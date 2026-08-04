@@ -2,9 +2,13 @@
 
 #include "brgr_archive.hpp"
 #include "nova_app.hpp"
+#include "pict_image.hpp"
+#include "rle_sprite_sheet.hpp"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
+#include <vector>
 
 namespace {
 
@@ -45,6 +49,28 @@ TEST_CASE("sprite metadata decodes from its documented big-endian layout") {
   CHECK(definition->tile_height == 60);
   CHECK(definition->tiles_x == 1);
   CHECK(definition->tiles_y == 2);
+}
+
+TEST_CASE("16-bit RLE sprite commands decode literal RGB555 pixels") {
+  constexpr std::array<std::byte, 32> bytes{
+      std::byte{0x00}, std::byte{0x02}, std::byte{0x00}, std::byte{0x01},
+      std::byte{0x00}, std::byte{0x10}, std::byte{0x00}, std::byte{0x00},
+      std::byte{0x00}, std::byte{0x01}, std::byte{0x00}, std::byte{0x00},
+      std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+      std::byte{0x01}, std::byte{0x00}, std::byte{0x00}, std::byte{0x08},
+      std::byte{0x02}, std::byte{0x00}, std::byte{0x00}, std::byte{0x04},
+      std::byte{0x7c}, std::byte{0x00}, std::byte{0x03}, std::byte{0xe0},
+      std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+  };
+
+  const auto sheet = RleSpriteSheet_Decode16(bytes);
+
+  REQUIRE(sheet);
+  REQUIRE(sheet->frames.size() == 1);
+  CHECK(sheet->width == 2);
+  CHECK(sheet->height == 1);
+  CHECK(sheet->frames[0].rgba_pixels ==
+        std::vector<std::uint8_t>{255, 0, 0, 255, 0, 255, 0, 255});
 }
 
 TEST_CASE("main-menu style decodes native colors and 1024x768 button origins") {
@@ -104,6 +130,30 @@ TEST_CASE("resource resolver locates the real menu sprite definitions") {
   CHECK(definition_606->tiles_y == 7);
 }
 
+TEST_CASE("real main-menu RLE sprite sheets decode two frames") {
+  if (!MenuArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+
+  for (std::uint16_t sprite_id = 600; sprite_id <= 605; ++sprite_id) {
+    const auto definition =
+        NovaResource_LoadMainMenuSpriteDefinition(sprite_id);
+    REQUIRE(definition);
+    const auto bytes = NovaResource_Load(kResourceTypeRleSheet16,
+                                         definition->sprites_resource_id);
+    REQUIRE(bytes);
+    const auto sheet = RleSpriteSheet_Decode16(*bytes);
+    REQUIRE(sheet);
+    CHECK(sheet->width == definition->tile_width);
+    CHECK(sheet->height == definition->tile_height);
+    REQUIRE(sheet->frames.size() == 2);
+    CHECK(std::ranges::any_of(
+        sheet->frames[0].rgba_pixels,
+        [](std::uint8_t component) { return component != 0; }));
+    CHECK(sheet->frames[0].rgba_pixels != sheet->frames[1].rgba_pixels);
+  }
+}
+
 TEST_CASE("resource resolver decodes the real colors main-menu style") {
   if (!MenuArchivesAvailable()) {
     SKIP("Nova .rez archives not present");
@@ -138,8 +188,18 @@ TEST_CASE("resource resolver locates the splash PICTs in Nova Titles 1") {
   const auto loading = NovaResource_LoadPictData(0x1fa4);
   REQUIRE(loading);
   CHECK(loading->size() == 190550);
+  const auto loading_image = Resource_LoadPictAsImage(*loading);
+  REQUIRE(loading_image);
+  CHECK(loading_image->width == 369);
+  CHECK(loading_image->height == 558);
+  CHECK(loading_image->rgba_pixels.size() == 369U * 558U * 4U);
 
   const auto startup = NovaResource_LoadPictData(0x83);
   REQUIRE(startup);
   CHECK(startup->size() == 384926);
+  const auto startup_image = Resource_LoadPictAsImage(*startup);
+  REQUIRE(startup_image);
+  CHECK(startup_image->width == 832);
+  CHECK(startup_image->height == 624);
+  CHECK(startup_image->rgba_pixels.size() == 832U * 624U * 4U);
 }

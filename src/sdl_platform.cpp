@@ -18,6 +18,7 @@ SdlTexture::Create(SDL_Renderer *renderer, int width, int height,
     SDL_DestroyTexture(texture);
     return nullptr;
   }
+  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
   return std::make_unique<SdlTexture>(texture);
 }
 

@@ -2,6 +2,7 @@
 #include "log.hpp"
 
 #include <cstddef>
+#include <limits>
 
 namespace {
 
@@ -13,7 +14,11 @@ namespace {
 
 [[nodiscard]] std::optional<std::size_t>
 FindDirectBitsRect(std::span<const std::byte> bytes) {
-  for (std::size_t offset = 10; offset + 2 < bytes.size(); ++offset) {
+  // PICT v2 opcodes are word-aligned relative to the start of the resource.
+  // This remains a deliberately narrow scanner, but avoiding odd offsets keeps
+  // pixel/payload bytes from being mistaken for an opcode in the observed
+  // DirectBitsRect resources.
+  for (std::size_t offset = 10; offset + 2 <= bytes.size(); offset += 2) {
     if (ReadBe16(bytes, offset) == 0x009a) {
       return offset + 2;
     }
@@ -51,7 +56,7 @@ FindDirectBitsRect(std::span<const std::byte> bytes) {
       }
     }
   }
-  return destination == output.size();
+  return source == encoded.size() && destination == output.size();
 }
 
 } // namespace
@@ -77,8 +82,13 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   const auto right = ReadBe16(pict_data, base + 12);
   const auto pixel_size = ReadBe16(pict_data, base + 32);
   const auto component_count = ReadBe16(pict_data, base + 34);
+  const auto width = static_cast<std::size_t>(right - left);
+  const auto height = static_cast<std::size_t>(bottom - top);
   if (bottom <= top || right <= left || pixel_size != 16 ||
-      component_count != 3 || row_bytes == 0) {
+      component_count != 3 || row_bytes < width * 2 ||
+      width > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      height > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      width > std::numeric_limits<std::size_t>::max() / 4 / height) {
     NovaLog::Todo(
         "unsupported PICT DirectBitsRect layout ({}-bit, {} components)",
         pixel_size, component_count);
@@ -86,10 +96,9 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   }
 
   PictImage image;
-  image.width = right - left;
-  image.height = bottom - top;
-  image.rgba_pixels.resize(
-      static_cast<std::size_t>(image.width * image.height * 4));
+  image.width = static_cast<int>(width);
+  image.height = static_cast<int>(height);
+  image.rgba_pixels.resize(width * height * 4);
   std::vector<std::uint8_t> row(row_bytes);
   std::size_t source = base + pixmap_size + source_and_destination_rects_size;
   for (int y = 0; y < image.height; ++y) {

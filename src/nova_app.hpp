@@ -1,12 +1,14 @@
 #pragma once
 
 #include "brgr_archive.hpp"
+#include "rle_sprite_sheet.hpp"
 #include "sdl_platform.hpp"
 
 #include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 enum class GameModeAction : std::uint8_t {
   new_game = 0,
@@ -23,12 +25,18 @@ enum class StartupPhase : std::uint8_t {
   main_menu,
 };
 
+struct NovaMenuSpriteAsset {
+  RleSpriteSheet sheet;
+  std::vector<std::unique_ptr<SdlTexture>> textures;
+};
+
 struct NovaRuntime {
   SdlPlatform platform;
   std::unique_ptr<SdlTexture> loading_splash_texture;
   std::unique_ptr<SdlTexture> startup_splash_texture;
   std::array<std::optional<NovaSpriteDefinition>, 6>
       main_menu_sprite_definitions;
+  std::array<std::optional<NovaMenuSpriteAsset>, 6> main_menu_sprite_assets;
   std::optional<NovaMainMenuStyle> main_menu_style;
   StartupPhase startup_phase = StartupPhase::loading_splash;
   bool game_active = false;

@@ -3,6 +3,7 @@
 #include "brgr_archive.hpp"
 #include "log.hpp"
 #include "pict_image.hpp"
+#include "rle_sprite_sheet.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -20,9 +21,10 @@ struct MenuEntry {
 constexpr std::array kMenuEntries{
     MenuEntry{GameModeAction::new_game, "NEW GAME  [N]"},
     MenuEntry{GameModeAction::open_pilot, "OPEN PILOT [O]"},
+    MenuEntry{GameModeAction::quit, "QUIT        [Q]"},
+    MenuEntry{GameModeAction::enter_spaceflight, "ENTER SPACE"},
     MenuEntry{GameModeAction::preferences, "PREFERENCES [P]"},
     MenuEntry{GameModeAction::starmap, "STAR MAP    [A]"},
-    MenuEntry{GameModeAction::quit, "QUIT        [Q]"},
 };
 
 constexpr float kMenuCoordinateScale = 640.0F / 1024.0F;
@@ -59,6 +61,63 @@ constexpr std::uint64_t kStartupSplashDurationMs = 1'850;
 [[nodiscard]] bool Contains(const SDL_FRect &rect, SDL_FPoint point) {
   return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y &&
          point.y <= rect.y + rect.h;
+}
+
+[[nodiscard]] std::optional<NovaMenuSpriteAsset>
+LoadMenuSpriteAsset(SDL_Renderer *renderer,
+                    const NovaSpriteDefinition &definition) {
+  const auto resource_data = NovaResource_Load(kResourceTypeRleSheet16,
+                                               definition.sprites_resource_id);
+  if (!resource_data) {
+    return std::nullopt;
+  }
+  auto sheet = RleSpriteSheet_Decode16(*resource_data);
+  const auto expected_frames = static_cast<std::size_t>(definition.tiles_x) *
+                               static_cast<std::size_t>(definition.tiles_y);
+  if (!sheet || sheet->width != definition.tile_width ||
+      sheet->height != definition.tile_height ||
+      sheet->frames.size() != expected_frames) {
+    return std::nullopt;
+  }
+
+  NovaMenuSpriteAsset asset{.sheet = std::move(*sheet)};
+  asset.textures.reserve(asset.sheet.frames.size());
+  for (const auto &frame : asset.sheet.frames) {
+    auto texture = SdlTexture::Create(renderer, asset.sheet.width,
+                                      asset.sheet.height, frame.rgba_pixels);
+    if (!texture) {
+      return std::nullopt;
+    }
+    asset.textures.push_back(std::move(texture));
+  }
+  return asset;
+}
+
+[[nodiscard]] bool MenuSpriteContainsOpaquePixel(const NovaRuntime &runtime,
+                                                 std::size_t index,
+                                                 SDL_FPoint point) {
+  const auto rect = MenuRect(runtime, index);
+  if (!Contains(rect, point) ||
+      index >= runtime.main_menu_sprite_assets.size() ||
+      !runtime.main_menu_sprite_assets[index]) {
+    return false;
+  }
+  const auto &sheet = runtime.main_menu_sprite_assets[index]->sheet;
+  if (sheet.frames.empty() || rect.w <= 0.0F || rect.h <= 0.0F) {
+    return false;
+  }
+  const auto x =
+      std::min(sheet.width - 1,
+               static_cast<int>((point.x - rect.x) *
+                                static_cast<float>(sheet.width) / rect.w));
+  const auto y =
+      std::min(sheet.height - 1,
+               static_cast<int>((point.y - rect.y) *
+                                static_cast<float>(sheet.height) / rect.h));
+  const auto alpha =
+      sheet.frames[0]
+          .rgba_pixels[static_cast<std::size_t>(y * sheet.width + x) * 4 + 3];
+  return alpha != 0;
 }
 
 void DrawDebugTextCentered(SDL_Renderer *renderer, float center_x, float y,
@@ -194,8 +253,8 @@ void PresentSplashTexture(SDL_Renderer *renderer, SDL_Texture *texture) {
   SDL_GetTextureSize(texture, &width, &height);
   const auto scale = std::min(640.0F / width, 480.0F / height);
   const SDL_FRect destination{(640.0F - width * scale) / 2.0F,
-                              (480.0F - height * scale) / 2.0F,
-                              width * scale, height * scale};
+                              (480.0F - height * scale) / 2.0F, width * scale,
+                              height * scale};
   SDL_RenderTexture(renderer, texture, nullptr, &destination);
 }
 
@@ -235,11 +294,18 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
         NovaResource_LoadMainMenuSpriteDefinition(sprite_id);
     if (const auto &definition = runtime.main_menu_sprite_definitions[index]) {
       NovaLog::Info(
-          "loaded sp\\x95n {}: sprite PICT 0x{:04x}, mask PICT 0x{:04x}, "
+          "loaded sp\\x95n {}: image resource 0x{:04x}, mask resource "
+          "0x{:04x}, "
           "{}x{} tiles ({}x{})",
           sprite_id, definition->sprites_resource_id,
           definition->mask_resource_id, definition->tile_width,
           definition->tile_height, definition->tiles_x, definition->tiles_y);
+      runtime.main_menu_sprite_assets[index] =
+          LoadMenuSpriteAsset(runtime.platform.renderer(), *definition);
+      if (!runtime.main_menu_sprite_assets[index]) {
+        NovaLog::Todo("main-menu rl\\x91D resource 0x{:04x} failed to decode",
+                      definition->sprites_resource_id);
+      }
     } else {
       NovaLog::Todo("main-menu sp\\x95n {} could not be loaded", sprite_id);
     }
@@ -266,9 +332,9 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   const auto load_splash_texture = [&runtime](std::uint16_t resource_id) {
     if (const auto pict_data = NovaResource_LoadPictData(resource_id)) {
       if (const auto pict = Resource_LoadPictAsImage(*pict_data)) {
-        auto texture = SdlTexture::Create(runtime.platform.renderer(),
-                                          pict->width, pict->height,
-                                          pict->rgba_pixels);
+        auto texture =
+            SdlTexture::Create(runtime.platform.renderer(), pict->width,
+                               pict->height, pict->rgba_pixels);
         if (!texture) {
           NovaLog::Error("PICT 0x{:04x} decoded but SDL texture upload "
                          "failed",
@@ -363,9 +429,29 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   SDL_SetRenderDrawColor(renderer, 142, 189, 229, SDL_ALPHA_OPAQUE);
   DrawDebugTextCentered(renderer, 320.0F, 130.0F, "PILOT COMMAND CONSOLE");
 
+  for (std::size_t index = 0; index < runtime.main_menu_sprite_assets.size();
+       ++index) {
+    if (!runtime.main_menu_sprite_assets[index]) {
+      continue;
+    }
+    const auto &asset = *runtime.main_menu_sprite_assets[index];
+    std::size_t frame_index = 0;
+    if (index < kMenuEntries.size() &&
+        runtime.hovered_action == kMenuEntries[index].action &&
+        asset.textures.size() > 1) {
+      frame_index = 1;
+    }
+    const auto destination = MenuRect(runtime, index);
+    SDL_RenderTexture(renderer, asset.textures[frame_index]->get(), nullptr,
+                      &destination);
+  }
+
   for (std::size_t index = 0; index < kMenuEntries.size(); ++index) {
     const auto rect = MenuRect(runtime, index);
     const bool hovered = runtime.hovered_action == kMenuEntries[index].action;
+    if (runtime.main_menu_sprite_assets[index]) {
+      continue;
+    }
     if (hovered) {
       SDL_SetRenderDrawColor(renderer, 39, 99, 151, SDL_ALPHA_OPAQUE);
       SDL_RenderFillRect(renderer, &rect);
@@ -477,7 +563,9 @@ std::optional<GameModeAction>
 NovaHud_TrackFocusHoverIndex(const NovaRuntime &runtime) {
   const auto mouse_position = runtime.platform.mouse_position();
   for (std::size_t index = 0; index < kMenuEntries.size(); ++index) {
-    if (Contains(MenuRect(runtime, index), mouse_position)) {
+    if (runtime.main_menu_sprite_assets[index]
+            ? MenuSpriteContainsOpaquePixel(runtime, index, mouse_position)
+            : Contains(MenuRect(runtime, index), mouse_position)) {
       return kMenuEntries[index].action;
     }
   }
