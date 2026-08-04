@@ -1,0 +1,22 @@
+EV Nova/
+# Build products and local dependency state
+/build/
+/out/
+/cmake-build-*/
+/vcpkg_installed/
+
+# Editor and OS state
+.DS_Store
+.idea/
+.vscode/
+.cache/
+.claude/
+__pycache__/
+*.py[cod]
+
+# Original-game data and reverse-engineering workspace (kept local)
+/analysis/
+/EV Nova/
+/EV Nova Bible.html
+/docs/reference/
+/ghidra/

@@ -1,0 +1,131 @@
+#!/usr/bin/env -S bun
+/**
+ * ghidra_api.ts
+ *
+ * Usage:
+ *   ./ghidra_api.ts "/functions?name_re=FUN_|foo|ba.*r"
+ *   ./ghidra_api.ts /comment/set '{"addr":"0x00434","comment":"some comment","kind":"plate"}'
+ *   ./ghidra_api.ts /comment/set @payload.json
+ *
+ * Env:
+ *   GHIDRA_API_BASE (default: http://127.0.0.1:8166)
+ */
+
+import fs from "fs";
+import process from "process";
+
+const BASE = process.env.GHIDRA_API_BASE ?? "http://127.0.0.1:8166";
+
+function usageAndExit(code = 1): never {
+    const cmd = process.argv[1]?.split("/").pop() ?? "ghidra_api.ts";
+    console.error(
+        [
+            `Usage:`,
+            `  ${cmd} <pathOrUrl> [jsonBodyOr@file]`,
+            ``,
+            `Examples:`,
+            `  ${cmd} "/functions?name_re=FUN_|foo|ba.*r"`,
+            `  ${cmd} /comment/set '{"addr":"0x00434","comment":"some comment","kind":"plate"}'`,
+            `  ${cmd} /comment/set @payload.json`,
+            ``,
+            `Env: GHIDRA_API_BASE (default: ${BASE})`,
+        ].join("\n"),
+    );
+    process.exit(code);
+}
+
+function normPath(p: string): string {
+    // Ensure it starts with "/"
+    if (!p) return "/";
+    if (p.startsWith("http://") || p.startsWith("https://")) return p; // full URL allowed
+    return p.startsWith("/") ? p : `/${p}`;
+}
+
+function encodePathAndQuery(input: string): string {
+    // If it's a full URL, we keep its origin but re-encode pathname + query safely.
+    const isFull = input.startsWith("http://") || input.startsWith("https://");
+
+    const base = isFull ? undefined : BASE;
+    const url = new URL(isFull ? input : normPath(input), base);
+
+    // Encode each path segment
+    const encodedPath = url.pathname
+        .split("/")
+        .map((seg) => encodeURIComponent(decodeURIComponent(seg)))
+        .join("/")
+        // keep leading slash if present
+        .replace(/^%2F/, "/");
+
+    // Encode query params (preserve repeated keys)
+    const qp = new URLSearchParams();
+    for (const [k, v] of url.searchParams.entries()) {
+        qp.append(k, v);
+    }
+
+    const out = new URL(isFull ? url.origin : BASE);
+    out.pathname = encodedPath;
+    out.search = qp.toString();
+
+    return out.toString();
+}
+
+function readBodyArg(arg: string): unknown {
+    let raw = arg;
+
+    // @file.json syntax
+    if (raw.startsWith("@")) {
+        const path = raw.slice(1);
+        raw = fs.readFileSync(path, "utf8");
+    }
+
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown JSON parse error";
+        throw new Error(`Body is not valid JSON: ${msg}`);
+    }
+}
+
+async function main() {
+    const [, , pathOrUrl, bodyArg] = process.argv;
+    if (!pathOrUrl) usageAndExit(1);
+
+    const method = bodyArg === undefined ? "GET" : "POST";
+    const url = encodePathAndQuery(pathOrUrl);
+
+    const controller = new AbortController();
+    process.on("SIGINT", () => controller.abort());
+    process.on("SIGTERM", () => controller.abort());
+
+    const headers: Record<string, string> = {};
+    let body: string | undefined;
+
+    if (bodyArg !== undefined) {
+        headers["Content-Type"] = "application/json";
+        const parsed = readBodyArg(bodyArg);
+        body = JSON.stringify(parsed);
+    }
+
+    const res = await fetch(url, {
+        method,
+        headers,
+        body,
+        signal: controller.signal,
+    });
+
+    const text = await res.text();
+
+    // If non-2xx, still print body to stdout, but exit non-zero and include status on stderr.
+    if (!res.ok) {
+        console.error(`HTTP ${res.status} ${res.statusText} (${method} ${url})`);
+        process.stdout.write(text);
+        process.exit(2);
+    }
+
+    process.stdout.write(text);
+}
+
+main().catch((err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+});
