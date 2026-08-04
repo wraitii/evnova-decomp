@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sdl_audio.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +23,7 @@ constexpr std::uint32_t kResourceTypeColors = 0x639a6c72;    // "c\x9alr"
 constexpr std::uint32_t kResourceTypeRleSheet8 = 0x726c9138; // "rl\x9138" (8-bit sheets)
 constexpr std::uint32_t kResourceTypeRleSheet16 = 0x726c9144;// "rl\x91D" (16-bit sheets)
 constexpr std::uint32_t kResourceTypePict = 0x50494354;      // "PICT"
+constexpr std::uint32_t kResourceTypeSnd = 0x736e6420;      // "snd " (AIFF-style sounds)
 
 // Ghidra: FUN_004ce250 + FUN_004cdfa0 (resource lookup by type + id). Returns
 // the raw resource payload; the first archive holding a matching record wins,
@@ -63,6 +66,9 @@ struct NovaMainMenuStyle {
   NovaRgbColor menu_dim;
   std::uint16_t menu_font_size = 0;
   std::array<NovaMenuPoint, 6> button_origins{};
+  // Ghidra: DAT_007d2524/26 loaded from c\x9alr +0xe0; the main-screen logo
+  // (sp\x95n 606) anchor in the 1024x768 backdrop space.
+  NovaMenuPoint logo_origin{};
 };
 
 [[nodiscard]] std::optional<NovaSpriteDefinition>
@@ -84,4 +90,39 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data);
 // Ghidra: 0x004ce250 resource acquisition beneath Resource_LoadPictAsImage.
 // Covers the loading splash PICT 0x1fa4 and the startup splash PICT 0x83.
 [[nodiscard]] std::optional<std::vector<std::byte>>
+NovaResource_LoadSndData(std::uint16_t resource_id);
+
+// Ghidra: 0x004d6e60 FUN_004d6e60 + 0x004d6900 FUN_004d6900. Decodes a Nova
+// "snd " resource payload into device-agnostic PCM. The menu blips (ids
+// 600/601) use the uncompressed 8-bit mono 'NONE' form: FUN_004d6d30 scans the
+// format-2 rate table for a sub-structure offset, and the 8-bit sample data
+// starts at that offset + 0x16. The game expands each 8-bit sample to 16-bit
+// by (v + 0x80) | (v + 0x80) << 8 (a quirk preserved for fidelity).
+//
+// TODO(decomp): the 'NONE' form stores no sample rate; it plays at the mixer
+// output rate (44100 Hz on present-day audio hardware, per the waveOut
+// device-capability derivation in FUN_00507820/FUN_00507d0b). The ima4/AIFC
+// forms are not implemented yet and return std::nullopt.
+[[nodiscard]] std::optional<NovaSoundData>
+NovaSound_Decode(std::span<const std::byte> resource_data);
+
+// Ghidra: FUN_004ce250 loads the "snd " (0x736e6420) resource family from the
+// Nova Sounds.rez archive. Sound ids 600..603 are the intro/travel/loading
+// transition/ambience sounds preloaded by NovaAudio_PreloadTransitionEffects
+// (Ghidra 0x0048b250) into DAT_007d24b8; the menu hover/confirm blips live in
+// the same family.
+[[nodiscard]] std::optional<std::vector<std::byte>>
 NovaResource_LoadPictData(std::uint16_t resource_id);
+
+// Ghidra: title-screen backdrop PICT 0x1f40 in Nova Titles 1.rez. The
+// original 1024x768 artwork shows a starship interior looking out at a
+// planet; it is the backdrop behind the main-menu buttons (c\x9alr button
+// origins share this 1024x768 coordinate space).
+[[nodiscard]] std::optional<std::vector<std::byte>>
+NovaResource_LoadMainMenuBackdropData();
+
+// Ghidra: main-screen logo PICT 0x1f4a (sp\x95n 606, 654x209 tiles in a 7-frame
+// vertical sheet). The animated "ESCAPE VELOCITY: NOVA" title drawn above the
+// backdrop; its on-screen position comes from the c\x9alr offsets at +0xe0.
+[[nodiscard]] std::optional<std::vector<std::byte>>
+NovaResource_LoadMainMenuLogoData();

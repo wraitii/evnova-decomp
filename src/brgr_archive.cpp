@@ -197,10 +197,13 @@ ParseArchive(const std::filesystem::path &path) {
 
 // Archives needed by the menu/splash path. Graphics 3 holds the sp\x95n,
 // c\x9alr and rl\x91D menu assets; Nova Titles 1 holds the splash PICTs
-// (0x1fa4 loading, 0x83 startup). Extend as more subsystems are reconstructed.
+// (0x1fa4 loading, 0x83 startup); Nova Sounds holds the "snd " audio family
+// used for menu feedback and the intro/travel/loading sounds (ids 600..603).
+// Extend as more subsystems are reconstructed.
 constexpr std::array kArchiveFileNames{
     "Nova Graphics 3.rez",
     "Nova Titles 1.rez",
+    "Nova Sounds.rez",
 };
 constexpr std::array kNovaFilesRoots{
     "EV Nova/Nova Files/",
@@ -362,6 +365,14 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data) {
         .y = ReadBeI16(resource_data, offset + 2),
     };
   }
+  // Ghidra: NovaData_LoadScenarioResourceTables reads c\x9alr +0xe0 into
+  // DAT_007d2524/26, the main-screen logo anchor.
+  if (resource_data.size() >= 0xe4) {
+    style.logo_origin = NovaMenuPoint{
+        .x = ReadBeI16(resource_data, 0xe0),
+        .y = ReadBeI16(resource_data, 0xe2),
+    };
+  }
   return style;
 }
 
@@ -382,6 +393,89 @@ std::optional<NovaMainMenuStyle> NovaResource_LoadMainMenuStyle() {
 }
 
 std::optional<std::vector<std::byte>>
+NovaResource_LoadSndData(std::uint16_t resource_id) {
+  const auto resource_data = NovaResource_Load(kResourceTypeSnd, resource_id);
+  if (!resource_data) {
+    NovaLog::Todo("snd \x20resource {} could not be located", resource_id);
+    return std::nullopt;
+  }
+  return resource_data;
+}
+
+std::optional<NovaSoundData>
+NovaSound_Decode(std::span<const std::byte> resource_data) {
+  // The 'NONE' 8-bit menu blips use the 'snd ' container with first big-endian
+  // short == 2. FUN_004d6d30 scans a small table at byte offset 6 (8-byte
+  // stride: [2-byte rate marker][4-byte value]) for a rate marker 0x8051/0x8050
+  // and returns the matched value; that value is a sub-structure offset. In
+  // FUN_004d6e60 the cVar1 byte lives at that offset + 0x14 (== 0 selects the
+  // 'NONE' path) and the 8-bit sample data begins at offset + 0x16.
+  const auto read_be16 = [resource_data](std::size_t offset) {
+    if (offset + 2 > resource_data.size()) {
+      return std::uint16_t{0};
+    }
+    return static_cast<std::uint16_t>((std::to_integer<std::uint8_t>(resource_data[offset]) << 8U) |
+                                      std::to_integer<std::uint8_t>(resource_data[offset + 1]));
+  };
+  const auto read_be32 = [resource_data](std::size_t offset) {
+    if (offset + 4 > resource_data.size()) {
+      return std::uint32_t{0};
+    }
+    return (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(resource_data[offset])) << 24U) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(resource_data[offset + 1])) << 16U) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(resource_data[offset + 2])) << 8U) |
+           static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(resource_data[offset + 3]));
+  };
+  if (resource_data.size() < 0x22 || read_be16(0) != 2U) {
+    NovaLog::Todo("ima4/AIFC or other 'snd ' sound containers are not decoded yet");
+    return std::nullopt;
+  }
+
+  // FUN_004d6d30 format-2 table scan -> sub-structure offset.
+  const auto entry_count = read_be16(4);
+  std::size_t data_offset = 0;
+  for (std::size_t entry = 0; entry < static_cast<std::size_t>(entry_count); ++entry) {
+    const auto table_pos = 6 + entry * 8;
+    if (table_pos + 8 > resource_data.size()) {
+      break;
+    }
+    const auto marker = read_be16(table_pos);
+    if (marker == 0x8051 || marker == 0x8050) {
+      data_offset = read_be32(table_pos + 4);
+      break;
+    }
+  }
+
+  // cVar1 == 0 selects the 'NONE' 8-bit mono path (FUN_004d6e60).
+  if (data_offset + 0x14 >= resource_data.size() ||
+      std::to_integer<std::uint8_t>(resource_data[data_offset + 0x14]) != 0x00) {
+    NovaLog::Todo("snd \x20sub-formats other than 'NONE' 8-bit are not decoded yet");
+    return std::nullopt;
+  }
+
+  const std::size_t data_start = data_offset + 0x16;
+  NovaSoundData sound{};
+  sound.channel_count = 1;
+  // The 'NONE' 8-bit form stores no sample rate. Playback runs at the mixer
+  // output rate, which FUN_00507820/FUN_00507d0b derive from the waveOut
+  // device: 0xAC44<<16 -> 44100 Hz on modern devices (22050/11025 on older
+  // audio hardware). We use 44100, matching a present-day device.
+  sound.sample_rate = 44100;
+  sound.samples.reserve(resource_data.size() - data_start);
+  // Ghidra FUN_004d6900: *out = (v + 0x80) | (v + 0x80) << 8, truncated to
+  // 16 bits. Reconstruct the same bit pattern exactly (full-width biased
+  // value before the 16-bit store).
+  for (std::size_t index = data_start; index < resource_data.size(); ++index) {
+    const auto biased = std::to_integer<int>(resource_data[index]) + 0x80;
+    const auto value = static_cast<std::uint16_t>(biased | (biased << 8));
+    sound.samples.push_back(static_cast<std::int16_t>(value));
+  }
+  NovaLog::Debug("decoded 'NONE' 8-bit snd \x20with {} samples from offset {}",
+                 sound.samples.size(), data_start);
+  return sound;
+}
+
+std::optional<std::vector<std::byte>>
 NovaResource_LoadPictData(std::uint16_t resource_id) {
   const auto resource_data = NovaResource_Load(kResourceTypePict, resource_id);
   if (!resource_data) {
@@ -389,4 +483,13 @@ NovaResource_LoadPictData(std::uint16_t resource_id) {
     return std::nullopt;
   }
   return resource_data;
+}
+
+std::optional<std::vector<std::byte>>
+NovaResource_LoadMainMenuBackdropData() {
+  return NovaResource_LoadPictData(0x1f40);
+}
+
+std::optional<std::vector<std::byte>> NovaResource_LoadMainMenuLogoData() {
+  return NovaResource_LoadPictData(0x1f4a);
 }

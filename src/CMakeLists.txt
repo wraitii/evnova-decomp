@@ -4,6 +4,7 @@ add_library(evnova_runtime
     nova_app.cpp
     pict_image.cpp
     rle_sprite_sheet.cpp
+    sdl_audio.cpp
     sdl_platform.cpp
 )
 
