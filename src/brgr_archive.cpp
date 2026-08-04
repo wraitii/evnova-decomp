@@ -304,6 +304,18 @@ NovaResource_LoadNthOfType(std::uint32_t type_code, std::size_t ordinal) {
   return NovaResourceDb::Instance().LoadNthOfType(type_code, ordinal);
 }
 
+std::optional<std::filesystem::path>
+NovaResource_LocateFile(const std::string &file_name) {
+  for (const auto root : kNovaFilesRoots) {
+    const auto path = std::filesystem::path{root} / file_name;
+    if (std::filesystem::exists(path)) {
+      return path;
+    }
+  }
+  NovaLog::Todo("Nova Files asset '{}' was not found", file_name);
+  return std::nullopt;
+}
+
 std::optional<NovaSpriteDefinition>
 NovaSpriteDefinition_Parse(std::span<const std::byte> resource_data) {
   if (resource_data.size() < 12) {

@@ -5,11 +5,12 @@ add_library(evnova_runtime
     pict_image.cpp
     rle_sprite_sheet.cpp
     sdl_audio.cpp
+    sdl_music.cpp
     sdl_platform.cpp
 )
 
 target_include_directories(evnova_runtime PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(evnova_runtime PUBLIC SDL3::SDL3 fmt::fmt)
+target_link_libraries(evnova_runtime PUBLIC SDL3::SDL3 SDL3_mixer::SDL3_mixer fmt::fmt)
 
 target_compile_features(evnova_runtime PUBLIC cxx_std_23)
 

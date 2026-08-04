@@ -5,8 +5,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -35,6 +37,12 @@ NovaResource_Load(std::uint32_t type_code, std::uint16_t resource_id);
 // game reads the c\x9alr style through this accessor rather than by id.
 [[nodiscard]] std::optional<std::vector<std::byte>>
 NovaResource_LoadNthOfType(std::uint32_t type_code, std::size_t ordinal);
+
+// Resolves a file name inside the Nova Files data folder to an absolute path
+// on disk (used for streaming assets such as background music), searching the
+// known candidates for the game install. Returns nullopt if not found.
+[[nodiscard]] std::optional<std::filesystem::path>
+NovaResource_LocateFile(const std::string &file_name);
 
 // On-disk layout documented as the "sp\x95n" resource in the Nova Bible.
 // Field 0/1 are the sprite-graphics and mask resource ids (rl\x91D sheets for

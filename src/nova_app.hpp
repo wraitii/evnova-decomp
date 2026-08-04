@@ -3,6 +3,7 @@
 #include "brgr_archive.hpp"
 #include "rle_sprite_sheet.hpp"
 #include "sdl_audio.hpp"
+#include "sdl_music.hpp"
 #include "sdl_platform.hpp"
 
 #include <array>
@@ -36,6 +37,11 @@ struct NovaRuntime {
   // SDL audio output shared by menu feedback sounds. Kept as a member (not a
   // singleton) so the runtime owns its lifecycle.
   SdlAudio audio;
+  // Background/menu bass stream (SDL3_mixer), separate logical device.
+  SdlMusic music;
+  // True once the main-menu bass has been started (on first reaching the
+  // main-menu phase).
+  bool menu_music_started = false;
   // Decoded main-menu feedback sounds: hover blip (id 600) and select blip
   // (id 601). Loaded once during session startup.
   std::optional<NovaSoundData> menu_hover_sound;

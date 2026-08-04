@@ -4,6 +4,10 @@
   "description": "Clean-room recompilation of Escape Velocity Nova",
   "dependencies": [
     "sdl3",
+    {
+      "name": "sdl3-mixer",
+      "features": ["mpg123"]
+    },
     "catch2",
     "fmt"
   ]

@@ -432,6 +432,21 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   if (!runtime.audio.Initialize()) {
     NovaLog::Warn("continuing without audio (menu sounds are silent)");
   }
+
+  // Background music. The shipped bass track is the MP3 in the Nova Files
+  // folder (the original streams a :Music:SongNN path through a codec; SDL3_mixer
+  // decodes the MP3 for us). The music device/format is set up here, matching
+  // NovaAudio_Initialize(8,0) running before the splash frames in the original;
+  // Play() is deferred until the main menu is entered (see NovaMainLoop_UpdateFrame).
+  if (!runtime.music.Initialize()) {
+    NovaLog::Warn("continuing without background music (menu bass is silent)");
+  } else if (const auto music_path = NovaResource_LocateFile("Nova Music.mp3")) {
+    if (runtime.music.Load(music_path->string())) {
+      // Keep the menu bass at a comfortable level under the SFX blips.
+      runtime.music.SetVolume(0.8F);
+    }
+  }
+
   NovaMainLoop_Run(runtime);
 }
 
@@ -470,6 +485,13 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
   }
 
   if (runtime.startup_phase == StartupPhase::main_menu) {
+    // Start the menu bass the first time the main menu is entered (the
+    // original begins background playback as the menu becomes the active
+    // game state).
+    if (!runtime.menu_music_started) {
+      runtime.menu_music_started = true;
+      runtime.music.Play();
+    }
     runtime.hovered_action = NovaHud_TrackFocusHoverIndex(runtime);
   } else {
     runtime.hovered_action.reset();

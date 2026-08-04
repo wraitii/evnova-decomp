@@ -18,6 +18,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang|Clang|GNU")
 endif()
 
 find_package(SDL3 CONFIG REQUIRED)
+find_package(SDL3_mixer CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 
 add_subdirectory(src)
