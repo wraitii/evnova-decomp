@@ -2,7 +2,7 @@ add_executable(evnova_tests
     smoke_test.cpp
 )
 
-target_link_libraries(evnova_tests PRIVATE Catch2::Catch2WithMain)
+target_link_libraries(evnova_tests PRIVATE Catch2::Catch2WithMain evnova_runtime)
 
 target_compile_features(evnova_tests PRIVATE cxx_std_23)
 

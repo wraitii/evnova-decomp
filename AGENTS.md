@@ -25,6 +25,10 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 The purpose of this reimplementation is to have identical gameplay to the original, but the rendering, audio & such will be swapped out for SDL3.
 
 - Preserve original game behavior first; improve architecture second.
+- Keep a one to one correspondance between reimplementation and ghidra functions. A function re-implementing ghidra functionality should have a comment to the address in the original binary.
+- If running in undescribed code in ghidra, document it in ghidra first. Feel free to stop coding and do an explanatory improvement pass on ghidra in these cases.
+- Log all divergences or skips when writing new code.
+- When writing or modifying a ghidra-decomp-available function, always check it's ghira decompilation. If necessary, the disassembly can also be checked.
 - Use modern C++23, but avoid clever abstractions and template-heavy code.
 - Prefer value types, RAII, std::unique_ptr, and deterministic ownership.
 - No raw new/delete. Raw pointers are non-owning only.

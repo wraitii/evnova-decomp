@@ -4,6 +4,7 @@
   "description": "Clean-room recompilation of Escape Velocity Nova",
   "dependencies": [
     "sdl3",
-    "catch2"
+    "catch2",
+    "fmt"
   ]
 }
