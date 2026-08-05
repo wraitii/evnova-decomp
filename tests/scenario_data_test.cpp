@@ -342,4 +342,32 @@ TEST_CASE("system background color and murk decode from the payload",
   CHECK(alphara->murk == 20);
 }
 
+// The ambient star-field artwork: sp\x9an spin descriptor resource 700 is a
+// 4x4 grid of 5x5px star tiles (16 distinct star shapes). Ghidra builds it into
+// DAT_00593efc via Spin_ReadDescriptor(700,..) and the star spawn picks a
+// random frame in [0, frame_count) where frame_count = tiles_x * tiles_y (the
+// sprite +0x54 field). Pin the decode so the flight-view star rendering uses
+// the real sheet.
+TEST_CASE("starfield sheet (spin resource 700) decodes to 16 5x5 frames",
+          "[scenario][starfield]") {
+  using namespace game;
+  const auto spin = NovaResource_Load(kResourceTypeSprites, 700);
+  REQUIRE(spin.has_value());
+  const auto def = NovaSpriteDefinition_Parse(*spin);
+  REQUIRE(def.has_value());
+  CHECK(def->tile_width == 5);
+  CHECK(def->tile_height == 5);
+  CHECK(def->tiles_x == 4);
+  CHECK(def->tiles_y == 4);
+
+  const auto sheet_data = NovaResource_Load(kResourceTypeRleSheet16,
+                                            def->sprites_resource_id);
+  REQUIRE(sheet_data.has_value());
+  const auto sheet = RleSpriteSheet_Decode16(*sheet_data);
+  REQUIRE(sheet.has_value());
+  CHECK(sheet->width == 5);
+  CHECK(sheet->height == 5);
+  CHECK(sheet->frames.size() == 16);
+}
+
 } // namespace game

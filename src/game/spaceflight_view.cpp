@@ -171,6 +171,74 @@ SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
   return spin_sets_[index].get();
 }
 
+// Loads (and caches) the ambient star-field artwork: sp\x9an spin descriptor
+// resource 700 is a 4x4 grid of 5x5px star tiles (16 shapes), whose SpritesID
+// names the rl\x91D sheet. Ghidra builds this into DAT_00593efc via
+// Spin_ReadDescriptor(700,..); the spawn picks a random frame in
+// [0, frameCount) from it. Falls back to null (plain-point stars) when absent.
+const SpaceflightView::StarFieldSheet *
+SpaceflightView::EnsureStarFieldSheet(SdlPlatform &platform) {
+  if (!star_field_.frames.empty()) {
+    return &star_field_;  // cached
+  }
+  // Spin descriptor resource id for the ambient star field (Ghidra
+  // Spin_ReadDescriptor(700,..)); a sp\x9an descriptor, distinct from the
+  // stellar spin-object range (+1000).
+  constexpr std::uint16_t kStarFieldSpinId = 700;
+  const auto spin_data = NovaResource_Load(kResourceTypeSprites, kStarFieldSpinId);
+  if (!spin_data) {
+    NovaLog::Warn("star field: no sp.x9an descriptor resource {}; stars drawn "
+                  "as points",
+                  kStarFieldSpinId);
+    return nullptr;
+  }
+  const auto def = NovaSpriteDefinition_Parse(*spin_data);
+  if (!def) {
+    NovaLog::Warn("star field: malformed sp.x9an descriptor {}; stars drawn "
+                  "as points",
+                  kStarFieldSpinId);
+    return nullptr;
+  }
+  const auto sheet_data =
+      NovaResource_Load(kResourceTypeRleSheet16, def->sprites_resource_id);
+  if (!sheet_data) {
+    NovaLog::Warn("star field: no rl.x91D sheet {}; stars drawn as points",
+                  def->sprites_resource_id);
+    return nullptr;
+  }
+  auto sheet = RleSpriteSheet_Decode16(*sheet_data);
+  if (!sheet || def->tile_width <= 0 || def->tile_height <= 0 ||
+      sheet->width != def->tile_width || sheet->height != def->tile_height) {
+    NovaLog::Warn("star field: rl.x91D sheet {} not a valid tile grid; stars "
+                  "drawn as points",
+                  def->sprites_resource_id);
+    return nullptr;
+  }
+  star_field_.frame_count = static_cast<int>(sheet->frames.size());
+  star_field_.tile_width = sheet->width;
+  star_field_.tile_height = sheet->height;
+  SDL_Renderer *const renderer = platform.renderer();
+  star_field_.frames.reserve(sheet->frames.size());
+  for (const auto &frame : sheet->frames) {
+    auto texture = SdlTexture::Create(renderer, sheet->width, sheet->height,
+                                      frame.rgba_pixels);
+    if (!texture) {
+      star_field_.frames.clear();
+      NovaLog::Warn("star field: texture upload failed; stars drawn as points");
+      return nullptr;
+    }
+    // The 5x5 tiles are tiny; upscale smoothly so scaled-up stars look like
+    // soft glows rather than chunky squares (matches the original's smooth
+    // sprite scaling draw-proc).
+    SDL_SetTextureScaleMode(texture->get(), SDL_SCALEMODE_LINEAR);
+    star_field_.frames.push_back(std::move(texture));
+  }
+  NovaLog::Info("star field sheet loaded: {}x{} {} frames",
+                star_field_.tile_width, star_field_.tile_height,
+                star_field_.frame_count);
+  return &star_field_;
+}
+
 // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0). See the header.
 // Decoded from the binary: spawn count = round(viewportHeight / 600.0 * 20.0)
 // (divisor g_background_star_spawn_height_divisor = 600.0). Each of the first
@@ -180,8 +248,14 @@ SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
 // their previous position/speed (a re-scatter only rewrites the first `count`).
 // A negative system murk (SystemDef.murk) clears the whole field. When the
 // per-gameplay options toggle DAT_005914d7 is clear (starfield motion disabled)
-// the speed is forced to zero so the field is static.
-void SpaceflightView::SpawnAmbientStars(GameState &state) {
+// the speed is forced to zero so the field is static. The star-field sprite
+// sheet (sp\x9an 700) is ensured loaded here so the per-star frame index bound
+// (frame count) is known.
+void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
+                                        GameState &state) {
+  // Load the star artwork (if not already) so the frame-count bound is known;
+  // a missing sheet just leaves stars as plain points.
+  (void)EnsureStarFieldSheet(platform);
   const auto *sys = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   const bool murk_hides_stars = sys && sys->murk < 0;
@@ -212,6 +286,11 @@ void SpaceflightView::SpawnAmbientStars(GameState &state) {
       // previous position/speed carry over.
       continue;
     }
+    // Star sprite frame index: the original picks NovaRandom_Range(frameCount)
+    // uniformly over the star sheet's 16 tiles (Ghida DAT_00593efc +0x54).
+    // When the sheet is unavailable we keep frame 0 (fallback point draw).
+    const int frame_count = star_field_.frame_count > 0 ? star_field_.frame_count : 1;
+    s.frame = NovaRandomRange(state.rng, frame_count);
     // Random world offset within the (player-centred) viewport.
     const auto rx = static_cast<float>(NovaRandomRange(state.rng, kViewportWidth));
     const auto ry = static_cast<float>(NovaRandomRange(state.rng, kViewportHeight));
@@ -245,10 +324,12 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 // Ghidra: Frame_RenderViewportBackground clears + fills with the
 // NovaRender_SetSystemSpaceBackgroundColor tint, then Frame_UpdateViewportWrapBackgroundSprites
 // (+ the sprite-world draw in Frame_SpaceflightLoop scope 2) renders the stars.
-// NOTE(decomp): star artwork is a small point approximation rather than the
-// original's per-frame sprite sheet (source sheet id not yet located).
-void SpaceflightView::DrawBackground(SDL_Renderer *renderer,
+// Each star draws its randomly-chosen frame of the 16-frame star-field sprite
+// sheet (sp\x9an 700, 4x4 grid of 5x5 tiles), scaled to the murk-derived
+// star_size_; a plain filled rect stands in only if the sheet cannot load.
+void SpaceflightView::DrawBackground(SdlPlatform &platform,
                                      const GameState &state) {
+  SDL_Renderer *const renderer = platform.renderer();
   // Per-system space background tint. Ghidra NovaRender_SetSystemSpaceBackgroundColor
   // uses SystemDef.field_0x1ee (the decoded RGB bytes); RRGGBB = 0 is pure
   // black. This replaces the earlier provisional government-theme wash.
@@ -276,8 +357,11 @@ void SpaceflightView::DrawBackground(SDL_Renderer *renderer,
   // Ambient star particles, wrapped around the current viewport (Ghidra
   // Frame_UpdateViewportWrapBackgroundSprites relocates an off-edge particle to
   // the opposite edge). When murk hides them we already cleared on spawn, so
-  // nothing is drawn. Otherwise each active star is drawn as a small point
-  // behind the world.
+  // nothing is drawn. Otherwise each active star is drawn from its frame of the
+  // 5px star-field sprite sheet (sp\x9an 700), scaled up to the murk-derived
+  // star_size_, reproducing the original's per-frame sprite rendering.
+  const StarFieldSheet *sheet = EnsureStarFieldSheet(platform);
+  const float dst_size = static_cast<float>(star_size_);
   for (const auto &s : ambient_stars_) {
     if (!s.active) {
       continue;
@@ -288,22 +372,23 @@ void SpaceflightView::DrawBackground(SDL_Renderer *renderer,
     float wy = std::fmod(sy, static_cast<float>(kViewportHeight));
     if (wx < 0.0F) wx += static_cast<float>(kViewportWidth);
     if (wy < 0.0F) wy += static_cast<float>(kViewportHeight);
-    // Provisional brightness/size scaling off the per-particle speed so nearer
-    // (faster) stars read brighter, and the murk-derived star_size_ so gloomy
-    // systems show heavier stars (the original scales each star sprite by the
-    // same murk-derived value).
-    const float bright = 180.0F + 75.0F * std::clamp(s.speed, 0.0F, 1.0F);
-    SDL_SetRenderDrawColor(renderer, static_cast<std::uint8_t>(bright),
-                           static_cast<std::uint8_t>(bright),
-                           static_cast<std::uint8_t>(std::min(255.0F, bright + 40.0F)),
-                           SDL_ALPHA_OPAQUE);
-    if (star_size_ <= 0) {
-      SDL_RenderPoint(renderer, wx, wy);
-    } else {
-      const float d = static_cast<float>(star_size_) * 0.0625F;  // ~2px at scale 32
-      const SDL_FRect r{wx - d, wy - d, d * 2.0F, d * 2.0F};
-      SDL_RenderFillRect(renderer, &r);
+
+    if (sheet && !sheet->frames.empty()) {
+      const int frame_idx =
+          std::clamp(s.frame, 0, sheet->frame_count - 1);
+      const auto &texture = sheet->frames[static_cast<std::size_t>(frame_idx)];
+      const SDL_FRect dest{wx - dst_size / 2.0F, wy - dst_size / 2.0F,
+                           dst_size, dst_size};
+      SDL_RenderTexture(renderer, texture->get(), nullptr, &dest);
+      continue;
     }
+
+    // Fallback when the star-field sheet is unavailable: a small bright point
+    // sized off star_size_ (the original scales each star sprite by the same
+    // murk-derived value).
+    const SDL_FRect r{wx - dst_size * 0.5F, wy - dst_size * 0.5F, dst_size,
+                      dst_size};
+    SDL_RenderFillRect(renderer, &r);
   }
 }
 
@@ -378,7 +463,7 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
 
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
-  DrawBackground(renderer, state);
+  DrawBackground(platform, state);
   DrawStellarBodies(platform, state);
 
   // Player ship at the play-area centre, frame selected by heading.

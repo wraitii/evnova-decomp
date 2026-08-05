@@ -163,7 +163,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0042CD10,Stellar_UpdateStellarSprites,,0%,
 0x0042D890,Stellar_TickStellarDefenseBatteries,,0%,
 0x0042E160,Shot_UpdateImpactEffectSprites,,0%,
-0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,55,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); murk size scaling round(murk*0.9) clamp [2,29] faithful; sprite artwork still point approximation (draw-proc/sheet unlocated)"
+0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,70,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); murk size scaling round(murk*0.9) clamp [2,29] faithful; stars drawn from real 16-frame 5x5 sprite sheet (sp.x9an 700)"
 0x0042EAC0,NovaUi_UpdateTravelTargetReticle,,0%,
 0x0042EDE0,NovaUi_UpdateShipTargetReticle,,0%,
 0x0042F1B0,Frame_UpdateScreenFlashTimers,,0%,
@@ -490,7 +490,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046E9E0,Stellar_SelectRandomAdjacentDestination,,0%,
 0x0046EA40,Outfit_CountCarriedShipsForOutfit,,0%,
 0x0046EBB0,Stellar_CountValidLinkedStellarDestinations,,0%,
-0x0046EBF0,NovaEffects_QueuedAmbientStarParticles,src/game/spaceflight_view.cpp,85,"20-slot starfield spawn (SpawnAmbientStars): count=round(h/600*20) faithful, offset/parallax speed=random(0x23)*0.01 faithful, outer-slot carry-over faithful, murk<0 gate faithful; only remaining gap is star sprite sheet/frame rendering"
+0x0046EBF0,NovaEffects_QueuedAmbientStarParticles,src/game/spaceflight_view.cpp,90,"20-slot starfield spawn (SpawnAmbientStars): count=round(h/600*20), random frame over 16-frame star sheet (sp.x9an 700), offset, parallax speed=random(0x23)*0.01, outer-slot carry-over, murk<0 gate all faithful; only DAT_005914d7 toggle not plumbed (kept enabled)"
 0x0046EDE0,NovaEffects_ClearAmbientStarParticles,src/game/spaceflight_view.cpp,70,"cleared when system murk<0 via SpawnAmbientStars path"
 0x0046EE50,NovaEffects_UpdateAmbientStarParticles,src/game/spaceflight_view.cpp,85,"per-frame delta integration + drift threshold (0.0f, DAT_005757d8) faithful (UpdateAmbientStars); sign verified against caller (prev-cur)"
 0x0046EEB0,PascalString_Copy,,0%,

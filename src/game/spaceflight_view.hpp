@@ -48,14 +48,15 @@ class SpaceflightView {
   // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0): (re)spawns the
   // 20-slot ambient starfield around the player ship. Spawn count is
   // round(viewportHeight / 600.0 * 20.0) fresh stars; each gets a random world
-  // offset within the current viewport (centred on the ship) and a random
-  // per-particle parallax speed = NovaRandom_Range(0x23) * 0.01 (0.00..0.34).
-  // The remaining (20-count) slots are merely re-activated with their previous
-  // position/speed (outer-slot carry-over). When the system's murk
-  // (SystemDef.murk) is negative the field is cleared instead (stars hidden).
-  // Called at every spaceflight entry / travel boundary (Ghidra travel/landing
-  // paths call it on system entry). Mutates the GameState PRNG, so it is non-const.
-  void SpawnAmbientStars(GameState &state);
+  // offset within the current viewport (centred on the ship), a random star
+  // sprite frame in [0, star_field_.frame_count), and a random per-particle
+  // parallax speed = NovaRandom_Range(0x23) * 0.01 (0.00..0.34). The remaining
+  // (20-count) slots are merely re-activated with their previous position/speed
+  // (outer-slot carry-over). When the system's murk (SystemDef.murk) is
+  // negative the field is cleared instead (stars hidden). Called at every
+  // spaceflight entry / travel boundary (Ghidra travel/landing paths call it
+  // on system entry). Mutates the GameState PRNG, so it is non-const.
+  void SpawnAmbientStars(SdlPlatform &platform, GameState &state);
 
   // Ghidra NovaEffects_UpdateAmbientStarParticles (0x0046ee50): advances the
   // ambient starfield each frame by the ship's movement delta (dx, dy). Each
@@ -67,24 +68,36 @@ class SpaceflightView {
   // Draws the solid per-system space background tint (SystemDef.bkgnd_color,
   // Ghidra NovaRender_SetSystemSpaceBackgroundColor / Frame_RenderViewportBackground)
   // then the active ambient star particles.
-  void DrawBackground(SDL_Renderer *renderer, const GameState &state);
+  void DrawBackground(SdlPlatform &platform, const GameState &state);
 
  private:
-  // One ambient background star particle (Ghidra FadingEffectSpriteState pool
-  // at g_ambient_star_particles, stride 0x14 = 20 bytes; offsets noted where
-  // they map the original fields). The star's sprite-frame index (+0x06) and
-  // draw-proc are not carried here; the artwork renderer is provisional.
+  // One ambient background star particle (Ghidra AmbientStarParticle pool at
+  // g_ambient_star_particles, stride 0x14 = 20 bytes; offsets match the way we
+  // index the original fields).
   struct AmbientStar {
+    int frame = 0;     // +0x06 random star-sprite frame index at spawn
     float speed = 0.0F; // +0x08 parallax drift speed (random per particle)
     float pos_x = 0.0F; // +0x0c world-space x
     float pos_y = 0.0F; // +0x10 world-space y
     bool active = false; // +0x04 active flag
   };
   std::array<AmbientStar, 20> ambient_stars_{};
-  // Provisional star-field visual size in px; the original sizes each star
-  // sprite by 0x20 (=32) when the system murk (alert level) is zero, scaled
-  // otherwise (Ghidra Frame_UpdateViewportWrapBackgroundSprites).
-  int star_size_ = 0;
+  // The ambient star-field artwork: sp\x9an spin descriptor resource 700 is a
+  // 4x4 grid of 5x5px star tiles (16 distinct star shapes). Each particle
+  // renders one of these frames, scaled by the system murk (see star_size_).
+  // Ghidra: DAT_00593efc built by Spin_ReadDescriptor(700,..), frame count at
+  // +0x54 = tiles_x * tiles_y.
+  struct StarFieldSheet {
+    std::vector<std::unique_ptr<class SdlTexture>> frames;
+    int frame_count = 0;
+    int tile_width = 0;   // 5
+    int tile_height = 0;  // 5
+  };
+  StarFieldSheet star_field_;
+  // Star-field visual size in px; the original sizes each star sprite by 0x20
+  // (=32) when SystemDef.murk == 0, else round(murk*0.9) clamped to [2,29]
+  // (Ghidra Frame_UpdateViewportWrapBackgroundSprites, scale _DAT_005753c0).
+  int star_size_ = 32;
   // Unrotated per-frame ship textures plus rotation metadata.
   struct ShipSprite {
     std::vector<std::unique_ptr<class SdlTexture>> frames;
@@ -115,6 +128,11 @@ class SpaceflightView {
   // resource id). Returns null when the set cannot be loaded.
   [[nodiscard]] const SpinSpriteSet *GetSpinSpriteSet(SdlPlatform &platform,
                                                       int spin_set_id);
+
+  // Loads (and caches) the ambient star-field sheet (sp\x9an resource 700).
+  // Returns null when it could not be decoded; on failure stars fall back to
+  // plain points. Ghidra DAT_00593efc.
+  [[nodiscard]] const StarFieldSheet *EnsureStarFieldSheet(SdlPlatform &platform);
 
   // Draws the current system's stellar bodies (planets/stations) at their
   // world positions relative to the player camera.

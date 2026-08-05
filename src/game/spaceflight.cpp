@@ -224,7 +224,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
   // (NovaEffects_QueuedAmbientStarParticles from Ship_RunSpaceflightMode and the
   // travel/landing transitions). We spawn once when the mode starts, then
   // advance it per frame below.
-  view.SpawnAmbientStars(state);
+  view.SpawnAmbientStars(platform, state);
   NovaFrame_TickSystems(state, /*run_full_tick=*/true);
   DrawInGameFrame(platform, state, view);
   SDL_RenderPresent(platform.renderer());
