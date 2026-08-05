@@ -19,6 +19,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -36,6 +37,37 @@ constexpr std::uint32_t kWeaponResourceType = 0x77916170; // w\x91ap
 constexpr std::uint32_t kStellarResourceType = 0x73709a62; // sp\x9ab
 constexpr std::uint32_t kSystemResourceType = 0x73d87374; // s\xd8st
 } // namespace scenario
+
+// --------------------------------------------------------------------------
+// Nova control bit (NCB) test-expression evaluator
+// --------------------------------------------------------------------------
+// Gates ship/outfit/mission availability and system visibility in the original
+// (Ghidra NovaExpression_EvaluateToken 0x00448be0 / NovaExpression_EvaluateBoolean
+// 0x00449020). Implements the Bible's test-expression grammar: Bxxx (control
+// bit), Pxxx (registered-with-days), G (gender: male=1), Oxxx (owns outfit),
+// Exxx (explored system), the `& | ! ( )` boolean operators, and counted sets
+// `[ ... ]` compared with `= < >`. Blank expressions evaluate to true (the
+// original's default). The evaluator is pure: game-state lookups are injected
+// through the state callback so scenario parsing stays independent of the game.
+struct ControlExpressionState {
+  // Bxxx: value of Nova control bit (mission bit) `bit`.
+  std::function<bool(std::uint32_t bit)> get_control_bit;
+  // Pxxx: true if the game is registered (or unregistered fewer than `days`
+  // days). Pass an unused `days` when registration state is unknown.
+  std::function<bool(std::uint32_t days)> is_registered;
+  // G: player gender lookup, true = male.
+  std::function<bool()> is_male;
+  // Oxxx: true if the player owns (has in cargo) at least one outfit id.
+  std::function<bool(std::int16_t outfit_id)> owns_outfit;
+  // Exxx: true if the player has explored system id.
+  std::function<bool(std::int16_t system_id)> has_explored;
+};
+
+// Evaluates a Nova control bit test expression against `state`. Returns true
+// for an empty expression. Malformed/unknown tokens evaluate as false and are
+// logged. Thread-safe (no hidden globals).
+[[nodiscard]] bool NovaControlExpression_Evaluate(
+    std::string_view expression, const ControlExpressionState &state);
 
 // A single stock weapon triple on a ship class: a weapon id plus how many to
 // equip and the standard ammo load. The original arrays hold eight of these.
@@ -100,10 +132,17 @@ struct ShipClass {
 
 // Ghidra OutfitDef (g_outfit_defs, 0x200 entries indexed by outfit id minus
 // 0x80). One purchasable item / ship component.
+//
+// Payload layout is the o\x9ftf resource (Nova Bible): the numeric header is
+// followed by the mod block, Max/Flags/Cost, the availability/on-purchase
+// strings, a Contribute/Require 64-bit pair each, the ShortName/LCName/LCPlural
+// strings, and a tail block holding DispWeight/Graphic/BuyRandom/ItemClass.
+// The record *name* (BRGR resource.map) is surfaced as `name`, not a numeric
+// header field.
 struct Outfit {
-  std::string name;          // resource name / display name
-  std::string availability_expr; // Availability
-  std::string on_purchase_expr;  // OnPurchase
+  std::string name;          // resource record name (BRGR display name)
+  std::string availability_expr; // Availability (control test expression)
+  std::string on_purchase_expr;  // OnPurchase (control set expression)
 
   std::int16_t display_weight = 0; // DispWeight
   std::int16_t mass_tons = 0;      // Mass
@@ -115,16 +154,31 @@ struct Outfit {
   std::array<std::int16_t, 3> alt_mod_vals{};
   std::int16_t max_count = 0;      // Max
   std::uint16_t flags = 0;         // Flags
-  std::int32_t cost = 0;           // Cost
+  std::int32_t cost = 0;           // Cost (4 bytes @ 0x0e of the payload)
+
+  // Contribute / Require 64-bit pairs (contribute_lo/hi, require_lo/hi).
+  // Contribute bits are ORed into the player's aggregate Contribute mask;
+  // Require bits must each be covered by that mask for the item to sell.
+  std::uint32_t contribute_lo = 0; // Contribute (low word)
+  std::uint32_t contribute_hi = 0; // Contribute (high word)
+  std::uint32_t require_lo = 0;    // Require (low word)
+  std::uint32_t require_hi = 0;    // Require (high word)
 
   std::int16_t item_class = 0;     // ItemClass
-  std::int16_t scan_mask = 0;      // ScanMask
-  std::int16_t buy_random = 0;     // BuyRandom (0=100)
+  std::int16_t buy_random = 100;   // BuyRandom (1-100; <1/ >100 mean 100)
+  std::int16_t sprite_id = 0;      // Graphic (p\x9ari sprite id)
 
-  std::string short_name;          // ShortName
-  std::string lc_name;             // LCName
-  std::string lc_plural;           // LCPlural
-  std::int16_t require_govt = 0;   // RequireGovt
+  std::string short_name;          // ShortName (dialog menu label)
+  std::string lc_name;             // LCName (lowercase singular)
+  std::string lc_plural;           // LCPlural (lowercase plural)
+
+  // Purchase-time derived cost/mass. The original computes these at load from
+  // Cost/Mass and the relevant Flags bit, scaling by ship-class hull mass for
+  // mass-proportional items (Flags bit 0x0200 cost, 0x0400 mass); see
+  // Outfit_ComputeOutfitPurchasePrice / Outfit_ComputeOutfitPurchaseMass
+  // (Ghidra 0x0046e910 / 0x0046e950).
+  [[nodiscard]] std::int32_t PurchasePrice(std::int16_t ship_hull_mass) const;
+  [[nodiscard]] std::int32_t PurchaseMass(std::int16_t ship_hull_mass) const;
 };
 
 // Ghidra WeaponDef (g_weapon_defs, 0x100 entries indexed by weapon id minus

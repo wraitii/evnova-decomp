@@ -88,6 +88,11 @@ struct ResourceRecord {
   std::uint32_t type_code = 0;
   std::uint16_t resource_id = 0;
   std::size_t entry_index = 0;
+  // Record display name from resource.map (`name` field of the 0x10a-byte
+  // record, written at [0x0a]). For resource families that key off the record
+  // name rather than a numeric field (ships, outfits, stellars, systems) this
+  // is what the loader surfaces as the class/outfit/object display name.
+  std::string name;
 };
 
 struct LoadedArchive {
@@ -202,7 +207,27 @@ ParseArchive(const std::filesystem::path &path) {
         if (index == 0 || index - 1 >= archive.entries.size()) {
           continue;
         }
-        archive.records.push_back({type_code, resource_id, index - 1});
+        // Record name is a NUL-terminated C string at [0x0a] of the 0x10a-byte
+        // record, e.g. "Marauder" or "Light Blaster". Bounded by the record's
+        // fixed width (and by the end of file if truncated).
+        std::string record_name;
+        const std::size_t name_capacity =
+            (record_offset + 10 >= archive.bytes.size())
+                ? 0
+                : std::min(kMapRecordSize - 10,
+                           archive.bytes.size() - (record_offset + 10));
+        if (name_capacity > 0) {
+          record_name.append(
+              reinterpret_cast<const char *>(archive.bytes.data() +
+                                             record_offset + 10),
+              name_capacity);
+          if (const auto nul = record_name.find('\0');
+              nul != std::string::npos) {
+            record_name.resize(nul);
+          }
+        }
+        archive.records.push_back(
+            {type_code, resource_id, index - 1, std::move(record_name)});
       }
     }
     return archive;
@@ -259,6 +284,23 @@ public:
           continue;
         }
         return Region(archive, record);
+      }
+    }
+    return std::nullopt;
+  }
+
+  // Like Load plus the record's resource.map display name.
+  [[nodiscard]] std::optional<NovaResource>
+  LoadNamed(std::uint32_t type_code, std::uint16_t resource_id) {
+    EnsureLoaded();
+    for (const auto &archive : archives_) {
+      for (const auto &record : archive.records) {
+        if (record.type_code != type_code ||
+            record.resource_id != resource_id) {
+          continue;
+        }
+        return NovaResource{.bytes = Region(archive, record),
+                            .name = record.name};
       }
     }
     return std::nullopt;
@@ -329,6 +371,12 @@ private:
 std::optional<std::vector<std::byte>>
 NovaResource_Load(std::uint32_t type_code, std::uint16_t resource_id) {
   return NovaResourceDb::Instance().Load(type_code, resource_id);
+}
+
+std::optional<NovaResource>
+NovaResource_LoadNamed(std::uint32_t type_code,
+                       std::uint16_t resource_id) {
+  return NovaResourceDb::Instance().LoadNamed(type_code, resource_id);
 }
 
 std::optional<std::vector<std::byte>>

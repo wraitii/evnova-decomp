@@ -57,6 +57,17 @@ NovaResource_LoadCharacterIntro();
 [[nodiscard]] std::optional<std::vector<std::byte>>
 NovaResource_Load(std::uint32_t type_code, std::uint16_t resource_id);
 
+// Resource payload plus the record's display name from resource.map. The
+// scenario loader (NovaData_LoadScenarioResourceTables, 0x004bd3c0) reads this
+// name for ships/outfits/stellars/systems and uses it as the display name (the
+// record-name string, not a field in the numeric payload).
+struct NovaResource {
+  std::vector<std::byte> bytes;
+  std::string name;
+};
+[[nodiscard]] std::optional<NovaResource>
+NovaResource_LoadNamed(std::uint32_t type_code, std::uint16_t resource_id);
+
 // Ghidra: FUN_004ce2a0 + FUN_004ce030 (n-th record of a type, 1-based). The
 // game reads the c\x9alr style through this accessor rather than by id.
 [[nodiscard]] std::optional<std::vector<std::byte>>
