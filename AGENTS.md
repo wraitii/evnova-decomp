@@ -19,6 +19,7 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 - Be conservative with speculative renames; be liberal with factual comments. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.
 - Prefer plate comments for functions; pre-comments for globals/data.
 - When renaming high-level control-flow functions (startup, run loop, shutdown), also add a short clean-room comment block (2-4 lines) documenting purpose, entry/exit conditions, and confidence/unknowns.
+- If testing game behaviour is required, stop and ask the user for input - you will not be able to interact with the game well enough.
 
 ## Function progress tracker (`progress.csv`)
 
