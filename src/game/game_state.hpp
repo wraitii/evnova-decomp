@@ -60,6 +60,17 @@ struct PlayerShip {
   std::int16_t timed_action_counter = -1; // g_ship_states->timed_action_counter
   std::int32_t credits = 0;             // g_ship_states->credits
   bool is_active = false;               // g_ship_states->is_active
+  // Engine-thrust latch: whether the player is currently applying forward
+  // thrust this frame (mirrors Ghidra ShipState.ai_forward_thrust_cmd at +0x30
+  // being non-zero). Written by NovaPlayer_UpdateFromInput and read by the
+  // flight render to drive the engine-glow layer.
+  bool engine_thrust = false;
+  // Engine-glow intensity, 0..1, ramped toward the target by the movement
+  // update (rise while thrusting, decay when not). Clean-room approximation of
+  // the original dimming the glow sprite with throttle; on the live movement
+  // sim this is binary thrust, so it is a soft fade rather than a per-degree
+  // throttle fade (TODO(decomp)).
+  float engine_glow_intensity = 0.0F;
 };
 
 // The new pilot's identity (first/last name) and start configuration, filled

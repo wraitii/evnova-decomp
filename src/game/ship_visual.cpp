@@ -40,6 +40,12 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
   d.sprite_behavior_flags = ReadBe16(resource_data, 0x2e); // Flags
   d.anim_delay = ReadBeI16(resource_data, 0x30);           // AnimDelay
   d.weapon_decay = ReadBeI16(resource_data, 0x32);         // WeapDecay
+  // Engine-glow layer (+0x16 image / +0x18 mask / +0x1a x / +0x1c y), read as
+  // big-endian shorts like the base fields. Negative/zero id = no glow layer.
+  d.engine_glow_image_id = ReadBeI16(resource_data, 0x16); // GlowImageID
+  d.engine_glow_mask_id = ReadBeI16(resource_data, 0x18);  // GlowMaskID
+  d.engine_glow_x_size = ReadBe16(resource_data, 0x1a);    // GlowXSize
+  d.engine_glow_y_size = ReadBe16(resource_data, 0x1c);    // GlowYSize
   d.frames_per_rotation = ReadBeI16(resource_data, 0x34);  // FramesPer
   if (d.frames_per_rotation == 0) {
     d.frames_per_rotation = 36;

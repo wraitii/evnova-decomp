@@ -8,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -303,6 +304,17 @@ void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state) {
   constexpr float kThrustAccel = 0.35F; // px/frame^2
   constexpr float kMaxSpeed = 7.0F;     // px/frame
   constexpr float kDrag = 0.985F;       // per-frame velocity damping
+  // Engine-glow intensity ramp: rise/fall rate per frame toward the binary
+  // thrust target. Clean-room stand-in for the original's throttle-based glow
+  // dimming (TODO(decomp): map to ShipState.ai_forward_thrust_cmd magnitude
+  // once a throttle is modeled).
+  constexpr float kGlowRiseRate = 0.12F;
+  constexpr float kGlowDecayRate = 0.05F;
+
+  p.engine_thrust = input.thrust;
+  // Ramp the glow intensity toward 1.0 while thrusting, toward 0.0 when not.
+  p.engine_glow_intensity += (p.engine_thrust ? kGlowRiseRate : -kGlowDecayRate);
+  p.engine_glow_intensity = std::clamp(p.engine_glow_intensity, 0.0F, 1.0F);
 
   if (input.turn_left) {
     p.heading -= kTurnRate;

@@ -239,6 +239,18 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships", "[scenario][ships][
   CHECK(d->anim_delay == 0);
   CHECK(d->weapon_decay == 0);   // no weapon-glow fade for the bare Shuttle
 
+  // The engine-glow layer names the 'Shuttle Eng Glow' rl\x9144 sheet 0x0578
+  // (108-frame rotation grid matching the base). Ghidra
+  // ShipClass_LoadShipClassVisualAndLaunchData reads the glow image/mask/xy at
+  // +0x16/+0x18/+0x1a/+0x1c and binds it to the per-class glow sprite set.
+  // The descriptor's GlowX/YSize (48) matches the sheet canvas: a 48x48 frame
+  // (half again larger than the 24x24 hull) so the exhaust jets extend past the
+  // ship.
+  CHECK(d->engine_glow_image_id == 0x0578);
+  CHECK(d->engine_glow_mask_id == 0x0579);
+  CHECK(d->engine_glow_x_size == 48);
+  CHECK(d->engine_glow_y_size == 48);
+
   // The referenced 16-bit sheet must be decodable and hold base_set_count *
   // frames_per_rotation frames (3 * 36 = 108) at the descriptor's dimensions.
   const auto sheet = NovaResource_Load(kResourceTypeRleSheet16, d->base_image_id);
@@ -248,6 +260,17 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships", "[scenario][ships][
   CHECK(decoded->width == 24);
   CHECK(decoded->height == 24);
   CHECK(decoded->frames.size() == 108);
+
+  // The glow sheet shares the base's rotation grid: same frame count, larger
+  // canvas (48x48 vs the 24x24 hull).
+  const auto glow_sheet =
+      NovaResource_Load(kResourceTypeRleSheet16, d->engine_glow_image_id);
+  REQUIRE(glow_sheet.has_value());
+  const auto glow_decoded = RleSpriteSheet_Decode16(*glow_sheet);
+  REQUIRE(glow_decoded.has_value());
+  CHECK(glow_decoded->width == 48);
+  CHECK(glow_decoded->height == 48);
+  CHECK(glow_decoded->frames.size() == 108);
 }
 
 // VERIFY the stellar (planet) graphic path end to end on the Kania system:

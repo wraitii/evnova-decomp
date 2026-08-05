@@ -117,6 +117,20 @@ class SpaceflightView {
     int height = 0;
   };
   ShipSprite ship_;
+  // The ship's engine-glow layer, a second rl\x9144 sheet (sh\x8an
+  // GlowImageID, e.g. 'Shuttle Eng Glow' 0x0578) sharing the base sheet's
+  // rotation grid (same frame count), drawn over the base with a thrust-driven
+  // alpha. Empty when the class has no glow layer.
+  ShipSprite glow_;
+  // Whether this class's sh\x8an descriptor named a glow layer at all (so
+  // EnsureShipSprite does not retry a missing sheet every frame).
+  bool has_glow_ = false;
+
+  // Decodes one rl\x9144 ship sheet (resource `id`) and uploads its frames as
+  // textures. Returns nullopt when the sheet is missing/malformed. Multi-frame
+  // rotation sheets (base + glow) share this decoder.
+  [[nodiscard]] std::optional<ShipSprite>
+  LoadShipSprite(SDL_Renderer *renderer, std::uint16_t resource_id);
 
   // One decodable spin sprite set (a stellar/planet graphic). Frames are
   // arranged in a grid of tiles_x * tiles_y; only the first frame is drawn

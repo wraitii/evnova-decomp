@@ -887,7 +887,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004B4690,Game_ResetNewGameState,,0%,
 0x004B4CF0,Sprite_CompileFramesAndDiscardSourceData,,0%,
 0x004B4E10,FUN_004b4e10,,0%,
-0x004B4EE0,ShipClass_LoadShipClassVisualAndLaunchData,,0%,
+0x004B4EE0,ShipClass_LoadShipClassVisualAndLaunchData,src/game/ship_visual.cpp,20%,"sh.x9an descriptor field decode (base/alt/glow/light/weap/shield ids+sizes, FramesPer, Flags, AnimDelay, WeapDecay) verified; glow layer fields + 0x16 added. Sprite-container table loading and exit-point handling not yet reimplemented (clean-room SpaceflightView loads base+glow sheets directly)."
 0x004B6620,FUN_004b6620,,0%,
 0x004B6760,FUN_004b6760,,0%,
 0x004B67C0,ShipClass_FindShipSpriteSetByResourceId,,0%,

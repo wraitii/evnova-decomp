@@ -78,40 +78,71 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
                   ship_class->display_name);
     return false;
   }
-  const auto sheet_data = NovaResource_Load(kResourceTypeRleSheet16,
-                                            visual->base_image_id);
-  if (!sheet_data) {
-    NovaLog::Warn("ship sprite: no rl.x91D sheet {} for class '{}'",
+  SDL_Renderer *const renderer = platform.renderer();
+  auto base = LoadShipSprite(renderer, visual->base_image_id);
+  if (!base) {
+    NovaLog::Warn("ship sprite: no usable rl.x91D sheet {} for class '{}'",
                   visual->base_image_id, ship_class->display_name);
     return false;
+  }
+  ship_ = std::move(*base);
+  ship_.frames_per_rotation = visual->frames_per_rotation;
+
+  // Engine-glow layer (GlowImageID). The original loads it into the per-class
+  // glow sprite set sharing the base's rotation grid (same frame count, set by
+  // frames_per_rotation * base_set_count); it is drawn over the base with a
+  // thrust-driven alpha (see Draw). A missing/absent glow sheet just means the
+  // ship has no glow layer, which is not fatal.
+  has_glow_ = visual->engine_glow_image_id > 0;
+  if (has_glow_) {
+    if (auto glow = LoadShipSprite(renderer, static_cast<std::uint16_t>(
+                                                 visual->engine_glow_image_id));
+        glow) {
+      glow_ = std::move(*glow);
+      glow_.frames_per_rotation = visual->frames_per_rotation;
+      NovaLog::Info("ship engine glow loaded for '{}': {}x{} x{} frames",
+                    ship_class->display_name, glow_.width, glow_.height,
+                    glow_.frame_count);
+    } else {
+      has_glow_ = false;
+      NovaLog::Warn("ship sprite: no usable rl.x91D glow sheet {} for class "
+                    "'{}'; engine glow skipped",
+                    visual->engine_glow_image_id, ship_class->display_name);
+    }
+  }
+
+  NovaLog::Info("ship sprite loaded for '{}': {}x{} x{} frames ({} set(s))",
+                ship_class->display_name, ship_.width, ship_.height,
+                ship_.frame_count, visual->base_set_count);
+  return true;
+}
+
+std::optional<SpaceflightView::ShipSprite>
+SpaceflightView::LoadShipSprite(SDL_Renderer *renderer,
+                                std::uint16_t resource_id) {
+  const auto sheet_data = NovaResource_Load(kResourceTypeRleSheet16, resource_id);
+  if (!sheet_data) {
+    return std::nullopt;
   }
   auto sheet = RleSpriteSheet_Decode16(*sheet_data);
   if (!sheet) {
-    NovaLog::Warn("ship sprite: failed to decode rl.x91D sheet {} for class '{}'",
-                  visual->base_image_id, ship_class->display_name);
-    return false;
+    return std::nullopt;
   }
-  ship_.frames_per_rotation = visual->frames_per_rotation;
-  ship_.frame_count = static_cast<int>(sheet->frames.size());
-  ship_.width = sheet->width;
-  ship_.height = sheet->height;
-  ship_.frames.reserve(sheet->frames.size());
-  SDL_Renderer *const renderer = platform.renderer();
+  ShipSprite out;
+  out.frame_count = static_cast<int>(sheet->frames.size());
+  out.width = sheet->width;
+  out.height = sheet->height;
+  out.frames.reserve(sheet->frames.size());
   for (const auto &frame : sheet->frames) {
     auto texture = SdlTexture::Create(renderer, sheet->width, sheet->height,
                                       frame.rgba_pixels);
     if (!texture) {
-      NovaLog::Warn("ship sprite: texture upload failed for class '{}'",
-                    ship_class->display_name);
-      ship_.frames.clear();
-      return false;
+      out.frames.clear();
+      return std::nullopt;
     }
-    ship_.frames.push_back(std::move(texture));
+    out.frames.push_back(std::move(texture));
   }
-  NovaLog::Info("ship sprite loaded for '{}': {}x{} x{} frames ({} set(s))",
-                ship_class->display_name, sheet->width, sheet->height,
-                ship_.frame_count, visual->base_set_count);
-  return true;
+  return out;
 }
 
 // Loads (and caches) the spin sprite set for a stellar's graphic. spin_set_id
@@ -593,6 +624,35 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
         static_cast<float>(kViewportWidth) / 2.0F - w / 2.0F,
         static_cast<float>(kViewportHeight) / 2.0F - h / 2.0F, w, h};
     SDL_RenderTexture(renderer, texture->get(), nullptr, &dest);
+
+    // Engine-glow layer: drawn over the base with the same heading-selected
+    // frame and a thrust-driven alpha. The original binds the glow as a second
+    // sprite layer on top of the base set to the same frame index (Ghidra
+    // NovaUi_UpdateShipClassLaunchProgress sets both to sVar10). The glow
+    // sheet is larger than the base (exhaust jets extend beyond the hull), so
+    // it is drawn centred on the ship at its native size. Alpha = the ramped
+    // thrust intensity, so the exhaust fades in while accelerating and out when
+    // coasting (clean-room approximation of the original dimming the glow with
+    // throttle).
+    if (has_glow_ && state.player.engine_glow_intensity > 0.0F &&
+        !glow_.frames.empty() && glow_.frames_per_rotation > 0) {
+      const int glow_frame =
+          std::clamp(FrameForHeading(state.player.heading,
+                                     glow_.frames_per_rotation),
+                     0, glow_.frame_count - 1);
+      const auto &glow_texture =
+          glow_.frames[static_cast<std::size_t>(glow_frame)];
+      const float gw = static_cast<float>(glow_.width);
+      const float gh = static_cast<float>(glow_.height);
+      const SDL_FRect glow_dest{
+          static_cast<float>(kViewportWidth) / 2.0F - gw / 2.0F,
+          static_cast<float>(kViewportHeight) / 2.0F - gh / 2.0F, gw, gh};
+      const std::uint8_t alpha = static_cast<std::uint8_t>(
+          std::clamp(state.player.engine_glow_intensity, 0.0F, 1.0F) * 255.0F);
+      SDL_SetTextureAlphaMod(glow_texture->get(), alpha);
+      SDL_RenderTexture(renderer, glow_texture->get(), nullptr, &glow_dest);
+      SDL_SetTextureAlphaMod(glow_texture->get(), SDL_ALPHA_OPAQUE);
+    }
   }
 }
 

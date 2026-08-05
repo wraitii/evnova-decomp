@@ -46,6 +46,18 @@ struct ShipVisualDescriptor {
   // WeapDecay (+0x32): the weapon-glow fade rate; scaled into
   // ShipClassDef.weapon_glow_decay_rate.
   std::int16_t weapon_decay = 0;
+  // Engine-glow layer. Ghidra ShipClass_LoadShipClassVisualAndLaunchData reads
+  // the glow image/mask/x/y from the sh\x8an descriptor at +0x16/+0x18/+0x1a/
+  // +0x1c and builds the per-class glow sprite from the named rl\x9144 sheet
+  // (for the starter Shuttle: 'Shuttle Eng Glow' 0x0578, 48x48, same rotation
+  // grid as the base). The glow X/Y sizes match the sheet canvas (48x48 vs the
+  // 24x24 hull), so the exhaust jets extend past the ship. A non-positive image
+  // id means the ship has no engine-glow layer (verified on the shuttle:
+  // +0x16 = 0x0578).
+  std::int16_t engine_glow_image_id = 0;   // GlowImageID (+0x16)
+  std::int16_t engine_glow_mask_id = 0;    // GlowMaskID (+0x18)
+  std::uint16_t engine_glow_x_size = 0;    // GlowXSize (+0x1a)
+  std::uint16_t engine_glow_y_size = 0;    // GlowYSize (+0x1c)
 };
 
 // Decodes one sh\x8an descriptor payload (Ghidra ShipClass_LoadShipClass-
