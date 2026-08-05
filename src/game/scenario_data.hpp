@@ -358,7 +358,8 @@ struct System {
   // NovaRender_SetSystemSpaceBackgroundColor paints. Pure black (0) when unset.
   std::uint32_t bkgnd_color = 0;
   // Murk (s\xd8st +0x92): murkiness 0-100; a negative value hides the starfield
-  // (SystemDef.alert_level < 0). Feeds the ambient-star size scale as well.
+  // (SystemDef.murk at +0xbc < 0; Ghidra previously mislabeled this field
+  // "alert_level"). Feeds the ambient-star size scale as well.
   std::int16_t murk = 0;
   std::uint16_t ast_types = 0;    // AstTypes
   std::int16_t reinf_fleet = -1;  // ReinfFleet

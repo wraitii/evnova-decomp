@@ -370,7 +370,9 @@ namespace {
 // DudeTypes+0x6e, % Prob+0x7e, govt+0x66, BkgndColor+0x8e (24-bit RRGGBB,
 // Ghidra NovaData_LoadScenarioResourceTables reads a 32-bit at payload +0x8e
 // and splits the three bytes into SystemDef.field_0x1ee/.f0/.f2), Murk+0x92
-// (feeds SystemDef.alert_level, clamped). The loader also reads DudeTypes/Prob
+// (feeds SystemDef.murk at +0xbc; Ghidra previously mislabeled this field
+// "alert_level" - the EV Nova Bible documents Murk as the starfield/ambience
+// opacity, negative hides the starfield). The loader also reads DudeTypes/Prob
 // (8 shorts each), a Message/Asteroids/Interference block and ReinfFleet/Time/
 // Intrval near the end of the record, plus the Visibility string.
 [[nodiscard]] System DecodeSystem(std::span<const std::byte> bytes) {
@@ -397,9 +399,10 @@ namespace {
   s.bkgnd_color = ((bkgnd >> 8) & 0xff) << 16 |  // 0x90 -> R
                   ((bkgnd >> 16) & 0xff) << 8 |   // 0x8f -> G
                   ((bkgnd >> 24) & 0xff);         // 0x8e -> B
-  // Murk (s\xd8st +0x92): murkiness 0-100; a negative value equivalently hides
-  // the starfield (NovaEffects_QueuedAmbientStarParticles clears ambient stars
-  // when the derived SystemDef.alert_level < 0).
+  // Murk (s\xd8st +0x92): murkiness 0-100 (SystemDef.murk at +0xbc; Ghidra
+  // previously mislabeled this field "alert_level"); a negative value equivalently
+  // hides the starfield (NovaEffects_QueuedAmbientStarParticles clears ambient
+  // stars when SystemDef.murk < 0).
   s.murk = ReadBeI16(bytes, 0x92);
   // TODO(decomp): AvgShips / Message / Asteroids / Interference / AstTypes
   // payload offsets are not yet confirmed against the loader; they stay

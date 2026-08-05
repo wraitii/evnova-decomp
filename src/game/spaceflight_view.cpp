@@ -172,14 +172,15 @@ SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
 }
 
 // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0). See the header.
-// The original spawns as many particles as the viewport allows (about
-// viewport_height / 768 * 20 of the 20-slot pool) and gives each a random
-// world offset within the viewport (centered on the player) plus a random
-// per-particle parallax speed. A negative system murk clears the field.
-// NOTE(decomp): the star's frame index (random over the star sprite sheet
-// frame count) and the exact speed constant (_DAT_00575738) depend on the as-yet
-// unlocated star-field sprite sheet; speed is provisionally scaled to a
-// fractional parallax range and the artwork is drawn as small points.
+// Decoded from the binary: spawn count = round(viewportHeight / 600.0 * 20.0)
+// (divisor g_background_star_spawn_height_divisor = 600.0). Each of the first
+// `count` slots gets a random world offset within the (player-centred) viewport
+// and a parallax speed of NovaRandom_Range(0x23) * 0.01 (constant _DAT_00575738,
+// a double). The remaining (20-count) slots are merely re-activated, keeping
+// their previous position/speed (a re-scatter only rewrites the first `count`).
+// A negative system murk (SystemDef.murk) clears the whole field. When the
+// per-gameplay options toggle DAT_005914d7 is clear (starfield motion disabled)
+// the speed is forced to zero so the field is static.
 void SpaceflightView::SpawnAmbientStars(GameState &state) {
   const auto *sys = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
@@ -193,30 +194,44 @@ void SpaceflightView::SpawnAmbientStars(GameState &state) {
     return;
   }
 
-  // Ghidra derives the spawn count from the viewport height: ~height/768 * 20.
-  const int count = std::max<int>(0, std::min<int>(20, kViewportHeight * 20 / 768));
-  // Provisional parallax speed scale (Ghida _DAT_00575738); sweeps speed over a
-  // small fraction so nearby stars stream by while distants recede.
-  constexpr float kSpeedScale = 0.02F;
-  for (int i = 0; i < count; ++i) {
+  // Ghidra: count = round(viewportHeight / 600.0 * 20.0), clamped to the
+  // 20-slot pool (viewport height 400 -> round(13.33) = 13 fresh stars).
+  const int count =
+      std::clamp<int>(static_cast<int>(std::round(kViewportHeight / 600.0F * 20.0F)), 0, 20);
+  // gh.data flag DAT_005914d7: options toggle for starfield motion. Our clean
+  // reimplementation currently has no such preference, so we keep it enabled.
+  constexpr bool kStarfieldMotionEnabled = true;
+  // gh.data _DAT_00575738 = 0.01 (double): parallax speed multiplier, so
+  // speed = NovaRandom_Range(0x23) * 0.01 spans 0.00..0.34.
+  constexpr float kSpeedScale = 0.01F;
+  for (int i = 0; i < 20; ++i) {
     AmbientStar &s = ambient_stars_[static_cast<std::size_t>(i)];
     s.active = true;
+    if (i >= count) {
+      // Ghidra: slots beyond the computed count are only re-activated; their
+      // previous position/speed carry over.
+      continue;
+    }
     // Random world offset within the (player-centred) viewport.
     const auto rx = static_cast<float>(NovaRandomRange(state.rng, kViewportWidth));
     const auto ry = static_cast<float>(NovaRandomRange(state.rng, kViewportHeight));
     s.pos_x = rx + state.player.pos_x - static_cast<float>(kViewportWidth) / 2.0F;
     s.pos_y = ry + state.player.pos_y - static_cast<float>(kViewportHeight) / 2.0F;
-    // Ghidra: speed = NovaRandom_Range(0x23) * scale.
-    s.speed = static_cast<float>(NovaRandomRange(state.rng, 0x23)) * kSpeedScale;
+    // Ghidra: speed = NovaRandom_Range(0x23) * 0.01 when the motion toggle is on,
+    // else forced to 0 (stationary field).
+    s.speed = kStarfieldMotionEnabled
+                  ? static_cast<float>(NovaRandomRange(state.rng, 0x23)) * kSpeedScale
+                  : 0.0F;
   }
 }
 
 // Ghidra NovaEffects_UpdateAmbientStarParticles (0x0046ee50). Each active
 // particle's world position grows by (dx, dy) * per-particle speed, where the
 // passed delta is the ship's movement this frame. Only particles whose speed
-// clears the (tiny) drift threshold move, mirroring the original's gate.
+// clears the drift threshold (gh.data _DAT_005757d8 = 0.0f: any non-zero speed)
+// move, mirroring the original's gate.
 void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
-  constexpr float kMinSpeed = 0.0001F; // original gate DAT_005757d8 (provisional)
+  constexpr float kMinSpeed = 0.0F; // original gate DAT_005757d8 = 0.0f
   for (auto &s : ambient_stars_) {
     if (s.active && s.speed > kMinSpeed) {
       s.pos_x += dx * s.speed;
@@ -247,11 +262,12 @@ void SpaceflightView::DrawBackground(SDL_Renderer *renderer,
   SDL_RenderClear(renderer);
 
   // Star size: the original sizes each star sprite by 0x20 (32) when murk==0,
-  // else scales by murk (clamped). Mirrors Frame_UpdateViewportWrapBackgroundSprites.
+  // else scales by round(murk * 0.9), clamped to [2,29]. Mirrors
+  // Frame_UpdateViewportWrapBackgroundSprites (gh.data _DAT_005753c0 = 0.9).
   std::int16_t star = 32;
-  if (sys && sys->murk > 0) {
-    // Ghidra clamps the scaled size to [2, 29] when murk (>0) is active.
-    star = static_cast<std::int16_t>(sys->murk);
+  if (sys && sys->murk != 0) {
+    star = static_cast<std::int16_t>(
+        std::round(static_cast<float>(sys->murk) * 0.9F));
     if (star > 29) star = 29;
     if (star < 2) star = 2;
   }

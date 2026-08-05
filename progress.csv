@@ -163,7 +163,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0042CD10,Stellar_UpdateStellarSprites,,0%,
 0x0042D890,Stellar_TickStellarDefenseBatteries,,0%,
 0x0042E160,Shot_UpdateImpactEffectSprites,,0%,
-0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,50%,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); sprite sizing/draw-proc provisional (point approximation)",
+0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,55,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); murk size scaling round(murk*0.9) clamp [2,29] faithful; sprite artwork still point approximation (draw-proc/sheet unlocated)"
 0x0042EAC0,NovaUi_UpdateTravelTargetReticle,,0%,
 0x0042EDE0,NovaUi_UpdateShipTargetReticle,,0%,
 0x0042F1B0,Frame_UpdateScreenFlashTimers,,0%,
@@ -448,7 +448,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046BFF0,Government_DoGovtsShareClass,,0%,
 0x0046C080,Ship_ComputeStatusEffectDecayRate,,0%,
 0x0046C160,Ship_GetStatusEffectIntensity,,0%,
-0x0046C250,Government_GetSystemAlertLevelPercent,,0%,
+0x0046C250,System_GetEffectiveMurkPercent,,0,
 0x0046C2F0,Weapon_GetShotImpactVariant,,0%,
 0x0046C320,Weapon_SelectTurretQuadrant,,0%,
 0x0046C4E0,Weapon_ChooseBestTurretQuadrantForTarget,,0%,
@@ -490,9 +490,9 @@ address,name,impl_file,reimpl_pct,comment
 0x0046E9E0,Stellar_SelectRandomAdjacentDestination,,0%,
 0x0046EA40,Outfit_CountCarriedShipsForOutfit,,0%,
 0x0046EBB0,Stellar_CountValidLinkedStellarDestinations,,0%,
-0x0046EBF0,NovaEffects_QueuedAmbientStarParticles,src/game/spaceflight_view.cpp,70%,"20-slot starfield spawn reimplemented (SpawnAmbientStars): count/offset/parallax speed/murk-hide gate faithful; star sprite frame & exact speed const provisional",
-0x0046EDE0,NovaEffects_ClearAmbientStarParticles,src/game/spaceflight_view.cpp,70%,"cleared when system murk<0 via SpawnAmbientStars path",
-0x0046EE50,NovaEffects_UpdateAmbientStarParticles,src/game/spaceflight_view.cpp,80%,"per-frame delta integration + drift threshold faithful (UpdateAmbientStars); threshold const provisional",
+0x0046EBF0,NovaEffects_QueuedAmbientStarParticles,src/game/spaceflight_view.cpp,85,"20-slot starfield spawn (SpawnAmbientStars): count=round(h/600*20) faithful, offset/parallax speed=random(0x23)*0.01 faithful, outer-slot carry-over faithful, murk<0 gate faithful; only remaining gap is star sprite sheet/frame rendering"
+0x0046EDE0,NovaEffects_ClearAmbientStarParticles,src/game/spaceflight_view.cpp,70,"cleared when system murk<0 via SpawnAmbientStars path"
+0x0046EE50,NovaEffects_UpdateAmbientStarParticles,src/game/spaceflight_view.cpp,85,"per-frame delta integration + drift threshold (0.0f, DAT_005757d8) faithful (UpdateAmbientStars); sign verified against caller (prev-cur)"
 0x0046EEB0,PascalString_Copy,,0%,
 0x0046EF00,CString_Equals,,0%,
 0x0046EF80,NovaUi_HideTravelSelectionSprite,,0%,

@@ -46,19 +46,22 @@ class SpaceflightView {
   void Draw(SdlPlatform &platform, const GameState &state);
 
   // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0): (re)spawns the
-  // 20-particle ambient starfield around the player ship. Each particle gets a
-  // random world offset within the current viewport (centred on the ship) and a
-  // random per-particle parallax speed. When the system's derived alert level
-  // (murk) is negative the field is cleared instead (stars hidden). Called at
-  // every spaceflight entry / travel boundary (Ghidra travel/landing paths
-  // call it on system entry). Mutates the GameState PRNG, so it is non-const.
+  // 20-slot ambient starfield around the player ship. Spawn count is
+  // round(viewportHeight / 600.0 * 20.0) fresh stars; each gets a random world
+  // offset within the current viewport (centred on the ship) and a random
+  // per-particle parallax speed = NovaRandom_Range(0x23) * 0.01 (0.00..0.34).
+  // The remaining (20-count) slots are merely re-activated with their previous
+  // position/speed (outer-slot carry-over). When the system's murk
+  // (SystemDef.murk) is negative the field is cleared instead (stars hidden).
+  // Called at every spaceflight entry / travel boundary (Ghidra travel/landing
+  // paths call it on system entry). Mutates the GameState PRNG, so it is non-const.
   void SpawnAmbientStars(GameState &state);
 
   // Ghidra NovaEffects_UpdateAmbientStarParticles (0x0046ee50): advances the
   // ambient starfield each frame by the ship's movement delta (dx, dy). Each
-  // active particle's world position gains (dx, dy) * per-particle parallax
-  // speed, so nearer/faster particles stream past while distant ones recede
-  // (real spatial parallax).
+  // active particle whose parallax speed exceeds the (0.0) drift threshold
+  // gains (dx, dy) * per-particle speed, so nearer/faster particles stream
+  // past while slow (speed 0) distant ones stay fixed (real spatial parallax).
   void UpdateAmbientStars(float dx, float dy);
 
   // Draws the solid per-system space background tint (SystemDef.bkgnd_color,
