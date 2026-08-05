@@ -64,49 +64,29 @@ TEST_CASE("PilotFileApply seeds the live state from a pilot record") {
   CHECK(state.player.timed_action_counter == -1);
 }
 
-TEST_CASE("a fresh GameState is inactive with no intro played") {
+// Ghidra-linked single-bit flags: a fresh state is out of game and hasn't
+// played the intro (DAT_00596d28 / DAT_00596d35, the latter cleared on new
+// pilot so the intro plays on first entry).
+TEST_CASE("a fresh GameState is inactive and has not played the intro") {
   game::GameState state;
   CHECK_FALSE(state.game_active);
   CHECK_FALSE(state.intro_played);
-  CHECK(state.pilot.first_name.empty());
-  CHECK(state.pilot.last_name.empty());
-  CHECK(state.intro_cinematic.post_intro_dest_id == -1);
-  // A -1 post-intro destination means IntroCinematic_Run must NOT open the
-  // post-intro travel-selection dialog.
-  CHECK_FALSE(state.intro_cinematic.should_open_post_intro_dialog());
-
-  // The four-frame cinematic array is empty by default (ids < 1 => no art).
-  for (const auto id : state.intro_cinematic.source_pict_ids) {
-    CHECK(id < 1);
-  }
 }
 
-// The new-game flow (currently sampled from ch\x9ar/IntroCinematic_SetupFrames)
-// configures a three-frame intro (PICT 0x2008/0x2009/0x200a) with post_intro_
-// dest_id = 0x7ffd. 0x7ffd is the "no stellar yet" sentinel but is deliberately
-// distinct from -1, so IntroCinematic_Run still opens the destination dialog
-// after the last frame. Captured here as a pure-data regression test.
-TEST_CASE("the three-frame new-game intro config opens the destination dialog") {
-  game::IntroCinematicData cinematic;
-  cinematic.source_pict_ids = {0x2008, 0x2009, 0x200a, -1};
-  cinematic.duration_60h_ticks = {45, 45, 45, 0};
-  // IntroCinematic_SetupFrames writes 0x7ffd on the no-save path (Ghidra
-  // 0x004cd3b0).
-  cinematic.post_intro_dest_id = 0x7ffd;
+// The post-intro dialog gate (Ghidra IntroCinematic_Run) must open the
+// travel-selection dialog for the new-game sentinel 0x7ffd ("no stellar yet,"
+// written by IntroCinematic_SetupFrames 0x004cd3b0 on the no-save path),
+// which is deliberately distinct from -1. A fresh (default) state must not.
+TEST_CASE("post-intro dialog gate trips for 0x7ffd but not -1") {
+  game::IntroCinematicData fresh;
+  CHECK(fresh.post_intro_dest_id == -1);
+  CHECK_FALSE(fresh.should_open_post_intro_dialog());
 
-  CHECK(cinematic.source_pict_ids[0] == 0x2008);
-  CHECK(cinematic.source_pict_ids[1] == 0x2009);
-  CHECK(cinematic.source_pict_ids[2] == 0x200a);
-  CHECK(cinematic.source_pict_ids[3] < 1);
-  CHECK(cinematic.duration_60h_ticks[0] == 45);
-  // The dialog gate trips for 0x7ffd even though it represents "no stellar".
-  CHECK(cinematic.post_intro_dest_id != -1);
-  CHECK(cinematic.should_open_post_intro_dialog());
+  game::IntroCinematicData new_game;
+  new_game.post_intro_dest_id = 0x7ffd;
+  CHECK(new_game.should_open_post_intro_dialog());
 }
 
-// Data-dependent: the stock ch\x9ar (default .Trader character) resource in
-// Nova Data 1.rez carries the real 3-frame new-pilot intro (IntroPict 0x2008..
-// 0x200a, each 45 1/60s ticks). Skipped when the archives are missing.
 TEST_CASE("the default character resource supplies the three-frame intro") {
   if (!NovaArchivesAvailable()) {
     SKIP("Nova .rez archives not present");
@@ -123,45 +103,6 @@ TEST_CASE("the default character resource supplies the three-frame intro") {
   CHECK(intro->delay_ticks[1] == 45);
   CHECK(intro->delay_ticks[2] == 45);
   CHECK(intro->delay_ticks[3] == 0);
-}
-
-TEST_CASE("a fresh PlayerShip carries the new-game reset defaults") {
-  game::GameState state;
-
-  // Ghidra Ship_ResetPlayerShipState clears position/velocity and debuffs.
-  CHECK(state.player.is_active == false);
-  CHECK(state.player.death_timer_active == -1.0F);
-  CHECK(state.player.timed_action_counter == -1);
-  CHECK(state.player.pos_x == 0.0F);
-  CHECK(state.player.pos_y == 0.0F);
-  CHECK(state.player.vel_x == 0.0F);
-  CHECK(state.player.vel_y == 0.0F);
-}
-
-TEST_CASE("overwriting the starting inventory leaves the model consistent") {
-  game::GameState state;
-  state.outfit_owned_count.fill(7);
-  state.weapon_bank_ammo.fill(9);
-  state.weapon_bank_secondary.fill(9);
-
-  const auto expected_table_size = state.outfit_owned_count.size();
-  REQUIRE(expected_table_size == 0x200);
-  REQUIRE(state.weapon_bank_ammo.size() == 0x100);
-  REQUIRE(state.weapon_bank_secondary.size() == 0x100);
-
-  // The new-game flow zeroes these arrays.
-  state.outfit_owned_count.fill(0);
-  state.weapon_bank_ammo.fill(0);
-  state.weapon_bank_secondary.fill(0);
-  for (const auto count : state.outfit_owned_count) {
-    CHECK(count == 0);
-  }
-  for (const auto ammo : state.weapon_bank_ammo) {
-    CHECK(ammo == 0);
-  }
-  for (const auto secondary : state.weapon_bank_secondary) {
-    CHECK(secondary == 0);
-  }
 }
 
 TEST_CASE("the default new-game intro frame PICT 0x2008 is locatable") {

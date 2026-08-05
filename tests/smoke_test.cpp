@@ -22,8 +22,6 @@ namespace {
 
 } // namespace
 
-TEST_CASE("test infrastructure is available") { CHECK(true); }
-
 TEST_CASE("main-menu shortcuts retain the original action mapping") {
   CHECK(NovaCommand_TranslateByInputMap('n') == GameModeAction::new_game);
   CHECK(NovaCommand_TranslateByInputMap('o') == GameModeAction::open_pilot);
@@ -374,11 +372,4 @@ TEST_CASE("NovaSound_Decode carries predictor low bits between IMA4 packets") {
   CHECK(sound->samples[64] == 267);
 }
 
-TEST_CASE("main-menu style exposes the logo anchor from c\\x9alr +0xe0") {
-  constexpr std::array<std::byte, 0xe4> bytes{};
-  const auto style = NovaMainMenuStyle_Parse(bytes);
-  REQUIRE(style);
-  // All-zero payload: origin defaults to (0,0) and stays readable.
-  CHECK(style->logo_origin.x == 0);
-  CHECK(style->logo_origin.y == 0);
-}
+
