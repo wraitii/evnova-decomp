@@ -163,7 +163,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0042CD10,Stellar_UpdateStellarSprites,,0%,
 0x0042D890,Stellar_TickStellarDefenseBatteries,,0%,
 0x0042E160,Shot_UpdateImpactEffectSprites,,0%,
-0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,70,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); murk size scaling round(murk*0.9) clamp [2,29] faithful; stars drawn from real 16-frame 5x5 sprite sheet (sp.x9an 700)"
+0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,72,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); each star renders a random frame of the 16-frame 5px sheet (sp.x9an 700) at native 1:1 size; murk round(murk*0.9) value is a blend-mode sentinel (tinted/blobed), not a pixel size"
 0x0042EAC0,NovaUi_UpdateTravelTargetReticle,,0%,
 0x0042EDE0,NovaUi_UpdateShipTargetReticle,,0%,
 0x0042F1B0,Frame_UpdateScreenFlashTimers,,0%,

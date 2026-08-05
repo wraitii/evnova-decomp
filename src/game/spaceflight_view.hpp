@@ -84,7 +84,8 @@ class SpaceflightView {
   std::array<AmbientStar, 20> ambient_stars_{};
   // The ambient star-field artwork: sp\x9an spin descriptor resource 700 is a
   // 4x4 grid of 5x5px star tiles (16 distinct star shapes). Each particle
-  // renders one of these frames, scaled by the system murk (see star_size_).
+  // renders one of these frames at native 1:1 size (the original's murk-derived
+  // +0xa2..\x0aa8 values are blend-mode sentinels, not pixel sizes).
   // Ghidra: DAT_00593efc built by Spin_ReadDescriptor(700,..), frame count at
   // +0x54 = tiles_x * tiles_y.
   struct StarFieldSheet {
@@ -94,10 +95,6 @@ class SpaceflightView {
     int tile_height = 0;  // 5
   };
   StarFieldSheet star_field_;
-  // Star-field visual size in px; the original sizes each star sprite by 0x20
-  // (=32) when SystemDef.murk == 0, else round(murk*0.9) clamped to [2,29]
-  // (Ghidra Frame_UpdateViewportWrapBackgroundSprites, scale _DAT_005753c0).
-  int star_size_ = 32;
   // Unrotated per-frame ship textures plus rotation metadata.
   struct ShipSprite {
     std::vector<std::unique_ptr<class SdlTexture>> frames;

@@ -325,8 +325,8 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 // NovaRender_SetSystemSpaceBackgroundColor tint, then Frame_UpdateViewportWrapBackgroundSprites
 // (+ the sprite-world draw in Frame_SpaceflightLoop scope 2) renders the stars.
 // Each star draws its randomly-chosen frame of the 16-frame star-field sprite
-// sheet (sp\x9an 700, 4x4 grid of 5x5 tiles), scaled to the murk-derived
-// star_size_; a plain filled rect stands in only if the sheet cannot load.
+// sheet (sp\x9an 700, 4x4 grid of 5x5 tiles) at native 1:1 size; a small point
+// stands in only if the sheet cannot load.
 void SpaceflightView::DrawBackground(SdlPlatform &platform,
                                      const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
@@ -342,26 +342,16 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   SDL_SetRenderDrawColor(renderer, bg_r, bg_g, bg_b, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
-  // Star size: the original sizes each star sprite by 0x20 (32) when murk==0,
-  // else scales by round(murk * 0.9), clamped to [2,29]. Mirrors
-  // Frame_UpdateViewportWrapBackgroundSprites (gh.data _DAT_005753c0 = 0.9).
-  std::int16_t star = 32;
-  if (sys && sys->murk != 0) {
-    star = static_cast<std::int16_t>(
-        std::round(static_cast<float>(sys->murk) * 0.9F));
-    if (star > 29) star = 29;
-    if (star < 2) star = 2;
-  }
-  star_size_ = star;
-
   // Ambient star particles, wrapped around the current viewport (Ghidra
   // Frame_UpdateViewportWrapBackgroundSprites relocates an off-edge particle to
   // the opposite edge). When murk hides them we already cleared on spawn, so
-  // nothing is drawn. Otherwise each active star is drawn from its frame of the
-  // 5px star-field sprite sheet (sp\x9an 700), scaled up to the murk-derived
-  // star_size_, reproducing the original's per-frame sprite rendering.
+  // nothing is drawn.
+  // Each star is one tile of the 5px star-field sprite sheet (sp\x9an 700)
+  // drawn at its native pixel size. The 0x20 / murk-derived value the ORIGINAL
+  // writes into the sprite's +0xa2..0xa8 fields is a BLEND-CODE sentinel (0x20
+  // = raw/tinted-raw blit; round(murk*0.9) in [2,29] selects a hazy tinted/
+  // indexed blend), not a pixel dimension - so each star stays ~5px regardless.
   const StarFieldSheet *sheet = EnsureStarFieldSheet(platform);
-  const float dst_size = static_cast<float>(star_size_);
   for (const auto &s : ambient_stars_) {
     if (!s.active) {
       continue;
@@ -377,18 +367,17 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
       const int frame_idx =
           std::clamp(s.frame, 0, sheet->frame_count - 1);
       const auto &texture = sheet->frames[static_cast<std::size_t>(frame_idx)];
-      const SDL_FRect dest{wx - dst_size / 2.0F, wy - dst_size / 2.0F,
-                           dst_size, dst_size};
+      // Native tile size: draw the 5x5 star 1:1, centred on its position.
+      const float tw = static_cast<float>(sheet->tile_width);
+      const float th = static_cast<float>(sheet->tile_height);
+      const SDL_FRect dest{wx - tw / 2.0F, wy - th / 2.0F, tw, th};
       SDL_RenderTexture(renderer, texture->get(), nullptr, &dest);
       continue;
     }
 
-    // Fallback when the star-field sheet is unavailable: a small bright point
-    // sized off star_size_ (the original scales each star sprite by the same
-    // murk-derived value).
-    const SDL_FRect r{wx - dst_size * 0.5F, wy - dst_size * 0.5F, dst_size,
-                      dst_size};
-    SDL_RenderFillRect(renderer, &r);
+    // Fallback when the star-field sheet is unavailable: a small single-pixel
+    // point (matches a 5px sprite scaled for the 400px viewport).
+    SDL_RenderPoint(renderer, wx, wy);
   }
 }
 
