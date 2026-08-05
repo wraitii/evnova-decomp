@@ -20,12 +20,15 @@
 // (601/603/605/606) and the splash PICTs.
 
 // Resource type codes as stored in resource.map records (big-endian FourCCs).
-constexpr std::uint32_t kResourceTypeSprites = 0x7370956e;   // "sp\x95n"
-constexpr std::uint32_t kResourceTypeColors = 0x639a6c72;    // "c\x9alr"
-constexpr std::uint32_t kResourceTypeRleSheet8 = 0x726c9138; // "rl\x9138" (8-bit sheets)
-constexpr std::uint32_t kResourceTypeRleSheet16 = 0x726c9144;// "rl\x91D" (16-bit sheets)
-constexpr std::uint32_t kResourceTypePict = 0x50494354;      // "PICT"
-constexpr std::uint32_t kResourceTypeSnd = 0x736e6420;      // "snd " (AIFF-style sounds)
+constexpr std::uint32_t kResourceTypeSprites = 0x7370956e; // "sp\x95n"
+constexpr std::uint32_t kResourceTypeColors = 0x639a6c72;  // "c\x9alr"
+constexpr std::uint32_t kResourceTypeRleSheet8 =
+    0x726c9138; // "rl\x9138" (8-bit sheets)
+constexpr std::uint32_t kResourceTypeRleSheet16 =
+    0x726c9144; // "rl\x91D" (16-bit sheets)
+constexpr std::uint32_t kResourceTypePict = 0x50494354; // "PICT"
+constexpr std::uint32_t kResourceTypeSnd =
+    0x736e6420; // "snd " (AIFF-style sounds)
 
 // Ghidra: FUN_004ce250 + FUN_004cdfa0 (resource lookup by type + id). Returns
 // the raw resource payload; the first archive holding a matching record wins,
@@ -77,6 +80,12 @@ struct NovaMainMenuStyle {
   // Ghidra: DAT_007d2524/26 loaded from c\x9alr +0xe0; the main-screen logo
   // (sp\x95n 606) anchor in the 1024x768 backdrop space.
   NovaMenuPoint logo_origin{};
+  // Ghidra: c\x9alr +0xe4; sp\x95n 607 is the small center preview whose
+  // frames correspond to the six menu actions plus one idle frame.
+  NovaMenuPoint center_preview_origin{};
+  // Ghidra: c\x9alr +0xe8/+0xec/+0xf0; sp\x95n 608-610 are the three
+  // pre-rendered horizontal reveal strips behind the two button columns.
+  std::array<NovaMenuPoint, 3> row_reveal_origins{};
 };
 
 [[nodiscard]] std::optional<NovaSpriteDefinition>
@@ -107,10 +116,10 @@ NovaResource_LoadSndData(std::uint16_t resource_id);
 // starts at that offset + 0x16. The game expands each 8-bit sample to 16-bit
 // by (v + 0x80) | (v + 0x80) << 8 (a quirk preserved for fidelity).
 //
-// TODO(decomp): the 'NONE' form stores no sample rate; it plays at the mixer
-// output rate (44100 Hz on present-day audio hardware, per the waveOut
-// device-capability derivation in FUN_00507820/FUN_00507d0b). The ima4/AIFC
-// forms are not implemented yet and return std::nullopt.
+// The classic header's 16.16 sample rate is preserved (600/601 use about
+// 11127 Hz). The format-1 extended form used by snd 602/603 contains mono Apple
+// IMA4 packets; those are decoded to PCM here because the original delegated
+// them to its platform audio backend. Other AIFC forms remain unsupported.
 [[nodiscard]] std::optional<NovaSoundData>
 NovaSound_Decode(std::span<const std::byte> resource_data);
 

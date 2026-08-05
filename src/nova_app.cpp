@@ -1,6 +1,8 @@
 #include "nova_app.hpp"
 
 #include "brgr_archive.hpp"
+#include "game/new_pilot_flow.hpp"
+#include "game/spaceflight.hpp"
 #include "log.hpp"
 #include "pict_image.hpp"
 #include "rle_sprite_sheet.hpp"
@@ -35,8 +37,17 @@ constexpr float kFallbackMenuHeight = 24.0F;
 constexpr float kFallbackMenuGap = 8.0F;
 constexpr float kFallbackLogoOriginX = 191.0F;
 constexpr float kFallbackLogoOriginY = 162.0F;
+constexpr NovaMenuPoint kFallbackCenterPreviewOrigin{.x = 444, .y = 465};
+constexpr std::array<NovaMenuPoint, 3> kFallbackRowRevealOrigins{
+    NovaMenuPoint{.x = 343, .y = 399},
+    NovaMenuPoint{.x = 337, .y = 462},
+    NovaMenuPoint{.x = 337, .y = 526},
+};
 constexpr std::uint64_t kLoadingSplashDurationMs = 850;
 constexpr std::uint64_t kStartupSplashDurationMs = 1'850;
+// Keep authored menu animation independent of the host display's vsync. The
+// original presentation was effectively paced at roughly 60 Hz.
+constexpr std::uint64_t kMenuAnimationFrameDurationMs = 16;
 
 [[nodiscard]] SDL_FRect MenuRect(const NovaRuntime &runtime,
                                  std::size_t index) {
@@ -95,37 +106,67 @@ LoadMenuSpriteAsset(SDL_Renderer *renderer,
   return asset;
 }
 
-// Slices the main-screen logo sheet PICT 0x1f4a (a 7-frame vertical stack of
-// 654x209 tiles, matching sp\x95n 606) into one SDL texture per frame.
+// Slices a vertically stacked PICT sprite resource into SDL textures. The
+// title animation (606) and row reveals (608-610) all use this layout.
 [[nodiscard]] std::vector<std::unique_ptr<SdlTexture>>
-LoadMenuLogoFrames(SDL_Renderer *renderer, const PictImage &pict) {
-  constexpr int kLogoFrameHeight = 209;
-  constexpr int kLogoFrameCount = 7;
-  if (pict.width <= 0 ||
-      pict.height < kLogoFrameHeight * kLogoFrameCount ||
+LoadStackedPictFrames(SDL_Renderer *renderer, const PictImage &pict,
+                      const NovaSpriteDefinition &definition) {
+  if (definition.tiles_x != 1 || definition.tiles_y == 0 ||
+      pict.width != definition.tile_width ||
+      pict.height < static_cast<int>(definition.tile_height) *
+                        static_cast<int>(definition.tiles_y) ||
       pict.rgba_pixels.size() <
           static_cast<std::size_t>(pict.width) *
-              static_cast<std::size_t>(kLogoFrameHeight * kLogoFrameCount) *
-              4) {
+              static_cast<std::size_t>(definition.tile_height) *
+              static_cast<std::size_t>(definition.tiles_y) * 4) {
     return {};
   }
 
   std::vector<std::unique_ptr<SdlTexture>> textures;
-  textures.reserve(kLogoFrameCount);
-  for (int frame = 0; frame < kLogoFrameCount; ++frame) {
+  textures.reserve(definition.tiles_y);
+  for (std::size_t frame = 0; frame < definition.tiles_y; ++frame) {
     const auto pixels = std::span<const std::uint8_t>{
         pict.rgba_pixels.data() +
-            static_cast<std::size_t>(frame) * kLogoFrameHeight *
+            frame * static_cast<std::size_t>(definition.tile_height) *
                 static_cast<std::size_t>(pict.width) * 4,
-        static_cast<std::size_t>(pict.width) * kLogoFrameHeight * 4};
-    auto texture =
-        SdlTexture::Create(renderer, pict.width, kLogoFrameHeight, pixels);
+        static_cast<std::size_t>(pict.width) * definition.tile_height * 4};
+    auto texture = SdlTexture::Create(renderer, pict.width,
+                                      definition.tile_height, pixels);
     if (!texture) {
       return {};
     }
     textures.push_back(std::move(texture));
   }
   return textures;
+}
+
+[[nodiscard]] std::vector<std::unique_ptr<SdlTexture>>
+LoadPictSpriteFrames(SDL_Renderer *renderer,
+                     const NovaSpriteDefinition &definition) {
+  const auto resource_data =
+      NovaResource_Load(kResourceTypePict, definition.sprites_resource_id);
+  if (!resource_data) {
+    return {};
+  }
+  const auto pict = Resource_LoadPictAsImage(*resource_data);
+  if (!pict) {
+    return {};
+  }
+  return LoadStackedPictFrames(renderer, *pict, definition);
+}
+
+[[nodiscard]] bool MenuRowRevealed(const NovaRuntime &runtime,
+                                   std::size_t row) {
+  return row < runtime.main_menu_row_reveal_textures.size() &&
+         (runtime.main_menu_row_reveal_textures[row].empty() ||
+          runtime.menu_row_reveal_counters[row] >=
+              static_cast<int>(
+                  runtime.main_menu_row_reveal_textures[row].size()));
+}
+
+[[nodiscard]] bool MenuEntranceComplete(const NovaRuntime &runtime) {
+  return MenuRowRevealed(runtime, 0) && MenuRowRevealed(runtime, 1) &&
+         MenuRowRevealed(runtime, 2);
 }
 
 [[nodiscard]] bool MenuSpriteContainsOpaquePixel(const NovaRuntime &runtime,
@@ -293,6 +334,93 @@ void PresentSplashTexture(SDL_Renderer *renderer, SDL_Texture *texture) {
   SDL_RenderTexture(renderer, texture, nullptr, &destination);
 }
 
+void InitializeMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
+  runtime.menu_entrance_initialized = true;
+  runtime.menu_top_animation_frame = 0;
+  runtime.next_menu_top_animation_ms = now_ms + kMenuAnimationFrameDurationMs;
+  runtime.next_menu_reveal_frame_ms = now_ms;
+  runtime.menu_center_preview_frame = 6;
+  runtime.menu_center_preview_intensity = 0;
+
+  int counter = -1;
+  for (std::size_t row = 0; row < runtime.menu_row_reveal_counters.size();
+       ++row) {
+    runtime.menu_row_reveal_counters[row] = counter;
+    // Ghidra NovaHud_UpdateLayoutState: each subsequent strip starts half the
+    // preceding strip's frame count behind the prior counter (0.5 multiplier
+    // at DAT_00575938).
+    if (row + 1 < runtime.menu_row_reveal_counters.size()) {
+      const auto frame_count =
+          runtime.main_menu_row_reveal_textures[row].size();
+      const auto stagger =
+          static_cast<int>(std::lround(static_cast<double>(frame_count) * 0.5));
+      counter -= stagger;
+    }
+  }
+}
+
+void UpdateMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
+  if (!runtime.menu_entrance_initialized) {
+    InitializeMenuEntrance(runtime, now_ms);
+  }
+
+  if (runtime.main_menu_logo_textures.size() > 1 &&
+      now_ms >= runtime.next_menu_top_animation_ms) {
+    const auto choice_count = runtime.main_menu_logo_textures.size() - 1;
+    const auto advance = 1 + static_cast<std::size_t>(now_ms % choice_count);
+    runtime.menu_top_animation_frame =
+        (runtime.menu_top_animation_frame + advance) %
+        runtime.main_menu_logo_textures.size();
+    runtime.next_menu_top_animation_ms = now_ms + kMenuAnimationFrameDurationMs;
+  }
+
+  if (now_ms >= runtime.next_menu_reveal_frame_ms) {
+    runtime.next_menu_reveal_frame_ms = now_ms + kMenuAnimationFrameDurationMs;
+    for (std::size_t row = 0; row < runtime.menu_row_reveal_counters.size();
+         ++row) {
+      const auto frame_count =
+          static_cast<int>(runtime.main_menu_row_reveal_textures[row].size());
+      if (frame_count == 0 ||
+          runtime.menu_row_reveal_counters[row] >= frame_count) {
+        continue;
+      }
+      ++runtime.menu_row_reveal_counters[row];
+      if (runtime.menu_row_reveal_counters[row] == 0 &&
+          runtime.menu_reveal_start_sound) {
+        runtime.audio.Play(*runtime.menu_reveal_start_sound);
+      }
+      if (runtime.menu_row_reveal_counters[row] == frame_count &&
+          runtime.menu_reveal_finish_sound) {
+        runtime.audio.Play(*runtime.menu_reveal_finish_sound);
+      }
+    }
+  }
+}
+
+void UpdateMenuCenterPreview(NovaRuntime &runtime) {
+  if (!runtime.main_menu_center_preview_asset ||
+      runtime.main_menu_center_preview_asset->textures.empty() ||
+      !MenuEntranceComplete(runtime)) {
+    runtime.menu_center_preview_intensity = 0;
+    return;
+  }
+
+  const auto &textures = runtime.main_menu_center_preview_asset->textures;
+  const auto idle_frame = textures.size() - 1;
+  const auto desired_frame =
+      runtime.hovered_action ? static_cast<std::size_t>(*runtime.hovered_action)
+                             : idle_frame;
+  if (runtime.menu_center_preview_frame == desired_frame) {
+    runtime.menu_center_preview_intensity = static_cast<std::uint8_t>(
+        std::min<int>(32, runtime.menu_center_preview_intensity + 4));
+  } else if (runtime.menu_center_preview_intensity > 0) {
+    runtime.menu_center_preview_intensity = static_cast<std::uint8_t>(
+        std::max<int>(0, runtime.menu_center_preview_intensity - 4));
+  } else {
+    runtime.menu_center_preview_frame = desired_frame;
+  }
+}
+
 } // namespace
 
 // Ghidra: 0x00503f30 NovaProgramEntry
@@ -399,23 +527,36 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
       NovaLog::Todo("main-menu backdrop PICT 0x1f40 failed to decode");
     }
   }
-  if (const auto logo_data = NovaResource_LoadMainMenuLogoData()) {
-    if (const auto pict = Resource_LoadPictAsImage(*logo_data)) {
-      runtime.main_menu_logo_textures =
-          LoadMenuLogoFrames(runtime.platform.renderer(), *pict);
-      if (runtime.main_menu_logo_textures.empty()) {
-        NovaLog::Error("main-menu logo PICT 0x1f4a decoded but SDL texture "
-                       "upload failed");
+  if (const auto definition = NovaResource_LoadMainMenuSpriteDefinition(606)) {
+    runtime.main_menu_logo_textures =
+        LoadPictSpriteFrames(runtime.platform.renderer(), *definition);
+    if (runtime.main_menu_logo_textures.empty()) {
+      NovaLog::Todo("main-menu top animation sp\x95n 606 failed to load");
+    }
+  }
+  if (const auto definition = NovaResource_LoadMainMenuSpriteDefinition(607)) {
+    runtime.main_menu_center_preview_asset =
+        LoadMenuSpriteAsset(runtime.platform.renderer(), *definition);
+    if (!runtime.main_menu_center_preview_asset) {
+      NovaLog::Todo("main-menu center preview sp\x95n 607 failed to load");
+    }
+  }
+  for (std::size_t row = 0; row < runtime.main_menu_row_reveal_textures.size();
+       ++row) {
+    const auto sprite_id = static_cast<std::uint16_t>(608 + row);
+    if (const auto definition =
+            NovaResource_LoadMainMenuSpriteDefinition(sprite_id)) {
+      runtime.main_menu_row_reveal_textures[row] =
+          LoadPictSpriteFrames(runtime.platform.renderer(), *definition);
+      if (runtime.main_menu_row_reveal_textures[row].empty()) {
+        NovaLog::Todo("main-menu row reveal sp\x95n {} failed to load",
+                      sprite_id);
       }
-    } else {
-      NovaLog::Todo("main-menu logo PICT 0x1f4a failed to decode");
     }
   }
   // Audio: open the SDL output device and preload the main-menu feedback
-  // blips. Hover = "snd " id 600, select = "snd " id 601 (the first two of
-  // the transition/ambience family 600..603 loaded by Ghidra
-  // NovaAudio_PreloadTransitionEffects at 0x0048b250; NovaHud_TrackFocusHoverIndex
-  // queues handle DAT_007d24b8[0] == 600 on hover).
+  // effects. 600/601 mark focus entry/exit. Frame_TickTimerDecayAndEffects
+  // queues 602 when each row reveal starts and 603 when it completes.
   const auto load_menu_sound = [](std::uint16_t sound_id) {
     if (const auto resource = NovaResource_LoadSndData(sound_id)) {
       if (auto decoded = NovaSound_Decode(*resource)) {
@@ -427,20 +568,24 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
     }
     return std::optional<NovaSoundData>{};
   };
-  runtime.menu_hover_sound = load_menu_sound(600);
-  runtime.menu_select_sound = load_menu_sound(601);
+  runtime.menu_focus_enter_sound = load_menu_sound(600);
+  runtime.menu_focus_exit_sound = load_menu_sound(601);
+  runtime.menu_reveal_start_sound = load_menu_sound(602);
+  runtime.menu_reveal_finish_sound = load_menu_sound(603);
   if (!runtime.audio.Initialize()) {
     NovaLog::Warn("continuing without audio (menu sounds are silent)");
   }
 
   // Background music. The shipped bass track is the MP3 in the Nova Files
-  // folder (the original streams a :Music:SongNN path through a codec; SDL3_mixer
-  // decodes the MP3 for us). The music device/format is set up here, matching
-  // NovaAudio_Initialize(8,0) running before the splash frames in the original;
-  // Play() is deferred until the main menu is entered (see NovaMainLoop_UpdateFrame).
+  // folder (the original streams a :Music:SongNN path through a codec;
+  // SDL3_mixer decodes the MP3 for us). The music device/format is set up here,
+  // matching NovaAudio_Initialize(8,0) running before the splash frames in the
+  // original; Play() is deferred until the second splash becomes active, then
+  // the same stream carries through into the main menu.
   if (!runtime.music.Initialize()) {
     NovaLog::Warn("continuing without background music (menu bass is silent)");
-  } else if (const auto music_path = NovaResource_LocateFile("Nova Music.mp3")) {
+  } else if (const auto music_path =
+                 NovaResource_LocateFile("Nova Music.mp3")) {
     if (runtime.music.Load(music_path->string())) {
       // Keep the menu bass at a comfortable level under the SFX blips.
       runtime.music.SetVolume(0.8F);
@@ -481,39 +626,44 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
              now_ms - runtime.startup_phase_started_ms >=
                  kStartupSplashDurationMs) {
     runtime.startup_phase = StartupPhase::main_menu;
+    runtime.startup_phase_started_ms = now_ms;
     runtime.next_menu_prompt_toggle_ms = now_ms + 650;
+    InitializeMenuEntrance(runtime, now_ms);
+  }
+
+  // The menu bass begins with the second (Ambrosia) splash and is deliberately
+  // not restarted at main-menu entry, so playback carries across the boundary.
+  if (runtime.startup_phase != StartupPhase::loading_splash &&
+      !runtime.menu_music_started) {
+    runtime.menu_music_started = true;
+    runtime.music.Play();
   }
 
   if (runtime.startup_phase == StartupPhase::main_menu) {
-    // Start the menu bass the first time the main menu is entered (the
-    // original begins background playback as the menu becomes the active
-    // game state).
-    if (!runtime.menu_music_started) {
-      runtime.menu_music_started = true;
-      runtime.music.Play();
-    }
+    UpdateMenuEntrance(runtime, now_ms);
     runtime.hovered_action = NovaHud_TrackFocusHoverIndex(runtime);
+    UpdateMenuCenterPreview(runtime);
   } else {
     runtime.hovered_action.reset();
   }
 
-  // Play the hover blip only when the focus moves onto a (new) menu entry; the
-  // original queues it in NovaHud_TrackFocusHoverIndex when the hovered index
-  // transitions to a valid button (sound handle DAT_007d24b8[0] == "snd " 600).
-  if (runtime.hovered_action &&
-      runtime.hovered_action != runtime.previous_hovered_action) {
-    if (runtime.menu_hover_sound) {
-      runtime.audio.Play(*runtime.menu_hover_sound);
+  // Original focus transitions use handle 600 when entering a button and 601
+  // when leaving one. Moving directly between entries therefore plays 600.
+  if (runtime.hovered_action != runtime.previous_hovered_action) {
+    if (runtime.hovered_action && runtime.menu_focus_enter_sound) {
+      runtime.audio.Play(*runtime.menu_focus_enter_sound);
+    } else if (!runtime.hovered_action && runtime.previous_hovered_action &&
+               runtime.menu_focus_exit_sound) {
+      runtime.audio.Play(*runtime.menu_focus_exit_sound);
     }
   }
   runtime.previous_hovered_action = runtime.hovered_action;
 
   if (runtime.requested_action) {
-    // Menu action confirm blip ("snd " 601). Divergence: the original ties the
-    // confirm cue into each action-family flow; our placeholders dispatch it
-    // centrally so every menu selection has audible feedback.
-    if (runtime.menu_select_sound) {
-      runtime.audio.Play(*runtime.menu_select_sound);
+    // NovaAudio_PlayTransitionEffectsWait plays focus-in then focus-out around
+    // keyboard actions. Dispatch remains asynchronous in this SDL loop.
+    if (runtime.menu_focus_enter_sound) {
+      runtime.audio.Play(*runtime.menu_focus_enter_sound);
     }
     NovaGameMode_DispatchAction(runtime, *runtime.requested_action);
     runtime.requested_action.reset();
@@ -556,22 +706,24 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
 
   SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
 
-  // Main-screen logo (sp\x95n 606, PICT 0x1f4a): the animated "ESCAPE
-  // VELOCITY: NOVA" title, drawn at the c\x9alr +0xe0 origin (191,162 in the
-  // 1024x768 backdrop space). Frame 0 is the resting logo; the original
-  // cycles frames off the menu blink timer (DAT_007d2514).
+  // Top background animation (sp\x95n 606, PICT 0x1f4a), drawn at c\x9alr
+  // +0xe0. Frame_TickTimerDecayAndEffects selects a different random frame on
+  // its short animation timer; UpdateMenuEntrance maintains the equivalent
+  // no-repeat progression.
   if (!runtime.main_menu_logo_textures.empty()) {
     const float logo_scale = kMenuCoordinateScale;
-    const auto &logo_texture = runtime.main_menu_logo_textures.front();
+    const auto frame = std::min(runtime.menu_top_animation_frame,
+                                runtime.main_menu_logo_textures.size() - 1);
+    const auto &logo_texture = runtime.main_menu_logo_textures[frame];
     float logo_width = 0.0F;
     float logo_height = 0.0F;
     SDL_GetTextureSize(logo_texture->get(), &logo_width, &logo_height);
-    const float logo_origin_x =
-        runtime.main_menu_style ? runtime.main_menu_style->logo_origin.x
-                                : kFallbackLogoOriginX;
-    const float logo_origin_y =
-        runtime.main_menu_style ? runtime.main_menu_style->logo_origin.y
-                                : kFallbackLogoOriginY;
+    const float logo_origin_x = runtime.main_menu_style
+                                    ? runtime.main_menu_style->logo_origin.x
+                                    : kFallbackLogoOriginX;
+    const float logo_origin_y = runtime.main_menu_style
+                                    ? runtime.main_menu_style->logo_origin.y
+                                    : kFallbackLogoOriginY;
     const SDL_FRect logo_destination{
         logo_origin_x * logo_scale,
         logo_origin_y * logo_scale,
@@ -586,9 +738,39 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
     DrawDebugTextCentered(renderer, 320.0F, 102.0F, "N O V A");
   }
 
+  // The original entrance does not interpolate the button sprites. It plays
+  // authored PICT strips 608-610 behind each pair, then replaces a completed
+  // strip with the two normal focus sprites for that row.
+  for (std::size_t row = 0; row < runtime.main_menu_row_reveal_textures.size();
+       ++row) {
+    const auto &textures = runtime.main_menu_row_reveal_textures[row];
+    const auto counter = runtime.menu_row_reveal_counters[row];
+    if (counter < 0 || counter >= static_cast<int>(textures.size()) ||
+        textures.empty()) {
+      continue;
+    }
+    const auto origin = runtime.main_menu_style
+                            ? runtime.main_menu_style->row_reveal_origins[row]
+                            : kFallbackRowRevealOrigins[row];
+    float width = 0.0F;
+    float height = 0.0F;
+    SDL_GetTextureSize(textures[static_cast<std::size_t>(counter)]->get(),
+                       &width, &height);
+    const SDL_FRect destination{
+        static_cast<float>(origin.x) * kMenuCoordinateScale,
+        static_cast<float>(origin.y) * kMenuCoordinateScale,
+        width * kMenuCoordinateScale,
+        height * kMenuCoordinateScale,
+    };
+    SDL_RenderTexture(renderer,
+                      textures[static_cast<std::size_t>(counter)]->get(),
+                      nullptr, &destination);
+  }
+
   for (std::size_t index = 0; index < runtime.main_menu_sprite_assets.size();
        ++index) {
-    if (!runtime.main_menu_sprite_assets[index]) {
+    if (!runtime.main_menu_sprite_assets[index] ||
+        !MenuRowRevealed(runtime, index % 3)) {
       continue;
     }
     const auto &asset = *runtime.main_menu_sprite_assets[index];
@@ -604,6 +786,9 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   }
 
   for (std::size_t index = 0; index < kMenuEntries.size(); ++index) {
+    if (!MenuRowRevealed(runtime, index % 3)) {
+      continue;
+    }
     const auto rect = MenuRect(runtime, index);
     const bool hovered = runtime.hovered_action == kMenuEntries[index].action;
     if (runtime.main_menu_sprite_assets[index]) {
@@ -631,14 +816,40 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
                         kMenuEntries[index].label.data());
   }
 
+  // Center preview (sp\x95n 607): frames 0-5 correspond to the menu actions,
+  // frame 6 is idle. The original fades the old frame out before switching.
+  if (runtime.main_menu_center_preview_asset &&
+      !runtime.main_menu_center_preview_asset->textures.empty() &&
+      runtime.menu_center_preview_intensity > 0) {
+    const auto &asset = *runtime.main_menu_center_preview_asset;
+    const auto frame =
+        std::min(runtime.menu_center_preview_frame, asset.textures.size() - 1);
+    const auto origin = runtime.main_menu_style
+                            ? runtime.main_menu_style->center_preview_origin
+                            : kFallbackCenterPreviewOrigin;
+    const SDL_FRect destination{
+        static_cast<float>(origin.x) * kMenuCoordinateScale,
+        static_cast<float>(origin.y) * kMenuCoordinateScale,
+        static_cast<float>(asset.sheet.width) * kMenuCoordinateScale,
+        static_cast<float>(asset.sheet.height) * kMenuCoordinateScale,
+    };
+    const auto alpha = static_cast<std::uint8_t>(
+        static_cast<unsigned>(runtime.menu_center_preview_intensity) * 255U /
+        32U);
+    SDL_SetTextureAlphaMod(asset.textures[frame]->get(), alpha);
+    SDL_RenderTexture(renderer, asset.textures[frame]->get(), nullptr,
+                      &destination);
+    SDL_SetTextureAlphaMod(asset.textures[frame]->get(), SDL_ALPHA_OPAQUE);
+  }
+
   // Only the pulsing "SELECT A COMMAND" prompt is drawn by the original idle
   // main menu (Ghidra 0x004873b0, string key 0x7d2/0x114). status_text is shown
   // underneath only when a menu action has produced feedback.
-  if (runtime.status_text) {
+  if (MenuEntranceComplete(runtime) && runtime.status_text) {
     SDL_SetRenderDrawColor(renderer, 159, 190, 227, SDL_ALPHA_OPAQUE);
     DrawDebugTextCentered(renderer, 320.0F, 370.0F, *runtime.status_text);
   }
-  if (runtime.menu_prompt_visible) {
+  if (MenuEntranceComplete(runtime) && runtime.menu_prompt_visible) {
     DrawDebugTextCentered(renderer, 320.0F, 394.0F, "SELECT A COMMAND");
   }
 
@@ -681,22 +892,54 @@ void NovaUi_PresentStartupSplashFrame(NovaRuntime &runtime) {
 // Ghidra: 0x00486ed0 NovaGameMode_DispatchAction
 void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
   switch (action) {
-  case GameModeAction::new_game:
-    runtime.status_text = "New Game flow is not reconstructed yet.";
+  case GameModeAction::new_game: {
+    // Ghidra: param_1 == 0. If a game is already active the original asks
+    // before discarding it; confirmation dialogs for an active pilot are not
+    // reconstructed yet, so the new-game flow below simply restarts.
+    if (runtime.game.game_active) {
+      NovaLog::Todo("confirm-discard before starting a new pilot with an "
+                    "active game is not reconstructed; starting fresh");
+    }
+    // Runs the modal new-pilot flow (naming, confirm, reset, scenario load,).
+    // On success the flow marks the game active and we return to the menu; the
+    // player then chooses ENTER SPACE to play (intro cinematic plays then).
+    if (game::NovaNewPilotFlow_Run(runtime.platform, runtime.game)) {
+      runtime.status_text = "New pilot created. Choose ENTER SPACE to fly.";
+    } else {
+      runtime.status_text = "New game cancelled.";
+    }
     break;
+  }
   case GameModeAction::open_pilot:
+    NovaLog::Todo("Open Pilot file dialog is not reconstructed.");
     runtime.status_text = "Open Pilot flow is not reconstructed yet.";
     break;
   case GameModeAction::quit:
     runtime.quit_requested = true;
     break;
-  case GameModeAction::enter_spaceflight:
-    runtime.status_text = "Spaceflight requires an active pilot.";
+  case GameModeAction::enter_spaceflight: {
+    // Ghidra: param_1 == 3. Run spaceflight only when there is an active,
+    // living pilot; otherwise show the error blip (an effect the placeholder
+    // build cannot show, so a status line is used instead).
+    const auto player_alive = runtime.game.player.is_active &&
+                              runtime.game.player.death_timer_active < 0.0F;
+    if (!runtime.game.game_active || !player_alive) {
+      runtime.status_text = "Spaceflight requires an active pilot.";
+      break;
+    }
+    // Blocking: plays the intro cinematic on first entry, then the in-game
+    // main loop, returning to the menu when the pilot exits. Mirrors
+    // Ship_RunSpaceflightMode being called inline from the dispatcher.
+    game::NovaSpaceflight_Run(runtime.platform, runtime.game);
+    runtime.status_text = "Returned from spaceflight.";
     break;
+  }
   case GameModeAction::preferences:
+    NovaLog::Todo("Preferences dialog is not reconstructed.");
     runtime.status_text = "Preferences dialog is not reconstructed yet.";
     break;
   case GameModeAction::starmap:
+    NovaLog::Todo("Star Map dialog requires system/route tables.");
     runtime.status_text = "Star Map requires an active pilot.";
     break;
   }
@@ -725,6 +968,9 @@ std::optional<GameModeAction>
 NovaHud_TrackFocusHoverIndex(const NovaRuntime &runtime) {
   const auto mouse_position = runtime.platform.mouse_position();
   for (std::size_t index = 0; index < kMenuEntries.size(); ++index) {
+    if (!MenuRowRevealed(runtime, index % 3)) {
+      continue;
+    }
     if (runtime.main_menu_sprite_assets[index]
             ? MenuSpriteContainsOpaquePixel(runtime, index, mouse_position)
             : Contains(MenuRect(runtime, index), mouse_position)) {

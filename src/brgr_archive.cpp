@@ -1,6 +1,7 @@
 #include "brgr_archive.hpp"
 #include "log.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <filesystem>
@@ -123,8 +124,7 @@ ParseArchive(const std::filesystem::path &path) {
   const auto entry_count =
       static_cast<std::size_t>(ReadLe32(archive.bytes, kBrgrBlobOffset + 8));
   const auto entries_begin = kBrgrBlobOffset + 12;
-  if (entry_count == 0 ||
-      entry_count > (blob_size - 12) / kBrgrEntrySize) {
+  if (entry_count == 0 || entry_count > (blob_size - 12) / kBrgrEntrySize) {
     NovaLog::Warn("BRGR archive has an invalid entry count: {}", path.string());
     return std::nullopt;
   }
@@ -134,8 +134,7 @@ ParseArchive(const std::filesystem::path &path) {
         static_cast<std::size_t>(ReadLe32(archive.bytes, entry_offset));
     const auto size =
         static_cast<std::size_t>(ReadLe32(archive.bytes, entry_offset + 4));
-    if (offset > archive.bytes.size() ||
-        size > archive.bytes.size() - offset) {
+    if (offset > archive.bytes.size() || size > archive.bytes.size() - offset) {
       NovaLog::Warn("BRGR archive has an out-of-bounds region: {}",
                     path.string());
       return std::nullopt;
@@ -156,8 +155,7 @@ ParseArchive(const std::filesystem::path &path) {
         static_cast<std::size_t>(ReadBe32(archive.bytes, entry.offset));
     const auto type_count =
         static_cast<std::size_t>(ReadBe32(archive.bytes, entry.offset + 4));
-    if (type_count == 0 || type_count > 500 ||
-        type_dir_offset > entry.size ||
+    if (type_count == 0 || type_count > 500 || type_dir_offset > entry.size ||
         type_dir_offset + type_count * kMapTypeEntrySize > entry.size) {
       continue;
     }
@@ -165,15 +163,13 @@ ParseArchive(const std::filesystem::path &path) {
       const auto type_entry_offset =
           entry.offset + type_dir_offset + type * kMapTypeEntrySize;
       const auto type_code = ReadBe32(archive.bytes, type_entry_offset);
-      const auto records_offset =
-          static_cast<std::size_t>(
-              ReadBe32(archive.bytes, type_entry_offset + 4));
-      const auto record_count =
-          static_cast<std::size_t>(
-              ReadBe32(archive.bytes, type_entry_offset + 8));
+      const auto records_offset = static_cast<std::size_t>(
+          ReadBe32(archive.bytes, type_entry_offset + 4));
+      const auto record_count = static_cast<std::size_t>(
+          ReadBe32(archive.bytes, type_entry_offset + 8));
       for (std::size_t record = 0; record < record_count; ++record) {
-        const auto record_offset = entry.offset + records_offset +
-                                   record * kMapRecordSize;
+        const auto record_offset =
+            entry.offset + records_offset + record * kMapRecordSize;
         if (record_offset + 0x0e > entry.offset + entry.size) {
           break;
         }
@@ -183,8 +179,7 @@ ParseArchive(const std::filesystem::path &path) {
         if (index == 0 || index - 1 >= archive.entries.size()) {
           continue;
         }
-        archive.records.push_back(
-            {type_code, resource_id, index - 1});
+        archive.records.push_back({type_code, resource_id, index - 1});
       }
     }
     return archive;
@@ -256,8 +251,8 @@ public:
   }
 
 private:
-  [[nodiscard]] std::vector<std::byte> Region(const LoadedArchive &archive,
-                                              const ResourceRecord &record) const {
+  [[nodiscard]] std::vector<std::byte>
+  Region(const LoadedArchive &archive, const ResourceRecord &record) const {
     const auto &entry = archive.entries[record.entry_index];
     return std::vector<std::byte>{
         archive.bytes.begin() + static_cast<std::ptrdiff_t>(entry.offset),
@@ -385,14 +380,29 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data) {
         .y = ReadBeI16(resource_data, 0xe2),
     };
   }
+  if (resource_data.size() >= 0xe8) {
+    style.center_preview_origin = NovaMenuPoint{
+        .x = ReadBeI16(resource_data, 0xe4),
+        .y = ReadBeI16(resource_data, 0xe6),
+    };
+  }
+  if (resource_data.size() >= 0xf4) {
+    for (std::size_t index = 0; index < style.row_reveal_origins.size();
+         ++index) {
+      const auto offset = 0xe8 + index * 4;
+      style.row_reveal_origins[index] = NovaMenuPoint{
+          .x = ReadBeI16(resource_data, offset),
+          .y = ReadBeI16(resource_data, offset + 2),
+      };
+    }
+  }
   return style;
 }
 
 std::optional<NovaMainMenuStyle> NovaResource_LoadMainMenuStyle() {
   // The game reads the first c\x9alr record (FUN_004ce2a0(0x639a6c72, 1)); in
   // Nova Graphics 3 that record's resource id is 0x80.
-  const auto resource_data =
-      NovaResource_LoadNthOfType(kResourceTypeColors, 1);
+  const auto resource_data = NovaResource_LoadNthOfType(kResourceTypeColors, 1);
   if (!resource_data) {
     NovaLog::Todo("main-menu c\\x9alr resource could not be located");
     return std::nullopt;
@@ -416,37 +426,132 @@ NovaResource_LoadSndData(std::uint16_t resource_id) {
 
 std::optional<NovaSoundData>
 NovaSound_Decode(std::span<const std::byte> resource_data) {
-  // The 'NONE' 8-bit menu blips use the 'snd ' container with first big-endian
-  // short == 2. FUN_004d6d30 scans a small table at byte offset 6 (8-byte
-  // stride: [2-byte rate marker][4-byte value]) for a rate marker 0x8051/0x8050
-  // and returns the matched value; that value is a sub-structure offset. In
-  // FUN_004d6e60 the cVar1 byte lives at that offset + 0x14 (== 0 selects the
-  // 'NONE' path) and the 8-bit sample data begins at offset + 0x16.
+  // FUN_004d6e60 accepts both classic format-2 'NONE' headers (menu focus
+  // ticks 600/601) and format-1 extended headers containing Apple IMA4
+  // packets (the row-reveal effects 602/603).
   const auto read_be16 = [resource_data](std::size_t offset) {
     if (offset + 2 > resource_data.size()) {
       return std::uint16_t{0};
     }
-    return static_cast<std::uint16_t>((std::to_integer<std::uint8_t>(resource_data[offset]) << 8U) |
-                                      std::to_integer<std::uint8_t>(resource_data[offset + 1]));
+    return static_cast<std::uint16_t>(
+        (std::to_integer<std::uint8_t>(resource_data[offset]) << 8U) |
+        std::to_integer<std::uint8_t>(resource_data[offset + 1]));
   };
   const auto read_be32 = [resource_data](std::size_t offset) {
     if (offset + 4 > resource_data.size()) {
       return std::uint32_t{0};
     }
-    return (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(resource_data[offset])) << 24U) |
-           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(resource_data[offset + 1])) << 16U) |
-           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(resource_data[offset + 2])) << 8U) |
-           static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(resource_data[offset + 3]));
+    return (static_cast<std::uint32_t>(
+                std::to_integer<std::uint8_t>(resource_data[offset]))
+            << 24U) |
+           (static_cast<std::uint32_t>(
+                std::to_integer<std::uint8_t>(resource_data[offset + 1]))
+            << 16U) |
+           (static_cast<std::uint32_t>(
+                std::to_integer<std::uint8_t>(resource_data[offset + 2]))
+            << 8U) |
+           static_cast<std::uint32_t>(
+               std::to_integer<std::uint8_t>(resource_data[offset + 3]));
   };
-  if (resource_data.size() < 0x22 || read_be16(0) != 2U) {
-    NovaLog::Todo("ima4/AIFC or other 'snd ' sound containers are not decoded yet");
+  if (resource_data.size() < 0x22) {
+    return std::nullopt;
+  }
+
+  if (read_be16(0) == 1U) {
+    // The format-1 command list used by 602/603 places the extended sound
+    // header at +0x14. Its sample payload begins 0x40 bytes later. Ghidra's
+    // FUN_004d6e60 recognizes the 0xfe header marker and 'ima4' FourCC, then
+    // leaves codec conversion to the platform audio backend. SDL consumes
+    // PCM, so decode the standard 34-byte Apple IMA4 packets here.
+    constexpr std::size_t kHeaderOffset = 0x14;
+    constexpr std::size_t kSamplesOffset = kHeaderOffset + 0x40;
+    constexpr std::size_t kPacketBytes = 34;
+    constexpr std::size_t kSamplesPerPacket = 64;
+    constexpr std::uint32_t kIma4 = 0x696d6134;
+    if (resource_data.size() < kSamplesOffset ||
+        read_be32(kHeaderOffset + 4) != 1U ||
+        std::to_integer<std::uint8_t>(resource_data[kHeaderOffset + 0x14]) !=
+            0xfeU ||
+        read_be32(kHeaderOffset + 0x28) != kIma4 ||
+        read_be16(kHeaderOffset + 0x3e) != 16U ||
+        (resource_data.size() - kSamplesOffset) % kPacketBytes != 0U) {
+      NovaLog::Todo("unsupported extended snd resource layout");
+      return std::nullopt;
+    }
+
+    constexpr std::array<int, 89> kStepTable{
+        7,     8,     9,     10,    11,    12,    13,    14,    16,    17,
+        19,    21,    23,    25,    28,    31,    34,    37,    41,    45,
+        50,    55,    60,    66,    73,    80,    88,    97,    107,   118,
+        130,   143,   157,   173,   190,   209,   230,   253,   279,   307,
+        337,   371,   408,   449,   494,   544,   598,   658,   724,   796,
+        876,   963,   1060,  1166,  1282,  1411,  1552,  1707,  1878,  2066,
+        2272,  2499,  2749,  3024,  3327,  3660,  4026,  4428,  4871,  5358,
+        5894,  6484,  7132,  7845,  8630,  9493,  10442, 11487, 12635, 13899,
+        15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767};
+    constexpr std::array<int, 16> kIndexAdjust{-1, -1, -1, -1, 2, 4, 6, 8,
+                                               -1, -1, -1, -1, 2, 4, 6, 8};
+
+    NovaSoundData sound{};
+    sound.channel_count = 1;
+    sound.sample_rate = static_cast<int>(read_be32(kHeaderOffset + 8) >> 16U);
+    if (sound.sample_rate <= 0) {
+      return std::nullopt;
+    }
+    const auto packet_count =
+        (resource_data.size() - kSamplesOffset) / kPacketBytes;
+    sound.samples.reserve(packet_count * kSamplesPerPacket);
+    int predictor = 0;
+    for (std::size_t packet = 0; packet < packet_count; ++packet) {
+      const auto packet_offset = kSamplesOffset + packet * kPacketBytes;
+      const auto preamble = read_be16(packet_offset);
+      // QuickTime replaces the predictor's high nine bits from each packet
+      // preamble while preserving the prior packet's low seven bits. Those
+      // seven preamble bits separately select the new step-table index.
+      predictor = static_cast<std::int16_t>((preamble & 0xff80U) |
+                                            (predictor & 0x007f));
+      int step_index = std::min<int>(preamble & 0x7fU, 88);
+      for (std::size_t byte_index = 2; byte_index < kPacketBytes;
+           ++byte_index) {
+        const auto packed = std::to_integer<std::uint8_t>(
+            resource_data[packet_offset + byte_index]);
+        for (const int shift : {0, 4}) {
+          const int nibble = (packed >> shift) & 0x0f;
+          const int step = kStepTable[static_cast<std::size_t>(step_index)];
+          int difference = step >> 3;
+          if ((nibble & 1) != 0) {
+            difference += step >> 2;
+          }
+          if ((nibble & 2) != 0) {
+            difference += step >> 1;
+          }
+          if ((nibble & 4) != 0) {
+            difference += step;
+          }
+          predictor += (nibble & 8) != 0 ? -difference : difference;
+          predictor = std::clamp(predictor, -32768, 32767);
+          step_index = std::clamp(
+              step_index + kIndexAdjust[static_cast<std::size_t>(nibble)], 0,
+              88);
+          sound.samples.push_back(static_cast<std::int16_t>(predictor));
+        }
+      }
+    }
+    NovaLog::Debug("decoded Apple IMA4 snd with {} samples at {} Hz",
+                   sound.samples.size(), sound.sample_rate);
+    return sound;
+  }
+
+  if (read_be16(0) != 2U) {
+    NovaLog::Todo("unsupported snd resource container version");
     return std::nullopt;
   }
 
   // FUN_004d6d30 format-2 table scan -> sub-structure offset.
   const auto entry_count = read_be16(4);
   std::size_t data_offset = 0;
-  for (std::size_t entry = 0; entry < static_cast<std::size_t>(entry_count); ++entry) {
+  for (std::size_t entry = 0; entry < static_cast<std::size_t>(entry_count);
+       ++entry) {
     const auto table_pos = 6 + entry * 8;
     if (table_pos + 8 > resource_data.size()) {
       break;
@@ -460,19 +565,25 @@ NovaSound_Decode(std::span<const std::byte> resource_data) {
 
   // cVar1 == 0 selects the 'NONE' 8-bit mono path (FUN_004d6e60).
   if (data_offset + 0x14 >= resource_data.size() ||
-      std::to_integer<std::uint8_t>(resource_data[data_offset + 0x14]) != 0x00) {
-    NovaLog::Todo("snd \x20sub-formats other than 'NONE' 8-bit are not decoded yet");
+      std::to_integer<std::uint8_t>(resource_data[data_offset + 0x14]) !=
+          0x00) {
+    NovaLog::Todo(
+        "snd \x20sub-formats other than 'NONE' 8-bit are not decoded yet");
     return std::nullopt;
   }
 
   const std::size_t data_start = data_offset + 0x16;
   NovaSoundData sound{};
   sound.channel_count = 1;
-  // The 'NONE' 8-bit form stores no sample rate. Playback runs at the mixer
-  // output rate, which FUN_00507820/FUN_00507d0b derive from the waveOut
-  // device: 0xAC44<<16 -> 44100 Hz on modern devices (22050/11025 on older
-  // audio hardware). We use 44100, matching a present-day device.
-  sound.sample_rate = 44100;
+  // Standard SoundHeader.sampleRate at +8 is an unsigned 16.16 fixed-point
+  // value. The shipped focus ticks use the classic Macintosh rate
+  // 0x2b7745d1 (about 11127.27 Hz); forcing them to the 44.1 kHz output rate
+  // makes them several times too short and pitches them up.
+  const auto fixed_sample_rate = read_be32(data_offset + 8);
+  sound.sample_rate = static_cast<int>((fixed_sample_rate + 0x8000U) >> 16U);
+  if (sound.sample_rate <= 0) {
+    return std::nullopt;
+  }
   sound.samples.reserve(resource_data.size() - data_start);
   // Ghidra FUN_004d6900: *out = (v + 0x80) | (v + 0x80) << 8, truncated to
   // 16 bits. Reconstruct the same bit pattern exactly (full-width biased
@@ -497,8 +608,7 @@ NovaResource_LoadPictData(std::uint16_t resource_id) {
   return resource_data;
 }
 
-std::optional<std::vector<std::byte>>
-NovaResource_LoadMainMenuBackdropData() {
+std::optional<std::vector<std::byte>> NovaResource_LoadMainMenuBackdropData() {
   return NovaResource_LoadPictData(0x1f40);
 }
 

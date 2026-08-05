@@ -69,6 +69,43 @@ bool SdlPlatform::Initialize() {
 
 SDL_Renderer *SdlPlatform::renderer() const { return renderer_.get(); }
 
+std::optional<TextInput> SdlPlatform::PollTextEvent() {
+  SDL_Event event;
+  while (SDL_PollEvent(&event)) {
+    if (event.type == SDL_EVENT_QUIT) {
+      quit_requested_ = true;
+      continue;
+    }
+    if (event.type == SDL_EVENT_MOUSE_MOTION) {
+      SDL_RenderCoordinatesFromWindow(renderer_.get(), event.motion.x,
+                                      event.motion.y, &mouse_position_.x,
+                                      &mouse_position_.y);
+      continue;
+    }
+    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+      switch (event.key.key) {
+      case SDLK_RETURN:
+      case SDLK_KP_ENTER:
+        return TextInput{TextKey::enter};
+      case SDLK_ESCAPE:
+        return TextInput{TextKey::escape};
+      case SDLK_BACKSPACE:
+        return TextInput{TextKey::backspace};
+      default:
+        break;
+      }
+      // Any printable key symbols map to their ASCII value: letters and digits
+      // use ASCII syms, while combined punctuation is approximated by its
+      // scanned key's symbol (enough for callsign entry).
+      const auto sym = static_cast<int>(event.key.key);
+      if (sym >= 32 && sym < 127) {
+        return TextInput{TextKey::character, static_cast<char>(sym)};
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<char> SdlPlatform::PollCommandEvent() {
   SDL_Event event;
   while (SDL_PollEvent(&event)) {

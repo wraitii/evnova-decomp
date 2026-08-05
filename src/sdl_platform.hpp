@@ -6,6 +6,17 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
+
+// Key a modal text/input dialog can act on. The menu's command channel only
+// reports a fixed action-key set, so dialogs read raw editable keys through a
+// separate channel.
+enum class TextKey { none, character, enter, escape, backspace };
+
+struct TextInput {
+  TextKey key = TextKey::none;
+  char character = '\0'; // valid when key == TextKey::character
+};
 
 class SdlTexture {
 public:
@@ -35,6 +46,11 @@ public:
   [[nodiscard]] bool Initialize();
   [[nodiscard]] SDL_Renderer *renderer() const;
   [[nodiscard]] std::optional<char> PollCommandEvent();
+  // Raw editable-key event for modal dialogs. Enter/Escape/Backspace are
+  // returned as distinct TextKey values; otherwise returns the translated
+  // printable ASCII character (shifted key case). Quit still sets
+  // quit_requested_.
+  [[nodiscard]] std::optional<TextInput> PollTextEvent();
   [[nodiscard]] bool quit_requested() const;
   [[nodiscard]] std::uint64_t ticks_ms() const;
   [[nodiscard]] SDL_FPoint mouse_position() const;

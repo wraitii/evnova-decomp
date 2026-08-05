@@ -1,6 +1,7 @@
 #pragma once
 
 #include "brgr_archive.hpp"
+#include "game/game_state.hpp"
 #include "rle_sprite_sheet.hpp"
 #include "sdl_audio.hpp"
 #include "sdl_music.hpp"
@@ -39,13 +40,16 @@ struct NovaRuntime {
   SdlAudio audio;
   // Background/menu bass stream (SDL3_mixer), separate logical device.
   SdlMusic music;
-  // True once the main-menu bass has been started (on first reaching the
-  // main-menu phase).
+  // True once the menu bass has started on entry to the second startup splash;
+  // the same stream continues into the main-menu phase.
   bool menu_music_started = false;
-  // Decoded main-menu feedback sounds: hover blip (id 600) and select blip
-  // (id 601). Loaded once during session startup.
-  std::optional<NovaSoundData> menu_hover_sound;
-  std::optional<NovaSoundData> menu_select_sound;
+  // Ghidra: NovaAudio_PreloadTransitionEffects loads snd 600..603. The first
+  // pair marks focus entry/exit; the second pair accompanies each row's
+  // pre-rendered entrance reveal.
+  std::optional<NovaSoundData> menu_focus_enter_sound;
+  std::optional<NovaSoundData> menu_focus_exit_sound;
+  std::optional<NovaSoundData> menu_reveal_start_sound;
+  std::optional<NovaSoundData> menu_reveal_finish_sound;
   std::unique_ptr<SdlTexture> loading_splash_texture;
   std::unique_ptr<SdlTexture> startup_splash_texture;
   // Ghidra: title-screen backdrop PICT 0x1f40 (1024x768 ship-interior scene)
@@ -53,6 +57,12 @@ struct NovaRuntime {
   std::unique_ptr<SdlTexture> main_menu_backdrop_texture;
   // Ghidra: sp\x95n 606 logo sheet PICT 0x1f4a (7 frames of 654x209).
   std::vector<std::unique_ptr<SdlTexture>> main_menu_logo_textures;
+  // Ghidra: sp\x95n 607, one center-preview frame per menu action plus idle.
+  std::optional<NovaMenuSpriteAsset> main_menu_center_preview_asset;
+  // Ghidra: sp\x95n 608-610, three PICT animation strips that reveal the
+  // paired rows of buttons as the main menu opens.
+  std::array<std::vector<std::unique_ptr<SdlTexture>>, 3>
+      main_menu_row_reveal_textures;
   std::array<std::optional<NovaSpriteDefinition>, 6>
       main_menu_sprite_definitions;
   std::array<std::optional<NovaMenuSpriteAsset>, 6> main_menu_sprite_assets;
@@ -73,6 +83,21 @@ struct NovaRuntime {
   std::optional<const char *> status_text;
   std::uint64_t startup_phase_started_ms = 0;
   std::uint64_t next_menu_prompt_toggle_ms = 0;
+  std::uint64_t next_menu_top_animation_ms = 0;
+  std::uint64_t next_menu_reveal_frame_ms = 0;
+  std::size_t menu_top_animation_frame = 0;
+  std::size_t menu_center_preview_frame = 6;
+  std::uint8_t menu_center_preview_intensity = 0;
+  // Active in-game state for the running pilot (new-game flow, intro
+  // cinematic, and spaceflight mode all read/write it). Lives on the runtime
+  // rather than as globals (AGENTS.md: represent game state explicitly).
+  game::GameState game;
+
+  // Original counters begin at -1, then stagger each following strip by half
+  // the preceding strip's frame count. A strip is replaced by its two focus
+  // sprites once its counter reaches the strip's frame count.
+  std::array<int, 3> menu_row_reveal_counters{-1, -1, -1};
+  bool menu_entrance_initialized = false;
 };
 
 [[nodiscard]] int NovaProgramEntry();

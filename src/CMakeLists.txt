@@ -1,5 +1,8 @@
 add_library(evnova_runtime
     brgr_archive.cpp
+    game/intro_cinematic.cpp
+    game/new_pilot_flow.cpp
+    game/spaceflight.cpp
     log.cpp
     nova_app.cpp
     pict_image.cpp
