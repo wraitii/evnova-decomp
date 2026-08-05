@@ -109,6 +109,25 @@ stellar objects). Naming done in the DB:
 - `Frame_UpdateSpriteDistanceIntensity` (0x00438db0) computes
   `Sprite.distance_brightness` (+0xAA) from player distance and copies
   `SystemDef.space_color` (+0x1F8) into `Sprite.space_color` (+0xAC).
+
+### Distance/fog (Frame_UpdateSpriteDistanceIntensity) - decoded
+
+`distance_brightness = round(g_distance_intensity_scale * distSq * 1.2e-05)`
+where `distSq` is squared rounded distance to the player on both axes and
+`g_distance_intensity_scale` (0x7356bc) is actually the **effective system murk
+percent** (0-100), rebuilt each recompute by
+`Outfit_RecomputeOutfitDerivedState` via `System_GetEffectiveMurkPercent()`
+(System `murk` clamped >=0 + murk-modifier outfits modtype 0x1c, clamp [0,100]).
+The tiny fog constant `g_distance_intensity_scale_const2` (= `_DAT_005754d0`,
+double 1.2e-05) makes brightness only visibly vary for large distances near a
+high-murk system. Clamp is 0..0x1F (0x18 in pixel-depth-8). Then copies
+`SystemDef.space_color` (5-5-5 packed from BkgndColor) into the sprite.
+
+**Consequence for the starting-system demo:** Kania has murk 0, so
+`g_distance_intensity_scale` is 0 and `distance_brightness` stays 0 -- this fog
+is a no-op for the current default system. It only materialises in high-murk
+systems, so it is recorded here for later correctness rather than implemented
+in the SDL renderer yet (TODO).
 - `SpaceflightView::AdvanceStellarAnimation` (src/game/spaceflight_view.cpp)
   reimplements the ambient frame-stepping part: the ordinary ping-pong/
   alternate/random cycler (availability_flags bit clear) and the hypergate
