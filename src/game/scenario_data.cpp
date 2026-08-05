@@ -242,7 +242,14 @@ namespace {
     st.government_id = -1;
   }
   st.min_status = ReadBeI16(bytes, 0x16);   // reputation_threshold
+  st.engage_highlight_frame = ReadBeI16(bytes, 0x18); // hypergate pulse frame
   st.availability_flags = ReadBe16(bytes, 0x20); // availability_flags
+  // Animation timing (Bible AnimDelay / Frame0Bias; Ghidra StellarDef +0x470/
+  // +0x472 from payload +0x22/+0x24). See Stellar_UpdateStellarSprites.
+  if (bytes.size() >= 0x26) {
+    st.animation_dwell_time = ReadBeI16(bytes, 0x22);
+    st.animation_frame_multiplier = ReadBeI16(bytes, 0x24);
+  }
   if (bytes.size() >= 0x242) {
     st.link_b_id = ReadBeI16(bytes, 0x240); // link_b_id (alternate spin set)
     if (st.link_b_id < 0 || st.link_b_id > 0xff) {

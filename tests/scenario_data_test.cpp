@@ -370,4 +370,39 @@ TEST_CASE("starfield sheet (spin resource 700) decodes to 16 5x5 frames",
   CHECK(sheet->frames.size() == 16);
 }
 
+
+// The stellar animation timing fields (sp\x6fb AnimDelay/Frame0Bias, Ghidra
+// StellarDef +0x470/+0x472 from payload +0x22/+0x24) and the hypergate
+// engage_highlight_frame (Ghidra StellarDef +0x26, payload +0x18) decode from
+// the payload and gate the Stellar_UpdateStellarSprites frame stepping.
+TEST_CASE("stellar animation fields decode", "[scenario][stellar]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // Earth / Port Kane: ordinary 1-frame planet sprites; dwell/multiplier 0 (so
+  // the ambient stepper sees a single-frame set and stays on frame 0).
+  const Stellar *earth = data.Stellar(0x80);
+  REQUIRE(earth != nullptr);
+  CHECK(earth->animation_dwell_time == 0);
+  CHECK(earth->animation_frame_multiplier == 0);
+  CHECK((earth->availability_flags & 0x1000) == 0);  // not a hypergate
+
+  const Stellar *portkane = data.Stellar(0x89);
+  REQUIRE(portkane != nullptr);
+  CHECK(portkane->animation_dwell_time == 0);
+  CHECK(portkane->animation_frame_multiplier == 0);
+  CHECK((portkane->availability_flags & 0x1000) == 0);  // not a hypergate
+
+  // HG-Kania hypergate: 42-frame animated set (link_a 1 -> spin 1001), the
+  // hypergate availability bit (0x1000) set, and an engaged highlight frame 37
+  // (holds/clamps on the opening/working boundary).
+  const Stellar *hg = data.Stellar(0x57c);
+  REQUIRE(hg != nullptr);
+  CHECK(hg->link_a_id == 1);
+  CHECK((hg->availability_flags & 0x1000) != 0);  // hypergate
+  CHECK(hg->engage_highlight_frame == 37);
+  CHECK(hg->animation_dwell_time == 0);
+  CHECK(hg->animation_frame_multiplier == 0);
+}
+
 } // namespace game

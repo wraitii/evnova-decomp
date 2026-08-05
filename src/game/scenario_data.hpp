@@ -242,6 +242,11 @@ struct Stellar {
 
   std::int16_t government_id = -1; // Govt (+0x14; <0x80 -> -1)
   std::int16_t min_status = 0;    // reputation_threshold (+0x16)
+  // engage_highlight_frame (Ghidra StellarDef +0x26, payload +0x18): the
+  // frame index at which an animated stellar (hypergate/wormhole, avail
+  // 0x1000) shows its engaged/pulse highlight. Clamped to the middle frame by
+  // the animator when unset/out of range.
+  std::int16_t engage_highlight_frame = 0;
 
   std::int16_t cust_pict_id = -1; // CustPicID
   std::int16_t cust_snd_id = -1;  // CustSndID
@@ -250,8 +255,14 @@ struct Stellar {
   std::int16_t defense_count = 0;    // DefCount
   std::uint16_t flags2 = 0;         // Flags2
 
-  std::int16_t anim_delay = 0;    // AnimDelay
-  std::int16_t frame0_bias = 0;   // Frame0Bias
+  // Animation timing for an animated stellar (Ghidra StellarDef +0x470/+0x472;
+  // loaded from the sp\x6fb payload +0x22/+0x24). animation_dwell_time is the
+  // Bible AnimDelay (frame dwell, 30ths of a second); animation_frame_multiplier
+  // is the Bible Frame0Bias, a multiplier that holds the first (frame 0) of the
+  // sequence longer (used when current_frame == 0). Drives the frame stepping
+  // in Ghidra Stellar_UpdateStellarSprites (0x0042cd10).
+  std::int16_t animation_dwell_time = 0;     // AnimDelay
+  std::int16_t animation_frame_multiplier = 0; // Frame0Bias
   std::array<std::int16_t, 8> hyperlinks{-1, -1, -1, -1, -1, -1, -1, -1}; // HyperLink1-8
 
   std::int16_t fee = 0;           // Fee

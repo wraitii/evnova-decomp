@@ -160,7 +160,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0042C660,Shot_UpdateDirectionalWeaponEffects,,0%,
 0x0042CBB0,Frame_AnchorAuxHUDSpriteToOrigin,,0%,
 0x0042CC30,Stellar_TickTravelCountdownSprite,,0%,
-0x0042CD10,Stellar_UpdateStellarSprites,,0%,
+0x0042CD10,Stellar_UpdateStellarSprites,src/game/spaceflight_view.cpp,30%,"ambient frame-stepping reimplemented (AdvanceStellarAnimation): dwell/frame-multiplier stepping + alternate/linger/random cycling; hypergate 0x1000 non-engaged drift toward engage_highlight_frame; engage-highlight pulse (AI/ travel-selection state) + per-frame SetPosition from distance-intensity not reconstructed",
 0x0042D890,Stellar_TickStellarDefenseBatteries,,0%,
 0x0042E160,Shot_UpdateImpactEffectSprites,,0%,
 0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,72,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); each star renders a random frame of the 16-frame 5px sheet (sp.x9an 700) at native 1:1 size; murk round(murk*0.9) value is a blend-mode sentinel (tinted/blobed), not a pixel size"
@@ -448,7 +448,8 @@ address,name,impl_file,reimpl_pct,comment
 0x0046BFF0,Government_DoGovtsShareClass,,0%,
 0x0046C080,Ship_ComputeStatusEffectDecayRate,,0%,
 0x0046C160,Ship_GetStatusEffectIntensity,,0%,
-0x0046C250,System_GetEffectiveMurkPercent,,0,
+0x0046C250,System_GetEffectiveMurkPercent,,0
+,
 0x0046C2F0,Weapon_GetShotImpactVariant,,0%,
 0x0046C320,Weapon_SelectTurretQuadrant,,0%,
 0x0046C4E0,Weapon_ChooseBestTurretQuadrantForTarget,,0%,
@@ -490,9 +491,12 @@ address,name,impl_file,reimpl_pct,comment
 0x0046E9E0,Stellar_SelectRandomAdjacentDestination,,0%,
 0x0046EA40,Outfit_CountCarriedShipsForOutfit,,0%,
 0x0046EBB0,Stellar_CountValidLinkedStellarDestinations,,0%,
-0x0046EBF0,NovaEffects_QueuedAmbientStarParticles,src/game/spaceflight_view.cpp,90,"20-slot starfield spawn (SpawnAmbientStars): count=round(h/600*20), random frame over 16-frame star sheet (sp.x9an 700), offset, parallax speed=random(0x23)*0.01, outer-slot carry-over, murk<0 gate all faithful; only DAT_005914d7 toggle not plumbed (kept enabled)"
-0x0046EDE0,NovaEffects_ClearAmbientStarParticles,src/game/spaceflight_view.cpp,70,"cleared when system murk<0 via SpawnAmbientStars path"
-0x0046EE50,NovaEffects_UpdateAmbientStarParticles,src/game/spaceflight_view.cpp,85,"per-frame delta integration + drift threshold (0.0f, DAT_005757d8) faithful (UpdateAmbientStars); sign verified against caller (prev-cur)"
+0x0046EBF0,NovaEffects_QueuedAmbientStarParticles,src/game/spaceflight_view.cpp,90
+,"20-slot starfield spawn (SpawnAmbientStars): count=round(h/600*20), random frame over 16-frame star sheet (sp.x9an 700), offset, parallax speed=random(0x23)*0.01, outer-slot carry-over, murk<0 gate all faithful; only DAT_005914d7 toggle not plumbed (kept enabled)"
+0x0046EDE0,NovaEffects_ClearAmbientStarParticles,src/game/spaceflight_view.cpp,70
+,"cleared when system murk<0 via SpawnAmbientStars path"
+0x0046EE50,NovaEffects_UpdateAmbientStarParticles,src/game/spaceflight_view.cpp,85
+,"per-frame delta integration + drift threshold (0.0f, DAT_005757d8) faithful (UpdateAmbientStars); sign verified against caller (prev-cur)"
 0x0046EEB0,PascalString_Copy,,0%,
 0x0046EF00,CString_Equals,,0%,
 0x0046EF80,NovaUi_HideTravelSelectionSprite,,0%,
@@ -1005,7 +1009,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004BD090,FUN_004bd090,,0%,
 0x004BD0C0,Prefs_SetNovaFilesPathPrefix,,0%,
 0x004BD160,Resource_ValidateInstallFolders,,0%,
-0x004BD3C0,NovaData_LoadScenarioResourceTables,,50%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields); ship+weapon verified; system/stellar partial (dude types/prob, reinf, visibility added; stellar tail + system numeric block TODO(decomp))."
+0x004BD3C0,NovaData_LoadScenarioResourceTables,,50%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields); ship+weapon verified; system/stellar partial (dude types/prob, reinf, visibility added; stellar tail TODO(decomp)); stellar animation fields (AnimDelay/Frame0Bias = +0x470/+0x472 from payload +0x22/+0x24) and hypergate engage_highlight_frame (+0x26 from payload +0x18) decoded"
 0x004C6D50,Ui_LoadSelectionDialogResource,,0%,
 0x004C7040,FUN_004c7040,,0%,
 0x004C73B0,FUN_004c73b0,,0%,

@@ -239,7 +239,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
   // from the movement delta after simulation.
   float prev_x = state.player.pos_x;
   float prev_y = state.player.pos_y;
+  // Real frame-time basis for the per-frame ambient/stellar animation steppers
+  // (the original accumulates _g_avg_frame_time_ms).
+  std::uint64_t prev_tick_ms = SDL_GetTicks();
   while (!platform.quit_requested() && !returning_to_menu) {
+    const std::uint64_t now_ms = SDL_GetTicks();
+    const float frame_time_ms =
+        std::max(1.0F, static_cast<float>(now_ms - prev_tick_ms));
+    prev_tick_ms = now_ms;
     // Player control (heading/throttle) is read here so the ship flies while
     // the simulation stubs do not. Movement integrates into PlayerShip.
     NovaPlayer_UpdateFromInput(platform, state);
@@ -250,6 +257,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
     // Ghidra NovaEffects_UpdateAmbientStarParticles(fVar1, fVar4) advances the
     // starfield by the ship's movement delta (frames not frozen).
     view.UpdateAmbientStars(delta_x, delta_y);
+    // Ghidra Stellar_UpdateStellarSprites advances each animated stellar one
+    // animation step each frame.
+    view.AdvanceStellarAnimation(platform, state, frame_time_ms);
 
     // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
     // cursor update.

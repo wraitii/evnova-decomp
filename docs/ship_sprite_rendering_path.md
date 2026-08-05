@@ -109,6 +109,16 @@ stellar objects). Naming done in the DB:
 - `Frame_UpdateSpriteDistanceIntensity` (0x00438db0) computes
   `Sprite.distance_brightness` (+0xAA) from player distance and copies
   `SystemDef.space_color` (+0x1F8) into `Sprite.space_color` (+0xAC).
+- `SpaceflightView::AdvanceStellarAnimation` (src/game/spaceflight_view.cpp)
+  reimplements the ambient frame-stepping part: the ordinary ping-pong/
+  alternate/random cycler (availability_flags bit clear) and the hypergate
+  (bit 0x1000) non-engaged drift toward/around `engage_highlight_frame`
+  (StellarDef +0x26, payload +0x18). Reconstructed runtime state is kept per
+  stellar id in the view (sprite_current/previous_frame + frame_accumulator,
+  mirrored from StellarDef +0x476/+0x478/+0x490). Dwell/frame multiplier decode
+  from the sp\x6fb payload +0x22/+0x24 (StellarDef +0x470/+0x472) as Bible
+  AnimDelay / Frame0Bias. The engage-highlight pulse and per-frame
+  distance-intensity positioning are not yet reimplemented (TODO(decomp)).
 
 ## Decoder
 

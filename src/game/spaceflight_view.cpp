@@ -381,10 +381,127 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   }
 }
 
+// Ghidra Stellar_UpdateStellarSprites (0x0042cd10), ambient-animation part.
+// Advances each animate stellar of the current system one animation step each
+// real frame. Stellar bodies with only a single frame (sprite_frame_count<2)
+// stay static at frame 0. For ordinary animated stellars (availability_flags &
+// 0x1000 clear) this is the ping-pong/alternate/random cycling stepper; for
+// hypergate-style stellars (0x1000 set) it is the non-engaged frame-drift
+// toward/around engage_highlight_frame. Engage-highlight pulsing needs AI ship
+// states and travel-selection (g_travel_selected_stellar_id / g_travel_engage_
+// timer), which this build does not model, so that leg is documented as a
+// no-op and only the non-engaged drift is applied. frame_time_ms mirrors the
+// original's _g_avg_frame_time_ms accumulator basis.
+void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
+                                              GameState &state,
+                                              float frame_time_ms) {
+  const auto *sys = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (!sys) {
+    return;
+  }
+  for (const auto nav : sys->nav_defs) {
+    if (nav < 0x80) {
+      continue;
+    }
+    const auto *st = state.scenario.Stellar(nav);
+    if (!st || st->name.empty()) {
+      continue;
+    }
+    // The original builds the active spin set from link_a (primary) when the
+    // stellar is not engaged/hand-over, link_b otherwise; every starting-system
+    // stellar has link_b == -1, so the primary link_a set is the one animated.
+    const auto *set = GetSpinSpriteSet(platform, st->link_a_id);
+    if (!set || set->frame_count < 2) {
+      continue;  // no animated set / single-frame body stays static
+    }
+    StellarAnimState &anim = stellar_anims_[nav];
+    const int frame_count = set->frame_count;
+
+    if ((st->availability_flags & 0x1000) == 0) {
+      // ---- Ordinary ambient animation (no hypergate-style highlighting). ----
+      anim.frame_accumulator += frame_time_ms;
+      // Dwell: hold frame 0 longer (Bible Frame0Bias) when it is shown and the
+      // multiplier is set.
+      const int dwell =
+          (anim.current_frame == 0 && st->animation_frame_multiplier > 1)
+              ? st->animation_dwell_time * st->animation_frame_multiplier
+              : st->animation_dwell_time;
+      if (dwell <= anim.frame_accumulator) {
+        anim.frame_accumulator = 0.0F;
+        if ((st->availability_flags & 1) == 0) {
+          // Alternate: current tracks previous; previous walks forward (or
+          // jumps to a random frame != current when the random bit is set).
+          anim.current_frame = anim.previous_frame;
+          if ((st->availability_flags & 2) == 0) {
+            anim.previous_frame =
+                (anim.previous_frame + 1) % frame_count;
+          } else {
+            do {
+              anim.previous_frame =
+                  NovaRandomRange(state.rng, frame_count);
+            } while (anim.previous_frame == anim.current_frame);
+          }
+        } else if (anim.current_frame == 0) {
+          // Linger-on-0: leave frame 0, show previous, then advance it (never
+          // returning it to 0 in the sequential case; random skips 0).
+          anim.current_frame = anim.previous_frame;
+          if ((st->availability_flags & 2) == 0) {
+            anim.previous_frame =
+                (anim.previous_frame + 1) % frame_count;
+            if (anim.previous_frame == 0) {
+              anim.previous_frame += 1;
+            }
+          } else {
+            do {
+              do {
+                anim.previous_frame =
+                    NovaRandomRange(state.rng, frame_count);
+              } while (anim.previous_frame == 0);
+            } while (anim.previous_frame == anim.current_frame);
+          }
+        } else {
+          // (flags & 1) with a non-zero current frame: snap back to frame 0.
+          anim.current_frame = 0;
+        }
+      }
+    } else {
+      // ---- Hypergate-style stellar (availability_flags & 0x1000): ----------
+      // Drift frames toward/around the engage_highlight_frame (default middle).
+      int highlight = st->engage_highlight_frame;
+      if (highlight < 1 || frame_count - 1 <= highlight) {
+        highlight = frame_count / 2;  // Ghidra (frame_count+1US -1)>>1 == fc/2
+      }
+      // TODO(decomp): g_travel_selected_stellar_id / g_travel_engage_timer and
+      // active-ship engagement not modeled here; the engaged pulse-to-highlight
+      // leg is skipped (no travel-selection / AI ship state in this build). The
+      // non-engaged drift below reproduces the original exactly for this case.
+      if (st->animation_dwell_time <= anim.frame_accumulator) {
+        anim.frame_accumulator = 0.0F;
+        const int cur = anim.current_frame;
+        if (cur < highlight) {
+          if (cur > 0) {
+            anim.current_frame = cur - 1;  // drift down toward 0 / highlight
+          }
+        } else if ((st->availability_flags & 2) == 0) {
+          if (cur < frame_count - 1) {
+            anim.current_frame = cur + 1;
+          } else {
+            anim.current_frame = highlight - 1;
+          }
+        } else {
+          anim.current_frame = highlight - 1;
+        }
+      }
+    }
+  }
+}
+
 // Draws the current system's stellar bodies. When the body's spin sprite set
 // (link_a_id -> sp\x9an id+1000) loads, its real planet art is drawn; otherwise
 // a tinted circle stands in. Positions are world px offset by the player
-// (camera centred on the ship).
+// (camera centred on the ship). Animated stellars draw their per-frame advanced
+// frame (see AdvanceStellarAnimation).
 void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
                                         const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
@@ -426,10 +543,18 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
       b = gov->theme_blue;
     }
 
-    // Prefer the real spin planet sprite; fall back to a tinted disc.
+    // Prefer the real spin planet sprite; fall back to a tinted disc. Animated
+    // stellars use the frame advanced by AdvanceStellarAnimation (keyed by the
+    // stellar id); single-frame bodies stay at frame 0.
     const auto *set = GetSpinSpriteSet(platform, st->link_a_id);
     if (set && !set->frames.empty()) {
-      const auto &frame = set->frames[0];
+      int frame_idx = 0;
+      const auto anim_it = stellar_anims_.find(nav);
+      if (anim_it != stellar_anims_.end()) {
+        frame_idx =
+            std::clamp(anim_it->second.current_frame, 0, set->frame_count - 1);
+      }
+      const auto &frame = set->frames[static_cast<std::size_t>(frame_idx)];
       const float scale = 1.0F;  // planets render at native world size
       const SDL_FRect dest{
           static_cast<float>(cx) - set->tile_width * scale / 2.0F,
