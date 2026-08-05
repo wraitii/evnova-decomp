@@ -367,7 +367,10 @@ namespace {
 // s\xd8st (System / s\xffst) decode
 // ---------------------------------------------------------------------------
 // Header verified: xPos+0, yPos+2, Con1-16+0x04, NavDef1-16+0x24,
-// DudeTypes+0x6e, % Prob+0x7e, govt+0x66. The loader also reads DudeTypes/Prob
+// DudeTypes+0x6e, % Prob+0x7e, govt+0x66, BkgndColor+0x8e (24-bit RRGGBB,
+// Ghidra NovaData_LoadScenarioResourceTables reads a 32-bit at payload +0x8e
+// and splits the three bytes into SystemDef.field_0x1ee/.f0/.f2), Murk+0x92
+// (feeds SystemDef.alert_level, clamped). The loader also reads DudeTypes/Prob
 // (8 shorts each), a Message/Asteroids/Interference block and ReinfFleet/Time/
 // Intrval near the end of the record, plus the Visibility string.
 [[nodiscard]] System DecodeSystem(std::span<const std::byte> bytes) {
@@ -383,10 +386,25 @@ namespace {
     s.dude_types[i] = ReadBeI16(bytes, 0x6e + i * 2);
     s.dude_prob[i] = ReadBeI16(bytes, 0x7e + i * 2);
   }
-  // TODO(decomp): AvgShips / Message / Asteroids / Interference / BkgndColor /
-  // Murk / AstTypes payload offsets are not yet confirmed against the loader
-  // (some are transformed at load, e.g. Interference and the background color
-  // bit-repacking); they stay defaulted here.
+  // BkgndColor (s\xd8st +0x8e): three colour bytes (pure black when unset) that
+  // the original reads as a 32-bit little-endian value and splits into the
+  // SystemDef.field_0x1ee/.f0/.f2 shorts, mapping R = resource byte +0x90,
+  // G = +0x8f, B = +0x8e (a byte-order quirk of the 32-bit read that visibly
+  // affects the rendered colour -- preserved for fidelity). This is the
+  // per-system space background tint used by NovaRender_SetSystemSpaceBackgroundColor
+  // (Ghidra 0x0046bbf0).
+  const std::uint32_t bkgnd = ReadBe32(bytes, 0x8e);  // mem[0x8e..0x91]
+  s.bkgnd_color = ((bkgnd >> 8) & 0xff) << 16 |  // 0x90 -> R
+                  ((bkgnd >> 16) & 0xff) << 8 |   // 0x8f -> G
+                  ((bkgnd >> 24) & 0xff);         // 0x8e -> B
+  // Murk (s\xd8st +0x92): murkiness 0-100; a negative value equivalently hides
+  // the starfield (NovaEffects_QueuedAmbientStarParticles clears ambient stars
+  // when the derived SystemDef.alert_level < 0).
+  s.murk = ReadBeI16(bytes, 0x92);
+  // TODO(decomp): AvgShips / Message / Asteroids / Interference / AstTypes
+  // payload offsets are not yet confirmed against the loader; they stay
+  // defaulted here. Interference and the background-color bit-repacking are
+  // load-time transforms not yet reconstructed.
   s.reinf_fleet = ReadBeI16(bytes, 0x196);
   s.reinf_time = ReadBeI16(bytes, 0x198);
   s.reinf_interval = ReadBeI16(bytes, 0x19a);

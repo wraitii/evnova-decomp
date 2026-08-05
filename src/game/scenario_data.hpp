@@ -351,8 +351,15 @@ struct System {
   std::int16_t message_id = -1; // Message
   std::int16_t asteroid_count = 0; // Asteroids
   std::int16_t interference = 0;  // Interference
-  std::uint32_t bkgnd_color = 0;  // BkgndColor
-  std::int16_t murk = 0;          // Murk
+  // BkgndColor (s\xd8st +0x8e): per-system space background tint stored as 24-bit
+  // 0xRRGGBB. Decoded to reproduce the original's runtime mapping (it reads the
+  // resource bytes as a little-endian 32-bit and takes R=byte+0x90, G=byte+0x8f,
+  // B=byte+0x8e), so `(c>>16),(c>>8),c` are exactly the colours
+  // NovaRender_SetSystemSpaceBackgroundColor paints. Pure black (0) when unset.
+  std::uint32_t bkgnd_color = 0;
+  // Murk (s\xd8st +0x92): murkiness 0-100; a negative value hides the starfield
+  // (SystemDef.alert_level < 0). Feeds the ambient-star size scale as well.
+  std::int16_t murk = 0;
   std::uint16_t ast_types = 0;    // AstTypes
   std::int16_t reinf_fleet = -1;  // ReinfFleet
   std::int16_t reinf_time = 0;    // ReinfTime

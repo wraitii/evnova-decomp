@@ -220,6 +220,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
                 "reconstructed");
   const bool ship_ready = view.EnsureShipSprite(platform, state);
   (void)ship_ready;
+  // Ghidra: the ambient starfield is (re)spawned at every spaceflight entry
+  // (NovaEffects_QueuedAmbientStarParticles from Ship_RunSpaceflightMode and the
+  // travel/landing transitions). We spawn once when the mode starts, then
+  // advance it per frame below.
+  view.SpawnAmbientStars(state);
   NovaFrame_TickSystems(state, /*run_full_tick=*/true);
   DrawInGameFrame(platform, state, view);
   SDL_RenderPresent(platform.renderer());
@@ -229,10 +234,22 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
   // mouse command latched in post-draw, i.e. return-to-menu-from-pause) is set.
   // The pause menu is not reconstructed, so Escape/'q' stand in for the
   // return-to-menu latch (documented divergence).
+  // Ghidra Frame_SpaceflightLoop scope 1 stores the ship's pre-tick position
+  // (_DAT_005997c4/_c8) so the per-frame ambient-star parallax can be computed
+  // from the movement delta after simulation.
+  float prev_x = state.player.pos_x;
+  float prev_y = state.player.pos_y;
   while (!platform.quit_requested() && !returning_to_menu) {
     // Player control (heading/throttle) is read here so the ship flies while
     // the simulation stubs do not. Movement integrates into PlayerShip.
     NovaPlayer_UpdateFromInput(platform, state);
+    const float delta_x = state.player.pos_x - prev_x;
+    const float delta_y = state.player.pos_y - prev_y;
+    prev_x = state.player.pos_x;
+    prev_y = state.player.pos_y;
+    // Ghidra NovaEffects_UpdateAmbientStarParticles(fVar1, fVar4) advances the
+    // starfield by the ship's movement delta (frames not frozen).
+    view.UpdateAmbientStars(delta_x, delta_y);
 
     // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
     // cursor update.

@@ -316,4 +316,30 @@ TEST_CASE("system nav_defs identify the owned space stellars",
   CHECK(data.Stellar(0x57c)->link_a_id == 1);
 }
 
+// The per-system space background tint (syst BkgndColor +0x8e, 24-bit RRGGBB)
+// and murk (syst +0x92) feed the flight backdrop + amber starfield. Values are
+// verified against the raw payload bytes; they shape the ground-truth rendering
+// decided in the reimplementation (SystemDef.field_0x1ee / alert_level).
+TEST_CASE("system background color and murk decode from the payload",
+          "[scenario][system]") {
+  game::ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // Kania: pure-black space backdrop (BkgndColor = 0), murk 0 (stars shown,
+  // full 32px sprite scale).
+  const game::System *kania = data.System(0x80);
+  REQUIRE(kania != nullptr);
+  CHECK(kania->bkgnd_color == 0x000000);
+  CHECK(kania->murk == 0);
+
+  // Alphara: backdrop bytes at +0x8e..+0x90 are {0x00, 0x19, 0x19}; the
+  // original's byte-order quirk maps R=+0x90, G=+0x8f, B=+0x8e, so the rendered
+  // 0xRRGGBB is 0x191900 (R=G=0x19, B=0). Murk 20.
+  const game::System *alphara = data.System(0x83);
+  REQUIRE(alphara != nullptr);
+  CHECK(alphara->name == "Alphara");
+  CHECK(alphara->bkgnd_color == 0x191900);
+  CHECK(alphara->murk == 20);
+}
+
 } // namespace game

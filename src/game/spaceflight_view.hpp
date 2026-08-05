@@ -12,16 +12,18 @@
 // wy - player.y + play_area_top + half_height). The player ship is drawn at
 // the centre of the play area with its frame selected by heading.
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
 
-// Forward declarations of the SDL-wrapper types (defined in sdl_platform.hpp,
+// Forward declarations of the SDL types (defined in sdl_platform.hpp / SDL3,
 // global namespace) so this header can declare the view's interface without
 // pulling in SDL here.
 class SdlPlatform;
 class SdlTexture;
+struct SDL_Renderer;
 
 #include "scenario_data.hpp"
 
@@ -39,11 +41,47 @@ class SpaceflightView {
   [[nodiscard]] bool EnsureShipSprite(SdlPlatform &platform,
                                       const GameState &state);
 
-  // Draws the whole in-flight world (starfield, stellar bodies, player ship)
-  // into the current renderer.
+  // Draws the whole in-flight world (solid per-system space backdrop, ambient
+  // starfield, stellar bodies, player ship) into the current renderer.
   void Draw(SdlPlatform &platform, const GameState &state);
 
+  // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0): (re)spawns the
+  // 20-particle ambient starfield around the player ship. Each particle gets a
+  // random world offset within the current viewport (centred on the ship) and a
+  // random per-particle parallax speed. When the system's derived alert level
+  // (murk) is negative the field is cleared instead (stars hidden). Called at
+  // every spaceflight entry / travel boundary (Ghidra travel/landing paths
+  // call it on system entry). Mutates the GameState PRNG, so it is non-const.
+  void SpawnAmbientStars(GameState &state);
+
+  // Ghidra NovaEffects_UpdateAmbientStarParticles (0x0046ee50): advances the
+  // ambient starfield each frame by the ship's movement delta (dx, dy). Each
+  // active particle's world position gains (dx, dy) * per-particle parallax
+  // speed, so nearer/faster particles stream past while distant ones recede
+  // (real spatial parallax).
+  void UpdateAmbientStars(float dx, float dy);
+
+  // Draws the solid per-system space background tint (SystemDef.bkgnd_color,
+  // Ghidra NovaRender_SetSystemSpaceBackgroundColor / Frame_RenderViewportBackground)
+  // then the active ambient star particles.
+  void DrawBackground(SDL_Renderer *renderer, const GameState &state);
+
  private:
+  // One ambient background star particle (Ghidra FadingEffectSpriteState pool
+  // at g_ambient_star_particles, stride 0x14 = 20 bytes; offsets noted where
+  // they map the original fields). The star's sprite-frame index (+0x06) and
+  // draw-proc are not carried here; the artwork renderer is provisional.
+  struct AmbientStar {
+    float speed = 0.0F; // +0x08 parallax drift speed (random per particle)
+    float pos_x = 0.0F; // +0x0c world-space x
+    float pos_y = 0.0F; // +0x10 world-space y
+    bool active = false; // +0x04 active flag
+  };
+  std::array<AmbientStar, 20> ambient_stars_{};
+  // Provisional star-field visual size in px; the original sizes each star
+  // sprite by 0x20 (=32) when the system murk (alert level) is zero, scaled
+  // otherwise (Ghidra Frame_UpdateViewportWrapBackgroundSprites).
+  int star_size_ = 0;
   // Unrotated per-frame ship textures plus rotation metadata.
   struct ShipSprite {
     std::vector<std::unique_ptr<class SdlTexture>> frames;

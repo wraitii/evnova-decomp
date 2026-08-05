@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <random>
 #include <string>
 
 namespace game {
@@ -37,6 +38,15 @@ constexpr int kViewportHeight = 400;
     frame += frames_per_rotation;
   }
   return frame;
+}
+
+// Uniform integer in [0, bound). Mirrors the game's NovaRandom_Range seeded from
+// the GameState PRNG so the spawn layout is reproducible per session.
+[[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
+  if (bound <= 1) {
+    return 0;
+  }
+  return static_cast<std::int16_t>(std::uniform_int_distribution<int>{0, bound - 1}(rng));
 }
 
 } // namespace
@@ -161,55 +171,122 @@ SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
   return spin_sets_[index].get();
 }
 
-// Draws the parallax starfield for the current system: two slow layers of
-// deterministic star "clouds" scrolled by (player_pos * parallax) so drifting
-// conveys motion, plus a faint background tint derived from the system's
-// government theme color when a system is active.
-void DrawStarfield(SDL_Renderer *renderer, const GameState &state) {
-  // Background wash tinted by the current system's government theme colour (so
-  // systems read distinctly), lightened so stars still show.
-  std::uint8_t bg_r = 6, bg_g = 8, bg_b = 24;
-  if (const auto *sys =
-          state.scenario.System(static_cast<std::int16_t>(state.player.current_system_id + 0x80));
-      sys) {
-    if (const auto *gov = state.scenario.Government(sys->government_id); gov) {
-      bg_r = static_cast<std::uint8_t>((gov->theme_red >> 1U) + 8U);
-      bg_g = static_cast<std::uint8_t>((gov->theme_green >> 1U) + 8U);
-      bg_b = static_cast<std::uint8_t>((gov->theme_blue >> 1U) + 14U);
+// Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0). See the header.
+// The original spawns as many particles as the viewport allows (about
+// viewport_height / 768 * 20 of the 20-slot pool) and gives each a random
+// world offset within the viewport (centered on the player) plus a random
+// per-particle parallax speed. A negative system murk clears the field.
+// NOTE(decomp): the star's frame index (random over the star sprite sheet
+// frame count) and the exact speed constant (_DAT_00575738) depend on the as-yet
+// unlocated star-field sprite sheet; speed is provisionally scaled to a
+// fractional parallax range and the artwork is drawn as small points.
+void SpaceflightView::SpawnAmbientStars(GameState &state) {
+  const auto *sys = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  const bool murk_hides_stars = sys && sys->murk < 0;
+
+  if (murk_hides_stars) {
+    // Ghidra NovaEffects_ClearAmbientStarParticles: murk < 0 hides the stars.
+    for (auto &s : ambient_stars_) {
+      s = {};
+    }
+    return;
+  }
+
+  // Ghidra derives the spawn count from the viewport height: ~height/768 * 20.
+  const int count = std::max<int>(0, std::min<int>(20, kViewportHeight * 20 / 768));
+  // Provisional parallax speed scale (Ghida _DAT_00575738); sweeps speed over a
+  // small fraction so nearby stars stream by while distants recede.
+  constexpr float kSpeedScale = 0.02F;
+  for (int i = 0; i < count; ++i) {
+    AmbientStar &s = ambient_stars_[static_cast<std::size_t>(i)];
+    s.active = true;
+    // Random world offset within the (player-centred) viewport.
+    const auto rx = static_cast<float>(NovaRandomRange(state.rng, kViewportWidth));
+    const auto ry = static_cast<float>(NovaRandomRange(state.rng, kViewportHeight));
+    s.pos_x = rx + state.player.pos_x - static_cast<float>(kViewportWidth) / 2.0F;
+    s.pos_y = ry + state.player.pos_y - static_cast<float>(kViewportHeight) / 2.0F;
+    // Ghidra: speed = NovaRandom_Range(0x23) * scale.
+    s.speed = static_cast<float>(NovaRandomRange(state.rng, 0x23)) * kSpeedScale;
+  }
+}
+
+// Ghidra NovaEffects_UpdateAmbientStarParticles (0x0046ee50). Each active
+// particle's world position grows by (dx, dy) * per-particle speed, where the
+// passed delta is the ship's movement this frame. Only particles whose speed
+// clears the (tiny) drift threshold move, mirroring the original's gate.
+void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
+  constexpr float kMinSpeed = 0.0001F; // original gate DAT_005757d8 (provisional)
+  for (auto &s : ambient_stars_) {
+    if (s.active && s.speed > kMinSpeed) {
+      s.pos_x += dx * s.speed;
+      s.pos_y += dy * s.speed;
     }
   }
+}
+
+// Draws the solid per-system space backdrop (a flat tint from SystemDef
+// BkgndColor, pure black when unset) and then the active ambient star particles.
+// Ghidra: Frame_RenderViewportBackground clears + fills with the
+// NovaRender_SetSystemSpaceBackgroundColor tint, then Frame_UpdateViewportWrapBackgroundSprites
+// (+ the sprite-world draw in Frame_SpaceflightLoop scope 2) renders the stars.
+// NOTE(decomp): star artwork is a small point approximation rather than the
+// original's per-frame sprite sheet (source sheet id not yet located).
+void SpaceflightView::DrawBackground(SDL_Renderer *renderer,
+                                     const GameState &state) {
+  // Per-system space background tint. Ghidra NovaRender_SetSystemSpaceBackgroundColor
+  // uses SystemDef.field_0x1ee (the decoded RGB bytes); RRGGBB = 0 is pure
+  // black. This replaces the earlier provisional government-theme wash.
+  const auto *sys = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  const std::uint32_t c = sys ? sys->bkgnd_color : 0;
+  const std::uint8_t bg_r = static_cast<std::uint8_t>((c >> 16) & 0xff);
+  const std::uint8_t bg_g = static_cast<std::uint8_t>((c >> 8) & 0xff);
+  const std::uint8_t bg_b = static_cast<std::uint8_t>(c & 0xff);
   SDL_SetRenderDrawColor(renderer, bg_r, bg_g, bg_b, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
-  // Two parallax star layers. The exact positions are deterministic but spread
-  // evenly; scrolling by player position gives a subtle depth feel.
-  const struct {
-    int count;
-    int parity;
-    float parallax;
-    std::uint8_t r, g, b;
-  } layers[] = {
-      {110, 3, 0.25F, 150, 195, 255},  // distant sparse faint stars
-      {45, 7, 0.55F, 210, 235, 255},   // nearer brighter stars
-  };
-  SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
-  for (const auto &layer : layers) {
-    SDL_SetRenderDrawColor(renderer, layer.r, layer.g, layer.b,
+  // Star size: the original sizes each star sprite by 0x20 (32) when murk==0,
+  // else scales by murk (clamped). Mirrors Frame_UpdateViewportWrapBackgroundSprites.
+  std::int16_t star = 32;
+  if (sys && sys->murk > 0) {
+    // Ghidra clamps the scaled size to [2, 29] when murk (>0) is active.
+    star = static_cast<std::int16_t>(sys->murk);
+    if (star > 29) star = 29;
+    if (star < 2) star = 2;
+  }
+  star_size_ = star;
+
+  // Ambient star particles, wrapped around the current viewport (Ghidra
+  // Frame_UpdateViewportWrapBackgroundSprites relocates an off-edge particle to
+  // the opposite edge). When murk hides them we already cleared on spawn, so
+  // nothing is drawn. Otherwise each active star is drawn as a small point
+  // behind the world.
+  for (const auto &s : ambient_stars_) {
+    if (!s.active) {
+      continue;
+    }
+    const float sx = (s.pos_x - state.player.pos_x) + kViewportWidth / 2;
+    const float sy = (s.pos_y - state.player.pos_y) + kViewportHeight / 2;
+    float wx = std::fmod(sx, static_cast<float>(kViewportWidth));
+    float wy = std::fmod(sy, static_cast<float>(kViewportHeight));
+    if (wx < 0.0F) wx += static_cast<float>(kViewportWidth);
+    if (wy < 0.0F) wy += static_cast<float>(kViewportHeight);
+    // Provisional brightness/size scaling off the per-particle speed so nearer
+    // (faster) stars read brighter, and the murk-derived star_size_ so gloomy
+    // systems show heavier stars (the original scales each star sprite by the
+    // same murk-derived value).
+    const float bright = 180.0F + 75.0F * std::clamp(s.speed, 0.0F, 1.0F);
+    SDL_SetRenderDrawColor(renderer, static_cast<std::uint8_t>(bright),
+                           static_cast<std::uint8_t>(bright),
+                           static_cast<std::uint8_t>(std::min(255.0F, bright + 40.0F)),
                            SDL_ALPHA_OPAQUE);
-    for (int i = 0; i < layer.count; ++i) {
-      const float freq_x = 1.0F + static_cast<float>(i % 7) * 0.113F;
-      const float freq_y = 1.0F + static_cast<float>((i * 5) % 11) * 0.071F;
-      const float base_x =
-          20.0F + 600.0F * std::fmod(static_cast<float>(i) * 0.6180339F + 0.17F, 1.0F);
-      const float base_y =
-          16.0F + 384.0F * std::fmod(static_cast<float>(i * 0.381966F) + 0.53F, 1.0F);
-      float sx = std::fmod(base_x - state.player.pos_x * layer.parallax * freq_x,
-                           static_cast<float>(kViewportWidth));
-      float sy = std::fmod(base_y - state.player.pos_y * layer.parallax * freq_y,
-                           static_cast<float>(kViewportHeight));
-      if (sx < 0.0F) sx += static_cast<float>(kViewportWidth);
-      if (sy < 0.0F) sy += static_cast<float>(kViewportHeight);
-      SDL_RenderPoint(renderer, sx, sy);
+    if (star_size_ <= 0) {
+      SDL_RenderPoint(renderer, wx, wy);
+    } else {
+      const float d = static_cast<float>(star_size_) * 0.0625F;  // ~2px at scale 32
+      const SDL_FRect r{wx - d, wy - d, d * 2.0F, d * 2.0F};
+      SDL_RenderFillRect(renderer, &r);
     }
   }
 }
@@ -285,7 +362,7 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
 
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
-  DrawStarfield(renderer, state);
+  DrawBackground(renderer, state);
   DrawStellarBodies(platform, state);
 
   // Player ship at the play-area centre, frame selected by heading.

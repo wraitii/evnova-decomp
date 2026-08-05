@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -30,6 +31,29 @@ constexpr std::array<std::string_view, 7> kOpenerFirstNames{
 constexpr std::array<std::string_view, 2> kStartTypeNames{
     "Default Start", "Alternate Start",
 };
+
+// Where a brand-new pilot begins. The real game randomizes the start system
+// among a few candidates at PilotData_InitializePlayerState (fresh-seed picks a
+// random valid starting system from the pilot-block's four stored choices); we
+// hardcode one (Tichel, zero-based 1) for now so the in-flight view has a known
+// landmark. TODO(decomp): implement the randomized start-system selection once
+// the pilot-block start candidates are decoded.
+constexpr std::int16_t kStartSystemId = 1;            // zero-based (Tichel)
+constexpr std::int16_t kStartSystemResourceId = 0x81; // resource id
+
+// Picks the stellar resource id the player should spawn near in a system: the
+// first owned body (running the system's nav_defs). This stands in for the
+// original's landing/launch placement (which positions the ship beside the
+// planet it last docked at); the jump-gate vs planet choice is not yet
+// distinguished, so we take the system's first owned body.
+[[nodiscard]] std::int16_t PickLandingStellarResource(std::span<const std::int16_t> nav_defs) {
+  for (const auto nav : nav_defs) {
+    if (nav >= 0x80) {
+      return nav;
+    }
+  }
+  return -1;
+}
 
 // ===========================================================================
 // Modal prompt helpers
@@ -209,15 +233,14 @@ void Stub_SeedStartingInventory(GameState &state) {
 void Stub_DiscoverStartingSystems(GameState &state) {
   // Menu_RunNewGameFlow sets discovery_state = 1 on the starting system and
   // each adjacent neighbour so the starmap shows the pilot's immediate area.
-  // The starting system is the pilot's entry point; without a fixed coordinate
-  // anchor we use the lowest-numbered defined system (id 0x80, zero-based 0),
-  // which the scroll/start flow chooses for the default pilot type. The
-  // reimplementation tracks discovered systems by id in GameState instead of
-  // the original SystemDef discovery bits; the starmap later reads it.
+  // The starting system is the pilot's entry point. The reimplementation
+  // tracks discovered systems by id in GameState instead of the original
+  // SystemDef discovery bits; the starmap later reads it.
   (void)state;
-  // TODO(decomp): mark the starting system (id 0x80) and each linked neighbour
-  // discovered once a discovery-container is added to GameState. The system
-  // links are now readable via state.scenario.System(0x80)->links.
+  // TODO(decomp): mark the starting system (kStartSystemResourceId) and each
+  // linked neighbour discovered once a discovery-container is added to
+  // GameState. The system links are now readable via
+  // state.scenario.System(kStartSystemResourceId)->links.
   NovaLog::Info("starting system discovery pending: system adjacency now "
                 "available via scenario tables");
 }
@@ -226,12 +249,12 @@ void Stub_PickFirstTravelDestination(GameState &state) {
   // Ghidra Stellar_FindNearestAvailableTravelStellar picks the first adjacent,
   // reachable system as the pilot's initial jump target, stored back into
   // state->travel by Stellar_SetTravelDestination when found. Here the first
-  // live link of the starting system (id 0x80) stands in for that choice.
-  // Ghidra zero-based link ids: -1 or < 0x80 is unused; links >= 0x80 name a
-  // system (the loader re-bases them into the 0.. index space after a sanity
-  // range check, so we keep them as resource ids here).
+  // live link of the starting system (kStartSystemResourceId) stands in for
+  // that choice. Ghidra zero-based link ids: -1 or < 0x80 is unused; links
+  // >= 0x80 name a system (the loader re-bases them into the 0.. index space
+  // after a sanity range check, so we keep them as resource ids here).
   state.travel.selected_dest_id = -1;
-  if (const auto *start = state.scenario.System(0x80); start) {
+  if (const auto *start = state.scenario.System(kStartSystemResourceId); start) {
     for (const auto link : start->links) {
       if (link >= 0x80) {
         state.travel.selected_dest_id = link;
@@ -253,12 +276,38 @@ void ResetPlayerShipForNewGame(GameState &state) {
   // Ghidra 0x004b3350 Ship_ResetPlayerShipState: fresh position/velocity,
   // default class id, recomputed shield/armor/fuel, cleared targeting/travel/
   // mission/AI fields and debuffs.
+  //
+  // Start in the hardcoded starting system (Tichel for now; the original
+  // randomizes among a few start candidates). The world coordinate axes follow
+  // the game convention confirmed from the flight renderer: heading 0 = up
+  // (-y), so world +y is down on screen (Math_AddPolarVelocity projects
+  // heading -> vel = (sin, -cos); pos += vel * dt).
+  state.player.current_system_id = kStartSystemId;
+
   state.player.pos_x = 0.0F;
-  // Spawn just below the starting system's landing stellar (Port Kane at the
-  // origin) so the planet is visible ahead rather than under the ship. The
-  // original positions the ship adjacent to the planet it just left; the offset
-  // is provisional until the landing/launch placement is reconstructed.
+  // Spawn just below the starting system's landing stellar so the body is
+  // visible ahead rather than under the ship. The original positions the ship
+  // adjacent to the planet it just left; the offset is provisional until the
+  // landing/launch placement is reconstructed.
   state.player.pos_y = 60.0F;
+  if (const auto *sys = state.scenario.System(kStartSystemResourceId); sys) {
+    if (const auto anchor_id = PickLandingStellarResource(sys->nav_defs); anchor_id >= 0x80) {
+      if (const auto *anchor = state.scenario.Stellar(anchor_id); anchor) {
+        // Spawn just east (positive-x screen = starboard) of the anchor body,
+        // a small pull away so the planet stays framed ahead-down.
+        state.player.pos_x = static_cast<float>(anchor->pos_x) + 30.0F;
+        state.player.pos_y = static_cast<float>(anchor->pos_y) + 60.0F;
+        NovaLog::Debug("spawning new pilot near landing stellar '{}' at "
+                       "({}, {})",
+                       anchor->name, anchor->pos_x, anchor->pos_y);
+      }
+    }
+  } else {
+    NovaLog::Todo("starting system {:#x} not in scenario tables; spawn kept at "
+                  "the origin",
+                  kStartSystemResourceId);
+  }
+
   state.player.vel_x = state.player.vel_y = 0.0F;
   state.player.heading = 0.0F;
   state.player.speed = 0.0F;
