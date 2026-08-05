@@ -11,7 +11,19 @@
 // Key a modal text/input dialog can act on. The menu's command channel only
 // reports a fixed action-key set, so dialogs read raw editable keys through a
 // separate channel.
-enum class TextKey { none, character, enter, escape, backspace };
+enum class TextKey {
+  none,
+  character,
+  enter,
+  escape,
+  backspace,
+  // Left mouse button-press. Delivered through the same raw channel as the
+  // keyboard so modal loops (e.g. the intro cinematic) that only read
+  // PollTextEvent can also honor the game's primary-click command, mirroring
+  // Ghidra IntroCinematic_Run polling _DAT_00591514. The menu's
+  // PollCommandEvent channel reports the same press as 'm'.
+  primary,
+};
 
 struct TextInput {
   TextKey key = TextKey::none;

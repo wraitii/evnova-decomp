@@ -56,11 +56,16 @@ void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state) {
   NovaLog::Info("entering spaceflight mode");
 
   // Preflight: the new-game intro cinematic plays on the pilot's first entry
-  // (Ghidra DAT_00596d35 == 0 in Ship_RunSpaceflightMode). The intro's
-  // "skipped" result suppresses the post-intro travel-selection dialog, which
-  // is not reconstructed anyway, so it is ignored here.
+  // (Ghidra DAT_00596d35 == 0 in Ship_RunSpaceflightMode). We set the
+  // intro_played latch *after* the intro returns, exactly as the original sets
+  // DAT_00596d35 = 0x01 immediately after IntroCinematic_Run(). The intro's
+  // skip result already gates (a stub of) the post-intro travel-selection
+  // dialog internally, so its return value needs no action here.
   if (!state.intro_played) {
     (void)NovaIntroCinematic_Run(platform, state);
+    // Ghidra: DAT_00596d35 = 0x01, the latch IntroCinematic_SetupFrames/
+    // Game_ResetNewGameState clear on a new pilot (see new_pilot_flow.cpp).
+    state.intro_played = true;
   }
 
   // In-space main loop. Frame_SpaceflightLoop is a per-frame update/present

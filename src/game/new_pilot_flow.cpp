@@ -65,6 +65,7 @@ bool RunTextInputPrompt(SdlPlatform &platform, const std::string &prompt,
         }
         break;
       case TextKey::none:
+      case TextKey::primary: // mouse click does not edit a callsign
         break;
       }
     }
@@ -104,6 +105,7 @@ int RunStartTypePrompt(SdlPlatform &platform) {
       if (input->key == TextKey::escape) {
         return -1;
       }
+      // TextKey::primary / none: mouse click does not select a start type.
     }
     SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
@@ -287,12 +289,19 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   // ---- Step 6: intro cinematic configuration ------------------------------
   // Ghidra: IntroCinematic_SetupFrames fills g_intro_cinematic. Without the
   // pilot save block (0x63688a72) it defaults to a single PICT 0x2008 shown
-  // for 10 ticks. That default is what the reimplementation uses.
+  // for 10 ticks and post_intro_dest_id = 0x7ffd. That default is what the
+  // reimplementation uses. Because post_intro_dest_id (0x7ffd) != -1, the
+  // intro finishes by opening the post-intro travel-selection dialog (see
+  // intro_cinematic.cpp), mirroring the original's flow.
   state.intro_cinematic = IntroCinematicData{};
   state.intro_cinematic.source_pict_ids = {0x2008, -1, -1, -1};
   state.intro_cinematic.duration_60h_ticks = {10, 0, 0, 0};
-  NovaLog::Info("new-game intro configured: single PICT 0x2008 for 10 ticks "
-                "(no pilot save block)");
+  // IntroCinematic_SetupFrames' no-save default: 0x7ffd ("no stellar yet"),
+  // deliberately not -1 so IntroCinematic_Run still opens the destination
+  // dialog after the last frame.
+  state.intro_cinematic.post_intro_dest_id = 0x7ffd;
+  NovaLog::Info("new-game intro configured: single PICT 0x2008 for 10 ticks, "
+                "post-intro dest id 0x7ffd (no pilot save block)");
 
   // ---- Step 7: mark active ------------------------------------------------
   // Ghidra: DAT_00596d28 = 1 (game active), DAT_00596d2f = repoChoice.

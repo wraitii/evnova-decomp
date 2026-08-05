@@ -27,6 +27,14 @@ struct IntroCinematicData {
   // Per-frame display time in 1/60 s ticks, matching the original clamp.
   std::array<std::int16_t, 4> duration_60h_ticks{0, 0, 0, 0};
   std::int16_t post_intro_dest_id = -1;
+
+  // Ghidra IntroCinematic_Run opens the post-intro travel-selection dialog
+  // when post_intro_dest_id != -1. The new-game flow (IntroCinematic_SetupFrames
+  // default) uses 0x7ffd even with no pilot-save block, which is "no stellar
+  // yet" but deliberately not -1 so the dialog still opens.
+  [[nodiscard]] bool should_open_post_intro_dialog() const {
+    return post_intro_dest_id != -1;
+  }
 };
 
 // Ghidra 0x004b3350 Ship_ResetPlayerShipState resets g_ship_states. The

@@ -82,6 +82,13 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
                                       &mouse_position_.y);
       continue;
     }
+    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+        event.button.button == SDL_BUTTON_LEFT) {
+      SDL_RenderCoordinatesFromWindow(renderer_.get(), event.button.x,
+                                      event.button.y, &mouse_position_.x,
+                                      &mouse_position_.y);
+      return TextInput{TextKey::primary};
+    }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
       switch (event.key.key) {
       case SDLK_RETURN:

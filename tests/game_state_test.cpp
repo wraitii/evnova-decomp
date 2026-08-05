@@ -28,11 +28,35 @@ TEST_CASE("a fresh GameState is inactive with no intro played") {
   CHECK(state.pilot.first_name.empty());
   CHECK(state.pilot.last_name.empty());
   CHECK(state.intro_cinematic.post_intro_dest_id == -1);
+  // A -1 post-intro destination means IntroCinematic_Run must NOT open the
+  // post-intro travel-selection dialog.
+  CHECK_FALSE(state.intro_cinematic.should_open_post_intro_dialog());
 
   // The four-frame cinematic array is empty by default (ids < 1 => no art).
   for (const auto id : state.intro_cinematic.source_pict_ids) {
     CHECK(id < 1);
   }
+}
+
+// The new-game flow (mirroring IntroCinematic_SetupFrames' no-save default)
+// configures the intro with a single frame and post_intro_dest_id = 0x7ffd.
+// 0x7ffd is the "no stellar yet" sentinel but is deliberately distinct from
+// -1, so IntroCinematic_Run still opens the destination dialog after the
+// last frame. Captured here as a pure-data regression test.
+TEST_CASE("the new-game intro config opens the post-intro destination dialog") {
+  game::IntroCinematicData cinematic;
+  cinematic.source_pict_ids = {0x2008, -1, -1, -1};
+  cinematic.duration_60h_ticks = {10, 0, 0, 0};
+  // IntroCinematic_SetupFrames writes 0x7ffd on the no-save path (Ghidra
+  // 0x004cd3b0).
+  cinematic.post_intro_dest_id = 0x7ffd;
+
+  CHECK(cinematic.source_pict_ids[0] == 0x2008);
+  CHECK(cinematic.source_pict_ids[1] < 1);
+  CHECK(cinematic.duration_60h_ticks[0] == 10);
+  // The dialog gate trips for 0x7ffd even though it represents "no stellar".
+  CHECK(cinematic.post_intro_dest_id != -1);
+  CHECK(cinematic.should_open_post_intro_dialog());
 }
 
 TEST_CASE("a fresh PlayerShip carries the new-game reset defaults") {
