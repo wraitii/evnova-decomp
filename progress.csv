@@ -176,7 +176,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00431530,Shot_UpdateShotGuidance,,0%,
 0x00432470,System_UpdateSystemAndStellarDisplayState,,0%,
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
-0x00433050,Ship_HandleShip,,0%,
+0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,3%,player free-flight movement model reconstructed (ship-class stats, turn/thrust/clamp, inertia coast, reverse brake) via NovaPlayer_IntegrateMovement; AI/combat/weapon/travel scopes still stubbed
 0x00435830,Shot_HandleShot,,0%,
 0x00436910,Frame_UpdateScriptedManeuverSprites,,0%,
 0x00436FF0,NovaUi_ResolveWeaponSplashImpact,,0%,
@@ -202,8 +202,8 @@ address,name,impl_file,reimpl_pct,comment
 0x0043AED0,Stellar_HandleShipStellarCrash,,0%,
 0x0043B020,Ship_SteerVelocityTowardShipHeading,,0%,
 0x0043B170,Frame_UpdateFadingEffectSprites,,0%,
-0x0043B4A0,Math_AddPolarVelocity,,0%,
-0x0043B4E0,Math_AddPolarVelocityWithClamp,,0%,
+0x0043B4A0,Math_AddPolarVelocity,src/game/spaceflight.cpp,80%,polar velocity convention (heading 0=up, clockwise, vel_x=sin, vel_y=-cos) reproduced inline in NovaPlayer_IntegrateMovement; not a distinct function yet
+0x0043B4E0,Math_AddPolarVelocityWithClamp,src/game/spaceflight.cpp,70%,top-speed axis clamp behavior reproduced in NovaPlayer_IntegrateMovement
 0x0043B670,Math_BearingFromPointToPoint,,0%,
 0x0043B6A0,Math_ClampVelocityComponents,,0%,
 0x0043B710,Math_SquaredDistance,,0%,
@@ -268,7 +268,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0044AA30,Math_RotateLeft8,,0%,
 0x0044AA50,FUN_0044aa50,,0%,
 0x0044AA60,FUN_0044aa60,,0%,
-0x0044AA70,Ship_HandlePlayerShipCore,,0%,
+0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,3%,player thrust/turn control subset reconstructed (ShipClass stats scaled accel/640, speed/10000, maneuver*0.1); travel/combat/disable/mission scopes still stubbed
 0x0044B120,Ship_HandlePlayerShip,,0%,
 0x0044C8D0,Ship_TurnShipTowardHeading,,0%,
 0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,

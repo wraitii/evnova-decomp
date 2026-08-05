@@ -18,6 +18,7 @@
 // which latches DAT_00596d38 on the primary mouse command through the pause
 // menu; see the loop body in spaceflight.cpp.
 
+#include "../sdl_platform.hpp"
 #include "game_state.hpp"
 
 class SdlPlatform;
@@ -34,10 +35,34 @@ namespace game {
 // shell.
 void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state);
 
+// Ship-class movement stats derived from the raw resource as the original
+// loader (NovaData_LoadScenarioResourceTables 0x004bd3c0) derives
+// ShipClassDef.base_turn_rate_deg / base_speed / accel(0x3c):
+//   accel    = raw_accel    / 10000.0   (px/frame^2)
+//   speed    = raw_speed    / 640.0     (px/frame)
+//   turn     = raw_maneuver * 0.1       (deg/frame)
+// See spaceflight.cpp for the source-constant references.
+struct PlayerMovementStats {
+  float turn_rate_deg_per_frame = 0.0F;
+  float max_speed_px_per_frame = 0.0F;
+  float thrust_px_per_frame2 = 0.0F;
+};
+
+// Pure free-flight physics integrator (unit-testable; no SDL). Derives stats
+// from a ShipClass and advances the player ship for one frame according to the
+// Input key latches. Faithful to the original movement model ("Player ship
+// movement (free flight)" comment in spaceflight.cpp): bank continuously at
+// the class turn rate while a turn key is held, thrust along heading toward
+// the class top speed, inertia-preserving coast when thrust released, and
+// reverse-thrust braking toward rest. Returns the same PlayerMovementStats it
+// integrated with so the caller knows what was applied.
+[[nodiscard]] PlayerMovementStats NovaPlayer_IntegrateMovement(
+    PlayerShip &ship, const FlightInput &input,
+    const ShipClass &ship_class);
+
 // Reads the live flight controls (via SdlPlatform::PollFlightInput) and
 // integrates the player ship's heading/throttle into GameState.player so the
-// ship flies during flight. A lightweight momentum/turn model stands in for the
-// full Ship_HandlePlayerShipCore movement while the simulation is stubbed.
+// ship flies during flight.
 extern void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state);
 
 } // namespace game

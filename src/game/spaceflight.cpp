@@ -289,61 +289,146 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
 
 } // namespace
 
-// Integrates the player's heading/throttle from the live keyboard into the
-// PlayerShip. This is a lightweight stand-in for Ship_HandlePlayerShipCore's
-// movement: turn by a fixed rate per frame, accelerate toward the current
-// heading while thrust is held, apply a soft drag, and clamp speed.
-// TODO(decomp): replace these provisional turn/thrust/drag constants with the
-// ship-class-derived rates (base_turn_rate_deg, base_speed, accel) once the
-// movement sim is reconstructed.
+// ---------------------------------------------------------------------------
+// Player ship movement (free flight)
+// ---------------------------------------------------------------------------
+// GHIDRA 0x0044aa70 Ship_HandlePlayerShipCore drives the player ship; the
+// actual per-frame integration lives in 0x00433050 Ship_HandleShip with the
+// polar helpers Math_AddPolarVelocity (0x0043b4a0) and
+// Math_AddPolarVelocityWithClamp (0x0043b4e0). Reconstructs that movement
+// model for the player instead of the old fixed-constant stand-in:
+//
+//  * Stats come from the ship class (ShipClassDef). The scenario loader scales
+//    the raw resource shorts exactly as the original (NovaData_LoadScenario-
+//    ResourceTables 0x004bd3c0):
+//        accel    -> thrust (px/frame^2):  raw_accel / 10000.0    (DAT_00575e68)
+//        speed    -> top speed (px/frame): raw_speed / 640.0      (DAT_00575e48)
+//        maneuver -> turn rate (deg/frame): raw_maneuver * 0.1    (DAT_00575e58)
+//    Starter (sh.x9an 0x80): accel 0.05, speed 0.625, turn 4.0 deg/frame.
+//    These per-frame values hold at the original's reference cadence (the game
+//    scales them by g_avg_frame_time_ms; see note at the end).
+//
+//  * Turn follows the held key at the class turn rate continuously (no
+//    heading integration besides the rate), matching Ship_ComputeShipMaxTurn-_
+//    RateDeg making the ship bank at max rate under direct control. Heading 0
+//    points 'up', increases clockwise (Math_AddPolarVelocity convention).
+//
+//  * Thrust accelerates along the heading vector toward top speed, clamped to
+//    the effective max (like Math_AddPolarVelocityWithClamp). The original's
+//    throttle rate is high enough that the player reaches top speed within a
+//    few frames when holding thrust (near-instant arcade accel).
+//
+//  * WHEN THROTTLE RELEASED THE SHIP COASTS -- there is NO continuous velocity
+//    drag in the original's free-flight path, so a released ship keeps most of
+//    its momentum. The old stand-in's per-frame kDrag multiply was the main
+//    fidelity bug (made ships feel mushy and never reach a crisp cruise).
+//
+//  * Brake ('s'/down) applies reverse thrust toward zero velocity, converging
+//    to top speed (or to rest). After reaching rest any last velocity is zeroed.
+//
+// NOTE(decomp) scale/cadence: the original integrates over g_avg_frame_time_ms
+// (0x00735448, Frame_MeasureFrameTiming 0x00432ea0) so ship motion is cadence-,
+// not fixed-step, independent. The reimplementation loop is per-frame fixed
+// cadence (SDL_Delay(16) in NovaFrame_SpaceflightLoop), so the class stats are
+// used directly as per-frame values and the frames-per-second of the host
+// dictates on-screen pace; this restores the *relative* handling between ship
+// classes and the inertia feel, but the absolute pace/turn should be re-checked
+// against a real capture once the world->viewport transform is reconstructed.
+// Pure per-frame movement integration (unit-tested in tests/movement_test.cpp).
+[[nodiscard]] PlayerMovementStats NovaPlayer_IntegrateMovement(
+    PlayerShip &ship, const FlightInput &input, const ShipClass &ship_class) {
+  constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+  constexpr float kTwoPi = 6.283185307179586F;
+
+  PlayerMovementStats stats;
+  stats.turn_rate_deg_per_frame =
+      static_cast<float>(ship_class.turn_rate) * 0.1F;
+  stats.max_speed_px_per_frame =
+      static_cast<float>(ship_class.speed) / 640.0F;
+  stats.thrust_px_per_frame2 =
+      static_cast<float>(ship_class.accel) / 10000.0F;
+  const float turn_rad_per_frame = stats.turn_rate_deg_per_frame * kDegToRad;
+  const float reverse_accel = stats.thrust_px_per_frame2 * 2.0F;
+
+  ship.engine_thrust = input.thrust;
+  const bool retro_thrust = input.brake && !input.thrust;
+
+  // Heading: bank continuously at the class turn rate while a turn key is held.
+  if (input.turn_left) {
+    ship.heading -= turn_rad_per_frame;
+  }
+  if (input.turn_right) {
+    ship.heading += turn_rad_per_frame;
+  }
+  ship.heading = std::fmod(ship.heading + kTwoPi, kTwoPi);
+  if (ship.heading < 0.0F) {
+    ship.heading += kTwoPi;
+  }
+
+  if (input.thrust) {
+    // Heading 0 = 'up' (screen -y); thrust along heading toward top speed.
+    ship.vel_x += std::sin(ship.heading) * stats.thrust_px_per_frame2;
+    ship.vel_y -= std::cos(ship.heading) * stats.thrust_px_per_frame2;
+  }
+
+  if (retro_thrust) {
+    // Reverse thrust opposes the current velocity: reduce the velocity vector's
+    // magnitude toward zero by the reverse-accel step, without a proportional
+    // multiplier (so it lands exactly on rest instead of the decaying-decay
+    // overshoot a `vel *= (1-k)` with k>1 causes). Direction is preserved.
+    const float speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+    if (speed > 1e-4F) {
+      const float reduce = std::min(reverse_accel, speed);
+      const float scale = (speed - reduce) / speed;
+      ship.vel_x *= scale;
+      ship.vel_y *= scale;
+    } else {
+      ship.vel_x = 0.0F;
+      ship.vel_y = 0.0F;
+    }
+  }
+
+  // Clamp to the class top speed (Math_AddPolarVelocityWithClamp behaviour).
+  const float speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+  if (speed > stats.max_speed_px_per_frame) {
+    const float scale = stats.max_speed_px_per_frame / speed;
+    ship.vel_x *= scale;
+    ship.vel_y *= scale;
+  }
+
+  ship.pos_x += ship.vel_x;
+  ship.pos_y += ship.vel_y;
+  ship.speed =
+      std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+  return stats;
+}
+
 void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state) {
   const FlightInput input = platform.PollFlightInput();
   PlayerShip &p = state.player;
 
-  constexpr float kTurnRate = 0.09F;    // rad/frame (~5.2 deg)
-  constexpr float kThrustAccel = 0.35F; // px/frame^2
-  constexpr float kMaxSpeed = 7.0F;     // px/frame
-  constexpr float kDrag = 0.985F;       // per-frame velocity damping
-  // Engine-glow intensity ramp: rise/fall rate per frame toward the binary
-  // thrust target. Clean-room stand-in for the original's throttle-based glow
-  // dimming (TODO(decomp): map to ShipState.ai_forward_thrust_cmd magnitude
-  // once a throttle is modeled).
+  const ShipClass *cls = state.scenario.Ship(
+      static_cast<std::int16_t>(p.ship_class_id + 0x80));
+  // No scenario table (or missing class/archive), or a non-arbitrary ship class
+  // with zeroed movement fields: fall back to the Baktun/starter-style defaults
+  // the pilot ship expects while keeping the inertia-preserving model.
+  ShipClass fallback;
+  if (!cls) {
+    fallback.turn_rate = 40;
+    fallback.speed = 400;
+    fallback.accel = 500;
+    cls = &fallback;
+  }
+  (void)NovaPlayer_IntegrateMovement(p, input, *cls);
+
+  // Engine-glow intensity ramp toward the binary thrust target (clean-room
+  // stand-in for the original dimming the glow with ai_forward_thrust_cmd
+  // throttle; TODO(decomp): drive by thrust magnitude once the command channel
+  // exists).
   constexpr float kGlowRiseRate = 0.12F;
   constexpr float kGlowDecayRate = 0.05F;
-
-  p.engine_thrust = input.thrust;
-  // Ramp the glow intensity toward 1.0 while thrusting, toward 0.0 when not.
   p.engine_glow_intensity += (p.engine_thrust ? kGlowRiseRate : -kGlowDecayRate);
   p.engine_glow_intensity = std::clamp(p.engine_glow_intensity, 0.0F, 1.0F);
-
-  if (input.turn_left) {
-    p.heading -= kTurnRate;
-  }
-  if (input.turn_right) {
-    p.heading += kTurnRate;
-  }
-  if (input.thrust) {
-    // Heading 0 points 'up' (screen -y).
-    p.vel_x += std::sin(p.heading) * kThrustAccel;
-    p.vel_y -= std::cos(p.heading) * kThrustAccel;
-  }
-  if (input.brake) {
-    // Brake: strong drag toward zero velocity.
-    p.vel_x *= 0.86F;
-    p.vel_y *= 0.86F;
-  }
-
-  p.vel_x *= kDrag;
-  p.vel_y *= kDrag;
-  const float speed = std::sqrt(p.vel_x * p.vel_x + p.vel_y * p.vel_y);
-  if (speed > kMaxSpeed) {
-    const float scale = kMaxSpeed / speed;
-    p.vel_x *= scale;
-    p.vel_y *= scale;
-  }
-  p.pos_x += p.vel_x;
-  p.pos_y += p.vel_y;
-  p.speed = speed;
 }
 
 void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state) {
