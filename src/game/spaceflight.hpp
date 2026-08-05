@@ -52,10 +52,11 @@ struct PlayerMovementStats {
 // from a ShipClass and advances the player ship for one frame according to the
 // Input key latches. Faithful to the original movement model ("Player ship
 // movement (free flight)" comment in spaceflight.cpp): bank continuously at
-// the class turn rate while a turn key is held, thrust along heading toward
-// the class top speed, inertia-preserving coast when thrust released, and
-// reverse-thrust braking toward rest. Returns the same PlayerMovementStats it
-// integrated with so the caller knows what was applied.
+// the class turn rate while a turn key is held, thrust along heading as a
+// per-AXIS-polar-clamped step (Math_AddPolarVelocityWithClamp 0x0043b4e0),
+// inertia-preserving coast when thrust released, and reverse-thrust braking
+// toward rest. Returns the same PlayerMovementStats it integrated with so the
+// caller knows what was applied.
 [[nodiscard]] PlayerMovementStats NovaPlayer_IntegrateMovement(
     PlayerShip &ship, const FlightInput &input,
     const ShipClass &ship_class);

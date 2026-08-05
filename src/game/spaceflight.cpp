@@ -313,18 +313,24 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
 //    RateDeg making the ship bank at max rate under direct control. Heading 0
 //    points 'up', increases clockwise (Math_AddPolarVelocity convention).
 //
-//  * Thrust accelerates along the heading vector toward top speed, clamped to
-//    the effective max (like Math_AddPolarVelocityWithClamp). The original's
-//    throttle rate is high enough that the player reaches top speed within a
-//    few frames when holding thrust (near-instant arcade accel).
+//  * Thrust accelerates along the heading as a polar velocity step clamped
+//    per-AXIS to the projection of the class top speed (Math_AddPolarVelocity-
+//    WithClamp 0x0043b4e0). The clamp only caps each axis's additional thrust
+//    at its polar max projection; it is NOT a vector-magnitude governor, so a
+//    ship turning at full thrust can build a small off-axis component that
+//    pushes its net speed modestly past the nominal top speed (the authentic
+//    EVN drift). The original's throttle is high enough to top out within a
+//    few frames.
 //
 //  * WHEN THROTTLE RELEASED THE SHIP COASTS -- there is NO continuous velocity
 //    drag in the original's free-flight path, so a released ship keeps most of
 //    its momentum. The old stand-in's per-frame kDrag multiply was the main
 //    fidelity bug (made ships feel mushy and never reach a crisp cruise).
 //
-//  * Brake ('s'/down) applies reverse thrust toward zero velocity, converging
-//    to top speed (or to rest). After reaching rest any last velocity is zeroed.
+//  * BRAKE ('s'/down) is a separate reverse-to-rest path (see body), not a
+//    second thrust sign, because the original's reverse is governed by
+//    ai_desired_speed / reverse_speed_bias rather than a mirrored forward
+//    thrust.
 //
 // NOTE(decomp) scale/cadence: the original integrates over g_avg_frame_time_ms
 // (0x00735448, Frame_MeasureFrameTiming 0x00432ea0) so ship motion is cadence-,
@@ -335,6 +341,45 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
 // classes and the inertia feel, but the absolute pace/turn should be re-checked
 // against a real capture once the world->viewport transform is reconstructed.
 // Pure per-frame movement integration (unit-tested in tests/movement_test.cpp).
+
+// One per-axis step of Ghidra Math_AddPolarVelocityWithClamp (0x0043b4e0), the
+// original's single forward-thrust pathway (Ship_HandleShip calls it with
+// `ai_forward_thrust_cmd * frame_time` as the base speed). For each velocity
+// axis it combines the polar projection of the class top speed (max_proj) with
+// the polar projection of the per-frame thrust step (delta) and the current
+// velocity, exactly as decoded:
+//
+//   if (delta <= 0 || max_proj <= 0) {
+//       if (delta < 0 && max_proj < 0) { if (max_proj < cur) cur += delta; }
+//       else                             cur += delta;
+//   } else if (cur < max_proj)          cur += delta;
+//
+// The clamp therefore only CAPS additional thrust on an axis at its polar max
+// projection; it never pulls an existing (e.g. drift-built) component back to
+// enforce a vector-magnitude limit. Heading uses the polar convention from
+// Math_AddPolarVelocity (0x0043b4a0): vel_x += sin(h)*s ; vel_y -= cos(h)*s.
+static void NovaPlayer_AddPolarVelocityClamped(float heading_rad, float thrust_step,
+                                               float max_speed, float &vel_x, float &vel_y) {
+  const float sin_h = std::sin(heading_rad);
+  const float cos_h = std::cos(heading_rad);
+  auto axis_step = [](float max_proj, float delta, float cur) -> float {
+    if (delta <= 0.0F || max_proj <= 0.0F) {
+      if (delta < 0.0F && max_proj < 0.0F) {
+        if (max_proj < cur) {
+          cur += delta;
+        }
+      } else {
+        cur += delta;
+      }
+    } else if (cur < max_proj) {
+      cur += delta;
+    }
+    return cur;
+  };
+  vel_x = axis_step(sin_h * max_speed, sin_h * thrust_step, vel_x);
+  vel_y = axis_step(-cos_h * max_speed, -cos_h * thrust_step, vel_y);
+}
+
 [[nodiscard]] PlayerMovementStats NovaPlayer_IntegrateMovement(
     PlayerShip &ship, const FlightInput &input, const ShipClass &ship_class) {
   constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
@@ -351,7 +396,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
   const float reverse_accel = stats.thrust_px_per_frame2 * 2.0F;
 
   ship.engine_thrust = input.thrust;
-  const bool retro_thrust = input.brake && !input.thrust;
+  const bool retro_thrust = input.brake && !input.thrust; // brake excludes thrust
 
   // Heading: bank continuously at the class turn rate while a turn key is held.
   if (input.turn_left) {
@@ -366,9 +411,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
   }
 
   if (input.thrust) {
-    // Heading 0 = 'up' (screen -y); thrust along heading toward top speed.
-    ship.vel_x += std::sin(ship.heading) * stats.thrust_px_per_frame2;
-    ship.vel_y -= std::cos(ship.heading) * stats.thrust_px_per_frame2;
+    // Forward thrust: polar step toward the heading, per-axis clamped to the
+    // class top speed projection (Math_AddPolarVelocityWithClamp semantics).
+    NovaPlayer_AddPolarVelocityClamped(ship.heading, stats.thrust_px_per_frame2,
+                                       stats.max_speed_px_per_frame, ship.vel_x,
+                                       ship.vel_y);
   }
 
   if (retro_thrust) {
@@ -386,14 +433,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
       ship.vel_x = 0.0F;
       ship.vel_y = 0.0F;
     }
-  }
-
-  // Clamp to the class top speed (Math_AddPolarVelocityWithClamp behaviour).
-  const float speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
-  if (speed > stats.max_speed_px_per_frame) {
-    const float scale = stats.max_speed_px_per_frame / speed;
-    ship.vel_x *= scale;
-    ship.vel_y *= scale;
   }
 
   ship.pos_x += ship.vel_x;

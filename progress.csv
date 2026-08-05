@@ -203,7 +203,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0043B020,Ship_SteerVelocityTowardShipHeading,,0%,
 0x0043B170,Frame_UpdateFadingEffectSprites,,0%,
 0x0043B4A0,Math_AddPolarVelocity,src/game/spaceflight.cpp,80%,polar velocity convention (heading 0=up, clockwise, vel_x=sin, vel_y=-cos) reproduced inline in NovaPlayer_IntegrateMovement; not a distinct function yet
-0x0043B4E0,Math_AddPolarVelocityWithClamp,src/game/spaceflight.cpp,70%,top-speed axis clamp behavior reproduced in NovaPlayer_IntegrateMovement
+0x0043B4E0,Math_AddPolarVelocityWithClamp,src/game/spaceflight.cpp,85%,per-axis polar clamp reproduced faithfully (caps thrust per-axis at polar max projection; no magnitude governor) via NovaPlayer_AddPolarVelocityClamped; angle lookup tables approximated with sin/cos
 0x0043B670,Math_BearingFromPointToPoint,,0%,
 0x0043B6A0,Math_ClampVelocityComponents,,0%,
 0x0043B710,Math_SquaredDistance,,0%,
