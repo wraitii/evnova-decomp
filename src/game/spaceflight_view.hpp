@@ -125,6 +125,9 @@ class SpaceflightView {
   // Whether this class's sh\x8an descriptor named a glow layer at all (so
   // EnsureShipSprite does not retry a missing sheet every frame).
   bool has_glow_ = false;
+  // Last glow-draw gate result, so transitions (on/off) can be logged once per
+  // change rather than per frame (diagnostic for the flight render).
+  bool glow_last_drawn_ = false;
 
   // Decodes one rl\x9144 ship sheet (resource `id`) and uploads its frames as
   // textures. Returns nullopt when the sheet is missing/malformed. Multi-frame

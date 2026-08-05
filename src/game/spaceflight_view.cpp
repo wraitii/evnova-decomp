@@ -636,6 +636,12 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
     // throttle).
     if (has_glow_ && state.player.engine_glow_intensity > 0.0F &&
         !glow_.frames.empty() && glow_.frames_per_rotation > 0) {
+      if (!glow_last_drawn_) {
+        NovaLog::Info("[glow] draw ON intensity={:.2f} frames={} size={}x{}",
+                      state.player.engine_glow_intensity, glow_.frame_count,
+                      glow_.width, glow_.height);
+        glow_last_drawn_ = true;
+      }
       const int glow_frame =
           std::clamp(FrameForHeading(state.player.heading,
                                      glow_.frames_per_rotation),
@@ -652,6 +658,12 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
       SDL_SetTextureAlphaMod(glow_texture->get(), alpha);
       SDL_RenderTexture(renderer, glow_texture->get(), nullptr, &glow_dest);
       SDL_SetTextureAlphaMod(glow_texture->get(), SDL_ALPHA_OPAQUE);
+    } else if (glow_last_drawn_) {
+      // Won't draw this frame (intensity leaked below the gate / layer empty).
+      NovaLog::Info("[glow] draw OFF has_glow={} intensity={:.2f} frames={}",
+                    has_glow_, state.player.engine_glow_intensity,
+                    glow_.frame_count);
+      glow_last_drawn_ = false;
     }
   }
 }
