@@ -2,6 +2,7 @@
 
 #include "brgr_archive.hpp"
 #include "game/game_state.hpp"
+#include "game/pilot_file.hpp"
 #include "pict_image.hpp"
 
 #include <filesystem>
@@ -20,6 +21,48 @@ bool NovaArchivesAvailable() {
 
 // The game-state model is pure data (no SDL/renderer), so these tests run in
 // every environment. They document the defaults the new-pilot flow relies on.
+
+// The pilot file is an on-demand serialized record of the live state (the
+// original only materializes it for load/save, see pilot_file.hpp). A fresh
+// record seeds a brand-new pilot exactly like PilotData_InitializePlayerState
+// (0x004cd4b0): 10000 credits, ship class 0, system 0, no intro configured.
+TEST_CASE("a fresh PilotFile seed matches PilotData_InitializePlayerState") {
+  const game::PilotFile fresh = game::PilotFile::Fresh();
+  CHECK(fresh.pilot_name.empty());
+  CHECK(fresh.credits == 10000);
+  CHECK(fresh.ship_class_id == 0);
+  CHECK(fresh.current_system_id == 0);
+  CHECK(fresh.death_timer_active == -1.0F);
+  CHECK(fresh.timed_action_counter == -1);
+  // No intro configured yet.
+  CHECK(fresh.post_intro_dest_id == -1);
+  for (const auto id : fresh.intro_source_pict_ids) {
+    CHECK(id < 1);
+  }
+}
+
+// Applying a seeded pilot record mirrors the live state the new-game flow
+// produces (PilotData_InitializePlayerState fresh-seed + IntroCinematic_
+// SetupFrames), without touching serialization (no .plt writer).
+TEST_CASE("PilotFileApply seeds the live state from a pilot record") {
+  game::PilotFile record = game::PilotFile::Fresh();
+  record.pilot_name = "Rowan";
+  record.intro_source_pict_ids = {0x2008, 0x2009, 0x200a, -1};
+  record.intro_duration_60h_ticks = {45, 45, 45, 0};
+  record.post_intro_dest_id = 0x7ffd;
+  record.outfit_owned_count[9] = 2;
+
+  game::GameState state;
+  state.pilot.first_name = "not-yet-seeded";
+  game::PilotFileApply(record, state);
+
+  CHECK(state.pilot.first_name == "Rowan");
+  // The fresh seed carries the PilotData_InitializePlayerState defaults.
+  CHECK(state.player.credits == 10000);
+  CHECK(state.player.ship_class_id == 0);
+  CHECK(state.player.current_system_id == 0);
+  CHECK(state.player.timed_action_counter == -1);
+}
 
 TEST_CASE("a fresh GameState is inactive with no intro played") {
   game::GameState state;

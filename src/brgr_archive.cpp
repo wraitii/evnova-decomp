@@ -159,6 +159,32 @@ ParseArchive(const std::filesystem::path &path) {
         type_dir_offset + type_count * kMapTypeEntrySize > entry.size) {
       continue;
     }
+    // Some containers carry multiple regions whose first bytes happen to read
+    // as a plausible map header (a small type_dir_offset and a modest type
+    // count) but whose "records" are not a coherent record table. Only trust a
+    // region when every type entry's record table lies entirely inside it; a
+    // genuine resource.map is one big packed block of fixed-size records, so an
+    // overflowing entry means this region is not the map. This is what earlier
+    // caused Nova Data 4's o\x9ftf / w\x91ap records to be missed: a bogus
+    // region was accepted before the real one.
+    bool table_in_bounds = true;
+    for (std::size_t type = 0; type < type_count; ++type) {
+      const auto type_entry_offset =
+          entry.offset + type_dir_offset + type * kMapTypeEntrySize;
+      const auto records_offset = static_cast<std::size_t>(
+          ReadBe32(archive.bytes, type_entry_offset + 4));
+      const auto record_count = static_cast<std::size_t>(
+          ReadBe32(archive.bytes, type_entry_offset + 8));
+      const auto table_end =
+          records_offset + record_count * static_cast<std::size_t>(kMapRecordSize);
+      if (records_offset > entry.size || table_end > entry.size) {
+        table_in_bounds = false;
+        break;
+      }
+    }
+    if (!table_in_bounds) {
+      continue;
+    }
     for (std::size_t type = 0; type < type_count; ++type) {
       const auto type_entry_offset =
           entry.offset + type_dir_offset + type * kMapTypeEntrySize;
@@ -170,9 +196,6 @@ ParseArchive(const std::filesystem::path &path) {
       for (std::size_t record = 0; record < record_count; ++record) {
         const auto record_offset =
             entry.offset + records_offset + record * kMapRecordSize;
-        if (record_offset + 0x0e > entry.offset + entry.size) {
-          break;
-        }
         const auto index =
             static_cast<std::size_t>(ReadBe32(archive.bytes, record_offset));
         const auto resource_id = ReadBe16(archive.bytes, record_offset + 8);
@@ -190,18 +213,29 @@ ParseArchive(const std::filesystem::path &path) {
   return std::nullopt;
 }
 
-// Archives needed by the menu/splash path. Graphics 3 holds the sp\x95n,
+// Archives needed by the recompiled path. Graphics 3 holds the sp\x95n,
 // c\x9alr and rl\x91D menu assets; Nova Titles 1 holds the splash PICTs
 // (0x1fa4 loading, 0x83 startup); Nova Sounds holds the "snd " audio family
-// used for menu feedback and the intro/travel/loading sounds (ids 600..603);
-// Nova Data 1 holds the single ch\x9ar (character / default pilot type .Trader)
-// resource that carries the new-pilot intro frame/delay fields. Extend as more
-// subsystems are reconstructed.
+// used for menu feedback and the intro/travel/loading sounds (ids 600..603).
+//
+// The scenario data archives hold the runtime resource tables that
+// NovaData_LoadScenarioResourceTables (0x004bd3c0) rebuilds: ships (sh\x95p)
+// and the default character (ch\x9ar) live in Nova Data 1; stellars (sp\x9ab)
+// and systems (s\xd8st) in Nova Data 2; descriptions (d\x91sc) span several;
+// outfits (o\x9ftf) and weapons (w\x91ap) are in Nova Data 4. The remaining
+// Data archives are loaded so plugins/overrides resolve the same way the
+// original scans them; more are added as graphics/ships subsystems are
+// reconstructed.
 constexpr std::array kArchiveFileNames{
     "Nova Graphics 3.rez",
     "Nova Titles 1.rez",
     "Nova Sounds.rez",
     "Nova Data 1.rez",
+    "Nova Data 2.rez",
+    "Nova Data 3.rez",
+    "Nova Data 4.rez",
+    "Nova Data 5.rez",
+    "Nova Data 6.rez",
 };
 constexpr std::array kNovaFilesRoots{
     "EV Nova/Nova Files/",

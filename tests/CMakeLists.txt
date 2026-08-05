@@ -1,5 +1,6 @@
 add_executable(evnova_tests
     game_state_test.cpp
+    scenario_data_test.cpp
     smoke_test.cpp
 )
 

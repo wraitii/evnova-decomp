@@ -5,7 +5,7 @@ Escape Velocity Nova is Ambrosia Software's 2002 open-world 2D space-trading and
 ## Current state: recompilation started.
 
 The decomp is now quite advanced.
-The current goal is to continue improving decomp understanding and metadata — function/param/type renames, struct fields, globals, and comments in the Ghidra DB. There is no C++ code in this repo yet; reimplementation has not started. Many *deep* helper routines and low-level subsystems are still only provisionally named, and numerous struct fields remain untyped/unattributed.
+The current goal is to continue improving decomp understanding and metadata — function/param/type renames, struct fields, globals, and comments in the Ghidra DB. There is no C++ code in this repo yet; reimplementation has not started. Many _deep_ helper routines and low-level subsystems are still only provisionally named, and numerous struct fields remain untyped/unattributed.
 
 Ghidra is the decompiler backend — it maintains its own database of the code, with disassembled, decompiled, partial type and symbol information.
 Part of the objective of this metadata work is to improve Ghidra's DB to make future decompiling easier.
@@ -19,6 +19,22 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 - Be conservative with speculative renames; be liberal with factual comments. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.
 - Prefer plate comments for functions; pre-comments for globals/data.
 - When renaming high-level control-flow functions (startup, run loop, shutdown), also add a short clean-room comment block (2-4 lines) documenting purpose, entry/exit conditions, and confidence/unknowns.
+
+## Function progress tracker (`progress.csv`)
+
+The project root `progress.csv` tracks one row per Ghidra function:
+`address,name,impl_file,reimpl_pct,comment`. It is the canonical record of how
+much of each function has been re-implemented.
+
+- **Keep it always up to date**, conservatively, whenever you make a code change that re-implements or partially re-implements a Ghidra function: update that row's `reimpl_pct`, `impl_file`, and `comment` in the same commit.
+- `reimpl_pct` is an **estimate of reimplementation completeness**, 0% to 100%.
+  - `100%` — faithful reimplementation.
+  - `10%`–`90%` — partial: the higher the number, the more behavior is reimplemented (skeleton/cadence-only ≈ 10–30%; a substantial subset that still has known stubbed scopes or untracked fields ≈ 40–90%).
+  - `0%` — not reimplemented (regardless of whether the function is already named/annotated in Ghidra; only reimplementation progress counts here).
+- `impl_file` is the `src/...` path that reimplements the function (empty when `0%`).
+- `comment` is a short note (confidence, known gaps/divergences, TODO(decomp)).
+- **Edit `progress.csv` in place**.
+- **`progress.csv` is very large (~3200 rows). Never rewrite it wholesale or dump it to your context. Always locate the target address with grep and make surgical, in-place edits (edit tool / patch), leaving all other rows intact.**
 
 ## C++ reimplementation phase
 

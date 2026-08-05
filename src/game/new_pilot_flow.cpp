@@ -4,9 +4,11 @@
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "pilot_file.hpp"
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <random>
 #include <string>
@@ -145,13 +147,16 @@ int RunStartTypePrompt(SdlPlatform &platform) {
 // the systems it depends on.
 namespace {
 
-void Stub_LoadScenarioResourceTables() {
-  // Ghidra 0x004b9050 NovaData_LoadScenarioResourceTables reads the first
-  // c\x9alr record plus the scenario table resources. Those tables drive
-  // system/outfit/weapon class definitions, which are not reconstructed yet.
-  // The player ship is left at the default class without scenario world data.
-  NovaLog::Todo("scenario resource tables not loaded; player world uses "
-                "fallback defaults");
+void Stub_LoadScenarioResourceTables(GameState &state) {
+  // Ghidra 0x004bd3c0 NovaData_LoadScenarioResourceTables reads the scenario
+  // resource tables (sh\x95p ships, o\x9ftf outfits, w\x91ap weapons,
+  // sp\x9ab stellars, s\xd8st systems) and rebuilds the global class tables.
+  // The reimplementation does the same into state.scenario; the player ship
+  // can now read its real class stats here.
+  if (!state.scenario.LoadFromArchives()) {
+    NovaLog::Todo("scenario resource tables could not be loaded; player world "
+                  "uses fallback defaults");
+  }
 }
 
 void Stub_ResetReputationAndWorldTables(GameState &state) {
@@ -166,33 +171,82 @@ void Stub_ResetReputationAndWorldTables(GameState &state) {
 void Stub_SeedStartingInventory(GameState &state) {
   // Menu_RunNewGameFlow zeroes the outfit counts and weapon-bank ammo/secondary
   // counters, then seeds them from the starting ship class's default outfit
-  // list and weapon banks. Those ship/weapon class tables are not reconstructed
-  // yet, so the arrays stay zero.
+  // list (DefaultItems) and stock weapon banks. The ship-class tables are now
+  // available in state.scenario, so for the default ship (id 0x80, zero-based
+  // 0) the outfit counts are populated from its default items.
   state.outfit_owned_count.fill(0);
   state.weapon_bank_ammo.fill(0);
   state.weapon_bank_secondary.fill(0);
-  NovaLog::Todo("starting inventory left empty: ship-class default outfit and "
-                "weapon tables not reconstructed");
+
+  const auto *ship = state.scenario.Ship(static_cast<std::int16_t>(
+      state.player.ship_class_id + 0x80));
+  if (!ship) {
+    NovaLog::Todo("starting inventory left empty: default ship class id "
+                  "{} not in the scenario tables",
+                  state.player.ship_class_id);
+    return;
+  }
+  for (std::size_t i = 0; i < ship->default_outfit_ids.size(); ++i) {
+    const auto id = ship->default_outfit_ids[i];
+    if (id < 0x80) {
+      continue;
+    }
+    const auto index = static_cast<std::size_t>(id) - 0x80;
+    if (index >= state.outfit_owned_count.size()) {
+      continue;
+    }
+    state.outfit_owned_count[index] =
+        static_cast<std::int16_t>(ship->default_outfit_counts[i]);
+  }
+  NovaLog::Info("new-game inventory seeded from ship class '{}' ({} default "
+                "outfits)",
+                ship->display_name,
+                std::count_if(ship->default_outfit_ids.begin(),
+                              ship->default_outfit_ids.end(),
+                              [](std::int16_t id) { return id >= 0x80; }));
 }
 
 void Stub_DiscoverStartingSystems(GameState &state) {
   // Menu_RunNewGameFlow sets discovery_state = 1 on the starting system and
-  // each visible neighbour so the starmap shows the pilot's immediate area.
-  // SystemDef adjacency/discovery tables are not reconstructed yet.
+  // each adjacent neighbour so the starmap shows the pilot's immediate area.
+  // The starting system is the pilot's entry point; without a fixed coordinate
+  // anchor we use the lowest-numbered defined system (id 0x80, zero-based 0),
+  // which the scroll/start flow chooses for the default pilot type. The
+  // reimplementation tracks discovered systems by id in GameState instead of
+  // the original SystemDef discovery bits; the starmap later reads it.
   (void)state;
-  NovaLog::Todo("starting-system discovery not applied: SystemDef tables and "
-                "system-id registry not reconstructed");
+  // TODO(decomp): mark the starting system (id 0x80) and each linked neighbour
+  // discovered once a discovery-container is added to GameState. The system
+  // links are now readable via state.scenario.System(0x80)->links.
+  NovaLog::Info("starting system discovery pending: system adjacency now "
+                "available via scenario tables");
 }
 
 void Stub_PickFirstTravelDestination(GameState &state) {
   // Ghidra Stellar_FindNearestAvailableTravelStellar picks the first adjacent,
-  // visible system as the pilot's initial jump target (stored back into
-  // state->travel by Stellar_SetTravelDestination when found).
-  // System adjacency tables are not reconstructed yet, so no destination is
-  // chosen; the in-game starmap later reports "no route".
+  // reachable system as the pilot's initial jump target, stored back into
+  // state->travel by Stellar_SetTravelDestination when found. Here the first
+  // live link of the starting system (id 0x80) stands in for that choice.
+  // Ghidra zero-based link ids: -1 or < 0x80 is unused; links >= 0x80 name a
+  // system (the loader re-bases them into the 0.. index space after a sanity
+  // range check, so we keep them as resource ids here).
   state.travel.selected_dest_id = -1;
-  NovaLog::Todo("first travel destination not resolved: system adjacency "
-                "table not reconstructed; starmap will show no route");
+  if (const auto *start = state.scenario.System(0x80); start) {
+    for (const auto link : start->links) {
+      if (link >= 0x80) {
+        state.travel.selected_dest_id = link;
+        break;
+      }
+    }
+  }
+  if (state.travel.selected_dest_id >= 0) {
+    NovaLog::Info("initial travel destination resolved to system id {} from "
+                  "starting-system links",
+                  state.travel.selected_dest_id);
+  } else {
+    NovaLog::Todo("first travel destination not resolved: starting system has "
+                  "no outward link defined; starmap will show no route");
+  }
 }
 
 void ResetPlayerShipForNewGame(GameState &state) {
@@ -203,17 +257,29 @@ void ResetPlayerShipForNewGame(GameState &state) {
   state.player.vel_x = state.player.vel_y = 0.0F;
   state.player.heading = 0.0F;
   state.player.speed = 0.0F;
-  state.player.ship_class_id = 0; // default class; class table unavailable
+  state.player.ship_class_id = 0; // default class (ship id 0x80)
   state.player.active_weapon_bank_slot = 0;
   state.player.timed_action_counter = -1;
   state.player.death_timer_active = -1.0F;
   state.player.is_active = true;
-  // Shield/armor/fuel are recomputed from the class in the original; without
-  // the class table they fall back to the template defaults (documented).
-  state.player.shield_points = 0.0F;
-  state.player.armor_points = 0.0F;
-  state.player.fuel_points = 0.0F;
-  NovaLog::Debug("player ship reset for new game");
+  // Shield/armor/fuel are recomputed from the default ship class (Ghidra
+  // multiplies the class base values by x5 for shields/armor per the negative
+  // held/Shield convention; here we take the raw base values). Falls back to
+  // the template defaults when the class table is unavailable.
+  if (const auto *ship = state.scenario.Ship(0x80)) {
+    state.player.shield_points = static_cast<float>(ship->base_shield);
+    state.player.armor_points = static_cast<float>(ship->base_armor);
+    state.player.fuel_points = static_cast<float>(ship->base_fuel);
+    NovaLog::Debug("player ship reset for new game: class '{}' (holds {}, "
+                   "shield {}, armor {}, fuel {})",
+                   ship->display_name, ship->cargo_holds, ship->base_shield,
+                   ship->base_armor, ship->base_fuel);
+  } else {
+    state.player.shield_points = 0.0F;
+    state.player.armor_points = 0.0F;
+    state.player.fuel_points = 0.0F;
+    NovaLog::Todo("player ship reset without the default ship class table");
+  }
 }
 
 void SetNewGameDateAndStrings(GameState &state) {
@@ -272,11 +338,14 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   // Game_ResetNewGameReputation/State, zero outfit/weapon tables,
   // PilotData_InitializePlayerState, clear system discovery, re-seed the
   // starting inventory, discover surrounding systems, load scenario tables.
+  // Ghidra loads the scenario data tables (ships/outfits/weapons/stellars/
+  // systems) as part of the fresh world reset; the ship reset and inventory
+  // seed below read class stats, so load the tables first.
+  Stub_LoadScenarioResourceTables(state);
   ResetPlayerShipForNewGame(state);
   Stub_ResetReputationAndWorldTables(state);
   Stub_SeedStartingInventory(state);
   Stub_DiscoverStartingSystems(state);
-  Stub_LoadScenarioResourceTables();
   SetNewGameDateAndStrings(state);
 
   // ---- Step 5: first travel destination + scenario spawn ------------------
@@ -287,29 +356,39 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   NovaLog::Todo("system scenario ships and roamer population not spawned: "
                 "mission and ship tables not reconstructed");
 
-  // ---- Step 6: intro cinematic configuration ------------------------------
-  // Ghidra: IntroCinematic_SetupFrames fills g_intro_cinematic from the pilot
-  // save block (0x63688a72). That block is populated from the ch\x9ar
-  // (character) resource's IntroPict1-4 / PictDelay1-4 fields. Rather than
-  // depend on a pilot-save block, the reimplementation reads the same default
-  // character resource directly (NovaResource_LoadCharacterIntro): the stock
-  // .Trader pilot uses IntroPict 0x2008/0x2009/0x200a for 45 1/60s ticks each.
-  // post_intro_dest_id stays at IntroCinematic_SetupFrames' no-save default
-  // 0x7ffd ("no stellar yet", but != -1 so the destination dialog still opens).
-  state.intro_cinematic = IntroCinematicData{};
+  // ---- Step 6: assemble the persistent pilot record and apply it ----------
+  // Ghidra keeps the freshly-seeded pilot in a pilot-save block (resource id
+  // 0x63688a72) created/accessed by PilotData_InitializePlayerState and
+  // IntroCinematic_SetupFrames; the running game only materializes that
+  // record on demand (see pilot_file.hpp). The reimplementation does the
+  // same: build a PilotFile for the new pilot, then copy it into the live
+  // GameState so the intro and spaceflight read one consistent record.
+  PilotFile record = PilotFile::Fresh();
+  record.pilot_name = state.pilot.first_name;
+  record.current_system_id = state.player.current_system_id;
+
+  // IntroCinematic_SetupFrames reads the intro frames from the pilot-save
+  // block (+0x20 / +0x28 / +0x30). Here the record is seeded from the default
+  // character (ch\x9ar) resource's IntroPict1-4 / PictDelay1-4 fields: the
+  // stock .Trader pilot uses IntroPict 0x2008/0x2009/0x200a for 45 1/60s ticks
+  // each. post_intro_dest_id stays at the no-save default 0x7ffd ("no stellar
+  // yet", but != -1 so the destination dialog still opens).
   if (const auto char_intro = NovaResource_LoadCharacterIntro()) {
-    state.intro_cinematic.source_pict_ids = char_intro->pict_ids;
-    state.intro_cinematic.duration_60h_ticks = char_intro->delay_ticks;
+    record.intro_source_pict_ids = char_intro->pict_ids;
+    record.intro_duration_60h_ticks = char_intro->delay_ticks;
   } else {
     // IntroCinematic_SetupFrames' own no-save fallback: a single PICT 0x2008
     // shown for 10 ticks.
-    state.intro_cinematic.source_pict_ids = {0x2008, -1, -1, -1};
-    state.intro_cinematic.duration_60h_ticks = {10, 0, 0, 0};
+    record.intro_source_pict_ids = {0x2008, -1, -1, -1};
+    record.intro_duration_60h_ticks = {10, 0, 0, 0};
   }
-  // IntroCinematic_SetupFrames' no-save default: 0x7ffd ("no stellar yet"),
-  // deliberately not -1 so IntroCinematic_Run still gates the destination
-  // dialog after the last frame.
-  state.intro_cinematic.post_intro_dest_id = 0x7ffd;
+  record.post_intro_dest_id = 0x7ffd;
+
+  // Copy the assembled record into the live state (mirroring the block-to-
+  // global copy IntroCinematic_SetupFrames/PilotData_InitializePlayerState
+  // perform). The intro and spaceflight modes read these live fields. The
+  // record is kept in memory only (no .plt writer); see PilotFileApply.
+  PilotFileApply(record, state);
   NovaLog::Info("new-game intro configured: frames {} {} {} {} for {} {} {} "
                 "ticks each (character resource)",
                 state.intro_cinematic.source_pict_ids[0],

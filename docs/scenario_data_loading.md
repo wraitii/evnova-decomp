@@ -1,0 +1,78 @@
+# Scenario data loading (ships / outfits / weapons / stellars / systems)
+
+Clean-room reconstruction of the Nova scenario resource tables that the new-game
+flow and spaceflight loop consume. The original rebuilds them at startup in
+`NovaData_LoadScenarioResourceTables` (Ghidra `0x004bd3c0`) by walking five
+resource families by id `0x80..` and parsing a fixed big-endian field layout
+(Macintosh resource heritage) into a set of globals.
+
+## Where the data lives
+
+The `.rez` archives are `BRGR` containers parsed by `src/brgr_archive.cpp`. Each
+holds a big-endian `resource.map` (type dir of `[type_code][records_offset]
+[count]`, then `0x10a`-byte records of `[index][type_code][u16 res_id][name]`).
+The scenario families are spread across the `Nova Data *.rez` archives:
+
+| type | FourCC | family | archive | count |
+|------|--------|--------|---------|-------|
+| `0x73689570` | `sh\x95p`  | ships   | Nova Data 1 | 288 |
+| `0x6f9f7466` | `o\x9ftf`  | outfits | Nova Data 4 | 242 |
+| `0x77916170` | `w\x91ap`  | weapons | Nova Data 4 | 81  |
+| `0x73709a62` | `sp\x9ab`  | stellars| Nova Data 2 | 411 |
+| `0x73d87374` | `s\xd8st`  | systems | Nova Data 2 | 545 |
+
+`brgr_archive.cpp`'s `kArchiveFileNames` lists the Data archives alongside the
+menu/splash archives. A robustness fix to `ParseArchive` was required: some
+containers (Nova Data 4) carry an early bogus region whose first bytes read as a
+plausible map header but whose record table overflows the region; the parse now
+rejects any region whose every type entry's record table isn't fully in bounds,
+so the genuine map is found.
+
+## Clean-room model
+
+`src/game/scenario_data.hpp` defines `game::ShipClass`, `Outfit`, `Weapon`,
+`Stellar`, `System`, plus `ScenarioData` which owns the five indexed tables
+(by `id - 0x80`, matching the original globals). `ScenarioData::LoadFromArchives()`
+parses all families and is stored on `GameState::scenario` so gameplay code has
+data keyed by id with no hidden globals (AGENTS.md).
+
+### Verified offsets (vs. payload + loader)
+
+- **sh\x95p (ship)**: Holds0, Shield2, Accel4, Speed6, Maneuver8, Fuel_a,
+  FreeMass_c, Armor_e, ShieldRech10. The 8 stock weapon banks are packed as two
+  groups of 4 — banks 0-3 as `(type,count,ammo)` at `0x12/0x1a/0x22`, banks 4-7
+  at `0x6ce/0x6d6/0x6de` — and the 8 DefaultItems likewise split at `0x4e/0x56`
+  and `0x370/0x378`. MaxGun2a, MaxTur2c, TechLevel2e, Cost30(**int32**),
+  DeathDelay34, ArmorRech36, Explode1/2 38/3a, DispWeight3c, Mass3e, Length40,
+  InherentAI42, Crew44, Strength46, InherentGovt48, Flags(capability)4a,
+  Flags2 62, Flags3 726. Verified against ship 0x80 (holds 10, shield 30,
+  accel 500, speed 400, turn 40, fuel 300, mass 15, cost 10000).
+- **w\x91ap (weapon)**: Reload0, Count2, MassDmg4, EnergyDmg6, Guidance8,
+  Speed_a, AmmoType_c, Graphic_e, Inaccuracy10, Sound12, Impact14, ExplodType16,
+  ProxRadius18, BlastRadius1a, Flags1c, Seeker1e, ... Verified against weapon
+  0x80 (reload 10, count 13, mass 1, energy 4, unguided, speed 1500).
+- **s\xd8st (system)**: xPos0, yPos2, Con1-16 at `0x04`, NavDef1-16 at `0x24`,
+  DudeTypes at `0x44`, AvgShips64, Govt66, Message68, Asteroids6a, Interference6c.
+  Verified against system 0x80 (links 199/200/202/129/135, govt 128).
+
+### Provisional (not yet fully verified)
+
+`o\x9ftf` (outfit) and `sp\x9ab` (stellars) decoders fill the positively-identified
+header fields but not every offset; they are marked provisional in
+`scenario_data.cpp`. The derived runtime fields the original computes at load
+(purchase mass/price recompute from default outfits, control-expression
+compilation for availability/purchase) are not reconstructed yet, and string
+fields (names, availability/on-purchase expressions) come from the resource
+record name / later string blocks rather than the numeric header.
+
+## New-game flow integration
+
+`new_pilot_flow.cpp` now:
+- loads the scenario tables once (Step 4) before the ship reset;
+- resets the player ship from the real default class stats (id 0x80);
+- seeds the starting inventory from the class DefaultItems;
+- resolves the initial travel destination from the starting system's first
+  outward link (system adjacency now readable).
+
+`progress.csv` row for `0x004BD3C0` was raised to 30% to reflect the
+resource-family decoding slice.

@@ -14,6 +14,8 @@
 #include <optional>
 #include <string>
 
+#include "scenario_data.hpp"
+
 namespace game {
 
 // Ghidra 0x004cd3b0 IntroCinematic_SetupFrames fills this (g_intro_cinematic).
@@ -95,6 +97,12 @@ struct GameState {
   PlayerShip player;
   TravelState travel;
   IntroCinematicData intro_cinematic;
+
+  // Parsed scenario data (ships/outfits/weapons/stellars/systems), loaded once
+  // so the gameplay loops can look up classes by id. Empty until a game is
+  // created (mirrors the original lazily loading scenario tables in
+  // NovaData_LoadScenarioResourceTables on the new-game path).
+  ScenarioData scenario;
 
   // Outfit/weapon ownership counts indexed by outfit id. The new-game flow
   // zeroes all and then seeds them from the starting ship class's default
