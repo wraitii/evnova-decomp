@@ -1,5 +1,6 @@
 #include "new_pilot_flow.hpp"
 
+#include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
@@ -287,21 +288,37 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
                 "mission and ship tables not reconstructed");
 
   // ---- Step 6: intro cinematic configuration ------------------------------
-  // Ghidra: IntroCinematic_SetupFrames fills g_intro_cinematic. Without the
-  // pilot save block (0x63688a72) it defaults to a single PICT 0x2008 shown
-  // for 10 ticks and post_intro_dest_id = 0x7ffd. That default is what the
-  // reimplementation uses. Because post_intro_dest_id (0x7ffd) != -1, the
-  // intro finishes by opening the post-intro travel-selection dialog (see
-  // intro_cinematic.cpp), mirroring the original's flow.
+  // Ghidra: IntroCinematic_SetupFrames fills g_intro_cinematic from the pilot
+  // save block (0x63688a72). That block is populated from the ch\x9ar
+  // (character) resource's IntroPict1-4 / PictDelay1-4 fields. Rather than
+  // depend on a pilot-save block, the reimplementation reads the same default
+  // character resource directly (NovaResource_LoadCharacterIntro): the stock
+  // .Trader pilot uses IntroPict 0x2008/0x2009/0x200a for 45 1/60s ticks each.
+  // post_intro_dest_id stays at IntroCinematic_SetupFrames' no-save default
+  // 0x7ffd ("no stellar yet", but != -1 so the destination dialog still opens).
   state.intro_cinematic = IntroCinematicData{};
-  state.intro_cinematic.source_pict_ids = {0x2008, -1, -1, -1};
-  state.intro_cinematic.duration_60h_ticks = {10, 0, 0, 0};
+  if (const auto char_intro = NovaResource_LoadCharacterIntro()) {
+    state.intro_cinematic.source_pict_ids = char_intro->pict_ids;
+    state.intro_cinematic.duration_60h_ticks = char_intro->delay_ticks;
+  } else {
+    // IntroCinematic_SetupFrames' own no-save fallback: a single PICT 0x2008
+    // shown for 10 ticks.
+    state.intro_cinematic.source_pict_ids = {0x2008, -1, -1, -1};
+    state.intro_cinematic.duration_60h_ticks = {10, 0, 0, 0};
+  }
   // IntroCinematic_SetupFrames' no-save default: 0x7ffd ("no stellar yet"),
-  // deliberately not -1 so IntroCinematic_Run still opens the destination
+  // deliberately not -1 so IntroCinematic_Run still gates the destination
   // dialog after the last frame.
   state.intro_cinematic.post_intro_dest_id = 0x7ffd;
-  NovaLog::Info("new-game intro configured: single PICT 0x2008 for 10 ticks, "
-                "post-intro dest id 0x7ffd (no pilot save block)");
+  NovaLog::Info("new-game intro configured: frames {} {} {} {} for {} {} {} "
+                "ticks each (character resource)",
+                state.intro_cinematic.source_pict_ids[0],
+                state.intro_cinematic.source_pict_ids[1],
+                state.intro_cinematic.source_pict_ids[2],
+                state.intro_cinematic.source_pict_ids[3],
+                state.intro_cinematic.duration_60h_ticks[0],
+                state.intro_cinematic.duration_60h_ticks[1],
+                state.intro_cinematic.duration_60h_ticks[2]);
 
   // ---- Step 7: mark active ------------------------------------------------
   // Ghidra: DAT_00596d28 = 1 (game active), DAT_00596d2f = repoChoice.

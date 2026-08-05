@@ -29,6 +29,27 @@ constexpr std::uint32_t kResourceTypeRleSheet16 =
 constexpr std::uint32_t kResourceTypePict = 0x50494354; // "PICT"
 constexpr std::uint32_t kResourceTypeSnd =
     0x736e6420; // "snd " (AIFF-style sounds)
+// "ch"♦r" (ch\x9ar) — the single default character/pilot-type resource.
+// Same FourCC (0x63688a72) the game uses as the pilot-save registry key; the
+// resource carries the new-pilot intro frame ids and per-frame delays (Nova
+// Bible `ch♦r` IntroPict1-4 / PictDelay1-4). Only Nova Data 1.rez holds it.
+constexpr std::uint32_t kResourceTypeCharacter = 0x63688a72;
+
+// The new-pilot intro portion of the ch\x9ar character resource (Ghidra
+// IntroCinematic_SetupFrames reads these same fields from the pilot-save
+// block). Up to four PICT ids shown in sequence; the delay field is stored in
+// 1/60s ticks and feeds IntroCinematicData::duration_60h_ticks directly (the
+// intro timer waits ticks * 60 ms).
+struct NovaCharacterIntro {
+  std::array<std::int16_t, 4> pict_ids{-1, -1, -1, -1};  // IntroPict1-4
+  std::array<std::int16_t, 4> delay_ticks{0, 0, 0, 0};   // PictDelay1-4
+};
+
+// Ghidra NovaData_LoadScenarioResourceTables loads the character resource
+// (ch\x9ar, here the default .Trader id 0x0080) that defines a new pilot's
+// intro cinematic. Returns nullopt when the archive/field set is absent.
+[[nodiscard]] std::optional<NovaCharacterIntro>
+NovaResource_LoadCharacterIntro();
 
 // Ghidra: FUN_004ce250 + FUN_004cdfa0 (resource lookup by type + id). Returns
 // the raw resource payload; the first archive holding a matching record wins,

@@ -38,25 +38,48 @@ TEST_CASE("a fresh GameState is inactive with no intro played") {
   }
 }
 
-// The new-game flow (mirroring IntroCinematic_SetupFrames' no-save default)
-// configures the intro with a single frame and post_intro_dest_id = 0x7ffd.
-// 0x7ffd is the "no stellar yet" sentinel but is deliberately distinct from
-// -1, so IntroCinematic_Run still opens the destination dialog after the
-// last frame. Captured here as a pure-data regression test.
-TEST_CASE("the new-game intro config opens the post-intro destination dialog") {
+// The new-game flow (currently sampled from ch\x9ar/IntroCinematic_SetupFrames)
+// configures a three-frame intro (PICT 0x2008/0x2009/0x200a) with post_intro_
+// dest_id = 0x7ffd. 0x7ffd is the "no stellar yet" sentinel but is deliberately
+// distinct from -1, so IntroCinematic_Run still opens the destination dialog
+// after the last frame. Captured here as a pure-data regression test.
+TEST_CASE("the three-frame new-game intro config opens the destination dialog") {
   game::IntroCinematicData cinematic;
-  cinematic.source_pict_ids = {0x2008, -1, -1, -1};
-  cinematic.duration_60h_ticks = {10, 0, 0, 0};
+  cinematic.source_pict_ids = {0x2008, 0x2009, 0x200a, -1};
+  cinematic.duration_60h_ticks = {45, 45, 45, 0};
   // IntroCinematic_SetupFrames writes 0x7ffd on the no-save path (Ghidra
   // 0x004cd3b0).
   cinematic.post_intro_dest_id = 0x7ffd;
 
   CHECK(cinematic.source_pict_ids[0] == 0x2008);
-  CHECK(cinematic.source_pict_ids[1] < 1);
-  CHECK(cinematic.duration_60h_ticks[0] == 10);
+  CHECK(cinematic.source_pict_ids[1] == 0x2009);
+  CHECK(cinematic.source_pict_ids[2] == 0x200a);
+  CHECK(cinematic.source_pict_ids[3] < 1);
+  CHECK(cinematic.duration_60h_ticks[0] == 45);
   // The dialog gate trips for 0x7ffd even though it represents "no stellar".
   CHECK(cinematic.post_intro_dest_id != -1);
   CHECK(cinematic.should_open_post_intro_dialog());
+}
+
+// Data-dependent: the stock ch\x9ar (default .Trader character) resource in
+// Nova Data 1.rez carries the real 3-frame new-pilot intro (IntroPict 0x2008..
+// 0x200a, each 45 1/60s ticks). Skipped when the archives are missing.
+TEST_CASE("the default character resource supplies the three-frame intro") {
+  if (!NovaArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+
+  const auto intro = NovaResource_LoadCharacterIntro();
+  REQUIRE(intro);
+  REQUIRE(intro->pict_ids.size() == 4);
+  CHECK(intro->pict_ids[0] == 0x2008);
+  CHECK(intro->pict_ids[1] == 0x2009);
+  CHECK(intro->pict_ids[2] == 0x200a);
+  CHECK(intro->pict_ids[3] < 1);
+  CHECK(intro->delay_ticks[0] == 45);
+  CHECK(intro->delay_ticks[1] == 45);
+  CHECK(intro->delay_ticks[2] == 45);
+  CHECK(intro->delay_ticks[3] == 0);
 }
 
 TEST_CASE("a fresh PlayerShip carries the new-game reset defaults") {

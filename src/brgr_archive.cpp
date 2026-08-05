@@ -193,12 +193,15 @@ ParseArchive(const std::filesystem::path &path) {
 // Archives needed by the menu/splash path. Graphics 3 holds the sp\x95n,
 // c\x9alr and rl\x91D menu assets; Nova Titles 1 holds the splash PICTs
 // (0x1fa4 loading, 0x83 startup); Nova Sounds holds the "snd " audio family
-// used for menu feedback and the intro/travel/loading sounds (ids 600..603).
-// Extend as more subsystems are reconstructed.
+// used for menu feedback and the intro/travel/loading sounds (ids 600..603);
+// Nova Data 1 holds the single ch\x9ar (character / default pilot type .Trader)
+// resource that carries the new-pilot intro frame/delay fields. Extend as more
+// subsystems are reconstructed.
 constexpr std::array kArchiveFileNames{
     "Nova Graphics 3.rez",
     "Nova Titles 1.rez",
     "Nova Sounds.rez",
+    "Nova Data 1.rez",
 };
 constexpr std::array kNovaFilesRoots{
     "EV Nova/Nova Files/",
@@ -614,4 +617,37 @@ std::optional<std::vector<std::byte>> NovaResource_LoadMainMenuBackdropData() {
 
 std::optional<std::vector<std::byte>> NovaResource_LoadMainMenuLogoData() {
   return NovaResource_LoadPictData(0x1f4a);
+}
+
+std::optional<NovaCharacterIntro> NovaResource_LoadCharacterIntro() {
+  // The default ch\x9ar (character) resource id 0x0080 (".Trader") in Nova
+  // Data 1.rez carries the new-pilot intro fields at the same offsets Ghidra
+  // IntroCinematic_SetupFrames reads from the pilot-save block: IntroPict1-4
+  // at +0x20 and PictDelay1-4 at +0x28 (both 1/60s-tick units; the intro timer
+  // multiplies by 60 ms/unit). A value of -1 (0xffff) terminates the list.
+  const auto resource_data =
+      NovaResource_Load(kResourceTypeCharacter, 0x0080);
+  if (!resource_data) {
+    NovaLog::Todo("default character resource (ch\\x9ar 0x0080) not loaded; "
+                  "intro defaults to the single-frame fallback");
+    return std::nullopt;
+  }
+  const auto bytes = std::span{*resource_data};
+  NovaCharacterIntro intro;
+  for (std::size_t i = 0; i < intro.pict_ids.size(); ++i) {
+    intro.pict_ids[i] = ReadBeI16(bytes, 0x20 + i * 2);
+    intro.delay_ticks[i] = ReadBeI16(bytes, 0x28 + i * 2);
+    if (intro.pict_ids[i] < 1) {
+      // A -1/0 terminator ends the sequence (later slots carry 0xff/0xffff).
+      for (std::size_t j = i; j < intro.pict_ids.size(); ++j) {
+        intro.pict_ids[j] = -1;
+        intro.delay_ticks[j] = 0;
+      }
+      break;
+    }
+  }
+  NovaLog::Info("default character intro: frames {} {} {}, {}-ms delays",
+                intro.pict_ids[0], intro.pict_ids[1], intro.pict_ids[2],
+                intro.delay_ticks[0] * 60);
+  return intro;
 }
