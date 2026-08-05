@@ -41,8 +41,8 @@ constexpr std::uint32_t kResourceTypeCharacter = 0x63688a72;
 // 1/60s ticks and feeds IntroCinematicData::duration_60h_ticks directly (the
 // intro timer waits ticks * 60 ms).
 struct NovaCharacterIntro {
-  std::array<std::int16_t, 4> pict_ids{-1, -1, -1, -1};  // IntroPict1-4
-  std::array<std::int16_t, 4> delay_ticks{0, 0, 0, 0};   // PictDelay1-4
+  std::array<std::int16_t, 4> pict_ids{-1, -1, -1, -1}; // IntroPict1-4
+  std::array<std::int16_t, 4> delay_ticks{0, 0, 0, 0};  // PictDelay1-4
 };
 
 // Ghidra NovaData_LoadScenarioResourceTables loads the character resource
@@ -65,6 +65,7 @@ struct NovaResource {
   std::vector<std::byte> bytes;
   std::string name;
 };
+
 [[nodiscard]] std::optional<NovaResource>
 NovaResource_LoadNamed(std::uint32_t type_code, std::uint16_t resource_id);
 

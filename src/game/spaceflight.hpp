@@ -58,8 +58,7 @@ struct PlayerMovementStats {
 // toward rest. Returns the same PlayerMovementStats it integrated with so the
 // caller knows what was applied.
 [[nodiscard]] PlayerMovementStats NovaPlayer_IntegrateMovement(
-    PlayerShip &ship, const FlightInput &input,
-    const ShipClass &ship_class);
+    PlayerShip &ship, const FlightInput &input, const ShipClass &ship_class);
 
 // Reads the live flight controls (via SdlPlatform::PollFlightInput) and
 // integrates the player ship's heading/throttle into GameState.player so the

@@ -13,9 +13,11 @@ constexpr SDL_AudioSpec kMusicSpec{SDL_AUDIO_S16, 2, 44100};
 void SdlMusic::MixerDeleter::operator()(MIX_Mixer *mixer) const {
   MIX_DestroyMixer(mixer);
 }
+
 void SdlMusic::AudioDeleter::operator()(MIX_Audio *audio) const {
   MIX_DestroyAudio(audio);
 }
+
 void SdlMusic::TrackDeleter::operator()(MIX_Track *track) const {
   MIX_DestroyTrack(track);
 }
@@ -42,8 +44,8 @@ bool SdlMusic::Initialize() {
     NovaLog::Error("SDL_mixer init failed: {}", SDL_GetError());
     return false;
   }
-  mixer_.reset(MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                     &kMusicSpec));
+  mixer_.reset(
+      MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &kMusicSpec));
   if (!mixer_) {
     NovaLog::Error("SDL_mixer device open failed: {}", SDL_GetError());
     MIX_Quit();
@@ -77,13 +79,14 @@ bool SdlMusic::Load(const std::string &path) {
   }
   audio_.reset(audio);
   if (!MIX_SetTrackAudio(track_.get(), audio_.get())) {
-    NovaLog::Error("SDL_mixer could not bind music '{}': {}", path,
-                   SDL_GetError());
+    NovaLog::Error(
+        "SDL_mixer could not bind music '{}': {}", path, SDL_GetError());
     return false;
   }
   // Loop the whole track forever.
   if (!MIX_SetTrackLoops(track_.get(), -1)) {
-    NovaLog::Warn("SDL_mixer could not enable music looping: {}", SDL_GetError());
+    NovaLog::Warn("SDL_mixer could not enable music looping: {}",
+                  SDL_GetError());
   }
   NovaLog::Info("music loaded '{}'", path);
   return true;

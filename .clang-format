@@ -1,0 +1,45 @@
+# clang-format configuration for the EV Nova clean-room recompilation.
+#
+# House style is close to the LLVM baseline with a few project opinions:
+# left-aligned reference/pointer qualifiers, aligned trailing-comma params,
+# and compact class member access spacing. Generated with
+#   clang-format --style=file --dump-config
+# and hand-tuned to match the existing sources.
+
+BasedOnStyle: LLVM
+
+# The codebase attaches the reference/pointer token to the variable name but
+# keeps it separated from the type, i.e. `PlayerShip &ship`, `ShipClass *cls`.
+# That is the `Pointer` reference alignment combined with `Right` pointer
+# alignment (GGameState &state, 0x00489210 Ship_RunSpaceflightMode).
+ReferenceAlignment: Pointer
+PointerAlignment: Right
+
+# Favour `a && b` / `a || b` spacing over line endings (operators stay inline).
+BreakBeforeBinaryOperators: None
+
+# Trailing-comma list/function arguments, aligned to the opening token's column.
+AlignAfterOpenBracket: Align
+AlignTrailingComments: true
+BinPackArguments: false
+BinPackParameters: false
+
+# Attach braces (K&R), matching every existing function/struct block.
+BreakBeforeBraces: Attach
+
+# Case labels stay flush with their switch (LLVM default); multi-word switch
+# cases on the stock resource parse (see new_pilot_flow.cpp) read cleaner this
+# way.
+IndentCaseLabels: false
+
+# Keep `template <...>` on its own line and don't squeeze namespace scopes.
+NamespaceIndentation: None
+FixNamespaceComments: true
+SeparateDefinitionBlocks: Always
+
+# Keep short control-flow bodies one-liner friendly where reasonable.
+AllowShortIfStatementsOnASingleLine: Never
+
+# Ordering / placement policy.
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve

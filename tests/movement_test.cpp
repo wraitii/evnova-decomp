@@ -41,9 +41,11 @@ TEST_CASE("turn rate follows the ship class at the loader-scaled degrees/frame",
   in.turn_right = true;
 
   // turn_rate=40 -> base_turn_rate_deg = 40*0.1 = 4.0 deg/frame.
-  const float heading_deg_before = ship.heading * 180.0F / 3.14159265358979323846F;
+  const float heading_deg_before =
+      ship.heading * 180.0F / 3.14159265358979323846F;
   (void)game::NovaPlayer_IntegrateMovement(ship, in, sc);
-  const float heading_deg_after = ship.heading * 180.0F / 3.14159265358979323846F;
+  const float heading_deg_after =
+      ship.heading * 180.0F / 3.14159265358979323846F;
   // Frame 0 turns toward positive heading by exactly the class rate.
   CHECK(heading_deg_after - heading_deg_before ==
         Catch::Approx(4.0F).margin(1e-3F));

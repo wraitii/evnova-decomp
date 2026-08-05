@@ -29,7 +29,8 @@ constexpr int kViewportHeight = 400;
 // TODO(decomp): verify phase/clockwise orientation against a real rendered
 // ship -- this is the conventional mapping and should be re-checked once the
 // ship is on screen.
-[[nodiscard]] int FrameForHeading(float heading_radians, int frames_per_rotation) {
+[[nodiscard]] int FrameForHeading(float heading_radians,
+                                  int frames_per_rotation) {
   const float normalized = std::fmod(heading_radians + kTwoPi, kTwoPi);
   const float sector =
       (normalized / kTwoPi) * static_cast<float>(frames_per_rotation);
@@ -40,13 +41,14 @@ constexpr int kViewportHeight = 400;
   return frame;
 }
 
-// Uniform integer in [0, bound). Mirrors the game's NovaRandom_Range seeded from
-// the GameState PRNG so the spawn layout is reproducible per session.
+// Uniform integer in [0, bound). Mirrors the game's NovaRandom_Range seeded
+// from the GameState PRNG so the spawn layout is reproducible per session.
 [[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
   if (bound <= 1) {
     return 0;
   }
-  return static_cast<std::int16_t>(std::uniform_int_distribution<int>{0, bound - 1}(rng));
+  return static_cast<std::int16_t>(
+      std::uniform_int_distribution<int>{0, bound - 1}(rng));
 }
 
 } // namespace
@@ -82,7 +84,8 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   auto base = LoadShipSprite(renderer, visual->base_image_id);
   if (!base) {
     NovaLog::Warn("ship sprite: no usable rl.x91D sheet {} for class '{}'",
-                  visual->base_image_id, ship_class->display_name);
+                  visual->base_image_id,
+                  ship_class->display_name);
     return false;
   }
   ship_ = std::move(*base);
@@ -95,32 +98,39 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   // ship has no glow layer, which is not fatal.
   has_glow_ = visual->engine_glow_image_id > 0;
   if (has_glow_) {
-    if (auto glow = LoadShipSprite(renderer, static_cast<std::uint16_t>(
-                                                 visual->engine_glow_image_id));
+    if (auto glow = LoadShipSprite(
+            renderer, static_cast<std::uint16_t>(visual->engine_glow_image_id));
         glow) {
       glow_ = std::move(*glow);
       glow_.frames_per_rotation = visual->frames_per_rotation;
       NovaLog::Info("ship engine glow loaded for '{}': {}x{} x{} frames",
-                    ship_class->display_name, glow_.width, glow_.height,
+                    ship_class->display_name,
+                    glow_.width,
+                    glow_.height,
                     glow_.frame_count);
     } else {
       has_glow_ = false;
       NovaLog::Warn("ship sprite: no usable rl.x91D glow sheet {} for class "
                     "'{}'; engine glow skipped",
-                    visual->engine_glow_image_id, ship_class->display_name);
+                    visual->engine_glow_image_id,
+                    ship_class->display_name);
     }
   }
 
   NovaLog::Info("ship sprite loaded for '{}': {}x{} x{} frames ({} set(s))",
-                ship_class->display_name, ship_.width, ship_.height,
-                ship_.frame_count, visual->base_set_count);
+                ship_class->display_name,
+                ship_.width,
+                ship_.height,
+                ship_.frame_count,
+                visual->base_set_count);
   return true;
 }
 
 std::optional<SpaceflightView::ShipSprite>
 SpaceflightView::LoadShipSprite(SDL_Renderer *renderer,
                                 std::uint16_t resource_id) {
-  const auto sheet_data = NovaResource_Load(kResourceTypeRleSheet16, resource_id);
+  const auto sheet_data =
+      NovaResource_Load(kResourceTypeRleSheet16, resource_id);
   if (!sheet_data) {
     return std::nullopt;
   }
@@ -134,8 +144,8 @@ SpaceflightView::LoadShipSprite(SDL_Renderer *renderer,
   out.height = sheet->height;
   out.frames.reserve(sheet->frames.size());
   for (const auto &frame : sheet->frames) {
-    auto texture = SdlTexture::Create(renderer, sheet->width, sheet->height,
-                                      frame.rgba_pixels);
+    auto texture = SdlTexture::Create(
+        renderer, sheet->width, sheet->height, frame.rgba_pixels);
     if (!texture) {
       out.frames.clear();
       return std::nullopt;
@@ -147,7 +157,8 @@ SpaceflightView::LoadShipSprite(SDL_Renderer *renderer,
 
 // Loads (and caches) the spin sprite set for a stellar's graphic. spin_set_id
 // is the stellar's link_a_id; the sp\x9an descriptor id is spin_set_id + 1000
-// (the stellar-object spin id range), and its SpritesID names the rl\x91D sheet.
+// (the stellar-object spin id range), and its SpritesID names the rl\x91D
+// sheet.
 const SpaceflightView::SpinSpriteSet *
 SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
   if (spin_set_id < 0 || spin_set_id > 0xff) {
@@ -158,7 +169,7 @@ SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
     spin_sets_.resize(index + 1);
   }
   if (spin_sets_[index]) {
-    return spin_sets_[index].get();  // cached (possibly a failed load -> null)
+    return spin_sets_[index].get(); // cached (possibly a failed load -> null)
   }
   auto owner = std::make_unique<SpinSpriteSet>();
   const auto spin_id = static_cast<std::uint16_t>(spin_set_id + 1000);
@@ -179,24 +190,28 @@ SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
           owner->tile_width = def->tile_width;
           owner->tile_height = def->tile_height;
           for (const auto &frame : sheet->frames) {
-            auto texture = SdlTexture::Create(
-                platform.renderer(), sheet->width, sheet->height,
-                frame.rgba_pixels);
+            auto texture = SdlTexture::Create(platform.renderer(),
+                                              sheet->width,
+                                              sheet->height,
+                                              frame.rgba_pixels);
             if (!texture) {
               break;
             }
             owner->frames.push_back(std::move(texture));
           }
-          NovaLog::Info("spin sprite id {}: {}x{} {} frames", spin_id,
-                        sheet->width, sheet->height, owner->frame_count);
+          NovaLog::Info("spin sprite id {}: {}x{} {} frames",
+                        spin_id,
+                        sheet->width,
+                        sheet->height,
+                        owner->frame_count);
         }
       }
     }
   }
   if (owner->frames.empty()) {
-    NovaLog::Warn("no spin sprite for stellar set {} (spin id {})",
-                  spin_set_id, spin_id);
-    return nullptr;  // not cached; caller falls back to tinted disc
+    NovaLog::Warn(
+        "no spin sprite for stellar set {} (spin id {})", spin_set_id, spin_id);
+    return nullptr; // not cached; caller falls back to tinted disc
   }
   spin_sets_[index] = std::move(owner);
   return spin_sets_[index].get();
@@ -210,13 +225,14 @@ SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
 const SpaceflightView::StarFieldSheet *
 SpaceflightView::EnsureStarFieldSheet(SdlPlatform &platform) {
   if (!star_field_.frames.empty()) {
-    return &star_field_;  // cached
+    return &star_field_; // cached
   }
   // Spin descriptor resource id for the ambient star field (Ghidra
   // Spin_ReadDescriptor(700,..)); a sp\x9an descriptor, distinct from the
   // stellar spin-object range (+1000).
   constexpr std::uint16_t kStarFieldSpinId = 700;
-  const auto spin_data = NovaResource_Load(kResourceTypeSprites, kStarFieldSpinId);
+  const auto spin_data =
+      NovaResource_Load(kResourceTypeSprites, kStarFieldSpinId);
   if (!spin_data) {
     NovaLog::Warn("star field: no sp.x9an descriptor resource {}; stars drawn "
                   "as points",
@@ -251,8 +267,8 @@ SpaceflightView::EnsureStarFieldSheet(SdlPlatform &platform) {
   SDL_Renderer *const renderer = platform.renderer();
   star_field_.frames.reserve(sheet->frames.size());
   for (const auto &frame : sheet->frames) {
-    auto texture = SdlTexture::Create(renderer, sheet->width, sheet->height,
-                                      frame.rgba_pixels);
+    auto texture = SdlTexture::Create(
+        renderer, sheet->width, sheet->height, frame.rgba_pixels);
     if (!texture) {
       star_field_.frames.clear();
       NovaLog::Warn("star field: texture upload failed; stars drawn as points");
@@ -265,7 +281,8 @@ SpaceflightView::EnsureStarFieldSheet(SdlPlatform &platform) {
     star_field_.frames.push_back(std::move(texture));
   }
   NovaLog::Info("star field sheet loaded: {}x{} {} frames",
-                star_field_.tile_width, star_field_.tile_height,
+                star_field_.tile_width,
+                star_field_.tile_height,
                 star_field_.frame_count);
   return &star_field_;
 }
@@ -274,14 +291,14 @@ SpaceflightView::EnsureStarFieldSheet(SdlPlatform &platform) {
 // Decoded from the binary: spawn count = round(viewportHeight / 600.0 * 20.0)
 // (divisor g_background_star_spawn_height_divisor = 600.0). Each of the first
 // `count` slots gets a random world offset within the (player-centred) viewport
-// and a parallax speed of NovaRandom_Range(0x23) * 0.01 (constant _DAT_00575738,
-// a double). The remaining (20-count) slots are merely re-activated, keeping
-// their previous position/speed (a re-scatter only rewrites the first `count`).
-// A negative system murk (SystemDef.murk) clears the whole field. When the
-// per-gameplay options toggle DAT_005914d7 is clear (starfield motion disabled)
-// the speed is forced to zero so the field is static. The star-field sprite
-// sheet (sp\x9an 700) is ensured loaded here so the per-star frame index bound
-// (frame count) is known.
+// and a parallax speed of NovaRandom_Range(0x23) * 0.01 (constant
+// _DAT_00575738, a double). The remaining (20-count) slots are merely
+// re-activated, keeping their previous position/speed (a re-scatter only
+// rewrites the first `count`). A negative system murk (SystemDef.murk) clears
+// the whole field. When the per-gameplay options toggle DAT_005914d7 is clear
+// (starfield motion disabled) the speed is forced to zero so the field is
+// static. The star-field sprite sheet (sp\x9an 700) is ensured loaded here so
+// the per-star frame index bound (frame count) is known.
 void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
                                         GameState &state) {
   // Load the star artwork (if not already) so the frame-count bound is known;
@@ -301,8 +318,8 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
 
   // Ghidra: count = round(viewportHeight / 600.0 * 20.0), clamped to the
   // 20-slot pool (viewport height 400 -> round(13.33) = 13 fresh stars).
-  const int count =
-      std::clamp<int>(static_cast<int>(std::round(kViewportHeight / 600.0F * 20.0F)), 0, 20);
+  const int count = std::clamp<int>(
+      static_cast<int>(std::round(kViewportHeight / 600.0F * 20.0F)), 0, 20);
   // gh.data flag DAT_005914d7: options toggle for starfield motion. Our clean
   // reimplementation currently has no such preference, so we keep it enabled.
   constexpr bool kStarfieldMotionEnabled = true;
@@ -320,18 +337,24 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
     // Star sprite frame index: the original picks NovaRandom_Range(frameCount)
     // uniformly over the star sheet's 16 tiles (Ghida DAT_00593efc +0x54).
     // When the sheet is unavailable we keep frame 0 (fallback point draw).
-    const int frame_count = star_field_.frame_count > 0 ? star_field_.frame_count : 1;
+    const int frame_count =
+        star_field_.frame_count > 0 ? star_field_.frame_count : 1;
     s.frame = NovaRandomRange(state.rng, frame_count);
     // Random world offset within the (player-centred) viewport.
-    const auto rx = static_cast<float>(NovaRandomRange(state.rng, kViewportWidth));
-    const auto ry = static_cast<float>(NovaRandomRange(state.rng, kViewportHeight));
-    s.pos_x = rx + state.player.pos_x - static_cast<float>(kViewportWidth) / 2.0F;
-    s.pos_y = ry + state.player.pos_y - static_cast<float>(kViewportHeight) / 2.0F;
-    // Ghidra: speed = NovaRandom_Range(0x23) * 0.01 when the motion toggle is on,
-    // else forced to 0 (stationary field).
-    s.speed = kStarfieldMotionEnabled
-                  ? static_cast<float>(NovaRandomRange(state.rng, 0x23)) * kSpeedScale
-                  : 0.0F;
+    const auto rx =
+        static_cast<float>(NovaRandomRange(state.rng, kViewportWidth));
+    const auto ry =
+        static_cast<float>(NovaRandomRange(state.rng, kViewportHeight));
+    s.pos_x =
+        rx + state.player.pos_x - static_cast<float>(kViewportWidth) / 2.0F;
+    s.pos_y =
+        ry + state.player.pos_y - static_cast<float>(kViewportHeight) / 2.0F;
+    // Ghidra: speed = NovaRandom_Range(0x23) * 0.01 when the motion toggle is
+    // on, else forced to 0 (stationary field).
+    s.speed =
+        kStarfieldMotionEnabled
+            ? static_cast<float>(NovaRandomRange(state.rng, 0x23)) * kSpeedScale
+            : 0.0F;
   }
 }
 
@@ -351,9 +374,10 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 }
 
 // Draws the solid per-system space backdrop (a flat tint from SystemDef
-// BkgndColor, pure black when unset) and then the active ambient star particles.
-// Ghidra: Frame_RenderViewportBackground clears + fills with the
-// NovaRender_SetSystemSpaceBackgroundColor tint, then Frame_UpdateViewportWrapBackgroundSprites
+// BkgndColor, pure black when unset) and then the active ambient star
+// particles. Ghidra: Frame_RenderViewportBackground clears + fills with the
+// NovaRender_SetSystemSpaceBackgroundColor tint, then
+// Frame_UpdateViewportWrapBackgroundSprites
 // (+ the sprite-world draw in Frame_SpaceflightLoop scope 2) renders the stars.
 // Each star draws its randomly-chosen frame of the 16-frame star-field sprite
 // sheet (sp\x9an 700, 4x4 grid of 5x5 tiles) at native 1:1 size; a small point
@@ -361,9 +385,10 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
 void SpaceflightView::DrawBackground(SdlPlatform &platform,
                                      const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
-  // Per-system space background tint. Ghidra NovaRender_SetSystemSpaceBackgroundColor
-  // uses SystemDef.field_0x1ee (the decoded RGB bytes); RRGGBB = 0 is pure
-  // black. This replaces the earlier provisional government-theme wash.
+  // Per-system space background tint. Ghidra
+  // NovaRender_SetSystemSpaceBackgroundColor uses SystemDef.field_0x1ee (the
+  // decoded RGB bytes); RRGGBB = 0 is pure black. This replaces the earlier
+  // provisional government-theme wash.
   const auto *sys = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   const std::uint32_t c = sys ? sys->bkgnd_color : 0;
@@ -391,12 +416,13 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
     const float sy = (s.pos_y - state.player.pos_y) + kViewportHeight / 2;
     float wx = std::fmod(sx, static_cast<float>(kViewportWidth));
     float wy = std::fmod(sy, static_cast<float>(kViewportHeight));
-    if (wx < 0.0F) wx += static_cast<float>(kViewportWidth);
-    if (wy < 0.0F) wy += static_cast<float>(kViewportHeight);
+    if (wx < 0.0F)
+      wx += static_cast<float>(kViewportWidth);
+    if (wy < 0.0F)
+      wy += static_cast<float>(kViewportHeight);
 
     if (sheet && !sheet->frames.empty()) {
-      const int frame_idx =
-          std::clamp(s.frame, 0, sheet->frame_count - 1);
+      const int frame_idx = std::clamp(s.frame, 0, sheet->frame_count - 1);
       const auto &texture = sheet->frames[static_cast<std::size_t>(frame_idx)];
       // Native tile size: draw the 5x5 star 1:1, centred on its position.
       const float tw = static_cast<float>(sheet->tile_width);
@@ -444,7 +470,7 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
     // stellar has link_b == -1, so the primary link_a set is the one animated.
     const auto *set = GetSpinSpriteSet(platform, st->link_a_id);
     if (!set || set->frame_count < 2) {
-      continue;  // no animated set / single-frame body stays static
+      continue; // no animated set / single-frame body stays static
     }
     StellarAnimState &anim = stellar_anims_[nav];
     const int frame_count = set->frame_count;
@@ -465,12 +491,10 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
           // jumps to a random frame != current when the random bit is set).
           anim.current_frame = anim.previous_frame;
           if ((st->availability_flags & 2) == 0) {
-            anim.previous_frame =
-                (anim.previous_frame + 1) % frame_count;
+            anim.previous_frame = (anim.previous_frame + 1) % frame_count;
           } else {
             do {
-              anim.previous_frame =
-                  NovaRandomRange(state.rng, frame_count);
+              anim.previous_frame = NovaRandomRange(state.rng, frame_count);
             } while (anim.previous_frame == anim.current_frame);
           }
         } else if (anim.current_frame == 0) {
@@ -478,16 +502,14 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
           // returning it to 0 in the sequential case; random skips 0).
           anim.current_frame = anim.previous_frame;
           if ((st->availability_flags & 2) == 0) {
-            anim.previous_frame =
-                (anim.previous_frame + 1) % frame_count;
+            anim.previous_frame = (anim.previous_frame + 1) % frame_count;
             if (anim.previous_frame == 0) {
               anim.previous_frame += 1;
             }
           } else {
             do {
               do {
-                anim.previous_frame =
-                    NovaRandomRange(state.rng, frame_count);
+                anim.previous_frame = NovaRandomRange(state.rng, frame_count);
               } while (anim.previous_frame == 0);
             } while (anim.previous_frame == anim.current_frame);
           }
@@ -501,7 +523,7 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
       // Drift frames toward/around the engage_highlight_frame (default middle).
       int highlight = st->engage_highlight_frame;
       if (highlight < 1 || frame_count - 1 <= highlight) {
-        highlight = frame_count / 2;  // Ghidra (frame_count+1US -1)>>1 == fc/2
+        highlight = frame_count / 2; // Ghidra (frame_count+1US -1)>>1 == fc/2
       }
       // TODO(decomp): g_travel_selected_stellar_id / g_travel_engage_timer and
       // active-ship engagement not modeled here; the engaged pulse-to-highlight
@@ -512,7 +534,7 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
         const int cur = anim.current_frame;
         if (cur < highlight) {
           if (cur > 0) {
-            anim.current_frame = cur - 1;  // drift down toward 0 / highlight
+            anim.current_frame = cur - 1; // drift down toward 0 / highlight
           }
         } else if ((st->availability_flags & 2) == 0) {
           if (cur < frame_count - 1) {
@@ -536,8 +558,8 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
 void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
                                         const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
-  const auto *sys =
-      state.scenario.System(static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  const auto *sys = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   if (!sys) {
     return;
   }
@@ -556,18 +578,18 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
     }
     const int cx =
         (st->pos_x - static_cast<int>(state.player.pos_x)) + kViewportWidth / 2;
-    const int cy =
-        (st->pos_y - static_cast<int>(state.player.pos_y)) + kViewportHeight / 2;
+    const int cy = (st->pos_y - static_cast<int>(state.player.pos_y)) +
+                   kViewportHeight / 2;
     if (cx < -160 || cx > kViewportWidth + 160 || cy < -160 ||
         cy > kViewportHeight + 160) {
-      continue;  // off-screen
+      continue; // off-screen
     }
     // Pick an 8-bit tint: the stellar's government (now decoded) if present,
     // else the system government.
     std::uint8_t r = 170, g = 170, b = 200;
-    const auto *gov =
-        st->government_id >= 0x80 ? state.scenario.Government(st->government_id)
-                                  : state.scenario.Government(sys->government_id);
+    const auto *gov = st->government_id >= 0x80
+                          ? state.scenario.Government(st->government_id)
+                          : state.scenario.Government(sys->government_id);
     if (gov && gov->present) {
       r = gov->theme_red;
       g = gov->theme_green;
@@ -586,11 +608,12 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
             std::clamp(anim_it->second.current_frame, 0, set->frame_count - 1);
       }
       const auto &frame = set->frames[static_cast<std::size_t>(frame_idx)];
-      const float scale = 1.0F;  // planets render at native world size
+      const float scale = 1.0F; // planets render at native world size
       const SDL_FRect dest{
           static_cast<float>(cx) - set->tile_width * scale / 2.0F,
           static_cast<float>(cy) - set->tile_height * scale / 2.0F,
-          set->tile_width * scale, set->tile_height * scale};
+          set->tile_width * scale,
+          set->tile_height * scale};
       SDL_RenderTexture(renderer, frame->get(), nullptr, &dest);
       continue;
     }
@@ -613,16 +636,17 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
 
   // Player ship at the play-area centre, frame selected by heading.
   if (!ship_.frames.empty() && ship_.frames_per_rotation > 0) {
-    const int frame = FrameForHeading(state.player.heading,
-                                      ship_.frames_per_rotation);
+    const int frame =
+        FrameForHeading(state.player.heading, ship_.frames_per_rotation);
     const int clamped_frame = std::clamp(frame, 0, ship_.frame_count - 1);
     const auto &texture = ship_.frames[static_cast<std::size_t>(clamped_frame)];
-    const float scale = 1.0F;  // original draws ship at native size
+    const float scale = 1.0F; // original draws ship at native size
     const float w = static_cast<float>(ship_.width) * scale;
     const float h = static_cast<float>(ship_.height) * scale;
-    const SDL_FRect dest{
-        static_cast<float>(kViewportWidth) / 2.0F - w / 2.0F,
-        static_cast<float>(kViewportHeight) / 2.0F - h / 2.0F, w, h};
+    const SDL_FRect dest{static_cast<float>(kViewportWidth) / 2.0F - w / 2.0F,
+                         static_cast<float>(kViewportHeight) / 2.0F - h / 2.0F,
+                         w,
+                         h};
     SDL_RenderTexture(renderer, texture->get(), nullptr, &dest);
 
     // Engine-glow layer: drawn over the base with the same heading-selected
@@ -638,21 +662,25 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
         !glow_.frames.empty() && glow_.frames_per_rotation > 0) {
       if (!glow_last_drawn_) {
         NovaLog::Info("[glow] draw ON intensity={:.2f} frames={} size={}x{}",
-                      state.player.engine_glow_intensity, glow_.frame_count,
-                      glow_.width, glow_.height);
+                      state.player.engine_glow_intensity,
+                      glow_.frame_count,
+                      glow_.width,
+                      glow_.height);
         glow_last_drawn_ = true;
       }
-      const int glow_frame =
-          std::clamp(FrameForHeading(state.player.heading,
-                                     glow_.frames_per_rotation),
-                     0, glow_.frame_count - 1);
+      const int glow_frame = std::clamp(
+          FrameForHeading(state.player.heading, glow_.frames_per_rotation),
+          0,
+          glow_.frame_count - 1);
       const auto &glow_texture =
           glow_.frames[static_cast<std::size_t>(glow_frame)];
       const float gw = static_cast<float>(glow_.width);
       const float gh = static_cast<float>(glow_.height);
       const SDL_FRect glow_dest{
           static_cast<float>(kViewportWidth) / 2.0F - gw / 2.0F,
-          static_cast<float>(kViewportHeight) / 2.0F - gh / 2.0F, gw, gh};
+          static_cast<float>(kViewportHeight) / 2.0F - gh / 2.0F,
+          gw,
+          gh};
       const std::uint8_t alpha = static_cast<std::uint8_t>(
           std::clamp(state.player.engine_glow_intensity, 0.0F, 1.0F) * 255.0F);
       SDL_SetTextureAlphaMod(glow_texture->get(), alpha);
@@ -661,7 +689,8 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
     } else if (glow_last_drawn_) {
       // Won't draw this frame (intensity leaked below the gate / layer empty).
       NovaLog::Info("[glow] draw OFF has_glow={} intensity={:.2f} frames={}",
-                    has_glow_, state.player.engine_glow_intensity,
+                    has_glow_,
+                    state.player.engine_glow_intensity,
                     glow_.frame_count);
       glow_last_drawn_ = false;
     }

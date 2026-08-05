@@ -51,9 +51,11 @@ private:
   struct MixerDeleter {
     void operator()(MIX_Mixer *mixer) const;
   };
+
   struct AudioDeleter {
     void operator()(MIX_Audio *audio) const;
   };
+
   struct TrackDeleter {
     void operator()(MIX_Track *track) const;
   };

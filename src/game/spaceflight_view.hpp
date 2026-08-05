@@ -32,7 +32,7 @@ namespace game {
 struct GameState;
 
 class SpaceflightView {
- public:
+public:
   SpaceflightView() = default;
   SpaceflightView(const SpaceflightView &) = delete;
   SpaceflightView &operator=(const SpaceflightView &) = delete;
@@ -67,34 +67,38 @@ class SpaceflightView {
   void UpdateAmbientStars(float dx, float dy);
 
   // Draws the solid per-system space background tint (SystemDef.bkgnd_color,
-  // Ghidra NovaRender_SetSystemSpaceBackgroundColor / Frame_RenderViewportBackground)
-  // then the active ambient star particles.
+  // Ghidra NovaRender_SetSystemSpaceBackgroundColor /
+  // Frame_RenderViewportBackground) then the active ambient star particles.
   void DrawBackground(SdlPlatform &platform, const GameState &state);
 
-  // Ghidra Stellar_UpdateStellarSprites (0x0042cd10), ambient-animation part only:
-  // advances each of the current system's animated stellars' sprite frame one
-  // animation step. frame_time_ms is the real elapsed frame time (the original
-  // accumulates _g_avg_frame_time_ms into StellarDef.sprite_frame_accumulator).
-  // Hypergate-style stellars (availability_flags & 0x1000) use the non-engaged
-  // drift branch (clamped to engage_highlight_frame); because this build has no
-  // AI ships / travel-selection state the engage-highlight pulse is documented
-  // and left untouched (TODO(decomp)). Mutates the GameState PRNG (random
-  // cycling) so it is non-const.
-  void AdvanceStellarAnimation(SdlPlatform &platform, GameState &state,
+  // Ghidra Stellar_UpdateStellarSprites (0x0042cd10), ambient-animation part
+  // only: advances each of the current system's animated stellars' sprite frame
+  // one animation step. frame_time_ms is the real elapsed frame time (the
+  // original accumulates _g_avg_frame_time_ms into
+  // StellarDef.sprite_frame_accumulator). Hypergate-style stellars
+  // (availability_flags & 0x1000) use the non-engaged drift branch (clamped to
+  // engage_highlight_frame); because this build has no AI ships /
+  // travel-selection state the engage-highlight pulse is documented and left
+  // untouched (TODO(decomp)). Mutates the GameState PRNG (random cycling) so it
+  // is non-const.
+  void AdvanceStellarAnimation(SdlPlatform &platform,
+                               GameState &state,
                                float frame_time_ms);
 
- private:
+private:
   // One ambient background star particle (Ghidra AmbientStarParticle pool at
   // g_ambient_star_particles, stride 0x14 = 20 bytes; offsets match the way we
   // index the original fields).
   struct AmbientStar {
-    int frame = 0;     // +0x06 random star-sprite frame index at spawn
-    float speed = 0.0F; // +0x08 parallax drift speed (random per particle)
-    float pos_x = 0.0F; // +0x0c world-space x
-    float pos_y = 0.0F; // +0x10 world-space y
+    int frame = 0;       // +0x06 random star-sprite frame index at spawn
+    float speed = 0.0F;  // +0x08 parallax drift speed (random per particle)
+    float pos_x = 0.0F;  // +0x0c world-space x
+    float pos_y = 0.0F;  // +0x10 world-space y
     bool active = false; // +0x04 active flag
   };
+
   std::array<AmbientStar, 20> ambient_stars_{};
+
   // The ambient star-field artwork: sp\x9an spin descriptor resource 700 is a
   // 4x4 grid of 5x5px star tiles (16 distinct star shapes). Each particle
   // renders one of these frames at native 1:1 size (the original's murk-derived
@@ -104,18 +108,21 @@ class SpaceflightView {
   struct StarFieldSheet {
     std::vector<std::unique_ptr<class SdlTexture>> frames;
     int frame_count = 0;
-    int tile_width = 0;   // 5
-    int tile_height = 0;  // 5
+    int tile_width = 0;  // 5
+    int tile_height = 0; // 5
   };
+
   StarFieldSheet star_field_;
+
   // Unrotated per-frame ship textures plus rotation metadata.
   struct ShipSprite {
     std::vector<std::unique_ptr<class SdlTexture>> frames;
-    int frame_count = 0;      // base_set_count * frames_per_rotation
+    int frame_count = 0; // base_set_count * frames_per_rotation
     int frames_per_rotation = 36;
     int width = 0;
     int height = 0;
   };
+
   ShipSprite ship_;
   // The ship's engine-glow layer, a second rl\x9144 sheet (sh\x8an
   // GlowImageID, e.g. 'Shuttle Eng Glow' 0x0578) sharing the base sheet's
@@ -141,11 +148,12 @@ class SpaceflightView {
   struct SpinSpriteSet {
     std::vector<std::unique_ptr<class SdlTexture>> frames;
     int frame_count = 0;
-    int width = 0;   // tiles_x
-    int height = 0;  // tiles_y
+    int width = 0;  // tiles_x
+    int height = 0; // tiles_y
     int tile_width = 0;
     int tile_height = 0;
   };
+
   // spin sprite-set id -> loaded set (lazily populated; id+1000 is the spin
   // resource id for the set).
   std::vector<std::unique_ptr<SpinSpriteSet>> spin_sets_;
@@ -159,7 +167,8 @@ class SpaceflightView {
   // Loads (and caches) the ambient star-field sheet (sp\x9an resource 700).
   // Returns null when it could not be decoded; on failure stars fall back to
   // plain points. Ghidra DAT_00593efc.
-  [[nodiscard]] const StarFieldSheet *EnsureStarFieldSheet(SdlPlatform &platform);
+  [[nodiscard]] const StarFieldSheet *
+  EnsureStarFieldSheet(SdlPlatform &platform);
 
   // One animated stellar's frame-stepping runtime state (the original keeps
   // these on StellarDef sprite_current_frame / sprite_previous_frame /
@@ -170,6 +179,7 @@ class SpaceflightView {
     int previous_frame = 0;
     float frame_accumulator = 0.0F;
   };
+
   // stellar id (resource id) -> runtime animation state for animated stellars.
   std::map<std::int16_t, StellarAnimState> stellar_anims_;
 

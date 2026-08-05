@@ -27,8 +27,8 @@ bool SdlAudio::Initialize() {
     return false;
   }
   const SDL_AudioSpec device_format{SDL_AUDIO_S16, 2, 44100};
-  device_id_ = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                   &device_format);
+  device_id_ =
+      SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &device_format);
   if (device_id_ == 0) {
     NovaLog::Error("SDL audio device open failed: {}", SDL_GetError());
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
@@ -59,9 +59,8 @@ void SdlAudio::Play(const NovaSoundData &sound, float gain) {
     voices_.reserve(8);
   }
   if (voices_.size() < 8) {
-    voices_.push_back(
-        std::unique_ptr<SDL_AudioStream, StreamDeleter>{
-            SDL_CreateAudioStream(nullptr, nullptr)});
+    voices_.push_back(std::unique_ptr<SDL_AudioStream, StreamDeleter>{
+        SDL_CreateAudioStream(nullptr, nullptr)});
     if (!voices_.back()) {
       NovaLog::Error("SDL audio stream creation failed: {}", SDL_GetError());
       voices_.pop_back();
@@ -78,7 +77,8 @@ void SdlAudio::Play(const NovaSoundData &sound, float gain) {
   // reuses slots.
   auto *voice = voices_[next_voice_].get();
   for (std::size_t attempt = 0; attempt < voices_.size(); ++attempt) {
-    const auto candidate = voices_[(next_voice_ + attempt) % voices_.size()].get();
+    const auto candidate =
+        voices_[(next_voice_ + attempt) % voices_.size()].get();
     if (!StreamActive(candidate)) {
       voice = candidate;
       break;
@@ -86,8 +86,8 @@ void SdlAudio::Play(const NovaSoundData &sound, float gain) {
   }
   next_voice_ = (next_voice_ + 1) % voices_.size();
 
-  const SDL_AudioSpec source_spec{SDL_AUDIO_S16, sound.channel_count,
-                                  sound.sample_rate};
+  const SDL_AudioSpec source_spec{
+      SDL_AUDIO_S16, sound.channel_count, sound.sample_rate};
   if (!SDL_SetAudioStreamFormat(voice, &source_spec, nullptr)) {
     NovaLog::Warn("SDL audio stream format failed: {}", SDL_GetError());
     return;
@@ -97,8 +97,8 @@ void SdlAudio::Play(const NovaSoundData &sound, float gain) {
   const auto data = std::span<const std::byte>{
       reinterpret_cast<const std::byte *>(sound.samples.data()),
       sound.samples.size() * sizeof(std::int16_t)};
-  if (!SDL_PutAudioStreamData(voice, data.data(),
-                              static_cast<int>(data.size()))) {
+  if (!SDL_PutAudioStreamData(
+          voice, data.data(), static_cast<int>(data.size()))) {
     NovaLog::Warn("SDL audio stream read failed: {}", SDL_GetError());
     return;
   }

@@ -25,11 +25,17 @@ namespace {
 // confirm dialog also predate the current framework, so they are reduced to
 // small modal prompts with the same semantics (see below).
 constexpr std::array<std::string_view, 7> kOpenerFirstNames{
-    "the newcomer", "the wanderer", "the trader",  "the mercenary",
-    "the courier",  "the smuggler", "the pilot",
+    "the newcomer",
+    "the wanderer",
+    "the trader",
+    "the mercenary",
+    "the courier",
+    "the smuggler",
+    "the pilot",
 };
 constexpr std::array<std::string_view, 2> kStartTypeNames{
-    "Default Start", "Alternate Start",
+    "Default Start",
+    "Alternate Start",
 };
 
 // Where a brand-new pilot begins. The real game randomizes the start system
@@ -46,7 +52,8 @@ constexpr std::int16_t kStartSystemResourceId = 0x81; // resource id
 // original's landing/launch placement (which positions the ship beside the
 // planet it last docked at); the jump-gate vs planet choice is not yet
 // distinguished, so we take the system's first owned body.
-[[nodiscard]] std::int16_t PickLandingStellarResource(std::span<const std::int16_t> nav_defs) {
+[[nodiscard]] std::int16_t
+PickLandingStellarResource(std::span<const std::int16_t> nav_defs) {
   for (const auto nav : nav_defs) {
     if (nav >= 0x80) {
       return nav;
@@ -65,10 +72,13 @@ constexpr std::int16_t kStartSystemResourceId = 0x81; // resource id
 // nova_app.cpp. These are intentionally minimal: they are not the real
 // stock UI dialogs, which are a later milestone.
 
-bool RunTextInputPrompt(SdlPlatform &platform, const std::string &prompt,
-                        std::string initial, std::string &out) {
+bool RunTextInputPrompt(SdlPlatform &platform,
+                        const std::string &prompt,
+                        std::string initial,
+                        std::string &out) {
   SDL_Renderer *const renderer = platform.renderer();
-  constexpr std::string_view kNavKeys = "Ctrl-BACKSPACE clears  /  ENTER accept  /  ESC cancel";
+  constexpr std::string_view kNavKeys =
+      "Ctrl-BACKSPACE clears  /  ENTER accept  /  ESC cancel";
   constexpr std::size_t kMaxChars = 48;
 
   out = std::move(initial);
@@ -143,9 +153,10 @@ int RunStartTypePrompt(SdlPlatform &platform) {
     SDL_RenderRect(renderer, &panel);
     SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
     for (std::size_t i = 0; i < kStartTypeNames.size(); ++i) {
-      const std::string line = std::to_string(i + 1) + "  " +
-                              std::string(kStartTypeNames[i]);
-      SDL_RenderDebugText(renderer, 130.0F,
+      const std::string line =
+          std::to_string(i + 1) + "  " + std::string(kStartTypeNames[i]);
+      SDL_RenderDebugText(renderer,
+                          130.0F,
                           174.0F + static_cast<float>(i) * 34.0F,
                           line.c_str());
     }
@@ -158,8 +169,8 @@ int RunStartTypePrompt(SdlPlatform &platform) {
 }
 
 [[nodiscard]] int RandomIndex(GameState &state, int count) {
-  return static_cast<int>(std::uniform_int_distribution<int>{0, count - 1}(
-      state.rng));
+  return static_cast<int>(
+      std::uniform_int_distribution<int>{0, count - 1}(state.rng));
 }
 
 } // namespace
@@ -202,8 +213,8 @@ void Stub_SeedStartingInventory(GameState &state) {
   state.weapon_bank_ammo.fill(0);
   state.weapon_bank_secondary.fill(0);
 
-  const auto *ship = state.scenario.Ship(static_cast<std::int16_t>(
-      state.player.ship_class_id + 0x80));
+  const auto *ship = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
   if (!ship) {
     NovaLog::Todo("starting inventory left empty: default ship class id "
                   "{} not in the scenario tables",
@@ -254,7 +265,8 @@ void Stub_PickFirstTravelDestination(GameState &state) {
   // >= 0x80 name a system (the loader re-bases them into the 0.. index space
   // after a sanity range check, so we keep them as resource ids here).
   state.travel.selected_dest_id = -1;
-  if (const auto *start = state.scenario.System(kStartSystemResourceId); start) {
+  if (const auto *start = state.scenario.System(kStartSystemResourceId);
+      start) {
     for (const auto link : start->links) {
       if (link >= 0x80) {
         state.travel.selected_dest_id = link;
@@ -291,7 +303,8 @@ void ResetPlayerShipForNewGame(GameState &state) {
   // landing/launch placement is reconstructed.
   state.player.pos_y = 60.0F;
   if (const auto *sys = state.scenario.System(kStartSystemResourceId); sys) {
-    if (const auto anchor_id = PickLandingStellarResource(sys->nav_defs); anchor_id >= 0x80) {
+    if (const auto anchor_id = PickLandingStellarResource(sys->nav_defs);
+        anchor_id >= 0x80) {
       if (const auto *anchor = state.scenario.Stellar(anchor_id); anchor) {
         // Spawn just east (positive-x screen = starboard) of the anchor body,
         // a small pull away so the planet stays framed ahead-down.
@@ -299,7 +312,9 @@ void ResetPlayerShipForNewGame(GameState &state) {
         state.player.pos_y = static_cast<float>(anchor->pos_y) + 60.0F;
         NovaLog::Debug("spawning new pilot near landing stellar '{}' at "
                        "({}, {})",
-                       anchor->name, anchor->pos_x, anchor->pos_y);
+                       anchor->name,
+                       anchor->pos_x,
+                       anchor->pos_y);
       }
     }
   } else {
@@ -326,8 +341,11 @@ void ResetPlayerShipForNewGame(GameState &state) {
     state.player.fuel_points = static_cast<float>(ship->base_fuel);
     NovaLog::Debug("player ship reset for new game: class '{}' (holds {}, "
                    "shield {}, armor {}, fuel {})",
-                   ship->display_name, ship->cargo_holds, ship->base_shield,
-                   ship->base_armor, ship->base_fuel);
+                   ship->display_name,
+                   ship->cargo_holds,
+                   ship->base_shield,
+                   ship->base_armor,
+                   ship->base_fuel);
   } else {
     state.player.shield_points = 0.0F;
     state.player.armor_points = 0.0F;
@@ -360,8 +378,10 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   state.pilot.first_name.clear();
   const std::string suggested = std::string(
       kOpenerFirstNames[static_cast<std::size_t>(RandomIndex(state, 7))]);
-  if (!RunTextInputPrompt(platform, "NEW PILOT  -  enter callsign:",
-                          suggested, state.pilot.first_name)) {
+  if (!RunTextInputPrompt(platform,
+                          "NEW PILOT  -  enter callsign:",
+                          suggested,
+                          state.pilot.first_name)) {
     return false;
   }
   if (state.pilot.first_name.empty()) {
@@ -458,7 +478,8 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   state.pilot.selected_reputation = static_cast<std::int16_t>(start_type);
   state.game_active = true;
   NovaLog::Info("new pilot active: callsign '{}', start type {}",
-                state.pilot.first_name, state.pilot.start_type_code);
+                state.pilot.first_name,
+                state.pilot.start_type_code);
   return true;
 }
 

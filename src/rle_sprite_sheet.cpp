@@ -21,7 +21,8 @@ constexpr std::size_t kHeaderSize = 0x10;
          std::to_integer<std::uint32_t>(bytes[offset + 3]);
 }
 
-void StoreRgb555(std::span<std::uint8_t> rgba_pixels, std::size_t pixel_index,
+void StoreRgb555(std::span<std::uint8_t> rgba_pixels,
+                 std::size_t pixel_index,
                  std::uint16_t pixel) {
   const auto destination = pixel_index * 4;
   rgba_pixels[destination] =
@@ -34,7 +35,9 @@ void StoreRgb555(std::span<std::uint8_t> rgba_pixels, std::size_t pixel_index,
 }
 
 [[nodiscard]] bool DecodeFrame(std::span<const std::byte> resource_data,
-                               std::size_t &source, int width, int height,
+                               std::size_t &source,
+                               int width,
+                               int height,
                                RleSpriteFrame &frame) {
   const auto row_size = static_cast<std::size_t>(width) * 2;
   int row = -1;

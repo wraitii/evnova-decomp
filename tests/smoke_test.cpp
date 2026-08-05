@@ -33,9 +33,18 @@ TEST_CASE("main-menu shortcuts retain the original action mapping") {
 
 TEST_CASE("sprite metadata decodes from its documented big-endian layout") {
   constexpr std::array<std::byte, 12> bytes{
-      std::byte{0x1f}, std::byte{0x74}, std::byte{0x1f}, std::byte{0x7e},
-      std::byte{0x00}, std::byte{0x64}, std::byte{0x00}, std::byte{0x3c},
-      std::byte{0x00}, std::byte{0x01}, std::byte{0x00}, std::byte{0x02},
+      std::byte{0x1f},
+      std::byte{0x74},
+      std::byte{0x1f},
+      std::byte{0x7e},
+      std::byte{0x00},
+      std::byte{0x64},
+      std::byte{0x00},
+      std::byte{0x3c},
+      std::byte{0x00},
+      std::byte{0x01},
+      std::byte{0x00},
+      std::byte{0x02},
   };
 
   const auto definition = NovaSpriteDefinition_Parse(bytes);
@@ -371,5 +380,3 @@ TEST_CASE("NovaSound_Decode carries predictor low bits between IMA4 packets") {
   REQUIRE(sound->samples.size() == 128);
   CHECK(sound->samples[64] == 267);
 }
-
-

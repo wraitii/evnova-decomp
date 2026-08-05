@@ -96,8 +96,8 @@ LoadMenuSpriteAsset(SDL_Renderer *renderer,
   NovaMenuSpriteAsset asset{.sheet = std::move(*sheet)};
   asset.textures.reserve(asset.sheet.frames.size());
   for (const auto &frame : asset.sheet.frames) {
-    auto texture = SdlTexture::Create(renderer, asset.sheet.width,
-                                      asset.sheet.height, frame.rgba_pixels);
+    auto texture = SdlTexture::Create(
+        renderer, asset.sheet.width, asset.sheet.height, frame.rgba_pixels);
     if (!texture) {
       return std::nullopt;
     }
@@ -109,7 +109,8 @@ LoadMenuSpriteAsset(SDL_Renderer *renderer,
 // Slices a vertically stacked PICT sprite resource into SDL textures. The
 // title animation (606) and row reveals (608-610) all use this layout.
 [[nodiscard]] std::vector<std::unique_ptr<SdlTexture>>
-LoadStackedPictFrames(SDL_Renderer *renderer, const PictImage &pict,
+LoadStackedPictFrames(SDL_Renderer *renderer,
+                      const PictImage &pict,
                       const NovaSpriteDefinition &definition) {
   if (definition.tiles_x != 1 || definition.tiles_y == 0 ||
       pict.width != definition.tile_width ||
@@ -130,8 +131,8 @@ LoadStackedPictFrames(SDL_Renderer *renderer, const PictImage &pict,
             frame * static_cast<std::size_t>(definition.tile_height) *
                 static_cast<std::size_t>(pict.width) * 4,
         static_cast<std::size_t>(pict.width) * definition.tile_height * 4};
-    auto texture = SdlTexture::Create(renderer, pict.width,
-                                      definition.tile_height, pixels);
+    auto texture = SdlTexture::Create(
+        renderer, pict.width, definition.tile_height, pixels);
     if (!texture) {
       return {};
     }
@@ -196,7 +197,9 @@ LoadPictSpriteFrames(SDL_Renderer *renderer,
   return alpha != 0;
 }
 
-void DrawDebugTextCentered(SDL_Renderer *renderer, float center_x, float y,
+void DrawDebugTextCentered(SDL_Renderer *renderer,
+                           float center_x,
+                           float y,
                            std::string_view text) {
   constexpr float character_width = 8.0F;
   const auto text_width = static_cast<float>(text.length()) * character_width;
@@ -210,8 +213,8 @@ void DrawMenuBackground(SDL_Renderer *renderer, int width, int height) {
   for (int band = 0; band < height; band += 4) {
     const auto blue = static_cast<std::uint8_t>(15 + band * 20 / height);
     SDL_SetRenderDrawColor(renderer, 3, 10, blue, SDL_ALPHA_OPAQUE);
-    SDL_FRect strip{0.0F, static_cast<float>(band), static_cast<float>(width),
-                    4.0F};
+    SDL_FRect strip{
+        0.0F, static_cast<float>(band), static_cast<float>(width), 4.0F};
     SDL_RenderFillRect(renderer, &strip);
   }
 
@@ -232,21 +235,34 @@ void DrawPlanet(SDL_Renderer *renderer) {
     const auto half_width =
         std::sqrt(radius * radius - static_cast<float>(y * y));
     const auto shade = static_cast<std::uint8_t>(34 + (y + 172) * 28 / 344);
-    SDL_SetRenderDrawColor(renderer, 7, shade,
+    SDL_SetRenderDrawColor(renderer,
+                           7,
+                           shade,
                            static_cast<std::uint8_t>(shade + 34),
                            SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(renderer, center_x - half_width,
-                   center_y + static_cast<float>(y), center_x + half_width,
+    SDL_RenderLine(renderer,
+                   center_x - half_width,
+                   center_y + static_cast<float>(y),
+                   center_x + half_width,
                    center_y + static_cast<float>(y));
   }
 
   SDL_SetRenderDrawColor(renderer, 86, 171, 215, SDL_ALPHA_OPAQUE);
-  SDL_RenderLine(renderer, center_x - 150.0F, center_y - 82.0F,
-                 center_x + 20.0F, center_y - 120.0F);
-  SDL_RenderLine(renderer, center_x - 170.0F, center_y - 20.0F,
-                 center_x + 84.0F, center_y - 56.0F);
-  SDL_RenderLine(renderer, center_x - 166.0F, center_y + 66.0F,
-                 center_x + 110.0F, center_y + 34.0F);
+  SDL_RenderLine(renderer,
+                 center_x - 150.0F,
+                 center_y - 82.0F,
+                 center_x + 20.0F,
+                 center_y - 120.0F);
+  SDL_RenderLine(renderer,
+                 center_x - 170.0F,
+                 center_y - 20.0F,
+                 center_x + 84.0F,
+                 center_y - 56.0F);
+  SDL_RenderLine(renderer,
+                 center_x - 166.0F,
+                 center_y + 66.0F,
+                 center_x + 110.0F,
+                 center_y + 34.0F);
 }
 
 void DrawHudFrame(SDL_Renderer *renderer) {
@@ -267,8 +283,10 @@ void DrawHudFrame(SDL_Renderer *renderer) {
   SDL_RenderDebugText(renderer, 40.0F, 438.0F, "SECTOR 000 / LOCAL");
 }
 
-void DrawSplashFrame(SDL_Renderer *renderer, std::string_view heading,
-                     std::string_view detail, float progress) {
+void DrawSplashFrame(SDL_Renderer *renderer,
+                     std::string_view heading,
+                     std::string_view detail,
+                     float progress) {
   DrawMenuBackground(renderer, 640, 480);
 
   SDL_SetRenderDrawColor(renderer, 48, 113, 179, SDL_ALPHA_OPAQUE);
@@ -329,7 +347,8 @@ void PresentSplashTexture(SDL_Renderer *renderer, SDL_Texture *texture) {
   SDL_GetTextureSize(texture, &width, &height);
   const auto scale = std::min(640.0F / width, 480.0F / height);
   const SDL_FRect destination{(640.0F - width * scale) / 2.0F,
-                              (480.0F - height * scale) / 2.0F, width * scale,
+                              (480.0F - height * scale) / 2.0F,
+                              width * scale,
                               height * scale};
   SDL_RenderTexture(renderer, texture, nullptr, &destination);
 }
@@ -454,7 +473,8 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   runtime.next_menu_prompt_toggle_ms = runtime.startup_phase_started_ms + 650;
   // Ghidra: FUN_004ad960, which loads sp\x95n 600-605 into DAT_00596cb8.
   for (std::size_t index = 0;
-       index < runtime.main_menu_sprite_definitions.size(); ++index) {
+       index < runtime.main_menu_sprite_definitions.size();
+       ++index) {
     const auto sprite_id = static_cast<std::uint16_t>(600 + index);
     runtime.main_menu_sprite_definitions[index] =
         NovaResource_LoadMainMenuSpriteDefinition(sprite_id);
@@ -463,9 +483,13 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
           "loaded sp\\x95n {}: image resource 0x{:04x}, mask resource "
           "0x{:04x}, "
           "{}x{} tiles ({}x{})",
-          sprite_id, definition->sprites_resource_id,
-          definition->mask_resource_id, definition->tile_width,
-          definition->tile_height, definition->tiles_x, definition->tiles_y);
+          sprite_id,
+          definition->sprites_resource_id,
+          definition->mask_resource_id,
+          definition->tile_width,
+          definition->tile_height,
+          definition->tiles_x,
+          definition->tiles_y);
       runtime.main_menu_sprite_assets[index] =
           LoadMenuSpriteAsset(runtime.platform.renderer(), *definition);
       if (!runtime.main_menu_sprite_assets[index]) {
@@ -498,9 +522,10 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   const auto load_splash_texture = [&runtime](std::uint16_t resource_id) {
     if (const auto pict_data = NovaResource_LoadPictData(resource_id)) {
       if (const auto pict = Resource_LoadPictAsImage(*pict_data)) {
-        auto texture =
-            SdlTexture::Create(runtime.platform.renderer(), pict->width,
-                               pict->height, pict->rgba_pixels);
+        auto texture = SdlTexture::Create(runtime.platform.renderer(),
+                                          pict->width,
+                                          pict->height,
+                                          pict->rgba_pixels);
         if (!texture) {
           NovaLog::Error("PICT 0x{:04x} decoded but SDL texture upload "
                          "failed",
@@ -517,8 +542,10 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   if (const auto backdrop_data = NovaResource_LoadMainMenuBackdropData()) {
     if (const auto pict = Resource_LoadPictAsImage(*backdrop_data)) {
       runtime.main_menu_backdrop_texture =
-          SdlTexture::Create(runtime.platform.renderer(), pict->width,
-                             pict->height, pict->rgba_pixels);
+          SdlTexture::Create(runtime.platform.renderer(),
+                             pict->width,
+                             pict->height,
+                             pict->rgba_pixels);
       if (!runtime.main_menu_backdrop_texture) {
         NovaLog::Error("main-menu backdrop PICT 0x1f40 decoded but SDL "
                        "texture upload failed");
@@ -730,11 +757,11 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
         logo_width * logo_scale,
         logo_height * logo_scale,
     };
-    SDL_RenderTexture(renderer, logo_texture->get(), nullptr,
-                      &logo_destination);
+    SDL_RenderTexture(
+        renderer, logo_texture->get(), nullptr, &logo_destination);
   } else {
-    DrawDebugTextCentered(renderer, 320.0F, 78.0F,
-                          "E S C A P E   V E L O C I T Y");
+    DrawDebugTextCentered(
+        renderer, 320.0F, 78.0F, "E S C A P E   V E L O C I T Y");
     DrawDebugTextCentered(renderer, 320.0F, 102.0F, "N O V A");
   }
 
@@ -754,8 +781,8 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
                             : kFallbackRowRevealOrigins[row];
     float width = 0.0F;
     float height = 0.0F;
-    SDL_GetTextureSize(textures[static_cast<std::size_t>(counter)]->get(),
-                       &width, &height);
+    SDL_GetTextureSize(
+        textures[static_cast<std::size_t>(counter)]->get(), &width, &height);
     const SDL_FRect destination{
         static_cast<float>(origin.x) * kMenuCoordinateScale,
         static_cast<float>(origin.y) * kMenuCoordinateScale,
@@ -764,7 +791,8 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
     };
     SDL_RenderTexture(renderer,
                       textures[static_cast<std::size_t>(counter)]->get(),
-                      nullptr, &destination);
+                      nullptr,
+                      &destination);
   }
 
   for (std::size_t index = 0; index < runtime.main_menu_sprite_assets.size();
@@ -781,8 +809,8 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
       frame_index = 1;
     }
     const auto destination = MenuRect(runtime, index);
-    SDL_RenderTexture(renderer, asset.textures[frame_index]->get(), nullptr,
-                      &destination);
+    SDL_RenderTexture(
+        renderer, asset.textures[frame_index]->get(), nullptr, &destination);
   }
 
   for (std::size_t index = 0; index < kMenuEntries.size(); ++index) {
@@ -810,9 +838,14 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
                   .green = static_cast<std::uint8_t>(hovered ? 248 : 200),
                   .blue = static_cast<std::uint8_t>(hovered ? 255 : 239),
               };
-    SDL_SetRenderDrawColor(renderer, menu_color.red, menu_color.green,
-                           menu_color.blue, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, rect.x + 22.0F, rect.y + 8.0F,
+    SDL_SetRenderDrawColor(renderer,
+                           menu_color.red,
+                           menu_color.green,
+                           menu_color.blue,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer,
+                        rect.x + 22.0F,
+                        rect.y + 8.0F,
                         kMenuEntries[index].label.data());
   }
 
@@ -837,8 +870,8 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
         static_cast<unsigned>(runtime.menu_center_preview_intensity) * 255U /
         32U);
     SDL_SetTextureAlphaMod(asset.textures[frame]->get(), alpha);
-    SDL_RenderTexture(renderer, asset.textures[frame]->get(), nullptr,
-                      &destination);
+    SDL_RenderTexture(
+        renderer, asset.textures[frame]->get(), nullptr, &destination);
     SDL_SetTextureAlphaMod(asset.textures[frame]->get(), SDL_ALPHA_OPAQUE);
   }
 
@@ -861,8 +894,8 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
 // Ghidra: 0x004ab070 NovaUi_PresentLoadingSplashFrame
 void NovaUi_PresentLoadingSplashFrame(NovaRuntime &runtime) {
   if (runtime.loading_splash_texture) {
-    SDL_SetRenderDrawColor(runtime.platform.renderer(), 0, 0, 0,
-                           SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(
+        runtime.platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(runtime.platform.renderer());
     PresentSplashTexture(runtime.platform.renderer(),
                          runtime.loading_splash_texture->get());
@@ -872,15 +905,17 @@ void NovaUi_PresentLoadingSplashFrame(NovaRuntime &runtime) {
       runtime.platform.ticks_ms() - runtime.startup_phase_started_ms;
   const auto progress = static_cast<float>(elapsed_ms) /
                         static_cast<float>(kLoadingSplashDurationMs);
-  DrawSplashFrame(runtime.platform.renderer(), "ESCAPE VELOCITY: NOVA",
-                  "INITIALIZING NAVIGATION SYSTEMS", progress);
+  DrawSplashFrame(runtime.platform.renderer(),
+                  "ESCAPE VELOCITY: NOVA",
+                  "INITIALIZING NAVIGATION SYSTEMS",
+                  progress);
 }
 
 // Ghidra: 0x004aaf60 NovaUi_PresentStartupSplashFrame
 void NovaUi_PresentStartupSplashFrame(NovaRuntime &runtime) {
   if (runtime.startup_splash_texture) {
-    SDL_SetRenderDrawColor(runtime.platform.renderer(), 0, 0, 0,
-                           SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(
+        runtime.platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(runtime.platform.renderer());
     PresentSplashTexture(runtime.platform.renderer(),
                          runtime.startup_splash_texture->get());

@@ -91,7 +91,8 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
       width > std::numeric_limits<std::size_t>::max() / 4 / height) {
     NovaLog::Todo(
         "unsupported PICT DirectBitsRect layout ({}-bit, {} components)",
-        pixel_size, component_count);
+        pixel_size,
+        component_count);
     return std::nullopt;
   }
 

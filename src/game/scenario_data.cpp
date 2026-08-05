@@ -18,10 +18,9 @@ namespace {
   if (offset + 2 > bytes.size()) {
     return 0;
   }
-  return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset])
-                                    << 8U |
-                                    std::to_integer<std::uint8_t>(
-                                        bytes[offset + 1]));
+  return static_cast<std::uint16_t>(
+      std::to_integer<std::uint8_t>(bytes[offset]) << 8U |
+      std::to_integer<std::uint8_t>(bytes[offset + 1]));
 }
 
 [[nodiscard]] std::int16_t ReadBeI16(std::span<const std::byte> bytes,
@@ -34,14 +33,11 @@ namespace {
   if (offset + 4 > bytes.size()) {
     return 0;
   }
-  return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset])
-                                    << 24U |
-                                    std::to_integer<std::uint8_t>(
-                                        bytes[offset + 1]) << 16U |
-                                    std::to_integer<std::uint8_t>(
-                                        bytes[offset + 2]) << 8U |
-                                    std::to_integer<std::uint8_t>(
-                                        bytes[offset + 3]));
+  return static_cast<std::uint32_t>(
+      std::to_integer<std::uint8_t>(bytes[offset]) << 24U |
+      std::to_integer<std::uint8_t>(bytes[offset + 1]) << 16U |
+      std::to_integer<std::uint8_t>(bytes[offset + 2]) << 8U |
+      std::to_integer<std::uint8_t>(bytes[offset + 3]));
 }
 
 [[nodiscard]] std::int32_t ReadBeI32(std::span<const std::byte> bytes,
@@ -56,16 +52,15 @@ namespace {
   if (offset >= bytes.size()) {
     return {};
   }
-  const auto* begin = reinterpret_cast<const char*>(bytes.data() + offset);
+  const auto *begin = reinterpret_cast<const char *>(bytes.data() + offset);
   const auto max_len = bytes.size() - offset;
-  const void* nul = std::memchr(begin, '\0', max_len);
+  const void *nul = std::memchr(begin, '\0', max_len);
   const std::size_t len =
-      nul == nullptr ? max_len
-                     : static_cast<std::size_t>(static_cast<const char*>(nul) -
-                                                begin);
+      nul == nullptr
+          ? max_len
+          : static_cast<std::size_t>(static_cast<const char *>(nul) - begin);
   return std::string{begin, len};
 }
-
 
 // ---------------------------------------------------------------------------
 // w\x91ap (Weapon) decode
@@ -190,32 +185,32 @@ namespace {
 //   +0x3ee Graphic sprite id, +0x3f0 BuyRandom, +0x3f2 ItemClass.
 [[nodiscard]] Outfit DecodeOutfit(std::span<const std::byte> bytes) {
   Outfit o;
-  o.mass_tons = ReadBeI16(bytes, 0x02);         // Mass
-  o.tech_level = ReadBeI16(bytes, 0x04);        // TechLevel
-  o.mod_type = ReadBeI16(bytes, 0x06);          // ModType (primary)
-  o.mod_val = ReadBeI16(bytes, 0x08);           // ModVal (primary)
-  o.max_count = ReadBeI16(bytes, 0x0a);         // Max
-  o.flags = ReadBe16(bytes, 0x0c);              // Flags
-  o.cost = ReadBeI32(bytes, 0x0e);              // Cost (4 bytes, big-endian)
-  o.alt_mod_types[0] = ReadBeI16(bytes, 0x12);  // ModType2
-  o.alt_mod_vals[0] = ReadBeI16(bytes, 0x14);   // ModVal2
-  o.alt_mod_types[1] = ReadBeI16(bytes, 0x16);  // ModType3
-  o.alt_mod_vals[1] = ReadBeI16(bytes, 0x18);   // ModVal3
-  o.alt_mod_types[2] = ReadBeI16(bytes, 0x1a);  // ModType4
-  o.alt_mod_vals[2] = ReadBeI16(bytes, 0x1c);   // ModVal4
-  o.contribute_lo = ReadBe32(bytes, 0x1e);      // Contribute (low 32)
-  o.contribute_hi = ReadBe32(bytes, 0x22);      // Contribute (high 32)
-  o.require_lo = ReadBe32(bytes, 0x26);         // Require (low 32)
-  o.require_hi = ReadBe32(bytes, 0x2a);         // Require (high 32)
-  o.availability_expr = ReadCString(bytes, 0x2e);   // Availability
-  o.on_purchase_expr = ReadCString(bytes, 0x12d);   // OnPurchase
-  o.short_name = ReadCString(bytes, 0x32b);     // ShortName
-  o.lc_name = ReadCString(bytes, 0x36b);        // LCName
-  o.lc_plural = ReadCString(bytes, 0x3ab);      // LCPlural
-  o.display_weight = ReadBeI16(bytes, 0x3ec);   // DispWeight
-  o.sprite_id = ReadBeI16(bytes, 0x3ee);        // Graphic (p\x9ari sprite)
-  o.buy_random = ReadBeI16(bytes, 0x3f0);       // BuyRandom (1-100)
-  o.item_class = ReadBeI16(bytes, 0x3f2);       // ItemClass
+  o.mass_tons = ReadBeI16(bytes, 0x02);           // Mass
+  o.tech_level = ReadBeI16(bytes, 0x04);          // TechLevel
+  o.mod_type = ReadBeI16(bytes, 0x06);            // ModType (primary)
+  o.mod_val = ReadBeI16(bytes, 0x08);             // ModVal (primary)
+  o.max_count = ReadBeI16(bytes, 0x0a);           // Max
+  o.flags = ReadBe16(bytes, 0x0c);                // Flags
+  o.cost = ReadBeI32(bytes, 0x0e);                // Cost (4 bytes, big-endian)
+  o.alt_mod_types[0] = ReadBeI16(bytes, 0x12);    // ModType2
+  o.alt_mod_vals[0] = ReadBeI16(bytes, 0x14);     // ModVal2
+  o.alt_mod_types[1] = ReadBeI16(bytes, 0x16);    // ModType3
+  o.alt_mod_vals[1] = ReadBeI16(bytes, 0x18);     // ModVal3
+  o.alt_mod_types[2] = ReadBeI16(bytes, 0x1a);    // ModType4
+  o.alt_mod_vals[2] = ReadBeI16(bytes, 0x1c);     // ModVal4
+  o.contribute_lo = ReadBe32(bytes, 0x1e);        // Contribute (low 32)
+  o.contribute_hi = ReadBe32(bytes, 0x22);        // Contribute (high 32)
+  o.require_lo = ReadBe32(bytes, 0x26);           // Require (low 32)
+  o.require_hi = ReadBe32(bytes, 0x2a);           // Require (high 32)
+  o.availability_expr = ReadCString(bytes, 0x2e); // Availability
+  o.on_purchase_expr = ReadCString(bytes, 0x12d); // OnPurchase
+  o.short_name = ReadCString(bytes, 0x32b);       // ShortName
+  o.lc_name = ReadCString(bytes, 0x36b);          // LCName
+  o.lc_plural = ReadCString(bytes, 0x3ab);        // LCPlural
+  o.display_weight = ReadBeI16(bytes, 0x3ec);     // DispWeight
+  o.sprite_id = ReadBeI16(bytes, 0x3ee);          // Graphic (p\x9ari sprite)
+  o.buy_random = ReadBeI16(bytes, 0x3f0);         // BuyRandom (1-100)
+  o.item_class = ReadBeI16(bytes, 0x3f2);         // ItemClass
   return o;
 }
 
@@ -230,20 +225,20 @@ namespace {
 // to -1 when < 0x80.
 [[nodiscard]] Stellar DecodeStellar(std::span<const std::byte> bytes) {
   Stellar st;
-  st.pos_x = ReadBeI16(bytes, 0x00);       // xPos
-  st.pos_y = ReadBeI16(bytes, 0x02);       // yPos
-  st.link_a_id = ReadBeI16(bytes, 0x04);   // link_a_id (primary spin set)
+  st.pos_x = ReadBeI16(bytes, 0x00);     // xPos
+  st.pos_y = ReadBeI16(bytes, 0x02);     // yPos
+  st.link_a_id = ReadBeI16(bytes, 0x04); // link_a_id (primary spin set)
   if (st.link_a_id < 0 || st.link_a_id > 0xff) {
     st.link_a_id = -1;
   }
-  st.flags = ReadBe32(bytes, 0x06);         // travel_flags
+  st.flags = ReadBe32(bytes, 0x06);          // travel_flags
   st.government_id = ReadBeI16(bytes, 0x14); // Govt (resource id; <0x80 -> -1)
   if (st.government_id < 0x80) {
     st.government_id = -1;
   }
-  st.min_status = ReadBeI16(bytes, 0x16);   // reputation_threshold
+  st.min_status = ReadBeI16(bytes, 0x16);             // reputation_threshold
   st.engage_highlight_frame = ReadBeI16(bytes, 0x18); // hypergate pulse frame
-  st.availability_flags = ReadBe16(bytes, 0x20); // availability_flags
+  st.availability_flags = ReadBe16(bytes, 0x20);      // availability_flags
   // Animation timing (Bible AnimDelay / Frame0Bias; Ghidra StellarDef +0x470/
   // +0x472 from payload +0x22/+0x24). See Stellar_UpdateStellarSprites.
   if (bytes.size() >= 0x26) {
@@ -309,8 +304,7 @@ namespace {
   g.bribe_cost_percent = ReadBeI16(bytes, 0x14);
 
   // combat_rating_scale = int16(payload +0x16) * 0.01; degenerate -> 0.01.
-  g.combat_rating_scale =
-      static_cast<float>(ReadBeI16(bytes, 0x16)) * 0.01F;
+  g.combat_rating_scale = static_cast<float>(ReadBeI16(bytes, 0x16)) * 0.01F;
   if (g.combat_rating_scale < 0.01F) {
     g.combat_rating_scale = 0.01F;
   }
@@ -400,16 +394,16 @@ namespace {
   // SystemDef.field_0x1ee/.f0/.f2 shorts, mapping R = resource byte +0x90,
   // G = +0x8f, B = +0x8e (a byte-order quirk of the 32-bit read that visibly
   // affects the rendered colour -- preserved for fidelity). This is the
-  // per-system space background tint used by NovaRender_SetSystemSpaceBackgroundColor
-  // (Ghidra 0x0046bbf0).
-  const std::uint32_t bkgnd = ReadBe32(bytes, 0x8e);  // mem[0x8e..0x91]
-  s.bkgnd_color = ((bkgnd >> 8) & 0xff) << 16 |  // 0x90 -> R
-                  ((bkgnd >> 16) & 0xff) << 8 |   // 0x8f -> G
-                  ((bkgnd >> 24) & 0xff);         // 0x8e -> B
+  // per-system space background tint used by
+  // NovaRender_SetSystemSpaceBackgroundColor (Ghidra 0x0046bbf0).
+  const std::uint32_t bkgnd = ReadBe32(bytes, 0x8e); // mem[0x8e..0x91]
+  s.bkgnd_color = ((bkgnd >> 8) & 0xff) << 16 |      // 0x90 -> R
+                  ((bkgnd >> 16) & 0xff) << 8 |      // 0x8f -> G
+                  ((bkgnd >> 24) & 0xff);            // 0x8e -> B
   // Murk (s\xd8st +0x92): murkiness 0-100 (SystemDef.murk at +0xbc; Ghidra
-  // previously mislabeled this field "alert_level"); a negative value equivalently
-  // hides the starfield (NovaEffects_QueuedAmbientStarParticles clears ambient
-  // stars when SystemDef.murk < 0).
+  // previously mislabeled this field "alert_level"); a negative value
+  // equivalently hides the starfield (NovaEffects_QueuedAmbientStarParticles
+  // clears ambient stars when SystemDef.murk < 0).
   s.murk = ReadBeI16(bytes, 0x92);
   // TODO(decomp): AvgShips / Message / Asteroids / Interference / AstTypes
   // payload offsets are not yet confirmed against the loader; they stay
@@ -428,22 +422,27 @@ const ShipClass *ScenarioData::Ship(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < ships.size() ? &ships[index] : nullptr;
 }
+
 const Outfit *ScenarioData::Outfit(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < outfits.size() ? &outfits[index] : nullptr;
 }
+
 const Weapon *ScenarioData::Weapon(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < weapons.size() ? &weapons[index] : nullptr;
 }
+
 const Stellar *ScenarioData::Stellar(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < stellars.size() ? &stellars[index] : nullptr;
 }
+
 const System *ScenarioData::System(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < systems.size() ? &systems[index] : nullptr;
 }
+
 const Government *ScenarioData::Government(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < governments.size() ? &governments[index] : nullptr;
@@ -470,9 +469,8 @@ bool ScenarioData::LoadFromArchives() {
   std::size_t loaded_governments = 0;
 
   for (std::int32_t id = 0x80; id <= 0x27f; ++id) {
-    if (const auto res =
-            NovaResource_LoadNamed(scenario::kShipResourceType,
-                                   static_cast<std::uint16_t>(id))) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kShipResourceType, static_cast<std::uint16_t>(id))) {
       ShipClass cls = DecodeShip(res->bytes);
       // The ship class display name is the resource record name (the loader
       // reads it via ResourceData_ReadEntryMetadata + StripSubtitleSuffix), not
@@ -483,9 +481,8 @@ bool ScenarioData::LoadFromArchives() {
     }
   }
   for (std::int32_t id = 0x80; id <= 0x27f; ++id) {
-    if (const auto res =
-            NovaResource_LoadNamed(scenario::kOutfitResourceType,
-                                   static_cast<std::uint16_t>(id))) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kOutfitResourceType, static_cast<std::uint16_t>(id))) {
       game::Outfit outfit = DecodeOutfit(res->bytes);
       outfit.name = res->name; // record name (HUD/UI display)
       outfits[static_cast<std::size_t>(id) - 0x80] = std::move(outfit);
@@ -493,9 +490,8 @@ bool ScenarioData::LoadFromArchives() {
     }
   }
   for (std::int32_t id = 0x80; id <= 0x17f; ++id) {
-    if (const auto res =
-            NovaResource_LoadNamed(scenario::kWeaponResourceType,
-                                   static_cast<std::uint16_t>(id))) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kWeaponResourceType, static_cast<std::uint16_t>(id))) {
       game::Weapon weapon = DecodeWeapon(res->bytes);
       weapon.name = res->name;
       weapons[static_cast<std::size_t>(id) - 0x80] = std::move(weapon);
@@ -503,9 +499,8 @@ bool ScenarioData::LoadFromArchives() {
     }
   }
   for (std::int32_t id = 0x80; id <= 0x57f; ++id) {
-    if (const auto res =
-            NovaResource_LoadNamed(scenario::kStellarResourceType,
-                                   static_cast<std::uint16_t>(id))) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kStellarResourceType, static_cast<std::uint16_t>(id))) {
       game::Stellar st = DecodeStellar(res->bytes);
       st.name = res->name;
       stellars[static_cast<std::size_t>(id) - 0x80] = std::move(st);
@@ -513,9 +508,8 @@ bool ScenarioData::LoadFromArchives() {
     }
   }
   for (std::int32_t id = 0x80; id <= 0x47f; ++id) {
-    if (const auto res =
-            NovaResource_LoadNamed(scenario::kSystemResourceType,
-                                   static_cast<std::uint16_t>(id))) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kSystemResourceType, static_cast<std::uint16_t>(id))) {
       game::System sys = DecodeSystem(res->bytes);
       sys.name = res->name;
       systems[static_cast<std::size_t>(id) - 0x80] = std::move(sys);
@@ -538,8 +532,12 @@ bool ScenarioData::LoadFromArchives() {
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} governments",
-      loaded_ships, loaded_outfits, loaded_weapons, loaded_stellars,
-      loaded_systems, loaded_governments);
+      loaded_ships,
+      loaded_outfits,
+      loaded_weapons,
+      loaded_stellars,
+      loaded_systems,
+      loaded_governments);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 
@@ -547,9 +545,9 @@ bool ScenarioData::LoadFromArchives() {
 // Purchase-time derived cost/mass
 // ---------------------------------------------------------------------------
 // Ghidra Outfit_ComputeOutfitPurchasePrice (0x0046e910) and
-// Outfit_ComputeOutfitPurchaseMass (0x0046e950): the outfit store computes these
-// from the outfit's cost/mass with optional mass-proportional scaling. Flag
-// 0x0200 (price) and 0x0400 (mass) make the value proportional to the ship
+// Outfit_ComputeOutfitPurchaseMass (0x0046e950): the outfit store computes
+// these from the outfit's cost/mass with optional mass-proportional scaling.
+// Flag 0x0200 (price) and 0x0400 (mass) make the value proportional to the ship
 // class's hull mass; the scaled value never drops below the base positive
 // value. Base cost > 0 is required for a price; base mass <= 0 yields no mass.
 std::int32_t Outfit::PurchasePrice(std::int16_t ship_hull_mass) const {
@@ -600,7 +598,7 @@ namespace {
 //   set    := token*            (counts the number of 1-valued tokens)
 //   token  := 'B'number | 'P'number | 'G' | 'O'number | 'E'number | '0' | '1'
 class ExprParser {
- public:
+public:
   ExprParser(std::string_view text, const ControlExpressionState &state)
       : text_(text), state_(state) {}
 
@@ -610,7 +608,7 @@ class ExprParser {
     return value;
   }
 
- private:
+private:
   void SkipWhitespace() {
     while (pos_ < text_.size() && text_[pos_] == ' ') {
       ++pos_;
@@ -691,7 +689,7 @@ class ExprParser {
   // a following number with '=' / '<' / '>'. Returns nonzero if the count
   // satisfies the comparison (or is nonzero when no comparison is given).
   [[nodiscard]] bool ParseCountedSet() {
-    Consume();  // '['
+    Consume(); // '['
     std::int32_t ones = 0;
     for (;;) {
       SkipWhitespace();
@@ -745,47 +743,45 @@ class ExprParser {
       return 0;
     }
     switch (static_cast<unsigned char>(c)) {
-      case 'B':
-      case 'b': {
-        const std::int32_t bit = ParseNumber();
-        if (bit >= 0 && state_.get_control_bit) {
-          return state_.get_control_bit(static_cast<std::uint32_t>(bit)) ? 1
-                                                                        : 0;
-        }
-        return 0;
+    case 'B':
+    case 'b': {
+      const std::int32_t bit = ParseNumber();
+      if (bit >= 0 && state_.get_control_bit) {
+        return state_.get_control_bit(static_cast<std::uint32_t>(bit)) ? 1 : 0;
       }
-      case 'P':
-      case 'p': {
-        const std::int32_t days = ParseNumber();
-        if (state_.is_registered) {
-          return state_.is_registered(days) ? 1 : 0;
-        }
-        return 0;
+      return 0;
+    }
+    case 'P':
+    case 'p': {
+      const std::int32_t days = ParseNumber();
+      if (state_.is_registered) {
+        return state_.is_registered(days) ? 1 : 0;
       }
-      case 'G':
-      case 'g': {
-        return state_.is_male && state_.is_male() ? 1 : 0;
+      return 0;
+    }
+    case 'G':
+    case 'g': {
+      return state_.is_male && state_.is_male() ? 1 : 0;
+    }
+    case 'O':
+    case 'o': {
+      const std::int32_t outfit_id = ParseNumber();
+      if (state_.owns_outfit) {
+        return state_.owns_outfit(static_cast<std::int16_t>(outfit_id)) ? 1 : 0;
       }
-      case 'O':
-      case 'o': {
-        const std::int32_t outfit_id = ParseNumber();
-        if (state_.owns_outfit) {
-          return state_.owns_outfit(static_cast<std::int16_t>(outfit_id)) ? 1
+      return 0;
+    }
+    case 'E':
+    case 'e': {
+      const std::int32_t system_id = ParseNumber();
+      if (state_.has_explored) {
+        return state_.has_explored(static_cast<std::int16_t>(system_id)) ? 1
                                                                          : 0;
-        }
-        return 0;
       }
-      case 'E':
-      case 'e': {
-        const std::int32_t system_id = ParseNumber();
-        if (state_.has_explored) {
-          return state_.has_explored(static_cast<std::int16_t>(system_id)) ? 1
-                                                                          : 0;
-        }
-        return 0;
-      }
-      default:
-        return 0;
+      return 0;
+    }
+    default:
+      return 0;
     }
   }
 
@@ -799,7 +795,7 @@ class ExprParser {
 bool NovaControlExpression_Evaluate(std::string_view expression,
                                     const ControlExpressionState &state) {
   if (expression.empty()) {
-    return true;  // blank test expression evaluates to true
+    return true; // blank test expression evaluates to true
   }
   return ExprParser{expression, state}.Eval();
 }

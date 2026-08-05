@@ -31,11 +31,11 @@ namespace game {
 // resource.map records and the constants in brgr_archive.cpp).
 // --------------------------------------------------------------------------
 namespace scenario {
-constexpr std::uint32_t kShipResourceType = 0x73689570;   // sh\x95p
-constexpr std::uint32_t kOutfitResourceType = 0x6f9f7466; // o\x9ftf
-constexpr std::uint32_t kWeaponResourceType = 0x77916170; // w\x91ap
-constexpr std::uint32_t kStellarResourceType = 0x73709a62; // sp\x9ab
-constexpr std::uint32_t kSystemResourceType = 0x73d87374; // s\xd8st
+constexpr std::uint32_t kShipResourceType = 0x73689570;       // sh\x95p
+constexpr std::uint32_t kOutfitResourceType = 0x6f9f7466;     // o\x9ftf
+constexpr std::uint32_t kWeaponResourceType = 0x77916170;     // w\x91ap
+constexpr std::uint32_t kStellarResourceType = 0x73709a62;    // sp\x9ab
+constexpr std::uint32_t kSystemResourceType = 0x73d87374;     // s\xd8st
 constexpr std::uint32_t kGovernmentResourceType = 0x679a7674; // g\x9avt
 } // namespace scenario
 
@@ -43,10 +43,11 @@ constexpr std::uint32_t kGovernmentResourceType = 0x679a7674; // g\x9avt
 // Nova control bit (NCB) test-expression evaluator
 // --------------------------------------------------------------------------
 // Gates ship/outfit/mission availability and system visibility in the original
-// (Ghidra NovaExpression_EvaluateToken 0x00448be0 / NovaExpression_EvaluateBoolean
-// 0x00449020). Implements the Bible's test-expression grammar: Bxxx (control
-// bit), Pxxx (registered-with-days), G (gender: male=1), Oxxx (owns outfit),
-// Exxx (explored system), the `& | ! ( )` boolean operators, and counted sets
+// (Ghidra NovaExpression_EvaluateToken 0x00448be0 /
+// NovaExpression_EvaluateBoolean 0x00449020). Implements the Bible's
+// test-expression grammar: Bxxx (control bit), Pxxx (registered-with-days), G
+// (gender: male=1), Oxxx (owns outfit), Exxx (explored system), the `& | ! ( )`
+// boolean operators, and counted sets
 // `[ ... ]` compared with `= < >`. Blank expressions evaluate to true (the
 // original's default). The evaluator is pure: game-state lookups are injected
 // through the state callback so scenario parsing stays independent of the game.
@@ -67,8 +68,9 @@ struct ControlExpressionState {
 // Evaluates a Nova control bit test expression against `state`. Returns true
 // for an empty expression. Malformed/unknown tokens evaluate as false and are
 // logged. Thread-safe (no hidden globals).
-[[nodiscard]] bool NovaControlExpression_Evaluate(
-    std::string_view expression, const ControlExpressionState &state);
+[[nodiscard]] bool
+NovaControlExpression_Evaluate(std::string_view expression,
+                               const ControlExpressionState &state);
 
 // A single stock weapon triple on a ship class: a weapon id plus how many to
 // equip and the standard ammo load. The original arrays hold eight of these.
@@ -83,27 +85,27 @@ struct ShipDefaultWeaponBank {
 // minus 0x80). Only the fields the reimplementation needs so far are carried;
 // the Bible documents the full set.
 struct ShipClass {
-  std::string display_name;       // resource name / target display
-  std::string short_name;         // shipyard menu label
-  std::string long_name;          // purchase dialog / new-pilot text
+  std::string display_name; // resource name / target display
+  std::string short_name;   // shipyard menu label
+  std::string long_name;    // purchase dialog / new-pilot text
 
-  std::int16_t cargo_holds = 0;   // Holds
-  std::int16_t base_shield = 0;   // Shield
-  std::int16_t base_armor = 0;    // Armor
-  std::int16_t base_fuel = 0;     // Fuel (100 = 1 jump)
-  std::int16_t free_mass = 0;     // FreeMass
-  std::int16_t mass_tons = 0;     // Mass
-  std::int16_t length_meters = 0; // Length
-  std::int16_t tech_level = 0;    // TechLevel
-  std::int32_t cost = 0;          // Cost
+  std::int16_t cargo_holds = 0;    // Holds
+  std::int16_t base_shield = 0;    // Shield
+  std::int16_t base_armor = 0;     // Armor
+  std::int16_t base_fuel = 0;      // Fuel (100 = 1 jump)
+  std::int16_t free_mass = 0;      // FreeMass
+  std::int16_t mass_tons = 0;      // Mass
+  std::int16_t length_meters = 0;  // Length
+  std::int16_t tech_level = 0;     // TechLevel
+  std::int32_t cost = 0;           // Cost
   std::int16_t display_weight = 0; // DispWeight
 
   // Movement / combat stats (float magnitudes repacked from the short field).
-  float accel = 0.0F;             // Accel
-  float speed = 0.0F;             // Speed
-  float turn_rate = 0.0F;         // Maneuver
-  float shield_recharge = 0.0F;   // ShieldRech
-  float armor_recharge = 0.0F;    // ArmorRech
+  float accel = 0.0F;           // Accel
+  float speed = 0.0F;           // Speed
+  float turn_rate = 0.0F;       // Maneuver
+  float shield_recharge = 0.0F; // ShieldRech
+  float armor_recharge = 0.0F;  // ArmorRech
 
   std::int16_t default_ai_behavior = 0; // InherentAI
   std::int16_t class_category = 0;      // Strength? / category
@@ -116,12 +118,13 @@ struct ShipClass {
   std::uint16_t flags_secondary = 0;          // Flags2
   std::uint16_t availability_flags = 0;       // Flags3
 
-  std::int16_t max_gun = 0;        // MaxGun
-  std::int16_t max_turret = 0;     // MaxTur
+  std::int16_t max_gun = 0;    // MaxGun
+  std::int16_t max_turret = 0; // MaxTur
 
   // DefaultItems (outfit ids, zero-based after 0x80) + counts, up to 8. These
   // seed the player's starting inventory when bought/captured.
-  std::array<std::int16_t, 8> default_outfit_ids{-1, -1, -1, -1, -1, -1, -1, -1};
+  std::array<std::int16_t, 8> default_outfit_ids{
+      -1, -1, -1, -1, -1, -1, -1, -1};
   std::array<std::int16_t, 8> default_outfit_counts{};
   // The 8 stock weapon banks.
   std::array<ShipDefaultWeaponBank, 8> stock_weapons{};
@@ -141,7 +144,7 @@ struct ShipClass {
 // The record *name* (BRGR resource.map) is surfaced as `name`, not a numeric
 // header field.
 struct Outfit {
-  std::string name;          // resource record name (BRGR display name)
+  std::string name;              // resource record name (BRGR display name)
   std::string availability_expr; // Availability (control test expression)
   std::string on_purchase_expr;  // OnPurchase (control set expression)
 
@@ -153,9 +156,9 @@ struct Outfit {
   // Alternate mods 2-4 (ModType2-4 / ModVal2-4).
   std::array<std::int16_t, 3> alt_mod_types{};
   std::array<std::int16_t, 3> alt_mod_vals{};
-  std::int16_t max_count = 0;      // Max
-  std::uint16_t flags = 0;         // Flags
-  std::int32_t cost = 0;           // Cost (4 bytes @ 0x0e of the payload)
+  std::int16_t max_count = 0; // Max
+  std::uint16_t flags = 0;    // Flags
+  std::int32_t cost = 0;      // Cost (4 bytes @ 0x0e of the payload)
 
   // Contribute / Require 64-bit pairs (contribute_lo/hi, require_lo/hi).
   // Contribute bits are ORed into the player's aggregate Contribute mask;
@@ -165,13 +168,13 @@ struct Outfit {
   std::uint32_t require_lo = 0;    // Require (low word)
   std::uint32_t require_hi = 0;    // Require (high word)
 
-  std::int16_t item_class = 0;     // ItemClass
-  std::int16_t buy_random = 100;   // BuyRandom (1-100; <1/ >100 mean 100)
-  std::int16_t sprite_id = 0;      // Graphic (p\x9ari sprite id)
+  std::int16_t item_class = 0;   // ItemClass
+  std::int16_t buy_random = 100; // BuyRandom (1-100; <1/ >100 mean 100)
+  std::int16_t sprite_id = 0;    // Graphic (p\x9ari sprite id)
 
-  std::string short_name;          // ShortName (dialog menu label)
-  std::string lc_name;             // LCName (lowercase singular)
-  std::string lc_plural;           // LCPlural (lowercase plural)
+  std::string short_name; // ShortName (dialog menu label)
+  std::string lc_name;    // LCName (lowercase singular)
+  std::string lc_plural;  // LCPlural (lowercase plural)
 
   // Purchase-time derived cost/mass. The original computes these at load from
   // Cost/Mass and the relevant Flags bit, scaling by ship-class hull mass for
@@ -187,45 +190,45 @@ struct Outfit {
 struct Weapon {
   std::string name; // resource name / status-display name
 
-  std::int16_t reload_ticks = 30;   // Reload
-  std::int16_t lifetime_ticks = 30; // Count
-  std::int16_t mass_damage = 0;     // MassDmg
-  std::int16_t energy_damage = 0;   // EnergyDmg
-  std::int16_t guidance_mode = 0;   // Guidance
+  std::int16_t reload_ticks = 30;    // Reload
+  std::int16_t lifetime_ticks = 30;  // Count
+  std::int16_t mass_damage = 0;      // MassDmg
+  std::int16_t energy_damage = 0;    // EnergyDmg
+  std::int16_t guidance_mode = 0;    // Guidance
   std::int16_t weapon_mode_code = 0; // (runtime alias of Guidance)
-  float projectile_speed = 0.0F;    // Speed (pixels/frame * 100)
-  std::int16_t ammo_type = -1;      // AmmoType
+  float projectile_speed = 0.0F;     // Speed (pixels/frame * 100)
+  std::int16_t ammo_type = -1;       // AmmoType
 
-  std::int16_t sprite_id = 0;       // Graphic
-  std::int16_t inaccuracy = 0;      // Inaccuracy
-  std::int16_t fire_sound = -1;     // Sound
+  std::int16_t sprite_id = 0;   // Graphic
+  std::int16_t inaccuracy = 0;  // Inaccuracy
+  std::int16_t fire_sound = -1; // Sound
 
-  std::int16_t impact = 0;          // Impact
-  std::int16_t explosion = -1;      // ExplodType
-  std::int16_t prox_radius = 0;     // ProxRadius
-  std::int16_t blast_radius = 0;    // BlastRadius
+  std::int16_t impact = 0;       // Impact
+  std::int16_t explosion = -1;   // ExplodType
+  std::int16_t prox_radius = 0;  // ProxRadius
+  std::int16_t blast_radius = 0; // BlastRadius
 
-  std::uint16_t flags = 0;          // Flags
-  std::uint16_t seeker = 0;         // Seeker
+  std::uint16_t flags = 0;  // Flags
+  std::uint16_t seeker = 0; // Seeker
 
-  std::int16_t beam_length = 0;     // BeamLength
-  std::int16_t beam_width = 0;      // BeamWidth
-  std::int16_t burst_count = 0;     // BurstCount
-  std::int16_t burst_reload = 0;    // BurstReload
-  std::int16_t max_ammo = 0;        // MaxAmmo
+  std::int16_t beam_length = 0;  // BeamLength
+  std::int16_t beam_width = 0;   // BeamWidth
+  std::int16_t burst_count = 0;  // BurstCount
+  std::int16_t burst_reload = 0; // BurstReload
+  std::int16_t max_ammo = 0;     // MaxAmmo
 
   std::array<std::int16_t, 4> jam_vuln{}; // JamVuln1-4
-  std::uint16_t flags2 = 0;         // Flags2
-  std::int16_t guided_turn = 0;     // GuidedTurn
+  std::uint16_t flags2 = 0;               // Flags2
+  std::int16_t guided_turn = 0;           // GuidedTurn
 };
 
 // Ghidra StellarDef (g_stellar_defs, entries indexed by stellar id minus
 // 0x80). One planet/station/object in a system.
 struct Stellar {
-  std::string name;        // resource name
+  std::string name; // resource name
 
-  std::int16_t pos_x = 0;  // xPos
-  std::int16_t pos_y = 0;  // yPos
+  std::int16_t pos_x = 0; // xPos
+  std::int16_t pos_y = 0; // yPos
   // link_a_id (+0x04): the primary spin sprite-set id for this body's graphic
   // (the game loads spin resource id+1000 for its sprite; see Stellar_Update-
   // StellarSprites). Bounded 0..255 by the loader.
@@ -235,13 +238,13 @@ struct Stellar {
   std::int16_t link_b_id = -1;
 
   std::uint32_t flags = 0; // travel_flags (+0x06; land/dock/trade, economy...)
-  std::uint16_t availability_flags = 0; // availability_flags (+0x20)
-  std::int32_t tribute = 0; // Tribute
-  std::int16_t tech_level = 0; // TechLevel
+  std::uint16_t availability_flags = 0;       // availability_flags (+0x20)
+  std::int32_t tribute = 0;                   // Tribute
+  std::int16_t tech_level = 0;                // TechLevel
   std::array<std::int16_t, 8> special_tech{}; // SpecialTech1-8
 
   std::int16_t government_id = -1; // Govt (+0x14; <0x80 -> -1)
-  std::int16_t min_status = 0;    // reputation_threshold (+0x16)
+  std::int16_t min_status = 0;     // reputation_threshold (+0x16)
   // engage_highlight_frame (Ghidra StellarDef +0x26, payload +0x18): the
   // frame index at which an animated stellar (hypergate/wormhole, avail
   // 0x1000) shows its engaged/pulse highlight. Clamped to the middle frame by
@@ -253,25 +256,27 @@ struct Stellar {
 
   std::int16_t defense_dude_id = -1; // DefenseDude
   std::int16_t defense_count = 0;    // DefCount
-  std::uint16_t flags2 = 0;         // Flags2
+  std::uint16_t flags2 = 0;          // Flags2
 
   // Animation timing for an animated stellar (Ghidra StellarDef +0x470/+0x472;
   // loaded from the sp\x6fb payload +0x22/+0x24). animation_dwell_time is the
-  // Bible AnimDelay (frame dwell, 30ths of a second); animation_frame_multiplier
-  // is the Bible Frame0Bias, a multiplier that holds the first (frame 0) of the
-  // sequence longer (used when current_frame == 0). Drives the frame stepping
-  // in Ghidra Stellar_UpdateStellarSprites (0x0042cd10).
-  std::int16_t animation_dwell_time = 0;     // AnimDelay
+  // Bible AnimDelay (frame dwell, 30ths of a second);
+  // animation_frame_multiplier is the Bible Frame0Bias, a multiplier that holds
+  // the first (frame 0) of the sequence longer (used when current_frame == 0).
+  // Drives the frame stepping in Ghidra Stellar_UpdateStellarSprites
+  // (0x0042cd10).
+  std::int16_t animation_dwell_time = 0;       // AnimDelay
   std::int16_t animation_frame_multiplier = 0; // Frame0Bias
-  std::array<std::int16_t, 8> hyperlinks{-1, -1, -1, -1, -1, -1, -1, -1}; // HyperLink1-8
+  std::array<std::int16_t, 8> hyperlinks{
+      -1, -1, -1, -1, -1, -1, -1, -1}; // HyperLink1-8
 
-  std::int16_t fee = 0;           // Fee
+  std::int16_t fee = 0; // Fee
   // Gravity is a float in the original; stored as its encoded half/short here.
-  std::int16_t gravity = 0;       // Gravity
-  std::int16_t weapon_id = -1;    // Weapon
-  std::int32_t strength = 0;      // Strength (negative/total = invincible)
-  std::int16_t dead_type = 0;     // DeadType
-  std::int16_t dead_time = 0;     // DeadTime
+  std::int16_t gravity = 0;         // Gravity
+  std::int16_t weapon_id = -1;      // Weapon
+  std::int32_t strength = 0;        // Strength (negative/total = invincible)
+  std::int16_t dead_type = 0;       // DeadType
+  std::int16_t dead_time = 0;       // DeadTime
   std::int16_t explosion_type = -1; // ExplodType
 };
 
@@ -297,10 +302,12 @@ struct Government {
   std::int16_t voice_type_code = -1;
   std::int16_t voice_type_mode = -1;
 
-  std::uint16_t flags_primary = 0;   // GovtDef 0x20 (payload +0x02)
+  std::uint16_t flags_primary = 0; // GovtDef 0x20 (payload +0x02)
   // Known bits (from Government_AreGovtsAllied / _HostileOrXenophobic):
-  //   0x0001 xenophobic (attacks on sight), 0x0800 derelict (no alliance checks).
-  std::uint16_t scan_mask_short = 0; // GovtDef 0x22 (payload +0x04) [Provisional])
+  //   0x0001 xenophobic (attacks on sight), 0x0800 derelict (no alliance
+  //   checks).
+  std::uint16_t scan_mask_short =
+      0; // GovtDef 0x22 (payload +0x04) [Provisional])
   std::int16_t ai_skill_percent = 0; // GovtDef 0x24 (payload +0x32)
 
   // Class / alliance / enemy id lists (payload +0x18/+0x20/+0x28). Govts share
@@ -330,7 +337,7 @@ struct Government {
   // payload int16 values by 0.01 (DAT_00575e60) and applies the defaults 1.0
   // (pilot) / 0.01 (combat) to degenerate inputs: pilot source < 1 -> 1.0,
   // combat result < 0.01 -> 0.01.
-  float pilot_skill_scale = 1.0F;   // GovtDef 0x64 (payload +0x30)
+  float pilot_skill_scale = 1.0F;    // GovtDef 0x64 (payload +0x30)
   float combat_rating_scale = 0.01F; // GovtDef 0x60 (payload +0x16)
 
   std::uint32_t scan_mask_lo = 0; // GovtDef 0x68 (payload +0x54)
@@ -343,40 +350,56 @@ struct Government {
   std::uint8_t theme_red = 0, theme_green = 0, theme_blue = 0;
   std::uint8_t ship_red = 0, ship_green = 0, ship_blue = 0;
 
-  bool present = false; // GovtDef 0x86 is_present (slots zero-filled when absent)
+  bool present =
+      false; // GovtDef 0x86 is_present (slots zero-filled when absent)
 };
 
 // Ghidra SystemDef (g_system_defs, entries indexed by system id minus 0x80).
 // One star system; links to 16 others and holds stellar nav defaults.
 struct System {
-  std::string name;            // resource name / map label
-  std::int16_t pos_x = 0;      // xPos
-  std::int16_t pos_y = 0;      // yPos
-  std::array<std::int16_t, 16> links{};   // Con1-16 (system ids, stored -1/zero-based)
-  std::array<std::int16_t, 16> nav_defs{-1, -1, -1, -1, -1, -1, -1, -1,
-                                        -1, -1, -1, -1, -1, -1, -1, -1}; // NavDef1-16 (stellar ids)
+  std::string name;       // resource name / map label
+  std::int16_t pos_x = 0; // xPos
+  std::int16_t pos_y = 0; // yPos
+  std::array<std::int16_t, 16>
+      links{}; // Con1-16 (system ids, stored -1/zero-based)
+  std::array<std::int16_t, 16> nav_defs{-1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1}; // NavDef1-16 (stellar ids)
   std::array<std::int16_t, 8> dude_types{}; // DudeTypes (128-639, or neg fleet)
   std::array<std::int16_t, 8> dude_prob{};  // % Prob
-  std::int16_t avg_ships = 0;  // AvgShips
-  std::int16_t government_id = -1; // Govt
-  std::int16_t message_id = -1; // Message
-  std::int16_t asteroid_count = 0; // Asteroids
-  std::int16_t interference = 0;  // Interference
-  // BkgndColor (s\xd8st +0x8e): per-system space background tint stored as 24-bit
-  // 0xRRGGBB. Decoded to reproduce the original's runtime mapping (it reads the
-  // resource bytes as a little-endian 32-bit and takes R=byte+0x90, G=byte+0x8f,
-  // B=byte+0x8e), so `(c>>16),(c>>8),c` are exactly the colours
+  std::int16_t avg_ships = 0;               // AvgShips
+  std::int16_t government_id = -1;          // Govt
+  std::int16_t message_id = -1;             // Message
+  std::int16_t asteroid_count = 0;          // Asteroids
+  std::int16_t interference = 0;            // Interference
+  // BkgndColor (s\xd8st +0x8e): per-system space background tint stored as
+  // 24-bit 0xRRGGBB. Decoded to reproduce the original's runtime mapping (it
+  // reads the resource bytes as a little-endian 32-bit and takes R=byte+0x90,
+  // G=byte+0x8f, B=byte+0x8e), so `(c>>16),(c>>8),c` are exactly the colours
   // NovaRender_SetSystemSpaceBackgroundColor paints. Pure black (0) when unset.
   std::uint32_t bkgnd_color = 0;
   // Murk (s\xd8st +0x92): murkiness 0-100; a negative value hides the starfield
   // (SystemDef.murk at +0xbc < 0; Ghidra previously mislabeled this field
   // "alert_level"). Feeds the ambient-star size scale as well.
   std::int16_t murk = 0;
-  std::uint16_t ast_types = 0;    // AstTypes
-  std::int16_t reinf_fleet = -1;  // ReinfFleet
-  std::int16_t reinf_time = 0;    // ReinfTime
+  std::uint16_t ast_types = 0;     // AstTypes
+  std::int16_t reinf_fleet = -1;   // ReinfFleet
+  std::int16_t reinf_time = 0;     // ReinfTime
   std::int16_t reinf_interval = 0; // ReinfIntrval
-  std::string visibility_expr;    // Visibility
+  std::string visibility_expr;     // Visibility
 };
 
 // Owns the parsed scenario tables indexed by (resource id - 0x80), mirroring
@@ -385,11 +408,11 @@ struct System {
 // range so callers can index directly; missing/empty resources decode to
 // defaults (the original zero-fills those slots).
 struct ScenarioData {
-  std::vector<ShipClass> ships;      // indexed by ship_id - 0x80
-  std::vector<Outfit> outfits;       // indexed by outfit_id - 0x80
-  std::vector<Weapon> weapons;       // indexed by weapon_id - 0x80
-  std::vector<Stellar> stellars;     // indexed by stellar_id - 0x80
-  std::vector<System> systems;       // indexed by system_id - 0x80
+  std::vector<ShipClass> ships;        // indexed by ship_id - 0x80
+  std::vector<Outfit> outfits;         // indexed by outfit_id - 0x80
+  std::vector<Weapon> weapons;         // indexed by weapon_id - 0x80
+  std::vector<Stellar> stellars;       // indexed by stellar_id - 0x80
+  std::vector<System> systems;         // indexed by system_id - 0x80
   std::vector<Government> governments; // indexed by government_id - 0x80
 
   // gh.id 0x80.. lookup for government/faction data.

@@ -107,8 +107,9 @@ void Stub_HandleShots(GameState &state) {
 // Only the player ship exists, and its full simulation is not reconstructed.
 void Stub_HandleShips(GameState &state) {
   (void)state;
-  NovaLog::Todo("scope 4/5 ship handling not reconstructed: only the player "
-                "ship exists and its movement/combat update is not reconstructed");
+  NovaLog::Todo(
+      "scope 4/5 ship handling not reconstructed: only the player "
+      "ship exists and its movement/combat update is not reconstructed");
 }
 
 // Ghidra Frame_TickSystems scope 8 "misc handlers": stellar sprite animation,
@@ -141,16 +142,16 @@ void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
   Stub_Collisions(state);
 
   if (run_full_tick) {
-    Stub_DrawStatus(state);       // scope 0xc
-    Stub_AiRoutines(state);       // scope 6 (part 1: targeting setup)
+    Stub_DrawStatus(state);             // scope 0xc
+    Stub_AiRoutines(state);             // scope 6 (part 1: targeting setup)
     Stub_MissionAndMiscHandlers(state); // scope 0xb
-    Stub_AiRoutines(state);       // scope 6 (part 2: per-ship AI)
-    Stub_CalcAiOdds(state);       // scope 0x14
+    Stub_AiRoutines(state);             // scope 6 (part 2: per-ship AI)
+    Stub_CalcAiOdds(state);             // scope 0x14
   }
 
   // Always-run scopes that keep advancing during frozen transitions.
-  Stub_HandleShots(state);        // scope 7
-  Stub_HandleShips(state);        // scope 4/5
+  Stub_HandleShots(state);                 // scope 7
+  Stub_HandleShips(state);                 // scope 4/5
   Stub_MiscHandlers(state, run_full_tick); // scope 8
   Stub_BeamHitQueue(state);
 }
@@ -160,7 +161,8 @@ void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
 // draw + Frame_RenderViewportBackground); the HUD chrome below is a recognised
 // stand-in (proximity-scan/radar panels not reconstructed). The world view is
 // centred on the player so the ship sits at the play-area centre.
-void DrawInGameFrame(SdlPlatform &platform, GameState &state,
+void DrawInGameFrame(SdlPlatform &platform,
+                     GameState &state,
                      SpaceflightView &view) {
   view.Draw(platform, state);
 
@@ -178,19 +180,17 @@ void DrawInGameFrame(SdlPlatform &platform, GameState &state,
       "   FUEL " + std::to_string(static_cast<int>(state.player.fuel_points)) +
       "   CR " + std::to_string(state.player.credits);
   SDL_RenderDebugText(renderer, 30.0F, 426.0F, hud.c_str());
-  const auto *sys = state.scenario.System(static_cast<std::int16_t>(
-      state.player.current_system_id + 0x80));
+  const auto *sys = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   const std::string sysline =
-      std::string("SYSTEM ") +
-      (sys ? sys->name : "?") +
-      "  HDG " + std::to_string(static_cast<int>(
-                     state.player.heading * 180.0F / 3.14159F)) +
-      "  X " + std::to_string(static_cast<int>(state.player.pos_x)) +
-      "  Y " + std::to_string(static_cast<int>(state.player.pos_y));
+      std::string("SYSTEM ") + (sys ? sys->name : "?") + "  HDG " +
+      std::to_string(
+          static_cast<int>(state.player.heading * 180.0F / 3.14159F)) +
+      "  X " + std::to_string(static_cast<int>(state.player.pos_x)) + "  Y " +
+      std::to_string(static_cast<int>(state.player.pos_y));
   SDL_RenderDebugText(renderer, 30.0F, 444.0F, sysline.c_str());
   SDL_SetRenderDrawColor(renderer, 240, 120, 90, SDL_ALPHA_OPAQUE);
-  SDL_RenderDebugText(renderer, 460.0F, 410.0F,
-                      "[ARROWS/WASD fly, ESC menu]");
+  SDL_RenderDebugText(renderer, 460.0F, 410.0F, "[ARROWS/WASD fly, ESC menu]");
 }
 
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
@@ -205,7 +205,8 @@ void DrawInGameFrame(SdlPlatform &platform, GameState &state,
 // TODO(decomp): replace these provisional turn/thrust/drag constants with the
 // ship-class-derived rates (base_turn_rate_deg, base_speed, accel) once the
 // movement sim is reconstructed.
-void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
+void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
+                               GameState &state,
                                bool &returning_to_menu) {
   SpaceflightView view;
 
@@ -222,8 +223,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
   const bool ship_ready = view.EnsureShipSprite(platform, state);
   (void)ship_ready;
   // Ghidra: the ambient starfield is (re)spawned at every spaceflight entry
-  // (NovaEffects_QueuedAmbientStarParticles from Ship_RunSpaceflightMode and the
-  // travel/landing transitions). We spawn once when the mode starts, then
+  // (NovaEffects_QueuedAmbientStarParticles from Ship_RunSpaceflightMode and
+  // the travel/landing transitions). We spawn once when the mode starts, then
   // advance it per frame below.
   view.SpawnAmbientStars(platform, state);
   NovaFrame_TickSystems(state, /*run_full_tick=*/true);
@@ -301,9 +302,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
 //  * Stats come from the ship class (ShipClassDef). The scenario loader scales
 //    the raw resource shorts exactly as the original (NovaData_LoadScenario-
 //    ResourceTables 0x004bd3c0):
-//        accel    -> thrust (px/frame^2):  raw_accel / 10000.0    (DAT_00575e68)
-//        speed    -> top speed (px/frame): raw_speed / 640.0      (DAT_00575e48)
-//        maneuver -> turn rate (deg/frame): raw_maneuver * 0.1    (DAT_00575e58)
+//        accel    -> thrust (px/frame^2):  raw_accel / 10000.0 (DAT_00575e68)
+//        speed    -> top speed (px/frame): raw_speed / 640.0 (DAT_00575e48)
+//        maneuver -> turn rate (deg/frame): raw_maneuver * 0.1 (DAT_00575e58)
 //    Starter (sh.x9an 0x80): accel 0.05, speed 0.625, turn 4.0 deg/frame.
 //    These per-frame values hold at the original's reference cadence (the game
 //    scales them by g_avg_frame_time_ms; see note at the end).
@@ -358,8 +359,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
 // projection; it never pulls an existing (e.g. drift-built) component back to
 // enforce a vector-magnitude limit. Heading uses the polar convention from
 // Math_AddPolarVelocity (0x0043b4a0): vel_x += sin(h)*s ; vel_y -= cos(h)*s.
-static void NovaPlayer_AddPolarVelocityClamped(float heading_rad, float thrust_step,
-                                               float max_speed, float &vel_x, float &vel_y) {
+static void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
+                                               float thrust_step,
+                                               float max_speed,
+                                               float &vel_x,
+                                               float &vel_y) {
   const float sin_h = std::sin(heading_rad);
   const float cos_h = std::cos(heading_rad);
   auto axis_step = [](float max_proj, float delta, float cur) -> float {
@@ -388,15 +392,14 @@ static void NovaPlayer_AddPolarVelocityClamped(float heading_rad, float thrust_s
   PlayerMovementStats stats;
   stats.turn_rate_deg_per_frame =
       static_cast<float>(ship_class.turn_rate) * 0.1F;
-  stats.max_speed_px_per_frame =
-      static_cast<float>(ship_class.speed) / 640.0F;
-  stats.thrust_px_per_frame2 =
-      static_cast<float>(ship_class.accel) / 10000.0F;
+  stats.max_speed_px_per_frame = static_cast<float>(ship_class.speed) / 640.0F;
+  stats.thrust_px_per_frame2 = static_cast<float>(ship_class.accel) / 10000.0F;
   const float turn_rad_per_frame = stats.turn_rate_deg_per_frame * kDegToRad;
   const float reverse_accel = stats.thrust_px_per_frame2 * 2.0F;
 
   ship.engine_thrust = input.thrust;
-  const bool retro_thrust = input.brake && !input.thrust; // brake excludes thrust
+  const bool retro_thrust =
+      input.brake && !input.thrust; // brake excludes thrust
 
   // Heading: bank continuously at the class turn rate while a turn key is held.
   if (input.turn_left) {
@@ -413,8 +416,10 @@ static void NovaPlayer_AddPolarVelocityClamped(float heading_rad, float thrust_s
   if (input.thrust) {
     // Forward thrust: polar step toward the heading, per-axis clamped to the
     // class top speed projection (Math_AddPolarVelocityWithClamp semantics).
-    NovaPlayer_AddPolarVelocityClamped(ship.heading, stats.thrust_px_per_frame2,
-                                       stats.max_speed_px_per_frame, ship.vel_x,
+    NovaPlayer_AddPolarVelocityClamped(ship.heading,
+                                       stats.thrust_px_per_frame2,
+                                       stats.max_speed_px_per_frame,
+                                       ship.vel_x,
                                        ship.vel_y);
   }
 
@@ -423,7 +428,8 @@ static void NovaPlayer_AddPolarVelocityClamped(float heading_rad, float thrust_s
     // magnitude toward zero by the reverse-accel step, without a proportional
     // multiplier (so it lands exactly on rest instead of the decaying-decay
     // overshoot a `vel *= (1-k)` with k>1 causes). Direction is preserved.
-    const float speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+    const float speed =
+        std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
     if (speed > 1e-4F) {
       const float reduce = std::min(reverse_accel, speed);
       const float scale = (speed - reduce) / speed;
@@ -437,8 +443,7 @@ static void NovaPlayer_AddPolarVelocityClamped(float heading_rad, float thrust_s
 
   ship.pos_x += ship.vel_x;
   ship.pos_y += ship.vel_y;
-  ship.speed =
-      std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+  ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
   return stats;
 }
 
@@ -446,8 +451,8 @@ void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state) {
   const FlightInput input = platform.PollFlightInput();
   PlayerShip &p = state.player;
 
-  const ShipClass *cls = state.scenario.Ship(
-      static_cast<std::int16_t>(p.ship_class_id + 0x80));
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
   // No scenario table (or missing class/archive), or a non-arbitrary ship class
   // with zeroed movement fields: fall back to the Baktun/starter-style defaults
   // the pilot ship expects while keeping the inertia-preserving model.
@@ -466,7 +471,8 @@ void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state) {
   // exists).
   constexpr float kGlowRiseRate = 0.12F;
   constexpr float kGlowDecayRate = 0.05F;
-  p.engine_glow_intensity += (p.engine_thrust ? kGlowRiseRate : -kGlowDecayRate);
+  p.engine_glow_intensity +=
+      (p.engine_thrust ? kGlowRiseRate : -kGlowDecayRate);
   p.engine_glow_intensity = std::clamp(p.engine_glow_intensity, 0.0F, 1.0F);
 }
 

@@ -35,8 +35,8 @@ constexpr std::string_view kFirstFlightHint =
 // here it is uniformly scaled to fit the 640x480 viewport. The visual is
 // equivalent for the intro frame art and keeps a single shared draw path.
 void PresentPict(SDL_Renderer *renderer, const PictImage &pict) {
-  auto texture = SdlTexture::Create(renderer, pict.width, pict.height,
-                                    pict.rgba_pixels);
+  auto texture =
+      SdlTexture::Create(renderer, pict.width, pict.height, pict.rgba_pixels);
   if (!texture) {
     return;
   }
@@ -45,7 +45,8 @@ void PresentPict(SDL_Renderer *renderer, const PictImage &pict) {
   SDL_GetTextureSize(texture->get(), &width, &height);
   const auto scale = std::min(640.0F / width, 480.0F / height);
   const SDL_FRect destination{(640.0F - width * scale) / 2.0F,
-                              (480.0F - height * scale) / 2.0F, width * scale,
+                              (480.0F - height * scale) / 2.0F,
+                              width * scale,
                               height * scale};
   SDL_RenderTexture(renderer, texture->get(), nullptr, &destination);
 }
@@ -79,12 +80,13 @@ void RunPostIntroDestinationStub(const GameState &state) {
 // Mirrors the original's two distinct skip mechanisms from IntroCinematic_Run:
 //  * Enter (0x1c) / Space (0x39) ended only the *current* frame's wait.
 //  * The primary mouse command (_DAT_00591514) set the persistent latch `bVar9`
-//    that carries across all remaining frames and is also latched once at entry.
+//    that carries across all remaining frames and is also latched once at
+//    entry.
 // Note Escape is *not* a skip key here: Ghidra IntroCinematic_Run reads only
 // 0x1c (Enter), 0x39 (Space) and the primary mouse command. Returns whether the
 // frame's wait should end (Enter/Space) and whether the primary latch fired.
 struct SkipState {
-  bool frame_done = false;   // Enter/Space: end this frame's wait
+  bool frame_done = false;    // Enter/Space: end this frame's wait
   bool primary_latch = false; // primary mouse: skip the whole sequence (bVar9)
 };
 
@@ -118,7 +120,8 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
   // primary latch); an Enter/Space fast-forward only moves to the next frame
   // slot, of which the default config has a single PICT then terminators.
   for (std::size_t frame_index = 0;
-       frame_index < cinematic.source_pict_ids.size(); ++frame_index) {
+       frame_index < cinematic.source_pict_ids.size();
+       ++frame_index) {
     const auto pict_id = cinematic.source_pict_ids[frame_index];
     if (pict_id < 1) {
       // Ghidra: source_pict_ids[i] < 1 means no art this frame. Only frames
@@ -134,8 +137,8 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
     // source_pict_ids[i], center + blit onto the offscreen surface, draw it to
     // the render-owner rect with the first-flight hint overlaid.
     std::optional<PictImage> pict = std::nullopt;
-    if (const auto pict_data = NovaResource_LoadPictData(
-            static_cast<std::uint16_t>(pict_id))) {
+    if (const auto pict_data =
+            NovaResource_LoadPictData(static_cast<std::uint16_t>(pict_id))) {
       pict = Resource_LoadPictAsImage(*pict_data);
     }
     if (!pict) {
@@ -145,11 +148,10 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
     }
 
     const auto start_ms = platform.ticks_ms();
-    const auto duration_ms = static_cast<std::uint64_t>(
-                                 std::max<int>(0,
-                                               cinematic.duration_60h_ticks
-                                                   [frame_index])) *
-                             kMsPer60Tick;
+    const auto duration_ms =
+        static_cast<std::uint64_t>(
+            std::max<int>(0, cinematic.duration_60h_ticks[frame_index])) *
+        kMsPer60Tick;
     while (!platform.quit_requested()) {
       SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(renderer);
@@ -159,7 +161,9 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
       SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
       const auto hint_width =
           static_cast<float>(std::strlen(kFirstFlightHint.data())) * 8.0F;
-      SDL_RenderDebugText(renderer, (640.0F - hint_width) / 2.0F, 452.0F,
+      SDL_RenderDebugText(renderer,
+                          (640.0F - hint_width) / 2.0F,
+                          452.0F,
                           kFirstFlightHint.data());
       SDL_RenderPresent(renderer);
 

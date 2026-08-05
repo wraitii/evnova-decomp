@@ -35,16 +35,18 @@ struct TextInput {
 // Mirrors the player-control channel the original reads through the primary
 // input driver in Frame_SpaceflightLoop scope 3 (Ship_HandlePlayerShipCore).
 struct FlightInput {
-  bool turn_left = false;   // left / 'a'
-  bool turn_right = false;  // right / 'd'
-  bool thrust = false;      // up / 'w' (accelerate toward heading)
-  bool brake = false;       // down / 's' (decelerate)
+  bool turn_left = false;  // left / 'a'
+  bool turn_right = false; // right / 'd'
+  bool thrust = false;     // up / 'w' (accelerate toward heading)
+  bool brake = false;      // down / 's' (decelerate)
 };
 
 class SdlTexture {
 public:
   [[nodiscard]] static std::unique_ptr<SdlTexture>
-  Create(SDL_Renderer *renderer, int width, int height,
+  Create(SDL_Renderer *renderer,
+         int width,
+         int height,
          std::span<const std::uint8_t> rgba_pixels);
   [[nodiscard]] SDL_Texture *get() const;
   explicit SdlTexture(SDL_Texture *texture);
@@ -53,6 +55,7 @@ private:
   struct Deleter {
     void operator()(SDL_Texture *texture) const;
   };
+
   std::unique_ptr<SDL_Texture, Deleter> texture_;
 };
 
@@ -84,6 +87,7 @@ private:
   struct WindowDeleter {
     void operator()(SDL_Window *window) const;
   };
+
   struct RendererDeleter {
     void operator()(SDL_Renderer *renderer) const;
   };

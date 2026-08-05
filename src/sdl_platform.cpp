@@ -8,11 +8,15 @@ void SdlTexture::Deleter::operator()(SDL_Texture *texture) const {
 SdlTexture::SdlTexture(SDL_Texture *texture) : texture_(texture) {}
 
 std::unique_ptr<SdlTexture>
-SdlTexture::Create(SDL_Renderer *renderer, int width, int height,
+SdlTexture::Create(SDL_Renderer *renderer,
+                   int width,
+                   int height,
                    std::span<const std::uint8_t> rgba_pixels) {
-  SDL_Texture *texture =
-      SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
-                        SDL_TEXTUREACCESS_STATIC, width, height);
+  SDL_Texture *texture = SDL_CreateTexture(renderer,
+                                           SDL_PIXELFORMAT_RGBA32,
+                                           SDL_TEXTUREACCESS_STATIC,
+                                           width,
+                                           height);
   if (texture == nullptr ||
       !SDL_UpdateTexture(texture, nullptr, rgba_pixels.data(), width * 4)) {
     SDL_DestroyTexture(texture);
@@ -62,8 +66,8 @@ bool SdlPlatform::Initialize() {
   }
 
   SDL_SetRenderVSync(renderer_.get(), 1);
-  SDL_SetRenderLogicalPresentation(renderer_.get(), 640, 480,
-                                   SDL_LOGICAL_PRESENTATION_LETTERBOX);
+  SDL_SetRenderLogicalPresentation(
+      renderer_.get(), 640, 480, SDL_LOGICAL_PRESENTATION_LETTERBOX);
   return true;
 }
 
@@ -77,15 +81,19 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
       continue;
     }
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
-      SDL_RenderCoordinatesFromWindow(renderer_.get(), event.motion.x,
-                                      event.motion.y, &mouse_position_.x,
+      SDL_RenderCoordinatesFromWindow(renderer_.get(),
+                                      event.motion.x,
+                                      event.motion.y,
+                                      &mouse_position_.x,
                                       &mouse_position_.y);
       continue;
     }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
         event.button.button == SDL_BUTTON_LEFT) {
-      SDL_RenderCoordinatesFromWindow(renderer_.get(), event.button.x,
-                                      event.button.y, &mouse_position_.x,
+      SDL_RenderCoordinatesFromWindow(renderer_.get(),
+                                      event.button.x,
+                                      event.button.y,
+                                      &mouse_position_.x,
                                       &mouse_position_.y);
       return TextInput{TextKey::primary};
     }
@@ -143,15 +151,19 @@ std::optional<char> SdlPlatform::PollCommandEvent() {
       continue;
     }
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
-      SDL_RenderCoordinatesFromWindow(renderer_.get(), event.motion.x,
-                                      event.motion.y, &mouse_position_.x,
+      SDL_RenderCoordinatesFromWindow(renderer_.get(),
+                                      event.motion.x,
+                                      event.motion.y,
+                                      &mouse_position_.x,
                                       &mouse_position_.y);
       continue;
     }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
         event.button.button == SDL_BUTTON_LEFT) {
-      SDL_RenderCoordinatesFromWindow(renderer_.get(), event.button.x,
-                                      event.button.y, &mouse_position_.x,
+      SDL_RenderCoordinatesFromWindow(renderer_.get(),
+                                      event.button.x,
+                                      event.button.y,
+                                      &mouse_position_.x,
                                       &mouse_position_.y);
       return 'm';
     }

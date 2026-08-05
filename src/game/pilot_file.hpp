@@ -39,20 +39,20 @@ struct PilotFile {
   std::string pilot_name;
 
   // -- Player ship core (Ghidra .plt offsets from PilotFile_LoadSave) --------
-  std::int32_t credits = 0;          // block+0x281a
-  std::int16_t ship_class_id = 0;    // block+0x02 (0 = default class)
+  std::int32_t credits = 0;       // block+0x281a
+  std::int16_t ship_class_id = 0; // block+0x02 (0 = default class)
   std::int16_t current_system_id = 0;
   std::int16_t active_weapon_bank_slot = 0;
   std::int16_t timed_action_counter = -1;
   float death_timer_active = -1.0F;
-  float shield_points = 0.0F;        // block+0x04 (g_ship_states->shield_points)
-  float armor_points = 0.0F;         // block+0x06
-  float fuel_points = 0.0F;          // block+0x08
+  float shield_points = 0.0F; // block+0x04 (g_ship_states->shield_points)
+  float armor_points = 0.0F;  // block+0x06
+  float fuel_points = 0.0F;   // block+0x08
   float pos_x = 0.0F;
   float pos_y = 0.0F;
   float vel_x = 0.0F;
   float vel_y = 0.0F;
-  float heading = 0.0F;              // radians
+  float heading = 0.0F; // radians
   float speed = 0.0F;
 
   // -- Intro cinematic (IntroCinematic_SetupFrames reads block+0x20/0x28/0x30).
@@ -65,10 +65,10 @@ struct PilotFile {
   std::array<std::int16_t, 0x100> weapon_bank_ammo{};
   std::array<std::int16_t, 0x100> weapon_bank_secondary{};
 
-  // Fresh default for a brand-new pilot, mirroring PilotData_InitializePlayerState's
-  // absent-block seed: 10000 credits, ship class 0, current system 0, no intro
-  // configured yet. The new-game flow then overlays the pilot's name, start
-  // config and intro frames.
+  // Fresh default for a brand-new pilot, mirroring
+  // PilotData_InitializePlayerState's absent-block seed: 10000 credits, ship
+  // class 0, current system 0, no intro configured yet. The new-game flow then
+  // overlays the pilot's name, start config and intro frames.
   [[nodiscard]] static PilotFile Fresh();
 };
 

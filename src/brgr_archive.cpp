@@ -111,7 +111,9 @@ ParseArchive(const std::filesystem::path &path) {
              static_cast<std::streamsize>(bytes.size()));
   if (bytes.size() < 0x1c ||
       std::array{bytes[0], bytes[1], bytes[2], bytes[3]} !=
-          std::array{std::byte{0x42}, std::byte{0x52}, std::byte{0x47},
+          std::array{std::byte{0x42},
+                     std::byte{0x52},
+                     std::byte{0x47},
                      std::byte{0x52}}) {
     NovaLog::Warn("BRGR archive unavailable or malformed: {}", path.string());
     return std::nullopt;
@@ -181,7 +183,8 @@ ParseArchive(const std::filesystem::path &path) {
       const auto record_count = static_cast<std::size_t>(
           ReadBe32(archive.bytes, type_entry_offset + 8));
       const auto table_end =
-          records_offset + record_count * static_cast<std::size_t>(kMapRecordSize);
+          records_offset +
+          record_count * static_cast<std::size_t>(kMapRecordSize);
       if (records_offset > entry.size || table_end > entry.size) {
         table_in_bounds = false;
         break;
@@ -217,10 +220,9 @@ ParseArchive(const std::filesystem::path &path) {
                 : std::min(kMapRecordSize - 10,
                            archive.bytes.size() - (record_offset + 10));
         if (name_capacity > 0) {
-          record_name.append(
-              reinterpret_cast<const char *>(archive.bytes.data() +
-                                             record_offset + 10),
-              name_capacity);
+          record_name.append(reinterpret_cast<const char *>(
+                                 archive.bytes.data() + record_offset + 10),
+                             name_capacity);
           if (const auto nul = record_name.find('\0');
               nul != std::string::npos) {
             record_name.resize(nul);
@@ -391,9 +393,8 @@ NovaResource_Load(std::uint32_t type_code, std::uint16_t resource_id) {
   return NovaResourceDb::Instance().Load(type_code, resource_id);
 }
 
-std::optional<NovaResource>
-NovaResource_LoadNamed(std::uint32_t type_code,
-                       std::uint16_t resource_id) {
+std::optional<NovaResource> NovaResource_LoadNamed(std::uint32_t type_code,
+                                                   std::uint16_t resource_id) {
   return NovaResourceDb::Instance().LoadNamed(type_code, resource_id);
 }
 
@@ -592,8 +593,8 @@ NovaSound_Decode(std::span<const std::byte> resource_data) {
         2272,  2499,  2749,  3024,  3327,  3660,  4026,  4428,  4871,  5358,
         5894,  6484,  7132,  7845,  8630,  9493,  10442, 11487, 12635, 13899,
         15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767};
-    constexpr std::array<int, 16> kIndexAdjust{-1, -1, -1, -1, 2, 4, 6, 8,
-                                               -1, -1, -1, -1, 2, 4, 6, 8};
+    constexpr std::array<int, 16> kIndexAdjust{
+        -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8};
 
     NovaSoundData sound{};
     sound.channel_count = 1;
@@ -634,14 +635,16 @@ NovaSound_Decode(std::span<const std::byte> resource_data) {
           predictor += (nibble & 8) != 0 ? -difference : difference;
           predictor = std::clamp(predictor, -32768, 32767);
           step_index = std::clamp(
-              step_index + kIndexAdjust[static_cast<std::size_t>(nibble)], 0,
+              step_index + kIndexAdjust[static_cast<std::size_t>(nibble)],
+              0,
               88);
           sound.samples.push_back(static_cast<std::int16_t>(predictor));
         }
       }
     }
     NovaLog::Debug("decoded Apple IMA4 snd with {} samples at {} Hz",
-                   sound.samples.size(), sound.sample_rate);
+                   sound.samples.size(),
+                   sound.sample_rate);
     return sound;
   }
 
@@ -697,7 +700,8 @@ NovaSound_Decode(std::span<const std::byte> resource_data) {
     sound.samples.push_back(static_cast<std::int16_t>(value));
   }
   NovaLog::Debug("decoded 'NONE' 8-bit snd \x20with {} samples from offset {}",
-                 sound.samples.size(), data_start);
+                 sound.samples.size(),
+                 data_start);
   return sound;
 }
 
@@ -725,8 +729,7 @@ std::optional<NovaCharacterIntro> NovaResource_LoadCharacterIntro() {
   // IntroCinematic_SetupFrames reads from the pilot-save block: IntroPict1-4
   // at +0x20 and PictDelay1-4 at +0x28 (both 1/60s-tick units; the intro timer
   // multiplies by 60 ms/unit). A value of -1 (0xffff) terminates the list.
-  const auto resource_data =
-      NovaResource_Load(kResourceTypeCharacter, 0x0080);
+  const auto resource_data = NovaResource_Load(kResourceTypeCharacter, 0x0080);
   if (!resource_data) {
     NovaLog::Todo("default character resource (ch\\x9ar 0x0080) not loaded; "
                   "intro defaults to the single-frame fallback");
@@ -747,7 +750,9 @@ std::optional<NovaCharacterIntro> NovaResource_LoadCharacterIntro() {
     }
   }
   NovaLog::Info("default character intro: frames {} {} {}, {}-ms delays",
-                intro.pict_ids[0], intro.pict_ids[1], intro.pict_ids[2],
+                intro.pict_ids[0],
+                intro.pict_ids[1],
+                intro.pict_ids[2],
                 intro.delay_ticks[0] * 60);
   return intro;
 }

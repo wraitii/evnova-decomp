@@ -10,8 +10,8 @@
 
 #include <array>
 #include <cstdint>
-#include <random>
 #include <optional>
+#include <random>
 #include <string>
 
 #include "scenario_data.hpp"
@@ -31,9 +31,10 @@ struct IntroCinematicData {
   std::int16_t post_intro_dest_id = -1;
 
   // Ghidra IntroCinematic_Run opens the post-intro travel-selection dialog
-  // when post_intro_dest_id != -1. The new-game flow (IntroCinematic_SetupFrames
-  // default) uses 0x7ffd even with no pilot-save block, which is "no stellar
-  // yet" but deliberately not -1 so the dialog still opens.
+  // when post_intro_dest_id != -1. The new-game flow
+  // (IntroCinematic_SetupFrames default) uses 0x7ffd even with no pilot-save
+  // block, which is "no stellar yet" but deliberately not -1 so the dialog
+  // still opens.
   [[nodiscard]] bool should_open_post_intro_dialog() const {
     return post_intro_dest_id != -1;
   }
@@ -48,18 +49,18 @@ struct PlayerShip {
   float pos_y = 0.0F;
   float vel_x = 0.0F;
   float vel_y = 0.0F;
-  float heading = 0.0F;      // radians
+  float heading = 0.0F; // radians
   float speed = 0.0F;
-  float shield_points = 0.0F;   // g_ship_states->shield_points
-  float armor_points = 0.0F;    // g_ship_states->armor_points
-  float fuel_points = 0.0F;     // g_ship_states->fuel_points
-  float death_timer_active = -1.0F; // g_ship_states->death_timer_active
-  std::int16_t ship_class_id = 0;   // g_ship_states->ship_class_id
+  float shield_points = 0.0F;         // g_ship_states->shield_points
+  float armor_points = 0.0F;          // g_ship_states->armor_points
+  float fuel_points = 0.0F;           // g_ship_states->fuel_points
+  float death_timer_active = -1.0F;   // g_ship_states->death_timer_active
+  std::int16_t ship_class_id = 0;     // g_ship_states->ship_class_id
   std::int16_t current_system_id = 0; // g_ship_states->current_system_id
   std::int16_t active_weapon_bank_slot = 0;
   std::int16_t timed_action_counter = -1; // g_ship_states->timed_action_counter
-  std::int32_t credits = 0;             // g_ship_states->credits
-  bool is_active = false;               // g_ship_states->is_active
+  std::int32_t credits = 0;               // g_ship_states->credits
+  bool is_active = false;                 // g_ship_states->is_active
   // Engine-thrust latch: whether the player is currently applying forward
   // thrust this frame (mirrors Ghidra ShipState.ai_forward_thrust_cmd at +0x30
   // being non-zero). Written by NovaPlayer_UpdateFromInput and read by the
@@ -79,7 +80,7 @@ struct PlayerShip {
 struct PilotData {
   std::string first_name;
   std::string last_name;
-  std::int16_t start_type_code = 0; // PilotData_ResolveStartType result
+  std::int16_t start_type_code = 0;     // PilotData_ResolveStartType result
   std::int16_t selected_reputation = 0; // pilot-selection-dialog choice
 };
 
@@ -101,7 +102,7 @@ struct GameState {
   // the state so runs are reproducible when seeded identically.
   std::mt19937 rng{42};
 
-  bool game_active = false; // Ghidra DAT_00596d28
+  bool game_active = false;  // Ghidra DAT_00596d28
   bool intro_played = false; // Ghidra DAT_00596d35: cleared on new pilot so
                              // the intro cinematic plays on first flight.
   PilotData pilot;

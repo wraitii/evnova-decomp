@@ -41,7 +41,8 @@ struct ShipVisualDescriptor {
   std::int16_t frames_per_rotation = 36;
   // Flags (+0x2e): the ship sprite behavior flags (bank/unfold/carry-animate).
   std::uint16_t sprite_behavior_flags = 0;
-  // AnimDelay (+0x30): the loader stores this in ShipClassDef.combat_state_init_range.
+  // AnimDelay (+0x30): the loader stores this in
+  // ShipClassDef.combat_state_init_range.
   std::int16_t anim_delay = 0;
   // WeapDecay (+0x32): the weapon-glow fade rate; scaled into
   // ShipClassDef.weapon_glow_decay_rate.
@@ -54,10 +55,10 @@ struct ShipVisualDescriptor {
   // 24x24 hull), so the exhaust jets extend past the ship. A non-positive image
   // id means the ship has no engine-glow layer (verified on the shuttle:
   // +0x16 = 0x0578).
-  std::int16_t engine_glow_image_id = 0;   // GlowImageID (+0x16)
-  std::int16_t engine_glow_mask_id = 0;    // GlowMaskID (+0x18)
-  std::uint16_t engine_glow_x_size = 0;    // GlowXSize (+0x1a)
-  std::uint16_t engine_glow_y_size = 0;    // GlowYSize (+0x1c)
+  std::int16_t engine_glow_image_id = 0; // GlowImageID (+0x16)
+  std::int16_t engine_glow_mask_id = 0;  // GlowMaskID (+0x18)
+  std::uint16_t engine_glow_x_size = 0;  // GlowXSize (+0x1a)
+  std::uint16_t engine_glow_y_size = 0;  // GlowYSize (+0x1c)
 };
 
 // Decodes one sh\x8an descriptor payload (Ghidra ShipClass_LoadShipClass-

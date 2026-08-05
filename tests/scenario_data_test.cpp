@@ -16,7 +16,8 @@ namespace game {
 // that were verified directly from the raw payload bytes, so they pin both the
 // BRGR map resolution and the clean-room decoders to the exact game data.
 
-TEST_CASE("scenario tables load ships, outfits and weapons", "[scenario][data]") {
+TEST_CASE("scenario tables load ships, outfits and weapons",
+          "[scenario][data]") {
   ScenarioData data;
   REQUIRE(data.LoadFromArchives());
 
@@ -65,8 +66,12 @@ TEST_CASE("scenario resource families resolve through the BRGR adapter",
   // The five scenario families live across the Nova Data archives; the adapter
   // must find them all (regression: Nova Data 4's w\x91ap / o\x9ftf records
   // were previously missed by a too-loose resource.map scan).
-  for (std::uint32_t type : {0x73689570U, 0x6f9f7466U, 0x77916170U,
-                             0x73709a62U, 0x73d87374U, 0x679a7674U}) {
+  for (std::uint32_t type : {0x73689570U,
+                             0x6f9f7466U,
+                             0x77916170U,
+                             0x73709a62U,
+                             0x73d87374U,
+                             0x679a7674U}) {
     const auto first = NovaResource_Load(type, 0x80);
     CHECK(first.has_value());
   }
@@ -94,7 +99,7 @@ TEST_CASE("outfit tail fields decode at their real payload offsets",
           "[scenario][data]") {
   ScenarioData data;
   REQUIRE(data.LoadFromArchives());
-  const auto *o = data.Outfit(0x80);  // Light Blaster
+  const auto *o = data.Outfit(0x80); // Light Blaster
   REQUIRE(o != nullptr);
   // Verified from the raw payload: Mass=3, TechLevel=4, ModType=1 (weapon),
   // Cost is a 4-byte big-endian value at +0x0e (5000 for the Light Blaster).
@@ -103,7 +108,7 @@ TEST_CASE("outfit tail fields decode at their real payload offsets",
   CHECK(o->mod_type == 1);
   CHECK(o->mod_val == 0x80);
   CHECK(o->max_count == 8);
-  CHECK(o->flags == 0x0001U);  // fixed gun
+  CHECK(o->flags == 0x0001U); // fixed gun
   CHECK(o->cost == 5000);
   // Tail block: DispWeight, Graphic, BuyRandom, ItemClass from +0x3ec..+0x3f3.
   CHECK(o->display_weight == 0);
@@ -120,12 +125,13 @@ TEST_CASE("outfit tail fields decode at their real payload offsets",
   CHECK(o->require_hi == 1);
 }
 
-TEST_CASE("outfit purchase mass/price derived computation", "[scenario][data]") {
+TEST_CASE("outfit purchase mass/price derived computation",
+          "[scenario][data]") {
   ScenarioData data;
   REQUIRE(data.LoadFromArchives());
   const auto *o = data.Outfit(0x80);
   REQUIRE(o != nullptr);
-  const std::int16_t hull = 15;  // the Shuttle's Mass
+  const std::int16_t hull = 15; // the Shuttle's Mass
   // Light Blaster: no mass/price proportional flag, so cost/mass pass through.
   CHECK(o->PurchasePrice(hull) == 5000);
   CHECK(o->PurchaseMass(hull) == 3);
@@ -160,8 +166,8 @@ TEST_CASE("nova control bit expression evaluator", "[scenario][control]") {
   CHECK(NovaControlExpression_Evaluate("!b6", state));
   CHECK(NovaControlExpression_Evaluate("g", state));
   CHECK(NovaControlExpression_Evaluate("b5 & g", state));
-  CHECK(NovaControlExpression_Evaluate("o128", state));  // outfit id 0x80
-  CHECK(NovaControlExpression_Evaluate("e129", state));   // system id 0x81
+  CHECK(NovaControlExpression_Evaluate("o128", state)); // outfit id 0x80
+  CHECK(NovaControlExpression_Evaluate("e129", state)); // system id 0x81
   CHECK_NOTHROW(NovaControlExpression_Evaluate("b5 | b6", state));
   CHECK(NovaControlExpression_Evaluate("b5 | b6", state));
   CHECK_FALSE(NovaControlExpression_Evaluate("b6 & b5", state));
@@ -218,26 +224,27 @@ TEST_CASE("government table loads and decodes the Federation class",
   CHECK(f->news_pic_id == 9001);
 }
 
-TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships", "[scenario][ships][brgr]") {
+TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships",
+          "[scenario][ships][brgr]") {
   // The starter Shuttle is ship class id 0x80; its sh\x8an descriptor and the
   // rl\x91D sheet it references live in the Nova Ships archives, which are now
   // on the archive search path.
-  const auto payload =
-      NovaResource_Load(kShipVisualResourceType, static_cast<std::uint16_t>(0x80));
+  const auto payload = NovaResource_Load(kShipVisualResourceType,
+                                         static_cast<std::uint16_t>(0x80));
   REQUIRE(payload.has_value());
 
   const auto d = DecodeShipVisualDescriptor(*payload);
   REQUIRE(d.has_value());
-  CHECK(d->base_image_id == 1000);   // Shuttle rl\x91D sheet
+  CHECK(d->base_image_id == 1000); // Shuttle rl\x91D sheet
   CHECK(d->base_mask_id == 1001);
-  CHECK(d->base_set_count == 3);     // 3 sets per rotation
+  CHECK(d->base_set_count == 3); // 3 sets per rotation
   CHECK(d->base_x_size == 24);
   CHECK(d->base_y_size == 24);
   CHECK(d->base_transparency == 0);
   CHECK(d->frames_per_rotation == 36);
   CHECK(d->sprite_behavior_flags == 0x0041);
   CHECK(d->anim_delay == 0);
-  CHECK(d->weapon_decay == 0);   // no weapon-glow fade for the bare Shuttle
+  CHECK(d->weapon_decay == 0); // no weapon-glow fade for the bare Shuttle
 
   // The engine-glow layer names the 'Shuttle Eng Glow' rl\x9144 sheet 0x0578
   // (108-frame rotation grid matching the base). Ghidra
@@ -253,7 +260,8 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships", "[scenario][ships][
 
   // The referenced 16-bit sheet must be decodable and hold base_set_count *
   // frames_per_rotation frames (3 * 36 = 108) at the descriptor's dimensions.
-  const auto sheet = NovaResource_Load(kResourceTypeRleSheet16, d->base_image_id);
+  const auto sheet =
+      NovaResource_Load(kResourceTypeRleSheet16, d->base_image_id);
   REQUIRE(sheet.has_value());
   const auto decoded = RleSpriteSheet_Decode16(*sheet);
   REQUIRE(decoded.has_value());
@@ -277,8 +285,8 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships", "[scenario][ships][
 // the starting system Earth planet has link_a_id 0 -> spin sp\x9an 1000 ->
 // rl\x91D 2000 (150x150), and its government id resolves to the Federation
 // (0x80).
-TEST_CASE("stellar spin sprites resolve from Nova Graphics", "[scenario][stellar]")
-{
+TEST_CASE("stellar spin sprites resolve from Nova Graphics",
+          "[scenario][stellar]") {
   // Nova Graphics 1/2 now on the archive path, so stellar spin ids 1000+ are
   // reachable. The Kania Earth is system 0x80 stellar 0x80.
   const auto spin = NovaResource_Load(kResourceTypeSprites, 1000);
@@ -288,8 +296,8 @@ TEST_CASE("stellar spin sprites resolve from Nova Graphics", "[scenario][stellar
   CHECK(def->sprites_resource_id == 2000);
   CHECK(def->tiles_x == 1);
   CHECK(def->tiles_y == 1);
-  const auto sheet = NovaResource_Load(kResourceTypeRleSheet16,
-                                       def->sprites_resource_id);
+  const auto sheet =
+      NovaResource_Load(kResourceTypeRleSheet16, def->sprites_resource_id);
   REQUIRE(sheet.has_value());
   const auto decoded = RleSpriteSheet_Decode16(*sheet);
   REQUIRE(decoded.has_value());
@@ -331,10 +339,10 @@ TEST_CASE("system nav_defs identify the owned space stellars",
     }
   }
   REQUIRE(owned.size() == 2);
-  CHECK(owned[0] == 0x89);   // Port Kane
-  CHECK(owned[1] == 0x57c);  // HG-Kania hypergate
+  CHECK(owned[0] == 0x89);  // Port Kane
+  CHECK(owned[1] == 0x57c); // HG-Kania hypergate
   CHECK(data.Stellar(0x89)->name == "Port Kane");
-  CHECK(data.Stellar(0x89)->link_a_id == 34);  // spin 1034 planet sprite
+  CHECK(data.Stellar(0x89)->link_a_id == 34); // spin 1034 planet sprite
   // 1404 HG-Kania hypergate's alternate sprite set id is 1 (a hypergate icon).
   CHECK(data.Stellar(0x57c)->link_a_id == 1);
 }
@@ -383,8 +391,8 @@ TEST_CASE("starfield sheet (spin resource 700) decodes to 16 5x5 frames",
   CHECK(def->tiles_x == 4);
   CHECK(def->tiles_y == 4);
 
-  const auto sheet_data = NovaResource_Load(kResourceTypeRleSheet16,
-                                            def->sprites_resource_id);
+  const auto sheet_data =
+      NovaResource_Load(kResourceTypeRleSheet16, def->sprites_resource_id);
   REQUIRE(sheet_data.has_value());
   const auto sheet = RleSpriteSheet_Decode16(*sheet_data);
   REQUIRE(sheet.has_value());
@@ -392,7 +400,6 @@ TEST_CASE("starfield sheet (spin resource 700) decodes to 16 5x5 frames",
   CHECK(sheet->height == 5);
   CHECK(sheet->frames.size() == 16);
 }
-
 
 // The stellar animation timing fields (sp\x6fb AnimDelay/Frame0Bias, Ghidra
 // StellarDef +0x470/+0x472 from payload +0x22/+0x24) and the hypergate
@@ -408,13 +415,13 @@ TEST_CASE("stellar animation fields decode", "[scenario][stellar]") {
   REQUIRE(earth != nullptr);
   CHECK(earth->animation_dwell_time == 0);
   CHECK(earth->animation_frame_multiplier == 0);
-  CHECK((earth->availability_flags & 0x1000) == 0);  // not a hypergate
+  CHECK((earth->availability_flags & 0x1000) == 0); // not a hypergate
 
   const Stellar *portkane = data.Stellar(0x89);
   REQUIRE(portkane != nullptr);
   CHECK(portkane->animation_dwell_time == 0);
   CHECK(portkane->animation_frame_multiplier == 0);
-  CHECK((portkane->availability_flags & 0x1000) == 0);  // not a hypergate
+  CHECK((portkane->availability_flags & 0x1000) == 0); // not a hypergate
 
   // HG-Kania hypergate: 42-frame animated set (link_a 1 -> spin 1001), the
   // hypergate availability bit (0x1000) set, and an engaged highlight frame 37
@@ -422,7 +429,7 @@ TEST_CASE("stellar animation fields decode", "[scenario][stellar]") {
   const Stellar *hg = data.Stellar(0x57c);
   REQUIRE(hg != nullptr);
   CHECK(hg->link_a_id == 1);
-  CHECK((hg->availability_flags & 0x1000) != 0);  // hypergate
+  CHECK((hg->availability_flags & 0x1000) != 0); // hypergate
   CHECK(hg->engage_highlight_frame == 37);
   CHECK(hg->animation_dwell_time == 0);
   CHECK(hg->animation_frame_multiplier == 0);
