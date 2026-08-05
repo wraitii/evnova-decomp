@@ -1005,7 +1005,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004BD090,FUN_004bd090,,0%,
 0x004BD0C0,Prefs_SetNovaFilesPathPrefix,,0%,
 0x004BD160,Resource_ValidateInstallFolders,,0%,
-0x004BD3C0,NovaData_LoadScenarioResourceTables,,45%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st families into clean-room tables; record names now surfaced from the BRGR map. Outfit decoder complete (tail fields Contribute/Require/BuyRandom/ItemClass/ShortName/LCName/LCPlural at real offsets); ship+weapon verified; system/stellar partial (dude types/prob, reinf, visibility added; stellar tail + system numeric block TODO(decomp))."
+0x004BD3C0,NovaData_LoadScenarioResourceTables,,50%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields); ship+weapon verified; system/stellar partial (dude types/prob, reinf, visibility added; stellar tail + system numeric block TODO(decomp))."
 0x004C6D50,Ui_LoadSelectionDialogResource,,0%,
 0x004C7040,FUN_004c7040,,0%,
 0x004C73B0,FUN_004c73b0,,0%,

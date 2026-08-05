@@ -36,6 +36,7 @@ constexpr std::uint32_t kOutfitResourceType = 0x6f9f7466; // o\x9ftf
 constexpr std::uint32_t kWeaponResourceType = 0x77916170; // w\x91ap
 constexpr std::uint32_t kStellarResourceType = 0x73709a62; // sp\x9ab
 constexpr std::uint32_t kSystemResourceType = 0x73d87374; // s\xd8st
+constexpr std::uint32_t kGovernmentResourceType = 0x679a7674; // g\x9avt
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -256,6 +257,77 @@ struct Stellar {
   std::int16_t explosion_type = -1; // ExplodType
 };
 
+// Ghidra GovtDef (g_government_defs, up to 0x100 entries indexed by government
+// id minus 0x80). A government defines a faction: its class/alliance/enemy
+// relations, reputation penalties, AI/pilot skill, intel scan mask, theme
+// colors for the HUD map, and the voice/interface/name tables. The original
+// loads these from the g\x9avt resource family in Nova Data 1 and derives some
+// runtime fields (voice_type_mode from the voice code range, the 8-bit theme
+// colors from the 16-bit fields, fly-scaled pilot/combat skill).
+//
+// Field names mirror the EV Nova Bible `govmnt`/`government` layout; each
+// notes the Ghidra GovtDef member (and the source payload offset) it decodes.
+struct Government {
+  std::string name;        // resource record name (display / HUD label)
+  std::string comm_name;   // name table (comm chatter / fame label)
+  std::string medium_name; // medium name table (mission/map label)
+
+  // GovtDef +0x3e/+0x40: voice_type_code and its decoded companion mode. The
+  // loader recodes raw 0..7 voices as mode -1, voices offset by 1000 as mode 1
+  // and those offset by 2000 as mode 0 (subtracting the offset from the code);
+  // out-of-range codes set both to -1.
+  std::int16_t voice_type_code = -1;
+  std::int16_t voice_type_mode = -1;
+
+  std::uint16_t flags_primary = 0;   // GovtDef 0x20 (payload +0x02)
+  // Known bits (from Government_AreGovtsAllied / _HostileOrXenophobic):
+  //   0x0001 xenophobic (attacks on sight), 0x0800 derelict (no alliance checks).
+  std::uint16_t scan_mask_short = 0; // GovtDef 0x22 (payload +0x04) [Provisional])
+  std::int16_t ai_skill_percent = 0; // GovtDef 0x24 (payload +0x32)
+
+  // Class / alliance / enemy id lists (payload +0x18/+0x20/+0x28). Govts share
+  // a class id to be treated alike; the ally/enemy lists drive
+  // Government_AreGovtsAllied / _HostileOrXenophobic (0x0046bc90 / 0x0046bdf0).
+  std::array<std::int16_t, 4> classes{-1, -1, -1, -1};
+  std::array<std::int16_t, 4> ally_classes{-1, -1, -1, -1};
+  std::array<std::int16_t, 4> enemy_classes{-1, -1, -1, -1};
+
+  std::int16_t interface_id = -1; // GovtDef 0x42 (payload +0xac; <0x80 -> -1)
+  std::int16_t news_pic_id = -1;  // GovtDef 0x44 (payload +0xae; <0x80 -> -1)
+
+  std::int16_t flee_shield_threshold = 0; // GovtDef 0x46 (payload +0x08)
+  std::int16_t disable_penalty = 0;       // GovtDef 0x48 (payload +0x0a)
+  std::int16_t board_penalty = 0;         // GovtDef 0x4a (payload +0x0c)
+  std::int16_t kill_penalty = 0;          // GovtDef 0x4c (payload +0x0e)
+  std::int16_t shoot_penalty = 0;         // GovtDef 0x4e (payload +0x10)
+  std::int16_t max_odds = 0;              // GovtDef 0x50 (payload +0x12)
+  std::int16_t bribe_cost_percent = 0;    // GovtDef 0x52 (payload +0x14)
+
+  // Inherent electronic-warfare jamming values (GovtDef 0x54..0x5a). jam[0]
+  // comes from payload +0x06; jam[1..3] from payload +0x5c..0x62, each clamped
+  // to [0,100] by the loader.
+  std::array<std::int16_t, 4> inherent_jam{};
+
+  // GovtDef 0x60/0x64: pilot/combat skill as fractions. The loader scales the
+  // payload int16 values by 0.01 (DAT_00575e60) and applies the defaults 1.0
+  // (pilot) / 0.01 (combat) to degenerate inputs: pilot source < 1 -> 1.0,
+  // combat result < 0.01 -> 0.01.
+  float pilot_skill_scale = 1.0F;   // GovtDef 0x64 (payload +0x30)
+  float combat_rating_scale = 0.01F; // GovtDef 0x60 (payload +0x16)
+
+  std::uint32_t scan_mask_lo = 0; // GovtDef 0x68 (payload +0x54)
+  std::uint32_t scan_mask_hi = 0; // GovtDef 0x6c (payload +0x58)
+
+  // Theme colors tag a government's systems/ships on the HUD map. The loader
+  // stores 16-bit fields at GovtDef 0x70/0x76 from a packed RGB24 payload
+  // (+0xa4 theme, +0xa8 ship) and mirrors the 8-bit values at 0x7c/0x80; the
+  // 8-bit forms are what gameplay consumes, so that is what we carry.
+  std::uint8_t theme_red = 0, theme_green = 0, theme_blue = 0;
+  std::uint8_t ship_red = 0, ship_green = 0, ship_blue = 0;
+
+  bool present = false; // GovtDef 0x86 is_present (slots zero-filled when absent)
+};
+
 // Ghidra SystemDef (g_system_defs, entries indexed by system id minus 0x80).
 // One star system; links to 16 others and holds stellar nav defaults.
 struct System {
@@ -292,6 +364,10 @@ struct ScenarioData {
   std::vector<Weapon> weapons;       // indexed by weapon_id - 0x80
   std::vector<Stellar> stellars;     // indexed by stellar_id - 0x80
   std::vector<System> systems;       // indexed by system_id - 0x80
+  std::vector<Government> governments; // indexed by government_id - 0x80
+
+  // gh.id 0x80.. lookup for government/faction data.
+  [[nodiscard]] const Government *Government(std::int16_t resource_id) const;
 
   // gh.id 0x80.. convention: returns the entry for the given resource id, or
   // nullptr when it is outside the loaded range.

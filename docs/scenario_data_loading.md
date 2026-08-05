@@ -1,4 +1,4 @@
-# Scenario data loading (ships / outfits / weapons / stellars / systems)
+# Scenario data loading (ships / outfits / weapons / stellars / systems / governments)
 
 Clean-room reconstruction of the Nova scenario resource tables that the new-game
 flow and spaceflight loop consume. The original rebuilds them at startup in
@@ -20,6 +20,7 @@ The scenario families are spread across the `Nova Data *.rez` archives:
 | `0x77916170` | `w\x91ap`  | weapons | Nova Data 4 | 81  |
 | `0x73709a62` | `sp\x9ab`  | stellars| Nova Data 2 | 411 |
 | `0x73d87374` | `s\xd8st`  | systems | Nova Data 2 | 545 |
+| `0x679a7674` | `g\x9avt`  | governments| Nova Data 1 | 68 |
 
 `brgr_archive.cpp`'s `kArchiveFileNames` lists the Data archives alongside the
 menu/splash archives. A robustness fix to `ParseArchive` was required: some
@@ -31,10 +32,11 @@ so the genuine map is found.
 ## Clean-room model
 
 `src/game/scenario_data.hpp` defines `game::ShipClass`, `Outfit`, `Weapon`,
-`Stellar`, `System`, plus `ScenarioData` which owns the five indexed tables
-(by `id - 0x80`, matching the original globals). `ScenarioData::LoadFromArchives()`
-parses all families and is stored on `GameState::scenario` so gameplay code has
-data keyed by id with no hidden globals (AGENTS.md).
+`Stellar`, `System`, `Government`, plus `ScenarioData` which owns the six
+indexed tables (by `id - 0x80`, matching the original globals).
+`ScenarioData::LoadFromArchives()` parses all families and stores them on
+`GameState::scenario` so gameplay code has data keyed by id with no hidden
+globals (AGENTS.md).
 
 ### Verified offsets (vs. payload + loader)
 
@@ -54,6 +56,16 @@ data keyed by id with no hidden globals (AGENTS.md).
 - **s\xd8st (system)**: xPos0, yPos2, Con1-16 at `0x04`, NavDef1-16 at `0x24`,
   DudeTypes at `0x44`, AvgShips64, Govt66, Message68, Asteroids6a, Interference6c.
   Verified against system 0x80 (links 199/200/202/129/135, govt 128).
+- **g\x9avt (government)**: header +00 voice, +02 flags_primary, +04
+  scan_mask_short, +06 jam1, +08 flee, +0a disable_pen / +0c board / +0e kill /
+  +10 shoot penalties, +12 max_odds, +14 bribe %, +16 combat_rating_src, +18
+  class1-4, +20 ally1-4, +28 enemy1-4, +30 pilot_skill_src, +32 ai_skill,
+  +34 comm name, +44 name-table name, +54 scan_lo, +58 scan_hi, +5c..+62
+  jam2-4, +64 medium name, +a4 theme-color RGB24, +a8 ship-color RGB24, +ac
+  interface_id, +ae news_pic_id. The loader recodes the voice code by range
+  (raw 0..7 / +1000 / +2000 -> mode -1/1/0) and scales the skill shorts by
+  0.01f (`DAT_00575e60`). Verified against the Federation (0x80): flags 0xe2b0,
+  enemies 2/10/16/9, theme 0x2c2caf, interface 0x82.
 
 ### Provisional (not yet fully verified)
 

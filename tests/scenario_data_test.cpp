@@ -1,10 +1,12 @@
 #include "game/scenario_data.hpp"
+#include "game/ship_visual.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
 
 #include "brgr_archive.hpp"
+#include "rle_sprite_sheet.hpp"
 
 namespace game {
 
@@ -62,7 +64,7 @@ TEST_CASE("scenario resource families resolve through the BRGR adapter",
   // must find them all (regression: Nova Data 4's w\x91ap / o\x9ftf records
   // were previously missed by a too-loose resource.map scan).
   for (std::uint32_t type : {0x73689570U, 0x6f9f7466U, 0x77916170U,
-                             0x73709a62U, 0x73d87374U}) {
+                             0x73709a62U, 0x73d87374U, 0x679a7674U}) {
     const auto first = NovaResource_Load(type, 0x80);
     CHECK(first.has_value());
   }
@@ -169,6 +171,81 @@ TEST_CASE("nova control bit expression evaluator", "[scenario][control]") {
   CHECK(NovaControlExpression_Evaluate("[b1 b2] = 2", s2));
   CHECK_FALSE(NovaControlExpression_Evaluate("[b1 b3] = 2", s2));
   CHECK(NovaControlExpression_Evaluate("[b1 b2] > 0", s2));
+}
+
+TEST_CASE("government table loads and decodes the Federation class",
+          "[scenario][data]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  // The federal government (id 0x80) is the canonical / starter faction; these
+  // values were verified from the raw g\x9avt payload in Nova Data 1, pinning
+  // both the map resolution and the DecodeGovernment offsets.
+  const Government *f = data.Government(0x80);
+  REQUIRE(f != nullptr);
+  REQUIRE(f->present);
+  CHECK(f->name == "Federation");
+  CHECK(f->comm_name == "Federation");
+  CHECK(f->medium_name == "Federation");
+  // voice_type_code 1 (raw) -> mode -1.
+  CHECK(f->voice_type_code == 1);
+  CHECK(f->voice_type_mode == -1);
+  CHECK(f->flags_primary == 0xe2b0U);
+  CHECK(f->ai_skill_percent == -32768);
+  // classes/ally/enemy lists from payload +0x18/+0x20/+0x28.
+  CHECK(f->classes[0] == 1);
+  CHECK(f->classes[1] == -1);
+  CHECK(f->ally_classes == std::array<std::int16_t, 4>{0, 1, 12, 13});
+  CHECK(f->enemy_classes == std::array<std::int16_t, 4>{2, 10, 16, 9});
+  // Reputation penalties (payload +0x0a..+0x12).
+  CHECK(f->disable_penalty == 1);
+  CHECK(f->board_penalty == 1);
+  CHECK(f->kill_penalty == 2);
+  CHECK(f->shoot_penalty == 5);
+  CHECK(f->max_odds == 5);
+  // Skill fractions: pilot src 100 -> 1.0, combat src 200 -> 2.0.
+  CHECK(f->pilot_skill_scale == 1.0F);
+  CHECK(f->combat_rating_scale == 2.0F);
+  // Inherent jamming: jam[0] payload +0x06 = 0; jam[1..3] from +0x5c = 7/5/0.
+  CHECK(f->inherent_jam == std::array<std::int16_t, 4>{0, 7, 5, 0});
+  // Theme color from packed RGB24 at payload +0xa4 = 0x002c2caf.
+  CHECK(f->theme_red == 0x2c);
+  CHECK(f->theme_green == 0x2c);
+  CHECK(f->theme_blue == 0xaf);
+  // Interface/news picture ids resolve into the 0x80.. range.
+  CHECK(f->interface_id == 0x82);
+  CHECK(f->news_pic_id == 9001);
+}
+
+TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships", "[scenario][ships][brgr]") {
+  // The starter Shuttle is ship class id 0x80; its sh\x8an descriptor and the
+  // rl\x91D sheet it references live in the Nova Ships archives, which are now
+  // on the archive search path.
+  const auto payload =
+      NovaResource_Load(kShipVisualResourceType, static_cast<std::uint16_t>(0x80));
+  REQUIRE(payload.has_value());
+
+  const auto d = DecodeShipVisualDescriptor(*payload);
+  REQUIRE(d.has_value());
+  CHECK(d->base_image_id == 1000);   // Shuttle rl\x91D sheet
+  CHECK(d->base_mask_id == 1001);
+  CHECK(d->base_set_count == 3);     // 3 sets per rotation
+  CHECK(d->base_x_size == 24);
+  CHECK(d->base_y_size == 24);
+  CHECK(d->base_transparency == 0);
+  CHECK(d->frames_per_rotation == 36);
+  CHECK(d->sprite_behavior_flags == 0x0041);
+  CHECK(d->anim_delay == 0);
+  CHECK(d->weapon_decay == 0);   // no weapon-glow fade for the bare Shuttle
+
+  // The referenced 16-bit sheet must be decodable and hold base_set_count *
+  // frames_per_rotation frames (3 * 36 = 108) at the descriptor's dimensions.
+  const auto sheet = NovaResource_Load(kResourceTypeRleSheet16, d->base_image_id);
+  REQUIRE(sheet.has_value());
+  const auto decoded = RleSpriteSheet_Decode16(*sheet);
+  REQUIRE(decoded.has_value());
+  CHECK(decoded->width == 24);
+  CHECK(decoded->height == 24);
+  CHECK(decoded->frames.size() == 108);
 }
 
 } // namespace game

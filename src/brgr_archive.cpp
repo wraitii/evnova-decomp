@@ -249,12 +249,24 @@ ParseArchive(const std::filesystem::path &path) {
 // and systems (s\xd8st) in Nova Data 2; descriptions (d\x91sc) span several;
 // outfits (o\x9ftf) and weapons (w\x91ap) are in Nova Data 4. The remaining
 // Data archives are loaded so plugins/overrides resolve the same way the
-// original scans them; more are added as graphics/ships subsystems are
+// original scans them; more are added as graphics/ships subsystems as they are
 // reconstructed.
+//
+// The ship ship-animation descriptor (sh\x8an) and its 16-bit sprite sheets
+// (rl\x91D) live in the Nova Ships archives; they are needed so the flight
+// rendering path can draw a ship by heading (ShipClass_LoadShipClassVisual-
+// AndLaunchData reads sh\x8an BaseImageID -> rl\x91D).
 constexpr std::array kArchiveFileNames{
     "Nova Graphics 3.rez",
     "Nova Titles 1.rez",
     "Nova Sounds.rez",
+    "Nova Ships 1.rez",
+    "Nova Ships 2.rez",
+    "Nova Ships 3.rez",
+    "Nova Ships 4.rez",
+    "Nova Ships 5.rez",
+    "Nova Ships 6.rez",
+    "Nova Ships 7.rez",
     "Nova Data 1.rez",
     "Nova Data 2.rez",
     "Nova Data 3.rez",

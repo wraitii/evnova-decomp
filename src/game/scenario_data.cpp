@@ -249,6 +249,115 @@ namespace {
 }
 
 // ---------------------------------------------------------------------------
+// g\x9avt (Government / govmnt) decode
+// ---------------------------------------------------------------------------
+// Field offsets verified against Nova Data 1's government payloads and the
+// loader's government section (0x004bd3c0; loop reads the payload big-endian
+// and derives voice_type_mode, the fly-scaled skill fractions and the 8-bit
+// theme colors). Payload layout (payload offsets in parentheses):
+//   voice_type_code +0, flags_primary +2, scan_mask_short +4, jam1 +6,
+//   flee +8, disable_penalty +10, board +12, kill +14, shoot +16, max_odds
+//   +18, bribe +20, combat_rating_src +22, class1-4 +0x18, ally1-4 +0x20,
+//   enemy1-4 +0x28, pilot_skill_src +0x30, ai_skill +0x32, comm_name +0x34,
+//   name_table +0x44, scan_lo +0x54, scan_hi +0x58, jam2-4 +0x5c..+0x62,
+//   medium_name +0x64, theme_color RGB24 +0xa4, ship_color RGB24 +0xa8,
+//   interface_id +0xac, news_pic_id +0xae. The record name (resource.map, via
+//   ResourceData_ReadEntryMetadata + StripSubtitleSuffix) is the display name.
+[[nodiscard]] Government DecodeGovernment(std::span<const std::byte> bytes) {
+  Government g;
+
+  g.voice_type_code = ReadBeI16(bytes, 0x00);
+  // Recode the voice code by range (see loader 0x004bd3c0): 0..7 keep mode -1;
+  // 1000..1007 and 2000..2007 subtract the offset and set mode 1/0; any other
+  // value marks both fields -1.
+  const std::int16_t vtc = g.voice_type_code;
+  if (vtc >= 0 && vtc <= 7) {
+    g.voice_type_mode = -1;
+  } else if (vtc >= 1000 && vtc <= 1007) {
+    g.voice_type_code = vtc - 1000;
+    g.voice_type_mode = 1;
+  } else if (vtc >= 2000 && vtc <= 2007) {
+    g.voice_type_code = vtc - 2000;
+    g.voice_type_mode = 0;
+  } else {
+    g.voice_type_code = -1;
+    g.voice_type_mode = -1;
+  }
+
+  g.flags_primary = ReadBe16(bytes, 0x02);
+  g.scan_mask_short = ReadBe16(bytes, 0x04);
+  g.inherent_jam[0] = ReadBeI16(bytes, 0x06);
+  g.flee_shield_threshold = ReadBeI16(bytes, 0x08);
+  g.disable_penalty = ReadBeI16(bytes, 0x0a);
+  g.board_penalty = ReadBeI16(bytes, 0x0c);
+  g.kill_penalty = ReadBeI16(bytes, 0x0e);
+  g.shoot_penalty = ReadBeI16(bytes, 0x10);
+  g.max_odds = ReadBeI16(bytes, 0x12);
+  g.bribe_cost_percent = ReadBeI16(bytes, 0x14);
+
+  // combat_rating_scale = int16(payload +0x16) * 0.01; degenerate -> 0.01.
+  g.combat_rating_scale =
+      static_cast<float>(ReadBeI16(bytes, 0x16)) * 0.01F;
+  if (g.combat_rating_scale < 0.01F) {
+    g.combat_rating_scale = 0.01F;
+  }
+
+  for (std::size_t i = 0; i < 4; ++i) {
+    g.classes[i] = ReadBeI16(bytes, 0x18 + i * 2);
+    g.ally_classes[i] = ReadBeI16(bytes, 0x20 + i * 2);
+    g.enemy_classes[i] = ReadBeI16(bytes, 0x28 + i * 2);
+  }
+
+  // pilot_skill_scale = int16(payload +0x30) * 0.01; source < 1 -> 1.0.
+  const std::int16_t pilot_src = ReadBeI16(bytes, 0x30);
+  g.pilot_skill_scale = static_cast<float>(pilot_src) * 0.01F;
+  if (pilot_src < 1) {
+    g.pilot_skill_scale = 1.0F;
+  }
+  g.ai_skill_percent = ReadBeI16(bytes, 0x32);
+
+  g.comm_name = ReadCString(bytes, 0x34);
+  g.name = ReadCString(bytes, 0x44);
+  g.medium_name = ReadCString(bytes, 0x64);
+
+  g.scan_mask_lo = ReadBe32(bytes, 0x54);
+  g.scan_mask_hi = ReadBe32(bytes, 0x58);
+  // jam[1..3] from +0x5c, each clamped to [0,100].
+  for (std::size_t i = 1; i < 4; ++i) {
+    g.inherent_jam[i] = ReadBeI16(bytes, 0x5c + (i - 1) * 2);
+    if (g.inherent_jam[i] > 100) {
+      g.inherent_jam[i] = 100;
+    } else if (g.inherent_jam[i] < 0) {
+      g.inherent_jam[i] = 0;
+    }
+  }
+
+  // Theme/ship colors are packed RGB24 words at +0xa4/+0xa8. The loader
+  // spreads each byte into a 16-bit (<<8) field and mirrors the >>8 8-bit
+  // values; we carry the final 8-bit colors directly.
+  const std::uint32_t theme = ReadBe32(bytes, 0xa4);
+  g.theme_red = static_cast<std::uint8_t>((theme >> 16U) & 0xffU);
+  g.theme_green = static_cast<std::uint8_t>((theme >> 8U) & 0xffU);
+  g.theme_blue = static_cast<std::uint8_t>(theme & 0xffU);
+  const std::uint32_t ship = ReadBe32(bytes, 0xa8);
+  g.ship_red = static_cast<std::uint8_t>((ship >> 16U) & 0xffU);
+  g.ship_green = static_cast<std::uint8_t>((ship >> 8U) & 0xffU);
+  g.ship_blue = static_cast<std::uint8_t>(ship & 0xffU);
+
+  g.interface_id = ReadBeI16(bytes, 0xac);
+  if (g.interface_id < 0x80) {
+    g.interface_id = -1;
+  }
+  g.news_pic_id = ReadBeI16(bytes, 0xae);
+  if (g.news_pic_id < 0x80) {
+    g.news_pic_id = -1;
+  }
+
+  g.present = true;
+  return g;
+}
+
+// ---------------------------------------------------------------------------
 // s\xd8st (System / s\xffst) decode
 // ---------------------------------------------------------------------------
 // Header verified: xPos+0, yPos+2, Con1-16+0x04, NavDef1-16+0x24,
@@ -301,6 +410,10 @@ const System *ScenarioData::System(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < systems.size() ? &systems[index] : nullptr;
 }
+const Government *ScenarioData::Government(std::int16_t resource_id) const {
+  const auto index = static_cast<std::size_t>(resource_id) - 0x80;
+  return index < governments.size() ? &governments[index] : nullptr;
+}
 
 bool ScenarioData::LoadFromArchives() {
   // The original sizes these tables to the family maximum and zero-fills
@@ -311,12 +424,16 @@ bool ScenarioData::LoadFromArchives() {
   weapons.assign(0x100, {});
   stellars.assign(0x600, {});
   systems.assign(0x800, {});
+  // GovernmentDef table is capped at 0x100 entries by the original (loop bound
+  // sVar21 < 0x100); federal classes are indexed by government id minus 0x80.
+  governments.assign(0x100, {});
 
   std::size_t loaded_ships = 0;
   std::size_t loaded_weapons = 0;
   std::size_t loaded_outfits = 0;
   std::size_t loaded_stellars = 0;
   std::size_t loaded_systems = 0;
+  std::size_t loaded_governments = 0;
 
   for (std::int32_t id = 0x80; id <= 0x27f; ++id) {
     if (const auto res =
@@ -371,12 +488,24 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_systems;
     }
   }
+  for (std::int32_t id = 0x80; id <= 0x17f; ++id) {
+    if (const auto res =
+            NovaResource_LoadNamed(scenario::kGovernmentResourceType,
+                                   static_cast<std::uint16_t>(id))) {
+      game::Government gov = DecodeGovernment(res->bytes);
+      // The record name is authoritative for the display name; comm/medium
+      // name tables come from the numeric payload strings (DecodeGovernment).
+      gov.name = res->name;
+      governments[static_cast<std::size_t>(id) - 0x80] = std::move(gov);
+      ++loaded_governments;
+    }
+  }
 
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
-      "{} systems",
+      "{} systems, {} governments",
       loaded_ships, loaded_outfits, loaded_weapons, loaded_stellars,
-      loaded_systems);
+      loaded_systems, loaded_governments);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 
