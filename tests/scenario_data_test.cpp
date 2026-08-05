@@ -5,6 +5,8 @@
 
 #include <cmath>
 
+#include <vector>
+
 #include "brgr_archive.hpp"
 #include "rle_sprite_sheet.hpp"
 
@@ -285,6 +287,33 @@ TEST_CASE("stellar spin sprites resolve from Nova Graphics", "[scenario][stellar
   const game::Government *gov = data.Government(earth->government_id);
   REQUIRE(gov != nullptr);
   CHECK(gov->present);
+}
+
+// Kania (system 0x80) owns exactly Port Kane + the HG-Kania hypergate as its
+// space objects (System.nav_defs from payload +0x24). The flight renderer draws
+// only the current system's nav_defs stellars, so this pins that membership.
+TEST_CASE("system nav_defs identify the owned space stellars",
+          "[scenario][system]") {
+  game::ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const game::System *kania = data.System(0x80);
+  REQUIRE(kania != nullptr);
+  // Each nav_def >= 0x80 is an owned stellar resource id (other slots hold the
+  // -1 sentinel).
+  std::vector<std::int16_t> owned;
+  for (const auto nav : kania->nav_defs) {
+    if (nav >= 0x80) {
+      owned.push_back(nav);
+      REQUIRE(data.Stellar(nav) != nullptr);
+    }
+  }
+  REQUIRE(owned.size() == 2);
+  CHECK(owned[0] == 0x89);   // Port Kane
+  CHECK(owned[1] == 0x57c);  // HG-Kania hypergate
+  CHECK(data.Stellar(0x89)->name == "Port Kane");
+  CHECK(data.Stellar(0x89)->link_a_id == 34);  // spin 1034 planet sprite
+  // 1404 HG-Kania hypergate's alternate sprite set id is 1 (a hypergate icon).
+  CHECK(data.Stellar(0x57c)->link_a_id == 1);
 }
 
 } // namespace game

@@ -253,7 +253,12 @@ void ResetPlayerShipForNewGame(GameState &state) {
   // Ghidra 0x004b3350 Ship_ResetPlayerShipState: fresh position/velocity,
   // default class id, recomputed shield/armor/fuel, cleared targeting/travel/
   // mission/AI fields and debuffs.
-  state.player.pos_x = state.player.pos_y = 0.0F;
+  state.player.pos_x = 0.0F;
+  // Spawn just below the starting system's landing stellar (Port Kane at the
+  // origin) so the planet is visible ahead rather than under the ship. The
+  // original positions the ship adjacent to the planet it just left; the offset
+  // is provisional until the landing/launch placement is reconstructed.
+  state.player.pos_y = 60.0F;
   state.player.vel_x = state.player.vel_y = 0.0F;
   state.player.heading = 0.0F;
   state.player.speed = 0.0F;

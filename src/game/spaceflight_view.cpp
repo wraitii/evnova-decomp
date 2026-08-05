@@ -226,15 +226,17 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
   if (!sys) {
     return;
   }
-  for (std::size_t slot = 0; slot <= 0x100; ++slot) {
-    const auto *st =
-        state.scenario.Stellar(static_cast<std::int16_t>(slot + 0x80));
-    if (!st || st->name.empty()) {
+  // The game renders only the current system's owned space objects: the
+  // NavDef1-16 list (System.nav_defs, payload +0x24) holds the stellar resource
+  // ids that belong to this system (Kania owns Port Kane + the hypergate). Any
+  // other stellar in the global table belongs to a different system and must
+  // not be drawn here.
+  for (const auto nav : sys->nav_defs) {
+    if (nav < 0x80) {
       continue;
     }
-    // Skip the space ports / stations that the scenario leaves at (0,0) stacked
-    // on top of the landing zone: they would all pile at the camera centre.
-    if (st->pos_x == 0 && st->pos_y == 0) {
+    const auto *st = state.scenario.Stellar(nav);
+    if (!st || st->name.empty()) {
       continue;
     }
     const int cx =
