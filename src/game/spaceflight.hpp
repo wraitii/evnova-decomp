@@ -34,4 +34,10 @@ namespace game {
 // shell.
 void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state);
 
+// Reads the live flight controls (via SdlPlatform::PollFlightInput) and
+// integrates the player ship's heading/throttle into GameState.player so the
+// ship flies during flight. A lightweight momentum/turn model stands in for the
+// full Ship_HandlePlayerShipCore movement while the simulation is stubbed.
+extern void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state);
+
 } // namespace game

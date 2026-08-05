@@ -256,6 +256,10 @@ ParseArchive(const std::filesystem::path &path) {
 // (rl\x91D) live in the Nova Ships archives; they are needed so the flight
 // rendering path can draw a ship by heading (ShipClass_LoadShipClassVisual-
 // AndLaunchData reads sh\x8an BaseImageID -> rl\x91D).
+//  0x1F8 space color). The ship ship-animation descriptor (sh\x8an) and its
+//  16-bit sprite sheets (rl\x91D) live in the Nova Ships archives; the stellar
+//  (planet) spin sprites (sp\x9an ids 1000-1255 + their rl\x91D sheets) are in
+//  Nova Graphics 2; both are needed for the flight rendering path.
 constexpr std::array kArchiveFileNames{
     "Nova Graphics 3.rez",
     "Nova Titles 1.rez",
@@ -267,6 +271,8 @@ constexpr std::array kArchiveFileNames{
     "Nova Ships 5.rez",
     "Nova Ships 6.rez",
     "Nova Ships 7.rez",
+    "Nova Graphics 1.rez",
+    "Nova Graphics 2.rez",
     "Nova Data 1.rez",
     "Nova Data 2.rez",
     "Nova Data 3.rez",

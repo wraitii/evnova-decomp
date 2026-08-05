@@ -30,6 +30,17 @@ struct TextInput {
   char character = '\0'; // valid when key == TextKey::character
 };
 
+// Continuous flight-input snapshot polled once per frame from the live
+// keyboard state (not edge events, so holding a key steers continuously).
+// Mirrors the player-control channel the original reads through the primary
+// input driver in Frame_SpaceflightLoop scope 3 (Ship_HandlePlayerShipCore).
+struct FlightInput {
+  bool turn_left = false;   // left / 'a'
+  bool turn_right = false;  // right / 'd'
+  bool thrust = false;      // up / 'w' (accelerate toward heading)
+  bool brake = false;       // down / 's' (decelerate)
+};
+
 class SdlTexture {
 public:
   [[nodiscard]] static std::unique_ptr<SdlTexture>
@@ -63,6 +74,8 @@ public:
   // printable ASCII character (shifted key case). Quit still sets
   // quit_requested_.
   [[nodiscard]] std::optional<TextInput> PollTextEvent();
+  // Live keyboard-state flight control snapshot (held-key steering).
+  [[nodiscard]] FlightInput PollFlightInput();
   [[nodiscard]] bool quit_requested() const;
   [[nodiscard]] std::uint64_t ticks_ms() const;
   [[nodiscard]] SDL_FPoint mouse_position() const;

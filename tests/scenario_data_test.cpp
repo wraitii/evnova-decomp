@@ -248,4 +248,43 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships", "[scenario][ships][
   CHECK(decoded->frames.size() == 108);
 }
 
+// VERIFY the stellar (planet) graphic path end to end on the Kania system:
+// the starting system Earth planet has link_a_id 0 -> spin sp\x9an 1000 ->
+// rl\x91D 2000 (150x150), and its government id resolves to the Federation
+// (0x80).
+TEST_CASE("stellar spin sprites resolve from Nova Graphics", "[scenario][stellar]")
+{
+  // Nova Graphics 1/2 now on the archive path, so stellar spin ids 1000+ are
+  // reachable. The Kania Earth is system 0x80 stellar 0x80.
+  const auto spin = NovaResource_Load(kResourceTypeSprites, 1000);
+  REQUIRE(spin.has_value());
+  const auto def = NovaSpriteDefinition_Parse(*spin);
+  REQUIRE(def.has_value());
+  CHECK(def->sprites_resource_id == 2000);
+  CHECK(def->tiles_x == 1);
+  CHECK(def->tiles_y == 1);
+  const auto sheet = NovaResource_Load(kResourceTypeRleSheet16,
+                                       def->sprites_resource_id);
+  REQUIRE(sheet.has_value());
+  const auto decoded = RleSpriteSheet_Decode16(*sheet);
+  REQUIRE(decoded.has_value());
+  CHECK(decoded->width == 150);
+  CHECK(decoded->height == 150);
+
+  // The stellar decode surfaces link_a_id and the government id.
+  game::ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const game::Stellar *earth = data.Stellar(0x80);
+  REQUIRE(earth != nullptr);
+  CHECK(earth->link_a_id == 0);
+  CHECK(earth->government_id == 0x80);
+  CHECK(earth->pos_x == 0);
+  CHECK(earth->pos_y == 0);
+  // A governed stellar resolves to a real government whose theme colour tints
+  // its HUD/planet presentation.
+  const game::Government *gov = data.Government(earth->government_id);
+  REQUIRE(gov != nullptr);
+  CHECK(gov->present);
+}
+
 } // namespace game

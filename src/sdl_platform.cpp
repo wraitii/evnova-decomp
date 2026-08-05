@@ -113,6 +113,28 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
   return std::nullopt;
 }
 
+FlightInput SdlPlatform::PollFlightInput() {
+  // Drain queued events first so the window stays responsive and the keyboard
+  // state reflects the latest presses/releases. Then read the live key state
+  // for the flight controls (edge-agnostic, so holding a key steers).
+  SDL_Event event;
+  while (SDL_PollEvent(&event)) {
+    if (event.type == SDL_EVENT_QUIT) {
+      quit_requested_ = true;
+    }
+  }
+  const bool *const keys = SDL_GetKeyboardState(nullptr);
+  FlightInput input;
+  const auto pressed = [&](SDL_Scancode scancode) {
+    return keys[scancode] != 0;
+  };
+  input.turn_left = pressed(SDL_SCANCODE_LEFT) || pressed(SDL_SCANCODE_A);
+  input.turn_right = pressed(SDL_SCANCODE_RIGHT) || pressed(SDL_SCANCODE_D);
+  input.thrust = pressed(SDL_SCANCODE_UP) || pressed(SDL_SCANCODE_W);
+  input.brake = pressed(SDL_SCANCODE_DOWN) || pressed(SDL_SCANCODE_S);
+  return input;
+}
+
 std::optional<char> SdlPlatform::PollCommandEvent() {
   SDL_Event event;
   while (SDL_PollEvent(&event)) {

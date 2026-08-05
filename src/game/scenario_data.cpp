@@ -222,29 +222,35 @@ namespace {
 // ---------------------------------------------------------------------------
 // sp\x9ab (Stellar / sp\xf6b) decode
 // ---------------------------------------------------------------------------
-// The stellar is the planet/station space-object (Bible sp\xf6b). Header is
-// well verified: xPos+0, yPos+2, Type+4, Flags (32-bit)+6, Tribute+0x0a,
-// TechLevel+0x0c, SpecialTech1-8+0x0e. The loader then reads Govt / MinStatus /
-// CustPic/CustSnd / DefenseDude/DefCount / Flags2 / Anim/frame / hyperlinks /
-// Fee/Gravity/Weapon/Strength/DeadType/DeadTime/ExplodType from the tail of
-// the record; those tail offsets are only partially mapped (the Ghidra struct
-// StellarDef carries runtime field with conflicting names), so they stay as
-// defaults here and are marked provisional.
+// Offsets verified against Nova Data 2's stellar payloads and the loader's
+// stellar section (0x004bd3c0): xPos+0, yPos+2, link_a_id+4 (the primary spin
+// sprite-set id, id+1000 is the sp\x9an resource), travel_flags (32-bit)+6,
+// reputation_threshold+0x16, availability_flags+0x20, service_cost+0x234,
+// link_b_id+0x240. government_id+0x14 is rebased into the 0.. space and set
+// to -1 when < 0x80.
 [[nodiscard]] Stellar DecodeStellar(std::span<const std::byte> bytes) {
   Stellar st;
-  st.pos_x = ReadBeI16(bytes, 0x00);
-  st.pos_y = ReadBeI16(bytes, 0x02);
-  st.graphic_type = ReadBeI16(bytes, 0x04);
-  st.flags = ReadBe32(bytes, 0x06);
-  st.tribute = ReadBeI16(bytes, 0x0a);
-  st.tech_level = ReadBeI16(bytes, 0x0c);
-  for (std::size_t i = 0; i < st.special_tech.size(); ++i) {
-    st.special_tech[i] = ReadBeI16(bytes, 0x0e + i * 2);
+  st.pos_x = ReadBeI16(bytes, 0x00);       // xPos
+  st.pos_y = ReadBeI16(bytes, 0x02);       // yPos
+  st.link_a_id = ReadBeI16(bytes, 0x04);   // link_a_id (primary spin set)
+  if (st.link_a_id < 0 || st.link_a_id > 0xff) {
+    st.link_a_id = -1;
   }
-  // TODO(decomp): the stellar tail (Govt/MinStatus -> ExplodType, per the Bible
-  // sp\xf6b layout) is loaded by NovaData_LoadScenarioResourceTables but the
-  // payload offsets are not yet confirmed against the Ghidra StellarDef fields;
-  // government_id and the rest stay defaulted until that is pinned.
+  st.flags = ReadBe32(bytes, 0x06);         // travel_flags
+  st.government_id = ReadBeI16(bytes, 0x14); // Govt (resource id; <0x80 -> -1)
+  if (st.government_id < 0x80) {
+    st.government_id = -1;
+  }
+  st.min_status = ReadBeI16(bytes, 0x16);   // reputation_threshold
+  st.availability_flags = ReadBe16(bytes, 0x20); // availability_flags
+  if (bytes.size() >= 0x242) {
+    st.link_b_id = ReadBeI16(bytes, 0x240); // link_b_id (alternate spin set)
+    if (st.link_b_id < 0 || st.link_b_id > 0xff) {
+      st.link_b_id = -1;
+    }
+  } else {
+    st.link_b_id = -1;
+  }
   return st;
 }
 

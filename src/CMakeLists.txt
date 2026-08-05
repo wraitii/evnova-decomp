@@ -4,6 +4,7 @@ add_library(evnova_runtime
     game/new_pilot_flow.cpp
     game/pilot_file.cpp
     game/spaceflight.cpp
+    game/spaceflight_view.cpp
     game/scenario_data.cpp
     game/ship_visual.cpp
     log.cpp

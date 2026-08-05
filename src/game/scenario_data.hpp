@@ -226,15 +226,22 @@ struct Stellar {
 
   std::int16_t pos_x = 0;  // xPos
   std::int16_t pos_y = 0;  // yPos
-  std::int16_t graphic_type = 0; // Type
+  // link_a_id (+0x04): the primary spin sprite-set id for this body's graphic
+  // (the game loads spin resource id+1000 for its sprite; see Stellar_Update-
+  // StellarSprites). Bounded 0..255 by the loader.
+  std::int16_t link_a_id = 0;
+  // link_b_id (+0x240): alternate spin sprite-set id used when the body is in
+  // its non-active zone state. Bounded 0..255 (else -1) by the loader.
+  std::int16_t link_b_id = -1;
 
-  std::uint32_t flags = 0; // Flags (land/dock/trade, economy, etc.)
+  std::uint32_t flags = 0; // travel_flags (+0x06; land/dock/trade, economy...)
+  std::uint16_t availability_flags = 0; // availability_flags (+0x20)
   std::int32_t tribute = 0; // Tribute
   std::int16_t tech_level = 0; // TechLevel
   std::array<std::int16_t, 8> special_tech{}; // SpecialTech1-8
 
-  std::int16_t government_id = -1; // Govt
-  std::int16_t min_status = 0;    // MinStatus
+  std::int16_t government_id = -1; // Govt (+0x14; <0x80 -> -1)
+  std::int16_t min_status = 0;    // reputation_threshold (+0x16)
 
   std::int16_t cust_pict_id = -1; // CustPicID
   std::int16_t cust_snd_id = -1;  // CustSndID

@@ -4,9 +4,11 @@
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
 #include "intro_cinematic.hpp"
+#include "spaceflight_view.hpp"
 
 #include <SDL3/SDL.h>
 
+#include <cmath>
 #include <string>
 
 namespace game {
@@ -152,28 +154,16 @@ void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
   Stub_BeamHitQueue(state);
 }
 
-// Draw one in-game frame. The original renders the current-system starfield,
-// planets/stellars, the pilot's ship sprite and the full HUD chrome onto the
-// gameplay surface (Frame_RenderViewportBackground + SpriteWorld_RenderLayers
-// + NovaUi_RedrawGameplayViewportAndRadar). None of that is reconstructed, so
-// this is a recognized stand-in: a sparse deterministic starfield (the original
-// uses NovaEffects_QueuedAmbientStarParticles), a HUD frame with the pilot's
-// basics, and a "SIMULATION NOT RECONSTRUCTED" banner.
-void DrawInGameFrame(SdlPlatform &platform, const GameState &state) {
+// Draw one in-game frame. The starfield, stellar bodies and the pilot's ship
+// are handled by the SpaceflightView (gh.getId 0x00417600 scope 2 sprite-world
+// draw + Frame_RenderViewportBackground); the HUD chrome below is a recognised
+// stand-in (proximity-scan/radar panels not reconstructed). The world view is
+// centred on the player so the ship sits at the play-area centre.
+void DrawInGameFrame(SdlPlatform &platform, GameState &state,
+                     SpaceflightView &view) {
+  view.Draw(platform, state);
+
   SDL_Renderer *const renderer = platform.renderer();
-  SDL_SetRenderDrawColor(renderer, 0, 0, 6, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(renderer);
-
-  // Sparse deterministic starfield; the original uses a per-system ambient
-  // particle system (NovaEffects_QueuedAmbientStarParticles).
-  SDL_SetRenderDrawColor(renderer, 140, 190, 255, SDL_ALPHA_OPAQUE);
-  constexpr std::size_t kStarCount = 90;
-  for (std::size_t i = 0; i < kStarCount; ++i) {
-    const auto x = static_cast<float>((i * 61 + 13) % 640);
-    const auto y = static_cast<float>((i * 97 + 41) % 400);
-    SDL_RenderPoint(renderer, x, y);
-  }
-
   // HUD frame + debug readouts (placeholder).
   SDL_SetRenderDrawColor(renderer, 51, 113, 171, SDL_ALPHA_OPAQUE);
   const SDL_FRect outer{18.0F, 400.0F, 604.0F, 62.0F};
@@ -187,17 +177,37 @@ void DrawInGameFrame(SdlPlatform &platform, const GameState &state) {
       "   FUEL " + std::to_string(static_cast<int>(state.player.fuel_points)) +
       "   CR " + std::to_string(state.player.credits);
   SDL_RenderDebugText(renderer, 30.0F, 426.0F, hud.c_str());
+  const auto *sys = state.scenario.System(static_cast<std::int16_t>(
+      state.player.current_system_id + 0x80));
+  const std::string sysline =
+      std::string("SYSTEM ") +
+      (sys ? sys->name : "?") +
+      "  HDG " + std::to_string(static_cast<int>(
+                     state.player.heading * 180.0F / 3.14159F)) +
+      "  X " + std::to_string(static_cast<int>(state.player.pos_x)) +
+      "  Y " + std::to_string(static_cast<int>(state.player.pos_y));
+  SDL_RenderDebugText(renderer, 30.0F, 444.0F, sysline.c_str());
   SDL_SetRenderDrawColor(renderer, 240, 120, 90, SDL_ALPHA_OPAQUE);
-  SDL_RenderDebugText(renderer, 30.0F, 444.0F,
-                      "SPACEFLIGHT SIMULATION NOT RECONSTRUCTED  [ESC] menu");
+  SDL_RenderDebugText(renderer, 460.0F, 410.0F,
+                      "[ARROWS/WASD fly, ESC menu]");
 }
 
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
 // phase skeleton (setup + full first tick, then per-frame pre-draw/sim,
-// drawing, post-draw) and the run_full_tick freeze gate. All simulation is
-// yielded to NovaFrame_TickSystems's stubs.
+// drawing, post-draw) and the run_full_tick freeze gate. Simulation is still
+// yielded to NovaFrame_TickSystems's stubs, but the rendering is live: stellar
+// bodies, the parallax starfield and the player's rotating ship are drawn.
+// Integrates the player's heading/throttle from the live keyboard into the
+// PlayerShip. This is a lightweight stand-in for Ship_HandlePlayerShipCore's
+// movement: turn by a fixed rate per frame, accelerate toward the current
+// heading while thrust is held, apply a soft drag, and clamp speed.
+// TODO(decomp): replace these provisional turn/thrust/drag constants with the
+// ship-class-derived rates (base_turn_rate_deg, base_speed, accel) once the
+// movement sim is reconstructed.
 void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
                                bool &returning_to_menu) {
+  SpaceflightView view;
+
   // ---- Pre-loop setup -----------------------------------------------------
   // Ghidra: rebuilds the stellar radar panel, evaluates availability,
   // updates system/stellar display state, then runs a full TickSystems with
@@ -208,8 +218,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
   NovaLog::Todo("spaceflight pre-loop setup skipped: stellar radar panel, "
                 "availability evaluation and system/stellar display state not "
                 "reconstructed");
+  const bool ship_ready = view.EnsureShipSprite(platform, state);
+  (void)ship_ready;
   NovaFrame_TickSystems(state, /*run_full_tick=*/true);
-  DrawInGameFrame(platform, state);
+  DrawInGameFrame(platform, state, view);
   SDL_RenderPresent(platform.renderer());
 
   // ---- Main loop ----------------------------------------------------------
@@ -218,13 +230,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
   // The pause menu is not reconstructed, so Escape/'q' stand in for the
   // return-to-menu latch (documented divergence).
   while (!platform.quit_requested() && !returning_to_menu) {
+    // Player control (heading/throttle) is read here so the ship flies while
+    // the simulation stubs do not. Movement integrates into PlayerShip.
+    NovaPlayer_UpdateFromInput(platform, state);
+
     // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
     // cursor update.
     NovaFrame_TickSystems(state, /*run_full_tick=*/true);
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
-    DrawInGameFrame(platform, state);
+    DrawInGameFrame(platform, state, view);
     SDL_RenderPresent(platform.renderer());
 
     // Ghidra scope 3 "post-draw tasks": pump the primary mouse command; when
@@ -244,6 +260,52 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform, GameState &state,
 }
 
 } // namespace
+
+// Integrates the player's heading/throttle from the live keyboard into the
+// PlayerShip. This is a lightweight stand-in for Ship_HandlePlayerShipCore's
+// movement: turn by a fixed rate per frame, accelerate toward the current
+// heading while thrust is held, apply a soft drag, and clamp speed.
+// TODO(decomp): replace these provisional turn/thrust/drag constants with the
+// ship-class-derived rates (base_turn_rate_deg, base_speed, accel) once the
+// movement sim is reconstructed.
+void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state) {
+  const FlightInput input = platform.PollFlightInput();
+  PlayerShip &p = state.player;
+
+  constexpr float kTurnRate = 0.09F;    // rad/frame (~5.2 deg)
+  constexpr float kThrustAccel = 0.35F; // px/frame^2
+  constexpr float kMaxSpeed = 7.0F;     // px/frame
+  constexpr float kDrag = 0.985F;       // per-frame velocity damping
+
+  if (input.turn_left) {
+    p.heading -= kTurnRate;
+  }
+  if (input.turn_right) {
+    p.heading += kTurnRate;
+  }
+  if (input.thrust) {
+    // Heading 0 points 'up' (screen -y).
+    p.vel_x += std::sin(p.heading) * kThrustAccel;
+    p.vel_y -= std::cos(p.heading) * kThrustAccel;
+  }
+  if (input.brake) {
+    // Brake: strong drag toward zero velocity.
+    p.vel_x *= 0.86F;
+    p.vel_y *= 0.86F;
+  }
+
+  p.vel_x *= kDrag;
+  p.vel_y *= kDrag;
+  const float speed = std::sqrt(p.vel_x * p.vel_x + p.vel_y * p.vel_y);
+  if (speed > kMaxSpeed) {
+    const float scale = kMaxSpeed / speed;
+    p.vel_x *= scale;
+    p.vel_y *= scale;
+  }
+  p.pos_x += p.vel_x;
+  p.pos_y += p.vel_y;
+  p.speed = speed;
+}
 
 void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state) {
   NovaLog::Info("entering spaceflight mode");
