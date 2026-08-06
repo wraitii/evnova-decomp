@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // BRGR container access is a reconstruction adapter, not a direct Ghidra
@@ -73,6 +74,11 @@ NovaResource_LoadNamed(std::uint32_t type_code, std::uint16_t resource_id);
 // game reads the c\x9alr style through this accessor rather than by id.
 [[nodiscard]] std::optional<std::vector<std::byte>>
 NovaResource_LoadNthOfType(std::uint32_t type_code, std::size_t ordinal);
+
+// Diagnostics: every distinct (type_code, resource_id) pair carried by the
+// loaded BRGR resource maps, in archive order. Used to confirm which resource
+// families the .rez containers expose (dialog/DLOG-DITL, PICT, sprites, ...).
+std::vector<std::pair<std::uint32_t, std::uint16_t>> NovaResource_AllKeys();
 
 // Resolves a file name inside the Nova Files data folder to an absolute path
 // on disk (used for streaming assets such as background music), searching the

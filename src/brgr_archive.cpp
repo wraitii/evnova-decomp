@@ -265,6 +265,9 @@ ParseArchive(const std::filesystem::path &path) {
 constexpr std::array kArchiveFileNames{
     "Nova Graphics 3.rez",
     "Nova Titles 1.rez",
+    "Nova Titles 2.rez",
+    "Nova Titles 3.rez",
+    "Nova Titles 4.rez",
     "Nova Sounds.rez",
     "Nova Ships 1.rez",
     "Nova Ships 2.rez",
@@ -349,6 +352,20 @@ public:
     return std::nullopt;
   }
 
+  // Diagnostics: every distinct (type_code, resource_id) pair across all
+  // archives, used to confirm which resource families the BRGR maps carry.
+  [[nodiscard]] std::vector<std::pair<std::uint32_t, std::uint16_t>>
+  AllKeys() {
+    EnsureLoaded();
+    std::vector<std::pair<std::uint32_t, std::uint16_t>> keys;
+    for (const auto &archive : archives_) {
+      for (const auto &record : archive.records) {
+        keys.emplace_back(record.type_code, record.resource_id);
+      }
+    }
+    return keys;
+  }
+
 private:
   [[nodiscard]] std::vector<std::byte>
   Region(const LoadedArchive &archive, const ResourceRecord &record) const {
@@ -401,6 +418,10 @@ std::optional<NovaResource> NovaResource_LoadNamed(std::uint32_t type_code,
 std::optional<std::vector<std::byte>>
 NovaResource_LoadNthOfType(std::uint32_t type_code, std::size_t ordinal) {
   return NovaResourceDb::Instance().LoadNthOfType(type_code, ordinal);
+}
+
+std::vector<std::pair<std::uint32_t, std::uint16_t>> NovaResource_AllKeys() {
+  return NovaResourceDb::Instance().AllKeys();
 }
 
 std::optional<std::filesystem::path>
