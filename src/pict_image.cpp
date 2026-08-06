@@ -154,20 +154,42 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   image.rgba_pixels.resize(width * height * 4);
   std::vector<std::uint8_t> row(row_bytes);
   std::size_t source = base + pixmap_size + source_and_destination_rects_size;
+
+  // The game's row decoder FUN_004fcc00 switches on the row byte count: when
+  // `rowBytes < 8` the packed row is stored RAW (no per-row length prefix and
+  // no packbits) and rowBytes bytes are copied straight into the output row
+  // (param_3 < 8 branch), advancing the source by rowBytes each row. Only
+  // wider rows (>= 8 bytes) carry the length-prefixed packbits payload. The
+  // 2px-wide three-state button middle tiles (rowBytes = 4) hit the raw path,
+  // so the always-packbits path below rejected them with a bogus "packbits
+  // decode failed" and the button bodies never rendered.
+  const bool raw_rows = row_bytes < 8;
   for (int y = 0; y < image.height; ++y) {
-    const auto row_length = ReadRowLength(pict_data, source, row_bytes);
-    if (!row_length) {
-      NovaLog::Todo("PICT row {}: bad length at {}", y, source);
-      return std::nullopt;
+    if (raw_rows) {
+      // Raw copy: no length prefix, no packbits. Guard the tail so a
+      // truncated resource is rejected rather than over-read.
+      if (source + row_bytes > pict_data.size()) {
+        NovaLog::Todo("PICT row {}: raw data truncated", y);
+        return std::nullopt;
+      }
+      for (std::size_t n = 0; n < row_bytes; ++n) {
+        row[n] = std::to_integer<std::uint8_t>(pict_data[source + n]);
+      }
+      source += row_bytes;
+    } else {
+      const auto row_length = ReadRowLength(pict_data, source, row_bytes);
+      if (!row_length) {
+        NovaLog::Todo("PICT row {}: bad length at {}", y, source);
+        return std::nullopt;
+      }
+      source += row_length->second;
+      const auto packed = pict_data.subspan(source, row_length->first);
+      if (!DecodePackBitsRow(packed, row, unit_size)) {
+        NovaLog::Todo("PICT row {}: packbits decode failed", y);
+        return std::nullopt;
+      }
+      source += row_length->first;
     }
-    source += row_length->second;
-    const auto packed =
-        pict_data.subspan(source, row_length->first);
-    if (!DecodePackBitsRow(packed, row, unit_size)) {
-      NovaLog::Todo("PICT row {}: packbits decode failed", y);
-      return std::nullopt;
-    }
-    source += row_length->first;
     for (std::size_t x = 0; x < width; ++x) {
       const auto destination = (static_cast<std::size_t>(y) * width + x) * 4;
       if (format == PixelFormat::kRgb555) {

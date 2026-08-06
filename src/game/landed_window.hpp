@@ -28,6 +28,12 @@
 // repair are handled as actual state mutations so the loop is exerciseable.
 
 #include <cstdint>
+#include <optional>
+#include <utility>
+
+#include <SDL3/SDL.h>
+
+#include <vector>
 
 #include "game_state.hpp"
 
@@ -35,21 +41,22 @@ class SdlPlatform;
 
 namespace game {
 
-// The service menu actions a docked player may pick, mirroring the ordering of
-// the original travel-destination services buttons (services window 0x47c8e0;
-// shipyard/buy-sell/bar stubs where out of scope).
+// The service menu actions a docked player may pick, mirroring the original
+// travel-destination services (the Spaceport screen: on the left Bar, Mission
+// BBS, Trade center, Repair; on the right Shipyard, Outfitter, Refuel, Leave).
+// The shipyard/buy-sell/bar stubs where out of scope are (mocked) in the MVP.
 enum class LandedService : std::uint8_t {
-  // Leave the dock and resume free flight over the stellar (the "get up and
-  // go / launch" head of the list).
+  // Leave the dock and resume free flight over the stellar (the "Leave"
+  // button at the bottom-right of the docked panel).
   kLaunch = 0,
   kRefuel,       // top up fuel toward the effective capacity
   kRepair,       // top up armor (and shields) toward effective maximums
-  kBuySellCargo, // (mocked) cargo trading
-  kOutfit,       // (mocked) change ship loadout
-  kShipyard,     // (mocked) buy/sell ships
-  kBar,          // (mocked) bar mini-game / local rumours
-  kStarmap,      // (mocked) system navigation map
-  kMissionBoard, // (mocked) mission computer
+  kBuySellCargo, // (mocked) the Trade center (commodity exchange)
+  kOutfit,       // (mocked) the Outfitter
+  kShipyard,     // (mocked) the Shipyard
+  kBar,          // (mocked) the Bar
+  kStarmap,      // (mocked) the Starmap (no on-screen slot; number-key only)
+  kMissionBoard, // (mocked) the Mission BBS
   kCount,
 };
 
@@ -62,6 +69,58 @@ enum class LandedExit : std::uint8_t {
   kQuit,
   kServiceComplete,
 };
+
+// ---- Testable (SDL-free) dialog-window layout adapter ---------------------
+// Small adapter that lays a dialog window (DLOG + DITL) out onto a logical
+// panel, mirroring how the original centres a dialog window on the display
+// (Dialog_CreateFromDlog). Used by the docked screen to drive its panels,
+// header band, and buttons from the real Nova.rez dialog data instead of
+// hardcoded geometry.
+
+// The role each laid-out DITL item plays on the docked screen.
+enum class DockedItemKind : std::uint8_t {
+  kButton,     // a 145x25 service button
+  kOuterPanel, // the large outer window panel
+  kInnerPanel, // the inner content panel
+  kTitleBand,  // the header band above the inner panel (holds the title)
+  kOrnament,   // other decorative / sub-window-frame rects
+};
+
+// One laid-out docked item: its on-screen rect (logical panel space).
+struct DockedItem {
+  DockedItemKind kind = DockedItemKind::kOrnament;
+  SDL_FRect rect = {0.0F, 0.0F, 0.0F, 0.0F};
+};
+
+// The laid-out docked screen: the on-screen dialog-window bounds plus every
+// DITL item mapped to panel space. `from_ditl` is false when the dialog
+// resources were unavailable and a fallback (buttons-only) layout was used.
+struct DockedLayout {
+  SDL_FRect window = {0.0F, 0.0F, 0.0F, 0.0F};
+  bool from_ditl = false;
+  std::vector<DockedItem> items;
+};
+
+// Loads the Spaceport dialog (DLOG 0x3e8 -> DITL 0x3e8) from Nova.rez and lays
+// every item onto the logical `panel`, centering the dialog window on it and
+// mapping item rects to panel space (screen = window_origin + dialog_rect).
+// Returns false and produces a button-only fallback layout when the dialog
+// resources cannot be decoded. Pure rect math; testable without a renderer.
+bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out);
+
+// Physical docked-button order matches the original Spaceport screen: LEFT
+// column (top-to-bottom) is Bar, Mission BBS, Trade center, Repair, and RIGHT
+// column is Shipyard, Outfitter, Refuel, Leave. `side` is 0 (left) or 1
+// (right); `row` is 0..3 top-to-bottom. The starmap service has no on-screen
+// slot (it stays reachable via the number keys). These pure lookups are shared
+// by the button builder and the keyboard navigation so they never drift.
+[[nodiscard]] LandedService NovaDialog_DockedServiceAt(std::size_t side,
+                                                       std::size_t row);
+
+// Inverse of NovaDialog_DockedServiceAt: the (side, row) grid position of an
+// on-screen docked service, or std::nullopt for a no-slot service (starmap).
+[[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>>
+NovaDialog_DockedGridOf(LandedService svc);
 
 // ---- Testable (SDL-free) landed state --------------------------------------
 // A docked session captures the destination stellar and the derived

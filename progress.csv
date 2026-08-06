@@ -1064,7 +1064,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004CECF0,FUN_004cecf0,,0%,
 0x004CEDE0,FUN_004cede0,,0%,
 0x004CEEC0,FUN_004ceec0,,0%,
-0x004CEF50,FUN_004cef50,,0%,
+0x004CEF50,Dialog_ParseItemList,src/brgr_archive.cpp,70%,DITL item parser reimplemented as NovaResource_LoadDialogItems: BE count, rect/type bytes, per-type tail skip, even align; validates the 8 docked Spaceport buttons
 0x004CF1C0,FUN_004cf1c0,,0%,
 0x004CF760,UiWindow_CreateFromDialogResource,,0%,
 0x004CF890,UiWindow_Destroy,,0%,
@@ -1669,7 +1669,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004FC570,FUN_004fc570,,0%,
 0x004FCA30,FUN_004fca30,,0%,
 0x004FCAC0,FUN_004fcac0,,0%,
-0x004FCC00,FUN_004fcc00,,0%,
+0x004FCC00,Pict_DecodePixmapRows,src/pict_image.cpp,30%,PICT row decoder reimplemented in Resource_LoadPictAsImage: packbits + raw-copy (rowBytes<8) paths + 1-byte/BE16 row length; depth/planar/masking/buffer mgmt out of scope
 0x004FD0A0,FUN_004fd0a0,,0%,
 0x004FDB60,FUN_004fdb60,,0%,
 0x004FDB90,FUN_004fdb90,,0%,
@@ -2945,7 +2945,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00872DC0,FUN_00872dc0,,0%,
 0x00872E7E,Settings_LoadUiScale,,0%,
 0x00873065,DrawContext_StoreScaledValue,,0%,
-0x008730A1,FUN_008730a1,,0%,
+0x008730A1,Dialog_CreateFromDlog,src/game/landed_window.cpp,30%,Reads the DLOG (window bounds + linked DITL id; reimplemented as NovaResource_LoadDialogDefinition) and centres the window on screen (reimplemented as NovaDialogWindow_Layout); ui-scale path not yet reimplemented
 0x00873187,FUN_00873187,,0%,
 0x008731F8,FUN_008731f8,,0%,
 0x00873231,FUN_00873231,,0%,

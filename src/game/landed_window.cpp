@@ -13,6 +13,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <string>
@@ -133,8 +135,6 @@ std::int32_t NovaLanded_Repair(GameState &state,
   return spend;
 }
 
-namespace {
-
 // ---------------------------------------------------------------------------
 // Window / service-button geometry.
 //
@@ -149,9 +149,12 @@ namespace {
 // 12), mirroring the real docked buttons.
 //
 // We reproduce that docked panel here: the backdrop fills the full 640x480
-// screen and the services are a 2-column x 4-row grid at the lower-left and
-// lower-right, shared between the draw pass and the mouse hit-test so a click
-// always lands on the button the text is drawn on.
+// screen and the window content (panels, title band, and the two-column x
+// 4-row service grid at the lower-left and lower-right) is laid out from the
+// real Spaceport DLOG/DITL 0x3e8 via NovaDialogWindow_Layout, so the draw pass
+// and the mouse hit-test share the same data-driven rects. The hardcoded
+// two-column grid remains only as a fallback when the dialog archive is
+// absent.
 
 namespace {
 
@@ -161,44 +164,176 @@ using PanelRect = SDL_FRect;
   return {0.0F, 0.0F, 640.0F, 480.0F};
 }
 
-// Service-button columns, mirroring DITL 0x3e8: each button is 145px wide, 25px
-// tall; the left column runs from x=3 and the right from x=471 on the 640px
-// docked panel, with four rows pitched ~41px apart starting near the bottom.
+// Fallback button columns (DITL-left-column values) used when the dialog
+// archive is absent, so the dock still renders.
 struct ServiceColumns {
   float left_x = 3.0F;
   float right_x = 471.0F;
   float width = 145.0F;
   float height = 25.0F;
   float row_pitch = 41.0F;
-  float row0_y = 333.0F; // first row top on the 640x480 panel
+  float row0_y = 333.0F;
 };
 
-// Builds the service buttons as the docked 2-column x 4-row layout: the first
-// four services (left column) then the next four (right column), like the
-// original docking screen's buttons. The grid has 8 slots; the DITL-0x3e8
-// docked panel uses exactly 8 service buttons (the extra mission-board service
-// stays selectable via the number keys but gets no on-screen slot).
-std::vector<ServiceButton> BuildServiceButtons(const PanelRect &panel) {
-  constexpr ServiceColumns kCols;
+} // namespace
+
+// Public adapter (#3): lays the Spaceport dialog (DLOG+ DITL 0x3e8) onto the
+// 640x480 logical panel, centering the dialog window on it and mapping every
+// DITL item to panel space (screen = window_origin + dialog_rect). This
+// replaces the previously hardcoded panel/title/status/button geometry with
+// geometry read straight from Nova.rez. Type definitions live in the header.
+// When the dialog resources are unavailable it falls back to a minimal
+// layout with just the buttons from the hardcoded two-column grid.
+bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
+  constexpr ServiceColumns kFallback;
   constexpr std::size_t kRows = 4;
-  const std::size_t count =
+  const std::size_t button_count =
       std::min<std::size_t>(static_cast<std::size_t>(LandedService::kCount),
-                            2U * kRows);
-  std::vector<ServiceButton> buttons;
-  buttons.reserve(count);
-  for (std::size_t i = 0; i < count; ++i) {
-    const std::size_t side = i >= kRows ? 1 : 0; // 0 = left, 1 = right
+                            kRows * 2U);
+
+  const auto def = NovaResource_LoadDialogDefinition(0x3e8);
+  const auto items = NovaResource_LoadDialogItems(0x3e8);
+  if (def && items) {
+    // Window size = DLOG bounds right-bottom minus left-top (618x517 for the
+    // Spaceport window); centered like Dialog_CreateFromDlog centers it, with
+    // the centered offset truncated toward zero to match the game's integer
+    // (display - windowSize)/2 arithmetic.
+    const float win_w = static_cast<float>(def->right - def->left);
+    const float win_h = static_cast<float>(def->bottom - def->top);
+    const auto center_trunc = [](float span) {
+      return std::trunc(span / 2.0F);
+    };
+    const float win_x = panel.x + center_trunc(panel.w - win_w);
+    const float win_y = panel.y + center_trunc(panel.h - win_h);
+    out.window = {win_x, win_y, win_w, win_h};
+    out.from_ditl = true;
+
+    for (const auto &item : *items) {
+      DockedItem d;
+      d.rect.x = win_x + static_cast<float>(item.left);
+      d.rect.y = win_y + static_cast<float>(item.top);
+      d.rect.w = static_cast<float>(item.right - item.left);
+      d.rect.h = static_cast<float>(item.bottom - item.top);
+      const int w = item.right - item.left;
+      const int h = item.bottom - item.top;
+      if (w == 145 && h == 25) {
+        d.kind = DockedItemKind::kButton;
+      } else if (w > 500 && h > 200) {
+        d.kind = DockedItemKind::kOuterPanel;
+      } else if (w > 250 && h > 150) {
+        d.kind = DockedItemKind::kInnerPanel;
+      } else if (w > 250 && h < 30) {
+        d.kind = DockedItemKind::kTitleBand;
+      } else {
+        d.kind = DockedItemKind::kOrnament;
+      }
+      out.items.push_back(d);
+    }
+    return true;
+  }
+  NovaLog::Todo("Spaceport DLOG/DITL 0x3e8 not usable; using hardcoded dock "
+                "grid layout");
+  // Minimal fallback: the eight buttons in the reference two-column grid.
+  out.from_ditl = false;
+  out.window = {panel.x, panel.y, 618.0F, 517.0F};
+  for (std::size_t i = 0; i < button_count; ++i) {
+    const std::size_t side = i >= kRows ? 1 : 0;
     const std::size_t row = i % kRows;
-    const float x = panel.x + (side == 0 ? kCols.left_x : kCols.right_x);
-    const float y = panel.y + kCols.row0_y +
-                    static_cast<float>(row) * kCols.row_pitch;
-    buttons.push_back(ServiceButton{{x, y, kCols.width, kCols.height},
-                                    static_cast<std::uint8_t>(i)});
+    DockedItem d;
+    d.kind = DockedItemKind::kButton;
+    d.rect.x = panel.x + (side == 0 ? kFallback.left_x : kFallback.right_x);
+    d.rect.y = panel.y + kFallback.row0_y +
+               static_cast<float>(row) * kFallback.row_pitch;
+    d.rect.w = kFallback.width;
+    d.rect.h = kFallback.height;
+    out.items.push_back(d);
+  }
+  return false;
+}
+
+constexpr std::size_t kDockedButtonRows = 4;
+
+// Real docked button order (top-to-bottom per column), mirroring the original
+// Spaceport screen: LEFT column sits Bar, Mission BBS, Trade center, Repair;
+// RIGHT column sits Shipyard, Outfitter, Refuel, Leave. The extra starmap
+// service has no on-screen slot (it is still reachable via the number keys).
+constexpr LandedService kLeftColumnServices[kDockedButtonRows] = {
+    LandedService::kBar,          // top
+    LandedService::kMissionBoard, // mission BBS
+    LandedService::kBuySellCargo, // trade center
+    LandedService::kRepair,       // bottom
+};
+constexpr LandedService kRightColumnServices[kDockedButtonRows] = {
+    LandedService::kShipyard, // top
+    LandedService::kOutfit,   // outfitter
+    LandedService::kRefuel,   //
+    LandedService::kLaunch,   // leave (bottom)
+};
+
+const LandedService *kColumnServices[2] = {kLeftColumnServices,
+                                           kRightColumnServices};
+
+// The service at a grid (column, row), mirroring BuildServiceButtons' slot
+// assignment so navigation and the DITL button placement stay in sync.
+LandedService NovaDialog_DockedServiceAt(std::size_t side, std::size_t row) {
+  return kColumnServices[side][row];
+}
+
+// Maps an on-screen docked service to its grid (column, row), or nullopt when
+// it has no on-screen slot (e.g. the starmap, reachable only via number keys).
+std::optional<std::pair<std::size_t, std::size_t>>
+NovaDialog_DockedGridOf(LandedService svc) {
+  for (std::size_t side = 0; side < 2; ++side) {
+    for (std::size_t row = 0; row < kDockedButtonRows; ++row) {
+      if (kColumnServices[side][row] == svc) {
+        return std::pair{side, row};
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+namespace {
+// Builds the service buttons from a laid-out dock: the DITL's eight 145x25
+// button rects split into left/right columns, each sorted top-to-bottom. Each
+// physical button is assigned the real service it represents (see the two
+// k*ColumnServices tables), so the label and dispatch match the original
+// Spaceport screen. `slot` carries the LandedService value (not a packed
+// column*4+row index), so the draw/hit-test/navigation resolve the same
+// service the number keys select.
+std::vector<ServiceButton> BuildServiceButtons(const DockedLayout &layout) {
+  std::vector<ServiceButton> buttons;
+  buttons.reserve(kDockedButtonRows * 2U);
+
+  // Collect the layout's button items into left/right columns by screen x,
+  // then sort each column top-to-bottom before assigning the per-slot service.
+  std::vector<SDL_FRect> cols[2];  // [0]=left, [1]=right
+  for (const auto &item : layout.items) {
+    if (item.kind != DockedItemKind::kButton) {
+      continue;
+    }
+    cols[item.rect.x < 400.0F ? 0U : 1U].push_back(item.rect);
+  }
+  for (std::size_t side = 0; side < 2; ++side) {
+    auto &col = cols[side];
+    std::sort(col.begin(), col.end(),
+              [](const SDL_FRect &a, const SDL_FRect &b) { return a.y < b.y; });
+    for (std::size_t row = 0; row < col.size(); ++row) {
+      if (row >= kDockedButtonRows) {
+        continue;  // only four on-screen rows per column
+      }
+      const LandedService svc =
+          (side == 0 ? kLeftColumnServices[row] : kRightColumnServices[row]);
+      buttons.push_back(ServiceButton{col[row],
+                                      static_cast<std::uint8_t>(svc)});
+    }
   }
   return buttons;
 }
 
 } // namespace
+
+namespace {
 
 // Human-readable service-row labels for the MVP menu. The original draws these
 // as PICT sub-window frames (Nova Graphics 3: 0x2135 Shipyard, 0x2136 Outfit,
@@ -208,15 +343,15 @@ std::vector<ServiceButton> BuildServiceButtons(const PanelRect &panel) {
 const char *ServiceLabel(LandedService t) {
   switch (t) {
   case LandedService::kLaunch:
-    return "Launch into space";
+    return "Leave";
   case LandedService::kRefuel:
     return "Refuel";
   case LandedService::kRepair:
     return "Repair";
   case LandedService::kBuySellCargo:
-    return "Buy/Sell cargo";
+    return "Trade center";
   case LandedService::kOutfit:
-    return "Outfitting";
+    return "Outfitter";
   case LandedService::kShipyard:
     return "Shipyard";
   case LandedService::kBar:
@@ -224,20 +359,18 @@ const char *ServiceLabel(LandedService t) {
   case LandedService::kStarmap:
     return "Starmap";
   case LandedService::kMissionBoard:
-    return "Mission computer";
+    return "Mission BBS";
   case LandedService::kCount:
     break;
   }
   return "";
 }
 
-// Draws the docked-screen backdrop + header + service list with the real screen
-// fonts: the destination title in Chicago (charcoal) and the status lines in
-// Geneva (the original's title = family 0/Chicago UI font, body = family 3/
-// Geneva). The backdrop PICT (0x2134) fills the whole 640x480 `panel`
-// (mirroring the docked screen, which draws the destination PICT across the
-// full window), the destination name is centred near the top, and the service-
-// button columns are laid out per DITL 0x3e8.
+// Draws the docked-screen backdrop + panels + header + service list with the
+// real screen fonts: the destination title in Chicago (charcoal) and the status
+// lines in Geneva. The backdrop PICT (0x2134) fills the whole 640x480 `panel`;
+// the panels, title band, and buttons are positioned from the laid-out DITL
+// items (`layout`) rather than hardcoded geometry.
 void DrawLandedMenu(SdlPlatform &platform,
                     NovaFontCache &font_cache,
                     const ServicesButtonArt &buttons,
@@ -245,6 +378,7 @@ void DrawLandedMenu(SdlPlatform &platform,
                     const LandedContext &ctx,
                     SDL_Texture *destination_art,
                     const SDL_FRect &panel,
+                    const DockedLayout &layout,
                     const std::vector<ServiceButton> &button_rects,
                     std::optional<std::uint8_t> hovered) {
   SDL_Renderer *renderer = platform.renderer();
@@ -260,24 +394,53 @@ void DrawLandedMenu(SdlPlatform &platform,
   const SDL_Color kTitle{202, 224, 255, 255};    // bright rows / highlight
   const SDL_Color kBody{128, 170, 210, 255};     // dim rows
   const SDL_Color kSelected{142, 209, 255, 255}; // selected row
+  const SDL_Color kPanel{16, 40, 72, 255};       // flat panel frame fill
+  const SDL_Color kPanelBorder{80, 140, 190, 255};
 
-  // Destination name in the window title font, centred across the top of the
-  // panel; the credits/fuel/hull status lines sit in the top-left corner
-  // (mirroring the docked screen's status readout).
+  // Draw the DITL panel/frame rects as flat frames (the real PICT sub-window
+  // frames 0x2135.. are out of scope, so a fill + border stands in).
+  SDL_FRect title_band = panel;
+  SDL_FRect status_panel = {0.0F, 0.0F, 0.0F, 0.0F};
+  for (const auto &item : layout.items) {
+    if (item.kind == DockedItemKind::kOuterPanel ||
+        item.kind == DockedItemKind::kInnerPanel) {
+      SDL_SetRenderDrawColor(renderer, kPanel.r, kPanel.g, kPanel.b,
+                             kPanel.a);
+      SDL_RenderFillRect(renderer, &item.rect);
+      SDL_SetRenderDrawColor(renderer, kPanelBorder.r, kPanelBorder.g,
+                             kPanelBorder.b, kPanelBorder.a);
+      SDL_RenderRect(renderer, &item.rect);
+      if (item.kind == DockedItemKind::kInnerPanel) {
+        status_panel = item.rect;
+      }
+    } else if (item.kind == DockedItemKind::kTitleBand) {
+      title_band = item.rect;
+    }
+  }
+
+  // Destination name centred in the DITL header band (Chicago/title font),
+  // falling back to a top-of-panel line if the band is unavailable.
   std::string title = st ? st->name : std::string("(unknown stellar)");
   title += " -- services";
+  const float band_cy = title_band.y + title_band.h / 2.0F;
   NovaText_DrawCentered(platform,
                         font_cache,
                         NovaFontFamily::kChicago,
                         18.0F,
                         kNovaFontStyleRegular,
                         kTitle,
-                        panel.x,
-                        panel.x + panel.w,
-                        panel.y + 32.0F,
+                        title_band.x,
+                        title_band.x + title_band.w,
+                        band_cy,
                         title);
-  const float body_x = panel.x + 12.0F;
-  float baseline = panel.y + 60.0F;
+
+  // Credits/fuel/hull status lines in the inner content panel (Geneva body
+  // font), or the panel top-left when no inner panel was laid out.
+  const bool have_status = status_panel.w > 0.0F && status_panel.h > 0.0F;
+  const float body_x = have_status ? status_panel.x + 12.0F
+                                   : panel.x + 12.0F;
+  float baseline =
+      have_status ? status_panel.y + 66.0F : panel.y + 60.0F;
 
   baseline += 24.0F;
   const std::string credits =
@@ -345,8 +508,11 @@ void DrawLandedMenu(SdlPlatform &platform,
                           ServiceLabel(static_cast<LandedService>(slot)));
   }
 
-  // Footer hint row in the body font, at the top of the panel beneath the
-  // title so it is never clipped off-screen.
+  // Footer hint row in the body font, just below the docked content (the
+  // window bottom when laid out; otherwise the top of the panel).
+  const float footer_y =
+      layout.from_ditl ? layout.window.y + layout.window.h - 20.0F
+                       : panel.y + 52.0F;
   NovaText_DrawCentered(platform,
                         font_cache,
                         NovaFontFamily::kGeneva,
@@ -355,7 +521,7 @@ void DrawLandedMenu(SdlPlatform &platform,
                         kBody,
                         panel.x + 300.0F,
                         panel.x + 530.0F,
-                        panel.y + 52.0F,
+                        footer_y,
                         "WASD move, Enter select, Q launch, Esc back");
 }
 
@@ -455,6 +621,12 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   }
   const SDL_FRect panel = FullScreenPanel();
 
+  // Lay out the docked screen from the real Spaceport DLOG/DITL 0x3e8
+  // (centered window + per-item screen rects). Falls back to a hardcoded
+  // grid when the dialog resources are unavailable.
+  DockedLayout layout;
+  NovaDialogWindow_Layout(panel, layout);
+
   // Load the docked buttons' real three-state strip art (normal 0x1d4c..,
   // pressed 0x1d4f.., grey 0x1d52..) and lay out their desk rects. If the
   // strips are unavailable the buttons still render as flat fills behind the
@@ -465,12 +637,12 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     NovaLog::Warn("service button art unavailable");
   }
   const std::vector<ServiceButton> button_rects =
-      BuildServiceButtons(panel);
+      BuildServiceButtons(layout);
 
   NovaLog::Todo(
-      "docked screen uses the DITL 0x3e8 two-column button layout in outline "
-      "only; the PICT sub-window frames (0x2135..) and the sub-window "
-      "modals are out of scope");
+      "docked screen geometry (panels, title band, buttons) is laid out from "
+      "the real DITL 0x3e8, but the PICT sub-window frames (0x2135..) and the "
+      "sub-window modals are out of scope");
 
   // Font subsystem init (SDL3_ttf) is refcounted and managed lazily by the
   // NovaFontCache itself (TTF_Init on first use, TTF_Quit in ~NovaFontCache),
@@ -493,26 +665,27 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
 
   bool entered_sub_screen = false;
 
-  // The docked services sit in a 2-column x 4-row grid (left column = services
-  // 0-3, right column = 4-7, top-to-bottom within each side). Up/Down move a
-  // row within the current column (wrapping), Left/Right cross to the other
-  // column at the same row, mirroring the docked screen's button columns.
-  // `kRows` must match the grid built by BuildServiceButtons.
-  constexpr int kRows = 4;
+  // The docked services sit in a 2-column x 4-row grid whose physical button
+  // order is the real Spaceport screen (left col: Bar, Mission BBS, Trade,
+  // Repair; right col: Shipyard, Outfitter, Refuel, Leave; see
+  // k*ColumnServices). Up/Down move a row within the current column
+  // (wrapping), Left/Right cross to the other column at the same row.
   auto step_row = [&](int row_delta) {
-    const int index = static_cast<int>(ctx.selection);
-    const int col = index / kRows;               // 0 = left, 1 = right
-    int row = (index % kRows + row_delta + kRows) % kRows;
-    ctx.selection = static_cast<LandedService>(col * kRows + row);
+    if (auto pos = NovaDialog_DockedGridOf(ctx.selection)) {
+      const int row = static_cast<int>(pos->second) + row_delta;
+      const std::size_t wrapped =
+          static_cast<std::size_t>((row + static_cast<int>(kDockedButtonRows)) %
+                                   static_cast<int>(kDockedButtonRows));
+      ctx.selection = NovaDialog_DockedServiceAt(pos->first, wrapped);
+    }
   };
   auto step_column = [&] {
     // Cross over to the other column at the same row (within the on-screen
     // slots).
-    const int index = static_cast<int>(ctx.selection);
-    const int col = index / kRows;
-    const int row = index % kRows;
-    ctx.selection =
-        static_cast<LandedService>((1 - col) * kRows + row);
+    if (auto pos = NovaDialog_DockedGridOf(ctx.selection)) {
+      ctx.selection =
+          NovaDialog_DockedServiceAt(1U - pos->first, pos->second);
+    }
   };
 
   while (!platform.quit_requested()) {
@@ -531,6 +704,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                     ctx,
                     destination_art ? destination_art->get() : nullptr,
                     panel,
+                    layout,
                     button_rects,
                     hovered);
     SDL_RenderPresent(platform.renderer());

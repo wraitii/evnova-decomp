@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -21,6 +22,94 @@ namespace {
 }
 
 } // namespace
+
+// The three-state button strips (0x1d4c..0x1d54) are nine PICTs: for each of
+// normal/pressed/grey a 13px left cap, a 2px-wide stretchable middle tile, and
+// a 13px right cap (NovaUi_InitThreeStateButtonArt, 0x004a2f50). The middle
+// tiles are only 2px wide so their PICT rows are rowBytes = 4, which the game's
+// row decoder FUN_004fcc00 stores RAW (the `param_3 < 8` branch) rather than
+// length-prefixed packbits. Regression: they must decode to 2x25, not fail.
+TEST_CASE("button strip middle tiles decode via the raw-row path") {
+  if (!MenuArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  // (state) -> PICT ids {left, middle, right}.
+  const std::array<std::array<std::uint16_t, 3>, 3> strips{{
+      {{0x1d4c, 0x1d4d, 0x1d4e}},
+      {{0x1d4f, 0x1d50, 0x1d51}},
+      {{0x1d52, 0x1d53, 0x1d54}},
+  }};
+  for (std::size_t state = 0; state < strips.size(); ++state) {
+    for (std::size_t piece = 0; piece < 3; ++piece) {
+      const std::uint16_t id = strips[state][piece];
+      const auto data = NovaResource_LoadPictData(id);
+      REQUIRE(data);
+      const auto img = Resource_LoadPictAsImage(*data);
+      REQUIRE(img);
+      // Caps are 13px wide, middle tiles 2px; all are 25px tall.
+      const std::size_t expect_w = (piece == 1) ? 2U : 13U;
+      CHECK(img->width == static_cast<int>(expect_w));
+      CHECK(img->height == 25);
+      CHECK(img->rgba_pixels.size() == expect_w * 25U * 4U);
+      // Middle tiles carry real non-flat button pixels (not a null fallback).
+      if (piece == 1) {
+        CHECK(std::ranges::any_of(img->rgba_pixels, [](std::uint8_t c) {
+          return c != 0;
+        }));
+      }
+    }
+  }
+}
+
+// The Spaceport DITL 0x3e8 carries the docked screen's controls. It decodes
+// to 14 items; the eight 145x25 service buttons form the 2-column x 4-row
+// dock (left column at x=3, right at x=471) that BuildServiceButtons places.
+// Regression: the parser must reproduce the real rects.
+TEST_CASE("Spaceport DITL 0x3e8 decodes the two-column service buttons") {
+  if (!MenuArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  const auto items = NovaResource_LoadDialogItems(0x3e8);
+  REQUIRE(items);
+  REQUIRE(items->size() == 15); // 14 real items + zero terminator
+  // The eight 145x25 buttons, keyed by expected left/top/right/bottom.
+  std::array<std::array<std::int16_t, 4>, 8> buttons{{
+      {{333, 3, 358, 148}},   // left col, row 0 (Launch)
+      {{374, 3, 399, 148}},   // left col, row 1 (Refuel)
+      {{414, 3, 439, 148}},   // left col, row 2 (Repair)
+      {{456, 3, 481, 148}},   // left col, row 3 (Buy/Sell)
+      {{333, 471, 358, 616}}, // right col, row 0 (Outfit)
+      {{375, 471, 400, 616}}, // right col, row 1 (Shipyard)
+      {{416, 471, 441, 616}}, // right col, row 2 (Bar)
+      {{456, 471, 481, 616}}, // right col, row 3 (Starmap)
+  }};
+  std::size_t found = 0;
+  std::array<bool, 8> seen{};
+  for (const auto &item : *items) {
+    const auto w = item.right - item.left;
+    const auto h = item.bottom - item.top;
+    if (w != 145 || h != 25) {
+      continue; // background/orament/panel rects, not a service button
+    }
+    // Find which expected slot this 145x25 rect matches (compare by shape,
+    // independent of the resource order in which the items are stored).
+    std::optional<std::size_t> slot;
+    for (std::size_t s = 0; s < buttons.size(); ++s) {
+      if (!seen[s] && buttons[s][0] == item.top && buttons[s][1] == item.left &&
+          buttons[s][2] == item.bottom && buttons[s][3] == item.right) {
+        slot = s;
+        break;
+      }
+    }
+    CHECK(slot.has_value());
+    if (slot) {
+      seen[*slot] = true;
+      CHECK(item.type == 0);
+      ++found;
+    }
+  }
+  CHECK(found == buttons.size());
+}
 
 TEST_CASE("main-menu shortcuts retain the original action mapping") {
   CHECK(NovaCommand_TranslateByInputMap('n') == GameModeAction::new_game);

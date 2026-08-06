@@ -193,3 +193,48 @@ NovaResource_LoadMainMenuBackdropData();
 // backdrop; its on-screen position comes from the c\x9alr offsets at +0xe0.
 [[nodiscard]] std::optional<std::vector<std::byte>>
 NovaResource_LoadMainMenuLogoData();
+
+// One DITL item as decoded by the dialog parser FUN_004cef50. `rect` is the
+// 4-coordinate item box in the dialog's own coordinate space; the ordering is
+// (top, left, bottom, right) and the DLOG window is centred on screen before
+// items are placed (FUN_008730a1). `type` is the low 7 bits of the type byte
+// (bit 7 is the enabled/hilite flag). `enabled` mirrors that high bit.
+struct NovaDialogItem {
+  std::int16_t top = 0;
+  std::int16_t left = 0;
+  std::int16_t bottom = 0;
+  std::int16_t right = 0;
+  std::uint8_t type = 0;
+  bool enabled = true;
+};
+
+// Ghidra: FUN_004cef50 (called by UiWindow_CreateFromDialogResource after it
+// loads the DITL id referenced by a DLOG). Parses the DITL payload into its
+// items, mirroring the game's byte arithmetic exactly: the big-endian item
+// count at offset 0 (processed count+1 to include the trailing terminator),
+// a per-item rect at +4..+11, the type byte at +12, then a variable tail that
+// the walker advances past per item type (pascal-string items skip their
+// title, icon/pict/control items skip a refcon short, plain items skip 14
+// bytes), always re-aligning to an even offset. Returns nullopt when the
+// resource is absent or a walk goes out of bounds.
+[[nodiscard]] std::optional<std::vector<NovaDialogItem>>
+NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id);
+
+// A DLOG (dialog declaration) as read by Dialog_CreateFromDlog
+// (FUN_008730a1). `bounds_*` is the window box in the DLOG's own coordinate
+// space (its right-bottom minus left-top gives the window size);
+// `dialog_item_list_id` is the DITL id linked at byte offset 18 that the
+// dialog engine loads and parses for the window's items.
+struct NovaDialogDefinition {
+  std::int16_t top = 0;
+  std::int16_t left = 0;
+  std::int16_t bottom = 0;
+  std::int16_t right = 0;
+  std::uint16_t dialog_item_list_id = 0;
+};
+
+// Ghidra: FUN_004ce250(0x444c4f47) + Dialog_CreateFromDlog. Loads a DLOG
+// (window declaration) resource: its BE bounds shorts at offsets 0..7 give the
+// window size and the DITL id at offset 18. Returns nullopt when absent.
+[[nodiscard]] std::optional<NovaDialogDefinition>
+NovaResource_LoadDialogDefinition(std::uint16_t dialog_id);

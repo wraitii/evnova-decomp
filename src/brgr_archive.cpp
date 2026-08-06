@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -752,6 +753,114 @@ std::optional<std::vector<std::byte>> NovaResource_LoadMainMenuBackdropData() {
 
 std::optional<std::vector<std::byte>> NovaResource_LoadMainMenuLogoData() {
   return NovaResource_LoadPictData(0x1f4a);
+}
+
+namespace {
+
+// Big-endian 16-bit read helper for DITL field parsing.
+[[nodiscard]] std::uint16_t DialogReadBe16(std::span<const std::byte> data,
+                                            std::size_t offset) {
+  return std::to_integer<std::uint16_t>(data[offset]) << 8U |
+         std::to_integer<std::uint16_t>(data[offset + 1]);
+}
+
+} // namespace
+
+std::optional<std::vector<NovaDialogItem>>
+NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
+  // The DITL payload is the raw resource (FUN_004cef50 receives the same via
+  // *handle). Its first big-endian short is the item count; the parser then
+  // walks count+1 entries (the trailing entry is a zero-value terminator).
+  const auto data =
+      NovaResource_Load(kResourceTypeDialogItemList, dialog_item_list_id);
+  if (!data) {
+    NovaLog::Todo("DITL 0x{:04x} could not be located", dialog_item_list_id);
+    return std::nullopt;
+  }
+  const std::size_t size = data->size();
+  if (size < 2) {
+    return std::nullopt;
+  }
+  const std::size_t count = DialogReadBe16(*data, 0);
+
+  std::vector<NovaDialogItem> items;
+  // First item follows the 2-byte count field.
+  std::size_t pos = 2;
+  for (std::size_t entry = 0; entry <= count; ++entry) {
+    // Faithful bounds check: the item header (rect + type) is 14 bytes
+    // (FUN_004cef50 reads through +0xd).
+    if (pos + 14 > size) {
+      NovaLog::Todo("DITL 0x{:04x}: item {} at {} out of bounds ({})",
+                    dialog_item_list_id, entry, pos, size);
+      return std::nullopt;
+    }
+    NovaDialogItem item;
+    // Rect is two BE shorts ordered (top, left, bottom, right)
+    // at item+4..+11; the type byte (bit 7 = enabled) at item+12.
+    item.top = static_cast<std::int16_t>(DialogReadBe16(*data, pos + 4));
+    item.left = static_cast<std::int16_t>(DialogReadBe16(*data, pos + 6));
+    item.bottom = static_cast<std::int16_t>(DialogReadBe16(*data, pos + 8));
+    item.right = static_cast<std::int16_t>(DialogReadBe16(*data, pos + 10));
+    const auto type_byte = std::to_integer<std::uint8_t>((*data)[pos + 12]);
+    item.enabled = (type_byte & 0x80U) != 0;
+    item.type = type_byte & 0x7fU;
+    items.push_back(item);
+
+    // Advance past the item's variable tail, mirroring FUN_004cef50:
+    //  - text-like types (4,5,6,8,0x10) carry a pascal string starting at
+    //    +13; skip its length byte + characters.
+    //  - icon/pict/control types (7,0x20,0x40) carry an extra refcon short.
+    //  - everything else (buttons/plain) skips a 14-byte fixed record.
+    std::size_t next;
+    switch (item.type) {
+    case 4:
+    case 5:
+    case 6:
+    case 8:
+    case 0x10: {
+      const std::size_t title_len =
+          static_cast<std::size_t>(std::to_integer<std::uint8_t>(
+              (*data)[pos + 13]));
+      next = pos + 13 + title_len + 1;
+      break;
+    }
+    case 7:
+    case 0x20:
+    case 0x40:
+      next = pos + 16; // +8 ushorts
+      break;
+    default:
+      next = pos + 14; // +7 ushorts
+      break;
+    }
+    // Re-align to an even offset before the next item.
+    pos = next & ~std::size_t{1};
+    if ((next & std::size_t{1}) != 0) {
+      pos = next + 1;
+    }
+  }
+  return items;
+}
+
+std::optional<NovaDialogDefinition>
+NovaResource_LoadDialogDefinition(std::uint16_t dialog_id) {
+  const auto data = NovaResource_Load(kResourceTypeDialog, dialog_id);
+  if (!data) {
+    NovaLog::Todo("DLOG 0x{:04x} could not be located", dialog_id);
+    return std::nullopt;
+  }
+  // The DLOG is at least 20 bytes: bounds (off 0..7), procID/flags
+  // (off 8..17) and the linked DITL id (off 18..19).
+  if (data->size() < 20) {
+    return std::nullopt;
+  }
+  NovaDialogDefinition def;
+  def.top = static_cast<std::int16_t>(DialogReadBe16(*data, 0));
+  def.left = static_cast<std::int16_t>(DialogReadBe16(*data, 2));
+  def.bottom = static_cast<std::int16_t>(DialogReadBe16(*data, 4));
+  def.right = static_cast<std::int16_t>(DialogReadBe16(*data, 6));
+  def.dialog_item_list_id = DialogReadBe16(*data, 18);
+  return def;
 }
 
 std::optional<NovaCharacterIntro> NovaResource_LoadCharacterIntro() {
