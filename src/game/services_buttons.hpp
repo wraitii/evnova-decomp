@@ -4,17 +4,27 @@
 // travel/boarding modal windows, mirroring NovaUi_InitThreeStateButtonArt
 // (0x004a2f50) + NovaUi_DrawThreeStateButton (0x004a3340).
 //
-// The original pre-composites the six PICT button slices -- three left-edge
-// tiles (ids 0x1d4c top, 0x1d4f mid, 0x1d52 bottom) and three right-edge
-// tiles (0x1d4e, 0x1d51, 0x1d54) -- for each of the normal (0x1d4c..) and
-// hover (0x1db0..) states, plus a disabled fallback, and draws a button by
-// tiling those edges around the (empty) middle and centering the label text.
-// This module reconstructs that on SDL: it loads the real slices as textures,
-// renders a three-state button body into a target rect, and leaves the label
-// glyph to the caller (the original draws the label via the shared text
-// engine). Missing slices (the middle column / disabled variants) fall back to
-// a solid fill matching the window backdrop, exactly as the game does with a
-// 0xc x 0x18 solid rect.
+// The button is a 3-piece horizontal strip: a fixed left cap (13px), a 2px-wide
+// middle tile that stretches horizontally to fill the body, and a fixed right
+// cap (13px), all 25px tall. Each of the three visual states has its own strip:
+//
+//    state   PICT ids (left, middle, right)   resource-map display name
+//    normal  0x1d4c, 0x1d4d, 0x1d4e          "Button Left/Middle/Right Bright"
+//    pressed 0x1d4f, 0x1d50, 0x1d51          "click left/middle/right"
+//    grey    0x1d52, 0x1d53, 0x1d54          "grey left/middle/right"
+//
+//  0x1d4c..0x1d54 and the mask set 0x1db0.. come straight from Nova Graphics
+//  3.rez and the nine consecutive PICT loads in NovaUi_InitThreeStateButtonArt
+//  (0x1d4c + 0..8). The down/disabled variant ids are *not* vertical slices of
+//  one button: the earlier reconstruction misread 0x1d4f ("click left") and
+//  0x1d52 ("grey left") as the middle/bottom of a 3-row edge column, which
+//  tiled parts of three different states into a single button. The game instead
+//  selects one whole strip via NovaUi_DrawThreeStateButton's state index
+//  (param_4/param_5: 0,0 -> normal; 0,!0 -> pressed; !0 -> grey) and stretches
+//  that state's 2px middle across the body. This module loads the real strips,
+//  draws the body by left cap + stretched middle + right cap, and leaves the
+//  label glyph to the caller. Missing strips fall back to a solid fill matching
+//  the window backdrop, as the game does with its 0xc x 0x18 solid rect.
 
 #include <SDL3/SDL.h>
 
@@ -28,8 +38,8 @@
 namespace game {
 
 // A three-state button body. States follow the game's DrawThreeStateButton
-// param_4/param_5 conventions: kNormal (idle), kHover (mouse over / focused),
-// kDisabled. kPressed is treated as kHover by the original when not disabled.
+// param_4/param_5 conventions: kNormal (idle), kHover (mouse over / focused;
+// uses the "click"/pressed art), kDisabled (uses the "grey" art).
 enum class ButtonState : std::uint8_t { kNormal, kHover, kDisabled };
 
 // Loads and caches the three-state button edge slices. Kept on a per-window
@@ -43,33 +53,36 @@ public:
   ServicesButtonArt(const ServicesButtonArt &) = delete;
   ServicesButtonArt &operator=(const ServicesButtonArt &) = delete;
 
-  // Loads the six normal (0x1d4c..) and six hover (0x1db0..) edge PICTs into
-  // textures. Slices that fail to decode (or are absent) become a solid fill
-  // so the button still renders. Returns true when at least the normal edges
-  // are usable.
+  // Loads the three strips' PICTs into textures: normal (0x1d4c..0x1d4e),
+  // pressed/hover (0x1d4f..0x1d51) and grey/disabled (0x1d52..0x1d54), each
+  // with its left 13px cap, 2px middle tile and right 13px cap. Pieces that
+  // fail to decode (or are absent) become a solid fill so the button still
+  // renders. Returns true when at least the normal strip is usable.
   [[nodiscard]] bool Initialize(SdlPlatform &platform);
 
   // Draws a three-state button body into `rect` (logical 640x480 space).
-  // `state` picks normal/hover/disabled edge art. The label is drawn by the
-  // caller afterwards via the screen-font text engine so it stays selectable/
-  // styled independently.
+  // `state` picks normal/hover/disabled strip art. The body is drawn as the
+  // left cap, the 2px middle tile stretched across the remaining width, and
+  // the right cap (native 25px corner height). The label is drawn by the
+  // caller afterwards via the screen-font text engine.
   void Draw(SdlPlatform &platform,
             const SDL_FRect &rect,
             ButtonState state) const;
 
   [[nodiscard]] bool usable() const { return usable_; }
 
-  // Internal: the three vertical edge segments (0=top, 1=middle, 2=bottom) for
-  // each of the left/right edges. Middle segments stretch between the fixed
-  // corners; a null texture means "fill with the backdrop".
-  struct EdgeTextures {
-    std::unique_ptr<SdlTexture> left[3];
-    std::unique_ptr<SdlTexture> right[3];
+  // The three horizontal pieces (0=left cap, 1=middle tile, 2=right cap) of one
+  // button strip. A null texture means "fill with the backdrop".
+  struct StripPieces {
+    std::unique_ptr<SdlTexture> left;
+    std::unique_ptr<SdlTexture> middle;
+    std::unique_ptr<SdlTexture> right;
   };
 
 private:
-  EdgeTextures normal_;
-  EdgeTextures hover_;
+  StripPieces normal_;
+  StripPieces pressed_;
+  StripPieces grey_;
   bool usable_ = false;
 };
 

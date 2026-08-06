@@ -19,7 +19,8 @@ struct PictImage {
 // fun FUN_004fcc00). Row lengths and packbits follow the game's algorithm
 // (1-byte length for narrow <= 0xfa rows, else BE16; unit = 2 for 16-bit,
 // 1 otherwise). The destination-art PICTs (0x2137/0x2138), the three-state
-// button slices (0x1d4c+/0x1db0+) and the refuel-activity icons all load
+// button strips (0x1d4c..0x1d54 + masks 0x1db0..) and the refuel-activity icons
+// all load
 // through it.
 [[nodiscard]] std::optional<PictImage>
 Resource_LoadPictAsImage(std::span<const std::byte> pict_data);

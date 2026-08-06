@@ -453,9 +453,10 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   }
   const SDL_FRect panel = FullScreenPanel();
 
-  // Load the docked buttons' real three-state edge art (normal 0x1d4c and
-  // hover 0x1db0 slice sets) and lay out their desk rects. If the slices are
-  // unavailable the buttons still render as flat fills behind the labels.
+  // Load the docked buttons' real three-state strip art (normal 0x1d4c..,
+  // pressed 0x1d4f.., grey 0x1d52..) and lay out their desk rects. If the
+  // strips are unavailable the buttons still render as flat fills behind the
+  // labels.
   ServicesButtonArt button_art;
   const bool have_buttons = button_art.Initialize(platform);
   if (!have_buttons) {

@@ -16,58 +16,55 @@ ServicesButtonArt::~ServicesButtonArt() = default;
 
 namespace {
 
-// The six live edge slices for one state, in (left/right, row) order matching
-// how NovaUi_InitThreeStateButtonArt lays out slices 0..8 in a 3x3 grid where
-// only the left and right columns carry tiles:
-//   left  row0 = 0x1d4c, row1 = 0x1d4f, row2 = 0x1d52
-//   right row0 = 0x1d4e, row1 = 0x1d51, row2 = 0x1d54
-// The hover/disabled source set begins at 0x1db0 with the same row offsets.
-constexpr std::uint16_t kNormalEdgeStart = 0x1d4c;
-constexpr std::uint16_t kHoverEdgeStart = 0x1db0;
+// The three button strips, in the same order NovaUi_InitThreeStateButtonArt
+// (0x004a2f50) loads them: nine consecutive PICTs from 0x1d4c (normal left) to
+// 0x1d54 (grey right), i.e. 0x1d4c + state*3 + piece:
+//   normal  left/middle/right = 0x1d4c, 0x1d4d, 0x1d4e  ("Button ... Bright")
+//   pressed left/middle/right = 0x1d4f, 0x1d50, 0x1d51  ("click ...")
+//   grey    left/middle/right = 0x1d52, 0x1d53, 0x1d54  ("grey ...")
+constexpr std::uint16_t kStripBase = 0x1d4c;
+constexpr std::uint16_t kPiecesPerStrip = 3; // left, middle, right
 
-void LoadEdgeSetImpl(SdlPlatform &platform,
-                 std::uint16_t base_id,
-                 ServicesButtonArt::EdgeTextures &out,
-                 bool &any_loaded) {
-  static constexpr std::uint16_t kLeftOffsets[3] = {0x0000, 0x0003, 0x0006};
-  static constexpr std::uint16_t kRightOffsets[3] = {0x0002, 0x0005, 0x0008};
-  for (int row = 0; row < 3; ++row) {
-    for (int edge = 0; edge < 2; ++edge) {
-      const std::uint16_t id =
-          static_cast<std::uint16_t>(
-              base_id + (edge == 0 ? kLeftOffsets[row] : kRightOffsets[row]));
-      auto &slot = edge == 0 ? out.left[row] : out.right[row];
-      if (const auto data = NovaResource_LoadPictData(id)) {
-        if (const auto pict = Resource_LoadPictAsImage(*data)) {
-          slot = SdlTexture::Create(platform.renderer(),
-                                    pict->width,
-                                    pict->height,
-                                    pict->rgba_pixels);
-          if (slot) {
-            any_loaded = true;
-            continue;
-          }
-          NovaLog::Error("button slice 0x{:04x} decoded but upload failed", id);
-        } else {
-          NovaLog::Todo("button slice PICT 0x{:04x} failed to decode", id);
+// Loads one strip's three pieces (left cap, stretchable middle tile, right
+// cap) from Nova Graphics 3 PICTs `base`, ... `base+2`.
+void LoadStripImpl(SdlPlatform &platform,
+                   std::uint16_t base,
+                   ServicesButtonArt::StripPieces &out,
+                   bool &any_loaded) {
+  std::unique_ptr<SdlTexture> *slots[3] = {&out.left, &out.middle, &out.right};
+  for (std::size_t piece = 0; piece < kPiecesPerStrip; ++piece) {
+    const std::uint16_t id = static_cast<std::uint16_t>(base + piece);
+    auto &slot = *slots[piece];
+    if (const auto data = NovaResource_LoadPictData(id)) {
+      if (const auto pict = Resource_LoadPictAsImage(*data)) {
+        slot = SdlTexture::Create(platform.renderer(),
+                                  pict->width,
+                                  pict->height,
+                                  pict->rgba_pixels);
+        if (slot) {
+          any_loaded = true;
+          continue;
         }
+        NovaLog::Error("button strip piece 0x{:04x} decoded but upload failed",
+                       id);
+      } else {
+        NovaLog::Todo("button strip PICT 0x{:04x} failed to decode", id);
       }
-      // Missing/undecodable slice -> leave slot null; Draw() fills it with the
-      // window backdrop so the button still renders, matching the game's
-      // solid 0xc x 0x18 fallback rect.
-      slot.reset();
     }
+    // Missing/undecodable piece -> leave slot null; Draw() fills it with the
+    // window backdrop so the button still renders.
+    slot.reset();
   }
 }
 
-// Draws one edge segment into the target: if the source slice is present it is
-// drawn at its native width across a vertically-stretched band (the middle
-// segment stretches between the fixed corners); otherwise the band is filled
-// with `fill` (the window backdrop colour).
-void DrawEdgeSegment(SDL_Renderer *renderer,
-                     SDL_Texture *slice,
-                     const SDL_Color &fill,
-                     SDL_FRect dest) {
+// Draws one button piece into the target rect: the source slice is stretched to
+// fill `dest` (the 2px middle tile is stretched horizontally across the body);
+// if the slice is absent the rect is filled with `fill` (the window backdrop
+// colour).
+void DrawPiece(SDL_Renderer *renderer,
+               SDL_Texture *slice,
+               const SDL_Color &fill,
+               SDL_FRect dest) {
   if (slice != nullptr) {
     SDL_RenderTexture(renderer, slice, nullptr, &dest);
   } else {
@@ -80,11 +77,12 @@ void DrawEdgeSegment(SDL_Renderer *renderer,
 
 [[nodiscard]] bool ServicesButtonArt::Initialize(SdlPlatform &platform) {
   bool any = false;
-  LoadEdgeSetImpl(platform, kNormalEdgeStart, normal_, any);
-  LoadEdgeSetImpl(platform, kHoverEdgeStart, hover_, any);
+  LoadStripImpl(platform, kStripBase + 0, normal_, any);
+  LoadStripImpl(platform, kStripBase + 3, pressed_, any);
+  LoadStripImpl(platform, kStripBase + 6, grey_, any);
   usable_ = any;
   if (!usable_) {
-    NovaLog::Warn("no three-state button slices loaded; buttons will render "
+    NovaLog::Warn("no three-state button strips loaded; buttons will render "
                   "as flat fills");
   }
   return usable_;
@@ -94,61 +92,33 @@ void ServicesButtonArt::Draw(SdlPlatform &platform,
                              const SDL_FRect &rect,
                              ButtonState state) const {
   SDL_Renderer *renderer = platform.renderer();
-  auto &edges = state == ButtonState::kHover ? hover_ : normal_;
-  // Backdrop colour used for missing slices / the button body.
+  const StripPieces *strip = &normal_;
+  if (state == ButtonState::kHover) {
+    strip = &pressed_;
+  } else if (state == ButtonState::kDisabled) {
+    strip = &grey_;
+  }
+  // Backdrop colour used for missing pieces / the button body.
   const SDL_Color kBackdrop{1, 4, 12, 255};
 
-  // The three source rows: the real top/bottom corner slices are 25px tall and
-  // the middle slice stretches vertically between them. For a button shorter
-  // than two corners (2*25 = 50px), clamp the corner height to rect.h/2 so the
-  // middle band is never negative; the original has the same constraint (a
-  // <50px three-state button would overlap its corners).
-  constexpr float kSliceHeight = 25.0F;
-  const float corner_h = std::min(kSliceHeight, rect.h / 2.0F);
-  const float x0 = rect.x;
-  const float x1 = rect.x + 13.0F;
-  const float x2 = rect.x + rect.w - 13.0F;
-  const float y_top = rect.y;
-  const float mid_top = rect.y + corner_h;
-  const float mid_bottom = rect.y + rect.h - corner_h;
-  const float mid_h = std::max(0.0F, mid_bottom - mid_top);
+  // The left/right caps are fixed 13px wide; the 2px middle tile stretches
+  // across the body between them. For a button narrower than two caps
+  // (2*13 = 26px) clamp so it still draws without a negative middle band.
+  constexpr float kCapWidth = 13.0F;
+  const float left_w = std::min(kCapWidth, rect.w / 2.0F);
+  const float right_w = std::min(kCapWidth, rect.w - left_w);
+  const float mid_x = rect.x + left_w;
+  const float mid_w = std::max(0.0F, rect.w - left_w - right_w);
 
-  // Left edge (three segments into the left 13px band).
-  const float le = 13.0F;
-  DrawEdgeSegment(renderer,
-                  edges.left[0] ? edges.left[0]->get() : nullptr,
-                  kBackdrop,
-                  {x0, y_top, le, corner_h});
-  DrawEdgeSegment(renderer,
-                  edges.left[1] ? edges.left[1]->get() : nullptr,
-                  kBackdrop,
-                  {x0, mid_top, le, mid_h});
-  DrawEdgeSegment(renderer,
-                  edges.left[2] ? edges.left[2]->get() : nullptr,
-                  kBackdrop,
-                  {x0, mid_bottom, le, corner_h});
-
-  // Right edge.
-  const float re = 13.0F;
-  DrawEdgeSegment(renderer,
-                  edges.right[0] ? edges.right[0]->get() : nullptr,
-                  kBackdrop,
-                  {x2, y_top, re, corner_h});
-  DrawEdgeSegment(renderer,
-                  edges.right[1] ? edges.right[1]->get() : nullptr,
-                  kBackdrop,
-                  {x2, mid_top, re, mid_h});
-  DrawEdgeSegment(renderer,
-                  edges.right[2] ? edges.right[2]->get() : nullptr,
-                  kBackdrop,
-                  {x2, mid_bottom, re, corner_h});
-
-  // Body: the middle band is the window backdrop so the bevel reads as a solid
-  // button.
-  SDL_SetRenderDrawColor(renderer, kBackdrop.r, kBackdrop.g, kBackdrop.b,
-                         kBackdrop.a);
-  const SDL_FRect body{x1, rect.y, x2 - x1, rect.h};
-  SDL_RenderFillRect(renderer, &body);
+  // Left cap.
+  DrawPiece(renderer, strip->left ? strip->left->get() : nullptr, kBackdrop,
+            {rect.x, rect.y, left_w, rect.h});
+  // Stretched middle tile.
+  DrawPiece(renderer, strip->middle ? strip->middle->get() : nullptr, kBackdrop,
+            {mid_x, rect.y, mid_w, rect.h});
+  // Right cap.
+  DrawPiece(renderer, strip->right ? strip->right->get() : nullptr, kBackdrop,
+            {rect.x + rect.w - right_w, rect.y, right_w, rect.h});
 }
 
 std::optional<std::uint8_t> ServiceButtonAt(
