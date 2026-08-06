@@ -15,7 +15,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00408150,Ship_ApplyShipAiControls,,0%,
 0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,,0%,
 0x0040CC10,Stellar_FindNearestAdjacentTravelStellar,,0%,
-0x0040CD80,Stellar_IsStellarAdjacentToCurrentSystem,,0%,
+0x0040CD80,Stellar_IsStellarAdjacentToCurrentSystem,src/game/targeting.cpp,100%,"NovaTargeting_IsStellarAdjacentToSystem: matches a stellar id against a system's nav list, preserving the empty-nav-list == adjacent quirk"
 0x0040CE00,Weapon_SelectWeaponBankForCurrentTarget,,0%,
 0x0040D220,Weapon_SelectGuidedWeaponBankForPrimaryTarget,,0%,
 0x0040D470,Weapon_SelectDirectFireWeaponBankForPrimaryTarget,,0%,
@@ -174,7 +174,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00431480,Frame_JitterPlayerStatModifiers,,0%,
 0x00431500,Frame_RerollPlayerStatModifiers,,0%,
 0x00431530,Shot_UpdateShotGuidance,,0%,
-0x00432470,System_UpdateSystemAndStellarDisplayState,,0%,
+0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,30%,"scope 3 (per-tick stellar system_id/is_available/hazard re-derivation) via NovaTargeting_UpdateStellarAvailability + wired into NovaFrame_SpaceflightLoop; visible-system cache + sprite-set bookkeeping not reconstructed"
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
 0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,3%,player free-flight movement model reconstructed (ship-class stats, turn/thrust/clamp, inertia coast, reverse brake) via NovaPlayer_IntegrateMovement; AI/combat/weapon/travel scopes still stubbed
 0x00435830,Shot_HandleShot,,0%,
@@ -268,19 +268,19 @@ address,name,impl_file,reimpl_pct,comment
 0x0044AA50,FUN_0044aa50,,0%,
 0x0044AA60,FUN_0044aa60,,0%,
 0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,8%,player thrust/turn control subset (ShipClass scaled) + jump-complete block (CompleteJump in travel.cpp); travel/combat/disable/mission scopes still stubbed
-0x0044B120,Ship_HandlePlayerShip,,0%,
+0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,15%,"auto-targets nearest usable travel/land stellar (NovaTargeting_UpdatePlayerTarget) + target-action to landing in NovaFrame_SpaceflightLoop; combat/movement/travel-transition scopes still stubbed"
 0x0044C8D0,Ship_TurnShipTowardHeading,,0%,
 0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,
 0x0044E019,Ship_HandlePlayerShipControl,,0%,
 0x0044EAB4,FUN_0044eab4,,0%,
 0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
-0x00454910,Ship_HandlePlayerTargetActionCommand,,0%,
+0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/targeting.cpp,10%,"landable-target branch (selected stellar available/unrestricted -> open landing interaction) via NovaTargeting_IsLandingAvailable/NovaLanding_TryLand; ship-comm and mission-ship branches not reconstructed"
 0x00455150,Weapon_FirePlayerWeaponBank,,0%,
 0x00455E10,Stellar_TravelToSystem,,0%,
-0x00456480,Stellar_LandOnSpob,,0%,
+0x00456480,Stellar_LandOnSpob,src/game/targeting.cpp,20%,"landing transition state subset in NovaLanding_TryLand: reposition to stellar, zero velocity, refill shields/armor, deduct service cost; dock/world-context entry is a mocked dock-and-return stub"
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
-0x00457580,Stellar_ProcessTravelAndLanding,,0%,
+0x00457580,Stellar_ProcessTravelAndLanding,src/game/targeting.cpp,10%,"landing-dispatch branch via NovaLanding_TryLand (in-range landable target -> land); gating/feedback messages, jump/hypergate branches and engage-timer still not reconstructed"
 0x00459950,NovaUi_UpdateTravelEngagementProgress,,0%,
 0x0045A3D0,Ship_HandlePlayerBoardTargetCommand,,0%,
 0x0045BAA0,Ship_RecenterSpaceObjectsForWorldWrap,,0%,
@@ -358,7 +358,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00465410,Outfit_HasPlayerOwnedOutfitType0x0D_Cached,,0%,
 0x004654B0,Outfit_HasPlayerOwnedOutfitType0x0E_Cached,,0%,
 0x00465550,Stellar_ComputeHyperspaceTravelDays,,0%,
-0x00465610,Stellar_ComputeTravelRangeSq,,0%,
+0x00465610,Stellar_ComputeTravelRangeSq,src/game/targeting.cpp,100%,"NovaTargeting_ComputeTravelRangeSq: base 1000 + ModType-23 outfit sum (primary+alt slots * owned count), clamped >=0 then squared"
 0x004656A0,Outfit_ClampOutfitOwnedCountToCurrentLimits,,0%,
 0x00465AF0,DrawContext_DrawGroupedUInt,,0%,
 0x00465C10,CString_AppendFormattedQuantity,,0%,
@@ -480,13 +480,13 @@ address,name,impl_file,reimpl_pct,comment
 0x0046E120,Stellar_ShipHasGravityShielding,,0%,
 0x0046E210,Stellar_ShipImmuneToStellarCrash,,0%,
 0x0046E2F0,Ship_AccelerateShipTowardPoint,,0%,
-0x0046E3C0,Stellar_IsStellarActive,,0%,
-0x0046E3F0,Stellar_StellarTargetsSpriteSetActive,,0%,
-0x0046E440,Stellar_IsStellarUsableForTravel,,0%,
+0x0046E3C0,Stellar_IsStellarActive,src/game/targeting.cpp,100%,"NovaTargeting_IsStellarActive: population>0 && (handle active || engage access>0); runtime fields on Stellar"
+0x0046E3F0,Stellar_StellarTargetsSpriteSetActive,src/game/targeting.cpp,100%,"NovaTargeting_StellarTargetsSpriteSetActive: control bit set && sprite-active == engaged flag (XNOR)"
+0x0046E440,Stellar_IsStellarUsableForTravel,src/game/targeting.cpp,100%,"NovaTargeting_IsStellarUsableForTravel: targets-sprite-set-active && not availability_flags 0x3000"
 0x0046E470,Ship_ResolveShipTintColor,,0%,
 0x0046E540,Frame_ShouldTriggerAutoRepairTick,,0%,
 0x0046E6D0,NovaText_SplitPascalStringAtNewline,,0%,
-0x0046E790,System_FindSystemContainingStellar,,0%,
+0x0046E790,System_FindSystemContainingStellar,src/game/targeting.cpp,100%,"NovaTargeting_FindSystemContainingStellar: first system (visible-first, else all) whose nav list owns the stellar id, else -1"
 0x0046E840,NoSys_NoOp_0046e840,,0%,
 0x0046E850,NoSys_NoOp_0046e850,,0%,
 0x0046E860,Government_GetGovernmentPolicyFlag,,0%,

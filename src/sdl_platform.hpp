@@ -44,6 +44,11 @@ struct FlightInput {
   // channel; this build maps it to a dedicated key so it is distinct from the
   // continuous steer inputs.
   bool travel = false;
+  // Edge-triggered target-action command: 'e' (land on / interact with the
+  // currently targeted stellar). Stand-in for the original's target-action
+  // command channel (Ship_HandlePlayerTargetActionCommand); opens the landing
+  // interaction for a landable target in range.
+  bool target_action = false;
 };
 
 class SdlTexture {

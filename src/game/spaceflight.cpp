@@ -6,6 +6,7 @@
 #include "intro_cinematic.hpp"
 #include "outfit.hpp"
 #include "spaceflight_view.hpp"
+#include "targeting.hpp"
 #include "travel.hpp"
 
 #include <SDL3/SDL.h>
@@ -171,7 +172,7 @@ void DrawInGameFrame(SdlPlatform &platform,
   SDL_Renderer *const renderer = platform.renderer();
   // HUD frame + debug readouts (placeholder).
   SDL_SetRenderDrawColor(renderer, 51, 113, 171, SDL_ALPHA_OPAQUE);
-  const SDL_FRect outer{18.0F, 400.0F, 604.0F, 62.0F};
+  const SDL_FRect outer{18.0F, 400.0F, 604.0F, 80.0F};
   SDL_RenderRect(renderer, &outer);
   SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
   const std::string callsign = "PLT " + state.pilot.first_name;
@@ -191,8 +192,27 @@ void DrawInGameFrame(SdlPlatform &platform,
       "  X " + std::to_string(static_cast<int>(state.player.pos_x)) + "  Y " +
       std::to_string(static_cast<int>(state.player.pos_y));
   SDL_RenderDebugText(renderer, 30.0F, 444.0F, sysline.c_str());
+
+  // Target readout: the auto-targeted travel/land stellar and a landing hint.
+  const auto *cur = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  const std::int16_t sid = state.travel.selected_stellar_id;
+  const auto *tsid = state.scenario.Stellar(sid);
+  if (cur && tsid) {
+    const bool landable = NovaTargeting_IsLandingAvailable(state);
+    std::string tgt = "TGT ";
+    tgt += (tsid->name.empty() ? "?" : tsid->name);
+    tgt += landable ? "  [e] LAND" : "  (travel)";
+    SDL_RenderDebugText(renderer, 30.0F, 462.0F, tgt.c_str());
+  } else {
+    const std::string nosel = "TGT (none)";
+    SDL_RenderDebugText(renderer, 30.0F, 462.0F, nosel.c_str());
+  }
+
+  // The HUD frame is 80 tall (400..480); the target line sits inside it.
   SDL_SetRenderDrawColor(renderer, 240, 120, 90, SDL_ALPHA_OPAQUE);
-  SDL_RenderDebugText(renderer, 460.0F, 410.0F, "[ARROWS/WASD fly, ESC menu]");
+  SDL_RenderDebugText(
+      renderer, 460.0F, 410.0F, "[WASD fly, J jump, E land, ESC]");
 }
 
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
@@ -213,15 +233,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   SpaceflightView view;
 
   // ---- Pre-loop setup -----------------------------------------------------
-  // Ghidra: rebuilds the stellar radar panel, evaluates availability,
-  // updates system/stellar display state, then runs a full TickSystems with
-  // g_gameplay_time_frozen and draws the first gameplay frame. The radar/
-  // availability/system-display setup is not reconstructed; we log it and go
-  // straight to the first full tick + first draw (Ghidra does this once before
-  // the loop, then every frame inside).
-  NovaLog::Todo("spaceflight pre-loop setup skipped: stellar radar panel, "
-                "availability evaluation and system/stellar display state not "
-                "reconstructed");
+  // Ghidra: rebuilds the stellar radar panel, evaluates availability, updates
+  // system/stellar display state, then runs a full TickSystems with
+  // g_gameplay_time_frozen and draws the first gameplay frame. The radar panel
+  // and per-tick sprite display state are still not reconstructed; the stellar
+  // availability re-evaluation (the part of System_UpdateSystemAnd-
+  // StellarDisplayState that re-homes each stellar to its system and sets
+  // is_available / hazard flags) is now live via NovaTargeting_UpdateStellar-
+  // Availability. Radar-panel rebuild is a logged divergence.
+  NovaTargeting_UpdateStellarAvailability(state);
+  NovaLog::Todo("spaceflight pre-loop setup: stellar radar panel rebuild and "
+                "per-tick sprite display state still not reconstructed");
   const bool ship_ready = view.EnsureShipSprite(platform, state);
   (void)ship_ready;
   // Ghidra: the ambient starfield is (re)spawned at every spaceflight entry
@@ -265,6 +287,20 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (state.travel.just_completed) {
       view.SpawnAmbientStars(platform, state);
     }
+    // Auto-target the nearest playable travel/land stellar in the current
+    // system (mirrors Ship_HandlePlayerShip auto-setting ai_secondary_target_
+    // slot / travel_transfer_mode==2). This drives the HUD target label and
+    // the landing interaction below.
+    NovaTargeting_UpdatePlayerTarget(state);
+    // Target-action command ('e'): land on the currently selected stellar when
+    // it is a landable target in range. Mocked dock-and-return stub.
+    if (input.target_action) {
+      if (NovaTargeting_IsLandingAvailable(state)) {
+        (void)NovaLanding_TryLand(state);
+      } else {
+        NovaLog::Info("target-action: no landable target in range");
+      }
+    }
     // In-flight shield regeneration (class base + opcode-5 outfit bonuses),
     // scaled by the real frame time. The original's player-update path ticks
     // shields each frame; armor does not regenerate in flight.
@@ -279,6 +315,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Ghidra Stellar_UpdateStellarSprites advances each animated stellar one
     // animation step each frame.
     view.AdvanceStellarAnimation(platform, state, frame_time_ms);
+    // Re-derive stellar availability for the current system each tick (scope 3
+    // of System_UpdateSystemAndStellarDisplayState). This keeps stellar
+    // is_available / hazard state in step as the player moves between systems.
+    NovaTargeting_UpdateStellarAvailability(state);
 
     // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
     // cursor update.

@@ -4,6 +4,7 @@ add_executable(evnova_tests
     outfit_test.cpp
     scenario_data_test.cpp
     smoke_test.cpp
+    targeting_test.cpp
     travel_test.cpp
 )
 

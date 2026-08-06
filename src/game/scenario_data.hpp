@@ -270,7 +270,9 @@ struct Stellar {
   std::array<std::int16_t, 8> hyperlinks{
       -1, -1, -1, -1, -1, -1, -1, -1}; // HyperLink1-8
 
-  std::int16_t fee = 0; // Fee
+  // service_cost (StellarDef +0x38, payload +0x234; ServiceCost): the landing/
+  // docking fee the player pays when landing here (waived for hazard stellars).
+  std::int32_t service_cost = 0;
   // Gravity is a float in the original; stored as its encoded half/short here.
   std::int16_t gravity = 0;         // Gravity
   std::int16_t weapon_id = -1;      // Weapon
@@ -278,6 +280,36 @@ struct Stellar {
   std::int16_t dead_type = 0;       // DeadType
   std::int16_t dead_time = 0;       // DeadTime
   std::int16_t explosion_type = -1; // ExplodType
+
+  // ---- Runtime targeting / display state (decoded with, not from, the
+  // payload). The original keeps these on StellarDef (+0x14/+0x44/+0x45/
+  // +0x46/+0x3c/+0x40/+0x47c) and re-derives them per tick in
+  // System_UpdateSystemAndStellarDisplayState (0x00432470) / the sprite pass;
+  // they gate the targeting/selection predicates in targeting.cpp. ----
+  // Which 0-based system this stellar belongs to (+0x14). Re-homed to the
+  // player's current system when it is found in that system's nav list.
+  std::int16_t system_id = -1;
+  // is_available (+0x44): whether the stellar may currently be interacted
+  // with (its system is visible and it is reachable). Set by the display-state
+  // refresh.
+  bool is_available = false;
+  // hazard_marker (field_0x46): set when the stellar's system is visible and
+  // its availability_flags carry the 0x20 hazard/derelict bit; colours the
+  // stellar as a hazard on the radar/target display.
+  bool hazard_marker = false;
+  // sprite_population (+0x40): count of ambient sprites currently spawned for
+  // this stellar. A population >0 combined with a live/engaged sprite handle is
+  // one half of Stellar_IsStellarActive's gate.
+  int sprite_population = 0;
+  // sprite_handle_active (+0x3c): whether the stellar's ambient sprite is
+  // presently loaded via a live handle (in the original a negative handle is
+  // the active sentinel). Read along with the engagement access counter by
+  // Stellar_IsStellarActive.
+  bool sprite_handle_active = false;
+  // engage_access (+0x47c): the stellar's engagement-access counter, bumped by
+  // the travel/targeting interaction when a ship engages this stellar. >0 keeps
+  // the stellar "active" even while its ambient sprite is unloaded.
+  std::int16_t engage_access = 0;
 };
 
 // Ghidra GovtDef (g_government_defs, up to 0x100 entries indexed by government
@@ -400,6 +432,14 @@ struct System {
   std::int16_t reinf_time = 0;     // ReinfTime
   std::int16_t reinf_interval = 0; // ReinfIntrval
   std::string visibility_expr;     // Visibility
+
+  // ---- Runtime discovery/visibility state (decoded with, not from, the
+  // payload). Mirrors SystemDef is_visible / has_explored_flag / discovery
+  // state, maintained by System_UpdateSystemAndStellarDisplayState and the
+  // discovery flood (System_FloodDiscoverAdjacentSystems). These gate which
+  // systems (and hence their stellars) the player may target. ----
+  bool is_visible = false;
+  bool has_explored_flag = false;
 };
 
 // Owns the parsed scenario tables indexed by (resource id - 0x80), mirroring

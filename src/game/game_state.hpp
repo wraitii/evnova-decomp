@@ -98,6 +98,15 @@ struct TravelState {
   // used as the adjacency-slot selector. The paired destination system is
   // System.links[slot].
   std::int16_t travel_slot = -1;
+  // The stellar resource id currently auto-targeted for travel/landing (the
+  // nearest playable stellar in the current system), mirroring the original's
+  // auto-set ai_secondary_target_slot / travel_transfer_mode == 2. -1 when no
+  // stellar qualifies. Set each frame by NovaTargeting_UpdatePlayerTarget.
+  std::int16_t selected_stellar_id = -1;
+  // Whether the selected stellar is a landing target (travel_flags & 0x2) as
+  // opposed to a jump/hypergate point; drives the HUD label and the landing
+  // interaction. Derived from the selected stellar, not stored separately.
+  bool landed_this_frame = false;
   // The stellar resource id the player is jumping from (the travel point that
   // was engaged), -1 unless travel is active. The new-game flow also uses
   // selected_dest_id as its initial target.

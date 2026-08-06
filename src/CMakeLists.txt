@@ -8,6 +8,7 @@ add_library(evnova_runtime
     game/spaceflight_view.cpp
     game/scenario_data.cpp
     game/ship_visual.cpp
+    game/targeting.cpp
     game/travel.cpp
     log.cpp
     nova_app.cpp
