@@ -3,6 +3,9 @@
 
 #include <cstddef>
 #include <limits>
+#include <optional>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -56,7 +59,30 @@ FindDirectBitsRect(std::span<const std::byte> bytes) {
       }
     }
   }
-  return source == encoded.size() && destination == output.size();
+  // The game's FUN_004fcc00 stops when the source is consumed and does not
+  // require a row to fill its full row-bytes (trailing padding is allowed), so
+  // only require that all encoded bytes were consumed without overflowing.
+  return source == encoded.size() && destination <= output.size();
+}
+
+// Ghidra FUN_004fcc00 row-length rule: the row length is stored as ONE byte
+// when the pixmap row-byte count is <= 0xfa, otherwise as a big-endian 2-byte
+// value. Return (length, bytes_consumed).
+[[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>>
+ReadRowLength(std::span<const std::byte> bytes,
+              std::size_t source,
+              std::size_t row_bytes) {
+  if (source + 2 > bytes.size())
+    return std::nullopt;
+  if (row_bytes <= 0xfa) {
+    return std::make_pair(
+        static_cast<std::size_t>(std::to_integer<std::uint8_t>(bytes[source])),
+        std::size_t{1});
+  }
+  const auto length = static_cast<std::size_t>(ReadBe16(bytes, source));
+  if (source + 2 + length > bytes.size())
+    return std::nullopt;
+  return std::make_pair(length, std::size_t{2});
 }
 
 } // namespace
@@ -84,15 +110,41 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   const auto component_count = ReadBe16(pict_data, base + 34);
   const auto width = static_cast<std::size_t>(right - left);
   const auto height = static_cast<std::size_t>(bottom - top);
-  if (bottom <= top || right <= left || pixel_size != 16 ||
-      component_count != 3 || row_bytes < width * 2 ||
+  if (bottom <= top || right <= left ||
       width > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
       height > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
       width > std::numeric_limits<std::size_t>::max() / 4 / height) {
-    NovaLog::Todo(
-        "unsupported PICT DirectBitsRect layout ({}-bit, {} components)",
-        pixel_size,
-        component_count);
+    NovaLog::Todo("unsupported PICT DirectBitsRect dimensions");
+    return std::nullopt;
+  }
+
+  // Decoded row layout per bit depth, matching the game's FUN_004fcc00:
+  // 16-bit stays 2 bytes/pixel (big-endian 5-5-5), 32-bit expands to 4
+  // bytes/pixel. The packbits unit is 2 for 16-bit and 1 for 32-bit.
+  std::size_t unit_size = 1;
+  std::size_t row_out_bytes = 0;
+  enum class PixelFormat { kUnsupported, kRgb555, kRgb24Planar } format =
+      PixelFormat::kUnsupported;
+  if (pixel_size == 16 && component_count == 3) {
+    unit_size = 2;
+    row_out_bytes = width * 2;
+    format = PixelFormat::kRgb555;
+  } else if (pixel_size == 32 && component_count == 3) {
+    // The game's FUN_004fd0a0 demotes a 3-component 32-bit source to 24-bit
+    // (depth 0x18) before row decode; FUN_004fcc00 then decodes the row with
+    // packbits unit 1 into width*3 bytes laid out as R, then G, then B planes
+    // and interleaves them. rowBytes is still width*4 (the pixmap's), which
+    // only controls whether the row length is 1 or 2 bytes.
+    unit_size = 1;
+    row_out_bytes = width * 3;
+    format = PixelFormat::kRgb24Planar;
+  } else {
+    NovaLog::Todo("unsupported PICT DirectBitsRect layout ({}-bit, {} components)",
+                  pixel_size, component_count);
+    return std::nullopt;
+  }
+  if (row_bytes < row_out_bytes) {
+    NovaLog::Todo("PICT rowBytes {} < expected {}", row_bytes, row_out_bytes);
     return std::nullopt;
   }
 
@@ -103,29 +155,41 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   std::vector<std::uint8_t> row(row_bytes);
   std::size_t source = base + pixmap_size + source_and_destination_rects_size;
   for (int y = 0; y < image.height; ++y) {
-    if (source + 2 > pict_data.size())
+    const auto row_length = ReadRowLength(pict_data, source, row_bytes);
+    if (!row_length) {
+      NovaLog::Todo("PICT row {}: bad length at {}", y, source);
       return std::nullopt;
-    const auto packed_size =
-        static_cast<std::size_t>(ReadBe16(pict_data, source));
-    source += 2;
-    if (source + packed_size > pict_data.size() ||
-        !DecodePackBitsRow(pict_data.subspan(source, packed_size), row, 2))
+    }
+    source += row_length->second;
+    const auto packed =
+        pict_data.subspan(source, row_length->first);
+    if (!DecodePackBitsRow(packed, row, unit_size)) {
+      NovaLog::Todo("PICT row {}: packbits decode failed", y);
       return std::nullopt;
-    source += packed_size;
-    for (int x = 0; x < image.width; ++x) {
-      const auto pixel =
-          static_cast<std::uint16_t>(row[static_cast<std::size_t>(x) * 2])
-              << 8U |
-          row[static_cast<std::size_t>(x) * 2 + 1];
-      const auto destination =
-          static_cast<std::size_t>((y * image.width + x) * 4);
-      image.rgba_pixels[destination] =
-          static_cast<std::uint8_t>(((pixel >> 10U) & 31U) * 255U / 31U);
-      image.rgba_pixels[destination + 1] =
-          static_cast<std::uint8_t>(((pixel >> 5U) & 31U) * 255U / 31U);
-      image.rgba_pixels[destination + 2] =
-          static_cast<std::uint8_t>((pixel & 31U) * 255U / 31U);
-      image.rgba_pixels[destination + 3] = 255;
+    }
+    source += row_length->first;
+    for (std::size_t x = 0; x < width; ++x) {
+      const auto destination = (static_cast<std::size_t>(y) * width + x) * 4;
+      if (format == PixelFormat::kRgb555) {
+        const auto pixel =
+            static_cast<std::uint16_t>(row[x * 2]) << 8U | row[x * 2 + 1];
+        image.rgba_pixels[destination] =
+            static_cast<std::uint8_t>(((pixel >> 10U) & 31U) * 255U / 31U);
+        image.rgba_pixels[destination + 1] =
+            static_cast<std::uint8_t>(((pixel >> 5U) & 31U) * 255U / 31U);
+        image.rgba_pixels[destination + 2] =
+            static_cast<std::uint8_t>((pixel & 31U) * 255U / 31U);
+        image.rgba_pixels[destination + 3] = 255;
+      } else {
+        // RG B planar interleave (FUN_004fcc00, depth 0x18).
+        image.rgba_pixels[destination]=
+            static_cast<std::uint8_t>(row[x]);
+        image.rgba_pixels[destination+1]=
+            static_cast<std::uint8_t>(row[width + x]);
+        image.rgba_pixels[destination+2]=
+            static_cast<std::uint8_t>(row[width * 2 + x]);
+        image.rgba_pixels[destination+3] = 255;
+      }
     }
   }
   return image;
