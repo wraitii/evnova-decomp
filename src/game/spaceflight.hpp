@@ -65,4 +65,15 @@ struct PlayerMovementStats {
 // ship flies during flight.
 extern void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state);
 
+// Per-frame in-flight shield regeneration (the spaceflight loop calls this
+// once a frame). Restores the player's shields toward the effective maximum at
+// the recorded shield-recharge rate (class base + outfit opcode-5 bonuses,
+// scaled by frame time), capped so it never exceeds max shield points.
+// Mirrors the shield-regen portion of the original's per-frame player update.
+// Armor does NOT regenerate in flight (the original only repairs armor while
+// landed/at the shipyard or via the disabled auto-repair system), so this only
+// grows shield_points.
+extern void NovaPlayer_TickShieldRecharge(GameState &state,
+                                          float frame_time_ms);
+
 } // namespace game

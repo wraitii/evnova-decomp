@@ -4,6 +4,7 @@
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
 #include "intro_cinematic.hpp"
+#include "outfit.hpp"
 #include "spaceflight_view.hpp"
 
 #include <SDL3/SDL.h>
@@ -252,6 +253,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Player control (heading/throttle) is read here so the ship flies while
     // the simulation stubs do not. Movement integrates into PlayerShip.
     NovaPlayer_UpdateFromInput(platform, state);
+    // In-flight shield regeneration (class base + opcode-5 outfit bonuses),
+    // scaled by the real frame time. The original's player-update path ticks
+    // shields each frame; armor does not regenerate in flight.
+    NovaPlayer_TickShieldRecharge(state, frame_time_ms);
     const float delta_x = state.player.pos_x - prev_x;
     const float delta_y = state.player.pos_y - prev_y;
     prev_x = state.player.pos_x;
@@ -451,19 +456,23 @@ void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state) {
   const FlightInput input = platform.PollFlightInput();
   PlayerShip &p = state.player;
 
-  const ShipClass *cls =
-      state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
-  // No scenario table (or missing class/archive), or a non-arbitrary ship class
-  // with zeroed movement fields: fall back to the Baktun/starter-style defaults
-  // the pilot ship expects while keeping the inertia-preserving model.
-  ShipClass fallback;
-  if (!cls) {
-    fallback.turn_rate = 40;
-    fallback.speed = 400;
-    fallback.accel = 500;
-    cls = &fallback;
+  // Resolve the outfit-derived effective movement stats (class base + owned
+  // outfit opcode 7/8/9 bonuses), reading the cached snapshot when still
+  // valid. The cache is invalidated by the inventory mutation helpers and the
+  // new-pilot ship-class reset.
+  if (!state.stat_cache_valid) {
+    state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+    state.stat_cache_valid = true;
   }
-  (void)NovaPlayer_IntegrateMovement(p, input, *cls);
+  const PlayerEffectiveStats &eff = state.cached_stats;
+
+  // Map the effective raw stats onto the movement integrator's ShipClass view
+  // (it divides raw accel/speed by the loader scale; turn is deg/frame).
+  ShipClass effective_class;
+  effective_class.accel = eff.thrust_raw;
+  effective_class.speed = eff.speed_raw;
+  effective_class.turn_rate = eff.turn_raw;
+  (void)NovaPlayer_IntegrateMovement(p, input, effective_class);
 
   // Engine-glow intensity ramp toward the binary thrust target (clean-room
   // stand-in for the original dimming the glow with ai_forward_thrust_cmd
@@ -474,6 +483,25 @@ void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state) {
   p.engine_glow_intensity +=
       (p.engine_thrust ? kGlowRiseRate : -kGlowDecayRate);
   p.engine_glow_intensity = std::clamp(p.engine_glow_intensity, 0.0F, 1.0F);
+}
+
+void NovaPlayer_TickShieldRecharge(GameState &state, float frame_time_ms) {
+  PlayerShip &p = state.player;
+  // Resolve the effective stats (cache when possible) for the current
+  // recharge rate and max shield.
+  if (!state.stat_cache_valid) {
+    state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+    state.stat_cache_valid = true;
+  }
+  const PlayerEffectiveStats &eff = state.cached_stats;
+  // The recharge rate is in shield points per frame at the reference cadence
+  // (the movement model / Ship_ComputeShipShieldRechargeRate use per-frame); we
+  // scale it by the real frame time so the on-screen pace matches the host.
+  const float rate = eff.shield_recharge * frame_time_ms / 1000.0F;
+  if (rate <= 0.0F) {
+    return;
+  }
+  p.shield_points = std::min(eff.max_shield_points, p.shield_points + rate);
 }
 
 void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state) {

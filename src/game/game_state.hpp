@@ -93,6 +93,42 @@ struct TravelState {
   // post_intro_dest_id is hoisted into IntroCinematicData.
 };
 
+// The outfit-driven effective ship stats (mirrors the cached outputs of the
+// Ghidra Ship_ComputeShip* helpers). Stored on GameState so the spaceflight
+// loop reads a cached snapshot instead of re-scanning the 0x200-entry outfit
+// table every frame (the original caches these in _DAT_00735688/90/98...;
+// stat_cache_valid tracks that cache's dirty state).
+struct PlayerEffectiveStats {
+  float max_shield_points = 0.0F; // 0x00463550
+  float max_armor_points = 0.0F;  // 0x004637a0
+  float fuel_capacity = 0.0F;     // 0x00463a20 (clamped [0,32000])
+  float cargo_capacity = 0.0F;    // opcode 2 (+ class cargo_holds)
+  float thrust_raw = 0.0F;        // 0x004640a0 raw accel (opcode 7); the
+                                  // spaceflight loop /10000 for px/frame^2
+  float speed_raw = 0.0F;         // opcode 8 raw speed
+  float turn_raw = 0.0F;          // opcode 9 raw turn (deg/frame after *0.1)
+  float shield_recharge = 0.0F;   // 0x00463b30 opcode 5
+  float armor_recharge = 0.0F;    // opcode 29 armor repair rate
+  int max_guns = 0;               // class MaxGun + opcode 45
+  int max_turrets = 0;            // class MaxTur + opcode 46
+};
+
+// The discrete player-owned inventory: stackable outfit counts, the 6 cargo
+// compartments, and the junk quantities. Mirrors the original globals
+// g_outfit_owned_count, ShipState.field_0x7a..0x84 (cargo bins) and the
+// g_junk_defs strided array.
+struct PlayerInventory {
+  // How many of each outfit the player owns, indexed by (outfit id - 0x80).
+  // Ghidra g_outfit_owned_count[0x200].
+  std::array<std::int16_t, 0x200> outfit_owned_count{};
+  // The 6 standard cargo compartments (Ghidra ShipState.field_0x7a..0x84,
+  // tons each).
+  std::array<std::int16_t, 6> cargo_bins{};
+  // Junk quantities (Ghidra g_junk_defs strided array), summed for the
+  // total-held cargo bookkeeping.
+  std::array<std::int16_t, 0x80> junk_counts{};
+};
+
 // Everything about the running pilot's world. Replaces the Game_Reset* set of
 // globals for the transient not-yet-reconstructed subsystems with explicit
 // flags so we can log exactly what is and is not preserved.
@@ -116,17 +152,23 @@ struct GameState {
   // NovaData_LoadScenarioResourceTables on the new-game path).
   ScenarioData scenario;
 
-  // Outfit/weapon ownership counts indexed by outfit id. The new-game flow
-  // zeroes all and then seeds them from the starting ship class's default
-  // outfit list. Ghidra g_outfit_owned_count (0x200 entries).
-  // NOTE(decomp): outfit/weapon class tables are not reconstructed yet, so
-  // this array is present but not populated; see new_pilot_flow.cpp.
-  std::array<std::int16_t, 0x200> outfit_owned_count{};
+  // The player's owned outfits, cargo and junk. The new-game flow zeroes it
+  // then seeds the outfit counts from the starting ship class's default item
+  // list (see new_pilot_flow.cpp). Ghidra g_outfit_owned_count + the ship
+  // cargo/junk globals; see outfit.hpp/outfit.cpp for the aggregation layer.
+  PlayerInventory inventory;
+
+  // Effective-stats cache (Outfit_ComputePlayerEffectiveStats). `true` once
+  // the cache is populated and nothing (outfit ownership, ship class) has
+  // changed since. Invalidated by the inventory mutation helpers and whenever
+  // the ship class changes.
+  bool stat_cache_valid = false;
+  PlayerEffectiveStats cached_stats{};
+
   // Per-weapon ammo/secondary counters (Ghidra g_ship_states
-  // weapon_bank_ammo_0 / weapon_bank_secondary_counter_0). The original
-  // walks these as two-dimensional [bank][weapon] tables with a 0x100 stride;
-  // that inner layout is not reconstructed, so a flat placeholder bank array is
-  // carried and left zero by the new-game inventory stub.
+  // weapon_bank_ammo_0 / weapon_bank_secondary_counter_0; 0x100 fixed bank
+  // stride). Kept as a placeholder bank set for now; the two-dimensional
+  // per-bank layout is not yet reconstructed.
   std::array<std::int16_t, 0x100> weapon_bank_ammo{};
   std::array<std::int16_t, 0x100> weapon_bank_secondary{};
 };

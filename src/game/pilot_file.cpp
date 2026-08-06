@@ -44,7 +44,7 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
       pilot_file.intro_duration_60h_ticks;
   state.intro_cinematic.post_intro_dest_id = pilot_file.post_intro_dest_id;
 
-  state.outfit_owned_count = pilot_file.outfit_owned_count;
+  state.inventory.outfit_owned_count = pilot_file.outfit_owned_count;
   state.weapon_bank_ammo = pilot_file.weapon_bank_ammo;
   state.weapon_bank_secondary = pilot_file.weapon_bank_secondary;
 

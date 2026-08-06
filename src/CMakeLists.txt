@@ -2,6 +2,7 @@ add_library(evnova_runtime
     brgr_archive.cpp
     game/intro_cinematic.cpp
     game/new_pilot_flow.cpp
+    game/outfit.cpp
     game/pilot_file.cpp
     game/spaceflight.cpp
     game/spaceflight_view.cpp

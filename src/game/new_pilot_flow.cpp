@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "outfit.hpp"
 #include "pilot_file.hpp"
 
 #include <SDL3/SDL.h>
@@ -209,7 +210,7 @@ void Stub_SeedStartingInventory(GameState &state) {
   // list (DefaultItems) and stock weapon banks. The ship-class tables are now
   // available in state.scenario, so for the default ship (id 0x80, zero-based
   // 0) the outfit counts are populated from its default items.
-  state.outfit_owned_count.fill(0);
+  state.inventory.outfit_owned_count.fill(0);
   state.weapon_bank_ammo.fill(0);
   state.weapon_bank_secondary.fill(0);
 
@@ -227,10 +228,10 @@ void Stub_SeedStartingInventory(GameState &state) {
       continue;
     }
     const auto index = static_cast<std::size_t>(id) - 0x80;
-    if (index >= state.outfit_owned_count.size()) {
+    if (index >= state.inventory.outfit_owned_count.size()) {
       continue;
     }
-    state.outfit_owned_count[index] =
+    state.inventory.outfit_owned_count[index] =
         static_cast<std::int16_t>(ship->default_outfit_counts[i]);
   }
   NovaLog::Info("new-game inventory seeded from ship class '{}' ({} default "
@@ -331,27 +332,24 @@ void ResetPlayerShipForNewGame(GameState &state) {
   state.player.timed_action_counter = -1;
   state.player.death_timer_active = -1.0F;
   state.player.is_active = true;
-  // Shield/armor/fuel are recomputed from the default ship class (Ghidra
-  // multiplies the class base values by x5 for shields/armor per the negative
-  // held/Shield convention; here we take the raw base values). Falls back to
-  // the template defaults when the class table is unavailable.
-  if (const auto *ship = state.scenario.Ship(0x80)) {
-    state.player.shield_points = static_cast<float>(ship->base_shield);
-    state.player.armor_points = static_cast<float>(ship->base_armor);
-    state.player.fuel_points = static_cast<float>(ship->base_fuel);
-    NovaLog::Debug("player ship reset for new game: class '{}' (holds {}, "
-                   "shield {}, armor {}, fuel {})",
-                   ship->display_name,
-                   ship->cargo_holds,
-                   ship->base_shield,
-                   ship->base_armor,
-                   ship->base_fuel);
-  } else {
-    state.player.shield_points = 0.0F;
-    state.player.armor_points = 0.0F;
-    state.player.fuel_points = 0.0F;
-    NovaLog::Todo("player ship reset without the default ship class table");
-  }
+  // Shield/armor/fuel are recomputed from the default ship class plus any
+  // owned outfit bonuses (the original Ship_ResetPlayerShipState recomputes
+  // them from the effective capacity helpers). The effective-stats aggregation
+  // (Ghidra 0x00463550/0x004637a0/0x00463a20) is used so a ship stocked with
+  // shields/armor/fuel boosters starts full. Falls back to the template
+  // defaults when the class table is unavailable.
+  state.stat_cache_valid = false; // ship class may have changed; recompute
+  const game::PlayerEffectiveStats eff =
+      game::Outfit_ComputePlayerEffectiveStats(state);
+  state.player.shield_points = eff.max_shield_points;
+  state.player.armor_points = eff.max_armor_points;
+  state.player.fuel_points = eff.fuel_capacity;
+  state.cached_stats = eff;
+  state.stat_cache_valid = true;
+  NovaLog::Debug("player ship reset for new game: shield {}, armor {}, fuel {}",
+                 eff.max_shield_points,
+                 eff.max_armor_points,
+                 eff.fuel_capacity);
 }
 
 void SetNewGameDateAndStrings(GameState &state) {

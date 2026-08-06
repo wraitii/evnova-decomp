@@ -14,6 +14,9 @@ EV Nova/
 __pycache__/
 *.py[cod]
 
+# pi coding-agent session logs
+pi-session-*.html
+
 # Original-game data and reverse-engineering workspace (kept local)
 /analysis/
 /EV Nova/
