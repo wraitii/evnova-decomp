@@ -90,7 +90,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004159E0,Ship_EnterShipAiState0x15_JumpOutToSystem,,0%,
 0x00415AD0,Stellar_IsShipHeadingToStellarInAiState0x01Or0x14,,0%,
 0x00415B00,Ship_IsShipDockedWithTargetInControlMode0x0F,,0%,
-0x00415B80,Stellar_CanShipInitiateJumpSequence,,0%,
+0x00415B80,Stellar_CanShipInitiateJumpSequence,src/game/travel.cpp,90%,jump fuel gating (class fuel_capacity>=100 + held fuel) via NovaTravel_CanStartJump; velocity-match/mission-ship gates deferred
 0x00415C10,Weapon_HasAnyFireableNonSecondaryWeapon,,0%,
 0x00415CB0,Ship_ResetShipAndAttackersAfterBoarding,,0%,
 0x00415DC0,Ship_ClearOtherShipsTargetingShip,,0%,
@@ -238,8 +238,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004438D0,Mission_ProcessInteractionReactionSlotResources,,0%,
 0x00443C60,Mission_HandleMissionOrSurrenderShipReaction,,0%,
 0x004444F0,Stellar_BuildTravelDestinationDescription,,0%,
-0x00445D70,Mission_ReplaceSubstringInMissionText,,0%,
-0x00445DC0,NovaUi_RebuildSpecialInteractionList,,0%,
+0x00445D70,Mission_ReplaceSubstringInMissionText,,0%,0x00445DC0,NovaUi_RebuildSpecialInteractionList,,0%,
 0x00446150,NovaUi_RunMissionComputerWindow,,0%,
 0x00446770,NovaUi_PollSpecialInteractionWindow,,0%,
 0x00446E00,NovaUi_DrawSpecialInteractionWindow,,0%,
@@ -268,13 +267,13 @@ address,name,impl_file,reimpl_pct,comment
 0x0044AA30,Math_RotateLeft8,,0%,
 0x0044AA50,FUN_0044aa50,,0%,
 0x0044AA60,FUN_0044aa60,,0%,
-0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,3%,player thrust/turn control subset reconstructed (ShipClass stats scaled accel/640, speed/10000, maneuver*0.1); travel/combat/disable/mission scopes still stubbed
+0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,8%,player thrust/turn control subset (ShipClass scaled) + jump-complete block (CompleteJump in travel.cpp); travel/combat/disable/mission scopes still stubbed
 0x0044B120,Ship_HandlePlayerShip,,0%,
 0x0044C8D0,Ship_TurnShipTowardHeading,,0%,
 0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,
 0x0044E019,Ship_HandlePlayerShipControl,,0%,
 0x0044EAB4,FUN_0044eab4,,0%,
-0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,,0%,
+0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
 0x00454910,Ship_HandlePlayerTargetActionCommand,,0%,
 0x00455150,Weapon_FirePlayerWeaponBank,,0%,
@@ -320,7 +319,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00462850,Ship_SelectNearestEngagedTarget,,0%,
 0x004629E0,Government_IsCandidateHostileToTargeter,,0%,
 0x00462BD0,Ship_SelectNearestHostileCombatTarget,,0%,
-0x00462DB0,Stellar_FindNearestAvailableTravelStellar,,0%,
+0x00462DB0,Stellar_FindNearestAvailableTravelStellar,src/game/travel.cpp,90%,nearest travel point via NovaTravel_FindNearestTravelPoint (nav-defs geometry + restricted-range gate); per-stellar is_available treated as present
 0x00462EC0,Weapon_ReconcileOutfitPoolWithWeaponBanks,,0%,
 0x00463260,Weapon_RebuildWeaponBankPoolsFromOwnedOutfits,,0%,
 0x00463470,Ship_ComputeShipCurrentMass,,0%,

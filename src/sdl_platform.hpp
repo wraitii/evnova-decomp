@@ -39,6 +39,11 @@ struct FlightInput {
   bool turn_right = false; // right / 'd'
   bool thrust = false;     // up / 'w' (accelerate toward heading)
   bool brake = false;      // down / 's' (decelerate)
+  // Edge-triggered travel engage: 'j' (hyperspace jump toward the nearest
+  // available travel point). The original uses a separate travel command
+  // channel; this build maps it to a dedicated key so it is distinct from the
+  // continuous steer inputs.
+  bool travel = false;
 };
 
 class SdlTexture {

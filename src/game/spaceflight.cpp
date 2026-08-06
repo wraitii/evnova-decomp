@@ -6,6 +6,7 @@
 #include "intro_cinematic.hpp"
 #include "outfit.hpp"
 #include "spaceflight_view.hpp"
+#include "travel.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -250,9 +251,20 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     const float frame_time_ms =
         std::max(1.0F, static_cast<float>(now_ms - prev_tick_ms));
     prev_tick_ms = now_ms;
-    // Player control (heading/throttle) is read here so the ship flies while
-    // the simulation stubs do not. Movement integrates into PlayerShip.
-    NovaPlayer_UpdateFromInput(platform, state);
+    // Player control (heading/throttle) is read here once so the ship flies
+    // while the simulation stubs do not, and the same snapshot feeds the
+    // travel/jump channel. Movement integrates into PlayerShip.
+    const FlightInput input = platform.PollFlightInput();
+    NovaPlayer_UpdateFromInput(state, input);
+    // Cross-system hyperspace jump state machine (travel.cpp): engages on the
+    // 'j' key near an available travel point, then tick the countdown.
+    NovaTravel_Tick(state, input.travel, frame_time_ms);
+    // When a jump completed this frame, re-spawn the starfield for the new
+    // system (the original's jump completion re-runs
+    // NovaEffects_QueuedAmbientStarParticles).
+    if (state.travel.just_completed) {
+      view.SpawnAmbientStars(platform, state);
+    }
     // In-flight shield regeneration (class base + opcode-5 outfit bonuses),
     // scaled by the real frame time. The original's player-update path ticks
     // shields each frame; armor does not regenerate in flight.
@@ -452,8 +464,7 @@ static void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
   return stats;
 }
 
-void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state) {
-  const FlightInput input = platform.PollFlightInput();
+void NovaPlayer_UpdateFromInput(GameState &state, const FlightInput &input) {
   PlayerShip &p = state.player;
 
   // Resolve the outfit-derived effective movement stats (class base + owned

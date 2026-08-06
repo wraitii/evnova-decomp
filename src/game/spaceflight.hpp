@@ -60,10 +60,12 @@ struct PlayerMovementStats {
 [[nodiscard]] PlayerMovementStats NovaPlayer_IntegrateMovement(
     PlayerShip &ship, const FlightInput &input, const ShipClass &ship_class);
 
-// Reads the live flight controls (via SdlPlatform::PollFlightInput) and
-// integrates the player ship's heading/throttle into GameState.player so the
-// ship flies during flight.
-extern void NovaPlayer_UpdateFromInput(SdlPlatform &platform, GameState &state);
+// Applies the live flight controls to the player ship: integrates the heading/
+// throttle from an already-polled flight-input snapshot into GameState.player
+// so the ship flies during flight. The caller supplies the snapshot so it can
+// also feed the travel/other channels without polling the keyboard twice.
+extern void NovaPlayer_UpdateFromInput(GameState &state,
+                                       const FlightInput &input);
 
 // Per-frame in-flight shield regeneration (the spaceflight loop calls this
 // once a frame). Restores the player's shields toward the effective maximum at

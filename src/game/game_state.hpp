@@ -84,13 +84,38 @@ struct PilotData {
   std::int16_t selected_reputation = 0; // pilot-selection-dialog choice
 };
 
-// Travel-selection / post-intro destination plumbing. Ghidra:
-// Stellar_FindNearestAvailableTravelStellar + Stellar_SetTravelDestination.
-// The new-game flow picks the first available adjacent system as the first
-// jump target after the intro.
+// Travel-selection / cross-system jump state. Ghidra keeps the jump/landing
+// interaction in ship fields (ai_secondary_target_slot as the travel slot,
+// g_travel_selected_stellar_id / g_travel_engage_timer) plus a set of
+// Stellar_* helpers (Stellar_FindNearestAvailableTravelStellar /
+// Stellar_CanShipInitiateJumpSequence / the hypergate jump sequence in
+// Stellar_HandlePlayerHyperspaceSequence). The reimplementation models the
+// cross-system hyperspace jump as an explicit state machine (travel.cpp) so it
+// is reconstructable without the NPC-fleet, landing or dialog systems.
 struct TravelState {
-  std::int16_t selected_dest_id = -1; // g_stellar_selected, opens as dialog
-  // post_intro_dest_id is hoisted into IntroCinematicData.
+  // The travel-slot index (0..15) of the travel point the player is engaging,
+  // or -1 when no travel is active. Mirrors Ghidra ai_secondary_target_slot
+  // used as the adjacency-slot selector. The paired destination system is
+  // System.links[slot].
+  std::int16_t travel_slot = -1;
+  // The stellar resource id the player is jumping from (the travel point that
+  // was engaged), -1 unless travel is active. The new-game flow also uses
+  // selected_dest_id as its initial target.
+  std::int16_t engaged_stellar_id = -1;
+  // The resolved destination system resource id for the engaged jump.
+  std::int16_t destination_system_id = -1;
+  // Jump-sequence countdown in 1/60s tick intervals (the original's
+  // Stellar_GetJumpSequenceDurationMs / ai_station_hold_timer gate). During
+  // this phase the ship coasts and the sequence plays; at zero the jump
+  // completes and the system changes.
+  int jump_countdown_ticks = 0;
+  // Whether the engaged jump has finished declaring a destination and is now
+  // in the transition. The original jumps directly into the hyperspace flight;
+  // we keep a boolean so the loop knows to hand off to the completion path.
+  bool engaging = false;
+  // Whether a jump completed this frame (consumed by the spaceflight loop to
+  // re-spawn the starfield once). Cleared each tick.
+  bool just_completed = false;
 };
 
 // The outfit-driven effective ship stats (mirrors the cached outputs of the

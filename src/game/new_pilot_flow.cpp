@@ -6,6 +6,7 @@
 #include "game_state.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
+#include "travel.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -259,29 +260,18 @@ void Stub_DiscoverStartingSystems(GameState &state) {
 
 void Stub_PickFirstTravelDestination(GameState &state) {
   // Ghidra Stellar_FindNearestAvailableTravelStellar picks the first adjacent,
-  // reachable system as the pilot's initial jump target, stored back into
-  // state->travel by Stellar_SetTravelDestination when found. Here the first
-  // live link of the starting system (kStartSystemResourceId) stands in for
-  // that choice. Ghidra zero-based link ids: -1 or < 0x80 is unused; links
-  // >= 0x80 name a system (the loader re-bases them into the 0.. index space
-  // after a sanity range check, so we keep them as resource ids here).
-  state.travel.selected_dest_id = -1;
-  if (const auto *start = state.scenario.System(kStartSystemResourceId);
-      start) {
-    for (const auto link : start->links) {
-      if (link >= 0x80) {
-        state.travel.selected_dest_id = link;
-        break;
-      }
-    }
-  }
-  if (state.travel.selected_dest_id >= 0) {
-    NovaLog::Info("initial travel destination resolved to system id {} from "
-                  "starting-system links",
-                  state.travel.selected_dest_id);
+  // reachable travel point as the pilot's initial jump target. The travel
+  // mechanics are reconstructed (travel.cpp): the first-jump target is now
+  // resolved dynamically at engage time, so this step just validates that the
+  // starting system has a reachable outward route and logs it.
+  const int slot = NovaTravel_FindNearestTravelPoint(state);
+  if (slot >= 0) {
+    NovaLog::Info("initial travel outline resolved from starting-system "
+                  "nav-defs: travel slot {} available",
+                  slot);
   } else {
     NovaLog::Todo("first travel destination not resolved: starting system has "
-                  "no outward link defined; starmap will show no route");
+                  "no reachable travel point defined");
   }
 }
 

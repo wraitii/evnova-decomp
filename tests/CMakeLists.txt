@@ -4,6 +4,7 @@ add_executable(evnova_tests
     outfit_test.cpp
     scenario_data_test.cpp
     smoke_test.cpp
+    travel_test.cpp
 )
 
 target_link_libraries(evnova_tests PRIVATE Catch2::Catch2WithMain evnova_runtime)
