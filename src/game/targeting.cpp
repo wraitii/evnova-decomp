@@ -1,7 +1,7 @@
 #include "targeting.hpp"
 
 #include "../log.hpp"
-#include "outfit.hpp"
+#include "landed_window.hpp"
 
 namespace game {
 
@@ -283,49 +283,8 @@ bool NovaTargeting_IsLandingAvailable(const GameState &state) {
 }
 
 bool NovaLanding_TryLand(GameState &state) {
-  state.travel.landed_this_frame = false;
-  const std::int16_t sid = state.travel.selected_stellar_id;
-  if (!NovaTargeting_IsLandingAvailable(state)) {
-    return false;
-  }
-  const auto *st = state.scenario.Stellar(sid);
-  if (!st) {
-    return false;
-  }
-
-  // Landing transition state changes (mirrors Stellar_LandOnSpob 0x00456480):
-  // reposition to the stellar, zero velocity/speed, refill shields/armor, and
-  // deduct the stellar's service cost (clamped to 0 credits).
-  state.player.pos_x = static_cast<float>(st->pos_x);
-  state.player.pos_y = static_cast<float>(st->pos_y);
-  state.player.vel_x = 0.0F;
-  state.player.vel_y = 0.0F;
-  state.player.speed = 0.0F;
-  const auto eff = Outfit_ComputePlayerEffectiveStats(state);
-  state.player.shield_points = eff.max_shield_points;
-  state.player.armor_points = eff.max_armor_points;
-  state.cached_stats = eff;
-  state.stat_cache_valid = true;
-
-  // Service cost (StellarDef service_cost; a positive fee for hangar/slip when
-  // the stellar is not a hazard). The player pays once per landing.
-  if (st->service_cost > 0 && !st->hazard_marker) {
-    state.player.credits -= st->service_cost;
-    if (state.player.credits < 0) {
-      state.player.credits = 0;
-    }
-  }
-
-  // The dock/world context that follows a real landing (shops, missions,
-  // systems map, re-launch) is not reconstructed; this is a dock-and-return
-  // stub that logs the visit and leaves the player in free flight.
-  NovaLog::Info("LANDED [mocked] at stellar {} ({}); shields/armor refilled; "
-                "credits {}",
-                sid,
-                st->name,
-                state.player.credits);
-  state.travel.landed_this_frame = true;
-  return true;
+  LandedContext ctx;
+  return NovaLanding_EnterDocked(state, ctx);
 }
 
 } // namespace game

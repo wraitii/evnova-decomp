@@ -275,12 +275,12 @@ address,name,impl_file,reimpl_pct,comment
 0x0044EAB4,FUN_0044eab4,,0%,
 0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
-0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/targeting.cpp,10%,"landable-target branch (selected stellar available/unrestricted -> open landing interaction) via NovaTargeting_IsLandingAvailable/NovaLanding_TryLand; ship-comm and mission-ship branches not reconstructed"
+0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,25%,"landable-target branch (selected stellar available/unrestricted -> open landing interaction) via NovaTargeting_IsLandingAvailable + NovaLanded_RunWindow in NovaFrame_SpaceflightLoop; ship-comm and mission-ship branches not reconstructed"
 0x00455150,Weapon_FirePlayerWeaponBank,,0%,
 0x00455E10,Stellar_TravelToSystem,,0%,
-0x00456480,Stellar_LandOnSpob,src/game/targeting.cpp,20%,"landing transition state subset in NovaLanding_TryLand: reposition to stellar, zero velocity, refill shields/armor, deduct service cost; dock/world-context entry is a mocked dock-and-return stub"
+0x00456480,Stellar_LandOnSpob,src/game/landed_window.cpp,40%,"landing transition state subset in NovaLanding_EnterDocked (used by NovaLanding_TryLand): reposition to stellar, zero velocity, refill shields/armor, deduct service cost; then the docked services window opens (NovaLanded_RunWindow). World/laydown scene not reconstructed"
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
-0x00457580,Stellar_ProcessTravelAndLanding,src/game/targeting.cpp,10%,"landing-dispatch branch via NovaLanding_TryLand (in-range landable target -> land); gating/feedback messages, jump/hypergate branches and engage-timer still not reconstructed"
+0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,20%,"landing-dispatch branch: in-range landable target -> land transition (NovaLanding_EnterDocked) -> open docked services window (NovaLanded_RunWindow) in NovaFrame_SpaceflightLoop; gating/feedback messages, jump/hypergate branches and engage-timer still not reconstructed"
 0x00459950,NovaUi_UpdateTravelEngagementProgress,,0%,
 0x0045A3D0,Ship_HandlePlayerBoardTargetCommand,,0%,
 0x0045BAA0,Ship_RecenterSpaceObjectsForWorldWrap,,0%,
@@ -684,7 +684,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0047BDD0,SWParticles_DrawParticles,,0%,
 0x0047C3A0,SWParticles_UpdateDirtyPixels,,0%,
 0x0047C800,FUN_0047c800,,0%,
-0x0047C8E0,NovaUi_RunTravelDestinationServicesWindow,,0%,
+0x0047C8E0,NovaUi_RunTravelDestinationServicesWindow,src/game/landed_window.cpp,15%,"landed/services modal skeleton via NovaLanded_RunWindow: header (destination + credits), navigable service list (launch/refuel/repair real; buy-sell/outfit/shipyard/bar/starmap/mission mocked), refuel+repair bill credits. Original UiWindow/PICT art + sub-windows not reconstructed"
 0x0047CFE0,NovaUi_DrawTravelDestinationServicesWindow,,0%,
 0x0047D180,FUN_0047d180,,0%,
 0x0047D370,FUN_0047d370,,0%,

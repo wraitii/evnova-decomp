@@ -114,16 +114,16 @@ NovaTargeting_FindNearestLandableStellar(const GameState &state);
 // spaceflight frame.
 void NovaTargeting_UpdatePlayerTarget(GameState &state);
 
-// Performs a landing on the player's currently selected stellar (the mocked
-// interaction-system stub for Stellar_LandOnSpob / Stellar_ProcessTravelAnd-
-// Landing's landing dispatch). Gated on a selected landable stellar that the
-// ship is within travel range of. On success it repositions the ship to the
-// stellar, refills shields/armor from the effective maximums, deducts the
-// stellar's service cost (clamped >= 0 credits), and sets
-// state.travel.landed_this_frame. The dock/world context that follows a real
-// landing is NOT reconstructed -- this is a dock-and-return stub that logs the
-// visit and leaves the player back in free flight. Returns true when a landing
-// was performed this call.
+// Performs a landing on the player's currently selected stellar (the landing-
+// transition subset of Stellar_LandOnSpob / Stellar_ProcessTravelAndLanding's
+// landing dispatch). Gated on a selected landable stellar that the ship is
+// within travel range of. On success it repositions the ship to the stellar,
+// refills shields/armor from the effective maximums, deducts the stellar's
+// service cost (clamped >= 0 credits), and sets
+// state.travel.landed_this_frame. The dock/world UI that follows a real
+// landing is opened by NovaLanded_RunWindow in landed_window.cpp, not here
+// (this function is the pure transition used by the spaceflight loop). Returns
+// true when a landing was performed this call.
 bool NovaLanding_TryLand(GameState &state);
 
 // True when the player's currently selected stellar (state.travel.selected_

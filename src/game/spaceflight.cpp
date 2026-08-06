@@ -4,6 +4,7 @@
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
 #include "intro_cinematic.hpp"
+#include "landed_window.hpp"
 #include "outfit.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
@@ -293,10 +294,22 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // the landing interaction below.
     NovaTargeting_UpdatePlayerTarget(state);
     // Target-action command ('e'): land on the currently selected stellar when
-    // it is a landable target in range. Mocked dock-and-return stub.
+    // it is a landable target in range. On a successful landing transition the
+    // game opens the landed/services window (mirrors Stellar_ProcessTravelAnd-
+    // Landing dispatching into the docked UI); when the player launches back
+    // into space the loop continues flying, and a hard quit propagates.
     if (input.target_action) {
       if (NovaTargeting_IsLandingAvailable(state)) {
-        (void)NovaLanding_TryLand(state);
+        LandedContext ctx;
+        if (NovaLanding_EnterDocked(state, ctx)) {
+          const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
+          if (exit == LandedExit::kQuit) {
+            returning_to_menu = true;
+            break;
+          }
+        } else {
+          NovaLog::Info("target-action: landing transition failed");
+        }
       } else {
         NovaLog::Info("target-action: no landable target in range");
       }
