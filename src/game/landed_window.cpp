@@ -2,6 +2,7 @@
 
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
+#include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "targeting.hpp"
@@ -158,9 +159,12 @@ const char *ServiceLabel(LandedService t) {
   return "";
 }
 
-// Draws the landed window header + service list using SDL's debug-font text
-// (a temporary stand-in for the original GVNO bitmap-font UI).
+// Draws the landed window header + service list with the real screen fonts:
+// the destination title in Chicago (charcoal) and the rows/bars in Geneva,
+// mirroring the original's window (title = family 0/Chicago UI font, body =
+// family 3/Geneva). Text positions are in the original 640x480 logical space.
 void DrawLandedMenu(SdlPlatform &platform,
+                    NovaFontCache &font_cache,
                     const GameState &state,
                     const LandedContext &ctx) {
   SDL_Renderer *renderer = platform.renderer();
@@ -169,14 +173,35 @@ void DrawLandedMenu(SdlPlatform &platform,
   SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
-  // Header: destination name + available credits.
+  const SDL_Color kTitle{202, 224, 255, 255};    // bright rows / highlight
+  const SDL_Color kBody{128, 170, 210, 255};     // dim rows
+  const SDL_Color kSelected{142, 209, 255, 255}; // selected row
+
+  // Header: destination name (+ service marker) as the window title font.
   std::string title = st ? st->name : std::string("(unknown stellar)");
   title += " -- services";
-  SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
-  SDL_RenderDebugText(renderer, 20.0F, 24.0F, title.c_str());
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kChicago,
+                18.0F,
+                kNovaFontStyleRegular,
+                kTitle,
+                20.0F,
+                30.0F, // baseline
+                title);
 
-  std::string credits = "Credits: " + std::to_string(state.player.credits);
-  SDL_RenderDebugText(renderer, 20.0F, 40.0F, credits.c_str());
+  // Credits / fuel / hull status bars in the Geneva body font.
+  const std::string credits =
+      "Credits: " + std::to_string(state.player.credits);
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                12.0F,
+                kNovaFontStyleRegular,
+                kBody,
+                20.0F,
+                56.0F,
+                credits);
 
   const auto *eff = &state.cached_stats; // set during landing/refuel/repair
   const float cap = eff ? eff->fuel_capacity : 0.0F;
@@ -188,34 +213,45 @@ void DrawLandedMenu(SdlPlatform &platform,
                 cap,
                 state.player.armor_points,
                 eff ? eff->max_armor_points : 0.0F);
-  SDL_RenderDebugText(renderer, 20.0F, 56.0F, fuel);
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                12.0F,
+                kNovaFontStyleRegular,
+                kBody,
+                20.0F,
+                74.0F,
+                fuel);
 
-  const int kTop = 92;
-  const int kRowH = 26;
+  const int kTop = 110;
+  const int kRowH = 24;
   for (int i = 0; i < static_cast<int>(LandedService::kCount); ++i) {
     const auto svc = static_cast<LandedService>(i);
     const bool selected = (i == static_cast<int>(ctx.selection));
-    std::string row = "  ";
-    if (selected) {
-      row = "> ";
-    }
-    row += ServiceLabel(svc);
-    if (selected) {
-      SDL_SetRenderDrawColor(renderer, 142, 209, 255, SDL_ALPHA_OPAQUE);
-    } else {
-      SDL_SetRenderDrawColor(renderer, 128, 170, 210, SDL_ALPHA_OPAQUE);
-    }
-    SDL_RenderDebugText(
-        renderer, 20.0F, static_cast<float>(kTop + i * kRowH), row.c_str());
+    const std::string row =
+        std::string(selected ? "> " : "  ") + ServiceLabel(svc);
+    const SDL_Color &color = selected ? kSelected : kBody;
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  13.0F,
+                  selected ? kNovaFontStyleBold : kNovaFontStyleRegular,
+                  color,
+                  20.0F,
+                  static_cast<float>(kTop + i * kRowH),
+                  row);
   }
 
-  // Footer hint row.
-  SDL_SetRenderDrawColor(renderer, 128, 170, 210, SDL_ALPHA_OPAQUE);
-  SDL_RenderDebugText(
-      renderer,
-      20.0F,
-      452.0F,
-      "Up/Down or W/S move  Enter/E select  Q launch  Esc back");
+  // Footer hint row in the body font.
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                11.0F,
+                kNovaFontStyleRegular,
+                kBody,
+                20.0F,
+                464.0F,
+                "Up/Down or W/S move  Enter/E select  Q launch  Esc back");
 }
 
 // Handles one service selection from the docked menu. Returns the exit intent:
@@ -280,11 +316,30 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                 static_cast<int>(ctx.stellar_id));
 
   // The original draws the six PICT service icons plus destination art
-  // (0x2151..0x2178); this build has no GVNO PICT UI, so each menu redraw logs
-  // the divergence once the first time.
+  // (0x2151..0x2178); this build has no GVNO PICT UI, so the menu text is
+  // laid out with the real screen fonts instead. Log the art divergence once.
   NovaLog::Todo(
-      "landed window renders as debug-text menu; the original uses UiWindow "
-      "dialog 0x3f5/0x3fd + PICT art/icons (out of scope for the MVP)");
+      "landed window text now uses screen fonts (Chicago/Geneva); the original "
+      "UiWindow dialog 0x3f5/0x3fd + PICT art/icons are still out of scope");
+
+  // Font subsystem init (SDL3_ttf) is refcounted and managed lazily by the
+  // NovaFontCache itself (TTF_Init on first use, TTF_Quit in ~NovaFontCache),
+  // so repeated dockings stay stable. Here we only surface the availability of
+  // the faces the original ships/substitutes so a missing bundle is loud.
+  NovaFontCache font_cache;
+  NovaLog::Info("landed window font families available: Charcoal={} "
+                "Geneva={} Times={} Helvetica={} NewYork={}",
+                font_cache.IsFamilyAvailable(NovaFontFamily::kChicago),
+                font_cache.IsFamilyAvailable(NovaFontFamily::kGeneva),
+                font_cache.IsFamilyAvailable(NovaFontFamily::kTimes),
+                font_cache.IsFamilyAvailable(NovaFontFamily::kHelvetica),
+                font_cache.IsFamilyAvailable(NovaFontFamily::kNewYork));
+  if (!font_cache.IsFamilyAvailable(NovaFontFamily::kChicago) ||
+      !font_cache.IsFamilyAvailable(NovaFontFamily::kGeneva)) {
+    NovaLog::Warn(
+        "bundled Charcoal.ttf/Geneva.ttf not found next to the executable "
+        "(looked in EV Nova/); text will fall back to debug font");
+  }
 
   bool entered_sub_screen = false;
 
@@ -298,7 +353,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     // Draw the current face. When a sub-screen is "open" the original swaps to
     // a nested modal widget; the MVP keeps the same menu surface and only
     // distinguishes via the hint, so we always redraw the list.
-    DrawLandedMenu(platform, state, ctx);
+    DrawLandedMenu(platform, font_cache, state, ctx);
     SDL_RenderPresent(platform.renderer());
 
     // Poll discrete raw keys for the modal (dedicated channel, so it never

@@ -2,6 +2,7 @@ add_executable(evnova_tests
     game_state_test.cpp
     landed_window_test.cpp
     movement_test.cpp
+    nova_font_test.cpp
     outfit_test.cpp
     scenario_data_test.cpp
     smoke_test.cpp

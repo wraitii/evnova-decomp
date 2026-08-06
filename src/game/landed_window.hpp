@@ -102,9 +102,12 @@ std::int32_t NovaLanded_Repair(GameState &state,
 
 // ---- SDL modal -------------------------------------------------------------
 // Runs the landed window modal for a stellar, driving navigation from the
-// platform input channels. Returns the exit code describing how the window
-// closed (see LandedExit). `state.player` must already be positioned at the
-// dock (e.g. after NovaLanding_EnterDocked).
+// platform input channels. Owns a NovaFontCache for the duration of the modal
+// (mirroring the original's DrawContext font state) and lays the window text
+// out with the real screen fonts (Chicago/Charcoal titles + Geneva body).
+// Returns the exit code describing how the window closed (see LandedExit).
+// `state.player` must already be positioned at the dock (e.g. after
+// NovaLanding_EnterDocked).
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                               GameState &state,
                                               LandedContext &ctx);

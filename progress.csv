@@ -309,7 +309,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00461BC0,FUN_00461bc0,,0%,
 0x00461BD0,Ship_FindNextPlayerCycleTarget,,0%,
 0x00461F60,Ship_FindPreviousPlayerCycleTarget,,0%,
-0x004622F0,DrawContext_DrawCenteredPascalStringInBounds,,0%,
+0x004622F0,DrawContext_DrawCenteredPascalStringInBounds,src/game/nova_font.cpp,50%,"NovaText_DrawCentered: measures width then centers over left/right bounds before drawing; real screen-font (SDL_ttf) reconstruction of measure+position+draw"
 0x00462340,Rect_FilledSideDim,,0%,
 0x00462390,Sprite_GetShotHalfSpan,,0%,
 0x004623D0,Sprite_GetFrameVerticalHalfSpan,,0%,
@@ -684,7 +684,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0047BDD0,SWParticles_DrawParticles,,0%,
 0x0047C3A0,SWParticles_UpdateDirtyPixels,,0%,
 0x0047C800,FUN_0047c800,,0%,
-0x0047C8E0,NovaUi_RunTravelDestinationServicesWindow,src/game/landed_window.cpp,15%,"landed/services modal skeleton via NovaLanded_RunWindow: header (destination + credits), navigable service list (launch/refuel/repair real; buy-sell/outfit/shipyard/bar/starmap/mission mocked), refuel+repair bill credits. Original UiWindow/PICT art + sub-windows not reconstructed"
+0x0047C8E0,NovaUi_RunTravelDestinationServicesWindow,src/game/landed_window.cpp,20%,"landed/services modal skeleton via NovaLanded_RunWindow: header + navigable service list rendered with the real screen fonts (Chicago/Charcoal title, Geneva body) via NovaFontCache; refuel+repair billed; buy-sell/outfit/shipyard/bar/starmap/mission mocked; PICT art/icons still out of scope"
 0x0047CFE0,NovaUi_DrawTravelDestinationServicesWindow,,0%,
 0x0047D180,FUN_0047d180,,0%,
 0x0047D370,FUN_0047d370,,0%,
@@ -903,8 +903,8 @@ address,name,impl_file,reimpl_pct,comment
 0x004B68D0,NovaInputQueue_FlushAllCommands,,0%,
 0x004B68E0,NovaPlatform_PumpInputAndReadyState,,0%,
 0x004B68F0,FUN_004b68f0,,0%,
-0x004B6900,DrawContext_SetFontId,,0%,
-0x004B6920,DrawContext_StoreScaledValue,,0%,
+0x004B6900,DrawContext_SetFontId,src/game/nova_font.cpp,40%,"active family id selected per draw via the NovaFontFamily enum passed to NovaText_Draw/NovaText_DrawCentered"
+0x004B6920,DrawContext_StoreScaledValue,src/game/nova_font.cpp,30%,"point-size selection for a text draw (NovaFontCache.Font); UI-scale scaling factor not reconstructed (SDL logical presentation scales instead)"
 0x004B6940,FUN_004b6940,,0%,
 0x004B6960,FUN_004b6960,,0%,
 0x004B6990,DrawContext_SetRgbColor,,0%,
@@ -987,18 +987,18 @@ address,name,impl_file,reimpl_pct,comment
 0x004BC2A0,LoadStringResourceCopyById,,0%,
 0x004BC300,FontCache_NoOpCleanup,,0%,
 0x004BC310,NovaGameSession_BuildStartupCurveTable,,0%,
-0x004BC3E0,FontCache_InitializeDefaultFamilies,,0%,
-0x004BC450,FontFamily_CreateFontHandle,,0%,
+0x004BC3E0,FontCache_InitializeDefaultFamilies,src/game/nova_font.cpp,70%,"NovaFontFamily enum + ResolveFontFile mapping Chicago/Charcoal, Geneva, Times->Times New Roman, Helvetica->Arial, New York->Georgia; bundled Charcoal+Geneva ttfs shipped by CE build"
+0x004BC450,FontFamily_CreateFontHandle,src/game/nova_font.cpp,40%,"style bold/italic flags mapped onto the SDL_ttf face (bold synthesized via TTF_STYLE_BOLD, no post-open weight setter in this version)"
 0x004BC5C0,FontCache_CreateFamilyEntry,,0%,
 0x004BC600,FontFamily_FindHandleBySizeAndStyle,,0%,
 0x004BC640,FontCache_GetFamilyEntryByIndex,,0%,
-0x004BC670,FontCache_GetOrCreateFontHandle,,0%,
+0x004BC670,FontCache_GetOrCreateFontHandle,src/game/nova_font.cpp,60%,"NovaFontCache.Font/TextWidth: caches SDL_ttf faces by (family,size,style) key; lazy TTF_Init refcounted in the cache lifetime"
 0x004BC6E0,FontCache_FindOrAddFamilyByName,,0%,
 0x004BC760,FUN_004bc760,,0%,
 0x004BCA70,FUN_004bca70,,0%,
-0x004BCA90,DrawContext_DrawPascalString,,0%,
+0x004BCA90,DrawContext_DrawPascalString,src/game/nova_font.cpp,40%,"NovaText_Draw rasterizes via SDL3_ttf solid mode and blits at the baseline (mirrors the OS text drawing FUN_004bc760)"
 0x004BCAB0,FUN_004bcab0,,0%,
-0x004BCAD0,DrawContext_GetPascalStringWidth,,0%,
+0x004BCAD0,DrawContext_GetPascalStringWidth,src/game/nova_font.cpp,50%,"NovaFontCache.TextWidth via TTF_GetStringSize on the same face used to draw"
 0x004BCB00,FUN_004bcb00,,0%,
 0x004BCBC0,FUN_004bcbc0,,0%,
 0x004BCC70,FUN_004bcc70,,0%,
