@@ -2,22 +2,21 @@
 
 // Clean-room reconstruction of the "landed window" -- the UI shown while the
 // player is docked at a stellar (planet/station). Mirrors the original's
-// travel-destination services modal opened after a landing transition
-// (Ghidra NovaUi_RunTravelDestinationServicesWindow 0x0047c8e0 and its draw/
-// interaction helpers), exposed as a self-contained modal run-loop on top of
-// SDL.
+// docked screen (the Spaceport window, Ghidra NovaUi_RunTravelDestination-
+// InteractionLoop 0x00491f30 creating DLOG 0x3e8, and its backdrop/button draw
+// helpers), exposed as a self-contained modal run-loop on top of SDL.
 //
-// SCOPE / ARCHITECTURE: the original is a full GVNO UiWindow modal built from
-// a dialog resource (UiWindow_CreateFromDialogResource 0x3f5 / 0x3fd), loads a
-// destination-art PICT (0x2137/0x2138) plus six service-icon images (0x2152..
-// 0x2178), and implements the buy/sell/outfit/shipyard/bar/starmap/mission
-// sub-windows as nested modals over the same backing store. That whole GVNO
-// UI stack is NOT reconstructed here. This build presents the same landing
-// *architecture* -- a persistent services modal with a header (destination
-// name + credits) and a vertical service list, driven by the same input
-// channel (`PollFlightInput` up/down to select, jump/target-action to choose),
-// where each service is an entry point into a (mocked where out of scope)
-// sub-screen.
+// SCOPE / ARCHITECTURE: the original is a full GVNO UiWindow docking screen
+// built from a dialog resource (DLOG 0x3e8 -> DITL 0x3e8), filling a near-
+// full-screen panel with the destination-art PICT 0x2134 backdrop
+// (FUN_0048e970) and the service controls in a two-column button layout down
+// the lower left/right edges (plus 0x2152..0x2178 service-icon images). The
+// buy/sell/outfit/shipyard/bar/starmap/mission sub-windows are nested modals
+// over the same backing store. That whole GVNO UI stack is NOT reconstructed
+// here. This build presents the same landing *architecture* -- a persistent
+// docked screen with a header (destination name + credits) and the two-column
+// service grid -- driven by the same input channel, where each service is an
+// entry point into a (mocked where out of scope) sub-screen.
 //
 // OUT OF SCOPE for the MVP (each is a loud NovaLog::Todo stub): cargo buy/sell,
 // outfitting, shipyard purchasing, the bar mini-game, starmap, mission
@@ -101,15 +100,19 @@ std::int32_t NovaLanded_Repair(GameState &state,
                                std::int32_t price_per_armor_point);
 
 // ---- SDL modal -------------------------------------------------------------
-// Runs the landed window modal for a stellar, driving navigation from the
+// Runs the docked-screen modal for a stellar, driving navigation from the
 // platform input channels. Owns a NovaFontCache for the duration of the modal
 // (mirroring the original's DrawContext font state) and lays the window text
 // out with the real screen fonts (Chicago/Charcoal titles + Geneva body).
-// Renders the stellar's destination art PICT (0x2137 default, 0x2138 custom
-// variant) as the window backdrop, mirroring NovaUi_DrawTravelDestination-
-// ServicesWindow blitting it across the window rect. Returns the exit code
-// describing how the window closed (see LandedExit). `state.player` must already
-// be positioned at the dock (e.g. after NovaLanding_EnterDocked).
+// Renders the docked-screen backdrop (destination-art PICT 0x2134, ~618x517)
+// across the whole 640x480 panel, mirroring Ghidra FUN_0048e970
+// (g_travel_overlay_sprite_handle = Resource_LoadPictAsImage(0x2134)) blitting
+// it over the full window rect. The destination name is centred near the top
+// and the services sit in the DITL-0x3e8 two-column (4-row) button layout at
+// the lower left/right, driven by the same geometry as the mouse hit-test.
+// Returns the exit code describing how the window closed (see LandedExit).
+// `state.player` must already be positioned at the dock (e.g. after
+// NovaLanding_EnterDocked).
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                               GameState &state,
                                               LandedContext &ctx);

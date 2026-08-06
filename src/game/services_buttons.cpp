@@ -5,6 +5,8 @@
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
 
+#include <algorithm>
+
 #include <optional>
 #include <utility>
 
@@ -96,45 +98,50 @@ void ServicesButtonArt::Draw(SdlPlatform &platform,
   // Backdrop colour used for missing slices / the button body.
   const SDL_Color kBackdrop{1, 4, 12, 255};
 
-  // The three source rows: fixed 25px corners + a vertically-stretched middle.
-  constexpr float kCornerHeight = 25.0F;
+  // The three source rows: the real top/bottom corner slices are 25px tall and
+  // the middle slice stretches vertically between them. For a button shorter
+  // than two corners (2*25 = 50px), clamp the corner height to rect.h/2 so the
+  // middle band is never negative; the original has the same constraint (a
+  // <50px three-state button would overlap its corners).
+  constexpr float kSliceHeight = 25.0F;
+  const float corner_h = std::min(kSliceHeight, rect.h / 2.0F);
   const float x0 = rect.x;
   const float x1 = rect.x + 13.0F;
   const float x2 = rect.x + rect.w - 13.0F;
-  const float middle_bottom = rect.y + rect.h - kCornerHeight;
   const float y_top = rect.y;
-  const float mid_top = rect.y + kCornerHeight;
-  const float mid_bottom = rect.y + rect.h - kCornerHeight;
+  const float mid_top = rect.y + corner_h;
+  const float mid_bottom = rect.y + rect.h - corner_h;
+  const float mid_h = std::max(0.0F, mid_bottom - mid_top);
 
   // Left edge (three segments into the left 13px band).
   const float le = 13.0F;
   DrawEdgeSegment(renderer,
                   edges.left[0] ? edges.left[0]->get() : nullptr,
                   kBackdrop,
-                  {x0, y_top, le, kCornerHeight});
+                  {x0, y_top, le, corner_h});
   DrawEdgeSegment(renderer,
                   edges.left[1] ? edges.left[1]->get() : nullptr,
                   kBackdrop,
-                  {x0, mid_top, le, mid_bottom - mid_top});
+                  {x0, mid_top, le, mid_h});
   DrawEdgeSegment(renderer,
                   edges.left[2] ? edges.left[2]->get() : nullptr,
                   kBackdrop,
-                  {x0, middle_bottom, le, kCornerHeight});
+                  {x0, mid_bottom, le, corner_h});
 
   // Right edge.
   const float re = 13.0F;
   DrawEdgeSegment(renderer,
                   edges.right[0] ? edges.right[0]->get() : nullptr,
                   kBackdrop,
-                  {x2, y_top, re, kCornerHeight});
+                  {x2, y_top, re, corner_h});
   DrawEdgeSegment(renderer,
                   edges.right[1] ? edges.right[1]->get() : nullptr,
                   kBackdrop,
-                  {x2, mid_top, re, mid_bottom - mid_top});
+                  {x2, mid_top, re, mid_h});
   DrawEdgeSegment(renderer,
                   edges.right[2] ? edges.right[2]->get() : nullptr,
                   kBackdrop,
-                  {x2, middle_bottom, re, kCornerHeight});
+                  {x2, mid_bottom, re, corner_h});
 
   // Body: the middle band is the window backdrop so the bevel reads as a solid
   // button.
