@@ -7,6 +7,7 @@
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
+#include "services_buttons.hpp"
 #include "targeting.hpp"
 
 #include <SDL3/SDL.h>
@@ -136,11 +137,31 @@ namespace {
 
 // Row-layout for the six service entries, shared by the draw pass and the
 // mouse hit-test so a click lands on the same row the text is drawn on.
-// Rows are Geneva body text at 13 logical px whose baseline is kTop + i*kRowH;
-// we treat the clickable band as the glyph band above that baseline.
-constexpr int kServiceRowTop = 110;
-constexpr int kServiceRowHeight = 24;
-constexpr int kServiceRowFontSize = 13;
+// Layout for the six service buttons: a left-hand column. The row/body band
+// geometry is shared here so the hit test and the draw pass agree. Buttons are
+// 172 logical px wide so the label fits, 44 tall (25px bevel top+bottom plus a
+// short stretch centre) - enough to read as a real button.
+constexpr float kServiceButtonX = 40.0F;
+constexpr float kServiceButtonWidth = 172.0F;
+constexpr float kServiceButtonTop = 108.0F;
+constexpr float kServiceButtonHeight = 40.0F;
+constexpr float kServiceButtonStep = 50.0F;
+
+// Builds the six desk buttons (one per LandedService) at fixed rects.
+std::vector<ServiceButton> BuildServiceButtons() {
+  std::vector<ServiceButton> buttons;
+  buttons.reserve(static_cast<std::size_t>(LandedService::kCount));
+  for (std::uint8_t i = 0; i < static_cast<std::uint8_t>(LandedService::kCount);
+       ++i) {
+    buttons.push_back(ServiceButton{
+        {kServiceButtonX,
+         kServiceButtonTop + static_cast<float>(i) * kServiceButtonStep,
+         kServiceButtonWidth, kServiceButtonHeight},
+        i,
+    });
+  }
+  return buttons;
+}
 
 // Human-readable service-row labels for the MVP menu. The original draws these
 // as PICT service icons (0x2152..0x2178); we fall back to text so the MVP is
@@ -148,7 +169,7 @@ constexpr int kServiceRowFontSize = 13;
 const char *ServiceLabel(LandedService t) {
   switch (t) {
   case LandedService::kLaunch:
-    return "Launch into space (Q)";
+    return "Launch into space";
   case LandedService::kRefuel:
     return "Refuel";
   case LandedService::kRepair:
@@ -171,28 +192,6 @@ const char *ServiceLabel(LandedService t) {
   return "";
 }
 
-// Returns the service whose clickable row contains the logical-space point, or
-// std::nullopt when the point is not over any service row. The logo area / art
-// and the footer are not selectable.
-std::optional<LandedService> ServiceAtPoint(SDL_FPoint point) {
-  const float left = 10.0F;
-  const float right = 620.0F;
-  if (point.x < left || point.x > right) {
-    return std::nullopt;
-  }
-  for (int i = 0; i < static_cast<int>(LandedService::kCount); ++i) {
-    const float row_top =
-        static_cast<float>(kServiceRowTop + i * kServiceRowHeight -
-                           kServiceRowFontSize);
-    const float row_bottom =
-        static_cast<float>(kServiceRowTop + i * kServiceRowHeight);
-    if (point.y >= row_top && point.y <= row_bottom) {
-      return static_cast<LandedService>(i);
-    }
-  }
-  return std::nullopt;
-}
-
 // Draws the landed window header + service list with the real screen fonts:
 // the destination title in Chicago (charcoal) and the rows/bars in Geneva,
 // mirroring the original's window (title = family 0/Chicago UI font, body =
@@ -203,9 +202,12 @@ std::optional<LandedService> ServiceAtPoint(SDL_FPoint point) {
 // the services list.
 void DrawLandedMenu(SdlPlatform &platform,
                     NovaFontCache &font_cache,
+                    const ServicesButtonArt &buttons,
                     const GameState &state,
                     const LandedContext &ctx,
-                    SDL_Texture *destination_art) {
+                    SDL_Texture *destination_art,
+                    const std::vector<ServiceButton> &button_rects,
+                    std::optional<std::uint8_t> hovered) {
   SDL_Renderer *renderer = platform.renderer();
   const auto *st = state.scenario.Stellar(ctx.stellar_id);
 
@@ -266,23 +268,32 @@ void DrawLandedMenu(SdlPlatform &platform,
                 74.0F,
                 fuel);
 
-  const int kTop = kServiceRowTop;
-  const int kRowH = kServiceRowHeight;
-  for (int i = 0; i < static_cast<int>(LandedService::kCount); ++i) {
-    const auto svc = static_cast<LandedService>(i);
-    const bool selected = (i == static_cast<int>(ctx.selection));
-    const std::string row =
-        std::string(selected ? "> " : "  ") + ServiceLabel(svc);
-    const SDL_Color &color = selected ? kSelected : kBody;
-    NovaText_Draw(platform,
-                  font_cache,
-                  NovaFontFamily::kGeneva,
-                  static_cast<float>(kServiceRowFontSize),
-                  selected ? kNovaFontStyleBold : kNovaFontStyleRegular,
-                  color,
-                  20.0F,
-                  static_cast<float>(kTop + i * kRowH),
-                  row);
+  // The six service buttons, drawn with the real three-state button art and
+  // their labels centered in the body font. The selected (keyboard-focused)
+  // slot and the mouse-hovered slot both render in the hover state, mirroring
+  // the original highlighting the focused service.
+  for (std::size_t i = 0; i < button_rects.size(); ++i) {
+    const auto slot = button_rects[i].slot;
+    const bool focused = static_cast<int>(slot) ==
+                         static_cast<int>(ctx.selection);
+    const bool hovered_by_mouse = hovered.has_value() && *hovered == slot;
+    const auto state =
+        (focused || hovered_by_mouse) ? ButtonState::kHover
+                                      : ButtonState::kNormal;
+    buttons.Draw(platform, button_rects[i].rect, state);
+    const SDL_Color &label_color =
+        (focused || hovered_by_mouse) ? kSelected : kBody;
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          13.0F,
+                          (focused || hovered_by_mouse) ? kNovaFontStyleBold
+                                                        : kNovaFontStyleRegular,
+                          label_color,
+                          button_rects[i].rect.x,
+                          button_rects[i].rect.x + button_rects[i].rect.w,
+                          button_rects[i].rect.y + 18.0F,
+                          ServiceLabel(static_cast<LandedService>(slot)));
   }
 
   // Footer hint row in the body font.
@@ -387,10 +398,20 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                   "backdrop");
   }
 
+  // Load the six service buttons' real three-state edge art (normal 0x1d4c
+  // and hover 0x1db0 slice sets) and lay out their desk rects. If the slices
+  // are unavailable the buttons still render as flat fills behind the labels.
+  ServicesButtonArt button_art;
+  const bool have_buttons = button_art.Initialize(platform);
+  if (!have_buttons) {
+    NovaLog::Warn("service button art unavailable");
+  }
+  const std::vector<ServiceButton> button_rects = BuildServiceButtons();
+
   NovaLog::Todo(
-      "landed window service list still uses screen fonts; the original "
-      "UiWindow dialog 0x3f5/0x3fd six PICT service buttons + icon art are "
-      "out of scope");
+      "landed window still uses the original 0x3f5 UiWindow layout only in "
+      "outline; the six PICT service icon glyphs (0x2152..) and the sub-window "
+      "modals are out of scope");
 
   // Font subsystem init (SDL3_ttf) is refcounted and managed lazily by the
   // NovaFontCache itself (TTF_Init on first use, TTF_Quit in ~NovaFontCache),
@@ -420,14 +441,22 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   };
 
   while (!platform.quit_requested()) {
+    // Compute the mouse-hovered service (for hover state on the buttons).
+    std::optional<std::uint8_t> hovered;
+    if (!entered_sub_screen) {
+      hovered = ServiceButtonAt(button_rects, platform.mouse_position());
+    }
     // Draw the current face. When a sub-screen is "open" the original swaps to
     // a nested modal widget; the MVP keeps the same menu surface and only
     // distinguishes via the hint, so we always redraw the list.
     DrawLandedMenu(platform,
                     font_cache,
+                    button_art,
                     state,
                     ctx,
-                    destination_art ? destination_art->get() : nullptr);
+                    destination_art ? destination_art->get() : nullptr,
+                    button_rects,
+                    hovered);
     SDL_RenderPresent(platform.renderer());
 
     // Poll discrete raw keys for the modal (dedicated channel, so it never
@@ -452,11 +481,12 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
         continue;
       }
       if (in->key == TextKey::primary) {
-        // Left-click a service row: select it and activate (mirrors the
+        // Left-click a service button: select it and activate (mirrors the
         // original's mouse button driving the services buttons).
         if (!entered_sub_screen) {
-          if (const auto svc = ServiceAtPoint(platform.mouse_position())) {
-            ctx.selection = *svc;
+          if (const auto slot =
+                  ServiceButtonAt(button_rects, platform.mouse_position())) {
+            ctx.selection = static_cast<LandedService>(*slot);
             LandedExit exit = DispatchService(platform, state, ctx);
             if (exit == LandedExit::kLaunched) {
               return LandedExit::kLaunched;

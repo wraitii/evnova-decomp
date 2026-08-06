@@ -22,6 +22,7 @@ add_library(evnova_runtime
     game/spaceflight.cpp
     game/spaceflight_view.cpp
     game/scenario_data.cpp
+    game/services_buttons.cpp
     game/ship_visual.cpp
     game/targeting.cpp
     game/travel.cpp
