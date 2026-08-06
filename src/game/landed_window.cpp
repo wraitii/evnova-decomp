@@ -1,6 +1,8 @@
 #include "landed_window.hpp"
 
+#include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
@@ -10,6 +12,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <memory>
+#include <optional>
 #include <string>
 
 namespace game {
@@ -130,6 +134,14 @@ std::int32_t NovaLanded_Repair(GameState &state,
 
 namespace {
 
+// Row-layout for the six service entries, shared by the draw pass and the
+// mouse hit-test so a click lands on the same row the text is drawn on.
+// Rows are Geneva body text at 13 logical px whose baseline is kTop + i*kRowH;
+// we treat the clickable band as the glyph band above that baseline.
+constexpr int kServiceRowTop = 110;
+constexpr int kServiceRowHeight = 24;
+constexpr int kServiceRowFontSize = 13;
+
 // Human-readable service-row labels for the MVP menu. The original draws these
 // as PICT service icons (0x2152..0x2178); we fall back to text so the MVP is
 // navigable.
@@ -159,19 +171,50 @@ const char *ServiceLabel(LandedService t) {
   return "";
 }
 
+// Returns the service whose clickable row contains the logical-space point, or
+// std::nullopt when the point is not over any service row. The logo area / art
+// and the footer are not selectable.
+std::optional<LandedService> ServiceAtPoint(SDL_FPoint point) {
+  const float left = 10.0F;
+  const float right = 620.0F;
+  if (point.x < left || point.x > right) {
+    return std::nullopt;
+  }
+  for (int i = 0; i < static_cast<int>(LandedService::kCount); ++i) {
+    const float row_top =
+        static_cast<float>(kServiceRowTop + i * kServiceRowHeight -
+                           kServiceRowFontSize);
+    const float row_bottom =
+        static_cast<float>(kServiceRowTop + i * kServiceRowHeight);
+    if (point.y >= row_top && point.y <= row_bottom) {
+      return static_cast<LandedService>(i);
+    }
+  }
+  return std::nullopt;
+}
+
 // Draws the landed window header + service list with the real screen fonts:
 // the destination title in Chicago (charcoal) and the rows/bars in Geneva,
 // mirroring the original's window (title = family 0/Chicago UI font, body =
 // family 3/Geneva). Text positions are in the original 640x480 logical space.
+// When `destination_art` is non-null it is stretched across the window rect
+// first (mirroring NovaUi_DrawTravelDestinationServicesWindow blitting the
+// destination PICT across the window), so the piece is recognisable beneath
+// the services list.
 void DrawLandedMenu(SdlPlatform &platform,
                     NovaFontCache &font_cache,
                     const GameState &state,
-                    const LandedContext &ctx) {
+                    const LandedContext &ctx,
+                    SDL_Texture *destination_art) {
   SDL_Renderer *renderer = platform.renderer();
   const auto *st = state.scenario.Stellar(ctx.stellar_id);
 
   SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
+  if (destination_art != nullptr) {
+    const SDL_FRect full{0.0F, 0.0F, 640.0F, 480.0F};
+    SDL_RenderTexture(renderer, destination_art, nullptr, &full);
+  }
 
   const SDL_Color kTitle{202, 224, 255, 255};    // bright rows / highlight
   const SDL_Color kBody{128, 170, 210, 255};     // dim rows
@@ -223,8 +266,8 @@ void DrawLandedMenu(SdlPlatform &platform,
                 74.0F,
                 fuel);
 
-  const int kTop = 110;
-  const int kRowH = 24;
+  const int kTop = kServiceRowTop;
+  const int kRowH = kServiceRowHeight;
   for (int i = 0; i < static_cast<int>(LandedService::kCount); ++i) {
     const auto svc = static_cast<LandedService>(i);
     const bool selected = (i == static_cast<int>(ctx.selection));
@@ -234,7 +277,7 @@ void DrawLandedMenu(SdlPlatform &platform,
     NovaText_Draw(platform,
                   font_cache,
                   NovaFontFamily::kGeneva,
-                  13.0F,
+                  static_cast<float>(kServiceRowFontSize),
                   selected ? kNovaFontStyleBold : kNovaFontStyleRegular,
                   color,
                   20.0F,
@@ -251,7 +294,8 @@ void DrawLandedMenu(SdlPlatform &platform,
                 kBody,
                 20.0F,
                 464.0F,
-                "Up/Down or W/S move  Enter/E select  Q launch  Esc back");
+                "Click a service, Up/Down or W/S move, Enter/E select, Q launch, "
+                "Esc back");
 }
 
 // Handles one service selection from the docked menu. Returns the exit intent:
@@ -315,12 +359,38 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   NovaLog::Info("opening landed services window at stellar {}",
                 static_cast<int>(ctx.stellar_id));
 
-  // The original draws the six PICT service icons plus destination art
-  // (0x2151..0x2178); this build has no GVNO PICT UI, so the menu text is
-  // laid out with the real screen fonts instead. Log the art divergence once.
+  // Load the stellar's destination art. The original picks PICT 0x2138 when a
+  // custom selection-dialog variant is installed (g_selection_dialog_variant >=
+  // 0x80), else the default 0x2137; both are 16-bit DirectBitsRect PICTs. We
+  // use the default unless the scenario data later surfaces a variant id. The
+  // six PICT service icons and the GVNO UiWindow dialog (0x3f5/0x3fd) are still
+  // out of scope, so the service list stays as screen-font text.
+  std::unique_ptr<SdlTexture> destination_art;
+  if (const auto art_data = NovaResource_LoadPictData(0x2137)) {
+    if (const auto art = Resource_LoadPictAsImage(*art_data)) {
+      destination_art = SdlTexture::Create(platform.renderer(),
+                                           art->width,
+                                           art->height,
+                                           art->rgba_pixels);
+      if (!destination_art) {
+        NovaLog::Error("destination art 0x2137 decoded but SDL texture upload "
+                       "failed");
+      } else {
+        NovaLog::Info("landed window destination art 0x2137 ({}x{})",
+                      art->width, art->height);
+      }
+    } else {
+      NovaLog::Todo("destination art PICT 0x2137 failed to decode");
+    }
+  } else {
+    NovaLog::Todo("destination art PICT 0x2137 not found; drawing flat "
+                  "backdrop");
+  }
+
   NovaLog::Todo(
-      "landed window text now uses screen fonts (Chicago/Geneva); the original "
-      "UiWindow dialog 0x3f5/0x3fd + PICT art/icons are still out of scope");
+      "landed window service list still uses screen fonts; the original "
+      "UiWindow dialog 0x3f5/0x3fd six PICT service buttons + icon art are "
+      "out of scope");
 
   // Font subsystem init (SDL3_ttf) is refcounted and managed lazily by the
   // NovaFontCache itself (TTF_Init on first use, TTF_Quit in ~NovaFontCache),
@@ -353,7 +423,11 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     // Draw the current face. When a sub-screen is "open" the original swaps to
     // a nested modal widget; the MVP keeps the same menu surface and only
     // distinguishes via the hint, so we always redraw the list.
-    DrawLandedMenu(platform, font_cache, state, ctx);
+    DrawLandedMenu(platform,
+                    font_cache,
+                    state,
+                    ctx,
+                    destination_art ? destination_art->get() : nullptr);
     SDL_RenderPresent(platform.renderer());
 
     // Poll discrete raw keys for the modal (dedicated channel, so it never
@@ -375,6 +449,21 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
           return LandedExit::kLaunched;
         }
         entered_sub_screen = false;
+        continue;
+      }
+      if (in->key == TextKey::primary) {
+        // Left-click a service row: select it and activate (mirrors the
+        // original's mouse button driving the services buttons).
+        if (!entered_sub_screen) {
+          if (const auto svc = ServiceAtPoint(platform.mouse_position())) {
+            ctx.selection = *svc;
+            LandedExit exit = DispatchService(platform, state, ctx);
+            if (exit == LandedExit::kLaunched) {
+              return LandedExit::kLaunched;
+            }
+            entered_sub_screen = false;
+          }
+        }
         continue;
       }
       if (in->key == TextKey::character) {

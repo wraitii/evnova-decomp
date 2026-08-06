@@ -105,9 +105,11 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // platform input channels. Owns a NovaFontCache for the duration of the modal
 // (mirroring the original's DrawContext font state) and lays the window text
 // out with the real screen fonts (Chicago/Charcoal titles + Geneva body).
-// Returns the exit code describing how the window closed (see LandedExit).
-// `state.player` must already be positioned at the dock (e.g. after
-// NovaLanding_EnterDocked).
+// Renders the stellar's destination art PICT (0x2137 default, 0x2138 custom
+// variant) as the window backdrop, mirroring NovaUi_DrawTravelDestination-
+// ServicesWindow blitting it across the window rect. Returns the exit code
+// describing how the window closed (see LandedExit). `state.player` must already
+// be positioned at the dock (e.g. after NovaLanding_EnterDocked).
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                               GameState &state,
                                               LandedContext &ctx);
