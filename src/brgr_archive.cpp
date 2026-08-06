@@ -263,6 +263,13 @@ ParseArchive(const std::filesystem::path &path) {
 //  (planet) spin sprites (sp\x9an ids 1000-1255 + their rl\x91D sheets) are in
 //  Nova Graphics 2; both are needed for the flight rendering path.
 constexpr std::array kArchiveFileNames{
+    // The core UI archive lives directly in EV Nova/ (not under Nova Files/):
+    // it carries the DLOG/DITL/MENU/ALRT/CNTL dialog-window resources that the
+    // engine's dialog system (UiWindow_CreateFromDialogResource -> DLOG 0x444c4f47
+    // / DITL 0x4449544c) builds every in-game window from, plus a handful of
+    // PICT/STR#. Without it the .rez set is incomplete and dialog data is
+    // missing (this is what the landed/services window rects come from).
+    "Nova.rez",
     "Nova Graphics 3.rez",
     "Nova Titles 1.rez",
     "Nova Titles 2.rez",
@@ -286,7 +293,10 @@ constexpr std::array kArchiveFileNames{
     "Nova Data 6.rez",
 };
 constexpr std::array kNovaFilesRoots{
+    // Nova.rez sits one level above the Nova Files/ subfolder, so search both.
+    "EV Nova/",
     "EV Nova/Nova Files/",
+    "../../../EV Nova/",
     "../../../EV Nova/Nova Files/",
 };
 

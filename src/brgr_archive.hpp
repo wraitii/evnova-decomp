@@ -30,6 +30,17 @@ constexpr std::uint32_t kResourceTypeRleSheet16 =
 constexpr std::uint32_t kResourceTypePict = 0x50494354; // "PICT"
 constexpr std::uint32_t kResourceTypeSnd =
     0x736e6420; // "snd " (AIFF-style sounds)
+// "DLOG" (0x444c4f47) / "DITL" (0x4449544c) live in the core EV Nova/Nova.rez
+// UI archive. The dialog system builds every in-game window from a DLOG (which
+// selects a DITL by id) plus that DITL's item rects/types/titles. The docked
+// Spaceport window is DLOG/DITL 0x3e8 (618x517, matching PICT 0x2134 "Spaceport");
+// the docked sub-windows are DITL 0x3e9 Trade, 0x3ea Outfit, 0x3ec Shipyard,
+// 0x3ee Mission Select, 0x3f5 Bar, 0x3f6 News.
+constexpr std::uint32_t kResourceTypeDialog = 0x444c4f47;
+constexpr std::uint32_t kResourceTypeDialogItemList = 0x4449544c;
+constexpr std::uint32_t kResourceTypeMenu = 0x4d454e55; // "MENU"
+constexpr std::uint32_t kResourceTypeAlert = 0x414c5254; // "ALRT"
+constexpr std::uint32_t kResourceTypeControl = 0x434e544c; // "CNTL"
 // "ch"♦r" (ch\x9ar) — the single default character/pilot-type resource.
 // Same FourCC (0x63688a72) the game uses as the pilot-save registry key; the
 // resource carries the new-pilot intro frame ids and per-frame delays (Nova

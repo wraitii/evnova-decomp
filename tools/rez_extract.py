@@ -220,7 +220,7 @@ def parse_args():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('mode', choices=['list', 'list-all', 'strings', 'strings-all',
-                                     'types', 'find', 'summary'],
+                                     'types', 'find', 'summary', 'dlg'],
                     help="operation to run")
     ap.add_argument('pattern', nargs='?', default=None,
                     help="search word (find mode); optional archive name filter")
@@ -231,7 +231,12 @@ def parse_args():
 
 def default_paths():
     here = os.path.dirname(os.path.abspath(__file__))
-    return sorted(glob.glob(os.path.join(here, '..', 'EV Nova', 'Nova Files', '*.rez')))
+    nova_root = os.path.join(here, '..', 'EV Nova')
+    # Nova.rez (the core UI archive holding DLOG/DITL/MENU/...) sits directly in
+    # EV Nova/, while the scenario/graphics archives sit under EV Nova/Nova Files/.
+    paths = glob.glob(os.path.join(nova_root, 'Nova.rez'))
+    paths += glob.glob(os.path.join(nova_root, 'Nova Files', '*.rez'))
+    return sorted(set(paths))
 
 
 def main():
@@ -318,6 +323,47 @@ def main():
                     print(f"{a.name} region#{k} off={hex(off)}:")
                     for s in hits:
                         print(f"    {s!r}")
+
+    if args.mode == 'dlg':
+        # Decode the DLOG/DITL dialog resources from the core UI archive.
+        # DLOG selects a DITL by id; a DITL (classic Mac DlgTemplate) is a
+        # big-endian item list: [count:u16][version:u16] then per item
+        # [top,i16][left,i16][bottom,i16][right,i16][type:u8][payload]. Payload is
+        # a PascalString title for text/button/icon types, else a 5-byte refCon.
+        import struct
+        ITEM = {1: 'UserItem', 2: 'frame', 3: 'Icon?(Button)', 4: 'Button',
+                5: 'CheckBox', 6: 'RadioButton', 7: 'ScrollBar', 8: 'StaticText',
+                9: 'EditText', 11: 'Icon', 0xD: 'User', 0x20: 'Gauge', 0x40: 'Slider'}
+        for a in archives:
+            dlog = {rid: idx for tc, idx, rid, _ in a.map_records if tc == b'DLOG'}
+            ditl = {rid: idx for tc, idx, rid, _ in a.map_records if tc == b'DITL'}
+            if not (dlog or ditl):
+                continue
+            print(f"\n===== {a.name} dialogs =====")
+            for rid, idx in sorted(dlog.items()):
+                d = a.payload(idx)
+                bnds = struct.unpack('>4h', d[2:10])
+                dlog_id = int.from_bytes(d[0x12:0x14], 'big')
+                print(f"  DLOG {rid:#06x} bounds=({bnds[1]},{bnds[0]}..{bnds[3]},{bnds[2]}) "
+                      f"{bnds[3]-bnds[1]}x{bnds[2]-bnds[0]} -> DITL {dlog_id:#06x}")
+            for rid, idx in sorted(ditl.items()):
+                data = a.payload(idx)
+                n = struct.unpack('>H', data[0:2])[0]
+                print(f"  DITL {rid:#06x}  {n} items")
+                q = 4
+                for i in range(n):
+                    if q + 10 > len(data):
+                        break
+                    top, left, bot, right = struct.unpack('>4h', data[q:q+8]); q += 8
+                    it = data[q]; q += 1
+                    title = ''
+                    if it in (4, 5, 6, 8, 9, 11, 12, 0xD, 0x10, 0x14, 0x15, 0x21, 0x22, 0x24, 0x2d):
+                        L = data[q]; title = data[q+1:q+1+L].decode('latin1'); q += 1 + L
+                    else:
+                        q += 5
+                    print(f"      [{i:2d}] x={left:>4}..{right:>4} y={top:>4}..{bot:>4} "
+                          f"{right-left:>3}x{bot-top:>3} type={it:#04x} {ITEM.get(it,'?'):<10} {title!r}")
+        return
 
 
 if __name__ == '__main__':
