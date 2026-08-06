@@ -10,7 +10,9 @@
 // built from a dialog resource (DLOG 0x3e8 -> DITL 0x3e8), filling a near-
 // full-screen panel with the destination-art PICT 0x2134 backdrop
 // (FUN_0048e970) and the service controls in a two-column button layout down
-// the lower left/right edges (plus 0x2152..0x2178 service-icon images). The
+// the lower left/right edges (plus the docked sub-window frame PICTs in Nova
+// Graphics 3: 0x2135 Shipyard, 0x2136 Outfit, 0x2137 Bar, 0x2139 Mission BBS,
+// 0x213d Map, 0x213e Trade, 0x213f Communications). The
 // buy/sell/outfit/shipyard/bar/starmap/mission sub-windows are nested modals
 // over the same backing store. That whole GVNO UI stack is NOT reconstructed
 // here. This build presents the same landing *architecture* -- a persistent

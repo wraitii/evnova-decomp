@@ -201,7 +201,9 @@ std::vector<ServiceButton> BuildServiceButtons(const PanelRect &panel) {
 } // namespace
 
 // Human-readable service-row labels for the MVP menu. The original draws these
-// as PICT service icons (0x2152..0x2178); we fall back to text so the MVP is
+// as PICT sub-window frames (Nova Graphics 3: 0x2135 Shipyard, 0x2136 Outfit,
+// 0x2137 Bar, 0x2139 Mission BBS, 0x213e Trade, ...); we fall back to text so
+// the MVP is
 // navigable.
 const char *ServiceLabel(LandedService t) {
   switch (t) {
@@ -467,7 +469,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
 
   NovaLog::Todo(
       "docked screen uses the DITL 0x3e8 two-column button layout in outline "
-      "only; the PICT service-icon glyphs (0x2152..) and the sub-window "
+      "only; the PICT sub-window frames (0x2135..) and the sub-window "
       "modals are out of scope");
 
   // Font subsystem init (SDL3_ttf) is refcounted and managed lazily by the
