@@ -31,7 +31,7 @@ carry the crln control char (0xd9) in the on-disk names are re-marked here as <c
 """
 
 import sys, os, glob, json, argparse
-from rez_extract import Archive, _u32, type_code_str  # reuse parser
+from rez_extract import Archive, type_code_str  # reuse parser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
