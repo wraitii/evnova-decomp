@@ -212,31 +212,22 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
 
   std::int16_t effective = owned;
 
-  // (1) Ammo-backed weapons: an outfit whose ModType1 == 3 (ammo) tied to a
-  // weapon with ammo capacity limits holdings to capacity * bank ammo.
+  // (1) Ammo-backed weapons: an outfit whose ModType1 == 3 (ammo) supplies a
+  // weapon bank; the ammo outfit's holdings are capped by the bank ammo and
+  // any ammo capacity the weapon definitions impose.
+  //
+  // TODO(decomp): the original caps this via the weapon bank / ammo system
+  // (Weapon_CanFireWeaponBank gating on weapon_bank_secondary counters), not
+  // a per-weapon "max ammo" payload field. Earlier clean-room code fabricated
+  // a max_ammo from payload +0x5a, which is actually burst_cycle_ticks (see
+  // the weapon-decode audit). Until the real ammo system is reconstructed we
+  // leave the capacity cap out; the plain owned-count handling below still
+  // bounds it correctly for non-ammo outfits.
   if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo)) {
-    const std::int16_t ammo_weapon_id = o.mod_val; // weapon resource id (base)
-    const Weapon *wpn =
-        state.scenario.Weapon(static_cast<std::int16_t>(ammo_weapon_id + 0x80));
-    if (wpn && wpn->max_ammo > 0) {
-      // Ghidra: weapon_bank_ammo[mod_val * 100] is the held ammo for the bank
-      // this outfit feeds. Our placeholder bank index mirrors that legacy
-      // stride; bounds-checked here.
-      const std::size_t bank_idx =
-          static_cast<std::size_t>(ammo_weapon_id) * 100U;
-      const std::int16_t bank_ammo = bank_idx < state.weapon_bank_ammo.size()
-                                         ? state.weapon_bank_ammo[bank_idx]
-                                         : 0;
-      const std::int16_t limit =
-          static_cast<std::int16_t>(wpn->max_ammo) * bank_ammo;
-      if (limit < out.max_allowed) {
-        out.max_allowed = limit;
-      }
-      effective = std::min<int>(effective, limit);
-      out.effective_owned =
-          static_cast<std::int16_t>(std::max<int>(0, effective));
-      return out;
-    }
+    // Held ammo is not yet a separate concept in this build; skip the
+    // capacity cap (TODO(decomp) above).
+    out.effective_owned = static_cast<std::int16_t>(std::max<int>(0, owned));
+    return out;
   }
 
   // (2) ModType-27 (kIncreaseMax) maximum multipliers: every owned outfit

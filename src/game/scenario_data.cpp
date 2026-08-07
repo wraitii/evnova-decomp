@@ -65,16 +65,22 @@ namespace {
 // ---------------------------------------------------------------------------
 // w\x91ap (Weapon) decode
 // ---------------------------------------------------------------------------
-// All offsets verified against the Nova Data 4 payloads and the loader's
-// weapon section (0x004bd3c0). Bible order: Reload0, Count2, MassDmg4,
-// EnergyDmg6, Guidance8, Speed_a, AmmoType_c, Graphic_e, Inaccuracy10,
-// Sound12, Impact14, ExplodType16, ProxRadius18, BlastRadius1a, Flags1c,
-// Seeker1e, then SmokeSet20..PartColor2c (24-bit), BeamLength30, BeamWidth32,
-// Falloff34, BeamColor36 (24-bit), CoronaColor3a (24-bit), the sub/particle
-// block, and the jam/burst fields near 0x44+ / 0x56 / 0x6a / 0x72.
+// Offsets verified against the Nova Data 4 payloads and the original loader
+// (0x004bd3c0), which copies each resource +N into a g_weapon_defs slot. The
+// first packet follows Bible order (Reload0, Count2, MassDmg4, EnergyDmg6,
+// Guidance8, Speed_a, AmmoType_c, Graphic_e, Inaccuracy10, Sound12, Impact14,
+// ExplodType16, ProxRadius18, BlastRadius1a, Flags1c, Seeker1e) and the
+// remaining fields match the loader's WeaponDef mapping (flags_secondary +0x48,
+// burst_cycle_ticks +0x5a / burst_reset_cooldown +0x5c, turret arc +0x30,
+// homing/turn +0x32, kickback +0x56, turret_group +0x58, retarget +0x68,
+// jam_vuln +0x5e..+0x64). See the Weapon field comments in scenario_data.hpp.
 [[nodiscard]] Weapon DecodeWeapon(std::span<const std::byte> bytes) {
   Weapon w;
-  w.reload_ticks = ReadBeI16(bytes, 0x00);
+  // Offsets cross-checked against the in-memory loader copy (0x004bd3c0):
+  // each `resource +N` below is the payload offset the loader stores into a
+  // g_weapon_defs slot. See the Weapon field comments in scenario_data.hpp
+  // for the Ghidra/provisional names.
+  w.reload_ticks = ReadBeI16(bytes, 0x00); // Reload / WeaponDef speed_scalar
   w.lifetime_ticks = ReadBeI16(bytes, 0x02);
   w.mass_damage = ReadBeI16(bytes, 0x04);
   w.energy_damage = ReadBeI16(bytes, 0x06);
@@ -85,24 +91,24 @@ namespace {
   w.sprite_id = ReadBeI16(bytes, 0x0e);
   w.inaccuracy = ReadBeI16(bytes, 0x10);
   w.fire_sound = ReadBeI16(bytes, 0x12);
-  w.impact = ReadBeI16(bytes, 0x14);
-  w.explosion = ReadBeI16(bytes, 0x16);
-  w.prox_radius = ReadBeI16(bytes, 0x18);
-  w.blast_radius = ReadBeI16(bytes, 0x1a);
-  w.flags = ReadBe16(bytes, 0x1c);
-  w.seeker = ReadBe16(bytes, 0x1e);
-  w.beam_length = ReadBeI16(bytes, 0x30);
-  // Resource +0x32 is Ghidra WeaponDef.homing_strength_or_turn_rate (the
-  // loader maps resource 0x32 -> +0x72); it is the shot animation frame-dwell
-  // time in ms (see Weapon field comment in scenario_data.hpp).
+  w.impact_sound_slot = ReadBeI16(bytes, 0x14);
+  w.impact_effect_id = ReadBeI16(bytes, 0x16);
+  w.blast_radius = ReadBeI16(bytes, 0x18);
+  w.splash_radius = ReadBeI16(bytes, 0x1a);
+  w.flags = ReadBe16(bytes, 0x1c); // flags_primary
+  w.flags_quaternary = ReadBe16(bytes, 0x1e);
+  w.flags_secondary = ReadBe16(bytes, 0x48);
+  w.flags_tertiary = ReadBe16(bytes, 0x66);
+  w.turret_arc_degrees = ReadBeI16(bytes, 0x30);
   w.shot_anim_frame_dwell = ReadBeI16(bytes, 0x32);
-  w.burst_count = ReadBeI16(bytes, 0x56);
-  w.burst_reload = ReadBeI16(bytes, 0x58);
-  w.max_ammo = ReadBeI16(bytes, 0x5a);
+  w.kickback_impulse = ReadBeI16(bytes, 0x56);
+  w.turret_group_id = ReadBeI16(bytes, 0x58);
+  w.burst_cycle_ticks = ReadBeI16(bytes, 0x5a);
+  w.burst_reset_cooldown = ReadBeI16(bytes, 0x5c);
+  w.retarget_interval_ticks = ReadBeI16(bytes, 0x68);
   for (std::size_t i = 0; i < 4; ++i) {
     w.jam_vuln[i] = ReadBeI16(bytes, 0x5e + i * 2);
   }
-  w.flags2 = ReadBe16(bytes, 0x44);
   return w;
 }
 

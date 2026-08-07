@@ -54,6 +54,25 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(std::fabs(w->projectile_speed - 1500.0F) < 0.001F);
   CHECK(w->ammo_type == -1); // unlimited ammo
   CHECK(w->sprite_id == 0);
+  // Weapon-decode audit: pin the re-named/offset fields to the Light Blaster's
+  // actual payload (verified byte-for-byte). The loader maps the first packet
+  // in Bible order and the tail per its WeaponDef mapping.
+  CHECK(w->inaccuracy == 9); // shot_random_spread
+  CHECK(w->fire_sound == 8);
+  CHECK(w->impact_sound_slot == 10); // was mislabeled 'impact' but same offset
+  CHECK(w->impact_effect_id == -1);  // was 'explosion'
+  CHECK(w->blast_radius == 5);       // was 'prox_radius'
+  CHECK(w->splash_radius == 6);      // was 'blast_radius'
+  CHECK(w->flags == 0x6100);
+  CHECK(w->flags_quaternary == 0U); // was mislabeled 'seeker'
+  CHECK(w->flags_secondary == 0U);  // (payload +0x48)
+  CHECK(w->flags_tertiary == 2U);   // (payload +0x66)
+  CHECK(w->turret_arc_degrees == 0);
+  CHECK(w->shot_anim_frame_dwell == 0);
+  CHECK(w->kickback_impulse == 0);
+  CHECK(w->burst_cycle_ticks == 0); // (the old mislabeled 'max_ammo' at +0x5a)
+  CHECK(w->burst_reset_cooldown == 0);
+  CHECK(w->retarget_interval_ticks == 0);
 
   // Outfits load; the first outfit is a weapon-type (ModType 1 -> weapon).
   CHECK(data.Outfit(0x80) != nullptr);

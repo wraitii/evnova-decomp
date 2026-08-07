@@ -190,28 +190,43 @@ struct Outfit {
 struct Weapon {
   std::string name; // resource name / status-display name
 
-  std::int16_t reload_ticks = 30;    // Reload
-  std::int16_t lifetime_ticks = 30;  // Count
-  std::int16_t mass_damage = 0;      // MassDmg
-  std::int16_t energy_damage = 0;    // EnergyDmg
-  std::int16_t guidance_mode = 0;    // Guidance
+  // Field offsets are verified against the raw w\x91ap payload bytes and the
+  // original loader (0x004bd3c0) which copies each to a g_weapon_defs slot.
+  // The Bible ordering and the loader's provisional WeaponDef names differ
+  // slightly; the offset values below are the source of truth (validated
+  // against the Light Blaster payload: reload 10, count 13, etc.) and the
+  // Ghidra name is noted where it diverges.
+
+  // Reload0 (Ghidra speed_scalar): the fire cadence, in reference frames, for
+  // a non-burst weapon. The original Weapon_FirePlayerWeaponBank sets the
+  // bank cooldown to this value (Weapon_GetWeaponBurstAttempts == 1); stored
+  // as float speed_scalar in WeaponDef.
+  std::int16_t reload_ticks = 30;
+  std::int16_t lifetime_ticks = 30;  // Count2
+  std::int16_t mass_damage = 0;      // MassDmg4 (WeaponDef field_0x2)
+  std::int16_t energy_damage = 0;    // EnergyDmg6 (WeaponDef field_0x4)
+  std::int16_t guidance_mode = 0;    // Guidance8
   std::int16_t weapon_mode_code = 0; // (runtime alias of Guidance)
-  float projectile_speed = 0.0F;     // Speed (pixels/frame * 100)
-  std::int16_t ammo_type = -1;       // AmmoType
+  float projectile_speed = 0.0F;     // Speed_a, raw (pixels/frame * 100);
+                                     // divide by 100 for px/frame.
+  std::int16_t ammo_type = -1;       // AmmoType_c (ammo_or_energy_cost_code)
 
-  std::int16_t sprite_id = 0;   // Graphic
-  std::int16_t inaccuracy = 0;  // Inaccuracy
-  std::int16_t fire_sound = -1; // Sound
+  std::int16_t sprite_id = 0;   // Graphic_e (shot_sprite_set_id)
+  std::int16_t inaccuracy = 0;  // Inaccuracy10 (shot_random_spread)
+  std::int16_t fire_sound = -1; // Sound12 (fire_sound_slot)
 
-  std::int16_t impact = 0;       // Impact
-  std::int16_t explosion = -1;   // ExplodType
-  std::int16_t prox_radius = 0;  // ProxRadius
-  std::int16_t blast_radius = 0; // BlastRadius
+  std::int16_t impact_sound_slot = -1; // Impact14
+  std::int16_t impact_effect_id = -1;  // ExplodType16
+  std::int16_t blast_radius = 0;       // ProxRadius18
+  std::int16_t splash_radius = 0;      // BlastRadius1a
 
-  std::uint16_t flags = 0;  // Flags
-  std::uint16_t seeker = 0; // Seeker
+  std::uint16_t flags = 0;             // Flags1c (flags_primary)
+  std::uint16_t flags_quaternary = 0;  // Seeker1e (flags_quaternary)
+  std::uint16_t flags_secondary = 0;   // (resource +0x48, flags_secondary)
+  std::uint16_t flags_tertiary = 0;    // (resource +0x66, flags_tertiary)
 
-  std::int16_t beam_length = 0;  // BeamLength (TODO(decomp): offset unverified)
+  std::int16_t turret_arc_degrees = 0; // (resource +0x30, was mislabeled
+                                       // beam_length)
   // Ghidra WeaponDef.homing_strength_or_turn_rate (+0x72, loaded from resource
   // +0x32): dual-purpose. For an animation-frame weapon set it is the shot
   // animation frame-dwell time in ms (Shot_HandleShot accumulates it into
@@ -220,12 +235,18 @@ struct Weapon {
   // payload keeps it at 0, which makes even an animated frame-stepper advance
   // every frame.
   std::int16_t shot_anim_frame_dwell = 0;
-  std::int16_t burst_count = 0;  // BurstCount
-  std::int16_t burst_reload = 0; // BurstReload
-  std::int16_t max_ammo = 0;     // MaxAmmo
+  std::int16_t kickback_impulse = 0;   // (resource +0x56, WeaponDef field_0x12;
+                                       // recoil kickback, was mislabeled burst_count)
+  std::int16_t turret_group_id = -1;   // (resource +0x58, was mislabeled
+                                       // burst_reload)
+  // Burst-cycle fields drive a weapon that fires a burst then resets on a
+  // cooldown (Weapon_GetWeaponFireIntervalTicks / Weapon_FirePlayerWeaponBank).
+  std::int16_t burst_cycle_ticks = 0;  // (resource +0x5a, was mislabeled
+                                       // max_ammo)
+  std::int16_t burst_reset_cooldown = 0;
+  std::int16_t retarget_interval_ticks = 0;
 
-  std::array<std::int16_t, 4> jam_vuln{}; // JamVuln1-4
-  std::uint16_t flags2 = 0;               // Flags2
+  std::array<std::int16_t, 4> jam_vuln{}; // JamVuln1-4 (resource +0x5e..)
 };
 
 // Ghidra StellarDef (g_stellar_defs, entries indexed by stellar id minus
