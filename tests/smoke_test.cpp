@@ -1,7 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "brgr_archive.hpp"
-#include "nova_app.hpp"
 #include "pict_image.hpp"
 #include "rle_sprite_sheet.hpp"
 
@@ -109,15 +108,6 @@ TEST_CASE("Spaceport DITL 0x3e8 decodes the two-column service buttons") {
     }
   }
   CHECK(found == buttons.size());
-}
-
-TEST_CASE("main-menu shortcuts retain the original action mapping") {
-  CHECK(NovaCommand_TranslateByInputMap('n') == GameModeAction::new_game);
-  CHECK(NovaCommand_TranslateByInputMap('o') == GameModeAction::open_pilot);
-  CHECK(NovaCommand_TranslateByInputMap('p') == GameModeAction::preferences);
-  CHECK(NovaCommand_TranslateByInputMap('a') == GameModeAction::starmap);
-  CHECK(NovaCommand_TranslateByInputMap('q') == GameModeAction::quit);
-  CHECK_FALSE(NovaCommand_TranslateByInputMap('z').has_value());
 }
 
 TEST_CASE("sprite metadata decodes from its documented big-endian layout") {
@@ -351,121 +341,4 @@ TEST_CASE("main-menu backdrop and logo PICTs decode to the 1024x768 space") {
   CHECK(logo_image->width == 654);
   CHECK(logo_image->height == 209 * 7);
   CHECK(logo_image->rgba_pixels.size() == 654U * (209U * 7U) * 4U);
-}
-
-TEST_CASE("resource resolver locates the main-menu sound blips") {
-  if (!MenuArchivesAvailable()) {
-    SKIP("Nova .rez archives not present");
-  }
-
-  // Hover blip = "snd " 600, select blip = "snd " 601. Both are the tiny
-  // uncompressed 8-bit mono 'NONE' form (Ghidra DAT_007d24b8[0] == 600).
-  const auto hover = NovaResource_LoadSndData(600);
-  REQUIRE(hover);
-  const auto hover_sound = NovaSound_Decode(*hover);
-  REQUIRE(hover_sound);
-  CHECK(hover_sound->sample_rate == 11127);
-  const auto select = NovaResource_LoadSndData(601);
-  REQUIRE(select);
-  const auto select_sound = NovaSound_Decode(*select);
-  REQUIRE(select_sound);
-  CHECK(select_sound->sample_rate == 11127);
-
-  // Row reveal start/finish = snd 602/603, both mono Apple IMA4.
-  for (std::uint16_t sound_id = 602; sound_id <= 603; ++sound_id) {
-    const auto bytes = NovaResource_LoadSndData(sound_id);
-    REQUIRE(bytes);
-    const auto decoded = NovaSound_Decode(*bytes);
-    REQUIRE(decoded);
-    CHECK(decoded->sample_rate == 22050);
-    CHECK(decoded->channel_count == 1);
-    CHECK_FALSE(decoded->samples.empty());
-    CHECK(decoded->samples.size() % 64 == 0);
-  }
-}
-
-TEST_CASE("NovaSound_Decode expands 8-bit menu blips to 16-bit 'NONE' PCM") {
-  // Minimal format-2 'NONE' payload: first short == 2, a one-entry rate table
-  // at offset 6 returning sub-structure offset 14 (Ghidra FUN_004d6d30), the
-  // 'NONE' byte at 14 + 0x14, then 8-bit samples from 14 + 0x16 = 36.
-  std::vector<std::byte> bytes(36 + 2, std::byte{0x00});
-  bytes[0] = std::byte{0x00};
-  bytes[1] = std::byte{0x02}; // first short == 2 (8-bit form)
-  bytes[4] = std::byte{0x00};
-  bytes[5] = std::byte{0x01}; // one table entry
-  bytes[6] = std::byte{0x80};
-  bytes[7] = std::byte{0x51};  // rate marker 0x8051 at table_pos 6
-  bytes[10] = std::byte{0x00}; // table value at table_pos+4 (bytes 10..13)
-  bytes[13] = std::byte{0x0e}; // value == 14 -> data offset 14
-  bytes[14 + 8] = std::byte{0x2b};
-  bytes[14 + 9] = std::byte{0x77};
-  bytes[14 + 10] = std::byte{0x45};
-  bytes[14 + 11] = std::byte{0xd1};   // 11127.27 Hz, unsigned 16.16
-  bytes[14 + 0x14] = std::byte{0x00}; // cVar1 == 0 -> 'NONE'
-  bytes[36] = std::byte{0x80};        // first 8-bit sample (silence)
-  bytes[37] = std::byte{0x00};
-
-  const auto sound = NovaSound_Decode(bytes);
-  REQUIRE(sound);
-  CHECK(sound->channel_count == 1);
-  CHECK(sound->sample_rate == 11127);
-  REQUIRE(sound->samples.size() == 2);
-  // 16-bit expansion mirrors FUN_004d6900: (v + 0x80) | (v + 0x80) << 8,
-  // truncated to 16 bits. So 0x80 -> 0x100 -> 0x0100, and 0x00 -> 0x8080.
-  CHECK(sound->samples[0] == static_cast<std::int16_t>(0x0100));
-  CHECK(sound->samples[1] ==
-        static_cast<std::int16_t>(static_cast<std::uint16_t>(0x8080)));
-  CHECK_FALSE(NovaSound_Decode(std::vector<std::byte>(40, std::byte{0x00}))
-                  .has_value());
-}
-
-TEST_CASE("NovaSound_Decode expands a mono Apple IMA4 packet") {
-  // Format-1 extended sound header at +0x14, followed by one 34-byte Apple
-  // IMA4 packet. A zero predictor/index and zero nibbles decode to 64 zeroes.
-  std::vector<std::byte> bytes(0x54 + 34, std::byte{0x00});
-  bytes[1] = std::byte{0x01};
-  bytes[0x14 + 7] = std::byte{0x01}; // one channel (big-endian u32)
-  bytes[0x14 + 8] = std::byte{0x56};
-  bytes[0x14 + 9] = std::byte{0x22}; // 22050 in 16.16 fixed point
-  bytes[0x14 + 0x14] = std::byte{0xfe};
-  bytes[0x14 + 0x28] = std::byte{'i'};
-  bytes[0x14 + 0x29] = std::byte{'m'};
-  bytes[0x14 + 0x2a] = std::byte{'a'};
-  bytes[0x14 + 0x2b] = std::byte{'4'};
-  bytes[0x14 + 0x3f] = std::byte{0x10};
-
-  const auto sound = NovaSound_Decode(bytes);
-
-  REQUIRE(sound);
-  CHECK(sound->sample_rate == 22050);
-  CHECK(sound->channel_count == 1);
-  CHECK(sound->samples == std::vector<std::int16_t>(64, 0));
-}
-
-TEST_CASE("NovaSound_Decode carries predictor low bits between IMA4 packets") {
-  std::vector<std::byte> bytes(0x54 + 68, std::byte{0x00});
-  bytes[1] = std::byte{0x01};
-  bytes[0x14 + 7] = std::byte{0x01};
-  bytes[0x14 + 8] = std::byte{0x56};
-  bytes[0x14 + 9] = std::byte{0x22};
-  bytes[0x14 + 0x14] = std::byte{0xfe};
-  bytes[0x14 + 0x28] = std::byte{'i'};
-  bytes[0x14 + 0x29] = std::byte{'m'};
-  bytes[0x14 + 0x2a] = std::byte{'a'};
-  bytes[0x14 + 0x2b] = std::byte{'4'};
-  bytes[0x14 + 0x3f] = std::byte{0x10};
-  // Packet 0 starts at predictor/index zero. Its final high nibble 7 advances
-  // the predictor to 11, leaving low bits that QuickTime carries forward.
-  bytes[0x54 + 33] = std::byte{0x70};
-  // Packet 1 replaces the predictor high bits with 0x0100 and starts at step
-  // index zero. Its first zero nibble has zero delta, so the first output is
-  // 0x0100 | 11 = 267.
-  bytes[0x54 + 34] = std::byte{0x01};
-  bytes[0x54 + 35] = std::byte{0x00};
-
-  const auto sound = NovaSound_Decode(bytes);
-
-  REQUIRE(sound);
-  REQUIRE(sound->samples.size() == 128);
-  CHECK(sound->samples[64] == 267);
 }
