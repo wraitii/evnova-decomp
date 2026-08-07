@@ -320,6 +320,39 @@ TEST_CASE("stellar spin sprites resolve from Nova Graphics",
   CHECK(gov->present);
 }
 
+// The Light Blaster's projectile shot sprite set. Each weapon's shot sprite
+// set id (Ghidra WeaponDef.shot_sprite_set_id, our Weapon.sprite_id from the
+// "Graphic" payload field) selects a ``g_weapon_sprite_set_table`` entry that
+// FUN_004ad960 builds from the sp\x9an spin descriptor at id + 3000 (the
+// weapon spin-object range). The Light Blaster's sprite_id is 0, so its bolt
+// spinner is spin resource 3000. Pin the decode so the flight shot renderer
+// mounts the real bolt rather than the bright-dot fallback.
+TEST_CASE("light blaster shot sprite (spin resource 3000) decodes",
+          "[scenario][weaponshot]") {
+  game::ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const game::Weapon *w = data.Weapon(0x80);
+  REQUIRE(w != nullptr);
+  CHECK(w->sprite_id == 0);
+
+  // spin descriptor id = shot_sprite_set_id + 3000.
+  const auto spin_id = static_cast<std::uint16_t>(w->sprite_id + 3000);
+  const auto spin = NovaResource_Load(kResourceTypeSprites, spin_id);
+  REQUIRE(spin.has_value());
+  const auto def = NovaSpriteDefinition_Parse(*spin);
+  REQUIRE(def.has_value());
+
+  const auto sheet_data =
+      NovaResource_Load(kResourceTypeRleSheet16, def->sprites_resource_id);
+  REQUIRE(sheet_data.has_value());
+  const auto sheet = RleSpriteSheet_Decode16(*sheet_data);
+  REQUIRE(sheet.has_value());
+  // Each bolt frame is a single tile (one frame per direction/pulse, laid out
+  // as tiles_x * tiles_y distinct frames in the sheet).
+  CHECK(sheet->width == def->tile_width);
+  CHECK(sheet->height == def->tile_height);
+}
+
 // Kania (system 0x80) owns exactly Port Kane + the HG-Kania hypergate as its
 // space objects (System.nav_defs from payload +0x24). The flight renderer draws
 // only the current system's nav_defs stellars, so this pins that membership.

@@ -100,7 +100,8 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
     return false;
   }
   SDL_Renderer *const renderer = platform.renderer();
-  auto base = LoadShipSprite(renderer, visual->base_image_id);
+  // Bare rl\x91D ship sheets load through the shared sheet decoder.
+  auto base = SpriteAsset::LoadSheet(renderer, visual->base_image_id);
   if (!base) {
     NovaLog::Warn("ship sprite: no usable rl.x91D sheet {} for class '{}'",
                   visual->base_image_id,
@@ -108,7 +109,7 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
     return false;
   }
   ship_ = std::move(*base);
-  ship_.frames_per_rotation = visual->frames_per_rotation;
+  ship_frames_per_rotation_ = visual->frames_per_rotation;
 
   // Engine-glow layer (GlowImageID). The original loads it into the per-class
   // glow sprite set sharing the base's rotation grid (same frame count, set by
@@ -117,15 +118,15 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   // ship has no glow layer, which is not fatal.
   has_glow_ = visual->engine_glow_image_id > 0;
   if (has_glow_) {
-    if (auto glow = LoadShipSprite(
+    if (auto glow = SpriteAsset::LoadSheet(
             renderer, static_cast<std::uint16_t>(visual->engine_glow_image_id));
         glow) {
       glow_ = std::move(*glow);
-      glow_.frames_per_rotation = visual->frames_per_rotation;
+      glow_.frame_count = ship_.frame_count; // shares the base rotation grid
       NovaLog::Info("ship engine glow loaded for '{}': {}x{} x{} frames",
                     ship_class->display_name,
-                    glow_.width,
-                    glow_.height,
+                    glow_.tile_width,
+                    glow_.tile_height,
                     glow_.frame_count);
     } else {
       has_glow_ = false;
@@ -138,172 +139,21 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
 
   NovaLog::Info("ship sprite loaded for '{}': {}x{} x{} frames ({} set(s))",
                 ship_class->display_name,
-                ship_.width,
-                ship_.height,
+                ship_.tile_width,
+                ship_.tile_height,
                 ship_.frame_count,
                 visual->base_set_count);
   return true;
 }
 
-std::optional<SpaceflightView::ShipSprite>
-SpaceflightView::LoadShipSprite(SDL_Renderer *renderer,
-                                std::uint16_t resource_id) {
-  const auto sheet_data =
-      NovaResource_Load(kResourceTypeRleSheet16, resource_id);
-  if (!sheet_data) {
-    return std::nullopt;
-  }
-  auto sheet = RleSpriteSheet_Decode16(*sheet_data);
-  if (!sheet) {
-    return std::nullopt;
-  }
-  ShipSprite out;
-  out.frame_count = static_cast<int>(sheet->frames.size());
-  out.width = sheet->width;
-  out.height = sheet->height;
-  out.frames.reserve(sheet->frames.size());
-  for (const auto &frame : sheet->frames) {
-    auto texture = SdlTexture::Create(
-        renderer, sheet->width, sheet->height, frame.rgba_pixels);
-    if (!texture) {
-      out.frames.clear();
-      return std::nullopt;
-    }
-    out.frames.push_back(std::move(texture));
-  }
-  return out;
-}
-
-// Loads (and caches) the spin sprite set for a stellar's graphic. spin_set_id
-// is the stellar's link_a_id; the sp\x9an descriptor id is spin_set_id + 1000
-// (the stellar-object spin id range), and its SpritesID names the rl\x91D
-// sheet.
-const SpaceflightView::SpinSpriteSet *
-SpaceflightView::GetSpinSpriteSet(SdlPlatform &platform, int spin_set_id) {
-  if (spin_set_id < 0 || spin_set_id > 0xff) {
-    return nullptr;
-  }
-  const auto index = static_cast<std::size_t>(spin_set_id);
-  if (spin_sets_.size() <= index) {
-    spin_sets_.resize(index + 1);
-  }
-  if (spin_sets_[index]) {
-    return spin_sets_[index].get(); // cached (possibly a failed load -> null)
-  }
-  auto owner = std::make_unique<SpinSpriteSet>();
-  const auto spin_id = static_cast<std::uint16_t>(spin_set_id + 1000);
-  const auto spin_data = NovaResource_Load(kResourceTypeSprites, spin_id);
-  if (spin_data) {
-    const auto def = NovaSpriteDefinition_Parse(*spin_data);
-    if (def) {
-      const auto sheet_data =
-          NovaResource_Load(kResourceTypeRleSheet16, def->sprites_resource_id);
-      if (sheet_data) {
-        auto sheet = RleSpriteSheet_Decode16(*sheet_data);
-        if (sheet && def->tile_width > 0 && def->tile_height > 0 &&
-            sheet->width == def->tile_width &&
-            sheet->height == def->tile_height) {
-          owner->frame_count = static_cast<int>(sheet->frames.size());
-          owner->width = def->tiles_x;
-          owner->height = def->tiles_y;
-          owner->tile_width = def->tile_width;
-          owner->tile_height = def->tile_height;
-          for (const auto &frame : sheet->frames) {
-            auto texture = SdlTexture::Create(platform.renderer(),
-                                              sheet->width,
-                                              sheet->height,
-                                              frame.rgba_pixels);
-            if (!texture) {
-              break;
-            }
-            owner->frames.push_back(std::move(texture));
-          }
-          NovaLog::Info("spin sprite id {}: {}x{} {} frames",
-                        spin_id,
-                        sheet->width,
-                        sheet->height,
-                        owner->frame_count);
-        }
-      }
-    }
-  }
-  if (owner->frames.empty()) {
-    NovaLog::Warn(
-        "no spin sprite for stellar set {} (spin id {})", spin_set_id, spin_id);
-    return nullptr; // not cached; caller falls back to tinted disc
-  }
-  spin_sets_[index] = std::move(owner);
-  return spin_sets_[index].get();
-}
-
-// Loads (and caches) the ambient star-field artwork: sp\x9an spin descriptor
-// resource 700 is a 4x4 grid of 5x5px star tiles (16 shapes), whose SpritesID
-// names the rl\x91D sheet. Ghidra builds this into DAT_00593efc via
-// Spin_ReadDescriptor(700,..); the spawn picks a random frame in
-// [0, frameCount) from it. Falls back to null (plain-point stars) when absent.
-const SpaceflightView::StarFieldSheet *
-SpaceflightView::EnsureStarFieldSheet(SdlPlatform &platform) {
-  if (!star_field_.frames.empty()) {
-    return &star_field_; // cached
-  }
-  // Spin descriptor resource id for the ambient star field (Ghidra
-  // Spin_ReadDescriptor(700,..)); a sp\x9an descriptor, distinct from the
-  // stellar spin-object range (+1000).
+// Returns the ambient star-field artwork from the shared sprite store: sp\x9an
+// spin descriptor 700 is a 4x4 grid of 5x5px star tiles (16 shapes). Ghidra
+// builds this into DAT_00593efc via Spin_ReadDescriptor(700,..); the spawn
+// picks a random frame in [0, frameCount) from it. Falls back to null
+// (plain-point stars) when absent.
+const SpriteAsset *SpaceflightView::StarFieldSheet(SdlPlatform &platform) {
   constexpr std::uint16_t kStarFieldSpinId = 700;
-  const auto spin_data =
-      NovaResource_Load(kResourceTypeSprites, kStarFieldSpinId);
-  if (!spin_data) {
-    NovaLog::Warn("star field: no sp.x9an descriptor resource {}; stars drawn "
-                  "as points",
-                  kStarFieldSpinId);
-    return nullptr;
-  }
-  const auto def = NovaSpriteDefinition_Parse(*spin_data);
-  if (!def) {
-    NovaLog::Warn("star field: malformed sp.x9an descriptor {}; stars drawn "
-                  "as points",
-                  kStarFieldSpinId);
-    return nullptr;
-  }
-  const auto sheet_data =
-      NovaResource_Load(kResourceTypeRleSheet16, def->sprites_resource_id);
-  if (!sheet_data) {
-    NovaLog::Warn("star field: no rl.x91D sheet {}; stars drawn as points",
-                  def->sprites_resource_id);
-    return nullptr;
-  }
-  auto sheet = RleSpriteSheet_Decode16(*sheet_data);
-  if (!sheet || def->tile_width <= 0 || def->tile_height <= 0 ||
-      sheet->width != def->tile_width || sheet->height != def->tile_height) {
-    NovaLog::Warn("star field: rl.x91D sheet {} not a valid tile grid; stars "
-                  "drawn as points",
-                  def->sprites_resource_id);
-    return nullptr;
-  }
-  star_field_.frame_count = static_cast<int>(sheet->frames.size());
-  star_field_.tile_width = sheet->width;
-  star_field_.tile_height = sheet->height;
-  SDL_Renderer *const renderer = platform.renderer();
-  star_field_.frames.reserve(sheet->frames.size());
-  for (const auto &frame : sheet->frames) {
-    auto texture = SdlTexture::Create(
-        renderer, sheet->width, sheet->height, frame.rgba_pixels);
-    if (!texture) {
-      star_field_.frames.clear();
-      NovaLog::Warn("star field: texture upload failed; stars drawn as points");
-      return nullptr;
-    }
-    // The 5x5 tiles are tiny; upscale smoothly so scaled-up stars look like
-    // soft glows rather than chunky squares (matches the original's smooth
-    // sprite scaling draw-proc).
-    SDL_SetTextureScaleMode(texture->get(), SDL_SCALEMODE_LINEAR);
-    star_field_.frames.push_back(std::move(texture));
-  }
-  NovaLog::Info("star field sheet loaded: {}x{} {} frames",
-                star_field_.tile_width,
-                star_field_.tile_height,
-                star_field_.frame_count);
-  return &star_field_;
+  return sprite_store_.Spin(platform.renderer(), kStarFieldSpinId);
 }
 
 // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0). See the header.
@@ -322,7 +172,8 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
                                         GameState &state) {
   // Load the star artwork (if not already) so the frame-count bound is known;
   // a missing sheet just leaves stars as plain points.
-  (void)EnsureStarFieldSheet(platform);
+  const SpriteAsset *star_sheet = StarFieldSheet(platform);
+  const int star_frame_count = star_sheet ? star_sheet->frame_count : 0;
   const Viewport vp = CurrentViewport(platform);
   const auto *sys = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
@@ -357,8 +208,7 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
     // Star sprite frame index: the original picks NovaRandom_Range(frameCount)
     // uniformly over the star sheet's 16 tiles (Ghida DAT_00593efc +0x54).
     // When the sheet is unavailable we keep frame 0 (fallback point draw).
-    const int frame_count =
-        star_field_.frame_count > 0 ? star_field_.frame_count : 1;
+    const int frame_count = star_frame_count > 0 ? star_frame_count : 1;
     s.frame = NovaRandomRange(state.rng, frame_count);
     // Random world offset within the (player-centred) viewport.
     const auto rx = static_cast<float>(NovaRandomRange(state.rng, vp.w));
@@ -424,34 +274,38 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   // = raw/tinted-raw blit; round(murk*0.9) in [2,29] selects a hazy tinted/
   // indexed blend), not a pixel dimension - so each star stays ~5px regardless.
   const Viewport vp = CurrentViewport(platform);
-  const StarFieldSheet *sheet = EnsureStarFieldSheet(platform);
+  const SpriteAsset *sheet = StarFieldSheet(platform);
   for (const auto &s : ambient_stars_) {
     if (!s.active) {
       continue;
     }
-    const float sx = (s.pos_x - state.player.pos_x) + vp.w / 2;
-    const float sy = (s.pos_y - state.player.pos_y) + vp.h / 2;
-    float wx = std::fmod(sx, static_cast<float>(vp.w));
-    float wy = std::fmod(sy, static_cast<float>(vp.h));
-    if (wx < 0.0F)
-      wx += static_cast<float>(vp.w);
-    if (wy < 0.0F)
-      wy += static_cast<float>(vp.h);
-
     if (sheet && !sheet->frames.empty()) {
-      const int frame_idx = std::clamp(s.frame, 0, sheet->frame_count - 1);
-      const auto &texture = sheet->frames[static_cast<std::size_t>(frame_idx)];
-      // Native tile size: draw the 5x5 star 1:1, centred on its position.
-      const float tw = static_cast<float>(sheet->tile_width);
-      const float th = static_cast<float>(sheet->tile_height);
-      const SDL_FRect dest{wx - tw / 2.0F, wy - th / 2.0F, tw, th};
-      SDL_RenderTexture(renderer, texture->get(), nullptr, &dest);
+      // Native tile size, centred, with one-exit wraparound; linear filtering
+      // so the tiny 5x5 star tiles read as soft glows when scaled.
+      SpriteDrawOptions opts;
+      opts.wrap = true;
+      opts.linear_scale = true;
+      DrawSprite(renderer,
+                 *sheet,
+                 s.frame,
+                 s.pos_x,
+                 s.pos_y,
+                 state.player.pos_x,
+                 state.player.pos_y,
+                 vp.w,
+                 vp.h,
+                 opts);
       continue;
     }
-
     // Fallback when the star-field sheet is unavailable: a small single-pixel
     // point (matches a 5px sprite scaled for the 400px viewport).
-    SDL_RenderPoint(renderer, wx, wy);
+    const float wx = std::fmod((s.pos_x - state.player.pos_x) + vp.w / 2,
+                               static_cast<float>(vp.w));
+    const float wy = std::fmod((s.pos_y - state.player.pos_y) + vp.h / 2,
+                               static_cast<float>(vp.h));
+    SDL_RenderPoint(renderer,
+                    wx < 0.0F ? wx + static_cast<float>(vp.w) : wx,
+                    wy < 0.0F ? wy + static_cast<float>(vp.h) : wy);
   }
 }
 
@@ -485,7 +339,8 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
     // The original builds the active spin set from link_a (primary) when the
     // stellar is not engaged/hand-over, link_b otherwise; every starting-system
     // stellar has link_b == -1, so the primary link_a set is the one animated.
-    const auto *set = GetSpinSpriteSet(platform, st->link_a_id);
+    const SpriteAsset *set = sprite_store_.Spin(
+        platform.renderer(), static_cast<std::uint16_t>(st->link_a_id + 1000));
     if (!set || set->frame_count < 2) {
       continue; // no animated set / single-frame body stays static
     }
@@ -615,8 +470,10 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
 
     // Prefer the real spin planet sprite; fall back to a tinted disc. Animated
     // stellars use the frame advanced by AdvanceStellarAnimation (keyed by the
-    // stellar id); single-frame bodies stay at frame 0.
-    const auto *set = GetSpinSpriteSet(platform, st->link_a_id);
+    // stellar id); single-frame bodies stay at frame 0. Stellar spin sets live
+    // at spin resource id link_a_id + 1000 in the shared sprite store.
+    const SpriteAsset *set = sprite_store_.Spin(
+        platform.renderer(), static_cast<std::uint16_t>(st->link_a_id + 1000));
     if (set && !set->frames.empty()) {
       int frame_idx = 0;
       const auto anim_it = stellar_anims_.find(nav);
@@ -624,19 +481,25 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
         frame_idx =
             std::clamp(anim_it->second.current_frame, 0, set->frame_count - 1);
       }
-      const auto &frame = set->frames[static_cast<std::size_t>(frame_idx)];
-      const float scale = 1.0F; // planets render at native world size
-      const SDL_FRect dest{
-          static_cast<float>(cx) - set->tile_width * scale / 2.0F,
-          static_cast<float>(cy) - set->tile_height * scale / 2.0F,
-          set->tile_width * scale,
-          set->tile_height * scale};
-      SDL_RenderTexture(renderer, frame->get(), nullptr, &dest);
+      DrawSprite(platform.renderer(),
+                 *set,
+                 frame_idx,
+                 static_cast<float>(st->pos_x),
+                 static_cast<float>(st->pos_y),
+                 state.player.pos_x,
+                 state.player.pos_y,
+                 vp.w,
+                 vp.h);
       continue;
     }
+    // Fallback tinted disc (centred on screen coords like the sprite above).
+    const float fsx = (static_cast<float>(st->pos_x) - state.player.pos_x) +
+                      static_cast<float>(vp.w) / 2.0F;
+    const float fsy = (static_cast<float>(st->pos_y) - state.player.pos_y) +
+                      static_cast<float>(vp.h) / 2.0F;
     const int radius = 14;
-    const SDL_FRect rect{static_cast<float>(cx - radius),
-                         static_cast<float>(cy - radius),
+    const SDL_FRect rect{fsx - static_cast<float>(radius),
+                         fsy - static_cast<float>(radius),
                          static_cast<float>(radius * 2),
                          static_cast<float>(radius * 2)};
     SDL_SetRenderDrawColor(renderer, r / 2U, g / 2U, b / 2U, SDL_ALPHA_OPAQUE);
@@ -652,50 +515,78 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
     return;
   }
   const Viewport vp = CurrentViewport(platform);
-  // The light blaster's projectile is a small bright bolt. Drawn as a filled
-  // dot at each shot's world position (same camera transform as the stars and
-  // stellars), including the one-exit wraparound for the extending window so a
-  // shot leaving the right edge reappears on the left. TODO(decomp): mount the
-  // shot's real sprite (Weapon.sprite_id spin sheet) once the shot sprite
-  // cache is reconstructed.
-  SDL_SetRenderDrawColor(renderer, 255, 180, 64, SDL_ALPHA_OPAQUE);
+  // Each shot uses its weapon's shot sprite set (Ghidra Sprite_AssignSpriteSet
+  // on the weapon-sprite-set table entry g_weapon_sprite_set_table
+  // [shot_sprite_set_id]; spin resource id shot_sprite_set_id + 3000) from the
+  // shared store, drawn at its world position with wraparound. The bolt frames
+  // are drawn at native size; frame 0 is used for now (TODO(decomp): advance
+  // the shot's animation frame in Shot_HandleShot cadence). Falls back to a
+  // small bright dot when the weapon has no loadable shot sprite.
   for (const auto &s : state.active_shots) {
-    float sx = (s.pos_x - state.player.pos_x) + vp.w / 2;
-    float sy = (s.pos_y - state.player.pos_y) + vp.h / 2;
-    sx = std::fmod(sx, static_cast<float>(vp.w));
-    sy = std::fmod(sy, static_cast<float>(vp.h));
-    if (sx < 0.0F) {
-      sx += static_cast<float>(vp.w);
+    // The shot's bank slot is a zero-based weapon id; the scenario Weapon()
+    // lookup uses the 0x80.. resource-id residue (same convention as
+    // NovaWeapon_FirePlayerWeaponBank).
+    const Weapon *w = state.scenario.Weapon(static_cast<std::int16_t>(
+        static_cast<std::int16_t>(s.weapon_id) + 0x80));
+    const SpriteAsset *set =
+        (w != nullptr) ? sprite_store_.Spin(
+                             platform.renderer(),
+                             static_cast<std::uint16_t>(w->sprite_id + 3000))
+                       : nullptr;
+    if (set && !set->frames.empty()) {
+      SpriteDrawOptions opts;
+      opts.wrap = true;
+      DrawSprite(renderer,
+                 *set,
+                 0,
+                 s.pos_x,
+                 s.pos_y,
+                 state.player.pos_x,
+                 state.player.pos_y,
+                 vp.w,
+                 vp.h,
+                 opts);
+    } else {
+      float sx = (s.pos_x - state.player.pos_x) + static_cast<float>(vp.w) / 2;
+      float sy = (s.pos_y - state.player.pos_y) + static_cast<float>(vp.h) / 2;
+      sx = std::fmod(sx, static_cast<float>(vp.w));
+      sy = std::fmod(sy, static_cast<float>(vp.h));
+      if (sx < 0.0F) {
+        sx += static_cast<float>(vp.w);
+      }
+      if (sy < 0.0F) {
+        sy += static_cast<float>(vp.h);
+      }
+      SDL_SetRenderDrawColor(renderer, 255, 180, 64, SDL_ALPHA_OPAQUE);
+      const float radius = 2.0F;
+      const SDL_FRect rect{
+          sx - radius, sy - radius, radius * 2.0F, radius * 2.0F};
+      SDL_RenderFillRect(renderer, &rect);
     }
-    if (sy < 0.0F) {
-      sy += static_cast<float>(vp.h);
-    }
-    const float radius = 2.0F;
-    const SDL_FRect rect{sx - radius, sy - radius, radius * 2.0F, radius * 2.0F};
-    SDL_RenderFillRect(renderer, &rect);
   }
 }
 
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
-  SDL_Renderer *const renderer = platform.renderer();
   DrawBackground(platform, state);
   DrawStellarBodies(platform, state);
   DrawShots(platform, state);
 
-  // Player ship at the play-area centre, frame selected by heading.
-  if (!ship_.frames.empty() && ship_.frames_per_rotation > 0) {
+  // Player ship at the play-area centre, frame selected by heading. Because
+  // the camera is centred on the player, drawing at the ship's own world
+  // position lands it at the viewport centre (world==camera -> centre).
+  if (!ship_.frames.empty() && ship_frames_per_rotation_ > 0) {
     const Viewport vp = CurrentViewport(platform);
-    const float cx = static_cast<float>(vp.w) / 2.0F;
-    const float cy = static_cast<float>(vp.h) / 2.0F;
     const int frame =
-        FrameForHeading(state.player.heading, ship_.frames_per_rotation);
-    const int clamped_frame = std::clamp(frame, 0, ship_.frame_count - 1);
-    const auto &texture = ship_.frames[static_cast<std::size_t>(clamped_frame)];
-    const float scale = 1.0F; // original draws ship at native size
-    const float w = static_cast<float>(ship_.width) * scale;
-    const float h = static_cast<float>(ship_.height) * scale;
-    const SDL_FRect dest{cx - w / 2.0F, cy - h / 2.0F, w, h};
-    SDL_RenderTexture(renderer, texture->get(), nullptr, &dest);
+        FrameForHeading(state.player.heading, ship_frames_per_rotation_);
+    DrawSprite(platform.renderer(),
+               ship_,
+               frame,
+               state.player.pos_x,
+               state.player.pos_y,
+               state.player.pos_x,
+               state.player.pos_y,
+               vp.w,
+               vp.h);
 
     // Engine-glow layer: drawn over the base with the same heading-selected
     // frame and a thrust-driven alpha. The original binds the glow as a second
@@ -707,29 +598,29 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
     // coasting (clean-room approximation of the original dimming the glow with
     // throttle).
     if (has_glow_ && state.player.engine_glow_intensity > 0.0F &&
-        !glow_.frames.empty() && glow_.frames_per_rotation > 0) {
+        !glow_.frames.empty()) {
       if (!glow_last_drawn_) {
         NovaLog::Info("[glow] draw ON intensity={:.2f} frames={} size={}x{}",
                       state.player.engine_glow_intensity,
                       glow_.frame_count,
-                      glow_.width,
-                      glow_.height);
+                      glow_.tile_width,
+                      glow_.tile_height);
         glow_last_drawn_ = true;
       }
-      const int glow_frame = std::clamp(
-          FrameForHeading(state.player.heading, glow_.frames_per_rotation),
-          0,
-          glow_.frame_count - 1);
-      const auto &glow_texture =
-          glow_.frames[static_cast<std::size_t>(glow_frame)];
-      const float gw = static_cast<float>(glow_.width);
-      const float gh = static_cast<float>(glow_.height);
-      const SDL_FRect glow_dest{cx - gw / 2.0F, cy - gh / 2.0F, gw, gh};
-      const std::uint8_t alpha = static_cast<std::uint8_t>(
-          std::clamp(state.player.engine_glow_intensity, 0.0F, 1.0F) * 255.0F);
-      SDL_SetTextureAlphaMod(glow_texture->get(), alpha);
-      SDL_RenderTexture(renderer, glow_texture->get(), nullptr, &glow_dest);
-      SDL_SetTextureAlphaMod(glow_texture->get(), SDL_ALPHA_OPAQUE);
+      const int glow_frame =
+          FrameForHeading(state.player.heading, ship_frames_per_rotation_);
+      SpriteDrawOptions opts;
+      opts.alpha_mod = state.player.engine_glow_intensity;
+      DrawSprite(platform.renderer(),
+                 glow_,
+                 glow_frame,
+                 state.player.pos_x,
+                 state.player.pos_y,
+                 state.player.pos_x,
+                 state.player.pos_y,
+                 vp.w,
+                 vp.h,
+                 opts);
     } else if (glow_last_drawn_) {
       // Won't draw this frame (intensity leaked below the gate / layer empty).
       NovaLog::Info("[glow] draw OFF has_glow={} intensity={:.2f} frames={}",
