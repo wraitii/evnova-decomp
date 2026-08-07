@@ -128,4 +128,64 @@ TEST_CASE("starter ship government selects the Federation interface layout",
   CHECK(layout->interface_bg_pict_id == 0x2be);
 }
 
+// ---- Gameplay viewport / HUD-anchor geometry ----------------------------
+// Mirrors NovaView_UpdateGameplayViewport (0x00488380).
+
+TEST_CASE("full 1024x768 canvas yields origin (512,384) and anchor (0,0)",
+          "[interface][geometry]") {
+  const HudPanelRect surface{0, 0, 1024, 768};
+  const auto g = GameplayGeometry_FromSurface(surface);
+  // The 1024x768 frame fills the surface exactly; no nudges trigger.
+  CHECK(g.surface_rect.left == 0);
+  CHECK(g.surface_rect.top == 0);
+  CHECK(g.surface_rect.right == 1024);
+  CHECK(g.surface_rect.bottom == 768);
+  CHECK(g.frame_rect.left == 0);
+  CHECK(g.frame_rect.top == 0);
+  CHECK(g.frame_rect.right == 1024);
+  CHECK(g.frame_rect.bottom == 768);
+  CHECK(g.hud_panel_origin_x == 512);
+  CHECK(g.hud_panel_origin_y == 384);
+  CHECK(g.hud_panel_anchor_x == 0);
+  CHECK(g.hud_panel_anchor_y == 0);
+}
+
+TEST_CASE("a classic 640x480 surface centres the frame off-canvas and nudges "
+          "up/left",
+          "[interface][geometry]") {
+  // A 640x480 window: the 1024x768 frame centres with its top-left at
+  // (-192, -144), then the narrow (640 < 768) and short (480 < 641) viewport
+  // nudges shift it up by 0x3c and left by 0x3c.
+  const HudPanelRect surface{0, 0, 640, 480};
+  const auto g = GameplayGeometry_FromSurface(surface);
+  CHECK(g.frame_rect.left == -192 - 0x3c);   // -252
+  CHECK(g.frame_rect.top == -144 - 0x3c);    // -204
+  CHECK(g.frame_rect.right == -252 + 1024);  // 772
+  CHECK(g.frame_rect.bottom == -204 + 768);  // 564
+  // Origin = centre of the nudged frame rect.
+  CHECK(g.hud_panel_origin_x == (-252 + 772 + 1) / 2);
+  CHECK(g.hud_panel_origin_y == (-204 + 564 + 1) / 2);
+  // Anchor = origin - (512, 384).
+  CHECK(g.hud_panel_anchor_x == g.hud_panel_origin_x - 512);
+  CHECK(g.hud_panel_anchor_y == g.hud_panel_origin_y - 384);
+}
+
+TEST_CASE("a tall/narrow surface nudges left when short (height < 0x281)",
+          "[interface][geometry]") {
+  // Width 900 >= 768 so the y nudge (width<768) does NOT apply. Height 500 <
+  // 641 so the x nudge (height<641) shifts the frame left by 0x3c, which moves
+  // the derived HUD origin accordingly.
+  const HudPanelRect surface{10, 20, 910, 520};
+  const auto g = GameplayGeometry_FromSurface(surface);
+  CHECK(g.frame_rect.left == 10 + (900 - 1024) / 2 - 0x3c); // -112
+  CHECK(g.frame_rect.top == 20 + (500 - 768) / 2);          // -114 (no y nudge)
+  // Origin = centre of the nudged frame.
+  const int cx = (g.frame_rect.right + g.frame_rect.left + 1) / 2;
+  const int cy = (g.frame_rect.bottom + g.frame_rect.top + 1) / 2;
+  CHECK(g.hud_panel_origin_x == 400);
+  CHECK(g.hud_panel_origin_y == 270);
+  CHECK(g.hud_panel_origin_x == cx);
+  CHECK(g.hud_panel_origin_y == cy);
+}
+
 } // namespace game

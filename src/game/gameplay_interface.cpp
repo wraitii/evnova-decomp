@@ -80,6 +80,59 @@ constexpr std::uint32_t kInterfaceLayoutType = 0x956e7466U;
 
 } // namespace
 
+GameplayViewportGeometry GameplayGeometry_FromSurface(
+    const HudPanelRect &surface_rect) {
+  // Mirrors NovaView_UpdateGameplayViewport (0x00488380) exactly. The cockpit
+  // frame PICT is the shipped resource 8000 (1024x768); the game centres it in
+  // the shared offscreen surface rect (DAT_00597954..5a), nudges it up/left by
+  // 0x3c for small viewports, then derives the HUD origin (its centre point)
+  // and the HUD anchor (origin - 0x200/-0x180).
+  constexpr std::int16_t kFrameWidth = 1024;
+  constexpr std::int16_t kFrameHeight = 768;
+  constexpr std::int16_t kNarrowViewport = 0x300; // 768
+  constexpr std::int16_t kShortViewport = 0x281;  // 641
+  constexpr std::int16_t kHalfPanelWidth = 0x200; // 512
+  constexpr std::int16_t kHalfPanelHeight = 0x180; // 384
+  constexpr std::int16_t kNudge = 0x3c;            // 60
+
+  GameplayViewportGeometry g;
+  g.surface_rect = surface_rect;
+
+  // Centre the 1024x768 frame image in the surface (top-left aligned to the
+  // midpoints; the image may overhang the surface when the surface is small).
+  std::int16_t left = static_cast<std::int16_t>(
+      surface_rect.left +
+      (static_cast<int>(surface_rect.width()) - kFrameWidth) / 2);
+  std::int16_t top = static_cast<std::int16_t>(
+      surface_rect.top +
+      (static_cast<int>(surface_rect.height()) - kFrameHeight) / 2);
+  std::int16_t right = static_cast<std::int16_t>(left + kFrameWidth);
+  std::int16_t bottom = static_cast<std::int16_t>(top + kFrameHeight);
+
+  // Restrict the viewport nudges to genuinely small surfaces.
+  if (surface_rect.width() < kNarrowViewport) {
+    top = static_cast<std::int16_t>(top - kNudge);
+    bottom = static_cast<std::int16_t>(bottom - kNudge);
+  }
+  if (surface_rect.height() < kShortViewport) {
+    left = static_cast<std::int16_t>(left - kNudge);
+    right = static_cast<std::int16_t>(right - kNudge);
+  }
+
+  g.frame_rect = HudPanelRect{left, top, right, bottom};
+
+  // HUD origin = the frame image centre ((right+left+1)>>1, (bottom+top+1)>>1).
+  g.hud_panel_origin_x =
+      static_cast<std::int16_t>((right + left + 1) >> 1);
+  g.hud_panel_origin_y =
+      static_cast<std::int16_t>((bottom + top + 1) >> 1);
+  g.hud_panel_anchor_x =
+      static_cast<std::int16_t>(g.hud_panel_origin_x - kHalfPanelWidth);
+  g.hud_panel_anchor_y =
+      static_cast<std::int16_t>(g.hud_panel_origin_y - kHalfPanelHeight);
+  return g;
+}
+
 std::optional<GameplayInterfaceLayout>
 NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id) {
   const auto payload =

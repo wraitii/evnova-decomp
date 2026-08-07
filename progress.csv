@@ -723,7 +723,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004873B0,NovaRender_RedrawAndPresentFrame,src/nova_app.cpp,100%,NovaRender_RedrawAndPresentFrame
 0x00487FCD,FUN_00487fcd,,0%,
 0x00488080,NovaMainLoop_UpdateFrame,src/nova_app.cpp,100%,NovaMainLoop_UpdateFrame
-0x00488380,NovaView_UpdateGameplayViewport,,0%,
+0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
 0x00488650,Menu_RunSettingsDialog,,0%,
 0x00489210,Ship_RunSpaceflightMode,src/game/spaceflight.cpp,10%,"Ship_RunSpaceflightMode skeleton: faithful loop/cadence, gameplay scopes stubbed"
 0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,100%,Menu_RunNewGameFlow reconstructed new-pilot path; other dialog branches (continue/load) stubbed

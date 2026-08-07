@@ -79,4 +79,46 @@ struct GameplayInterfaceLayout {
 [[nodiscard]] std::optional<GameplayInterfaceLayout>
 NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id);
 
+// ---------------------------------------------------------------------------
+// Gameplay viewport / HUD-anchor geometry
+// ---------------------------------------------------------------------------
+// Ghidra NovaView_UpdateGameplayViewport (0x00488380) computes the in-game
+// camera geometry every frame. The game works in a fixed 1024x768 logical
+// canvas (the shared offscreen surface DAT_00597950; the 1024x768 frame PICT
+// 8000 backs the cockpit and is centred in it). All HUD panel rects / text
+// offsets are relative to two derived anchors:
+//
+//   * g_hud_panel_origin : the central point of the workspace that the HUD
+//     (status text at origin + (dx,dy)) and the panel art are laid out around.
+//     For the full 1024x768 canvas this is (512, 384).
+//   * g_hud_panel_anchor  : the top-left of the 1024x768 HUD panel, i.e.
+//     origin - (0x200, 0x180). On the full canvas this is (0, 0), so the
+//     archived panel rects then land directly at logical canvas coordinates.
+//
+// The host display scales this canvas to the window (the original window is
+// 640x480, the same 1024->640 0.625 scale the main menu uses).
+struct GameplayViewportGeometry {
+  // The workspace rect the frame PICT is centred in. Normally the full
+  // 0,0,1024,768 canvas; smaller (e.g. low-res) windows produce a sub-rect
+  // that triggers the up/left nudge below.
+  HudPanelRect surface_rect{};
+  // Where the 1024x768 cockpit frame PICT landed after centering + nudging
+  // (used only to derive the origin; kept for diagnostics).
+  HudPanelRect frame_rect{};
+  // Centred HUD origin (canvas x/y of the workspace centre).
+  std::int16_t hud_panel_origin_x = 0;
+  std::int16_t hud_panel_origin_y = 0;
+  // Top-left of the 1024x768 HUD panel: origin - (+0x200, +0x180).
+  std::int16_t hud_panel_anchor_x = 0;
+  std::int16_t hud_panel_anchor_y = 0;
+};
+
+// Mirrors NovaView_UpdateGameplayViewport's arithmetic for the given workspace
+// surface rect. `surface_rect` is the shared offscreen surface (DAT_00597954..
+// 5a); the cockpit frame PICT is taken to be 1024x768 (the shipped resource
+// 8000). The small-viewport nudges (offset up by 0x3c when the surface is <
+// 0x300 wide, left by 0x3c when < 0x281 tall) are reproduced exactly.
+[[nodiscard]] GameplayViewportGeometry
+GameplayGeometry_FromSurface(const HudPanelRect &surface_rect);
+
 } // namespace game
