@@ -111,6 +111,7 @@ bool RunTextInputPrompt(SdlPlatform &platform,
 
     SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
+    platform.SetCenteredPlayfield();
     SDL_SetRenderDrawColor(renderer, 48, 113, 179, SDL_ALPHA_OPAQUE);
     const SDL_FRect panel{96.0F, 142.0F, 448.0F, 150.0F};
     SDL_RenderFillRect(renderer, &panel);
@@ -148,6 +149,7 @@ int RunStartTypePrompt(SdlPlatform &platform) {
     }
     SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
+    platform.SetCenteredPlayfield();
     SDL_SetRenderDrawColor(renderer, 48, 113, 179, SDL_ALPHA_OPAQUE);
     const SDL_FRect panel{96.0F, 142.0F, 448.0F, 160.0F};
     SDL_RenderFillRect(renderer, &panel);

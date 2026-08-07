@@ -168,6 +168,10 @@ void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
 void DrawInGameFrame(SdlPlatform &platform,
                      GameState &state,
                      SpaceflightView &view) {
+  // The free-flight world extends: draw 1:1 across the whole (possibly larger)
+  // window with no centre-clipping. The landed modal already restores its own
+  // centred playfield each frame, so re-assert the fullscreen viewport here.
+  platform.SetFullscreenPlayfield();
   view.Draw(platform, state);
 
   SDL_Renderer *const renderer = platform.renderer();

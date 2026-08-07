@@ -93,7 +93,42 @@ public:
   [[nodiscard]] std::uint64_t ticks_ms() const;
   [[nodiscard]] SDL_FPoint mouse_position() const;
 
+  // Resolution-extension presentation. Mirrors the original: the game renders
+  // onto a fixed 640x480 logical playfield that is drawn at 1:1 (no scaling);
+  // when the window is larger the fixed screens (docked/menu) show black
+  // borders around the 640x480 content, while the free-flight world (which
+  // cannot be "bordered") extends to show more of the system. `scale_to_window_`
+  // is a documented divergence: when enabled the whole 640x480 playfield is
+  // uniformly letterbox-scaled to fill the window.
+  [[nodiscard]] bool scale_to_window() const { return scale_to_window_; }
+  // Toggled by the F5 key from the active input poll. Returns the new state.
+  bool ToggleScale();
+  // The logical playfield size the renderer presents to draw calls: 640x480 in
+  // scale mode, the window pixel size (1:1) in extend mode. World/spaceflight
+  // drawing queries this to extend to the larger window.
+  [[nodiscard]] SDL_FPoint logical_playfield_size() const;
+
+  // Resolution-extension helpers for the fixed 640x480 screens (main menu,
+  // docked, splash, intro). In extend mode these centre the 640x480 playfield
+  // in the (possibly larger) window with black borders on all sides by
+  // clipping draws to the centred rect via SDL_SetRenderViewport; SDL's
+  // SDL_RenderCoordinatesFromWindow then already reports the mouse in
+  // playfield (viewport-relative) coordinates, so the hit-tests stay correct.
+  // In scale mode the playfield already fills the logical 640x480 space so the
+  // viewport is a no-op. SetCenteredPlayfield() must be paired with a
+  // SetFullscreenPlayfield() reset (world/splash) which restores the
+  // full-window viewport.
+  void SetCenteredPlayfield();
+  // Restores the full-window viewport (no clipping) for the extending
+  // free-flight world, whose mouse coordinates track the whole window 1:1.
+  void SetFullscreenPlayfield();
+
 private:
+  // (Re)applies the renderer's logical presentation to match the current scale
+  // mode and window size. Fixed 640x480 letterbox when scaling; 1:1 output
+  // (no logical size) when extending.
+  void ApplyLogicalPresentation();
+
   struct WindowDeleter {
     void operator()(SDL_Window *window) const;
   };
@@ -104,6 +139,7 @@ private:
 
   bool sdl_initialized_ = false;
   bool quit_requested_ = false;
+  bool scale_to_window_ = false;
   SDL_FPoint mouse_position_{};
   std::unique_ptr<SDL_Window, WindowDeleter> window_;
   std::unique_ptr<SDL_Renderer, RendererDeleter> renderer_;

@@ -632,6 +632,13 @@ void NovaMainLoop_Run(NovaRuntime &runtime) {
 
 // Ghidra: 0x00488080 NovaMainLoop_UpdateFrame
 void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
+  // The menu/splash hover tracking below reads platform.mouse_position(),
+  // which SDL reports relative to the current renderer viewport. When the
+  // player returns to the menu the previous (flight) context left the full-
+  // window viewport active, so re-assert the centred playfield here, before
+  // any hit-testing, to keep mouse coordinates in 640x480 playfield space.
+  runtime.platform.SetCenteredPlayfield();
+
   if (const auto command = runtime.platform.PollCommandEvent()) {
     if (*command == 'q') {
       runtime.requested_action = GameModeAction::quit;
@@ -706,6 +713,10 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
 // Ghidra: 0x004873b0 NovaRender_RedrawAndPresentFrame
 void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   SDL_Renderer *const renderer = runtime.platform.renderer();
+  // Fixed screens (menu / splash / docked) render a centred 640x480 playfield:
+  // clip draw calls to it (SDL_RenderClear still fills the whole window first
+  // with the border colour because the clear ignores the clip rect).
+  runtime.platform.SetCenteredPlayfield();
   if (runtime.startup_phase == StartupPhase::loading_splash) {
     NovaUi_PresentLoadingSplashFrame(runtime);
     SDL_RenderPresent(renderer);

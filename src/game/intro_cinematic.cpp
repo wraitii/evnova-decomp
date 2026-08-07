@@ -155,6 +155,7 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
     while (!platform.quit_requested()) {
       SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(renderer);
+      platform.SetCenteredPlayfield();
       if (pict) {
         PresentPict(renderer, *pict);
       }

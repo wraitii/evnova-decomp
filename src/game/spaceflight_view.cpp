@@ -19,10 +19,29 @@ namespace game {
 namespace {
 
 constexpr float kTwoPi = 6.283185307179586F;
-// Logical play area: the space viewport occupies the 640x400 region above the
-// HUD strip (the existing placeholder HUD sits at y 400..460).
+// Fixed logical play area reserved at the bottom of the window for the HUD
+// strip (the placeholder HUD sits at y 400..460). At the default 640x480 window
+// the space viewport is the 640x400 region above it.
 constexpr int kViewportWidth = 640;
 constexpr int kViewportHeight = 400;
+
+// The current space-viewport size, in logical (1:1) pixels. In resolution-
+// extension mode the world "extends": a larger window shows more of the system,
+// so the camera, the star-field simulation and the culling all track the full
+// window size (the HUD is a placeholder overlay drawn over the bottom band). In
+// scale-to-window mode the viewport is the fixed 640x400 playfield above the
+// HUD reserve.
+struct Viewport {
+  int w = kViewportWidth;
+  int h = kViewportHeight;
+};
+
+[[nodiscard]] Viewport CurrentViewport(const SdlPlatform &platform) {
+  const auto sz = platform.logical_playfield_size();
+  const int w = std::max(kViewportWidth, static_cast<int>(sz.x));
+  const int h = std::max(kViewportHeight, static_cast<int>(sz.y));
+  return {w, h};
+}
 
 // Frame index for a heading. EV Nova ships point 'up' at frame 0 with heading
 // increasing clockwise; frames progress one per sector of the rotation.
@@ -304,6 +323,7 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
   // Load the star artwork (if not already) so the frame-count bound is known;
   // a missing sheet just leaves stars as plain points.
   (void)EnsureStarFieldSheet(platform);
+  const Viewport vp = CurrentViewport(platform);
   const auto *sys = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   const bool murk_hides_stars = sys && sys->murk < 0;
@@ -319,7 +339,7 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
   // Ghidra: count = round(viewportHeight / 600.0 * 20.0), clamped to the
   // 20-slot pool (viewport height 400 -> round(13.33) = 13 fresh stars).
   const int count = std::clamp<int>(
-      static_cast<int>(std::round(kViewportHeight / 600.0F * 20.0F)), 0, 20);
+      static_cast<int>(std::round(vp.h / 600.0F * 20.0F)), 0, 20);
   // gh.data flag DAT_005914d7: options toggle for starfield motion. Our clean
   // reimplementation currently has no such preference, so we keep it enabled.
   constexpr bool kStarfieldMotionEnabled = true;
@@ -341,14 +361,10 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
         star_field_.frame_count > 0 ? star_field_.frame_count : 1;
     s.frame = NovaRandomRange(state.rng, frame_count);
     // Random world offset within the (player-centred) viewport.
-    const auto rx =
-        static_cast<float>(NovaRandomRange(state.rng, kViewportWidth));
-    const auto ry =
-        static_cast<float>(NovaRandomRange(state.rng, kViewportHeight));
-    s.pos_x =
-        rx + state.player.pos_x - static_cast<float>(kViewportWidth) / 2.0F;
-    s.pos_y =
-        ry + state.player.pos_y - static_cast<float>(kViewportHeight) / 2.0F;
+    const auto rx = static_cast<float>(NovaRandomRange(state.rng, vp.w));
+    const auto ry = static_cast<float>(NovaRandomRange(state.rng, vp.h));
+    s.pos_x = rx + state.player.pos_x - static_cast<float>(vp.w) / 2.0F;
+    s.pos_y = ry + state.player.pos_y - static_cast<float>(vp.h) / 2.0F;
     // Ghidra: speed = NovaRandom_Range(0x23) * 0.01 when the motion toggle is
     // on, else forced to 0 (stationary field).
     s.speed =
@@ -407,19 +423,20 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   // writes into the sprite's +0xa2..0xa8 fields is a BLEND-CODE sentinel (0x20
   // = raw/tinted-raw blit; round(murk*0.9) in [2,29] selects a hazy tinted/
   // indexed blend), not a pixel dimension - so each star stays ~5px regardless.
+  const Viewport vp = CurrentViewport(platform);
   const StarFieldSheet *sheet = EnsureStarFieldSheet(platform);
   for (const auto &s : ambient_stars_) {
     if (!s.active) {
       continue;
     }
-    const float sx = (s.pos_x - state.player.pos_x) + kViewportWidth / 2;
-    const float sy = (s.pos_y - state.player.pos_y) + kViewportHeight / 2;
-    float wx = std::fmod(sx, static_cast<float>(kViewportWidth));
-    float wy = std::fmod(sy, static_cast<float>(kViewportHeight));
+    const float sx = (s.pos_x - state.player.pos_x) + vp.w / 2;
+    const float sy = (s.pos_y - state.player.pos_y) + vp.h / 2;
+    float wx = std::fmod(sx, static_cast<float>(vp.w));
+    float wy = std::fmod(sy, static_cast<float>(vp.h));
     if (wx < 0.0F)
-      wx += static_cast<float>(kViewportWidth);
+      wx += static_cast<float>(vp.w);
     if (wy < 0.0F)
-      wy += static_cast<float>(kViewportHeight);
+      wy += static_cast<float>(vp.h);
 
     if (sheet && !sheet->frames.empty()) {
       const int frame_idx = std::clamp(s.frame, 0, sheet->frame_count - 1);
@@ -568,6 +585,7 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
   // ids that belong to this system (Kania owns Port Kane + the hypergate). Any
   // other stellar in the global table belongs to a different system and must
   // not be drawn here.
+  const Viewport vp = CurrentViewport(platform);
   for (const auto nav : sys->nav_defs) {
     if (nav < 0x80) {
       continue;
@@ -577,11 +595,10 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
       continue;
     }
     const int cx =
-        (st->pos_x - static_cast<int>(state.player.pos_x)) + kViewportWidth / 2;
-    const int cy = (st->pos_y - static_cast<int>(state.player.pos_y)) +
-                   kViewportHeight / 2;
-    if (cx < -160 || cx > kViewportWidth + 160 || cy < -160 ||
-        cy > kViewportHeight + 160) {
+        (st->pos_x - static_cast<int>(state.player.pos_x)) + vp.w / 2;
+    const int cy =
+        (st->pos_y - static_cast<int>(state.player.pos_y)) + vp.h / 2;
+    if (cx < -160 || cx > vp.w + 160 || cy < -160 || cy > vp.h + 160) {
       continue; // off-screen
     }
     // Pick an 8-bit tint: the stellar's government (now decoded) if present,
@@ -636,6 +653,9 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
 
   // Player ship at the play-area centre, frame selected by heading.
   if (!ship_.frames.empty() && ship_.frames_per_rotation > 0) {
+    const Viewport vp = CurrentViewport(platform);
+    const float cx = static_cast<float>(vp.w) / 2.0F;
+    const float cy = static_cast<float>(vp.h) / 2.0F;
     const int frame =
         FrameForHeading(state.player.heading, ship_.frames_per_rotation);
     const int clamped_frame = std::clamp(frame, 0, ship_.frame_count - 1);
@@ -643,10 +663,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
     const float scale = 1.0F; // original draws ship at native size
     const float w = static_cast<float>(ship_.width) * scale;
     const float h = static_cast<float>(ship_.height) * scale;
-    const SDL_FRect dest{static_cast<float>(kViewportWidth) / 2.0F - w / 2.0F,
-                         static_cast<float>(kViewportHeight) / 2.0F - h / 2.0F,
-                         w,
-                         h};
+    const SDL_FRect dest{cx - w / 2.0F, cy - h / 2.0F, w, h};
     SDL_RenderTexture(renderer, texture->get(), nullptr, &dest);
 
     // Engine-glow layer: drawn over the base with the same heading-selected
@@ -676,11 +693,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
           glow_.frames[static_cast<std::size_t>(glow_frame)];
       const float gw = static_cast<float>(glow_.width);
       const float gh = static_cast<float>(glow_.height);
-      const SDL_FRect glow_dest{
-          static_cast<float>(kViewportWidth) / 2.0F - gw / 2.0F,
-          static_cast<float>(kViewportHeight) / 2.0F - gh / 2.0F,
-          gw,
-          gh};
+      const SDL_FRect glow_dest{cx - gw / 2.0F, cy - gh / 2.0F, gw, gh};
       const std::uint8_t alpha = static_cast<std::uint8_t>(
           std::clamp(state.player.engine_glow_intensity, 0.0F, 1.0F) * 255.0F);
       SDL_SetTextureAlphaMod(glow_texture->get(), alpha);

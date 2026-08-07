@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <memory>
 #include <optional>
@@ -158,8 +159,13 @@ std::int32_t NovaLanded_Repair(GameState &state,
 
 namespace {
 
-// The docked panel covers the whole 640x480 logical screen.
+// The docked panel is the whole 640x480 logical playfield, drawn in playfield
+// (logical) coordinates. In resolution-extension mode SdlPlatform::
+// SetCenteredPlayfield clips the renderer to this centred rect so the docked
+// content stays fixed 640x480 with black borders on all sides; in scale mode it
+// fills the letterboxed playfield.
 using PanelRect = SDL_FRect;
+
 [[nodiscard]] PanelRect FullScreenPanel() {
   return {0.0F, 0.0F, 640.0F, 480.0F};
 }
@@ -187,9 +193,8 @@ struct ServiceColumns {
 bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
   constexpr ServiceColumns kFallback;
   constexpr std::size_t kRows = 4;
-  const std::size_t button_count =
-      std::min<std::size_t>(static_cast<std::size_t>(LandedService::kCount),
-                            kRows * 2U);
+  const std::size_t button_count = std::min<std::size_t>(
+      static_cast<std::size_t>(LandedService::kCount), kRows * 2U);
 
   const auto def = NovaResource_LoadDialogDefinition(0x3e8);
   const auto items = NovaResource_LoadDialogItems(0x3e8);
@@ -307,7 +312,7 @@ std::vector<ServiceButton> BuildServiceButtons(const DockedLayout &layout) {
 
   // Collect the layout's button items into left/right columns by screen x,
   // then sort each column top-to-bottom before assigning the per-slot service.
-  std::vector<SDL_FRect> cols[2];  // [0]=left, [1]=right
+  std::vector<SDL_FRect> cols[2]; // [0]=left, [1]=right
   for (const auto &item : layout.items) {
     if (item.kind != DockedItemKind::kButton) {
       continue;
@@ -316,16 +321,17 @@ std::vector<ServiceButton> BuildServiceButtons(const DockedLayout &layout) {
   }
   for (std::size_t side = 0; side < 2; ++side) {
     auto &col = cols[side];
-    std::sort(col.begin(), col.end(),
+    std::sort(col.begin(),
+              col.end(),
               [](const SDL_FRect &a, const SDL_FRect &b) { return a.y < b.y; });
     for (std::size_t row = 0; row < col.size(); ++row) {
       if (row >= kDockedButtonRows) {
-        continue;  // only four on-screen rows per column
+        continue; // only four on-screen rows per column
       }
       const LandedService svc =
           (side == 0 ? kLeftColumnServices[row] : kRightColumnServices[row]);
-      buttons.push_back(ServiceButton{col[row],
-                                      static_cast<std::uint8_t>(svc)});
+      buttons.push_back(
+          ServiceButton{col[row], static_cast<std::uint8_t>(svc)});
     }
   }
   return buttons;
@@ -366,17 +372,69 @@ const char *ServiceLabel(LandedService t) {
   return "";
 }
 
+// Whether a docked service slot is usable right now, mirroring the original's
+// per-slot gating in NovaUi_RedrawTravelActionButtons (0x004a0220) and its
+// mouse hit-test (NovaUi_HitTestAndTrackTravelActionButtons 0x0049fe10).
+//   Leave            always
+//   Refuel/Recharge  credits>0, fuel below capacity, non-hypergate;
+//                    (hyper-gate travel_flags bit 0x20 disables services)
+//   Trade center, Shipyard, Bar    travel_flags bits 0x2/0x8/0x40
+//   Outfitter                       travel_flags bit 0x4
+//   Mission BBS                     non-hypergate (travel_flags bit 0x20 clear)
+// Unavailable slots render grey (disabled art) and refuse activation.
+bool ServiceAvailable(const GameState &state, std::int16_t stellar_id, LandedService t) {
+  const auto *st = state.scenario.Stellar(stellar_id);
+  const std::uint32_t flags = st ? st->flags : 0U;
+  const bool allows_services = (flags & 0x20U) == 0U; // non-hypergate
+  const auto &eff = state.cached_stats;
+  switch (t) {
+  case LandedService::kLaunch:
+    return true;
+  case LandedService::kRefuel: {
+    if (!allows_services || state.player.credits <= 0) {
+      return false;
+    }
+    return state.player.fuel_points + 0.5F < eff.fuel_capacity;
+  }
+  case LandedService::kBuySellCargo:
+    return (flags & 0x2U) != 0U;
+  case LandedService::kOutfit:
+    return (flags & 0x4U) != 0U;
+  case LandedService::kShipyard:
+    return (flags & 0x8U) != 0U;
+  case LandedService::kBar:
+    return (flags & 0x40U) != 0U;
+  case LandedService::kMissionBoard:
+    return allows_services;
+  case LandedService::kRepair:
+    // Not a docked button in the original (no billable Repair): shields/armor
+    // are auto-refilled free on landing. Kept available only because the
+    // reconstruction grid still carries a Repair slot; it reports a no-op.
+    return state.player.armor_points + 0.5F < eff.max_armor_points;
+  case LandedService::kStarmap:
+    // Not a docked button in the original; kept reachable via its own key.
+    return true;
+  case LandedService::kCount:
+    break;
+  }
+  return false;
+}
+
 // Draws the docked-screen backdrop + panels + header + service list with the
 // real screen fonts: the destination title in Chicago (charcoal) and the status
-// lines in Geneva. The backdrop PICT (0x2134) fills the whole 640x480 `panel`;
-// the panels, title band, and buttons are positioned from the laid-out DITL
-// items (`layout`) rather than hardcoded geometry.
+// lines in Geneva. The Spaceport backdrop (`destination_art`) fills the whole
+// 640x480 `panel`; the destination planet picture (`planet_art`, PICT
+// link_a + 0x10000) is drawn 1:1 into the Spaceport DITL's 612x285 outer panel
+// at the top-centre (its natural size), over the spaceport. The title band,
+// inner status panel, and buttons are positioned from the laid-out DITL items
+// (`layout`) rather than hardcoded geometry.
 void DrawLandedMenu(SdlPlatform &platform,
                     NovaFontCache &font_cache,
                     const ServicesButtonArt &buttons,
                     const GameState &state,
                     const LandedContext &ctx,
                     SDL_Texture *destination_art,
+                    SDL_Texture *planet_art,
                     const SDL_FRect &panel,
                     const DockedLayout &layout,
                     const std::vector<ServiceButton> &button_rects,
@@ -384,9 +442,12 @@ void DrawLandedMenu(SdlPlatform &platform,
   SDL_Renderer *renderer = platform.renderer();
   const auto *st = state.scenario.Stellar(ctx.stellar_id);
 
-  // The backdrop fills the whole screen; the panel is the full 640x480 rect.
+  // The Spaceport backdrop fills the whole screen; the panel is the full
+  // 640x480 playfield. Clear the whole window (so extension borders stay
+  // black), then clip drawing to the centred 640x480 playfield viewport.
   SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
+  platform.SetCenteredPlayfield();
   if (destination_art != nullptr) {
     SDL_RenderTexture(renderer, destination_art, nullptr, &panel);
   }
@@ -397,25 +458,51 @@ void DrawLandedMenu(SdlPlatform &platform,
   const SDL_Color kPanel{16, 40, 72, 255};       // flat panel frame fill
   const SDL_Color kPanelBorder{80, 140, 190, 255};
 
-  // Draw the DITL panel/frame rects as flat frames (the real PICT sub-window
-  // frames 0x2135.. are out of scope, so a fill + border stands in).
+  // Lay out the panels. The large 612x285 outer panel at the top-centre
+  // is the destination-planet frame: the planet picture is drawn into it at its
+  // natural size (falling back to a flat frame when no planet PICT loads). The
+  // inner (status/description) panel and the title band are handled below.
   SDL_FRect title_band = panel;
+  SDL_FRect outer_panel = {0.0F, 0.0F, 0.0F, 0.0F};
   SDL_FRect status_panel = {0.0F, 0.0F, 0.0F, 0.0F};
   for (const auto &item : layout.items) {
-    if (item.kind == DockedItemKind::kOuterPanel ||
-        item.kind == DockedItemKind::kInnerPanel) {
-      SDL_SetRenderDrawColor(renderer, kPanel.r, kPanel.g, kPanel.b,
-                             kPanel.a);
-      SDL_RenderFillRect(renderer, &item.rect);
-      SDL_SetRenderDrawColor(renderer, kPanelBorder.r, kPanelBorder.g,
-                             kPanelBorder.b, kPanelBorder.a);
-      SDL_RenderRect(renderer, &item.rect);
-      if (item.kind == DockedItemKind::kInnerPanel) {
-        status_panel = item.rect;
-      }
+    if (item.kind == DockedItemKind::kInnerPanel) {
+      status_panel = item.rect;
+    } else if (item.kind == DockedItemKind::kOuterPanel) {
+      outer_panel = item.rect;
     } else if (item.kind == DockedItemKind::kTitleBand) {
       title_band = item.rect;
     }
+  }
+
+  // Destination planet picture in the outer panel (1:1; it is the same 612x285
+  // size as the panel). A thin border frames it when drawn.
+  if (outer_panel.w > 0.0F && outer_panel.h > 0.0F) {
+    if (planet_art != nullptr) {
+      SDL_RenderTexture(renderer, planet_art, nullptr, &outer_panel);
+    } else {
+      SDL_SetRenderDrawColor(renderer, kPanel.r, kPanel.g, kPanel.b, kPanel.a);
+      SDL_RenderFillRect(renderer, &outer_panel);
+    }
+    SDL_SetRenderDrawColor(renderer,
+                           kPanelBorder.r,
+                           kPanelBorder.g,
+                           kPanelBorder.b,
+                           kPanelBorder.a);
+    SDL_RenderRect(renderer, &outer_panel);
+  }
+
+  // The inner panel is the status/description frame; draw it as a bordered
+  // flat frame and lay the status lines out inside it.
+  if (status_panel.w > 0.0F && status_panel.h > 0.0F) {
+    SDL_SetRenderDrawColor(renderer, kPanel.r, kPanel.g, kPanel.b, kPanel.a);
+    SDL_RenderFillRect(renderer, &status_panel);
+    SDL_SetRenderDrawColor(renderer,
+                           kPanelBorder.r,
+                           kPanelBorder.g,
+                           kPanelBorder.b,
+                           kPanelBorder.a);
+    SDL_RenderRect(renderer, &status_panel);
   }
 
   // Destination name centred in the DITL header band (Chicago/title font),
@@ -437,10 +524,8 @@ void DrawLandedMenu(SdlPlatform &platform,
   // Credits/fuel/hull status lines in the inner content panel (Geneva body
   // font), or the panel top-left when no inner panel was laid out.
   const bool have_status = status_panel.w > 0.0F && status_panel.h > 0.0F;
-  const float body_x = have_status ? status_panel.x + 12.0F
-                                   : panel.x + 12.0F;
-  float baseline =
-      have_status ? status_panel.y + 66.0F : panel.y + 60.0F;
+  const float body_x = have_status ? status_panel.x + 12.0F : panel.x + 12.0F;
+  float baseline = have_status ? status_panel.y + 66.0F : panel.y + 60.0F;
 
   baseline += 24.0F;
   const std::string credits =
@@ -477,21 +562,28 @@ void DrawLandedMenu(SdlPlatform &platform,
                 fuel);
 
   // The service buttons, drawn with the real three-state button art and their
-  // labels centred in the body font. The selected (keyboard-focused) slot and
-  // the mouse-hovered slot both render in the hover state, mirroring the
-  // original highlighting the focused service. Label baseline is centred on the
-  // +5px-below-centre rule the original uses (NovaUi_DrawThreeStateButton).
+  // labels centred in the body font. Following the original, there is NO
+  // keyboard-focus/selection highlight: the pressed ("click") art marks the
+  // slot the mouse currently hovers (NovaUi_HitTestAndTrackTravelActionButtons
+  // redraws with the hovered index), and unavailable slots are drawn grey with
+  // the disabled art (NovaUi_RedrawTravelActionButtons). Label baseline is
+  // centred on the +5px-below-centre rule the original uses
+  // (NovaUi_DrawThreeStateButton).
+  const SDL_Color kDisabledLabel{88, 108, 132, 255}; // dimmed grey
   for (std::size_t i = 0; i < button_rects.size(); ++i) {
     const auto slot = button_rects[i].slot;
-    const bool focused = static_cast<int>(slot) ==
-                         static_cast<int>(ctx.selection);
-    const bool hovered_by_mouse = hovered.has_value() && *hovered == slot;
+    const auto svc = static_cast<LandedService>(slot);
+    const bool enabled = ServiceAvailable(state, ctx.stellar_id, svc);
+    const bool hovered_by_mouse =
+        enabled && hovered.has_value() && *hovered == slot;
     const auto state =
-        (focused || hovered_by_mouse) ? ButtonState::kHover
-                                      : ButtonState::kNormal;
+        !enabled ? ButtonState::kDisabled
+                 : (hovered_by_mouse ? ButtonState::kHover : ButtonState::kNormal);
     buttons.Draw(platform, button_rects[i].rect, state);
     const SDL_Color &label_color =
-        (focused || hovered_by_mouse) ? kSelected : kBody;
+        !enabled   ? kDisabledLabel
+        : hovered_by_mouse ? kSelected
+                          : kBody;
     const float label_baseline =
         button_rects[i].rect.y +
         std::max(9.0F, button_rects[i].rect.h / 2.0F + 5.0F);
@@ -499,20 +591,20 @@ void DrawLandedMenu(SdlPlatform &platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
                           12.0F,
-                          (focused || hovered_by_mouse) ? kNovaFontStyleBold
+                          (enabled && hovered_by_mouse) ? kNovaFontStyleBold
                                                         : kNovaFontStyleRegular,
                           label_color,
                           button_rects[i].rect.x,
                           button_rects[i].rect.x + button_rects[i].rect.w,
                           label_baseline,
-                          ServiceLabel(static_cast<LandedService>(slot)));
+                          ServiceLabel(svc));
   }
 
   // Footer hint row in the body font, just below the docked content (the
   // window bottom when laid out; otherwise the top of the panel).
-  const float footer_y =
-      layout.from_ditl ? layout.window.y + layout.window.h - 20.0F
-                       : panel.y + 52.0F;
+  const float footer_y = layout.from_ditl
+                             ? layout.window.y + layout.window.h - 20.0F
+                             : panel.y + 52.0F;
   NovaText_DrawCentered(platform,
                         font_cache,
                         NovaFontFamily::kGeneva,
@@ -522,7 +614,8 @@ void DrawLandedMenu(SdlPlatform &platform,
                         panel.x + 300.0F,
                         panel.x + 530.0F,
                         footer_y,
-                        "WASD move, Enter select, Q launch, Esc back");
+                        "R/F refuel  C/T trade  O outfit  S shipyard  "
+                        "N mission  B bar  Esc/Enter leave");
 }
 
 // Handles one service selection from the docked menu. Returns the exit intent:
@@ -550,11 +643,16 @@ DispatchService(SdlPlatform &platform, GameState &state, LandedContext &ctx) {
     return LandedExit::kServiceComplete;
   }
 
-  case LandedService::kRepair: {
-    constexpr std::int32_t kRepairPrice = 10; // credits per armor point
-    NovaLanded_Repair(state, kRepairPrice);
+  case LandedService::kRepair:
+    // The original's docked strip has NO Repair button: shields AND armor are
+    // refilled to maximum automatically, for free, by Stellar_TravelToSystem
+    // (0x00455e10) when the player arrives at (and leaves) a normal dock. The
+    // landing transition (NovaLanding_EnterDocked) already applies that free
+    // top-up, so there is nothing to bill here; this slot only reports the
+    // (already-full) state.
+    NovaLog::Info("dock repair: hull already at full (free auto-repair on "
+                  "landing; Stellar_TravelToSystem 0x00455e10)");
     return LandedExit::kServiceComplete;
-  }
 
   case LandedService::kBuySellCargo:
   case LandedService::kOutfit:
@@ -586,39 +684,69 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   NovaLog::Info("opening landed services window at stellar {}",
                 static_cast<int>(ctx.stellar_id));
 
-  // Load the docked-screen backdrop. The original fills the docking window
-  // with destination-art PICT 0x2134 (618x517) via g_travel_overlay_sprite_handle
-  // (Ghidra FUN_0048e970); the earlier 263x185 PICT 0x2137 belongs to the small
-  // travel-services modal, not the docked screen, so it is only a fallback if
-  // the large backdrop is unavailable. Either image is drawn across the full
-  // 640x480 dock panel (the panel is not shrunk to the art's natural size).
+  // Load the docked-screen backdrop and the destination planet picture.
+  //
+  // destination_art is the full-width dock backdrop: the Spaceport PICT 0x2134
+  // (618x517) drawn across the whole 640x480 panel (via
+  // g_travel_overlay_sprite_handle, Ghidra FUN_0048e970's base overlay); the
+  // earlier 263x185 PICT 0x2137 is only a fallback when 0x2134 is unavailable.
+  //
+  // planet_art is the destination stellar's own planet picture (the "you are
+  // here" surface panorama, PICT 0x2710 + link_a_id, or its custom picture id
+  // when it sets one at engage_highlight_frame >= 0x80 - mirrors FUN_0048e970's
+  // planet-PICT selection `engage_highlight_frame >= 0x80 ?
+  // engage_highlight_frame : link_a_id + 0x2710`). The Spaceport DITL 0x3e8
+  // carves a 612x285 outer panel at the top-centre of the docked window that is
+  // exactly the pict's natural size, so the planet is drawn there at 1:1, over
+  // the spaceport backdrop. When no stellar picture exists (hypergate / missing
+  // strip) the panel falls back to a flat frame.
   std::unique_ptr<SdlTexture> destination_art;
-  const auto backdrop_data = NovaResource_LoadPictData(0x2134);
-  const auto backdrop = backdrop_data
-                            ? Resource_LoadPictAsImage(*backdrop_data)
-                            : std::nullopt;
-  if (backdrop_data && backdrop) {
-    destination_art = SdlTexture::Create(platform.renderer(),
-                                         backdrop->width,
-                                         backdrop->height,
-                                         backdrop->rgba_pixels);
-    NovaLog::Info("landed dock backdrop PICT 0x2134 ({}x{})",
-                  backdrop->width, backdrop->height);
+  const auto *st_dec = state.scenario.Stellar(ctx.stellar_id);
+  const auto load_pict = [&](std::uint16_t pict_id) {
+    const auto data = NovaResource_LoadPictData(pict_id);
+    const auto img = data ? Resource_LoadPictAsImage(*data) : std::nullopt;
+    if (data && img) {
+      return SdlTexture::Create(
+          platform.renderer(), img->width, img->height, img->rgba_pixels);
+    }
+    return std::unique_ptr<SdlTexture>{};
+  };
+  std::unique_ptr<SdlTexture> planet_art;
+  if (st_dec) {
+    const std::int16_t stell_pict =
+        (st_dec->engage_highlight_frame >= 0x80)
+            ? st_dec->engage_highlight_frame
+            : static_cast<std::int16_t>(st_dec->link_a_id + 0x2710);
+    if (stell_pict >= 0x80) {
+      planet_art = load_pict(static_cast<std::uint16_t>(stell_pict));
+      if (planet_art) {
+        NovaLog::Info("destination planet PICT 0x{} ({}) for stellar {}",
+                      std::to_string(static_cast<int>(stell_pict)),
+                      st_dec->name,
+                      static_cast<int>(ctx.stellar_id));
+      } else {
+        NovaLog::Todo(
+            "no destination planet PICT {} (link_a {} + 0x10000) for stellar "
+            "'{}'; the outer panel stays a flat frame",
+            static_cast<int>(stell_pict),
+            static_cast<int>(st_dec->link_a_id),
+            st_dec->name);
+      }
+    }
+  }
+  destination_art = load_pict(0x2134);
+  if (destination_art) {
+    NovaLog::Info("landed dock backdrop PICT 0x2134");
   } else {
     NovaLog::Todo("docked backdrop PICT 0x2134 unavailable; falling back to "
                   "0x2137");
-    if (const auto art_data = NovaResource_LoadPictData(0x2137)) {
-      if (const auto art = Resource_LoadPictAsImage(*art_data)) {
-        destination_art = SdlTexture::Create(platform.renderer(),
-                                             art->width,
-                                             art->height,
-                                             art->rgba_pixels);
-      }
-    }
+    destination_art = load_pict(0x2137);
   }
   if (!destination_art) {
     NovaLog::Warn("no docked backdrop decoded; drawing a flat backdrop");
   }
+  // The docked panel fills the 640x480 logical playfield (centred via
+  // SetCenteredPlayfield in DrawLandedMenu in resolution-extension mode).
   const SDL_FRect panel = FullScreenPanel();
 
   // Lay out the docked screen from the real Spaceport DLOG/DITL 0x3e8
@@ -636,8 +764,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   if (!have_buttons) {
     NovaLog::Warn("service button art unavailable");
   }
-  const std::vector<ServiceButton> button_rects =
-      BuildServiceButtons(layout);
+  const std::vector<ServiceButton> button_rects = BuildServiceButtons(layout);
 
   NovaLog::Todo(
       "docked screen geometry (panels, title band, buttons) is laid out from "
@@ -665,55 +792,67 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
 
   bool entered_sub_screen = false;
 
-  // The docked services sit in a 2-column x 4-row grid whose physical button
-  // order is the real Spaceport screen (left col: Bar, Mission BBS, Trade,
-  // Repair; right col: Shipyard, Outfitter, Refuel, Leave; see
-  // k*ColumnServices). Up/Down move a row within the current column
-  // (wrapping), Left/Right cross to the other column at the same row.
-  auto step_row = [&](int row_delta) {
-    if (auto pos = NovaDialog_DockedGridOf(ctx.selection)) {
-      const int row = static_cast<int>(pos->second) + row_delta;
-      const std::size_t wrapped =
-          static_cast<std::size_t>((row + static_cast<int>(kDockedButtonRows)) %
-                                   static_cast<int>(kDockedButtonRows));
-      ctx.selection = NovaDialog_DockedServiceAt(pos->first, wrapped);
+  // Activates the currently-selected service, leaving the dock when the player
+  // picks Launch. On a mocked sub-screen (trade/outfit/shipyard/bar/...) the
+  // modal stays open (DispatchService returns kServiceComplete). Guards against
+  // activating a gated/disabled slot, mirroring the original only accepting
+  // usable action buttons. Returns true when the dock is left.
+  auto activate_selection = [&]() -> bool {
+    if (!ServiceAvailable(state, ctx.stellar_id, ctx.selection)) {
+      return false;
     }
-  };
-  auto step_column = [&] {
-    // Cross over to the other column at the same row (within the on-screen
-    // slots).
-    if (auto pos = NovaDialog_DockedGridOf(ctx.selection)) {
-      ctx.selection =
-          NovaDialog_DockedServiceAt(1U - pos->first, pos->second);
+    LandedExit exit = DispatchService(platform, state, ctx);
+    if (exit == LandedExit::kLaunched) {
+      return true;
     }
+    entered_sub_screen = false;
+    return false;
   };
+
+  // (Re)assert the centred playfield viewport before the first input poll so
+  // mouse coordinates (SDL_RenderCoordinatesFromWindow subtracts the viewport
+  // origin) are already in 640x480 playfield space even if the previous
+  // context (e.g. the fullscreen flight world) left no viewport set.
+  platform.SetCenteredPlayfield();
 
   while (!platform.quit_requested()) {
     // Compute the mouse-hovered service (for hover state on the buttons).
     std::optional<std::uint8_t> hovered;
     if (!entered_sub_screen) {
-      hovered = ServiceButtonAt(button_rects, platform.mouse_position());
+      const auto c = ServiceButtonAt(button_rects, platform.mouse_position());
+      // Only enabled slots highlight (the original's hit-test filters gated
+      // buttons before returning a hovered index).
+      if (c) {
+        const auto svc = static_cast<LandedService>(*c);
+        hovered =
+            ServiceAvailable(state, ctx.stellar_id, svc) ? c : std::nullopt;
+      }
     }
     // Draw the current face. When a sub-screen is "open" the original swaps to
     // a nested modal widget; the MVP keeps the same menu surface and only
     // distinguishes via the hint, so we always redraw the list.
     DrawLandedMenu(platform,
-                    font_cache,
-                    button_art,
-                    state,
-                    ctx,
-                    destination_art ? destination_art->get() : nullptr,
-                    panel,
-                    layout,
-                    button_rects,
-                    hovered);
+                   font_cache,
+                   button_art,
+                   state,
+                   ctx,
+                   destination_art ? destination_art->get() : nullptr,
+                   planet_art ? planet_art->get() : nullptr,
+                   panel,
+                   layout,
+                   button_rects,
+                   hovered);
     SDL_RenderPresent(platform.renderer());
 
     // Poll discrete raw keys for the modal (dedicated channel, so it never
-    // interferes with the spaceflight flight controls).
+    // interferes with the spaceflight flight controls). Keyboard shortcuts are
+    // the first/mnemonic letter of each service, matching the travel-scene
+    // action dispatch in NovaUi_RunTravelDestinationInteractionLoop
+    // (0x00491f30): r/f refuel, c/t trade, o outfit, s shipyard, n mission,
+    // b bar, Enter/Esc leave. There is no keyboard focus/highlight state.
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
       if (in->key == TextKey::escape) {
-        // Esc leaves a sub-screen back to the menu, or launches from the menu.
+        // Esc leaves a sub-screen back to the menu, or leaves the dock.
         if (entered_sub_screen) {
           entered_sub_screen = false;
         } else {
@@ -722,71 +861,68 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
         continue;
       }
       if (in->key == TextKey::enter) {
-        // Enter activates the focused service (same as 'e').
-        LandedExit exit = DispatchService(platform, state, ctx);
-        if (exit == LandedExit::kLaunched) {
-          return LandedExit::kLaunched;
-        }
-        entered_sub_screen = false;
-        continue;
+        // Enter leaves the dock, matching the original's Enter/Esc exit code.
+        return LandedExit::kLaunched;
       }
       if (in->key == TextKey::primary) {
-        // Left-click a service button: select it and activate (mirrors the
-        // original's mouse button driving the services buttons).
+        // Left-click a service button: activate the hovered (and only if
+        // enabled) slot, like the original's mouse-driven services buttons.
         if (!entered_sub_screen) {
           if (const auto slot =
                   ServiceButtonAt(button_rects, platform.mouse_position())) {
             ctx.selection = static_cast<LandedService>(*slot);
-            LandedExit exit = DispatchService(platform, state, ctx);
-            if (exit == LandedExit::kLaunched) {
-              return LandedExit::kLaunched;
+            if (ServiceAvailable(state, ctx.stellar_id, ctx.selection)) {
+              LandedExit exit = DispatchService(platform, state, ctx);
+              if (exit == LandedExit::kLaunched) {
+                return LandedExit::kLaunched;
+              }
+              entered_sub_screen = false;
             }
-            entered_sub_screen = false;
           }
         }
         continue;
       }
       if (in->key == TextKey::character) {
-        switch (in->character) {
-        case 'w':
-        case 'k':
-          if (!entered_sub_screen) {
-            step_row(-1);
-          }
+        if (entered_sub_screen) {
+          continue;
+        }
+        // First-letter service shortcuts (mirror the travel interaction loop
+        // key comparisons). Each is case-insensitive (SDL3 reports letter keys
+        // lower-case, but normalise anyway).
+        const char kc =
+            static_cast<char>(std::tolower(static_cast<unsigned char>(in->character)));
+        switch (kc) {
+        case 'r':
+        case 'f':
+          ctx.selection = LandedService::kRefuel;
+          break;
+        case 'c':
+        case 't':
+          ctx.selection = LandedService::kBuySellCargo;
+          break;
+        case 'o':
+          ctx.selection = LandedService::kOutfit;
           break;
         case 's':
-        case 'j':
-          if (!entered_sub_screen) {
-            step_row(1);
-          }
+          ctx.selection = LandedService::kShipyard;
           break;
-        case 'a':
-        case 'h':
-        case 'd':
+        case 'n':
+          ctx.selection = LandedService::kMissionBoard;
+          break;
+        case 'b':
+          ctx.selection = LandedService::kBar;
+          break;
         case 'l':
-          // Left/Right cross between the two docked button columns.
-          if (!entered_sub_screen) {
-            step_column();
-          }
-          break;
-        case 'e': {
-          LandedExit exit = DispatchService(platform, state, ctx);
-          if (exit == LandedExit::kLaunched) {
-            return LandedExit::kLaunched;
-          }
-          entered_sub_screen = false;
-          break;
-        }
-        case '1':
-          if (!entered_sub_screen) {
-            const auto n = static_cast<int>(in->character - '0');
-            if (n >= 0 && n < static_cast<int>(LandedService::kCount)) {
-              ctx.selection = static_cast<LandedService>(n);
-            }
-          }
+          // "Launch": a synonym for Enter/Esc (the docked Leave slot).
+          return LandedExit::kLaunched;
+        case 'm':
+          ctx.selection = LandedService::kStarmap;
           break;
         default:
-          break;
+          continue;
+        }
+        if (activate_selection()) {
+          return LandedExit::kLaunched;
         }
       }
     }

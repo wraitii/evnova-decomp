@@ -134,9 +134,10 @@ struct LandedContext {
   // open the dock with a "try to refuel" walk-up). Mirrors Stellar_LandOnSpob
   // being a prerequisite of the docked state.
   bool landed = false;
-  // The currently focused service row (0..kCount-1). The MVP uses the same
-  // channel as spaceflight targeting (up/down) so no new input surface is
-  // needed.
+  // The service most recently activated (by a mouse click or a letter
+  // shortcut). The original has NO persistent keyboard focus/highlight state:
+  // only a momentarily mouse-hovered slot is visually pressed, so this value is
+  // used purely for dispatch, not for rendering a selection.
   LandedService selection = LandedService::kLaunch;
 };
 
@@ -154,9 +155,11 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx);
 // stats. Returns the credits actually spent (>= 0).
 std::int32_t NovaLanded_Refuel(GameState &state, std::int32_t price_per_unit);
 
-// Repairs armor (and shields) toward the effective maximums. The original hides
-// the repair price behind a fixed shop cost model; the MVP charges a flat
-// per-point rate for the gap. Returns the credits actually spent.
+// Repairs armor (and shields) toward the effective maximums. NOTE: the original
+// has no billed docked Repair service -- shields and armor are auto-refilled for
+// free on landing by Stellar_TravelToSystem (0x00455e10). This helper models the
+// delta top-up for completeness / unit tests only; the docked menu does not bill
+// it. Returns the credits actually spent.
 std::int32_t NovaLanded_Repair(GameState &state,
                                std::int32_t price_per_armor_point);
 
@@ -165,15 +168,24 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // platform input channels. Owns a NovaFontCache for the duration of the modal
 // (mirroring the original's DrawContext font state) and lays the window text
 // out with the real screen fonts (Chicago/Charcoal titles + Geneva body).
-// Renders the docked-screen backdrop (destination-art PICT 0x2134, ~618x517)
-// across the whole 640x480 panel, mirroring Ghidra FUN_0048e970
-// (g_travel_overlay_sprite_handle = Resource_LoadPictAsImage(0x2134)) blitting
-// it over the full window rect. The destination name is centred near the top
-// and the services sit in the DITL-0x3e8 two-column (4-row) button layout at
-// the lower left/right, driven by the same geometry as the mouse hit-test.
-// Returns the exit code describing how the window closed (see LandedExit).
+// Renders the Spaceport backdrop (PICT 0x2134 via
+// g_travel_overlay_sprite_handle, Ghidra FUN_0048e970) across the 640x480
+// playfield, then draws the destination stellar's own planet picture (PICT
+// 0x2710 + link_a_id, or its custom picture id at engage_highlight_frame >=
+// 0x80, per FUN_0048e970) into the Spaceport DITL-0x3e8 outer panel at its
+// natural 612x285 size. The destination name is centred in the header band and
+// the services sit in the DITL-0x3e8 two-column (4-row) button layout at the
+// lower left/right, driven by the same geometry as the mouse hit-test.
+//
+// Input follows the original, not a keyboard-focus model: a mouse click
+// activates, the mouse-hovered slot is visually pressed, unavailable services
+// draw grey, and the first-letter shortcuts (r/f refuel, c/t trade, o outfit,
+// s shipyard, n mission, b bar; Enter/Esc leave) activate immediately. Returns
+// the exit code describing how the window closed (see LandedExit).
 // `state.player` must already be positioned at the dock (e.g. after
-// NovaLanding_EnterDocked).
+// NovaLanding_EnterDocked). In resolution-extension mode the playfield stays a
+// fixed 640x480 centred with black borders; the F5 scale toggle (documented
+// divergence) scales it to fill the window.
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                               GameState &state,
                                               LandedContext &ctx);

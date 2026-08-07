@@ -20,6 +20,7 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 - Prefer plate comments for functions; pre-comments for globals/data.
 - When renaming high-level control-flow functions (startup, run loop, shutdown), also add a short clean-room comment block (2-4 lines) documenting purpose, entry/exit conditions, and confidence/unknowns.
 - If testing game behaviour is required, stop and ask the user for input - you will not be able to interact with the game well enough.
+- Beware of `find` in shell, on macos some commands are very slow if searching the disk.
 
 ## Function progress tracker (`progress.csv`)
 
