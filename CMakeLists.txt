@@ -6,10 +6,23 @@ project(EscapeVelocityNova
     LANGUAGES CXX)
 
 option(EVNOVA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
+option(EVNOVA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation when available" ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(EVNOVA_ENABLE_CLANG_TIDY)
+    find_program(EVNOVA_CLANG_TIDY NAMES clang-tidy
+        HINTS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin)
+    if(EVNOVA_CLANG_TIDY)
+        set(CMAKE_CXX_CLANG_TIDY
+            "${EVNOVA_CLANG_TIDY};--checks=clang-analyzer-*;--warnings-as-errors=*")
+    else()
+        message(STATUS "clang-tidy not found; static analysis is disabled")
+    endif()
+endif()
 
 # Preserve source-level debugging while avoiding the pathologically slow unoptimized builds
 # produced by -O0. This applies to the executable and tests on Clang/GCC-family toolchains.

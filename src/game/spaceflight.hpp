@@ -6,13 +6,9 @@
 // combat simulation is not reconstructed; this module provides the faithful
 // *skeleton*: it plays the new-game intro cinematic on first entry, then runs
 // the in-system loop with the original's phase/scope ordering
-// (Frame_SpaceflightLoop pre-draw/sim/draw/post-draw, Frame_TickSystems's
-// run_full_tick-gated scopes), each real scope yielded to a loud stub that
-// logs what it stands in for (mirroring the Stub_* isolation in
-// new_pilot_flow.cpp). As each gameplay subsystem is reconstructed, its stub
-// grows a real implementation without changing the loop skeleton. Entering
-// and leaving mirrors the original mode transition between the UI shell (main
-// menu) and active flight.
+// (Frame_SpaceflightLoop pre-draw/sim/draw/post-draw and Frame_TickSystems's
+// run_full_tick-gated scopes). Unimplemented scopes are no-ops until their
+// subsystem is reconstructed.
 //
 // The reimplementation's escape back to the menu diverges from the original,
 // which latches DAT_00596d38 on the primary mouse command through the pause
@@ -69,7 +65,7 @@ extern void NovaPlayer_UpdateFromInput(GameState &state,
 
 // Per-frame in-flight shield regeneration (the spaceflight loop calls this
 // once a frame). Restores the player's shields toward the effective maximum at
-// the recorded shield-recharge rate (class base + outfit opcode-5 bonuses,
+// the recorded shield-recharge rate (class base + outfit opcode-18 bonuses,
 // scaled by frame time), capped so it never exceeds max shield points.
 // Mirrors the shield-regen portion of the original's per-frame player update.
 // Armor does NOT regenerate in flight (the original only repairs armor while

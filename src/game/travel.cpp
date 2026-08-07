@@ -85,7 +85,7 @@ int NovaTravel_FindNearestTravelPoint(const GameState &state) {
       continue; // no travel point in this slot
     }
     const Stellar *st = state.scenario.Stellar(stellar_id);
-    if (!st) {
+    if (!st || !st->is_available || (st->flags & 1U) == 0U) {
       continue;
     }
     // Distance from the ship to the travel point (world coords; +y is down).
@@ -116,11 +116,6 @@ bool NovaTravel_CanStartJump(const GameState &state) {
   const float class_fuel_capacity =
       cls ? static_cast<float>(cls->base_fuel) : 0.0F;
   if (class_fuel_capacity < kJumpFuelCost) {
-    return false;
-  }
-  // And enough fuel on hand to pay for the jump (the completion decrements
-  // kJumpFuelCost out of fuel_points).
-  if (state.player.fuel_points < kJumpFuelCost) {
     return false;
   }
   // TODO(decomp): the original also blocks while velocity-matched to another

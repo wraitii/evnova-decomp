@@ -93,7 +93,7 @@ LoadMenuSpriteAsset(SDL_Renderer *renderer,
     return std::nullopt;
   }
 
-  NovaMenuSpriteAsset asset{.sheet = std::move(*sheet)};
+  NovaMenuSpriteAsset asset{.sheet = std::move(*sheet), .textures = {}};
   asset.textures.reserve(asset.sheet.frames.size());
   for (const auto &frame : asset.sheet.frames) {
     auto texture = SdlTexture::Create(

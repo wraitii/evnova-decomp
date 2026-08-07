@@ -62,8 +62,8 @@ struct PilotFile {
 
   // -- Ownership tables (g_outfit_owned_count, weapon banks) -----------------
   std::array<std::int16_t, 0x200> outfit_owned_count{};
-  std::array<std::int16_t, 0x100> weapon_bank_ammo{};
-  std::array<std::int16_t, 0x100> weapon_bank_secondary{};
+  std::array<std::int16_t, 0x100 * 100> weapon_bank_ammo{};
+  std::array<std::int16_t, 0x100 * 100> weapon_bank_secondary{};
 
   // Fresh default for a brand-new pilot, mirroring
   // PilotData_InitializePlayerState's absent-block seed: 10000 credits, ship

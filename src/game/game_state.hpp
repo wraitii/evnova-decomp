@@ -199,12 +199,9 @@ struct GameState {
   bool stat_cache_valid = false;
   PlayerEffectiveStats cached_stats{};
 
-  // Per-weapon ammo/secondary counters (Ghidra g_ship_states
-  // weapon_bank_ammo_0 / weapon_bank_secondary_counter_0; 0x100 fixed bank
-  // stride). Kept as a placeholder bank set for now; the two-dimensional
-  // per-bank layout is not yet reconstructed.
-  std::array<std::int16_t, 0x100> weapon_bank_ammo{};
-  std::array<std::int16_t, 0x100> weapon_bank_secondary{};
+  // The original stores 0x100 weapon banks with a 100-element stride.
+  std::array<std::int16_t, 0x100 * 100> weapon_bank_ammo{};
+  std::array<std::int16_t, 0x100 * 100> weapon_bank_secondary{};
 };
 
 } // namespace game

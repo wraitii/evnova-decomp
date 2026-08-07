@@ -25,16 +25,6 @@ std::array<Effect, 4> OutfitEffects(const Outfit &o) {
           Effect{o.alt_mod_types[2], o.alt_mod_vals[2]}};
 }
 
-// The loader's stat scaling divisors/screw factors (Ghidra constants; see the
-// movement loader notes in spaceflight.cpp). These map a raw outfit opcode
-// bonus into the same per-frame units the scenario loader already applied to
-// the ship-class base fields. Values are the exact Ghidra float constants read
-// from the binary's tuning block; kept named + provisional so a live capture
-// can re-verify them (TODO(decomp)).
-constexpr float kAccelDivisor = 10000.0F; // opcode 7 accel -> px/frame^2
-constexpr float kSpeedDivisor = 640.0F;   // opcode 8 speed -> px/frame
-constexpr float kTurnScale = 0.1F;        // opcode 9 turn -> deg/frame
-
 // Scale applied to the summed shield-recharge bonuses: shield_recharge bonus
 // (opcode 5) = kShieldRechargeScale / modval, in shield points per frame.
 // Ghidra _DAT_00575778. TODO(decomp): verify magnitude against a capture.
@@ -110,8 +100,8 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   }
 
   PlayerEffectiveStats s;
-  // Base capacities/exponents from the ship class (the loader already scaled
-  // accel/speed/turn; base_shield/base_armor/base_fuel/cargo_holds are ints).
+  // These movement fields remain in their raw resource units until the
+  // movement integrator applies the corresponding conversion.
   s.max_shield_points = static_cast<float>(cls->base_shield);
   s.max_armor_points = static_cast<float>(cls->base_armor);
   s.fuel_capacity = static_cast<float>(cls->base_fuel);
@@ -148,16 +138,13 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
         s.cargo_capacity += weighted;
         break;
       case OutfitEffect::kAccelerator: // opcode 7
-        s.thrust_raw += static_cast<float>(owned) *
-                        (static_cast<float>(e.val) / kAccelDivisor);
+        s.thrust_raw += weighted;
         break;
       case OutfitEffect::kSpeed: // opcode 8
-        s.speed_raw += static_cast<float>(owned) *
-                       (static_cast<float>(e.val) / kSpeedDivisor);
+        s.speed_raw += weighted;
         break;
       case OutfitEffect::kTurn: // opcode 9
-        s.turn_raw += static_cast<float>(owned) *
-                      (static_cast<float>(e.val) * kTurnScale);
+        s.turn_raw += weighted;
         break;
       case OutfitEffect::kShieldRecharge: // opcode 5
         if (e.val != 0) {
@@ -255,7 +242,7 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
   // (2) ModType-27 (kIncreaseMax) maximum multipliers: every owned outfit
   // pointing at this one (mod type 27, mod val == this outfit's id) multiplies
   // the base maximum by the owned count of the multiplier.
-  std::int16_t multiplier = 1;
+  std::int32_t multiplier = 0;
   for (std::size_t mid = 0; mid < state.inventory.outfit_owned_count.size();
        ++mid) {
     const std::int16_t mowned = state.inventory.outfit_owned_count[mid];
@@ -273,12 +260,10 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
       }
     }
   }
-  if (multiplier < 1) {
-    multiplier = 1;
-  }
+  multiplier = std::max<std::int32_t>(1, multiplier);
   const std::int16_t lifted = static_cast<std::int16_t>(
-      static_cast<std::int32_t>(multiplier) * out.max_allowed);
-  if (lifted < out.max_allowed) {
+      std::clamp<std::int32_t>(multiplier * out.max_allowed, 0, 32767));
+  if (multiplier > 1 || lifted < out.max_allowed) {
     out.max_allowed = lifted;
   }
   effective = std::min<int>(effective, lifted);

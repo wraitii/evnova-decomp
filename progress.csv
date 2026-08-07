@@ -105,7 +105,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004160E0,LicenseDigest_TouchAndLoadByte,,0%,
 0x004160F0,Util_ReturnZero,,0%,
 0x00416100,NovaGameSession_Run,src/nova_app.cpp,100%,NovaGameSession_Run demo session shell
-0x00417600,Frame_SpaceflightLoop,src/game/spaceflight.cpp,10%,"Frame_SpaceflightLoop skeleton: outer pre-draw/sim/draw/post ordering reconstructed, scopes stubbed"
+0x00417600,Frame_SpaceflightLoop,src/game/spaceflight.cpp,10%,"Frame_SpaceflightLoop skeleton: outer pre-draw/sim/draw/post ordering reconstructed; unimplemented scopes are silent no-ops"
 0x004186B0,Frame_TickSystems,src/game/spaceflight.cpp,10%,Frame_TickSystems structure reconstructed (run_full_tick gated); heavy per-tick scopes stubbed
 0x00419210,Frame_RefreshTransitionFrameAuxVisuals,,0%,
 0x004192D0,Shot_ResolveShipHitFromWeapon,,0%,
@@ -327,7 +327,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00463550,Ship_ComputeShipMaxShieldPoints,src/game/outfit.cpp,85%,player-path effective max shield (class base + opcode 4 x owned) in Outfit_ComputePlayerEffectiveStats; NPC/mission paths deferred
 0x004637a0,Ship_ComputeShipMaxArmor,src/game/outfit.cpp,85%,player-path effective max armor (class base + opcode 6 x owned); NPC/mission paths deferred
 0x00463a20,Ship_ComputeShipFuelCapacity,src/game/outfit.cpp,85%,player-path effective fuel (class base + opcode 12 x owned) clamped [0,32000]; NPC/mission paths deferred
-0x00463b30,Ship_ComputeShipShieldRechargeRate,src/game/outfit.cpp,80%,player shield recharge (class base + opcode 5 bonuses) factored into PlayerEffectiveStats; armor path via opcode 29
+0x00463b30,Ship_ComputeShipShieldRechargeRate,src/game/outfit.cpp,80%,player shield recharge (class base + verified opcode 18 bonuses) factored into PlayerEffectiveStats; armor path via opcode 29
 0x004640a0,Ship_ComputeShipEffectiveThrust,src/game/outfit.cpp,80%,player effective accel (class base + opcode 7 /10000 x owned) in PlayerEffectiveStats; NPC/mission combat-state mods deferred
 0x00463680,Ship_ComputeShipShieldRegenRate,,0%,
 0x004637A0,Ship_ComputeShipMaxArmor,,0%,
@@ -411,7 +411,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00469480,FUN_00469480,,0%,
 0x00469490,FUN_00469490,,0%,
 0x004694A0,ShipClass_CanPlayerCaptureShipClass,,0%,
-0x004656a0,Outfit_ClampOutfitOwnedCountToCurrentLimits,src/game/outfit.cpp,90%,ownership limiting (Max, ammo-bank, ModType-27 multipliers, gun/turret slot caps) faithfully reconstructed; ammo-bank index uses placeholder stride
+0x004656a0,Outfit_ClampOutfitOwnedCountToCurrentLimits,src/game/outfit.cpp,90%,ownership limiting (Max, ammo-bank, ModType-27 multipliers, gun/turret slot caps) reconstructed; full 0x100x100 ammo-bank stride now modelled
 0x00469760,Outfit_ComputeFleetCargoCapacity,src/game/outfit.cpp,50%,player-only fleet cargo capacity via Outfit_ComputePlayerFleetCargoCapacity; no NPC escort freighters yet
 0x0046a5d0,Outfit_ComputePlayerCargoAndJunkTotal,src/game/outfit.cpp,80%,player cargo+junk total from 6 bins + junk array; mission-cargo path deferred
 0x0046a7c0,Outfit_ComputeRemainingCargoSpace,src/game/outfit.cpp,60%,remaining free cargo = capacity - carried, clamped >=0; no mission-fleet objects committed

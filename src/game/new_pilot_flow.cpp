@@ -237,6 +237,16 @@ void Stub_SeedStartingInventory(GameState &state) {
     state.inventory.outfit_owned_count[index] =
         static_cast<std::int16_t>(ship->default_outfit_counts[i]);
   }
+  // ResetPlayerShipForNewGame calculated capacities before this inventory was
+  // seeded. Recompute now so the new pilot starts with installed bonuses.
+  OutfitMarkStatsDirty(state);
+  const PlayerEffectiveStats effective =
+      Outfit_ComputePlayerEffectiveStats(state);
+  state.player.shield_points = effective.max_shield_points;
+  state.player.armor_points = effective.max_armor_points;
+  state.player.fuel_points = effective.fuel_capacity;
+  state.cached_stats = effective;
+  state.stat_cache_valid = true;
   NovaLog::Info("new-game inventory seeded from ship class '{}' ({} default "
                 "outfits)",
                 ship->display_name,

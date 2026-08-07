@@ -382,7 +382,9 @@ const char *ServiceLabel(LandedService t) {
 //   Outfitter                       travel_flags bit 0x4
 //   Mission BBS                     non-hypergate (travel_flags bit 0x20 clear)
 // Unavailable slots render grey (disabled art) and refuse activation.
-bool ServiceAvailable(const GameState &state, std::int16_t stellar_id, LandedService t) {
+bool ServiceAvailable(const GameState &state,
+                      std::int16_t stellar_id,
+                      LandedService t) {
   const auto *st = state.scenario.Stellar(stellar_id);
   const std::uint32_t flags = st ? st->flags : 0U;
   const bool allows_services = (flags & 0x20U) == 0U; // non-hypergate
@@ -576,14 +578,14 @@ void DrawLandedMenu(SdlPlatform &platform,
     const bool enabled = ServiceAvailable(state, ctx.stellar_id, svc);
     const bool hovered_by_mouse =
         enabled && hovered.has_value() && *hovered == slot;
-    const auto state =
-        !enabled ? ButtonState::kDisabled
-                 : (hovered_by_mouse ? ButtonState::kHover : ButtonState::kNormal);
-    buttons.Draw(platform, button_rects[i].rect, state);
-    const SDL_Color &label_color =
-        !enabled   ? kDisabledLabel
-        : hovered_by_mouse ? kSelected
-                          : kBody;
+    const auto button_state =
+        !enabled
+            ? ButtonState::kDisabled
+            : (hovered_by_mouse ? ButtonState::kHover : ButtonState::kNormal);
+    buttons.Draw(platform, button_rects[i].rect, button_state);
+    const SDL_Color &label_color = !enabled           ? kDisabledLabel
+                                   : hovered_by_mouse ? kSelected
+                                                      : kBody;
     const float label_baseline =
         button_rects[i].rect.y +
         std::max(9.0F, button_rects[i].rect.h / 2.0F + 5.0F);
@@ -889,8 +891,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
         // First-letter service shortcuts (mirror the travel interaction loop
         // key comparisons). Each is case-insensitive (SDL3 reports letter keys
         // lower-case, but normalise anyway).
-        const char kc =
-            static_cast<char>(std::tolower(static_cast<unsigned char>(in->character)));
+        const char kc = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(in->character)));
         switch (kc) {
         case 'r':
         case 'f':

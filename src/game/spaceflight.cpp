@@ -19,126 +19,34 @@
 namespace game {
 namespace {
 
-// ===========================================================================
-// TickSystem scope / Frame_SpaceflightLoop phase stubs.
-// ---------------------------------------------------------------------------
-// Ghidra 0x004186b0 Frame_TickSystems run_full_tick gates the heavy per-tick
-// dispatch (AI, mission spawns, weapon fire) behind `run_full_tick != 0`, while
-// the always-on scopes (collisions, shot handling, ship handling, misc sprite/
-// gravity handlers) run regardless -- they are what still advances while
-// gameplay is frozen during transitions. Frame_SpaceflightLoop (0x00417600)
-// calls it full on pre-draw and reduced when g_gameplay_time_frozen is set.
-//
-// None of the underlying gameplay systems are reconstructed yet (ship AI,
-// shots, collisions, missions, stellar/gravity, player control all depend on
-// the ship-class / outfit / weapon / stellar tables the new-pilot flow reports
-// as unavailable). So each real scope below is a loud stub that preserves the
-// original's ordering and run_full_tick structure, ready to grow a real
-// implementation as each subsystem is reconstructed. This mirrors the Stub_*
-// isolation pattern in new_pilot_flow.cpp.
+// Frame_TickSystems preserves the original scope order. Unimplemented scopes
+// intentionally do nothing; logging them per frame would overwhelm diagnostics.
+void Stub_PlayerCore(GameState &state) { (void)state; }
 
-// Ghidra Frame_TickSystems scope 10 "player":
-// Ship_HandlePlayerShipCore(g_ship_states) -- player control, travel
-// interactions, combat/disable transitions, outfit side effects, mission
-// cleanup/presentation. The full player-ship simulation.
-void Stub_PlayerCore(GameState &state) {
-  (void)state;
-  NovaLog::Todo("scope 10 player core not reconstructed: ship control, travel "
-                "interaction and outfit/mission side effects skipped");
-}
+void Stub_Collisions(GameState &state) { (void)state; }
 
-// Ghidra Frame_TickSystems scope 9 "collisions":
-// Shot_ResolveCollisions + Ship_TestSpriteLayerOverlaps over the shot
-// container layers. No shot/object containers exist yet.
-void Stub_Collisions(GameState &state) {
-  (void)state;
-  NovaLog::Todo("scope 9 collisions not reconstructed: no shot/object "
-                "containers to resolve against");
-}
+void Stub_DrawStatus(GameState &state) { (void)state; }
 
-// Ghidra Frame_TickSystems scope 0xc "DrawStatus" (full tick only):
-// Frame_RollProximityScanDetection + NovaUi_RefreshGameplayPanels.
-void Stub_DrawStatus(GameState &state) {
-  (void)state;
-  NovaLog::Todo("scope 0xc draw status not reconstructed: proximity-scan "
-                "detection roll and gameplay panel refresh skipped");
-}
+void Stub_AiRoutines(GameState &state) { (void)state; }
 
-// Ghidra Frame_TickSystems scope 6 "AI routines" (full tick only):
-// clears the per-ship targeting latches (ai_targeted_by_any_ship /
-// ai_followed_as_leader / ai_selected_as_resolved_target), snapshots the AI
-// target slots, then Ship_UpdateShipAI per active NPC ship. No ship fleet
-// exists yet, so only the targeting-latch reset is representable (on the
-// player by identity) and the per-ship AI loop is a stub.
-void Stub_AiRoutines(GameState &state) {
-  // TODO(decomp): when a ship-fleet container is added to GameState, reset the
-  // per-slot targeting latches and walk each active same-system NPC here.
-  (void)state;
-  NovaLog::Todo("scope 6 AI routines not reconstructed: no NPC fleet to walk; "
-                "targeting-latch reset skipped");
-}
+void Stub_MissionAndMiscHandlers(GameState &state) { (void)state; }
 
-// Ghidra Frame_TickSystems scope 0xb "misc handlers2" (full tick only):
-// Mission_TickShipInteractionReactions + Frame_UpdateCombatChatter +
-// Frame_UpdateScreenFlashTimers + Ship_TallyInboundWeaponThreat +
-// Mission_TickMissionAndEncounterSpawns + Dude_SpawnRoamingShip.
-void Stub_MissionAndMiscHandlers(GameState &state) {
-  (void)state;
-  NovaLog::Todo("scope 0xb mission/misc handlers not reconstructed: reaction "
-                "slots, combat chatter, screen-flash timers, inbound-threat "
-                "tally, mission/encounter spawns and roamer spawn skipped");
-}
+void Stub_CalcAiOdds(GameState &state) { (void)state; }
 
-// Ghidra Frame_TickSystems scope 0x14 "calc AI odds" (full tick only):
-// Ship_UpdateShipCombatPressureRatio per active same-system NPC ship. No NPC
-// ships to grade.
-void Stub_CalcAiOdds(GameState &state) {
-  (void)state;
-  NovaLog::Todo("scope 0x14 combat-pressure ratio not reconstructed: no NPC "
-                "ships to grade against the player");
-}
+void Stub_HandleShots(GameState &state) { (void)state; }
 
-// Ghidra Frame_TickSystems scope 7 "HandleShot": Shot_HandleShot per active
-// shot (g_shot_states, 0x80 slots). No shot container exists yet.
-void Stub_HandleShots(GameState &state) {
-  (void)state;
-  NovaLog::Todo("scope 7 shot handling not reconstructed: no shot entities to "
-                "advance");
-}
+void Stub_HandleShips(GameState &state) { (void)state; }
 
-// Ghidra Frame_TickSystems scope 4 "HandleShip" / scope 5 "HandleShipDisplay":
-// Ship_HandleShip per active same-system ship, then launch/sprite progress.
-// Only the player ship exists, and its full simulation is not reconstructed.
-void Stub_HandleShips(GameState &state) {
-  (void)state;
-  NovaLog::Todo(
-      "scope 4/5 ship handling not reconstructed: only the player "
-      "ship exists and its movement/combat update is not reconstructed");
-}
-
-// Ghidra Frame_TickSystems scope 8 "misc handlers": stellar sprite animation,
-// defense batteries, travel/ship reticles, viewport wrap, ambient star
-// particles, scripted maneuvers, encounter countdown, gravity pull, stellar
-// crash test, fading effects, travel countdown sprite. All depend on the
-// StellarDef / SystemDef tables and the ambient-effect subsystem.
 void Stub_MiscHandlers(GameState &state, bool run_full_tick) {
   (void)state;
   (void)run_full_tick;
-  NovaLog::Todo("scope 8 misc handlers not reconstructed: stellar sprites, "
-                "defense batteries, reticles, gravity pull, stellar crash, "
-                "ambient star particles and fading effects skipped");
 }
 
-// Ghidra Frame_TickSystems final: Shot_UpdateBeamHitQueue(run_full_tick).
-void Stub_BeamHitQueue(GameState &state) {
-  (void)state;
-  NovaLog::Todo("beam hit queue not reconstructed: no beam hits to resolve");
-}
+void Stub_BeamHitQueue(GameState &state) { (void)state; }
 
 // Ghidra 0x004186b0 Frame_TickSystems. Reconstructs only the *structure*:
 // the scope ordering and the run_full_tick gate. Each scope is a loud stub
-// (see above). Called full on spaceflight pre-draw and reduced when gameplay
-// is frozen during transitions.
+// (see above). Called full before drawing and reduced during transitions.
 void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
   // scope 10 "player": always runs.
   Stub_PlayerCore(state);
@@ -351,9 +259,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // frozen, runs a *reduced* TickSystems(0). Here Escape/q set the
     // return-to-menu latch; the frozen reduced tick is skipped (no transition
     // is active in this build).
-    for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
-      if (input->key == TextKey::escape ||
-          (input->key == TextKey::character && input->character == 'q')) {
+    for (std::optional<TextInput> text_event;
+         (text_event = platform.PollTextEvent());) {
+      if (text_event->key == TextKey::escape ||
+          (text_event->key == TextKey::character &&
+           text_event->character == 'q')) {
         returning_to_menu = true;
         break;
       }

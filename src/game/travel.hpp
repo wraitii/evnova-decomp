@@ -38,9 +38,8 @@ inline constexpr float kJumpFuelCost = 100.0F;
 // Mirrors Stellar_FindNearestAvailableTravelStellar (0x00462db0): returns the
 // travel-slot index (0..15) of the nearest available travel stellar in the
 // player's current system, or -1 when no travel point qualifies. A travel
-// stellar qualifies when it is present in the system's nav-defs and is
-// "available" (the original checks per-stellar is_available + travel_flags&1;
-// we treat a present, resolved nav-stellar as available). Restriction flags
+// stellar qualifies when it is present in the system's nav-defs, available,
+// and has travel_flags bit 1. Restriction flags
 // (availability_flags & 0x3000) require the ship to be within the jump range.
 [[nodiscard]] int NovaTravel_FindNearestTravelPoint(const GameState &state);
 
@@ -48,7 +47,8 @@ inline constexpr float kJumpFuelCost = 100.0F;
 // the player ship may initiate a hyperspace jump. Gates on the ship class
 // fuel capacity being at least one jump (kJumpFuelCost) and the ship not
 // being locked onto another ship's velocity match (no NPC fleet, so that check
-// is degenerate), plus having enough fuel on hand.
+// is degenerate). Fuel is consumed by the jump-completion path; this helper's
+// original implementation does not inspect the current fuel amount.
 [[nodiscard]] bool NovaTravel_CanStartJump(const GameState &state);
 
 // Ticks the cross-system travel state machine once per spaceflight frame.

@@ -56,6 +56,7 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 - Preserve original constants and quirks when they affect gameplay.
 - Name reconstructed concepts by purpose, not by decompiler-generated names.
 - Document uncertain behavior with TODO(decomp) and supporting evidence. Log verbosely.
+- Avoid over-commenting. Only comment explicit divergences, assumptions, or particularly complicated or surprising code flow. The rest should be self-explanatory, mostly. You may comment constants & other game-provided data especially where hardcoded numbers have meaning.
 - Prefer small functions, early returns, and straightforward control flow.
 - Use enum class, std::span, std::optional, and strong domain types.
 - Log failures with enough context to reproduce them.
