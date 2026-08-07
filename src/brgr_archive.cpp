@@ -896,3 +896,56 @@ std::optional<NovaCharacterIntro> NovaResource_LoadCharacterIntro() {
                 intro.delay_ticks[0] * 60);
   return intro;
 }
+
+std::optional<NovaStellarDescription>
+NovaResource_LoadStellarDescription(std::int16_t stellar_id) {
+  // Prompt text is keyed by the stellar's raw resource id (>= 0x80): the main
+  // docked window calls Ui_LoadSelectionDialogResource(stellar_id + 0x80)
+  // where its arg is the stellar's 0-based slot, i.e. the desc id = the raw
+  // stellar id. Resources that carry a block for a stellar are validated
+  // against the resource id clamp the loader uses (0x80.. *).
+  if (stellar_id < 0x80) {
+    return std::nullopt;
+  }
+  const auto data =
+      NovaResource_Load(kResourceTypeDescription,
+                        static_cast<std::uint16_t>(stellar_id));
+  if (!data || data->size() < 2) {
+    NovaLog::Todo("landing description desc {} absent or truncated",
+                  stellar_id);
+    return std::nullopt;
+  }
+  const auto bytes = std::span{*data};
+  const std::size_t size = bytes.size();
+
+  NovaStellarDescription out;
+  auto *raw = reinterpret_cast<const char *>(bytes.data());
+
+  // Leading NUL-terminated C-string: the landing description text.
+  {
+    const void *end =
+        std::memchr(raw, '\0', size);
+    const std::size_t len =
+        end == nullptr ? size : static_cast<std::size_t>(
+                                    static_cast<const char *>(end) - raw);
+    out.text.assign(raw, len);
+
+    // After the text NUL, Ui_LoadSelectionDialogResource reads the 2-byte BE
+    // selection-dialog variant/picture id at text_len+1..+2, then the trailing
+    // status C-string (<=0x20 chars) at text_len+3.
+    if (len + 3 <= size) {
+      out.dialog_variant = ReadBeI16(bytes, len + 1);
+      const std::size_t status_rem = size - (len + 3);
+      const void *status_end =
+          std::memchr(raw + len + 3, '\0', status_rem);
+      std::size_t status_len =
+          status_end == nullptr
+              ? status_rem
+              : static_cast<std::size_t>(static_cast<const char *>(status_end) -
+                                         (raw + len + 3));
+      status_len = std::min(status_len, std::size_t{0x20});
+      out.status.assign(raw + len + 3, status_len);
+    }
+  }
+  return out;
+}

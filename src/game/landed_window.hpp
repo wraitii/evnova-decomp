@@ -28,7 +28,9 @@
 // repair are handled as actual state mutations so the loop is exerciseable.
 
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include <SDL3/SDL.h>
@@ -121,6 +123,17 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out);
 // on-screen docked service, or std::nullopt for a no-slot service (starmap).
 [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>>
 NovaDialog_DockedGridOf(LandedService svc);
+
+// Greedy word-wrap of a long description string into lines that each fit a
+// `max_width` (device-independent) measurement. `measure` returns the width of
+// a candidate line and must be consistent with the font actually drawn (the
+// caller supplies the same NovaFontCache::TextWidth used for rendering). Words
+// are never split; a single word wider than the row is emitted on its own line
+// (the renderer may clip it). Pure text math; testable without a renderer.
+[[nodiscard]] std::vector<std::string>
+WrapDescriptionLines(std::string_view text,
+                     int max_width,
+                     const std::function<int(std::string_view)> &measure);
 
 // ---- Testable (SDL-free) landed state --------------------------------------
 // A docked session captures the destination stellar and the derived

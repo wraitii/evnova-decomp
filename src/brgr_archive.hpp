@@ -38,6 +38,14 @@ constexpr std::uint32_t kResourceTypeSnd =
 // 0x3ee Mission Select, 0x3f5 Bar, 0x3f6 News.
 constexpr std::uint32_t kResourceTypeDialog = 0x444c4f47;
 constexpr std::uint32_t kResourceTypeDialogItemList = 0x4449544c;
+// Stellar "landing description" family ("desc", 0x64 0x91 0x73 0x63). Each
+// stellar has a small block whose leading NUL-terminated C-string is the text
+// the docked/Spaceport window shows about the place you are landing at
+// (Ghidra NovaUi_RunTravelDestinationInteractionLoop, 0x00491f30, loads it via
+// Ui_LoadSelectionDialogResource with id = the destination stellar resource
+// id). The same family also holds sub-window flavour text at other id ranges
+// (e.g. the Bar establishment description at stellar_id + 10000).
+constexpr std::uint32_t kResourceTypeDescription = 0x64917363; // "d\x91sc"
 constexpr std::uint32_t kResourceTypeMenu = 0x4d454e55; // "MENU"
 constexpr std::uint32_t kResourceTypeAlert = 0x414c5254; // "ALRT"
 constexpr std::uint32_t kResourceTypeControl = 0x434e544c; // "CNTL"
@@ -238,3 +246,22 @@ struct NovaDialogDefinition {
 // window size and the DITL id at offset 18. Returns nullopt when absent.
 [[nodiscard]] std::optional<NovaDialogDefinition>
 NovaResource_LoadDialogDefinition(std::uint16_t dialog_id);
+
+// The decoded head of a stellar "desc" landing-description resource (Ghidra
+// Ui_LoadSelectionDialogResource, 0x004c6d50). The leading C-string is the
+// description text shown in the docked/Spaceport inner panel; the 2-byte BE
+// `dialog_variant` and the trailing `status` line follow the text and feed the
+// selection-dialog modals (not used by the docked landing panel).
+struct NovaStellarDescription {
+  std::string text;               // leading C-string: the landing description
+  std::string status;             // trailing status C-string (<=0x20 chars)
+  std::int16_t dialog_variant = 0; // 2-byte BE variant/picture id after text
+};
+
+// Ghidra: Ui_LoadSelectionDialogResource, called by
+// NovaUi_RunTravelDestinationInteractionLoop (0x00491f30) with id = the
+// destination stellar's raw resource id (>= 0x80). Loads that stellar's
+// landing description and parses its leading text/status/variant. Returns
+// nullopt when the archive/record is absent or the payload is too short.
+[[nodiscard]] std::optional<NovaStellarDescription>
+NovaResource_LoadStellarDescription(std::int16_t stellar_id);

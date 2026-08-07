@@ -65,6 +65,7 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 - Avoid tests for provisional code. Only test complex algorithms (such as data loading) where the result is known final and accurate, and implementation difficult. You may write temporary tests when building that we drop on committing (once they pass, they pass). Avoid testing simple gameplay behaviour where the test is too mocked to be relevant.
 - Keep commits small and distinguish faithful reconstruction from deliberate fixes.
 - Do not “clean up” strange original behavior.
+- Build both debug and release builds.
 
 # Ghidra server API
 

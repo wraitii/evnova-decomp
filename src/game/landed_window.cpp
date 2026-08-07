@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace game {
 
@@ -298,6 +299,62 @@ NovaDialog_DockedGridOf(LandedService svc) {
   return std::nullopt;
 }
 
+// Greedy word-wrap for the docked landing-description panel (see header).
+// Grows a candidate line word-by-word and, when the measured width would
+// exceed `max_width`, closes the current line and starts the next with only
+// the new word (never re-append the already-drained words, which would show a
+// "cumulative" repeat of the text on every line).
+std::vector<std::string>
+WrapDescriptionLines(std::string_view text,
+                     int max_width,
+                     const std::function<int(std::string_view)> &measure) {
+  std::vector<std::string> lines;
+  if (text.empty() || max_width <= 0) {
+    return lines;
+  }
+  std::string line;
+  std::size_t i = 0;
+  while (i < text.size()) {
+    // Skip inter-word whitespace; a newline forces an explicit line break.
+    while (i < text.size() &&
+           (text[i] == ' ' || text[i] == '\n' || text[i] == '\t')) {
+      if (text[i] == '\n' && !line.empty()) {
+        lines.push_back(line);
+        line.clear();
+      }
+      ++i;
+    }
+    if (i >= text.size()) {
+      break;
+    }
+    std::size_t word_end = i;
+    while (word_end < text.size() && text[word_end] != ' ' &&
+           text[word_end] != '\n' && text[word_end] != '\t') {
+      ++word_end;
+    }
+    const std::size_t word_len = word_end - i;
+    if (word_len == 0) {
+      break; // trailing whitespace only
+    }
+    std::string candidate = line;
+    if (!candidate.empty()) {
+      candidate.push_back(' ');
+    }
+    candidate.append(text.substr(i, word_len));
+    if (measure(candidate) > max_width && !line.empty()) {
+      lines.push_back(line);
+      line.assign(text.substr(i, word_len)); // new line starts with this word
+    } else {
+      line = candidate;
+    }
+    i = word_end;
+  }
+  if (!line.empty()) {
+    lines.push_back(line);
+  }
+  return lines;
+}
+
 namespace {
 // Builds the service buttons from a laid-out dock: the DITL's eight 145x25
 // button rects split into left/right columns, each sorted top-to-bottom. Each
@@ -437,6 +494,7 @@ void DrawLandedMenu(SdlPlatform &platform,
                     const LandedContext &ctx,
                     SDL_Texture *destination_art,
                     SDL_Texture *planet_art,
+                    std::string_view description,
                     const SDL_FRect &panel,
                     const DockedLayout &layout,
                     const std::vector<ServiceButton> &button_rects,
@@ -523,45 +581,83 @@ void DrawLandedMenu(SdlPlatform &platform,
                         band_cy,
                         title);
 
-  // Credits/fuel/hull status lines in the inner content panel (Geneva body
-  // font), or the panel top-left when no inner panel was laid out.
+  // The stellar's landing description text in the inner content panel (Geneva
+  // body font), word-wrapped to the panel width. The description comes from the
+  // stellar's "desc" landing-description block (NovaResource_LoadStellar-
+  // Description, Ghidra Ui_LoadSelectionDialogResource); when it is absent the
+  // panel falls back to the credits/fuel/hull status lines.
   const bool have_status = status_panel.w > 0.0F && status_panel.h > 0.0F;
   const float body_x = have_status ? status_panel.x + 12.0F : panel.x + 12.0F;
-  float baseline = have_status ? status_panel.y + 66.0F : panel.y + 60.0F;
+  float baseline = have_status ? status_panel.y + 18.0F : panel.y + 60.0F;
+  const float body_w =
+      have_status ? std::max(40.0F, status_panel.w - 24.0F)
+                  : std::max(40.0F, panel.w - 24.0F);
 
-  baseline += 24.0F;
-  const std::string credits =
-      "Credits: " + std::to_string(state.player.credits);
-  NovaText_Draw(platform,
-                font_cache,
-                NovaFontFamily::kGeneva,
-                12.0F,
-                kNovaFontStyleRegular,
-                kBody,
-                body_x,
-                baseline,
-                credits);
+  if (!description.empty()) {
+    // Word-wrap the stellar description to the panel width (measured with the
+    // same Geneva 12pt face used to draw) and lay the lines out from the inner
+    // panel top, mirroring how the original fills the docked landing panel.
+    constexpr float kLineHeight = 14.0F;
+    const int wrap_w = static_cast<int>(std::lround(body_w));
+    const auto desc_lines = WrapDescriptionLines(
+        description,
+        wrap_w,
+        [&](std::string_view s) {
+          return font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                      12.0F,
+                                      kNovaFontStyleRegular,
+                                      s);
+        });
+    for (const auto &desc_line : desc_lines) {
+      NovaText_Draw(platform,
+                    font_cache,
+                    NovaFontFamily::kGeneva,
+                    12.0F,
+                    kNovaFontStyleRegular,
+                    kBody,
+                    body_x,
+                    baseline,
+                    desc_line);
+      baseline += kLineHeight;
+    }
+  } else {
+    // Fallback when no landing description resolved: the credits/fuel/hull
+    // status lines the panel used to show (kept so a missing desc block never
+    // leaves the inner panel blank).
+    baseline += 20.0F;
+    const std::string credits =
+        "Credits: " + std::to_string(state.player.credits);
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kBody,
+                  body_x,
+                  baseline,
+                  credits);
 
-  const auto *eff = &state.cached_stats; // set during landing/refuel/repair
-  const float cap = eff ? eff->fuel_capacity : 0.0F;
-  char fuel[96];
-  std::snprintf(fuel,
-                sizeof(fuel),
-                "Fuel: %.0f / %.0f      Hull: %.0f / %.0f",
-                state.player.fuel_points,
-                cap,
-                state.player.armor_points,
-                eff ? eff->max_armor_points : 0.0F);
-  baseline += 18.0F;
-  NovaText_Draw(platform,
-                font_cache,
-                NovaFontFamily::kGeneva,
-                12.0F,
-                kNovaFontStyleRegular,
-                kBody,
-                body_x,
-                baseline,
-                fuel);
+    const auto *eff = &state.cached_stats; // set during landing/refuel/repair
+    const float cap = eff ? eff->fuel_capacity : 0.0F;
+    char fuel[96];
+    std::snprintf(fuel,
+                  sizeof(fuel),
+                  "Fuel: %.0f / %.0f      Hull: %.0f / %.0f",
+                  state.player.fuel_points,
+                  cap,
+                  state.player.armor_points,
+                  eff ? eff->max_armor_points : 0.0F);
+    baseline += 18.0F;
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kBody,
+                  body_x,
+                  baseline,
+                  fuel);
+  }
 
   // The service buttons, drawn with the real three-state button art and their
   // labels centred in the body font. Following the original, there is NO
@@ -757,6 +853,23 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   DockedLayout layout;
   NovaDialogWindow_Layout(panel, layout);
 
+  // Load this stellar's landing description (the text shown in the docked inner
+  // panel). Mirrors NovaUi_RunTravelDestinationInteractionLoop populating its
+  // prompt buffer via Ui_LoadSelectionDialogResource with the destination
+  // stellar's resource id.
+  std::string description;
+  const auto desc = NovaResource_LoadStellarDescription(ctx.stellar_id);
+  if (desc) {
+    description = desc->text;
+    NovaLog::Info("landed description for stellar {} ({} chars)",
+                  static_cast<int>(ctx.stellar_id),
+                  description.size());
+  } else {
+    NovaLog::Todo("no landing description desc for stellar {}; docked inner "
+                  "panel falls back to the status lines",
+                  static_cast<int>(ctx.stellar_id));
+  }
+
   // Load the docked buttons' real three-state strip art (normal 0x1d4c..,
   // pressed 0x1d4f.., grey 0x1d52..) and lay out their desk rects. If the
   // strips are unavailable the buttons still render as flat fills behind the
@@ -840,6 +953,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                    ctx,
                    destination_art ? destination_art->get() : nullptr,
                    planet_art ? planet_art->get() : nullptr,
+                   description,
                    panel,
                    layout,
                    button_rects,

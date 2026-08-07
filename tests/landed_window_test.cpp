@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 // The docked service buttons come from the real Spaceport DITL 0x3e8. The
@@ -112,4 +113,89 @@ TEST_CASE("dialog layout centers the dock window and buckets the items",
     }
   }
   CHECK(min_y == Catch::Approx(-18.0F + 333.0F));
+}
+
+// The docked inner panel is filled with the landing stellar's description,
+// loaded from the stellar's "desc" landing-description block (Ghidra
+// Ui_LoadSelectionDialogResource, key 0x64917363) keyed by the raw stellar
+// resource id. Regression: the leading C-string parses into the description
+// text (and the 2-byte BE variant + trailing status follow the text, matching
+// the decompiled layout).
+TEST_CASE("landing description loader decodes the desc block",
+          "[landed_window]") {
+  if (!std::filesystem::exists("EV Nova/Nova.rez") &&
+      !std::filesystem::exists("EV Nova/Nova Files/Nova.rez") &&
+      !std::filesystem::exists("../../../EV Nova/Nova.rez") &&
+      !std::filesystem::exists("../../../EV Nova/Nova Files/Nova.rez")) {
+    SKIP("Nova.rez not present");
+  }
+
+  // Stellar 0x80 (Earth) and 0x9d (Viking, the starting Tichel landing
+  // stellar) both carry real landing descriptions. Compute plain boolean
+  // results first (the assertions just check those scalars); the leading text
+  // must be non-empty and start with the stellar name.
+  {
+    const auto earth = NovaResource_LoadStellarDescription(0x80);
+    const bool earth_ok =
+        earth.has_value() && !earth->text.empty() &&
+        earth->text.starts_with("Earth");
+    CHECK(earth_ok);
+  }
+  {
+    const auto viking = NovaResource_LoadStellarDescription(0x9d);
+    const bool viking_ok =
+        viking.has_value() && !viking->text.empty() &&
+        viking->text.starts_with("Viking");
+    CHECK(viking_ok);
+  }
+
+  // An id with no desc block (e.g. 0x7f, below the resource range) yields
+  // nothing rather than a crash.
+  const bool missing_ok = !NovaResource_LoadStellarDescription(0x7f).has_value();
+  CHECK(missing_ok);
+}
+
+// The docked landing-description panel is word-wrapped. The wrap must NOT
+// "cumulatively append": each new line must start fresh (with only its own
+// words), never re-embed the already-drained earlier line. Regression for a
+// bug where a wrapping line re-appended the drained text onto the next line,
+// making every subsequent line repeat all prior words.
+TEST_CASE("landing description word-wrap produces distinct lines",
+          "[landed_window]") {
+  using game::WrapDescriptionLines;
+  auto width = [](std::string_view s) { return static_cast<int>(s.size()); };
+
+  const std::string text =
+      "The warriors on this station hold themselves ready to deal with any "
+      "large-scale threat to the sovereignty of the Polaris.";
+  const auto lines = WrapDescriptionLines(text, 40, width);
+  REQUIRE(lines.size() >= 3);
+
+  // Each wrapped line fits the row (except a single-word overflow, not the
+  // case here) and no line is a substring of a later line.
+  for (std::size_t i = 0; i < lines.size(); ++i) {
+    CHECK(static_cast<int>(lines[i].size()) <= 40);
+    for (std::size_t j = i + 1; j < lines.size(); ++j) {
+      CHECK_FALSE(lines[j].starts_with(lines[i]));
+      CHECK(lines[j].find(lines[i]) == std::string::npos);
+    }
+  }
+  // Rejoining the wrapped lines with a single separating space must reproduce
+  // the original text exactly (the wrap only ever drops the whitespace between
+  // a line's last word and the next, never any word characters).
+  {
+    std::string rejoined;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+      if (i != 0) {
+        rejoined.push_back(' ');
+      }
+      rejoined += lines[i];
+    }
+    CHECK(rejoined == text);
+  }
+
+  // A single over-wide word is emitted on its own (unsplit) line.
+  const auto long_word = WrapDescriptionLines("supercalifragilistic", 4, width);
+  REQUIRE(long_word.size() == 1);
+  CHECK(long_word[0] == "supercalifragilistic");
 }
