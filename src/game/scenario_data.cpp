@@ -92,13 +92,15 @@ namespace {
   w.flags = ReadBe16(bytes, 0x1c);
   w.seeker = ReadBe16(bytes, 0x1e);
   w.beam_length = ReadBeI16(bytes, 0x30);
-  w.beam_width = ReadBeI16(bytes, 0x32);
+  // Resource +0x32 is Ghidra WeaponDef.homing_strength_or_turn_rate (the
+  // loader maps resource 0x32 -> +0x72); it is the shot animation frame-dwell
+  // time in ms (see Weapon field comment in scenario_data.hpp).
+  w.shot_anim_frame_dwell = ReadBeI16(bytes, 0x32);
   w.burst_count = ReadBeI16(bytes, 0x56);
   w.burst_reload = ReadBeI16(bytes, 0x58);
   w.max_ammo = ReadBeI16(bytes, 0x5a);
-  w.guided_turn = ReadBeI16(bytes, 0x72);
   for (std::size_t i = 0; i < 4; ++i) {
-    w.jam_vuln[i] = ReadBeI16(bytes, 0x6a + i * 2);
+    w.jam_vuln[i] = ReadBeI16(bytes, 0x5e + i * 2);
   }
   w.flags2 = ReadBe16(bytes, 0x44);
   return w;

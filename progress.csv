@@ -177,7 +177,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,30%,scope 3 (per-tick stellar system_id/is_available/hazard re-derivation) via NovaTargeting_UpdateStellarAvailability + wired into NovaFrame_SpaceflightLoop; visible-system cache + sprite-set bookkeeping not reconstructed
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
 0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,3%,"player free-flight movement model reconstructed (ship-class stats, turn/thrust/clamp, inertia coast, reverse brake) via NovaPlayer_IntegrateMovement; AI/combat/weapon/travel scopes still stubbed"
-0x00435830,Shot_HandleShot,,0%,
+0x00435830,Shot_HandleShot,src/game/spaceflight_view.cpp,5%,"shot sprite frame selection mirrored for unguided projectiles: flags_primary bit0 clear => static/heading frame (rotation sheet, bearing via FrameForHeading) in DrawShots; time-animated frame_cycle_index/anim_elapsed branch not reached by current build (TODO(decomp))"
 0x00436910,Frame_UpdateScriptedManeuverSprites,,0%,
 0x00436FF0,NovaUi_ResolveWeaponSplashImpact,,0%,
 0x004374F0,Ship_HandleSpritePairCollision,,0%,
@@ -277,7 +277,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
 0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,25%,landable-target branch (selected stellar available/unrestricted -> open landing interaction) via NovaTargeting_IsLandingAvailable + NovaLanded_RunWindow in NovaFrame_SpaceflightLoop; ship-comm and mission-ship branches not reconstructed
-0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,20%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; beam/turret/guided/launcher branches and audio/burst side-effects not reconstructed"
+0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,20%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, see 0x00435830); beam/turret/guided/launcher branches and audio/burst side-effects not reconstructed"
 0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,25%,"non-hypergate travel/dock transition: the free auto-refill of shields+armor to max (Ship_ComputeShipMaxShieldPoints/MaxArmor) and the credit-charged refuel (Outfit_RefuelShipWithCredits) are captured by NovaLanding_EnterDocked; the docked interaction loop, starmap/discovery/fleet-trade steps and the final position/velocity reset are not reconstructed"
 0x00456480,Stellar_LandOnSpob,src/game/landed_window.cpp,40%,"landing transition state subset in NovaLanding_EnterDocked (used by NovaLanding_TryLand): reposition to stellar, zero velocity, refill shields/armor, deduct service cost; then the docked services window opens (NovaLanded_RunWindow). World/laydown scene not reconstructed"
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
@@ -1012,7 +1012,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004BD090,FUN_004bd090,,0%,
 0x004BD0C0,Prefs_SetNovaFilesPathPrefix,,0%,
 0x004BD160,Resource_ValidateInstallFolders,,0%,
-0x004BD3C0,NovaData_LoadScenarioResourceTables,,50%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields); ship+weapon verified; system/stellar partial (dude types/prob, reinf, visibility added; stellar tail TODO(decomp)); stellar animation fields (AnimDelay/Frame0Bias = +0x470/+0x472 from payload +0x22/+0x24) and hypergate engage_highlight_frame (+0x26 from payload +0x18) decoded"
+0x004BD3C0,NovaData_LoadScenarioResourceTables,,50%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields); ship+weapon verified; weapon shot_anim_frame_dwell now decoded from payload +0x32 (= Ghidra WeaponDef.homing_strength_or_turn_rate; jam_vuln corrected to payload +0x5e); system/stellar partial (dude types/prob, reinf, visibility added; stellar tail TODO(decomp)); stellar animation fields (AnimDelay/Frame0Bias = +0x470/+0x472 from payload +0x22/+0x24) and hypergate engage_highlight_frame (+0x26 from payload +0x18) decoded"
 0x004C6D50,Ui_LoadSelectionDialogResource,,0%,
 0x004C7040,FUN_004c7040,,0%,
 0x004C73B0,FUN_004c73b0,,0%,

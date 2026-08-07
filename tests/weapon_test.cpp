@@ -2,9 +2,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <optional>
 
+#include "brgr_archive.hpp"
 #include "game/game_state.hpp"
 #include "game/pilot_file.hpp"
 #include "game/scenario_data.hpp"
@@ -22,8 +24,13 @@ namespace game {
 
 namespace {
 bool ArchivesAvailable() {
-  return std::filesystem::exists("EV Nova/Nova Files/Nova.rez") ||
-         std::filesystem::exists("../../../EV Nova/Nova Files/Nova.rez") ||
+  // The data archives resolve relative to the test working directory (the
+  // repo root). The core UI archive Nova.rez sits directly in EV Nova/, and
+  // the scenario data lives in EV Nova/Nova Files/*.rez (LoadFromArchives
+  // searches both); check the same on-disk anchors the loader uses so the
+  // data-dependant assertions actually run rather than report a stale miss.
+  return std::filesystem::exists("EV Nova/Nova.rez") ||
+         std::filesystem::exists("EV Nova/Nova Files/Nova Data 1.rez") ||
          std::filesystem::exists("../../../EV Nova/Nova.rez");
 }
 
@@ -76,6 +83,54 @@ TEST_CASE("shuttle light blaster is mounted and fireable", "[weapon][data]") {
   // loop touches it; it is not a secondary weapon.
   CHECK(state.weapon_bank_ammo[0] == 1);
   CHECK(NovaWeapon_CanFireBank(state, 0));
+}
+
+// Ground truth for the Light Blaster's on-screen shot behaviour (verified
+// against its raw payload and shot sprite set, sp.x9an id shot_sprite_set_id +
+// 3000 = 3000):
+//  * The shot sprite set is a 35x35 tile, 6x6 grid = 36-frame rotation sheet,
+//    so the bolt is heading-oriented (like the ship), not a single image.
+//  * WeaponDef flags_primary bit 0 is clear -> Shot_HandleShot takes the
+//    *static/heading* branch: the frame is picked from the firing bearing, not
+//    time-stepped. This is why the bolt must be rotated by its velocity.
+//  * shot_anim_frame_dwell (resource +0x32, Ghidra homing_strength_or_turn_rate)
+//    is 0, so even an animated frame-stepper would advance every frame.
+TEST_CASE("light blaster shot is heading-oriented, not time-animated",
+          "[weapon]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const Weapon *w = state.scenario.Weapon(0x80);
+  REQUIRE(w != nullptr);
+  CHECK((w->flags & 0x0001U) == 0U); // static/heading shot-frame path
+  CHECK(w->shot_anim_frame_dwell == 0);
+  CHECK(w->sprite_id == 0); // shot sprite set spin id 0 + 3000 = 3000
+
+  auto spin = NovaResource_Load(kResourceTypeSprites, 3000);
+  REQUIRE(spin.has_value());
+  auto def = NovaSpriteDefinition_Parse(*spin);
+  REQUIRE(def.has_value());
+  CHECK(def->tile_width == 35);
+  CHECK(def->tile_height == 35);
+  CHECK(def->tiles_x == 6);
+  CHECK(def->tiles_y == 6);
+
+  // The fired shot must carry a velocity whose direction picks the matching
+  // heading frame (up = frame 0).
+  state.player.ship_class_id = 0;
+  state.player.heading = 0.0F;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  SeedStockWeaponBanks(state);
+  NovaWeapon_FirePlayerPrimary(state);
+  REQUIRE(state.active_shots.size() == 1);
+  const ActiveShot &shot = state.active_shots[0];
+  // atan2(vel_x, -vel_y) = heading-bearing in the Math_AddPolarVelocity
+  // convention; heading 0 (up) projects to vel_y < 0, so bearing ~ 0.
+  const float bearing = std::atan2(shot.vel_x, -shot.vel_y);
+  CHECK(std::fabs(bearing) < 0.01F);
 }
 
 TEST_CASE("primary fire spawns a light blaster shot then cools down",
@@ -167,5 +222,4 @@ TEST_CASE("fresh-pilot record round-trip keeps the light blaster fireable",
   NovaWeapon_FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
 }
-
 } // namespace game

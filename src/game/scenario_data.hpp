@@ -211,15 +211,21 @@ struct Weapon {
   std::uint16_t flags = 0;  // Flags
   std::uint16_t seeker = 0; // Seeker
 
-  std::int16_t beam_length = 0;  // BeamLength
-  std::int16_t beam_width = 0;   // BeamWidth
+  std::int16_t beam_length = 0;  // BeamLength (TODO(decomp): offset unverified)
+  // Ghidra WeaponDef.homing_strength_or_turn_rate (+0x72, loaded from resource
+  // +0x32): dual-purpose. For an animation-frame weapon set it is the shot
+  // animation frame-dwell time in ms (Shot_HandleShot accumulates it into
+  // ShotState.anim_elapsed and steps frame_cycle_index each time the dwell is
+  // crossed); for guided weapons it is the turn rate. The Light Blaster's
+  // payload keeps it at 0, which makes even an animated frame-stepper advance
+  // every frame.
+  std::int16_t shot_anim_frame_dwell = 0;
   std::int16_t burst_count = 0;  // BurstCount
   std::int16_t burst_reload = 0; // BurstReload
   std::int16_t max_ammo = 0;     // MaxAmmo
 
   std::array<std::int16_t, 4> jam_vuln{}; // JamVuln1-4
   std::uint16_t flags2 = 0;               // Flags2
-  std::int16_t guided_turn = 0;           // GuidedTurn
 };
 
 // Ghidra StellarDef (g_stellar_defs, entries indexed by stellar id minus

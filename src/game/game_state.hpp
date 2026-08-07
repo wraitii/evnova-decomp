@@ -232,8 +232,8 @@ struct GameState {
   // the ShotState swath (g_shot_states) with full sprite/guidance/collision
   // bookkeeping (Shot_SpawnShotFromWeapon 0x0041fd30); this clean-room model
   // carries only the fields the firing + flight renderer need so far, and the
-  // projectile is drawn as a simple sprite placeholder (TODO(decomp): mount
-  // the shot's spin sprite and the per-vehicle sprite caches).
+  // projectile is drawn via its weapon's shot sprite set (spin id + 3000),
+  // oriented by its velocity as Shot_HandleShot picks the heading frame.
   // Each entry is one fired round at a given world position/velocity.
   std::vector<ActiveShot> active_shots;
 };

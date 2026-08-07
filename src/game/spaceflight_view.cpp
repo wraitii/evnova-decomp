@@ -518,10 +518,24 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
   // Each shot uses its weapon's shot sprite set (Ghidra Sprite_AssignSpriteSet
   // on the weapon-sprite-set table entry g_weapon_sprite_set_table
   // [shot_sprite_set_id]; spin resource id shot_sprite_set_id + 3000) from the
-  // shared store, drawn at its world position with wraparound. The bolt frames
-  // are drawn at native size; frame 0 is used for now (TODO(decomp): advance
-  // the shot's animation frame in Shot_HandleShot cadence). Falls back to a
-  // small bright dot when the weapon has no loadable shot sprite.
+  // shared store, drawn at its world position with wraparound.
+  //
+  // Frame selection mirrors Shot_HandleShot's shot sprite update. The Light
+  // Blaster (and most unguided projectiles) has flags_primary bit 0 clear, so
+  // it takes the *static* (heading-oriented) branch: its sprite set is a
+  // 36-frame rotation sheet and the frame is picked from range_scalar_runtime
+  // -- the shot's firing bearing in radians -- as
+  //   frame = ROUND(frames_per_rotation * bearing / 2pi),
+  // the same rotation mapping the ship uses (FrameForHeading). Because a
+  // shot's velocity was spawned along that bearing (Math_AddPolarVelocity),
+  // the frame is derived here from the velocity's direction; the set is drawn
+  // centered on the world position.
+  //
+  // TODO(decomp): weapons with flags_primary bit 0 set take Shot_HandleShot's
+  // *animated* branch instead, stepping a frame_cycle_index/anim_elapsed
+  // timer at the weapon's shot_anim_frame_dwell cadence; that path awaits the
+  // frame-cycle bookkeeping and is not reached by the current build's
+  // unguided projectiles.
   for (const auto &s : state.active_shots) {
     // The shot's bank slot is a zero-based weapon id; the scenario Weapon()
     // lookup uses the 0x80.. resource-id residue (same convention as
@@ -536,9 +550,16 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
     if (set && !set->frames.empty()) {
       SpriteDrawOptions opts;
       opts.wrap = true;
+      // Bearing of the shot's velocity, in the Math_AddPolarVelocity
+      // convention (heading 0 = up/-y, clockwise positive): the polar
+      // projection vel = (sin(b), -cos(b))*speed inverts to atan2(vel_x,
+      // -vel_y). Mirrors the spawn bearing Shot_SpawnShotFromWeapon stored in
+      // range_scalar_runtime.
+      const float bearing = std::atan2(s.vel_x, -s.vel_y);
+      const int frame = FrameForHeading(bearing, set->frame_count);
       DrawSprite(renderer,
                  *set,
-                 0,
+                 frame,
                  s.pos_x,
                  s.pos_y,
                  state.player.pos_x,
