@@ -4,6 +4,7 @@ add_executable(evnova_tests
     smoke_test.cpp
     sprite_test.cpp
     weapon_test.cpp
+    gameplay_interface_test.cpp
 )
 
 target_link_libraries(evnova_tests PRIVATE Catch2::Catch2WithMain evnova_runtime)

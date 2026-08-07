@@ -1038,7 +1038,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004CD3B0,IntroCinematic_SetupFrames,src/game/pilot_file.cpp,40%,IntroCinematic_SetupFrames: fills intro-frames subset of the record; full .plt field surface not covered
 0x004CD4B0,PilotData_InitializePlayerState,src/game/pilot_file.cpp,100%,PilotData_InitializePlayerState absent-block seed (in-memory; no .plt writer)
 0x004CD7E0,FUN_004cd7e0,,0%,
-0x004CDA50,Ui_InstallGameplayInterfaceLayout,,0%,
+0x004CDA50,Ui_InstallGameplayInterfaceLayout,src/game/gameplay_interface.cpp,30%,layout record decode + panel rect/color/font/bg fill implemented; govt-resolution + bg PICT draw + radar rebuild not yet wired
 0x004CDFA0,FUN_004cdfa0,,0%,
 0x004CE030,ResourceData_GetSlotByIndex,,0%,
 0x004CE0B0,FUN_004ce0b0,,0%,

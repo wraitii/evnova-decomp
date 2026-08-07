@@ -13,6 +13,7 @@ find_package(SDL3_ttf CONFIG REQUIRED)
 
 add_library(evnova_runtime
     brgr_archive.cpp
+    game/gameplay_interface.cpp
     game/intro_cinematic.cpp
     game/landed_window.cpp
     game/new_pilot_flow.cpp
