@@ -93,7 +93,8 @@ TEST_CASE("shuttle light blaster is mounted and fireable", "[weapon][data]") {
 //  * WeaponDef flags_primary bit 0 is clear -> Shot_HandleShot takes the
 //    *static/heading* branch: the frame is picked from the firing bearing, not
 //    time-stepped. This is why the bolt must be rotated by its velocity.
-//  * shot_anim_frame_dwell (resource +0x32, Ghidra homing_strength_or_turn_rate)
+//  * shot_anim_frame_dwell (resource +0x32, Ghidra
+//  homing_strength_or_turn_rate)
 //    is 0, so even an animated frame-stepper would advance every frame.
 TEST_CASE("light blaster shot is heading-oriented, not time-animated",
           "[weapon]") {
@@ -153,8 +154,8 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   CHECK(state.active_shots[0].weapon_id == 0);
   CHECK(state.active_shots[0].pos_x == Catch::Approx(100.0F));
   CHECK(state.active_shots[0].pos_y == Catch::Approx(200.0F));
-  // WeaponDef Speed is px/frame * 100; the light blaster is 1500 -> 15 px/frame,
-  // so heading 0 projects to vel_y = -15.
+  // WeaponDef Speed is px/frame * 100; the light blaster is 1500 -> 15
+  // px/frame, so heading 0 projects to vel_y = -15.
   CHECK(state.active_shots[0].vel_x == Catch::Approx(0.0F));
   CHECK(state.active_shots[0].vel_y == Catch::Approx(-15.0F));
   // Life = WeaponDef Count (13 ticks).
@@ -181,7 +182,8 @@ TEST_CASE("cooldown counts down and the bank can fire again", "[weapon]") {
   for (int i = 0; i < 1; ++i) {
     NovaWeapon_TickShots(state);
   }
-  CHECK(state.weapon_bank_cooldown[0] == Catch::Approx(initial_cooldown - 1.0F));
+  CHECK(state.weapon_bank_cooldown[0] ==
+        Catch::Approx(initial_cooldown - 1.0F));
 
   // After enough ticks the shot expires and the bank cools to 0, so fire again.
   for (int i = 0; i < static_cast<int>(initial_cooldown) + 2; ++i) {
@@ -221,5 +223,38 @@ TEST_CASE("fresh-pilot record round-trip keeps the light blaster fireable",
   CHECK(NovaWeapon_CanFireBank(state, 0));
   NovaWeapon_FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
+}
+
+// The Light Blaster (weapon 0x80) carries fire_sound slot 8, which maps to
+// the snd resource id 200 + 8 = 208 ("Light Blaster.sfil"). Firing a round
+// must queue that slot for playback (GameState.pending_fire_sound_slots), and
+// the preload helper must decode it into the cache so the spaceflight loop can
+// play it. This pins the audio side of the firing path to the real data.
+TEST_CASE("firing queues the weapon's fire sound and preload decodes it",
+          "[weapon][audio]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.ship_class_id = 0;
+  SeedStockWeaponBanks(state);
+
+  const Weapon *w = state.scenario.Weapon(0x80);
+  REQUIRE(w != nullptr);
+  CHECK(w->fire_sound == 8);
+  CHECK(NovaWeapon_FireSoundResourceId(w->fire_sound) == 208);
+
+  // Firing a round queues the fire-sound slot.
+  NovaWeapon_FirePlayerPrimary(state);
+  REQUIRE(state.active_shots.size() == 1);
+  REQUIRE(state.pending_fire_sound_slots.size() == 1);
+  CHECK(state.pending_fire_sound_slots[0] == 8);
+
+  // Preloading that slot decodes the Light Blaster fire sound into the cache.
+  NovaWeapon_PreloadFireSound(state, 8);
+  REQUIRE(state.weapon_fire_sounds[8].has_value());
+  CHECK(state.weapon_fire_sounds[8]->sample_rate == 11127);
+  CHECK(state.weapon_fire_sounds[8]->channel_count == 1);
 }
 } // namespace game

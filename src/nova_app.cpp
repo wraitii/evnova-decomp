@@ -976,7 +976,7 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // Blocking: plays the intro cinematic on first entry, then the in-game
     // main loop, returning to the menu when the pilot exits. Mirrors
     // Ship_RunSpaceflightMode being called inline from the dispatcher.
-    game::NovaSpaceflight_Run(runtime.platform, runtime.game);
+    game::NovaSpaceflight_Run(runtime.platform, runtime.audio, runtime.game);
     runtime.status_text = "Returned from spaceflight.";
     break;
   }

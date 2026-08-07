@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "scenario_data.hpp"
+#include "sdl_audio.hpp"
 
 namespace game {
 
@@ -244,6 +245,24 @@ struct GameState {
   // oriented by its velocity as Shot_HandleShot picks the heading frame.
   // Each entry is one fired round at a given world position/velocity.
   std::vector<ActiveShot> active_shots;
+
+  // Decoded player weapon fire sounds, keyed by the weapon's `fire_sound`
+  // slot. Ghidra Weapon_FirePlayerWeaponBank resolves the weapon's
+  // fire_sound_slot through the preloaded g_gameplay_sound_handle_table and
+  // plays it via NovaAudio_PlaySpatialByDistance once a shot actually spawns;
+  // this clean-room cache mirrors that table (index = slot, -1 slot = none is
+  // left empty). A slot maps to the snd resource id 200 + slot (verified: the
+  // Light Blaster's slot 8 is "Light Blaster.sfil" id 208).
+  std::array<std::optional<NovaSoundData>, 36> weapon_fire_sounds{};
+
+  // Fire-sound slots whose weapons actually fired a shot this frame (one
+  // entry per primary-bank volley). The firing routine appends a weapon's
+  // fire_sound slot whenever a round is spawned (mirroring
+  // Weapon_-FirePlayerWeaponBank playing the fire sound after volley_fired > 0
+  // only); the spaceflight loop, which owns the SdlAudio device, drains and
+  // clears it and plays each cached slot. Keeps SDL out of the pure weapon
+  // path.
+  std::vector<std::int16_t> pending_fire_sound_slots;
 };
 
 } // namespace game

@@ -51,8 +51,12 @@ void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state);
 // consumes ammo/energy as the weapon requires, spawns one shot toward the
 // ship's current heading, then sets the bank's cooldown to the weapon's fire
 // interval (reload_ticks) so the bank cannot fire again until it elapses.
-// The audio/visual side effects, burst-cycle bookkeeping and carrier-bay /
-// beam / guided modes are not yet implemented (TODO(decomp)).
+// Once a round actually spawns, the weapon's fire_sound slot (when >= 0) is
+// appended to GameState.pending_fire_sound_slots so the spaceflight loop (which
+// owns the SdlAudio device) can play the cached sound -- mirroring the
+// original's volley_fired > 0 gate around NovaAudio_PlaySpatialByDistance.
+// The visual side-effects, burst-cycle bookkeeping and carrier-bay / beam /
+// guided modes are not yet implemented (TODO(decomp)).
 void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      std::int16_t weapon_bank);
 
@@ -76,5 +80,31 @@ void NovaWeapon_TickShots(GameState &state, float frame_time_ms = 1.0F);
 // "?" when the bank is unmounted/invalid. Used by the HUD weapon readout.
 [[nodiscard]] std::string NovaWeapon_BankDisplayName(const GameState &state,
                                                      std::int16_t weapon_bank);
+
+// Weapon fire-sound slot mapping. A weapon's `fire_sound` field (Ghidra
+// WeaponDef.fire_sound_slot) is a slot index 0..35 that the original resolves
+// through the preloaded g_gameplay_sound_handle_table; in the shipped data the
+// slot maps to the snd resource id 200 + slot (verified: Light Blaster slot 8
+// -> "Light Blaster.sfil" id 208). -1 means the weapon has no fire sound.
+[[nodiscard]] constexpr std::int16_t
+NovaWeapon_FireSoundResourceId(std::int16_t fire_sound_slot) {
+  return (fire_sound_slot >= 0 && fire_sound_slot < 36)
+             ? static_cast<std::int16_t>(200 + fire_sound_slot)
+             : -1;
+}
+
+// Preloads a weapon fire sound into the GameState cache from the snd resource
+// id 200 + `slot` (NovaResource_LoadSndData + NovaSound_Decode), so the firing
+// path only looks the slot up in memory. Idempotent; leaves the slot empty on
+// a decode failure (the weapon then fires silently, as if fire_sound_slot were
+// -1). Call at spaceflight entry.
+void NovaWeapon_PreloadFireSound(GameState &state,
+                                 std::int16_t fire_sound_slot);
+
+// Preloads every distinct fire sound the player's currently owned primary
+// weapons use. Iterates the rebuilt weapon banks, collects each owned weapon's
+// fire_sound slot, and loads it into the cache. Call at spaceflight entry so a
+// bank never silently misses its first shot's sound.
+void NovaWeapon_PreloadOwnedFireSounds(GameState &state);
 
 } // namespace game

@@ -33,9 +33,9 @@ constexpr std::uint32_t kResourceTypeSnd =
 // "DLOG" (0x444c4f47) / "DITL" (0x4449544c) live in the core EV Nova/Nova.rez
 // UI archive. The dialog system builds every in-game window from a DLOG (which
 // selects a DITL by id) plus that DITL's item rects/types/titles. The docked
-// Spaceport window is DLOG/DITL 0x3e8 (618x517, matching PICT 0x2134 "Spaceport");
-// the docked sub-windows are DITL 0x3e9 Trade, 0x3ea Outfit, 0x3ec Shipyard,
-// 0x3ee Mission Select, 0x3f5 Bar, 0x3f6 News.
+// Spaceport window is DLOG/DITL 0x3e8 (618x517, matching PICT 0x2134
+// "Spaceport"); the docked sub-windows are DITL 0x3e9 Trade, 0x3ea Outfit,
+// 0x3ec Shipyard, 0x3ee Mission Select, 0x3f5 Bar, 0x3f6 News.
 constexpr std::uint32_t kResourceTypeDialog = 0x444c4f47;
 constexpr std::uint32_t kResourceTypeDialogItemList = 0x4449544c;
 // Stellar "landing description" family ("desc", 0x64 0x91 0x73 0x63). Each
@@ -46,9 +46,9 @@ constexpr std::uint32_t kResourceTypeDialogItemList = 0x4449544c;
 // id). The same family also holds sub-window flavour text at other id ranges
 // (e.g. the Bar establishment description at stellar_id + 10000).
 constexpr std::uint32_t kResourceTypeDescription = 0x64917363; // "d\x91sc"
-constexpr std::uint32_t kResourceTypeMenu = 0x4d454e55; // "MENU"
-constexpr std::uint32_t kResourceTypeAlert = 0x414c5254; // "ALRT"
-constexpr std::uint32_t kResourceTypeControl = 0x434e544c; // "CNTL"
+constexpr std::uint32_t kResourceTypeMenu = 0x4d454e55;        // "MENU"
+constexpr std::uint32_t kResourceTypeAlert = 0x414c5254;       // "ALRT"
+constexpr std::uint32_t kResourceTypeControl = 0x434e544c;     // "CNTL"
 // "ch"♦r" (ch\x9ar) — the single default character/pilot-type resource.
 // Same FourCC (0x63688a72) the game uses as the pilot-save registry key; the
 // resource carries the new-pilot intro frame ids and per-frame delays (Nova
@@ -175,9 +175,12 @@ NovaResource_LoadSndData(std::uint16_t resource_id);
 // by (v + 0x80) | (v + 0x80) << 8 (a quirk preserved for fidelity).
 //
 // The classic header's 16.16 sample rate is preserved (600/601 use about
-// 11127 Hz). The format-1 extended form used by snd 602/603 contains mono Apple
-// IMA4 packets; those are decoded to PCM here because the original delegated
-// them to its platform audio backend. Other AIFC forms remain unsupported.
+// 11127 Hz). Two format-1 sub-forms are handled: an extended header containing
+// mono Apple IMA4 packets (snd 602/603 and the IMA4 weapon sounds), and the
+// 'NONE' 8-bit mono payload that backs most weapon fire sounds (ids 200..235).
+// Both are decoded to PCM here because the original delegated the codec
+// conversion to its platform audio backend. Other AIFC forms remain
+// unsupported.
 [[nodiscard]] std::optional<NovaSoundData>
 NovaSound_Decode(std::span<const std::byte> resource_data);
 
@@ -253,8 +256,8 @@ NovaResource_LoadDialogDefinition(std::uint16_t dialog_id);
 // `dialog_variant` and the trailing `status` line follow the text and feed the
 // selection-dialog modals (not used by the docked landing panel).
 struct NovaStellarDescription {
-  std::string text;               // leading C-string: the landing description
-  std::string status;             // trailing status C-string (<=0x20 chars)
+  std::string text;                // leading C-string: the landing description
+  std::string status;              // trailing status C-string (<=0x20 chars)
   std::int16_t dialog_variant = 0; // 2-byte BE variant/picture id after text
 };
 

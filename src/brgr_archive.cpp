@@ -266,7 +266,8 @@ ParseArchive(const std::filesystem::path &path) {
 constexpr std::array kArchiveFileNames{
     // The core UI archive lives directly in EV Nova/ (not under Nova Files/):
     // it carries the DLOG/DITL/MENU/ALRT/CNTL dialog-window resources that the
-    // engine's dialog system (UiWindow_CreateFromDialogResource -> DLOG 0x444c4f47
+    // engine's dialog system (UiWindow_CreateFromDialogResource -> DLOG
+    // 0x444c4f47
     // / DITL 0x4449544c) builds every in-game window from, plus a handful of
     // PICT/STR#. Without it the .rez set is incomplete and dialog data is
     // missing (this is what the landed/services window rects come from).
@@ -365,8 +366,7 @@ public:
 
   // Diagnostics: every distinct (type_code, resource_id) pair across all
   // archives, used to confirm which resource families the BRGR maps carry.
-  [[nodiscard]] std::vector<std::pair<std::uint32_t, std::uint16_t>>
-  AllKeys() {
+  [[nodiscard]] std::vector<std::pair<std::uint32_t, std::uint16_t>> AllKeys() {
     EnsureLoaded();
     std::vector<std::pair<std::uint32_t, std::uint16_t>> keys;
     for (const auto &archive : archives_) {
@@ -562,9 +562,13 @@ NovaResource_LoadSndData(std::uint16_t resource_id) {
 
 std::optional<NovaSoundData>
 NovaSound_Decode(std::span<const std::byte> resource_data) {
-  // FUN_004d6e60 accepts both classic format-2 'NONE' headers (menu focus
-  // ticks 600/601) and format-1 extended headers containing Apple IMA4
-  // packets (the row-reveal effects 602/603).
+  // FUN_004d6e60 accepts the format-1/2/3 'snd' payload layouts Ghidra's
+  // FUN_004d6e60 dispatches on: format-2 'NONE' headers (menu focus ticks
+  // 600/601), format-1 extended headers containing Apple IMA4 packets (the
+  // row-reveal effects 602/603 and the IMA4 weapon sounds), and format-1
+  // 'NONE' 8-bit mono payloads (the bulk of the weapon fire sounds, e.g.
+  // Light Blaster). Weapon fire sounds live in snd ids 200..235 (see
+  // NovaWeapon_FireSound slot -> resource mapping in weapon.cpp).
   const auto read_be16 = [resource_data](std::size_t offset) {
     if (offset + 2 > resource_data.size()) {
       return std::uint16_t{0};
@@ -594,20 +598,60 @@ NovaSound_Decode(std::span<const std::byte> resource_data) {
   }
 
   if (read_be16(0) == 1U) {
-    // The format-1 command list used by 602/603 places the extended sound
-    // header at +0x14. Its sample payload begins 0x40 bytes later. Ghidra's
-    // FUN_004d6e60 recognizes the 0xfe header marker and 'ima4' FourCC, then
-    // leaves codec conversion to the platform audio backend. SDL consumes
-    // PCM, so decode the standard 34-byte Apple IMA4 packets here.
+    // Format-1 'snd' payloads (the version word at +0 in {1,2,3} routes through
+    // the same Ghidra command-list scan: FUN_004d6e60 -> the format handler)
+    // place a single 0x8051 data command whose offset field is 0x14 for our
+    // shipped set, so data_offset = 0x14. The byte at data_offset + 0x14 is
+    // the sub-format discriminator Ghidra switches on (FUN_004d6e60's cVar1):
+    //   0x00 -> 'NONE' 8-bit mono uncompressed (weapon fire/beam sounds, e.g.
+    //            Light Blaster 208 @ 11127 Hz). Sample data at +0x16.
+    //   0xfe -> extended SoundHeader carrying Apple IMA4 packets (menu row
+    //            reveals 602/603 and the IMA4 weapon sounds). Sample data
+    //            begins 0x40 bytes later; Ghidra leaves the codec conversion
+    //            to the platform audio backend, and SDL consumes PCM, so the
+    //            34-byte IMA4 packets are decoded here.
     constexpr std::size_t kHeaderOffset = 0x14;
+    const auto discriminator =
+        std::to_integer<std::uint8_t>(resource_data[kHeaderOffset + 0x14]);
+
+    if (discriminator == 0x00) {
+      // 'NONE' 8-bit mono, the same decode as the format-2 path but with the
+      // fixed 0x14 data offset. SoundHeader at +0x14 carries the 16.16
+      // fixed-point sample rate; each byte is biased 8-bit signed-mapped to
+      // 16-bit exactly as FUN_004d6900 does ((v + 0x80) | (v + 0x80) << 8).
+      constexpr std::size_t kNonesOffset = kHeaderOffset + 0x16;
+      if (resource_data.size() <= kNonesOffset) {
+        NovaLog::Todo("format-1 'NONE' snd resource has no sample data");
+        return std::nullopt;
+      }
+      NovaSoundData sound{};
+      sound.channel_count = 1;
+      const auto fixed_sample_rate = read_be32(kHeaderOffset + 8);
+      sound.sample_rate =
+          static_cast<int>((fixed_sample_rate + 0x8000U) >> 16U);
+      if (sound.sample_rate <= 0) {
+        return std::nullopt;
+      }
+      sound.samples.reserve(resource_data.size() - kNonesOffset);
+      for (std::size_t index = kNonesOffset; index < resource_data.size();
+           ++index) {
+        const auto biased = std::to_integer<int>(resource_data[index]) + 0x80;
+        const auto value = static_cast<std::uint16_t>(biased | (biased << 8));
+        sound.samples.push_back(static_cast<std::int16_t>(value));
+      }
+      NovaLog::Debug("decoded format-1 'NONE' 8-bit snd \x20with {} samples "
+                     "at {} Hz",
+                     sound.samples.size(),
+                     sound.sample_rate);
+      return sound;
+    }
+
     constexpr std::size_t kSamplesOffset = kHeaderOffset + 0x40;
     constexpr std::size_t kPacketBytes = 34;
     constexpr std::size_t kSamplesPerPacket = 64;
     constexpr std::uint32_t kIma4 = 0x696d6134;
-    if (resource_data.size() < kSamplesOffset ||
+    if (discriminator != 0xfeU || resource_data.size() < kSamplesOffset ||
         read_be32(kHeaderOffset + 4) != 1U ||
-        std::to_integer<std::uint8_t>(resource_data[kHeaderOffset + 0x14]) !=
-            0xfeU ||
         read_be32(kHeaderOffset + 0x28) != kIma4 ||
         read_be16(kHeaderOffset + 0x3e) != 16U ||
         (resource_data.size() - kSamplesOffset) % kPacketBytes != 0U) {
@@ -759,7 +803,7 @@ namespace {
 
 // Big-endian 16-bit read helper for DITL field parsing.
 [[nodiscard]] std::uint16_t DialogReadBe16(std::span<const std::byte> data,
-                                            std::size_t offset) {
+                                           std::size_t offset) {
   return std::to_integer<std::uint16_t>(data[offset]) << 8U |
          std::to_integer<std::uint16_t>(data[offset + 1]);
 }
@@ -791,7 +835,10 @@ NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
     // (FUN_004cef50 reads through +0xd).
     if (pos + 14 > size) {
       NovaLog::Todo("DITL 0x{:04x}: item {} at {} out of bounds ({})",
-                    dialog_item_list_id, entry, pos, size);
+                    dialog_item_list_id,
+                    entry,
+                    pos,
+                    size);
       return std::nullopt;
     }
     NovaDialogItem item;
@@ -818,9 +865,8 @@ NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
     case 6:
     case 8:
     case 0x10: {
-      const std::size_t title_len =
-          static_cast<std::size_t>(std::to_integer<std::uint8_t>(
-              (*data)[pos + 13]));
+      const std::size_t title_len = static_cast<std::size_t>(
+          std::to_integer<std::uint8_t>((*data)[pos + 13]));
       next = pos + 13 + title_len + 1;
       break;
     }
@@ -907,9 +953,8 @@ NovaResource_LoadStellarDescription(std::int16_t stellar_id) {
   if (stellar_id < 0x80) {
     return std::nullopt;
   }
-  const auto data =
-      NovaResource_Load(kResourceTypeDescription,
-                        static_cast<std::uint16_t>(stellar_id));
+  const auto data = NovaResource_Load(kResourceTypeDescription,
+                                      static_cast<std::uint16_t>(stellar_id));
   if (!data || data->size() < 2) {
     NovaLog::Todo("landing description desc {} absent or truncated",
                   stellar_id);
@@ -923,11 +968,11 @@ NovaResource_LoadStellarDescription(std::int16_t stellar_id) {
 
   // Leading NUL-terminated C-string: the landing description text.
   {
-    const void *end =
-        std::memchr(raw, '\0', size);
+    const void *end = std::memchr(raw, '\0', size);
     const std::size_t len =
-        end == nullptr ? size : static_cast<std::size_t>(
-                                    static_cast<const char *>(end) - raw);
+        end == nullptr
+            ? size
+            : static_cast<std::size_t>(static_cast<const char *>(end) - raw);
     out.text.assign(raw, len);
 
     // After the text NUL, Ui_LoadSelectionDialogResource reads the 2-byte BE
@@ -936,8 +981,7 @@ NovaResource_LoadStellarDescription(std::int16_t stellar_id) {
     if (len + 3 <= size) {
       out.dialog_variant = ReadBeI16(bytes, len + 1);
       const std::size_t status_rem = size - (len + 3);
-      const void *status_end =
-          std::memchr(raw + len + 3, '\0', status_rem);
+      const void *status_end = std::memchr(raw + len + 3, '\0', status_rem);
       std::size_t status_len =
           status_end == nullptr
               ? status_rem

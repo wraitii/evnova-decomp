@@ -148,9 +148,15 @@ void DrawInGameFrame(SdlPlatform &platform,
 // ship-class-derived rates (base_turn_rate_deg, base_speed, accel) once the
 // movement sim is reconstructed.
 void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
+                               SdlAudio &audio,
                                GameState &state,
                                bool &returning_to_menu) {
   SpaceflightView view;
+
+  // Preload the fire sounds the player's owned primary weapons use so the
+  // first volley's sound is already decoded (mirrors the original preloading
+  // the gameplay sound-handle table at startup).
+  NovaWeapon_PreloadOwnedFireSounds(state);
 
   // ---- Pre-loop setup -----------------------------------------------------
   // Ghidra: rebuilds the stellar radar panel, evaluates availability, updates
@@ -206,6 +212,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     NovaWeapon_TickShots(state, frame_time_ms);
     if (input.fire) {
       NovaWeapon_FirePlayerPrimary(state);
+      // Play each weapon fire sound queued this frame (a round actually
+      // spawned). The firing routine appends the fire_sound slot to
+      // GameState.pending_fire_sound_slots; this loop owns the SdlAudio device
+      // and plays the decoded sound, then clears the queue. Mirrors the
+      // original's per-volley NovaAudio_PlaySpatialByDistance.
+      for (const std::int16_t slot : state.pending_fire_sound_slots) {
+        if (slot < 0 || slot >= 36) {
+          continue;
+        }
+        const auto &sound = state.weapon_fire_sounds[slot];
+        if (sound.has_value()) {
+          audio.Play(*sound);
+        }
+      }
+      state.pending_fire_sound_slots.clear();
     }
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
     // 'j' key near an available travel point, then tick the countdown.
@@ -497,7 +518,9 @@ void NovaPlayer_TickShieldRecharge(GameState &state, float frame_time_ms) {
   p.shield_points = std::min(eff.max_shield_points, p.shield_points + rate);
 }
 
-void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state) {
+void NovaSpaceflight_Run(SdlPlatform &platform,
+                         SdlAudio &audio,
+                         GameState &state) {
   NovaLog::Info("entering spaceflight mode");
 
   // Preflight: the new-game intro cinematic plays on the pilot's first entry
@@ -516,7 +539,7 @@ void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state) {
   // Ghidra Ship_RunSpaceflightMode: preflight owns the gameplay surface, runs
   // Frame_SpaceflightLoop, then tears the mode back down to the menu shell.
   bool returning_to_menu = false;
-  NovaFrame_SpaceflightLoop(platform, state, returning_to_menu);
+  NovaFrame_SpaceflightLoop(platform, audio, state, returning_to_menu);
 
   NovaLog::Info("leaving spaceflight mode to the main menu");
 }

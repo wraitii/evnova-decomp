@@ -51,7 +51,7 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 - Prefer value types, RAII, std::unique_ptr, and deterministic ownership.
 - No raw new/delete. Raw pointers are non-owning only.
 - Keep SDL handles behind small RAII wrappers.
-- Keep game logic independent of SDL wherever practical.
+- Try to keep game logic independent of SDL, though it's sometimes more practical to bundle the two together.
 - Represent game state explicitly. Avoid hidden globals and singleton managers. This may diverge from the original implementation where practical.
 - Preserve original constants and quirks when they affect gameplay.
 - Name reconstructed concepts by purpose, not by decompiler-generated names.

@@ -399,6 +399,41 @@ TEST_CASE("system nav_defs identify the owned space stellars",
   CHECK(data.Stellar(0x57c)->link_a_id == 1);
 }
 
+// The starter weapon's fire sound. The Light Blaster's `fire_sound` field is a
+// slot index (8), not a resource id; the slot maps to the snd resource id
+// 200 + slot (so 208 = "Light Blaster.sfil"), and that payload is a format-1
+// 'NONE' 8-bit mono sound -- a sub-format added to NovaSound_Decode. Pinning
+// this decode keeps the weapon firing path's audio mounted on the real bolt.
+TEST_CASE("light blaster fire sound (snd id 208) decodes as NONE 8-bit",
+          "[audio][snd]") {
+  game::ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const game::Weapon *w = data.Weapon(0x80);
+  REQUIRE(w != nullptr);
+  // Slot 8 -> resource id 208 (verified: "Light Blaster.sfil" in Nova Sounds).
+  CHECK(w->fire_sound == 8);
+
+  const auto resource =
+      NovaResource_LoadSndData(static_cast<std::uint16_t>(200 + w->fire_sound));
+  REQUIRE(resource.has_value());
+  const auto sound = NovaSound_Decode(*resource);
+  REQUIRE(sound.has_value());
+  // 8-bit mono at the classic Mac 16.16 rate: 0x2b770000 >> 16 = 11127 Hz.
+  CHECK(sound->sample_rate == 11127);
+  CHECK(sound->channel_count == 1);
+  // The shipped payload carries 4655 biased 8-bit samples (verified directly).
+  CHECK(sound->samples.size() == 4655);
+  // Sanity: decoded samples are nonzero and 16-bit-expanded from 8-bit bias.
+  bool any_nonzero = false;
+  for (const auto s : sound->samples) {
+    if (s != 0) {
+      any_nonzero = true;
+      break;
+    }
+  }
+  CHECK(any_nonzero);
+}
+
 // The per-system space background tint (syst BkgndColor +0x8e, 24-bit RRGGBB)
 // and murk (syst +0x92) feed the flight backdrop + amber starfield. Values are
 // verified against the raw payload bytes; they shape the ground-truth rendering

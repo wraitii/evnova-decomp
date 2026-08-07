@@ -1,5 +1,8 @@
 #include "weapon.hpp"
 
+#include "../brgr_archive.hpp"
+#include "../log.hpp"
+#include "game_state.hpp"
 #include "outfit.hpp"
 
 #include <algorithm>
@@ -143,6 +146,13 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
   shot.life_frames = std::max(1, static_cast<int>(w->lifetime_ticks));
   state.active_shots.push_back(shot);
 
+  // A round actually spawned: mirror Weapon_FirePlayerWeaponBank's
+  // `volley_fired > 0` gate and queue this weapon's fire sound (slot, not
+  // resource id) for the spaceflight loop to play through the cached sound.
+  if (w->fire_sound >= 0) {
+    state.pending_fire_sound_slots.push_back(w->fire_sound);
+  }
+
   // Set the bank cooldown to the fire interval (the original computes this
   // from the weapon's burst/reload fields; here reload_ticks, in reference
   // cadence frames, is used. TODO(decomp): reproduce the exact
@@ -237,6 +247,50 @@ std::string NovaWeapon_BankDisplayName(const GameState &state,
     return "?";
   }
   return w->name.empty() ? "?" : w->name;
+}
+
+void NovaWeapon_PreloadFireSound(GameState &state,
+                                 std::int16_t fire_sound_slot) {
+  if (fire_sound_slot < 0 || fire_sound_slot >= 36) {
+    return; // no fire sound for this slot
+  }
+  if (state.weapon_fire_sounds[fire_sound_slot].has_value()) {
+    return; // already cached
+  }
+  // Slot -> snd resource id 200 + slot (see NovaWeapon_FireSoundResourceId).
+  const auto resource = NovaResource_LoadSndData(static_cast<std::uint16_t>(
+      NovaWeapon_FireSoundResourceId(fire_sound_slot)));
+  if (!resource) {
+    return; // resource missing; weapon fires silently
+  }
+  if (auto decoded = NovaSound_Decode(*resource)) {
+    state.weapon_fire_sounds[fire_sound_slot] = std::move(*decoded);
+    NovaLog::Info("cached weapon fire sound slot {} (snd id {})",
+                  fire_sound_slot,
+                  NovaWeapon_FireSoundResourceId(fire_sound_slot));
+  } else {
+    NovaLog::Warn("weapon fire sound slot {} (snd id {}) failed to decode",
+                  fire_sound_slot,
+                  NovaWeapon_FireSoundResourceId(fire_sound_slot));
+  }
+}
+
+void NovaWeapon_PreloadOwnedFireSounds(GameState &state) {
+  // Scan the rebuilt primary weapon banks and preload each distinct owned
+  // weapon's fire sound so a bank never misses its first shot (the original
+  // preloads the whole g_gameplay_sound_handle_table at startup; here we only
+  // load what the player's banks use).
+  for (std::int16_t b = 0; b < 0x100; ++b) {
+    const std::int16_t ammo = BankAmmo(state, b);
+    if (ammo <= 0) {
+      continue;
+    }
+    const Weapon *w = WeaponAt(state, b);
+    if (!w || (w->flags & 0x0002U) != 0) {
+      continue; // unmounted or a secondary weapon
+    }
+    NovaWeapon_PreloadFireSound(state, w->fire_sound);
+  }
 }
 
 } // namespace game

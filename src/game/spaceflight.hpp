@@ -14,6 +14,7 @@
 // which latches DAT_00596d38 on the primary mouse command through the pause
 // menu; see the loop body in spaceflight.cpp.
 
+#include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
 
@@ -29,7 +30,9 @@ namespace game {
 // returns to the menu, at which point it returns. Mirrors
 // Ship_RunSpaceflightMode's gating (DAT_00596d35) and clean return to the menu
 // shell.
-void NovaSpaceflight_Run(SdlPlatform &platform, GameState &state);
+void NovaSpaceflight_Run(SdlPlatform &platform,
+                         SdlAudio &audio,
+                         GameState &state);
 
 // Ship-class movement stats derived from the raw resource as the original
 // loader (NovaData_LoadScenarioResourceTables 0x004bd3c0) derives
