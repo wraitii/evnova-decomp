@@ -309,6 +309,24 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   }
 }
 
+// Unified per-frame world animation pass (see the header). One call advances
+// every animated in-flight entity's cadence so the timing basis is centralised
+// here (Mirror of SpriteWorld_UpdateAnimatedSprites 0x004781f0 at the world
+// scope). Drives the animated stellar frame stepping (dwell cadence) and the
+// ambient-star parallax movement; time-animated shot frames step in
+// NovaWeapon_TickShots using the same dwell model (they need simulation-side
+// mutable GameState, so they live there rather than on the SDL view).
+void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
+                                        GameState &state,
+                                        float frame_time_ms,
+                                        float dx,
+                                        float dy) {
+  // Animated stellar sprite-frame stepping (dwell accumulator cadence).
+  AdvanceStellarAnimation(platform, state, frame_time_ms);
+  // Ambient-star spatial parallax (moves by the ship's movement delta).
+  UpdateAmbientStars(dx, dy);
+}
+
 // Ghidra Stellar_UpdateStellarSprites (0x0042cd10), ambient-animation part.
 // Advances each animate stellar of the current system one animation step each
 // real frame. Stellar bodies with only a single frame (sprite_frame_count<2)
@@ -528,14 +546,14 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
   //   frame = ROUND(frames_per_rotation * bearing / 2pi),
   // the same rotation mapping the ship uses (FrameForHeading). Because a
   // shot's velocity was spawned along that bearing (Math_AddPolarVelocity),
-  // the frame is derived here from the velocity's direction; the set is drawn
-  // centered on the world position.
+  // the frame is derived here from the velocity's direction.
   //
-  // TODO(decomp): weapons with flags_primary bit 0 set take Shot_HandleShot's
-  // *animated* branch instead, stepping a frame_cycle_index/anim_elapsed
-  // timer at the weapon's shot_anim_frame_dwell cadence; that path awaits the
-  // frame-cycle bookkeeping and is not reached by the current build's
-  // unguided projectiles.
+  // A weapon with flags_primary bit 0 SET takes Shot_HandleShot's *animated*
+  // branch instead: NovaWeapon_TickShots steps the shot's frame_cycle_index /
+  // anim_elapsed at the weapon's shot_anim_frame_dwell cadence (see
+  // weapon.cpp), and here the cycle is wrapped at the shot set's frame count
+  // (or held at frame_count-1 for a flags_secondary bit 1 reverse wrap, the
+  // last-frame hold Shot_HandleShot applies) before being drawn.
   for (const auto &s : state.active_shots) {
     // The shot's bank slot is a zero-based weapon id; the scenario Weapon()
     // lookup uses the 0x80.. resource-id residue (same convention as
@@ -550,13 +568,22 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
     if (set && !set->frames.empty()) {
       SpriteDrawOptions opts;
       opts.wrap = true;
-      // Bearing of the shot's velocity, in the Math_AddPolarVelocity
-      // convention (heading 0 = up/-y, clockwise positive): the polar
-      // projection vel = (sin(b), -cos(b))*speed inverts to atan2(vel_x,
-      // -vel_y). Mirrors the spawn bearing Shot_SpawnShotFromWeapon stored in
-      // range_scalar_runtime.
-      const float bearing = std::atan2(s.vel_x, -s.vel_y);
-      const int frame = FrameForHeading(bearing, set->frame_count);
+      int frame;
+      if ((w->flags & 0x0001U) == 0) {
+        // Static/heading branch: the frame is the shot's firing bearing.
+        const float bearing = std::atan2(s.vel_x, -s.vel_y);
+        frame = FrameForHeading(bearing, set->frame_count);
+      } else {
+        // Time-animated branch: clamp the stepped frame_cycle_index at the
+        // set's frame count, holding the last frame for a flags_secondary bit 1
+        // reverse-wrap (Shot_HandleShot's frame-count wrap + reverse hold).
+        int cycle = s.frame_cycle_index;
+        if (cycle >= set->frame_count) {
+          cycle =
+              ((w->flags_secondary & 0x0002U) != 0) ? set->frame_count - 1 : 0;
+        }
+        frame = std::clamp(cycle, 0, set->frame_count - 1);
+      }
       DrawSprite(renderer,
                  *set,
                  frame,
@@ -587,10 +614,27 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
   }
 }
 
+// Draws the whole in-flight world, compositing every visible entity in the
+// fixed layer order the original's sprite layers use (Ghidra Frame_Spaceflight-
+// Loop scope 2 sprite-world present: the background is cleared/filled first,
+// then the spiralled sprite layers are drawn in layer order). The precedence,
+// bottom to top, is locked as:
+//
+//   background (space tint + ambient starfield)   -- DrawBackground
+//   stellar bodies (planets / stations)           -- DrawStellarBodies
+//   shots / projectiles                           -- DrawShots
+//   player ship + engine-glow                     -- (below)
+//
+// That is: the ship's hull and glow composite over everything else in the
+// scene, and shots pass between the ship and the stellar/backdrop layers. This
+// matches a ship-centred camera where the player's own ship is the front-most
+// occupant of the scene. Keeping the order explicit here (rather than spread
+// across the per-subsystem drawers) makes the composed precedence auditable and
+// lets a future layer-table refactor replace the fixed sequence wholesale.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
-  DrawBackground(platform, state);
-  DrawStellarBodies(platform, state);
-  DrawShots(platform, state);
+  DrawBackground(platform, state);    // backmost: tint + ambient stars
+  DrawStellarBodies(platform, state); // stellar planets / stations
+  DrawShots(platform, state);         // projectiles above stellars
 
   // Player ship at the play-area centre, frame selected by heading. Because
   // the camera is centred on the player, drawing at the ship's own world

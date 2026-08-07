@@ -72,6 +72,25 @@ public:
   // Frame_RenderViewportBackground) then the active ambient star particles.
   void DrawBackground(SdlPlatform &platform, const GameState &state);
 
+  // Unified per-frame animation advance. Mirrors SpriteWorld_UpdateAnimated-
+  // Sprites (0x004781f0): one world-level pass each frame advances every
+  // animated in-flight entity's frame cadence so the timing basis bounds live
+  // in a single place rather than being duplicated per subsystem. This is the
+  // only per-frame world-animation hook the spaceflight loop calls; it drives:
+  //   * animated stellar frame stepping (AdvanceStellarAnimation),
+  //   * ambient-star parallax movement (UpdateAmbientStars, via `dx/dy`),
+  // while the player's time-animated shot frames step in NovaWeapon_TickShots
+  // (simulation side, same dwell model). frame_time_ms / dx / dy are the real
+  // elapsed frame time and ship-movement delta (the original's
+  // _g_avg_frame_time_ms + the pre-tick position delta). Mutates GameState
+  // (PRNG for random cycling), so it is non-const.
+  void AdvanceAnimations(SdlPlatform &platform,
+                         GameState &state,
+                         float frame_time_ms,
+                         float dx,
+                         float dy);
+
+private:
   // Ghidra Stellar_UpdateStellarSprites (0x0042cd10), ambient-animation part
   // only: advances each of the current system's animated stellars' sprite frame
   // one animation step. frame_time_ms is the real elapsed frame time (the
@@ -81,12 +100,11 @@ public:
   // engage_highlight_frame); because this build has no AI ships /
   // travel-selection state the engage-highlight pulse is documented and left
   // untouched (TODO(decomp)). Mutates the GameState PRNG (random cycling) so it
-  // is non-const.
+  // is non-const. Called from AdvanceAnimations.
   void AdvanceStellarAnimation(SdlPlatform &platform,
                                GameState &state,
                                float frame_time_ms);
 
-private:
   // One ambient background star particle (Ghidra AmbientStarParticle pool at
   // g_ambient_star_particles, stride 0x14 = 20 bytes; offsets match the way we
   // index the original fields).

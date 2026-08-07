@@ -178,6 +178,14 @@ struct ActiveShot {
   float vel_y = 0.0F;
   // Remaining lifetime in reference-cadence frames (WeaponDef Count).
   int life_frames = 0;
+  // Time-animated shot-frame stepping (Ghidra ShotState.frame_cycle_index / +
+  // anim_elapsed). For a weapon whose flags_primary bit 0 is SET the shot uses
+  // Shot_HandleShot's animated branch: anim_elapsed accumulates frame time and
+  // each time it crosses the weapon's shot_anim_frame_dwell, frame_cycle_index
+  // advances (wrapping at the frame count). Only the animated-branch shot
+  // sets need these; static/heading sets (Light Blaster) leave them unused.
+  int frame_cycle_index = 0; // ShotState.frame_cycle_index (+0x3e)
+  float anim_elapsed = 0.0F; // ShotState.anim_elapsed, in ms
 };
 
 // Everything about the running pilot's world. Replaces the Game_Reset* set of

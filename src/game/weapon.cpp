@@ -17,14 +17,16 @@ constexpr std::size_t kBankStride = 100;
 std::int16_t &BankAmmo(GameState &state, std::int16_t bank) {
   return state.weapon_bank_ammo[static_cast<std::size_t>(bank) * kBankStride];
 }
+
 const std::int16_t &BankAmmo(const GameState &state, std::int16_t bank) {
-  return state
-      .weapon_bank_ammo[static_cast<std::size_t>(bank) * kBankStride];
+  return state.weapon_bank_ammo[static_cast<std::size_t>(bank) * kBankStride];
 }
+
 std::int16_t &BankSecondary(GameState &state, std::int16_t bank) {
   return state
       .weapon_bank_secondary[static_cast<std::size_t>(bank) * kBankStride];
 }
+
 const std::int16_t &BankSecondary(const GameState &state, std::int16_t bank) {
   return state
       .weapon_bank_secondary[static_cast<std::size_t>(bank) * kBankStride];
@@ -125,8 +127,11 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
 
   ActiveShot shot;
   shot.weapon_id = weapon_bank;
-  // World position: the ship's centre (TODO(decomp): navigate to the gun-exit
-  // point on the ship sprite when ShipClassDef.gun_exit_pos is decoded).
+  // World position: the ship's centre. The per-frame sprite anchors in the
+  // sprite world (Sprite_AnchorToScreen + DrawSprite's opts.anchor_*) make the
+  // gun-fire-point placement available; wiring it needs the fired round to exit
+  // at the ship sprite's gun-exit point, which awaits ShipClassDef.gun_exit_pos
+  // being decoded (TODO(decomp)).
   shot.pos_x = ship.pos_x;
   shot.pos_y = ship.pos_y;
   // Velocity = heading-projected projectile speed + the ship's own velocity
@@ -164,8 +169,42 @@ void NovaWeapon_FirePlayerPrimary(GameState &state) {
   }
 }
 
-void NovaWeapon_TickShots(GameState &state) {
-  // Advance shots by velocity and lifetime; drop expired rounds.
+// Ghidra Shot_HandleShot (0x00435830) time-animated shot-frame branch: for a
+// weapon with flags_primary bit 0 set, each frame accumulates the real frame
+// time into ShotState.anim_elapsed and, when it crosses the weapon's
+// shot_anim_frame_dwell (Ghidra WeaponDef.homing_strength_or_turn_rate; a
+// dwell < 1 advances every frame), steps ShotState.frame_cycle_index, wrapping
+// at the shot sprite-set's frame count (0, or frame_count-1 when the weapon's
+// flags_secondary bit 1 is set). The Light Blaster and the other unguided
+// projectiles take the static/heading branch instead, so this only drives
+// genuinely time-animated weapon shots.
+void NovaWeapon_StepShotAnimation(GameState &state,
+                                  ActiveShot &shot,
+                                  float frame_time_ms) {
+  const Weapon *w = WeaponAt(state, shot.weapon_id);
+  if (!w) {
+    return;
+  }
+  // flags_primary bit 0 clear -> static/heading shot-frame path (no animation).
+  if ((w->flags & 0x0001U) == 0) {
+    return;
+  }
+  const std::int16_t dwell = w->shot_anim_frame_dwell;
+  shot.anim_elapsed += frame_time_ms;
+  if (dwell < 1 || shot.anim_elapsed >= static_cast<float>(dwell)) {
+    shot.frame_cycle_index += 1;
+    shot.anim_elapsed = 0.0F;
+  }
+  // The caller (DrawShots) clamps the displayed frame to the sprite set's frame
+  // count, mirroring Shot_HandleShot's wrap. The reverse-wrap (flags_secondary
+  // bit 1 -> frame_count - 1) needs the frame count, which lives on the SDL
+  // side; DrawShots owns that clamp once the set is resolved.
+}
+
+void NovaWeapon_TickShots(GameState &state, float frame_time_ms) {
+  // Advance shots by velocity and lifetime; drop expired rounds. Also step the
+  // time-animated shot-frame cycle (Shot_HandleShot animated branch) for
+  // weapons that use it; static/heading shot sets are untouched.
   auto &shots = state.active_shots;
   for (auto &shot : shots) {
     shot.pos_x += shot.vel_x;
@@ -173,6 +212,7 @@ void NovaWeapon_TickShots(GameState &state) {
     if (shot.life_frames > 0) {
       --shot.life_frames;
     }
+    NovaWeapon_StepShotAnimation(state, shot, frame_time_ms);
   }
   shots.erase(
       std::remove_if(shots.begin(),

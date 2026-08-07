@@ -160,7 +160,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0042C660,Shot_UpdateDirectionalWeaponEffects,,0%,
 0x0042CBB0,Frame_AnchorAuxHUDSpriteToOrigin,,0%,
 0x0042CC30,Stellar_TickTravelCountdownSprite,,0%,
-0x0042CD10,Stellar_UpdateStellarSprites,src/game/spaceflight_view.cpp,30%,ambient frame-stepping reimplemented (AdvanceStellarAnimation): dwell/frame-multiplier stepping + alternate/linger/random cycling; hypergate 0x1000 non-engaged drift toward engage_highlight_frame; engage-highlight pulse (AI/ travel-selection state) + per-frame SetPosition from distance-intensity not reconstructed
+0x0042CD10,Stellar_UpdateStellarSprites,src/game/spaceflight_view.cpp,30%,ambient frame-stepping reimplemented (AdvanceStellarAnimation, now driven by the unified SpaceflightView::AdvanceAnimations per-frame pass mirroring SpriteWorld_UpdateAnimatedSprites): dwell/frame-multiplier stepping + alternate/linger/random cycling; hypergate 0x1000 non-engaged drift toward engage_highlight_frame; engage-highlight pulse (AI/travel-selection state) + per-frame SetPosition from distance-intensity not reconstructed
 0x0042D890,Stellar_TickStellarDefenseBatteries,,0%,
 0x0042E160,Shot_UpdateImpactEffectSprites,,0%,
 0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,72%,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); each star renders a random frame of the 16-frame 5px sheet (sp.x9an 700) at native 1:1 size; murk round(murk*0.9) value is a blend-mode sentinel (tinted/blobed), not a pixel size"
@@ -177,7 +177,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,30%,scope 3 (per-tick stellar system_id/is_available/hazard re-derivation) via NovaTargeting_UpdateStellarAvailability + wired into NovaFrame_SpaceflightLoop; visible-system cache + sprite-set bookkeeping not reconstructed
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
 0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,3%,"player free-flight movement model reconstructed (ship-class stats, turn/thrust/clamp, inertia coast, reverse brake) via NovaPlayer_IntegrateMovement; AI/combat/weapon/travel scopes still stubbed"
-0x00435830,Shot_HandleShot,src/game/spaceflight_view.cpp,5%,"shot sprite frame selection mirrored for unguided projectiles: flags_primary bit0 clear => static/heading frame (rotation sheet, bearing via FrameForHeading) in DrawShots; time-animated frame_cycle_index/anim_elapsed branch not reached by current build (TODO(decomp))"
+0x00435830,Shot_HandleShot,src/game/spaceflight_view.cpp,15%,"shot sprite frame selection mirrored: flags_primary bit0 clear => static/heading frame (rotation sheet, bearing via FrameForHeading) in DrawShots; bit0 set => time-animated frame_cycle_index/anim_elapsed stepped at shot_anim_frame_dwell cadence by NovaWeapon_TickShots (weapon.cpp) and wrapped at the set's frame count (reverse-hold via flags_secondary) in DrawShots; guidance motion, collision, linked-shot/area-impact and audio side-effects not reconstructed"
 0x00436910,Frame_UpdateScriptedManeuverSprites,,0%,
 0x00436FF0,NovaUi_ResolveWeaponSplashImpact,,0%,
 0x004374F0,Ship_HandleSpritePairCollision,,0%,
@@ -277,7 +277,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
 0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,25%,landable-target branch (selected stellar available/unrestricted -> open landing interaction) via NovaTargeting_IsLandingAvailable + NovaLanded_RunWindow in NovaFrame_SpaceflightLoop; ship-comm and mission-ship branches not reconstructed
-0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,20%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, see 0x00435830); beam/turret/guided/launcher branches and audio/burst side-effects not reconstructed"
+0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,20%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, or time-animated path for flags bit0, see 0x00435830); spawning from the ship centre (gun-fire-point placement available via sprite anchors but needs ShipClassDef.gun_exit_pos, TODO(decomp)); beam/turret/guided/launcher branches and audio/burst side-effects not reconstructed"
 0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,25%,"non-hypergate travel/dock transition: the free auto-refill of shields+armor to max (Ship_ComputeShipMaxShieldPoints/MaxArmor) and the credit-charged refuel (Outfit_RefuelShipWithCredits) are captured by NovaLanding_EnterDocked; the docked interaction loop, starmap/discovery/fleet-trade steps and the final position/velocity reset are not reconstructed"
 0x00456480,Stellar_LandOnSpob,src/game/landed_window.cpp,40%,"landing transition state subset in NovaLanding_EnterDocked (used by NovaLanding_TryLand): reposition to stellar, zero velocity, refill shields/armor, deduct service cost; then the docked services window opens (NovaLanded_RunWindow). World/laydown scene not reconstructed"
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
@@ -499,7 +499,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046EBB0,Stellar_CountValidLinkedStellarDestinations,,0%,
 0x0046EBF0,NovaEffects_QueuedAmbientStarParticles,src/game/spaceflight_view.cpp,90%,"20-slot starfield spawn (SpawnAmbientStars): count=round(h/600*20), random frame over 16-frame star sheet (sp.x9an 700), offset, parallax speed=random(0x23)*0.01, outer-slot carry-over, murk<0 gate all faithful; only DAT_005914d7 toggle not plumbed (kept enabled)"
 0x0046EDE0,NovaEffects_ClearAmbientStarParticles,src/game/spaceflight_view.cpp,70%,cleared when system murk<0 via SpawnAmbientStars path
-0x0046EE50,NovaEffects_UpdateAmbientStarParticles,src/game/spaceflight_view.cpp,85%,"per-frame delta integration + drift threshold (0.0f, DAT_005757d8) faithful (UpdateAmbientStars); sign verified against caller (prev-cur)"
+0x0046EE50,NovaEffects_UpdateAmbientStarParticles,src/game/spaceflight_view.cpp,85%,"per-frame delta integration + drift threshold (0.0f, DAT_005757d8) faithful (UpdateAmbientStars, routed through unified SpaceflightView::AdvanceAnimations per-frame pass); sign verified against caller (prev-cur)"
 0x0046EEB0,PascalString_Copy,,0%,
 0x0046EF00,CString_Equals,,0%,
 0x0046EF80,NovaUi_HideTravelSelectionSprite,,0%,
@@ -574,29 +574,29 @@ address,name,impl_file,reimpl_pct,comment
 0x00474300,NovaSetup_FreeIndexedSpriteLookupBanks,,0%,
 0x00474350,FUN_00474350,,0%,
 0x00474410,FUN_00474410,,0%,
-0x004744A0,Sprite_Create,,0%,
+0x004744A0,Sprite_Create,src/game/sprite_world.cpp,60%,"Sprite object model (empty frame set + current frame index) mirrored by game::Sprite; Sprite_AddFrame/Release/SetCurrentFrame/TheFrame implement the frame-array ownership and clamps; creation resets runtime state; the original's error slots and update/draw callback slots are not populated"
 0x00474720,Sprite_InitOrAllocate,,0%,
 0x00474970,Sprite_CreateFromSequentialFrameResources,,0%,
-0x00474AB0,Sprite_CreateFromSpriteSheetResources,src/game/sprite_world.cpp,20%,"SpriteAsset::LoadSpin implements the tile-grid frame-set construction (parse sp.x9an descriptor, decode named rl.x91D sheet into per-tile frames, upload textures) consumed by the spin store (stellars +1000, weapon shots +3000, star field 700); the Sprite object model, DrawContext creation, frame refcounting and render/present plumbing are not reconstructed"
+0x00474AB0,Sprite_CreateFromSpriteSheetResources,src/game/sprite_world.cpp,25%,"SpriteAsset::LoadSpin implements the tile-grid frame-set construction (parse sp.x9an descriptor, decode named rl.x91D sheet into per-tile frames, upload textures, per-frame centre anchors) consumed by the spin store (stellars +1000, weapon shots +3000, star field 700); frames are assignable onto a live Sprite via Sprite_AssignAsset (Sprite_CreateFromSpriteSheetResources -> Sprite_AssignSpriteSet opening); DrawContext creation and render/present plumbing not reconstructed"
 0x00474E90,Sprite_CreateFromMultiFrameResource,src/rle_sprite_sheet.cpp,100%,Sprite_CreateFromMultiFrameResource rl\x91D decode
 0x00475050,Sprite_Clone,,0%,
 0x00475470,FUN_00475470,,0%,
 0x004754A0,FUN_004754a0,,0%,
 0x00475550,Sprite_PrepareFramesAndAttachResourceData,,0%,
 0x004756C0,Sprite_ReleasePreparedFramesAndDetachResourceData,,0%,
-0x00475740,Sprite_AddFrame,,0%,
+0x00475740,Sprite_AddFrame,src/game/sprite_world.cpp,80%,"Sprite::AddFrame appends a reference-counted SpriteFrameImage to the sprite's frame list (shared_ptr refcount), returning the new index or -1 on null; frame capacity growth mirrors Sprite_AddFrame's array growth"
 0x00475800,FUN_00475800,,0%,
 0x00475830,Sprite_SetCurrentFrame,,0%,
 0x00475940,Sprite_SetUpdateCallback,,0%,
 0x00475970,Sprite_SetDrawProcValidated,,0%,
 0x00475A60,Sprite_SetFrameRange,,0%,
-0x00475AF0,Sprite_SetPositionFromCurrentFrameAnchor,,0%,
+0x00475AF0,Sprite_SetPositionFromCurrentFrameAnchor,src/game/sprite_world.cpp,70%,"per-frame anchor alignment reimplemented: SpriteAnchorTransform/Sprite_AnchorToScreen computes the top-left given the frame-local anchor and DrawSprite aligns the frame's stored anchor (or Sprite_DrawOptions.anchor_* override, e.g. a shot's gun-fire point) to the world position, matching Sprite_SetPositionFromCurrentFrameAnchor placing the anchor on the world point; anchor data is stored per frame (Ghidra SpriteFrame +0x2a/+0x2c, centre for tile/sheet sets); Sprite::SetPositionFromCurrentFrameAnchor records the located position"
 0x00475B80,Sprite_SetVisible,,0%,
 0x00475BE0,Sprite_TestBoundingCircleOverlap,,0%,
 0x00475C80,Sprite_TestPixelMaskOverlap,,0%,
 0x00475E20,Sprite_TestOpaquePixelAtPoint,,0%,
 0x00475EC0,Sprite_IsRectInsideCurrentFrameInsetBounds,,0%,
-0x00475F70,Sprite_AssignSpriteSet,,0%,
+0x00475F70,Sprite_AssignSpriteSet,src/game/sprite_world.cpp,55%,"Sprite_AssignAsset binds a SpriteAsset's frames onto a live Sprite as reference-counted frame images retaining the shared set (keeps the SDL textures alive); replaces the prior frame set like Sprite_AssignSpriteSet rebinding; per-sprite world placement/sprite-set table still not reconstructed"
 0x004760C0,Sprite_CompileFrames,,0%,
 0x00476400,SpriteFrame_CreateFromRect,,0%,
 0x004765D0,SpriteFrame_CreateFromSpriteRect,,0%,
@@ -604,7 +604,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004769D0,FUN_004769d0,,0%,
 0x004769E0,FUN_004769e0,,0%,
 0x004769F0,FUN_004769f0,,0%,
-0x00476BD0,Sprite_Release,,0%,
+0x00476BD0,Sprite_Release,src/game/sprite_world.cpp,80%,"Sprite::Release clears the frame set, dropping each frame image's refcount (shared_ptr frees the SDL handle at zero); mirrors Sprite_Release releasing the frame refs at teardown"
 0x00476C70,Sprite_Destroy,,0%,
 0x00476CB0,FUN_00476cb0,,0%,
 0x00476D10,SpriteFrame_RebuildRowOffsets,,0%,

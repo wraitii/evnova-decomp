@@ -110,8 +110,7 @@ void DrawInGameFrame(SdlPlatform &platform,
   // Weapon readout: the current primary bank's name + ammo state. The Shuttle
   // mounts a single Light Blaster in bank 0 (weapon_bank_ammo[0] = 1).
   const std::string wpn = NovaWeapon_BankDisplayName(state, 0);
-  const std::string wpnline =
-      "WPN " + wpn + "   [space] FIRE";
+  const std::string wpnline = "WPN " + wpn + "   [space] FIRE";
   SDL_RenderDebugText(renderer, 330.0F, 410.0F, wpnline.c_str());
 
   // Target readout: the auto-targeted travel/land stellar and a landing hint.
@@ -201,8 +200,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     NovaPlayer_UpdateFromInput(state, input);
     // Advance the player's fired shots/cooldowns from the previous frame, then
     // handle this frame's fire input. Mirrors Ship_HandlePlayerShipControl
-    // firing the primary bank(s) while the fire command is held.
-    NovaWeapon_TickShots(state);
+    // firing the primary bank(s) while the fire command is held. frame_time_ms
+    // feeds the time-animated shot-frame cadence (Shot_HandleShot's animated
+    // branch); static/heading shot sets ignore it.
+    NovaWeapon_TickShots(state, frame_time_ms);
     if (input.fire) {
       NovaWeapon_FirePlayerPrimary(state);
     }
@@ -249,12 +250,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     const float delta_y = state.player.pos_y - prev_y;
     prev_x = state.player.pos_x;
     prev_y = state.player.pos_y;
-    // Ghidra NovaEffects_UpdateAmbientStarParticles(fVar1, fVar4) advances the
-    // starfield by the ship's movement delta (frames not frozen).
-    view.UpdateAmbientStars(delta_x, delta_y);
-    // Ghidra Stellar_UpdateStellarSprites advances each animated stellar one
-    // animation step each frame.
-    view.AdvanceStellarAnimation(platform, state, frame_time_ms);
+    // Unified per-frame world animation pass: advances the ambient starfield by
+    // the ship's movement delta (NovaEffects_UpdateAmbientStarParticles) and
+    // steps each animated stellar one animation segment (Stellar_UpdateStellar-
+    // Sprites), both on the single frame_time_ms cadence (see the header).
+    view.AdvanceAnimations(platform, state, frame_time_ms, delta_x, delta_y);
     // Re-derive stellar availability for the current system each tick (scope 3
     // of System_UpdateSystemAndStellarDisplayState). This keeps stellar
     // is_available / hazard state in step as the player moves between systems.

@@ -63,10 +63,14 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
 void NovaWeapon_FirePlayerPrimary(GameState &state);
 
 // Per-frame shot + cooldown bookkeeping for the firing path. Advances each
-// active shot by its velocity and counts down its remaining life (removing
-// expired rounds), and decrements every weapon-bank cooldown toward zero.
+// active shot by its velocity, counts down its remaining life, and steps the
+// time-animated shot-frame cycle (frame_cycle_index / anim_elapsed at the
+// weapon's shot_anim_frame_dwell cadence, mirroring Shot_HandleShot's animated
+// branch), then removes expired rounds and decrements every weapon-bank
+// cooldown toward zero. `frame_time_ms` is the real elapsed frame time used to
+// accumulate the animated-short dwell (ignored for static/heading shot sets).
 // Called once per spaceflight frame for the player's shots.
-void NovaWeapon_TickShots(GameState &state);
+void NovaWeapon_TickShots(GameState &state, float frame_time_ms = 1.0F);
 
 // Diagnostic: the human-readable weapon name of the given bank's weapon, or
 // "?" when the bank is unmounted/invalid. Used by the HUD weapon readout.

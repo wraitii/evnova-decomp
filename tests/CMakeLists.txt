@@ -2,6 +2,7 @@ add_executable(evnova_tests
     landed_window_test.cpp
     scenario_data_test.cpp
     smoke_test.cpp
+    sprite_test.cpp
     weapon_test.cpp
 )
 
