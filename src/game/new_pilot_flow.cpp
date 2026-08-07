@@ -7,6 +7,7 @@
 #include "outfit.hpp"
 #include "pilot_file.hpp"
 #include "travel.hpp"
+#include "weapon.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -237,6 +238,38 @@ void Stub_SeedStartingInventory(GameState &state) {
     state.inventory.outfit_owned_count[index] =
         static_cast<std::int16_t>(ship->default_outfit_counts[i]);
   }
+  // Seed the weapon banks from the starting ship class's stock weapons,
+  // mirroring Menu_RunNewGameFlow: for each stock weapon triple
+  // {weapon_id, count, ammo_load} the mounted-count goes into
+  // weapon_bank_ammo[weapon_id-0x80] and any carried rounds (ammo_load, when
+  // > 0) into the matching secondary/ammo counter. The starter Shuttle's
+  // single Light Blaster ({0x80, 1, -1}: 1 mounted, unlimited ammo) thereby
+  // lands in bank 0 with weapon_bank_ammo[0] = 1 > 0, so the primary-fire
+  // loop (NovaWeapon_FirePlayerPrimary) can fire it. The stock_weapons decode
+  // and the loader's default_weapon_ammo/secondary mapping are verified in
+  // tests/scenario_data_test.cpp.
+  for (const ShipDefaultWeaponBank &stock : ship->stock_weapons) {
+    if (stock.weapon_id < 0x80 || stock.weapon_id > 0x17f) {
+      continue; // unmounted bank (weapon_id -1) or out-of-range
+    }
+    const std::size_t bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
+    state.weapon_bank_ammo[bank * 100] =
+        static_cast<std::int16_t>(stock.count > 0 ? stock.count : 0);
+    // Carried rounds: only relevant for ammunition-backed weapons (the bank's
+    // weapon must actually consume ammo for this to gate firing); the stock
+    // ship stores ammo_load (-1 = unlimited) in the same counter used for
+    // the ammo-outfit id elsewhere, so a >0 value here is the starting load.
+    if (stock.ammo_load > 0) {
+      const std::size_t ammo_bank =
+          static_cast<std::size_t>(stock.weapon_id - 0x80);
+      state.weapon_bank_secondary[ammo_bank * 100] =
+          static_cast<std::int16_t>(stock.ammo_load);
+    }
+  }
+  // Reset any lingering per-bank cooldown so a fresh pilot can fire
+  // immediately on entering spaceflight.
+  state.weapon_bank_cooldown.fill(0.0F);
+  state.active_shots.clear();
   // ResetPlayerShipForNewGame calculated capacities before this inventory was
   // seeded. Recompute now so the new pilot starts with installed bonuses.
   OutfitMarkStatsDirty(state);
@@ -457,6 +490,13 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
     record.intro_duration_60h_ticks = {10, 0, 0, 0};
   }
   record.post_intro_dest_id = 0x7ffd;
+
+  // Carry the weapon banks seeded in Step 4 (from the starting ship's stock
+  // weapons) into the record, otherwise PilotFileApply below copies a fresh
+  // record whose banks are all zero and clobbers the seeded Light Blaster
+  // bank 0, so nothing could ever fire.
+  record.weapon_bank_ammo = state.weapon_bank_ammo;
+  record.weapon_bank_secondary = state.weapon_bank_secondary;
 
   // Copy the assembled record into the live state (mirroring the block-to-
   // global copy IntroCinematic_SetupFrames/PilotData_InitializePlayerState

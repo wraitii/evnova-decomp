@@ -186,6 +186,13 @@ private:
   // Draws the current system's stellar bodies (planets/stations) at their
   // world positions relative to the player camera.
   void DrawStellarBodies(SdlPlatform &platform, const GameState &state);
+
+  // Draws the player's in-flight active shots (GameState.active_shots) at
+  // their world positions relative to the ship, using the same camera
+  // transform as the stars/stellars. The light blaster's projectile is drawn
+  // as a small bright dot (TODO(decomp): mount the shot's spin sprite set once
+  // the shot sprite cache is reconstructed).
+  void DrawShots(SdlPlatform &platform, const GameState &state);
 };
 
 } // namespace game

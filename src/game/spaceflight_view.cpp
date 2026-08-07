@@ -646,10 +646,41 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
   }
 }
 
+void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
+  SDL_Renderer *const renderer = platform.renderer();
+  if (state.active_shots.empty()) {
+    return;
+  }
+  const Viewport vp = CurrentViewport(platform);
+  // The light blaster's projectile is a small bright bolt. Drawn as a filled
+  // dot at each shot's world position (same camera transform as the stars and
+  // stellars), including the one-exit wraparound for the extending window so a
+  // shot leaving the right edge reappears on the left. TODO(decomp): mount the
+  // shot's real sprite (Weapon.sprite_id spin sheet) once the shot sprite
+  // cache is reconstructed.
+  SDL_SetRenderDrawColor(renderer, 255, 180, 64, SDL_ALPHA_OPAQUE);
+  for (const auto &s : state.active_shots) {
+    float sx = (s.pos_x - state.player.pos_x) + vp.w / 2;
+    float sy = (s.pos_y - state.player.pos_y) + vp.h / 2;
+    sx = std::fmod(sx, static_cast<float>(vp.w));
+    sy = std::fmod(sy, static_cast<float>(vp.h));
+    if (sx < 0.0F) {
+      sx += static_cast<float>(vp.w);
+    }
+    if (sy < 0.0F) {
+      sy += static_cast<float>(vp.h);
+    }
+    const float radius = 2.0F;
+    const SDL_FRect rect{sx - radius, sy - radius, radius * 2.0F, radius * 2.0F};
+    SDL_RenderFillRect(renderer, &rect);
+  }
+}
+
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
   DrawBackground(platform, state);
   DrawStellarBodies(platform, state);
+  DrawShots(platform, state);
 
   // Player ship at the play-area centre, frame selected by heading.
   if (!ship_.frames.empty() && ship_.frames_per_rotation > 0) {

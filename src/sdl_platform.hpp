@@ -39,6 +39,11 @@ struct FlightInput {
   bool turn_right = false; // right / 'd'
   bool thrust = false;     // up / 'w' (accelerate toward heading)
   bool brake = false;      // down / 's' (decelerate)
+  // Primary fire: space (hold to keep firing the player's main weapon bank).
+  // Stand-in for the original's primary-fire input command; the Ghost map is
+  // not reconstructed, so this build binds the logical primary-fire command to
+  // the space bar (documented divergence).
+  bool fire = false;
   // Edge-triggered travel engage: 'j' (hyperspace jump toward the nearest
   // available travel point). The original uses a separate travel command
   // channel; this build maps it to a dedicated key so it is distinct from the

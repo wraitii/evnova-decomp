@@ -9,6 +9,7 @@
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
+#include "weapon.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -106,6 +107,13 @@ void DrawInGameFrame(SdlPlatform &platform,
       std::to_string(static_cast<int>(state.player.pos_y));
   SDL_RenderDebugText(renderer, 30.0F, 444.0F, sysline.c_str());
 
+  // Weapon readout: the current primary bank's name + ammo state. The Shuttle
+  // mounts a single Light Blaster in bank 0 (weapon_bank_ammo[0] = 1).
+  const std::string wpn = NovaWeapon_BankDisplayName(state, 0);
+  const std::string wpnline =
+      "WPN " + wpn + "   [space] FIRE";
+  SDL_RenderDebugText(renderer, 330.0F, 410.0F, wpnline.c_str());
+
   // Target readout: the auto-targeted travel/land stellar and a landing hint.
   const auto *cur = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
@@ -191,6 +199,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // travel/jump channel. Movement integrates into PlayerShip.
     const FlightInput input = platform.PollFlightInput();
     NovaPlayer_UpdateFromInput(state, input);
+    // Advance the player's fired shots/cooldowns from the previous frame, then
+    // handle this frame's fire input. Mirrors Ship_HandlePlayerShipControl
+    // firing the primary bank(s) while the fire command is held.
+    NovaWeapon_TickShots(state);
+    if (input.fire) {
+      NovaWeapon_FirePlayerPrimary(state);
+    }
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
     // 'j' key near an available travel point, then tick the countdown.
     NovaTravel_Tick(state, input.travel, frame_time_ms);

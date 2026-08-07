@@ -13,6 +13,7 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <vector>
 
 #include "scenario_data.hpp"
 
@@ -163,6 +164,22 @@ struct PlayerInventory {
   std::array<std::int16_t, 0x80> junk_counts{};
 };
 
+// A single fired round (clean-room stand-in for one Ghidra ShotState).
+// TODO(decomp): once Shot_SpawnShotFromWeapon and the shot sprite-world are
+// reconstructed this moves onto the real shot records; here it only carries the
+// physics/visual fields the basic firing path consumes.
+struct ActiveShot {
+  // Which weapon fired this round (zero-based weapon id; used as the bank
+  // slot and to look up the WeaponDef stats for drawing/lifetime).
+  std::int16_t weapon_id = -1;
+  float pos_x = 0.0F; // world x
+  float pos_y = 0.0F; // world y
+  float vel_x = 0.0F; // px/frame
+  float vel_y = 0.0F;
+  // Remaining lifetime in reference-cadence frames (WeaponDef Count).
+  int life_frames = 0;
+};
+
 // Everything about the running pilot's world. Replaces the Game_Reset* set of
 // globals for the transient not-yet-reconstructed subsystems with explicit
 // flags so we can log exactly what is and is not preserved.
@@ -202,6 +219,23 @@ struct GameState {
   // The original stores 0x100 weapon banks with a 100-element stride.
   std::array<std::int16_t, 0x100 * 100> weapon_bank_ammo{};
   std::array<std::int16_t, 0x100 * 100> weapon_bank_secondary{};
+  // Per-weapon-bank cooldown, in reference-cadence ticks remaining before the
+  // bank may fire again (Ghidra ShipState.weapon_bank_cooldown_0, a float per
+  // bank). Mirrors the original: after firing, the bank's cooldown is set to
+  // the weapon's reload/cooldown value and counts down each frame; the firing
+  // routine only fires banks whose cooldown has elapsed. Indices are the
+  // zero-based weapon id (bank slot).
+  std::array<float, 0x100> weapon_bank_cooldown{};
+
+  // Lightweight ground-truth of fired shots (projectiles / beams) in flight,
+  // reconstructed for the player's primary weapon. The original keeps these in
+  // the ShotState swath (g_shot_states) with full sprite/guidance/collision
+  // bookkeeping (Shot_SpawnShotFromWeapon 0x0041fd30); this clean-room model
+  // carries only the fields the firing + flight renderer need so far, and the
+  // projectile is drawn as a simple sprite placeholder (TODO(decomp): mount
+  // the shot's spin sprite and the per-vehicle sprite caches).
+  // Each entry is one fired round at a given world position/velocity.
+  std::vector<ActiveShot> active_shots;
 };
 
 } // namespace game

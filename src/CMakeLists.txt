@@ -26,6 +26,7 @@ add_library(evnova_runtime
     game/ship_visual.cpp
     game/targeting.cpp
     game/travel.cpp
+    game/weapon.cpp
     log.cpp
     nova_app.cpp
     pict_image.cpp
