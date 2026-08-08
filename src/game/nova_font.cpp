@@ -5,7 +5,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <filesystem>
 
 namespace game {
@@ -80,6 +82,17 @@ std::string FindFirstExisting(const char *const *candidates) {
     }
   }
   return {};
+}
+
+// Keep the cache key stable while allowing fractional logical-presentation
+// scales. One 64th of a point is far below a physical pixel at UI sizes, but
+// prevents every tiny resize delta from creating a distinct font handle.
+float QuantizedRasterScale(const SdlPlatform &platform, float point_size) {
+  const float logical_size = point_size > 0.0F ? point_size : kDefaultPointSize;
+  const float requested_size =
+      logical_size * std::max(1.0F, platform.text_raster_scale());
+  const float raster_size = std::round(requested_size * 64.0F) / 64.0F;
+  return raster_size / logical_size;
 }
 
 } // namespace
@@ -159,8 +172,8 @@ TTF_Font *NovaFontCache::Font(NovaFontFamily family,
     return nullptr;
   }
 
-  // SDL_ttf sizes fonts in points in the logical UI space; the frame's SDL
-  // logical presentation scales the finished texture to the window.
+  // This size is the concrete raster size requested by the caller. Text draw
+  // calls multiply their logical size by the current output density first.
   TTF_Font *font = TTF_OpenFont(file.c_str(), point_size);
   if (font == nullptr) {
     NovaLog::Warn("font family {} failed to open '{}': {}",
@@ -204,10 +217,11 @@ int NovaFontCache::TextWidth(NovaFontFamily family,
 // ---------------------------------------------------------------------------
 // Text drawing
 // ---------------------------------------------------------------------------
-// Draws one string: rasterise the glyphs with SDL3_ttf (fast "solid" mode,
-// matching the original's single-ink-colour palette rendering), upload the
-// resulting 8-bit surface to a texture, and blit it so the baseline lands at
-// the requested logical y. This mirrors FUN_004bc760's baseline model.
+// Draws one string: rasterise the glyphs with SDL3_ttf, upload the resulting
+// surface to a texture, and blit it so the baseline lands at the requested
+// logical y. The original uses DrawTextW with a transparent background, whose
+// antialiased coverage is matched by SDL_ttf's blended renderer. This mirrors
+// FUN_004bc760's baseline model.
 void NovaText_Draw(SdlPlatform &platform,
                    NovaFontCache &cache,
                    NovaFontFamily family,
@@ -217,20 +231,22 @@ void NovaText_Draw(SdlPlatform &platform,
                    float baseline_x,
                    float baseline_y,
                    std::string_view text) {
-  TTF_Font *font = cache.Font(family, point_size, style);
-  if (font == nullptr || text.empty()) {
+  if (text.empty()) {
+    return;
+  }
+  const float logical_size = point_size > 0.0F ? point_size : kDefaultPointSize;
+  const float raster_scale = QuantizedRasterScale(platform, point_size);
+  TTF_Font *font = cache.Font(family, logical_size * raster_scale, style);
+  if (font == nullptr) {
     return;
   }
   std::string buf(text);
   SDL_Surface *surface =
-      TTF_RenderText_Solid(font, buf.c_str(), buf.size(), color);
+      TTF_RenderText_Blended(font, buf.c_str(), buf.size(), color);
   if (surface == nullptr) {
     NovaLog::Warn("text '{}' failed to render: {}", buf, SDL_GetError());
     return;
   }
-  // The solid surface uses pixel 0 as a transparent colorkey; mark it so the
-  // texture carries a clear background, then blend the glyphs onto the frame.
-  SDL_SetSurfaceColorKey(surface, true, 0);
   SDL_Texture *texture =
       SDL_CreateTextureFromSurface(platform.renderer(), surface);
   SDL_DestroySurface(surface);
@@ -245,7 +261,10 @@ void NovaText_Draw(SdlPlatform &platform,
   // Place the surface so its baseline (ascent from the top of the glyph
   // surface) sits at baseline_y, matching the original's cursor-as-baseline.
   const float ascent = static_cast<float>(TTF_GetFontAscent(font));
-  const SDL_FRect dst{baseline_x, baseline_y - ascent, w, h};
+  const SDL_FRect dst{baseline_x,
+                      baseline_y - ascent / raster_scale,
+                      w / raster_scale,
+                      h / raster_scale};
   SDL_RenderTexture(platform.renderer(), texture, nullptr, &dst);
   SDL_DestroyTexture(texture);
 }
@@ -260,7 +279,16 @@ void NovaText_DrawCentered(SdlPlatform &platform,
                            float x_right,
                            float baseline_y,
                            std::string_view text) {
-  const int width = cache.TextWidth(family, point_size, style, text);
+  const float raster_scale = QuantizedRasterScale(platform, point_size);
+  const float logical_size = point_size > 0.0F ? point_size : kDefaultPointSize;
+  TTF_Font *font = cache.Font(family, logical_size * raster_scale, style);
+  int raster_width = 0;
+  if (font != nullptr && !text.empty()) {
+    const std::string buf(text);
+    (void)TTF_GetStringSize(
+        font, buf.c_str(), buf.size(), &raster_width, nullptr);
+  }
+  const float width = static_cast<float>(raster_width) / raster_scale;
   const float center = (x_left + x_right) / 2.0F;
   NovaText_Draw(platform,
                 cache,
@@ -268,7 +296,7 @@ void NovaText_DrawCentered(SdlPlatform &platform,
                 point_size,
                 style,
                 color,
-                center - static_cast<float>(width) / 2.0F,
+                center - width / 2.0F,
                 baseline_y,
                 text);
 }

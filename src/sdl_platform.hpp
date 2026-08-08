@@ -115,11 +115,16 @@ public:
   // SetCenteredPlayfield / SetScaledPlayfield / SetFullscreenPlayfield.
   enum class Presentation { kCentered, kScaled, kFullscreen };
 
-  // The full window pixel size in the current presentation (logical draw
-  // coordinates). World/spaceflight drawing queries this to extend to the
+  // The full window size in logical draw coordinates. World/spaceflight
+  // drawing queries this to extend to the
   // (possibly larger) window; it is independent of whether fixed screens are
   // being upscaled or bordered.
   [[nodiscard]] SDL_FPoint logical_playfield_size() const;
+
+  // Physical output pixels occupied by one current render-coordinate unit.
+  // Text uses this to rasterize at the destination resolution, then draws the
+  // resulting texture at its unchanged logical size.
+  [[nodiscard]] float text_raster_scale() const;
 
   // Resolution-extension helpers. The game renders onto a logical 640x480
   // content canvas (the original's 1024x768 surface scaled to its window); the
@@ -131,11 +136,11 @@ public:
   //    logical presentation. This is the "scale a few things up" default; at
   //    the 1024x768 minimum it is ~1:1 with the 1024-native art.
   //  * SetCenteredPlayfield()-- the docked/landed screen stays at native 1:1
-  //    size, centred in the window with black bars on every side (never
-  //    upscaled). Clipped via SDL_SetRenderViewport.
+  //    size, centred in the window with black bars on every side. Retina
+  //    backing pixels increase detail without changing its physical size.
   //  * SetFullscreenPlayfield() -- the free-flight world spans the whole
-  //    window 1:1 (no clipping / logical size) so larger windows show more of
-  //    the system; HUD chrome stays at fixed, unscaled logical coordinates.
+  //    window in window-coordinate units (no clipping / fixed logical size),
+  //    so larger windows show more of the system; HUD chrome stays fixed.
   //
   // SDL_RenderCoordinatesFromWindow reports the mouse in content coordinates
   // (viewport-relative / through the logical rect) when the corresponding
@@ -151,6 +156,8 @@ private:
   void ApplyCenteredPresentation();
   void ApplyScaledPresentation();
   void ApplyFullscreenPresentation();
+
+  [[nodiscard]] float WindowPixelDensity() const;
 
   struct WindowDeleter {
     void operator()(SDL_Window *window) const;

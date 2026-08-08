@@ -71,13 +71,14 @@ bool SdlPlatform::Initialize() {
   SDL_SetAppMetadata("Escape Velocity Nova", "0.1.0", "com.ambrosiasw.evnova");
   // Minimum window: 1024x768 (the user-facing baseline resolution, matching
   // the game's native 1024x768 canvas). The window opens at that minimum and
-  // stays resizable so larger windows show more of the system in flight; the
-  // renderer is 1:1 (no SDL logical presentation) and each screen picks its
+  // stays resizable so larger windows show more of the system in flight. A
+  // high-density backing buffer keeps text sharp while each screen picks its
   // own presentation policy per frame (see the *Presentation helpers).
-  window_.reset(SDL_CreateWindow("Escape Velocity Nova",
-                                 kMinimumWindowWidth,
-                                 kMinimumWindowHeight,
-                                 SDL_WINDOW_RESIZABLE));
+  window_.reset(
+      SDL_CreateWindow("Escape Velocity Nova",
+                       kMinimumWindowWidth,
+                       kMinimumWindowHeight,
+                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY));
   if (!window_) {
     NovaLog::Error("SDL window creation failed: {}", SDL_GetError());
     return false;
@@ -101,13 +102,15 @@ SDL_Renderer *SdlPlatform::renderer() const { return renderer_.get(); }
 
 void SdlPlatform::ApplyFullscreenPresentation() {
   // Extending free-flight world / fullscreen splash: 1 logical unit = 1
-  // physical pixel, no clipping. The world spans the whole window and larger
-  // windows show more of the system; the HUD overlays stay at fixed logical
-  // coordinates.
+  // window-coordinate point, no clipping. On a high-density display the
+  // renderer scale maps that unit to the backing pixels without changing how
+  // much world fits in the window.
   presentation_ = Presentation::kFullscreen;
   SDL_SetRenderLogicalPresentation(
       renderer_.get(), 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
   SDL_SetRenderViewport(renderer_.get(), nullptr);
+  const float density = WindowPixelDensity();
+  SDL_SetRenderScale(renderer_.get(), density, density);
 }
 
 void SdlPlatform::ApplyScaledPresentation() {
@@ -115,6 +118,7 @@ void SdlPlatform::ApplyScaledPresentation() {
   // content canvas to fill the window (letterboxing the 4:3 aspect). At the
   // 1024x768 minimum this reads back at the native art resolution.
   presentation_ = Presentation::kScaled;
+  SDL_SetRenderScale(renderer_.get(), 1.0F, 1.0F);
   SDL_SetRenderViewport(renderer_.get(), nullptr);
   SDL_SetRenderLogicalPresentation(renderer_.get(),
                                    kPlayfieldWidth,
@@ -123,18 +127,24 @@ void SdlPlatform::ApplyScaledPresentation() {
 }
 
 void SdlPlatform::ApplyCenteredPresentation() {
-  // Docked/landed screen: native 1:1 size, centred in the window with black
-  // bars on every side (never upscaled). Clip draws to the centred 640x480
-  // rect; SDL_RenderCoordinatesFromWindow (used to fill mouse_position_)
-  // subtracts the viewport origin, so hit-tests see playfield coordinates.
+  // Docked/landed screen: native 1:1 window-coordinate size, centred in the
+  // window with black bars on every side. A high-density backing buffer gives
+  // each logical unit multiple physical pixels without making the panel
+  // physically larger.
   presentation_ = Presentation::kCentered;
   SDL_SetRenderLogicalPresentation(
       renderer_.get(), 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+  const float density = WindowPixelDensity();
+  SDL_SetRenderScale(renderer_.get(), density, density);
   int w = kPlayfieldWidth;
   int h = kPlayfieldHeight;
-  SDL_GetRenderOutputSize(renderer_.get(), &w, &h);
-  const int ox = std::max(0, (w - kPlayfieldWidth)) / 2;
-  const int oy = std::max(0, (h - kPlayfieldHeight)) / 2;
+  SDL_GetWindowSize(window_.get(), &w, &h);
+  // SDL applies the render scale to the viewport as well as draw coordinates,
+  // so the viewport must stay in logical/window units. Supplying backing-pixel
+  // dimensions here would multiply both its offset and extent by density a
+  // second time.
+  const int ox = std::max(0, w - kPlayfieldWidth) / 2;
+  const int oy = std::max(0, h - kPlayfieldHeight) / 2;
   const SDL_Rect viewport{ox, oy, kPlayfieldWidth, kPlayfieldHeight};
   SDL_SetRenderViewport(renderer_.get(), &viewport);
 }
@@ -146,15 +156,44 @@ void SdlPlatform::SetScaledPlayfield() { ApplyScaledPresentation(); }
 void SdlPlatform::SetCenteredPlayfield() { ApplyCenteredPresentation(); }
 
 SDL_FPoint SdlPlatform::logical_playfield_size() const {
-  // The extending world always tracks the window pixel size in 1:1 draws.
+  // The extending world tracks the window-coordinate size. The renderer scale
+  // maps these coordinates to the high-density backing pixels.
   // (Fixed screens do not query this; they draw in the 640x480 content canvas
   // through their own presentation.)
   int w = kPlayfieldWidth;
   int h = kPlayfieldHeight;
-  if (renderer_) {
-    SDL_GetRenderOutputSize(renderer_.get(), &w, &h);
+  if (window_) {
+    SDL_GetWindowSize(window_.get(), &w, &h);
   }
   return {static_cast<float>(w), static_cast<float>(h)};
+}
+
+float SdlPlatform::WindowPixelDensity() const {
+  if (!window_) {
+    return 1.0F;
+  }
+  const float density = SDL_GetWindowPixelDensity(window_.get());
+  return density > 0.0F ? density : 1.0F;
+}
+
+float SdlPlatform::text_raster_scale() const {
+  if (!renderer_) {
+    return 1.0F;
+  }
+  if (presentation_ != Presentation::kScaled) {
+    return WindowPixelDensity();
+  }
+
+  int output_width = kPlayfieldWidth;
+  int output_height = kPlayfieldHeight;
+  if (!SDL_GetRenderOutputSize(
+          renderer_.get(), &output_width, &output_height)) {
+    return WindowPixelDensity();
+  }
+  return std::max(
+      1.0F,
+      std::min(static_cast<float>(output_width) / kPlayfieldWidth,
+               static_cast<float>(output_height) / kPlayfieldHeight));
 }
 
 std::optional<TextInput> SdlPlatform::PollTextEvent() {

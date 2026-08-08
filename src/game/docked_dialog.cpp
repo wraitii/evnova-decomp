@@ -40,7 +40,7 @@ constexpr SDL_Color kScrim{0, 0, 0, 150};
 
 // Colours for the dialog heading/leave labels, matching the docked menu's
 // palette (bright rows for the title, dim rows for the helper text).
-constexpr SDL_Color kTitle{202, 224, 255, 255};
+constexpr SDL_Color kTitle{255, 255, 255, 255};
 constexpr SDL_Color kDim{128, 170, 210, 255};
 
 // The heading / leave-button label for each sub-window. Kept close to the
@@ -273,6 +273,28 @@ struct StoreLayout {
           55.0F};
 }
 
+struct StoreLabelLines {
+  std::string_view first;
+  std::string_view second;
+};
+
+// NovaText_SplitPascalStringAtNewline is used by both original store redraw
+// routines. Scenario short names encode the separator as the two characters
+// "\\n" (not an embedded LF), for example "Light Blaster\\nTurret".
+[[nodiscard]] StoreLabelLines SplitStoreLabel(std::string_view label) {
+  std::size_t separator = label.find("\\n");
+  std::size_t separator_width = 2;
+  if (separator == std::string_view::npos) {
+    separator = label.find('\n');
+    separator_width = 1;
+  }
+  if (separator == std::string_view::npos) {
+    return {label, {}};
+  }
+  return {label.substr(0, separator),
+          label.substr(separator + separator_width)};
+}
+
 void DrawStoreBase(SdlPlatform &platform,
                    SDL_Texture *backdrop,
                    SDL_Texture *frame,
@@ -370,7 +392,7 @@ void DrawStoreContents(SdlPlatform &platform,
                        StoreTextureCache &texture_cache,
                        SDL_Texture *selected_image,
                        std::string_view selected_description) {
-  constexpr SDL_Color kText{202, 224, 255, 255};
+  constexpr SDL_Color kText{255, 255, 255, 255};
   constexpr SDL_Color kMuted{128, 170, 210, 255};
   const bool outfit_store = session.kind == LandedStoreKind::kOutfitter;
   SDL_Renderer *renderer = platform.renderer();
@@ -396,6 +418,12 @@ void DrawStoreContents(SdlPlatform &platform,
     const std::string_view name =
         outfit_store ? std::string_view{state.scenario.Outfit(id)->short_name}
                      : std::string_view{state.scenario.Ship(id)->short_name};
+    const StoreLabelLines label = SplitStoreLabel(name);
+    // NovaUi_RedrawTravelOutfitMenu (0x00490c70) and
+    // NovaUi_DrawShipyardShipList (0x004948b0) place a single line at
+    // bottom-6, or split labels at bottom-14 and bottom-3.
+    const float first_baseline =
+        rect.y + (label.second.empty() ? 49.0F : 41.0F);
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
@@ -404,8 +432,20 @@ void DrawStoreContents(SdlPlatform &platform,
                           kText,
                           rect.x + 2.0F,
                           rect.x + rect.w - 2.0F,
-                          rect.y + 48.0F,
-                          name);
+                          first_baseline,
+                          label.first);
+    if (!label.second.empty()) {
+      NovaText_DrawCentered(platform,
+                            font_cache,
+                            NovaFontFamily::kGeneva,
+                            10.0F,
+                            kNovaFontStyleRegular,
+                            kText,
+                            rect.x + 2.0F,
+                            rect.x + rect.w - 2.0F,
+                            rect.y + 52.0F,
+                            label.second);
+    }
     if (outfit_store) {
       const std::int16_t count = state.inventory.outfit_owned_count[id - 0x80];
       NovaText_DrawCentered(platform,

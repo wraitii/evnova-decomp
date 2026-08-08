@@ -750,7 +750,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0048EA70,NovaUi_RunTravelOutfitInteractionLoop,src/game/docked_dialog.cpp,38%,Partial clean-room modal: native 765x321 frame and DITL-aligned 4x5 grid/action controls; row paging; one-item buy/sell; inventory mutation and exit cleanup. Quantity modifiers and remaining transaction/script branches remain TODO(decomp).
 0x004903C0,NovaUi_HandleTravelOutfitMenuInput,src/game/docked_dialog.cpp,25%,Mouse grid/action handling plus B/S/P/N/L shortcuts drive selection buy sell paging and exit; original command-map navigation and quantity modifiers remain TODO(decomp).
 0x004909A0,TravelOutfitMenu_FUN_004909a0,,0%,
-0x00490C70,NovaUi_RedrawTravelOutfitMenu,src/game/docked_dialog.cpp,48%,Partial clean-room redraw using native PICT 0x2136 and original DITL geometry: 4x5 grid with zero-based outfit index+6000 PICT thumbnails selected 200x200 preview desc resource-id+3000 price credits mass/free-mass selection and disabled action states; exact fonts/colors/cache cadence remain TODO(decomp).
+0x00490C70,NovaUi_RedrawTravelOutfitMenu,src/game/docked_dialog.cpp,50%,Partial clean-room redraw using native PICT 0x2136 and original DITL geometry: 4x5 grid with zero-based outfit index+6000 PICT thumbnails selected 200x200 preview desc resource-id+3000 price credits mass/free-mass selection and disabled action states; encoded newline splitting and one/two-line baselines match the original; exact cache cadence and scripted color variants remain TODO(decomp).
 0x00491950,NovaUi_IsTravelOutfitPurchaseAllowed,src/game/landed_store.cpp,40%,Partial clean-room purchase gate: tech/special-tech Require availability expressions ownership limits credits and free-mass gate; cargo special effects government and script gates remain TODO(decomp).
 0x00491F30,NovaUi_RunTravelDestinationInteractionLoop,,0%,
 0x00492C40,NovaUi_RenderTravelDestinationOverlay,,0%,
@@ -758,7 +758,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00492F30,NovaUi_RunShipyardPurchaseLoop,src/game/docked_dialog.cpp,28%,Partial replacement-mode modal: native Shipyard frame selection row paging purchase gate and player-ship replacement dispatch; confirmation/name dialog escort-hire mode and nested interactions remain TODO(decomp).
 0x00493FC0,NovaUi_ShipyardHandleSelectionInput,src/game/docked_dialog.cpp,20%,Mouse grid/action selection plus B/P/N/L shortcuts reconstructed for replacement mode; original keyboard navigation and escort-hire purchase branch remain TODO(decomp).
 0x0049458D,NovaUi_ShipyardSetCursorSlot,src/game/landed_store.cpp,25%,LandedStoreSession tracks 20-slot cursor selection and preserves/clears it across four-item row paging; original directional command mapping remains TODO(decomp).
-0x004948B0,NovaUi_DrawShipyardShipList,src/game/docked_dialog.cpp,45%,Partial native Shipyard redraw: PICT 0x2135 DITL-aligned 4x5 grid ship-class PICT id+5000 thumbnails and 200x200 selected preview selection frame price/trade-in stats and five gated actions; exact cache cadence/text and scripted variants remain TODO(decomp).
+0x004948B0,NovaUi_DrawShipyardShipList,src/game/docked_dialog.cpp,47%,Partial native Shipyard redraw: PICT 0x2135 DITL-aligned 4x5 grid ship-class PICT id+5000 thumbnails and 200x200 selected preview selection frame price/trade-in stats and five gated actions; encoded newline splitting and one/two-line baselines match the original; exact cache cadence and scripted color variants remain TODO(decomp).
 0x004956A0,FUN_004956a0,,0%,
 0x00495C80,NovaUi_DrawShipyardDetailPanel,src/game/docked_dialog.cpp,15%,Selected ship name price trade-in and core speed acceleration maneuver fuel shield armor cargo mass crew fields are shown inline; original nested DLOG detail panel and complete stat comparison remain TODO(decomp).
 0x00497430,FUN_00497430,,0%,
@@ -901,7 +901,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004B68E0,NovaPlatform_PumpInputAndReadyState,,0%,
 0x004B68F0,FUN_004b68f0,,0%,
 0x004B6900,DrawContext_SetFontId,src/game/nova_font.cpp,40%,active family id selected per draw via the NovaFontFamily enum passed to NovaText_Draw/NovaText_DrawCentered
-0x004B6920,DrawContext_StoreScaledValue,src/game/nova_font.cpp,30%,point-size selection for a text draw (NovaFontCache.Font); UI-scale scaling factor not reconstructed (SDL logical presentation scales instead)
+0x004B6920,DrawContext_StoreScaledValue,src/game/nova_font.cpp,45%,NovaText draw path scales the logical point size by the active presentation/backing-pixel factor before obtaining a font handle; original fixed-point scale storage and non-text uses remain TODO(decomp)
 0x004B6940,FUN_004b6940,,0%,
 0x004B6960,FUN_004b6960,,0%,
 0x004B6990,DrawContext_SetRgbColor,,0%,
@@ -993,7 +993,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004BC6E0,FontCache_FindOrAddFamilyByName,,0%,
 0x004BC760,FUN_004bc760,,0%,
 0x004BCA70,FUN_004bca70,,0%,
-0x004BCA90,DrawContext_DrawPascalString,src/game/nova_font.cpp,40%,NovaText_Draw rasterizes via SDL3_ttf solid mode and blits at the baseline (mirrors the OS text drawing FUN_004bc760)
+0x004BCA90,DrawContext_DrawPascalString,src/game/nova_font.cpp,45%,NovaText_Draw rasterizes antialiased transparent text at the physical output density then blits at unchanged logical size/baseline (mirrors the scaled OS DrawTextW path in FUN_004bc760)
 0x004BCAB0,FUN_004bcab0,,0%,
 0x004BCAD0,DrawContext_GetPascalStringWidth,src/game/nova_font.cpp,50%,NovaFontCache.TextWidth via TTF_GetStringSize on the same face used to draw
 0x004BCB00,FUN_004bcb00,,0%,

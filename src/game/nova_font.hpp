@@ -86,7 +86,8 @@ public:
   // (and caching the handle) on first use; null when the face could not be
   // resolved. point_size is in the logical 640x480 space (the original's
   // scaled_value before UI scale is applied -- SDL_ttf is given the logical
-  // size and SDL's logical presentation scales the final frame).
+  // size. NovaText_Draw opens a density-scaled cached face for rasterization,
+  // then draws it at these unchanged logical dimensions.
   [[nodiscard]] TTF_Font *Font(NovaFontFamily family,
                                float point_size,
                                std::uint16_t style = kNovaFontStyleRegular);
@@ -140,9 +141,10 @@ private:
 // `color`, treating (x, y) as the *baseline* exactly as the original's cursor
 // does (FUN_004bc760 places the glyph rect top at baseline - fontsize and the
 // OS engine's ascent positions the ink above the baseline). The glyphs are
-// rasterised by SDL3_ttf in fast "solid" mode (8-bit, single ink color) and
-// uploaded as a texture for this frame. The font cache member must outlive the
-// call; the platform owns the renderer.
+// antialiased by SDL3_ttf at the current physical output density, matching the
+// scale-then-rasterize transparent-background DrawTextW path in the original,
+// then drawn at their unchanged logical size. The font cache member must
+// outlive the call; the platform owns the renderer.
 void NovaText_Draw(SdlPlatform &platform,
                    NovaFontCache &cache,
                    NovaFontFamily family,
