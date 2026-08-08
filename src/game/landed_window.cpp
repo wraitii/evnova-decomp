@@ -29,6 +29,7 @@ namespace game {
 // ---------------------------------------------------------------------------
 bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   ctx.landed = false;
+  ctx.denial = LandedDenial::kNone;
   const std::int16_t stellar_id = state.travel.selected_stellar_id;
   const auto *stellar = state.scenario.Stellar(stellar_id);
   if (stellar == nullptr || !stellar->is_available ||
@@ -36,6 +37,7 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
       (stellar->availability_flags & 0x3000U) != 0U ||
       (stellar->flags & 0x20U) != 0U ||
       !NovaTargeting_StellarTargetsSpriteSetActive(*stellar)) {
+    ctx.denial = LandedDenial::kUnavailable;
     return false;
   }
   // The final normal-arrival branch in Stellar_ProcessTravelAndLanding only
@@ -45,6 +47,7 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
           kArrivalAxisRange ||
       std::abs(state.player.pos_y - static_cast<float>(stellar->pos_y)) >=
           kArrivalAxisRange) {
+    ctx.denial = LandedDenial::kTooFar;
     return false;
   }
 
@@ -59,6 +62,7 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
                   stellar_id,
                   stellar->service_cost,
                   state.player.credits);
+    ctx.denial = LandedDenial::kTooExpensive;
     return false;
   }
 
@@ -611,9 +615,8 @@ void DrawLandedMenu(SdlPlatform &platform,
   const bool have_status = status_panel.w > 0.0F && status_panel.h > 0.0F;
   const float body_x = have_status ? status_panel.x + 12.0F : panel.x + 12.0F;
   float baseline = have_status ? status_panel.y + 18.0F : panel.y + 60.0F;
-  const float body_w =
-      have_status ? std::max(40.0F, status_panel.w - 24.0F)
-                  : std::max(40.0F, panel.w - 24.0F);
+  const float body_w = have_status ? std::max(40.0F, status_panel.w - 24.0F)
+                                   : std::max(40.0F, panel.w - 24.0F);
 
   if (!description.empty()) {
     // Word-wrap the stellar description to the panel width (measured with the
@@ -621,14 +624,10 @@ void DrawLandedMenu(SdlPlatform &platform,
     // panel top, mirroring how the original fills the docked landing panel.
     constexpr float kLineHeight = 14.0F;
     const int wrap_w = static_cast<int>(std::lround(body_w));
-    const auto desc_lines = WrapDescriptionLines(
-        description,
-        wrap_w,
-        [&](std::string_view s) {
-          return font_cache.TextWidth(NovaFontFamily::kGeneva,
-                                      12.0F,
-                                      kNovaFontStyleRegular,
-                                      s);
+    const auto desc_lines =
+        WrapDescriptionLines(description, wrap_w, [&](std::string_view s) {
+          return font_cache.TextWidth(
+              NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, s);
         });
     for (const auto &desc_line : desc_lines) {
       NovaText_Draw(platform,

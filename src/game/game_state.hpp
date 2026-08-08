@@ -20,6 +20,19 @@
 
 namespace game {
 
+// Ghidra g_system_reputation (0x00733bc8): a per-system int16 global that
+// tracks the player's standing with each system. Negative values push factions
+// hostile; the destination-interaction dialog compares a target stellar's
+// reputation_threshold against the containing system's reputation to decide
+// whether landing is denied (Stellar_ProcessTravelAndLanding / NovaUi_Run-
+// TravelDestinationInteractionWindow). Resized by ScenarioData load to match
+// the systems table; indexed by 0-based system resource id.
+using SystemReputation = std::vector<std::int16_t>;
+
+} // namespace game
+
+namespace game {
+
 // Ghidra 0x004cd3b0 IntroCinematic_SetupFrames fills this (g_intro_cinematic).
 // Up to 4 PICT ids (source_pict_ids), each shown for duration_60h_ticks/i
 // 1/60s ticks (clamped to [0,300]). When post_intro_dest_id != -1 the intro
@@ -193,6 +206,30 @@ struct ActiveShot {
   float anim_elapsed = 0.0F; // ShotState.anim_elapsed, in ms
 };
 
+// Transient on-screen HUD overlay message state, mirroring the original's
+// g_hud_overlay_msg_buffer / g_hud_overlay_msg_color pair written by
+// NovaHud_ShowOverlayMessage (0x0047e2d0) and replayable by
+// NovaHud_ShowCachedOverlayMessage (0x0047e430). Clean-room: the drawn text
+// colour is carried as an RGB, and a wall-clock expiry replaces the original's
+// fixed frame durations so the spaceflight loop can clear it. Game logic only
+// calls NovaHud_ShowOverlayMessage to arm it; the HudRenderer draws it.
+struct HudOverlayState {
+  // Whether a message is currently live (the original's g_hud_overlay_msg_color
+  // > 0 gate). Cleared once the expiry passes.
+  bool active = false;
+  // The cached message text (g_hud_overlay_msg_buffer), shown at the bottom of
+  // the flight viewport.
+  std::string message;
+  // Drawn text colour (RGB). Matches the overlay text colour reference
+  // (Ghidra DAT_00733b44, the 00 rr gg bb colour the show call passes).
+  std::uint8_t red = 0xe0;
+  std::uint8_t green = 0xe0;
+  std::uint8_t blue = 0xe0;
+  // Absolute wall-clock deadline (SDL_GetTicks ms) after which the message
+  // disappears. Set by NovaHud_ShowOverlayMessage from its duration.
+  std::uint64_t expiry_ms = 0;
+};
+
 // Everything about the running pilot's world. Replaces the Game_Reset* set of
 // globals for the transient not-yet-reconstructed subsystems with explicit
 // flags so we can log exactly what is and is not preserved.
@@ -201,7 +238,6 @@ struct GameState {
   // selection. The original uses a global NovaRandom; this is kept local to
   // the state so runs are reproducible when seeded identically.
   std::mt19937 rng{42};
-
   bool game_active = false;  // Ghidra DAT_00596d28
   bool intro_played = false; // Ghidra DAT_00596d35: cleared on new pilot so
                              // the intro cinematic plays on first flight.
@@ -209,12 +245,26 @@ struct GameState {
   PlayerShip player;
   TravelState travel;
   IntroCinematicData intro_cinematic;
+  // The transient HUD overlay message (see HudOverlayState). Kept on GameState
+  // per AGENTS.md (no hidden globals) and rendered by the HudRenderer.
+  HudOverlayState hud_overlay;
 
   // Parsed scenario data (ships/outfits/weapons/stellars/systems), loaded once
   // so the gameplay loops can look up classes by id. Empty until a game is
   // created (mirrors the original lazily loading scenario tables in
   // NovaData_LoadScenarioResourceTables on the new-game path).
   ScenarioData scenario;
+
+  // Per-system faction reputation (Ghidra g_system_reputation 0x00733bc8).
+  // Indexed by 0-based system resource id and sized to the systems table on
+  // load. The destination-interaction dialog decrements the containing
+  // system's reputation when the player attacks a stellar's government. The
+  // faction-combat reaction hook (Government_ProcessFactionCombatEvent
+  // 0x00466fc0) and the mission reaction script hook (Mission_ExecuteReaction-
+  // Script 0x00448020) that the dialog invokes on an attack are deferred with
+  // TODO(decomp) in negotiation_dialog.cpp; this field models the reputation
+  // data those hooks read/write.
+  SystemReputation system_reputation;
 
   // The player's owned outfits, cargo and junk. The new-game flow zeroes it
   // then seeds the outfit counts from the starting ship class's default item

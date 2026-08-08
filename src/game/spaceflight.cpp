@@ -3,9 +3,11 @@
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "intro_cinematic.hpp"
 #include "landed_window.hpp"
+#include "negotiation_dialog.hpp"
 #include "outfit.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
@@ -218,7 +220,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Normal arrival (Return) is independent of target action: the original
     // player-ship tick directly invokes Stellar_ProcessTravelAndLanding here,
     // opening the Spaceport only when the selected ordinary stellar is inside
-    // its arrival envelope. HUD ticker text remains TODO(decomp).
+    // its arrival envelope. The rejection feedback is shown as an on-screen HUD
+    // overlay (STR# 0x7d2 messages) instead of a bare log line.
     if (land_pressed) {
       LandedContext ctx;
       if (NovaLanding_EnterDocked(state, ctx)) {
@@ -230,17 +233,53 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           break;
         }
       } else {
-        NovaLog::Info("arrival unavailable: move within 250 units of the "
-                      "selected ordinary stellar and stop special travel");
+        const auto *st =
+            state.scenario.Stellar(state.travel.selected_stellar_id);
+        const bool is_station = st != nullptr && (st->flags & 0x10U) != 0U;
+        NovaHud_ShowLandingDenial(state, ctx.denial, is_station);
       }
     }
     // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
     // interaction pathway. It is intentionally not substituted for landing.
     if (target_action_pressed) {
       if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
-        NovaLog::Todo("target-action: destination-interaction window 0x3f1 "
-                      "for special bribe/hostility/script handling remains "
-                      "unreconstructed");
+        const std::int16_t dialog_stellar = state.travel.selected_stellar_id;
+        const NegotiationExit exit = NovaNegotiation_RunDestinationDialog(
+            platform, state, dialog_stellar);
+        if (exit == NegotiationExit::kQuit) {
+          returning_to_menu = true;
+          break;
+        }
+        if (exit == NegotiationExit::kProceedToLand) {
+          // The player landed or paid a bribe: open the Spaceport (DLOG 0x3e8).
+          // The original's bribe/land handoff sets g_travel_selected_stellar_id
+          // + g_travel_engage_timer (the travel-to-system warp) rather than
+          // requiring the 250-unit arrival envelope, so co-locate the ship at
+          // the destination before the normal dock gate.
+          const auto *st =
+              state.scenario.Stellar(state.travel.selected_stellar_id);
+          if (st != nullptr) {
+            state.player.pos_x = static_cast<float>(st->pos_x);
+            state.player.pos_y = static_cast<float>(st->pos_y);
+          }
+          LandedContext ctx;
+          if (NovaLanding_EnterDocked(state, ctx)) {
+            NovaLog::Info("destination-interaction dialog granted landing at "
+                          "stellar {}; opening Spaceport",
+                          ctx.stellar_id);
+            const LandedExit landed =
+                NovaLanded_RunWindow(platform, state, ctx);
+            if (landed == LandedExit::kQuit) {
+              returning_to_menu = true;
+              break;
+            }
+          } else {
+            NovaLog::Warn("destination-interaction dialog staged a landing at "
+                          "stellar {} but arrival was refused ({})",
+                          ctx.stellar_id,
+                          static_cast<int>(ctx.denial));
+          }
+        }
       } else {
         NovaLog::Info("target-action: selected stellar cannot open its "
                       "destination interaction");
@@ -250,6 +289,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // scaled by the real frame time. The original's player-update path ticks
     // shields each frame; armor does not regenerate in flight.
     NovaPlayer_TickShieldRecharge(state, frame_time_ms);
+    // Expire any transient HUD overlay message once its wall-clock deadline
+    // passes (the draw path is const over state).
+    NovaHud_TickOverlay(state);
     const float delta_x = state.player.pos_x - prev_x;
     const float delta_y = state.player.pos_y - prev_y;
     prev_x = state.player.pos_x;

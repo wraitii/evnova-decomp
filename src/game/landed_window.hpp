@@ -138,6 +138,17 @@ WrapDescriptionLines(std::string_view text,
 // A docked session captures the destination stellar and the derived
 // refuel/repair economics on a single landing. Kept off GameState so the modal
 // can be nested and the service bookkeeping unit-tested without touching SDL.
+// Why a landing request was not accepted (set by NovaLanding_EnterDocked).
+// Maps to the on-screen HUD feedback text (STR# 0x7d2) the spaceflight loop
+// shows; mirrors Stellar_ProcessTravelAndLanding's feedback cases.
+enum class LandedDenial : std::uint8_t {
+  kNone,         // the landing was accepted (ctx.landed == true)
+  kUnavailable,  // no selected/valid ordinary stellar at all
+  kTooFar,       // selected stellar is outside the 250-unit arrival envelope
+  kTooFast,      // ship is moving too fast to dock (decomp constraint)
+  kTooExpensive, // service_cost exceeds credits
+};
+
 struct LandedContext {
   // Resource id (>= 0x80) of the stellar we are docked at, or -1 before the
   // landing transition resolves it.
@@ -145,6 +156,10 @@ struct LandedContext {
   // Whether a landing transition ran for this session. No original caller has
   // yet been confirmed, so callers must establish this state independently.
   bool landed = false;
+  // Why a landing was denied (kNone when accepted). Set by
+  // NovaLanding_EnterDocked so the spaceflight loop can show the matching
+  // STR# 0x7d2 HUD overlay instead of a bare log line.
+  LandedDenial denial = LandedDenial::kNone;
   // The service most recently activated (by a mouse click or a letter
   // shortcut). The original has NO persistent keyboard focus/highlight state:
   // only a momentarily mouse-hovered slot is visually pressed, so this value is
@@ -169,10 +184,10 @@ struct LandedContext {
 std::int32_t NovaLanded_Refuel(GameState &state, std::int32_t price_per_unit);
 
 // Repairs armor (and shields) toward the effective maximums. NOTE: the original
-// has no billed docked Repair service -- shields and armor are auto-refilled for
-// free on landing by Stellar_TravelToSystem (0x00455e10). This helper models the
-// delta top-up for completeness / unit tests only; the docked menu does not bill
-// it. Returns the credits actually spent.
+// has no billed docked Repair service -- shields and armor are auto-refilled
+// for free on landing by Stellar_TravelToSystem (0x00455e10). This helper
+// models the delta top-up for completeness / unit tests only; the docked menu
+// does not bill it. Returns the credits actually spent.
 std::int32_t NovaLanded_Repair(GameState &state,
                                std::int32_t price_per_armor_point);
 

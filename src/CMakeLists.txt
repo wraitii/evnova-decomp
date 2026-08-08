@@ -15,9 +15,11 @@ add_library(evnova_runtime
     brgr_archive.cpp
     game/gameplay_interface.cpp
     game/hud_renderer.cpp
+    game/hud_overlay.cpp
     game/intro_cinematic.cpp
     game/landed_window.cpp
     game/docked_dialog.cpp
+    game/negotiation_dialog.cpp
     game/new_pilot_flow.cpp
     game/nova_font.cpp
     game/outfit.cpp

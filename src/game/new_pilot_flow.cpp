@@ -197,6 +197,10 @@ void Stub_LoadScenarioResourceTables(GameState &state) {
     NovaLog::Todo("scenario resource tables could not be loaded; player world "
                   "uses fallback defaults");
   }
+  // Size the per-system reputation table to the systems table (the original
+  // keeps g_system_reputation 0x00733bc8 as a fixed system-indexed int16 span
+  // alongside g_system_defs; our default is 0 so every system starts neutral).
+  state.system_reputation.assign(state.scenario.systems.size(), 0);
 }
 
 void Stub_ResetReputationAndWorldTables(GameState &state) {

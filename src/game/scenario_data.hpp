@@ -220,10 +220,10 @@ struct Weapon {
   std::int16_t blast_radius = 0;       // ProxRadius18
   std::int16_t splash_radius = 0;      // BlastRadius1a
 
-  std::uint16_t flags = 0;             // Flags1c (flags_primary)
-  std::uint16_t flags_quaternary = 0;  // Seeker1e (flags_quaternary)
-  std::uint16_t flags_secondary = 0;   // (resource +0x48, flags_secondary)
-  std::uint16_t flags_tertiary = 0;    // (resource +0x66, flags_tertiary)
+  std::uint16_t flags = 0;            // Flags1c (flags_primary)
+  std::uint16_t flags_quaternary = 0; // Seeker1e (flags_quaternary)
+  std::uint16_t flags_secondary = 0;  // (resource +0x48, flags_secondary)
+  std::uint16_t flags_tertiary = 0;   // (resource +0x66, flags_tertiary)
 
   std::int16_t turret_arc_degrees = 0; // (resource +0x30, was mislabeled
                                        // beam_length)
@@ -235,14 +235,15 @@ struct Weapon {
   // payload keeps it at 0, which makes even an animated frame-stepper advance
   // every frame.
   std::int16_t shot_anim_frame_dwell = 0;
-  std::int16_t kickback_impulse = 0;   // (resource +0x56, WeaponDef field_0x12;
-                                       // recoil kickback, was mislabeled burst_count)
-  std::int16_t turret_group_id = -1;   // (resource +0x58, was mislabeled
-                                       // burst_reload)
+  std::int16_t kickback_impulse =
+      0; // (resource +0x56, WeaponDef field_0x12;
+         // recoil kickback, was mislabeled burst_count)
+  std::int16_t turret_group_id = -1; // (resource +0x58, was mislabeled
+                                     // burst_reload)
   // Burst-cycle fields drive a weapon that fires a burst then resets on a
   // cooldown (Weapon_GetWeaponFireIntervalTicks / Weapon_FirePlayerWeaponBank).
-  std::int16_t burst_cycle_ticks = 0;  // (resource +0x5a, was mislabeled
-                                       // max_ammo)
+  std::int16_t burst_cycle_ticks = 0; // (resource +0x5a, was mislabeled
+                                      // max_ammo)
   std::int16_t burst_reset_cooldown = 0;
   std::int16_t retarget_interval_ticks = 0;
 
@@ -338,6 +339,22 @@ struct Stellar {
   // the travel/targeting interaction when a ship engages this stellar. >0 keeps
   // the stellar "active" even while its ambient sprite is unloaded.
   std::int16_t engage_access = 0;
+
+  // ---- Hostile-ship deposit bookkeeping (Ghidra StellarDef +0x4e/+0x50 and
+  // the derelict sentinel +0x47). The original keeps a pool of patrol/defence
+  // ships staged at a stellar (max_ship_count = the mounted garrison size,
+  // present_ship_count = how many are currently spawned). The destination-
+  // interaction dialog's attack branch (NovaUi_RunTravelDestinationInter-
+  // actionWindow 0x00480030) scans these to decide whether to spawn a fresh
+  // hostile fleet for the stellar, and rescales present_ship_count after a
+  // confrontation. field_0x47 is a single-byte derelict / abandoned sentinel
+  // that suppresses the hostile re-spawn latching. TODO(decomp): the attack
+  // branch that reads them is deferred (see negotiation_dialog.cpp); these
+  // fields are modelled now so the data is present.
+  int present_ship_count = 0; // StellarDef +0x50
+  int max_ship_count = 0;     // StellarDef +0x4e (garrison size; >0x3e9/0x2711
+                              //  rescale branches)
+  std::uint8_t field_0x47 = 0;
 };
 
 // Ghidra GovtDef (g_government_defs, up to 0x100 entries indexed by government

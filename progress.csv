@@ -281,7 +281,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,20%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, and full effective shield/armor; system-transition/world-reset/discovery work remains TODO(decomp)
 0x00456480,Stellar_SelectLinkedDestinationViaStarmap,,0%,confirmed linked-destination starmap transfer; prior speculative docking implementation removed
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
-0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,12%,normal ordinary-stellar arrival gate reconstructed in NovaLanding_EnterDocked: active/current-system target, 0x3000/0x20 exclusions, strict 250-unit per-axis envelope, and fee gate; timer/reputation/ticker/hypergate branches remain TODO(decomp)
+0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,20%,normal ordinary-stellar arrival gate + HUD overlay denial feedback (STR# 0x7d2) reconstructed: active/current-system target, 0x3000/0x20 exclusions, strict 250-unit per-axis envelope, fee gate; overlay text via NovaHud_ShowLandingDenial. Timer/reputation/disabled/hypergate/waiting branches remain TODO(decomp)
 0x00459950,NovaUi_UpdateTravelEngagementProgress,,0%,
 0x0045A3D0,Ship_HandlePlayerBoardTargetCommand,,0%,
 0x0045BAA0,Ship_RecenterSpaceObjectsForWorldWrap,,0%,
@@ -689,19 +689,19 @@ address,name,impl_file,reimpl_pct,comment
 0x0047D600,FUN_0047d600,,0%,
 0x0047DC50,FUN_0047dc50,,0%,
 0x0047E1E0,FUN_0047e1e0,,0%,
-0x0047E2D0,NovaHud_ShowOverlayMessage,,0%,
-0x0047E430,NovaHud_ShowCachedOverlayMessage,,0%,
+0x0047E2D0,NovaHud_ShowOverlayMessage,src/game/hud_overlay.cpp,60%,transient HUD overlay message reconstructed (NovaHud_ShowOverlayMessage + state on GameState): text cache, colour, wall-clock expiry, drawn by HudRenderer bottom-band; user feedback (landing denial) wired. Edge-flag/colour-palette fidelity + exact durations approximate
+0x0047E430,NovaHud_ShowCachedOverlayMessage,src/game/hud_overlay.cpp,70%,transient overlay replays the cached message (NovaHud_ShowCachedOverlayMessage): re-arms the live message expiry; drawn by the same HudRenderer path
 0x0047E470,NovaUi_RunTargetShipCommWindow,,0%,
 0x0047F9C0,NovaUi_RunTravelDestinationBribeWindow,,0%,
 0x0047FA40,FUN_0047fa40,,0%,
 0x0047FB70,NovaUi_DrawTravelDestinationBribeWindow,,0%,
-0x00480030,NovaUi_RunTravelDestinationInteractionWindow,,0%,
+0x00480030,NovaUi_RunTravelDestinationInteractionWindow,src/game/negotiation_dialog.cpp,75,land/bribe/leave reconstructed in NovaNegotiation_RunDestinationDialog (real RNG bribe cost + latch, 5-variant STR# pickup, per-button hit-test, DLOG 0x3f0 payment + price-haggle +1000 counter-offer, PaymentChancePercent 35%); the attack/spawn branch remains deferred with TODO(decomp)
 0x004812C0,NovaUi_DrawTravelDestinationInteractionWindow,,0%,
 0x004819D0,FUN_004819d0,,0%,
-0x00482280,NovaUi_RunTravelDestinationPaymentWindow,,0%,
+0x00482280,NovaUi_RunTravelDestinationPaymentWindow,src/game/negotiation_dialog.cpp,45,payment confirm with random 35% success, bribe-mode inflation 0.75 + /100 rounding, and the declined-bribe haggle counter-offer (+1000) in the interaction path; full separate DLOG 0x3f0 modal + debt mode 1.33 still deferred
 0x004826A0,NovaUi_DrawTravelDestinationPaymentWindow,,0%,
 0x004828C0,NovaUi_LoadTravelDestinationPromptString,,0%,
-0x00482910,NovaUi_LoadTravelDestinationStatusString,,0%,
+0x00482910,NovaUi_LoadTravelDestinationStatusString,src/game/negotiation_dialog.cpp,80,status STR# 0xbba loaded via NovaHud_LoadStringEntry with the 5-flavour variant at message*5+random+1 (real per-launch random index)
 0x00482940,NovaUi_RunBoardingPlunderWindow,,0%,
 0x00484230,Ship_BuildBoardingPlunderOptions,,0%,
 0x00484D30,NovaUi_DrawBoardingPlunderWindow,,0%,

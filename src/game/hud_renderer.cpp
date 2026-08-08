@@ -325,6 +325,34 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
                 value_color,
                 4.0F);
   }
+
+  // Transient HUD overlay message (NovaHud_ShowOverlayMessage / the landing &
+  // negotiation feedback text): drawn centered near the bottom of the flight
+  // viewport while the wall-clock expiry has not passed. Mirrors the original
+  // drawing the shared message rect (g_hud_overlay_message_rect) with the
+  // cached message colour. See hud_overlay.hpp. The spaceflight loop clears an
+  // expired message (HudRenderer::Draw is const over state).
+  if (state.hud_overlay.active &&
+      (state.hud_overlay.expiry_ms == 0 ||
+       SDL_GetTicks() < state.hud_overlay.expiry_ms)) {
+    const auto &msg = state.hud_overlay;
+    const float size = static_cast<float>(layout_.font_size) + 3.0F;
+    const auto logical = platform.logical_playfield_size();
+    const float left = 0.0F;
+    const float right = logical.x;
+    const float baseline = logical.y - 8.0F;
+    NovaText_DrawCentered(
+        platform,
+        *font_cache_,
+        NovaFontFamily::kGeneva,
+        size,
+        kNovaFontStyleRegular,
+        SDL_Color{msg.red, msg.green, msg.blue, SDL_ALPHA_OPAQUE},
+        left,
+        right,
+        baseline,
+        msg.message);
+  }
 }
 
 } // namespace game
