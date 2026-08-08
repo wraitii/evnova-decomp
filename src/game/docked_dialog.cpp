@@ -4,10 +4,12 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
-#include "nova_font.hpp"
 #include "landed_store.hpp"
+#include "nova_font.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
+#include "ship_visual.hpp"
+#include "sprite_world.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -18,6 +20,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <unordered_map>
 
 namespace game {
 namespace {
@@ -195,128 +199,524 @@ void DrawSubWindowDialog(SdlPlatform &platform,
          point.y < rect.y + rect.h;
 }
 
-void DrawStoreContents(SdlPlatform &platform, NovaFontCache &font_cache,
-                       const ServicesButtonArt &button_art, const GameState &state,
-                       const LandedStoreSession &session, std::int16_t stellar_id) {
+// DLOG 0x3ea/0x3ec are 765 pixels wide and their frame PICTs are 321/323
+// pixels high. The original centres those native-size windows on its 1024x768
+// drawing surface. Store coordinates below are the corresponding DITL-local
+// coordinates; keeping them local makes window resize centring and hit tests
+// use the same transform.
+struct StoreLayout {
+  SDL_FPoint origin{};
+  SDL_FRect frame{};
+  SDL_FRect grid{};
+  SDL_FRect description{};
+  SDL_FRect preview{};
+  SDL_FRect details{};
+  SDL_FRect leave{};
+  SDL_FRect buy{};
+  SDL_FRect sell_or_info{};
+  SDL_FRect previous{};
+  SDL_FRect next{};
+};
+
+[[nodiscard]] SDL_FRect OffsetRect(SDL_FRect rect, SDL_FPoint origin) {
+  rect.x += origin.x;
+  rect.y += origin.y;
+  return rect;
+}
+
+[[nodiscard]] StoreLayout LayoutStore(const SdlPlatform &platform,
+                                      bool outfit_store) {
+  const SDL_FPoint output = platform.logical_playfield_size();
+  constexpr float kWidth = 765.0F;
+  const float height = outfit_store ? 321.0F : 323.0F;
+  const SDL_FPoint origin{std::max(0.0F, (output.x - kWidth) / 2.0F),
+                          std::max(0.0F, (output.y - height) / 2.0F)};
+  auto at = [origin](SDL_FRect rect) { return OffsetRect(rect, origin); };
+
+  StoreLayout layout;
+  layout.origin = origin;
+  layout.frame = at({0.0F, 0.0F, kWidth, height});
+  // One-based DITL entries 5, 6, 8 and 9.
+  layout.grid = at({9.0F, 8.0F, 333.0F, 271.0F});
+  layout.description = at({354.0F, 10.0F, 192.0F, 267.0F});
+  layout.preview = at({557.0F, 8.0F, 200.0F, 200.0F});
+  layout.details = at({outfit_store ? 618.0F : 614.0F,
+                       214.0F,
+                       outfit_store ? 135.0F : 143.0F,
+                       100.0F});
+  if (outfit_store) {
+    // DITL entries 1, 7, 4, 10 and 11: Leave, Buy, Sell, Previous, Next.
+    layout.leave = at({500.0F, 289.0F, 99.0F, 25.0F});
+    layout.buy = at({288.0F, 289.0F, 99.0F, 25.0F});
+    layout.sell_or_info = at({394.0F, 289.0F, 99.0F, 25.0F});
+    layout.previous = at({148.0F, 288.0F, 25.0F, 25.0F});
+    layout.next = at({178.0F, 288.0F, 25.0F, 25.0F});
+  } else {
+    // DITL entries 7, 1, 10, 12 and 13: Leave, Buy, Info, Previous, Next.
+    layout.leave = at({480.0F, 289.0F, 109.0F, 25.0F});
+    layout.buy = at({365.0F, 289.0F, 109.0F, 25.0F});
+    layout.sell_or_info = at({253.0F, 289.0F, 89.0F, 25.0F});
+    layout.previous = at({141.0F, 288.0F, 25.0F, 25.0F});
+    layout.next = at({171.0F, 288.0F, 25.0F, 25.0F});
+  }
+  return layout;
+}
+
+[[nodiscard]] SDL_FRect StoreCell(const StoreLayout &layout, std::size_t slot) {
+  // thunk_FUN_008745b6 (0x00499150): four columns, five rows. The original
+  // generated inclusive 84x55 rectangles at 83x54 steps from DITL item 5.
+  constexpr float kStepX = 83.0F;
+  constexpr float kStepY = 54.0F;
+  return {layout.grid.x + static_cast<float>(slot % 4) * kStepX,
+          layout.grid.y + static_cast<float>(slot / 4) * kStepY,
+          84.0F,
+          55.0F};
+}
+
+void DrawStoreBase(SdlPlatform &platform,
+                   SDL_Texture *backdrop,
+                   SDL_Texture *frame,
+                   const StoreLayout &layout) {
+  SDL_Renderer *renderer = platform.renderer();
+  platform.SetFullscreenPlayfield();
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderClear(renderer);
+  const SDL_FPoint output = platform.logical_playfield_size();
+  if (backdrop != nullptr) {
+    float width = 0.0F;
+    float height = 0.0F;
+    SDL_GetTextureSize(backdrop, &width, &height);
+    const SDL_FRect dst{
+        (output.x - width) / 2.0F, (output.y - height) / 2.0F, width, height};
+    SDL_RenderTexture(renderer, backdrop, nullptr, &dst);
+  }
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+  SDL_SetRenderDrawColor(renderer, kScrim.r, kScrim.g, kScrim.b, kScrim.a);
+  const SDL_FRect screen{0.0F, 0.0F, output.x, output.y};
+  SDL_RenderFillRect(renderer, &screen);
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  if (frame != nullptr) {
+    SDL_RenderTexture(renderer, frame, nullptr, &layout.frame);
+  }
+}
+
+struct StoreTextureCache {
+  std::unordered_map<std::int16_t, std::unique_ptr<SdlTexture>> pictures;
+  std::unordered_map<std::int16_t, std::unique_ptr<SpriteAsset>> ship_sprites;
+};
+
+[[nodiscard]] SDL_Texture *StorePreviewTexture(SdlPlatform &platform,
+                                               StoreTextureCache &cache,
+                                               bool outfit_store,
+                                               std::int16_t id) {
+  if (id < 0x80) {
+    return nullptr;
+  }
+  const auto found = cache.pictures.find(id);
+  if (found != cache.pictures.end()) {
+    if (found->second) {
+      return found->second->get();
+    }
+    const auto sprite = cache.ship_sprites.find(id);
+    return sprite != cache.ship_sprites.end() && sprite->second &&
+                   !sprite->second->frames.empty()
+               ? sprite->second->frames.front().texture->get()
+               : nullptr;
+  }
+  const std::int32_t pict_id =
+      outfit_store ? static_cast<std::int32_t>(id - 0x80) + 6000
+                   : static_cast<std::int32_t>(id - 0x80) + 5000;
+  auto picture = LoadPictTexture(platform, static_cast<std::uint16_t>(pict_id));
+  if (picture) {
+    SDL_Texture *result = picture->get();
+    cache.pictures.emplace(id, std::move(picture));
+    return result;
+  }
+  cache.pictures.emplace(id, nullptr);
+  if (outfit_store) {
+    return nullptr;
+  }
+
+  // NovaData_LoadAllShipClassVisualAndLaunchData prefers the class PICT at
+  // (zero-based class + 5000), then falls back to the cloned ship sprite set.
+  // We do the same for plug-in ships whose preview PICT is absent.
+  const auto visual_data = NovaResource_Load(kShipVisualResourceType,
+                                             static_cast<std::uint16_t>(id));
+  if (!visual_data) {
+    cache.ship_sprites.emplace(id, nullptr);
+    return nullptr;
+  }
+  const auto visual = DecodeShipVisualDescriptor(*visual_data);
+  if (!visual) {
+    cache.ship_sprites.emplace(id, nullptr);
+    return nullptr;
+  }
+  auto sprite =
+      SpriteAsset::LoadSheet(platform.renderer(), visual->base_image_id);
+  SDL_Texture *result = sprite && !sprite->frames.empty()
+                            ? sprite->frames.front().texture->get()
+                            : nullptr;
+  cache.ship_sprites.emplace(id, std::move(sprite));
+  return result;
+}
+
+void DrawStoreContents(SdlPlatform &platform,
+                       NovaFontCache &font_cache,
+                       const ServicesButtonArt &button_art,
+                       const GameState &state,
+                       const LandedStoreSession &session,
+                       std::int16_t stellar_id,
+                       const StoreLayout &layout,
+                       StoreTextureCache &texture_cache,
+                       SDL_Texture *selected_image,
+                       std::string_view selected_description) {
   constexpr SDL_Color kText{202, 224, 255, 255};
   constexpr SDL_Color kMuted{128, 170, 210, 255};
   const bool outfit_store = session.kind == LandedStoreKind::kOutfitter;
-  constexpr float kGridX = 48.0F;
-  constexpr float kGridY = 122.0F;
-  constexpr float kCellW = 108.0F;
-  constexpr float kCellH = 37.0F;
   SDL_Renderer *renderer = platform.renderer();
   for (std::size_t slot = 0; slot < LandedStoreSession::kPageSlots; ++slot) {
     const std::size_t index = session.page_base + slot;
-    if (index >= session.available_ids.size()) break;
+    if (index >= session.available_ids.size())
+      break;
     const std::int16_t id = session.available_ids[index];
-    const std::size_t col = slot % 5;
-    const std::size_t row = slot / 5;
-    const SDL_FRect rect{kGridX + static_cast<float>(col) * kCellW,
-                         kGridY + static_cast<float>(row) * kCellH,
-                         kCellW - 3.0F, kCellH - 3.0F};
+    const SDL_FRect rect = StoreCell(layout, slot);
     const bool selected = id == session.selected_id;
-    SDL_SetRenderDrawColor(renderer, selected ? 66 : 16, selected ? 108 : 40,
-                           selected ? 154 : 72, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &rect);
-    SDL_SetRenderDrawColor(renderer, selected ? 220 : 80, selected ? 235 : 140,
-                           selected ? 255 : 190, SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(renderer,
+                           selected ? 220 : 80,
+                           selected ? 235 : 140,
+                           selected ? 255 : 190,
+                           SDL_ALPHA_OPAQUE);
     SDL_RenderRect(renderer, &rect);
-    const std::string_view name = outfit_store
-                                      ? std::string_view{state.scenario.Outfit(id)->short_name}
-                                      : std::string_view{state.scenario.Ship(id)->short_name};
-    NovaText_DrawCentered(platform, font_cache, NovaFontFamily::kGeneva, 10.0F,
-                          kNovaFontStyleRegular, kText, rect.x + 2.0F,
-                          rect.x + rect.w - 2.0F, rect.y + 15.0F, name);
+    if (SDL_Texture *thumbnail =
+            StorePreviewTexture(platform, texture_cache, outfit_store, id)) {
+      const SDL_FRect thumbnail_rect{
+          rect.x + (rect.w - 32.0F) / 2.0F, rect.y + 3.0F, 32.0F, 32.0F};
+      SDL_RenderTexture(renderer, thumbnail, nullptr, &thumbnail_rect);
+    }
+    const std::string_view name =
+        outfit_store ? std::string_view{state.scenario.Outfit(id)->short_name}
+                     : std::string_view{state.scenario.Ship(id)->short_name};
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          10.0F,
+                          kNovaFontStyleRegular,
+                          kText,
+                          rect.x + 2.0F,
+                          rect.x + rect.w - 2.0F,
+                          rect.y + 48.0F,
+                          name);
     if (outfit_store) {
       const std::int16_t count = state.inventory.outfit_owned_count[id - 0x80];
-      NovaText_DrawCentered(platform, font_cache, NovaFontFamily::kGeneva, 9.0F,
-                            kNovaFontStyleRegular, kMuted, rect.x, rect.x + rect.w,
-                            rect.y + 29.0F, std::to_string(count));
+      NovaText_DrawCentered(platform,
+                            font_cache,
+                            NovaFontFamily::kGeneva,
+                            9.0F,
+                            kNovaFontStyleRegular,
+                            kMuted,
+                            rect.x + 2.0F,
+                            rect.x + rect.w - 2.0F,
+                            rect.y + 12.0F,
+                            std::to_string(count));
     }
   }
-  const SDL_FRect leave{55.0F, 400.0F, 90.0F, 25.0F};
-  const SDL_FRect buy{165.0F, 400.0F, 90.0F, 25.0F};
-  const SDL_FRect sell{275.0F, 400.0F, 90.0F, 25.0F};
-  const SDL_FRect previous{385.0F, 400.0F, 90.0F, 25.0F};
-  const SDL_FRect next{495.0F, 400.0F, 90.0F, 25.0F};
-  const std::array<std::pair<SDL_FRect, std::string_view>, 5> controls{{
-      {leave, "LEAVE"}, {buy, "BUY"}, {sell, outfit_store ? "SELL" : "INFO"},
-      {previous, "PREVIOUS"}, {next, "NEXT"}}};
-  for (const auto &[rect, label] : controls) {
-    button_art.Draw(platform, rect, ButtonState::kNormal);
-    NovaText_DrawCentered(platform, font_cache, NovaFontFamily::kGeneva, 11.0F,
-                          kNovaFontStyleBold, kText, rect.x, rect.x + rect.w,
-                          rect.y + 16.0F, label);
+  const bool buy_allowed =
+      session.selected_id >= 0 &&
+      (outfit_store
+           ? NovaLanded_CanBuyOutfit(state, stellar_id, session.selected_id)
+           : NovaLanded_CanBuyShip(state, stellar_id, session.selected_id));
+  const bool sell_allowed =
+      outfit_store && session.selected_id >= 0 &&
+      state.inventory.outfit_owned_count[session.selected_id - 0x80] > 0 &&
+      (state.scenario.Outfit(session.selected_id)->flags & 0x0008U) == 0U;
+  const std::array<std::tuple<SDL_FRect, std::string_view, bool>, 5> controls{
+      {{layout.leave, "LEAVE", true},
+       {layout.buy, "BUY", buy_allowed},
+       {layout.sell_or_info,
+        outfit_store ? "SELL" : "INFO",
+        outfit_store ? sell_allowed : session.selected_id >= 0},
+       {layout.previous, "<", session.CanPagePrevious()},
+       {layout.next, ">", session.CanPageNext()}}};
+  for (const auto &[rect, label, enabled] : controls) {
+    button_art.Draw(platform,
+                    rect,
+                    enabled ? ButtonState::kNormal : ButtonState::kDisabled);
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          11.0F,
+                          kNovaFontStyleBold,
+                          enabled ? kText : kMuted,
+                          rect.x,
+                          rect.x + rect.w,
+                          rect.y + 16.0F,
+                          label);
   }
   if (session.selected_id >= 0) {
-    const std::string title = outfit_store
-        ? state.scenario.Outfit(session.selected_id)->name
-        : state.scenario.Ship(session.selected_id)->display_name;
-    const std::int32_t price = outfit_store
-        ? NovaLanded_OutfitPrice(state, stellar_id, session.selected_id)
-        : NovaLanded_ShipPurchasePrice(state, stellar_id, session.selected_id);
-    NovaText_DrawCentered(platform, font_cache, NovaFontFamily::kGeneva, 12.0F,
-                          kNovaFontStyleBold, kText, 35.0F, 605.0F, 310.0F, title);
-    NovaText_DrawCentered(platform, font_cache, NovaFontFamily::kGeneva, 11.0F,
-                          kNovaFontStyleRegular, kMuted, 35.0F, 605.0F, 327.0F,
-                          std::to_string(price) + " credits");
+    const std::string title =
+        outfit_store ? state.scenario.Outfit(session.selected_id)->name
+                     : state.scenario.Ship(session.selected_id)->display_name;
+    const std::int32_t price =
+        outfit_store
+            ? NovaLanded_OutfitPrice(state, stellar_id, session.selected_id)
+            : NovaLanded_ShipPurchasePrice(
+                  state, stellar_id, session.selected_id);
+    if (selected_image != nullptr) {
+      SDL_RenderTexture(renderer, selected_image, nullptr, &layout.preview);
+    }
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          12.0F,
+                          kNovaFontStyleBold,
+                          kText,
+                          layout.description.x + 4.0F,
+                          layout.description.x + layout.description.w - 4.0F,
+                          layout.description.y + 18.0F,
+                          title);
+    if (outfit_store) {
+      const Outfit *outfit = state.scenario.Outfit(session.selected_id);
+      const ShipClass *player_ship = state.scenario.Ship(
+          static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+      const std::int32_t mass =
+          player_ship == nullptr ? 0
+                                 : outfit->PurchaseMass(player_ship->mass_tons);
+      NovaText_DrawCentered(platform,
+                            font_cache,
+                            NovaFontFamily::kGeneva,
+                            10.0F,
+                            kNovaFontStyleRegular,
+                            kMuted,
+                            layout.details.x + 2.0F,
+                            layout.details.x + layout.details.w - 2.0F,
+                            layout.details.y + 15.0F,
+                            "Price: " + std::to_string(price));
+      NovaText_DrawCentered(platform,
+                            font_cache,
+                            NovaFontFamily::kGeneva,
+                            9.0F,
+                            kNovaFontStyleRegular,
+                            kMuted,
+                            layout.details.x + 2.0F,
+                            layout.details.x + layout.details.w - 2.0F,
+                            layout.details.y + 30.0F,
+                            "Mass: " + std::to_string(mass));
+      NovaText_DrawCentered(
+          platform,
+          font_cache,
+          NovaFontFamily::kGeneva,
+          9.0F,
+          kNovaFontStyleRegular,
+          kMuted,
+          layout.details.x + 2.0F,
+          layout.details.x + layout.details.w - 2.0F,
+          layout.details.y + 45.0F,
+          "Free: " + std::to_string(std::max(0, NovaLanded_FreeMass(state))));
+      const auto lines = WrapDescriptionLines(
+          selected_description, 28, [](std::string_view text) {
+            return static_cast<int>(text.size());
+          });
+      for (std::size_t i = 0; i < std::min<std::size_t>(lines.size(), 16);
+           ++i) {
+        NovaText_DrawCentered(
+            platform,
+            font_cache,
+            NovaFontFamily::kGeneva,
+            9.0F,
+            kNovaFontStyleRegular,
+            kMuted,
+            layout.description.x + 5.0F,
+            layout.description.x + layout.description.w - 5.0F,
+            layout.description.y + 39.0F + static_cast<float>(i) * 13.0F,
+            lines[i]);
+      }
+    } else {
+      const ShipClass *ship = state.scenario.Ship(session.selected_id);
+      const std::array<std::string, 6> lines{
+          "Price: " + std::to_string(price),
+          "Shields: " + std::to_string(ship->base_shield),
+          "Armor: " + std::to_string(ship->base_armor),
+          "Cargo: " + std::to_string(ship->cargo_holds),
+          "Mass: " + std::to_string(ship->mass_tons),
+          "Crew: " + std::to_string(ship->crew)};
+      for (std::size_t i = 0; i < lines.size(); ++i) {
+        NovaText_DrawCentered(platform,
+                              font_cache,
+                              NovaFontFamily::kGeneva,
+                              9.0F,
+                              kNovaFontStyleRegular,
+                              kMuted,
+                              layout.details.x + 2.0F,
+                              layout.details.x + layout.details.w - 2.0F,
+                              layout.details.y + 14.0F +
+                                  static_cast<float>(i) * 14.0F,
+                              lines[i]);
+      }
+      const std::array<std::string, 5> comparison{
+          "Trade-in: " +
+              std::to_string(NovaLanded_ShipTradeInValue(state, stellar_id)),
+          "Speed: " + std::to_string(static_cast<int>(ship->speed)),
+          "Acceleration: " + std::to_string(static_cast<int>(ship->accel)),
+          "Maneuver: " + std::to_string(static_cast<int>(ship->turn_rate)),
+          "Fuel: " + std::to_string(ship->base_fuel)};
+      for (std::size_t i = 0; i < comparison.size(); ++i) {
+        NovaText_DrawCentered(
+            platform,
+            font_cache,
+            NovaFontFamily::kGeneva,
+            10.0F,
+            i == 0 ? kNovaFontStyleBold : kNovaFontStyleRegular,
+            kMuted,
+            layout.description.x + 5.0F,
+            layout.description.x + layout.description.w - 5.0F,
+            layout.description.y + 48.0F + static_cast<float>(i) * 22.0F,
+            comparison[i]);
+      }
+    }
   }
-  NovaText_DrawCentered(platform, font_cache, NovaFontFamily::kGeneva, 10.0F,
-                        kNovaFontStyleRegular, kMuted, 35.0F, 605.0F, 365.0F,
+  NovaText_DrawCentered(platform,
+                        font_cache,
+                        NovaFontFamily::kGeneva,
+                        10.0F,
+                        kNovaFontStyleRegular,
+                        kMuted,
+                        layout.description.x + 5.0F,
+                        layout.description.x + layout.description.w - 5.0F,
+                        layout.description.y + layout.description.h - 9.0F,
                         "Credits: " + std::to_string(state.player.credits));
 }
 
-LandedExit RunStoreDialog(SdlPlatform &platform, GameState &state,
-                          LandedService service, std::int16_t stellar_id) {
+LandedExit RunStoreDialog(SdlPlatform &platform,
+                          GameState &state,
+                          LandedService service,
+                          std::int16_t stellar_id) {
   const bool outfit_store = service == LandedService::kOutfit;
-  LandedStoreSession session = outfit_store
-      ? NovaLanded_OpenOutfitterSession(state, stellar_id)
-      : NovaLanded_OpenShipyardSession(state, stellar_id);
+  LandedStoreSession session =
+      outfit_store ? NovaLanded_OpenOutfitterSession(state, stellar_id)
+                   : NovaLanded_OpenShipyardSession(state, stellar_id);
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
-  auto frame = LoadPictTexture(platform, NovaDocked_SubWindowFramePict(service));
+  auto frame =
+      LoadPictTexture(platform, NovaDocked_SubWindowFramePict(service));
+  StoreTextureCache texture_cache;
+  std::string selected_description;
+  std::int16_t selected_description_id = -1;
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
-  const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
-  constexpr SDL_FRect kGrid{48.0F, 122.0F, 5.0F * 108.0F, 4.0F * 37.0F};
-  constexpr SDL_FRect kLeave{55.0F, 400.0F, 90.0F, 25.0F};
-  constexpr SDL_FRect kBuy{165.0F, 400.0F, 90.0F, 25.0F};
-  constexpr SDL_FRect kSell{275.0F, 400.0F, 90.0F, 25.0F};
-  constexpr SDL_FRect kPrevious{385.0F, 400.0F, 90.0F, 25.0F};
-  constexpr SDL_FRect kNext{495.0F, 400.0F, 90.0F, 25.0F};
   while (!platform.quit_requested()) {
-    DrawSubWindowDialog(platform, font_cache, button_art,
-                        backdrop ? backdrop->get() : nullptr,
-                        frame ? frame->get() : nullptr, service, panel);
-    DrawStoreContents(platform, font_cache, button_art, state, session, stellar_id);
+    const StoreLayout layout = LayoutStore(platform, outfit_store);
+    SDL_Texture *selected_image = StorePreviewTexture(
+        platform, texture_cache, outfit_store, session.selected_id);
+    if (outfit_store && session.selected_id != selected_description_id) {
+      selected_description.clear();
+      if (session.selected_id >= 0) {
+        if (const auto description = NovaResource_LoadDescription(
+                static_cast<std::uint16_t>(session.selected_id + 3000))) {
+          selected_description = description->text;
+        }
+      }
+      selected_description_id = session.selected_id;
+    }
+    DrawStoreBase(platform,
+                  backdrop ? backdrop->get() : nullptr,
+                  frame ? frame->get() : nullptr,
+                  layout);
+    DrawStoreContents(platform,
+                      font_cache,
+                      button_art,
+                      state,
+                      session,
+                      stellar_id,
+                      layout,
+                      texture_cache,
+                      selected_image,
+                      selected_description);
     SDL_RenderPresent(platform.renderer());
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
-      if (input->key == TextKey::escape || input->key == TextKey::enter) return LandedExit::kServiceComplete;
-      if (input->key != TextKey::primary) continue;
+      if (input->key == TextKey::escape) {
+        if (outfit_store)
+          NovaLanded_CloseOutfitterSession(state);
+        return LandedExit::kServiceComplete;
+      }
+      if (input->key == TextKey::character) {
+        const char key = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(input->character)));
+        if (key == 'l') {
+          if (outfit_store)
+            NovaLanded_CloseOutfitterSession(state);
+          return LandedExit::kServiceComplete;
+        }
+        if (key == 'p') {
+          session.PagePrevious();
+          continue;
+        }
+        if (key == 'n') {
+          session.PageNext();
+          continue;
+        }
+        if (key == 'b' && session.selected_id >= 0) {
+          if (outfit_store) {
+            (void)NovaLanded_BuyOutfit(
+                state, stellar_id, session.selected_id, 1);
+          } else {
+            const ShipClass *ship = state.scenario.Ship(session.selected_id);
+            (void)NovaLanded_ReplacePlayerShip(
+                state,
+                stellar_id,
+                session.selected_id,
+                ship == nullptr ? "" : ship->short_name);
+          }
+          continue;
+        }
+        if (key == 's' && outfit_store && session.selected_id >= 0) {
+          (void)NovaLanded_SellOutfit(state, session, session.selected_id, 1);
+          continue;
+        }
+      }
+      if (input->key != TextKey::primary)
+        continue;
       const SDL_FPoint point = platform.mouse_position();
-      if (Contains(kLeave, point)) return LandedExit::kServiceComplete;
-      if (Contains(kPrevious, point)) { session.PagePrevious(); continue; }
-      if (Contains(kNext, point)) { session.PageNext(); continue; }
-      if (Contains(kGrid, point)) {
-        const std::size_t col = static_cast<std::size_t>((point.x - kGrid.x) / 108.0F);
-        const std::size_t row = static_cast<std::size_t>((point.y - kGrid.y) / 37.0F);
-        session.SelectSlot(row * 5 + col);
+      if (Contains(layout.leave, point)) {
+        if (outfit_store)
+          NovaLanded_CloseOutfitterSession(state);
+        return LandedExit::kServiceComplete;
+      }
+      if (Contains(layout.previous, point)) {
+        session.PagePrevious();
         continue;
       }
-      if (Contains(kBuy, point) && session.selected_id >= 0) {
+      if (Contains(layout.next, point)) {
+        session.PageNext();
+        continue;
+      }
+      if (Contains(layout.grid, point)) {
+        for (std::size_t slot = 0; slot < LandedStoreSession::kPageSlots;
+             ++slot) {
+          if (Contains(StoreCell(layout, slot), point)) {
+            session.SelectSlot(slot);
+            break;
+          }
+        }
+        continue;
+      }
+      if (Contains(layout.buy, point) && session.selected_id >= 0) {
         if (outfit_store) {
           (void)NovaLanded_BuyOutfit(state, stellar_id, session.selected_id, 1);
         } else {
           const ShipClass *ship = state.scenario.Ship(session.selected_id);
-          (void)NovaLanded_ReplacePlayerShip(state, stellar_id, session.selected_id,
-                                              ship == nullptr ? "" : ship->short_name);
+          (void)NovaLanded_ReplacePlayerShip(
+              state,
+              stellar_id,
+              session.selected_id,
+              ship == nullptr ? "" : ship->short_name);
         }
-        session = outfit_store ? NovaLanded_OpenOutfitterSession(state, stellar_id)
-                               : NovaLanded_OpenShipyardSession(state, stellar_id);
+        session = outfit_store
+                      ? NovaLanded_OpenOutfitterSession(state, stellar_id)
+                      : NovaLanded_OpenShipyardSession(state, stellar_id);
         continue;
       }
-      if (outfit_store && Contains(kSell, point) && session.selected_id >= 0) {
+      if (outfit_store && Contains(layout.sell_or_info, point) &&
+          session.selected_id >= 0) {
         (void)NovaLanded_SellOutfit(state, session, session.selected_id, 1);
       }
     }
@@ -349,7 +749,8 @@ LandedExit NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                                          GameState &state,
                                          LandedService service,
                                          std::int16_t stellar_id) {
-  if (service == LandedService::kOutfit || service == LandedService::kShipyard) {
+  if (service == LandedService::kOutfit ||
+      service == LandedService::kShipyard) {
     return RunStoreDialog(platform, state, service, stellar_id);
   }
   NovaLog::Info("opening docked sub-window dialog '{}' at stellar {}",

@@ -272,3 +272,8 @@ struct NovaStellarDescription {
 // nullopt when the archive/record is absent or the payload is too short.
 [[nodiscard]] std::optional<NovaStellarDescription>
 NovaResource_LoadStellarDescription(std::int16_t stellar_id);
+
+// Reads an arbitrary `desc` resource through the selection-dialog format.
+// Landed stores use outfit_id + 3000 for selected-item descriptions.
+[[nodiscard]] std::optional<NovaStellarDescription>
+NovaResource_LoadDescription(std::uint16_t resource_id);

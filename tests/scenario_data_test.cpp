@@ -114,6 +114,17 @@ TEST_CASE("record names are surfaced from the BRGR map for ships and outfits",
   CHECK(data.Weapon(0x80)->name == "Light Blaster");
 }
 
+TEST_CASE("stellar technology fields decode for landed stores",
+          "[scenario][stellar][landed_store]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const Stellar *earth = data.Stellar(0x80);
+  REQUIRE(earth != nullptr);
+  CHECK(earth->tech_level == 7);
+  CHECK(earth->special_tech ==
+        std::array<std::int16_t, 8>{14, 20, 55, 57, 80, 116, 0, 0});
+}
+
 TEST_CASE("outfit tail fields decode at their real payload offsets",
           "[scenario][data]") {
   ScenarioData data;

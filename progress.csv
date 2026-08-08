@@ -422,8 +422,8 @@ address,name,impl_file,reimpl_pct,comment
 0x00469CF0,NovaInput_CommandHasKeyBinding,,0%,
 0x00469D10,Input_PumpAndTestCommand,,0%,
 0x00469D30,Stellar_ExtractTravelFlagConnectiveValue,,0%,
-0x00469E90,NovaUi_RebuildShipyardAvailabilityList,,0%,
-0x0046A220,Outfit_RebuildAvailableOutfitListForTravelStellar,,0%,
+0x00469E90,NovaUi_RebuildShipyardAvailabilityList,src/game/landed_store.cpp,45%,Partial clean-room availability list: decoded stellar base/special tech gates, valid-resource and BuyRandom-zero filtering, Require and availability expressions, equal-weight suppression, and descending stable ordering; positive-percent daily availability rolls and hire mode remain TODO(decomp).
+0x0046A220,Outfit_RebuildAvailableOutfitListForTravelStellar,src/game/landed_store.cpp,45%,Partial clean-room availability list: decoded stellar base/special tech gates, valid-resource and owned visibility handling, Require and availability expressions, display-weight-zero inclusion, equal-weight suppression, and descending stable ordering; random stock and full flag semantics remain TODO(decomp).
 0x0046A5D0,Outfit_ComputePlayerCargoAndJunkTotal,,0%,
 0x0046A680,Outfit_HasAnyOwnedItem,,0%,
 0x0046A730,Ship_ComputeShipTotalMass,,0%,
@@ -747,26 +747,26 @@ address,name,impl_file,reimpl_pct,comment
 0x0048D5A0,TravelOutfitMenu_FUN_0048d5a0,,0%,
 0x0048D6F0,NovaUi_RedrawTravelServicesMenu,,0%,
 0x0048E970,FUN_0048e970,,0%,
-0x0048EA70,NovaUi_RunTravelOutfitInteractionLoop,,0%,
-0x004903C0,NovaUi_HandleTravelOutfitMenuInput,,0%,
+0x0048EA70,NovaUi_RunTravelOutfitInteractionLoop,src/game/docked_dialog.cpp,38%,Partial clean-room modal: native 765x321 frame and DITL-aligned 4x5 grid/action controls; row paging; one-item buy/sell; inventory mutation and exit cleanup. Quantity modifiers and remaining transaction/script branches remain TODO(decomp).
+0x004903C0,NovaUi_HandleTravelOutfitMenuInput,src/game/docked_dialog.cpp,25%,Mouse grid/action handling plus B/S/P/N/L shortcuts drive selection buy sell paging and exit; original command-map navigation and quantity modifiers remain TODO(decomp).
 0x004909A0,TravelOutfitMenu_FUN_004909a0,,0%,
-0x00490C70,NovaUi_RedrawTravelOutfitMenu,,0%,
-0x00491950,NovaUi_IsTravelOutfitPurchaseAllowed,src/game/landed_store.cpp,25%,Partial clean-room purchase gate: tech/special-tech Require availability control-expression ownership-limit and credit checks; cargo special effects and government/script gates remain TODO(decomp).
+0x00490C70,NovaUi_RedrawTravelOutfitMenu,src/game/docked_dialog.cpp,48%,Partial clean-room redraw using native PICT 0x2136 and original DITL geometry: 4x5 grid with zero-based outfit index+6000 PICT thumbnails selected 200x200 preview desc resource-id+3000 price credits mass/free-mass selection and disabled action states; exact fonts/colors/cache cadence remain TODO(decomp).
+0x00491950,NovaUi_IsTravelOutfitPurchaseAllowed,src/game/landed_store.cpp,40%,Partial clean-room purchase gate: tech/special-tech Require availability expressions ownership limits credits and free-mass gate; cargo special effects government and script gates remain TODO(decomp).
 0x00491F30,NovaUi_RunTravelDestinationInteractionLoop,,0%,
 0x00492C40,NovaUi_RenderTravelDestinationOverlay,,0%,
 0x00492F10,NovaUi_PollTravelScriptAction,,0%,
-0x00492F30,NovaUi_RunShipyardPurchaseLoop,,0%,
-0x00493FC0,NovaUi_ShipyardHandleSelectionInput,,0%,
-0x0049458D,NovaUi_ShipyardSetCursorSlot,,0%,
-0x004948B0,NovaUi_DrawShipyardShipList,,0%,
+0x00492F30,NovaUi_RunShipyardPurchaseLoop,src/game/docked_dialog.cpp,28%,Partial replacement-mode modal: native Shipyard frame selection row paging purchase gate and player-ship replacement dispatch; confirmation/name dialog escort-hire mode and nested interactions remain TODO(decomp).
+0x00493FC0,NovaUi_ShipyardHandleSelectionInput,src/game/docked_dialog.cpp,20%,Mouse grid/action selection plus B/P/N/L shortcuts reconstructed for replacement mode; original keyboard navigation and escort-hire purchase branch remain TODO(decomp).
+0x0049458D,NovaUi_ShipyardSetCursorSlot,src/game/landed_store.cpp,25%,LandedStoreSession tracks 20-slot cursor selection and preserves/clears it across four-item row paging; original directional command mapping remains TODO(decomp).
+0x004948B0,NovaUi_DrawShipyardShipList,src/game/docked_dialog.cpp,45%,Partial native Shipyard redraw: PICT 0x2135 DITL-aligned 4x5 grid ship-class PICT id+5000 thumbnails and 200x200 selected preview selection frame price/trade-in stats and five gated actions; exact cache cadence/text and scripted variants remain TODO(decomp).
 0x004956A0,FUN_004956a0,,0%,
-0x00495C80,NovaUi_DrawShipyardDetailPanel,,0%,
+0x00495C80,NovaUi_DrawShipyardDetailPanel,src/game/docked_dialog.cpp,15%,Selected ship name price trade-in and core speed acceleration maneuver fuel shield armor cargo mass crew fields are shown inline; original nested DLOG detail panel and complete stat comparison remain TODO(decomp).
 0x00497430,FUN_00497430,,0%,
 0x00497500,NovaMainLoop_PumpAndYieldFrames,,0%,
 0x004976B0,Ui_ShowDialogFromResource,,0%,
 0x004977D0,Ui_ShowConfirmDialog,,0%,
 0x00497900,NovaUi_ShowTextConfirmCodeDialog,,0%,
-0x00497B70,FUN_00497b70,,0%,
+0x00497B70,FUN_00497b70,src/game/docked_dialog.cpp,20%,StoreTextureCache lazily loads and reuses outfit/ship PICT thumbnails per modal; original shared 128-entry atlas LRU and three-load-per-redraw cadence are not reproduced.
 0x00497CF0,FUN_00497cf0,,0%,
 0x00497D50,FUN_00497d50,,0%,
 0x00497DF0,Frame_RenderViewportBackground,src/game/spaceflight_view.cpp,50%,system-space backdrop fill reimplemented (DrawBackground: per-system BkgndColor clear + fill + commit); surface/rect-copy plumbing not reconstructed
@@ -781,7 +781,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0049A540,NovaUi_DrawPlayerSpecialInteractionWindow,,0%,
 0x0049C050,NovaUi_BuildPlayerSpecialInteractionStrings,,0%,
 0x0049D630,FUN_0049d630,,0%,
-0x0049D640,Outfit_ComputeScaledPurchasePrice,,0%,
+0x0049D640,Outfit_ComputeScaledPurchasePrice,src/game/landed_store.cpp,100%,Faithful clean-room price scaling: tech discount nearest-unit rounding and threshold quantization.
 0x0049D7A0,NoSys_NoOp_0049d7a0,,0%,
 0x0049D7B0,NoSys_NoOp_0049d7b0,,0%,
 0x0049D7C0,FUN_0049d7c0,,0%,
@@ -797,12 +797,12 @@ address,name,impl_file,reimpl_pct,comment
 0x0049EEC0,FUN_0049eec0,,0%,
 0x0049EEF0,UiPanel_TrackSixEntryMouseSelection,,0%,
 0x0049F1F0,TravelOutfitMenu_FUN_0049f1f0,,0%,
-0x0049F3F0,NovaUi_ShipyardPageNavInput,,0%,
-0x0049F6F0,NovaUi_ShipyardSelectRow,,0%,
-0x0049F8F0,NovaUi_HitTestAndTrackTravelOutfitNavButtons,,0%,
-0x0049FBB0,TravelOutfitMenu_FUN_0049fbb0,,0%,
+0x0049F3F0,NovaUi_ShipyardPageNavInput,src/game/docked_dialog.cpp,25%,DITL-aligned Leave Buy Info Previous and Next mouse hit tests with enabled paging/purchase state; held-button press tracking remains TODO(decomp).
+0x0049F6F0,NovaUi_ShipyardSelectRow,src/game/docked_dialog.cpp,30%,Draws five Shipyard controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
+0x0049F8F0,NovaUi_HitTestAndTrackTravelOutfitNavButtons,src/game/docked_dialog.cpp,25%,DITL-aligned Leave Buy Sell Previous and Next mouse hit tests with transaction/paging gates; held-button press tracking remains TODO(decomp).
+0x0049FBB0,TravelOutfitMenu_FUN_0049fbb0,src/game/docked_dialog.cpp,30%,Draws five Outfitter controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
 0x0049FE10,NovaUi_HitTestAndTrackTravelActionButtons,src/game/landed_window.cpp,15%,"mouse-tracking hover for the docked service slots: ServiceButtonAt finds the hovered 145x25 button, ServiceAvailable gates disabled slots (per StellarDef travel_flags/fuel/credits), the hovered enabled slot renders in the pressed state; the original's button-held release-selection loop is not reconstructed"
-0x004A0220,NovaUi_RedrawTravelActionButtons,src/game/landed_window.cpp,20%,docked action-button draw: normal/hover(pressed)/disabled(grey) three-state strips via ServicesButtonArt::Draw + ServiceLabel + ServiceAvailable gating in NovaLanded_RunWindow (labels/7-button order diverge from the original 7-slot strip)
+0x004A0220,NovaUi_RedrawTravelActionButtons,src/game/landed_window.cpp,30%,docked action-button draw: faithful one-based UiPanel item numbers mapped to zero-based DITL ordinals and original physical order; normal/hover(pressed)/disabled(grey) strips via ServicesButtonArt::Draw + ServiceLabel + ServiceAvailable gating; exact original text-resource draw path remains TODO(decomp)
 0x004A04D0,TravelOutfitMenu_FUN_004a04d0,,0%,
 0x004A06A0,TravelOutfitMenu_FUN_004a06a0,,0%,
 0x004A0810,NovaUi_HitTestAndTrackTravelBinaryChoiceButtons,,0%,
@@ -1012,7 +1012,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004BD090,FUN_004bd090,,0%,
 0x004BD0C0,Prefs_SetNovaFilesPathPrefix,,0%,
 0x004BD160,Resource_ValidateInstallFolders,,0%,
-0x004BD3C0,NovaData_LoadScenarioResourceTables,,50%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields); ship+weapon verified; weapon-decode audit done: field names/offsets aligned with loader WeaponDef mapping (flags_secondary/tertiary/quaternary at +0x48/+0x66/+0x1e, turret_arc +0x30, homing/turn/shot-dwell +0x32, kickback +0x56, turret_group +0x58, burst_cycle_ticks +0x5a, burst_reset_cooldown +0x5c, retarget +0x68, jam_vuln +0x5e..+0x64; dropped bogus max_ammo/flags2/guided_turn at +0x44/+0x44/+0x72); system/stellar partial (dude types/prob, reinf, visibility added; stellar tail TODO(decomp)); stellar animation fields (AnimDelay/Frame0Bias = +0x470/+0x472 from payload +0x22/+0x24) and hypergate engage_highlight_frame (+0x26 from payload +0x18) decoded"
+0x004BD3C0,NovaData_LoadScenarioResourceTables,src/game/scenario_data.cpp,52%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields); ship+weapon verified; weapon-decode audit done: field names/offsets aligned with loader WeaponDef mapping (flags_secondary/tertiary/quaternary at +0x48/+0x66/+0x1e, turret_arc +0x30, homing/turn/shot-dwell +0x32, kickback +0x56, turret_group +0x58, burst_cycle_ticks +0x5a, burst_reset_cooldown +0x5c, retarget +0x68, jam_vuln +0x5e..+0x64; dropped bogus max_ammo/flags2/guided_turn at +0x44/+0x44/+0x72); system/stellar partial (dude types/prob, reinf, visibility, TechLevel and SpecialTech1-8 decoded; stellar tail TODO(decomp)); stellar animation fields (AnimDelay/Frame0Bias = +0x470/+0x472 from payload +0x22/+0x24) and hypergate engage_highlight_frame (+0x26 from payload +0x18) decoded"
 0x004C6D50,Ui_LoadSelectionDialogResource,,0%,
 0x004C7040,FUN_004c7040,,0%,
 0x004C73B0,FUN_004c73b0,,0%,

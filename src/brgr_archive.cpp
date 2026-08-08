@@ -945,20 +945,10 @@ std::optional<NovaCharacterIntro> NovaResource_LoadCharacterIntro() {
 }
 
 std::optional<NovaStellarDescription>
-NovaResource_LoadStellarDescription(std::int16_t stellar_id) {
-  // Prompt text is keyed by the stellar's raw resource id (>= 0x80): the main
-  // docked window calls Ui_LoadSelectionDialogResource(stellar_id + 0x80)
-  // where its arg is the stellar's 0-based slot, i.e. the desc id = the raw
-  // stellar id. Resources that carry a block for a stellar are validated
-  // against the resource id clamp the loader uses (0x80.. *).
-  if (stellar_id < 0x80) {
-    return std::nullopt;
-  }
-  const auto data = NovaResource_Load(kResourceTypeDescription,
-                                      static_cast<std::uint16_t>(stellar_id));
+NovaResource_LoadDescription(std::uint16_t resource_id) {
+  const auto data = NovaResource_Load(kResourceTypeDescription, resource_id);
   if (!data || data->size() < 2) {
-    NovaLog::Todo("landing description desc {} absent or truncated",
-                  stellar_id);
+    NovaLog::Todo("description desc {} absent or truncated", resource_id);
     return std::nullopt;
   }
   const auto bytes = std::span{*data};
@@ -993,4 +983,17 @@ NovaResource_LoadStellarDescription(std::int16_t stellar_id) {
     }
   }
   return out;
+}
+
+std::optional<NovaStellarDescription>
+NovaResource_LoadStellarDescription(std::int16_t stellar_id) {
+  // Prompt text is keyed by the stellar's raw resource id (>= 0x80): the main
+  // docked window calls Ui_LoadSelectionDialogResource(stellar_id + 0x80)
+  // where its arg is the stellar's 0-based slot, i.e. the desc id = the raw
+  // stellar id. Resources that carry a block for a stellar are validated
+  // against the resource id clamp the loader uses (0x80.. *).
+  if (stellar_id < 0x80) {
+    return std::nullopt;
+  }
+  return NovaResource_LoadDescription(static_cast<std::uint16_t>(stellar_id));
 }

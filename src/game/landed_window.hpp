@@ -109,8 +109,9 @@ struct DockedLayout {
 // resources cannot be decoded. Pure rect math; testable without a renderer.
 bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out);
 
-// Maps the original Spaceport's DITL item ordinal to its action.  Only seven
-// item indices are controls: 12, 4, 7, 8, 9, 10, and 11.
+// Maps the original Spaceport's zero-based DITL item ordinal to its action.
+// Ghidra's UI calls name the same controls by one-based item numbers 12, 4, 7,
+// 8, 9, 10, and 11.
 [[nodiscard]] std::optional<LandedService>
 NovaDialog_DockedServiceForDitlItem(std::size_t ditl_index);
 

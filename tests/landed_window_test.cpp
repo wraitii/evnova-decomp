@@ -3,7 +3,9 @@
 
 #include "brgr_archive.hpp"
 #include "game/docked_dialog.hpp"
+#include "game/landed_store.hpp"
 #include "game/landed_window.hpp"
+#include "game/outfit.hpp"
 #include "pict_image.hpp"
 
 #include <algorithm>
@@ -12,11 +14,134 @@
 #include <optional>
 #include <vector>
 
-// The docked service buttons come from the real Spaceport DITL 0x3e8. The
-// two-column arrangement (services 0-3 on the left column, 4-7 on the right,
-// each column top-to-bottom) is what BuildServiceButtons produces, so this
-// verifies the split/sort that lands Launch..BuySell left and Outfit..Starmap
-// right stays faithful to the LandedService enum.
+TEST_CASE("landed stores suppress later equal-weight alternatives and retain "
+          "page selection",
+          "[landed_store]") {
+  game::GameState state;
+  state.scenario.stellars.resize(1);
+  state.scenario.outfits.resize(3);
+  state.scenario.outfits[0].name = "First";
+  state.scenario.outfits[0].display_weight = 10;
+  state.scenario.outfits[0].flags = 0x1000;
+  state.scenario.outfits[1].name = "Second";
+  state.scenario.outfits[1].display_weight = 10;
+  state.scenario.outfits[2].name = "Third";
+  state.scenario.outfits[2].display_weight = 5;
+
+  const auto outfitter = game::NovaLanded_OpenOutfitterSession(state, 0x80);
+  CHECK(outfitter.available_ids == std::vector<std::int16_t>{0x80, 0x82});
+
+  state.scenario.ships.resize(3);
+  state.scenario.ships[0].display_name = "First";
+  state.scenario.ships[0].display_weight = 10;
+  state.scenario.ships[0].availability_flags = 0x4000;
+  state.scenario.ships[1].display_name = "Second";
+  state.scenario.ships[1].display_weight = 10;
+  state.scenario.ships[2].display_name = "Third";
+  state.scenario.ships[2].display_weight = 5;
+  state.scenario.ships.push_back({});
+  state.scenario.ships[3].display_name = "Mission-only variant";
+  state.scenario.ships[3].display_weight = 20;
+  state.scenario.ships[3].buy_random = 0;
+  const auto shipyard = game::NovaLanded_OpenShipyardSession(state, 0x80);
+  CHECK(shipyard.available_ids == std::vector<std::int16_t>{0x80, 0x82});
+
+  game::LandedStoreSession session;
+  for (std::int16_t id = 0; id < 25; ++id)
+    session.available_ids.push_back(id);
+  session.SelectSlot(5);
+  session.PageNext();
+  CHECK(session.page_base == 4);
+  CHECK(session.cursor_slot == 1);
+  CHECK(session.selected_id == 5);
+  session.PagePrevious();
+  CHECK(session.page_base == 0);
+  CHECK(session.cursor_slot == 5);
+  CHECK(session.selected_id == 5);
+  session.SelectSlot(2);
+  session.PageNext();
+  CHECK(session.cursor_slot == -1);
+  CHECK(session.selected_id == -1);
+}
+
+TEST_CASE("Earth landed stores contain real scenario inventory",
+          "[landed_store][scenario]") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const auto outfitter = game::NovaLanded_OpenOutfitterSession(state, 0x80);
+  CHECK(std::ranges::find(outfitter.available_ids, 0x80) !=
+        outfitter.available_ids.end());
+  CHECK(std::ranges::none_of(outfitter.available_ids, [&state](auto id) {
+    const auto *outfit = state.scenario.Outfit(id);
+    return outfit == nullptr || outfit->name.empty();
+  }));
+
+  const auto shipyard = game::NovaLanded_OpenShipyardSession(state, 0x80);
+  CHECK_FALSE(shipyard.available_ids.empty());
+  CHECK(std::ranges::none_of(shipyard.available_ids, [&state](auto id) {
+    const auto *ship = state.scenario.Ship(id);
+    return ship == nullptr || ship->display_name.empty();
+  }));
+}
+
+TEST_CASE("closing the Outfitter removes temporary outfits and caps meters",
+          "[landed_store]") {
+  game::GameState state;
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].base_shield = 100;
+  state.scenario.ships[0].base_armor = 80;
+  state.scenario.ships[0].base_fuel = 60;
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].flags = 0x0010;
+  state.scenario.outfits[0].mod_type =
+      static_cast<std::int16_t>(game::OutfitEffect::kShield);
+  state.scenario.outfits[0].mod_val = 50;
+  state.inventory.outfit_owned_count[0] = 1;
+  state.player.shield_points = 140.0F;
+  state.player.armor_points = 90.0F;
+  state.player.fuel_points = 70.0F;
+
+  game::NovaLanded_CloseOutfitterSession(state);
+  CHECK(state.inventory.outfit_owned_count[0] == 0);
+  CHECK(state.player.shield_points == 100.0F);
+  CHECK(state.player.armor_points == 80.0F);
+  CHECK(state.player.fuel_points == 60.0F);
+}
+
+TEST_CASE("Outfitter transactions enforce free mass in both directions",
+          "[landed_store]") {
+  game::GameState state;
+  state.scenario.stellars.resize(1);
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].mass_tons = 100;
+  state.scenario.ships[0].free_mass = 10;
+  state.scenario.outfits.resize(2);
+  state.scenario.outfits[0].cost = 100;
+  state.scenario.outfits[0].mass_tons = 6;
+  state.scenario.outfits[0].max_count = 5;
+  state.player.credits = 1'000;
+
+  CHECK(game::NovaLanded_FreeMass(state) == 10);
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x80));
+  state.inventory.outfit_owned_count[0] = 1;
+  CHECK(game::NovaLanded_FreeMass(state) == 4);
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x80));
+
+  // A negative-mass outfit supplies capacity. Removing it is rejected when
+  // the remaining positive-mass load would exceed the bare hull allowance.
+  state.scenario.ships[0].free_mass = 5;
+  state.scenario.outfits[1].mass_tons = -4;
+  state.inventory.outfit_owned_count[1] = 1;
+  game::LandedStoreSession session;
+  CHECK(game::NovaLanded_FreeMass(state) == 3);
+  CHECK(game::NovaLanded_SellOutfit(state, session, 0x81, 1) == 0);
+  CHECK(state.inventory.outfit_owned_count[1] == 1);
+}
+
+// The docked service buttons come from the real Spaceport DITL 0x3e8. Verify
+// both physical columns and the non-sequential item-to-service mapping used by
+// the original window.
 TEST_CASE("docked DITL buttons arrange the two service columns",
           "[landed_window]") {
   if (!std::filesystem::exists("EV Nova/Nova.rez") &&
@@ -42,8 +167,9 @@ TEST_CASE("docked DITL buttons arrange the two service columns",
   REQUIRE(left.size() == 4);
   REQUIRE(right.size() == 4);
   const auto sort_rows = [](std::vector<std::array<std::int16_t, 4>> &col) {
-    std::sort(col.begin(), col.end(),
-              [](const auto &a, const auto &b) { return a[0] < b[0]; });
+    std::sort(col.begin(), col.end(), [](const auto &a, const auto &b) {
+      return a[0] < b[0];
+    });
   };
   sort_rows(left);
   sort_rows(right);
@@ -61,6 +187,38 @@ TEST_CASE("docked DITL buttons arrange the two service columns",
     CHECK(right[i][1] == kRightX);
     CHECK(right[i][0] == right_tops[i]);
   }
+
+  // UiPanel_GetEntryInfo's item numbers in Ghidra are one-based. The parser
+  // exposes zero-based DITL ordinals, and the resource geometry pins each
+  // mapped action to its original physical button.
+  const auto service_at = [&](std::size_t index) {
+    const auto it = std::ranges::find_if(
+        *items, [index](const auto &item) { return item.index == index; });
+    REQUIRE(it != items->end());
+    return std::pair{game::NovaDialog_DockedServiceForDitlItem(index),
+                     std::pair{it->top, it->left}};
+  };
+  CHECK(service_at(11) ==
+        std::pair{std::optional{game::LandedService::kLaunch},
+                  std::pair<std::int16_t, std::int16_t>{456, 471}});
+  CHECK(service_at(3) ==
+        std::pair{std::optional{game::LandedService::kRefuel},
+                  std::pair<std::int16_t, std::int16_t>{416, 471}});
+  CHECK(service_at(6) ==
+        std::pair{std::optional{game::LandedService::kBuySellCargo},
+                  std::pair<std::int16_t, std::int16_t>{414, 3}});
+  CHECK(service_at(7) ==
+        std::pair{std::optional{game::LandedService::kOutfit},
+                  std::pair<std::int16_t, std::int16_t>{375, 471}});
+  CHECK(service_at(8) ==
+        std::pair{std::optional{game::LandedService::kShipyard},
+                  std::pair<std::int16_t, std::int16_t>{333, 471}});
+  CHECK(service_at(9) ==
+        std::pair{std::optional{game::LandedService::kMissionBoard},
+                  std::pair<std::int16_t, std::int16_t>{374, 3}});
+  CHECK(service_at(10) ==
+        std::pair{std::optional{game::LandedService::kBar},
+                  std::pair<std::int16_t, std::int16_t>{333, 3}});
 }
 
 // The dialog-window layout adapter (#3) centers the 618x517 Spaceport window
@@ -94,17 +252,26 @@ TEST_CASE("dialog layout centers the dock window and buckets the items",
   std::size_t buttons = 0, outer = 0, inner = 0, bands = 0;
   for (const auto &item : layout.items) {
     switch (item.kind) {
-    case DockedItemKind::kButton: ++buttons; break;
-    case DockedItemKind::kOuterPanel: ++outer; break;
-    case DockedItemKind::kInnerPanel: ++inner; break;
-    case DockedItemKind::kTitleBand: ++bands; break;
-    case DockedItemKind::kOrnament: break;
+    case DockedItemKind::kButton:
+      ++buttons;
+      break;
+    case DockedItemKind::kOuterPanel:
+      ++outer;
+      break;
+    case DockedItemKind::kInnerPanel:
+      ++inner;
+      break;
+    case DockedItemKind::kTitleBand:
+      ++bands;
+      break;
+    case DockedItemKind::kOrnament:
+      break;
     }
   }
   CHECK(buttons == 8);
-  CHECK(outer == 1);   // 612x285 outer panel
-  CHECK(inner == 1);   // 301x185 inner panel
-  CHECK(bands == 1);   // 303x18 title band
+  CHECK(outer == 1); // 612x285 outer panel
+  CHECK(inner == 1); // 301x185 inner panel
+  CHECK(bands == 1); // 303x18 title band
 
   // Bottom-most left-column button rect: DITL (top 456, left 3) mapped by the
   // centered window origin (y=456-18=438, x=3+11=14), 145x25.
@@ -138,22 +305,21 @@ TEST_CASE("landing description loader decodes the desc block",
   // must be non-empty and start with the stellar name.
   {
     const auto earth = NovaResource_LoadStellarDescription(0x80);
-    const bool earth_ok =
-        earth.has_value() && !earth->text.empty() &&
-        earth->text.starts_with("Earth");
+    const bool earth_ok = earth.has_value() && !earth->text.empty() &&
+                          earth->text.starts_with("Earth");
     CHECK(earth_ok);
   }
   {
     const auto viking = NovaResource_LoadStellarDescription(0x9d);
-    const bool viking_ok =
-        viking.has_value() && !viking->text.empty() &&
-        viking->text.starts_with("Viking");
+    const bool viking_ok = viking.has_value() && !viking->text.empty() &&
+                           viking->text.starts_with("Viking");
     CHECK(viking_ok);
   }
 
   // An id with no desc block (e.g. 0x7f, below the resource range) yields
   // nothing rather than a crash.
-  const bool missing_ok = !NovaResource_LoadStellarDescription(0x7f).has_value();
+  const bool missing_ok =
+      !NovaResource_LoadStellarDescription(0x7f).has_value();
   CHECK(missing_ok);
 }
 

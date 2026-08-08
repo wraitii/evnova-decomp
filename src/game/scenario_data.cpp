@@ -245,6 +245,7 @@ namespace {
 // Offsets verified against Nova Data 2's stellar payloads and the loader's
 // stellar section (0x004bd3c0): xPos+0, yPos+2, link_a_id+4 (the primary spin
 // sprite-set id, id+1000 is the sp\x9an resource), travel_flags (32-bit)+6,
+// TechLevel+0x0c, SpecialTech1-3+0x0e and SpecialTech4-8+0x444,
 // reputation_threshold+0x16, availability_flags+0x20, service_cost+0x234,
 // link_b_id+0x240. government_id+0x14 is rebased into the 0.. space and set
 // to -1 when < 0x80.
@@ -256,7 +257,11 @@ namespace {
   if (st.link_a_id < 0 || st.link_a_id > 0xff) {
     st.link_a_id = -1;
   }
-  st.flags = ReadBe32(bytes, 0x06);          // travel_flags
+  st.flags = ReadBe32(bytes, 0x06);       // travel_flags
+  st.tech_level = ReadBeI16(bytes, 0x0c); // TechLevel
+  st.special_tech[0] = ReadBeI16(bytes, 0x0e);
+  st.special_tech[1] = ReadBeI16(bytes, 0x10);
+  st.special_tech[2] = ReadBeI16(bytes, 0x12);
   st.government_id = ReadBeI16(bytes, 0x14); // Govt (resource id; <0x80 -> -1)
   if (st.government_id < 0x80) {
     st.government_id = -1;
@@ -277,6 +282,11 @@ namespace {
     }
   } else {
     st.link_b_id = -1;
+  }
+  if (bytes.size() >= 0x44e) {
+    for (std::size_t i = 0; i < 5; ++i) {
+      st.special_tech[i + 3] = ReadBeI16(bytes, 0x444 + i * 2);
+    }
   }
   // service_cost (payload +0x234; StellarDef +0x38), a destination-service
   // value whose collection path is not yet reconstructed.

@@ -116,7 +116,8 @@ std::int32_t NovaLanded_Refuel(GameState &state, std::int32_t price_per_unit) {
   // The original's stellar marker makes refuelling free, not unavailable.
   if (price_per_unit <= 0) {
     state.player.fuel_points = eff.fuel_capacity;
-    NovaLog::Info("refuel: granted {:.1f} fuel by free stellar service", missing);
+    NovaLog::Info("refuel: granted {:.1f} fuel by free stellar service",
+                  missing);
     return 0;
   }
   // Full cost for the whole top-up; the player may only buy as far as credits
@@ -255,7 +256,7 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
       const int w = item.right - item.left;
       const int h = item.bottom - item.top;
       if (w == 145 && h == 25) {
-      d.kind = DockedItemKind::kButton;
+        d.kind = DockedItemKind::kButton;
       } else if (w > 500 && h > 200) {
         d.kind = DockedItemKind::kOuterPanel;
       } else if (w > 250 && h > 150) {
@@ -264,9 +265,9 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
         d.kind = DockedItemKind::kTitleBand;
       } else {
         d.kind = DockedItemKind::kOrnament;
-    }
-    d.ditl_index = item.index;
-    out.items.push_back(d);
+      }
+      d.ditl_index = item.index;
+      out.items.push_back(d);
     }
     return true;
   }
@@ -277,8 +278,8 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
   out.window = {panel.x, panel.y, 618.0F, 517.0F};
   // The fallback has no raw DITL parser output, but retain the original
   // control ordinals so service dispatch still follows the same map.
-  constexpr std::array<std::size_t, 7> kFallbackDitlItems{12, 4, 7, 8,
-                                                            9, 10, 11};
+  constexpr std::array<std::size_t, 7> kFallbackDitlItems{
+      11, 3, 6, 7, 8, 9, 10};
   for (std::size_t i = 0; i < button_count; ++i) {
     const std::size_t side = i >= kRows ? 1 : 0;
     const std::size_t row = i % kRows;
@@ -298,14 +299,25 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
 std::optional<LandedService>
 NovaDialog_DockedServiceForDitlItem(std::size_t ditl_index) {
   switch (ditl_index) {
-  case 12: return LandedService::kLaunch;
-  case 4: return LandedService::kRefuel;
-  case 7: return LandedService::kBuySellCargo;
-  case 8: return LandedService::kOutfit;
-  case 9: return LandedService::kShipyard;
-  case 10: return LandedService::kMissionBoard;
-  case 11: return LandedService::kBar;
-  default: return std::nullopt;
+  // UiPanel_GetEntryInfo uses one-based item numbers; NovaDialogItem::index
+  // is deliberately zero-based. Ghidra's {12,4,7,8,9,10,11} therefore maps
+  // to the resource ordinals below.
+  case 11:
+    return LandedService::kLaunch;
+  case 3:
+    return LandedService::kRefuel;
+  case 6:
+    return LandedService::kBuySellCargo;
+  case 7:
+    return LandedService::kOutfit;
+  case 8:
+    return LandedService::kShipyard;
+  case 9:
+    return LandedService::kMissionBoard;
+  case 10:
+    return LandedService::kBar;
+  default:
+    return std::nullopt;
   }
 }
 
@@ -380,9 +392,10 @@ std::vector<ServiceButton> BuildServiceButtons(const DockedLayout &layout) {
     if (item.kind != DockedItemKind::kButton) {
       continue;
     }
-    if (const auto service = NovaDialog_DockedServiceForDitlItem(item.ditl_index)) {
-      buttons.push_back(ServiceButton{item.rect,
-                                      static_cast<std::uint8_t>(*service)});
+    if (const auto service =
+            NovaDialog_DockedServiceForDitlItem(item.ditl_index)) {
+      buttons.push_back(
+          ServiceButton{item.rect, static_cast<std::uint8_t>(*service)});
     }
   }
   return buttons;
@@ -710,7 +723,8 @@ DispatchService(SdlPlatform &platform, GameState &state, LandedContext &ctx) {
 
   case LandedService::kRefuel: {
     const Stellar *stellar = state.scenario.Stellar(ctx.stellar_id);
-    NovaLanded_Refuel(state, stellar != nullptr && stellar->hazard_marker ? 0 : 1);
+    NovaLanded_Refuel(state,
+                      stellar != nullptr && stellar->hazard_marker ? 0 : 1);
     return LandedExit::kServiceComplete;
   }
 
