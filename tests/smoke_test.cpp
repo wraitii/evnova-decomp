@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "brgr_archive.hpp"
+#include "game/gameplay_interface.hpp"
 #include "pict_image.hpp"
 #include "rle_sprite_sheet.hpp"
 
@@ -341,4 +342,41 @@ TEST_CASE("main-menu backdrop and logo PICTs decode to the 1024x768 space") {
   CHECK(logo_image->width == 654);
   CHECK(logo_image->height == 209 * 7);
   CHECK(logo_image->rgba_pixels.size() == 654U * (209U * 7U) * 4U);
+}
+
+TEST_CASE("HUD cockpit PICTs decode to the 194x767 status-bar strip") {
+  if (!MenuArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+
+  // The gameplay HUD "status bar" cockpit art is a narrow, full-height strip:
+  // PICT 0x2bc (Default), 0x2c0 (Auroran), 0x2c2 (Vell-os). Each interface
+  // layout names its own cockpit PICT (payload +0xa4).
+  for (const auto id : {0x2bc, 0x2c0, 0x2c2}) {
+    const auto data = NovaResource_LoadPictData(static_cast<std::uint16_t>(id));
+    REQUIRE(data);
+    const auto img = Resource_LoadPictAsImage(*data);
+    REQUIRE(img);
+    CHECK(img->width == 194);
+    CHECK(img->height == 767);
+    CHECK(img->rgba_pixels.size() == 194U * 767U * 4U);
+  }
+}
+
+TEST_CASE("HUD interface layout names a decodable gov cockpit PICT") {
+  if (!MenuArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  // The Default interface (0x80) backs the starter ship's HUD; its cockpit
+  // PICT must exist and decode so the HUD chrome is present, not just bars.
+  const auto layout = game::NovaResource_LoadGameplayInterfaceLayout(0x80);
+  REQUIRE(layout);
+  REQUIRE(layout->interface_bg_pict_id >= 0x80);
+  const auto data =
+      NovaResource_LoadPictData(layout->interface_bg_pict_id);
+  REQUIRE(data);
+  const auto img = Resource_LoadPictAsImage(*data);
+  REQUIRE(img);
+  CHECK(img->width == 194);
+  CHECK(img->height == 767);
 }

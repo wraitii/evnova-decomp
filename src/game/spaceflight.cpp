@@ -3,6 +3,7 @@
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "hud_renderer.hpp"
 #include "intro_cinematic.hpp"
 #include "landed_window.hpp"
 #include "outfit.hpp"
@@ -71,68 +72,22 @@ void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
 
 // Draw one in-game frame. The starfield, stellar bodies and the pilot's ship
 // are handled by the SpaceflightView (gh.getId 0x00417600 scope 2 sprite-world
-// draw + Frame_RenderViewportBackground); the HUD chrome below is a recognised
-// stand-in (proximity-scan/radar panels not reconstructed). The world view is
-// centred on the player so the ship sits at the play-area centre.
+// draw + Frame_RenderViewportBackground); the gov-specific HUD (cockpit PICT,
+// life-support bars and readouts) is composited by the HudRenderer over the
+// world, unscaled. The world view is centred on the player so the ship sits at
+// the play-area centre.
 void DrawInGameFrame(SdlPlatform &platform,
                      GameState &state,
-                     SpaceflightView &view) {
+                     SpaceflightView &view,
+                     HudRenderer &hud) {
   // The free-flight world extends: draw 1:1 across the whole (possibly larger)
   // window with no centre-clipping. The landed modal already restores its own
   // centred playfield each frame, so re-assert the fullscreen viewport here.
   platform.SetFullscreenPlayfield();
   view.Draw(platform, state);
-
-  SDL_Renderer *const renderer = platform.renderer();
-  // HUD frame + debug readouts (placeholder).
-  SDL_SetRenderDrawColor(renderer, 51, 113, 171, SDL_ALPHA_OPAQUE);
-  const SDL_FRect outer{18.0F, 400.0F, 604.0F, 80.0F};
-  SDL_RenderRect(renderer, &outer);
-  SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
-  const std::string callsign = "PLT " + state.pilot.first_name;
-  SDL_RenderDebugText(renderer, 30.0F, 410.0F, callsign.c_str());
-  const std::string hud =
-      "SHLD " + std::to_string(static_cast<int>(state.player.shield_points)) +
-      "   ARM " + std::to_string(static_cast<int>(state.player.armor_points)) +
-      "   FUEL " + std::to_string(static_cast<int>(state.player.fuel_points)) +
-      "   CR " + std::to_string(state.player.credits);
-  SDL_RenderDebugText(renderer, 30.0F, 426.0F, hud.c_str());
-  const auto *sys = state.scenario.System(
-      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
-  const std::string sysline =
-      std::string("SYSTEM ") + (sys ? sys->name : "?") + "  HDG " +
-      std::to_string(
-          static_cast<int>(state.player.heading * 180.0F / 3.14159F)) +
-      "  X " + std::to_string(static_cast<int>(state.player.pos_x)) + "  Y " +
-      std::to_string(static_cast<int>(state.player.pos_y));
-  SDL_RenderDebugText(renderer, 30.0F, 444.0F, sysline.c_str());
-
-  // Weapon readout: the current primary bank's name + ammo state. The Shuttle
-  // mounts a single Light Blaster in bank 0 (weapon_bank_ammo[0] = 1).
-  const std::string wpn = NovaWeapon_BankDisplayName(state, 0);
-  const std::string wpnline = "WPN " + wpn + "   [space] FIRE";
-  SDL_RenderDebugText(renderer, 330.0F, 410.0F, wpnline.c_str());
-
-  // Target readout: the auto-targeted travel/land stellar and a landing hint.
-  const auto *cur = state.scenario.System(
-      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
-  const std::int16_t sid = state.travel.selected_stellar_id;
-  const auto *tsid = state.scenario.Stellar(sid);
-  if (cur && tsid) {
-    const bool landable = NovaTargeting_IsLandingAvailable(state);
-    std::string tgt = "TGT ";
-    tgt += (tsid->name.empty() ? "?" : tsid->name);
-    tgt += landable ? "  [e] LAND" : "  (travel)";
-    SDL_RenderDebugText(renderer, 30.0F, 462.0F, tgt.c_str());
-  } else {
-    const std::string nosel = "TGT (none)";
-    SDL_RenderDebugText(renderer, 30.0F, 462.0F, nosel.c_str());
-  }
-
-  // The HUD frame is 80 tall (400..480); the target line sits inside it.
-  SDL_SetRenderDrawColor(renderer, 240, 120, 90, SDL_ALPHA_OPAQUE);
-  SDL_RenderDebugText(
-      renderer, 460.0F, 410.0F, "[WASD fly, J jump, E land, ESC]");
+  // HUD overlays the extending world at fixed, unscaled size (the project's
+  // resolution policy: more window = more system shown, NOT a bigger HUD).
+  hud.Draw(platform, state);
 }
 
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
@@ -152,6 +107,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                GameState &state,
                                bool &returning_to_menu) {
   SpaceflightView view;
+  // The government-specific HUD (Interface layout + cockpit PICT) is resolved
+  // once on spaceflight entry (Ui_InstallGameplayInterfaceLayout) and re-
+  // composited over the world each frame.
+  HudRenderer hud;
+  hud.Install(platform, state);
 
   // Preload the fire sounds the player's owned primary weapons use so the
   // first volley's sound is already decoded (mirrors the original preloading
@@ -178,7 +138,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // advance it per frame below.
   view.SpawnAmbientStars(platform, state);
   NovaFrame_TickSystems(state, /*run_full_tick=*/true);
-  DrawInGameFrame(platform, state, view);
+  DrawInGameFrame(platform, state, view, hud);
   SDL_RenderPresent(platform.renderer());
 
   // ---- Main loop ----------------------------------------------------------
@@ -287,7 +247,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
-    DrawInGameFrame(platform, state, view);
+    DrawInGameFrame(platform, state, view, hud);
     SDL_RenderPresent(platform.renderer());
 
     // Ghidra scope 3 "post-draw tasks": pump the primary mouse command; when

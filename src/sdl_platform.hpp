@@ -98,41 +98,46 @@ public:
   [[nodiscard]] std::uint64_t ticks_ms() const;
   [[nodiscard]] SDL_FPoint mouse_position() const;
 
-  // Resolution-extension presentation. Mirrors the original: the game renders
-  // onto a fixed 640x480 logical playfield that is drawn at 1:1 (no scaling);
-  // when the window is larger the fixed screens (docked/menu) show black
-  // borders around the 640x480 content, while the free-flight world (which
-  // cannot be "bordered") extends to show more of the system. `scale_to_window_`
-  // is a documented divergence: when enabled the whole 640x480 playfield is
-  // uniformly letterbox-scaled to fill the window.
-  [[nodiscard]] bool scale_to_window() const { return scale_to_window_; }
-  // Toggled by the F5 key from the active input poll. Returns the new state.
-  bool ToggleScale();
-  // The logical playfield size the renderer presents to draw calls: 640x480 in
-  // scale mode, the window pixel size (1:1) in extend mode. World/spaceflight
-  // drawing queries this to extend to the larger window.
+  // The current window->content presentation policy for this frame. See
+  // SetCenteredPlayfield / SetScaledPlayfield / SetFullscreenPlayfield.
+  enum class Presentation { kCentered, kScaled, kFullscreen };
+
+  // The full window pixel size in the current presentation (logical draw
+  // coordinates). World/spaceflight drawing queries this to extend to the
+  // (possibly larger) window; it is independent of whether fixed screens are
+  // being upscaled or bordered.
   [[nodiscard]] SDL_FPoint logical_playfield_size() const;
 
-  // Resolution-extension helpers for the fixed 640x480 screens (main menu,
-  // docked, splash, intro). In extend mode these centre the 640x480 playfield
-  // in the (possibly larger) window with black borders on all sides by
-  // clipping draws to the centred rect via SDL_SetRenderViewport; SDL's
-  // SDL_RenderCoordinatesFromWindow then already reports the mouse in
-  // playfield (viewport-relative) coordinates, so the hit-tests stay correct.
-  // In scale mode the playfield already fills the logical 640x480 space so the
-  // viewport is a no-op. SetCenteredPlayfield() must be paired with a
-  // SetFullscreenPlayfield() reset (world/splash) which restores the
-  // full-window viewport.
+  // Resolution-extension helpers. The game renders onto a logical 640x480
+  // content canvas (the original's 1024x768 surface scaled to its window); the
+  // window itself has a 1024x768 minimum. Each presentation policy maps that
+  // content to the window differently:
+  //
+  //  * SetScaledPlayfield()  -- fixed screens (main menu, splash, intro) are
+  //    uniformly upscaled to fill the window (letterbox for aspect) via SDL's
+  //    logical presentation. This is the "scale a few things up" default; at
+  //    the 1024x768 minimum it is ~1:1 with the 1024-native art.
+  //  * SetCenteredPlayfield()-- the docked/landed screen stays at native 1:1
+  //    size, centred in the window with black bars on every side (never
+  //    upscaled). Clipped via SDL_SetRenderViewport.
+  //  * SetFullscreenPlayfield() -- the free-flight world spans the whole
+  //    window 1:1 (no clipping / logical size) so larger windows show more of
+  //    the system; HUD chrome stays at fixed, unscaled logical coordinates.
+  //
+  // SDL_RenderCoordinatesFromWindow reports the mouse in content coordinates
+  // (viewport-relative / through the logical rect) when the corresponding
+  // presentation is active, so hit-tests stay correct in all three modes.
   void SetCenteredPlayfield();
-  // Restores the full-window viewport (no clipping) for the extending
-  // free-flight world, whose mouse coordinates track the whole window 1:1.
+  void SetScaledPlayfield();
   void SetFullscreenPlayfield();
 
 private:
-  // (Re)applies the renderer's logical presentation to match the current scale
-  // mode and window size. Fixed 640x480 letterbox when scaling; 1:1 output
-  // (no logical size) when extending.
-  void ApplyLogicalPresentation();
+  // The 640x480 logical content canvas shared by the fixed screens. This is
+  // scaled up to the window in kScaled presentation and clipped centred in
+  // kCentered; the extending world ignores it and tracks the window size.
+  void ApplyCenteredPresentation();
+  void ApplyScaledPresentation();
+  void ApplyFullscreenPresentation();
 
   struct WindowDeleter {
     void operator()(SDL_Window *window) const;
@@ -144,7 +149,7 @@ private:
 
   bool sdl_initialized_ = false;
   bool quit_requested_ = false;
-  bool scale_to_window_ = false;
+  Presentation presentation_ = Presentation::kFullscreen;
   SDL_FPoint mouse_position_{};
   std::unique_ptr<SDL_Window, WindowDeleter> window_;
   std::unique_ptr<SDL_Renderer, RendererDeleter> renderer_;

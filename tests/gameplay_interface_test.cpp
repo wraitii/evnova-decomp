@@ -122,6 +122,13 @@ TEST_CASE("starter ship government selects the Federation interface layout",
   REQUIRE(fed->present);
   CHECK(fed->interface_id == 0x82);
 
+  // The starter shuttle carries no inherited government (both inherited-gov
+  // fields are -1 in the shipped data), so Ui_InstallGameplayInterfaceLayout's
+  // ship-class lookup falls back to the Default interface (0x80). This pins
+  // that fallback so the HUD still resolves for the out-of-the-box ship.
+  CHECK(shuttle->inherent_attributes_govt == -1);
+  CHECK(shuttle->inherent_combat_govt == -1);
+
   const auto layout = NovaResource_LoadGameplayInterfaceLayout(
       static_cast<std::uint16_t>(fed->interface_id));
   REQUIRE(layout.has_value());
@@ -158,10 +165,10 @@ TEST_CASE("a classic 640x480 surface centres the frame off-canvas and nudges "
   // nudges shift it up by 0x3c and left by 0x3c.
   const HudPanelRect surface{0, 0, 640, 480};
   const auto g = GameplayGeometry_FromSurface(surface);
-  CHECK(g.frame_rect.left == -192 - 0x3c);   // -252
-  CHECK(g.frame_rect.top == -144 - 0x3c);    // -204
-  CHECK(g.frame_rect.right == -252 + 1024);  // 772
-  CHECK(g.frame_rect.bottom == -204 + 768);  // 564
+  CHECK(g.frame_rect.left == -192 - 0x3c);  // -252
+  CHECK(g.frame_rect.top == -144 - 0x3c);   // -204
+  CHECK(g.frame_rect.right == -252 + 1024); // 772
+  CHECK(g.frame_rect.bottom == -204 + 768); // 564
   // Origin = centre of the nudged frame rect.
   CHECK(g.hud_panel_origin_x == (-252 + 772 + 1) / 2);
   CHECK(g.hud_panel_origin_y == (-204 + 564 + 1) / 2);
@@ -186,6 +193,75 @@ TEST_CASE("a tall/narrow surface nudges left when short (height < 0x281)",
   CHECK(g.hud_panel_origin_y == 270);
   CHECK(g.hud_panel_origin_x == cx);
   CHECK(g.hud_panel_origin_y == cy);
+}
+
+// ---- Life-bar fill geometry ----------------------------------------------
+// Mirrors NovaUi_DrawPlayerShieldBar / _ArmorBar / _FuelLevelBar: the fill axis
+// is chosen by the panel rect's aspect (tall slot fills from the top down;
+// wide slot fills from the right, depleting left).
+
+TEST_CASE("tall life-bar slot fills from the top down", "[interface][hud]") {
+  // The Federation shield panel (200,35)-(207,184) is 7x149 (tall).
+  const HudPanelRect panel{200, 35, 207, 184};
+
+  // Full -> the whole slot is filled.
+  const HudBarFill full = HudBar_FillRect(panel, 1.0F);
+  CHECK(full.left == 200);
+  CHECK(full.top == 35);
+  CHECK(full.width == 7);
+  CHECK(full.height == 149);
+  CHECK_FALSE(full.empty());
+
+  // Half -> anchored to the top, grows down to the midpoint.
+  const HudBarFill half = HudBar_FillRect(panel, 0.5F);
+  CHECK(half.left == 200);
+  CHECK(half.top == 35);
+  CHECK(half.width == 7);
+  // floor(149 * 0.5) = 74.
+  CHECK(half.height == 74);
+
+  // Depleted -> clamp to zero (empty fill, nothing drawn).
+  const HudBarFill empty = HudBar_FillRect(panel, 0.0F);
+  CHECK(empty.empty());
+}
+
+TEST_CASE("wide bar slot fills from the right, depleting left",
+          "[interface][hud]") {
+  // A hypothetical horizontal gauge (width > height), e.g. 200x40.
+  const HudPanelRect panel{50, 100, 200, 140};
+  CHECK(panel.width() > panel.height());
+
+  const HudBarFill full = HudBar_FillRect(panel, 1.0F);
+  CHECK(full.left == 50);
+  CHECK(full.width == 150);
+  CHECK(full.top == 100);
+  CHECK(full.height == 40);
+
+  const HudBarFill half = HudBar_FillRect(panel, 0.5F);
+  // floor(150 * 0.5) = 75; right-anchored -> left = 200 - 75 = 125.
+  CHECK(half.width == 75);
+  CHECK(half.left == 125);
+  CHECK(half.top == 100);
+  CHECK(half.height == 40);
+
+  const HudBarFill quarter = HudBar_FillRect(panel, 0.25F);
+  // floor(150 * 0.25) = 37; left = 200 - 37 = 163.
+  CHECK(quarter.width == 37);
+  CHECK(quarter.left == 163);
+}
+
+TEST_CASE("bar fill clamps fraction and rejects invalid panels",
+          "[interface][hud]") {
+  const HudPanelRect panel{200, 35, 207, 184};
+  // fraction > 1 is clamped to the full slot.
+  const HudBarFill over = HudBar_FillRect(panel, 2.0F);
+  CHECK(over.left == 200);
+  CHECK(over.height == 149);
+  // Negative fraction clamps to empty (nothing drawn).
+  CHECK(HudBar_FillRect(panel, -1.0F).empty());
+  // A degenerate/degenerate panel yields an empty fill.
+  CHECK(HudBar_FillRect({0, 0, 0, 0}, 0.5F).empty());
+  CHECK(HudBar_FillRect({10, 10, 5, 5}, 0.5F).empty());
 }
 
 } // namespace game

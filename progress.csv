@@ -296,10 +296,10 @@ address,name,impl_file,reimpl_pct,comment
 0x0045D600,NovaUi_DrawStellarRadarPanel,,0%,
 0x0045E400,NovaUi_DrawTravelStatusPanel,,0%,
 0x0045E9C0,NovaUi_DrawPlayerShieldArmorPanels,,0%,
-0x0045EA66,NovaUi_DrawPlayerShieldBar,,0%,
-0x0045EBE8,NovaUi_DrawPlayerArmorBar,,0%,
-0x0045EFE0,NovaUi_DrawPlayerFuelPanel,,0%,
-0x0045F086,NovaUi_DrawPlayerFuelLevelBar,,0%,
+0x0045EA66,NovaUi_DrawPlayerShieldBar,src/game/hud_renderer.cpp,60%,aspect-driven fill geometry (HudBar_FillRect + DrawLifeBar): tall slots fill top-down, wide fill right-to-left, colour from gov panel slot; still missing cockpit-trough pre-blit / dirty-rect restore
+0x0045EBE8,NovaUi_DrawPlayerArmorBar,src/game/hud_renderer.cpp,60%,aspect-driven fill geometry shared with shield bar (HudBar_FillRect + DrawLifeBar); still missing cockpit-trough pre-blit / dirty-rect restore
+0x0045EFE0,NovaUi_DrawPlayerFuelPanel,src/game/hud_renderer.cpp,50%,fuel panel shim: validates fuel panel rect and routes to the shared life-bar fill (DrawLifeBar on layout_.fuel_panel); reserve segment not yet drawn
+0x0045F086,NovaUi_DrawPlayerFuelLevelBar,src/game/hud_renderer.cpp,50%,usable fuel fill drawn via HudBar_FillRect; reserve-bar segment + firing/travel suppression (Ship_IsShipFireRestricted) not yet implemented
 0x0045F530,NovaUi_DrawTargetStatusPanel,,0%,
 0x00460EC0,NovaUi_DrawActiveWeaponAmmoPanel,,0%,
 0x004612C0,NovaUi_DrawCargoMissionStatusPanel,,0%,

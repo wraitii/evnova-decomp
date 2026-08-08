@@ -4,12 +4,18 @@
 #include <algorithm>
 
 namespace {
-// The original renders onto a fixed 640x480 logical playfield (the full-screen
-// space/docked/menu view). See SdlPlatform::ApplyLogicalPresentation for how
-// the presentation maps this onto the (larger, resizable) window in the two
-// resolution modes.
+// The original renders onto a 1024x768 internal canvas which it then scales to
+// its 640x480 window. We keep the same 4:3 content as a 640x480 logical
+// playfield (see SdlPlatform::Apply*Presentation) and present a window with a
+// 1024x768 minimum, so the fixed screens (which are upscaled, or kept centred
+// with bars for the docked window) and the extending free-flight world all
+// resolve at least as crisply as the original's native canvas.
 constexpr int kPlayfieldWidth = 640;
 constexpr int kPlayfieldHeight = 480;
+// Minimum window size: the user-facing baseline resolution. At this size the
+// upscaled fixed screens render their 1024-native art at ~1:1.
+constexpr int kMinimumWindowWidth = 1024;
+constexpr int kMinimumWindowHeight = 768;
 } // namespace
 
 void SdlTexture::Deleter::operator()(SDL_Texture *texture) const {
@@ -63,18 +69,22 @@ bool SdlPlatform::Initialize() {
   sdl_initialized_ = true;
 
   SDL_SetAppMetadata("Escape Velocity Nova", "0.1.0", "com.ambrosiasw.evnova");
-  // Default window: start larger than the original's 640x480 so the
-  // resolution-extension behaviour is visible (fixed screens kept centred with
-  // black borders, the free-flight world extending to show more). Kept
-  // resizable; scale_to_window_ is off by default.
+  // Minimum window: 1024x768 (the user-facing baseline resolution, matching
+  // the game's native 1024x768 canvas). The window opens at that minimum and
+  // stays resizable so larger windows show more of the system in flight; the
+  // renderer is 1:1 (no SDL logical presentation) and each screen picks its
+  // own presentation policy per frame (see the *Presentation helpers).
   window_.reset(SDL_CreateWindow("Escape Velocity Nova",
-                                 960,
-                                 720,
+                                 kMinimumWindowWidth,
+                                 kMinimumWindowHeight,
                                  SDL_WINDOW_RESIZABLE));
   if (!window_) {
     NovaLog::Error("SDL window creation failed: {}", SDL_GetError());
     return false;
   }
+  // Users may not shrink the game below its baseline resolution.
+  SDL_SetWindowMinimumSize(
+      window_.get(), kMinimumWindowWidth, kMinimumWindowHeight);
 
   renderer_.reset(SDL_CreateRenderer(window_.get(), nullptr));
   if (!renderer_) {
@@ -83,79 +93,68 @@ bool SdlPlatform::Initialize() {
   }
 
   SDL_SetRenderVSync(renderer_.get(), 1);
-  ApplyLogicalPresentation();
+  SetFullscreenPlayfield();
   return true;
 }
 
 SDL_Renderer *SdlPlatform::renderer() const { return renderer_.get(); }
 
-void SdlPlatform::ApplyLogicalPresentation() {
-  if (!renderer_) {
-    return;
-  }
-  if (scale_to_window_) {
-    // DIVERGENCE (documented, toggled with F5): uniformly scale the whole
-    // 640x480 playfield to fill the window, letterboxing the aspect.
-    SDL_SetRenderLogicalPresentation(renderer_.get(),
-                                     kPlayfieldWidth,
-                                     kPlayfieldHeight,
-                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
-    return;
-  }
-  // Faithful resolution-extension: no logical size, so 1 logical unit = 1
-  // physical pixel and the fixed 640x480 playfield gets black borders when the
-  // window is larger (fixed screens) or the world extends (see
-  // logical_playfield_size).
-  SDL_SetRenderLogicalPresentation(renderer_.get(),
-                                   0,
-                                   0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
+void SdlPlatform::ApplyFullscreenPresentation() {
+  // Extending free-flight world / fullscreen splash: 1 logical unit = 1
+  // physical pixel, no clipping. The world spans the whole window and larger
+  // windows show more of the system; the HUD overlays stay at fixed logical
+  // coordinates.
+  presentation_ = Presentation::kFullscreen;
+  SDL_SetRenderLogicalPresentation(
+      renderer_.get(), 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+  SDL_SetRenderViewport(renderer_.get(), nullptr);
 }
 
-bool SdlPlatform::ToggleScale() {
-  scale_to_window_ = !scale_to_window_;
-  ApplyLogicalPresentation();
-  NovaLog::Info("render scale mode: {}",
-                scale_to_window_ ? "scale-to-window (divergence)"
-                                 : "resolution-extension (1:1)");
-  return scale_to_window_;
+void SdlPlatform::ApplyScaledPresentation() {
+  // Fixed screens (menu / splash / intro): uniformly upscale the 640x480
+  // content canvas to fill the window (letterboxing the 4:3 aspect). At the
+  // 1024x768 minimum this reads back at the native art resolution.
+  presentation_ = Presentation::kScaled;
+  SDL_SetRenderViewport(renderer_.get(), nullptr);
+  SDL_SetRenderLogicalPresentation(renderer_.get(),
+                                   kPlayfieldWidth,
+                                   kPlayfieldHeight,
+                                   SDL_LOGICAL_PRESENTATION_LETTERBOX);
 }
+
+void SdlPlatform::ApplyCenteredPresentation() {
+  // Docked/landed screen: native 1:1 size, centred in the window with black
+  // bars on every side (never upscaled). Clip draws to the centred 640x480
+  // rect; SDL_RenderCoordinatesFromWindow (used to fill mouse_position_)
+  // subtracts the viewport origin, so hit-tests see playfield coordinates.
+  presentation_ = Presentation::kCentered;
+  SDL_SetRenderLogicalPresentation(
+      renderer_.get(), 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+  int w = kPlayfieldWidth;
+  int h = kPlayfieldHeight;
+  SDL_GetRenderOutputSize(renderer_.get(), &w, &h);
+  const int ox = std::max(0, (w - kPlayfieldWidth)) / 2;
+  const int oy = std::max(0, (h - kPlayfieldHeight)) / 2;
+  const SDL_Rect viewport{ox, oy, kPlayfieldWidth, kPlayfieldHeight};
+  SDL_SetRenderViewport(renderer_.get(), &viewport);
+}
+
+void SdlPlatform::SetFullscreenPlayfield() { ApplyFullscreenPresentation(); }
+
+void SdlPlatform::SetScaledPlayfield() { ApplyScaledPresentation(); }
+
+void SdlPlatform::SetCenteredPlayfield() { ApplyCenteredPresentation(); }
 
 SDL_FPoint SdlPlatform::logical_playfield_size() const {
-  if (scale_to_window_) {
-    return {static_cast<float>(kPlayfieldWidth),
-            static_cast<float>(kPlayfieldHeight)};
-  }
+  // The extending world always tracks the window pixel size in 1:1 draws.
+  // (Fixed screens do not query this; they draw in the 640x480 content canvas
+  // through their own presentation.)
   int w = kPlayfieldWidth;
   int h = kPlayfieldHeight;
   if (renderer_) {
     SDL_GetRenderOutputSize(renderer_.get(), &w, &h);
   }
   return {static_cast<float>(w), static_cast<float>(h)};
-}
-
-void SdlPlatform::SetCenteredPlayfield() {
-  if (!renderer_) {
-    return;
-  }
-  const auto sz = logical_playfield_size();
-  const int ox = std::max(0, static_cast<int>(sz.x) - kPlayfieldWidth) / 2;
-  const int oy = std::max(0, static_cast<int>(sz.y) - kPlayfieldHeight) / 2;
-  // Clip fixed-screen drawing to the centred 640x480 playfield (a no-op in
-  // scale mode where the logical presentation is already 640x480).
-  // SDL_RenderCoordinatesFromWindow (used to fill mouse_position_) already
-  // subtracts this viewport origin, so hit-tests see playfield coordinates.
-  const SDL_Rect viewport{ox, oy, kPlayfieldWidth, kPlayfieldHeight};
-  SDL_SetRenderViewport(renderer_.get(), &viewport);
-}
-
-void SdlPlatform::SetFullscreenPlayfield() {
-  if (!renderer_) {
-    return;
-  }
-  // Full-window viewport (extending world / fullscreen splash): no clipping,
-  // mouse coordinates track the whole window 1:1.
-  SDL_SetRenderViewport(renderer_.get(), nullptr);
 }
 
 std::optional<TextInput> SdlPlatform::PollTextEvent() {
@@ -165,10 +164,17 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
       quit_requested_ = true;
       continue;
     }
-    if (event.type == SDL_EVENT_WINDOW_RESIZED && !scale_to_window_) {
-      // 1:1 extend mode must track the window size so the playfield stays
-      // top-left with black borders (fixed screens) / the world extends.
-      ApplyLogicalPresentation();
+    if (event.type == SDL_EVENT_WINDOW_RESIZED) {
+      // The presentation is chosen per-frame by the active screen (centred /
+      // scaled / fullscreen); a resize just needs the menu/splash upscaled and
+      // the docked-centric offset recomputed, which the next Set*Playfield()
+      // call does. Nothing to do here beyond refreshing the logical rect for
+      // the current presentation.
+      if (presentation_ == Presentation::kScaled) {
+        ApplyScaledPresentation();
+      } else if (presentation_ == Presentation::kCentered) {
+        ApplyCenteredPresentation();
+      }
       continue;
     }
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
@@ -189,10 +195,6 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
       return TextInput{TextKey::primary};
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
-      if (event.key.key == SDLK_F5) {
-        ToggleScale();
-        continue;
-      }
       switch (event.key.key) {
       case SDLK_RETURN:
       case SDLK_KP_ENTER:
@@ -225,13 +227,6 @@ FlightInput SdlPlatform::PollFlightInput() {
     if (event.type == SDL_EVENT_QUIT) {
       quit_requested_ = true;
     }
-    if (event.type == SDL_EVENT_WINDOW_RESIZED && !scale_to_window_) {
-      ApplyLogicalPresentation();
-    }
-    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-        event.key.key == SDLK_F5) {
-      ToggleScale();
-    }
   }
   const bool *const keys = SDL_GetKeyboardState(nullptr);
   FlightInput input;
@@ -256,10 +251,6 @@ std::optional<char> SdlPlatform::PollCommandEvent() {
       quit_requested_ = true;
       continue;
     }
-    if (event.type == SDL_EVENT_WINDOW_RESIZED && !scale_to_window_) {
-      ApplyLogicalPresentation();
-      continue;
-    }
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
       SDL_RenderCoordinatesFromWindow(renderer_.get(),
                                       event.motion.x,
@@ -278,10 +269,6 @@ std::optional<char> SdlPlatform::PollCommandEvent() {
       return 'm';
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
-      if (event.key.key == SDLK_F5) {
-        ToggleScale();
-        continue;
-      }
       switch (event.key.key) {
       case SDLK_N:
         return 'n';

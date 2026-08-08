@@ -47,10 +47,17 @@ constexpr std::uint32_t kInterfaceLayoutType = 0x956e7466U;
   if (offset + 4 > bytes.size()) {
     return 0;
   }
-  return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset])) |
-         static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset + 1])) << 8U |
-         static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset + 2])) << 16U |
-         static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset + 3])) << 24U;
+  return static_cast<std::uint32_t>(
+             std::to_integer<std::uint8_t>(bytes[offset])) |
+         static_cast<std::uint32_t>(
+             std::to_integer<std::uint8_t>(bytes[offset + 1]))
+             << 8U |
+         static_cast<std::uint32_t>(
+             std::to_integer<std::uint8_t>(bytes[offset + 2]))
+             << 16U |
+         static_cast<std::uint32_t>(
+             std::to_integer<std::uint8_t>(bytes[offset + 3]))
+             << 24U;
 }
 
 // NUL-terminated C string at `offset` (bounded by the payload). The family
@@ -80,8 +87,35 @@ constexpr std::uint32_t kInterfaceLayoutType = 0x956e7466U;
 
 } // namespace
 
-GameplayViewportGeometry GameplayGeometry_FromSurface(
-    const HudPanelRect &surface_rect) {
+HudBarFill HudBar_FillRect(const HudPanelRect &panel, float fraction) {
+  HudBarFill out;
+  if (!panel.valid()) {
+    return out;
+  }
+  fraction = std::clamp(fraction, 0.0F, 1.0F);
+  const float w = static_cast<float>(panel.width());
+  const float h = static_cast<float>(panel.height());
+  if (panel.height() > panel.width()) {
+    // Tall slot: fill anchored to the top, growing downward. The game computes
+    // the cut point `top + height*(value/max)` and clamps it to the bottom.
+    out.left = static_cast<float>(panel.left);
+    out.top = static_cast<float>(panel.top);
+    out.width = w;
+    out.height = std::floor(h * fraction);
+  } else {
+    // Wide slot: fill anchored to the right, depleting leftward. The game
+    // computes the cut point `right - width*(value/max)` and clamps to the
+    // left.
+    out.width = std::floor(w * fraction);
+    out.left = static_cast<float>(panel.right) - out.width;
+    out.top = static_cast<float>(panel.top);
+    out.height = h;
+  }
+  return out;
+}
+
+GameplayViewportGeometry
+GameplayGeometry_FromSurface(const HudPanelRect &surface_rect) {
   // Mirrors NovaView_UpdateGameplayViewport (0x00488380) exactly. The cockpit
   // frame PICT is the shipped resource 8000 (1024x768); the game centres it in
   // the shared offscreen surface rect (DAT_00597954..5a), nudges it up/left by
@@ -89,9 +123,9 @@ GameplayViewportGeometry GameplayGeometry_FromSurface(
   // and the HUD anchor (origin - 0x200/-0x180).
   constexpr std::int16_t kFrameWidth = 1024;
   constexpr std::int16_t kFrameHeight = 768;
-  constexpr std::int16_t kNarrowViewport = 0x300; // 768
-  constexpr std::int16_t kShortViewport = 0x281;  // 641
-  constexpr std::int16_t kHalfPanelWidth = 0x200; // 512
+  constexpr std::int16_t kNarrowViewport = 0x300;  // 768
+  constexpr std::int16_t kShortViewport = 0x281;   // 641
+  constexpr std::int16_t kHalfPanelWidth = 0x200;  // 512
   constexpr std::int16_t kHalfPanelHeight = 0x180; // 384
   constexpr std::int16_t kNudge = 0x3c;            // 60
 
@@ -122,10 +156,8 @@ GameplayViewportGeometry GameplayGeometry_FromSurface(
   g.frame_rect = HudPanelRect{left, top, right, bottom};
 
   // HUD origin = the frame image centre ((right+left+1)>>1, (bottom+top+1)>>1).
-  g.hud_panel_origin_x =
-      static_cast<std::int16_t>((right + left + 1) >> 1);
-  g.hud_panel_origin_y =
-      static_cast<std::int16_t>((bottom + top + 1) >> 1);
+  g.hud_panel_origin_x = static_cast<std::int16_t>((right + left + 1) >> 1);
+  g.hud_panel_origin_y = static_cast<std::int16_t>((bottom + top + 1) >> 1);
   g.hud_panel_anchor_x =
       static_cast<std::int16_t>(g.hud_panel_origin_x - kHalfPanelWidth);
   g.hud_panel_anchor_y =
@@ -135,8 +167,7 @@ GameplayViewportGeometry GameplayGeometry_FromSurface(
 
 std::optional<GameplayInterfaceLayout>
 NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id) {
-  const auto payload =
-      NovaResource_Load(kInterfaceLayoutType, interface_id);
+  const auto payload = NovaResource_Load(kInterfaceLayoutType, interface_id);
   if (!payload || payload->size() < 0xa6) {
     if (!payload) {
       NovaLog::Info("gameplay interface layout: no 'interface' record for "
@@ -155,8 +186,8 @@ NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id) {
   out.target_status_panel = ReadPanel(bytes, 0x50);
   out.cargo_status_panel = ReadPanel(bytes, 0x58);
   // Colour slots at +0x00/+0x04/+0x10/+0x14/+0x20/+0x2c/+0x38/+0x3c.
-  constexpr std::size_t kColorOffsets[8] = {0x00, 0x04, 0x10, 0x14,
-                                            0x20, 0x2c, 0x38, 0x3c};
+  constexpr std::size_t kColorOffsets[8] = {
+      0x00, 0x04, 0x10, 0x14, 0x20, 0x2c, 0x38, 0x3c};
   for (std::size_t i = 0; i < 8; ++i) {
     out.color_word[i] = ReadRgb24(bytes, kColorOffsets[i]);
   }

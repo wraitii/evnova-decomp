@@ -155,7 +155,9 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
     while (!platform.quit_requested()) {
       SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(renderer);
-      platform.SetCenteredPlayfield();
+      // The intro cinematic renders as a fixed screen, upscaled to the window
+      // like the menu/splash (same scaled 640x480 logical presentation).
+      platform.SetScaledPlayfield();
       if (pict) {
         PresentPict(renderer, *pict);
       }

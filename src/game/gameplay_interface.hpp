@@ -29,10 +29,10 @@ struct HudPanelRect {
   std::int16_t right = 0;
   std::int16_t bottom = 0;
 
-  [[nodiscard]] bool valid() const {
-    return top < bottom && left < right;
-  }
+  [[nodiscard]] bool valid() const { return top < bottom && left < right; }
+
   [[nodiscard]] int width() const { return right > left ? right - left : 0; }
+
   [[nodiscard]] int height() const { return bottom > top ? bottom - top : 0; }
 };
 
@@ -48,9 +48,9 @@ struct HudPanelRect {
 // CString_ToPascalStringInPlace), +0xa0/+0xa2 are the two font sizes, and +0xa4
 // is the cockpit/interface background PICT resource id (clamped to >= 0x80).
 struct GameplayInterfaceLayout {
-  HudPanelRect shield_panel; // +0x18 g_player_shield_panel_*
-  HudPanelRect armor_panel;  // +0x24 g_player_armor_panel_*
-  HudPanelRect fuel_panel;   // +0x30 g_player_fuel_panel_*
+  HudPanelRect shield_panel;        // +0x18 g_player_shield_panel_*
+  HudPanelRect armor_panel;         // +0x24 g_player_armor_panel_*
+  HudPanelRect fuel_panel;          // +0x30 g_player_fuel_panel_*
   HudPanelRect travel_status_panel; // +0x40 g_travel_status_panel_*
   HudPanelRect weapon_ammo_panel;   // +0x48 g_weapon_ammo_panel_*
   HudPanelRect target_status_panel; // +0x50 g_target_status_panel_*
@@ -63,8 +63,8 @@ struct GameplayInterfaceLayout {
   // (value text / label / bar fills per NovaUi_SetupGameplayPanelColors).
   std::uint32_t color_word[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
-  std::string font_family_name; // +0x60
-  std::uint16_t font_size = 0;  // +0xa0
+  std::string font_family_name;  // +0x60
+  std::uint16_t font_size = 0;   // +0xa0
   std::uint16_t font_size_2 = 0; // +0xa2
   // +0xa4: the cockpit PICT resource backing this interface (clamped >= 0x80).
   std::uint16_t interface_bg_pict_id = 0x80;
@@ -120,5 +120,29 @@ struct GameplayViewportGeometry {
 // 0x300 wide, left by 0x3c when < 0x281 tall) are reproduced exactly.
 [[nodiscard]] GameplayViewportGeometry
 GameplayGeometry_FromSurface(const HudPanelRect &surface_rect);
+
+// The filled portion of a single life-support bar, in the game's 1024x768
+// canvas coordinates. Reproduces the fill geometry of NovaUi_DrawPlayerShield-
+// Bar (0x0045ea66), NovaUi_DrawPlayerArmorBar (0x0045ebe8) and
+// NovaUi_DrawPlayerFuelLevelBar (0x0045f086): the game selects the fill axis
+// from the panel rect's own aspect.
+//
+//   * Tall slot (height > width) -- the life bars -- is anchored to the TOP
+//     and grows downward: the fill occupies [top, top + height*fraction].
+//   * Wide slot (height <= width, a horizontal gauge) is anchored to the RIGHT
+//     and depletes leftward: the fill occupies [right - width*fraction, right].
+//
+// fraction is clamped to [0,1] and the fill is always within the panel rect.
+struct HudBarFill {
+  float left = 0.0F;
+  float top = 0.0F;
+  float width = 0.0F;
+  float height = 0.0F;
+
+  [[nodiscard]] bool empty() const { return width <= 0.0F || height <= 0.0F; }
+};
+
+[[nodiscard]] HudBarFill HudBar_FillRect(const HudPanelRect &panel,
+                                         float fraction);
 
 } // namespace game
