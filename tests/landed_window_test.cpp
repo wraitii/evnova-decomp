@@ -199,3 +199,52 @@ TEST_CASE("landing description word-wrap produces distinct lines",
   REQUIRE(long_word.size() == 1);
   CHECK(long_word[0] == "supercalifragilistic");
 }
+
+TEST_CASE("normal landing arrival charges once and restores the docked ship",
+          "[landed_window]") {
+  // SDL-free core of Stellar_TravelToSystem's normal-arrival bookkeeping.
+  // The target is deliberately an inactive (not currently rendered) stellar:
+  // StellarTargetsSpriteSetActive accepts the matching inactive state unless
+  // the stellar's 0x80 engaged bit is set.
+  game::GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  game::Stellar &stellar = state.scenario.stellars[0];
+  stellar.name = "Testport";
+  stellar.pos_x = 123;
+  stellar.pos_y = -456;
+  stellar.flags = 0x1;
+  stellar.is_available = true;
+  stellar.system_id = 0;
+  stellar.service_cost = 75;
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].base_shield = 300;
+  state.scenario.ships[0].base_armor = 250;
+
+  state.player.current_system_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.credits = 100;
+  state.player.pos_x = 3.0F;
+  state.player.pos_y = -300.0F;
+  state.player.vel_x = 2.0F;
+  state.player.vel_y = -1.0F;
+  state.player.speed = 4.0F;
+  state.player.shield_points = 1.0F;
+  state.player.armor_points = 2.0F;
+  state.travel.selected_stellar_id = 0x80;
+
+  game::LandedContext ctx;
+  REQUIRE(game::NovaLanding_EnterDocked(state, ctx));
+  CHECK(ctx.landed);
+  CHECK(ctx.stellar_id == 0x80);
+  CHECK(state.travel.landed_this_frame);
+  CHECK(state.player.credits == 25);
+  CHECK(state.player.pos_x == 123.0F);
+  CHECK(state.player.pos_y == -456.0F);
+  CHECK(state.player.vel_x == 0.0F);
+  CHECK(state.player.vel_y == 0.0F);
+  CHECK(state.player.speed == 0.0F);
+  CHECK(state.player.shield_points == 300.0F);
+  CHECK(state.player.armor_points == 250.0F);
+}

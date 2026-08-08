@@ -5,6 +5,7 @@
 #include "game_state.hpp"
 #include "hud_renderer.hpp"
 #include "intro_cinematic.hpp"
+#include "landed_window.hpp"
 #include "outfit.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
@@ -154,6 +155,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // (the original accumulates _g_avg_frame_time_ms).
   std::uint64_t prev_tick_ms = SDL_GetTicks();
   bool target_cycle_was_held = false;
+  bool land_was_held = false;
   bool target_action_was_held = false;
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = SDL_GetTicks();
@@ -170,6 +172,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       NovaTargeting_CyclePlayerStellarTarget(state, input.cycle_target_next);
     }
     target_cycle_was_held = target_cycle;
+    const bool land_pressed = input.land && !land_was_held;
+    land_was_held = input.land;
     const bool target_action_pressed =
         input.target_action && !target_action_was_held;
     target_action_was_held = input.target_action;
@@ -211,18 +215,32 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Shift+Tab. This keeps navigation purposeful instead of retargeting to
     // whichever body happens to be closest each frame.
     NovaTargeting_UpdatePlayerTarget(state);
-    // Target-action command ('e'): the original opens the destination
-    // interaction window here. It does not dock or perform a physical stellar
-    // collision; any later travel/landing result belongs to that modal's
-    // confirmed action path.
+    // Normal arrival (Return) is independent of target action: the original
+    // player-ship tick directly invokes Stellar_ProcessTravelAndLanding here,
+    // opening the Spaceport only when the selected ordinary stellar is inside
+    // its arrival envelope. HUD ticker text remains TODO(decomp).
+    if (land_pressed) {
+      LandedContext ctx;
+      if (NovaLanding_EnterDocked(state, ctx)) {
+        NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
+                      ctx.stellar_id);
+        const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
+        if (exit == LandedExit::kQuit) {
+          returning_to_menu = true;
+          break;
+        }
+      } else {
+        NovaLog::Info("arrival unavailable: move within 250 units of the "
+                      "selected ordinary stellar and stop special travel");
+      }
+    }
+    // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
+    // interaction pathway. It is intentionally not substituted for landing.
     if (target_action_pressed) {
       if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
-        const auto *st = state.scenario.Stellar(state.travel.selected_stellar_id);
-        NovaLog::Todo("target-action: destination-interaction window 0x3f1 for "
-                      "stellar {} ({}) is the next reconstruction boundary; "
-                      "do not enter Spaceport directly",
-                      state.travel.selected_stellar_id,
-                      st ? st->name : "(unknown)");
+        NovaLog::Todo("target-action: destination-interaction window 0x3f1 "
+                      "for special bribe/hostility/script handling remains "
+                      "unreconstructed");
       } else {
         NovaLog::Info("target-action: selected stellar cannot open its "
                       "destination interaction");

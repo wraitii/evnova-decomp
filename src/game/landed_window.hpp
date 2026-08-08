@@ -152,6 +152,16 @@ struct LandedContext {
   LandedService selection = LandedService::kLaunch;
 };
 
+// Applies the normal-arrival subset of Stellar_ProcessTravelAndLanding
+// (0x00457580) / Stellar_TravelToSystem (0x00455e10): the selected stellar
+// must be an ordinary active destination and within the original's 250-unit
+// per-axis arrival envelope. Then verifies its fee, stops/positions the ship,
+// restores armor/shields, and prepares the Spaceport context. This keeps the
+// modal UI out of the transition so its accounting is testable. Returns false
+// without mutating the player when arrival cannot proceed.
+[[nodiscard]] bool NovaLanding_EnterDocked(GameState &state,
+                                           LandedContext &ctx);
+
 // Refuels the player ship toward its effective fuel capacity. Mirrors the
 // landed fuel service: the player pays a per-unit price for the fuel added,
 // clamped so credits never go negative; capacity comes from the effective
@@ -185,10 +195,10 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // draw grey, and the first-letter shortcuts (r/f refuel, c/t trade, o outfit,
 // s shipyard, n mission, b bar; Enter/Esc leave) activate immediately. Returns
 // the exit code describing how the window closed (see LandedExit).
-// Target action first opens NovaUi_RunTravelDestinationInteractionWindow
-// (0x00480030); normal engaged travel later reaches the original's DLOG 0x3e8
-// path through Stellar_TravelToSystem/InteractionLoop. This reconstruction is
-// not wired to that later transition yet. In resolution-extension mode the
+// Normal in-range arrival reaches this DLOG 0x3e8 path through
+// Stellar_ProcessTravelAndLanding / Stellar_TravelToSystem. The separate
+// target-action DLOG 0x3f1 (bribe/hostility/script interaction) remains out
+// of scope. In resolution-extension mode the
 // playfield stays a fixed 640x480 centred with black borders; the F5 scale
 // toggle (documented divergence) scales it to fill the window.
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,

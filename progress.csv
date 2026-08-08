@@ -278,10 +278,10 @@ address,name,impl_file,reimpl_pct,comment
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
 0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,10%,stellar target-action eligibility only: available unrestricted sprite-active target with travel_flags&0x20 clear reaches the destination-interaction reconstruction boundary; modal/ship-comm/mission branches remain TODO(decomp)
 0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,25%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, or time-animated path for flags bit0, see 0x00435830); fire-sound audio side-effect reconstructed (volley_fired>0 gate -> dequeue fire_sound slot, played by the spaceflight loop through the cached NovaSoundData, slot->snd id 200+slot); spawning from the ship centre (gun-fire-point placement available via sprite anchors but needs ShipClassDef.gun_exit_pos, TODO(decomp)); beam/turret/guided/launcher branches and burst side-effects not reconstructed"
-0x00455E10,Stellar_TravelToSystem,,0%,confirmed normal engaged-travel transition into NovaUi_RunTravelDestinationInteractionLoop (DLOG 0x3e8); prior speculative direct-docking subset removed
+0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,20%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, and full effective shield/armor; system-transition/world-reset/discovery work remains TODO(decomp)
 0x00456480,Stellar_SelectLinkedDestinationViaStarmap,,0%,confirmed linked-destination starmap transfer; prior speculative docking implementation removed
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
-0x00457580,Stellar_ProcessTravelAndLanding,,0%,confirmed engaged-travel dispatcher; previous speculative direct-docking subset removed; modal/timer/reputation and travel branches remain TODO(decomp)
+0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,12%,normal ordinary-stellar arrival gate reconstructed in NovaLanding_EnterDocked: active/current-system target, 0x3000/0x20 exclusions, strict 250-unit per-axis envelope, and fee gate; timer/reputation/ticker/hypergate branches remain TODO(decomp)
 0x00459950,NovaUi_UpdateTravelEngagementProgress,,0%,
 0x0045A3D0,Ship_HandlePlayerBoardTargetCommand,,0%,
 0x0045BAA0,Ship_RecenterSpaceObjectsForWorldWrap,,0%,

@@ -8,6 +8,7 @@
 #include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
+#include "targeting.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -21,6 +22,73 @@
 #include <string_view>
 
 namespace game {
+
+// ---------------------------------------------------------------------------
+// Stellar_TravelToSystem (0x00455e10): normal arrival subset.
+// ---------------------------------------------------------------------------
+bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
+  ctx.landed = false;
+  const std::int16_t stellar_id = state.travel.selected_stellar_id;
+  const auto *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr || !stellar->is_available ||
+      stellar->system_id != state.player.current_system_id ||
+      (stellar->availability_flags & 0x3000U) != 0U ||
+      (stellar->flags & 0x20U) != 0U ||
+      !NovaTargeting_StellarTargetsSpriteSetActive(*stellar)) {
+    return false;
+  }
+  // The final normal-arrival branch in Stellar_ProcessTravelAndLanding only
+  // accepts the dock once both axis deltas are strictly below 0xfa.
+  constexpr float kArrivalAxisRange = 250.0F;
+  if (std::abs(state.player.pos_x - static_cast<float>(stellar->pos_x)) >=
+          kArrivalAxisRange ||
+      std::abs(state.player.pos_y - static_cast<float>(stellar->pos_y)) >=
+          kArrivalAxisRange) {
+    return false;
+  }
+
+  // Stellar_ProcessTravelAndLanding checks affordability before it begins the
+  // arrival transition, then deducts the full fee (unless the stellar is in
+  // its hostile/hazard state). Do the same before touching player state.
+  const bool fee_waived = stellar->hazard_marker;
+  if (stellar->service_cost > 0 && !fee_waived &&
+      state.player.credits < stellar->service_cost) {
+    NovaLog::Info("landing denied at stellar {}: service cost {} exceeds "
+                  "available credits {}",
+                  stellar_id,
+                  stellar->service_cost,
+                  state.player.credits);
+    return false;
+  }
+
+  if (stellar->service_cost > 0 && !fee_waived) {
+    state.player.credits -= stellar->service_cost;
+  }
+  state.player.pos_x = static_cast<float>(stellar->pos_x);
+  state.player.pos_y = static_cast<float>(stellar->pos_y);
+  state.player.vel_x = 0.0F;
+  state.player.vel_y = 0.0F;
+  state.player.speed = 0.0F;
+
+  // Stellar_TravelToSystem restores the effective hull and shield capacities
+  // after the destination interaction loop returns.
+  const PlayerEffectiveStats effective =
+      Outfit_ComputePlayerEffectiveStats(state);
+  state.player.shield_points = effective.max_shield_points;
+  state.player.armor_points = effective.max_armor_points;
+  state.cached_stats = effective;
+  state.stat_cache_valid = true;
+
+  ctx.stellar_id = stellar_id;
+  ctx.landed = true;
+  ctx.selection = LandedService::kLaunch;
+  state.travel.landed_this_frame = true;
+  NovaLog::Info("landed at stellar {} ({}); {} credits remain",
+                stellar_id,
+                stellar->name,
+                state.player.credits);
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // Fuel service.

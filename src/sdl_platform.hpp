@@ -49,6 +49,11 @@ struct FlightInput {
   // channel; this build maps it to a dedicated key so it is distinct from the
   // continuous steer inputs.
   bool travel = false;
+  // Edge-triggered normal arrival command: Return. When the currently selected
+  // ordinary stellar is inside the 250-unit arrival envelope, this follows the
+  // ticker-text / Spaceport path in Stellar_ProcessTravelAndLanding instead of
+  // opening the target-action interaction dialog.
+  bool land = false;
   // Edge-triggered target-action command: 'e' opens the destination-
   // interaction window for the currently targeted stellar. It is separate
   // from both physical stellar collision and the later docked UI path.

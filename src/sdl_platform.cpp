@@ -238,6 +238,7 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.thrust = pressed(SDL_SCANCODE_UP) || pressed(SDL_SCANCODE_W);
   input.brake = pressed(SDL_SCANCODE_DOWN) || pressed(SDL_SCANCODE_S);
   input.travel = pressed(SDL_SCANCODE_J);
+  input.land = pressed(SDL_SCANCODE_RETURN) || pressed(SDL_SCANCODE_KP_ENTER);
   input.target_action = pressed(SDL_SCANCODE_E);
   input.cycle_target_next = pressed(SDL_SCANCODE_TAB) &&
                             !pressed(SDL_SCANCODE_LSHIFT) &&
