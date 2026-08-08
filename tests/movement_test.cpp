@@ -46,3 +46,18 @@ TEST_CASE("reverse command turns the ship but preserves its velocity") {
   CHECK(ship.pos_y == Catch::Approx(-2.0F));
   CHECK_FALSE(ship.engine_thrust);
 }
+
+TEST_CASE("flight turns at the original rounded effective turn rate") {
+  game::PlayerShip ship;
+  game::ShipClass ship_class = TestShipClass();
+  // Resource maneuver 45 becomes 4.5 degrees/tick, which the original player
+  // control path rounds before applying the frame-time multiplier.
+  ship_class.turn_rate = 45.0F;
+  FlightInput input;
+  input.turn_right = true;
+
+  (void)game::NovaPlayer_IntegrateMovement(ship, input, ship_class, 1.0F);
+
+  CHECK(ship.heading ==
+        Catch::Approx(5.0F * std::numbers::pi_v<float> / 180.0F));
+}

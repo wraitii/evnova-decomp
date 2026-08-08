@@ -65,12 +65,22 @@ struct ControlExpressionState {
   std::function<bool(std::int16_t system_id)> has_explored;
 };
 
+// Mutation callback used by the OnPurchase/OnSell/OnRetire NCB set strings.
+// Set strings are a distinct language from availability tests: a bare Bn sets
+// bit n, while !Bn or Bn=0 clears it. Unknown directives are deliberately
+// ignored by this small executor until their opcode has been reconstructed.
+struct ControlExpressionMutation {
+  std::function<void(std::uint32_t bit, bool value)> set_control_bit;
+};
+
 // Evaluates a Nova control bit test expression against `state`. Returns true
 // for an empty expression. Malformed/unknown tokens evaluate as false and are
 // logged. Thread-safe (no hidden globals).
 [[nodiscard]] bool
 NovaControlExpression_Evaluate(std::string_view expression,
                                const ControlExpressionState &state);
+void NovaControlExpression_ExecuteSet(
+    std::string_view expression, const ControlExpressionMutation &mutation);
 
 // A single stock weapon triple on a ship class: a weapon id plus how many to
 // equip and the standard ammo load. The original arrays hold eight of these.
@@ -132,6 +142,11 @@ struct ShipClass {
   // Player-facing strings used by the new-pilot flow.
   std::string availability_expr; // Availability
   std::string on_purchase_expr;  // OnPurchase
+  std::string on_retire_expr;    // OnRetire
+  std::uint32_t require_lo = 0;
+  std::uint32_t require_hi = 0;
+  std::int16_t buy_random = 100;
+  std::int16_t hire_random = 100;
 };
 
 // Ghidra OutfitDef (g_outfit_defs, 0x200 entries indexed by outfit id minus
@@ -147,6 +162,7 @@ struct Outfit {
   std::string name;              // resource record name (BRGR display name)
   std::string availability_expr; // Availability (control test expression)
   std::string on_purchase_expr;  // OnPurchase (control set expression)
+  std::string on_sell_expr;      // OnSell (control set expression)
 
   std::int16_t display_weight = 0; // DispWeight
   std::int16_t mass_tons = 0;      // Mass
@@ -171,6 +187,9 @@ struct Outfit {
   std::int16_t item_class = 0;   // ItemClass
   std::int16_t buy_random = 100; // BuyRandom (1-100; <1/ >100 mean 100)
   std::int16_t sprite_id = 0;    // Graphic (p\x9ari sprite id)
+  // Runtime field_0x378 is initialized from Flags bit 0x0004 and is the
+  // marker retained across player-ship replacement.
+  bool persistent_on_ship_swap = false;
 
   std::string short_name; // ShortName (dialog menu label)
   std::string lc_name;    // LCName (lowercase singular)

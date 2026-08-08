@@ -110,7 +110,13 @@ std::int32_t NovaLanded_Refuel(GameState &state, std::int32_t price_per_unit) {
 
   const float missing =
       std::max(0.0F, eff.fuel_capacity - state.player.fuel_points);
-  if (missing <= 0.0F || price_per_unit <= 0) {
+  if (missing <= 0.0F) {
+    return 0;
+  }
+  // The original's stellar marker makes refuelling free, not unavailable.
+  if (price_per_unit <= 0) {
+    state.player.fuel_points = eff.fuel_capacity;
+    NovaLog::Info("refuel: granted {:.1f} fuel by free stellar service", missing);
     return 0;
   }
   // Full cost for the whole top-up; the player may only buy as far as credits
@@ -249,7 +255,7 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
       const int w = item.right - item.left;
       const int h = item.bottom - item.top;
       if (w == 145 && h == 25) {
-        d.kind = DockedItemKind::kButton;
+      d.kind = DockedItemKind::kButton;
       } else if (w > 500 && h > 200) {
         d.kind = DockedItemKind::kOuterPanel;
       } else if (w > 250 && h > 150) {
@@ -258,8 +264,9 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
         d.kind = DockedItemKind::kTitleBand;
       } else {
         d.kind = DockedItemKind::kOrnament;
-      }
-      out.items.push_back(d);
+    }
+    d.ditl_index = item.index;
+    out.items.push_back(d);
     }
     return true;
   }
@@ -268,6 +275,10 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
   // Minimal fallback: the eight buttons in the reference two-column grid.
   out.from_ditl = false;
   out.window = {panel.x, panel.y, 618.0F, 517.0F};
+  // The fallback has no raw DITL parser output, but retain the original
+  // control ordinals so service dispatch still follows the same map.
+  constexpr std::array<std::size_t, 7> kFallbackDitlItems{12, 4, 7, 8,
+                                                            9, 10, 11};
   for (std::size_t i = 0; i < button_count; ++i) {
     const std::size_t side = i >= kRows ? 1 : 0;
     const std::size_t row = i % kRows;
@@ -278,51 +289,24 @@ bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
                static_cast<float>(row) * kFallback.row_pitch;
     d.rect.w = kFallback.width;
     d.rect.h = kFallback.height;
+    d.ditl_index = i < kFallbackDitlItems.size() ? kFallbackDitlItems[i] : 0;
     out.items.push_back(d);
   }
   return false;
 }
 
-constexpr std::size_t kDockedButtonRows = 4;
-
-// Real docked button order (top-to-bottom per column), mirroring the original
-// Spaceport screen: LEFT column sits Bar, Mission BBS, Trade center, Repair;
-// RIGHT column sits Shipyard, Outfitter, Refuel, Leave. The extra starmap
-// service has no on-screen slot (it is still reachable via the number keys).
-constexpr LandedService kLeftColumnServices[kDockedButtonRows] = {
-    LandedService::kBar,          // top
-    LandedService::kMissionBoard, // mission BBS
-    LandedService::kBuySellCargo, // trade center
-    LandedService::kRepair,       // bottom
-};
-constexpr LandedService kRightColumnServices[kDockedButtonRows] = {
-    LandedService::kShipyard, // top
-    LandedService::kOutfit,   // outfitter
-    LandedService::kRefuel,   //
-    LandedService::kLaunch,   // leave (bottom)
-};
-
-const LandedService *kColumnServices[2] = {kLeftColumnServices,
-                                           kRightColumnServices};
-
-// The service at a grid (column, row), mirroring BuildServiceButtons' slot
-// assignment so navigation and the DITL button placement stay in sync.
-LandedService NovaDialog_DockedServiceAt(std::size_t side, std::size_t row) {
-  return kColumnServices[side][row];
-}
-
-// Maps an on-screen docked service to its grid (column, row), or nullopt when
-// it has no on-screen slot (e.g. the starmap, reachable only via number keys).
-std::optional<std::pair<std::size_t, std::size_t>>
-NovaDialog_DockedGridOf(LandedService svc) {
-  for (std::size_t side = 0; side < 2; ++side) {
-    for (std::size_t row = 0; row < kDockedButtonRows; ++row) {
-      if (kColumnServices[side][row] == svc) {
-        return std::pair{side, row};
-      }
-    }
+std::optional<LandedService>
+NovaDialog_DockedServiceForDitlItem(std::size_t ditl_index) {
+  switch (ditl_index) {
+  case 12: return LandedService::kLaunch;
+  case 4: return LandedService::kRefuel;
+  case 7: return LandedService::kBuySellCargo;
+  case 8: return LandedService::kOutfit;
+  case 9: return LandedService::kShipyard;
+  case 10: return LandedService::kMissionBoard;
+  case 11: return LandedService::kBar;
+  default: return std::nullopt;
   }
-  return std::nullopt;
 }
 
 // Greedy word-wrap for the docked landing-description panel (see header).
@@ -391,30 +375,14 @@ namespace {
 // service the number keys select.
 std::vector<ServiceButton> BuildServiceButtons(const DockedLayout &layout) {
   std::vector<ServiceButton> buttons;
-  buttons.reserve(kDockedButtonRows * 2U);
-
-  // Collect the layout's button items into left/right columns by screen x,
-  // then sort each column top-to-bottom before assigning the per-slot service.
-  std::vector<SDL_FRect> cols[2]; // [0]=left, [1]=right
+  buttons.reserve(7);
   for (const auto &item : layout.items) {
     if (item.kind != DockedItemKind::kButton) {
       continue;
     }
-    cols[item.rect.x < 400.0F ? 0U : 1U].push_back(item.rect);
-  }
-  for (std::size_t side = 0; side < 2; ++side) {
-    auto &col = cols[side];
-    std::sort(col.begin(),
-              col.end(),
-              [](const SDL_FRect &a, const SDL_FRect &b) { return a.y < b.y; });
-    for (std::size_t row = 0; row < col.size(); ++row) {
-      if (row >= kDockedButtonRows) {
-        continue; // only four on-screen rows per column
-      }
-      const LandedService svc =
-          (side == 0 ? kLeftColumnServices[row] : kRightColumnServices[row]);
-      buttons.push_back(
-          ServiceButton{col[row], static_cast<std::uint8_t>(svc)});
+    if (const auto service = NovaDialog_DockedServiceForDitlItem(item.ditl_index)) {
+      buttons.push_back(ServiceButton{item.rect,
+                                      static_cast<std::uint8_t>(*service)});
     }
   }
   return buttons;
@@ -435,8 +403,6 @@ const char *ServiceLabel(LandedService t) {
     return "Leave";
   case LandedService::kRefuel:
     return "Refuel";
-  case LandedService::kRepair:
-    return "Repair";
   case LandedService::kBuySellCargo:
     return "Trade center";
   case LandedService::kOutfit:
@@ -445,8 +411,6 @@ const char *ServiceLabel(LandedService t) {
     return "Shipyard";
   case LandedService::kBar:
     return "Bar";
-  case LandedService::kStarmap:
-    return "Starmap";
   case LandedService::kMissionBoard:
     return "Mission BBS";
   case LandedService::kCount:
@@ -491,14 +455,6 @@ bool ServiceAvailable(const GameState &state,
     return (flags & 0x40U) != 0U;
   case LandedService::kMissionBoard:
     return allows_services;
-  case LandedService::kRepair:
-    // Not a docked button in the original (no billable Repair): shields/armor
-    // are auto-refilled free on landing. Kept available only because the
-    // reconstruction grid still carries a Repair slot; it reports a no-op.
-    return state.player.armor_points + 0.5F < eff.max_armor_points;
-  case LandedService::kStarmap:
-    // Not a docked button in the original; kept reachable via its own key.
-    return true;
   case LandedService::kCount:
     break;
   }
@@ -753,31 +709,15 @@ DispatchService(SdlPlatform &platform, GameState &state, LandedContext &ctx) {
     return LandedExit::kLaunched;
 
   case LandedService::kRefuel: {
-    // The travel-services fuel price is a shop constant placeholder; the
-    // original prices refuelling per unit from an outfit/tech-level table
-    // (TODO(decomp)). 2 credits per fuel point below a typical capacity is a
-    // working default.
-    constexpr std::int32_t kFuelPrice = 2; // credits per fuel point
-    NovaLanded_Refuel(state, kFuelPrice);
+    const Stellar *stellar = state.scenario.Stellar(ctx.stellar_id);
+    NovaLanded_Refuel(state, stellar != nullptr && stellar->hazard_marker ? 0 : 1);
     return LandedExit::kServiceComplete;
   }
-
-  case LandedService::kRepair:
-    // The original's docked strip has NO Repair button: shields AND armor are
-    // refilled to maximum automatically, for free, by Stellar_TravelToSystem
-    // (0x00455e10) when the player arrives at (and leaves) a normal dock. The
-    // an arrival transition could already apply that free
-    // top-up, so there is nothing to bill here; this slot only reports the
-    // (already-full) state.
-    NovaLog::Info("dock repair: hull already at full (free auto-repair on "
-                  "landing; Stellar_TravelToSystem 0x00455e10)");
-    return LandedExit::kServiceComplete;
 
   case LandedService::kBuySellCargo:
   case LandedService::kOutfit:
   case LandedService::kShipyard:
   case LandedService::kBar:
-  case LandedService::kStarmap:
   case LandedService::kMissionBoard: {
     // Render the sub-window as a real on-screen dialog over the docked scene
     // (frame PICT + heading + Leave), instead of the previous TODO mock. The
@@ -1060,9 +1000,6 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
         case 'l':
           // "Launch": a synonym for Enter/Esc (the docked Leave slot).
           return LandedExit::kLaunched;
-        case 'm':
-          ctx.selection = LandedService::kStarmap;
-          break;
         default:
           continue;
         }

@@ -175,6 +175,21 @@ namespace {
   if (bytes.size() >= 0x728) {
     s.availability_flags = ReadBe16(bytes, 0x726);
   }
+  // The string block and store masks are copied verbatim by
+  // NovaData_LoadScenarioResourceTables (0x004bd3c0).  Only the scripts used
+  // by landed stores are named here; the two intervening script blocks remain
+  // intentionally unmodelled pending callsite attribution.
+  s.availability_expr = ReadCString(bytes, 0x6c);
+  s.on_purchase_expr = ReadCString(bytes, 0x26a);
+  s.on_retire_expr = ReadCString(bytes, 0x4cf);
+  s.short_name = ReadCString(bytes, 0x5ce);
+  s.long_name = ReadCString(bytes, 0x62e);
+  s.buy_random = ReadBeI16(bytes, 0x388);
+  s.hire_random = ReadBeI16(bytes, 0x38a);
+  if (bytes.size() >= 0x736) {
+    s.require_lo = ReadBe32(bytes, 0x72a);
+    s.require_hi = ReadBe32(bytes, 0x72e);
+  }
   return s;
 }
 
@@ -212,6 +227,7 @@ namespace {
   o.require_hi = ReadBe32(bytes, 0x2a);           // Require (high 32)
   o.availability_expr = ReadCString(bytes, 0x2e); // Availability
   o.on_purchase_expr = ReadCString(bytes, 0x12d); // OnPurchase
+  o.on_sell_expr = ReadCString(bytes, 0x22c);     // OnSell
   o.short_name = ReadCString(bytes, 0x32b);       // ShortName
   o.lc_name = ReadCString(bytes, 0x36b);          // LCName
   o.lc_plural = ReadCString(bytes, 0x3ab);        // LCPlural
@@ -219,6 +235,7 @@ namespace {
   o.sprite_id = ReadBeI16(bytes, 0x3ee);          // Graphic (p\x9ari sprite)
   o.buy_random = ReadBeI16(bytes, 0x3f0);         // BuyRandom (1-100)
   o.item_class = ReadBeI16(bytes, 0x3f2);         // ItemClass
+  o.persistent_on_ship_swap = (o.flags & 0x0004U) != 0U;
   return o;
 }
 
@@ -811,6 +828,60 @@ bool NovaControlExpression_Evaluate(std::string_view expression,
     return true; // blank test expression evaluates to true
   }
   return ExprParser{expression, state}.Eval();
+}
+
+void NovaControlExpression_ExecuteSet(
+    std::string_view expression, const ControlExpressionMutation &mutation) {
+  if (!mutation.set_control_bit) {
+    return;
+  }
+  // Set expressions are a stream of directives.  The landing-store scripts
+  // observed in the scenario use B<number> to set a control bit; accepting an
+  // explicit ! or =0 form also makes clearing state unambiguous.  Other
+  // directive families are left untouched until their state targets are
+  // reconstructed rather than being guessed as inventory mutations.
+  for (std::size_t pos = 0; pos < expression.size();) {
+    while (pos < expression.size() &&
+           (expression[pos] == ' ' || expression[pos] == ',' ||
+            expression[pos] == ';')) {
+      ++pos;
+    }
+    bool value = true;
+    if (pos < expression.size() && expression[pos] == '!') {
+      value = false;
+      ++pos;
+    }
+    if (pos >= expression.size() ||
+        (expression[pos] != 'B' && expression[pos] != 'b')) {
+      while (pos < expression.size() && expression[pos] != ',' &&
+             expression[pos] != ';') {
+        ++pos;
+      }
+      continue;
+    }
+    ++pos;
+    const std::size_t number_start = pos;
+    std::uint32_t bit = 0;
+    while (pos < expression.size() && expression[pos] >= '0' &&
+           expression[pos] <= '9') {
+      bit = bit * 10U + static_cast<std::uint32_t>(expression[pos] - '0');
+      ++pos;
+    }
+    if (pos == number_start) {
+      continue;
+    }
+    if (pos < expression.size() && expression[pos] == '=') {
+      ++pos;
+      if (pos < expression.size() && expression[pos] == '0') {
+        value = false;
+        ++pos;
+      } else if (pos < expression.size() && expression[pos] == '1') {
+        value = true;
+        ++pos;
+      }
+    }
+    mutation.set_control_bit(bit, value);
+  }
 }
 
 } // namespace game

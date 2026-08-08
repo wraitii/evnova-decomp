@@ -113,7 +113,8 @@ Weapon aiming / lead subsystem (shared by ApplyShipAiControls, SpawnShotFromWeap
 > **Important:** all three return `short` (the predicted aim bearing in EAX), NOT void. The original void decomp was a Ghidra return-model bug: the final `Math_BearingFromPointToPoint` returns in EAX which the void prototype ignored. Callers assign the returned bearing to the ship desired-heading field (+0x1A) or a shot heading (+0x20), and then apply `shot_random_spread` rounding. Signature fixed in the DB.
 
 Globals touched this session:
-- `g_gravity_pull_active` (0x0073548c) — set by gravity pull each tick; paired with `g_player_in_gravity_well` (0x007cab1b, set in movement-control helper) to apply player movement/impulse penalty.
+- `g_gravity_pull_active` (0x0073548c) — set when the current system contains an active nonzero-gravity stellar. The player-control path uses it to suppress the afterburner's boosted-cap branch.
+- `g_player_in_gravity_well` (0x007cab1b; **misnamed in the current Ghidra DB**) — player afterburner-active latch. `Ship_HandlePlayerShipControl` sets it only when the opcode-15 command is held, fuel is positive, and `Ship_GetShipFuelBurnRate` is affordable; while set it burns that rate each frame. It does not mean that the player is physically inside a gravity well.
 - `g_navigation_override_done` (0x007354ab) — navigation-override latch cleared at start of each player tick.
 
 ## Struct and field touchpoints already set

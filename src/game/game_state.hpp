@@ -9,6 +9,7 @@
 // global/struct names the address in a comment.
 
 #include <array>
+#include <bitset>
 #include <cstdint>
 #include <optional>
 #include <random>
@@ -71,6 +72,7 @@ struct PlayerShip {
   float fuel_points = 0.0F;           // g_ship_states->fuel_points
   float death_timer_active = -1.0F;   // g_ship_states->death_timer_active
   std::int16_t ship_class_id = 0;     // g_ship_states->ship_class_id
+  std::string ship_name;
   std::int16_t current_system_id = 0; // g_ship_states->current_system_id
   std::int16_t active_weapon_bank_slot = 0;
   std::int16_t timed_action_counter = -1; // g_ship_states->timed_action_counter
@@ -81,11 +83,13 @@ struct PlayerShip {
   // being non-zero). Written by NovaPlayer_UpdateFromInput and read by the
   // flight render to drive the engine-glow layer.
   bool engine_thrust = false;
-  // Engine-glow intensity, 0..1, ramped toward the target by the movement
-  // update (rise while thrusting, decay when not). Clean-room approximation of
-  // the original dimming the glow sprite with throttle; on the live movement
-  // sim this is binary thrust, so it is a soft fade rather than a per-degree
-  // throttle fade (TODO(decomp)).
+  // ShipState +0xc8d4. The player-control path raises this one unit/frame
+  // while thrusting and lowers it one unit/frame otherwise; normal thrust caps
+  // at 24, while the afterburner path can reach 32. The renderer maps the
+  // original integer control level to alpha because the original SpriteWorld
+  // blend setup is not reconstructed yet.
+  std::int16_t engine_glow_level = 0;
+  // Derived render value, always engine_glow_level / 24 clamped to [0,1].
   float engine_glow_intensity = 0.0F;
 };
 
@@ -97,6 +101,27 @@ struct PilotData {
   std::string last_name;
   std::int16_t start_type_code = 0;     // PilotData_ResolveStartType result
   std::int16_t selected_reputation = 0; // pilot-selection-dialog choice
+};
+
+// Persistent scenario-control state (the original pilot NCB/control-bit
+// payload).  Availability expressions read it and OnPurchase/OnSell/OnRetire
+// scripts mutate it; keeping it in GameState makes those effects saveable
+// rather than ephemeral UI latches.
+struct PilotControlState {
+  static constexpr std::size_t kControlBitCount = 65536;
+  std::bitset<kControlBitCount> bits;
+  std::bitset<0x800> explored_systems;
+  bool registered = true;
+  bool male = true;
+
+  [[nodiscard]] bool ControlBit(std::uint32_t bit) const {
+    return bit < kControlBitCount && bits.test(bit);
+  }
+  void SetControlBit(std::uint32_t bit, bool value) {
+    if (bit < kControlBitCount) {
+      bits.set(bit, value);
+    }
+  }
 };
 
 // Travel-selection / cross-system jump state. Ghidra keeps the jump/landing
@@ -242,6 +267,7 @@ struct GameState {
   bool intro_played = false; // Ghidra DAT_00596d35: cleared on new pilot so
                              // the intro cinematic plays on first flight.
   PilotData pilot;
+  PilotControlState control;
   PlayerShip player;
   TravelState travel;
   IntroCinematicData intro_cinematic;

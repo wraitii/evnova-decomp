@@ -198,7 +198,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00439D40,Frame_PresentViewportAndParticles,,0%,
 0x0043A020,System_UpdateRandomEncounterCountdown,,0%,
 0x0043A310,Weapon_SelectTurretTargetWithinArc,,0%,
-0x0043ADB0,Stellar_TickStellarGravityPull,,0%,
+0x0043ADB0,Stellar_TickStellarGravityPull,src/game/spaceflight.cpp,10%,"player-only stellar gravity force reconstructed; NPC iteration/crash consequences remain unimplemented"
 0x0043AED0,Stellar_HandleShipStellarCrash,,0%,
 0x0043B020,Ship_SteerVelocityTowardShipHeading,,0%,
 0x0043B170,Frame_UpdateFadingEffectSprites,,0%,
@@ -268,11 +268,11 @@ address,name,impl_file,reimpl_pct,comment
 0x0044AA30,Math_RotateLeft8,,0%,
 0x0044AA50,FUN_0044aa50,,0%,
 0x0044AA60,FUN_0044aa60,,0%,
-0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,12%,player thrust/turn subset via NovaPlayer_IntegrateMovement (loader-verified scales speed /100 thrust x2 DAT_005757a8 turn*0.1; elapsed-time integration; max-speed hard cap; inertia-less zeroing) plus jump-complete block (CompleteJump in travel.cpp). travel/combat/disable/mission scopes still stubbed
+0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,20%,"player control subset includes effective turn rounding, thrust/afterburner fuel burn, stellar gravity, integer engine-glow control, and jump completion. travel/combat/disable/mission scopes still stubbed"
 0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,20%,nearest eligible stellar seeds target; Tab/Shift+Tab cycles and retains a manual stellar selection; target action now stops at the destination-interaction boundary. Combat/movement/travel-transition scopes still stubbed
 0x0044C8D0,Ship_TurnShipTowardHeading,src/game/spaceflight.cpp,3%,reverse-control subset turns toward the heading opposite current velocity at the effective turn rate; direct-turn/thrust and transition scopes not separately reconstructed
 0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,
-0x0044E019,Ship_HandlePlayerShipControl,src/game/spaceflight.cpp,15%,primary-fire loop wired via NovaWeapon_FirePlayerPrimary + NovaWeapon_TickShots; movement subset includes elapsed-time-scaled turn/thrust and down/S reverse (turn hull opposite velocity without braking). travel/mission/target-cycling scopes still stubbed
+0x0044E019,Ship_HandlePlayerShipControl,src/game/spaceflight.cpp,28%,"primary fire and player movement subset: rounded effective turn, thrust/reverse, afterburner x1.8 cap/fuel burn, stellar gravity, and integer engine-glow control. travel/mission/UI control scopes remain stubbed"
 0x0044EAB4,FUN_0044eab4,,0%,
 0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
@@ -336,7 +336,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00463A20,Ship_ComputeShipFuelCapacity,,0%,
 0x00463B30,Ship_ComputeShipShieldRechargeRate,,0%,
 0x00463DC0,Weapon_WeaponCanTrackTarget,,0%,
-0x00463E70,Ship_ComputeShipMaxTurnRateDeg,,0%,turn model decoded (base_turn_rate_deg float +0x38 + opcode-9 bonuses + floor 1.0 + status damping); player keyboard path in HandlePlayerShipControl rounds to integer deg/frame. Not yet a distinct reimplemented function; NovaPlayer_IntegrateMovement approximates with turn_rate*0.1
+0x00463E70,Ship_ComputeShipMaxTurnRateDeg,src/game/spaceflight.cpp,35%,"player path applies base plus opcode-9 effective turn and original integer rounding. Base-floor, ship/NPC cache behavior, and status-effect damping remain TODO(decomp)"
 0x004640A0,Ship_ComputeShipEffectiveThrust,,0%,
 0x004642E0,Ship_ComputeShipEffectiveMaxSpeed,,0%,
 0x004644A0,Outfit_HasSpecialMovementOutfitOrLaunchBay,,0%,
@@ -475,11 +475,11 @@ address,name,impl_file,reimpl_pct,comment
 0x0046D250,PascalString_ToCStringInPlace,,0%,
 0x0046D380,CString_ToPascalStringInPlace,,0%,
 0x0046D4B0,Outfit_RecomputeOutfitDerivedState,,0%,
-0x0046DF70,Outfit_ShipHasGravityShieldOutfit,,0%,
-0x0046E060,Ship_GetShipFuelBurnRate,,0%,
-0x0046E120,Stellar_ShipHasGravityShielding,,0%,
+0x0046DF70,Outfit_ShipHasGravityShieldOutfit,src/game/spaceflight.cpp,25%,"player opcode-38 inertial-dampener gate used by stellar gravity; ship-class and NPC-control-mode gates remain unimplemented"
+0x0046E060,Ship_GetShipFuelBurnRate,src/game/outfit.cpp,75%,"player opcode-15 scan follows the last-owned-afterburner ModVal / 30-tick rate; original cache sentinel omitted"
+0x0046E120,Stellar_ShipHasGravityShielding,src/game/spaceflight.cpp,25%,"player opcode-38/41 gravity immunity gates stellar force; ship-class and NPC behavior remain unimplemented"
 0x0046E210,Stellar_ShipImmuneToStellarCrash,,0%,
-0x0046E2F0,Ship_AccelerateShipTowardPoint,,0%,
+0x0046E2F0,Ship_AccelerateShipTowardPoint,src/game/spaceflight.cpp,55%,"player stellar-gravity use reconstructed: unit bearing force with gravity*elapsed / squared-distance; generic helper and original near-zero constants remain inline/TODO(decomp)"
 0x0046E3C0,Stellar_IsStellarActive,src/game/targeting.cpp,100%,NovaTargeting_IsStellarActive: population>0 && (handle active || engage access>0); runtime fields on Stellar
 0x0046E3F0,Stellar_StellarTargetsSpriteSetActive,src/game/targeting.cpp,100%,NovaTargeting_StellarTargetsSpriteSetActive: control bit set && sprite-active == engaged flag (XNOR)
 0x0046E440,Stellar_IsStellarUsableForTravel,src/game/targeting.cpp,100%,NovaTargeting_IsStellarUsableForTravel: targets-sprite-set-active && not availability_flags 0x3000
@@ -751,7 +751,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004903C0,NovaUi_HandleTravelOutfitMenuInput,,0%,
 0x004909A0,TravelOutfitMenu_FUN_004909a0,,0%,
 0x00490C70,NovaUi_RedrawTravelOutfitMenu,,0%,
-0x00491950,NovaUi_IsTravelOutfitPurchaseAllowed,,0%,
+0x00491950,NovaUi_IsTravelOutfitPurchaseAllowed,src/game/landed_store.cpp,25%,Partial clean-room purchase gate: tech/special-tech Require availability control-expression ownership-limit and credit checks; cargo special effects and government/script gates remain TODO(decomp).
 0x00491F30,NovaUi_RunTravelDestinationInteractionLoop,,0%,
 0x00492C40,NovaUi_RenderTravelDestinationOverlay,,0%,
 0x00492F10,NovaUi_PollTravelScriptAction,,0%,
@@ -773,7 +773,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00497EB0,NovaUi_ShowCaptureDecisionDialog,,0%,
 0x00498110,FUN_00498110,,0%,
 0x004982A0,Ui_RunTravelSelectionDialog,,0%,
-0x00498DC0,FUN_00498dc0,,0%,
+0x00498DC0,FUN_00498dc0,src/game/landed_store.cpp,20%,Partial clean-room ship purchase gate: selected/current class and net trade-in affordability; full original availability/random checks remain TODO(decomp).
 0x00499150,thunk_FUN_008745b6,,0%,
 0x00499270,FUN_00499270,,0%,
 0x00499870,FUN_00499870,,0%,

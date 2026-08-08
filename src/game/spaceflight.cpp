@@ -99,11 +99,9 @@ void DrawInGameFrame(SdlPlatform &platform,
 // bodies, the parallax starfield and the player's rotating ship are drawn.
 // Integrates the player's heading/throttle from the live keyboard into the
 // PlayerShip. This is a lightweight stand-in for Ship_HandlePlayerShipCore's
-// movement: turn by a fixed rate per frame, accelerate toward the current
-// heading while thrust is held, apply a soft drag, and clamp speed.
-// TODO(decomp): replace these provisional turn/thrust/drag constants with the
-// ship-class-derived rates (base_turn_rate_deg, base_speed, accel) once the
-// movement sim is reconstructed.
+// movement. Player steering, thrust, afterburner fuel burn, stellar gravity,
+// and engine-glow control are reconstructed below; AI/combat scopes remain
+// intentionally stubbed.
 void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                SdlAudio &audio,
                                GameState &state,
@@ -360,16 +358,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 //    px/tick. The original scales these values by its frame-time-derived tick
 //    count.
 //
-//  * Turn follows the held key while a turn command is active, at a
-//    rate of round(Ship_ComputeShipMaxTurnRateDeg) integer degrees/tick,
-//    applied as sVar18 * frame_time (Ship_HandlePlayerShipControl 0x0044e019).
-//    Ship_ComputeShipMaxTurnRateDeg (0x00463e70) reads the runtime
-//    ShipClassDef.base_turn_rate_deg (float +0x38) -- not the raw maneuver
-//    short -- plus outfit opcode-9 turn bonuses, a base-value floor, and
-//    status-effect damping. TODO(decomp): currently only the raw maneuver
-//    is reproduced below; the integer rounding and the opcode-9/floor/damping
-//    contributions are not yet modelled. Heading 0 points 'up', increases
-//    clockwise (Math_AddPolarVelocity convention).
+//  * Turn follows the held key at round(effective turn rate) integer degrees
+//    per tick. Outfit opcode-9 is folded into the effective stats before this
+//    integrator; the original's status-effect damping awaits reconstruction of
+//    that combat state. Heading 0 points 'up', increases clockwise.
 //
 //  * Thrust accelerates along the heading as a polar velocity step clamped
 //    per-AXIS to the projection of the class top speed (Math_AddPolarVelocity-
@@ -442,6 +434,45 @@ static void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
   vel_y = axis_step(-cos_h * max_speed, -cos_h * thrust_step, vel_y);
 }
 
+// Ghidra 0x0046e2f0 Ship_AccelerateShipTowardPoint. Stellar_TickStellar-
+// GravityPull passes gravity * frame_time as max_accel, divides by the squared
+// separation (with a tiny-distance floor), then adds the polar result to the
+// ship velocity. The player is exempt with either opcode 38 (inertial
+// dampener, used by Outfit_ShipHasGravityShieldOutfit) or opcode 41 (gravity
+// resistance, added by Stellar_ShipHasGravityShielding).
+static bool NovaPlayer_ApplyStellarGravity(GameState &state,
+                                           float elapsed_ticks) {
+  const System *const system = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (system == nullptr || elapsed_ticks <= 0.0F) {
+    return false;
+  }
+
+  bool gravity_present = false;
+  const bool protected_from_gravity =
+      Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener) ||
+      Outfit_HasOwnedEffect(state, OutfitEffect::kGravityResist);
+  for (const std::int16_t stellar_id : system->nav_defs) {
+    const Stellar *const stellar = state.scenario.Stellar(stellar_id);
+    if (stellar == nullptr || stellar->gravity == 0) {
+      continue;
+    }
+    gravity_present = true;
+    if (protected_from_gravity) {
+      continue;
+    }
+    const float dx = static_cast<float>(stellar->pos_x) - state.player.pos_x;
+    const float dy = static_cast<float>(stellar->pos_y) - state.player.pos_y;
+    const float distance_sq = std::max(dx * dx + dy * dy, 1.0F);
+    const float distance = std::sqrt(distance_sq);
+    const float accel =
+        static_cast<float>(stellar->gravity) * elapsed_ticks / distance_sq;
+    state.player.vel_x += dx / distance * accel;
+    state.player.vel_y += dy / distance * accel;
+  }
+  return gravity_present;
+}
+
 [[nodiscard]] PlayerMovementStats
 NovaPlayer_IntegrateMovement(PlayerShip &ship,
                              const FlightInput &input,
@@ -452,8 +483,11 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 
   PlayerMovementStats stats;
   elapsed_ticks = std::max(0.0F, elapsed_ticks);
+  // Ship_HandlePlayerShipControl rounds Ship_ComputeShipMaxTurnRateDeg before
+  // multiplying by frame time. Our caller supplies the effective raw
+  // maneuver (base + opcode-9 bonuses), so preserve that integer gate here.
   stats.turn_rate_deg_per_tick =
-      static_cast<float>(ship_class.turn_rate) * 0.1F;
+      std::round(static_cast<float>(ship_class.turn_rate) * 0.1F);
   // Loader-verified scales (NovaData_LoadScenarioResourceTables 0x004bd3c0):
   //   accel (offset 0x04) -> base_accel via /DAT_00575e68=10000.0;
   //   speed (offset 0x06) -> base_speed  via /DAT_00575e48=100.0   (NOT 640);
@@ -548,23 +582,49 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   }
   const PlayerEffectiveStats &eff = state.cached_stats;
 
+  const float fuel_burn = Outfit_GetPlayerAfterburnerFuelBurnRate(state);
+  const bool afterburner_active = input.afterburner && !input.reverse &&
+                                  fuel_burn <= p.fuel_points &&
+                                  fuel_burn > 0.0F;
+  // Ghidra's old name g_player_in_gravity_well is misleading: this is the
+  // opcode-15 afterburner latch. Stellar_TickStellarGravityPull independently
+  // sets g_gravity_pull_active, which disables the afterburner's boosted speed
+  // branch but does not prevent normal thrust.
+  const bool gravity_present =
+      NovaPlayer_ApplyStellarGravity(state, elapsed_ticks);
+
   // Map the effective raw stats onto the movement integrator's ShipClass view
   // (it divides raw accel/speed by the loader scale; turn is deg/tick).
   ShipClass effective_class;
   effective_class.accel = eff.thrust_raw;
   effective_class.speed = eff.speed_raw;
   effective_class.turn_rate = eff.turn_raw;
+  if (afterburner_active && !gravity_present) {
+    // DAT_00575610 = 1.8: the afterburner control branch raises the speed cap
+    // while no stellar gravity pull is active.
+    effective_class.speed *= 1.8F;
+  }
   (void)NovaPlayer_IntegrateMovement(p, input, effective_class, elapsed_ticks);
 
-  // Engine-glow intensity ramp toward the binary thrust target (clean-room
-  // stand-in for the original dimming the glow with ai_forward_thrust_cmd
-  // throttle; TODO(decomp): drive by thrust magnitude once the command channel
-  // exists).
-  constexpr float kGlowRiseRate = 0.12F;
-  constexpr float kGlowDecayRate = 0.05F;
-  p.engine_glow_intensity +=
-      (p.engine_thrust ? kGlowRiseRate : -kGlowDecayRate);
-  p.engine_glow_intensity = std::clamp(p.engine_glow_intensity, 0.0F, 1.0F);
+  if (afterburner_active) {
+    p.fuel_points = std::max(0.0F, p.fuel_points - fuel_burn * elapsed_ticks);
+  }
+
+  // ShipState +0xc8d4 is an integer engine/glow control, not a free-running
+  // alpha ramp. Normal thrust approaches 24; afterburning extends it to 32;
+  // coasting and reverse decrement by one renderer frame. This makes the
+  // observable rise/fall and afterburner cap match player control; rendering
+  // derives its alpha from that level until SpriteWorld's native glow blend is
+  // reconstructed.
+  const std::int16_t glow_target =
+      afterburner_active ? 32 : (p.engine_thrust ? 24 : 0);
+  if (p.engine_glow_level < glow_target) {
+    ++p.engine_glow_level;
+  } else if (p.engine_glow_level > glow_target) {
+    --p.engine_glow_level;
+  }
+  p.engine_glow_intensity =
+      std::clamp(static_cast<float>(p.engine_glow_level) / 24.0F, 0.0F, 1.0F);
 }
 
 void NovaPlayer_TickShieldRecharge(GameState &state, float frame_time_ms) {

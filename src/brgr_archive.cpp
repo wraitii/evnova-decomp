@@ -842,6 +842,7 @@ NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
       return std::nullopt;
     }
     NovaDialogItem item;
+    item.index = entry;
     // Rect is two BE shorts ordered (top, left, bottom, right)
     // at item+4..+11; the type byte (bit 7 = enabled) at item+12.
     item.top = static_cast<std::int16_t>(DialogReadBe16(*data, pos + 4));

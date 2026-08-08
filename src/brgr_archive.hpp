@@ -211,6 +211,10 @@ NovaResource_LoadMainMenuLogoData();
 // items are placed (FUN_008730a1). `type` is the low 7 bits of the type byte
 // (bit 7 is the enabled/hilite flag). `enabled` mirrors that high bit.
 struct NovaDialogItem {
+  // Zero-based DITL item index.  Dialog code addresses controls by this
+  // ordinal (rather than by their screen geometry), so callers must retain it
+  // even when several controls happen to share the same size.
+  std::size_t index = 0;
   std::int16_t top = 0;
   std::int16_t left = 0;
   std::int16_t bottom = 0;

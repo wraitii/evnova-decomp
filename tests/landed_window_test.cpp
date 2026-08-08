@@ -267,7 +267,6 @@ TEST_CASE("docked sub-window frame PICTs decode from Nova Graphics",
                          game::LandedService::kOutfit,
                          game::LandedService::kBar,
                          game::LandedService::kMissionBoard,
-                         game::LandedService::kStarmap,
                          game::LandedService::kBuySellCargo};
   for (const auto s : services) {
     const auto id = game::NovaDocked_SubWindowFramePict(s);

@@ -43,21 +43,20 @@ class SdlPlatform;
 namespace game {
 
 // The service menu actions a docked player may pick, mirroring the original
-// travel-destination services (the Spaceport screen: on the left Bar, Mission
-// BBS, Trade center, Repair; on the right Shipyard, Outfitter, Refuel, Leave).
+// travel-destination services.  The Spaceport has exactly seven actions;
+// their visual placement comes from the DITL item indices, not a synthetic
+// two-column service grid.
 // The shipyard/buy-sell/bar stubs where out of scope are (mocked) in the MVP.
 enum class LandedService : std::uint8_t {
   // Leave the dock and resume free flight over the stellar (the "Leave"
   // button at the bottom-right of the docked panel).
   kLaunch = 0,
-  kRefuel,       // top up fuel toward the effective capacity
-  kRepair,       // top up armor (and shields) toward effective maximums
-  kBuySellCargo, // (mocked) the Trade center (commodity exchange)
-  kOutfit,       // (mocked) the Outfitter
-  kShipyard,     // (mocked) the Shipyard
-  kBar,          // (mocked) the Bar
-  kStarmap,      // (mocked) the Starmap (no on-screen slot; number-key only)
-  kMissionBoard, // (mocked) the Mission BBS
+  kRefuel,
+  kBuySellCargo,
+  kOutfit,
+  kShipyard,
+  kMissionBoard,
+  kBar,
   kCount,
 };
 
@@ -89,6 +88,7 @@ enum class DockedItemKind : std::uint8_t {
 
 // One laid-out docked item: its on-screen rect (logical panel space).
 struct DockedItem {
+  std::size_t ditl_index = 0;
   DockedItemKind kind = DockedItemKind::kOrnament;
   SDL_FRect rect = {0.0F, 0.0F, 0.0F, 0.0F};
 };
@@ -109,19 +109,10 @@ struct DockedLayout {
 // resources cannot be decoded. Pure rect math; testable without a renderer.
 bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out);
 
-// Physical docked-button order matches the original Spaceport screen: LEFT
-// column (top-to-bottom) is Bar, Mission BBS, Trade center, Repair, and RIGHT
-// column is Shipyard, Outfitter, Refuel, Leave. `side` is 0 (left) or 1
-// (right); `row` is 0..3 top-to-bottom. The starmap service has no on-screen
-// slot (it stays reachable via the number keys). These pure lookups are shared
-// by the button builder and the keyboard navigation so they never drift.
-[[nodiscard]] LandedService NovaDialog_DockedServiceAt(std::size_t side,
-                                                       std::size_t row);
-
-// Inverse of NovaDialog_DockedServiceAt: the (side, row) grid position of an
-// on-screen docked service, or std::nullopt for a no-slot service (starmap).
-[[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>>
-NovaDialog_DockedGridOf(LandedService svc);
+// Maps the original Spaceport's DITL item ordinal to its action.  Only seven
+// item indices are controls: 12, 4, 7, 8, 9, 10, and 11.
+[[nodiscard]] std::optional<LandedService>
+NovaDialog_DockedServiceForDitlItem(std::size_t ditl_index);
 
 // Greedy word-wrap of a long description string into lines that each fit a
 // `max_width` (device-independent) measurement. `measure` returns the width of

@@ -39,6 +39,10 @@ struct FlightInput {
   bool turn_right = false; // right / 'd'
   bool thrust = false;     // up / 'w' (accelerate toward heading)
   bool reverse = false;    // down / 's' (turn ship to fly backward)
+  // Held afterburner command. The original maps this through the configurable
+  // gameplay-command table; this clean-room binding uses Ctrl so it remains
+  // independent of target cycling (Shift+Tab).
+  bool afterburner = false;
   // Primary fire: space (hold to keep firing the player's main weapon bank).
   // Stand-in for the original's primary-fire input command; the Ghost map is
   // not reconstructed, so this build binds the logical primary-fire command to

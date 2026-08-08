@@ -140,6 +140,13 @@ Outfit_ComputeRemainingCargoSpace(const GameState &state);
 [[nodiscard]] bool Outfit_HasOwnedEffect(const GameState &state,
                                          OutfitEffect effect);
 
+// Mirrors Ship_GetShipFuelBurnRate (0x0046e060) for the player: the last
+// owned outfit encountered with opcode 15 supplies ModVal / 30 fuel per
+// original simulation tick. The original caches this result until inventory
+// changes; this inexpensive clean-room scan is used only while afterburning.
+[[nodiscard]] float
+Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state);
+
 // Marks the effective-stats cache dirty. Called by the inventory mutation
 // helpers; the spaceflight loop reads cached stats to avoid re-scanning the
 // 0x200-entry outfit table every frame.

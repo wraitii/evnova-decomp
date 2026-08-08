@@ -80,6 +80,27 @@ void OutfitMarkStatsDirty(GameState &state) { MarkStatsDirty(state); }
   return false;
 }
 
+float Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state) {
+  // _DAT_00575858 is 1/30. The original stops at the first opcode-15 slot in
+  // an outfit but continues through the table, so a later owned afterburner
+  // replaces an earlier value; ownership count does not multiply the rate.
+  float rate = 0.0F;
+  for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
+       ++id) {
+    if (state.inventory.outfit_owned_count[id] <= 0 ||
+        id >= state.scenario.outfits.size()) {
+      continue;
+    }
+    for (const Effect &e : OutfitEffects(state.scenario.outfits[id])) {
+      if (e.type == static_cast<std::int16_t>(OutfitEffect::kAfterburner)) {
+        rate = static_cast<float>(e.val) / 30.0F;
+        break;
+      }
+    }
+  }
+  return rate;
+}
+
 PlayerEffectiveStats
 Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   const int16_t ship_class_id = state.player.ship_class_id;
