@@ -17,6 +17,7 @@ add_library(evnova_runtime
     game/hud_renderer.cpp
     game/intro_cinematic.cpp
     game/landed_window.cpp
+    game/docked_dialog.cpp
     game/new_pilot_flow.cpp
     game/nova_font.cpp
     game/outfit.cpp

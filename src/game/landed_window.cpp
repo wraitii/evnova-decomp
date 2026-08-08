@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "docked_dialog.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
@@ -778,13 +779,21 @@ DispatchService(SdlPlatform &platform, GameState &state, LandedContext &ctx) {
   case LandedService::kShipyard:
   case LandedService::kBar:
   case LandedService::kStarmap:
-  case LandedService::kMissionBoard:
-    NovaLog::Todo(
-        "landed service '{}' at stellar {} not reconstructed (sub-window "
-        "mocked)",
-        ServiceLabel(ctx.selection),
-        static_cast<int>(ctx.stellar_id));
+  case LandedService::kMissionBoard: {
+    // Render the sub-window as a real on-screen dialog over the docked scene
+    // (frame PICT + heading + Leave), instead of the previous TODO mock. The
+    // service content (buy/sell tables, outfit list, shipyard purchases, bar
+    // holovid/gamble, map navigation) is still out of scope behind the frame.
+    const LandedExit dialog_exit = NovaLanded_RunSubWindowDialog(
+        platform, state, ctx.selection, ctx.stellar_id);
+    if (dialog_exit == LandedExit::kQuit) {
+      return LandedExit::kQuit;
+    }
+    // Otherwise the dialog closed back to the dock menu normally. The sub-
+    // window content is out of scope, so there is no kLaunched hand-off yet;
+    // a future service-internal "launch" path would return kLaunched here.
     return LandedExit::kServiceComplete;
+  }
 
   case LandedService::kCount:
     break;

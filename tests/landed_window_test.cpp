@@ -2,7 +2,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "brgr_archive.hpp"
+#include "game/docked_dialog.hpp"
 #include "game/landed_window.hpp"
+#include "pict_image.hpp"
 
 #include <algorithm>
 #include <array>
@@ -247,4 +249,34 @@ TEST_CASE("normal landing arrival charges once and restores the docked ship",
   CHECK(state.player.speed == 0.0F);
   CHECK(state.player.shield_points == 300.0F);
   CHECK(state.player.armor_points == 250.0F);
+}
+
+// The sub-window dialogs render each docked service's frame PICT over the dock
+// (NovaDocked_SubWindowFramePict). Every documented Nova Graphics 3 frame id
+// must resolve to a decodable PICT so the dialog has real art rather than the
+// placeholder panel.
+TEST_CASE("docked sub-window frame PICTs decode from Nova Graphics",
+          "[landed_window][docked_dialog]") {
+  if (!std::filesystem::exists("EV Nova/Nova.rez") &&
+      !std::filesystem::exists("EV Nova/Nova Files/Nova.rez") &&
+      !std::filesystem::exists("../../../EV Nova/Nova.rez") &&
+      !std::filesystem::exists("../../../EV Nova/Nova Files/Nova.rez")) {
+    SKIP("Nova.rez not present");
+  }
+  const auto services = {game::LandedService::kShipyard,
+                         game::LandedService::kOutfit,
+                         game::LandedService::kBar,
+                         game::LandedService::kMissionBoard,
+                         game::LandedService::kStarmap,
+                         game::LandedService::kBuySellCargo};
+  for (const auto s : services) {
+    const auto id = game::NovaDocked_SubWindowFramePict(s);
+    REQUIRE(id != 0);
+    const auto data = NovaResource_LoadPictData(id);
+    REQUIRE(data);
+    const auto img = Resource_LoadPictAsImage(*data);
+    REQUIRE(img.has_value());
+    REQUIRE(img->width > 0);
+    REQUIRE(img->height > 0);
+  }
 }
