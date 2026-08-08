@@ -726,9 +726,9 @@ address,name,impl_file,reimpl_pct,comment
 0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
 0x00488650,Menu_RunSettingsDialog,,0%,
 0x00489210,Ship_RunSpaceflightMode,src/game/spaceflight.cpp,10%,"Ship_RunSpaceflightMode skeleton: faithful loop/cadence, gameplay scopes stubbed"
-0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,100%,Menu_RunNewGameFlow reconstructed new-pilot path; other dialog branches (continue/load) stubbed
+0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,75%,New-pilot path preserves reset/refilled stats and seeded inventory; dialogs, scenario population, discovery remain partial
 0x0048A7E0,Menu_RunPilotSelectionDialog,,0%,
-0x0048ADC0,IntroCinematic_Run,src/game/intro_cinematic.cpp,100%,IntroCinematic_Run full 3-frame intro playback
+0x0048ADC0,IntroCinematic_Run,src/game/intro_cinematic.cpp,85%,Timed configured-frame playback; Enter/Space/click advance one frame; native command/cursor paths and travel dialog partial
 0x0048B230,NovaRender_PresentBlockingTransitionFrame,,0%,
 0x0048B250,NovaAudio_PreloadTransitionEffects,,0%,NovaAudio_PreloadTransitionEffects into DAT_007d24b8
 0x0048B280,FUN_0048b280,,0%,

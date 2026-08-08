@@ -472,7 +472,28 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   // GameState so the intro and spaceflight read one consistent record.
   PilotFile record = PilotFile::Fresh();
   record.pilot_name = state.pilot.first_name;
+  // A fresh pilot block is not a loaded save: PilotData_InitializePlayerState
+  // leaves Ship_ResetPlayerShipState's live values in place, then the original
+  // refills shield, armor and fuel after stock outfits are seeded. Our
+  // in-memory record is applied below solely to keep the tracked intro/save
+  // fields together, so it must carry those live values rather than its zero
+  // initialization. Otherwise PilotFileApply would incorrectly erase the
+  // newly filled ship and the seeded inventory.
+  record.credits = state.player.credits;
+  record.ship_class_id = state.player.ship_class_id;
   record.current_system_id = state.player.current_system_id;
+  record.active_weapon_bank_slot = state.player.active_weapon_bank_slot;
+  record.timed_action_counter = state.player.timed_action_counter;
+  record.death_timer_active = state.player.death_timer_active;
+  record.shield_points = state.player.shield_points;
+  record.armor_points = state.player.armor_points;
+  record.fuel_points = state.player.fuel_points;
+  record.pos_x = state.player.pos_x;
+  record.pos_y = state.player.pos_y;
+  record.vel_x = state.player.vel_x;
+  record.vel_y = state.player.vel_y;
+  record.heading = state.player.heading;
+  record.speed = state.player.speed;
 
   // IntroCinematic_SetupFrames reads the intro frames from the pilot-save
   // block (+0x20 / +0x28 / +0x30). Here the record is seeded from the default
@@ -497,6 +518,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   // bank 0, so nothing could ever fire.
   record.weapon_bank_ammo = state.weapon_bank_ammo;
   record.weapon_bank_secondary = state.weapon_bank_secondary;
+  record.outfit_owned_count = state.inventory.outfit_owned_count;
 
   // Copy the assembled record into the live state (mirroring the block-to-
   // global copy IntroCinematic_SetupFrames/PilotData_InitializePlayerState

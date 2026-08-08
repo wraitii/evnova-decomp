@@ -123,8 +123,8 @@ boot-phase splash above; it is a timed scripted sequence tied to a starting a ru
 - For each of (up to 4) intro frames: loads/fills the frame PICT (id from
   g_intro_cinematic.source_pict_ids[i]), centers and blits it to the shared offscreen surface
   `DAT_00597950`, then waits the per-frame duration (g_intro_cinematic.duration_60h_ticks[i],
-  in 1/60s ticks → ms = ticks*60) with input-to-skip (enter/space/primary). `0xffff` on a
-  frame id terminates the frame list.
+  in 1/60s ticks → ms = ticks*60). Enter, Space, or a pointer click advances only the current
+  frame; `0xffff` on a frame id terminates the frame list.
 - After the sequence, if a post-intro travel destination is set
   (g_intro_cinematic.post_intro_dest_id != -1) it opens the intro travel-selection dialog.
 

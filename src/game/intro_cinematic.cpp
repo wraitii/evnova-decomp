@@ -59,8 +59,8 @@ void DrainInput(SdlPlatform &platform) {
 }
 
 // Ghidra IntroCinematic_Run's post-intro epilogue: after the last frame, when
-// the intro was not skipped and g_intro_cinematic.post_intro_dest_id != -1 it
-// opens the travel-selection dialog for that destination
+// g_intro_cinematic.post_intro_dest_id != -1 it opens the travel-selection
+// dialog for that destination
 // (Ui_RunTravelSelectionDialog, gating DAT_007d1fa6 = 1). The full systems
 // dialog is not reconstructed, so this reproduces the *gating* faithfully and
 // logs what is skipped. With the new-game default post_intro_dest_id = 0x7ffd
@@ -77,28 +77,23 @@ void RunPostIntroDestinationStub(const GameState &state) {
       state.intro_cinematic.post_intro_dest_id);
 }
 
-// Mirrors the original's two distinct skip mechanisms from IntroCinematic_Run:
-//  * Enter (0x1c) / Space (0x39) ended only the *current* frame's wait.
-//  * The primary mouse command (_DAT_00591514) set the persistent latch `bVar9`
-//    that carries across all remaining frames and is also latched once at
-//    entry.
-// Note Escape is *not* a skip key here: Ghidra IntroCinematic_Run reads only
-// 0x1c (Enter), 0x39 (Space) and the primary mouse command. Returns whether the
-// frame's wait should end (Enter/Space) and whether the primary latch fired.
+// A pointer press inside the render rect makes IntroCinematic_Run leave its
+// current frame wait (`local_19`); it does not set the routine's separate
+// command latch (`bVar9`) and therefore does not discard the remaining frames.
+// Enter (0x1c) and Space (0x39) have the same per-frame effect. SDL exposes
+// only the pointer press here, so it maps to that mouse path. Escape is not a
+// cinematic skip key in the original.
 struct SkipState {
-  bool frame_done = false;    // Enter/Space: end this frame's wait
-  bool primary_latch = false; // primary mouse: skip the whole sequence (bVar9)
+  bool frame_done = false;
 };
 
-SkipState PollSkip(SdlPlatform &platform, bool primary_latch) {
+SkipState PollSkip(SdlPlatform &platform) {
   SkipState result;
-  result.primary_latch = primary_latch;
   for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
     if (input->key == TextKey::enter ||
-        (input->key == TextKey::character && input->character == ' ')) {
+        (input->key == TextKey::character && input->character == ' ') ||
+        input->key == TextKey::primary) {
       result.frame_done = true;
-    } else if (input->key == TextKey::primary) {
-      result.primary_latch = true;
     }
   }
   return result;
@@ -110,15 +105,8 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
   const auto &cinematic = state.intro_cinematic;
 
-  // Ghidra latched the primary mouse command once at entry into loop-local
-  // `bVar9`, so if the player was already pressing the primary button the
-  // whole sequence is skipped immediately. Enter/Space only fast-forward the
-  // current frame, so they interact with the latch per frame below.
-  bool primary_latch = PollSkip(platform, false).primary_latch;
-
-  // Ghidra's per-frame quick-break on the frame loop is driven by bVar9 (the
-  // primary latch); an Enter/Space fast-forward only moves to the next frame
-  // slot, of which the default config has a single PICT then terminators.
+  // A frame-specific advance only ends that frame's wait. In particular, a
+  // click during the first stock frame advances to the second stock frame.
   for (std::size_t frame_index = 0;
        frame_index < cinematic.source_pict_ids.size();
        ++frame_index) {
@@ -126,8 +114,8 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
     if (pict_id < 1) {
       // Ghidra: source_pict_ids[i] < 1 means no art this frame. Only frames
       // with art enter the wait loop; the loop nevertheless walks all four
-      // slots. A primary latch set on an earlier frame ends the walk.
-      if (primary_latch || platform.quit_requested()) {
+      // slots.
+      if (platform.quit_requested()) {
         break;
       }
       continue;
@@ -170,44 +158,37 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
                           kFirstFlightHint.data());
       SDL_RenderPresent(renderer);
 
-      // Wait out the per-frame duration. Enter/Space end this frame's wait
-      // (frame_done); the primary mouse command sets the persistent latch,
-      // which short-circuits every remaining wait immediately.
-      const auto skip = PollSkip(platform, primary_latch);
-      primary_latch = skip.primary_latch;
-      if (primary_latch || platform.quit_requested()) {
-        break; // primary latch ends the whole walk (see outer loop)
+      // Wait out the per-frame duration. Keyboard and pointer input advance
+      // one frame only; the outer loop then presents the next configured PICT.
+      const auto skip = PollSkip(platform);
+      if (platform.quit_requested()) {
+        break;
       }
       if (skip.frame_done) {
-        break; // Enter/Space: advance to the next frame slot only
+        break;
       }
       if (platform.ticks_ms() - start_ms >= duration_ms) {
         break;
       }
       SDL_Delay(16);
     }
-    if (primary_latch || platform.quit_requested()) {
+    if (platform.quit_requested()) {
       break;
     }
   }
 
   DrainInput(platform);
 
-  // Ghidra: after the sequence, if the primary latch was NOT set and
-  // post_intro_dest_id != -1, open the travel-selection dialog. `intro_played`
+  // Ghidra: after the sequence, if post_intro_dest_id != -1, open the
+  // travel-selection dialog. `intro_played`
   // is *not* set here: Ship_RunSpaceflightMode sets DAT_00596d35 after
   // IntroCinematic_Run returns (see spaceflight.cpp).
-  if (!primary_latch && !platform.quit_requested()) {
-    NovaLog::Info("intro cinematic finished (Enter/Space may have advanced "
-                  "the single frame)");
+  if (!platform.quit_requested()) {
+    NovaLog::Info("intro cinematic finished (input may have advanced "
+                  "individual frames)");
     RunPostIntroDestinationStub(state);
-  } else {
-    NovaLog::Info("intro cinematic skipped by the player");
   }
-  // Mirrors bVar9: the post-intro destination dialog is suppressed only by the
-  // primary mouse command, matching the original's gate (`!bVar9 &&
-  // post_intro_dest_id != -1`).
-  return !primary_latch;
+  return !platform.quit_requested();
 }
 
 } // namespace game
