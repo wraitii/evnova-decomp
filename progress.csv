@@ -176,7 +176,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00431530,Shot_UpdateShotGuidance,,0%,
 0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,35%,scope 3 marks the entered current system visible, then re-derives stellar system_id/is_available/hazard state via NovaTargeting_UpdateStellarAvailability; discovery flood and sprite-set bookkeeping not reconstructed
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
-0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,3%,"player free-flight movement model reconstructed (ship-class stats, turn/thrust/clamp, inertia coast, reverse brake) via NovaPlayer_IntegrateMovement; AI/combat/weapon/travel scopes still stubbed"
+0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,5%,"player free-flight movement reconstructed (ship-class stats, elapsed-time-scaled thrust/clamp/position, inertia coast) via NovaPlayer_IntegrateMovement. AI/combat/weapon/travel scopes still stubbed"
 0x00435830,Shot_HandleShot,src/game/spaceflight_view.cpp,15%,"shot sprite frame selection mirrored: flags_primary bit0 clear => static/heading frame (rotation sheet, bearing via FrameForHeading) in DrawShots; bit0 set => time-animated frame_cycle_index/anim_elapsed stepped at shot_anim_frame_dwell cadence by NovaWeapon_TickShots (weapon.cpp) and wrapped at the set's frame count (reverse-hold via flags_secondary) in DrawShots; guidance motion, collision, linked-shot/area-impact and audio side-effects not reconstructed"
 0x00436910,Frame_UpdateScriptedManeuverSprites,,0%,
 0x00436FF0,NovaUi_ResolveWeaponSplashImpact,,0%,
@@ -268,11 +268,11 @@ address,name,impl_file,reimpl_pct,comment
 0x0044AA30,Math_RotateLeft8,,0%,
 0x0044AA50,FUN_0044aa50,,0%,
 0x0044AA60,FUN_0044aa60,,0%,
-0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,8%,player thrust/turn control subset (ShipClass scaled) + jump-complete block (CompleteJump in travel.cpp); travel/combat/disable/mission scopes still stubbed
+0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,12%,player thrust/turn subset via NovaPlayer_IntegrateMovement (loader-verified scales speed /100 thrust x2 DAT_005757a8 turn*0.1; elapsed-time integration; max-speed hard cap; inertia-less zeroing) plus jump-complete block (CompleteJump in travel.cpp). travel/combat/disable/mission scopes still stubbed
 0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,20%,nearest eligible stellar seeds target; Tab/Shift+Tab cycles and retains a manual stellar selection; target action now stops at the destination-interaction boundary. Combat/movement/travel-transition scopes still stubbed
-0x0044C8D0,Ship_TurnShipTowardHeading,,0%,
+0x0044C8D0,Ship_TurnShipTowardHeading,src/game/spaceflight.cpp,3%,reverse-control subset turns toward the heading opposite current velocity at the effective turn rate; direct-turn/thrust and transition scopes not separately reconstructed
 0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,
-0x0044E019,Ship_HandlePlayerShipControl,src/game/spaceflight.cpp,12%,primary-fire command loop (fire all primary banks) wired via NovaWeapon_FirePlayerPrimary + NovaWeapon_TickShots in NovaFrame_SpaceflightLoop; travel/mission/target-cycling/travel-selection scopes still stubbed
+0x0044E019,Ship_HandlePlayerShipControl,src/game/spaceflight.cpp,15%,primary-fire loop wired via NovaWeapon_FirePlayerPrimary + NovaWeapon_TickShots; movement subset includes elapsed-time-scaled turn/thrust and down/S reverse (turn hull opposite velocity without braking). travel/mission/target-cycling scopes still stubbed
 0x0044EAB4,FUN_0044eab4,,0%,
 0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
@@ -336,7 +336,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00463A20,Ship_ComputeShipFuelCapacity,,0%,
 0x00463B30,Ship_ComputeShipShieldRechargeRate,,0%,
 0x00463DC0,Weapon_WeaponCanTrackTarget,,0%,
-0x00463E70,Ship_ComputeShipMaxTurnRateDeg,,0%,
+0x00463E70,Ship_ComputeShipMaxTurnRateDeg,,0%,turn model decoded (base_turn_rate_deg float +0x38 + opcode-9 bonuses + floor 1.0 + status damping); player keyboard path in HandlePlayerShipControl rounds to integer deg/frame. Not yet a distinct reimplemented function; NovaPlayer_IntegrateMovement approximates with turn_rate*0.1
 0x004640A0,Ship_ComputeShipEffectiveThrust,,0%,
 0x004642E0,Ship_ComputeShipEffectiveMaxSpeed,,0%,
 0x004644A0,Outfit_HasSpecialMovementOutfitOrLaunchBay,,0%,

@@ -38,7 +38,7 @@ struct FlightInput {
   bool turn_left = false;  // left / 'a'
   bool turn_right = false; // right / 'd'
   bool thrust = false;     // up / 'w' (accelerate toward heading)
-  bool brake = false;      // down / 's' (decelerate)
+  bool reverse = false;    // down / 's' (turn ship to fly backward)
   // Primary fire: space (hold to keep firing the player's main weapon bank).
   // Stand-in for the original's primary-fire input command; the Ghost map is
   // not reconstructed, so this build binds the logical primary-fire command to

@@ -37,34 +37,42 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
 // Ship-class movement stats derived from the raw resource as the original
 // loader (NovaData_LoadScenarioResourceTables 0x004bd3c0) derives
 // ShipClassDef.base_turn_rate_deg / base_speed / accel(0x3c):
-//   accel    = raw_accel    / 10000.0   (px/frame^2)
-//   speed    = raw_speed    / 640.0     (px/frame)
-//   turn     = raw_maneuver * 0.1       (deg/frame)
+//   accel    = raw_accel    / 10000.0  * 2.0  (px/tick^2; runtime multiplier
+//                                                 DAT_005757a8=2.0)
+//   speed    = raw_speed    / 100.0           (px/tick; DAT_00575e48, NOT 640)
+//   turn     = raw_maneuver * 0.1             (deg/tick; DAT_00575e58)
 // See spaceflight.cpp for the source-constant references.
 struct PlayerMovementStats {
-  float turn_rate_deg_per_frame = 0.0F;
-  float max_speed_px_per_frame = 0.0F;
-  float thrust_px_per_frame2 = 0.0F;
+  float turn_rate_deg_per_tick = 0.0F;
+  float max_speed_px_per_tick = 0.0F;
+  float thrust_px_per_tick2 = 0.0F;
 };
 
 // Pure free-flight physics integrator (unit-testable; no SDL). Derives stats
-// from a ShipClass and advances the player ship for one frame according to the
-// Input key latches. Faithful to the original movement model ("Player ship
-// movement (free flight)" comment in spaceflight.cpp): bank continuously at
-// the class turn rate while a turn key is held, thrust along heading as a
-// per-AXIS-polar-clamped step (Math_AddPolarVelocityWithClamp 0x0043b4e0),
-// inertia-preserving coast when thrust released, and reverse-thrust braking
-// toward rest. Returns the same PlayerMovementStats it integrated with so the
-// caller knows what was applied.
-[[nodiscard]] PlayerMovementStats NovaPlayer_IntegrateMovement(
-    PlayerShip &ship, const FlightInput &input, const ShipClass &ship_class);
+// from a ShipClass and advances the player ship for an elapsed interval
+// according to the Input key latches. Faithful to the original movement model
+// ("Player ship movement (free flight)" comment in spaceflight.cpp): bank
+// continuously at the class turn rate while a turn key is held, thrust along
+// heading as a per-AXIS-polar-clamped step (Math_AddPolarVelocityWithClamp
+// 0x0043b4e0), inertia-preserving coast when thrust released, and the original
+// reverse command (turn toward the direction opposite current velocity). All
+// rates are scaled by `elapsed_ticks`, normalized to the original 30 Hz
+// simulation cadence (the same role as g_avg_frame_time_ms in the original).
+// Returns the same PlayerMovementStats it integrated with so the caller knows
+// what was applied.
+[[nodiscard]] PlayerMovementStats
+NovaPlayer_IntegrateMovement(PlayerShip &ship,
+                             const FlightInput &input,
+                             const ShipClass &ship_class,
+                             float elapsed_ticks);
 
 // Applies the live flight controls to the player ship: integrates the heading/
 // throttle from an already-polled flight-input snapshot into GameState.player
 // so the ship flies during flight. The caller supplies the snapshot so it can
 // also feed the travel/other channels without polling the keyboard twice.
 extern void NovaPlayer_UpdateFromInput(GameState &state,
-                                       const FlightInput &input);
+                                       const FlightInput &input,
+                                       float elapsed_ticks);
 
 // Per-frame in-flight shield regeneration (the spaceflight loop calls this
 // once a frame). Restores the player's shields toward the effective maximum at

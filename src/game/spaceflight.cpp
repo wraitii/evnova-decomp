@@ -179,7 +179,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     const bool target_action_pressed =
         input.target_action && !target_action_was_held;
     target_action_was_held = input.target_action;
-    NovaPlayer_UpdateFromInput(state, input);
+    // The original's movement values are per simulation tick. Its normal
+    // cadence is 30 Hz; using a 60 Hz SDL render loop without this conversion
+    // advances the player ship at twice the intended speed.
+    constexpr float kOriginalTickMs = 1000.0F / 30.0F;
+    NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
     // Advance the player's fired shots/cooldowns from the previous frame, then
     // handle this frame's fire input. Mirrors Ship_HandlePlayerShipControl
     // firing the primary bank(s) while the fire command is held. frame_time_ms
@@ -347,17 +351,25 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 //  * Stats come from the ship class (ShipClassDef). The scenario loader scales
 //    the raw resource shorts exactly as the original (NovaData_LoadScenario-
 //    ResourceTables 0x004bd3c0):
-//        accel    -> thrust (px/frame^2):  raw_accel / 10000.0 (DAT_00575e68)
-//        speed    -> top speed (px/frame): raw_speed / 640.0 (DAT_00575e48)
-//        maneuver -> turn rate (deg/frame): raw_maneuver * 0.1 (DAT_00575e58)
-//    Starter (sh.x9an 0x80): accel 0.05, speed 0.625, turn 4.0 deg/frame.
-//    These per-frame values hold at the original's reference cadence (the game
-//    scales them by g_avg_frame_time_ms; see note at the end).
+//        accel    -> thrust (px/tick^2):   raw_accel / 10000.0 (DAT_00575e68)
+//                                                 then *2.0 runtime
+//                                                 (DAT_005757a8)
+//        speed    -> top speed (px/tick):  raw_speed / 100.0 (DAT_00575e48)
+//        maneuver -> turn rate (deg/tick): raw_maneuver * 0.1 (DAT_00575e58)
+//    Starter (sh.x9an 0x80): accel 0.05, turn 4.0 deg/tick, top speed 4
+//    px/tick. The original scales these values by its frame-time-derived tick
+//    count.
 //
-//  * Turn follows the held key at the class turn rate continuously (no
-//    heading integration besides the rate), matching Ship_ComputeShipMaxTurn-_
-//    RateDeg making the ship bank at max rate under direct control. Heading 0
-//    points 'up', increases clockwise (Math_AddPolarVelocity convention).
+//  * Turn follows the held key while a turn command is active, at a
+//    rate of round(Ship_ComputeShipMaxTurnRateDeg) integer degrees/tick,
+//    applied as sVar18 * frame_time (Ship_HandlePlayerShipControl 0x0044e019).
+//    Ship_ComputeShipMaxTurnRateDeg (0x00463e70) reads the runtime
+//    ShipClassDef.base_turn_rate_deg (float +0x38) -- not the raw maneuver
+//    short -- plus outfit opcode-9 turn bonuses, a base-value floor, and
+//    status-effect damping. TODO(decomp): currently only the raw maneuver
+//    is reproduced below; the integer rounding and the opcode-9/floor/damping
+//    contributions are not yet modelled. Heading 0 points 'up', increases
+//    clockwise (Math_AddPolarVelocity convention).
 //
 //  * Thrust accelerates along the heading as a polar velocity step clamped
 //    per-AXIS to the projection of the class top speed (Math_AddPolarVelocity-
@@ -365,28 +377,29 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 //    at its polar max projection; it is NOT a vector-magnitude governor, so a
 //    ship turning at full thrust can build a small off-axis component that
 //    pushes its net speed modestly past the nominal top speed (the authentic
-//    EVN drift). The original's throttle is high enough to top out within a
-//    few frames.
+//    EVN drift). Separately, the final velocity vector is then hard-capped
+//    each frame to +/-the effective max-speed component (DAT_005997bc/c0 in
+//    Ship_HandlePlayerShipControl 0x0044e019), pulling back any excess built
+//    up off-axis, so the cap bounds the net speed. The original's throttle is
+//    high enough to top out within a few frames.
 //
-//  * WHEN THROTTLE RELEASED THE SHIP COASTS -- there is NO continuous velocity
-//    drag in the original's free-flight path, so a released ship keeps most of
-//    its momentum. The old stand-in's per-frame kDrag multiply was the main
-//    fidelity bug (made ships feel mushy and never reach a crisp cruise).
+//  * Inertia: most ships preserve momentum when throttle is released -- there
+//    is NO continuous velocity drag in the original's free-flight path, so a
+//    released ship keeps most of its momentum. The old stand-in's per-frame
+//    kDrag multiply was the main fidelity bug. Inertia-less ships are the
+//    special case where base_accel == 0 && base_speed == 0: Ship_HandleShip
+//    (0x00433050) zeroes their velocity every frame, pinning them in place.
 //
-//  * BRAKE ('s'/down) is a separate reverse-to-rest path (see body), not a
-//    second thrust sign, because the original's reverse is governed by
-//    ai_desired_speed / reverse_speed_bias rather than a mirrored forward
-//    thrust.
+//  * REVERSE ('s'/down) turns the ship toward the heading opposite its current
+//    velocity, then continues to coast; it does not apply retro-thrust. This is
+//    Ship_HandlePlayerShipControl's early Ship_TurnShipTowardHeading path.
 //
 // NOTE(decomp) scale/cadence: the original integrates over g_avg_frame_time_ms
-// (0x00735448, Frame_MeasureFrameTiming 0x00432ea0) so ship motion is cadence-,
-// not fixed-step, independent. The reimplementation loop is per-frame fixed
-// cadence (SDL_Delay(16) in NovaFrame_SpaceflightLoop), so the class stats are
-// used directly as per-frame values and the frames-per-second of the host
-// dictates on-screen pace; this restores the *relative* handling between ship
-// classes and the inertia feel, but the absolute pace/turn should be re-checked
-// against a real capture once the world->viewport transform is reconstructed.
-// Pure per-frame movement integration (unit-tested in tests/movement_test.cpp).
+// (0x00735448, Frame_MeasureFrameTiming 0x00432ea0), so ship motion is
+// cadence-independent. The reimplementation normalizes measured SDL elapsed
+// time to the original's 30 Hz simulation-tick basis.
+// Pure tick-scaled movement integration (unit-tested in
+// tests/movement_test.cpp).
 
 // One per-axis step of Ghidra Math_AddPolarVelocityWithClamp (0x0043b4e0), the
 // original's single forward-thrust pathway (Ship_HandleShip calls it with
@@ -429,70 +442,100 @@ static void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
   vel_y = axis_step(-cos_h * max_speed, -cos_h * thrust_step, vel_y);
 }
 
-[[nodiscard]] PlayerMovementStats NovaPlayer_IntegrateMovement(
-    PlayerShip &ship, const FlightInput &input, const ShipClass &ship_class) {
+[[nodiscard]] PlayerMovementStats
+NovaPlayer_IntegrateMovement(PlayerShip &ship,
+                             const FlightInput &input,
+                             const ShipClass &ship_class,
+                             float elapsed_ticks) {
   constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
   constexpr float kTwoPi = 6.283185307179586F;
 
   PlayerMovementStats stats;
-  stats.turn_rate_deg_per_frame =
+  elapsed_ticks = std::max(0.0F, elapsed_ticks);
+  stats.turn_rate_deg_per_tick =
       static_cast<float>(ship_class.turn_rate) * 0.1F;
-  stats.max_speed_px_per_frame = static_cast<float>(ship_class.speed) / 640.0F;
-  stats.thrust_px_per_frame2 = static_cast<float>(ship_class.accel) / 10000.0F;
-  const float turn_rad_per_frame = stats.turn_rate_deg_per_frame * kDegToRad;
-  const float reverse_accel = stats.thrust_px_per_frame2 * 2.0F;
+  // Loader-verified scales (NovaData_LoadScenarioResourceTables 0x004bd3c0):
+  //   accel (offset 0x04) -> base_accel via /DAT_00575e68=10000.0;
+  //   speed (offset 0x06) -> base_speed  via /DAT_00575e48=100.0   (NOT 640);
+  //   turn  (offset 0x08) -> base_turn_rate_deg via *DAT_00575e58=0.1.
+  stats.max_speed_px_per_tick = static_cast<float>(ship_class.speed) / 100.0F;
+  // Ship_ComputeShipEffectiveThrust (0x004640a0) multiplies the loaded accel
+  // by DAT_005757a8 = 2.0 before the player applies it as the thrust step, so
+  // the effective thrust is 2*accel/10000 (the reimpl previously
+  // omitted this x2).
+  stats.thrust_px_per_tick2 =
+      static_cast<float>(ship_class.accel) / 10000.0F * 2.0F;
+  const float turn_rad =
+      stats.turn_rate_deg_per_tick * kDegToRad * elapsed_ticks;
 
-  ship.engine_thrust = input.thrust;
-  const bool retro_thrust =
-      input.brake && !input.thrust; // brake excludes thrust
+  ship.engine_thrust = input.thrust && !input.reverse;
 
   // Heading: bank continuously at the class turn rate while a turn key is held.
   if (input.turn_left) {
-    ship.heading -= turn_rad_per_frame;
+    ship.heading -= turn_rad;
   }
   if (input.turn_right) {
-    ship.heading += turn_rad_per_frame;
+    ship.heading += turn_rad;
   }
   ship.heading = std::fmod(ship.heading + kTwoPi, kTwoPi);
   if (ship.heading < 0.0F) {
     ship.heading += kTwoPi;
   }
 
-  if (input.thrust) {
+  if (input.reverse) {
+    // Ghidra 0x0044e019: the reverse command finds the current velocity's
+    // bearing, adds 180 degrees, and calls Ship_TurnShipTowardHeading. It
+    // turns the hull around while preserving its velocity; it is not braking.
+    const float speed = std::hypot(ship.vel_x, ship.vel_y);
+    if (speed > 1e-4F) {
+      const float reverse_heading =
+          std::atan2(ship.vel_x, -ship.vel_y) + 3.14159265358979323846F;
+      const float desired = std::fmod(reverse_heading + kTwoPi, kTwoPi);
+      float delta = std::remainder(desired - ship.heading, kTwoPi);
+      delta = std::clamp(delta, -turn_rad, turn_rad);
+      ship.heading = std::fmod(ship.heading + delta + kTwoPi, kTwoPi);
+    }
+  } else if (input.thrust) {
     // Forward thrust: polar step toward the heading, per-axis clamped to the
     // class top speed projection (Math_AddPolarVelocityWithClamp semantics).
     NovaPlayer_AddPolarVelocityClamped(ship.heading,
-                                       stats.thrust_px_per_frame2,
-                                       stats.max_speed_px_per_frame,
+                                       stats.thrust_px_per_tick2 *
+                                           elapsed_ticks,
+                                       stats.max_speed_px_per_tick,
                                        ship.vel_x,
                                        ship.vel_y);
   }
 
-  if (retro_thrust) {
-    // Reverse thrust opposes the current velocity: reduce the velocity vector's
-    // magnitude toward zero by the reverse-accel step, without a proportional
-    // multiplier (so it lands exactly on rest instead of the decaying-decay
-    // overshoot a `vel *= (1-k)` with k>1 causes). Direction is preserved.
-    const float speed =
-        std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
-    if (speed > 1e-4F) {
-      const float reduce = std::min(reverse_accel, speed);
-      const float scale = (speed - reduce) / speed;
-      ship.vel_x *= scale;
-      ship.vel_y *= scale;
-    } else {
-      ship.vel_x = 0.0F;
-      ship.vel_y = 0.0F;
-    }
+  // Inertia-less ships (base_accel == 0 && base_speed == 0) are stationary: the
+  // original Ship_HandleShip (0x00433050) zeroes their velocity every frame, so
+  // they act as pinned/immovable objects rather than coasting forever.
+  if (ship_class.accel == 0.0F && ship_class.speed == 0.0F) {
+    ship.vel_x = 0.0F;
+    ship.vel_y = 0.0F;
+    ship.speed = 0.0F;
+    return stats;
   }
 
-  ship.pos_x += ship.vel_x;
-  ship.pos_y += ship.vel_y;
+  // Max-speed hard cap. Beyond the per-axis clamp applied *during* thrust
+  // (NovaPlayer_AddPolarVelocityClamped), the original player path
+  // (Ship_HandlePlayerShipControl 0x0044e019) clamps the resulting velocity
+  // vector to +/-the effective max speed component every frame (DAT_005997bc /
+  // DAT_005997c0) before integrating position. This pulls back any excess
+  // component (drift-built, recoil/knockback, gravity) that exceeds max speed.
+  ship.vel_x = std::clamp(
+      ship.vel_x, -stats.max_speed_px_per_tick, stats.max_speed_px_per_tick);
+  ship.vel_y = std::clamp(
+      ship.vel_y, -stats.max_speed_px_per_tick, stats.max_speed_px_per_tick);
+
+  ship.pos_x += ship.vel_x * elapsed_ticks;
+  ship.pos_y += ship.vel_y * elapsed_ticks;
   ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
   return stats;
 }
 
-void NovaPlayer_UpdateFromInput(GameState &state, const FlightInput &input) {
+void NovaPlayer_UpdateFromInput(GameState &state,
+                                const FlightInput &input,
+                                float elapsed_ticks) {
   PlayerShip &p = state.player;
 
   // Resolve the outfit-derived effective movement stats (class base + owned
@@ -506,12 +549,12 @@ void NovaPlayer_UpdateFromInput(GameState &state, const FlightInput &input) {
   const PlayerEffectiveStats &eff = state.cached_stats;
 
   // Map the effective raw stats onto the movement integrator's ShipClass view
-  // (it divides raw accel/speed by the loader scale; turn is deg/frame).
+  // (it divides raw accel/speed by the loader scale; turn is deg/tick).
   ShipClass effective_class;
   effective_class.accel = eff.thrust_raw;
   effective_class.speed = eff.speed_raw;
   effective_class.turn_rate = eff.turn_raw;
-  (void)NovaPlayer_IntegrateMovement(p, input, effective_class);
+  (void)NovaPlayer_IntegrateMovement(p, input, effective_class, elapsed_ticks);
 
   // Engine-glow intensity ramp toward the binary thrust target (clean-room
   // stand-in for the original dimming the glow with ai_forward_thrust_cmd
