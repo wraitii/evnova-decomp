@@ -50,11 +50,11 @@ constexpr std::int16_t kDefaultInterfaceId = 0x80;
     const ShipClass &cls =
         state.scenario.ships[static_cast<std::size_t>(ship_index)];
     std::int16_t gov = cls.inherent_attributes_govt;
-    if (gov < 0x80 || gov >= 0x180) {
+    if (gov == -1) {
       gov = cls.inherent_combat_govt;
     }
     const Government *g = state.scenario.Government(gov);
-    if (g && g->interface_id >= 0x80 && g->interface_id < 0x180) {
+    if (g && g->interface_id >= 0x80) {
       return g->interface_id;
     }
   }
@@ -132,31 +132,19 @@ bool HudRenderer::Install(SdlPlatform &platform, const GameState &state) {
   return true;
 }
 
-// The in-game HUD is composed on the game's fixed 1024x768 logical canvas and
-// scaled 0.625 onto the default 640x480 window (the same 0.625 scale the main
-// menu uses -- see GameplayGeometry_FromSurface / the gameplay_interface
-// header). All panel rects from the .ntf layout are 1024-canvas coordinates;
-// this is the constant that projects them onto the window. The HUD is top-left
-// anchored at the (0,0) canvas anchor for a full 1024x768 surface (resolution
-// extension shows more *world*, not a bigger HUD).
-constexpr float kHudScale = 640.0F / 1024.0F; // 0.625
-
-// Converts a layout panel rect (1024-canvas coords) into a window-space rect at
-// the 0.625 scale. Mirrors the game painting the HUD panels onto the canvas
-// that the window then displays scaled.
 [[nodiscard]] SDL_FRect ProjectPanel(const HudPanelRect &panel) {
-  return SDL_FRect{panel.left * kHudScale,
-                   panel.top * kHudScale,
-                   static_cast<float>(panel.width()) * kHudScale,
-                   static_cast<float>(panel.height()) * kHudScale};
+  return SDL_FRect{static_cast<float>(panel.left),
+                   static_cast<float>(panel.top),
+                   static_cast<float>(panel.width()),
+                   static_cast<float>(panel.height())};
 }
 
 // Draws one life-support bar from its real layout panel rect, faithfully
 // reproducing the game's fill geometry (HudBar_FillRect mirrors
 // NovaUi_DrawPlayerShieldBar 0x0045ea66 / _ArmorBar 0x0045ebe8 /
-// _FuelLevelBar 0x0045f086: the fill axis is chosen by the panel's aspect, and
-// the tall life-bar slots fill from the top down). The 1024-canvas geometry is
-// projected by kHudScale into window space. Only the filled portion is drawn
+// _FuelLevelBar 0x0045f086: the fill axis is chosen by the panel's aspect.
+// The shipped HUD slots are wide and grow from left to right. Only the
+// filled portion is drawn
 // (opaque on the panel); the surrounding bar trough art lives in the cockpit
 // PICT, which is composited separately.
 void DrawLifeBar(SDL_Renderer *renderer,
@@ -170,17 +158,14 @@ void DrawLifeBar(SDL_Renderer *renderer,
   if (fill.empty()) {
     return;
   }
-  const SDL_FRect rect{fill.left * kHudScale,
-                       fill.top * kHudScale,
-                       fill.width * kHudScale,
-                       fill.height * kHudScale};
+  const SDL_FRect rect{fill.left, fill.top, fill.width, fill.height};
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   SDL_RenderFillRect(renderer, &rect);
 }
 
 // Draws the readout panel text (travel / weapon ammo / target / cargo) at the
-// panel's genuine 0.625-projected position, in the interface's value colour and
-// the .ntf body font size (e.g. 12 for Geneva).
+// panel's genuine position, in the interface's value colour and the .ntf body
+// font size (e.g. 12 for Geneva).
 void DrawReadout(SdlPlatform &platform,
                  NovaFontCache &font,
                  float font_size_px,
@@ -215,28 +200,30 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
     font_cache_ = std::make_unique<NovaFontCache>();
   }
 
-  // The HUD is composed on the game's fixed 1024x768 logical canvas, scaled
-  // 0.625 onto the default 640x480 window and top-left anchored at the canvas
-  // origin (anchor (0,0) for a full 1024x768 surface -- see
-  // GameplayGeometry_FromSurface). The gov cockpit PICT and every panel rect
-  // below are laid out in those 1024-canvas coordinates and projected by
-  // kHudScale. Resolution extension shows more world (the viewport widens);
-  // the HUD chrome itself stays at this fixed 0.625 scale.
-  //
-  // Cockpit PICT: the gov interface background art, drawn at its 0.625-scaled
-  // canvas position (top-left anchored).
+  // The cockpit PICT is a 194x767 strip. The original positions it against the
+  // current render owner's right edge and translates every panel by the same
+  // amount (RenderOwner.right - DAT_0088c020), keeping this UI top-right
+  // anchored while the flight viewport expands.
+  const auto playfield = platform.logical_playfield_size();
+  const auto render_right = static_cast<std::int16_t>(playfield.x);
+  const std::int16_t hud_left =
+      static_cast<std::int16_t>(render_right - kGameplayHudStripWidth);
+  const auto anchor_panel = [render_right](const HudPanelRect &panel) {
+    return HudPanel_AnchorTopRight(panel, render_right);
+  };
+
+  // Cockpit PICT: native size, pinned to the upper-right HUD origin.
   if (cockpit_) {
-    const SDL_FRect strip_rect{0.0F,
+    const SDL_FRect strip_rect{static_cast<float>(hud_left),
                                0.0F,
-                               static_cast<float>(cockpit_w_) * kHudScale,
-                               static_cast<float>(cockpit_h_) * kHudScale};
+                               static_cast<float>(cockpit_w_),
+                               static_cast<float>(cockpit_h_)};
     SDL_RenderTexture(renderer, cockpit_->get(), nullptr, &strip_rect);
   }
 
-  // Life-support bars, drawn inside their genuine layout panel rects at their
-  // genuine canvas positions. The Federation shield/armor/fuel panels are thin
-  // tall slots (e.g. shield 200..207 x 35..184), so DrawLifeBar anchors each
-  // fill to the panel TOP and grows it downward by the current/max fraction.
+  // Life-support bars, drawn inside their genuine top-right-strip rects. The
+  // Federation shield/armor/fuel slots are x=35..184 at y=200/216/234, and
+  // each fills from the left by the current/max fraction.
   // Before the first movement update fills the stats cache the bars read as
   // full (fresh dock == full shields/armor/fuel).
   const PlayerEffectiveStats &eff = state.cached_stats;
@@ -247,17 +234,17 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   const float fuel_max =
       state.stat_cache_valid ? eff.fuel_capacity : state.player.fuel_points;
   DrawLifeBar(renderer,
-              layout_.shield_panel,
+              anchor_panel(layout_.shield_panel),
               state.player.shield_points,
               shield_max,
               ColorOf(layout_.color_word[4]));
   DrawLifeBar(renderer,
-              layout_.armor_panel,
+              anchor_panel(layout_.armor_panel),
               state.player.armor_points,
               armor_max,
               ColorOf(layout_.color_word[5]));
   DrawLifeBar(renderer,
-              layout_.fuel_panel,
+              anchor_panel(layout_.fuel_panel),
               state.player.fuel_points,
               fuel_max,
               ColorOf(layout_.color_word[6]));
@@ -278,8 +265,8 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
     }
     DrawReadout(platform,
                 *font_cache_,
-                static_cast<float>(layout_.font_size) * kHudScale,
-                layout_.travel_status_panel,
+                static_cast<float>(layout_.font_size),
+                anchor_panel(layout_.travel_status_panel),
                 travel,
                 value_color,
                 4.0F);
@@ -290,8 +277,8 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
     const std::string wpn = NovaWeapon_BankDisplayName(state, 0);
     DrawReadout(platform,
                 *font_cache_,
-                static_cast<float>(layout_.font_size) * kHudScale,
-                layout_.weapon_ammo_panel,
+                static_cast<float>(layout_.font_size),
+                anchor_panel(layout_.weapon_ammo_panel),
                 wpn,
                 value_color,
                 4.0F);
@@ -312,8 +299,8 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
     }
     DrawReadout(platform,
                 *font_cache_,
-                static_cast<float>(layout_.font_size) * kHudScale,
-                layout_.target_status_panel,
+                static_cast<float>(layout_.font_size),
+                anchor_panel(layout_.target_status_panel),
                 tgt,
                 value_color,
                 4.0F);
@@ -330,8 +317,8 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
         cargo, sizeof(cargo), "CR %d  CARGO %d", state.player.credits, total);
     DrawReadout(platform,
                 *font_cache_,
-                static_cast<float>(layout_.font_size) * kHudScale,
-                layout_.cargo_status_panel,
+                static_cast<float>(layout_.font_size),
+                anchor_panel(layout_.cargo_status_panel),
                 cargo,
                 value_color,
                 4.0F);

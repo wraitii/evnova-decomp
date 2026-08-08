@@ -1,17 +1,11 @@
 #pragma once
 
 // Per-frame in-flight HUD overlay, reconstructed from the original's gameplay
-// panel system. The game renders the HUD (the government-specific cockpit
-// PICT plus the shield/armor/fuel life bars and the travel / weapon / target /
-// cargo text readouts) on its fixed 1024x768 gameplay surface, which the
-// 640x480 window displays at 0.625 scale. We reproduce that: the cockpit PICT
-// and every panel rect are laid out in 1024-canvas coordinates (the genuine
-// .ntf panel rects decoded by GameplayGeometry_FromSurface / the layout), and
-// projected by kHudScale (640/1024) top-left anchored onto the window. Per the
-// project's resolution policy higher in-game resolution shows more system (the
-// extending viewport widens); the HUD chrome itself stays at this fixed 0.625
-// scale. The life-support slots are thin vertical bars (e.g. Federation shield
-// 200..207 x 35..184) filled from the top down -- see HudBar_FillRect.
+// panel system. The government-specific cockpit PICT is a native-size 194x767
+// strip anchored to the active render surface's top-right edge. Every decoded
+// .ntf panel rect is translated by that same horizontal origin. The life bars
+// are horizontal slots within the strip (e.g. Federation shield x 35..184,
+// y 200..207) and fill from left to right -- see HudBar_FillRect.
 //
 // Ghidra model:
 //   * Ui_InstallGameplayInterfaceLayout (0x004cda50) resolves the government
@@ -20,11 +14,8 @@
 //     g_*_panel_* rect/colour globals plus the cockpit PICT id (payload +0xa4,
 //     clamped >= 0x80). That layout is decoded by
 //     NovaResource_LoadGameplayInterfaceLayout (gameplay_interface.cpp).
-//   * NovaView_UpdateGameplayViewport (0x00488380) bakes the 1024x768 frame
-//     PICT 8000 into the gameplay surface and derives g_hud_panel_origin /
-//     g_hud_panel_anchor from the surface rect (the anchor is (0,0) for a full
-//     1024x768 canvas; large viewports nudge it via
-//     GameplayGeometry_FromSurface).
+//   * HUD panel paths translate layout rects by RenderOwner.right - 0xc2
+//     (DAT_0088c020), anchoring the 194px cockpit strip to the top-right.
 //   * NovaUi_DrawPlayerShieldArmorPanels (0x0045e9c0) / _FuelPanel (0x0045efe0)
 //     draw the vertical life-support bars: the cockpit PICT blit already draws
 //     the bar trough, then a sub-rect of the panel is filled with the gov's bar
@@ -35,10 +26,8 @@
 //     .ntf colour slots (+0x20 shield, +0x2c armor, +0x38 fuel, +0x3c fuel
 //     reserve).
 //
-// The life bars are drawn inside their real layout panel rects (the thin tall
-// shield/armor/fuel slots near the top-left of the canvas), and the readout
-// panels (travel / weapon ammo / target / cargo) at their genuine positions
-// across the top band.
+// The life bars and readouts are drawn inside their real, top-right-strip panel
+// rects.
 
 #include "game_state.hpp"
 #include "gameplay_interface.hpp"
@@ -71,9 +60,8 @@ public:
   bool Install(SdlPlatform &platform, const GameState &state);
 
   // Composites the HUD overlay over the already-drawn free-flight world. The
-  // cockpit PICT is drawn at native size pinned to the viewport top-left (the
-  // HUD is never scaled). Bars and readouts are drawn in the interface's panel
-  // rects, offset by the derived HUD anchor for the current viewport size.
+  // cockpit PICT is drawn at native size pinned to the viewport top-right;
+  // bars and readouts inherit that horizontal offset.
   void Draw(SdlPlatform &platform, const GameState &state);
 
   [[nodiscard]] bool installed() const { return installed_; }

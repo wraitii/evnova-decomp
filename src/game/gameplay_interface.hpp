@@ -21,8 +21,10 @@
 
 namespace game {
 
-// One HUD panel rect as the interface layout stores it. The original reads
-// these as a 4-field (left, top, right, bottom) short quad.
+// One HUD panel rect in conventional screen coordinates. The archived
+// interface resource stores its four shorts in QuickDraw Rect order:
+// (top, left, bottom, right); NovaResource_LoadGameplayInterfaceLayout maps
+// those values into this representation.
 struct HudPanelRect {
   std::int16_t left = 0;
   std::int16_t top = 0;
@@ -80,20 +82,18 @@ struct GameplayInterfaceLayout {
 NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id);
 
 // ---------------------------------------------------------------------------
-// Gameplay viewport / HUD-anchor geometry
+// Gameplay viewport/frame geometry
 // ---------------------------------------------------------------------------
 // Ghidra NovaView_UpdateGameplayViewport (0x00488380) computes the in-game
 // camera geometry every frame. The game works in a fixed 1024x768 logical
 // canvas (the shared offscreen surface DAT_00597950; the 1024x768 frame PICT
-// 8000 backs the cockpit and is centred in it). All HUD panel rects / text
-// offsets are relative to two derived anchors:
+// 8000 is centred in it). This is frame geometry, distinct from the gameplay
+// status strip, whose panels are right-edge anchored by
+// HudPanel_AnchorTopRight:
 //
-//   * g_hud_panel_origin : the central point of the workspace that the HUD
-//     (status text at origin + (dx,dy)) and the panel art are laid out around.
-//     For the full 1024x768 canvas this is (512, 384).
-//   * g_hud_panel_anchor  : the top-left of the 1024x768 HUD panel, i.e.
-//     origin - (0x200, 0x180). On the full canvas this is (0, 0), so the
-//     archived panel rects then land directly at logical canvas coordinates.
+//   * g_hud_panel_origin : the central point of the frame workspace.
+//   * g_hud_panel_anchor : origin - (0x200, 0x180), retained for frame
+//     compositing diagnostics.
 //
 // The host display scales this canvas to the window (the original window is
 // 640x480, the same 1024->640 0.625 scale the main menu uses).
@@ -129,8 +129,8 @@ GameplayGeometry_FromSurface(const HudPanelRect &surface_rect);
 //
 //   * Tall slot (height > width) -- the life bars -- is anchored to the TOP
 //     and grows downward: the fill occupies [top, top + height*fraction].
-//   * Wide slot (height <= width, a horizontal gauge) is anchored to the RIGHT
-//     and depletes leftward: the fill occupies [right - width*fraction, right].
+//   * Wide slot (height <= width, a horizontal gauge) is anchored to the LEFT
+//     and grows rightward: the fill occupies [left, left + width*fraction].
 //
 // fraction is clamped to [0,1] and the fill is always within the panel rect.
 struct HudBarFill {
@@ -144,5 +144,12 @@ struct HudBarFill {
 
 [[nodiscard]] HudBarFill HudBar_FillRect(const HudPanelRect &panel,
                                          float fraction);
+
+// The original uses DAT_0088c020 (0xc2) as the width of the top-right cockpit
+// strip. Each panel rect is translated horizontally by render_right - 0xc2.
+constexpr std::int16_t kGameplayHudStripWidth = 0xc2;
+
+[[nodiscard]] HudPanelRect HudPanel_AnchorTopRight(const HudPanelRect &panel,
+                                                   std::int16_t render_right);
 
 } // namespace game

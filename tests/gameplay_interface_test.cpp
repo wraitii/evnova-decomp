@@ -16,53 +16,49 @@ TEST_CASE("Federation gameplay interface layout decodes its panel rects",
   const auto layout = NovaResource_LoadGameplayInterfaceLayout(0x82);
   REQUIRE(layout.has_value());
 
-  // The three life-support bars sit at the left of the HUD strip as thin
-  // vertical bars, stacked shield -> armor -> fuel (each ~8px wide).
-  // Left column: shield (200..207), armor (216..223), fuel (234..241),
-  // all spanning y 35..184.
-  CHECK(layout->shield_panel.left == 200);
-  CHECK(layout->shield_panel.top == 35);
-  CHECK(layout->shield_panel.right == 207);
-  CHECK(layout->shield_panel.bottom == 184);
-  CHECK(layout->shield_panel.width() == 7);
-  CHECK(layout->shield_panel.height() == 149);
+  // The resource uses QuickDraw order (top,left,bottom,right). The bars are
+  // horizontal slots in the 194px-wide top-right strip.
+  CHECK(layout->shield_panel.left == 35);
+  CHECK(layout->shield_panel.top == 200);
+  CHECK(layout->shield_panel.right == 184);
+  CHECK(layout->shield_panel.bottom == 207);
+  CHECK(layout->shield_panel.width() == 149);
+  CHECK(layout->shield_panel.height() == 7);
   CHECK(layout->shield_panel.valid());
 
-  CHECK(layout->armor_panel.left == 216);
-  CHECK(layout->armor_panel.top == 35);
-  CHECK(layout->armor_panel.right == 223);
-  CHECK(layout->armor_panel.bottom == 184);
+  CHECK(layout->armor_panel.left == 35);
+  CHECK(layout->armor_panel.top == 216);
+  CHECK(layout->armor_panel.right == 184);
+  CHECK(layout->armor_panel.bottom == 223);
   CHECK(layout->armor_panel.valid());
 
-  CHECK(layout->fuel_panel.left == 234);
-  CHECK(layout->fuel_panel.top == 35);
-  CHECK(layout->fuel_panel.right == 241);
-  CHECK(layout->fuel_panel.bottom == 184);
+  CHECK(layout->fuel_panel.left == 35);
+  CHECK(layout->fuel_panel.top == 234);
+  CHECK(layout->fuel_panel.right == 184);
+  CHECK(layout->fuel_panel.bottom == 241);
   CHECK(layout->fuel_panel.valid());
 
-  // Readout panels across the console: travel status (254..286),
-  // weapon ammo (300..315), target status (330..442), cargo (458..552),
-  // all top = 8, bottom = 184.
-  CHECK(layout->travel_status_panel.left == 254);
-  CHECK(layout->travel_status_panel.top == 8);
-  CHECK(layout->travel_status_panel.right == 286);
-  CHECK(layout->travel_status_panel.bottom == 184);
+  // Readouts stack vertically in the same strip and span x=8..184.
+  CHECK(layout->travel_status_panel.left == 8);
+  CHECK(layout->travel_status_panel.top == 254);
+  CHECK(layout->travel_status_panel.right == 184);
+  CHECK(layout->travel_status_panel.bottom == 286);
   CHECK(layout->travel_status_panel.valid());
 
-  CHECK(layout->weapon_ammo_panel.left == 300);
-  CHECK(layout->weapon_ammo_panel.top == 8);
-  CHECK(layout->weapon_ammo_panel.right == 315);
-  CHECK(layout->weapon_ammo_panel.bottom == 184);
+  CHECK(layout->weapon_ammo_panel.left == 8);
+  CHECK(layout->weapon_ammo_panel.top == 300);
+  CHECK(layout->weapon_ammo_panel.right == 184);
+  CHECK(layout->weapon_ammo_panel.bottom == 315);
 
-  CHECK(layout->target_status_panel.left == 330);
-  CHECK(layout->target_status_panel.top == 8);
-  CHECK(layout->target_status_panel.right == 442);
-  CHECK(layout->target_status_panel.bottom == 184);
+  CHECK(layout->target_status_panel.left == 8);
+  CHECK(layout->target_status_panel.top == 330);
+  CHECK(layout->target_status_panel.right == 184);
+  CHECK(layout->target_status_panel.bottom == 442);
 
-  CHECK(layout->cargo_status_panel.left == 458);
-  CHECK(layout->cargo_status_panel.top == 8);
-  CHECK(layout->cargo_status_panel.right == 552);
-  CHECK(layout->cargo_status_panel.bottom == 184);
+  CHECK(layout->cargo_status_panel.left == 8);
+  CHECK(layout->cargo_status_panel.top == 458);
+  CHECK(layout->cargo_status_panel.right == 184);
+  CHECK(layout->cargo_status_panel.bottom == 552);
 }
 
 TEST_CASE("Federation interface layout colors, font and background PICT",
@@ -217,7 +213,7 @@ TEST_CASE("tall life-bar slot fills from the top down", "[interface][hud]") {
   CHECK(half.left == 200);
   CHECK(half.top == 35);
   CHECK(half.width == 7);
-  // floor(149 * 0.5) = 74.
+  // The original's post-round adjustment produces floor(149 * 0.5) = 74.
   CHECK(half.height == 74);
 
   // Depleted -> clamp to zero (empty fill, nothing drawn).
@@ -225,7 +221,7 @@ TEST_CASE("tall life-bar slot fills from the top down", "[interface][hud]") {
   CHECK(empty.empty());
 }
 
-TEST_CASE("wide bar slot fills from the right, depleting left",
+TEST_CASE("wide bar slot fills from the left, growing right",
           "[interface][hud]") {
   // A hypothetical horizontal gauge (width > height), e.g. 200x40.
   const HudPanelRect panel{50, 100, 200, 140};
@@ -238,16 +234,30 @@ TEST_CASE("wide bar slot fills from the right, depleting left",
   CHECK(full.height == 40);
 
   const HudBarFill half = HudBar_FillRect(panel, 0.5F);
-  // floor(150 * 0.5) = 75; right-anchored -> left = 200 - 75 = 125.
+  // 150 * 0.5 = 75; left-anchored at x=50.
   CHECK(half.width == 75);
-  CHECK(half.left == 125);
+  CHECK(half.left == 50);
   CHECK(half.top == 100);
   CHECK(half.height == 40);
 
   const HudBarFill quarter = HudBar_FillRect(panel, 0.25F);
-  // floor(150 * 0.25) = 37; left = 200 - 37 = 163.
+  // floor(150 * 0.25) = 37; left remains 50.
   CHECK(quarter.width == 37);
-  CHECK(quarter.left == 163);
+  CHECK(quarter.left == 50);
+}
+
+TEST_CASE("HUD panels anchor to the render owner's top-right strip",
+          "[interface][hud]") {
+  const HudPanelRect local{35, 200, 184, 207};
+  const HudPanelRect at_1024 = HudPanel_AnchorTopRight(local, 1024);
+  CHECK(at_1024.left == 1024 - kGameplayHudStripWidth + 35);
+  CHECK(at_1024.right == 1024 - kGameplayHudStripWidth + 184);
+  CHECK(at_1024.top == 200);
+  CHECK(at_1024.bottom == 207);
+
+  const HudPanelRect at_1600 = HudPanel_AnchorTopRight(local, 1600);
+  CHECK(at_1600.left - at_1024.left == 576);
+  CHECK(at_1600.top == at_1024.top);
 }
 
 TEST_CASE("bar fill clamps fraction and rejects invalid panels",

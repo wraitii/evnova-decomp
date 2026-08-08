@@ -4,6 +4,7 @@
 #include "../log.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -78,11 +79,14 @@ constexpr std::uint32_t kInterfaceLayoutType = 0x956e7466U;
 }
 
 [[nodiscard]] HudPanelRect ReadPanel(std::span<const std::byte> bytes,
-                                     std::size_t left) {
-  return HudPanelRect{ReadBeI16(bytes, left),
-                      ReadBeI16(bytes, left + 2),
-                      ReadBeI16(bytes, left + 4),
-                      ReadBeI16(bytes, left + 6)};
+                                     std::size_t top) {
+  // The resource uses the native QuickDraw Rect memory layout: top, left,
+  // bottom, right. Preserve that fact at this boundary rather than making all
+  // SDL consumers reason in the original field order.
+  return HudPanelRect{ReadBeI16(bytes, top + 2),
+                      ReadBeI16(bytes, top),
+                      ReadBeI16(bytes, top + 6),
+                      ReadBeI16(bytes, top + 4)};
 }
 
 } // namespace
@@ -103,15 +107,24 @@ HudBarFill HudBar_FillRect(const HudPanelRect &panel, float fraction) {
     out.width = w;
     out.height = std::floor(h * fraction);
   } else {
-    // Wide slot: fill anchored to the right, depleting leftward. The game
-    // computes the cut point `right - width*(value/max)` and clamps to the
-    // left.
+    // Wide slot: fill anchored to the left, growing rightward. This is the
+    // observed behavior of the shipped cockpit's horizontal life bars.
     out.width = std::floor(w * fraction);
-    out.left = static_cast<float>(panel.right) - out.width;
+    out.left = static_cast<float>(panel.left);
     out.top = static_cast<float>(panel.top);
     out.height = h;
   }
   return out;
+}
+
+HudPanelRect HudPanel_AnchorTopRight(const HudPanelRect &panel,
+                                     std::int16_t render_right) {
+  const std::int16_t offset =
+      static_cast<std::int16_t>(render_right - kGameplayHudStripWidth);
+  return HudPanelRect{static_cast<std::int16_t>(panel.left + offset),
+                      panel.top,
+                      static_cast<std::int16_t>(panel.right + offset),
+                      panel.bottom};
 }
 
 GameplayViewportGeometry
