@@ -261,7 +261,8 @@ namespace {
   } else {
     st.link_b_id = -1;
   }
-  // service_cost (payload +0x234; StellarDef +0x38), the landing/docking fee.
+  // service_cost (payload +0x234; StellarDef +0x38), a destination-service
+  // value whose collection path is not yet reconstructed.
   if (bytes.size() >= 0x238) {
     st.service_cost = ReadBeI32(bytes, 0x234);
   }

@@ -90,48 +90,21 @@ NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
 // (TODO in NovaFrame_SpaceflightLoop).
 void NovaTargeting_UpdateStellarAvailability(GameState &state);
 
-// Landing selection (clean-room, built from the primitives above): returns the
-// resource id of the nearest currently playable landing/travel stellar in the
-// player's current system -- one the ship is within
-// Stellar_ComputeTravelRangeSq of, is not a reserved travel lane, and passes
-// StellarTargetsSpriteSetActive. Returns -1 when none qualifies. Used to seed
-// the player's chosen landing target (a stand-in for
-// Ship_FindNearestEngagedTarget 0x00462850's stellar leg until ship-AI
-// targeting exists).
-[[nodiscard]] std::int16_t
-NovaTargeting_FindNearestLandableStellar(const GameState &state);
-
-// True when `st` is a landing (non-travel) target the player can dock at.
-// The original dispatches Stellars with availability_flags bit 0x1000 to
-// Stellar_LandOnSpob; the remaining usable points proceed through travel or
-// hypergate paths.
-[[nodiscard]] bool NovaTargeting_IsLandableStellar(const Stellar &st);
-
-// Per-frame player travel/land targeting. Seeds the nearest usable stellar in
-// the current system, but preserves a player-cycled target while valid. Unlike
-// the old shortcut, selection is not constrained to docking range: a target
-// remains selected while the player flies toward it.
+// Per-frame player travel targeting. Normal stellar selection requires only a
+// current-system available stellar with travel_flags bit 1. 0x3000 special
+// lanes additionally require NovaTargeting_ComputeTravelRangeSq proximity.
+// A player-cycled target remains selected while valid.
 void NovaTargeting_UpdatePlayerTarget(GameState &state);
 
 // Select the next (or previous when `forward` is false) playable stellar in
 // the current system. Returns false when there is no eligible stellar.
 bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward);
 
-// Performs a landing on the player's currently selected stellar (the landing-
-// transition subset of Stellar_LandOnSpob / Stellar_ProcessTravelAndLanding's
-// landing dispatch). Gated on a selected landable stellar that the ship is
-// within travel range of. On success it repositions the ship to the stellar,
-// refills shields/armor from the effective maximums, deducts the stellar's
-// service cost (clamped >= 0 credits), and sets
-// state.travel.landed_this_frame. The dock/world UI that follows a real
-// landing is opened by NovaLanded_RunWindow in landed_window.cpp, not here
-// (this function is the pure transition used by the spaceflight loop). Returns
-// true when a landing was performed this call.
-bool NovaLanding_TryLand(GameState &state);
-
-// True when the player's currently selected stellar (state.travel.selected_
-// stellar_id) is a landable target that has cleared the original's final
-// docking envelope (within 250px in both axes and essentially at rest).
-[[nodiscard]] bool NovaTargeting_IsLandingAvailable(const GameState &state);
+// Mirrors Ship_HandlePlayerTargetActionCommand's stellar branch: a target
+// action can open the destination-interaction window only for an available,
+// unrestricted, sprite-active target with travel_flags bit 0x20 clear. This
+// deliberately does not imply docking or a physical collision.
+[[nodiscard]] bool
+NovaTargeting_CanOpenTravelDestinationInteraction(const GameState &state);
 
 } // namespace game

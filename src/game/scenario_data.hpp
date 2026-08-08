@@ -298,7 +298,8 @@ struct Stellar {
       -1, -1, -1, -1, -1, -1, -1, -1}; // HyperLink1-8
 
   // service_cost (StellarDef +0x38, payload +0x234; ServiceCost): the landing/
-  // docking fee the player pays when landing here (waived for hazard stellars).
+  // Destination service cost. Its exact collection path remains unverified;
+  // do not treat this as a direct target-action docking fee.
   std::int32_t service_cost = 0;
   // Gravity is a float in the original; stored as its encoded half/short here.
   std::int16_t gravity = 0;         // Gravity

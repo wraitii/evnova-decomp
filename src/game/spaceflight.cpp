@@ -5,7 +5,6 @@
 #include "game_state.hpp"
 #include "hud_renderer.hpp"
 #include "intro_cinematic.hpp"
-#include "landed_window.hpp"
 #include "outfit.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
@@ -212,26 +211,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Shift+Tab. This keeps navigation purposeful instead of retargeting to
     // whichever body happens to be closest each frame.
     NovaTargeting_UpdatePlayerTarget(state);
-    // Target-action command ('e'): land on the currently selected stellar when
-    // it is a landable target in range. On a successful landing transition the
-    // game opens the landed/services window (mirrors Stellar_ProcessTravelAnd-
-    // Landing dispatching into the docked UI); when the player launches back
-    // into space the loop continues flying, and a hard quit propagates.
+    // Target-action command ('e'): the original opens the destination
+    // interaction window here. It does not dock or perform a physical stellar
+    // collision; any later travel/landing result belongs to that modal's
+    // confirmed action path.
     if (target_action_pressed) {
-      if (NovaTargeting_IsLandingAvailable(state)) {
-        LandedContext ctx;
-        if (NovaLanding_EnterDocked(state, ctx)) {
-          const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
-          if (exit == LandedExit::kQuit) {
-            returning_to_menu = true;
-            break;
-          }
-        } else {
-          NovaLog::Info("target-action: landing transition failed");
-        }
+      if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
+        const auto *st = state.scenario.Stellar(state.travel.selected_stellar_id);
+        NovaLog::Todo("target-action: destination-interaction window 0x3f1 for "
+                      "stellar {} ({}) is the next reconstruction boundary; "
+                      "do not enter Spaceport directly",
+                      state.travel.selected_stellar_id,
+                      st ? st->name : "(unknown)");
       } else {
-        NovaLog::Info("target-action: docking with selected stellar requires "
-                      "being within 250px and at rest");
+        NovaLog::Info("target-action: selected stellar cannot open its "
+                      "destination interaction");
       }
     }
     // In-flight shield regeneration (class base + opcode-5 outfit bonuses),

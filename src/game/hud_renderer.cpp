@@ -285,15 +285,16 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   }
 
   // Target panel: a manually selected stellar persists while the player flies
-  // toward it. [DOCK] is only shown in the final 250px/rest envelope.
+  // toward it. The target-action window gate is independent of collision and
+  // does not imply that the ship has docked.
   {
     std::string tgt;
     const std::int16_t sid = state.travel.selected_stellar_id;
     const auto *st = state.scenario.Stellar(sid);
     if (st && !st->name.empty()) {
       tgt = st->name;
-      if (NovaTargeting_IsLandingAvailable(state)) {
-        tgt += " [DOCK]";
+      if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
+        tgt += " [INTERACT]";
       }
     } else {
       tgt = "(none)";

@@ -1,8 +1,6 @@
 #include "targeting.hpp"
 
 #include "../log.hpp"
-#include "landed_window.hpp"
-
 #include <array>
 #include <cmath>
 
@@ -198,51 +196,8 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state) {
 }
 
 // ---------------------------------------------------------------------------
-// Landing / travel-destination selection (clean-room; built from the
-// primitives).
 // ---------------------------------------------------------------------------
-bool NovaTargeting_IsLandableStellar(const Stellar &st) {
-  return NovaTargeting_IsStellarUsableForTravel(st) &&
-         (st.availability_flags & 0x1000U) != 0U;
-}
-
-std::int16_t NovaTargeting_FindNearestLandableStellar(const GameState &state) {
-  const auto *cur = state.scenario.System(
-      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
-  if (!cur) {
-    return -1;
-  }
-  const float range_sq = NovaTargeting_ComputeTravelRangeSq(state);
-  // The player's world position; the stellar must be within the no-jump radius.
-  const float px = state.player.pos_x;
-  const float py = state.player.pos_y;
-
-  std::int16_t best = -1;
-  float best_dist_sq = 1e12F; // kMaxDistanceSq sentinel, larger than any real
-  for (const auto nav : cur->nav_defs) {
-    if (nav < 0x80) {
-      continue;
-    }
-    const auto *st = state.scenario.Stellar(nav);
-    if (!st || !NovaTargeting_IsLandableStellar(*st)) {
-      continue;
-    }
-    const float dx = px - static_cast<float>(st->pos_x);
-    const float dy = py - static_cast<float>(st->pos_y);
-    const float dist_sq = dx * dx + dy * dy;
-    if (dist_sq > range_sq) {
-      continue; // beyond the no-jump/engagement radius
-    }
-    if (dist_sq < best_dist_sq) {
-      best_dist_sq = dist_sq;
-      best = nav;
-    }
-  }
-  return best;
-}
-
-// ---------------------------------------------------------------------------
-// Per-frame player targeting + landing interaction (clean-room, mocked).
+// Per-frame player stellar-target selection.
 // ---------------------------------------------------------------------------
 void NovaTargeting_UpdatePlayerTarget(GameState &state) {
   const auto *cur = state.scenario.System(
@@ -257,9 +212,20 @@ void NovaTargeting_UpdatePlayerTarget(GameState &state) {
       return false;
     }
     const auto *st = state.scenario.Stellar(sid);
-    return st && st->is_available &&
-           st->system_id == state.player.current_system_id &&
-           NovaTargeting_IsStellarUsableForTravel(*st);
+    if (!st || !st->is_available ||
+        st->system_id != state.player.current_system_id ||
+        (st->flags & 1U) == 0U) {
+      return false;
+    }
+    // Stellar_FindNearestAvailableTravelStellar accepts ordinary available
+    // travel points at any distance. Only availability_flags 0x3000 lanes
+    // require the no-jump-radius proximity test.
+    if ((st->availability_flags & 0x3000U) == 0U) {
+      return true;
+    }
+    const float dx = state.player.pos_x - static_cast<float>(st->pos_x);
+    const float dy = state.player.pos_y - static_cast<float>(st->pos_y);
+    return dx * dx + dy * dy <= NovaTargeting_ComputeTravelRangeSq(state);
   };
   if (state.travel.selected_stellar_is_manual &&
       selectable(state.travel.selected_stellar_id)) {
@@ -302,7 +268,14 @@ bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward) {
     const auto *st = state.scenario.Stellar(sid);
     if (sid >= 0x80 && st && st->is_available &&
         st->system_id == state.player.current_system_id &&
-        NovaTargeting_IsStellarUsableForTravel(*st)) {
+        (st->flags & 1U) != 0U) {
+      if ((st->availability_flags & 0x3000U) != 0U) {
+        const float dx = state.player.pos_x - static_cast<float>(st->pos_x);
+        const float dy = state.player.pos_y - static_cast<float>(st->pos_y);
+        if (dx * dx + dy * dy > NovaTargeting_ComputeTravelRangeSq(state)) {
+          continue;
+        }
+      }
       candidates[count++] = sid;
     }
   }
@@ -327,7 +300,7 @@ bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward) {
   return true;
 }
 
-bool NovaTargeting_IsLandingAvailable(const GameState &state) {
+bool NovaTargeting_CanOpenTravelDestinationInteraction(const GameState &state) {
   const std::int16_t sid = state.travel.selected_stellar_id;
   if (sid < 0x80) {
     return false;
@@ -335,21 +308,12 @@ bool NovaTargeting_IsLandingAvailable(const GameState &state) {
   const auto *st = state.scenario.Stellar(sid);
   if (!st || !st->is_available ||
       st->system_id != state.player.current_system_id ||
-      !NovaTargeting_IsLandableStellar(*st)) {
+      (st->availability_flags & 0x3000U) != 0U ||
+      (st->flags & 0x20U) != 0U ||
+      !NovaTargeting_StellarTargetsSpriteSetActive(*st)) {
     return false;
   }
-  constexpr float kDockAxisRange = 250.0F;
-  constexpr float kDockMaxVelocity = 0.01F;
-  const float dx = std::abs(state.player.pos_x - static_cast<float>(st->pos_x));
-  const float dy = std::abs(state.player.pos_y - static_cast<float>(st->pos_y));
-  return dx < kDockAxisRange && dy < kDockAxisRange &&
-         std::abs(state.player.vel_x) <= kDockMaxVelocity &&
-         std::abs(state.player.vel_y) <= kDockMaxVelocity;
-}
-
-bool NovaLanding_TryLand(GameState &state) {
-  LandedContext ctx;
-  return NovaLanding_EnterDocked(state, ctx);
+  return true;
 }
 
 } // namespace game

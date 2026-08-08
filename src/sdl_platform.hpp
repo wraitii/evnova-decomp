@@ -49,10 +49,9 @@ struct FlightInput {
   // channel; this build maps it to a dedicated key so it is distinct from the
   // continuous steer inputs.
   bool travel = false;
-  // Edge-triggered target-action command: 'e' (land on / interact with the
-  // currently targeted stellar). Stand-in for the original's target-action
-  // command channel (Ship_HandlePlayerTargetActionCommand); opens the landing
-  // interaction for a landable target in range.
+  // Edge-triggered target-action command: 'e' opens the destination-
+  // interaction window for the currently targeted stellar. It is separate
+  // from both physical stellar collision and the later docked UI path.
   bool target_action = false;
   // Cycle the stellar target. This is a clean-room binding for the original's
   // target-selection command channel; Tab advances through the current

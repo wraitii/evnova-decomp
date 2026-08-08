@@ -109,9 +109,9 @@ struct TravelState {
   // valid stellar in the current system. Otherwise UpdatePlayerTarget seeds
   // this field from the nearest eligible stellar, matching entry behavior.
   bool selected_stellar_is_manual = false;
-  // Whether the selected stellar is a landing target (travel_flags & 0x2) as
-  // opposed to a jump/hypergate point; drives the HUD label and the landing
-  // interaction. Derived from the selected stellar, not stored separately.
+  // Legacy latch retained for future arrival/docked reconstruction. Target
+  // selection and target action do not set it: they only select a travel
+  // stellar and open its destination-interaction window.
   bool landed_this_frame = false;
   // The stellar resource id the player is jumping from (the travel point that
   // was engaged), -1 unless travel is active. The new-game flow also uses

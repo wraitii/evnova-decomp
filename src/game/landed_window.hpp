@@ -1,10 +1,9 @@
 #pragma once
 
-// Clean-room reconstruction of the "landed window" -- the UI shown while the
-// player is docked at a stellar (planet/station). Mirrors the original's
-// docked screen (the Spaceport window, Ghidra NovaUi_RunTravelDestination-
-// InteractionLoop 0x00491f30 creating DLOG 0x3e8, and its backdrop/button draw
-// helpers), exposed as a self-contained modal run-loop on top of SDL.
+// Clean-room reconstruction of the Spaceport-style destination window. The
+// original entry is confirmed as Stellar_TravelToSystem (0x00455e10) calling
+// NovaUi_RunTravelDestinationInteractionLoop (0x00491f30), which creates
+// DLOG 1000 (0x3e8). This SDL modal is still not wired to that travel path.
 //
 // SCOPE / ARCHITECTURE: the original is a full GVNO UiWindow docking screen
 // built from a dialog resource (DLOG 0x3e8 -> DITL 0x3e8), filling a near-
@@ -143,9 +142,8 @@ struct LandedContext {
   // Resource id (>= 0x80) of the stellar we are docked at, or -1 before the
   // landing transition resolves it.
   std::int16_t stellar_id = -1;
-  // Whether a landing transition actually ran for this session (the player may
-  // open the dock with a "try to refuel" walk-up). Mirrors Stellar_LandOnSpob
-  // being a prerequisite of the docked state.
+  // Whether a landing transition ran for this session. No original caller has
+  // yet been confirmed, so callers must establish this state independently.
   bool landed = false;
   // The service most recently activated (by a mouse click or a letter
   // shortcut). The original has NO persistent keyboard focus/highlight state:
@@ -153,14 +151,6 @@ struct LandedContext {
   // used purely for dispatch, not for rendering a selection.
   LandedService selection = LandedService::kLaunch;
 };
-
-// Performs the landing transition for the current selected stellar: repositions
-// the ship at the stellar, zeroes velocity, refills shields/armor from the
-// effective maximums, and deducts the stellar's service cost (clamped >= 0
-// credits). Faithful subset of Ghidra Stellar_LandOnSpob (0x00456480). Call
-// before NovaLanded_RunWindow starts its modal. Returns true when a landing
-// was performed.
-bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx);
 
 // Refuels the player ship toward its effective fuel capacity. Mirrors the
 // landed fuel service: the player pays a per-unit price for the fuel added,
@@ -195,10 +185,12 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // draw grey, and the first-letter shortcuts (r/f refuel, c/t trade, o outfit,
 // s shipyard, n mission, b bar; Enter/Esc leave) activate immediately. Returns
 // the exit code describing how the window closed (see LandedExit).
-// `state.player` must already be positioned at the dock (e.g. after
-// NovaLanding_EnterDocked). In resolution-extension mode the playfield stays a
-// fixed 640x480 centred with black borders; the F5 scale toggle (documented
-// divergence) scales it to fill the window.
+// Target action first opens NovaUi_RunTravelDestinationInteractionWindow
+// (0x00480030); normal engaged travel later reaches the original's DLOG 0x3e8
+// path through Stellar_TravelToSystem/InteractionLoop. This reconstruction is
+// not wired to that later transition yet. In resolution-extension mode the
+// playfield stays a fixed 640x480 centred with black borders; the F5 scale
+// toggle (documented divergence) scales it to fill the window.
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                               GameState &state,
                                               LandedContext &ctx);

@@ -8,7 +8,6 @@
 #include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
-#include "targeting.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -22,66 +21,6 @@
 #include <string_view>
 
 namespace game {
-
-// ---------------------------------------------------------------------------
-// Stellar_LandOnSpob (0x00456480): landing transition subset.
-// ---------------------------------------------------------------------------
-bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
-  ctx.landed = false;
-  const std::int16_t sid = state.travel.selected_stellar_id;
-  if (!NovaTargeting_IsLandingAvailable(state)) {
-    return false;
-  }
-  const auto *st = state.scenario.Stellar(sid);
-  if (!st) {
-    return false;
-  }
-
-  // Stellar_ProcessTravelAndLanding rejects a paid landing before it enters
-  // the docking sequence; do the same before changing any player state. A
-  // hazard/derelict stellar (field_0x46) waives this fee.
-  if (st->service_cost > 0 && !st->hazard_marker &&
-      state.player.credits < st->service_cost) {
-    NovaLog::Info("docking denied at stellar {}: service cost {} exceeds "
-                  "available credits {}",
-                  sid,
-                  st->service_cost,
-                  state.player.credits);
-    return false;
-  }
-
-  // Reposition to the stellar, zero velocity/speed, refill shields/armor from
-  // the effective maximums (mirrors Stellar_LandOnSpob).
-  state.player.pos_x = static_cast<float>(st->pos_x);
-  state.player.pos_y = static_cast<float>(st->pos_y);
-  state.player.vel_x = 0.0F;
-  state.player.vel_y = 0.0F;
-  state.player.speed = 0.0F;
-  const auto eff = Outfit_ComputePlayerEffectiveStats(state);
-  state.player.shield_points = eff.max_shield_points;
-  state.player.armor_points = eff.max_armor_points;
-  state.cached_stats = eff;
-  state.stat_cache_valid = true;
-
-  // Service cost (StellarDef service_cost): deducted once per landing, waived
-  // for hazard stellars. The affordability gate above makes the clamp a
-  // defensive invariant rather than an implicit partial-payment behavior.
-  if (st->service_cost > 0 && !st->hazard_marker) {
-    state.player.credits -= st->service_cost;
-    state.player.credits = std::max(0, state.player.credits);
-  }
-
-  ctx.stellar_id = sid;
-  ctx.landed = true;
-  ctx.selection = LandedService::kLaunch;
-  state.travel.landed_this_frame = true;
-  NovaLog::Info("landed at stellar {} ({}); shields/armor refilled, {} credits "
-                "remaining after service cost",
-                sid,
-                st->name,
-                state.player.credits);
-  return true;
-}
 
 // ---------------------------------------------------------------------------
 // Fuel service.
@@ -129,7 +68,7 @@ std::int32_t NovaLanded_Repair(GameState &state,
   state.stat_cache_valid = true;
 
   // The original repairs the whole hull; shields are already full from the
-  // landing transition, so only the armor gap is billed.
+  // arrival transition, so only the armor gap is billed.
   const float armor_gap =
       std::max(0.0F, eff.max_armor_points - state.player.armor_points);
   if (armor_gap <= 0.0F || price_per_armor_point <= 0) {
@@ -759,7 +698,7 @@ DispatchService(SdlPlatform &platform, GameState &state, LandedContext &ctx) {
     // The original's docked strip has NO Repair button: shields AND armor are
     // refilled to maximum automatically, for free, by Stellar_TravelToSystem
     // (0x00455e10) when the player arrives at (and leaves) a normal dock. The
-    // landing transition (NovaLanding_EnterDocked) already applies that free
+    // an arrival transition could already apply that free
     // top-up, so there is nothing to bill here; this slot only reports the
     // (already-full) state.
     NovaLog::Info("dock repair: hull already at full (free auto-repair on "
