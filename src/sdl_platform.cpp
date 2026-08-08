@@ -239,6 +239,12 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.brake = pressed(SDL_SCANCODE_DOWN) || pressed(SDL_SCANCODE_S);
   input.travel = pressed(SDL_SCANCODE_J);
   input.target_action = pressed(SDL_SCANCODE_E);
+  input.cycle_target_next = pressed(SDL_SCANCODE_TAB) &&
+                            !pressed(SDL_SCANCODE_LSHIFT) &&
+                            !pressed(SDL_SCANCODE_RSHIFT);
+  input.cycle_target_previous =
+      pressed(SDL_SCANCODE_TAB) &&
+      (pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT));
   // Primary fire (held): space. See FlightInput::fire for the mapping note.
   input.fire = pressed(SDL_SCANCODE_SPACE);
   return input;

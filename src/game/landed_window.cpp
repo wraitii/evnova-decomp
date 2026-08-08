@@ -37,6 +37,19 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
     return false;
   }
 
+  // Stellar_ProcessTravelAndLanding rejects a paid landing before it enters
+  // the docking sequence; do the same before changing any player state. A
+  // hazard/derelict stellar (field_0x46) waives this fee.
+  if (st->service_cost > 0 && !st->hazard_marker &&
+      state.player.credits < st->service_cost) {
+    NovaLog::Info("docking denied at stellar {}: service cost {} exceeds "
+                  "available credits {}",
+                  sid,
+                  st->service_cost,
+                  state.player.credits);
+    return false;
+  }
+
   // Reposition to the stellar, zero velocity/speed, refill shields/armor from
   // the effective maximums (mirrors Stellar_LandOnSpob).
   state.player.pos_x = static_cast<float>(st->pos_x);
@@ -51,7 +64,8 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   state.stat_cache_valid = true;
 
   // Service cost (StellarDef service_cost): deducted once per landing, waived
-  // for hazard stellars, clamped >= 0 credits.
+  // for hazard stellars. The affordability gate above makes the clamp a
+  // defensive invariant rather than an implicit partial-payment behavior.
   if (st->service_cost > 0 && !st->hazard_marker) {
     state.player.credits -= st->service_cost;
     state.player.credits = std::max(0, state.player.credits);

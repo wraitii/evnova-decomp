@@ -54,6 +54,11 @@ struct FlightInput {
   // command channel (Ship_HandlePlayerTargetActionCommand); opens the landing
   // interaction for a landable target in range.
   bool target_action = false;
+  // Cycle the stellar target. This is a clean-room binding for the original's
+  // target-selection command channel; Tab advances through the current
+  // system's eligible stellars and Shift+Tab goes backwards.
+  bool cycle_target_next = false;
+  bool cycle_target_previous = false;
 };
 
 class SdlTexture {

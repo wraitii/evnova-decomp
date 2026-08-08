@@ -101,18 +101,21 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 [[nodiscard]] std::int16_t
 NovaTargeting_FindNearestLandableStellar(const GameState &state);
 
-// True when `st` is a landing (non-travel) target the player can dock at:
-// usable for travel and the travel_flags "landable" bit (0x2) is set.
+// True when `st` is a landing (non-travel) target the player can dock at.
+// The original dispatches Stellars with availability_flags bit 0x1000 to
+// Stellar_LandOnSpob; the remaining usable points proceed through travel or
+// hypergate paths.
 [[nodiscard]] bool NovaTargeting_IsLandableStellar(const Stellar &st);
 
-// Per-frame player travel/land targeting. Selects the nearest stellar in the
-// player's current system that is usable for travel/landing (passes
-// IsStellarUsableForTravel and is within Stellar_ComputeTravelRangeSq) and
-// stores it in state.travel.selected_stellar_id (mirrors the original's
-// auto-set ai_secondary_target_slot / travel_transfer_mode == 2 in
-// Ship_HandlePlayerShip). Clears it to -1 when none qualifies. Runs each
-// spaceflight frame.
+// Per-frame player travel/land targeting. Seeds the nearest usable stellar in
+// the current system, but preserves a player-cycled target while valid. Unlike
+// the old shortcut, selection is not constrained to docking range: a target
+// remains selected while the player flies toward it.
 void NovaTargeting_UpdatePlayerTarget(GameState &state);
+
+// Select the next (or previous when `forward` is false) playable stellar in
+// the current system. Returns false when there is no eligible stellar.
+bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward);
 
 // Performs a landing on the player's currently selected stellar (the landing-
 // transition subset of Stellar_LandOnSpob / Stellar_ProcessTravelAndLanding's
@@ -127,8 +130,8 @@ void NovaTargeting_UpdatePlayerTarget(GameState &state);
 bool NovaLanding_TryLand(GameState &state);
 
 // True when the player's currently selected stellar (state.travel.selected_
-// stellar_id) is a landable target within travel range of the ship, i.e. a
-// landing interaction is available right now.
+// stellar_id) is a landable target that has cleared the original's final
+// docking envelope (within 250px in both axes and essentially at rest).
 [[nodiscard]] bool NovaTargeting_IsLandingAvailable(const GameState &state);
 
 } // namespace game

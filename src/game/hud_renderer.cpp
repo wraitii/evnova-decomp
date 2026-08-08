@@ -284,7 +284,8 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
                 4.0F);
   }
 
-  // Target panel: the auto-targeted stellar, or an empty target hint.
+  // Target panel: a manually selected stellar persists while the player flies
+  // toward it. [DOCK] is only shown in the final 250px/rest envelope.
   {
     std::string tgt;
     const std::int16_t sid = state.travel.selected_stellar_id;
@@ -292,7 +293,7 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
     if (st && !st->name.empty()) {
       tgt = st->name;
       if (NovaTargeting_IsLandingAvailable(state)) {
-        tgt += " [L]";
+        tgt += " [DOCK]";
       }
     } else {
       tgt = "(none)";

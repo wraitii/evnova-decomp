@@ -174,7 +174,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00431480,Frame_JitterPlayerStatModifiers,,0%,
 0x00431500,Frame_RerollPlayerStatModifiers,,0%,
 0x00431530,Shot_UpdateShotGuidance,,0%,
-0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,30%,scope 3 (per-tick stellar system_id/is_available/hazard re-derivation) via NovaTargeting_UpdateStellarAvailability + wired into NovaFrame_SpaceflightLoop; visible-system cache + sprite-set bookkeeping not reconstructed
+0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,35%,scope 3 marks the entered current system visible, then re-derives stellar system_id/is_available/hazard state via NovaTargeting_UpdateStellarAvailability; discovery flood and sprite-set bookkeeping not reconstructed
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
 0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,3%,"player free-flight movement model reconstructed (ship-class stats, turn/thrust/clamp, inertia coast, reverse brake) via NovaPlayer_IntegrateMovement; AI/combat/weapon/travel scopes still stubbed"
 0x00435830,Shot_HandleShot,src/game/spaceflight_view.cpp,15%,"shot sprite frame selection mirrored: flags_primary bit0 clear => static/heading frame (rotation sheet, bearing via FrameForHeading) in DrawShots; bit0 set => time-animated frame_cycle_index/anim_elapsed stepped at shot_anim_frame_dwell cadence by NovaWeapon_TickShots (weapon.cpp) and wrapped at the set's frame count (reverse-hold via flags_secondary) in DrawShots; guidance motion, collision, linked-shot/area-impact and audio side-effects not reconstructed"
@@ -269,19 +269,19 @@ address,name,impl_file,reimpl_pct,comment
 0x0044AA50,FUN_0044aa50,,0%,
 0x0044AA60,FUN_0044aa60,,0%,
 0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,8%,player thrust/turn control subset (ShipClass scaled) + jump-complete block (CompleteJump in travel.cpp); travel/combat/disable/mission scopes still stubbed
-0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,15%,auto-targets nearest usable travel/land stellar (NovaTargeting_UpdatePlayerTarget) + target-action to landing in NovaFrame_SpaceflightLoop; combat/movement/travel-transition scopes still stubbed
+0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,20%,nearest eligible stellar seeds target; Tab/Shift+Tab cycles and retains a manual stellar selection; target action routes through final docking eligibility in NovaFrame_SpaceflightLoop. Combat/movement/travel-transition scopes still stubbed
 0x0044C8D0,Ship_TurnShipTowardHeading,,0%,
 0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,
 0x0044E019,Ship_HandlePlayerShipControl,src/game/spaceflight.cpp,12%,primary-fire command loop (fire all primary banks) wired via NovaWeapon_FirePlayerPrimary + NovaWeapon_TickShots in NovaFrame_SpaceflightLoop; travel/mission/target-cycling/travel-selection scopes still stubbed
 0x0044EAB4,FUN_0044eab4,,0%,
 0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
-0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,25%,landable-target branch (selected stellar available/unrestricted -> open landing interaction) via NovaTargeting_IsLandingAvailable + NovaLanded_RunWindow in NovaFrame_SpaceflightLoop; ship-comm and mission-ship branches not reconstructed
+0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,35%,selected stellar branch enforces current-system availability, correct spob flag (availability_flags&0x1000), 250px docking envelope, rest, and affordability before NovaLanded_RunWindow; ship-comm, reputation/require-mask, and mission-ship branches not reconstructed
 0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,25%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, or time-animated path for flags bit0, see 0x00435830); fire-sound audio side-effect reconstructed (volley_fired>0 gate -> dequeue fire_sound slot, played by the spaceflight loop through the cached NovaSoundData, slot->snd id 200+slot); spawning from the ship centre (gun-fire-point placement available via sprite anchors but needs ShipClassDef.gun_exit_pos, TODO(decomp)); beam/turret/guided/launcher branches and burst side-effects not reconstructed"
 0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,25%,"non-hypergate travel/dock transition: the free auto-refill of shields+armor to max (Ship_ComputeShipMaxShieldPoints/MaxArmor) and the credit-charged refuel (Outfit_RefuelShipWithCredits) are captured by NovaLanding_EnterDocked; the docked interaction loop, starmap/discovery/fleet-trade steps and the final position/velocity reset are not reconstructed"
 0x00456480,Stellar_LandOnSpob,src/game/landed_window.cpp,40%,"landing transition state subset in NovaLanding_EnterDocked (used by NovaLanding_TryLand): reposition to stellar, zero velocity, refill shields/armor, deduct service cost; then the docked services window opens (NovaLanded_RunWindow). World/laydown scene not reconstructed"
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
-0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,20%,"landing-dispatch branch: in-range landable target -> land transition (NovaLanding_EnterDocked) -> open docked services window (NovaLanded_RunWindow) in NovaFrame_SpaceflightLoop; gating/feedback messages, jump/hypergate branches and engage-timer still not reconstructed"
+0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,30%,"landing-dispatch branch: selectable stellar target -> final 250px-per-axis/rest docking gate -> land transition (NovaLanding_EnterDocked) -> docked services window (NovaLanded_RunWindow); correctly dispatches availability_flags&0x1000 to landing. Reputation/require-mask feedback, engage timer, and jump/hypergate branches remain TODO(decomp)"
 0x00459950,NovaUi_UpdateTravelEngagementProgress,,0%,
 0x0045A3D0,Ship_HandlePlayerBoardTargetCommand,,0%,
 0x0045BAA0,Ship_RecenterSpaceObjectsForWorldWrap,,0%,

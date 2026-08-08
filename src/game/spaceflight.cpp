@@ -154,6 +154,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // Real frame-time basis for the per-frame ambient/stellar animation steppers
   // (the original accumulates _g_avg_frame_time_ms).
   std::uint64_t prev_tick_ms = SDL_GetTicks();
+  bool target_cycle_was_held = false;
+  bool target_action_was_held = false;
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = SDL_GetTicks();
     const float frame_time_ms =
@@ -163,6 +165,15 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // while the simulation stubs do not, and the same snapshot feeds the
     // travel/jump channel. Movement integrates into PlayerShip.
     const FlightInput input = platform.PollFlightInput();
+    const bool target_cycle =
+        input.cycle_target_next || input.cycle_target_previous;
+    if (target_cycle && !target_cycle_was_held) {
+      NovaTargeting_CyclePlayerStellarTarget(state, input.cycle_target_next);
+    }
+    target_cycle_was_held = target_cycle;
+    const bool target_action_pressed =
+        input.target_action && !target_action_was_held;
+    target_action_was_held = input.target_action;
     NovaPlayer_UpdateFromInput(state, input);
     // Advance the player's fired shots/cooldowns from the previous frame, then
     // handle this frame's fire input. Mirrors Ship_HandlePlayerShipControl
@@ -197,17 +208,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (state.travel.just_completed) {
       view.SpawnAmbientStars(platform, state);
     }
-    // Auto-target the nearest playable travel/land stellar in the current
-    // system (mirrors Ship_HandlePlayerShip auto-setting ai_secondary_target_
-    // slot / travel_transfer_mode==2). This drives the HUD target label and
-    // the landing interaction below.
+    // Seed an automatic target, while retaining a stellar chosen by Tab/
+    // Shift+Tab. This keeps navigation purposeful instead of retargeting to
+    // whichever body happens to be closest each frame.
     NovaTargeting_UpdatePlayerTarget(state);
     // Target-action command ('e'): land on the currently selected stellar when
     // it is a landable target in range. On a successful landing transition the
     // game opens the landed/services window (mirrors Stellar_ProcessTravelAnd-
     // Landing dispatching into the docked UI); when the player launches back
     // into space the loop continues flying, and a hard quit propagates.
-    if (input.target_action) {
+    if (target_action_pressed) {
       if (NovaTargeting_IsLandingAvailable(state)) {
         LandedContext ctx;
         if (NovaLanding_EnterDocked(state, ctx)) {
@@ -220,7 +230,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           NovaLog::Info("target-action: landing transition failed");
         }
       } else {
-        NovaLog::Info("target-action: no landable target in range");
+        NovaLog::Info("target-action: docking with selected stellar requires "
+                      "being within 250px and at rest");
       }
     }
     // In-flight shield regeneration (class base + opcode-5 outfit bonuses),

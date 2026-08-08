@@ -3,6 +3,9 @@
 #include "../log.hpp"
 #include "landed_window.hpp"
 
+#include <array>
+#include <cmath>
+
 namespace game {
 
 // ---------------------------------------------------------------------------
@@ -151,6 +154,15 @@ NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
 void NovaTargeting_UpdateStellarAvailability(GameState &state) {
   const std::int16_t current_sys =
       static_cast<std::int16_t>(state.player.current_system_id);
+  if (current_sys >= 0 &&
+      static_cast<std::size_t>(current_sys) < state.scenario.systems.size()) {
+    // A ship can only be flying in a system the original has already entered;
+    // keep that system visible even though the discovery flood and pilot-file
+    // discovery bits are not reconstructed yet. Without this invariant every
+    // local stellar is filtered out by the availability refresh.
+    state.scenario.systems[static_cast<std::size_t>(current_sys)].is_visible =
+        true;
+  }
   const auto *cur =
       state.scenario.System(static_cast<std::int16_t>(current_sys + 0x80));
   if (!cur) {
@@ -190,8 +202,8 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state) {
 // primitives).
 // ---------------------------------------------------------------------------
 bool NovaTargeting_IsLandableStellar(const Stellar &st) {
-  // travel_flags bit 0x2 is the "landable" (non-jump) slot.
-  return NovaTargeting_IsStellarUsableForTravel(st) && (st.flags & 0x2U) != 0U;
+  return NovaTargeting_IsStellarUsableForTravel(st) &&
+         (st.availability_flags & 0x1000U) != 0U;
 }
 
 std::int16_t NovaTargeting_FindNearestLandableStellar(const GameState &state) {
@@ -235,11 +247,25 @@ std::int16_t NovaTargeting_FindNearestLandableStellar(const GameState &state) {
 void NovaTargeting_UpdatePlayerTarget(GameState &state) {
   const auto *cur = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
-  state.travel.selected_stellar_id = -1;
   if (!cur) {
+    state.travel.selected_stellar_id = -1;
+    state.travel.selected_stellar_is_manual = false;
     return;
   }
-  const float range_sq = NovaTargeting_ComputeTravelRangeSq(state);
+  const auto selectable = [&](std::int16_t sid) {
+    if (sid < 0x80) {
+      return false;
+    }
+    const auto *st = state.scenario.Stellar(sid);
+    return st && st->is_available &&
+           st->system_id == state.player.current_system_id &&
+           NovaTargeting_IsStellarUsableForTravel(*st);
+  };
+  if (state.travel.selected_stellar_is_manual &&
+      selectable(state.travel.selected_stellar_id)) {
+    return;
+  }
+  state.travel.selected_stellar_is_manual = false;
   const float px = state.player.pos_x;
   const float py = state.player.pos_y;
 
@@ -249,16 +275,13 @@ void NovaTargeting_UpdatePlayerTarget(GameState &state) {
     if (nav < 0x80) {
       continue;
     }
-    const auto *st = state.scenario.Stellar(nav);
-    if (!st || !NovaTargeting_IsStellarUsableForTravel(*st)) {
+    if (!selectable(nav)) {
       continue;
     }
+    const auto *st = state.scenario.Stellar(nav);
     const float dx = px - static_cast<float>(st->pos_x);
     const float dy = py - static_cast<float>(st->pos_y);
     const float dist_sq = dx * dx + dy * dy;
-    if (dist_sq > range_sq) {
-      continue;
-    }
     if (dist_sq < best_dist_sq) {
       best_dist_sq = dist_sq;
       best = nav;
@@ -267,19 +290,61 @@ void NovaTargeting_UpdatePlayerTarget(GameState &state) {
   state.travel.selected_stellar_id = best;
 }
 
+bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward) {
+  const auto *cur = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (!cur) {
+    return false;
+  }
+  std::array<std::int16_t, 16> candidates{};
+  std::size_t count = 0;
+  for (const auto sid : cur->nav_defs) {
+    const auto *st = state.scenario.Stellar(sid);
+    if (sid >= 0x80 && st && st->is_available &&
+        st->system_id == state.player.current_system_id &&
+        NovaTargeting_IsStellarUsableForTravel(*st)) {
+      candidates[count++] = sid;
+    }
+  }
+  if (count == 0) {
+    state.travel.selected_stellar_id = -1;
+    state.travel.selected_stellar_is_manual = false;
+    return false;
+  }
+  std::size_t current = count;
+  for (std::size_t i = 0; i < count; ++i) {
+    if (candidates[i] == state.travel.selected_stellar_id) {
+      current = i;
+      break;
+    }
+  }
+  const std::size_t next =
+      current == count
+          ? (forward ? 0 : count - 1)
+          : (forward ? (current + 1) % count : (current + count - 1) % count);
+  state.travel.selected_stellar_id = candidates[next];
+  state.travel.selected_stellar_is_manual = true;
+  return true;
+}
+
 bool NovaTargeting_IsLandingAvailable(const GameState &state) {
   const std::int16_t sid = state.travel.selected_stellar_id;
   if (sid < 0x80) {
     return false;
   }
   const auto *st = state.scenario.Stellar(sid);
-  if (!st || !NovaTargeting_IsLandableStellar(*st)) {
+  if (!st || !st->is_available ||
+      st->system_id != state.player.current_system_id ||
+      !NovaTargeting_IsLandableStellar(*st)) {
     return false;
   }
-  const float range_sq = NovaTargeting_ComputeTravelRangeSq(state);
-  const float dx = state.player.pos_x - static_cast<float>(st->pos_x);
-  const float dy = state.player.pos_y - static_cast<float>(st->pos_y);
-  return (dx * dx + dy * dy) <= range_sq;
+  constexpr float kDockAxisRange = 250.0F;
+  constexpr float kDockMaxVelocity = 0.01F;
+  const float dx = std::abs(state.player.pos_x - static_cast<float>(st->pos_x));
+  const float dy = std::abs(state.player.pos_y - static_cast<float>(st->pos_y));
+  return dx < kDockAxisRange && dy < kDockAxisRange &&
+         std::abs(state.player.vel_x) <= kDockMaxVelocity &&
+         std::abs(state.player.vel_y) <= kDockMaxVelocity;
 }
 
 bool NovaLanding_TryLand(GameState &state) {

@@ -105,6 +105,10 @@ struct TravelState {
   // auto-set ai_secondary_target_slot / travel_transfer_mode == 2. -1 when no
   // stellar qualifies. Set each frame by NovaTargeting_UpdatePlayerTarget.
   std::int16_t selected_stellar_id = -1;
+  // Once the player cycles targets, retain that choice while it remains a
+  // valid stellar in the current system. Otherwise UpdatePlayerTarget seeds
+  // this field from the nearest eligible stellar, matching entry behavior.
+  bool selected_stellar_is_manual = false;
   // Whether the selected stellar is a landing target (travel_flags & 0x2) as
   // opposed to a jump/hypergate point; drives the HUD label and the landing
   // interaction. Derived from the selected stellar, not stored separately.
