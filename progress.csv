@@ -466,8 +466,8 @@ address,name,impl_file,reimpl_pct,comment
 0x0046CA60,Outfit_HasRequiredSpecialOutfit,,0%,
 0x0046CB90,FUN_0046cb90,,0%,
 0x0046CC60,Sprite_SetContainerIfChanged,,0%,
-0x0046CCA0,Mission_AccumulatePlayerContributeMask,,0%,
-0x0046CD80,Outfit_EvaluateRequireMask,,0%,
+0x0046CCA0,Mission_AccumulatePlayerContributeMask,,0%,Clean-room contribute aggregation in landed_store ContributeMask now seeds the ship-class baseline + owned outfits (not missions/ranks), matching the Require gating used by outfit/ship purchases.
+0x0046CD80,Outfit_EvaluateRequireMask,,0%,Require-mask satisfaction now routed through the ship-class-seeded ContributeMask (landed_store MeetsRequire), fixing fresh-player outfit purchases.
 0x0046CDD0,Stellar_ComputeShipJumpDepth,,0%,
 0x0046CEC0,Weapon_GetShipMaxWeaponRange,,0%,
 0x0046D080,Ship_CheckSpecialLoadoutCapability,,0%,

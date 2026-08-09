@@ -139,6 +139,40 @@ TEST_CASE("Outfitter transactions enforce free mass in both directions",
   CHECK(state.inventory.outfit_owned_count[1] == 1);
 }
 
+// The player's ship class supplies the baseline Contribute mask that almost
+// every outfit's Require mask depends on (e.g. the starter Shuttle contributes
+// Require high-word bit 0, matching the req_hi=1 on base weapons such as the
+// Light Blaster). Without seeding the aggregate from the ship class a fresh
+// player fails every Require gate and can buy nothing. Regression for the
+// "can't buy outfits" bug.
+TEST_CASE("Outfitter buying respects the ship class contribute baseline",
+          "[landed_store][scenario]") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.ship_class_id = 0; // the starter Shuttle (id 0x80)
+  state.player.credits = 10'000;
+
+  // The starter Shuttle's Contribute mask comes from the shp payload: lo=0,
+  // hi=1 (bit 0 of the high word), giving a fresh player the base that the
+  // Light Blaster (req_hi=1) and friends require to be purchasable.
+  const game::ShipClass *shuttle = state.scenario.Ship(0x80);
+  REQUIRE(shuttle != nullptr);
+  CHECK(shuttle->contribute_lo == 0);
+  CHECK(shuttle->contribute_hi == 1);
+  // The previously (mis)decoded require at shp +0x72a is the Shuttle's cost,
+  // not a Require mask; the real Require (+0x380/+0x384) is empty.
+  CHECK(shuttle->require_lo == 0);
+  CHECK(shuttle->require_hi == 0);
+
+  // With the baseline contribute mask the Light Blaster is purchasable and
+  // buys cleanly.
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x80));
+  game::LandedStoreSession session;
+  CHECK(game::NovaLanded_BuyOutfit(state, 0x80, 0x80, 1) == 1);
+  CHECK(state.inventory.outfit_owned_count[0] == 1);
+  CHECK(state.player.credits == 5'000); // paid the 5000 credit list price
+}
+
 // The docked service buttons come from the real Spaceport DITL 0x3e8. Verify
 // both physical columns and the non-sequential item-to-service mapping used by
 // the original window.

@@ -143,6 +143,13 @@ struct ShipClass {
   std::string availability_expr; // Availability
   std::string on_purchase_expr;  // OnPurchase
   std::string on_retire_expr;    // OnRetire
+  // Contribute / Require 64-bit pairs (payload +0x64/+0x68 and +0x380/+0x384).
+  // Contribute is the ship's baseline for the player's aggregate Contribute
+  // mask (Mission_AccumulatePlayerContributeMask reads ship
+  // ShipClassDef.field_0xa30/0xa34, populated from shp +0x64/+0x68) and gates
+  // Require checks on outfits/missions/ships. See landed_store ContributeMask.
+  std::uint32_t contribute_lo = 0;
+  std::uint32_t contribute_hi = 0;
   std::uint32_t require_lo = 0;
   std::uint32_t require_hi = 0;
   std::int16_t buy_random = 100;

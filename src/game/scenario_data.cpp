@@ -186,9 +186,16 @@ namespace {
   s.long_name = ReadCString(bytes, 0x62e);
   s.buy_random = ReadBeI16(bytes, 0x388);
   s.hire_random = ReadBeI16(bytes, 0x38a);
-  if (bytes.size() >= 0x736) {
-    s.require_lo = ReadBe32(bytes, 0x72a);
-    s.require_hi = ReadBe32(bytes, 0x72e);
+  // Store masks (loader 0x004bd3c0): Contribute at shp +0x64/+0x68 and Require
+  // at +0x380/+0x384 feed the player's aggregate Contribute/Require masks.
+  // (These are the ship-class baseline contributions combined with owned
+  // outfits for Require checks; the earlier payload at +0x72a is the ship's
+  // cost, not a mask.)
+  s.contribute_lo = ReadBe32(bytes, 0x64);
+  s.contribute_hi = ReadBe32(bytes, 0x68);
+  if (bytes.size() >= 0x384 + 4) {
+    s.require_lo = ReadBe32(bytes, 0x380);
+    s.require_hi = ReadBe32(bytes, 0x384);
   }
   return s;
 }
@@ -241,8 +248,7 @@ namespace {
   // (kWeapon), 3 (kAmmo) or 0x15 (kBomb). This makes a weapon outfit's mod_val
   // equal the zero-based weapon bank slot (resource id minus 0x80), so weapon
   // banking (NovaWeapon_*) indexes banks directly with mod_val.
-  const auto rebase_mod_val = [](std::int16_t mod_type,
-                                 std::int16_t &mod_val) {
+  const auto rebase_mod_val = [](std::int16_t mod_type, std::int16_t &mod_val) {
     if ((mod_type == 1 || mod_type == 3 || mod_type == 0x15) &&
         mod_val > 0x7f) {
       mod_val = static_cast<std::int16_t>(mod_val - 0x80);

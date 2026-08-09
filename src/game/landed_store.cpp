@@ -28,8 +28,24 @@ namespace {
 
 [[nodiscard]] std::pair<std::uint32_t, std::uint32_t>
 ContributeMask(const GameState &state) {
+  // Ghidra Outfit_EvaluateRequireMask (0x0046cd80) ->
+  // Mission_AccumulatePlayerContributeMask (0x0046cca0) seeds the aggregate
+  // from the *player's ship class* contribute (ship
+  // ShipClassDef.field_0xa30/0xa34), then ORs contributions from owned outfits
+  // (plus active missions / ranks in the original). Without the ship baseline
+  // a fresh player with only the starter stock would fail every outfit Require
+  // mask, so buying fails.
   std::uint32_t lo = 0;
   std::uint32_t hi = 0;
+  const std::int16_t ship_class_id = state.player.ship_class_id;
+  const ShipClass *cls =
+      ship_class_id >= 0
+          ? state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80))
+          : nullptr;
+  if (cls != nullptr) {
+    lo |= cls->contribute_lo;
+    hi |= cls->contribute_hi;
+  }
   for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
                           i < state.scenario.outfits.size();
        ++i) {
