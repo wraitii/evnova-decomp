@@ -105,6 +105,12 @@ struct ShipDefaultWeaponBank {
   std::int16_t ammo_load = 0;
 };
 
+// Ghidra ShipClassDef.tech_level sentinel (== (short)0xd8f1 == -9999) marking
+// a class as nonexistent. Ship_HandleShip deactivates any ship flying such a
+// class, and DudeDef decode nulls a ship type referencing one.
+inline constexpr std::int16_t kShipClassNonexistentTechLevel =
+    static_cast<std::int16_t>(0xd8f1);
+
 // Ghidra ShipClassDef (g_ship_class_defs, 0x200 entries indexed by ship id
 // minus 0x80). Only the fields the reimplementation needs so far are carried;
 // the Bible documents the full set.

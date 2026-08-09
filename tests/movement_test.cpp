@@ -296,6 +296,61 @@ TEST_CASE("npc banking ship glows toward 0x18 while turning") {
   CHECK(ship.engine_glow_intensity > 0.7F); // visibly lit while banking
 }
 
+TEST_CASE("npc_out-of-range class ship is deactivated by the guard") {
+  game::GameState state;
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.current_system_id = 0;
+  ship.ship_class_id = 0x300; // > 0x2ff -> Ship_HandleShip deactivates
+  ship.pos_x = 12.0F;
+
+  game::NovaShip_TickNpcShips(state, 1.0F);
+  CHECK_FALSE(ship.is_active);
+}
+
+TEST_CASE("npc nonexistent-class (tech -9999) ship is deactivated") {
+  game::GameState state;
+  // Populate the scenario ship table so the (valid-indexed) class resolves.
+  state.scenario.ships.emplace_back(); // index 0 = resource id 0x80
+  state.scenario.ships[0].tech_level = game::kShipClassNonexistentTechLevel;
+  state.scenario.ships[0].accel = 500.0F;
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.current_system_id = 0;
+  ship.ship_class_id = 0; // maps to ships[0]
+  ship.pos_x = 12.0F;
+
+  game::NovaShip_TickNpcShips(state, 1.0F);
+  CHECK_FALSE(ship.is_active);
+}
+
+TEST_CASE(
+    "npc guard resets drifted slot fields and keeps a valid ship active") {
+  game::GameState state;
+  state.scenario.ships.emplace_back(); // resource id 0x80, valid (tech 0)
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.current_system_id = 0;
+  ship.ship_class_id = 0;
+  // Drifted slot fields out of their legal ranges (Ghidra resets to -1).
+  ship.faction_or_government_id = 0x100; // > 0xff
+  ship.dude_class_id = 0x200;            // > 0x1ff
+  ship.mission_ship_slot = 0x400;        // > 0x3ff
+  ship.ai_target_ship_slot = 0x40;       // > 0x3f
+  ship.target_stellar_object_id = 0x800; // > 0x7ff (resets ai_target_ship_slot)
+  ship.mission_fleet_slot = 0x10;        // > 0xf
+  ship.primary_target_ship_slot = 0x40;  // > 0x3f
+
+  game::NovaShip_TickNpcShips(state, 1.0F);
+  CHECK(ship.is_active); // valid class: not deactivated
+  CHECK(ship.faction_or_government_id == -1);
+  CHECK(ship.dude_class_id == -1);
+  CHECK(ship.mission_ship_slot == -1);
+  CHECK(ship.ai_target_ship_slot == -1); // reset by both direct check + quirk
+  CHECK(ship.mission_fleet_slot == -1);
+  CHECK(ship.primary_target_ship_slot == -1);
+}
+
 // --- Turn-rate floor (Ship_ComputeShipMaxTurnRateDeg NPC branch) ---
 
 TEST_CASE("npc turn-rate floor is a no-op for a clean ship (computed==base)") {

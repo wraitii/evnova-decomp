@@ -647,7 +647,7 @@ namespace {
       // also nulled.
       if (ship >= 0 && static_cast<std::size_t>(ship) < ship_table.size() &&
           ship_table[static_cast<std::size_t>(ship)].tech_level ==
-              static_cast<std::int16_t>(0xd8f1)) {
+              kShipClassNonexistentTechLevel) {
         ship = -1;
       }
     }

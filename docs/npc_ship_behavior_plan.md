@@ -76,9 +76,15 @@ mostly unblocked porting work.
       `NovaFrame_TickSystems`) now iterates active, non-player ships in the
       current system and calls `NovaShip_IntegrateNpcMovement` with the
       per-frame elapsed ticks (mirroring the player's cadence normalization).
-- [ ] **Object crash / deactivation guards**: ports the validation prologue from
-      `Ship_HandleShip` (the `is_active = false` returns for bad class_id,
-      `tech_level == -9999`, etc.).
+- [x] **Object crash / deactivation guards**: `Stub_HandleShips` now ports the
+      `Ship_HandleShip` validation prologue: deactivates any active NPC whose
+      class id falls outside [0,0x2ff] or whose class carries the -9999
+      `kShipClassNonexistentTechLevel` (0xd8f1) sentinel, and range-resets
+      drifted slot fields (faction / dude_class / mission_ship / ai_target_ship
+      / target_stellar_object / mission_fleet / primary_target) to -1
+      (including Ghidra's quirk that the out-of-range `target_stellar_object_id`
+      check resets `ai_target_ship_slot`). Exposed for tests via
+      `NovaShip_TickNpcShips`; unit-tested (tests/movement_test.cpp).
 
 ## Phase 2 -- Steering math helpers (low effort)
 

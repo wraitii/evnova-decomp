@@ -97,13 +97,52 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     if (!ship.is_active || ship.current_system_id != current_system) {
       continue;
     }
-    // ship_class_id is the zero-based index; scenario lookup adds 0x80 at its
-    // boundary (same as the spawner NovaEncounter_SpawnFleetLeadShip).
-    const ShipClass *cls = state.scenario.Ship(
-        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    if (cls == nullptr) {
+
+    // ---- Ghidra Ship_HandleShip (0x00433050) validation prologue. ----
+    // The original deactivates any ship whose class id falls outside [0,0x2ff]
+    // or whose class carries the -9999 (0xd8f1) "nonexistent class" sentinel,
+    // then range-resets each slot field that has drifted out of its legal bound
+    // back to -1 (logging a debug string per reset). ship_class_id is kept
+    // zero-based in the clean-room struct, so the range checks mirror the
+    // original exactly.
+    const std::int16_t class_id = ship.ship_class_id;
+    if (class_id < 0 || class_id > 0x2ff) {
+      ship.is_active = false;
       continue;
     }
+    const ShipClass *cls =
+        state.scenario.Ship(static_cast<std::int16_t>(class_id + 0x80));
+    if (cls == nullptr || cls->tech_level == kShipClassNonexistentTechLevel) {
+      ship.is_active = false;
+      continue;
+    }
+    if (ship.faction_or_government_id < -1 ||
+        ship.faction_or_government_id > 0xff) {
+      ship.faction_or_government_id = -1;
+    }
+    if (ship.dude_class_id < -1 || ship.dude_class_id > 0x1ff) {
+      ship.dude_class_id = -1;
+    }
+    if (ship.mission_ship_slot < -1 || ship.mission_ship_slot > 0x3ff) {
+      ship.mission_ship_slot = -1;
+    }
+    if (ship.ai_target_ship_slot < -1 || ship.ai_target_ship_slot > 0x3f) {
+      ship.ai_target_ship_slot = -1;
+    }
+    if (ship.target_stellar_object_id < -1 ||
+        ship.target_stellar_object_id > 0x7ff) {
+      // Ghidra quirk: this range check resets ai_target_ship_slot, not
+      // target_stellar_object_id.
+      ship.ai_target_ship_slot = -1;
+    }
+    if (ship.mission_fleet_slot < -1 || ship.mission_fleet_slot > 0xf) {
+      ship.mission_fleet_slot = -1;
+    }
+    if (ship.primary_target_ship_slot < -1 ||
+        ship.primary_target_ship_slot > 0x3f) {
+      ship.primary_target_ship_slot = -1;
+    }
+
     NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
   }
 }
@@ -416,6 +455,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 }
 
 } // namespace
+
+// External test seam into the per-ship simulation pass (Ghidra scope 4/5 of
+// Frame_TickSystems 0x004186b0 -> Ship_HandleShip 0x00433050). Stub_HandleShips
+// lives in the anonymous namespace above; this wrapper exposes it to unit tests
+// without external linkage polluting the otherwise-internal stub set.
+void NovaShip_TickNpcShips(GameState &state, float elapsed_ticks) {
+  Stub_HandleShips(state, elapsed_ticks);
+}
 
 // ---------------------------------------------------------------------------
 // Player ship movement (free flight)
