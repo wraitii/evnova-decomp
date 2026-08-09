@@ -4,9 +4,9 @@ Goal: make NPC ships do things -- move around the system, wander toward / land o
 stellars, escort, acquire combat targets, and jump between systems.
 
 This is a living plan. Phases are listed in the recommended execution order and
-marked as they land. Current state: **Phases 0-1 done** (NPC movement physics
-integrator wired into per-frame tick); next up is **Phase 2** (shared steering
-math helpers) then **Phase 3** (the AI decision layer).
+marked as they land. Current state: **Phases 0-2 done** (NPC movement physics
+integrator + gravity-shield steer helper, both wired into the per-frame tick);
+next up is **Phase 3** (the AI decision layer).
 
 ## Current architecture snapshot (start state)
 
@@ -71,12 +71,20 @@ mostly unblocked porting work.
 
 ## Phase 2 -- Steering math helpers (low effort)
 
-- [ ] **`Math_AddPolarVelocity`** (0x0043b4a0) and
-      **`Math_AddPolarVelocityWithClamp`** (0x0043b4e0). The player integrator
-      implements the clamped variant inline; extract/reuse as a shared helper so
-      NPCs and player converge on one math path.
-- [ ] **`Ship_SteerVelocityTowardShipHeading`** (0x0043b020) -- the
-      momentum/turn integrator used by gravity-shield NPC ships.
+- [x] **`Math_AddPolarVelocity`** (0x0043b4a0) and
+      **`Math_AddPolarVelocityWithClamp`** (0x0043b4e0). The clamped variant is
+      shared (`NovaPlayer_AddPolarVelocityClamped`, promoted in Phase 1); the
+      unclamped polar add is inlined in the NPC integrator's reverse path and
+      the steer helper.
+- [x] **`Ship_SteerVelocityTowardShipHeading`** (0x0043b020) as
+      `NovaShip_SteerVelocityTowardShipHeading`: the momentum/turn integrator
+      for gravity-shield ships (scalar `speed` snapped toward heading*speed,
+      then relaxed toward the prior velocity at `eff_thrust * 4.0 * frame_time`
+      per axis). Added `NovaShip_HasGravityShield` (NPC branch of
+      `Outfit_ShipHasGravityShieldOutfit` 0x0046df70: class `flags_secondary`
+      bit 0x40, excluding ai_control_mode 0x0c) and wired the gravity-shield
+      scalar-speed thrust path into `NovaShip_IntegrateNpcMovement`. Unit-tested
+      (tests/movement_test.cpp).
 
 ## Phase 3 -- AI decision layer (high effort, the content)
 

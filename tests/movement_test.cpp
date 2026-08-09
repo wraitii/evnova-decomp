@@ -165,3 +165,65 @@ TEST_CASE("npc coasts without thrust (no forward command)") {
   CHECK(ship.pos_x == Catch::Approx(3.0F)); // pos += vel * ticks
   CHECK(ship.pos_y == Catch::Approx(-6.0F));
 }
+
+TEST_CASE("steer velocity rotates heading*speed toward the prior velocity") {
+  game::Ship ship;
+  ship.heading = 0.0F; // heading 0 = up (-y)
+  ship.speed = 4.0F;   // gravity-shield scalar speed
+  // Prior velocity points elsewhere (large positive x) so the steer converges
+  // from it toward the heading*speed vector at a bounded per-axis rate.
+  ship.vel_x = 100.0F;
+  ship.vel_y = -100.0F;
+
+  // eff_thrust 0.1 * 4.0 turn-scale = 0.4 step per tick.
+  game::NovaShip_SteerVelocityTowardShipHeading(ship, 0.1F, 1.0F);
+  // new heading*vel = (0,-4). It moves from the prior velocity toward that by
+  // at most 0.4 per axis (clamped, never crossing the new value). Starting far
+  // away, the not-yet-clamped result stays within one step of the prior side
+  // of the target:
+  CHECK(ship.vel_x == Catch::Approx(0.4F));  // approached 0 from above
+  CHECK(ship.vel_y == Catch::Approx(-4.4F)); // approached -4 from below
+}
+
+TEST_CASE("within a step, steer preserves the prior velocity") {
+  game::Ship ship;
+  ship.heading = 0.0F;
+  ship.speed = 4.0F;
+  // Prior velocity already within one step of the heading*speed vector, so the
+  // steer does not move it (it only moves by at most step, never crossing).
+  ship.vel_x = 0.1F;
+  ship.vel_y = -3.9F;
+
+  game::NovaShip_SteerVelocityTowardShipHeading(ship, 0.1F, 1.0F);
+  CHECK(ship.vel_x == Catch::Approx(0.1F)); // prior preserved within step
+  CHECK(ship.vel_y == Catch::Approx(-3.9F));
+}
+
+TEST_CASE("gravity-shield npc keeps a scalar clamped speed and applies it") {
+  game::GameState state;
+  game::Ship ship;
+  // flags_secondary 0x40 marks the class as a gravity-shield ship.
+  game::ShipClass cls = TestShipClass();
+  cls.flags_secondary = 0x40;
+  ship.ai_desired_heading_deg = 0;
+  ship.ai_desired_speed = 100.0F;
+  ship.ai_forward_thrust_cmd = 2.0F;
+  ship.speed = 1.0F;
+
+  // Forward thrust accumulates the scalar speed: 1 + cmd*ticks = 3, then the
+  // position block steers the velocity toward heading*3 at 0.4/tick from rest:
+  // vel_y approaches -3 by one step, so after one tick it sits at -2.6.
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.speed == Catch::Approx(3.0F));
+  CHECK(ship.vel_y == Catch::Approx(-2.6F)); // heading 0 = up, one steer step
+  CHECK(ship.pos_y == Catch::Approx(-2.6F));
+}
+
+TEST_CASE("gravity-shield detect excludes ai_control_mode 0x0c") {
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  cls.flags_secondary = 0x40;
+  CHECK(game::NovaShip_HasGravityShield(ship, cls));
+  ship.ai_control_mode = 0x0c;
+  CHECK_FALSE(game::NovaShip_HasGravityShield(ship, cls));
+}

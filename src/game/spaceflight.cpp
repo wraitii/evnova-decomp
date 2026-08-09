@@ -659,9 +659,10 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 // 7/8/9 outfit bonuses, the government combat_rating_scale and disable/status-
 // effect damping to these when the NPC outfit/combat state is reconstructed.
 //
-// Gravity-shield ships (outfit opcode 38) keep a scalar `speed` and steer via
-// Ship_SteerVelocityTowardShipHeading (0x0043b020, Phase 2). None spawn with
-// that outfit yet, so the vector path is used throughout.
+// Gravity-shield ships (ShipClassDef.flags_secondary bit 0x40) keep a scalar
+// `speed` (integrated in the thrust block below) and steer their velocity
+// through NovaShip_SteerVelocityTowardShipHeading (0x0043b020) in the position
+// block, matching the original's two-regime movement model.
 void NovaShip_IntegrateNpcMovement(GameState &state,
                                    Ship &ship,
                                    const ShipClass &ship_class,
@@ -674,6 +675,12 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // Derived effective stats (see header/block comment above).
   const float eff_turn_deg = static_cast<float>(ship_class.turn_rate) * 0.1F;
   const float eff_max_speed = static_cast<float>(ship_class.speed) / 100.0F;
+  const float eff_thrust =
+      static_cast<float>(ship_class.accel) / 10000.0F * 2.0F;
+  // Gravity-shield ships (ShipClassDef.flags_secondary bit 0x40, and not in
+  // ai_control_mode 0x0c) keep a scalar Ship.speed and steer their velocity
+  // through Ship_SteerVelocityTowardShipHeading instead of vector thrust.
+  const bool gravity_shield = NovaShip_HasGravityShield(ship, ship_class);
 
   // The movement blocks are gated off while coasting through a reversal, and
   // for the defunct AI state (0x16) the ship also holds course. The original
@@ -736,7 +743,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // stopped ship with no thrust command drifts without applying any new
   // velocity). The coast case (desired == 0) is a clamped step toward the
   // class top speed; desired > 0 throttles toward it; desired < 0 is the
-  // reverse/absolute-set path.
+  // reverse/absolute-set path. Non-gravity-shield ships apply polar vector
+  // thrust; gravity-shield ships accumulate a scalar `speed` clamped at the
+  // same caps.
   if (!holds_course && ship.ai_forward_thrust_cmd != 0.0F) {
     const float desired = ship.ai_desired_speed;
     auto add_polar = [&](float speed) {
@@ -751,22 +760,35 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       NovaPlayer_AddPolarVelocityClamped(
           ship.heading, thrust_step, cap, ship.vel_x, ship.vel_y);
     };
+    const float thrust_step = ship.ai_forward_thrust_cmd * elapsed_ticks;
 
     if (desired == 0.0F) {
-      // Free-coast: apply the cruise thrust command (usually 0) as a per-axis
-      // clamped step toward the class top speed so a ship with a nonzero
-      // constant forward command advances. With command 0 this is a no-op.
-      add_polar_clamped(ship.ai_forward_thrust_cmd * elapsed_ticks,
-                        eff_max_speed);
+      // Coast branch. Non-shield: per-axis clamped step toward the class top
+      // speed (with a zero command this is a no-op). Gravity-shield: scalar
+      // `speed` clamped at the class top speed.
+      if (!gravity_shield) {
+        add_polar_clamped(thrust_step, eff_max_speed);
+      } else {
+        ship.speed = std::clamp(ship.speed + thrust_step, 0.0F, eff_max_speed);
+      }
     } else if (desired > 0.0F) {
       // Forward thrust toward the requested speed.
-      add_polar_clamped(ship.ai_forward_thrust_cmd * elapsed_ticks, desired);
+      if (!gravity_shield) {
+        add_polar_clamped(thrust_step, desired);
+      } else {
+        ship.speed = std::clamp(ship.speed + thrust_step, 0.0F, desired);
+      }
     } else {
-      // Reverse / absolute-set: zero the velocity and re-impose it at
-      // abs(desired) along the heading.
-      ship.vel_x = 0.0F;
-      ship.vel_y = 0.0F;
-      add_polar(std::abs(desired));
+      // Reverse / absolute-set: non-shield zeroes the vector velocity and
+      // re-imposes it at abs(desired) along the heading; gravity-shield sets
+      // the scalar speed directly.
+      if (!gravity_shield) {
+        ship.vel_x = 0.0F;
+        ship.vel_y = 0.0F;
+        add_polar(std::abs(desired));
+      } else {
+        ship.speed = std::abs(desired);
+      }
       ship.ai_desired_speed += std::abs(ship.ai_forward_thrust_cmd);
       // Once the reversal has closed enough distance, the AI decides to coast
       // through: arm a random 30..60-tick reversal timer (only in open space,
@@ -784,17 +806,26 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
 
   // --- Position integration + inertia-less special case. ---
   // Inertia-less ships (base_accel == 0 && base_speed == 0) are pinned: the
-  // original zeroes their velocity every frame. Others integrate
-  // pos += vel * frame_time (gravity-shield ships instead turn their velocity
-  // through Ship_SteerVelocityTowardShipHeading first -- none exist yet).
+  // original zeroes their velocity every frame. Gravity-shield ships turn their
+  // scalar `speed` into an actual velocity via Ship_SteerVelocityToward-
+  // ShipHeading first. Others integrate pos += vel * frame_time.
   if (ship_class.accel == 0.0F && ship_class.speed == 0.0F) {
     ship.vel_x = 0.0F;
     ship.vel_y = 0.0F;
     ship.speed = 0.0F;
   } else {
+    if (gravity_shield) {
+      NovaShip_SteerVelocityTowardShipHeading(ship, eff_thrust, elapsed_ticks);
+    }
     ship.pos_x += ship.vel_x * elapsed_ticks;
     ship.pos_y += ship.vel_y * elapsed_ticks;
-    ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+    // Vector-path ships keep `speed` as the velocity magnitude; gravity-shield
+    // ships keep the scalar `speed` written by the thrust block and only the
+    // steer helper converts it to vel (Ship_HandleShip does not overwrite the
+    // scalar for gravity-shield ships).
+    if (!gravity_shield) {
+      ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+    }
   }
 
   // --- Coast-through-reversal timer countdown. ---
@@ -802,6 +833,28 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     ship.reverse_speed_bias =
         std::max(0.0F, ship.reverse_speed_bias - elapsed_ticks);
   }
+}
+
+// Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020). Takes the
+// gravity-shield ship's scalar `speed` + `heading`, resets the velocity to the
+// heading*speed vector, then relaxes it back toward the previous frame's
+// velocity by a per-axis step of eff_thrust * 4.0 * frame_time (never
+// overshooting the prior velocity), yielding a smooth velocity rotation. The
+// turn-scale 4.0 mirrors _DAT_005754ac (provisional).
+void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
+                                             float eff_thrust,
+                                             float elapsed_ticks) {
+  const float prev_vel_x = ship.vel_x;
+  const float prev_vel_y = ship.vel_y;
+  // Reset the vector velocity to forward-heading * speed (Ship.speed is the
+  // gravity-shield scalar), via Math_AddPolarVelocity semantics.
+  const float new_vx = std::sin(ship.heading) * ship.speed;
+  const float new_vy = -std::cos(ship.heading) * ship.speed;
+  const float step = eff_thrust * 4.0F * elapsed_ticks;
+  // new + clamp(prev - new, -step, +step): move the heading snap back toward
+  // the previous velocity at most `step` per axis, never crossing it.
+  ship.vel_x = new_vx + std::clamp(prev_vel_x - new_vx, -step, step);
+  ship.vel_y = new_vy + std::clamp(prev_vel_y - new_vy, -step, step);
 }
 
 void NovaPlayer_UpdateFromInput(GameState &state,

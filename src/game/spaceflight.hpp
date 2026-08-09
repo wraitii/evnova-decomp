@@ -112,4 +112,27 @@ extern void NovaShip_IntegrateNpcMovement(GameState &state,
                                           const ShipClass &ship_class,
                                           float elapsed_ticks);
 
+// Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020), the momentum
+// / turn integrator for gravity-shield ships (ShipClassDef.flags_secondary bit
+// 0x40). These ships keep a scalar `speed` in Ship.speed; this converts it into
+// an actual velocity each frame by snapping the velocity toward the
+// forward-heading * speed vector, then letting it relax back toward the
+// previous frame's velocity at a rate of `eff_thrust * 4.0 * frame_time` per
+// axis (Math_AddPolarVelocity semantics + a per-axis clamp that never
+// overshoots the prior velocity). Produces a smooth velocity rotation rather
+// than an instant heading snap. Confidence: medium-high on the shape; the
+// turn-scale constant 4.0 (_DAT_005754ac) is provisional.
+extern void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
+                                                    float eff_thrust,
+                                                    float elapsed_ticks);
+
+// Whether an NPC ship is on the gravity-shield movement model: the ship-class
+// flags_secondary bit 0x40 gate (and not in ai_control_mode 0x0c). Ports the
+// NPC branch of Outfit_ShipHasGravityShieldOutfit (0x0046df70); the player's
+// owned-outfit branch is handled separately in the player path.
+[[nodiscard]] inline bool NovaShip_HasGravityShield(const Ship &ship,
+                                                    const ShipClass &cls) {
+  return (cls.flags_secondary & 0x40) != 0 && ship.ai_control_mode != 0x0c;
+}
+
 } // namespace game
