@@ -3,6 +3,7 @@
 #include "../log.hpp"
 #include "government.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <random>
 #include <vector>
@@ -426,12 +427,13 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
       continue;
     }
 
-    const System *sys = state.scenario.System(
-        static_cast<std::int16_t>(system_id + 0x80));
+    const System *sys =
+        state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
     if (sys == nullptr) {
       return -1;
     }
-    const int dude_slot = NovaDude_SelectRandomSystemDudeClassIndex(*sys, state.rng);
+    const int dude_slot =
+        NovaDude_SelectRandomSystemDudeClassIndex(*sys, state.rng);
     if (dude_slot < 0) {
       continue; // no selectable dude class for this system
     }
@@ -441,9 +443,8 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     if (dude == nullptr) {
       continue;
     }
-    const int type_slot =
-        NovaDude_SelectShipTypeIndex(*dude, /*ignore_ship_availability=*/false,
-                                     state.rng);
+    const int type_slot = NovaDude_SelectShipTypeIndex(
+        *dude, /*ignore_ship_availability=*/false, state.rng);
     if (type_slot < 0 || type_slot >= 16) {
       return -1; // ship type selection failed -> slot released
     }
@@ -457,8 +458,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     const ShipClass *cls = state.scenario.Ship(
         static_cast<std::int16_t>(ship.ship_class_id + 0x80));
     if (dude->ai_type < 1) {
-      ship.ai_behavior_code =
-          cls != nullptr ? cls->default_ai_behavior : 0;
+      ship.ai_behavior_code = cls != nullptr ? cls->default_ai_behavior : 0;
     } else {
       ship.ai_behavior_code = dude->ai_type;
     }
@@ -468,8 +468,9 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     // otherwise scatter in [-750,750). The clean-room System uses nav_defs[0]
     // as the first stellar the payload's SpaceObj table points at.
     const bool speed_locked = ship.ai_behavior_code == 3 &&
-                              !sys->nav_defs.empty() && sys->nav_defs[0] >= 0x80 &&
-                              cls != nullptr && cls->speed == kSpeedLockedSpeed;
+                              !sys->nav_defs.empty() &&
+                              sys->nav_defs[0] >= 0x80 && cls != nullptr &&
+                              cls->speed == kSpeedLockedSpeed;
     if (speed_locked) {
       if (const auto *st = state.scenario.Stellar(sys->nav_defs[0]); st) {
         ship.pos_x = static_cast<float>(st->pos_x);
@@ -539,7 +540,8 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
     NovaLog::Debug("dude spawn dispatch: mission-ship branch not implemented; "
                    "falling through to dude/fleet");
   } else if (RandomBelow(state, kDispatchRoll) == 0) {
-    (void)NovaEncounter_TrySpawnRandomFleet(state, system_id,
+    (void)NovaEncounter_TrySpawnRandomFleet(state,
+                                            system_id,
                                             /*ignore_ship_availability=*/true);
   } else {
     slot = NovaEncounter_SpawnRandomSystemDudeShip(state, system_id, 8);
@@ -626,17 +628,17 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
   // 1-in-500 encounter roll. The original draws NovaRandom_Range(500) and only
   // proceeds when the draw is exactly 1.
   if (RandomBelow(state, 500) == 1) {
-    const bool has_encounters = sys->encounter_fleet_count >= 1 &&
-                                sys->encounter_chance_percent > 0;
+    const bool has_encounters =
+        sys->encounter_fleet_count >= 1 && sys->encounter_chance_percent > 0;
     if (has_encounters) {
       // Second gate: a uniform draw in [0, encounter_chance_percent).
       if (RandomBelow(state, 100) < sys->encounter_chance_percent) {
-        const int fleet =
-            NovaEncounter_SelectFleetDefWeighted(*sys, state.scenario, state.rng);
+        const int fleet = NovaEncounter_SelectFleetDefWeighted(
+            *sys, state.scenario, state.rng);
         if (fleet >= 0) {
           // Original intercept: EncounterFleet_SpawnRandomEncounterFleet.
-          (void)NovaEncounter_SpawnFleetLeadShip(state, system_id,
-                                                 static_cast<std::int16_t>(fleet));
+          (void)NovaEncounter_SpawnFleetLeadShip(
+              state, system_id, static_cast<std::int16_t>(fleet));
           return;
         }
       }
@@ -647,6 +649,47 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
   if (NovaDude_SelectRandomSystemDudeClassIndex(*sys, state.rng) != -1) {
     (void)NovaDude_SpawnRandomDudeShipInSystem(state, system_id);
   }
+}
+
+// Ghidra 0x0041ad50 Ship_DeactivateVacantShipsAndTally (ship-slot cleanup
+// slice). See the header for the carve-out rationale. Scans every NPC slot and
+// clears the active flag / system / targeting / mission fields on ships
+// assigned to `system_id`, so the system's cohort is reset to an empty slate
+// before the caller repopulates toward avg_ships.
+void NovaShip_DeactivateSystemShips(GameState &state, std::int16_t system_id) {
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.current_system_id != system_id) {
+      continue;
+    }
+    ship.is_active = false;
+    ship.current_system_id = -1;
+    ship.ai_target_ship_slot = -1;
+    ship.primary_target_ship_slot = -1;
+    ship.ai_secondary_target_slot = -1;
+    ship.mission_fleet_slot = -1;
+    ship.mission_owner_slot = -1;
+    ship.mission_ship_slot = -1;
+    ship.target_stellar_object_id = -1;
+    ship.jump_destination_stellar_id = -1;
+  }
+}
+
+// Ghidra 0x004ab970 NovaRandom_Reseed. The original reseeds the global LCG
+// with the current millisecond tick count at session bootstrap; we reseed the
+// clean-room mt19937 with an unrelated entropy source (random_device + the
+// steady clock) so a fresh game no longer draws the default-42 deterministic
+// spawn sequence.
+void NovaGame_ReseedRandom(GameState &state) {
+  std::random_device rd;
+  const std::uint64_t clock_seed =
+      std::chrono::steady_clock::now().time_since_epoch().count();
+  std::seed_seq seq{rd(),
+                    static_cast<std::uint32_t>(clock_seed),
+                    static_cast<std::uint32_t>(clock_seed >> 32U)};
+  state.rng.seed(seq);
+  NovaLog::Debug("game random reseeded with entropy; ship/fleet spawns will "
+                 "vary across sessions");
 }
 
 } // namespace game

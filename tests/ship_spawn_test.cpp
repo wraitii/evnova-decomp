@@ -362,7 +362,8 @@ TEST_CASE("random system dude ship lays the dude def onto slot 1") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   const int slot =
-      NovaEncounter_SpawnRandomSystemDudeShip(state, /*system_id=*/0x80,
+      NovaEncounter_SpawnRandomSystemDudeShip(state,
+                                              /*system_id=*/0x80,
                                               /*reserved_slots=*/8);
   REQUIRE(slot == 1);
   const game::Ship &ship = state.ShipAt(1);
@@ -432,12 +433,54 @@ TEST_CASE("system maintenance populates Tichel toward avg_ships") {
   for (int i = 0; i < 4000; ++i) {
     NovaSystem_TickNpcSpawnMaintenance(state, 0x81);
   }
-  const int spawned =
-      ActiveShipsInSystem(state, 0x81);
+  const int spawned = ActiveShipsInSystem(state, 0x81);
   CHECK(spawned >= 1);
   // The maintenance should respect the avg_ships cap (allow a little slack
   // since the dude spawn loop may allocate slightly beyond on a lucky streak).
   CHECK(spawned <= sys->avg_ships + 2);
+}
+
+// Ship_DeactivateVacantShipsAndTally (0x0041ad50) clears the whole active NPC
+// cohort of one system (slots 1..), leaving ships of other systems and the
+// player (slot 0) untouched.
+TEST_CASE("deactivate system ships clears only the target system's NPCs") {
+  using game::NovaShip_DeactivateSystemShips;
+  const std::int16_t target = 3;
+  const std::int16_t other = 7;
+  GameState st;
+  // Two NPCs in the target system, one in another system (slot 0 stays the
+  // player and is never cleared).
+  (void)NovaShip_AllocateShipSlot(st, target, 0);
+  (void)NovaShip_AllocateShipSlot(st, target, 0);
+  (void)NovaShip_AllocateShipSlot(st, other, 0);
+
+  NovaShip_DeactivateSystemShips(st, target);
+
+  int active_target = 0, active_other = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const game::Ship &s = st.ShipAt(slot);
+    if (!s.is_active) {
+      continue;
+    }
+    if (s.current_system_id == target) {
+      ++active_target;
+    } else if (s.current_system_id == other) {
+      ++active_other;
+    }
+  }
+  // All target-system NPC slots were cleared; the other-system ship remains.
+  CHECK(active_target == 0);
+  CHECK(active_other == 1);
+}
+
+// NovaRandom_Reseed (0x004ab970) reseeds the RNG so a fresh game draws a
+// different spawn sequence than the default-42 pause.
+TEST_CASE("reseed random changes the spawn stream") {
+  using game::NovaGame_ReseedRandom;
+  GameState a;
+  GameState b;
+  NovaGame_ReseedRandom(b);
+  REQUIRE(a.rng != b.rng);
 }
 
 } // namespace

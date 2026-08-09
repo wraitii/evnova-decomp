@@ -172,4 +172,28 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
                                         std::int16_t system_id);
 
+// Mirrors the ship-slot cleanup of Ship_DeactivateVacantShipsAndTally
+// (Ghidra 0x0041ad50): deactivates every active NPC ship assigned to
+// `system_id` (slots 1..kMaxShips-1), clearing the active flag and returning
+// their current_system_id / targeting / mission slots to their -1 defaults.
+// The original staggers this across the fire-restricted / parked / mission
+// residency cases (keeping idle non-fire-restricted wanderers) and tallies
+// deactivated ships into mission-fleet/at-stellar quotas; those tallies and the
+// residency carve-outs depend on the mission / park / fire-restriction systems
+// that are not yet reconstructed, so the clean-room clears the whole active
+// system cohort. The caller (the normal-arrival dock path) immediately
+// replenishes toward System.avg_ships via NovaSystem_TickNpcSpawnMaintenance,
+// which is what yields the observed "new batch of ships" after docking.
+// TODO(decomp): fire-restriction / parked-stellar / mission-fleet carve-outs.
+void NovaShip_DeactivateSystemShips(GameState &state, std::int16_t system_id);
+
+// Mirrors NovaRandom_Reseed (Ghidra 0x004ab970 -> NovaRandom_Range(0)), which
+// mixes NovaTime_GetTicksMs() into the global LCG. The original calls this
+// once at game-session bootstrap (NovaGameSession_Run 0x00416100) so each
+// session's NovaRandom draws differ. The clean-room GameState keeps its own
+// mt19937 in `state.rng` (seeded 42 by default); this reseeds it with fresh
+// entropy so the new-game flow spawns a different,
+// time-varying set of ships/positions instead of the deterministic pause.
+void NovaGame_ReseedRandom(GameState &state);
+
 } // namespace game

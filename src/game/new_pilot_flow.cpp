@@ -6,6 +6,7 @@
 #include "game_state.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
+#include "ship_spawn.hpp"
 #include "travel.hpp"
 #include "weapon.hpp"
 
@@ -450,6 +451,13 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   // Game_ResetNewGameReputation/State, zero outfit/weapon tables,
   // PilotData_InitializePlayerState, clear system discovery, re-seed the
   // starting inventory, discover surrounding systems, load scenario tables.
+  // Ghidra reseeds the global LCG once at session bootstrap
+  // (NovaRandom_Reseed 0x004ab970 from NovaGameSession_Run) so each game's
+  // NovaRandom draws differ; the clean-room GameState keeps its own mt19937
+  // (default-seeded 42), so reseed it with fresh entropy here or every new
+  // pilot would spawn the same deterministic ships/positions. This runs before
+  // the scenario load + opener-string rolls below (which draw from the rng).
+  NovaGame_ReseedRandom(state);
   // Ghidra loads the scenario data tables (ships/outfits/weapons/stellars/
   // systems) as part of the fresh world reset; the ship reset and inventory
   // seed below read class stats, so load the tables first.

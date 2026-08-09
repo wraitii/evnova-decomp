@@ -9,6 +9,7 @@
 #include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
+#include "ship_spawn.hpp"
 #include "targeting.hpp"
 #include "weapon.hpp"
 
@@ -90,6 +91,17 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   state.player.armor_points = effective.max_armor_points;
   state.cached_stats = effective;
   state.stat_cache_valid = true;
+
+  // Stellar_ProcessTravelAndLanding (0x00457580) runs Ship_DeactivateVacant
+  // ShipsAndTally('\0') during the normal arrival, then System_TickNpcSpawn
+  // Maintenance + Mission_SpawnSystemMisnShips to reseed the system's NPC
+  // population. So a landing (and the subsequent launch) leaves the system with
+  // a fresh batch of ships rather than the fleet that had accumulated before
+  // docking. The clean-room deactivates the whole active system cohort (the
+  // original spare idle non-fire-restricted wanderers / mission / parked
+  // ships), then replenishes toward avg_ships; see ship_spawn.hpp.
+  NovaShip_DeactivateSystemShips(state, state.player.current_system_id);
+  NovaSystem_TickNpcSpawnMaintenance(state, state.player.current_system_id);
 
   ctx.stellar_id = stellar_id;
   ctx.landed = true;
