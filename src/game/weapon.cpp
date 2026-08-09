@@ -415,6 +415,31 @@ std::string NovaWeapon_BankDisplayName(const GameState &state,
   return w->name.empty() ? "?" : w->name;
 }
 
+std::int16_t NovaWeapon_BankAmmoCount(const GameState &state,
+                                      std::int16_t weapon_bank) {
+  if (weapon_bank < 0 || weapon_bank >= 0x100) {
+    return -1;
+  }
+  const Weapon *w = WeaponAt(state, weapon_bank);
+  if (!w) {
+    return -1;
+  }
+  // Energy/unlimited weapons show no count (NovaUi_DrawActiveWeaponAmmoPanel's
+  // early cases).
+  if (w->ammo_type == -1 || (w->flags_secondary & 0x40U) != 0U) {
+    return -1;
+  }
+  // A special (mode 99) or out-of-range ammo_type weapon reads its own bank's
+  // secondary counter; a normal weapon reads the ammo counter of the weapon
+  // bank whose id equals its ammo_type.
+  const std::int16_t source_bank =
+      (w->ammo_type < 0 || w->ammo_type > 0xff || w->weapon_mode_code == 99)
+          ? weapon_bank
+          : w->ammo_type;
+  return std::min<std::int16_t>(
+      BankSecondary(state, source_bank), 9999);
+}
+
 void NovaWeapon_PreloadFireSound(GameState &state,
                                  std::int16_t fire_sound_slot) {
   if (fire_sound_slot < 0 || fire_sound_slot >= 36) {

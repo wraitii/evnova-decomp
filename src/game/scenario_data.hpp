@@ -165,6 +165,18 @@ struct ShipClass {
   // 0x80 timing, etc.). Consulted by the AI travel/arrive logic.
   std::uint16_t sprite_behavior_flags = 0;
 
+  // Ghidra ShipClassDef +0xA0C (clone_source_ship_class). The zero-based ship
+  // class that owns the base sprites this class shares: the first class whose
+  // sh\x8an BaseImageID matches this class's (derived by ShipClass_LoadShip-
+  // ClassVisualAndLaunchData 0x004b4ee0's clone branch, stored at load time by
+  // NovaData_LoadAllShipClassVisualAndLaunchData 0x004aeda0). Classes that
+  // clone an earlier class reuse its target-info PICT (Bible: "give the first
+  // of any series of identical-looking ship types a target pict ... and the
+  // engine will use it for all higher-numbered ship types with the same base
+  // sprites"); the portrait resource is 3000 + this id. -1 when not derived
+  // (the decoder falls back to the class's own id).
+  std::int16_t clone_source_ship_class = -1;
+
   // DefaultItems (outfit ids, zero-based after 0x80) + counts, up to 8. These
   // seed the player's starting inventory when bought/captured.
   std::array<std::int16_t, 8> default_outfit_ids{

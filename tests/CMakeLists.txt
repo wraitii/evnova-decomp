@@ -1,5 +1,6 @@
 add_executable(evnova_tests
     asteroid_test.cpp
+    cicn_test.cpp
     gameplay_interface_test.cpp
     government_test.cpp
     hud_overlay_test.cpp

@@ -53,12 +53,23 @@ public:
   // Ghidra NovaUi_UpdateShipTargetReticle (0x0042ede0): draws the 4-corner
   // bracket reticle around the player's primary target ship (state.player
   // .primary_target_ship_slot). Hidden when no target. The bracket offset is
-  // half the target ship's sprite span plus the decaying reticle pulse
-  // (GameState.ship_reticle_pulse; the loop decays it by frame time * 0.06);
-  // the frame-state encoding (fire-restricted 0xc / targeting-the-player 0x8 /
-  // distress-eligible 0x0 / other 0x4) is rendered as a provisional color
-  // mapping until the real bracket sprite frames are ported (TODO(decomp)).
+  // ceil(max(target frame height, frame width)/2) plus the decaying reticle
+  // pulse (GameState.ship_reticle_pulse; the loop decays it by frame time
+  // * 0.06), with the four corner-bracket sprites (cicn 10008-10023) placed at
+  // the original's asymmetric positions (TL/BL get the extra 16px left margin,
+  // the top row an extra 16px above); the frame index encodes target state
+  // (fire-restricted 0xc / targeting-the-player 0x8 / distress-eligible 0x0 /
+  // other 0x4). Falls back to the SDL-line diagnostic brackets when the cicn
+  // set cannot be loaded.
   void DrawShipTargetReticle(SdlPlatform &platform, const GameState &state);
+
+  // Ghidra NovaUi_UpdateTravelTargetReticle (0x0042eac0): draws the 4-corner
+  // bracket reticle around the currently selected travel destination stellar
+  // (state.travel.selected_stellar_id, shown only while a travel target is
+  // engaged), using the 8-frame cicn set 10000-10007. Frame base is 0 or 4 by
+  // the destination's orientation-engaged flag; sized by the stellar's sprite
+  // span. Falls back to nothing (no spin art) when the cicn set is unavailable.
+  void DrawTravelTargetReticle(SdlPlatform &platform, const GameState &state);
 
   // Clean-room click-to-target ship picking: returns the slot of the active
   // NPC ship in the player's system whose sprite bounding span contains the
@@ -147,6 +158,20 @@ private:
   // field 700 are all just different spin resource ids into the one store).
   // Ghidra: g_weapon_sprite_set_table + the stellar/spin sprite-set tables.
   SpriteStore sprite_store_;
+
+  // The ship-target reticle's 16-frame corner-bracket set (cicn 10008-10023)
+  // and the travel reticle's 8-frame set (cicn 10000-10007), loaded on first
+  // use. A failed load stays empty so a missing asset is not retried every
+  // frame (the reticle drawers fall back to the debug bracket art).
+  std::unique_ptr<SpriteAsset> ship_reticle_set_;
+  std::unique_ptr<SpriteAsset> travel_reticle_set_;
+  bool ship_reticle_tried_ = false;
+  bool travel_reticle_tried_ = false;
+
+  // Loads (and caches) the ship-target reticle set {cicn 10008..10023}.
+  [[nodiscard]] const SpriteAsset *ShipReticleSet(SdlPlatform &platform);
+  // Loads (and caches) the travel-target reticle set {cicn 10000..10007}.
+  [[nodiscard]] const SpriteAsset *TravelReticleSet(SdlPlatform &platform);
 
   // The ambient star-field artwork: sp\x9an spin descriptor resource 700 is a
   // 4x4 grid of 5x5px star tiles (16 distinct star shapes). Kept as an asset in

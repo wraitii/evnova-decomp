@@ -771,6 +771,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawShots(platform, state);         // projectiles above stellars
   DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
   DrawShipTargetReticle(platform, state); // target brackets over the ships
+  DrawTravelTargetReticle(platform, state); // brackets over the travel target
 
   // Player ship at the play-area centre, frame selected by heading. Because
   // the camera is centred on the player, drawing at the ship's own world
@@ -834,17 +835,48 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
 }
 
 // Ghidra NovaUi_UpdateShipTargetReticle (0x0042ede0). The original positions
-// four corner-bracket sprites around the player's primary target ship: the
-// bracket offset is (max(frame half span, shot half span) + 1) / 2 rounded up
-// plus the decaying reticle pulse, with an extra 16px corner margin, and the
-// per-bracket sprite frame encodes the target state (base + corner index):
+// four corner-bracket sprites around the player's primary target ship. Each
+// bracket is a cloned sprite from the 16-frame cicn set 10008-10023; the frame
+// index is `state_base + corner` where state_base encodes the target's
+// disposition:
 //   0xc fire-restricted, 0x8 targeting the player (or a player-targeting
 //   chain), 0x0 distress-eligible, 0x4 other.
-// The clean-room draw renders L-shaped corner brackets with SDL lines instead
-// of the real sprite frames (TODO(decomp): port the bracket spin/PICT art) and
-// maps the state base to a diagnostic colour (0xc grey, 0x8 green, 0x0 yellow,
-// 0x4 white). The pulse value (GameState.ship_reticle_pulse) is decayed by the
-// spaceflight loop (60.0 units/sec, DAT_005753c8) before drawing.
+// The bracket offset is (max(target frame height, target frame width) + 1) / 2
+// rounded up plus the decaying reticle pulse; the four sprites are then placed
+// at asymmetric screen positions around the target (the 16px corner margin
+// falls between the corner art and the ship on the left/top edges only):
+//   TL (cx-off-16, cy-off-16)  TR (cx+off,   cy-off-16)
+//   BL (cx-off-16, cy+off)     BR (cx+off,   cy+off)
+// where off = ceil(max(h,w)/2) + round(pulse). Each sprite's anchor is its
+// frame centre, so a bracket whose art sits in the frame's top-left corner is
+// rendered centred at that spot.
+// When the cicn set cannot be loaded we fall back to the previous diagnostic
+// SDL line brackets (coloured by state) rather than hiding targeting entirely.
+const SpriteAsset *SpaceflightView::ShipReticleSet(SdlPlatform &platform) {
+  if (!ship_reticle_tried_) {
+    ship_reticle_tried_ = true;
+    ship_reticle_set_ =
+        SpriteAsset::LoadCicnSet(platform.renderer(), 10008, 16);
+    if (!ship_reticle_set_) {
+      NovaLog::Warn("ship reticle: cicn 10008-10023 unavailable; using debug "
+                    "brackets");
+    }
+  }
+  return ship_reticle_set_.get();
+}
+
+const SpriteAsset *SpaceflightView::TravelReticleSet(SdlPlatform &platform) {
+  if (!travel_reticle_tried_) {
+    travel_reticle_tried_ = true;
+    travel_reticle_set_ =
+        SpriteAsset::LoadCicnSet(platform.renderer(), 10000, 8);
+    if (!travel_reticle_set_) {
+      NovaLog::Warn("travel reticle: cicn 10000-10007 unavailable");
+    }
+  }
+  return travel_reticle_set_.get();
+}
+
 void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
                                             const GameState &state) {
   const std::int16_t slot = state.player.primary_target_ship_slot;
@@ -890,6 +922,44 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
       frame_base = 8;
     }
   }
+
+  // Bracket offset: ceil(max(target frame height, width)/2) + the decaying
+  // pulse. Sprite_GetFrameVerticalHalfSpan / Sprite_GetShotHalfSpan return the
+  // target's full frame height/width, so `full` is max(h, w), then the game
+  // halves it rounding up. The fallback uses the sheet's native tile size.
+  float full = 32.0F; // default Sprite_Get*HalfSpan for a missing sprite
+  if (const NpcShipSprite *sprite = ShipClassSprite(
+          platform, static_cast<std::int16_t>(target.ship_class_id + 0x80));
+      sprite != nullptr && !sprite->base.frames.empty()) {
+    full = std::max(static_cast<float>(sprite->base.tile_width),
+                    static_cast<float>(sprite->base.tile_height));
+  }
+  const float off = std::ceil(full * 0.5F) + pulse;
+
+  // The real corner brackets, when the cicn set is available.
+  if (const SpriteAsset *ret = ShipReticleSet(platform)) {
+    // Corner indices 0..3 map to TL, TR, BR, BL (matching the order in which
+    // the original positions its four bracket sprites).
+    const float pos[4][2] = {
+        {cx - off - 16.0F, cy - off - 16.0F},
+        {cx + off, cy - off - 16.0F},
+        {cx + off, cy + off},
+        {cx - off - 16.0F, cy + off}};
+    for (int corner = 0; corner < 4; ++corner) {
+      DrawSprite(platform.renderer(),
+                 *ret,
+                 frame_base + corner,
+                 pos[corner][0],
+                 pos[corner][1],
+                 state.player.pos_x,
+                 state.player.pos_y,
+                 vp.w,
+                 vp.h);
+    }
+    return;
+  }
+
+  // Diagnostic fallback: L-shaped corner brackets coloured by state.
   const SDL_Color color = [&]() -> SDL_Color {
     switch (frame_base) {
     case 0xc:
@@ -902,26 +972,10 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
       return SDL_Color{255, 255, 255, SDL_ALPHA_OPAQUE}; // other
     }
   }();
-
-  // Bracket offset: half the ship's bounding span plus the pulse, plus the
-  // original's fixed 16px corner margin. The original takes max(frame vertical
-  // half span, shot half span) of the target's sprite; here the loaded sheet's
-  // half-height stands in (the shot half span is a per-sprite constant we do
-  // not decode yet -- TODO(decomp)).
-  float half_span = 20.0F; // fallback when the class sprite is unavailable
-  if (const NpcShipSprite *sprite = ShipClassSprite(
-          platform, static_cast<std::int16_t>(target.ship_class_id + 0x80));
-      sprite != nullptr && !sprite->base.frames.empty()) {
-    half_span =
-        std::max(sprite->base.tile_width, sprite->base.tile_height) * 0.5F;
-  }
-  const float size =
-      std::floor((half_span + 1.0F) * 0.5F) + pulse + 16.0F;
-
-  const float left = cx - size;
-  const float right = cx + size;
-  const float top = cy - size;
-  const float bottom = cy + size;
+  const float left = cx - off;
+  const float right = cx + off;
+  const float top = cy - off;
+  const float bottom = cy + off;
   constexpr float kArm = 14.0F; // bracket arm length (provisional)
   SDL_SetRenderDrawColor(
       platform.renderer(), color.r, color.g, color.b, color.a);
@@ -931,10 +985,76 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     SDL_RenderFillRect(platform.renderer(), &h);
     SDL_RenderFillRect(platform.renderer(), &v);
   };
-  corner(left, top, kArm, kArm);        // top-left  \\/
-  corner(right - kArm, top, kArm, kArm); // top-right
+  corner(left, top, kArm, kArm);          // top-left
+  corner(right - kArm, top, kArm, kArm);  // top-right
   corner(left, bottom - kArm, kArm, kArm); // bottom-left
   corner(right - kArm, bottom - kArm, kArm, kArm); // bottom-right
+}
+
+// Ghidra NovaUi_UpdateTravelTargetReticle (0x0042eac0). While a travel
+// destination stellar is selected (state.travel.selected_stellar_id, the
+// original's ai_secondary_target_slot >= 0) the four corner brackets are drawn
+// around that stellar at its screen position, using the 8-frame cicn set
+// 10000-10007 (frame = base + corner; base is 0 or 4 by the destination's
+// orientation flag -- approximated as 0 here, TODO(decomp)). The offset is
+// ceil(max(frame height, frame width)/2) + the decaying travel pulse, sized by
+// the destination stellar's sprite set; the corners use the same asymmetric
+// placement as the ship reticle. There is no SDL-line fallback: a missing cicn
+// set just hides the reticle (the stellar remains highlighted by selection).
+void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
+                                              const GameState &state) {
+  const std::int16_t stellar_id = state.travel.selected_stellar_id;
+  if (stellar_id < 0x80) {
+    return; // no destination selected
+  }
+  const auto *st = state.scenario.Stellar(stellar_id);
+  if (!st || !st->is_available ||
+      st->system_id != state.player.current_system_id) {
+    return;
+  }
+  const SpriteAsset *ret = TravelReticleSet(platform);
+  if (!ret) {
+    return;
+  }
+  const Viewport vp = CurrentViewport(platform);
+  const float pulse = std::max(0.0F, state.travel_reticle_pulse);
+  const float cx =
+      (static_cast<float>(st->pos_x) - state.player.pos_x) +
+      static_cast<float>(vp.w) / 2.0F;
+  const float cy =
+      (static_cast<float>(st->pos_y) - state.player.pos_y) +
+      static_cast<float>(vp.h) / 2.0F;
+
+  // Bracket offset sized by the destination stellar's spin sprite set.
+  float full = 32.0F; // default Sprite_Get*HalfSpan fallback (0x20)
+  if (const auto *spin =
+          sprite_store_.Spin(platform.renderer(),
+                             static_cast<std::uint16_t>(st->link_a_id + 1000));
+      spin && !spin->frames.empty()) {
+    full = std::max(static_cast<float>(spin->tile_width),
+                    static_cast<float>(spin->tile_height));
+  }
+  const float off = std::ceil(full * 0.5F) + pulse;
+
+  // Frame base 0 (the original reads the destination's orientation flag for
+  // this; ours is not yet reconstructed, so 0).
+  const int frame_base = 0;
+  const float pos[4][2] = {
+      {cx - off - 16.0F, cy - off - 16.0F},
+      {cx + off, cy - off - 16.0F},
+      {cx + off, cy + off},
+      {cx - off - 16.0F, cy + off}};
+  for (int corner = 0; corner < 4; ++corner) {
+    DrawSprite(platform.renderer(),
+               *ret,
+               frame_base + corner,
+               pos[corner][0],
+               pos[corner][1],
+               state.player.pos_x,
+               state.player.pos_y,
+               vp.w,
+               vp.h);
+  }
 }
 
 std::int16_t SpaceflightView::PickShipAt(SdlPlatform &platform,

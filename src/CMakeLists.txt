@@ -13,6 +13,7 @@ find_package(SDL3_ttf CONFIG REQUIRED)
 
 add_library(evnova_runtime
     brgr_archive.cpp
+    cicn_image.cpp
     game/gameplay_interface.cpp
     game/government.cpp
     game/hud_renderer.cpp

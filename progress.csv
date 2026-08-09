@@ -164,8 +164,8 @@ address,name,impl_file,reimpl_pct,comment
 0x0042D890,Stellar_TickStellarDefenseBatteries,,0%,
 0x0042E160,Shot_UpdateImpactEffectSprites,,0%,
 0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,72%,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); each star renders a random frame of the 16-frame 5px sheet (sp.x9an 700) at native 1:1 size; murk round(murk*0.9) value is a blend-mode sentinel (tinted/blobed), not a pixel size"
-0x0042EAC0,NovaUi_UpdateTravelTargetReticle,,0%,
-0x0042EDE0,NovaUi_UpdateShipTargetReticle,src/game/spaceflight_view.cpp,60%,SpaceflightView::DrawShipTargetReticle: 4-corner bracket geometry (half-span + decaying 60/sec pulse + 16px margin) and the frame-state encoding (fire-restricted 0xc / targeting-player 0x8 / distress 0x0 / other 0x4) drawn as SDL corner brackets with a provisional color mapping; the real bracket sprite frames and the shot-half-span term are TODO(decomp).
+0x0042EAC0,NovaUi_UpdateTravelTargetReticle,src/game/spaceflight_view.cpp,70%,SpaceflightView::DrawTravelTargetReticle: 4-corner brackets from cicn 10000-10007 around the selected travel stellar (travel.selected_stellar_id), offset ceil(max(stellar sprite h,w)/2) + decaying pulse, asymmetric placement; pulse armed on selection change and decayed 60/sec in the spaceflight loop. Frame base reads the destination orientation flag which is not yet reconstructed (TODO(decomp) always 0).
+0x0042EDE0,NovaUi_UpdateShipTargetReticle,src/game/spaceflight_view.cpp,88%,SpaceflightView::DrawShipTargetReticle: 4-corner bracket sprites from cicn 10008-10023 (frame = state base 0x0/0x4/0x8/0xc + corner), offset ceil(max(target sprite h,w)/2) + decaying 60/sec pulse, asymmetric 16px-margin placement; state encoding (fire-restricted/targeting-player/distress/other) faithful; debug SDL bracket fallback retained only when the cicn set is missing. Remaining TODO(decomp): the shot-half-span term is approximated by the sheet's frame dims.
 0x0042F1B0,Frame_UpdateScreenFlashTimers,,0%,
 0x0042F270,Shot_UpdateBeamHitQueue,,0%,
 0x004311F0,Frame_UpdateCombatChatter,,0%,
@@ -294,15 +294,15 @@ address,name,impl_file,reimpl_pct,comment
 0x0045D287,NovaUi_BlitGameplayClipRect,,0%,
 0x0045D320,NovaUi_RefreshGameplayPanels,,0%,
 0x0045D600,NovaUi_DrawStellarRadarPanel,,0%,
-0x0045E400,NovaUi_DrawTravelStatusPanel,,0%,
+0x0045E400,NovaUi_DrawTravelStatusPanel,src/game/hud_renderer.cpp,55%,HUD travel panel: engaged-jump state + destination system name while travel.engaging, else the selected destination stellar name (or idle/NO TARGET fallback). Faithful enough to the idle/transfer text split (STR# 0x7d2/0x156/0x157); the exact transfer-mode enum and jump-complete label are approximated.
 0x0045E9C0,NovaUi_DrawPlayerShieldArmorPanels,,0%,
 0x0045EA66,NovaUi_DrawPlayerShieldBar,src/game/hud_renderer.cpp,60%,aspect-driven fill geometry (HudBar_FillRect + DrawLifeBar): tall slots fill top-down, wide fill right-to-left, colour from gov panel slot; still missing cockpit-trough pre-blit / dirty-rect restore
 0x0045EBE8,NovaUi_DrawPlayerArmorBar,src/game/hud_renderer.cpp,60%,aspect-driven fill geometry shared with shield bar (HudBar_FillRect + DrawLifeBar); still missing cockpit-trough pre-blit / dirty-rect restore
 0x0045EFE0,NovaUi_DrawPlayerFuelPanel,src/game/hud_renderer.cpp,50%,fuel panel shim: validates fuel panel rect and routes to the shared life-bar fill (DrawLifeBar on layout_.fuel_panel); reserve segment not yet drawn
 0x0045F086,NovaUi_DrawPlayerFuelLevelBar,src/game/hud_renderer.cpp,50%,usable fuel fill drawn via HudBar_FillRect; reserve-bar segment + firing/travel suppression (Ship_IsShipFireRestricted) not yet implemented
-0x0045F530,NovaUi_DrawTargetStatusPanel,src/game/hud_renderer.cpp,20%,HUD target panel text subset: ship class name + government + shield % when a ship is the primary target (else the stellar travel target). Portrait (PICT 3000+), exact rect layout, AI/debug overlay and the shield/armor status-line branches are TODO(decomp).
-0x00460EC0,NovaUi_DrawActiveWeaponAmmoPanel,,0%,
-0x004612C0,NovaUi_DrawCargoMissionStatusPanel,,0%,
+0x0045F530,NovaUi_DrawTargetStatusPanel,src/game/hud_renderer.cpp,50%,HUD target panel: ship class display name + government + shield/armor status line honouring class capability flags (0x100 armor % / 0x200 suppress status), plus the PICT 3000+ class portrait resolved through clone_source_ship_class (so duplicate classes reuse the source class's portrait, Bible "3000 + shipID - 128"). Still TODO(decomp): per-class Subtitle field, the AI/debug overlay, and the exact multi-line rect layout.
+0x00460EC0,NovaUi_DrawActiveWeaponAmmoPanel,src/game/hud_renderer.cpp,55%,HUD weapon/ammo panel: active bank name + ammo count (or bare name for energy/unlimited weapons, ammo_type==-1 or flags_secondary&0x40), idle label when no weapon. Mirrors the ammo source (own bank for mode 99 / out-of-range ammo_type, else the ammo_type bank). TODO(decomp): no-weapon vs missing-bank label exact STR# entry.
+0x004612C0,NovaUi_DrawCargoMissionStatusPanel,src/game/hud_renderer.cpp,45%,HUD cargo/mission panel: credits + used cargo / free fleet cargo space (Outfit_ComputeRemainingCargoSpace). The 6 cargo-bin list labels and the escort/command summary line are TODO(decomp) (bins are unused in this build).
 0x00461830,Math_InitTrigLookupTables,,0%,
 0x00461930,Math_LookupAngleSine,,0%,
 0x00461970,Math_LookupAngleCosine,,0%,
@@ -877,7 +877,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004ACAC0,FUN_004acac0,,0%,
 0x004AD7C0,Settings_InitTimingPresets,,0%,
 0x004AD960,FUN_004ad960,,0%,
-0x004AEDA0,FUN_004aeda0,,0%,
+0x004AEDA0,NovaData_LoadAllShipClassVisualAndLaunchData,src/game/scenario_data.cpp,10%,"Ship-class clone-source derivation only: ShipClass.clone_source_ship_class computed at scenario load from the first class sharing a sh.x8an BaseImageID (the 0x004b4ee0 clone branch), verified against the shipped data (Fed Viper 0xe0 clones 0x90, etc.). The six per-class sprite-handle tables, sh.x8an decode and PICT 5000+ fallback loading are still TODO(decomp)."
 0x004AF020,FUN_004af020,,0%,
 0x004B0740,FUN_004b0740,,0%,
 0x004B0A30,FUN_004b0a30,,0%,

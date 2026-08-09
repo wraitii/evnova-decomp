@@ -5,6 +5,7 @@
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
 #include "nova_font.hpp"
+#include "outfit.hpp"
 #include "targeting.hpp"
 #include "weapon.hpp"
 
@@ -132,6 +133,48 @@ bool HudRenderer::Install(SdlPlatform &platform, const GameState &state) {
   return true;
 }
 
+const HudRenderer::PortraitEntry *
+HudRenderer::TargetPortrait(SdlPlatform &platform,
+                            const ScenarioData &scenario,
+                            std::int16_t ship_class_id) {
+  const auto cached = portraits_.find(ship_class_id);
+  if (cached != portraits_.end()) {
+    // Null entry = already-tried-and-failed: never return it to a caller that
+    // dereferences the texture.
+    return cached->second->texture ? cached->second.get() : nullptr;
+  }
+  // Target-info pict id = 3000 + clone-source class (Bible: "PICT resource ID
+  // 3000 + shipID - 128"). The engine reuses one pict for every class that
+  // shares the source's base sprites (ShipClassDef.clone_source_ship_class,
+  // derived from the sh\x8an BaseImageID at load time), so a Fed Viper
+  // duplicate resolves to the original's 3016 rather than a missing 3096.
+  std::int16_t pict_class = ship_class_id;
+  if (const ShipClass *cls = scenario.Ship(ship_class_id + 0x80);
+      cls != nullptr && cls->clone_source_ship_class >= 0) {
+    pict_class = cls->clone_source_ship_class;
+  }
+  auto entry = std::make_unique<PortraitEntry>();
+  if (const auto pict_data = NovaResource_LoadPictData(
+          static_cast<std::uint16_t>(3000 + pict_class))) {
+    if (const auto pict = Resource_LoadPictAsImage(*pict_data)) {
+      auto tex = SdlTexture::Create(
+          platform.renderer(), pict->width, pict->height, pict->rgba_pixels);
+      if (tex) {
+        entry->texture = std::move(tex);
+        entry->width = pict->width;
+        entry->height = pict->height;
+      } else {
+        NovaLog::Warn("target panel: portrait PICT {:#x} upload failed",
+                      3000 + pict_class);
+      }
+    }
+  }
+  const auto [it, inserted] =
+      portraits_.emplace(ship_class_id, std::move(entry));
+  (void)inserted;
+  return it->second->texture ? it->second.get() : nullptr;
+}
+
 [[nodiscard]] SDL_FRect ProjectPanel(const HudPanelRect &panel) {
   return SDL_FRect{static_cast<float>(panel.left),
                    static_cast<float>(panel.top),
@@ -252,16 +295,27 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   // Readout panels: value colour (slot 0), body font.
   const SDL_Color value_color = ColorOf(layout_.color_word[0]);
 
-  // Travel-status panel: destination system name when a travel/land target is
-  // selected, else the idle fallback.
+  // Travel-status panel: shows the engaged-jump state while the hyperspace
+  // sequence runs, else the selected destination stellar's name (or the idle
+  // fallback). Mirrors NovaUi_DrawTravelStatusPanel (0x0045e400): a transfer
+  // (mode 2) title + the destination name, the idle message when no target.
   {
     std::string travel;
-    const std::int16_t sid = state.travel.selected_stellar_id;
-    const auto *st = state.scenario.Stellar(sid);
-    if (st && !st->name.empty()) {
-      travel = st->name;
+    if (state.travel.engaging) {
+      travel = "JUMPING"; // transfer title (STR# 0x7d2/0x157)
+      const auto *dst = state.scenario.System(
+          static_cast<std::int16_t>(state.travel.destination_system_id));
+      if (dst && !dst->name.empty()) {
+        travel += " > " + dst->name;
+      }
     } else {
-      travel = "NO TARGET";
+      const std::int16_t sid = state.travel.selected_stellar_id;
+      const auto *st = state.scenario.Stellar(sid);
+      if (st && !st->name.empty()) {
+        travel = st->name;
+      } else {
+        travel = "NO TARGET"; // idle message (STR# 0x7d2/0x156)
+      }
     }
     DrawReadout(platform,
                 *font_cache_,
@@ -272,46 +326,93 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
                 4.0F);
   }
 
-  // Weapon/ammo panel: current primary bank display name.
+  // Weapon/ammo panel: current active weapon bank name, with an ammo count for
+  // ammo-based weapons (mirrors NovaUi_DrawActiveWeaponAmmoPanel 0x00460ec0).
+  // Energy/unlimited weapons (ammo_type == -1 or flags_secondary & 0x40) show
+  // the bank name without a count; a missing/invalid bank shows the idle
+  // label instead of a count.
   {
-    const std::string wpn = NovaWeapon_BankDisplayName(state, 0);
+    std::string text;
+    const std::int16_t bank = state.player.active_weapon_bank_slot;
+    const bool empty = bank < 0 || bank >= 0x100 ||
+                       NovaWeapon_BankDisplayName(state, bank) == "?";
+    if (empty) {
+      text = "NO WEAPON"; // STR# 0x7d2/0x15e idle label
+    } else {
+      text = NovaWeapon_BankDisplayName(state, bank);
+      const std::int16_t ammo = NovaWeapon_BankAmmoCount(state, bank);
+      if (ammo >= 0) {
+        text += " - " + std::to_string(ammo);
+      }
+    }
     DrawReadout(platform,
                 *font_cache_,
                 static_cast<float>(layout_.font_size),
                 anchor_panel(layout_.weapon_ammo_panel),
-                wpn,
+                text,
                 value_color,
                 4.0F);
   }
 
-  // Target panel: a manually selected stellar persists while the player flies
-  // toward it. When a ship is the primary target (backquote cycle / 'o' /
-  // mouse click) the panel reads the ship's class name + government + shield
-  // percentage instead, mirroring NovaUi_DrawTargetStatusPanel (0x0045f530)'s
-  // top name line and bottom status line (portrait + exact layout deferred:
-  // TODO(decomp) PICT 3000+ class portraits).
+  // Target panel: when a ship is the primary target (backquote cycle / 'o' /
+  // mouse click) shows the ship's class name + government + a shield/armor
+  // status line, mirroring NovaUi_DrawTargetStatusPanel (0x0045f530). Class
+  // capability flag 0x0200 suppresses the status (gov name only); 0x0100 shows
+  // armor percent instead of shield. A manually selected travel stellar
+  // persists while flying toward it. (The per-class Subtitle is deferred:
+  // TODO(decomp) -- needs the shp Subtitle field.)
   {
     std::string tgt;
     const std::int16_t ship_slot = state.player.primary_target_ship_slot;
     if (ship_slot > 0 &&
         state.SlotInRange(static_cast<std::size_t>(ship_slot))) {
       const Ship &target = state.ShipAt(static_cast<std::size_t>(ship_slot));
-      const ShipClass *target_cls =
-          state.scenario.Ship(static_cast<std::int16_t>(target.ship_class_id +
-                                                        0x80));
+      const ShipClass *target_cls = state.scenario.Ship(
+          static_cast<std::int16_t>(target.ship_class_id + 0x80));
       std::string name = target_cls ? target_cls->display_name : "?";
       const Government *govt = state.scenario.Government(
           static_cast<std::int16_t>(target.faction_or_government_id + 0x80));
-      const float tgt_shield_max =
-          std::max(1.0F,
-                   static_cast<float>(target_cls ? target_cls->base_shield : 1));
-      const int shield_pct = static_cast<int>(std::clamp(
-          target.shield_points / tgt_shield_max * 100.0F, 0.0F, 999.0F));
+      // Portrait: blit the class PICT into the panel's left area at native
+      // size (clipped to the panel). The original's portrait box is centred
+      // toward the panel's left; we place it at the top-left and let the text
+      // read out to its right. TargetPortrait resolves the PICT through the
+      // class's clone source and never returns a textureless entry.
+      if (const auto *portrait =
+              TargetPortrait(platform, state.scenario, target.ship_class_id)) {
+        const HudPanelRect pp = anchor_panel(layout_.target_status_panel);
+        SDL_FRect box{static_cast<float>(pp.left),
+                      static_cast<float>(pp.top),
+                      static_cast<float>(portrait->width),
+                      static_cast<float>(portrait->height)};
+        if (box.w > static_cast<float>(pp.width())) {
+          box.w = static_cast<float>(pp.width());
+        }
+        if (box.h > static_cast<float>(pp.height())) {
+          box.h = static_cast<float>(pp.height());
+        }
+        SDL_RenderTexture(
+            platform.renderer(), portrait->texture->get(), nullptr, &box);
+      }
       tgt = name;
       if (govt != nullptr) {
         tgt += " [" + govt->name + "]";
       }
-      tgt += " SHD " + std::to_string(shield_pct) + "%";
+      // Status: suppressed by 0x0200; otherwise armour % (0x0100) or shield %.
+      const bool no_status = target_cls != nullptr &&
+                             (target_cls->capability_flags & 0x0200U) != 0U;
+      if (!no_status && target_cls != nullptr) {
+        const bool show_armor = (target_cls->capability_flags & 0x0100U) != 0U;
+        const float maximum =
+            std::max(1.0F,
+                     static_cast<float>(show_armor ? target_cls->base_armor
+                                                   : target_cls->base_shield));
+        const float current =
+            show_armor ? target.armor_points : target.shield_points;
+        const int pct = static_cast<int>(
+            std::clamp(current / maximum * 100.0F, 0.0F, 999.0F));
+        tgt += std::string(show_armor ? " ARM " : " SHD ") +
+               std::to_string(pct) + "%";
+      }
     } else {
       const std::int16_t sid = state.travel.selected_stellar_id;
       const auto *st = state.scenario.Stellar(sid);
@@ -333,15 +434,23 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
                 4.0F);
   }
 
-  // Cargo/mission panel: current credits + cargo total.
+  // Cargo/mission panel: current credits, the used cargo holding and the
+  // remaining free fleet cargo space. Mirrors
+  // NovaUi_DrawCargoMissionStatusPanel (0x004612c0)'s essential readout: the 6
+  // cargo-bin list (only non-empty bins, and their labels are not reconstructed
+  // here, TODO(decomp)) and the fleet free-space value
+  // (Outfit_ComputeFleetCargoCapacity - cargo+junk total). The escort/command
+  // summary line is omitted until fleet state exists.
   {
+    const std::int16_t free_space = Outfit_ComputeRemainingCargoSpace(state);
+    const std::int16_t used = Outfit_ComputePlayerCargoAndJunkTotal(state);
     char cargo[96];
-    int total = 0;
-    for (const auto n : state.inventory.cargo_bins) {
-      total += n;
-    }
-    std::snprintf(
-        cargo, sizeof(cargo), "CR %d  CARGO %d", state.player.credits, total);
+    std::snprintf(cargo,
+                  sizeof(cargo),
+                  "CR %d  CARGO %d/%d",
+                  state.player.credits,
+                  used,
+                  used + free_space);
     DrawReadout(platform,
                 *font_cache_,
                 static_cast<float>(layout_.font_size),

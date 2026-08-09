@@ -1,6 +1,7 @@
 #include "sprite_world.hpp"
 
 #include "../brgr_archive.hpp"
+#include "../cicn_image.hpp"
 #include "../log.hpp"
 #include "../rle_sprite_sheet.hpp"
 #include "../sdl_platform.hpp"
@@ -205,6 +206,49 @@ std::unique_ptr<SpriteAsset> SpriteAsset::LoadSheet(SDL_Renderer *renderer,
   auto asset = std::make_unique<SpriteAsset>();
   if (!UploadSheetTextures(renderer, *sheet, *asset)) {
     NovaLog::Warn("sprite sheet {}: texture upload failed", sheet_id);
+    return nullptr;
+  }
+  return asset;
+}
+
+std::unique_ptr<SpriteAsset> SpriteAsset::LoadCicnSet(SDL_Renderer *renderer,
+                                                      std::uint16_t first_id,
+                                                      int count) {
+  auto asset = std::make_unique<SpriteAsset>();
+  asset->frame_count = count;
+  bool have_dimensions = false;
+  for (int i = 0; i < count; ++i) {
+    const std::uint16_t id = static_cast<std::uint16_t>(first_id + i);
+    const auto data = NovaResource_Load(kResourceTypeCicn, id);
+    if (!data) {
+      NovaLog::Warn("cicn frame: no resource {}", static_cast<unsigned>(id));
+      return nullptr;
+    }
+    const auto image = Resource_LoadCicnAsImage(*data);
+    if (!image) {
+      NovaLog::Warn("cicn frame {}: could not decode", static_cast<unsigned>(id));
+      return nullptr;
+    }
+    auto texture = SdlTexture::Create(
+        renderer, image->width, image->height, image->rgba_pixels);
+    if (!texture) {
+      NovaLog::Warn("cicn frame {}: texture upload failed",
+                    static_cast<unsigned>(id));
+      return nullptr;
+    }
+    if (!have_dimensions) {
+      asset->tile_width = image->width;
+      asset->tile_height = image->height;
+      have_dimensions = true;
+    }
+    // Centre anchor, matching SpriteFrame_CreateFromRect's default for a frame
+    // built from the full icon rect.
+    asset->frames.push_back(
+        SpriteFrame{std::move(texture),
+                    static_cast<float>(image->width) / 2.0F,
+                    static_cast<float>(image->height) / 2.0F});
+  }
+  if (asset->frames.empty()) {
     return nullptr;
   }
   return asset;

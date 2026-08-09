@@ -34,6 +34,7 @@
 #include "nova_font.hpp"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 
 class SdlPlatform;
@@ -84,6 +85,29 @@ private:
   // The screen-font cache used for the HUD readouts, kept for this renderer's
   // lifetime so font handles are decoded once (not reloaded every frame).
   std::unique_ptr<NovaFontCache> font_cache_;
+
+  // Ship-class portraits for the target panel (PICT 3000 + zero-based clone
+  // source class id, per the Bible "PICT resource ID 3000 + shipID - 128",
+  // reused across classes that share base sprites via
+  // ShipClassDef.clone_source_ship_class). Keyed by the zero-based ship class
+  // id so each distinct class is decoded/uploaded once. A missing/failed
+  // decode maps to null (the target panel draws text-only).
+  struct PortraitEntry {
+    std::unique_ptr<SdlTexture> texture;
+    int width = 0;
+    int height = 0;
+  };
+
+  std::map<std::int16_t, std::unique_ptr<PortraitEntry>> portraits_;
+
+  // Loads (and caches) the target-panel portrait for a zero-based ship class
+  // id, resolving the portrait PICT through the class's clone source, or null
+  // when unavailable (null is also returned for a cached-but-textureless
+  // entry, so callers may dereference the returned entry's texture freely).
+  [[nodiscard]] const PortraitEntry *
+  TargetPortrait(SdlPlatform &platform,
+                 const ScenarioData &scenario,
+                 std::int16_t class_id);
 };
 
 } // namespace game

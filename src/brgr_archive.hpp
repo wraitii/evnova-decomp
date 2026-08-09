@@ -28,6 +28,8 @@ constexpr std::uint32_t kResourceTypeRleSheet8 =
 constexpr std::uint32_t kResourceTypeRleSheet16 =
     0x726c9144; // "rl\x91D" (16-bit sheets)
 constexpr std::uint32_t kResourceTypePict = 0x50494354; // "PICT"
+constexpr std::uint32_t kResourceTypeCicn =
+    0x6369636e; // "cicn" (color icons, e.g. the target reticles)
 constexpr std::uint32_t kResourceTypeSnd =
     0x736e6420; // "snd " (AIFF-style sounds)
 // "DLOG" (0x444c4f47) / "DITL" (0x4449544c) live in the core EV Nova/Nova.rez

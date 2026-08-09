@@ -79,6 +79,17 @@ struct SpriteAsset {
   [[nodiscard]] static std::unique_ptr<SpriteAsset>
   LoadSheet(SDL_Renderer *renderer, std::uint16_t sheet_id);
 
+  // Loads a run of consecutive `cicn` color-icon resources as one frame set:
+  // `first_id`, `first_id+1`, ..., `first_id+count-1` each decode to one frame
+  // (Ghidra Sprite_CreateFromSequentialFrameResources, FUN_00476800). Used for
+  // the 16-frame ship-target reticle (cicn 10008-10023) and the 8-frame travel
+  // reticle (cicn 10000-10007). Every frame's anchor is its centre (the
+  // SpriteFrame_CreateFromRect default), which is how the original positions
+  // the four corner brackets around a target. Returns null (caller falls back
+  // to the debug bracket draws) when any required frame is missing.
+  [[nodiscard]] static std::unique_ptr<SpriteAsset>
+  LoadCicnSet(SDL_Renderer *renderer, std::uint16_t first_id, int count);
+
   [[nodiscard]] bool empty() const { return frames.empty(); }
 };
 

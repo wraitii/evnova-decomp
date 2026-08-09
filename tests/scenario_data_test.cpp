@@ -816,4 +816,35 @@ TEST_CASE("asteroid-type rows decode from the payload",
   CHECK(data.AsteroidType(0x100) == nullptr);
 }
 
+TEST_CASE("ship classes derive the sprite clone source", "[scenario][data]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // clone_source_ship_class is the first ship class whose sh\x8an BaseImageID
+  // matches this class's (ShipClass_LoadShipClassVisualAndLaunchData's clone
+  // branch); the target-panel portrait PICT is 3000 + that id. Verified from
+  // the raw sh\x8an payloads (BaseImageID at +0x00):
+  //   Fed Viper (0x90) and its duplicate (0xe0) share base sheet 1032;
+  //   Rebel Dragon 0xb4 / 0xb7 share 1104; Rebel Destroyer 0xb5 / 0xb8 share
+  //   1106; Wraith (Adult) 0xa8 / 0xb9 share 1080; Shuttle 0x80 / 0xbc share
+  //   1000; Rebel Lightning 0x112 (new art) is its own source.
+  const auto clone_of = [&](std::int16_t raw_id) {
+    const ShipClass *cls = data.Ship(raw_id);
+    return cls ? cls->clone_source_ship_class : -2;
+  };
+  CHECK(clone_of(0x90) == 16);   // first Fed Viper owns its sprites
+  CHECK(clone_of(0xe0) == 16);   // duplicate Fed Viper clones 16
+  CHECK(clone_of(0xb4) == 52);   // first Rebel Dragon owns its sprites
+  CHECK(clone_of(0xb7) == 52);   // second Rebel Dragon clones 52
+  CHECK(clone_of(0xb8) == 53);   // second Rebel Destroyer clones 53
+  CHECK(clone_of(0xb9) == 40);   // duplicate Wraith (Adult) clones 40
+  CHECK(clone_of(0xbc) == 0);    // second Shuttle clones 0
+  CHECK(clone_of(0x112) == 146); // Rebel Lightning: own art, own source
+  // Portrait ids: 3000 + clone source (Bible "PICT resource ID 3000 + shipID
+  // - 128"), so the duplicate classes reuse the originals' existing PICTs
+  // (3016/3052/3053/3040/3000) instead of referencing missing 3096+ ids.
+  CHECK(clone_of(0x90) + 3000 == 3016);
+  CHECK(clone_of(0xe0) + 3000 == 3016);
+}
+
 } // namespace game

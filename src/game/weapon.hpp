@@ -98,6 +98,17 @@ void NovaWeapon_TickShots(GameState &state, float frame_time_ms = 1.0F);
 [[nodiscard]] std::string NovaWeapon_BankDisplayName(const GameState &state,
                                                      std::int16_t weapon_bank);
 
+// The ammo/secondary counter shown for a weapon bank in the HUD weapon/ammo
+// panel, mirroring NovaUi_DrawActiveWeaponAmmoPanel (0x00460ec0). The original
+// reads `weapon_bank_secondary_counter_0[bank*100]` for a special weapon
+// (weapon_mode_code 99 / out-of-range ammo_type), else the ammo counter of the
+// weapon whose id equals this weapon's ammo_type (weapon_bank_secondary
+// counter `ammo_type`). The panel hides the count for energy-based weapons
+// (ammo_type == -1 or flags_secondary & 0x40), and returns `-1` to signal that
+// case. Returns -1 when the bank/weapon is invalid.
+[[nodiscard]] std::int16_t NovaWeapon_BankAmmoCount(const GameState &state,
+                                                     std::int16_t weapon_bank);
+
 // Weapon fire-sound slot mapping. A weapon's `fire_sound` field (Ghidra
 // WeaponDef.fire_sound_slot) is a slot index 0..35 that the original resolves
 // through the preloaded g_gameplay_sound_handle_table; in the shipped data the

@@ -274,6 +274,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool nearest_was_held = false;
   bool land_was_held = false;
   bool target_action_was_held = false;
+  std::int16_t prev_travel_stellar = state.travel.selected_stellar_id;
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = SDL_GetTicks();
     const float frame_time_ms =
@@ -420,8 +421,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     }
     // Seed an automatic target, while retaining a stellar chosen by Tab/
     // Shift+Tab. This keeps navigation purposeful instead of retargeting to
-    // whichever body happens to be closest each frame.
+    // whichever body happens to be closest each frame. A change to the selected
+    // travel stellar re-arms the travel reticle pulse (NovaUi_UpdateTravelTarget
+    // Reticle's re-arm at 0x43800000), mirroring the original arming
+    // _g_travel_target_reticle_pulse whenever ai_secondary_target_slot is
+    // assigned a fresh stellar.
     NovaTargeting_UpdatePlayerTarget(state);
+    if (state.travel.selected_stellar_id != prev_travel_stellar) {
+      state.travel_reticle_pulse = 256.0F;
+      prev_travel_stellar = state.travel.selected_stellar_id;
+    }
     // Normal arrival (Return) is independent of target action: the original
     // player-ship tick directly invokes Stellar_ProcessTravelAndLanding here,
     // opening the Spaceport only when the selected ordinary stellar is inside
@@ -532,6 +541,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // driving the bracket grow-out-then-settle animation.
     state.ship_reticle_pulse =
         std::max(0.0F, state.ship_reticle_pulse - frame_time_ms * 0.06F);
+    state.travel_reticle_pulse =
+        std::max(0.0F, state.travel_reticle_pulse - frame_time_ms * 0.06F);
     SDL_Delay(16);
   }
 }

@@ -2,12 +2,14 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "ship_visual.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <string_view>
 
 namespace game {
@@ -790,6 +792,11 @@ bool ScenarioData::LoadFromArchives() {
   std::size_t loaded_dudes = 0;
   std::size_t loaded_asteroid_types = 0;
 
+  // BaseImageID -> first zero-based ship class using it, for clone-source
+  // derivation (ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0's clone
+  // branch: a class whose sh\x8an BaseImageID matches an earlier class's
+  // reuses that class's sprites and target portrait).
+  std::map<std::uint16_t, std::int16_t> first_class_by_base_image;
   for (std::int32_t id = 0x80; id <= 0x27f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
             scenario::kShipResourceType, static_cast<std::uint16_t>(id))) {
@@ -798,7 +805,30 @@ bool ScenarioData::LoadFromArchives() {
       // reads it via ResourceData_ReadEntryMetadata + StripSubtitleSuffix), not
       // a numeric header field.
       cls.display_name = res->name;
-      ships[static_cast<std::size_t>(id) - 0x80] = std::move(cls);
+      const std::size_t index = static_cast<std::size_t>(id) - 0x80;
+      // Clone-source derivation: the sh\x8an descriptor shares the class id,
+      // and its BaseImageID (+0x00) is the sheet the class's sprites are cut
+      // from. The first class (lowest id) seen with a given BaseImageID is the
+      // clone source; identical-looking classes get its portrait (Bible:
+      // "PICT resource ID 3000 + shipID - 128 ... for all higher-numbered
+      // ship types with the same base sprites").
+      const auto shan = NovaResource_Load(kShipVisualResourceType,
+                                          static_cast<std::uint16_t>(id));
+      if (shan && shan->size() >= 2) {
+        const std::uint16_t base_image = ReadBe16(*shan, 0x00);
+        if (const auto found = first_class_by_base_image.find(base_image);
+            found != first_class_by_base_image.end()) {
+          cls.clone_source_ship_class = found->second;
+        } else {
+          cls.clone_source_ship_class = static_cast<std::int16_t>(index);
+          first_class_by_base_image.emplace(base_image,
+                                            static_cast<std::int16_t>(index));
+        }
+      } else {
+        // No sh\x8an descriptor: the class owns its (missing) sprites.
+        cls.clone_source_ship_class = static_cast<std::int16_t>(index);
+      }
+      ships[index] = std::move(cls);
       ++loaded_ships;
     }
   }
