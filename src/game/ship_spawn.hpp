@@ -25,4 +25,25 @@ namespace game {
                                             std::int16_t system_id,
                                             std::int16_t reserved_tail);
 
+// PARTIAL reconstruction of the lead-ship spawn of
+// EncounterFleet_SpawnRandomEncounterFleet (Ghidra 0x004259b0). Allocates one
+// ship slot in system_id for the random-encounter fleet template at
+// fleet_def_index (0-based index into ScenarioData.fleets), applying the def's
+// lead ship class (if any) and identity: ship_class_id, government, AI behavior
+// (or ship-class default when the requested code is -1), base shield/armor,
+// mission slots cleared, mining-scoop flag, credits. Returns the allocated slot
+// or -1 when the def has no lead ship, is unavailable at spawn time
+// (is_available_runtime clear), or no slot is free.
+//
+// TODO(decomp) deferred (see ship_spawn.cpp): the original also positions the
+// lead (spin-out at a random polar offset via AI state 0x08, or jump-in at an
+// adjacent stellar via AI state 0x15), seeds random cargo for carry_cargo_flag
+// fleets, copies the 8-bank weapon loadout, and spawns/links the escorts + the
+// arrival overlay banner. Those are not yet reconstructed (they sit on the
+// deferred AI-state / DudeDef / weapon-bank code); this function leaves the
+// ship at a neutral origin heading (ai_state_code 0) so it is visible and
+// positioned for rendering but not yet animated or armed.
+[[nodiscard]] int NovaEncounter_SpawnFleetLeadShip(
+    GameState &state, std::int16_t system_id, std::int16_t fleet_def_index);
+
 } // namespace game

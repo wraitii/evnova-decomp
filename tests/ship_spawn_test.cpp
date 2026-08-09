@@ -6,6 +6,7 @@
 namespace {
 
 using game::GameState;
+using game::NovaEncounter_SpawnFleetLeadShip;
 using game::NovaShip_AllocateShipSlot;
 
 TEST_CASE("allocator takes the first free slot below the reserved tail") {
@@ -77,6 +78,58 @@ TEST_CASE("allocator never touches the player slot (index 0)") {
   const game::Ship &player = state.ShipAt(0);
   CHECK(player.ship_class_id == 42);
   CHECK(player.is_active == false); // the player's activation is set elsewhere
+}
+
+// The fleet lead-ship spawner lays a fleet def's lead onto an allocated slot.
+TEST_CASE("fleet lead spawner shapes the ship from the fleet def") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Fleet 0x80 (Confederacy patrol): lead ship class 13, govt 0. Mark it
+  // available so the spawner accepts it.
+  auto &def = state.scenario.fleets[0x80 - 0x80];
+  def.is_available_runtime = true;
+
+  const int slot =
+      NovaEncounter_SpawnFleetLeadShip(state, /*system_id=*/0x88, 0x80 - 0x80);
+  REQUIRE(slot != -1);
+  const game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  CHECK(ship.is_active);
+  CHECK(ship.current_system_id == 0x88);
+  // ship_class_id is stored as a resource id (0x80-relative offset + 0x80);
+  // fleet 0x80's lead class id is 13 (zero-based) -> resource id 0x80 + 13.
+  CHECK(ship.ship_class_id == 0x80 + 13);
+  CHECK(ship.faction_or_government_id == 0);
+  // AI behavior takes the lead ship class's default.
+  const game::ShipClass *cls = state.scenario.Ship(ship.ship_class_id);
+  REQUIRE(cls != nullptr);
+  CHECK(ship.ai_behavior_code == cls->default_ai_behavior);
+  CHECK(ship.shield_points ==
+        Catch::Approx(static_cast<float>(cls->base_shield)));
+  CHECK(ship.armor_points ==
+        Catch::Approx(static_cast<float>(cls->base_armor)));
+  CHECK(ship.mission_fleet_slot == -1);
+  CHECK(ship.mission_ship_slot == -1);
+  CHECK(ship.jump_destination_stellar_id == -2);
+  // Position/heading are the neutral defaults for now (AI-entry deferred).
+  CHECK(ship.pos_x == Catch::Approx(0.0F));
+  CHECK(ship.pos_y == Catch::Approx(0.0F));
+  CHECK(ship.ai_state_code == 0);
+}
+
+TEST_CASE("fleet lead spawner rejects unavailable / lead-less defs") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Fleet 0x80 not marked available -> refused.
+  state.scenario.fleets[0x80 - 0x80].is_available_runtime = false;
+  CHECK(NovaEncounter_SpawnFleetLeadShip(state, 0x88, 0x80 - 0x80) == -1);
+
+  // A fleet def with no lead ship (lead -1 = "no fleet") -> refused.
+  auto &empty = state.scenario.fleets[0x90 - 0x80];
+  empty.is_available_runtime = true;
+  empty.lead_ship_class_id = -1;
+  CHECK(NovaEncounter_SpawnFleetLeadShip(state, 0x88, 0x90 - 0x80) == -1);
 }
 
 } // namespace

@@ -77,17 +77,17 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   if (!ship_.frames.empty()) {
     return true;
   }
-  const auto *ship_class = state.scenario.Ship(
-      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  const std::int16_t player_class =
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80);
+  const auto *ship_class = state.scenario.Ship(player_class);
   if (!ship_class) {
     NovaLog::Warn("ship sprite: no ship class {:#x} in scenario tables",
-                  static_cast<unsigned>(state.player.ship_class_id + 0x80));
+                  static_cast<unsigned>(player_class));
     return false;
   }
   // The sh\x8an descriptor id matches the ship class id.
   const auto visual_data = NovaResource_Load(
-      kShipVisualResourceType,
-      static_cast<std::uint16_t>(state.player.ship_class_id + 0x80));
+      kShipVisualResourceType, static_cast<std::uint16_t>(player_class));
   if (!visual_data) {
     NovaLog::Warn("ship sprite: no sh.x9an descriptor for class '{}'",
                   ship_class->display_name);
@@ -103,10 +103,8 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   // path (NovaWeapon_FirePlayerWeaponBank) can offset shots to the gun barrel.
   for (std::size_t g = 0; g < visual->turret_muzzles.size(); ++g) {
     for (std::size_t q = 0; q < 4; ++q) {
-      state.player.muzzle_lateral[g][q] =
-          visual->turret_muzzles[g].lateral[q];
-      state.player.muzzle_forward[g][q] =
-          visual->turret_muzzles[g].forward[q];
+      state.player.muzzle_lateral[g][q] = visual->turret_muzzles[g].lateral[q];
+      state.player.muzzle_forward[g][q] = visual->turret_muzzles[g].forward[q];
       state.player.muzzle_drop[g][q] = visual->turret_muzzles[g].drop[q];
     }
     state.player.muzzle_quadrant[g] = -1; // first shot picks a random barrel
@@ -159,6 +157,82 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
                 ship_.frame_count,
                 visual->base_set_count);
   return true;
+}
+
+// Loads (and caches) an NPC ship's heading-rotation sheet for a ship class
+// resource id. This is the general form of EnsureShipSprite's base load; the
+// player's call keeps its own glow/muzzle handling on top of the same sheet.
+// NPC ships draw base-only (no engine glow) for now -- TODO(decomp).
+const SpaceflightView::NpcShipSprite *
+SpaceflightView::ShipClassSprite(SdlPlatform &platform,
+                                 std::int16_t ship_class_id) {
+  const auto cached = npc_ship_sprites_.find(ship_class_id);
+  if (cached != npc_ship_sprites_.end()) {
+    return &cached->second;
+  }
+
+  NpcShipSprite entry;
+  const auto visual_data = NovaResource_Load(
+      kShipVisualResourceType, static_cast<std::uint16_t>(ship_class_id));
+  const auto visual =
+      visual_data ? DecodeShipVisualDescriptor(*visual_data) : std::nullopt;
+  if (!visual) {
+    // Cache a failed entry so a missing class is not retried every frame.
+    npc_ship_sprites_[ship_class_id] = std::move(entry);
+    return nullptr;
+  }
+  auto base =
+      SpriteAsset::LoadSheet(platform.renderer(), visual->base_image_id);
+  if (!base) {
+    npc_ship_sprites_[ship_class_id] = std::move(entry);
+    return nullptr;
+  }
+  entry.base = std::move(*base);
+  entry.frames_per_rotation = visual->frames_per_rotation;
+  auto [it, inserted] =
+      npc_ship_sprites_.emplace(ship_class_id, std::move(entry));
+  (void)inserted;
+  NovaLog::Info("npc ship sprite loaded for class {:#x}: {}x{} x{} frames",
+                static_cast<unsigned>(ship_class_id),
+                it->second.base.tile_width,
+                it->second.base.tile_height,
+                it->second.base.frame_count);
+  return &it->second;
+}
+
+// Draws every active non-player ship in the current system at its world
+// position, frame selected by heading. Filters by system to avoid drawing NPCs
+// parked in other systems, and skips ships whose class sprite could not be
+// loaded. Ships with no class sprite get a plain placeholder dot so they are
+// still visible.
+void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
+                                   const GameState &state) {
+  const Viewport vp = CurrentViewport(platform);
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active ||
+        ship.current_system_id != state.player.current_system_id) {
+      continue;
+    }
+    const std::int16_t class_id =
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80);
+    const NpcShipSprite *sprite = ShipClassSprite(platform, class_id);
+    if (sprite == nullptr || sprite->base.frames.empty() ||
+        sprite->frames_per_rotation <= 0) {
+      continue;
+    }
+    const int frame =
+        FrameForHeading(ship.heading, sprite->frames_per_rotation);
+    DrawSprite(platform.renderer(),
+               sprite->base,
+               frame,
+               ship.pos_x,
+               ship.pos_y,
+               state.player.pos_x,
+               state.player.pos_y,
+               vp.w,
+               vp.h);
+  }
 }
 
 // Returns the ambient star-field artwork from the shared sprite store: sp\x9an
@@ -638,18 +712,21 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
 //   background (space tint + ambient starfield)   -- DrawBackground
 //   stellar bodies (planets / stations)           -- DrawStellarBodies
 //   shots / projectiles                           -- DrawShots
+//   NPC ships (active ships in the current system) -- DrawNpcShips
 //   player ship + engine-glow                     -- (below)
 //
-// That is: the ship's hull and glow composite over everything else in the
-// scene, and shots pass between the ship and the stellar/backdrop layers. This
-// matches a ship-centred camera where the player's own ship is the front-most
-// occupant of the scene. Keeping the order explicit here (rather than spread
-// across the per-subsystem drawers) makes the composed precedence auditable and
-// lets a future layer-table refactor replace the fixed sequence wholesale.
+// That is: the player's hull and glow composite over everything else in the
+// scene (front-most), NPC ships and shots pass between the ship and the
+// stellar/backdrop layers. This matches a ship-centred camera where the
+// player's own ship is the front-most occupant of the scene. Keeping the order
+// explicit here (rather than spread across the per-subsystem drawers) makes the
+// composed precedence auditable and lets a future layer-table refactor replace
+// the fixed sequence wholesale.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawBackground(platform, state);    // backmost: tint + ambient stars
   DrawStellarBodies(platform, state); // stellar planets / stations
   DrawShots(platform, state);         // projectiles above stellars
+  DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
 
   // Player ship at the play-area centre, frame selected by heading. Because
   // the camera is centred on the player, drawing at the ship's own world

@@ -43,11 +43,11 @@ public:
   // copies the sh\x8an weapon-exit (muzzle) geometry into
   // GameState::player::muzzle_* so the firing path offsets shots to the ship's
   // gun barrels. Non-const because it mutates the player ship state.
-  [[nodiscard]] bool EnsureShipSprite(SdlPlatform &platform,
-                                      GameState &state);
+  [[nodiscard]] bool EnsureShipSprite(SdlPlatform &platform, GameState &state);
 
   // Draws the whole in-flight world (solid per-system space backdrop, ambient
-  // starfield, stellar bodies, player ship) into the current renderer.
+  // starfield, stellar bodies, shots, NPC ships in the current system, player
+  // ship) into the current renderer.
   void Draw(SdlPlatform &platform, const GameState &state);
 
   // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0): (re)spawns the
@@ -147,6 +147,30 @@ private:
   // Last glow-draw gate result, so transitions (on/off) can be logged once per
   // change rather than per frame (diagnostic for the flight render).
   bool glow_last_drawn_ = false;
+
+  // One loaded NPC ship's heading-rotation sprite data (base sheet only; NPC
+  // ships are drawn without the engine-glow layer for now -- TODO(decomp) the
+  // per-ship glow). Cached per ship-class resource id so each distinct class
+  // in the current system is decoded/uploaded once per session.
+  struct NpcShipSprite {
+    SpriteAsset base;
+    int frames_per_rotation = 36;
+  };
+
+  std::map<std::int16_t, NpcShipSprite> npc_ship_sprites_;
+
+  // Loads (and caches) the heading-rotation sheet for a ship class resource
+  // id (0x80-relative convention already applied by callers). Returns a
+  // pointer to the cached entry, or null when the class/sheet cannot be
+  // loaded. Non-const: mutates the cache and logically owns the SDL upload.
+  const NpcShipSprite *ShipClassSprite(SdlPlatform &platform,
+                                       std::int16_t ship_class_id);
+
+  // Draws every active non-player ship in the current system at its world
+  // position, frame selected by heading (player's ship is drawn separately at
+  // the viewport centre). Ships whose class sprite failed to load are skipped
+  // (logged once).
+  void DrawNpcShips(SdlPlatform &platform, const GameState &state);
 
   // One animated stellar's frame-stepping runtime state (the original keeps
   // these on StellarDef sprite_current_frame / sprite_previous_frame /

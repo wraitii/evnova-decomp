@@ -145,3 +145,25 @@ in the SDL renderer yet (TODO).
 `rl\x91D` 16-bit RLE format the ship sheets use (header width/height/16/frame_count),
 so reaching a renderable ship sprite is: add Ships archives -> read `sh\x9an` for
 the class -> decode `rl\x91D` BaseImageID -> index frame by heading -> draw.
+
+## Step 4 status: NPC ships rendered (provisional)
+
+`SpaceflightView` now renders every active non-player ship in the current system:
+
+- `ShipClassSprite(platform, class_id)` lazily loads and caches a per-class
+  `rl\x91D` heading-rotation sheet (keyed by ship class resource id) so each
+  distinct class in the system is decoded/uploaded once. It mirrors the player's
+  `EnsureShipSprite` base load but skips the engine-glow layer (TODO: per-NPC
+  glow).
+- `DrawNpcShips` iterates the ship slots (1..) and draws each active ship in the
+  current system at its world position with its heading-selected frame
+  (`FrameForHeading`), using the same camera/DrawSprite path as the player.
+  NPC ships composite below the player ship (layer order: backdrop -> stellars
+  -> shots -> NPC ships -> player).
+- To make the renderer's output visible, `SpawnRoamingFleetsStandIn`
+  (spaceflight.cpp) spawns a small set of random-encounter fleet-lead ships on
+  system entry via `NovaEncounter_SpawnFleetLeadShip`, capped at the system's
+  `avg_ships`. This is a PROVISIONAL stand-in for the deferred
+  `System_InitRoamingShips` / Step 5 encounter maintenance (it does not yet
+  honour each def's spawn_system_filter, the availability expression, or spawn
+  escorts).

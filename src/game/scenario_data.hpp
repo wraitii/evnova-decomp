@@ -37,6 +37,7 @@ constexpr std::uint32_t kWeaponResourceType = 0x77916170;     // w\x91ap
 constexpr std::uint32_t kStellarResourceType = 0x73709a62;    // sp\x9ab
 constexpr std::uint32_t kSystemResourceType = 0x73d87374;     // s\xd8st
 constexpr std::uint32_t kGovernmentResourceType = 0x679a7674; // g\x9avt
+constexpr std::uint32_t kFleetResourceType = 0x666c9174;      // fl\x91t
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -491,13 +492,20 @@ struct System {
                                         -1,
                                         -1,
                                         -1}; // NavDef1-16 (stellar ids)
-  std::array<std::int16_t, 8> dude_types{}; // DudeTypes (128-639, or neg fleet)
-  std::array<std::int16_t, 8> dude_prob{};  // % Prob
-  std::int16_t avg_ships = 0;               // AvgShips
-  std::int16_t government_id = -1;          // Govt
-  std::int16_t message_id = -1;             // Message
-  std::int16_t asteroid_count = 0;          // Asteroids
-  std::int16_t interference = 0;            // Interference
+  std::array<std::int16_t, 8> dude_types{};  // DudeTypes (+0x6e, rebased -0x80;
+                                             //  <0x80 / >0x47e -> -1)
+  std::array<std::int16_t, 8> dude_prob{};   // % Prob (+0x7e, clamped 0..100)
+  // AvgShips (payload +0x64): the per-system NPC ship population cap that the
+  // spawn maintainers replenish the system's active ship count toward.
+  std::int16_t avg_ships = 0;
+  // Govt (payload +0x66; <0x80 or >0x17f -> -1, else rebased -0x80). The
+  // owning faction; gates alliance/hostility and the system's HUD/map color.
+  std::int16_t government_id = -1;
+  std::int16_t message_id = -1;    // Message (+0x68)
+  std::int16_t asteroid_count = 0; // Asteroids (+0x6a; the loader also rescales
+                                   //  this by render height at load - see
+                                   //  DecodeSystem)
+  std::int16_t interference = 0;   // Interference (+0x6c)
   // BkgndColor (s\xd8st +0x8e): per-system space background tint stored as
   // 24-bit 0xRRGGBB. Decoded to reproduce the original's runtime mapping (it
   // reads the resource bytes as a little-endian 32-bit and takes R=byte+0x90,
@@ -514,6 +522,21 @@ struct System {
   std::int16_t reinf_interval = 0; // ReinfIntrval
   std::string visibility_expr;     // Visibility
 
+  // ---- Runtime random-encounter binding (decoded with, not from, the
+  // payload). The original stores per-system random-encounter fleet templates
+  // and weights on SystemDef (struct +0x6a fleet ids / +0x7a weights /
+  // +0x8a count / +0x8c chance-percent) and consumes them each tick via
+  // EncounterFleet_SelectRandomEncounterFleetDefWeighted (0x0046b6d0) from
+  // Mission_TickMissionAndEncounterSpawns (0x0041d6e0). TODO(decomp): the
+  // population pass that fills these from scenario data is not yet localized;
+  // these fields are modelled now so Step 5's spawn hook has a home, and stay
+  // empty/default until the binding is reconstructed.
+  std::array<std::int16_t, 8> encounter_fleet_ids{
+      -1, -1, -1, -1, -1, -1, -1, -1};
+  std::array<std::uint16_t, 8> encounter_fleet_weights{};
+  std::int16_t encounter_fleet_count = 0; // SystemDef +0x8a (bound def count)
+  std::int16_t encounter_chance_percent = 0; // SystemDef +0x8c (spawn odds)
+
   // ---- Runtime discovery/visibility state (decoded with, not from, the
   // payload). Mirrors SystemDef is_visible / has_explored_flag / discovery
   // state, maintained by System_UpdateSystemAndStellarDisplayState and the
@@ -521,6 +544,62 @@ struct System {
   // systems (and hence their stellars) the player may target. ----
   bool is_visible = false;
   bool has_explored_flag = false;
+};
+
+// Ghidra RandomEncounterFleetDef (g_random_encounter_fleet_defs, up to 0x100
+// entries indexed by fleet id minus 0x80). One random-encounter "fleet"
+// template: a lead ship plus up to four escort classes with per-escort
+// population ranges, a system/government filter that gates where the fleet may
+// spawn and an availability NCB expression, plus an arrival message id and a
+// flags word. The original loads these from the fl\x91t resource family in
+// Nova Data 1 inside NovaData_LoadScenarioResourceTables (Ghidra 0x004bd3c0) at
+// a 0x124-byte stride, < 0x80 lead/government/escort ids being sentinel-invalid
+// (-1) after the loader's rebasing.
+//
+// Payload layout (big-endian fl\x91t record, >= 0x132 bytes): lead_ship_class
+// +0x00, escort_ship_class_ids[4] +0x02, escort_min_count[4] +0x0a,
+// escort_max_count[4] +0x12 (this is why government_id is loaded from +0x1a),
+// government_id +0x1a, spawn_system_filter +0x1c, availability_expr +0x1e,
+// arrival_message_id +0x11e, carry_cargo_flags +0x120. The in-memory
+// RandomEncounterFleetDef mirrors the same field ordering with the
+// availability block at +0x20.
+struct FleetDef {
+  // Lead ship class id (0.. space, rebased from payload by -0x80); -1 means
+  // "no fleet" (absent slot or a <0x80 lead) and suppresses spawning.
+  std::int16_t lead_ship_class_id = -1;
+  // Government id (0.. space, < 0x80 -> -1). Applied to every ship spawned
+  // from this def.
+  std::int16_t government_id = -1;
+  // Escort ship class ids (0.. space, < 0x80 -> -1 = "no escort slot").
+  std::array<std::int16_t, 4> escort_ship_class_ids{-1, -1, -1, -1};
+  // Minimum / maximum number of each escort class to spawn.
+  std::array<std::int16_t, 4> escort_min_count{};
+  std::array<std::int16_t, 4> escort_max_count{};
+  // Filter that restricts which systems the fleet may spawn in
+  // (EncounterFleet_TrySpawnRandomEncounterFleet reads the payload +0x1c
+  // value verbatim):
+  //   -1 -> anywhere; 0x80..9999 -> a specific system id;
+  //   10000..14999 -> a specific government id; 15000..19999 -> allied govt;
+  //   20000..24999 -> a different govt; 25000..29999 -> hostile govt;
+  //   values in 1..0x7f / 0x20..0x7f are not matched.
+  std::int16_t spawn_system_filter = 0;
+  // Arrival overlay-message resource id (payload +0x11e). Used only by the
+  // ignore-ship-availability spawn flavor (Ghidra EncounterFleet_SpawnRandom-
+  // EncounterFleet 0x004259b0) to flash an "arrival" banner.
+  std::int16_t arrival_message_id = 0;
+  // Availability NCB test expression (loads from payload +0x1e, the same
+  // offset as the government id's gap; a < 0x80 lead keeps this empty).
+  std::string availability_expr;
+  // Flags word (payload +0x120). Bit 0x0001: spawned ships may carry a
+  // randomly-seeded cargo bin (gate checks default_ai_behavior < 3).
+  std::uint16_t flags = 0;
+
+  [[nodiscard]] bool HasCargoFlag() const { return (flags & 0x0001U) != 0; }
+
+  // Runtime availability (matches is_available_runtime at +0x122): derived by
+  // evaluating availability_expr against the game state, not decoded from the
+  // payload. Starts false so absent/untoggled defs never spawn.
+  bool is_available_runtime = false;
 };
 
 // Owns the parsed scenario tables indexed by (resource id - 0x80), mirroring
@@ -535,6 +614,7 @@ struct ScenarioData {
   std::vector<Stellar> stellars;       // indexed by stellar_id - 0x80
   std::vector<System> systems;         // indexed by system_id - 0x80
   std::vector<Government> governments; // indexed by government_id - 0x80
+  std::vector<FleetDef> fleets;        // indexed by fleet_id - 0x80
 
   // gh.id 0x80.. lookup for government/faction data.
   [[nodiscard]] const Government *Government(std::int16_t resource_id) const;
@@ -546,6 +626,9 @@ struct ScenarioData {
   [[nodiscard]] const Weapon *Weapon(std::int16_t resource_id) const;
   [[nodiscard]] const Stellar *Stellar(std::int16_t resource_id) const;
   [[nodiscard]] const System *System(std::int16_t resource_id) const;
+  // gh.id 0x80.. lookup for a random-encounter fleet template, or nullptr when
+  // outside the loaded range.
+  [[nodiscard]] const FleetDef *Fleet(std::int16_t resource_id) const;
 
   // Ghidra NovaData_LoadScenarioResourceTables (0x004bd3c0). Walks each
   // resource family by id 0x80.. max and decodes it into the matching table.

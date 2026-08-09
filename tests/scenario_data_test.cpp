@@ -533,4 +533,96 @@ TEST_CASE("stellar animation fields decode", "[scenario][stellar]") {
   CHECK(hg->animation_frame_multiplier == 0);
 }
 
+// The random-encounter fleet templates (fl\x91t family, Nova Data 1) decode
+// into g_random_encounter_fleet_defs entries whose lead/government/escort ids
+// are rebased into the 0.. space by the loader (0x004bd3c0), with a < 0x80 id
+// sentinel-invalidating that field. Pinned against the shipped records len by
+// inspecting the payloads + loader behavior.
+TEST_CASE("random encounter fleet defs decode", "[scenario][fleet]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // 128 fleet templates are present in Nova Data 1. An absent slot has the
+  // default "no fleet" sentinel (lead -1, no escorts); a populated def has a
+  // valid lead (>= 0) or at least one escort.
+  std::size_t populated = 0;
+  for (const FleetDef &f : data.fleets) {
+    if (f.lead_ship_class_id >= 0 || f.escort_ship_class_ids[0] != -1) {
+      ++populated;
+    }
+  }
+  CHECK(populated == 128);
+
+  // Fleet id 0x80: lead ship class 13 (0x80->0), government 0 (Confederacy),
+  // system filter 10000 = "any system of government 0", two escorts (95,96).
+  const FleetDef *f80 = data.Fleet(0x80);
+  REQUIRE(f80 != nullptr);
+  CHECK(f80->lead_ship_class_id == 13);
+  CHECK(f80->government_id == 0);
+  CHECK(f80->spawn_system_filter == 10000);
+  CHECK(f80->arrival_message_id == 0);
+  CHECK(f80->flags == 0U);
+  CHECK(f80->escort_ship_class_ids[0] == 95);
+  CHECK(f80->escort_min_count[0] == 0);
+  CHECK(f80->escort_max_count[0] == 1);
+  CHECK(f80->escort_ship_class_ids[1] == 96);
+  CHECK(f80->escort_min_count[1] == 0);
+  CHECK(f80->escort_max_count[1] == 1);
+  CHECK(f80->escort_ship_class_ids[2] == -1); // no 3rd/4th escort
+  CHECK(f80->escort_ship_class_ids[3] == -1);
+  // Fleet 0x80 has no availability expression in the shipped data.
+  CHECK(f80->availability_expr.empty());
+
+  // Fleet id 0x82: filter -1 spawns anywhere (no system/government gate).
+  const FleetDef *f82 = data.Fleet(0x82);
+  REQUIRE(f82 != nullptr);
+  CHECK(f82->spawn_system_filter == -1);
+  CHECK(f82->lead_ship_class_id == 3);
+  CHECK(f82->government_id == 29);
+
+  // Fleet ids 0x81-0x83 all share the roaming-pirate government 29 (a lawful
+  // federation-dependent faction) and filter by specific government 0.
+  CHECK(data.Fleet(0x81)->government_id == 0);
+  CHECK(data.Fleet(0x83)->government_id == 29);
+}
+
+// The system record's population/faction/spawn block (payload +0x64..+0x6c)
+// and the dude tables decode with the loader's rebasing. Pinned against system
+// 0x80 (payload: avg_ships 4 @ +0x64, govt 0x80 @ +0x66, message -1, asteroids
+// 3, interference 0, dude_types 0x01fe/0x9b/0x9c/0x80/... @ +0x6e, % prob @
+// +0x7e).
+TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  const System *s = data.System(0x80);
+  REQUIRE(s != nullptr);
+  // AvgShips = 4; government 0x80 -> 0 (a Confederacy world).
+  CHECK(s->avg_ships == 4);
+  CHECK(s->government_id == 0);
+  CHECK(s->message_id == -1);
+  CHECK(s->asteroid_count == 3);
+  CHECK(s->interference == 0);
+
+  // Dude type ids are rebased -0x80 (payload 0x01fe/0x9b/0x9c/0x80/0xe3/...).
+  CHECK(s->dude_types[0] == 510 - 0x80); // payload 0x01fe
+  CHECK(s->dude_types[1] == 155 - 0x80); // payload 0x009b
+  CHECK(s->dude_types[2] == 156 - 0x80); // payload 0x009c
+  CHECK(s->dude_types[3] == 128 - 0x80); // payload 0x0080
+  // % Prob values are carried verbatim (0x32/0x01/0x01/0x0a/... @ +0x7e).
+  CHECK(s->dude_prob[0] == 50);
+  CHECK(s->dude_prob[1] == 1);
+  CHECK(s->dude_prob[2] == 1);
+  CHECK(s->dude_prob[3] == 10);
+
+  // A system with an out-of-range government (raw 0 > 0x17f... use a sentinel
+  // that the loader maps to -1): verify no crash and -1 handling via a direct
+  // synthetic decode is not needed; the real tables expose the rebase below.
+  // The vast majority of systems carry a valid 0x80.. id; South (various) show
+  // the -1 path. Just confirm the runtime encounter binding defaults empty.
+  CHECK(s->encounter_fleet_count == 0);
+  CHECK(s->encounter_chance_percent == 0);
+  CHECK(s->encounter_fleet_ids[0] == -1);
+}
+
 } // namespace game

@@ -99,11 +99,12 @@ struct Ship {
   // from the ShipClassDef loadout).
 
   // --- Mission / target/AI slots (added to unblock spawn/targeting) ---
-  std::int16_t mission_owner_slot = -1;       // +0x8A
-  std::int16_t mission_fleet_slot = -1;       // +0xC8D2
-  std::int16_t ai_behavior_code = 0;          // +0x88
-  std::int16_t ai_state_code = 0;             // +0xC8C8
-  std::int16_t ai_control_mode = 0;           // +0xC8CA
+  std::int16_t mission_owner_slot = -1; // +0x8A
+  std::int16_t mission_ship_slot = -1;  // +0xC8CE (mission-ship slot link)
+  std::int16_t mission_fleet_slot = -1; // +0xC8D2
+  std::int16_t ai_behavior_code = 0;    // +0x88
+  std::int16_t ai_state_code = 0;       // +0xC8C8
+  std::int16_t ai_control_mode = 0;     // +0xC8CA
   std::int16_t primary_target_ship_slot = -1; // +0x70
   std::int16_t ai_secondary_target_slot =
       -1;                                // +0x6C (also a travel/stellar slot)
@@ -111,6 +112,10 @@ struct Ship {
   std::int16_t target_stellar_object_id = -1;    // +0x8C
   std::int16_t jump_destination_stellar_id = -1; // +0x92
   std::int16_t ai_hostility_accumulator = 0;     // +0x96
+
+  // Whether this ship is flagged as carrying a mining scoop outfit (ShipState
+  // +0xBE mining_scoop_active, derived by Outfit_HasMiningScoopOutfit).
+  bool mining_scoop_active = false;
 
   // --- Misc ---
   std::int16_t timed_action_counter = -1; // +0xC908

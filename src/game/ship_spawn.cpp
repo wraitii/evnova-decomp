@@ -104,4 +104,84 @@ int NovaShip_AllocateShipSlot(GameState &state,
   return slot;
 }
 
+// Ghidra 0x004259b0 EncounterFleet_SpawnRandomEncounterFleet -- lead-ship
+// slice only. See the header for the field rationale and the deferred parts.
+//
+// Lead shaping decoded from the original: allocates a slot (reserve 8), then
+// ship_class = def lead (already zero-based), government = def government_id,
+// ai_behavior = requested code or ship-class default when -1, base shield/
+// armor from the ship class, mission slots cleared, escort-eligibility and
+// mining-scoop derived flags, and the timed-action seed. The original also
+// seeds random cargo for carry_cargo_flag & low-default-AI fleets, positions
+// the lead (spin-out / jump-in), copies the 8-bank weapon loadout and spawns
+// the escorts; those are deferred and left at defaults here (see header TODO).
+int NovaEncounter_SpawnFleetLeadShip(GameState &state,
+                                     std::int16_t system_id,
+                                     std::int16_t fleet_def_index) {
+  const FleetDef *def =
+      state.scenario.Fleet(static_cast<std::int16_t>(fleet_def_index + 0x80));
+  if (def == nullptr) {
+    return -1;
+  }
+  // The original no-ops when the def has no lead ship or is not currently
+  // available (is_available_runtime).
+  if (def->lead_ship_class_id < 0 || !def->is_available_runtime) {
+    return -1;
+  }
+
+  const int slot = NovaShip_AllocateShipSlot(state, system_id, 8);
+  if (slot == -1) {
+    return -1;
+  }
+
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id =
+      static_cast<std::int16_t>(def->lead_ship_class_id + 0x80);
+  ship.faction_or_government_id = def->government_id;
+
+  const ShipClass *cls = state.scenario.Ship(ship.ship_class_id);
+  // The spawned-lead flavor of the original takes an explicit ai_behavior_code
+  // argument; this slice models the -1 flavor, whose effective behavior is the
+  // lead ship class's default AI (the code-6 escort behavior is the escorts'
+  // concern).
+  ship.ai_behavior_code = cls != nullptr ? cls->default_ai_behavior : 0;
+
+  if (cls != nullptr) {
+    ship.shield_points = static_cast<float>(cls->base_shield);
+    ship.armor_points = static_cast<float>(cls->base_armor);
+    ship.timed_action_counter = cls->timed_action_counter_init;
+  } else {
+    ship.shield_points = 0.0F;
+    ship.armor_points = 0.0F;
+    ship.timed_action_counter = 0;
+  }
+
+  // Mission/misc slots cleared and derived flags (the original computes
+  // escort-eligibility + mining-scoop here; mining-scoop is deferred, kept
+  // false).
+  ship.mission_ship_slot = -1;
+  ship.mission_fleet_slot = -1;
+  ship.mining_scoop_active = false;
+  ship.ai_hostility_accumulator = 0;
+  ship.credits = 10000; // (a round number; the original's per-spawn floor)
+  ship.jump_destination_stellar_id = -2;
+  ship.mission_owner_slot = -1;
+
+  // Positioning (DEFERRED positioning nuance): the original spins the lead out
+  // at a random polar offset (AI state 0x08) or jumps it in at an adjacent
+  // stellar (state 0x15). Those AI-state entries are not yet reconstructed, so
+  // the lead is left at the system origin with a fixed heading and a static
+  // ai_state_code 0 -- visible and positioned for rendering, but not yet given
+  // motion or a spawn animation. TODO(decomp).
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  ship.speed = 0.0F;
+  ship.heading = 0.0F;
+  ship.ai_state_code = 0;
+
+  return slot;
+}
+
 } // namespace game

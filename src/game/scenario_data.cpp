@@ -431,14 +431,15 @@ namespace {
 // s\xd8st (System / s\xffst) decode
 // ---------------------------------------------------------------------------
 // Header verified: xPos+0, yPos+2, Con1-16+0x04, NavDef1-16+0x24,
-// DudeTypes+0x6e, % Prob+0x7e, govt+0x66, BkgndColor+0x8e (24-bit RRGGBB,
-// Ghidra NovaData_LoadScenarioResourceTables reads a 32-bit at payload +0x8e
-// and splits the three bytes into SystemDef.field_0x1ee/.f0/.f2), Murk+0x92
-// (feeds SystemDef.murk at +0xbc; Ghidra previously mislabeled this field
+// AvgShips+0x64, govt+0x66, Message+0x68, Asteroids+0x6a, Interference+0x6c,
+// DudeTypes+0x6e, % Prob+0x7e, BkgndColor+0x8e (24-bit RRGGBB, Ghidra
+// NovaData_LoadScenario- ResourceTables reads a 32-bit at payload +0x8e and
+// splits the three bytes into SystemDef.field_0x1ee/.f0/.f2), Murk+0x92 (feeds
+// SystemDef.murk at +0xbc; Ghidra previously mislabeled this field
 // "alert_level" - the EV Nova Bible documents Murk as the starfield/ambience
 // opacity, negative hides the starfield). The loader also reads DudeTypes/Prob
-// (8 shorts each), a Message/Asteroids/Interference block and ReinfFleet/Time/
-// Intrval near the end of the record, plus the Visibility string.
+// (8 shorts each, with id rebasing/prob clamping), ReinfFleet/Time/Intrval near
+// the end of the record, plus the Visibility string.
 [[nodiscard]] System DecodeSystem(std::span<const std::byte> bytes) {
   System s;
   s.pos_x = ReadBeI16(bytes, 0x00);
@@ -447,10 +448,35 @@ namespace {
     s.links[i] = ReadBeI16(bytes, 0x04 + i * 2);
     s.nav_defs[i] = ReadBeI16(bytes, 0x24 + i * 2);
   }
+  // AvgShips/Govt/Message/Asteroids/Interference block (payload +0x64..+0x6c),
+  // verified against the loader (0x004bd3c0): avg_ships +0x64, government
+  // +0x66, Message +0x68, Asteroids +0x6a, Interference +0x6c.
+  s.avg_ships = ReadBeI16(bytes, 0x64);
   s.government_id = ReadBeI16(bytes, 0x66);
+  s.message_id = ReadBeI16(bytes, 0x68);
+  s.asteroid_count = ReadBeI16(bytes, 0x6a);
+  s.interference = ReadBeI16(bytes, 0x6c);
+  // Government rebase mirrors the loader: < 0x80 or > 0x17f -> -1 else -0x80.
+  if (s.government_id < 0x80 || s.government_id > 0x17f) {
+    s.government_id = -1;
+  } else {
+    s.government_id = static_cast<std::int16_t>(s.government_id - 0x80);
+  }
   for (std::size_t i = 0; i < s.dude_types.size(); ++i) {
     s.dude_types[i] = ReadBeI16(bytes, 0x6e + i * 2);
     s.dude_prob[i] = ReadBeI16(bytes, 0x7e + i * 2);
+    // Dude type id rebase/clamp (loader): < 0x80 or > 0x47e -> -1 else -0x80.
+    if (s.dude_types[i] < 0x80 || s.dude_types[i] > 0x47e) {
+      s.dude_types[i] = -1;
+    } else {
+      s.dude_types[i] = static_cast<std::int16_t>(s.dude_types[i] - 0x80);
+    }
+    // % Prob clamp to [0,100] (loader).
+    if (s.dude_prob[i] < 0) {
+      s.dude_prob[i] = 0;
+    } else if (s.dude_prob[i] > 100) {
+      s.dude_prob[i] = 100;
+    }
   }
   // BkgndColor (s\xd8st +0x8e): three colour bytes (pure black when unset) that
   // the original reads as a 32-bit little-endian value and splits into the
@@ -468,15 +494,70 @@ namespace {
   // equivalently hides the starfield (NovaEffects_QueuedAmbientStarParticles
   // clears ambient stars when SystemDef.murk < 0).
   s.murk = ReadBeI16(bytes, 0x92);
-  // TODO(decomp): AvgShips / Message / Asteroids / Interference / AstTypes
-  // payload offsets are not yet confirmed against the loader; they stay
-  // defaulted here. Interference and the background-color bit-repacking are
-  // load-time transforms not yet reconstructed.
   s.reinf_fleet = ReadBeI16(bytes, 0x196);
   s.reinf_time = ReadBeI16(bytes, 0x198);
   s.reinf_interval = ReadBeI16(bytes, 0x19a);
   s.visibility_expr = ReadCString(bytes, 0x96);
   return s;
+}
+
+// ---------------------------------------------------------------------------
+// fl\x91t (RandomEncounterFleetDef) decode
+// ---------------------------------------------------------------------------
+// Offsets verified against the loader's fleet section (0x004bd3c0):
+// lead_ship_class payload +0x00, escort_ship_class_ids[4] +0x02,
+// escort_min_count[4] +0x0a, escort_max_count[4] +0x12, government_id +0x1a,
+// spawn_system_filter +0x1c, availability_expression +0x1e, arrival_message_id
+// +0x11e, carry_cargo_flags +0x120. The loader rebases every id that is >= 0x80
+// down by 0x80 and nulls the fields whose id reads < 0x80: lead id < 0x80
+// becomes 0 (and the def never spawns), government id < 0x80 becomes -1, and a
+// < 0x80 escort class id invalidates that escort slot (-1 with min/max zeroed).
+// is_available_runtime is runtime-only (starts false); the availability string
+// is left as read.
+[[nodiscard]] FleetDef DecodeFleet(std::span<const std::byte> bytes) {
+  FleetDef f;
+
+  f.lead_ship_class_id = ReadBeI16(bytes, 0x00);
+  f.government_id = ReadBeI16(bytes, 0x1a);
+  f.spawn_system_filter = ReadBeI16(bytes, 0x1c);
+  f.arrival_message_id = ReadBeI16(bytes, 0x11e);
+  f.flags = ReadBe16(bytes, 0x120);
+
+  for (std::size_t i = 0; i < 4; ++i) {
+    f.escort_ship_class_ids[i] = ReadBeI16(bytes, 0x02 + i * 2);
+    f.escort_min_count[i] = ReadBeI16(bytes, 0x0a + i * 2);
+    f.escort_max_count[i] = ReadBeI16(bytes, 0x12 + i * 2);
+  }
+  f.availability_expr = ReadCString(bytes, 0x1e);
+
+  // Rebasing mirrors the loader's per-id normalization. A < 0x80 lead
+  // means "no fleet" and is modelled as -1 (matching the original's
+  // `lead_ship_class_id == -1` spawn gate in EncounterFleet_SpawnRandom-
+  // EncounterFleet 0x004259b0; the loader's transient store of 0 for that
+  // case is unused at spawn time).
+  if (f.lead_ship_class_id < 0x80) {
+    f.lead_ship_class_id = -1;
+  } else {
+    f.lead_ship_class_id =
+        static_cast<std::int16_t>(f.lead_ship_class_id - 0x80);
+  }
+  if (f.government_id < 0x80) {
+    f.government_id = -1;
+  } else {
+    f.government_id = static_cast<std::int16_t>(f.government_id - 0x80);
+  }
+  for (std::size_t i = 0; i < 4; ++i) {
+    if (f.escort_ship_class_ids[i] < 0x80) {
+      f.escort_ship_class_ids[i] = -1;
+      f.escort_min_count[i] = 0;
+      f.escort_max_count[i] = 0;
+    } else {
+      f.escort_ship_class_ids[i] =
+          static_cast<std::int16_t>(f.escort_ship_class_ids[i] - 0x80);
+    }
+  }
+
+  return f;
 }
 
 } // namespace
@@ -511,6 +592,11 @@ const Government *ScenarioData::Government(std::int16_t resource_id) const {
   return index < governments.size() ? &governments[index] : nullptr;
 }
 
+const FleetDef *ScenarioData::Fleet(std::int16_t resource_id) const {
+  const auto index = static_cast<std::size_t>(resource_id) - 0x80;
+  return index < fleets.size() ? &fleets[index] : nullptr;
+}
+
 bool ScenarioData::LoadFromArchives() {
   // The original sizes these tables to the family maximum and zero-fills
   // missing slots (0x200 ships/outfits, 0x100 weapons). We mirror that so
@@ -523,6 +609,9 @@ bool ScenarioData::LoadFromArchives() {
   // GovernmentDef table is capped at 0x100 entries by the original (loop bound
   // sVar21 < 0x100); federal classes are indexed by government id minus 0x80.
   governments.assign(0x100, {});
+  // Random-encounter fleet tables: the original loops < 0x100 entries indexed
+  // by fleet id minus 0x80.
+  fleets.assign(0x100, {});
 
   std::size_t loaded_ships = 0;
   std::size_t loaded_weapons = 0;
@@ -530,6 +619,7 @@ bool ScenarioData::LoadFromArchives() {
   std::size_t loaded_stellars = 0;
   std::size_t loaded_systems = 0;
   std::size_t loaded_governments = 0;
+  std::size_t loaded_fleets = 0;
 
   for (std::int32_t id = 0x80; id <= 0x27f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
@@ -591,16 +681,27 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_governments;
     }
   }
+  // Random-encounter fleet defs (Nova Data 1 fl\x91t family). The original
+  // walks ids up to 0x100 slots and zero-fills absent ones; a def with no lead
+  // ship (< 0x80 lead) is suppressed by the DecodeFleet rebasing.
+  for (std::int32_t id = 0x80; id <= 0x17f; ++id) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kFleetResourceType, static_cast<std::uint16_t>(id))) {
+      fleets[static_cast<std::size_t>(id) - 0x80] = DecodeFleet(res->bytes);
+      ++loaded_fleets;
+    }
+  }
 
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
-      "{} systems, {} governments",
+      "{} systems, {} governments, {} fleet defs",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
       loaded_stellars,
       loaded_systems,
-      loaded_governments);
+      loaded_governments,
+      loaded_fleets);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 
