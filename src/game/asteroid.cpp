@@ -1,4 +1,4 @@
-#include "maneuver.hpp"
+#include "asteroid.hpp"
 
 #include "../log.hpp"
 #include "scenario_data.hpp"
@@ -22,24 +22,24 @@ inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
   return static_cast<std::int16_t>(dist(state.rng));
 }
 
-// Ghidra _DAT_00575298: the double 0.01 used across the manoeuvre spawn for
+// Ghidra _DAT_00575298: the double 0.01 used across the asteroid spawn for
 // converting the integer random rolls into the small fractional world/pixel
 // scales the asteroid-drift records use.
-constexpr double kManeuverScale = 0.01;
+constexpr double kAsteroidScale = 0.01;
 
-// Ghidra _DAT_00575280: 0.5. The asteroid-drift scatter centers each
-// random target position around the player (`pos +/- radius*0.5`), so a random
-// offset of [0, radius) maps to a [-radius*0.5, +radius*0.5) band.
+// Ghidra _DAT_00575280: 0.5. The asteroid-drift scatter centers each random
+// target position around the player (`pos +/- radius*0.5`), so a random offset
+// of [0, radius) maps to a [-radius*0.5, +radius*0.5) band.
 constexpr float kScatterCenter = 0.5F;
 
 // Ghidra _DAT_005751f8: 2.0. The minimum ring radius for the place_in_ring
-// branch of Dude_SpawnAsteroid: `max(scatter_y, 2.0)`.
+// branch of Asteroid_Spawn: `max(scatter_y, 2.0)`.
 constexpr float kRingRadiusMin = 2.0F;
 
-// Ghidra _DAT_005752d8: -0.01. Negative manoeuvre scale; the ring branch uses
+// Ghidra _DAT_005752d8: -0.01. Negative asteroid scale; the ring branch uses
 // it to push one of the two velocity axes away from the player while the other
-// pulls inward (see NovaDude_SpawnAsteroid).
-constexpr double kNegManeuverScale = -0.01;
+// pulls inward (see NovaAsteroid_Spawn).
+constexpr double kNegAsteroidScale = -0.01;
 
 // Scatter/ring radius for an asteroid spawn, measured from the player. The
 // original reads the (x, y) pair out of the random-encounter fleet-def scratch
@@ -47,8 +47,8 @@ constexpr double kNegManeuverScale = -0.01;
 // (+0x80 for x) / `._238_2_` (for y). The clean-room has no such scratch
 // buffer, so these stand in for those two loaded values. TODO(decomp): confirm
 // the exact radii once the running game is observed (Step 4 visual validation).
-constexpr std::int32_t kRoamingScatterX = 128;
-constexpr std::int32_t kRoamingScatterY = 128;
+constexpr std::int32_t kAsteroidScatterX = 128;
+constexpr std::int32_t kAsteroidScatterY = 128;
 
 // Ring-direction spread used by the place_in_ring branch: the random offset
 // along the axis is drawn in [0, round(radius/2)). The original computes this
@@ -61,45 +61,45 @@ constexpr std::int32_t RingSpread(std::int32_t radius) {
 
 } // namespace
 
-int NovaManeuver_SpawnState(GameState &state,
-                            float pos_x,
-                            float pos_y,
-                            std::int16_t type) {
+int NovaAsteroid_SpawnRecord(GameState &state,
+                             float pos_x,
+                             float pos_y,
+                             std::int16_t type) {
   // Find the first inactive pool slot; give up when all 16 are busy.
-  std::size_t slot = ManeuverState::kPoolSize;
-  for (std::size_t i = 0; i < ManeuverState::kPoolSize; ++i) {
-    if (!state.maneuver_pool[i].active) {
+  std::size_t slot = AsteroidState::kPoolSize;
+  for (std::size_t i = 0; i < AsteroidState::kPoolSize; ++i) {
+    if (!state.asteroid_pool[i].active) {
       slot = i;
       break;
     }
   }
-  if (slot == ManeuverState::kPoolSize) {
+  if (slot == AsteroidState::kPoolSize) {
     return -1;
   }
 
-  ManeuverState &m = state.maneuver_pool[slot];
+  AsteroidState &m = state.asteroid_pool[slot];
   m.active = true;
   m.wander_type = type;
   m.target_pos_x = pos_x;
   m.target_pos_y = pos_y;
   // Scatter velocity: [-100,100) * 0.01 -> [-1,1) px/frame.
   m.target_vel_x = static_cast<float>(RandomBelow(state, 200) - 100) *
-                   static_cast<float>(kManeuverScale);
+                   static_cast<float>(kAsteroidScale);
   m.target_vel_y = static_cast<float>(RandomBelow(state, 200) - 100) *
-                   static_cast<float>(kManeuverScale);
+                   static_cast<float>(kAsteroidScale);
 
   // Wander radius/lifetime. The original draws this from the per-type sprite
   // descriptor's frame count (descriptor[mode]+0x54). Until the drift-sprite
   // system lands (Step 3/4) the decoded per-type `lifetime` field stands in;
-  // see ManeuverTypeDef.lifetime TODO(decomp).
-  const ManeuverTypeDef *row =
-      state.scenario.ManeuverType(static_cast<std::int16_t>(type + 0x80));
+  // see AsteroidDef.lifetime TODO(decomp).
+  const AsteroidDef *row =
+      state.scenario.AsteroidType(static_cast<std::int16_t>(type + 0x80));
   const std::int32_t lifetime = row != nullptr ? row->lifetime : 0;
   m.wander_radius = static_cast<float>(RandomBelow(state, lifetime));
   const float speed_mult = row != nullptr ? row->wander_speed_multiplier : 1.0F;
   // wander_speed = (rand(0x29)+0x50) * speed_mult * 0.01 -> 0.8..1.2 scaled.
   m.wander_speed = static_cast<float>(RandomBelow(state, 0x29) + 0x50) *
-                   speed_mult * static_cast<float>(kManeuverScale);
+                   speed_mult * static_cast<float>(kAsteroidScale);
   // Flip the wander direction sign half of the time (Ghidra _DAT_005752e0 =
   // -1.0): the sprite drifts toward or away from its spawn.
   if (RandomBelow(state, 2) == 0) {
@@ -108,7 +108,7 @@ int NovaManeuver_SpawnState(GameState &state,
   m.wander_table_value =
       row != nullptr ? row->wander_table_value : static_cast<std::int16_t>(0);
 
-  NovaLog::Debug("maneuver spawn slot {} type {} lifetime {} speed {}",
+  NovaLog::Debug("asteroid spawn slot {} type {} lifetime {} speed {}",
                  slot,
                  type,
                  lifetime,
@@ -116,26 +116,26 @@ int NovaManeuver_SpawnState(GameState &state,
   return static_cast<int>(slot);
 }
 
-// Mirrors Dude_SpawnAsteroid (0x00421830): allocates one asteroid / drift
-// debris manoeuvre record into a free pool slot. `place_in_ring == 0` scatters
-// the target around the player (a [-radius*0.5, +radius*0.5) band with a random
-// velocity), otherwise it parks the target along an axis-aligned ring of radius
-// max(scatter_y, 2) near the player. The record's wander type is a 0..15
-// manoeuvre-type index (the Metal/Ice/Dust/Crystal x size-tier rows, i.e. the
-// r\xf6id asteroid types) that the system's ast_types mask must permit:
-// `(1 << (type & 0x1f)) & ast_types` must be set, otherwise the random pick is
-// redrawn. The wander radius/speed/table value are seeded from that type's
-// manoeuvre row, mirroring the per-type recipe used by NovaManeuver_SpawnState.
-// Returns the allocated pool slot, or -1 when the system declares no asteroids,
-// its ast_types mask is clear, all slots are busy, or the invocation is a
-// no-op.
+// Mirrors Asteroid_Spawn (0x00421830): allocates
+// one asteroid / drift debris record into a free pool slot. `place_in_ring ==
+// 0` scatters the target around the player (a [-radius*0.5, +radius*0.5) band
+// with a random velocity), otherwise it parks the target along an axis-aligned
+// ring of radius max(scatter_y, 2) near the player. The record's wander type
+// is a 0..15 asteroid-type index (the Metal/Ice/Dust/Crystal x size-tier rows,
+// i.e. the r\xf6id asteroid types) that the system's ast_types mask must
+// permit: `(1 << (type & 0x1f)) & ast_types` must be set, otherwise the random
+// pick is redrawn. The wander radius/speed/table value are seeded from that
+// type's asteroid row, mirroring the per-type recipe used by
+// NovaAsteroid_SpawnRecord. Returns the allocated pool slot, or -1 when the
+// system declares no asteroids, its ast_types mask is clear, all slots are
+// busy, or the invocation is a no-op.
 //
 // DIVERGENCE (documented): the original first runs a license-parity probe that
 // toggles a license-runtime byte
 // (g_ship_class_defs[alt].is_licensed_runtime_alt). Registration/licence
 // integrity is out of scope for the recompilation (see
 // docs/recomp_startup_main_menu.md), so that latch is skipped.
-int NovaDude_SpawnAsteroid(GameState &state, bool place_in_ring) {
+int NovaAsteroid_Spawn(GameState &state, bool place_in_ring) {
   const System *sys =
       state.scenario.System(state.player.current_system_id + 0x80);
   if (sys == nullptr || sys->asteroid_count < 1 || sys->ast_types == 0) {
@@ -146,7 +146,7 @@ int NovaDude_SpawnAsteroid(GameState &state, bool place_in_ring) {
   // the system's asteroid quota (it will not allocate beyond asteroid_count
   // concurrent drift records).
   int active = 0;
-  for (const ManeuverState &ent : state.maneuver_pool) {
+  for (const AsteroidState &ent : state.asteroid_pool) {
     active += ent.active ? 1 : 0;
   }
   if (active >= sys->asteroid_count) {
@@ -154,81 +154,82 @@ int NovaDude_SpawnAsteroid(GameState &state, bool place_in_ring) {
   }
 
   // Claim the first free slot and mark it active (the +0x20 byte).
-  std::size_t slot = ManeuverState::kPoolSize;
-  for (std::size_t i = 0; i < ManeuverState::kPoolSize; ++i) {
-    if (!state.maneuver_pool[i].active) {
+  std::size_t slot = AsteroidState::kPoolSize;
+  for (std::size_t i = 0; i < AsteroidState::kPoolSize; ++i) {
+    if (!state.asteroid_pool[i].active) {
       slot = i;
       break;
     }
   }
-  if (slot == ManeuverState::kPoolSize) {
+  if (slot == AsteroidState::kPoolSize) {
     return -1;
   }
-  ManeuverState &m = state.maneuver_pool[slot];
+  AsteroidState &m = state.asteroid_pool[slot];
   m.active = true;
 
   const float px = state.player.pos_x;
   const float py = state.player.pos_y;
   if (!place_in_ring) {
     // Scatter around the player: [px - rx*0.5, px + rx*0.5) per axis.
-    m.target_pos_x = static_cast<float>(RandomBelow(state, kRoamingScatterX)) +
-                     px - static_cast<float>(kRoamingScatterX) * kScatterCenter;
-    m.target_pos_y = static_cast<float>(RandomBelow(state, kRoamingScatterY)) +
-                     py - static_cast<float>(kRoamingScatterY) * kScatterCenter;
+    m.target_pos_x = static_cast<float>(RandomBelow(state, kAsteroidScatterX)) +
+                     px -
+                     static_cast<float>(kAsteroidScatterX) * kScatterCenter;
+    m.target_pos_y = static_cast<float>(RandomBelow(state, kAsteroidScatterY)) +
+                     py -
+                     static_cast<float>(kAsteroidScatterY) * kScatterCenter;
     m.target_vel_x = static_cast<float>(RandomBelow(state, 400) - 200) *
-                     static_cast<float>(kManeuverScale);
+                     static_cast<float>(kAsteroidScale);
     m.target_vel_y = static_cast<float>(RandomBelow(state, 400) - 200) *
-                     static_cast<float>(kManeuverScale);
+                     static_cast<float>(kAsteroidScale);
   } else {
     // Park along an axis-aligned ring of radius max(scatter_y, 2). Each axis
     // independently picks a side (+/-); the outward axis gets a negative or
     // positive velocity (push away from center) and the other draws from
     // [0, round(radius/2)) for the along-ring spread.
     const std::int32_t ring = std::max<std::int32_t>(
-        kRoamingScatterY, static_cast<std::int32_t>(kRingRadiusMin));
+        kAsteroidScatterY, static_cast<std::int32_t>(kRingRadiusMin));
     const std::int32_t spread = RingSpread(ring);
     const bool x_plus = RandomBelow(state, 2) == 0;
     if (x_plus) {
       m.target_pos_x = px + static_cast<float>(ring) +
                        static_cast<float>(RandomBelow(state, spread));
       m.target_vel_x = static_cast<float>(RandomBelow(state, 200)) *
-                       static_cast<float>(kNegManeuverScale);
+                       static_cast<float>(kNegAsteroidScale);
     } else {
       m.target_pos_x = (px - static_cast<float>(ring)) -
                        static_cast<float>(RandomBelow(state, spread));
       m.target_vel_x = static_cast<float>(RandomBelow(state, 200)) *
-                       static_cast<float>(kManeuverScale);
+                       static_cast<float>(kAsteroidScale);
     }
     const bool y_plus = RandomBelow(state, 2) == 0;
     if (y_plus) {
       m.target_pos_y = py + static_cast<float>(ring) +
                        static_cast<float>(RandomBelow(state, spread));
       m.target_vel_y = static_cast<float>(RandomBelow(state, 200)) *
-                       static_cast<float>(kNegManeuverScale);
+                       static_cast<float>(kNegAsteroidScale);
     } else {
       m.target_pos_y = (py - static_cast<float>(ring)) -
                        static_cast<float>(RandomBelow(state, spread));
       m.target_vel_y = static_cast<float>(RandomBelow(state, 200)) *
-                       static_cast<float>(kManeuverScale);
+                       static_cast<float>(kAsteroidScale);
     }
   }
 
-  // Pick an asteroid type (manoeuvre-type index 0..15) permitted by the system
-  // ast_types mask, then seed the wander radius/speed/table value from that
-  // row.
+  // Pick an asteroid type (index 0..15) permitted by the system ast_types
+  // mask, then seed the wander radius/speed/table value from that row.
   std::int16_t dir = 0;
   do {
     dir = RandomBelow(state, 0x10);
   } while ((sys->ast_types & (1U << (dir & 0x1f))) == 0);
   m.wander_type = dir;
 
-  const ManeuverTypeDef *row =
-      state.scenario.ManeuverType(static_cast<std::int16_t>(dir + 0x80));
+  const AsteroidDef *row =
+      state.scenario.AsteroidType(static_cast<std::int16_t>(dir + 0x80));
   const std::int32_t lifetime = row != nullptr ? row->lifetime : 0;
   m.wander_radius = static_cast<float>(RandomBelow(state, lifetime));
   const float speed_mult = row != nullptr ? row->wander_speed_multiplier : 1.0F;
   m.wander_speed = static_cast<float>(RandomBelow(state, 0x29) + 0x50) *
-                   speed_mult * static_cast<float>(kManeuverScale);
+                   speed_mult * static_cast<float>(kAsteroidScale);
   if (RandomBelow(state, 2) == 0) {
     m.wander_speed = -m.wander_speed;
   }
@@ -243,43 +244,43 @@ int NovaDude_SpawnAsteroid(GameState &state, bool place_in_ring) {
   return static_cast<int>(slot);
 }
 
-// Mirrors System_InitAsteroids (0x004216B0): restores the current system's
-// asteroid / drift-debris population on spaceflight entry / cross-system
-// travel. When the system declares no asteroids (asteroid_count < 1) it sets
-// the NoRoamingShips latch (GameState.no_roaming_ships_latch): the original
-// writes a 1 byte into g_random_encounter_fleet_defs[0x4d]
-// .availability_expression [0x94] (a scratch area); the clean-room stores it
-// in the explicit game-state flag instead since that scratch buffer is not
-// modelled. Otherwise it spawns `asteroid_count` asteroid records (scatter
-// placement) and pre-warms all 16 manoeuvre-pool slots with a random wander
-// target around the player.
-void NovaSystem_InitAsteroids(GameState &state) {
+// Mirrors Asteroid_InitSystem (0x004216B0):
+// restores the current system's asteroid / drift-debris population on
+// spaceflight entry / cross-system travel. When the system declares no
+// asteroids (asteroid_count < 1) it sets the NoAsteroids latch
+// (GameState.no_asteroids_latch): the original writes a 1 byte into
+// g_random_encounter_fleet_defs[0x4d].availability_expression[0x94] (a scratch
+// area); the clean-room stores it in the explicit game-state flag instead
+// since that scratch buffer is not modelled. Otherwise it spawns
+// `asteroid_count` asteroid records (scatter placement) and pre-warms all 16
+// pool slots with a random wander target around the player.
+void NovaAsteroid_InitSystem(GameState &state) {
   const System *sys =
       state.scenario.System(state.player.current_system_id + 0x80);
   if (sys == nullptr) {
     return;
   }
   if (sys->asteroid_count < 1) {
-    state.no_roaming_ships_latch = true;
+    state.no_asteroids_latch = true;
     return;
   }
 
   for (std::int16_t i = 0; i < sys->asteroid_count; ++i) {
-    (void)NovaDude_SpawnAsteroid(state, /*place_in_ring=*/false);
+    (void)NovaAsteroid_Spawn(state, /*place_in_ring=*/false);
   }
 
   // Pre-warm all 16 pool slots with a random wander target around the player.
-  for (ManeuverState &m : state.maneuver_pool) {
-    m.target_pos_x = static_cast<float>(RandomBelow(state, kRoamingScatterX)) +
+  for (AsteroidState &m : state.asteroid_pool) {
+    m.target_pos_x = static_cast<float>(RandomBelow(state, kAsteroidScatterX)) +
                      state.player.pos_x -
-                     static_cast<float>(kRoamingScatterX) * kScatterCenter;
-    m.target_pos_y = static_cast<float>(RandomBelow(state, kRoamingScatterY)) +
+                     static_cast<float>(kAsteroidScatterX) * kScatterCenter;
+    m.target_pos_y = static_cast<float>(RandomBelow(state, kAsteroidScatterY)) +
                      state.player.pos_y -
-                     static_cast<float>(kRoamingScatterY) * kScatterCenter;
+                     static_cast<float>(kAsteroidScatterY) * kScatterCenter;
     m.target_vel_x = static_cast<float>(RandomBelow(state, 400) - 200) *
-                     static_cast<float>(kManeuverScale);
+                     static_cast<float>(kAsteroidScale);
     m.target_vel_y = static_cast<float>(RandomBelow(state, 400) - 200) *
-                     static_cast<float>(kManeuverScale);
+                     static_cast<float>(kAsteroidScale);
   }
 }
 

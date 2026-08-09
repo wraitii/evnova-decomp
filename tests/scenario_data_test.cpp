@@ -1,4 +1,4 @@
-#include "game/maneuver.hpp"
+#include "game/asteroid.hpp"
 #include "game/scenario_data.hpp"
 #include "game/ship_spawn.hpp"
 #include "game/ship_visual.hpp"
@@ -754,28 +754,28 @@ TEST_CASE("dude class weighted-select returns slots with valid weight",
   REQUIRE(NovaDude_SelectRandomSystemDudeClassIndex(bare, rng) == -1);
 }
 
-// The manoeuvre-type (asteroid-drift) table (r\x9aid family, Nova Data 1)
-// decodes into ScenarioData.maneuver_types. One row per resource id
+// The asteroid-type (asteroid-drift) table (r\x9aid family, Nova Data 1)
+// decodes into ScenarioData.asteroid_defs. One row per resource id
 // 0x80..0x8f (Metal/Ice/Dust/Crystal x Small/Medium/Big/Huge). Values pinned
 // against the shipped rows (verified directly from the raw payload bytes):
 // wander_table_value = word[0x0], wander_speed_multiplier = word[0x2] * 0.01,
 // lifetime = word[0x16] (doubles per size tier), tint +0x18 packed from the
-// +0x0a RGB bytes. The speed/lifetime fields feed the ScriptedManeuverState
-// spawn (NovaManeuver_SpawnState).
-TEST_CASE("manoeuvre-type rows decode from the payload",
-          "[scenario][maneuver]") {
+// +0x0a RGB bytes. The speed/lifetime fields feed the AsteroidState spawn
+// (NovaAsteroid_SpawnRecord).
+TEST_CASE("asteroid-type rows decode from the payload",
+          "[scenario][asteroid]") {
   ScenarioData data;
   REQUIRE(data.LoadFromArchives());
 
   // All 16 ids 0x80..0x8f are present.
   std::size_t present = 0;
-  for (const ManeuverTypeDef &t : data.maneuver_types) {
+  for (const AsteroidDef &t : data.asteroid_defs) {
     present += t.present ? 1U : 0U;
   }
   CHECK(present == 16);
 
   // Metal Small (0x80): value 100, speed 100% (-> 1.0), lifetime 150.
-  const ManeuverTypeDef *small = data.ManeuverType(0x80);
+  const AsteroidDef *small = data.AsteroidType(0x80);
   REQUIRE(small != nullptr);
   REQUIRE(small->present);
   CHECK(small->wander_table_value == 100);
@@ -787,7 +787,7 @@ TEST_CASE("manoeuvre-type rows decode from the payload",
   CHECK(small->field_0x0c == 20);
 
   // Metal Huge (0x83): lifetime doubles with the size tier.
-  const ManeuverTypeDef *huge = data.ManeuverType(0x83);
+  const AsteroidDef *huge = data.AsteroidType(0x83);
   REQUIRE(huge != nullptr);
   REQUIRE(huge->present);
   CHECK(huge->lifetime == 1200);
@@ -797,7 +797,7 @@ TEST_CASE("manoeuvre-type rows decode from the payload",
 
   // Direction sub-array: Metal Medium (0x81) refs 0x80->0 and 0x88->8 (the
   // loader's -0x80 rebase for the 0x80..0x90 window).
-  const ManeuverTypeDef *medium = data.ManeuverType(0x81);
+  const AsteroidDef *medium = data.AsteroidType(0x81);
   REQUIRE(medium != nullptr);
   CHECK(medium->directions[0] == 0); // payload 0x80 rebased
   CHECK(medium->directions[1] == 8); // payload 0x88 rebased
@@ -808,12 +808,12 @@ TEST_CASE("manoeuvre-type rows decode from the payload",
   // ids 0x80..0x8f exist, so ids >= 0x100 fall outside the table and the
   // accessor returns null; ids in the hole (e.g. 0x90) are present==false
   // default rows within the sized table.
-  REQUIRE(data.ManeuverType(0x8f) != nullptr);
-  REQUIRE(data.ManeuverType(0x8f)->present);
-  const ManeuverTypeDef *hole = data.ManeuverType(0x90);
+  REQUIRE(data.AsteroidType(0x8f) != nullptr);
+  REQUIRE(data.AsteroidType(0x8f)->present);
+  const AsteroidDef *hole = data.AsteroidType(0x90);
   REQUIRE(hole != nullptr);
   CHECK_FALSE(hole->present);
-  CHECK(data.ManeuverType(0x100) == nullptr);
+  CHECK(data.AsteroidType(0x100) == nullptr);
 }
 
 } // namespace game

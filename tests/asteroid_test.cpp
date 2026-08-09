@@ -2,26 +2,26 @@
 
 #include <cmath>
 
+#include "game/asteroid.hpp"
 #include "game/game_state.hpp"
-#include "game/maneuver.hpp"
 
 namespace game {
 
-// NovaManeuver_SpawnState (Frame_SpawnScriptedManeuverState 0x00421e60): the
-// first inactive pool slot is claimed, gains the manoeuvre type, spawn
-// position, a scattered target velocity, and the per-type wander values from
-// the loaded manoeuvre-type table. Values follow the original's random-factor
-// recipe (rand(200)-100 scaled by 0.01 for the velocity, etc.).
-TEST_CASE("maneuver spawn claims free slots and scatters a wander target",
-          "[maneuver]") {
+// NovaAsteroid_SpawnRecord (Asteroid_SpawnRecord 0x00421e60): the first
+// inactive pool slot is claimed, gains the asteroid type, spawn position, a
+// scattered target velocity, and the per-type wander values from the loaded
+// asteroid-type table. Values follow the original's random-factor recipe
+// (rand(200)-100 scaled by 0.01 for the velocity, etc.).
+TEST_CASE("asteroid spawn claims free slots and scatters a wander target",
+          "[asteroid]") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
   // Type 0 = Metal Small.
-  const int slot = NovaManeuver_SpawnState(state, 100.0F, 200.0F, 0);
+  const int slot = NovaAsteroid_SpawnRecord(state, 100.0F, 200.0F, 0);
   REQUIRE(slot == 0);
 
-  const ManeuverState &m = state.maneuver_pool[0];
+  const AsteroidState &m = state.asteroid_pool[0];
   CHECK(m.active);
   CHECK(m.wander_type == 0);
   CHECK(m.target_pos_x == 100.0F);
@@ -40,28 +40,27 @@ TEST_CASE("maneuver spawn claims free slots and scatters a wander target",
   // Fill the whole pool; the next spawn reports no free slot.
   int count = 1;
   for (; count < 16; ++count) {
-    const int s = NovaManeuver_SpawnState(state, 0.0F, 0.0F, 3);
+    const int s = NovaAsteroid_SpawnRecord(state, 0.0F, 0.0F, 3);
     REQUIRE(s == count);
   }
-  CHECK(state.maneuver_pool[15].active);
+  CHECK(state.asteroid_pool[15].active);
   // Very likely every slot claims a non-zero (or zero) speed; just assert the
   // full pool is busy and a further spawn fails.
   int busy = 0;
-  for (const auto &ent : state.maneuver_pool) {
+  for (const auto &ent : state.asteroid_pool) {
     busy += ent.active ? 1 : 0;
   }
   CHECK(busy == 16);
-  CHECK(NovaManeuver_SpawnState(state, 0.0F, 0.0F, 0) == -1);
+  CHECK(NovaAsteroid_SpawnRecord(state, 0.0F, 0.0F, 0) == -1);
 }
 
-// NovaDude_SpawnAsteroid (Dude_SpawnAsteroid 0x00421830): the asteroid
-// allocator bails when the system has no asteroids / a clear ast_types mask,
-// respects the asteroid quota, and claims the first free pool slot whose
-// wander direction is permitted by the system ast_types mask when one is
-// available. These records are ASTEROID/drift-debris chars (r\xf6id family),
-// not NPC ships.
-TEST_CASE("asteroid spawn allocates an ast_types-valid manoeuvre slot",
-          "[maneuver][asteroid]") {
+// NovaAsteroid_Spawn (Asteroid_Spawn 0x00421830): the asteroid allocator
+// bails when the system has no asteroids / a clear ast_types mask, respects
+// the asteroid quota, and claims the first free pool slot whose wander
+// direction is permitted by the system ast_types mask when one is available.
+// These records are ASTEROID/drift-debris chars (r\xf6id family), not NPC
+// ships.
+TEST_CASE("asteroid spawn allocates an ast_types-valid slot", "[asteroid]") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
@@ -76,47 +75,47 @@ TEST_CASE("asteroid spawn allocates an ast_types-valid manoeuvre slot",
   REQUIRE(sys->ast_types == 0x0711);
 
   // Allocate up to the asteroid quota.
-  int slot = NovaDude_SpawnAsteroid(state, /*place_in_ring=*/false);
+  int slot = NovaAsteroid_Spawn(state, /*place_in_ring=*/false);
   REQUIRE(slot == 0);
-  CHECK(state.maneuver_pool[0].active);
+  CHECK(state.asteroid_pool[0].active);
   // Direction bit must be in the system ast_types mask.
-  CHECK((sys->ast_types & (1U << (state.maneuver_pool[0].wander_type & 0x1f))) !=
-        0);
+  CHECK((sys->ast_types &
+         (1U << (state.asteroid_pool[0].wander_type & 0x1f))) != 0);
   // Scatter position is a [-rx*0.5, +rx*0.5) band around the player.
-  CHECK(state.maneuver_pool[0].target_pos_x >= 500.0F - 64.0F);
-  CHECK(state.maneuver_pool[0].target_pos_x < 500.0F + 64.0F);
-  CHECK(state.maneuver_pool[0].target_pos_y >= 300.0F - 64.0F);
-  CHECK(state.maneuver_pool[0].target_pos_y < 300.0F + 64.0F);
+  CHECK(state.asteroid_pool[0].target_pos_x >= 500.0F - 64.0F);
+  CHECK(state.asteroid_pool[0].target_pos_x < 500.0F + 64.0F);
+  CHECK(state.asteroid_pool[0].target_pos_y >= 300.0F - 64.0F);
+  CHECK(state.asteroid_pool[0].target_pos_y < 300.0F + 64.0F);
 
-  REQUIRE(NovaDude_SpawnAsteroid(state, false) == 1);
-  REQUIRE(NovaDude_SpawnAsteroid(state, false) == 2);
+  REQUIRE(NovaAsteroid_Spawn(state, false) == 1);
+  REQUIRE(NovaAsteroid_Spawn(state, false) == 2);
   // Quota of 3 is reached; a further spawn is a no-op (no new slot).
-  CHECK(NovaDude_SpawnAsteroid(state, false) == -1);
+  CHECK(NovaAsteroid_Spawn(state, false) == -1);
 }
 
-// NovaSystem_InitAsteroids (System_InitAsteroids 0x004216B0): for a populated
+// NovaAsteroid_InitSystem (Asteroid_InitSystem 0x004216B0): for a populated
 // system it allocates asteroid_count records and pre-warms all 16 pool slots;
-// for an empty system it sets the no-ships latch instead.
+// for an empty system it sets the no-asteroids latch instead.
 TEST_CASE("system init restores the asteroid population and pre-warms the pool",
-          "[maneuver][asteroid]") {
+          "[asteroid]") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.current_system_id = 0; // Kania, asteroid_count 3
   state.player.pos_x = 1000.0F;
   state.player.pos_y = 2000.0F;
 
-  NovaSystem_InitAsteroids(state);
-  CHECK(!state.no_roaming_ships_latch);
+  NovaAsteroid_InitSystem(state);
+  CHECK(!state.no_asteroids_latch);
 
   int active = 0;
-  for (const auto &m : state.maneuver_pool) {
+  for (const auto &m : state.asteroid_pool) {
     active += m.active ? 1 : 0;
   }
   CHECK(active == 3);
 
   // Every slot (active or not) got a pre-warmed scatter target around the
   // player; the pre-warm writes positions/velocities but not the active flag.
-  for (const auto &m : state.maneuver_pool) {
+  for (const auto &m : state.asteroid_pool) {
     CHECK(m.target_pos_x >= 1000.0F - 64.0F);
     CHECK(m.target_pos_x < 1000.0F + 64.0F);
     CHECK(m.target_pos_y >= 2000.0F - 64.0F);
@@ -134,8 +133,8 @@ TEST_CASE("system init restores the asteroid population and pre-warms the pool",
   // genuinely mutable, so casting off const to perturb this one test copy is a
   // deliberate, local exception.
   const_cast<System &>(*s0).asteroid_count = 0;
-  NovaSystem_InitAsteroids(empty);
-  CHECK(empty.no_roaming_ships_latch);
+  NovaAsteroid_InitSystem(empty);
+  CHECK(empty.no_asteroids_latch);
 }
 
 } // namespace game

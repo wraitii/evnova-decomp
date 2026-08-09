@@ -35,7 +35,7 @@ much of each function has been re-implemented.
   - `0%` — not reimplemented (regardless of whether the function is already named/annotated in Ghidra; only reimplementation progress counts here).
 - `impl_file` is the `src/...` path that reimplements the function (empty when `0%`).
 - `comment` is a short note (confidence, known gaps/divergences, TODO(decomp)).
-- DO NOT use tail/head when building, or add a small timeout (as it hangs otherwise)
+- **DO NOT use tail/head when building**, or add a small timeout. tail/head can hang if there are fewer lines output than expected.
 - **Edit `progress.csv` in place**.
 - **`progress.csv` is very large (~3200 rows). Never rewrite it wholesale or dump it to your context. Always locate the target address with grep and make surgical, in-place edits (edit tool / patch), leaving all other rows intact.**
 
@@ -64,7 +64,7 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 - Treat compiler warnings as errors.
 - Format automatically with clang-format; lint with clang-tidy.
 - Avoid tests for provisional code. Only test complex algorithms (such as data loading) where the result is known final and accurate, and implementation difficult. You may write temporary tests when building that we drop on committing (once they pass, they pass). Avoid testing simple gameplay behaviour where the test is too mocked to be relevant.
-- Keep commits small and distinguish faithful reconstruction from deliberate fixes.
+- Keep commits small and distinguish faithful reconstruction from deliberate workarounds.
 - Do not “clean up” strange original behavior.
 - Build both debug and release builds.
 

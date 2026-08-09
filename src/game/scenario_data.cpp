@@ -491,8 +491,8 @@ namespace {
   s.government_id = ReadBeI16(bytes, 0x66);
   s.message_id = ReadBeI16(bytes, 0x68);
   // Payload +0x6a -> SystemDef.asteroid_count (+0x94). The Asteroid field
-  // (number of asteroid/drift records, 0-16); read by System_InitAsteroids
-  // (0x004216B0) / Dude_SpawnAsteroid (0x00421830).
+  // (number of asteroid/drift records, 0-16); read by Asteroid_InitSystem
+  // (0x004216B0) / Asteroid_Spawn (0x00421830).
   s.asteroid_count = ReadBeI16(bytes, 0x6a);
   s.interference = ReadBeI16(bytes, 0x6c);
   // Government rebase mirrors the loader: < 0x80 or > 0x17f -> -1 else -0x80.
@@ -535,7 +535,7 @@ namespace {
   s.murk = ReadBeI16(bytes, 0x92);
   // AstTypes (s\xd8st +0x94): a 16-bit mask of allowed asteroid types. The
   // loader copies it verbatim into SystemDef.ast_types (+0x1f4);
-  // Dude_SpawnAsteroid (0x00421830) tests it via
+  // Asteroid_Spawn (0x00421830) tests it via
   // (1 << (wander_type & 0x1f)) & ast_types.
   s.ast_types = static_cast<std::uint16_t>(ReadBeI16(bytes, 0x94));
   s.reinf_fleet = ReadBeI16(bytes, 0x196);
@@ -661,18 +661,17 @@ namespace {
 }
 
 // ---------------------------------------------------------------------------
-// r\x9aid (ManeuverTypeDef) decode
+// r\x9aid (AsteroidDef) decode
 // ---------------------------------------------------------------------------
-// See ManeuverTypeDef in scenario_data.hpp. Mirrors the original loader's
-// manoeuvre-type section (NovaData_LoadScenarioResourceTables 0x004bd3c0 at
+// See AsteroidDef in scenario_data.hpp. Mirrors the original loader's
+// asteroid-type section (NovaData_LoadScenarioResourceTables 0x004bd3c0 at
 // 0x004c6207..), which reads the record's fields into the shared 0x1c-row
 // table exposed as DAT_005912dc / DAT_005912f0. Fields are big-endian 16-bit
 // except the 4-byte colour word at +0x0a (byte-swapped to a packed 15-bit RGB
 // at +0x18). Validation branches match the loader (skip row on a bad id
 // window); harmless for the shipped records.
-[[nodiscard]] ManeuverTypeDef
-DecodeManeuverType(std::span<const std::byte> bytes) {
-  ManeuverTypeDef t;
+[[nodiscard]] AsteroidDef DecodeAsteroidType(std::span<const std::byte> bytes) {
+  AsteroidDef t;
   if (bytes.size() < 0x18) {
     return t;
   }
@@ -754,10 +753,9 @@ const DudeDef *ScenarioData::Dude(std::int16_t resource_id) const {
   return index < dudes.size() ? &dudes[index] : nullptr;
 }
 
-const ManeuverTypeDef *
-ScenarioData::ManeuverType(std::int16_t resource_id) const {
+const AsteroidDef *ScenarioData::AsteroidType(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
-  return index < maneuver_types.size() ? &maneuver_types[index] : nullptr;
+  return index < asteroid_defs.size() ? &asteroid_defs[index] : nullptr;
 }
 
 bool ScenarioData::LoadFromArchives() {
@@ -779,8 +777,8 @@ bool ScenarioData::LoadFromArchives() {
   // (the loader's loop bound at 0x004c2c81) at a 0x4a-byte DudeDef stride,
   // indexed by dude id minus 0x80.
   dudes.assign(0x200, {});
-  // Manoeuvre-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
-  maneuver_types.assign(0x80, {});
+  // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
+  asteroid_defs.assign(0x80, {});
 
   std::size_t loaded_ships = 0;
   std::size_t loaded_weapons = 0;
@@ -790,7 +788,7 @@ bool ScenarioData::LoadFromArchives() {
   std::size_t loaded_governments = 0;
   std::size_t loaded_fleets = 0;
   std::size_t loaded_dudes = 0;
-  std::size_t loaded_maneuver_types = 0;
+  std::size_t loaded_asteroid_types = 0;
 
   for (std::int32_t id = 0x80; id <= 0x27f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
@@ -874,21 +872,20 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_dudes;
     }
   }
-  // Manoeuvre-type (asteroid-drift) rows (r\x9aid family), 16 ids 0x80..0x8f.
+  // Asteroid-type rows (r\x9aid family), 16 ids 0x80..0x8f.
   for (std::int32_t id = 0x80; id < 0x90; ++id) {
-    if (const auto res =
-            NovaResource_LoadNamed(scenario::kManeuverTypeResourceType,
-                                   static_cast<std::uint16_t>(id))) {
-      maneuver_types[static_cast<std::size_t>(id) - 0x80] =
-          DecodeManeuverType(res->bytes);
-      ++loaded_maneuver_types;
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kAsteroidResourceType, static_cast<std::uint16_t>(id))) {
+      asteroid_defs[static_cast<std::size_t>(id) - 0x80] =
+          DecodeAsteroidType(res->bytes);
+      ++loaded_asteroid_types;
     }
   }
 
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} governments, {} fleet defs, {} dude defs, "
-      "{} maneuver types",
+      "{} asteroid types",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
@@ -897,7 +894,7 @@ bool ScenarioData::LoadFromArchives() {
       loaded_governments,
       loaded_fleets,
       loaded_dudes,
-      loaded_maneuver_types);
+      loaded_asteroid_types);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

@@ -327,14 +327,14 @@ struct HudOverlayState {
   std::uint64_t expiry_ms = 0;
 };
 
-// A single roaming/asteroid-drift manoeuvre record. The original keeps 16 of
-// these in one global pool `g_scripted_maneuver_state_ptr` (16 x 0x24 bytes)
-// and spawns them with Frame_SpawnScriptedManeuverState (0x00421e60) from
-// effect packages (impact debris) and the travel-scene walker; the per-tick
-// drift is Frame_UpdateScriptedManeuverSprites (0x00436910). Layout mirrors the
-// Ghidra ScriptedManeuverState so a future sprite/drift layer can port
-// verbatim.
-struct ManeuverState {
+// A single asteroid / drift-debris drift record (the r\xf6id asteroid/manoeuvre
+// family). The original keeps 16 of these in one global pool
+// `g_asteroid_states` (16 x 0x24 bytes) and spawns them with
+// Asteroid_SpawnRecord (0x00421e60) from effect packages (impact debris) and
+// the travel-scene walker; the per-tick drift is Asteroid_UpdateSprites
+// (0x00436910). Layout mirrors the Ghidra AsteroidState so a future
+// sprite/drift layer can port verbatim.
+struct AsteroidState {
   // Sprite handle / state_code for this record; the drift renderer assigns a
   // sprite set by wander_type and ticks/arm its frame counter from +0x54.
   std::int32_t state_code = 0; // +0x00
@@ -343,16 +343,16 @@ struct ManeuverState {
   float target_vel_x = 0.0F;   // +0x0c
   float target_vel_y = 0.0F;   // +0x10
   // Wander phase / lifetime accumulator. Spawned as a random value in
-  // [0, pertype lifetime) (Frame_SpawnScriptedManeuverState) and advanced by
-  // wander_speed each tick, wrapping via the sprite descriptor's frame count
-  // (Frame_UpdateScriptedManeuverSprites).
+  // [0, pertype lifetime) (Asteroid_SpawnRecord) and advanced by wander_speed
+  // each tick, wrapping via the sprite descriptor's frame count
+  // (Asteroid_UpdateSprites).
   float wander_radius = 0.0F;          // +0x14
   float wander_speed = 0.0F;           // +0x18
   std::int16_t wander_table_value = 0; // +0x1c
-  std::int16_t wander_type = 0; // +0x1e (index into the manoeuvre-type table)
+  std::int16_t wander_type = 0; // +0x1e (index into the asteroid-type table)
   bool active = false;          // +0x20
 
-  // Pool size for the 16-slot ScriptedManeuverState table.
+  // Pool size for the 16-slot AsteroidState table.
   static constexpr std::size_t kPoolSize = 16;
 };
 
@@ -456,20 +456,19 @@ struct GameState {
   // Each entry is one fired round at a given world position/velocity.
   std::vector<ActiveShot> active_shots;
 
-  // The 16-slot roaming/asteroid-drift manoeuvre pool (mirrors the original
-  // `g_scripted_maneuver_state_ptr`). Shared by Frame_SpawnScriptedManeuver-
-  // State (spawn), the future System_InitAsteroids / Dude_SpawnAsteroid
-  // (Steps 3/4) and the step 5 per-tick drift. The records are ASTEROID /
-  // drift-debris chars (r\xf6id family), not NPC ships. Slots are found by
-  // scanning for `active == false`.
-  std::array<ManeuverState, ManeuverState::kPoolSize> maneuver_pool{};
+  // The 16-slot asteroid / drift-debris pool (mirrors the original
+  // `g_asteroid_states`). Shared by Asteroid_SpawnRecord (spawn), the future
+  // Asteroid_InitSystem / Asteroid_Spawn (Steps 3/4) and the step 5 per-tick
+  // drift. The records are ASTEROID / drift-debris chars (r\xf6id family), not
+  // NPC ships. Slots are found by scanning for `active == false`.
+  std::array<AsteroidState, AsteroidState::kPoolSize> asteroid_pool{};
 
-  // "no asteroids" latch set by System_InitAsteroids (0x004216B0) when the
+  // "no asteroids" latch set by Asteroid_InitSystem (0x004216B0) when the
   // current system declares asteroid_count < 1. The original writes a 1 byte
   // into the random-encounter fleet-def scratch area
-  // (g_random_encounter_fleet_defs[0x4d].availability_expression[0x94]); the
-  // clean-room stores it here since that scratch buffer is not modelled.
-  bool no_roaming_ships_latch = false;
+  // (g_random_encounter_fleet_defs[0x4d].availability_expression[0x94]);
+  // the clean-room stores it here since that scratch buffer is not modelled.
+  bool no_asteroids_latch = false;
 
   // Decoded player weapon fire sounds, keyed by the weapon's `fire_sound`
   // slot. Ghidra Weapon_FirePlayerWeaponBank resolves the weapon's

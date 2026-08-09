@@ -42,16 +42,15 @@ constexpr std::uint32_t kFleetResourceType = 0x666c9174;      // fl\x91t
 // record per dude def in Nova Data 1; see DudeDef. Loaded by the original
 // NovaData_LoadScenarioResourceTables (0x004bd3c0) into the g_dude_defs table.
 constexpr std::uint32_t kDudeResourceType = 0x649f6465; // d\x9fde
-// "r\x9aid" (0x729a6964) — the ASTEROID/maneuver-drift class family. Records
-// are named "Metal Small".."Crystal Huge" (4 compositions x 4 sizes = 16
-// entries, resource ids 0x80..0x8f, the r\xf6id asteroid ids 128..143) and
-// define the per-type wander/drift parameters fed to ScriptedManeuverState
-// spawns (Frame_SpawnScriptedManeuverState 0x00421e60 / Dude_SpawnAsteroid
-// 0x00421830 wander reads).
+// "r\x9aid" (0x729a6964) — the ASTEROID/roid class family. Records are named
+// "Metal Small".."Crystal Huge" (4 compositions x 4 sizes = 16 entries,
+// resource ids 0x80..0x8f, the r\xf6id asteroid ids 128..143) and define the
+// per-type wander/drift parameters fed to AsteroidState spawns
+// (Asteroid_SpawnRecord 0x00421e60 / Asteroid_Spawn 0x00421830 wander reads).
 // Decoded by the original loader (NovaData_LoadScenarioResourceTables
 // 0x004bd3c0 at 0x004c6207) into the DAT_005912dc / DAT_005912f0 global pair,
-// which share one 0x1c-byte-strided 16-row table. See ManeuverTypeDef.
-constexpr std::uint32_t kManeuverTypeResourceType = 0x729a6964; // r\x9aid
+// which share one 0x1c-byte-strided 16-row table. See AsteroidDef.
+constexpr std::uint32_t kAsteroidResourceType = 0x729a6964; // r\x9aid
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -525,11 +524,11 @@ struct System {
   // spawn for the system (EV Nova Bible: 0 = none, 1-16 = that many "asteroid"
   // drift-char records). The loader stores this payload word into
   // SystemDef.asteroid_count (+0x94; verified in the 0x004bd3c0 system section:
-  // MOV WORD [g_system_defs+ebp+0x94], payload+0x6a). System_InitAsteroids
-  // (0x004216B0) spawns this many Dude_SpawnAsteroid records and pre-warms the
-  // 16-slot maneuver pool; Dude_SpawnAsteroid (0x00421830) bails out when it
-  // is < 1. Clarified from a previous misname `roaming_ship_count`: these are
-  // ASTEROID drift records, not NPC ships.
+  // MOV WORD [g_system_defs+ebp+0x94], payload+0x6a). Asteroid_InitSystem
+  // (0x004216B0) spawns this many Asteroid_Spawn records and pre-warms the
+  // 16-slot pool; Asteroid_Spawn bails out when it is < 1. Clarified from a
+  // previous misname `roaming_ship_count`: these are ASTEROID drift records,
+  // not NPC ships.
   std::int16_t asteroid_count = 0;
   std::int16_t interference = 0; // Interference (+0x6c)
   // BkgndColor (s\xd8st +0x8e): per-system space background tint stored as
@@ -545,10 +544,11 @@ struct System {
   // AstTypes (payload +0x94): flag bits determining which asteroid types appear
   // in the system (EV Nova Bible: bit0 = Small metal r\xf6id 128, bit1 = Medium
   // metal, etc.). Copied verbatim into SystemDef.ast_types at +0x1f4;
-  // Dude_SpawnAsteroid (0x00421830) tests it via (1 << (wander_type & 0x1f)) &
-  // this mask to reject a random asteroid type the system does not host, and
-  // gives up entirely when it is 0. These are the r\xf6id (asteroid) types, not
-  // ship roles; renamed from a misname `roaming_direction_bitmap`.
+  // Asteroid_Spawn (0x00421830) tests it via
+  // (1 << (wander_type & 0x1f)) & this mask to reject a random asteroid type
+  // the system does not host, and gives up entirely when it is 0. These are
+  // the r\xf6id (asteroid) types, not ship roles; renamed from a misname
+  // `roaming_direction_bitmap`.
   std::uint16_t ast_types = 0;
   std::int16_t reinf_fleet = -1;   // ReinfFleet
   std::int16_t reinf_time = 0;     // ReinfTime
@@ -676,25 +676,25 @@ struct DudeDef {
   bool present = false;
 };
 
-// One 0x1c-byte row of the shared maneuver/asteroid-drift table the original
-// exposes through two overlapping global labels: DAT_005912dc (a short[0xe]
-// window) and DAT_005912f0 (a float[7] window), which are the same 16-row,
-// 0x1c-byte-strided table. One row per resource id 0x80..0x8f (Metal/Ice/
+// One 0x1c-byte row of the shared asteroid-drift table the original exposes
+// through two overlapping global labels: DAT_005912dc (a short[0xe] window)
+// and DAT_005912f0 (a float[7] window), which are the same 16-row,
+// 0x1c-byte-strided table. One row per resource id 0x80..0x8f (Metal/Ice /
 // Dust/Crystal x Small/Medium/Big/Huge). Loaded by NovaData_LoadScenario-
 // ResourceTables (0x004bd3c0 at 0x004c6207..) from the r\x9aid family into
-// the g_scripted_maneuver_state type params.
+// the g_asteroid_states type params.
 //
 // Only the two fields consumed by the spawn reads are confidently named:
 //   +0x00 wander_table_value (read via DAT_005912dc[mode]), and
 //   +0x14 wander_speed_multiplier (read via DAT_005912f0[mode]).
 // The remaining fields are decoded with their loader-assigned offsets but
-// semantically provisional (TODO(decomp): confirm against Dude_SpawnAsteroid
-// ring placement and the drift render). Payload layout (big-endian):
+// semantically provisional (TODO(decomp): confirm against Asteroid_Spawn ring
+// placement and the drift render). Payload layout (big-endian):
 //   +0x00 value, +0x02 speed%, +0x04 field, +0x06 field(+0x02),
 //   +0x08 field(+0x0c), +0x0a RGB bytes (565 -> 15-bit), +0x0e..+0x12 the
 //   3-element direction sub-array, +0x14 field(+0x10), +0x16 lifetime.
-struct ManeuverTypeDef {
-  // Lowest row field; stored into a spawned ScriptedManeuverState's
+struct AsteroidDef {
+  // Lowest row field; stored into a spawned AsteroidState's
   // wander_table_value (+0x1c). Ghidra DAT_005912dc[mode] (+0x00).
   // Payload word[0x0]. Verbatim, no rebase.
   std::int16_t wander_table_value = 0;
@@ -713,10 +713,10 @@ struct ManeuverTypeDef {
   std::int16_t field_0x10 = 0;
   // +0x0e; payload word[0x16]. Scales with size tier in the shipped data
   // (Metal Small 150 / Medium 300 / Big 600 / Huge 1200), consistent with a
-  // wander lifetime/count. PROVISIONAL: Frame_SpawnScriptedManeuverState reads
-  // the per-type lifetime from the sprite descriptor (+0x54), not this field;
-  // the drift layer (step 3/4) is expected to connect the two. Kept decoded
-  // so the spawn path has a datapoint.
+  // wander lifetime/count. PROVISIONAL: Asteroid_SpawnRecord reads the
+  // per-type lifetime from the sprite descriptor (+0x54), not this field; the
+  // drift layer (step 3/4) is expected to connect the two. Kept decoded so
+  // the spawn path has a datapoint.
   std::int16_t lifetime = 0;
   // 3-element direction sub-array at +0x06/+0x08/+0x0a (payload word[0xe+i*2],
   // loader rebases 0x80..0x90 by -0x80, else requires <0x10). The third slot
@@ -727,7 +727,7 @@ struct ManeuverTypeDef {
   // green=byte[11]>>3, blue=byte[10]>>3). +0x18 (DAT_005912f4). Not yet
   // consumed (needs the drift-sprite render).
   std::uint32_t color = 0;
-  // Set true for every present manoeuvre-type row (resource id 0x80..0x8f);
+  // Set true for every present asteroid-type row (resource id 0x80..0x8f);
   // absent ids stay default.
   bool present = false;
 };
@@ -746,10 +746,10 @@ struct ScenarioData {
   std::vector<Government> governments; // indexed by government_id - 0x80
   std::vector<FleetDef> fleets;        // indexed by fleet_id - 0x80
   std::vector<DudeDef> dudes;          // indexed by dude_id - 0x80
-  // Asteroid/drift manoeuvre-class table (r\x9aid family, one row per resource
-  // id 0x80..0x8f). Ghidra g_scripted_maneuver_state's per-type params read
-  // via the DAT_005912dc / DAT_005912f0 pair.
-  std::vector<ManeuverTypeDef> maneuver_types; // indexed by type id - 0x80
+  // Asteroid/drift class table (r\x9aid family, one row per resource id
+  // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
+  // the DAT_005912dc / DAT_005912f0 pair.
+  std::vector<AsteroidDef> asteroid_defs; // indexed by type id - 0x80
 
   // gh.id 0x80.. lookup for government/faction data.
   [[nodiscard]] const Government *Government(std::int16_t resource_id) const;
@@ -767,10 +767,9 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for a dude template (g_dude_defs), or nullptr when
   // outside the loaded range.
   [[nodiscard]] const DudeDef *Dude(std::int16_t resource_id) const;
-  // gh.id 0x80.. lookup for a manoeuvre-type row, or nullptr when outside the
+  // gh.id 0x80.. lookup for an asteroid-type row, or nullptr when outside the
   // loaded range.
-  [[nodiscard]] const ManeuverTypeDef *
-  ManeuverType(std::int16_t resource_id) const;
+  [[nodiscard]] const AsteroidDef *AsteroidType(std::int16_t resource_id) const;
 
   // Ghidra NovaData_LoadScenarioResourceTables (0x004bd3c0). Walks each
   // resource family by id 0x80.. max and decodes it into the matching table.

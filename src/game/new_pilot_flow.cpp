@@ -467,7 +467,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   // ---- Step 5: first travel destination + scenario spawn ------------------
   Stub_PickFirstTravelDestination(state);
   // Ghidra: Mission_SpawnSystemMisnShips + System_UpdateSystemAndStellar
-  // display state + System_InitAsteroids (the system's asteroid field).
+  // display state + Asteroid_InitSystem (the system's asteroid field).
   // not reconstructed; skipped.
   NovaLog::Todo("system scenario ships and roamer population not spawned: "
                 "mission and ship tables not reconstructed");

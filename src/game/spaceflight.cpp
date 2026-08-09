@@ -2,12 +2,12 @@
 
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
+#include "asteroid.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "intro_cinematic.hpp"
 #include "landed_window.hpp"
-#include "maneuver.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
 #include "ship_spawn.hpp"
@@ -41,7 +41,7 @@ void Stub_AiRoutines(GameState &state) { (void)state; }
 // Ship_TallyInboundWeaponThreat, then -- the fleet/dude spawn maintenance this
 // reimplementation is building toward -- System_TickNpcSpawnMaintenance
 // (encounter fleets + random dude ships up to the system's avg_ships cap) and
-// Dude_SpawnAsteroid('\x01') (the asteroid ring), before clearing the
+// Asteroid_Spawn('\x01') (the asteroid ring), before clearing the
 // g_ai_misc_event_flag / g_ai_target_refresh_needed latches.
 //
 // Reconstructed: the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance,
@@ -51,8 +51,7 @@ void Stub_AiRoutines(GameState &state) { (void)state; }
 // yet reconstructed).
 void Stub_TickReactionsAndNpcSpawns(GameState &state) {
   (void)state;
-  NovaSystem_TickNpcSpawnMaintenance(
-      state, state.player.current_system_id);
+  NovaSystem_TickNpcSpawnMaintenance(state, state.player.current_system_id);
 }
 
 void Stub_CalcAiOdds(GameState &state) { (void)state; }
@@ -152,11 +151,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                 "per-tick sprite display state still not reconstructed");
   const bool ship_ready = view.EnsureShipSprite(platform, state);
   (void)ship_ready;
-  // Restore the current system's roaming/asteroid-drift ships on entry
-  // (System_InitAsteroids 0x004216B0): spawns the asteroid record quota and
-  // pre-warms all 16 manoeuvre-pool slots with wander targets around the
+  // Restore the current system's asteroid / drift-debris population on entry
+  // (Asteroid_InitSystem 0x004216B0): spawns the asteroid record quota and
+  // pre-warms all 16 asteroid-pool slots with wander targets around the
   // player. The encounter-fleet population is Step 5.
-  NovaSystem_InitAsteroids(state);
+  NovaAsteroid_InitSystem(state);
   // Ghidra: the ambient starfield is (re)spawned at every spaceflight entry
   // (NovaEffects_QueuedAmbientStarParticles from Ship_RunSpaceflightMode and
   // the travel/landing transitions). We spawn once when the mode starts, then
@@ -238,10 +237,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // system (the original's jump completion re-runs
     // NovaEffects_QueuedAmbientStarParticles).
     if (state.travel.just_completed) {
-      // Cross-system travel re-initializes the roaming ships for the new
-      // system, matching the original's jump-completion re-run of
-      // System_InitAsteroids.
-      NovaSystem_InitAsteroids(state);
+      // Cross-system travel re-initializes the asteroids for the new system,
+      // matching the original's jump-completion re-run of Asteroid_InitSystem.
+      NovaAsteroid_InitSystem(state);
       view.SpawnAmbientStars(platform, state);
     }
     // Seed an automatic target, while retaining a stellar chosen by Tab/
