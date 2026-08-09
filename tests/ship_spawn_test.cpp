@@ -113,37 +113,91 @@ TEST_CASE("system maintenance populates Tichel toward avg_ships") {
   CHECK(spawned <= sys->avg_ships + 2);
 }
 
-// Ship_DeactivateVacantShipsAndTally (0x0041ad50) clears the whole active NPC
-// cohort of one system (slots 1..), leaving ships of other systems and the
-// player (slot 0) untouched.
-TEST_CASE("deactivate system ships clears only the target system's NPCs") {
-  using game::NovaShip_DeactivateSystemShips;
-  const std::int16_t target = 3;
-  const std::int16_t other = 7;
+// Ship_DeactivateVacantShipsAndTally (0x0041ad50): the vacancy predicate
+// spares ONLY non-fire-restricted ships actively engaging the player
+// (behavior > 4, ai_target_ship_slot == 0, not docked, no mission fleet, flag
+// == 0). Idle wanderers/dudes, parked ships and fire-restricted ships are all
+// deactivated; parked ships are tallied into their stellar's present_ship_count
+// (capped at max_ship_count) before the slot is cleared.
+TEST_CASE("deactivate vacant ships spares only player-engaged non-restricted") {
+  using game::NovaShip_DeactivateVacantShipsAndTally;
   GameState st;
-  // Two NPCs in the target system, one in another system (slot 0 stays the
-  // player and is never cleared).
-  (void)NovaShip_AllocateShipSlot(st, target, 0);
-  (void)NovaShip_AllocateShipSlot(st, target, 0);
-  (void)NovaShip_AllocateShipSlot(st, other, 0);
+  REQUIRE(st.scenario.LoadFromArchives());
 
-  NovaShip_DeactivateSystemShips(st, target);
+  // (a) Idle wanderer (behavior 1, no targets): vacant -> deactivated.
+  const int idle_slot = NovaShip_AllocateShipSlot(st, 3, 0);
+  REQUIRE(idle_slot != -1);
+  st.ShipAt(static_cast<std::size_t>(idle_slot)).ai_behavior_code = 1;
 
-  int active_target = 0, active_other = 0;
-  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
-    const game::Ship &s = st.ShipAt(slot);
-    if (!s.is_active) {
-      continue;
-    }
-    if (s.current_system_id == target) {
-      ++active_target;
-    } else if (s.current_system_id == other) {
-      ++active_other;
-    }
-  }
-  // All target-system NPC slots were cleared; the other-system ship remains.
-  CHECK(active_target == 0);
-  CHECK(active_other == 1);
+  // (b) Ship actively engaging the player (behavior 5, target 0), not
+  // fire-restricted: spared when keep_player_engaged == false.
+  const int engaged_slot = NovaShip_AllocateShipSlot(st, 3, 0);
+  REQUIRE(engaged_slot != -1);
+  auto &engaged = st.ShipAt(static_cast<std::size_t>(engaged_slot));
+  engaged.ai_behavior_code = 5;
+  engaged.ai_target_ship_slot = 0;
+  // A real spawned ship carries its class hull; the bare allocator leaves
+  // armor at 0, which NovaAiShip_IsFireRestricted would read as critical
+  // damage. Restore it so the ship counts as actively engaging the player.
+  const auto *engaged_cls =
+      st.scenario.Ship(0x80); // class 0 (allocator default)
+  engaged.armor_points = engaged_cls != nullptr
+                             ? static_cast<float>(engaged_cls->base_armor)
+                             : 100.0F;
+
+  // (c) Same shape but fire-restricted (docked at a stellar): vacant even when
+  // engaging the player, and it tallies into the stellar's present_ship_count.
+  const int parked_slot = NovaShip_AllocateShipSlot(st, 3, 0);
+  REQUIRE(parked_slot != -1);
+  auto &parked = st.ShipAt(static_cast<std::size_t>(parked_slot));
+  parked.ai_behavior_code = 5;
+  parked.ai_target_ship_slot = 0;
+  parked.target_stellar_object_id = 0x81; // some stellar resource id
+  auto &stellar = st.scenario.stellars[0x81 - 0x80];
+  stellar.max_ship_count = 3;
+  stellar.present_ship_count = 2;
+
+  NovaShip_DeactivateVacantShipsAndTally(st,
+                                         /*keep_player_engaged=*/false);
+
+  CHECK(!st.ShipAt(static_cast<std::size_t>(idle_slot)).is_active);
+  CHECK(st.ShipAt(static_cast<std::size_t>(engaged_slot)).is_active);
+  CHECK(!st.ShipAt(static_cast<std::size_t>(parked_slot)).is_active);
+
+  // Parked tally: present_ship_count went 2 -> 3, capped at max_ship_count.
+  CHECK(stellar.present_ship_count == 3);
+
+  // Cleared fields on the deactivated parked ship.
+  CHECK(parked.target_stellar_object_id == -1);
+  CHECK(parked.current_system_id == -1);
+  CHECK(parked.ai_target_ship_slot == -1);
+  CHECK(parked.mission_fleet_slot == -1);
+  CHECK(parked.mission_owner_slot == -1);
+  CHECK(parked.velocity_match_target_ship_slot == -1);
+
+  // With keep_player_engaged (flag != 0) even the engaged ship is deactivated.
+  NovaShip_DeactivateVacantShipsAndTally(st, /*keep_player_engaged=*/true);
+  CHECK(!st.ShipAt(static_cast<std::size_t>(engaged_slot)).is_active);
+}
+
+// The tally caps a stellar's present_ship_count at its max_ship_count, mirror-
+// ing the original's cap in Ship_DeactivateVacantShipsAndTally (0x0041ad50).
+TEST_CASE("deactivate tally caps stellar present count at max") {
+  using game::NovaShip_DeactivateVacantShipsAndTally;
+  GameState st;
+  REQUIRE(st.scenario.LoadFromArchives());
+
+  const int slot = NovaShip_AllocateShipSlot(st, 3, 0);
+  REQUIRE(slot != -1);
+  auto &ship = st.ShipAt(static_cast<std::size_t>(slot));
+  ship.target_stellar_object_id = 0x80;
+  auto &stellar = st.scenario.stellars[0x80 - 0x80];
+  stellar.max_ship_count = 1;
+  stellar.present_ship_count = 1;
+
+  NovaShip_DeactivateVacantShipsAndTally(st, false);
+  CHECK(stellar.present_ship_count == 1); // capped, not 2
+  CHECK(!ship.is_active);
 }
 
 // NovaRandom_Reseed (0x004ab970) reseeds the RNG so a fresh game draws a

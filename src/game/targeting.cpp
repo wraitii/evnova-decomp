@@ -1,10 +1,390 @@
 #include "targeting.hpp"
 
 #include "../log.hpp"
+#include "government.hpp"
+#include "outfit.hpp"
+#include "ship_ai.hpp"
 #include <array>
 #include <cmath>
 
 namespace game {
+
+// ---------------------------------------------------------------------------
+// Player scanner capabilities (modType 0x1e cloak-scanner outfit family).
+// ---------------------------------------------------------------------------
+// Mirrors Outfit_HasScannerTargetUntargetableCapability (0x0046c930) and
+// Outfit_HasCloakScannerTargetCloakedCapability (0x0046ca60) for the player:
+// any owned outfit whose primary or alternate mod type is 0x1e (kCloakScanner)
+// and whose mod value has bit 0x04 grants targeting of "untargetable" ships
+// (class flags_secondary bit 2), bit 0x08 grants targeting through the
+// disable-threshold gate. The original memoizes the result in the tri-state
+// caches g_player_has_cloak_scanner_target_untargetable_cached (DAT_007356be)
+// / _cloaked_cached (DAT_007356c0); this build rescans the 0x200-entry owned
+// table on demand because the calls happen once per targeting command press,
+// not per frame.
+struct PlayerScannerCapabilities {
+  bool can_target_untargetable = false; // modVal & 0x04
+  bool can_target_cloaked = false;      // modVal & 0x08
+};
+
+[[nodiscard]] PlayerScannerCapabilities
+ScannerCapabilities(const GameState &state) {
+  PlayerScannerCapabilities caps;
+  const auto &owned = state.inventory.outfit_owned_count;
+  const auto check_mods = [&](const Outfit &outfit) {
+    const auto probe = [&](std::int16_t mod_type, std::int16_t mod_val) {
+      if (mod_type == static_cast<std::int16_t>(OutfitEffect::kCloakScanner)) {
+        caps.can_target_untargetable =
+            caps.can_target_untargetable || (mod_val & 0x04) != 0;
+        caps.can_target_cloaked =
+            caps.can_target_cloaked || (mod_val & 0x08) != 0;
+      }
+    };
+    probe(outfit.mod_type, outfit.mod_val);
+    for (std::size_t i = 0; i < outfit.alt_mod_types.size(); ++i) {
+      probe(outfit.alt_mod_types[i], outfit.alt_mod_vals[i]);
+    }
+  };
+  for (std::size_t id = 0; id < owned.size(); ++id) {
+    if (owned[id] <= 0) {
+      continue;
+    }
+    const auto *outfit = state.scenario.Outfit(
+        static_cast<std::int16_t>(id + 0x80));
+    if (outfit) {
+      check_mods(*outfit);
+    }
+  }
+  return caps;
+}
+
+// ---------------------------------------------------------------------------
+// Ship_CheckShipDisableThresholdState (0x0046c7a0).
+// ---------------------------------------------------------------------------
+bool NovaTargeting_ShipAtDisableThreshold(const Ship &ship) {
+  const float progress = ship.disable_threshold_progress;
+  if (progress > 24.0F && ship.disable_state_latch >= 0) {
+    return true;
+  }
+  if (progress > 8.0F && ship.disable_state_latch < 0) {
+    return true;
+  }
+  // The original returns 1 (disabled) when progress is above 16.0 and 0x100
+  // (low byte 0 = not disabled) otherwise; callers test the low byte.
+  return progress > 16.0F;
+}
+
+// ---------------------------------------------------------------------------
+// Ship_IsShipEligibleForDistressCall (0x0040f6d0).
+// ---------------------------------------------------------------------------
+bool NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
+                                                 const Ship &ship) {
+  if (!ship.is_active) {
+    return false;
+  }
+  // Not coasting through a reversal (the original requires reverse_speed_bias
+  // <= 0.0; FLOAT_00575000 = 0.0).
+  if (ship.reverse_speed_bias > 0.0F) {
+    return false;
+  }
+  if (NovaAiShip_IsFireRestricted(state, ship)) {
+    return false;
+  }
+  const std::int16_t target = ship.primary_target_ship_slot;
+  if (target < 0) {
+    return false;
+  }
+  // Retreat/disengage state set the original excludes.
+  const std::int16_t st = ship.ai_state_code;
+  if (st == 7 || st == 9 || st == 0xf || st == 10 || st == 0xb || st == 5 ||
+      st == 0xc || st == 0x12) {
+    return false;
+  }
+  // Primary target is the player, or a ship that itself targets the player.
+  if (target == 0) {
+    return true;
+  }
+  if (target < static_cast<std::int16_t>(GameState::kMaxShips) &&
+      state.ShipAt(static_cast<std::size_t>(target)).ai_target_ship_slot == 0) {
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Ship_IsShipAcquirableAsTarget (0x0040faa0).
+// ---------------------------------------------------------------------------
+bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
+                                            const Ship &candidate,
+                                            const Ship &acquirer) {
+  if (!acquirer.is_active || NovaAiShip_IsFireRestricted(state, acquirer)) {
+    return false;
+  }
+  const std::int16_t candidate_id = candidate.ship_instance_id;
+  if (acquirer.ai_target_ship_slot == candidate_id) {
+    return false; // already locked onto the candidate
+  }
+  if (acquirer.ship_instance_id == 0) {
+    // Player branch: government policy flag 0 (the aggro gate) or the
+    // candidate is eligible for a distress call.
+    if (NovaGovernment_GetPolicyFlag(
+            state.scenario, candidate.faction_or_government_id, 0)) {
+      return true;
+    }
+    return NovaTargeting_IsShipEligibleForDistressCall(state, candidate);
+  }
+  // NPC branch: the candidate is the acquirer's primary target (and the
+  // acquirer is in an attacking state), or another active ship targets the
+  // candidate while the acquirer's primary target is that ship.
+  const std::int16_t st = acquirer.ai_state_code;
+  const bool state_ok = st != 7 && st != 9 && st != 0xf && st != 10 &&
+                        st != 0xb && st != 5 && st != 0xc && st != 0x12;
+  if (acquirer.primary_target_ship_slot == candidate_id && state_ok) {
+    return true;
+  }
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &other = state.ShipAt(slot);
+    if (!other.is_active || other.ai_target_ship_slot != candidate_id) {
+      continue;
+    }
+    if (acquirer.primary_target_ship_slot !=
+        static_cast<std::int16_t>(slot)) {
+      continue;
+    }
+    if (slot == static_cast<std::size_t>(acquirer.ship_instance_id) ||
+        !state_ok) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Player target cycling (0x00461bd0 / 0x00461f60).
+// ---------------------------------------------------------------------------
+// Per-ship "combat relevance" flag (the acStack_90 markability table built in
+// the first loop of Ship_FindNextPlayerCycleTarget). A ship is relevant when
+// it targets the player directly (ai_target_ship_slot == 0) or targets a ship
+// that itself targets the player, provided it is not a mission-fleet escort.
+// The mission-fleet-escort arm (acStack_50: fleet def active byte != 0 and
+// escort flag short == 1) is not modelled because mission-fleet defs are not
+// reconstructed yet (TODO(decomp)); it is always false here.
+[[nodiscard]] bool ShipIsCycleRelevant(const GameState &state,
+                                       const Ship &ship) {
+  if (ship.ai_target_ship_slot == 0) {
+    return true; // directly targeting the player
+  }
+  const std::int16_t target = ship.ai_target_ship_slot;
+  if (target == -1 || ship.target_stellar_object_id != -1 ||
+      !state.SlotInRange(static_cast<std::size_t>(target))) {
+    return false;
+  }
+  return state.ShipAt(static_cast<std::size_t>(target)).ai_target_ship_slot ==
+         0;
+}
+
+// Shared candidate test for the cycle search loops. Mirrors the filter chain
+// of Ship_FindNextPlayerCycleTarget: active, not destroyed, disable-threshold
+// gate (cloak scanner or combat-relevant while the include-combat modifier is
+// held), same system, not AI state 0x15, untargetable class gate (scanner
+// outfit), and the relevance-vs-modifier equality (`relevant == include_combat`
+// -- no modifier cycles non-relevant ships, the modifier cycles relevant
+// ones).
+[[nodiscard]] bool ShipIsCycleEligible(const GameState &state,
+                                       std::int16_t slot,
+                                       std::int16_t system_id,
+                                       bool include_combat,
+                                       const PlayerScannerCapabilities &scanner,
+                                       const std::array<bool, GameState::kMaxShips> &relevant) {
+  const Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  if (!ship.is_active || NovaAiShip_IsDestroyed(ship)) {
+    return false;
+  }
+  const bool is_relevant = relevant[static_cast<std::size_t>(slot)];
+  if (NovaTargeting_ShipAtDisableThreshold(ship) &&
+      !scanner.can_target_cloaked && !(is_relevant && include_combat)) {
+    return false;
+  }
+  if (ship.current_system_id != system_id || ship.ai_state_code == 0x15) {
+    return false;
+  }
+  // flags_secondary bit 2 = "can't be targeted"; the untargetable-scanner
+  // outfit lifts it. A missing class entry falls through as targetable (the
+  // original deactivates out-of-range class ships before targeting runs).
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls != nullptr && (cls->flags_secondary & 4U) != 0 &&
+      !scanner.can_target_untargetable) {
+    return false;
+  }
+  return is_relevant == include_combat;
+}
+
+std::int16_t NovaTargeting_FindNextPlayerCycleTarget(
+    const GameState &state,
+    std::int16_t current_slot,
+    std::int16_t system_id,
+    bool include_combat) {
+  const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
+  std::array<bool, GameState::kMaxShips> relevant{};
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    relevant[slot] = ShipIsCycleRelevant(state, state.ShipAt(slot));
+  }
+  const auto eligible = [&](std::int16_t slot) {
+    return ShipIsCycleEligible(
+        state, slot, system_id, include_combat, scanner, relevant);
+  };
+  if (current_slot == -1) {
+    for (std::int16_t slot = 1; slot < static_cast<std::int16_t>(GameState::kMaxShips); ++slot) {
+      if (eligible(slot)) {
+        return slot;
+      }
+    }
+  } else {
+    for (std::int16_t slot = static_cast<std::int16_t>(current_slot + 1);
+         slot < static_cast<std::int16_t>(GameState::kMaxShips); ++slot) {
+      if (eligible(slot)) {
+        return slot;
+      }
+    }
+  }
+  return current_slot;
+}
+
+std::int16_t NovaTargeting_FindPreviousPlayerCycleTarget(
+    const GameState &state,
+    std::int16_t current_slot,
+    std::int16_t system_id,
+    bool include_combat) {
+  const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
+  std::array<bool, GameState::kMaxShips> relevant{};
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    relevant[slot] = ShipIsCycleRelevant(state, state.ShipAt(slot));
+  }
+  const auto eligible = [&](std::int16_t slot) {
+    return ShipIsCycleEligible(
+        state, slot, system_id, include_combat, scanner, relevant);
+  };
+  if (current_slot == -1) {
+    for (std::int16_t slot = static_cast<std::int16_t>(GameState::kMaxShips - 1);
+         slot >= 1; --slot) {
+      if (eligible(slot)) {
+        return slot;
+      }
+    }
+  } else {
+    for (std::int16_t slot = static_cast<std::int16_t>(current_slot - 1); slot >= 1; --slot) {
+      if (eligible(slot)) {
+        return slot;
+      }
+    }
+  }
+  return current_slot;
+}
+
+// ---------------------------------------------------------------------------
+// Ship_SelectNearestEngagedTarget (0x00462850) / _HostileCombatTarget
+// (0x00462bd0).
+// ---------------------------------------------------------------------------
+// Shared "nearest target" candidate core for the two player scans: active,
+// not destroyed, not fire-restricted (hostile scan only), below the disable
+// threshold (or cloak scanner), in the player's system, not in AI state 0x15
+// (engaged scan only), not class-untargetable (or scanner), and NOT already
+// locked onto the player (ai_target_ship_slot != 0).
+[[nodiscard]] bool ShipIsNearestScanEligible(
+    const GameState &state,
+    const Ship &ship,
+    const PlayerScannerCapabilities &scanner,
+    bool require_not_fire_restricted,
+    bool exclude_state_15) {
+  if (!ship.is_active || NovaAiShip_IsDestroyed(ship) ||
+      ship.ai_target_ship_slot == 0 ||
+      ship.current_system_id != state.player.current_system_id) {
+    return false;
+  }
+  if (require_not_fire_restricted &&
+      NovaAiShip_IsFireRestricted(state, ship)) {
+    return false;
+  }
+  if (NovaTargeting_ShipAtDisableThreshold(ship) &&
+      !scanner.can_target_cloaked) {
+    return false;
+  }
+  if (exclude_state_15 && ship.ai_state_code == 0x15) {
+    return false;
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls != nullptr && (cls->flags_secondary & 4U) != 0 &&
+      !scanner.can_target_untargetable) {
+    return false;
+  }
+  return true;
+}
+
+std::int16_t NovaTargeting_SelectNearestEngagedTarget(const GameState &state) {
+  const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
+  std::int16_t best = -1;
+  float best_dist_sq = -1.0F;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (!ShipIsNearestScanEligible(state, ship, scanner,
+                                   /*require_not_fire_restricted=*/false,
+                                   /*exclude_state_15=*/true)) {
+      continue;
+    }
+    const float dx = state.player.pos_x - ship.pos_x;
+    const float dy = state.player.pos_y - ship.pos_y;
+    const float dist_sq = dx * dx + dy * dy;
+    if (best == -1 || dist_sq < best_dist_sq) {
+      best_dist_sq = dist_sq;
+      best = static_cast<std::int16_t>(slot);
+    }
+  }
+  return best;
+}
+
+std::int16_t NovaTargeting_SelectNearestHostileCombatTarget(
+    const GameState &state) {
+  const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
+  std::int16_t best = -1;
+  float best_dist_sq = -1.0F;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (!ShipIsNearestScanEligible(state, ship, scanner,
+                                   /*require_not_fire_restricted=*/true,
+                                   /*exclude_state_15=*/false)) {
+      continue;
+    }
+    // Hostile = distress-eligible, or locked on its primary target in AI
+    // state 4 while that primary is an active ship targeting the player
+    // (Ship_IsShipLockedOnAttackerInAiState0x04 0x004102b0).
+    bool hostile = NovaTargeting_IsShipEligibleForDistressCall(state, ship);
+    if (!hostile) {
+      const std::int16_t t = ship.primary_target_ship_slot;
+      if (t >= 0 && t < static_cast<std::int16_t>(GameState::kMaxShips)) {
+        const Ship &target = state.ShipAt(static_cast<std::size_t>(t));
+        if (target.is_active && target.ai_target_ship_slot == 0 &&
+            ship.ai_state_code == 4) {
+          hostile = true;
+        }
+      }
+    }
+    if (!hostile) {
+      continue;
+    }
+    const float dx = state.player.pos_x - ship.pos_x;
+    const float dy = state.player.pos_y - ship.pos_y;
+    const float dist_sq = dx * dx + dy * dy;
+    if (best == -1 || dist_sq < best_dist_sq) {
+      best_dist_sq = dist_sq;
+      best = static_cast<std::int16_t>(slot);
+    }
+  }
+  return best;
+}
+
 
 // ---------------------------------------------------------------------------
 // Mirrors Stellar_IsStellarActive (0x0046E3C0).

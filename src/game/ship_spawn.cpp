@@ -2,6 +2,7 @@
 
 #include "../log.hpp"
 #include "government.hpp"
+#include "ship_ai.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -79,6 +80,14 @@ int NovaShip_AllocateShipSlot(GameState &state,
                  // writes.
   ship.is_active = true;
   ship.current_system_id = system_id;
+  // ShipState +0x86: NPC ship identity. The original compares instance ids
+  // against slot-indexed targeting fields (ai_target_ship_slot /
+  // primary_target_ship_slot) and 0 means "the player", so an NPC's instance
+  // id must equal its slot. Ghidra Ship_AllocateShipSlotInSystem (0x004254b0)
+  // does not write the field itself -- it relies on the per-slot identity
+  // being stable across allocations; seeding it here is the equivalent
+  // clean-room behaviour (the reuse of a slot keeps its identity).
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
   ship.dude_class_id = -1;
   ship.ship_class_id = 0;
   ship.ai_behavior_code = 1;
@@ -451,6 +460,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
 
     ship.is_active = true;
     ship.current_system_id = system_id;
+    ship.ship_instance_id = static_cast<std::int16_t>(slot); // identity == slot
     ship.dude_class_id = dude_class_id;
     ship.ship_class_id = dude->ship_types[type_slot];
     ship.faction_or_government_id = dude->government_id;
@@ -651,27 +661,87 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
   }
 }
 
-// Ghidra 0x0041ad50 Ship_DeactivateVacantShipsAndTally (ship-slot cleanup
-// slice). See the header for the carve-out rationale. Scans every NPC slot and
-// clears the active flag / system / targeting / mission fields on ships
-// assigned to `system_id`, so the system's cohort is reset to an empty slate
-// before the caller repopulates toward avg_ships.
-void NovaShip_DeactivateSystemShips(GameState &state, std::int16_t system_id) {
+// Ghidra 0x0041ad50 Ship_DeactivateVacantShipsAndTally. Scans every NPC ship
+// slot (1..kMaxShips-1) and deactivates the "vacant" ones, tallying them into
+// their spawn-quota bucket before the cleanup:
+//   * a parked ship (target_stellar_object_id != -1) increments that stellar's
+//     present_ship_count, capped at its max_ship_count (the mounted garrison
+//     size -- this is what feeds the hostile re-spawn bookkeeping);
+//   * a mission ship (mission_owner_slot != -1) increments its mission fleet's
+//     current-ship count (capped at the fleet max) -- mission fleets are not
+//     reconstructed, so that arm is a logged no-op (TODO(decomp));
+// then clears is_active and the targeting/mission/system slots.
+//
+// Vacancy predicate (bVar3 in the decomp): a slot is SPARED only when it is
+// actively engaging the player -- ai_behavior_code > 4, ai_target_ship_slot ==
+// 0, not docked at a stellar, not in a mission fleet -- AND is not
+// fire-restricted AND `keep_player_engaged` is false (the original's flag==0).
+// Every other ship (idle wanderers/dudes, parked, mission, fire-restricted) is
+// vacant and deactivated. The original runs this on travel/landing arrival
+// (Stellar_ProcessTravelAndLanding 0x00457580) and on system entry
+// (NovaMainLoop_Run 0x00486880) with flag==0, then Mission_SpawnSystemMisnShips
+// + System_TickNpcSpawnMaintenance reseed the population.
+void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
+                                            bool keep_player_engaged) {
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
-    if (!ship.is_active || ship.current_system_id != system_id) {
+
+    // Vacancy predicate: spared only when actively engaging the player and
+    // (with flag==0) not fire-restricted.
+    bool vacant = true;
+    if (ship.ai_behavior_code > 4 && ship.ai_target_ship_slot == 0 &&
+        ship.target_stellar_object_id == -1 && ship.mission_fleet_slot == -1) {
+      if (!NovaAiShip_IsFireRestricted(state, ship) && !keep_player_engaged) {
+        vacant = false;
+      }
+    }
+    if (!vacant) {
       continue;
     }
+
+    // Tally into the spawn-quota buckets before clearing. The original checks
+    // is_active/mission_owner_slot first: mission ships (active with an owner)
+    // go to their mission fleet's current-ship counter; everything else parks
+    // at a stellar only when it is active and docked there.
+    if (!ship.is_active || ship.mission_owner_slot == -1) {
+      if (ship.is_active && ship.target_stellar_object_id != -1) {
+        // target_stellar_object_id is a stellar resource id (>= 0x80); the
+        // clean-room stellars table is indexed by id - 0x80. The const
+        // ScenarioData::Stellar() accessor cannot mutate the runtime count,
+        // so index the vector directly (same pattern as the display-state
+        // refresh in targeting.cpp).
+        const std::int16_t sid = ship.target_stellar_object_id;
+        if (sid >= 0x80 && static_cast<std::size_t>(sid - 0x80) <
+                               state.scenario.stellars.size()) {
+          Stellar &st =
+              state.scenario.stellars[static_cast<std::size_t>(sid - 0x80)];
+          ++st.present_ship_count;
+          if (st.present_ship_count > st.max_ship_count) {
+            st.present_ship_count = st.max_ship_count;
+          }
+        }
+      }
+    } else {
+      // Mission-fleet current-ship tally (g_random_encounter_fleet_defs
+      // escort current counters): no mission fleets in the clean-room, so
+      // this arm is a documented no-op. TODO(decomp).
+      NovaLog::Debug(
+          "deactivate: mission ship slot {} owner {} tallied to fleet "
+          "(mission fleets not reconstructed)",
+          slot,
+          ship.mission_owner_slot);
+    }
+
+    // Clear the slot fields, mirroring the original's cleanup writes
+    // (velocity_match_target_ship_slot / field_0xbb / field_0xbc included;
+    // the two byte flags are unmodelled AI latches, TODO(decomp)).
     ship.is_active = false;
+    ship.mission_fleet_slot = -1;
+    ship.target_stellar_object_id = -1;
+    ship.velocity_match_target_ship_slot = -1;
+    ship.mission_owner_slot = -1;
     ship.current_system_id = -1;
     ship.ai_target_ship_slot = -1;
-    ship.primary_target_ship_slot = -1;
-    ship.ai_secondary_target_slot = -1;
-    ship.mission_fleet_slot = -1;
-    ship.mission_owner_slot = -1;
-    ship.mission_ship_slot = -1;
-    ship.target_stellar_object_id = -1;
-    ship.jump_destination_stellar_id = -1;
   }
 }
 

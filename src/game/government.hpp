@@ -36,4 +36,14 @@ namespace game {
 [[nodiscard]] bool NovaGovernment_AreGovtsHostileOrXenophobic(
     const ScenarioData &scenario, std::int16_t govt_a, std::int16_t govt_b);
 
+// Ghidra 0x0046e860 Government_GetGovernmentPolicyFlag. Reads one of the two
+// per-government boolean policy flags (Government.policy_flags, GovtDef
+// +0x84). flag_index must be 0 or 1; out-of-range government ids read 0.
+// Flag 0 gates player target acquisition (Ship_IsShipAcquirableAsTarget
+// 0x0040faa0) and several aggro/relation decisions. The writer is not yet
+// identified, so the flags stay 0 in the current build (TODO(decomp)).
+[[nodiscard]] bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
+                                                std::int16_t govt_id,
+                                                int flag_index);
+
 } // namespace game

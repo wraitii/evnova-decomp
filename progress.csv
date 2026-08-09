@@ -12,7 +12,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00405120,Ship_ShouldShipPrioritizePlayerThreat,,0%,
 0x004053C0,Mission_UpdateShipMissionStellarAttackDirective,,0%,
 0x00405590,Ship_UpdateShipAiState,src/game/ship_ai.cpp,20%,"NovaAi_UpdateShipState: core travel (1/0x14/2), hold (0xb), pursuit(5)/assist(10)/escort(7), drift(0xe), disengage(0x15/8), defunct(0x16) control-mode writes ported. Travel-arrival reverse_speed_bias band corrected to Ghidra (300..499 / 100..174). Attack/disable states 3/4/0xc/0xd and HUD/mission flavor deferred. Many _DAT_005750xx constants provisional (TODO(decomp))"
-0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,15%,"NovaAi_ApplyControls: travel/pursue/hold/approach control modes bridge into movement fields. Combat/formation modes (5-0x17) provisional. Auto-weapon-selection + fire latch deferred"
+0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,25%,"NovaAi_ApplyControls: modes 1/2/3/4/0xd ported faithfully with decoded _DAT_00575xxx constants (thrust cmd now carries the raw eff_thrust = 2*accel/10000 * govt combat_rating_scale, NOT 1.0 -- fixes ~50x too-fast NPC acceleration; mode-2 alignment gate turn_rate+5 and 25% arrival cruise; mode-1 braking ladder). Combat/formation modes (5-0x17) provisional. Auto-weapon-selection + fire latch deferred"
 0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,src/game/ship_ai.cpp,40%,"NovaAi_SelectRandomAdjacentTravelStellar: availability/travel-flag/govt-hostility candidates, uniform random pick; weighted scan-mask pools deferred"
 0x0040CC10,Stellar_FindNearestAdjacentTravelStellar,,0%,
 0x0040CD80,Stellar_IsStellarAdjacentToCurrentSystem,src/game/targeting.cpp,100%,"NovaTargeting_IsStellarAdjacentToSystem: matches a stellar id against a system's nav list, preserving the empty-nav-list == adjacent quirk"
@@ -25,9 +25,9 @@ address,name,impl_file,reimpl_pct,comment
 0x0040DB70,NovaUi_DrawAiStateMnemonic,,0%,
 0x0040DDC0,NovaUi_DrawAiControlModeMnemonic,,0%,
 0x0040E020,Ship_AcquirePrimaryTargetForShip,,0%,
-0x0040F6D0,Ship_IsShipEligibleForDistressCall,,0%,
+0x0040F6D0,Ship_IsShipEligibleForDistressCall,src/game/targeting.cpp,100%,NovaTargeting_IsShipEligibleForDistressCall: active + not coasting-through-reversal (reverse_speed_bias <= 0) + not fire-restricted + primary target is the player or a player-targeting ship + not in retreat states {7,9,15,10,11,5,12,18}.
 0x0040F780,Ship_ShouldShipKeepPressingTarget,,0%,
-0x0040FAA0,Ship_IsShipAcquirableAsTarget,,0%,
+0x0040FAA0,Ship_IsShipAcquirableAsTarget,src/game/targeting.cpp,100%,NovaTargeting_IsShipAcquirableAsTarget: player branch (govt policy flag 0 or distress-eligible) + NPC branch (primary-target / mutual-target scan with the same retreat-state gate).
 0x0040FC00,Ship_IsShipEligibleForCommAidInteraction,,0%,
 0x0040FCA0,Ship_IsShipBrakingOnPlayerInAiState0x09,,0%,
 0x0040FCE0,Ship_IsShipBrakingOnPlayerInAiState0x0F,,0%,
@@ -109,7 +109,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004186B0,Frame_TickSystems,src/game/spaceflight.cpp,10%,Frame_TickSystems structure reconstructed (run_full_tick gated); heavy per-tick scopes stubbed
 0x00419210,Frame_RefreshTransitionFrameAuxVisuals,,0%,
 0x004192D0,Shot_ResolveShipHitFromWeapon,,0%,
-0x0041AD50,Ship_DeactivateVacantShipsAndTally,src/game/ship_spawn.cpp,35%,NovaShip_DeactivateSystemShips: ship-slot cleanup slice clearing the active flag + system/targeting/mission slots on active NPC ships of a system, driven from the normal-arrival dock path (then repopulates toward avg_ships). TODO(decomp): fire-restricted/parked-stellar/mission-fleet residency carve-outs + quota tallies (mission/park/fire-restriction systems not reconstructed)
+0x0041AD50,Ship_DeactivateVacantShipsAndTally,src/game/ship_spawn.cpp,80%,"NovaShip_DeactivateVacantShipsAndTally: faithful slot-scan cleanup. Vacancy predicate spares only non-fire-restricted ships actively engaging the player (behavior>4, target==0, not docked, no fleet, flag==0); parked ships tally into StellarDef.present_ship_count (capped at max_ship_count); exact field clears incl. velocity_match_target_ship_slot (+0xC8DC). Wired at landing (landed_window) and player-jump completion (spaceflight) then repopulated toward avg_ships. Remaining: mission-fleet tally arm + field_0xbb/0xbc byte clears (no mission fleets, TODO(decomp))"
 0x0041AF90,Mission_SpawnSystemMisnShips,,0%,
 0x0041BA80,EncounterFleet_SpawnRandomSystemDudeShip,src/game/ship_spawn.cpp,75%,NovaEncounter_SpawnRandomSystemDudeShip (was EncounterFleet_SpawnShipFromFleetDef): spawns a random system-bound dude ship from the SystemDef dude binding (NovaDude_SelectRandomSystemDudeClassIndex + NovaDude_SelectShipTypeIndex + DudeDef). Identity/kinematics/vitals/subset of AI fields set; ship at a visible heading (ai_state_code 0). Deferred: deep combat/AI residual fields + 8-bank weapon loadout + mining-scoop derivation (not modeled on clean-room Ship).
 0x0041C710,Dude_SpawnRandomDudeShipInSystem,src/game/ship_spawn.cpp,55%,NovaDude_SpawnRandomDudeShipInSystem: 1-in-7 encounter-fleet / dude dispatch, fuel-capacity discard (<1), polar offset from centre, heading toward origin. Deferred: 1-in-7 mission-ship branch + AI-state entry (spin-out/jump-in) not reconstructed; spawn radius provisional.
@@ -165,7 +165,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0042E160,Shot_UpdateImpactEffectSprites,,0%,
 0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,72%,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); each star renders a random frame of the 16-frame 5px sheet (sp.x9an 700) at native 1:1 size; murk round(murk*0.9) value is a blend-mode sentinel (tinted/blobed), not a pixel size"
 0x0042EAC0,NovaUi_UpdateTravelTargetReticle,,0%,
-0x0042EDE0,NovaUi_UpdateShipTargetReticle,,0%,
+0x0042EDE0,NovaUi_UpdateShipTargetReticle,src/game/spaceflight_view.cpp,60%,SpaceflightView::DrawShipTargetReticle: 4-corner bracket geometry (half-span + decaying 60/sec pulse + 16px margin) and the frame-state encoding (fire-restricted 0xc / targeting-player 0x8 / distress 0x0 / other 0x4) drawn as SDL corner brackets with a provisional color mapping; the real bracket sprite frames and the shot-half-span term are TODO(decomp).
 0x0042F1B0,Frame_UpdateScreenFlashTimers,,0%,
 0x0042F270,Shot_UpdateBeamHitQueue,,0%,
 0x004311F0,Frame_UpdateCombatChatter,,0%,
@@ -176,7 +176,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00431530,Shot_UpdateShotGuidance,,0%,
 0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,35%,scope 3 marks the entered current system visible, then re-derives stellar system_id/is_available/hazard state via NovaTargeting_UpdateStellarAvailability; discovery flood and sprite-set bookkeeping not reconstructed
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
-0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,30%,"validation prologue ported in Stub_HandleShips (deactivate OOR/-9999-class ships, range-reset drifted slot fields) + movement/physics block on both sides: player via NovaPlayer_IntegrateMovement; NPC via NovaShip_IntegrateNpcMovement (continuous AI turn, three-branch ai_desired_speed thrust, reverse_speed_bias timer, inertia-less pin, gravity-shield regime, engine-glow level field_0xc8d4) wired per-frame. AI/combat/weapon/travel/disable/mission scopes still stubbed; NPC effective-stats use class base only (no outfit/status/government-mod yet, TODO(decomp))"
+0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,30%,"validation prologue ported in Stub_HandleShips (deactivate OOR/-9999-class ships, range-reset drifted slot fields) + movement/physics block on both sides: player via NovaPlayer_IntegrateMovement; NPC via NovaShip_IntegrateNpcMovement (continuous AI turn now writing ai_turn_bias_dir from the turn direction, three-branch ai_desired_speed thrust, reverse_speed_bias timer, inertia-less pin, gravity-shield regime, engine-glow level field_0xc8d4; effective stats via shared NovaShip_ComputeEffectiveStats incl. govt combat_rating_scale; coast branch gated on ai_station_hold_timer<=0 per original). AI/combat/weapon/travel/disable/mission scopes still stubbed; NPC status/disable damping and skill_variance_scale (+0x40) TODO(decomp)"
 0x00435830,Shot_HandleShot,src/game/spaceflight_view.cpp,15%,"shot sprite frame selection mirrored: flags_primary bit0 clear => static/heading frame (rotation sheet, bearing via FrameForHeading) in DrawShots; bit0 set => time-animated frame_cycle_index/anim_elapsed stepped at shot_anim_frame_dwell cadence by NovaWeapon_TickShots (weapon.cpp) and wrapped at the set's frame count (reverse-hold via flags_secondary) in DrawShots; guidance motion, collision, linked-shot/area-impact and audio side-effects not reconstructed"
 0x00436910,Asteroid_UpdateSprites,,0%,
 0x00436FF0,NovaUi_ResolveWeaponSplashImpact,,0%,
@@ -269,7 +269,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0044AA50,FUN_0044aa50,,0%,
 0x0044AA60,FUN_0044aa60,,0%,
 0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,20%,"player control subset includes effective turn rounding, thrust/afterburner fuel burn, stellar gravity, integer engine-glow control, and jump completion. travel/combat/disable/mission scopes still stubbed"
-0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,20%,nearest eligible stellar seeds target; Tab/Shift+Tab cycles and retains a manual stellar selection; target action now stops at the destination-interaction boundary. Combat/movement/travel-transition scopes still stubbed
+0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,30%,nearest eligible stellar seeds target; Tab/Shift+Tab cycles and retains a manual stellar selection; backquote/Shift+backquote cycle the ship primary target (Alt/'k' = combat-relevant only), 'o' selects nearest hostile combat / Alt+'o' nearest engaged, click-to-target ship picking via SpaceflightView::PickShipAt; reticle pulse armed on target change; target action stops at the destination-interaction boundary. Combat/movement/travel-transition scopes still stubbed
 0x0044C8D0,Ship_TurnShipTowardHeading,src/game/spaceflight.cpp,3%,reverse-control subset turns toward the heading opposite current velocity at the effective turn rate; direct-turn/thrust and transition scopes not separately reconstructed
 0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,
 0x0044E019,Ship_HandlePlayerShipControl,src/game/spaceflight.cpp,28%,"primary fire and player movement subset: rounded effective turn, thrust/reverse, afterburner x1.8 cap/fuel burn, stellar gravity, and integer engine-glow control. travel/mission/UI control scopes remain stubbed"
@@ -278,7 +278,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
 0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,10%,stellar target-action eligibility only: available unrestricted sprite-active target with travel_flags&0x20 clear reaches the destination-interaction reconstruction boundary; modal/ship-comm/mission branches remain TODO(decomp)
 0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,35%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, or time-animated path for flags bit0, see 0x00435830); fire-sound audio side-effect reconstructed (volley_fired>0 gate -> dequeue fire_sound slot, played by the spaceflight loop through the cached NovaSoundData, slot->snd id 200+slot). Two fixes: (1) shots now exit the weapon's turret-group barrel rather than the hull centre by applying the sh\x8an per-group/quadrant muzzle offsets (Weapon_ApplyTurretSpreadVelocity 0x0046c5c0 group0, decoded via ShipVisualDescriptor.turret_muzzles -> GameState player muzzle_* in EnsureShipSprite, quadrant rotation alternates barrels); (2) bank cooldown = reload_ticks / weapon_bank_ammo (speed_scalar/ammo per Weapon_FirePlayerWeaponBank), so a second mounted weapon doubles fire rate. beam/turret/guided/launcher branches and burst side-effects (Weapon_GetWeaponFireIntervalTicks 0x0046f270 flags-0x40 path) not reconstructed"
-0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,30%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, full effective shield/armor, and Weapon_ReconcileOutfitPoolWithWeaponBanks at arrival (register stock-bank weapons as owned); system NPC cohort reset on landing via NovaShip_DeactivateSystemShips + NovaSystem_TickNpcSpawnMaintenance (fresh batch on launch); system-transition/world-reset/discovery work remains TODO(decomp)
+0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,30%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, full effective shield/armor, and Weapon_ReconcileOutfitPoolWithWeaponBanks at arrival (register stock-bank weapons as owned); system NPC cohort reset on landing via NovaShip_DeactivateVacantShipsAndTally + NovaSystem_TickNpcSpawnMaintenance (fresh batch on launch); system-transition/world-reset/discovery work remains TODO(decomp)
 0x00456480,Stellar_SelectLinkedDestinationViaStarmap,,0%,confirmed linked-destination starmap transfer; prior speculative docking implementation removed
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
 0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,20%,normal ordinary-stellar arrival gate + HUD overlay denial feedback (STR# 0x7d2) reconstructed: active/current-system target, 0x3000/0x20 exclusions, strict 250-unit per-axis envelope, fee gate; overlay text via NovaHud_ShowLandingDenial. Timer/reputation/disabled/hypergate/waiting branches remain TODO(decomp)
@@ -300,7 +300,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0045EBE8,NovaUi_DrawPlayerArmorBar,src/game/hud_renderer.cpp,60%,aspect-driven fill geometry shared with shield bar (HudBar_FillRect + DrawLifeBar); still missing cockpit-trough pre-blit / dirty-rect restore
 0x0045EFE0,NovaUi_DrawPlayerFuelPanel,src/game/hud_renderer.cpp,50%,fuel panel shim: validates fuel panel rect and routes to the shared life-bar fill (DrawLifeBar on layout_.fuel_panel); reserve segment not yet drawn
 0x0045F086,NovaUi_DrawPlayerFuelLevelBar,src/game/hud_renderer.cpp,50%,usable fuel fill drawn via HudBar_FillRect; reserve-bar segment + firing/travel suppression (Ship_IsShipFireRestricted) not yet implemented
-0x0045F530,NovaUi_DrawTargetStatusPanel,,0%,
+0x0045F530,NovaUi_DrawTargetStatusPanel,src/game/hud_renderer.cpp,20%,HUD target panel text subset: ship class name + government + shield % when a ship is the primary target (else the stellar travel target). Portrait (PICT 3000+), exact rect layout, AI/debug overlay and the shield/armor status-line branches are TODO(decomp).
 0x00460EC0,NovaUi_DrawActiveWeaponAmmoPanel,,0%,
 0x004612C0,NovaUi_DrawCargoMissionStatusPanel,,0%,
 0x00461830,Math_InitTrigLookupTables,,0%,
@@ -308,8 +308,8 @@ address,name,impl_file,reimpl_pct,comment
 0x00461970,Math_LookupAngleCosine,,0%,
 0x004619B0,Math_AngleFromVector2D,,0%,
 0x00461BC0,FUN_00461bc0,,0%,
-0x00461BD0,Ship_FindNextPlayerCycleTarget,,0%,
-0x00461F60,Ship_FindPreviousPlayerCycleTarget,,0%,
+0x00461BD0,Ship_FindNextPlayerCycleTarget,src/game/targeting.cpp,100%,NovaTargeting_FindNextPlayerCycleTarget: faithful port of the markability table (combat-relevant = targets player or a player-targeting ship; mission-fleet-escort arm always false TODO(decomp)) + the eligibility filter chain (active/not-destroyed/disable-threshold + cloak scanner/state-0x15/system/untargetable-class + scanner/relevant==include_combat).
+0x00461F60,Ship_FindPreviousPlayerCycleTarget,src/game/targeting.cpp,100%,NovaTargeting_FindPreviousPlayerCycleTarget: backward sibling of the next-cycle port (same filters, wraps from slot 0x3f).
 0x004622F0,DrawContext_DrawCenteredPascalStringInBounds,src/game/nova_font.cpp,50%,NovaText_DrawCentered: measures width then centers over left/right bounds before drawing; real screen-font (SDL_ttf) reconstruction of measure+position+draw
 0x00462340,Rect_FilledSideDim,,0%,
 0x00462390,Sprite_GetShotHalfSpan,,0%,
@@ -317,9 +317,9 @@ address,name,impl_file,reimpl_pct,comment
 0x00462410,System_GetCurrentSystemLinkHalfSpan,,0%,
 0x004624C0,Sprite_GetShipClassEscortShotHalfSpan,,0%,
 0x00462550,Weapon_SpawnWeaponImpactEffectPackage,,0%,
-0x00462850,Ship_SelectNearestEngagedTarget,,0%,
+0x00462850,Ship_SelectNearestEngagedTarget,src/game/targeting.cpp,100%,NovaTargeting_SelectNearestEngagedTarget: nearest active/not-destroyed ship in-system, below disable threshold (or cloak scanner), not state-0x15, class not untargetable (or scanner), excluding ships already locked on the player.
 0x004629E0,Government_IsCandidateHostileToTargeter,,0%,
-0x00462BD0,Ship_SelectNearestHostileCombatTarget,,0%,
+0x00462BD0,Ship_SelectNearestHostileCombatTarget,src/game/targeting.cpp,100%,NovaTargeting_SelectNearestHostileCombatTarget: engaged-scan core + not fire-restricted + distress-eligible or locked-on-primary-in-state-4 (Ship_IsShipLockedOnAttackerInAiState0x04).
 0x00462DB0,Stellar_FindNearestAvailableTravelStellar,src/game/travel.cpp,90%,nearest travel point via NovaTravel_FindNearestTravelPoint (nav-defs geometry + restricted-range gate); per-stellar is_available treated as present
 0x00462EC0,Weapon_ReconcileOutfitPoolWithWeaponBanks,src/game/weapon.cpp,85%,"via NovaWeapon_ReconcileOutfitPoolWithWeaponBanks: snapshot bank ammo/secondary, subtract counts owned outfits explain (clamp negatives to 0), then materialize leftover positive bank ammo/secondary as owned ModType-1 weapon / ModType-3 ammo outfits. Wired (as Ghidra calls it) at new-game seeding (Stub_SeedStartingInventory), Outfitter entry (NovaLanded_OpenOutfitterSession), travel arrival (NovaLanding_EnterDocked) and ship purchase (NovaLanded_ReplacePlayerShip), so any mounted stock weapon becomes an owned, sellable outfit. The reverse (weapon-bank edit direction for buy/sell) is subsumed by RebuildBanksFromOwnedOutfits"
 0x00463260,Weapon_RebuildWeaponBankPoolsFromOwnedOutfits,src/game/weapon.cpp,90%,"via NovaWeapon_RebuildBanksFromOwnedOutfits (zero 0x100 banks, accumulate owned ModType-1 weapon / ModType-3 ammo outfits into bank ammo/secondary); caller topology (outfitter buy/sell flow) not yet wired"
@@ -329,7 +329,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004637a0,Ship_ComputeShipMaxArmor,src/game/outfit.cpp,85%,player-path effective max armor (class base + opcode 6 x owned); NPC/mission paths deferred
 0x00463a20,Ship_ComputeShipFuelCapacity,src/game/outfit.cpp,85%,"player-path effective fuel (class base + opcode 12 x owned) clamped [0,32000]; NPC/mission paths deferred"
 0x00463b30,Ship_ComputeShipShieldRechargeRate,src/game/outfit.cpp,80%,player shield recharge (class base + verified opcode 18 bonuses) factored into PlayerEffectiveStats; armor path via opcode 29
-0x004640a0,Ship_ComputeShipEffectiveThrust,src/game/outfit.cpp,80%,player effective accel (class base + opcode 7 /10000 x owned) in PlayerEffectiveStats; NPC/mission combat-state mods deferred
+0x004640a0,Ship_ComputeShipEffectiveThrust,src/game/outfit.cpp,85%,"player effective accel (class base + opcode 7 /10000 x owned) in PlayerEffectiveStats; NPC branch ported into NovaShip_ComputeEffectiveStats (base * govt combat_rating_scale * 2.0, shared by integrator + controls bridge). Remaining: skill_variance_scale (+0x40) and disable/status damping TODO(decomp)"
 0x00463680,Ship_ComputeShipShieldRegenRate,,0%,
 0x004637A0,Ship_ComputeShipMaxArmor,,0%,
 0x004638E0,Ship_ComputeShipArmorRegenRate,,0%,
@@ -338,7 +338,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00463DC0,Weapon_WeaponCanTrackTarget,,0%,
 0x00463E70,Ship_ComputeShipMaxTurnRateDeg,src/game/spaceflight.cpp,40%,"player path applies base plus opcode-9 effective turn and original integer rounding; NPC branch (field_0xc8dc class-override damping + 1.0-deg/frame floor) ported into NovaShip_IntegrateNpcMovement (floor currently inert for a clean NPC). Remaining: status-effect intensity damping and ship/NPC cache behavior TODO(decomp)"
 0x004640A0,Ship_ComputeShipEffectiveThrust,,0%,
-0x004642E0,Ship_ComputeShipEffectiveMaxSpeed,,0%,
+0x004642E0,Ship_ComputeShipEffectiveMaxSpeed,,50%,"NPC branch ported into NovaShip_ComputeEffectiveStats (base * govt combat_rating_scale; NOT the 2.0 thrust factor), shared by NovaShip_IntegrateNpcMovement + NovaAi_ApplyControls. Player outfit path + fanned cap components (DAT_005997bc/_c0) and skill_variance_scale (+0x40) TODO(decomp)"
 0x004644A0,Outfit_HasSpecialMovementOutfitOrLaunchBay,,0%,
 0x00464520,Weapon_HasLaunchBayWeapon,,0%,
 0x00464590,ShipClass_FindLaunchBayShipClassId,,0%,
@@ -460,10 +460,10 @@ address,name,impl_file,reimpl_pct,comment
 0x0046C320,Weapon_SelectTurretQuadrant,,0%,
 0x0046C4E0,Weapon_ChooseBestTurretQuadrantForTarget,,0%,
 0x0046C5C0,Weapon_ApplyTurretSpreadVelocity,,0%,
-0x0046C7A0,Ship_CheckShipDisableThresholdState,,0%,
+0x0046C7A0,Ship_CheckShipDisableThresholdState,src/game/targeting.cpp,100%,NovaTargeting_ShipAtDisableThreshold: disable_threshold_progress (+0x64) vs 24/8/16.0 gates keyed on disable_state_latch sign (fields added to Ship; disable subsystem not yet written so clean ships pass).
 0x0046C800,Frame_IsRectVisibleInViewport,,0%,
-0x0046C930,FUN_0046c930,,0%,
-0x0046CA60,Outfit_HasRequiredSpecialOutfit,,0%,
+0x0046C930,Outfit_HasScannerTargetUntargetableCapability,src/game/targeting.cpp,100%,scanned inside NovaTargeting ScannerCapabilities: any owned outfit modType 0x1e with modVal bit 0x04 (kCloakScanner untargetable flag) across primary+alt mod slots; original's tri-state memo cache not reproduced (scan is once per targeting-command press).
+0x0046CA60,Outfit_HasCloakScannerTargetCloakedCapability,src/game/targeting.cpp,100%,scanned inside NovaTargeting ScannerCapabilities: any owned outfit modType 0x1e with modVal bit 0x08 (cloaked-targeting flag); same no-cache note as the untargetable sibling.
 0x0046CB90,FUN_0046cb90,,0%,
 0x0046CC60,Sprite_SetContainerIfChanged,,0%,
 0x0046CCA0,Mission_AccumulatePlayerContributeMask,,0%,Clean-room contribute aggregation in landed_store ContributeMask now seeds the ship-class baseline + owned outfits (not missions/ranks), matching the Require gating used by outfit/ship purchases.

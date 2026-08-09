@@ -285,19 +285,44 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   }
 
   // Target panel: a manually selected stellar persists while the player flies
-  // toward it. The target-action window gate is independent of collision and
-  // does not imply that the ship has docked.
+  // toward it. When a ship is the primary target (backquote cycle / 'o' /
+  // mouse click) the panel reads the ship's class name + government + shield
+  // percentage instead, mirroring NovaUi_DrawTargetStatusPanel (0x0045f530)'s
+  // top name line and bottom status line (portrait + exact layout deferred:
+  // TODO(decomp) PICT 3000+ class portraits).
   {
     std::string tgt;
-    const std::int16_t sid = state.travel.selected_stellar_id;
-    const auto *st = state.scenario.Stellar(sid);
-    if (st && !st->name.empty()) {
-      tgt = st->name;
-      if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
-        tgt += " [INTERACT]";
+    const std::int16_t ship_slot = state.player.primary_target_ship_slot;
+    if (ship_slot > 0 &&
+        state.SlotInRange(static_cast<std::size_t>(ship_slot))) {
+      const Ship &target = state.ShipAt(static_cast<std::size_t>(ship_slot));
+      const ShipClass *target_cls =
+          state.scenario.Ship(static_cast<std::int16_t>(target.ship_class_id +
+                                                        0x80));
+      std::string name = target_cls ? target_cls->display_name : "?";
+      const Government *govt = state.scenario.Government(
+          static_cast<std::int16_t>(target.faction_or_government_id + 0x80));
+      const float tgt_shield_max =
+          std::max(1.0F,
+                   static_cast<float>(target_cls ? target_cls->base_shield : 1));
+      const int shield_pct = static_cast<int>(std::clamp(
+          target.shield_points / tgt_shield_max * 100.0F, 0.0F, 999.0F));
+      tgt = name;
+      if (govt != nullptr) {
+        tgt += " [" + govt->name + "]";
       }
+      tgt += " SHD " + std::to_string(shield_pct) + "%";
     } else {
-      tgt = "(none)";
+      const std::int16_t sid = state.travel.selected_stellar_id;
+      const auto *st = state.scenario.Stellar(sid);
+      if (st && !st->name.empty()) {
+        tgt = st->name;
+        if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
+          tgt += " [INTERACT]";
+        }
+      } else {
+        tgt = "(none)";
+      }
     }
     DrawReadout(platform,
                 *font_cache_,

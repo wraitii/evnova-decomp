@@ -6,12 +6,141 @@ stellars, escort, acquire combat targets, and jump between systems.
 This is a living plan. Phases are listed in the recommended execution order and
 marked as they land. Current state: **Phases 0-2 done** (NPC movement physics
 integrator + gravity-shield steer helper, both wired into the per-frame tick);
-**Phase 3 started** (AI decision layer): the ship_ai module now dispatches the
+**Phase 3 in progress** (AI decision layer): the ship_ai module dispatches the
 behavior supervisors + state machine + controls bridge each frame, and the
 **wander/travel milestone (Phases 3+4) is live** -- NPCs pick a random adjacent
-travel stellar, steer toward it, and cycle to the next on arrival.
+travel stellar, steer toward it, and cycle to the next on arrival. NPC movement
+uses each ship's real class stats; the thrust-units bug that made them ~50x too
+fast is fixed (see the Diagnosis section below). **Phase 6 is done**: the
+faithful `Ship_DeactivateVacantShipsAndTally` port sweeps vacant NPCs (with
+stellar present-ship tallies) at every landing/jump system boundary and the
+population maintenance reseeds -- the original keeps arrived ships active and
+removes them only at system boundaries (see Phase 6).
 
-## Current architecture snapshot (start state)
+## Diagnosis (2025-08-09): NPC ships do not use their ship's stats
+
+Root cause found while chasing "NPCs move too fast". The NPC movement chain is
+`NovaAi_ApplyControls` (bridge) -> `NovaShip_IntegrateNpcMovement` (integrator).
+Both are faithful in shape but the bridge writes **`ai_forward_thrust_cmd = 1.0`**
+where the original `Ship_ApplyShipAiControls` writes the ship's **raw effective
+thrust value** (`Ship_ComputeShipEffectiveThrust` = `2*accel/10000` px/tick^2,
+e.g. ~0.02 for accel=100). `Ship_HandleShip` forms the per-frame velocity step as
+`ai_forward_thrust_cmd * frame_time`, so the port accelerated NPCs at ~1 px/tick
+per frame instead of ~0.02 -- **~50x too fast**, hitting top speed in ~8 frames
+instead of ~400. The `eff_thrust` the integrator computes was only used for the
+engine-glow logic, never for thrust.
+
+### Decoded movement constants (now typed in Ghidra, pre-commented)
+
+The `_DAT_005750xx` globals were byte-mislabeled; values decoded from the raw
+bytes at 0x00575000..0x00575200 (little-endian; float vs double from the actual
+`FADD/FMUL/FCOMP float|double ptr` instructions):
+
+| addr | type | value | meaning |
+|------|------|-------|---------|
+| 0x575008 | double | 0.0 | zero sentinel for AI fields (`FLOAT_ZERO`) |
+| 0x575010 | double | 100.0 | velocity->bearing precision scale (modes 1/0xb/0xf/0xe) |
+| 0x575018 | float | 1.0 | turn-alignment allowance addend (modes 1/0xb/0xf) |
+| 0x57501c | float | 100.0 | hold/approach proximity gate (modes 6/0xb) |
+| 0x575038 | double | 0.5 | reduced thrust factor (mode-1 slow brake, mode-0xb close) |
+| 0x575068 | double | 8.0 | state-1 arrive-range turn-rate cap |
+| 0x575070 | double | 9.0 | state-1 arrive-range base |
+| 0x575078 | double | 32.0 | state-1 arrive-range offset; range = (9.0-min(turn,8))*8+32 |
+| 0x575080 | double | 0.35 | "moving" / arrival-stopped velocity threshold (px/tick) |
+| 0x575088 | double | 0.98 | state-1 arrival velocity damp |
+| 0x5750b0 | float | 165.0 | combat proximity gate (modes 5/6/0x10/0x11) |
+| 0x5750c0 | float | 30.0 | mode-0xd hold-release timer gate |
+| 0x5750d4 | float | 15.0 | mode-0x12 chase speed factor / mode-6 alignment addend |
+| 0x5750f0 | double | 0.95 | damp when nearly stopped (mode-1/0xe) / hold-match |
+| 0x5750f8 | double | 0.94 | mode-1 aligned-slow + state-9 damp |
+| 0x575100 | float | 5.0 | mode-2 (travel) turn-alignment addend |
+| 0x575104 | float | 500.0 | mode-2 "close to stellar" per-axis gate (px) |
+| 0x575108 | double | 0.25 | mode-2 arrival cruise fraction of eff_max_speed |
+| 0x575110 | float | 20.0 | mode-5/0x12 turn-alignment addend |
+| 0x575118 | double | 1.75 | mode-1 "still fast" threshold (px/tick) |
+| 0x575120 | float | 3.0 | mode-3 addend; mode-6/7/0x10/0x11 turn multiplier |
+| 0x575128 | float | 82.0 | mode-6/7 break-off per-axis gate |
+| 0x575130 | double | 1.5 | mode-0x10 evasive thrust factor |
+| 0x575138 | float | 135.0 | mode-6 evasive heading offset (deg) |
+| 0x575140 | double | 2.75 | mode-0x11 boost thrust factor |
+| 0x575148 | double | 1.8 | mode-0x11 cruise factor (eff_max_speed * 1.8) |
+| 0x575150 | float | 4.0 | mode-7 turn-alignment multiplier |
+| 0x575158 | double | 0.525 | mode-0xf velocity-match threshold |
+| 0x575160 | float | 200.0 | mode-0xb/9 per-axis distance gate |
+
+### Secondary fidelity gaps (found and fixed 2025-08-09)
+
+All five below are fixed in the current code (see "Fixes landed"); kept as a
+record of the bugs found while chasing the speed issue.
+
+1. **Mode 2 (travel) does not throttle at arrival**: original writes
+   `ai_desired_speed = 0` when far (coast at max-speed clamp) and
+   `eff_max_speed * 0.25` within 500 px of the stellar; the port always writes
+   `max_speed`.
+2. **Mode 2 has no alignment gate**: original only thrusts when the hull is
+   within `turn_rate + 5.0` deg of the bearing; the port always thrusts.
+3. **Mode 1 (damp/brake) is a no-op in the port**: original steers to the
+   reverse bearing and writes thrust = `eff_thrust` (or `*0.5` when slow, with a
+   0.94 damp), dropping to 0.95 damp + idle mode once below 0.35 px/tick. The
+   port writes `desired = -max(1,max_speed)` with `thrust_cmd = 0`, which the
+   integrator's `ai_forward_thrust_cmd != 0` gate skips entirely -- ships in
+   state 6/2/0x16 never slow down.
+4. **State-1 arrival constants were provisional**: the port used
+   `(10-turn)*50+20` range, `0.9` damp, `20` px/tick stopped threshold; the
+   original is `(9.0-min(turn,8))*8+32`, `0.98`, `0.35`.
+5. **Top-of-function desired-speed reset missing**: the original resets
+   `ai_desired_speed = eff_max_speed` whenever it is `>= 0` at entry; mode 1
+   relies on this (it never writes desired itself).
+
+### Fixes landed (2025-08-09)
+
+- `NovaAi_ApplyControls` writes `ai_forward_thrust_cmd = eff_thrust` (not 1.0)
+  in every thrusting mode, and ports the mode-2 alignment gate + arrival
+  fraction, the mode-1 braking ladder, and the entry desired-speed reset.
+- `NovaAi_UpdateShipState` arrival uses the decoded constants
+  (`(9.0-min(turn,8))*8+32` range, `0.98` damp, `0.35` stopped threshold).
+- `NovaShip_IntegrateNpcMovement` keeps `thrust_step = ai_forward_thrust_cmd *
+  elapsed_ticks` (now correct since the bridge writes the thrust value); the
+  coast branch also adopts the original's `ai_station_hold_timer <= 0` gate.
+
+### AI control-mode reference (`ai_control_mode`, +0xC8CA)
+
+Decoded from `Ship_ApplyShipAiControls` (0x00408150). Modes 0-4/0xd/0xb/9 are
+ported faithfully; 5-0x17 are provisional cruise stand-ins until the
+combat/formation/jump systems land (Phase 5-7).
+
+| Mode | Name | Behavior (original) |
+|------|------|---------------------|
+| 0x00 | Idle | no thrust, hold heading; auto-weapon refresh |
+| 0x01 | Brake-to-stop | steer to reverse of velocity bearing; full thrust -> 0.5x + 0.94 damp -> 0.95 damp + idle (<0.35 px/tick); g-shield: -0.5x thrust |
+| 0x02 | Travel to stellar | thrust only when aligned <= turn_rate+5 deg; desired 0 (coast at max clamp) far, 0.25*max within 500 px/axis |
+| 0x03 | Approach centre | point away from centre; thrust when aligned <= turn_rate+3 deg |
+| 0x04 | Jump spin-up | point away from centre; ramp hold timer; jump bookkeeping when timer >= duration/class (Phase 7) |
+| 0x05 | Pursue target | formation offset (leader); steer at target; thrust when aligned <= turn_rate+20 deg; close (<165 px) -> 0x11 |
+| 0x06 | Combat pursuit | predictive/straight aim; thrust gate turn_rate+15 deg, 2nd gate turn_rate*3 -> direct-fire; break-off (135 deg, 82 px) -> 0x10; g-shield speed-matching |
+| 0x07 | Combat strafe | aim (guided predictive); weapon select when aligned turn_rate*3; thrust gate turn_rate*4 |
+| 0x08 | Escort follow | steer at lead; thrust when aligned <= turn_rate+1 deg; outside escort half-span creep at 10x thrust; inside -> launch/handoff |
+| 0x09 | Hold at distance | steer at target (>200 px) or velocity-bearing match; thrust when aligned <= turn_rate+1 deg |
+| 0x0b | Formation hold | formation offset; steer at target / velocity-bearing; thrust <= turn_rate+1 deg; desired 0 far, 0.5*max within 100 px |
+| 0x0c | Velocity-match | match target vel/heading within 0.525 px/tick; heading-lerp window 25/|vel| |
+| 0x0d | Formation hold (timer) | copy leader heading/offset; leader timer >30 -> release to default behavior/mode 4; aligned <=11 deg -> damp 0.95, desired -4.0 (reverse), timer ramp |
+| 0x0e | Evade/break | brake like mode 1 aimed at target; g-shield -thrust; slow -> damp 0.95 + steer at target |
+| 0x0f | Velocity-match pursuit | brake on RELATIVE velocity (mode-1 style); <0.525 -> match target vel + damp; boarding/capture on arrival |
+| 0x10 | Evasive break | heading = current +/-135 deg (ship_instance_id parity); thrust 1.5x, desired 0; -> 0x6 when aligned |
+| 0x11 | Boost to target | thrust 2.75x, desired 1.8*max (over-speed); formation offset; -> 0x6 on alignment |
+| 0x12 | Chase leader | head at leader + 15*max polar offset; thrust <= turn_rate+20 deg; guided-weapon select in state 4 |
+| 0x13 | Scripted maneuver | steer at scripted target; thrust <= turn_rate+15 deg |
+| 0x14 | Scripted velocity-match | ramp vel to scripted target vel at 1.5x thrust; positional creep (+/-150/80 px); weapon lead-aim |
+| 0x15 | Jump-in | pick nearest freeflight anchor; steer at it; thrust <= turn_rate+15 deg, else damp 1.75x thrust (Phase 7) |
+| 0x16 | Jump-out/retreat | steer at stellar map coords; weapon select when aligned <= turn_rate+15 deg |
+| 0x17 | (no block) | thrust stays 0 -- effectively hold (port parks it too) |
+
+Notes: 0x575118 doubles as mode-1's 1.75 px/tick threshold AND mode-0x15's
+1.75x damp factor. 0x0a is unused/reserved (no block in the original). The
+port's mode 1/2/3/4/0xd implementations in `NovaAi_ApplyControls` mirror the
+table; mode 4/0xd keep placeholder hold behavior until jump/formation land.
+
+## Current architecture snapshot
 
 - **Frame loop**: `NovaFrame_SpaceflightLoop` (src/game/spaceflight.cpp) ->
   `NovaFrame_TickSystems` (src/game/spaceflight.cpp) mirrors Ghidra
@@ -37,14 +166,10 @@ travel stellar, steer toward it, and cycle to the next on arrival.
 - **Player movement**: `NovaPlayer_IntegrateMovement` is a faithful integrator
   (turn, thrust, inertia-less special case, max-speed clamp).
 
-### Key realization
-
 The AI decision code (`Ship_UpdateShipAI`, the `Behavior0x01/0x02/0x03`
-supervisors) is **already fully documented in Ghidra** with plate comments. The
-missing piece is reimplementing it in C++ plus the NPC movement integrator
-(`Ship_HandleShip` movement block). The clean-room `Ship` struct already carries
-most field names with `+0x` offsets matching Ghidra `ShipState`, so this is
-mostly unblocked porting work.
+supervisors) is fully documented in Ghidra with plate comments, and the
+clean-room `Ship` struct carries the `ShipState` field names/offsets, so the
+remaining porting is largely unblocked.
 
 ---
 
@@ -53,12 +178,16 @@ mostly unblocked porting work.
 - [x] **NPC movement integrator**: port the movement block of `Ship_HandleShip`
       (0x00433050) into `NovaShip_IntegrateNpcMovement` (src/game/spaceflight.cpp,
       declared in spaceflight.hpp): continuous turn toward `ai_desired_heading_deg`
-      at `round(Ship_ComputeShipMaxTurnRateDeg)`; three-branch `ai_desired_speed`
+      at the raw `Ship_ComputeShipMaxTurnRateDeg` rate (continuous; the player
+      keyboard path rounds instead); three-branch `ai_desired_speed`
       thrust (free-coast / forward / reverse absolute-set, gated on
       `ai_forward_thrust_cmd != 0`); `reverse_speed_bias` coast-through-reversal
       timer; inertia-less pin (accel==0 && speed==0); position integration;
       shield/armor regen; engine-glow level (`ShipState +0xc8d4`: full-burn 32 /
-      low-throttle 24 / fade-to-zero, turn-bias +2). Unit-tested
+      low-throttle 24 / fade-to-zero, turn-bias +2 -- the +2 bank bump is driven
+      by `ai_turn_bias_dir` (+0xC8F8), written by the integrator's turn block
+      from the turn direction, matching Ship_HandleShip's tilt-derived signal).
+      Unit-tested
       (tests/movement_test.cpp). TODO(decomp): NPC outfit/status/government-
       effective stats (the `Ship_ComputeShipMaxTurnRateDeg` 1.0-deg/frame NPC
       floor clamp is ported but inert until disable/status damping lowers a
@@ -121,8 +250,9 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
     the ship's own class fuel
     (`NovaTravel_CanShipInitiateJumpSequence`, mirroring
     `Stellar_CanShipInitiateJumpSequence` 0x00415b80, not the player-only
-    `NovaTravel_CanStartJump`). Remaining `_DAT_005750xx` turn/arrive
-    constants are provisional (TODO(decomp)).
+    `NovaTravel_CanStartJump`). The `_DAT_005750xx` turn/arrive constants are
+    now decoded and typed in Ghidra (see the Diagnosis section); the state-1
+    arrival uses the real range/damp/threshold values.
 - [ ] **Shared AI helpers** the supervisors call (small, reusable). Derive the
       concrete list from callees of 0x00401000 / 0x00405590 (batch-decompile
       them). Likely: `Ship_SelectNearestDisabledShipForBoarding`,
@@ -180,11 +310,39 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
 
 ## Phase 6 -- Land on stellars
 
-- [ ] **NPC arrival/landing path**: the AI reaches its travel stellar. Key funcs:
-      the arrival handling that deactivates/despawns a ship when it docks +
-      `Ship_DeactivateVacantShipsAndTally` (0x0041AD50, partially in
-      ship_spawn.cpp). In state 1 travel, arriving at the target stellar should
-      despawn the NPC ("land"), and population maintenance respawns others.
+- [x] **State-1 travel arrival settle** (ported with Phase 3/4): on arrival the
+      ship damp-stops at the stellar, records `jump_destination_stellar_id =`
+      the arrived stellar, re-enters state 0 and arms the coast-through-reversal
+      timer (300..499 ms open-space, 100..174 ms route-limited). Then the
+      wander supervisor (Behavior 0x01/0x02, state 0 "still at point") either
+      routes the ship toward the system centre for a jump spin-up (state 2,
+      `Stellar_CanShipInitiateJumpSequence` fuel gate) or parks it at the
+      stellar (state 6). **The original does NOT despawn NPCs on arrival** --
+      ships stay active and parked/wandering until the player leaves the system.
+- [x] **`Ship_DeactivateVacantShipsAndTally` (0x0041AD50)** -- faithful port
+      (`NovaShip_DeactivateVacantShipsAndTally`, src/game/ship_spawn.cpp): the
+      64-slot scan deactivates every "vacant" NPC -- i.e. all ships except
+      non-fire-restricted ships actively engaging the player (behavior > 4,
+      `ai_target_ship_slot == 0`, not docked, no mission fleet, flag == 0).
+      Docked ships (`target_stellar_object_id` set) are tallied into their
+      stellar's `present_ship_count` (capped at `max_ship_count`) before the
+      slot is cleared; mission ships would tally into their fleet's current-
+      ship count (mission fleets not reconstructed, TODO(decomp)).
+- [x] **Wired at both system-boundary paths**: the normal-arrival dock path
+      (Stellar_ProcessTravelAndLanding 0x00457580) and the player jump
+      completion (NovaMainLoop_Run 0x00486880 system-entry latch), each
+      followed by `NovaSystem_TickNpcSpawnMaintenance` to reseed toward
+      `System.avg_ships`. Before this wiring, a player jump left the old
+      system's ships stale-but-active so they reappeared when jumping back.
+
+**Phase 6 correction (2025-08-09)**: the original plan claimed arriving NPCs
+"despawn (land)". Ghidra shows the opposite: `Ship_UpdateShipAiState` state-1
+arrival keeps the ship active (stop + record + re-idle), and NPCs are removed
+from the world only by the vacant-ship cleanup at the system boundary. The
+visible "ships disappear when they reach a planet" effect is these parked
+ships leaving the player's view (they stop at the stellar; most then head to
+the system centre for a jump spin-up, Phase 7), plus the population reseed at
+every landing/jump.
 
 ## Phase 7 -- Jump between systems (high effort, save for last)
 
@@ -217,13 +375,16 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
 | 3 | AI decision layer | High |
 | 4 | Wander toward stellars | Medium |
 | 5 | Combat/fire | High |
-| 6 | Land on stellars | Medium |
+| 6 | Land/settle on stellars + system-boundary cleanup | Medium |
 | 7 | Jump systems | High |
 | 8 | Escort formations | Medium |
 
-First visible, achievable milestone: **Phases 0-4** -- NPC ships spawn, move
-around the system, and wander toward / land on stellars. Jump + full combat are
-the later, bigger lifts.
+**Phases 0-4 and the Phase-6 system-boundary cleanup are live**: NPC ships
+spawn, move around the system, wander toward travel stellars, and settle there;
+on every landing/jump the vacant-ship cleanup sweeps the cohort and population
+maintenance reseeds it (so NPCs leave the world at system boundaries, exactly
+like the original). Jump (Phase 7) and full combat (Phase 5) are the later,
+bigger lifts.
 
 ## Cross-cutting reminders (per AGENTS.md)
 
@@ -232,12 +393,16 @@ the later, bigger lifts.
 - Each reimpl function keeps a comment referencing its Ghidra address.
 - Work one Ghidra function at a time; decompile + callees first before porting.
 - NPC movement stats are per-ship-class in this build: the Phase 0 integrator
-  and `NovaAi_ApplyControls` both derive stats from the ship's own `ShipClass`
-  (`accel`/`speed`/`turn_rate`), which for a clean NPC **is** the effective value
-  (the outfit opcode-7/8/9 bonuses in `Ship_ComputeShipEffective*`/
-  `Ship_ComputeShipMaxTurnRateDeg` apply only to the player, `ship_instance_id
-  == 0`). The remaining NPC-branch gaps are just the status-effect/disable
-  damping (requires combat/status state, TODO(decomp)) and the turn-rate floor
-  clamp (ported, currently inert). Keep these in sync if NPC outfit/status
+  and `NovaAi_ApplyControls` share `NovaShip_ComputeEffectiveStats` (the NPC
+  branch of `Ship_ComputeShipEffectiveThrust`/`Ship_ComputeShipEffectiveMax-`
+  `Speed`), i.e. class `accel`/`speed`/`turn_rate` scaled by the government
+  `combat_rating_scale` (faction != -1; speed/accel only, not turn). The
+  remaining NPC-branch gaps are the per-ship **skill_variance_scale** (+0x40,
+  decoded formula: `(NovaRandom_Range(pct*2+1) + (100-pct)) * 0.01` from
+  `ShipClass_ComputeShipClassSkillVarianceScale` 0x0046b870; needs a `Ship`
+  field + spawner init) and the status-effect/disable damping (needs
+  combat/status state, TODO(decomp)). The `Ship_ComputeShipMaxTurnRateDeg`
+  1.0-deg/frame NPC floor clamp is ported but inert until damping lowers a
+  clean base below its floor. Keep these in sync if NPC outfit/status
   modelling is added.
 - Build both debug and release; format with clang-format; treat warnings as errors.

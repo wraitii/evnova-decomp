@@ -67,6 +67,31 @@ struct FlightInput {
   // system's eligible stellars and Shift+Tab goes backwards.
   bool cycle_target_next = false;
   bool cycle_target_previous = false;
+  // Cycle the ship (primary) target: backquote (`), Shift+backquote backwards
+  // (the original's default binding per the EV Nova manual: "press the ` key
+  // until the desired ship is selected"). When cycle_ship_include_combat is
+  // held (Alt or 'k') the cycle restricts itself to combat-relevant ships
+  // (ships targeting the player or a player-targeting ship), mirroring the
+  // original's modifier commands 0x1d (Left Ctrl) / 0x6b ('k'); the clean-room
+  // binding uses Alt to match the manual's description and stay clear of the
+  // afterburner Ctrl binding.
+  bool cycle_ship_target_next = false;
+  bool cycle_ship_target_previous = false;
+  bool cycle_ship_include_combat = false;
+  // Select the nearest hostile combat target ('o'), or the nearest engaged
+  // target (Alt+'o'). Mirrors the original's "target nearest" command whose
+  // default arm selects Ship_SelectNearestHostileCombatTarget and whose
+  // 0x38/0x6f modifiers select Ship_SelectNearestEngagedTarget.
+  bool select_nearest_hostile = false;
+  bool select_nearest_engaged = false;
+  // Edge latches from drained SDL events the loop otherwise could not see
+  // (PollFlightInput owns the event drain). escape_pressed latches Escape or
+  // 'q' keydown; primary_clicked latches a left mouse press with the current
+  // render-coordinate cursor position, used for click-to-target ship picking.
+  bool escape_pressed = false;
+  bool primary_clicked = false;
+  float mouse_x = 0.0F;
+  float mouse_y = 0.0F;
 };
 
 class SdlTexture {

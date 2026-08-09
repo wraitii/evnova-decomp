@@ -261,14 +261,40 @@ FlightInput SdlPlatform::PollFlightInput() {
   // Drain queued events first so the window stays responsive and the keyboard
   // state reflects the latest presses/releases. Then read the live key state
   // for the flight controls (edge-agnostic, so holding a key steers).
+  FlightInput input;
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
     if (event.type == SDL_EVENT_QUIT) {
       quit_requested_ = true;
+      continue;
+    }
+    if (event.type == SDL_EVENT_MOUSE_MOTION) {
+      SDL_RenderCoordinatesFromWindow(renderer_.get(),
+                                      event.motion.x,
+                                      event.motion.y,
+                                      &input.mouse_x,
+                                      &input.mouse_y);
+      continue;
+    }
+    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+        event.button.button == SDL_BUTTON_LEFT) {
+      SDL_RenderCoordinatesFromWindow(renderer_.get(),
+                                      event.button.x,
+                                      event.button.y,
+                                      &input.mouse_x,
+                                      &input.mouse_y);
+      input.primary_clicked = true;
+      continue;
+    }
+    // Escape/'q' exit the flight loop; captured here because this function
+    // drains the queue the old PollTextEvent-based check relied on.
+    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+        (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_Q)) {
+      input.escape_pressed = true;
+      continue;
     }
   }
   const bool *const keys = SDL_GetKeyboardState(nullptr);
-  FlightInput input;
   const auto pressed = [&](SDL_Scancode scancode) {
     return keys[scancode] != 0;
   };
@@ -287,6 +313,20 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.cycle_target_previous =
       pressed(SDL_SCANCODE_TAB) &&
       (pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT));
+  // Ship-target cycling: backquote (`) next, Shift+backquote backwards (the
+  // original's direction modifiers are Left/Right Shift, 0x2a/0x36). Alt (or
+  // the original's 'k', 0x6b) restricts the cycle to combat-relevant ships.
+  const bool alt_held =
+      pressed(SDL_SCANCODE_LALT) || pressed(SDL_SCANCODE_RALT);
+  const bool shift_held =
+      pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT);
+  input.cycle_ship_include_combat = alt_held || pressed(SDL_SCANCODE_K);
+  input.cycle_ship_target_next = pressed(SDL_SCANCODE_GRAVE) && !shift_held;
+  input.cycle_ship_target_previous =
+      pressed(SDL_SCANCODE_GRAVE) && shift_held;
+  // Nearest hostile/engaged target selection.
+  input.select_nearest_hostile = pressed(SDL_SCANCODE_O) && !alt_held;
+  input.select_nearest_engaged = pressed(SDL_SCANCODE_O) && alt_held;
   // Primary fire (held): space. See FlightInput::fire for the mapping note.
   input.fire = pressed(SDL_SCANCODE_SPACE);
   return input;

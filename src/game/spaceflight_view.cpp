@@ -5,7 +5,9 @@
 #include "../rle_sprite_sheet.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "ship_ai.hpp"
 #include "ship_visual.hpp"
+#include "targeting.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -768,6 +770,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawStellarBodies(platform, state); // stellar planets / stations
   DrawShots(platform, state);         // projectiles above stellars
   DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
+  DrawShipTargetReticle(platform, state); // target brackets over the ships
 
   // Player ship at the play-area centre, frame selected by heading. Because
   // the camera is centred on the player, drawing at the ship's own world
@@ -828,6 +831,146 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
       glow_last_drawn_ = false;
     }
   }
+}
+
+// Ghidra NovaUi_UpdateShipTargetReticle (0x0042ede0). The original positions
+// four corner-bracket sprites around the player's primary target ship: the
+// bracket offset is (max(frame half span, shot half span) + 1) / 2 rounded up
+// plus the decaying reticle pulse, with an extra 16px corner margin, and the
+// per-bracket sprite frame encodes the target state (base + corner index):
+//   0xc fire-restricted, 0x8 targeting the player (or a player-targeting
+//   chain), 0x0 distress-eligible, 0x4 other.
+// The clean-room draw renders L-shaped corner brackets with SDL lines instead
+// of the real sprite frames (TODO(decomp): port the bracket spin/PICT art) and
+// maps the state base to a diagnostic colour (0xc grey, 0x8 green, 0x0 yellow,
+// 0x4 white). The pulse value (GameState.ship_reticle_pulse) is decayed by the
+// spaceflight loop (60.0 units/sec, DAT_005753c8) before drawing.
+void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
+                                            const GameState &state) {
+  const std::int16_t slot = state.player.primary_target_ship_slot;
+  if (slot <= 0 || !state.SlotInRange(static_cast<std::size_t>(slot))) {
+    return; // no (or invalid) primary target: original hides the brackets
+  }
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
+  if (!target.is_active ||
+      target.current_system_id != state.player.current_system_id) {
+    return;
+  }
+  const Viewport vp = CurrentViewport(platform);
+  const float pulse = std::max(0.0F, state.ship_reticle_pulse);
+  // Viewport-centre offsets mirror the original reading the render-owner rect
+  // translation (g_random_encounter_fleet_defs[0x72].availability_expression.
+  // _236_2_/_238_2_): the HUD strip anchors the world to the left of the
+  // top-right panel, i.e. the full playfield in this build.
+  const float cx =
+      (target.pos_x - state.player.pos_x) + static_cast<float>(vp.w) / 2.0F;
+  const float cy =
+      (target.pos_y - state.player.pos_y) + static_cast<float>(vp.h) / 2.0F;
+
+  // Bracket frame base by target state (mirrors the reticle's sVar4 branch).
+  int frame_base = 4; // other
+  if (NovaAiShip_IsFireRestricted(state, target)) {
+    frame_base = 0xc;
+  } else {
+    if (target.ai_target_ship_slot == 0 &&
+        target.target_stellar_object_id == -1) {
+      frame_base = 8; // directly targeting the player
+    } else {
+      frame_base = NovaTargeting_IsShipEligibleForDistressCall(state, target)
+                       ? 0
+                       : 4;
+    }
+    // The original re-checks the chain AFTER the state branches and overrides
+    // 0/4: targeting a ship that itself targets the player reads as 8.
+    if (target.ai_target_ship_slot > 0 &&
+        state.SlotInRange(
+            static_cast<std::size_t>(target.ai_target_ship_slot)) &&
+        state.ShipAt(static_cast<std::size_t>(target.ai_target_ship_slot))
+                .ai_target_ship_slot == 0) {
+      frame_base = 8;
+    }
+  }
+  const SDL_Color color = [&]() -> SDL_Color {
+    switch (frame_base) {
+    case 0xc:
+      return SDL_Color{150, 150, 150, SDL_ALPHA_OPAQUE}; // fire-restricted
+    case 0x8:
+      return SDL_Color{80, 255, 120, SDL_ALPHA_OPAQUE}; // engaged w/ player
+    case 0x0:
+      return SDL_Color{255, 230, 80, SDL_ALPHA_OPAQUE}; // distress-eligible
+    default:
+      return SDL_Color{255, 255, 255, SDL_ALPHA_OPAQUE}; // other
+    }
+  }();
+
+  // Bracket offset: half the ship's bounding span plus the pulse, plus the
+  // original's fixed 16px corner margin. The original takes max(frame vertical
+  // half span, shot half span) of the target's sprite; here the loaded sheet's
+  // half-height stands in (the shot half span is a per-sprite constant we do
+  // not decode yet -- TODO(decomp)).
+  float half_span = 20.0F; // fallback when the class sprite is unavailable
+  if (const NpcShipSprite *sprite = ShipClassSprite(
+          platform, static_cast<std::int16_t>(target.ship_class_id + 0x80));
+      sprite != nullptr && !sprite->base.frames.empty()) {
+    half_span =
+        std::max(sprite->base.tile_width, sprite->base.tile_height) * 0.5F;
+  }
+  const float size =
+      std::floor((half_span + 1.0F) * 0.5F) + pulse + 16.0F;
+
+  const float left = cx - size;
+  const float right = cx + size;
+  const float top = cy - size;
+  const float bottom = cy + size;
+  constexpr float kArm = 14.0F; // bracket arm length (provisional)
+  SDL_SetRenderDrawColor(
+      platform.renderer(), color.r, color.g, color.b, color.a);
+  const auto corner = [&](float x, float y, float dx, float dy) {
+    SDL_FRect h{std::min(x, x + dx), y, std::abs(dx), 3.0F};
+    SDL_FRect v{x, std::min(y, y + dy), 3.0F, std::abs(dy)};
+    SDL_RenderFillRect(platform.renderer(), &h);
+    SDL_RenderFillRect(platform.renderer(), &v);
+  };
+  corner(left, top, kArm, kArm);        // top-left  \\/
+  corner(right - kArm, top, kArm, kArm); // top-right
+  corner(left, bottom - kArm, kArm, kArm); // bottom-left
+  corner(right - kArm, bottom - kArm, kArm, kArm); // bottom-right
+}
+
+std::int16_t SpaceflightView::PickShipAt(SdlPlatform &platform,
+                                         const GameState &state,
+                                         float rx,
+                                         float ry) {
+  const Viewport vp = CurrentViewport(platform);
+  const float wx = rx - static_cast<float>(vp.w) / 2.0F + state.player.pos_x;
+  const float wy = ry - static_cast<float>(vp.h) / 2.0F + state.player.pos_y;
+  std::int16_t best = -1;
+  float best_dist_sq = 0.0F;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active ||
+        ship.current_system_id != state.player.current_system_id) {
+      continue;
+    }
+    const NpcShipSprite *sprite = ShipClassSprite(
+        platform, static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (sprite == nullptr || sprite->base.frames.empty()) {
+      continue;
+    }
+    const float half_span =
+        std::max(sprite->base.tile_width, sprite->base.tile_height) * 0.5F;
+    const float dx = ship.pos_x - wx;
+    const float dy = ship.pos_y - wy;
+    const float dist_sq = dx * dx + dy * dy;
+    if (dist_sq > half_span * half_span) {
+      continue;
+    }
+    if (best == -1 || dist_sq < best_dist_sq) {
+      best_dist_sq = dist_sq;
+      best = static_cast<std::int16_t>(slot);
+    }
+  }
+  return best;
 }
 
 } // namespace game

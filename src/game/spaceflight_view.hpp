@@ -50,6 +50,28 @@ public:
   // ship) into the current renderer.
   void Draw(SdlPlatform &platform, const GameState &state);
 
+  // Ghidra NovaUi_UpdateShipTargetReticle (0x0042ede0): draws the 4-corner
+  // bracket reticle around the player's primary target ship (state.player
+  // .primary_target_ship_slot). Hidden when no target. The bracket offset is
+  // half the target ship's sprite span plus the decaying reticle pulse
+  // (GameState.ship_reticle_pulse; the loop decays it by frame time * 0.06);
+  // the frame-state encoding (fire-restricted 0xc / targeting-the-player 0x8 /
+  // distress-eligible 0x0 / other 0x4) is rendered as a provisional color
+  // mapping until the real bracket sprite frames are ported (TODO(decomp)).
+  void DrawShipTargetReticle(SdlPlatform &platform, const GameState &state);
+
+  // Clean-room click-to-target ship picking: returns the slot of the active
+  // NPC ship in the player's system whose sprite bounding span contains the
+  // render-coordinate point (rx, ry), nearest first, or -1. Mirrors the
+  // manual's "click on a ship to select it with your targeting sensors"; the
+  // original performs the pick through the sprite pixel-test pass, which is
+  // approximated here with the sprite half-span hit test (TODO(decomp)). No
+  // government filter: any ship under the cursor may be selected for hailing.
+  std::int16_t PickShipAt(SdlPlatform &platform,
+                          const GameState &state,
+                          float rx,
+                          float ry);
+
   // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0): (re)spawns the
   // 20-slot ambient starfield around the player ship. Spawn count is
   // round(viewportHeight / 600.0 * 20.0) fresh stars; each gets a random world

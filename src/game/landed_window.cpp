@@ -93,14 +93,14 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   state.stat_cache_valid = true;
 
   // Stellar_ProcessTravelAndLanding (0x00457580) runs Ship_DeactivateVacant
-  // ShipsAndTally('\0') during the normal arrival, then System_TickNpcSpawn
-  // Maintenance + Mission_SpawnSystemMisnShips to reseed the system's NPC
-  // population. So a landing (and the subsequent launch) leaves the system with
-  // a fresh batch of ships rather than the fleet that had accumulated before
-  // docking. The clean-room deactivates the whole active system cohort (the
-  // original spare idle non-fire-restricted wanderers / mission / parked
-  // ships), then replenishes toward avg_ships; see ship_spawn.hpp.
-  NovaShip_DeactivateSystemShips(state, state.player.current_system_id);
+  // ShipsAndTally('\0') during the normal arrival, then Mission_SpawnSystemMisn
+  // Ships + System_TickNpcSpawnMaintenance reseed the system's NPC population.
+  // So a landing (and the subsequent launch) leaves the system with a fresh
+  // batch of ships rather than the fleet that had accumulated before docking.
+  // The port deactivates the whole vacant cohort (idle wanderers / parked /
+  // mission ships; only non-fire-restricted ships actively engaging the player
+  // are spared -- see ship_spawn.hpp), then replenishes toward avg_ships.
+  NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
   NovaSystem_TickNpcSpawnMaintenance(state, state.player.current_system_id);
 
   ctx.stellar_id = stellar_id;

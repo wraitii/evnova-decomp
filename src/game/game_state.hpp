@@ -135,25 +135,47 @@ struct Ship {
   // to 2 when it assigns ai_secondary_target_slot a fresh travel stellar (the
   // signal System_UpdateSystemAndStellarDisplayState reads to auto-target the
   // nearest travel point on the arrival/last-known system).
-  std::int16_t travel_transfer_mode = 0; // +0x2A (provisional offset)
+  std::int16_t travel_transfer_mode = 0;      // +0x2A (provisional offset)
   std::int16_t primary_target_ship_slot = -1; // +0x70
   std::int16_t ai_secondary_target_slot =
       -1;                                // +0x6C (also a travel/stellar slot)
   std::int16_t ai_target_ship_slot = -1; // +0x9A
-  std::int16_t target_stellar_object_id = -1;    // +0x8C
-  std::int16_t jump_destination_stellar_id = -1; // +0x92
-  std::int16_t ai_hostility_accumulator = 0;     // +0x96
-  // Disable/surrender-pressure patience timer: counts down (by frame time) while
-  // the ship fails to gain disable pressure over its target; when it runs out the
-  // AI gives up and clears the primary target (Ship_UpdateShipAiState state 4).
-  // -1 = no patience pressure tracked (set by Ship_CanShipApplyDisablePressure-
-  // ToTarget 0x00464a90 on each successful check).
-  float target_disable_patience_timer = -1.0F; // +0xC8D8
+  std::int16_t target_stellar_object_id = -1; // +0x8C
+  // Velocity-match lock (ShipState +0xC8DC): the slot of a ship whose
+  // velocity/heading this ship is matching (control mode 0xc/0xf), or -1. A
+  // non-self value gates the NPC effective-stats branch
+  // (Ship_ComputeShipEffectiveThrust 0x004640a0 applies the DAT_00575788
+  // factor while locked) and blocks Stellar_CanShipInitiateJumpSequence; the
+  // velocity-match control modes are Phase 5/8 TODO(decomp), but the field is
+  // cleared by Ship_DeactivateVacantShipsAndTally (0x0041ad50) and seeded by
+  // Ship_AllocateShipSlotInSystem, so it lives on the struct now.
+  std::int16_t velocity_match_target_ship_slot = -1; // +0xC8DC
+  std::int16_t jump_destination_stellar_id = -1;     // +0x92
+  std::int16_t ai_hostility_accumulator = 0;         // +0x96
+  // Disable/surrender-pressure patience timer: counts down (by frame time)
+  // while the ship fails to gain disable pressure over its target; when it runs
+  // out the AI gives up and clears the primary target (Ship_UpdateShipAiState
+  // state 4). -1 = no patience pressure tracked (set by
+  // Ship_CanShipApplyDisablePressure- ToTarget 0x00464a90 on each successful
+  // check).
+  float target_disable_patience_timer = -1.0F; // +0xC90C
+  // Disable-threshold progress (Ghidra ShipState +0x64, provisional): grows
+  // while the ship takes disable pressure. Ship_CheckShipDisableThresholdState
+  // (0x0046c7a0) treats progress > 16.0 (or > 24.0 with disable_state_latch
+  // >= 0, > 8.0 with latch < 0) as "at/below the disable threshold", which
+  // makes the ship un-targetable without a cloak-scanner outfit. The disable/
+  // status-effect subsystem is not reconstructed yet, so this stays 0 and the
+  // gate passes (ships are cycleable).
+  float disable_threshold_progress = 0.0F; // +0x64
+  // Disable-state latch (Ghidra ShipState +0xC8D8, short): sign selects the
+  // disable-threshold boundary (24.0 vs 8.0) in Ship_CheckShipDisableThreshold-
+  // State. Written by the disable subsystem (Phase 5); 0 by default.
+  std::int16_t disable_state_latch = 0; // +0xC8D8
   // Waypoint arrival marker pair used by ships carrying arrival markers (class
-  // sprite_behavior_flags bit 1): waypoint_arrival_marker_a reflects a completed
-  // arrival; marker_b counts/suppresses route restarts. -1 = none.
-  std::int16_t waypoint_arrival_marker_a = -1; // +0xC8F2 (provisional offset)
-  std::int16_t waypoint_arrival_marker_b = -1; // +0xC8F4 (provisional offset)
+  // sprite_behavior_flags bit 1): waypoint_arrival_marker_a reflects a
+  // completed arrival; marker_b counts/suppresses route restarts. -1 = none.
+  std::int16_t waypoint_arrival_marker_a = -1; // +0xC8FA (provisional offset)
+  std::int16_t waypoint_arrival_marker_b = -1; // +0xC8FC (provisional offset)
 
   // Whether this ship is flagged as carrying a mining scoop outfit (ShipState
   // +0xBE mining_scoop_active, derived by Outfit_HasMiningScoopOutfit).
@@ -446,6 +468,15 @@ struct GameState {
   // The transient HUD overlay message (see HudOverlayState). Kept on GameState
   // per AGENTS.md (no hidden globals) and rendered by the HudRenderer.
   HudOverlayState hud_overlay;
+
+  // Target-reticle pulse values (Ghidra g_travel_target_reticle_pulse
+  // DAT_00735490 / g_ship_target_reticle_pulse DAT_00735494). Set to 256.0
+  // (0x43800000) when the corresponding target is (re)selected, then decay
+  // toward 0.0 at 60.0 units/sec (DAT_005753c8) by NovaUi_UpdateShipTarget-
+  // Reticle (0x0042ede0) / NovaUi_UpdateTravelTargetReticle (0x0042eac0). The
+  // pulse drives the bracket "grow out then settle" offset.
+  float travel_reticle_pulse = 0.0F;
+  float ship_reticle_pulse = 0.0F;
 
   // Parsed scenario data (ships/outfits/weapons/stellars/systems), loaded once
   // so the gameplay loops can look up classes by id. Empty until a game is

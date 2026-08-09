@@ -102,4 +102,18 @@ bool NovaGovernment_AreGovtsHostileOrXenophobic(const ScenarioData &scenario,
   return xenophobic(govt_a) || xenophobic(govt_b);
 }
 
+bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
+                                  std::int16_t govt_id,
+                                  int flag_index) {
+  if (govt_id < 0 || govt_id >= 0x100 ||
+      static_cast<std::size_t>(govt_id) >= scenario.governments.size()) {
+    return false;
+  }
+  if (flag_index < 0 || flag_index >= 2) {
+    return false;
+  }
+  return scenario.governments[static_cast<std::size_t>(govt_id)]
+             .policy_flags[static_cast<std::size_t>(flag_index)] != 0;
+}
+
 } // namespace game

@@ -7,10 +7,10 @@
 //    NovaShip_HasGravityShield, and "effective stats" are the class base
 //    values (the player's outfit/status damping is not modelled yet).
 //  * Several per-mode turn/thrust scale constants (the _DAT_005750xx globals)
-//    are provisional -- they are cast from byte-sized Ghidra labels whose
-//    surrounding float payloads overlap, and need gameplay observation to pin.
-//    They are collected at the top with TODO(decomp) so there is one
-//    edit-point.
+//    were provisional; they have since been decoded from the raw bytes and
+//    typed + pre-commented in the Ghidra DB (2025-08-09). The movement modes
+//    (1/2/3/4/0xd) now read the real values; combat-mode constants are only
+//    referenced in comments until those modes are ported.
 //  * HUD/mission flavor side-effects (overlay messages, extortion prompts,
 //    fuel-transfer chatter, carrier-bay launch) are documented no-ops until
 //    those systems land; combat-heavy branches that depend on the not-yet-
@@ -36,27 +36,55 @@ namespace game {
 
 namespace {
 
-// --- Provisional shared constants (TODO(decomp)). The original reads most of
-// these from the byte-overlapped _DAT_005750xx globals; their exact float
-// payloads are not fully resolved from static analysis, so they are collected
-// in one place. The values below are reasoned from the surrounding math and
-// normal gameplay expectations; treat as placeholders until observed. ----
-// A "very slow" speed threshold used in the travel/arrive branches.
-constexpr float kVerySlowSpeed = 20.0F;
-// Velocity damp applied when a ship within arrival range is still moving.
-constexpr float kArrivalDamp = 0.9F;
-// The (10.0 - base_turn_rate) turn-radius base and scale.
-constexpr float kTurnRadiusBase = 10.0F;
-constexpr float kTurnRadiusScale50 = 50.0F;
-// Engagement distance within which a ship can fire / apply disable pressure.
+// --- Decoded movement constants (Ghidra _DAT_00575xxx). The original reads
+// these from byte-mislabeled globals at 0x00575000..0x00575200; the values
+// below were decoded from the raw bytes (float vs double from the actual
+// instruction widths) on 2025-08-09 and are typed + pre-commented in the
+// Ghidra DB. See docs/npc_ship_behavior_plan.md "Diagnosis" section. ---
+// "Moving" / arrival-stopped velocity threshold, px/tick (0x575080, double).
+constexpr float kVerySlowSpeed = 0.35F;
+// State-1 travel arrival velocity damp (0x575088, double).
+constexpr float kArrivalDamp = 0.98F;
+// State-1 travel arrive-range: (9.0 - min(turn_rate_deg, 8.0)) * 8.0 + 32.0
+// px per axis (0x575070 / 0x575068 / 0x575078, doubles).
+constexpr float kArriveRangeBase = 9.0F;
+constexpr float kArriveRangeTurnCap = 8.0F;
+constexpr float kArriveRangeScale = 8.0F;
+constexpr float kArriveRangeOffset = 32.0F;
+// Mode-1 (damp/brake) ladder: fast threshold 0.35 (0x575080), "still fast"
+// 1.75 (0x575118), half-thrust factor 0.5 (0x575038), aligned damp 0.94
+// (0x5750f8), nearly-stopped damp 0.95 (0x5750f0), alignment addend 1.0
+// (0x575018).
+constexpr float kMode1FastThreshold = 0.35F;
+constexpr float kMode1StillFastThreshold = 1.75F;
+constexpr float kMode1SlowThrustFactor = 0.5F;
+constexpr float kMode1Damp = 0.94F;
+constexpr float kMode1StopDamp = 0.95F;
+constexpr float kMode1AlignAddend = 1.0F;
+// Mode-2 (travel): alignment addend 5.0 (0x575100, float), "close to stellar"
+// gate 500 px/axis (0x575104, float), arrival cruise fraction 0.25
+// (0x575108, double).
+constexpr float kMode2AlignAddend = 5.0F;
+constexpr float kMode2CloseGatePx = 500.0F;
+constexpr float kMode2ArriveFraction = 0.25F;
+// Mode-3 (approach centre): alignment addend 3.0 (0x575120, float).
+constexpr float kMode3AlignAddend = 3.0F;
+// Engagement distance within which a ship can fire / apply disable pressure
+// (0x5750b0, float).
 constexpr float kEngageDist = 165.0F;
 // Assist/response keep-distance thresholds.
 constexpr float kAssistClose = 300.0F;
 constexpr float kAssistFar = 600.0F;
-// Squared-distance threshold for "at system centre" (states 2/3 station-keep).
-constexpr float kCentreRangeSq = 10000.0F;
+// Squared-distance threshold for "at system centre" (states 2/3 station-keep);
+// 0x575098 (double) = 1,000,000 px^2 (1000 px radius).
+constexpr float kCentreRangeSq = 1000000.0F;
 // Gravity-shield approach multipliers (state 0xd/0xf).
 constexpr float kShieldKeepMult = 4.0F;
+// PROVISIONAL turn-radius range used by the port's own pursuit/assist range
+// gates (states 5/0xf; the original uses Ship_CanShipInterceptCurrent-
+// PrimaryTarget instead). NOT the decoded state-1 travel arrive range above.
+constexpr float kTurnRadiusBase = 10.0F;
+constexpr float kTurnRadiusScale50 = 50.0F;
 
 constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
 constexpr float kFullCircleDeg = 360.0F;
@@ -356,20 +384,28 @@ void NovaAi_UpdateShipState(GameState &state,
       // Distances to the travel stellar.
       const float dx = static_cast<float>(target->pos_x) - ship.pos_x;
       const float dy = static_cast<float>(target->pos_y) - ship.pos_y;
-      // Compute a target turn-radius distance: as long as the offset is larger
-      // than it, keep steering toward the stellar (control mode 2 travel).
+      // Compute the turn-radius arrive range, mirroring Ship_UpdateShipAiState
+      // (0x00405590): range = (9.0 - min(Ship_ComputeShipMaxTurnRateDeg,
+      // 8.0)) * 8.0 + 32.0 px per axis. As long as the offset is larger than
+      // it, keep steering toward the stellar (control mode 2 travel).
       const auto *cls =
           scn->Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-      const float base_turn = cls ? cls->turn_rate : 0.0F;
+      const float turn_deg = cls ? static_cast<float>(cls->turn_rate) * 0.1F
+                                 : 0.0F; // Ship_ComputeShipMaxTurnRateDeg NPC branch
       const float arrive_range =
-          (kTurnRadiusBase - base_turn) * kTurnRadiusScale50 + kVerySlowSpeed;
+          (kArriveRangeBase -
+           std::min(turn_deg, kArriveRangeTurnCap)) *
+              kArriveRangeScale +
+          kArriveRangeOffset;
       const bool outside_range =
           std::abs(dx) > arrive_range || std::abs(dy) > arrive_range;
       if (outside_range) {
         ship.ai_control_mode = 2; // travel: steer toward map coords
       } else {
         // Arrived: damp residual velocity, or stop and (re)arm the departure
-        // coast-through-reversal timer to fly off once the ship settles.
+        // coast-through-reversal timer to fly off once the ship settles. The
+        // velocity damp and "stopped" threshold match the original's
+        // _DAT_00575088 (0.98) / _DAT_00575080 (0.35 px/tick).
         const ShipClass *sc2 = cls;
         const bool has_arrival_marker =
             sc2 && (sc2->sprite_behavior_flags & 2) != 0;
@@ -480,6 +516,9 @@ void NovaAi_UpdateShipState(GameState &state,
   // ---- Idle-template / approach station-keeping (state 2). ----
   if (ship.ai_state_code == 2) {
     // At system centre -> approach/stop; else station-keep or drift to it.
+    // The "stopped" test uses the same 0.35 px/tick threshold as the original
+    // (_DAT_00575080); the special-loadout arm of the original's mode-4 branch
+    // is not modelled (TODO(decomp): Ship_CheckSpecialLoadoutCapability).
     if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <= kCentreRangeSq) {
       ship.ai_control_mode = 3;
     } else if (std::abs(ship.vel_x) < kVerySlowSpeed &&
@@ -719,38 +758,108 @@ void NovaAi_UpdateShipState(GameState &state,
 // ai_forward_thrust_cmd (whether to thrust this frame). The travel/arrive
 // modes (0-3) are the ones that make NPCs wander; the attack/formation modes
 // (5-0x17) are provisionally mapped onto the same steering primitive until
-// the combat/formation systems land. Most per-mode turn polynomials read the
-// provisional shared constants above.
+// the combat/formation systems land. The movement constants are now decoded
+// from the Ghidra _DAT_00575xxx globals (see the constant block at the top).
 void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
   (void)frame_time_ms;
   ship.ai_forward_thrust_cmd = 0.0F;
   ship.ai_fire_trigger_latch = 0;
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-  const float max_speed = cls ? static_cast<float>(cls->speed) / 100.0F : 0.0F;
+  // Effective stats via the shared helper (NPC branch of
+  // Ship_ComputeShipEffectiveThrust / Ship_ComputeShipEffectiveMaxSpeed /
+  // Ship_ComputeShipMaxTurnRateDeg): class base values, government
+  // combat_rating_scale applied to speed/thrust, no outfit/status yet. Same
+  // derivation as NovaShip_IntegrateNpcMovement.
+  const NpcEffectiveStats eff =
+      cls ? NovaShip_ComputeEffectiveStats(state, ship, *cls)
+          : NpcEffectiveStats{};
+  const float max_speed = eff.max_speed_px_per_tick;
+  const float eff_thrust = eff.thrust_px_per_tick2;
+  const float eff_turn_deg = eff.turn_rate_deg_per_tick;
+
+  // Ship_ApplyShipAiControls entry: any non-negative ai_desired_speed carried
+  // over from the previous frame is reset to the full cruise speed (the
+  // original tests the 0x575008 zero sentinel). Modes that never write
+  // desired themselves (mode-1 braking) rely on this reset to hand the
+  // integrator an eff_max_speed cap.
+  if (ship.ai_desired_speed >= 0.0F) {
+    ship.ai_desired_speed = max_speed;
+  }
+
+  // Shortest signed angle (deg) from the current heading to the desired one.
+  auto heading_delta_deg = [&]() {
+    const float cur_deg = ship.heading / kDegToRad;
+    return std::remainder(
+        static_cast<float>(ship.ai_desired_heading_deg) - cur_deg,
+        kFullCircleDeg);
+  };
 
   switch (ship.ai_control_mode) {
   case 0:
   case 0x15:
   case 0x16:
-    // Idle / static: no thrust, hold heading.
+  case 0x17:
+    // Idle / static: no thrust, hold heading. 0x15/0x16 are the jump-in /
+    // jump-out modes (freeflight-object / stellar steering, Phase 7) and 0x17
+    // the jump-arrival hold -- the original Ship_ApplyShipAiControls has no
+    // block for 0x17 (thrust stays 0), and 0x15/0x16 need the jump systems, so
+    // all three park the ship.
     ship.ai_forward_thrust_cmd = 0.0F;
     ship.ai_desired_speed = 0.0F;
     break;
 
-  case 1:
-    // Slow/damp to a stop: reverse thrust to shed velocity.
-    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
-        BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F);
-    ship.ai_desired_speed = -std::max(1.0F, max_speed);
+  case 1: {
+    // Slow to a stop (original mode 1). While any velocity component is above
+    // 0.35 px/tick, steer toward the reverse of the velocity bearing and brake
+    // with the raw effective thrust; once aligned and below 1.75 px/tick brake
+    // at half thrust while damping velocity by 0.94; once below 0.35 px/tick
+    // damp by 0.95 and drop to idle control mode 0. Gravity-shield ships brake
+    // with a NEGATIVE thrust command (the integrator's scalar-speed path). The
+    // state-code-9 not-yet-aligned damp is kept for parity.
+    if (std::abs(ship.vel_x) < kMode1FastThreshold &&
+        std::abs(ship.vel_y) < kMode1FastThreshold) {
+      ship.vel_x *= kMode1StopDamp;
+      ship.vel_y *= kMode1StopDamp;
+      ship.speed *= kMode1StopDamp;
+      ship.ai_control_mode = 0;
+      break;
+    }
+    if (cls == nullptr || !NovaShip_HasGravityShield(ship, *cls)) {
+      ship.ai_desired_heading_deg = static_cast<std::int16_t>(WrapDeg(
+          BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
+      if (std::abs(heading_delta_deg()) <
+          eff_turn_deg + kMode1AlignAddend) {
+        if (std::abs(ship.vel_x) >= kMode1StillFastThreshold ||
+            std::abs(ship.vel_y) >= kMode1StillFastThreshold) {
+          ship.ai_forward_thrust_cmd = eff_thrust;
+        } else {
+          ship.ai_forward_thrust_cmd = eff_thrust * kMode1SlowThrustFactor;
+          ship.vel_x *= kMode1Damp;
+          ship.vel_y *= kMode1Damp;
+          ship.speed *= kMode1Damp;
+        }
+      } else if (ship.ai_state_code == 9) {
+        ship.vel_x *= kMode1Damp;
+        ship.vel_y *= kMode1Damp;
+        ship.speed *= kMode1Damp;
+      }
+    } else {
+      ship.ai_forward_thrust_cmd = -eff_thrust * kMode1SlowThrustFactor;
+    }
     break;
+  }
 
   case 2:
   case 9:
   case 0xb: {
-    // Travel / pursue a map or ship coordinate in ai_secondary_target_slot
-    // (a stellar resource id, or a ship slot). Steer the heading toward the
-    // target and apply forward cruise thrust.
+    // Travel / pursue a map or ship coordinate in ai_secondary_target_slot (a
+    // stellar resource id, or a ship slot). Steer the heading toward the
+    // target; thrust only while the hull is within eff_turn_deg + 5.0 deg of
+    // the bearing (the original's alignment gate -- the ship turns first, then
+    // applies thrust once roughly aligned). Far from the stellar cruise at the
+    // max-speed clamp (desired = 0); within 500 px per axis throttle to 25% of
+    // max speed for the arrival slowdown.
     float tx = ship.pos_x, ty = ship.pos_y;
     if (ship.ai_secondary_target_slot == 0) {
       const Ship &p = state.ShipAt(0);
@@ -773,22 +882,42 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     }
     ship.ai_desired_heading_deg =
         static_cast<std::int16_t>(BearingDeg(ship.pos_x, ship.pos_y, tx, ty));
-    ship.ai_desired_speed = max_speed;
-    ship.ai_forward_thrust_cmd = 1.0F;
+    if (std::abs(heading_delta_deg()) <
+        eff_turn_deg + kMode2AlignAddend) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      if (std::abs(tx - ship.pos_x) < kMode2CloseGatePx &&
+          std::abs(ty - ship.pos_y) < kMode2CloseGatePx) {
+        ship.ai_desired_speed = max_speed * kMode2ArriveFraction;
+      } else {
+        ship.ai_desired_speed = 0.0F;
+      }
+    }
+    // Not aligned: thrust stays 0 this frame (turn in place).
     break;
   }
 
-  case 4:
-  case 0xd:
-    // Station-keep / hold: hold heading, low trailing thrust only if moving.
-    ship.ai_desired_speed = max_speed * 0.5F;
-    ship.ai_forward_thrust_cmd = ship.speed > 0.1F ? 1.0F : 0.0F;
+  case 3:
+    // Approach the system centre: point away from the centre and coast
+    // (desired = 0 -> max-speed clamp in the integrator), thrusting once
+    // aligned within eff_turn_deg + 3.0 deg.
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+        BearingDeg(0.0F, 0.0F, ship.pos_x, ship.pos_y));
+    if (std::abs(heading_delta_deg()) <
+        eff_turn_deg + kMode3AlignAddend) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      ship.ai_desired_speed = 0.0F;
+    }
     break;
 
-  case 3:
-    // Approach a stationary point (system centre in state 2): brake in.
-    ship.ai_desired_speed = -std::max(1.0F, max_speed);
-    ship.ai_forward_thrust_cmd = 1.0F;
+  case 4:
+  case 0xd:
+    // Station-keep / hold. The original mode 4 is the jump spin-up timer
+    // (Phase 7) and mode 0xd the formation-hold
+    // (Ship_MoveShipTowardFormationOffset); neither is wired, so keep the
+    // placeholder hold behavior but with the real thrust value.
+    // TODO(decomp): jump timer + formation offset.
+    ship.ai_desired_speed = max_speed * 0.5F;
+    ship.ai_forward_thrust_cmd = ship.speed > 0.1F ? eff_thrust : 0.0F;
     break;
 
   case 5:
@@ -803,7 +932,6 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
   case 0x12:
   case 0x13:
   case 0x14:
-  case 0x17:
   default:
     // Combat/formation/capture modes: steer toward the current heading and
     // cruise, so ships in these states still move fluidly rather than
@@ -811,7 +939,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     ship.ai_desired_heading_deg =
         static_cast<std::int16_t>(WrapDeg(ship.heading / kDegToRad));
     ship.ai_desired_speed = max_speed;
-    ship.ai_forward_thrust_cmd = 1.0F;
+    ship.ai_forward_thrust_cmd = eff_thrust;
     break;
   }
 }

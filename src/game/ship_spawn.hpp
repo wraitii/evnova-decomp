@@ -173,19 +173,28 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
                                         std::int16_t system_id);
 
 // Mirrors the ship-slot cleanup of Ship_DeactivateVacantShipsAndTally
-// (Ghidra 0x0041ad50): deactivates every active NPC ship assigned to
-// `system_id` (slots 1..kMaxShips-1), clearing the active flag and returning
-// their current_system_id / targeting / mission slots to their -1 defaults.
-// The original staggers this across the fire-restricted / parked / mission
-// residency cases (keeping idle non-fire-restricted wanderers) and tallies
-// deactivated ships into mission-fleet/at-stellar quotas; those tallies and the
-// residency carve-outs depend on the mission / park / fire-restriction systems
-// that are not yet reconstructed, so the clean-room clears the whole active
-// system cohort. The caller (the normal-arrival dock path) immediately
-// replenishes toward System.avg_ships via NovaSystem_TickNpcSpawnMaintenance,
-// which is what yields the observed "new batch of ships" after docking.
-// TODO(decomp): fire-restriction / parked-stellar / mission-fleet carve-outs.
-void NovaShip_DeactivateSystemShips(GameState &state, std::int16_t system_id);
+// (Ghidra 0x0041ad50): scans every NPC slot and deactivates the "vacant" ones,
+// tallying them into their spawn-quota bucket first. A slot is SPARED only when
+// it is actively engaging the player -- ai_behavior_code > 4,
+// ai_target_ship_slot
+// == 0, not docked at a stellar (target_stellar_object_id == -1), not in a
+// mission fleet -- AND is not fire-restricted AND `keep_player_engaged` is
+// false (the original's flag==0). Everything else (idle wanderers/dudes,
+// parked-at-stellar ships, mission ships, fire-restricted ships) is
+// deactivated: parked ships increment their stellar's present_ship_count
+// (capped at max_ship_count), mission ships would increment their mission
+// fleet's current-ship count (mission fleets not reconstructed; logged no-op),
+// then is_active and the targeting/mission/system slots are cleared.
+//
+// The original runs this with flag==0 on travel/landing arrival
+// (Stellar_ProcessTravelAndLanding 0x00457580) and system entry
+// (NovaMainLoop_Run 0x00486880); the caller then reseeds toward
+// System.avg_ships via NovaSystem_TickNpcSpawnMaintenance, which is what yields
+// the observed "fresh batch of ships" after docking/jumping. Note the original
+// scans ALL slots regardless of system; the clean-room's ships only ever live
+// in the current system, so this matches in practice.
+void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
+                                            bool keep_player_engaged);
 
 // Mirrors NovaRandom_Reseed (Ghidra 0x004ab970 -> NovaRandom_Range(0)), which
 // mixes NovaTime_GetTicksMs() into the global LCG. The original calls this

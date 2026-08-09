@@ -104,6 +104,14 @@ Travel / interaction UI:
 - `0x0042cc30` `NovaGameplay_TickTravelCountdownSprite` (`DAT_00734c18` countdown) — flashes the travel/limbo countdown sprite; armed at 30 in escape-pod seq, cleared on travel completion.
 - `0x0042cbb0` `NovaGameplay_AnchorAuxHUDSpriteToOrigin`.
 
+Player ship targeting / selection (reconstructed in `src/game/targeting.cpp`, wired in `NovaFrame_SpaceflightLoop`):
+- `0x00461bd0` / `0x00461f60` `Ship_FindNextPlayerCycleTarget` / `_Previous` — backquote (`) / Shift+backquote cycle the player's primary target ship; the held include-combat modifier (Alt or the original's 'k' / 0x6b) restricts the cycle to combat-relevant ships (targeting the player or a player-targeting ship). Ported as `NovaTargeting_FindNext/PreviousPlayerCycleTarget`.
+- `0x00462bd0` `Ship_SelectNearestHostileCombatTarget` ('o') and `0x00462850` `Ship_SelectNearestEngagedTarget` (Alt+'o') — nearest combat-target scans, ported as `NovaTargeting_SelectNearest*`.
+- `0x0040faa0` `Ship_IsShipAcquirableAsTarget` — pairwise acquisition predicate (player + NPC branches), ported as `NovaTargeting_IsShipAcquirableAsTarget`.
+- `0x0046c7a0` `Ship_CheckShipDisableThresholdState`, `0x0040f6d0` `Ship_IsShipEligibleForDistressCall`, the two cloak-scanner outfit predicates (`0x0046c930` / `0x0046ca60`) — the shared eligibility helpers behind all of the above.
+- Click-to-target ship picking (`SpaceflightView::PickShipAt`, sprite half-span hit test approximating the original's pixel-test pass) sets the primary target directly (the manual: "click on a ship to select it with your targeting sensors").
+- `0x0042ede0` `NovaUi_UpdateShipTargetReticle` — 4-corner bracket reticle around the primary target, drawn as SDL brackets with the state-encoded frame mapping (0xc fire-restricted grey / 0x8 targeting-player green / 0x0 distress yellow / 0x4 other white) and the decaying 256→0 pulse (60/sec). Real bracket sprite frames are TODO(decomp).
+
 Weapon aiming / lead subsystem (shared by ApplyShipAiControls, SpawnShotFromWeapon, turret evaluators, stellar batteries):
 - `0x004eed20` `Math_Sqrt`
 - `0x004619b0` `Math_AngleFromVector2D` — atan2 to EV game-degree angle; core behind `Math_BearingFromPointToPoint`.

@@ -85,6 +85,27 @@ extern void NovaPlayer_UpdateFromInput(GameState &state,
 extern void NovaPlayer_TickShieldRecharge(GameState &state,
                                           float frame_time_ms);
 
+// Effective NPC movement stats, ported from the NPC branch of Ghidra
+// Ship_ComputeShipEffectiveThrust (0x004640a0) /
+// Ship_ComputeShipEffectiveMaxSpeed (0x004642e0) for a clean NPC (no outfit /
+// status / disable / mission-ship state):
+//   thrust_px_per_tick2  = base_accel * govt_scale * 2.0  (base = accel/10000)
+//   max_speed_px_per_tick = base_speed * govt_scale       (base = speed/100)
+//   turn_rate_deg_per_tick = base_turn * 0.1              (NOT govt-scaled;
+//                              Ship_ComputeShipMaxTurnRateDeg 0x00463e70)
+// Government combat_rating_scale applies only when the ship has a faction
+// (faction_or_government_id != -1). The per-ship skill_variance_scale (+0x40)
+// factor of the original is NOT yet modelled (TODO(decomp): Ship field +
+// spawner init + ShipClass_ComputeShipClassSkillVarianceScale 0x0046b870).
+struct NpcEffectiveStats {
+  float thrust_px_per_tick2 = 0.0F;
+  float max_speed_px_per_tick = 0.0F;
+  float turn_rate_deg_per_tick = 0.0F;
+};
+
+[[nodiscard]] NpcEffectiveStats NovaShip_ComputeEffectiveStats(
+    const GameState &state, const Ship &ship, const ShipClass &ship_class);
+
 // One per-axis step of Ghidra Math_AddPolarVelocityWithClamp (0x0043b4e0), the
 // original's single forward-thrust pathway. For each velocity axis it combines
 // the polar projection of the class top speed (max_proj) with the polar

@@ -270,6 +270,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // (the original accumulates _g_avg_frame_time_ms).
   std::uint64_t prev_tick_ms = SDL_GetTicks();
   bool target_cycle_was_held = false;
+  bool ship_cycle_was_held = false;
+  bool nearest_was_held = false;
   bool land_was_held = false;
   bool target_action_was_held = false;
   while (!platform.quit_requested() && !returning_to_menu) {
@@ -281,12 +283,77 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // while the simulation stubs do not, and the same snapshot feeds the
     // travel/jump channel. Movement integrates into PlayerShip.
     const FlightInput input = platform.PollFlightInput();
+    // Escape/'q' are latched by PollFlightInput (it owns the SDL event drain
+    // the old PollTextEvent-based check relied on); return to the menu.
+    if (input.escape_pressed) {
+      returning_to_menu = true;
+      break;
+    }
     const bool target_cycle =
         input.cycle_target_next || input.cycle_target_previous;
     if (target_cycle && !target_cycle_was_held) {
       NovaTargeting_CyclePlayerStellarTarget(state, input.cycle_target_next);
     }
     target_cycle_was_held = target_cycle;
+    // Ship-target cycling: backquote (`) / Shift+backquote, with the
+    // combat-relevant-only modifier (Alt or 'k'). Mirrors the original's
+    // Ship_HandlePlayerShip cycle-target block (0x0044b120): a no-op result or
+    // a self-result clears the target, otherwise the new slot is stored and
+    // the reticle pulse is re-armed at 256.0 (0x43800000).
+    const bool ship_cycle = input.cycle_ship_target_next ||
+                            input.cycle_ship_target_previous;
+    if (ship_cycle && !ship_cycle_was_held) {
+      const std::int16_t next = input.cycle_ship_target_next
+                                    ? NovaTargeting_FindNextPlayerCycleTarget(
+                                          state,
+                                          state.player.primary_target_ship_slot,
+                                          state.player.current_system_id,
+                                          input.cycle_ship_include_combat)
+                                    : NovaTargeting_FindPreviousPlayerCycleTarget(
+                                          state,
+                                          state.player.primary_target_ship_slot,
+                                          state.player.current_system_id,
+                                          input.cycle_ship_include_combat);
+      if (next == state.player.primary_target_ship_slot ||
+          next == state.player.ship_instance_id) {
+        state.player.primary_target_ship_slot = -1;
+      } else {
+        state.player.primary_target_ship_slot = next;
+        state.ship_reticle_pulse = 256.0F;
+      }
+    }
+    ship_cycle_was_held = ship_cycle;
+    // "Target nearest" command: 'o' selects the nearest hostile combat target
+    // (Ship_SelectNearestHostileCombatTarget 0x00462bd0), Alt+'o' the nearest
+    // engaged target (0x00462850). A miss (-1) leaves the current target
+    // untouched; a new slot re-arms the reticle pulse.
+    const bool nearest_pressed =
+        input.select_nearest_hostile || input.select_nearest_engaged;
+    if (nearest_pressed && !nearest_was_held) {
+      const std::int16_t slot = input.select_nearest_hostile
+                                    ? NovaTargeting_SelectNearestHostileCombatTarget(
+                                          state)
+                                    : NovaTargeting_SelectNearestEngagedTarget(
+                                          state);
+      if (slot != -1 && slot != state.player.primary_target_ship_slot) {
+        state.player.primary_target_ship_slot = slot;
+        state.ship_reticle_pulse = 256.0F;
+      }
+    }
+    nearest_was_held = nearest_pressed;
+    // Click-to-target ship selection (the manual: "click on a ship to select
+    // it with your targeting sensors"). The picked ship is selected as the
+    // primary target; clicking empty space does nothing.
+    if (input.primary_clicked) {
+      const std::int16_t picked =
+          view.PickShipAt(platform, state, input.mouse_x, input.mouse_y);
+      if (picked != -1) {
+        state.player.primary_target_ship_slot = picked;
+        state.ship_reticle_pulse = 256.0F;
+      } else {
+        NovaLog::Info("click-to-target: no ship under cursor");
+      }
+    }
     const bool land_pressed = input.land && !land_was_held;
     land_was_held = input.land;
     const bool target_action_pressed =
@@ -332,6 +399,24 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // matching the original's jump-completion re-run of Asteroid_InitSystem.
       NovaAsteroid_InitSystem(state);
       view.SpawnAmbientStars(platform, state);
+      // Ship_DeactivateVacantShipsAndTally ('\0') runs at system-entry
+      // (NovaMainLoop_Run 0x00486880's 0x90 latch and Stellar_ProcessTravel-
+      // AndLanding 0x00457580): the ships left behind by the departure system
+      // are vacant (idle wanderers/parked; only non-fire-restricted ships
+      // engaging the player survive), so the cohort is swept before the new
+      // system repopulates toward avg_ships (System_TickNpcSpawnMaintenance).
+      // Without this sweep the old system's ships would linger in their
+      // previous current_system_id and reappear (still active) whenever the
+      // player jumps back.
+      NovaShip_DeactivateVacantShipsAndTally(state,
+                                             /*keep_player_engaged=*/false);
+      NovaSystem_TickNpcSpawnMaintenance(state, state.player.current_system_id);
+      // The player's primary target ship lived in the departure system; the
+      // vacancy sweep deactivated it (and its slot may be reused by a fresh
+      // spawn), so clear the selection and the reticle pulse -- the original
+      // resets primary_target_ship_slot on system entry.
+      state.player.primary_target_ship_slot = -1;
+      state.ship_reticle_pulse = 0.0F;
     }
     // Seed an automatic target, while retaining a stellar chosen by Tab/
     // Shift+Tab. This keeps navigation purposeful instead of retargeting to
@@ -438,18 +523,15 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 
     // Ghidra scope 3 "post-draw tasks": pump the primary mouse command; when
     // latched bit sets DAT_00596d38 (return to menu) and, while the frame is
-    // frozen, runs a *reduced* TickSystems(0). Here Escape/q set the
+    // frozen, runs a *reduced* TickSystems(0). Escape/'q' are captured by
+    // PollFlightInput above (it owns the SDL event drain) and set the
     // return-to-menu latch; the frozen reduced tick is skipped (no transition
     // is active in this build).
-    for (std::optional<TextInput> text_event;
-         (text_event = platform.PollTextEvent());) {
-      if (text_event->key == TextKey::escape ||
-          (text_event->key == TextKey::character &&
-           text_event->character == 'q')) {
-        returning_to_menu = true;
-        break;
-      }
-    }
+    // Reticle pulse decay (NovaUi_UpdateShipTargetReticle 0x0042ede0): the
+    // pulse falls from 256.0 toward 0.0 at 60.0 units/sec (DAT_005753c8),
+    // driving the bracket grow-out-then-settle animation.
+    state.ship_reticle_pulse =
+        std::max(0.0F, state.ship_reticle_pulse - frame_time_ms * 0.06F);
     SDL_Delay(16);
   }
 }
@@ -699,6 +781,34 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 // -------------------------------------------------------------------------
 // NPC ship movement
 // -------------------------------------------------------------------------
+
+NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
+                                                 const Ship &ship,
+                                                 const ShipClass &ship_class) {
+  NpcEffectiveStats stats;
+  stats.turn_rate_deg_per_tick =
+      static_cast<float>(ship_class.turn_rate) * 0.1F;
+  stats.max_speed_px_per_tick = static_cast<float>(ship_class.speed) / 100.0F;
+  stats.thrust_px_per_tick2 =
+      static_cast<float>(ship_class.accel) / 10000.0F * 2.0F;
+  // Government combat_rating_scale (NPC branch of Ship_ComputeShipEffective-
+  // Thrust 0x004640a0 / Ship_ComputeShipEffectiveMaxSpeed 0x004642e0): applied
+  // to thrust and max speed when the ship belongs to a government. Turn rate
+  // is NOT government-scaled (Ship_ComputeShipMaxTurnRateDeg 0x00463e70 is
+  // base + outfit opcode-9 + status damping + floor only). The original also
+  // multiplies by the per-ship skill_variance_scale (ShipState +0x40) here --
+  // not modelled yet, see the header (TODO(decomp)).
+  if (ship.faction_or_government_id >= 0) {
+    const Government *g = state.scenario.Government(
+        static_cast<std::int16_t>(ship.faction_or_government_id + 0x80));
+    if (g != nullptr) {
+      stats.max_speed_px_per_tick *= g->combat_rating_scale;
+      stats.thrust_px_per_tick2 *= g->combat_rating_scale;
+    }
+  }
+  return stats;
+}
+
 // Ports the movement block of Ghidra Ship_HandleShip (0x00433050) for the
 // AI-driven NPC ships. The AI layer (Ship_UpdateShipAiState / the behavior
 // supervisors) writes ai_desired_heading_deg (degrees, 0 = up, clockwise),
@@ -709,9 +819,13 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 // The AI turn is CONTINUOUS (Ship_HandleShip uses the raw
 // Ship_ComputeShipMaxTurnRateDeg rate) unlike the player keyboard path which
 // rounds to integer degrees/frame before integrating. Thrust follows the
-// original three-branch model keyed on ai_desired_speed:
-//   desired == 0 : free-coast (no net thrust; ai_forward_thrust_cmd is usually
-//                  the cruise command applied as a per-axis clamped step).
+// original three-branch model keyed on ai_desired_speed; ai_forward_thrust_cmd
+// carries the RAW effective thrust value (NovaAi_ApplyControls writes
+// Ship_ComputeShipEffectiveThrust, NOT 1.0 -- writing 1.0 made NPCs
+// accelerate ~50x too fast, fixed 2025-08-09):
+//   desired == 0 : free-coast (the thrust command is applied as a per-axis
+//                  clamped step toward the max-speed projection; gated on
+//                  ai_station_hold_timer <= 0).
 //   desired >  0 : forward thrust toward `desired` speed, per-axis clamped to
 //                  the polar projection of `desired` (Math_AddPolarVelocity-
 //                  WithClamp 0x0043b4e0).
@@ -722,13 +836,14 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 // it counts down by frame time each frame and is re-set to a random 30..60
 // when the AI decides to reverse into open space.
 //
-// Stats are derived from the ship class exactly as the player integrator does
-// (NovaPlayer_IntegrateMovement): turn = raw_maneuver*0.1 deg/tick,
-// max speed = raw_speed/100 px/tick, thrust = raw_accel/10000*2 px/tick^2.
-// NPC ships carry no outfit inventory or status effects in the current build,
-// so the class base values ARE the effective values. TODO(decomp): apply opcode
-// 7/8/9 outfit bonuses, the government combat_rating_scale and disable/status-
-// effect damping to these when the NPC outfit/combat state is reconstructed.
+// Stats come from NovaShip_ComputeEffectiveStats (Ship_ComputeShipEffective-
+// Thrust / EffectiveMaxSpeed NPC branch): turn = raw_maneuver*0.1 deg/tick,
+// max speed = raw_speed/100 px/tick * government combat_rating_scale,
+// thrust = raw_accel/10000*2 px/tick^2 * government combat_rating_scale. NPC
+// ships carry no outfit inventory or status effects in the current build.
+// TODO(decomp): opcode 7/8/9 outfit bonuses, the per-ship skill_variance_scale
+// (+0x40) factor and disable/status-effect damping when the NPC outfit/combat
+// state is reconstructed.
 //
 // Gravity-shield ships (ShipClassDef.flags_secondary bit 0x40) keep a scalar
 // `speed` (integrated in the thrust block below) and steer their velocity
@@ -751,14 +866,15 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // NPC the computed rate equals the base, so this floor is currently inert; it
   // becomes active only once status-effect / disable damping lowers the rate
   // below its base (TODO(decomp)). Kept to match the original's NPC branch.
-  const float base_turn_deg = static_cast<float>(ship_class.turn_rate) * 0.1F;
+  const NpcEffectiveStats stats =
+      NovaShip_ComputeEffectiveStats(state, ship, ship_class);
+  const float base_turn_deg = stats.turn_rate_deg_per_tick;
   float eff_turn_deg = base_turn_deg;
   if (base_turn_deg >= 1.0F) {
     eff_turn_deg = std::max(eff_turn_deg, 1.0F);
   }
-  const float eff_max_speed = static_cast<float>(ship_class.speed) / 100.0F;
-  const float eff_thrust =
-      static_cast<float>(ship_class.accel) / 10000.0F * 2.0F;
+  const float eff_max_speed = stats.max_speed_px_per_tick;
+  const float eff_thrust = stats.thrust_px_per_tick2;
   // Gravity-shield ships (ShipClassDef.flags_secondary bit 0x40, and not in
   // ai_control_mode 0x0c) keep a scalar Ship.speed and steer their velocity
   // through Ship_SteerVelocityTowardShipHeading instead of vector thrust.
@@ -777,7 +893,11 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // direction) by eff_max_turn_deg each frame, snapping to the exact heading
   // once within one step. The snap-once branch writes the desired heading
   // directly; otherwise the ship rotates by a full turn step in the direction
-  // that closes the angle fastest.
+  // that closes the angle fastest. ai_turn_bias_dir mirrors the original's
+  // turn-bank signal (Ship_HandleShip writes +0xc8f8 from the field_0xc8e4
+  // tilt anim: +1 while banking one way, -1 the other, 0 otherwise), which the
+  // engine-glow block below consumes for its turn-bias +2 bump.
+  ship.ai_turn_bias_dir = 0;
   if (!holds_course) {
     const float cur_deg = ship.heading / kDegToRad;
     // Shortest signed delta [-180, 180] degrees from current to desired.
@@ -791,6 +911,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     } else {
       ship.heading =
           (cur_deg + std::copysign(max_turn_deg, delta_deg)) * kDegToRad;
+      ship.ai_turn_bias_dir = delta_deg > 0.0F ? 1 : -1;
     }
     ship.heading = std::fmod(ship.heading, kFullCircleDeg / kDegToRad);
     if (ship.heading < 0.0F) {
@@ -847,11 +968,16 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     if (desired == 0.0F) {
       // Coast branch. Non-shield: per-axis clamped step toward the class top
       // speed (with a zero command this is a no-op). Gravity-shield: scalar
-      // `speed` clamped at the class top speed.
-      if (!gravity_shield) {
-        add_polar_clamped(thrust_step, eff_max_speed);
-      } else {
-        ship.speed = std::clamp(ship.speed + thrust_step, 0.0F, eff_max_speed);
+      // `speed` clamped at the class top speed. The original gates this branch
+      // on ai_station_hold_timer <= 0 (a ship parked at a hold point does not
+      // coast-accelerate).
+      if (ship.ai_station_hold_timer <= 0.0F) {
+        if (!gravity_shield) {
+          add_polar_clamped(thrust_step, eff_max_speed);
+        } else {
+          ship.speed =
+              std::clamp(ship.speed + thrust_step, 0.0F, eff_max_speed);
+        }
       }
     } else if (desired > 0.0F) {
       // Forward thrust toward the requested speed.

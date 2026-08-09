@@ -1,14 +1,16 @@
 #pragma once
 
-// Clean-room stellar targeting / selection / landing primitives.
+// Clean-room targeting / selection / landing primitives.
 //
-// The original keeps these as small StellarDef/SystemDef helpers that gate who
-// the player (and AI) may travel to or land on, plus a per-tick refresh that
-// re-derives which stellars belong to and are playable in the current system.
-// They are reconstructed here as pure predicates and geometry over the scenario
-// tables + the player's GameState -- the self-contained subset that does not
-// need the NPC ship-fleet container or the interaction dialogs. Each maps a
-// named Ghidra function (address in the comment).
+// Two independent target channels exist in the original: the *travel/landing
+// stellar* (ai_secondary_target_slot, auto-seeded to the nearest playable
+// stellar each frame, cycled with Tab) and the *primary target ship* (a slot
+// in g_ship_states, selected with the backquote cycle, the nearest-hostile/
+// engaged commands, or a mouse click). Both are reconstructed here as pure
+// predicates and geometry over the scenario tables + the player's GameState
+// -- the self-contained subset that does not need the NPC ship-fleet
+// container or the interaction dialogs. Each maps a named Ghidra function
+// (address in the comment).
 //
 //   Stellar_IsStellarActive                      0x0046E3C0  activity gate
 //   Stellar_StellarTargetsSpriteSetActive        0x0046E3F0  targeting gate
@@ -19,8 +21,15 @@
 //   System_UpdateSystemAndStellarDisplayState    0x00432470  (scope 3 only:
 //     the per-tick re-derivation of stellar system_id + is_available for the
 //     player's current system; the sprite-set bookkeeping is left to the view)
-//   Ship_FindNearestEngagedTarget                0x00462850  (used to seed the
-//     player's initial target on system entry)
+//   Ship_CheckShipDisableThresholdState          0x0046C7A0  disable gate
+//   Ship_IsShipEligibleForDistressCall           0x0040F6D0  distress gate
+//   Ship_IsShipAcquirableAsTarget                0x0040FAA0  acquire gate
+//   Ship_FindNextPlayerCycleTarget               0x00461BD0  ship cycle fwd
+//   Ship_FindPreviousPlayerCycleTarget           0x00461F60  ship cycle back
+//   Ship_SelectNearestEngagedTarget              0x00462850  nearest engaged
+//   Ship_SelectNearestHostileCombatTarget        0x00462BD0  nearest hostile
+//   Outfit_HasScannerTargetUntargetableCapability 0x0046C930 (scanner gate)
+//   Outfit_HasCloakScannerTargetCloakedCapability 0x0046CA60 (scanner gate)
 //
 // The runtime stellar "activity" state (sprite population / sprite handle
 // active / engagement access counter) is carried on Stellar so the predicates
@@ -89,6 +98,85 @@ NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
 // the per-tick availability evaluation the spaceflight pre-loop currently skips
 // (TODO in NovaFrame_SpaceflightLoop).
 void NovaTargeting_UpdateStellarAvailability(GameState &state);
+
+// ---------------------------------------------------------------------------
+// Ship targeting (player primary target selection).
+// ---------------------------------------------------------------------------
+// The player's "primary target" is an NPC ship slot (or the player themselves
+// at slot 0) selected by the ` cycle / Tab commands, the nearest-hostile/
+// engaged commands or a mouse click. All selection paths share the same
+// eligibility core: active, in the player's system, not destroyed, not in AI
+// state 0x15, below the disable threshold (unless a cloak scanner or the
+// combat-cycle modifier applies), and not flagged untargetable by the ship
+// class (flags_secondary bit 2) unless the player owns the scanner-target-
+// untargetable outfit. Ported from the Ghidra functions listed per helper.
+
+// Mirrors Ship_CheckShipDisableThresholdState (0x0046c7a0): true when the
+// ship counts as at/below the disable threshold and is therefore not
+// targetable without a cloak-scanner outfit. Threshold levels are 16.0 base
+// (always), 24.0 when disable_state_latch >= 0 and 8.0 when the latch < 0
+// (the latch sign shifts the boundary). Disable-threshold progress is the
+// Ship.disable_threshold_progress field (Ghidra ShipState +0x64); the
+// disable subsystem is not reconstructed yet, so clean ships read 0 and pass.
+[[nodiscard]] bool NovaTargeting_ShipAtDisableThreshold(const Ship &ship);
+
+// Mirrors Ship_IsShipEligibleForDistressCall (0x0040f6d0): true when the ship
+// is an active, non-fire-restricted combatant that could call for help -- not
+// coasting through a reversal (reverse_speed_bias <= 0), holding a primary
+// target that is either the player or a ship targeting the player, and not in
+// a retreat/disengage AI state (7,9,15,10,11,5,12,18). Used by the
+// nearest-hostile scan and the player target-acquisition predicate.
+[[nodiscard]] bool
+NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
+                                            const Ship &ship);
+
+// Mirrors Ship_IsShipAcquirableAsTarget (0x0040faa0): pairwise predicate for
+// whether `acquirer` should validly acquire `candidate` as a target. The
+// player branch (acquirer.ship_instance_id == 0) returns true when the
+// candidate's government policy flag 0 is set or the candidate is
+// distress-eligible; the NPC branch keeps the candidate when it is the
+// acquirer's primary target (or another active ship targets it while the
+// acquirer tracks that ship) and the acquirer is not in a disengage/retreat
+// AI state.
+[[nodiscard]] bool NovaTargeting_IsShipAcquirableAsTarget(
+    const GameState &state, const Ship &candidate, const Ship &acquirer);
+
+// Mirrors Ship_FindNextPlayerCycleTarget (0x00461bd0) / _Previous
+// (0x00461f60): returns the next (or previous) eligible ship slot after
+// `current_slot` within `system_id`, wrapping from slot 1 (0 is the player;
+// -1 starts the search at the first/last slot). `include_combat` mirrors the
+// original's held modifier (input commands 0x1d Left-Ctrl / 0x6b 'k'): when
+// true only combat-relevant ships (targeting the player or a ship that
+// targets the player, excluding mission-fleet escorts) are candidates;
+// otherwise only non-relevant ships are. Returns `current_slot` unchanged
+// when no candidate exists (the caller clears the target on a no-op).
+[[nodiscard]] std::int16_t NovaTargeting_FindNextPlayerCycleTarget(
+    const GameState &state,
+    std::int16_t current_slot,
+    std::int16_t system_id,
+    bool include_combat);
+[[nodiscard]] std::int16_t NovaTargeting_FindPreviousPlayerCycleTarget(
+    const GameState &state,
+    std::int16_t current_slot,
+    std::int16_t system_id,
+    bool include_combat);
+
+// Mirrors Ship_SelectNearestEngagedTarget (0x00462850): nearest active,
+// non-destroyed ship in the player's system that is below the disable
+// threshold (or the player has a cloak scanner), not in AI state 0x15, class
+// not untargetable (or scanner), and whose ai_target_ship_slot is NOT the
+// player (ships already locked onto the player are excluded). Returns the
+// slot or -1 when none.
+[[nodiscard]] std::int16_t
+NovaTargeting_SelectNearestEngagedTarget(const GameState &state);
+
+// Mirrors Ship_SelectNearestHostileCombatTarget (0x00462bd0): stricter scan
+// than SelectNearestEngagedTarget -- the candidate must additionally be
+// eligible for a distress call, or locked on its primary target (which must
+// be targeting the player) in AI state 0x04, and not fire-restricted.
+// Returns the slot or -1 when none.
+[[nodiscard]] std::int16_t
+NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state);
 
 // Per-frame player travel targeting. Normal stellar selection requires only a
 // current-system available stellar with travel_flags bit 1. 0x3000 special

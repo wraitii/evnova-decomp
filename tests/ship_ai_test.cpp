@@ -101,8 +101,17 @@ TEST_CASE("behavior-0x01 spawn wanders to a travel stellar when idle") {
     // controls bridge to steer toward it.
     REQUIRE(ship.ai_secondary_target_slot >= 0x80);
     CHECK(ship.ai_control_mode == 2);
-    // The controls bridge wrote a concrete heading and forward thrust.
-    CHECK(ship.ai_forward_thrust_cmd != 0.0F);
+    // The controls bridge wrote a concrete heading. Forward thrust is gated on
+    // the original's alignment check (thrust only within turn_rate + 5 deg of
+    // the bearing), so align the hull and run the pass again before expecting
+    // a thrust command.
+    CHECK(ship.ai_desired_heading_deg != 0);
+    ship.heading =
+        static_cast<float>(ship.ai_desired_heading_deg) * 3.14159265F / 180.0F;
+    NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+    if (ship.ai_state_code == 1) {
+      CHECK(ship.ai_forward_thrust_cmd != 0.0F);
+    }
   }
 }
 

@@ -492,6 +492,15 @@ struct Government {
   std::uint8_t theme_red = 0, theme_green = 0, theme_blue = 0;
   std::uint8_t ship_red = 0, ship_green = 0, ship_blue = 0;
 
+  // Two per-government boolean policy flags (GovtDef +0x84, provisional).
+  // Government_GetGovernmentPolicyFlag (0x0046e860) reads policy_flags[index]
+  // for index 0/1; flag 0 gates player target acquisition
+  // (Ship_IsShipAcquirableAsTarget 0x0040faa0: a candidate with flag 0 set is
+  // acquirable) and several aggro/relation decisions. The writer is not yet
+  // identified (mission/faction hostility system), so the flag stays 0 in the
+  // current build (TODO(decomp)).
+  std::array<std::uint8_t, 2> policy_flags{}; // GovtDef +0x84/+0x85
+
   bool present =
       false; // GovtDef 0x86 is_present (slots zero-filled when absent)
 };

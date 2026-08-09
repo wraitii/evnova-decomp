@@ -329,3 +329,43 @@ TEST_CASE("npc turn-rate floor is a no-op for a clean ship (computed==base)") {
   CHECK(ship.heading ==
         Catch::Approx(0.5F * std::numbers::pi_v<float> / 180.0F));
 }
+
+// Government combat_rating_scale applies to NPC thrust and max speed (but NOT
+// turn rate), mirroring the NPC branch of Ship_ComputeShipEffectiveThrust /
+// Ship_ComputeShipEffectiveMaxSpeed (0x004640a0 / 0x004642e0). Ships with no
+// faction keep the class base values.
+TEST_CASE("npc effective stats apply the government combat rating scale") {
+  game::GameState state;
+  // Hand-built government at zero-based index 0 (faction ids are zero-based in
+  // the clean-room; the ScenarioData accessor adds 0x80).
+  state.scenario.governments.clear();
+  game::Government g;
+  g.combat_rating_scale = 0.5F;
+  state.scenario.governments.push_back(g);
+
+  game::Ship ship; // faction_or_government_id defaults to -1
+  game::ShipClass cls = TestShipClass(); // accel 500 -> 0.1 px/tick^2; speed 400 -> 4.0
+
+  // No faction: class base values unchanged.
+  const auto base = game::NovaShip_ComputeEffectiveStats(state, ship, cls);
+  CHECK(base.thrust_px_per_tick2 == Catch::Approx(0.1F));
+  CHECK(base.max_speed_px_per_tick == Catch::Approx(4.0F));
+  CHECK(base.turn_rate_deg_per_tick == Catch::Approx(4.0F));
+
+  // Government scale 0.5 halves thrust and max speed; turn rate is untouched.
+  ship.faction_or_government_id = 0;
+  const auto scaled = game::NovaShip_ComputeEffectiveStats(state, ship, cls);
+  CHECK(scaled.thrust_px_per_tick2 == Catch::Approx(0.05F));
+  CHECK(scaled.max_speed_px_per_tick == Catch::Approx(2.0F));
+  CHECK(scaled.turn_rate_deg_per_tick == Catch::Approx(4.0F));
+
+  // The integrator and the controls bridge consume the same effective stats
+  // (NovaShip_IntegrateNpcMovement / NovaAi_ApplyControls share the helper).
+  game::Ship moving;
+  moving.faction_or_government_id = 0;
+  moving.ai_desired_heading_deg = 0; // heading 0 = up (-y)
+  moving.ai_desired_speed = 100.0F;  // desired > 0: throttle toward the cap
+  moving.ai_forward_thrust_cmd = 0.05F; // eff_thrust * 1 tick
+  game::NovaShip_IntegrateNpcMovement(state, moving, cls, 1.0F);
+  CHECK(moving.vel_y == Catch::Approx(-0.05F));
+}

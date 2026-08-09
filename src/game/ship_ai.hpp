@@ -34,6 +34,16 @@ namespace game {
 // current tick count in ai_mode_start_time_ms.
 void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms);
 
+// Ghidra 0x004687b0 Ship_IsShipFireRestricted. True when the ship must not
+// fire/act this frame: derelict government (flags_primary 0x800), docked to a
+// stellar (target_stellar_object_id set) for non-player ships, or critically
+// damaged (armor below a government/aggression-dependent fraction of max).
+// Shared with the spawn-maintenance cleanup
+// (NovaShip_DeactivateVacantShipsAndTally 0x0041ad50), which spares
+// non-fire-restricted ships actively engaging the player.
+[[nodiscard]] bool NovaAiShip_IsFireRestricted(const GameState &state,
+                                               const Ship &ship);
+
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame AI state machine.
 // Given the ship's current ai_state_code it maintains that state and writes
 // the companion Ship.ai_control_mode field (consumed by
