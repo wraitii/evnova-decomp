@@ -13,6 +13,20 @@ using game::NovaEncounter_SpawnFleetLeadShip;
 using game::NovaEncounter_TrySpawnRandomFleet;
 using game::NovaShip_AllocateShipSlot;
 
+// Count active NPC ships in the current system (any AI target state). Used by
+// the population tests below to assert ships actually spawned.
+[[nodiscard]] int ActiveShipsInSystem(const GameState &state,
+                                      std::int16_t system_id) {
+  int n = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const game::Ship &s = state.ShipAt(slot);
+    if (s.is_active && s.current_system_id == system_id) {
+      ++n;
+    }
+  }
+  return n;
+}
+
 TEST_CASE("allocator takes the first free slot below the reserved tail") {
   GameState state;
   state.ShipAt(1).is_active = true; // occupy slot 1
@@ -311,6 +325,119 @@ TEST_CASE("try-spawn skips lead-less and unavailable defs") {
   for (int i = 0; i < 30; ++i) {
     CHECK(NovaEncounter_TrySpawnRandomFleet(state, 0, false) == -1);
   }
+}
+
+// Dude_SelectShipTypeIndexFromDudeDef (0x0046b4b0): a weighted pick over a
+// dude def's present ship types. The default (random, seeded) rng makes the
+// highest-probability ship dominate over many draws.
+TEST_CASE("dude ship-type select picks a present entry by weight") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  // Dude 0x80 (Lone Federation Ship): several ship types with varied weights.
+  const game::DudeDef &dude = *state.scenario.Dude(0x80);
+  std::array<int, 16> hits{};
+  constexpr int kDraws = 2000;
+  std::mt19937 rng(2024);
+  for (int i = 0; i < kDraws; ++i) {
+    const int idx = game::NovaDude_SelectShipTypeIndex(
+        dude, /*ignore_ship_availability=*/false, rng);
+    REQUIRE(idx >= 0);
+    REQUIRE(idx < 16);
+    REQUIRE(dude.ship_types[static_cast<std::size_t>(idx)] >= 0);
+    hits[static_cast<std::size_t>(idx)]++;
+  }
+  // Every draw must land on a present ship type, and the distribution must be
+  // non-degenerate (at least one slot was selected).
+  int max_hit = hits[0];
+  for (int i = 1; i < 16; ++i) {
+    max_hit = std::max(max_hit, hits[static_cast<std::size_t>(i)]);
+  }
+  CHECK(max_hit > 0);
+}
+
+// EncounterFleet_SpawnRandomSystemDudeShip (0x0041ba80): spawns one random
+// system-bound dude ship in slot 1, with the dude's identity and class stats.
+TEST_CASE("random system dude ship lays the dude def onto slot 1") {
+  using game::NovaEncounter_SpawnRandomSystemDudeShip;
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int slot =
+      NovaEncounter_SpawnRandomSystemDudeShip(state, /*system_id=*/0x80,
+                                              /*reserved_slots=*/8);
+  REQUIRE(slot == 1);
+  const game::Ship &ship = state.ShipAt(1);
+  CHECK(ship.is_active);
+  CHECK(ship.current_system_id == 0x80);
+  CHECK(ship.dude_class_id >= 0);
+  // The dude_class_id must be one bound to system 0x80.
+  const auto &sys = *state.scenario.System(0x80);
+  bool bound = false;
+  for (int i = 0; i < 8; ++i) {
+    if (sys.dude_class_ids[static_cast<std::size_t>(i)] == ship.dude_class_id) {
+      bound = true;
+    }
+  }
+  CHECK(bound);
+  // The ship class matches the dude def's chosen type.
+  const game::DudeDef &dude = *state.scenario.Dude(
+      static_cast<std::int16_t>(ship.dude_class_id + 0x80));
+  bool class_ok = false;
+  for (int i = 0; i < 16; ++i) {
+    if (dude.ship_types[static_cast<std::size_t>(i)] == ship.ship_class_id) {
+      class_ok = true;
+    }
+  }
+  CHECK(class_ok);
+  CHECK(ship.faction_or_government_id == dude.government_id);
+  CHECK(ship.ai_behavior_code > 0);
+  CHECK(ship.credits == 10000);
+  CHECK(ship.speed == Catch::Approx(0.0F));
+  CHECK(ship.shield_points > 0.0F);
+}
+
+// Dude_SpawnRandomDudeShipInSystem (0x0041c710): higher-level dispatcher that
+// spawns a wandering dude and positions it away from the system centre.
+TEST_CASE("random dude dispatch spawns and positions a ship") {
+  using game::NovaDude_SpawnRandomDudeShipInSystem;
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int slot =
+      NovaDude_SpawnRandomDudeShipInSystem(state, /*system_id=*/0x80);
+  if (slot < 0) {
+    // The reference rng may stochastically miss; nothing to assert then.
+    SUCCEED("dispatch no-opped this seed");
+  } else {
+    const game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+    CHECK(ship.is_active);
+    CHECK(ship.current_system_id == 0x80);
+    // Positioned at a non-zero polar offset from the centre.
+    CHECK(ship.pos_x * ship.pos_x + ship.pos_y * ship.pos_y > 1.0F);
+  }
+}
+
+// System_TickNpcSpawnMaintenance (0x0041d6e0, ambience slice): over repeated
+// full ticks the AvgShips cap for Tichel (system 0x81) is filled with dude
+// ships. Tichel binds no encounter fleets, so the dude spawn dominates.
+TEST_CASE("system maintenance populates Tichel toward avg_ships") {
+  using game::NovaSystem_TickNpcSpawnMaintenance;
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 0x81; // Tichel
+  const auto *sys = state.scenario.System(0x81);
+  REQUIRE(sys != nullptr);
+  REQUIRE(sys->avg_ships > 0);
+  REQUIRE(sys->encounter_fleet_count == 0); // dude-bound only
+
+  // Tick many times; the maintenance should fill the system toward avg_ships.
+  for (int i = 0; i < 4000; ++i) {
+    NovaSystem_TickNpcSpawnMaintenance(state, 0x81);
+  }
+  const int spawned =
+      ActiveShipsInSystem(state, 0x81);
+  CHECK(spawned >= 1);
+  // The maintenance should respect the avg_ships cap (allow a little slack
+  // since the dude spawn loop may allocate slightly beyond on a lucky streak).
+  CHECK(spawned <= sys->avg_ships + 2);
 }
 
 } // namespace

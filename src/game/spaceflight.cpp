@@ -10,6 +10,7 @@
 #include "maneuver.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
+#include "ship_spawn.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
@@ -39,10 +40,20 @@ void Stub_AiRoutines(GameState &state) { (void)state; }
 // Frame_UpdateCombatChatter, Frame_UpdateScreenFlashTimers,
 // Ship_TallyInboundWeaponThreat, then -- the fleet/dude spawn maintenance this
 // reimplementation is building toward -- System_TickNpcSpawnMaintenance
-// (encounter fleets + roaming dudes up to the system's avg_ships cap) and
+// (encounter fleets + random dude ships up to the system's avg_ships cap) and
 // Dude_SpawnAsteroid('\x01') (the asteroid ring), before clearing the
 // g_ai_misc_event_flag / g_ai_target_refresh_needed latches.
-void Stub_TickReactionsAndNpcSpawns(GameState &state) { (void)state; }
+//
+// Reconstructed: the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance,
+// which spawns encounter-fleet leads / random dude ships toward avg_ships).
+// Deferred: the mission/combat-chatter/screen-flash/threat reaction helpers,
+// the asteroid ring and the interaction flags (mission + combat systems not
+// yet reconstructed).
+void Stub_TickReactionsAndNpcSpawns(GameState &state) {
+  (void)state;
+  NovaSystem_TickNpcSpawnMaintenance(
+      state, state.player.current_system_id);
+}
 
 void Stub_CalcAiOdds(GameState &state) { (void)state; }
 

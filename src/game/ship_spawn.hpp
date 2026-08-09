@@ -79,6 +79,22 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 [[nodiscard]] int NovaEncounter_TrySpawnRandomFleet(
     GameState &state, std::int16_t system_id, bool ignore_ship_availability);
 
+// Mirrors Dude_SelectShipTypeIndexFromDudeDef (Ghidra 0x0046b4b0): weighted-
+// random pick of one ship slot (0..15) from a DudeDef's ship_types /
+// ship_probabilities tables, skipping entries whose ship class the system does
+// not host. ignore_ship_availability lifts that filter (the caller accepts any
+// listed class). Returns the chosen slot index or -1 when no valid entry is
+// selectable.
+//
+// TODO(decomp): the original skips ship classes whose runtime availability
+// expression evaluates false (ShipClassDef.runtime_availability_result). The
+// clean-room does not yet evaluate ship-class availability expressions, so all
+// listed classes are treated as available; this only diverges for classes with
+// an availability gate (rare for dude-bound traders/pirates).
+[[nodiscard]] int NovaDude_SelectShipTypeIndex(const DudeDef &dude,
+                                               bool ignore_ship_availability,
+                                               std::mt19937 &rng);
+
 // PARTIAL reconstruction of the lead-ship spawn of
 // EncounterFleet_SpawnRandomEncounterFleet (Ghidra 0x004259b0). Allocates one
 // ship slot in system_id for the random-encounter fleet template at
@@ -101,5 +117,59 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 // positioned for rendering but not yet animated or armed.
 [[nodiscard]] int NovaEncounter_SpawnFleetLeadShip(
     GameState &state, std::int16_t system_id, std::int16_t fleet_def_index);
+
+// Mirrors EncounterFleet_SpawnRandomSystemDudeShip (Ghidra 0x0041ba80):
+// spawns a single random system-bound NPC (dude) ship. Scans the first inactive
+// ship slot, picks a random dude class bound to the system
+// (NovaDude_SelectRandomSystemDudeClassIndex), then a weighted ship type from
+// that dude def (NovaDude_SelectShipTypeIndex), and lays it onto the slot:
+// ship class, government, AI behavior (dude ai_type or the class default when
+// < 1), dude_class_id, base shield/armor/fuel, a heading/radial and a position
+// (at the first stellar for ai_behavior 3 speed-locked ships, else random
+// [-750,750) scatter). Returns the allocated slot, or -1 when no dude/ship is
+// selectable or no slot is free.
+//
+// Deferred (see ship_spawn.cpp): deep combat/AI residual fields
+// (skill_variance_scale, jamming, combat_state, voice_type,
+// escort-eligibility) and the full 8-bank weapon loadout are not yet modeled
+// on the clean-room Ship. The NPC is left at a visible heading/position
+// (ai_state_code 0) so it renders without the AI-state entry.
+[[nodiscard]] int NovaEncounter_SpawnRandomSystemDudeShip(
+    GameState &state, std::int16_t system_id, std::uint16_t reserved_slots);
+
+// Mirrors Dude_SpawnRandomDudeShipInSystem (Ghidra 0x0041c710): the
+// high-level random wandering NPC spawn dispatcher. Rolls 1-in-7 for a mission
+// ship, else 1-in-7 for a random-encounter fleet, else spawns a random system
+// dude ship (discarded when its computed fuel capacity < 1), then positions
+// the spawned ship at a random polar offset from system centre and faces it
+// toward the origin. Returns the spawned ship slot or -1.
+//
+// The 1-in-7 mission-ship branch and the AI-state entry (spin-out / jump-in)
+// are deferred (mission system / AI-state helpers not reconstructed); see
+// ship_spawn.cpp.
+[[nodiscard]] int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
+                                                       std::int16_t system_id);
+
+// Mirrors System_TickNpcSpawnMaintenance (Ghidra 0x0041d6e0), the ambience
+// slice. This reconstructs the random-encounter / drifting-dude population that
+// replenishes a system's NPC ships toward its AvgShips cap:
+//
+//  * Count the ambient active ships in `system_id` (active + not engaged on
+//    the player, ai_target_ship_slot != 0).
+//  * While the count lies below System.avg_ships, roll a 1-in-500 encounter
+//    pick gated by encounter_chance_percent: on a hit select a weighted
+//    encounter-fleet def (NovaEncounter_SelectFleetDefWeighted) and spawn its
+//    lead (NovaEncounter_SpawnFleetLeadShip), otherwise spawn a random
+//    system-bound dude ship (NovaDude_SpawnRandomDudeShipInSystem). When the
+//    system has no encounter fleets (encounter_chance_percent == 0) the roll
+//    always falls through to the dude spawn.
+//
+// Deferred (TODO(decomp), see ship_spawn.cpp): the 16 mission-slot stepper, the
+// stellar-defense ship spawns, the roaming-NPC population cap, the
+// <200-traffic ambient-fleet escalation and the ambient-mission-ship respawn
+// latch. The mission and stellar-defense systems they depend on are not yet
+// reconstructed.
+void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
+                                        std::int16_t system_id);
 
 } // namespace game

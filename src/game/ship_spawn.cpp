@@ -21,6 +21,11 @@ inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
   return static_cast<std::int16_t>(dist(state.rng));
 }
 
+// Ghidra _DAT_00575260: the base-speed literal the original compares against
+// for ai_behavior 3 (speed-locked) dude placement in
+// EncounterFleet_SpawnRandomSystemDudeShip.
+constexpr float kSpeedLockedSpeed = 0.0F;
+
 } // namespace
 
 // Ghidra 0x004254b0 Ship_AllocateShipSlotInSystem.
@@ -357,6 +362,291 @@ int NovaEncounter_TrySpawnRandomFleet(GameState &state,
     return NovaEncounter_SpawnFleetLeadShip(state, system_id, idx);
   }
   return -1;
+}
+
+// Ghidra 0x0046b4b0 Dude_SelectShipTypeIndexFromDudeDef. See the header.
+// The original unrolls the 16 ship slots, building cumulative buckets over
+// the entries whose class is present and (unless `ignore_ship_availability`)
+// whose runtime availability result is non-zero, draws a uniform value in
+// [0, total), and picks the lowest-index slot whose cumulative bucket first
+// reaches (draw+1). Our clean-room does not yet evaluate ship-class
+// availability expressions, so every present slot is a candidate; see the
+// TODO(decomp) in the header.
+int NovaDude_SelectShipTypeIndex(const DudeDef &dude,
+                                 bool ignore_ship_availability,
+                                 std::mt19937 &rng) {
+  auto present = [&dude, ignore_ship_availability](std::size_t i) {
+    (void)ignore_ship_availability; // availability eval deferred (see header)
+    return dude.ship_types[i] >= 0 && dude.ship_types[i] < 0x200;
+  };
+
+  std::array<std::int32_t, 16> bucket{}; // cumulative weights
+  std::int32_t total = 0;
+  for (std::size_t i = 0; i < dude.ship_types.size(); ++i) {
+    if (i > 0) {
+      bucket[i] = bucket[i - 1];
+    }
+    if (present(i)) {
+      bucket[i] += dude.ship_probabilities[i];
+      total += dude.ship_probabilities[i];
+    }
+  }
+  if (total < 1) {
+    return -1;
+  }
+
+  std::uniform_int_distribution<std::int32_t> dist{0, total - 1};
+  const std::int32_t draw = dist(rng) + 1; // (draw+1) in [1, total]
+  for (std::size_t i = 0; i < dude.ship_types.size(); ++i) {
+    if (present(i) && draw <= bucket[i]) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1; // unreachable for consistent weights
+}
+
+// Ghidra 0x0041ba80 EncounterFleet_SpawnRandomSystemDudeShip. See the header.
+// The original scans the first inactive ship slot and, within it, picks a
+// random system-bound dude class (NovaDude_SelectRandomSystemDudeClassIndex)
+// then a weighted ship type from that dude def (NovaDude_SelectShipTypeIndex),
+// and lays the dude-def's identity + class stats onto the slot in place (it
+// does NOT go through Ship_AllocateShipSlotInSystem; the slot was already
+// found inactive). We reconstruct the load-bearing identity/kinematics/vitals
+// subset; deep combat/AI residual fields and the 8-bank weapon loadout are
+// deferred (see the header).
+int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
+                                            std::int16_t system_id,
+                                            std::uint16_t reserved_slots) {
+  const std::int32_t free_limit =
+      static_cast<std::int32_t>(GameState::kMaxShips) -
+      static_cast<std::int32_t>(reserved_slots);
+  for (std::int32_t slot = 1; slot < free_limit; ++slot) {
+    Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+    if (ship.is_active) {
+      continue;
+    }
+
+    const System *sys = state.scenario.System(
+        static_cast<std::int16_t>(system_id + 0x80));
+    if (sys == nullptr) {
+      return -1;
+    }
+    const int dude_slot = NovaDude_SelectRandomSystemDudeClassIndex(*sys, state.rng);
+    if (dude_slot < 0) {
+      continue; // no selectable dude class for this system
+    }
+    const std::int16_t dude_class_id = sys->dude_class_ids[dude_slot];
+    const DudeDef *dude =
+        state.scenario.Dude(static_cast<std::int16_t>(dude_class_id + 0x80));
+    if (dude == nullptr) {
+      continue;
+    }
+    const int type_slot =
+        NovaDude_SelectShipTypeIndex(*dude, /*ignore_ship_availability=*/false,
+                                     state.rng);
+    if (type_slot < 0 || type_slot >= 16) {
+      return -1; // ship type selection failed -> slot released
+    }
+
+    ship.is_active = true;
+    ship.current_system_id = system_id;
+    ship.dude_class_id = dude_class_id;
+    ship.ship_class_id = dude->ship_types[type_slot];
+    ship.faction_or_government_id = dude->government_id;
+
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (dude->ai_type < 1) {
+      ship.ai_behavior_code =
+          cls != nullptr ? cls->default_ai_behavior : 0;
+    } else {
+      ship.ai_behavior_code = dude->ai_type;
+    }
+
+    // Position: ai_behavior 3 (speed-locked) ships anchor to the system's first
+    // stellar when that class's base speed matches the special speed value;
+    // otherwise scatter in [-750,750). The clean-room System uses nav_defs[0]
+    // as the first stellar the payload's SpaceObj table points at.
+    const bool speed_locked = ship.ai_behavior_code == 3 &&
+                              !sys->nav_defs.empty() && sys->nav_defs[0] >= 0x80 &&
+                              cls != nullptr && cls->speed == kSpeedLockedSpeed;
+    if (speed_locked) {
+      if (const auto *st = state.scenario.Stellar(sys->nav_defs[0]); st) {
+        ship.pos_x = static_cast<float>(st->pos_x);
+        ship.pos_y = static_cast<float>(st->pos_y);
+      } else {
+        ship.pos_x = ship.pos_y = 0.0F;
+      }
+    } else {
+      ship.pos_x = static_cast<float>(RandomBelow(state, 0x5dc) - 0x2ee);
+      ship.pos_y = static_cast<float>(RandomBelow(state, 0x5dc) - 0x2ee);
+    }
+
+    ship.vel_x = 0.0F;
+    ship.vel_y = 0.0F;
+    ship.speed = 0.0F;
+    ship.heading = static_cast<float>(RandomBelow(state, 0x168));
+    ship.jump_destination_stellar_id = -2;
+    ship.ai_state_code = 0;
+    ship.ai_control_mode = 0;
+    ship.mission_fleet_slot = -1;
+    ship.mission_owner_slot = -1;
+    ship.mission_ship_slot = -1;
+    ship.ai_hostility_accumulator = 0;
+    ship.ai_target_ship_slot = -1;
+    ship.primary_target_ship_slot = -1;
+    ship.ai_secondary_target_slot = -1;
+    ship.death_timer_active = 0.0F;
+    ship.timed_action_counter =
+        cls != nullptr ? cls->timed_action_counter_init : 0;
+    ship.credits = 10000;
+    // The original derives mining_scoop_active from the spawned class's scoop
+    // outfit (Outfit_HasMiningScoopOutfit); the clean-room leaves it false (it
+    // only affects mining AI, not yet reconstructed). TODO(decomp).
+    ship.mining_scoop_active = false;
+    ship.target_stellar_object_id = -1;
+    if (cls != nullptr) {
+      ship.shield_points = static_cast<float>(cls->base_shield);
+      ship.armor_points = static_cast<float>(cls->base_armor);
+      ship.fuel_points = static_cast<float>(cls->base_fuel);
+    }
+    NovaLog::Debug("spawned random dude ship: slot {} class {} govt {} ai {}",
+                   slot,
+                   ship.ship_class_id,
+                   ship.faction_or_government_id,
+                   ship.ai_behavior_code);
+    return slot;
+  }
+  return -1;
+}
+
+// Ghidra 0x0041c710 Dude_SpawnRandomDudeShipInSystem. See the header.
+// Rolls 1-in-7 for a mission ship (deferred), else 1-in-7 for a random-
+// encounter fleet (existing NovaEncounter_TrySpawnRandomFleet), else spawns a
+// random system dude ship (discarded when its fuel capacity < 1), then
+// positions the spawned ship at a random polar offset from system centre and
+// faces it toward the origin. The AI-state entry (spin-out / jump-in) and the
+// speed polar integration mirror Math_AddPolarVelocity (heading 0 = up, world
+// +y down).
+int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
+                                         std::int16_t system_id) {
+  int slot = -1;
+  // 1-in-7 mission ship branch: mission system not reconstructed; skip it and
+  // let the dude/fleet rolls run instead. TODO(decomp).
+  constexpr std::int32_t kDispatchRoll = 7;
+  if (RandomBelow(state, kDispatchRoll) == 0) {
+    // Mission_SpawnMissionShipFromMissionShipDef (deferred).
+    NovaLog::Debug("dude spawn dispatch: mission-ship branch not implemented; "
+                   "falling through to dude/fleet");
+  } else if (RandomBelow(state, kDispatchRoll) == 0) {
+    (void)NovaEncounter_TrySpawnRandomFleet(state, system_id,
+                                            /*ignore_ship_availability=*/true);
+  } else {
+    slot = NovaEncounter_SpawnRandomSystemDudeShip(state, system_id, 8);
+    if (slot >= 0) {
+      Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+      // Discard ships whose computed fuel capacity < 1 (the original's
+      // Ship_ComputeShipFuelCapacity). The clean-room NPC fuel is the class
+      // base_fuel; outfit-derived fuel bonuses (opcode-12 outfits) are not
+      // typically present on dude ships, so this is faithful for the stock
+      // scenario. TODO(decomp).
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      const std::int16_t fuel = cls != nullptr ? cls->base_fuel : 0;
+      if (fuel < 1) {
+        ship.is_active = false;
+        return -1;
+      }
+    }
+  }
+  if (slot < 0) {
+    return -1;
+  }
+
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  // Random polar offset from system centre, magnitude ~the spawn scale
+  // (_DAT_0057522c + ramp + _DAT_0057526c). The original picks a radius and
+  // adds it in the heading direction: pos += (sin(h), -cos(h)) * speed.
+  const float heading = static_cast<float>(RandomBelow(state, 0x168));
+  // The decomp's radius loop accumulates ~DAT_0057522c at a cadence; we fold it
+  // into a single representative spawn radius for the clean-room (the precise
+  // sum of the loop is provisional until the drifting-sprite scale is
+  // observed). TODO(decomp).
+  constexpr float kSpawnRadius = 300.0F;
+  ship.pos_x = std::sin(heading) * kSpawnRadius;
+  ship.pos_y = -std::cos(heading) * kSpawnRadius;
+  // Face the spawned ship toward the origin (bearing from its position back to
+  // system centre). The original uses Math_BearingFromPointToPoint.
+  // Face the spawned ship toward the origin (bearing from its position back to
+  // system centre). The original uses Math_BearingFromPointToPoint; this uses
+  // the same heading convention as the rest of the codebase (heading =
+  // atan2(vx, -vy), heading 0 = up).
+  ship.heading = std::atan2(-ship.pos_x, ship.pos_y);
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  ship.speed = 0.0F;
+  ship.jump_destination_stellar_id = -2;
+  ship.ai_state_code = 0;
+  NovaLog::Info("dude ship placed at ({}, {}) heading {:.2f}",
+                ship.pos_x,
+                ship.pos_y,
+                ship.heading);
+  return slot;
+}
+
+// Ghidra 0x0041d6e0 System_TickNpcSpawnMaintenance (ambience slice). See the
+// header. The original counts the ambient active ships in the system whose
+// ai_target_ship_slot != 0 (ships not actively engaged on the player), then
+// below the AvgShips cap rolls a 1-in-500 encounter pick (gated by
+// encounter_chance_percent) and otherwise spawns a random dude ship. Tichel and
+// most ordinary systems bind no encounter fleets, so the dude spawn is the
+// dominant population path.
+void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
+                                        std::int16_t system_id) {
+  const System *sys =
+      state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
+  if (sys == nullptr) {
+    return;
+  }
+
+  // Count ambient ships: active, in this system, and not targeting the player
+  // (ai_target_ship_slot != 0). Slot 0 (the player) is not counted.
+  int ambient = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (ship.is_active && ship.current_system_id == system_id &&
+        ship.ai_target_ship_slot != 0) {
+      ++ambient;
+    }
+  }
+  if (ambient >= sys->avg_ships) {
+    return;
+  }
+
+  // 1-in-500 encounter roll. The original draws NovaRandom_Range(500) and only
+  // proceeds when the draw is exactly 1.
+  if (RandomBelow(state, 500) == 1) {
+    const bool has_encounters = sys->encounter_fleet_count >= 1 &&
+                                sys->encounter_chance_percent > 0;
+    if (has_encounters) {
+      // Second gate: a uniform draw in [0, encounter_chance_percent).
+      if (RandomBelow(state, 100) < sys->encounter_chance_percent) {
+        const int fleet =
+            NovaEncounter_SelectFleetDefWeighted(*sys, state.scenario, state.rng);
+        if (fleet >= 0) {
+          // Original intercept: EncounterFleet_SpawnRandomEncounterFleet.
+          (void)NovaEncounter_SpawnFleetLeadShip(state, system_id,
+                                                 static_cast<std::int16_t>(fleet));
+          return;
+        }
+      }
+    }
+  }
+
+  // Fall back to a random system dude ship when the encounter did not fire.
+  if (NovaDude_SelectRandomSystemDudeClassIndex(*sys, state.rng) != -1) {
+    (void)NovaDude_SpawnRandomDudeShipInSystem(state, system_id);
+  }
 }
 
 } // namespace game
