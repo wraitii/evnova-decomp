@@ -21,6 +21,7 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 - When renaming high-level control-flow functions (startup, run loop, shutdown), also add a short clean-room comment block (2-4 lines) documenting purpose, entry/exit conditions, and confidence/unknowns.
 - If testing game behaviour is required, stop and ask the user for input - you will not be able to interact with the game well enough.
 - Beware of `find` in shell, on macos some commands are very slow if searching the disk.
+- **DO NOT use tail/head when building**, or add a small timeout. tail/head can hang if there are fewer lines output than expected.
 
 ## Function progress tracker (`progress.csv`)
 
@@ -35,7 +36,6 @@ much of each function has been re-implemented.
   - `0%` — not reimplemented (regardless of whether the function is already named/annotated in Ghidra; only reimplementation progress counts here).
 - `impl_file` is the `src/...` path that reimplements the function (empty when `0%`).
 - `comment` is a short note (confidence, known gaps/divergences, TODO(decomp)).
-- **DO NOT use tail/head when building**, or add a small timeout. tail/head can hang if there are fewer lines output than expected.
 - **Edit `progress.csv` in place**.
 - **`progress.csv` is very large (~3200 rows). Never rewrite it wholesale or dump it to your context. Always locate the target address with grep and make surgical, in-place edits (edit tool / patch), leaving all other rows intact.**
 
