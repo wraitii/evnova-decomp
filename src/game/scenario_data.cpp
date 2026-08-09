@@ -530,6 +530,13 @@ namespace {
   // equivalently hides the starfield (NovaEffects_QueuedAmbientStarParticles
   // clears ambient stars when SystemDef.murk < 0).
   s.murk = ReadBeI16(bytes, 0x92);
+  // Roaming-ship direction bitmap (s\xd8st +0x94): a 16-bit mask of allowed
+  // char-direction slots for roaming-ship wander targets. The loader copies it
+  // verbatim into SystemDef.roaming_direction_bitmap (+0x1f4);
+  // Dude_SpawnRoamingShip (0x00421830) tests it via
+  // (1 << (wander_type & 0x1f)) & bitmap.
+  s.roaming_direction_bitmap =
+      static_cast<std::uint16_t>(ReadBeI16(bytes, 0x94));
   s.reinf_fleet = ReadBeI16(bytes, 0x196);
   s.reinf_time = ReadBeI16(bytes, 0x198);
   s.reinf_interval = ReadBeI16(bytes, 0x19a);

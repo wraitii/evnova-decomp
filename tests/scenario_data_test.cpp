@@ -624,6 +624,10 @@ TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   CHECK(s->encounter_fleet_count == 0);
   CHECK(s->encounter_chance_percent == 0);
   CHECK(s->encounter_fleet_ids[0] == -1);
+  // Roaming-ship direction bitmap (payload +0x94) is copied verbatim. Kania's
+  // raw payload reads 0x711 (bits 0/4/8/9/10) ->
+  // SystemDef.roaming_direction_bitmap.
+  CHECK(s->roaming_direction_bitmap == 0x711);
 
   // Alphara's first Dude entry is raw -129 with weight 20. The loader removes
   // it from the ordinary dude table and derives fleet id abs(-129)-0x80 = 1.

@@ -3,9 +3,12 @@
 
 #include "game/ship_spawn.hpp"
 
+#include <algorithm>
+
 namespace {
 
 using game::GameState;
+using game::NovaEncounter_SelectFleetDefWeighted;
 using game::NovaEncounter_SpawnFleetLeadShip;
 using game::NovaShip_AllocateShipSlot;
 
@@ -131,6 +134,104 @@ TEST_CASE("fleet lead spawner rejects unavailable / lead-less defs") {
   empty.is_available_runtime = true;
   empty.lead_ship_class_id = -1;
   CHECK(NovaEncounter_SpawnFleetLeadShip(state, 0x88, 0x90 - 0x80) == -1);
+}
+
+// EncounterFleet_SelectRandomEncounterFleetDefWeighted (0x0046b6d0) clean-room
+// counterpart: NovaEncounter_SelectFleetDefWeighted. A system with no bound
+// encounter fleets yields no candidate.
+TEST_CASE("weighted fleet select returns -1 when no fleets are bound") {
+  GameState state;
+  state.scenario.systems.push_back(game::System{}); // index 0 = system id 0x80
+  const game::System &s = state.scenario.systems[0];
+  CHECK(s.encounter_fleet_count == 0);
+  CHECK(s.encounter_chance_percent == 0);
+  CHECK(NovaEncounter_SelectFleetDefWeighted(s, state.scenario, state.rng) ==
+        -1);
+}
+
+TEST_CASE("weighted fleet select picks among available bound defs") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Build a synthetic System binding three fleet defs (ids 0/1/2) with weights
+  // 10/20/70. The caller passes a System by value here (pure selection does not
+  // mutate scenario state).
+  game::System sys;
+  sys.encounter_fleet_count = 3;
+  sys.encounter_fleet_ids = {0, 1, 2};
+  sys.encounter_fleet_weights = {10, 20, 70};
+
+  // Mark the three target fleet defs available with valid leads.
+  for (const int idx : {0, 1, 2}) {
+    auto &def = state.scenario.fleets[static_cast<std::size_t>(idx)];
+    def.is_available_runtime = true;
+    if (def.lead_ship_class_id < 0) {
+      def.lead_ship_class_id = 0;
+    }
+  }
+
+  // Distribution sanity: with weights 10/20/70 the 70-weight def (pick 2)
+  // should dominate. The rng seed is fixed so the run is reproducible.
+  std::mt19937 rng(12345);
+  int hits0 = 0, hits1 = 0, hits2 = 0;
+  constexpr int kDraws = 2000;
+  for (int i = 0; i < kDraws; ++i) {
+    const int pick =
+        NovaEncounter_SelectFleetDefWeighted(sys, state.scenario, rng);
+    REQUIRE(pick >= 0);
+    REQUIRE(pick < 3);
+    if (pick == 0)
+      ++hits0;
+    if (pick == 1)
+      ++hits1;
+    if (pick == 2)
+      ++hits2;
+  }
+  INFO("hits 0/1/2 = " << hits0 << "/" << hits1 << "/" << hits2);
+  CHECK(hits0 + hits1 + hits2 == kDraws);
+  CHECK(hits2 > hits0);
+  CHECK(hits2 > hits1);
+}
+
+TEST_CASE("weighted fleet select skips unavailable / lead-less defs") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  game::System sys;
+  sys.encounter_fleet_count = 3;
+  sys.encounter_fleet_ids = {0, 1, 2};
+  sys.encounter_fleet_weights = {10, 20, 70};
+
+  // Only fleet 2 is available; fleets 0 and 1 are filtered from the bucket.
+  state.scenario.fleets[2].is_available_runtime = true;
+  if (state.scenario.fleets[2].lead_ship_class_id < 0) {
+    state.scenario.fleets[2].lead_ship_class_id = 0;
+  }
+  state.scenario.fleets[0].is_available_runtime = false;
+  state.scenario.fleets[1].is_available_runtime = false;
+
+  std::mt19937 rng(77);
+  int hits = 0;
+  constexpr int kDraws = 50;
+  for (int i = 0; i < kDraws; ++i) {
+    const int pick =
+        NovaEncounter_SelectFleetDefWeighted(sys, state.scenario, rng);
+    CHECK(pick == 2); // only eligible candidate
+    if (pick == 2)
+      ++hits;
+  }
+  CHECK(hits == kDraws);
+}
+
+TEST_CASE("weighted fleet select returns -1 when no candidate is available") {
+  GameState state;
+  state.scenario.systems.push_back(game::System{});
+  auto &sys = state.scenario.systems[0];
+  sys.encounter_fleet_count = 2;
+  sys.encounter_fleet_ids = {3, 4};
+  sys.encounter_fleet_weights = {50, 50};
+  // Both bound defs remain unavailable -> no eligible candidate.
+  std::mt19937 rng(99);
+  CHECK(NovaEncounter_SelectFleetDefWeighted(sys, state.scenario, rng) == -1);
 }
 
 } // namespace

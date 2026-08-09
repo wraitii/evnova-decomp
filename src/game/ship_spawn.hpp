@@ -25,6 +25,21 @@ namespace game {
                                             std::int16_t system_id,
                                             std::int16_t reserved_tail);
 
+// Mirrors EncounterFleet_SelectRandomEncounterFleetDefWeighted (Ghidra
+// 0x0046b6d0): weighted-random selection among a system's bound random-
+// encounter fleet defs. Guards on System.encounter_fleet_count; builds a
+// candidate list from the System.encounter_fleet_ids whose FleetDef has a
+// valid lead ship (lead_ship_class_id != -1) AND is_available_runtime set,
+// accumulating System.encounter_fleet_weights into a cumulative-weight bucket;
+// then draws a uniform value in [0, total_weight) and returns the fleet id
+// whose cumulative bucket is first reached (heavier-weighted defs are
+// likelier). Returns -1 when there are no eligible candidates (or no total
+// weight). The returned value is a 0-based fleet-def index into
+// ScenarioData.fleets (i.e. resource id minus 0x80), matching the parameter
+// conventions of NovaEncounter_SpawnFleetLeadShip.
+[[nodiscard]] int NovaEncounter_SelectFleetDefWeighted(
+    const System &system, const ScenarioData &scenario, std::mt19937 &rng);
+
 // PARTIAL reconstruction of the lead-ship spawn of
 // EncounterFleet_SpawnRandomEncounterFleet (Ghidra 0x004259b0). Allocates one
 // ship slot in system_id for the random-encounter fleet template at

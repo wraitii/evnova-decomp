@@ -188,4 +188,63 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   return slot;
 }
 
+// Ghidra 0x0046b6d0 EncounterFleet_SelectRandomEncounterFleetDefWeighted.
+// Weighted-random pick among the system's bound encounter-fleet defs (see the
+// header). The original reads SystemDef +0x8a (count), +0x6a ids, +0x7a weights
+// directly and tests each FleetDef's lead (+0x00) + is_available_runtime
+// (+0x122); we use the clean-room System/FleetDef fields. The decompiled
+// cumulative bucket is built as a running total over candidate weights; the
+// uniform draw in [0, total) with a (draw+1) <= bucket threshold reproduces the
+// canonical weighted-selection the original's unrolled stack-split accumulates.
+// Note the fleet/index convention: this returns a 0-based def index (the
+// original pushes the raw def id, itself 0-based after scenario load), so the
+// result feeds NovaEncounter_SpawnFleetLeadShip / Fleet()+0x80 directly.
+int NovaEncounter_SelectFleetDefWeighted(const System &system,
+                                         const ScenarioData &scenario,
+                                         std::mt19937 &rng) {
+  if (system.encounter_fleet_count < 1) {
+    return -1;
+  }
+
+  std::array<std::int16_t, 8> eligible_ids{};
+  std::array<std::int32_t, 8> bucket{}; // cumulative weights
+  std::int32_t eligible_count = 0;
+  std::int32_t total_weight = 0;
+  for (int i = 0; i < system.encounter_fleet_count && i < 8; ++i) {
+    const std::int16_t def_index = system.encounter_fleet_ids[i];
+    if (def_index < 0) {
+      continue;
+    }
+    const FleetDef *def =
+        scenario.Fleet(static_cast<std::int16_t>(def_index + 0x80));
+    // The original only admits candidates with a valid lead and the runtime
+    // availability bit set; a missing/out-of-range def entry is ineligible.
+    if (def == nullptr || def->lead_ship_class_id < 0 ||
+        !def->is_available_runtime) {
+      continue;
+    }
+    eligible_ids[static_cast<std::size_t>(eligible_count)] = def_index;
+    const std::int32_t w = system.encounter_fleet_weights[i];
+    const std::int32_t prev =
+        eligible_count > 0
+            ? bucket[static_cast<std::size_t>(eligible_count - 1)]
+            : 0;
+    bucket[static_cast<std::size_t>(eligible_count)] = prev + w;
+    total_weight += w;
+    ++eligible_count;
+  }
+
+  if (eligible_count == 0 || total_weight <= 0) {
+    return -1;
+  }
+  std::uniform_int_distribution<std::int32_t> dist{0, total_weight - 1};
+  const std::int32_t draw = dist(rng) + 1; // draw+1 in [1, total]
+  for (std::int32_t k = 0; k < eligible_count; ++k) {
+    if (draw <= bucket[static_cast<std::size_t>(k)]) {
+      return eligible_ids[static_cast<std::size_t>(k)];
+    }
+  }
+  return -1;
+}
+
 } // namespace game

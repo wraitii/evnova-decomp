@@ -521,6 +521,14 @@ struct System {
   // (SystemDef.murk at +0xbc < 0; Ghidra previously mislabeled this field
   // "alert_level"). Feeds the ambient-star size scale as well.
   std::int16_t murk = 0;
+  // Bitmask of allowed char-direction slots for roaming-ship wander targets
+  // (SystemDef.roaming_direction_bitmap at +0x1f4, copied verbatim from the
+  // system payload +0x94), named during the Step 5 metadata pass. Bit k permits
+  // direction k; Dude_SpawnRoamingShip (0x00421830) rejects a random
+  // wander_type whose (1 << (type & 0x1f)) & this bitmap is 0, and gives up
+  // entirely when the whole bitmap is 0. Not yet consumed by clean-room code
+  // (roaming ships remain stand-in), so it is decoded for completeness only.
+  std::uint16_t roaming_direction_bitmap = 0;
   std::uint16_t ast_types = 0;     // AstTypes
   std::int16_t reinf_fleet = -1;   // ReinfFleet
   std::int16_t reinf_time = 0;     // ReinfTime
