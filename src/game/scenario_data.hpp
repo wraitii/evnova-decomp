@@ -131,6 +131,11 @@ struct ShipClass {
   std::int16_t max_gun = 0;    // MaxGun
   std::int16_t max_turret = 0; // MaxTur
 
+  // Ghidra ShipClassDef +0xA20 (ship payload +0x4c). The starting
+  // timed_action_counter for a newly allocated ship; Ship_AllocateShipSlot
+  // (Ship_AllocateShipSlotInSystem 0x004254b0) seeds a fresh ship slot from it.
+  std::int16_t timed_action_counter_init = 0;
+
   // DefaultItems (outfit ids, zero-based after 0x80) + counts, up to 8. These
   // seed the player's starting inventory when bought/captured.
   std::array<std::int16_t, 8> default_outfit_ids{

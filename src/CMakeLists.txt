@@ -30,6 +30,7 @@ add_library(evnova_runtime
     game/scenario_data.cpp
     game/services_buttons.cpp
     game/ship_visual.cpp
+    game/ship_spawn.cpp
     game/sprite_world.cpp
     game/targeting.cpp
     game/travel.cpp

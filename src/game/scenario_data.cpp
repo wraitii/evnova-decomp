@@ -155,6 +155,7 @@ namespace {
   s.mass_tons = ReadBeI16(bytes, 0x3e);
   s.length_meters = ReadBeI16(bytes, 0x40);
   s.default_ai_behavior = ReadBeI16(bytes, 0x42);
+  s.timed_action_counter_init = ReadBeI16(bytes, 0x4c);
   s.crew = ReadBeI16(bytes, 0x44);
   s.strength = ReadBeI16(bytes, 0x46);
   s.inherent_combat_govt = ReadBeI16(bytes, 0x48);
