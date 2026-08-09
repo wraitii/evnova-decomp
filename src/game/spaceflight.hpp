@@ -85,4 +85,31 @@ extern void NovaPlayer_UpdateFromInput(GameState &state,
 extern void NovaPlayer_TickShieldRecharge(GameState &state,
                                           float frame_time_ms);
 
+// One per-axis step of Ghidra Math_AddPolarVelocityWithClamp (0x0043b4e0), the
+// original's single forward-thrust pathway. For each velocity axis it combines
+// the polar projection of the class top speed (max_proj) with the polar
+// projection of the per-frame thrust step (delta) and the current velocity,
+// exactly as decoded. Named NovaPlayer_* for continuity but used by the NPC
+// integrator (NovaShip_IntegrateNpcMovement) too.
+void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
+                                        float thrust_step,
+                                        float max_speed,
+                                        float &vel_x,
+                                        float &vel_y);
+
+// NPC free-flight movement integrator, ported from the movement block of Ghidra
+// Ship_HandleShip (0x00433050). The AI writes the ship's ai_desired_heading_deg
+// / ai_desired_speed / ai_forward_thrust_cmd fields; this turns the ship toward
+// the desired heading at the class turn rate (continuous, unlike the player's
+// integer-rounded keyboard path), then applies forward or reverse thrust along
+// the heading and integrates position. Honors the reverse_speed_bias
+// coast-through-reversal timer by holding heading and coasting. Derives the
+// effective thrust/max-speed/turn from the class (no outfit inventory or status
+// effects yet, matching the NPC spawner's outfit-less ships) and scales all
+// rates by `elapsed_ticks` normalized to the 30 Hz simulation cadence.
+extern void NovaShip_IntegrateNpcMovement(GameState &state,
+                                          Ship &ship,
+                                          const ShipClass &ship_class,
+                                          float elapsed_ticks);
+
 } // namespace game

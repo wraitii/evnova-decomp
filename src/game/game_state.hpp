@@ -72,8 +72,34 @@ struct Ship {
   float vel_y = 0.0F;   // +0x24
   float heading = 0.0F; // +0x44 radians
   float speed = 0.0F;   // +0x48
-  // +0x30 ai_forward_thrust_cmd: whether the ship is applying forward thrust
-  // this frame. Mirrored by `engine_thrust` below for the player's render glow.
+
+  // --- AI movement state (drives Ship_HandleShip 0x00433050's integrator) ---
+  // Whether the ship applies forward thrust this frame. Mirror GHIDRA
+  // ShipState.ai_forward_thrust_cmd (+0x30). For the player it is mirrored by
+  // `engine_thrust` below for the render glow; the AI writes the same field
+  // via the reaction/offence helpers.
+  float ai_forward_thrust_cmd = 0.0F; // +0x30
+  // Desired scalar speed along the heading: >0 means forward thrust, <=0 means
+  // the absolute-set reverse path (vel set to heading*abs(desired)).
+  float ai_desired_speed = 0.0F; // +0x34
+  // Desired heading in the game's integer-degrees convention (heading 0 = up,
+  // increasing clockwise). Ship_HandleShip turns the ship toward this at
+  // Ship_ComputeShipMaxTurnRateDeg deg/frame.
+  std::int16_t ai_desired_heading_deg = 0; // +0x68
+  // Coast-through-reversal TIMER (NOT a brake): while >0 it suppresses both the
+  // turn-to-heading and forward-thrust blocks so the ship holds heading and
+  // coasts. Set to random 30..60 when the AI decides to reverse, counts down by
+  // frame time each frame.
+  float reverse_speed_bias = 0.0F; // +0x4C
+  // Station-hold timer driving the hold/approach state (ai_station_hold_timer).
+  float ai_station_hold_timer = 0.0F; // +0x50
+  // Wall-clock (SDL ticks) the current AI mode began; used by the jump-sequence
+  // and formation positioning timing.
+  std::uint32_t ai_mode_start_time_ms = 0; // +0xA4
+  // AI turn-bias direction (-1/0/+1) used by ships that bank/lean into turns.
+  std::int16_t ai_turn_bias_dir = 0; // +0xC8F8
+  // Latch requesting this ship to fire its active weapon bank.
+  std::int8_t ai_fire_trigger_latch = 0; // +0xBA
 
   // --- Vital stats ---
   float shield_points = 0.0F;       // +0x54

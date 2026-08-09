@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 #include <string>
 
 namespace game {
@@ -58,7 +59,30 @@ void Stub_CalcAiOdds(GameState &state) { (void)state; }
 
 void Stub_HandleShots(GameState &state) { (void)state; }
 
-void Stub_HandleShips(GameState &state) { (void)state; }
+// Ghidra scope 4/5 of Frame_TickSystems: per-ship simulation. For the NPC
+// ships this is Ship_HandleShip (0x00433050), which integrates each active
+// ship's AI-written movement commands into its kinematics. Reconstructed for
+// the NPC population: the movement/physics block (turning, thrust) via
+// NovaShip_IntegrateNpcMovement for every active, non-player ship in the
+// current system. The weapon/combat/disable/mission scopes of Ship_HandleShip
+// remain stubbed until those systems reimplemented.
+void Stub_HandleShips(GameState &state, float elapsed_ticks) {
+  const std::int16_t current_system = state.player.current_system_id;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.current_system_id != current_system) {
+      continue;
+    }
+    // ship_class_id is the zero-based index; scenario lookup adds 0x80 at its
+    // boundary (same as the spawner NovaEncounter_SpawnFleetLeadShip).
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (cls == nullptr) {
+      continue;
+    }
+    NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
+  }
+}
 
 void Stub_MiscHandlers(GameState &state, bool run_full_tick) {
   (void)state;
@@ -70,7 +94,9 @@ void Stub_BeamHitQueue(GameState &state) { (void)state; }
 // Ghidra 0x004186b0 Frame_TickSystems. Reconstructs only the *structure*:
 // the scope ordering and the run_full_tick gate. Each scope is a loud stub
 // (see above). Called full before drawing and reduced during transitions.
-void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
+void NovaFrame_TickSystems(GameState &state,
+                           bool run_full_tick,
+                           float elapsed_ticks) {
   // scope 10 "player": always runs.
   Stub_PlayerCore(state);
   // scope 9 "collisions": always runs.
@@ -86,7 +112,7 @@ void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
 
   // Always-run scopes that keep advancing during frozen transitions.
   Stub_HandleShots(state);                 // scope 7
-  Stub_HandleShips(state);                 // scope 4/5
+  Stub_HandleShips(state, elapsed_ticks);  // scope 4/5
   Stub_MiscHandlers(state, run_full_tick); // scope 8
   Stub_BeamHitQueue(state);
 }
@@ -161,7 +187,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // the travel/landing transitions). We spawn once when the mode starts, then
   // advance it per frame below.
   view.SpawnAmbientStars(platform, state);
-  NovaFrame_TickSystems(state, /*run_full_tick=*/true);
+  NovaFrame_TickSystems(state,
+                        /*run_full_tick=*/true,
+                        /*elapsed_ticks=*/1.0F);
   DrawInGameFrame(platform, state, view, hud);
   SDL_RenderPresent(platform.renderer());
 
@@ -337,7 +365,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 
     // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
     // cursor update.
-    NovaFrame_TickSystems(state, /*run_full_tick=*/true);
+    NovaFrame_TickSystems(
+        state, /*run_full_tick=*/true, frame_time_ms / kOriginalTickMs);
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
@@ -436,11 +465,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 // projection; it never pulls an existing (e.g. drift-built) component back to
 // enforce a vector-magnitude limit. Heading uses the polar convention from
 // Math_AddPolarVelocity (0x0043b4a0): vel_x += sin(h)*s ; vel_y -= cos(h)*s.
-static void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
-                                               float thrust_step,
-                                               float max_speed,
-                                               float &vel_x,
-                                               float &vel_y) {
+// Declared in spaceflight.hpp so both the player and NPC integrators share one
+// faithful port.
+void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
+                                        float thrust_step,
+                                        float max_speed,
+                                        float &vel_x,
+                                        float &vel_y) {
   const float sin_h = std::sin(heading_rad);
   const float cos_h = std::cos(heading_rad);
   auto axis_step = [](float max_proj, float delta, float cur) -> float {
@@ -592,6 +623,185 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   ship.pos_y += ship.vel_y * elapsed_ticks;
   ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
   return stats;
+}
+
+// -------------------------------------------------------------------------
+// NPC ship movement
+// -------------------------------------------------------------------------
+// Ports the movement block of Ghidra Ship_HandleShip (0x00433050) for the
+// AI-driven NPC ships. The AI layer (Ship_UpdateShipAiState / the behavior
+// supervisors) writes ai_desired_heading_deg (degrees, 0 = up, clockwise),
+// ai_desired_speed (scalar speed along the heading) and ai_forward_thrust_cmd;
+// here the integrator turns the hull toward the desired heading at the class
+// turn rate and applies thrust / position integration.
+//
+// The AI turn is CONTINUOUS (Ship_HandleShip uses the raw
+// Ship_ComputeShipMaxTurnRateDeg rate) unlike the player keyboard path which
+// rounds to integer degrees/frame before integrating. Thrust follows the
+// original three-branch model keyed on ai_desired_speed:
+//   desired == 0 : free-coast (no net thrust; ai_forward_thrust_cmd is usually
+//                  the cruise command applied as a per-axis clamped step).
+//   desired >  0 : forward thrust toward `desired` speed, per-axis clamped to
+//                  the polar projection of `desired` (Math_AddPolarVelocity-
+//                  WithClamp 0x0043b4e0).
+//   desired <  0 : absolute-set velocity to heading * abs(desired) (the
+//                  reverse/abs-set path), then grow the reversal timer.
+// reverse_speed_bias is a coast-through-reversal TIMER (not a brake): while >0
+// it suppresses both turning and thrust (the ship holds heading and coasts);
+// it counts down by frame time each frame and is re-set to a random 30..60
+// when the AI decides to reverse into open space.
+//
+// Stats are derived from the ship class exactly as the player integrator does
+// (NovaPlayer_IntegrateMovement): turn = raw_maneuver*0.1 deg/tick,
+// max speed = raw_speed/100 px/tick, thrust = raw_accel/10000*2 px/tick^2.
+// NPC ships carry no outfit inventory or status effects in the current build,
+// so the class base values ARE the effective values. TODO(decomp): apply opcode
+// 7/8/9 outfit bonuses, the government combat_rating_scale and disable/status-
+// effect damping to these when the NPC outfit/combat state is reconstructed.
+//
+// Gravity-shield ships (outfit opcode 38) keep a scalar `speed` and steer via
+// Ship_SteerVelocityTowardShipHeading (0x0043b020, Phase 2). None spawn with
+// that outfit yet, so the vector path is used throughout.
+void NovaShip_IntegrateNpcMovement(GameState &state,
+                                   Ship &ship,
+                                   const ShipClass &ship_class,
+                                   float elapsed_ticks) {
+  constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+  constexpr float kTwoPi = 6.283185307179586F;
+  constexpr float kFullCircleDeg = 360.0F;
+  elapsed_ticks = std::max(0.0F, elapsed_ticks);
+
+  // Derived effective stats (see header/block comment above).
+  const float eff_turn_deg = static_cast<float>(ship_class.turn_rate) * 0.1F;
+  const float eff_max_speed = static_cast<float>(ship_class.speed) / 100.0F;
+
+  // The movement blocks are gated off while coasting through a reversal, and
+  // for the defunct AI state (0x16) the ship also holds course. The original
+  // also gates off ships whose class is the 0x2ff sentinel; those fall through
+  // to the inactive-guard at the top of Ship_HandleShip in practice.
+  const bool coasting = ship.reverse_speed_bias > 0.0F;
+  const bool holds_course = coasting || ship.ai_state_code == 0x16;
+
+  // --- Turn toward the desired heading (continuous AI turn rate). ---
+  // The original computes the shortest signed angular delta in degrees from
+  // the current heading to = ai_desired_heading_deg, stepping it (in either
+  // direction) by eff_max_turn_deg each frame, snapping to the exact heading
+  // once within one step. The snap-once branch writes the desired heading
+  // directly; otherwise the ship rotates by a full turn step in the direction
+  // that closes the angle fastest.
+  if (!holds_course) {
+    const float cur_deg = ship.heading / kDegToRad;
+    // Shortest signed delta [-180, 180] degrees from current to desired.
+    const float delta_deg = std::remainder(
+        static_cast<float>(ship.ai_desired_heading_deg) - cur_deg,
+        kFullCircleDeg);
+    const float max_turn_deg = eff_turn_deg * elapsed_ticks;
+    if (std::abs(delta_deg) <= max_turn_deg) {
+      ship.heading =
+          static_cast<float>(ship.ai_desired_heading_deg) * kDegToRad;
+    } else {
+      ship.heading =
+          (cur_deg + std::copysign(max_turn_deg, delta_deg)) * kDegToRad;
+    }
+    ship.heading = std::fmod(ship.heading, kFullCircleDeg / kDegToRad);
+    if (ship.heading < 0.0F) {
+      ship.heading += kTwoPi;
+    }
+
+    // Shield / armor regeneration toward their maxima. The original regens
+    // these in the same not-coasting gate as turning. Rates are per-frame at
+    // the reference cadence; scale by elapsed ticks so host frame rate doesn't
+    // change the on-screen pace.
+    const float max_shield = static_cast<float>(ship_class.base_shield);
+    if (ship.shield_points < max_shield) {
+      ship.shield_points = std::min(
+          max_shield,
+          ship.shield_points +
+              static_cast<float>(ship_class.shield_recharge) * elapsed_ticks);
+    }
+    const float max_armor = static_cast<float>(ship_class.base_armor);
+    if (ship.armor_points < max_armor) {
+      ship.armor_points = std::min(
+          max_armor,
+          ship.armor_points +
+              static_cast<float>(ship_class.armor_recharge) * elapsed_ticks);
+    }
+  }
+
+  // --- Forward / reverse thrust along the heading. ---
+  // When the ship is coasting (reverse_speed_bias > 0) or defunct it skips
+  // thrust entirely and holds velocity. Otherwise, when a forward-thrust
+  // command is present, apply the three-branch ai_desired_speed model (the
+  // original gates this whole block on ai_forward_thrust_cmd != 0, so a
+  // stopped ship with no thrust command drifts without applying any new
+  // velocity). The coast case (desired == 0) is a clamped step toward the
+  // class top speed; desired > 0 throttles toward it; desired < 0 is the
+  // reverse/absolute-set path.
+  if (!holds_course && ship.ai_forward_thrust_cmd != 0.0F) {
+    const float desired = ship.ai_desired_speed;
+    auto add_polar = [&](float speed) {
+      // Math_AddPolarVelocity (0x0043b4a0): vel_x += sin(h)*s ; vel_y -=
+      // cos(h)*s (heading 0 = up / -y, increasing clockwise).
+      ship.vel_x += std::sin(ship.heading) * speed;
+      ship.vel_y -= std::cos(ship.heading) * speed;
+    };
+    auto add_polar_clamped = [&](float thrust_step, float cap) {
+      // Math_AddPolarVelocityWithClamp (0x0043b4e0), via the shared
+      // player/NPC helper -- Math_AddPolarVelocityWithClamp clamp semantics.
+      NovaPlayer_AddPolarVelocityClamped(
+          ship.heading, thrust_step, cap, ship.vel_x, ship.vel_y);
+    };
+
+    if (desired == 0.0F) {
+      // Free-coast: apply the cruise thrust command (usually 0) as a per-axis
+      // clamped step toward the class top speed so a ship with a nonzero
+      // constant forward command advances. With command 0 this is a no-op.
+      add_polar_clamped(ship.ai_forward_thrust_cmd * elapsed_ticks,
+                        eff_max_speed);
+    } else if (desired > 0.0F) {
+      // Forward thrust toward the requested speed.
+      add_polar_clamped(ship.ai_forward_thrust_cmd * elapsed_ticks, desired);
+    } else {
+      // Reverse / absolute-set: zero the velocity and re-impose it at
+      // abs(desired) along the heading.
+      ship.vel_x = 0.0F;
+      ship.vel_y = 0.0F;
+      add_polar(std::abs(desired));
+      ship.ai_desired_speed += std::abs(ship.ai_forward_thrust_cmd);
+      // Once the reversal has closed enough distance, the AI decides to coast
+      // through: arm a random 30..60-tick reversal timer (only in open space,
+      // i.e. no current target and not a mission ship). The original also
+      // clears primary/secondary targets here -- that belongs to the AI layer
+      // (deferred). TODO(decomp): mission_ship_slot==0x3ff carve-out. Uses the
+      // same GameState.rng-backed uniform draw the spawner does (RandomBelow,
+      // mirroring NovaRandom_Range) so runs stay reproducible.
+      if (ship.ai_target_ship_slot == -1) {
+        std::uniform_int_distribution<std::int32_t> dist(30, 60);
+        ship.reverse_speed_bias = static_cast<float>(dist(state.rng));
+      }
+    }
+  }
+
+  // --- Position integration + inertia-less special case. ---
+  // Inertia-less ships (base_accel == 0 && base_speed == 0) are pinned: the
+  // original zeroes their velocity every frame. Others integrate
+  // pos += vel * frame_time (gravity-shield ships instead turn their velocity
+  // through Ship_SteerVelocityTowardShipHeading first -- none exist yet).
+  if (ship_class.accel == 0.0F && ship_class.speed == 0.0F) {
+    ship.vel_x = 0.0F;
+    ship.vel_y = 0.0F;
+    ship.speed = 0.0F;
+  } else {
+    ship.pos_x += ship.vel_x * elapsed_ticks;
+    ship.pos_y += ship.vel_y * elapsed_ticks;
+    ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+  }
+
+  // --- Coast-through-reversal timer countdown. ---
+  if (ship.reverse_speed_bias > 0.0F) {
+    ship.reverse_speed_bias =
+        std::max(0.0F, ship.reverse_speed_bias - elapsed_ticks);
+  }
 }
 
 void NovaPlayer_UpdateFromInput(GameState &state,
