@@ -168,10 +168,15 @@ struct Outfit {
   std::int16_t mass_tons = 0;      // Mass
   std::int16_t tech_level = 0;     // TechLevel
   std::int16_t mod_type = 0;       // ModType (primary)
-  std::int16_t mod_val = 0;        // ModVal
+  std::int16_t mod_val = 0;        // ModVal (zero-based for weapon/ammo/bomb)
   // Alternate mods 2-4 (ModType2-4 / ModVal2-4).
   std::array<std::int16_t, 3> alt_mod_types{};
   std::array<std::int16_t, 3> alt_mod_vals{};
+  // Decode stores weapon/ammo/bomb mod values zero-based (the loader subtracts
+  // 0x80 for ModType 1/3/0x15 with ModVal > 0x7f; see DecodeOutfit), so a
+  // weapon outfit's mod_val equals its zero-based weapon bank slot (resource id
+  // minus 0x80) and weapon banking (NovaWeapon_*) indexes banks directly with
+  // mod_val. Other mod types keep their raw payload value.
   std::int16_t max_count = 0; // Max
   std::uint16_t flags = 0;    // Flags
   std::int32_t cost = 0;      // Cost (4 bytes @ 0x0e of the payload)

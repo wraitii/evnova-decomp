@@ -77,7 +77,7 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   // Outfits load; the first outfit is a weapon-type (ModType 1 -> weapon).
   CHECK(data.Outfit(0x80) != nullptr);
   CHECK(data.Outfit(0x80)->mod_type == 1);
-  CHECK(data.Outfit(0x80)->mod_val == 0x80); // references weapon id 128
+  CHECK(data.Outfit(0x80)->mod_val == 0); // zero-based weapon id (0x80 -> 0)
 }
 
 TEST_CASE("scenario resource families resolve through the BRGR adapter",
@@ -136,7 +136,7 @@ TEST_CASE("outfit tail fields decode at their real payload offsets",
   CHECK(o->mass_tons == 3);
   CHECK(o->tech_level == 4);
   CHECK(o->mod_type == 1);
-  CHECK(o->mod_val == 0x80);
+  CHECK(o->mod_val == 0); // weapon reference rebased to zero-based bank slot
   CHECK(o->max_count == 8);
   CHECK(o->flags == 0x0001U); // fixed gun
   CHECK(o->cost == 5000);

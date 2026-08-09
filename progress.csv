@@ -138,7 +138,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004232D0,Outfit_ProcessPlayerEscortPayroll,,0%,
 0x00423540,Outfit_CollectStellarIncome,,0%,
 0x004235C0,Mission_SpawnMissionShipFromMissionShipDef,,0%,
-0x00423FA0,Outfit_SwapPlayerShipWithEscort,,0%,
+0x00423FA0,Outfit_SwapPlayerShipWithEscort,src/game/landed_store.cpp,45%,"ship swap subset in NovaLanded_ReplacePlayerShip: trade-in/purchase credit, ship-class switch, non-persistent outfit clear + DefaultItems grant, seed the new ship's stock weapon banks (NovaWeapon_SeedBanksFromShipStock) and reconcile them into owned outfits (NovaWeapon_ReconcileOutfitPoolWithWeaponBanks), cap meters to new maxima, spawn at the stellar. Escort/fleet slot management and cargo reallocation remain TODO(decomp)"
 0x00424F90,System_UpdateDisasterStates,,0%,
 0x004250F0,Outfit_RefuelShipWithCredits,,0%,
 0x00425280,EncounterFleet_TrySpawnRandomEncounterFleet,,0%,
@@ -278,7 +278,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
 0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,10%,stellar target-action eligibility only: available unrestricted sprite-active target with travel_flags&0x20 clear reaches the destination-interaction reconstruction boundary; modal/ship-comm/mission branches remain TODO(decomp)
 0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,25%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, or time-animated path for flags bit0, see 0x00435830); fire-sound audio side-effect reconstructed (volley_fired>0 gate -> dequeue fire_sound slot, played by the spaceflight loop through the cached NovaSoundData, slot->snd id 200+slot); spawning from the ship centre (gun-fire-point placement available via sprite anchors but needs ShipClassDef.gun_exit_pos, TODO(decomp)); beam/turret/guided/launcher branches and burst side-effects not reconstructed"
-0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,20%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, and full effective shield/armor; system-transition/world-reset/discovery work remains TODO(decomp)
+0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,24%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, full effective shield/armor, and Weapon_ReconcileOutfitPoolWithWeaponBanks at arrival (register stock-bank weapons as owned); system-transition/world-reset/discovery work remains TODO(decomp)
 0x00456480,Stellar_SelectLinkedDestinationViaStarmap,,0%,confirmed linked-destination starmap transfer; prior speculative docking implementation removed
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
 0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,20%,normal ordinary-stellar arrival gate + HUD overlay denial feedback (STR# 0x7d2) reconstructed: active/current-system target, 0x3000/0x20 exclusions, strict 250-unit per-axis envelope, fee gate; overlay text via NovaHud_ShowLandingDenial. Timer/reputation/disabled/hypergate/waiting branches remain TODO(decomp)
@@ -321,7 +321,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004629E0,Government_IsCandidateHostileToTargeter,,0%,
 0x00462BD0,Ship_SelectNearestHostileCombatTarget,,0%,
 0x00462DB0,Stellar_FindNearestAvailableTravelStellar,src/game/travel.cpp,90%,nearest travel point via NovaTravel_FindNearestTravelPoint (nav-defs geometry + restricted-range gate); per-stellar is_available treated as present
-0x00462EC0,Weapon_ReconcileOutfitPoolWithWeaponBanks,,0%,
+0x00462EC0,Weapon_ReconcileOutfitPoolWithWeaponBanks,src/game/weapon.cpp,85%,"via NovaWeapon_ReconcileOutfitPoolWithWeaponBanks: snapshot bank ammo/secondary, subtract counts owned outfits explain (clamp negatives to 0), then materialize leftover positive bank ammo/secondary as owned ModType-1 weapon / ModType-3 ammo outfits. Wired (as Ghidra calls it) at new-game seeding (Stub_SeedStartingInventory), Outfitter entry (NovaLanded_OpenOutfitterSession), travel arrival (NovaLanding_EnterDocked) and ship purchase (NovaLanded_ReplacePlayerShip), so any mounted stock weapon becomes an owned, sellable outfit. The reverse (weapon-bank edit direction for buy/sell) is subsumed by RebuildBanksFromOwnedOutfits"
 0x00463260,Weapon_RebuildWeaponBankPoolsFromOwnedOutfits,src/game/weapon.cpp,90%,"via NovaWeapon_RebuildBanksFromOwnedOutfits (zero 0x100 banks, accumulate owned ModType-1 weapon / ModType-3 ammo outfits into bank ammo/secondary); caller topology (outfitter buy/sell flow) not yet wired"
 0x00463470,Ship_ComputeShipCurrentMass,,0%,
 0x00463520,Math_MapPosToPointFloat,,0%,
@@ -726,7 +726,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
 0x00488650,Menu_RunSettingsDialog,,0%,
 0x00489210,Ship_RunSpaceflightMode,src/game/spaceflight.cpp,10%,"Ship_RunSpaceflightMode skeleton: faithful loop/cadence, gameplay scopes stubbed"
-0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,75%,New-pilot path preserves reset/refilled stats and seeded inventory; dialogs, scenario population, discovery remain partial
+0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,80%,New-pilot path preserves reset/refilled stats and seeded inventory and now reconciles seeded weapon banks into owned outfits (stock Light Blaster registered/sellable); dialogs, scenario population, discovery remain partial
 0x0048A7E0,Menu_RunPilotSelectionDialog,,0%,
 0x0048ADC0,IntroCinematic_Run,src/game/intro_cinematic.cpp,85%,Timed configured-frame playback; Enter/Space/click advance one frame; native command/cursor paths and travel dialog partial
 0x0048B230,NovaRender_PresentBlockingTransitionFrame,,0%,
@@ -747,10 +747,10 @@ address,name,impl_file,reimpl_pct,comment
 0x0048D5A0,TravelOutfitMenu_FUN_0048d5a0,,0%,
 0x0048D6F0,NovaUi_RedrawTravelServicesMenu,,0%,
 0x0048E970,FUN_0048e970,,0%,
-0x0048EA70,NovaUi_RunTravelOutfitInteractionLoop,src/game/docked_dialog.cpp,38%,Partial clean-room modal: native 765x321 frame and DITL-aligned 4x5 grid/action controls; row paging; one-item buy/sell; inventory mutation and exit cleanup. Quantity modifiers and remaining transaction/script branches remain TODO(decomp).
-0x004903C0,NovaUi_HandleTravelOutfitMenuInput,src/game/docked_dialog.cpp,25%,Mouse grid/action handling plus B/S/P/N/L shortcuts drive selection buy sell paging and exit; original command-map navigation and quantity modifiers remain TODO(decomp).
+0x0048EA70,NovaUi_RunTravelOutfitInteractionLoop,src/game/docked_dialog.cpp,42%,Partial clean-room modal: native 765x321 frame and DITL-aligned 4x5 grid/action controls; row paging; one-item buy/sell with in-place list refresh preserving the opening-count snapshot (same-session full-price refund vs half-price resale, priced off the stellar-scaled purchase price) and inventory mutation/exit cleanup. Quantity modifiers and dependent-ammo/bay protection branches remain TODO(decomp).
+0x004903C0,NovaUi_HandleTravelOutfitMenuInput,src/game/docked_dialog.cpp,30%,Mouse grid/action handling plus B/S/P/N/L shortcuts drive selection buy/sell paging and exit; buy/sell both refresh the visible list in place and load the outfit description at zero-based id+3000 (`selected_id - 0x80 + 3000`). Original command-map navigation and quantity modifiers remain TODO(decomp).
 0x004909A0,TravelOutfitMenu_FUN_004909a0,,0%,
-0x00490C70,NovaUi_RedrawTravelOutfitMenu,src/game/docked_dialog.cpp,50%,Partial clean-room redraw using native PICT 0x2136 and original DITL geometry: 4x5 grid with zero-based outfit index+6000 PICT thumbnails selected 200x200 preview desc resource-id+3000 price credits mass/free-mass selection and disabled action states; encoded newline splitting and one/two-line baselines match the original; exact cache cadence and scripted color variants remain TODO(decomp).
+0x00490C70,NovaUi_RedrawTravelOutfitMenu,src/game/docked_dialog.cpp,50%,Partial clean-room redraw using native PICT 0x2136 and original DITL geometry: 4x5 grid with zero-based outfit index+6000 PICT thumbnails selected 200x200 preview desc resource-id (zero-based+3000) price credits mass/free-mass selection and disabled action states; encoded newline splitting and one/two-line baselines match the original; exact cache cadence and scripted color variants remain TODO(decomp).
 0x00491950,NovaUi_IsTravelOutfitPurchaseAllowed,src/game/landed_store.cpp,40%,Partial clean-room purchase gate: tech/special-tech Require availability expressions ownership limits credits and free-mass gate; cargo special effects government and script gates remain TODO(decomp).
 0x00491F30,NovaUi_RunTravelDestinationInteractionLoop,,0%,
 0x00492C40,NovaUi_RenderTravelDestinationOverlay,,0%,
@@ -882,7 +882,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004B0740,FUN_004b0740,,0%,
 0x004B0A30,FUN_004b0a30,,0%,
 0x004B0C20,Ship_InitGameplayDataTables,,0%,
-0x004B3350,Ship_ResetPlayerShipState,src/game/new_pilot_flow.cpp,30%,Ship_ResetPlayerShipState: track only fields the new-pilot flow / early loop meaningfully need; deep AI/combat fields reset but unused
+0x004B3350,Ship_ResetPlayerShipState,src/game/new_pilot_flow.cpp,34%,Ship_ResetPlayerShipState: track only fields the new-pilot flow / early loop meaningfully need, including the fresh-game 10000-credit seed and active_weapon_bank_slot=-1; shield/armor/fuel are finalized by a post-seed meter recompute (Menu_RunNewGameFlow order) rather than at reset; deep AI/combat fields reset but unused
 0x004B4220,Game_ResetNewGameReputation,,0%,
 0x004B42F0,FUN_004b42f0,,0%,
 0x004B4320,NovaPrefs_ResetToDefaults,,0%,
@@ -1012,7 +1012,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004BD090,FUN_004bd090,,0%,
 0x004BD0C0,Prefs_SetNovaFilesPathPrefix,,0%,
 0x004BD160,Resource_ValidateInstallFolders,,0%,
-0x004BD3C0,NovaData_LoadScenarioResourceTables,src/game/scenario_data.cpp,52%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields); ship+weapon verified; weapon-decode audit done: field names/offsets aligned with loader WeaponDef mapping (flags_secondary/tertiary/quaternary at +0x48/+0x66/+0x1e, turret_arc +0x30, homing/turn/shot-dwell +0x32, kickback +0x56, turret_group +0x58, burst_cycle_ticks +0x5a, burst_reset_cooldown +0x5c, retarget +0x68, jam_vuln +0x5e..+0x64; dropped bogus max_ammo/flags2/guided_turn at +0x44/+0x44/+0x72); system/stellar partial (dude types/prob, reinf, visibility, TechLevel and SpecialTech1-8 decoded; stellar tail TODO(decomp)); stellar animation fields (AnimDelay/Frame0Bias = +0x470/+0x472 from payload +0x22/+0x24) and hypergate engage_highlight_frame (+0x26 from payload +0x18) decoded"
+0x004BD3C0,NovaData_LoadScenarioResourceTables,src/game/scenario_data.cpp,52%,"Reimpl: ScenarioData::LoadFromArchives() src/game/scenario_data.cpp walks the sh.x95p/w.x91ap/o.x9ftf/sp.x9ab/s.xd8st/g.x9avt families into clean-room tables; record names surfaced from the BRGR map. Government decoder complete: gains/mission resource entries (3 name tables, class/ally/enemy id lists, penalties, jamming, derived voice_type_mode + fly-scaled skill + 8-bit theme colors) verified vs Federation 0x80. Outfit decoder complete (tail fields), incl. ModVal-=0x80 rebasing for ModType 1/3/0x15 (zero-based weapon bank slot); ship+weapon verified; weapon-decode audit done: field names/offsets aligned with loader WeaponDef mapping (flags_secondary/tertiary/quaternary at +0x48/+0x66/+0x1e, turret_arc +0x30, homing/turn/shot-dwell +0x32, kickback +0x56, turret_group +0x58, burst_cycle_ticks +0x5a, burst_reset_cooldown +0x5c, retarget +0x68, jam_vuln +0x5e..+0x64; dropped bogus max_ammo/flags2/guided_turn at +0x44/+0x44/+0x72); system/stellar partial (dude types/prob, reinf, visibility, TechLevel and SpecialTech1-8 decoded; stellar tail TODO(decomp)); stellar animation fields (AnimDelay/Frame0Bias = +0x470/+0x472 from payload +0x22/+0x24) and hypergate engage_highlight_frame (+0x26 from payload +0x18) decoded"
 0x004C6D50,Ui_LoadSelectionDialogResource,,0%,
 0x004C7040,FUN_004c7040,,0%,
 0x004C73B0,FUN_004c73b0,,0%,

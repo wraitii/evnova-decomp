@@ -46,6 +46,36 @@ const Weapon *WeaponAt(const GameState &state, std::int16_t bank) {
 
 } // namespace
 
+void NovaWeapon_SeedBanksFromShipStock(GameState &state,
+                                       std::int16_t ship_class_id) {
+  // Seeds the player's 0x100 weapon-bank ammo/secondary counters from a ship
+  // class's mounted stock weapons (Ghidra default_weapon_ammo / default_weapon_
+  // secondary). For each stock weapon triple {weapon_id, count, ammo_load} the
+  // mounted-count goes into weapon_bank_ammo[weapon_id-0x80] and any carried
+  // rounds (ammo_load, when > 0) into the matching secondary/ammo counter. The
+  // original seeds the new ship's banks this way in Menu_RunNewGameFlow and
+  // Outfit_SwapPlayerShipWithEscort, then calls
+  // Weapon_ReconcileOutfitPoolWithWeaponBanks to register the mounted stock
+  // guns as owned outfits.
+  const ShipClass *ship = state.scenario.Ship(
+      static_cast<std::int16_t>(ship_class_id + 0x80));
+  if (ship == nullptr) {
+    return;
+  }
+  for (const ShipDefaultWeaponBank &stock : ship->stock_weapons) {
+    if (stock.weapon_id < 0x80 || stock.weapon_id > 0x17f) {
+      continue; // unmounted bank (weapon_id -1) or out-of-range
+    }
+    const std::size_t bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
+    state.weapon_bank_ammo[bank * kBankStride] =
+        static_cast<std::int16_t>(stock.count > 0 ? stock.count : 0);
+    if (stock.ammo_load > 0) {
+      state.weapon_bank_secondary[bank * kBankStride] =
+          static_cast<std::int16_t>(stock.ammo_load);
+    }
+  }
+}
+
 void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state) {
   // Zero-sweep all 0x100 banks (the original clears both counters).
   for (std::size_t b = 0; b < 0x100; ++b) {
@@ -61,22 +91,122 @@ void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state) {
       continue;
     }
     const Outfit &o = outfits[i];
-    // ModType 1 (kWeapon): mod_val names the mounted weapon; its owned count
-    // is the number we hold (so weapon_bank_ammo[b] > 0 gates firing).
+    // ModType 1 (kWeapon): mod_val is the zero-based weapon bank slot
+    // (resource id minus 0x80) the owned count loads into; owned count > 0
+    // gates firing.
     if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kWeapon)) {
       if (o.mod_val >= 0 && o.mod_val < 0x100) {
         BankAmmo(state, o.mod_val) =
             static_cast<std::int16_t>(BankAmmo(state, o.mod_val) + owned);
       }
     }
-    // ModType 3 (kAmmo): mod_val names the ammo outfit id whose carried rounds
-    // back this weapon; accumulate into the secondary (ammo) counter.
+    // ModType 3 (kAmmo): mod_val is the zero-based weapon bank slot whose
+    // carried-round (secondary) counter this ammo outfit backs.
     if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo)) {
       if (o.mod_val >= 0 && o.mod_val < 0x100) {
         BankSecondary(state, o.mod_val) =
             static_cast<std::int16_t>(BankSecondary(state, o.mod_val) + owned);
       }
     }
+  }
+}
+
+void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
+  // Ghidra Weapon_ReconcileOutfitPoolWithWeaponBanks (0x00462ec0) reconciles
+  // the outfit-pool counts with the live weapon-bank counters in both
+  // directions:
+  //   1. snapshot each bank's ammo/secondary counter;
+  //   2. for every owned outfit, subtract the count it already explains from
+  //      the matching snapshot (weapon outfits from ammo, ammo outfits from
+  //      secondary), clamping the owned count down if more is owned than the
+  //      bank carries;
+  //   3. clamp any negative owned count to zero;
+  //   4. convert leftover positive bank balance back into owned outfits: for
+  //      each bank with ammo > 0 still unaccounted, add that amount to the
+  //      first owned-eligible weapon outfit (ModType 1) whose mod_val is the
+  //      bank slot; likewise leftover secondary -> an ammo outfit (ModType 3).
+  // Menu_RunNewGameFlow calls this right after seeding weapon banks from the
+  // starting ship class's stock weapons, so a mounted weapon that has no
+  // DefaultItem entry (e.g. the Shuttle's Light Blaster) is registered as an
+  // owned outfit and becomes sellable in the Outfitter.
+  std::array<std::int16_t, 0x100> bank_ammo{};
+  std::array<std::int16_t, 0x100> bank_secondary{};
+  for (std::int16_t b = 0; b < 0x100; ++b) {
+    bank_ammo[b] = BankAmmo(state, b);
+    bank_secondary[b] = BankSecondary(state, b);
+  }
+
+  const auto &outfits = state.scenario.outfits;
+  for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
+                      i < outfits.size();
+       ++i) {
+    const std::int16_t owned = state.inventory.outfit_owned_count[i];
+    if (owned <= 0) {
+      continue;
+    }
+    const Outfit &o = outfits[i];
+    const auto consume = [](std::int16_t &balance,
+                            std::int16_t &owned_count) {
+      if (owned_count < balance) {
+        balance = static_cast<std::int16_t>(balance - owned_count);
+      } else {
+        owned_count = balance;
+        balance = 0;
+      }
+    };
+    if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kWeapon) &&
+        o.mod_val >= 0 && o.mod_val < 0x100) {
+      consume(bank_ammo[o.mod_val], state.inventory.outfit_owned_count[i]);
+    } else if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo) &&
+               o.mod_val >= 0 && o.mod_val < 0x100) {
+      consume(bank_secondary[o.mod_val],
+              state.inventory.outfit_owned_count[i]);
+    }
+  }
+  for (std::int16_t &count : state.inventory.outfit_owned_count) {
+    if (count < 0) {
+      count = 0;
+    }
+  }
+
+  // Leftover positive bank ammo that no owned outfit explains becomes an owned
+  // weapon outfit; leftover secondary becomes an owned ammo outfit.
+  bool materialized = false;
+  for (std::int16_t b = 0; b < 0x100; ++b) {
+    if (bank_ammo[b] > 0) {
+      for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
+                          i < outfits.size();
+           ++i) {
+        const Outfit &o = outfits[i];
+        if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kWeapon) &&
+            o.mod_val == b) {
+          state.inventory.outfit_owned_count[i] = static_cast<std::int16_t>(
+              state.inventory.outfit_owned_count[i] + bank_ammo[b]);
+          bank_ammo[b] = 0;
+          materialized = true;
+          break;
+        }
+      }
+    }
+    if (bank_secondary[b] > 0) {
+      for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
+                          i < outfits.size();
+           ++i) {
+        const Outfit &o = outfits[i];
+        if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo) &&
+            o.mod_val == b) {
+          state.inventory.outfit_owned_count[i] = static_cast<std::int16_t>(
+              state.inventory.outfit_owned_count[i] + bank_secondary[b]);
+          bank_secondary[b] = 0;
+          materialized = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (materialized) {
+    OutfitMarkStatsDirty(state);
   }
 }
 

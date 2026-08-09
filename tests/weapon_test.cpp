@@ -8,6 +8,7 @@
 
 #include "brgr_archive.hpp"
 #include "game/game_state.hpp"
+#include "game/outfit.hpp"
 #include "game/pilot_file.hpp"
 #include "game/scenario_data.hpp"
 #include "game/weapon.hpp"
@@ -82,6 +83,69 @@ TEST_CASE("shuttle light blaster is mounted and fireable", "[weapon][data]") {
   // Bank 0 (weapon 0x80, the Light Blaster) is mounted and >0 so the primary
   // loop touches it; it is not a secondary weapon.
   CHECK(state.weapon_bank_ammo[0] == 1);
+  CHECK(NovaWeapon_CanFireBank(state, 0));
+}
+
+// Regression: the new-game flow must reconcile the seeded Light Blaster weapon
+// bank into an owned outfit (Weapon_ReconcileOutfitPoolWithWeaponBanks,
+// 0x00462ec0). Without it the starter blaster stays an owned-bank-only weapon:
+// the Outfitter doesn't list it as owned, it can't be sold, and the first
+// bank rebuild (buy/sell/close) wipes the bank so it stops firing.
+TEST_CASE("starter light blaster becomes owned and survives a rebuild",
+          "[weapon][data]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.ship_class_id = 0; // ship class id 0x80 = Shuttle
+
+  // outfit id 0x80 = Light Blaster has ModType 1 (kWeapon); after the loader's
+  // ModVal -= 0x80 rebasing (DecodeOutfit) its mod_val is the zero-based bank
+  // slot 0.
+  const Outfit *lb = state.scenario.Outfit(0x80);
+  REQUIRE(lb != nullptr);
+  CHECK(lb->mod_type == static_cast<std::int16_t>(OutfitEffect::kWeapon));
+  CHECK(lb->mod_val == 0);
+
+  SeedStockWeaponBanks(state);
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+
+  // The mounted stock weapon is now an owned outfit (index 0x80 - 0x80 = 0).
+  CHECK(state.inventory.outfit_owned_count[0] == 1);
+
+  // It is sellable in the Outfitter (not flagged with the 0x0008 no-sell bit).
+  CHECK((state.scenario.Outfit(0x80)->flags & 0x0008U) == 0U);
+
+  // A bank rebuild from owned outfits (the landed buy/sell/close path) keeps the
+  // Light Blaster bank mounted, so firing survives any Outfitter transaction.
+  NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+  CHECK(state.weapon_bank_ammo[0] == 1);
+  CHECK(NovaWeapon_CanFireBank(state, 0));
+}
+
+// A shipyard purchase seeds the new ship's mounted stock weapons into the
+// banks and reconciles them into owned outfits (Outfit_SwapPlayerShipWithEscort,
+// 0x00423fa0: seed default_weapon_ammo/secondary, then
+// Weapon_ReconcileOutfitPoolWithWeaponBanks). Buying the Shuttle again therefore
+// yields both an owned Light Blaster and a fireable bank 0, even though the class
+// has no DefaultItem entry.
+TEST_CASE("buying a ship registers its stock weapons as owned",
+          "[weapon][data]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Simulate swapping into ship class 0x80 (Shuttle) via the shipyard path:
+  // switch class, clear non-persistent outfits, seed stock banks, reconcile.
+  state.player.ship_class_id = 0;
+  state.inventory.outfit_owned_count.fill(0);
+  NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
+  CHECK(state.weapon_bank_ammo[0] == 1);
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+  CHECK(state.inventory.outfit_owned_count[0] == 1);
   CHECK(NovaWeapon_CanFireBank(state, 0));
 }
 

@@ -135,7 +135,7 @@ TEST_CASE("Outfitter transactions enforce free mass in both directions",
   state.inventory.outfit_owned_count[1] = 1;
   game::LandedStoreSession session;
   CHECK(game::NovaLanded_FreeMass(state) == 3);
-  CHECK(game::NovaLanded_SellOutfit(state, session, 0x81, 1) == 0);
+  CHECK(game::NovaLanded_SellOutfit(state, session, 0x80, 0x81, 1) == 0);
   CHECK(state.inventory.outfit_owned_count[1] == 1);
 }
 

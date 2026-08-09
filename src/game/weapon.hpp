@@ -31,12 +31,29 @@ namespace game {
 // Ghidra Weapon_RebuildWeaponBankPoolsFromOwnedOutfits (0x00463260): rebuilds
 // the player's 0x100 weapon-bank ammo/secondary counters from the currently
 // owned outfits. Every owned outfit with ModType 1 (kWeapon) contributes its
-// owned count to weapon_bank_ammo[mod_val] (mod_val is the weapon resource
-// id); every owned ModType 3 (kAmmo) outfit contributes to
+// owned count to weapon_bank_ammo[mod_val] (mod_val is the zero-based weapon
+// bank slot); every owned ModType 3 (kAmmo) outfit contributes to
 // weapon_bank_secondary[mod_val]. All banks are zeroed first. Mirrors the
 // original's zero-sweep + owned-outfit accumulation. Used when outfit
 // ownership changes (the outfitter buy/sell path).
 void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state);
+
+// Seeds the player's 0x100 weapon-bank ammo/secondary counters from a ship
+// class's mounted stock weapons (Ghidra default_weapon_ammo / secondary).
+// Used by new-game seeding and the shipyard purchase path, followed by
+// NovaWeapon_ReconcileOutfitPoolWithWeaponBanks so mounted stock guns become
+// owned outfits.
+void NovaWeapon_SeedBanksFromShipStock(GameState &state,
+                                       std::int16_t ship_class_id);
+
+// Ghidra Weapon_ReconcileOutfitPoolWithWeaponBanks (0x00462ec0): reconciles
+// outfit-pool counts with the live weapon-bank ammo/secondary counters in both
+// directions. After seeding banks from a ship class's stock weapons
+// (Menu_RunNewGameFlow) or after any buy/sell, it converts leftover positive
+// bank ammo not explained by an owned weapon outfit into an owned outfit
+// (and leftover secondary into an owned ammo outfit), so a mounted stock
+// weapon like the Shuttle's Light Blaster is registered as sellable ownership.
+void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 
 // Ghidra Weapon_CanFireWeaponBank (0x00468990): whether the given weapon bank
 // may fire right now. The clean-room player model omits the ship-disable, NPC

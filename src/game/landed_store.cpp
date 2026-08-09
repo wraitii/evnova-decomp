@@ -152,15 +152,11 @@ void NovaLanded_ExecuteControlSet(GameState &state,
       }});
 }
 
-LandedStoreSession NovaLanded_OpenOutfitterSession(const GameState &state,
-                                                   std::int16_t stellar_id) {
-  LandedStoreSession session;
-  session.kind = LandedStoreKind::kOutfitter;
-  session.opening_outfit_counts = state.inventory.outfit_owned_count;
-  const Stellar *stellar = state.scenario.Stellar(stellar_id);
-  if (stellar == nullptr)
-    return session;
-  const auto expression_state = NovaLanded_ControlExpressionState(state);
+std::vector<std::int16_t>
+BuildOutfitterIds(const GameState &state,
+                  const Stellar &stellar,
+                  const ControlExpressionState &expr) {
+  std::vector<std::int16_t> ids;
   for (std::size_t i = 0; i < state.scenario.outfits.size() && i < 0x200; ++i) {
     const Outfit &outfit = state.scenario.outfits[i];
     // ScenarioData keeps resource-addressable holes in the 0x200-entry table.
@@ -169,44 +165,139 @@ LandedStoreSession NovaLanded_OpenOutfitterSession(const GameState &state,
     if (outfit.name.empty())
       continue;
     const bool owned = state.inventory.outfit_owned_count[i] > 0;
-    bool visible = HasTech(*stellar, outfit.tech_level);
-    if (owned && (stellar->availability_flags & 0x400U) != 0U &&
+    bool visible = HasTech(stellar, outfit.tech_level);
+    if (owned && (stellar.availability_flags & 0x400U) != 0U &&
         (outfit.flags & 0x0008U) == 0U)
       visible = true;
     if (!owned && (outfit.flags & 0x4000U) != 0U)
-      visible = visible && NovaControlExpression_Evaluate(
-                               outfit.availability_expr, expression_state);
+      visible = visible &&
+                NovaControlExpression_Evaluate(outfit.availability_expr, expr);
     if (!owned && (outfit.flags & 0x0100U) != 0U)
       visible =
           visible && MeetsRequire(state, outfit.require_lo, outfit.require_hi);
     if (owned && (outfit.flags & 0x0800U) != 0U)
       visible = true;
     if (visible)
-      session.available_ids.push_back(static_cast<std::int16_t>(i + 0x80));
+      ids.push_back(static_cast<std::int16_t>(i + 0x80));
   }
   // 0x0046a220: an eligible item with flag 0x1000 suppresses later resource
   // IDs carrying the same display weight. This is intentionally applied
   // before the weight ordering, matching the original's resource-order pass.
-  for (std::size_t i = 0; i < session.available_ids.size(); ++i) {
-    const Outfit *outfit = state.scenario.Outfit(session.available_ids[i]);
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    const Outfit *outfit = state.scenario.Outfit(ids[i]);
     if ((outfit->flags & 0x1000U) == 0U)
       continue;
     const auto weight = outfit->display_weight;
-    session.available_ids.erase(
-        std::remove_if(
-            session.available_ids.begin() + static_cast<std::ptrdiff_t>(i + 1),
-            session.available_ids.end(),
-            [&state, weight](std::int16_t candidate) {
-              return state.scenario.Outfit(candidate)->display_weight == weight;
-            }),
-        session.available_ids.end());
+    ids.erase(std::remove_if(
+                  ids.begin() + static_cast<std::ptrdiff_t>(i + 1),
+                  ids.end(),
+                  [&state, weight](std::int16_t candidate) {
+                    return state.scenario.Outfit(candidate)->display_weight ==
+                           weight;
+                  }),
+              ids.end());
   }
-  std::stable_sort(session.available_ids.begin(),
-                   session.available_ids.end(),
-                   [&state](auto a, auto b) {
-                     return state.scenario.Outfit(a)->display_weight >
-                            state.scenario.Outfit(b)->display_weight;
-                   });
+  std::stable_sort(ids.begin(), ids.end(), [&state](auto a, auto b) {
+    return state.scenario.Outfit(a)->display_weight >
+           state.scenario.Outfit(b)->display_weight;
+  });
+  return ids;
+}
+
+std::vector<std::int16_t> BuildShipyardIds(const GameState &state,
+                                           const Stellar &stellar,
+                                           const ControlExpressionState &expr) {
+  std::vector<std::int16_t> ids;
+  for (std::size_t i = 0; i < state.scenario.ships.size() && i < 0x200; ++i) {
+    const ShipClass &ship = state.scenario.ships[i];
+    // 0x00469e90 first applies the per-class daily BuyRandom availability
+    // latch. A zero BuyRandom is unconditional: the class is never offered
+    // for purchase. Nova's many mission/paint/loadout variants deliberately
+    // use zero here, so admitting them based on tech alone floods the list
+    // with duplicate hulls. Positive-percent daily rolls remain TODO(decomp)
+    // until the per-day runtime availability state is represented.
+    if (ship.display_name.empty() || ship.buy_random <= 0 ||
+        !HasTech(stellar, ship.tech_level))
+      continue;
+    if ((ship.availability_flags & 0x0200U) != 0U &&
+        !MeetsRequire(state, ship.require_lo, ship.require_hi))
+      continue;
+    if ((ship.availability_flags & 0x0100U) != 0U &&
+        !NovaControlExpression_Evaluate(ship.availability_expr, expr))
+      continue;
+    ids.push_back(static_cast<std::int16_t>(i + 0x80));
+  }
+  // 0x00469e90 uses the corresponding ship-class flag 0x4000.
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    const ShipClass *ship = state.scenario.Ship(ids[i]);
+    if ((ship->availability_flags & 0x4000U) == 0U)
+      continue;
+    const auto weight = ship->display_weight;
+    ids.erase(std::remove_if(
+                  ids.begin() + static_cast<std::ptrdiff_t>(i + 1),
+                  ids.end(),
+                  [&state, weight](std::int16_t candidate) {
+                    return state.scenario.Ship(candidate)->display_weight ==
+                           weight;
+                  }),
+              ids.end());
+  }
+  std::stable_sort(ids.begin(), ids.end(), [&state](auto a, auto b) {
+    return state.scenario.Ship(a)->display_weight >
+           state.scenario.Ship(b)->display_weight;
+  });
+  return ids;
+}
+
+void NovaLanded_RefreshStoreSession(GameState &state,
+                                    LandedStoreSession &session,
+                                    std::int16_t stellar_id) {
+  // 0x0048ea70 re-runs the stellar-filtered list build after every buy/sell
+  // mutation, but it keeps the opening-count snapshot taken when the modal
+  // was entered. That snapshot gates the same-session full-price refund on
+  // purchase (vs. the half-price resale of opening stock). We rebuild only the
+  // listing here, preserving kind, snapshot, and (where still present) the
+  // selection; a freshly bought/sold item no longer offered drops out.
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr)
+    return;
+  const auto expr = NovaLanded_ControlExpressionState(state);
+  const auto fresh = session.kind == LandedStoreKind::kOutfitter
+                         ? BuildOutfitterIds(state, *stellar, expr)
+                         : BuildShipyardIds(state, *stellar, expr);
+  if (fresh == session.available_ids) {
+    return;
+  }
+  session.available_ids = std::move(fresh);
+  // The list changed: drop a selection that is no longer offered, mirroring
+  // the original's reset when Outfit_RebuildAvailableOutfitListForTravelStellar
+  // reports a change (0x0048ea70).
+  if (session.selected_id >= 0 &&
+      std::find(session.available_ids.begin(),
+                session.available_ids.end(),
+                session.selected_id) == session.available_ids.end()) {
+    session.selected_id = -1;
+    session.cursor_slot = -1;
+    session.page_base = 0;
+  }
+}
+
+LandedStoreSession NovaLanded_OpenOutfitterSession(GameState &state,
+                                                   std::int16_t stellar_id) {
+  LandedStoreSession session;
+  session.kind = LandedStoreKind::kOutfitter;
+  // Ghidra NovaUi_RunTravelOutfitInteractionLoop (0x0048ea70) runs
+  // Weapon_ReconcileOutfitPoolWithWeaponBanks at modal entry, before
+  // Outfit_RebuildAvailableOutfitListForTravelStellar builds the listing, so
+  // any stock-bank weapon not yet registered as an owned outfit (e.g. a
+  // lately-acquired ship's mounted gun) becomes a sellable owned item.
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+  session.opening_outfit_counts = state.inventory.outfit_owned_count;
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr)
+    return session;
+  const auto expr = NovaLanded_ControlExpressionState(state);
+  session.available_ids = BuildOutfitterIds(state, *stellar, expr);
   return session;
 }
 
@@ -218,48 +309,8 @@ LandedStoreSession NovaLanded_OpenShipyardSession(const GameState &state,
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   if (stellar == nullptr)
     return session;
-  const auto expression_state = NovaLanded_ControlExpressionState(state);
-  for (std::size_t i = 0; i < state.scenario.ships.size() && i < 0x200; ++i) {
-    const ShipClass &ship = state.scenario.ships[i];
-    // 0x00469e90 first applies the per-class daily BuyRandom availability
-    // latch. A zero BuyRandom is unconditional: the class is never offered
-    // for purchase. Nova's many mission/paint/loadout variants deliberately
-    // use zero here, so admitting them based on tech alone floods the list
-    // with duplicate hulls. Positive-percent daily rolls remain TODO(decomp)
-    // until the per-day runtime availability state is represented.
-    if (ship.display_name.empty() || ship.buy_random <= 0 ||
-        !HasTech(*stellar, ship.tech_level))
-      continue;
-    if ((ship.availability_flags & 0x0200U) != 0U &&
-        !MeetsRequire(state, ship.require_lo, ship.require_hi))
-      continue;
-    if ((ship.availability_flags & 0x0100U) != 0U &&
-        !NovaControlExpression_Evaluate(ship.availability_expr,
-                                        expression_state))
-      continue;
-    session.available_ids.push_back(static_cast<std::int16_t>(i + 0x80));
-  }
-  // 0x00469e90 uses the corresponding ship-class flag 0x4000.
-  for (std::size_t i = 0; i < session.available_ids.size(); ++i) {
-    const ShipClass *ship = state.scenario.Ship(session.available_ids[i]);
-    if ((ship->availability_flags & 0x4000U) == 0U)
-      continue;
-    const auto weight = ship->display_weight;
-    session.available_ids.erase(
-        std::remove_if(
-            session.available_ids.begin() + static_cast<std::ptrdiff_t>(i + 1),
-            session.available_ids.end(),
-            [&state, weight](std::int16_t candidate) {
-              return state.scenario.Ship(candidate)->display_weight == weight;
-            }),
-        session.available_ids.end());
-  }
-  std::stable_sort(session.available_ids.begin(),
-                   session.available_ids.end(),
-                   [&state](auto a, auto b) {
-                     return state.scenario.Ship(a)->display_weight >
-                            state.scenario.Ship(b)->display_weight;
-                   });
+  const auto expr = NovaLanded_ControlExpressionState(state);
+  session.available_ids = BuildShipyardIds(state, *stellar, expr);
   return session;
 }
 
@@ -360,6 +411,7 @@ std::int16_t NovaLanded_BuyOutfit(GameState &state,
 
 std::int16_t NovaLanded_SellOutfit(GameState &state,
                                    LandedStoreSession &session,
+                                   std::int16_t stellar_id,
                                    std::int16_t outfit_id,
                                    std::int16_t requested) {
   if (requested <= 0 || !IsValidOutfit(state, outfit_id))
@@ -374,6 +426,14 @@ std::int16_t NovaLanded_SellOutfit(GameState &state,
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
   if (ship == nullptr)
     return 0;
+  // 0x0048ea70 prices a sale off the scaled purchase price at this port, not
+  // the raw base cost: opening stock resells at ROUND(price * 0.5) (the
+  // double 0.5 at DAT_00575940), while items bought earlier this session are
+  // refunded at the full scaled price paid.
+  const std::int32_t scaled_price =
+      NovaLanded_OutfitPrice(state, stellar_id, outfit_id);
+  const std::int32_t resale_value =
+      RoundNearest(static_cast<float>(scaled_price) * 0.5F);
   const std::int32_t purchase_mass = outfit->PurchaseMass(ship->mass_tons);
   std::int16_t removed = 0;
   for (; removed < allowed; ++removed) {
@@ -397,7 +457,7 @@ std::int16_t NovaLanded_SellOutfit(GameState &state,
     const std::int16_t resale_count =
         static_cast<std::int16_t>(removed - std::min(removed, refund_count));
     state.player.credits +=
-        refund_count * outfit->cost + resale_count * (outfit->cost / 2);
+        refund_count * scaled_price + resale_count * resale_value;
     NovaLanded_ExecuteControlSet(state, outfit->on_sell_expr);
     NovaWeapon_RebuildBanksFromOwnedOutfits(state);
   }
@@ -489,7 +549,13 @@ bool NovaLanded_ReplacePlayerShip(GameState &state,
       (void)Outfit_AddInstalledOutfit(
           state, id, new_ship->default_outfit_counts[i]);
   }
-  NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+  // Outfit_SwapPlayerShipWithEscort (0x00423fa0) seeds the new ship's weapon
+  // banks from its mounted stock weapons, then runs
+  // Weapon_ReconcileOutfitPoolWithWeaponBanks so the stock guns become owned,
+  // sellable outfits. Our ShipClass carries the stock as stock_weapons (the
+  // loader's default_weapon_ammo/secondary mapping), so seed + reconcile here.
+  NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
   state.stat_cache_valid = false;
   const PlayerEffectiveStats stats = Outfit_ComputePlayerEffectiveStats(state);
   state.player.active_weapon_bank_slot = -1;

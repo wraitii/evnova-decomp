@@ -252,28 +252,18 @@ void Stub_SeedStartingInventory(GameState &state) {
   // loop (NovaWeapon_FirePlayerPrimary) can fire it. The stock_weapons decode
   // and the loader's default_weapon_ammo/secondary mapping are verified in
   // tests/scenario_data_test.cpp.
-  for (const ShipDefaultWeaponBank &stock : ship->stock_weapons) {
-    if (stock.weapon_id < 0x80 || stock.weapon_id > 0x17f) {
-      continue; // unmounted bank (weapon_id -1) or out-of-range
-    }
-    const std::size_t bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-    state.weapon_bank_ammo[bank * 100] =
-        static_cast<std::int16_t>(stock.count > 0 ? stock.count : 0);
-    // Carried rounds: only relevant for ammunition-backed weapons (the bank's
-    // weapon must actually consume ammo for this to gate firing); the stock
-    // ship stores ammo_load (-1 = unlimited) in the same counter used for
-    // the ammo-outfit id elsewhere, so a >0 value here is the starting load.
-    if (stock.ammo_load > 0) {
-      const std::size_t ammo_bank =
-          static_cast<std::size_t>(stock.weapon_id - 0x80);
-      state.weapon_bank_secondary[ammo_bank * 100] =
-          static_cast<std::int16_t>(stock.ammo_load);
-    }
-  }
+  NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
   // Reset any lingering per-bank cooldown so a fresh pilot can fire
   // immediately on entering spaceflight.
   state.weapon_bank_cooldown.fill(0.0F);
   state.active_shots.clear();
+  // Menu_RunNewGameFlow calls Weapon_ReconcileOutfitPoolWithWeaponBanks right
+  // after seeding the weapon banks: leftover bank ammo/secondary not explained
+  // by an owned outfit is converted back into owned weapon/ammo outfits. This
+  // registers the Shuttle's stock Light Blaster (a mounted bank with no
+  // DefaultItem entry) as an owned outfit, so the Outfitter lists it as owned,
+  // it can be sold, and it survives the later bank rebuilds (buy/sell/close).
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
   // ResetPlayerShipForNewGame calculated capacities before this inventory was
   // seeded. Recompute now so the new pilot starts with installed bonuses.
   OutfitMarkStatsDirty(state);
@@ -324,10 +314,35 @@ void Stub_PickFirstTravelDestination(GameState &state) {
   }
 }
 
+void RecomputePlayerMeters(GameState &state) {
+  // Shield/armor/fuel are recomputed from the default ship class plus any
+  // owned outfit bonuses (the effective-stats aggregation at Ghidra
+  // 0x00463550/0x004637a0/0x00463a20), so a ship stocked with shield/armor/
+  // fuel outfits starts full. Menu_RunNewGameFlow recomputes these AFTER the
+  // starting outfit counts are seeded, so this helper runs after the inventory
+  // seed rather than during the ship-state reset. Falls back to the class
+  // template defaults when the class table is unavailable.
+  state.stat_cache_valid = false;
+  const game::PlayerEffectiveStats eff =
+      game::Outfit_ComputePlayerEffectiveStats(state);
+  state.player.shield_points = eff.max_shield_points;
+  state.player.armor_points = eff.max_armor_points;
+  state.player.fuel_points = eff.fuel_capacity;
+  state.cached_stats = eff;
+  state.stat_cache_valid = true;
+  NovaLog::Debug("player ship reset for new game: shield {}, armor {}, fuel {}",
+                 eff.max_shield_points,
+                 eff.max_armor_points,
+                 eff.fuel_capacity);
+}
+
 void ResetPlayerShipForNewGame(GameState &state) {
   // Ghidra 0x004b3350 Ship_ResetPlayerShipState: fresh position/velocity,
-  // default class id, recomputed shield/armor/fuel, cleared targeting/travel/
-  // mission/AI fields and debuffs.
+  // default class id, cleared targeting/travel/mission/AI fields and debuffs.
+  // The param_1!=0 fresh-game branch also seeds the player's starting credits
+  // to 10000 (g_ship_states->credits = 10000). Shield/armor/fuel are NOT
+  // finalized here: Menu_RunNewGameFlow recomputes them after the starting
+  // outfit counts are seeded (see RecomputePlayerMeters).
   //
   // Start in the hardcoded starting system (Tichel for now; the original
   // randomizes among a few start candidates). The world coordinate axes follow
@@ -335,6 +350,7 @@ void ResetPlayerShipForNewGame(GameState &state) {
   // (-y), so world +y is down on screen (Math_AddPolarVelocity projects
   // heading -> vel = (sin, -cos); pos += vel * dt).
   state.player.current_system_id = kStartSystemId;
+  state.player.credits = 10000;
 
   state.player.pos_x = 0.0F;
   // Spawn just below the starting system's landing stellar so the body is
@@ -367,28 +383,13 @@ void ResetPlayerShipForNewGame(GameState &state) {
   state.player.heading = 0.0F;
   state.player.speed = 0.0F;
   state.player.ship_class_id = 0; // default class (ship id 0x80)
-  state.player.active_weapon_bank_slot = 0;
+  // Ship_ResetPlayerShipState leaves the active weapon bank unselected (-1);
+  // the firing loop (NovaWeapon_FirePlayerPrimary) fires every loaded bank
+  // regardless, so the selection latch is only carried for save/UI fidelity.
+  state.player.active_weapon_bank_slot = -1;
   state.player.timed_action_counter = -1;
   state.player.death_timer_active = -1.0F;
   state.player.is_active = true;
-  // Shield/armor/fuel are recomputed from the default ship class plus any
-  // owned outfit bonuses (the original Ship_ResetPlayerShipState recomputes
-  // them from the effective capacity helpers). The effective-stats aggregation
-  // (Ghidra 0x00463550/0x004637a0/0x00463a20) is used so a ship stocked with
-  // shields/armor/fuel boosters starts full. Falls back to the template
-  // defaults when the class table is unavailable.
-  state.stat_cache_valid = false; // ship class may have changed; recompute
-  const game::PlayerEffectiveStats eff =
-      game::Outfit_ComputePlayerEffectiveStats(state);
-  state.player.shield_points = eff.max_shield_points;
-  state.player.armor_points = eff.max_armor_points;
-  state.player.fuel_points = eff.fuel_capacity;
-  state.cached_stats = eff;
-  state.stat_cache_valid = true;
-  NovaLog::Debug("player ship reset for new game: shield {}, armor {}, fuel {}",
-                 eff.max_shield_points,
-                 eff.max_armor_points,
-                 eff.fuel_capacity);
 }
 
 void SetNewGameDateAndStrings(GameState &state) {
@@ -456,6 +457,10 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   ResetPlayerShipForNewGame(state);
   Stub_ResetReputationAndWorldTables(state);
   Stub_SeedStartingInventory(state);
+  // Menu_RunNewGameFlow finalizes shield/armor/fuel only after the starting
+  // outfit counts and weapon banks are seeded, so their max capacities account
+  // for the starter loadout's outfit bonuses.
+  RecomputePlayerMeters(state);
   Stub_DiscoverStartingSystems(state);
   SetNewGameDateAndStrings(state);
 

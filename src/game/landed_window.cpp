@@ -10,6 +10,7 @@
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "targeting.hpp"
+#include "weapon.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -69,6 +70,12 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   if (stellar->service_cost > 0 && !fee_waived) {
     state.player.credits -= stellar->service_cost;
   }
+  // Stellar_TravelToSystem (0x00455e10) runs Weapon_ReconcileOutfitPoolWith-
+  // WeaponBanks at the start of the travel transition, so any stock weapon
+  // bank acquired since the last reconcile (e.g. a ship bought at the
+  // shipyard with mounted stock guns) becomes a sellable owned outfit. Landed
+  // Offfitter session buys/sells use this same reconcile at modal entry.
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
   state.player.pos_x = static_cast<float>(stellar->pos_x);
   state.player.pos_y = static_cast<float>(stellar->pos_y);
   state.player.vel_x = 0.0F;

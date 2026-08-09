@@ -649,9 +649,16 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         platform, texture_cache, outfit_store, session.selected_id);
     if (outfit_store && session.selected_id != selected_description_id) {
       selected_description.clear();
-      if (session.selected_id >= 0) {
-        if (const auto description = NovaResource_LoadDescription(
-                static_cast<std::uint16_t>(session.selected_id + 3000))) {
+      if (session.selected_id >= 0x80) {
+        // The Outfitter (DLOG 0x3ea) keys the outfit 'd\x91sc' description
+        // resource at its zero-based outfit index + 3000 (Ghidra
+        // NovaUi_HandleTravelOutfitMenuInput 0x004903c0 calls
+        // Ui_LoadSelectionDialogResource(..., g_travel_outfit_selected_id +
+        // 3000) where that selected id is 0-based). selected_id here is the
+        // raw 0x80+ resource id, so subtract the 0x80 base before the offset.
+        const auto desc_id =
+            static_cast<std::uint16_t>(session.selected_id - 0x80 + 3000);
+        if (const auto description = NovaResource_LoadDescription(desc_id)) {
           selected_description = description->text;
         }
       }
@@ -698,6 +705,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           if (outfit_store) {
             (void)NovaLanded_BuyOutfit(
                 state, stellar_id, session.selected_id, 1);
+            NovaLanded_RefreshStoreSession(state, session, stellar_id);
           } else {
             const ShipClass *ship = state.scenario.Ship(session.selected_id);
             (void)NovaLanded_ReplacePlayerShip(
@@ -705,11 +713,14 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
                 stellar_id,
                 session.selected_id,
                 ship == nullptr ? "" : ship->short_name);
+            session = NovaLanded_OpenShipyardSession(state, stellar_id);
           }
           continue;
         }
         if (key == 's' && outfit_store && session.selected_id >= 0) {
-          (void)NovaLanded_SellOutfit(state, session, session.selected_id, 1);
+          (void)NovaLanded_SellOutfit(
+              state, session, stellar_id, session.selected_id, 1);
+          NovaLanded_RefreshStoreSession(state, session, stellar_id);
           continue;
         }
       }
@@ -742,6 +753,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       if (Contains(layout.buy, point) && session.selected_id >= 0) {
         if (outfit_store) {
           (void)NovaLanded_BuyOutfit(state, stellar_id, session.selected_id, 1);
+          NovaLanded_RefreshStoreSession(state, session, stellar_id);
         } else {
           const ShipClass *ship = state.scenario.Ship(session.selected_id);
           (void)NovaLanded_ReplacePlayerShip(
@@ -749,15 +761,15 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
               stellar_id,
               session.selected_id,
               ship == nullptr ? "" : ship->short_name);
+          session = NovaLanded_OpenShipyardSession(state, stellar_id);
         }
-        session = outfit_store
-                      ? NovaLanded_OpenOutfitterSession(state, stellar_id)
-                      : NovaLanded_OpenShipyardSession(state, stellar_id);
         continue;
       }
       if (outfit_store && Contains(layout.sell_or_info, point) &&
           session.selected_id >= 0) {
-        (void)NovaLanded_SellOutfit(state, session, session.selected_id, 1);
+        (void)NovaLanded_SellOutfit(
+            state, session, stellar_id, session.selected_id, 1);
+        NovaLanded_RefreshStoreSession(state, session, stellar_id);
       }
     }
     SDL_Delay(16);

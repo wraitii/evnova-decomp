@@ -34,11 +34,21 @@ NovaLanded_ControlExpressionState(const GameState &state);
 void NovaLanded_ExecuteControlSet(GameState &state,
                                   std::string_view expression);
 
+// 0x0048ea70 open: runs Weapon_ReconcileOutfitPoolWithWeaponBanks at modal
+// entry (registering stock-bank weapons not yet owned as owned outfits), then
+// builds the stellar-filtered listing. The caller passes a mutable state
+// because the reconcile can modify outfit ownership.
 [[nodiscard]] LandedStoreSession
-NovaLanded_OpenOutfitterSession(const GameState &state,
-                                std::int16_t stellar_id);
+NovaLanded_OpenOutfitterSession(GameState &state, std::int16_t stellar_id);
 [[nodiscard]] LandedStoreSession
 NovaLanded_OpenShipyardSession(const GameState &state, std::int16_t stellar_id);
+// 0x0048ea70: rebuilds the outfitter/shipyard listing in place after a
+// buy/sell mutation, preserving the session's opening-count snapshot (which
+// gates same-session full-price refunds) and the selection when it is still
+// offered.
+void NovaLanded_RefreshStoreSession(GameState &state,
+                                    LandedStoreSession &session,
+                                    std::int16_t stellar_id);
 
 [[nodiscard]] std::int32_t
 NovaLanded_ScaledStorePrice(std::int32_t base_price,
@@ -60,6 +70,7 @@ NovaLanded_ScaledStorePrice(std::int32_t base_price,
                                                 std::int16_t requested);
 [[nodiscard]] std::int16_t NovaLanded_SellOutfit(GameState &state,
                                                  LandedStoreSession &session,
+                                                 std::int16_t stellar_id,
                                                  std::int16_t outfit_id,
                                                  std::int16_t requested);
 // 0x0048ea70: applies the landed Outfitter's final inventory cleanup before

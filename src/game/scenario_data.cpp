@@ -236,6 +236,22 @@ namespace {
   o.buy_random = ReadBeI16(bytes, 0x3f0);         // BuyRandom (1-100)
   o.item_class = ReadBeI16(bytes, 0x3f2);         // ItemClass
   o.persistent_on_ship_swap = (o.flags & 0x0004U) != 0U;
+  // The loader (0x004bd3c0) stores weapon/ammo/bomb mod values zero-based,
+  // subtracting 0x80 from any ModVal > 0x7f when the matching ModType is 1
+  // (kWeapon), 3 (kAmmo) or 0x15 (kBomb). This makes a weapon outfit's mod_val
+  // equal the zero-based weapon bank slot (resource id minus 0x80), so weapon
+  // banking (NovaWeapon_*) indexes banks directly with mod_val.
+  const auto rebase_mod_val = [](std::int16_t mod_type,
+                                 std::int16_t &mod_val) {
+    if ((mod_type == 1 || mod_type == 3 || mod_type == 0x15) &&
+        mod_val > 0x7f) {
+      mod_val = static_cast<std::int16_t>(mod_val - 0x80);
+    }
+  };
+  rebase_mod_val(o.mod_type, o.mod_val);
+  for (std::size_t i = 0; i < o.alt_mod_types.size(); ++i) {
+    rebase_mod_val(o.alt_mod_types[i], o.alt_mod_vals[i]);
+  }
   return o;
 }
 
