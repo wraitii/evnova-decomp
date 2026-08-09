@@ -34,7 +34,16 @@ void Stub_DrawStatus(GameState &state) { (void)state; }
 
 void Stub_AiRoutines(GameState &state) { (void)state; }
 
-void Stub_MissionAndMiscHandlers(GameState &state) { (void)state; }
+// Ghidra scope 0xb of Frame_TickSystems (0x004186b0). Despite the "mission"
+// prefix this is the per-tick in-system NPC/reactivity pass, not just mission
+// logic. The original runs: Mission_TickShipInteractionReactions,
+// Frame_UpdateCombatChatter, Frame_UpdateScreenFlashTimers,
+// Ship_TallyInboundWeaponThreat, then -- the fleet/dude spawn maintenance this
+// reimplementation is building toward -- Mission_TickMissionAndEncounterSpawns
+// (encounter fleets + roaming dudes up to the system's avg_ships cap) and
+// Dude_SpawnRoamingShip('\x01') (the roaming-dude ring), before clearing the
+// g_ai_misc_event_flag / g_ai_target_refresh_needed latches.
+void Stub_MissionAndEncounterSpawns(GameState &state) { (void)state; }
 
 void Stub_CalcAiOdds(GameState &state) { (void)state; }
 
@@ -123,11 +132,11 @@ void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
   Stub_Collisions(state);
 
   if (run_full_tick) {
-    Stub_DrawStatus(state);             // scope 0xc
-    Stub_AiRoutines(state);             // scope 6 (part 1: targeting setup)
-    Stub_MissionAndMiscHandlers(state); // scope 0xb
-    Stub_AiRoutines(state);             // scope 6 (part 2: per-ship AI)
-    Stub_CalcAiOdds(state);             // scope 0x14
+    Stub_DrawStatus(state);                // scope 0xc
+    Stub_AiRoutines(state);                // scope 6 (part 1: targeting setup)
+    Stub_MissionAndEncounterSpawns(state); // scope 0xb
+    Stub_AiRoutines(state);                // scope 6 (part 2: per-ship AI)
+    Stub_CalcAiOdds(state);                // scope 0x14
   }
 
   // Always-run scopes that keep advancing during frozen transitions.
