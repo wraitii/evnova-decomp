@@ -603,9 +603,10 @@ TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   CHECK(s->avg_ships == 4);
   CHECK(s->government_id == 0);
   CHECK(s->message_id == -1);
-  // payload +0x6a -> SystemDef.roaming_ship_count (re-ships/asteroid drifts).
-  CHECK(s->roaming_ship_count == 3);
-  CHECK(s->roaming_direction_bitmap == 0x0711);
+  // payload +0x6a -> SystemDef.asteroid_count (the EV Nova Bible "Asteroids"
+  // field: how many asteroid/drift-debris records, 0-16).
+  CHECK(s->asteroid_count == 3);
+  CHECK(s->ast_types == 0x0711);
   CHECK(s->interference == 0);
 
   // Dude type ids are rebased -0x80 (payload 0x01fe/0x9b/0x9c/0x80/0xe3/...).
@@ -628,10 +629,10 @@ TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   CHECK(s->encounter_fleet_count == 0);
   CHECK(s->encounter_chance_percent == 0);
   CHECK(s->encounter_fleet_ids[0] == -1);
-  // Roaming-ship direction bitmap (payload +0x94) is copied verbatim. Kania's
-  // raw payload reads 0x711 (bits 0/4/8/9/10) ->
-  // SystemDef.roaming_direction_bitmap.
-  CHECK(s->roaming_direction_bitmap == 0x711);
+  // AstTypes (payload +0x94) is copied verbatim: which asteroid types appear.
+  // Kania's raw payload reads 0x711 (bits 0/4/8/9/10 -> small/large metal and
+  // the ice/crystal sizes) -> SystemDef.ast_types.
+  CHECK(s->ast_types == 0x711);
 
   // Alphara's first Dude entry is raw -129 with weight 20. The loader removes
   // it from the ordinary dude table and derives fleet id abs(-129)-0x80 = 1.

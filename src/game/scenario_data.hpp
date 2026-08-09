@@ -42,11 +42,12 @@ constexpr std::uint32_t kFleetResourceType = 0x666c9174;      // fl\x91t
 // record per dude def in Nova Data 1; see DudeDef. Loaded by the original
 // NovaData_LoadScenarioResourceTables (0x004bd3c0) into the g_dude_defs table.
 constexpr std::uint32_t kDudeResourceType = 0x649f6465; // d\x9fde
-// "r\x9aid" (0x729a6964) — the maneuver/asteroid-drift class family. Records
+// "r\x9aid" (0x729a6964) — the ASTEROID/maneuver-drift class family. Records
 // are named "Metal Small".."Crystal Huge" (4 compositions x 4 sizes = 16
-// entries, resource ids 0x80..0x8f) and define the per-type wander/drift
-// parameters fed to ScriptedManeuverState spawns (Frame_SpawnScripted-
-// ManeuverState 0x00421e60 / Dude_SpawnRoamingShip 0x00421830 wander reads).
+// entries, resource ids 0x80..0x8f, the r\xf6id asteroid ids 128..143) and
+// define the per-type wander/drift parameters fed to ScriptedManeuverState
+// spawns (Frame_SpawnScriptedManeuverState 0x00421e60 / Dude_SpawnAsteroid
+// 0x00421830 wander reads).
 // Decoded by the original loader (NovaData_LoadScenarioResourceTables
 // 0x004bd3c0 at 0x004c6207) into the DAT_005912dc / DAT_005912f0 global pair,
 // which share one 0x1c-byte-strided 16-row table. See ManeuverTypeDef.
@@ -520,15 +521,16 @@ struct System {
   // owning faction; gates alliance/hostility and the system's HUD/map color.
   std::int16_t government_id = -1;
   std::int16_t message_id = -1; // Message (+0x68)
-  // Roaming-ship / asteroid-drift count (payload +0x6a), i.e. the number of
-  // drifting-debris/asteroid records to spawn for the system. The loader stores
-  // this payload word into SystemDef.roaming_ship_count (+0x94; verified in the
-  // 0x004bd3c0 system section: MOV WORD [g_system_defs+ebp+0x94],
-  // payload+0x6a). System_InitRoamingShips (0x004216B0) spawns this many
-  // Dude_SpawnRoamingShip records and pre-warms the 16-slot maneuver pool;
-  // Dude_SpawnRoamingShip (0x00421830) bails out when it is < 1. Previously
-  // misnamed `asteroid_count`.
-  std::int16_t roaming_ship_count = 0;
+  // Asteroids count (payload +0x6a): how many asteroid/drift-debris records to
+  // spawn for the system (EV Nova Bible: 0 = none, 1-16 = that many "asteroid"
+  // drift-char records). The loader stores this payload word into
+  // SystemDef.asteroid_count (+0x94; verified in the 0x004bd3c0 system section:
+  // MOV WORD [g_system_defs+ebp+0x94], payload+0x6a). System_InitAsteroids
+  // (0x004216B0) spawns this many Dude_SpawnAsteroid records and pre-warms the
+  // 16-slot maneuver pool; Dude_SpawnAsteroid (0x00421830) bails out when it
+  // is < 1. Clarified from a previous misname `roaming_ship_count`: these are
+  // ASTEROID drift records, not NPC ships.
+  std::int16_t asteroid_count = 0;
   std::int16_t interference = 0; // Interference (+0x6c)
   // BkgndColor (s\xd8st +0x8e): per-system space background tint stored as
   // 24-bit 0xRRGGBB. Decoded to reproduce the original's runtime mapping (it
@@ -540,15 +542,14 @@ struct System {
   // (SystemDef.murk at +0xbc < 0; Ghidra previously mislabeled this field
   // "alert_level"). Feeds the ambient-star size scale as well.
   std::int16_t murk = 0;
-  // Bitmask of allowed char-direction slots for roaming-ship wander targets
-  // (SystemDef.roaming_direction_bitmap at +0x1f4, copied verbatim from the
-  // system payload +0x94), named during the Step 5 metadata pass. Bit k permits
-  // direction k; Dude_SpawnRoamingShip (0x00421830) rejects a random
-  // wander_type whose (1 << (type & 0x1f)) & this bitmap is 0, and gives up
-  // entirely when the whole bitmap is 0. Not yet consumed by clean-room code
-  // (roaming ships remain stand-in), so it is decoded for completeness only.
-  std::uint16_t roaming_direction_bitmap = 0;
-  std::uint16_t ast_types = 0;     // AstTypes
+  // AstTypes (payload +0x94): flag bits determining which asteroid types appear
+  // in the system (EV Nova Bible: bit0 = Small metal r\xf6id 128, bit1 = Medium
+  // metal, etc.). Copied verbatim into SystemDef.ast_types at +0x1f4;
+  // Dude_SpawnAsteroid (0x00421830) tests it via (1 << (wander_type & 0x1f)) &
+  // this mask to reject a random asteroid type the system does not host, and
+  // gives up entirely when it is 0. These are the r\xf6id (asteroid) types, not
+  // ship roles; renamed from a misname `roaming_direction_bitmap`.
+  std::uint16_t ast_types = 0;
   std::int16_t reinf_fleet = -1;   // ReinfFleet
   std::int16_t reinf_time = 0;     // ReinfTime
   std::int16_t reinf_interval = 0; // ReinfIntrval
@@ -687,7 +688,7 @@ struct DudeDef {
 //   +0x00 wander_table_value (read via DAT_005912dc[mode]), and
 //   +0x14 wander_speed_multiplier (read via DAT_005912f0[mode]).
 // The remaining fields are decoded with their loader-assigned offsets but
-// semantically provisional (TODO(decomp): confirm against Dude_SpawnRoamingShip
+// semantically provisional (TODO(decomp): confirm against Dude_SpawnAsteroid
 // ring placement and the drift render). Payload layout (big-endian):
 //   +0x00 value, +0x02 speed%, +0x04 field, +0x06 field(+0x02),
 //   +0x08 field(+0x0c), +0x0a RGB bytes (565 -> 15-bit), +0x0e..+0x12 the

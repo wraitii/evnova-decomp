@@ -458,14 +458,15 @@ struct GameState {
 
   // The 16-slot roaming/asteroid-drift manoeuvre pool (mirrors the original
   // `g_scripted_maneuver_state_ptr`). Shared by Frame_SpawnScriptedManeuver-
-  // State (spawn), the future System_InitRoamingShips / Dude_SpawnRoamingShip
-  // (Steps 3/4) and the step 5 per-tick drift. Slots are found by scanning
-  // for `active == false`.
+  // State (spawn), the future System_InitAsteroids / Dude_SpawnAsteroid
+  // (Steps 3/4) and the step 5 per-tick drift. The records are ASTEROID /
+  // drift-debris chars (r\xf6id family), not NPC ships. Slots are found by
+  // scanning for `active == false`.
   std::array<ManeuverState, ManeuverState::kPoolSize> maneuver_pool{};
 
-  // "no roaming ships" latch set by System_InitRoamingShips (0x004216B0) when
-  // the current system declares roaming_ship_count < 1. The original writes a 1
-  // byte into the random-encounter fleet-def scratch area
+  // "no asteroids" latch set by System_InitAsteroids (0x004216B0) when the
+  // current system declares asteroid_count < 1. The original writes a 1 byte
+  // into the random-encounter fleet-def scratch area
   // (g_random_encounter_fleet_defs[0x4d].availability_expression[0x94]); the
   // clean-room stores it here since that scratch buffer is not modelled.
   bool no_roaming_ships_latch = false;

@@ -105,7 +105,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004160E0,LicenseDigest_TouchAndLoadByte,,0%,
 0x004160F0,Util_ReturnZero,,0%,
 0x00416100,NovaGameSession_Run,src/nova_app.cpp,100%,NovaGameSession_Run demo session shell
-0x00417600,Frame_SpaceflightLoop,src/game/spaceflight.cpp,12%,Frame_SpaceflightLoop skeleton: outer pre-draw/sim/draw/post ordering reconstructed; unimplemented scopes are silent no-ops. Step 4: drawn every active NPC ship in the current system (SpaceflightView::DrawNpcShips via per-class ShipClassSprite cache). On spaceflight entry and completed cross-system travel NovaSystem_InitRoamingShips (maneuver.cpp 0x004216B0) restores the roaming/asteroid-drift population; the random-encounter-fleet population is still the deferred Step 5 encounter maintenance (0x004259B0/0x0041D6E0)
+0x00417600,Frame_SpaceflightLoop,src/game/spaceflight.cpp,12%,Frame_SpaceflightLoop skeleton: outer pre-draw/sim/draw/post ordering reconstructed; unimplemented scopes are silent no-ops. Step 4: drawn every active NPC ship in the current system (SpaceflightView::DrawNpcShips via per-class ShipClassSprite cache). On spaceflight entry and completed cross-system travel NovaSystem_InitAsteroids (maneuver.cpp 0x004216B0) restores the asteroid/drift population; the random-encounter-fleet population is still the deferred Step 5 encounter maintenance (0x004259B0/0x0041D6E0)
 0x004186B0,Frame_TickSystems,src/game/spaceflight.cpp,10%,Frame_TickSystems structure reconstructed (run_full_tick gated); heavy per-tick scopes stubbed
 0x00419210,Frame_RefreshTransitionFrameAuxVisuals,,0%,
 0x004192D0,Shot_ResolveShipHitFromWeapon,,0%,
@@ -126,8 +126,8 @@ address,name,impl_file,reimpl_pct,comment
 0x004211D0,Shot_SpawnAreaImpactEffects,,0%,
 0x00421500,Shot_SpawnImpactEffectSprite,,0%,
 0x004215D0,Shot_SpawnDirectionalWeaponEffect,,0%,
-0x004216B0,System_InitRoamingShips,src/game/maneuver.cpp,80%,NovaSystem_InitRoamingShips: spawns roaming_ship_count records, pre-warms all 16 pool slots, sets no-ships latch. Scatter radii from fleet-def scratch area replaced by kRoamingScatterX/Y (provisional, TODO(decomp) validate vs live game).
-0x00421830,Dude_SpawnRoamingShip,src/game/maneuver.cpp,70%,NovaDude_SpawnRoamingShip: scatter+ring placement, direction-bitmap gating, wander params from manoeuvre row, std-rng replay. License-parity latch skipped (out of scope); ring geometry/radii provisional (Step 4 visual validation).
+0x004216B0,System_InitAsteroids,src/game/maneuver.cpp,80%,NovaSystem_InitAsteroids: spawns asteroid_count records, pre-warms all 16 pool slots, sets no-ships latch. Scatter radii from fleet-def scratch area replaced by kScatterX/Y (provisional, TODO(decomp) validate vs live game).
+0x00421830,Dude_SpawnAsteroid,src/game/maneuver.cpp,70%,NovaDude_SpawnAsteroid: scatter+ring placement, ast-types gating, wander params from manoeuvre row, std-rng replay. License-parity latch skipped (out of scope); ring geometry/radii provisional (Step 4 visual validation).
 0x00421E60,Frame_SpawnScriptedManeuverState,src/game/maneuver.cpp,40%,"IMPLEMENTED as NovaManeuver_SpawnState (src/game/maneuver.cpp): finds first inactive pool slot, marks active, records wander_type, copies spawn pos, scatters target_vel (rand(200)-100)*0.01, seeds wander_radius from the per-type lifetime, wander_speed (rand(0x29)+0x50)*DAT_005912f0[type]*0.01 with 50% sign flip (DAT_005752e0 = -1.0), and wander_table_value from DAT_005912dc[type]. Signal-accurate against the decomp. TODO(decomp) divergences: the original draws the lifetime from the per-type sprite descriptor +0x54 (drift-sprite system, Step 3/4) rather than the decoded ManeuverTypeDef.lifetime row field; and no callsite wires it yet (effect-package / travel-walker spawn path deferred). Pool lives on GameState.maneuver_pool (ManeuverState, 16 x stride 0x24)."
 0x00421FD0,Stellar_SpawnHostileShipForStellar,,0%,
 0x004221D0,Ship_IsInboundThreatExceedingDefenses,,0%,

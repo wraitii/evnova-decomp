@@ -27,21 +27,21 @@ inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
 // scales the asteroid-drift records use.
 constexpr double kManeuverScale = 0.01;
 
-// Ghidra _DAT_00575280: 0.5. The roaming/asteroid-drift scatter centers each
+// Ghidra _DAT_00575280: 0.5. The asteroid-drift scatter centers each
 // random target position around the player (`pos +/- radius*0.5`), so a random
 // offset of [0, radius) maps to a [-radius*0.5, +radius*0.5) band.
 constexpr float kScatterCenter = 0.5F;
 
 // Ghidra _DAT_005751f8: 2.0. The minimum ring radius for the place_in_ring
-// branch of Dude_SpawnRoamingShip: `max(scatter_y, 2.0)`.
+// branch of Dude_SpawnAsteroid: `max(scatter_y, 2.0)`.
 constexpr float kRingRadiusMin = 2.0F;
 
 // Ghidra _DAT_005752d8: -0.01. Negative manoeuvre scale; the ring branch uses
 // it to push one of the two velocity axes away from the player while the other
-// pulls inward (see NovaDude_SpawnRoamingShip).
+// pulls inward (see NovaDude_SpawnAsteroid).
 constexpr double kNegManeuverScale = -0.01;
 
-// Scatter/ring radius for a roaming spawn, measured from the player. The
+// Scatter/ring radius for an asteroid spawn, measured from the player. The
 // original reads the (x, y) pair out of the random-encounter fleet-def scratch
 // area as `g_random_encounter_fleet_defs[0x72].availability_expression._236_2_`
 // (+0x80 for x) / `._238_2_` (for y). The clean-room has no such scratch
@@ -116,40 +116,40 @@ int NovaManeuver_SpawnState(GameState &state,
   return static_cast<int>(slot);
 }
 
-// Mirrors Dude_SpawnRoamingShip (0x00421830): allocates one roaming/asteroid-
-// drift manoeuvre record into a free pool slot. `place_in_ring == 0` scatters
+// Mirrors Dude_SpawnAsteroid (0x00421830): allocates one asteroid / drift
+// debris manoeuvre record into a free pool slot. `place_in_ring == 0` scatters
 // the target around the player (a [-radius*0.5, +radius*0.5) band with a random
 // velocity), otherwise it parks the target along an axis-aligned ring of radius
 // max(scatter_y, 2) near the player. The record's wander type is a 0..15
-// manoeuvre-type index (the Metal/Ice/Dust/Crystal x size-tier rows) that the
-// roam direction bitmap must permit: `(1 << (type & 0x1f)) & bitmap` must be
-// set, otherwise the random pick is redrawn. The wander radius/speed/table
-// value are seeded from that type's manoeuvre row, mirroring the per-type
-// recipe used by NovaManeuver_SpawnState. Returns the allocated pool slot, or
-// -1 when the system declares no roaming ships, its direction bitmap is clear,
-// all slots are busy, or the invocation is a no-op.
+// manoeuvre-type index (the Metal/Ice/Dust/Crystal x size-tier rows, i.e. the
+// r\xf6id asteroid types) that the system's ast_types mask must permit:
+// `(1 << (type & 0x1f)) & ast_types` must be set, otherwise the random pick is
+// redrawn. The wander radius/speed/table value are seeded from that type's
+// manoeuvre row, mirroring the per-type recipe used by NovaManeuver_SpawnState.
+// Returns the allocated pool slot, or -1 when the system declares no asteroids,
+// its ast_types mask is clear, all slots are busy, or the invocation is a
+// no-op.
 //
 // DIVERGENCE (documented): the original first runs a license-parity probe that
 // toggles a license-runtime byte
 // (g_ship_class_defs[alt].is_licensed_runtime_alt). Registration/licence
 // integrity is out of scope for the recompilation (see
 // docs/recomp_startup_main_menu.md), so that latch is skipped.
-int NovaDude_SpawnRoamingShip(GameState &state, bool place_in_ring) {
+int NovaDude_SpawnAsteroid(GameState &state, bool place_in_ring) {
   const System *sys =
       state.scenario.System(state.player.current_system_id + 0x80);
-  if (sys == nullptr || sys->roaming_ship_count < 1 ||
-      sys->roaming_direction_bitmap == 0) {
+  if (sys == nullptr || sys->asteroid_count < 1 || sys->ast_types == 0) {
     return -1;
   }
 
   // The original bails when the number of already-active pool slots reaches
-  // the system's roaming quota (it will not allocate beyond roaming_ship_count
+  // the system's asteroid quota (it will not allocate beyond asteroid_count
   // concurrent drift records).
   int active = 0;
   for (const ManeuverState &ent : state.maneuver_pool) {
     active += ent.active ? 1 : 0;
   }
-  if (active >= sys->roaming_ship_count) {
+  if (active >= sys->asteroid_count) {
     return -1;
   }
 
@@ -213,12 +213,13 @@ int NovaDude_SpawnRoamingShip(GameState &state, bool place_in_ring) {
     }
   }
 
-  // Pick a roam direction (manoeuvre-type index 0..15) permitted by the system
-  // bitmap, then seed the wander radius/speed/table value from that row.
+  // Pick an asteroid type (manoeuvre-type index 0..15) permitted by the system
+  // ast_types mask, then seed the wander radius/speed/table value from that
+  // row.
   std::int16_t dir = 0;
   do {
     dir = RandomBelow(state, 0x10);
-  } while ((sys->roaming_direction_bitmap & (1U << (dir & 0x1f))) == 0);
+  } while ((sys->ast_types & (1U << (dir & 0x1f))) == 0);
   m.wander_type = dir;
 
   const ManeuverTypeDef *row =
@@ -234,7 +235,7 @@ int NovaDude_SpawnRoamingShip(GameState &state, bool place_in_ring) {
   m.wander_table_value =
       row != nullptr ? row->wander_table_value : static_cast<std::int16_t>(0);
 
-  NovaLog::Debug("roaming spawn slot {} dir {} ring={} radius {}",
+  NovaLog::Debug("asteroid spawn slot {} type {} ring={} radius {}",
                  slot,
                  dir,
                  place_in_ring,
@@ -242,29 +243,29 @@ int NovaDude_SpawnRoamingShip(GameState &state, bool place_in_ring) {
   return static_cast<int>(slot);
 }
 
-// Mirrors System_InitRoamingShips (0x004216B0): restores the current system's
-// roaming/asteroid-drift ship population on spaceflight entry / cross-system
-// travel. When the system declares no roaming ships (roaming_ship_count < 1) it
-// sets the NoRoamingShips latch (GameState.no_roaming_ships_latch): the
-// original writes a 1 byte into
-// g_random_encounter_fleet_defs[0x4d].availability_expression [0x94] (a scratch
-// area); the clean-room stores it in the explicit game-state flag instead since
-// that scratch buffer is not modelled. Otherwise it spawns `roaming_ship_count`
-// roaming records (scatter placement) and pre-warms all 16 manoeuvre-pool slots
-// with a random wander target around the player.
-void NovaSystem_InitRoamingShips(GameState &state) {
+// Mirrors System_InitAsteroids (0x004216B0): restores the current system's
+// asteroid / drift-debris population on spaceflight entry / cross-system
+// travel. When the system declares no asteroids (asteroid_count < 1) it sets
+// the NoRoamingShips latch (GameState.no_roaming_ships_latch): the original
+// writes a 1 byte into g_random_encounter_fleet_defs[0x4d]
+// .availability_expression [0x94] (a scratch area); the clean-room stores it
+// in the explicit game-state flag instead since that scratch buffer is not
+// modelled. Otherwise it spawns `asteroid_count` asteroid records (scatter
+// placement) and pre-warms all 16 manoeuvre-pool slots with a random wander
+// target around the player.
+void NovaSystem_InitAsteroids(GameState &state) {
   const System *sys =
       state.scenario.System(state.player.current_system_id + 0x80);
   if (sys == nullptr) {
     return;
   }
-  if (sys->roaming_ship_count < 1) {
+  if (sys->asteroid_count < 1) {
     state.no_roaming_ships_latch = true;
     return;
   }
 
-  for (std::int16_t i = 0; i < sys->roaming_ship_count; ++i) {
-    (void)NovaDude_SpawnRoamingShip(state, /*place_in_ring=*/false);
+  for (std::int16_t i = 0; i < sys->asteroid_count; ++i) {
+    (void)NovaDude_SpawnAsteroid(state, /*place_in_ring=*/false);
   }
 
   // Pre-warm all 16 pool slots with a random wander target around the player.

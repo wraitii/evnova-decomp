@@ -490,10 +490,10 @@ namespace {
   s.avg_ships = ReadBeI16(bytes, 0x64);
   s.government_id = ReadBeI16(bytes, 0x66);
   s.message_id = ReadBeI16(bytes, 0x68);
-  // Payload +0x6a -> SystemDef.roaming_ship_count (+0x94). Previously named
-  // `asteroid_count`; the roaming-ship/asteroid-drift spawners (System_Init-
-  // RoamingShips 0x004216B0 / Dude_SpawnRoamingShip 0x00421830) read it.
-  s.roaming_ship_count = ReadBeI16(bytes, 0x6a);
+  // Payload +0x6a -> SystemDef.asteroid_count (+0x94). The Asteroid field
+  // (number of asteroid/drift records, 0-16); read by System_InitAsteroids
+  // (0x004216B0) / Dude_SpawnAsteroid (0x00421830).
+  s.asteroid_count = ReadBeI16(bytes, 0x6a);
   s.interference = ReadBeI16(bytes, 0x6c);
   // Government rebase mirrors the loader: < 0x80 or > 0x17f -> -1 else -0x80.
   if (s.government_id < 0x80 || s.government_id > 0x17f) {
@@ -533,13 +533,11 @@ namespace {
   // equivalently hides the starfield (NovaEffects_QueuedAmbientStarParticles
   // clears ambient stars when SystemDef.murk < 0).
   s.murk = ReadBeI16(bytes, 0x92);
-  // Roaming-ship direction bitmap (s\xd8st +0x94): a 16-bit mask of allowed
-  // char-direction slots for roaming-ship wander targets. The loader copies it
-  // verbatim into SystemDef.roaming_direction_bitmap (+0x1f4);
-  // Dude_SpawnRoamingShip (0x00421830) tests it via
-  // (1 << (wander_type & 0x1f)) & bitmap.
-  s.roaming_direction_bitmap =
-      static_cast<std::uint16_t>(ReadBeI16(bytes, 0x94));
+  // AstTypes (s\xd8st +0x94): a 16-bit mask of allowed asteroid types. The
+  // loader copies it verbatim into SystemDef.ast_types (+0x1f4);
+  // Dude_SpawnAsteroid (0x00421830) tests it via
+  // (1 << (wander_type & 0x1f)) & ast_types.
+  s.ast_types = static_cast<std::uint16_t>(ReadBeI16(bytes, 0x94));
   s.reinf_fleet = ReadBeI16(bytes, 0x196);
   s.reinf_time = ReadBeI16(bytes, 0x198);
   s.reinf_interval = ReadBeI16(bytes, 0x19a);

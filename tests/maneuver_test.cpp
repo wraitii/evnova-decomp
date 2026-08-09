@@ -54,56 +54,58 @@ TEST_CASE("maneuver spawn claims free slots and scatters a wander target",
   CHECK(NovaManeuver_SpawnState(state, 0.0F, 0.0F, 0) == -1);
 }
 
-// NovaDude_SpawnRoamingShip (Dude_SpawnRoamingShip 0x00421830): the roaming
-// allocator bails when the system has no roaming ships / a clear direction
-// bitmap, respects the roaming quota, and claims the first free pool slot whose
-// wander direction is permitted by the system bitmap when one is available.
-TEST_CASE("roaming spawn allocates a direction-bitmap-valid manoeuvre slot",
-          "[maneuver][roaming]") {
+// NovaDude_SpawnAsteroid (Dude_SpawnAsteroid 0x00421830): the asteroid
+// allocator bails when the system has no asteroids / a clear ast_types mask,
+// respects the asteroid quota, and claims the first free pool slot whose
+// wander direction is permitted by the system ast_types mask when one is
+// available. These records are ASTEROID/drift-debris chars (r\xf6id family),
+// not NPC ships.
+TEST_CASE("asteroid spawn allocates an ast_types-valid manoeuvre slot",
+          "[maneuver][asteroid]") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
-  // Kania is index 0 -> system 0x80: roaming_ship_count 3, bitmap 0x0711.
+  // Kania is index 0 -> system 0x80: asteroid_count 3, ast_types 0x0711.
   state.player.current_system_id = 0;
   state.player.pos_x = 500.0F;
   state.player.pos_y = 300.0F;
 
   const System *sys = state.scenario.System(0x80);
   REQUIRE(sys != nullptr);
-  REQUIRE(sys->roaming_ship_count == 3);
-  REQUIRE(sys->roaming_direction_bitmap == 0x0711);
+  REQUIRE(sys->asteroid_count == 3);
+  REQUIRE(sys->ast_types == 0x0711);
 
-  // Allocate up to the roaming quota.
-  int slot = NovaDude_SpawnRoamingShip(state, /*place_in_ring=*/false);
+  // Allocate up to the asteroid quota.
+  int slot = NovaDude_SpawnAsteroid(state, /*place_in_ring=*/false);
   REQUIRE(slot == 0);
   CHECK(state.maneuver_pool[0].active);
-  // Direction bit must be in the system bitmap.
-  CHECK((sys->roaming_direction_bitmap &
-         (1U << (state.maneuver_pool[0].wander_type & 0x1f))) != 0);
+  // Direction bit must be in the system ast_types mask.
+  CHECK((sys->ast_types & (1U << (state.maneuver_pool[0].wander_type & 0x1f))) !=
+        0);
   // Scatter position is a [-rx*0.5, +rx*0.5) band around the player.
   CHECK(state.maneuver_pool[0].target_pos_x >= 500.0F - 64.0F);
   CHECK(state.maneuver_pool[0].target_pos_x < 500.0F + 64.0F);
   CHECK(state.maneuver_pool[0].target_pos_y >= 300.0F - 64.0F);
   CHECK(state.maneuver_pool[0].target_pos_y < 300.0F + 64.0F);
 
-  REQUIRE(NovaDude_SpawnRoamingShip(state, false) == 1);
-  REQUIRE(NovaDude_SpawnRoamingShip(state, false) == 2);
+  REQUIRE(NovaDude_SpawnAsteroid(state, false) == 1);
+  REQUIRE(NovaDude_SpawnAsteroid(state, false) == 2);
   // Quota of 3 is reached; a further spawn is a no-op (no new slot).
-  CHECK(NovaDude_SpawnRoamingShip(state, false) == -1);
+  CHECK(NovaDude_SpawnAsteroid(state, false) == -1);
 }
 
-// NovaSystem_InitRoamingShips (System_InitRoamingShips 0x004216B0): for a
-// populated system it allocates roaming_ship_count records and pre-warms all 16
-// pool slots; for an empty system it sets the no-ships latch instead.
-TEST_CASE("system init restores the roaming population and pre-warms the pool",
-          "[maneuver][roaming]") {
+// NovaSystem_InitAsteroids (System_InitAsteroids 0x004216B0): for a populated
+// system it allocates asteroid_count records and pre-warms all 16 pool slots;
+// for an empty system it sets the no-ships latch instead.
+TEST_CASE("system init restores the asteroid population and pre-warms the pool",
+          "[maneuver][asteroid]") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
-  state.player.current_system_id = 0; // Kania, roaming_ship_count 3
+  state.player.current_system_id = 0; // Kania, asteroid_count 3
   state.player.pos_x = 1000.0F;
   state.player.pos_y = 2000.0F;
 
-  NovaSystem_InitRoamingShips(state);
+  NovaSystem_InitAsteroids(state);
   CHECK(!state.no_roaming_ships_latch);
 
   int active = 0;
@@ -121,18 +123,18 @@ TEST_CASE("system init restores the roaming population and pre-warms the pool",
     CHECK(m.target_pos_y < 2000.0F + 64.0F);
   }
 
-  // A system with no roaming ships sets the latch instead of spawning.
+  // A system with no asteroids sets the latch instead of spawning.
   GameState empty;
   REQUIRE(empty.scenario.LoadFromArchives());
   empty.player.current_system_id = 0;
   const System *s0 = empty.scenario.System(0x80);
   REQUIRE(s0 != nullptr);
-  // Force Kania's roaming_ship_count to 0 so the no-ship latch path runs
+  // Force Kania's asteroid_count to 0 so the no-asteroid latch path runs
   // deterministically. ScenarioData exposes the element as const; the vector is
   // genuinely mutable, so casting off const to perturb this one test copy is a
   // deliberate, local exception.
-  const_cast<System &>(*s0).roaming_ship_count = 0;
-  NovaSystem_InitRoamingShips(empty);
+  const_cast<System &>(*s0).asteroid_count = 0;
+  NovaSystem_InitAsteroids(empty);
   CHECK(empty.no_roaming_ships_latch);
 }
 
