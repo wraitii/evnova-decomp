@@ -109,18 +109,28 @@ int NovaTravel_FindNearestTravelPoint(const GameState &state) {
 // Mirrors Stellar_CanShipInitiateJumpSequence (0x00415b80).
 // ---------------------------------------------------------------------------
 bool NovaTravel_CanStartJump(const GameState &state) {
-  const ShipClass *cls = state.scenario.Ship(
-      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
-  // The original gates on the ship *class* fuel capacity being at least one
-  // jump (a class that physically cannot carry a jump's fuel can't jump).
+  // Player-side convenience wrapper around the faithful per-ship gate.
+  return NovaTravel_CanShipInitiateJumpSequence(state, state.player);
+}
+
+// Mirrors Stellar_CanShipInitiateJumpSequence (0x00415b80) for an arbitrary
+// (NPC) ship. Gates on the ship's OWN class fuel capacity being at least one
+// jump (kJumpFuelCost) -- NOT the player's, which is what the old NPC AI call
+// sites wrongly used. The original further blocks while the ship is locked to
+// another ship's velocity match (ShipState.velocity_match_target_ship_slot !=
+// -1 and != own id) and while a mission ship lacks fuel; those need the
+// velocity-match / mission systems and are deferred (TODO(decomp)). Fuel is
+// consumed by the jump-completion path; this gate does not inspect the current
+// fuel amount.
+bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
+                                            const Ship &ship) {
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   const float class_fuel_capacity =
       cls ? static_cast<float>(cls->base_fuel) : 0.0F;
-  if (class_fuel_capacity < kJumpFuelCost) {
-    return false;
-  }
-  // TODO(decomp): the original also blocks while velocity-matched to another
-  // ship and under certain mission-ship flags; no NPC fleet / missions yet.
-  return true;
+  // TODO(decomp): also block while velocity-matched to another ship and under
+  // certain mission-ship flags (no NPC velocity-match / mission systems yet).
+  return class_fuel_capacity >= kJumpFuelCost;
 }
 
 // ---------------------------------------------------------------------------

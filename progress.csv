@@ -2,7 +2,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00401000,Ship_UpdateShipAI,src/game/ship_ai.cpp,25%,"NovaAi_UpdateShipAI: dispatching skeleton (heavy-AI cadence gates + behavior-code dispatch + state machine + controls bridge) wired into Stub_AiRoutines. Behavior 0x01 faithful; behaviors 0x02/0x03/4/5+ fall back to the wander supervisor. Combat/disable caches deferred"
 0x00401800,Government_HandlePlayerFactionExtortion,,0%,
 0x00402810,Ship_ResetShipAiBehaviorRuntimeFields,,0%,
-0x00402860,Ship_UpdateShipAiBehavior0x01,src/game/ship_ai.cpp,80%,"NovaAi_UpdateBehavior0x01: reacquire travel stellar / jump fallback / hostility escalation faithfully ported. Intercept-taunt HUD flavor deferred"
+0x00402860,Ship_UpdateShipAiBehavior0x01,src/game/ship_ai.cpp,80%,"NovaAi_UpdateBehavior0x01: reacquire travel stellar / jump fallback / hostility escalation faithfully ported. Jump fallback now gates on the ship's OWN class fuel (NovaTravel_CanShipInitiateJumpSequence). Intercept-taunt HUD flavor deferred"
 0x00402980,Ship_UpdateShipAiAvailabilityBehavior,,0%,
 0x00402BD0,Ship_UpdateShipAiBehavior0x02,,0%,
 0x00402E50,Ship_UpdateShipAiBehavior0x03,,0%,
@@ -11,7 +11,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004048A0,Ship_UpdateShipAssistResponseBehavior,,0%,
 0x00405120,Ship_ShouldShipPrioritizePlayerThreat,,0%,
 0x004053C0,Mission_UpdateShipMissionStellarAttackDirective,,0%,
-0x00405590,Ship_UpdateShipAiState,src/game/ship_ai.cpp,20%,"NovaAi_UpdateShipState: core travel (1/0x14/2), hold (0xb), pursuit(5)/assist(10)/escort(7), drift(0xe), disengage(0x15/8), defunct(0x16) control-mode writes ported. Attack/disable states 3/4/0xc/0xd and HUD/mission flavor deferred. Many _DAT_005750xx constants provisional (TODO(decomp))"
+0x00405590,Ship_UpdateShipAiState,src/game/ship_ai.cpp,20%,"NovaAi_UpdateShipState: core travel (1/0x14/2), hold (0xb), pursuit(5)/assist(10)/escort(7), drift(0xe), disengage(0x15/8), defunct(0x16) control-mode writes ported. Travel-arrival reverse_speed_bias band corrected to Ghidra (300..499 / 100..174). Attack/disable states 3/4/0xc/0xd and HUD/mission flavor deferred. Many _DAT_005750xx constants provisional (TODO(decomp))"
 0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,15%,"NovaAi_ApplyControls: travel/pursue/hold/approach control modes bridge into movement fields. Combat/formation modes (5-0x17) provisional. Auto-weapon-selection + fire latch deferred"
 0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,src/game/ship_ai.cpp,40%,"NovaAi_SelectRandomAdjacentTravelStellar: availability/travel-flag/govt-hostility candidates, uniform random pick; weighted scan-mask pools deferred"
 0x0040CC10,Stellar_FindNearestAdjacentTravelStellar,,0%,
@@ -90,7 +90,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004159E0,Ship_EnterShipAiState0x15_JumpOutToSystem,,0%,
 0x00415AD0,Stellar_IsShipHeadingToStellarInAiState0x01Or0x14,,0%,
 0x00415B00,Ship_IsShipDockedWithTargetInControlMode0x0F,,0%,
-0x00415B80,Stellar_CanShipInitiateJumpSequence,src/game/travel.cpp,90%,jump fuel gating (class fuel_capacity>=100 + held fuel) via NovaTravel_CanStartJump; velocity-match/mission-ship gates deferred
+0x00415B80,Stellar_CanShipInitiateJumpSequence,src/game/travel.cpp,90%,jump fuel gating (class fuel_capacity>=100) via NovaTravel_CanShipInitiateJumpSequence (ship-aware, used by NPC AI) + NovaTravel_CanStartJump (player convenience wrapper gating on the player class). Velocity-match/mission-ship gates deferred
 0x00415C10,Weapon_HasAnyFireableNonSecondaryWeapon,,0%,
 0x00415CB0,Ship_ResetShipAndAttackersAfterBoarding,,0%,
 0x00415DC0,Ship_ClearOtherShipsTargetingShip,,0%,

@@ -51,6 +51,16 @@ inline constexpr float kJumpFuelCost = 100.0F;
 // original implementation does not inspect the current fuel amount.
 [[nodiscard]] bool NovaTravel_CanStartJump(const GameState &state);
 
+// Mirrors Stellar_CanShipInitiateJumpSequence (0x00415b80) for an arbitrary
+// (NPC) ship: returns true when `ship` may initiate a hyperspace jump. Gates on
+// the ship's own class fuel capacity (kJumpFuelCost), NOT the player's. The
+// original also blocks while velocity-matched to another ship and under certain
+// mission-ship flags; those need the velocity-match / mission systems and are
+// deferred (see the .cpp).
+[[nodiscard]] bool
+NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
+                                       const Ship &ship);
+
 // Ticks the cross-system travel state machine once per spaceflight frame.
 // Handles (a) engaging a jump when the travel key is pressed near an available
 // travel point, (b) running the engaged countdown, and (c) completing the jump

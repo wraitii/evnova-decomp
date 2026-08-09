@@ -5,8 +5,10 @@
 #include "game/ship_ai.hpp"
 #include "game/ship_spawn.hpp"
 #include "game/targeting.hpp"
+#include "game/travel.hpp"
 
 #include <algorithm>
+#include <iterator>
 
 namespace {
 
@@ -151,4 +153,47 @@ TEST_CASE("fire-restricted ship does not initiate travel") {
   // Fire-restricted ships are held idle (no travel target picked).
   CHECK(ship.ai_state_code == 0);
   CHECK(ship.ai_secondary_target_slot == -1);
+}
+
+// The NPC jump gate uses the ship's OWN class fuel, not the player's
+// (Stellar_CanShipInitiateJumpSequence 0x00415b80 on the NPC, not the player's
+// ship). This catches the old bug where NovaAi called the player-only
+// NovaTravel_CanStartJump so an NPC's jump decision reflected the player's
+// hull class.
+TEST_CASE("npc jump gate uses the npc's own class fuel") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Find a class that cannot carry jump fuel and one that can.
+  const game::ShipClass *no_fuel = nullptr;
+  const game::ShipClass *with_fuel = nullptr;
+  for (const auto &sc : state.scenario.ships) {
+    if (sc.base_fuel < static_cast<std::int16_t>(game::kJumpFuelCost)) {
+      if (!no_fuel) {
+        no_fuel = &sc;
+      }
+    } else if (!with_fuel) {
+      with_fuel = &sc;
+    }
+    if (no_fuel && with_fuel) {
+      break;
+    }
+  }
+  REQUIRE(no_fuel != nullptr);   // a low-fuel class exists in the data
+  REQUIRE(with_fuel != nullptr); // and a jumping-capable one
+
+  // sc is const (range-for over a const ref); base on a const ShipClass* so
+  // the std::distance argument types match.
+  const auto zero_based = [&state](const game::ShipClass &sc) -> std::int16_t {
+    const game::ShipClass *first = &state.scenario.ships.front();
+    return static_cast<std::int16_t>(
+        std::distance(first, static_cast<const game::ShipClass *>(&sc)));
+  };
+
+  game::Ship npc;
+  npc.ship_class_id = zero_based(*with_fuel);
+  CHECK(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+
+  npc.ship_class_id = zero_based(*no_fuel);
+  CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
 }

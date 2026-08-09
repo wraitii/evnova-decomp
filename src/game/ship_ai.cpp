@@ -224,8 +224,10 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
                                 NovaTargeting_IsStellarAdjacentToSystem(
                                     *sys, ship.jump_destination_stellar_id);
     if (still_at_point) {
-      // Already at a valid travel stellar: settle / try to jump away.
-      if (NovaTravel_CanStartJump(state)) {
+      // Already at a valid travel stellar: settle / try to jump away. The jump
+      // gate uses THIS ship's class fuel (NovaTravel_CanShipInitiateJump-
+      // Sequence), not the player's.
+      if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
         NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
       } else {
         ship.ai_state_code = 6;
@@ -238,7 +240,7 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
       ship.ai_secondary_target_slot = travel;
       if (ship.ai_secondary_target_slot == -1) {
         // No route remains: try to jump, else settle into idle-template.
-        if (NovaTravel_CanStartJump(state)) {
+        if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
           NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
         } else {
           ship.ai_state_code = 6;
@@ -333,9 +335,10 @@ void NovaAi_UpdateShipState(GameState &state,
   }
 
   // Behavior-5 escort holding state 0xb: if the ship can't initiate a jump,
-  // downgrade to pursue (5) and target the lead.
+  // downgrade to pursue (5) and target the lead. Gated on this ship's own class
+  // fuel.
   if (ship.ai_behavior_code == 5 && ship.ai_state_code == 0xb) {
-    if (!NovaTravel_CanStartJump(state)) {
+    if (!NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
       ship.ai_state_code = 5;
       ship.primary_target_ship_slot = -1;
       ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
@@ -389,11 +392,13 @@ void NovaAi_UpdateShipState(GameState &state,
           ship.ai_control_mode = 0;
           ship.ai_state_code = 0;
           // Arm the coast-through-reversal timer so the next wander leg starts
-          // with the ship "breaking away" (open-space duration 300..500 ticks,
-          // or 100..175 for route-limited ships).
+          // with the ship "breaking away". Ghidra draws
+          // NovaRandom_Range(200)+300 (300..499) for open-space ships, or
+          // NovaRandom_Range(0x4b)+100 (100..174) for route-limited
+          // (availability_flags bit 2) ships.
           std::uniform_int_distribution<std::int32_t> dist(
               (sc2 && (sc2->availability_flags & 2) != 0) ? 100 : 300,
-              (sc2 && (sc2->availability_flags & 2) != 0) ? 175 : 500);
+              (sc2 && (sc2->availability_flags & 2) != 0) ? 174 : 499);
           ship.reverse_speed_bias = static_cast<float>(dist(state.rng));
         }
       }

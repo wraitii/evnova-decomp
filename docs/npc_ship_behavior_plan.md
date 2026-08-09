@@ -116,7 +116,12 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
     core travel (1/0x14/2), hold (0xb), pursuit(5)/assist(10)/escort(7), drift
     (0xe), disengage(0x15/8) and defunct(0x16) control-mode writes; the
     attack/disable states (3/4/0xc/0xd) and HUD/mission flavor need Phase 5
-    systems and are conservatively gated. The `_DAT_005750xx` turn/arrive
+    systems and are conservatively gated. The travel-arrival `reverse_speed_bias`
+    band matches Ghidra (300..499 / 100..174); the jump-fallback gate now uses
+    the ship's own class fuel
+    (`NovaTravel_CanShipInitiateJumpSequence`, mirroring
+    `Stellar_CanShipInitiateJumpSequence` 0x00415b80, not the player-only
+    `NovaTravel_CanStartJump`). Remaining `_DAT_005750xx` turn/arrive
     constants are provisional (TODO(decomp)).
 - [ ] **Shared AI helpers** the supervisors call (small, reusable). Derive the
       concrete list from callees of 0x00401000 / 0x00405590 (batch-decompile
