@@ -431,8 +431,9 @@ namespace {
 // s\xd8st (System / s\xffst) decode
 // ---------------------------------------------------------------------------
 // Header verified: xPos+0, yPos+2, Con1-16+0x04, NavDef1-16+0x24,
-// AvgShips+0x64, govt+0x66, Message+0x68, Asteroids+0x6a, Interference+0x6c,
-// DudeTypes+0x6e, % Prob+0x7e, BkgndColor+0x8e (24-bit RRGGBB, Ghidra
+// Dude1-8+0x44, DudeProb1-8+0x54, AvgShips+0x64, govt+0x66, Message+0x68,
+// Asteroids+0x6a, Interference+0x6c, DudeTypes+0x6e, % Prob+0x7e,
+// BkgndColor+0x8e (24-bit RRGGBB, Ghidra
 // NovaData_LoadScenario- ResourceTables reads a 32-bit at payload +0x8e and
 // splits the three bytes into SystemDef.field_0x1ee/.f0/.f2), Murk+0x92 (feeds
 // SystemDef.murk at +0xbc; Ghidra previously mislabeled this field
@@ -447,6 +448,41 @@ namespace {
   for (std::size_t i = 0; i < s.links.size(); ++i) {
     s.links[i] = ReadBeI16(bytes, 0x04 + i * 2);
     s.nav_defs[i] = ReadBeI16(bytes, 0x24 + i * 2);
+  }
+  // The loader splits the Dude1-8 table into ordinary dude-class bindings and
+  // random-encounter fleet bindings. Positive resource ids 0x80..0x27f become
+  // zero-based dude-class ids. Negative references -0x80..-0x17f encode fleet
+  // ids as abs(raw)-0x80; their weights also sum to encounter_chance_percent.
+  std::uint16_t dude_weight_total = 0;
+  for (std::size_t i = 0; i < s.dude_class_ids.size(); ++i) {
+    const std::int16_t raw_id = ReadBeI16(bytes, 0x44 + i * 2);
+    const std::uint16_t weight = ReadBe16(bytes, 0x54 + i * 2);
+    if (raw_id >= 0x80 && raw_id <= 0x27f) {
+      s.dude_class_ids[i] = static_cast<std::int16_t>(raw_id - 0x80);
+      s.dude_class_weights[i] = weight;
+      dude_weight_total =
+          static_cast<std::uint16_t>(dude_weight_total + weight);
+    } else if (raw_id <= -0x80 && raw_id > -0x180 &&
+               s.encounter_fleet_count <
+                   static_cast<std::int16_t>(s.encounter_fleet_ids.size())) {
+      const std::size_t fleet_slot =
+          static_cast<std::size_t>(s.encounter_fleet_count);
+      s.encounter_fleet_ids[fleet_slot] =
+          static_cast<std::int16_t>(-raw_id - 0x80);
+      s.encounter_fleet_weights[fleet_slot] = weight;
+      ++s.encounter_fleet_count;
+      s.encounter_chance_percent = static_cast<std::int16_t>(
+          s.encounter_chance_percent + static_cast<std::int16_t>(weight));
+    }
+  }
+  // Ordinary dude weights are normalized to a 100-point distribution when
+  // the payload does not already sum to 100. Fleet weights are excluded.
+  if (dude_weight_total != 0 && dude_weight_total != 100) {
+    const float scale = 100.0F / static_cast<float>(dude_weight_total);
+    for (std::uint16_t &weight : s.dude_class_weights) {
+      weight = static_cast<std::uint16_t>(
+          std::lround(static_cast<float>(weight) * scale));
+    }
   }
   // AvgShips/Govt/Message/Asteroids/Interference block (payload +0x64..+0x6c),
   // verified against the loader (0x004bd3c0): avg_ships +0x64, government

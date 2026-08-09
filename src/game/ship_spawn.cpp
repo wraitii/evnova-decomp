@@ -135,11 +135,13 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   }
 
   Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
-  ship.ship_class_id =
-      static_cast<std::int16_t>(def->lead_ship_class_id + 0x80);
+  // ShipState stores the zero-based ShipClassDef index. Resource lookups add
+  // 0x80 at their boundary.
+  ship.ship_class_id = def->lead_ship_class_id;
   ship.faction_or_government_id = def->government_id;
 
-  const ShipClass *cls = state.scenario.Ship(ship.ship_class_id);
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   // The spawned-lead flavor of the original takes an explicit ai_behavior_code
   // argument; this slice models the -1 flavor, whose effective behavior is the
   // lead ship class's default AI (the code-6 escort behavior is the escorts'
@@ -163,7 +165,9 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   ship.mission_fleet_slot = -1;
   ship.mining_scoop_active = false;
   ship.ai_hostility_accumulator = 0;
-  ship.credits = 10000; // (a round number; the original's per-spawn floor)
+  // Ship_AllocateShipSlotInSystem initializes credits to zero; the fleet
+  // spawner does not override them.
+  ship.credits = 0;
   ship.jump_destination_stellar_id = -2;
   ship.mission_owner_slot = -1;
 

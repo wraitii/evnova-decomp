@@ -203,8 +203,7 @@ SpaceflightView::ShipClassSprite(SdlPlatform &platform,
 // Draws every active non-player ship in the current system at its world
 // position, frame selected by heading. Filters by system to avoid drawing NPCs
 // parked in other systems, and skips ships whose class sprite could not be
-// loaded. Ships with no class sprite get a plain placeholder dot so they are
-// still visible.
+// loaded.
 void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                                    const GameState &state) {
   const Viewport vp = CurrentViewport(platform);

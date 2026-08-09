@@ -29,9 +29,11 @@ namespace game {
 // EncounterFleet_SpawnRandomEncounterFleet (Ghidra 0x004259b0). Allocates one
 // ship slot in system_id for the random-encounter fleet template at
 // fleet_def_index (0-based index into ScenarioData.fleets), applying the def's
-// lead ship class (if any) and identity: ship_class_id, government, AI behavior
+// lead ship class (if any) and identity: zero-based ship_class_id, government,
+// AI behavior
 // (or ship-class default when the requested code is -1), base shield/armor,
-// mission slots cleared, mining-scoop flag, credits. Returns the allocated slot
+// mission slots cleared, mining-scoop flag, zero credits. Returns the allocated
+// slot
 // or -1 when the def has no lead ship, is unavailable at spawn time
 // (is_available_runtime clear), or no slot is free.
 //

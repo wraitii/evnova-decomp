@@ -60,11 +60,12 @@ globals (AGENTS.md).
   -> -1) with % Prob at `0x7e` (clamped 0..100), BkgndColor+0x8e, Murk+0x92,
   ReinfFleet/Time/Interval +0x196..+0x19a, Visibility +0x96. Verified against
   system 0x80 (links 199/200/202/129/135, avg 4, govt 128->0, message -1,
-  asteroids 3, dude types 510/155/156/128, probs 50/1/1/10). The original also
-  stores a per-system runtime random-encounter binding (SystemDef +0x6a ids /
-  +0x7a weights / +0x8a count / +0x8c chance) feeding
-  EncounterFleet_SelectRandomEncounterFleetDefWeighted (0x0046b6d0); the population
-  pass that fills it from scenario data is not yet localized.
+  asteroids 3, dude types 510/155/156/128, probs 50/1/1/10). Dude1-8 at +0x44
+  and their weights at +0x54 are split by the loader: ordinary 0x80..0x27f ids
+  become normalized dude-class bindings, while negative -0x80..-0x17f ids
+  become the per-system encounter-fleet binding (SystemDef +0x6a ids / +0x7a
+  weights / +0x8a count / +0x8c chance) consumed by
+  EncounterFleet_SelectRandomEncounterFleetDefWeighted (0x0046b6d0).
 - **g\x9avt (government)**: header +00 voice, +02 flags_primary, +04
   scan_mask_short, +06 jam1, +08 flee, +0a disable_pen / +0c board / +0e kill /
   +10 shoot penalties, +12 max_odds, +14 bribe %, +16 combat_rating_src, +18

@@ -615,14 +615,29 @@ TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   CHECK(s->dude_prob[2] == 1);
   CHECK(s->dude_prob[3] == 10);
 
-  // A system with an out-of-range government (raw 0 > 0x17f... use a sentinel
-  // that the loader maps to -1): verify no crash and -1 handling via a direct
-  // synthetic decode is not needed; the real tables expose the rebase below.
-  // The vast majority of systems carry a valid 0x80.. id; South (various) show
-  // the -1 path. Just confirm the runtime encounter binding defaults empty.
+  // Kania has only ordinary dude-class entries. Its raw weights already sum to
+  // 100, and all ids are rebased from resource ids to zero-based indexes.
+  CHECK(s->dude_class_ids[0] == 0);
+  CHECK(s->dude_class_ids[1] == 2);
+  CHECK(s->dude_class_weights[0] == 30);
+  CHECK(s->dude_class_weights[1] == 10);
   CHECK(s->encounter_fleet_count == 0);
   CHECK(s->encounter_chance_percent == 0);
   CHECK(s->encounter_fleet_ids[0] == -1);
+
+  // Alphara's first Dude entry is raw -129 with weight 20. The loader removes
+  // it from the ordinary dude table and derives fleet id abs(-129)-0x80 = 1.
+  // The remaining ordinary weights sum to 80 and are normalized to 100.
+  const System *alphara = data.System(0x83);
+  REQUIRE(alphara != nullptr);
+  CHECK(alphara->dude_class_ids[0] == -1);
+  CHECK(alphara->dude_class_weights[0] == 0);
+  CHECK(alphara->encounter_fleet_count == 1);
+  CHECK(alphara->encounter_chance_percent == 20);
+  CHECK(alphara->encounter_fleet_ids[0] == 1);
+  CHECK(alphara->encounter_fleet_weights[0] == 20);
+  CHECK(alphara->dude_class_ids[1] == 2);
+  CHECK(alphara->dude_class_weights[1] == 20); // raw 16, normalized by 1.25
 }
 
 } // namespace game

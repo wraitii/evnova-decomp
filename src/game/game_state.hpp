@@ -82,7 +82,7 @@ struct Ship {
   float death_timer_active = -1.0F; // +0x3C
 
   // --- Identity / placement ---
-  std::int16_t ship_class_id = 0;             // +0x76 (ship id 0x80..)
+  std::int16_t ship_class_id = 0;             // +0x76 (zero-based ship index)
   std::int16_t ship_instance_id = 0;          // +0x86 (0 = player)
   std::int16_t current_system_id = 0;         // +0x74
   std::int16_t faction_or_government_id = -1; // +0x98

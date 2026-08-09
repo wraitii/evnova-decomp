@@ -492,9 +492,14 @@ struct System {
                                         -1,
                                         -1,
                                         -1}; // NavDef1-16 (stellar ids)
-  std::array<std::int16_t, 8> dude_types{};  // DudeTypes (+0x6e, rebased -0x80;
-                                             //  <0x80 / >0x47e -> -1)
-  std::array<std::int16_t, 8> dude_prob{};   // % Prob (+0x7e, clamped 0..100)
+  // Dude1-8 / DudeProb1-8 (payload +0x44/+0x54). Ordinary 0x80..0x27f
+  // entries are rebased into dude-class indexes. Negative -0x80..-0x17f
+  // entries are moved into encounter_fleet_* below instead.
+  std::array<std::int16_t, 8> dude_class_ids{-1, -1, -1, -1, -1, -1, -1, -1};
+  std::array<std::uint16_t, 8> dude_class_weights{};
+  std::array<std::int16_t, 8> dude_types{}; // DudeTypes (+0x6e, rebased -0x80;
+                                            //  <0x80 / >0x47e -> -1)
+  std::array<std::int16_t, 8> dude_prob{};  // % Prob (+0x7e, clamped 0..100)
   // AvgShips (payload +0x64): the per-system NPC ship population cap that the
   // spawn maintainers replenish the system's active ship count toward.
   std::int16_t avg_ships = 0;
@@ -522,15 +527,11 @@ struct System {
   std::int16_t reinf_interval = 0; // ReinfIntrval
   std::string visibility_expr;     // Visibility
 
-  // ---- Runtime random-encounter binding (decoded with, not from, the
-  // payload). The original stores per-system random-encounter fleet templates
-  // and weights on SystemDef (struct +0x6a fleet ids / +0x7a weights /
-  // +0x8a count / +0x8c chance-percent) and consumes them each tick via
-  // EncounterFleet_SelectRandomEncounterFleetDefWeighted (0x0046b6d0) from
-  // Mission_TickMissionAndEncounterSpawns (0x0041d6e0). TODO(decomp): the
-  // population pass that fills these from scenario data is not yet localized;
-  // these fields are modelled now so Step 5's spawn hook has a home, and stay
-  // empty/default until the binding is reconstructed.
+  // ---- Derived random-encounter binding. The loader separates negative
+  // fleet references from the payload's Dude1-8 table and stores their ids and
+  // weights here. Their weight sum is the per-system encounter chance;
+  // EncounterFleet_SelectRandomEncounterFleetDefWeighted (0x0046b6d0) chooses
+  // among the eligible entries when that encounter gate fires.
   std::array<std::int16_t, 8> encounter_fleet_ids{
       -1, -1, -1, -1, -1, -1, -1, -1};
   std::array<std::uint16_t, 8> encounter_fleet_weights{};

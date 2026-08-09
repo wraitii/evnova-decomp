@@ -61,21 +61,39 @@ void SpawnRoamingFleetsStandIn(GameState &state) {
     return;
   }
   const int cap = std::max(0, std::min(4, static_cast<int>(sys->avg_ships)));
+  std::size_t current_population = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (ship.is_active &&
+        ship.current_system_id == state.player.current_system_id) {
+      ++current_population;
+    }
+  }
+  const std::size_t target_population = static_cast<std::size_t>(cap);
+  if (current_population >= target_population) {
+    return;
+  }
+
+  const std::size_t wanted = target_population - current_population;
   std::size_t spawned = 0;
   for (std::size_t i = 0; i < state.scenario.fleets.size(); ++i) {
-    if (spawned >= static_cast<std::size_t>(cap)) {
+    if (spawned >= wanted) {
       break;
     }
     auto &def = state.scenario.fleets[i];
     if (def.lead_ship_class_id < 0) {
       continue;
     }
-    // Stand-in: force-available the def (Step 5 will replace this with the
-    // real system binding + availability-expression evaluation).
+    // Stand-in: temporarily force the def available for this one spawn. Step 5
+    // will replace this with the real binding + availability evaluation.
+    const bool was_available = def.is_available_runtime;
     def.is_available_runtime = true;
     const int slot = NovaEncounter_SpawnFleetLeadShip(
         state, state.player.current_system_id, static_cast<std::int16_t>(i));
-    (void)slot;
+    def.is_available_runtime = was_available;
+    if (slot == -1) {
+      break;
+    }
     ++spawned;
   }
   if (spawned > 0) {
@@ -264,6 +282,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // system (the original's jump completion re-runs
     // NovaEffects_QueuedAmbientStarParticles).
     if (state.travel.just_completed) {
+      SpawnRoamingFleetsStandIn(state);
       view.SpawnAmbientStars(platform, state);
     }
     // Seed an automatic target, while retaining a stellar chosen by Tab/
