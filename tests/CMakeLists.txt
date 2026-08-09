@@ -3,6 +3,8 @@ add_executable(evnova_tests
     scenario_data_test.cpp
     smoke_test.cpp
     movement_test.cpp
+    ship_model_test.cpp
+    ship_spawn_test.cpp
     sprite_test.cpp
     weapon_test.cpp
     gameplay_interface_test.cpp

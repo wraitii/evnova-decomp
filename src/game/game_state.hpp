@@ -56,28 +56,70 @@ struct IntroCinematicData {
   }
 };
 
-// Ghidra 0x004b3350 Ship_ResetPlayerShipState resets g_ship_states. The
-// reimplementation tracks only the fields meaningfully needed for the
-// new-pilot flow and early game loop so far; deep AI/combat fields are
-// present and reset but unused until spaceflight is reconstructed.
-struct PlayerShip {
-  float pos_x = 0.0F;
-  float pos_y = 0.0F;
-  float vel_x = 0.0F;
-  float vel_y = 0.0F;
-  float heading = 0.0F; // radians
-  float speed = 0.0F;
-  float shield_points = 0.0F;         // g_ship_states->shield_points
-  float armor_points = 0.0F;          // g_ship_states->armor_points
-  float fuel_points = 0.0F;           // g_ship_states->fuel_points
-  float death_timer_active = -1.0F;   // g_ship_states->death_timer_active
-  std::int16_t ship_class_id = 0;     // g_ship_states->ship_class_id
+// A single ship in a system. The original keeps them all in one global array
+// `g_ship_states`, 64 slots each of a `ShipState` (offset 0 = the player). We
+// model the common kinematic/combat/identity subset the reimplementation needs
+// now (movement, targeting, and later the spawn + AI systems). Only the fields
+// with a clear Ghidra `ShipState` mapping are named with their offset; deep
+// AI/combat fields are added as their systems are reconstructed (see
+// Ship_AllocateShipSlotInSystem 0x004254b0). Index 0 in GameState.ships_ is the
+// player; GameState.player references it (the original g_ship_states[0]).
+struct Ship {
+  // --- Kinematics (Ghidra ShipState) ---
+  float pos_x = 0.0F;   // +0x18
+  float pos_y = 0.0F;   // +0x1C
+  float vel_x = 0.0F;   // +0x20
+  float vel_y = 0.0F;   // +0x24
+  float heading = 0.0F; // +0x44 radians
+  float speed = 0.0F;   // +0x48
+  // +0x30 ai_forward_thrust_cmd: whether the ship is applying forward thrust
+  // this frame. Mirrored by `engine_thrust` below for the player's render glow.
+
+  // --- Vital stats ---
+  float shield_points = 0.0F;       // +0x54
+  float armor_points = 0.0F;        // +0x58
+  float fuel_points = 0.0F;         // +0x38
+  float death_timer_active = -1.0F; // +0x3C
+
+  // --- Identity / placement ---
+  std::int16_t ship_class_id = 0;             // +0x76 (ship id 0x80..)
+  std::int16_t ship_instance_id = 0;          // +0x86 (0 = player)
+  std::int16_t current_system_id = 0;         // +0x74
+  std::int16_t faction_or_government_id = -1; // +0x98
+  std::int16_t dude_class_id = -1;            // +0x78
   std::string ship_name;
-  std::int16_t current_system_id = 0; // g_ship_states->current_system_id
-  std::int16_t active_weapon_bank_slot = 0;
-  std::int16_t timed_action_counter = -1; // g_ship_states->timed_action_counter
-  std::int32_t credits = 0;               // g_ship_states->credits
-  bool is_active = false;                 // g_ship_states->is_active
+
+  // --- Weapon bank / active selection ---
+  std::int16_t active_weapon_bank_slot = 0; // +0x72
+  // Ghidra keeps the 6 weapon-bank ammo counters at +0xC8 (a 100-stride row) on
+  // the ShipState. The reimplementation instead tracks player ammo centrally in
+  // GameState.weapon_bank_ammo/key secondary (weapon.cpp). The per-bank
+  // cooldown lives in GameState.weapon_bank_cooldown. Added here only when the
+  // NPC weapon path is reconstructed (Ship_AllocateShipSlotInSystem seeds these
+  // from the ShipClassDef loadout).
+
+  // --- Mission / target/AI slots (added to unblock spawn/targeting) ---
+  std::int16_t mission_owner_slot = -1;       // +0x8A
+  std::int16_t mission_fleet_slot = -1;       // +0xC8D2
+  std::int16_t ai_behavior_code = 0;          // +0x88
+  std::int16_t ai_state_code = 0;             // +0xC8C8
+  std::int16_t ai_control_mode = 0;           // +0xC8CA
+  std::int16_t primary_target_ship_slot = -1; // +0x70
+  std::int16_t ai_secondary_target_slot =
+      -1;                                // +0x6C (also a travel/stellar slot)
+  std::int16_t ai_target_ship_slot = -1; // +0x9A
+  std::int16_t target_stellar_object_id = -1;    // +0x8C
+  std::int16_t jump_destination_stellar_id = -1; // +0x92
+  std::int16_t ai_hostility_accumulator = 0;     // +0x96
+
+  // --- Misc ---
+  std::int16_t timed_action_counter = -1; // +0xC908
+  std::int32_t credits = 0;               // +0xA0
+  bool is_active = false;                 // +0xB8
+
+  // --- Player-only render/input extras (kept on Ship for simplicity; the
+  // original stores the engine-glow level at ShipState +0xc8d4 and per-ship
+  // muzzle geometry derived from the sh\x8an descriptor). ---
   // Engine-thrust latch: whether the player is currently applying forward
   // thrust this frame (mirrors Ghidra ShipState.ai_forward_thrust_cmd at +0x30
   // being non-zero). Written by NovaPlayer_UpdateFromInput and read by the
@@ -113,6 +155,10 @@ struct PlayerShip {
   std::array<std::int8_t, 4> muzzle_quadrant{-1, -1, -1, -1};
 };
 
+// Historical name for `Ship`; kept so existing player-ship helpers compile
+// unchanged after the rename. New code should use `Ship` directly.
+using PlayerShip = Ship;
+
 // The new pilot's identity (first/last name) and start configuration, filled
 // by the pilot-naming dialog in the new-game flow. Ghidra keeps these in
 // DAT_007d20b7 (first) / DAT_007d21b7 (last) and DAT_007d22b7 (start type).
@@ -137,6 +183,7 @@ struct PilotControlState {
   [[nodiscard]] bool ControlBit(std::uint32_t bit) const {
     return bit < kControlBitCount && bits.test(bit);
   }
+
   void SetControlBit(std::uint32_t bit, bool value) {
     if (bit < kControlBitCount) {
       bits.set(bit, value);
@@ -279,6 +326,36 @@ struct HudOverlayState {
 // globals for the transient not-yet-reconstructed subsystems with explicit
 // flags so we can log exactly what is and is not preserved.
 struct GameState {
+  // Size of the original global ship array `g_ship_states` (0x40 slots).
+  // Index 0 is the player; the remaining slots hold NPC ships.
+  static constexpr std::size_t kMaxShips = 0x40;
+
+  // The ship slots (mirrors `g_ship_states`). Index 0 is the player; the
+  // reimplementation keeps it reachable both through `ships[0]` and the
+  // convenience reference `player`. `ships_` is private; use the accessors
+  // below (or GameState.player for the index-0 ship).
+  std::array<Ship, kMaxShips> ships_;
+
+  // Convenience alias for ships_[0] (the player). Kept so the large existing
+  // `state.player` codebase needs no churn; the same object lives in the ship
+  // array, matching the original g_ship_states[0].
+  Ship &player;
+
+  // Binds `player` to ships_[0]. GameState is never copied or moved in this
+  // codebase, so the reference member is safe; it prohibits assignment of the
+  // whole struct (no caller does).
+  GameState() : player(ships_[0]) {}
+
+  [[nodiscard]] Ship &ShipAt(std::size_t slot) { return ships_[slot]; }
+
+  [[nodiscard]] const Ship &ShipAt(std::size_t slot) const {
+    return ships_[slot];
+  }
+
+  [[nodiscard]] bool SlotInRange(std::size_t slot) const {
+    return slot < kMaxShips;
+  }
+
   // Seeded PRNG backing the new-game flow's random opener strings and start
   // selection. The original uses a global NovaRandom; this is kept local to
   // the state so runs are reproducible when seeded identically.
@@ -288,7 +365,6 @@ struct GameState {
                              // the intro cinematic plays on first flight.
   PilotData pilot;
   PilotControlState control;
-  PlayerShip player;
   TravelState travel;
   IntroCinematicData intro_cinematic;
   // The transient HUD overlay message (see HudOverlayState). Kept on GameState
