@@ -4,8 +4,9 @@ Goal: make NPC ships do things -- move around the system, wander toward / land o
 stellars, escort, acquire combat targets, and jump between systems.
 
 This is a living plan. Phases are listed in the recommended execution order and
-each has a concrete milestone. Mark completed items as you land them and cross
-off phases when done.
+marked as they land. Current state: **Phases 0-1 done** (NPC movement physics
+integrator wired into per-frame tick); next up is **Phase 2** (shared steering
+math helpers) then **Phase 3** (the AI decision layer).
 
 ## Current architecture snapshot (start state)
 
