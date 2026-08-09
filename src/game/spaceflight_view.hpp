@@ -39,9 +39,12 @@ public:
   SpaceflightView &operator=(const SpaceflightView &) = delete;
 
   // Ensures the player's ship sprite sheet (from sh\x8an BaseImageID) is
-  // decoded and uploaded, and returns false if it could not be loaded.
+  // decoded and uploaded, and returns false if it could not be loaded. Also
+  // copies the sh\x8an weapon-exit (muzzle) geometry into
+  // GameState::player::muzzle_* so the firing path offsets shots to the ship's
+  // gun barrels. Non-const because it mutates the player ship state.
   [[nodiscard]] bool EnsureShipSprite(SdlPlatform &platform,
-                                      const GameState &state);
+                                      GameState &state);
 
   // Draws the whole in-flight world (solid per-system space backdrop, ambient
   // starfield, stellar bodies, player ship) into the current renderer.

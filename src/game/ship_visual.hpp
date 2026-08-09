@@ -10,6 +10,7 @@
 // decoder carries the base-image fields and the rotation metadata that drive
 // frame selection by heading.
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -59,6 +60,25 @@ struct ShipVisualDescriptor {
   std::int16_t engine_glow_mask_id = 0;  // GlowMaskID (+0x18)
   std::uint16_t engine_glow_x_size = 0;  // GlowXSize (+0x1a)
   std::uint16_t engine_glow_y_size = 0;  // GlowYSize (+0x1c)
+
+  // Per-turret-group weapon-exit (muzzle) offsets. EVN ships have up to four
+  // turret groups, each with up to four quadrant barrels; a projectile is
+  // offset off the ship centre to the barrel of its weapon's turret group,
+  // alternating quadrant as the ship fires (Ghidra ShipClassDef
+  // field_0xa42.. and Weapon_ApplyTurretSpreadVelocity 0x0046c5c0). The
+  // loader (ShipClass_LoadShipClassVisualAndLaunchData) copies these shorts
+  // from the sh\x8an descriptor at +0x48..+0xae.
+  struct TurretGroupMuzzle {
+    std::array<std::int16_t, 4> lateral{}; // field_0xa42 per quadrant
+    std::array<std::int16_t, 4> forward{}; // field_0xa44 per quadrant
+    std::array<std::int16_t, 4> drop{};    // field_0xa82 per quadrant
+  };
+  std::array<TurretGroupMuzzle, 4> turret_muzzles{};
+  // Weapon-exit compress scales (ShipClassDef field_0xaa4/0xaa8), already
+  // multiplied by the 0.01 compress factor (raw sh\x8an short * 0.01; for the
+  // Shuttle 100*0.01 = 1.0 and 71*0.01 = 0.71, matching the loader defaults).
+  float muzzle_scale_x = 0.0F;
+  float muzzle_scale_y = 0.0F;
 };
 
 // Decodes one sh\x8an descriptor payload (Ghidra ShipClass_LoadShipClass-

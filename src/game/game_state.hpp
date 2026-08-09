@@ -91,6 +91,26 @@ struct PlayerShip {
   std::int16_t engine_glow_level = 0;
   // Derived render value, always engine_glow_level / 24 clamped to [0,1].
   float engine_glow_intensity = 0.0F;
+
+  // Weapon-exit (muzzle) geometry for the player's ship, decoded from the
+  // ship's sh\x8an descriptor (see ShipVisualDescriptor.turret_muzzles) when
+  // the ship sprite is ensured. Shots spawn at the barrel of their weapon's
+  // turret group rather than the ship centre (Ghidra Weapon_ApplyTurretSpread-
+  // Velocity 0x0046c5c0 via Weapon_SelectTurretQuadrant 0x0046c320), which is
+  // what makes the Light Blaster (and other guns) visibly fire from the nose.
+  // Indexed [turret_group][quadrant], 4 groups x 4 quadrant barrels.
+  std::array<std::array<std::int16_t, 4>, 4> muzzle_lateral{};
+  std::array<std::array<std::int16_t, 4>, 4> muzzle_forward{};
+  std::array<std::array<std::int16_t, 4>, 4> muzzle_drop{};
+  // Per-axis weapon-exit compress scale (field_0xaa4/0xaa8, x 0.01).
+  float muzzle_scale_x = 0.0F;
+  float muzzle_scale_y = 0.0F;
+  // Whether muzzle geometry has been loaded for the current ship class. Cleared
+  // and repopulated each time the ship class changes / the sprite is ensured.
+  bool muzzle_ready = false;
+  // Per-turret-group quadrant rotation state (next barrel to fire), -1 until
+  // the first shot chooses a random quadrant (Weapon_SelectTurretQuadrant).
+  std::array<std::int8_t, 4> muzzle_quadrant{-1, -1, -1, -1};
 };
 
 // The new pilot's identity (first/last name) and start configuration, filled

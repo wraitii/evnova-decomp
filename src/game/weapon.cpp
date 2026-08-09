@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <random>
 
 namespace game {
 namespace {
@@ -260,13 +261,41 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
 
   ActiveShot shot;
   shot.weapon_id = weapon_bank;
-  // World position: the ship's centre. The per-frame sprite anchors in the
-  // sprite world (Sprite_AnchorToScreen + DrawSprite's opts.anchor_*) make the
-  // gun-fire-point placement available; wiring it needs the fired round to exit
-  // at the ship sprite's gun-exit point, which awaits ShipClassDef.gun_exit_pos
-  // being decoded (TODO(decomp)).
+  // World position starts at the ship centre, then is offset to the barrel of
+  // the weapon's turret group (Ghidra Weapon_ApplyTurretSpreadVelocity
+  // 0x0046c5c0 via Weapon_SelectTurretQuadrant 0x0046c320). This is what makes
+  // the Light Blaster (and other gun/turret weapons) visibly fire from the
+  // ship's nose instead of dead-centre; without the offset the projectile would
+  // always appear to launch from the exact middle of the hull.
   shot.pos_x = ship.pos_x;
   shot.pos_y = ship.pos_y;
+  const int turret_group = static_cast<int>(w->turret_group_id);
+  if (state.player.muzzle_ready && turret_group >= 0 && turret_group < 4) {
+    // Pick the next barrel (quadrant) for this group, cycling 0..3 as the
+    // ship fires; -1 means no barrel has been chosen yet, so the first shot
+    // picks a random one (Weapon_SelectTurretQuadrant).
+    auto &quadrant = state.player.muzzle_quadrant[turret_group];
+    if (quadrant < 0 || quadrant > 3) {
+      quadrant = static_cast<std::int8_t>(
+          std::uniform_int_distribution<int>{0, 3}(state.rng));
+    }
+    const int q = quadrant;
+    // Muzzle offset (reference):
+    //   el.x = sin(heading)*F + cos(heading)*L   (F forward, L lateral
+    //          from Math_AddPolarVelocity at bearing+90deg)
+    //   el.y = -cos(heading)*F + sin(heading)*L
+    //   pos += (el.x * scale_x, el.y * scale_y - drop)
+    const float F = static_cast<float>(state.player.muzzle_forward[turret_group][q]);
+    const float L = static_cast<float>(state.player.muzzle_lateral[turret_group][q]);
+    const float drop = static_cast<float>(state.player.muzzle_drop[turret_group][q]);
+    const float sin_h = std::sin(ship.heading);
+    const float cos_h = std::cos(ship.heading);
+    shot.pos_x += (sin_h * F + cos_h * L) * state.player.muzzle_scale_x;
+    shot.pos_y +=
+        (-cos_h * F + sin_h * L) * state.player.muzzle_scale_y - drop;
+    // Advance to the next barrel for this group on the following shot.
+    quadrant = static_cast<std::int8_t>((q + 1) & 3);
+  }
   // Velocity = heading-projected projectile speed + the ship's own velocity
   // (Math_AddPolarVelocity convention: heading 0 = up/-y, vel=(sin,-cos)*s).
   // WeaponDef.Speed is stored as pixels/frame * 100 (see scenario_data.hpp).
@@ -283,13 +312,20 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
     state.pending_fire_sound_slots.push_back(w->fire_sound);
   }
 
-  // Set the bank cooldown to the fire interval (the original computes this
-  // from the weapon's burst/reload fields; here reload_ticks, in reference
-  // cadence frames, is used. TODO(decomp): reproduce the exact
-  // speed_scalar / burst bookkeeping). The bank cannot fire again until this
-  // elapses (NovaWeapon_TickShots counts it down).
+  // Set the bank cooldown to the fire interval. The original divides the
+  // weapon's fire cadence by the number of weapons mounted in this bank
+  // (Weapon_FirePlayerWeaponBank sets `weapon_bank_cooldown = sVar18 *
+  // speed_scalar / weapon_bank_ammo`, with sVar18 = shots actually fired, 1 for
+  // the light blaster's non-burst path). weapon_bank_ammo holds the mount
+  // count, so buying/installing a second identical weapon doubles the fire
+  // rate rather than being a no-op. The bank cannot fire again until this
+  // elapses (NovaWeapon_TickShots counts it down); reload_ticks is the
+  // reference-cadence speed_scalar in frames.
+  const int mount_count =
+      std::max(1, static_cast<int>(BankAmmo(state, weapon_bank)));
   state.weapon_bank_cooldown[weapon_bank] =
-      static_cast<float>(std::max(1, static_cast<int>(w->reload_ticks)));
+      static_cast<float>(std::max(1, static_cast<int>(w->reload_ticks))) /
+      static_cast<float>(mount_count);
 }
 
 void NovaWeapon_FirePlayerPrimary(GameState &state) {
