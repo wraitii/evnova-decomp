@@ -20,6 +20,7 @@ add_library(evnova_runtime
     game/intro_cinematic.cpp
     game/landed_window.cpp
     game/landed_store.cpp
+    game/maneuver.cpp
     game/docked_dialog.cpp
     game/negotiation_dialog.cpp
     game/new_pilot_flow.cpp

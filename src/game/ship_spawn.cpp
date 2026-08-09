@@ -249,6 +249,48 @@ int NovaEncounter_SelectFleetDefWeighted(const System &system,
   return -1;
 }
 
+// Ghidra 0x0046b600 Dude_SelectRandomSystemDudeClassIndex. See the header.
+// The original unrolls the eight slots (SystemDef +0x4a class ids / +0x5a
+// weights), accumulates a cumulative bucket over valid class ids (>= 0 and
+// < 0x200), draws a uniform value in [0, total) via NovaRandom_Range, and its
+// descending loop (which keeps overwriting the picked slot) terminates on the
+// lowest-index valid slot whose bucket reaches (draw+1). We express that with
+// an ascending scan over the same cumulative bucket; it selects the identical
+// slot. Real weights sum far below 65536, so the original's 16-bit `total`
+// accumulation never wraps.
+int NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
+                                              std::mt19937 &rng) {
+  auto is_valid_slot = [&system](std::size_t i) {
+    return system.dude_class_ids[i] >= 0 && system.dude_class_ids[i] < 0x200;
+  };
+
+  std::array<std::int32_t, 8> bucket{}; // cumulative weights over valid slots
+  std::int32_t total = 0;
+  for (std::size_t i = 0; i < system.dude_class_ids.size(); ++i) {
+    if (i > 0) {
+      bucket[i] = bucket[i - 1];
+    }
+    if (is_valid_slot(i)) {
+      bucket[i] += system.dude_class_weights[i];
+      total += system.dude_class_weights[i];
+    }
+  }
+  if (total < 1) {
+    return -1;
+  }
+
+  std::uniform_int_distribution<std::int32_t> dist{0, total - 1};
+  const std::int32_t draw = dist(rng) + 1; // (draw+1) in [1, total]
+  for (std::size_t i = 0; i < system.dude_class_ids.size(); ++i) {
+    if (is_valid_slot(i) && draw <= bucket[i]) {
+      return static_cast<int>(i);
+    }
+  }
+  // The cumulative bucket of the highest valid slot equals `total`, so the
+  // draw is always covered; this is unreachable for consistent weights.
+  return -1;
+}
+
 // Ghidra 0x00425280 EncounterFleet_TrySpawnRandomEncounterFleet. See the
 // header for the full filter decode and the selection semantics. The original
 // scans all 0x100 FleetDef slots (g_random_encounter_fleet_defs); our

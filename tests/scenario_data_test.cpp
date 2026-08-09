@@ -1,4 +1,6 @@
+#include "game/maneuver.hpp"
 #include "game/scenario_data.hpp"
+#include "game/ship_spawn.hpp"
 #include "game/ship_visual.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -601,7 +603,9 @@ TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   CHECK(s->avg_ships == 4);
   CHECK(s->government_id == 0);
   CHECK(s->message_id == -1);
-  CHECK(s->asteroid_count == 3);
+  // payload +0x6a -> SystemDef.roaming_ship_count (re-ships/asteroid drifts).
+  CHECK(s->roaming_ship_count == 3);
+  CHECK(s->roaming_direction_bitmap == 0x0711);
   CHECK(s->interference == 0);
 
   // Dude type ids are rebased -0x80 (payload 0x01fe/0x9b/0x9c/0x80/0xe3/...).
@@ -642,6 +646,173 @@ TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   CHECK(alphara->encounter_fleet_weights[0] == 20);
   CHECK(alphara->dude_class_ids[1] == 2);
   CHECK(alphara->dude_class_weights[1] == 20); // raw 16, normalized by 1.25
+}
+
+// The DudeDef table (d\x9fde family, Nova Data 1) decodes into
+// ScenarioData.dudes. The loader (0x004bd3c0 dude section) re-arranges the
+// payload's scattered fields into the 74-byte in-memory DudeDef, re-bases the
+// government and ship-type ids by -0x80, and validates ship types against the
+// loaded ship-class table. Values pinned against the shipped dude 0x80
+// ("Lone Federation Ship") and 0x81 ("Trader") records.
+TEST_CASE("dude defs decode and rebase from the payload", "[scenario][dude]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // 147 dude templates are present (resource ids 0x80..0x172); absent slots
+  // stay default (present == false).
+  std::size_t present = 0;
+  for (const DudeDef &d : data.dudes) {
+    present += d.present ? 1U : 0U;
+  }
+  CHECK(present == 147);
+
+  // Lone Federation Ship (id 0x80): ai 4, government 0x80 rebased to 0
+  // (Federation), booty/hail from payload +0x04/+0x06.
+  const DudeDef *lone = data.Dude(0x80);
+  REQUIRE(lone != nullptr);
+  REQUIRE(lone->present);
+  CHECK(lone->ai_type == 4);
+  CHECK(lone->government_id == 0);
+  CHECK(lone->booty_flags == 0U);
+  CHECK(lone->hail_info_types == 0x8000);
+  // 13 candidate ships (payload +0x08 big-endian, rebased -0x80); trailing
+  // 0xffff sentinels decode to -1 (unused slots).
+  CHECK(lone->ship_types ==
+        std::array<std::int16_t, 16>{
+            14, 44, 16, 17, 59, 87, 88, 89, 95, 96, 97, 98, 223, -1, -1, -1});
+  CHECK(lone->ship_probabilities ==
+        std::array<std::int16_t, 16>{
+            11, 20, 11, 11, 10, 3, 3, 3, 5, 4, 5, 4, 10, 0, 0, 0});
+
+  // Trader (id 0x81): ai 1, government 0x9d rebased to 29, all 16 ships used.
+  const DudeDef *trader = data.Dude(0x81);
+  REQUIRE(trader != nullptr);
+  REQUIRE(trader->present);
+  CHECK(trader->ai_type == 1);
+  CHECK(trader->government_id == 29);
+  CHECK(trader->booty_flags == 127);
+  CHECK(trader->hail_info_types == 0x1000);
+  CHECK(trader->ship_types ==
+        std::array<std::int16_t, 16>{
+            0, 1, 8, 7, 60, 61, 74, 75, 149, 150, 29, 179, 180, 181, 251, 2});
+
+  // Foreign government check: a < 0x80 or > 0x17f government id is kept
+  // verbatim (never rebased). The Slyvilian Defence Scum (0x96) government
+  // reads 0xffff (-1) in the raw payload and stays -1.
+  const DudeDef *scum = data.Dude(0x96);
+  REQUIRE(scum != nullptr);
+  REQUIRE(scum->present);
+  CHECK(scum->government_id == -1);
+}
+
+// Dude_SelectRandomSystemDudeClassIndex (0x0046b600) weighted pick on a
+// system's eight dude slots: the cumulative-weight bucket over valid class ids
+// and the uniform draw select the lowest-index slot whose bucket reaches the
+// draw. Deterministic over a seeded mt19937; exercised on Kania's binding.
+TEST_CASE("dude class weighted-select returns slots with valid weight",
+          "[scenario][dude]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // Kania (0x80) binds eight dude slots; verify a couple and their weights.
+  const System *kania = data.System(0x80);
+  REQUIRE(kania != nullptr);
+  CHECK(kania->dude_class_ids[0] == 0);
+  CHECK(kania->dude_class_ids[1] == 2);
+  CHECK(kania->dude_class_weights[0] == 30);
+  CHECK(kania->dude_class_weights[1] == 10);
+
+  std::mt19937 rng{12345};
+  std::array<long, 8> hits{};
+  constexpr int kTrials = 20000;
+  for (int i = 0; i < kTrials; ++i) {
+    const int slot = NovaDude_SelectRandomSystemDudeClassIndex(*kania, rng);
+    REQUIRE(slot >= 0);
+    REQUIRE(slot < 8);
+    ++hits[static_cast<std::size_t>(slot)];
+  }
+  // Every slot carrying a non-zero weight is picked sometimes, and the draws
+  // always land on a weighted (valid) slot, so all trials are consumed.
+  long total = 0;
+  for (const long h : hits) {
+    total += h;
+    CHECK(h >= 0);
+  }
+  CHECK(total == kTrials);
+  CHECK(hits[0] > 0);
+  CHECK(hits[1] > 0);
+  CHECK(hits[7] > 0);
+  // The heaviest-weighted slot (slot 0, weight 30) is the most common and the
+  // weight-10 slot 1 is rarer than the weight-12 slot 4.
+  CHECK(hits[0] > hits[7]);
+  CHECK(hits[7] > hits[1]);
+  CHECK(hits[4] > hits[1]);
+
+  // A system with no valid weighted dude slots returns -1.
+  System bare;
+  REQUIRE(NovaDude_SelectRandomSystemDudeClassIndex(bare, rng) == -1);
+}
+
+// The manoeuvre-type (asteroid-drift) table (r\x9aid family, Nova Data 1)
+// decodes into ScenarioData.maneuver_types. One row per resource id
+// 0x80..0x8f (Metal/Ice/Dust/Crystal x Small/Medium/Big/Huge). Values pinned
+// against the shipped rows (verified directly from the raw payload bytes):
+// wander_table_value = word[0x0], wander_speed_multiplier = word[0x2] * 0.01,
+// lifetime = word[0x16] (doubles per size tier), tint +0x18 packed from the
+// +0x0a RGB bytes. The speed/lifetime fields feed the ScriptedManeuverState
+// spawn (NovaManeuver_SpawnState).
+TEST_CASE("manoeuvre-type rows decode from the payload",
+          "[scenario][maneuver]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // All 16 ids 0x80..0x8f are present.
+  std::size_t present = 0;
+  for (const ManeuverTypeDef &t : data.maneuver_types) {
+    present += t.present ? 1U : 0U;
+  }
+  CHECK(present == 16);
+
+  // Metal Small (0x80): value 100, speed 100% (-> 1.0), lifetime 150.
+  const ManeuverTypeDef *small = data.ManeuverType(0x80);
+  REQUIRE(small != nullptr);
+  REQUIRE(small->present);
+  CHECK(small->wander_table_value == 100);
+  CHECK(std::fabs(small->wander_speed_multiplier - 1.0F) < 1e-4F);
+  CHECK(small->lifetime == 150);
+  // Metal Small is the lightest debris: small speed-scale, neutrals tint.
+  CHECK(small->field_0x04 == 4);
+  CHECK(small->field_0x02 == 4);
+  CHECK(small->field_0x0c == 20);
+
+  // Metal Huge (0x83): lifetime doubles with the size tier.
+  const ManeuverTypeDef *huge = data.ManeuverType(0x83);
+  REQUIRE(huge != nullptr);
+  REQUIRE(huge->present);
+  CHECK(huge->lifetime == 1200);
+  CHECK(huge->wander_table_value == 300);
+  // word[0x2] = 0x19 = 25 -> 0.25 speed multiple.
+  CHECK(std::fabs(huge->wander_speed_multiplier - 0.25F) < 1e-4F);
+
+  // Direction sub-array: Metal Medium (0x81) refs 0x80->0 and 0x88->8 (the
+  // loader's -0x80 rebase for the 0x80..0x90 window).
+  const ManeuverTypeDef *medium = data.ManeuverType(0x81);
+  REQUIRE(medium != nullptr);
+  CHECK(medium->directions[0] == 0); // payload 0x80 rebased
+  CHECK(medium->directions[1] == 8); // payload 0x88 rebased
+  CHECK(medium->directions[2] == 2);
+  CHECK(medium->lifetime == 300);
+
+  // A row absent from the range window stays default (present false). Only
+  // ids 0x80..0x8f exist, so ids >= 0x100 fall outside the table and the
+  // accessor returns null; ids in the hole (e.g. 0x90) are present==false
+  // default rows within the sized table.
+  REQUIRE(data.ManeuverType(0x8f) != nullptr);
+  REQUIRE(data.ManeuverType(0x8f)->present);
+  const ManeuverTypeDef *hole = data.ManeuverType(0x90);
+  REQUIRE(hole != nullptr);
+  CHECK_FALSE(hole->present);
+  CHECK(data.ManeuverType(0x100) == nullptr);
 }
 
 } // namespace game

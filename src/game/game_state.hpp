@@ -327,6 +327,35 @@ struct HudOverlayState {
   std::uint64_t expiry_ms = 0;
 };
 
+// A single roaming/asteroid-drift manoeuvre record. The original keeps 16 of
+// these in one global pool `g_scripted_maneuver_state_ptr` (16 x 0x24 bytes)
+// and spawns them with Frame_SpawnScriptedManeuverState (0x00421e60) from
+// effect packages (impact debris) and the travel-scene walker; the per-tick
+// drift is Frame_UpdateScriptedManeuverSprites (0x00436910). Layout mirrors the
+// Ghidra ScriptedManeuverState so a future sprite/drift layer can port
+// verbatim.
+struct ManeuverState {
+  // Sprite handle / state_code for this record; the drift renderer assigns a
+  // sprite set by wander_type and ticks/arm its frame counter from +0x54.
+  std::int32_t state_code = 0; // +0x00
+  float target_pos_x = 0.0F;   // +0x04
+  float target_pos_y = 0.0F;   // +0x08
+  float target_vel_x = 0.0F;   // +0x0c
+  float target_vel_y = 0.0F;   // +0x10
+  // Wander phase / lifetime accumulator. Spawned as a random value in
+  // [0, pertype lifetime) (Frame_SpawnScriptedManeuverState) and advanced by
+  // wander_speed each tick, wrapping via the sprite descriptor's frame count
+  // (Frame_UpdateScriptedManeuverSprites).
+  float wander_radius = 0.0F;          // +0x14
+  float wander_speed = 0.0F;           // +0x18
+  std::int16_t wander_table_value = 0; // +0x1c
+  std::int16_t wander_type = 0; // +0x1e (index into the manoeuvre-type table)
+  bool active = false;          // +0x20
+
+  // Pool size for the 16-slot ScriptedManeuverState table.
+  static constexpr std::size_t kPoolSize = 16;
+};
+
 // Everything about the running pilot's world. Replaces the Game_Reset* set of
 // globals for the transient not-yet-reconstructed subsystems with explicit
 // flags so we can log exactly what is and is not preserved.
@@ -426,6 +455,20 @@ struct GameState {
   // oriented by its velocity as Shot_HandleShot picks the heading frame.
   // Each entry is one fired round at a given world position/velocity.
   std::vector<ActiveShot> active_shots;
+
+  // The 16-slot roaming/asteroid-drift manoeuvre pool (mirrors the original
+  // `g_scripted_maneuver_state_ptr`). Shared by Frame_SpawnScriptedManeuver-
+  // State (spawn), the future System_InitRoamingShips / Dude_SpawnRoamingShip
+  // (Steps 3/4) and the step 5 per-tick drift. Slots are found by scanning
+  // for `active == false`.
+  std::array<ManeuverState, ManeuverState::kPoolSize> maneuver_pool{};
+
+  // "no roaming ships" latch set by System_InitRoamingShips (0x004216B0) when
+  // the current system declares roaming_ship_count < 1. The original writes a 1
+  // byte into the random-encounter fleet-def scratch area
+  // (g_random_encounter_fleet_defs[0x4d].availability_expression[0x94]); the
+  // clean-room stores it here since that scratch buffer is not modelled.
+  bool no_roaming_ships_latch = false;
 
   // Decoded player weapon fire sounds, keyed by the weapon's `fire_sound`
   // slot. Ghidra Weapon_FirePlayerWeaponBank resolves the weapon's

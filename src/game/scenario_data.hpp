@@ -38,6 +38,19 @@ constexpr std::uint32_t kStellarResourceType = 0x73709a62;    // sp\x9ab
 constexpr std::uint32_t kSystemResourceType = 0x73d87374;     // s\xd8st
 constexpr std::uint32_t kGovernmentResourceType = 0x679a7674; // g\x9avt
 constexpr std::uint32_t kFleetResourceType = 0x666c9174;      // fl\x91t
+// d\x9fde (0x649f6465) — the "dude" (NPC pilot/drifter) template family. One
+// record per dude def in Nova Data 1; see DudeDef. Loaded by the original
+// NovaData_LoadScenarioResourceTables (0x004bd3c0) into the g_dude_defs table.
+constexpr std::uint32_t kDudeResourceType = 0x649f6465; // d\x9fde
+// "r\x9aid" (0x729a6964) — the maneuver/asteroid-drift class family. Records
+// are named "Metal Small".."Crystal Huge" (4 compositions x 4 sizes = 16
+// entries, resource ids 0x80..0x8f) and define the per-type wander/drift
+// parameters fed to ScriptedManeuverState spawns (Frame_SpawnScripted-
+// ManeuverState 0x00421e60 / Dude_SpawnRoamingShip 0x00421830 wander reads).
+// Decoded by the original loader (NovaData_LoadScenarioResourceTables
+// 0x004bd3c0 at 0x004c6207) into the DAT_005912dc / DAT_005912f0 global pair,
+// which share one 0x1c-byte-strided 16-row table. See ManeuverTypeDef.
+constexpr std::uint32_t kManeuverTypeResourceType = 0x729a6964; // r\x9aid
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -506,11 +519,17 @@ struct System {
   // Govt (payload +0x66; <0x80 or >0x17f -> -1, else rebased -0x80). The
   // owning faction; gates alliance/hostility and the system's HUD/map color.
   std::int16_t government_id = -1;
-  std::int16_t message_id = -1;    // Message (+0x68)
-  std::int16_t asteroid_count = 0; // Asteroids (+0x6a; the loader also rescales
-                                   //  this by render height at load - see
-                                   //  DecodeSystem)
-  std::int16_t interference = 0;   // Interference (+0x6c)
+  std::int16_t message_id = -1; // Message (+0x68)
+  // Roaming-ship / asteroid-drift count (payload +0x6a), i.e. the number of
+  // drifting-debris/asteroid records to spawn for the system. The loader stores
+  // this payload word into SystemDef.roaming_ship_count (+0x94; verified in the
+  // 0x004bd3c0 system section: MOV WORD [g_system_defs+ebp+0x94],
+  // payload+0x6a). System_InitRoamingShips (0x004216B0) spawns this many
+  // Dude_SpawnRoamingShip records and pre-warms the 16-slot maneuver pool;
+  // Dude_SpawnRoamingShip (0x00421830) bails out when it is < 1. Previously
+  // misnamed `asteroid_count`.
+  std::int16_t roaming_ship_count = 0;
+  std::int16_t interference = 0; // Interference (+0x6c)
   // BkgndColor (s\xd8st +0x8e): per-system space background tint stored as
   // 24-bit 0xRRGGBB. Decoded to reproduce the original's runtime mapping (it
   // reads the resource bytes as a little-endian 32-bit and takes R=byte+0x90,
@@ -611,6 +630,107 @@ struct FleetDef {
   bool is_available_runtime = false;
 };
 
+// Ghidra DudeDef (g_dude_defs, up to 0x200 entries indexed by dude id minus
+// 0x80). One "dude" template: an NPC drifter/pirate pilot category with an AI
+// behavior, owning government, and up to 16 (ship-class, weight) pairs used to
+// spawn a wandering ship (EncounterFleet_SpawnRandomSystemDudeShip / the
+// roaming-dude spawners).
+//
+// The in-memory DudeDef is 74 bytes (
+// ai_type +0x00, government_id +0x02, ship_types[16] +0x04, ship_probabilities
+// [16] +0x24, booty_flags +0x44, hail_info_types +0x46) plus a present flag at
+// +0x48. IMPORTANT: the d\x9fde payload layout does NOT mirror the struct.
+// The original loader (NovaData_LoadScenarioResourceTables 0x004bd3c0, dude
+// section at 0x004c2a2d..) re-arranges the payload's scattered fields into the
+// struct, reads the 16-bit scalars big-endian, rebases government_id
+// (-0x80 when in 0x80..0x180) and each ship type (-0x80 when in 0x80..0x380),
+// and nulls out a ship type whose target ship-class def carries the
+// "nonexistent" marker (ShipClassDef.tech_level == (short)0xd8f1 == -9999).
+// The payload layout is:
+//   +0x00 ai_type, +0x02 government_id, +0x04 booty_flags,
+//   +0x06 hail_info_types, +0x08..+0x28 ship_types[16],
+//   +0x28..+0x48 ship_probabilities[16]; bytes +0x48..+0x58 are padding
+//   (the loader's EnsureBlockSize(payload, 0x58) requires an 88-byte record).
+struct DudeDef {
+  // AI behavior code (InherentAI) applied to ships spawned from this def, or
+  // -1 to fall back to the ship class's default. Ghidra DudeDef +0x00.
+  std::int16_t ai_type = -1;
+  // Owning government (0.. space after the loader's -0x80 rebase). Applied to
+  // every ship spawned from this def. Ghidra DudeDef +0x02.
+  std::int16_t government_id = -1;
+  // Candidate ship classes (0.. space, rebased -0x80 by the loader). A -1 slot
+  // is an unused/removed entry; Dude_SelectShipTypeIndexFromDudeDef skips it.
+  // Ghidra DudeDef +0x04.
+  std::array<std::int16_t, 16> ship_types{
+      -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+  // Per-ship weight used by Dude_SelectShipTypeIndexFromDudeDef's weighted
+  // pick. Ghidra DudeDef +0x24 (copied verbatim, no rebase).
+  std::array<std::int16_t, 16> ship_probabilities{};
+  // Booty / haul flags word. Ghidra DudeDef +0x44 (payload +0x04).
+  std::uint16_t booty_flags = 0;
+  // Hail/comm flags word. Ghidra DudeDef +0x46 (payload +0x06).
+  std::uint16_t hail_info_types = 0;
+  // set true by the loader for every present dude def (the struct's +0x48
+  // flags word is set to 1; absent slots stay 0).
+  bool present = false;
+};
+
+// One 0x1c-byte row of the shared maneuver/asteroid-drift table the original
+// exposes through two overlapping global labels: DAT_005912dc (a short[0xe]
+// window) and DAT_005912f0 (a float[7] window), which are the same 16-row,
+// 0x1c-byte-strided table. One row per resource id 0x80..0x8f (Metal/Ice/
+// Dust/Crystal x Small/Medium/Big/Huge). Loaded by NovaData_LoadScenario-
+// ResourceTables (0x004bd3c0 at 0x004c6207..) from the r\x9aid family into
+// the g_scripted_maneuver_state type params.
+//
+// Only the two fields consumed by the spawn reads are confidently named:
+//   +0x00 wander_table_value (read via DAT_005912dc[mode]), and
+//   +0x14 wander_speed_multiplier (read via DAT_005912f0[mode]).
+// The remaining fields are decoded with their loader-assigned offsets but
+// semantically provisional (TODO(decomp): confirm against Dude_SpawnRoamingShip
+// ring placement and the drift render). Payload layout (big-endian):
+//   +0x00 value, +0x02 speed%, +0x04 field, +0x06 field(+0x02),
+//   +0x08 field(+0x0c), +0x0a RGB bytes (565 -> 15-bit), +0x0e..+0x12 the
+//   3-element direction sub-array, +0x14 field(+0x10), +0x16 lifetime.
+struct ManeuverTypeDef {
+  // Lowest row field; stored into a spawned ScriptedManeuverState's
+  // wander_table_value (+0x1c). Ghidra DAT_005912dc[mode] (+0x00).
+  // Payload word[0x0]. Verbatim, no rebase.
+  std::int16_t wander_table_value = 0;
+  // Float wander-speed scale for this type; `(rand(0x29)+0x50) * this * 0.01`
+  // yields a state's wander_speed (+0x18). Ghidra DAT_005912f0[mode]
+  // (+0x14). Payload word[0x2] * 0.01 (0x64..0x12c => 0.5..3.0 shipped).
+  float wander_speed_multiplier = 1.0F;
+  // +0x02; loader validates payload word[0x6] >= 0. Provisional.
+  std::int16_t field_0x02 = 0;
+  // +0x04; loader accepts [-6,6] or [0x3e8,0x468). Provisional.
+  std::int16_t field_0x04 = 0;
+  // +0x0c; loader validates payload word[0x8] >= 0. Provisional.
+  std::int16_t field_0x0c = 0;
+  // +0x10; loader accepts [0,0x40) or [0x3e8,0x428). Provisional (the
+  // ship/dude-id style window hints at a cross-reference).
+  std::int16_t field_0x10 = 0;
+  // +0x0e; payload word[0x16]. Scales with size tier in the shipped data
+  // (Metal Small 150 / Medium 300 / Big 600 / Huge 1200), consistent with a
+  // wander lifetime/count. PROVISIONAL: Frame_SpawnScriptedManeuverState reads
+  // the per-type lifetime from the sprite descriptor (+0x54), not this field;
+  // the drift layer (step 3/4) is expected to connect the two. Kept decoded
+  // so the spawn path has a datapoint.
+  std::int16_t lifetime = 0;
+  // 3-element direction sub-array at +0x06/+0x08/+0x0a (payload word[0xe+i*2],
+  // loader rebases 0x80..0x90 by -0x80, else requires <0x10). The third slot
+  // (+0x0a) converges with the standalone +0x0a field.
+  std::array<std::int16_t, 3> directions{0, 0, 0};
+  // Packed 15-bit tint for the drift sprite, computed from the payload's
+  // 3 RGB565 bytes via the loader's 565->555 downsample (red=byte[12]>>3,
+  // green=byte[11]>>3, blue=byte[10]>>3). +0x18 (DAT_005912f4). Not yet
+  // consumed (needs the drift-sprite render).
+  std::uint32_t color = 0;
+  // Set true for every present manoeuvre-type row (resource id 0x80..0x8f);
+  // absent ids stay default.
+  bool present = false;
+};
+
 // Owns the parsed scenario tables indexed by (resource id - 0x80), mirroring
 // the original global arrays (g_ship_class_defs etc.). Filled by
 // LoadFromArchives(). Entries are created for every id in the family's valid
@@ -624,6 +744,11 @@ struct ScenarioData {
   std::vector<System> systems;         // indexed by system_id - 0x80
   std::vector<Government> governments; // indexed by government_id - 0x80
   std::vector<FleetDef> fleets;        // indexed by fleet_id - 0x80
+  std::vector<DudeDef> dudes;          // indexed by dude_id - 0x80
+  // Asteroid/drift manoeuvre-class table (r\x9aid family, one row per resource
+  // id 0x80..0x8f). Ghidra g_scripted_maneuver_state's per-type params read
+  // via the DAT_005912dc / DAT_005912f0 pair.
+  std::vector<ManeuverTypeDef> maneuver_types; // indexed by type id - 0x80
 
   // gh.id 0x80.. lookup for government/faction data.
   [[nodiscard]] const Government *Government(std::int16_t resource_id) const;
@@ -638,6 +763,13 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for a random-encounter fleet template, or nullptr when
   // outside the loaded range.
   [[nodiscard]] const FleetDef *Fleet(std::int16_t resource_id) const;
+  // gh.id 0x80.. lookup for a dude template (g_dude_defs), or nullptr when
+  // outside the loaded range.
+  [[nodiscard]] const DudeDef *Dude(std::int16_t resource_id) const;
+  // gh.id 0x80.. lookup for a manoeuvre-type row, or nullptr when outside the
+  // loaded range.
+  [[nodiscard]] const ManeuverTypeDef *
+  ManeuverType(std::int16_t resource_id) const;
 
   // Ghidra NovaData_LoadScenarioResourceTables (0x004bd3c0). Walks each
   // resource family by id 0x80.. max and decodes it into the matching table.

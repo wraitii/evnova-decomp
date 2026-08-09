@@ -490,7 +490,10 @@ namespace {
   s.avg_ships = ReadBeI16(bytes, 0x64);
   s.government_id = ReadBeI16(bytes, 0x66);
   s.message_id = ReadBeI16(bytes, 0x68);
-  s.asteroid_count = ReadBeI16(bytes, 0x6a);
+  // Payload +0x6a -> SystemDef.roaming_ship_count (+0x94). Previously named
+  // `asteroid_count`; the roaming-ship/asteroid-drift spawners (System_Init-
+  // RoamingShips 0x004216B0 / Dude_SpawnRoamingShip 0x00421830) read it.
+  s.roaming_ship_count = ReadBeI16(bytes, 0x6a);
   s.interference = ReadBeI16(bytes, 0x6c);
   // Government rebase mirrors the loader: < 0x80 or > 0x17f -> -1 else -0x80.
   if (s.government_id < 0x80 || s.government_id > 0x17f) {
@@ -603,6 +606,114 @@ namespace {
   return f;
 }
 
+// ---------------------------------------------------------------------------
+// d\x9fde (DudeDef) decode
+// ---------------------------------------------------------------------------
+// See the DudeDef comment in scenario_data.hpp for the payload layout.
+// This mirrors the original loader's dude section (NovaData_LoadScenario-
+// ResourceTables 0x004bd3c0, at 0x004c2a2d..), which pulls the payload's
+// scattered fields into the 74-byte in-memory DudeDef, big-endian 16-bit
+// reads, and re-bases / validates the id references. `ship_table` is the
+// already-decoded ship-class table (g_ship_class_defs) used to null out a
+// ship type whose target class carries the "nonexistent" marker (a tech_level
+// of (short)0xd8f1 == -9999). The payload d\x9fde records observed in the
+// shipped archives are 88 bytes, matching the loader's EnsureBlockSize(payload,
+// 0x58); every shipped record references only defined ship classes, so the
+// marker branch never trips on real data.
+[[nodiscard]] DudeDef DecodeDude(std::span<const std::byte> bytes,
+                                 const std::vector<ShipClass> &ship_table) {
+  DudeDef d;
+  // The loader only accepts an 88-byte (0x58) minimum payload; bail to an
+  // empty def when the record is truncated.
+  if (bytes.size() < 0x58) {
+    return d;
+  }
+
+  d.ai_type = ReadBeI16(bytes, 0x00);
+  d.government_id = ReadBeI16(bytes, 0x02);
+  if (d.government_id >= 0x80 && d.government_id < 0x180) {
+    d.government_id = static_cast<std::int16_t>(d.government_id - 0x80);
+  }
+  d.booty_flags = ReadBe16(bytes, 0x04);
+  d.hail_info_types = ReadBe16(bytes, 0x06);
+
+  for (std::size_t i = 0; i < d.ship_types.size(); ++i) {
+    std::int16_t ship = ReadBeI16(bytes, 0x08 + i * 2);
+    if (ship >= 0x80 && ship < 0x380) {
+      ship = static_cast<std::int16_t>(ship - 0x80);
+      // Original: CMP g_ship_class_defs[ship].tech_level (ShipClassDef +0xa),
+      // 0xd8f1 -> set the slot to -1. tech_level is 16-bit, so (short)0xd8f1
+      // is the -9999 sentinel; real data never carries it (verified against
+      // the shipped archives), but replicate the gate for fidelity. An
+      // out-of-range class index (should not occur after the -0x80 rebase) is
+      // also nulled.
+      if (ship >= 0 && static_cast<std::size_t>(ship) < ship_table.size() &&
+          ship_table[static_cast<std::size_t>(ship)].tech_level ==
+              static_cast<std::int16_t>(0xd8f1)) {
+        ship = -1;
+      }
+    }
+    d.ship_types[i] = ship;
+  }
+  for (std::size_t i = 0; i < d.ship_probabilities.size(); ++i) {
+    d.ship_probabilities[i] = ReadBeI16(bytes, 0x28 + i * 2);
+  }
+  d.present = true;
+  return d;
+}
+
+// ---------------------------------------------------------------------------
+// r\x9aid (ManeuverTypeDef) decode
+// ---------------------------------------------------------------------------
+// See ManeuverTypeDef in scenario_data.hpp. Mirrors the original loader's
+// manoeuvre-type section (NovaData_LoadScenarioResourceTables 0x004bd3c0 at
+// 0x004c6207..), which reads the record's fields into the shared 0x1c-row
+// table exposed as DAT_005912dc / DAT_005912f0. Fields are big-endian 16-bit
+// except the 4-byte colour word at +0x0a (byte-swapped to a packed 15-bit RGB
+// at +0x18). Validation branches match the loader (skip row on a bad id
+// window); harmless for the shipped records.
+[[nodiscard]] ManeuverTypeDef
+DecodeManeuverType(std::span<const std::byte> bytes) {
+  ManeuverTypeDef t;
+  if (bytes.size() < 0x18) {
+    return t;
+  }
+  t.wander_table_value = ReadBeI16(bytes, 0x00);
+  // word[0x2] * 0.01 -> float multiplier (the loader FMULs by the 0.01 double
+  // DAT_00575e60).
+  t.wander_speed_multiplier =
+      static_cast<float>(ReadBeI16(bytes, 0x02)) * 0.01F;
+  t.field_0x04 = ReadBeI16(bytes, 0x04);
+  t.field_0x02 = ReadBeI16(bytes, 0x06);
+  t.field_0x0c = ReadBeI16(bytes, 0x08);
+  // Colour: the loader squashes the three RGB565-ish bytes at +0x0a to a
+  // 15-bit tint: red=byte[0xc]>>3, green=byte[0xb]>>3, blue=byte[0xa]>>3
+  // (see 0x004c62ed..0x004c6380).
+  {
+    const auto b0 = std::to_integer<std::uint8_t>(bytes[0x0a]); // blue
+    const auto b1 = std::to_integer<std::uint8_t>(bytes[0x0b]); // green
+    const auto b2 = std::to_integer<std::uint8_t>(bytes[0x0c]); // red
+    t.color = (static_cast<std::uint32_t>(b2) >> 3U) << 10U |
+              (static_cast<std::uint32_t>(b1) >> 3U) << 5U |
+              (static_cast<std::uint32_t>(b0) >> 3U);
+  }
+  // 3-element direction sub-array at payload +0x0e; the loader rebases
+  // 0x80..0x90 by -0x80, else requires the value < 0x10.
+  for (std::size_t i = 0; i < t.directions.size(); ++i) {
+    std::int16_t v = ReadBeI16(bytes, 0x0e + i * 2);
+    if (v >= 0x80 && v < 0x90) {
+      v = static_cast<std::int16_t>(v - 0x80);
+    }
+    // Out-of-range (non <0x10, non 0x80..0x90) would abort the row in the
+    // original; shipped data stays within the accepted windows.
+    t.directions[i] = v;
+  }
+  t.field_0x10 = ReadBeI16(bytes, 0x14);
+  t.lifetime = ReadBeI16(bytes, 0x16);
+  t.present = true;
+  return t;
+}
+
 } // namespace
 
 const ShipClass *ScenarioData::Ship(std::int16_t resource_id) const {
@@ -640,6 +751,17 @@ const FleetDef *ScenarioData::Fleet(std::int16_t resource_id) const {
   return index < fleets.size() ? &fleets[index] : nullptr;
 }
 
+const DudeDef *ScenarioData::Dude(std::int16_t resource_id) const {
+  const auto index = static_cast<std::size_t>(resource_id) - 0x80;
+  return index < dudes.size() ? &dudes[index] : nullptr;
+}
+
+const ManeuverTypeDef *
+ScenarioData::ManeuverType(std::int16_t resource_id) const {
+  const auto index = static_cast<std::size_t>(resource_id) - 0x80;
+  return index < maneuver_types.size() ? &maneuver_types[index] : nullptr;
+}
+
 bool ScenarioData::LoadFromArchives() {
   // The original sizes these tables to the family maximum and zero-fills
   // missing slots (0x200 ships/outfits, 0x100 weapons). We mirror that so
@@ -655,6 +777,12 @@ bool ScenarioData::LoadFromArchives() {
   // Random-encounter fleet tables: the original loops < 0x100 entries indexed
   // by fleet id minus 0x80.
   fleets.assign(0x100, {});
+  // Dude table (g_dude_defs): the original runs up to < 0x200 resource slots
+  // (the loader's loop bound at 0x004c2c81) at a 0x4a-byte DudeDef stride,
+  // indexed by dude id minus 0x80.
+  dudes.assign(0x200, {});
+  // Manoeuvre-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
+  maneuver_types.assign(0x80, {});
 
   std::size_t loaded_ships = 0;
   std::size_t loaded_weapons = 0;
@@ -663,6 +791,8 @@ bool ScenarioData::LoadFromArchives() {
   std::size_t loaded_systems = 0;
   std::size_t loaded_governments = 0;
   std::size_t loaded_fleets = 0;
+  std::size_t loaded_dudes = 0;
+  std::size_t loaded_maneuver_types = 0;
 
   for (std::int32_t id = 0x80; id <= 0x27f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
@@ -734,17 +864,42 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_fleets;
     }
   }
+  // Dude defs (Nova Data 1 d\x9fde family), up to 0x200 slots. Decoded after
+  // the ship-class table so DecodeDude can validate each ship-type reference
+  // against the loaded g_ship_class_defs (the loader's "nonexistent" marker
+  // check).
+  for (std::int32_t id = 0x80; id < 0x27f; ++id) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kDudeResourceType, static_cast<std::uint16_t>(id))) {
+      dudes[static_cast<std::size_t>(id) - 0x80] =
+          DecodeDude(res->bytes, ships);
+      ++loaded_dudes;
+    }
+  }
+  // Manoeuvre-type (asteroid-drift) rows (r\x9aid family), 16 ids 0x80..0x8f.
+  for (std::int32_t id = 0x80; id < 0x90; ++id) {
+    if (const auto res =
+            NovaResource_LoadNamed(scenario::kManeuverTypeResourceType,
+                                   static_cast<std::uint16_t>(id))) {
+      maneuver_types[static_cast<std::size_t>(id) - 0x80] =
+          DecodeManeuverType(res->bytes);
+      ++loaded_maneuver_types;
+    }
+  }
 
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
-      "{} systems, {} governments, {} fleet defs",
+      "{} systems, {} governments, {} fleet defs, {} dude defs, "
+      "{} maneuver types",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
       loaded_stellars,
       loaded_systems,
       loaded_governments,
-      loaded_fleets);
+      loaded_fleets,
+      loaded_dudes,
+      loaded_maneuver_types);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

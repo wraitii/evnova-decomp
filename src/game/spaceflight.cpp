@@ -7,9 +7,9 @@
 #include "hud_renderer.hpp"
 #include "intro_cinematic.hpp"
 #include "landed_window.hpp"
+#include "maneuver.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
-#include "ship_spawn.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
@@ -47,70 +47,6 @@ void Stub_TickReactionsAndNpcSpawns(GameState &state) { (void)state; }
 void Stub_CalcAiOdds(GameState &state) { (void)state; }
 
 void Stub_HandleShots(GameState &state) { (void)state; }
-
-// PROVISIONAL stand-in for the deferred System_InitRoamingShips / Step 5
-// encounter maintenance. On spaceflight entry and cross-system travel the
-// original restores the current system's NPC population up to its avg_ships
-// cap (random-encounter fleets + roaming dudes). Until that full maintenance is
-// reconstructed this hooks spawns a small set of random-encounter fleet lead
-// ships (via NovaEncounter_SpawnFleetLeadShip) so the Step 4 NPC renderer has
-// visible, positioned non-player ships to draw.
-//
-// Selection is a deliberate simplification: the first few fleet defs that are
-// unavailable-at-load are marked available and their leads spawned, up to the
-// system's avg_ships cap (clamped to a small count). It does not yet honour
-// each def's spawn_system_filter against the system's government/relations, nor
-// the runtime is_available_runtime expression, nor spawn escorts -- those are
-// Step 5 (see progress.csv 0x004259B0 / 0x0041D6E0).
-void SpawnRoamingFleetsStandIn(GameState &state) {
-  const System *sys =
-      state.scenario.System(state.player.current_system_id + 0x80);
-  if (sys == nullptr) {
-    return;
-  }
-  const int cap = std::max(0, std::min(4, static_cast<int>(sys->avg_ships)));
-  std::size_t current_population = 0;
-  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
-    const Ship &ship = state.ShipAt(slot);
-    if (ship.is_active &&
-        ship.current_system_id == state.player.current_system_id) {
-      ++current_population;
-    }
-  }
-  const std::size_t target_population = static_cast<std::size_t>(cap);
-  if (current_population >= target_population) {
-    return;
-  }
-
-  const std::size_t wanted = target_population - current_population;
-  std::size_t spawned = 0;
-  for (std::size_t i = 0; i < state.scenario.fleets.size(); ++i) {
-    if (spawned >= wanted) {
-      break;
-    }
-    auto &def = state.scenario.fleets[i];
-    if (def.lead_ship_class_id < 0) {
-      continue;
-    }
-    // Stand-in: temporarily force the def available for this one spawn. Step 5
-    // will replace this with the real binding + availability evaluation.
-    const bool was_available = def.is_available_runtime;
-    def.is_available_runtime = true;
-    const int slot = NovaEncounter_SpawnFleetLeadShip(
-        state, state.player.current_system_id, static_cast<std::int16_t>(i));
-    def.is_available_runtime = was_available;
-    if (slot == -1) {
-      break;
-    }
-    ++spawned;
-  }
-  if (spawned > 0) {
-    NovaLog::Info("[roaming-standin] spawned {} positional NPC ships in system "
-                  "{} (provisional; full encounter maintenance is Step 5)",
-                  spawned,
-                  state.player.current_system_id + 0x80);
-  }
-}
 
 void Stub_HandleShips(GameState &state) { (void)state; }
 
@@ -205,10 +141,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                 "per-tick sprite display state still not reconstructed");
   const bool ship_ready = view.EnsureShipSprite(platform, state);
   (void)ship_ready;
-  // PROVISIONAL: spawn the current system's positional NPC fleet-lead ships so
-  // the Step 4 renderer has visible non-player ships (see
-  // SpawnRoamingFleetsStandIn; the real per-tick maintenance is Step 5).
-  SpawnRoamingFleetsStandIn(state);
+  // Restore the current system's roaming/asteroid-drift ships on entry
+  // (System_InitRoamingShips 0x004216B0): spawns the roaming record quota and
+  // pre-warms all 16 manoeuvre-pool slots with wander targets around the
+  // player. The encounter-fleet population is Step 5.
+  NovaSystem_InitRoamingShips(state);
   // Ghidra: the ambient starfield is (re)spawned at every spaceflight entry
   // (NovaEffects_QueuedAmbientStarParticles from Ship_RunSpaceflightMode and
   // the travel/landing transitions). We spawn once when the mode starts, then
@@ -290,7 +227,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // system (the original's jump completion re-runs
     // NovaEffects_QueuedAmbientStarParticles).
     if (state.travel.just_completed) {
-      SpawnRoamingFleetsStandIn(state);
+      // Cross-system travel re-initializes the roaming ships for the new
+      // system, matching the original's jump-completion re-run of
+      // System_InitRoamingShips.
+      NovaSystem_InitRoamingShips(state);
       view.SpawnAmbientStars(platform, state);
     }
     // Seed an automatic target, while retaining a stellar chosen by Tab/

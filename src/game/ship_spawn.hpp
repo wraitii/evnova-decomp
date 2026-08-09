@@ -40,6 +40,22 @@ namespace game {
 [[nodiscard]] int NovaEncounter_SelectFleetDefWeighted(
     const System &system, const ScenarioData &scenario, std::mt19937 &rng);
 
+// Mirrors Dude_SelectRandomSystemDudeClassIndex (Ghidra 0x0046b600): weighted-
+// random pick among a system's eight bound dude slots. Builds a cumulative-
+// weight bucket over the slots whose System.dude_class_ids entry is a valid
+// class id (0..0x1ff), draws a uniform value in [0, total_weight), and returns
+// the lowest-index slot whose cumulative bucket first reaches the (draw+1)
+// threshold (heavier-weighted slots are likelier). Returns -1 when no slot has
+// a valid non-zero weight. The returned value is a 0-based dude slot index
+// (0-7), i.e. an index into System.dude_class_ids / dude_class_weights; the
+// caller resolves that to the actuate dude-class id. This is the clean-room
+// analogue of the already-restored fleet weighted-select
+// (NovaEncounter_SelectFleetDefWeighted) and feeds
+// EncounterFleet_SpawnRandomSystemDudeShip (0x0041ba80, deferred).
+[[nodiscard]] int
+NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
+                                          std::mt19937 &rng);
+
 // Mirrors EncounterFleet_TrySpawnRandomEncounterFleet (Ghidra 0x00425280):
 // scans the ScenarioData.fleets table, marking each def that may spawn in
 // system_id based on its spawn_system_filter and current availability, then

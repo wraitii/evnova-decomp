@@ -35,6 +35,7 @@ much of each function has been re-implemented.
   - `0%` — not reimplemented (regardless of whether the function is already named/annotated in Ghidra; only reimplementation progress counts here).
 - `impl_file` is the `src/...` path that reimplements the function (empty when `0%`).
 - `comment` is a short note (confidence, known gaps/divergences, TODO(decomp)).
+- DO NOT use tail/head when building, or add a small timeout (as it hangs otherwise)
 - **Edit `progress.csv` in place**.
 - **`progress.csv` is very large (~3200 rows). Never rewrite it wholesale or dump it to your context. Always locate the target address with grep and make surgical, in-place edits (edit tool / patch), leaving all other rows intact.**
 
