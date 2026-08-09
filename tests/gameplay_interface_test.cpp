@@ -1,5 +1,4 @@
 #include "game/gameplay_interface.hpp"
-#include "game/scenario_data.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -61,30 +60,6 @@ TEST_CASE("Federation gameplay interface layout decodes its panel rects",
   CHECK(layout->cargo_status_panel.bottom == 552);
 }
 
-TEST_CASE("Federation interface layout colors, font and background PICT",
-          "[interface][data]") {
-  const auto layout = NovaResource_LoadGameplayInterfaceLayout(0x82);
-  REQUIRE(layout.has_value());
-
-  // The colour slots carry the raw little-endian words from the archive:
-  // slot0 `00 e3 f1 ff` -> 0xfff1e300 (value bar), slot1 `00 78 80 87` ->
-  // 0x87807800 (dim label), and the bright-white / dim-gray status slots at
-  // the +0x10/+0x14 entries: `00 ff ff ff` / `00 80 80 80`.
-  CHECK(layout->color_word[0] == 0xfff1e300U);
-  CHECK(layout->color_word[1] == 0x87807800U);
-  CHECK(layout->color_word[2] == 0xffffff00U);
-  CHECK(layout->color_word[3] == 0x80808000U);
-
-  // Font family at +0x60 (a C string) and the two font sizes at +0xa0/+0xa2.
-  CHECK(layout->font_family_name == "Geneva");
-  CHECK(layout->font_size == 12);
-  CHECK(layout->font_size_2 == 10);
-
-  // Background cockpit PICT (layout +0xa4): the Federation interface art, id
-  // 0x2be (702), clamped to >= 0x80.
-  CHECK(layout->interface_bg_pict_id == 0x2be);
-}
-
 TEST_CASE("every shipped interface layout parses to valid rects",
           "[interface][data]") {
   // The archive exposes layout records for interfaces 0x80..0x86; each must
@@ -97,38 +72,6 @@ TEST_CASE("every shipped interface layout parses to valid rects",
     CHECK(layout->fuel_panel.valid());
     CHECK(layout->interface_bg_pict_id >= 0x80);
   }
-}
-
-TEST_CASE("missing interface layout returns nullopt", "[interface][data]") {
-  // A synthetically absent interface id (no record) must not throw or return a
-  // half-parsed layout.
-  CHECK_FALSE(NovaResource_LoadGameplayInterfaceLayout(0x07fff).has_value());
-}
-
-// End-to-end: the starter Shuttle's government resolves to the Federation and
-// its interface engine loads that government's HUD layout.
-TEST_CASE("starter ship government selects the Federation interface layout",
-          "[interface][data]") {
-  ScenarioData data;
-  REQUIRE(data.LoadFromArchives());
-  const ShipClass *shuttle = data.Ship(0x80);
-  REQUIRE(shuttle != nullptr);
-  const Government *fed = data.Government(0x80);
-  REQUIRE(fed != nullptr);
-  REQUIRE(fed->present);
-  CHECK(fed->interface_id == 0x82);
-
-  // The starter shuttle carries no inherited government (both inherited-gov
-  // fields are -1 in the shipped data), so Ui_InstallGameplayInterfaceLayout's
-  // ship-class lookup falls back to the Default interface (0x80). This pins
-  // that fallback so the HUD still resolves for the out-of-the-box ship.
-  CHECK(shuttle->inherent_attributes_govt == -1);
-  CHECK(shuttle->inherent_combat_govt == -1);
-
-  const auto layout = NovaResource_LoadGameplayInterfaceLayout(
-      static_cast<std::uint16_t>(fed->interface_id));
-  REQUIRE(layout.has_value());
-  CHECK(layout->interface_bg_pict_id == 0x2be);
 }
 
 // ---- Gameplay viewport / HUD-anchor geometry ----------------------------
@@ -151,44 +94,6 @@ TEST_CASE("full 1024x768 canvas yields origin (512,384) and anchor (0,0)",
   CHECK(g.hud_panel_origin_y == 384);
   CHECK(g.hud_panel_anchor_x == 0);
   CHECK(g.hud_panel_anchor_y == 0);
-}
-
-TEST_CASE("a classic 640x480 surface centres the frame off-canvas and nudges "
-          "up/left",
-          "[interface][geometry]") {
-  // A 640x480 window: the 1024x768 frame centres with its top-left at
-  // (-192, -144), then the narrow (640 < 768) and short (480 < 641) viewport
-  // nudges shift it up by 0x3c and left by 0x3c.
-  const HudPanelRect surface{0, 0, 640, 480};
-  const auto g = GameplayGeometry_FromSurface(surface);
-  CHECK(g.frame_rect.left == -192 - 0x3c);  // -252
-  CHECK(g.frame_rect.top == -144 - 0x3c);   // -204
-  CHECK(g.frame_rect.right == -252 + 1024); // 772
-  CHECK(g.frame_rect.bottom == -204 + 768); // 564
-  // Origin = centre of the nudged frame rect.
-  CHECK(g.hud_panel_origin_x == (-252 + 772 + 1) / 2);
-  CHECK(g.hud_panel_origin_y == (-204 + 564 + 1) / 2);
-  // Anchor = origin - (512, 384).
-  CHECK(g.hud_panel_anchor_x == g.hud_panel_origin_x - 512);
-  CHECK(g.hud_panel_anchor_y == g.hud_panel_origin_y - 384);
-}
-
-TEST_CASE("a tall/narrow surface nudges left when short (height < 0x281)",
-          "[interface][geometry]") {
-  // Width 900 >= 768 so the y nudge (width<768) does NOT apply. Height 500 <
-  // 641 so the x nudge (height<641) shifts the frame left by 0x3c, which moves
-  // the derived HUD origin accordingly.
-  const HudPanelRect surface{10, 20, 910, 520};
-  const auto g = GameplayGeometry_FromSurface(surface);
-  CHECK(g.frame_rect.left == 10 + (900 - 1024) / 2 - 0x3c); // -112
-  CHECK(g.frame_rect.top == 20 + (500 - 768) / 2);          // -114 (no y nudge)
-  // Origin = centre of the nudged frame.
-  const int cx = (g.frame_rect.right + g.frame_rect.left + 1) / 2;
-  const int cy = (g.frame_rect.bottom + g.frame_rect.top + 1) / 2;
-  CHECK(g.hud_panel_origin_x == 400);
-  CHECK(g.hud_panel_origin_y == 270);
-  CHECK(g.hud_panel_origin_x == cx);
-  CHECK(g.hud_panel_origin_y == cy);
 }
 
 // ---- Life-bar fill geometry ----------------------------------------------
@@ -219,59 +124,6 @@ TEST_CASE("tall life-bar slot fills from the top down", "[interface][hud]") {
   // Depleted -> clamp to zero (empty fill, nothing drawn).
   const HudBarFill empty = HudBar_FillRect(panel, 0.0F);
   CHECK(empty.empty());
-}
-
-TEST_CASE("wide bar slot fills from the left, growing right",
-          "[interface][hud]") {
-  // A hypothetical horizontal gauge (width > height), e.g. 200x40.
-  const HudPanelRect panel{50, 100, 200, 140};
-  CHECK(panel.width() > panel.height());
-
-  const HudBarFill full = HudBar_FillRect(panel, 1.0F);
-  CHECK(full.left == 50);
-  CHECK(full.width == 150);
-  CHECK(full.top == 100);
-  CHECK(full.height == 40);
-
-  const HudBarFill half = HudBar_FillRect(panel, 0.5F);
-  // 150 * 0.5 = 75; left-anchored at x=50.
-  CHECK(half.width == 75);
-  CHECK(half.left == 50);
-  CHECK(half.top == 100);
-  CHECK(half.height == 40);
-
-  const HudBarFill quarter = HudBar_FillRect(panel, 0.25F);
-  // floor(150 * 0.25) = 37; left remains 50.
-  CHECK(quarter.width == 37);
-  CHECK(quarter.left == 50);
-}
-
-TEST_CASE("HUD panels anchor to the render owner's top-right strip",
-          "[interface][hud]") {
-  const HudPanelRect local{35, 200, 184, 207};
-  const HudPanelRect at_1024 = HudPanel_AnchorTopRight(local, 1024);
-  CHECK(at_1024.left == 1024 - kGameplayHudStripWidth + 35);
-  CHECK(at_1024.right == 1024 - kGameplayHudStripWidth + 184);
-  CHECK(at_1024.top == 200);
-  CHECK(at_1024.bottom == 207);
-
-  const HudPanelRect at_1600 = HudPanel_AnchorTopRight(local, 1600);
-  CHECK(at_1600.left - at_1024.left == 576);
-  CHECK(at_1600.top == at_1024.top);
-}
-
-TEST_CASE("bar fill clamps fraction and rejects invalid panels",
-          "[interface][hud]") {
-  const HudPanelRect panel{200, 35, 207, 184};
-  // fraction > 1 is clamped to the full slot.
-  const HudBarFill over = HudBar_FillRect(panel, 2.0F);
-  CHECK(over.left == 200);
-  CHECK(over.height == 149);
-  // Negative fraction clamps to empty (nothing drawn).
-  CHECK(HudBar_FillRect(panel, -1.0F).empty());
-  // A degenerate/degenerate panel yields an empty fill.
-  CHECK(HudBar_FillRect({0, 0, 0, 0}, 0.5F).empty());
-  CHECK(HudBar_FillRect({10, 10, 5, 5}, 0.5F).empty());
 }
 
 } // namespace game

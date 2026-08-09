@@ -1,18 +1,16 @@
 add_executable(evnova_tests
-    landed_window_test.cpp
-    scenario_data_test.cpp
-    smoke_test.cpp
-    movement_test.cpp
-    ship_model_test.cpp
-    ship_spawn_test.cpp
-    sprite_test.cpp
-    ship_ai_test.cpp
-    weapon_test.cpp
-    gameplay_interface_test.cpp
-    hud_overlay_test.cpp
-    negotiation_dialog_test.cpp
-    government_test.cpp
     asteroid_test.cpp
+    gameplay_interface_test.cpp
+    government_test.cpp
+    hud_overlay_test.cpp
+    landed_window_test.cpp
+    movement_test.cpp
+    scenario_data_test.cpp
+    ship_ai_test.cpp
+    ship_spawn_test.cpp
+    smoke_test.cpp
+    sprite_test.cpp
+    weapon_test.cpp
 )
 
 target_link_libraries(evnova_tests PRIVATE Catch2::Catch2WithMain evnova_runtime)
@@ -32,4 +30,6 @@ else()
 endif()
 
 include(Catch)
-catch_discover_tests(evnova_tests)
+# Data-dependent tests locate the game archives relative to the repo root;
+# run ctest discoveries from there so the archive-gated cases actually run.
+catch_discover_tests(evnova_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

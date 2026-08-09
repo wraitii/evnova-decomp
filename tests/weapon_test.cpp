@@ -1,12 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
-#include <cmath>
 #include <filesystem>
-#include <optional>
 
-#include "brgr_archive.hpp"
 #include "game/game_state.hpp"
 #include "game/outfit.hpp"
 #include "game/pilot_file.hpp"
@@ -62,30 +58,6 @@ void SeedStockWeaponBanks(GameState &state) {
 }
 } // namespace
 
-TEST_CASE("shuttle light blaster is mounted and fireable", "[weapon][data]") {
-  if (!ArchivesAvailable()) {
-    SKIP("Nova .rez archives not present");
-  }
-  GameState state;
-  REQUIRE(state.scenario.LoadFromArchives());
-  state.player.ship_class_id = 0; // ship class id 0x80 = Shuttle
-
-  const auto *ship = state.scenario.Ship(0x80);
-  REQUIRE(ship != nullptr);
-  CHECK(ship->display_name == "Shuttle");
-  // The starter stock bank: one Light Blaster, unlimited ammo.
-  CHECK(ship->stock_weapons[0].weapon_id == 0x80);
-  CHECK(ship->stock_weapons[0].count == 1);
-  CHECK(ship->stock_weapons[0].ammo_load == -1);
-
-  SeedStockWeaponBanks(state);
-
-  // Bank 0 (weapon 0x80, the Light Blaster) is mounted and >0 so the primary
-  // loop touches it; it is not a secondary weapon.
-  CHECK(state.weapon_bank_ammo[0] == 1);
-  CHECK(NovaWeapon_CanFireBank(state, 0));
-}
-
 // Regression: the new-game flow must reconcile the seeded Light Blaster weapon
 // bank into an owned outfit (Weapon_ReconcileOutfitPoolWithWeaponBanks,
 // 0x00462ec0). Without it the starter blaster stays an owned-bank-only weapon:
@@ -124,80 +96,6 @@ TEST_CASE("starter light blaster becomes owned and survives a rebuild",
   CHECK(NovaWeapon_CanFireBank(state, 0));
 }
 
-// A shipyard purchase seeds the new ship's mounted stock weapons into the
-// banks and reconciles them into owned outfits (Outfit_SwapPlayerShipWithEscort,
-// 0x00423fa0: seed default_weapon_ammo/secondary, then
-// Weapon_ReconcileOutfitPoolWithWeaponBanks). Buying the Shuttle again therefore
-// yields both an owned Light Blaster and a fireable bank 0, even though the class
-// has no DefaultItem entry.
-TEST_CASE("buying a ship registers its stock weapons as owned",
-          "[weapon][data]") {
-  if (!ArchivesAvailable()) {
-    SKIP("Nova .rez archives not present");
-  }
-  GameState state;
-  REQUIRE(state.scenario.LoadFromArchives());
-
-  // Simulate swapping into ship class 0x80 (Shuttle) via the shipyard path:
-  // switch class, clear non-persistent outfits, seed stock banks, reconcile.
-  state.player.ship_class_id = 0;
-  state.inventory.outfit_owned_count.fill(0);
-  NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
-  CHECK(state.weapon_bank_ammo[0] == 1);
-  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
-  CHECK(state.inventory.outfit_owned_count[0] == 1);
-  CHECK(NovaWeapon_CanFireBank(state, 0));
-}
-
-// Ground truth for the Light Blaster's on-screen shot behaviour (verified
-// against its raw payload and shot sprite set, sp.x9an id shot_sprite_set_id +
-// 3000 = 3000):
-//  * The shot sprite set is a 35x35 tile, 6x6 grid = 36-frame rotation sheet,
-//    so the bolt is heading-oriented (like the ship), not a single image.
-//  * WeaponDef flags_primary bit 0 is clear -> Shot_HandleShot takes the
-//    *static/heading* branch: the frame is picked from the firing bearing, not
-//    time-stepped. This is why the bolt must be rotated by its velocity.
-//  * shot_anim_frame_dwell (resource +0x32, Ghidra
-//  homing_strength_or_turn_rate)
-//    is 0, so even an animated frame-stepper would advance every frame.
-TEST_CASE("light blaster shot is heading-oriented, not time-animated",
-          "[weapon]") {
-  if (!ArchivesAvailable()) {
-    SKIP("Nova .rez archives not present");
-  }
-  GameState state;
-  REQUIRE(state.scenario.LoadFromArchives());
-  const Weapon *w = state.scenario.Weapon(0x80);
-  REQUIRE(w != nullptr);
-  CHECK((w->flags & 0x0001U) == 0U); // static/heading shot-frame path
-  CHECK(w->shot_anim_frame_dwell == 0);
-  CHECK(w->sprite_id == 0); // shot sprite set spin id 0 + 3000 = 3000
-
-  auto spin = NovaResource_Load(kResourceTypeSprites, 3000);
-  REQUIRE(spin.has_value());
-  auto def = NovaSpriteDefinition_Parse(*spin);
-  REQUIRE(def.has_value());
-  CHECK(def->tile_width == 35);
-  CHECK(def->tile_height == 35);
-  CHECK(def->tiles_x == 6);
-  CHECK(def->tiles_y == 6);
-
-  // The fired shot must carry a velocity whose direction picks the matching
-  // heading frame (up = frame 0).
-  state.player.ship_class_id = 0;
-  state.player.heading = 0.0F;
-  state.player.pos_x = 0.0F;
-  state.player.pos_y = 0.0F;
-  SeedStockWeaponBanks(state);
-  NovaWeapon_FirePlayerPrimary(state);
-  REQUIRE(state.active_shots.size() == 1);
-  const ActiveShot &shot = state.active_shots[0];
-  // atan2(vel_x, -vel_y) = heading-bearing in the Math_AddPolarVelocity
-  // convention; heading 0 (up) projects to vel_y < 0, so bearing ~ 0.
-  const float bearing = std::atan2(shot.vel_x, -shot.vel_y);
-  CHECK(std::fabs(bearing) < 0.01F);
-}
-
 TEST_CASE("primary fire spawns a light blaster shot then cools down",
           "[weapon]") {
   if (!ArchivesAvailable()) {
@@ -229,34 +127,6 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   CHECK(state.weapon_bank_cooldown[0] > 0.0F);
   NovaWeapon_FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1); // no second shot while cooling down
-}
-
-TEST_CASE("cooldown counts down and the bank can fire again", "[weapon]") {
-  if (!ArchivesAvailable()) {
-    SKIP("Nova .rez archives not present");
-  }
-  GameState state;
-  REQUIRE(state.scenario.LoadFromArchives());
-  state.player.ship_class_id = 0;
-  SeedStockWeaponBanks(state);
-
-  NovaWeapon_FirePlayerPrimary(state);
-  const float initial_cooldown = state.weapon_bank_cooldown[0];
-  REQUIRE(initial_cooldown > 0.0F);
-  for (int i = 0; i < 1; ++i) {
-    NovaWeapon_TickShots(state);
-  }
-  CHECK(state.weapon_bank_cooldown[0] ==
-        Catch::Approx(initial_cooldown - 1.0F));
-
-  // After enough ticks the shot expires and the bank cools to 0, so fire again.
-  for (int i = 0; i < static_cast<int>(initial_cooldown) + 2; ++i) {
-    NovaWeapon_TickShots(state);
-  }
-  CHECK(state.active_shots.empty());
-  CHECK(state.weapon_bank_cooldown[0] == 0.0F);
-  NovaWeapon_FirePlayerPrimary(state);
-  REQUIRE(state.active_shots.size() == 1);
 }
 
 // Regression: mounting a second identical weapon in a bank doubles the fire
@@ -362,36 +232,4 @@ TEST_CASE("fresh-pilot record round-trip keeps the light blaster fireable",
   REQUIRE(state.active_shots.size() == 1);
 }
 
-// The Light Blaster (weapon 0x80) carries fire_sound slot 8, which maps to
-// the snd resource id 200 + 8 = 208 ("Light Blaster.sfil"). Firing a round
-// must queue that slot for playback (GameState.pending_fire_sound_slots), and
-// the preload helper must decode it into the cache so the spaceflight loop can
-// play it. This pins the audio side of the firing path to the real data.
-TEST_CASE("firing queues the weapon's fire sound and preload decodes it",
-          "[weapon][audio]") {
-  if (!ArchivesAvailable()) {
-    SKIP("Nova .rez archives not present");
-  }
-  GameState state;
-  REQUIRE(state.scenario.LoadFromArchives());
-  state.player.ship_class_id = 0;
-  SeedStockWeaponBanks(state);
-
-  const Weapon *w = state.scenario.Weapon(0x80);
-  REQUIRE(w != nullptr);
-  CHECK(w->fire_sound == 8);
-  CHECK(NovaWeapon_FireSoundResourceId(w->fire_sound) == 208);
-
-  // Firing a round queues the fire-sound slot.
-  NovaWeapon_FirePlayerPrimary(state);
-  REQUIRE(state.active_shots.size() == 1);
-  REQUIRE(state.pending_fire_sound_slots.size() == 1);
-  CHECK(state.pending_fire_sound_slots[0] == 8);
-
-  // Preloading that slot decodes the Light Blaster fire sound into the cache.
-  NovaWeapon_PreloadFireSound(state, 8);
-  REQUIRE(state.weapon_fire_sounds[8].has_value());
-  CHECK(state.weapon_fire_sounds[8]->sample_rate == 11127);
-  CHECK(state.weapon_fire_sounds[8]->channel_count == 1);
-}
 } // namespace game

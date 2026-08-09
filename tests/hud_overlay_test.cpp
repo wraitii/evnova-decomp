@@ -34,8 +34,10 @@ std::vector<std::byte> MakePool(std::initializer_list<const char *> items) {
   return out;
 }
 
-TEST_CASE("STR# pool: big-endian count and length-prefixed entries decode",
+TEST_CASE("STR# pool decodes length-prefixed entries and rejects malformed "
+          "input",
           "[hud_overlay]") {
+  // Happy path: big-endian count, then length-prefixed entries.
   const auto pool =
       MakePool({"land on Planet", "dock at Station", "too far", "too fast"});
   REQUIRE(NovaHud_DecodeStringEntry(pool, 0) ==
@@ -46,12 +48,9 @@ TEST_CASE("STR# pool: big-endian count and length-prefixed entries decode",
           std::optional<std::string>("too far"));
   REQUIRE(NovaHud_DecodeStringEntry(pool, 3) ==
           std::optional<std::string>("too fast"));
-}
 
-TEST_CASE("STR# pool: out-of-range and malformed indices are rejected",
-          "[hud_overlay]") {
-  const auto pool = MakePool({"only one"});
-  CHECK(NovaHud_DecodeStringEntry(pool, 1) == std::nullopt);
+  // Out-of-range and malformed indices are rejected.
+  CHECK(NovaHud_DecodeStringEntry(pool, 4) == std::nullopt);
   CHECK(NovaHud_DecodeStringEntry(pool, 0xffff) == std::nullopt);
 
   // Empty pool (count 0) -> index 0 rejected.

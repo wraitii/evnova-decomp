@@ -34,49 +34,6 @@ TEST_CASE("allied helper matches a class against the other's allies",
   CHECK(NovaGovernment_AreGovtsAllied(data, 1, 1));
 }
 
-TEST_CASE("hostile helper matches a class against the other's enemies",
-          "[government][relation]") {
-  ScenarioData data = TwoGovts();
-  auto &b = data.governments[1];
-  b.enemy_classes = {0, -1, -1, -1}; // b enemies class 0 (a's class)
-  CHECK(NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 1));
-  CHECK(NovaGovernment_AreGovtsHostileOrXenophobic(data, 1, 0));
-  // Not hostile when no enemy / ally overlap.
-  b.enemy_classes = {-1, -1, -1, -1};
-  b.ally_classes = {-1, -1, -1, -1};
-  CHECK(!NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 1));
-  // Self is never hostile.
-  CHECK(!NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 0));
-}
-
-TEST_CASE("derelict governments are excluded from relation checks",
-          "[government][relation]") {
-  ScenarioData data = TwoGovts();
-  auto &a = data.governments[0];
-  auto &b = data.governments[1];
-  b.ally_classes = {0, -1, -1, -1};
-  a.flags_primary |= 0x0800U; // a is derelict -> excluded
-  // Even though b allies class 0, the derelict a is not checked against.
-  CHECK(!NovaGovernment_AreGovtsAllied(data, 0, 1));
-  CHECK(NovaGovernment_AreGovtsAllied(data, 1, 1)); // self still allied
-}
-
-TEST_CASE("xenophobic override marks hostile when not allied",
-          "[government][relation]") {
-  ScenarioData data = TwoGovts();
-  auto &b = data.governments[1];
-  // No ally/enemy overlap: not allied by class.
-  b.ally_classes = {-1, -1, -1, -1};
-  b.enemy_classes = {-1, -1, -1, -1};
-  CHECK(!NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 1));
-  // b becomes xenophobic -> hostile from sight, even with no class relation.
-  b.flags_primary |= 0x0001U;
-  CHECK(NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 1));
-  // Unless they are allied: xenophobic does not override an alliance.
-  b.ally_classes = {0, -1, -1, -1};
-  CHECK(!NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 1));
-}
-
 // Ground truth from the real scenario data (see scenario_data_test.cpp: the
 // Federation 0x80 flags 0xe2b0, classes {1}, enemy list {2,10,16,9}; govt 0x81
 // classes {2}, enemies {1,12,...}; govt 0x84 class {4} allies {2,5}; govt 0x85

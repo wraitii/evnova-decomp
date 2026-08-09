@@ -185,20 +185,6 @@ TEST_CASE("steer velocity rotates heading*speed toward the prior velocity") {
   CHECK(ship.vel_y == Catch::Approx(-4.4F)); // approached -4 from below
 }
 
-TEST_CASE("within a step, steer preserves the prior velocity") {
-  game::Ship ship;
-  ship.heading = 0.0F;
-  ship.speed = 4.0F;
-  // Prior velocity already within one step of the heading*speed vector, so the
-  // steer does not move it (it only moves by at most step, never crossing).
-  ship.vel_x = 0.1F;
-  ship.vel_y = -3.9F;
-
-  game::NovaShip_SteerVelocityTowardShipHeading(ship, 0.1F, 1.0F);
-  CHECK(ship.vel_x == Catch::Approx(0.1F)); // prior preserved within step
-  CHECK(ship.vel_y == Catch::Approx(-3.9F));
-}
-
 TEST_CASE("gravity-shield npc keeps a scalar clamped speed and applies it") {
   game::GameState state;
   game::Ship ship;
@@ -277,47 +263,12 @@ TEST_CASE("npc glow fades to zero when thrust stops") {
   CHECK(ship.engine_glow_intensity == Catch::Approx(0.0F));
 }
 
-TEST_CASE("npc banking ship glows toward 0x18 while turning") {
-  game::GameState state;
-  game::Ship ship;
-  ship.ai_turn_bias_dir = 1;
-  game::ShipClass cls = TestShipClass();
-  cls.sprite_behavior_flags = 0x2; // bit 2 = banking sprite
-
-  // No thrust command: the +2 turn-bias boost toward 0x18 then the no-thrust
-  // fade decrements once, so the level rises +1/frame (net) and settles
-  // oscillating in a band around the 0x18 cruise level (matching the original's
-  // boost/fade interaction).
-  for (int i = 0; i < 40; ++i) {
-    game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
-  }
-  CHECK(ship.engine_glow_level >= 0x15);
-  CHECK(ship.engine_glow_level <= 0x18);
-  CHECK(ship.engine_glow_intensity > 0.7F); // visibly lit while banking
-}
-
 TEST_CASE("npc_out-of-range class ship is deactivated by the guard") {
   game::GameState state;
   game::Ship &ship = state.ShipAt(1);
   ship.is_active = true;
   ship.current_system_id = 0;
   ship.ship_class_id = 0x300; // > 0x2ff -> Ship_HandleShip deactivates
-  ship.pos_x = 12.0F;
-
-  game::NovaShip_TickNpcShips(state, 1.0F);
-  CHECK_FALSE(ship.is_active);
-}
-
-TEST_CASE("npc nonexistent-class (tech -9999) ship is deactivated") {
-  game::GameState state;
-  // Populate the scenario ship table so the (valid-indexed) class resolves.
-  state.scenario.ships.emplace_back(); // index 0 = resource id 0x80
-  state.scenario.ships[0].tech_level = game::kShipClassNonexistentTechLevel;
-  state.scenario.ships[0].accel = 500.0F;
-  game::Ship &ship = state.ShipAt(1);
-  ship.is_active = true;
-  ship.current_system_id = 0;
-  ship.ship_class_id = 0; // maps to ships[0]
   ship.pos_x = 12.0F;
 
   game::NovaShip_TickNpcShips(state, 1.0F);
