@@ -6,6 +6,7 @@ add_executable(evnova_tests
     ship_model_test.cpp
     ship_spawn_test.cpp
     sprite_test.cpp
+    ship_ai_test.cpp
     weapon_test.cpp
     gameplay_interface_test.cpp
     hud_overlay_test.cpp

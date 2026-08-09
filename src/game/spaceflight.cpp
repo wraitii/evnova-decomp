@@ -10,6 +10,7 @@
 #include "landed_window.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
+#include "ship_ai.hpp"
 #include "ship_spawn.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
@@ -34,7 +35,30 @@ void Stub_Collisions(GameState &state) { (void)state; }
 
 void Stub_DrawStatus(GameState &state) { (void)state; }
 
-void Stub_AiRoutines(GameState &state) { (void)state; }
+// Ghidra scope 6 parts 1 & 2 of Frame_TickSystems (0x004186b0). Part 1 ran the
+// per-frame targeting setup (Ship_UpdateAutoWeaponSelectionFromTarget etc.);
+// part 2 is the per-ship AI decision stage -- the top-level Ship_UpdateShipAI
+// (0x00401000) listed in the plan. The clean-room equivalent is
+// NovaAi_UpdateShipAI (src/game/ship_ai.cpp), which dispatches the behavior
+// supervisors + the Ship_UpdateShipAiState state machine + the
+// Ship_ApplyShipAiControls bridge for every active, non-player ship in the
+// current system. Part 1's target-refresh helpers are reconstructed in ship_ai.
+void Stub_AiRoutines(GameState &state) {
+  const std::int16_t current_system = state.player.current_system_id;
+  // now_ms backs the ai_mode_start_time_ms timestamps; the wander/state
+  // machine does not yet consume them (no jump/formation timing gates wired
+  // into this stub), so it is passed as 0 rather than adding an SDL tick read
+  // here -- TODO(decomp) when a timer-consuming AI branch is wired.
+  const std::uint32_t now_ms = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.current_system_id != current_system) {
+      continue;
+    }
+    // skip_heavy_ai=0: these spawned ships run the full (heavy) AI decision.
+    NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, now_ms);
+  }
+}
 
 // Ghidra scope 0xb of Frame_TickSystems (0x004186b0): the per-tick in-system
 // NPC/reactivity pass. The original runs: Mission_TickShipInteractionReactions,

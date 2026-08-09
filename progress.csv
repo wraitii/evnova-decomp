@@ -1,8 +1,8 @@
 address,name,impl_file,reimpl_pct,comment
-0x00401000,Ship_UpdateShipAI,,0%,
+0x00401000,Ship_UpdateShipAI,src/game/ship_ai.cpp,25%,"NovaAi_UpdateShipAI: dispatching skeleton (heavy-AI cadence gates + behavior-code dispatch + state machine + controls bridge) wired into Stub_AiRoutines. Behavior 0x01 faithful; behaviors 0x02/0x03/4/5+ fall back to the wander supervisor. Combat/disable caches deferred"
 0x00401800,Government_HandlePlayerFactionExtortion,,0%,
 0x00402810,Ship_ResetShipAiBehaviorRuntimeFields,,0%,
-0x00402860,Ship_UpdateShipAiBehavior0x01,,0%,
+0x00402860,Ship_UpdateShipAiBehavior0x01,src/game/ship_ai.cpp,80%,"NovaAi_UpdateBehavior0x01: reacquire travel stellar / jump fallback / hostility escalation faithfully ported. Intercept-taunt HUD flavor deferred"
 0x00402980,Ship_UpdateShipAiAvailabilityBehavior,,0%,
 0x00402BD0,Ship_UpdateShipAiBehavior0x02,,0%,
 0x00402E50,Ship_UpdateShipAiBehavior0x03,,0%,
@@ -11,9 +11,9 @@ address,name,impl_file,reimpl_pct,comment
 0x004048A0,Ship_UpdateShipAssistResponseBehavior,,0%,
 0x00405120,Ship_ShouldShipPrioritizePlayerThreat,,0%,
 0x004053C0,Mission_UpdateShipMissionStellarAttackDirective,,0%,
-0x00405590,Ship_UpdateShipAiState,,0%,
-0x00408150,Ship_ApplyShipAiControls,,0%,
-0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,,0%,
+0x00405590,Ship_UpdateShipAiState,src/game/ship_ai.cpp,20%,"NovaAi_UpdateShipState: core travel (1/0x14/2), hold (0xb), pursuit(5)/assist(10)/escort(7), drift(0xe), disengage(0x15/8), defunct(0x16) control-mode writes ported. Attack/disable states 3/4/0xc/0xd and HUD/mission flavor deferred. Many _DAT_005750xx constants provisional (TODO(decomp))"
+0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,15%,"NovaAi_ApplyControls: travel/pursue/hold/approach control modes bridge into movement fields. Combat/formation modes (5-0x17) provisional. Auto-weapon-selection + fire latch deferred"
+0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,src/game/ship_ai.cpp,40%,"NovaAi_SelectRandomAdjacentTravelStellar: availability/travel-flag/govt-hostility candidates, uniform random pick; weighted scan-mask pools deferred"
 0x0040CC10,Stellar_FindNearestAdjacentTravelStellar,,0%,
 0x0040CD80,Stellar_IsStellarAdjacentToCurrentSystem,src/game/targeting.cpp,100%,"NovaTargeting_IsStellarAdjacentToSystem: matches a stellar id against a system's nav list, preserving the empty-nav-list == adjacent quirk"
 0x0040CE00,Weapon_SelectWeaponBankForCurrentTarget,,0%,
@@ -38,7 +38,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004101D0,Ship_CanShipRespondToDistressCall,,0%,
 0x004102B0,Ship_IsShipLockedOnAttackerInAiState0x04,,0%,
 0x004102E0,Government_PropagateHostilityFromAttack,,0%,
-0x00410670,Ship_EnterShipAiState0x02_ClearPrimaryTarget,,0%,
+0x00410670,Ship_EnterShipAiState0x02_ClearPrimaryTarget,src/game/ship_ai.cpp,100%,"NovaAi_EnterState2ClearPrimaryTarget: enters state 2, clears primary, clamps hold timer, records ai_mode_start_time_ms"
 0x004106B0,Ship_EnterShipAiState0x0B_SetRetreatThrottle,,0%,
 0x00410700,Ship_SetShipHostileToPlayer,,0%,
 0x004107E0,Ship_EnterShipAiState0x04_TargetRandomCombatCandidate,,0%,
@@ -398,8 +398,8 @@ address,name,impl_file,reimpl_pct,comment
 0x004683B0,NovaRandom_Range,,0%,
 0x00468450,NovaText_FormatDateString,,0%,
 0x00468600,Stellar_FormatElapsedTravelTime,,0%,
-0x004687B0,Ship_IsShipFireRestricted,,0%,
-0x004688E0,Ship_IsShipDestroyed,,0%,
+0x004687B0,Ship_IsShipFireRestricted,src/game/ship_ai.cpp,30%,"NovaAiShip_IsFireRestricted: derelict-govt + docked(target_stellar) + low-armor gates; mission-fleet escort gate deferred"
+0x004688E0,Ship_IsShipDestroyed,src/game/ship_ai.cpp,100%,"NovaAiShip_IsDestroyed: death-timer-active or armor<=0"
 0x00468920,Ship_CanPlayerHaveMoreEscorts,,0%,
 0x00468990,Weapon_CanFireWeaponBank,src/game/weapon.cpp,35%,ammo/energy sufficiency gate for a bank via NovaWeapon_CanFireBank (incl. carrier-bay dependency + ammo counter); player ship-disable / NPC-ammo / launch-bay-dependency gates not reproduced (no disable/NPC state yet)
 0x00468AF0,System_HasUsableTravelDestination,,0%,

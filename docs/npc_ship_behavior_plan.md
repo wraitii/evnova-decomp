@@ -6,7 +6,10 @@ stellars, escort, acquire combat targets, and jump between systems.
 This is a living plan. Phases are listed in the recommended execution order and
 marked as they land. Current state: **Phases 0-2 done** (NPC movement physics
 integrator + gravity-shield steer helper, both wired into the per-frame tick);
-next up is **Phase 3** (the AI decision layer).
+**Phase 3 started** (AI decision layer): the ship_ai module now dispatches the
+behavior supervisors + state machine + controls bridge each frame, and the
+**wander/travel milestone (Phases 3+4) is live** -- NPCs pick a random adjacent
+travel stellar, steer toward it, and cycle to the next on arrival.
 
 ## Current architecture snapshot (start state)
 
@@ -14,7 +17,8 @@ next up is **Phase 3** (the AI decision layer).
   `NovaFrame_TickSystems` (src/game/spaceflight.cpp) mirrors Ghidra
   `Frame_TickSystems` (0x004186b0). NPC per-frame work is split across stubs:
   - `Stub_AiRoutines` (scope 6, twice: targeting setup + per-ship AI) <- **where
-    `Ship_UpdateShipAI` (0x00401000) lives**.
+    `Ship_UpdateShipAI` (0x00401000) lives** -- now wired to
+    `NovaAi_UpdateShipAI` (src/game/ship_ai.cpp).
   - `Stub_HandleShips` (scope 4/5) <- **where `Ship_HandleShip` (0x00433050)
     lives** (per-ship integrate movement/targets/fire).
 - **NPC population**: `NovaSystem_TickNpcSpawnMaintenance` +
@@ -95,16 +99,29 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
       plate defines states 0-0x16 (idle/travel/attack/pursue/escort/board/
       drift/jump/disengage/defunct etc.) and the companion `ai_control_mode`
       writer. This is the heart.
+  - **In progress**: `NovaAi_UpdateShipState` (src/game/ship_ai.cpp) ports the
+    core travel (1/0x14/2), hold (0xb), pursuit(5)/assist(10)/escort(7), drift
+    (0xe), disengage(0x15/8) and defunct(0x16) control-mode writes; the
+    attack/disable states (3/4/0xc/0xd) and HUD/mission flavor need Phase 5
+    systems and are conservatively gated. The `_DAT_005750xx` turn/arrive
+    constants are provisional (TODO(decomp)).
 - [ ] **Shared AI helpers** the supervisors call (small, reusable). Derive the
       concrete list from callees of 0x00401000 / 0x00405590 (batch-decompile
       them). Likely: `Ship_SelectNearestDisabledShipForBoarding`,
       `Ship_FindBestAssistTargetForShip`, `Ship_IsShipFireRestricted`,
       target-validity checks, travel-stellar reacquire.
+  - **Started**: `NovaAiShip_IsDestroyed` (0x004688e0, faithful),
+    `NovaAiShip_IsFireRestricted` (0x004687b0, partial),
+    `NovaAi_EnterState2ClearPrimaryTarget` (0x00410670, faithful),
+    `NovaAi_SelectRandomAdjacentTravelStellar` (0x0040c790, partial),
+    all in src/game/ship_ai.cpp.
   - `Ship_UpdateAutoWeaponSelectionFromTarget` (0x00411540) -- ties into
     weapon-bank selection once firing exists.
 - [ ] **Behavior supervisors**, in dependency order:
-  - `Ship_UpdateShipAiBehavior0x01` (0x00402860) -- normal travel; **the "wander /
-    travel to stellar / fall back to jump" behavior**.
+  - **Started**: `Ship_UpdateShipAiBehavior0x01` (0x00402860) -- normal travel
+    (**the "wander / travel to stellar" behavior**, faithful port:
+    `NovaAi_UpdateBehavior0x01`). Behaviors 0x02/0x03/4/5+ currently fall back
+    to the wander supervisor until their disable/combat systems land.
   - `Ship_UpdateShipAiBehavior0x02` (0x00402bd0) -- basic "dude"/local ships:
     reacquire travel, promote nearby targets to attack.
   - `Ship_UpdateShipAiBehavior0x03` (0x00402e50) -- hostile attack/flee/regroup
@@ -117,16 +134,23 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
   - Respect `skip_heavy_ai` gating from `Ship_UpdateShipAI` where the original
     does.
 - [ ] **`Ship_UpdateShipAI`** (0x00401000) -- the top-level per-ship AI entry
-      that dispatches the supervisors. Wire it into `Stub_AiRoutines` (scope 6).
-      Once live, NPC ships stop being static sprites and start chasing travel
-      targets, escorting, and picking combat.
+      that dispatches the supervisors. **In progress**: `NovaAi_UpdateShipAI`
+      (src/game/ship_ai.cpp) implements the dispatch skeleton + state machine +
+      controls bridge, and is wired into `Stub_AiRoutines` (scope 6). The
+      movement bridge `Ship_ApplyShipAiControls` (0x00408150, `NovaAi_ApplyControls`)
+      turns `ai_control_mode` into the movement fields the Phase 0 integrator
+      consumes, so NPCs now visibly wander toward travel stellars (Phase 4
+      steering). Unit-tested (tests/ship_ai_test.cpp).
 
 ## Phase 4 -- Wander in the world (movement toward stellars)
 
-- [ ] **Steering toward a travel target**: the AI writes `ai_secondary_target_slot`
-      (travel stellar). Implement steering-to-map-coords so state 1 (travel to
-      system, steers to map coords) actually moves the ship toward an in-system
-      stellar. This is the "make them move around" milestone.
+- [x] **Steering toward a travel target**: the AI writes `ai_secondary_target_slot`
+      (travel stellar). `NovaAi_ApplyControls` (Ship_ApplyShipAiControls 0x00408150)
+      + the Phase 0 integrator now steer a state-1 ship toward the stellar's map
+      coordinates (control mode 2), and on arrival it damp-to-stops / re-arms the
+      coast-through-reversal timer and re-enters idle so the wander supervisor
+      picks the next leg. This is the "make them move around" milestone; the
+      eventual despawn/land + population respawn awaits Phase 6.
 
 ## Phase 5 -- Firing / combat (optional but natural next)
 

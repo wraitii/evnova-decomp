@@ -150,6 +150,15 @@ struct ShipClass {
   // (Ship_AllocateShipSlotInSystem 0x004254b0) seeds a fresh ship slot from it.
   std::int16_t timed_action_counter_init = 0;
 
+  // Ghidra ShipClassDef +0xA00. Pilot skill variance percent used by the AI
+  // dispatch cadence (Ship_UpdateShipAI) to rate-limit heavy decisions for
+  // lower-skill ships.
+  std::int16_t skill_variance_percent = 0;
+  // Ghidra ShipClassDef +0xA24. Sprite/behavior flags (bit 1 = carries
+  // waypoint arrival markers, bit 2 = banking ships with sprite_behavior_flags
+  // 0x80 timing, etc.). Consulted by the AI travel/arrive logic.
+  std::uint16_t sprite_behavior_flags = 0;
+
   // DefaultItems (outfit ids, zero-based after 0x80) + counts, up to 8. These
   // seed the player's starting inventory when bought/captured.
   std::array<std::int16_t, 8> default_outfit_ids{

@@ -131,6 +131,11 @@ struct Ship {
   std::int16_t ai_behavior_code = 0;    // +0x88
   std::int16_t ai_state_code = 0;       // +0xC8C8
   std::int16_t ai_control_mode = 0;     // +0xC8CA
+  // Travel-target transfer latch (Ghidra ShipState +0x2Aish): the AI sets this
+  // to 2 when it assigns ai_secondary_target_slot a fresh travel stellar (the
+  // signal System_UpdateSystemAndStellarDisplayState reads to auto-target the
+  // nearest travel point on the arrival/last-known system).
+  std::int16_t travel_transfer_mode = 0; // +0x2A (provisional offset)
   std::int16_t primary_target_ship_slot = -1; // +0x70
   std::int16_t ai_secondary_target_slot =
       -1;                                // +0x6C (also a travel/stellar slot)
@@ -138,6 +143,17 @@ struct Ship {
   std::int16_t target_stellar_object_id = -1;    // +0x8C
   std::int16_t jump_destination_stellar_id = -1; // +0x92
   std::int16_t ai_hostility_accumulator = 0;     // +0x96
+  // Disable/surrender-pressure patience timer: counts down (by frame time) while
+  // the ship fails to gain disable pressure over its target; when it runs out the
+  // AI gives up and clears the primary target (Ship_UpdateShipAiState state 4).
+  // -1 = no patience pressure tracked (set by Ship_CanShipApplyDisablePressure-
+  // ToTarget 0x00464a90 on each successful check).
+  float target_disable_patience_timer = -1.0F; // +0xC8D8
+  // Waypoint arrival marker pair used by ships carrying arrival markers (class
+  // sprite_behavior_flags bit 1): waypoint_arrival_marker_a reflects a completed
+  // arrival; marker_b counts/suppresses route restarts. -1 = none.
+  std::int16_t waypoint_arrival_marker_a = -1; // +0xC8F2 (provisional offset)
+  std::int16_t waypoint_arrival_marker_b = -1; // +0xC8F4 (provisional offset)
 
   // Whether this ship is flagged as carrying a mining scoop outfit (ShipState
   // +0xBE mining_scoop_active, derived by Outfit_HasMiningScoopOutfit).
