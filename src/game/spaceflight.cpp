@@ -34,16 +34,15 @@ void Stub_DrawStatus(GameState &state) { (void)state; }
 
 void Stub_AiRoutines(GameState &state) { (void)state; }
 
-// Ghidra scope 0xb of Frame_TickSystems (0x004186b0). Despite the "mission"
-// prefix this is the per-tick in-system NPC/reactivity pass, not just mission
-// logic. The original runs: Mission_TickShipInteractionReactions,
+// Ghidra scope 0xb of Frame_TickSystems (0x004186b0): the per-tick in-system
+// NPC/reactivity pass. The original runs: Mission_TickShipInteractionReactions,
 // Frame_UpdateCombatChatter, Frame_UpdateScreenFlashTimers,
 // Ship_TallyInboundWeaponThreat, then -- the fleet/dude spawn maintenance this
-// reimplementation is building toward -- Mission_TickMissionAndEncounterSpawns
+// reimplementation is building toward -- System_TickNpcSpawnMaintenance
 // (encounter fleets + roaming dudes up to the system's avg_ships cap) and
 // Dude_SpawnRoamingShip('\x01') (the roaming-dude ring), before clearing the
 // g_ai_misc_event_flag / g_ai_target_refresh_needed latches.
-void Stub_MissionAndEncounterSpawns(GameState &state) { (void)state; }
+void Stub_TickReactionsAndNpcSpawns(GameState &state) { (void)state; }
 
 void Stub_CalcAiOdds(GameState &state) { (void)state; }
 
@@ -134,7 +133,7 @@ void NovaFrame_TickSystems(GameState &state, bool run_full_tick) {
   if (run_full_tick) {
     Stub_DrawStatus(state);                // scope 0xc
     Stub_AiRoutines(state);                // scope 6 (part 1: targeting setup)
-    Stub_MissionAndEncounterSpawns(state); // scope 0xb
+    Stub_TickReactionsAndNpcSpawns(state); // scope 0xb
     Stub_AiRoutines(state);                // scope 6 (part 2: per-ship AI)
     Stub_CalcAiOdds(state);                // scope 0x14
   }

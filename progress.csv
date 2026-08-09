@@ -115,7 +115,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0041C710,Dude_SpawnRandomDudeShipInSystem,,0%,
 0x0041C9F0,Dude_SpawnShipFromDudeDefInSystem,,0%,
 0x0041CF40,Mission_SpawnMissionShipFromDudeDef,,0%,
-0x0041D6E0,Mission_TickMissionAndEncounterSpawns,,0%,
+0x0041D6E0,System_TickNpcSpawnMaintenance,,0%,Renamed in Ghidra (was Mission_TickMissionAndEncounterSpawns): per-tick NPC spawn/population maintenance for the active system across all NPC categories, not just missions. Steps the 16 mission slots (mission-fleet ships up to quota, respawn timers, Mission_DoesSystemMatchMissionLocator gating, Mission_ResolveMisnSlot), rolls random encounter/dude spawns below the avg_ships cap (1-in-500 pick gated by encounter_chance_percent -> EncounterFleet_SelectRandomEncounterFleetDefWeighted then SpawnRandomEncounterFleet, else Dude_SpawnRandomDudeShipInSystem), spawns stellar-defense ships, enforces the roaming-NPC population cap and the <200-traffic ambient threshold. Not reimplemented; depends on DudeDef table + scripted-maneuver pool.
 0x0041E240,Ship_ResetShipToDefaultCombatState,,0%,
 0x0041E640,Weapon_SpawnShipFromCarrierBayWeapon,,0%,
 0x0041F330,Outfit_RedistributeFleetCargoOverflow,,0%,
