@@ -159,10 +159,12 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   return true;
 }
 
-// Loads (and caches) an NPC ship's heading-rotation sheet for a ship class
-// resource id. This is the general form of EnsureShipSprite's base load; the
-// player's call keeps its own glow/muzzle handling on top of the same sheet.
-// NPC ships draw base-only (no engine glow) for now -- TODO(decomp).
+// Loads (and caches) an NPC ship's heading-rotation sheet and engine-glow layer
+// for a ship class resource id. This is the general form of EnsureShipSprite's
+// base load; the player's call keeps its own glow/muzzle handling on top of the
+// same sheet. NPC glow uses the class's GlowImageID (the same sheet the player
+// draws), sharing the base's rotation grid; a class with no glow sheet just
+// draws base-only.
 const SpaceflightView::NpcShipSprite *
 SpaceflightView::ShipClassSprite(SdlPlatform &platform,
                                  std::int16_t ship_class_id) {
@@ -189,14 +191,33 @@ SpaceflightView::ShipClassSprite(SdlPlatform &platform,
   }
   entry.base = std::move(*base);
   entry.frames_per_rotation = visual->frames_per_rotation;
+  // Engine-glow layer (GlowImageID), sharing the base's rotation grid. An
+  // absent glow image id, or a glow sheet that fails to load, just means the
+  // NPC has no glow layer (not fatal).
+  if (visual->engine_glow_image_id > 0) {
+    if (auto glow = SpriteAsset::LoadSheet(
+            platform.renderer(),
+            static_cast<std::uint16_t>(visual->engine_glow_image_id));
+        glow) {
+      entry.glow = std::move(*glow);
+      entry.glow.frame_count = entry.base.frame_count;
+      entry.has_glow = true;
+    } else {
+      NovaLog::Warn("npc ship sprite: no usable glow sheet {} for class "
+                    "{:#x}; engine glow skipped",
+                    static_cast<unsigned>(visual->engine_glow_image_id),
+                    static_cast<unsigned>(ship_class_id));
+    }
+  }
   auto [it, inserted] =
       npc_ship_sprites_.emplace(ship_class_id, std::move(entry));
   (void)inserted;
-  NovaLog::Info("npc ship sprite loaded for class {:#x}: {}x{} x{} frames",
+  NovaLog::Info("npc ship sprite loaded for class {:#x}: {}x{} x{} frames{}",
                 static_cast<unsigned>(ship_class_id),
                 it->second.base.tile_width,
                 it->second.base.tile_height,
-                it->second.base.frame_count);
+                it->second.base.frame_count,
+                it->second.has_glow ? " + engine glow" : "");
   return &it->second;
 }
 
@@ -231,6 +252,27 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                state.player.pos_y,
                vp.w,
                vp.h);
+
+    // Engine-glow layer, drawn over the hull with the same heading-selected
+    // frame and a thrust-driven alpha. engine_glow_level is driven in
+    // NovaShip_IntegrateNpcMovement (Ship_HandleShip field_0xc8d4); level/24
+    // clamped to [0,1] is the exhaust intensity, matching the player's glow. A
+    // class with no glow layer or a currently-dark exhaust just skips this.
+    if (sprite->has_glow && !sprite->glow.frames.empty() &&
+        ship.engine_glow_intensity > 0.0F) {
+      SpriteDrawOptions opts;
+      opts.alpha_mod = ship.engine_glow_intensity;
+      DrawSprite(platform.renderer(),
+                 sprite->glow,
+                 frame,
+                 ship.pos_x,
+                 ship.pos_y,
+                 state.player.pos_x,
+                 state.player.pos_y,
+                 vp.w,
+                 vp.h,
+                 opts);
+    }
   }
 }
 

@@ -26,7 +26,11 @@ travel stellar, steer toward it, and cycle to the next on arrival.
   (src/game/ship_spawn.cpp) already create active NPC `Ship`s in
   `GameState::ships_`.
 - **Rendering**: `SpaceflightView::DrawNpcShips` already draws active NPC ships
-  in the current system (base-only, no engine glow yet).
+  in the current system, including a per-class **engine-glow layer** (loaded
+  from `GlowImageID` in `ShipClassSprite`, drawn over the hull with a
+  thrust-driven alpha read from `Ship::engine_glow_level`, which
+  `NovaShip_IntegrateNpcMovement` drives faithfully to Ghidra
+  `Ship_HandleShip`'s `field_0xc8d4`).
 - **Ship data**: `Ship` struct (src/game/game_state.hpp) already has kinematics,
   AI slots (`ai_state_code`, `ai_control_mode`, `primary_target_ship_slot`,
   `ai_secondary_target_slot`, `jump_destination_stellar_id`, ...), and identity.
@@ -53,9 +57,12 @@ mostly unblocked porting work.
       thrust (free-coast / forward / reverse absolute-set, gated on
       `ai_forward_thrust_cmd != 0`); `reverse_speed_bias` coast-through-reversal
       timer; inertia-less pin (accel==0 && speed==0); position integration;
-      shield/armor regen. Unit-tested (tests/movement_test.cpp). TODO(decomp):
-      gravity-shield scalar-speed path, NPC outfit/status/government-effective
-      stats.
+      shield/armor regen; engine-glow level (`ShipState +0xc8d4`: full-burn 32 /
+      low-throttle 24 / fade-to-zero, turn-bias +2). Unit-tested
+      (tests/movement_test.cpp). TODO(decomp): NPC outfit/status/government-
+      effective stats (the `Ship_ComputeShipMaxTurnRateDeg` 1.0-deg/frame NPC
+      floor clamp is ported but inert until disable/status damping lowers a
+      clean base below its floor).
 - [x] **Add missing `Ship` AI fields** on the clean-room struct
       (src/game/game_state.hpp): `ai_forward_thrust_cmd` (+0x30),
       `ai_desired_speed` (+0x34), `ai_desired_heading_deg` (+0x68),
@@ -213,6 +220,13 @@ the later, bigger lifts.
   each function gets reimplemented.
 - Each reimpl function keeps a comment referencing its Ghidra address.
 - Work one Ghidra function at a time; decompile + callees first before porting.
-- NPC-only paths in `Ship_ComputeShipEffective*` and `Ship_ComputeShipMaxTurnRateDeg`
-  are currently player-gated -- extend them (Phase 0) or NPC stats use defaults.
+- NPC movement stats are per-ship-class in this build: the Phase 0 integrator
+  and `NovaAi_ApplyControls` both derive stats from the ship's own `ShipClass`
+  (`accel`/`speed`/`turn_rate`), which for a clean NPC **is** the effective value
+  (the outfit opcode-7/8/9 bonuses in `Ship_ComputeShipEffective*`/
+  `Ship_ComputeShipMaxTurnRateDeg` apply only to the player, `ship_instance_id
+  == 0`). The remaining NPC-branch gaps are just the status-effect/disable
+  damping (requires combat/status state, TODO(decomp)) and the turn-rate floor
+  clamp (ported, currently inert). Keep these in sync if NPC outfit/status
+  modelling is added.
 - Build both debug and release; format with clang-format; treat warnings as errors.

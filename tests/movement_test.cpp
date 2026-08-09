@@ -227,3 +227,99 @@ TEST_CASE("gravity-shield detect excludes ai_control_mode 0x0c") {
   ship.ai_control_mode = 0x0c;
   CHECK_FALSE(game::NovaShip_HasGravityShield(ship, cls));
 }
+
+// --- NPC engine-glow level (Ghidra Ship_HandleShip field_0xc8d4) ---
+
+TEST_CASE("npc full-burn glow ramps toward the 0x20 cap") {
+  game::GameState state;
+  game::Ship ship;
+  // Full burn: thrust command at/above 2x effective thrust (2*0.1 = 0.2).
+  ship.ai_forward_thrust_cmd = 0.5F;
+  game::ShipClass cls = TestShipClass(); // accel 500 -> eff_thrust 0.1
+
+  // ramps +1/frame from 0 toward 32.
+  for (int i = 0; i < 40; ++i) {
+    game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  }
+  CHECK(ship.engine_glow_level == 0x20);
+  // 0x20/24 = 1.333, clamped to the [0,1] alpha range.
+  CHECK(ship.engine_glow_intensity == Catch::Approx(1.0F));
+}
+
+TEST_CASE("npc low-throttle glow settles at the 0x18 cruise level") {
+  game::GameState state;
+  game::Ship ship;
+  ship.ai_forward_thrust_cmd = 0.05F; // < 2x eff_thrust -> low throttle
+  game::ShipClass cls = TestShipClass();
+
+  for (int i = 0; i < 40; ++i) {
+    game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  }
+  CHECK(ship.engine_glow_level == 0x18);
+}
+
+TEST_CASE("npc glow fades to zero when thrust stops") {
+  game::GameState state;
+  game::Ship ship;
+  ship.ai_forward_thrust_cmd = 0.5F; // burn up first
+  game::ShipClass cls = TestShipClass();
+  for (int i = 0; i < 40; ++i) {
+    game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  }
+  CHECK(ship.engine_glow_level == 0x20);
+
+  // Stop thrusting: glow decays one unit/frame toward 0.
+  ship.ai_forward_thrust_cmd = 0.0F;
+  for (int i = 0; i < 40; ++i) {
+    game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  }
+  CHECK(ship.engine_glow_level == 0);
+  CHECK(ship.engine_glow_intensity == Catch::Approx(0.0F));
+}
+
+TEST_CASE("npc banking ship glows toward 0x18 while turning") {
+  game::GameState state;
+  game::Ship ship;
+  ship.ai_turn_bias_dir = 1;
+  game::ShipClass cls = TestShipClass();
+  cls.sprite_behavior_flags = 0x2; // bit 2 = banking sprite
+
+  // No thrust command: the +2 turn-bias boost toward 0x18 then the no-thrust
+  // fade decrements once, so the level rises +1/frame (net) and settles
+  // oscillating in a band around the 0x18 cruise level (matching the original's
+  // boost/fade interaction).
+  for (int i = 0; i < 40; ++i) {
+    game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  }
+  CHECK(ship.engine_glow_level >= 0x15);
+  CHECK(ship.engine_glow_level <= 0x18);
+  CHECK(ship.engine_glow_intensity > 0.7F); // visibly lit while banking
+}
+
+// --- Turn-rate floor (Ship_ComputeShipMaxTurnRateDeg NPC branch) ---
+
+TEST_CASE("npc turn-rate floor is a no-op for a clean ship (computed==base)") {
+  game::GameState state;
+  game::Ship ship;
+  ship.ai_desired_heading_deg = 90;
+  game::ShipClass cls = TestShipClass();
+  // Base turn 8 raw -> 0.8 deg/tick. Ship_ComputeShipMaxTurnRateDeg floors the
+  // returned rate up to 1.0 only when the base rate is already >= 1.0 AND the
+  // computed (post-damping) rate fell below it; a clean NPC has no status/
+  // disable damping so computed == base and the floor never engages here. It
+  // only starts to matter once status/disable damping is reconstructed (see
+  // the integrator comment).
+  cls.turn_rate = 8.0F;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.heading ==
+        Catch::Approx(0.8F * std::numbers::pi_v<float> / 180.0F));
+
+  // Same for a genuinely sluggish class whose base is below the floor guard: it
+  // is not raised to 1.0 (only bases already >= 1.0 are floored).
+  ship.heading = 0.0F;
+  cls.turn_rate = 5.0F;
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.heading ==
+        Catch::Approx(0.5F * std::numbers::pi_v<float> / 180.0F));
+}

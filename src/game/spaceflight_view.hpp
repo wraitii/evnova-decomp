@@ -148,12 +148,17 @@ private:
   // change rather than per frame (diagnostic for the flight render).
   bool glow_last_drawn_ = false;
 
-  // One loaded NPC ship's heading-rotation sprite data (base sheet only; NPC
-  // ships are drawn without the engine-glow layer for now -- TODO(decomp) the
-  // per-ship glow). Cached per ship-class resource id so each distinct class
-  // in the current system is decoded/uploaded once per session.
+  // One loaded NPC ship's heading-rotation sprite data: the base hull sheet and
+  // (when the class's sh\x8an descriptor names one) the engine-glow layer,
+  // sharing the same rotation grid. The glow is drawn over the base with a
+  // thrust-driven alpha read from the ship's engine_glow_level (driven in
+  // NovaShip_IntegrateNpcMovement); a class without a glow sheet just draws
+  // base-only. Cached per ship-class resource id so each distinct class in the
+  // current system is decoded/uploaded once per session.
   struct NpcShipSprite {
     SpriteAsset base;
+    SpriteAsset glow;      // engine-glow layer (empty when the class has none)
+    bool has_glow = false; // whether a glow layer is present/loaded
     int frames_per_rotation = 36;
   };
 

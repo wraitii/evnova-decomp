@@ -697,7 +697,18 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   elapsed_ticks = std::max(0.0F, elapsed_ticks);
 
   // Derived effective stats (see header/block comment above).
-  const float eff_turn_deg = static_cast<float>(ship_class.turn_rate) * 0.1F;
+  // The turn-rate floor mirrors Ship_ComputeShipMaxTurnRateDeg's NPC branch:
+  // the returned rate is clamped up to a minimum floor (gh.data _DAT_00575784
+  // = 1.0 deg/frame) whenever the base class rate itself is already at/above
+  // that floor (so genuinely sluggish classes keep their low rate). For a clean
+  // NPC the computed rate equals the base, so this floor is currently inert; it
+  // becomes active only once status-effect / disable damping lowers the rate
+  // below its base (TODO(decomp)). Kept to match the original's NPC branch.
+  const float base_turn_deg = static_cast<float>(ship_class.turn_rate) * 0.1F;
+  float eff_turn_deg = base_turn_deg;
+  if (base_turn_deg >= 1.0F) {
+    eff_turn_deg = std::max(eff_turn_deg, 1.0F);
+  }
   const float eff_max_speed = static_cast<float>(ship_class.speed) / 100.0F;
   const float eff_thrust =
       static_cast<float>(ship_class.accel) / 10000.0F * 2.0F;
@@ -856,6 +867,59 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   if (ship.reverse_speed_bias > 0.0F) {
     ship.reverse_speed_bias =
         std::max(0.0F, ship.reverse_speed_bias - elapsed_ticks);
+  }
+
+  // --- Engine glow level (Ghidra ShipState field_0xc8d4). ---
+  // Mirrors Ship_HandleShip's glow drive: the level ramps toward 0x20 (32)
+  // under a full burn, toward 0x18 (24) under low throttle (thrust command
+  // below 2x the effective thrust, gh.data DAT_0057531c = 2.0), fades by one
+  // decrement while not thrusting (LAB_00435197) and again while reversing, and
+  // gets an extra +2 toward 0x18 while banking into a turn (ai_turn_bias_dir
+  // set and class sprite_behavior_flags bit 2). The renderer maps level/24
+  // clamped to [0,1] onto the engine-glow alpha, exactly as for the player.
+  {
+    std::int16_t &glow = ship.engine_glow_level;
+    auto fade_to_zero = [&]() { // LAB_00435197: single decrement toward 0.
+      if (glow > 0) {
+        glow = static_cast<std::int16_t>(glow - 1);
+      }
+    };
+    if (ship.ai_turn_bias_dir != 0 && (ship_class.sprite_behavior_flags & 2)) {
+      if (glow < 0x18) {
+        glow = static_cast<std::int16_t>(glow + 2);
+        if (glow > 0x18) {
+          glow = 0x18;
+        }
+      }
+    }
+    if (ship.ai_forward_thrust_cmd <= 0.0F) {
+      fade_to_zero();
+    } else if (ship.reverse_speed_bias > 0.0F || ship.ai_state_code == 0x16) {
+      // Thrust command present but the ship is coasting through a reversal (or
+      // defunct): the original jumps to the fade label here too.
+      fade_to_zero();
+    } else if (ship.ai_forward_thrust_cmd < eff_thrust * 2.0F) {
+      // Low throttle: settle the glow at the 0x18 cruise level.
+      if (glow < 0x18) {
+        glow = static_cast<std::int16_t>(glow + 1);
+      } else if (glow > 0x18) {
+        glow = static_cast<std::int16_t>(glow - 1);
+      }
+    } else {
+      // Full burn: raise toward the 0x20 cap.
+      if (glow < 0x20) {
+        glow = static_cast<std::int16_t>(glow + 1);
+      }
+    }
+    // The reversal countdown block also fades the glow once more while its
+    // timer is live (Ship_HandleShip decrements again here), so a reversing
+    // ship fades twice per frame like the original.
+    if (ship.reverse_speed_bias > 0.0F && ship.ai_state_code != 0x16 &&
+        glow > 0) {
+      glow = static_cast<std::int16_t>(glow - 1);
+    }
+    ship.engine_glow_intensity =
+        std::clamp(static_cast<float>(glow) / 24.0F, 0.0F, 1.0F);
   }
 }
 
