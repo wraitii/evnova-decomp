@@ -10,6 +10,7 @@ add_executable(evnova_tests
     gameplay_interface_test.cpp
     hud_overlay_test.cpp
     negotiation_dialog_test.cpp
+    government_test.cpp
 )
 
 target_link_libraries(evnova_tests PRIVATE Catch2::Catch2WithMain evnova_runtime)

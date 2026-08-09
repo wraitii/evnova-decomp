@@ -40,6 +40,29 @@ namespace game {
 [[nodiscard]] int NovaEncounter_SelectFleetDefWeighted(
     const System &system, const ScenarioData &scenario, std::mt19937 &rng);
 
+// Mirrors EncounterFleet_TrySpawnRandomEncounterFleet (Ghidra 0x00425280):
+// scans the ScenarioData.fleets table, marking each def that may spawn in
+// system_id based on its spawn_system_filter and current availability, then
+// with per-eligible-def odds spawns one eligible def via
+// NovaEncounter_SpawnFleetLeadShip. Returns the spawned ship slot, or -1 when
+// no eligible def was picked (or none was available).
+//
+// Filter decode (0-based def): -1 -> anywhere; 0x80..9999 -> that exact system
+// id; 10000..14999 -> system government == (filter-10000); 15000..19999 ->
+// system govt allied to (filter-15000); 20000..24999 -> system govt !=
+// (filter-20000); 25000..29999 -> system govt hostile/xenophobic to
+// (filter-25000). Only defs with a valid lead (lead_ship_class_id != -1) and
+// is_available_runtime set are candidates. Selection draws uniformly over the
+// full 0x100-def space and only spawns when the drawn slot is marked eligible
+// (the original's effective per-eligible-def odds, lower when few defs fit).
+//
+// TODO(decomp) ignore_ship_availability: the original forwards this to
+// EncounterFleet_SpawnRandomEncounterFleet to gate the arrival overlay banner;
+// our lead-only spawner does not model the banner yet, so the flag is accepted
+// for signature parity but not yet acted on.
+[[nodiscard]] int NovaEncounter_TrySpawnRandomFleet(
+    GameState &state, std::int16_t system_id, bool ignore_ship_availability);
+
 // PARTIAL reconstruction of the lead-ship spawn of
 // EncounterFleet_SpawnRandomEncounterFleet (Ghidra 0x004259b0). Allocates one
 // ship slot in system_id for the random-encounter fleet template at

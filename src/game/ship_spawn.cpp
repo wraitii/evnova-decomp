@@ -1,9 +1,11 @@
 #include "ship_spawn.hpp"
 
 #include "../log.hpp"
+#include "government.hpp"
 
 #include <cmath>
 #include <random>
+#include <vector>
 
 namespace game {
 namespace {
@@ -243,6 +245,74 @@ int NovaEncounter_SelectFleetDefWeighted(const System &system,
     if (draw <= bucket[static_cast<std::size_t>(k)]) {
       return eligible_ids[static_cast<std::size_t>(k)];
     }
+  }
+  return -1;
+}
+
+// Ghidra 0x00425280 EncounterFleet_TrySpawnRandomEncounterFleet. See the
+// header for the full filter decode and the selection semantics. The original
+// scans all 0x100 FleetDef slots (g_random_encounter_fleet_defs); our
+// ScenarioData.fleets is likewise sized to 0x100, so the scan range matches.
+int NovaEncounter_TrySpawnRandomFleet(GameState &state,
+                                      std::int16_t system_id,
+                                      bool /*ignore_ship_availability*/) {
+  const System *sys =
+      state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
+  if (sys == nullptr) {
+    return -1;
+  }
+
+  std::vector<bool> eligible(state.scenario.fleets.size(), false);
+  std::size_t eligible_count = 0;
+  for (std::size_t i = 0; i < state.scenario.fleets.size(); ++i) {
+    const FleetDef &def = state.scenario.fleets[i];
+    // Only defs with a valid lead and the runtime availability bit can spawn.
+    if (def.lead_ship_class_id < 0 || !def.is_available_runtime) {
+      continue;
+    }
+    const std::int16_t filter = def.spawn_system_filter;
+    bool mark = false;
+    if (filter == -1) {
+      mark = true; // anywhere
+    } else if (system_id == filter) {
+      mark = true; // exact 0-based system id
+    } else if (filter > 0x7f && filter < 10000 && system_id == filter - 0x80) {
+      mark = true; // exact system id (stored as raw resource id)
+    } else if (filter > 9999 && filter < 15000 &&
+               filter - 10000 == sys->government_id) {
+      mark = true; // specific government id
+    } else if (filter > 14999 && filter < 20000 && sys->government_id >= 0 &&
+               NovaGovernment_AreGovtsAllied(
+                   state.scenario,
+                   static_cast<std::int16_t>(filter - 15000),
+                   sys->government_id)) {
+      mark = true; // government allied to the filter's government
+    } else if (filter > 19999 && filter < 25000 && sys->government_id >= 0 &&
+               filter - 20000 != sys->government_id) {
+      mark = true; // a different government
+    } else if (filter > 24999 && filter < 30000 && sys->government_id >= 0 &&
+               NovaGovernment_AreGovtsHostileOrXenophobic(
+                   state.scenario,
+                   static_cast<std::int16_t>(filter - 25000),
+                   sys->government_id)) {
+      mark = true; // hostile / xenophobic government
+    }
+    if (mark) {
+      eligible[i] = true;
+      ++eligible_count;
+    }
+  }
+
+  if (eligible_count == 0) {
+    return -1;
+  }
+  // Selection: draw uniformly over the full 0x100-def space and only spawn when
+  // the drawn slot is a marked (eligible) def -- the original's effective
+  // per-eligible-def odds.
+  const std::int16_t idx = RandomBelow(state, 0x100);
+  if (idx >= 0 && static_cast<std::size_t>(idx) < eligible.size() &&
+      eligible[static_cast<std::size_t>(idx)]) {
+    return NovaEncounter_SpawnFleetLeadShip(state, system_id, idx);
   }
   return -1;
 }

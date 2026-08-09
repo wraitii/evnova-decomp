@@ -10,6 +10,7 @@ namespace {
 using game::GameState;
 using game::NovaEncounter_SelectFleetDefWeighted;
 using game::NovaEncounter_SpawnFleetLeadShip;
+using game::NovaEncounter_TrySpawnRandomFleet;
 using game::NovaShip_AllocateShipSlot;
 
 TEST_CASE("allocator takes the first free slot below the reserved tail") {
@@ -232,6 +233,84 @@ TEST_CASE("weighted fleet select returns -1 when no candidate is available") {
   // Both bound defs remain unavailable -> no eligible candidate.
   std::mt19937 rng(99);
   CHECK(NovaEncounter_SelectFleetDefWeighted(sys, state.scenario, rng) == -1);
+}
+
+// EncounterFleet_TrySpawnRandomEncounterFleet (0x00425280) clean-room
+// counterpart: NovaEncounter_TrySpawnRandomFleet. With every fleet-def slot
+// marked eligible (valid lead, available, matching a government-specific
+// filter), any draw lands on an eligible def so the spawn is deterministic.
+TEST_CASE("try-spawn picks an eligible def matching the system government") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  // system index 0 == resource id 0x80; give it government id 5 (0-based).
+  auto &sys = state.scenario.systems[0];
+  sys.government_id = 5;
+
+  // Mark ALL 0x100 fleet slots eligible with lead 0 + filter "specific govt 5".
+  for (auto &def : state.scenario.fleets) {
+    def.lead_ship_class_id = 0;
+    def.is_available_runtime = true;
+    def.spawn_system_filter = 10000 + 5;
+  }
+
+  // Every draw lies inside the 0x100 range and lands on an eligible def, so
+  // the spawn is deterministic (returns a slot, never -1).
+  for (int i = 0; i < 20; ++i) {
+    const int slot = NovaEncounter_TrySpawnRandomFleet(state, 0, false);
+    REQUIRE(slot != -1);
+    // The spawned ship carries the synthetic lead class 0.
+    CHECK(state.ShipAt(static_cast<std::size_t>(slot)).ship_class_id == 0);
+  }
+}
+
+// A filter naming a different government than the system's means no def is
+// eligible, so the try-spawn always yields -1.
+TEST_CASE("try-spawn refuses when no def matches the system government") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  auto &sys = state.scenario.systems[0];
+  sys.government_id = 5;
+  for (auto &def : state.scenario.fleets) {
+    def.lead_ship_class_id = 0;
+    def.is_available_runtime = true;
+    def.spawn_system_filter = 10000 + 6; // only govt 6, not 5
+  }
+  for (int i = 0; i < 30; ++i) {
+    CHECK(NovaEncounter_TrySpawnRandomFleet(state, 0, false) == -1);
+  }
+}
+
+// The "anywhere" filter (-1) makes any available lead-valid def eligible.
+TEST_CASE("try-spawn with anywhere filter spawns for any draw") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  auto &sys = state.scenario.systems[0];
+  sys.government_id = 5;
+  for (auto &def : state.scenario.fleets) {
+    def.lead_ship_class_id = 0;
+    def.is_available_runtime = true;
+    def.spawn_system_filter = -1;
+  }
+  for (int i = 0; i < 20; ++i) {
+    REQUIRE(NovaEncounter_TrySpawnRandomFleet(state, 0, false) != -1);
+  }
+}
+
+// Ineligible defs (no lead, or unavailable) are never spawned even when the
+// filter matches: with only lead-less/unavailable defs the draw always misses.
+TEST_CASE("try-spawn skips lead-less and unavailable defs") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  auto &sys = state.scenario.systems[0];
+  sys.government_id = 5;
+  for (auto &def : state.scenario.fleets) {
+    def.lead_ship_class_id = -1; // no lead
+    def.is_available_runtime = true;
+    def.spawn_system_filter = -1; // anywhere
+  }
+  for (int i = 0; i < 30; ++i) {
+    CHECK(NovaEncounter_TrySpawnRandomFleet(state, 0, false) == -1);
+  }
 }
 
 } // namespace

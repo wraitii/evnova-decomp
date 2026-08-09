@@ -141,7 +141,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00423FA0,Outfit_SwapPlayerShipWithEscort,src/game/landed_store.cpp,45%,"ship swap subset in NovaLanded_ReplacePlayerShip: trade-in/purchase credit, ship-class switch, non-persistent outfit clear + DefaultItems grant, seed the new ship's stock weapon banks (NovaWeapon_SeedBanksFromShipStock) and reconcile them into owned outfits (NovaWeapon_ReconcileOutfitPoolWithWeaponBanks), cap meters to new maxima, spawn at the stellar. Escort/fleet slot management and cargo reallocation remain TODO(decomp)"
 0x00424F90,System_UpdateDisasterStates,,0%,
 0x004250F0,Outfit_RefuelShipWithCredits,,0%,
-0x00425280,EncounterFleet_TrySpawnRandomEncounterFleet,,0%,
+0x00425280,EncounterFleet_TrySpawnRandomEncounterFleet,src/game/ship_spawn.cpp,90%,Faithful reimpl as NovaEncounter_TrySpawnRandomFleet (src/game/ship_spawn.cpp/hpp): scans all 0x100 FleetDef slots, marks eligible defs (valid lead + is_available_runtime) by spawn_system_filter decode (-1 anywhere; exact system id; 10000+/15000+/20000+/25000+ govt ranges via NovaGovernment_AreGovtsAllied/_HostileOrXenophobic), then draws over [0,0x100) and spawns the drawn def if eligible via NovaEncounter_SpawnFleetLeadShip. TODO(decomp): ignore_ship_availability forwarded to the genuine spawner gates the arrival banner (our lead-only spawner does not model the banner).
 0x004254B0,Ship_AllocateShipSlotInSystem,src/game/ship_spawn.cpp,70,"NovaShip_AllocateShipSlot: faithful slot scan (reserved tail) + baseline reset of the load-bearing identity/kinematics/targeting/mission fields and [-750,750) position scatter. TODO(decomp): deep combat/AI residual field_0x* resets and the combat_state_init_range/skill_variance random inits are omitted until the ship AI/combat systems are reconstructed (see ship_spawn.cpp)."
 0x004259B0,EncounterFleet_SpawnRandomEncounterFleet,src/game/ship_spawn.cpp,25%,Partial reimpl of the lead-ship spawn: NovaEncounter_SpawnFleetLeadShip src/game/ship_spawn.cpp allocates one slot, applies the zero-based def lead class directly to ShipState.ship_class_id, government, class-default AI behavior, base shield/armor, mission slots cleared, mining-scoop flag, allocator-default credits=0, jump_destination=-2. TODO(decomp): positioning (spin-out AI 0x08 / jump-in AI 0x15), cargo seeding, weapon-bank loadout copy, escort spawn/link, arrival banner. Depends on deferred AI-state/weapon-bank/DudeDef code.
 0x00426CE0,Frame_QueueCombatChatter,,0%,
@@ -450,8 +450,8 @@ address,name,impl_file,reimpl_pct,comment
 0x0046BA30,Ship_FindNearestHittableWeaponTarget,,0%,
 0x0046BBF0,NovaRender_SetSystemSpaceBackgroundColor,src/game/spaceflight_view.cpp,60%,per-system BkgndColor (syst +0x8e RRGGBB) decoded & used as solid backdrop; DrawContext/sprite-effect surface plumbing not reconstructed
 0x0046BC50,Government_SetSystemFillColor,,0%,
-0x0046BC90,Government_AreGovtsAllied,,0%,
-0x0046BDF0,Government_AreGovtsHostileOrXenophobic,,0%,
+0x0046BC90,Government_AreGovtsAllied,src/game/government.cpp,100%,Faithful reimpl as NovaGovernment_AreGovtsAllied (src/game/government.cpp/hpp): self returns true, derelict (flags_primary & 0x800) excluded, then cross-checks classes vs the other's ally list both directions. Verified vs Federation 0x80 / govt 0x81 (not allied) and govts 0x84/0x85 (allied).
+0x0046BDF0,Government_AreGovtsHostileOrXenophobic,src/game/government.cpp,100%,Faithful reimpl as NovaGovernment_AreGovtsHostileOrXenophobic (src/game/government.cpp/hpp): enemy-class cross-check both directions, then fallback not-allied && (either xenophobic flag 0x0001). Verified vs Federation 0x80 hostile to govt 0x81; govts 0x84/0x85 non-hostile; synthetic xenophobic + derelict cases.
 0x0046BFF0,Government_DoGovtsShareClass,,0%,
 0x0046C080,Ship_ComputeStatusEffectDecayRate,,0%,
 0x0046C160,Ship_GetStatusEffectIntensity,,0%,
