@@ -13,8 +13,22 @@
 //   Request Assistance | Beg For Mercy | Release (secondary action)
 //
 // (labels from the STR# 0x96 "button labels" pool entries 0x14/0x15/0x16/
-// 0x18/0x1f). Behavior-6 ships with no AI target and no mission fleet open
-// the escort-management window instead (not reconstructed; see scope).
+// 0x18/0x1f). The window is laid out from DLOG/DITL 0x3ef: the 423x215 PICT
+// 0x213f backdrop is centred on the 640x480 playfield, with the 200x200 ship
+// portrait (ShipClass pict_fallback_sprite_resource_id = PICT 5000+class, from
+// NovaData_LoadAllShipClassVisualAndLaunchData 0x004aeda0) in DITL item 10 on
+// the right, the ship name in item 9 and the status/prompt block in item 11,
+// and the three context buttons stacked *vertically* on the lower-left in DITL
+// items 0/1/2 (Close Channel at the bottom, Request Assistance / Beg For
+// Mercy / Release in the middle, Greetings at the top; each button's label
+// matches its action -- slot 1 runs the assistance dialogue, slot 2 shows
+// the hail-info text), mirroring NovaUi_DrawTravelDestinationContextButtons'
+// DAT_007d82ee/f0/f2 label table.
+// The assistance button is hidden for special-scan-mask governments (mirroring
+// the same function's local_10[1] gate), and the Greetings button then drops
+// down to the middle rect (item 1, y=153). Behavior-6 ships with no AI target
+// and no mission fleet open the escort-management window instead (not
+// reconstructed; see scope).
 //
 // The comm state machine the original keeps in globals is derived here and
 // carried explicitly on the dialog frame: the per-launch random flavour index
@@ -25,7 +39,10 @@
 // (local_11/1d/1e + DAT_007d17f4 in the original). Prompt text is loaded from
 // STR# 0xbb8 (prompt_index < 0x26) / STR# 0xbb9 (>= 0x26) at
 // `index*5 + random + 1` exactly like NovaUi_LoadTravelDestinationPrompt-
-// String (0x004828c0).
+// String (0x004828c0). The dialog honours the original keyboard shortcuts
+// (NovaUi_PollTargetShipCommWindow 0x0047fa40): Enter/'e'/Esc close the
+// channel, 'r' triggers the assistance button (Request Assistance | Beg For
+// Mercy | Release), 'g' the Greetings button.
 //
 // SCOPE: the window shell, the initial prompt selection, the Greetings state
 // machine (fire-restricted / escort cargo-transfer / keep-pressing-target /
@@ -49,9 +66,10 @@ namespace game {
 
 // Runs the DLOG 0x3ef ship-comm modal for the ship in `ship_slot` (must be a
 // valid active NPC slot). Draws PICT 0x213f as the window backdrop on a dim
-// scrim over the flight scene, shows the ship picture (ShipClass
-// pict_fallback_sprite_resource_id) and name/government panel, and loops the
-// three context buttons until the player closes the channel (Esc/Enter/Close
+// scrim over the flight scene, shows the 200x200 ship portrait (ShipClass
+// pict_fallback_sprite_resource_id) on the right and name/government panel on
+// the left, and loops the three context buttons (stacked vertically on the
+// lower-left) until the player closes the channel (Esc/Enter/'e'/Close
 // Channel), the platform quits, or the internal escort-transfer latch is
 // armed (the window closes once the transfer prompt is shown, mirroring the
 // original's one-shot escort release). May mutate the target ship's AI state

@@ -165,12 +165,13 @@ struct ShipClass {
   // 0x80 timing, etc.). Consulted by the AI travel/arrive logic.
   std::uint16_t sprite_behavior_flags = 0;
 
-  // Ghidra ShipClassDef +0xA0A (pict_fallback_sprite_resource_id): the PICT
-  // resource drawn in the ship-comm dialog / shipyard ship list. The loader
-  // source that fills this field has not been located yet (TODO(decomp): the
-  // sh\x95p payload and both class loaders write neighbours +0xA00..+0xA20
-  // but not +0xA0A), so it stays 0 and the comm dialog falls back to a
-  // placeholder picture.
+  // Ghidra ShipClassDef +0xA0A (pict_fallback_sprite_resource_id): the large
+  // (200x200) portrait PICT drawn in the ship-comm dialog (DLOG 0x3ef item 10)
+  // and the shipyard list. Ghidra NovaData_LoadAllShipClassVisualAndLaunchData
+  // (0x004aeda0) stores `5000 + (zero-based class id)` when PICT(index+5000)
+  // exists, otherwise `5000 + clone_source_ship_class` (the source's portrait)
+  // -- the portrait lives in the 5000+ PICT range, distinct from the target-
+  // panel 3000+ PICT set. 0 when neither resolution succeeded.
   std::uint16_t pict_fallback_sprite_resource_id = 0;
 
   // Ghidra ShipClassDef +0xA0C (clone_source_ship_class). The zero-based ship

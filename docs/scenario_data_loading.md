@@ -6,6 +6,12 @@ flow and spaceflight loop consume. The original rebuilds them at startup in
 resource families by id `0x80..` and parsing a fixed big-endian field layout
 (Macintosh resource heritage) into a set of globals.
 
+The scenario tables above are the *numeric data* families. The **in-flight and
+docked UI windows** (ship-comm 0x3ef, negotiation 0x3f1, payment 0x3f0,
+spaceport 0x3e8, ...) are built from a *different* pair of `Nova.rez`
+resources, `DLOG`/`DITL`, documented separately in
+`docs/dlog_ditl_dialog_format.md`.
+
 ## Where the data lives
 
 The `.rez` archives are `BRGR` containers parsed by `src/brgr_archive.cpp`. Each

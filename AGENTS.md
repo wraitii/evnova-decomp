@@ -14,6 +14,11 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 
 ## Workflow notes
 
+- Before diving into an unfamiliar subsystem (data formats, resource loading,
+  UI/window layout, render paths), run `ls docs/` to see if a reverse-engineering
+  note already exists for it (e.g. `dlog_ditl_dialog_format.md` for dialog
+  resources, `scenario_data_loading.md`, `menu_graphics_structure.md`). Docs are
+  the fastest ground-truth shortcut over re-deriving from the Ghidra API.
 - Reference decompiled / disassembled ground truth from the Ghidra API.
 - When grepping, prefer to do it in the repo root and `tools/`; data may not be where you expect.
 - Be conservative with speculative renames; be liberal with factual comments. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.

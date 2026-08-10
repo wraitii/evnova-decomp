@@ -31,6 +31,39 @@ namespace {
 // The ship-comm window's backdrop PICT (DLOG 0x3ef, the Communications frame).
 constexpr std::uint16_t kCommFramePict = 0x213f;
 
+// ---- DLOG 0x3ef / DITL 0x3ef geometry -------------------------------------
+// The comm window is 423x215 (DLOG 0x3ef bounds = the backdrop PICT 0x213f,
+// decodes to exactly 423x215), centred on the 640x480 playfield at
+// window-relative (0,0) = top-left of the backdrop. The three context buttons
+// are DITL items 0/1/2 stacked *vertically* on the lower-left (166x26 each at
+// x=21..187, y=125/153/181), NOT a bottom row; the ship portrait is DITL item
+// 10, a 200x200 box on the right (x=216..416, y=7..207); the ship name is item
+// 9 (x=11..203, y=8..66) and the status/prompt block is item 11 (x=40..174,
+// y=73..119). The remaining DITL items (3..8, below y=207) sit past the
+// 215-tall backdrop and are clipped/redundant in the shipped window.
+constexpr int kCommFrameWidth = 423;
+constexpr int kCommFrameHeight = 215;
+// Window origin on the 640x480 playfield (centred frame).
+constexpr float kCommWindowX = (640 - kCommFrameWidth) / 2.0F;
+constexpr float kCommWindowY = (480 - kCommFrameHeight) / 2.0F;
+// Portrait (DITL item 10): 200x200 on the right side.
+constexpr SDL_FRect kCommPictureRect{216.0F, 7.0F, 200.0F, 200.0F};
+// Ship name (DITL item 9) / status block (DITL item 11).
+constexpr SDL_FRect kCommNameRect{11.0F, 8.0F, 192.0F, 58.0F};
+constexpr SDL_FRect kCommStatusRect{40.0F, 73.0F, 134.0F, 46.0F};
+// Buttons (DITL items 0/1/2), 166x26, stacked vertically. DITL item 0 = the
+// Close Channel button (y=181, bottom), item 1 = the assistance button
+// (y=153, middle: label Request Assistance | Beg For Mercy | Release, runs
+// the assistance dialogue), item 2 = the Greetings button (y=125, top:
+// shows the hail-info text). Label indices come from
+// NovaUi_DrawTravelDestinationContextButtons' DAT_007d82ee/f0/f2 table.
+constexpr float kCommButtonX = 21.0F;
+constexpr float kCommButtonW = 166.0F;
+constexpr float kCommButtonH = 26.0F;
+constexpr float kCommButtonYTop = 125.0F;    // Greetings button
+constexpr float kCommButtonYMiddle = 153.0F; // assistance button
+constexpr float kCommButtonYClose = 181.0F;
+
 // Prompt pools: STR# 0xbb8 "Ship Comm Strings" for prompt_index < 0x26, STR#
 // 0xbb9 "More Ship Comm" for prompt_index >= 0x26 (the escort-goodbye pool),
 // each at `index*5 + random + 1` / `(index*5 + random) - 0xbd` respectively
@@ -256,33 +289,27 @@ void DrawShipCommDialog(SdlPlatform &platform,
   SDL_RenderFillRect(renderer, &panel);
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
-  // Centre the frame at its natural size on the 640x480 playfield.
-  SDL_FRect dst{0, 0, 520.0F, 320.0F};
+  // The comm window frame is a fixed 423x215 PICT (DLOG 0x3ef), centred on the
+  // 640x480 playfield. All DITL item rects are offset by this origin.
+  const SDL_FRect frame{kCommWindowX, kCommWindowY,
+                        static_cast<float>(kCommFrameWidth),
+                        static_cast<float>(kCommFrameHeight)};
   if (backdrop != nullptr) {
-    float frame_w = 0.0F;
-    float frame_h = 0.0F;
-    SDL_GetTextureSize(backdrop, &frame_w, &frame_h);
-    frame_w = std::min(frame_w, panel.w - 40.0F);
-    frame_h = std::min(frame_h, panel.h - 60.0F);
-    dst = {(panel.w - frame_w) / 2.0F,
-           (panel.h - frame_h) / 2.0F - 18.0F,
-           frame_w,
-           frame_h};
-    dst.y = std::max(0.0F, dst.y);
-    SDL_RenderTexture(renderer, backdrop, nullptr, &dst);
+    SDL_RenderTexture(renderer, backdrop, nullptr, &frame);
   } else {
     // No backdrop art: draw a bordered placeholder so the dialog stays legible.
     SDL_SetRenderDrawColor(renderer, 16, 40, 72, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &dst);
+    SDL_RenderFillRect(renderer, &frame);
     SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &dst);
+    SDL_RenderRect(renderer, &frame);
   }
 
-  // Ship picture box (DLOG entry 0xb in the original) upper-left of the frame.
-  const SDL_FRect picture{std::max(1.0F, dst.x + 18.0F),
-                          std::max(1.0F, dst.y + 18.0F),
-                          150.0F,
-                          110.0F};
+  // Ship portrait (DITL item 10): a 200x200 box on the right side of the
+  // frame, filled by the class's 200x200 portrait PICT (5000 + class id).
+  const SDL_FRect picture{kCommWindowX + kCommPictureRect.x,
+                          kCommWindowY + kCommPictureRect.y,
+                          kCommPictureRect.w,
+                          kCommPictureRect.h};
   if (ship_picture != nullptr) {
     SDL_RenderTexture(renderer, ship_picture, nullptr, &picture);
   } else {
@@ -302,50 +329,60 @@ void DrawShipCommDialog(SdlPlatform &platform,
                           "[no picture]");
   }
 
-  // Ship name / government status panel (DLOG entry 0xc).
+  // Ship name (DITL item 9) at the top of the frame's left panel, with the
+  // government / escort status line beneath it.
+  const SDL_FRect name{kCommWindowX + kCommNameRect.x,
+                       kCommWindowY + kCommNameRect.y,
+                       kCommNameRect.w,
+                       kCommNameRect.h};
   NovaText_DrawCentered(platform,
                         font_cache,
                         NovaFontFamily::kGeneva,
                         13.0F,
                         kNovaFontStyleBold,
                         kTitle,
-                        dst.x + 180.0F,
-                        dst.x + dst.w - 16.0F,
-                        dst.y + 22.0F,
+                        name.x,
+                        name.x + name.w,
+                        name.y + name.h / 2.0F + 2.0F,
                         ship_name);
   if (!name_status.empty()) {
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
-                          12.0F,
+                          11.0F,
                           kNovaFontStyleRegular,
                           kDim,
-                          dst.x + 180.0F,
-                          dst.x + dst.w - 16.0F,
-                          dst.y + 44.0F,
+                          name.x,
+                          name.x + name.w,
+                          name.y + name.h / 2.0F + 14.0F,
                           name_status);
   }
 
-  // Status / prompt text block (DLOG entry 10) just inside the frame, below
-  // the name panel.
-  const SDL_FRect textBand{
-      dst.x + 24.0F, dst.y + 92.0F, std::max(1.0F, dst.w - 48.0F), 90.0F};
+  // Prompt / status message text (DITL item 11) below the name.
+  const SDL_FRect status{kCommWindowX + kCommStatusRect.x,
+                         kCommWindowY + kCommStatusRect.y,
+                         kCommStatusRect.w,
+                         kCommStatusRect.h};
   if (!prompt_text.empty()) {
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
-                          13.0F,
+                          12.0F,
                           kNovaFontStyleBold,
                           kTitle,
-                          textBand.x,
-                          textBand.x + textBand.w,
-                          textBand.y,
+                          status.x,
+                          status.x + status.w,
+                          status.y + status.h / 2.0F,
                           prompt_text);
   }
 
-  // Three context buttons across the lower part of the window.
-  for (std::size_t i = 0; i < buttons.size(); ++i) {
-    const ServiceButton &b = buttons[i];
+  // Three context buttons stacked vertically on the lower-left (DITL items
+  // 0/1/2) in slot order bottom-to-top: Close Channel, assistance (label
+  // Request Assistance | Beg For Mercy | Release), Greetings. Labels follow
+  // the original's DAT_007d82ee/f0/f2 table. For special-scan-mask ships the
+  // assistance slot is already omitted from `buttons` (see caller), so only
+  // Close Channel and Greetings (pushed down to the middle) are drawn.
+  for (const ServiceButton &b : buttons) {
     button_art.Draw(platform, b.rect, ButtonState::kNormal);
     NovaText_DrawCentered(platform,
                           font_cache,
@@ -356,7 +393,9 @@ void DrawShipCommDialog(SdlPlatform &platform,
                           b.rect.x,
                           b.rect.x + b.rect.w,
                           b.rect.y + b.rect.h / 2.0F + 4.0F,
-                          i < button_labels.size() ? button_labels[i] : "");
+                          b.slot < button_labels.size()
+                              ? button_labels[b.slot]
+                              : "");
   }
 }
 
@@ -426,7 +465,7 @@ LoadMoodPromptPayFirst(std::int16_t random_index, double personality) {
   return LoadCommPrompt(random_index, kMsgTerribleMood);
 }
 
-// The hail-info text (DAT_007d190c) the secondary button shows for
+// The hail-info text (DAT_007d190c) the Greetings button shows for
 // government-aid-eligible ships. The full assembly (NovaUi_BuildShipCommHail-
 // InfoText 0x004819d0 branch 0: stellar scan + commodity names) is deferred;
 // this mirrors the default STR# 0x7d2 0xaf fragment the original shows when
@@ -467,7 +506,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   // Behavior-6 escorts with no AI target and no mission fleet open the
   // escort-management window in the original (NovaUi_RunEscortShipManagement-
   // Window 0x004853a0); that window is not reconstructed, so the comm dialog
-  // stands in (the Greetings action still runs the escort-release flow).
+  // stands in (the assistance button still runs the escort-release flow).
   if (target.ai_behavior_code == 6 && target.ai_target_ship_slot == 0 &&
       target.mission_fleet_slot == -1) {
     NovaLog::Todo("ship-comm: escort-management window 0x004853a0 not "
@@ -503,7 +542,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     }
   }
 
-  // Government scan-mask gates: bit 1 = "special" (hides the Greetings
+  // Government scan-mask gates: bit 1 = "special" (hides the assistance
   // button / short-circuits comm), bit 8 = comm-special, bit 0x10 = free help
   // (local_10: the bribe is granted without the payment window). The class's
   // inherent government contributes its bit 8.
@@ -579,9 +618,9 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     NovaLog::Todo("ship-comm: frame PICT 0x213f unavailable; drawing a "
                   "bordered placeholder");
   }
-  // Ship picture: ShipClass.pict_fallback_sprite_resource_id is not populated
-  // (the loader source is unlocated, TODO(decomp)), so the picture box shows a
-  // placeholder.
+  // Ship portrait PICT: ShipClass.pict_fallback_sprite_resource_id (5000 +
+  // class id, populated by the scenario loader at startup) decodes to a
+  // 200x200 portrait drawn into DITL item 10 on the frame's right.
   std::unique_ptr<SdlTexture> ship_picture;
   if (ship_class != nullptr &&
       ship_class->pict_fallback_sprite_resource_id != 0) {
@@ -619,45 +658,252 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   }();
 
   // ---- Buttons -------------------------------------------------------------
-  // Slots: 0 Close Channel, 1 Greetings (hidden for special-mask ships),
-  // 2 Request Assistance | Beg For Mercy | Release.
+  // Slots: 0 Close Channel (bottom), 1 the assistance button (middle; label
+  // Request Assistance | Beg For Mercy | Release, hidden for special-mask
+  // ships), 2 the Greetings button (top; shows the hail-info text).
   enum ButtonSlot : std::uint8_t {
     kCloseChannel = 0,
-    kGreetings = 1,
-    kSecondary = 2
+    kAssistance = 1,
+    kGreetings = 2
   };
 
-  const float btn_w = 120.0F;
-  const float btn_h = 25.0F;
-  const float gap = 16.0F;
-  const float total_w = btn_w * 3 + gap * 2;
-  const float row_y = std::min(panel.h - 60.0F, panel.y + panel.h - 50.0F);
-  const float start_x = panel.x + (panel.w - total_w) / 2.0F;
+  // The three buttons live at DITL items 0/1/2: a 166x26 stack on the frame's
+  // lower-left, slot 0 (Close Channel) at the bottom y=181, slot 1 (the
+  // assistance button) in the middle y=153, slot 2 (Greetings) at the top
+  // y=125. For special-scan-mask ships the original hides the assistance
+  // button and drops the Greetings button down to the middle rect (y=153)
+  // -- NovaUi_HandleTravelDestinationContextButtons reads entry 2 (item 1,
+  // y=153) for the Greetings slot instead of entry 3 (item 2, y=125), and
+  // the slot-1 draw rect is the offscreen item 3 (y=241..266). To keep the
+  // hit test unambiguous the assistance slot is omitted from the button list
+  // for special-mask ships rather than kept-but-hidden.
+  const bool keep_assistance = !special_mask;
+  const float greetings_y =
+      special_mask ? kCommButtonYMiddle : kCommButtonYTop;
+  const SDL_FRect btn_rects[3] = {
+      {kCommWindowX + kCommButtonX, kCommWindowY + kCommButtonYClose,
+       kCommButtonW, kCommButtonH},
+      {kCommWindowX + kCommButtonX, kCommWindowY + kCommButtonYMiddle,
+       kCommButtonW, kCommButtonH},
+      {kCommWindowX + kCommButtonX, kCommWindowY + greetings_y, kCommButtonW,
+       kCommButtonH},
+  };
   std::vector<ServiceButton> buttons;
   buttons.reserve(3);
   for (std::uint8_t i = 0; i < 3; ++i) {
-    buttons.push_back(ServiceButton{
-        {start_x + static_cast<float>(i) * (btn_w + gap), row_y, btn_w, btn_h},
-        i});
+    if (!keep_assistance && i == kAssistance) {
+      continue; // Assistance (slot 1) is suppressed for special-mask ships.
+    }
+    buttons.push_back(ServiceButton{btn_rects[i], i});
   }
-  std::string secondary_label;
+  std::string assistance_label;
   if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
-    secondary_label = LoadButtonLabel(kBtnBegForMercy);
+    assistance_label = LoadButtonLabel(kBtnBegForMercy);
   } else if (target.ai_target_ship_slot == 0 && target.ai_behavior_code == 6 &&
              !mission_escort) {
-    secondary_label = LoadButtonLabel(kBtnRelease);
+    assistance_label = LoadButtonLabel(kBtnRelease);
   } else {
-    secondary_label = LoadButtonLabel(kBtnRequestAssistance);
+    assistance_label = LoadButtonLabel(kBtnRequestAssistance);
   }
+  // Label per slot, matching the original's DAT_007d82ee/f0/f2 table: slot
+  // 0 = Close Channel (0x14), slot 1 = Request Assistance | Beg For Mercy |
+  // Release (0x16/0x18/0x1f), slot 2 = Greetings (0x15). Each slot's label
+  // agrees with its action (slot 1 runs the assistance dialogue, slot 2
+  // shows the hail-info text). NOTE: the plate comments on NovaUi_PollTarget-
+  // ShipCommWindow call action 2 "Greetings" and action 3 "secondary", which
+  // is swapped relative to the buttons and is the historical source of the
+  // label confusion here.
   const std::array<std::string, 3> button_labels{
       LoadButtonLabel(kBtnCloseChannel),
-      LoadButtonLabel(kBtnGreetings),
-      secondary_label};
+      assistance_label,
+      LoadButtonLabel(kBtnGreetings)};
 
-  // The escort-release latch (DAT_007d17f5): armed by Greetings on a
-  // behavior-6 escort without an AI target; on close it transfers cargo/junk
+  // The escort-release latch (DAT_007d17f5): armed by the assistance button
+  // ("Release") on a behavior-6 escort without an AI target; on close it
+  // transfers cargo/junk
   // and releases the escort back to its default behavior.
   bool escort_transfer_armed = false;
+
+  // The assistance dialogue (runner for slot 1, the Request Assistance | Beg
+  // For Mercy | Release button). Mirrors the decomp's local_22 == 2 block;
+  // factored out so both the button click and the 'r' keyboard shortcut
+  // (NovaUi_PollTargetShipCommWindow 0x0047fa40) share it.
+  const auto RunAssistanceDialogue = [&]() {
+    // ---- Assistance dialogue (local_22 == 2) -----------------------------
+    if (fire_restricted) {
+      // "No response." (prompt 1).
+      status = LoadCommPrompt(random_index, kMsgNoResponse).value_or(status);
+      return;
+    }
+    if (target.ai_target_ship_slot == 0 && target.ai_behavior_code == 6 &&
+        !mission_escort) {
+      // Escort release: latch the cargo transfer and show the goodbye message
+      // (STR# 0xbb9). The window stays open until the player closes the
+      // channel; the transfer/re-hire runs on close.
+      escort_transfer_armed = true;
+      status =
+          LoadCommPrompt(random_index, kMsgEscortGoodbye).value_or(status);
+      return;
+    }
+    if (comm_special) {
+      // scan_mask & 8 ships: "No response." and no further comm.
+      status = LoadCommPrompt(random_index, kMsgNoResponse).value_or(status);
+      return;
+    }
+    if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
+      // Keep-pressing ship: the mission-fleet bribe/hostility branch (prompts
+      // 0x13 refusal, 0x17/0x12/0x18 mood ladder, outcomes 0x14 re-hired / 0x1e
+      // hostile / 0xc can't-afford).
+      if (target.target_stellar_object_id == -1 && bribe_offered) {
+        status =
+            LoadMoodPromptPayFirst(random_index, personality).value_or(status);
+        const BribeOutcome outcome =
+            RunBribePayment(state, bribe_cost, free_help);
+        if (outcome == BribeOutcome::kPaid) {
+          status = LoadCommPrompt(random_index, kMsgBusiness).value_or(status);
+          NovaAi_EnterState2ClearPrimaryTarget(
+              target, static_cast<std::uint32_t>(SDL_GetTicks()));
+          target.ai_behavior_code = 1;
+        } else if (outcome == BribeOutcome::kRefused) {
+          status =
+              LoadCommPrompt(random_index, kMsgPrepareToDie).value_or(status);
+          NovaAi_SetShipHostileToPlayer(state, target);
+        } else {
+          status = LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
+        }
+      } else {
+        status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
+      }
+      return;
+    }
+    if (!NovaGovernment_IsShipEligibleForGovernmentAid(state, target) ||
+        govt_aid_flag || keep_refusal) {
+      // No aid on offer: "In your dreams, pal."
+      status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
+      return;
+    }
+    if (NovaAiShip_IsShipEligibleForCommAidInteraction(state, target) ||
+        NovaAiShip_IsShipInNonIdleAiState(target)) {
+      // The ship is already busy with something: "I'm busy." / "Sorry sir, I
+      // can't do that." (escorts), or "Okay, I'm on my way." when it is
+      // braking onto the player in state 0x09/0x0F.
+      if (!NovaAiShip_IsShipBrakingOnPlayerState9(state, target) &&
+          !NovaAiShip_IsShipBrakingOnPlayerState0xF(state, target)) {
+        status = target.ai_behavior_code < 5
+                     ? LoadCommPrompt(random_index, kMsgImBusy).value_or(status)
+                     : LoadCommPrompt(random_index, kMsgCantDoSir)
+                           .value_or(status);
+      } else {
+        status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
+      }
+      return;
+    }
+    if (!NovaAi_AreAnyShipsEligibleForDistressCall(state)) {
+      // No distress call in progress: the fuel-offer branch triggers when the
+      // player's tank is low (or the player is fire-restricted). A govt-aid
+      // ship (xenophobic flag) refuses with "In your dreams, pal." instead;
+      // otherwise "You're not in any trouble."
+      const bool player_fuel_low =
+          state.player.fuel_points < kPlayerFuelOfferThreshold &&
+          state.cached_stats.fuel_capacity > 0;
+      if (player_fuel_low ||
+          NovaAiShip_IsFireRestricted(state, state.player)) {
+        if (govt_aid_flag) {
+          status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
+        } else if (target.ai_behavior_code < 5) {
+          status = LoadMoodPrompt(random_index, personality).value_or(status);
+          const BribeOutcome outcome =
+              RunBribePayment(state, bribe_cost, free_help);
+          if (outcome == BribeOutcome::kPaid) {
+            status =
+                LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
+            if (NovaAiShip_IsFireRestricted(state, state.player)) {
+              NovaAi_EnterState0FTargetPlayerAndBrake(target);
+            } else {
+              NovaAi_EnterState9TargetPlayerAndBrake(target);
+            }
+          } else if (outcome == BribeOutcome::kRefused) {
+            status = LoadCommPrompt(random_index, kMsgComedian).value_or(status);
+          } else {
+            status =
+                LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
+          }
+        } else {
+          status = LoadCommPrompt(random_index, kMsgCantDo).value_or(status);
+        }
+      } else {
+        status = LoadCommPrompt(random_index, kMsgNoTrouble).value_or(status);
+      }
+      return;
+    }
+    // A distress call is possible: route on the target's responders.
+    if (!NovaAiShip_HasShipDistressResponder(state, target)) {
+      status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
+      return;
+    }
+    // TODO(decomp): the local_1c fleet-def bit (allied 0x400 fleet defs) gates
+    // the "on my way" + Government_TryTriggerGovtAssistanceEncounter arm; fleet
+    // defs are not modelled, so the behavior ladder below runs instead.
+    if (!govt_aid_flag) {
+      const std::int16_t behavior = target.ai_behavior_code;
+      if (behavior == 1) {
+        status = LoadCommPrompt(random_index, kMsgRatherNot).value_or(status);
+      } else if (behavior == 2 && target.ship_instance_id % 3 == 0 &&
+                 target.faction_or_government_id == -1) {
+        status =
+            LoadMoodPromptPayFirst(random_index, personality).value_or(status);
+        const BribeOutcome outcome =
+            RunBribePayment(state, bribe_cost, free_help);
+        if (outcome == BribeOutcome::kPaid) {
+          status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
+          NovaAi_EnterState4TargetRandomUnengagedShip(state, target);
+        } else if (outcome == BribeOutcome::kRefused) {
+          status = LoadCommPrompt(random_index, kMsgComedian).value_or(status);
+        } else {
+          status = LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
+        }
+      } else if (behavior == 3 || behavior == 4) {
+        status =
+            LoadMoodPromptPayFirst(random_index, personality).value_or(status);
+        const BribeOutcome outcome =
+            RunBribePayment(state, bribe_cost, free_help);
+        if (outcome == BribeOutcome::kPaid) {
+          status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
+          NovaAi_EnterState4TargetRandomUnengagedShip(state, target);
+        } else if (outcome == BribeOutcome::kRefused) {
+          status = LoadCommPrompt(random_index, kMsgComedian).value_or(status);
+        } else {
+          status = LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
+        }
+      } else {
+        status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
+        NovaAi_EnterState4TargetRandomCombatCandidate(state, target);
+      }
+    } else {
+      status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
+    }
+  };
+
+  // The Greetings action (runner for slot 2, the Greetings button): shows the
+  // hail-info text (DAT_007d190c) or a refusal prompt. Mirrors the decomp's
+  // local_22 == 3 block; shared by the button click and the 'g' keyboard
+  // shortcut.
+  const auto RunGreetings = [&]() {
+    if (!fire_restricted && !special_mask) {
+      if (!NovaAiShip_ShouldKeepPressingTarget(state, target) &&
+          NovaGovernment_IsShipEligibleForGovernmentAid(state, target)) {
+        const std::string info = BuildHailInfoText(target);
+        if (!info.empty()) {
+          status = info;
+        }
+      } else {
+        status =
+            LoadCommPrompt(random_index, kMsgStopWastingTime).value_or(status);
+      }
+    } else {
+      status = LoadCommPrompt(random_index, kMsgNoResponse).value_or(status);
+    }
+  };
 
   // ---- Modal loop ----------------------------------------------------------
   while (!platform.quit_requested()) {
@@ -691,205 +937,43 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
         case kCloseChannel:
           close_channel = true;
           break;
-        case kGreetings: {
-          // ---- Primary comm action (local_22 == 2) -------------------------
-          if (fire_restricted) {
-            // "No response." (prompt 1).
-            status =
-                LoadCommPrompt(random_index, kMsgNoResponse).value_or(status);
-            break;
-          }
-          if (target.ai_target_ship_slot == 0 && target.ai_behavior_code == 6 &&
-              !mission_escort) {
-            // Escort release: latch the cargo transfer and show the goodbye
-            // message (STR# 0xbb9). The window stays open until the player
-            // closes the channel; the transfer/re-hire runs on close.
-            escort_transfer_armed = true;
-            status = LoadCommPrompt(random_index, kMsgEscortGoodbye)
-                         .value_or(status);
-            break;
-          }
-          if (comm_special) {
-            // scan_mask & 8 ships: "No response." and no further comm.
-            status =
-                LoadCommPrompt(random_index, kMsgNoResponse).value_or(status);
-            break;
-          }
-          if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
-            // Keep-pressing ship: the mission-fleet bribe/hostility branch
-            // (prompts 0x13 refusal, 0x17/0x12/0x18 mood ladder, outcomes
-            // 0x14 re-hired / 0x1e hostile / 0xc can't-afford).
-            if (target.target_stellar_object_id == -1 && bribe_offered) {
-              status = LoadMoodPromptPayFirst(random_index, personality)
-                           .value_or(status);
-              const BribeOutcome outcome =
-                  RunBribePayment(state, bribe_cost, free_help);
-              if (outcome == BribeOutcome::kPaid) {
-                status =
-                    LoadCommPrompt(random_index, kMsgBusiness).value_or(status);
-                NovaAi_EnterState2ClearPrimaryTarget(
-                    target, static_cast<std::uint32_t>(SDL_GetTicks()));
-                target.ai_behavior_code = 1;
-              } else if (outcome == BribeOutcome::kRefused) {
-                status = LoadCommPrompt(random_index, kMsgPrepareToDie)
-                             .value_or(status);
-                NovaAi_SetShipHostileToPlayer(state, target);
-              } else {
-                status = LoadCommPrompt(random_index, kMsgCantAfford)
-                             .value_or(status);
-              }
-            } else {
-              status =
-                  LoadCommPrompt(random_index, kMsgDreams).value_or(status);
-            }
-            break;
-          }
-          if (!NovaGovernment_IsShipEligibleForGovernmentAid(state, target) ||
-              govt_aid_flag || keep_refusal) {
-            // No aid on offer: "In your dreams, pal."
-            status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
-            break;
-          }
-          if (NovaAiShip_IsShipEligibleForCommAidInteraction(state, target) ||
-              NovaAiShip_IsShipInNonIdleAiState(target)) {
-            // The ship is already busy with something: "I'm busy." /
-            // "Sorry sir, I can't do that." (escorts), or "Okay, I'm on my
-            // way." when it is braking onto the player in state 0x09/0x0F.
-            if (!NovaAiShip_IsShipBrakingOnPlayerState9(state, target) &&
-                !NovaAiShip_IsShipBrakingOnPlayerState0xF(state, target)) {
-              status = target.ai_behavior_code < 5
-                           ? LoadCommPrompt(random_index, kMsgImBusy)
-                                 .value_or(status)
-                           : LoadCommPrompt(random_index, kMsgCantDoSir)
-                                 .value_or(status);
-            } else {
-              status =
-                  LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
-            }
-            break;
-          }
-          if (!NovaAi_AreAnyShipsEligibleForDistressCall(state)) {
-            // No distress call in progress: the fuel-offer branch triggers
-            // when the player's tank is low (or the player is fire-restricted).
-            // A govt-aid ship (xenophobic flag) refuses with "In your dreams,
-            // pal." instead; otherwise "You're not in any trouble."
-            const bool player_fuel_low =
-                state.player.fuel_points < kPlayerFuelOfferThreshold &&
-                state.cached_stats.fuel_capacity > 0;
-            if (player_fuel_low ||
-                NovaAiShip_IsFireRestricted(state, state.player)) {
-              if (govt_aid_flag) {
-                status =
-                    LoadCommPrompt(random_index, kMsgDreams).value_or(status);
-              } else if (target.ai_behavior_code < 5) {
-                status =
-                    LoadMoodPrompt(random_index, personality).value_or(status);
-                const BribeOutcome outcome =
-                    RunBribePayment(state, bribe_cost, free_help);
-                if (outcome == BribeOutcome::kPaid) {
-                  status = LoadCommPrompt(random_index, kMsgOnMyWay)
-                               .value_or(status);
-                  if (NovaAiShip_IsFireRestricted(state, state.player)) {
-                    NovaAi_EnterState0FTargetPlayerAndBrake(target);
-                  } else {
-                    NovaAi_EnterState9TargetPlayerAndBrake(target);
-                  }
-                } else if (outcome == BribeOutcome::kRefused) {
-                  status = LoadCommPrompt(random_index, kMsgComedian)
-                               .value_or(status);
-                } else {
-                  status = LoadCommPrompt(random_index, kMsgCantAfford)
-                               .value_or(status);
-                }
-              } else {
-                status =
-                    LoadCommPrompt(random_index, kMsgCantDo).value_or(status);
-              }
-            } else {
-              status =
-                  LoadCommPrompt(random_index, kMsgNoTrouble).value_or(status);
-            }
-            break;
-          }
-          // A distress call is possible: route on the target's responders.
-          if (!NovaAiShip_HasShipDistressResponder(state, target)) {
-            status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
-            break;
-          }
-          // TODO(decomp): the local_1c fleet-def bit (allied 0x400 fleet defs)
-          // gates the "on my way" + Government_TryTriggerGovtAssistanceEncoun-
-          // ter arm; fleet defs are not modelled, so the behavior ladder below
-          // runs instead.
-          if (!govt_aid_flag) {
-            const std::int16_t behavior = target.ai_behavior_code;
-            if (behavior == 1) {
-              status =
-                  LoadCommPrompt(random_index, kMsgRatherNot).value_or(status);
-            } else if (behavior == 2 && target.ship_instance_id % 3 == 0 &&
-                       target.faction_or_government_id == -1) {
-              status = LoadMoodPromptPayFirst(random_index, personality)
-                           .value_or(status);
-              const BribeOutcome outcome =
-                  RunBribePayment(state, bribe_cost, free_help);
-              if (outcome == BribeOutcome::kPaid) {
-                status =
-                    LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
-                NovaAi_EnterState4TargetRandomUnengagedShip(state, target);
-              } else if (outcome == BribeOutcome::kRefused) {
-                status =
-                    LoadCommPrompt(random_index, kMsgComedian).value_or(status);
-              } else {
-                status = LoadCommPrompt(random_index, kMsgCantAfford)
-                             .value_or(status);
-              }
-            } else if (behavior == 3 || behavior == 4) {
-              status = LoadMoodPromptPayFirst(random_index, personality)
-                           .value_or(status);
-              const BribeOutcome outcome =
-                  RunBribePayment(state, bribe_cost, free_help);
-              if (outcome == BribeOutcome::kPaid) {
-                status =
-                    LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
-                NovaAi_EnterState4TargetRandomUnengagedShip(state, target);
-              } else if (outcome == BribeOutcome::kRefused) {
-                status =
-                    LoadCommPrompt(random_index, kMsgComedian).value_or(status);
-              } else {
-                status = LoadCommPrompt(random_index, kMsgCantAfford)
-                             .value_or(status);
-              }
-            } else {
-              status =
-                  LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
-              NovaAi_EnterState4TargetRandomCombatCandidate(state, target);
-            }
-          } else {
-            status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
-          }
+        case kAssistance:
+          // Assistance dialogue (local_22 == 2). Only reachable for
+          // non-special-mask ships (the slot is omitted from `buttons` for
+          // special-mask ships).
+          RunAssistanceDialogue();
+          break;
+        case kGreetings:
+          // Greetings action (local_22 == 3): hail-info text.
+          RunGreetings();
           break;
         }
-        case kSecondary: {
-          // ---- Secondary action (local_22 == 3) ----------------------------
-          // Request Assistance / Beg For Mercy / Release: show the hail-info
-          // text when the ship is government-aid eligible and not pressing a
-          // target; otherwise "Stop wasting my time." / "No response."
-          if (!fire_restricted && !special_mask) {
-            if (!NovaAiShip_ShouldKeepPressingTarget(state, target) &&
-                NovaGovernment_IsShipEligibleForGovernmentAid(state, target)) {
-              const std::string info = BuildHailInfoText(target);
-              if (!info.empty()) {
-                status = info;
-              }
-            } else {
-              status = LoadCommPrompt(random_index, kMsgStopWastingTime)
-                           .value_or(status);
-            }
-          } else {
-            status =
-                LoadCommPrompt(random_index, kMsgNoResponse).value_or(status);
+        break;
+      }
+      case TextKey::character: {
+        // Original keyboard shortcuts (NovaUi_PollTargetShipCommWindow
+        // 0x0047fa40): 'e'/Enter/Esc close the channel, 'r' triggers the
+        // assistance button (Request Assistance | Beg For Mercy | Release),
+        // 'g' triggers the Greetings button. The assistance shortcut is
+        // suppressed for special-scan-mask ships (the button is hidden there
+        // too).
+        switch (in->character) {
+        case 'e':
+        case 'E':
+          close_channel = true;
+          break;
+        case 'r':
+        case 'R':
+          if (!special_mask) {
+            RunAssistanceDialogue();
           }
           break;
-        }
+        case 'g':
+        case 'G':
+          RunGreetings();
+          break;
+        default:
+          break;
         }
         break;
       }

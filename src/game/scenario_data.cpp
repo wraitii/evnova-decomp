@@ -828,6 +828,19 @@ bool ScenarioData::LoadFromArchives() {
         // No sh\x8an descriptor: the class owns its (missing) sprites.
         cls.clone_source_ship_class = static_cast<std::int16_t>(index);
       }
+      // Large 200x200 portrait PICT for the ship-comm / shipyard panels
+      // (ShipClassDef +0xA0A). Ghidra NovaData_LoadAllShipClassVisualAndLaunch
+      // Data (0x004aeda0): use PICT `index + 5000` when that resource exists
+      // (FUN_004ce640(CICN 'PICT', index + 5000)), else fall back to the
+      // clone-source class's portrait `clone_source_ship_class + 5000` (the
+      // portrait resource lives at 5000 + a zero-based class id).
+      const std::uint16_t own_portrait =
+          static_cast<std::uint16_t>(index + 5000);
+      cls.pict_fallback_sprite_resource_id =
+          NovaResource_Load(kResourceTypePict, own_portrait)
+              ? own_portrait
+              : static_cast<std::uint16_t>(cls.clone_source_ship_class +
+                                           5000);
       ships[index] = std::move(cls);
       ++loaded_ships;
     }
