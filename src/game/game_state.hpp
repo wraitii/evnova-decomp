@@ -472,9 +472,11 @@ struct GameState {
   // Target-reticle pulse values (Ghidra g_travel_target_reticle_pulse
   // DAT_00735490 / g_ship_target_reticle_pulse DAT_00735494). Set to 256.0
   // (0x43800000) when the corresponding target is (re)selected, then decay
-  // toward 0.0 at 60.0 units/sec (DAT_005753c8) by NovaUi_UpdateShipTarget-
-  // Reticle (0x0042ede0) / NovaUi_UpdateTravelTargetReticle (0x0042eac0). The
-  // pulse drives the bracket "grow out then settle" offset.
+  // toward 0.0 at the original's rate: each frame the updaters subtract
+  // g_avg_frame_time_ms * 60.0 (DAT_005753c8), and the avg frame time's EMA
+  // steady state is delta_ms * 0.03, so the effective rate is delta_ms * 1.8
+  // (see the spaceflight loop). The pulse drives the bracket "grow out then
+  // settle" offset.
   float travel_reticle_pulse = 0.0F;
   float ship_reticle_pulse = 0.0F;
 

@@ -537,12 +537,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // return-to-menu latch; the frozen reduced tick is skipped (no transition
     // is active in this build).
     // Reticle pulse decay (NovaUi_UpdateShipTargetReticle 0x0042ede0): the
-    // pulse falls from 256.0 toward 0.0 at 60.0 units/sec (DAT_005753c8),
-    // driving the bracket grow-out-then-settle animation.
+    // pulse falls from 256.0 toward 0.0 each frame by
+    // g_avg_frame_time_ms * 60.0 (DAT_005753c8 = 60.0). The avg frame time
+    // is an EMA whose steady state is delta_ms * 0.03 (0x00432f76..8a:
+    // avg = (avg*3 + delta*0.03) * 0.25), so the faithful rate is
+    // delta_ms * 0.03 * 60 = delta_ms * 1.8: at 60fps that is ~30px/frame,
+    // settling the 256px grow-out in ~0.15s. (Earlier builds used 0.06/ms,
+    // a 30x-too-slow ~4.3s settle.)
     state.ship_reticle_pulse =
-        std::max(0.0F, state.ship_reticle_pulse - frame_time_ms * 0.06F);
+        std::max(0.0F, state.ship_reticle_pulse - frame_time_ms * 1.8F);
     state.travel_reticle_pulse =
-        std::max(0.0F, state.travel_reticle_pulse - frame_time_ms * 0.06F);
+        std::max(0.0F, state.travel_reticle_pulse - frame_time_ms * 1.8F);
     SDL_Delay(16);
   }
 }

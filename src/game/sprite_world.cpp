@@ -241,12 +241,13 @@ std::unique_ptr<SpriteAsset> SpriteAsset::LoadCicnSet(SDL_Renderer *renderer,
       asset->tile_height = image->height;
       have_dimensions = true;
     }
-    // Centre anchor, matching SpriteFrame_CreateFromRect's default for a frame
-    // built from the full icon rect.
+    // Top-left anchor (0,0), matching SpriteFrame_CreateFromRect (0x00476400):
+    // it writes anchor_x/anchor_y (frame +0x2a/+0x2c) = 0 for a frame built
+    // from the icon rect. The original's reticle updaters position the four
+    // brackets WITHOUT the half-span compensation the ship/stellar updaters
+    // apply, so the frame's top-left lands exactly on the placement point.
     asset->frames.push_back(
-        SpriteFrame{std::move(texture),
-                    static_cast<float>(image->width) / 2.0F,
-                    static_cast<float>(image->height) / 2.0F});
+        SpriteFrame{std::move(texture), 0.0F, 0.0F});
   }
   if (asset->frames.empty()) {
     return nullptr;

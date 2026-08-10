@@ -55,12 +55,14 @@ public:
   // .primary_target_ship_slot). Hidden when no target. The bracket offset is
   // ceil(max(target frame height, frame width)/2) plus the decaying reticle
   // pulse (GameState.ship_reticle_pulse; the loop decays it by frame time
-  // * 0.06), with the four corner-bracket sprites (cicn 10008-10023) placed at
+  // * 1.8, the original's avg-frame-time*60 rate -- see spaceflight.cpp), with
+  // the four corner-bracket sprites (cicn 10008-10023) placed at
   // the original's asymmetric positions (TL/BL get the extra 16px left margin,
   // the top row an extra 16px above); the frame index encodes target state
   // (fire-restricted 0xc / targeting-the-player 0x8 / distress-eligible 0x0 /
-  // other 0x4). Falls back to the SDL-line diagnostic brackets when the cicn
-  // set cannot be loaded.
+  // other 0x4). Frame anchors are the cicn frames' top-left (0,0), matching
+  // SpriteFrame_CreateFromRect. Falls back to the SDL-line diagnostic brackets
+  // when the cicn set cannot be loaded.
   void DrawShipTargetReticle(SdlPlatform &platform, const GameState &state);
 
   // Ghidra NovaUi_UpdateTravelTargetReticle (0x0042eac0): draws the 4-corner

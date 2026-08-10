@@ -839,17 +839,20 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
 // bracket is a cloned sprite from the 16-frame cicn set 10008-10023; the frame
 // index is `state_base + corner` where state_base encodes the target's
 // disposition:
-//   0xc fire-restricted, 0x8 targeting the player (or a player-targeting
-//   chain), 0x0 distress-eligible, 0x4 other.
+//   0xc fire-restricted (grey: can't fire -- near-disabled armor < 1/3 max,
+//   boarding, travel-to-stellar, or govt no-fire flag; Ship_IsShipFireRestricted
+//   0x004687b0), 0x8 targeting the player (or a player-targeting chain),
+//   0x0 distress-eligible, 0x4 other.
 // The bracket offset is (max(target frame height, target frame width) + 1) / 2
 // rounded up plus the decaying reticle pulse; the four sprites are then placed
 // at asymmetric screen positions around the target (the 16px corner margin
 // falls between the corner art and the ship on the left/top edges only):
 //   TL (cx-off-16, cy-off-16)  TR (cx+off,   cy-off-16)
 //   BL (cx-off-16, cy+off)     BR (cx+off,   cy+off)
-// where off = ceil(max(h,w)/2) + round(pulse). Each sprite's anchor is its
-// frame centre, so a bracket whose art sits in the frame's top-left corner is
-// rendered centred at that spot.
+// where off = ceil(max(h,w)/2) + round(pulse). Each bracket frame's anchor is
+// its top-left corner (SpriteFrame_CreateFromRect zeroes the anchor pair), so
+// the placement point is the frame's top-left and the corner art (a 10-11px
+// wedge in the frame's corner quadrant) hugs the target box corner.
 // When the cicn set cannot be loaded we fall back to the previous diagnostic
 // SDL line brackets (coloured by state) rather than hiding targeting entirely.
 const SpriteAsset *SpaceflightView::ShipReticleSet(SdlPlatform &platform) {
@@ -890,14 +893,20 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   }
   const Viewport vp = CurrentViewport(platform);
   const float pulse = std::max(0.0F, state.ship_reticle_pulse);
-  // Viewport-centre offsets mirror the original reading the render-owner rect
-  // translation (g_random_encounter_fleet_defs[0x72].availability_expression.
-  // _236_2_/_238_2_): the HUD strip anchors the world to the left of the
-  // top-right panel, i.e. the full playfield in this build.
+  // The brackets are placed in WORLD space around the target; DrawSprite's
+  // single camera transform then lands them on screen at the target. This
+  // mirrors the original, which positions the bracket sprites at
+  // round(target - player) + g_viewport_center_x/y (Ghidra 0x0042ede0 reads
+  // g_viewport_center_x/y -- shown in the decompile as the overlapping
+  // _236_2_/_238_2_ sub-symbols -- exactly like every other gameplay sprite).
+  // cx/cy are the target's SCREEN centre, used by the diagnostic fallback
+  // below which blits in screen space directly.
+  const float wx = target.pos_x;
+  const float wy = target.pos_y;
   const float cx =
-      (target.pos_x - state.player.pos_x) + static_cast<float>(vp.w) / 2.0F;
+      (wx - state.player.pos_x) + static_cast<float>(vp.w) / 2.0F;
   const float cy =
-      (target.pos_y - state.player.pos_y) + static_cast<float>(vp.h) / 2.0F;
+      (wy - state.player.pos_y) + static_cast<float>(vp.h) / 2.0F;
 
   // Bracket frame base by target state (mirrors the reticle's sVar4 branch).
   int frame_base = 4; // other
@@ -926,7 +935,8 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   // Bracket offset: ceil(max(target frame height, width)/2) + the decaying
   // pulse. Sprite_GetFrameVerticalHalfSpan / Sprite_GetShotHalfSpan return the
   // target's full frame height/width, so `full` is max(h, w), then the game
-  // halves it rounding up. The fallback uses the sheet's native tile size.
+  // halves it rounding up; the pulse term is rounded to whole pixels exactly
+  // as the original does. The fallback uses the sheet's native tile size.
   float full = 32.0F; // default Sprite_Get*HalfSpan for a missing sprite
   if (const NpcShipSprite *sprite = ShipClassSprite(
           platform, static_cast<std::int16_t>(target.ship_class_id + 0x80));
@@ -934,17 +944,28 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     full = std::max(static_cast<float>(sprite->base.tile_width),
                     static_cast<float>(sprite->base.tile_height));
   }
-  const float off = std::ceil(full * 0.5F) + pulse;
+  const float off =
+      std::ceil(full * 0.5F) + std::round(pulse);
 
-  // The real corner brackets, when the cicn set is available.
+  // The real corner brackets, when the cicn set is available. The frames'
+  // anchors are their top-left corners (LoadCicnSet mirrors
+  // SpriteFrame_CreateFromRect's (0,0) anchor), so each placement point is the
+  // bracket frame's top-left -- exactly how the original's
+  // Sprite_SetPositionFromCurrentFrameAnchor places them (no half-span
+  // compensation, unlike the ship/stellar updaters). The corner art is a
+  // 10-11px wedge in the frame's corner quadrant, so the wedge's diagonal
+  // hugs the target box corner with a small gap.
   if (const SpriteAsset *ret = ShipReticleSet(platform)) {
     // Corner indices 0..3 map to TL, TR, BR, BL (matching the order in which
-    // the original positions its four bracket sprites).
+    // the original positions its four bracket sprites). The offsets (off and
+    // the 16px corner margin) are in world pixels, so they are added to the
+    // target's WORLD position here rather than to the screen centre -- the
+    // DrawSprite call below applies the camera transform exactly once.
     const float pos[4][2] = {
-        {cx - off - 16.0F, cy - off - 16.0F},
-        {cx + off, cy - off - 16.0F},
-        {cx + off, cy + off},
-        {cx - off - 16.0F, cy + off}};
+        {wx - off - 16.0F, wy - off - 16.0F},
+        {wx + off, wy - off - 16.0F},
+        {wx + off, wy + off},
+        {wx - off - 16.0F, wy + off}};
     for (int corner = 0; corner < 4; ++corner) {
       DrawSprite(platform.renderer(),
                  *ret,
@@ -959,7 +980,9 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     return;
   }
 
-  // Diagnostic fallback: L-shaped corner brackets coloured by state.
+  // Diagnostic fallback: L-shaped corner brackets coloured to approximate the
+  // real cicn art per state (10008-10023 palettes: 0xc grey, 0x8 green,
+  // 0x0 red/orange, 0x4 black/yellow).
   const SDL_Color color = [&]() -> SDL_Color {
     switch (frame_base) {
     case 0xc:
@@ -967,9 +990,9 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     case 0x8:
       return SDL_Color{80, 255, 120, SDL_ALPHA_OPAQUE}; // engaged w/ player
     case 0x0:
-      return SDL_Color{255, 230, 80, SDL_ALPHA_OPAQUE}; // distress-eligible
+      return SDL_Color{255, 120, 40, SDL_ALPHA_OPAQUE}; // distress-eligible
     default:
-      return SDL_Color{255, 255, 255, SDL_ALPHA_OPAQUE}; // other
+      return SDL_Color{255, 255, 100, SDL_ALPHA_OPAQUE}; // other
     }
   }();
   const float left = cx - off;
@@ -1018,14 +1041,14 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
   }
   const Viewport vp = CurrentViewport(platform);
   const float pulse = std::max(0.0F, state.travel_reticle_pulse);
-  const float cx =
-      (static_cast<float>(st->pos_x) - state.player.pos_x) +
-      static_cast<float>(vp.w) / 2.0F;
-  const float cy =
-      (static_cast<float>(st->pos_y) - state.player.pos_y) +
-      static_cast<float>(vp.h) / 2.0F;
+  // Same world-space placement as the ship reticle: bracket corners are offset
+  // from the stellar's WORLD position and DrawSprite applies the single camera
+  // transform (original: round(stellar.map - player) + g_viewport_center).
+  const float wx = static_cast<float>(st->pos_x);
+  const float wy = static_cast<float>(st->pos_y);
 
-  // Bracket offset sized by the destination stellar's spin sprite set.
+  // Bracket offset sized by the destination stellar's spin sprite set; the
+  // pulse term is rounded to whole pixels (original rounds it too).
   float full = 32.0F; // default Sprite_Get*HalfSpan fallback (0x20)
   if (const auto *spin =
           sprite_store_.Spin(platform.renderer(),
@@ -1034,16 +1057,17 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
     full = std::max(static_cast<float>(spin->tile_width),
                     static_cast<float>(spin->tile_height));
   }
-  const float off = std::ceil(full * 0.5F) + pulse;
+  const float off =
+      std::ceil(full * 0.5F) + std::round(pulse);
 
   // Frame base 0 (the original reads the destination's orientation flag for
   // this; ours is not yet reconstructed, so 0).
   const int frame_base = 0;
   const float pos[4][2] = {
-      {cx - off - 16.0F, cy - off - 16.0F},
-      {cx + off, cy - off - 16.0F},
-      {cx + off, cy + off},
-      {cx - off - 16.0F, cy + off}};
+      {wx - off - 16.0F, wy - off - 16.0F},
+      {wx + off, wy - off - 16.0F},
+      {wx + off, wy + off},
+      {wx - off - 16.0F, wy + off}};
   for (int corner = 0; corner < 4; ++corner) {
     DrawSprite(platform.renderer(),
                *ret,
