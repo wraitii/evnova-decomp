@@ -204,6 +204,17 @@ constexpr SDL_FRect kCommPictureRect{216, 7, 200, 200};          // DITL item 10
 // ... buttons stacked at kCommButtonYClose=181 / YMiddle=153 / YTop=125
 ```
 
+The **destination-interaction (negotiation) window** gets the same treatment in
+`src/game/negotiation_dialog.cpp`: DLOG 0x3f1 / PICT 0x2140 is a fixed 540x295
+frame centred on the playfield, with the three primary buttons stacked
+vertically down the lower-left column (DITL items 0/1/2 -> Leave bottom,
+Attack middle, Land/Bribe top), the destination planet PICT in the item-4 image
+frame on the right, the status/prompt text in the item-3 panel, and the stellar
+header name in the item-5 block. The rects were cross-checked against the
+`NovaResource_LoadDialogItems` parser output for DITL 0x3f1 (items:
+`{146x26 buttons at x=27..173 y=244/184/214}`, `text 5,5..205,65`,
+`image 222,5..532,288`, `header 16,82..136,132`).
+
 If a future pass needs to render *any* dialog from its resource (rather than a
 hard-coded one), the natural path is to parse the DITL once into `NovaDialogItem`
 rects (already exposed by `brgr_archive.cpp`), offset each by the centred window

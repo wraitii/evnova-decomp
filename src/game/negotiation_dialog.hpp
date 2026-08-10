@@ -23,6 +23,14 @@
 //               land/bribe (not built here; hand off through
 //               state.travel.selected_stellar_id).
 //
+// The window itself is laid out from the real DLOG/DITL 0x3f1 (a 540x295
+// backdrop PICT 0x2140 centred on the playfield), with the three primary
+// buttons stacked vertically down the lower-left column (DITL items 0/1/2:
+// Leave bottom, Attack middle, Land/Bribe top), the destination planet picture
+// in the DITL item-4 frame on the right, the status/prompt text in the item-3
+// panel and the stellar header name in the item-5 block -- mirroring how the
+// ship-comm dialog reads its DITL.
+//
 // SCOPE: the bribe-cost computation, denied/hostile derivation, bribe-
 // eligibility gate, the land/status primary action and the payment window are
 // reconstructed. The attack/confrontation branch (reputation decrement, hostile

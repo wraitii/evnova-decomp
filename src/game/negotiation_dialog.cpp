@@ -99,6 +99,48 @@ constexpr SDL_Color kTitle{202, 224, 255, 255};
 // draws the interaction window over the already-composited gameplay surface).
 constexpr SDL_Color kScrim{0, 0, 0, 170};
 
+// ---- DLOG 0x3f1 / DITL 0x3f1 geometry ------------------------------------
+// The destination-interaction window is 540x295 (DLOG 0x3f1 bounds = the
+// backdrop PICT 0x2140, decodes to exactly 540x295), centred on the 640x480
+// playfield. All DITL item rects are window-local (0,0 = the backdrop's
+// top-left); they must be offset by the centred window origin before drawing.
+//
+// Layout (entry numbers are one-based UiPanel_GetEntryInfo indices, matching
+// NovaUi_HandleTravelDestinationPrimaryButtons reading entries 1/2/3 and
+// NovaUi_DrawTravelDestinationInteractionWindow reading entries 4/5/6):
+//   [0] Leave (entry 1)       x=27..173 y=244..270  (bottom)
+//   [1] Land/Bribe (entry 2)  x=27..173 y=184..210  (top)
+//   [2] Attack (entry 3)      x=27..173 y=214..240  (middle)
+//   The listed [n] are the *resources* for each slot; the window shows them
+//   stacked vertically on the lower-left column (bottom-to-top: Leave, Attack,
+//   Land/Bribe).
+constexpr int kNegotiationFrameWidth = 540;
+constexpr int kNegotiationFrameHeight = 295;
+constexpr float kNegotiationWindowX = (640 - kNegotiationFrameWidth) / 2.0F;
+constexpr float kNegotiationWindowY = (480 - kNegotiationFrameHeight) / 2.0F;
+// The three primary buttons (DITL items 0/1/2), each a 146x26 box at x=27..
+// 173, stacked vertically. DITL item 0 = Leave (y=244, bottom), item 1 =
+// Land/Bribe (y=184, top), item 2 = Attack (y=214, middle).
+constexpr float kNegotiationButtonX = 27.0F + kNegotiationWindowX;
+constexpr float kNegotiationButtonW = 146.0F;
+constexpr float kNegotiationButtonH = 26.0F;
+constexpr float kNegotiationButtonYLeave =
+    kNegotiationWindowY + 244.0F; // DITL item 0
+constexpr float kNegotiationButtonYLand =
+    kNegotiationWindowY + 184.0F; // DITL item 1
+constexpr float kNegotiationButtonYAttack =
+    kNegotiationWindowY + 214.0F; // DITL item 2
+// Status/prompt text panel (DITL item 3, entry 4): 200x60 at x=5..205,
+// y=5..65 -- the top-left text block on the frame.
+constexpr SDL_FRect kNegotiationStatusRect{5.0F, 5.0F, 200.0F, 60.0F};
+// Target stellar image frame (DITL item 4, entry 5): a 310x283 box at
+// x=222..532, y=5..288 on the right side of the frame -- filled by the
+// destination planet picture.
+constexpr SDL_FRect kNegotiationImageRect{222.0F, 5.0F, 310.0F, 283.0F};
+// Destination header block (DITL item 5, entry 6): a 120x50 box at x=16..136,
+// y=82..132 -- holds the stellar display name and a short note.
+constexpr SDL_FRect kNegotiationHeaderRect{16.0F, 82.0F, 120.0F, 50.0F};
+
 // ---- Government flag gates (GovtDef.flags_primary) ------------------------
 // 0x8000: the faction "bribes the player" -- raises the bribe cost 1.5x and
 // forces bribe eligibility. 0x4000: the faction's ships will take a bribe (an
@@ -182,14 +224,20 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
       platform.renderer(), img->width, img->height, img->rgba_pixels);
 }
 
-// Draws the interaction-window frame over the dim scrim: the PICT backdrop
-// centred at its natural size (falling back to a bordered placeholder), the
-// status/prompt text block, and the three buttons (Leave, Land/Bribe, Attack).
+// Draws the interaction-window frame over the dim scrim. The 540x295 backdrop
+// PICT (DLOG 0x3f1) is centred on the 640x480 playfield; over it we draw the
+// destination planet picture into the DITL item-4 image frame on the right, the
+// status/prompt text into the item-3 panel top-left, the stellar header (item
+// 5) name block, and the three primary buttons (items 0/1/2) stacked
+// vertically down the lower-left column (Leave bottom, Attack middle,
+// Land/Bribe top).
 void DrawNegotiationDialog(SdlPlatform &platform,
                            NovaFontCache &font_cache,
                            const ServicesButtonArt &button_art,
                            SDL_Texture *backdrop,
+                           SDL_Texture *planet_art,
                            std::string_view status,
+                           std::string_view header,
                            std::string_view land_label,
                            std::span<const ServiceButton> buttons,
                            const SDL_FRect &panel) {
@@ -204,48 +252,105 @@ void DrawNegotiationDialog(SdlPlatform &platform,
   SDL_RenderFillRect(renderer, &panel);
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
-  // Centre the frame at its natural size on the 640x480 playfield.
-  SDL_FRect dst{0, 0, 520.0F, 320.0F};
+  // The interaction-window frame is a fixed 540x295 PICT (DLOG 0x3f1), centred
+  // on the 640x480 playfield. All DITL item rects are offset by this origin.
+  const SDL_FRect frame{kNegotiationWindowX,
+                        kNegotiationWindowY,
+                        static_cast<float>(kNegotiationFrameWidth),
+                        static_cast<float>(kNegotiationFrameHeight)};
   if (backdrop != nullptr) {
-    float frame_w = 0.0F;
-    float frame_h = 0.0F;
-    SDL_GetTextureSize(backdrop, &frame_w, &frame_h);
-    frame_w = std::min(frame_w, panel.w - 40.0F);
-    frame_h = std::min(frame_h, panel.h - 60.0F);
-    dst = {(panel.w - frame_w) / 2.0F,
-           (panel.h - frame_h) / 2.0F - 18.0F,
-           frame_w,
-           frame_h};
-    dst.y = std::max(0.0F, dst.y);
-    SDL_RenderTexture(renderer, backdrop, nullptr, &dst);
+    SDL_RenderTexture(renderer, backdrop, nullptr, &frame);
   } else {
     // No backdrop art: draw a bordered placeholder so the dialog stays legible.
     SDL_SetRenderDrawColor(renderer, 16, 40, 72, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &dst);
+    SDL_RenderFillRect(renderer, &frame);
     SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &dst);
+    SDL_RenderRect(renderer, &frame);
   }
 
-  // Status / prompt text block just inside the frame.
-  const SDL_FRect textBand{
-      dst.x + 24.0F, dst.y + 30.0F, std::max(1.0F, dst.w - 48.0F), 80.0F};
+  // Destination planet picture (DITL item 4, entry 5): a 310x283 frame on the
+  // right side of the window (x=222..532, y=5..288). The original scales the
+  // target stellar's ambient sprite into this panel; we draw the destination
+  // planet PICT 1:1 (like the ship-comm portrait), with a bordered placeholder
+  // when the picture is absent.
+  const SDL_FRect picture{kNegotiationWindowX + kNegotiationImageRect.x,
+                          kNegotiationWindowY + kNegotiationImageRect.y,
+                          kNegotiationImageRect.w,
+                          kNegotiationImageRect.h};
+  if (planet_art != nullptr) {
+    // Scale the planet art to fit the panel while preserving aspect ratio.
+    float aw = 0.0F;
+    float ah = 0.0F;
+    SDL_GetTextureSize(planet_art, &aw, &ah);
+    SDL_FRect dst = picture;
+    if (aw > 0.0F && ah > 0.0F) {
+      const float scale = std::min(picture.w / aw, picture.h / ah);
+      dst.w = aw * scale;
+      dst.h = ah * scale;
+      dst.x = picture.x + (picture.w - dst.w) / 2.0F;
+      dst.y = picture.y + (picture.h - dst.h) / 2.0F;
+    }
+    SDL_RenderTexture(renderer, planet_art, nullptr, &dst);
+  } else {
+    SDL_SetRenderDrawColor(renderer, 8, 24, 44, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &picture);
+    SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &picture);
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          11.0F,
+                          kNovaFontStyleRegular,
+                          kDim,
+                          picture.x,
+                          picture.x + picture.w,
+                          picture.y + picture.h / 2.0F,
+                          "[no picture]");
+  }
+
+  // Destination header (DITL item 5, entry 6): the stellar display name and a
+  // short note in the small box under the status panel.
+  const SDL_FRect header_rect{kNegotiationWindowX + kNegotiationHeaderRect.x,
+                              kNegotiationWindowY + kNegotiationHeaderRect.y,
+                              kNegotiationHeaderRect.w,
+                              kNegotiationHeaderRect.h};
+  if (!header.empty()) {
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          12.0F,
+                          kNovaFontStyleBold,
+                          kTitle,
+                          header_rect.x,
+                          header_rect.x + header_rect.w,
+                          header_rect.y + header_rect.h / 2.0F + 2.0F,
+                          header);
+  }
+
+  // Status / prompt text block (DITL item 3, entry 4): a 200x60 panel at the
+  // top-left of the frame (x=5..205, y=5..65), centred vertically.
+  const SDL_FRect status_rect{kNegotiationWindowX + kNegotiationStatusRect.x,
+                              kNegotiationWindowY + kNegotiationStatusRect.y,
+                              kNegotiationStatusRect.w,
+                              kNegotiationStatusRect.h};
   if (!status.empty()) {
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
-                          13.0F,
+                          12.0F,
                           kNovaFontStyleBold,
                           kTitle,
-                          textBand.x,
-                          textBand.x + textBand.w,
-                          textBand.y,
+                          status_rect.x,
+                          status_rect.x + status_rect.w,
+                          status_rect.y + status_rect.h / 2.0F,
                           status);
   }
 
-  // Three buttons across the lower part of the window: Leave, Land/Bribe,
-  // Attack (the attack branch is deferred; see the header scope note). The
-  // rects come from the caller's `buttons` vector so drawing and hit-testing
-  // share the same geometry.
+  // The three primary buttons stacked vertically down the lower-left column
+  // (DITL items 0/1/2): Leave at the bottom, Attack in the middle, Land/Bribe
+  // at the top -- each a 146x26 box at x=27..173. Labels follow the original
+  // per-slot table ({LEAVE, LAND/BRIBE, ATTACK}); the attack branch is
+  // deferred (see the header scope note).
   const std::string_view labels[3] = {"LEAVE", land_label, "ATTACK"};
   for (const ServiceButton &b : buttons) {
     const std::size_t slot = static_cast<std::size_t>(b.slot) < 3
@@ -264,9 +369,9 @@ void DrawNegotiationDialog(SdlPlatform &platform,
                           labels[slot]);
   }
 
-  // Footer hint above the button row (aligned to the top of the first button).
+  // Footer hint, just above the top (Land/Bribe) button's rect.
   const float hint_y =
-      buttons.empty() ? panel.h - 50.0F : buttons[0].rect.y - 16.0F;
+      buttons.empty() ? 480.0F - 50.0F : buttons[0].rect.y - 16.0F;
   NovaText_DrawCentered(platform,
                         font_cache,
                         NovaFontFamily::kGeneva,
@@ -408,6 +513,34 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
     NovaLog::Todo("destination-interaction backdrop PICT 0x2140 unavailable; "
                   "drawing a bordered placeholder");
   }
+
+  // The destination planet picture shown in the DITL item-4 image frame (the
+  // original scales the target stellar's ambient sprite into it). The planet
+  // PICT comes from the same selection the docked screen uses: the stellar's
+  // custom picture (engage_highlight_frame >= 0x80) or link_a_id + 0x2710.
+  // This mirrors the destination-planet art in landed_window.cpp.
+  std::unique_ptr<SdlTexture> planet_art;
+  if (stellar) {
+    const std::int16_t stell_pict =
+        (stellar->engage_highlight_frame >= 0x80)
+            ? stellar->engage_highlight_frame
+            : static_cast<std::int16_t>(stellar->link_a_id + 0x2710);
+    if (stell_pict >= 0x80) {
+      planet_art =
+          LoadPictTexture(platform, static_cast<std::uint16_t>(stell_pict));
+      if (planet_art) {
+        NovaLog::Info("negotiation destination PICT 0x{} ({}) for stellar {}",
+                      static_cast<int>(stell_pict),
+                      stellar->name,
+                      static_cast<int>(stellar_id));
+      } else {
+        NovaLog::Todo("no negotiation destination PICT {} for stellar '{}'; "
+                      "the image frame stays a flat placeholder",
+                      static_cast<int>(stell_pict),
+                      stellar->name);
+      }
+    }
+  }
   ServicesButtonArt button_art;
   if (!button_art.Initialize(platform)) {
     NovaLog::Warn("three-state button art unavailable for the negotiation "
@@ -423,32 +556,47 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   // g_travel_interaction_denied_state).
   const std::string land_label = (denied && bribe_eligible) ? "BRIBE" : "LAND";
 
-  // ---- Button geometry / hit-testing (item 4) ------------------------------
-  // The three buttons use the existing `ServiceButton`/`ServiceButtonAt`
-  // abstractions from services_buttons so the drawn rects and the click
-  // hit-test share identical geometry. Slots: 0 Leave, 1 Land/Bribe, 2 Attack.
+  // ---- Button geometry / hit-testing --------------------------------------
+  // The three primary buttons stack vertically down the frame's lower-left
+  // column (DITL items 0/1/2), each 146x26 at x=27..173, slot order bottom-to-
+  // top: Leave (item 0, y=244), Attack (item 2, y=214), Land/Bribe (item 1,
+  // y=184). The existing `ServiceButton`/`ServiceButtonAt` abstractions make
+  // the drawn rects and the click hit-test share identical geometry.
   enum ButtonSlot : std::uint8_t { kLeave = 0, kLandBribe = 1, kAttack = 2 };
 
-  const float btn_w = 120.0F;
-  const float btn_h = 25.0F;
-  const float gap = 16.0F;
-  const float total_w = btn_w * 3 + gap * 2;
-  const float row_y = std::min(panel.h - 60.0F, panel.y + panel.h - 50.0F);
-  const float start_x = panel.x + (panel.w - total_w) / 2.0F;
+  const SDL_FRect btn_rects[3] = {
+      {kNegotiationButtonX,
+       kNegotiationButtonYLeave,
+       kNegotiationButtonW,
+       kNegotiationButtonH},
+      {kNegotiationButtonX,
+       kNegotiationButtonYLand,
+       kNegotiationButtonW,
+       kNegotiationButtonH},
+      {kNegotiationButtonX,
+       kNegotiationButtonYAttack,
+       kNegotiationButtonW,
+       kNegotiationButtonH},
+  };
   std::vector<ServiceButton> buttons;
   buttons.reserve(3);
   for (std::uint8_t i = 0; i < 3; ++i) {
-    buttons.push_back(ServiceButton{
-        {start_x + static_cast<float>(i) * (btn_w + gap), row_y, btn_w, btn_h},
-        i});
+    buttons.push_back(ServiceButton{btn_rects[i], i});
   }
+
+  // Destination header: the stellar display name shown in the DITL item-5
+  // (entry 6) block, mirroring NovaUi_DrawTravelDestinationInteractionWindow
+  // drawing g_stellar_defs[...].display_name there.
+  const std::string header = stellar->name;
 
   while (!platform.quit_requested()) {
     DrawNegotiationDialog(platform,
                           font_cache,
                           button_art,
                           backdrop ? backdrop->get() : nullptr,
+                          planet_art ? planet_art->get() : nullptr,
                           status,
+                          header,
                           land_label,
                           buttons,
                           panel);
