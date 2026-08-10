@@ -124,18 +124,23 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
   if (!sys) {
     return false;
   }
-  const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
-  if (stellar_id < 0x80) {
-    return false;
-  }
+  // The destination is resolved purely from the hyperlink (System.links[slot]);
+  // a NavDef departure-point stellar at the same slot is NOT required -- the
+  // scenario data does not pair them 1:1 (e.g. Kania links to Tichel at slot 3
+  // with no travel stellar there, yet 'j' still jumps Kania->Tichel). If a
+  // departure-point stellar does exist, surface it as the selected target so
+  // the travel reticle/HUD point at it.
   t.travel_slot = static_cast<std::int16_t>(slot);
-  t.engaged_stellar_id = stellar_id;
-  t.selected_stellar_id = stellar_id;
+  t.destination_system_id = destination_zero_based;
+  const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
+  if (stellar_id >= 0x80) {
+    t.engaged_stellar_id = stellar_id;
+    t.selected_stellar_id = stellar_id;
+  }
   t.selected_stellar_is_manual = true;
-  NovaLog::Info("plotted starmap jump to system {} (route via travel "
-                "stellar {})",
+  NovaLog::Info("plotted starmap jump to system {} (hyperlink slot {})",
                 destination_zero_based,
-                stellar_id);
+                slot);
   return true;
 }
 

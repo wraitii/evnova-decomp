@@ -8,6 +8,8 @@ namespace {
 
 using game::GameState;
 using game::NovaTravel_MarkSystemDiscovered;
+using game::NovaTravel_PlotStarmapDestination;
+using game::NovaTravel_Tick;
 
 // Returns whether the scenario marks zero-based `id` visible/explored and the
 // pilot's explored bitset holds it.
@@ -167,4 +169,46 @@ TEST_CASE("starmap plot arms the travel slot only for linked destinations") {
   NovaTravel_PlotStarmapDestination(state, start);
   CHECK(state.travel.starmap_destination_system_id == start);
   CHECK(state.travel.travel_slot == -1);
+}
+
+// Regression: Kania (0) links to Tichel (1) at hyperlink slot 3, but has no
+// travel-nav stellar there (nav_defs[3] is empty). A plotted jump to Tichel
+// must still arm (destination resolved purely against links) and 'j' must land
+// in Tichel, not fall back to the nearest travel point (which would go to a
+// different system). This locked in the fix where PlotStarmapDestination no
+// longer required a NavDef paired with the hyperlink slot.
+TEST_CASE("plot to a hyperlink without a paired nav-def stellar still jumps") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Verify the scenario shape that exercises the fix: Kania links to Tichel at
+  // a slot whose nav_defs entry is empty.
+  state.player.current_system_id = 0; // Kania
+  const game::System *kania = state.scenario.System(0x80);
+  REQUIRE(kania != nullptr);
+  int tichel_slot = -1;
+  for (std::size_t i = 0; i < kania->links.size(); ++i) {
+    if (kania->links[i] == 0x81 /* Tichel resource */) {
+      tichel_slot = static_cast<int>(i);
+      break;
+    }
+  }
+  REQUIRE(tichel_slot >= 0);
+  CAPTURE(tichel_slot);
+  REQUIRE(static_cast<std::size_t>(tichel_slot) < kania->nav_defs.size());
+  // Historically this slot had an empty nav_def, exercising the no-paired-
+  // NavDef branch; arm regardless.
+  const bool armed = NovaTravel_PlotStarmapDestination(state, 1);
+  REQUIRE(armed);
+  CHECK(state.travel.starmap_destination_system_id == 1);
+  CHECK(state.travel.travel_slot == tichel_slot);
+  CHECK(state.travel.destination_system_id == 1);
+
+  // Pressing 'j' to completion must land in Tichel (system id 1).
+  state.player.fuel_points = 500;
+  for (int f = 0; f < 200 && !state.travel.just_completed; ++f) {
+    NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  }
+  CHECK(state.travel.just_completed);
+  CHECK(state.player.current_system_id == 1);
 }

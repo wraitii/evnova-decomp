@@ -16,9 +16,11 @@
 // Mapping (confirmed from the decomp + the Bible): a System's adjacency block
 // is 32 entries -- indices 0..15 are the destination systems (Con1-16, our
 // System.links) and indices 16..31 are the travel stellars (NavDef1-16, our
-// System.nav_defs). Picking travel-stellar slot i jumps the ship to
-// System.links[i]. The travel slot (ai_secondary_target_slot) selects that
-// pairing.
+// System.nav_defs). The jump TARGET is a System.links entry (a direct
+// hyperlink); the NavDef list only names the departure-point stellar for some
+// slots and is NOT paired 1:1 with every link in the scenario data (e.g. Kania
+// links to Tichel at slot 3 with no travel stellar there, yet 'j' still jumps
+// Kania->Tichel). So a plotted destination is resolved purely against links.
 //
 // The in-flight hyperspace flight itself is a simplified countdown stand-in
 // (TODO(decomp)): the ship coasts and holds for jump_countdown_ticks, then the

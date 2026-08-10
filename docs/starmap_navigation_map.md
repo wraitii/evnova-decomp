@@ -48,8 +48,9 @@ The map is driven by the scenario `syst` table (`ScenarioData.systems`, the
 - `pos_x` / `pos_y` — the node position on the galaxy map.
 - `links[16]` — `Con1-16` adjacency: each is a system *resource* id (>= 0x80)
   the player can jump to. The map draws a link line for each.
-- `nav_defs[16]` — `NavDef1-16` travel-stellar ids paired with `links`; slot `i`
-  travel point jumps to `links[i]` (see travel.hpp).
+- `nav_defs[16]` — `NavDef1-16` travel-stellar ids (departure-point stellars).
+  NOT paired 1:1 with every `links` entry in the scenario data; a jump's target
+  is a `System.links` hyperlink, resolved purely against `links` (travel.cpp).
 
 Visibility / exploration (fog of war):
 

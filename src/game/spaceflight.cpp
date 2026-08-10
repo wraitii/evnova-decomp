@@ -447,6 +447,15 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // resets primary_target_ship_slot on system entry.
       state.player.primary_target_ship_slot = -1;
       state.ship_reticle_pulse = 0.0F;
+      // Re-arm the landed system's stellar availability immediately (mirrors
+      // system-entry re-deriving display state) and clear any manual travel
+      // selection left over from the departure system, so the automatic target
+      // below starts from the new system's own stellars rather than a stale
+      // one. Without this the travel/land reticle can point at the previous
+      // system's target for a frame.
+      NovaTargeting_UpdateStellarAvailability(state);
+      state.travel.selected_stellar_id = -1;
+      state.travel.selected_stellar_is_manual = false;
     }
     // Seed an automatic target, while retaining a stellar chosen by Tab/
     // Shift+Tab. This keeps navigation purposeful instead of retargeting to
