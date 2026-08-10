@@ -14,6 +14,7 @@
 // the fallback hostility override. The helper takes the ScenarioData so it can
 // look up governments by id without any hidden global state (AGENTS.md).
 
+#include "game_state.hpp"
 #include "scenario_data.hpp"
 
 namespace game {
@@ -45,5 +46,20 @@ namespace game {
 [[nodiscard]] bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
                                                 std::int16_t govt_id,
                                                 int flag_index);
+
+// Ghidra 0x0040fd20 Government_IsShipEligibleForGovernmentAid. Whether the
+// ship's government would send it to help the player when hailed: false when
+// the ship keeps pressing its own target; true when it is idle with no AI
+// target, or its government policy flag 0 is set, or it has no faction at all.
+// Otherwise resolves the player's current system government against the
+// ship's faction: the xenophobic flag (0x0001) admits aid when the system
+// reputation clears the system government's flee threshold, the 0x0002 flag
+// admits aid when reputation + the relevant government's flee threshold stays
+// negative, and hostile system governments admit aid under the same threshold
+// test. The mission-fleet branch (random-encounter fleet defs) and the
+// GovtDef +0x83 byte gate are deferred (TODO(decomp): not modelled).
+[[nodiscard]] bool
+NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
+                                              const Ship &ship);
 
 } // namespace game

@@ -11,6 +11,7 @@
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
+#include "ship_comm_dialog.hpp"
 #include "ship_spawn.hpp"
 #include "spaceflight_view.hpp"
 #include "targeting.hpp"
@@ -301,20 +302,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Ship_HandlePlayerShip cycle-target block (0x0044b120): a no-op result or
     // a self-result clears the target, otherwise the new slot is stored and
     // the reticle pulse is re-armed at 256.0 (0x43800000).
-    const bool ship_cycle = input.cycle_ship_target_next ||
-                            input.cycle_ship_target_previous;
+    const bool ship_cycle =
+        input.cycle_ship_target_next || input.cycle_ship_target_previous;
     if (ship_cycle && !ship_cycle_was_held) {
-      const std::int16_t next = input.cycle_ship_target_next
-                                    ? NovaTargeting_FindNextPlayerCycleTarget(
-                                          state,
-                                          state.player.primary_target_ship_slot,
-                                          state.player.current_system_id,
-                                          input.cycle_ship_include_combat)
-                                    : NovaTargeting_FindPreviousPlayerCycleTarget(
-                                          state,
-                                          state.player.primary_target_ship_slot,
-                                          state.player.current_system_id,
-                                          input.cycle_ship_include_combat);
+      const std::int16_t next =
+          input.cycle_ship_target_next
+              ? NovaTargeting_FindNextPlayerCycleTarget(
+                    state,
+                    state.player.primary_target_ship_slot,
+                    state.player.current_system_id,
+                    input.cycle_ship_include_combat)
+              : NovaTargeting_FindPreviousPlayerCycleTarget(
+                    state,
+                    state.player.primary_target_ship_slot,
+                    state.player.current_system_id,
+                    input.cycle_ship_include_combat);
       if (next == state.player.primary_target_ship_slot ||
           next == state.player.ship_instance_id) {
         state.player.primary_target_ship_slot = -1;
@@ -331,11 +333,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     const bool nearest_pressed =
         input.select_nearest_hostile || input.select_nearest_engaged;
     if (nearest_pressed && !nearest_was_held) {
-      const std::int16_t slot = input.select_nearest_hostile
-                                    ? NovaTargeting_SelectNearestHostileCombatTarget(
-                                          state)
-                                    : NovaTargeting_SelectNearestEngagedTarget(
-                                          state);
+      const std::int16_t slot =
+          input.select_nearest_hostile
+              ? NovaTargeting_SelectNearestHostileCombatTarget(state)
+              : NovaTargeting_SelectNearestEngagedTarget(state);
       if (slot != -1 && slot != state.player.primary_target_ship_slot) {
         state.player.primary_target_ship_slot = slot;
         state.ship_reticle_pulse = 256.0F;
@@ -422,10 +423,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Seed an automatic target, while retaining a stellar chosen by Tab/
     // Shift+Tab. This keeps navigation purposeful instead of retargeting to
     // whichever body happens to be closest each frame. A change to the selected
-    // travel stellar re-arms the travel reticle pulse (NovaUi_UpdateTravelTarget
-    // Reticle's re-arm at 0x43800000), mirroring the original arming
-    // _g_travel_target_reticle_pulse whenever ai_secondary_target_slot is
-    // assigned a fresh stellar.
+    // travel stellar re-arms the travel reticle pulse
+    // (NovaUi_UpdateTravelTarget Reticle's re-arm at 0x43800000), mirroring the
+    // original arming _g_travel_target_reticle_pulse whenever
+    // ai_secondary_target_slot is assigned a fresh stellar.
     NovaTargeting_UpdatePlayerTarget(state);
     if (state.travel.selected_stellar_id != prev_travel_stellar) {
       state.travel_reticle_pulse = 256.0F;
@@ -455,8 +456,45 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     }
     // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
     // interaction pathway. It is intentionally not substituted for landing.
+    // Mirrors Ship_HandlePlayerTargetActionCommand (0x00454910): with a ship
+    // primary target the action opens the ship-comm dialog (DLOG 0x3ef); with
+    // no target (or the 0x38/0x6f commands held) it opens the destination-
+    // interaction window for the selected travel stellar. The player disabled/
+    // destroyed gate and the target-ship "entering hyperspace" latch only
+    // beep + show an overlay in the original (the clean-room shows the overlay
+    // text; the beep is not modelled). Mission-ship defs are not modelled, so
+    // the original's NovaUi_RunMissionShipInteractionWindow branch never
+    // triggers here (TODO(decomp)).
     if (target_action_pressed) {
-      if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
+      const std::int16_t ship_target = state.player.primary_target_ship_slot;
+      if (ship_target > 0 &&
+          state.SlotInRange(static_cast<std::size_t>(ship_target))) {
+        if (NovaAiShip_IsDestroyed(state.player) ||
+            state.player.ai_station_hold_timer > 0.0F) {
+          NovaLog::Info("target-action: player disabled/destroyed; hail "
+                        "ignored");
+        } else {
+          const Ship &target =
+              state.ShipAt(static_cast<std::size_t>(ship_target));
+          if (target.ai_station_hold_timer > 0.0F) {
+            // Ship is launching/entering hyperspace: cannot hail.
+            const bool restricted = NovaAiShip_IsFireRestricted(state, target);
+            const auto text =
+                NovaHud_LoadStringEntry(0x7d2, restricted ? 0x35 : 0x36);
+            NovaHud_ShowOverlayMessage(state,
+                                       text.value_or("Unable to send hail."));
+          } else if (!NovaShipComm_TargetEligibleForHail(state, target)) {
+            const auto text =
+                NovaHud_LoadStringEntry(0x7d2, 0x35); // "Unable to send hail
+                                                      // - target ship is
+                                                      // entering hyperspace."
+            NovaHud_ShowOverlayMessage(state,
+                                       text.value_or("Unable to send hail."));
+          } else {
+            (void)NovaShipComm_RunShipDialog(platform, state, ship_target);
+          }
+        }
+      } else if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
         const std::int16_t dialog_stellar = state.travel.selected_stellar_id;
         const NegotiationExit exit = NovaNegotiation_RunDestinationDialog(
             platform, state, dialog_stellar);

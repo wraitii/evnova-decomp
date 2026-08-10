@@ -55,12 +55,13 @@ constexpr std::uint16_t kNegotiationBackdropPict = 0x2140;
 // deferred full payment-window reconstruction (see the header scope note).
 
 // STR# pools carrying the interaction status / prompt text. Status strings
-// (STR# 0xbba) and prompts (STR# 0xbb9 for prompt_index < 0x26, 0xbb8
+// (STR# 0xbba) and prompts (STR# 0xbb8 for prompt_index < 0x26, 0xbb9
 // otherwise) each store five flavour variants per message; the dialog picks
 // one at `index*5 + random + 1` (see NovaUi_LoadTravelDestinationStatusString
-// 0x00482910 / NovaUi_LoadTravelDestinationPromptString 0x004828c0).
+// 0x00482910 / NovaUi_LoadTravelDestinationPromptString 0x004828c0, which
+// reads STR# 0xbb8 for prompt indices below 0x26).
 constexpr std::uint16_t kStatusStr = 0xbba;
-constexpr std::uint16_t kPromptStr = 0xbb9;
+constexpr std::uint16_t kPromptStr = 0xbb8;
 
 // Status/prompt message indices used by the dialog loop (see the decomp of
 // NovaUi_RunTravelDestinationInteractionWindow). Kept explicit so the variant
@@ -156,9 +157,9 @@ LoadStatusVariant(std::int16_t random_index, std::uint16_t message_index) {
       kStatusStr, StringVariantIndex(random_index, message_index));
 }
 
-// Loads one flavour variant of a prompt (STR# 0xbb9) message. Mirrors
+// Loads one flavour variant of a prompt (STR# 0xbb8) message. Mirrors
 // NovaUi_LoadTravelDestinationPromptString (0x004828c0) for the common
-// prompt_index < 0x26 range (loading `message*5 + random + 1`); the 0xbb8
+// prompt_index < 0x26 range (loading `message*5 + random + 1`); the 0xbb9
 // higher-index branch is unused by this dialog.
 [[nodiscard]] std::optional<std::string>
 LoadPromptVariant(std::int16_t random_index, std::uint16_t message_index) {

@@ -390,11 +390,11 @@ void NovaAi_UpdateShipState(GameState &state,
       // it, keep steering toward the stellar (control mode 2 travel).
       const auto *cls =
           scn->Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-      const float turn_deg = cls ? static_cast<float>(cls->turn_rate) * 0.1F
-                                 : 0.0F; // Ship_ComputeShipMaxTurnRateDeg NPC branch
+      const float turn_deg =
+          cls ? static_cast<float>(cls->turn_rate) * 0.1F
+              : 0.0F; // Ship_ComputeShipMaxTurnRateDeg NPC branch
       const float arrive_range =
-          (kArriveRangeBase -
-           std::min(turn_deg, kArriveRangeTurnCap)) *
+          (kArriveRangeBase - std::min(turn_deg, kArriveRangeTurnCap)) *
               kArriveRangeScale +
           kArriveRangeOffset;
       const bool outside_range =
@@ -790,9 +790,9 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
   // Shortest signed angle (deg) from the current heading to the desired one.
   auto heading_delta_deg = [&]() {
     const float cur_deg = ship.heading / kDegToRad;
-    return std::remainder(
-        static_cast<float>(ship.ai_desired_heading_deg) - cur_deg,
-        kFullCircleDeg);
+    return std::remainder(static_cast<float>(ship.ai_desired_heading_deg) -
+                              cur_deg,
+                          kFullCircleDeg);
   };
 
   switch (ship.ai_control_mode) {
@@ -826,10 +826,9 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
       break;
     }
     if (cls == nullptr || !NovaShip_HasGravityShield(ship, *cls)) {
-      ship.ai_desired_heading_deg = static_cast<std::int16_t>(WrapDeg(
-          BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
-      if (std::abs(heading_delta_deg()) <
-          eff_turn_deg + kMode1AlignAddend) {
+      ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+          WrapDeg(BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
+      if (std::abs(heading_delta_deg()) < eff_turn_deg + kMode1AlignAddend) {
         if (std::abs(ship.vel_x) >= kMode1StillFastThreshold ||
             std::abs(ship.vel_y) >= kMode1StillFastThreshold) {
           ship.ai_forward_thrust_cmd = eff_thrust;
@@ -882,8 +881,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     }
     ship.ai_desired_heading_deg =
         static_cast<std::int16_t>(BearingDeg(ship.pos_x, ship.pos_y, tx, ty));
-    if (std::abs(heading_delta_deg()) <
-        eff_turn_deg + kMode2AlignAddend) {
+    if (std::abs(heading_delta_deg()) < eff_turn_deg + kMode2AlignAddend) {
       ship.ai_forward_thrust_cmd = eff_thrust;
       if (std::abs(tx - ship.pos_x) < kMode2CloseGatePx &&
           std::abs(ty - ship.pos_y) < kMode2CloseGatePx) {
@@ -902,8 +900,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     // aligned within eff_turn_deg + 3.0 deg.
     ship.ai_desired_heading_deg = static_cast<std::int16_t>(
         BearingDeg(0.0F, 0.0F, ship.pos_x, ship.pos_y));
-    if (std::abs(heading_delta_deg()) <
-        eff_turn_deg + kMode3AlignAddend) {
+    if (std::abs(heading_delta_deg()) < eff_turn_deg + kMode3AlignAddend) {
       ship.ai_forward_thrust_cmd = eff_thrust;
       ship.ai_desired_speed = 0.0F;
     }
@@ -1028,6 +1025,390 @@ void NovaAi_UpdateShipAI(GameState &state,
   // heavy block even when bVar6 skipped the heavy decision).
   NovaAi_UpdateShipState(state, ship, now_ms);
   NovaAi_ApplyControls(state, ship, 0.0F);
+}
+
+// ---------------------------------------------------------------------------
+// Ship-comm / hail predicates and AI state entries. See ship_ai.hpp for the
+// per-function Ghidra addresses and semantics.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// The disengage/retreat AI state set shared by the keep-pressing predicate and
+// the comm-aid scan (each uses its own literal set in the original; 0x12 = 18
+// is only excluded by Ship_ShouldShipKeepPressingTarget).
+[[nodiscard]] bool IsDisengageState(std::int16_t state, bool include_state18) {
+  switch (state) {
+  case 7:
+  case 9:
+  case 15:
+  case 10:
+  case 11:
+  case 5:
+  case 12:
+    return true;
+  case 18:
+    return include_state18;
+  default:
+    return false;
+  }
+}
+
+// Uniform integer in [0, bound) from the GameState PRNG (the dialog and AI
+// entries share the session PRNG like the original's NovaRandom_Range).
+[[nodiscard]] std::int16_t NovaAiRandomRange(GameState &state, int bound) {
+  if (bound <= 1) {
+    return 0;
+  }
+  return static_cast<std::int16_t>(
+      std::uniform_int_distribution<int>{0, bound - 1}(state.rng));
+}
+
+} // namespace
+
+// Ghidra 0x00464a90 Ship_CanShipApplyDisablePressureToTarget (player target).
+bool NovaAiShip_CanApplyDisablePressureToTarget(const GameState &state,
+                                                const Ship &ship) {
+  if (ship.ai_state_code == 0x15) {
+    return false; // jump/travel state: no disable pressure
+  }
+  const Ship &player = state.player;
+  // The 0x3ff mission-ship slot is exempt in the original; the player never
+  // carries one in this build, so this is always false here.
+  if (player.mission_ship_slot == 0x3ff) {
+    return true;
+  }
+  // Not at/below the attacker's own disable threshold -> can press the target.
+  if (!NovaTargeting_ShipAtDisableThreshold(ship)) {
+    return true;
+  }
+  // TODO(decomp): the two remaining arms need unmodelled fields -- the player
+  // targeting the attacker while carrying a disable outfit
+  // (Outfit_HasDisableOutfit 0x0046df40), or player.disable_pressure_state ==
+  // 1 within DAT_005757c0 (200 px). Both read 0 in the current build, so the
+  // original would also return false here.
+  return false;
+}
+
+// Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget.
+bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
+                                         const Ship &ship) {
+  if (!ship.is_active || NovaAiShip_IsFireRestricted(state, ship)) {
+    return false;
+  }
+  if (ship.ai_target_ship_slot == 0 || ship.primary_target_ship_slot == -1) {
+    return false;
+  }
+  if (!NovaAiShip_CanApplyDisablePressureToTarget(state, ship)) {
+    return false;
+  }
+  if (ship.target_stellar_object_id != -1) {
+    return true; // docked/landed against a stellar: keeps pressing
+  }
+  const std::int16_t target_slot = ship.primary_target_ship_slot;
+  const bool coasting_reversal = ship.reverse_speed_bias > 0.0F;
+  const bool engaged =
+      !IsDisengageState(ship.ai_state_code, /*include_state18=*/true);
+  const Ship *target =
+      target_slot >= 0 &&
+              static_cast<std::size_t>(target_slot) < GameState::kMaxShips
+          ? &state.ShipAt(static_cast<std::size_t>(target_slot))
+          : nullptr;
+  // Targeting the player (slot 0): press while not coasting through a
+  // reversal and not in a disengage state.
+  if (target_slot == 0) {
+    if (!coasting_reversal && engaged) {
+      return true;
+    }
+  }
+  // The target ship points at the player (the original evaluates this block
+  // and the identical sVar6 != -1 block below separately; both require the
+  // target's ai_target_ship_slot to be the player).
+  if (target != nullptr && target->ai_target_ship_slot == 0) {
+    if (!coasting_reversal && engaged) {
+      return true;
+    }
+    if (target_slot != -1 && !coasting_reversal && engaged) {
+      return true;
+    }
+  }
+  // A third ship pressing this ship: scan the other slots for one whose
+  // ai_target_ship_slot is this ship's instance id, is not coasting through a
+  // reversal, is active, unrestricted, and (like the direct checks) in a
+  // non-disengage state while itself holding the player or a player-targeting
+  // ship as primary.
+  for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
+    const Ship &other = state.ShipAt(j);
+    if (other.ai_target_ship_slot != ship.ship_instance_id) {
+      continue;
+    }
+    if (other.reverse_speed_bias > 0.0F || !other.is_active) {
+      continue;
+    }
+    if (NovaAiShip_IsFireRestricted(state, other)) {
+      continue;
+    }
+    const std::int16_t o_target = other.primary_target_ship_slot;
+    if (o_target == 0) {
+      if (engaged) {
+        return true;
+      }
+    }
+    if (o_target != -1 &&
+        static_cast<std::size_t>(o_target) < GameState::kMaxShips) {
+      const Ship &other_target =
+          state.ShipAt(static_cast<std::size_t>(o_target));
+      if (engaged && other_target.ai_target_ship_slot == 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x0040fc00 Ship_IsShipEligibleForCommAidInteraction.
+bool NovaAiShip_IsShipEligibleForCommAidInteraction(const GameState &state,
+                                                    const Ship &ship) {
+  if (!ship.is_active || NovaAiShip_IsFireRestricted(state, ship)) {
+    return false;
+  }
+  for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
+    const Ship &other = state.ShipAt(j);
+    if (!other.is_active) {
+      continue;
+    }
+    // Literal port of the original's condition: the *target* ship's primary
+    // target slot is compared with its own instance id (disasm 0x0040fc51:
+    // CMP [EBX+0x70], [EBX+0x86]). With instance ids equal to slots in this
+    // build this reads "targets its own slot", which is what the original
+    // effectively tests; kept verbatim to preserve the quirk.
+    if (ship.primary_target_ship_slot != ship.ship_instance_id) {
+      continue;
+    }
+    if (static_cast<std::int16_t>(j) == ship.ship_instance_id) {
+      continue;
+    }
+    if (!IsDisengageState(other.ai_state_code, /*include_state18=*/false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x0040fca0 / 0x0040fce0.
+bool NovaAiShip_IsShipBrakingOnPlayerState9(const GameState &state,
+                                            const Ship &ship) {
+  return ship.is_active && !NovaAiShip_IsFireRestricted(state, ship) &&
+         ship.primary_target_ship_slot == 0 && ship.ai_state_code == 9;
+}
+
+bool NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
+                                              const Ship &ship) {
+  return ship.is_active && !NovaAiShip_IsFireRestricted(state, ship) &&
+         ship.primary_target_ship_slot == 0 && ship.ai_state_code == 0x0F;
+}
+
+// Ghidra 0x00411270 Ship_IsShipInNonIdleAiState.
+bool NovaAiShip_IsShipInNonIdleAiState(const Ship &ship) {
+  const std::int16_t s = ship.ai_state_code;
+  return s != 0 && s != 2 && s != 1 && s != 0x14 && s != 7;
+}
+
+// Ghidra 0x00410060 Ship_AreAnyShipsEligibleForDistressCall.
+bool NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state) {
+  for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
+    const Ship &other = state.ShipAt(j);
+    if (NovaTargeting_IsShipEligibleForDistressCall(state, other)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x004101d0 Ship_CanShipRespondToDistressCall.
+bool NovaAiShip_CanShipRespondToDistressCall(const GameState &state,
+                                             const Ship &responder,
+                                             const Ship &distressed) {
+  if (responder.ship_instance_id == distressed.ship_instance_id) {
+    return false;
+  }
+  if (!responder.is_active || !distressed.is_active) {
+    return false;
+  }
+  if (distressed.mission_ship_slot == 0x3ff) {
+    return false;
+  }
+  const std::int16_t govt_a = responder.faction_or_government_id;
+  const std::int16_t govt_b = distressed.faction_or_government_id;
+  if (govt_a != -1 && govt_b != -1) {
+    if (govt_a == govt_b) {
+      return false;
+    }
+    if (NovaGovernment_AreGovtsHostileOrXenophobic(
+            state.scenario, govt_a, govt_b)) {
+      return true;
+    }
+    // A xenophobic `distressed` government admits any non-allied responder
+    // (literal port of the decomp's goto LAB_0041029d).
+    if ((state.scenario.governments[static_cast<std::size_t>(govt_b)]
+             .flags_primary &
+         0x1U) != 0 &&
+        !NovaGovernment_AreGovtsAllied(state.scenario, govt_a, govt_b)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x004100a0 Ship_HasShipDistressResponder.
+bool NovaAiShip_HasShipDistressResponder(const GameState &state,
+                                         const Ship &ship) {
+  for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
+    const Ship &other = state.ShipAt(j);
+    if (!other.is_active ||
+        static_cast<std::int16_t>(j) == ship.ship_instance_id) {
+      continue;
+    }
+    if (NovaAiShip_ShouldKeepPressingTarget(state, other) &&
+        NovaAiShip_CanShipRespondToDistressCall(state, ship, other)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerAndBrake.
+void NovaAi_EnterState9TargetPlayerAndBrake(Ship &ship) {
+  ship.ai_hostility_accumulator = 0;
+  ship.ai_station_hold_timer = 0.0F;
+  ship.primary_target_ship_slot = 0;
+  ship.ai_state_code = 9;
+  ship.ai_control_mode = 0;
+  ship.reverse_speed_bias = -1.0F;
+}
+
+// Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerAndBrake.
+void NovaAi_EnterState0FTargetPlayerAndBrake(Ship &ship) {
+  ship.ai_hostility_accumulator = 0;
+  ship.ai_station_hold_timer = 0.0F;
+  ship.primary_target_ship_slot = 0;
+  ship.ai_state_code = 0x0F;
+  ship.ai_control_mode = 0;
+  ship.reverse_speed_bias = -1.0F;
+}
+
+namespace {
+
+// Shared candidate predicate of the two state-0x04 target-random entries. When
+// `require_distress` is set the candidate must additionally be distress-
+// eligible (Ship_EnterShipAiState0x04_TargetRandomCombatCandidate).
+[[nodiscard]] bool IsState4Candidate(const GameState &state,
+                                     const Ship &candidate,
+                                     std::int16_t self_id,
+                                     std::int16_t system_id,
+                                     bool require_distress) {
+  if (candidate.ship_instance_id == self_id) {
+    return false;
+  }
+  if (NovaAiShip_IsFireRestricted(state, candidate) ||
+      NovaAiShip_IsDestroyed(candidate)) {
+    return false;
+  }
+  if (candidate.current_system_id != system_id) {
+    return false;
+  }
+  if (require_distress) {
+    return NovaTargeting_IsShipEligibleForDistressCall(state, candidate);
+  }
+  return candidate.primary_target_ship_slot == 0 &&
+         (candidate.ai_state_code == 3 || candidate.ai_state_code == 4);
+}
+
+} // namespace
+
+// Ghidra 0x00410b00 Ship_EnterShipAiState0x04_TargetRandomUnengagedShip.
+void NovaAi_EnterState4TargetRandomUnengagedShip(GameState &state, Ship &ship) {
+  std::int16_t count = 0;
+  for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
+    if (IsState4Candidate(state,
+                          state.ShipAt(j),
+                          ship.ship_instance_id,
+                          ship.current_system_id,
+                          /*require_distress=*/false)) {
+      ++count;
+    }
+  }
+  if (count < 1) {
+    ship.primary_target_ship_slot = -1;
+    ship.ai_state_code = 4;
+    return;
+  }
+  // Random pick over slots 1..0x3f until a valid candidate is found (the
+  // original's nested do-while ladder).
+  for (;;) {
+    std::int16_t pick;
+    do {
+      pick = static_cast<std::int16_t>(NovaAiRandomRange(state, 0x3f) + 1);
+    } while (pick == ship.ship_instance_id || pick == 0);
+    if (IsState4Candidate(state,
+                          state.ShipAt(static_cast<std::size_t>(pick)),
+                          ship.ship_instance_id,
+                          ship.current_system_id,
+                          /*require_distress=*/false)) {
+      ship.primary_target_ship_slot = pick;
+      break;
+    }
+  }
+  ship.ai_state_code = 4;
+}
+
+// Ghidra 0x004107e0 Ship_EnterShipAiState0x04_TargetRandomCombatCandidate.
+void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
+                                                   Ship &ship) {
+  std::int16_t count = 0;
+  for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
+    if (IsState4Candidate(state,
+                          state.ShipAt(j),
+                          ship.ship_instance_id,
+                          ship.current_system_id,
+                          /*require_distress=*/true)) {
+      ++count;
+    }
+  }
+  if (count < 1) {
+    ship.primary_target_ship_slot = -1;
+    ship.ai_state_code = 4;
+    return;
+  }
+  for (;;) {
+    std::int16_t pick;
+    do {
+      pick = static_cast<std::int16_t>(NovaAiRandomRange(state, 0x3f) + 1);
+    } while (pick == ship.ship_instance_id || pick == 0);
+    if (IsState4Candidate(state,
+                          state.ShipAt(static_cast<std::size_t>(pick)),
+                          ship.ship_instance_id,
+                          ship.current_system_id,
+                          /*require_distress=*/true)) {
+      ship.ai_secondary_target_slot = -1;
+      ship.primary_target_ship_slot = pick;
+      break;
+    }
+  }
+  ship.ai_state_code = 4;
+}
+
+// Ghidra 0x00410700 Ship_SetShipHostileToPlayer. The mission-announcement arm
+// is deferred (TODO(decomp): g_mission_ship_defs + Mission_ShowMissionShip-
+// Announcement are not modelled), so this is the escort-mode/state flip only.
+void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
+  (void)state;
+  if (ship.ai_control_mode == 4 || ship.ai_control_mode == 0x0D) {
+    ship.ai_control_mode = 0;
+  }
+  ship.ai_state_code = 4;
+  ship.ai_secondary_target_slot = -1;
+  ship.primary_target_ship_slot = 0;
 }
 
 } // namespace game

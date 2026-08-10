@@ -165,6 +165,14 @@ struct ShipClass {
   // 0x80 timing, etc.). Consulted by the AI travel/arrive logic.
   std::uint16_t sprite_behavior_flags = 0;
 
+  // Ghidra ShipClassDef +0xA0A (pict_fallback_sprite_resource_id): the PICT
+  // resource drawn in the ship-comm dialog / shipyard ship list. The loader
+  // source that fills this field has not been located yet (TODO(decomp): the
+  // sh\x95p payload and both class loaders write neighbours +0xA00..+0xA20
+  // but not +0xA0A), so it stays 0 and the comm dialog falls back to a
+  // placeholder picture.
+  std::uint16_t pict_fallback_sprite_resource_id = 0;
+
   // Ghidra ShipClassDef +0xA0C (clone_source_ship_class). The zero-based ship
   // class that owns the base sprites this class shares: the first class whose
   // sh\x8an BaseImageID matches this class's (derived by ShipClass_LoadShip-

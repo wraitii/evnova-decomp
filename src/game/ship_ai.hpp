@@ -75,4 +75,110 @@ void NovaAi_UpdateShipAI(GameState &state,
                          bool skip_heavy_ai,
                          std::uint32_t now_ms);
 
+// ---------------------------------------------------------------------------
+// Ship-comm / hail predicates and AI state entries (added for the ship-comm
+// dialog 0x0047e470). Each maps one Ghidra function; the comm dialog branches
+// on these to pick its prompt and to order the target ship around.
+// ---------------------------------------------------------------------------
+
+// Ghidra 0x00464a90 Ship_CanShipApplyDisablePressureToTarget, evaluated with
+// the player as the target. True when `ship` can meaningfully apply
+// disable/surrender pressure to the player: not in AI state 0x15, and either
+// the player is a 0x3ff special slot, or `ship` is not at its own disable
+// threshold. The two outfit/close-range arms (player targets the ship with a
+// disable outfit; player.disable_pressure_state == 1 at DAT_005757c0 range)
+// are deferred -- neither field is modelled (TODO(decomp)).
+[[nodiscard]] bool
+NovaAiShip_CanApplyDisablePressureToTarget(const GameState &state,
+                                           const Ship &ship);
+
+// Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget. True when a pursuing
+// ship should keep pressing its primary target (or the player under mutual
+// targeting): active, not fire-restricted, holding an AI target and a primary
+// target, able to apply disable pressure, not coasting through a reversal
+// (reverse_speed_bias <= 0), and in a non-disengage AI state (not in
+// {7,9,15,10,11,5,12,18}) -- either directly on the player, on a ship that
+// targets the player, or pressed by a third ship that itself holds the player
+// or a player-targeting primary. Mirrors the original's literal
+// primary_target_ship_slot == ship_instance_id comparison in the third-ship
+// scan (instance ids equal slots in this build).
+[[nodiscard]] bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
+                                                       const Ship &ship);
+
+// Ghidra 0x0040fc00 Ship_IsShipEligibleForCommAidInteraction. True when some
+// other active ship is positioned to come to `ship`'s aid: iterates the other
+// slots and returns true for the first one in a non-disengage state
+// (ai_state_code not in {7,9,15,10,11,5,12}) while `ship`'s primary target
+// slot equals its own instance id (a literal port of the original's
+// comparison; see the implementation comment).
+[[nodiscard]] bool
+NovaAiShip_IsShipEligibleForCommAidInteraction(const GameState &state,
+                                               const Ship &ship);
+
+// Ghidra 0x0040fca0 / 0x0040fce0. True when the ship is braking/throttled
+// while locked onto the player in AI state 0x09 (escort-pursue) / 0x0F
+// (pursue-with-restrictions). Gates the ship-comm dialog's "on my way" vs
+// "I'm busy" prompt pick.
+[[nodiscard]] bool
+NovaAiShip_IsShipBrakingOnPlayerState9(const GameState &state,
+                                       const Ship &ship);
+[[nodiscard]] bool
+NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
+                                         const Ship &ship);
+
+// Ghidra 0x00411270 Ship_IsShipInNonIdleAiState. True when the ship's
+// ai_state_code is not one of the idle/non-combat states {0 (track-parked), 1
+// (docked), 2 (idle-template), 7 (escort-arrive), 0x14 (jump/travel)}.
+[[nodiscard]] bool NovaAiShip_IsShipInNonIdleAiState(const Ship &ship);
+
+// Ghidra 0x00410060 Ship_AreAnyShipsEligibleForDistressCall. Scans the NPC
+// slots for any ship satisfying NovaTargeting_IsShipEligibleForDistressCall.
+[[nodiscard]] bool
+NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state);
+
+// Ghidra 0x004101d0 Ship_CanShipRespondToDistressCall. Whether `responder`
+// can serve as a responder for `distressed`'s distress-call flow: distinct,
+// both active, `distressed` not a 0x3ff mission slot, and government relation
+// rules -- hostile/xenophobic governments respond, same-government does not,
+// and a xenophobic `distressed` government admits any non-allied responder.
+[[nodiscard]] bool NovaAiShip_CanShipRespondToDistressCall(
+    const GameState &state, const Ship &responder, const Ship &distressed);
+
+// Ghidra 0x004100a0 Ship_HasShipDistressResponder. True when at least one
+// other ship (not `ship`) both keeps pressing its own target and can respond
+// to `ship`'s distress call. Used by the comm dialog to route the distress
+// branch.
+[[nodiscard]] bool NovaAiShip_HasShipDistressResponder(const GameState &state,
+                                                       const Ship &ship);
+
+// Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerAndBrake. Enters AI
+// state 0x09 targeting the player, resets hostility/hold-timer/control, and
+// sets reverse_speed_bias -1 (coast through reversal). Called when the hail
+// target agrees to come to the player's aid.
+void NovaAi_EnterState9TargetPlayerAndBrake(Ship &ship);
+
+// Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerAndBrake. Same as
+// the 0x09 entry but for fire-restricted ships (state 0x0F).
+void NovaAi_EnterState0FTargetPlayerAndBrake(Ship &ship);
+
+// Ghidra 0x00410b00 Ship_EnterShipAiState0x04_TargetRandomUnengagedShip.
+// Counts same-system ships that are not fire-restricted, not destroyed, hold
+// the player as primary target and are in AI state 0x03/0x04; picks one at
+// random, stores it in primary_target_ship_slot and enters ai_state_code
+// 0x04 (clears the target to -1 when none).
+void NovaAi_EnterState4TargetRandomUnengagedShip(GameState &state, Ship &ship);
+
+// Ghidra 0x004107e0 Ship_EnterShipAiState0x04_TargetRandomCombatCandidate.
+// Same as TargetRandomUnengagedShip but the candidate scan additionally
+// requires NovaTargeting_IsShipEligibleForDistressCall.
+void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
+                                                   Ship &ship);
+
+// Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Flips the ship hostile: sets
+// ai_state_code 0x04, clears the secondary target, targets the player, and
+// drops escort control modes 0x04/0x0D. The mission-side announcement arm
+// (Mission_ShowMissionShipAnnouncement for mission-ship slots) is deferred
+// with TODO(decomp) -- mission ship defs are not modelled.
+void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship);
+
 } // namespace game

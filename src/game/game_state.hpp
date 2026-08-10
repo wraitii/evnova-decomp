@@ -181,6 +181,21 @@ struct Ship {
   // +0xBE mining_scoop_active, derived by Outfit_HasMiningScoopOutfit).
   bool mining_scoop_active = false;
 
+  // --- Ship-comm dialog latches (Provisional; see ship_comm_dialog.cpp) -----
+  // The comm window (NovaUi_RunTargetShipCommWindow 0x0047e470) reads/writes
+  // three unnamed ShipState bytes. +0xB9 is set when a hailed escort is
+  // re-hired (escort_rehired_mark), +0xBB gates the dialog's status label
+  // (0 = "Fighter" STR# 0x7d2 0xa8, else "Captured Escort" 0xa6:
+  // escort_origin_mark), and +0xBC is set after any ship-comm dialog closes
+  // (comm_interacted_mark). Names are conservative/Provisional pending the
+  // wider escort/fleet system.
+  std::int8_t escort_rehired_mark = 0;  // +0xB9 (Provisional)
+  std::int8_t escort_origin_mark = 0;   // +0xBB (Provisional)
+  std::int8_t comm_interacted_mark = 0; // +0xBC (Provisional)
+  // ShipState +0xC8DE post_hit_mode_hint: the AI's post-hit behavior hint
+  // (written by the ship-comm escort release and the disable subsystem).
+  std::int16_t post_hit_mode_hint = -1; // +0xC8DE
+
   // --- Misc ---
   std::int16_t timed_action_counter = -1; // +0xC908
   std::int32_t credits = 0;               // +0xA0

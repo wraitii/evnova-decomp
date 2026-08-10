@@ -26,26 +26,26 @@ address,name,impl_file,reimpl_pct,comment
 0x0040DDC0,NovaUi_DrawAiControlModeMnemonic,,0%,
 0x0040E020,Ship_AcquirePrimaryTargetForShip,,0%,
 0x0040F6D0,Ship_IsShipEligibleForDistressCall,src/game/targeting.cpp,100%,NovaTargeting_IsShipEligibleForDistressCall: active + not coasting-through-reversal (reverse_speed_bias <= 0) + not fire-restricted + primary target is the player or a player-targeting ship + not in retreat states {7,9,15,10,11,5,12,18}.
-0x0040F780,Ship_ShouldShipKeepPressingTarget,,0%,
+0x0040F780,Ship_ShouldShipKeepPressingTarget,src/game/ship_ai.cpp,100%,"NovaAiShip_ShouldKeepPressingTarget: pursuit-retention predicate (active/unrestricted/AI+primary target/disable-pressure gates, reversal-coast + non-disengage state checks on the player, a player-targeting target, or a third ship pressing it). Literal port incl. the original's primary_target_ship_slot==ship_instance_id comparison in the third-ship scan"
 0x0040FAA0,Ship_IsShipAcquirableAsTarget,src/game/targeting.cpp,100%,NovaTargeting_IsShipAcquirableAsTarget: player branch (govt policy flag 0 or distress-eligible) + NPC branch (primary-target / mutual-target scan with the same retreat-state gate).
-0x0040FC00,Ship_IsShipEligibleForCommAidInteraction,,0%,
-0x0040FCA0,Ship_IsShipBrakingOnPlayerInAiState0x09,,0%,
-0x0040FCE0,Ship_IsShipBrakingOnPlayerInAiState0x0F,,0%,
-0x0040FD20,Government_IsShipEligibleForGovernmentAid,,0%,
-0x00410060,Ship_AreAnyShipsEligibleForDistressCall,,0%,
-0x004100A0,Ship_HasShipDistressResponder,,0%,
+0x0040FC00,Ship_IsShipEligibleForCommAidInteraction,src/game/ship_ai.cpp,100%,"NovaAiShip_IsShipEligibleForCommAidInteraction: scans other active ships for one in a non-disengage state while the target's primary slot equals its own instance id (literal quirk port)"
+0x0040FCA0,Ship_IsShipBrakingOnPlayerInAiState0x09,src/game/ship_ai.cpp,100%,NovaAiShip_IsShipBrakingOnPlayerState9: active + unrestricted + targets player + state 9
+0x0040FCE0,Ship_IsShipBrakingOnPlayerInAiState0x0F,src/game/ship_ai.cpp,100%,NovaAiShip_IsShipBrakingOnPlayerState0xF: active + unrestricted + targets player + state 0x0F
+0x0040FD20,Government_IsShipEligibleForGovernmentAid,src/game/government.cpp,75%,"NovaGovernment_IsShipEligibleForGovernmentAid: keep-pressing/idle/policy-factionless gates + xenophobic/0x0002/allied/hostile reputation-vs-flee-threshold ladders. Mission-fleet branch (fleet defs) and GovtDef +0x83 gate deferred TODO(decomp)"
+0x00410060,Ship_AreAnyShipsEligibleForDistressCall,src/game/ship_ai.cpp,100%,NovaAi_AreAnyShipsEligibleForDistressCall: scans NPC slots via NovaTargeting_IsShipEligibleForDistressCall
+0x004100A0,Ship_HasShipDistressResponder,src/game/ship_ai.cpp,100%,NovaAiShip_HasShipDistressResponder: scan for a pressing ship that can respond to the target's distress call
 0x00410110,Ship_HasAnyDistressResponderForShip,,0%,
-0x004101D0,Ship_CanShipRespondToDistressCall,,0%,
+0x004101D0,Ship_CanShipRespondToDistressCall,src/game/ship_ai.cpp,100%,NovaAiShip_CanShipRespondToDistressCall: identity/activity/mission-slot gates + govt hostile/xenophobic relation rules
 0x004102B0,Ship_IsShipLockedOnAttackerInAiState0x04,,0%,
 0x004102E0,Government_PropagateHostilityFromAttack,,0%,
 0x00410670,Ship_EnterShipAiState0x02_ClearPrimaryTarget,src/game/ship_ai.cpp,100%,"NovaAi_EnterState2ClearPrimaryTarget: enters state 2, clears primary, clamps hold timer, records ai_mode_start_time_ms"
 0x004106B0,Ship_EnterShipAiState0x0B_SetRetreatThrottle,,0%,
-0x00410700,Ship_SetShipHostileToPlayer,,0%,
-0x004107E0,Ship_EnterShipAiState0x04_TargetRandomCombatCandidate,,0%,
+0x00410700,Ship_SetShipHostileToPlayer,src/game/ship_ai.cpp,60%,"NovaAi_SetShipHostileToPlayer: state 4 + target player + clear secondary + escort-control-mode drop. Mission-announcement arm (mission ship defs) deferred TODO(decomp)"
+0x004107E0,Ship_EnterShipAiState0x04_TargetRandomCombatCandidate,src/game/ship_ai.cpp,100%,NovaAi_EnterState4TargetRandomCombatCandidate: count + random pick of distress-eligible same-system ships, state 4
 0x00410900,Ship_EnterShipAiState0x04_TargetRandomRelativeContact,,0%,
-0x00410B00,Ship_EnterShipAiState0x04_TargetRandomUnengagedShip,,0%,
-0x00410C30,Ship_EnterShipAiState0x09_TargetPlayerAndBrake,,0%,
-0x00410C70,Ship_EnterShipAiState0x0F_TargetPlayerAndBrake,,0%,
+0x00410B00,Ship_EnterShipAiState0x04_TargetRandomUnengagedShip,src/game/ship_ai.cpp,100%,NovaAi_EnterState4TargetRandomUnengagedShip: count + random pick of player-targeting state-3/4 same-system ships, state 4
+0x00410C30,Ship_EnterShipAiState0x09_TargetPlayerAndBrake,src/game/ship_ai.cpp,100%,NovaAi_EnterState9TargetPlayerAndBrake: hostility/hold-timer/control reset + target player + state 9 + reversal bias -1
+0x00410C70,Ship_EnterShipAiState0x0F_TargetPlayerAndBrake,src/game/ship_ai.cpp,100%,NovaAi_EnterState0FTargetPlayerAndBrake: same as state 9 entry with state 0x0F
 0x00410CB0,Ship_EnterShipAiState0x05_ReturnToAiTargetLeader,,0%,
 0x00410CE0,Ship_IsShipInAiBehavior5State0x05,,0%,
 0x00410D10,Ship_EnterLeaderReturnStateFromAiTarget,,0%,
@@ -56,7 +56,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00410EE0,Ship_IsShipInAiControlMode0x0C,,0%,
 0x00410F00,Ship_IsShipInAiState0x04,,0%,
 0x00410F20,Ship_CanShipInterceptCurrentPrimaryTarget,,0%,
-0x00411270,Ship_IsShipInNonIdleAiState,,0%,
+0x00411270,Ship_IsShipInNonIdleAiState,src/game/ship_ai.cpp,100%,NovaAiShip_IsShipInNonIdleAiState: state not in {0,1,2,7,0x14}
 0x004112A0,Ship_IsShipInAiState0x02,,0%,
 0x004112C0,Ship_ShowPlayerInterceptTauntIfEligible,,0%,
 0x00411540,Ship_UpdateAutoWeaponSelectionFromTarget,,0%,
@@ -276,7 +276,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0044EAB4,FUN_0044eab4,,0%,
 0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
-0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,10%,stellar target-action eligibility only: available unrestricted sprite-active target with travel_flags&0x20 clear reaches the destination-interaction reconstruction boundary; modal/ship-comm/mission branches remain TODO(decomp)
+0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,35%,"stellar target-action eligibility + destination-interaction (0x3f1) + ship-comm branch: player disabled/destroyed and hyperspace-latch gates with STR# 0x7d2 overlays, bVar1 hail-eligibility gate, NovaShipComm_RunShipDialog handoff. Mission-ship interaction branch (mission defs) remains TODO(decomp)"
 0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,35%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, or time-animated path for flags bit0, see 0x00435830); fire-sound audio side-effect reconstructed (volley_fired>0 gate -> dequeue fire_sound slot, played by the spaceflight loop through the cached NovaSoundData, slot->snd id 200+slot). Two fixes: (1) shots now exit the weapon's turret-group barrel rather than the hull centre by applying the sh\x8an per-group/quadrant muzzle offsets (Weapon_ApplyTurretSpreadVelocity 0x0046c5c0 group0, decoded via ShipVisualDescriptor.turret_muzzles -> GameState player muzzle_* in EnsureShipSprite, quadrant rotation alternates barrels); (2) bank cooldown = reload_ticks / weapon_bank_ammo (speed_scalar/ammo per Weapon_FirePlayerWeaponBank), so a second mounted weapon doubles fire rate. beam/turret/guided/launcher branches and burst side-effects (Weapon_GetWeaponFireIntervalTicks 0x0046f270 flags-0x40 path) not reconstructed"
 0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,30%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, full effective shield/armor, and Weapon_ReconcileOutfitPoolWithWeaponBanks at arrival (register stock-bank weapons as owned); system NPC cohort reset on landing via NovaShip_DeactivateVacantShipsAndTally + NovaSystem_TickNpcSpawnMaintenance (fresh batch on launch); system-transition/world-reset/discovery work remains TODO(decomp)
 0x00456480,Stellar_SelectLinkedDestinationViaStarmap,,0%,confirmed linked-destination starmap transfer; prior speculative docking implementation removed
@@ -347,7 +347,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00464700,Outfit_HasPlayerOwnedOutfitType0x14,,0%,
 0x00464760,Outfit_HasPlayerOwnedOutfitType0x0F_Cached,,0%,
 0x00464810,Ship_GetShipJammingScore,,0%,
-0x00464A90,Ship_CanShipApplyDisablePressureToTarget,,0%,
+0x00464A90,Ship_CanShipApplyDisablePressureToTarget,src/game/ship_ai.cpp,60%,"NovaAiShip_CanApplyDisablePressureToTarget (player target): state-0x15 gate + mission-slot exemption + disable-threshold arm. Outfit/pressure-state arms deferred (fields not modelled)"
 0x00464B50,Outfit_HasDisableOutfit,,0%,
 0x00464C80,Outfit_HasPersistentDisableOutfit,,0%,
 0x00464DB0,Outfit_GetDisableOutfitArmorThresholdNibble,,0%,
@@ -691,7 +691,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0047E1E0,FUN_0047e1e0,,0%,
 0x0047E2D0,NovaHud_ShowOverlayMessage,src/game/hud_overlay.cpp,60%,transient HUD overlay message reconstructed (NovaHud_ShowOverlayMessage + state on GameState): text cache, colour, wall-clock expiry, drawn by HudRenderer bottom-band; user feedback (landing denial) wired. Edge-flag/colour-palette fidelity + exact durations approximate
 0x0047E430,NovaHud_ShowCachedOverlayMessage,src/game/hud_overlay.cpp,70%,transient overlay replays the cached message (NovaHud_ShowCachedOverlayMessage): re-arms the live message expiry; drawn by the same HudRenderer path
-0x0047E470,NovaUi_RunTargetShipCommWindow,,0%,
+0x0047E470,NovaUi_RunTargetShipCommWindow,src/game/ship_comm_dialog.cpp,65%,"NovaShipComm_RunShipDialog (DLOG 0x3ef, PICT 0x213f): window shell + name/picture panel + 3 context buttons (Close Channel/Greetings/Request Assistance|Beg For Mercy|Release), personality + bribe cost (5e-07/1e-4 scales, 0.333 cap, [1000,20000]), bribe latch, initial prompt ladder, Greetings state machine (fire-restricted/escort-release/keep-pressing/comm-aid/distress/fuel-bribe), single-pass payment (35%, 0.75x, +1000 haggle, free-help scan_mask 0x10), secondary hail-info (default fragment only). Deferred: escort-management handoff, fleet-def branches, full hail-info assembly, cargo transfer"
 0x0047F9C0,NovaUi_RunTravelDestinationBribeWindow,,0%,
 0x0047FA40,FUN_0047fa40,,0%,
 0x0047FB70,NovaUi_DrawTravelDestinationBribeWindow,,0%,
