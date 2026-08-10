@@ -53,6 +53,11 @@ struct FlightInput {
   // channel; this build maps it to a dedicated key so it is distinct from the
   // continuous steer inputs.
   bool travel = false;
+  // Edge-triggered galaxy-map command: 'm' opens the starmap modal. Mirrors
+  // the original's map command checked by Ship_HandlePlayerShip (0x0044b120)
+  // through NovaInput_IsCommandActiveWithGameplayGuards; this build binds it to
+  // a single key distinct from the steer/travel/target inputs.
+  bool starmap = false;
   // Edge-triggered normal arrival command: Return. When the currently selected
   // ordinary stellar is inside the 250-unit arrival envelope, this follows the
   // ticker-text / Spaceport path in Stellar_ProcessTravelAndLanding instead of

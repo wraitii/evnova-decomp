@@ -47,6 +47,13 @@ void CompleteJump(GameState &state) {
   state.player.vel_x = 0.0F;
   state.player.vel_y = 0.0F;
   state.player.speed = 0.0F;
+
+  // Mark the destination system (and its linked neighbours) explored/visible
+  // so the starmap shows progression. This mirrors the discovery flood
+  // (System_FloodDiscoverAdjacentSystems) that runs on system entry in the
+  // original: reaching a system reveals it and its immediate neighbourhood.
+  NovaTravel_MarkSystemDiscovered(state, t.destination_system_id);
+
   // Refill shields/armor from the effective (outfit-derived) maximums.
   const PlayerEffectiveStats eff = Outfit_ComputePlayerEffectiveStats(state);
   state.player.shield_points = eff.max_shield_points;
@@ -131,6 +138,43 @@ bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
   // TODO(decomp): also block while velocity-matched to another ship and under
   // certain mission-ship flags (no NPC velocity-match / mission systems yet).
   return class_fuel_capacity >= kJumpFuelCost;
+}
+
+// ---------------------------------------------------------------------------
+// Discovery flood.
+// ---------------------------------------------------------------------------
+void NovaTravel_MarkSystemDiscovered(GameState &state,
+                                     std::int16_t zero_based_system_id) {
+  const std::size_t count = state.scenario.systems.size();
+  const auto mark = [&](std::int16_t zero_based) {
+    if (zero_based < 0 ||
+        static_cast<std::size_t>(zero_based) >= count) {
+      return;
+    }
+    const std::size_t idx = static_cast<std::size_t>(zero_based);
+    auto &sys = state.scenario.systems[idx];
+    // Keep the scenario's per-system visibility flag in sync so target/fog
+    // helpers that consult is_visible stay correct (targeting.cpp forces the
+    // current system visible; we extend that to neighbours reached by jump).
+    sys.is_visible = true;
+    sys.has_explored_flag = true;
+    if (idx < state.control.explored_systems.size()) {
+      state.control.explored_systems.set(idx);
+    }
+  };
+  mark(zero_based_system_id);
+  // Reveal the immediate neighbourhood too (links are stored as system
+  // *resource* ids in System.links).
+  const auto *sys =
+      state.scenario.System(static_cast<std::int16_t>(zero_based_system_id + 0x80));
+  if (!sys) {
+    return;
+  }
+  for (const std::int16_t link : sys->links) {
+    if (link >= 0x80) {
+      mark(static_cast<std::int16_t>(link - 0x80));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

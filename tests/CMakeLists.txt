@@ -11,6 +11,7 @@ add_executable(evnova_tests
     ship_spawn_test.cpp
     smoke_test.cpp
     sprite_test.cpp
+    travel_test.cpp
     weapon_test.cpp
 )
 

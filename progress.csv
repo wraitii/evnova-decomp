@@ -269,12 +269,12 @@ address,name,impl_file,reimpl_pct,comment
 0x0044AA50,FUN_0044aa50,,0%,
 0x0044AA60,FUN_0044aa60,,0%,
 0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,20%,"player control subset includes effective turn rounding, thrust/afterburner fuel burn, stellar gravity, integer engine-glow control, and jump completion. travel/combat/disable/mission scopes still stubbed"
-0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,30%,nearest eligible stellar seeds target; Tab/Shift+Tab cycles and retains a manual stellar selection; backquote/Shift+backquote cycle the ship primary target (Alt/'k' = combat-relevant only), 'o' selects nearest hostile combat / Alt+'o' nearest engaged, click-to-target ship picking via SpaceflightView::PickShipAt; reticle pulse armed on target change; target action stops at the destination-interaction boundary. Combat/movement/travel-transition scopes still stubbed
+0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,30%,nearest eligible stellar seeds target; Tab/Shift+Tab cycles and retains a manual stellar selection; backquote/Shift+backquote cycle the ship primary target (Alt/'k' = combat-relevant only), 'o' selects nearest hostile combat / Alt+'o' nearest engaged, click-to-target ship picking via SpaceflightView::PickShipAt; 'm' opens the galaxy starmap (map command, NovaStarmap_RunWindow); reticle pulse armed on target change; target action stops at the destination-interaction boundary. Combat/movement/travel-transition scopes still stubbed
 0x0044C8D0,Ship_TurnShipTowardHeading,src/game/spaceflight.cpp,3%,reverse-control subset turns toward the heading opposite current velocity at the effective turn rate; direct-turn/thrust and transition scopes not separately reconstructed
 0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,
 0x0044E019,Ship_HandlePlayerShipControl,src/game/spaceflight.cpp,28%,"primary fire and player movement subset: rounded effective turn, thrust/reverse, afterburner x1.8 cap/fuel burn, stellar gravity, and integer engine-glow control. travel/mission/UI control scopes remain stubbed"
 0x0044EAB4,FUN_0044eab4,,0%,
-0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick; in-flight hyperspace visuals/audio/fleet warp-sync deferred
+0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,15%,cross-system jump sequence reduced to a countdown stand-in in NovaTravel_Tick (now marks the destination + neighbours discovered via NovaTravel_MarkSystemDiscovered on completion); in-flight hyperspace visuals/audio/fleet warp-sync deferred
 0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
 0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,35%,"stellar target-action eligibility + destination-interaction (0x3f1) + ship-comm branch: player disabled/destroyed and hyperspace-latch gates with STR# 0x7d2 overlays, bVar1 hail-eligibility gate, NovaShipComm_RunShipDialog handoff. Mission-ship interaction branch (mission defs) remains TODO(decomp)"
 0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,35%,"unguided-projectile branch (spawn shot toward heading, reload cooldown, ammo/energy gate) via NovaWeapon_FirePlayerWeaponBank; fired shots drawn via their weapon's spin shot set oriented by heading (Shot_HandleShot static-frame path, or time-animated path for flags bit0, see 0x00435830); fire-sound audio side-effect reconstructed (volley_fired>0 gate -> dequeue fire_sound slot, played by the spaceflight loop through the cached NovaSoundData, slot->snd id 200+slot). Two fixes: (1) shots now exit the weapon's turret-group barrel rather than the hull centre by applying the sh\x8an per-group/quadrant muzzle offsets (Weapon_ApplyTurretSpreadVelocity 0x0046c5c0 group0, decoded via ShipVisualDescriptor.turret_muzzles -> GameState player muzzle_* in EnsureShipSprite, quadrant rotation alternates barrels); (2) bank cooldown = reload_ticks / weapon_bank_ammo (speed_scalar/ammo per Weapon_FirePlayerWeaponBank), so a second mounted weapon doubles fire rate. beam/turret/guided/launcher branches and burst side-effects (Weapon_GetWeaponFireIntervalTicks 0x0046f270 flags-0x40 path) not reconstructed"
@@ -382,7 +382,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00467710,Stellar_FindReachableEmergencyDestinationStellar,,0%,
 0x004677A0,Stellar_FindReachableEmergencyDestinationStellarRecursive,,0%,
 0x00467970,System_RebuildSystemVisibilityMap,,0%,
-0x00467AB0,System_FloodDiscoverAdjacentSystems,,0%,
+0x00467AB0,System_FloodDiscoverAdjacentSystems,src/game/travel.cpp,40%,NovaTravel_MarkSystemDiscovered marks a reached system + linked neighbours visible/explored on jump completion (travel.cpp) and on new-game start (new_pilot_flow.cpp); only the immediate-neighbourhood flood (depth 1) is reconstructed
 0x00467BD0,Frame_TriggerSystemRegionEvents,,0%,
 0x00467CF0,System_ShowSystemEventMessage,,0%,
 0x00467D60,Anim_EaseFrameProgress,,0%,
@@ -834,7 +834,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004A2F50,NovaUi_InitThreeStateButtonArt,,0%,
 0x004A3300,NovaUi_ShutdownThreeStateButtonArt,,0%,
 0x004A3340,NovaUi_DrawThreeStateButton,,0%,
-0x004A3AA0,NovaUi_RunStarmapWindow,,0%,
+0x004A3AA0,NovaUi_RunStarmapWindow,src/game/starmap.cpp,30%,clean-room modal run loop via NovaStarmap_RunWindow: galaxy graph (System pos/links/names) drawn with explored/current/selected coloring + pan/zoom/select, opened from spaceflight on 'm' (NovaStarmap_CloseStarmapWindow analog returns kContinue). DITL resource assets, political overlay, route editing, search dialog, and license-easter-egg branch deferred
 0x004A4353,NovaUi_StarmapWindowInnerLoop,,0%,
 0x004A4FD0,NovaUi_CloseStarmapWindow,,0%,
 0x004A51E0,FUN_004a51e0,,0%,

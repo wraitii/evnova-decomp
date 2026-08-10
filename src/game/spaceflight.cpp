@@ -14,6 +14,7 @@
 #include "ship_comm_dialog.hpp"
 #include "ship_spawn.hpp"
 #include "spaceflight_view.hpp"
+#include "starmap.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
 #include "weapon.hpp"
@@ -273,6 +274,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool target_cycle_was_held = false;
   bool ship_cycle_was_held = false;
   bool nearest_was_held = false;
+  bool starmap_was_held = false;
   bool land_was_held = false;
   bool target_action_was_held = false;
   std::int16_t prev_travel_stellar = state.travel.selected_stellar_id;
@@ -393,6 +395,24 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
     // 'j' key near an available travel point, then tick the countdown.
     NovaTravel_Tick(state, input.travel, frame_time_ms);
+
+    // Galaxy-map command ('m', edge-triggered): open the starmap modal over
+    // the current flight scene. Mirrors Ship_HandlePlayerShip (0x0044b120)
+    // dispatching NovaUi_RunStarmapWindow when its map gameplay command is
+    // active. The modal owns the frame until the player closes it; the jump
+    // state machine is untouched by inspection (the map only selects systems).
+    const bool starmap_held = input.starmap;
+    if (starmap_held && !starmap_was_held) {
+      if (NovaStarmap_RunWindow(platform, state) == StarmapExit::kQuit) {
+        returning_to_menu = true;
+        break;
+      }
+      // Refresh the travel reticle after the map may have re-selected a
+      // current-system marker (the original re-arms the travel pulse on map
+      // return via NovaUi_MarkTravelAndStatusPanelsDirty).
+      state.travel_reticle_pulse = 256.0F;
+    }
+    starmap_was_held = starmap_held;
     // When a jump completed this frame, re-spawn the starfield for the new
     // system (the original's jump completion re-runs
     // NovaEffects_QueuedAmbientStarParticles).

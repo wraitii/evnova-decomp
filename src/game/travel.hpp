@@ -70,6 +70,15 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 // jump lands. Requires a valid scenario. The completed jump does NOT re-spawn
 // the starfield itself; the spaceflight loop observes just_completed and calls
 // SpaceflightView::SpawnAmbientStars for the new system.
+// Completion-scope discovery helper: marks `zero_based_system_id` explored
+// (and each of its linked neighbours visible/explored) so the galaxy starmap
+// reveals the neighbourhood when the player enters a system. Mirrors the
+// discovery flood that runs on system entry in the original
+// (System_FloodDiscoverAdjacentSystems / System_RebuildSystemVisibilityMap).
+// Idempotent; safe on empty/out-of-range systems.
+void NovaTravel_MarkSystemDiscovered(GameState &state,
+                                     std::int16_t zero_based_system_id);
+
 void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms);
 
 } // namespace game

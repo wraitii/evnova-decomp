@@ -286,16 +286,15 @@ void Stub_SeedStartingInventory(GameState &state) {
 void Stub_DiscoverStartingSystems(GameState &state) {
   // Menu_RunNewGameFlow sets discovery_state = 1 on the starting system and
   // each adjacent neighbour so the starmap shows the pilot's immediate area.
-  // The starting system is the pilot's entry point. The reimplementation
-  // tracks discovered systems by id in GameState instead of the original
-  // SystemDef discovery bits; the starmap later reads it.
-  (void)state;
-  // TODO(decomp): mark the starting system (kStartSystemResourceId) and each
-  // linked neighbour discovered once a discovery-container is added to
-  // GameState. The system links are now readable via
-  // state.scenario.System(kStartSystemResourceId)->links.
-  NovaLog::Info("starting system discovery pending: system adjacency now "
-                "available via scenario tables");
+  // The starting system is the pilot's entry point. Mark the starting system
+  // and its linked neighbours discovered/visible now that the galaxy starmap
+  // (starmap.cpp) reads the explored bits; the flood mirrors the original
+  // discovery_state=1 set in Menu_RunNewGameFlow.
+  NovaTravel_MarkSystemDiscovered(state, kStartSystemId);
+  NovaLog::Info("starting system discovery seeded: {} (resource {}) and "
+                "adjacent neighbours now visible on the starmap",
+                kStartSystemId,
+                kStartSystemResourceId);
 }
 
 void Stub_PickFirstTravelDestination(GameState &state) {
