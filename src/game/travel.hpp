@@ -34,7 +34,7 @@ namespace game {
 // Number of fuel points a single jump burns. From the Bible "Fuel (100 = 1
 // jump)" and the diagnostic jump gate Stellar_CanShipInitiateJumpSequence
 // (class fuel_capacity >= 100) / the completion decrement `fuel_points -=
-// _DAT_005755a4`.
+// FLOAT_kJumpFuelCost` (named 0x005755a4 in Ghidra).
 inline constexpr float kJumpFuelCost = 100.0F;
 
 // Mirrors Stellar_FindNearestAvailableTravelStellar (0x00462db0): returns the

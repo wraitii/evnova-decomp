@@ -197,9 +197,9 @@ bool NovaTravel_CanStartJump(const GameState &state) {
 //
 // It additionally gates on the CURRENT fuel amount: Stellar_HandlePlayerShip-
 // Core' jump block refuses to (re)enter the hyperspace sequence while
-// `ship->fuel_points < _DAT_005755a4` (0x005755a4 == kJumpFuelCost == 100),
-// showing the "not enough fuel to take off" denial overlay. A ship with no
-// fuel in the tank cannot engage a jump even though its class can hold a
+// `ship->fuel_points < FLOAT_kJumpFuelCost` (0x005755a4 == kJumpFuelCost ==
+// 100), showing the "not enough fuel to take off" denial overlay. A ship with
+// no fuel in the tank cannot engage a jump even though its class can hold a
 // jump's worth of fuel.
 bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
                                             const Ship &ship) {
