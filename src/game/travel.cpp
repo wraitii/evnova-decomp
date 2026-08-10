@@ -68,13 +68,76 @@ void CompleteJump(GameState &state) {
                 static_cast<int>(kJumpFuelCost));
 
   // Clear the travel engagement; the spaceflight loop re-spawns the starfield
-  // when it observes just_completed.
+  // when it observes just_completed. The plotted starmap destination is also
+  // consumed by the jump (a fresh plot is needed for the next jump).
+  t.starmap_destination_system_id = -1;
   t.travel_slot = -1;
   t.engaged_stellar_id = -1;
   t.destination_system_id = -1;
 }
 
+// ---------------------------------------------------------------------------
+// Starmap plot: resolve a galaxy-map destination to a travel slot.
+// ---------------------------------------------------------------------------
+// Maps a destination zero-based system id to the slot (0..15) in the current
+// system whose linked destination matches (System.links[slot] alongside
+// System.nav_defs[slot]), or -1 when there is no direct link.
+int FindLinkedTravelSlot(const GameState &state,
+                         std::int16_t destination_zero_based) {
+  const System *sys = state.scenario.System(CurrentSystemResource(state));
+  if (!sys) {
+    return -1;
+  }
+  const std::int16_t dest_resource =
+      static_cast<std::int16_t>(destination_zero_based + 0x80);
+  for (std::size_t slot = 0; slot < sys->links.size(); ++slot) {
+    if (sys->links[slot] == dest_resource) {
+      return static_cast<int>(slot);
+    }
+  }
+  return -1;
+}
+
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Plots a galaxy-map destination as the next jump target.
+// ---------------------------------------------------------------------------
+bool NovaTravel_PlotStarmapDestination(GameState &state,
+                                       std::int16_t destination_zero_based) {
+  TravelState &t = state.travel;
+  t.starmap_destination_system_id = destination_zero_based;
+  if (destination_zero_based < 0 ||
+      destination_zero_based == state.player.current_system_id) {
+    return false;
+  }
+  const int slot =
+      FindLinkedTravelSlot(state, destination_zero_based);
+  if (slot < 0) {
+    // No direct single jump reaches it. Keep the plot recorded so the HUD can
+    // show the intention, but arm nothing -- 'j' falls back to the nearest
+    // travel point.
+    return false;
+  }
+  const System *sys =
+      state.scenario.System(CurrentSystemResource(state));
+  if (!sys) {
+    return false;
+  }
+  const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
+  if (stellar_id < 0x80) {
+    return false;
+  }
+  t.travel_slot = static_cast<std::int16_t>(slot);
+  t.engaged_stellar_id = stellar_id;
+  t.selected_stellar_id = stellar_id;
+  t.selected_stellar_is_manual = true;
+  NovaLog::Info("plotted starmap jump to system {} (route via travel "
+                "stellar {})",
+                destination_zero_based,
+                stellar_id);
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // Mirrors Stellar_FindNearestAvailableTravelStellar (0x00462db0).
@@ -205,11 +268,17 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
     return; // transient; should not persist with engaging false
   }
 
-  // (a) Idle: wait for the travel key near an available travel point.
+  // (a) Idle: wait for the travel key. When a starmap plot armed a specific
+  // travel slot, jump toward that plotted destination; otherwise fall back to
+  // the nearest available travel point (the original's
+  // Stellar_FindNearestAvailableTravelStellar behaviour via 'j').
   if (!travel_input || !NovaTravel_CanStartJump(state)) {
     return;
   }
-  const int slot = NovaTravel_FindNearestTravelPoint(state);
+  const int slot =
+      (t.travel_slot >= 0 && t.starmap_destination_system_id >= 0)
+          ? static_cast<int>(t.travel_slot)
+          : NovaTravel_FindNearestTravelPoint(state);
   if (slot < 0) {
     return; // no travel point in range/available
   }
@@ -229,6 +298,7 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
   t.travel_slot = static_cast<std::int16_t>(slot);
   t.engaged_stellar_id = stellar_id;
   t.destination_system_id = dest_zero_based;
+  t.starmap_destination_system_id = dest_zero_based;
   t.jump_countdown_ticks = kJumpSequenceTicks;
   t.engaging = true;
   NovaLog::Debug(

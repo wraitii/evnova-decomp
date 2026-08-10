@@ -308,6 +308,18 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
       if (dst && !dst->name.empty()) {
         travel += " > " + dst->name;
       }
+    } else if (state.travel.starmap_destination_system_id >= 0) {
+      // A galaxy-map plot is armed: show the plotted next-jump destination
+      // system (mirrors the original showing the route target after the
+      // starmap syncs its route into the travel status panel).
+      const auto *dst = state.scenario.System(
+          static_cast<std::int16_t>(
+              state.travel.starmap_destination_system_id));
+      if (dst && !dst->name.empty()) {
+        travel = "JUMP > " + dst->name;
+      } else {
+        travel = "JUMP > ?";
+      }
     } else {
       const std::int16_t sid = state.travel.selected_stellar_id;
       const auto *st = state.scenario.Stellar(sid);

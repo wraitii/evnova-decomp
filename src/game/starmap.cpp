@@ -189,8 +189,8 @@ void DrawChrome(SdlPlatform &platform, NovaFontCache &font_cache) {
                         0.0F,
                         640.0F,
                         kHelpBaselineY,
-                        "Arrows pan   +/- zoom   h home/fit   click select "
-                        "  Esc close");
+                        "Arrows pan   +/- zoom   h home/fit   Tab select "
+                        "  Enter/Esc close");
 }
 
 // Draws the galaxy graph: link lines first, then markers and names.
@@ -373,11 +373,11 @@ float MarkerDistSq(const SDL_FPoint &point, const MappedSystem &m) {
 // ---------------------------------------------------------------------------
 // NovaStarmap_RunWindow (0x004a3aa0 NovaUi_RunStarmapWindow, clean-room).
 // ---------------------------------------------------------------------------
-StarmapExit NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
+StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
   // No scenario tables -> nothing to map.
   if (state.scenario.systems.empty()) {
     NovaLog::Warn("starmap opened with no scenario system table; closing");
-    return StarmapExit::kContinue;
+    return StarmapResult{};
   }
 
   NovaFontCache font_cache;
@@ -397,9 +397,22 @@ StarmapExit NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
              panel.h);
 
   std::int16_t selected_id = state.player.current_system_id;
+  bool tab_was_held = false;
 
   NovaLog::Info("opening galaxy starmap ({} systems in scenario)",
                 state.scenario.systems.size());
+
+  // Builds the modal result from the currently highlighted selection. The
+  // highlighted system is the plotted next-jump destination the caller may
+  // act on, unless it is the player's current system (no plot).
+  const auto close_with_selection = [&]() {
+    StarmapResult r;
+    r.exit = StarmapExit::kContinue;
+    if (selected_id != state.player.current_system_id) {
+      r.destination_system_id = selected_id;
+    }
+    return r;
+  };
 
   while (!platform.quit_requested()) {
     const auto mapped = BuildMappedSystems(state, view, panel);
@@ -412,17 +425,17 @@ StarmapExit NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
       switch (in->key) {
       case TextKey::escape:
-        return StarmapExit::kContinue;
+        return close_with_selection();
 
       case TextKey::enter:
         // Selecting the current system's own node (or the current default) is
         // a no-op navigation-wise; Enter confirms the selection and closes.
-        return StarmapExit::kContinue;
+        return close_with_selection();
 
       case TextKey::character: {
         const char ch = in->character;
         if (ch == 'q' || ch == 'x') {
-          return StarmapExit::kContinue;
+          return close_with_selection();
         }
         if (ch == '+' || ch == '=') {
           view.ZoomAt(1.35F, panel.w * 0.5F, panel.h * 0.5F);
@@ -479,9 +492,37 @@ StarmapExit NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
     if (keys[SDL_SCANCODE_DOWN]) {
       view.PanPixels(0.0F, kPanPxPerEvent);
     }
+    // Tab cycles the highlighted selection through the explorable (explored /
+    // visible / current) systems so the destination can be picked without a
+    // mouse. Held-Tab repeats via the scan state; a one-shot requires a press
+    // edge (PollTextEvent does not deliver Tab, so poll the key state here).
+    if (keys[SDL_SCANCODE_TAB] && !tab_was_held) {
+      std::vector<std::int16_t> picks;
+      for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+        const auto &s = state.scenario.systems[i];
+        const std::int16_t id = static_cast<std::int16_t>(i);
+        if (s.is_visible || s.has_explored_flag ||
+            id == state.player.current_system_id) {
+          picks.push_back(id);
+        }
+      }
+      if (!picks.empty()) {
+        auto it = std::find(picks.begin(), picks.end(), selected_id);
+        std::size_t index = it == picks.end() ? 0u
+            : static_cast<std::size_t>(it - picks.begin()) + 1u;
+        if (index >= picks.size()) {
+          index = 0;
+        }
+        selected_id = picks[index];
+      }
+    }
+    tab_was_held = keys[SDL_SCANCODE_TAB];
   }
 
-  return StarmapExit::kQuit;
+  StarmapResult quit;
+  quit.exit = StarmapExit::kQuit;
+  quit.destination_system_id = selected_id;
+  return quit;
 }
 
 } // namespace game

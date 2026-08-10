@@ -403,13 +403,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // state machine is untouched by inspection (the map only selects systems).
     const bool starmap_held = input.starmap;
     if (starmap_held && !starmap_was_held) {
-      if (NovaStarmap_RunWindow(platform, state) == StarmapExit::kQuit) {
+      const StarmapResult map_result =
+          NovaStarmap_RunWindow(platform, state);
+      if (map_result.exit == StarmapExit::kQuit) {
         returning_to_menu = true;
         break;
       }
-      // Refresh the travel reticle after the map may have re-selected a
-      // current-system marker (the original re-arms the travel pulse on map
-      // return via NovaUi_MarkTravelAndStatusPanelsDirty).
+      // Plot the map-selected system as the next jump destination so the HUD
+      // shows the plotted jump and 'j' engages it. A non-directly-linked
+      // destination is still recorded (the HUD shows the intention) but arms
+      // no travel slot, so 'j' falls back to the nearest travel point.
+      NovaTravel_PlotStarmapDestination(state,
+                                        map_result.destination_system_id);
+      // Refresh the travel reticle after the map may have re-selected the
+      // travel stellar (the original re-arms the travel pulse on map return
+      // via NovaUi_MarkTravelAndStatusPanelsDirty).
       state.travel_reticle_pulse = 256.0F;
     }
     starmap_was_held = starmap_held;

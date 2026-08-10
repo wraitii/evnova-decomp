@@ -92,3 +92,79 @@ TEST_CASE("jump discovery guards out-of-range systems") {
       state, static_cast<std::int16_t>(state.scenario.systems.size() + 10));
   CHECK(state.control.explored_systems.count() == before);
 }
+
+// Plotting a starmap destination arms the travel slot for a directly-linked
+// system so 'j' jumps there, and does not arm a slot when the destination
+// cannot be reached in a single jump.
+TEST_CASE("starmap plot arms the travel slot only for linked destinations") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Pick a starting system with at least one outward link to a real system.
+  std::int16_t start = -1;
+  std::int16_t linked_dest = -1;
+  std::int16_t unrelated = -1;
+  for (std::size_t i = 0; i < state.scenario.systems.size() && linked_dest < 0;
+       ++i) {
+    const auto *sys = state.scenario.System(static_cast<std::int16_t>(i + 0x80));
+    if (!sys) {
+      continue;
+    }
+    for (const std::int16_t link : sys->links) {
+      if (link >= 0x80 &&
+          static_cast<std::size_t>(link - 0x80) < state.scenario.systems.size() &&
+          link - 0x80 != static_cast<std::int16_t>(i)) {
+        start = static_cast<std::int16_t>(i);
+        linked_dest = static_cast<std::int16_t>(link - 0x80);
+        break;
+      }
+    }
+  }
+  REQUIRE(start >= 0);
+  REQUIRE(linked_dest >= 0);
+  state.player.current_system_id = start;
+
+  // Find a system that is neither start nor linked_dest, for the no-link case.
+  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+    const std::int16_t id = static_cast<std::int16_t>(i);
+    if (id == start || id == linked_dest) {
+      continue;
+    }
+    bool linked = false;
+    const auto *start_sys =
+        state.scenario.System(static_cast<std::int16_t>(start + 0x80));
+    for (const std::int16_t link : start_sys->links) {
+      if (link == static_cast<std::int16_t>(id + 0x80)) {
+        linked = true;
+        break;
+      }
+    }
+    if (!linked) {
+      unrelated = id;
+      break;
+    }
+  }
+  REQUIRE(unrelated >= 0);
+
+  // Directly-linked destination: arms the travel slot.
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, linked_dest));
+  CHECK(state.travel.starmap_destination_system_id == linked_dest);
+  CHECK(state.travel.travel_slot >= 0);
+  CHECK(state.travel.selected_stellar_is_manual);
+
+  // Reset for the negative cases, then check a non-linked destination.
+  state.travel.starmap_destination_system_id = -1;
+  state.travel.travel_slot = -1;
+  const bool not_armed =
+      NovaTravel_PlotStarmapDestination(state, unrelated);
+  CHECK(not_armed == false);
+  CHECK(state.travel.starmap_destination_system_id == unrelated);
+  CHECK(state.travel.travel_slot == -1);
+
+  // Plotting the current system records no jump.
+  state.travel.starmap_destination_system_id = -1;
+  state.travel.travel_slot = -1;
+  NovaTravel_PlotStarmapDestination(state, start);
+  CHECK(state.travel.starmap_destination_system_id == start);
+  CHECK(state.travel.travel_slot == -1);
+}

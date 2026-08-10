@@ -24,11 +24,19 @@
 namespace game {
 
 // Result of the starmap modal session. The map never performs a jump or
-// landing itself -- it only inspects/selects the galaxy -- so the only real
-// exit route is back to flight (or the app quits, folded into kQuit).
+// landing itself -- it only inspects/selects the galaxy -- but the selected
+// destination is surfaced so the caller can plot the next jump.
 enum class StarmapExit {
   kContinue, // normal close back to the flight scene
   kQuit,     // the app is quitting (platform.quit_requested)
+};
+
+struct StarmapResult {
+  StarmapExit exit = StarmapExit::kContinue;
+  // The zero-based scenario-system id the player left highlighted in the map,
+  // or -1 when no selection was made. The caller may treat this as a plotted
+  // next-jump destination.
+  std::int16_t destination_system_id = -1;
 };
 
 // Runs the modal galaxy starmap until the player closes it or the app quits.
@@ -36,8 +44,9 @@ enum class StarmapExit {
 // and presented the frame). Reads the scenario's System table, the player's
 // current System, and the pilot's explored-system bits; it does not mutate
 // gameplay state. Requires a valid scenario (a no-scenario starmap is a no-op
-// that returns kContinue).
-[[nodiscard]] StarmapExit NovaStarmap_RunWindow(SdlPlatform &platform,
-                                                GameState &state);
+// that returns kContinue with no destination). On close the returned
+// StarmapResult carries the destination system id the player left selected.
+[[nodiscard]] StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
+                                                  GameState &state);
 
 } // namespace game

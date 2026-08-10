@@ -289,6 +289,12 @@ struct TravelState {
   // used as the adjacency-slot selector. The paired destination system is
   // System.links[slot].
   std::int16_t travel_slot = -1;
+  // The zero-based system id the player plotted as the next jump destination
+  // via the galaxy starmap, -1 when nothing is plotted. When a jump completes,
+  // this is cleared. 'j' jumps toward this system if it is directly linked
+  // from the current system; otherwise the jump falls back to the nearest
+  // available travel point.
+  std::int16_t starmap_destination_system_id = -1;
   // The stellar resource id currently auto-targeted for travel/landing (the
   // nearest playable stellar in the current system), mirroring the original's
   // auto-set ai_secondary_target_slot / travel_transfer_mode == 2. -1 when no

@@ -73,14 +73,20 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   current / selected systems.
 - Colour coding: current system = amber; explored = light blue; unexplored =
   dim blue (hidden label).
-- Pan (arrow keys) and zoom (`+`/`-`); `h` re-fits the view; mouse click
-  selects the nearest node within a radius.
+- Pan (arrow keys) and zoom (`+`/`-`); `h` re-fits the view; mouse click or
+  Tab selects/cycles a system.
 - Inspector footer shows the selected system's name, explored/current state and
   outward jump count.
-- Esc / Enter / click-for-empty / q / x close the map and return to flight.
+- Esc / Enter / q / x close the map and return to flight.
 
 Wired from `spaceflight.cpp`: the `FlightInput.starmap` ('m', edge-latched in
-the loop) opens the modal. On return the loop re-arms the travel reticle pulse.
+the loop) opens the modal. On return the loop calls
+`NovaTravel_PlotStarmapDestination`, which resolves the map's highlighted
+destination to a current-system travel slot + stellar (when directly linked),
+arms the travel state and marks the selection manual; the HUD travel-status
+panel then shows "JUMP > <destination>" and `NovaTravel_Tick` engages that
+jump on 'j' (falling back to the nearest travel point when no direct slot). On
+completion `CompleteJump` clears the plot.
 
 Jump discovery: `NovaTravel_MarkSystemDiscovered` (travel.cpp) marks a reached
 system + its `links` neighbours explored/visible. Called on jump completion
@@ -91,7 +97,8 @@ the explored blobs grow as the player jumps.
 
 - No DITL resource allocation / frame PICT; the map is a direct SDL3 render.
 - No political/government overlay (`NovaUi_DrawStarmapPoliticalOverlay`).
-- No plotted-route editing or route → travel-target sync.
+- No plotted-route editing or multi-hop route → travel-target sync (only the
+  immediate first hop is resolved to a travel slot).
 - No mission-highlight icons / mission jump planning.
 - No starmap search dialog (`0x004aab30`).
 - No licence-seed easter-egg branch.

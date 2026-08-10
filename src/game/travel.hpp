@@ -79,6 +79,17 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 void NovaTravel_MarkSystemDiscovered(GameState &state,
                                      std::int16_t zero_based_system_id);
 
+// Plots `destination_zero_based` (a system selected in the galaxy starmap) as
+// the player's next-jump destination. Finds the current system's travel slot
+// whose linked destination matches and stores the resolved slot + stellar on
+// the travel state, so the HUD shows the plotted jump and 'j' engages it. When
+// the destination is not directly linked from the current system (no single
+// jump reaches it), the plot is recorded but no travel slot is armed; 'j'
+// then falls back to the nearest travel point. Returns true when a direct
+// travel slot was found and armed.
+bool NovaTravel_PlotStarmapDestination(GameState &state,
+                                       std::int16_t destination_zero_based);
+
 void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms);
 
 } // namespace game
