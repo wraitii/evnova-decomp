@@ -51,6 +51,7 @@ constexpr SDL_Color kTextTitle{202, 224, 255, 255};
 constexpr SDL_Color kTextBody{200, 214, 232, 255};
 constexpr SDL_Color kTextDim{110, 132, 158, 255};
 constexpr SDL_Color kSelectionBox{110, 170, 230, 255};
+constexpr SDL_Color kReachableLink{120, 255, 170, 255}; // selected route accent
 
 // A single system marker's mapped screen position plus its index, so clicks
 // and label collision checks resolve against the same projection as drawing.
@@ -71,19 +72,24 @@ struct MapView {
   [[nodiscard]] float ToScreenX(float world_x) const {
     return offset_x + world_x * scale;
   }
+
   [[nodiscard]] float ToScreenY(float world_y) const {
     return offset_y + world_y * scale;
   }
+
   [[nodiscard]] float ToWorldX(float screen_x) const {
     return (screen_x - offset_x) / scale;
   }
+
   [[nodiscard]] float ToWorldY(float screen_y) const {
     return (screen_y - offset_y) / scale;
   }
+
   void PanPixels(float dx, float dy) {
     offset_x += dx;
     offset_y += dy;
   }
+
   void ZoomAt(float factor, float screen_x, float screen_y) {
     // Keep the world point under the cursor stationary while scaling.
     const float world_x = ToWorldX(screen_x);
@@ -149,6 +155,46 @@ bool SystemExplored(const GameState &state, std::int16_t zero_based_id) {
   return false;
 }
 
+// The owning government's theme colour for a system, or a neutral fallback
+// when the system has no (or no valid) government. Governments colour their
+// systems on the starmap like a political map (DrawStarmapPoliticalOverlay
+// tints by g_government_defs[].theme_color_*); the clean-room uses the decoded
+// Government.theme_* fields. The system stores its government as a zero-based
+// id, so the resource-keyed accessor needs the +0x80 rebase.
+SDL_Color GovernmentColor(const GameState &state, std::int16_t zero_based_id) {
+  if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
+                               state.scenario.systems.size()) {
+    return SDL_Color{
+        kMarkerExplored.r, kMarkerExplored.g, kMarkerExplored.b, 255};
+  }
+  const std::int16_t gov =
+      state.scenario.systems[static_cast<std::size_t>(zero_based_id)]
+          .government_id;
+  if (gov < 0) {
+    return SDL_Color{
+        kMarkerExplored.r, kMarkerExplored.g, kMarkerExplored.b, 255};
+  }
+  const Government *g =
+      state.scenario.Government(static_cast<std::int16_t>(gov + 0x80));
+  if (!g || (g->theme_red == 0 && g->theme_green == 0 && g->theme_blue == 0)) {
+    return SDL_Color{
+        kMarkerExplored.r, kMarkerExplored.g, kMarkerExplored.b, 255};
+  }
+  return SDL_Color{g->theme_red, g->theme_green, g->theme_blue, 255};
+}
+
+// Merges `tint` into `base` by `amount` (0..1), so unexplored/explored markers
+// keep their dim/readable base but lean toward the governing faction's colour.
+SDL_Color Blend(SDL_Color base, SDL_Color tint, float amount) {
+  const float a = std::clamp(amount, 0.0F, 0.9F);
+  const auto mix = [a](std::uint8_t x, std::uint8_t y) -> std::uint8_t {
+    return static_cast<std::uint8_t>(static_cast<float>(x) * (1.0F - a) +
+                                     static_cast<float>(y) * a);
+  };
+  return SDL_Color{
+      mix(base.r, tint.r), mix(base.g, tint.g), mix(base.b, tint.b), 255};
+}
+
 // Draws the fixed chrome: the window background, panel frame and title bar.
 void DrawChrome(SdlPlatform &platform, NovaFontCache &font_cache) {
   SDL_Renderer *renderer = platform.renderer();
@@ -158,16 +204,23 @@ void DrawChrome(SdlPlatform &platform, NovaFontCache &font_cache) {
   platform.SetCenteredPlayfield();
 
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-  const SDL_FRect full{
-      0, 0, static_cast<float>(kLogicalUiWidth), static_cast<float>(kLogicalUiHeight)};
+  const SDL_FRect full{0,
+                       0,
+                       static_cast<float>(kLogicalUiWidth),
+                       static_cast<float>(kLogicalUiHeight)};
   SDL_SetRenderDrawColor(renderer, kScrim.r, kScrim.g, kScrim.b, kScrim.a);
   SDL_RenderFillRect(renderer, &full);
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
   const SDL_FRect panel{kPanelX, kPanelY, kPanelW, kPanelH};
-  SDL_SetRenderDrawColor(renderer, kPanelBg.r, kPanelBg.g, kPanelBg.b, SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(
+      renderer, kPanelBg.r, kPanelBg.g, kPanelBg.b, SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &panel);
-  SDL_SetRenderDrawColor(renderer, kPanelBorder.r, kPanelBorder.g, kPanelBorder.b, SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(renderer,
+                         kPanelBorder.r,
+                         kPanelBorder.g,
+                         kPanelBorder.b,
+                         SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &panel);
 
   NovaText_DrawCentered(platform,
@@ -223,8 +276,7 @@ void DrawGalaxy(SdlPlatform &platform,
                         view.ToScreenY(static_cast<float>(sb.pos_y))};
     const bool touches_current = a == current || b == current;
     SDL_SetRenderDrawColor(renderer,
-                           touches_current ? kLinkLineCurrent.r
-                                           : kLinkLine.r,
+                           touches_current ? kLinkLineCurrent.r : kLinkLine.r,
                            touches_current ? kLinkLineCurrent.g : kLinkLine.g,
                            touches_current ? kLinkLineCurrent.b : kLinkLine.b,
                            touches_current ? kLinkLineCurrent.a : kLinkLine.a);
@@ -244,12 +296,47 @@ void DrawGalaxy(SdlPlatform &platform,
     }
   }
 
+  // Reachable-jump highlight: emphasise the links fanning out of the selected
+  // system (the route candidates the player would travel on a plotted jump),
+  // mirroring the original's selected-stellar route accent while keeping the
+  // full adjacency graph underneath. Drawn directly (not via draw_link) so the
+  // accent survives over the graph colour.
+  if (selected_id >= 0 &&
+      static_cast<std::size_t>(selected_id) < systems.size()) {
+    const System &sel = systems[static_cast<std::size_t>(selected_id)];
+    SDL_SetRenderDrawColor(renderer,
+                           kReachableLink.r,
+                           kReachableLink.g,
+                           kReachableLink.b,
+                           kReachableLink.a);
+    for (const std::int16_t link : sel.links) {
+      if (link < 0x80) {
+        continue;
+      }
+      const std::int16_t dest = static_cast<std::int16_t>(link - 0x80);
+      if (dest < 0 || static_cast<std::size_t>(dest) >= systems.size()) {
+        continue;
+      }
+      const System &dd = systems[static_cast<std::size_t>(dest)];
+      const SDL_FPoint pa{view.ToScreenX(static_cast<float>(sel.pos_x)),
+                          view.ToScreenY(static_cast<float>(sel.pos_y))};
+      const SDL_FPoint pb{view.ToScreenX(static_cast<float>(dd.pos_x)),
+                          view.ToScreenY(static_cast<float>(dd.pos_y))};
+      SDL_RenderLine(renderer, pa.x, pa.y, pb.x, pb.y);
+    }
+  }
+
   // Markers + names.
   for (const auto &m : mapped) {
     const bool is_current = m.zero_based_id == current;
     const bool explored = SystemExplored(state, m.zero_based_id);
     const bool selected = m.zero_based_id == selected_id;
-    SDL_Color c = explored ? kMarkerExplored : kMarkerUnexplored;
+    // Colour by owning government (political-map tint) blended into the
+    // explored/unexplored base so explored systems read as explorable territory
+    // of their faction while still staying dim until discovered.
+    const SDL_Color gov = GovernmentColor(state, m.zero_based_id);
+    SDL_Color c = explored ? Blend(kMarkerExplored, gov, 0.55F)
+                           : Blend(kMarkerUnexplored, gov, 0.35F);
     if (is_current) {
       c = kMarkerCurrent;
     }
@@ -261,11 +348,11 @@ void DrawGalaxy(SdlPlatform &platform,
     constexpr int kSegments = 12;
     std::array<SDL_FPoint, kSegments + 1> pts{};
     for (int s = 0; s <= kSegments; ++s) {
-      const float ang =
-          static_cast<float>(s) * static_cast<float>(2.0 * std::numbers::pi) /
-          static_cast<float>(kSegments);
-      pts[static_cast<std::size_t>(s)] = SDL_FPoint{
-          m.sx + r * std::cos(ang), m.sy + r * std::sin(ang)};
+      const float ang = static_cast<float>(s) *
+                        static_cast<float>(2.0 * std::numbers::pi) /
+                        static_cast<float>(kSegments);
+      pts[static_cast<std::size_t>(s)] =
+          SDL_FPoint{m.sx + r * std::cos(ang), m.sy + r * std::sin(ang)};
     }
     SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, SDL_ALPHA_OPAQUE);
     SDL_RenderLines(renderer, pts.data(), kSegments + 1);
@@ -274,10 +361,9 @@ void DrawGalaxy(SdlPlatform &platform,
       constexpr int kRingSegments = 16;
       std::array<SDL_FPoint, kRingSegments + 1> ring{};
       for (int s = 0; s <= kRingSegments; ++s) {
-        const float ang =
-            static_cast<float>(s) *
-            static_cast<float>(2.0 * std::numbers::pi) /
-            static_cast<float>(kRingSegments);
+        const float ang = static_cast<float>(s) *
+                          static_cast<float>(2.0 * std::numbers::pi) /
+                          static_cast<float>(kRingSegments);
         ring[static_cast<std::size_t>(s)] =
             SDL_FPoint{m.sx + (r + 3.0F) * std::cos(ang),
                        m.sy + (r + 3.0F) * std::sin(ang)};
@@ -322,7 +408,23 @@ void DrawInspector(SdlPlatform &platform,
     const bool explored = SystemExplored(state, selected_id);
     const bool is_current = selected_id == state.player.current_system_id;
     line = sys.name + "   ";
-    line += is_current ? "[current]" : (explored ? "[explored]" : "[undiscovered]");
+    line +=
+        is_current ? "[current]" : (explored ? "[explored]" : "[undiscovered]");
+    // Flag the system plotted as the next jumped-to destination (via a prior
+    // starmap selection), so the landing-feedback tells the player which system
+    // the plotted jump actually targets.
+    if (state.travel.starmap_destination_system_id == selected_id) {
+      line += "  [plotted target]";
+    }
+    // Owning government (the political-map affiliation of this system).
+    if (sys.government_id >= 0) {
+      if (const Government *g = state.scenario.Government(
+              static_cast<std::int16_t>(sys.government_id + 0x80))) {
+        if (!g->name.empty()) {
+          line += "  " + g->name;
+        }
+      }
+    }
     // Count reachable jumps from this system.
     int jump_count = 0;
     for (const std::int16_t link : sys.links) {
@@ -442,11 +544,11 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
         } else if (ch == '-') {
           view.ZoomAt(1.0F / 1.35F, panel.w * 0.5F, panel.h * 0.5F);
         } else if (ch == 'h' || ch == 'H') {
-          FitMapView({state.scenario.systems.data(),
-                      state.scenario.systems.size()},
-                     view,
-                     panel.w,
-                     panel.h);
+          FitMapView(
+              {state.scenario.systems.data(), state.scenario.systems.size()},
+              view,
+              panel.w,
+              panel.h);
         }
         break;
       }
@@ -508,8 +610,10 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
       }
       if (!picks.empty()) {
         auto it = std::find(picks.begin(), picks.end(), selected_id);
-        std::size_t index = it == picks.end() ? 0u
-            : static_cast<std::size_t>(it - picks.begin()) + 1u;
+        std::size_t index =
+            it == picks.end()
+                ? 0u
+                : static_cast<std::size_t>(it - picks.begin()) + 1u;
         if (index >= picks.size()) {
           index = 0;
         }

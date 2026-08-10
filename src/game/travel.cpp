@@ -1,6 +1,7 @@
 #include "travel.hpp"
 
 #include "../log.hpp"
+#include "hud_overlay.hpp"
 #include "outfit.hpp"
 
 #include <algorithm>
@@ -111,16 +112,14 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
       destination_zero_based == state.player.current_system_id) {
     return false;
   }
-  const int slot =
-      FindLinkedTravelSlot(state, destination_zero_based);
+  const int slot = FindLinkedTravelSlot(state, destination_zero_based);
   if (slot < 0) {
     // No direct single jump reaches it. Keep the plot recorded so the HUD can
     // show the intention, but arm nothing -- 'j' falls back to the nearest
     // travel point.
     return false;
   }
-  const System *sys =
-      state.scenario.System(CurrentSystemResource(state));
+  const System *sys = state.scenario.System(CurrentSystemResource(state));
   if (!sys) {
     return false;
   }
@@ -194,18 +193,22 @@ bool NovaTravel_CanStartJump(const GameState &state) {
 // sites wrongly used. The original further blocks while the ship is locked to
 // another ship's velocity match (ShipState.velocity_match_target_ship_slot !=
 // -1 and != own id) and while a mission ship lacks fuel; those need the
-// velocity-match / mission systems and are deferred (TODO(decomp)). Fuel is
-// consumed by the jump-completion path; this gate does not inspect the current
-// fuel amount.
+// velocity-match / mission systems and are deferred (TODO(decomp)).
+//
+// It additionally gates on the CURRENT fuel amount: Stellar_HandlePlayerShip-
+// Core' jump block refuses to (re)enter the hyperspace sequence while
+// `ship->fuel_points < _DAT_005755a4` (0x005755a4 == kJumpFuelCost == 100),
+// showing the "not enough fuel to take off" denial overlay. A ship with no
+// fuel in the tank cannot engage a jump even though its class can hold a
+// jump's worth of fuel.
 bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
                                             const Ship &ship) {
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   const float class_fuel_capacity =
       cls ? static_cast<float>(cls->base_fuel) : 0.0F;
-  // TODO(decomp): also block while velocity-matched to another ship and under
-  // certain mission-ship flags (no NPC velocity-match / mission systems yet).
-  return class_fuel_capacity >= kJumpFuelCost;
+  return class_fuel_capacity >= kJumpFuelCost &&
+         ship.fuel_points >= kJumpFuelCost;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,8 +218,7 @@ void NovaTravel_MarkSystemDiscovered(GameState &state,
                                      std::int16_t zero_based_system_id) {
   const std::size_t count = state.scenario.systems.size();
   const auto mark = [&](std::int16_t zero_based) {
-    if (zero_based < 0 ||
-        static_cast<std::size_t>(zero_based) >= count) {
+    if (zero_based < 0 || static_cast<std::size_t>(zero_based) >= count) {
       return;
     }
     const std::size_t idx = static_cast<std::size_t>(zero_based);
@@ -233,8 +235,8 @@ void NovaTravel_MarkSystemDiscovered(GameState &state,
   mark(zero_based_system_id);
   // Reveal the immediate neighbourhood too (links are stored as system
   // *resource* ids in System.links).
-  const auto *sys =
-      state.scenario.System(static_cast<std::int16_t>(zero_based_system_id + 0x80));
+  const auto *sys = state.scenario.System(
+      static_cast<std::int16_t>(zero_based_system_id + 0x80));
   if (!sys) {
     return;
   }
@@ -277,13 +279,24 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
   // travel slot, jump toward that plotted destination; otherwise fall back to
   // the nearest available travel point (the original's
   // Stellar_FindNearestAvailableTravelStellar behaviour via 'j').
-  if (!travel_input || !NovaTravel_CanStartJump(state)) {
+  if (!travel_input) {
     return;
   }
-  const int slot =
-      (t.travel_slot >= 0 && t.starmap_destination_system_id >= 0)
-          ? static_cast<int>(t.travel_slot)
-          : NovaTravel_FindNearestTravelPoint(state);
+  if (!NovaTravel_CanStartJump(state)) {
+    // A 'j' press with an empty tank is refused with a HUD-overlay denial,
+    // mirroring the original's jump block showing the "not enough fuel"
+    // message rather than silently ignoring the command.
+    NovaHud_ShowOverlayMessage(state,
+                               "Not enough fuel to make a hyperspace jump.",
+                               0xe0,
+                               0xe0,
+                               0xe0,
+                               600U);
+    return;
+  }
+  const int slot = (t.travel_slot >= 0 && t.starmap_destination_system_id >= 0)
+                       ? static_cast<int>(t.travel_slot)
+                       : NovaTravel_FindNearestTravelPoint(state);
   if (slot < 0) {
     return; // no travel point in range/available
   }

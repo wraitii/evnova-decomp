@@ -299,12 +299,16 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   // sequence runs, else the selected destination stellar's name (or the idle
   // fallback). Mirrors NovaUi_DrawTravelStatusPanel (0x0045e400): a transfer
   // (mode 2) title + the destination name, the idle message when no target.
+  //
+  // The travel state stores destination ids zero-based; the scenario accessor
+  // keys systems by resource id (index + 0x80), so add the offset before the
+  // lookup or the name resolves to nothing and the HUD shows a bare '?'.
   {
     std::string travel;
     if (state.travel.engaging) {
       travel = "JUMPING"; // transfer title (STR# 0x7d2/0x157)
       const auto *dst = state.scenario.System(
-          static_cast<std::int16_t>(state.travel.destination_system_id));
+          static_cast<std::int16_t>(state.travel.destination_system_id + 0x80));
       if (dst && !dst->name.empty()) {
         travel += " > " + dst->name;
       }
@@ -312,9 +316,8 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
       // A galaxy-map plot is armed: show the plotted next-jump destination
       // system (mirrors the original showing the route target after the
       // starmap syncs its route into the travel status panel).
-      const auto *dst = state.scenario.System(
-          static_cast<std::int16_t>(
-              state.travel.starmap_destination_system_id));
+      const auto *dst = state.scenario.System(static_cast<std::int16_t>(
+          state.travel.starmap_destination_system_id + 0x80));
       if (dst && !dst->name.empty()) {
         travel = "JUMP > " + dst->name;
       } else {

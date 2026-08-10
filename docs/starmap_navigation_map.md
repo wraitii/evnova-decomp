@@ -73,11 +73,19 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   the lower index), system nodes as filled circles, and labels for explored /
   current / selected systems.
 - Colour coding: current system = amber; explored = light blue; unexplored =
-  dim blue (hidden label).
+  dim blue (hidden label). Markers are additionally tinted toward their owning
+  government's theme colour (`Government.theme_red/green/blue`, the political-map
+  affiliation drawn by `NovaUi_DrawStarmapPoliticalOverlay`), so explored
+  systems read as their faction's territory at a glance.
 - Pan (arrow keys) and zoom (`+`/`-`); `h` re-fits the view; mouse click or
   Tab selects/cycles a system.
-- Inspector footer shows the selected system's name, explored/current state and
-  outward jump count.
+- Reachable-jump accent: the links fanning out of the *selected* system are
+  redrawn in a bright green so the player sees every single-jump route
+  candidate from the highlighted node (mirrors the original's selected-stellar
+  route emphasis).
+- Inspector footer shows the selected system's name, explored/current state,
+  owning government, outward jump count, and a `[plotted target]` flag when it
+  is the active starmap-plotted destination.
 - Esc / Enter / q / x close the map and return to flight.
 
 Wired from `spaceflight.cpp`: the `FlightInput.starmap` ('m', edge-latched in
@@ -97,7 +105,9 @@ the explored blobs grow as the player jumps.
 ## Divergences / deferred (TODO)
 
 - No DITL resource allocation / frame PICT; the map is a direct SDL3 render.
-- No political/government overlay (`NovaUi_DrawStarmapPoliticalOverlay`).
+- No political/government **overlay grid** (`NovaUi_DrawStarmapPoliticalOverlay`
+  per-cell strength tint); the per-system marker government-colouring above is a
+  lightweight stand-in.
 - No plotted-route editing or multi-hop route → travel-target sync (only the
   immediate first hop is resolved to a travel slot).
 - No mission-highlight icons / mission jump planning.

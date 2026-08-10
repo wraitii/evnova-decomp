@@ -201,8 +201,41 @@ TEST_CASE("npc jump gate uses the npc's own class fuel") {
 
   game::Ship npc;
   npc.ship_class_id = zero_based(*with_fuel);
+  // A tankful ship may jump.
+  npc.fuel_points = game::kJumpFuelCost;
   CHECK(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
 
+  // A hull that cannot carry a jump's fuel may not jump even with a full tank.
   npc.ship_class_id = zero_based(*no_fuel);
+  npc.fuel_points = 500.0F;
   CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+}
+
+// The jump gate also requires CURRENT fuel: a jumping-capable class with an
+// empty tank is refused, mirroring Stellar_HandlePlayerShipCore's
+// `fuel_points < _DAT_005755a4 (100)` jump block.
+TEST_CASE("jump gate requires current fuel") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const game::ShipClass *with_fuel = nullptr;
+  for (const auto &sc : state.scenario.ships) {
+    if (sc.base_fuel >= static_cast<std::int16_t>(game::kJumpFuelCost)) {
+      with_fuel = &sc;
+      break;
+    }
+  }
+  REQUIRE(with_fuel != nullptr);
+  const game::ShipClass *first = &state.scenario.ships.front();
+  const std::int16_t cls_zero = static_cast<std::int16_t>(
+      std::distance(first, static_cast<const game::ShipClass *>(with_fuel)));
+
+  game::Ship npc;
+  npc.ship_class_id = cls_zero;
+  npc.fuel_points = 0.0F; // empty tank
+  CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+  npc.fuel_points = game::kJumpFuelCost - 1.0F;
+  CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+  npc.fuel_points = game::kJumpFuelCost;
+  CHECK(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
 }
