@@ -21,6 +21,7 @@ namespace game {
 namespace {
 
 constexpr float kTwoPi = 6.283185307179586F;
+constexpr float kTunnelSpeedPxPerMs = 1.2F;
 // Fixed logical play area reserved at the bottom of the window for the HUD
 // strip (the placeholder HUD sits at y 400..460). At the default 640x480 window
 // the space viewport is the 640x400 region above it.
@@ -37,6 +38,20 @@ struct Viewport {
   int w = kViewportWidth;
   int h = kViewportHeight;
 };
+
+// During the jump zoom the player stays screen-centred while the rest of the
+// current system is driven backward at the same pace as the warp-star field.
+std::pair<float, float> WorldCameraPosition(const GameState &state) {
+  float x = state.player.pos_x;
+  float y = state.player.pos_y;
+  if (state.travel.engaging &&
+      state.travel.jump_phase == TravelState::JumpPhase::kZoom) {
+    const float drive = kTunnelSpeedPxPerMs * state.travel.zoom_elapsed_ms;
+    x += std::sin(state.travel.jump_heading_rad) * drive;
+    y -= std::cos(state.travel.jump_heading_rad) * drive;
+  }
+  return {x, y};
+}
 
 [[nodiscard]] Viewport CurrentViewport(const SdlPlatform &platform) {
   const auto sz = platform.logical_playfield_size();
@@ -230,6 +245,7 @@ SpaceflightView::ShipClassSprite(SdlPlatform &platform,
 void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                                    const GameState &state) {
   const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
     if (!ship.is_active ||
@@ -250,8 +266,8 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                frame,
                ship.pos_x,
                ship.pos_y,
-               state.player.pos_x,
-               state.player.pos_y,
+               camera_x,
+               camera_y,
                vp.w,
                vp.h);
 
@@ -269,8 +285,8 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                  frame,
                  ship.pos_x,
                  ship.pos_y,
-                 state.player.pos_x,
-                 state.player.pos_y,
+                 camera_x,
+                 camera_y,
                  vp.w,
                  vp.h,
                  opts);
@@ -384,7 +400,6 @@ void SpaceflightView::UpdateAmbientStarsTunnel(float jump_heading_rad,
                                                float frame_time_ms) {
   // Tunnel stream speed in px/ms (a brisk forward whoosh that reads clearly
   // over the ~700 ms zoom). Measured against the 400px-tall viewport.
-  constexpr float kTunnelSpeedPxPerMs = 1.4F;
   const float drive = kTunnelSpeedPxPerMs * frame_time_ms;
   // Reverse heading: stars stream backward relative to the forward jump.
   const float dx = -std::sin(jump_heading_rad) * drive;
@@ -438,9 +453,8 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   // motion-blur streak along the reverse of the jump heading (like the
   // original's tunnel whoosh). The star positions themselves are driven each
   // frame by UpdateAmbientStarsTunnel; here we add the visual rails.
-  const bool tunnel =
-      state.travel.engaging &&
-      state.travel.jump_phase == TravelState::JumpPhase::kZoom;
+  const bool tunnel = state.travel.engaging &&
+                      state.travel.jump_phase == TravelState::JumpPhase::kZoom;
   const float tunnel_sx = -std::sin(state.travel.jump_heading_rad);
   const float tunnel_sy = std::cos(state.travel.jump_heading_rad);
   constexpr int kTunnelStreakSteps = 6;
@@ -663,6 +677,7 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
   // other stellar in the global table belongs to a different system and must
   // not be drawn here.
   const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
   for (const auto nav : sys->nav_defs) {
     if (nav < 0x80) {
       continue;
@@ -671,10 +686,8 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
     if (!st || st->name.empty()) {
       continue;
     }
-    const int cx =
-        (st->pos_x - static_cast<int>(state.player.pos_x)) + vp.w / 2;
-    const int cy =
-        (st->pos_y - static_cast<int>(state.player.pos_y)) + vp.h / 2;
+    const int cx = (st->pos_x - static_cast<int>(camera_x)) + vp.w / 2;
+    const int cy = (st->pos_y - static_cast<int>(camera_y)) + vp.h / 2;
     if (cx < -160 || cx > vp.w + 160 || cy < -160 || cy > vp.h + 160) {
       continue; // off-screen
     }
@@ -708,16 +721,16 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
                  frame_idx,
                  static_cast<float>(st->pos_x),
                  static_cast<float>(st->pos_y),
-                 state.player.pos_x,
-                 state.player.pos_y,
+                 camera_x,
+                 camera_y,
                  vp.w,
                  vp.h);
       continue;
     }
     // Fallback tinted disc (centred on screen coords like the sprite above).
-    const float fsx = (static_cast<float>(st->pos_x) - state.player.pos_x) +
+    const float fsx = (static_cast<float>(st->pos_x) - camera_x) +
                       static_cast<float>(vp.w) / 2.0F;
-    const float fsy = (static_cast<float>(st->pos_y) - state.player.pos_y) +
+    const float fsy = (static_cast<float>(st->pos_y) - camera_y) +
                       static_cast<float>(vp.h) / 2.0F;
     const int radius = 14;
     const SDL_FRect rect{fsx - static_cast<float>(radius),
@@ -737,6 +750,7 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
     return;
   }
   const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
   // Each shot uses its weapon's shot sprite set (Ghidra Sprite_AssignSpriteSet
   // on the weapon-sprite-set table entry g_weapon_sprite_set_table
   // [shot_sprite_set_id]; spin resource id shot_sprite_set_id + 3000) from the
@@ -793,14 +807,14 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
                  frame,
                  s.pos_x,
                  s.pos_y,
-                 state.player.pos_x,
-                 state.player.pos_y,
+                 camera_x,
+                 camera_y,
                  vp.w,
                  vp.h,
                  opts);
     } else {
-      float sx = (s.pos_x - state.player.pos_x) + static_cast<float>(vp.w) / 2;
-      float sy = (s.pos_y - state.player.pos_y) + static_cast<float>(vp.h) / 2;
+      float sx = (s.pos_x - camera_x) + static_cast<float>(vp.w) / 2;
+      float sy = (s.pos_y - camera_y) + static_cast<float>(vp.h) / 2;
       sx = std::fmod(sx, static_cast<float>(vp.w));
       sy = std::fmod(sy, static_cast<float>(vp.h));
       if (sx < 0.0F) {

@@ -3,6 +3,8 @@
 
 #include <SDL3/SDL_init.h>
 
+#include <cmath>
+
 void SdlAudio::StreamDeleter::operator()(SDL_AudioStream *stream) const {
   SDL_DestroyAudioStream(stream);
 }
@@ -47,7 +49,9 @@ bool SdlAudio::StreamActive(SDL_AudioStream *stream) {
   return queued > 0;
 }
 
-void SdlAudio::Play(const NovaSoundData &sound, float gain) {
+void SdlAudio::Play(const NovaSoundData &sound,
+                    float gain,
+                    float playback_rate) {
   if (!initialized_ || sound.samples.empty() || sound.sample_rate <= 0 ||
       sound.channel_count <= 0) {
     return;
@@ -86,8 +90,13 @@ void SdlAudio::Play(const NovaSoundData &sound, float gain) {
   }
   next_voice_ = (next_voice_ + 1) % voices_.size();
 
+  const int playback_sample_rate =
+      static_cast<int>(std::lround(sound.sample_rate * playback_rate));
+  if (playback_sample_rate <= 0) {
+    return;
+  }
   const SDL_AudioSpec source_spec{
-      SDL_AUDIO_S16, sound.channel_count, sound.sample_rate};
+      SDL_AUDIO_S16, sound.channel_count, playback_sample_rate};
   if (!SDL_SetAudioStreamFormat(voice, &source_spec, nullptr)) {
     NovaLog::Warn("SDL audio stream format failed: {}", SDL_GetError());
     return;

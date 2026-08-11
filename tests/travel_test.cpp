@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -326,6 +327,8 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
   state.player.vel_x = 8.0F;   // flying rightward (heading 90 deg)
   state.player.vel_y = 0.0F;
   state.player.fuel_points = 500;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
   const float initial_speed =
       std::hypot(state.player.vel_x, state.player.vel_y);
   REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
@@ -346,27 +349,23 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
   // ~345 frames to slow |vel| 8 -> 0.5 at 0.992/frame, the alignment hold a
   // fixed 550 ms, and the zoom 700 ms: ~1.5 s total (much faster than the old
   // ~13 s cue/tunnel cadence).
-  for (int f = 0; f < 450 && !state.travel.just_completed; ++f) {
+  for (int f = 0; f < 800 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
   }
   CHECK(state.travel.just_completed);
   CHECK(state.player.current_system_id == 1);
 }
 
-// The alignment hold + zoom: once the ship comes to a stop at the travel
-// point it aligns onto the jump heading, then the 'Warp up' cue is latched
-// exactly once as the zoom (thrust + glow ramp) begins; the boom/arrival then
-// lands at the end of the zoom (not a fixed cue length).
-TEST_CASE("jump alignment hold then zoom thrust latches the cue once") {
+TEST_CASE("jump starts Warp up when alignment hands off to launch") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
   REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
 
-  // Engage while stationary: the first tick arms the jump (kBrake), the
-  // second immediately finds the ship already stopped and moves into the
-  // alignment hold (the cue is NOT started here).
+  // The stopped handoff only enters the alignment hold.
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.engaging);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
@@ -374,25 +373,25 @@ TEST_CASE("jump alignment hold then zoom thrust latches the cue once") {
   CHECK_FALSE(state.warp_up_sound_pending);
   CHECK_FALSE(state.travel.warp_up_started);
 
-  // Run the hold to its 550 ms beat; once aligned the zoom begins and latches
-  // the warp-up cue exactly once.
+  // The sound is latched precisely when turn completion starts the zoom.
   bool cue_latched = false;
-  for (int f = 0; f < 60 && !state.travel.just_completed; ++f) {
+  for (int f = 0; f < 240 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-    if (state.travel.jump_phase == game::TravelState::JumpPhase::kZoom) {
+    if (state.warp_up_sound_pending) {
       cue_latched = true;
+      state.warp_up_sound_pending = false;
+      break;
     }
   }
-  // The stationary ship is already aligned (heading is the fallback jump
-  // heading), so the hold simply times out into the zoom.
   REQUIRE(cue_latched);
   CHECK(state.travel.warp_up_started);
+  CHECK_FALSE(state.warp_up_sound_pending);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kWarmup);
 
-  // The zoom (700 ms) then lands the boom/arrival: flash + warp-out latch +
-  // system change on the same tick.
+  // The longer zoom then lands the boom/arrival.
   bool flash_armed = false;
   bool warp_out_latched = false;
-  for (int f = 0; f < 60 && !state.travel.just_completed; ++f) {
+  for (int f = 0; f < 420 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
     if (state.screen_flash_intensity > 0.0F) {
       flash_armed = true;
@@ -407,6 +406,27 @@ TEST_CASE("jump alignment hold then zoom thrust latches the cue once") {
   CHECK(state.player.current_system_id == 1);
 }
 
+TEST_CASE("jump heading uses the linked systems' map vector") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 123456.0F;
+  state.player.pos_y = -654321.0F;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  const auto *source = state.scenario.System(0x80);
+  const auto *destination = state.scenario.System(0x81);
+  REQUIRE(source != nullptr);
+  REQUIRE(destination != nullptr);
+  const float expected =
+      std::atan2(static_cast<float>(destination->pos_x - source->pos_x),
+                 -static_cast<float>(destination->pos_y - source->pos_y));
+  CHECK(std::abs(std::remainder(state.travel.jump_heading_rad - expected,
+                                6.28318530717958646F)) < 0.001F);
+}
+
 // The zoom advances the ship at increasing speed along the jump heading
 // (the origin system parallaxes away) and the jump completes AT the end of
 // the zoom with the arrival already in the new system; there is no separate
@@ -416,6 +436,8 @@ TEST_CASE("jump zoom accelerates the ship then arrives (no post-fire tunnel)") {
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
   REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
   // Populate the effective-stats cache the spaceflight loop maintains so the
   // zoom's thrust (PlayerThrust) is nonzero (cached_stats defaults to 0).
@@ -424,7 +446,7 @@ TEST_CASE("jump zoom accelerates the ship then arrives (no post-fire tunnel)") {
 
   // Burn through the hold to the zoom.
   for (int f = 0; f < 200 && state.travel.jump_phase !=
-                                  game::TravelState::JumpPhase::kZoom;
+                                 game::TravelState::JumpPhase::kZoom;
        ++f) {
     NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   }
@@ -447,7 +469,7 @@ TEST_CASE("jump zoom accelerates the ship then arrives (no post-fire tunnel)") {
 
   // The zoom ends in the boom/arrival: the jump completes at the fire, already
   // coiling into the NEW system at max speed.
-  for (int f = 0; f < 80 && !state.travel.just_completed; ++f) {
+  for (int f = 0; f < 200 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
   }
   CHECK(state.travel.just_completed);
@@ -468,12 +490,13 @@ TEST_CASE("jump fire arms the screen flash") {
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
   REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
 
   bool flash_armed = false;
-  // The alignment hold (550 ms) + zoom (700 ms) precede the fire; ~1.5 s of
-  // frames is plenty.
-  for (int f = 0; f < 120 && !state.travel.just_completed; ++f) {
+  // Alignment and the longer zoom precede the fire.
+  for (int f = 0; f < 420 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
     if (state.screen_flash_intensity > 0.0F) {
       flash_armed = true;

@@ -478,7 +478,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Latch gating NovaEffects_QueueCenteredResource).
     if (state.warp_up_sound_pending) {
       if (state.warp_up_sound.has_value()) {
-        audio.Play(*state.warp_up_sound);
+        // Fit the native six-second cue within warm-up plus acceleration.
+        audio.Play(*state.warp_up_sound, 1.0F, 1.5F);
       }
       state.warp_up_sound_pending = false;
     }
@@ -907,16 +908,19 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 
   ship.engine_thrust = input.thrust && !input.reverse;
 
-  // Heading: bank continuously at the class turn rate while a turn key is held.
-  if (input.turn_left) {
-    ship.heading -= turn_rad;
-  }
-  if (input.turn_right) {
-    ship.heading += turn_rad;
-  }
-  ship.heading = std::fmod(ship.heading + kTwoPi, kTwoPi);
-  if (ship.heading < 0.0F) {
-    ship.heading += kTwoPi;
+  // Reverse uses the original's automatic turn-toward-velocity path instead
+  // of also applying manual steering in the same tick.
+  if (!input.reverse) {
+    if (input.turn_left) {
+      ship.heading -= turn_rad;
+    }
+    if (input.turn_right) {
+      ship.heading += turn_rad;
+    }
+    ship.heading = std::fmod(ship.heading + kTwoPi, kTwoPi);
+    if (ship.heading < 0.0F) {
+      ship.heading += kTwoPi;
+    }
   }
 
   if (input.reverse) {

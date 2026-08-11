@@ -11,24 +11,9 @@
 namespace game {
 namespace {
 
-// Aim/charge hold duration (ms) before the zoom begins. The original's
-// ai_station_hold_timer must exceed g_hyperspace_engage_hold_ms (30.0,
-// 0x5755a8) before the jump loop audio latch arms the fire; we approximate
-// that floor with a short alignment hold that nonetheless reads as a distinct
-// "paused, charging" beat. (TODO(decomp): the original also waits on the
-// escalating NovaAudio_PreStageJumpSoundBySeconds cue, whose length and the
-// exact hold are not yet reconstructed; here we use a fixed beat.)
-constexpr float kHoldMs = 550.0F;
-
-// In-zoom accelerator duration (ms): the rising 'Warp up' cue has started and
-// the ship thrusts to max speed along the jump vector while the origin system
-// parallaxes away, before the boom/arrival. Approximates the original's
-// Stellar_GetJumpSequenceDurationMs (350 ms engine variant) / ShipClassDef.
-// jump_duration_multiplier; the class multiplier is not yet decoded so we use
-// a fixed fallback.
-//  (TODO(decomp): decode ShipClassDef.jump_duration_multiplier and use 350/m 
-//   for the zoom length.)
-constexpr float kZoomMs = 700.0F;
+constexpr float kWarmupMs = 2000.0F;
+// TODO(decomp): derive this from ShipClassDef.jump_duration_multiplier.
+constexpr float kZoomMs = 2200.0F;
 
 // The stopped threshold for the turn-around: the original's Ship_HandlePlayer-
 // Ship pre-fire block treats |round(vel_x)| < 2 && |round(vel_y)| < 2 as
@@ -40,15 +25,7 @@ constexpr float kStoppedVel = 0.5F;
 // (original g_jump_turnaround_velocity_damp 0x5755f0, a double 0.992).
 constexpr float kTurnDamp = 0.992F;
 
-// Minimum turn rate (deg/tick) during the turn-around: the original clamps
-// the turn rate to at least g_jump_turnaround_min_turn_rate_deg
-// (0x5755e8) = 20.0 deg/tick (max(computed + addend, 20)), so the ship snaps
-// around to face the reverse of its velocity.
-constexpr float kTurnAroundMinRateDeg = 20.0F;
-
-// Addend on the computed class turn rate during the turn-around
-// (g_jump_turnaround_turn_rate_addend 0x57555c = 1.0): the effective rate is
-// max(class rate + 1.0, 20.0) deg/tick.
+// Add one degree to the normal effective turn rate while braking.
 constexpr float kTurnRateAddend = 1.0F;
 
 // Slow-phase velocity damp during the stationary hold
@@ -463,8 +440,7 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
       }
     };
     const float max_turn_around = std::max(
-        std::round(state.cached_stats.turn_raw * 0.1F) + kTurnRateAddend,
-        kTurnAroundMinRateDeg);
+        std::round(state.cached_stats.turn_raw * 0.1F) + kTurnRateAddend, 1.0F);
     // Turn the heading by at most the class turn rate (rad) this frame.
     const auto turn_toward = [&](float desired, float max_turn_deg) {
       const float turn_rad = max_turn_deg * kDegToRad * ticks;
@@ -478,9 +454,8 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
       // Pre-fire turn-around, mirroring the travel_transfer_mode == 3 block in
       // Ship_HandlePlayerShip (0x0044b120): while the ship still has velocity
       // it turns toward the REVERSE of its velocity (bearing from vel*100 back
-      // to origin, i.e. flying out from the system) at a fast minimum turn
-      // rate (max(class rate + g_jump_turnaround_turn_rate_addend 1.0,
-      // g_jump_turnaround_min_turn_rate_deg 20.0) deg/tick), brakes by
+      // to origin, i.e. flying out from the system) at the effective class
+      // turn rate plus one degree, brakes by
       // g_jump_turnaround_velocity_damp (0.992) per frame, and once facing the
       // heading within one tick applies effective thrust back along it (the
       // flip-and-boost that visibly stops the ship) while ramping the engine
@@ -491,8 +466,8 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
           std::abs(player.vel_y) >= kStoppedVel) {
         // Still moving: turn around to face the reverse of the velocity.
         const float vel_heading = std::atan2(player.vel_x, -player.vel_y);
-        float desired = std::fmod(vel_heading + 3.14159265358979323846F,
-                                  kTwoPi);
+        float desired =
+            std::fmod(vel_heading + 3.14159265358979323846F, kTwoPi);
         if (desired < 0.0F) {
           desired += kTwoPi;
         }
@@ -520,11 +495,7 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
         player.pos_x += player.vel_x * ticks;
         player.pos_y += player.vel_y * ticks;
       } else {
-        // Stopped: move to the alignment hold. The 'Warp up' cue is NOT
-        // started yet -- it fires with the zoom thrust (below). The original
-        // sets ai_station_hold_timer = 2.0 and ai_mode_start_time_ms here and
-        // the telescope starts the slow-turn re-aim toward the destination
-        // bearing at class rate (Stellar_HandlePlayerHyperspaceSequence).
+        // First finish the map-vector turn; Warp up starts with the launch.
         t.jump_phase = TravelState::JumpPhase::kHold;
         t.hold_elapsed_ms = 0.0F;
       }
@@ -545,31 +516,30 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
       fade_glow();
       // Align onto the jump heading at the class turn rate (unlimited by the
       // turn-around's 20-deg floor -- the ship is already nearly pointed).
-      turn_toward(t.jump_heading_rad,
-                  std::max(std::round(state.cached_stats.turn_raw * 0.1F),
-                           1.0F));
-      t.hold_elapsed_ms += frame_time_ms;
-      // The handoff is time-based: the brake has already turned the hull
-      // toward the jump vector, and forcing strict alignment before firing
-      // could stall a slow-turner whose jump heading differs from the approach
-      // reverse. The original fires on the hold timer, so the fixed beat
-      // drives the handoff; the zoom then snaps the ship onto the jump
-      // heading anyway.
-      if (t.hold_elapsed_ms >= kHoldMs) {
-        // Begin the zoom: start the rising 'Warp up' cue (snd 128/129) exactly
-        // once, then accelerate into the jump. Mirrors the original's
-        // stopped-branch voice allocation / Stellar_TriggerHyperspaceAudioOnce
-        // (g_playerHyperspaceAudioLatch) firing the jump-loop sound as the
-        // ship launches.
-        t.jump_phase = TravelState::JumpPhase::kZoom;
-        t.zoom_elapsed_ms = 0.0F;
-        if (!t.warp_up_started) {
-          t.warp_up_started = true;
-          state.warp_up_sound_pending = true;
-        }
+      turn_toward(
+          t.jump_heading_rad,
+          std::max(std::round(state.cached_stats.turn_raw * 0.1F), 1.0F));
+      const float alignment_error =
+          std::abs(std::remainder(t.jump_heading_rad - player.heading, kTwoPi));
+      if (alignment_error < 0.001F) {
+        t.jump_phase = TravelState::JumpPhase::kWarmup;
+        t.hold_elapsed_ms = 0.0F;
+        t.warp_up_started = true;
+        state.warp_up_sound_pending = true;
       }
       break;
     }
+    case TravelState::JumpPhase::kWarmup:
+      player.vel_x *= kSlowPhaseVelDamp;
+      player.vel_y *= kSlowPhaseVelDamp;
+      player.speed = std::hypot(player.vel_x, player.vel_y);
+      fade_glow();
+      t.hold_elapsed_ms += frame_time_ms;
+      if (t.hold_elapsed_ms >= kWarmupMs) {
+        t.jump_phase = TravelState::JumpPhase::kZoom;
+        t.zoom_elapsed_ms = 0.0F;
+      }
+      break;
     case TravelState::JumpPhase::kZoom: {
       // Acceleration-zoom: the ship thrusts to max speed along the jump
       // heading as the origin system parallaxes away (the ambient-star tunnel
@@ -587,8 +557,7 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
       const float thrust = PlayerThrust(state);
       player.vel_x += std::sin(t.jump_heading_rad) * thrust * ticks;
       player.vel_y += -std::cos(t.jump_heading_rad) * thrust * ticks;
-      const float speed =
-          std::hypot(player.vel_x, player.vel_y);
+      const float speed = std::hypot(player.vel_x, player.vel_y);
       if (speed > max_speed) {
         const float scale = max_speed / speed;
         player.vel_x *= scale;
@@ -660,18 +629,16 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
   t.destination_system_id = dest_zero_based;
   t.starmap_destination_system_id = dest_zero_based;
 
-  // Compute the jump heading: the bearing from the ship out to the
-  // destination system (constants folded with the polar convention used by
-  // Math_BearingFromPointToPoint / Math_AddPolarVelocity: heading 0 = up,
-  // clockwise; vel_x += sin(h)*s ; vel_y -= cos(h)*s). The brake/hold align
-  // the hull onto this direction and the zoom thrusts the ship along it.
+  // The original turns toward the map-space bearing from the current system
+  // to its linked destination; in-system player coordinates are unrelated.
+  const System *source_sys =
+      state.scenario.System(CurrentSystemResource(state));
   const System *dest_sys =
       state.scenario.System(static_cast<std::int16_t>(dest_zero_based + 0x80));
-  if (dest_sys != nullptr) {
-    // Destination system center in world coords (System.pos_x/pos_y).
-    const float dx = static_cast<float>(dest_sys->pos_x) - state.player.pos_x;
-    const float dy = static_cast<float>(dest_sys->pos_y) - state.player.pos_y;
-    t.jump_heading_rad = std::atan2(dx, -dy); // polar heading to destination
+  if (source_sys != nullptr && dest_sys != nullptr) {
+    const float dx = static_cast<float>(dest_sys->pos_x - source_sys->pos_x);
+    const float dy = static_cast<float>(dest_sys->pos_y - source_sys->pos_y);
+    t.jump_heading_rad = std::atan2(dx, -dy);
   } else {
     // Fallback: keep the current heading.
     t.jump_heading_rad = state.player.heading;

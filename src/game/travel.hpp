@@ -31,10 +31,9 @@
 //     deg/tick), brakes by _DAT_005755f0 (0.992)/frame, and once facing ramps
 //     the engine glow by +3/frame to 24 (ShipState +0xc8d4). Ends when the
 //     ship has come to a stop (/vel/ < 0.5).
-//   kHold -- a short stationary beat that finishes damping the drift and turns
-//     the hull onto the actual jump heading (the destination-system bearing)
-//     at class rate; the glow fades. The handoff to the zoom is time-based.
-//   kZoom -- the rising 'Warp up' cue starts, the engine glow ramps and the
+//   kHold -- finishes turning the hull onto the destination-system bearing.
+//   kWarmup -- starts the rising 'Warp up' cue and holds for two seconds.
+//   kZoom -- the engine glow ramps and the
 //     ship thrusts to max speed along the jump heading so the ORIGIN system
 //     parallaxes away (spaceflight view renders the streaking star tunnel via
 //     the world movement delta). Duration approximates the original's

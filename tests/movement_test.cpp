@@ -47,6 +47,19 @@ TEST_CASE("reverse command turns the ship but preserves its velocity") {
   CHECK_FALSE(ship.engine_thrust);
 }
 
+TEST_CASE("reverse does not combine with manual turn input") {
+  game::PlayerShip ship;
+  ship.vel_y = -2.0F;
+  FlightInput input;
+  input.reverse = true;
+  input.turn_right = true;
+
+  (void)game::NovaPlayer_IntegrateMovement(ship, input, TestShipClass(), 1.0F);
+
+  CHECK(ship.heading ==
+        Catch::Approx(4.0F * std::numbers::pi_v<float> / 180.0F));
+}
+
 TEST_CASE("flight turns at the original rounded effective turn rate") {
   game::PlayerShip ship;
   game::ShipClass ship_class = TestShipClass();
@@ -344,7 +357,8 @@ TEST_CASE("npc effective stats apply the government combat rating scale") {
   state.scenario.governments.push_back(g);
 
   game::Ship ship; // faction_or_government_id defaults to -1
-  game::ShipClass cls = TestShipClass(); // accel 500 -> 0.1 px/tick^2; speed 400 -> 4.0
+  game::ShipClass cls =
+      TestShipClass(); // accel 500 -> 0.1 px/tick^2; speed 400 -> 4.0
 
   // No faction: class base values unchanged.
   const auto base = game::NovaShip_ComputeEffectiveStats(state, ship, cls);
@@ -363,8 +377,8 @@ TEST_CASE("npc effective stats apply the government combat rating scale") {
   // (NovaShip_IntegrateNpcMovement / NovaAi_ApplyControls share the helper).
   game::Ship moving;
   moving.faction_or_government_id = 0;
-  moving.ai_desired_heading_deg = 0; // heading 0 = up (-y)
-  moving.ai_desired_speed = 100.0F;  // desired > 0: throttle toward the cap
+  moving.ai_desired_heading_deg = 0;    // heading 0 = up (-y)
+  moving.ai_desired_speed = 100.0F;     // desired > 0: throttle toward the cap
   moving.ai_forward_thrust_cmd = 0.05F; // eff_thrust * 1 tick
   game::NovaShip_IntegrateNpcMovement(state, moving, cls, 1.0F);
   CHECK(moving.vel_y == Catch::Approx(-0.05F));

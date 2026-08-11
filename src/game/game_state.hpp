@@ -321,38 +321,16 @@ struct TravelState {
   // nav computer to hyperspace mode". Cleared when a jump completes or on
   // system change.
   bool hyperspace_mode = false;
-  // Whether the engaged jump has finished declaring a destination and is now
-  // in the transition. The original (Stellar_HandlePlayerHyperspaceSequence
-  // 0x0044f3d0) drives the visible jump in phases before the system change;
-  // the reimpl models them via `jump_phase`: a pre-fire turn-around (flip +
-  // brake onto the reverse-velocity bearing at min-20deg/tick, damp 0.992 --
-  // Ship_HandlePlayerShip travel_transfer_mode==3 block 0x0044b120), a
-  // stationary hold that finishes aligning the hull onto the jump vector
-  // while damping to a dead stop, then the 'zoom' where the rising 'Warp up'
-  // cue starts, the engine glow ramps and the ship accelerates to max speed
-  // along the jump vector so the origin system parallaxes away. At the
-  // end of the zoom the fire/flash + 'Warp out' boom + system change land on
-  // the same instant (the original's fire-and-arrival block), arriving in the
-  // NEW system at max speed; the ship then coasts through it (no separate
-  // tunnel phase -- the world scrolls in normal flight). Set on engage,
-  // cleared on completion.
+  // The visible jump transition, driven by `jump_phase` until arrival.
   bool engaging = false;
   // Whether a jump completed this frame (consumed by the spaceflight loop to
   // re-spawn the starfield once). Set at the fire moment (the system change),
   // cleared each tick.
   bool just_completed = false;
-  // Active phase of an engaged jump. Mirrors the original's pre-fire
-  // turn-around + warp-up hold (Ship_HandlePlayerShip travel_transfer_mode ==
-  // 3 block 0x0044b120 / Stellar_HandlePlayerHyperspaceSequence 0x0044f3d0)
-  // followed by the acceleration 'zoom' whose length is the original's
-  // Stellar_GetJumpSequenceDurationMs (350) / ShipClassDef.jump_duration_
-  // multiplier, then the fire/arrival (same instant). Idle when engaging is
-  // false.
-  enum class JumpPhase { kIdle, kBrake, kHold, kZoom };
+  // Brake, align, warm up, then zoom to arrival.
+  enum class JumpPhase { kIdle, kBrake, kHold, kWarmup, kZoom };
   JumpPhase jump_phase = JumpPhase::kIdle;
-  // Whether the 'Warp up' cue has been started for this jump (mirrors the
-  // stopped-branch voice allocation: it starts exactly once, when the 'zoom'
-  // thrust phase begins). Cleared on engage and on jump end.
+  // Whether Warp up has been started for this jump.
   bool warp_up_started = false;
   // Jump-phase accumulators (ms): frame_time accumulates each tick so the
   // phase timing is frame-rate independent and unit-testable. hold_elapsed_ms
@@ -614,10 +592,7 @@ struct GameState {
   // (g_random_encounter_fleet_defs[0x4d].availability_expression[0x94]);
   // the clean-room stores it here since that scratch buffer is not modelled.
   bool no_asteroids_latch = false;
-  // Latched by NovaTravel_Tick when the jump zoom begins (the 'Warp up' cue
-  // as the ship accelerates) and at the fire/arrival (the 'Warp out' boom) so
-  // the spaceflight loop plays each cached sound once (mirrors the original's
-  // g_playerHyperspaceAudioLatch one-shot). Cleared by the loop after playing.
+  // One-shot audio requests consumed by the spaceflight loop.
   bool warp_up_sound_pending = false;
   bool warp_out_sound_pending = false;
 
@@ -643,15 +618,8 @@ struct GameState {
   // FUN_004b0740: LoadStringResourceCopyById(0x80/0x81/0x82) into the jump
   // handles g_random_encounter_fleet_defs[0].availability_expression
   // +0x8c/+0x90/+0x94).
-  //  * warp_up_sound: snd 128 'Warp up' (rising 'hyperspace imminent' cue;
-  //    snd 129 'Warp up.x2' is the faster engine variant) played as the ship
-  //    accelerates into the jump zoom.
-  //  * warp_out_sound: snd 130 'Warp out' (~2.5 s boom) played at the
-  //    fire/arrival instant, synced with the screen flash.
-  // Played by the spaceflight loop (which owns SdlAudio) when the matching
-  // *_pending latch is set. Empty when the resource is missing or fails to
-  // decode (the jump then plays silently and travel.cpp falls back to its
-  // fixed hold/tunnel durations).
+  // snd 128 Warp up is played during the pre-jump hold; snd 130 Warp out at
+  // fire/arrival. Empty means the travel state uses its fallback timing.
   std::optional<NovaSoundData> warp_up_sound;
   std::optional<NovaSoundData> warp_out_sound;
 };

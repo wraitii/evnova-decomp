@@ -35,7 +35,9 @@ public:
   // Plays a one-shot effect by streaming the provided PCM through a free voice.
   // If every voice is busy the oldest voice is reused (the new blip replaces
   // the tail of an earlier one, as the original's small voice pool does).
-  void Play(const NovaSoundData &sound, float gain = 1.0F);
+  void Play(const NovaSoundData &sound,
+            float gain = 1.0F,
+            float playback_rate = 1.0F);
   void StopAll();
 
   [[nodiscard]] bool IsEnabled() const;
