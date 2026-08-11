@@ -6,6 +6,7 @@
 #include "../sdl_platform.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include <optional>
 #include <utility>
@@ -13,6 +14,10 @@
 namespace game {
 
 ServicesButtonArt::~ServicesButtonArt() = default;
+
+float ThreeStateButtonLabelBaseline(const SDL_FRect &rect) {
+  return std::floor(rect.y + rect.h / 2.0F) + 5.0F;
+}
 
 namespace {
 
@@ -25,8 +30,52 @@ namespace {
 constexpr std::uint16_t kStripBase = 0x1d4c;
 constexpr std::uint16_t kPiecesPerStrip = 3; // left, middle, right
 
+// Each strip's left/right caps are carved by a 1-bit mask PICT 0x64 above the
+// strip's art ids (NovaUi_InitThreeStateButtonArt loads 0x1d4c..0x1d54 AND
+// 0x1db0..0x1db8):
+//   normal  masks 0x1db0 ("unclick mask left") / 0x1db2 ("unclick mask right")
+//   pressed masks 0x1db3 ("click mask left")    / 0x1db5 ("click mask right")
+//   grey    masks 0x1db6 ("grey mask left")     / 0x1db8 ("grey mask right")
+// The 2px middle tile has no mask (it is fully opaque). Mask semantics follow
+// the game's mask compositing (FUN_004b9410): white pixels are masked out and
+// stay transparent, black pixels show the art.
+constexpr std::uint16_t kMaskOffsetFromArt = 0x64;
+
+// Applies the cap's 1-bit mask PICT (white = transparent) to the cap's RGBA
+// pixels so the outside of the rounded corners is fully transparent, as in the
+// original (which blits each cap through its mask; without this the cap art's
+// opaque corner-cutout pixels show as dark smudges). A missing/undecodable or
+// size-mismatched mask leaves the cap fully opaque.
+void ApplyCapMask(std::uint16_t art_base,
+                  std::size_t piece,
+                  const PictImage &cap,
+                  std::vector<std::uint8_t> &rgba) {
+  const std::uint16_t mask_id = static_cast<std::uint16_t>(
+      art_base + kMaskOffsetFromArt + (piece == 2 ? 2 : 0));
+  const auto mask_data = NovaResource_LoadPictData(mask_id);
+  if (!mask_data) {
+    return;
+  }
+  const auto mask = Resource_LoadPictAsImage(*mask_data);
+  if (!mask || mask->width != cap.width || mask->height != cap.height) {
+    NovaLog::Todo("button cap mask 0x{:04x} missing or mismatched", mask_id);
+    return;
+  }
+  for (std::size_t i = 0;
+       i < static_cast<std::size_t>(cap.width) *
+               static_cast<std::size_t>(cap.height);
+       ++i) {
+    // Mask PICTs are 1-bit black/white; white marks the transparent corner
+    // cutouts.
+    if (mask->rgba_pixels[i * 4] > 127) {
+      rgba[i * 4 + 3] = 0;
+    }
+  }
+}
+
 // Loads one strip's three pieces (left cap, stretchable middle tile, right
-// cap) from Nova Graphics 3 PICTs `base`, ... `base+2`.
+// cap) from Nova Graphics 3 PICTs `base`, ... `base+2`, applying each cap's
+// mask (see ApplyCapMask) so the rounded corners stay transparent.
 void LoadStripImpl(SdlPlatform &platform,
                    std::uint16_t base,
                    ServicesButtonArt::StripPieces &out,
@@ -37,10 +86,14 @@ void LoadStripImpl(SdlPlatform &platform,
     auto &slot = *slots[piece];
     if (const auto data = NovaResource_LoadPictData(id)) {
       if (const auto pict = Resource_LoadPictAsImage(*data)) {
+        std::vector<std::uint8_t> rgba = pict->rgba_pixels;
+        if (piece != 1) {
+          ApplyCapMask(base, piece, *pict, rgba);
+        }
         slot = SdlTexture::Create(platform.renderer(),
                                   pict->width,
                                   pict->height,
-                                  pict->rgba_pixels);
+                                  rgba);
         if (slot) {
           any_loaded = true;
           continue;

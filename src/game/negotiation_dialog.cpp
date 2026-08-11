@@ -351,6 +351,10 @@ void DrawNegotiationDialog(SdlPlatform &platform,
   // at the top -- each a 146x26 box at x=27..173. Labels follow the original
   // per-slot table ({LEAVE, LAND/BRIBE, ATTACK}); the attack branch is
   // deferred (see the header scope note).
+  // Three-state button labels: white on the normal art, plain screen font
+  // (the original's shared renderer never bolds them; see
+  // NovaUi_InitThreeStateButtonArt DAT_007d8350 / NovaUi_DrawThreeStateButton).
+  constexpr SDL_Color kButtonLabel{255, 255, 255, 255};
   const std::string_view labels[3] = {"LEAVE", land_label, "ATTACK"};
   for (const ServiceButton &b : buttons) {
     const std::size_t slot = static_cast<std::size_t>(b.slot) < 3
@@ -359,13 +363,13 @@ void DrawNegotiationDialog(SdlPlatform &platform,
     button_art.Draw(platform, b.rect, ButtonState::kNormal);
     NovaText_DrawCentered(platform,
                           font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleBold,
-                          kDim,
+                          kThreeStateButtonFontFamily,
+                          kThreeStateButtonFontSize,
+                          kNovaFontStyleRegular,
+                          kButtonLabel,
                           b.rect.x,
                           b.rect.x + b.rect.w,
-                          b.rect.y + b.rect.h / 2.0F + 4.0F,
+                          ThreeStateButtonLabelBaseline(b.rect),
                           labels[slot]);
   }
 

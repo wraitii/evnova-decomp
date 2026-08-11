@@ -21,14 +21,18 @@
 //  tiled parts of three different states into a single button. The game instead
 //  selects one whole strip via NovaUi_DrawThreeStateButton's state index
 //  (param_4/param_5: 0,0 -> normal; 0,!0 -> pressed; !0 -> grey) and stretches
-//  that state's 2px middle across the body. This module loads the real strips,
-//  draws the body by left cap + stretched middle + right cap, and leaves the
-//  label glyph to the caller. Missing strips fall back to a solid fill matching
-//  the window backdrop, as the game does with its 0xc x 0x18 solid rect.
+//  that state's 2px middle across the body. Each cap is composited through its
+//  1-bit mask PICT (white = transparent), so the outside of the rounded corners
+//  is fully transparent; the middle tile is unmasked/opaque. This module loads
+//  the real strips, draws the body by left cap + stretched middle + right cap,
+//  applies the cap masks, and leaves the label glyph to the caller. Missing
+//  strips fall back to a solid fill matching the window backdrop, as the game
+//  does with its 0xc x 0x18 solid rect.
 
 #include <SDL3/SDL.h>
 
 #include "../sdl_platform.hpp"
+#include "nova_font.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -36,6 +40,17 @@
 #include <vector>
 
 namespace game {
+
+// Nova Graphics 3's first c\x9alr record configures the shared button labels
+// as Charcoal 12 (record offsets +0x9e and +0xde). In the reconstructed font
+// family table, the bundled Charcoal.ttf is the Chicago-family screen face.
+inline constexpr NovaFontFamily kThreeStateButtonFontFamily =
+    NovaFontFamily::kChicago;
+inline constexpr float kThreeStateButtonFontSize = 12.0F;
+
+// NovaUi_DrawThreeStateButton (0x004a3340) places the label baseline at the
+// integer vertical midpoint of the button rect plus five logical pixels.
+[[nodiscard]] float ThreeStateButtonLabelBaseline(const SDL_FRect &rect);
 
 // A three-state button body. States follow the game's DrawThreeStateButton
 // param_4/param_5 conventions: kNormal (idle), kHover (mouse over / focused;

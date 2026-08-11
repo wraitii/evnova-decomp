@@ -528,7 +528,6 @@ void DrawLandedMenu(SdlPlatform &platform,
 
   const SDL_Color kTitle{202, 224, 255, 255};    // bright rows / highlight
   const SDL_Color kBody{128, 170, 210, 255};     // dim rows
-  const SDL_Color kSelected{142, 209, 255, 255}; // selected row
   const SDL_Color kPanel{16, 40, 72, 255};       // flat panel frame fill
   const SDL_Color kPanelBorder{80, 140, 190, 255};
 
@@ -675,8 +674,13 @@ void DrawLandedMenu(SdlPlatform &platform,
   // redraws with the hovered index), and unavailable slots are drawn grey with
   // the disabled art (NovaUi_RedrawTravelActionButtons). Label baseline is
   // centred on the +5px-below-centre rule the original uses
-  // (NovaUi_DrawThreeStateButton).
-  const SDL_Color kDisabledLabel{88, 108, 132, 255}; // dimmed grey
+  // (NovaUi_DrawThreeStateButton). Label colours follow the original's
+  // three-state label table (NovaUi_InitThreeStateButtonArt DAT_007d8350):
+  // white on the normal art, 50% grey on the pressed/hover and grey/disabled
+  // art -- the shared renderer draws the label in the plain screen font (it
+  // sets only the font id + size, never a bold style), so no bold here either.
+  constexpr SDL_Color kButtonLabelNormal{255, 255, 255, 255};
+  constexpr SDL_Color kButtonLabelGrey{128, 128, 128, 255};
   for (std::size_t i = 0; i < button_rects.size(); ++i) {
     const auto slot = button_rects[i].slot;
     const auto svc = static_cast<LandedService>(slot);
@@ -688,18 +692,16 @@ void DrawLandedMenu(SdlPlatform &platform,
             ? ButtonState::kDisabled
             : (hovered_by_mouse ? ButtonState::kHover : ButtonState::kNormal);
     buttons.Draw(platform, button_rects[i].rect, button_state);
-    const SDL_Color &label_color = !enabled           ? kDisabledLabel
-                                   : hovered_by_mouse ? kSelected
-                                                      : kBody;
+    const SDL_Color &label_color = !enabled           ? kButtonLabelGrey
+                                   : hovered_by_mouse ? kButtonLabelGrey
+                                                      : kButtonLabelNormal;
     const float label_baseline =
-        button_rects[i].rect.y +
-        std::max(9.0F, button_rects[i].rect.h / 2.0F + 5.0F);
+        ThreeStateButtonLabelBaseline(button_rects[i].rect);
     NovaText_DrawCentered(platform,
                           font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          (enabled && hovered_by_mouse) ? kNovaFontStyleBold
-                                                        : kNovaFontStyleRegular,
+                          kThreeStateButtonFontFamily,
+                          kThreeStateButtonFontSize,
+                          kNovaFontStyleRegular,
                           label_color,
                           button_rects[i].rect.x,
                           button_rects[i].rect.x + button_rects[i].rect.w,

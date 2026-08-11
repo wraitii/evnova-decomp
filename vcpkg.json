@@ -4,7 +4,10 @@
   "description": "Clean-room recompilation of Escape Velocity Nova",
   "dependencies": [
     "sdl3",
-    "sdl3-ttf",
+    {
+      "name": "sdl3-ttf",
+      "features": ["harfbuzz"]
+    },
     {
       "name": "sdl3-mixer",
       "features": ["mpg123"]

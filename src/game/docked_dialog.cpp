@@ -119,13 +119,13 @@ void DrawSubWindowDialog(SdlPlatform &platform,
     button_art.Draw(platform, leaveRect, ButtonState::kNormal);
     NovaText_DrawCentered(platform,
                           font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleBold,
-                          kDim,
+                          kThreeStateButtonFontFamily,
+                          kThreeStateButtonFontSize,
+                          kNovaFontStyleRegular,
+                          kTitle,
                           leaveRect.x,
                           leaveRect.x + leaveRect.w,
-                          leaveRect.y + leaveRect.h / 2.0F + 4.0F,
+                          ThreeStateButtonLabelBaseline(leaveRect),
                           "LEAVE");
     return;
   }
@@ -172,13 +172,13 @@ void DrawSubWindowDialog(SdlPlatform &platform,
   button_art.Draw(platform, leaveRect, ButtonState::kNormal);
   NovaText_DrawCentered(platform,
                         font_cache,
-                        NovaFontFamily::kGeneva,
-                        12.0F,
-                        kNovaFontStyleBold,
-                        kDim,
+                        kThreeStateButtonFontFamily,
+                        kThreeStateButtonFontSize,
+                        kNovaFontStyleRegular,
+                        kTitle,
                         leaveRect.x,
                         leaveRect.x + leaveRect.w,
-                        leaveRect.y + leaveRect.h / 2.0F + 4.0F,
+                        ThreeStateButtonLabelBaseline(leaveRect),
                         "LEAVE");
 
   // Footer hint just above the Leave button.
@@ -481,15 +481,19 @@ void DrawStoreContents(SdlPlatform &platform,
     button_art.Draw(platform,
                     rect,
                     enabled ? ButtonState::kNormal : ButtonState::kDisabled);
+    // Three-state button labels: white enabled, 50% grey disabled, in the
+    // plain (non-bold) screen font -- the original's shared renderer
+    // (NovaUi_DrawThreeStateButton, label colours DAT_007d8350).
+    const SDL_Color kLabelGrey{128, 128, 128, 255};
     NovaText_DrawCentered(platform,
                           font_cache,
-                          NovaFontFamily::kGeneva,
-                          11.0F,
-                          kNovaFontStyleBold,
-                          enabled ? kText : kMuted,
+                          kThreeStateButtonFontFamily,
+                          kThreeStateButtonFontSize,
+                          kNovaFontStyleRegular,
+                          enabled ? kText : kLabelGrey,
                           rect.x,
                           rect.x + rect.w,
-                          rect.y + 16.0F,
+                          ThreeStateButtonLabelBaseline(rect),
                           label);
   }
   if (session.selected_id >= 0) {

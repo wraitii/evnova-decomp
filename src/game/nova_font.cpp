@@ -193,6 +193,10 @@ TTF_Font *NovaFontCache::Font(NovaFontFamily family,
       font,
       ((style & kNovaFontStyleBold) ? TTF_STYLE_BOLD : TTF_STYLE_NORMAL) |
           ((style & kNovaFontStyleItalic) ? TTF_STYLE_ITALIC : 0U));
+  // The original delegates grid fitting to the platform text engine. Light
+  // FreeType hinting most closely matches the comparatively restrained GDI /
+  // classic Mac screen-font coverage at Nova's small UI sizes.
+  TTF_SetFontHinting(font, TTF_HINTING_LIGHT);
 
   fonts_[key] = font;
   return font;

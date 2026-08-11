@@ -1004,10 +1004,13 @@ void DrawButtons(SdlPlatform &platform,
                  bool show_borders,
                  int zoom_level,
                  std::optional<std::size_t> hovered) {
-  // Same label palette as the other button rows (landed_window.cpp).
-  constexpr SDL_Color kDim{128, 170, 210, 255};
-  constexpr SDL_Color kSelected{142, 209, 255, 255};
-  constexpr SDL_Color kDisabledLabel{88, 108, 132, 255};
+  // Labels follow the original three-state button palette -- white on the
+  // normal art, 50% grey on the pressed/hover and grey/disabled art
+  // (NovaUi_InitThreeStateButtonArt DAT_007d8350) -- in the plain screen font
+  // the shared renderer uses (no bold). The earlier light-blue bold labels were
+  // a divergence.
+  constexpr SDL_Color kButtonLabelNormal{255, 255, 255, 255};
+  constexpr SDL_Color kButtonLabelGrey{128, 128, 128, 255};
   const std::array<std::pair<StarmapButton, bool>, 6> buttons{{
       {StarmapButton::kShowBorders, true},
       {StarmapButton::kClearRoute, true},
@@ -1024,19 +1027,17 @@ void DrawButtons(SdlPlatform &platform,
             ? ButtonState::kDisabled
             : (hovered_by_mouse ? ButtonState::kHover : ButtonState::kNormal);
     button_art.Draw(platform, geometry.buttons[i], state);
-    const SDL_Color &label_color = !enabled           ? kDisabledLabel
-                                   : hovered_by_mouse ? kSelected
-                                                      : kDim;
+    const SDL_Color &label_color =
+        !enabled || hovered_by_mouse ? kButtonLabelGrey : kButtonLabelNormal;
     NovaText_DrawCentered(platform,
                           font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleBold,
+                          kThreeStateButtonFontFamily,
+                          kThreeStateButtonFontSize,
+                          kNovaFontStyleRegular,
                           label_color,
                           geometry.buttons[i].x,
                           geometry.buttons[i].x + geometry.buttons[i].w,
-                          geometry.buttons[i].y + geometry.buttons[i].h / 2.0F +
-                              4.0F,
+                          ThreeStateButtonLabelBaseline(geometry.buttons[i]),
                           StarmapButtonLabel(button, show_borders));
   }
 }

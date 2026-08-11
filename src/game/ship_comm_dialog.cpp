@@ -382,17 +382,21 @@ void DrawShipCommDialog(SdlPlatform &platform,
   // the original's DAT_007d82ee/f0/f2 table. For special-scan-mask ships the
   // assistance slot is already omitted from `buttons` (see caller), so only
   // Close Channel and Greetings (pushed down to the middle) are drawn.
+  // Labels follow the original three-state button palette: pure white on the
+  // normal art in the plain screen font (NovaUi_DrawThreeStateButton sets only
+  // font id + size, never bold; label colour table DAT_007d8350).
+  constexpr SDL_Color kButtonLabel{255, 255, 255, 255};
   for (const ServiceButton &b : buttons) {
     button_art.Draw(platform, b.rect, ButtonState::kNormal);
     NovaText_DrawCentered(platform,
                           font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleBold,
-                          kDim,
+                          kThreeStateButtonFontFamily,
+                          kThreeStateButtonFontSize,
+                          kNovaFontStyleRegular,
+                          kButtonLabel,
                           b.rect.x,
                           b.rect.x + b.rect.w,
-                          b.rect.y + b.rect.h / 2.0F + 4.0F,
+                          ThreeStateButtonLabelBaseline(b.rect),
                           b.slot < button_labels.size()
                               ? button_labels[b.slot]
                               : "");
