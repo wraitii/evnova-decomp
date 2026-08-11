@@ -175,12 +175,26 @@ the explored blobs grow as the player jumps.
   on screen; the graph is scissored to its viewport rect.
 - The bottom buttons use the house three-state PICT button art with STR# 0x96
   labels and dispatch the original's actions (zoom in/out at the zoom limits,
-  Done closes, Show/Hide Borders toggles the political tint, Clear Route clears
-  the plotted destination, Find starts an inline name-prefix search). Find is
-  the inline stand-in for the original's modal search dialog (`0x004aab30`).
-- No political/government **overlay grid** (`NovaUi_DrawStarmapPoliticalOverlay`
-  per-cell strength tint); the Show Borders toggle strengthens the per-system
-  marker government tint as a lightweight stand-in.
+  Done closes, Show/Hide Borders toggles the political overlay, Clear Route
+  clears the plotted destination, Find starts an inline name-prefix search).
+  Find is the inline stand-in for the original's modal search dialog
+  (`0x004aab30`).
+- The political/government **overlay** (`NovaUi_DrawStarmapPoliticalOverlay`
+  per-cell strength tint) is implemented as smooth fading government discs
+  behind the graph: one disc per discovered, travel-reachable system with a
+  valid government, radius `round(22/zoom)+12` (or `round(11/zoom)+9` for
+  `scan_mask` bit-1 governments) half-pixel cells, per-cell strength
+  `(r^2-d^2)*fade*zoom` clamped [1,255], `theme_*0.5` at the centre fading to
+  fully transparent at the disc rim (the galaxy backdrop shows through). It is
+  built to the actual panel on every toggle/zoom/pan rebuild, so discs are
+  never dropped or truncated at the panel edge at any resolution (a deliberate
+  fix of the original's fixed-size grid + hard viewport clamp, which could cut
+  edge discs). Deliberate rendering improvement over the original's flat 16px
+  opaque overlay blocks: the same strength field is drawn per-pixel (a texture)
+  so the discs read smooth at any window scale. The overlay is ON by default
+  (the original persists a default-Off preference; the clean-room has no prefs
+  store yet) and the Show/Hide Borders button toggles it; while active the
+  markers drop to their neutral base.
 - No plotted-route editing or multi-hop route → travel-target sync (only the
   immediate first hop is resolved to a travel slot).
 - No mission-highlight icons / mission jump planning.

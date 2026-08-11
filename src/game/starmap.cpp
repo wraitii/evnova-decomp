@@ -118,6 +118,20 @@ constexpr std::array<StarmapButtonRect, 6> kStarmapButtonRects{{
 constexpr float kMarkerRadius = 4.0F;
 constexpr float kCurrentSystemRadius = 6.0F;
 
+// Political overlay (the original's NovaUi_DrawStarmapPoliticalOverlay
+// 0x004aa620 / NovaUi_BuildStarmapPoliticalOverlay 0x004a9d50): a fading
+// government-coloured disc behind every discovered, reachable system. Disc
+// world radius, selected by GovtDef scan_mask bit 1 (normal governments use
+// the large radius, the small tier the small one). Computed from the
+// original's round(22/zoom)+12 / round(11/zoom)+9 cell radii at its default
+// zoom, but expressed as a world-constant so discs track the marker/zoom
+// scale; the constants are bumped ~59% larger than the original per eyeball
+// tuning.
+constexpr float kOverlayRadiusLarge = 35.0F; // world-unit disc radius
+constexpr float kOverlayRadiusSmall =
+    17.5F; // world-unit disc radius (small tier)
+constexpr float kOverlayDrawIntensity = 0.5F;
+
 // The starmap zooms through a handful of fixed levels (like the original's
 // stepped zoom, not a continuous slider) and opens on a *middle* level centred
 // on the pilot's current system, rather than being pinned to the small
@@ -437,7 +451,10 @@ void DrawRing(
 // --- Zoom thresholds (mirror the original's zoom-gated labels: system names
 // only render once the map is zoomed in close enough, Dat_00575a10 ; the
 // current/selected nodes stay legible regardless). ---
-constexpr float kLabelZoomMin = 1.4F; // scale at which labels fade in
+constexpr float kLabelZoomMin = 0.93F; // scale at which labels fade in (one
+                                       // zoom step OUT from the original's
+                                       // 1.4, so names show while zoomed out
+                                       // one level more)
 
 // Loads the starmap backdrop PICT (0x213d "Map", the DAT_007dc73c backdrop
 // NovaUi_RunStarmapWindow loads) into a texture sized to the 601x513 DLOG
@@ -569,11 +586,226 @@ void DrawChrome(SdlPlatform &platform,
   }
 }
 
-// Draws the galaxy graph: link lines first, then markers and names, clipped to
-// the map panel (DITL item 2) so routes/names never paint over the window
-// chrome. `show_borders` is the political-overlay toggle: when on, markers
-// lean more strongly toward their owning government's colour (a lightweight
-// stand-in for the original's per-cell government overlay grid).
+// ---------------------------------------------------------------------------
+// Political overlay (the original's NovaUi_DrawStarmapPoliticalOverlay
+// 0x004aa620). Each discovered, travel-reachable system with a valid
+// government paints a fading, government-coloured disc over the map panel,
+// brightest (theme*0.5, the original's theme_r8 * strength * 0.5 scale) at the
+// system and fading to fully transparent (the galaxy backdrop showing through)
+// at the rim -- an "influence map".
+//
+// The original rendered this as a coarse grid of flat 16px opaque blocks (a
+// 0x200x0x35c half-pixel strength/gov grid at cell_size=8 stride, 4 slots per
+// cell), which only looked smooth because it ran at low native resolution. We
+// deliberately render the *same per-system field* per-pixel instead, so the
+// discs are genuinely smooth at any window scale and the politics read
+// clearly (AGENTS.md: rendering is swapped for SDL3). Strength is the
+// original's (r^2 - d^2) * fade * zoom shape, but normalized to a quadratic
+// fade (peak 255 at the disc centre, 0 at the rim) and the radius is a
+// world-constant. At each pixel the disc with the highest strength wins (this
+// is exactly the visual result of the original's "strongest slot" draw rule,
+// without needing its 4-slot grid).
+struct PoliticalOverlay {
+  int width = 0;  // overlay texture width (== panel width, px)
+  int height = 0; // overlay texture height (== panel height, px)
+  // Per-pixel RGBA (premultiplied-style: colour = theme, alpha = strength /
+  // 255 * kOverlayDrawIntensity), transparent where no disc reaches.
+  std::vector<std::uint8_t> rgba;
+};
+
+// Ghidra 0x00468af0 System_HasUsableTravelDestination: true when at least one
+// of the system's first four nav defs (the original's SystemDef.stellar_ids at
+// +0x2a, i.e. NavDef1-4) resolves to a stellar whose travel_flags bit 0x20 is
+// clear and availability_flags & 0x3000 is clear -- a normal, reachable
+// destination. Gates which systems paint a government disc on the starmap.
+bool SystemHasUsableDestination(const ScenarioData &scenario,
+                                const System &sys) {
+  for (std::size_t i = 0; i < 4; ++i) {
+    const std::int16_t nav = sys.nav_defs[i];
+    if (nav < 0x80) {
+      continue;
+    }
+    const Stellar *st = scenario.Stellar(nav);
+    if (st == nullptr) {
+      continue;
+    }
+    if ((st->flags & 0x20U) != 0U || (st->availability_flags & 0x3000U) != 0U) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+// Builds the political overlay for the current view. Mirrors
+// NovaUi_BuildStarmapPoliticalOverlay (0x004a9d50) / NovaUi_PaintStarmapGovDisc
+// (0x004aa070): eligible systems are is_visible && has_explored_flag (the
+// clean-room discovery flags; the original used is_visible &&
+// discovered_this_rebuild && discovery_state > 0), with a valid government
+// (scan_mask bit 2 clear) and at least one usable travel destination. Disc
+// radius is world-constant (22 world-units, or 11 for the small tier) so it
+// scales with the links/markers on zoom; strength is a normalized quadratic
+// fade (the original's (r^2 - d^2) * fade * zoom up to a scale factor)
+// clamped to [1,255]. At each pixel the highest-strength disc wins (the
+// visual ``strongest slot'' rule -- the original's 4-slot per-cell merge was
+// only needed because its coarse grid had spare slots).
+//
+// Deliberate divergence from the original (logged): the disc centre is NOT
+// snapped down to a cell-size multiple (the original drifted discs up to 7
+// cells from the system node); strength is computed per-pixel, so the discs
+// are smooth instead of the original's flat 16px blocks (a rendering-quality
+// fix). The buffer is sized to the *actual* panel on every rebuild and the
+// disc bounds are clamped to it, so no disc is dropped or truncated at the
+// panel edge at any resolution (the original's fixed-size grid + hard viewport
+// clamp could cut edge discs).
+PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
+                                       const MapView &view,
+                                       const SDL_FRect &panel) {
+  const auto &systems = state.scenario.systems;
+  PoliticalOverlay out;
+  // A per-pixel buffer: width in px = panel width (integer), height likewise.
+  out.width = std::max(1, static_cast<int>(panel.w));
+  out.height = std::max(1, static_cast<int>(panel.h));
+  // 4 bytes/pixel, transparent everywhere the field is empty.
+  out.rgba.assign(static_cast<std::size_t>(out.width) *
+                      static_cast<std::size_t>(out.height) * 4u,
+                  0U);
+  // Parallel strength buffer (0 = empty); keeps per-pixel ``strongest wins''
+  // cheap without touching the RGBA on every disc write.
+  std::vector<std::uint16_t> strength(static_cast<std::size_t>(out.width) *
+                                          static_cast<std::size_t>(out.height),
+                                      0);
+  // Government id (zero-based) that currently owns each pixel.
+  std::vector<std::int16_t> gov(static_cast<std::size_t>(out.width) *
+                                    static_cast<std::size_t>(out.height),
+                                -1);
+
+  for (std::size_t i = 0; i < systems.size(); ++i) {
+    const auto id = static_cast<std::int16_t>(i);
+    if (!SystemExplored(state, id)) {
+      continue; // fog of war: undiscovered systems paint no territory
+    }
+    const System &sys = systems[i];
+    if (sys.government_id < 0) {
+      continue;
+    }
+    const Government *gv = state.scenario.Government(
+        static_cast<std::int16_t>(sys.government_id + 0x80));
+    if (gv == nullptr || (gv->scan_mask_short & 0x0004U) != 0U) {
+      continue; // no government / map-mask bit 2: no disc
+    }
+    if (!SystemHasUsableDestination(state.scenario, sys)) {
+      continue; // no reachable destination: no territory
+    }
+    const bool small_tier = (gv->scan_mask_short & 0x0002U) != 0U;
+    // World-constant disc radius so discs track the linked/marker scale as the
+    // player zooms (zoom IN -> discs grow, keeping a fixed number of systems
+    // inside). kOverlayRadiusLarge/small is a world-unit radius (22/11), like
+    // the original's round(22/zoom)+12 term whose screen size tracks zoom; the
+    // scan_mask bit-1 small tier is a 9 instead of 12 cell floor. A small
+    // fixed pixel floor (half the original's +12/+9 call offset) keeps discs
+    // from collapsing to nothing at the most zoomed-out level.
+    const float radius_world =
+        small_tier ? kOverlayRadiusSmall : kOverlayRadiusLarge;
+    const float r_px = radius_world * view.scale + (small_tier ? 4.5F : 6.0F);
+    if (r_px <= 0.5F) {
+      continue;
+    }
+    const float sx = panel.x + view.ToScreenX(static_cast<float>(sys.pos_x));
+    const float sy = panel.y + view.ToScreenY(static_cast<float>(sys.pos_y));
+    const float cx = sx - panel.x; // disc centre in screen px
+    const float cy = sy - panel.y;
+    const float r2 = r_px * r_px;
+    const int bx0 = std::max(0, static_cast<int>(std::floor(cx - r_px)));
+    const int by0 = std::max(0, static_cast<int>(std::floor(cy - r_px)));
+    const int bx1 = std::min(out.width, static_cast<int>(std::ceil(cx + r_px)));
+    const int by1 =
+        std::min(out.height, static_cast<int>(std::ceil(cy + r_px)));
+    for (int py = by0; py < by1; ++py) {
+      for (int px = bx0; px < bx1; ++px) {
+        const float dx = static_cast<float>(px) + 0.5F - cx;
+        const float dy = static_cast<float>(py) + 0.5F - cy;
+        const float d2 = dx * dx + dy * dy;
+        if (d2 > r2) {
+          continue;
+        }
+        // Normalized quadratic fade (the original's (r^2-d^2)*fade*zoom is
+        // exactly this up to a scale factor: at d=0 it saturates at 255, at
+        // the rim d=r it is 0). Resolution- and zoom-independent, so discs
+        // always read as a solid core fading to the backdrop.
+        const float u = radius_world > 0.0F ? 1.0F - d2 / r2 : 1.0F;
+        const int s =
+            std::clamp(static_cast<int>(std::lround(255.0F * u)), 1, 255);
+        const std::size_t idx =
+            static_cast<std::size_t>(py) * static_cast<std::size_t>(out.width) +
+            static_cast<std::size_t>(px);
+        if (static_cast<std::uint16_t>(s) > strength[idx]) {
+          strength[idx] = static_cast<std::uint16_t>(s);
+          gov[idx] = sys.government_id;
+        }
+      }
+    }
+  }
+
+  // Flatten the ``strongest wins'' field into final RGBA: colour = theme,
+  // alpha = strength/255 * kOverlayDrawIntensity (centre reads at theme*0.5,
+  // fading to transparent at the rim).
+  for (int py = 0; py < out.height; ++py) {
+    for (int px = 0; px < out.width; ++px) {
+      const std::size_t idx =
+          static_cast<std::size_t>(py) * static_cast<std::size_t>(out.width) +
+          static_cast<std::size_t>(px);
+      if (strength[idx] == 0U) {
+        continue; // leave transparent
+      }
+      const Government *gv =
+          state.scenario.Government(static_cast<std::int16_t>(gov[idx] + 0x80));
+      if (gv == nullptr) {
+        continue;
+      }
+      // alpha = strength * kOverlayDrawIntensity (strength is already 1..255,
+      // so at strength 255 the centre reads at theme*0.5 alpha).
+      const std::uint8_t a = static_cast<std::uint8_t>(std::min(
+          255,
+          static_cast<int>(std::lround(static_cast<float>(strength[idx]) *
+                                       kOverlayDrawIntensity))));
+      const std::size_t o = idx * 4u;
+      out.rgba[o + 0] = gv->theme_red;
+      out.rgba[o + 1] = gv->theme_green;
+      out.rgba[o + 2] = gv->theme_blue;
+      out.rgba[o + 3] = a;
+    }
+  }
+  return out;
+}
+
+// Uploads the per-pixel overlay to an SDL texture and blits it over the panel,
+// scissored by DrawGalaxy so the fade stops cleanly at the panel edge (the
+// galaxy backdrop shows through the translucent rim).
+void DrawPoliticalOverlay(SdlPlatform &platform,
+                          const PoliticalOverlay &overlay,
+                          const SDL_FRect &panel) {
+  SDL_Renderer *renderer = platform.renderer();
+  auto texture =
+      SdlTexture::Create(renderer, overlay.width, overlay.height, overlay.rgba);
+  if (!texture) {
+    NovaLog::Warn("political overlay texture upload failed: {}",
+                  SDL_GetError());
+    return;
+  }
+  const SDL_FRect dst{panel.x,
+                      panel.y,
+                      static_cast<float>(overlay.width),
+                      static_cast<float>(overlay.height)};
+  SDL_RenderTexture(renderer, texture->get(), nullptr, &dst);
+}
+
+// Draws the galaxy graph: the political overlay first (when active), then
+// link lines, markers and names, clipped to the map panel (DITL item 2) so
+// routes/names never paint over the window chrome. `overlay` is non-null when
+// the Show/Hide Borders toggle is on; the discs carry the government colouring
+// (the original's per-cell government overlay grid), so the markers fall back
+// to their neutral base while it is active.
 void DrawGalaxy(SdlPlatform &platform,
                 NovaFontCache &font_cache,
                 const GameState &state,
@@ -581,7 +813,8 @@ void DrawGalaxy(SdlPlatform &platform,
                 const MapView &view,
                 const StarmapGeometry &geometry,
                 std::int16_t selected_id,
-                bool show_borders) {
+                bool show_borders,
+                const PoliticalOverlay *overlay) {
   const auto &systems = state.scenario.systems;
   const std::int16_t current = state.player.current_system_id;
   SDL_Renderer *renderer = platform.renderer();
@@ -595,6 +828,13 @@ void DrawGalaxy(SdlPlatform &platform,
                       static_cast<int>(geometry.map.h)};
   SDL_SetRenderClipRect(renderer, &clip);
   const auto restore_clip = [&]() { SDL_SetRenderClipRect(renderer, nullptr); };
+
+  // Government discs paint under everything else in the panel (the original
+  // draws the overlay grid before routes/markers in
+  // NovaUi_RedrawStarmapWindow).
+  if (overlay != nullptr) {
+    DrawPoliticalOverlay(platform, *overlay, geometry.map);
+  }
 
   // Link/route endpoints and marker positions must share the same origin.
   // Markers are stored panel-relative (m.sx/m.sy include the panel offset in
@@ -711,10 +951,12 @@ void DrawGalaxy(SdlPlatform &platform,
       continue;
     }
     // Colour by owning government (political-map tint) blended into the
-    // explored/unexplored base so explored systems read as explorable territory
-    // of their faction.
+    // explored base. With the political overlay active the discs already carry
+    // the faction colouring (as in the original, where the overlay grid is the
+    // government colour and markers stay neutral), so markers drop back to the
+    // plain explored blue; otherwise the tint stands in for the overlay.
     const SDL_Color gov = GovernmentColor(state, m.zero_based_id);
-    SDL_Color c = Blend(kMarkerExplored, gov, show_borders ? 0.9F : 0.55F);
+    SDL_Color c = Blend(kMarkerExplored, gov, show_borders ? 0.0F : 0.55F);
     if (is_current) {
       c = kMarkerCurrent;
     }
@@ -1110,6 +1352,11 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
   // good region of the galaxy. `+`/`-` step between levels and `h` snaps back
   // here ('h' also re-centres on the current system).
   MapView view;
+  // Political-overlay grid cache. Rebuilt lazily whenever the view changes
+  // while borders are on (the original recomputes on toggle-on, zoom and pan
+  // via NovaUi_EnableStarmapPoliticalOverlay).
+  PoliticalOverlay overlay;
+  bool overlay_needs_rebuild = true;
   const float whole_fit_scale =
       FitMapView(state, view, panel.w, panel.h, /*only_explored=*/false)
           ? view.scale
@@ -1152,16 +1399,20 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
     zoom_level = std::clamp(new_level, kZoomLevelMin, kZoomLevelMax);
     apply_zoom_level();
     view.SetScaleAt(view.scale, pivot_x, pivot_y);
+    overlay_needs_rebuild = true;
   };
 
   std::int16_t selected_id = state.player.current_system_id;
   bool tab_was_held = false;
   bool backslash_was_held = false;
   // Political-overlay toggle (the original's Show/Hide Borders button, action
-  // 9): strengthens the per-system government tint on the map. The original
-  // draws a per-cell government grid over the map; the clean-room uses a
-  // marker-tint stand-in (see DrawGalaxy).
-  bool show_borders = false;
+  // 9): draws the per-government fading-disc overlay over the map (see
+  // BuildPoliticalOverlay / DrawGalaxy). The original stores this as a
+  // persisted preference defaulting OFF on first run (NovaPrefs_ResetToDefaults
+  // 0x004b4320 sets g_starmap_show_borders = 0) but keeps the user's choice
+  // across sessions; the clean-room has no prefs store yet, so we default it
+  // ON for the richer view and keep the button toggle (TODO: persist it).
+  bool show_borders = true;
   // Inline name-prefix search (the Find button, action 10). The original runs
   // a modal search dialog (NovaUi_RunStarmapSearchDialog, DLOG 0xbbd); the
   // clean-room implements the same prefix match inline: typed characters build
@@ -1258,6 +1509,10 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
   while (!platform.quit_requested()) {
     const auto mapped = BuildMappedSystems(state, view, panel);
     DrawChrome(platform, geometry, backdrop ? backdrop->get() : nullptr);
+    if (show_borders && overlay_needs_rebuild) {
+      overlay = BuildPoliticalOverlay(state, view, panel);
+      overlay_needs_rebuild = false;
+    }
     DrawGalaxy(platform,
                font_cache,
                state,
@@ -1265,7 +1520,8 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
                view,
                geometry,
                selected_id,
-               show_borders);
+               show_borders,
+               show_borders ? &overlay : nullptr);
     DrawSidePanels(platform,
                    font_cache,
                    state,
@@ -1374,6 +1630,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
             switch (static_cast<StarmapButton>(i)) {
             case StarmapButton::kShowBorders:
               show_borders = !show_borders;
+              overlay_needs_rebuild = true;
               break;
             case StarmapButton::kClearRoute:
               // Clears the plotted starmap route (the original resets the
@@ -1460,6 +1717,12 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
     }
     if (keys[SDL_SCANCODE_DOWN]) {
       view.PanPixels(0.0F, -kPanPxPerEvent);
+    }
+    if (keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT] ||
+        keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_DOWN]) {
+      // Rebuild the political overlay for the new pan (the original recomputes
+      // on every pan while borders are on).
+      overlay_needs_rebuild = true;
     }
     // Tab / Backslash step the selection through the destination ring computed
     // when the window opened (the current system's directly-linked destination

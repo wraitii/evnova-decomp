@@ -19,11 +19,15 @@
 // as the right-hand selected-system detail column (entry 6) and item 1 as the
 // bottom status bar (entry 2).
 //
-// Remaining divergences from the original: no zoomable political/government
-// overlay tiles (NovaUi_DrawStarmapPoliticalOverlay), no mission-highlight
-// route editing, no starmap search dialog and no licence-seed easter-egg
-// branch. The focus is a faithful, useful navigation surface for the jump
-// player.
+// Remaining divergences from the original: no mission-highlight route editing,
+// no starmap search dialog and no licence-seed easter-egg branch. The focus is
+// a faithful, useful navigation surface for the jump player.
+//
+// The political/government overlay (the original's
+// NovaUi_DrawStarmapPoliticalOverlay) IS implemented: fading government discs
+// behind every discovered, reachable system, toggled by the Show/Hide Borders
+// button (ON by default). Unlike the original's opaque 16px overlay blocks it
+// renders the same strength field per-pixel as a smooth, translucent fade.
 
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"

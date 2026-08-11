@@ -469,8 +469,12 @@ struct Government {
   // Known bits (from Government_AreGovtsAllied / _HostileOrXenophobic):
   //   0x0001 xenophobic (attacks on sight), 0x0800 derelict (no alliance
   //   checks).
+  // Known bits (from NovaUi_PaintStarmapGovDisc 0x004aa070 / the political
+  // overlay): 0x0002 = political-map small-disc tier (overlay disc radius
+  // round(11/zoom)+9 cells, strength fade 0.4, instead of round(22/zoom)+12 /
+  // 0.2); 0x0004 = excluded from the political map (no overlay disc drawn).
   std::uint16_t scan_mask_short =
-      0; // GovtDef 0x22 (payload +0x04) [Provisional])
+      0; // GovtDef 0x22 (payload +0x04) [Provisional]
   std::int16_t ai_skill_percent = 0; // GovtDef 0x24 (payload +0x32)
 
   // Class / alliance / enemy id lists (payload +0x18/+0x20/+0x28). Govts share
