@@ -272,6 +272,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // (the original accumulates _g_avg_frame_time_ms).
   std::uint64_t prev_tick_ms = SDL_GetTicks();
   bool target_cycle_was_held = false;
+  bool destination_cycle_was_held = false;
+  bool hyperspace_was_held = false;
   bool ship_cycle_was_held = false;
   bool nearest_was_held = false;
   bool starmap_was_held = false;
@@ -299,6 +301,33 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       NovaTargeting_CyclePlayerStellarTarget(state, input.cycle_target_next);
     }
     target_cycle_was_held = target_cycle;
+    // Destination-SYSTEM cycling (Backslash / Shift+Backslash): rotate the
+    // next-jump destination through the systems directly linked to the
+    // current one. Mirrors the original's command-0x60 channel in
+    // Ship_HandlePlayerShip (g_playerCycleTravelTargetCommandLatch; default
+    // Backslash per the EV Nova manual). Edge-latched so held-\ steps one
+    // system per press. Setting a destination arms travel mode but does NOT
+    // engage the jump -- that stays on the 'j' travel key (NovaTravel_Tick).
+    const bool destination_cycle =
+        input.cycle_destination_next || input.cycle_destination_previous;
+    if (destination_cycle && !destination_cycle_was_held) {
+      const std::int16_t dest = NovaTravel_CycleDestinationSystem(
+          state, input.cycle_destination_next);
+      if (dest >= 0) {
+        // Destination cycled; travel mode is armed but the jump awaits 'j'.
+        NovaLog::Info("backslash: destination system {}", dest);
+      } else {
+        NovaLog::Info("backslash: no travelable destination from this system");
+      }
+    }
+    destination_cycle_was_held = destination_cycle;
+    // Hyperspace-mode toggle (H): latch the off-map destination-selection
+    // channel (the manual's "press H to set hyperspace mode, then Backslash to
+    // pick the destination system"). The latch is cleared when a jump lands.
+    if (input.hyperspace_mode && !hyperspace_was_held) {
+      state.travel.hyperspace_mode = true;
+    }
+    hyperspace_was_held = input.hyperspace_mode;
     // Ship-target cycling: backquote (`) / Shift+backquote, with the
     // combat-relevant-only modifier (Alt or 'k'). Mirrors the original's
     // Ship_HandlePlayerShip cycle-target block (0x0044b120): a no-op result or
@@ -403,8 +432,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // state machine is untouched by inspection (the map only selects systems).
     const bool starmap_held = input.starmap;
     if (starmap_held && !starmap_was_held) {
-      const StarmapResult map_result =
-          NovaStarmap_RunWindow(platform, state);
+      const StarmapResult map_result = NovaStarmap_RunWindow(platform, state);
       if (map_result.exit == StarmapExit::kQuit) {
         returning_to_menu = true;
         break;

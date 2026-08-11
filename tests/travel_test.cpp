@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
+#include <vector>
+
 #include "game/game_state.hpp"
 #include "game/scenario_data.hpp"
 #include "game/travel.hpp"
@@ -7,6 +10,7 @@
 namespace {
 
 using game::GameState;
+using game::NovaTravel_CycleDestinationSystem;
 using game::NovaTravel_MarkSystemDiscovered;
 using game::NovaTravel_PlotStarmapDestination;
 using game::NovaTravel_Tick;
@@ -14,8 +18,8 @@ using game::NovaTravel_Tick;
 // Returns whether the scenario marks zero-based `id` visible/explored and the
 // pilot's explored bitset holds it.
 bool IsDiscovered(const GameState &state, std::int16_t zero_based_id) {
-  if (zero_based_id < 0 ||
-      static_cast<std::size_t>(zero_based_id) >= state.scenario.systems.size()) {
+  if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
+                               state.scenario.systems.size()) {
     return false;
   }
   const std::size_t idx = static_cast<std::size_t>(zero_based_id);
@@ -54,7 +58,8 @@ TEST_CASE("jump discovery reveals the destination and its neighbours") {
   // The reached system is revealed.
   CHECK(IsDiscovered(state, start));
 
-  // Every outward link (stored as a system resource id >= 0x80) is revealed too.
+  // Every outward link (stored as a system resource id >= 0x80) is revealed
+  // too.
   for (const std::int16_t link : sys->links) {
     if (link < 0x80) {
       continue;
@@ -108,13 +113,15 @@ TEST_CASE("starmap plot arms the travel slot only for linked destinations") {
   std::int16_t unrelated = -1;
   for (std::size_t i = 0; i < state.scenario.systems.size() && linked_dest < 0;
        ++i) {
-    const auto *sys = state.scenario.System(static_cast<std::int16_t>(i + 0x80));
+    const auto *sys =
+        state.scenario.System(static_cast<std::int16_t>(i + 0x80));
     if (!sys) {
       continue;
     }
     for (const std::int16_t link : sys->links) {
       if (link >= 0x80 &&
-          static_cast<std::size_t>(link - 0x80) < state.scenario.systems.size() &&
+          static_cast<std::size_t>(link - 0x80) <
+              state.scenario.systems.size() &&
           link - 0x80 != static_cast<std::int16_t>(i)) {
         start = static_cast<std::int16_t>(i);
         linked_dest = static_cast<std::int16_t>(link - 0x80);
@@ -157,8 +164,7 @@ TEST_CASE("starmap plot arms the travel slot only for linked destinations") {
   // Reset for the negative cases, then check a non-linked destination.
   state.travel.starmap_destination_system_id = -1;
   state.travel.travel_slot = -1;
-  const bool not_armed =
-      NovaTravel_PlotStarmapDestination(state, unrelated);
+  const bool not_armed = NovaTravel_PlotStarmapDestination(state, unrelated);
   CHECK(not_armed == false);
   CHECK(state.travel.starmap_destination_system_id == unrelated);
   CHECK(state.travel.travel_slot == -1);
@@ -211,4 +217,90 @@ TEST_CASE("plot to a hyperlink without a paired nav-def stellar still jumps") {
   }
   CHECK(state.travel.just_completed);
   CHECK(state.player.current_system_id == 1);
+}
+
+// The destination-system cycle (the Backslash / command-0x60 channel) must
+// advance through the current system's directly-linked systems, wrapping, and
+// arm the travel slot + destination so 'j' jumps there. On a system with no
+// travelable links it must return -1 and clear the armed destination.
+TEST_CASE("destination-system cycle steps and wraps") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Pick a starting system with at least two distinct outward links.
+  std::int16_t start = -1;
+  std::vector<std::int16_t> dests;
+  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+    const game::System *sys =
+        state.scenario.System(static_cast<std::int16_t>(i + 0x80));
+    if (!sys) {
+      continue;
+    }
+    dests.clear();
+    for (const std::int16_t link : sys->links) {
+      if (link >= 0x80 &&
+          static_cast<std::size_t>(link - 0x80) <
+              state.scenario.systems.size() &&
+          link - 0x80 != static_cast<std::int16_t>(i)) {
+        dests.push_back(static_cast<std::int16_t>(link - 0x80));
+      }
+    }
+    if (dests.size() >= 2) {
+      start = static_cast<std::int16_t>(i);
+      break;
+    }
+  }
+  REQUIRE(start >= 0);
+  REQUIRE(dests.size() >= 2);
+  state.player.current_system_id = start;
+
+  // First press selects the first destination (travel_slot was -1).
+  const std::int16_t d0 =
+      NovaTravel_CycleDestinationSystem(state, /*forward=*/true);
+  REQUIRE(d0 == dests[0]);
+  CHECK(state.travel.starmap_destination_system_id == d0);
+  CHECK(state.travel.travel_slot >= 0);
+  CHECK(state.travel.destination_system_id == d0);
+
+  // Next press moves to the second destination (not back to the first).
+  const std::int16_t d1 =
+      NovaTravel_CycleDestinationSystem(state, /*forward=*/true);
+  REQUIRE(d1 == dests[1]);
+  CHECK(d1 != d0);
+
+  // Backward wraps from the second to the first.
+  const std::int16_t back =
+      NovaTravel_CycleDestinationSystem(state, /*forward=*/false);
+  REQUIRE(back == d0);
+
+  // A system with no outward links clears the armed destination and returns -1.
+  std::int16_t dead_end = -1;
+  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+    const game::System *sys =
+        state.scenario.System(static_cast<std::int16_t>(i + 0x80));
+    if (!sys) {
+      continue;
+    }
+    bool has_link = false;
+    for (const std::int16_t link : sys->links) {
+      if (link >= 0x80 &&
+          static_cast<std::size_t>(link - 0x80) <
+              state.scenario.systems.size() &&
+          link - 0x80 != static_cast<std::int16_t>(i)) {
+        has_link = true;
+        break;
+      }
+    }
+    if (!has_link) {
+      dead_end = static_cast<std::int16_t>(i);
+      break;
+    }
+  }
+  REQUIRE(dead_end >= 0);
+  state.player.current_system_id = dead_end;
+  const std::int16_t no_dest =
+      NovaTravel_CycleDestinationSystem(state, /*forward=*/true);
+  REQUIRE(no_dest == -1);
+  CHECK(state.travel.starmap_destination_system_id == -1);
+  CHECK(state.travel.travel_slot == -1);
 }

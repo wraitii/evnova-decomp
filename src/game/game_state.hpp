@@ -319,6 +319,13 @@ struct TravelState {
   // this phase the ship coasts and the sequence plays; at zero the jump
   // completes and the system changes.
   int jump_countdown_ticks = 0;
+  // Hyperspace-mode latch (H): when set, leading Backslash destination-system
+  // presses (cycle_destination_*) choose the next jump system, and the HUD
+  // travel panel reads as "Hyperspace". Mirrors the original's command 0x60
+  // travel_transfer_mode-3 channel plus the manual's "press H to set the
+  // nav computer to hyperspace mode". Cleared when a jump completes or on
+  // system change.
+  bool hyperspace_mode = false;
   // Whether the engaged jump has finished declaring a destination and is now
   // in the transition. The original jumps directly into the hyperspace flight;
   // we keep a boolean so the loop knows to hand off to the completion path.

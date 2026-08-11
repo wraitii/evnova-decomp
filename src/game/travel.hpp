@@ -94,6 +94,19 @@ void NovaTravel_MarkSystemDiscovered(GameState &state,
 bool NovaTravel_PlotStarmapDestination(GameState &state,
                                        std::int16_t destination_zero_based);
 
+// Cycles the player's next-jump destination SYSTEM through the systems
+// directly linked to the current system, in slot order. Mirrors the original's
+// command-0x60 block in Ship_HandlePlayerShip (g_playerCycleTravelTarget-
+// CommandLatch / travel_transfer_mode == 3 / ai_secondary_target_slot++): a
+// destination is only offered when its link slot resolves to a travelable
+// system. Each press advances (forward=true) or retreats (forward=false) one
+// slot (wrapping); sets the travel slot + destination on state.travel so 'j'
+// jumps there and the HUD shows the name. Returns the newly selected
+// destination zero-based system id, or -1 when the current system has no
+// travelable links.
+[[nodiscard]] std::int16_t NovaTravel_CycleDestinationSystem(GameState &state,
+                                                             bool forward);
+
 void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms);
 
 } // namespace game

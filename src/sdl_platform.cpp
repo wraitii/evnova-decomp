@@ -314,17 +314,25 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.cycle_target_previous =
       pressed(SDL_SCANCODE_TAB) &&
       (pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT));
+  // Shift is the shared direction modifier for the backward cycling commands.
+  const bool shift_held =
+      pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT);
+  const bool alt_held =
+      pressed(SDL_SCANCODE_LALT) || pressed(SDL_SCANCODE_RALT);
+  // Destination-SYSTEM cycling (the next-jump system): Backslash forwards,
+  // Shift+Backslash backwards. This is the command the EV Nova manual binds
+  // to Backslash for choosing the hyperspace destination system, distinct
+  // from Tab's stellar cycle above.
+  const bool backslash = pressed(SDL_SCANCODE_BACKSLASH);
+  input.cycle_destination_next = backslash && !shift_held;
+  input.cycle_destination_previous = backslash && shift_held;
+  input.hyperspace_mode = pressed(SDL_SCANCODE_H);
   // Ship-target cycling: backquote (`) next, Shift+backquote backwards (the
   // original's direction modifiers are Left/Right Shift, 0x2a/0x36). Alt (or
   // the original's 'k', 0x6b) restricts the cycle to combat-relevant ships.
-  const bool alt_held =
-      pressed(SDL_SCANCODE_LALT) || pressed(SDL_SCANCODE_RALT);
-  const bool shift_held =
-      pressed(SDL_SCANCODE_LSHIFT) || pressed(SDL_SCANCODE_RSHIFT);
   input.cycle_ship_include_combat = alt_held || pressed(SDL_SCANCODE_K);
   input.cycle_ship_target_next = pressed(SDL_SCANCODE_GRAVE) && !shift_held;
-  input.cycle_ship_target_previous =
-      pressed(SDL_SCANCODE_GRAVE) && shift_held;
+  input.cycle_ship_target_previous = pressed(SDL_SCANCODE_GRAVE) && shift_held;
   // Nearest hostile/engaged target selection.
   input.select_nearest_hostile = pressed(SDL_SCANCODE_O) && !alt_held;
   input.select_nearest_engaged = pressed(SDL_SCANCODE_O) && alt_held;

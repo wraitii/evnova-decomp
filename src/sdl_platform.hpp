@@ -72,6 +72,21 @@ struct FlightInput {
   // system's eligible stellars and Shift+Tab goes backwards.
   bool cycle_target_next = false;
   bool cycle_target_previous = false;
+  // Cycle the destination SYSTEM for the next jump: Backslash cycles forward
+  // through the systems directly linked to (jumpable from) the current system,
+  // Shift+Backslash backwards. Mirrors the original's command 0x60
+  // (g_playerCycleTravelTargetCommandLatch) read by Ship_HandlePlayerShip,
+  // whose default binding the EV Nova manual describes as "press the
+  // Backslash key until the name of your desired destination system appears"
+  // (after entering hyperspace mode with H). Distinct from cycle_target_next
+  // (Tab), which cycles stellars within the system.
+  bool cycle_destination_next = false;
+  bool cycle_destination_previous = false;
+  // Hyperspace-mode toggle (H): arms the in-flight destination-system
+  // selection channel so leading Backslash cycles choose a jump system
+  // (manual: "press the H key to set your ship's computer to hyperspace
+  // mode. Then, press the Backslash key until the desired destination...").
+  bool hyperspace_mode = false;
   // Cycle the ship (primary) target: backquote (`), Shift+backquote backwards
   // (the original's default binding per the EV Nova manual: "press the ` key
   // until the desired ship is selected"). When cycle_ship_include_combat is

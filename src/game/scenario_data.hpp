@@ -533,7 +533,10 @@ struct System {
   std::int16_t pos_x = 0; // xPos
   std::int16_t pos_y = 0; // yPos
   std::array<std::int16_t, 16>
-      links{}; // Con1-16 (system ids, stored -1/zero-based)
+      links{}; // Con1-16 (system resource ids, 0x80-based; -1/less marks an
+               //   empty slot). A jump target is a links entry, converted to a
+               //   scenario index as (value - 0x80); the travel slot lookup
+               //   (FindLinkedTravelSlot) compares against this 0x80-based id.
   std::array<std::int16_t, 16> nav_defs{-1,
                                         -1,
                                         -1,

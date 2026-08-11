@@ -313,15 +313,18 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
         travel += " > " + dst->name;
       }
     } else if (state.travel.starmap_destination_system_id >= 0) {
-      // A galaxy-map plot is armed: show the plotted next-jump destination
-      // system (mirrors the original showing the route target after the
-      // starmap syncs its route into the travel status panel).
+      // A destination is armed -- either plotted from the galaxy starmap, or
+      // cycled with Backslash after entering hyperspace mode (H). Show the
+      // jump/hyperspace destination system (the manual: the nav display reads
+      // "Hyperspace" and lists the destination name).
       const auto *dst = state.scenario.System(static_cast<std::int16_t>(
           state.travel.starmap_destination_system_id + 0x80));
+      const std::string prefix =
+          state.travel.hyperspace_mode ? "HYP > " : "JUMP > ";
       if (dst && !dst->name.empty()) {
-        travel = "JUMP > " + dst->name;
+        travel = prefix + dst->name;
       } else {
-        travel = "JUMP > ?";
+        travel = prefix + "?";
       }
     } else {
       const std::int16_t sid = state.travel.selected_stellar_id;

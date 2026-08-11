@@ -99,6 +99,7 @@ Scan detection / radar (scope 0xc):
 - `g_proximity_scan_detected` (0x007caba0) drives radar blip drawing in `NovaUi_DrawStellarRadarPanel`.
 
 Travel / interaction UI:
+- `0x0044b120` `Ship_HandlePlayerShip` destination-system cycle (command 0x60, `g_playerCycleTravelTargetCommandLatch`) — Backslash / Shift+Backslash cycle the player's next-jump DESTINATION SYSTEM through the current system's directly-linked systems (`travel_transfer_mode == 3`, `ai_secondary_target_slot++`). Default key per the EV Nova manual ("press the Backslash key until the name of your desired destination system appears" after entering hyperspace mode with H). Ported as `NovaTravel_CycleDestinationSystem`; H toggles `TravelState.hyperspace_mode`.
 - `0x00443760` `NovaGameplay_TickShipInteractionReactions` — per-tick loop over 16 interaction slots; per-slot handler composes feedback, mission resolution, surrender/board conditions.
 - `0x004444f0` `NovaGameplay_BuildTravelDestinationDescription` — builds destination description text (stellar/system resolution + localization).
 - `0x0042cc30` `NovaGameplay_TickTravelCountdownSprite` (`DAT_00734c18` countdown) — flashes the travel/limbo countdown sprite; armed at 30 in escape-pod seq, cleared on travel completion.

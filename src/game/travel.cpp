@@ -5,6 +5,7 @@
 #include "outfit.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace game {
@@ -75,6 +76,7 @@ void CompleteJump(GameState &state) {
   t.travel_slot = -1;
   t.engaged_stellar_id = -1;
   t.destination_system_id = -1;
+  t.hyperspace_mode = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +247,75 @@ void NovaTravel_MarkSystemDiscovered(GameState &state,
       mark(static_cast<std::int16_t>(link - 0x80));
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Destination-system cycling (the Backslash / command-0x60 channel).
+// ---------------------------------------------------------------------------
+// Mirrors the command-0x60 block in Ship_HandlePlayerShip
+// (g_playerCycleTravelTargetCommandLatch): builds the set of travelable
+// destination slots for the current system, then nudges the travel-slot
+// selector one slot forward/backward through them (wrapping). A slot is a
+// candidate when its linked destination (System.links[slot] >= 0x80) resolves
+// to a real, non-self system. On a hit it sets the travel slot + destination
+// on state.travel so 'j' jumps there and the HUD travel panel shows the name.
+std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
+  TravelState &t = state.travel;
+  const System *sys = state.scenario.System(CurrentSystemResource(state));
+  if (!sys) {
+    return -1;
+  }
+  const std::int16_t current_res = CurrentSystemResource(state);
+  const std::size_t n = state.scenario.systems.size();
+
+  // Collect candidate slots: every link slot whose destination is a real,
+  // non-self system.
+  std::array<int, 16> slots{};
+  std::size_t count = 0;
+  for (std::size_t slot = 0; slot < sys->links.size(); ++slot) {
+    const std::int16_t link = sys->links[slot];
+    if (link < 0x80 || link == current_res) {
+      continue; // no link, or it loops back to the current system
+    }
+    const std::int16_t dest = static_cast<std::int16_t>(link - 0x80);
+    if (dest < 0 || static_cast<std::size_t>(dest) >= n) {
+      continue; // dangling link to an out-of-range system
+    }
+    slots[count++] = static_cast<int>(slot);
+  }
+  if (count == 0) {
+    t.travel_slot = -1;
+    t.destination_system_id = -1;
+    t.starmap_destination_system_id = -1;
+    return -1; // current system has no travelable links
+  }
+
+  // Locate the current travel-slot selection within the candidate list.
+  std::size_t index = count;
+  for (std::size_t i = 0; i < count; ++i) {
+    if (slots[i] == t.travel_slot) {
+      index = i;
+      break;
+    }
+  }
+  const std::size_t next =
+      index == count
+          ? (forward ? 0 : count - 1)
+          : (forward ? (index + 1) % count : (index + count - 1) % count);
+  const int slot = slots[next];
+  const std::int16_t dest = static_cast<std::int16_t>(
+      sys->links[static_cast<std::size_t>(slot)] - 0x80);
+
+  t.travel_slot = static_cast<std::int16_t>(slot);
+  t.starmap_destination_system_id = dest;
+  t.destination_system_id = dest;
+  const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
+  if (stellar_id >= 0x80) {
+    t.engaged_stellar_id = stellar_id;
+  }
+  NovaLog::Info(
+      "cycled destination system to {} (hyperlink slot {})", dest, slot);
+  return dest;
 }
 
 // ---------------------------------------------------------------------------

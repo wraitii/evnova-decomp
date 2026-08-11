@@ -71,18 +71,65 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
 
 - Draws the galaxy graph: `System.links` as lines (deduplicated by drawing from
   the lower index), system nodes as filled circles, and labels for explored /
-  current / selected systems.
-- Colour coding: current system = amber; explored = light blue; unexplored =
-  dim blue (hidden label). Markers are additionally tinted toward their owning
-  government's theme colour (`Government.theme_red/green/blue`, the political-map
+  current / selected systems. Only *discovered* systems are drawn at all: each
+  marker is gated on the explored/visible flag (matching the original's
+  `is_visible && has_explored_flag` marker gate in `NovaUi_DrawStarmapRoutesAndMarkers`),
+  a link line draws only when BOTH its endpoints are explored, and undiscovered
+  systems have no marker, no label, cannot be clicked and are excluded from the
+  Tab/Backslash cycle. Undiscovered far-flung systems therefore don't stagger the
+  view either.
+- Markers are true solid discs (filled triangle-fan via the geometry path), so the
+  node sits exactly on its system position; link endpoints share the same panel
+  origin as the markers (the raw world projection is offset by the panel origin),
+  so link lines land precisely on the centre of each circle.
+- Colour coding: current system = amber; explored = light blue. Markers are
+  additionally tinted toward their owning government's theme colour
+  (`Government.theme_red/green/blue`, the political-map
   affiliation drawn by `NovaUi_DrawStarmapPoliticalOverlay`), so explored
   systems read as their faction's territory at a glance.
-- Pan (arrow keys) and zoom (`+`/`-`); `h` re-fits the view; mouse click or
-  Tab selects/cycles a system.
-- Reachable-jump accent: the links fanning out of the *selected* system are
-  redrawn in a bright green so the player sees every single-jump route
-  candidate from the highlighted node (mirrors the original's selected-stellar
-  route emphasis).
+- Zoom is stepped through a handful of fixed levels (a modest geometric series,
+  x1.5 per level, over the whole-galaxy fit: level 0 = whole galaxy, higher =
+  closer), matching the original's stepped zoom rather than a continuous slider.
+  The top level is capped so the closest view stays a useful regional scale
+  instead of blowing up to a handful of systems. The map opens on a *middle*
+  level centred on the pilot's current system -- not pinned to the discovered
+  cluster -- so the local neighbourhood (and a good span of the galaxy) is
+  visible immediately; `+`/`-` step between levels and `h` snaps back to that
+  opening view (re-centring on the current system). Zooming pivots about the
+  current system's on-screen position (like the original's fixed pan reference),
+  so the current system stays put rather than racing to a corner of the panel.
+  Pan (arrow keys) scrolls the camera, content moving opposite the key direction
+  (Right shows what lies to the right of the current view); mouse click or
+  Tab/Backslash selects/cycles a system.
+- Selection/jump accent: when the highlighted system is a directly-linked jump
+  destination of the current system, a thick green line is drawn from the
+  current system to it (plus a small green ring at that node), making the
+  planned next hop obvious before committing.
+- Tab / Backslash step the selection through the *destination ring* computed
+  once per session: each system *directly linked* to the player's current
+  system (the EV Nova manual: "press Tab or Backslash to cycle through all the
+  systems that are linked to your current system"). The ring contains ONLY those
+  destination systems -- never the current system itself (jumping to where you
+  already are is meaningless). Shift+Tab / Shift+Backslash step backwards.
+  Anchored to the player's current system, so a single-link system offers just
+  that one destination rather than chain-walking outward; when the current
+  selection isn't in the ring (e.g. the current system) the first forward step
+  lands on the first destination and the first backward step on the last. The
+  committed plotted jump to the highlighted system is shown as the thick green
+  current-path line + small green target marker.
+- Committed-jump accent (faithful to the original): the *active* plotted jump
+  (travel_transfer_mode == 3) is drawn as a single thick green line from the
+  current system to its directly-linked destination, with a small green link
+  marker at that destination. This deliberately does NOT fan green over every
+  reachable link from the selected node (the original only highlights the jump
+  the player has committed to). Distinct from the *selection* accent above, which
+  previews the currently highlighted destination on every redraw.
+- Rendering fidelity: link lines render as thick quads (2px at the current
+  system, brighter for current-adjacent links), marker nodes scale up with
+  zoom (mirroring the original's zoom-dependant marker insets), and explored-
+  system name labels appear only once the map is zoomed in past a threshold
+  (mirroring the original's zoom-gated labels, Dat_00575a10) while the
+  current / selected system names stay always visible.
 - Inspector footer shows the selected system's name, explored/current state,
   owning government, outward jump count, and a `[plotted target]` flag when it
   is the active starmap-plotted destination.
