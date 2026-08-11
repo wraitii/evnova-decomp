@@ -371,6 +371,33 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
   }
 }
 
+// Drives the starfield during the hyperspace tunnel. The ship is coasting
+// (velocity held at max along the heading) but we deliberately do NOT advance
+// its world position; instead every star is pushed along the REVERSE of the
+// jump heading each frame by a speed proportional to the frame time, so the
+// whole stationary field visibly streams past the (fixed) camera as the tunnel
+// streaks. The wrap-around in DrawBackground keeps the field continuously
+// populated as stars leave one edge and re-enter the opposite. `speed` is
+// set from the overall tunnel pace (independent of the saved per-particle
+// parallax speed, which would otherwise freeze slow stars).
+void SpaceflightView::UpdateAmbientStarsTunnel(float jump_heading_rad,
+                                               float frame_time_ms) {
+  // Tunnel stream speed in px/ms (a brisk forward whoosh that reads clearly
+  // over the ~900 ms tunnel). Measured against the 400px-tall viewport.
+  constexpr float kTunnelSpeedPxPerMs = 1.4F;
+  const float drive = kTunnelSpeedPxPerMs * frame_time_ms;
+  // Reverse heading: stars stream backward relative to the forward jump.
+  const float dx = -std::sin(jump_heading_rad) * drive;
+  const float dy = std::cos(jump_heading_rad) * drive;
+  for (auto &s : ambient_stars_) {
+    if (!s.active) {
+      continue;
+    }
+    s.pos_x += dx;
+    s.pos_y += dy;
+  }
+}
+
 // Draws the solid per-system space backdrop (a flat tint from SystemDef
 // BkgndColor, pure black when unset) and then the active ambient star
 // particles. Ghidra: Frame_RenderViewportBackground clears + fills with the
@@ -407,6 +434,16 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   // indexed blend), not a pixel dimension - so each star stays ~5px regardless.
   const Viewport vp = CurrentViewport(platform);
   const SpriteAsset *sheet = StarFieldSheet(platform);
+  // During the in-tunnel hyperspace jump, draw each streaming star as a short
+  // motion-blur streak along the reverse of the jump heading (like the
+  // original's tunnel whoosh). The star positions themselves are driven each
+  // frame by UpdateAmbientStarsTunnel; here we add the visual rails.
+  const bool tunnel =
+      state.travel.engaging &&
+      state.travel.jump_phase == TravelState::JumpPhase::kFlying;
+  const float tunnel_sx = -std::sin(state.travel.jump_heading_rad);
+  const float tunnel_sy = std::cos(state.travel.jump_heading_rad);
+  constexpr int kTunnelStreakSteps = 6;
   for (const auto &s : ambient_stars_) {
     if (!s.active) {
       continue;
@@ -417,16 +454,40 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
       SpriteDrawOptions opts;
       opts.wrap = true;
       opts.linear_scale = true;
-      DrawSprite(renderer,
-                 *sheet,
-                 s.frame,
-                 s.pos_x,
-                 s.pos_y,
-                 state.player.pos_x,
-                 state.player.pos_y,
-                 vp.w,
-                 vp.h,
-                 opts);
+      if (tunnel) {
+        // Draw the star several times receding along the reverse heading with
+        // increasing spacing and fading alpha, producing a streaking rail.
+        constexpr float kStepPx = 7.0F;
+        for (int i = 0; i < kTunnelStreakSteps; ++i) {
+          opts.alpha_mod = 1.0F - static_cast<float>(i) /
+                                      static_cast<float>(kTunnelStreakSteps);
+          const float sx =
+              s.pos_x + tunnel_sx * kStepPx * static_cast<float>(i);
+          const float sy =
+              s.pos_y + tunnel_sy * kStepPx * static_cast<float>(i);
+          DrawSprite(renderer,
+                     *sheet,
+                     s.frame,
+                     sx,
+                     sy,
+                     state.player.pos_x,
+                     state.player.pos_y,
+                     vp.w,
+                     vp.h,
+                     opts);
+        }
+      } else {
+        DrawSprite(renderer,
+                   *sheet,
+                   s.frame,
+                   s.pos_x,
+                   s.pos_y,
+                   state.player.pos_x,
+                   state.player.pos_y,
+                   vp.w,
+                   vp.h,
+                   opts);
+      }
       continue;
     }
     // Fallback when the star-field sheet is unavailable: a small single-pixel
@@ -456,7 +517,18 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
   // Animated stellar sprite-frame stepping (dwell accumulator cadence).
   AdvanceStellarAnimation(platform, state, frame_time_ms);
   // Ambient-star spatial parallax (moves by the ship's movement delta).
-  UpdateAmbientStars(dx, dy);
+  if (state.travel.engaging &&
+      state.travel.jump_phase == TravelState::JumpPhase::kFlying) {
+    // Hyperspace tunnel: the stars stream backward past the (fixed) ship as
+    // it coasts through the tunnel. Override the normal ship-parallax movement
+    // with a large drive along the reverse of the jump heading each frame so
+    // the field visibly streaks; the stars wrap around the viewport in
+    // DrawBackground so the tunnel stays populated.
+    UpdateAmbientStarsTunnel(state.travel.jump_heading_rad, frame_time_ms);
+  } else {
+    // Normal in-system parallax (moves by the ship's movement delta).
+    UpdateAmbientStars(dx, dy);
+  }
 }
 
 // Ghidra Stellar_UpdateStellarSprites (0x0042cd10), ambient-animation part.
@@ -766,10 +838,10 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
 // composed precedence auditable and lets a future layer-table refactor replace
 // the fixed sequence wholesale.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
-  DrawBackground(platform, state);    // backmost: tint + ambient stars
-  DrawStellarBodies(platform, state); // stellar planets / stations
-  DrawShots(platform, state);         // projectiles above stellars
-  DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
+  DrawBackground(platform, state);        // backmost: tint + ambient stars
+  DrawStellarBodies(platform, state);     // stellar planets / stations
+  DrawShots(platform, state);             // projectiles above stellars
+  DrawNpcShips(platform, state);          // NPC ships above the backdrop/shots
   DrawShipTargetReticle(platform, state); // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target
 
@@ -840,9 +912,9 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
 // index is `state_base + corner` where state_base encodes the target's
 // disposition:
 //   0xc fire-restricted (grey: can't fire -- near-disabled armor < 1/3 max,
-//   boarding, travel-to-stellar, or govt no-fire flag; Ship_IsShipFireRestricted
-//   0x004687b0), 0x8 targeting the player (or a player-targeting chain),
-//   0x0 distress-eligible, 0x4 other.
+//   boarding, travel-to-stellar, or govt no-fire flag;
+//   Ship_IsShipFireRestricted 0x004687b0), 0x8 targeting the player (or a
+//   player-targeting chain), 0x0 distress-eligible, 0x4 other.
 // The bracket offset is (max(target frame height, target frame width) + 1) / 2
 // rounded up plus the decaying reticle pulse; the four sprites are then placed
 // at asymmetric screen positions around the target (the 16px corner margin
@@ -903,10 +975,8 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   // below which blits in screen space directly.
   const float wx = target.pos_x;
   const float wy = target.pos_y;
-  const float cx =
-      (wx - state.player.pos_x) + static_cast<float>(vp.w) / 2.0F;
-  const float cy =
-      (wy - state.player.pos_y) + static_cast<float>(vp.h) / 2.0F;
+  const float cx = (wx - state.player.pos_x) + static_cast<float>(vp.w) / 2.0F;
+  const float cy = (wy - state.player.pos_y) + static_cast<float>(vp.h) / 2.0F;
 
   // Bracket frame base by target state (mirrors the reticle's sVar4 branch).
   int frame_base = 4; // other
@@ -917,9 +987,8 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
         target.target_stellar_object_id == -1) {
       frame_base = 8; // directly targeting the player
     } else {
-      frame_base = NovaTargeting_IsShipEligibleForDistressCall(state, target)
-                       ? 0
-                       : 4;
+      frame_base =
+          NovaTargeting_IsShipEligibleForDistressCall(state, target) ? 0 : 4;
     }
     // The original re-checks the chain AFTER the state branches and overrides
     // 0/4: targeting a ship that itself targets the player reads as 8.
@@ -944,8 +1013,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     full = std::max(static_cast<float>(sprite->base.tile_width),
                     static_cast<float>(sprite->base.tile_height));
   }
-  const float off =
-      std::ceil(full * 0.5F) + std::round(pulse);
+  const float off = std::ceil(full * 0.5F) + std::round(pulse);
 
   // The real corner brackets, when the cicn set is available. The frames'
   // anchors are their top-left corners (LoadCicnSet mirrors
@@ -961,11 +1029,10 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     // the 16px corner margin) are in world pixels, so they are added to the
     // target's WORLD position here rather than to the screen centre -- the
     // DrawSprite call below applies the camera transform exactly once.
-    const float pos[4][2] = {
-        {wx - off - 16.0F, wy - off - 16.0F},
-        {wx + off, wy - off - 16.0F},
-        {wx + off, wy + off},
-        {wx - off - 16.0F, wy + off}};
+    const float pos[4][2] = {{wx - off - 16.0F, wy - off - 16.0F},
+                             {wx + off, wy - off - 16.0F},
+                             {wx + off, wy + off},
+                             {wx - off - 16.0F, wy + off}};
     for (int corner = 0; corner < 4; ++corner) {
       DrawSprite(platform.renderer(),
                  *ret,
@@ -1008,9 +1075,9 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     SDL_RenderFillRect(platform.renderer(), &h);
     SDL_RenderFillRect(platform.renderer(), &v);
   };
-  corner(left, top, kArm, kArm);          // top-left
-  corner(right - kArm, top, kArm, kArm);  // top-right
-  corner(left, bottom - kArm, kArm, kArm); // bottom-left
+  corner(left, top, kArm, kArm);                   // top-left
+  corner(right - kArm, top, kArm, kArm);           // top-right
+  corner(left, bottom - kArm, kArm, kArm);         // bottom-left
   corner(right - kArm, bottom - kArm, kArm, kArm); // bottom-right
 }
 
@@ -1057,17 +1124,15 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
     full = std::max(static_cast<float>(spin->tile_width),
                     static_cast<float>(spin->tile_height));
   }
-  const float off =
-      std::ceil(full * 0.5F) + std::round(pulse);
+  const float off = std::ceil(full * 0.5F) + std::round(pulse);
 
   // Frame base 0 (the original reads the destination's orientation flag for
   // this; ours is not yet reconstructed, so 0).
   const int frame_base = 0;
-  const float pos[4][2] = {
-      {wx - off - 16.0F, wy - off - 16.0F},
-      {wx + off, wy - off - 16.0F},
-      {wx + off, wy + off},
-      {wx - off - 16.0F, wy + off}};
+  const float pos[4][2] = {{wx - off - 16.0F, wy - off - 16.0F},
+                           {wx + off, wy - off - 16.0F},
+                           {wx + off, wy + off},
+                           {wx - off - 16.0F, wy + off}};
   for (int corner = 0; corner < 4; ++corner) {
     DrawSprite(platform.renderer(),
                *ret,

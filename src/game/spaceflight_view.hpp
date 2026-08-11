@@ -80,10 +80,8 @@ public:
   // original performs the pick through the sprite pixel-test pass, which is
   // approximated here with the sprite half-span hit test (TODO(decomp)). No
   // government filter: any ship under the cursor may be selected for hailing.
-  std::int16_t PickShipAt(SdlPlatform &platform,
-                          const GameState &state,
-                          float rx,
-                          float ry);
+  std::int16_t
+  PickShipAt(SdlPlatform &platform, const GameState &state, float rx, float ry);
 
   // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0): (re)spawns the
   // 20-slot ambient starfield around the player ship. Spawn count is
@@ -104,6 +102,16 @@ public:
   // gains (dx, dy) * per-particle speed, so nearer/faster particles stream
   // past while slow (speed 0) distant ones stay fixed (real spatial parallax).
   void UpdateAmbientStars(float dx, float dy);
+
+  // Hyperspace-tunnel star drive: advances the ambient starfield during the
+  // in-tunnel jump flight (the streaks streaming behind the coasting ship).
+  // Each active star's world position is pushed along the reverse of the jump
+  // heading by a speed scaled to the frame time, so the stationary field
+  // visibly streams past; the one-exit wraparound in DrawBackground keeps the
+  // tunnel populated. Mirrors how the original's Frame_UpdateViewportWrap-
+  // BackgroundSprites re-runs the star scatter during the jump transition,
+  // but driven continuously over the tunnel duration.
+  void UpdateAmbientStarsTunnel(float jump_heading_rad, float frame_time_ms);
 
   // Draws the solid per-system space background tint (SystemDef.bkgnd_color,
   // Ghidra NovaRender_SetSystemSpaceBackgroundColor /

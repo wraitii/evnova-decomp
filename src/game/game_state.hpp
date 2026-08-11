@@ -352,7 +352,6 @@ struct TravelState {
   float jump_heading_rad = 0.0F;
 };
 
-
 // The outfit-driven effective ship stats (mirrors the cached outputs of the
 // Ghidra Ship_ComputeShip* helpers). Stored on GameState so the spaceflight
 // loop reads a cached snapshot instead of re-scanning the 0x200-entry outfit
