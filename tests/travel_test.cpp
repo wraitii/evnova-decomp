@@ -304,3 +304,45 @@ TEST_CASE("destination-system cycle steps and wraps") {
   CHECK(state.travel.starmap_destination_system_id == -1);
   CHECK(state.travel.travel_slot == -1);
 }
+
+// The pre-fire turn-around: engaging 'j' while the ship is still moving must
+// turn the hull (toward the reverse of the velocity, i.e. back toward the jump
+// vector) and brake the velocity to a stop before the tunnel fires -- the
+// original's Ship_HandlePlayerShip travel_transfer_mode == 3 block
+// (0x0044b120). The jump still completes to the plotted destination.
+TEST_CASE("jump engages with a moving ship: turns around and brakes") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Kania (0) -> Tichel (1); give the ship a healthy outward drift so the
+  // turn-around actually has something to brake.
+  state.player.current_system_id = 0;
+  state.player.pos_x = 300.0F;
+  state.player.pos_y = 300.0F;
+  state.player.heading = 0.0F; // up
+  state.player.vel_x = 8.0F;   // flying rightward (heading 90 deg)
+  state.player.vel_y = 0.0F;
+  state.player.fuel_points = 500;
+  const float initial_speed =
+      std::hypot(state.player.vel_x, state.player.vel_y);
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  // Engage and let the slow-turn run: after a few frames the heading must
+  // have changed (turning around) and the speed must have decayed.
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.engaging);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kSlowTurn);
+  const float heading_after_engage = state.player.heading;
+  for (int f = 0; f < 30; ++f) {
+    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  }
+  CHECK(state.player.heading != heading_after_engage);
+  CHECK(std::hypot(state.player.vel_x, state.player.vel_y) < initial_speed);
+
+  // Let the whole sequence run; it must still land in Tichel.
+  for (int f = 0; f < 600 && !state.travel.just_completed; ++f) {
+    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  }
+  CHECK(state.travel.just_completed);
+  CHECK(state.player.current_system_id == 1);
+}

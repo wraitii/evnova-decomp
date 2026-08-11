@@ -22,12 +22,25 @@
 // links to Tichel at slot 3 with no travel stellar there, yet 'j' still jumps
 // Kania->Tichel). So a plotted destination is resolved purely against links.
 //
-// The in-flight hyperspace flight is modelled as two visible phases (see the
-// NovaTravel_Tick notes below): a slow-turn/brake onto the jump heading, then
-// an in-tunnel coast at max speed while the spaceflight view renders the
-// starring tunnel. The original also stages jump audio (Stellar_Trigger-/
-// HyperspaceAudioOnce) and warp-syncs escort ships by jump depth (Stellar_Com-
-// puteShipJumpDepth); those remain documented divergences for a later pass.
+// The in-flight hyperspace flight is modelled as visible phases (see the
+// NovaTravel_Tick notes below), mirroring the original's pre-fire block in
+// Ship_HandlePlayerShip (0x0044b120, travel_transfer_mode == 3):
+//   kSlowTurn -- while the ship still has velocity it turns around to face the
+//     REVERSE of its velocity (flying out from the system, that points back
+//     toward the jump vector) at a fast minimum turn rate (max(computed+1, 20)
+//     deg/tick), brakes by _DAT_005755f0 (0.992)/frame, and once facing ramps
+//     the engine glow by +3/frame to 24 (ShipState +0xc8d4). Ends when the
+//     ship has come to a stop (|vel| < 2).
+//   kHold -- the ship re-aims at the destination bearing at class turn rate
+//     and holds briefly with the glow at max (the original's
+//     ai_station_hold_timer ramp), then fires.
+//   kFlying -- in-tunnel coast at max speed while the spaceflight view renders
+//     the streaking star tunnel, then completion (fuel burn, system change,
+//     arrival at max speed aimed at the new-system center).
+// The original also stages jump audio (Stellar_TriggerHyperspaceAudioOnce,
+// NovaAudio_PreStageJumpSoundBySeconds) and warp-syncs escort ships by jump
+// depth (Stellar_ComputeShipJumpDepth); those remain documented divergences
+// for a later pass.
 
 #include "game_state.hpp"
 

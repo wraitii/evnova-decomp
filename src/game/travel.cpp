@@ -11,14 +11,35 @@
 namespace game {
 namespace {
 
-// Slow-turn/brake hold duration (ms) before the tunnel fires. The original
-// ramps ai_station_hold_timer by g_avg_frame_time_ms and damps velocity by
-// g_hyperspace_slow_phase_velocity_damp (0.98) per frame while the ship turns
-// onto the jump vector, firing the tunnel once it crosses
-// g_hyperspace_engage_hold_ms (30 ms). The raw frame-time ramp makes that hold
-// practically instantaneous; we lengthen it so the turn-and-slow reads on
-// screen. (TODO(decomp): the exact cadence of the hold vs avg-frame-time.)
-constexpr float kSlowTurnHoldMs = 700.0F;
+// Aim/charge hold duration (ms) after the ship has stopped, before the tunnel
+// fires. The original's ai_station_hold_timer ramps from 1.0 by frame time and
+// fires once it crosses g_hyperspace_engage_hold_ms (30 ms) -- practically
+// instantaneous. We lengthen it so the aimed-and-charged pause reads on
+// screen, then fire the tunnel. (TODO(decomp): the exact cadence of the hold
+// vs avg-frame-time.)
+constexpr float kAimHoldMs = 350.0F;
+
+// Hard cap on the aim/charge hold: if the ship still has not come to face the
+// destination bearing within this wall of time (e.g. a very slow-turning class
+// stopped pointing the wrong way), fire anyway along the jump heading rather
+// than hang in the hold (the original fires on its hold timer regardless of
+// facing).
+constexpr float kAimHoldMaxMs = 1500.0F;
+
+// The stopped threshold for the turn-around: the original's Ship_HandlePlayer-
+// Ship pre-fire block treats |vel_x| < 2 && |vel_y| < 2 as "come to a stop",
+// at which point it re-aims at the destination bearing and starts the hold.
+constexpr float kStoppedVel = 2.0F;
+
+// Turn-around damp: while turning, the ship brakes by this factor per frame
+// (original _DAT_005755f0, a double 0.992 -- gentler than the hold-phase
+// g_hyperspace_slow_phase_velocity_damp 0.98).
+constexpr float kTurnDamp = 0.992F;
+
+// Minimum turn rate (deg/tick) during the turn-around: the original clamps
+// the turn rate to at least _DAT_005755e8 = 20.0 deg/tick (max(computed + 1,
+// 20)), so the ship snaps around to face the jump direction.
+constexpr float kTurnAroundMinRateDeg = 20.0F;
 
 // In-tunnel coast duration (ms), driven by a wall-clock stopwatch
 // (flight_start_ms mirroring ai_mode_start_time_ms + NovaTime_GetTicksMs). The
@@ -363,43 +384,100 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
     // (b) Engaged: drive the visible jump phases, then complete.
     switch (t.jump_phase) {
     case TravelState::JumpPhase::kSlowTurn: {
-      // Turn the hull onto the jump heading and brake to a stop, mirroring
-      // the original's pre-fire hold: ai_station_hold_timer ramps by frame
-      // time while both velocity axes are damped by
-      // g_hyperspace_slow_phase_velocity_damp (0.98) each frame. Here we
-      // turn toward the jump heading at the class turn rate (deg/tick) and
-      // apply the same damper; once the hold elapses we fire the tunnel.
+      // Turn-around + brake + glow ramp, mirroring the original's pre-fire
+      // block in Ship_HandlePlayerShip (0x0044b120, travel_transfer_mode == 3):
+      // while the ship still has velocity it turns toward the REVERSE of its
+      // current velocity (flying out from the system, that points back toward
+      // the jump vector) at a fast minimum turn rate (max(computed + 1, 20)
+      // deg/tick, _DAT_005755e8), brakes by _DAT_005755f0 (0.992) per frame,
+      // and once facing the heading ramps the engine glow by +3/frame up to
+      // 24 (ShipState +0xc8d4, the normal-thrust cap). Ends when the ship has
+      // come to a stop (|vel| < kStoppedVel) -- the original's LAB_0044edfd
+      // handoff to the destination-aim.
       Ship &player = state.player;
-      const float max_turn = std::round(state.cached_stats.turn_raw * 0.1F);
-      const float turn_rad = max_turn * (3.14159265358979323846F / 180.0F) *
-                             (frame_time_ms / 1000.0F / 30.0F);
-      float delta = std::remainder(t.jump_heading_rad - player.heading,
-                                   6.28318530717958646F);
-      delta = std::clamp(delta, -turn_rad, turn_rad);
-      player.heading = std::fmod(player.heading + delta + 6.28318530717958646F,
-                                 6.28318530717958646F);
-      // Brake: damp both velocity axes (original g_hyperspace_slow_phase-
-      // velocity_damp 0.98).
-      constexpr float kBrakeDamp = 0.98F;
-      player.vel_x *= kBrakeDamp;
-      player.vel_y *= kBrakeDamp;
-      player.speed = std::hypot(player.vel_x, player.vel_y);
+      constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+      constexpr float kTwoPi = 6.28318530717958646F;
+      // The movement model's tick cadence (30 Hz reference; see
+      // NovaPlayer_IntegrateMovement).
+      const float ticks = frame_time_ms / (1000.0F / 30.0F);
 
-      t.slow_turn_elapsed_ms += frame_time_ms;
-      if (t.slow_turn_elapsed_ms >= kSlowTurnHoldMs) {
-        // Fire: snap position and set the ship coasting at max speed along
-        // the jump heading (the tunnel flight). Mirrors the original's fire
-        // block (max speed via Ship_ComputeShipEffectiveMaxSpeed). The
-        // momentary 180-deg hurl is skipped since the same frame zeroes it.
+      if (std::abs(player.vel_x) >= kStoppedVel ||
+          std::abs(player.vel_y) >= kStoppedVel) {
+        // Still moving: turn around to face the reverse of the velocity.
+        const float vel_heading = std::atan2(player.vel_x, -player.vel_y);
+        float desired =
+            std::fmod(vel_heading + 3.14159265358979323846F, kTwoPi);
+        if (desired < 0.0F) {
+          desired += kTwoPi;
+        }
+        const float max_turn =
+            std::max(std::round(state.cached_stats.turn_raw * 0.1F) + 1.0F,
+                     kTurnAroundMinRateDeg);
+        const float turn_rad = max_turn * kDegToRad * ticks;
+        float delta = std::remainder(desired - player.heading, kTwoPi);
+        delta = std::clamp(delta, -turn_rad, turn_rad);
+        player.heading = std::fmod(player.heading + delta + kTwoPi, kTwoPi);
+
+        // Glow ramps to max once facing the reverse heading (the original's
+        // +3/frame to 24 while thrusting along it).
+        if (std::abs(std::remainder(desired - player.heading, kTwoPi)) <=
+            turn_rad) {
+          player.engine_glow_level =
+              std::min<std::int16_t>(24, player.engine_glow_level + 3);
+          player.engine_glow_intensity = std::clamp(
+              static_cast<float>(player.engine_glow_level) / 24.0F, 0.0F, 1.0F);
+        }
+        // Brake (original _DAT_005755f0 = 0.992) and keep the ship coasting
+        // through the deceleration.
+        player.vel_x *= kTurnDamp;
+        player.vel_y *= kTurnDamp;
+        player.speed = std::hypot(player.vel_x, player.vel_y);
+        player.pos_x += player.vel_x * ticks;
+        player.pos_y += player.vel_y * ticks;
+      } else {
+        // Already stopped: proceed to the aim/charge hold.
+        t.jump_phase = TravelState::JumpPhase::kHold;
+        t.hold_elapsed_ms = 0.0F;
+      }
+      break;
+    }
+    case TravelState::JumpPhase::kHold: {
+      // Aim/charge: turn toward the destination bearing at the class turn
+      // rate (Ship_TurnShipTowardHeading / Ship_ComputeShipMaxTurnRateDeg)
+      // and hold briefly while the engine glow sits at max, then fire the
+      // tunnel (the original's ai_station_hold_timer ramp to
+      // g_hyperspace_engage_hold_ms).
+      Ship &player = state.player;
+      constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+      constexpr float kTwoPi = 6.28318530717958646F;
+      const float ticks = frame_time_ms / (1000.0F / 30.0F);
+      const float max_turn = std::round(state.cached_stats.turn_raw * 0.1F);
+      const float turn_rad = max_turn * kDegToRad * ticks;
+      float delta = std::remainder(t.jump_heading_rad - player.heading, kTwoPi);
+      delta = std::clamp(delta, -turn_rad, turn_rad);
+      player.heading = std::fmod(player.heading + delta + kTwoPi, kTwoPi);
+      // Glow stays at max while charging at the jump vector.
+      player.engine_glow_level =
+          std::min<std::int16_t>(24, player.engine_glow_level + 3);
+      player.engine_glow_intensity = std::clamp(
+          static_cast<float>(player.engine_glow_level) / 24.0F, 0.0F, 1.0F);
+
+      t.hold_elapsed_ms += frame_time_ms;
+      const bool facing =
+          std::abs(std::remainder(t.jump_heading_rad - player.heading,
+                                  kTwoPi)) < 20.0F * kDegToRad;
+      if ((t.hold_elapsed_ms >= kAimHoldMs && facing) ||
+          t.hold_elapsed_ms >= kAimHoldMaxMs) {
+        // Fire: set the ship coasting at max speed along the jump heading
+        // (the tunnel flight). Mirrors the original's fire block (max speed
+        // via Ship_ComputeShipEffectiveMaxSpeed); the momentary 180-deg hurl
+        // is skipped since the same frame zeroes it.
         t.jump_phase = TravelState::JumpPhase::kFlying;
         t.flying_elapsed_ms = 0.0F;
-        Ship &p = state.player;
-        p.engine_glow_level = 32; // glow slam to max (afterburner cap)
-        p.engine_glow_intensity = 1.0F;
         const float max_speed = std::max(PlayerMaxSpeed(state), 1.0F);
-        p.vel_x = std::sin(t.jump_heading_rad) * max_speed;
-        p.vel_y = -std::cos(t.jump_heading_rad) * max_speed;
-        p.speed = max_speed;
+        player.vel_x = std::sin(t.jump_heading_rad) * max_speed;
+        player.vel_y = -std::cos(t.jump_heading_rad) * max_speed;
+        player.speed = max_speed;
         NovaLog::Debug(
             "hyperspace tunnel fired: coasting at max speed along heading");
       }
@@ -414,14 +492,14 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
       player.vel_x = std::sin(t.jump_heading_rad) * max_speed;
       player.vel_y = -std::cos(t.jump_heading_rad) * max_speed;
       player.speed = max_speed;
-      player.engine_glow_level = 32;
+      player.engine_glow_level = 24; // stays max through the tunnel
       player.engine_glow_intensity = 1.0F;
       t.flying_elapsed_ms += frame_time_ms;
       if (t.flying_elapsed_ms >= kJumpTunnelMs) {
         CompleteJump(state);
         t.engaging = false;
         t.jump_phase = TravelState::JumpPhase::kIdle;
-        t.slow_turn_elapsed_ms = 0.0F;
+        t.hold_elapsed_ms = 0.0F;
         t.flying_elapsed_ms = 0.0F;
         t.jump_heading_rad = 0.0F;
         t.just_completed = true;
@@ -498,7 +576,7 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
 
   t.engaging = true;
   t.jump_phase = TravelState::JumpPhase::kSlowTurn;
-  t.slow_turn_elapsed_ms = 0.0F;
+  t.hold_elapsed_ms = 0.0F;
   t.flying_elapsed_ms = 0.0F;
   NovaLog::Debug(
       "hyperspace jump engaged: from stellar {} (slot {}) to system {}",

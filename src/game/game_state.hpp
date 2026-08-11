@@ -331,15 +331,16 @@ struct TravelState {
   // Whether a jump completed this frame (consumed by the spaceflight loop to
   // re-spawn the starfield once). Cleared each tick.
   bool just_completed = false;
-  // Active phase of an engaged jump. Mirrors the original's hold-timer ramp
-  // (slow-turn) followed by the in-tunnel flight (Fire + cold-start in
+  // Active phase of an engaged jump. Mirrors the original's pre-fire
+  // turn-around + hold (Ship_HandlePlayerShip travel_transfer_mode == 3 block
+  // 0x0044b120) followed by the in-tunnel flight (Fire + cold-start in
   // Ship_HandlePlayerShipCore). Idle when engaging is false.
-  enum class JumpPhase { kIdle, kSlowTurn, kFlying };
+  enum class JumpPhase { kIdle, kSlowTurn, kHold, kFlying };
   JumpPhase jump_phase = JumpPhase::kIdle;
-  // Slow-turn accumulator (ms): the original ramps ai_station_hold_timer by
-  // g_avg_frame_time_ms while the ship turns and doubles as the damped-brake
-  // gate; reaching g_hyperspace_engage_hold_ms fires the tunnel.
-  float slow_turn_elapsed_ms = 0.0F;
+  // Aim/charge hold accumulator (ms): once stopped, the ship turns toward the
+  // destination bearing and holds briefly (the original's ai_station_hold_timer
+  // ramp toward g_hyperspace_engage_hold_ms) before the tunnel fires.
+  float hold_elapsed_ms = 0.0F;
   // In-tunnel coast accumulator (ms): frame_time accumulates each tick (the
   // original's frame-time basis) until kJumpTunnelMs elapses, then the jump
   // completes. Kept as an accumulator (not wall-clock) so the timing is
