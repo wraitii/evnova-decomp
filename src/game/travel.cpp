@@ -407,8 +407,8 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
     }
     case TravelState::JumpPhase::kFlying: {
       // In-tunnel coast: hold the ship at max speed along the heading while
-      // the starfield streams (the tunnel visual), then complete when the
-      // wall-clock stopwatch elapses the tunnel duration.
+      // the starfield streams (the tunnel visual), then complete once the
+      // frame-time accumulator elapses the tunnel duration.
       Ship &player = state.player;
       const float max_speed = std::max(PlayerMaxSpeed(state), 1.0F);
       player.vel_x = std::sin(t.jump_heading_rad) * max_speed;
