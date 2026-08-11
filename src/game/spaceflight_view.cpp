@@ -371,19 +371,19 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
   }
 }
 
-// Drives the starfield during the hyperspace tunnel. The ship is coasting
-// (velocity held at max along the heading) but we deliberately do NOT advance
-// its world position; instead every star is pushed along the REVERSE of the
-// jump heading each frame by a speed proportional to the frame time, so the
-// whole stationary field visibly streams past the (fixed) camera as the tunnel
-// streaks. The wrap-around in DrawBackground keeps the field continuously
-// populated as stars leave one edge and re-enter the opposite. `speed` is
-// set from the overall tunnel pace (independent of the saved per-particle
-// parallax speed, which would otherwise freeze slow stars).
+// Drives the starfield during the hyperspace zoom. The ship accelerates to
+// max speed and its world position advances each frame (travel.cpp kZoom), so
+// every world item scrolls past the camera; on top of that the ambient stars
+// get this uniform warp drive along the REVERSE of the jump heading so the
+// field visibly streaks as the origin system whooshes away. The wrap-around in
+// DrawBackground keeps the field continuously populated as stars leave one
+// edge and re-enter the opposite. `speed` is the overall tunnel pace
+// (independent of the saved per-particle parallax speed, which would
+// otherwise freeze slow stars).
 void SpaceflightView::UpdateAmbientStarsTunnel(float jump_heading_rad,
                                                float frame_time_ms) {
   // Tunnel stream speed in px/ms (a brisk forward whoosh that reads clearly
-  // over the ~900 ms tunnel). Measured against the 400px-tall viewport.
+  // over the ~700 ms zoom). Measured against the 400px-tall viewport.
   constexpr float kTunnelSpeedPxPerMs = 1.4F;
   const float drive = kTunnelSpeedPxPerMs * frame_time_ms;
   // Reverse heading: stars stream backward relative to the forward jump.
@@ -434,13 +434,13 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   // indexed blend), not a pixel dimension - so each star stays ~5px regardless.
   const Viewport vp = CurrentViewport(platform);
   const SpriteAsset *sheet = StarFieldSheet(platform);
-  // During the in-tunnel hyperspace jump, draw each streaming star as a short
+  // During the hyperspace zoom, draw each streaming star as a short
   // motion-blur streak along the reverse of the jump heading (like the
   // original's tunnel whoosh). The star positions themselves are driven each
   // frame by UpdateAmbientStarsTunnel; here we add the visual rails.
   const bool tunnel =
       state.travel.engaging &&
-      state.travel.jump_phase == TravelState::JumpPhase::kFlying;
+      state.travel.jump_phase == TravelState::JumpPhase::kZoom;
   const float tunnel_sx = -std::sin(state.travel.jump_heading_rad);
   const float tunnel_sy = std::cos(state.travel.jump_heading_rad);
   constexpr int kTunnelStreakSteps = 6;
@@ -518,9 +518,9 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
   AdvanceStellarAnimation(platform, state, frame_time_ms);
   // Ambient-star spatial parallax (moves by the ship's movement delta).
   if (state.travel.engaging &&
-      state.travel.jump_phase == TravelState::JumpPhase::kFlying) {
+      state.travel.jump_phase == TravelState::JumpPhase::kZoom) {
     // Hyperspace tunnel: the stars stream backward past the (fixed) ship as
-    // it coasts through the tunnel. Override the normal ship-parallax movement
+    // it accelerates into the jump. Override the normal ship-parallax movement
     // with a large drive along the reverse of the jump heading each frame so
     // the field visibly streaks; the stars wrap around the viewport in
     // DrawBackground so the tunnel stays populated.

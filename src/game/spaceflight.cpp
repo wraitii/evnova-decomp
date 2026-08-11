@@ -241,14 +241,27 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // first volley's sound is already decoded (mirrors the original preloading
   // the gameplay sound-handle table at startup).
   NovaWeapon_PreloadOwnedFireSounds(state);
-  // Preload the hyperspace jump sound (snd 200 'Etheric Wake.sfil', the
-  // original's jump handle queued at engage) so the first jump plays it
-  // without a decode hitch. Missing resource -> jump plays silently.
-  if (!state.jump_sound.has_value()) {
+  // Preload the hyperspace jump sounds: snd 128 'Warp up' (the rising
+  // 'hyperspace imminent' cue played as the ship accelerates into the jump
+  // zoom; snd 129 'Warp up.x2' is the faster engine variant) and snd 130
+  // 'Warp out' (the ~2.5 s boom at the fire/arrival instant). Mirrors
+  // FUN_004b0740 preloading the jump handles
+  // (LoadStringResourceCopyById(0x80/0x81/0x82) -> snd 128/129/130) so the
+  // first jump plays them without a decode hitch. Missing resources -> the
+  // jump plays silently (travel.cpp falls back to fixed durations).
+  if (!state.warp_up_sound.has_value()) {
     if (const auto resource =
-            NovaResource_LoadSndData(static_cast<std::uint16_t>(200))) {
+            NovaResource_LoadSndData(static_cast<std::uint16_t>(128))) {
       if (auto decoded = NovaSound_Decode(*resource)) {
-        state.jump_sound = std::move(*decoded);
+        state.warp_up_sound = std::move(*decoded);
+      }
+    }
+  }
+  if (!state.warp_out_sound.has_value()) {
+    if (const auto resource =
+            NovaResource_LoadSndData(static_cast<std::uint16_t>(130))) {
+      if (auto decoded = NovaSound_Decode(*resource)) {
+        state.warp_out_sound = std::move(*decoded);
       }
     }
   }
@@ -422,8 +435,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // advances the player ship at twice the intended speed.
     constexpr float kOriginalTickMs = 1000.0F / 30.0F;
     // During an engaged hyperspace jump the jump state machine owns the ship
-    // (heading/velocity/glow) for the slow-turn and in-tunnel coast; the
-    // player's normal movement integration is suspended so it does not
+    // (heading/velocity/glow) for the brake, alignment hold and zoom thrust;
+    // the player's normal movement integration is suspended so it does not
     // overwrite the jump's flight. NovaTravel_Tick below drives the phases.
     if (!state.travel.engaging) {
       NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
@@ -432,9 +445,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // handle this frame's fire input. Mirrors Ship_HandlePlayerShipControl
     // firing the primary bank(s) while the fire command is held. frame_time_ms
     // feeds the time-animated shot-frame cadence (Shot_HandleShot's animated
-    // branch); static/heading shot sets ignore it.
+    // branch); static/heading shot sets ignore it. Gated while a jump is
+    // engaged (the original fire-restricts the player through the brake,
+    // hold and zoom).
     NovaWeapon_TickShots(state, frame_time_ms);
-    if (input.fire) {
+    if (input.fire && !state.travel.engaging) {
       NovaWeapon_FirePlayerPrimary(state);
       // Play each weapon fire sound queued this frame (a round actually
       // spawned). The firing routine appends the fire_sound slot to
@@ -455,16 +470,23 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
     // 'j' key near an available travel point, then drives the visible phases.
     NovaTravel_Tick(state, input.travel, frame_time_ms);
-    // Play the hyperspace jump sound latched by the travel fire (the 'boom'
-    // synced with the white flash). The loop owns the SdlAudio device, so
-    // travel only latches a flag. Mirrors the original's
+    // Play the hyperspace jump sounds latched by the travel state machine
+    // (the 'Warp up' cue as the zoom thrust begins and the 'Warp out' boom at
+    // the fire/arrival, synced with the screen flash). The loop owns the
+    // SdlAudio device, so travel only latches flags. Mirrors the original's
     // Stellar_TriggerHyperspaceAudioOnce one-shot (g_playerHyperspaceAudio-
     // Latch gating NovaEffects_QueueCenteredResource).
-    if (state.jump_sound_pending) {
-      if (state.jump_sound.has_value()) {
-        audio.Play(*state.jump_sound);
+    if (state.warp_up_sound_pending) {
+      if (state.warp_up_sound.has_value()) {
+        audio.Play(*state.warp_up_sound);
       }
-      state.jump_sound_pending = false;
+      state.warp_up_sound_pending = false;
+    }
+    if (state.warp_out_sound_pending) {
+      if (state.warp_out_sound.has_value()) {
+        audio.Play(*state.warp_out_sound);
+      }
+      state.warp_out_sound_pending = false;
     }
 
     // Galaxy-map command ('m', edge-triggered): open the starmap modal over
@@ -472,8 +494,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // dispatching NovaUi_RunStarmapWindow when its map gameplay command is
     // active. The modal owns the frame until the player closes it; the jump
     // state machine is untouched by inspection (the map only selects systems).
+    // Gated while a jump is engaged (the original fire-restricts the player
+    // through the brake, hold and zoom).
     const bool starmap_held = input.starmap;
-    if (starmap_held && !starmap_was_held) {
+    if (starmap_held && !starmap_was_held && !state.travel.engaging) {
       const StarmapResult map_result = NovaStarmap_RunWindow(platform, state);
       if (map_result.exit == StarmapExit::kQuit) {
         returning_to_menu = true;
@@ -543,8 +567,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // player-ship tick directly invokes Stellar_ProcessTravelAndLanding here,
     // opening the Spaceport only when the selected ordinary stellar is inside
     // its arrival envelope. The rejection feedback is shown as an on-screen HUD
-    // overlay (STR# 0x7d2 messages) instead of a bare log line.
-    if (land_pressed) {
+    // overlay (STR# 0x7d2 messages) instead of a bare log line. Gated while a
+    // jump is engaged (fire-restricted through brake + hold + zoom).
+    if (land_pressed && !state.travel.engaging) {
       LandedContext ctx;
       if (NovaLanding_EnterDocked(state, ctx)) {
         NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
@@ -571,8 +596,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // beep + show an overlay in the original (the clean-room shows the overlay
     // text; the beep is not modelled). Mission-ship defs are not modelled, so
     // the original's NovaUi_RunMissionShipInteractionWindow branch never
-    // triggers here (TODO(decomp)).
-    if (target_action_pressed) {
+    // triggers here (TODO(decomp)). Gated while a jump is engaged
+    // (fire-restricted through brake + hold + zoom).
+    if (target_action_pressed && !state.travel.engaging) {
       const std::int16_t ship_target = state.player.primary_target_ship_slot;
       if (ship_target > 0 &&
           state.SlotInRange(static_cast<std::size_t>(ship_target))) {
@@ -693,10 +719,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         std::max(0.0F, state.ship_reticle_pulse - frame_time_ms * 1.8F);
     state.travel_reticle_pulse =
         std::max(0.0F, state.travel_reticle_pulse - frame_time_ms * 1.8F);
-    // Decay the hyperspace fire flash: full white at fire, gone in ~120 ms
-    // (a single-frame boom, matching the original's one-frame effect 0x32).
+    // Decay the hyperspace fire flash: full white at the boom instant, gone
+    // in ~60 ms (a single bright frame, matching the original's one-frame
+    // centered effect 0x32).
     state.screen_flash_intensity =
-        std::max(0.0F, state.screen_flash_intensity - frame_time_ms / 120.0F);
+        std::max(0.0F, state.screen_flash_intensity - frame_time_ms / 60.0F);
     SDL_Delay(16);
   }
 }

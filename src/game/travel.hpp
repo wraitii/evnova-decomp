@@ -25,18 +25,24 @@
 // The in-flight hyperspace flight is modelled as visible phases (see the
 // NovaTravel_Tick notes below), mirroring the original's pre-fire block in
 // Ship_HandlePlayerShip (0x0044b120, travel_transfer_mode == 3):
-//   kSlowTurn -- while the ship still has velocity it turns around to face the
+//   kBrake -- while the ship still has velocity it turns around to face the
 //     REVERSE of its velocity (flying out from the system, that points back
 //     toward the jump vector) at a fast minimum turn rate (max(computed+1, 20)
 //     deg/tick), brakes by _DAT_005755f0 (0.992)/frame, and once facing ramps
 //     the engine glow by +3/frame to 24 (ShipState +0xc8d4). Ends when the
-//     ship has come to a stop (|vel| < 2).
-//   kHold -- the ship re-aims at the destination bearing at class turn rate
-//     and holds briefly with the glow at max (the original's
-//     ai_station_hold_timer ramp), then fires.
-//   kFlying -- in-tunnel coast at max speed while the spaceflight view renders
-//     the streaking star tunnel, then completion (fuel burn, system change,
-//     arrival at max speed aimed at the new-system center).
+//     ship has come to a stop (/vel/ < 0.5).
+//   kHold -- a short stationary beat that finishes damping the drift and turns
+//     the hull onto the actual jump heading (the destination-system bearing)
+//     at class rate; the glow fades. The handoff to the zoom is time-based.
+//   kZoom -- the rising 'Warp up' cue starts, the engine glow ramps and the
+//     ship thrusts to max speed along the jump heading so the ORIGIN system
+//     parallaxes away (spaceflight view renders the streaking star tunnel via
+//     the world movement delta). Duration approximates the original's
+//     Stellar_GetJumpSequenceDurationMs / ShipClassDef.jump_duration_multiplier
+//     (TODO(decomp)).
+//   fire -- at the end of the zoom the boom/arrival lands: full-screen flash +
+//     'Warp out' cue + system change, arriving in the NEW system at max speed;
+//     control returns to normal flight (no separate post-fire tunnel phase).
 // The original also stages jump audio (Stellar_TriggerHyperspaceAudioOnce,
 // NovaAudio_PreStageJumpSoundBySeconds) and warp-syncs escort ships by jump
 // depth (Stellar_ComputeShipJumpDepth); those remain documented divergences
@@ -82,12 +88,13 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 
 // Ticks the cross-system travel state machine once per spaceflight frame.
 // Handles (a) engaging a jump when the travel key is pressed near an available
-// travel point, (b) running the engaged visible phases (slow-turn/brake onto
-// the jump heading, then the in-tunnel coast at max speed while the starfield
-// streams), and (c) completing the jump (fuel burn + system change + arrival at
-// max speed aimed at the new system center + refill) once the tunnel elapses.
+// travel point, (b) running the engaged visible phases (brake onto the reverse
+// of the jump vector, a short alignment hold, then the zoom thrust at max
+// speed while the origin starfield streams away), and (c) completing the jump
+// at the end of the zoom (fuel burn + system change + arrival at max speed +
+// refill).
 // `travel_input` is the edge-triggered travel key state; `frame_time_ms` scales
-// the slow-turn. Reads/writes state.travel; sets just_completed the frame the
+// the phases. Reads/writes state.travel; sets just_completed the frame the
 // jump lands. Requires a valid scenario. While engaging, the caller must skip
 // player movement integration (the jump owns the ship) and the spaceflight
 // view branches on state.travel.engaging to render the star tunnel. The

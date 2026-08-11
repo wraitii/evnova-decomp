@@ -104,7 +104,7 @@ public:
   void UpdateAmbientStars(float dx, float dy);
 
   // Hyperspace-tunnel star drive: advances the ambient starfield during the
-  // in-tunnel jump flight (the streaks streaming behind the coasting ship).
+  // jump zoom (the streaks streaming behind the accelerating ship).
   // Each active star's world position is pushed along the reverse of the jump
   // heading by a speed scaled to the frame time, so the stationary field
   // visibly streams past; the one-exit wraparound in DrawBackground keeps the

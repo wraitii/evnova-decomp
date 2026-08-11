@@ -323,33 +323,49 @@ struct TravelState {
   bool hyperspace_mode = false;
   // Whether the engaged jump has finished declaring a destination and is now
   // in the transition. The original (Stellar_HandlePlayerHyperspaceSequence
-  // 0x0044f3d0) drives the visible jump in two phases before the system
-  // change; the reimpl models them via `jump_phase`: a slow-turn/brake onto
-  // the jump vector, then an in-tunnel coast at max speed (the star-tunnel
-  // visual), then the completion. Set on engage, cleared on completion.
+  // 0x0044f3d0) drives the visible jump in phases before the system change;
+  // the reimpl models them via `jump_phase`: a pre-fire turn-around (flip +
+  // brake onto the reverse-velocity bearing at min-20deg/tick, damp 0.992 --
+  // Ship_HandlePlayerShip travel_transfer_mode==3 block 0x0044b120), a
+  // stationary hold that finishes aligning the hull onto the jump vector
+  // while damping to a dead stop, then the 'zoom' where the rising 'Warp up'
+  // cue starts, the engine glow ramps and the ship accelerates to max speed
+  // along the jump vector so the origin system parallaxes away. At the
+  // end of the zoom the fire/flash + 'Warp out' boom + system change land on
+  // the same instant (the original's fire-and-arrival block), arriving in the
+  // NEW system at max speed; the ship then coasts through it (no separate
+  // tunnel phase -- the world scrolls in normal flight). Set on engage,
+  // cleared on completion.
   bool engaging = false;
   // Whether a jump completed this frame (consumed by the spaceflight loop to
-  // re-spawn the starfield once). Cleared each tick.
+  // re-spawn the starfield once). Set at the fire moment (the system change),
+  // cleared each tick.
   bool just_completed = false;
   // Active phase of an engaged jump. Mirrors the original's pre-fire
-  // turn-around + hold (Ship_HandlePlayerShip travel_transfer_mode == 3 block
-  // 0x0044b120) followed by the in-tunnel flight (Fire + cold-start in
-  // Ship_HandlePlayerShipCore). Idle when engaging is false.
-  enum class JumpPhase { kIdle, kSlowTurn, kHold, kFlying };
+  // turn-around + warp-up hold (Ship_HandlePlayerShip travel_transfer_mode ==
+  // 3 block 0x0044b120 / Stellar_HandlePlayerHyperspaceSequence 0x0044f3d0)
+  // followed by the acceleration 'zoom' whose length is the original's
+  // Stellar_GetJumpSequenceDurationMs (350) / ShipClassDef.jump_duration_
+  // multiplier, then the fire/arrival (same instant). Idle when engaging is
+  // false.
+  enum class JumpPhase { kIdle, kBrake, kHold, kZoom };
   JumpPhase jump_phase = JumpPhase::kIdle;
-  // Aim/charge hold accumulator (ms): once stopped, the ship turns toward the
-  // destination bearing and holds briefly (the original's ai_station_hold_timer
-  // ramp toward g_hyperspace_engage_hold_ms) before the tunnel fires.
+  // Whether the 'Warp up' cue has been started for this jump (mirrors the
+  // stopped-branch voice allocation: it starts exactly once, when the 'zoom'
+  // thrust phase begins). Cleared on engage and on jump end.
+  bool warp_up_started = false;
+  // Jump-phase accumulators (ms): frame_time accumulates each tick so the
+  // phase timing is frame-rate independent and unit-testable. hold_elapsed_ms
+  // drives the stationary-alignment hold; zoom_elapsed_ms drives the
+  // acceleration-zoom tunnel (approx. of 350/jump_duration_multiplier; the
+  // class multiplier is not yet decoded -- TODO(decomp)).
   float hold_elapsed_ms = 0.0F;
-  // In-tunnel coast accumulator (ms): frame_time accumulates each tick (the
-  // original's frame-time basis) until kJumpTunnelMs elapses, then the jump
-  // completes. Kept as an accumulator (not wall-clock) so the timing is
-  // frame-rate independent and unit-testable.
-  float flying_elapsed_ms = 0.0F;
+  float zoom_elapsed_ms = 0.0F;
   // The jump direction in the reimpl's radians heading convention (0 = up,
   // clockwise): the bearing from the departure point toward the destination
-  // system center, which the ship faces during the slow-turn and coasts along
-  // through the tunnel at max speed.
+  // system center. The brake/hold align the hull onto this bearing for the
+  // zoom thrust, and the arrival spawn is offset from the destination center
+  // along it.
   float jump_heading_rad = 0.0F;
 };
 
@@ -529,9 +545,9 @@ struct GameState {
   // Full-screen flash intensity [0..1] at the hyperspace fire moment (the
   // original's centered effect 0x32 queued via
   // NovaEffects_QueueCenteredResource at jump engage -- the 'boom' white
-  // frame). Set to 1.0 when the tunnel fires, then decayed by the spaceflight
-  // loop; the in-game frame draw overlays a white fullscreen rect with this
-  // alpha. 0 when no flash is active.
+  // frame). Set to 1.0 when the boom fires at the jump's arrival, then decayed
+  // by the spaceflight loop; the in-game frame draw overlays a white fullscreen
+  // rect with this alpha. 0 when no flash is active.
   float screen_flash_intensity = 0.0F;
 
   // Parsed scenario data (ships/outfits/weapons/stellars/systems), loaded once
@@ -598,10 +614,12 @@ struct GameState {
   // (g_random_encounter_fleet_defs[0x4d].availability_expression[0x94]);
   // the clean-room stores it here since that scratch buffer is not modelled.
   bool no_asteroids_latch = false;
-  // Latched by NovaTravel_Tick at the tunnel fire so the spaceflight loop
-  // plays the cached jump sound once (mirrors the original's
+  // Latched by NovaTravel_Tick when the jump zoom begins (the 'Warp up' cue
+  // as the ship accelerates) and at the fire/arrival (the 'Warp out' boom) so
+  // the spaceflight loop plays each cached sound once (mirrors the original's
   // g_playerHyperspaceAudioLatch one-shot). Cleared by the loop after playing.
-  bool jump_sound_pending = false;
+  bool warp_up_sound_pending = false;
+  bool warp_out_sound_pending = false;
 
   // Decoded player weapon fire sounds, keyed by the weapon's `fire_sound`
   // slot. Ghidra Weapon_FirePlayerWeaponBank resolves the weapon's
@@ -621,15 +639,21 @@ struct GameState {
   // path.
   std::vector<std::int16_t> pending_fire_sound_slots;
 
-  // Decoded hyperspace jump sound (snd resource 200 'Etheric Wake.sfil', the
-  // only non-weapon sound in the gameplay snd 200.. slot range; the original
-  // queues the jump handle (g_random_encounter_fleet_defs[0].availability_
-  // expression + 0x94) via NovaEffects_QueueCenteredResource at engage/fire,
-  // gated by g_playerHyperspaceAudioLatch so it starts exactly once). Played
-  // by the spaceflight loop (which owns SdlAudio) when jump_sound_pending is
-  // set at the tunnel fire, synced with the screen flash. Empty when the
-  // resource is missing or fails to decode (jump then plays silently).
-  std::optional<NovaSoundData> jump_sound;
+  // Decoded hyperspace jump sounds (the original preloads them via
+  // FUN_004b0740: LoadStringResourceCopyById(0x80/0x81/0x82) into the jump
+  // handles g_random_encounter_fleet_defs[0].availability_expression
+  // +0x8c/+0x90/+0x94).
+  //  * warp_up_sound: snd 128 'Warp up' (rising 'hyperspace imminent' cue;
+  //    snd 129 'Warp up.x2' is the faster engine variant) played as the ship
+  //    accelerates into the jump zoom.
+  //  * warp_out_sound: snd 130 'Warp out' (~2.5 s boom) played at the
+  //    fire/arrival instant, synced with the screen flash.
+  // Played by the spaceflight loop (which owns SdlAudio) when the matching
+  // *_pending latch is set. Empty when the resource is missing or fails to
+  // decode (the jump then plays silently and travel.cpp falls back to its
+  // fixed hold/tunnel durations).
+  std::optional<NovaSoundData> warp_up_sound;
+  std::optional<NovaSoundData> warp_out_sound;
 };
 
 } // namespace game
