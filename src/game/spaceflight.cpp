@@ -396,7 +396,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // cadence is 30 Hz; using a 60 Hz SDL render loop without this conversion
     // advances the player ship at twice the intended speed.
     constexpr float kOriginalTickMs = 1000.0F / 30.0F;
-    NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
+    // During an engaged hyperspace jump the jump state machine owns the ship
+    // (heading/velocity/glow) for the slow-turn and in-tunnel coast; the
+    // player's normal movement integration is suspended so it does not
+    // overwrite the jump's flight. NovaTravel_Tick below drives the phases.
+    if (!state.travel.engaging) {
+      NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
+    }
     // Advance the player's fired shots/cooldowns from the previous frame, then
     // handle this frame's fire input. Mirrors Ship_HandlePlayerShipControl
     // firing the primary bank(s) while the fire command is held. frame_time_ms

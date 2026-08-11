@@ -22,10 +22,12 @@
 // links to Tichel at slot 3 with no travel stellar there, yet 'j' still jumps
 // Kania->Tichel). So a plotted destination is resolved purely against links.
 //
-// The in-flight hyperspace flight itself is a simplified countdown stand-in
-// (TODO(decomp)): the ship coasts and holds for jump_countdown_ticks, then the
-// jump completes with the original's state changes. Visuals/audio and escort
-// warp-sync are documented diviergences for a later pass.
+// The in-flight hyperspace flight is modelled as two visible phases (see the
+// NovaTravel_Tick notes below): a slow-turn/brake onto the jump heading, then
+// an in-tunnel coast at max speed while the spaceflight view renders the
+// starring tunnel. The original also stages jump audio (Stellar_Trigger-/
+// HyperspaceAudioOnce) and warp-syncs escort ships by jump depth (Stellar_Com-
+// puteShipJumpDepth); those remain documented divergences for a later pass.
 
 #include "game_state.hpp"
 
@@ -67,13 +69,17 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 
 // Ticks the cross-system travel state machine once per spaceflight frame.
 // Handles (a) engaging a jump when the travel key is pressed near an available
-// travel point, (b) running the engaged countdown, and (c) completing the jump
-// (fuel burn + system change + reposition + refill) once the countdown elapses.
+// travel point, (b) running the engaged visible phases (slow-turn/brake onto
+// the jump heading, then the in-tunnel coast at max speed while the starfield
+// streams), and (c) completing the jump (fuel burn + system change + arrival at
+// max speed aimed at the new system center + refill) once the tunnel elapses.
 // `travel_input` is the edge-triggered travel key state; `frame_time_ms` scales
-// the countdown. Reads/writes state.travel; sets just_completed the frame the
-// jump lands. Requires a valid scenario. The completed jump does NOT re-spawn
-// the starfield itself; the spaceflight loop observes just_completed and calls
-// SpaceflightView::SpawnAmbientStars for the new system.
+// the slow-turn. Reads/writes state.travel; sets just_completed the frame the
+// jump lands. Requires a valid scenario. While engaging, the caller must skip
+// player movement integration (the jump owns the ship) and the spaceflight
+// view branches on state.travel.engaging to render the star tunnel. The
+// completed jump does NOT re-spawn the starfield itself; the spaceflight loop
+// observes just_completed and calls SpaceflightView::SpawnAmbientStars.
 // Completion-scope discovery helper: marks `zero_based_system_id` explored
 // (and each of its linked neighbours visible/explored) so the galaxy starmap
 // reveals the neighbourhood when the player enters a system. Mirrors the

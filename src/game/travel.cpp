@@ -11,10 +11,27 @@
 namespace game {
 namespace {
 
-// Jump-sequence length in 1/60s ticks. The original hyperspace flight is
-// driven by Stellar_GetJumpSequenceDurationMs / ai_station_hold_timer
-// (TODO(decomp) exact duration); ~1.5s is a reasonable countdown stand-in.
-constexpr int kJumpSequenceTicks = 90;
+// Slow-turn/brake hold duration (ms) before the tunnel fires. The original
+// ramps ai_station_hold_timer by g_avg_frame_time_ms and damps velocity by
+// g_hyperspace_slow_phase_velocity_damp (0.98) per frame while the ship turns
+// onto the jump vector, firing the tunnel once it crosses
+// g_hyperspace_engage_hold_ms (30 ms). The raw frame-time ramp makes that hold
+// practically instantaneous; we lengthen it so the turn-and-slow reads on
+// screen. (TODO(decomp): the exact cadence of the hold vs avg-frame-time.)
+constexpr float kSlowTurnHoldMs = 700.0F;
+
+// In-tunnel coast duration (ms), driven by a wall-clock stopwatch
+// (flight_start_ms mirroring ai_mode_start_time_ms + NovaTime_GetTicksMs). The
+// original's Stellar_GetJumpSequenceDurationMs returns ~350 ms and scales the
+// flight progress by ShipClassDef.jump_duration_multiplier; we keep a fixed
+// gate long enough for the streaking star-tunnel visual to read.
+// (TODO(decomp): apply jump_duration_multiplier to tune per class.)
+constexpr float kJumpTunnelMs = 900.0F;
+
+// Player max speed scale: px/tick = eff.speed_raw / kMaxSpeedScale (the
+// movement integrator's max_speed_px_per_tick). Used for the arrival-at-speed
+// (enter the new system at top speed aimed at center).
+constexpr float kMaxSpeedScale = 100.0F;
 
 // The jump-engagement proximity: squared distance (px^2) required for a
 // restricted travel stellar (StellarDef.availability_flags & 0x3000). Mirrors
@@ -31,10 +48,21 @@ std::int16_t CurrentSystemResource(const GameState &state) {
   return static_cast<std::int16_t>(state.player.current_system_id + 0x80);
 }
 
+// Returns the player's top speed in px/tick, matching the movement
+// integrator's max_speed_px_per_tick = eff.speed_raw / kMaxSpeedScale. Falls
+// back to 0 when the effective stat cache is unavailable.
+float PlayerMaxSpeed(const GameState &state) {
+  return state.cached_stats.speed_raw / kMaxSpeedScale;
+}
+
 // Completes an engaged jump: the ship lands in the destination system,
 // mirrors the jump-complete block in Ship_HandlePlayerShipCore (fuel burn,
-// system change, reposition, shield/armor refill) without the fleet warp-sync,
-// mission or rendering side effects.
+// system change, reposition just as a radial offset, shield/armor refill)
+// without the fleet warp-sync, mission or rendering side effects. The ship
+// arrives a short radial offset from the new system's origin and is set moving
+// at its top speed along the jump heading (aimed back at the system center) --
+// the original spends the tunnel coasting toward the destination and the
+// arrival handoff to normal flight begins at speed.
 void CompleteJump(GameState &state) {
   TravelState &t = state.travel;
 
@@ -44,24 +72,31 @@ void CompleteJump(GameState &state) {
 
   // Change system and clear the engaged destination.
   state.player.current_system_id = t.destination_system_id;
-  state.player.pos_x = 0.0F;
-  state.player.pos_y = 60.0F; // spawn above the new system's origin
-  state.player.vel_x = 0.0F;
-  state.player.vel_y = 0.0F;
-  state.player.speed = 0.0F;
 
-  // Mark the destination system (and its linked neighbours) explored/visible
-  // so the starmap shows progression. This mirrors the discovery flood
-  // (System_FloodDiscoverAdjacentSystems) that runs on system entry in the
-  // original: reaching a system reveals it and its immediate neighbourhood.
-  NovaTravel_MarkSystemDiscovered(state, t.destination_system_id);
-
-  // Refill shields/armor from the effective (outfit-derived) maximums.
+  // Refill shields/armor from the effective (outfit-derived) maximums. This
+  // also refreshes state.cached_stats, which PlayerMaxSpeed below relies on.
   const PlayerEffectiveStats eff = Outfit_ComputePlayerEffectiveStats(state);
   state.player.shield_points = eff.max_shield_points;
   state.player.armor_points = eff.max_armor_points;
   state.cached_stats = eff;
   state.stat_cache_valid = true;
+
+  // Arrive just outside the destination system's origin and move at top speed
+  // along the jump heading, matching the original's arrival at full speed into
+  // the new system. The tunnel coasted the ship along jump_heading_rad toward
+  // the destination, so the ship comes out a radial offset out from the origin
+  // (a little far away) still at max speed, aimed back at the center. Use the
+  // destination system's own origin (the arrival point) so this works even
+  // when the destination's geometry differs from the departure system.
+  const float arrival_speed = std::max(PlayerMaxSpeed(state), 1.0F);
+  constexpr float kArrivalOffset = 120.0F; // px behind the origin
+  state.player.pos_x =
+      -std::sin(t.jump_heading_rad) * kArrivalOffset;
+  state.player.pos_y = std::cos(t.jump_heading_rad) * kArrivalOffset;
+  state.player.heading = t.jump_heading_rad;
+  state.player.vel_x = std::sin(t.jump_heading_rad) * arrival_speed;
+  state.player.vel_y = -std::cos(t.jump_heading_rad) * arrival_speed;
+  state.player.speed = arrival_speed;
 
   NovaLog::Info("hyperspace jump landed: system id {} (resource {}) after "
                 "burning {} fuel; shields/armor refilled",
@@ -326,24 +361,82 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
   t.just_completed = false;
 
   if (t.engaging) {
-    // (b) Engaged: advance the countdown, then complete the jump.
-    // Advance by ~1 tick per real frame (the original accumulates frame time
-    // into ai_station_hold_timer). Scaling by the real frame time keeps the
-    // on-screen pace independent of host frame rate.
-    const float ticks_elapsed = frame_time_ms / (1000.0F / 60.0F);
-    t.jump_countdown_ticks -= static_cast<int>(std::max(1.0F, ticks_elapsed));
-    if (t.jump_countdown_ticks <= 0) {
-      CompleteJump(state);
-      t.engaging = false;
-      t.jump_countdown_ticks = 0;
-      t.just_completed = true;
-      NovaLog::Debug("hyperspace jump sequence finished");
+    // (b) Engaged: drive the visible jump phases, then complete.
+    switch (t.jump_phase) {
+      case TravelState::JumpPhase::kSlowTurn: {
+        // Turn the hull onto the jump heading and brake to a stop, mirroring
+        // the original's pre-fire hold: ai_station_hold_timer ramps by frame
+        // time while both velocity axes are damped by
+        // g_hyperspace_slow_phase_velocity_damp (0.98) each frame. Here we
+        // turn toward the jump heading at the class turn rate (deg/tick) and
+        // apply the same damper; once the hold elapses we fire the tunnel.
+        Ship &player = state.player;
+        const float max_turn = std::round(state.cached_stats.turn_raw * 0.1F);
+        const float turn_rad =
+            max_turn * (3.14159265358979323846F / 180.0F) *
+            (frame_time_ms / 1000.0F / 30.0F);
+        float delta = std::remainder(t.jump_heading_rad - player.heading,
+                                     6.28318530717958646F);
+        delta = std::clamp(delta, -turn_rad, turn_rad);
+        player.heading =
+            std::fmod(player.heading + delta + 6.28318530717958646F,
+                      6.28318530717958646F);
+        // Brake: damp both velocity axes (original g_hyperspace_slow_phase-
+        // velocity_damp 0.98).
+        constexpr float kBrakeDamp = 0.98F;
+        player.vel_x *= kBrakeDamp;
+        player.vel_y *= kBrakeDamp;
+        player.speed = std::hypot(player.vel_x, player.vel_y);
+
+        t.slow_turn_elapsed_ms += frame_time_ms;
+        if (t.slow_turn_elapsed_ms >= kSlowTurnHoldMs) {
+          // Fire: snap position and set the ship coasting at max speed along
+          // the jump heading (the tunnel flight). Mirrors the original's fire
+          // block (max speed via Ship_ComputeShipEffectiveMaxSpeed). The
+          // momentary 180-deg hurl is skipped since the same frame zeroes it.
+          t.jump_phase = TravelState::JumpPhase::kFlying;
+          t.flying_elapsed_ms = 0.0F;
+          Ship &p = state.player;
+          p.engine_glow_level = 32; // glow slam to max (afterburner cap)
+          p.engine_glow_intensity = 1.0F;
+          const float max_speed = std::max(PlayerMaxSpeed(state), 1.0F);
+          p.vel_x = std::sin(t.jump_heading_rad) * max_speed;
+          p.vel_y = -std::cos(t.jump_heading_rad) * max_speed;
+          p.speed = max_speed;
+          NovaLog::Debug(
+              "hyperspace tunnel fired: coasting at max speed along heading");
+        }
+        break;
+      }
+      case TravelState::JumpPhase::kFlying: {
+        // In-tunnel coast: hold the ship at max speed along the heading while
+        // the starfield streams (the tunnel visual), then complete when the
+        // wall-clock stopwatch elapses the tunnel duration.
+        Ship &player = state.player;
+        const float max_speed = std::max(PlayerMaxSpeed(state), 1.0F);
+        player.vel_x = std::sin(t.jump_heading_rad) * max_speed;
+        player.vel_y = -std::cos(t.jump_heading_rad) * max_speed;
+        player.speed = max_speed;
+        player.engine_glow_level = 32;
+        player.engine_glow_intensity = 1.0F;
+        t.flying_elapsed_ms += frame_time_ms;
+        if (t.flying_elapsed_ms >= kJumpTunnelMs) {
+          CompleteJump(state);
+          t.engaging = false;
+          t.jump_phase = TravelState::JumpPhase::kIdle;
+          t.slow_turn_elapsed_ms = 0.0F;
+          t.flying_elapsed_ms = 0.0F;
+          t.jump_heading_rad = 0.0F;
+          t.just_completed = true;
+          NovaLog::Debug("hyperspace jump sequence finished");
+        }
+        break;
+      }
+      case TravelState::JumpPhase::kIdle:
+      default:
+        break;
     }
     return;
-  }
-
-  if (t.jump_countdown_ticks > 0) {
-    return; // transient; should not persist with engaging false
   }
 
   // (a) Idle: wait for the travel key. When a starmap plot armed a specific
@@ -388,8 +481,28 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
   t.engaged_stellar_id = stellar_id;
   t.destination_system_id = dest_zero_based;
   t.starmap_destination_system_id = dest_zero_based;
-  t.jump_countdown_ticks = kJumpSequenceTicks;
+
+  // Compute the jump heading: the bearing from the ship out to the
+  // destination system (constants folded with the polar convention used by
+  // Math_BearingFromPointToPoint / Math_AddPolarVelocity: heading 0 = up,
+  // clockwise; vel_x += sin(h)*s ; vel_y -= cos(h)*s). This is the direction
+  // the ship faces during the slow-turn and coasts through the tunnel.
+  const System *dest_sys =
+      state.scenario.System(static_cast<std::int16_t>(dest_zero_based + 0x80));
+  if (dest_sys != nullptr) {
+    // Destination system center in world coords (System.pos_x/pos_y).
+    const float dx = static_cast<float>(dest_sys->pos_x) - state.player.pos_x;
+    const float dy = static_cast<float>(dest_sys->pos_y) - state.player.pos_y;
+    t.jump_heading_rad = std::atan2(dx, -dy); // polar heading to destination
+  } else {
+    // Fallback: keep the current heading.
+    t.jump_heading_rad = state.player.heading;
+  }
+
   t.engaging = true;
+  t.jump_phase = TravelState::JumpPhase::kSlowTurn;
+  t.slow_turn_elapsed_ms = 0.0F;
+  t.flying_elapsed_ms = 0.0F;
   NovaLog::Debug(
       "hyperspace jump engaged: from stellar {} (slot {}) to system {}",
       stellar_id,

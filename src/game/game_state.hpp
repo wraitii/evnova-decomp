@@ -314,11 +314,6 @@ struct TravelState {
   std::int16_t engaged_stellar_id = -1;
   // The resolved destination system resource id for the engaged jump.
   std::int16_t destination_system_id = -1;
-  // Jump-sequence countdown in 1/60s tick intervals (the original's
-  // Stellar_GetJumpSequenceDurationMs / ai_station_hold_timer gate). During
-  // this phase the ship coasts and the sequence plays; at zero the jump
-  // completes and the system changes.
-  int jump_countdown_ticks = 0;
   // Hyperspace-mode latch (H): when set, leading Backslash destination-system
   // presses (cycle_destination_*) choose the next jump system, and the HUD
   // travel panel reads as "Hyperspace". Mirrors the original's command 0x60
@@ -327,13 +322,36 @@ struct TravelState {
   // system change.
   bool hyperspace_mode = false;
   // Whether the engaged jump has finished declaring a destination and is now
-  // in the transition. The original jumps directly into the hyperspace flight;
-  // we keep a boolean so the loop knows to hand off to the completion path.
+  // in the transition. The original (Stellar_HandlePlayerHyperspaceSequence
+  // 0x0044f3d0) drives the visible jump in two phases before the system
+  // change; the reimpl models them via `jump_phase`: a slow-turn/brake onto
+  // the jump vector, then an in-tunnel coast at max speed (the star-tunnel
+  // visual), then the completion. Set on engage, cleared on completion.
   bool engaging = false;
   // Whether a jump completed this frame (consumed by the spaceflight loop to
   // re-spawn the starfield once). Cleared each tick.
   bool just_completed = false;
+  // Active phase of an engaged jump. Mirrors the original's hold-timer ramp
+  // (slow-turn) followed by the in-tunnel flight (Fire + cold-start in
+  // Ship_HandlePlayerShipCore). Idle when engaging is false.
+  enum class JumpPhase { kIdle, kSlowTurn, kFlying };
+  JumpPhase jump_phase = JumpPhase::kIdle;
+  // Slow-turn accumulator (ms): the original ramps ai_station_hold_timer by
+  // g_avg_frame_time_ms while the ship turns and doubles as the damped-brake
+  // gate; reaching g_hyperspace_engage_hold_ms fires the tunnel.
+  float slow_turn_elapsed_ms = 0.0F;
+  // In-tunnel coast accumulator (ms): frame_time accumulates each tick (the
+  // original's frame-time basis) until kJumpTunnelMs elapses, then the jump
+  // completes. Kept as an accumulator (not wall-clock) so the timing is
+  // frame-rate independent and unit-testable.
+  float flying_elapsed_ms = 0.0F;
+  // The jump direction in the reimpl's radians heading convention (0 = up,
+  // clockwise): the bearing from the departure point toward the destination
+  // system center, which the ship faces during the slow-turn and coasts along
+  // through the tunnel at max speed.
+  float jump_heading_rad = 0.0F;
 };
+
 
 // The outfit-driven effective ship stats (mirrors the cached outputs of the
 // Ghidra Ship_ComputeShip* helpers). Stored on GameState so the spaceflight
