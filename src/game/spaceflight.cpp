@@ -200,6 +200,19 @@ void DrawInGameFrame(SdlPlatform &platform,
   // HUD overlays the extending world at fixed, unscaled size (the project's
   // resolution policy: more window = more system shown, NOT a bigger HUD).
   hud.Draw(platform, state);
+  // Hyperspace fire flash: a full-screen white frame at the jump moment (the
+  // original's centered effect 0x32 queued at engage, the 'boom' flash).
+  // Drawn topmost so it also whites out the HUD, then fades over the next few
+  // frames as the loop decays screen_flash_intensity.
+  if (state.screen_flash_intensity > 0.0F) {
+    SDL_Renderer *const renderer = platform.renderer();
+    const std::uint8_t a = static_cast<std::uint8_t>(
+        std::clamp(state.screen_flash_intensity, 0.0F, 1.0F) * 255.0F);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, a);
+    SDL_RenderFillRect(renderer, nullptr);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  }
 }
 
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
@@ -657,6 +670,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         std::max(0.0F, state.ship_reticle_pulse - frame_time_ms * 1.8F);
     state.travel_reticle_pulse =
         std::max(0.0F, state.travel_reticle_pulse - frame_time_ms * 1.8F);
+    // Decay the hyperspace fire flash: full white at fire, gone in ~120 ms
+    // (a single-frame boom, matching the original's one-frame effect 0x32).
+    state.screen_flash_intensity =
+        std::max(0.0F, state.screen_flash_intensity - frame_time_ms / 120.0F);
     SDL_Delay(16);
   }
 }

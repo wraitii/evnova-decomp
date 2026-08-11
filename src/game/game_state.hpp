@@ -526,6 +526,14 @@ struct GameState {
   float travel_reticle_pulse = 0.0F;
   float ship_reticle_pulse = 0.0F;
 
+  // Full-screen flash intensity [0..1] at the hyperspace fire moment (the
+  // original's centered effect 0x32 queued via
+  // NovaEffects_QueueCenteredResource at jump engage -- the 'boom' white
+  // frame). Set to 1.0 when the tunnel fires, then decayed by the spaceflight
+  // loop; the in-game frame draw overlays a white fullscreen rect with this
+  // alpha. 0 when no flash is active.
+  float screen_flash_intensity = 0.0F;
+
   // Parsed scenario data (ships/outfits/weapons/stellars/systems), loaded once
   // so the gameplay loops can look up classes by id. Empty until a game is
   // created (mirrors the original lazily loading scenario tables in

@@ -471,9 +471,12 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
         // Fire: set the ship coasting at max speed along the jump heading
         // (the tunnel flight). Mirrors the original's fire block (max speed
         // via Ship_ComputeShipEffectiveMaxSpeed); the momentary 180-deg hurl
-        // is skipped since the same frame zeroes it.
+        // is skipped since the same frame zeroes it. The full-screen flash
+        // (the original's centered effect 0x32 -- the 'boom' white frame) is
+        // armed here and decays over the next few frames.
         t.jump_phase = TravelState::JumpPhase::kFlying;
         t.flying_elapsed_ms = 0.0F;
+        state.screen_flash_intensity = 1.0F;
         const float max_speed = std::max(PlayerMaxSpeed(state), 1.0F);
         player.vel_x = std::sin(t.jump_heading_rad) * max_speed;
         player.vel_y = -std::cos(t.jump_heading_rad) * max_speed;

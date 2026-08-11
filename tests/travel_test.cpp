@@ -346,3 +346,24 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
   CHECK(state.travel.just_completed);
   CHECK(state.player.current_system_id == 1);
 }
+
+// The fire moment must arm the full-screen flash (the original's centered
+// effect 0x32, the 'boom' white frame). NovaTravel_Tick sets the intensity;
+// the spaceflight loop decays it, so in this tick-only test it stays set.
+TEST_CASE("jump fire arms the screen flash") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  bool flash_armed = false;
+  for (int f = 0; f < 300 && !state.travel.just_completed; ++f) {
+    NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+    if (state.screen_flash_intensity > 0.0F) {
+      flash_armed = true;
+    }
+  }
+  CHECK(state.travel.just_completed);
+  CHECK(flash_armed);
+}
