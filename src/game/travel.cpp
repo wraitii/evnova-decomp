@@ -25,8 +25,14 @@ constexpr float kStoppedVel = 0.5F;
 // (original g_jump_turnaround_velocity_damp 0x5755f0, a double 0.992).
 constexpr float kTurnDamp = 0.992F;
 
-// Add one degree to the normal effective turn rate while braking.
+// The pre-fire turnaround turns at the class turn rate (Ship_ComputeShipMax
+// TurnRateDeg 0x00463e70, floor 1.0 deg/tick) -- no speed-up. The "+1" addend
+// and the 20-deg figure are only the FACING WINDOW (the alignment within which
+// the ship punches thrust back along the departure bearing), from
+// g_jump_turnaround_turn_rate_addend 0x57555c = 1.0 and
+// g_jump_turnaround_min_turn_rate_deg 0x5755e8 = 20.0.
 constexpr float kTurnRateAddend = 1.0F;
+constexpr float kTurnAroundAlignDeg = 20.0F;
 
 // Slow-phase velocity damp during the stationary hold
 // (g_hyperspace_slow_phase_velocity_damp 0x5755f8 = 0.98), gentler than the
@@ -439,8 +445,12 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
         refresh_glow();
       }
     };
-    const float max_turn_around = std::max(
-        std::round(state.cached_stats.turn_raw * 0.1F) + kTurnRateAddend, 1.0F);
+    // The turn is done at the class turn rate (no min-20 boost); the min-20
+    // only sizes the facing window for the thrust-back below.
+    const float class_turn_deg =
+        std::max(std::round(state.cached_stats.turn_raw * 0.1F), 1.0F);
+    const float turn_align_window =
+        std::max(class_turn_deg + kTurnRateAddend, kTurnAroundAlignDeg);
     // Turn the heading by at most the class turn rate (rad) this frame.
     const auto turn_toward = [&](float desired, float max_turn_deg) {
       const float turn_rad = max_turn_deg * kDegToRad * ticks;
@@ -454,14 +464,12 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
       // Pre-fire turn-around, mirroring the travel_transfer_mode == 3 block in
       // Ship_HandlePlayerShip (0x0044b120): while the ship still has velocity
       // it turns toward the REVERSE of its velocity (bearing from vel*100 back
-      // to origin, i.e. flying out from the system) at the effective class
-      // turn rate plus one degree, brakes by
-      // g_jump_turnaround_velocity_damp (0.992) per frame, and once facing the
-      // heading within one tick applies effective thrust back along it (the
-      // flip-and-boost that visibly stops the ship) while ramping the engine
-      // glow by +3/frame up to 24 (ShipState +0xc8d4, the normal-thrust cap).
-      // Ends when the ship has come to a stop (|vel| < kStoppedVel) -- the
-      // original's LAB_0044edfd handoff to the warp-up hold.
+      // to origin), brakes by g_jump_turnaround_velocity_damp (0.992) per
+      // frame, and once within the facing window
+      // (max(class turn + 1, 20) deg -- a gate, not a turn speed) applies
+      // effective thrust back along it to visibly stop the ship. Ends when the
+      // ship has come to a stop (|vel| < kStoppedVel) -- the original's
+      // LAB_0044edfd handoff to the warp-up hold.
       if (std::abs(player.vel_x) >= kStoppedVel ||
           std::abs(player.vel_y) >= kStoppedVel) {
         // Still moving: turn around to face the reverse of the velocity.
@@ -471,15 +479,15 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
         if (desired < 0.0F) {
           desired += kTwoPi;
         }
-        turn_toward(desired, max_turn_around);
+        turn_toward(desired, class_turn_deg);
 
-        // Once facing the reverse heading within one tick, punch back along it
-        // (Ship_ComputeShipEffectiveThrust toward the heading) and ramp the
-        // engine glow; otherwise the glow fades.
+        // Once facing the reverse heading within the facing window, punch back
+        // along it (Ship_ComputeShipEffectiveThrust toward the heading) and
+        // ramp the engine glow; otherwise the glow fades.
         const float delta_deg =
             std::abs(std::remainder(desired - player.heading, kTwoPi)) *
             (180.0F / 3.14159265358979323846F);
-        if (delta_deg < max_turn_around) {
+        if (delta_deg < turn_align_window) {
           const float thrust = PlayerThrust(state);
           player.vel_x += std::sin(player.heading) * thrust * ticks;
           player.vel_y += -std::cos(player.heading) * thrust * ticks;
@@ -514,8 +522,7 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
       player.vel_y *= kSlowPhaseVelDamp;
       player.speed = std::hypot(player.vel_x, player.vel_y);
       fade_glow();
-      // Align onto the jump heading at the class turn rate (unlimited by the
-      // turn-around's 20-deg floor -- the ship is already nearly pointed).
+      // Align onto the jump heading at the class turn rate.
       turn_toward(
           t.jump_heading_rad,
           std::max(std::round(state.cached_stats.turn_raw * 0.1F), 1.0F));

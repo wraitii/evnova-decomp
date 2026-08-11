@@ -25,12 +25,13 @@
 // The in-flight hyperspace flight is modelled as visible phases (see the
 // NovaTravel_Tick notes below), mirroring the original's pre-fire block in
 // Ship_HandlePlayerShip (0x0044b120, travel_transfer_mode == 3):
-//   kBrake -- while the ship still has velocity it turns around to face the
-//     REVERSE of its velocity (flying out from the system, that points back
-//     toward the jump vector) at a fast minimum turn rate (max(computed+1, 20)
-//     deg/tick), brakes by _DAT_005755f0 (0.992)/frame, and once facing ramps
-//     the engine glow by +3/frame to 24 (ShipState +0xc8d4). Ends when the
-//     ship has come to a stop (/vel/ < 0.5).
+//   kBrake -- while the ship still has velocity it turns around (at the class
+//     turn rate) to face the REVERSE of its velocity (flying out from the
+//     system, that points back toward the jump vector), brakes by
+//     _DAT_005755f0 (0.992)/frame, and once within max(class turn+1, 20) deg of
+//     that bearing (a facing window, not a turn speed) thrusts back along it,
+//     ramping the engine glow by +3/frame to 24. Ends when the ship has come
+//     to a stop (/vel/ < 0.5).
 //   kHold -- finishes turning the hull onto the destination-system bearing.
 //   kWarmup -- starts the rising 'Warp up' cue and holds for two seconds.
 //   kZoom -- the engine glow ramps and the
