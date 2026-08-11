@@ -13,10 +13,17 @@
 // (that stays with NovaTravel_Tick / the 'j' travel command), but it shows the
 // reachable neighbourhood so the player can plan the next jump.
 //
-// Divergences from the original: no DITL resource allocation, no zoomable
-// political/government overlay tiles (NovaUi_DrawStarmapPoliticalOverlay), no
-// mission-highlight route editing, and no licence-seed easter-egg branch. The
-// focus is a faithful, useful navigation surface for the jump player.
+// The window is the actual starmap dialog resource: DLOG 0x7d0 (601x513) with
+// the PICT 0x213d "Map" starfield backdrop blitted as the frame, DITL 0x7d0
+// item 2 as the galaxy-graph viewport (UiPanel_GetEntryInfo(window, 3)), item 5
+// as the right-hand selected-system detail column (entry 6) and item 1 as the
+// bottom status bar (entry 2).
+//
+// Remaining divergences from the original: no zoomable political/government
+// overlay tiles (NovaUi_DrawStarmapPoliticalOverlay), no mission-highlight
+// route editing, no starmap search dialog and no licence-seed easter-egg
+// branch. The focus is a faithful, useful navigation surface for the jump
+// player.
 
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"

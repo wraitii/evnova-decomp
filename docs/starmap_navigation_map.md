@@ -130,9 +130,21 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   system name labels appear only once the map is zoomed in past a threshold
   (mirroring the original's zoom-gated labels, Dat_00575a10) while the
   current / selected system names stay always visible.
-- Inspector footer shows the selected system's name, explored/current state,
-  owning government, outward jump count, and a `[plotted target]` flag when it
-  is the active starmap-plotted destination.
+- The two info panes the DITL defines around the graph are rendered: the
+  right-hand detail column (DITL item 5 / entry 6) shows the selected system's
+  name, explored/current state, owning government, outward jump count and a
+  `- plotted target` flag when it is the active starmap-plotted destination
+  (long names truncated to the narrow column); the bottom status bar (DITL
+  item 1 / entry 2) shows a `Selected System:` line plus the keyboard hints.
+- The bottom button row (DITL items 8/7/9/3/4/0) uses the house three-state
+  PICT button art (ServicesButtonArt strips 0x1d4c..0x1d54, the same the
+  ship-comm / negotiation / landed windows use) with STR# 0x96 labels, and is
+  clickable matching the original's action dispatch:
+  Show/Hide Borders toggles the political tint, Clear Route clears the plotted
+  destination, Find starts an inline name-prefix search (typed characters
+  select the first explored system matching, Esc cancels, Enter commits),
+  '-'/'+' step the zoom (dimmed at the limits, mirroring DAT_007dc742/743) and
+  Done closes the map.
 - Esc / Enter / q / x close the map and return to flight.
 
 Wired from `spaceflight.cpp`: the `FlightInput.starmap` ('m', edge-latched in
@@ -151,14 +163,27 @@ the explored blobs grow as the player jumps.
 
 ## Divergences / deferred (TODO)
 
-- No DITL resource allocation / frame PICT; the map is a direct SDL3 render.
+- The starmap renders the real dialog resources: the 601x513 window frame
+  (DLOG 0x7d0) with the PICT 0x213d "Map" starfield backdrop blitted as the
+  window base (the original's `DAT_007dc73c`), DITL 0x7d0 item 2 as the
+  galaxy-graph viewport (`UiPanel_GetEntryInfo(window, 3)`), item 5 as the
+  right-hand detail column (entry 6), item 1 as the bottom status bar (entry 2)
+  and items 8/7/9/3/4/0 as the bottom button row (entries 9/8/10/4/5/1: Show
+  Borders, Clear Route, Find, zoom out, zoom in, Done). Because the 513-tall
+  window is taller than the fixed 640x480 field, the whole dialog is scaled
+  down uniformly (x0.936) so every element -- including the button row -- is
+  on screen; the graph is scissored to its viewport rect.
+- The bottom buttons use the house three-state PICT button art with STR# 0x96
+  labels and dispatch the original's actions (zoom in/out at the zoom limits,
+  Done closes, Show/Hide Borders toggles the political tint, Clear Route clears
+  the plotted destination, Find starts an inline name-prefix search). Find is
+  the inline stand-in for the original's modal search dialog (`0x004aab30`).
 - No political/government **overlay grid** (`NovaUi_DrawStarmapPoliticalOverlay`
-  per-cell strength tint); the per-system marker government-colouring above is a
-  lightweight stand-in.
+  per-cell strength tint); the Show Borders toggle strengthens the per-system
+  marker government tint as a lightweight stand-in.
 - No plotted-route editing or multi-hop route → travel-target sync (only the
   immediate first hop is resolved to a travel slot).
 - No mission-highlight icons / mission jump planning.
-- No starmap search dialog (`0x004aab30`).
 - No licence-seed easter-egg branch.
 - Pan/zoom are keyboard-driven; no drag-to-pan / wheel zoom yet.
 - The map only inspects/selects; the actual jump stays with `NovaTravel_Tick`.

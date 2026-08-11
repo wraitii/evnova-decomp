@@ -1,13 +1,18 @@
 #include "starmap.hpp"
 
+#include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../pict_image.hpp"
+#include "hud_overlay.hpp"
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
+#include "services_buttons.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
@@ -19,16 +24,93 @@ namespace game {
 namespace {
 
 // ---- Fixed UI geometry (logical 640x480 playfield) ------------------------
-// The map modal draws over a centred 640x480 logical field (the same space the
-// other modals use). A title bar sits at the top; the galaxy graph fills the
-// panel below it; an inspector footer shows the selected system's details.
-constexpr int kPanelX = 8;
-constexpr int kPanelY = 8;
-constexpr int kPanelW = 624;
-constexpr int kPanelH = 430;
-constexpr float kTitleBaselineY = 22.0F;
-constexpr float kFooterBaselineY = 452.0F;
-constexpr float kHelpBaselineY = 470.0F;
+// The starmap window is the EV Nova DLOG 0x7d0 dialog: a 601x513 frame whose
+// backdrop is the PICT 0x213d "Map" resource, blitted across the whole window
+// (DAT_007dc73c in NovaUi_RunStarmapWindow). DITL 0x7d0 provides the other
+// window elements (UiPanel_GetEntryInfo entries are 1-based, so entry N = DITL
+// item N-1):
+//   item 2 (entry 3) -- the "big panel" galaxy-graph viewport, x=9..467,
+//                       y=8..428;
+//   item 5 (entry 6) -- the right-hand selected-system detail column,
+//                       x=474..594, y=8..437;
+//   item 1 (entry 2) -- the bottom status bar, x=8..594, y=436..478;
+//   items 0/3/4/7/8/9 (entries 1/4/5/8/9/10) -- the bottom button row at
+//                       y=483..508: Show Borders, Clear Route, Find, '-', '+',
+//                       Done. Their labels come from STR# 0x96 and their
+//                       actions from the clicked 1-based entry ordinal
+//                       (NovaUi_StarmapWindowInnerLoop's action dispatch).
+// The window is 513 tall, taller than the 640x480 field, so it is scaled down
+// uniformly (480/513) to keep the whole dialog -- map, side column, status bar
+// AND the bottom button row -- on screen. The starfield backdrop scales
+// invisibly; all DITL item rects below are the scaled playfield rects.
+constexpr int kStarmapWindowW = 601;
+constexpr int kStarmapWindowH = 513;
+constexpr float kStarmapFitScale =
+    static_cast<float>(kLogicalUiHeight) /
+    static_cast<float>(kStarmapWindowH); // ~0.936
+constexpr float kStarmapWindowX =
+    (640.0F - static_cast<float>(kStarmapWindowW) * kStarmapFitScale) /
+    2.0F; // ~38.8
+constexpr float kStarmapWindowY = 0.0F;
+// DITL item 2 (the galaxy-graph viewport): window origin + item rect
+// (left=9, top=8, right=467, bottom=428) scaled to the field. These are the
+// defaults; the rects are re-derived from the DITL at runtime when the
+// resource parses.
+constexpr float kMapPanelX = kStarmapWindowX + 9.0F * kStarmapFitScale;
+constexpr float kMapPanelY = 8.0F * kStarmapFitScale;
+constexpr float kMapPanelW = 458.0F * kStarmapFitScale;
+constexpr float kMapPanelH = 420.0F * kStarmapFitScale;
+// DITL item 5: the right-hand selected-system detail column.
+constexpr float kSidePanelX = kStarmapWindowX + 474.0F * kStarmapFitScale;
+constexpr float kSidePanelY = 8.0F * kStarmapFitScale;
+constexpr float kSidePanelW = 120.0F * kStarmapFitScale;
+constexpr float kSidePanelH = 429.0F * kStarmapFitScale;
+// DITL item 1: the bottom status bar.
+constexpr float kBottomBarX = kStarmapWindowX + 8.0F * kStarmapFitScale;
+constexpr float kBottomBarY = 436.0F * kStarmapFitScale;
+constexpr float kBottomBarW = 586.0F * kStarmapFitScale;
+constexpr float kBottomBarH = 42.0F * kStarmapFitScale;
+
+// The bottom button row (DITL items 8,7,9,3,4,0 in left-to-right screen order;
+// 1-based entries 9,8,10,4,5,1 -> actions Show Borders, Clear Route, Find,
+// zoom out, zoom in, Done). Each entry is the item rect's (left, top, w, h)
+// in the DITL authoring space, scaled to the field.
+struct StarmapButtonRect {
+  float x, y, w, h;
+};
+
+constexpr std::array<StarmapButtonRect, 6> kStarmapButtonRects{{
+    // Show Borders / Hide Borders (item 8): x=11..141, y=483..508
+    {kStarmapWindowX + 11.0F * kStarmapFitScale,
+     kStarmapWindowY + 483.0F * kStarmapFitScale,
+     130.0F * kStarmapFitScale,
+     25.0F * kStarmapFitScale},
+    // Clear Route (item 7): x=155..275
+    {kStarmapWindowX + 155.0F * kStarmapFitScale,
+     kStarmapWindowY + 483.0F * kStarmapFitScale,
+     120.0F * kStarmapFitScale,
+     25.0F * kStarmapFitScale},
+    // Find (item 9): x=288..387
+    {kStarmapWindowX + 288.0F * kStarmapFitScale,
+     kStarmapWindowY + 483.0F * kStarmapFitScale,
+     99.0F * kStarmapFitScale,
+     25.0F * kStarmapFitScale},
+    // Zoom out '-' (item 3): x=408..433
+    {kStarmapWindowX + 408.0F * kStarmapFitScale,
+     kStarmapWindowY + 483.0F * kStarmapFitScale,
+     25.0F * kStarmapFitScale,
+     25.0F * kStarmapFitScale},
+    // Zoom in '+' (item 4): x=438..463
+    {kStarmapWindowX + 438.0F * kStarmapFitScale,
+     kStarmapWindowY + 483.0F * kStarmapFitScale,
+     25.0F * kStarmapFitScale,
+     25.0F * kStarmapFitScale},
+    // Done (item 0): x=483..582
+    {kStarmapWindowX + 483.0F * kStarmapFitScale,
+     kStarmapWindowY + 483.0F * kStarmapFitScale,
+     99.0F * kStarmapFitScale,
+     25.0F * kStarmapFitScale},
+}};
 
 // Galaxies can span large/unbounded coordinates; the map view transform maps
 // the bounded set of *reachable* system positions (clamped to the current
@@ -57,18 +139,43 @@ constexpr SDL_Color kLinkLine{58, 82, 116, 200};
 constexpr SDL_Color kLinkLineCurrent{96, 150, 214, 255};
 constexpr SDL_Color kMarkerExplored{150, 196, 244, 255};
 constexpr SDL_Color kMarkerCurrent{255, 214, 100, 255};
-constexpr SDL_Color kTextTitle{202, 224, 255, 255};
 constexpr SDL_Color kTextBody{200, 214, 232, 255};
 constexpr SDL_Color kTextDim{110, 132, 158, 255};
 constexpr SDL_Color kSelectionBox{110, 170, 230, 255};
 constexpr SDL_Color kReachableLink{120, 255, 170, 255}; // plotted-route accent
 
+// The bottom button row, in left-to-right screen order (DITL items 8,7,9,3,4,0
+// -> 1-based entries 9,8,10,4,5,1 -> NovaUi_StarmapWindowInnerLoop actions
+// Show Borders, Clear Route, Find, zoom out, zoom in, Done). The labels come
+// from STR# 0x96 "button labels" (NovaHud_LoadStringEntry).
+enum class StarmapButton : std::size_t {
+  kShowBorders = 0, // STR# 0x96 [55] / [56] (Show/Hide Borders)
+  kClearRoute = 1,  // STR# 0x96 [48]
+  kFind = 2,        // STR# 0x96 [59]
+  kZoomOut = 3,     // STR# 0x96 [16] '-'
+  kZoomIn = 4,      // STR# 0x96 [17] '+'
+  kDone = 5,        // STR# 0x96 [4]
+};
+
+// The starmap geometry resolved from the DLOG/DITL dialog resources: the full
+// 601x513 window frame (root of the backdrop blit and its DITL items), the
+// galaxy-graph viewport (DITL item 2), the right-hand detail column (DITL item
+// 5), the bottom status bar (DITL item 1) and the bottom button row (DITL
+// items 8/7/9/3/4/0), all in scaled playfield coordinates.
+struct StarmapGeometry {
+  SDL_FRect window{};                 // full backdrop frame, playfield coords
+  SDL_FRect map{};                    // galaxy-graph viewport, playfield coords
+  SDL_FRect side{};                   // selected-system detail column
+  SDL_FRect bar{};                    // bottom status bar
+  std::array<SDL_FRect, 6> buttons{}; // bottom button row, StarmapButton order
+};
+
 // A single system marker's mapped screen position plus its index, so clicks
 // and label collision checks resolve against the same projection as drawing.
 struct MappedSystem {
   std::int16_t zero_based_id = -1; // scenario.systems index
-  float sx = 0.0F;                 // panel-local x
-  float sy = 0.0F;                 // panel-local y
+  float sx = 0.0F;                 // playfield x
+  float sy = 0.0F;                 // playfield y
 };
 
 // The map view: an SRT-ish transform that places the galaxy bounding box into
@@ -332,8 +439,89 @@ void DrawRing(
 // current/selected nodes stay legible regardless). ---
 constexpr float kLabelZoomMin = 1.4F; // scale at which labels fade in
 
-// Draws the fixed chrome: the window background, panel frame and title bar.
-void DrawChrome(SdlPlatform &platform, NovaFontCache &font_cache) {
+// Loads the starmap backdrop PICT (0x213d "Map", the DAT_007dc73c backdrop
+// NovaUi_RunStarmapWindow loads) into a texture sized to the 601x513 DLOG
+// 0x7d0 window. Returns null when the resource is missing or fails to decode.
+std::unique_ptr<SdlTexture> LoadStarmapBackdrop(SdlPlatform &platform) {
+  const auto data = NovaResource_LoadPictData(0x213d);
+  if (!data) {
+    return {};
+  }
+  const auto img = Resource_LoadPictAsImage(*data);
+  if (!img) {
+    return {};
+  }
+  return SdlTexture::Create(
+      platform.renderer(), img->width, img->height, img->rgba_pixels);
+}
+
+// Resolves the starmap window + panes + button row from the DLOG 0x7d0 /
+// DITL 0x7d0 dialog resources. The 601x513 window is scaled down to fit the
+// 640x480 field (kStarmapFitScale); every DITL item rect is offset by the
+// window origin and scaled by the same factor. Falls back to verified
+// hardcoded rects when the DITL resource can't be located.
+StarmapGeometry ResolveStarmapGeometry() {
+  StarmapGeometry g;
+  g.window = SDL_FRect{kStarmapWindowX,
+                       kStarmapWindowY,
+                       static_cast<float>(kStarmapWindowW) * kStarmapFitScale,
+                       static_cast<float>(kStarmapWindowH) * kStarmapFitScale};
+  g.map = SDL_FRect{kMapPanelX, kMapPanelY, kMapPanelW, kMapPanelH};
+  g.side = SDL_FRect{kSidePanelX, kSidePanelY, kSidePanelW, kSidePanelH};
+  g.bar = SDL_FRect{kBottomBarX, kBottomBarY, kBottomBarW, kBottomBarH};
+  for (std::size_t i = 0; i < kStarmapButtonRects.size(); ++i) {
+    const auto &b = kStarmapButtonRects[i];
+    g.buttons[i] = SDL_FRect{b.x, b.y, b.w, b.h};
+  }
+  const auto items = NovaResource_LoadDialogItems(0x7d0);
+  if (!items) {
+    return g;
+  }
+  // DITL items are 0-based; UiPanel_GetEntryInfo addresses them 1-based, so
+  // entry 3 = item 2 (galaxy graph), entry 6 = item 5 (side column), entry 2 =
+  // item 1 (bottom bar) and the button entries 9/8/10/4/5/1 = items
+  // 8/7/9/3/4/0. Use each item's authored rect offset by the window origin and
+  // scaled.
+  const auto offset_rect = [](const NovaDialogItem &it) {
+    return SDL_FRect{
+        kStarmapWindowX + static_cast<float>(it.left) * kStarmapFitScale,
+        kStarmapWindowY + static_cast<float>(it.top) * kStarmapFitScale,
+        static_cast<float>(it.right - it.left) * kStarmapFitScale,
+        static_cast<float>(it.bottom - it.top) * kStarmapFitScale};
+  };
+  const auto valid = [](const NovaDialogItem &it) {
+    return it.right > it.left && it.bottom > it.top;
+  };
+  if (items->size() > 2 && valid((*items)[2])) {
+    g.map = offset_rect((*items)[2]);
+  }
+  if (items->size() > 5 && valid((*items)[5])) {
+    g.side = offset_rect((*items)[5]);
+  }
+  if (items->size() > 1 && valid((*items)[1])) {
+    g.bar = offset_rect((*items)[1]);
+  }
+  // Button row, in StarmapButton screen order: item 8 -> Show Borders, item 7
+  // -> Clear Route, item 9 -> Find, item 3 -> zoom out, item 4 -> zoom in,
+  // item 0 -> Done.
+  const std::array<std::size_t, 6> button_items{8, 7, 9, 3, 4, 0};
+  for (std::size_t i = 0; i < button_items.size(); ++i) {
+    const std::size_t item_idx = button_items[i];
+    if (items->size() > item_idx && valid((*items)[item_idx])) {
+      g.buttons[i] = offset_rect((*items)[item_idx]);
+    }
+  }
+  return g;
+}
+
+// Draws the fixed chrome: the scrim, the 601x513 starmap window frame
+// (backdrop PICT when available, else a bordered placeholder) and the inset
+// panels of the remaining DITL elements -- the map viewport (item 2), the
+// right-hand detail column (item 5) and the bottom status bar (item 1). No
+// title bar: the window's own PICT carries its look.
+void DrawChrome(SdlPlatform &platform,
+                const StarmapGeometry &geometry,
+                SDL_Texture *backdrop) {
   SDL_Renderer *renderer = platform.renderer();
   SDL_SetRenderDrawColor(
       renderer, kWindowBg.r, kWindowBg.g, kWindowBg.b, SDL_ALPHA_OPAQUE);
@@ -349,52 +537,65 @@ void DrawChrome(SdlPlatform &platform, NovaFontCache &font_cache) {
   SDL_RenderFillRect(renderer, &full);
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
-  const SDL_FRect panel{kPanelX, kPanelY, kPanelW, kPanelH};
-  SDL_SetRenderDrawColor(
-      renderer, kPanelBg.r, kPanelBg.g, kPanelBg.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderFillRect(renderer, &panel);
-  SDL_SetRenderDrawColor(renderer,
-                         kPanelBorder.r,
-                         kPanelBorder.g,
-                         kPanelBorder.b,
-                         SDL_ALPHA_OPAQUE);
-  SDL_RenderRect(renderer, &panel);
+  if (backdrop != nullptr) {
+    // Blit the full 601x513 starfield backdrop across the window (the original
+    // blits DAT_007dc73c to UiWindow_GetRect).
+    SDL_RenderTexture(renderer, backdrop, nullptr, &geometry.window);
+  } else {
+    // No backdrop art: bordered placeholder so the map stays legible.
+    SDL_SetRenderDrawColor(
+        renderer, kPanelBg.r, kPanelBg.g, kPanelBg.b, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &geometry.window);
+    SDL_SetRenderDrawColor(renderer,
+                           kPanelBorder.r,
+                           kPanelBorder.g,
+                           kPanelBorder.b,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &geometry.window);
+  }
 
-  NovaText_DrawCentered(platform,
-                        font_cache,
-                        NovaFontFamily::kChicago,
-                        16.0F,
-                        kNovaFontStyleBold,
-                        kTextTitle,
-                        0.0F,
-                        640.0F,
-                        kTitleBaselineY,
-                        "Galaxy Map");
-  NovaText_DrawCentered(platform,
-                        font_cache,
-                        NovaFontFamily::kGeneva,
-                        11.0F,
-                        kNovaFontStyleRegular,
-                        kTextDim,
-                        0.0F,
-                        640.0F,
-                        kHelpBaselineY,
-                        "Arrows pan   +/- zoom   h home/fit   Tab/\\ "
-                        "select   Enter/Esc close");
+  // Inset panels for the map viewport and the two info regions (DITL items
+  // 2/5/1): a flat dark fill keeps the text legible over the starfield, with a
+  // subtle hairline edge so each region reads as its own pane.
+  const SDL_FRect *const panes[3] = {
+      &geometry.map, &geometry.side, &geometry.bar};
+  for (const SDL_FRect *pane : panes) {
+    SDL_SetRenderDrawColor(
+        renderer, kPanelBg.r, kPanelBg.g, kPanelBg.b, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, pane);
+    SDL_SetRenderDrawColor(
+        renderer, kPanelBorder.r, kPanelBorder.g, kPanelBorder.b, 160);
+    SDL_RenderRect(renderer, pane);
+  }
 }
 
-// Draws the galaxy graph: link lines first, then markers and names.
+// Draws the galaxy graph: link lines first, then markers and names, clipped to
+// the map panel (DITL item 2) so routes/names never paint over the window
+// chrome. `show_borders` is the political-overlay toggle: when on, markers
+// lean more strongly toward their owning government's colour (a lightweight
+// stand-in for the original's per-cell government overlay grid).
 void DrawGalaxy(SdlPlatform &platform,
                 NovaFontCache &font_cache,
                 const GameState &state,
                 const std::vector<MappedSystem> &mapped,
                 const MapView &view,
-                float panel_x,
-                float panel_y,
-                std::int16_t selected_id) {
+                const StarmapGeometry &geometry,
+                std::int16_t selected_id,
+                bool show_borders) {
   const auto &systems = state.scenario.systems;
   const std::int16_t current = state.player.current_system_id;
   SDL_Renderer *renderer = platform.renderer();
+  const float panel_x = geometry.map.x;
+  const float panel_y = geometry.map.y;
+  // Scissor the galaxy graph to the map panel so off-field nodes/labels stay
+  // inside the window frame.
+  const SDL_Rect clip{static_cast<int>(geometry.map.x),
+                      static_cast<int>(geometry.map.y),
+                      static_cast<int>(geometry.map.w),
+                      static_cast<int>(geometry.map.h)};
+  SDL_SetRenderClipRect(renderer, &clip);
+  const auto restore_clip = [&]() { SDL_SetRenderClipRect(renderer, nullptr); };
+
   // Link/route endpoints and marker positions must share the same origin.
   // Markers are stored panel-relative (m.sx/m.sy include the panel offset in
   // BuildMappedSystems); the raw world projection below does NOT, so the panel
@@ -513,7 +714,7 @@ void DrawGalaxy(SdlPlatform &platform,
     // explored/unexplored base so explored systems read as explorable territory
     // of their faction.
     const SDL_Color gov = GovernmentColor(state, m.zero_based_id);
-    SDL_Color c = Blend(kMarkerExplored, gov, 0.55F);
+    SDL_Color c = Blend(kMarkerExplored, gov, show_borders ? 0.9F : 0.55F);
     if (is_current) {
       c = kMarkerCurrent;
     }
@@ -562,57 +763,282 @@ void DrawGalaxy(SdlPlatform &platform,
       }
     }
   }
+
+  restore_clip();
 }
 
-// Draws the inspector footer for the selected system.
-void DrawInspector(SdlPlatform &platform,
-                   NovaFontCache &font_cache,
-                   const GameState &state,
-                   std::int16_t selected_id) {
-  std::string line = "No system selected";
+// Truncates `text` to fit within `max_width` logical pixels at the given font
+// metrics, appending "..." when cut. The detail column (DITL item 5) is only
+// ~120px wide, so long system/government names must be shortened to stay on
+// the pane (the original draws these same fields into the narrow column).
+std::string TruncateToWidth(NovaFontCache &font_cache,
+                            NovaFontFamily family,
+                            float point_size,
+                            std::uint16_t style,
+                            std::string_view text,
+                            int max_width) {
+  if (font_cache.TextWidth(family, point_size, style, text) <= max_width) {
+    return std::string(text);
+  }
+  std::string cut(text);
+  while (!cut.empty()) {
+    cut.pop_back();
+    if (font_cache.TextWidth(family, point_size, style, cut + "...") <=
+        max_width) {
+      return cut + "...";
+    }
+  }
+  return "...";
+}
+
+// Draws the two info panes the DITL defines around the map graph. The right
+// column (DITL item 5, UiPanel_GetEntryInfo entry 6) shows the selected
+// system's details -- name, explored/current state, owning government and
+// outward jump count -- mirroring the original's right-hand detail pane; the
+// bottom bar (DITL item 1, entry 2) carries the "Selected System:" line plus
+// the keyboard hints (a stand-in for the original's date/route status line).
+void DrawSidePanels(SdlPlatform &platform,
+                    NovaFontCache &font_cache,
+                    const GameState &state,
+                    const StarmapGeometry &geometry,
+                    std::int16_t selected_id,
+                    const std::string *search_query) {
+  SDL_Renderer *renderer = platform.renderer();
+
+  // ---- Right column: selected-system details. ----
+  std::string sys_name = "No system selected";
+  std::string status;
+  SDL_Color status_color = kTextDim;
+  std::string govt = "?";
+  int jump_count = 0;
   if (selected_id >= 0 &&
       static_cast<std::size_t>(selected_id) < state.scenario.systems.size()) {
     const System &sys =
         state.scenario.systems[static_cast<std::size_t>(selected_id)];
     const bool explored = SystemExplored(state, selected_id);
     const bool is_current = selected_id == state.player.current_system_id;
-    line = sys.name + "   ";
-    line +=
-        is_current ? "[current]" : (explored ? "[explored]" : "[undiscovered]");
+    sys_name = sys.name;
+    if (is_current) {
+      status = "current system";
+      status_color = kMarkerCurrent;
+    } else if (explored) {
+      status = "explored";
+      status_color = kTextBody;
+    } else {
+      status = "undiscovered";
+      status_color = kTextDim;
+    }
     // Flag the system plotted as the next jumped-to destination (via a prior
-    // starmap selection), so the landing-feedback tells the player which system
-    // the plotted jump actually targets.
+    // starmap selection), so the landing-feedback tells the player which
+    // system the plotted jump actually targets.
     if (state.travel.starmap_destination_system_id == selected_id) {
-      line += "  [plotted target]";
+      status += " - plotted target";
+      status_color = kReachableLink;
     }
     // Owning government (the political-map affiliation of this system).
     if (sys.government_id >= 0) {
       if (const Government *g = state.scenario.Government(
               static_cast<std::int16_t>(sys.government_id + 0x80))) {
         if (!g->name.empty()) {
-          line += "  " + g->name;
+          govt = g->name;
         }
       }
     }
     // Count reachable jumps from this system.
-    int jump_count = 0;
     for (const std::int16_t link : sys.links) {
       if (link >= 0x80) {
         ++jump_count;
       }
     }
-    line += "  jumps: " + std::to_string(jump_count);
   }
+
+  const float col_x = geometry.side.x + 6.0F;
+  const int col_w = static_cast<int>(geometry.side.w) - 12;
+  const auto fit = [&](std::string_view text) {
+    return TruncateToWidth(font_cache,
+                           NovaFontFamily::kGeneva,
+                           10.0F,
+                           kNovaFontStyleRegular,
+                           text,
+                           col_w);
+  };
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                10.0F,
+                kNovaFontStyleBold,
+                kTextBody,
+                col_x,
+                geometry.side.y + 14.0F,
+                TruncateToWidth(font_cache,
+                                NovaFontFamily::kGeneva,
+                                10.0F,
+                                kNovaFontStyleBold,
+                                sys_name,
+                                col_w));
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                10.0F,
+                kNovaFontStyleRegular,
+                status_color,
+                col_x,
+                geometry.side.y + 28.0F,
+                status);
+  // Divider under the column header (the original draws the same rule at the
+  // top of the entry-6 pane).
+  SDL_SetRenderDrawColor(
+      renderer, kPanelBorder.r, kPanelBorder.g, kPanelBorder.b, 120);
+  SDL_RenderLine(renderer,
+                 geometry.side.x + 4.0F,
+                 geometry.side.y + 36.0F,
+                 geometry.side.x + geometry.side.w - 4.0F,
+                 geometry.side.y + 36.0F);
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                10.0F,
+                kNovaFontStyleRegular,
+                kTextBody,
+                col_x,
+                geometry.side.y + 46.0F,
+                fit("Gov: " + govt));
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                10.0F,
+                kNovaFontStyleRegular,
+                kTextBody,
+                col_x,
+                geometry.side.y + 60.0F,
+                "Jumps: " + std::to_string(jump_count));
+
+  // ---- Bottom bar: selected-system line + control hints. ----
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                11.0F,
+                kNovaFontStyleRegular,
+                kTextBody,
+                geometry.bar.x + 10.0F,
+                geometry.bar.y + 24.0F,
+                search_query ? "Find: " + *search_query + "_"
+                             : "Selected System: " +
+                                   TruncateToWidth(
+                                       font_cache,
+                                       NovaFontFamily::kGeneva,
+                                       11.0F,
+                                       kNovaFontStyleRegular,
+                                       sys_name,
+                                       static_cast<int>(geometry.bar.w) - 220));
   NovaText_DrawCentered(platform,
                         font_cache,
                         NovaFontFamily::kGeneva,
-                        12.0F,
+                        10.0F,
                         kNovaFontStyleRegular,
-                        kTextBody,
-                        0.0F,
-                        640.0F,
-                        kFooterBaselineY,
-                        line);
+                        kTextDim,
+                        geometry.bar.x,
+                        geometry.bar.x + geometry.bar.w,
+                        geometry.bar.y + 36.0F,
+                        "Arrows pan   +/- zoom   h home/fit   Tab/\\ "
+                        "select   Enter/Esc close");
+}
+
+// Loads a bottom-button label from STR# 0x96 ("button labels", the same pool
+// the ship-comm/negotiation buttons use), with a hardcoded fallback so the row
+// stays legible when the pool is missing. The Show Borders button toggles
+// between the Show/Hide Borders entries with the political-overlay state.
+std::string StarmapButtonLabel(StarmapButton button, bool show_borders) {
+  std::uint16_t index = 0;
+  switch (button) {
+  case StarmapButton::kShowBorders:
+    index = show_borders ? 56 : 55; // Hide Borders / Show Borders
+    break;
+  case StarmapButton::kClearRoute:
+    index = 48;
+    break;
+  case StarmapButton::kFind:
+    index = 59;
+    break;
+  case StarmapButton::kZoomOut:
+    index = 16; // '-'
+    break;
+  case StarmapButton::kZoomIn:
+    index = 17; // '+'
+    break;
+  case StarmapButton::kDone:
+    index = 4;
+    break;
+  }
+  if (auto s = NovaHud_LoadStringEntry(0x96, index)) {
+    return *s;
+  }
+  switch (button) {
+  case StarmapButton::kShowBorders:
+    return show_borders ? "Hide Borders" : "Show Borders";
+  case StarmapButton::kClearRoute:
+    return "Clear Route";
+  case StarmapButton::kFind:
+    return "Find";
+  case StarmapButton::kZoomOut:
+    return "-";
+  case StarmapButton::kZoomIn:
+    return "+";
+  case StarmapButton::kDone:
+    return "Done";
+  }
+  return "?";
+}
+
+// Draws the bottom button row (DITL items 8/7/9/3/4/0 in screen order) with
+// the house three-state button art -- the same PICT strips (0x1d4c..0x1d54)
+// the ship-comm / negotiation / landed windows use -- plus the STR# 0x96
+// label. The zoom buttons grey out at the zoom limits (mirroring the
+// original's DAT_007dc742/743 gating), the button under the mouse uses the
+// pressed ("click") art like the other dialog rows, and the Show Borders
+// label reflects the political-overlay state.
+void DrawButtons(SdlPlatform &platform,
+                 NovaFontCache &font_cache,
+                 const ServicesButtonArt &button_art,
+                 const StarmapGeometry &geometry,
+                 bool show_borders,
+                 int zoom_level,
+                 std::optional<std::size_t> hovered) {
+  // Same label palette as the other button rows (landed_window.cpp).
+  constexpr SDL_Color kDim{128, 170, 210, 255};
+  constexpr SDL_Color kSelected{142, 209, 255, 255};
+  constexpr SDL_Color kDisabledLabel{88, 108, 132, 255};
+  const std::array<std::pair<StarmapButton, bool>, 6> buttons{{
+      {StarmapButton::kShowBorders, true},
+      {StarmapButton::kClearRoute, true},
+      {StarmapButton::kFind, true},
+      {StarmapButton::kZoomOut, zoom_level > kZoomLevelMin},
+      {StarmapButton::kZoomIn, zoom_level < kZoomLevelMax},
+      {StarmapButton::kDone, true},
+  }};
+  for (std::size_t i = 0; i < geometry.buttons.size(); ++i) {
+    const auto [button, enabled] = buttons[i];
+    const bool hovered_by_mouse = enabled && hovered == i;
+    const ButtonState state =
+        !enabled
+            ? ButtonState::kDisabled
+            : (hovered_by_mouse ? ButtonState::kHover : ButtonState::kNormal);
+    button_art.Draw(platform, geometry.buttons[i], state);
+    const SDL_Color &label_color = !enabled           ? kDisabledLabel
+                                   : hovered_by_mouse ? kSelected
+                                                      : kDim;
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          12.0F,
+                          kNovaFontStyleBold,
+                          label_color,
+                          geometry.buttons[i].x,
+                          geometry.buttons[i].x + geometry.buttons[i].w,
+                          geometry.buttons[i].y + geometry.buttons[i].h / 2.0F +
+                              4.0F,
+                          StarmapButtonLabel(button, show_borders));
+  }
 }
 
 // Builds the projected marker list for the current view.
@@ -652,12 +1078,28 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
   }
 
   NovaFontCache font_cache;
-  const SDL_FRect panel{
-      static_cast<float>(kPanelX),
-      static_cast<float>(kPanelY),
-      static_cast<float>(kPanelW),
-      static_cast<float>(kPanelH),
-  };
+  // Resolve the window + map viewport from the DLOG/DITL resources and load the
+  // PICT 0x213d backdrop (falling back to a clean bordered placeholder when the
+  // resource can't be decoded). The map graph draws into geometry.map.
+  const StarmapGeometry geometry = ResolveStarmapGeometry();
+  auto backdrop = LoadStarmapBackdrop(platform);
+  if (backdrop != nullptr) {
+    NovaLog::Info("starmap backdrop PICT 0x213d {}x{} loaded",
+                  static_cast<int>(geometry.window.w),
+                  static_cast<int>(geometry.window.h));
+  } else {
+    NovaLog::Warn(
+        "starmap backdrop PICT 0x213d unavailable; using placeholder");
+  }
+  const SDL_FRect panel = geometry.map;
+  // The bottom button row uses the same three-state PICT strips as the other
+  // dialog rows (ServicesButtonArt 0x1d4c..0x1d54). Initialize once per
+  // window; a failure only costs the hover/dim styling (the art falls back to
+  // a solid fill internally).
+  ServicesButtonArt button_art;
+  if (!button_art.Initialize(platform)) {
+    NovaLog::Warn("three-state button art unavailable for the starmap buttons");
+  }
 
   // Initial view: open on a *middle* zoom level centred on the pilot's current
   // system. The zoom levels are a geometric series over the whole-galaxy fit
@@ -714,6 +1156,48 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
   std::int16_t selected_id = state.player.current_system_id;
   bool tab_was_held = false;
   bool backslash_was_held = false;
+  // Political-overlay toggle (the original's Show/Hide Borders button, action
+  // 9): strengthens the per-system government tint on the map. The original
+  // draws a per-cell government grid over the map; the clean-room uses a
+  // marker-tint stand-in (see DrawGalaxy).
+  bool show_borders = false;
+  // Inline name-prefix search (the Find button, action 10). The original runs
+  // a modal search dialog (NovaUi_RunStarmapSearchDialog, DLOG 0xbbd); the
+  // clean-room implements the same prefix match inline: typed characters build
+  // a query and the first explored system whose name starts with it is
+  // selected, Esc cancels, Enter commits.
+  bool search_active = false;
+  std::string search_query;
+
+  // Finds the first explored system whose name starts with `query`
+  // (case-insensitive) and selects it. Mirrors the original dialog's
+  // "best matching visible system name prefix" behaviour.
+  const auto search_select = [&](const std::string &query) {
+    if (query.empty()) {
+      return;
+    }
+    const auto &systems = state.scenario.systems;
+    std::string lower = query;
+    std::transform(
+        lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+          return static_cast<char>(std::tolower(c));
+        });
+    for (std::size_t i = 0; i < systems.size(); ++i) {
+      if (!SystemExplored(state, static_cast<std::int16_t>(i))) {
+        continue;
+      }
+      std::string name = systems[i].name;
+      std::transform(
+          name.begin(), name.end(), name.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+          });
+      if (name.size() >= lower.size() &&
+          name.compare(0, lower.size(), lower) == 0) {
+        selected_id = static_cast<std::int16_t>(i);
+        return;
+      }
+    }
+  };
 
   // The map's Tab / Backslash cycling step, per the EV Nova manual, through
   // "all the systems that are linked to your current system." These are the
@@ -772,31 +1256,77 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
 
   while (!platform.quit_requested()) {
     const auto mapped = BuildMappedSystems(state, view, panel);
-    DrawChrome(platform, font_cache);
+    DrawChrome(platform, geometry, backdrop ? backdrop->get() : nullptr);
     DrawGalaxy(platform,
                font_cache,
                state,
                mapped,
                view,
-               panel.x,
-               panel.y,
-               selected_id);
-    DrawInspector(platform, font_cache, state, selected_id);
+               geometry,
+               selected_id,
+               show_borders);
+    DrawSidePanels(platform,
+                   font_cache,
+                   state,
+                   geometry,
+                   selected_id,
+                   search_active ? &search_query : nullptr);
+    // Hovered bottom-row button (pressed-art highlight, like the other dialog
+    // button rows).
+    std::optional<std::size_t> hovered_button;
+    {
+      const SDL_FPoint mp = platform.mouse_position();
+      for (std::size_t i = 0; i < geometry.buttons.size(); ++i) {
+        const SDL_FRect &b = geometry.buttons[i];
+        if (mp.x >= b.x && mp.x < b.x + b.w && mp.y >= b.y &&
+            mp.y < b.y + b.h) {
+          hovered_button = i;
+          break;
+        }
+      }
+    }
+    DrawButtons(platform,
+                font_cache,
+                button_art,
+                geometry,
+                show_borders,
+                zoom_level,
+                hovered_button);
     SDL_RenderPresent(platform.renderer());
 
     // Process one batch of raw editable keys / clicks.
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
       switch (in->key) {
       case TextKey::escape:
-        return close_with_selection();
+        if (search_active) {
+          search_active = false;
+          search_query.clear();
+        } else {
+          return close_with_selection();
+        }
+        break;
 
       case TextKey::enter:
-        // Selecting the current system's own node (or the current default) is
-        // a no-op navigation-wise; Enter confirms the selection and closes.
-        return close_with_selection();
+        if (search_active) {
+          // Commit the find result (the matched system stays selected).
+          search_active = false;
+        } else {
+          // Selecting the current system's own node (or the current default)
+          // is a no-op navigation-wise; Enter confirms the selection and
+          // closes.
+          return close_with_selection();
+        }
+        break;
 
       case TextKey::character: {
         const char ch = in->character;
+        if (search_active) {
+          // While searching, typed characters build the query prefix (q/x/+/-
+          // are ordinary query characters, not shortcuts).
+          search_query.push_back(ch);
+          search_select(search_query);
+          break;
+        }
         if (ch == 'q' || ch == 'x') {
           return close_with_selection();
         }
@@ -828,10 +1358,56 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
       }
 
       case TextKey::primary: {
+        const SDL_FPoint mp = platform.mouse_position();
+        // Bottom button row (DITL items 8/7/9/3/4/0): a click inside a button
+        // runs its action and consumes the click so the map doesn't also
+        // select a system underneath. Actions mirror
+        // NovaUi_StarmapWindowInnerLoop's dispatch (action = 1-based entry:
+        // 9 borders, 8 clear route, 10 find, 4 zoom out, 5 zoom in, 1 done).
+        bool button_clicked = false;
+        for (std::size_t i = 0; i < geometry.buttons.size(); ++i) {
+          const SDL_FRect &b = geometry.buttons[i];
+          if (mp.x >= b.x && mp.x < b.x + b.w && mp.y >= b.y &&
+              mp.y < b.y + b.h) {
+            button_clicked = true;
+            switch (static_cast<StarmapButton>(i)) {
+            case StarmapButton::kShowBorders:
+              show_borders = !show_borders;
+              break;
+            case StarmapButton::kClearRoute:
+              // Clears the plotted starmap route (the original resets the
+              // route array to just the current system); the clean-room clears
+              // the single plotted destination and its armed travel slot.
+              state.travel.starmap_destination_system_id = -1;
+              state.travel.travel_slot = -1;
+              selected_id = state.player.current_system_id;
+              break;
+            case StarmapButton::kFind:
+              search_active = true;
+              search_query.clear();
+              break;
+            case StarmapButton::kZoomOut:
+              if (zoom_level > kZoomLevelMin) {
+                zoom_to_level(zoom_level - 1);
+              }
+              break;
+            case StarmapButton::kZoomIn:
+              if (zoom_level < kZoomLevelMax) {
+                zoom_to_level(zoom_level + 1);
+              }
+              break;
+            case StarmapButton::kDone:
+              return close_with_selection();
+            }
+            break;
+          }
+        }
+        if (button_clicked) {
+          break;
+        }
         // Select the nearest *discovered* marker within a click radius; empty
         // click keeps the current selection. Undiscovered systems have no map
         // presence, so they cannot be picked either.
-        const SDL_FPoint mp = platform.mouse_position();
         std::int16_t best = -1;
         float best_d = 18.0F * 18.0F;
         for (const auto &m : mapped) {
@@ -847,11 +1423,19 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
         }
         if (best >= 0) {
           selected_id = best;
+          // A direct map pick also exits an active Find search.
+          search_active = false;
         }
         break;
       }
 
       case TextKey::backspace:
+        if (search_active && !search_query.empty()) {
+          search_query.pop_back();
+          search_select(search_query);
+        }
+        break;
+
       case TextKey::none:
         break;
       }
