@@ -598,6 +598,10 @@ struct GameState {
   // (g_random_encounter_fleet_defs[0x4d].availability_expression[0x94]);
   // the clean-room stores it here since that scratch buffer is not modelled.
   bool no_asteroids_latch = false;
+  // Latched by NovaTravel_Tick at the tunnel fire so the spaceflight loop
+  // plays the cached jump sound once (mirrors the original's
+  // g_playerHyperspaceAudioLatch one-shot). Cleared by the loop after playing.
+  bool jump_sound_pending = false;
 
   // Decoded player weapon fire sounds, keyed by the weapon's `fire_sound`
   // slot. Ghidra Weapon_FirePlayerWeaponBank resolves the weapon's
@@ -616,6 +620,16 @@ struct GameState {
   // clears it and plays each cached slot. Keeps SDL out of the pure weapon
   // path.
   std::vector<std::int16_t> pending_fire_sound_slots;
+
+  // Decoded hyperspace jump sound (snd resource 200 'Etheric Wake.sfil', the
+  // only non-weapon sound in the gameplay snd 200.. slot range; the original
+  // queues the jump handle (g_random_encounter_fleet_defs[0].availability_
+  // expression + 0x94) via NovaEffects_QueueCenteredResource at engage/fire,
+  // gated by g_playerHyperspaceAudioLatch so it starts exactly once). Played
+  // by the spaceflight loop (which owns SdlAudio) when jump_sound_pending is
+  // set at the tunnel fire, synced with the screen flash. Empty when the
+  // resource is missing or fails to decode (jump then plays silently).
+  std::optional<NovaSoundData> jump_sound;
 };
 
 } // namespace game

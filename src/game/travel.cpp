@@ -473,10 +473,14 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
         // via Ship_ComputeShipEffectiveMaxSpeed); the momentary 180-deg hurl
         // is skipped since the same frame zeroes it. The full-screen flash
         // (the original's centered effect 0x32 -- the 'boom' white frame) is
-        // armed here and decays over the next few frames.
+        // armed here and decays over the next few frames, and the jump sound
+        // (the original's g_playerHyperspaceAudioLatch one-shot queued via
+        // NovaEffects_QueueCenteredResource) is latched for the spaceflight
+        // loop to play -- the flash and the 'boom' land on the same frame.
         t.jump_phase = TravelState::JumpPhase::kFlying;
         t.flying_elapsed_ms = 0.0F;
         state.screen_flash_intensity = 1.0F;
+        state.jump_sound_pending = true;
         const float max_speed = std::max(PlayerMaxSpeed(state), 1.0F);
         player.vel_x = std::sin(t.jump_heading_rad) * max_speed;
         player.vel_y = -std::cos(t.jump_heading_rad) * max_speed;

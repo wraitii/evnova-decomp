@@ -1,5 +1,6 @@
 #include "spaceflight.hpp"
 
+#include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "asteroid.hpp"
@@ -240,6 +241,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // first volley's sound is already decoded (mirrors the original preloading
   // the gameplay sound-handle table at startup).
   NovaWeapon_PreloadOwnedFireSounds(state);
+  // Preload the hyperspace jump sound (snd 200 'Etheric Wake.sfil', the
+  // original's jump handle queued at engage) so the first jump plays it
+  // without a decode hitch. Missing resource -> jump plays silently.
+  if (!state.jump_sound.has_value()) {
+    if (const auto resource =
+            NovaResource_LoadSndData(static_cast<std::uint16_t>(200))) {
+      if (auto decoded = NovaSound_Decode(*resource)) {
+        state.jump_sound = std::move(*decoded);
+      }
+    }
+  }
 
   // ---- Pre-loop setup -----------------------------------------------------
   // Ghidra: rebuilds the stellar radar panel, evaluates availability, updates
@@ -441,8 +453,19 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       state.pending_fire_sound_slots.clear();
     }
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
-    // 'j' key near an available travel point, then tick the countdown.
+    // 'j' key near an available travel point, then drives the visible phases.
     NovaTravel_Tick(state, input.travel, frame_time_ms);
+    // Play the hyperspace jump sound latched by the travel fire (the 'boom'
+    // synced with the white flash). The loop owns the SdlAudio device, so
+    // travel only latches a flag. Mirrors the original's
+    // Stellar_TriggerHyperspaceAudioOnce one-shot (g_playerHyperspaceAudio-
+    // Latch gating NovaEffects_QueueCenteredResource).
+    if (state.jump_sound_pending) {
+      if (state.jump_sound.has_value()) {
+        audio.Play(*state.jump_sound);
+      }
+      state.jump_sound_pending = false;
+    }
 
     // Galaxy-map command ('m', edge-triggered): open the starmap modal over
     // the current flight scene. Mirrors Ship_HandlePlayerShip (0x0044b120)
