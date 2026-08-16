@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "government.hpp"
+#include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "spaceflight.hpp"
 #include "targeting.hpp"
@@ -345,7 +346,7 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
         candidate.ai_target_ship_slot == ship.ai_target_ship_slot ||
         !candidate.is_active || candidate.ai_state_code == 0x15 ||
         NovaAiShip_IsDestroyed(candidate) ||
-        !NovaAiShip_CanApplyDisablePressureToTarget(state, candidate)) {
+        !NovaAiShip_CanApplyDisablePressureToTarget(state, ship, candidate)) {
       continue;
     }
     if (NovaAiShip_IsFireRestricted(state, candidate) &&
@@ -861,6 +862,48 @@ void NovaAi_UpdateShipState(GameState &state,
     }
   }
 
+  // Ghidra's state-4/state-0xd pressure gate. Once an attacker has crossed
+  // its own disable threshold, it may only keep this target if the target is
+  // actively counter-pressing at close range. Higher-behavior ships brake and
+  // wait for a bounded patience interval; ordinary ships either hold at the
+  // centre or fall back to their jump-capable idle template.
+  if (ship.primary_target_ship_slot != -1 &&
+      (ship.ai_state_code == 4 || ship.ai_state_code == 0xd) &&
+      state.SlotInRange(
+          static_cast<std::size_t>(ship.primary_target_ship_slot))) {
+    const Ship &target =
+        state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+    if (!NovaAiShip_CanApplyDisablePressureToTarget(state, ship, target)) {
+      if (ship.ai_behavior_code > 2) {
+        ship.ai_control_mode = 1;
+        ship.ai_station_hold_timer = 0.0F;
+        ship.ai_secondary_target_slot = -1;
+        if (!std::isfinite(ship.target_disable_patience_timer) ||
+            ship.target_disable_patience_timer <= 0.0F) {
+          ship.target_disable_patience_timer = static_cast<float>(
+              std::uniform_int_distribution<int>{0, 99}(state.rng) + 100);
+        } else {
+          constexpr float kOriginalFrameTimeMs = 1000.0F / 30.0F;
+          ship.target_disable_patience_timer -= kOriginalFrameTimeMs;
+          if (ship.target_disable_patience_timer <= 0.0F) {
+            ship.primary_target_ship_slot = -1;
+            ship.ai_state_code = 0;
+            ship.ai_control_mode = 0;
+            ship.target_disable_patience_timer = -1.0F;
+          }
+        }
+        return;
+      }
+      if (!NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+        ship.ai_state_code = 6;
+      } else {
+        NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+      }
+      return;
+    }
+    ship.target_disable_patience_timer = -1.0F;
+  }
+
   // ---- Travel to system (state 1). ----
   if (ship.ai_state_code == 1 && ship.ai_secondary_target_slot != -1) {
     const Stellar *target =
@@ -1331,7 +1374,8 @@ void NovaAi_UpdateShipState(GameState &state,
     const float dy = std::abs(ship.pos_y - player.pos_y);
     if (state.player.ai_station_hold_timer > 0.0F) {
       ship.ai_state_code = 0xb;
-    } else if (!NovaAiShip_CanApplyDisablePressureToTarget(state, ship)) {
+    } else if (!NovaAiShip_CanApplyDisablePressureToTarget(
+                   state, ship, state.player)) {
       ship.ai_control_mode = 1;
     } else if (dx > outer || dy > outer) {
       ship.ai_control_mode = (dx > inner || dy > inner) ? 9 : 0xb;
@@ -1816,27 +1860,45 @@ namespace {
 
 } // namespace
 
-// Ghidra 0x00464a90 Ship_CanShipApplyDisablePressureToTarget (player target).
+// Ghidra 0x00464a90 Ship_CanShipApplyDisablePressureToTarget.
 bool NovaAiShip_CanApplyDisablePressureToTarget(const GameState &state,
-                                                const Ship &ship) {
-  if (ship.ai_state_code == 0x15) {
+                                                const Ship &attacker,
+                                                const Ship &target) {
+  if (attacker.ai_state_code == 0x15) {
     return false; // jump/travel state: no disable pressure
   }
-  const Ship &player = state.player;
-  // The 0x3ff mission-ship slot is exempt in the original; the player never
-  // carries one in this build, so this is always false here.
-  if (player.mission_ship_slot == 0x3ff) {
+  if (target.mission_ship_slot == 0x3ff) {
     return true;
   }
   // Not at/below the attacker's own disable threshold -> can press the target.
-  if (!NovaTargeting_ShipAtDisableThreshold(ship)) {
+  if (!NovaTargeting_ShipAtDisableThreshold(attacker)) {
     return true;
   }
-  // TODO(decomp): the two remaining arms need unmodelled fields -- the player
-  // targeting the attacker while carrying a disable outfit
-  // (Outfit_HasDisableOutfit 0x0046df40), or player.disable_pressure_state ==
-  // 1 within DAT_005757c0 (200 px). Both read 0 in the current build, so the
-  // original would also return false here.
+  // A target pressing this attacker with a disable outfit can still be
+  // engaged, even though the attacker is itself at the threshold.
+  if (target.ai_target_ship_slot == attacker.ship_instance_id &&
+      NovaOutfit_HasDisableOutfit(state, target)) {
+    return true;
+  }
+  // NPC-only escort/control-mode exception: the original checks the target's
+  // current AI target for a persistent disable outfit when the target is in
+  // control mode 0xc and that referenced ship is already thresholded.
+  if (target.ship_instance_id != 0 && target.ai_target_ship_slot >= 0 &&
+      target.ai_control_mode == 0xc &&
+      state.SlotInRange(static_cast<std::size_t>(target.ai_target_ship_slot))) {
+    const Ship &targeted_ship =
+        state.ShipAt(static_cast<std::size_t>(target.ai_target_ship_slot));
+    if (NovaTargeting_ShipAtDisableThreshold(targeted_ship) &&
+        NovaOutfit_HasPersistentDisableOutfit(state, targeted_ship)) {
+      return true;
+    }
+  }
+  constexpr float kDisablePressureCloseRange = 200.0F; // DAT_005757c0
+  if (target.disable_pressure_state == 1 &&
+      std::abs(target.pos_x - attacker.pos_x) <= kDisablePressureCloseRange &&
+      std::abs(target.pos_y - attacker.pos_y) <= kDisablePressureCloseRange) {
+    return true;
+  }
   return false;
 }
 
@@ -1852,7 +1914,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
   if (ship.ai_target_ship_slot == 0 || ship.primary_target_ship_slot == -1) {
     return false;
   }
-  if (!NovaAiShip_CanApplyDisablePressureToTarget(state, ship)) {
+  if (!NovaAiShip_CanApplyDisablePressureToTarget(state, ship, state.player)) {
     return false;
   }
   if (ship.target_stellar_object_id != -1) {

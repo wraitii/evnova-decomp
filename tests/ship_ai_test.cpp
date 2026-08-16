@@ -290,6 +290,88 @@ TEST_CASE("assist helper chooses the lowest positive candidate score") {
         candidate_slot);
 }
 
+TEST_CASE(
+    "disable-pressure gate is target-aware and has close-range fallbacks") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Use class 0 for both synthetic ships and remove its default loadout so
+  // the negative case cannot depend on the scenario's current outfit data.
+  REQUIRE(!state.scenario.ships.empty());
+  state.scenario.ships[0].default_outfit_counts.fill(0);
+
+  game::Ship attacker;
+  attacker.ship_instance_id = 1;
+  attacker.ship_class_id = 0;
+  attacker.ai_state_code = 4;
+  attacker.disable_threshold_progress = 17.0F;
+  attacker.disable_state_latch = 0;
+  attacker.pos_x = 0.0F;
+  attacker.pos_y = 0.0F;
+
+  game::Ship target;
+  target.ship_instance_id = 2;
+  target.ship_class_id = 0;
+  target.pos_x = 100.0F;
+  target.pos_y = 100.0F;
+
+  CHECK_FALSE(game::NovaAiShip_CanApplyDisablePressureToTarget(
+      state, attacker, target));
+
+  target.disable_pressure_state = 1;
+  CHECK(game::NovaAiShip_CanApplyDisablePressureToTarget(
+      state, attacker, target));
+  target.pos_x = 201.0F;
+  CHECK_FALSE(game::NovaAiShip_CanApplyDisablePressureToTarget(
+      state, attacker, target));
+
+  target.pos_x = 100.0F;
+  target.ai_target_ship_slot = attacker.ship_instance_id;
+  state.scenario.ships[0].default_outfit_ids[0] = 0x80;
+  state.scenario.ships[0].default_outfit_counts[0] = 1;
+  state.scenario.outfits[0].mod_type = 0x11;
+  CHECK(game::NovaAiShip_CanApplyDisablePressureToTarget(
+      state, attacker, target));
+
+  target.mission_ship_slot = 0x3ff;
+  attacker.ai_state_code = 0x15;
+  CHECK_FALSE(game::NovaAiShip_CanApplyDisablePressureToTarget(
+      state, attacker, target));
+}
+
+TEST_CASE(
+    "thresholded combat ship brakes with a finite disable patience timer") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(!state.scenario.ships.empty());
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.armor_points = 100.0F;
+  state.player.death_timer_active = -1.0F;
+
+  game::Ship &attacker = state.ShipAt(1);
+  attacker.is_active = true;
+  attacker.ship_instance_id = 1;
+  attacker.ship_class_id = 0;
+  attacker.ai_behavior_code = 3;
+  attacker.ai_state_code = 4;
+  attacker.primary_target_ship_slot = 0;
+  attacker.disable_threshold_progress = 17.0F;
+  attacker.disable_state_latch = 0;
+  attacker.target_disable_patience_timer = -1.0F;
+
+  state.inventory.outfit_owned_count.fill(0);
+  game::NovaAi_UpdateShipState(state, attacker, /*now_ms=*/0);
+
+  CHECK(attacker.ai_state_code == 4);
+  CHECK(attacker.ai_control_mode == 1);
+  CHECK(attacker.ai_secondary_target_slot == -1);
+  CHECK(attacker.target_disable_patience_timer >= 100.0F);
+  CHECK(attacker.target_disable_patience_timer < 200.0F);
+}
+
 // A fire-restricted (derelict-government) ship must NOT engage the heavy AI:
 // it holds state 0 / control 0 instead of picking a travel target.
 TEST_CASE("fire-restricted ship does not initiate travel") {

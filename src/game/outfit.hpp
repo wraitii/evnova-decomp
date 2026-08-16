@@ -140,6 +140,18 @@ Outfit_ComputeRemainingCargoSpace(const GameState &state);
 [[nodiscard]] bool Outfit_HasOwnedEffect(const GameState &state,
                                          OutfitEffect effect);
 
+// Ghidra 0x00464b50 Outfit_HasDisableOutfit. True when the player inventory
+// or an NPC ship-class default loadout contains the ModType 0x11 disable
+// outfit. The NPC special escort-target arm is included by the AI predicate,
+// where the target relationship is available.
+[[nodiscard]] bool NovaOutfit_HasDisableOutfit(const GameState &state,
+                                               const Ship &ship);
+
+// Ghidra 0x00464c80 Outfit_HasPersistentDisableOutfit. Same loadout scan, but
+// requires the disable outfit's Flags bit 0x1000.
+[[nodiscard]] bool NovaOutfit_HasPersistentDisableOutfit(const GameState &state,
+                                                         const Ship &ship);
+
 // Mirrors Ship_GetShipFuelBurnRate (0x0046e060) for the player: the last
 // owned outfit encountered with opcode 15 supplies ModVal / 30 fuel per
 // original simulation tick. The original caches this result until inventory

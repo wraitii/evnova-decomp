@@ -10,7 +10,8 @@ integrator + gravity-shield steer helper, both wired into the per-frame tick);
 behavior supervisors + state machine + controls bridge each frame. Behaviors
 0x02/0x03 now acquire nearest same-system hostile contacts, promote them into
 attack/assist states, and steer through combat control modes 5/6/7/8/0xc/0xf;
-mission, weapon, and disable side effects remain deferred. The
+mission and weapon side effects remain deferred; disable-pressure eligibility
+is now target-aware and the state-4/state-0xd patience branch is wired. The
 **wander/travel milestone (Phases 3+4) is live** -- NPCs pick a random adjacent
 travel stellar, steer toward it, and cycle to the next on arrival. NPC movement
 uses each ship's real class stats; the thrust-units bug that made them ~50x too
@@ -318,6 +319,12 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
 
 - [ ] **`Ship_UpdateShipDisableStateFromTraits`** (0x00411d00) and disable-state
       transitions -- needed for combat realism and capture.
+- **Started**: `Ship_CanShipApplyDisablePressureToTarget` (0x00464a90) now
+      receives both attacker and target, scans ModType-0x11 disable outfits
+      (including persistent NPC class loadouts), honors the target's
+      `disable_pressure_state` within the decoded 200px gate, and drives the
+      original state-4/state-0xd brake/patience fallback. The producer that
+      advances disable progress and enters the disable state remains deferred.
 - [ ] **Weapon/bank firing for NPCs**: extend the per-bank ammo/cooldown
       (currently player-centralized) onto `Ship` (+0xC8 row) and implement NPC
       fire selection from `active_weapon_bank_slot`. Larger; can be deferred.

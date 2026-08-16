@@ -347,9 +347,9 @@ address,name,impl_file,reimpl_pct,comment
 0x00464700,Outfit_HasPlayerOwnedOutfitType0x14,,0%,
 0x00464760,Outfit_HasPlayerOwnedOutfitType0x0F_Cached,,0%,
 0x00464810,Ship_GetShipJammingScore,,0%,
-0x00464A90,Ship_CanShipApplyDisablePressureToTarget,src/game/ship_ai.cpp,60%,"NovaAiShip_CanApplyDisablePressureToTarget (player target): state-0x15 gate + mission-slot exemption + disable-threshold arm. Outfit/pressure-state arms deferred (fields not modelled)"
-0x00464B50,Outfit_HasDisableOutfit,,0%,
-0x00464C80,Outfit_HasPersistentDisableOutfit,,0%,
+0x00464A90,Ship_CanShipApplyDisablePressureToTarget,src/game/ship_ai.cpp,90%,"NovaAiShip_CanApplyDisablePressureToTarget: target-aware state-0x15/mission-slot/threshold gate plus disable-outfit, persistent escort, and 200px pressure-state fallbacks; disable-state producer remains deferred."
+0x00464B50,Outfit_HasDisableOutfit,src/game/outfit.cpp,85%,"NovaOutfit_HasDisableOutfit scans player-owned or NPC class-default outfits for ModType 0x11; special relationship arm remains in Ship_CanShipApplyDisablePressureToTarget."
+0x00464C80,Outfit_HasPersistentDisableOutfit,src/game/outfit.cpp,85%,"NovaOutfit_HasPersistentDisableOutfit scans the same loadouts and requires outfit Flags bit 0x1000; cache invalidation is unnecessary in the clean-room value model."
 0x00464DB0,Outfit_GetDisableOutfitArmorThresholdNibble,,0%,
 0x00464E30,Outfit_HasDisableOutfitShieldDropFlag,,0%,
 0x00464F60,Outfit_HasDisableOutfitFlag0x0008,,0%,

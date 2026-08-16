@@ -41,11 +41,82 @@ constexpr float kArmorRechargeScale = 50.0F;
 // computed snapshot in GameState.cached_stats (stat_cache_valid).
 constexpr float kFuelCapacityClamp = 32000.0F; // opcode 12 clamp [0,32000]
 
+constexpr std::int16_t kDisableOutfitModType = 0x11;
+constexpr std::uint16_t kPersistentDisableOutfitFlag = 0x1000;
+
+[[nodiscard]] bool OutfitHasDisableEffect(const Outfit &outfit,
+                                          bool persistent_only) {
+  const auto has_disable_mod = [](std::int16_t mod_type) {
+    return mod_type == kDisableOutfitModType;
+  };
+  if (outfit.mod_type != kDisableOutfitModType &&
+      !std::any_of(outfit.alt_mod_types.begin(),
+                   outfit.alt_mod_types.end(),
+                   has_disable_mod)) {
+    return false;
+  }
+  return !persistent_only || (outfit.flags & kPersistentDisableOutfitFlag) != 0;
+}
+
+[[nodiscard]] bool ShipClassHasDisableOutfit(const GameState &state,
+                                             const Ship &ship,
+                                             bool persistent_only) {
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0; i < ship_class->default_outfit_ids.size(); ++i) {
+    if (ship_class->default_outfit_counts[i] <= 0) {
+      continue;
+    }
+    const Outfit *outfit =
+        state.scenario.Outfit(ship_class->default_outfit_ids[i]);
+    if (outfit != nullptr && OutfitHasDisableEffect(*outfit, persistent_only)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+[[nodiscard]] bool PlayerHasDisableOutfit(const GameState &state,
+                                          bool persistent_only) {
+  for (std::size_t index = 0; index < state.inventory.outfit_owned_count.size();
+       ++index) {
+    if (state.inventory.outfit_owned_count[index] <= 0) {
+      continue;
+    }
+    const Outfit *outfit =
+        state.scenario.Outfit(static_cast<std::int16_t>(index + 0x80));
+    if (outfit != nullptr && OutfitHasDisableEffect(*outfit, persistent_only)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void MarkStatsDirty(GameState &state) { state.stat_cache_valid = false; }
 
 } // namespace
 
 void OutfitMarkStatsDirty(GameState &state) { MarkStatsDirty(state); }
+
+// Ghidra 0x00464b50 Outfit_HasDisableOutfit.
+bool NovaOutfit_HasDisableOutfit(const GameState &state, const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return PlayerHasDisableOutfit(state, false);
+  }
+  return ShipClassHasDisableOutfit(state, ship, false);
+}
+
+// Ghidra 0x00464c80 Outfit_HasPersistentDisableOutfit.
+bool NovaOutfit_HasPersistentDisableOutfit(const GameState &state,
+                                           const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return PlayerHasDisableOutfit(state, true);
+  }
+  return ShipClassHasDisableOutfit(state, ship, true);
+}
 
 // ---------------------------------------------------------------------------
 // Effective-stats aggregation

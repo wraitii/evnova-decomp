@@ -109,11 +109,11 @@ struct Ship {
   std::int8_t ai_fire_trigger_latch = 0; // +0xBA
 
   // --- Vital stats ---
-  float shield_points = 0.0F;       // +0x54
-  float armor_points = 0.0F;        // +0x58
+  float shield_points = 0.0F;        // +0x54
+  float armor_points = 0.0F;         // +0x58
   float status_effect_points = 0.0F; // +0x5C (ionization/status-effect meter)
-  float fuel_points = 0.0F;         // +0x38
-  float death_timer_active = -1.0F; // +0x3C
+  float fuel_points = 0.0F;          // +0x38
+  float death_timer_active = -1.0F;  // +0x3C
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
   // timer consumer is still deferred, so the field remains provisional.
   float hit_reaction_timer = 0.0F;
@@ -191,6 +191,11 @@ struct Ship {
   // disable-threshold boundary (24.0 vs 8.0) in Ship_CheckShipDisableThreshold-
   // State. Written by the disable subsystem (Phase 5); 0 by default.
   std::int16_t disable_state_latch = 0; // +0xC8D8
+  // Disable-pressure state used by Ship_CanShipApplyDisablePressureToTarget
+  // (+0xC91C). The disable subsystem writes 1 while this ship is actively
+  // applying pressure; the AI uses it as a close-range fallback when the
+  // attacker itself has crossed its disable threshold.
+  std::int16_t disable_pressure_state = 0; // +0xC91C
   // Waypoint arrival marker pair used by ships carrying arrival markers (class
   // sprite_behavior_flags bit 1): waypoint_arrival_marker_a reflects a
   // completed arrival; marker_b counts/suppresses route restarts. -1 = none.

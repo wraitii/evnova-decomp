@@ -98,16 +98,12 @@ void NovaAi_UpdateShipAI(GameState &state,
 // on these to pick its prompt and to order the target ship around.
 // ---------------------------------------------------------------------------
 
-// Ghidra 0x00464a90 Ship_CanShipApplyDisablePressureToTarget, evaluated with
-// the player as the target. True when `ship` can meaningfully apply
-// disable/surrender pressure to the player: not in AI state 0x15, and either
-// the player is a 0x3ff special slot, or `ship` is not at its own disable
-// threshold. The two outfit/close-range arms (player targets the ship with a
-// disable outfit; player.disable_pressure_state == 1 at DAT_005757c0 range)
-// are deferred -- neither field is modelled (TODO(decomp)).
-[[nodiscard]] bool
-NovaAiShip_CanApplyDisablePressureToTarget(const GameState &state,
-                                           const Ship &ship);
+// Ghidra 0x00464a90 Ship_CanShipApplyDisablePressureToTarget. True when
+// `attacker` can apply disable/surrender pressure to `target`: the attacker
+// is not in state 0x15, is not past its own disable threshold, or the target
+// is actively countering at close range with a disable outfit/pressure state.
+[[nodiscard]] bool NovaAiShip_CanApplyDisablePressureToTarget(
+    const GameState &state, const Ship &attacker, const Ship &target);
 
 // Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget. True when a pursuing
 // ship should keep pressing its primary target (or the player under mutual
