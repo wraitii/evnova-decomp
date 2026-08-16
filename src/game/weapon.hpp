@@ -56,10 +56,9 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
 void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 
 // Ghidra Weapon_CanFireWeaponBank (0x00468990): whether the given weapon bank
-// may fire right now. The clean-room player model omits the ship-disable, NPC
-// ammo and launch-bay-dependency gates (no NPC/disable state yet); only the
-// ammo/energy sufficiency checks that apply to the player's owned banks are
-// reproduced.
+// may fire right now. The clean-room player model omits the cloak-visibility,
+// NPC ammo and launch-bay-dependency gates; only the ammo/energy sufficiency
+// checks that apply to the player's owned banks are reproduced.
 [[nodiscard]] bool NovaWeapon_CanFireBank(const GameState &state,
                                           std::int16_t weapon_bank);
 

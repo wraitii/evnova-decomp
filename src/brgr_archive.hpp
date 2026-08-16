@@ -51,6 +51,10 @@ constexpr std::uint32_t kResourceTypeDescription = 0x64917363; // "d\x91sc"
 constexpr std::uint32_t kResourceTypeMenu = 0x4d454e55;        // "MENU"
 constexpr std::uint32_t kResourceTypeAlert = 0x414c5254;       // "ALRT"
 constexpr std::uint32_t kResourceTypeControl = 0x434e544c;     // "CNTL"
+// "STR#" string-list family (0x53545223): a BE u16 count followed by that
+// many Pascal strings. The Settings dialog's sound-volume words are STR# 0x88
+// (9 entries, indexed by volume+1).
+constexpr std::uint32_t kResourceTypeStringTable = 0x53545223;
 // "ch"♦r" (ch\x9ar) — the single default character/pilot-type resource.
 // Same FourCC (0x63688a72) the game uses as the pilot-save registry key; the
 // resource carries the new-pilot intro frame ids and per-frame delays (Nova
@@ -223,6 +227,12 @@ struct NovaDialogItem {
   std::int16_t right = 0;
   std::uint8_t type = 0;
   bool enabled = true;
+  // The item's Pascal-string caption, captured for text-like item types
+  // (4 button, 5 checkbox, 6 radio, 8 static, 0x10 edit). Checkbox/static
+  // items carry their on-screen label here (e.g. the preferences dialog's
+  // "Ship Animations"); plain/control items leave it empty. Stored as the
+  // raw resource bytes (no NUL padding).
+  std::string title;
 };
 
 // Ghidra: FUN_004cef50 (called by UiWindow_CreateFromDialogResource after it

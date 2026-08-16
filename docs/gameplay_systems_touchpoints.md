@@ -137,7 +137,9 @@ Player ship targeting / selection (reconstructed in `src/game/targeting.cpp`, wi
 - `0x00461bd0` / `0x00461f60` `Ship_FindNextPlayerCycleTarget` / `_Previous` — backquote (`) / Shift+backquote cycle the player's primary target ship; the held include-combat modifier (Alt or the original's 'k' / 0x6b) restricts the cycle to combat-relevant ships (targeting the player or a player-targeting ship). Ported as `NovaTargeting_FindNext/PreviousPlayerCycleTarget`.
 - `0x00462bd0` `Ship_SelectNearestHostileCombatTarget` ('o') and `0x00462850` `Ship_SelectNearestEngagedTarget` (Alt+'o') — nearest combat-target scans, ported as `NovaTargeting_SelectNearest*`.
 - `0x0040faa0` `Ship_IsShipAcquirableAsTarget` — pairwise acquisition predicate (player + NPC branches), ported as `NovaTargeting_IsShipAcquirableAsTarget`.
-- `0x0046c7a0` `Ship_CheckShipDisableThresholdState`, `0x0040f6d0` `Ship_IsShipEligibleForDistressCall`, the two cloak-scanner outfit predicates (`0x0046c930` / `0x0046ca60`) — the shared eligibility helpers behind all of the above.
+- `0x0046c7a0` `Ship_IsShipCloakVisibilityThresholdActive`, `0x0040f6d0` `Ship_IsShipEligibleForDistressCall`, and the two cloak-scanner outfit predicates (`0x0046c930` / `0x0046ca60`) — the shared visibility/eligibility helpers behind all of the above.
+- `0x00467e80` `Ship_CanMaintainCloakState` — ModType-17 cloak/resource predicate used both by the per-frame cloak drain path and by the preemptive-cloak-on-hit path; it is not surrender logic.
+- `0x004687b0` `Ship_IsShipFireRestricted` — separate fire-restriction/true-disabled predicate. Its armor branch uses the Bible's 33% threshold, or 10% when Ship Flags `0x0010` is set; this is distinct from cloak fade visibility.
 - Click-to-target ship picking (`SpaceflightView::PickShipAt`, sprite half-span hit test approximating the original's pixel-test pass) sets the primary target directly (the manual: "click on a ship to select it with your targeting sensors").
 - `0x0042ede0` `NovaUi_UpdateShipTargetReticle` — 4-corner bracket reticle around the primary target, drawn as SDL brackets with the state-encoded frame mapping (0xc fire-restricted grey / 0x8 targeting-player green / 0x0 distress yellow / 0x4 other white) and the decaying 256→0 pulse (60/sec). Real bracket sprite frames are TODO(decomp).
 
@@ -177,7 +179,7 @@ Traced from the handlers in `NovaGameplay_UpdateShipAiState` (0x00405590) and it
 | 0 | idle / track-parked |
 | 1 | travel to system (`ai_secondary_target_slot` = stellar, steers to map coords) |
 | 2 | idle-template / approach station-keeping |
-| 3 | attack target ship (`primary_target_ship_slot`) w/ disable-pressure |
+| 3 | attack target ship (`primary_target_ship_slot`) w/ cloak-aware engagement |
 | 4 | attack target w/ mutual-target & allied-govt chain exclusions |
 | 5 | pursue/attack `ai_target_ship_slot` (chase control 0xb) |
 | 6 | follow/hold (control 1); entered when jump can't initiate in combat |
@@ -186,7 +188,7 @@ Traced from the handlers in `NovaGameplay_UpdateShipAiState` (0x00405590) and it
 | 9 | escort-pursue primary (chase 0xb) |
 | 10 | assist/reaction behavior (from `UpdateShipAssistResponseBehavior`) |
 | 0xb | hold-station / follow target (waits `ai_station_hold_timer`), entry to 5 jump if behavior 5 |
-| 0xc | engage target at turn radius w/ disable-pressure |
+| 0xc | engage target at turn radius w/ cloak-aware engagement |
 | 0xd | acquire disabled/boardable target (board state) |
 | 0xe | drift/evade (adds polar velocity) |
 | 0xf | disabled-pursue/flee at turn radius (gravity-shield scales range) |

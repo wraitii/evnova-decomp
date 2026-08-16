@@ -2,6 +2,7 @@
 
 #include "brgr_archive.hpp"
 #include "game/new_pilot_flow.hpp"
+#include "game/nova_font.hpp"
 #include "game/spaceflight.hpp"
 #include "log.hpp"
 #include "pict_image.hpp"
@@ -445,6 +446,10 @@ void UpdateMenuCenterPreview(NovaRuntime &runtime) {
 // Ghidra: 0x00503f30 NovaProgramEntry
 int NovaProgramEntry() {
   NovaRuntime runtime;
+  // Ghidra: NovaPrefs_ResetToDefaults (0x004b4320) seeds the preference globals
+  // before any dialog reads them; the key-settings .prf load-overrides them
+  // when available (NovaPrefs_LoadOrInit) and is deferred.
+  runtime.prefs.ResetToDefaults();
   return NovaApp_Run(runtime);
 }
 
@@ -981,10 +986,22 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     runtime.status_text = "Returned from spaceflight.";
     break;
   }
-  case GameModeAction::preferences:
-    NovaLog::Todo("Preferences dialog is not reconstructed.");
-    runtime.status_text = "Preferences dialog is not reconstructed yet.";
+  case GameModeAction::preferences: {
+    // Blocking Settings modal (Ghidra Menu_RunSettingsDialog 0x00488650, DLOG
+    // 0xfa3). Edits runtime.prefs in place; OK commits the .prf (deferred) and
+    // Esc/Cancel discards. Returns to the main menu either way.
+    game::NovaFontCache font_cache;
+    const bool saved = game::NovaMenu_RunSettingsDialog(runtime.platform,
+                                                        runtime.audio,
+                                                        runtime.music,
+                                                        font_cache,
+                                                        runtime.prefs);
+    runtime.status_text =
+        saved ? "Preferences saved." : "Preferences cancelled.";
+    // Force a redraw so the menu backdrop (and any brightness change) is seen.
+    NovaRender_RedrawAndPresentFrame(runtime, 1);
     break;
+  }
   case GameModeAction::starmap:
     NovaLog::Todo("Star Map dialog requires system/route tables.");
     runtime.status_text = "Star Map requires an active pilot.";

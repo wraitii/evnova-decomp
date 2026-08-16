@@ -2,6 +2,7 @@
 
 #include "brgr_archive.hpp"
 #include "game/game_state.hpp"
+#include "game/preferences.hpp"
 #include "rle_sprite_sheet.hpp"
 #include "sdl_audio.hpp"
 #include "sdl_music.hpp"
@@ -88,6 +89,12 @@ struct NovaRuntime {
   std::size_t menu_top_animation_frame = 0;
   std::size_t menu_center_preview_frame = 6;
   std::uint8_t menu_center_preview_intensity = 0;
+  // Global (non-pilot) preferences and the gameplay key-binding table. Holds
+  // the values the Settings dialog edits and that the clean-room play paths
+  // (sound volume, ship animations, brightness, flight bindings) will read.
+  // Kept on the runtime rather than as globals (AGENTS.md).
+  game::NovaPreferences prefs;
+
   // Active in-game state for the running pilot (new-game flow, intro
   // cinematic, and spaceflight mode all read/write it). Lives on the runtime
   // rather than as globals (AGENTS.md: represent game state explicitly).

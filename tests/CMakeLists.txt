@@ -7,6 +7,7 @@ add_executable(evnova_tests
     hud_overlay_test.cpp
     landed_window_test.cpp
     movement_test.cpp
+    preferences_test.cpp
     scenario_data_test.cpp
     ship_ai_test.cpp
     ship_spawn_test.cpp

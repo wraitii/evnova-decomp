@@ -1945,12 +1945,9 @@ void NovaAi_UpdateShipAI(GameState &state,
       // scan are not represented in ScenarioData yet.
       NovaAi_UpdateBehavior0x03(state, ship, now_ms);
     } else if (behavior == 4) {
-      // Ship_UpdateShipAiCombatState (0x00403de0) -- the common combat
-      // supervisor is still deferred; preserve hostile ships already carrying
-      // a target, otherwise use the behavior-0x03 acquisition path.
-      if (ship.primary_target_ship_slot == -1) {
-        NovaAi_UpdateBehavior0x03(state, ship, now_ms);
-      }
+      // Ship_UpdateShipAiCombatState (0x00403de0): reuse the reconstructed
+      // hostile path so an existing target is also promoted into state 4.
+      NovaAi_UpdateBehavior0x03(state, ship, now_ms);
     } else if (behavior > 4) {
       // Ship_UpdateShipAssistResponseBehavior (0x004048a0): mission/escort
       // command decoding is not complete, but an existing AI target can still

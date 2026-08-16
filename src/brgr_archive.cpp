@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <span>
 #include <string>
 #include <utility>
@@ -852,9 +853,10 @@ NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
     const auto type_byte = std::to_integer<std::uint8_t>((*data)[pos + 12]);
     item.enabled = (type_byte & 0x80U) != 0;
     item.type = type_byte & 0x7fU;
-    items.push_back(item);
 
-    // Advance past the item's variable tail, mirroring FUN_004cef50:
+    // Advance past the item's variable tail, mirroring FUN_004cef50 (this
+    // also fills item.title for text-like types, so the item is pushed after
+    // the tail is parsed):
     //  - text-like types (4,5,6,8,0x10) carry a pascal string starting at
     //    +13; skip its length byte + characters.
     //  - icon/pict/control types (7,0x20,0x40) carry an extra refcon short.
@@ -868,6 +870,13 @@ NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
     case 0x10: {
       const std::size_t title_len = static_cast<std::size_t>(
           std::to_integer<std::uint8_t>((*data)[pos + 13]));
+      // Capture the item's caption so callers can draw label text without a
+      // separate string lookup (preferences checkboxes read their title).
+      if (pos + 13 + 1 + title_len <= size) {
+        const auto first = data->begin() + pos + 14;
+        item.title.assign(std::string_view(
+            reinterpret_cast<const char *>(std::to_address(first)), title_len));
+      }
       next = pos + 13 + title_len + 1;
       break;
     }
@@ -880,6 +889,7 @@ NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
       next = pos + 14; // +7 ushorts
       break;
     }
+    items.push_back(item);
     // Re-align to an even offset before the next item.
     pos = next & ~std::size_t{1};
     if ((next & std::size_t{1}) != 0) {

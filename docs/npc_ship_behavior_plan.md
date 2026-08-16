@@ -250,8 +250,9 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
     core travel (1/0x14/2), hold (0xb), pursuit(5)/assist(10)/escort(7), drift
     (0xe), disengage(0x15/8), defunct (0x16), and partial attack/assist
     transitions (3/4/0xc/0xd). States 3/4 now select target-bearing pursuit
-    modes 5/6; weapon selection, disable transitions, formation offsets, and
-    HUD/mission flavor remain deferred. The travel-arrival `reverse_speed_bias`
+    modes 5/6; target-to-attacker engagement direction, escort/assist
+    engagement downgrades, and finite patience braking are wired. Weapon selection,
+    formation offsets, and HUD/mission flavor remain deferred. The travel-arrival `reverse_speed_bias`
     band matches Ghidra (300..499 / 100..174); the jump-fallback gate now uses
     the ship's own class fuel
     (`NovaTravel_CanShipInitiateJumpSequence`, mirroring
@@ -292,8 +293,10 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
     hostile target acquisition, validation, pursuit, and travel fallback.
   - **Shared fallback only**: `Ship_UpdateShipAiBehavior0x03CaptureVariant`
     (0x004038b0) -- capture-specific disabled-ship selection is deferred.
-  - **Shared target path only**: `Ship_UpdateShipAiCombatState` (0x00403de0),
-    `Ship_UpdateShipAiAssistResponseBehavior` (0x004048a0),
+  - **Shared target path**: `Ship_UpdateShipAiCombatState` (0x00403de0) now
+    reuses hostile acquisition and existing-target promotion; full target-chain,
+    flee, weapon-readiness, and mission branches remain deferred.
+  - **Shared target path only**: `Ship_UpdateShipAiAssistResponseBehavior` (0x004048a0),
     `Ship_UpdateShipAiAvailabilityBehavior` (0x00402980).
   - Respect `skip_heavy_ai` gating from `Ship_UpdateShipAI` where the original
     does.

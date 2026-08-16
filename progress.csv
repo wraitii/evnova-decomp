@@ -724,7 +724,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00487FCD,FUN_00487fcd,,0%,
 0x00488080,NovaMainLoop_UpdateFrame,src/nova_app.cpp,100%,NovaMainLoop_UpdateFrame
 0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
-0x00488650,Menu_RunSettingsDialog,,0%,
+0x00488650,Menu_RunSettingsDialog,src/game/preferences.cpp,60%,"core modal: all toggles+sliders+OK/cancel over DLOG 0xfa3; .prf persistence, key-settings sub-dlg, windowed-mode live toggle, sound-volume playback still TODO"
 0x00489210,Ship_RunSpaceflightMode,src/game/spaceflight.cpp,10%,"Ship_RunSpaceflightMode skeleton: faithful loop/cadence, gameplay scopes stubbed"
 0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,80%,New-pilot path preserves reset/refilled stats and seeded inventory and now reconciles seeded weapon banks into owned outfits (stock Light Blaster registered/sellable); dialogs, scenario population, discovery remain partial
 0x0048A7E0,Menu_RunPilotSelectionDialog,,0%,
@@ -885,8 +885,8 @@ address,name,impl_file,reimpl_pct,comment
 0x004B3350,Ship_ResetPlayerShipState,src/game/new_pilot_flow.cpp,34%,Ship_ResetPlayerShipState: track only fields the new-pilot flow / early loop meaningfully need, including the fresh-game 10000-credit seed and active_weapon_bank_slot=-1; shield/armor/fuel are finalized by a post-seed meter recompute (Menu_RunNewGameFlow order) rather than at reset; deep AI/combat fields reset but unused
 0x004B4220,Game_ResetNewGameReputation,,0%,
 0x004B42F0,FUN_004b42f0,,0%,
-0x004B4320,NovaPrefs_ResetToDefaults,,0%,
-0x004B4400,FUN_004b4400,,0%,
+0x004B4320,NovaPrefs_ResetToDefaults,src/game/preferences.cpp,70%,"NovaPreferences::ResetToDefaults sets every pref + key bindings; .prf load-override and gameplay consumption deferred"
+0x004B4400,NovaPrefs_ResetKeyBindings,src/game/preferences.cpp,90%,"KeyBindings::ResetToDefaults writes the full short[0x52] defaults incl panel-suppressed aliases; flight ASCII row verified"
 0x004B4690,Game_ResetNewGameState,,0%,
 0x004B4CF0,Sprite_CompileFramesAndDiscardSourceData,,0%,
 0x004B4E10,FUN_004b4e10,,0%,

@@ -1,0 +1,103 @@
+#pragma once
+
+// Clean-room model of the game's preferences (the main-menu Settings dialog,
+// DLOG 0xfa3) and the per-pilot key-binding table. The original keeps these
+// in a swath of globals (g_pref_intro_music, g_pref_sound_volume, ..., and
+// g_player_key_bindings); here they are one value object so the
+// reimplementation stays free of hidden globals and singletons (AGENTS.md).
+// Each field names its Ghidra global in a comment.
+//
+// Mirrors NovaPrefs_ResetToDefaults (0x004b4320) and the Settings dialog
+// Menu_RunSettingsDialog (0x00488650). See docs/preferences_keybindings.md for
+// the authoritative item map and the direction (inverted-ness) of each toggle.
+
+#include <array>
+#include <cstdint>
+
+class SdlAudio;
+class SdlMusic;
+class SdlPlatform;
+
+namespace game {
+
+// game::NovaFontCache (nova_font.hpp) — forward-declared here so the header
+// shows the dialog runner without pulling SDL_ttf into every consumer.
+class NovaFontCache;
+
+// The gameplay command -> key-code binding table. Slot index == command id
+// (confirmed by the Ship_HandlePlayerShipControl reads); the stored value is
+// the key code bound to that command (mostly DIK scan codes, but the four
+// flight slots store ASCII lowercase: turn-left 'c', turn-right 'd', forward
+// 'a', reverse 'f'). 0xff = unbound. Mirrors g_player_key_bindings
+// (0x005914e6, short[0x52]) and NovaPrefs_ResetKeyBindings (0x004b4400).
+struct KeyBindings {
+  static constexpr std::size_t kSlotCount = 0x52;
+  std::array<std::uint16_t, kSlotCount> cmd_to_key{};
+
+  // Defaults exactly as NovaPrefs_ResetKeyBindings writes them.
+  void ResetToDefaults();
+};
+
+// One stored preference value. The original keeps 8-bit toggled bytes; here
+// they are bools. The "inverted" Mac-era flags (a 0 value means the feature is
+// ON) are handled where the box is drawn/read, not here: the struct value is
+// the *global bit* the original stores (so quicktime_movies == 0 means the
+// QuickTime movies feature is enabled).
+struct NovaPreferences {
+  KeyBindings bindings;
+
+  // Ghidra g_pref_intro_music. When off the Settings OK path stops the menu
+  // music (the original's menu bass is the "intro" music here).
+  bool intro_music = true;
+  // Ghidra g_pref_sound_volume, 0..8. The on-screen word is STR# 0x88 row
+  // `volume+1` (0 = "No Bloody Noise" ... 8 = "Hoo Boy!").
+  std::int32_t sound_volume = 5;
+  // Ghidra g_pref_brightness, 0..6.
+  std::int32_t brightness = 3;
+
+  // Ghidra g_pref_share_processor_time.
+  bool share_processor_time = true;
+  // Ghidra g_pref_quicktime_movies (inverted flag: 0 = QuickTime on).
+  bool quicktime_movies = false;
+  // Ghidra g_pref_smoke_trails (inverted flag: 0 = smoke trails on).
+  bool smoke_trails = false;
+  // Ghidra DAT_00bec178 (run in a window), toggled live via the window mode.
+  bool run_in_window = false;
+  // Ghidra g_pref_ship_animations.
+  bool ship_animations = true;
+  // Ghidra g_pref_engine_glows.
+  bool engine_glows = true;
+  // Ghidra g_pref_running_lights (defaults to the same bit as weapon_effects).
+  bool running_lights = true;
+  // Ghidra g_pref_weapon_effects.
+  bool weapon_effects = true;
+  // Ghidra g_pref_parallax_starfield.
+  bool parallax_starfield = true;
+  // Ghidra g_pref_ambient_sounds.
+  bool ambient_sounds = true;
+  // Ghidra g_hyperspace_effects (inverted flag: 0 = effects on). The CE build
+  // also uses this byte as a raw-input lock; the clean-room keeps it as a pure
+  // effect toggle (documented divergence).
+  bool hyperspace_effects = false;
+  // Ghidra g_pref_check_for_updates (inverted flag: 0 = check for updates).
+  bool check_for_updates = true;
+
+  // Populates every field (and the key table) with the original defaults.
+  void ResetToDefaults();
+};
+
+// Runs the main-menu Settings dialog (DLOG 0xfa3) as a blocking modal over the
+// playfield, editing `prefs` in place. Mirrors Menu_RunSettingsDialog
+// (0x00488650): the OK button commits (the caller persists the .prf) and
+// returns true; Esc/Cancel discards and returns false. The Key Settings button
+// opens the rebinding modal (Menu_RunKeySettingsDialog). Intro-music toggling
+// stops/restarts `music` and windowed mode is applied to `platform` live, so
+// the prefs feel immediate like the original. Returns true when the player
+// pressed OK.
+bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
+                                SdlAudio &audio,
+                                SdlMusic &music,
+                                NovaFontCache &font_cache,
+                                NovaPreferences &prefs);
+
+} // namespace game
