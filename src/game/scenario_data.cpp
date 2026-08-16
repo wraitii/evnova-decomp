@@ -99,6 +99,8 @@ namespace {
   w.impact_effect_id = ReadBeI16(bytes, 0x16);
   w.blast_radius = ReadBeI16(bytes, 0x18);
   w.splash_radius = ReadBeI16(bytes, 0x1a);
+  w.fuse_ticks = ReadBeI16(bytes, 0x22);
+  w.late_collision_window_ticks = ReadBeI16(bytes, 0x46);
   w.ionization_points = ReadBeI16(bytes, 0x4a);
   w.ionization_color = ReadBe32(bytes, 0x72) & 0x00ffffffU;
   w.flags = ReadBe16(bytes, 0x1c); // flags_primary

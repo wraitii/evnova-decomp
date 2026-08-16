@@ -65,6 +65,8 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(w->impact_effect_id == -1);  // was 'explosion'
   CHECK(w->blast_radius == 5);       // was 'prox_radius'
   CHECK(w->splash_radius == 6);      // was 'blast_radius'
+  CHECK(w->fuse_ticks == 0);
+  CHECK(w->late_collision_window_ticks == 0);
   CHECK(w->flags == 0x6100);
   CHECK(w->flags_quaternary == 0U); // was mislabeled 'seeker'
   CHECK(w->flags_secondary == 0U);  // (payload +0x48)

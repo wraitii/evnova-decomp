@@ -58,7 +58,7 @@ globals (AGENTS.md).
   accel 500, speed 400, turn 40, fuel 300, mass 15, cost 10000).
 - **w\x91ap (weapon)**: Reload0, Count2, MassDmg4, EnergyDmg6, Guidance8,
   Speed_a, AmmoType_c, Graphic_e, Inaccuracy10, Sound12, Impact14, ExplodType16,
-  ProxRadius18, BlastRadius1a, Flags1c, Seeker1e, ... Verified against weapon
+  ProxRadius18, BlastRadius1a, Flags1c, Seeker1e, FuseTicks22, ... Verified against weapon
   0x80 (reload 10, count 13, mass 1, energy 4, unguided, speed 1500).
 - **s\xd8st (system)**: xPos0, yPos2, Con1-16 at `0x04`, NavDef1-16 at `0x24`,
   AvgShips64, Govt66 (rebased to 0.. space; <0x80 / >0x17f -> -1), Message68,

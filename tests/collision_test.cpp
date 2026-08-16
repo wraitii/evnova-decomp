@@ -75,10 +75,30 @@ TEST_CASE("projectile impact consumes shields before armor", "[collision]") {
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(10.0F));
   CHECK(state.ShipAt(1).armor_points == Catch::Approx(100.0F));
   CHECK(state.ShipAt(1).primary_target_ship_slot == 0);
-  CHECK(state.ShipAt(1).ai_target_ship_slot == 0);
+  // A player attack sets the hostile primary target, but does not overwrite
+  // the separate escort/leader-chain link.
+  CHECK(state.ShipAt(1).ai_target_ship_slot == -1);
   CHECK(state.ShipAt(1).ai_hostility_accumulator == 35);
   CHECK(state.ShipAt(1).hit_reaction_timer == Catch::Approx(32.0F));
-  CHECK(state.ShipAt(1).ai_state_code == 3);
+  CHECK(state.ShipAt(1).ai_state_code == 4);
+}
+
+TEST_CASE("player can continue firing after target becomes hostile",
+          "[collision]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  SpawnTestShot(state);
+
+  NovaWeapon_ResolveProjectileCollisions(state);
+  REQUIRE(state.active_shots.empty());
+
+  SpawnTestShot(state);
+  REQUIRE(NovaWeapon_CanProjectileHitShip(state, state.active_shots[0], 1));
+  NovaWeapon_ResolveProjectileCollisions(state);
+
+  CHECK(state.active_shots.empty());
+  CHECK(state.ShipAt(1).shield_points == Catch::Approx(0.0F));
+  CHECK(state.ShipAt(1).armor_points == Catch::Approx(75.0F));
 }
 
 TEST_CASE("collision is resolved before projectile movement", "[collision]") {
@@ -159,8 +179,13 @@ TEST_CASE("collision eligibility rejects friendly and scripted targets",
   CHECK(!NovaWeapon_CanProjectileHitShip(state, state.active_shots[0], 1));
 
   state.ShipAt(1).faction_or_government_id = -1;
-  state.ShipAt(1).ai_state_code = 0x10;
-  CHECK(!NovaWeapon_CanProjectileHitShip(state, state.active_shots[0], 1));
+  Ship &npc_owner = state.ShipAt(2);
+  npc_owner = state.ShipAt(1);
+  npc_owner.ship_instance_id = 2;
+  npc_owner.ai_state_code = 0x10;
+  ActiveShot npc_shot = state.active_shots[0];
+  npc_shot.owner_ship_slot = 2;
+  CHECK(!NovaWeapon_CanProjectileHitShip(state, npc_shot, 1));
 }
 
 TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
@@ -179,6 +204,23 @@ TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
   CHECK(state.ShipAt(1).armor_points == Catch::Approx(-15.0F));
   CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(-1.0F));
   CHECK(!NovaWeapon_CanProjectileHitShip(state, ActiveShot{}, 1));
+}
+
+TEST_CASE("late collision window stops contacts near expiry", "[collision]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.weapons[0].late_collision_window_ticks = 3;
+  SpawnTestShot(state);
+
+  state.active_shots[0].life_ticks_remaining = 2.0F;
+  NovaWeapon_ResolveProjectileCollisions(state);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.ShipAt(1).shield_points == Catch::Approx(20.0F));
+
+  state.active_shots[0].life_ticks_remaining = 4.0F;
+  NovaWeapon_ResolveProjectileCollisions(state);
+  CHECK(state.active_shots.empty());
+  CHECK(state.ShipAt(1).shield_points == Catch::Approx(10.0F));
 }
 
 } // namespace game

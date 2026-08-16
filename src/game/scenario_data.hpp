@@ -312,6 +312,15 @@ struct Weapon {
   std::int16_t blast_radius = 0;       // ProxRadius18
   std::int16_t splash_radius = 0;      // BlastRadius1a
 
+  // Fuse (resource +0x22; Ghidra WeaponDef.fuse_ticks). A positive value
+  // advances the shot's fuse_elapsed timer in Shot_HandleShot.
+  std::int16_t fuse_ticks = 0;
+  // Resource +0x46, stored by Ghidra as WeaponDef.field_0x1c. The collision
+  // callback and Shot_ResolveCollisions stop accepting contacts during this
+  // final portion of a shot's lifetime. The exact data-editor label remains
+  // provisional because the same field also controls late sprite-frame wrap.
+  std::int16_t late_collision_window_ticks = 0;
+
   // Ionization (+0x4a) is accumulated on ShipState.status_effect_points when
   // this weapon hits. IonizeColor (+0x72) is retained as packed RGB for the
   // later ship-tint/status renderer.

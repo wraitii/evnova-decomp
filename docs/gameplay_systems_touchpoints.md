@@ -82,11 +82,21 @@ Observed responsibilities:
 - Non-bypass hits refresh `ShipState.hit_reaction_timer` to 32. The original
   does not set the death timer at impact; destruction remains an armor-state
   result consumed by the ship handler.
+- A player hit calls `Ship_SetShipHostileToPlayer` (`0x00410700`): it sets the
+  hostile AI state and primary target, but leaves `ai_target_ship_slot` alone.
+  That field is also used by `Ship_ShipsShareTargetLeaderChain`; treating it
+  as the immediate attacker incorrectly makes subsequent player shots look
+  like friendly fire.
 - Blast-radius splash damage uses the impact resolver for each additional ship
   in the axis-aligned blast box, with aggro/retarget updates suppressed. The
   player's own ship is excluded unless Flags bit `0x0100` allows player hurt;
   NPC owners are not excluded by this carve-out. The same ionization/impulse
   payload is applied per target.
+- `0x004374f0` and `0x00437e20` both compare shot age against the weapon's
+  unnamed `WeaponDef.field_0x1c` late-life window (resource `w\x91ap` +0x46);
+  contacts are rejected once `lifetime_ticks - late_window_ticks` is crossed.
+  This is distinct from `WeaponDef.fuse_ticks` (resource +0x22), which only
+  advances the shot fuse/frame state in `0x00435830`.
 
 ### Missile seek / jamming subsystem (mode 1 homing)
 

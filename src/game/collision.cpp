@@ -1,6 +1,7 @@
 #include "collision.hpp"
 
 #include "scenario_data.hpp"
+#include "ship_ai.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -67,6 +68,23 @@ namespace {
           flag) != 0;
 }
 
+[[nodiscard]] bool ShotIsInLateCollisionWindow(const ActiveShot &shot,
+                                               const Weapon &weapon) {
+  if (weapon.late_collision_window_ticks <= 0) {
+    return false;
+  }
+  const float shot_age =
+      std::max(0.0F, static_cast<float>(weapon.lifetime_ticks) -
+                         shot.life_ticks_remaining);
+  const float collision_end_age =
+      static_cast<float>(weapon.lifetime_ticks -
+                         weapon.late_collision_window_ticks);
+  // Ship_HandleSpritePairCollision compares the integer lifetime minus the
+  // late-window field against ShotState.life_time and rejects the contact
+  // once that boundary has been crossed.
+  return collision_end_age < shot_age;
+}
+
 void ApplyWeaponOnHitEffects(Ship &target,
                              const Weapon &weapon,
                              float impact_x,
@@ -131,7 +149,7 @@ void ApplyImpactImpulse(const GameState &state,
   (void)shot;
 }
 
-void ResolveShipHit(const GameState &state,
+void ResolveShipHit(GameState &state,
                     const ActiveShot &shot,
                     Ship &target,
                     std::int16_t target_slot,
@@ -190,15 +208,12 @@ void ResolveShipHit(const GameState &state,
   // messages are deliberately outside this first slice.
   if (allow_aggro_updates && shot.owner_ship_slot > 0 && target_slot > 0) {
     target.primary_target_ship_slot = shot.owner_ship_slot;
-    if (target.ai_target_ship_slot < 0) {
-      target.ai_target_ship_slot = shot.owner_ship_slot;
-    }
   } else if (allow_aggro_updates && shot.owner_ship_slot == 0 && target_slot > 0) {
-    target.primary_target_ship_slot = 0;
-    target.ai_target_ship_slot = 0;
-    if (target.ai_state_code == 0) {
-      target.ai_state_code = 3;
-    }
+    // Ship_SetShipHostileToPlayer (0x00410700) deliberately changes the
+    // primary target/state only. ai_target_ship_slot is a separate leader /
+    // escort-chain link; overwriting it here makes the next player shot look
+    // like friendly fire through Ship_ShipsShareTargetLeaderChain.
+    NovaAi_SetShipHostileToPlayer(state, target);
   }
 
   // Shot_ResolveShipHitFromWeapon refreshes the non-bypass hit reaction timer.
@@ -234,7 +249,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   if (owner.current_system_id != shot.system_id || IsDestroyed(owner)) {
     return false;
   }
-  if (target.mission_ship_slot == 0x3ff || target.ai_state_code == 0x10) {
+  if (target.mission_ship_slot == 0x3ff) {
     return false;
   }
 
@@ -266,7 +281,13 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     return false;
   }
   if (HasGovernmentFlag(state, target, 0x0008U) ||
-      HasGovernmentFlag(state, target, 0x0800U)) {
+      HasGovernmentFlag(state, target, 0x0040U)) {
+    return false;
+  }
+
+  // The original's scripted-maneuver exclusion is on the attacking NPC, not
+  // on the target. The player (slot 0) is not subject to this owner-side gate.
+  if (shot.owner_ship_slot > 0 && owner.ai_state_code == 0x10) {
     return false;
   }
 
@@ -301,6 +322,9 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
     const Weapon *weapon = WeaponForShot(state, shot);
     if (weapon == nullptr) {
       shot.consumed = true;
+      continue;
+    }
+    if (ShotIsInLateCollisionWindow(shot, *weapon)) {
       continue;
     }
 
