@@ -2,6 +2,7 @@
 
 #include "brgr_archive.hpp"
 #include "game/preferences.hpp"
+#include "pict_image.hpp"
 
 #include <array>
 #include <filesystem>
@@ -75,6 +76,46 @@ TEST_CASE("Preferences DITL 0xfa3 carries the option titles per item") {
   // The two runtime value boxes are the static-text items.
   CHECK(item(4).type == 8);
   CHECK(item(23).type == 8);
+}
+
+TEST_CASE("Key Settings DLOG and DITL preserve the three-column layout") {
+  if (!DataAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  const auto def = NovaResource_LoadDialogDefinition(0xfa2);
+  REQUIRE(def);
+  CHECK(def->right - def->left == 594);
+  CHECK(def->bottom - def->top == 353);
+  CHECK(def->dialog_item_list_id == 0xfa2);
+
+  const auto items = NovaResource_LoadDialogItems(0xfa2);
+  REQUIRE(items);
+  REQUIRE(items->size() >= 38);
+  // Item 4 is the backdrop frame. Items 5..38 are the 34 key cells; the
+  // parser stores them zero-based, matching the handler's ordinal-5 logic.
+  CHECK((*items)[3].right - (*items)[3].left == 582);
+  CHECK((*items)[3].bottom - (*items)[3].top == 307);
+  CHECK((*items)[3].left == 6);
+  CHECK((*items)[3].top == 5);
+  CHECK((*items)[4].left == 102);
+  CHECK((*items)[4].right == 183);
+  CHECK((*items)[4].top == 19);
+  CHECK((*items)[37].left == 500);
+  CHECK((*items)[37].right == 581);
+}
+
+TEST_CASE("Key Settings backdrop PICT 0x8b decodes") {
+  if (!DataAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  const auto data = NovaResource_LoadPictData(0x8b);
+  REQUIRE(data);
+  const auto image = Resource_LoadPictAsImage(*data);
+  REQUIRE(image);
+  CHECK(image->width == 582);
+  CHECK(image->height == 307);
+  CHECK(image->rgba_pixels.size() ==
+        static_cast<std::size_t>(image->width * image->height * 4));
 }
 
 TEST_CASE("Preferences defaults match NovaPrefs_ResetToDefaults") {

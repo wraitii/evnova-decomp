@@ -106,6 +106,7 @@ bool RunTextInputPrompt(SdlPlatform &platform,
         }
         break;
       case TextKey::none:
+      case TextKey::physical:
       case TextKey::primary: // mouse click does not edit a callsign
         break;
       }

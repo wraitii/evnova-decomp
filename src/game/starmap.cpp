@@ -1695,6 +1695,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
         break;
 
       case TextKey::none:
+      case TextKey::physical:
         break;
       }
     }

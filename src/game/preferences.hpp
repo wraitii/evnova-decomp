@@ -100,4 +100,12 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
                                 NovaFontCache &font_cache,
                                 NovaPreferences &prefs);
 
+// Runs the separate Key Settings modal (Ghidra
+// Menu_RunKeySettingsDialog, 0x0048b280). The visible rows edit a shadow copy
+// of the 34 command bindings; Cancel discards it, Set Default resets it, and
+// OK copies it back only when no duplicate key is present.
+bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
+                                   NovaFontCache &font_cache,
+                                   NovaPreferences &prefs);
+
 } // namespace game

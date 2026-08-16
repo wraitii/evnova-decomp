@@ -724,14 +724,14 @@ address,name,impl_file,reimpl_pct,comment
 0x00487FCD,FUN_00487fcd,,0%,
 0x00488080,NovaMainLoop_UpdateFrame,src/nova_app.cpp,100%,NovaMainLoop_UpdateFrame
 0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
-0x00488650,Menu_RunSettingsDialog,src/game/preferences.cpp,60%,"core modal: all toggles+sliders+OK/cancel over DLOG 0xfa3; .prf persistence, key-settings sub-dlg, windowed-mode live toggle, sound-volume playback still TODO"
+0x00488650,Menu_RunSettingsDialog,src/game/preferences.cpp,75%,"core modal: DLOG 0xfa3 geometry, toggles, sliders, OK/cancel, and Key Settings sub-dialog; .prf persistence and windowed-mode live toggle remain TODO"
 0x00489210,Ship_RunSpaceflightMode,src/game/spaceflight.cpp,10%,"Ship_RunSpaceflightMode skeleton: faithful loop/cadence, gameplay scopes stubbed"
 0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,80%,New-pilot path preserves reset/refilled stats and seeded inventory and now reconciles seeded weapon banks into owned outfits (stock Light Blaster registered/sellable); dialogs, scenario population, discovery remain partial
 0x0048A7E0,Menu_RunPilotSelectionDialog,,0%,
 0x0048ADC0,IntroCinematic_Run,src/game/intro_cinematic.cpp,85%,Timed configured-frame playback; Enter/Space/click advance one frame; native command/cursor paths and travel dialog partial
 0x0048B230,NovaRender_PresentBlockingTransitionFrame,,0%,
 0x0048B250,NovaAudio_PreloadTransitionEffects,,0%,NovaAudio_PreloadTransitionEffects into DAT_007d24b8
-0x0048B280,FUN_0048b280,,0%,
+0x0048B280,Menu_RunKeySettingsDialog,src/game/preferences.cpp,70%,"DLOG 0xfa2 modal with native PICT 0x8b backdrop, 34-row shadow editing, capture, Set Default, duplicate validation, and Cancel/OK; persistence/input integration remain TODO(decomp)"
 0x0048B6D0,FUN_0048b6d0,,0%,
 0x0048B860,FUN_0048b860,,0%,
 0x0048BBB0,NovaHud_ReleaseTransientResources,,0%,
@@ -1666,7 +1666,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004FC570,FUN_004fc570,,0%,
 0x004FCA30,FUN_004fca30,,0%,
 0x004FCAC0,FUN_004fcac0,,0%,
-0x004FCC00,Pict_DecodePixmapRows,src/pict_image.cpp,30%,PICT row decoder reimplemented in Resource_LoadPictAsImage: packbits + raw-copy (rowBytes<8) paths + 1-byte/BE16 row length; depth/planar/masking/buffer mgmt out of scope
+0x004FCC00,Pict_DecodePixmapRows,src/pict_image.cpp,45%,PICT row decoder reimplemented: packbits + raw-copy paths, 1-byte/BE16 row length, and 1-bit expansion used by Key Settings PICT 0x8b; remaining depth/planar/masking/buffer behavior is out of scope
 0x004FD0A0,FUN_004fd0a0,,0%,
 0x004FDB60,FUN_004fdb60,,0%,
 0x004FDB90,FUN_004fdb90,,0%,

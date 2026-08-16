@@ -1,6 +1,7 @@
 #include "pict_image.hpp"
 #include "log.hpp"
 
+#include <array>
 #include <cstddef>
 #include <limits>
 #include <optional>
@@ -15,15 +16,24 @@ namespace {
          std::to_integer<std::uint16_t>(bytes[offset + 1]);
 }
 
-[[nodiscard]] std::optional<std::size_t>
+struct DirectBitsOpcode {
+  std::size_t payload = 0;
+  std::uint16_t opcode = 0;
+};
+
+[[nodiscard]] std::optional<DirectBitsOpcode>
 FindDirectBitsRect(std::span<const std::byte> bytes) {
   // PICT v2 opcodes are word-aligned relative to the start of the resource.
   // This remains a deliberately narrow scanner, but avoiding odd offsets keeps
   // pixel/payload bytes from being mistaken for an opcode in the observed
   // DirectBitsRect resources.
   for (std::size_t offset = 10; offset + 2 <= bytes.size(); offset += 2) {
-    if (ReadBe16(bytes, offset) == 0x009a) {
-      return offset + 2;
+    // The original decoder accepts both DirectBitsRect opcodes used by the
+    // shipped resources. Most PICTs use 0x9a; the Key Settings backdrop
+    // (PICT 0x8b) uses the older 0x99 spelling with the same pixmap payload.
+    if (ReadBe16(bytes, offset) == 0x0099 ||
+        ReadBe16(bytes, offset) == 0x009a) {
+      return DirectBitsOpcode{offset + 2, ReadBe16(bytes, offset)};
     }
   }
   return std::nullopt;
@@ -89,25 +99,36 @@ ReadRowLength(std::span<const std::byte> bytes,
 
 std::optional<PictImage>
 Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
-  constexpr std::size_t pixmap_size = 50;
   constexpr std::size_t source_and_destination_rects_size = 18;
   const auto direct_bits = FindDirectBitsRect(pict_data);
-  if (!direct_bits ||
-      *direct_bits + pixmap_size + source_and_destination_rects_size >
-          pict_data.size()) {
+  if (!direct_bits) {
     NovaLog::Todo("unsupported PICT: no DirectBitsRect opcode");
     return std::nullopt;
   }
 
-  const auto base = *direct_bits;
+  const auto base = direct_bits->payload;
+  // 0x99 stores the PixMap without its four-byte baseAddr; 0x9a includes that
+  // field before the same 46-byte PixMap header. PICT 0x8b is the former. The
+  // size below is the PixMap header itself; the optional baseAddr is already
+  // represented by pixmap_base.
+  const bool compact_pixmap = direct_bits->opcode == 0x0099;
+  const std::size_t pixmap_base = base + (compact_pixmap ? 0 : 4);
+  constexpr std::size_t pixmap_size = 46;
+  if (pixmap_base + pixmap_size + source_and_destination_rects_size >
+      pict_data.size()) {
+    NovaLog::Todo("unsupported PICT: truncated PixMap header");
+    return std::nullopt;
+  }
+  // The 0x8b resource stores 0x804a here; the high bit is a PixMap flag and
+  // the actual packed row is 74 bytes.
   const auto row_bytes =
-      static_cast<std::size_t>(ReadBe16(pict_data, base + 4) & 0x3fffU);
-  const auto top = ReadBe16(pict_data, base + 6);
-  const auto left = ReadBe16(pict_data, base + 8);
-  const auto bottom = ReadBe16(pict_data, base + 10);
-  const auto right = ReadBe16(pict_data, base + 12);
-  const auto pixel_size = ReadBe16(pict_data, base + 32);
-  const auto component_count = ReadBe16(pict_data, base + 34);
+      static_cast<std::size_t>(ReadBe16(pict_data, pixmap_base) & 0x3fffU);
+  const auto top = ReadBe16(pict_data, pixmap_base + 2);
+  const auto left = ReadBe16(pict_data, pixmap_base + 4);
+  const auto bottom = ReadBe16(pict_data, pixmap_base + 6);
+  const auto right = ReadBe16(pict_data, pixmap_base + 8);
+  const auto pixel_size = ReadBe16(pict_data, pixmap_base + 28);
+  const auto component_count = ReadBe16(pict_data, pixmap_base + 30);
   const auto width = static_cast<std::size_t>(right - left);
   const auto height = static_cast<std::size_t>(bottom - top);
   if (bottom <= top || right <= left ||
@@ -123,9 +144,17 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   // bytes/pixel. The packbits unit is 2 for 16-bit and 1 for 32-bit.
   std::size_t unit_size = 1;
   std::size_t row_out_bytes = 0;
-  enum class PixelFormat { kUnsupported, kRgb555, kRgb24Planar } format =
-      PixelFormat::kUnsupported;
-  if (pixel_size == 16 && component_count == 3) {
+  enum class PixelFormat {
+    kUnsupported,
+    kMonochrome,
+    kRgb555,
+    kRgb24Planar
+  } format = PixelFormat::kUnsupported;
+  if (pixel_size == 1 && component_count == 1) {
+    unit_size = 1;
+    row_out_bytes = row_bytes;
+    format = PixelFormat::kMonochrome;
+  } else if (pixel_size == 16 && component_count == 3) {
     unit_size = 2;
     row_out_bytes = width * 2;
     format = PixelFormat::kRgb555;
@@ -139,8 +168,10 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
     row_out_bytes = width * 3;
     format = PixelFormat::kRgb24Planar;
   } else {
-    NovaLog::Todo("unsupported PICT DirectBitsRect layout ({}-bit, {} components)",
-                  pixel_size, component_count);
+    NovaLog::Todo(
+        "unsupported PICT DirectBitsRect layout ({}-bit, {} components)",
+        pixel_size,
+        component_count);
     return std::nullopt;
   }
   if (row_bytes < row_out_bytes) {
@@ -153,7 +184,54 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   image.height = static_cast<int>(height);
   image.rgba_pixels.resize(width * height * 4);
   std::vector<std::uint8_t> row(row_bytes);
-  std::size_t source = base + pixmap_size + source_and_destination_rects_size;
+  std::array<std::array<std::uint8_t, 4>, 2> monochrome_colors{
+      std::array<std::uint8_t, 4>{0, 0, 0, 255},
+      std::array<std::uint8_t, 4>{255, 255, 255, 255}};
+  std::size_t source = pixmap_base + pixmap_size;
+  if (format == PixelFormat::kMonochrome) {
+    // 1-bit DirectBitsRect resources carry a ColorTable between the PixMap
+    // and the source/destination rectangles. PICT 0x8b uses two entries.
+    if (source + 8 > pict_data.size()) {
+      NovaLog::Todo("PICT monochrome color table is truncated");
+      return std::nullopt;
+    }
+    const auto color_count =
+        static_cast<std::size_t>(ReadBe16(pict_data, source + 6)) + 1;
+    if (color_count > 256 || source + 8 + color_count * 8 > pict_data.size()) {
+      NovaLog::Todo("unsupported PICT monochrome color table");
+      return std::nullopt;
+    }
+    for (std::size_t entry = 0; entry < color_count; ++entry) {
+      const std::size_t offset = source + 8 + entry * 8;
+      const auto index = ReadBe16(pict_data, offset);
+      if (index >= monochrome_colors.size()) {
+        continue;
+      }
+      monochrome_colors[index] = {
+          static_cast<std::uint8_t>(ReadBe16(pict_data, offset + 2) >> 8U),
+          static_cast<std::uint8_t>(ReadBe16(pict_data, offset + 4) >> 8U),
+          static_cast<std::uint8_t>(ReadBe16(pict_data, offset + 6) >> 8U),
+          255};
+    }
+    source += 8 + color_count * 8;
+  }
+  source += source_and_destination_rects_size;
+  if (compact_pixmap) {
+    // DirectBitsRect 0x99 places a byte-counted preamble in front of the
+    // PackBits rows. Pict_ParseDirectBitsRect advances over that block before
+    // passing the stream to Pict_DecodePixmapRows.
+    if (source + 2 > pict_data.size()) {
+      NovaLog::Todo("PICT 0x99 row preamble is truncated");
+      return std::nullopt;
+    }
+    const auto preamble_size =
+        static_cast<std::size_t>(ReadBe16(pict_data, source));
+    if (source + preamble_size > pict_data.size()) {
+      NovaLog::Todo("PICT 0x99 row preamble exceeds resource");
+      return std::nullopt;
+    }
+    source += preamble_size;
+  }
 
   // The game's row decoder FUN_004fcc00 switches on the row byte count: when
   // `rowBytes < 8` the packed row is stored RAW (no per-row length prefix and
@@ -192,7 +270,15 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
     }
     for (std::size_t x = 0; x < width; ++x) {
       const auto destination = (static_cast<std::size_t>(y) * width + x) * 4;
-      if (format == PixelFormat::kRgb555) {
+      if (format == PixelFormat::kMonochrome) {
+        const auto byte = row[x / 8];
+        const auto color_index = (byte >> (7U - (x % 8U))) & 1U;
+        const auto color = monochrome_colors[color_index];
+        image.rgba_pixels[destination] = color[0];
+        image.rgba_pixels[destination + 1] = color[1];
+        image.rgba_pixels[destination + 2] = color[2];
+        image.rgba_pixels[destination + 3] = color[3];
+      } else if (format == PixelFormat::kRgb555) {
         const auto pixel =
             static_cast<std::uint16_t>(row[x * 2]) << 8U | row[x * 2 + 1];
         image.rgba_pixels[destination] =
@@ -204,13 +290,12 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
         image.rgba_pixels[destination + 3] = 255;
       } else {
         // RG B planar interleave (FUN_004fcc00, depth 0x18).
-        image.rgba_pixels[destination]=
-            static_cast<std::uint8_t>(row[x]);
-        image.rgba_pixels[destination+1]=
+        image.rgba_pixels[destination] = static_cast<std::uint8_t>(row[x]);
+        image.rgba_pixels[destination + 1] =
             static_cast<std::uint8_t>(row[width + x]);
-        image.rgba_pixels[destination+2]=
+        image.rgba_pixels[destination + 2] =
             static_cast<std::uint8_t>(row[width * 2 + x]);
-        image.rgba_pixels[destination+3] = 255;
+        image.rgba_pixels[destination + 3] = 255;
       }
     }
   }

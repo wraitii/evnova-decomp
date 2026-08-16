@@ -14,8 +14,9 @@ struct PictImage {
 
 // Ghidra: 0x004b8ed0 Resource_LoadPictAsImageWithColorRemap (subset) + row
 // decode Pict_DecodePixmapRows (FUN_004fcc00). Decodes a PICT v2
-// DirectBitsRect (opcodes 0x9A/0x9B) into opque RGBA. Handles 16-bit 5-5-5
-// (2 bytes/pixel, big-endian) and 32-bit sources that the game demotes to its
+// DirectBitsRect (opcodes 0x99/0x9A/0x9B) into opaque RGBA. Handles the compact
+// 1-bit/color-table format used by Key Settings PICT 0x8b, 16-bit 5-5-5
+// (2 bytes/pixel, big-endian), and 32-bit sources that the game demotes to its
 // 24-bit RGB path (packbits unit 1, R/G/B planar interleave). Row lengths and
 // packbits follow the game's algorithm: rows wider than 8 bytes carry a
 // per-row length (1 byte for narrow <= 0xfa rows, else BE16) then packbits;

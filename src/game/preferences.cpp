@@ -2,6 +2,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../pict_image.hpp"
 #include "../sdl_audio.hpp"
 #include "../sdl_music.hpp"
 #include "../sdl_platform.hpp"
@@ -38,8 +39,18 @@ namespace {
 //   brightness label=23/22, brightness value=24/23, brightness down/up=25/26
 //   /24/25.
 constexpr std::uint16_t kSettingsDialogId = 0xfa3;
+constexpr std::uint16_t kKeySettingsDialogId = 0xfa2;
+constexpr std::uint16_t kKeySettingsBackdropPict = 0x008b;
 // STR# holding the nine sound-volume words, indexed by volume+1 (index 0..8).
 constexpr std::uint16_t kSoundVolumeString = 0x88;
+
+// Shot_SnapshotControlInputState's shadow order, not command-id order. The
+// original Key Settings dialog displays these 34 selected command slots in
+// three columns (items 4..37 in DITL 0xfa2).
+constexpr std::array<std::uint8_t, 34> kKeySettingsCommandIds{
+    0x15, 0x16, 0x14, 0x13, 0x18, 0x07, 0x0c, 0x0d, 0x0e, 0x08, 0x04, 0x05,
+    0x02, 0x03, 0x00, 0x01, 0x0a, 0x0b, 0x2a, 0x30, 0x31, 0x32, 0x33, 0x17,
+    0x06, 0x10, 0x0f, 0x11, 0x12, 0x29, 0x09, 0x19, 0x28, 0x34};
 
 // Dialog chrome colours (clean-room stand-in for the original window; the
 // DLOG has no backdrop PICT documented, so a flat bordered panel is drawn).
@@ -228,6 +239,313 @@ struct SettingsControl {
 
   [[nodiscard]] bool is(const std::size_t i) const { return index == i; }
 };
+
+struct KeySettingsLayout {
+  SDL_FRect window{};
+  std::vector<NovaDialogItem> items;
+  bool from_ditl = false;
+};
+
+[[nodiscard]] KeySettingsLayout BuildKeySettingsLayout(const SDL_FRect &panel) {
+  KeySettingsLayout out;
+  const auto def = NovaResource_LoadDialogDefinition(kKeySettingsDialogId);
+  if (!def) {
+    NovaLog::Todo("Key Settings DLOG 0x{:04x} unavailable",
+                  kKeySettingsDialogId);
+    return out;
+  }
+  const auto items = NovaResource_LoadDialogItems(def->dialog_item_list_id);
+  if (!items) {
+    NovaLog::Todo("Key Settings DITL 0x{:04x} unavailable",
+                  def->dialog_item_list_id);
+    return out;
+  }
+  const float win_w = static_cast<float>(def->right - def->left);
+  const float win_h = static_cast<float>(def->bottom - def->top);
+  out.window = CenterWindowOnPanel(panel, win_w, win_h);
+  out.items = *items;
+  out.from_ditl = true;
+  return out;
+}
+
+[[nodiscard]] std::unique_ptr<SdlTexture>
+LoadKeySettingsBackdrop(SdlPlatform &platform) {
+  const auto data = NovaResource_LoadPictData(kKeySettingsBackdropPict);
+  if (!data) {
+    return {};
+  }
+  const auto image = Resource_LoadPictAsImage(*data);
+  if (!image) {
+    NovaLog::Todo("Key Settings backdrop PICT 0x{:04x} failed to decode",
+                  kKeySettingsBackdropPict);
+    return {};
+  }
+  return SdlTexture::Create(
+      platform.renderer(), image->width, image->height, image->rgba_pixels);
+}
+
+[[nodiscard]] std::optional<std::size_t>
+HitTestKeySettingsRow(const KeySettingsLayout &layout, float x, float y) {
+  for (std::size_t index = 4; index < 4 + kKeySettingsCommandIds.size();
+       ++index) {
+    if (index >= layout.items.size()) {
+      break;
+    }
+    if (Contains(ItemRect(layout.items[index], layout.window), x, y)) {
+      return index - 4;
+    }
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::string KeyCodeName(std::uint16_t key_code) {
+  if (key_code == 0xffff) {
+    return "none";
+  }
+  if (key_code >= static_cast<std::uint16_t>('a') &&
+      key_code <= static_cast<std::uint16_t>('z')) {
+    return std::string(1, static_cast<char>(key_code - 'a' + 'A'));
+  }
+  if (key_code >= static_cast<std::uint16_t>('0') &&
+      key_code <= static_cast<std::uint16_t>('9')) {
+    return std::string(1, static_cast<char>(key_code));
+  }
+  switch (key_code) {
+  case 0x01:
+    return "Escape";
+  case 0x02:
+    return "1";
+  case 0x03:
+    return "2";
+  case 0x04:
+    return "3";
+  case 0x05:
+    return "4";
+  case 0x06:
+    return "5";
+  case 0x07:
+    return "6";
+  case 0x08:
+    return "7";
+  case 0x09:
+    return "8";
+  case 0x0a:
+    return "9";
+  case 0x0b:
+    return "0";
+  case 0x0e:
+    return "Backspace";
+  case 0x0f:
+    return "Tab";
+  case 0x10:
+    return "Q";
+  case 0x11:
+    return "W";
+  case 0x12:
+    return "E";
+  case 0x13:
+    return "R";
+  case 0x14:
+    return "T";
+  case 0x15:
+    return "Y";
+  case 0x16:
+    return "U";
+  case 0x17:
+    return "I";
+  case 0x18:
+    return "O";
+  case 0x19:
+    return "P";
+  case 0x1e:
+    return "A";
+  case 0x1f:
+    return "S";
+  case 0x20:
+    return "D";
+  case 0x21:
+    return "F";
+  case 0x22:
+    return "G";
+  case 0x23:
+    return "H";
+  case 0x24:
+    return "J";
+  case 0x25:
+    return "K";
+  case 0x26:
+    return "L";
+  case 0x2c:
+    return "Z";
+  case 0x2d:
+    return "X";
+  case 0x2e:
+    return "C";
+  case 0x2f:
+    return "V";
+  case 0x30:
+    return "B";
+  case 0x31:
+    return "N";
+  case 0x32:
+    return "M";
+  case 0x1c:
+    return "Return";
+  case 0x1d:
+    return "Ctrl";
+  case 0x2a:
+    return "LShift";
+  case 0x36:
+    return "RShift";
+  case 0x38:
+    return "Alt";
+  case 0x39:
+    return "Space";
+  case 0x3a:
+    return "Caps Lock";
+  case 0x3b:
+    return "F1";
+  case 0x3c:
+    return "F2";
+  case 0x3d:
+    return "F3";
+  case 0x3e:
+    return "F4";
+  case 0x3f:
+    return "F5";
+  case 0x40:
+    return "F6";
+  case 0x41:
+    return "F7";
+  case 0x42:
+    return "F8";
+  case 0x43:
+    return "F9";
+  case 0x44:
+    return "F10";
+  case 0x57:
+    return "F11";
+  case 0x58:
+    return "F12";
+  case 0xc7:
+    return "Home";
+  case 0xc8:
+    return "Up";
+  case 0xc9:
+    return "Page Up";
+  case 0xcb:
+    return "Left";
+  case 0xcd:
+    return "Right";
+  case 0xcf:
+    return "End";
+  case 0xd0:
+    return "Down";
+  case 0xd1:
+    return "Page Down";
+  case 0xd2:
+    return "Insert";
+  case 0xd3:
+    return "Delete";
+  default:
+    return "Key " + std::to_string(key_code);
+  }
+}
+
+[[nodiscard]] std::optional<std::size_t>
+FindKeyBindingConflict(const std::array<std::uint16_t, 34> &bindings) {
+  for (std::size_t current = 0; current < bindings.size(); ++current) {
+    if (bindings[current] == 0xffff) {
+      continue;
+    }
+    for (std::size_t previous = 0; previous < current; ++previous) {
+      if (bindings[previous] == bindings[current]) {
+        return current;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+void DrawKeySettingsDialog(SdlPlatform &platform,
+                           NovaFontCache &font_cache,
+                           const KeySettingsLayout &layout,
+                           SDL_Texture *backdrop,
+                           const std::array<std::uint16_t, 34> &bindings,
+                           std::size_t selected_row) {
+  SDL_Renderer *const renderer = platform.renderer();
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderClear(renderer);
+  platform.SetCenteredPlayfield();
+
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+  const SDL_FRect full{0.0F, 0.0F, 640.0F, 480.0F};
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 150);
+  SDL_RenderFillRect(renderer, &full);
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+  const auto &window = layout.window;
+  // Item 4 (zero-based item 3) is the native 582x307 PICT frame inset in the
+  // wider 594x353 DLOG. The resource must not be stretched to the DLOG bounds.
+  const SDL_FRect frame = ItemRect(layout.items[3], window);
+  if (backdrop != nullptr) {
+    SDL_RenderTexture(renderer, backdrop, nullptr, &frame);
+  } else {
+    // The fallback is intentionally close to the adjacent Nova UI panels. The
+    // normal path uses the original PICT 0x8b, including its command labels.
+    SDL_SetRenderDrawColor(renderer, kPanel.r, kPanel.g, kPanel.b, 255);
+    SDL_RenderFillRect(renderer, &frame);
+    SDL_SetRenderDrawColor(renderer, kBorder.r, kBorder.g, kBorder.b, 255);
+    SDL_RenderRect(renderer, &frame);
+  }
+
+  for (const auto &item : layout.items) {
+    if (item.index > 2) {
+      continue;
+    }
+    DrawButton(platform,
+               font_cache,
+               ItemRect(item, window),
+               item.index == 0   ? "OK"
+               : item.index == 1 ? "Cancel"
+                                 : "Set Default",
+               false);
+  }
+
+  for (std::size_t row = 0; row < bindings.size(); ++row) {
+    const std::size_t item_index = row + 4;
+    if (item_index >= layout.items.size()) {
+      break;
+    }
+    const SDL_FRect rect = ItemRect(layout.items[item_index], window);
+    const bool selected = row == selected_row;
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer,
+                           selected ? 220 : 0,
+                           selected ? 205 : 0,
+                           selected ? 100 : 0,
+                           selected ? 100 : 0);
+    if (selected) {
+      SDL_RenderFillRect(renderer, &rect);
+    }
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(renderer,
+                           selected ? kTitle.r : kBorder.r,
+                           selected ? kTitle.g : kBorder.g,
+                           selected ? kTitle.b : kBorder.b,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &rect);
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  11.0F,
+                  kNovaFontStyleRegular,
+                  selected ? kTitle : kBody,
+                  rect.x + 5.0F,
+                  rect.y + rect.h - 2.0F,
+                  KeyCodeName(bindings[row]));
+  }
+}
 
 } // namespace
 
@@ -536,9 +854,7 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
         case 0: // OK
           return true;
         case 15: // Key Settings
-          NovaLog::Todo(
-              "Key Settings dialog (DLOG 0xfa2) is not reconstructed; "
-              "returned unchanged");
+          (void)NovaMenu_RunKeySettingsDialog(platform, font_cache, prefs);
           break;
         case 5: // sound down
           prefs.sound_volume =
@@ -571,6 +887,101 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
       }
       default:
         break;
+      }
+    }
+    SDL_Delay(16);
+  }
+  return false;
+}
+
+// Ghidra: 0x0048b280 Menu_RunKeySettingsDialog
+bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
+                                   NovaFontCache &font_cache,
+                                   NovaPreferences &prefs) {
+  const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
+  const KeySettingsLayout layout = BuildKeySettingsLayout(panel);
+  if (!layout.from_ditl ||
+      layout.items.size() < 4 + kKeySettingsCommandIds.size()) {
+    NovaLog::Todo("cancelled: Key Settings dialog resources 0x{:04x} missing",
+                  kKeySettingsDialogId);
+    return false;
+  }
+
+  auto backdrop = LoadKeySettingsBackdrop(platform);
+  std::array<std::uint16_t, 34> working{};
+  for (std::size_t row = 0; row < working.size(); ++row) {
+    working[row] = prefs.bindings.cmd_to_key[kKeySettingsCommandIds[row]];
+  }
+  std::size_t selected_row = 0;
+  NovaLog::Info("opening Key Settings dialog (DLOG 0x{:04x})",
+                kKeySettingsDialogId);
+
+  while (!platform.quit_requested()) {
+    DrawKeySettingsDialog(platform,
+                          font_cache,
+                          layout,
+                          backdrop ? backdrop->get() : nullptr,
+                          working,
+                          selected_row);
+    SDL_RenderPresent(platform.renderer());
+
+    for (auto in = platform.PollTextEvent(); in;
+         in = platform.PollTextEvent()) {
+      if (in->key == TextKey::escape) {
+        return false;
+      }
+      if (in->key == TextKey::enter) {
+        if (!FindKeyBindingConflict(working)) {
+          for (std::size_t row = 0; row < working.size(); ++row) {
+            prefs.bindings.cmd_to_key[kKeySettingsCommandIds[row]] =
+                working[row];
+          }
+          return true;
+        }
+        continue;
+      }
+      if (in->key == TextKey::primary) {
+        const auto mouse = platform.mouse_position();
+        if (const auto row = HitTestKeySettingsRow(layout, mouse.x, mouse.y)) {
+          selected_row = *row;
+          continue;
+        }
+        for (std::size_t button = 0; button < 3; ++button) {
+          if (button >= layout.items.size() ||
+              !Contains(ItemRect(layout.items[button], layout.window),
+                        mouse.x,
+                        mouse.y)) {
+            continue;
+          }
+          if (button == 0) {
+            if (FindKeyBindingConflict(working)) {
+              continue;
+            }
+            for (std::size_t row = 0; row < working.size(); ++row) {
+              prefs.bindings.cmd_to_key[kKeySettingsCommandIds[row]] =
+                  working[row];
+            }
+            return true;
+          }
+          if (button == 1) {
+            return false;
+          }
+          KeyBindings defaults;
+          defaults.ResetToDefaults();
+          for (std::size_t row = 0; row < working.size(); ++row) {
+            working[row] = defaults.cmd_to_key[kKeySettingsCommandIds[row]];
+          }
+          selected_row = 0;
+        }
+        continue;
+      }
+      // Enter/Escape remain modal controls, matching the original's command
+      // channel. All other physical keys can be assigned to the selected row.
+      if ((in->key == TextKey::character || in->key == TextKey::physical ||
+           in->key == TextKey::backspace) &&
+          in->key_code != 0xffff) {
+        working[selected_row] = in->key_code;
+        selected_row = (selected_row + 1) % working.size();
       }
     }
     SDL_Delay(16);

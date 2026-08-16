@@ -149,10 +149,11 @@ checkbox/static labels come verbatim from each item's Pascal-string title.
 - items 0/1/2 = **OK / Cancel / Set Default** buttons; item 3 = backdrop frame
   (582x307); items 4..37 = the 34 row cells (col x=102..183 rows 19..305,
   middle x=301..382, right x=500..581) — three columns of command rows.
-- Backdrop **PICT 0x8b** is a 582x307 **0x99 16-bit DirectBitsRect** (a
-  non-standard variant the reimpl `Resource_LoadPictAsImage` currently rejects;
-  the packing was hand-decoded to read the layout — see TODO in that file).
-  Draw path blits it into item 4, then paints each row's bound key name
+- The DLOG bounds are 594x353; item 4 (zero-based item 3) is the native 582x307
+  frame at (6,5). Its backdrop **PICT 0x8b** is a compact **0x99 1-bit
+  DirectBitsRect** with an inline two-entry color table and a short preamble
+  before the PackBits rows. The reimplementation decodes and blits it at native
+  size, then paints each row's bound key name
   (`String_ExpandControlCode`, name table `PTR_s_Escape_005776dc`) into its
   cell; unbound rows draw STR# 0x7d2/0x119 ("none"); the selected row
   (`DAT_007d1f3c`) is highlighted.
@@ -219,17 +220,14 @@ plate comment). Version `0x69`. Reserved slots 0x7e..0x88 are zeroed on save
 
 ## Open TODO / work list for the reimplementation
 
-1. **Add PICT 0x8b (0x99 DirectBitsRect) decode** to `Resource_LoadPictAsImage`;
-   needed to render the Key Settings backdrop faithfully. (The 582x307 layout
-   is already read from the raw packbits, so only the pixmap decode is missing.)
-2. **Implement `Menu_RunSettingsDialog`** — clean-room modal over DLOG 0xfa3:
-   load 25-item DITL, draw the option checkboxes, sound/brightness slider
-   steps, OK/Key Settings buttons, run a modal loop reading raw `PollTextEvent`.
-   Wire the toggled bits into a `Preferences` struct held on `NovaRuntime`.
-3. **Implement `Menu_RunKeySettingsDialog`** — distinct modal (DLOG 0xfa2):
-   backdrop PICT 0x8b + 34 row cells; click-to-select → capture next key down;
-   OK (commit + save) / Cancel (discard) / Set Default. Operate on a shadow
-   copy so Cancel discards.
+1. **Complete:** `Resource_LoadPictAsImage` now decodes the compact 0x99
+   1-bit/color-table PICT 0x8b backdrop, including its row preamble.
+2. **Complete:** `Menu_RunSettingsDialog` is a clean-room modal over DLOG
+   0xfa3 with resource-derived geometry, toggles, sliders, OK/Cancel, and the
+   Key Settings entry point.
+3. **Complete:** `Menu_RunKeySettingsDialog` now renders PICT 0x8b and its 34
+   row cells; click-to-select, physical-key capture, duplicate validation,
+   Set Default, and shadow-copy Cancel/OK behavior are implemented.
 4. **Represent preferences explicitly** (AGENTS.md: avoid hidden globals):
    a `NovaPreferences` value struct on `NovaRuntime`/`GameState`, defaulting via
    `NovaPrefs_ResetToDefaults`-equivalent, loaded/saved through a `.prf`

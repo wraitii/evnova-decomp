@@ -14,6 +14,10 @@
 enum class TextKey {
   none,
   character,
+  // A non-printable physical key (arrows, function keys, modifiers, etc.)
+  // carrying only key_code. Text-entry modals ignore this channel; the Key
+  // Settings modal uses it to capture the complete physical-key set.
+  physical,
   enter,
   escape,
   backspace,
@@ -28,6 +32,10 @@ enum class TextKey {
 struct TextInput {
   TextKey key = TextKey::none;
   char character = '\0'; // valid when key == TextKey::character
+  // Original EV Nova key code (DIK-style for physical keys, with the four
+  // legacy flight letters represented as ASCII by their preference defaults).
+  // 0xffff means that this event has no bindable key code.
+  std::uint16_t key_code = 0xffff;
 };
 
 // Continuous flight-input snapshot polled once per frame from the live
@@ -146,9 +154,9 @@ public:
   [[nodiscard]] SDL_Renderer *renderer() const;
   [[nodiscard]] std::optional<char> PollCommandEvent();
   // Raw editable-key event for modal dialogs. Enter/Escape/Backspace are
-  // returned as distinct TextKey values; otherwise returns the translated
-  // printable ASCII character (shifted key case). Quit still sets
-  // quit_requested_.
+  // returned as distinct TextKey values; printable keys return translated
+  // ASCII and non-printable physical keys use TextKey::physical. Quit still
+  // sets quit_requested_.
   [[nodiscard]] std::optional<TextInput> PollTextEvent();
   // Live keyboard-state flight control snapshot (held-key steering).
   [[nodiscard]] FlightInput PollFlightInput();
