@@ -44,6 +44,23 @@ void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms);
 [[nodiscard]] bool NovaAiShip_IsFireRestricted(const GameState &state,
                                                const Ship &ship);
 
+// Ghidra 0x00410f20 Ship_CanShipInterceptCurrentPrimaryTarget. Validates the
+// current target's activity/system, minimum hull mass, relative-velocity
+// bearing, and the caller/target class-speed relation.
+[[nodiscard]] bool
+NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
+                                            const Ship &ship);
+
+// Ghidra 0x00412030 Ship_FindBestAssistTargetForShip. `score_flags` is the
+// original short argument: 0x226 limits the first range term, while -1 means
+// no range limit. Returns the slot with the lowest positive score.
+[[nodiscard]] std::int16_t NovaAi_FindBestAssistTargetForShip(
+    const GameState &state, const Ship &ship, std::int16_t score_flags);
+
+// Ghidra 0x00411540 Ship_UpdateAutoWeaponSelectionFromTarget. Refreshes the
+// active NPC weapon bank for higher-behavior ships and clears stale targets.
+void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship);
+
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame AI state machine.
 // Given the ship's current ai_state_code it maintains that state and writes
 // the companion Ship.ai_control_mode field (consumed by

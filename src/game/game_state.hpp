@@ -73,6 +73,13 @@ struct Ship {
   float heading = 0.0F; // +0x44 radians
   float speed = 0.0F;   // +0x48
 
+  // Clean-room collision envelope used until the original SpriteLayer pixel
+  // masks are represented by the simulation. The original derives this from
+  // the current ship sprite's half-span; keeping it explicit lets collision
+  // tests and future sprite loading replace the provisional 16px default
+  // without changing combat code.
+  float collision_radius_px = 16.0F;
+
   // --- AI movement state (drives Ship_HandleShip 0x00433050's integrator) ---
   // Whether the ship applies forward thrust this frame. Mirror GHIDRA
   // ShipState.ai_forward_thrust_cmd (+0x30). For the player it is mirrored by
@@ -104,8 +111,15 @@ struct Ship {
   // --- Vital stats ---
   float shield_points = 0.0F;       // +0x54
   float armor_points = 0.0F;        // +0x58
+  float status_effect_points = 0.0F; // +0x5C (ionization/status-effect meter)
   float fuel_points = 0.0F;         // +0x38
   float death_timer_active = -1.0F; // +0x3C
+  // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
+  // timer consumer is still deferred, so the field remains provisional.
+  float hit_reaction_timer = 0.0F;
+  // Ghidra ShipState field_0xB0. Weapon on-hit ionization colors are ORed
+  // here by Weapon_ApplyWeaponOnHitEffects; the status renderer is deferred.
+  std::uint32_t ionization_color = 0;
 
   // --- Identity / placement ---
   std::int16_t ship_class_id = 0;             // +0x76 (zero-based ship index)
@@ -117,12 +131,14 @@ struct Ship {
 
   // --- Weapon bank / active selection ---
   std::int16_t active_weapon_bank_slot = 0; // +0x72
-  // Ghidra keeps the 6 weapon-bank ammo counters at +0xC8 (a 100-stride row) on
-  // the ShipState. The reimplementation instead tracks player ammo centrally in
-  // GameState.weapon_bank_ammo/key secondary (weapon.cpp). The per-bank
-  // cooldown lives in GameState.weapon_bank_cooldown. Added here only when the
-  // NPC weapon path is reconstructed (Ship_AllocateShipSlotInSystem seeds these
-  // from the ShipClassDef loadout).
+  // Ghidra keeps the weapon-bank rows on every ShipState. The player path uses
+  // GameState's equivalent 100-stride arrays; NPCs keep their class loadout
+  // counters here so AI target/intercept helpers do not accidentally inspect
+  // the player's weapons.
+  std::array<std::int16_t, 0x100> npc_weapon_bank_ammo{};
+  std::array<std::int16_t, 0x100> npc_weapon_bank_secondary{};
+  std::array<float, 0x100> npc_weapon_bank_cooldown{};
+  std::int16_t npc_weapon_banks_ship_class = -1;
 
   // --- Mission / target/AI slots (added to unblock spawn/targeting) ---
   std::int16_t mission_owner_slot = -1; // +0x8A
@@ -141,6 +157,10 @@ struct Ship {
       -1;                                // +0x6C (also a travel/stellar slot)
   std::int16_t ai_target_ship_slot = -1; // +0x9A
   std::int16_t target_stellar_object_id = -1; // +0x8C
+  // Escort command selected by the assist supervisor. The clean-room dialog
+  // and mission models only use the neutral default so far, but the field is
+  // needed to preserve the state-0x05+ branch shape.
+  std::int16_t escort_command_code = 0; // +0xC90A (provisional)
   // Velocity-match lock (ShipState +0xC8DC): the slot of a ship whose
   // velocity/heading this ship is matching (control mode 0xc/0xf), or -1. A
   // non-self value gates the NPC effective-stats branch
@@ -391,12 +411,35 @@ struct ActiveShot {
   // Which weapon fired this round (zero-based weapon id; used as the bank
   // slot and to look up the WeaponDef stats for drawing/lifetime).
   std::int16_t weapon_id = -1;
+  // Ghidra ShotState.owner_ship_slot / target_ship_slot (+0x2c/+0x2a).
+  // Owner attribution is needed for friendly-fire and aggro gates; a target
+  // of -1 means that this basic projectile may collide with any eligible ship.
+  std::int16_t owner_ship_slot = -1;
+  std::int16_t target_ship_slot = -1;
+  // Ghidra ShotState.system_id (+0x2e). Shots from another system are stale
+  // and are discarded without applying damage.
+  std::int16_t system_id = -1;
   float pos_x = 0.0F; // world x
   float pos_y = 0.0F; // world y
   float vel_x = 0.0F; // px/frame
   float vel_y = 0.0F;
   // Remaining lifetime in reference-cadence frames (WeaponDef Count).
   int life_frames = 0;
+  // Fractional lifetime used by the frame loop's normalized 30 Hz cadence;
+  // life_frames is retained as the rounded/debug-facing view used by the
+  // renderer and existing tests.
+  float life_ticks_remaining = 0.0F;
+  // Provisional circle envelope replacing the original shot sprite half-span
+  // and pixel-mask test. Set by the common spawn path.
+  float collision_radius_px = 2.0F;
+  // Set by collision or expiry; the simulation removes these after the pass.
+  bool consumed = false;
+  // Ghidra ShotState.fuse_elapsed. Proximity-fuse behavior is deferred, but
+  // the accumulator belongs on the shot record so adding it will not require
+  // another storage migration.
+  float fuse_elapsed = 0.0F;
+  // Ghidra ShotState.impact_variant, used later by impact visual/effect code.
+  std::int8_t impact_variant = 0;
   // Time-animated shot-frame stepping (Ghidra ShotState.frame_cycle_index / +
   // anim_elapsed). For a weapon whose flags_primary bit 0 is SET the shot uses
   // Shot_HandleShot's animated branch: anim_elapsed accumulates frame time and

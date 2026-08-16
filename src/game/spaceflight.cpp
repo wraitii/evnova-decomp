@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "asteroid.hpp"
+#include "collision.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -34,7 +35,13 @@ namespace {
 // intentionally do nothing; logging them per frame would overwhelm diagnostics.
 void Stub_PlayerCore(GameState &state) { (void)state; }
 
-void Stub_Collisions(GameState &state) { (void)state; }
+// Ghidra scope 9 of Frame_TickSystems (0x004186b0) ->
+// Shot_ResolveCollisions (0x00437e20). The first clean-room slice resolves
+// direct projectile-vs-ship impacts; splash, asteroid, stellar, and sprite
+// pixel-mask collision paths remain deferred.
+void Stub_Collisions(GameState &state) {
+  NovaWeapon_ResolveProjectileCollisions(state);
+}
 
 void Stub_DrawStatus(GameState &state) { (void)state; }
 
@@ -84,7 +91,13 @@ void Stub_TickReactionsAndNpcSpawns(GameState &state) {
 
 void Stub_CalcAiOdds(GameState &state) { (void)state; }
 
-void Stub_HandleShots(GameState &state) { (void)state; }
+// Ghidra scope 7 of Frame_TickSystems -> Shot_HandleShot (0x00435830). Shot
+// movement/lifetime/cooldown bookkeeping now runs here, after scope 9
+// collision checks, matching the original phase order.
+void Stub_HandleShots(GameState &state, float elapsed_ticks) {
+  constexpr float kOriginalTickMs = 1000.0F / 30.0F;
+  NovaWeapon_TickShots(state, elapsed_ticks * kOriginalTickMs, elapsed_ticks);
+}
 
 // Ghidra scope 4/5 of Frame_TickSystems: per-ship simulation. For the NPC
 // ships this is Ship_HandleShip (0x00433050), which integrates each active
@@ -177,7 +190,7 @@ void NovaFrame_TickSystems(GameState &state,
   }
 
   // Always-run scopes that keep advancing during frozen transitions.
-  Stub_HandleShots(state);                 // scope 7
+  Stub_HandleShots(state, elapsed_ticks);  // scope 7
   Stub_HandleShips(state, elapsed_ticks);  // scope 4/5
   Stub_MiscHandlers(state, run_full_tick); // scope 8
   Stub_BeamHitQueue(state);
@@ -441,14 +454,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (!state.travel.engaging) {
       NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
     }
-    // Advance the player's fired shots/cooldowns from the previous frame, then
-    // handle this frame's fire input. Mirrors Ship_HandlePlayerShipControl
-    // firing the primary bank(s) while the fire command is held. frame_time_ms
-    // feeds the time-animated shot-frame cadence (Shot_HandleShot's animated
-    // branch); static/heading shot sets ignore it. Gated while a jump is
-    // engaged (the original fire-restricts the player through the brake,
-    // hold and zoom).
-    NovaWeapon_TickShots(state, frame_time_ms);
+    // Handle this frame's fire input. The shot movement/lifetime update now
+    // runs from Frame_TickSystems scope 7 after scope 9 collision checks,
+    // matching the original collision -> Shot_HandleShot phase order.
+    // Gated while a jump is engaged (the original fire-restricts the player
+    // through the brake, hold and zoom).
     if (input.fire && !state.travel.engaging) {
       NovaWeapon_FirePlayerPrimary(state);
       // Play each weapon fire sound queued this frame (a round actually

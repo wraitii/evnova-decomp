@@ -7,7 +7,10 @@ This is a living plan. Phases are listed in the recommended execution order and
 marked as they land. Current state: **Phases 0-2 done** (NPC movement physics
 integrator + gravity-shield steer helper, both wired into the per-frame tick);
 **Phase 3 in progress** (AI decision layer): the ship_ai module dispatches the
-behavior supervisors + state machine + controls bridge each frame, and the
+behavior supervisors + state machine + controls bridge each frame. Behaviors
+0x02/0x03 now acquire nearest same-system hostile contacts, promote them into
+attack/assist states, and steer through combat control modes 5/6/7/8/0xc/0xf;
+mission, weapon, and disable side effects remain deferred. The
 **wander/travel milestone (Phases 3+4) is live** -- NPCs pick a random adjacent
 travel stellar, steer toward it, and cycle to the next on arrival. NPC movement
 uses each ship's real class stats; the thrust-units bug that made them ~50x too
@@ -243,9 +246,10 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
       writer. This is the heart.
   - **In progress**: `NovaAi_UpdateShipState` (src/game/ship_ai.cpp) ports the
     core travel (1/0x14/2), hold (0xb), pursuit(5)/assist(10)/escort(7), drift
-    (0xe), disengage(0x15/8) and defunct(0x16) control-mode writes; the
-    attack/disable states (3/4/0xc/0xd) and HUD/mission flavor need Phase 5
-    systems and are conservatively gated. The travel-arrival `reverse_speed_bias`
+    (0xe), disengage(0x15/8), defunct (0x16), and partial attack/assist
+    transitions (3/4/0xc/0xd). States 3/4 now select target-bearing pursuit
+    modes 5/6; weapon selection, disable transitions, formation offsets, and
+    HUD/mission flavor remain deferred. The travel-arrival `reverse_speed_bias`
     band matches Ghidra (300..499 / 100..174); the jump-fallback gate now uses
     the ship's own class fuel
     (`NovaTravel_CanShipInitiateJumpSequence`, mirroring
@@ -262,33 +266,43 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
     `NovaAiShip_IsFireRestricted` (0x004687b0, partial),
     `NovaAi_EnterState2ClearPrimaryTarget` (0x00410670, faithful),
     `NovaAi_SelectRandomAdjacentTravelStellar` (0x0040c790, partial),
-    all in src/game/ship_ai.cpp.
-  - `Ship_UpdateAutoWeaponSelectionFromTarget` (0x00411540) -- ties into
-    weapon-bank selection once firing exists.
+    all in src/game/ship_ai.cpp. `NovaAi_AcquirePrimaryTarget` (0x0040e020)
+    retains the executable same-system hostile/engaged-contact core; mission/
+    scripted target priority, perceived-strength weighting, and reputation/
+    policy gates remain deferred.
+  - **Implemented partially**: `Ship_CanShipInterceptCurrentPrimaryTarget`
+    (0x00410f20) -- exact active/system/mass/relative-bearing and class-speed
+    gate, with the available guided-bank walk.
+  - **Implemented partially**: `Ship_FindBestAssistTargetForShip`
+    (0x00412030) -- exact 64-slot lowest-positive score scan and category/range
+    score; mission/escort command context remains provisional.
+  - **Implemented partially**: `Ship_UpdateAutoWeaponSelectionFromTarget`
+    (0x00411540) -- stale-target cleanup and class-loadout bank selection are
+    wired after the state/control pass; NPC firing and full turret priority
+    remain Phase 5 work.
 - [ ] **Behavior supervisors**, in dependency order:
   - **Started**: `Ship_UpdateShipAiBehavior0x01` (0x00402860) -- normal travel
     (**the "wander / travel to stellar" behavior**, faithful port:
-    `NovaAi_UpdateBehavior0x01`). Behaviors 0x02/0x03/4/5+ currently fall back
-    to the wander supervisor until their disable/combat systems land.
-  - `Ship_UpdateShipAiBehavior0x02` (0x00402bd0) -- basic "dude"/local ships:
-    reacquire travel, promote nearby targets to attack.
-  - `Ship_UpdateShipAiBehavior0x03` (0x00402e50) -- hostile attack/flee/regroup
-    (pirates).
-  - `Ship_UpdateShipAiBehavior0x03CaptureVariant` (0x004038b0) -- capture flavor
-    (board disabled ships).
-  - `Ship_UpdateShipAiCombatState` (0x00403de0),
+    `NovaAi_UpdateBehavior0x01`).
+  - **Implemented partially**: `Ship_UpdateShipAiBehavior0x02` (0x00402bd0) --
+    basic local-ship travel plus hostile-contact promotion.
+  - **Implemented partially**: `Ship_UpdateShipAiBehavior0x03` (0x00402e50) --
+    hostile target acquisition, validation, pursuit, and travel fallback.
+  - **Shared fallback only**: `Ship_UpdateShipAiBehavior0x03CaptureVariant`
+    (0x004038b0) -- capture-specific disabled-ship selection is deferred.
+  - **Shared target path only**: `Ship_UpdateShipAiCombatState` (0x00403de0),
     `Ship_UpdateShipAiAssistResponseBehavior` (0x004048a0),
     `Ship_UpdateShipAiAvailabilityBehavior` (0x00402980).
   - Respect `skip_heavy_ai` gating from `Ship_UpdateShipAI` where the original
     does.
 - [ ] **`Ship_UpdateShipAI`** (0x00401000) -- the top-level per-ship AI entry
       that dispatches the supervisors. **In progress**: `NovaAi_UpdateShipAI`
-      (src/game/ship_ai.cpp) implements the dispatch skeleton + state machine +
-      controls bridge, and is wired into `Stub_AiRoutines` (scope 6). The
+      (src/game/ship_ai.cpp) implements the dispatch + state machine + controls
+      bridge, and is wired into `Stub_AiRoutines` (scope 6). The
       movement bridge `Ship_ApplyShipAiControls` (0x00408150, `NovaAi_ApplyControls`)
       turns `ai_control_mode` into the movement fields the Phase 0 integrator
-      consumes, so NPCs now visibly wander toward travel stellars (Phase 4
-      steering). Unit-tested (tests/ship_ai_test.cpp).
+      consumes, so NPCs now visibly wander toward travel stellars and pursue
+      reconstructed hostile contacts. Unit-tested (tests/ship_ai_test.cpp).
 
 ## Phase 4 -- Wander in the world (movement toward stellars)
 

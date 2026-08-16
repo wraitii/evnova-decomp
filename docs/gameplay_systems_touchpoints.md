@@ -70,6 +70,24 @@ Observed responsibilities:
 - `NovaGameplay_FireShipWeapons` manages bank cadence and per-bank resource usage arrays.
 - `NovaGameplay_ResolveCollisions` is the shared hit-resolution pass after movement/shot updates.
 
+### Weapon → ship impact payload (mapped)
+
+- `0x00437780` `Shot_ResolveShotCollisionHit` applies the weapon's `Impact` field
+  as a mass-scaled velocity impulse before damage, then applies `Ionization` and
+  `IonizeColor` through `0x0046f3f0` `Weapon_ApplyWeaponOnHitEffects`.
+- `WeaponDef.Flags2 & 0x1000` (“can disable but not destroy”) is converted by
+  `0x0046c2f0` `Weapon_GetShotImpactVariant` into `ShotState.impact_variant`;
+  the hit resolver preserves one armor point when that variant would otherwise
+  kill the ship.
+- Non-bypass hits refresh `ShipState.hit_reaction_timer` to 32. The original
+  does not set the death timer at impact; destruction remains an armor-state
+  result consumed by the ship handler.
+- Blast-radius splash damage uses the impact resolver for each additional ship
+  in the axis-aligned blast box, with aggro/retarget updates suppressed. The
+  player's own ship is excluded unless Flags bit `0x0100` allows player hurt;
+  NPC owners are not excluded by this carve-out. The same ionization/impulse
+  payload is applied per target.
+
 ### Missile seek / jamming subsystem (mode 1 homing)
 
 - `WeaponDef.jam_vuln_1..4` (+0xBA) seed the four `ShotState.lock_quality_0..3` seek channels at spawn: `lock_quality[i] = 0` if `jam_vuln[i]<1` else `Random(0..jam_vuln[i])`.

@@ -15,10 +15,10 @@
 // {id 0x80, count 1, ammo -1=unlimited}); `weapon_bank_ammo[0]=1` so it is
 // fireable.
 //
-// Only the unguided-projectile branch of the firing routine is reconstructed
-// (weapon_mode_code -1/1/5/6 -> Shot_SpawnShotFromWeapon). The carrier-bay,
-// beam (mode 0), turret (3/4), guided (7/8) and launcher (99) branches are
-// not yet implemented (they need the full shot/turret/targeting systems).
+// The player still only fires the basic projectile branch here. The shared
+// projectile spawn record now carries the ownership/lifetime data consumed by
+// the first collision slice; carrier-bay, beam, turret, guided, and launcher
+// branches remain deferred.
 
 #include "game_state.hpp"
 #include "scenario_data.hpp"
@@ -63,6 +63,18 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 [[nodiscard]] bool NovaWeapon_CanFireBank(const GameState &state,
                                           std::int16_t weapon_bank);
 
+// Ghidra Shot_SpawnShotFromWeapon (0x0041fd30): allocate one clean-room shot
+// record, initialize owner/target/system attribution, muzzle position,
+// heading/spread, inherited velocity, lifetime, and the provisional collision
+// envelope. The current implementation covers only straight-flight spawn;
+// homing guidance and sprite-container setup remain deferred.
+[[nodiscard]] int NovaWeapon_SpawnProjectile(GameState &state,
+                                             std::int16_t owner_ship_slot,
+                                             std::int16_t target_ship_slot,
+                                             std::int16_t weapon_id,
+                                             bool spawn_without_owner = false,
+                                             bool apply_random_spread = true);
+
 // Ghidra Weapon_FirePlayerWeaponBank (0x00455150): fires one player weapon
 // bank for the current frame. Reconstructed for the unguided-projectile mode:
 // consumes ammo/energy as the weapon requires, spawns one shot toward the
@@ -89,9 +101,12 @@ void NovaWeapon_FirePlayerPrimary(GameState &state);
 // weapon's shot_anim_frame_dwell cadence, mirroring Shot_HandleShot's animated
 // branch), then removes expired rounds and decrements every weapon-bank
 // cooldown toward zero. `frame_time_ms` is the real elapsed frame time used to
-// accumulate the animated-short dwell (ignored for static/heading shot sets).
-// Called once per spaceflight frame for the player's shots.
-void NovaWeapon_TickShots(GameState &state, float frame_time_ms = 1.0F);
+// accumulate the animated-short dwell (ignored for static/heading shot sets),
+// while `elapsed_ticks` scales movement, lifetime, and cooldowns to the
+// original 30 Hz simulation cadence. Called from Frame_TickSystems scope 7.
+void NovaWeapon_TickShots(GameState &state,
+                          float frame_time_ms = 1.0F,
+                          float elapsed_ticks = 1.0F);
 
 // Diagnostic: the human-readable weapon name of the given bank's weapon, or
 // "?" when the bank is unmounted/invalid. Used by the HUD weapon readout.
@@ -107,7 +122,7 @@ void NovaWeapon_TickShots(GameState &state, float frame_time_ms = 1.0F);
 // (ammo_type == -1 or flags_secondary & 0x40), and returns `-1` to signal that
 // case. Returns -1 when the bank/weapon is invalid.
 [[nodiscard]] std::int16_t NovaWeapon_BankAmmoCount(const GameState &state,
-                                                     std::int16_t weapon_bank);
+                                                    std::int16_t weapon_bank);
 
 // Weapon fire-sound slot mapping. A weapon's `fire_sound` field (Ghidra
 // WeaponDef.fire_sound_slot) is a slot index 0..35 that the original resolves

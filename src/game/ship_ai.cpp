@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -80,11 +81,15 @@ constexpr float kAssistFar = 600.0F;
 constexpr float kCentreRangeSq = 1000000.0F;
 // Gravity-shield approach multipliers (state 0xd/0xf).
 constexpr float kShieldKeepMult = 4.0F;
-// PROVISIONAL turn-radius range used by the port's own pursuit/assist range
-// gates (states 5/0xf; the original uses Ship_CanShipInterceptCurrent-
-// PrimaryTarget instead). NOT the decoded state-1 travel arrive range above.
+// Combat turn-radius constants from DAT_005750a0/a4/a8/ac. The class turn
+// value is converted to the runtime degrees-per-tick value before these
+// branches use it.
 constexpr float kTurnRadiusBase = 10.0F;
 constexpr float kTurnRadiusScale50 = 50.0F;
+constexpr float kAssistTurnRadiusScale = 30.0F;
+constexpr float kAssistInnerTurnRadiusScale = 15.0F;
+constexpr float kCombatCloseRange = 165.0F;
+constexpr float kCombatStationRange = 251.0F; // 0xfb
 
 constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
 constexpr float kFullCircleDeg = 360.0F;
@@ -179,6 +184,291 @@ bool NovaAiShip_IsFireRestricted(const GameState &state, const Ship &ship) {
   return false;
 }
 
+namespace {
+
+constexpr float kInterceptSlowVelocity = 0.35F; // DAT_00575080
+constexpr float kInterceptDistanceScale = 0.8F; // DAT_00575190
+
+[[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
+                                            const Ship &ship) {
+  return state.scenario.Ship(
+      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+}
+
+[[nodiscard]] float
+RoundedDistanceSquared(float x1, float y1, float x2, float y2) {
+  return static_cast<float>(std::lround(SquaredDistance(x1, y1, x2, y2)));
+}
+
+void EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
+  if (ship.ship_instance_id == 0 ||
+      ship.npc_weapon_banks_ship_class == ship.ship_class_id) {
+    return;
+  }
+  ship.npc_weapon_bank_ammo.fill(0);
+  ship.npc_weapon_bank_secondary.fill(0);
+  ship.npc_weapon_bank_cooldown.fill(0.0F);
+  const ShipClass *cls = ShipClassFor(state, ship);
+  if (cls != nullptr) {
+    for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
+      if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
+        continue;
+      }
+      const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
+      ship.npc_weapon_bank_ammo[bank] = std::max<std::int16_t>(stock.count, 0);
+      // -1 is the original unlimited-secondary sentinel.
+      ship.npc_weapon_bank_secondary[bank] = stock.ammo_load;
+    }
+  }
+  ship.npc_weapon_banks_ship_class = ship.ship_class_id;
+}
+
+struct WeaponBankState {
+  std::int16_t ammo = 0;
+  std::int16_t secondary = 0;
+  float cooldown = 0.0F;
+};
+
+[[nodiscard]] WeaponBankState
+ReadWeaponBank(const GameState &state, const Ship &ship, std::int16_t bank) {
+  const auto index = static_cast<std::size_t>(bank);
+  if (ship.ship_instance_id == 0) {
+    return {state.weapon_bank_ammo[index * 100],
+            state.weapon_bank_secondary[index * 100],
+            state.weapon_bank_cooldown[index]};
+  }
+  return {ship.npc_weapon_bank_ammo[index],
+          ship.npc_weapon_bank_secondary[index],
+          ship.npc_weapon_bank_cooldown[index]};
+}
+
+[[nodiscard]] bool
+WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank) {
+  const WeaponBankState bank_state = ReadWeaponBank(state, ship, bank);
+  return bank_state.ammo > 0 && bank_state.cooldown <= 0.0F &&
+         (bank_state.secondary > 0 || bank_state.secondary == -1);
+}
+
+[[nodiscard]] bool WeaponCanTrackTarget(const ShipClass &ship_class,
+                                        const Weapon &weapon) {
+  // Weapon_WeaponCanTrackTarget rejects flagged tracking weapons when the
+  // caller's maximum turn rate exceeds three degrees. The remaining
+  // field_0x58 threshold is not yet represented in the clean Weapon record;
+  // unflagged weapons pass this gate exactly as in the original.
+  return (weapon.flags & 0x0008U) == 0 ||
+         static_cast<float>(ship_class.turn_rate) * 0.1F <= 3.0F;
+}
+
+[[nodiscard]] bool IsWeaponInTargetRange(const Weapon &weapon,
+                                         float distance_sq) {
+  if (!(weapon.range_scalar > 0.0F)) {
+    return false;
+  }
+  return distance_sq * kInterceptDistanceScale <=
+         weapon.range_scalar * weapon.range_scalar;
+}
+
+} // namespace
+
+// Ghidra 0x00410f20 Ship_CanShipInterceptCurrentPrimaryTarget. The original's
+// final comparison is deliberately a strict base-speed comparison; the
+// preceding weapon-bank walk only establishes the guided/intercept context.
+bool NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
+                                                 const Ship &ship) {
+  const std::int16_t target_slot = ship.primary_target_ship_slot;
+  if (target_slot < 0 ||
+      !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+    return false;
+  }
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  if (!target.is_active || target.current_system_id != ship.current_system_id ||
+      (target.ship_instance_id != 0 && target.ai_state_code != 3)) {
+    return false;
+  }
+  const ShipClass *ship_class = ShipClassFor(state, ship);
+  const ShipClass *target_class = ShipClassFor(state, target);
+  if (ship_class == nullptr || target_class == nullptr ||
+      ship_class->mass_tons < 100) {
+    return false;
+  }
+
+  const float relative_x = target.vel_x - ship.vel_x;
+  const float relative_y = target.vel_y - ship.vel_y;
+  if (std::abs(relative_x) <= kInterceptSlowVelocity &&
+      std::abs(relative_y) <= kInterceptSlowVelocity) {
+    return false;
+  }
+  const float relative_bearing = BearingDeg(0.0F, 0.0F, relative_x, relative_y);
+  const float target_to_ship_bearing =
+      BearingDeg(target.pos_x, target.pos_y, ship.pos_x, ship.pos_y);
+  if (std::abs(std::remainder(relative_bearing - target_to_ship_bearing,
+                              kFullCircleDeg)) < 90.0F) {
+    return false;
+  }
+
+  // Keep the original bank walk observable in the clean-room model. NPC bank
+  // counters are seeded by the auto-selection path; an unseeded NPC simply has
+  // no available guided bank yet, which does not change this helper's final
+  // strict speed comparison.
+  const float distance_sq =
+      SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+  bool has_intercept_bank = false;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
+    if (weapon == nullptr || weapon->weapon_mode_code != 1 ||
+        !WeaponBankCanFire(state, ship, bank) ||
+        !WeaponCanTrackTarget(*ship_class, *weapon) ||
+        !IsWeaponInTargetRange(*weapon, distance_sq)) {
+      continue;
+    }
+    has_intercept_bank = true;
+    break;
+  }
+  (void)has_intercept_bank;
+  return ship_class->speed < target_class->speed;
+}
+
+// Ghidra 0x00412030 / 0x00412090. The decompiler exposes the second argument
+// as a ShipState pointer, but the callsites pass the literal short ranges
+// 0x226 and -1; score_flags is the useful semantic type.
+std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
+                                                const Ship &ship,
+                                                std::int16_t score_flags) {
+  const std::int16_t self = ship.ship_instance_id;
+  std::int32_t best_score = std::numeric_limits<std::int32_t>::max();
+  std::int16_t best_slot = -1;
+  for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+    const Ship &candidate = state.ShipAt(slot);
+    if (candidate.ship_instance_id == self ||
+        candidate.ship_instance_id == candidate.ai_target_ship_slot ||
+        candidate.ship_instance_id == ship.ai_target_ship_slot ||
+        candidate.ai_target_ship_slot == ship.ai_target_ship_slot ||
+        !candidate.is_active || candidate.ai_state_code == 0x15 ||
+        NovaAiShip_IsDestroyed(candidate) ||
+        !NovaAiShip_CanApplyDisablePressureToTarget(state, candidate)) {
+      continue;
+    }
+    if (NovaAiShip_IsFireRestricted(state, candidate) &&
+        candidate.escort_command_code != 2) {
+      continue;
+    }
+
+    bool target_context_ok = false;
+    if (candidate.ai_target_ship_slot == 0) {
+      target_context_ok = NovaAiShip_ShouldKeepPressingTarget(state, candidate);
+    } else if (ship.ai_target_ship_slot >= 0 &&
+               state.SlotInRange(
+                   static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+      target_context_ok = NovaTargeting_IsShipAcquirableAsTarget(
+          state,
+          state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot)),
+          candidate);
+    }
+    if (!target_context_ok) {
+      continue;
+    }
+
+    const float target_distance_sq = RoundedDistanceSquared(
+        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot)).pos_x,
+        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot)).pos_y,
+        candidate.pos_x,
+        candidate.pos_y);
+    if (score_flags > 0 &&
+        target_distance_sq > static_cast<float>(score_flags) * score_flags) {
+      continue;
+    }
+
+    std::int32_t score = static_cast<std::int32_t>(std::lround(
+        RoundedDistanceSquared(
+            ship.pos_x, ship.pos_y, candidate.pos_x, candidate.pos_y) +
+        (score_flags > 0 ? target_distance_sq : 0.0F)));
+    const ShipClass *candidate_class = ShipClassFor(state, candidate);
+    const ShipClass *ship_class = ShipClassFor(state, ship);
+    if (candidate_class != nullptr && ship_class != nullptr &&
+        candidate_class->class_category != ship_class->class_category) {
+      score = (score + 1) / 2;
+      if (candidate_class->class_category == 0 &&
+          ship_class->class_category == 2) {
+        score = (score + 1) / 2;
+      }
+    }
+    score = std::max(score, 1);
+    if (score < best_score) {
+      best_score = score;
+      best_slot = static_cast<std::int16_t>(slot);
+    }
+  }
+  return best_slot;
+}
+
+// Ghidra 0x00411540 plus the weapon-bank chooser at 0x0040ce00. This is the
+// target-validity side faithfully; bank ranking is the available clean-room
+// subset (mode, ammo, cooldown, target capability, range, and damage class).
+void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
+  if (ship.ai_behavior_code < 5) {
+    return;
+  }
+  const std::int16_t target_slot = ship.primary_target_ship_slot;
+  if (target_slot < 0 ||
+      !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+    ship.primary_target_ship_slot = -1;
+    return;
+  }
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  if (!target.is_active || NovaAiShip_IsFireRestricted(state, target)) {
+    ship.primary_target_ship_slot = -1;
+    return;
+  }
+  const ShipClass *target_class = ShipClassFor(state, target);
+  if (target_class == nullptr) {
+    return;
+  }
+  EnsureNpcWeaponBanks(state, ship);
+
+  const float distance_sq =
+      SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+  std::int16_t best_bank = -1;
+  std::int32_t best_score = -1;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
+    if (weapon == nullptr ||
+        (weapon->weapon_mode_code != 3 && weapon->weapon_mode_code != 4 &&
+         weapon->weapon_mode_code != 7 && weapon->weapon_mode_code != 8) ||
+        !WeaponBankCanFire(state, ship, bank) ||
+        (weapon->flags_secondary & 0x400U) !=
+            (target_class->capability_flags & 0x400U)) {
+      continue;
+    }
+    if (weapon->range_scalar > 0.0F &&
+        distance_sq * kInterceptDistanceScale >
+            weapon->range_scalar * weapon->range_scalar) {
+      continue;
+    }
+    const float target_bearing =
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+    const float heading_deg = WrapDeg(ship.heading / kDegToRad);
+    const float reference = weapon->weapon_mode_code == 8
+                                ? WrapDeg(heading_deg + 180.0F)
+                                : heading_deg;
+    if ((weapon->weapon_mode_code == 7 || weapon->weapon_mode_code == 8) &&
+        std::abs(std::remainder(target_bearing - reference, kFullCircleDeg)) >=
+            46.0F) {
+      continue;
+    }
+    const std::int32_t score = target.shield_points > 0.0F
+                                   ? weapon->energy_damage
+                                   : weapon->mass_damage;
+    if (best_bank == -1 || score > best_score) {
+      best_bank = bank;
+      best_score = score;
+    }
+  }
+  if (best_bank != -1) {
+    ship.active_weapon_bank_slot = best_bank;
+    ship.ai_fire_trigger_latch = 1;
+  }
+}
+
 // Ghidra 0x0040c790 Stellar_SelectRandomAdjacentTravelStellar. Selects a
 // random adjacent travel stellar in the ship's current system, applying the
 // government scan-mask/hostility filters; returns the stellar *resource id*
@@ -221,6 +511,115 @@ std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
   }
   std::uniform_int_distribution<std::size_t> pick(0, candidates.size() - 1);
   return candidates[pick(state.rng)];
+}
+
+// Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. The original has
+// mission/scripted target arms and several combat-strength filters. Those data
+// sources are not reconstructed here, so this clean-room slice keeps the
+// executable core: same-system active contacts, hostile governments or
+// player-directed combat contacts, nearest-first selection, and the player as
+// a valid target when hostility has already been established.
+void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
+  if (ship.primary_target_ship_slot >= 0 &&
+      state.SlotInRange(
+          static_cast<std::size_t>(ship.primary_target_ship_slot))) {
+    const Ship &current =
+        state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+    if (current.is_active && !NovaAiShip_IsDestroyed(current) &&
+        current.current_system_id == ship.current_system_id) {
+      return;
+    }
+  }
+
+  std::int16_t best_slot = -1;
+  bool best_is_engaged = false;
+  float best_distance_sq = 0.0F;
+  for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+    if (slot == static_cast<std::size_t>(ship.ship_instance_id)) {
+      continue;
+    }
+    const Ship &candidate = state.ShipAt(slot);
+    if (!candidate.is_active || NovaAiShip_IsDestroyed(candidate) ||
+        candidate.current_system_id != ship.current_system_id ||
+        candidate.ai_state_code == 0x15 ||
+        candidate.target_stellar_object_id != -1 ||
+        NovaAiShip_IsFireRestricted(state, candidate) ||
+        NovaTargeting_ShipAtDisableThreshold(candidate)) {
+      continue;
+    }
+
+    const bool player_contact = slot == 0;
+    const bool candidate_is_engaged = candidate.ai_target_ship_slot == 0 ||
+                                      candidate.primary_target_ship_slot == 0;
+    bool hostile_contact = candidate_is_engaged;
+    if (!hostile_contact && ship.faction_or_government_id >= 0 &&
+        candidate.faction_or_government_id >= 0) {
+      hostile_contact = NovaGovernment_AreGovtsHostileOrXenophobic(
+          state.scenario,
+          ship.faction_or_government_id,
+          candidate.faction_or_government_id);
+    }
+    if (player_contact) {
+      // The player has no stable government identity in the clean-room state;
+      // retain the original's already-hostile path instead of making every
+      // behavior-0x03 ship attack the player on sight.
+      hostile_contact = hostile_contact || ship.ai_hostility_accumulator > 0;
+    }
+    if (!hostile_contact) {
+      continue;
+    }
+
+    const float dx = candidate.pos_x - ship.pos_x;
+    const float dy = candidate.pos_y - ship.pos_y;
+    const float distance_sq = dx * dx + dy * dy;
+    if (best_slot == -1 || (candidate_is_engaged && !best_is_engaged) ||
+        (candidate_is_engaged == best_is_engaged &&
+         distance_sq < best_distance_sq)) {
+      best_slot = static_cast<std::int16_t>(slot);
+      best_is_engaged = candidate_is_engaged;
+      best_distance_sq = distance_sq;
+    }
+  }
+
+  ship.primary_target_ship_slot = best_slot;
+  if (best_slot != -1) {
+    ship.ai_state_code = 4;
+    if (best_slot == 0) {
+      ship.ai_hostility_accumulator = std::max<std::int16_t>(
+          ship.ai_hostility_accumulator, static_cast<std::int16_t>(1));
+    }
+  }
+}
+
+// Shared travel fallback used by behavior 0x02/0x03. This is the common
+// `state 0 -> adjacent stellar -> state 1/2/6` ladder visible in both Ghidra
+// supervisors; mission and special-loadout branches remain deferred.
+void NovaAi_ReacquireTravelOrSettle(GameState &state,
+                                    Ship &ship,
+                                    std::uint32_t now_ms) {
+  const System *sys = CurrentSystem(state);
+  const bool still_at_point = sys && ship.jump_destination_stellar_id >= 0 &&
+                              NovaTargeting_IsStellarAdjacentToSystem(
+                                  *sys, ship.jump_destination_stellar_id);
+  if (!still_at_point) {
+    ship.ai_secondary_target_slot = -1;
+    ship.ai_secondary_target_slot =
+        NovaAi_SelectRandomAdjacentTravelStellar(state, ship);
+  }
+  if (ship.ai_secondary_target_slot == -1) {
+    if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+      NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+    } else {
+      ship.ai_state_code = 6;
+    }
+  } else if (!still_at_point) {
+    ship.travel_transfer_mode = 2;
+    ship.ai_state_code = 1;
+  } else if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+    NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+  } else {
+    ship.ai_state_code = 6;
+  }
 }
 
 // Ghidra 0x00402860 Ship_UpdateShipAiBehavior0x01. The "normal travel / wander"
@@ -294,17 +693,106 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
   (void)now_ms;
 }
 
+// Ghidra 0x00402bd0 Ship_UpdateShipAiBehavior0x02. Local/dude behavior shares
+// the travel fallback with behavior 0x01, but promotes an established hostile
+// contact once it is within the original 0x4e3-pixel per-axis gate. The
+// player-target arm enters state 10 (assist/response); other contacts enter
+// state 3. Government chatter and assistance encounter side effects remain
+// TODO(decomp).
+void NovaAi_UpdateBehavior0x02(GameState &state,
+                               Ship &ship,
+                               std::uint32_t now_ms) {
+  if (NovaAiShip_IsFireRestricted(state, ship)) {
+    return;
+  }
+  if (ship.ai_state_code == 9 || ship.ai_state_code == 0xf ||
+      ship.ai_state_code == 0x16) {
+    return;
+  }
+
+  if (ship.ai_state_code == 0 && ship.primary_target_ship_slot == -1) {
+    NovaAi_ReacquireTravelOrSettle(state, ship, now_ms);
+  }
+
+  if (ship.ai_hostility_accumulator > 0 &&
+      ship.primary_target_ship_slot != -1 &&
+      state.SlotInRange(
+          static_cast<std::size_t>(ship.primary_target_ship_slot))) {
+    const Ship &target =
+        state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+    const float dx = std::abs(ship.pos_x - target.pos_x);
+    const float dy = std::abs(ship.pos_y - target.pos_y);
+    if (dx < 1251.0F && dy < 1251.0F && ship.ai_station_hold_timer <= 0.0F) {
+      ship.ai_state_code = 4;
+    } else if (ship.ai_target_ship_slot == 0) {
+      ship.ai_state_code = 10;
+      ship.ai_secondary_target_slot = 0;
+    } else {
+      ship.ai_state_code = 3;
+    }
+  }
+}
+
+// Ghidra 0x00402e50 Ship_UpdateShipAiBehavior0x03. Hostile behavior acquires
+// a nearby contact when idle, preserves an active primary target, and falls
+// back to the normal travel/jump ladder when combat has no target. The
+// government flee, weapon-readiness, mission-fleet, and capture-variant arms
+// depend on data not represented by the current clean-room Ship model.
+void NovaAi_UpdateBehavior0x03(GameState &state,
+                               Ship &ship,
+                               std::uint32_t now_ms) {
+  if (NovaAiShip_IsFireRestricted(state, ship)) {
+    return;
+  }
+  if (ship.ai_state_code == 9 || ship.ai_state_code == 0xf ||
+      ship.ai_state_code == 0x16) {
+    return;
+  }
+
+  if (ship.primary_target_ship_slot != -1) {
+    if (!state.SlotInRange(
+            static_cast<std::size_t>(ship.primary_target_ship_slot)) ||
+        !state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot))
+             .is_active ||
+        NovaAiShip_IsDestroyed(state.ShipAt(
+            static_cast<std::size_t>(ship.primary_target_ship_slot)))) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_state_code = 0;
+    }
+  }
+
+  if (ship.ai_state_code == 0 && ship.primary_target_ship_slot == -1) {
+    NovaAi_AcquirePrimaryTarget(state, ship);
+    if (ship.primary_target_ship_slot == -1) {
+      NovaAi_ReacquireTravelOrSettle(state, ship, now_ms);
+    }
+  }
+
+  if (ship.ai_hostility_accumulator > 0 &&
+      ship.primary_target_ship_slot != -1 && ship.ai_state_code != 3 &&
+      ship.ai_state_code != 7 && ship.ai_station_hold_timer <= 0.0F) {
+    ship.ai_state_code = 4;
+  }
+
+  if (ship.ai_state_code == 4 && ship.primary_target_ship_slot != -1) {
+    const auto target_slot =
+        static_cast<std::size_t>(ship.primary_target_ship_slot);
+    if (!state.SlotInRange(target_slot) ||
+        !state.ShipAt(target_slot).is_active ||
+        NovaAiShip_IsDestroyed(state.ShipAt(target_slot))) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_state_code = 0;
+    }
+  }
+}
+
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame state machine. This
 // is a substantial function; the reconstruction below covers the core
 // movement/control-mode decision for the states the reimplementation drives
 // (travel, wander, escort-follow, hold, drift, disengage, defunct) and writes
-// Ship.ai_control_mode accordingly. The disable-pressure / board (0xd) and
-// ship-attack (3/4/0xc) branches are conservatively gated: they need the
-// disable/weapon systems (Phase 5) to be faithfully exercised, so those
-// helpers (Ship_CanShipApplyDisablePressureToTarget, Ship_CanShipIntercept-
-// CurrentPrimaryTarget, Ship_IsShipFireRestricted) are used where available
-// and otherwise defaulted permissive with TODO(decomp). HUD/mission flavor
-// (extortion messages, fuel-transfer chatter) is no-op.
+// Ship.ai_control_mode accordingly. The high-level attack states now enter
+// pursuit/engagement control modes using the reconstructed target slots;
+// weapon selection, disable pressure, and HUD/mission flavor remain deferred.
 void NovaAi_UpdateShipState(GameState &state,
                             Ship &ship,
                             std::uint32_t now_ms) {
@@ -589,9 +1077,10 @@ void NovaAi_UpdateShipState(GameState &state,
     ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
     const auto *cls =
         scn->Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    const float base_turn = cls ? cls->turn_rate : 0.0F;
-    const std::int16_t range = static_cast<std::int16_t>(
-        std::max(100, static_cast<int>((kTurnRadiusBase - base_turn) * 80.0F)));
+    const float base_turn = cls ? cls->turn_rate * 0.1F : 0.0F;
+    const std::int16_t range = static_cast<std::int16_t>(std::max(
+        100,
+        static_cast<int>((kTurnRadiusBase - base_turn) * kTurnRadiusScale50)));
     const Ship &tgt =
         state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
     if (std::abs(ship.pos_x - tgt.pos_x) > range ||
@@ -695,9 +1184,9 @@ void NovaAi_UpdateShipState(GameState &state,
     ship.ai_secondary_target_slot = ship.primary_target_ship_slot;
     const auto *cls =
         scn->Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    const float base_turn = cls ? cls->turn_rate : 0.0F;
+    const float base_turn = cls ? cls->turn_rate * 0.1F : 0.0F;
     const std::int16_t range = static_cast<std::int16_t>(
-        (kTurnRadiusBase - base_turn) * kTurnRadiusScale50 + 16.0F);
+        (kTurnRadiusBase - base_turn) * kTurnRadiusScale50 + 50.0F);
     const Ship &tgt =
         state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
     // Gravity-shield ships scale the keeping range up (they drift at a larger
@@ -740,12 +1229,183 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // Everything else (states 3/4/0xc/0xd attack/engagement) writes the neutral
-  // "idle" control mode until the disable/weapon systems (Phase 5) let us
-  // exercise those branches faithfully. Concrete combat control modes (5/6/7/
-  // 0xe for attack/mutual-target chains) are TODO(decomp).
-  if (ship.ai_state_code == 0 || ship.ai_state_code == 3 ||
-      ship.ai_state_code == 4) {
+  // ---- Attack / engagement states (3/4). ----
+  if (ship.ai_state_code == 3 || ship.ai_state_code == 4) {
+    if (ship.primary_target_ship_slot == -1 ||
+        !state.SlotInRange(
+            static_cast<std::size_t>(ship.primary_target_ship_slot))) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      ship.ai_hostility_accumulator = 0;
+      return;
+    }
+    const Ship &target =
+        state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+    if (!target.is_active || NovaAiShip_IsDestroyed(target)) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      ship.ai_hostility_accumulator = 0;
+      return;
+    }
+
+    const float dx = std::abs(ship.pos_x - target.pos_x);
+    const float dy = std::abs(ship.pos_y - target.pos_y);
+    ship.ai_secondary_target_slot = ship.primary_target_ship_slot;
+    if (ship.ai_state_code == 3) {
+      if (ship.ai_station_hold_timer > 0.0F) {
+        if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <=
+            kCentreRangeSq) {
+          ship.ai_station_hold_timer = 0.0F;
+          ship.ai_control_mode = 3;
+        } else {
+          ship.ai_control_mode = 4;
+        }
+      } else if (dx < kCombatStationRange && dy < kCombatStationRange &&
+                 ship.ai_control_mode != 4) {
+        ship.ai_control_mode = 5;
+        if (ship.faction_or_government_id >= 0 &&
+            ship.ai_target_ship_slot != 0 &&
+            target.faction_or_government_id >= 0 &&
+            NovaGovernment_AreGovtsAllied(state.scenario,
+                                          ship.faction_or_government_id,
+                                          target.faction_or_government_id) &&
+            target.ai_target_ship_slot == 0) {
+          ship.ai_state_code = 0;
+          ship.ai_control_mode = 0;
+          ship.primary_target_ship_slot = -1;
+          return;
+        }
+      } else if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <=
+                     kCentreRangeSq ||
+                 !NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+        ship.ai_control_mode = 3;
+      } else if (std::abs(ship.vel_x) < kVerySlowSpeed &&
+                 std::abs(ship.vel_y) < kVerySlowSpeed) {
+        ship.ai_control_mode = 4;
+      } else {
+        ship.ai_control_mode = 1;
+      }
+    } else {
+      if (ship.reverse_speed_bias > 0.0F) {
+        ship.ai_state_code = 0;
+        ship.ai_control_mode = 0;
+        return;
+      }
+      if (ship.ai_target_ship_slot != -1 &&
+          ship.ai_target_ship_slot == ship.primary_target_ship_slot) {
+        ship.ai_state_code = 0;
+        ship.ai_control_mode = 0;
+        ship.primary_target_ship_slot = -1;
+        return;
+      }
+      if (dx > kCombatCloseRange || dy > kCombatCloseRange) {
+        if (NovaAiShip_CanInterceptCurrentPrimaryTarget(state, ship)) {
+          if (ship.ai_behavior_code < 3) {
+            ship.ai_state_code = 3;
+            ship.ai_control_mode = 5;
+          } else {
+            ship.ai_control_mode = 0xe;
+          }
+        } else if (ship.ai_control_mode != 0x11) {
+          ship.ai_control_mode = 7;
+        }
+      } else if (ship.ai_control_mode != 0x10) {
+        ship.ai_control_mode = 6;
+      }
+    }
+    return;
+  }
+
+  // ---- Assist/response combat approach (state 0xc). ----
+  if (ship.ai_state_code == 0xc) {
+    ship.ai_station_hold_timer = 0.0F;
+    ship.primary_target_ship_slot = -1;
+    ship.ai_secondary_target_slot = 0;
+    const Ship &player = state.player;
+    const auto *cls = ShipClassFor(state, ship);
+    const float turn = cls ? cls->turn_rate * 0.1F : 0.0F;
+    const float outer = (kTurnRadiusBase - turn) * kAssistTurnRadiusScale;
+    const float inner = (kTurnRadiusBase - turn) * kAssistInnerTurnRadiusScale;
+    const float dx = std::abs(ship.pos_x - player.pos_x);
+    const float dy = std::abs(ship.pos_y - player.pos_y);
+    if (state.player.ai_station_hold_timer > 0.0F) {
+      ship.ai_state_code = 0xb;
+    } else if (!NovaAiShip_CanApplyDisablePressureToTarget(state, ship)) {
+      ship.ai_control_mode = 1;
+    } else if (dx > outer || dy > outer) {
+      ship.ai_control_mode = (dx > inner || dy > inner) ? 9 : 0xb;
+    } else {
+      ship.ai_control_mode = 0xc;
+    }
+    return;
+  }
+
+  // ---- Boarding / disabled-target pursuit (state 0xd). ----
+  if (ship.ai_state_code == 0xd) {
+    ship.ai_station_hold_timer = 0.0F;
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    if (target_slot < 0 || ship.reverse_speed_bias > 0.0F ||
+        !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      return;
+    }
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    if (ship.ai_target_ship_slot != -1 &&
+        (target_slot == ship.ai_target_ship_slot ||
+         target.ai_target_ship_slot == ship.ai_target_ship_slot)) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      ship.primary_target_ship_slot = -1;
+      return;
+    }
+    if (!target.is_active || NovaAiShip_IsDestroyed(target)) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_hostility_accumulator = 0;
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      return;
+    }
+    ship.ai_secondary_target_slot = -1;
+    const float dx = std::abs(ship.pos_x - target.pos_x);
+    const float dy = std::abs(ship.pos_y - target.pos_y);
+    if (!NovaAiShip_IsFireRestricted(state, target)) {
+      if (dx > kCombatCloseRange || dy > kCombatCloseRange) {
+        if (NovaAiShip_CanInterceptCurrentPrimaryTarget(state, ship)) {
+          ship.ai_control_mode = ship.ai_behavior_code < 3 ? 5 : 0xe;
+        } else if (ship.ai_control_mode != 0x11) {
+          ship.ai_control_mode = 7;
+        }
+      } else if (ship.ai_control_mode != 0x10 && ship.ai_control_mode != 0x11) {
+        ship.ai_control_mode = 6;
+      }
+    } else if (target.escort_rehired_mark == 0 ||
+               ship.reverse_speed_bias > 0.0F) {
+      ship.ai_secondary_target_slot = target_slot;
+      const auto *cls = ShipClassFor(state, ship);
+      const float turn = cls ? cls->turn_rate * 0.1F : 0.0F;
+      float range = (kTurnRadiusBase - turn) * kAssistTurnRadiusScale;
+      if (cls != nullptr && NovaShip_HasGravityShield(ship, *cls)) {
+        range *= kShieldKeepMult;
+      }
+      if (dx > range || dy > range) {
+        ship.ai_control_mode =
+            (dx > range * 2.0F || dy > range * 2.0F) ? 9 : 0xb;
+      } else {
+        ship.ai_control_mode = 0xf;
+      }
+    } else {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      ship.primary_target_ship_slot = -1;
+      ship.ai_secondary_target_slot = -1;
+    }
+    return;
+  }
+
+  if (ship.ai_state_code == 0) {
     ship.ai_control_mode = 0;
     return;
   }
@@ -793,6 +1453,43 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     return std::remainder(static_cast<float>(ship.ai_desired_heading_deg) -
                               cur_deg,
                           kFullCircleDeg);
+  };
+
+  // Combat modes address either the primary target or the companion AI target
+  // slot. Keep this lookup local to the controls bridge so the state machine
+  // can continue to use the original slot fields without introducing a new
+  // target object abstraction.
+  auto target_position = [&](float &x, float &y) {
+    std::int16_t target_slot = ship.primary_target_ship_slot;
+    if (target_slot == -1) {
+      target_slot = ship.ai_secondary_target_slot;
+    }
+    if (target_slot < 0 ||
+        !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+      return false;
+    }
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    if (!target.is_active) {
+      return false;
+    }
+    x = target.pos_x;
+    y = target.pos_y;
+    return true;
+  };
+
+  auto steer_toward_target = [&](float alignment_gate, float desired_speed) {
+    float target_x = 0.0F;
+    float target_y = 0.0F;
+    if (!target_position(target_x, target_y)) {
+      return false;
+    }
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+        BearingDeg(ship.pos_x, ship.pos_y, target_x, target_y));
+    if (std::abs(heading_delta_deg()) < alignment_gate) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      ship.ai_desired_speed = desired_speed;
+    }
+    return true;
   };
 
   switch (ship.ai_control_mode) {
@@ -918,21 +1615,62 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     break;
 
   case 5:
+    // Pursue a primary/AI target and apply thrust once aligned within the
+    // original mode-5 turn-rate +20 degree window.
+    if (!steer_toward_target(eff_turn_deg + 20.0F, 0.0F)) {
+      ship.ai_desired_speed = 0.0F;
+    }
+    break;
+
   case 6:
+    // Combat pursuit / lead-in. Weapon aiming is deferred, but the original
+    // movement gate (turn-rate +15) still determines when thrust begins.
+    if (!steer_toward_target(eff_turn_deg + 15.0F, 0.0F)) {
+      ship.ai_desired_speed = 0.0F;
+    }
+    break;
+
   case 7:
+    // Strafe/formation approach: retain the wider turn-rate*4 alignment
+    // window used by the original before it selects a weapon bank.
+    if (!steer_toward_target(eff_turn_deg * 4.0F, 0.0F)) {
+      ship.ai_desired_speed = 0.0F;
+    }
+    break;
+
   case 8:
+    // Hold at the close pursuit radius. The original uses this mode for the
+    // final approach while weapon range/disable pressure is evaluated.
+    if (!steer_toward_target(eff_turn_deg + 1.0F, 0.0F)) {
+      ship.ai_desired_speed = 0.0F;
+    }
+    break;
+
   case 0xc:
-  case 0xe:
+    // Close assist/engagement mode. Keep the player/target bearing live while
+    // leaving the weapon-bank side effect to the later combat slice.
+    if (!steer_toward_target(eff_turn_deg + 1.0F, 0.0F)) {
+      ship.ai_desired_speed = 0.0F;
+    }
+    break;
+
   case 0xf:
+    // Disabled-target pursuit uses the same target bearing before its
+    // boarding/disable transition is available.
+    if (!steer_toward_target(eff_turn_deg + 1.0F, 0.0F)) {
+      ship.ai_desired_speed = 0.0F;
+    }
+    break;
+
+  case 0xe:
   case 0x10:
   case 0x11:
   case 0x12:
   case 0x13:
   case 0x14:
   default:
-    // Combat/formation/capture modes: steer toward the current heading and
-    // cruise, so ships in these states still move fluidly rather than
-    // hanging. Faithful per-mode polynomials are TODO(decomp)/Phase 5.
+    // Formation/scripted modes remain stand-ins until their external target
+    // records are reconstructed. Preserve the previous heading/cadence.
     ship.ai_desired_heading_deg =
         static_cast<std::int16_t>(WrapDeg(ship.heading / kDegToRad));
     ship.ai_desired_speed = max_speed;
@@ -956,6 +1694,10 @@ void NovaAi_UpdateShipAI(GameState &state,
 
   // Fire-restricted ships skip the heavy behavior selection this frame.
   const bool restricted = NovaAiShip_IsFireRestricted(state, ship);
+  // Ship_CanShipInterceptCurrentPrimaryTarget reads the ship-local weapon
+  // rows before the post-state auto-selector runs. Seed those rows once from
+  // the assigned class so the intercept walk sees NPC guided banks too.
+  EnsureNpcWeaponBanks(state, ship);
 
   // Auto-guard: a fire-restricted ship ignores the whole AI selection and just
   // holds its current state/controls; mirrors the original clearing the target
@@ -996,27 +1738,31 @@ void NovaAi_UpdateShipAI(GameState &state,
     if (behavior == 1) {
       NovaAi_UpdateBehavior0x01(state, ship, now_ms);
     } else if (behavior == 2) {
-      // Ship_UpdateShipAiBehavior0x02 (0x00402bd0): local "dude"/travel
-      // behavior. Reuses the wander supervisor as a faithful-ish stand-in:
-      // dude ships travel/wander and escalate hostility the same way. TODO:
-      // the player-taunt / govt-assistance flavor is deferred.
-      NovaAi_UpdateBehavior0x01(state, ship, now_ms);
+      NovaAi_UpdateBehavior0x02(state, ship, now_ms);
     } else if (behavior == 3) {
-      // Ship_UpdateShipAiBehavior0x03 / _CaptureVariant (0x00402e50/004038b0):
-      // hostile attack / capture. The disable/capture systems are Phase 5, so
-      // these default to the wander supervisor (they still pick travel targets
-      // when idle) with a DEBUG note. TODO(decomp): real aggression.
-      NovaAi_UpdateBehavior0x01(state, ship, now_ms);
+      // Ship_UpdateShipAiBehavior0x03 (0x00402e50) now has the hostile target
+      // acquisition/travel fallback. The capture variant (0x004038b0) still
+      // falls through this path because capture_power and the disabled-ship
+      // scan are not represented in ScenarioData yet.
+      NovaAi_UpdateBehavior0x03(state, ship, now_ms);
     } else if (behavior == 4) {
-      // Ship_UpdateShipAiCombatState (0x00403de0) -- Phase 5; wander stand-in.
-      NovaAi_UpdateBehavior0x01(state, ship, now_ms);
+      // Ship_UpdateShipAiCombatState (0x00403de0) -- the common combat
+      // supervisor is still deferred; preserve hostile ships already carrying
+      // a target, otherwise use the behavior-0x03 acquisition path.
+      if (ship.primary_target_ship_slot == -1) {
+        NovaAi_UpdateBehavior0x03(state, ship, now_ms);
+      }
     } else if (behavior > 4) {
-      // Ship_UpdateShipAssistResponseBehavior (0x004048a0) -- assist; the
-      // target-slot assist selection needs combat; wander stand-in.
-      NovaAi_UpdateBehavior0x01(state, ship, now_ms);
+      // Ship_UpdateShipAssistResponseBehavior (0x004048a0): mission/escort
+      // command decoding is not complete, but an existing AI target can still
+      // enter the state machine's assist path.
+      if (ship.ai_target_ship_slot != -1) {
+        ship.ai_state_code = 10;
+      }
+      NovaAi_UpdateBehavior0x02(state, ship, now_ms);
     } else {
-      // Ship_UpdateShipAiAvailabilityBehavior (0x00402980): class availability
-      // drives cargo/travel; wander stand-in.
+      // Ship_UpdateShipAiAvailabilityBehavior (0x00402980): availability
+      // driven cargo/scripted branches remain deferred.
       NovaAi_UpdateBehavior0x01(state, ship, now_ms);
     }
   }
@@ -1025,6 +1771,10 @@ void NovaAi_UpdateShipAI(GameState &state,
   // heavy block even when bVar6 skipped the heavy decision).
   NovaAi_UpdateShipState(state, ship, now_ms);
   NovaAi_ApplyControls(state, ship, 0.0F);
+  // Ship_UpdateAutoWeaponSelectionFromTarget (0x00411540) is a post-state
+  // refresh. It must run after ApplyControls because that bridge clears the
+  // per-frame fire latch before the bank chooser arms it.
+  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
 }
 
 // ---------------------------------------------------------------------------
@@ -1096,6 +1846,9 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
   if (!ship.is_active || NovaAiShip_IsFireRestricted(state, ship)) {
     return false;
   }
+  // The original admits an unset (-1) AI target here; it specifically rejects
+  // the player slot 0 because that path is handled by the primary-target and
+  // mutual-target checks below.
   if (ship.ai_target_ship_slot == 0 || ship.primary_target_ship_slot == -1) {
     return false;
   }

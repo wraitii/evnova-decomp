@@ -58,8 +58,8 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
   // Outfit_SwapPlayerShipWithEscort, then calls
   // Weapon_ReconcileOutfitPoolWithWeaponBanks to register the mounted stock
   // guns as owned outfits.
-  const ShipClass *ship = state.scenario.Ship(
-      static_cast<std::int16_t>(ship_class_id + 0x80));
+  const ShipClass *ship =
+      state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80));
   if (ship == nullptr) {
     return;
   }
@@ -138,16 +138,15 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
   }
 
   const auto &outfits = state.scenario.outfits;
-  for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
-                      i < outfits.size();
+  for (std::size_t i = 0;
+       i < state.inventory.outfit_owned_count.size() && i < outfits.size();
        ++i) {
     const std::int16_t owned = state.inventory.outfit_owned_count[i];
     if (owned <= 0) {
       continue;
     }
     const Outfit &o = outfits[i];
-    const auto consume = [](std::int16_t &balance,
-                            std::int16_t &owned_count) {
+    const auto consume = [](std::int16_t &balance, std::int16_t &owned_count) {
       if (owned_count < balance) {
         balance = static_cast<std::int16_t>(balance - owned_count);
       } else {
@@ -160,8 +159,7 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
       consume(bank_ammo[o.mod_val], state.inventory.outfit_owned_count[i]);
     } else if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo) &&
                o.mod_val >= 0 && o.mod_val < 0x100) {
-      consume(bank_secondary[o.mod_val],
-              state.inventory.outfit_owned_count[i]);
+      consume(bank_secondary[o.mod_val], state.inventory.outfit_owned_count[i]);
     }
   }
   for (std::int16_t &count : state.inventory.outfit_owned_count) {
@@ -175,8 +173,8 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
   bool materialized = false;
   for (std::int16_t b = 0; b < 0x100; ++b) {
     if (bank_ammo[b] > 0) {
-      for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
-                          i < outfits.size();
+      for (std::size_t i = 0;
+           i < state.inventory.outfit_owned_count.size() && i < outfits.size();
            ++i) {
         const Outfit &o = outfits[i];
         if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kWeapon) &&
@@ -190,8 +188,8 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
       }
     }
     if (bank_secondary[b] > 0) {
-      for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
-                          i < outfits.size();
+      for (std::size_t i = 0;
+           i < state.inventory.outfit_owned_count.size() && i < outfits.size();
            ++i) {
         const Outfit &o = outfits[i];
         if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo) &&
@@ -236,12 +234,109 @@ bool NovaWeapon_CanFireBank(const GameState &state, std::int16_t weapon_bank) {
   return true;
 }
 
+int NovaWeapon_SpawnProjectile(GameState &state,
+                               std::int16_t owner_ship_slot,
+                               std::int16_t target_ship_slot,
+                               std::int16_t weapon_id,
+                               bool spawn_without_owner,
+                               bool apply_random_spread) {
+  if (weapon_id < 0 || weapon_id >= 0x100) {
+    return -1;
+  }
+  const Weapon *w = WeaponAt(state, weapon_id);
+  if (w == nullptr) {
+    return -1;
+  }
+
+  const bool owner_in_range =
+      owner_ship_slot >= 0 &&
+      owner_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips);
+  if (!spawn_without_owner && !owner_in_range) {
+    return -1;
+  }
+
+  ActiveShot shot;
+  shot.weapon_id = weapon_id;
+  shot.owner_ship_slot = spawn_without_owner ? -1 : owner_ship_slot;
+  shot.target_ship_slot = target_ship_slot;
+  shot.system_id = owner_in_range
+                       ? state.ShipAt(static_cast<std::size_t>(owner_ship_slot))
+                             .current_system_id
+                       : state.player.current_system_id;
+
+  float heading = 0.0F;
+  if (owner_in_range) {
+    const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+    shot.pos_x = owner.pos_x;
+    shot.pos_y = owner.pos_y;
+    heading = owner.heading;
+
+    // The player sh\x8an descriptor supplies the four-barrel muzzle geometry.
+    // NPC muzzle descriptors are not represented yet, so their projectiles
+    // fall back to the hull origin until that data is decoded.
+    const int turret_group = static_cast<int>(w->turret_group_id);
+    if (owner_ship_slot == 0 && owner.muzzle_ready && turret_group >= 0 &&
+        turret_group < 4) {
+      auto &quadrant = state.player.muzzle_quadrant[turret_group];
+      if (quadrant < 0 || quadrant > 3) {
+        quadrant = static_cast<std::int8_t>(
+            std::uniform_int_distribution<int>{0, 3}(state.rng));
+      }
+      const int q = quadrant;
+      const float forward =
+          static_cast<float>(owner.muzzle_forward[turret_group][q]);
+      const float lateral =
+          static_cast<float>(owner.muzzle_lateral[turret_group][q]);
+      const float drop = static_cast<float>(owner.muzzle_drop[turret_group][q]);
+      const float sin_heading = std::sin(heading);
+      const float cos_heading = std::cos(heading);
+      shot.pos_x += (sin_heading * forward + cos_heading * lateral) *
+                    owner.muzzle_scale_x;
+      shot.pos_y += (-cos_heading * forward + sin_heading * lateral) *
+                        owner.muzzle_scale_y -
+                    drop;
+      quadrant = static_cast<std::int8_t>((q + 1) & 3);
+    }
+  }
+
+  // The original jitters the firing bearing by the weapon's spread field.
+  // Full turret/lead rules remain deferred, but the signed angular spread is
+  // preserved for the basic straight-flight path.
+  if (apply_random_spread && w->inaccuracy > 0 && w->weapon_mode_code != 5) {
+    const int spread = std::uniform_int_distribution<int>{
+        -static_cast<int>(w->inaccuracy),
+        static_cast<int>(w->inaccuracy)}(state.rng);
+    heading += static_cast<float>(spread) * (3.14159265358979323846F / 180.0F);
+  }
+
+  const float speed = static_cast<float>(w->projectile_speed) / 100.0F;
+  if (owner_in_range) {
+    const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+    shot.vel_x = std::sin(heading) * speed + owner.vel_x;
+    shot.vel_y = -std::cos(heading) * speed + owner.vel_y;
+  } else {
+    shot.vel_x = std::sin(heading) * speed;
+    shot.vel_y = -std::cos(heading) * speed;
+  }
+
+  shot.life_ticks_remaining =
+      std::max(1.0F, static_cast<float>(w->lifetime_ticks));
+  shot.life_frames = static_cast<int>(std::ceil(shot.life_ticks_remaining));
+  shot.collision_radius_px = 2.0F;
+  // Weapon_GetShotImpactVariant (0x0046c2f0): Flags2 bit 0x1000 makes a
+  // weapon disable but not destroy. Shot_ResolveShipHitFromWeapon preserves
+  // one armor point for that variant.
+  shot.impact_variant =
+      (w->flags_secondary & 0x1000U) != 0U ? static_cast<std::int8_t>(1) : 0;
+  state.active_shots.push_back(shot);
+  return static_cast<int>(state.active_shots.size() - 1);
+}
+
 void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      std::int16_t weapon_bank) {
   if (weapon_bank < 0 || weapon_bank >= 0x100) {
     return;
   }
-  PlayerShip &ship = state.player;
   const Weapon *w = WeaponAt(state, weapon_bank);
   if (!w || state.weapon_bank_cooldown[weapon_bank] > 0.0F) {
     return; // unmounted bank, or still cooling down this frame
@@ -259,52 +354,20 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
     return;
   }
 
-  ActiveShot shot;
-  shot.weapon_id = weapon_bank;
-  // World position starts at the ship centre, then is offset to the barrel of
-  // the weapon's turret group (Ghidra Weapon_ApplyTurretSpreadVelocity
-  // 0x0046c5c0 via Weapon_SelectTurretQuadrant 0x0046c320). This is what makes
-  // the Light Blaster (and other gun/turret weapons) visibly fire from the
-  // ship's nose instead of dead-centre; without the offset the projectile would
-  // always appear to launch from the exact middle of the hull.
-  shot.pos_x = ship.pos_x;
-  shot.pos_y = ship.pos_y;
-  const int turret_group = static_cast<int>(w->turret_group_id);
-  if (state.player.muzzle_ready && turret_group >= 0 && turret_group < 4) {
-    // Pick the next barrel (quadrant) for this group, cycling 0..3 as the
-    // ship fires; -1 means no barrel has been chosen yet, so the first shot
-    // picks a random one (Weapon_SelectTurretQuadrant).
-    auto &quadrant = state.player.muzzle_quadrant[turret_group];
-    if (quadrant < 0 || quadrant > 3) {
-      quadrant = static_cast<std::int8_t>(
-          std::uniform_int_distribution<int>{0, 3}(state.rng));
-    }
-    const int q = quadrant;
-    // Muzzle offset (reference):
-    //   el.x = sin(heading)*F + cos(heading)*L   (F forward, L lateral
-    //          from Math_AddPolarVelocity at bearing+90deg)
-    //   el.y = -cos(heading)*F + sin(heading)*L
-    //   pos += (el.x * scale_x, el.y * scale_y - drop)
-    const float F = static_cast<float>(state.player.muzzle_forward[turret_group][q]);
-    const float L = static_cast<float>(state.player.muzzle_lateral[turret_group][q]);
-    const float drop = static_cast<float>(state.player.muzzle_drop[turret_group][q]);
-    const float sin_h = std::sin(ship.heading);
-    const float cos_h = std::cos(ship.heading);
-    shot.pos_x += (sin_h * F + cos_h * L) * state.player.muzzle_scale_x;
-    shot.pos_y +=
-        (-cos_h * F + sin_h * L) * state.player.muzzle_scale_y - drop;
-    // Advance to the next barrel for this group on the following shot.
-    quadrant = static_cast<std::int8_t>((q + 1) & 3);
+  // Weapon_FirePlayerWeaponBank passes the selected primary target through to
+  // Shot_SpawnShotFromWeapon, including for the straight projectile modes.
+  // Keeping that context on the shared record is important for mode-1
+  // target-only collision eligibility.
+  const int shot_slot =
+      NovaWeapon_SpawnProjectile(state,
+                                 0,
+                                 state.player.primary_target_ship_slot,
+                                 weapon_bank,
+                                 /*spawn_without_owner=*/false,
+                                 /*apply_random_spread=*/false);
+  if (shot_slot < 0) {
+    return;
   }
-  // Velocity = heading-projected projectile speed + the ship's own velocity
-  // (Math_AddPolarVelocity convention: heading 0 = up/-y, vel=(sin,-cos)*s).
-  // WeaponDef.Speed is stored as pixels/frame * 100 (see scenario_data.hpp).
-  const float spd = static_cast<float>(w->projectile_speed) / 100.0F;
-  shot.vel_x = std::sin(ship.heading) * spd + ship.vel_x;
-  shot.vel_y = -std::cos(ship.heading) * spd + ship.vel_y;
-  shot.life_frames = std::max(1, static_cast<int>(w->lifetime_ticks));
-  state.active_shots.push_back(shot);
-
   // A round actually spawned: mirror Weapon_FirePlayerWeaponBank's
   // `volley_fired > 0` gate and queue this weapon's fire sound (slot, not
   // resource id) for the spaceflight loop to play through the cached sound.
@@ -377,28 +440,39 @@ void NovaWeapon_StepShotAnimation(GameState &state,
   // side; DrawShots owns that clamp once the set is resolved.
 }
 
-void NovaWeapon_TickShots(GameState &state, float frame_time_ms) {
+void NovaWeapon_TickShots(GameState &state,
+                          float frame_time_ms,
+                          float elapsed_ticks) {
   // Advance shots by velocity and lifetime; drop expired rounds. Also step the
   // time-animated shot-frame cycle (Shot_HandleShot animated branch) for
   // weapons that use it; static/heading shot sets are untouched.
   auto &shots = state.active_shots;
+  const float tick_scale = std::max(0.0F, elapsed_ticks);
   for (auto &shot : shots) {
-    shot.pos_x += shot.vel_x;
-    shot.pos_y += shot.vel_y;
-    if (shot.life_frames > 0) {
-      --shot.life_frames;
+    if (shot.consumed) {
+      continue;
     }
+    shot.pos_x += shot.vel_x * tick_scale;
+    shot.pos_y += shot.vel_y * tick_scale;
+    if (shot.life_ticks_remaining <= 0.0F) {
+      shot.life_ticks_remaining = static_cast<float>(shot.life_frames);
+    }
+    shot.life_ticks_remaining -= tick_scale;
+    shot.life_frames =
+        static_cast<int>(std::ceil(std::max(0.0F, shot.life_ticks_remaining)));
     NovaWeapon_StepShotAnimation(state, shot, frame_time_ms);
   }
-  shots.erase(
-      std::remove_if(shots.begin(),
-                     shots.end(),
-                     [](const ActiveShot &s) { return s.life_frames <= 0; }),
-      shots.end());
+  shots.erase(std::remove_if(shots.begin(),
+                             shots.end(),
+                             [](const ActiveShot &s) {
+                               return s.consumed ||
+                                      s.life_ticks_remaining <= 0.0F;
+                             }),
+              shots.end());
   // Count every weapon-bank cooldown down toward zero.
   for (float &cd : state.weapon_bank_cooldown) {
     if (cd > 0.0F) {
-      --cd;
+      cd = std::max(0.0F, cd - tick_scale);
     }
   }
 }
@@ -436,8 +510,7 @@ std::int16_t NovaWeapon_BankAmmoCount(const GameState &state,
       (w->ammo_type < 0 || w->ammo_type > 0xff || w->weapon_mode_code == 99)
           ? weapon_bank
           : w->ammo_type;
-  return std::min<std::int16_t>(
-      BankSecondary(state, source_bank), 9999);
+  return std::min<std::int16_t>(BankSecondary(state, source_bank), 9999);
 }
 
 void NovaWeapon_PreloadFireSound(GameState &state,

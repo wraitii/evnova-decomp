@@ -13,7 +13,9 @@
 namespace {
 
 using game::GameState;
+using game::NovaAi_FindBestAssistTargetForShip;
 using game::NovaAi_UpdateShipAI;
+using game::NovaAiShip_CanInterceptCurrentPrimaryTarget;
 using game::NovaShip_AllocateShipSlot;
 using game::NovaTargeting_UpdateStellarAvailability;
 
@@ -113,6 +115,179 @@ TEST_CASE("behavior-0x01 spawn wanders to a travel stellar when idle") {
       CHECK(ship.ai_forward_thrust_cmd != 0.0F);
     }
   }
+}
+
+TEST_CASE("behavior-0x02 promotes an established hostile contact") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.ai_behavior_code = 2;
+  ship.ai_state_code = 0;
+  ship.ai_hostility_accumulator = 1;
+  // This is a hostile contact, not an escort target. Ghidra's state-4 branch
+  // intentionally clears a primary target when the two slots are identical.
+  ship.ai_target_ship_slot = -1;
+  ship.primary_target_ship_slot = 0;
+  ship.pos_x = 100.0F;
+  ship.pos_y = 0.0F;
+  ship.armor_points = 30.0F;
+
+  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+
+  CHECK(ship.ai_state_code == 4);
+  CHECK(ship.primary_target_ship_slot == 0);
+  CHECK((ship.ai_control_mode == 5 || ship.ai_control_mode == 6));
+}
+
+TEST_CASE("behavior-0x03 acquires a hostile player and pursues") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 0;
+  ship.ai_hostility_accumulator = 1;
+  ship.primary_target_ship_slot = -1;
+  ship.pos_x = 100.0F;
+  ship.pos_y = 0.0F;
+  ship.armor_points = 30.0F;
+
+  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+
+  CHECK(ship.primary_target_ship_slot == 0);
+  CHECK(ship.ai_state_code == 4);
+  CHECK(ship.ai_control_mode == 6);
+  CHECK(ship.ai_desired_heading_deg != 0);
+}
+
+TEST_CASE(
+    "intercept helper follows the relative-velocity and class-speed gates") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+
+  std::int16_t attacker_class = -1;
+  std::int16_t faster_target_class = -1;
+  for (std::size_t i = 0; i < state.scenario.ships.size(); ++i) {
+    const auto &candidate = state.scenario.ships[i];
+    if (candidate.mass_tons >= 100 && attacker_class == -1) {
+      attacker_class = static_cast<std::int16_t>(i);
+    }
+    if (candidate.mass_tons >= 100 && attacker_class != -1 &&
+        candidate.speed >
+            state.scenario.ships[static_cast<std::size_t>(attacker_class)]
+                .speed) {
+      faster_target_class = static_cast<std::int16_t>(i);
+      break;
+    }
+  }
+  REQUIRE(attacker_class >= 0);
+  REQUIRE(faster_target_class >= 0);
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &attacker = state.ShipAt(static_cast<std::size_t>(slot));
+  attacker.ship_class_id = attacker_class;
+  attacker.ship_instance_id = static_cast<std::int16_t>(slot);
+  attacker.current_system_id = static_cast<std::int16_t>(sys_idx);
+  attacker.primary_target_ship_slot = 0;
+  attacker.is_active = true;
+  attacker.armor_points = 100.0F;
+  attacker.pos_x = 100.0F;
+  attacker.pos_y = 0.0F;
+  attacker.vel_x = 0.0F;
+  attacker.vel_y = 0.0F;
+
+  state.player.ship_class_id = faster_target_class;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.player.vel_x = 0.0F;
+  state.player.vel_y = -10.0F;
+  state.player.armor_points = 100.0F;
+
+  CHECK(NovaAiShip_CanInterceptCurrentPrimaryTarget(state, attacker));
+  state.player.vel_y = 0.0F;
+  CHECK_FALSE(NovaAiShip_CanInterceptCurrentPrimaryTarget(state, attacker));
+}
+
+TEST_CASE("assist helper chooses the lowest positive candidate score") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.armor_points = 100.0F;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+
+  const int helper_slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  const int candidate_slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(helper_slot > 0);
+  REQUIRE(candidate_slot > helper_slot);
+  game::Ship &helper = state.ShipAt(static_cast<std::size_t>(helper_slot));
+  game::Ship &candidate =
+      state.ShipAt(static_cast<std::size_t>(candidate_slot));
+  helper.is_active = true;
+  helper.armor_points = 100.0F;
+  helper.ai_target_ship_slot = 0;
+  helper.primary_target_ship_slot = 0;
+  helper.pos_x = 500.0F;
+  helper.pos_y = 0.0F;
+  candidate.is_active = true;
+  candidate.armor_points = 100.0F;
+  candidate.ai_target_ship_slot = 1;
+  candidate.primary_target_ship_slot = 0;
+  candidate.pos_x = 100.0F;
+  candidate.pos_y = 0.0F;
+
+  CHECK(NovaAi_FindBestAssistTargetForShip(state, helper, -1) ==
+        candidate_slot);
 }
 
 // A fire-restricted (derelict-government) ship must NOT engage the heavy AI:

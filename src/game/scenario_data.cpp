@@ -5,6 +5,7 @@
 #include "ship_visual.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -89,14 +90,17 @@ namespace {
   w.guidance_mode = ReadBeI16(bytes, 0x08);
   w.weapon_mode_code = w.guidance_mode;
   w.projectile_speed = static_cast<float>(ReadBeI16(bytes, 0x0a));
+  w.range_scalar = std::bit_cast<float>(ReadBe32(bytes, 0x34));
   w.ammo_type = ReadBeI16(bytes, 0x0c);
   w.sprite_id = ReadBeI16(bytes, 0x0e);
   w.inaccuracy = ReadBeI16(bytes, 0x10);
   w.fire_sound = ReadBeI16(bytes, 0x12);
-  w.impact_sound_slot = ReadBeI16(bytes, 0x14);
+  w.impact_impulse = ReadBeI16(bytes, 0x14);
   w.impact_effect_id = ReadBeI16(bytes, 0x16);
   w.blast_radius = ReadBeI16(bytes, 0x18);
   w.splash_radius = ReadBeI16(bytes, 0x1a);
+  w.ionization_points = ReadBeI16(bytes, 0x4a);
+  w.ionization_color = ReadBe32(bytes, 0x72) & 0x00ffffffU;
   w.flags = ReadBe16(bytes, 0x1c); // flags_primary
   w.flags_quaternary = ReadBe16(bytes, 0x1e);
   w.flags_secondary = ReadBe16(bytes, 0x48);
@@ -839,8 +843,7 @@ bool ScenarioData::LoadFromArchives() {
       cls.pict_fallback_sprite_resource_id =
           NovaResource_Load(kResourceTypePict, own_portrait)
               ? own_portrait
-              : static_cast<std::uint16_t>(cls.clone_source_ship_class +
-                                           5000);
+              : static_cast<std::uint16_t>(cls.clone_source_ship_class + 5000);
       ships[index] = std::move(cls);
       ++loaded_ships;
     }

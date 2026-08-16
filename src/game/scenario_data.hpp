@@ -295,16 +295,28 @@ struct Weapon {
   std::int16_t weapon_mode_code = 0; // (runtime alias of Guidance)
   float projectile_speed = 0.0F;     // Speed_a, raw (pixels/frame * 100);
                                      // divide by 100 for px/frame.
-  std::int16_t ammo_type = -1;       // AmmoType_c (ammo_or_energy_cost_code)
+  // Range scalar used by the AI's intercept/range predicates (WeaponDef
+  // range_scalar, in-memory field_0x5c). Zero means that the source weapon
+  // carries no usable range value.
+  float range_scalar = 0.0F;
+  std::int16_t ammo_type = -1; // AmmoType_c (ammo_or_energy_cost_code)
 
   std::int16_t sprite_id = 0;   // Graphic_e (shot_sprite_set_id)
   std::int16_t inaccuracy = 0;  // Inaccuracy10 (shot_random_spread)
   std::int16_t fire_sound = -1; // Sound12 (fire_sound_slot)
 
-  std::int16_t impact_sound_slot = -1; // Impact14
+  // Impact14: impulse applied to the struck ship, not an audio resource. The
+  // Ghidra runtime field is still provisionally named `impact_sound_slot`.
+  std::int16_t impact_impulse = 0;
   std::int16_t impact_effect_id = -1;  // ExplodType16
   std::int16_t blast_radius = 0;       // ProxRadius18
   std::int16_t splash_radius = 0;      // BlastRadius1a
+
+  // Ionization (+0x4a) is accumulated on ShipState.status_effect_points when
+  // this weapon hits. IonizeColor (+0x72) is retained as packed RGB for the
+  // later ship-tint/status renderer.
+  std::int16_t ionization_points = 0;
+  std::uint32_t ionization_color = 0;
 
   std::uint16_t flags = 0;            // Flags1c (flags_primary)
   std::uint16_t flags_quaternary = 0; // Seeker1e (flags_quaternary)

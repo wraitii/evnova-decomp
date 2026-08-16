@@ -61,7 +61,7 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   // in Bible order and the tail per its WeaponDef mapping.
   CHECK(w->inaccuracy == 9); // shot_random_spread
   CHECK(w->fire_sound == 8);
-  CHECK(w->impact_sound_slot == 10); // was mislabeled 'impact' but same offset
+  CHECK(w->impact_impulse == 10); // Impact is the ship impulse, not a sound slot
   CHECK(w->impact_effect_id == -1);  // was 'explosion'
   CHECK(w->blast_radius == 5);       // was 'prox_radius'
   CHECK(w->splash_radius == 6);      // was 'blast_radius'
