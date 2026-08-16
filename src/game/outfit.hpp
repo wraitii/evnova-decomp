@@ -140,17 +140,30 @@ Outfit_ComputeRemainingCargoSpace(const GameState &state);
 [[nodiscard]] bool Outfit_HasOwnedEffect(const GameState &state,
                                          OutfitEffect effect);
 
-// Ghidra 0x00464b50 Outfit_HasDisableOutfit. True when the player inventory
-// or an NPC ship-class default loadout contains the ModType 0x11 disable
-// outfit. The NPC special escort-target arm is included by the AI predicate,
-// where the target relationship is available.
-[[nodiscard]] bool NovaOutfit_HasDisableOutfit(const GameState &state,
+// Ghidra 0x00464b50 Outfit_HasCloakingDevice. True when the player inventory
+// or an NPC ship-class default loadout contains ModType 17 (cloaking device).
+// NPCs also include the original control-mode-0xc escort-target exception
+// involving an area-cloak device.
+[[nodiscard]] bool NovaOutfit_HasCloakingDevice(const GameState &state,
                                                const Ship &ship);
 
-// Ghidra 0x00464c80 Outfit_HasPersistentDisableOutfit. Same loadout scan, but
-// requires the disable outfit's Flags bit 0x1000.
-[[nodiscard]] bool NovaOutfit_HasPersistentDisableOutfit(const GameState &state,
-                                                         const Ship &ship);
+// Ghidra 0x00464c80 Outfit_HasAreaCloakingDevice. Same loadout scan, but
+// requires ModType 17 ModVal bit 0x1000 (area cloak).
+[[nodiscard]] bool NovaOutfit_HasAreaCloakingDevice(const GameState &state,
+                                                    const Ship &ship);
+
+// Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags and 0x00465090
+// Outfit_GetCloakShieldDrainFlags. These return the ModType 17 fuel/shield
+// drain flag nibbles consulted by Ship_UpdateShipCloakStateFromTraits.
+[[nodiscard]] std::int16_t NovaOutfit_GetCloakFuelDrainFlags(
+    const GameState &state, const Ship &ship);
+[[nodiscard]] std::int16_t NovaOutfit_GetCloakShieldDrainFlags(
+    const GameState &state, const Ship &ship);
+
+// Ghidra 0x00464e30 Outfit_HasCloakShieldDropOnActivation. ModType 17
+// ModVal bit 0x0004 forces shields to zero when cloaking activates.
+[[nodiscard]] bool NovaOutfit_HasCloakShieldDropOnActivation(
+    const GameState &state, const Ship &ship);
 
 // Mirrors Ship_GetShipFuelBurnRate (0x0046e060) for the player: the last
 // owned outfit encountered with opcode 15 supplies ModVal / 30 fuel per

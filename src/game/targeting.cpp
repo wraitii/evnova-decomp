@@ -17,7 +17,7 @@ namespace game {
 // any owned outfit whose primary or alternate mod type is 0x1e (kCloakScanner)
 // and whose mod value has bit 0x04 grants targeting of "untargetable" ships
 // (class flags_secondary bit 2), bit 0x08 grants targeting through the
-// disable-threshold gate. The original memoizes the result in the tri-state
+// cloak-visibility gate. The original memoizes the result in the tri-state
 // caches g_player_has_cloak_scanner_target_untargetable_cached (DAT_007356be)
 // / _cloaked_cached (DAT_007356c0); this build rescans the 0x200-entry owned
 // table on demand because the calls happen once per targeting command press,
@@ -59,19 +59,20 @@ ScannerCapabilities(const GameState &state) {
 }
 
 // ---------------------------------------------------------------------------
-// Ship_CheckShipDisableThresholdState (0x0046c7a0).
+// Ship_IsShipCloakVisibilityThresholdActive (0x0046c7a0).
 // ---------------------------------------------------------------------------
-bool NovaTargeting_ShipAtDisableThreshold(const Ship &ship) {
-  const float progress = ship.disable_threshold_progress;
-  if (progress > 24.0F && ship.disable_state_latch >= 0) {
+bool NovaTargeting_ShipAtCloakVisibilityThreshold(const Ship &ship) {
+  constexpr float kEnteringCloakThreshold = 24.0F; // g_cloak_visibility_enter_threshold
+  constexpr float kClearingCloakThreshold = 8.0F;  // g_cloak_visibility_clear_threshold
+  constexpr float kBaselineThreshold = 16.0F;      // g_cloak_visibility_baseline_threshold
+  const float progress = ship.cloak_fade_progress;
+  if (progress > kEnteringCloakThreshold && ship.cloak_transition_latch >= 0) {
     return true;
   }
-  if (progress > 8.0F && ship.disable_state_latch < 0) {
+  if (progress > kClearingCloakThreshold && ship.cloak_transition_latch < 0) {
     return true;
   }
-  // The original returns 1 (disabled) when progress is above 16.0 and 0x100
-  // (low byte 0 = not disabled) otherwise; callers test the low byte.
-  return progress > 16.0F;
+  return progress > kBaselineThreshold;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +186,7 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
 }
 
 // Shared candidate test for the cycle search loops. Mirrors the filter chain
-// of Ship_FindNextPlayerCycleTarget: active, not destroyed, disable-threshold
+// of Ship_FindNextPlayerCycleTarget: active, not destroyed, cloak-visibility
 // gate (cloak scanner or combat-relevant while the include-combat modifier is
 // held), same system, not AI state 0x15, untargetable class gate (scanner
 // outfit), and the relevance-vs-modifier equality (`relevant == include_combat`
@@ -202,7 +203,7 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
     return false;
   }
   const bool is_relevant = relevant[static_cast<std::size_t>(slot)];
-  if (NovaTargeting_ShipAtDisableThreshold(ship) &&
+  if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship) &&
       !scanner.can_target_cloaked && !(is_relevant && include_combat)) {
     return false;
   }
@@ -288,8 +289,8 @@ std::int16_t NovaTargeting_FindPreviousPlayerCycleTarget(
 // (0x00462bd0).
 // ---------------------------------------------------------------------------
 // Shared "nearest target" candidate core for the two player scans: active,
-// not destroyed, not fire-restricted (hostile scan only), below the disable
-// threshold (or cloak scanner), in the player's system, not in AI state 0x15
+// not destroyed, not fire-restricted (hostile scan only), visible through the
+// cloak gate (or cloak scanner), in the player's system, not in AI state 0x15
 // (engaged scan only), not class-untargetable (or scanner), and NOT already
 // locked onto the player (ai_target_ship_slot != 0).
 [[nodiscard]] bool ShipIsNearestScanEligible(
@@ -307,7 +308,7 @@ std::int16_t NovaTargeting_FindPreviousPlayerCycleTarget(
       NovaAiShip_IsFireRestricted(state, ship)) {
     return false;
   }
-  if (NovaTargeting_ShipAtDisableThreshold(ship) &&
+  if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship) &&
       !scanner.can_target_cloaked) {
     return false;
   }

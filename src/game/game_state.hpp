@@ -104,6 +104,9 @@ struct Ship {
   // and formation positioning timing.
   std::uint32_t ai_mode_start_time_ms = 0; // +0xA4
   // AI turn-bias direction (-1/0/+1) used by ships that bank/lean into turns.
+  // Ghidra names the source phase at ShipState +0xC8E4
+  // `turn_bank_animation_phase`; the visual updater also reuses that phase for
+  // one sprite-behavior animation branch.
   std::int16_t ai_turn_bias_dir = 0; // +0xC8F8
   // Latch requesting this ship to fire its active weapon bank.
   std::int8_t ai_fire_trigger_latch = 0; // +0xBA
@@ -172,33 +175,31 @@ struct Ship {
   std::int16_t velocity_match_target_ship_slot = -1; // +0xC8DC
   std::int16_t jump_destination_stellar_id = -1;     // +0x92
   std::int16_t ai_hostility_accumulator = 0;         // +0x96
-  // Disable/surrender-pressure patience timer: counts down (by frame time)
-  // while the ship fails to gain disable pressure over its target; when it runs
-  // out the AI gives up and clears the primary target (Ship_UpdateShipAiState
-  // state 4). -1 = no patience pressure tracked (set by
-  // Ship_CanShipApplyDisablePressure- ToTarget 0x00464a90 on each successful
-  // check).
-  float target_disable_patience_timer = -1.0F; // +0xC90C
-  // Disable-threshold progress (Ghidra ShipState +0x64, provisional): grows
-  // while the ship takes disable pressure. Ship_CheckShipDisableThresholdState
-  // (0x0046c7a0) treats progress > 16.0 (or > 24.0 with disable_state_latch
-  // >= 0, > 8.0 with latch < 0) as "at/below the disable threshold", which
-  // makes the ship un-targetable without a cloak-scanner outfit. The disable/
-  // status-effect subsystem is not reconstructed yet, so this stays 0 and the
-  // gate passes (ships are cycleable).
-  float disable_threshold_progress = 0.0F; // +0x64
-  // Disable-state latch (Ghidra ShipState +0xC8D8, short): sign selects the
-  // disable-threshold boundary (24.0 vs 8.0) in Ship_CheckShipDisableThreshold-
-  // State. Written by the disable subsystem (Phase 5); 0 by default.
-  std::int16_t disable_state_latch = 0; // +0xC8D8
-  // Disable-pressure state used by Ship_CanShipApplyDisablePressureToTarget
-  // (+0xC91C). The disable subsystem writes 1 while this ship is actively
-  // applying pressure; the AI uses it as a close-range fallback when the
-  // attacker itself has crossed its disable threshold.
-  std::int16_t disable_pressure_state = 0; // +0xC91C
+  // Engagement patience timer while the cloak/targetability predicate rejects
+  // a target; when it expires the AI gives up and clears the primary target
+  // (Ship_UpdateShipAiState state 4). -1 means no patience interval active.
+  float target_engagement_patience_timer = -1.0F; // +0xC90C
+  // Cloak fade/visibility progress (Ghidra ShipState +0x64). The original
+  // visual updater integrates this over the 0..32 range; weapon hits do not
+  // produce it. Ship_IsShipCloakVisibilityThresholdActive (0x0046c7a0) uses
+  // it with the signed transition latch as a targetability gate.
+  float cloak_fade_progress = 0.0F; // +0x64
+  // Signed cloak transition state (Ghidra ShipState +0xC8D8): positive starts
+  // fading into cloak, negative starts fading out, and zero is stable.
+  std::int16_t cloak_transition_latch = 0; // +0xC8D8
+  // Per-ship cached cloak-scanner presentation capabilities. The original
+  // populates +0xC91C/+0xC91E from ModType 30 bits 0x0002/0x0001 (screen/radar)
+  // in Ship_UpdateVisualState (0x00428340).
+  std::int16_t cloak_scanner_reveal_screen = 0; // +0xC91C
+  std::int16_t cloak_scanner_reveal_radar = 0;  // +0xC91E
+  // Cached ModType 17 bit 0x0008: cloaking deactivates when the ship takes
+  // damage. The visual/state updater refreshes this latch lazily.
+  std::int16_t cloak_damage_deactivate_latch = 0; // +0xC920
   // Waypoint arrival marker pair used by ships carrying arrival markers (class
   // sprite_behavior_flags bit 1): waypoint_arrival_marker_a reflects a
   // completed arrival; marker_b counts/suppresses route restarts. -1 = none.
+  // Provisional: Ship_UpdateVisualState also reuses these two shorts as the
+  // control latch and cycle index for that same sprite-behavior animation.
   std::int16_t waypoint_arrival_marker_a = -1; // +0xC8FA (provisional offset)
   std::int16_t waypoint_arrival_marker_b = -1; // +0xC8FC (provisional offset)
 
@@ -218,7 +219,7 @@ struct Ship {
   std::int8_t escort_origin_mark = 0;   // +0xBB (Provisional)
   std::int8_t comm_interacted_mark = 0; // +0xBC (Provisional)
   // ShipState +0xC8DE post_hit_mode_hint: the AI's post-hit behavior hint
-  // (written by the ship-comm escort release and the disable subsystem).
+  // (written by the ship-comm escort release and post-hit state handling).
   std::int16_t post_hit_mode_hint = -1; // +0xC8DE
 
   // --- Misc ---

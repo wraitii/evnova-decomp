@@ -71,7 +71,7 @@ constexpr float kMode2CloseGatePx = 500.0F;
 constexpr float kMode2ArriveFraction = 0.25F;
 // Mode-3 (approach centre): alignment addend 3.0 (0x575120, float).
 constexpr float kMode3AlignAddend = 3.0F;
-// Engagement distance within which a ship can fire / apply disable pressure
+// Engagement distance within which a ship can fire on or engage a target
 // (0x5750b0, float).
 constexpr float kEngageDist = 165.0F;
 // Assist/response keep-distance thresholds.
@@ -183,6 +183,141 @@ bool NovaAiShip_IsFireRestricted(const GameState &state, const Ship &ship) {
     }
   }
   return false;
+}
+
+namespace {
+
+void BeginCloakTransition(GameState &state, Ship &ship) {
+  if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
+    return;
+  }
+  if (ship.cloak_fade_progress > 0.0F) {
+    if (ship.cloak_transition_latch < 0) {
+      ship.cloak_transition_latch = 0;
+    }
+  } else {
+    ship.cloak_transition_latch = 1;
+  }
+  if (ship.shield_points > 0.0F &&
+      NovaOutfit_HasCloakShieldDropOnActivation(state, ship)) {
+    ship.shield_points = 0.0F;
+  }
+}
+
+void ClearCloakTransition(Ship &ship) {
+  if (!NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
+    return;
+  }
+  if (ship.cloak_fade_progress > 0.0F) {
+    ship.cloak_transition_latch = -1;
+  } else if (ship.cloak_transition_latch > 0) {
+    ship.cloak_transition_latch = 0;
+  }
+}
+
+} // namespace
+
+// Ghidra 0x004680d0 Ship_OnShipCloakStateEntered.
+void NovaAi_OnShipCloakStateEntered(GameState &state, Ship &ship) {
+  BeginCloakTransition(state, ship);
+}
+
+// Ghidra 0x00468190 Ship_OnShipCloakStateCleared.
+void NovaAi_OnShipCloakStateCleared(Ship &ship) { ClearCloakTransition(ship); }
+
+// Ghidra 0x00411d00 Ship_UpdateShipCloakStateFromTraits.
+void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
+  constexpr float kCloakTargetDistance = 165.0F; // DAT_005750b0
+  if (!NovaOutfit_HasCloakingDevice(state, ship) ||
+      NovaAiShip_IsFireRestricted(state, ship)) {
+    if (ship.cloak_fade_progress > 0.0F) {
+      NovaAi_OnShipCloakStateCleared(ship);
+    }
+    return;
+  }
+  if (NovaOutfit_GetCloakFuelDrainFlags(state, ship) > 0 &&
+      ship.fuel_points <= 0.0F) {
+    NovaAi_OnShipCloakStateCleared(ship);
+    return;
+  }
+  if (NovaOutfit_GetCloakShieldDrainFlags(state, ship) > 0 &&
+      ship.shield_points <= 0.0F) {
+    NovaAi_OnShipCloakStateCleared(ship);
+    return;
+  }
+
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    NovaAi_OnShipCloakStateCleared(ship);
+    return;
+  }
+  bool should_enter = false;
+  const std::uint16_t flags = ship_class->flags_secondary;
+  if ((flags & 0x0100U) != 0U) {
+    for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+      const std::size_t bank_index = static_cast<std::size_t>(bank);
+      if (ship.npc_weapon_bank_ammo[bank_index] <= 0) {
+        continue;
+      }
+      const Weapon *weapon =
+          state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+      if (weapon != nullptr &&
+          static_cast<float>(weapon->reload_ticks) <
+              ship.npc_weapon_bank_cooldown[bank_index]) {
+        should_enter = true;
+        break;
+      }
+    }
+  }
+  if ((flags & 0x0200U) != 0U &&
+      (ship.ai_state_code == 3 ||
+       (ship.ai_state_code == 0x10 && ship.ai_control_mode == 0x13))) {
+    should_enter = true;
+  }
+  if ((flags & 0x0400U) != 0U &&
+      (ship.ai_control_mode == 4 || ship.ai_state_code == 8 ||
+       ship.ai_state_code == 0xb)) {
+    should_enter = true;
+  }
+  if ((flags & 0x0800U) != 0U &&
+      (ship.ai_state_code == 1 || ship.ai_state_code == 6 ||
+       ship.ai_state_code == 0x14 || ship.ai_state_code == 7 ||
+       ship.ai_state_code == 10)) {
+    should_enter = true;
+  }
+  if ((flags & 0x1000U) != 0U &&
+      NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
+    if (ship.ai_state_code == 4 && ship.primary_target_ship_slot >= 0 &&
+        state.SlotInRange(static_cast<std::size_t>(
+            ship.primary_target_ship_slot))) {
+      const Ship &target = state.ShipAt(static_cast<std::size_t>(
+          ship.primary_target_ship_slot));
+      should_enter = should_enter ||
+                     std::abs(ship.pos_x - target.pos_x) >
+                         kCloakTargetDistance ||
+                     std::abs(ship.pos_y - target.pos_y) > kCloakTargetDistance;
+    }
+    if (ship.ai_state_code == 0x10 && ship.ai_control_mode != 0x14) {
+      should_enter = true;
+    }
+  }
+  if ((flags & 0x2000U) != 0U && ship.ai_state_code == 0) {
+    should_enter = true;
+  }
+  if (ship.ai_behavior_code > 4 && ship.ai_target_ship_slot >= 0 &&
+      ship.ai_control_mode == 0xc &&
+      state.SlotInRange(static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+    const Ship &target =
+        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+    should_enter = should_enter ||
+                   NovaTargeting_ShipAtCloakVisibilityThreshold(target);
+  }
+  if (should_enter) {
+    NovaAi_OnShipCloakStateEntered(state, ship);
+  } else {
+    NovaAi_OnShipCloakStateCleared(ship);
+  }
 }
 
 namespace {
@@ -346,7 +481,7 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
         candidate.ai_target_ship_slot == ship.ai_target_ship_slot ||
         !candidate.is_active || candidate.ai_state_code == 0x15 ||
         NovaAiShip_IsDestroyed(candidate) ||
-        !NovaAiShip_CanApplyDisablePressureToTarget(state, ship, candidate)) {
+        !NovaAiShip_CanEngageTargetUnderCloakRules(state, ship, candidate)) {
       continue;
     }
     if (NovaAiShip_IsFireRestricted(state, candidate) &&
@@ -545,7 +680,7 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
         candidate.ai_state_code == 0x15 ||
         candidate.target_stellar_object_id != -1 ||
         NovaAiShip_IsFireRestricted(state, candidate) ||
-        NovaTargeting_ShipAtDisableThreshold(candidate)) {
+        NovaTargeting_ShipAtCloakVisibilityThreshold(candidate)) {
       continue;
     }
 
@@ -793,7 +928,7 @@ void NovaAi_UpdateBehavior0x03(GameState &state,
 // (travel, wander, escort-follow, hold, drift, disengage, defunct) and writes
 // Ship.ai_control_mode accordingly. The high-level attack states now enter
 // pursuit/engagement control modes using the reconstructed target slots;
-// weapon selection, disable pressure, and HUD/mission flavor remain deferred.
+// weapon selection, cloak engagement, and HUD/mission flavor remain deferred.
 void NovaAi_UpdateShipState(GameState &state,
                             Ship &ship,
                             std::uint32_t now_ms) {
@@ -862,9 +997,9 @@ void NovaAi_UpdateShipState(GameState &state,
     }
   }
 
-  // Ghidra's state-4/state-0xd pressure gate. Once an attacker has crossed
-  // its own disable threshold, it may only keep this target if the target is
-  // actively counter-pressing at close range. Higher-behavior ships brake and
+  // Ghidra's state-4/state-0xd cloak-engagement gate. Once an attacker has
+  // crossed its own cloak visibility threshold, it may only keep this target
+  // if the target remains engageable at close range. Higher-behavior ships brake and
   // wait for a bounded patience interval; ordinary ships either hold at the
   // centre or fall back to their jump-capable idle template.
   if (ship.primary_target_ship_slot != -1 &&
@@ -873,23 +1008,25 @@ void NovaAi_UpdateShipState(GameState &state,
           static_cast<std::size_t>(ship.primary_target_ship_slot))) {
     const Ship &target =
         state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
-    if (!NovaAiShip_CanApplyDisablePressureToTarget(state, ship, target)) {
+    // The original tests the primary target's cloak threshold against this
+    // ship's scanner/position context; the argument order is subject, ship.
+    if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, target, ship)) {
       if (ship.ai_behavior_code > 2) {
         ship.ai_control_mode = 1;
         ship.ai_station_hold_timer = 0.0F;
         ship.ai_secondary_target_slot = -1;
-        if (!std::isfinite(ship.target_disable_patience_timer) ||
-            ship.target_disable_patience_timer <= 0.0F) {
-          ship.target_disable_patience_timer = static_cast<float>(
+        if (!std::isfinite(ship.target_engagement_patience_timer) ||
+            ship.target_engagement_patience_timer <= 0.0F) {
+          ship.target_engagement_patience_timer = static_cast<float>(
               std::uniform_int_distribution<int>{0, 99}(state.rng) + 100);
         } else {
           constexpr float kOriginalFrameTimeMs = 1000.0F / 30.0F;
-          ship.target_disable_patience_timer -= kOriginalFrameTimeMs;
-          if (ship.target_disable_patience_timer <= 0.0F) {
+          ship.target_engagement_patience_timer -= kOriginalFrameTimeMs;
+          if (ship.target_engagement_patience_timer <= 0.0F) {
             ship.primary_target_ship_slot = -1;
             ship.ai_state_code = 0;
             ship.ai_control_mode = 0;
-            ship.target_disable_patience_timer = -1.0F;
+            ship.target_engagement_patience_timer = -1.0F;
           }
         }
         return;
@@ -901,7 +1038,7 @@ void NovaAi_UpdateShipState(GameState &state,
       }
       return;
     }
-    ship.target_disable_patience_timer = -1.0F;
+    ship.target_engagement_patience_timer = -1.0F;
   }
 
   // ---- Travel to system (state 1). ----
@@ -1132,8 +1269,8 @@ void NovaAi_UpdateShipState(GameState &state,
     } else {
       ship.ai_control_mode = 8;
     }
-    // Disable-pressure downgrade: without the disable system the ship boosts
-    // straight in (TODO: Ship_CanShipApplyDisablePressureToTarget).
+    // Cloak-engagement downgrade: without the cloak-aware predicate the ship
+    // boosts straight in (TODO: Ship_CanShipEngageTargetUnderCloakRules).
     return;
   }
 
@@ -1143,6 +1280,13 @@ void NovaAi_UpdateShipState(GameState &state,
     ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
     const Ship &tgt =
         state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+    if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, tgt, ship)) {
+      const bool far_from_target =
+          std::abs(ship.pos_x - tgt.pos_x) > kAssistFar ||
+          std::abs(ship.pos_y - tgt.pos_y) > kAssistFar;
+      ship.ai_control_mode = far_from_target ? 9 : 1;
+      return;
+    }
     const bool far = std::abs(ship.pos_x - tgt.pos_x) > kAssistFar ||
                      std::abs(ship.pos_y - tgt.pos_y) > kAssistFar;
     const bool close = std::abs(ship.pos_x - tgt.pos_x) > kAssistClose ||
@@ -1180,6 +1324,12 @@ void NovaAi_UpdateShipState(GameState &state,
       return;
     }
     const Ship &tgt = state.ShipAt(static_cast<std::size_t>(target));
+    if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, tgt, ship)) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      ship.primary_target_ship_slot = -1;
+      return;
+    }
     if (target == 0) {
       // Escorting the player: match hold distance, else pursue.
       if (std::abs(ship.pos_x - tgt.pos_x) > kEngageDist ||
@@ -1211,7 +1361,7 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Disabled pursuer/flee at turn radius (state 0xf). ----
+  // ---- Disabled/hidden pursuer-flee at turn radius (state 0xf). ----
   if (ship.ai_state_code == 0xf && ship.primary_target_ship_slot != -1) {
     if (!state.SlotInRange(
             static_cast<std::size_t>(ship.primary_target_ship_slot)) ||
@@ -1374,8 +1524,8 @@ void NovaAi_UpdateShipState(GameState &state,
     const float dy = std::abs(ship.pos_y - player.pos_y);
     if (state.player.ai_station_hold_timer > 0.0F) {
       ship.ai_state_code = 0xb;
-    } else if (!NovaAiShip_CanApplyDisablePressureToTarget(
-                   state, ship, state.player)) {
+    } else if (!NovaAiShip_CanEngageTargetUnderCloakRules(
+                   state, state.player, ship)) {
       ship.ai_control_mode = 1;
     } else if (dx > outer || dy > outer) {
       ship.ai_control_mode = (dx > inner || dy > inner) ? 9 : 0xb;
@@ -1684,7 +1834,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
 
   case 8:
     // Hold at the close pursuit radius. The original uses this mode for the
-    // final approach while weapon range/disable pressure is evaluated.
+    // final approach while weapon range/cloak engagement is evaluated.
     if (!steer_toward_target(eff_turn_deg + 1.0F, 0.0F)) {
       ship.ai_desired_speed = 0.0F;
     }
@@ -1700,7 +1850,7 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
 
   case 0xf:
     // Disabled-target pursuit uses the same target bearing before its
-    // boarding/disable transition is available.
+    // boarding transition is available.
     if (!steer_toward_target(eff_turn_deg + 1.0F, 0.0F)) {
       ship.ai_desired_speed = 0.0F;
     }
@@ -1742,6 +1892,11 @@ void NovaAi_UpdateShipAI(GameState &state,
   // rows before the post-state auto-selector runs. Seed those rows once from
   // the assigned class so the intercept walk sees NPC guided banks too.
   EnsureNpcWeaponBanks(state, ship);
+  // Ghidra calls the cloak-trait producer before the state supervisor, but
+  // skips it during the coast-through-reversal interval (+0x4c > 0).
+  if (ship.reverse_speed_bias <= 0.0F) {
+    NovaAi_UpdateShipCloakStateFromTraits(state, ship);
+  }
 
   // Auto-guard: a fire-restricted ship ignores the whole AI selection and just
   // holds its current state/controls; mirrors the original clearing the target
@@ -1860,43 +2015,32 @@ namespace {
 
 } // namespace
 
-// Ghidra 0x00464a90 Ship_CanShipApplyDisablePressureToTarget.
-bool NovaAiShip_CanApplyDisablePressureToTarget(const GameState &state,
-                                                const Ship &attacker,
-                                                const Ship &target) {
-  if (attacker.ai_state_code == 0x15) {
-    return false; // jump/travel state: no disable pressure
+// Ghidra 0x00464a90 Ship_CanShipEngageTargetUnderCloakRules.
+bool NovaAiShip_CanEngageTargetUnderCloakRules(const GameState &state,
+                                               const Ship &subject_ship,
+                                               const Ship &other_ship) {
+  if (subject_ship.ai_state_code == 0x15) {
+    return false; // jump/travel state: no engagement
   }
-  if (target.mission_ship_slot == 0x3ff) {
+  if (other_ship.mission_ship_slot == 0x3ff) {
     return true;
   }
-  // Not at/below the attacker's own disable threshold -> can press the target.
-  if (!NovaTargeting_ShipAtDisableThreshold(attacker)) {
+  // The first argument is the subject whose cloak visibility is tested.
+  if (!NovaTargeting_ShipAtCloakVisibilityThreshold(subject_ship)) {
     return true;
   }
-  // A target pressing this attacker with a disable outfit can still be
-  // engaged, even though the attacker is itself at the threshold.
-  if (target.ai_target_ship_slot == attacker.ship_instance_id &&
-      NovaOutfit_HasDisableOutfit(state, target)) {
+  // A ship tracking this subject and carrying a cloaking device can still be
+  // engaged, even though the subject is hidden.
+  if (other_ship.ai_target_ship_slot == subject_ship.ship_instance_id &&
+      NovaOutfit_HasCloakingDevice(state, other_ship)) {
     return true;
   }
-  // NPC-only escort/control-mode exception: the original checks the target's
-  // current AI target for a persistent disable outfit when the target is in
-  // control mode 0xc and that referenced ship is already thresholded.
-  if (target.ship_instance_id != 0 && target.ai_target_ship_slot >= 0 &&
-      target.ai_control_mode == 0xc &&
-      state.SlotInRange(static_cast<std::size_t>(target.ai_target_ship_slot))) {
-    const Ship &targeted_ship =
-        state.ShipAt(static_cast<std::size_t>(target.ai_target_ship_slot));
-    if (NovaTargeting_ShipAtDisableThreshold(targeted_ship) &&
-        NovaOutfit_HasPersistentDisableOutfit(state, targeted_ship)) {
-      return true;
-    }
-  }
-  constexpr float kDisablePressureCloseRange = 200.0F; // DAT_005757c0
-  if (target.disable_pressure_state == 1 &&
-      std::abs(target.pos_x - attacker.pos_x) <= kDisablePressureCloseRange &&
-      std::abs(target.pos_y - attacker.pos_y) <= kDisablePressureCloseRange) {
+  constexpr float kCloakEngagementCloseRange = 200.0F; // DAT_005757c0
+  if (other_ship.cloak_scanner_reveal_screen == 1 &&
+      std::abs(other_ship.pos_x - subject_ship.pos_x) <=
+          kCloakEngagementCloseRange &&
+      std::abs(other_ship.pos_y - subject_ship.pos_y) <=
+          kCloakEngagementCloseRange) {
     return true;
   }
   return false;
@@ -1914,7 +2058,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
   if (ship.ai_target_ship_slot == 0 || ship.primary_target_ship_slot == -1) {
     return false;
   }
-  if (!NovaAiShip_CanApplyDisablePressureToTarget(state, ship, state.player)) {
+  if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, ship, state.player)) {
     return false;
   }
   if (ship.target_stellar_object_id != -1) {

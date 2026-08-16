@@ -1100,7 +1100,8 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // once within one step. The snap-once branch writes the desired heading
   // directly; otherwise the ship rotates by a full turn step in the direction
   // that closes the angle fastest. ai_turn_bias_dir mirrors the original's
-  // turn-bank signal (Ship_HandleShip writes +0xc8f8 from the field_0xc8e4
+  // turn-bank signal (Ship_HandleShip writes +0xc8f8 from the
+  // turn_bank_animation_phase field at +0xc8e4
   // tilt anim: +1 while banking one way, -1 the other, 0 otherwise), which the
   // engine-glow block below consumes for its turn-bias +2 bump.
   ship.ai_turn_bias_dir = 0;

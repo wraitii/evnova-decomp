@@ -21,7 +21,7 @@
 //   System_UpdateSystemAndStellarDisplayState    0x00432470  (scope 3 only:
 //     the per-tick re-derivation of stellar system_id + is_available for the
 //     player's current system; the sprite-set bookkeeping is left to the view)
-//   Ship_CheckShipDisableThresholdState          0x0046C7A0  disable gate
+//   Ship_IsShipCloakVisibilityThresholdActive    0x0046C7A0  cloak gate
 //   Ship_IsShipEligibleForDistressCall           0x0040F6D0  distress gate
 //   Ship_IsShipAcquirableAsTarget                0x0040FAA0  acquire gate
 //   Ship_FindNextPlayerCycleTarget               0x00461BD0  ship cycle fwd
@@ -106,19 +106,19 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 // at slot 0) selected by the ` cycle / Tab commands, the nearest-hostile/
 // engaged commands or a mouse click. All selection paths share the same
 // eligibility core: active, in the player's system, not destroyed, not in AI
-// state 0x15, below the disable threshold (unless a cloak scanner or the
+// state 0x15, visible through the cloak gate (unless a cloak scanner or the
 // combat-cycle modifier applies), and not flagged untargetable by the ship
 // class (flags_secondary bit 2) unless the player owns the scanner-target-
 // untargetable outfit. Ported from the Ghidra functions listed per helper.
 
-// Mirrors Ship_CheckShipDisableThresholdState (0x0046c7a0): true when the
-// ship counts as at/below the disable threshold and is therefore not
-// targetable without a cloak-scanner outfit. Threshold levels are 16.0 base
-// (always), 24.0 when disable_state_latch >= 0 and 8.0 when the latch < 0
-// (the latch sign shifts the boundary). Disable-threshold progress is the
-// Ship.disable_threshold_progress field (Ghidra ShipState +0x64); the
-// disable subsystem is not reconstructed yet, so clean ships read 0 and pass.
-[[nodiscard]] bool NovaTargeting_ShipAtDisableThreshold(const Ship &ship);
+// Mirrors Ship_IsShipCloakVisibilityThresholdActive (0x0046c7a0): true when
+// the ship's cloak fade has crossed the targeting/visibility gate. Ghidra's
+// strict comparisons use 24.0 while entering, 8.0 while clearing, and 16.0
+// for the baseline branch; the signed transition latch selects the first two.
+// Ship.cloak_fade_progress is advanced by the visual updater, not by weapon-hit
+// damage.
+[[nodiscard]] bool NovaTargeting_ShipAtCloakVisibilityThreshold(
+    const Ship &ship);
 
 // Mirrors Ship_IsShipEligibleForDistressCall (0x0040f6d0): true when the ship
 // is an active, non-fire-restricted combatant that could call for help -- not
@@ -162,8 +162,8 @@ NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
     bool include_combat);
 
 // Mirrors Ship_SelectNearestEngagedTarget (0x00462850): nearest active,
-// non-destroyed ship in the player's system that is below the disable
-// threshold (or the player has a cloak scanner), not in AI state 0x15, class
+// non-destroyed ship in the player's system that is visible through the cloak
+// gate (or the player has a cloak scanner), not in AI state 0x15, class
 // not untargetable (or scanner), and whose ai_target_ship_slot is NOT the
 // player (ships already locked onto the player are excluded). Returns the
 // slot or -1 when none.

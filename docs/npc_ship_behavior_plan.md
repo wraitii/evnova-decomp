@@ -8,10 +8,11 @@ marked as they land. Current state: **Phases 0-2 done** (NPC movement physics
 integrator + gravity-shield steer helper, both wired into the per-frame tick);
 **Phase 3 in progress** (AI decision layer): the ship_ai module dispatches the
 behavior supervisors + state machine + controls bridge each frame. Behaviors
-0x02/0x03 now acquire nearest same-system hostile contacts, promote them into
-attack/assist states, and steer through combat control modes 5/6/7/8/0xc/0xf;
-mission and weapon side effects remain deferred; disable-pressure eligibility
-is now target-aware and the state-4/state-0xd patience branch is wired. The
+0x02/0x03/0x04 now acquire or promote same-system hostile contacts into
+attack/assist states and steer through combat control modes 5/6/7/8/0xc/0xf;
+mission and weapon side effects remain deferred. Cloak-aware engagement
+eligibility is target-aware, the state-4/state-0xd patience branch is wired,
+and the trait-driven NPC cloak latch now runs before each AI supervisor. The
 **wander/travel milestone (Phases 3+4) is live** -- NPCs pick a random adjacent
 travel stellar, steer toward it, and cycle to the next on arrival. NPC movement
 uses each ship's real class stats; the thrust-units bug that made them ~50x too
@@ -317,14 +318,34 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
 
 ## Phase 5 -- Firing / combat (optional but natural next)
 
-- [ ] **`Ship_UpdateShipDisableStateFromTraits`** (0x00411d00) and disable-state
-      transitions -- needed for combat realism and capture.
-- **Started**: `Ship_CanShipApplyDisablePressureToTarget` (0x00464a90) now
-      receives both attacker and target, scans ModType-0x11 disable outfits
-      (including persistent NPC class loadouts), honors the target's
-      `disable_pressure_state` within the decoded 200px gate, and drives the
-      original state-4/state-0xd brake/patience fallback. The producer that
-      advances disable progress and enters the disable state remains deferred.
+- **Started**: **`Ship_UpdateShipCloakStateFromTraits`** (0x00411d00) and cloak
+      transitions -- the NPC ModType-17/resource/ShipClass-Flags2 producer is
+      wired through the shared enter/clear latch callbacks. The EVN Bible and
+      visual updater show that `ShipState +0x64` is cloak fade progress, not a
+      weapon-hit disable meter; weapon hits do not write it.
+- **Clarified in Ghidra**: `Ship_UpdateVisualState` (0x00428340) integrates
+      `cloak_fade_progress` from the signed transition latch at 1.5 or 0.75
+      progress units per frame-time unit, clamps it to 0..32, and passively
+      decays it by 1.0 when the latch is clear. The visibility gate is strict
+      `>24` while entering, `>8` while clearing, and `>16` otherwise.
+- **Clarified in Ghidra**: the remaining high-offset `ShipState` fields used by
+      the visual updater are presentation state, not disable pressure:
+      `+0xC8E0` `sprite_animation_timer`, `+0xC8E4`
+      `turn_bank_animation_phase`, `+0xC8E8` `weapon_sprite_flash_level`,
+      `+0xC8EC` `weapon_exit_position_timer`, and the cycle indices at
+      `+0xC8F4/+0xC8F6`. The waypoint pair at `+0xC8FA/+0xC8FC` is deliberately
+      still provisional because travel code treats it as arrival state while
+      the visual updater reuses it for one sprite-behavior animation branch.
+- **Started**: `Ship_CanShipEngageTargetUnderCloakRules` (0x00464a90) now
+      receives both ship arguments. Ghidra confirms argument 1 is the
+      cloak-threshold-tested subject and argument 2 supplies mission/scanner/
+      position context; caller-side attacker/target roles vary. The port honors
+      the ModType-30 screen-reveal flag within the decoded 200px gate and drives
+      the original state-4/state-0xd engagement patience fallback.
+- **Clarified in Ghidra**: `Ship_CanMaintainCloakState` (0x00467e80) is the
+      ModType-17 resource/eligibility predicate used to keep or enter cloak;
+      `Ship_IsShipFireRestricted` (0x004687b0) is the separate true-disabled
+      / fire-restriction predicate, including the Bible's 33%/10% armor rule.
 - [ ] **Weapon/bank firing for NPCs**: extend the per-bank ammo/cooldown
       (currently player-centralized) onto `Ship` (+0xC8 row) and implement NPC
       fire selection from `active_weapon_bank_slot`. Larger; can be deferred.

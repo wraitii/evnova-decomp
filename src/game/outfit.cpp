@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdint>
 
+#include "targeting.hpp"
+
 namespace game {
 namespace {
 
@@ -41,26 +43,31 @@ constexpr float kArmorRechargeScale = 50.0F;
 // computed snapshot in GameState.cached_stats (stat_cache_valid).
 constexpr float kFuelCapacityClamp = 32000.0F; // opcode 12 clamp [0,32000]
 
-constexpr std::int16_t kDisableOutfitModType = 0x11;
-constexpr std::uint16_t kPersistentDisableOutfitFlag = 0x1000;
+constexpr std::int16_t kCloakingDeviceModType = 0x11;
+constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
 
-[[nodiscard]] bool OutfitHasDisableEffect(const Outfit &outfit,
-                                          bool persistent_only) {
-  const auto has_disable_mod = [](std::int16_t mod_type) {
-    return mod_type == kDisableOutfitModType;
+[[nodiscard]] bool OutfitHasCloakingDevice(const Outfit &outfit,
+                                           bool area_only) {
+  const auto matches = [area_only](std::int16_t mod_type,
+                                   std::int16_t mod_val) {
+    return mod_type == kCloakingDeviceModType &&
+           (!area_only || (static_cast<std::uint16_t>(mod_val) &
+                           kAreaCloakModValFlag) != 0U);
   };
-  if (outfit.mod_type != kDisableOutfitModType &&
-      !std::any_of(outfit.alt_mod_types.begin(),
-                   outfit.alt_mod_types.end(),
-                   has_disable_mod)) {
-    return false;
+  if (matches(outfit.mod_type, outfit.mod_val)) {
+    return true;
   }
-  return !persistent_only || (outfit.flags & kPersistentDisableOutfitFlag) != 0;
+  for (std::size_t i = 0; i < outfit.alt_mod_types.size(); ++i) {
+    if (matches(outfit.alt_mod_types[i], outfit.alt_mod_vals[i])) {
+      return true;
+    }
+  }
+  return false;
 }
 
-[[nodiscard]] bool ShipClassHasDisableOutfit(const GameState &state,
-                                             const Ship &ship,
-                                             bool persistent_only) {
+[[nodiscard]] bool ShipClassHasCloakingDevice(const GameState &state,
+                                              const Ship &ship,
+                                              bool area_only) {
   const ShipClass *ship_class =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   if (ship_class == nullptr) {
@@ -72,15 +79,15 @@ constexpr std::uint16_t kPersistentDisableOutfitFlag = 0x1000;
     }
     const Outfit *outfit =
         state.scenario.Outfit(ship_class->default_outfit_ids[i]);
-    if (outfit != nullptr && OutfitHasDisableEffect(*outfit, persistent_only)) {
+    if (outfit != nullptr && OutfitHasCloakingDevice(*outfit, area_only)) {
       return true;
     }
   }
   return false;
 }
 
-[[nodiscard]] bool PlayerHasDisableOutfit(const GameState &state,
-                                          bool persistent_only) {
+[[nodiscard]] bool PlayerHasCloakingDevice(const GameState &state,
+                                           bool area_only) {
   for (std::size_t index = 0; index < state.inventory.outfit_owned_count.size();
        ++index) {
     if (state.inventory.outfit_owned_count[index] <= 0) {
@@ -88,11 +95,53 @@ constexpr std::uint16_t kPersistentDisableOutfitFlag = 0x1000;
     }
     const Outfit *outfit =
         state.scenario.Outfit(static_cast<std::int16_t>(index + 0x80));
-    if (outfit != nullptr && OutfitHasDisableEffect(*outfit, persistent_only)) {
+    if (outfit != nullptr && OutfitHasCloakingDevice(*outfit, area_only)) {
       return true;
     }
   }
   return false;
+}
+
+[[nodiscard]] const Outfit *FindCloakingDevice(const GameState &state,
+                                               const Ship &ship) {
+  const auto find_in = [&](std::int16_t outfit_id) -> const Outfit * {
+    const Outfit *outfit = state.scenario.Outfit(outfit_id);
+    if (outfit != nullptr && OutfitHasCloakingDevice(*outfit, false)) {
+      return outfit;
+    }
+    return nullptr;
+  };
+
+  if (ship.ship_instance_id == 0) {
+    for (std::size_t index = 0;
+         index < state.inventory.outfit_owned_count.size(); ++index) {
+      if (state.inventory.outfit_owned_count[index] <= 0) {
+        continue;
+      }
+      if (const Outfit *outfit =
+              find_in(static_cast<std::int16_t>(index + 0x80))) {
+        return outfit;
+      }
+    }
+    return nullptr;
+  }
+
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    return nullptr;
+  }
+  for (std::size_t index = 0; index < ship_class->default_outfit_ids.size();
+       ++index) {
+    if (ship_class->default_outfit_counts[index] <= 0) {
+      continue;
+    }
+    if (const Outfit *outfit =
+            find_in(ship_class->default_outfit_ids[index])) {
+      return outfit;
+    }
+  }
+  return nullptr;
 }
 
 void MarkStatsDirty(GameState &state) { state.stat_cache_valid = false; }
@@ -101,21 +150,59 @@ void MarkStatsDirty(GameState &state) { state.stat_cache_valid = false; }
 
 void OutfitMarkStatsDirty(GameState &state) { MarkStatsDirty(state); }
 
-// Ghidra 0x00464b50 Outfit_HasDisableOutfit.
-bool NovaOutfit_HasDisableOutfit(const GameState &state, const Ship &ship) {
+// Ghidra 0x00464b50 Outfit_HasCloakingDevice.
+bool NovaOutfit_HasCloakingDevice(const GameState &state, const Ship &ship) {
   if (ship.ship_instance_id == 0) {
-    return PlayerHasDisableOutfit(state, false);
+    return PlayerHasCloakingDevice(state, false);
   }
-  return ShipClassHasDisableOutfit(state, ship, false);
+  // Ghidra's helper includes this NPC-only escort/control-mode exception
+  // before scanning the ship class's default loadout.
+  if (ship.ai_target_ship_slot >= 0 && ship.ai_control_mode == 0xc &&
+      state.SlotInRange(static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+    const Ship &target =
+        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+    if (NovaTargeting_ShipAtCloakVisibilityThreshold(target) &&
+        NovaOutfit_HasAreaCloakingDevice(state, target)) {
+      return true;
+    }
+  }
+  return ShipClassHasCloakingDevice(state, ship, false);
 }
 
-// Ghidra 0x00464c80 Outfit_HasPersistentDisableOutfit.
-bool NovaOutfit_HasPersistentDisableOutfit(const GameState &state,
-                                           const Ship &ship) {
+// Ghidra 0x00464c80 Outfit_HasAreaCloakingDevice.
+bool NovaOutfit_HasAreaCloakingDevice(const GameState &state,
+                                      const Ship &ship) {
   if (ship.ship_instance_id == 0) {
-    return PlayerHasDisableOutfit(state, true);
+    return PlayerHasCloakingDevice(state, true);
   }
-  return ShipClassHasDisableOutfit(state, ship, true);
+  return ShipClassHasCloakingDevice(state, ship, true);
+}
+
+std::int16_t NovaOutfit_GetCloakFuelDrainFlags(
+    const GameState &state, const Ship &ship) {
+  const Outfit *outfit = FindCloakingDevice(state, ship);
+  return outfit == nullptr
+             ? 0
+             : static_cast<std::int16_t>((static_cast<std::uint16_t>(
+                                               outfit->mod_val) >> 4) &
+                                          0x0fU);
+}
+
+std::int16_t NovaOutfit_GetCloakShieldDrainFlags(const GameState &state,
+                                                const Ship &ship) {
+  const Outfit *outfit = FindCloakingDevice(state, ship);
+  return outfit == nullptr
+             ? 0
+             : static_cast<std::int16_t>((static_cast<std::uint16_t>(
+                                               outfit->mod_val) >> 12) &
+                                          0x0fU);
+}
+
+bool NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
+                                               const Ship &ship) {
+  const Outfit *outfit = FindCloakingDevice(state, ship);
+  return outfit != nullptr &&
+         (static_cast<std::uint16_t>(outfit->mod_val) & 0x0004U) != 0U;
 }
 
 // ---------------------------------------------------------------------------

@@ -48,10 +48,12 @@ constexpr float kSpeedLockedSpeed = 0.0F;
 // once the ship AI/combat systems are reconstructed; Ship's defaults already
 // match a zero/-1 reset for them):
 //   * the per-ship skill_variance_scale (ShipState +0x40), jamming_score_1..4,
-//     combat_state_metric_a / waypoint markers / hit_reaction_timer /
+//     sprite_animation_timer / waypoint markers / hit_reaction_timer /
 //     player_aggro_accumulator / ai_turn_bias_dir and the various untyped
-//     field_0x* offsets (0x60/0x64/0xac/0xb0/0xb9/0xbb-0xbd/0xc8cc/0xc8d6/
-//     0xc8e4/0xc8e8/0xc8f4/0xc91e/0xc924) are all left at defaults.
+//     field_0x* offsets (0x60/0x64/0xac/0xb0/0xb9/0xbb-0xbd/0xc8cc) are all
+//     left at defaults. Ghidra now names the visual fields at +0xc8d6,
+//     +0xc8e4/+0xc8e8/+0xc8ec, and +0xc8f4/+0xc8f6; their reset/seed behavior
+//     remains deferred with the presentation subsystem.
 //   * the random inits gated on ShipClassDef.combat_state_init_range /
 //     skill_variance_percent (0x9FE/0xA00) and the derelict-government
 //     engine-glow override are skipped (those ShipClassDef fields are not yet

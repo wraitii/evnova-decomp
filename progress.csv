@@ -1,5 +1,5 @@
 address,name,impl_file,reimpl_pct,comment
-0x00401000,Ship_UpdateShipAI,src/game/ship_ai.cpp,45%,"NovaAi_UpdateShipAI: heavy-AI cadence + behavior dispatch now routes behavior 0x02/0x03 into distinct travel/hostile supervisors and behavior 4 into the shared target path; state machine + controls bridge remain wired. Mission/availability/assist side effects and combat/disable caches remain deferred."
+0x00401000,Ship_UpdateShipAI,src/game/ship_ai.cpp,55%,"NovaAi_UpdateShipAI: heavy-AI cadence + behavior dispatch routes behavior 0x02/0x03/0x04 through hostile state selection; per-frame NPC cloak-trait latch evaluation is wired before the supervisor. Mission/availability/assist side effects, weapon firing, and visual fade producer remain deferred."
 0x00401800,Government_HandlePlayerFactionExtortion,,0%,
 0x00402810,Ship_ResetShipAiBehaviorRuntimeFields,,0%,
 0x00402860,Ship_UpdateShipAiBehavior0x01,src/game/ship_ai.cpp,80%,"NovaAi_UpdateBehavior0x01: reacquire travel stellar / jump fallback / hostility escalation faithfully ported. Jump fallback now gates on the ship's OWN class fuel (NovaTravel_CanShipInitiateJumpSequence). Intercept-taunt HUD flavor deferred"
@@ -7,11 +7,11 @@ address,name,impl_file,reimpl_pct,comment
 0x00402BD0,Ship_UpdateShipAiBehavior0x02,src/game/ship_ai.cpp,65%,"NovaAi_UpdateBehavior0x02: travel/jump fallback plus hostile-contact promotion using the Ghidra 0x4e3 per-axis gate; player assist state 10 and contact attack state 3 are wired. Government chatter/assistance encounter side effects deferred."
 0x00402E50,Ship_UpdateShipAiBehavior0x03,src/game/ship_ai.cpp,60%,"NovaAi_UpdateBehavior0x03: same-system hostile target acquisition, target validation, pursuit state 4, and travel/jump fallback are implemented. Government flee/reinforcement, weapon readiness, mission-fleet, and capture branches remain TODO(decomp)."
 0x004038B0,Ship_UpdateShipAiBehavior0x03CaptureVariant,src/game/ship_ai.cpp,15%,"Behavior 0x03 capture variant currently shares the reconstructed hostile acquisition/pursuit path through NovaAi_UpdateShipAI; disabled-ship boarding selection, capture_power, cargo transfer, and capture retreat are deferred."
-0x00403DE0,Ship_UpdateShipAiCombatState,src/game/ship_ai.cpp,15%,"Behavior 0x04 now reuses the reconstructed hostile target/pursuit state path when it has no primary target; full combat supervisor target-chain, flee, weapon-readiness, and mission logic remain deferred."
+0x00403DE0,Ship_UpdateShipAiCombatState,src/game/ship_ai.cpp,25%,"Behavior 0x04 reuses the reconstructed hostile target/pursuit path for both target acquisition and existing-target promotion; full combat supervisor target-chain, flee, weapon-readiness, and mission logic remain deferred."
 0x004048A0,Ship_UpdateShipAssistResponseBehavior,,0%,
 0x00405120,Ship_ShouldShipPrioritizePlayerThreat,,0%,
 0x004053C0,Mission_UpdateShipMissionStellarAttackDirective,,0%,
-0x00405590,Ship_UpdateShipAiState,src/game/ship_ai.cpp,60%,"NovaAi_UpdateShipState: travel/hold/pursuit/escort/drift/disengage/defunct branches plus Ghidra-radius attack states 3/4, assist state 0xc, and boarding state 0xd cleanup/pursuit transitions. Exact intercept gates and disabled-target modes 6/7/9/0xb/0xf are wired; weapon firing, formation offsets, capture resolution, and HUD/mission flavor remain deferred."
+0x00405590,Ship_UpdateShipAiState,src/game/ship_ai.cpp,65%,"NovaAi_UpdateShipState: travel/hold/pursuit/escort/drift/disengage/defunct branches plus attack states 3/4, assist state 0xc, and boarding state 0xd transitions. Cloak-aware target engagement direction, patience braking, and escort/assist engagement downgrades match Ghidra; weapon firing, formation offsets, capture resolution, and HUD/mission flavor remain deferred."
 0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,50%,"NovaAi_ApplyControls: modes 1/2/3/4/0xd retain their decoded movement behavior; target-bearing/thrust gates are implemented for combat modes 5/6/7/8/0xc/0xf using primary/secondary target slots. Post-control auto bank selection now arms the fire latch for higher-behavior ships; formation offsets, predictive aim, and NPC shot firing remain deferred."
 0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,src/game/ship_ai.cpp,40%,"NovaAi_SelectRandomAdjacentTravelStellar: availability/travel-flag/govt-hostility candidates, uniform random pick; weighted scan-mask pools deferred"
 0x0040CC10,Stellar_FindNearestAdjacentTravelStellar,,0%,
@@ -26,7 +26,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0040DDC0,NovaUi_DrawAiControlModeMnemonic,,0%,
 0x0040E020,Ship_AcquirePrimaryTargetForShip,src/game/ship_ai.cpp,45%,"NovaAi_AcquirePrimaryTarget: nearest same-system active contact selection with hostile-government/player-directed filters and engaged-contact priority. Mission/scripted targets, perceived-combat-strength weighting, policy/reputation/flee arms, and distress-response details remain TODO(decomp)."
 0x0040F6D0,Ship_IsShipEligibleForDistressCall,src/game/targeting.cpp,100%,NovaTargeting_IsShipEligibleForDistressCall: active + not coasting-through-reversal (reverse_speed_bias <= 0) + not fire-restricted + primary target is the player or a player-targeting ship + not in retreat states {7,9,15,10,11,5,12,18}.
-0x0040F780,Ship_ShouldShipKeepPressingTarget,src/game/ship_ai.cpp,100%,"NovaAiShip_ShouldKeepPressingTarget: pursuit-retention predicate (active/unrestricted/AI+primary target/disable-pressure gates, reversal-coast + non-disengage state checks on the player, a player-targeting target, or a third ship pressing it). Literal port incl. the original's primary_target_ship_slot==ship_instance_id comparison in the third-ship scan"
+0x0040F780,Ship_ShouldShipKeepPressingTarget,src/game/ship_ai.cpp,100%,"NovaAiShip_ShouldKeepPressingTarget: pursuit-retention predicate (active/unrestricted/AI+primary target/cloak-aware engagement gates, reversal-coast + non-disengage state checks on the player, a player-targeting target, or a third ship pressing it). Literal port incl. the original's primary_target_ship_slot==ship_instance_id comparison in the third-ship scan"
 0x0040FAA0,Ship_IsShipAcquirableAsTarget,src/game/targeting.cpp,100%,NovaTargeting_IsShipAcquirableAsTarget: player branch (govt policy flag 0 or distress-eligible) + NPC branch (primary-target / mutual-target scan with the same retreat-state gate).
 0x0040FC00,Ship_IsShipEligibleForCommAidInteraction,src/game/ship_ai.cpp,100%,"NovaAiShip_IsShipEligibleForCommAidInteraction: scans other active ships for one in a non-disengage state while the target's primary slot equals its own instance id (literal quirk port)"
 0x0040FCA0,Ship_IsShipBrakingOnPlayerInAiState0x09,src/game/ship_ai.cpp,100%,NovaAiShip_IsShipBrakingOnPlayerState9: active + unrestricted + targets player + state 9
@@ -67,14 +67,14 @@ address,name,impl_file,reimpl_pct,comment
 0x00411AE0,Ship_ShouldSwitchToEscortWingmanTarget,,0%,
 0x00411B40,Ship_IsWingmanMirrorTargetStillValid,,0%,
 0x00411C20,Ship_FindLowerIndexedWingmanSharingTarget,,0%,
-0x00411D00,Ship_UpdateShipDisableStateFromTraits,,0%,
-0x00412030,Ship_FindBestAssistTargetForShip,src/game/ship_ai.cpp,70%,"NovaAi_FindBestAssistTargetForShip: 64-slot lowest-positive score scan and 0x12090 category/range scoring ported. Mission/escort command context and generalized disable-pressure exceptions remain partial."
+0x00411D00,Ship_UpdateShipCloakStateFromTraits,src/game/ship_ai.cpp,85%,"NovaAi_UpdateShipCloakStateFromTraits ports the ModType-17 loadout/resource/weapon-cooldown and ShipClass Flags2 0x100..0x2000 cloak gates, including shared transition latch and shield-drop behavior; player cues and mission fields remain deferred."
+0x00412030,Ship_FindBestAssistTargetForShip,src/game/ship_ai.cpp,70%,"NovaAi_FindBestAssistTargetForShip: 64-slot lowest-positive score scan and 0x12090 category/range scoring ported. Mission/escort command context and generalized cloak-engagement exceptions remain partial."
 0x00412090,Ship_ScoreAssistTargetForShip,,0%,
 0x00412330,Ship_SelectNearestDisabledShipForBoarding,,0%,
 0x004124F0,Ship_IsShipLockedOnTarget,,0%,
 0x00412530,Ship_IsShipInAiControlMode0x0F,,0%,
 0x00412550,Outfit_BoardShipAndTransferCargo,,0%,
-0x004133F0,Ship_UpdateShipCombatPressureRatio,,0%,
+0x004133F0,Ship_UpdateShipCombatOddsScore,,0%,"Ghidra clarified: computes hostile/allied strength ratio into ai_odds_score, with player combat rating contribution when acquirable; not disable pressure or aggression tolerance"
 0x00413610,Government_TryTriggerGovtAssistanceEncounter,,0%,
 0x00413810,Weapon_InitShipWeaponBursts,,0%,
 0x004138A0,Weapon_ClassifyShipWeaponAmmoReadiness,,0%,
@@ -108,7 +108,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00417600,Frame_SpaceflightLoop,src/game/spaceflight.cpp,12%,Frame_SpaceflightLoop skeleton: outer pre-draw/sim/draw/post ordering reconstructed; unimplemented scopes are silent no-ops. Step 4: drawn every active NPC ship in the current system (SpaceflightView::DrawNpcShips via per-class ShipClassSprite cache). On spaceflight entry and completed cross-system travel NovaAsteroid_InitSystem (asteroid.cpp 0x004216B0) restores the asteroid/drift population; the NPC population (System_TickNpcSpawnMaintenance 0x0041D6E0 ambience slice) spawns encounter-fleet leads + random dude ships in the spaceflight frame loop (Stub_TickReactionsAndNpcSpawns)
 0x004186B0,Frame_TickSystems,src/game/spaceflight.cpp,10%,Frame_TickSystems structure reconstructed (run_full_tick gated); heavy per-tick scopes stubbed
 0x00419210,Frame_RefreshTransitionFrameAuxVisuals,,0%,
-0x004192D0,Shot_ResolveShipHitFromWeapon,src/game/collision.cpp,68%,"Direct shield-first / armor damage, mass-scaled impact impulse, nonlethal armor floor, hit-reaction timer, and hostility transition implemented without corrupting the separate ai_target leader-chain link. Mission, disable, reputation, and full aggro side-effects remain TODO(decomp)."
+0x004192D0,Shot_ResolveShipHitFromWeapon,src/game/collision.cpp,75%,"Direct shield-first / armor damage, mass-scaled impact impulse, nonlethal armor floor, hit-reaction timer, and hostility transition implemented without corrupting the separate ai_target leader-chain link. Weapon Flags2 0x1000 remains a nonlethal damage variant; it does not produce cloak fade progress. Mission, reputation, player cues, and full aggro side-effects remain TODO(decomp)."
 0x0041AD50,Ship_DeactivateVacantShipsAndTally,src/game/ship_spawn.cpp,80%,"NovaShip_DeactivateVacantShipsAndTally: faithful slot-scan cleanup. Vacancy predicate spares only non-fire-restricted ships actively engaging the player (behavior>4, target==0, not docked, no fleet, flag==0); parked ships tally into StellarDef.present_ship_count (capped at max_ship_count); exact field clears incl. velocity_match_target_ship_slot (+0xC8DC). Wired at landing (landed_window) and player-jump completion (spaceflight) then repopulated toward avg_ships. Remaining: mission-fleet tally arm + field_0xbb/0xbc byte clears (no mission fleets, TODO(decomp))"
 0x0041AF90,Mission_SpawnSystemMisnShips,,0%,
 0x0041BA80,EncounterFleet_SpawnRandomSystemDudeShip,src/game/ship_spawn.cpp,75%,NovaEncounter_SpawnRandomSystemDudeShip (was EncounterFleet_SpawnShipFromFleetDef): spawns a random system-bound dude ship from the SystemDef dude binding (NovaDude_SelectRandomSystemDudeClassIndex + NovaDude_SelectShipTypeIndex + DudeDef). Identity/kinematics/vitals/subset of AI fields set; ship at a visible heading (ai_state_code 0). Deferred: deep combat/AI residual fields + 8-bank weapon loadout + mining-scoop derivation (not modeled on clean-room Ship).
@@ -155,7 +155,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00427F40,FUN_00427f40,,0%,
 0x00428090,Shot_SpawnShipDestructionDebrisPuff,,0%,
 0x00428260,License_ValidateAgainstKeyTable,,0%,
-0x00428340,NovaUi_UpdateShipClassLaunchProgress,,0%,
+0x00428340,Ship_UpdateVisualState,,0%,"Ghidra documents cloak_fade_progress integration: signed latch * (1.5, or 0.75 with ShipClass Flags2 0x0001) * frame time, clamp 0..32, passive decay 1.0 when latch is zero, and scanner/damage cache refresh. It also names the visual fields at +0xC8D6/+0xC8E0/+0xC8E4/+0xC8E8/+0xC8EC/+0xC8F4/+0xC8F6; clean-room visual implementation remains pending."
 0x0042C1B0,Frame_UpdateFreeflightObjectSprites,,0%,
 0x0042C660,Shot_UpdateDirectionalWeaponEffects,,0%,
 0x0042CBB0,Frame_AnchorAuxHUDSpriteToOrigin,,0%,
@@ -181,7 +181,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00436910,Asteroid_UpdateSprites,,0%,
 0x00436FF0,NovaUi_ResolveWeaponSplashImpact,,0%,
 0x004374F0,Ship_HandleSpritePairCollision,src/game/collision.cpp,40%,"Direct projectile-vs-ship circle collision replaces the original SpriteLayer callback/pixel-mask path provisionally; owner/target eligibility and the decoded late-collision window now mirror the callback gate. Pixel-mask, freeflight-object, and sprite overlap callbacks remain TODO(decomp)."
-0x00437780,Shot_ResolveShotCollisionHit,src/game/collision.cpp,65%,"Direct and proximity projectile impacts apply damage, ionization/color, impulse, nonlethal variant handling, and axis-aligned splash to additional ships before consuming the shot. Impact visuals, kill chatter, mission reactions, and linked shots remain TODO(decomp)."
+0x00437780,Shot_ResolveShotCollisionHit,src/game/collision.cpp,65%,"Direct and proximity projectile impacts apply damage, ionization/color, impulse, nonlethal variant handling, and axis-aligned splash to additional ships before consuming the shot. Weapon hits do not produce cloak fade progress. Impact visuals, kill chatter, mission reactions, and linked shots remain TODO(decomp)."
 0x00437E20,Shot_ResolveCollisions,src/game/collision.cpp,48%,"Projectile-vs-ship collision pass is wired at Frame_TickSystems scope 9 before Shot_HandleShot movement, with decoded late-collision gating and provisional proximity-radius selection. Asteroid/stellar/freeflight collision branches remain TODO(decomp)."
 0x004386F0,Shot_DrawBeamQueue,,0%,
 0x00438810,FUN_00438810,,0%,
@@ -308,7 +308,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00461970,Math_LookupAngleCosine,,0%,
 0x004619B0,Math_AngleFromVector2D,,0%,
 0x00461BC0,FUN_00461bc0,,0%,
-0x00461BD0,Ship_FindNextPlayerCycleTarget,src/game/targeting.cpp,100%,NovaTargeting_FindNextPlayerCycleTarget: faithful port of the markability table (combat-relevant = targets player or a player-targeting ship; mission-fleet-escort arm always false TODO(decomp)) + the eligibility filter chain (active/not-destroyed/disable-threshold + cloak scanner/state-0x15/system/untargetable-class + scanner/relevant==include_combat).
+0x00461BD0,Ship_FindNextPlayerCycleTarget,src/game/targeting.cpp,100%,NovaTargeting_FindNextPlayerCycleTarget: faithful port of the markability table (combat-relevant = targets player or a player-targeting ship; mission-fleet-escort arm always false TODO(decomp)) + the eligibility filter chain (active/not-destroyed/cloak-visibility gate + cloak scanner/state-0x15/system/untargetable-class + scanner/relevant==include_combat).
 0x00461F60,Ship_FindPreviousPlayerCycleTarget,src/game/targeting.cpp,100%,NovaTargeting_FindPreviousPlayerCycleTarget: backward sibling of the next-cycle port (same filters, wraps from slot 0x3f).
 0x004622F0,DrawContext_DrawCenteredPascalStringInBounds,src/game/nova_font.cpp,50%,NovaText_DrawCentered: measures width then centers over left/right bounds before drawing; real screen-font (SDL_ttf) reconstruction of measure+position+draw
 0x00462340,Rect_FilledSideDim,,0%,
@@ -317,7 +317,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00462410,System_GetCurrentSystemLinkHalfSpan,,0%,
 0x004624C0,Sprite_GetShipClassEscortShotHalfSpan,,0%,
 0x00462550,Weapon_SpawnWeaponImpactEffectPackage,,0%,
-0x00462850,Ship_SelectNearestEngagedTarget,src/game/targeting.cpp,100%,NovaTargeting_SelectNearestEngagedTarget: nearest active/not-destroyed ship in-system, below disable threshold (or cloak scanner), not state-0x15, class not untargetable (or scanner), excluding ships already locked on the player.
+0x00462850,Ship_SelectNearestEngagedTarget,src/game/targeting.cpp,100%,NovaTargeting_SelectNearestEngagedTarget: nearest active/not-destroyed ship in-system, visible through the cloak gate (or cloak scanner), not state-0x15, class not untargetable (or scanner), excluding ships already locked on the player.
 0x004629E0,Government_IsCandidateHostileToTargeter,,0%,
 0x00462BD0,Ship_SelectNearestHostileCombatTarget,src/game/targeting.cpp,100%,NovaTargeting_SelectNearestHostileCombatTarget: engaged-scan core + not fire-restricted + distress-eligible or locked-on-primary-in-state-4 (Ship_IsShipLockedOnAttackerInAiState0x04).
 0x00462DB0,Stellar_FindNearestAvailableTravelStellar,src/game/travel.cpp,90%,nearest travel point via NovaTravel_FindNearestTravelPoint (nav-defs geometry + restricted-range gate); per-stellar is_available treated as present
@@ -347,15 +347,15 @@ address,name,impl_file,reimpl_pct,comment
 0x00464700,Outfit_HasPlayerOwnedOutfitType0x14,,0%,
 0x00464760,Outfit_HasPlayerOwnedOutfitType0x0F_Cached,,0%,
 0x00464810,Ship_GetShipJammingScore,,0%,
-0x00464A90,Ship_CanShipApplyDisablePressureToTarget,src/game/ship_ai.cpp,90%,"NovaAiShip_CanApplyDisablePressureToTarget: target-aware state-0x15/mission-slot/threshold gate plus disable-outfit, persistent escort, and 200px pressure-state fallbacks; disable-state producer remains deferred."
-0x00464B50,Outfit_HasDisableOutfit,src/game/outfit.cpp,85%,"NovaOutfit_HasDisableOutfit scans player-owned or NPC class-default outfits for ModType 0x11; special relationship arm remains in Ship_CanShipApplyDisablePressureToTarget."
-0x00464C80,Outfit_HasPersistentDisableOutfit,src/game/outfit.cpp,85%,"NovaOutfit_HasPersistentDisableOutfit scans the same loadouts and requires outfit Flags bit 0x1000; cache invalidation is unnecessary in the clean-room value model."
-0x00464DB0,Outfit_GetDisableOutfitArmorThresholdNibble,,0%,
-0x00464E30,Outfit_HasDisableOutfitShieldDropFlag,,0%,
-0x00464F60,Outfit_HasDisableOutfitFlag0x0008,,0%,
-0x00465090,Outfit_GetDisableOutfitModeNibble,,0%,
-0x004651A0,Outfit_HasDisableOutfitFlag0x0002,,0%,
-0x004652A0,Outfit_HasLaunchEffectForSide,,0%,
+0x00464A90,Ship_CanShipEngageTargetUnderCloakRules,src/game/ship_ai.cpp,90%,"NovaAiShip_CanEngageTargetUnderCloakRules: first argument is the cloak-threshold-tested subject; second supplies mission/scanner/position context. Ports state-0x15, mission-slot, tracking/cloaking-device, and 200px scanner-reveal gates; no unsupported area-cloak exception."
+0x00464B50,Outfit_HasCloakingDevice,src/game/outfit.cpp,95%,"NovaOutfit_HasCloakingDevice scans player-owned or NPC class-default outfits for ModType 17 (cloaking device) and includes the NPC control-mode-0xc escort-target exception."
+0x00464C80,Outfit_HasAreaCloakingDevice,src/game/outfit.cpp,85%,"NovaOutfit_HasAreaCloakingDevice scans the same loadouts and requires ModType 17 ModVal bit 0x1000 (area cloak)."
+0x00464DB0,Outfit_GetCloakFuelDrainFlags,src/game/outfit.cpp,90%,"NovaOutfit_GetCloakFuelDrainFlags scans the active player/NPC loadout for ModType 17 and returns ModVal bits 4..7, the cloak fuel-drain flags."
+0x00464E30,Outfit_HasCloakShieldDropOnActivation,src/game/outfit.cpp,90%,"NovaOutfit_HasCloakShieldDropOnActivation scans the active player/NPC loadout for ModType 17 and tests ModVal bit 0x04."
+0x00464F60,Outfit_HasCloakDamageDeactivateFlag,,0%,
+0x00465090,Outfit_GetCloakShieldDrainFlags,src/game/outfit.cpp,90%,"NovaOutfit_GetCloakShieldDrainFlags scans the active player/NPC loadout for ModType 17 and returns ModVal bits 8..11, the cloak shield-drain flags."
+0x004651A0,Outfit_HasCloakRadarVisibilityFlag,,0%,
+0x004652A0,Outfit_HasCloakScannerRevealForSurface,,0%,
 0x00465410,Outfit_HasPlayerOwnedOutfitType0x0D_Cached,,0%,
 0x004654B0,Outfit_HasPlayerOwnedOutfitType0x0E_Cached,,0%,
 0x00465550,Stellar_ComputeHyperspaceTravelDays,,0%,
@@ -390,18 +390,18 @@ address,name,impl_file,reimpl_pct,comment
 0x00467E20,Frame_FinishBlockingTransitionFrame,,0%,
 0x00467E60,NoSys_NoOp_00467e60,,0%,
 0x00467E70,FUN_00467e70,,0%,
-0x00467E80,Mission_IsShipEligibleForSurrenderReaction,,0%,
-0x004680D0,Ship_OnShipDisableStateEntered,,0%,
-0x00468190,Ship_OnShipDisableStateCleared,,0%,
+0x00467E80,Ship_CanMaintainCloakState,,0%,"Ghidra clarified: ModType-17 cloak presence plus configured fuel/shield drain resource checks; gates cloak entry and per-frame maintenance, not surrender"
+0x004680D0,Ship_OnShipCloakStateEntered,src/game/ship_ai.cpp,55%,"NovaAi_OnShipCloakStateEntered shares the original cloak-latch normalization and ModType-17 shield-drop transition; player cue/status-panel side effects remain TODO(decomp)."
+0x00468190,Ship_OnShipCloakStateCleared,src/game/ship_ai.cpp,55%,"NovaAi_OnShipCloakStateCleared shares the original cloak-latch recovery transition; player clear cue remains TODO(decomp)."
 0x00468210,Stellar_HasAdjacentAccessibleStellarMatchingTravelFlags,,0%,
 0x004682D0,Stellar_HasAdjacentAccessibleStellarForTravelMode,,0%,
 0x004683B0,NovaRandom_Range,,0%,
 0x00468450,NovaText_FormatDateString,,0%,
 0x00468600,Stellar_FormatElapsedTravelTime,,0%,
-0x004687B0,Ship_IsShipFireRestricted,src/game/ship_ai.cpp,30%,"NovaAiShip_IsFireRestricted: derelict-govt + docked(target_stellar) + low-armor gates; mission-fleet escort gate deferred"
+0x004687B0,Ship_IsShipFireRestricted,src/game/ship_ai.cpp,30%,"NovaAiShip_IsFireRestricted: government/mission/stellar restrictions plus Bible armor disable threshold (33%, or 10% with Ship Flags 0x0010); cloak visibility remains separate"
 0x004688E0,Ship_IsShipDestroyed,src/game/ship_ai.cpp,100%,"NovaAiShip_IsDestroyed: death-timer-active or armor<=0"
 0x00468920,Ship_CanPlayerHaveMoreEscorts,,0%,
-0x00468990,Weapon_CanFireWeaponBank,src/game/weapon.cpp,35%,ammo/energy sufficiency gate for a bank via NovaWeapon_CanFireBank (incl. carrier-bay dependency + ammo counter); player ship-disable / NPC-ammo / launch-bay-dependency gates not reproduced (no disable/NPC state yet)
+0x00468990,Weapon_CanFireWeaponBank,src/game/weapon.cpp,35%,ammo/energy sufficiency gate for a bank via NovaWeapon_CanFireBank (incl. carrier-bay dependency + ammo counter); cloak-visibility / NPC-ammo / launch-bay-dependency gates not reproduced
 0x00468AF0,System_HasUsableTravelDestination,,0%,
 0x00468B50,Stellar_IsStellarReachableForTravel,,0%,
 0x00468D90,NovaUi_DrawSystemFactionConflictStatus,,0%,
@@ -460,7 +460,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046C320,Weapon_SelectTurretQuadrant,,0%,
 0x0046C4E0,Weapon_ChooseBestTurretQuadrantForTarget,,0%,
 0x0046C5C0,Weapon_ApplyTurretSpreadVelocity,,0%,
-0x0046C7A0,Ship_CheckShipDisableThresholdState,src/game/targeting.cpp,100%,NovaTargeting_ShipAtDisableThreshold: disable_threshold_progress (+0x64) vs 24/8/16.0 gates keyed on disable_state_latch sign (fields added to Ship; disable subsystem not yet written so clean ships pass).
+0x0046C7A0,Ship_IsShipCloakVisibilityThresholdActive,src/game/targeting.cpp,100%,NovaTargeting_ShipAtCloakVisibilityThreshold: strict cloak_fade_progress (+0x64) gates at 24.0 while entering, 8.0 while clearing, and 16.0 baseline keyed on cloak_transition_latch; visual fade integration remains outside the clean-room targeting module.
 0x0046C800,Frame_IsRectVisibleInViewport,,0%,
 0x0046C930,Outfit_HasScannerTargetUntargetableCapability,src/game/targeting.cpp,100%,scanned inside NovaTargeting ScannerCapabilities: any owned outfit modType 0x1e with modVal bit 0x04 (kCloakScanner untargetable flag) across primary+alt mod slots; original's tri-state memo cache not reproduced (scan is once per targeting-command press).
 0x0046CA60,Outfit_HasCloakScannerTargetCloakedCapability,src/game/targeting.cpp,100%,scanned inside NovaTargeting ScannerCapabilities: any owned outfit modType 0x1e with modVal bit 0x08 (cloaked-targeting flag); same no-cache note as the untargetable sibling.

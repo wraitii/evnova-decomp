@@ -291,7 +291,7 @@ TEST_CASE("assist helper chooses the lowest positive candidate score") {
 }
 
 TEST_CASE(
-    "disable-pressure gate is target-aware and has close-range fallbacks") {
+    "cloak engagement gate is target-aware and has close-range fallbacks") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
@@ -300,47 +300,47 @@ TEST_CASE(
   REQUIRE(!state.scenario.ships.empty());
   state.scenario.ships[0].default_outfit_counts.fill(0);
 
-  game::Ship attacker;
-  attacker.ship_instance_id = 1;
-  attacker.ship_class_id = 0;
-  attacker.ai_state_code = 4;
-  attacker.disable_threshold_progress = 17.0F;
-  attacker.disable_state_latch = 0;
-  attacker.pos_x = 0.0F;
-  attacker.pos_y = 0.0F;
+  game::Ship subject_ship;
+  subject_ship.ship_instance_id = 1;
+  subject_ship.ship_class_id = 0;
+  subject_ship.ai_state_code = 4;
+  subject_ship.cloak_fade_progress = 17.0F;
+  subject_ship.cloak_transition_latch = 0;
+  subject_ship.pos_x = 0.0F;
+  subject_ship.pos_y = 0.0F;
 
-  game::Ship target;
-  target.ship_instance_id = 2;
-  target.ship_class_id = 0;
-  target.pos_x = 100.0F;
-  target.pos_y = 100.0F;
+  game::Ship other_ship;
+  other_ship.ship_instance_id = 2;
+  other_ship.ship_class_id = 0;
+  other_ship.pos_x = 100.0F;
+  other_ship.pos_y = 100.0F;
 
-  CHECK_FALSE(game::NovaAiShip_CanApplyDisablePressureToTarget(
-      state, attacker, target));
+  CHECK_FALSE(game::NovaAiShip_CanEngageTargetUnderCloakRules(
+      state, subject_ship, other_ship));
 
-  target.disable_pressure_state = 1;
-  CHECK(game::NovaAiShip_CanApplyDisablePressureToTarget(
-      state, attacker, target));
-  target.pos_x = 201.0F;
-  CHECK_FALSE(game::NovaAiShip_CanApplyDisablePressureToTarget(
-      state, attacker, target));
+  other_ship.cloak_scanner_reveal_screen = 1;
+  CHECK(game::NovaAiShip_CanEngageTargetUnderCloakRules(
+      state, subject_ship, other_ship));
+  other_ship.pos_x = 201.0F;
+  CHECK_FALSE(game::NovaAiShip_CanEngageTargetUnderCloakRules(
+      state, subject_ship, other_ship));
 
-  target.pos_x = 100.0F;
-  target.ai_target_ship_slot = attacker.ship_instance_id;
+  other_ship.pos_x = 100.0F;
+  other_ship.ai_target_ship_slot = subject_ship.ship_instance_id;
   state.scenario.ships[0].default_outfit_ids[0] = 0x80;
   state.scenario.ships[0].default_outfit_counts[0] = 1;
   state.scenario.outfits[0].mod_type = 0x11;
-  CHECK(game::NovaAiShip_CanApplyDisablePressureToTarget(
-      state, attacker, target));
+  CHECK(game::NovaAiShip_CanEngageTargetUnderCloakRules(
+      state, subject_ship, other_ship));
 
-  target.mission_ship_slot = 0x3ff;
-  attacker.ai_state_code = 0x15;
-  CHECK_FALSE(game::NovaAiShip_CanApplyDisablePressureToTarget(
-      state, attacker, target));
+  other_ship.mission_ship_slot = 0x3ff;
+  subject_ship.ai_state_code = 0x15;
+  CHECK_FALSE(game::NovaAiShip_CanEngageTargetUnderCloakRules(
+      state, subject_ship, other_ship));
 }
 
 TEST_CASE(
-    "thresholded combat ship brakes with a finite disable patience timer") {
+    "hidden combat ship brakes with a finite engagement patience timer") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   REQUIRE(!state.scenario.ships.empty());
@@ -350,6 +350,10 @@ TEST_CASE(
   state.player.ship_class_id = 0;
   state.player.armor_points = 100.0F;
   state.player.death_timer_active = -1.0F;
+  // Ship_UpdateShipAiState calls the original cloak-engagement predicate as
+  // Can(target, attacker): the target's hidden state makes the NPC brake.
+  state.player.cloak_fade_progress = 17.0F;
+  state.player.cloak_transition_latch = 0;
 
   game::Ship &attacker = state.ShipAt(1);
   attacker.is_active = true;
@@ -358,9 +362,7 @@ TEST_CASE(
   attacker.ai_behavior_code = 3;
   attacker.ai_state_code = 4;
   attacker.primary_target_ship_slot = 0;
-  attacker.disable_threshold_progress = 17.0F;
-  attacker.disable_state_latch = 0;
-  attacker.target_disable_patience_timer = -1.0F;
+  attacker.target_engagement_patience_timer = -1.0F;
 
   state.inventory.outfit_owned_count.fill(0);
   game::NovaAi_UpdateShipState(state, attacker, /*now_ms=*/0);
@@ -368,8 +370,40 @@ TEST_CASE(
   CHECK(attacker.ai_state_code == 4);
   CHECK(attacker.ai_control_mode == 1);
   CHECK(attacker.ai_secondary_target_slot == -1);
-  CHECK(attacker.target_disable_patience_timer >= 100.0F);
-  CHECK(attacker.target_disable_patience_timer < 200.0F);
+  CHECK(attacker.target_engagement_patience_timer >= 100.0F);
+  CHECK(attacker.target_engagement_patience_timer < 200.0F);
+}
+
+TEST_CASE("cloak traits enter and clear the NPC cloak transition") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(!state.scenario.ships.empty());
+
+  auto &ship_class = state.scenario.ships[0];
+  ship_class.default_outfit_ids[0] = 0x80;
+  ship_class.default_outfit_counts[0] = 1;
+  ship_class.flags_secondary = 0x2000;
+  auto &cloaking_device = state.scenario.outfits[0];
+  cloaking_device.mod_type = 0x11;
+  cloaking_device.mod_val = 0x0004;
+
+  game::Ship ship;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = 0;
+  ship.ai_state_code = 0;
+  ship.shield_points = 25.0F;
+  ship.armor_points = 100.0F;
+  game::NovaAi_UpdateShipCloakStateFromTraits(state, ship);
+
+  CHECK(ship.cloak_transition_latch == 1);
+  CHECK(ship.shield_points == 0.0F);
+
+  ship_class.flags_secondary = 0;
+  // Ghidra's baseline visibility comparison is strict (>16.0), so exactly
+  // 16.0 has not crossed the clear gate yet.
+  ship.cloak_fade_progress = 17.0F;
+  game::NovaAi_UpdateShipCloakStateFromTraits(state, ship);
+  CHECK(ship.cloak_transition_latch == -1);
 }
 
 // A fire-restricted (derelict-government) ship must NOT engage the heavy AI:

@@ -44,6 +44,19 @@ void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms);
 [[nodiscard]] bool NovaAiShip_IsFireRestricted(const GameState &state,
                                                const Ship &ship);
 
+// Ghidra 0x004680d0 Ship_OnShipCloakStateEntered. Starts the signed cloak
+// transition and drops shields when ModType 17 requests it.
+void NovaAi_OnShipCloakStateEntered(GameState &state, Ship &ship);
+
+// Ghidra 0x00468190 Ship_OnShipCloakStateCleared. Starts the negative cloak
+// transition when the ship becomes visible enough to leave cloak.
+void NovaAi_OnShipCloakStateCleared(Ship &ship);
+
+// Ghidra 0x00411d00 Ship_UpdateShipCloakStateFromTraits. Re-evaluates the
+// NPC's cloak transition from its ModType 17 loadout, resources, class Flags2,
+// combat state, and target relationship. Weapon hits do not produce the fade.
+void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship);
+
 // Ghidra 0x00410f20 Ship_CanShipInterceptCurrentPrimaryTarget. Validates the
 // current target's activity/system, minimum hull mass, relative-velocity
 // bearing, and the caller/target class-speed relation.
@@ -98,17 +111,18 @@ void NovaAi_UpdateShipAI(GameState &state,
 // on these to pick its prompt and to order the target ship around.
 // ---------------------------------------------------------------------------
 
-// Ghidra 0x00464a90 Ship_CanShipApplyDisablePressureToTarget. True when
-// `attacker` can apply disable/surrender pressure to `target`: the attacker
-// is not in state 0x15, is not past its own disable threshold, or the target
-// is actively countering at close range with a disable outfit/pressure state.
-[[nodiscard]] bool NovaAiShip_CanApplyDisablePressureToTarget(
-    const GameState &state, const Ship &attacker, const Ship &target);
+// Ghidra 0x00464a90 Ship_CanShipEngageTargetUnderCloakRules. True when the
+// first ship's cloak visibility can be engaged using the second ship's
+// mission/scanner/position context. The neutral subject/other ordering is
+// intentional: callers reuse this predicate in pursuit, hostility, and weapon
+// selection paths with different attacker/target roles.
+[[nodiscard]] bool NovaAiShip_CanEngageTargetUnderCloakRules(
+    const GameState &state, const Ship &subject_ship, const Ship &other_ship);
 
 // Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget. True when a pursuing
-// ship should keep pressing its primary target (or the player under mutual
-// targeting): active, not fire-restricted, holding an AI target and a primary
-// target, able to apply disable pressure, not coasting through a reversal
+// ship should keep its primary target (or the player under mutual targeting):
+// active, not fire-restricted, holding an AI target and a primary target,
+// passing the cloak-aware engagement predicate, not coasting through a reversal
 // (reverse_speed_bias <= 0), and in a non-disengage AI state (not in
 // {7,9,15,10,11,5,12,18}) -- either directly on the player, on a ship that
 // targets the player, or pressed by a third ship that itself holds the player
