@@ -92,8 +92,54 @@ constexpr float kAssistInnerTurnRadiusScale = 15.0F;
 constexpr float kCombatCloseRange = 165.0F;
 constexpr float kCombatStationRange = 251.0F; // 0xfb
 
+// --- Combat control-mode constants (Ship_ApplyShipAiControls, decoded from
+// the typed _DAT_00575xxx globals; same source table as the travel block). ---
+// Proximity gates: 165 px/axis for the tight-approach / boost-return gate
+// (0x5750b0), 123 px for the evasive-break order (0x575124, decoded from the
+// raw bytes: 00 00 f6 42), 82 px for the long-axis break-off (0x575128),
+// 200 px for the hold/approach velocity-lerp (0x575160).
+constexpr float kEvasiveOrderGatePx = 123.0F;
+constexpr float kBreakOuterGatePx = 82.0F;
+constexpr float kHoldApproachGatePx = 200.0F;
+// Mode-0xc/0xf velocity-match tolerance, px/tick per axis (0x575158).
+constexpr float kVelocityMatchTol = 0.525F;
+// Mode-0x10 evasive break: 1.5x thrust (0x575130, double), 135 deg heading
+// offset (0x575138, float), sign from ship_instance_id parity.
+constexpr float kEvasiveThrustFactor = 1.5F;
+constexpr float kEvasiveHeadingOffsetDeg = 135.0F;
+// Mode-0x11 boost: 2.75x thrust (0x575140), 1.8x max-speed cruise (0x575148).
+constexpr float kBoostThrustFactor = 2.75F;
+constexpr float kBoostCruiseFactor = 1.8F;
+// Mode-0xc brake while outrunning the target: 0.66x thrust (0x575168, double).
+constexpr float kVelMatchBrakeFactor = 0.66F;
+// Position-creep factor shared by mode 8 (escort follow) and the mode-0xc
+// formation move: eff_thrust * 10 (0x575170, double) per frame-time unit.
+constexpr float kFormationCreepFactor = 10.0F;
+// Mode-0xc formation position offset radius (0x575178, float = 48 px) applied
+// in front of the leader's heading+135 when positioning (phase-8 area).
+constexpr float kFormationOffsetRadiusPx = 48.0F;
+// Mode-0x14 scripted velocity-match creep half-spans: 150 px x / 80 px y
+// per axis (0x57517c / 0x575180), merge gate turn+10 (0x5750a0 = 10.0).
+constexpr float kScriptPosXSpan = 150.0F;
+constexpr float kScriptPosYSpan = 80.0F;
+constexpr float kScriptAlignAddend = 10.0F;
+// Control-mode 10 (stationary cleanup reverse): desired -5.75 px/tick with a
+// -3.67 thrust command (raw float bits 0xC0B80000 / 0xC06AE148).
+constexpr float kMode10ReverseSpeed = -5.75F;
+constexpr float kMode10ReverseThrust = -3.67F;
+// Escort-follow half-span stand-in: Sprite_GetShipClassEscortShotHalfSpan
+// (0x004624c0) returns the class escort sprite's shot half-span or its 0x4B =
+// 75 px debug fallback; the clean-room sprite tables are not modelled, so the
+// debug fallback stands in (TODO(decomp)).
+constexpr float kEscortHalfSpanPx = 75.0F;
+
 constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
 constexpr float kFullCircleDeg = 360.0F;
+// The reference simulation cadence (30 Hz): the original's
+// _g_avg_frame_time_ms at 30 fps, used by the control-mode creeps and the
+// velocity-match/scripted ramps (modes 8/0xc/0xf/0x14 read the measured frame
+// time in milliseconds, not the normalized tick unit).
+constexpr float kReferenceFrameTimeMs = 1000.0F / 30.0F;
 
 // Game-convention angle winding helper (0..360, 0 = up / -y).
 float WrapDeg(float d) {
@@ -262,9 +308,8 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
       }
       const Weapon *weapon =
           state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
-      if (weapon != nullptr &&
-          static_cast<float>(weapon->reload_ticks) <
-              ship.npc_weapon_bank_cooldown[bank_index]) {
+      if (weapon != nullptr && static_cast<float>(weapon->reload_ticks) <
+                                   ship.npc_weapon_bank_cooldown[bank_index]) {
         should_enter = true;
         break;
       }
@@ -289,14 +334,14 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   if ((flags & 0x1000U) != 0U &&
       NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
     if (ship.ai_state_code == 4 && ship.primary_target_ship_slot >= 0 &&
-        state.SlotInRange(static_cast<std::size_t>(
-            ship.primary_target_ship_slot))) {
-      const Ship &target = state.ShipAt(static_cast<std::size_t>(
-          ship.primary_target_ship_slot));
-      should_enter = should_enter ||
-                     std::abs(ship.pos_x - target.pos_x) >
-                         kCloakTargetDistance ||
-                     std::abs(ship.pos_y - target.pos_y) > kCloakTargetDistance;
+        state.SlotInRange(
+            static_cast<std::size_t>(ship.primary_target_ship_slot))) {
+      const Ship &target =
+          state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+      should_enter =
+          should_enter ||
+          std::abs(ship.pos_x - target.pos_x) > kCloakTargetDistance ||
+          std::abs(ship.pos_y - target.pos_y) > kCloakTargetDistance;
     }
     if (ship.ai_state_code == 0x10 && ship.ai_control_mode != 0x14) {
       should_enter = true;
@@ -310,8 +355,8 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
       state.SlotInRange(static_cast<std::size_t>(ship.ai_target_ship_slot))) {
     const Ship &target =
         state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
-    should_enter = should_enter ||
-                   NovaTargeting_ShipAtCloakVisibilityThreshold(target);
+    should_enter =
+        should_enter || NovaTargeting_ShipAtCloakVisibilityThreshold(target);
   }
   if (should_enter) {
     NovaAi_OnShipCloakStateEntered(state, ship);
@@ -999,9 +1044,9 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // Ghidra's state-4/state-0xd cloak-engagement gate. Once an attacker has
   // crossed its own cloak visibility threshold, it may only keep this target
-  // if the target remains engageable at close range. Higher-behavior ships brake and
-  // wait for a bounded patience interval; ordinary ships either hold at the
-  // centre or fall back to their jump-capable idle template.
+  // if the target remains engageable at close range. Higher-behavior ships
+  // brake and wait for a bounded patience interval; ordinary ships either hold
+  // at the centre or fall back to their jump-capable idle template.
   if (ship.primary_target_ship_slot != -1 &&
       (ship.ai_state_code == 4 || ship.ai_state_code == 0xd) &&
       state.SlotInRange(
@@ -1614,7 +1659,10 @@ void NovaAi_UpdateShipState(GameState &state,
 // (5-0x17) are provisionally mapped onto the same steering primitive until
 // the combat/formation systems land. The movement constants are now decoded
 // from the Ghidra _DAT_00575xxx globals (see the constant block at the top).
-void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
+void NovaAi_ApplyControls(GameState &state,
+                          Ship &ship,
+                          float frame_time_ms,
+                          std::uint32_t now_ms) {
   (void)frame_time_ms;
   ship.ai_forward_thrust_cmd = 0.0F;
   ship.ai_fire_trigger_latch = 0;
@@ -1649,56 +1697,115 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
                           kFullCircleDeg);
   };
 
-  // Combat modes address either the primary target or the companion AI target
-  // slot. Keep this lookup local to the controls bridge so the state machine
-  // can continue to use the original slot fields without introducing a new
-  // target object abstraction.
-  auto target_position = [&](float &x, float &y) {
-    std::int16_t target_slot = ship.primary_target_ship_slot;
-    if (target_slot == -1) {
-      target_slot = ship.ai_secondary_target_slot;
-    }
-    if (target_slot < 0 ||
-        !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
-      return false;
-    }
-    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-    if (!target.is_active) {
-      return false;
-    }
-    x = target.pos_x;
-    y = target.pos_y;
-    return true;
+  // Math_AddPolarVelocity (0x0043b4a0): adds speed along a game-convention
+  // bearing (0 = up, clockwise) to an XY pair.
+  auto add_polar_step = [](float &x, float &y, float bearing_deg, float speed) {
+    const float rad = bearing_deg * kDegToRad;
+    x += std::sin(rad) * speed;
+    y -= std::cos(rad) * speed;
   };
 
-  auto steer_toward_target = [&](float alignment_gate, float desired_speed) {
-    float target_x = 0.0F;
-    float target_y = 0.0F;
-    if (!target_position(target_x, target_y)) {
-      return false;
+  // The combat modes read the primary target slot, falling back to the
+  // companion AI slot (Ship_ApplyShipAiControls reads ship[0x1c] then
+  // ship[0x1b]). Returns -1 when neither is set or the slot is out of range.
+  auto combat_target_slot = [&]() {
+    std::int16_t slot = ship.primary_target_ship_slot;
+    if (slot == -1) {
+      slot = ship.ai_secondary_target_slot;
     }
-    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
-        BearingDeg(ship.pos_x, ship.pos_y, target_x, target_y));
-    if (std::abs(heading_delta_deg()) < alignment_gate) {
-      ship.ai_forward_thrust_cmd = eff_thrust;
-      ship.ai_desired_speed = desired_speed;
+    if (slot < 0 || !state.SlotInRange(static_cast<std::size_t>(slot))) {
+      return std::int16_t{-1};
     }
-    return true;
+    return slot;
+  };
+
+  // Ship_IsShipFireRestricted gate: the original skips every combat/behavior
+  // mode for fire-restricted ships (they fall through with thrust 0).
+  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, ship);
+
+  // The mode-0x6 evasive-break player gate (NovaAi_PlayerCombatRatingGate
+  // 0x0046b330: a 1-in-0x540 roll beaten by the player's combat-rating
+  // points). The clean-room does not track the player's combat rating, so the
+  // gate conservatively fails (TODO(decomp): g_player_combat_rating_points).
+  auto player_combat_rating_gate = [&]() { return false; };
+
+  // Wrap a heading into [0, 360) using the original's 0x168-degree arithmetic.
+  auto wrap_deg_int = [](int deg) {
+    deg %= 360;
+    if (deg < 0) {
+      deg += 360;
+    }
+    return static_cast<std::int16_t>(deg);
   };
 
   switch (ship.ai_control_mode) {
   case 0:
-  case 0x15:
-  case 0x16:
   case 0x17:
-    // Idle / static: no thrust, hold heading. 0x15/0x16 are the jump-in /
-    // jump-out modes (freeflight-object / stellar steering, Phase 7) and 0x17
-    // the jump-arrival hold -- the original Ship_ApplyShipAiControls has no
-    // block for 0x17 (thrust stays 0), and 0x15/0x16 need the jump systems, so
-    // all three park the ship.
-    ship.ai_forward_thrust_cmd = 0.0F;
+    // Idle: the original has no mode-0 block (thrust stays 0, heading held).
+    // Mode 0x17 (jump-arrival hold) also has no block in the original --
+    // thrust stays 0.
     ship.ai_desired_speed = 0.0F;
     break;
+
+  case 0x15:
+    // Jump-in positioning: the original scans the 64 freeflight anchors for
+    // the nearest, steers at it (thrust on align, else 1.75x-thrust damp), and
+    // drops to control mode 0 when no anchor exists. No freeflight anchors are
+    // modelled, so the original's no-anchor outcome (mode 0) holds; real jump
+    // positioning awaits Phase 7.
+    ship.ai_control_mode = 0;
+    ship.ai_desired_speed = 0.0F;
+    break;
+
+  case 0x16:
+    // Jump-out / retreat: steer at the target stellar's map coordinates and
+    // select a weapon when aligned (weapon selection deferred, Phase 5). The
+    // original never thrusts in this mode.
+    if (!fire_restricted && ship.ai_secondary_target_slot >= 0x80) {
+      const Stellar *st =
+          StellarByResourceId(state, ship.ai_secondary_target_slot);
+      if (st) {
+        ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+            BearingDeg(ship.pos_x,
+                       ship.pos_y,
+                       static_cast<float>(st->pos_x),
+                       static_cast<float>(st->pos_y)));
+        if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
+          // Weapon_SelectGeneralWeaponBank (deferred, Phase 5).
+        }
+      }
+    }
+    ship.ai_desired_speed = 0.0F;
+    break;
+
+  case 0x12: {
+    // Chase the formation leader: head at the point 15x max-speed in front
+    // of the leader's heading (Math_AddPolarVelocity on the leader position)
+    // and thrust within turn+20 deg. With no leader the original falls back
+    // to control mode 0; state-4 guided-weapon selection is deferred.
+    if (fire_restricted) {
+      break;
+    }
+    const std::int16_t leader_slot = ship.formation_leader_ship_slot;
+    if (leader_slot < 1 ||
+        !state.SlotInRange(static_cast<std::size_t>(leader_slot))) {
+      ship.ai_control_mode = 0;
+      break;
+    }
+    const Ship &leader = state.ShipAt(static_cast<std::size_t>(leader_slot));
+    float tx = leader.pos_x;
+    float ty = leader.pos_y;
+    add_polar_step(tx, ty, leader.heading / kDegToRad, max_speed * 15.0F);
+    ship.ai_desired_heading_deg =
+        static_cast<std::int16_t>(BearingDeg(ship.pos_x, ship.pos_y, tx, ty));
+    if (std::abs(heading_delta_deg()) < eff_turn_deg + 20.0F) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+    }
+    if (ship.ai_state_code == 4 && ship.primary_target_ship_slot != -1) {
+      // Weapon_SelectGuidedWeaponBankForPrimaryTarget (deferred, Phase 5).
+    }
+    break;
+  }
 
   case 1: {
     // Slow to a stop (original mode 1). While any velocity component is above
@@ -1708,6 +1815,9 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     // damp by 0.95 and drop to idle control mode 0. Gravity-shield ships brake
     // with a NEGATIVE thrust command (the integrator's scalar-speed path). The
     // state-code-9 not-yet-aligned damp is kept for parity.
+    if (fire_restricted) {
+      break;
+    }
     if (std::abs(ship.vel_x) < kMode1FastThreshold &&
         std::abs(ship.vel_y) < kMode1FastThreshold) {
       ship.vel_x *= kMode1StopDamp;
@@ -1737,12 +1847,11 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     } else {
       ship.ai_forward_thrust_cmd = -eff_thrust * kMode1SlowThrustFactor;
     }
+    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
     break;
   }
 
-  case 2:
-  case 9:
-  case 0xb: {
+  case 2: {
     // Travel / pursue a map or ship coordinate in ai_secondary_target_slot (a
     // stellar resource id, or a ship slot). Steer the heading toward the
     // target; thrust only while the hull is within eff_turn_deg + 5.0 deg of
@@ -1750,6 +1859,9 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     // applies thrust once roughly aligned). Far from the stellar cruise at the
     // max-speed clamp (desired = 0); within 500 px per axis throttle to 25% of
     // max speed for the arrival slowdown.
+    if (fire_restricted) {
+      break;
+    }
     float tx = ship.pos_x, ty = ship.pos_y;
     if (ship.ai_secondary_target_slot == 0) {
       const Ship &p = state.ShipAt(0);
@@ -1789,6 +1901,9 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     // Approach the system centre: point away from the centre and coast
     // (desired = 0 -> max-speed clamp in the integrator), thrusting once
     // aligned within eff_turn_deg + 3.0 deg.
+    if (fire_restricted) {
+      break;
+    }
     ship.ai_desired_heading_deg = static_cast<std::int16_t>(
         BearingDeg(0.0F, 0.0F, ship.pos_x, ship.pos_y));
     if (std::abs(heading_delta_deg()) < eff_turn_deg + kMode3AlignAddend) {
@@ -1798,77 +1913,783 @@ void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms) {
     break;
 
   case 4:
-  case 0xd:
-    // Station-keep / hold. The original mode 4 is the jump spin-up timer
-    // (Phase 7) and mode 0xd the formation-hold
-    // (Ship_MoveShipTowardFormationOffset); neither is wired, so keep the
-    // placeholder hold behavior but with the real thrust value.
-    // TODO(decomp): jump timer + formation offset.
-    ship.ai_desired_speed = max_speed * 0.5F;
-    ship.ai_forward_thrust_cmd = ship.speed > 0.1F ? eff_thrust : 0.0F;
-    break;
-
-  case 5:
-    // Pursue a primary/AI target and apply thrust once aligned within the
-    // original mode-5 turn-rate +20 degree window.
-    if (!steer_toward_target(eff_turn_deg + 20.0F, 0.0F)) {
-      ship.ai_desired_speed = 0.0F;
+    // Jump spin-up: point away from the centre and accumulate the hold timer.
+    // The original's completion block (hold timer past the class-scaled jump
+    // duration) zeroes the timer, clears the ship's system id and deactivates
+    // it (the actual system transition is Phase 7), so that arm is not wired
+    // yet (TODO(decomp)); the heading + timer ramp below are faithful.
+    if (fire_restricted) {
+      break;
     }
-    break;
-
-  case 6:
-    // Combat pursuit / lead-in. Weapon aiming is deferred, but the original
-    // movement gate (turn-rate +15) still determines when thrust begins.
-    if (!steer_toward_target(eff_turn_deg + 15.0F, 0.0F)) {
-      ship.ai_desired_speed = 0.0F;
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+        BearingDeg(0.0F, 0.0F, ship.pos_x, ship.pos_y));
+    if (ship.ai_station_hold_timer <= 0.0F) {
+      ship.ai_station_hold_timer = 1.0F;
+      ship.ai_mode_start_time_ms = now_ms;
     }
-    break;
-
-  case 7:
-    // Strafe/formation approach: retain the wider turn-rate*4 alignment
-    // window used by the original before it selects a weapon bank.
-    if (!steer_toward_target(eff_turn_deg * 4.0F, 0.0F)) {
-      ship.ai_desired_speed = 0.0F;
+    if (ship.ai_station_hold_timer > 1.0F &&
+        now_ms < ship.ai_mode_start_time_ms) {
+      ship.ai_mode_start_time_ms = now_ms;
     }
+    ship.ai_station_hold_timer += 1.0F;
     break;
 
-  case 8:
-    // Hold at the close pursuit radius. The original uses this mode for the
-    // final approach while weapon range/cloak engagement is evaluated.
-    if (!steer_toward_target(eff_turn_deg + 1.0F, 0.0F)) {
-      ship.ai_desired_speed = 0.0F;
+  case 0xd: {
+    // Formation hold with leader release (Ship_MoveShipTowardFormationOffset
+    // 0x00414390 remains Phase 8). ai_target_ship_slot is the followed leader.
+    // While the leader's station-hold timer runs (>1.0) the ship matches the
+    // leader's spin-up: damp to a standstill (0.95, desired -4.0, timer +1)
+    // once the leader is within 11 deg of its own desired heading; once the
+    // ship's own hold timer passes 30 and the leader is not the player, the
+    // ship releases back to its class default behavior (state 2 / mode 4).
+    // Otherwise it copies the leader's velocity and glow (formation offset
+    // deferred).
+    if (fire_restricted) {
+      break;
     }
-    break;
-
-  case 0xc:
-    // Close assist/engagement mode. Keep the player/target bearing live while
-    // leaving the weapon-bank side effect to the later combat slice.
-    if (!steer_toward_target(eff_turn_deg + 1.0F, 0.0F)) {
-      ship.ai_desired_speed = 0.0F;
+    const std::int16_t leader_slot = ship.ai_target_ship_slot;
+    if (leader_slot < 0 ||
+        !state.SlotInRange(static_cast<std::size_t>(leader_slot))) {
+      break;
     }
-    break;
-
-  case 0xf:
-    // Disabled-target pursuit uses the same target bearing before its
-    // boarding transition is available.
-    if (!steer_toward_target(eff_turn_deg + 1.0F, 0.0F)) {
-      ship.ai_desired_speed = 0.0F;
-    }
-    break;
-
-  case 0xe:
-  case 0x10:
-  case 0x11:
-  case 0x12:
-  case 0x13:
-  case 0x14:
-  default:
-    // Formation/scripted modes remain stand-ins until their external target
-    // records are reconstructed. Preserve the previous heading/cadence.
+    const Ship &leader = state.ShipAt(static_cast<std::size_t>(leader_slot));
+    const float leader_heading_deg = leader.heading / kDegToRad;
     ship.ai_desired_heading_deg =
-        static_cast<std::int16_t>(WrapDeg(ship.heading / kDegToRad));
-    ship.ai_desired_speed = max_speed;
-    ship.ai_forward_thrust_cmd = eff_thrust;
+        static_cast<std::int16_t>(std::round(leader_heading_deg));
+    if (leader.ai_station_hold_timer > 1.0F) {
+      if (ship.ai_station_hold_timer > 1.0F &&
+          now_ms < ship.ai_mode_start_time_ms) {
+        ship.ai_mode_start_time_ms = now_ms;
+      }
+      if (ship.ai_station_hold_timer > 30.0F && leader_slot != 0) {
+        ship.ai_desired_heading_deg = leader.ai_desired_heading_deg;
+        ship.ai_target_ship_slot = -1;
+        ship.ai_behavior_code =
+            cls ? cls->default_ai_behavior : ship.ai_behavior_code;
+        ship.ai_state_code = 2;
+        ship.ai_control_mode = 4;
+        break;
+      }
+      const float leader_delta = std::abs(
+          std::remainder(static_cast<float>(leader.ai_desired_heading_deg) -
+                             std::round(leader_heading_deg),
+                         kFullCircleDeg));
+      if (leader_delta < 11.0F) {
+        ship.ai_secondary_target_slot = leader.ai_secondary_target_slot;
+        if (ship.ai_station_hold_timer == 0.0F) {
+          ship.ai_station_hold_timer = 1.0F;
+          ship.ai_mode_start_time_ms = now_ms;
+        }
+        ship.vel_x *= kMode1StopDamp;
+        ship.vel_y *= kMode1StopDamp;
+        ship.speed *= kMode1StopDamp;
+        ship.ai_forward_thrust_cmd = 0.0F;
+        ship.ai_desired_speed = -4.0F;
+        ship.ai_station_hold_timer += 1.0F;
+      } else if (leader_delta <= eff_turn_deg) {
+        ship.reverse_speed_bias = 180.0F; // raw float 0x43340000
+      } else {
+        ship.ai_desired_heading_deg = leader.ai_desired_heading_deg;
+        ship.ai_station_hold_timer = -4.0F;
+      }
+    } else {
+      ship.vel_x = leader.vel_x;
+      ship.vel_y = leader.vel_y;
+      // Ship_MoveShipTowardFormationOffset (Phase 8) + glow copy:
+      ship.engine_glow_level = leader.engine_glow_level;
+    }
+    break;
+  }
+
+  case 5: {
+    // Pursue / maintain distance on the primary target. NOTE: the original's
+    // bearing call is Math_BearingFromPointToPoint(target_pos, ship_pos) --
+    // the REVERSE of every other combat mode -- so mode 5 steers away from
+    // the target (the close-range "attack while backing off" strafe; the
+    // state machine only selects it within the 251 px combat station range).
+    // Formation-offset mirroring and the weapon-bank select for states 3/4 are
+    // deferred. Close (165 px/axis) + the +0xBD latch breaks off to a boost
+    // (0x11); the latch has no producer yet so the transition is inert.
+    if (fire_restricted || ship.primary_target_ship_slot == -1) {
+      break;
+    }
+    if (ship.formation_leader_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.formation_leader_ship_slot) <
+            GameState::kMaxShips) {
+      // Ship_MoveShipTowardFormationOffset (Phase 8).
+      ship.engine_glow_level =
+          state
+              .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
+              .engine_glow_level;
+    }
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+        BearingDeg(target.pos_x, target.pos_y, ship.pos_x, ship.pos_y));
+    if (std::abs(heading_delta_deg()) < eff_turn_deg + 20.0F) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      ship.ai_desired_speed = 0.0F;
+    }
+    if (ship.ai_state_code == 3 || ship.ai_state_code == 4) {
+      // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+    }
+    if (ship.ai_brake_to_boost_latch != 0 &&
+        (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange ||
+         std::abs(ship.pos_y - target.pos_y) < kCombatCloseRange)) {
+      ship.ai_control_mode = 0x11;
+    }
+    break;
+  }
+
+  case 6: {
+    // Combat pursuit / lead-in: steer at the primary target (predictive aim
+    // when a weapon bank is live is deferred, so the straight bearing stands
+    // in), thrust once within turn+15 deg. A second turn*3 alignment gate
+    // selects direct-fire weapons (deferred) and, for gravity-shield ships
+    // within 100 px, throttles the cruise down to the target's scalar speed.
+    // Break-off: at/inside 165 px (or any distance for non-shield ships) the
+    // evasive-break order fires -- a player target must beat the (unmodelled)
+    // combat-rating gate, non-player targets skip it half the time -- when the
+    // ship is a light fighter (class default behavior > 2, mass < 200 t)
+    // closing on a lighter/earlier target within 123 px with both hulls facing
+    // each other within 31 deg; the evasive heading is current +/-135 deg by
+    // instance-id parity (0x10). The 0xBD-latched boost break-off (0x11)
+    // beyond 82 px is gated as in the original.
+    if (fire_restricted || ship.primary_target_ship_slot == -1) {
+      break;
+    }
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    const float target_bearing_deg =
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(target_bearing_deg);
+    // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+    if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      ship.ai_desired_speed = 0.0F;
+    }
+    if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
+      // Weapon_SelectDirectFireWeaponBankForPrimaryTarget (deferred).
+      const bool gravity_shield =
+          cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
+      if (gravity_shield && std::abs(ship.pos_x - target.pos_x) < 100.0F &&
+          std::abs(ship.pos_y - target.pos_y) < 100.0F &&
+          target.speed < ship.speed) {
+        ship.ai_desired_speed = target.speed;
+      }
+    }
+    const float dx = std::abs(ship.pos_x - target.pos_x);
+    const float dy = std::abs(ship.pos_y - target.pos_y);
+    const bool gravity_shield =
+        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
+    if (dx < kCombatCloseRange || dy < kCombatCloseRange || !gravity_shield) {
+      bool allowed = false;
+      if (target_slot == 0) {
+        allowed = player_combat_rating_gate();
+      } else {
+        std::uniform_int_distribution<int> coin(0, 1);
+        if (coin(state.rng) == 0) {
+          allowed = player_combat_rating_gate();
+        } else {
+          allowed = true;
+        }
+      }
+      if (allowed && cls != nullptr && cls->default_ai_behavior > 2 &&
+          cls->mass_tons < 200 && dx < kEvasiveOrderGatePx &&
+          dy < kEvasiveOrderGatePx) {
+        const ShipClass *target_cls = state.scenario.Ship(
+            static_cast<std::int16_t>(target.ship_class_id + 0x80));
+        const bool smaller_first =
+            target_slot < ship.ship_instance_id ||
+            (ship.ship_instance_id < target_slot && target_cls != nullptr &&
+             cls->mass_tons < target_cls->mass_tons);
+        if (smaller_first && std::abs(std::remainder(
+                                 target_bearing_deg - ship.heading / kDegToRad,
+                                 kFullCircleDeg)) < 31.0F) {
+          const float target_heading_deg = target.heading / kDegToRad;
+          const float facing_back = WrapDeg(target_bearing_deg + 180.0F);
+          if (std::abs(std::remainder(facing_back - target_heading_deg,
+                                      kFullCircleDeg)) < 31.0F) {
+            ship.ai_control_mode = 0x10;
+            const float cur_deg = ship.heading / kDegToRad;
+            const bool even_instance = (ship.ship_instance_id & 1) == 0;
+            ship.ai_evasive_heading_deg = wrap_deg_int(
+                static_cast<int>(std::round(cur_deg) +
+                                 (even_instance ? kEvasiveHeadingOffsetDeg
+                                                : -kEvasiveHeadingOffsetDeg)));
+            ship.ai_desired_heading_deg =
+                wrap_deg_int(static_cast<int>(std::round(cur_deg)));
+          }
+        }
+      }
+    }
+    if (ship.ai_brake_to_boost_latch != 0 && dx > kBreakOuterGatePx &&
+        dy > kBreakOuterGatePx &&
+        std::abs(std::remainder(target_bearing_deg - ship.heading / kDegToRad,
+                                kFullCircleDeg)) < 31.0F) {
+      ship.ai_control_mode = 0x11;
+    }
+    break;
+  }
+
+  case 0x10: {
+    // Evasive break: fly the stored evasive heading (+/-135 deg) at 1.5x
+    // thrust with cruise 0, then drop back to combat pursuit (6) once the
+    // hull is within turn*3 deg of it (or, for gravity-shield ships, once the
+    // target is beyond 165 px). Weapon selection at close range is deferred.
+    if (fire_restricted || ship.primary_target_ship_slot == -1) {
+      break;
+    }
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    ship.ai_desired_heading_deg = ship.ai_evasive_heading_deg;
+    ship.ai_forward_thrust_cmd = eff_thrust * kEvasiveThrustFactor;
+    ship.ai_desired_speed = 0.0F;
+    if (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange ||
+        std::abs(ship.pos_y - target.pos_y) < kCombatCloseRange) {
+      // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+    }
+    const bool gravity_shield =
+        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
+    if (!gravity_shield) {
+      if (std::abs(
+              std::remainder(static_cast<float>(ship.ai_evasive_heading_deg) -
+                                 ship.heading / kDegToRad,
+                             kFullCircleDeg)) < eff_turn_deg * 3.0F) {
+        ship.ai_control_mode = 6;
+      }
+    } else if (std::abs(ship.pos_x - target.pos_x) > kCombatCloseRange ||
+               std::abs(ship.pos_y - target.pos_y) > kCombatCloseRange) {
+      ship.ai_control_mode = 6;
+    }
+    break;
+  }
+
+  case 0x11: {
+    // Boost to target: over-speed cruise (2.75x thrust, 1.8x max speed) on
+    // the straight bearing, weapon selection once aligned (deferred), and a
+    // return to combat pursuit (6) inside 165 px (or a 1-in-100 roll further
+    // out). Formation-offset mirroring is deferred (Phase 8).
+    if (fire_restricted || ship.primary_target_ship_slot == -1) {
+      break;
+    }
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    ship.ai_forward_thrust_cmd = eff_thrust * kBoostThrustFactor;
+    ship.ai_desired_speed = max_speed * kBoostCruiseFactor;
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
+    if (ship.formation_leader_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.formation_leader_ship_slot) <
+            GameState::kMaxShips) {
+      // Ship_MoveShipTowardFormationOffset (Phase 8).
+      ship.engine_glow_level =
+          state
+              .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
+              .engine_glow_level;
+    }
+    const float dx = std::abs(ship.pos_x - target.pos_x);
+    const float dy = std::abs(ship.pos_y - target.pos_y);
+    if (dx < kCombatCloseRange && dy < kCombatCloseRange) {
+      // Weapon_SelectWeaponBankForCurrentTarget + direct-fire select
+      // (deferred, Phase 5).
+      if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
+        // Weapon_SelectDirectFireWeaponBankForPrimaryTarget (deferred).
+      }
+    } else if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
+      // Weapon_SelectGuidedWeaponBankForPrimaryTarget (deferred).
+    }
+    if (dx < kCombatCloseRange && dy < kCombatCloseRange) {
+      ship.ai_control_mode = 6;
+    } else {
+      std::uniform_int_distribution<int> roll(0, 99);
+      if (roll(state.rng) == 0) {
+        ship.ai_control_mode = 6;
+      }
+    }
+    break;
+  }
+
+  case 7: {
+    // Combat strafe / guided approach: aim (predictive when a weapon bank is
+    // live; deferred -> straight bearing), select weapons at the turn*3 gate
+    // (deferred), thrust at the turn*4 gate, and break off to a boost (0x11)
+    // beyond 82 px/axis when the 0xBD latch is set and the target bearing is
+    // within 31 deg. Formation-offset mirroring is deferred (Phase 8).
+    if (fire_restricted || ship.primary_target_ship_slot == -1) {
+      break;
+    }
+    if (ship.formation_leader_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.formation_leader_ship_slot) <
+            GameState::kMaxShips) {
+      // Ship_MoveShipTowardFormationOffset (Phase 8).
+      ship.engine_glow_level =
+          state
+              .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
+              .engine_glow_level;
+    }
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    const float target_bearing_deg =
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(target_bearing_deg);
+    if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
+      // Weapon_SelectDirectFireWeaponBankForPrimaryTarget +
+      // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+    }
+    if (std::abs(heading_delta_deg()) < eff_turn_deg * 4.0F) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      ship.ai_desired_speed = 0.0F;
+      // Weapon_SelectGuidedWeaponBankForPrimaryTarget (deferred).
+    }
+    if (ship.ai_brake_to_boost_latch != 0 &&
+        std::abs(ship.pos_x - target.pos_x) > kBreakOuterGatePx &&
+        std::abs(ship.pos_y - target.pos_y) > kBreakOuterGatePx &&
+        std::abs(std::remainder(target_bearing_deg - ship.heading / kDegToRad,
+                                kFullCircleDeg)) < 31.0F) {
+      ship.ai_control_mode = 0x11;
+    }
+    break;
+  }
+
+  case 8: {
+    // Escort follow: steer at the escorted ship (ai_secondary_target_slot)
+    // and thrust within turn+1 deg. Outside the class escort half-span the
+    // ship creeps its position toward ai_target_ship_slot at 10x thrust per
+    // frame and drops desired speed by the same step; inside, the original
+    // launches/hands off the escort (deferred, Phase 8) or clears the escort
+    // for a non-capturable player escort. A destroyed/fire-restricted ship or
+    // a missing secondary target falls back to idle (state/control 0).
+    const std::int16_t target_slot = ship.ai_secondary_target_slot;
+    if (target_slot == -1) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      break;
+    }
+    if (NovaAiShip_IsDestroyed(ship) || fire_restricted) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      break;
+    }
+    if (!state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      break;
+    }
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    if (!target.is_active ||
+        target.current_system_id != ship.current_system_id) {
+      ship.ai_behavior_code =
+          cls ? cls->default_ai_behavior : ship.ai_behavior_code;
+      ship.ai_state_code = 0;
+      break;
+    }
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
+    if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      ship.ai_desired_speed = 0.0F;
+    }
+    if (kEscortHalfSpanPx < std::abs(target.pos_x - ship.pos_x) ||
+        kEscortHalfSpanPx < std::abs(target.pos_y - ship.pos_y)) {
+      // Creep toward the followed lead (ai_target_ship_slot) at 10x thrust.
+      const float step = eff_thrust * kFormationCreepFactor * frame_time_ms;
+      const std::int16_t lead_slot = ship.ai_target_ship_slot;
+      if (lead_slot > 0 &&
+          static_cast<std::size_t>(lead_slot) < GameState::kMaxShips) {
+        const Ship &lead = state.ShipAt(static_cast<std::size_t>(lead_slot));
+        if (ship.pos_x <= lead.pos_x - step) {
+          ship.pos_x += step;
+        } else if (lead.pos_x + step <= ship.pos_x) {
+          ship.pos_x -= step;
+        }
+        if (ship.pos_y <= lead.pos_y - step) {
+          ship.pos_y += step;
+        } else if (lead.pos_y + step <= ship.pos_y) {
+          ship.pos_y -= step;
+        }
+      }
+      ship.ai_desired_speed -= step;
+    } else {
+      // Inside the escort half-span: the original launches the escort from
+      // the carrier bay (or, for the player's slot, clears the escort when
+      // the class cannot be captured). Both arms are deferred (Phase 8).
+      if (ship.ship_instance_id == 0) {
+        ship.ai_state_code = 0xc;
+        ship.ai_control_mode = 0;
+        ship.primary_target_ship_slot = -1;
+        ship.ai_secondary_target_slot = -1;
+      }
+    }
+    break;
+  }
+
+  case 9: {
+    // Hold at distance: steer straight at the target while farther than
+    // 200 px/axis; inside that range, steer at the velocity correction toward
+    // a max-speed approach when the current velocity direction differs from
+    // the target bearing by more than 15 deg. Thrust within turn+1 deg.
+    if (fire_restricted) {
+      break;
+    }
+    const std::int16_t target_slot = combat_target_slot();
+    if (target_slot == -1 ||
+        !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+      break;
+    }
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    const float target_bearing_deg =
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+    const float dx = std::abs(ship.pos_x - target.pos_x);
+    const float dy = std::abs(ship.pos_y - target.pos_y);
+    if (dx > kHoldApproachGatePx || dy > kHoldApproachGatePx) {
+      ship.ai_desired_heading_deg =
+          static_cast<std::int16_t>(target_bearing_deg);
+    } else {
+      const float vel_bearing_deg =
+          BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y);
+      if (std::abs(vel_bearing_deg - target_bearing_deg) > 15.0F) {
+        // Delta toward the max-speed approach point.
+        float px = 0.0F;
+        float py = 0.0F;
+        add_polar_step(px, py, target_bearing_deg, max_speed);
+        const float dvx = px - ship.vel_x;
+        const float dvy = py - ship.vel_y;
+        if (std::abs(dvx) > kVerySlowSpeed || std::abs(dvy) > kVerySlowSpeed) {
+          ship.ai_desired_heading_deg =
+              static_cast<std::int16_t>(BearingDeg(0.0F, 0.0F, dvx, dvy));
+        }
+      }
+    }
+    if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      ship.ai_desired_speed = 0.0F;
+    }
+    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+    break;
+  }
+
+  case 0xb: {
+    // Formation hold: like mode 9 but the arrival throttle is 0.5x max speed
+    // within 100 px/axis (not 0), and the formation-leader glow/offset mirror
+    // runs first (offset deferred, Phase 8).
+    if (fire_restricted) {
+      break;
+    }
+    if (ship.formation_leader_ship_slot > 0 &&
+        static_cast<std::size_t>(ship.formation_leader_ship_slot) <
+            GameState::kMaxShips) {
+      // Ship_MoveShipTowardFormationOffset (Phase 8).
+      ship.engine_glow_level =
+          state
+              .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
+              .engine_glow_level;
+    }
+    const std::int16_t target_slot = combat_target_slot();
+    if (target_slot == -1 ||
+        !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+      break;
+    }
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    const float target_bearing_deg =
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+    const float dx = std::abs(ship.pos_x - target.pos_x);
+    const float dy = std::abs(ship.pos_y - target.pos_y);
+    if (dx > kHoldApproachGatePx || dy > kHoldApproachGatePx) {
+      ship.ai_desired_heading_deg =
+          static_cast<std::int16_t>(target_bearing_deg);
+    } else {
+      const float vel_bearing_deg =
+          BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y);
+      if (std::abs(vel_bearing_deg - target_bearing_deg) > 15.0F) {
+        float px = 0.0F;
+        float py = 0.0F;
+        add_polar_step(px, py, target_bearing_deg, max_speed);
+        const float dvx = px - ship.vel_x;
+        const float dvy = py - ship.vel_y;
+        if (std::abs(dvx) > kVerySlowSpeed || std::abs(dvy) > kVerySlowSpeed) {
+          ship.ai_desired_heading_deg =
+              static_cast<std::int16_t>(BearingDeg(0.0F, 0.0F, dvx, dvy));
+        }
+      }
+    }
+    if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
+      ship.ai_forward_thrust_cmd = eff_thrust;
+      if (dx > 100.0F || dy > 100.0F) {
+        ship.ai_desired_speed = 0.0F;
+      } else {
+        ship.ai_desired_speed = max_speed * 0.5F;
+      }
+    }
+    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+    break;
+  }
+
+  case 0xc: {
+    // Velocity match: copy the target's velocity and ease the desired heading
+    // toward the target's heading by 1 deg/frame once outside the 25/skill
+    // window (state 7 escorts also creep position toward the target's
+    // 135-deg offset anchor at 10x thrust). While the relative velocity is
+    // above 0.525 px/tick the ship instead brakes on the relative velocity at
+    // 0.66x thrust, damping it by 0.94 once slow. Formation-offset mirroring
+    // is deferred (Phase 8).
+    if (fire_restricted || ship.ai_secondary_target_slot == -1) {
+      break;
+    }
+    const std::int16_t target_slot = ship.ai_secondary_target_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    const float rel_x = ship.vel_x - target.vel_x;
+    const float rel_y = ship.vel_y - target.vel_y;
+    const bool gravity_shield =
+        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
+    if (gravity_shield || (std::abs(rel_x) < kVelocityMatchTol &&
+                           std::abs(rel_y) < kVelocityMatchTol)) {
+      ship.vel_x = target.vel_x;
+      ship.vel_y = target.vel_y;
+      const float target_heading_deg = target.heading / kDegToRad;
+      const float cur_deg = ship.heading / kDegToRad;
+      const float delta_deg = std::abs(
+          std::remainder(std::round(target_heading_deg) - std::round(cur_deg),
+                         kFullCircleDeg));
+      float window = 25.0F;
+      if (ship.skill_variance_scale > 0.0F) {
+        window = 25.0F / ship.skill_variance_scale;
+      }
+      if (delta_deg < 1.0F || window <= delta_deg) {
+        ship.ai_desired_heading_deg =
+            static_cast<std::int16_t>(std::round(target_heading_deg));
+      } else {
+        const float signed_delta =
+            std::remainder(std::round(target_heading_deg) - std::round(cur_deg),
+                           kFullCircleDeg);
+        std::int16_t desired = static_cast<std::int16_t>(std::round(cur_deg));
+        desired =
+            static_cast<std::int16_t>(desired + (signed_delta < 0.0F ? -1 : 1));
+        ship.ai_desired_heading_deg = wrap_deg_int(desired);
+      }
+      if (ship.ai_state_code == 7 && target_slot != -1) {
+        const float step = eff_thrust * kFormationCreepFactor * frame_time_ms;
+        float anchor_x = target.pos_x;
+        float anchor_y = target.pos_y;
+        add_polar_step(anchor_x,
+                       anchor_y,
+                       WrapDeg(target_heading_deg + 135.0F),
+                       kFormationOffsetRadiusPx);
+        if (ship.pos_x <= anchor_x - step) {
+          ship.pos_x += step;
+        } else if (anchor_x + step <= ship.pos_x) {
+          ship.pos_x -= step;
+        }
+        if (ship.pos_y <= anchor_y - step) {
+          ship.pos_y += step;
+        } else if (anchor_y + step <= ship.pos_y) {
+          ship.pos_y -= step;
+        }
+      } else {
+        // Ship_MoveShipTowardFormationOffset (Phase 8).
+      }
+      ship.engine_glow_level = target.engine_glow_level;
+    } else {
+      ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+          WrapDeg(BearingDeg(0.0F, 0.0F, rel_x, rel_y) + 180.0F));
+      if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
+        ship.ai_forward_thrust_cmd = eff_thrust * kVelMatchBrakeFactor;
+        ship.ai_desired_speed = 0.0F;
+      }
+      if (std::abs(rel_x) < kMode1StillFastThreshold ||
+          std::abs(rel_y) <= kMode1StillFastThreshold) {
+        ship.vel_x = target.vel_x + rel_x * kMode1Damp;
+        ship.vel_y = target.vel_y + rel_y * kMode1Damp;
+      }
+    }
+    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+    break;
+  }
+
+  case 0xf: {
+    // Velocity-match pursuit of a disabled/secondary target: brake on the
+    // RELATIVE velocity (mode-1 style, threshold 0.525 px/tick); once matched,
+    // copy the target's velocity and heading and creep position toward it at
+    // one frame-time unit per frame. The capture/boarding resolution that the
+    // original performs once within 3 px (state 0xd/0xf arms) is deferred
+    // (TODO(decomp): Outfit_BoardShipAndTransferCargo).
+    if (fire_restricted || ship.ai_secondary_target_slot == -1) {
+      break;
+    }
+    const std::int16_t target_slot = ship.ai_secondary_target_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    const float rel_x = ship.vel_x - target.vel_x;
+    const float rel_y = ship.vel_y - target.vel_y;
+    const bool gravity_shield =
+        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
+    if (std::abs(rel_x) >= kVelocityMatchTol ||
+        std::abs(rel_y) >= kVelocityMatchTol) {
+      if (!gravity_shield) {
+        ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+            WrapDeg(BearingDeg(0.0F, 0.0F, rel_x, rel_y) + 180.0F));
+        if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
+          ship.ai_forward_thrust_cmd = eff_thrust;
+          ship.ai_desired_speed = 0.0F;
+        }
+        if (std::abs(rel_x) < kMode1StillFastThreshold ||
+            std::abs(rel_y) <= kMode1StillFastThreshold) {
+          ship.vel_x = target.vel_x + rel_x * kMode1StopDamp;
+          ship.vel_y = target.vel_y + rel_y * kMode1StopDamp;
+        }
+      } else {
+        ship.ai_forward_thrust_cmd = 0.0F;
+        ship.ai_desired_speed = 0.0F;
+        if (ship.speed > 0.0F) {
+          ship.speed = std::max(0.0F, ship.speed - eff_thrust * frame_time_ms);
+        }
+      }
+    } else {
+      ship.ai_desired_heading_deg =
+          static_cast<std::int16_t>(std::round(target.heading / kDegToRad));
+      ship.vel_x = target.vel_x;
+      ship.vel_y = target.vel_y;
+      const float dx = std::abs(ship.pos_x - target.pos_x);
+      const float dy = std::abs(ship.pos_y - target.pos_y);
+      if (dx > 3.0F || dy > 3.0F) {
+        ship.speed = 0.0F;
+        const float bearing =
+            BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+        add_polar_step(ship.pos_x, ship.pos_y, bearing, frame_time_ms);
+      } else {
+        // Capture resolution: with the target disabled and within 3 px the
+        // original arms a 100..179-ms reverse-speed-bias timer (random 0x50 +
+        // 100) before entering state 0xe or boarding via
+        // Outfit_BoardShipAndTransferCargo. Deferred (TODO(decomp)).
+      }
+    }
+    break;
+  }
+
+  case 0xe: {
+    // Evade / break: while still moving (>= 0.35 px/tick) brake like mode 1
+    // (reverse of the velocity bearing, or a predictive aim when a weapon
+    // bank is live -- deferred to the straight bearing), thrust once within
+    // turn+1 deg; gravity-shield ships reverse-thrust. Once slow, damp by 0.95
+    // and steer at the target, selecting weapons within turn*3 deg (deferred).
+    // The carrier-bay launch (Ship_LaunchShipFromCarrierBay) is deferred.
+    if (fire_restricted || ship.primary_target_ship_slot == -1) {
+      break;
+    }
+    const std::int16_t target_slot = ship.primary_target_ship_slot;
+    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    const bool gravity_shield =
+        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
+    if (std::abs(ship.vel_x) >= kVerySlowSpeed ||
+        std::abs(ship.vel_y) >= kVerySlowSpeed) {
+      if (!gravity_shield) {
+        ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+            WrapDeg(BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
+        if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
+          ship.ai_forward_thrust_cmd = eff_thrust;
+        }
+      } else {
+        ship.ai_forward_thrust_cmd = -eff_thrust;
+      }
+    } else {
+      ship.vel_x *= kMode1StopDamp;
+      ship.vel_y *= kMode1StopDamp;
+      ship.speed *= kMode1StopDamp;
+      ship.ai_desired_heading_deg = static_cast<std::int16_t>(
+          BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
+      if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
+        // Weapon_SelectDirectFireWeaponBankForPrimaryTarget +
+        // Weapon_SelectGuidedWeaponBankForPrimaryTarget (deferred, Phase 5).
+      }
+      // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+    }
+    // Ship_LaunchShipFromCarrierBay (deferred).
+    break;
+  }
+
+  case 10:
+    // Stationary cleanup reverse: hold the ship parked by reversing against
+    // its heading. Raw float commands: desired -5.75 px/tick, thrust -3.67
+    // (bits 0xC0B80000 / 0xC06AE148).
+    if (ship.ai_desired_speed >= 0.0F) {
+      ship.ai_desired_speed = kMode10ReverseSpeed;
+    }
+    ship.ai_forward_thrust_cmd = kMode10ReverseThrust;
+    break;
+
+  case 0x13:
+    // Scripted maneuver: steer at the asteroid-pool slot-0 target position
+    // (g_asteroid_states->target_pos in the original) and thrust within
+    // turn+15 deg. No desired-speed write (cruise clamp from the entry reset).
+    if (!fire_restricted) {
+      const AsteroidState &target = state.asteroid_pool[0];
+      ship.ai_desired_heading_deg = static_cast<std::int16_t>(BearingDeg(
+          ship.pos_x, ship.pos_y, target.target_pos_x, target.target_pos_y));
+      if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
+        ship.ai_forward_thrust_cmd = eff_thrust;
+      }
+    }
+    break;
+
+  case 0x14:
+    // Scripted velocity-match: ramp velocity toward the asteroid-pool slot-0
+    // target velocity at 1.5x thrust per frame-time unit, then creep position
+    // within the 150/80 px/axis windows (the original's banded weave). The
+    // lead-velocity aim + unguided-weapon merge are deferred, so the straight
+    // bearing at the target stands in for the merge gate.
+    if (!fire_restricted) {
+      const AsteroidState &target = state.asteroid_pool[0];
+      const float step = eff_thrust * kEvasiveThrustFactor * frame_time_ms;
+      auto ramp_axis = [&](float &vel, float target_vel) {
+        if (vel < target_vel + step) {
+          if (target_vel - step < vel) {
+            vel = target_vel;
+          } else {
+            vel += step;
+          }
+        } else {
+          vel -= step;
+        }
+      };
+      ramp_axis(ship.vel_x, target.target_vel_x);
+      ramp_axis(ship.vel_y, target.target_vel_y);
+      if (target.target_pos_x + kScriptPosXSpan < ship.pos_x) {
+        ship.pos_x -= step;
+      } else if (ship.pos_x < target.target_pos_x - kScriptPosXSpan) {
+        ship.pos_x += step;
+      }
+      if (target.target_pos_y + kScriptPosXSpan < ship.pos_y) {
+        ship.pos_y -= step;
+      } else if (ship.pos_y < target.target_pos_y - kScriptPosXSpan) {
+        ship.pos_y += step;
+      }
+      if (ship.pos_x <= target.target_pos_x ||
+          target.target_pos_x + kScriptPosYSpan <= ship.pos_x) {
+        if (ship.pos_x < target.target_pos_x &&
+            target.target_pos_x - kScriptPosYSpan < ship.pos_x) {
+          ship.pos_x -= step;
+        }
+      } else {
+        ship.pos_x += step;
+      }
+      if (ship.pos_y <= target.target_pos_y ||
+          target.target_pos_y + kScriptPosYSpan <= ship.pos_y) {
+        if (ship.pos_y < target.target_pos_y &&
+            target.target_pos_y - kScriptPosYSpan < ship.pos_y) {
+          ship.pos_y -= step;
+        }
+      } else {
+        ship.pos_y += step;
+      }
+      ship.ai_desired_heading_deg = static_cast<std::int16_t>(BearingDeg(
+          ship.pos_x, ship.pos_y, target.target_pos_x, target.target_pos_y));
+      if (std::abs(heading_delta_deg()) < eff_turn_deg + kScriptAlignAddend) {
+        ship.primary_target_ship_slot = -1;
+        // Weapon_SelectUnguidedWeaponBank (deferred, Phase 5).
+      }
+    }
+    break;
+
+  default:
     break;
   }
 }
@@ -1964,9 +2785,11 @@ void NovaAi_UpdateShipAI(GameState &state,
   }
 
   // Always run the state machine + controls (the original does so after the
-  // heavy block even when bVar6 skipped the heavy decision).
+  // heavy block even when bVar6 skipped the heavy decision). frame_time_ms is
+  // the reference cadence (the original reads the _g_avg_frame_time_ms EMA,
+  // ~33.3 ms at 30 fps) for the control-mode position/velocity creeps.
   NovaAi_UpdateShipState(state, ship, now_ms);
-  NovaAi_ApplyControls(state, ship, 0.0F);
+  NovaAi_ApplyControls(state, ship, kReferenceFrameTimeMs, now_ms);
   // Ship_UpdateAutoWeaponSelectionFromTarget (0x00411540) is a post-state
   // refresh. It must run after ApplyControls because that bridge clears the
   // per-frame fire latch before the bank chooser arms it.

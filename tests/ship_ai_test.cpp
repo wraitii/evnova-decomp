@@ -1,9 +1,11 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "game/game_state.hpp"
 #include "game/scenario_data.hpp"
 #include "game/ship_ai.hpp"
 #include "game/ship_spawn.hpp"
+#include "game/spaceflight.hpp"
 #include "game/targeting.hpp"
 #include "game/travel.hpp"
 
@@ -339,8 +341,7 @@ TEST_CASE(
       state, subject_ship, other_ship));
 }
 
-TEST_CASE(
-    "hidden combat ship brakes with a finite engagement patience timer") {
+TEST_CASE("hidden combat ship brakes with a finite engagement patience timer") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   REQUIRE(!state.scenario.ships.empty());
@@ -529,4 +530,310 @@ TEST_CASE("jump gate requires current fuel") {
   CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
   npc.fuel_points = game::kJumpFuelCost;
   CHECK(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
+}
+
+// ---------------------------------------------------------------------------
+// Ship_ApplyShipAiControls (0x00408150) combat/formation mode fidelity.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using game::NovaAi_ApplyControls;
+using game::NovaShip_ComputeEffectiveStats;
+
+// Spawn a healthy NPC in a real system and point it at the player (slot 0).
+[[nodiscard]] game::Ship &
+SpawnCombatTestShip(GameState &state, int sys_idx, std::int16_t class_id) {
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.ship_class_id = class_id;
+  ship.shield_points = static_cast<float>(
+      state.scenario.Ship(static_cast<std::int16_t>(class_id + 0x80))
+          ->base_shield);
+  ship.armor_points = static_cast<float>(
+      state.scenario.Ship(static_cast<std::int16_t>(class_id + 0x80))
+          ->base_armor);
+  ship.ai_secondary_target_slot = -1;
+  ship.primary_target_ship_slot = -1;
+  ship.ai_target_ship_slot = -1;
+  ship.faction_or_government_id = -1;
+  ship.target_stellar_object_id = -1;
+  return ship;
+}
+
+void ActivatePlayer(GameState &state, float pos_x, float pos_y) {
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.pos_x = pos_x;
+  state.player.pos_y = pos_y;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
+}
+
+} // namespace
+
+// The original's mode-5 bearing call reverses the argument order
+// (Math_BearingFromPointToPoint(target_pos, ship_pos)), so the close-range
+// attack mode steers AWAY from the target -- the ship backs off while its
+// guns keep the target in front. Every other combat mode uses ship->target.
+TEST_CASE("ApplyControls mode 5 steers away from the target (original quirk)") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ActivatePlayer(state, 200.0F, 0.0F);
+
+  game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
+  ship.pos_x = 100.0F;
+  ship.pos_y = 0.0F;
+  ship.ai_control_mode = 5;
+  ship.primary_target_ship_slot = 0;
+  ship.ai_state_code = 4;
+  ship.heading = 0.0F; // currently pointing up
+
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+
+  // Player is east of the ship: mode 5 must steer west (270 deg), not east.
+  REQUIRE(ship.ai_desired_heading_deg == 270);
+  // Once aligned, mode 5 applies the raw effective thrust.
+  ship.heading = static_cast<float>(ship.ai_desired_heading_deg) *
+                 (3.14159265358979323846F / 180.0F);
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  const game::ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const game::NpcEffectiveStats eff =
+      NovaShip_ComputeEffectiveStats(state, ship, *cls);
+  CHECK(ship.ai_forward_thrust_cmd ==
+        Catch::Approx(eff.thrust_px_per_tick2).margin(1e-4F));
+}
+
+// Mode 6 (combat pursuit) steers ship->target and thrusts within turn+15 deg;
+// mode 0x10 (evasive break) flies the stored evasive heading at 1.5x thrust;
+// mode 0x11 (boost) over-cruises at 2.75x thrust / 1.8x max speed.
+TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ActivatePlayer(state, 200.0F, 0.0F);
+
+  game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
+  const game::ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const game::NpcEffectiveStats eff =
+      NovaShip_ComputeEffectiveStats(state, ship, *cls);
+
+  // Mode 6: pursue east.
+  ship.pos_x = 100.0F;
+  ship.pos_y = 0.0F;
+  ship.ai_control_mode = 6;
+  ship.primary_target_ship_slot = 0;
+  ship.heading = 90.0F * (3.14159265358979323846F / 180.0F); // already aligned
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  REQUIRE(ship.ai_desired_heading_deg == 90);
+  CHECK(ship.ai_forward_thrust_cmd ==
+        Catch::Approx(eff.thrust_px_per_tick2).margin(1e-4F));
+  CHECK(ship.ai_desired_speed == 0.0F);
+
+  // Mode 0x10: evasive break on the stored heading at 1.5x thrust.
+  ship.ai_control_mode = 0x10;
+  ship.ai_evasive_heading_deg = 200;
+  ship.heading = 200.0F * (3.14159265358979323846F / 180.0F);
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  REQUIRE(ship.ai_desired_heading_deg == 200);
+  CHECK(ship.ai_forward_thrust_cmd ==
+        Catch::Approx(eff.thrust_px_per_tick2 * 1.5F).margin(1e-4F));
+  CHECK(ship.ai_desired_speed == 0.0F);
+
+  // Mode 0x11: boost at 2.75x thrust, cruise 1.8x max speed.
+  ship.ai_control_mode = 0x11;
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  CHECK(ship.ai_forward_thrust_cmd ==
+        Catch::Approx(eff.thrust_px_per_tick2 * 2.75F).margin(1e-4F));
+  CHECK(ship.ai_desired_speed ==
+        Catch::Approx(eff.max_speed_px_per_tick * 1.8F).margin(1e-3F));
+}
+
+// Mode 0xc (velocity match) copies the target's velocity once the relative
+// velocity is within the 0.525 px/tick tolerance, and eases the desired
+// heading toward the target's heading.
+TEST_CASE("ApplyControls mode 0xc velocity match") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ActivatePlayer(state, 50.0F, 0.0F);
+
+  game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+  ship.ai_control_mode = 0xc;
+  ship.ai_secondary_target_slot = 0;
+  state.player.vel_x = 0.4F;
+  state.player.vel_y = -0.2F;
+  state.player.heading = 30.0F * (3.14159265358979323846F / 180.0F);
+  // Large relative velocity on BOTH axes (the original's slow-damp arm is an
+  // OR across axes): the brake arm runs (no velocity copy).
+  ship.vel_x = 3.0F;
+  ship.vel_y = 2.0F;
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  CHECK(ship.vel_x == 3.0F); // not copied while outrunning
+  // Align with the reverse of the relative-velocity bearing and brake:
+  // relative (2.6, 2.2) points ~130.2 deg; reverse is ~310.2 deg.
+  ship.heading = 310.2F * (3.14159265358979323846F / 180.0F);
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  CHECK(ship.ai_forward_thrust_cmd > 0.0F); // braking on the relative velocity
+
+  // Match the velocity: the copy arm runs and snaps velocity to the target.
+  ship.vel_x = 0.4F;
+  ship.vel_y = -0.2F;
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  CHECK(ship.vel_x == 0.4F);
+  CHECK(ship.vel_y == -0.2F);
+}
+
+// Mode 0xf (disabled-target pursuit) brakes on the RELATIVE velocity, then
+// copies the target's velocity and creeps position toward it.
+TEST_CASE("ApplyControls mode 0xf velocity-match pursuit") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ActivatePlayer(state, 10.0F, 0.0F);
+
+  game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+  ship.ai_control_mode = 0xf;
+  ship.ai_secondary_target_slot = 0;
+  state.player.vel_x = 0.1F;
+  state.player.vel_y = 0.0F;
+  state.player.heading = 0.0F;
+
+  // Relative velocity 2.0 px/tick: brake arm, steer at the reverse of the
+  // relative-velocity bearing (relative vel (2,0) -> bearing 90 -> +180 = 270).
+  ship.vel_x = 2.0F;
+  ship.vel_y = 0.0F;
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  REQUIRE(ship.ai_desired_heading_deg == 270);
+  ship.heading = static_cast<float>(ship.ai_desired_heading_deg) *
+                 (3.14159265358979323846F / 180.0F);
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  CHECK(ship.ai_forward_thrust_cmd > 0.0F);
+
+  // Relative velocity small: match the target's velocity.
+  ship.vel_x = 0.1F;
+  ship.vel_y = 0.05F;
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  CHECK(ship.vel_x == 0.1F);
+  CHECK(ship.vel_y == 0.0F);
+}
+
+// Mode 0x12 (chase leader) falls back to control mode 0 without a leader and
+// steers at the point 15x max-speed ahead of the leader's heading otherwise.
+TEST_CASE("ApplyControls mode 0x12 chase leader") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ActivatePlayer(state, 0.0F, 0.0F);
+
+  game::Ship &ship = SpawnCombatTestShip(state, sys_idx, 0);
+  ship.ai_control_mode = 0x12;
+  ship.formation_leader_ship_slot = -1;
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  REQUIRE(ship.ai_control_mode == 0); // no leader: idle control
+
+  ship.ai_control_mode = 0x12;
+  // The original treats leader slot < 1 (including the player slot 0) as "no
+  // leader", so the chased leader must occupy a real NPC slot.
+  const int leader_slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(leader_slot > 0);
+  game::Ship &leader = state.ShipAt(static_cast<std::size_t>(leader_slot));
+  leader.is_active = true;
+  leader.ship_instance_id = static_cast<std::int16_t>(leader_slot);
+  ship.formation_leader_ship_slot = static_cast<std::int16_t>(leader_slot);
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+  ship.heading = 0.0F;
+  leader.pos_x = 100.0F;
+  leader.pos_y = 0.0F;
+  leader.heading = 0.0F; // leader facing up: lead point = north of leader
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  // Lead point is (100, -15*max) north of the leader; the ship at the origin
+  // must steer roughly north-east.
+  const game::ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const game::NpcEffectiveStats eff =
+      NovaShip_ComputeEffectiveStats(state, ship, *cls);
+  const float lead_x = 100.0F;
+  const float lead_y = -eff.max_speed_px_per_tick * 15.0F; // up in -y
+  const float expected =
+      std::atan2(lead_x, -lead_y) / (3.14159265358979323846F / 180.0F);
+  CHECK(std::abs(ship.ai_desired_heading_deg - expected) < 1.0F);
+}
+
+// Mode 10 (stationary cleanup) parks the ship by reversing: desired -5.75,
+// thrust -3.67 (the original's raw float commands).
+TEST_CASE("ApplyControls mode 10 stationary reverse") {
+  GameState state;
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ai_control_mode = 10;
+  ship.ai_desired_speed = 0.0F;
+  NovaAi_ApplyControls(state,
+                       ship,
+                       (1000.0F / 30.0F),
+                       /*now_ms=*/0);
+  CHECK(ship.ai_desired_speed == Catch::Approx(-5.75F));
+  CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-3.67F));
 }

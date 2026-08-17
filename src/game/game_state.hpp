@@ -118,11 +118,11 @@ struct Ship {
   std::int8_t ai_fire_trigger_latch = 0; // +0xBA
 
   // --- Vital stats ---
-  float shield_points = 0.0F;        // +0x54
-  float armor_points = 0.0F;         // +0x58
-  float ionization_points = 0.0F; // +0x5C (ionization charge meter)
-  float fuel_points = 0.0F;          // +0x38
-  float death_timer_active = -1.0F;  // +0x3C
+  float shield_points = 0.0F;       // +0x54
+  float armor_points = 0.0F;        // +0x58
+  float ionization_points = 0.0F;   // +0x5C (ionization charge meter)
+  float fuel_points = 0.0F;         // +0x38
+  float death_timer_active = -1.0F; // +0x3C
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
   // timer consumer is still deferred, so the field remains provisional.
   float hit_reaction_timer = 0.0F;
@@ -184,6 +184,16 @@ struct Ship {
   // and mission models only use the neutral default so far, but the field is
   // needed to preserve the state-0x05+ branch shape.
   std::int16_t escort_command_code = 0; // +0xC90A (provisional)
+  // Formation lead whose engine-glow/formation-offset this ship mirrors in the
+  // escort control modes (ShipState +0xC906 formation_leader_ship_slot). <1
+  // means "no leader": mode 0x12 (chase leader) falls back to idle control
+  // when it is empty.
+  std::int16_t formation_leader_ship_slot = -1; // +0xC906
+  // Unnamed ShipState byte +0xBD (allocator-reset only). The original gates
+  // the close-range combat break-offs (mode 0x6/0x7 -> 0x11 boost, mode 0x5
+  // -> 0x11) on this latch; the producer is not yet identified, so the
+  // transitions stay inert in the port (TODO(decomp)).
+  std::int8_t ai_brake_to_boost_latch = 0; // +0xBD (Provisional)
   // Velocity-match lock (ShipState +0xC8DC): the slot of a ship whose
   // velocity/heading this ship is matching (control mode 0xc/0xf), or -1. A
   // non-self value gates the NPC effective-stats branch
@@ -193,8 +203,14 @@ struct Ship {
   // cleared by Ship_DeactivateVacantShipsAndTally (0x0041ad50) and seeded by
   // Ship_AllocateShipSlotInSystem, so it lives on the struct now.
   std::int16_t velocity_match_target_ship_slot = -1; // +0xC8DC
-  std::int16_t jump_destination_stellar_id = -1;     // +0x92
-  std::int16_t ai_hostility_accumulator = 0;         // +0x96
+  // Stored evasive heading for control mode 0x10 (Ghidra ShipState raw short
+  // at +0x8E, between target_stellar_object_id and jump_destination_stellar_id;
+  // unnamed in the DB). Ship_ApplyShipAiControls writes current-heading +/-135
+  // deg (instance-id parity sign) when it orders the evasive-break, and mode
+  // 0x10 steers at this value until it aligns and drops back to mode 0x6.
+  std::int16_t ai_evasive_heading_deg = 0;       // +0x8E (Provisional)
+  std::int16_t jump_destination_stellar_id = -1; // +0x92
+  std::int16_t ai_hostility_accumulator = 0;     // +0x96
   // Engagement patience timer while the cloak/targetability predicate rejects
   // a target; when it expires the AI gives up and clears the primary target
   // (Ship_UpdateShipAiState state 4). -1 means no patience interval active.

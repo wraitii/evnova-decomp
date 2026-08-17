@@ -12,7 +12,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00405120,Ship_ShouldShipPrioritizePlayerThreat,,0%,
 0x004053C0,Mission_UpdateShipMissionStellarAttackDirective,,0%,
 0x00405590,Ship_UpdateShipAiState,src/game/ship_ai.cpp,65%,"NovaAi_UpdateShipState: travel/hold/pursuit/escort/drift/disengage/defunct branches plus attack states 3/4, assist state 0xc, and boarding state 0xd transitions. Cloak-aware target engagement direction, patience braking, and escort/assist engagement downgrades match Ghidra; weapon firing, formation offsets, capture resolution, and HUD/mission flavor remain deferred."
-0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,50%,"NovaAi_ApplyControls: modes 1/2/3/4/0xd retain their decoded movement behavior; target-bearing/thrust gates are implemented for combat modes 5/6/7/8/0xc/0xf using primary/secondary target slots. Post-control auto bank selection now arms the fire latch for higher-behavior ships; formation offsets, predictive aim, and NPC shot firing remain deferred."
+0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,75%,"NovaAi_ApplyControls: travel modes 1/2/3 faithful; combat modes 5/6/7/8/9/0xb/0xc/0xe/0xf/0x10/0x11/0x12/0x13/0x14/0x16 now port the ground-truth movement (alignment gates, break-off/evasive-boost transitions, relative-velocity brake ladders, velocity-match copy, formation/scripted creeps, escort follow), with mode-5 steering-away quirk (Math_BearingFromPointToPoint target->ship arg order) confirmed from disassembly. Mode 4/0xd hold timers ramped; mode 10 stationary reverse (-5.75/-3.67) fixed. Weapon-bank selects, predictive aim, formation offsets, carrier-bay launches, freeflight anchors and the +0xBD brake-to-boost producer remain deferred (Phases 5/7/8, TODO(decomp))."
 0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,src/game/ship_ai.cpp,40%,"NovaAi_SelectRandomAdjacentTravelStellar: availability/travel-flag/govt-hostility candidates, uniform random pick; weighted scan-mask pools deferred"
 0x0040CC10,Stellar_FindNearestAdjacentTravelStellar,,0%,
 0x0040CD80,Stellar_IsStellarAdjacentToCurrentSystem,src/game/targeting.cpp,100%,"NovaTargeting_IsStellarAdjacentToSystem: matches a stellar id against a system's nav list, preserving the empty-nav-list == adjacent quirk"
@@ -729,14 +729,14 @@ address,name,impl_file,reimpl_pct,comment
 0x00486EC0,NoSys_NoOp_00486ec0,,0%,
 0x00486ED0,NovaGameMode_DispatchAction,src/nova_app.cpp,100%,NovaGameMode_DispatchAction
 0x004872A0,NovaCommand_DispatchToMode,,0%,
-0x004873B0,NovaRender_RedrawAndPresentFrame,src/nova_app.cpp,100%,NovaRender_RedrawAndPresentFrame
+0x004873B0,NovaRender_RedrawAndPresentFrame,src/nova_app.cpp,100%,NovaRender_RedrawAndPresentFrame; menu title cadence and center-preview alpha timing are timer based; authored row reveal remains at the original 16ms presentation cadence
 0x00487FCD,NovaRender_RestoreClippedRegion,,0%,
 0x00488080,NovaMainLoop_UpdateFrame,src/nova_app.cpp,100%,NovaMainLoop_UpdateFrame
 0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
 0x00488650,Menu_RunSettingsDialog,src/game/preferences.cpp,75%,"core modal: DLOG 0xfa3 geometry, toggles, sliders, OK/cancel, and Key Settings sub-dialog; .prf persistence and windowed-mode live toggle remain TODO"
 0x00489210,Ship_RunSpaceflightMode,src/game/spaceflight.cpp,10%,"Ship_RunSpaceflightMode skeleton: faithful loop/cadence, gameplay scopes stubbed"
 0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,80%,New-pilot path preserves reset/refilled stats and seeded inventory and now reconciles seeded weapon banks into owned outfits (stock Light Blaster registered/sellable); dialogs, scenario population, discovery remain partial
-0x0048A7E0,Menu_RunPilotSelectionDialog,,0%,
+0x0048A7E0,Menu_RunPilotSelectionDialog,src/game/new_pilot_flow.cpp,15%,Clean-room modal now follows the original 0xc1d/0xc1e window proportions and pilot-selection control layout; resource-backed controls, pilot registry/list binding, and full accept/cancel semantics remain TODO(decomp)
 0x0048ADC0,IntroCinematic_Run,src/game/intro_cinematic.cpp,85%,Timed configured-frame playback; Enter/Space/click advance one frame; native command/cursor paths and travel dialog partial
 0x0048B230,NovaRender_PresentBlockingTransitionFrame,,0%,
 0x0048B250,NovaAudio_PreloadTransitionEffects,,0%,NovaAudio_PreloadTransitionEffects into DAT_007d24b8

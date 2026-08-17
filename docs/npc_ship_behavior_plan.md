@@ -10,7 +10,12 @@ integrator + gravity-shield steer helper, both wired into the per-frame tick);
 behavior supervisors + state machine + controls bridge each frame. Behaviors
 0x02/0x03/0x04 now acquire or promote same-system hostile contacts into
 attack/assist states and steer through combat control modes 5/6/7/8/0xc/0xf;
-mission and weapon side effects remain deferred. Cloak-aware engagement
+mission and weapon side effects remain deferred. **The movement bridge
+(`Ship_ApplyShipAiControls` 0x00408150) is now ported across ALL modes**
+(2025-08-17): combat/formation/scripted steering, the relative-velocity brake
+ladders, velocity-match, escort follow, and the 5/6/7<->0x10/0x11 evasive/boost
+transitions, including the mode-5 steering-away argument-order quirk (see the
+control-mode table below). Cloak-aware engagement
 eligibility is target-aware, the state-4/state-0xd patience branch is wired,
 and the trait-driven NPC cloak latch now runs before each AI supervisor. The
 **wander/travel milestone (Phases 3+4) is live** -- NPCs pick a random adjacent
@@ -110,9 +115,19 @@ record of the bugs found while chasing the speed issue.
 
 ### AI control-mode reference (`ai_control_mode`, +0xC8CA)
 
-Decoded from `Ship_ApplyShipAiControls` (0x00408150). Modes 0-4/0xd/0xb/9 are
-ported faithfully; 5-0x17 are provisional cruise stand-ins until the
-combat/formation/jump systems land (Phase 5-7).
+Decoded from `Ship_ApplyShipAiControls` (0x00408150). All modes below are now
+ported for their MOVEMENT arms (heading/thrust/damp/velocity writes and the
+cross-mode transitions 5/6/7/0x10/0x11 break-off/boost ladder); the table's
+weapon-bank selects, formation-offset calls, carrier-bay launches and the
++0xBD latch (which gates the close-range 5/6/7 -> 0x11 boosts) remain deferred
+(Phases 5/8, TODO(decomp)).
+
+**Mode-0x05 quirk (2025-08-17)**: its bearing call is
+`Math_BearingFromPointToPoint(target_pos, ship_pos)` -- the REVERSE argument
+order of every other mode (confirmed from the disassembly push order at
+0x00408dcb/0x00408ddf) -- so mode 5 steers AWAY from the primary target. It is
+the close-range "attack while backing off" strafe the state machine selects
+within the 251 px combat station range.
 
 | Mode | Name | Behavior (original) |
 |------|------|---------------------|
@@ -120,30 +135,34 @@ combat/formation/jump systems land (Phase 5-7).
 | 0x01 | Brake-to-stop | steer to reverse of velocity bearing; full thrust -> 0.5x + 0.94 damp -> 0.95 damp + idle (<0.35 px/tick); g-shield: -0.5x thrust |
 | 0x02 | Travel to stellar | thrust only when aligned <= turn_rate+5 deg; desired 0 (coast at max clamp) far, 0.25*max within 500 px/axis |
 | 0x03 | Approach centre | point away from centre; thrust when aligned <= turn_rate+3 deg |
-| 0x04 | Jump spin-up | point away from centre; ramp hold timer; jump bookkeeping when timer >= duration/class (Phase 7) |
-| 0x05 | Pursue target | formation offset (leader); steer at target; thrust when aligned <= turn_rate+20 deg; close (<165 px) -> 0x11 |
-| 0x06 | Combat pursuit | predictive/straight aim; thrust gate turn_rate+15 deg, 2nd gate turn_rate*3 -> direct-fire; break-off (135 deg, 82 px) -> 0x10; g-shield speed-matching |
-| 0x07 | Combat strafe | aim (guided predictive); weapon select when aligned turn_rate*3; thrust gate turn_rate*4 |
-| 0x08 | Escort follow | steer at lead; thrust when aligned <= turn_rate+1 deg; outside escort half-span creep at 10x thrust; inside -> launch/handoff |
-| 0x09 | Hold at distance | steer at target (>200 px) or velocity-bearing match; thrust when aligned <= turn_rate+1 deg |
+| 0x04 | Jump spin-up | point away from centre; ramp hold timer (+1/frame, mode-start timestamp); completion deactivates the ship + clears system id (Phase 7 wiring pending) |
+| 0x05 | Attack strafe-out | **steers AWAY from the primary target** (arg-order quirk); thrust when aligned <= turn_rate+20 deg; formation offset (leader); 0xBD latch + <165 px -> 0x11 |
+| 0x06 | Combat pursuit | predictive/straight aim; thrust gate turn_rate+15 deg, 2nd gate turn_rate*3 -> direct-fire; break-off -> 0x10 (light fighter <= 123 px, 31-deg facing, combat-rating/50-50 gate) or -> 0x11 (>82 px, 0xBD latch); g-shield speed-matching within 100 px |
+| 0x07 | Combat strafe | aim (guided predictive); weapon select when aligned turn_rate*3; thrust gate turn_rate*4; 0xBD latch + >82 px + 31-deg -> 0x11 |
+| 0x08 | Escort follow | steer at lead; thrust when aligned <= turn_rate+1 deg; outside escort half-span creep at 10x thrust (desired -= step); inside -> launch/handoff (deferred) |
+| 0x09 | Hold at distance | steer at target (>200 px) or velocity-bearing match (15-deg window); thrust when aligned <= turn_rate+1 deg |
 | 0x0b | Formation hold | formation offset; steer at target / velocity-bearing; thrust <= turn_rate+1 deg; desired 0 far, 0.5*max within 100 px |
-| 0x0c | Velocity-match | match target vel/heading within 0.525 px/tick; heading-lerp window 25/|vel| |
-| 0x0d | Formation hold (timer) | copy leader heading/offset; leader timer >30 -> release to default behavior/mode 4; aligned <=11 deg -> damp 0.95, desired -4.0 (reverse), timer ramp |
+| 0x0c | Velocity-match | match target vel/heading within 0.525 px/tick; heading-lerp window 25/skill_variance_scale (1 deg/frame); state-7 position creep to heading+135 anchor; else brake at 0.66x thrust on relative velocity |
+| 0x0d | Formation hold (timer) | copy leader heading/offset; leader timer >30 -> release to default behavior/mode 4; aligned <=11 deg -> damp 0.95, desired -4.0 (reverse), timer ramp; leader hold <=1 -> copy leader vel/glow |
 | 0x0e | Evade/break | brake like mode 1 aimed at target; g-shield -thrust; slow -> damp 0.95 + steer at target |
-| 0x0f | Velocity-match pursuit | brake on RELATIVE velocity (mode-1 style); <0.525 -> match target vel + damp; boarding/capture on arrival |
-| 0x10 | Evasive break | heading = current +/-135 deg (ship_instance_id parity); thrust 1.5x, desired 0; -> 0x6 when aligned |
-| 0x11 | Boost to target | thrust 2.75x, desired 1.8*max (over-speed); formation offset; -> 0x6 on alignment |
-| 0x12 | Chase leader | head at leader + 15*max polar offset; thrust <= turn_rate+20 deg; guided-weapon select in state 4 |
-| 0x13 | Scripted maneuver | steer at scripted target; thrust <= turn_rate+15 deg |
-| 0x14 | Scripted velocity-match | ramp vel to scripted target vel at 1.5x thrust; positional creep (+/-150/80 px); weapon lead-aim |
-| 0x15 | Jump-in | pick nearest freeflight anchor; steer at it; thrust <= turn_rate+15 deg, else damp 1.75x thrust (Phase 7) |
-| 0x16 | Jump-out/retreat | steer at stellar map coords; weapon select when aligned <= turn_rate+15 deg |
-| 0x17 | (no block) | thrust stays 0 -- effectively hold (port parks it too) |
+| 0x0f | Velocity-match pursuit | brake on RELATIVE velocity (mode-1 style); <0.525 -> match target vel + damp + 1-frame-time position creep; boarding/capture on arrival (deferred) |
+| 0x10 | Evasive break | heading = current +/-135 deg (ship_instance_id parity); thrust 1.5x, desired 0; -> 0x6 when aligned (turn*3) / g-shield >165 px |
+| 0x11 | Boost to target | thrust 2.75x, desired 1.8*max (over-speed); formation offset; -> 0x6 within 165 px or 1-in-100 roll |
+| 0x12 | Chase leader | head at leader + 15*max polar offset; thrust <= turn_rate+20 deg; guided-weapon select in state 4; no leader (slot <1) -> control mode 0 |
+| 0x13 | Scripted maneuver | steer at asteroid-pool slot-0 target; thrust <= turn_rate+15 deg |
+| 0x14 | Scripted velocity-match | ramp vel to scripted target vel at 1.5x thrust; positional creep (+/-150/80 px); weapon lead-aim + merge gate turn+10 |
+| 0x15 | Jump-in | pick nearest freeflight anchor; steer at it; thrust <= turn_rate+15 deg, else damp 1.75x thrust; no anchor -> control mode 0 (no anchors modelled, Phase 7) |
+| 0x16 | Jump-out/retreat | steer at stellar map coords; weapon select when aligned <= turn_rate+15 deg (deferred); never thrusts |
+| 0x17 | (no block) | thrust stays 0 -- effectively hold |
 
 Notes: 0x575118 doubles as mode-1's 1.75 px/tick threshold AND mode-0x15's
-1.75x damp factor. 0x0a is unused/reserved (no block in the original). The
-port's mode 1/2/3/4/0xd implementations in `NovaAi_ApplyControls` mirror the
-table; mode 4/0xd keep placeholder hold behavior until jump/formation land.
+1.75x damp factor. 0x0a is unused/reserved (no block in the original). Mode 10
+(stationary cleanup, written by state 8) parks the ship with desired -5.75 and
+thrust -3.67 (raw floats 0xC0B80000/0xC06AE148). The combat/formation movement
+constants decoded on 2025-08-17: evasive-order gate 123 px (0x575124),
+mode-0xc brake 0.66 (0x575168), position-creep 10x (0x575170), formation
+radius 48 (0x575178), scripted creep spans 150/80 (0x57517c/0x575180) and
+merge addend 10 (0x5750a0) -- all typed + pre-commented in the Ghidra DB.
 
 ## Current architecture snapshot
 

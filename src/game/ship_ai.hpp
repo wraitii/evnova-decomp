@@ -89,10 +89,16 @@ void NovaAi_UpdateShipState(GameState &state, Ship &ship, std::uint32_t now_ms);
 // movement fields the integrator consumes: ai_desired_heading_deg,
 // ai_desired_speed, ai_forward_thrust_cmd. This is the bridge that makes the
 // AI state machine actually move ships. Also latches ai_fire_trigger_latch for
-// the firing path (deferred to Phase 5). Provisional: many per-mode turn/thrust
-// polynomials come from global constants that would need gameplay observation
-// to pin exactly.
-void NovaAi_ApplyControls(GameState &state, Ship &ship, float frame_time_ms);
+// the firing path (deferred to Phase 5). `frame_time_ms` is the measured frame
+// time used by the position/velocity creeps (the original reads
+// _g_avg_frame_time_ms); `now_ms` backs the mode-4/0xd hold-timer bookkeeping.
+// The per-mode turn/thrust polynomials come from the decoded _DAT_00575xxx
+// globals; weapon selection, formation offsets and carrier-bay launches are
+// documented no-ops until Phases 5/8.
+void NovaAi_ApplyControls(GameState &state,
+                          Ship &ship,
+                          float frame_time_ms,
+                          std::uint32_t now_ms);
 
 // Ghidra 0x00401000 Ship_UpdateShipAI. The top-level per-ship AI entry: applies
 // the global "heavy AI" cadence gating/skips, recomputes some stat caches,
