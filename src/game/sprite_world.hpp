@@ -81,9 +81,10 @@ struct SpriteAsset {
 
   // Loads a run of consecutive `cicn` color-icon resources as one frame set:
   // `first_id`, `first_id+1`, ..., `first_id+count-1` each decode to one frame
-  // (Ghidra Sprite_CreateFromSequentialFrameResources, FUN_00476800). Used for
-  // the 16-frame ship-target reticle (cicn 10008-10023) and the 8-frame travel
-  // reticle (cicn 10000-10007). Every frame's anchor is its top-left (0,0) --
+  // (Ghidra Sprite_CreateFromSequentialFrameResources,
+  // SpriteFrame_CreateFromCicnResource). Used for the 16-frame ship-target
+  // reticle (cicn 10008-10023) and the 8-frame travel reticle (cicn
+  // 10000-10007). Every frame's anchor is its top-left (0,0) --
   // SpriteFrame_CreateFromRect (0x00476400) zeroes the anchor pair (+0x2a/
   // +0x2c) for a full-icon-rect frame, and the original positions the four
   // corner brackets without the half-span compensation the ship/stellar

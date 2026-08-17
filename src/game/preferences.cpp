@@ -52,13 +52,23 @@ constexpr std::array<std::uint8_t, 34> kKeySettingsCommandIds{
     0x02, 0x03, 0x00, 0x01, 0x0a, 0x0b, 0x2a, 0x30, 0x31, 0x32, 0x33, 0x17,
     0x06, 0x10, 0x0f, 0x11, 0x12, 0x29, 0x09, 0x19, 0x28, 0x34};
 
-// Dialog chrome colours (clean-room stand-in for the original window; the
-// DLOG has no backdrop PICT documented, so a flat bordered panel is drawn).
-constexpr SDL_Color kPanel{12, 24, 44, 255};
-constexpr SDL_Color kBorder{96, 148, 200, 255};
-constexpr SDL_Color kTitle{230, 232, 240, 255};
-constexpr SDL_Color kBody{200, 212, 226, 255};
-constexpr SDL_Color kDim{136, 158, 184, 255};
+// The preferences DLOG has no full-window PICT:
+// UiWindow_CreateFromDialogResource allocates a plain surface, and
+// UiWindow_Draw fills it with the current fill colour then frames it with the
+// current RGB colour. At startup those globals are white
+// (g_hud_overlay_text_color) and black (DAT_00733b74), respectively. The
+// control bevel constants are the RGBColor triples at 0x0056f118, 0x0056f11e,
+// 0x0056f124, and 0x0056f12a, converted from 16-bit channels.
+constexpr SDL_Color kWindowFrame{0, 0, 0, 255};
+constexpr SDL_Color kWindowFill{255, 255, 255, 255};
+constexpr SDL_Color kControlHighlight{195, 195, 195, 255};
+constexpr SDL_Color kControlFill{136, 136, 136, 255};
+constexpr SDL_Color kControlShadow{58, 58, 58, 255};
+constexpr SDL_Color kControlText{0, 0, 0, 255};
+constexpr SDL_Color kControlSelectedText{255, 255, 255, 255};
+
+constexpr std::uint16_t kSoundArrowDownPict = 0x0087;
+constexpr std::uint16_t kSoundArrowUpPict = 0x0086;
 
 // Returns the STR# 0x88 sound-volume word for the given volume index, or the
 // original's fallback string DAT_0056cf0c (" ") when out of range. The value
@@ -117,30 +127,90 @@ CenterWindowOnPanel(const SDL_FRect &panel, float win_w, float win_h) {
   return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
-// Draws a small checkbox glyph (a hollow square, filled when checked) centred
-// in `box`, then its label text to the right.
+// Draws the 17x17 checkbox and label used by UiWindow_Draw. The original uses
+// the same four grayscale RGBColor triples as its push buttons.
 void DrawCheckBox(SdlPlatform &platform,
                   NovaFontCache &font_cache,
                   const SDL_FRect &box,
                   std::string_view label,
                   bool checked) {
   SDL_Renderer *renderer = platform.renderer();
-  const float size = 10.0F;
-  const SDL_FRect glyph{box.x, box.y + (box.h - size) / 2.0F, size, size};
-  SDL_SetRenderDrawColor(
-      renderer, kBorder.r, kBorder.g, kBorder.b, SDL_ALPHA_OPAQUE);
+  const SDL_FRect glyph{box.x, box.y, 17.0F, 17.0F};
+  SDL_SetRenderDrawColor(renderer,
+                         kControlFill.r,
+                         kControlFill.g,
+                         kControlFill.b,
+                         SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &glyph);
+  SDL_SetRenderDrawColor(renderer,
+                         kControlHighlight.r,
+                         kControlHighlight.g,
+                         kControlHighlight.b,
+                         SDL_ALPHA_OPAQUE);
+  SDL_RenderLine(renderer,
+                 glyph.x + 1.0F,
+                 glyph.y + 1.0F,
+                 glyph.x + glyph.w - 1.0F,
+                 glyph.y + 1.0F);
+  SDL_RenderLine(renderer,
+                 glyph.x + 1.0F,
+                 glyph.y + 1.0F,
+                 glyph.x + 1.0F,
+                 glyph.y + glyph.h - 1.0F);
+  SDL_SetRenderDrawColor(renderer,
+                         kControlShadow.r,
+                         kControlShadow.g,
+                         kControlShadow.b,
+                         SDL_ALPHA_OPAQUE);
+  SDL_RenderLine(renderer,
+                 glyph.x + glyph.w - 2.0F,
+                 glyph.y + glyph.h - 2.0F,
+                 glyph.x + 1.0F,
+                 glyph.y + glyph.h - 1.0F);
+  SDL_RenderLine(renderer,
+                 glyph.x + glyph.w - 2.0F,
+                 glyph.y + glyph.h - 2.0F,
+                 glyph.x + glyph.w - 1.0F,
+                 glyph.y + 1.0F);
+  SDL_SetRenderDrawColor(renderer,
+                         kWindowFrame.r,
+                         kWindowFrame.g,
+                         kWindowFrame.b,
+                         SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &glyph);
   if (checked) {
-    SDL_RenderFillRect(renderer, &glyph);
+    SDL_SetRenderDrawColor(renderer,
+                           kControlFill.r,
+                           kControlFill.g,
+                           kControlFill.b,
+                           SDL_ALPHA_OPAQUE);
+    const SDL_FRect inner{
+        glyph.x + 2.0F, glyph.y + 2.0F, glyph.w - 4.0F, glyph.h - 4.0F};
+    SDL_RenderFillRect(renderer, &inner);
+    SDL_SetRenderDrawColor(renderer,
+                           kControlSelectedText.r,
+                           kControlSelectedText.g,
+                           kControlSelectedText.b,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderLine(renderer,
+                   glyph.x + 3.0F,
+                   glyph.y + 6.0F,
+                   glyph.x + 6.0F,
+                   glyph.y + 9.0F);
+    SDL_RenderLine(renderer,
+                   glyph.x + 6.0F,
+                   glyph.y + 9.0F,
+                   glyph.x + 13.0F,
+                   glyph.y + 3.0F);
   }
-  const float baseline = box.y + box.h / 2.0F + 4.0F;
+  const float baseline = box.y + box.h / 2.0F + 5.0F;
   NovaText_Draw(platform,
                 font_cache,
                 NovaFontFamily::kGeneva,
                 12.0F,
                 kNovaFontStyleRegular,
-                kBody,
-                box.x + 14.0F,
+                kControlText,
+                box.x + 20.0F,
                 baseline,
                 label);
 }
@@ -158,8 +228,11 @@ void DrawSliderArrow(SdlPlatform &platform,
   const float top_y = up ? cy - h / 2.0F : cy + h / 2.0F;
   // Fill the triangle as horizontal strips, thinnest at the tip, widest at the
   // base.
-  SDL_SetRenderDrawColor(
-      platform.renderer(), kBody.r, kBody.g, kBody.b, SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(platform.renderer(),
+                         kControlText.r,
+                         kControlText.g,
+                         kControlText.b,
+                         SDL_ALPHA_OPAQUE);
   const int rows = 4;
   for (int i = 0; i < rows; ++i) {
     const float t =
@@ -184,23 +257,75 @@ void DrawButton(SdlPlatform &platform,
                 std::string_view label,
                 bool highlighted) {
   SDL_Renderer *renderer = platform.renderer();
-  SDL_SetRenderDrawColor(
-      renderer, kPanel.r, kPanel.g, kPanel.b, SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(renderer,
+                         kControlFill.r,
+                         kControlFill.g,
+                         kControlFill.b,
+                         SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &box);
-  const SDL_Color border = highlighted ? kTitle : kBorder;
+  const SDL_Color highlight = highlighted ? kControlShadow : kControlHighlight;
+  const SDL_Color shadow = highlighted ? kControlHighlight : kControlShadow;
   SDL_SetRenderDrawColor(
-      renderer, border.r, border.g, border.b, SDL_ALPHA_OPAQUE);
+      renderer, highlight.r, highlight.g, highlight.b, SDL_ALPHA_OPAQUE);
+  SDL_RenderLine(
+      renderer, box.x + 1.0F, box.y + 1.0F, box.x + box.w - 1.0F, box.y + 1.0F);
+  SDL_RenderLine(
+      renderer, box.x + 1.0F, box.y + 1.0F, box.x + 1.0F, box.y + box.h - 1.0F);
+  SDL_SetRenderDrawColor(
+      renderer, shadow.r, shadow.g, shadow.b, SDL_ALPHA_OPAQUE);
+  SDL_RenderLine(renderer,
+                 box.x + box.w - 2.0F,
+                 box.y + box.h - 2.0F,
+                 box.x + 1.0F,
+                 box.y + box.h - 1.0F);
+  SDL_RenderLine(renderer,
+                 box.x + box.w - 2.0F,
+                 box.y + box.h - 2.0F,
+                 box.x + box.w - 1.0F,
+                 box.y + 1.0F);
+  SDL_SetRenderDrawColor(renderer,
+                         kWindowFrame.r,
+                         kWindowFrame.g,
+                         kWindowFrame.b,
+                         SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &box);
   NovaText_DrawCentered(platform,
                         font_cache,
                         NovaFontFamily::kGeneva,
                         12.0F,
                         kNovaFontStyleRegular,
-                        highlighted ? kTitle : kBody,
+                        highlighted ? kControlSelectedText : kControlText,
                         box.x + 4.0F,
                         box.x + box.w - 4.0F,
                         box.y + box.h / 2.0F + 4.0F,
                         label);
+}
+
+[[nodiscard]] std::unique_ptr<SdlTexture>
+LoadSettingsPictTexture(SdlPlatform &platform, std::uint16_t pict_id) {
+  const auto data = NovaResource_LoadPictData(pict_id);
+  if (!data) {
+    return {};
+  }
+  const auto image = Resource_LoadPictAsImage(*data);
+  if (!image) {
+    NovaLog::Todo("preferences PICT 0x{:04x} failed to decode", pict_id);
+    return {};
+  }
+  return SdlTexture::Create(
+      platform.renderer(), image->width, image->height, image->rgba_pixels);
+}
+
+struct SettingsArtwork {
+  std::unique_ptr<SdlTexture> arrow_up;
+  std::unique_ptr<SdlTexture> arrow_down;
+};
+
+[[nodiscard]] SettingsArtwork LoadSettingsArtwork(SdlPlatform &platform) {
+  return SettingsArtwork{
+      .arrow_up = LoadSettingsPictTexture(platform, kSoundArrowUpPict),
+      .arrow_down = LoadSettingsPictTexture(platform, kSoundArrowDownPict),
+  };
 }
 
 // Fills `items` with the DITL item list sized to its window origin (a fresh
@@ -491,11 +616,19 @@ void DrawKeySettingsDialog(SdlPlatform &platform,
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &frame);
   } else {
-    // The fallback is intentionally close to the adjacent Nova UI panels. The
-    // normal path uses the original PICT 0x8b, including its command labels.
-    SDL_SetRenderDrawColor(renderer, kPanel.r, kPanel.g, kPanel.b, 255);
+    // The normal path uses the original PICT 0x8b, including its command
+    // labels. Keep the fallback in the same plain monochrome family.
+    SDL_SetRenderDrawColor(renderer,
+                           kWindowFill.r,
+                           kWindowFill.g,
+                           kWindowFill.b,
+                           SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(renderer, &frame);
-    SDL_SetRenderDrawColor(renderer, kBorder.r, kBorder.g, kBorder.b, 255);
+    SDL_SetRenderDrawColor(renderer,
+                           kWindowFrame.r,
+                           kWindowFrame.g,
+                           kWindowFrame.b,
+                           SDL_ALPHA_OPAQUE);
     SDL_RenderRect(renderer, &frame);
   }
 
@@ -519,30 +652,46 @@ void DrawKeySettingsDialog(SdlPlatform &platform,
     }
     const SDL_FRect rect = ItemRect(layout.items[item_index], window);
     const bool selected = row == selected_row;
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer,
-                           selected ? 220 : 0,
-                           selected ? 205 : 0,
-                           selected ? 100 : 0,
-                           selected ? 100 : 0);
-    if (selected) {
-      SDL_RenderFillRect(renderer, &rect);
-    }
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-    SDL_SetRenderDrawColor(renderer,
-                           selected ? kTitle.r : kBorder.r,
-                           selected ? kTitle.g : kBorder.g,
-                           selected ? kTitle.b : kBorder.b,
-                           SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &rect);
+    const SDL_FRect inset{
+        rect.x + 1.0F, rect.y + 1.0F, rect.w - 2.0F, rect.h - 2.0F};
+    if (selected) {
+      // Menu_KeySettingsDraw inverts the row: a white frame around a black
+      // cell, followed by white key text.
+      SDL_SetRenderDrawColor(renderer,
+                             kControlSelectedText.r,
+                             kControlSelectedText.g,
+                             kControlSelectedText.b,
+                             SDL_ALPHA_OPAQUE);
+      SDL_RenderRect(renderer, &rect);
+      SDL_SetRenderDrawColor(renderer,
+                             kWindowFrame.r,
+                             kWindowFrame.g,
+                             kWindowFrame.b,
+                             SDL_ALPHA_OPAQUE);
+      SDL_RenderFillRect(renderer, &inset);
+    } else {
+      SDL_SetRenderDrawColor(renderer,
+                             kWindowFill.r,
+                             kWindowFill.g,
+                             kWindowFill.b,
+                             SDL_ALPHA_OPAQUE);
+      SDL_RenderFillRect(renderer, &inset);
+      SDL_SetRenderDrawColor(renderer,
+                             kWindowFrame.r,
+                             kWindowFrame.g,
+                             kWindowFrame.b,
+                             SDL_ALPHA_OPAQUE);
+      SDL_RenderRect(renderer, &rect);
+    }
     NovaText_Draw(platform,
                   font_cache,
                   NovaFontFamily::kGeneva,
-                  11.0F,
+                  12.0F,
                   kNovaFontStyleRegular,
-                  selected ? kTitle : kBody,
+                  selected ? kControlSelectedText : kControlText,
                   rect.x + 5.0F,
-                  rect.y + rect.h - 2.0F,
+                  rect.y + 15.0F,
                   KeyCodeName(bindings[row]));
   }
 }
@@ -706,6 +855,7 @@ void DrawSettingsDialog(SdlPlatform &platform,
                         NovaFontCache &font_cache,
                         const SettingsLayout &layout,
                         const NovaPreferences &prefs,
+                        const SettingsArtwork &artwork,
                         std::optional<std::size_t> hover) {
   SDL_Renderer *renderer = platform.renderer();
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
@@ -723,12 +873,17 @@ void DrawSettingsDialog(SdlPlatform &platform,
   SDL_RenderFillRect(renderer, &full);
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
-  // Window panel + border (clean-room chrome; the DLOG has no backdrop PICT).
+  // UiWindow_Draw fills the entire DLOG surface white and draws one black
+  // frame. It does not add the blue panel or inset frame used by the old
+  // provisional renderer.
   SDL_SetRenderDrawColor(
-      renderer, kPanel.r, kPanel.g, kPanel.b, SDL_ALPHA_OPAQUE);
+      renderer, kWindowFill.r, kWindowFill.g, kWindowFill.b, SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &win);
-  SDL_SetRenderDrawColor(
-      renderer, kBorder.r, kBorder.g, kBorder.b, SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(renderer,
+                         kWindowFrame.r,
+                         kWindowFrame.g,
+                         kWindowFrame.b,
+                         SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &win);
 
   // Title band header (item 18), centred Chicago text.
@@ -740,15 +895,32 @@ void DrawSettingsDialog(SdlPlatform &platform,
     }
   }
   if (title != nullptr) {
+    const SDL_FRect title_rect = ItemRect(*title, win);
+    SDL_SetRenderDrawColor(renderer,
+                           kWindowFill.r,
+                           kWindowFill.g,
+                           kWindowFill.b,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &title_rect);
+    SDL_SetRenderDrawColor(renderer,
+                           kWindowFrame.r,
+                           kWindowFrame.g,
+                           kWindowFrame.b,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderLine(renderer,
+                   title_rect.x,
+                   title_rect.y + title_rect.h - 1.0F,
+                   title_rect.x + title_rect.w,
+                   title_rect.y + title_rect.h - 1.0F);
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kChicago,
                           18.0F,
                           kNovaFontStyleRegular,
-                          kTitle,
-                          win.x + static_cast<float>(title->left),
-                          win.x + static_cast<float>(title->right),
-                          win.y + static_cast<float>(title->top) + 16.0F,
+                          kControlText,
+                          title_rect.x,
+                          title_rect.x + title_rect.w,
+                          title_rect.y + 17.0F,
                           "Preferences");
   }
 
@@ -770,8 +942,15 @@ void DrawSettingsDialog(SdlPlatform &platform,
                  hover && *hover == item.index);
       break;
     case 0x40: // slider arrow (upper cell = up, lower = down)
-      DrawSliderArrow(
-          platform, font_cache, rect, item.index == 6 || item.index == 25);
+      if (const auto *texture = item.index == 6 || item.index == 25
+                                    ? artwork.arrow_up.get()
+                                    : artwork.arrow_down.get();
+          texture != nullptr) {
+        SDL_RenderTexture(renderer, texture->get(), nullptr, &rect);
+      } else {
+        DrawSliderArrow(
+            platform, font_cache, rect, item.index == 6 || item.index == 25);
+      }
       break;
     case 0x08: // static value/label text
       if (item.index == 4) {
@@ -780,7 +959,7 @@ void DrawSettingsDialog(SdlPlatform &platform,
                       NovaFontFamily::kGeneva,
                       12.0F,
                       kNovaFontStyleRegular,
-                      kBody,
+                      kControlText,
                       rect.x + 4.0F,
                       rect.y + rect.h / 2.0F + 4.0F,
                       LoadSoundVolumeWord(prefs.sound_volume));
@@ -792,7 +971,7 @@ void DrawSettingsDialog(SdlPlatform &platform,
                       NovaFontFamily::kGeneva,
                       12.0F,
                       kNovaFontStyleRegular,
-                      kBody,
+                      kControlText,
                       rect.x + 4.0F,
                       rect.y + rect.h / 2.0F + 4.0F,
                       std::to_string(prefs.brightness));
@@ -802,7 +981,7 @@ void DrawSettingsDialog(SdlPlatform &platform,
                       NovaFontFamily::kGeneva,
                       12.0F,
                       kNovaFontStyleRegular,
-                      kDim,
+                      kControlText,
                       rect.x + 4.0F,
                       rect.y + rect.h / 2.0F + 4.0F,
                       item.title);
@@ -831,11 +1010,12 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
     return false;
   }
   NovaLog::Info("opening Settings dialog (DLOG 0x{:04x})", kSettingsDialogId);
+  const SettingsArtwork artwork = LoadSettingsArtwork(platform);
 
   while (!platform.quit_requested()) {
     const SDL_FPoint mouse = platform.mouse_position();
     const auto hover = HitTestControl(layout, mouse.x, mouse.y);
-    DrawSettingsDialog(platform, font_cache, layout, prefs, hover);
+    DrawSettingsDialog(platform, font_cache, layout, prefs, artwork, hover);
     SDL_RenderPresent(platform.renderer());
 
     for (auto in = platform.PollTextEvent(); in;

@@ -152,7 +152,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00427770,Outfit_GrantOutfitToPlayer,,0%,
 0x00427A90,Shot_QueueBeamHit,,0%,
 0x00427DF0,System_RefreshSystemCueFlags,,0%,
-0x00427F40,FUN_00427f40,,0%,
+0x00427F40,Mission_ClearSystemCuesForShip,,0%,
 0x00428090,Shot_SpawnShipDestructionDebrisPuff,,0%,
 0x00428260,License_ValidateAgainstKeyTable,,0%,
 0x00428340,Ship_UpdateVisualState,,0%,"Ghidra documents cloak_fade_progress integration: signed latch * (1.5, or 0.75 with ShipClass Flags2 0x0001) * frame time, clamp 0..32, passive decay 1.0 when latch is zero, and scanner/damage cache refresh. It also names the visual fields at +0xC8D6/+0xC8E0/+0xC8E4/+0xC8E8/+0xC8EC/+0xC8F4/+0xC8F6; clean-room visual implementation remains pending."
@@ -184,13 +184,13 @@ address,name,impl_file,reimpl_pct,comment
 0x00437780,Shot_ResolveShotCollisionHit,src/game/collision.cpp,65%,"Direct and proximity projectile impacts apply damage, ionization/color, impulse, nonlethal variant handling, and axis-aligned splash to additional ships before consuming the shot. Weapon hits do not produce cloak fade progress. Impact visuals, kill chatter, mission reactions, and linked shots remain TODO(decomp)."
 0x00437E20,Shot_ResolveCollisions,src/game/collision.cpp,48%,"Projectile-vs-ship collision pass is wired at Frame_TickSystems scope 9 before Shot_HandleShot movement, with decoded late-collision gating and provisional proximity-radius selection. Asteroid/stellar/freeflight collision branches remain TODO(decomp)."
 0x004386F0,Shot_DrawBeamQueue,,0%,
-0x00438810,FUN_00438810,,0%,
+0x00438810,Shot_DrawBeamHitQueueForSurface,,0%,
 0x00438DB0,Frame_UpdateSpriteDistanceIntensity,,0%,
 0x00438F40,NovaUi_UpdateCursorOverGameplayRect,,0%,
 0x00438FC7,NovaUi_UpdateTravelSelectionSprite,,0%,
-0x00439500,FUN_00439500,,0%,
-0x00439750,FUN_00439750,,0%,
-0x004398B0,FUN_004398b0,,0%,
+0x00439500,Mission_TickDailyCronEvents,,0%,
+0x00439750,Mission_ActivateCronEvent,,0%,
+0x004398B0,Mission_TerminateCronEvent,,0%,
 0x00439A10,Frame_RestorePendingViewportRects,,0%,
 0x00439BB0,Frame_DrawViewportFlashOverlays,,0%,
 0x00439D00,Frame_DrawViewportFlashAndParticles,,0%,
@@ -220,7 +220,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0043D4C0,Mission_ResolveMissionSpecialShipCount,,0%,
 0x0043D510,Mission_SelectMissionStellarByLocator,,0%,
 0x0043E6F0,Mission_SelectMissionSystemByLocator,,0%,
-0x0043F080,FUN_0043f080,,0%,
+0x0043F080,Mission_ComputeReactionScheduleAfterSteps,,0%,
 0x0043F100,Mission_ActivateMissionAtSlot,,0%,
 0x0043F8C0,Mission_PopulateMissionSlotFromDef,,0%,
 0x00440370,Mission_TryConsumeMissionInteractionResources,,0%,
@@ -259,23 +259,32 @@ address,name,impl_file,reimpl_pct,comment
 0x00448BA0,NovaExpression_SkipWhitespace,,0%,
 0x00448BE0,NovaExpression_EvaluateToken,,100%,src/game/scenario_data.cpp NovaControlExpression_Evaluate() ParseTokenTerm (combines tokenizer+evaluator; B/P/G/O/E + literals)
 0x00449020,NovaExpression_EvaluateBoolean,,100%,"src/game/scenario_data.cpp NovaControlExpression_Evaluate() (recursive-descent, empty->true default)"
-0x00449370,FUN_00449370,,0%,
+0x00449370,Mission_ExecuteMisnScriptEngine,,0%,
 0x0044A4D0,Ship_ExpandStringPlaceholders,,0%,
 0x0044A980,NovaParser_AllocateBuffer,,0%,
 0x0044A9D0,NovaParser_FreeBuffer,,0%,
-0x0044AA10,FUN_0044aa10,,0%,
-0x0044AA20,FUN_0044aa20,,0%,
+0x0044AA10,Profile_ExpressionGate,,0%,
+0x0044AA20,Profile_CountExpression,,0%,
 0x0044AA30,Math_RotateLeft8,,0%,
-0x0044AA50,FUN_0044aa50,,0%,
-0x0044AA60,FUN_0044aa60,,0%,
-0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,20%,"player control subset includes effective turn rounding, thrust/afterburner fuel burn, stellar gravity, integer engine-glow control, and jump completion. travel/combat/disable/mission scopes still stubbed"
-0x0044B120,Ship_HandlePlayerShip,src/game/spaceflight.cpp,30%,nearest eligible stellar seeds target; Tab/Shift+Tab cycles and retains a manual stellar selection; Backslash/Shift+Backslash cycle the next-jump DESTINATION SYSTEM through the current system's directly-linked systems (original command 0x60, g_playerCycleTravelTargetCommandLatch, default key per the EV Nova manual) via NovaTravel_CycleDestinationSystem, arming travel mode; H toggles hyperspace mode; backquote/Shift+backquote cycle the ship primary target (Alt/'k' = combat-relevant only), 'o' selects nearest hostile combat / Alt+'o' nearest engaged, click-to-target ship picking via SpaceflightView::PickShipAt; 'm' opens the galaxy starmap (map command, NovaStarmap_RunWindow); reticle pulse armed on target change; target action stops at the destination-interaction boundary; the travel_transfer_mode==3 pre-fire block (turn onto reverse of velocity at class turn rate, damp 0.992; thrust-back once within max(class turn+1,20)deg facing window, glow +3->24) is reimplemented in travel.cpp (see 0x0044F3D0 row). Combat/movement/travel-transition scopes still stubbed
-0x0044C8D0,Ship_TurnShipTowardHeading,src/game/spaceflight.cpp,3%,reverse-control subset turns toward the heading opposite current velocity at the effective turn rate and excludes concurrent manual steering; direct-turn/thrust and transition scopes not separately reconstructed
-0x0044D371,Frame_HandlePlayerEscapePodSequence,,0%,
-0x0044E019,Ship_HandlePlayerShipControl,src/game/spaceflight.cpp,29%,"primary fire and player movement subset: rounded effective turn, thrust/reverse (reverse suppresses concurrent manual steering), afterburner x1.8 cap/fuel burn, stellar gravity, and integer engine-glow control. travel/mission/UI control scopes remain stubbed"
-0x0044EAB4,FUN_0044eab4,,0%,
-0x0044F3D0,Stellar_HandlePlayerHyperspaceSequence,src/game/travel.cpp,65%,Explicit player jump phases: brake, align to the source-to-destination map bearing, 2 s Warp up warm-up, zoom and arrival. Warp up starts at launch and plays at 1.3x to finish before the boom; zoom camera moves ships/stellars/shots backward. TODO(decomp): class-scaled timing, fleet warp sync and mission arrival work.
-0x0044FFF0,Ship_AlignHeadingToVelocity,,0%,
+0x0044AA50,Profile_ExpressionTimestamp,,0%,
+0x0044AA60,Delegate_NoOpReturnZero,,0%,
+0x0044AA70,Ship_HandlePlayerShipCore,src/game/spaceflight.cpp,20%,"Single Metrowerks-collapsed player tick; overall progress is tracked here and selected PlayerTick_* INTERNAL LABEL exception rows below retain subsection progress. Implemented subsets cover targeting/travel input, direct flight, afterburner, gravity, engine glow, and jump cadence; combat/disable/mission/system-transition scopes remain substantially incomplete."
+0x0044B037,PlayerTick_HyperspaceExitGate,src/game/travel.cpp,40%,"INTERNAL LABEL of 0x0044AA70; not a function. Jump progress/exit timing and arrival flash/audio cadence are partially reconstructed; exact class multiplier, escape-pod branch, and fleet synchronization remain TODO(decomp)."
+0x0044B120,PlayerTick_HyperspaceExitVelocity,src/game/travel.cpp,50%,"INTERNAL LABEL of 0x0044AA70; not a function. Exit-at-speed and heading handoff are reconstructed as part of the jump state machine; exact original clamp and reordered cleanup cadence remain incomplete."
+0x0044B240,PlayerTick_StatusAndOutfitEvents,,0%,"INTERNAL LABEL of 0x0044AA70; not a function. Destroyed/fire-restricted, auto-repair, distress, and carried-bomb event group is not reimplemented."
+0x0044B7C4,PlayerTick_TargetAndTravelCommands,src/game/spaceflight.cpp,30%,"INTERNAL LABEL of 0x0044AA70; not a function. Implements stellar/system and ship target cycling, click targeting, starmap opening, hyperspace-mode selection, target reticle pulse, and the travel/landing handoff; boarding and several UI/mission branches remain TODO(decomp)."
+0x0044BEB0,PlayerTick_WeaponCommands,src/game/weapon.cpp,15%,"INTERNAL LABEL of 0x0044AA70; not a function. Primary projectile firing is partially reconstructed; weapon-bank cycling, alternate modes, cooldown/status interactions, and most combat input remain incomplete."
+0x0044C18A,PlayerTick_HyperspaceCommand,src/game/travel.cpp,45%,"INTERNAL LABEL of 0x0044AA70; not a function. Destination/fuel engagement and visible jump phases are partially reconstructed; denial details, escort constraints, special loadouts, and exact timing remain TODO(decomp)."
+0x0044C8D0,PlayerTick_ManualFlightAndRegeneration,src/game/spaceflight.cpp,29%,"INTERNAL LABEL of 0x0044AA70; not a function. Rounded turn, thrust/reverse, afterburner fuel burn, max-speed clamp, stellar gravity, and engine-glow control are reconstructed; regeneration, status-effect, and transition branches remain incomplete."
+0x0044D371,PlayerTick_HyperspaceProgressBranch,src/game/travel.cpp,40%,"INTERNAL LABEL of 0x0044AA70; not a function. Frame-time jump progress and the normal tunnel-completion branch are partially reconstructed; escape-pod and class-scaled cases remain TODO(decomp)."
+0x0044D490,PlayerTick_TimedActionTransition,,0%,"INTERNAL LABEL of 0x0044AA70; not a function. Timed movement plus blocking UI/script/reset/emergency-destination transition is not reimplemented."
+0x0044E019,PlayerTick_MouseTargetAndControlCommands,src/game/spaceflight.cpp,15%,"INTERNAL LABEL of 0x0044AA70; not a function. Click-to-target ship picking is reconstructed; original rectangle/panel routing, travel selection, and shared command continuations remain incomplete."
+0x0044EAB4,PlayerTick_WeaponCycleContinuation,,0%,"INTERNAL LABEL of 0x0044AA70; not a function. Reordered secondary-bank eligibility and wrapped cycle continuation is not reimplemented."
+0x0044F3D0,PlayerTick_HyperspaceSequenceAnchor,src/game/travel.cpp,65%,"INTERNAL LABEL of 0x0044AA70; not a function. Explicit brake, alignment, warm-up, zoom and arrival phases are reconstructed; exact class-scaled timing, fleet warp synchronization, and mission-arrival work remain TODO(decomp)."
+0x0044F660,PlayerTick_SystemTransitionAndArrival,src/game/travel.cpp,25%,"INTERNAL LABEL of 0x0044AA70; not a function. Basic destination transfer, arrival state, discovery, and visual restoration have partial equivalents; travel-time, mission, encounter, payroll, and resource-refresh behavior remains incomplete."
+0x0044FFF0,PlayerTick_JumpTurnaroundContinuation,src/game/travel.cpp,65%,"INTERNAL LABEL of 0x0044AA70; not a function. Reverse-velocity heading, 0.992 damping, facing window, thrust-back, and engine-glow ramp are reconstructed in the jump brake phase."
+0x00450710,PlayerTick_AuxiliaryCommands,,0%,"INTERNAL LABEL of 0x0044AA70; not a function. Reaction input, escort/category UI, resource refresh, and launch-bay command group is not reimplemented as a unit."
+0x00451940,PlayerTick_InteractionCloakAndStatus,src/game/spaceflight.cpp,5%,"INTERNAL LABEL of 0x0044AA70; not a function. Only narrow target-action handoff behavior is reconstructed; cargo refresh, special interaction, mission computer, cloak maintenance, discovery, and status decay remain incomplete."
 0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,35%,"stellar target-action eligibility + destination-interaction (0x3f1) + ship-comm branch: player disabled/destroyed and hyperspace-latch gates with STR# 0x7d2 overlays, bVar1 hail-eligibility gate, NovaShipComm_RunShipDialog handoff. Mission-ship interaction branch (mission defs) remains TODO(decomp)"
 0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,45%,"Unguided-projectile branch now delegates record creation to NovaWeapon_SpawnProjectile, preserving the selected primary target, muzzle geometry, heading spread, inherited velocity, reload cooldown, ammo/energy gate, and fire sound. Beam/turret/guided/launcher branches and burst side-effects (Weapon_GetWeaponFireIntervalTicks 0x0046f270 flags-0x40 path) remain deferred."
 0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,30%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, full effective shield/armor, and Weapon_ReconcileOutfitPoolWithWeaponBanks at arrival (register stock-bank weapons as owned); system NPC cohort reset on landing via NovaShip_DeactivateVacantShipsAndTally + NovaSystem_TickNpcSpawnMaintenance (fresh batch on launch); system-transition/world-reset/discovery work remains TODO(decomp)
@@ -307,7 +316,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00461930,Math_LookupAngleSine,,0%,
 0x00461970,Math_LookupAngleCosine,,0%,
 0x004619B0,Math_AngleFromVector2D,,0%,
-0x00461BC0,FUN_00461bc0,,0%,
+0x00461BC0,Stub_ElidedHook,,0%,
 0x00461BD0,Ship_FindNextPlayerCycleTarget,src/game/targeting.cpp,100%,NovaTargeting_FindNextPlayerCycleTarget: faithful port of the markability table (combat-relevant = targets player or a player-targeting ship; mission-fleet-escort arm always false TODO(decomp)) + the eligibility filter chain (active/not-destroyed/cloak-visibility gate + cloak scanner/state-0x15/system/untargetable-class + scanner/relevant==include_combat).
 0x00461F60,Ship_FindPreviousPlayerCycleTarget,src/game/targeting.cpp,100%,NovaTargeting_FindPreviousPlayerCycleTarget: backward sibling of the next-cycle port (same filters, wraps from slot 0x3f).
 0x004622F0,DrawContext_DrawCenteredPascalStringInBounds,src/game/nova_font.cpp,50%,NovaText_DrawCentered: measures width then centers over left/right bounds before drawing; real screen-font (SDL_ttf) reconstruction of measure+position+draw
@@ -374,7 +383,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00466810,NovaInput_PeekActiveCommand,,0%,
 0x00466850,Shot_SnapshotControlInputState,,0%,
 0x00466A30,Frame_RestoreControlInputState,,0%,
-0x00466C10,FUN_00466c10,,0%,
+0x00466C10,ControlState_FindBindingConflict,,0%,
 0x00466C40,Mission_AdvanceReactionScheduleTimer,,0%,
 0x00466CB0,ShipClass_RerollShipClassAvailabilityChances,,0%,
 0x00466FC0,Government_ProcessFactionCombatEvent,,0%,
@@ -389,7 +398,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00467DE0,Frame_CommitFrameAndLatchTransitionWait,,0%,
 0x00467E20,Frame_FinishBlockingTransitionFrame,,0%,
 0x00467E60,NoSys_NoOp_00467e60,,0%,
-0x00467E70,FUN_00467e70,,0%,
+0x00467E70,Stub_NoOp,,0%,
 0x00467E80,Ship_CanMaintainCloakState,,0%,"Ghidra clarified: ModType-17 cloak presence plus configured fuel/shield drain resource checks; gates cloak entry and per-frame maintenance, not surrender"
 0x004680D0,Ship_OnShipCloakStateEntered,src/game/ship_ai.cpp,55%,"NovaAi_OnShipCloakStateEntered shares the original cloak-latch normalization and ModType-17 shield-drop transition; player cue/status-panel side effects remain TODO(decomp)."
 0x00468190,Ship_OnShipCloakStateCleared,src/game/ship_ai.cpp,55%,"NovaAi_OnShipCloakStateCleared shares the original cloak-latch recovery transition; player clear cue remains TODO(decomp)."
@@ -409,8 +418,8 @@ address,name,impl_file,reimpl_pct,comment
 0x00469100,Outfit_ComputeOwnedOutfitResaleTotal,,0%,
 0x00469230,Weapon_HasMatchingWeaponAmmoCarried,,0%,
 0x004692E0,NovaAudio_PlaySpatialByDistance,,0%,
-0x00469480,FUN_00469480,,0%,
-0x00469490,FUN_00469490,,0%,
+0x00469480,Stub_NoOp_00469480,,0%,
+0x00469490,Stub_NoOp_00469490,,0%,
 0x004694A0,ShipClass_CanPlayerCaptureShipClass,,0%,
 0x004656a0,Outfit_ClampOutfitOwnedCountToCurrentLimits,src/game/outfit.cpp,90%,"ownership limiting (Max, ammo-bank, ModType-27 multipliers, gun/turret slot caps) reconstructed; full 0x100x100 ammo-bank stride now modelled"
 0x00469760,Outfit_ComputeFleetCargoCapacity,src/game/outfit.cpp,50%,player-only fleet cargo capacity via Outfit_ComputePlayerFleetCargoCapacity; no NPC escort freighters yet
@@ -436,7 +445,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046AC50,Mission_SpawnAmbientMissionShip,,0%,
 0x0046B210,Math_ShortestAngleDeltaDeg,,0%,
 0x0046B260,Ship_IsShipEligibleForEscortOrLaunchBehavior,,0%,
-0x0046B330,FUN_0046b330,,0%,
+0x0046B330,NovaAi_PlayerCombatRatingGate,,0%,
 0x0046B360,Weapon_IsWeaponArcAllowed,,0%,
 0x0046B4B0,Dude_SelectShipTypeIndexFromDudeDef,src/game/ship_spawn.cpp,75%,NovaDude_SelectShipTypeIndex: weighted pick over a DudeDef's present ship types. Deferred: ship-class runtime-availability expression eval (all listed classes treated as available; only diverges for gated classes, rare for dude traders/pirates).
 0x0046B600,Dude_SelectRandomSystemDudeClassIndex,src/game/ship_spawn.cpp,100%,Reimpl: NovaDude_SelectRandomSystemDudeClassIndex() src/game/ship_spawn.cpp — weighted pick among a System's 8 dude slots (class ids >=0 && <0x200), scalar cumulative-weight bucket + uniform [0,total) draw, returns lowest-index valid slot reaching (draw+1) (mirrors the original's descending overwrite loop). Reproducible over GameState/seed rng. Tested via system 0x80 binding (8 slots weights 30/10/12/5/12/10/1/20) + empty->-1. High confidence.
@@ -464,7 +473,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046C800,Frame_IsRectVisibleInViewport,,0%,
 0x0046C930,Outfit_HasScannerTargetUntargetableCapability,src/game/targeting.cpp,100%,scanned inside NovaTargeting ScannerCapabilities: any owned outfit modType 0x1e with modVal bit 0x04 (kCloakScanner untargetable flag) across primary+alt mod slots; original's tri-state memo cache not reproduced (scan is once per targeting-command press).
 0x0046CA60,Outfit_HasCloakScannerTargetCloakedCapability,src/game/targeting.cpp,100%,scanned inside NovaTargeting ScannerCapabilities: any owned outfit modType 0x1e with modVal bit 0x08 (cloaked-targeting flag); same no-cache note as the untargetable sibling.
-0x0046CB90,FUN_0046cb90,,0%,
+0x0046CB90,Outfit_HasMiningScoopOutfit,,0%,
 0x0046CC60,Sprite_SetContainerIfChanged,,0%,
 0x0046CCA0,Mission_AccumulatePlayerContributeMask,,0%,Clean-room contribute aggregation in landed_store ContributeMask now seeds the ship-class baseline + owned outfits (not missions/ranks), matching the Require gating used by outfit/ship purchases.
 0x0046CD80,Outfit_EvaluateRequireMask,,0%,Require-mask satisfaction now routed through the ship-class-seeded ContributeMask (landed_store MeetsRequire), fixing fresh-player outfit purchases.
@@ -506,55 +515,55 @@ address,name,impl_file,reimpl_pct,comment
 0x0046EFB0,Stellar_GetJumpSequenceDurationMs,,0%,
 0x0046EFD0,Stellar_AreStellarsEquivalent,,0%,
 0x0046F100,Government_IsReputationTrackingGovernment,,0%,
-0x0046F140,FUN_0046f140,,0%,
+0x0046F140,Ship_HasAnyCargoLootOrActiveMission,,0%,
 0x0046F1E0,Frame_AddCombatRatingPoints,,0%,
 0x0046F270,Weapon_GetWeaponFireIntervalTicks,src/game/weapon.cpp,35%,fire-interval via reload_ticks in the cooldown set by NovaWeapon_FirePlayerWeaponBank, which now divides by weapon_bank_ammo (speed_scalar/ammo) so a second mounted weapon doubles fire rate; exact burst-count side-effects and flags-0x40 branch still not replicated
 0x0046F2C0,Weapon_GetWeaponBurstAttempts,,0%,
 0x0046F3F0,Weapon_ApplyWeaponOnHitEffects,src/game/collision.cpp,50%,"Direct/splash hit path accumulates Ionization and ORs IonizeColor, with squared-distance attenuation for blast-radius impacts. Status-effect decay and rendering remain TODO(decomp)."
-0x0046F500,FUN_0046f500,,0%,
+0x0046F500,ResourceArchive_OpenNamedSearchingPaths,,0%,
 0x0046F690,Resource_CountFilesByExtInFolder,,0%,
-0x0046F740,FUN_0046f740,,0%,
-0x0046F850,FUN_0046f850,,0%,
+0x0046F740,DrawContext_AllocateFromPictResource,,0%,
+0x0046F850,Hud_LoadOverlaySurfaceFromSpinImage,,0%,
 0x0046F8E0,DrawContext_PushCurrentAndSet,,0%,
 0x0046F910,DrawContext_RestorePreviousCurrent,,0%,
-0x0046F920,FUN_0046f920,,0%,
+0x0046F920,DrawContext_DestroyIfOwned,,0%,
 0x0046F940,DrawContextHandle_GetContextPtr,,0%,
-0x0046FA30,FUN_0046fa30,,0%,
+0x0046FA30,Profile_PrintTimingsEntry,,0%,
 0x0046FBF0,Particles_ClearAllPools,,0%,
-0x0046FC10,FUN_0046fc10,,0%,
+0x0046FC10,Profile_ResetAllEntrySlots,,0%,
 0x0046FDE0,ProfileScope_SetLabel,,0%,
 0x0046FE20,ProfileScope_Begin,,0%,
 0x0046FE80,ProfileScope_End,,0%,
 0x0046FF00,Profile_WriteReportFile,,0%,
 0x00470000,DebugLog_Open,,0%,
-0x00470100,FUN_00470100,,0%,
+0x00470100,Profile_FreeSharedStream,,0%,
 0x00470120,NovaDebugLog_PrintCString,,0%,
 0x00470150,NovaDebugLog_PrintCStringIndir,,0%,
-0x004701B0,FUN_004701b0,,0%,
+0x004701B0,Profile_PrintDateStamp,,0%,
 0x004701F0,NovaDebugLog_PrintInt,,0%,
 0x00470220,NovaDebugLog_PrintNcbSetStringContent,,0%,
 0x00470390,NovaDebugLog_PrintLine,,0%,
-0x004703C0,FUN_004703c0,,0%,
+0x004703C0,Profile_SharedStreamPresent,,0%,
 0x004703E0,BlitPixieInterface_CopyRect,,0%,
-0x00470680,FUN_00470680,,0%,
-0x00470960,FUN_00470960,,0%,
-0x00470C20,FUN_00470c20,,0%,
-0x00470EE0,FUN_00470ee0,,0%,
-0x004711E0,FUN_004711e0,,0%,
-0x00471800,FUN_00471800,,0%,
-0x00471920,FUN_00471920,,0%,
-0x004719D0,FUN_004719d0,,0%,
-0x00471A70,FUN_00471a70,,0%,
-0x00471B70,FUN_00471b70,,0%,
-0x00471CF0,FUN_00471cf0,,0%,
-0x00471D30,FUN_00471d30,,0%,
-0x00471DC0,FUN_00471dc0,,0%,
-0x00471E10,FUN_00471e10,,0%,unscaled command renderer referenced in notes
-0x00471E90,FUN_00471e90,,0%,
-0x00472000,FUN_00472000,,0%,resource byte-swap helper referenced in decode notes
-0x00472190,FUN_00472190,,0%,
-0x00472420,FUN_00472420,,0%,
-0x00472510,FUN_00472510,,0%,
+0x00470680,BlitPixie_BlitRectTintedOrPalette,,0%,
+0x00470960,BlitPixie_BlitRectMasked,,0%,
+0x00470C20,BlitPixie_BlitRectMaskInverted,,0%,
+0x00470EE0,BlitPixie_BlitRectRleCommandStream,,0%,
+0x004711E0,BlitPixie_BlitRectRawCopy,,0%,
+0x00471800,BlitPixie_CopyRectRegionBetweenFrames,,0%,
+0x00471920,BlitPixie_CopyRectFromFrameMasked,,0%,
+0x004719D0,SpriteFrame_ConvertColorToSurfaceDepth,,0%,
+0x00471A70,BlitRope_CopyRowsMasked,,0%,
+0x00471B70,BlitRope_CopyRowsMaskInverted,,0%,
+0x00471CF0,BlitRope_CopyRows,,0%,
+0x00471D30,BlitRope_CopyRowsTintedRgb15,,0%,
+0x00471DC0,BlitRope_CopyRowsSkipTransparent,,0%,
+0x00471E10,SpriteRleCommandStream_DecodeUnclipped,,0%,unscaled command renderer referenced in notes
+0x00471E90,SpriteRleCommandStream_DecodeClippedRow,,0%,
+0x00472000,SpriteRleCommandStream_ByteSwap,,0%,resource byte-swap helper referenced in decode notes
+0x00472190,SpriteRleCommandStream_SkipToRowCount,,0%,
+0x00472420,SpriteRleCommandStream_AdvanceRowsAndBlit,,0%,
+0x00472510,SpriteRleCommandStream_BlendColorRuns,,0%,
 0x00472900,SpriteRleCommandStream_BlitTintedRgb15,,0%,
 0x00472B30,SpriteRleCommandStream_BlitRaw,,0%,
 0x00472BB0,SpriteRleCommandStream_BlitIndexedOrRgb15,,0%,
@@ -563,29 +572,29 @@ address,name,impl_file,reimpl_pct,comment
 0x004730D0,SpriteRleCommandStream_BlitRawClipped,,0%,
 0x00473270,SpriteRleCommandStream_BlitIndexedOrRgb15Clipped,,0%,
 0x00473500,SpriteRleCommandStream_BlitIndexedRawClipped,,0%,
-0x004736A0,FUN_004736a0,,0%,
-0x004736C0,FUN_004736c0,,0%,
-0x00473B60,FUN_00473b60,,0%,
-0x00473C20,FUN_00473c20,,0%,
-0x00473DC0,FUN_00473dc0,,0%,
-0x00473E00,FUN_00473e00,,0%,
-0x00473FA0,FUN_00473fa0,,0%,
+0x004736A0,Color_ClampTo5Bit,,0%,
+0x004736C0,BlitPixel_TintRgb15Span,,0%,
+0x00473B60,BlitPixel_CopyOrSpan,,0%,
+0x00473C20,BlitPixel_TranslateIndexedSpan,,0%,
+0x00473DC0,BlitPixel_CopySkipTransparentSpan,,0%,
+0x00473E00,BlitPixel_RemapTintSpan,,0%,
+0x00473FA0,BlitPixel_CopyIndirectKeyedSpan,,0%,
 0x004740D0,NovaSetup_LoadIndexedSpriteLookupBanks,,0%,
 0x00474300,NovaSetup_FreeIndexedSpriteLookupBanks,,0%,
-0x00474350,FUN_00474350,,0%,
-0x00474410,FUN_00474410,,0%,
+0x00474350,BlitPixel_CopySpan,,0%,
+0x00474410,BlitPixel_FillSpan,,0%,
 0x004744A0,Sprite_Create,src/game/sprite_world.cpp,60%,"Sprite object model (empty frame set + current frame index) mirrored by game::Sprite; Sprite_AddFrame/Release/SetCurrentFrame/TheFrame implement the frame-array ownership and clamps; creation resets runtime state; the original's error slots and update/draw callback slots are not populated"
 0x00474720,Sprite_InitOrAllocate,,0%,
 0x00474970,Sprite_CreateFromSequentialFrameResources,,0%,
 0x00474AB0,Sprite_CreateFromSpriteSheetResources,src/game/sprite_world.cpp,25%,"SpriteAsset::LoadSpin implements the tile-grid frame-set construction (parse sp.x9an descriptor, decode named rl.x91D sheet into per-tile frames, upload textures, per-frame centre anchors) consumed by the spin store (stellars +1000, weapon shots +3000, star field 700); frames are assignable onto a live Sprite via Sprite_AssignAsset (Sprite_CreateFromSpriteSheetResources -> Sprite_AssignSpriteSet opening); DrawContext creation and render/present plumbing not reconstructed"
 0x00474E90,Sprite_CreateFromMultiFrameResource,src/rle_sprite_sheet.cpp,100%,Sprite_CreateFromMultiFrameResource rl\x91D decode
 0x00475050,Sprite_Clone,,0%,
-0x00475470,FUN_00475470,,0%,
-0x004754A0,FUN_004754a0,,0%,
+0x00475470,SpriteList_FreeStruct,,0%,
+0x004754A0,SpriteList_ReleaseMembers,,0%,
 0x00475550,Sprite_PrepareFramesAndAttachResourceData,,0%,
 0x004756C0,Sprite_ReleasePreparedFramesAndDetachResourceData,,0%,
 0x00475740,Sprite_AddFrame,src/game/sprite_world.cpp,80%,"Sprite::AddFrame appends a reference-counted SpriteFrameImage to the sprite's frame list (shared_ptr refcount), returning the new index or -1 on null; frame capacity growth mirrors Sprite_AddFrame's array growth"
-0x00475800,FUN_00475800,,0%,
+0x00475800,Sprite_InvokeDrawOrUpdateProc,,0%,
 0x00475830,Sprite_SetCurrentFrame,,0%,
 0x00475940,Sprite_SetUpdateCallback,,0%,
 0x00475970,Sprite_SetDrawProcValidated,,0%,
@@ -600,33 +609,33 @@ address,name,impl_file,reimpl_pct,comment
 0x004760C0,Sprite_CompileFrames,,0%,
 0x00476400,SpriteFrame_CreateFromRect,,0%,
 0x004765D0,SpriteFrame_CreateFromSpriteRect,,0%,
-0x00476800,FUN_00476800,,0%,
-0x004769D0,FUN_004769d0,,0%,
-0x004769E0,FUN_004769e0,,0%,
-0x004769F0,FUN_004769f0,,0%,
+0x00476800,SpriteFrame_CreateFromCicnResource,,0%,
+0x004769D0,SpriteFrame_ClearHandle,,0%,
+0x004769E0,Sprite_FreeDrawContext,,0%,
+0x004769F0,SpriteFrame_AllocateEmpty,,0%,
 0x00476BD0,Sprite_Release,src/game/sprite_world.cpp,80%,"Sprite::Release clears the frame set, dropping each frame image's refcount (shared_ptr frees the SDL handle at zero); mirrors Sprite_Release releasing the frame refs at teardown"
 0x00476C70,Sprite_Destroy,,0%,
-0x00476CB0,FUN_00476cb0,,0%,
+0x00476CB0,SpriteFrame_PushAsCurrentContext,,0%,
 0x00476D10,SpriteFrame_RebuildRowOffsets,,0%,
 0x00476E10,SpriteFrame_EnsurePrepared,,0%,
-0x00476F10,FUN_00476f10,,0%,
+0x00476F10,SpriteFrame_ResetPreparedState,,0%,
 0x00476F80,SpriteFrame_EnsureLoaded,,0%,
-0x00477070,FUN_00477070,,0%,
+0x00477070,SpriteFrame_ReleaseOverlayState,,0%,
 0x004770D0,SpriteLayer_Create,,0%,
-0x00477120,FUN_00477120,,0%,
+0x00477120,SpriteLayer_Free,,0%,
 0x00477140,SpriteLayer_AppendSprite,,0%,
 0x004771C0,SpriteLayer_RemoveSprite,,0%,
-0x00477240,FUN_00477240,,0%,
+0x00477240,SpriteLayer_SetId,,0%,
 0x00477250,SpriteLayer_PrepareSprites,,0%,
 0x00477290,SpriteLayer_ReleasePreparedSprites,,0%,
 0x004772D0,Ship_TestSpriteLayerOverlaps,,0%,
 0x00477630,Sprite_ClearLastError,,0%,
-0x00477640,FUN_00477640,,0%,
+0x00477640,Sprite_AllocateOwnerWithLayer,,0%,
 0x00477910,SpriteFrame_CreateFromRenderOwner,,0%,
-0x00477AF0,FUN_00477af0,,0%,
+0x00477AF0,Stub_SpriteNoOp,,0%,
 0x00477B00,SpriteWorld_AppendLayerTail,,0%,
 0x00477B50,SpriteWorld_RemoveLayerFromChain,,0%,
-0x00477BA0,FUN_00477ba0,,0%,
+0x00477BA0,SpriteWorld_PrepareAllLayers,,0%,
 0x00477C10,SpriteWorld_ClearSurface14,,0%,
 0x00477C40,SpriteWorld_ClearSurface18,,0%,
 0x00477C70,DrawContext_RestoreOwnerContext,,0%,
@@ -635,8 +644,8 @@ address,name,impl_file,reimpl_pct,comment
 0x00477CF0,SpriteWorld_SetPostRenderHook,,0%,
 0x00477D00,SpriteWorld_SetTargetFps,,0%,
 0x00477D60,SpriteWorld_SetEffectColor,,0%,
-0x00477F10,FUN_00477f10,,0%,
-0x00477F30,FUN_00477f30,,0%,
+0x00477F10,Sprite_CompositeCurrentFrameToContext,,0%,
+0x00477F30,SpriteFrame_DrawFrameToCurrentContext,,0%,
 0x00477FA0,SpriteWorld_RenderLayers,,0%,
 0x004781F0,SpriteWorld_UpdateAnimatedSprites,,0%,
 0x00478480,SpriteWorld_PresentDirtySprites,,0%,
@@ -650,54 +659,54 @@ address,name,impl_file,reimpl_pct,comment
 0x00478F20,SpriteWorld_FreeDrawContext,,0%,
 0x00478F30,SpriteWorld_CreateDrawContextFromResource,,0%,
 0x00478FA0,SpriteWorld_CreateDrawContextFromImage,,0%,
-0x00479070,FUN_00479070,,0%,
-0x004791B0,FUN_004791b0,,0%,
-0x004791D0,FUN_004791d0,,0%,
-0x00479210,FUN_00479210,,0%,
-0x00479250,FUN_00479250,,0%,
-0x00479260,FUN_00479260,,0%,
-0x004794A0,FUN_004794a0,,0%,
+0x00479070,Sprite_CompositeFrameToNewSurface,,0%,
+0x004791B0,Sprite_InvalidateRenderOwnerRect,,0%,
+0x004791D0,Sprite_InvertRect,,0%,
+0x00479210,SpriteWorld_SetChannelFillForDepth,,0%,
+0x00479250,SpriteWorld_NotFoundSentinel,,0%,
+0x00479260,SpriteWorld_CopyRectToSurfaceAndFill,,0%,
+0x004794A0,SpriteWorld_ClearFillState,,0%,
 0x004794B0,Sprite_SetLastError,,0%,
 0x004794D0,Sprite_ReportFatalError,,0%,
 0x00479590,Beam_DrawBlendedSegment,,0%,
 0x004797B0,Beam_BlendLineSegment,,0%,
-0x00479C50,FUN_00479c50,,0%,
-0x00479CF0,FUN_00479cf0,,0%,
-0x00479FE0,FUN_00479fe0,,0%,
-0x0047A410,FUN_0047a410,,0%,
-0x0047AC50,FUN_0047ac50,,0%,
-0x0047AFD0,FUN_0047afd0,,0%,
-0x0047B3C0,FUN_0047b3c0,,0%,
-0x0047B710,FUN_0047b710,,0%,
-0x0047B7A0,FUN_0047b7a0,,0%,
-0x0047B7C0,FUN_0047b7c0,,0%,
-0x0047B7D0,FUN_0047b7d0,,0%,
-0x0047B7E0,FUN_0047b7e0,,0%,
-0x0047B870,FUN_0047b870,,0%,
+0x00479C50,SWBeams_DrawBeamSegment,,0%,
+0x00479CF0,SWBeams_PlotBresenhamLine,,0%,
+0x00479FE0,SWBeams_DrawShortBeam,,0%,
+0x0047A410,SWBeams_DrawThickFadingBeam,,0%,
+0x0047AC50,SWBeams_DrawKinkedBeam,,0%,
+0x0047AFD0,SWBeams_DrawBeamWithFlare,,0%,
+0x0047B3C0,SWBeams_SetupAndClipSegment,,0%,
+0x0047B710,Rect_AlignCenterIn,,0%,
+0x0047B7A0,Resource_IsResourceTypePresent,,0%,
+0x0047B7C0,SWParticles_DefaultPoolSize,,0%,
+0x0047B7D0,Stub_NoOp_0047b7d0,,0%,
+0x0047B7E0,SWParticles_AllocatePool,,0%,
+0x0047B870,SWParticles_FreePool,,0%,
 0x0047B8C0,SWParticles_ResetEntries,,0%,
 0x0047B940,SWParticles_SetViewOrigin,,0%,
-0x0047B960,FUN_0047b960,,0%,
+0x0047B960,SWParticles_SpawnParticle,,0%,
 0x0047BB30,SWParticles_RestoreSavedPixels,,0%,
 0x0047BDD0,SWParticles_DrawParticles,,0%,
 0x0047C3A0,SWParticles_UpdateDirtyPixels,,0%,
-0x0047C800,FUN_0047c800,,0%,
+0x0047C800,SWParticles_Update,,0%,
 0x0047C8E0,NovaUi_RunTravelDestinationServicesWindow,src/game/landed_window.cpp,36%,"docked/screen modal via NovaLanded_RunWindow: Spaceport backdrop PICT 0x2134 (via g_travel_overlay_sprite_handle, FUN_0048e970) drawn across the fixed 640x480 playfield, with the destination stellar's own planet picture (PICT 0x2710+link_a_id, or its custom pict id at engage_highlight_frame>=0x80 per FUN_0048e970) drawn 1:1 into the Spaceport DITL-0x3e8 outer panel (612x285, the pict's natural size); destination name centred in the header band; the stellar's landing description (desc block key 0x64917363 at the raw stellar resource id, Ui_LoadSelectionDialogResource) word-wrapped into the inner panel, falling back to credits/fuel/hull status lines when absent; services in the DITL-0x3e8 two-column x4-row button layout at the lower left/right using the real three-state button strips (normal 0x1d4c.., pressed 0x1d4f.., grey 0x1d52..). Button state follows the original: mouse-hover = pressed art, unavailable slots (per StellarDef travel_flags/fuel/credits, mirroring NovaUi_RedrawTravelActionButtons 0x004a0220) = grey, no keyboard focus highlight; input is first-letter shortcuts (r/f,c/t,o,s,n,b; Enter/Esc leave) not WASD; refuel billed, armor/shields auto-repaired free on landing (Stellar_TravelToSystem 0x00455e10; there is no docked Repair button in the original); icon glyphs, the Communications frame and the desc placeholder expansion (<=1) still mocked; the sub-window modals now render as real on-screen dialogs via NovaLanded_RunSubWindowDialog (src/game/docked_dialog.cpp): each service's Nova Graphics 3 frame PICT (0x2135 Shipyard/0x2136 Outfit/0x2137 Bar/0x2139 Mission BBS/0x213d Map/0x213e Trade) over the re-layered docked backdrop 0x2134 under a dim scrim, heading + Leave, Esc/Enter/click to close"
 0x0047CFE0,NovaUi_DrawTravelDestinationServicesWindow,,0%,
-0x0047D180,FUN_0047d180,,0%,
-0x0047D370,FUN_0047d370,,0%,
-0x0047D560,FUN_0047d560,,0%,
-0x0047D600,FUN_0047d600,,0%,
-0x0047DC50,FUN_0047dc50,,0%,
-0x0047E1E0,FUN_0047e1e0,,0%,
+0x0047D180,NovaUi_RunTravelNewsWindow,,0%,
+0x0047D370,NovaUi_DrawTravelNewsWindow,,0%,
+0x0047D560,NovaUi_HandleTravelNewsWindowInput,,0%,
+0x0047D600,NovaUi_RedrawTravelNewsHeader,,0%,
+0x0047DC50,NovaUi_RunTravelGoodsFlashWindow,,0%,
+0x0047E1E0,NovaUi_DrawTravelGoodsFlashWindow,,0%,
 0x0047E2D0,NovaHud_ShowOverlayMessage,src/game/hud_overlay.cpp,60%,transient HUD overlay message reconstructed (NovaHud_ShowOverlayMessage + state on GameState): text cache, colour, wall-clock expiry, drawn by HudRenderer bottom-band; user feedback (landing denial) wired. Edge-flag/colour-palette fidelity + exact durations approximate
 0x0047E430,NovaHud_ShowCachedOverlayMessage,src/game/hud_overlay.cpp,70%,transient overlay replays the cached message (NovaHud_ShowCachedOverlayMessage): re-arms the live message expiry; drawn by the same HudRenderer path
 0x0047E470,NovaUi_RunTargetShipCommWindow,src/game/ship_comm_dialog.cpp,70%,"NovaShipComm_RunShipDialog (DLOG 0x3ef, PICT 0x213f): window shell + 200x200 portrait (ShipClass pict_fallback 5000+) on the DITL item-10 right box + name(DITL 9)/status(DITL 11) panel + 3 context buttons (Close Channel/Request Assistance|Beg For Mercy|Release/Greetings per DAT_007d82ee/f0/f2, labels matching each slot's action) stacked vertically lower-left per DITL items 0/1/2 (special-scan-mask hides the assistance slot and drops Greetings to the middle, entry 1/4/2 reads), personality + bribe cost (5e-07/1e-4 scales, 0.333 cap, [1000,20000]), bribe latch, initial prompt ladder, assistance dialogue state machine (fire-restricted/escort-release/keep-pressing/comm-aid/distress/fuel-bribe), single-pass payment (35%, 0.75x, +1000 haggle, free-help scan_mask 0x10), Greetings hail-info (default fragment only), keyboard shortcuts e/Esc/Enter/r/g. Deferred: escort-management handoff, fleet-def branches, full hail-info assembly, cargo transfer"
 0x0047F9C0,NovaUi_RunTravelDestinationBribeWindow,,0%,
-0x0047FA40,FUN_0047fa40,,0%,
+0x0047FA40,NovaUi_PollTargetShipCommWindow,,0%,
 0x0047FB70,NovaUi_DrawTravelDestinationBribeWindow,,0%,
 0x00480030,NovaUi_RunTravelDestinationInteractionWindow,src/game/negotiation_dialog.cpp,80,land/bribe/leave reconstructed in NovaNegotiation_RunDestinationDialog (real RNG bribe cost + latch, 5-variant STR# pickup, per-button hit-test, DLOG 0x3f0 payment + price-haggle +1000 counter-offer, PaymentChancePercent 35%); the attack/spawn branch remains deferred with TODO(decomp). Dialog now laid out from real DITL 0x3f1 (540x295 window, vertical lower-left buttons, destination header + reputation) and draws the destination planet art
 0x004812C0,NovaUi_DrawTravelDestinationInteractionWindow,src/game/negotiation_dialog.cpp,70,DrawNegotiationDialog paints the DLOG 0x3f1 backdrop centered at natural size, the destination planet picture in the DITL item-4 image frame, the header name (item 5), the status/prompt block (item 3) and the three vertically-stacked primary buttons (items 0/1/2); target-stellar ambient-sprite scaling out of scope (uses the planet PICT instead)
-0x004819D0,FUN_004819d0,,0%,
+0x004819D0,NovaUi_BuildShipCommHailInfoText,,0%,
 0x00482280,NovaUi_RunTravelDestinationPaymentWindow,src/game/negotiation_dialog.cpp,45,payment confirm with random 35% success, bribe-mode inflation 0.75 + /100 rounding, and the declined-bribe haggle counter-offer (+1000) in the interaction path; full separate DLOG 0x3f0 modal + debt mode 1.33 still deferred
 0x004826A0,NovaUi_DrawTravelDestinationPaymentWindow,,0%,
 0x004828C0,NovaUi_LoadTravelDestinationPromptString,,0%,
@@ -707,12 +716,12 @@ address,name,impl_file,reimpl_pct,comment
 0x00484D30,NovaUi_DrawBoardingPlunderWindow,,0%,
 0x004853A0,NovaUi_RunEscortShipManagementWindow,,0%,
 0x00485970,NovaUi_DrawEscortShipManagementWindow,,0%,
-0x004860B0,FUN_004860b0,,0%,
-0x004860C0,FUN_004860c0,,0%,
-0x004860D0,FUN_004860d0,,0%,
-0x004860F0,FUN_004860f0,,0%,
-0x00486100,FUN_00486100,,0%,
-0x00486110,FUN_00486110,,0%,
+0x004860B0,Profile_ExpressionGate_860,,0%,
+0x004860C0,Profile_CountExpression_860,,0%,
+0x004860D0,Util_Rotl8,,0%,
+0x004860F0,Compiler_UninitializedReturn,,0%,
+0x00486100,Profile_ExpressionTimestamp_860,,0%,
+0x00486110,Compiler_ReturnZero,,0%,
 0x00486120,Menu_OpenGalaxyMapDialog,,0%,
 0x004861B0,NovaHud_TrackFocusHoverIndex,src/nova_app.cpp,100%,NovaHud_TrackFocusHoverIndex menu hover tracking
 0x00486790,View_ResetCameraAndHover,,0%,
@@ -721,7 +730,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00486ED0,NovaGameMode_DispatchAction,src/nova_app.cpp,100%,NovaGameMode_DispatchAction
 0x004872A0,NovaCommand_DispatchToMode,,0%,
 0x004873B0,NovaRender_RedrawAndPresentFrame,src/nova_app.cpp,100%,NovaRender_RedrawAndPresentFrame
-0x00487FCD,FUN_00487fcd,,0%,
+0x00487FCD,NovaRender_RestoreClippedRegion,,0%,
 0x00488080,NovaMainLoop_UpdateFrame,src/nova_app.cpp,100%,NovaMainLoop_UpdateFrame
 0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
 0x00488650,Menu_RunSettingsDialog,src/game/preferences.cpp,75%,"core modal: DLOG 0xfa3 geometry, toggles, sliders, OK/cancel, and Key Settings sub-dialog; .prf persistence and windowed-mode live toggle remain TODO"
@@ -732,8 +741,8 @@ address,name,impl_file,reimpl_pct,comment
 0x0048B230,NovaRender_PresentBlockingTransitionFrame,,0%,
 0x0048B250,NovaAudio_PreloadTransitionEffects,,0%,NovaAudio_PreloadTransitionEffects into DAT_007d24b8
 0x0048B280,Menu_RunKeySettingsDialog,src/game/preferences.cpp,70%,"DLOG 0xfa2 modal with native PICT 0x8b backdrop, 34-row shadow editing, capture, Set Default, duplicate validation, and Cancel/OK; persistence/input integration remain TODO(decomp)"
-0x0048B6D0,FUN_0048b6d0,,0%,
-0x0048B860,FUN_0048b860,,0%,
+0x0048B6D0,Menu_KeySettingsHandleInput,,0%,
+0x0048B860,Menu_KeySettingsDraw,,0%,
 0x0048BBB0,NovaHud_ReleaseTransientResources,,0%,
 0x0048BC20,NovaAudio_PlayTransitionEffectsWait,,0%,
 0x0048BC90,NovaHud_UpdateLayoutState,,0%,
@@ -742,11 +751,11 @@ address,name,impl_file,reimpl_pct,comment
 0x0048C210,NovaHud_UpdateFocusAnimationState,,0%,
 0x0048C3C0,NovaHud_RenderOverlays,,0%,
 0x0048C580,NovaHud_RenderFocusOverlay,,0%,
-0x0048C730,FUN_0048c730,,0%,
+0x0048C730,NovaUi_HandleTravelDestinationInteractionLoop,,0%,
 0x0048D190,NovaUi_HandleTravelServicesMenuInput,,0%,
 0x0048D5A0,TravelOutfitMenu_FUN_0048d5a0,,0%,
 0x0048D6F0,NovaUi_RedrawTravelServicesMenu,,0%,
-0x0048E970,FUN_0048e970,,0%,
+0x0048E970,NovaUi_LoadTravelOverlaySprites,,0%,
 0x0048EA70,NovaUi_RunTravelOutfitInteractionLoop,src/game/docked_dialog.cpp,42%,Partial clean-room modal: native 765x321 frame and DITL-aligned 4x5 grid/action controls; row paging; one-item buy/sell with in-place list refresh preserving the opening-count snapshot (same-session full-price refund vs half-price resale, priced off the stellar-scaled purchase price) and inventory mutation/exit cleanup. Quantity modifiers and dependent-ammo/bay protection branches remain TODO(decomp).
 0x004903C0,NovaUi_HandleTravelOutfitMenuInput,src/game/docked_dialog.cpp,30%,Mouse grid/action handling plus B/S/P/N/L shortcuts drive selection buy/sell paging and exit; buy/sell both refresh the visible list in place and load the outfit description at zero-based id+3000 (`selected_id - 0x80 + 3000`). Original command-map navigation and quantity modifiers remain TODO(decomp).
 0x004909A0,TravelOutfitMenu_FUN_004909a0,,0%,
@@ -3018,7 +3027,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00875720,FUN_00875720,,0%,
 0x00875750,FUN_00875750,,0%,
 0x00875780,FUN_00875780,,0%,
-0x00875790,Ship_UpdatePlayerShipControl,,0%,
+0x00875790,PlayerTick_MouseCoordinateBridge,,0%,"INTERNAL LABEL of 0x0044AA70; not a function. Far bridge adjusts the saved cursor coordinate by the gameplay viewport offset and jumps to 0x0044E019; equivalent coordinate handling is folded into the reimplementation rather than ported one-to-one."
 0x008757A0,FUN_008757a0,,0%,
 0x008757C0,FUN_008757c0,,0%,
 0x008757D0,FUN_008757d0,,0%,

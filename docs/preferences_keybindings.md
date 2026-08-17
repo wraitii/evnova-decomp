@@ -13,7 +13,12 @@ be patient; it can take tens of seconds / a retry).
 
 1. **Preferences / Settings** = `Menu_RunSettingsDialog` (0x00488650), DLOG
    `0xfa3` (25 items). Option toggles + sound volume + brightness sliders + a
-   Key Settings button.
+   Key Settings button. The DLOG background is created by the dialog surface;
+   its title band is the custom `0x4884f0` user-item callback, and the slider
+   arrows are native PICT resources `0x86`/`0x87` at their 11x9 DITL cells.
+   The shared surface is white with a black frame; its controls use the
+   grayscale bevel RGBColor triples at `0x0056f118`..`0x0056f12a`, not Nova's
+   blue gameplay-panel palette.
 2. **Key Settings** = `Menu_RunKeySettingsDialog` (0x0048b280, renamed from
    FUN_0048b280), DLOG `0xfa2` (37 items) over backdrop PICT `0x8b`. A dedicated
    modal for rebinding the 34 gameplay commands.
@@ -22,6 +27,9 @@ be patient; it can take tens of seconds / a retry).
      the `_DAT_00591518` special-interaction command, distinct from the menu.
    - Its own loop draws `Menu_KeySettingsDraw` (0x0048b860) and handles input
      via `Menu_KeySettingsHandleInput` (0x0048b6d0).
+   - The PICT is the window backdrop; row highlighting is not a yellow overlay:
+     normal cells are white/black, while the selected cell is black with a
+     white frame and white key text.
 
 ## The command/binding model
 
@@ -218,13 +226,33 @@ plate comment). Version `0x69`. Reserved slots 0x7e..0x88 are zeroed on save
 `key_x2mode` from `[EV Nova]` in EVNova.ini and applies it via
 `Settings_PollKeyX2Mode` (poll of `g_key_x2mode`, default 0x14 = Caps Lock).
 
+## EVNova.ini settings outside the `.prf` preferences
+
+The Windows profile settings are read from `[EV Nova]` and are separate from
+the per-resolution `<render_width>EV Nova Prefs.prf` state:
+
+| key | reader | default / effect |
+|---|---|---|
+| `game_width` | `FUN_008721fc` | `0` means use the primary system metric; otherwise selects the requested game/display width before `VideoMode_ApplySnapshot`. |
+| `game_height` | `FUN_008721fc` | `0` means use the primary system metric; otherwise selects the requested game/display height. |
+| `key_x2mode` | `Settings_LoadIniAndPrefs` (`0x00872310`) | default string `0x14` (parsed with base autodetection, i.e. key code 20 / Caps Lock); `Settings_PollKeyX2Mode` polls that key each frame. |
+| `ui_scale` | `Settings_LoadUiScale` (`0x00872e7e`) | default `1.0`; zero is coerced to `1.0`, and non-default values rescale the base display dimensions and font setup. |
+
+These four values do not appear in the `.prf` payload and are not controls in
+the Preferences dialog. The checked-in `EV Nova/EVNova.ini` is the extracted
+numeric-section resource/string file and does not contain a live `[EV Nova]`
+profile section; the table above is the runtime reader contract recovered from
+the executable.
+
 ## Open TODO / work list for the reimplementation
 
 1. **Complete:** `Resource_LoadPictAsImage` now decodes the compact 0x99
    1-bit/color-table PICT 0x8b backdrop, including its row preamble.
 2. **Complete:** `Menu_RunSettingsDialog` is a clean-room modal over DLOG
-   0xfa3 with resource-derived geometry, toggles, sliders, OK/Cancel, and the
-   Key Settings entry point.
+   0xfa3 with resource-derived geometry, the custom title-band treatment,
+   native PICT slider arrows, the original white/black surface and grayscale
+   bevels, toggles, sliders, OK/Cancel,
+   and the Key Settings entry point.
 3. **Complete:** `Menu_RunKeySettingsDialog` now renders PICT 0x8b and its 34
    row cells; click-to-select, physical-key capture, duplicate validation,
    Set Default, and shadow-copy Cancel/OK behavior are implemented.

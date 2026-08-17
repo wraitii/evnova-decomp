@@ -21,6 +21,19 @@ struct DirectBitsOpcode {
   std::uint16_t opcode = 0;
 };
 
+[[nodiscard]] std::optional<std::size_t>
+FindClassicBitsRect(std::span<const std::byte> bytes) {
+  // The small preference arrow PICTs are classic bitmap pictures. Their
+  // BitsRect opcode is byte-aligned at an odd offset after the v1 header, so
+  // they cannot be handled by the word-aligned DirectBitsRect scanner.
+  for (std::size_t offset = 10; offset + 1 < bytes.size(); ++offset) {
+    if (std::to_integer<std::uint8_t>(bytes[offset]) == 0x90) {
+      return offset + 1;
+    }
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] std::optional<DirectBitsOpcode>
 FindDirectBitsRect(std::span<const std::byte> bytes) {
   // PICT v2 opcodes are word-aligned relative to the start of the resource.
@@ -97,11 +110,71 @@ ReadRowLength(std::span<const std::byte> bytes,
 
 } // namespace
 
+namespace {
+
+[[nodiscard]] std::optional<PictImage>
+DecodeClassicBitsRect(std::span<const std::byte> pict_data,
+                      std::size_t payload) {
+  constexpr std::size_t kBitmapHeaderSize = 28;
+  if (payload + kBitmapHeaderSize > pict_data.size()) {
+    return std::nullopt;
+  }
+  const auto row_bytes =
+      static_cast<std::size_t>(ReadBe16(pict_data, payload) & 0x3fffU);
+  const auto top = ReadBe16(pict_data, payload + 2);
+  const auto left = ReadBe16(pict_data, payload + 4);
+  const auto bottom = ReadBe16(pict_data, payload + 6);
+  const auto right = ReadBe16(pict_data, payload + 8);
+  const auto width = static_cast<std::size_t>(right - left);
+  const auto height = static_cast<std::size_t>(bottom - top);
+  if (row_bytes == 0 || bottom <= top || right <= left ||
+      width > row_bytes * 8U ||
+      width > std::numeric_limits<std::size_t>::max() / 4U / height) {
+    return std::nullopt;
+  }
+
+  // BitsRect: rowBytes, bounds, source rect, destination rect, transfer mode.
+  const std::size_t source = payload + kBitmapHeaderSize;
+  if (source + row_bytes * height > pict_data.size()) {
+    return std::nullopt;
+  }
+
+  PictImage image;
+  image.width = static_cast<int>(width);
+  image.height = static_cast<int>(height);
+  image.rgba_pixels.resize(width * height * 4, 0);
+  for (std::size_t y = 0; y < height; ++y) {
+    for (std::size_t x = 0; x < width; ++x) {
+      const auto packed = std::to_integer<std::uint8_t>(
+          pict_data[source + y * row_bytes + x / 8U]);
+      const bool set = (packed & (1U << (7U - (x % 8U)))) != 0;
+      const auto destination = (y * width + x) * 4U;
+      if (set) {
+        // The arrow pictures are monochrome mask-like art: preserve the
+        // background beneath the zero bits and draw the set bits in the Nova
+        // dialog highlight colour at upload time's opaque white.
+        image.rgba_pixels[destination] = 255;
+        image.rgba_pixels[destination + 1] = 255;
+        image.rgba_pixels[destination + 2] = 255;
+        image.rgba_pixels[destination + 3] = 255;
+      }
+    }
+  }
+  return image;
+}
+
+} // namespace
+
 std::optional<PictImage>
 Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   constexpr std::size_t source_and_destination_rects_size = 18;
   const auto direct_bits = FindDirectBitsRect(pict_data);
   if (!direct_bits) {
+    if (const auto classic_bits = FindClassicBitsRect(pict_data)) {
+      if (const auto image = DecodeClassicBitsRect(pict_data, *classic_bits)) {
+        return image;
+      }
+    }
     NovaLog::Todo("unsupported PICT: no DirectBitsRect opcode");
     return std::nullopt;
   }

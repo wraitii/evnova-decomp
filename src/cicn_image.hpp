@@ -17,8 +17,8 @@
 // (0x004bbb80) -> FUN_004d2bd0 parses the extended "color icon" header and
 // unpacks a per-pixel colour-index raster plus a 1-bit mask; the sprite-layer
 // builder then paints the palette-mapped pixels over a white rect and derives
-// the frame's alpha mask from the same mask bitmap (FUN_00476800 /
-// FUN_00479070).
+// the frame's alpha mask from the same mask bitmap
+// (SpriteFrame_CreateFromCicnResource / Sprite_CompositeFrameToNewSurface).
 //
 // This clean-room decoder reproduces that result: width/height come from
 // pixelBounds (+0x0c-+0x08, +0x0a-+0x06); the mask bitmap is a 1-bit-per-pixel

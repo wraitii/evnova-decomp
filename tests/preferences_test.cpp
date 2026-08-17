@@ -5,6 +5,7 @@
 #include "pict_image.hpp"
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 
@@ -76,6 +77,20 @@ TEST_CASE("Preferences DITL 0xfa3 carries the option titles per item") {
   // The two runtime value boxes are the static-text items.
   CHECK(item(4).type == 8);
   CHECK(item(23).type == 8);
+}
+
+TEST_CASE("Preferences slider controls use the native PICT arrow art") {
+  if (!DataAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  for (const auto pict_id : {std::uint16_t{0x86}, std::uint16_t{0x87}}) {
+    const auto data = NovaResource_LoadPictData(pict_id);
+    REQUIRE(data);
+    const auto image = Resource_LoadPictAsImage(*data);
+    REQUIRE(image);
+    CHECK(image->width == 11);
+    CHECK(image->height == 9);
+  }
 }
 
 TEST_CASE("Key Settings DLOG and DITL preserve the three-column layout") {

@@ -16,7 +16,7 @@ EV Nova uses two distinct graphics systems:
 
 The menu/splash/intro path uses a **shared offscreen compositing surface**:
 - `DAT_00597950` — the offscreen sprite/panel DrawContext handle (full-size gameplay
-  surface, allocated by `FUN_004ac950` via `FUN_0046f740`).
+  surface, allocated by `FUN_004ac950` via `DrawContext_AllocateFromPictResource (0x0046f740)`).
 - `DAT_00597954` — the full-game-size rect bounding that surface.
 - Everything menu/splash is drawn into `DAT_00597950`, then that surface is blitted to
   the main **render owner** (the OS window surface), then committed.
@@ -44,8 +44,9 @@ The menu/splash/intro path uses a **shared offscreen compositing surface**:
 ### Animated sprites — RLE sprite sheets (.rez)
 - `FUN_004b4e10(id, ...)` — reads the sprite-set resource header (frame count, dims,
   anchors). Returns valid-resource flag.
-- `FUN_0047b7a0(tag, id)` — checks which sprite encoding the resource uses
-  (`tag == 0x726c9138/0x726c9144` → RLE sprite sheet; otherwise multi-frame).
+- `Resource_IsResourceTypePresent(type, id) (0x0047b7a0)` — checks whether the resource family
+  (FourCC type / id) exists in the archive DB, so the loader picks the RLE sprite-sheet form
+  vs the multi-frame form.
 - `Sprite_CreateFromSpriteSheetResources(...)` — RLE sprite-sheet form.
 - `Sprite_CreateFromMultiFrameResource(...)` — multi-frame form.
 - `Sprite_PrepareFramesAndAttachResourceData(sprite)` — build usable frames.
@@ -77,9 +78,9 @@ both menu and in-game HUD. Menu path:
 3. **Blit the 6 menu focus sprites** (`DAT_00596cb8[6]`):
    - `Sprite_SetPositionFromCurrentFrameAnchor(sprite, x, y)` — position each at
      `DAT_007d24cc[i] + DAT_007d2544`, `DAT_007d24ce[i] + DAT_007d2546`.
-   - `FUN_00470ee0` — the sprite→surface blit entry (`BlitPixieInterface.c`). Validates
+   - `BlitPixie_BlitRectRleCommandStream (0x00470ee0)` — the sprite→surface blit entry (`BlitPixieInterface.c`). Validates
      the surface/sprite, then calls the RLE command-stream renderers
-     (`FUN_00471e10` unscaled / `FUN_00471e90` scaled+clipped). This is the function to
+     (`SpriteRleCommandStream_DecodeUnclipped (0x00471e10)` unscaled / `SpriteRleCommandStream_DecodeClippedRow (0x00471e90)` scaled+clipped). This is the function to
      replace with an SDL3 `SDL_RenderTexture`/blit.
 4. `NovaHud_RenderOverlays()` — HUD transient/effect overlays.
 5. `NovaHud_RenderFocusOverlay()` — indexed focus/animation overlay.
@@ -111,7 +112,7 @@ both menu and in-game HUD. Menu path:
 | `Resource_LoadPictAsImage` / `Resource_LoadPictAsImageWithColorRemap` | `IMG_Load` → `SDL_Texture` cache |
 | `Image_Destroy` | `SDL_DestroyTexture` |
 | `Sprite*` / sprite tables (`DAT_00596cb8[6]`, `g_weapon_sprite_set_table`) | load animated sprite sheets into `SDL_Texture` arrays (or `SDL_RenderGeometry` frames) |
-| `FUN_00470ee0` (RLE blit) | `SDL_RenderCopyEx` / `SDL_RenderTexture` per frame |
+| `BlitPixie_BlitRectRleCommandStream (0x00470ee0)` (RLE blit) | `SDL_RenderCopyEx` / `SDL_RenderTexture` per frame |
 | Offscreen surface `DAT_00597950` + rect `DAT_00597954` | an SDL target texture / `SDL_SetRenderTarget` for compositing |
 | Render owner (OS window surface) | the SDL window renderer/present target |
 | `NovaRender_CommitFrame` → `QueuePresentAndSwap` | `SDL_RenderPresent` |
