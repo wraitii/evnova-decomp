@@ -99,6 +99,19 @@ void Stub_HandleShots(GameState &state, float elapsed_ticks) {
   NovaWeapon_TickShots(state, elapsed_ticks * kOriginalTickMs, elapsed_ticks);
 }
 
+// Ship_HandleShip (0x00433050): ionization decay uses measured frame time in
+// milliseconds, unlike movement's normalized tick unit.
+void TickIonizationDecay(GameState &state, Ship &ship, float elapsed_ticks) {
+  if (ship.ionization_points <= 0.0F) {
+    ship.ionization_points = 0.0F;
+    return;
+  }
+  const float frame_time_ms = elapsed_ticks * (1000.0F / 30.0F);
+  const float decay_rate = NovaOutfit_ComputeIonizationDecayRate(state, ship);
+  ship.ionization_points = std::max(
+      0.0F, ship.ionization_points - decay_rate * frame_time_ms);
+}
+
 // Ghidra scope 4/5 of Frame_TickSystems: per-ship simulation. For the NPC
 // ships this is Ship_HandleShip (0x00433050), which integrates each active
 // ship's AI-written movement commands into its kinematics. Reconstructed for
@@ -160,6 +173,9 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     }
 
     NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
+
+    // The separate ionization speed clamp remains deferred.
+    TickIonizationDecay(state, ship, elapsed_ticks);
   }
 }
 
@@ -772,7 +788,7 @@ void NovaShip_TickNpcShips(GameState &state, float elapsed_ticks) {
 //
 //  * Turn follows the held key at round(effective turn rate) integer degrees
 //    per tick. Outfit opcode-9 is folded into the effective stats before this
-//    integrator; the original's status-effect damping awaits reconstruction of
+//    integrator; the original's ionization damping awaits reconstruction of
 //    that combat state. Heading 0 points 'up', increases clockwise.
 //
 //  * Thrust accelerates along the heading as a polar velocity step clamped
@@ -988,6 +1004,24 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 // NPC ship movement
 // -------------------------------------------------------------------------
 
+namespace {
+
+// Ship_GetIonizationIntensity (0x0046c160): the NPC path has no outfit
+// opcode-0x28 additions, so its normalized intensity is simply the status
+// ionization meter divided by the class capacity. The original returns zero for a
+// non-positive capacity and clamps the resulting stat multiplier below.
+[[nodiscard]] float NovaShip_IonizationIntensity(const Ship &ship,
+                                                 const ShipClass &ship_class) {
+  if (ship.ionization_points <= 0.0F ||
+      ship_class.ionization_capacity <= 0) {
+    return 0.0F;
+  }
+  return ship.ionization_points /
+         static_cast<float>(ship_class.ionization_capacity);
+}
+
+} // namespace
+
 NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
                                                  const Ship &ship,
                                                  const ShipClass &ship_class) {
@@ -997,19 +1031,67 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
   stats.max_speed_px_per_tick = static_cast<float>(ship_class.speed) / 100.0F;
   stats.thrust_px_per_tick2 =
       static_cast<float>(ship_class.accel) / 10000.0F * 2.0F;
-  // Government combat_rating_scale (NPC branch of Ship_ComputeShipEffective-
-  // Thrust 0x004640a0 / Ship_ComputeShipEffectiveMaxSpeed 0x004642e0): applied
-  // to thrust and max speed when the ship belongs to a government. Turn rate
-  // is NOT government-scaled (Ship_ComputeShipMaxTurnRateDeg 0x00463e70 is
-  // base + outfit opcode-9 + status damping + floor only). The original also
-  // multiplies by the per-ship skill_variance_scale (ShipState +0x40) here --
-  // not modelled yet, see the header (TODO(decomp)).
+  // Ship_ComputeShipEffectiveThrust (0x004640a0) and
+  // Ship_ComputeShipEffectiveMaxSpeed (0x004642e0) return zero for the NPC
+  // capability flag 0x400 before applying any other modifier.
+  if ((ship_class.capability_flags & 0x0400U) != 0U) {
+    return {};
+  }
+
+  // Government combat_rating_scale applies to thrust and max speed when the
+  // ship belongs to a government. Turn rate is not government-scaled. The
+  // skill-variance scale precedes the government scale in the original.
+  stats.max_speed_px_per_tick *= ship.skill_variance_scale;
+  stats.thrust_px_per_tick2 *= ship.skill_variance_scale;
   if (ship.faction_or_government_id >= 0) {
     const Government *g = state.scenario.Government(
         static_cast<std::int16_t>(ship.faction_or_government_id + 0x80));
     if (g != nullptr) {
       stats.max_speed_px_per_tick *= g->combat_rating_scale;
       stats.thrust_px_per_tick2 *= g->combat_rating_scale;
+    }
+  }
+
+  // DAT_00575788 = 1/3. A non-self velocity-match lock damps all three
+  // movement stats, including turn rate; a self-lock is deliberately neutral.
+  const bool velocity_matched =
+      ship.velocity_match_target_ship_slot != -1 &&
+      ship.velocity_match_target_ship_slot != ship.ship_instance_id;
+  if (velocity_matched) {
+    constexpr float kVelocityMatchScale = 1.0F / 3.0F;
+    stats.max_speed_px_per_tick *= kVelocityMatchScale;
+    stats.thrust_px_per_tick2 *= kVelocityMatchScale;
+    stats.turn_rate_deg_per_tick *= kVelocityMatchScale;
+  }
+
+  // Mission ships use DAT_005757a8 = 2.0 for thrust, speed and the special
+  // low-turn-rate correction. The latter is applied below with the same
+  // ordering as Ship_ComputeShipMaxTurnRateDeg.
+  if (ship.mission_ship_slot == 0x03ff) {
+    stats.max_speed_px_per_tick *= 2.0F;
+    stats.thrust_px_per_tick2 *= 2.0F;
+  }
+
+  // Ship_ComputeShipMaxTurnRateDeg applies the mission correction before the
+  // general one-degree floor, and ionization damping only while the ship is not
+  // thrusting. DAT_00575790 is 6.0 and DAT_00575784 is 1.0.
+  if (ship.mission_ship_slot == 0x03ff &&
+      stats.turn_rate_deg_per_tick < 6.0F) {
+    stats.turn_rate_deg_per_tick += 1.0F;
+  }
+  if (stats.turn_rate_deg_per_tick >= 1.0F) {
+    stats.turn_rate_deg_per_tick =
+        std::max(stats.turn_rate_deg_per_tick, 1.0F);
+  }
+  const float intensity =
+      std::min(0.7F, NovaShip_IonizationIntensity(ship, ship_class));
+  if (intensity > 0.0F) {
+    // Effective thrust always carries the ionization multiplier. The turn helper
+    // applies the same damping only in its non-thrusting branch; max speed
+    // has no ionization term in the original helper.
+    stats.thrust_px_per_tick2 *= (1.0F - intensity);
+    if (ship.ai_forward_thrust_cmd <= 0.0F) {
+      stats.turn_rate_deg_per_tick *= (1.0F - intensity);
     }
   }
   return stats;
@@ -1046,9 +1128,9 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
 // Thrust / EffectiveMaxSpeed NPC branch): turn = raw_maneuver*0.1 deg/tick,
 // max speed = raw_speed/100 px/tick * government combat_rating_scale,
 // thrust = raw_accel/10000*2 px/tick^2 * government combat_rating_scale. NPC
-// ships carry no outfit inventory or status effects in the current build.
+// ships carry no outfit inventory; ionization capacity comes from the class.
 // TODO(decomp): opcode 7/8/9 outfit bonuses, the per-ship skill_variance_scale
-// (+0x40) factor and disable/status-effect damping when the NPC outfit/combat
+// (+0x40) factor and disable/ionization damping when the NPC outfit/combat
 // state is reconstructed.
 //
 // Gravity-shield ships (ShipClassDef.flags_secondary bit 0x40) keep a scalar
@@ -1070,7 +1152,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // = 1.0 deg/frame) whenever the base class rate itself is already at/above
   // that floor (so genuinely sluggish classes keep their low rate). For a clean
   // NPC the computed rate equals the base, so this floor is currently inert; it
-  // becomes active only once status-effect / disable damping lowers the rate
+  // becomes active only once ionization / disable damping lowers the rate
   // below its base (TODO(decomp)). Kept to match the original's NPC branch.
   const NpcEffectiveStats stats =
       NovaShip_ComputeEffectiveStats(state, ship, ship_class);
@@ -1367,6 +1449,8 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   if (afterburner_active) {
     p.fuel_points = std::max(0.0F, p.fuel_points - fuel_burn * elapsed_ticks);
   }
+
+  TickIonizationDecay(state, p, elapsed_ticks);
 
   // ShipState +0xc8d4 is an integer engine/glow control, not a free-running
   // alpha ramp. Normal thrust approaches 24; afterburning extends it to 32;

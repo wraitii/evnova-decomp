@@ -172,6 +172,12 @@ Outfit_ComputeRemainingCargoSpace(const GameState &state);
 [[nodiscard]] float
 Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state);
 
+// Ghidra Ship_ComputeIonizationDecayRate (0x0046c080). Returns the class base
+// dissipation rate plus player-owned ModType 39 (ion dissipator) bonuses.
+// Rates are charge points per millisecond, matching g_avg_frame_time_ms.
+[[nodiscard]] float NovaOutfit_ComputeIonizationDecayRate(
+    const GameState &state, const Ship &ship);
+
 // Marks the effective-stats cache dirty. Called by the inventory mutation
 // helpers; the spaceflight loop reads cached stats to avoid re-scanning the
 // 0x200-entry outfit table every frame.

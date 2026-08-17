@@ -156,10 +156,19 @@ struct ShipClass {
   // (Ship_AllocateShipSlotInSystem 0x004254b0) seeds a fresh ship slot from it.
   std::int16_t timed_action_counter_init = 0;
 
-  // Ghidra ShipClassDef +0xA00. Pilot skill variance percent used by the AI
-  // dispatch cadence (Ship_UpdateShipAI) to rate-limit heavy decisions for
-  // lower-skill ships.
+  // Ghidra ShipClassDef +0xA00 (payload +0x60). Pilot skill variance percent
+  // used to seed each NPC's skill_variance_scale; it also gates some AI
+  // cadence decisions. Valid stock values are 1..50%.
   std::int16_t skill_variance_percent = 0;
+  // Ghidra ShipClassDef +0x9FA (ionization capacity). NPC effective-stat
+  // helpers divide ShipState.ionization_points by this value; zero means
+  // no ionization bar. The scenario loader reads the packed resource field at
+  // payload +0x36C.
+  std::int16_t ionization_capacity = 0;
+  // Ghidra ShipClassDef +0x48 / resource payload +0x36A. Base ionization
+  // dissipation rate in charge points per millisecond after the loader's
+  // 0.01 scale and minimum-one clamp.
+  float ionization_decay_rate = 0.0F;
   // Ghidra ShipClassDef +0xA24. Sprite/behavior flags (bit 1 = carries
   // waypoint arrival markers, bit 2 = banking ships with sprite_behavior_flags
   // 0x80 timing, etc.). Consulted by the AI travel/arrive logic.
@@ -308,9 +317,9 @@ struct Weapon {
   // Impact14: impulse applied to the struck ship, not an audio resource. The
   // Ghidra runtime field is still provisionally named `impact_sound_slot`.
   std::int16_t impact_impulse = 0;
-  std::int16_t impact_effect_id = -1;  // ExplodType16
-  std::int16_t blast_radius = 0;       // ProxRadius18
-  std::int16_t splash_radius = 0;      // BlastRadius1a
+  std::int16_t impact_effect_id = -1; // ExplodType16
+  std::int16_t blast_radius = 0;      // ProxRadius18
+  std::int16_t splash_radius = 0;     // BlastRadius1a
 
   // Fuse (resource +0x22; Ghidra WeaponDef.fuse_ticks). A positive value
   // advances the shot's fuse_elapsed timer in Shot_HandleShot.
@@ -321,7 +330,7 @@ struct Weapon {
   // provisional because the same field also controls late sprite-frame wrap.
   std::int16_t late_collision_window_ticks = 0;
 
-  // Ionization (+0x4a) is accumulated on ShipState.status_effect_points when
+  // Ionization (+0x4a) is accumulated on ShipState.ionization_points when
   // this weapon hits. IonizeColor (+0x72) is retained as packed RGB for the
   // later ship-tint/status renderer.
   std::int16_t ionization_points = 0;

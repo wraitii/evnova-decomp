@@ -180,6 +180,13 @@ namespace {
       s.default_outfit_counts[i + 4] = ReadBeI16(bytes, 0x378 + i * 2);
     }
   }
+  s.skill_variance_percent = ReadBeI16(bytes, 0x60);
+  // Ghidra NovaData_LoadScenarioResourceTables (0x004bd3c0) copies the
+  // ionization capacity from ShipClassDef.ionization_capacity at payload
+  // +0x36c. It is distinct from the nearby default-outfit count block.
+  s.ionization_capacity = ReadBeI16(bytes, 0x36c);
+  s.ionization_decay_rate =
+      std::max(1.0F, static_cast<float>(ReadBeI16(bytes, 0x36a)) * 0.01F);
   s.flags_secondary = ReadBe16(bytes, 0x62);
   if (bytes.size() >= 0x728) {
     s.availability_flags = ReadBe16(bytes, 0x726);

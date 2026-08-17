@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "game/spaceflight.hpp"
+#include "game/outfit.hpp"
 
 #include <numbers>
 
@@ -382,4 +383,65 @@ TEST_CASE("npc effective stats apply the government combat rating scale") {
   moving.ai_forward_thrust_cmd = 0.05F; // eff_thrust * 1 tick
   game::NovaShip_IntegrateNpcMovement(state, moving, cls, 1.0F);
   CHECK(moving.vel_y == Catch::Approx(-0.05F));
+}
+
+TEST_CASE("npc effective stats port the high-confidence modifier branches") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass(); // accel 500, speed 400, turn 40
+  cls.capability_flags = 0x0400;
+  game::Ship ship;
+  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls).thrust_px_per_tick2 ==
+        Catch::Approx(0.0F));
+  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls).max_speed_px_per_tick ==
+        Catch::Approx(0.0F));
+  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls).turn_rate_deg_per_tick ==
+        Catch::Approx(0.0F));
+
+  cls.capability_flags = 0;
+  ship.ship_instance_id = 3;
+  ship.velocity_match_target_ship_slot = 7;
+  const auto matched =
+      game::NovaShip_ComputeEffectiveStats(state, ship, cls);
+  CHECK(matched.thrust_px_per_tick2 == Catch::Approx(0.1F / 3.0F));
+  CHECK(matched.max_speed_px_per_tick == Catch::Approx(4.0F / 3.0F));
+  CHECK(matched.turn_rate_deg_per_tick == Catch::Approx(4.0F / 3.0F));
+
+  ship.velocity_match_target_ship_slot = -1;
+  ship.mission_ship_slot = 0x03ff;
+  const auto mission =
+      game::NovaShip_ComputeEffectiveStats(state, ship, cls);
+  CHECK(mission.thrust_px_per_tick2 == Catch::Approx(0.2F));
+  CHECK(mission.max_speed_px_per_tick == Catch::Approx(8.0F));
+  CHECK(mission.turn_rate_deg_per_tick == Catch::Approx(5.0F));
+
+  ship.mission_ship_slot = -1;
+  ship.ionization_points = 50.0F;
+  cls.ionization_capacity = 100;
+  const auto status =
+      game::NovaShip_ComputeEffectiveStats(state, ship, cls);
+  CHECK(status.thrust_px_per_tick2 == Catch::Approx(0.05F));
+  CHECK(status.max_speed_px_per_tick == Catch::Approx(4.0F));
+  CHECK(status.turn_rate_deg_per_tick == Catch::Approx(2.0F));
+}
+
+TEST_CASE("ionization decay uses class rate and player dissipator outfits") {
+  game::GameState state;
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].ionization_decay_rate = 0.01F;
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].mod_type =
+      static_cast<std::int16_t>(game::OutfitEffect::kIonDissipator);
+  state.scenario.outfits[0].mod_val = 100;
+  state.inventory.outfit_owned_count[0] = 2;
+
+  game::Ship player;
+  player.ship_instance_id = 0;
+  player.ship_class_id = 0;
+  CHECK(game::NovaOutfit_ComputeIonizationDecayRate(state, player) ==
+        Catch::Approx(2.01F));
+
+  game::Ship npc = player;
+  npc.ship_instance_id = 1;
+  CHECK(game::NovaOutfit_ComputeIonizationDecayRate(state, npc) ==
+        Catch::Approx(0.01F));
 }

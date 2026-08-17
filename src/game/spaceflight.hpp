@@ -88,15 +88,19 @@ extern void NovaPlayer_TickShieldRecharge(GameState &state,
 // Effective NPC movement stats, ported from the NPC branch of Ghidra
 // Ship_ComputeShipEffectiveThrust (0x004640a0) /
 // Ship_ComputeShipEffectiveMaxSpeed (0x004642e0) for a clean NPC (no outfit /
-// status / disable / mission-ship state):
+// disable state):
 //   thrust_px_per_tick2  = base_accel * govt_scale * 2.0  (base = accel/10000)
 //   max_speed_px_per_tick = base_speed * govt_scale       (base = speed/100)
 //   turn_rate_deg_per_tick = base_turn * 0.1              (NOT govt-scaled;
 //                              Ship_ComputeShipMaxTurnRateDeg 0x00463e70)
 // Government combat_rating_scale applies only when the ship has a faction
 // (faction_or_government_id != -1). The per-ship skill_variance_scale (+0x40)
-// factor of the original is NOT yet modelled (TODO(decomp): Ship field +
-// spawner init + ShipClass_ComputeShipClassSkillVarianceScale 0x0046b870).
+// NPC acceleration and speed also include the per-ship skill_variance_scale
+// (+0x40), seeded by ShipClass_ComputeShipClassSkillVarianceScale (0x0046b870);
+// turn rate does not. Capability flag 0x400 zeros all three stats; a
+// non-self velocity-match lock multiplies all three by 1/3; mission slot
+// 0x3ff doubles thrust/speed and supplies the matching low-turn correction;
+// ionization intensity damps thrust and, while not thrusting, turn rate.
 struct NpcEffectiveStats {
   float thrust_px_per_tick2 = 0.0F;
   float max_speed_px_per_tick = 0.0F;
@@ -125,8 +129,8 @@ void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
 // integer-rounded keyboard path), then applies forward or reverse thrust along
 // the heading and integrates position. Honors the reverse_speed_bias
 // coast-through-reversal timer by holding heading and coasting. Derives the
-// effective thrust/max-speed/turn from the class (no outfit inventory or status
-// effects yet, matching the NPC spawner's outfit-less ships) and scales all
+// effective thrust/max-speed/turn from the class, including the high-confidence
+// NPC capability/velocity-match/mission/ionization branches, and scales all
 // rates by `elapsed_ticks` normalized to the 30 Hz simulation cadence.
 extern void NovaShip_IntegrateNpcMovement(GameState &state,
                                           Ship &ship,

@@ -193,9 +193,9 @@ remaining porting is largely unblocked.
       by `ai_turn_bias_dir` (+0xC8F8), written by the integrator's turn block
       from the turn direction, matching Ship_HandleShip's tilt-derived signal).
       Unit-tested
-      (tests/movement_test.cpp). TODO(decomp): NPC outfit/status/government-
+      (tests/movement_test.cpp). TODO(decomp): NPC outfit/ionization/government-
       effective stats (the `Ship_ComputeShipMaxTurnRateDeg` 1.0-deg/frame NPC
-      floor clamp is ported but inert until disable/status damping lowers a
+      floor clamp is ported but inert until disable/ionization damping lowers a
       clean base below its floor).
 - [x] **Add missing `Ship` AI fields** on the clean-room struct
       (src/game/game_state.hpp): `ai_forward_thrust_cmd` (+0x30),
@@ -442,12 +442,9 @@ bigger lifts.
   branch of `Ship_ComputeShipEffectiveThrust`/`Ship_ComputeShipEffectiveMax-`
   `Speed`), i.e. class `accel`/`speed`/`turn_rate` scaled by the government
   `combat_rating_scale` (faction != -1; speed/accel only, not turn). The
-  remaining NPC-branch gaps are the per-ship **skill_variance_scale** (+0x40,
-  decoded formula: `(NovaRandom_Range(pct*2+1) + (100-pct)) * 0.01` from
-  `ShipClass_ComputeShipClassSkillVarianceScale` 0x0046b870; needs a `Ship`
-  field + spawner init) and the status-effect/disable damping (needs
-  combat/status state, TODO(decomp)). The `Ship_ComputeShipMaxTurnRateDeg`
+  remaining NPC-branch gap is the ionization/disable damping (needs
+  combat/ionization state, TODO(decomp)). The `Ship_ComputeShipMaxTurnRateDeg`
   1.0-deg/frame NPC floor clamp is ported but inert until damping lowers a
-  clean base below its floor. Keep these in sync if NPC outfit/status
+  clean base below its floor. Keep these in sync if NPC outfit/ionization
   modelling is added.
 - Build both debug and release; format with clang-format; treat warnings as errors.

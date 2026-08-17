@@ -15,7 +15,7 @@
 // Convention mirrors ship_spawn.cpp: each Ghidra function maps to one top-level
 // helper with the address in a comment; NPC ships carry no outfit inventory, so
 // the class base values stand in for the effective stats the original derives
-// from outfits/status effects (TODO(decomp) markers below). Units are the
+// from outfits/ionization effects (TODO(decomp) markers below). Units are the
 // simulation's reference cadence (30 Hz); rates passed in are already frame-
 // scaled by the caller where the original does the same.
 

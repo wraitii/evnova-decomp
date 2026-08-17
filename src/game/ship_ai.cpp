@@ -5,7 +5,7 @@
 //  * Ships carry no outfit inventory, so "has gravity shield" uses the NPC
 //    branch of Outfit_ShipHasGravityShieldOutfit (0x0046df70) via
 //    NovaShip_HasGravityShield, and "effective stats" are the class base
-//    values (the player's outfit/status damping is not modelled yet).
+//    values (the player's outfit/ionization damping is not modelled yet).
 //  * Several per-mode turn/thrust scale constants (the _DAT_005750xx globals)
 //    were provisional; they have since been decoded from the raw bytes and
 //    typed + pre-commented in the Ghidra DB (2025-08-09). The movement modes

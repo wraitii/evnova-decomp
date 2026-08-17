@@ -363,6 +363,33 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   return s;
 }
 
+float NovaOutfit_ComputeIonizationDecayRate(const GameState &state,
+                                            const Ship &ship) {
+  const ShipClass *cls = state.scenario.Ship(
+      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  float rate = cls != nullptr ? cls->ionization_decay_rate : 0.0F;
+  if (ship.ship_instance_id != 0) {
+    return rate;
+  }
+
+  constexpr float kModValueScale = 0.01F; // Ghidra DAT_00575738
+  for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
+       ++id) {
+    const std::int16_t owned = state.inventory.outfit_owned_count[id];
+    if (owned <= 0 || id >= state.scenario.outfits.size()) {
+      continue;
+    }
+    for (const Effect &effect : OutfitEffects(state.scenario.outfits[id])) {
+      if (effect.type ==
+          static_cast<std::int16_t>(OutfitEffect::kIonDissipator)) {
+        rate += static_cast<float>(owned) * static_cast<float>(effect.val) *
+                kModValueScale;
+      }
+    }
+  }
+  return rate;
+}
+
 // ---------------------------------------------------------------------------
 // Ownership limiting
 // ---------------------------------------------------------------------------

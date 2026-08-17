@@ -23,6 +23,20 @@ inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
   return static_cast<std::int16_t>(dist(state.rng));
 }
 
+// Ghidra 0x0046b870 ShipClass_ComputeShipClassSkillVarianceScale. The class
+// percentage p produces one integer in [0, 2p], then maps it to
+// (draw + 100 - p) * 0.01, so p=0 remains the neutral 1.0 scale.
+[[nodiscard]] float SkillVarianceScale(GameState &state,
+                                       const ShipClass *ship_class) {
+  if (ship_class == nullptr || ship_class->skill_variance_percent <= 0) {
+    return 1.0F;
+  }
+  const auto percent = ship_class->skill_variance_percent;
+  const auto draw =
+      RandomBelow(state, static_cast<std::int32_t>(percent) * 2 + 1);
+  return static_cast<float>(draw + 100 - percent) * 0.01F;
+}
+
 // Ghidra _DAT_00575260: the base-speed literal the original compares against
 // for ai_behavior 3 (speed-locked) dude placement in
 // EncounterFleet_SpawnRandomSystemDudeShip.
@@ -47,8 +61,8 @@ constexpr float kSpeedLockedSpeed = 0.0F;
 // that Ship_AllocateShipSlotInSystem zero/-1-resets but which are only consumed
 // once the ship AI/combat systems are reconstructed; Ship's defaults already
 // match a zero/-1 reset for them):
-//   * the per-ship skill_variance_scale (ShipState +0x40), jamming_score_1..4,
-//     sprite_animation_timer / waypoint markers / hit_reaction_timer /
+//   * jamming_score_1..4, sprite_animation_timer / waypoint markers /
+//     hit_reaction_timer /
 //     player_aggro_accumulator / ai_turn_bias_dir and the various untyped
 //     field_0x* offsets (0x60/0x64/0xac/0xb0/0xb9/0xbb-0xbd/0xc8cc) are all
 //     left at defaults. Ghidra now names the visual fields at +0xc8d6,
@@ -109,8 +123,10 @@ int NovaShip_AllocateShipSlot(GameState &state,
           static_cast<std::int16_t>(ship.ship_class_id + 0x80));
       ship_class != nullptr) {
     ship.timed_action_counter = ship_class->timed_action_counter_init;
+    ship.skill_variance_scale = SkillVarianceScale(state, ship_class);
   } else {
     ship.timed_action_counter = 0;
+    ship.skill_variance_scale = 1.0F;
   }
   ship.mission_owner_slot = -1;
   ship.credits = 0;
@@ -168,6 +184,7 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   ship.ai_behavior_code = cls != nullptr ? cls->default_ai_behavior : 0;
 
   if (cls != nullptr) {
+    ship.skill_variance_scale = SkillVarianceScale(state, cls);
     ship.shield_points = static_cast<float>(cls->base_shield);
     ship.armor_points = static_cast<float>(cls->base_armor);
     ship.timed_action_counter = cls->timed_action_counter_init;
@@ -519,6 +536,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     ship.mining_scoop_active = false;
     ship.target_stellar_object_id = -1;
     if (cls != nullptr) {
+      ship.skill_variance_scale = SkillVarianceScale(state, cls);
       ship.shield_points = static_cast<float>(cls->base_shield);
       ship.armor_points = static_cast<float>(cls->base_armor);
       ship.fuel_points = static_cast<float>(cls->base_fuel);

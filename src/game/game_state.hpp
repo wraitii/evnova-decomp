@@ -73,6 +73,12 @@ struct Ship {
   float heading = 0.0F; // +0x44 radians
   float speed = 0.0F;   // +0x48
 
+  // Ghidra ShipState +0x40. Per-instance NPC pilot-skill multiplier seeded by
+  // Ship_AllocateShipSlotInSystem /
+  // ShipClass_ComputeShipClassSkillVarianceScale (0x004254b0 / 0x0046b870).
+  // Player ships leave this at the neutral value.
+  float skill_variance_scale = 1.0F;
+
   // Clean-room collision envelope used until the original SpriteLayer pixel
   // masks are represented by the simulation. The original derives this from
   // the current ship sprite's half-span; keeping it explicit lets collision
@@ -114,7 +120,7 @@ struct Ship {
   // --- Vital stats ---
   float shield_points = 0.0F;        // +0x54
   float armor_points = 0.0F;         // +0x58
-  float status_effect_points = 0.0F; // +0x5C (ionization/status-effect meter)
+  float ionization_points = 0.0F; // +0x5C (ionization charge meter)
   float fuel_points = 0.0F;          // +0x38
   float death_timer_active = -1.0F;  // +0x3C
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
@@ -150,6 +156,20 @@ struct Ship {
   std::int16_t ai_behavior_code = 0;    // +0x88
   std::int16_t ai_state_code = 0;       // +0xC8C8
   std::int16_t ai_control_mode = 0;     // +0xC8CA
+  // Ghidra ShipState +0xC8CC. Ship_AllocateShipSlotInSystem initializes this
+  // to NovaRandom_Range(3)^2; the remaining consumer is an AI/render cadence
+  // branch, so the purpose is authoritative only at this level.
+  std::int16_t random_ai_render_cadence = 0; // +0xC8CC
+  // Ghidra ShipState +0xC8E0. Combat/sprite animation timer initialized from
+  // the class combat-state range and consumed by deferred animation/combat
+  // code.
+  float sprite_animation_timer = 0.0F; // +0xC8E0
+  // Ghidra ShipState +0xC8E4. Phase advanced by Ship_HandleShip's banking
+  // animation and mapped to ai_turn_bias_dir (+0xC8F8).
+  float turn_bank_animation_phase = 0.0F; // +0xC8E4
+  // Ghidra ShipState +0xC8F6. Sprite animation cycle initialized from the
+  // class skill-variance range.
+  std::int16_t sprite_animation_cycle_index = 0; // +0xC8F6
   // Travel-target transfer latch (Ghidra ShipState +0x2Aish): the AI sets this
   // to 2 when it assigns ai_secondary_target_slot a fresh travel stellar (the
   // signal System_UpdateSystemAndStellarDisplayState reads to auto-target the
@@ -227,9 +247,9 @@ struct Ship {
   std::int32_t credits = 0;               // +0xA0
   bool is_active = false;                 // +0xB8
 
-  // --- Player-only render/input extras (kept on Ship for simplicity; the
-  // original stores the engine-glow level at ShipState +0xc8d4 and per-ship
-  // muzzle geometry derived from the sh\x8an descriptor). ---
+  // --- Render/input extras (kept on Ship for simplicity; the original stores
+  // the engine-glow level at ShipState +0xc8d4 and per-ship muzzle geometry
+  // derived from the sh\x8an descriptor). ---
   // Engine-thrust latch: whether the player is currently applying forward
   // thrust this frame (mirrors Ghidra ShipState.ai_forward_thrust_cmd at +0x30
   // being non-zero). Written by NovaPlayer_UpdateFromInput and read by the

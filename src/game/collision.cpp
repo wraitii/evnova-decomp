@@ -106,7 +106,7 @@ void ApplyWeaponOnHitEffects(Ship &target,
     }
   }
   if (points > 0) {
-    target.status_effect_points += static_cast<float>(points);
+    target.ionization_points += static_cast<float>(points);
     target.ionization_color |= weapon.ionization_color;
   }
 }
