@@ -37,11 +37,6 @@ constexpr std::array<std::string_view, 7> kOpenerFirstNames{
     "the smuggler",
     "the pilot",
 };
-constexpr std::array<std::string_view, 2> kStartTypeNames{
-    "Default Start",
-    "Alternate Start",
-};
-
 // Where a brand-new pilot begins. The real game randomizes the start system
 // among a few candidates at PilotData_InitializePlayerState (fresh-seed picks a
 // random valid starting system from the pilot-block's four stored choices); we
@@ -70,22 +65,73 @@ PickLandingStellarResource(std::span<const std::int16_t> nav_defs) {
 // Modal prompt helpers
 // ---------------------------------------------------------------------------
 // The original performs all dialog interaction synchronously inside the flow
-// (blocking modal loops). Reimplemented as small SDL frame loops that draw a
-// centered cyan/border panel onto the current renderer with
-// SDL_RenderDebugText and present it, mirroring DrawSplashFrame's approach in
-// nova_app.cpp. These are intentionally minimal: they are not the real
-// stock UI dialogs, which are a later milestone.
+// (blocking modal loops). These clean-room loops keep that behaviour, but use
+// the stock pilot-selection window's proportions and classic white/grey
+// controls instead of the temporary blue prompt. Geometry and captions follow
+// DLOG 0xc1d/0xc1e and Menu_RunPilotSelectionDialog; the resource-backed
+// pilot registry/list binding is still a separate TODO.
+
+[[nodiscard]] std::unique_ptr<SdlTexture>
+CaptureModalBackground(SDL_Renderer *renderer) {
+  SDL_Surface *const surface = SDL_RenderReadPixels(renderer, nullptr);
+  if (surface == nullptr) {
+    NovaLog::Warn("could not snapshot menu frame before pilot dialog: {}",
+                  SDL_GetError());
+    return nullptr;
+  }
+  SDL_Texture *const texture = SDL_CreateTextureFromSurface(renderer, surface);
+  SDL_DestroySurface(surface);
+  if (texture == nullptr) {
+    NovaLog::Warn("could not create pilot-dialog background texture: {}",
+                  SDL_GetError());
+    return nullptr;
+  }
+  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+  return std::make_unique<SdlTexture>(texture);
+}
+
+void DrawModalBackground(SdlPlatform &platform,
+                         SDL_Renderer *renderer,
+                         const SdlTexture *background) {
+  platform.SetFullscreenPlayfield();
+  const auto size = platform.logical_playfield_size();
+  if (background == nullptr) {
+    SDL_SetRenderDrawColor(renderer, 18, 24, 32, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(renderer);
+  } else {
+    // SDL_RenderReadPixels returns output/backing dimensions. Replay the
+    // complete snapshot across the real fullscreen canvas before installing
+    // the centered logical modal viewport.
+    const SDL_FRect destination{0.0F, 0.0F, size.x, size.y};
+    SDL_RenderTexture(renderer, background->get(), nullptr, &destination);
+  }
+  // The background occupies the real fullscreen canvas. Dialog controls use
+  // the original 640x480 coordinate system, centered over that canvas.
+  const SDL_Rect modal_viewport{
+      static_cast<int>(std::max(0.0F, (size.x - 640.0F) * 0.5F)),
+      static_cast<int>(std::max(0.0F, (size.y - 480.0F) * 0.5F)),
+      640,
+      480,
+  };
+  SDL_SetRenderViewport(renderer, &modal_viewport);
+}
 
 bool RunTextInputPrompt(SdlPlatform &platform,
                         const std::string &prompt,
-                        std::string initial,
-                        std::string &out) {
+                        std::string initial_first,
+                        std::string initial_last,
+                        std::string &first,
+                        std::string &last,
+                        const SdlTexture *background) {
   SDL_Renderer *const renderer = platform.renderer();
   constexpr std::string_view kNavKeys =
-      "Ctrl-BACKSPACE clears  /  ENTER accept  /  ESC cancel";
+      "ENTER accept    ESC cancel    BACKSPACE erase";
   constexpr std::size_t kMaxChars = 48;
 
-  out = std::move(initial);
+  std::array<std::string *, 2> fields{&first, &last};
+  *fields[0] = std::move(initial_first);
+  *fields[1] = std::move(initial_last);
+  std::size_t active_field = 0;
   bool running = true;
   while (running && !platform.quit_requested()) {
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
@@ -96,83 +142,170 @@ bool RunTextInputPrompt(SdlPlatform &platform,
       case TextKey::escape:
         return false;
       case TextKey::backspace:
-        if (!out.empty()) {
-          out.pop_back();
+        if (!fields[active_field]->empty()) {
+          fields[active_field]->pop_back();
         }
         break;
       case TextKey::character:
-        if (out.size() < kMaxChars) {
-          out.push_back(input->character);
+        if (fields[active_field]->size() < kMaxChars) {
+          fields[active_field]->push_back(input->character);
+        }
+        break;
+      case TextKey::physical:
+        // DIK_TAB (0x0f) moves between the two text-entry controls, as in the
+        // original dialog's focus navigation.
+        if (input->key_code == 0x0f) {
+          active_field = (active_field + 1) % fields.size();
         }
         break;
       case TextKey::none:
-      case TextKey::physical:
-      case TextKey::primary: // mouse click does not edit a callsign
         break;
+      case TextKey::primary: {
+        const auto point = platform.mouse_position();
+        if (point.x >= 258.0F && point.x < 452.0F && point.y >= 168.0F &&
+            point.y < 190.0F) {
+          active_field = 0;
+        } else if (point.x >= 258.0F && point.x < 452.0F && point.y >= 197.0F &&
+                   point.y < 219.0F) {
+          active_field = 1;
+        } else if (point.x >= 168.0F && point.x < 230.0F && point.y >= 300.0F &&
+                   point.y < 328.0F) {
+          running = false;
+        } else if (point.x >= 395.0F && point.x < 465.0F && point.y >= 300.0F &&
+                   point.y < 328.0F) {
+          return false;
+        }
+        break;
+      }
       }
     }
 
-    SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(renderer);
-    platform.SetCenteredPlayfield();
-    SDL_SetRenderDrawColor(renderer, 48, 113, 179, SDL_ALPHA_OPAQUE);
-    const SDL_FRect panel{96.0F, 142.0F, 448.0F, 150.0F};
+    DrawModalBackground(platform, renderer, background);
+    // DLOG 0xc1e is 326x213 and is centred by the original dialog manager.
+    const SDL_FRect panel{157.0F, 133.0F, 326.0F, 213.0F};
+    const SDL_FRect panel_shadow{154.0F, 136.0F, 329.0F, 213.0F};
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &panel_shadow);
+    SDL_SetRenderDrawColor(renderer, 232, 232, 232, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 142, 209, 255, SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(renderer, 24, 24, 24, SDL_ALPHA_OPAQUE);
     SDL_RenderRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 130.0F, 160.0F, prompt.c_str());
-    const std::string shown = "> " + out + "_";
-    SDL_RenderDebugText(renderer, 130.0F, 200.0F, shown.c_str());
-    SDL_SetRenderDrawColor(renderer, 128, 170, 210, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 130.0F, 240.0F, kNavKeys.data());
+    SDL_SetRenderDrawColor(renderer, 210, 210, 210, SDL_ALPHA_OPAQUE);
+    const SDL_FRect title_bar{158.0F, 134.0F, 324.0F, 23.0F};
+    SDL_RenderFillRect(renderer, &title_bar);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer, 170.0F, 142.0F, "New Pilot");
+    SDL_RenderDebugText(renderer, 176.0F, 157.0F, prompt.c_str());
+    SDL_RenderDebugText(renderer, 176.0F, 176.0F, "Full Name:");
+    SDL_RenderDebugText(renderer, 176.0F, 205.0F, "Nickname:");
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
+    const SDL_FRect entry{258.0F, 168.0F, 194.0F, 22.0F};
+    SDL_RenderFillRect(renderer, &entry);
+    SDL_SetRenderDrawColor(renderer, 80, 80, 80, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &entry);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    const std::string first_shown = first + (active_field == 0 ? "_" : "");
+    SDL_RenderDebugText(renderer, 264.0F, 176.0F, first_shown.c_str());
+    SDL_SetRenderDrawColor(renderer,
+                           active_field == 1 ? 255 : 190,
+                           active_field == 1 ? 255 : 190,
+                           active_field == 1 ? 255 : 190,
+                           SDL_ALPHA_OPAQUE);
+    const SDL_FRect nickname{258.0F, 197.0F, 194.0F, 22.0F};
+    SDL_RenderFillRect(renderer, &nickname);
+    SDL_SetRenderDrawColor(renderer, 90, 90, 90, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &nickname);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    const std::string last_shown = last + (active_field == 1 ? "_" : "");
+    SDL_RenderDebugText(renderer, 264.0F, 205.0F, last_shown.c_str());
+    SDL_RenderDebugText(renderer, 176.0F, 226.0F, "Gender");
+    SDL_SetRenderDrawColor(renderer, 160, 160, 160, SDL_ALPHA_OPAQUE);
+    const SDL_FRect gender{258.0F, 216.0F, 100.0F, 22.0F};
+    SDL_RenderFillRect(renderer, &gender);
+    SDL_SetRenderDrawColor(renderer, 70, 70, 70, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &gender);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer, 318.0F, 224.0F, "Male");
+    SDL_RenderDebugText(renderer, 176.0F, 248.0F, "[ ] Strict Play");
+    SDL_RenderDebugText(
+        renderer, 176.0F, 262.0F, "If you check this box, when you're dead,");
+    SDL_RenderDebugText(
+        renderer, 176.0F, 276.0F, "you're dead. No reincarnation allowed.");
+    SDL_RenderDebugText(renderer, 176.0F, 310.0F, "Cancel");
+    SDL_RenderDebugText(renderer, 405.0F, 310.0F, "OK");
+    SDL_SetRenderDrawColor(renderer, 90, 90, 90, SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer, 176.0F, 336.0F, kNavKeys.data());
     SDL_RenderPresent(renderer);
     SDL_Delay(16);
   }
   return true;
 }
 
-// Returns 0..2 for the start type, or -1 on cancel. Mirrors the original
-// menu-based pilot-selection step, reduced to a modality prompt.
-int RunStartTypePrompt(SdlPlatform &platform) {
+// The original follows pilot selection with a small modal ship-name editor.
+bool RunShipNamePrompt(SdlPlatform &platform,
+                       std::string initial,
+                       std::string &out,
+                       const SdlTexture *background) {
   SDL_Renderer *const renderer = platform.renderer();
-  constexpr std::string_view kNavKeys = "  1 / 2 select  /  ESC cancel";
+  constexpr std::string_view kNavKeys =
+      "ENTER accept    ESC cancel    BACKSPACE erase";
+  out = std::move(initial);
   while (!platform.quit_requested()) {
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
-      if (input->key == TextKey::character && input->character == '1') {
-        return 0;
-      }
-      if (input->key == TextKey::character && input->character == '2') {
-        return 1;
+      if (input->key == TextKey::enter) {
+        return !out.empty();
       }
       if (input->key == TextKey::escape) {
-        return -1;
+        return false;
       }
-      // TextKey::primary / none: mouse click does not select a start type.
+      if (input->key == TextKey::backspace) {
+        if (!out.empty()) {
+          out.pop_back();
+        }
+      } else if (input->key == TextKey::character && out.size() < 32) {
+        out.push_back(input->character);
+      } else if (input->key == TextKey::primary) {
+        const auto point = platform.mouse_position();
+        if (point.x >= 350.0F && point.x < 430.0F && point.y >= 238.0F &&
+            point.y < 266.0F) {
+          return !out.empty();
+        }
+        if (point.x >= 240.0F && point.x < 325.0F && point.y >= 238.0F &&
+            point.y < 266.0F) {
+          return false;
+        }
+      }
     }
-    SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(renderer);
-    platform.SetCenteredPlayfield();
-    SDL_SetRenderDrawColor(renderer, 48, 113, 179, SDL_ALPHA_OPAQUE);
-    const SDL_FRect panel{96.0F, 142.0F, 448.0F, 160.0F};
+    DrawModalBackground(platform, renderer, background);
+    const SDL_FRect panel{157.0F, 151.0F, 326.0F, 145.0F};
+    const SDL_FRect panel_shadow{154.0F, 154.0F, 329.0F, 145.0F};
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &panel_shadow);
+    SDL_SetRenderDrawColor(renderer, 232, 232, 232, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 142, 209, 255, SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(renderer, 24, 24, 24, SDL_ALPHA_OPAQUE);
     SDL_RenderRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
-    for (std::size_t i = 0; i < kStartTypeNames.size(); ++i) {
-      const std::string line =
-          std::to_string(i + 1) + "  " + std::string(kStartTypeNames[i]);
-      SDL_RenderDebugText(renderer,
-                          130.0F,
-                          174.0F + static_cast<float>(i) * 34.0F,
-                          line.c_str());
-    }
-    SDL_SetRenderDrawColor(renderer, 128, 170, 210, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 130.0F, 262.0F, kNavKeys.data());
+    SDL_SetRenderDrawColor(renderer, 210, 210, 210, SDL_ALPHA_OPAQUE);
+    const SDL_FRect title_bar{158.0F, 152.0F, 324.0F, 23.0F};
+    SDL_RenderFillRect(renderer, &title_bar);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer, 170.0F, 160.0F, "Name your ship:");
+    const SDL_FRect entry{210.0F, 184.0F, 230.0F, 22.0F};
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &entry);
+    SDL_SetRenderDrawColor(renderer, 80, 80, 80, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &entry);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    const std::string shown = out + "_";
+    SDL_RenderDebugText(renderer, 216.0F, 192.0F, shown.c_str());
+    SDL_RenderDebugText(renderer, 242.0F, 238.0F, "Cancel");
+    SDL_RenderDebugText(renderer, 355.0F, 238.0F, "OK");
+    SDL_SetRenderDrawColor(renderer, 90, 90, 90, SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer, 176.0F, 276.0F, kNavKeys.data());
     SDL_RenderPresent(renderer);
     SDL_Delay(16);
   }
-  return -1;
+  return false;
 }
 
 [[nodiscard]] int RandomIndex(GameState &state, int count) {
@@ -417,10 +550,14 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   state.pilot.first_name.clear();
   const std::string suggested = std::string(
       kOpenerFirstNames[static_cast<std::size_t>(RandomIndex(state, 7))]);
+  const auto frozen_menu = CaptureModalBackground(platform.renderer());
   if (!RunTextInputPrompt(platform,
-                          "NEW PILOT  -  enter callsign:",
+                          "Enter pilot name (TAB switches fields):",
                           suggested,
-                          state.pilot.first_name)) {
+                          {},
+                          state.pilot.first_name,
+                          state.pilot.last_name,
+                          frozen_menu.get())) {
     return false;
   }
   if (state.pilot.first_name.empty()) {
@@ -428,15 +565,13 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
     return false;
   }
 
-  // ---- Step 2: start-type selection ---------------------------------------
-  // Ghidra: PilotData_ResolveStartType (optional for mods/older configs) then
-  // a text-confirm-code dialog the player must accept. Reduced to a modal
-  // pick of the start-type row.
-  const int start_type = RunStartTypePrompt(platform);
-  if (start_type < 0) {
+  // ---- Step 2: ship naming -------------------------------------------------
+  // The original opens a second modal to name the newly initialized ship.
+  if (!RunShipNamePrompt(
+          platform, "Shuttle", state.player.ship_name, frozen_menu.get())) {
     return false;
   }
-  state.pilot.start_type_code = static_cast<std::int16_t>(start_type);
+  state.pilot.start_type_code = 0;
 
   // ---- Step 3: overwrite-existing-pilot confirmation ----------------------
   // Ghidra: builds <nova_files><name>.plt, PilotFile_ProbeExists, and on hit
@@ -554,7 +689,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
 
   // ---- Step 7: mark active ------------------------------------------------
   // Ghidra: DAT_00596d28 = 1 (game active), DAT_00596d2f = repoChoice.
-  state.pilot.selected_reputation = static_cast<std::int16_t>(start_type);
+  state.pilot.selected_reputation = 0;
   state.game_active = true;
   NovaLog::Info("new pilot active: callsign '{}', start type {}",
                 state.pilot.first_name,

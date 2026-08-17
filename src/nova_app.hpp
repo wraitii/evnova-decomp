@@ -86,6 +86,7 @@ struct NovaRuntime {
   std::uint64_t next_menu_prompt_toggle_ms = 0;
   std::uint64_t next_menu_top_animation_ms = 0;
   std::uint64_t next_menu_reveal_frame_ms = 0;
+  std::uint64_t menu_center_preview_last_update_ms = 0;
   std::size_t menu_top_animation_frame = 0;
   std::size_t menu_center_preview_frame = 6;
   std::uint8_t menu_center_preview_intensity = 0;

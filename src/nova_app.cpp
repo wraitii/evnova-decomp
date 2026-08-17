@@ -46,9 +46,11 @@ constexpr std::array<NovaMenuPoint, 3> kFallbackRowRevealOrigins{
 };
 constexpr std::uint64_t kLoadingSplashDurationMs = 850;
 constexpr std::uint64_t kStartupSplashDurationMs = 1'850;
-// Keep authored menu animation independent of the host display's vsync. The
-// original presentation was effectively paced at roughly 60 Hz.
-constexpr std::uint64_t kMenuAnimationFrameDurationMs = 16;
+// These are authored animation timers, not render-loop delays. The original
+// title fire changes visibly slower than the 60 Hz frame cadence; tying it to
+// every host frame made the flame flicker far too quickly in SDL.
+constexpr std::uint64_t kMenuTitleFrameDurationMs = 40;
+constexpr std::uint64_t kMenuRevealFrameDurationMs = 16;
 
 [[nodiscard]] SDL_FRect MenuRect(const NovaRuntime &runtime,
                                  std::size_t index) {
@@ -357,10 +359,11 @@ void PresentSplashTexture(SDL_Renderer *renderer, SDL_Texture *texture) {
 void InitializeMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
   runtime.menu_entrance_initialized = true;
   runtime.menu_top_animation_frame = 0;
-  runtime.next_menu_top_animation_ms = now_ms + kMenuAnimationFrameDurationMs;
+  runtime.next_menu_top_animation_ms = now_ms + kMenuTitleFrameDurationMs;
   runtime.next_menu_reveal_frame_ms = now_ms;
   runtime.menu_center_preview_frame = 6;
   runtime.menu_center_preview_intensity = 0;
+  runtime.menu_center_preview_last_update_ms = now_ms;
 
   int counter = -1;
   for (std::size_t row = 0; row < runtime.menu_row_reveal_counters.size();
@@ -386,16 +389,13 @@ void UpdateMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
 
   if (runtime.main_menu_logo_textures.size() > 1 &&
       now_ms >= runtime.next_menu_top_animation_ms) {
-    const auto choice_count = runtime.main_menu_logo_textures.size() - 1;
-    const auto advance = 1 + static_cast<std::size_t>(now_ms % choice_count);
-    runtime.menu_top_animation_frame =
-        (runtime.menu_top_animation_frame + advance) %
-        runtime.main_menu_logo_textures.size();
-    runtime.next_menu_top_animation_ms = now_ms + kMenuAnimationFrameDurationMs;
+    runtime.menu_top_animation_frame = (runtime.menu_top_animation_frame + 1) %
+                                       runtime.main_menu_logo_textures.size();
+    runtime.next_menu_top_animation_ms = now_ms + kMenuTitleFrameDurationMs;
   }
 
   if (now_ms >= runtime.next_menu_reveal_frame_ms) {
-    runtime.next_menu_reveal_frame_ms = now_ms + kMenuAnimationFrameDurationMs;
+    runtime.next_menu_reveal_frame_ms = now_ms + kMenuRevealFrameDurationMs;
     for (std::size_t row = 0; row < runtime.menu_row_reveal_counters.size();
          ++row) {
       const auto frame_count =
@@ -417,7 +417,7 @@ void UpdateMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
   }
 }
 
-void UpdateMenuCenterPreview(NovaRuntime &runtime) {
+void UpdateMenuCenterPreview(NovaRuntime &runtime, std::uint64_t now_ms) {
   if (!runtime.main_menu_center_preview_asset ||
       runtime.main_menu_center_preview_asset->textures.empty() ||
       !MenuEntranceComplete(runtime)) {
@@ -430,12 +430,23 @@ void UpdateMenuCenterPreview(NovaRuntime &runtime) {
   const auto desired_frame =
       runtime.hovered_action ? static_cast<std::size_t>(*runtime.hovered_action)
                              : idle_frame;
+  const auto elapsed_ms = std::min<std::uint64_t>(
+      now_ms - runtime.menu_center_preview_last_update_ms, 100);
+  runtime.menu_center_preview_last_update_ms = now_ms;
+  // The original fades this central preview through the shared menu timer.
+  // Use elapsed time so a 30 Hz or 144 Hz presentation does not change the
+  // apparent alpha curve.
+  const auto intensity_step = static_cast<int>((elapsed_ms * 32U) / 180U);
   if (runtime.menu_center_preview_frame == desired_frame) {
     runtime.menu_center_preview_intensity = static_cast<std::uint8_t>(
-        std::min<int>(32, runtime.menu_center_preview_intensity + 4));
+        std::min<int>(32,
+                      runtime.menu_center_preview_intensity +
+                          std::max<int>(1, intensity_step)));
   } else if (runtime.menu_center_preview_intensity > 0) {
     runtime.menu_center_preview_intensity = static_cast<std::uint8_t>(
-        std::max<int>(0, runtime.menu_center_preview_intensity - 4));
+        std::max<int>(0,
+                      runtime.menu_center_preview_intensity -
+                          std::max<int>(1, intensity_step)));
   } else {
     runtime.menu_center_preview_frame = desired_frame;
   }
@@ -682,7 +693,7 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
   if (runtime.startup_phase == StartupPhase::main_menu) {
     UpdateMenuEntrance(runtime, now_ms);
     runtime.hovered_action = NovaHud_TrackFocusHoverIndex(runtime);
-    UpdateMenuCenterPreview(runtime);
+    UpdateMenuCenterPreview(runtime, now_ms);
   } else {
     runtime.hovered_action.reset();
   }
@@ -955,6 +966,7 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // Runs the modal new-pilot flow (naming, confirm, reset, scenario load,).
     // On success the flow marks the game active and we return to the menu; the
     // player then chooses ENTER SPACE to play (intro cinematic plays then).
+    NovaRender_RedrawAndPresentFrame(runtime, 0);
     if (game::NovaNewPilotFlow_Run(runtime.platform, runtime.game)) {
       runtime.status_text = "New pilot created. Choose ENTER SPACE to fly.";
     } else {
