@@ -1,6 +1,7 @@
 #include "collision.hpp"
 
 #include "scenario_data.hpp"
+#include "government.hpp"
 #include "ship_ai.hpp"
 
 #include <algorithm>
@@ -149,6 +150,84 @@ void ApplyImpactImpulse(const GameState &state,
   (void)shot;
 }
 
+// Ghidra Government_PropagateHostilityFromAttack (0x004102e0). A player hit
+// alerts eligible combat ships related to the victim; in particular, ships of
+// the victim's government join the response and target the player. The
+// mission/distress gates below preserve the original's conservative response
+// rules while keeping this clean-room pass limited to the represented fields.
+void PropagateHostilityFromPlayerAttack(GameState &state,
+                                        const Ship &target,
+                                        const ActiveShot &shot) {
+  if (shot.owner_ship_slot != 0 || target.mission_ship_slot == 0x3ff ||
+      state.player.mission_ship_slot == 0x3fe) {
+    return;
+  }
+
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &responder = state.ShipAt(slot);
+    if (!responder.is_active || responder.current_system_id != shot.system_id ||
+        responder.ai_behavior_code < 3 || responder.ai_behavior_code > 4 ||
+        responder.ai_state_code == 4 || responder.mission_ship_slot == 0x3ff ||
+        responder.faction_or_government_id < -1 ||
+        responder.faction_or_government_id >= 0x100) {
+      continue;
+    }
+    if (NovaAiShip_CanShipRespondToDistressCall(state, responder, target)) {
+      continue;
+    }
+
+    bool eligible = true;
+    const std::int16_t responder_govt = responder.faction_or_government_id;
+    const std::int16_t target_govt = target.faction_or_government_id;
+    if (responder_govt >= 0 && target_govt >= 0) {
+      // Government_PropagateHostilityFromAttack first retains only ships that
+      // are not already hostile to the victim, then admits allied/same-govt
+      // responders. A policy-0 government can opt out when the attacker is the
+      // player (or already targets the player).
+      eligible = !NovaGovernment_AreGovtsHostileOrXenophobic(
+          state.scenario, responder_govt, target_govt);
+      if (HasGovernmentFlag(state, target, 0x0001U) &&
+          responder_govt != target_govt) {
+        eligible = false;
+      }
+      if (NovaGovernment_GetPolicyFlag(state.scenario, responder_govt, 0)) {
+        eligible = false;
+      }
+      if (!NovaGovernment_AreGovtsAllied(
+              state.scenario, responder_govt, target_govt) &&
+          !NovaGovernment_AreGovtsAllied(
+              state.scenario, target_govt, responder_govt) &&
+          !HasGovernmentFlag(state, responder, 0x0002U)) {
+        eligible = false;
+      }
+      if (NovaGovernment_AreGovtsAllied(
+              state.scenario, responder_govt,
+              state.player.faction_or_government_id)) {
+        eligible = false;
+      }
+    } else if (responder_govt >= 0 && target_govt < 0) {
+      eligible = HasGovernmentFlag(state, responder, 0x0002U);
+    } else if (responder_govt < 0 && target_govt >= 0) {
+      eligible = !HasGovernmentFlag(state, target, 0x0001U);
+    }
+    if (HasGovernmentFlag(state, target, 0x0800U) ||
+        HasGovernmentFlag(state, target, 0x0020U)) {
+      eligible = false;
+    }
+    if (!eligible) {
+      continue;
+    }
+    if (responder.ai_target_ship_slot == shot.owner_ship_slot ||
+        (ValidShipSlot(responder.ai_target_ship_slot) &&
+         state.ShipAt(static_cast<std::size_t>(responder.ai_target_ship_slot))
+                 .ai_target_ship_slot == shot.owner_ship_slot)) {
+      continue;
+    }
+    responder.ai_state_code = 4;
+    responder.primary_target_ship_slot = shot.owner_ship_slot;
+  }
+}
+
 void ResolveShipHit(GameState &state,
                     const ActiveShot &shot,
                     Ship &target,
@@ -216,13 +295,17 @@ void ResolveShipHit(GameState &state,
     NovaAi_SetShipHostileToPlayer(state, target);
   }
 
+  if (allow_aggro_updates && suppress_retarget_logic &&
+      shot.owner_ship_slot == 0) {
+    PropagateHostilityFromPlayerAttack(state, target, shot);
+  }
+
   // Shot_ResolveShipHitFromWeapon refreshes the non-bypass hit reaction timer.
   // The clean-room renderer does not consume this yet, but retaining the latch
   // prevents later status/AI work from losing the event.
   if (!bypass_shields) {
     target.hit_reaction_timer = 32.0F;
   }
-  (void)suppress_retarget_logic;
 }
 
 } // namespace
@@ -329,7 +412,6 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
     }
 
     std::int16_t best_target = -1;
-    bool best_target_used_proximity = false;
     float best_distance_sq = std::numeric_limits<float>::max();
     for (std::int16_t slot = 0;
          slot < static_cast<std::int16_t>(GameState::kMaxShips);
@@ -351,7 +433,6 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
       if (distance_sq <= radius * radius && distance_sq < best_distance_sq) {
         best_target = slot;
         best_distance_sq = distance_sq;
-        best_target_used_proximity = distance_sq > direct_radius * direct_radius;
       }
     }
 
@@ -361,7 +442,8 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
                      state.ShipAt(static_cast<std::size_t>(best_target)),
                      best_target,
                      /*allow_aggro_updates=*/true,
-                     /*suppress_retarget_logic=*/!best_target_used_proximity);
+                     /*suppress_retarget_logic=*/
+                         shot.target_ship_slot == best_target);
 
       // Shot_ResolveShotCollisionHit (0x00437780): a blast damages every
       // additional active ship in the axis-aligned splash box, excluding the

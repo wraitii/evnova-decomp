@@ -83,6 +83,33 @@ TEST_CASE("projectile impact consumes shields before armor", "[collision]") {
   CHECK(state.ShipAt(1).ai_state_code == 4);
 }
 
+TEST_CASE("player attack alerts same-government NPCs", "[collision][ai]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.governments.resize(1);
+  state.ShipAt(1).faction_or_government_id = 0;
+  state.ShipAt(1).ai_behavior_code = 3;
+  state.player.primary_target_ship_slot = 1;
+
+  Ship &wingmate = state.ShipAt(2);
+  wingmate.is_active = true;
+  wingmate.ship_instance_id = 2;
+  wingmate.ship_class_id = 0;
+  wingmate.current_system_id = 0;
+  wingmate.faction_or_government_id = 0;
+  wingmate.ai_behavior_code = 3;
+  wingmate.ai_state_code = 0;
+  wingmate.mission_ship_slot = 0;
+  wingmate.pos_x = 100.0F;
+  wingmate.pos_y = 100.0F;
+
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, 1, 0) == 0);
+  NovaWeapon_ResolveProjectileCollisions(state);
+
+  CHECK(wingmate.ai_state_code == 4);
+  CHECK(wingmate.primary_target_ship_slot == 0);
+}
+
 TEST_CASE("player can continue firing after target becomes hostile",
           "[collision]") {
   GameState state;

@@ -754,7 +754,8 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
   // Each shot uses its weapon's shot sprite set (Ghidra Sprite_AssignSpriteSet
   // on the weapon-sprite-set table entry g_weapon_sprite_set_table
   // [shot_sprite_set_id]; spin resource id shot_sprite_set_id + 3000) from the
-  // shared store, drawn at its world position with wraparound.
+  // shared store, drawn at its world position. Shot_HandleShot (0x00435830)
+  // does not apply the viewport background's one-exit wrap to projectiles.
   //
   // Frame selection mirrors Shot_HandleShot's shot sprite update. The Light
   // Blaster (and most unguided projectiles) has flags_primary bit 0 clear, so
@@ -785,7 +786,7 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
                        : nullptr;
     if (set && !set->frames.empty()) {
       SpriteDrawOptions opts;
-      opts.wrap = true;
+      opts.wrap = false;
       int frame;
       if ((w->flags & 0x0001U) == 0) {
         // Static/heading branch: the frame is the shot's firing bearing.
@@ -815,14 +816,6 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
     } else {
       float sx = (s.pos_x - camera_x) + static_cast<float>(vp.w) / 2;
       float sy = (s.pos_y - camera_y) + static_cast<float>(vp.h) / 2;
-      sx = std::fmod(sx, static_cast<float>(vp.w));
-      sy = std::fmod(sy, static_cast<float>(vp.h));
-      if (sx < 0.0F) {
-        sx += static_cast<float>(vp.w);
-      }
-      if (sy < 0.0F) {
-        sy += static_cast<float>(vp.h);
-      }
       SDL_SetRenderDrawColor(renderer, 255, 180, 64, SDL_ALPHA_OPAQUE);
       const float radius = 2.0F;
       const SDL_FRect rect{
