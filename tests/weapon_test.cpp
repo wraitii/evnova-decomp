@@ -173,6 +173,56 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
   CHECK(state.active_shots[0].weapon_id == 0);
   CHECK(npc.npc_weapon_bank_secondary[0] == -1);
   CHECK(npc.ai_fire_trigger_latch == 0);
+
+  // A successful volley must latch the weapon's fire sound (Light Blaster
+  // slot 8) sourced at the firing ship, mirroring Weapon_FireShipWeapons's
+  // sVar9 > 0 gate around NovaAudio_PlaySpatialByDistance.
+  REQUIRE(state.pending_fire_sounds.size() == 1);
+  const GameState::PendingFireSound &pending = state.pending_fire_sounds[0];
+  CHECK(pending.slot == 8);
+  CHECK(pending.src_x == Catch::Approx(200.0F));
+  CHECK(pending.src_y == Catch::Approx(300.0F));
+  state.pending_fire_sounds.clear();
+}
+
+// The distance falloff mirrors NovaAudio_PlaySpatialByDistance (0x004692e0)
+// with the sound-volume extent factored out: full volume within 200 px, then
+// per-channel 1/d^2 falloff (loud channel full at 850 px, quiet channel at
+// the 200-px reference), each channel floored at 1/8, averaged to the mono
+// gain the mixer actually plays. Values below are hand-computed from the
+// original's integer math at full extent (E = 0x100).
+TEST_CASE("spatial fire gain matches the original distance falloff",
+          "[weapon][audio]") {
+  // src == listener (player firing): full volume.
+  CHECK(NovaWeapon_ComputeSpatialFireGain(0.0F, 0.0F, 0.0F, 0.0F) ==
+        Catch::Approx(1.0F));
+  // Within the 200 px cutoff: full volume regardless of heading.
+  CHECK(NovaWeapon_ComputeSpatialFireGain(0.0F, 0.0F, 200.0F, 0.0F) ==
+        Catch::Approx(1.0F));
+  CHECK(NovaWeapon_ComputeSpatialFireGain(0.0F, 0.0F, -120.0F, 160.0F) ==
+        Catch::Approx(1.0F));
+
+  // Directly north at 850 px, horizontally centered: the original feeds the
+  // loud channel (full at 722500/d^2 = 1.0) to BOTH ears, so no attenuation.
+  CHECK(NovaWeapon_ComputeSpatialFireGain(0.0F, 0.0F, 0.0F, 850.0F) ==
+        Catch::Approx(1.0F));
+  // Straight ahead at 2000 px, still centered: both channels truncate to
+  // 256*722500/4e6 = 46, average 46/256.
+  CHECK(NovaWeapon_ComputeSpatialFireGain(0.0F, 0.0F, 0.0F, 2000.0F) ==
+        Catch::Approx(46.0F / 256.0F));
+
+  // 1000 px to the left: loud channel (256*722500/1e6) truncates to 184,
+  // quiet (256*40000/1e6) to 10 -> floored to 32. Average (184+32+1)>>1
+  // = 108 of 256. Mirrored source to the right gives the same average.
+  CHECK(NovaWeapon_ComputeSpatialFireGain(0.0F, 0.0F, -1000.0F, 0.0F) ==
+        Catch::Approx(108.0F / 256.0F));
+  CHECK(NovaWeapon_ComputeSpatialFireGain(0.0F, 0.0F, 1000.0F, 0.0F) ==
+        Catch::Approx(108.0F / 256.0F));
+
+  // 3000 px out: loud (256*722500/9e6) = 20 -> floored to 32, quiet floored
+  // to 32; average stays 32/256 = 1/8 (the audible floor).
+  CHECK(NovaWeapon_ComputeSpatialFireGain(0.0F, 0.0F, 3000.0F, 0.0F) ==
+        Catch::Approx(32.0F / 256.0F));
 }
 
 // Regression: mounting a second identical weapon in a bank doubles the fire

@@ -385,8 +385,14 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
   // A round actually spawned: mirror Weapon_FirePlayerWeaponBank's
   // `volley_fired > 0` gate and queue this weapon's fire sound (slot, not
   // resource id) for the spaceflight loop to play through the cached sound.
+  // The player is both source and listener, so the spatial attenuation in
+  // NovaAudio_PlaySpatialByDistance evaluates to full volume (the original
+  // passes &g_ship_states->pos_x for both).
   if (w->fire_sound >= 0) {
-    state.pending_fire_sound_slots.push_back(w->fire_sound);
+    state.pending_fire_sounds.push_back({w->fire_sound,
+                                         state.player.pos_x,
+                                         state.player.pos_y,
+                                         (w->flags & 0x0010U) != 0U});
   }
 
   // Set the bank cooldown to the fire interval. The original divides the
@@ -553,6 +559,17 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     ship.npc_weapon_bank_secondary[index] =
         static_cast<std::int16_t>(secondary - 1);
   }
+  // A volley fired (sVar9 >= 1 in Weapon_FireShipWeapons): queue the fire
+  // sound, sourced at this ship, for the spaceflight loop. The original plays
+  // it via NovaAudio_PlaySpatialByDistance with the player ship as listener,
+  // so NPC fire fades with distance; flags_primary bit 0x10 marks sounds that
+  // must not stack (NovaAudio_CountActiveByHandle gate).
+  if (weapon->fire_sound >= 0) {
+    state.pending_fire_sounds.push_back({weapon->fire_sound,
+                                         ship.pos_x,
+                                         ship.pos_y,
+                                         (weapon->flags & 0x0010U) != 0U});
+  }
   const int mount_count =
       std::max(1, static_cast<int>(ship.npc_weapon_bank_ammo[index]));
   ship.npc_weapon_bank_cooldown[index] =
@@ -683,6 +700,14 @@ void NovaWeapon_PreloadFireSound(GameState &state,
   }
   if (auto decoded = NovaSound_Decode(*resource)) {
     state.weapon_fire_sounds[fire_sound_slot] = std::move(*decoded);
+    const auto resource_id = NovaWeapon_FireSoundResourceId(fire_sound_slot);
+    if (resource_id >= GameState::kGameplaySoundFirstId &&
+        static_cast<std::size_t>(resource_id) <
+            static_cast<std::size_t>(GameState::kGameplaySoundFirstId) +
+                GameState::kGameplaySoundCount) {
+      state.gameplay_sounds[resource_id - GameState::kGameplaySoundFirstId] =
+          *state.weapon_fire_sounds[fire_sound_slot];
+    }
     NovaLog::Info("cached weapon fire sound slot {} (snd id {})",
                   fire_sound_slot,
                   NovaWeapon_FireSoundResourceId(fire_sound_slot));
@@ -709,6 +734,80 @@ void NovaWeapon_PreloadOwnedFireSounds(GameState &state) {
     }
     NovaWeapon_PreloadFireSound(state, w->fire_sound);
   }
+}
+
+void NovaWeapon_PreloadGameplaySounds(GameState &state) {
+  std::size_t loaded = 0;
+  for (std::size_t offset = 0; offset < GameState::kGameplaySoundCount;
+       ++offset) {
+    if (state.gameplay_sounds[offset].has_value()) {
+      ++loaded;
+      continue;
+    }
+    const auto resource_id =
+        static_cast<std::uint16_t>(GameState::kGameplaySoundFirstId + offset);
+    const auto resource = NovaResource_LoadSndData(resource_id);
+    if (!resource) {
+      continue;
+    }
+    if (auto decoded = NovaSound_Decode(*resource)) {
+      state.gameplay_sounds[offset] = std::move(*decoded);
+      ++loaded;
+    } else {
+      NovaLog::Warn("gameplay snd resource {} failed to decode", resource_id);
+    }
+  }
+  NovaLog::Info("preloaded {} gameplay sound resources (ids {}..{})",
+                loaded,
+                GameState::kGameplaySoundFirstId,
+                GameState::kGameplaySoundFirstId +
+                    GameState::kGameplaySoundCount - 1);
+}
+
+// Ghidra NovaAudio_PlaySpatialByDistance (0x004692e0): the original computes
+// left/right channel gains from the rounded source/listener displacement,
+// clamps each channel to the [extent/8, extent] band, then averages the
+// channels (NovaEffects_QueueCenteredResource -> Audio_AllocateVoiceSlot feeds
+// a single mono gain to the mixer). The extent is the sound-volume scaled
+// global (0..0x100, Frame_UpdateEffectIntensityGlobal), so the *distance*
+// behavior factors out into a pure 0..1 attenuation; the caller's master
+// volume carries the preference. Within 200 px the sound plays at full
+// volume; beyond that the loud channel falls as 722500/d^2 (full at 850 px)
+// and the quiet channel as 40000/d^2, each floored at 1/8 of the extent. The
+// integer channel truncation, clamp, and (L+R+1)>>1 average are preserved so
+// the gain matches the original at 1/256 resolution.
+float NovaWeapon_ComputeSpatialFireGain(float listener_x,
+                                        float listener_y,
+                                        float src_x,
+                                        float src_y) {
+  const int dx = std::lround(src_x - listener_x);
+  const int dy = std::lround(src_y - listener_y);
+  const std::int64_t dist_sq =
+      static_cast<std::int64_t>(dx) * dx + static_cast<std::int64_t>(dy) * dy;
+  if (dist_sq <= 40000) {
+    return 1.0F; // 200 px or closer (including src == listener): full volume
+  }
+  // Channel gain as the original computes it with the extent at full scale
+  // (E = 0x100): (E * numerator) / dist_sq, truncated, clamped to [E/8, E].
+  auto channel = [dist_sq](std::int64_t numerator) -> std::int64_t {
+    const std::int64_t gain = (numerator * 256) / dist_sq;
+    return std::clamp<std::int64_t>(gain, 32, 256);
+  };
+  const std::int64_t loud = channel(722500);
+  const std::int64_t quiet = channel(40000);
+  std::int64_t left = loud;
+  std::int64_t right = loud;
+  if (dx < 200) {
+    if (dx < -200) {
+      right = quiet; // source clearly to the left
+    }
+    // -200 <= dx < 200: horizontally centered, both channels loud
+  } else {
+    right = loud;
+    left = quiet; // source clearly to the right
+  }
+  const std::int64_t average = (left + right + 1) >> 1;
+  return static_cast<float>(average) / 256.0F;
 }
 
 } // namespace game

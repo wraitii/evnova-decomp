@@ -1039,10 +1039,14 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
         case 5: // sound down
           prefs.sound_volume =
               std::max<std::int32_t>(0, prefs.sound_volume - 1);
+          audio.SetMasterVolume(
+              static_cast<float>(prefs.sound_volume) / 8.0F);
           break;
         case 6: // sound up
           prefs.sound_volume =
               std::min<std::int32_t>(8, prefs.sound_volume + 1);
+          audio.SetMasterVolume(
+              static_cast<float>(prefs.sound_volume) / 8.0F);
           break;
         case 24: // brightness down
           prefs.brightness = std::max<std::int32_t>(0, prefs.brightness - 1);

@@ -35,10 +35,18 @@ public:
   // Plays a one-shot effect by streaming the provided PCM through a free voice.
   // If every voice is busy the oldest voice is reused (the new blip replaces
   // the tail of an earlier one, as the original's small voice pool does).
+  // sound_key tags the voice for CountActiveByKey (the original counts active
+  // instances of a sound handle before retriggering no-stack effects); pass
+  // -1 for untagged one-shots.
   void Play(const NovaSoundData &sound,
             float gain = 1.0F,
-            float playback_rate = 1.0F);
+            float playback_rate = 1.0F,
+            int sound_key = -1);
+  // Number of voices still playing (draining) with the given key. Mirrors
+  // NovaAudio_CountActiveByHandle for the no-stack fire-sound gate.
+  [[nodiscard]] int CountActiveByKey(int sound_key) const;
   void StopAll();
+  void SetMasterVolume(float volume);
 
   [[nodiscard]] bool IsEnabled() const;
 
@@ -47,10 +55,16 @@ private:
     void operator()(SDL_AudioStream *stream) const;
   };
 
+  struct Voice {
+    std::unique_ptr<SDL_AudioStream, StreamDeleter> stream;
+    int key = -1;
+  };
+
   [[nodiscard]] static bool StreamActive(SDL_AudioStream *stream);
 
   SDL_AudioDeviceID device_id_ = 0;
-  std::vector<std::unique_ptr<SDL_AudioStream, StreamDeleter>> voices_;
+  std::vector<Voice> voices_;
   std::size_t next_voice_ = 0;
+  float master_gain_ = 1.0F;
   bool initialized_ = false;
 };

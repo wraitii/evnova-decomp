@@ -108,8 +108,8 @@ void TickIonizationDecay(GameState &state, Ship &ship, float elapsed_ticks) {
   }
   const float frame_time_ms = elapsed_ticks * (1000.0F / 30.0F);
   const float decay_rate = NovaOutfit_ComputeIonizationDecayRate(state, ship);
-  ship.ionization_points = std::max(
-      0.0F, ship.ionization_points - decay_rate * frame_time_ms);
+  ship.ionization_points =
+      std::max(0.0F, ship.ionization_points - decay_rate * frame_time_ms);
 }
 
 // Ghidra scope 4/5 of Frame_TickSystems: per-ship simulation. For the NPC
@@ -273,9 +273,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   HudRenderer hud;
   hud.Install(platform, state);
 
-  // Preload the fire sounds the player's owned primary weapons use so the
-  // first volley's sound is already decoded (mirrors the original preloading
-  // the gameplay sound-handle table at startup).
+  // Preload the complete gameplay sound handle table before the first frame.
+  // The original does this during session setup; limiting the cache to owned
+  // weapon fire sounds made impact, cloak, and other cues silent.
+  NovaWeapon_PreloadGameplaySounds(state);
+
+  // Keep the small legacy cache warm for callers that address weapon sounds
+  // by their 0..35 fire-sound slot.
   NovaWeapon_PreloadOwnedFireSounds(state);
   // Preload the hyperspace jump sounds: snd 128 'Warp up' (the rising
   // 'hyperspace imminent' cue played as the ship accelerates into the jump
@@ -484,22 +488,41 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // through the brake, hold and zoom).
     if (input.fire && !state.travel.engaging) {
       NovaWeapon_FirePlayerPrimary(state);
-      // Play each weapon fire sound queued this frame (a round actually
-      // spawned). The firing routine appends the fire_sound slot to
-      // GameState.pending_fire_sound_slots; this loop owns the SdlAudio device
-      // and plays the decoded sound, then clears the queue. Mirrors the
-      // original's per-volley NovaAudio_PlaySpatialByDistance.
-      for (const std::int16_t slot : state.pending_fire_sound_slots) {
-        if (slot < 0 || slot >= 36) {
-          continue;
-        }
-        const auto &sound = state.weapon_fire_sounds[slot];
-        if (sound.has_value()) {
-          audio.Play(*sound);
-        }
-      }
-      state.pending_fire_sound_slots.clear();
     }
+    // Play every fire sound latched this frame by the player or NPC firing
+    // routines (a round actually spawned). The firing routines append
+    // GameState.pending_fire_sounds; this loop owns the SdlAudio device, plays
+    // each decoded sound with the original's distance attenuation
+    // (NovaAudio_PlaySpatialByDistance, NPC fire sourced at the firing ship
+    // against the player ship as listener; the player's own fire is
+    // src == listener and plays at full volume), then clears the queue. Runs
+    // every frame regardless of the fire input so NPC volleys are audible.
+    for (const auto &pending : state.pending_fire_sounds) {
+      if (pending.slot < 0 || pending.slot >= 36) {
+        continue;
+      }
+      // Weapon fire slots 0..35 map onto the gameplay snd table (id 200+slot),
+      // which is fully preloaded; fall back to the legacy owned-weapon cache.
+      const std::size_t index = static_cast<std::size_t>(pending.slot);
+      const auto *sound = state.gameplay_sounds[index].has_value()
+                              ? &*state.gameplay_sounds[index]
+                              : (state.weapon_fire_sounds[index].has_value()
+                                     ? &*state.weapon_fire_sounds[index]
+                                     : nullptr);
+      if (sound == nullptr) {
+        continue;
+      }
+      // Weapon.flags bit 0x10: suppress a retrigger while this fire sound is
+      // still playing (NovaAudio_CountActiveByHandle gate in the original).
+      if (pending.suppress_if_active &&
+          audio.CountActiveByKey(pending.slot) > 0) {
+        continue;
+      }
+      const float gain = NovaWeapon_ComputeSpatialFireGain(
+          state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
+      audio.Play(*sound, gain, 1.0F, pending.slot);
+    }
+    state.pending_fire_sounds.clear();
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
     // 'j' key near an available travel point, then drives the visible phases.
     NovaTravel_Tick(state, input.travel, frame_time_ms);
@@ -1015,12 +1038,11 @@ namespace {
 
 // Ship_GetIonizationIntensity (0x0046c160): the NPC path has no outfit
 // opcode-0x28 additions, so its normalized intensity is simply the status
-// ionization meter divided by the class capacity. The original returns zero for a
-// non-positive capacity and clamps the resulting stat multiplier below.
+// ionization meter divided by the class capacity. The original returns zero for
+// a non-positive capacity and clamps the resulting stat multiplier below.
 [[nodiscard]] float NovaShip_IonizationIntensity(const Ship &ship,
                                                  const ShipClass &ship_class) {
-  if (ship.ionization_points <= 0.0F ||
-      ship_class.ionization_capacity <= 0) {
+  if (ship.ionization_points <= 0.0F || ship_class.ionization_capacity <= 0) {
     return 0.0F;
   }
   return ship.ionization_points /
@@ -1082,20 +1104,18 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
   // Ship_ComputeShipMaxTurnRateDeg applies the mission correction before the
   // general one-degree floor, and ionization damping only while the ship is not
   // thrusting. DAT_00575790 is 6.0 and DAT_00575784 is 1.0.
-  if (ship.mission_ship_slot == 0x03ff &&
-      stats.turn_rate_deg_per_tick < 6.0F) {
+  if (ship.mission_ship_slot == 0x03ff && stats.turn_rate_deg_per_tick < 6.0F) {
     stats.turn_rate_deg_per_tick += 1.0F;
   }
   if (stats.turn_rate_deg_per_tick >= 1.0F) {
-    stats.turn_rate_deg_per_tick =
-        std::max(stats.turn_rate_deg_per_tick, 1.0F);
+    stats.turn_rate_deg_per_tick = std::max(stats.turn_rate_deg_per_tick, 1.0F);
   }
   const float intensity =
       std::min(0.7F, NovaShip_IonizationIntensity(ship, ship_class));
   if (intensity > 0.0F) {
-    // Effective thrust always carries the ionization multiplier. The turn helper
-    // applies the same damping only in its non-thrusting branch; max speed
-    // has no ionization term in the original helper.
+    // Effective thrust always carries the ionization multiplier. The turn
+    // helper applies the same damping only in its non-thrusting branch; max
+    // speed has no ionization term in the original helper.
     stats.thrust_px_per_tick2 *= (1.0F - intensity);
     if (ship.ai_forward_thrust_cmd <= 0.0F) {
       stats.turn_rate_deg_per_tick *= (1.0F - intensity);

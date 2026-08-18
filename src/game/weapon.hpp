@@ -80,7 +80,7 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 // ship's current heading, then sets the bank's cooldown to the weapon's fire
 // interval (reload_ticks) so the bank cannot fire again until it elapses.
 // Once a round actually spawns, the weapon's fire_sound slot (when >= 0) is
-// appended to GameState.pending_fire_sound_slots so the spaceflight loop (which
+// appended to GameState.pending_fire_sounds so the spaceflight loop (which
 // owns the SdlAudio device) can play the cached sound -- mirroring the
 // original's volley_fired > 0 gate around NovaAudio_PlaySpatialByDistance.
 // The visual side-effects, burst-cycle bookkeeping and carrier-bay / beam /
@@ -96,7 +96,10 @@ void NovaWeapon_FirePlayerPrimary(GameState &state);
 
 // Ghidra Weapon_FireShipWeapons (0x00414550): fire the selected NPC bank for
 // one volley. This slice covers projectile modes -1, 1, 4, 6, 7, and 8;
-// beams, turrets, and carrier-bay branches remain deferred.
+// beams, turrets, and carrier-bay branches remain deferred. A successful
+// dispatch queues the weapon's fire sound (spatial, sourced at this ship) via
+// GameState.pending_fire_sounds, mirroring the original's sVar9 > 0 gate
+// around NovaAudio_PlaySpatialByDistance.
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship);
 
 // Ship_HandleShip (0x00433050): count down NPC-local bank cooldowns.
@@ -169,5 +172,18 @@ void NovaWeapon_PreloadFireSound(GameState &state,
 // fire_sound slot, and loads it into the cache. Call at spaceflight entry so a
 // bank never silently misses its first shot's sound.
 void NovaWeapon_PreloadOwnedFireSounds(GameState &state);
+
+void NovaWeapon_PreloadGameplaySounds(GameState &state);
+
+// Ghidra NovaAudio_PlaySpatialByDistance (0x004692e0) distance falloff, as a
+// pure 0..1 attenuation (the sound-volume extent factors out; the caller's
+// master volume carries the preference). Returns 1.0 within 200 px, then
+// falls off with 1/d^2 (loud channel full at 850 px, quiet channel at the
+// 200-px reference) with each channel floored at 1/8, averaged to the mono
+// gain the original's mixer actually plays.
+[[nodiscard]] float NovaWeapon_ComputeSpatialFireGain(float listener_x,
+                                                      float listener_y,
+                                                      float src_x,
+                                                      float src_y);
 
 } // namespace game

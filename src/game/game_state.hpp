@@ -712,14 +712,32 @@ struct GameState {
   // Light Blaster's slot 8 is "Light Blaster.sfil" id 208).
   std::array<std::optional<NovaSoundData>, 36> weapon_fire_sounds{};
 
-  // Fire-sound slots whose weapons actually fired a shot this frame (one
-  // entry per primary-bank volley). The firing routine appends a weapon's
-  // fire_sound slot whenever a round is spawned (mirroring
-  // Weapon_-FirePlayerWeaponBank playing the fire sound after volley_fired > 0
-  // only); the spaceflight loop, which owns the SdlAudio device, drains and
-  // clears it and plays each cached slot. Keeps SDL out of the pure weapon
-  // path.
-  std::vector<std::int16_t> pending_fire_sound_slots;
+  // Ghidra FUN_004b0740 preloads the contiguous gameplay snd handle range
+  // 200..455. Sharing this cache keeps impact, cloak, and other gameplay cues
+  // from being silently omitted when only weapon slots are loaded.
+  static constexpr std::uint16_t kGameplaySoundFirstId = 200;
+  static constexpr std::size_t kGameplaySoundCount = 256;
+  std::array<std::optional<NovaSoundData>, kGameplaySoundCount>
+      gameplay_sounds{};
+
+  // Fire sounds whose weapons actually fired a shot this frame (one entry
+  // per primary-bank volley, plus one per NPC ship that fired). The firing
+  // routines append a PendingFireSound whenever a round spawns (mirroring the
+  // original's volley_fired > 0 gate around NovaAudio_PlaySpatialByDistance);
+  // the spaceflight loop, which owns the SdlAudio device, drains and clears
+  // it and plays each cached sound with the original's distance attenuation.
+  // Keeps SDL out of the pure weapon path.
+  struct PendingFireSound {
+    std::int16_t slot = -1; // 0..35 fire-sound slot (snd resource id 200+slot)
+    float src_x = 0.0F;     // source (firing ship) position, world px
+    float src_y = 0.0F;
+    // Weapon.flags (flags_primary) bit 0x10: the original counts the sound
+    // handle already playing (NovaAudio_CountActiveByHandle) and suppresses a
+    // retrigger while it is, so this fire sound never stacks.
+    bool suppress_if_active = false;
+  };
+
+  std::vector<PendingFireSound> pending_fire_sounds;
 
   // Decoded hyperspace jump sounds (the original preloads them via
   // FUN_004b0740: LoadStringResourceCopyById(0x80/0x81/0x82) into the jump

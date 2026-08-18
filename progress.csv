@@ -82,7 +82,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00413B60,Ship_SetEscortLaunchOffsetVelocity,,0%,
 0x00414390,Ship_MoveShipTowardFormationOffset,,0%,
 0x00414530,Ship_IsShipInAiState0x11,,0%,
-0x00414550,Weapon_FireShipWeapons,src/game/weapon.cpp,30%,"NPC projectile dispatcher slice: local bank readiness, target/spread shot spawn for modes -1/1/4/6/7/8, finite secondary consumption plus unlimited -1 sentinel, cooldown, and fire-latch handoff. Beam/turret/carrier-bay, burst, energy, recoil, and spatial audio remain deferred."
+0x00414550,Weapon_FireShipWeapons,src/game/weapon.cpp,35%,"NPC projectile dispatcher slice: local bank readiness, target/spread shot spawn for modes -1/1/4/6/7/8, finite secondary consumption plus unlimited -1 sentinel, cooldown, fire-latch handoff, and the fire-sound latch (spatial, sourced at the ship). Beam/turret/carrier-bay, burst, energy, recoil, and the flags-0x10 no-stack audio gate remain deferred."
 0x004152E0,Ship_UpdateShipDistressResponseMode,,0%,
 0x004156A0,Ship_ReacquireAiTargetLeader,,0%,
 0x004159A0,Ship_IsShipInAiControlMode0x17,,0%,
@@ -286,7 +286,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00450710,PlayerTick_AuxiliaryCommands,,0%,"INTERNAL LABEL of 0x0044AA70; not a function. Reaction input, escort/category UI, resource refresh, and launch-bay command group is not reimplemented as a unit."
 0x00451940,PlayerTick_InteractionCloakAndStatus,src/game/spaceflight.cpp,5%,"INTERNAL LABEL of 0x0044AA70; not a function. Only narrow target-action handoff behavior is reconstructed; cargo refresh, special interaction, mission computer, cloak maintenance, discovery, and status decay remain incomplete."
 0x00454910,Ship_HandlePlayerTargetActionCommand,src/game/spaceflight.cpp,35%,"stellar target-action eligibility + destination-interaction (0x3f1) + ship-comm branch: player disabled/destroyed and hyperspace-latch gates with STR# 0x7d2 overlays, bVar1 hail-eligibility gate, NovaShipComm_RunShipDialog handoff. Mission-ship interaction branch (mission defs) remains TODO(decomp)"
-0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,45%,"Unguided-projectile branch now delegates record creation to NovaWeapon_SpawnProjectile, preserving the selected primary target, muzzle geometry, heading spread, inherited velocity, reload cooldown, ammo/energy gate, and fire sound. Beam/turret/guided/launcher branches and burst side-effects (Weapon_GetWeaponFireIntervalTicks 0x0046f270 flags-0x40 path) remain deferred."
+0x00455150,Weapon_FirePlayerWeaponBank,src/game/weapon.cpp,50%,"Unguided-projectile branch now delegates record creation to NovaWeapon_SpawnProjectile, preserving the selected primary target, muzzle geometry, heading spread, inherited velocity, reload cooldown, ammo/energy gate, and fire sound (latch carries source pos + no-stack flag; distance attenuation in the loop). Beam/turret/guided/launcher branches and burst side-effects (Weapon_GetWeaponFireIntervalTicks 0x0046f270 flags-0x40 path) remain deferred."
 0x00455E10,Stellar_TravelToSystem,src/game/landed_window.cpp,30%,normal-arrival subset in NovaLanding_EnterDocked: fee gate/deduction, target position + stopped kinematics, full effective shield/armor, and Weapon_ReconcileOutfitPoolWithWeaponBanks at arrival (register stock-bank weapons as owned); system NPC cohort reset on landing via NovaShip_DeactivateVacantShipsAndTally + NovaSystem_TickNpcSpawnMaintenance (fresh batch on launch); system-transition/world-reset/discovery work remains TODO(decomp)
 0x00456480,Stellar_SelectLinkedDestinationViaStarmap,,0%,confirmed linked-destination starmap transfer; prior speculative docking implementation removed
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
@@ -727,7 +727,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00486790,View_ResetCameraAndHover,,0%,
 0x00486880,NovaMainLoop_Run,src/nova_app.cpp,100%,NovaMainLoop_Run
 0x00486EC0,NoSys_NoOp_00486ec0,,0%,
-0x00486ED0,NovaGameMode_DispatchAction,src/nova_app.cpp,100%,NovaGameMode_DispatchAction
+0x00486ED0,NovaGameMode_DispatchAction,src/nova_app.cpp,100%,NovaGameMode_DispatchAction; menu music now stops for blocking spaceflight and resumes on return when Intro Music is enabled; other mode-dispatch divergences remain documented in source
 0x004872A0,NovaCommand_DispatchToMode,,0%,
 0x004873B0,NovaRender_RedrawAndPresentFrame,src/nova_app.cpp,100%,NovaRender_RedrawAndPresentFrame; menu title cadence and center-preview alpha timing are timer based; authored row reveal remains at the original 16ms presentation cadence
 0x00487FCD,NovaRender_RestoreClippedRegion,,0%,
@@ -888,7 +888,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004AD960,FUN_004ad960,,0%,
 0x004AEDA0,NovaData_LoadAllShipClassVisualAndLaunchData,src/game/scenario_data.cpp,20%,"Ship-class clone-source derivation (clone_source_ship_class from first class sharing a sh.x8an BaseImageID, the 0x004b4ee0 clone branch) plus pict_fallback_sprite_resource_id now populated at load: PICT 5000+class (else 5000+clone-source) per the 0x004aeda0 loop. The six per-class sprite-handle tables and full sh.x8an decode are still TODO(decomp)."
 0x004AF020,FUN_004af020,,0%,
-0x004B0740,FUN_004b0740,,0%,
+0x004B0740,NovaAudio_PreloadGameplayData,src/game/weapon.cpp,25%,partial gameplay snd preload: resources 200..455 are decoded into the shared session cache, covering the original weapon/effect/cloak handle range; duration-table setup and original handle allocation remain deferred
 0x004B0A30,FUN_004b0a30,,0%,
 0x004B0C20,Ship_InitGameplayDataTables,,0%,
 0x004B3350,Ship_ResetPlayerShipState,src/game/new_pilot_flow.cpp,34%,Ship_ResetPlayerShipState: track only fields the new-pilot flow / early loop meaningfully need, including the fresh-game 10000-credit seed and active_weapon_bank_slot=-1; shield/armor/fuel are finalized by a post-seed meter recompute (Menu_RunNewGameFlow order) rather than at reset; deep AI/combat fields reset but unused

@@ -617,6 +617,9 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   runtime.menu_reveal_finish_sound = load_menu_sound(603);
   if (!runtime.audio.Initialize()) {
     NovaLog::Warn("continuing without audio (menu sounds are silent)");
+  } else {
+    runtime.audio.SetMasterVolume(
+        static_cast<float>(runtime.prefs.sound_volume) / 8.0F);
   }
 
   // Background music. The shipped bass track is the MP3 in the Nova Files
@@ -994,7 +997,12 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // Blocking: plays the intro cinematic on first entry, then the in-game
     // main loop, returning to the menu when the pilot exits. Mirrors
     // Ship_RunSpaceflightMode being called inline from the dispatcher.
+    const bool resume_menu_music = runtime.prefs.intro_music;
+    runtime.music.Stop();
     game::NovaSpaceflight_Run(runtime.platform, runtime.audio, runtime.game);
+    if (resume_menu_music) {
+      runtime.music.Play();
+    }
     runtime.status_text = "Returned from spaceflight.";
     break;
   }
