@@ -51,6 +51,11 @@ constexpr std::uint32_t kDudeResourceType = 0x649f6465; // d\x9fde
 // 0x004bd3c0 at 0x004c6207) into the DAT_005912dc / DAT_005912f0 global pair,
 // which share one 0x1c-byte-strided 16-row table. See AsteroidDef.
 constexpr std::uint32_t kAsteroidResourceType = 0x729a6964; // r\x9aid
+// Impact/explosion definition family read by
+// NovaData_LoadScenarioResourceTables (0x004bd3c0). The binary FourCC is shown
+// as 0x629a9a6d by Ghidra; each record is 0x18 bytes in the source resource and
+// contributes the three runtime fields below.
+constexpr std::uint32_t kImpactEffectResourceType = 0x629a9a6d;
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -812,6 +817,34 @@ struct AsteroidDef {
   // Set true for every present asteroid-type row (resource id 0x80..0x8f);
   // absent ids stay default.
   bool present = false;
+
+  // The original reuses this 0x1c row as an impact-package definition in
+  // Weapon_SpawnWeaponImpactEffectPackage (0x00462550). These aliases expose
+  // that second interpretation without duplicating or reshaping the loaded
+  // table. The package index is the row index 0..15, not a resource id.
+  [[nodiscard]] std::int16_t ImpactFragmentCount() const { return field_0x02; }
+
+  [[nodiscard]] std::int16_t ImpactFragmentType() const { return field_0x04; }
+
+  [[nodiscard]] std::int16_t ImpactParticleCount() const { return field_0x0c; }
+
+  [[nodiscard]] std::int16_t ImpactAreaEffectId() const { return field_0x10; }
+
+  [[nodiscard]] std::int16_t ImpactSecondaryCount() const { return lifetime; }
+
+  [[nodiscard]] std::int16_t ImpactSecondaryEffectId(std::size_t index) const {
+    return index < directions.size() ? directions[index] : -1;
+  }
+};
+
+// Ghidra ImpactEffectDef (g_impact_effect_defs, 0x005912c0), runtime stride
+// 0x08. The source record stores an integer frame-rate scale, an impact sound
+// slot, and the sprite-set index. Runtime animation advances by
+// frame_rate_scale * elapsed_ms.
+struct ImpactEffect {
+  float frame_rate_scale = 1.0F;
+  std::int16_t impact_sound_slot = -1;
+  std::int16_t sprite_set_id = 0;
 };
 
 // Owns the parsed scenario tables indexed by (resource id - 0x80), mirroring
@@ -832,6 +865,9 @@ struct ScenarioData {
   // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
   // the DAT_005912dc / DAT_005912f0 pair.
   std::vector<AsteroidDef> asteroid_defs; // indexed by type id - 0x80
+  // Impact/explosion definitions are indexed directly by effect id 0..63;
+  // the source resources themselves use ids 0x80..0xbf.
+  std::array<ImpactEffect, 64> impact_effects{};
 
   // gh.id 0x80.. lookup for government/faction data.
   [[nodiscard]] const Government *Government(std::int16_t resource_id) const;
@@ -852,6 +888,12 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for an asteroid-type row, or nullptr when outside the
   // loaded range.
   [[nodiscard]] const AsteroidDef *AsteroidType(std::int16_t resource_id) const;
+  // Impact-package rows reuse the decoded r.x9aid table. The original indexes
+  // these rows directly from a ShotState package slot (0..15).
+  [[nodiscard]] const AsteroidDef *
+  ImpactPackageAt(std::int16_t package_id) const;
+  [[nodiscard]] const ImpactEffect *
+  ImpactEffectAt(std::int16_t effect_id) const;
 
   // Ghidra NovaData_LoadScenarioResourceTables (0x004bd3c0). Walks each
   // resource family by id 0x80.. max and decodes it into the matching table.

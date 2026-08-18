@@ -5,8 +5,10 @@ add_executable(evnova_tests
     gameplay_interface_test.cpp
     government_test.cpp
     hud_overlay_test.cpp
+    impact_effects_test.cpp
     landed_window_test.cpp
     movement_test.cpp
+    pilot_file_test.cpp
     preferences_test.cpp
     scenario_data_test.cpp
     ship_ai_test.cpp

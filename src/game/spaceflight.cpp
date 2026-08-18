@@ -523,6 +523,25 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       audio.Play(*sound, gain, 1.0F, pending.slot);
     }
     state.pending_fire_sounds.clear();
+    // Impact sounds use the original 300..363 snd range, which is already
+    // covered by the contiguous gameplay_sounds cache at offsets 100..163.
+    // Collision/effect code only queues source coordinates; this loop owns the
+    // SDL audio device and applies the same spatial attenuation as weapon fire.
+    for (const auto &pending : state.pending_impact_sounds) {
+      if (pending.slot < 0 || pending.slot >= 64) {
+        continue;
+      }
+      const std::size_t cache_index =
+          static_cast<std::size_t>(100 + pending.slot);
+      if (!state.gameplay_sounds[cache_index].has_value()) {
+        continue;
+      }
+      const float gain = NovaWeapon_ComputeSpatialFireGain(
+          state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
+      audio.Play(
+          *state.gameplay_sounds[cache_index], gain, 1.0F, 300 + pending.slot);
+    }
+    state.pending_impact_sounds.clear();
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
     // 'j' key near an available travel point, then drives the visible phases.
     NovaTravel_Tick(state, input.travel, frame_time_ms);

@@ -18,6 +18,7 @@ add_library(evnova_runtime
     game/government.cpp
     game/hud_renderer.cpp
     game/hud_overlay.cpp
+    game/impact_effects.cpp
     game/intro_cinematic.cpp
     game/landed_window.cpp
     game/landed_store.cpp

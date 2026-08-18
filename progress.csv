@@ -123,8 +123,8 @@ address,name,impl_file,reimpl_pct,comment
 0x0041FB50,Ship_SpawnFreeflightObjectAtPosition,,0%,
 0x0041FD30,Shot_SpawnShotFromWeapon,src/game/weapon.cpp,50%,"Basic clean-room projectile record now carries owner/target/system, muzzle position, inherited velocity, spread, lifetime, decoded fuse fields, and provisional collision radius. Homing lead, turret selection, sprite-container setup, fuse ticking, and advanced mode branches remain TODO(decomp)."
 0x00420D30,Shot_SpawnLinkedShotsOnImpact,,0%,
-0x004211D0,Shot_SpawnAreaImpactEffects,,0%,
-0x00421500,Shot_SpawnImpactEffectSprite,,0%,
+0x004211D0,Shot_SpawnAreaImpactEffects,src/game/impact_effects.cpp,45%,"Main and large-area impact sprite spawning is reconstructed, including child scatter and main impact sound queuing; weapon particle packages remain TODO(decomp)."
+0x00421500,Shot_SpawnImpactEffectSprite,src/game/impact_effects.cpp,55%,"Reconstructed the 32-slot impact-effect pool allocation and x/y/effect/animation/delay state; renderer sprite binding is handled by SpaceflightView."
 0x004215D0,Shot_SpawnDirectionalWeaponEffect,,0%,
 0x004216B0,Asteroid_InitSystem,src/game/asteroid.cpp,80%,NovaAsteroid_InitSystem: spawns asteroid_count records, pre-warms all 16 pool slots, sets no-asteroids latch. Scatter radii from fleet-def scratch area replaced by kAsteroidScatterX/Y (provisional, TODO(decomp) validate vs live game).
 0x00421830,Asteroid_Spawn,src/game/asteroid.cpp,70%,NovaAsteroid_Spawn: scatter+ring placement, ast-types gating, wander params from asteroid-type row, std-rng replay. License-parity latch skipped (out of scope); ring geometry/radii provisional (Step 4 visual validation).
@@ -162,12 +162,12 @@ address,name,impl_file,reimpl_pct,comment
 0x0042CC30,Stellar_TickTravelCountdownSprite,,0%,
 0x0042CD10,Stellar_UpdateStellarSprites,src/game/spaceflight_view.cpp,30%,ambient frame-stepping reimplemented (AdvanceStellarAnimation, now driven by the unified SpaceflightView::AdvanceAnimations per-frame pass mirroring SpriteWorld_UpdateAnimatedSprites): dwell/frame-multiplier stepping + alternate/linger/random cycling; hypergate 0x1000 non-engaged drift toward engage_highlight_frame; engage-highlight pulse (AI/travel-selection state) + per-frame SetPosition from distance-intensity not reconstructed
 0x0042D890,Stellar_TickStellarDefenseBatteries,,0%,
-0x0042E160,Shot_UpdateImpactEffectSprites,,0%,
+0x0042E160,Shot_UpdateImpactEffectSprites,src/game/impact_effects.cpp,55%,"Impact delay and animation timers, frame expiry, and distance fade are reconstructed; original sprite-container/debug suppression details remain TODO(decomp)."
 0x0042E590,Frame_UpdateViewportWrapBackgroundSprites,src/game/spaceflight_view.cpp,72%,"viewport-wrap of ambient star particles reimplemented (DrawBackground modulo wrap); each star renders a random frame of the 16-frame 5px sheet (sp.x9an 700) at native 1:1 size; murk round(murk*0.9) value is a blend-mode sentinel (tinted/blobed), not a pixel size"
 0x0042EAC0,NovaUi_UpdateTravelTargetReticle,src/game/spaceflight_view.cpp,72%,SpaceflightView::DrawTravelTargetReticle: 4-corner brackets from cicn 10000-10007 around the selected travel stellar (travel.selected_stellar_id), offset ceil(max(stellar sprite h,w)/2) + round(decaying pulse), asymmetric placement; pulse armed on selection change and decayed in the spaceflight loop at the original's rate (avg-frame-time*60 ~ 1.8*ms, ~0.15s settle). Corners placed in world space so DrawSprite's single camera transform lands them on target (mirrors original round(stellar.map - player) + g_viewport_center); frame anchors are the cicn top-left (0,0) matching SpriteFrame_CreateFromRect. Frame base reads the destination orientation flag (blue 0 vs green 4 palette) which is not yet reconstructed (TODO(decomp) always 0).
 0x0042EDE0,NovaUi_UpdateShipTargetReticle,src/game/spaceflight_view.cpp,92%,SpaceflightView::DrawShipTargetReticle: 4-corner bracket sprites from cicn 10008-10023 (frame = state base 0x0/0x4/0x8/0xc + corner), offset ceil(max(target sprite h,w)/2) + round(decaying pulse), asymmetric 16px-margin placement; state encoding (fire-restricted/targeting-player/distress/other) faithful. Placement: corners in world space (single camera transform; was double-transformed) AND frame anchors corrected to the cicn top-left (0,0) per SpriteFrame_CreateFromRect -- was centre, which pushed every bracket 8px outward. Pulse decay corrected from 0.06/ms (4.3s) to the original avg-frame-time*60 rate (~1.8*ms, 0.15s lock-in). Debug SDL bracket fallback retained only when the cicn set is missing. Remaining TODO(decomp): the shot-half-span term is approximated by the sheet's frame dims.
 0x0042F1B0,Frame_UpdateScreenFlashTimers,,0%,
-0x0042F270,Shot_UpdateBeamHitQueue,src/game/weapon.cpp,25%,"First queue tick slice: advances lifetime/endpoints and resolves each direct queued beam impact once through the shared shield/armor/status path. Full target retargeting, splash edge cases, and SDL beam rendering remain deferred."
+0x0042F270,Shot_UpdateBeamHitQueue,src/game/weapon.cpp,30%,"Queue tick advances lifetime/endpoints and resolves each direct queued beam impact once through the shared shield/armor/status and impact-effect path. Full target retargeting, splash edge cases, and SDL beam rendering remain deferred."
 0x004311F0,Frame_UpdateCombatChatter,,0%,
 0x004313C0,Frame_CancelCombatChatter,,0%,
 0x00431420,Stellar_TriggerHyperspaceAudioOnce,src/game/spaceflight.cpp,40%,one-shot jump audio latch reproduced via GameState.jump_sound_pending set by NovaTravel_Tick at the tunnel fire and drained by the spaceflight loop (plays snd 200 'Etheric Wake.sfil', the original's +0x94 jump handle, synced with the screen flash; g_playerHyperspaceAudioLatch equivalent). Deferred: the escalating pre-stage cue (NovaAudio_PreStageJumpSoundBySeconds 0x0046ab00), the engine-hum loop handles (+0x8c/+0x90) and their active-handle gating, and the arrival effect handle (+0xa0).
@@ -177,12 +177,12 @@ address,name,impl_file,reimpl_pct,comment
 0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,35%,scope 3 marks the entered current system visible, then re-derives stellar system_id/is_available/hazard state via NovaTargeting_UpdateStellarAvailability; discovery flood and sprite-set bookkeeping not reconstructed
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
 0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,38%,"validation prologue, movement/physics, and ionization charge decay are ported; NPC effective stats include capability 0x400 zeroing, skill/government scaling, velocity-match, mission-ship and ionization branches. The original ionization speed clamp and AI/combat/weapon/travel/disable/mission scopes remain stubbed"
-0x00435830,Shot_HandleShot,src/game/weapon.cpp,30%,"Shot movement, fractional lifetime/cadence, cooldown advancement, and existing sprite-frame selection are wired into the flight loop. Guidance, proximity fuse, linked shots, area impact, impact audio/effects, and sprite-container side-effects remain TODO(decomp)."
+0x00435830,Shot_HandleShot,src/game/weapon.cpp,35%,"Shot movement, fractional lifetime/cadence, cooldown advancement, sprite-frame selection, and expiry impact effects are wired into the flight loop. Guidance, proximity fuse, linked shots, and sprite-container side-effects remain TODO(decomp)."
 0x00436910,Asteroid_UpdateSprites,,0%,
 0x00436FF0,NovaUi_ResolveWeaponSplashImpact,,0%,
 0x004374F0,Ship_HandleSpritePairCollision,src/game/collision.cpp,40%,"Direct projectile-vs-ship circle collision replaces the original SpriteLayer callback/pixel-mask path provisionally; owner/target eligibility and the decoded late-collision window now mirror the callback gate. Pixel-mask, freeflight-object, and sprite overlap callbacks remain TODO(decomp)."
-0x00437780,Shot_ResolveShotCollisionHit,src/game/collision.cpp,65%,"Direct and proximity projectile impacts apply damage, ionization/color, impulse, nonlethal variant handling, and axis-aligned splash to additional ships before consuming the shot. Weapon hits do not produce cloak fade progress. Impact visuals, kill chatter, mission reactions, and linked shots remain TODO(decomp)."
-0x00437E20,Shot_ResolveCollisions,src/game/collision.cpp,48%,"Projectile-vs-ship collision pass is wired at Frame_TickSystems scope 9 before Shot_HandleShot movement, with decoded late-collision gating and provisional proximity-radius selection. Asteroid/stellar/freeflight collision branches remain TODO(decomp)."
+0x00437780,Shot_ResolveShotCollisionHit,src/game/collision.cpp,72%,"Direct and proximity projectile impacts apply damage, ionization/color, impulse, nonlethal variant handling, axis-aligned splash, and shared impact visuals/audio before consuming the shot. Kill chatter, mission reactions, and linked shots remain TODO(decomp)."
+0x00437E20,Shot_ResolveCollisions,src/game/collision.cpp,52%,"Projectile-vs-ship collision pass is wired at Frame_TickSystems scope 9 before Shot_HandleShot movement, with decoded late-collision gating, provisional proximity-radius selection, and shared impact effects. Asteroid/stellar/freeflight collision branches remain TODO(decomp)."
 0x004386F0,Shot_DrawBeamQueue,,0%,
 0x00438810,Shot_DrawBeamHitQueueForSurface,,0%,
 0x00438DB0,Frame_UpdateSpriteDistanceIntensity,,0%,
@@ -325,7 +325,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004623D0,Sprite_GetFrameVerticalHalfSpan,,0%,
 0x00462410,System_GetCurrentSystemLinkHalfSpan,,0%,
 0x004624C0,Sprite_GetShipClassEscortShotHalfSpan,,0%,
-0x00462550,Weapon_SpawnWeaponImpactEffectPackage,,0%,
+0x00462550,Weapon_SpawnWeaponImpactEffectPackage,src/game/impact_effects.cpp,30%,"Area-effect branch now dispatches the package row's configured impact effect at the terminal hit position. Secondary freeflight objects and SWParticles remain TODO(decomp)."
 0x00462850,Ship_SelectNearestEngagedTarget,src/game/targeting.cpp,100%,NovaTargeting_SelectNearestEngagedTarget: nearest active/not-destroyed ship in-system, visible through the cloak gate (or cloak scanner), not state-0x15, class not untargetable (or scanner), excluding ships already locked on the player.
 0x004629E0,Government_IsCandidateHostileToTargeter,,0%,
 0x00462BD0,Ship_SelectNearestHostileCombatTarget,src/game/targeting.cpp,100%,NovaTargeting_SelectNearestHostileCombatTarget: engaged-scan core + not fire-restricted + distress-eligible or locked-on-primary-in-state-4 (Ship_IsShipLockedOnAttackerInAiState0x04).
@@ -1028,14 +1028,14 @@ address,name,impl_file,reimpl_pct,comment
 0x004C7400,NovaPrefs_LoadOrInit,,0%,
 0x004C7820,FUN_004c7820,,0%,
 0x004C7D40,FUN_004c7d40,,0%,
-0x004C7DB0,Stellar_SetTravelDestination,,0%,
-0x004C7DD0,FUN_004c7dd0,,0%,
+0x004C7DB0,PilotFile_SaveGame,src/game/pilot_file.cpp,30%,PilotFile_SaveGame: entry -> PilotFileSaveGame(path build from pilot name + serialized tracked subset + write). License-seed check, last-pilot marker file (0x004c7d40) and untracked-block fills not reconstructed. TODO(decomp): autosave cadence in Ship_HandlePlayerShipCore not isolated.
+0x004C7DD0,PilotFile_SaveGameCore,src/game/pilot_file.cpp,30%,PilotFile_SaveGameCore: PilotFileSerialize covers the tracked block1/block2 offsets (cargo, fuel, outfits, weapon banks, credits, junk, nickname, seen-intro) + framing; missions/story/FleetState tables and dates left zero-filled. License-seed ship-class zeroing not reconstructed.
 0x004C9E90,Menu_OpenPilotFileDialog,,0%,
-0x004CA120,GameScenario_LoadStoryData,,0%,
-0x004CA2C0,FUN_004ca2c0,,0%,
-0x004CB260,PilotFile_LoadSave,,0%,PilotFile_LoadSave .plt block->globals copy; persistent load not reconstructed (no .plt files written)
-0x004CD030,PilotFile_ProbeExists,,0%,
-0x004CD040,PilotFile_Delete,,0%,
+0x004CA120,PilotData_AutoresumeLastPilot,,0%,PilotData_AutoresumeLastPilot (startup auto-resume via last-pilot marker file string 0x82/4) not reconstructed; marker file name unresolved
+0x004CA2C0,PilotDebug_WritePilotLog,,0%,debug-only pilotlog.txt dump (licensed runtime only); not reconstructed
+0x004CB260,PilotFile_LoadSave,src/game/pilot_file.cpp,35%,PilotFile_LoadSave: PilotFileDeserialize + file I/O + name-from-path + jump-dest system resolution for the tracked subset. Shield recompute, def-existence repairs, discovery/reputation/missions/FleetState restores not reconstructed.
+0x004CD030,PilotFile_ProbeExists,src/game/pilot_file.cpp,90%,PilotFile_ProbeExists: reimplemented as filesystem is_regular_file probe (original opens the file); used by save tests
+0x004CD040,PilotFile_Delete,src/game/pilot_file.cpp,90%,PilotFile_Delete: probe-guarded remove, same guard semantics as original
 0x004CD0B0,FUN_004cd0b0,,0%,
 0x004CD100,ResourceData_EnsureBlockSize,,0%,
 0x004CD140,FUN_004cd140,,0%,
@@ -2939,7 +2939,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00872500,FUN_00872500,,0%,
 0x00872550,FUN_00872550,,0%,
 0x00872560,FUN_00872560,,0%,
-0x008725B0,FUN_008725b0,,0%,
+0x008725B0,PilotSave_ValidateBlock,src/game/pilot_file.cpp,30%,PilotSave_ValidateBlock: u16[0] < 0x800 gate reimplemented (BlockPassesGate); checksum branch (LAB_0046f960) unresolved and treated as invalid
 0x008725E0,FUN_008725e0,,0%,
 0x00872640,FUN_00872640,,0%,
 0x0087265D,FUN_0087265d,,0%,

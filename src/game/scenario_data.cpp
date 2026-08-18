@@ -773,6 +773,22 @@ const AsteroidDef *ScenarioData::AsteroidType(std::int16_t resource_id) const {
   return index < asteroid_defs.size() ? &asteroid_defs[index] : nullptr;
 }
 
+const AsteroidDef *
+ScenarioData::ImpactPackageAt(std::int16_t package_id) const {
+  if (package_id < 0 || package_id >= static_cast<std::int16_t>(0x10)) {
+    return nullptr;
+  }
+  return &asteroid_defs[static_cast<std::size_t>(package_id)];
+}
+
+const ImpactEffect *ScenarioData::ImpactEffectAt(std::int16_t effect_id) const {
+  if (effect_id < 0 ||
+      effect_id >= static_cast<std::int16_t>(impact_effects.size())) {
+    return nullptr;
+  }
+  return &impact_effects[static_cast<std::size_t>(effect_id)];
+}
+
 bool ScenarioData::LoadFromArchives() {
   // The original sizes these tables to the family maximum and zero-fills
   // missing slots (0x200 ships/outfits, 0x100 weapons). We mirror that so
@@ -795,6 +811,10 @@ bool ScenarioData::LoadFromArchives() {
   // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
   asteroid_defs.assign(0x80, {});
 
+  // Impact definitions are a fixed 64-entry runtime table, zero-filled by
+  // the original before it probes source ids 0x80..0xbf.
+  impact_effects.fill({});
+
   std::size_t loaded_ships = 0;
   std::size_t loaded_weapons = 0;
   std::size_t loaded_outfits = 0;
@@ -804,6 +824,7 @@ bool ScenarioData::LoadFromArchives() {
   std::size_t loaded_fleets = 0;
   std::size_t loaded_dudes = 0;
   std::size_t loaded_asteroid_types = 0;
+  std::size_t loaded_impact_effects = 0;
 
   // BaseImageID -> first zero-based ship class using it, for clone-source
   // derivation (ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0's clone
@@ -936,11 +957,28 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_asteroid_types;
     }
   }
+  // Impact/explosion definitions (NovaData_LoadScenarioResourceTables around
+  // 0x004c54c0): source +0x00 is the integer frame-rate scale, +0x02 the
+  // impact sound slot, and +0x04 the sprite-set index. The runtime multiplies
+  // the scale by 0.01 before Frame_UpdateImpactEffectSprites uses it against
+  // elapsed milliseconds. Missing entries retain the original defaults.
+  for (std::int32_t id = 0x80; id < 0xc0; ++id) {
+    if (const auto res = NovaResource_Load(scenario::kImpactEffectResourceType,
+                                           static_cast<std::uint16_t>(id))) {
+      ImpactEffect &effect =
+          impact_effects[static_cast<std::size_t>(id - 0x80)];
+      effect.frame_rate_scale =
+          static_cast<float>(ReadBeI16(*res, 0x00)) * 0.01F;
+      effect.impact_sound_slot = ReadBeI16(*res, 0x02);
+      effect.sprite_set_id = ReadBeI16(*res, 0x04);
+      ++loaded_impact_effects;
+    }
+  }
 
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} governments, {} fleet defs, {} dude defs, "
-      "{} asteroid types",
+      "{} asteroid types, {} impact effects",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
@@ -949,7 +987,8 @@ bool ScenarioData::LoadFromArchives() {
       loaded_governments,
       loaded_fleets,
       loaded_dudes,
-      loaded_asteroid_types);
+      loaded_asteroid_types,
+      loaded_impact_effects);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

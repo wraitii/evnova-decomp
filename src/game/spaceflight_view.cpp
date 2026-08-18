@@ -5,6 +5,7 @@
 #include "../rle_sprite_sheet.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "impact_effects.hpp"
 #include "ship_ai.hpp"
 #include "ship_visual.hpp"
 #include "targeting.hpp"
@@ -530,6 +531,29 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
                                         float dy) {
   // Animated stellar sprite-frame stepping (dwell accumulator cadence).
   AdvanceStellarAnimation(platform, state, frame_time_ms);
+  NovaEffects_TickImpactEffects(state, frame_time_ms);
+  // The original impact updater reads each live Sprite's frame count when it
+  // decides that an animation has ended. Resolve that SDL-side fact here,
+  // after the simulation timer has advanced, so the GameState pool remains
+  // independent of renderer handles.
+  for (ImpactEffectInstance &instance : state.impact_effect_instances) {
+    if (instance.anim_time < 0.0F || instance.delay_timer > 0.0F) {
+      continue;
+    }
+    const ImpactEffect *definition =
+        state.scenario.ImpactEffectAt(instance.effect_id);
+    if (definition == nullptr) {
+      instance.anim_time = -1.0F;
+      continue;
+    }
+    const SpriteAsset *set = sprite_store_.Spin(
+        platform.renderer(),
+        static_cast<std::uint16_t>(400 + definition->sprite_set_id));
+    if (set == nullptr || set->frames.empty() ||
+        instance.anim_time >= static_cast<float>(set->frame_count)) {
+      instance.anim_time = -1.0F;
+    }
+  }
   // Ambient-star spatial parallax (moves by the ship's movement delta).
   if (state.travel.engaging &&
       state.travel.jump_phase == TravelState::JumpPhase::kZoom) {
@@ -825,8 +849,50 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
   }
 }
 
-void SpaceflightView::DrawBeams(SdlPlatform &platform,
-                                const GameState &state) {
+void SpaceflightView::DrawImpactEffects(SdlPlatform &platform,
+                                        const GameState &state) {
+  const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
+  for (const ImpactEffectInstance &instance : state.impact_effect_instances) {
+    if (instance.anim_time < 0.0F || instance.delay_timer > 0.0F) {
+      continue;
+    }
+    const ImpactEffect *definition =
+        state.scenario.ImpactEffectAt(instance.effect_id);
+    if (definition == nullptr) {
+      continue;
+    }
+    const SpriteAsset *set = sprite_store_.Spin(
+        platform.renderer(),
+        static_cast<std::uint16_t>(400 + definition->sprite_set_id));
+    if (set == nullptr || set->frames.empty()) {
+      continue;
+    }
+    const int frame =
+        std::clamp(static_cast<int>(std::lround(instance.anim_time)),
+                   0,
+                   set->frame_count - 1);
+    SpriteDrawOptions opts;
+    // Ghidra computes distance_intensity (+0xa2) as 32 - anim_time/frame_count
+    // for impact sprites. The SDL renderer expresses that as normalized alpha.
+    opts.alpha_mod = std::clamp(1.0F - instance.anim_time /
+                                           static_cast<float>(set->frame_count),
+                                0.0F,
+                                1.0F);
+    DrawSprite(platform.renderer(),
+               *set,
+               frame,
+               instance.pos_x,
+               instance.pos_y,
+               camera_x,
+               camera_y,
+               vp.w,
+               vp.h,
+               opts);
+  }
+}
+
+void SpaceflightView::DrawBeams(SdlPlatform &platform, const GameState &state) {
   const Viewport vp = CurrentViewport(platform);
   const auto [camera_x, camera_y] = WorldCameraPosition(state);
   SDL_Renderer *const renderer = platform.renderer();
@@ -835,8 +901,8 @@ void SpaceflightView::DrawBeams(SdlPlatform &platform,
         beam.owner_ship_slot < 0) {
       continue;
     }
-    const Weapon *weapon = state.scenario.Weapon(
-        static_cast<std::int16_t>(beam.weapon_id + 0x80));
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(beam.weapon_id + 0x80));
     if (weapon == nullptr) {
       continue;
     }
@@ -847,18 +913,14 @@ void SpaceflightView::DrawBeams(SdlPlatform &platform,
       return world_y - camera_y + static_cast<float>(vp.h) / 2.0F;
     };
     const std::uint32_t packed = weapon->ionization_color;
-    const std::uint8_t red = packed != 0 ? static_cast<std::uint8_t>(packed >> 16)
-                                         : 255;
-    const std::uint8_t green = packed != 0
-                                   ? static_cast<std::uint8_t>(packed >> 8)
-                                   : (weapon->energy_damage > weapon->mass_damage
-                                          ? 220
-                                          : 150);
-    const std::uint8_t blue = packed != 0
-                                  ? static_cast<std::uint8_t>(packed)
-                                  : (weapon->energy_damage > weapon->mass_damage
-                                         ? 255
-                                         : 64);
+    const std::uint8_t red =
+        packed != 0 ? static_cast<std::uint8_t>(packed >> 16) : 255;
+    const std::uint8_t green =
+        packed != 0 ? static_cast<std::uint8_t>(packed >> 8)
+                    : (weapon->energy_damage > weapon->mass_damage ? 220 : 150);
+    const std::uint8_t blue =
+        packed != 0 ? static_cast<std::uint8_t>(packed)
+                    : (weapon->energy_damage > weapon->mass_damage ? 255 : 64);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, red, green, blue, 220);
     SDL_RenderLine(renderer,
@@ -894,6 +956,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawStellarBodies(platform, state);     // stellar planets / stations
   DrawShots(platform, state);             // projectiles above stellars
   DrawBeams(platform, state);             // immediate beams above projectiles
+  DrawImpactEffects(platform, state);     // transient impacts above weapons
   DrawNpcShips(platform, state);          // NPC ships above the backdrop/shots
   DrawShipTargetReticle(platform, state); // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target

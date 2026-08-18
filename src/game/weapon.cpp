@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "collision.hpp"
 #include "game_state.hpp"
+#include "impact_effects.hpp"
 #include "outfit.hpp"
 
 #include <algorithm>
@@ -631,6 +632,21 @@ void NovaWeapon_TickShots(GameState &state,
     shot.life_ticks_remaining -= tick_scale;
     shot.life_frames =
         static_cast<int>(std::ceil(std::max(0.0F, shot.life_ticks_remaining)));
+    if (shot.life_ticks_remaining <= 0.0F &&
+        shot.system_id == state.player.current_system_id) {
+      // Ghidra Shot_HandleShot (0x00435830) emits the weapon's expiry/fuse
+      // impact before hiding the shot. Collision-resolved shots are removed
+      // earlier in the frame and therefore do not reach this branch.
+      if (const Weapon *weapon = WeaponAt(state, shot.weapon_id);
+          weapon != nullptr) {
+        NovaEffects_SpawnAreaImpact(state,
+                                    shot.pos_x,
+                                    shot.pos_y,
+                                    weapon->impact_effect_id,
+                                    weapon->splash_radius,
+                                    true);
+      }
+    }
     NovaWeapon_StepShotAnimation(state, shot, frame_time_ms);
   }
   shots.erase(std::remove_if(shots.begin(),

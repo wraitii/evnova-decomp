@@ -482,6 +482,9 @@ struct ActiveShot {
   float fuse_elapsed = 0.0F;
   // Ghidra ShotState.impact_variant, used later by impact visual/effect code.
   std::int8_t impact_variant = 0;
+  // Ghidra ShotState +0x1e: optional impact-package row selected by the
+  // chained-impact resolver. -1 means this round has no package dispatch.
+  std::int16_t impact_package_id = -1;
   // Time-animated shot-frame stepping (Ghidra ShotState.frame_cycle_index / +
   // anim_elapsed). For a weapon whose flags_primary bit 0 is SET the shot uses
   // Shot_HandleShot's animated branch: anim_elapsed accumulates frame time and
@@ -510,7 +513,20 @@ struct BeamHit {
   std::int16_t turret_group_id = -1;
   std::int16_t forced_targeting = -1;
   std::int8_t impact_variant = 0;
+  // Optional impact-package row for the queued beam's terminal hit.
+  std::int16_t impact_package_id = -1;
   bool impact_resolved = false;
+};
+
+// Ghidra ImpactEffectInstance (g_impact_effect_instances_ptr, 0x005912b8),
+// 32 entries at a 0x18-byte stride. `anim_time < 0` is the inactive sentinel;
+// delay_timer keeps the original delayed child-impact behavior.
+struct ImpactEffectInstance {
+  float pos_x = 0.0F;
+  float pos_y = 0.0F;
+  std::int16_t effect_id = -1;
+  float anim_time = -1.0F;
+  float delay_timer = 0.0F;
 };
 
 // Transient on-screen HUD overlay message state, mirroring the original's
@@ -685,6 +701,7 @@ struct GameState {
   // Each entry is one fired round at a given world position/velocity.
   std::vector<ActiveShot> active_shots;
   std::array<BeamHit, 0x40> beam_hit_queue{};
+  std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};
 
   // The 16-slot asteroid / drift-debris pool (mirrors the original
   // `g_asteroid_states`). Shared by Asteroid_SpawnRecord (spawn), the future
@@ -738,6 +755,17 @@ struct GameState {
   };
 
   std::vector<PendingFireSound> pending_fire_sounds;
+
+  // Impact sounds are queued by the simulation and drained by the flight
+  // loop, keeping SDL audio out of collision/effect logic. Slots map to snd
+  // resources 300..363 (Ghidra g_impact_sound_handle_table).
+  struct PendingImpactSound {
+    std::int16_t slot = -1;
+    float src_x = 0.0F;
+    float src_y = 0.0F;
+  };
+
+  std::vector<PendingImpactSound> pending_impact_sounds;
 
   // Decoded hyperspace jump sounds (the original preloads them via
   // FUN_004b0740: LoadStringResourceCopyById(0x80/0x81/0x82) into the jump

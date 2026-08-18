@@ -61,10 +61,11 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   // in Bible order and the tail per its WeaponDef mapping.
   CHECK(w->inaccuracy == 9); // shot_random_spread
   CHECK(w->fire_sound == 8);
-  CHECK(w->impact_impulse == 10); // Impact is the ship impulse, not a sound slot
-  CHECK(w->impact_effect_id == -1);  // was 'explosion'
-  CHECK(w->blast_radius == 5);       // was 'prox_radius'
-  CHECK(w->splash_radius == 6);      // was 'blast_radius'
+  CHECK(w->impact_impulse ==
+        10); // Impact is the ship impulse, not a sound slot
+  CHECK(w->impact_effect_id == -1); // was 'explosion'
+  CHECK(w->blast_radius == 5);      // was 'prox_radius'
+  CHECK(w->splash_radius == 6);     // was 'blast_radius'
   CHECK(w->fuse_ticks == 0);
   CHECK(w->late_collision_window_ticks == 0);
   CHECK(w->flags == 0x6100);
@@ -787,6 +788,18 @@ TEST_CASE("asteroid-type rows decode from the payload",
   CHECK(small->field_0x04 == 4);
   CHECK(small->field_0x02 == 4);
   CHECK(small->field_0x0c == 20);
+
+  // The same 0x1c runtime row is consumed as impact-package data by
+  // Weapon_SpawnWeaponImpactEffectPackage (0x00462550).
+  const AsteroidDef *package = data.ImpactPackageAt(0);
+  REQUIRE(package == small);
+  CHECK(package->ImpactFragmentCount() == 4);
+  CHECK(package->ImpactFragmentType() == 4);
+  CHECK(package->ImpactParticleCount() == 20);
+  CHECK(package->ImpactSecondaryEffectId(0) == small->directions[0]);
+  CHECK(package->ImpactAreaEffectId() == small->field_0x10);
+  CHECK(data.ImpactPackageAt(-1) == nullptr);
+  CHECK(data.ImpactPackageAt(0x10) == nullptr);
 
   // Metal Huge (0x83): lifetime doubles with the size tier.
   const AsteroidDef *huge = data.AsteroidType(0x83);

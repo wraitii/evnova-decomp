@@ -1,7 +1,8 @@
 #include "collision.hpp"
 
-#include "scenario_data.hpp"
 #include "government.hpp"
+#include "impact_effects.hpp"
+#include "scenario_data.hpp"
 #include "ship_ai.hpp"
 
 #include <algorithm>
@@ -74,12 +75,11 @@ namespace {
   if (weapon.late_collision_window_ticks <= 0) {
     return false;
   }
-  const float shot_age =
-      std::max(0.0F, static_cast<float>(weapon.lifetime_ticks) -
-                         shot.life_ticks_remaining);
-  const float collision_end_age =
-      static_cast<float>(weapon.lifetime_ticks -
-                         weapon.late_collision_window_ticks);
+  const float shot_age = std::max(0.0F,
+                                  static_cast<float>(weapon.lifetime_ticks) -
+                                      shot.life_ticks_remaining);
+  const float collision_end_age = static_cast<float>(
+      weapon.lifetime_ticks - weapon.late_collision_window_ticks);
   // Ship_HandleSpritePairCollision compares the integer lifetime minus the
   // late-window field against ShotState.life_time and rejects the contact
   // once that boundary has been crossed.
@@ -102,8 +102,8 @@ void ApplyWeaponOnHitEffects(Ship &target,
     } else if (distance_sq > 0.0F) {
       // Weapon_ApplyWeaponOnHitEffects (0x0046f3f0): splash ionization is
       // linearly attenuated by squared distance inside the blast radius.
-      points = static_cast<int>(std::lround(
-          static_cast<float>(points) * (1.0F - distance_sq / radius_sq)));
+      points = static_cast<int>(std::lround(static_cast<float>(points) *
+                                            (1.0F - distance_sq / radius_sq)));
     }
   }
   if (points > 0) {
@@ -201,7 +201,8 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
         eligible = false;
       }
       if (NovaGovernment_AreGovtsAllied(
-              state.scenario, responder_govt,
+              state.scenario,
+              responder_govt,
               state.player.faction_or_government_id)) {
         eligible = false;
       }
@@ -287,7 +288,8 @@ void ResolveShipHit(GameState &state,
   // messages are deliberately outside this first slice.
   if (allow_aggro_updates && shot.owner_ship_slot > 0 && target_slot > 0) {
     target.primary_target_ship_slot = shot.owner_ship_slot;
-  } else if (allow_aggro_updates && shot.owner_ship_slot == 0 && target_slot > 0) {
+  } else if (allow_aggro_updates && shot.owner_ship_slot == 0 &&
+             target_slot > 0) {
     // Ship_SetShipHostileToPlayer (0x00410700) deliberately changes the
     // primary target/state only. ai_target_ship_slot is a separate leader /
     // escort-chain link; overwriting it here makes the next player shot look
@@ -422,11 +424,11 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
       const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
       const float dx = target.pos_x - shot.pos_x;
       const float dy = target.pos_y - shot.pos_y;
-      const float direct_radius =
-          std::max(0.0F, target.collision_radius_px) +
-          std::max(0.0F, shot.collision_radius_px);
+      const float direct_radius = std::max(0.0F, target.collision_radius_px) +
+                                  std::max(0.0F, shot.collision_radius_px);
       const float proximity_radius =
-          static_cast<float>(std::max(0, static_cast<int>(weapon->blast_radius))) +
+          static_cast<float>(
+              std::max(0, static_cast<int>(weapon->blast_radius))) +
           std::max(0.0F, target.collision_radius_px) * 0.5F;
       const float radius = std::max(direct_radius, proximity_radius);
       const float distance_sq = dx * dx + dy * dy;
@@ -437,20 +439,32 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
     }
 
     if (best_target >= 0) {
+      // Ghidra Shot_ResolveShotCollisionHit (0x00437780) emits the primary
+      // impact package before applying direct and splash damage. Splash
+      // targets below reuse the damage path but do not spawn duplicate art.
+      NovaEffects_SpawnAreaImpact(state,
+                                  shot.pos_x,
+                                  shot.pos_y,
+                                  weapon->impact_effect_id,
+                                  weapon->splash_radius,
+                                  true);
+      NovaEffects_SpawnImpactEffectPackage(
+          state, shot.pos_x, shot.pos_y, shot.impact_package_id, false);
       ResolveShipHit(state,
                      shot,
                      state.ShipAt(static_cast<std::size_t>(best_target)),
                      best_target,
                      /*allow_aggro_updates=*/true,
                      /*suppress_retarget_logic=*/
-                         shot.target_ship_slot == best_target);
+                     shot.target_ship_slot == best_target);
 
       // Shot_ResolveShotCollisionHit (0x00437780): a blast damages every
       // additional active ship in the axis-aligned splash box, excluding the
       // owner unless Flags bit 0x0100 explicitly allows player hurt.
       if (weapon->splash_radius > 0) {
         for (std::int16_t slot = 0;
-             slot < static_cast<std::int16_t>(GameState::kMaxShips); ++slot) {
+             slot < static_cast<std::int16_t>(GameState::kMaxShips);
+             ++slot) {
           if (slot == best_target || !ValidShipSlot(slot)) {
             continue;
           }
@@ -461,8 +475,7 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
               (weapon->flags & 0x0100U) == 0U) {
             continue;
           }
-          Ship &splash_target =
-              state.ShipAt(static_cast<std::size_t>(slot));
+          Ship &splash_target = state.ShipAt(static_cast<std::size_t>(slot));
           if (!splash_target.is_active ||
               splash_target.current_system_id != shot.system_id ||
               IsDestroyed(splash_target)) {
@@ -505,7 +518,8 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                                        std::int16_t weapon_id,
                                        std::int8_t impact_variant) {
   if (!ValidShipSlot(owner_ship_slot) || !ValidShipSlot(target_ship_slot) ||
-      owner_ship_slot == target_ship_slot || weapon_id < 0 || weapon_id >= 0x100) {
+      owner_ship_slot == target_ship_slot || weapon_id < 0 ||
+      weapon_id >= 0x100) {
     return;
   }
   Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
@@ -523,7 +537,23 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
   shot.pos_x = owner.pos_x;
   shot.pos_y = owner.pos_y;
   shot.impact_variant = impact_variant;
-  ResolveShipHit(state, shot, target, target_ship_slot,
+  const Weapon *weapon = WeaponForShot(state, shot);
+  if (weapon != nullptr) {
+    // Beam expiry routes through the same primary impact visual/audio helper
+    // as projectile contact (Ghidra 0x0042f270 -> 0x00437780).
+    NovaEffects_SpawnAreaImpact(state,
+                                shot.pos_x,
+                                shot.pos_y,
+                                weapon->impact_effect_id,
+                                weapon->splash_radius,
+                                true);
+    NovaEffects_SpawnImpactEffectPackage(
+        state, shot.pos_x, shot.pos_y, shot.impact_package_id, false);
+  }
+  ResolveShipHit(state,
+                 shot,
+                 target,
+                 target_ship_slot,
                  /*allow_aggro_updates=*/true,
                  /*suppress_retarget_logic=*/false);
 }

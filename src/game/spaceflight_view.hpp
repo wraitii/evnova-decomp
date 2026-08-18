@@ -258,6 +258,9 @@ private:
   // the first frame at native size; falls back to a small bright dot when the
   // sprite set is unavailable.
   void DrawShots(SdlPlatform &platform, const GameState &state);
+  // Ghidra Shot_UpdateImpactEffectSprites (0x0042e160): draws the 32-slot
+  // impact animation pool above shots and beams but below ship sprites.
+  void DrawImpactEffects(SdlPlatform &platform, const GameState &state);
   // Minimal SDL representation of Ghidra Shot_DrawBeamQueue: draws live beam
   // queue endpoints as one-segment lines. Beam flare/kink geometry remains
   // deferred until the original beam sprite fields are reconstructed.
