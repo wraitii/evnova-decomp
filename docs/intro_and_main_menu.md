@@ -103,7 +103,7 @@ main-menu prompt pulse.
 | `x`   | —      | Immediate travel-selection dialog |
 
 - `Menu_OpenPilotFileDialog` (0x004c9e90, formerly `FUN_004c9e90`) — GetOpenFileNameA pilot selector; on selection
-  resets ship state and loads the save via `FUN_004cb260`.
+  resets ship state and loads the save via `PilotFile_LoadSave` (0x004cb260).
 - `Menu_RunNewGameFlow` (0x00489d70) — full new-game init: pilot selection dialog, player reset,
   scenario tables, starting destination, `IntroCinematic_SetupFrames`, sets `DAT_00596d28=1`,
   renders.
@@ -118,8 +118,8 @@ when a pilot first enters spaceflight (gated on `DAT_00596d35`). This is distinc
 boot-phase splash above; it is a timed scripted sequence tied to a starting a run.
 
 - `DAT_00596d35` — intro-played latch, set to 1 in `Ship_RunSpaceflightMode` after the cinematic
-  first runs; **persisted in the pilot save** (offset `0x3086`, restored by `FUN_004cb260` and
-  written back by the save writer `FUN_004c7dd0`).
+  first runs; **persisted in the pilot save** (offset `0x3086`, restored by `PilotFile_LoadSave` and
+  written back by the save writer `PilotFile_SaveGameCore`).
 - For each of (up to 4) intro frames: loads/fills the frame PICT (id from
   g_intro_cinematic.source_pict_ids[i]), centers and blits it to the shared offscreen surface
   `DAT_00597950`, then waits the per-frame duration (g_intro_cinematic.duration_60h_ticks[i],

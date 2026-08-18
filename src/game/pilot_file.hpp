@@ -8,7 +8,8 @@
 //   (PilotData_InitializePlayerState 0x004cd4b0 creates/grows the block,
 //    IntroCinematic_SetupFrames 0x004cd3b0 reads the intro frames from it),
 // (b) read back into the globals when continuing a pilot
-//   (PilotFile_LoadSave 0x004cb260 copies the .plt block into the globals).
+//   (PilotFile_LoadSave 0x004cb260 copies the .plt block into the globals),
+// (c) written out to disk by PilotFile_SaveGameCore (0x004c7dd0).
 //
 // In the original the on-disk .plt is a large binary block (offsets up to
 // 0xe94e) holding ship state, outfit/weapon tables, system discovery, per-govt
@@ -17,15 +18,21 @@
 // So this build carries a focused PilotFile covering exactly the fields the
 // current GameState tracks, each mapped to its Ghidra .plt block offset when
 // known. The remaining original fields are absent until their subsystems are
-// reconstructed; this record is over the tracked subset only. The pilot file
-// is never serialized in this build (no .plt writer): it is the in-memory
-// record the new-game flow seeds and applies to GameState.
+// reconstructed; this record is over the tracked subset only. Serialization
+// (PilotFileSerialize / PilotFileDeserialize) mirrors the original block
+// layout and offsets for the tracked fields and zero-fills the rest, so a
+// reimplementation save is structurally a valid .plt but does not round-trip
+// the untracked original state. See docs/pilot_save_file_format.md.
 
 #include "game_state.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace game {
 
@@ -37,17 +44,27 @@ struct PilotFile {
   // in-memory the original keys the pilot-save registry block by this name
   // (ResourceData_AccessByKey 0x63688a72; block+0x32 carries the name/opener).
   std::string pilot_name;
+  // The pilot's nickname/callsign suffix (Ghidra DAT_005999cc), stored in the
+  // .plt FleetState block at +0x5d98. The new-game flow uses it as the second
+  // generated opener string (last name).
+  std::string nickname;
+  // The player ship's name (Ghidra DAT_00599acc). Serialized as the .plt
+  // trailer C-string; not yet applied to any GameState visuals.
+  std::string ship_name;
 
   // -- Player ship core (Ghidra .plt offsets from PilotFile_LoadSave) --------
-  std::int32_t credits = 0;       // block+0x281a
-  std::int16_t ship_class_id = 0; // block+0x02 (0 = default class)
+  // The saved jump/travel destination stellar id (block1+0x00). The loader
+  // places the player at this stellar on restore; -1 means none.
+  std::int16_t jump_dest_stellar = -1;
+  std::int32_t credits = 0;       // block1+0x281a
+  std::int16_t ship_class_id = 0; // block1+0x02 (0 = default class)
   std::int16_t current_system_id = 0;
   std::int16_t active_weapon_bank_slot = 0;
   std::int16_t timed_action_counter = -1;
   float death_timer_active = -1.0F;
-  float shield_points = 0.0F; // block+0x04 (g_ship_states->shield_points)
-  float armor_points = 0.0F;  // block+0x06
-  float fuel_points = 0.0F;   // block+0x08
+  float shield_points = 0.0F; // block1+0x10 as u16 (rounded; not read back)
+  float armor_points = 0.0F;  // not serialized (recomputed on load)
+  float fuel_points = 0.0F;   // block1+0x12 as u16 (rounded)
   float pos_x = 0.0F;
   float pos_y = 0.0F;
   float vel_x = 0.0F;
@@ -59,11 +76,18 @@ struct PilotFile {
   std::array<std::int16_t, 4> intro_source_pict_ids{-1, -1, -1, -1};
   std::array<std::int16_t, 4> intro_duration_60h_ticks{0, 0, 0, 0};
   std::int16_t post_intro_dest_id = -1;
+  // Seen-intro-screen latch (Ghidra DAT_00596d35), block2+0x3086.
+  bool intro_played = false;
 
   // -- Ownership tables (g_outfit_owned_count, weapon banks) -----------------
-  std::array<std::int16_t, 0x200> outfit_owned_count{};
-  std::array<std::int16_t, 0x100 * 100> weapon_bank_ammo{};
-  std::array<std::int16_t, 0x100 * 100> weapon_bank_secondary{};
+  std::array<std::int16_t, 6>
+      cargo_bins{}; // block1+0x04 (ShipState field_0x7a..)
+  std::array<std::int16_t, 0x200> outfit_owned_count{};     // block1+0x101a
+  std::array<std::int16_t, 0x100 * 100> weapon_bank_ammo{}; // block1+0x241a
+  std::array<std::int16_t, 0x100 * 100>
+      weapon_bank_secondary{}; // block1+0x261a
+  // Junk item quantities (Ghidra g_junk_defs strided counts), block2+0x3488.
+  std::array<std::int16_t, 0x80> junk_counts{};
 
   // Fresh default for a brand-new pilot, mirroring
   // PilotData_InitializePlayerState's absent-block seed: 10000 credits, ship
@@ -75,9 +99,72 @@ struct PilotFile {
 // Apply a newly-seeded pilot record into the live GameState, so the intro
 // cinematic and spaceflight modes read one consistent record. This mirrors
 // the original's block-to-global copy (PilotData_InitializePlayerState /
-// IntroCinematic_SetupFrames after the block is created). The record is held
-// in memory only: the reimplementation does not write .plt files, so the
-// persistent/load side (PilotFile_LoadSave) is not reconstructed.
+// IntroCinematic_SetupFrames after the block is created).
 void PilotFileApply(const PilotFile &pilot_file, GameState &state);
+
+// Collect the live GameState into a PilotFile record (the inverse of
+// PilotFileApply; the original saver reads the globals directly).
+[[nodiscard]] PilotFile PilotFileCollectFromState(const GameState &state);
+
+// ---------------------------------------------------------------------------
+// .plt disk persistence.
+//
+// The on-disk format (docs/pilot_save_file_format.md) is:
+//   [u32 block1 size][block1 data 0xe952][u32 block2 size][block2 data 0x66fe]
+//   [ship-name C-string trailer]
+// All integers little-endian. PilotFileSerialize/Deserialize are pure byte
+// transforms; the PilotFile* path helpers add the file I/O.
+// ---------------------------------------------------------------------------
+
+// Error codes returned by PilotFileDeserialize / PilotFileLoadSave, mirroring
+// the original PilotFile_LoadSave (0x004cb260) returns.
+enum class PilotLoadError : int {
+  kOk = 0,
+  kMissingOrEmptyFile = -0x2b, // 0xffffffd5: file open/read failure or size 0
+  kInvalidFleetBlock = -0x2a,  // 0xffffffd6: block2 first u16 < 300
+  kWrongFileType = -0x2d,  // 0xffffffd3: block2 first u16 == 0x6b (.prf-like)
+  kRepairsApplied = -0x2e, // 0xffffffd2: restored with fallbacks (see log)
+};
+
+// Serialize the tracked PilotFile subset into the .plt byte layout. Mirrors
+// PilotFile_SaveGameCore (0x004c7dd0) for the tracked fields; untracked
+// regions are zero-filled. jump_dest_stellar is the destination written at
+// block1+0x00 (the caller's current travel destination).
+[[nodiscard]] std::vector<std::byte>
+PilotFileSerialize(const PilotFile &pilot_file, std::int16_t jump_dest_stellar);
+
+// Parse a .plt byte stream into `out` (mirrors PilotFile_LoadSave 0x004cb260
+// restore of the tracked subset, including the PilotSave_ValidateBlock gate at
+// 0x008725b0). Returns PilotLoadError; kRepairsApplied is returned when a
+// fallback was used (state is still restored). `out` is only modified on
+// kOk/kRepairsApplied.
+[[nodiscard]] PilotLoadError
+PilotFileDeserialize(std::span<const std::byte> bytes, PilotFile &out);
+
+// Save <nova_files_dir>/<pilot name>.plt from the live state. Mirrors
+// PilotFile_SaveGame (0x004c7db0) + PilotFile_SaveGameCore (0x004c7dd0).
+// jump_dest_stellar is the player's current jump/travel destination. Returns
+// false on I/O failure. Does not write the last-pilot marker file
+// (PilotFile_RecordLastPilotPath 0x004c7d40) -- TODO(decomp): wire it once the
+// marker file name (string-table id 0x82/4) is resolved.
+[[nodiscard]] bool
+PilotFileSaveGame(const std::filesystem::path &nova_files_dir,
+                  const GameState &state,
+                  std::int16_t jump_dest_stellar);
+
+// Load an explicit .plt path into the live state. Mirrors PilotFile_LoadSave
+// (0x004cb260) including deriving the pilot name from the file name (substring
+// after the last ':', extension stripped). Returns PilotLoadError (kOk on
+// success).
+[[nodiscard]] PilotLoadError
+PilotFileLoadSave(const std::filesystem::path &path, GameState &state);
+
+// Whether a pilot save file at the resolved path exists. Mirrors
+// PilotFile_ProbeExists (0x004cd030).
+[[nodiscard]] bool PilotFileProbeExists(const std::filesystem::path &path);
+
+// Delete a pilot save file. Mirrors PilotFile_Delete (0x004cd040) — only
+// removes the file when it exists.
+void PilotFileDelete(const std::filesystem::path &path);
 
 } // namespace game
