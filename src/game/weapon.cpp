@@ -2,6 +2,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "collision.hpp"
 #include "game_state.hpp"
 #include "outfit.hpp"
 
@@ -271,6 +272,19 @@ int NovaWeapon_SpawnProjectile(GameState &state,
     shot.pos_y = owner.pos_y;
     heading = owner.heading;
 
+    // NPC Shot_SpawnShotFromWeapon aims at its selected target. The player
+    // path retains current-heading behavior until its aim branches are ported.
+    if (owner_ship_slot != 0 && target_ship_slot >= 0 &&
+        target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips)) {
+      const Ship &target =
+          state.ShipAt(static_cast<std::size_t>(target_ship_slot));
+      if (target.is_active &&
+          target.current_system_id == owner.current_system_id) {
+        heading = std::atan2(target.pos_x - owner.pos_x,
+                             -(target.pos_y - owner.pos_y));
+      }
+    }
+
     // The player sh\x8an descriptor supplies the four-barrel muzzle geometry.
     // NPC muzzle descriptors are not represented yet, so their projectiles
     // fall back to the hull origin until that data is decoded.
@@ -406,6 +420,146 @@ void NovaWeapon_FirePlayerPrimary(GameState &state) {
     }
     NovaWeapon_FirePlayerWeaponBank(state, b);
   }
+}
+
+void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks) {
+  const float ticks = std::max(0.0F, elapsed_ticks);
+  for (float &cooldown : ship.npc_weapon_bank_cooldown) {
+    cooldown = std::max(0.0F, cooldown - ticks);
+  }
+}
+
+bool NovaWeapon_QueueBeamHit(GameState &state,
+                             std::int16_t owner_ship_slot,
+                             std::int16_t target_ship_slot,
+                             std::int16_t weapon_id,
+                             std::int16_t forced_targeting) {
+  if (owner_ship_slot < 0 ||
+      owner_ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips) ||
+      weapon_id < 0 || weapon_id >= 0x100) {
+    return false;
+  }
+  const Weapon *weapon = WeaponAt(state, weapon_id);
+  if (weapon == nullptr) {
+    return false;
+  }
+  for (BeamHit &beam : state.beam_hit_queue) {
+    if (beam.lifetime_ticks >= -1) {
+      continue;
+    }
+    const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+    beam.source_x = owner.pos_x;
+    beam.source_y = owner.pos_y;
+    beam.target_x = owner.pos_x;
+    beam.target_y = owner.pos_y;
+    if (target_ship_slot >= 0 &&
+        target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips)) {
+      const Ship &target =
+          state.ShipAt(static_cast<std::size_t>(target_ship_slot));
+      beam.target_x = target.pos_x;
+      beam.target_y = target.pos_y;
+    }
+    beam.lifetime_ticks = std::max<std::int16_t>(1, weapon->lifetime_ticks);
+    beam.animation_counter = 0;
+    beam.weapon_id = weapon_id;
+    beam.owner_ship_slot = owner_ship_slot;
+    beam.target_ship_slot = target_ship_slot;
+    beam.forced_targeting = forced_targeting;
+    beam.turret_quadrant = -1;
+    beam.turret_group_id = weapon->turret_group_id;
+    beam.impact_variant = (weapon->flags_secondary & 0x1000U) != 0U ? 1 : 0;
+    beam.impact_resolved = false;
+    return true;
+  }
+  return false;
+}
+
+void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
+  const float ticks = std::max(0.0F, elapsed_ticks);
+  for (BeamHit &beam : state.beam_hit_queue) {
+    if (beam.lifetime_ticks < -1) {
+      continue;
+    }
+    if (beam.target_ship_slot >= 0 &&
+        beam.target_ship_slot <
+            static_cast<std::int16_t>(GameState::kMaxShips)) {
+      const Ship &target =
+          state.ShipAt(static_cast<std::size_t>(beam.target_ship_slot));
+      beam.target_x = target.pos_x;
+      beam.target_y = target.pos_y;
+      if (!beam.impact_resolved && target.is_active) {
+        NovaWeapon_ResolveDirectWeaponHit(state,
+                                          beam.owner_ship_slot,
+                                          beam.target_ship_slot,
+                                          beam.weapon_id,
+                                          beam.impact_variant);
+        beam.impact_resolved = true;
+      }
+    }
+    beam.animation_counter = static_cast<std::int16_t>(
+        beam.animation_counter + static_cast<std::int16_t>(ticks));
+    beam.lifetime_ticks = static_cast<std::int16_t>(
+        beam.lifetime_ticks - static_cast<std::int16_t>(ticks));
+    if (beam.lifetime_ticks < 0) {
+      beam = BeamHit{};
+    }
+  }
+}
+
+void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
+  const std::int16_t bank = ship.active_weapon_bank_slot;
+  if (ship.ship_instance_id == 0 || bank < 0 || bank >= 0x100 ||
+      ship.ai_fire_trigger_latch == 0) {
+    return;
+  }
+  const std::size_t index = static_cast<std::size_t>(bank);
+  const Weapon *weapon =
+      state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+  if (weapon == nullptr || ship.npc_weapon_bank_ammo[index] <= 0 ||
+      ship.npc_weapon_bank_cooldown[index] > 0.0F) {
+    return;
+  }
+  const std::int16_t secondary = ship.npc_weapon_bank_secondary[index];
+  // Stock energy weapons use -1 as the unlimited-secondary sentinel; zero is
+  // the only empty value here.
+  if (secondary == 0 || weapon->weapon_mode_code == 99) {
+    return;
+  }
+  const std::int16_t mode = weapon->weapon_mode_code;
+  if (mode == 0) {
+    if (!NovaWeapon_QueueBeamHit(state,
+                                 ship.ship_instance_id,
+                                 ship.primary_target_ship_slot,
+                                 bank)) {
+      return;
+    }
+  } else if (mode != -1 && mode != 1 && mode != 4 && mode != 6 && mode != 7 &&
+             mode != 8) {
+    return;
+  } else {
+    const int shot_slot =
+        NovaWeapon_SpawnProjectile(state,
+                                   ship.ship_instance_id,
+                                   ship.primary_target_ship_slot,
+                                   bank,
+                                   false,
+                                   true);
+    if (shot_slot < 0) {
+      return;
+    }
+  }
+  if (secondary > 0 && ship.mission_ship_slot != 0x3ff &&
+      (weapon->flags_tertiary & 0x0001U) == 0U) {
+    ship.npc_weapon_bank_secondary[index] =
+        static_cast<std::int16_t>(secondary - 1);
+  }
+  const int mount_count =
+      std::max(1, static_cast<int>(ship.npc_weapon_bank_ammo[index]));
+  ship.npc_weapon_bank_cooldown[index] =
+      static_cast<float>(std::max(1, static_cast<int>(weapon->reload_ticks))) /
+      static_cast<float>(mount_count);
+  ship.ai_fire_trigger_latch = 0;
+  ship.active_weapon_bank_slot = -1;
 }
 
 // Ghidra Shot_HandleShot (0x00435830) time-animated shot-frame branch: for a

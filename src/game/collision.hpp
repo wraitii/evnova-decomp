@@ -33,4 +33,13 @@ namespace game {
 // remain deferred.
 void NovaWeapon_ResolveProjectileCollisions(GameState &state);
 
+// Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0), exposed for the
+// instantaneous beam queue. Applies one direct weapon impact using the same
+// shield/armor, ionization, impulse, and minimal aggro path as projectiles.
+void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
+                                       std::int16_t owner_ship_slot,
+                                       std::int16_t target_ship_slot,
+                                       std::int16_t weapon_id,
+                                       std::int8_t impact_variant = 0);
+
 } // namespace game

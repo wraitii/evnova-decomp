@@ -417,4 +417,33 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
       state.active_shots.end());
 }
 
+void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
+                                       std::int16_t owner_ship_slot,
+                                       std::int16_t target_ship_slot,
+                                       std::int16_t weapon_id,
+                                       std::int8_t impact_variant) {
+  if (!ValidShipSlot(owner_ship_slot) || !ValidShipSlot(target_ship_slot) ||
+      owner_ship_slot == target_ship_slot || weapon_id < 0 || weapon_id >= 0x100) {
+    return;
+  }
+  Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+  Ship &target = state.ShipAt(static_cast<std::size_t>(target_ship_slot));
+  if (!owner.is_active || !target.is_active ||
+      owner.current_system_id != target.current_system_id ||
+      owner.current_system_id != state.player.current_system_id) {
+    return;
+  }
+  ActiveShot shot;
+  shot.weapon_id = weapon_id;
+  shot.owner_ship_slot = owner_ship_slot;
+  shot.target_ship_slot = target_ship_slot;
+  shot.system_id = owner.current_system_id;
+  shot.pos_x = owner.pos_x;
+  shot.pos_y = owner.pos_y;
+  shot.impact_variant = impact_variant;
+  ResolveShipHit(state, shot, target, target_ship_slot,
+                 /*allow_aggro_updates=*/true,
+                 /*suppress_retarget_logic=*/false);
+}
+
 } // namespace game

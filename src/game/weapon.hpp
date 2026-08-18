@@ -94,6 +94,27 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
 // is such a bank, so holding fire fires it on a cadence.
 void NovaWeapon_FirePlayerPrimary(GameState &state);
 
+// Ghidra Weapon_FireShipWeapons (0x00414550): fire the selected NPC bank for
+// one volley. This slice covers projectile modes -1, 1, 4, 6, 7, and 8;
+// beams, turrets, and carrier-bay branches remain deferred.
+void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship);
+
+// Ship_HandleShip (0x00433050): count down NPC-local bank cooldowns.
+void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks);
+
+// Ghidra Shot_QueueBeamHit (0x00427A90): enqueue one immediate NPC beam hit.
+// The queue is gameplay-complete for direct target impacts; beam rendering and
+// turret quadrant selection remain deferred.
+[[nodiscard]] bool NovaWeapon_QueueBeamHit(GameState &state,
+                                           std::int16_t owner_ship_slot,
+                                           std::int16_t target_ship_slot,
+                                           std::int16_t weapon_id,
+                                           std::int16_t forced_targeting = -1);
+
+// Ghidra Shot_UpdateBeamHitQueue (0x0042F270): advance beam lifetimes and
+// resolve each queued direct impact once.
+void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks);
+
 // Per-frame shot + cooldown bookkeeping for the firing path. Advances each
 // active shot by its velocity, counts down its remaining life, and steps the
 // time-animated shot-frame cycle (frame_cycle_index / anim_elapsed at the

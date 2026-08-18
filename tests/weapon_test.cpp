@@ -7,6 +7,7 @@
 #include "game/outfit.hpp"
 #include "game/pilot_file.hpp"
 #include "game/scenario_data.hpp"
+#include "game/ship_ai.hpp"
 #include "game/weapon.hpp"
 
 namespace game {
@@ -89,8 +90,9 @@ TEST_CASE("starter light blaster becomes owned and survives a rebuild",
   // It is sellable in the Outfitter (not flagged with the 0x0008 no-sell bit).
   CHECK((state.scenario.Outfit(0x80)->flags & 0x0008U) == 0U);
 
-  // A bank rebuild from owned outfits (the landed buy/sell/close path) keeps the
-  // Light Blaster bank mounted, so firing survives any Outfitter transaction.
+  // A bank rebuild from owned outfits (the landed buy/sell/close path) keeps
+  // the Light Blaster bank mounted, so firing survives any Outfitter
+  // transaction.
   NovaWeapon_RebuildBanksFromOwnedOutfits(state);
   CHECK(state.weapon_bank_ammo[0] == 1);
   CHECK(NovaWeapon_CanFireBank(state, 0));
@@ -127,6 +129,50 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   CHECK(state.weapon_bank_cooldown[0] > 0.0F);
   NovaWeapon_FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1); // no second shot while cooling down
+}
+
+TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
+          "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  Ship &player = state.player;
+  player.is_active = true;
+  player.ship_instance_id = 0;
+  player.ship_class_id = 0;
+  player.current_system_id = 0;
+  player.armor_points = 100.0F;
+  player.shield_points = 100.0F;
+  player.pos_x = 200.0F;
+  player.pos_y = 100.0F;
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.current_system_id = 0;
+  npc.ai_behavior_code = 3;
+  npc.primary_target_ship_slot = 0;
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.pos_x = 200.0F;
+  npc.pos_y = 300.0F;
+
+  // The Shuttle's stock bank is Light Blaster {count 1, ammo -1}; the NPC
+  // selector must accept the unguided mode and preserve the unlimited sentinel.
+  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  REQUIRE(npc.active_weapon_bank_slot == 0);
+  REQUIRE(npc.ai_fire_trigger_latch != 0);
+
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].owner_ship_slot == 1);
+  CHECK(state.active_shots[0].weapon_id == 0);
+  CHECK(npc.npc_weapon_bank_secondary[0] == -1);
+  CHECK(npc.ai_fire_trigger_latch == 0);
 }
 
 // Regression: mounting a second identical weapon in a bank doubles the fire

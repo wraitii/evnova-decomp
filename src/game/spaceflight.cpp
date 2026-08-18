@@ -117,8 +117,9 @@ void TickIonizationDecay(GameState &state, Ship &ship, float elapsed_ticks) {
 // ship's AI-written movement commands into its kinematics. Reconstructed for
 // the NPC population: the movement/physics block (turning, thrust) via
 // NovaShip_IntegrateNpcMovement for every active, non-player ship in the
-// current system. The weapon/combat/disable/mission scopes of Ship_HandleShip
-// remain stubbed until those systems reimplemented.
+// current system. The first projectile slice of the weapon/combat scope is
+// also wired here; beams, turrets, carrier-bay, disable, and mission effects
+// remain deferred.
 void Stub_HandleShips(GameState &state, float elapsed_ticks) {
   const std::int16_t current_system = state.player.current_system_id;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
@@ -174,6 +175,10 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
 
     NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
 
+    NovaWeapon_TickNpcWeaponBanks(ship, elapsed_ticks);
+    // Ship_HandleShip hands a latched active bank to Weapon_FireShipWeapons.
+    NovaWeapon_FireNpcWeaponBank(state, ship);
+
     // The separate ionization speed clamp remains deferred.
     TickIonizationDecay(state, ship, elapsed_ticks);
   }
@@ -184,7 +189,9 @@ void Stub_MiscHandlers(GameState &state, bool run_full_tick) {
   (void)run_full_tick;
 }
 
-void Stub_BeamHitQueue(GameState &state) { (void)state; }
+void Stub_BeamHitQueue(GameState &state, float elapsed_ticks) {
+  NovaWeapon_TickBeamHitQueue(state, elapsed_ticks);
+}
 
 // Ghidra 0x004186b0 Frame_TickSystems. Reconstructs only the *structure*:
 // the scope ordering and the run_full_tick gate. Each scope is a loud stub
@@ -209,7 +216,7 @@ void NovaFrame_TickSystems(GameState &state,
   Stub_HandleShots(state, elapsed_ticks);  // scope 7
   Stub_HandleShips(state, elapsed_ticks);  // scope 4/5
   Stub_MiscHandlers(state, run_full_tick); // scope 8
-  Stub_BeamHitQueue(state);
+  Stub_BeamHitQueue(state, elapsed_ticks);
 }
 
 // Draw one in-game frame. The starfield, stellar bodies and the pilot's ship

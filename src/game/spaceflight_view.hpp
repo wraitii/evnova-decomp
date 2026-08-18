@@ -258,6 +258,10 @@ private:
   // the first frame at native size; falls back to a small bright dot when the
   // sprite set is unavailable.
   void DrawShots(SdlPlatform &platform, const GameState &state);
+  // Minimal SDL representation of Ghidra Shot_DrawBeamQueue: draws live beam
+  // queue endpoints as one-segment lines. Beam flare/kink geometry remains
+  // deferred until the original beam sprite fields are reconstructed.
+  void DrawBeams(SdlPlatform &platform, const GameState &state);
 };
 
 } // namespace game

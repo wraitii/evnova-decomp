@@ -59,7 +59,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00411270,Ship_IsShipInNonIdleAiState,src/game/ship_ai.cpp,100%,NovaAiShip_IsShipInNonIdleAiState: state not in {0,1,2,7,0x14}
 0x004112A0,Ship_IsShipInAiState0x02,,0%,
 0x004112C0,Ship_ShowPlayerInterceptTauntIfEligible,,0%,
-0x00411540,Ship_UpdateAutoWeaponSelectionFromTarget,src/game/ship_ai.cpp,65%,"NovaAi_UpdateAutoWeaponSelectionFromTarget: higher-behavior target validation/stale-target clearing plus mode/ammo/cooldown/capability/range/arc bank selection and fire latch. Turret spread, full weapon priority tables, and NPC shot firing remain deferred."
+0x00411540,Ship_UpdateAutoWeaponSelectionFromTarget,src/game/ship_ai.cpp,70%,"NovaAi_UpdateAutoWeaponSelectionFromTarget: combat-behavior target validation/stale-target clearing plus unguided/beam/guided mode, ammo, cooldown, capability, range, and arc bank selection with fire latch. Full weapon priority tables and turret spread remain deferred."
 0x004115A0,Ship_IsShipInAiState0x0D,,0%,
 0x004115C0,Ship_ClearShipState0x09Or0x0FToIdle,,0%,
 0x00411600,Weapon_IsShipWithinWeaponRangeOfTarget,,0%,
@@ -82,7 +82,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00413B60,Ship_SetEscortLaunchOffsetVelocity,,0%,
 0x00414390,Ship_MoveShipTowardFormationOffset,,0%,
 0x00414530,Ship_IsShipInAiState0x11,,0%,
-0x00414550,Weapon_FireShipWeapons,,0%,
+0x00414550,Weapon_FireShipWeapons,src/game/weapon.cpp,30%,"NPC projectile dispatcher slice: local bank readiness, target/spread shot spawn for modes -1/1/4/6/7/8, finite secondary consumption plus unlimited -1 sentinel, cooldown, and fire-latch handoff. Beam/turret/carrier-bay, burst, energy, recoil, and spatial audio remain deferred."
 0x004152E0,Ship_UpdateShipDistressResponseMode,,0%,
 0x004156A0,Ship_ReacquireAiTargetLeader,,0%,
 0x004159A0,Ship_IsShipInAiControlMode0x17,,0%,
@@ -150,7 +150,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00426EF0,Weapon_CanWeaponHitTarget,src/game/collision.cpp,55%,"Projectile eligibility now includes mode-1 recorded-target matching, shared AI/stellar-target exclusions, active/system/destroyed checks, self/faction/leader-chain exclusions, scripted invulnerability, mission-special exclusion, government flags, and planet-capability matching. Full government/AI/target-context predicates remain TODO(decomp)."
 0x004274D0,Weapon_SpawnWeaponImpactParticleBurst,,0%,
 0x00427770,Outfit_GrantOutfitToPlayer,,0%,
-0x00427A90,Shot_QueueBeamHit,,0%,
+0x00427A90,Shot_QueueBeamHit,src/game/weapon.cpp,30%,"First queue slice: 64 bounded beam records, owner/target/weapon/lifetime state, and direct NPC beam enqueue. Turret quadrant selection, endpoint rendering, forced-targeting variants, and full beam animation remain deferred."
 0x00427DF0,System_RefreshSystemCueFlags,,0%,
 0x00427F40,Mission_ClearSystemCuesForShip,,0%,
 0x00428090,Shot_SpawnShipDestructionDebrisPuff,,0%,
@@ -167,7 +167,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0042EAC0,NovaUi_UpdateTravelTargetReticle,src/game/spaceflight_view.cpp,72%,SpaceflightView::DrawTravelTargetReticle: 4-corner brackets from cicn 10000-10007 around the selected travel stellar (travel.selected_stellar_id), offset ceil(max(stellar sprite h,w)/2) + round(decaying pulse), asymmetric placement; pulse armed on selection change and decayed in the spaceflight loop at the original's rate (avg-frame-time*60 ~ 1.8*ms, ~0.15s settle). Corners placed in world space so DrawSprite's single camera transform lands them on target (mirrors original round(stellar.map - player) + g_viewport_center); frame anchors are the cicn top-left (0,0) matching SpriteFrame_CreateFromRect. Frame base reads the destination orientation flag (blue 0 vs green 4 palette) which is not yet reconstructed (TODO(decomp) always 0).
 0x0042EDE0,NovaUi_UpdateShipTargetReticle,src/game/spaceflight_view.cpp,92%,SpaceflightView::DrawShipTargetReticle: 4-corner bracket sprites from cicn 10008-10023 (frame = state base 0x0/0x4/0x8/0xc + corner), offset ceil(max(target sprite h,w)/2) + round(decaying pulse), asymmetric 16px-margin placement; state encoding (fire-restricted/targeting-player/distress/other) faithful. Placement: corners in world space (single camera transform; was double-transformed) AND frame anchors corrected to the cicn top-left (0,0) per SpriteFrame_CreateFromRect -- was centre, which pushed every bracket 8px outward. Pulse decay corrected from 0.06/ms (4.3s) to the original avg-frame-time*60 rate (~1.8*ms, 0.15s lock-in). Debug SDL bracket fallback retained only when the cicn set is missing. Remaining TODO(decomp): the shot-half-span term is approximated by the sheet's frame dims.
 0x0042F1B0,Frame_UpdateScreenFlashTimers,,0%,
-0x0042F270,Shot_UpdateBeamHitQueue,,0%,
+0x0042F270,Shot_UpdateBeamHitQueue,src/game/weapon.cpp,25%,"First queue tick slice: advances lifetime/endpoints and resolves each direct queued beam impact once through the shared shield/armor/status path. Full target retargeting, splash edge cases, and SDL beam rendering remain deferred."
 0x004311F0,Frame_UpdateCombatChatter,,0%,
 0x004313C0,Frame_CancelCombatChatter,,0%,
 0x00431420,Stellar_TriggerHyperspaceAudioOnce,src/game/spaceflight.cpp,40%,one-shot jump audio latch reproduced via GameState.jump_sound_pending set by NovaTravel_Tick at the tunnel fire and drained by the spaceflight loop (plays snd 200 'Etheric Wake.sfil', the original's +0x94 jump handle, synced with the screen flash; g_playerHyperspaceAudioLatch equivalent). Deferred: the escalating pre-stage cue (NovaAudio_PreStageJumpSoundBySeconds 0x0046ab00), the engine-hum loop handles (+0x8c/+0x90) and their active-handle gating, and the arrival effect handle (+0xa0).

@@ -832,6 +832,51 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
   }
 }
 
+void SpaceflightView::DrawBeams(SdlPlatform &platform,
+                                const GameState &state) {
+  const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
+  SDL_Renderer *const renderer = platform.renderer();
+  for (const BeamHit &beam : state.beam_hit_queue) {
+    if (beam.lifetime_ticks < -1 || beam.weapon_id < 0 ||
+        beam.owner_ship_slot < 0) {
+      continue;
+    }
+    const Weapon *weapon = state.scenario.Weapon(
+        static_cast<std::int16_t>(beam.weapon_id + 0x80));
+    if (weapon == nullptr) {
+      continue;
+    }
+    const auto screen_x = [camera_x, &vp](float world_x) {
+      return world_x - camera_x + static_cast<float>(vp.w) / 2.0F;
+    };
+    const auto screen_y = [camera_y, &vp](float world_y) {
+      return world_y - camera_y + static_cast<float>(vp.h) / 2.0F;
+    };
+    const std::uint32_t packed = weapon->ionization_color;
+    const std::uint8_t red = packed != 0 ? static_cast<std::uint8_t>(packed >> 16)
+                                         : 255;
+    const std::uint8_t green = packed != 0
+                                   ? static_cast<std::uint8_t>(packed >> 8)
+                                   : (weapon->energy_damage > weapon->mass_damage
+                                          ? 220
+                                          : 150);
+    const std::uint8_t blue = packed != 0
+                                  ? static_cast<std::uint8_t>(packed)
+                                  : (weapon->energy_damage > weapon->mass_damage
+                                         ? 255
+                                         : 64);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, red, green, blue, 220);
+    SDL_RenderLine(renderer,
+                   screen_x(beam.source_x),
+                   screen_y(beam.source_y),
+                   screen_x(beam.target_x),
+                   screen_y(beam.target_y));
+  }
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
 // Draws the whole in-flight world, compositing every visible entity in the
 // fixed layer order the original's sprite layers use (Ghidra Frame_Spaceflight-
 // Loop scope 2 sprite-world present: the background is cleared/filled first,
@@ -855,6 +900,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawBackground(platform, state);        // backmost: tint + ambient stars
   DrawStellarBodies(platform, state);     // stellar planets / stations
   DrawShots(platform, state);             // projectiles above stellars
+  DrawBeams(platform, state);             // immediate beams above projectiles
   DrawNpcShips(platform, state);          // NPC ships above the backdrop/shots
   DrawShipTargetReticle(platform, state); // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target

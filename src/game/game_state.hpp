@@ -492,6 +492,27 @@ struct ActiveShot {
   float anim_elapsed = 0.0F; // ShotState.anim_elapsed, in ms
 };
 
+// Ghidra g_beam_hit_queue / Shot_QueueBeamHit (0x00427a90). The original
+// keeps 0x40 immediate beam records at a 0x22-byte stride. Rendering fields
+// are retained here even though SDL beam drawing is deferred, so the gameplay
+// queue and its lifetime match the source before visual work is added.
+struct BeamHit {
+  float source_x = 0.0F;
+  float source_y = 0.0F;
+  float target_x = 0.0F;
+  float target_y = 0.0F;
+  std::int16_t lifetime_ticks = -2; // < -1 means inactive in the original
+  std::int16_t animation_counter = 0;
+  std::int16_t weapon_id = -1;
+  std::int16_t owner_ship_slot = -1;
+  std::int16_t target_ship_slot = -1;
+  std::int16_t turret_quadrant = -1;
+  std::int16_t turret_group_id = -1;
+  std::int16_t forced_targeting = -1;
+  std::int8_t impact_variant = 0;
+  bool impact_resolved = false;
+};
+
 // Transient on-screen HUD overlay message state, mirroring the original's
 // g_hud_overlay_msg_buffer / g_hud_overlay_msg_color pair written by
 // NovaHud_ShowOverlayMessage (0x0047e2d0) and replayable by
@@ -663,6 +684,7 @@ struct GameState {
   // oriented by its velocity as Shot_HandleShot picks the heading frame.
   // Each entry is one fired round at a given world position/velocity.
   std::vector<ActiveShot> active_shots;
+  std::array<BeamHit, 0x40> beam_hit_queue{};
 
   // The 16-slot asteroid / drift-debris pool (mirrors the original
   // `g_asteroid_states`). Shared by Asteroid_SpawnRecord (spawn), the future

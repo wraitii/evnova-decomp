@@ -586,7 +586,11 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
 // target-validity side faithfully; bank ranking is the available clean-room
 // subset (mode, ammo, cooldown, target capability, range, and damage class).
 void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
-  if (ship.ai_behavior_code < 5) {
+  // Combat behaviors 3/4 acquire hostile contacts directly. The original's
+  // post-state weapon refresh still arms their selected bank; restricting
+  // this to escort/mission behaviors (>4) left ordinary hostile NPCs with no
+  // active weapon at all.
+  if (ship.ai_behavior_code < 3) {
     return;
   }
   const std::int16_t target_slot = ship.primary_target_ship_slot;
@@ -613,8 +617,10 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
     const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
     if (weapon == nullptr ||
-        (weapon->weapon_mode_code != 3 && weapon->weapon_mode_code != 4 &&
-         weapon->weapon_mode_code != 7 && weapon->weapon_mode_code != 8) ||
+        (weapon->weapon_mode_code != -1 && weapon->weapon_mode_code != 0 &&
+         weapon->weapon_mode_code != 1 && weapon->weapon_mode_code != 4 &&
+         weapon->weapon_mode_code != 6 && weapon->weapon_mode_code != 7 &&
+         weapon->weapon_mode_code != 8) ||
         !WeaponBankCanFire(state, ship, bank) ||
         (weapon->flags_secondary & 0x400U) !=
             (target_class->capability_flags & 0x400U)) {
