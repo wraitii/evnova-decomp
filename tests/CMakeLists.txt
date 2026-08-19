@@ -8,6 +8,7 @@ add_executable(evnova_tests
     impact_effects_test.cpp
     landed_window_test.cpp
     movement_test.cpp
+    mission_test.cpp
     pilot_file_test.cpp
     preferences_test.cpp
     scenario_data_test.cpp

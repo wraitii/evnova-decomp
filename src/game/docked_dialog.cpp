@@ -5,6 +5,7 @@
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
 #include "landed_store.hpp"
+#include "mission.hpp"
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
@@ -192,6 +193,227 @@ void DrawSubWindowDialog(SdlPlatform &platform,
                         panel.x + panel.w,
                         leaveRect.y - 16.0F,
                         "Esc / Enter / click to close");
+}
+
+struct MissionBoardLayout {
+  SDL_FRect rows[8]{};
+  SDL_FRect accept{};
+  SDL_FRect leave{};
+};
+
+[[nodiscard]] MissionBoardLayout LayoutMissionBoard() {
+  MissionBoardLayout layout;
+  constexpr float x = 72.0F;
+  constexpr float width = 496.0F;
+  constexpr float row_y = 106.0F;
+  constexpr float row_height = 25.0F;
+  constexpr float row_pitch = 27.0F;
+  for (std::size_t i = 0; i < std::size(layout.rows); ++i) {
+    layout.rows[i] = {x, row_y + static_cast<float>(i) * row_pitch, width,
+                      row_height};
+  }
+  layout.accept = {72.0F, 335.0F, 150.0F, 25.0F};
+  layout.leave = {418.0F, 335.0F, 150.0F, 25.0F};
+  return layout;
+}
+
+void DrawMissionBoardContents(SdlPlatform &platform,
+                              NovaFontCache &font_cache,
+                              const GameState &state,
+                              const MissionBoardLayout &layout,
+                              const MissionListEvaluation &missions,
+                              std::size_t selected,
+                              std::string_view status) {
+  SDL_Renderer *renderer = platform.renderer();
+  constexpr SDL_Color kText{220, 235, 255, 255};
+  constexpr SDL_Color kMissionDim{128, 170, 210, 255};
+  constexpr SDL_Color kSelected{40, 90, 145, 220};
+  constexpr SDL_Color kButton{24, 58, 96, 255};
+
+  const auto &rows = missions.page_zero;
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                12.0F,
+                kNovaFontStyleBold,
+                kText,
+                72.0F,
+                94.0F,
+                "Available missions");
+  for (std::size_t row = 0; row < std::size(layout.rows); ++row) {
+    const SDL_FRect rect = layout.rows[row];
+    if (row >= rows.size()) {
+      continue;
+    }
+    if (row == selected) {
+      SDL_SetRenderDrawColor(renderer,
+                             kSelected.r,
+                             kSelected.g,
+                             kSelected.b,
+                             kSelected.a);
+      SDL_RenderFillRect(renderer, &rect);
+    }
+    const auto mission_id = rows[row];
+    const auto *definition = state.scenario.Mission(
+        static_cast<std::int16_t>(mission_id + 0x80));
+    const std::string label =
+        definition != nullptr && !definition->display_name.empty()
+            ? definition->display_name
+            : "Mission " + std::to_string(mission_id);
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kText,
+                  rect.x + 8.0F,
+                  rect.y + 17.0F,
+                  label);
+  }
+
+  for (const auto &[rect, label] :
+       std::array<std::pair<SDL_FRect, std::string_view>, 2>{
+           {{layout.accept, "ACCEPT"}, {layout.leave, "LEAVE"}}}) {
+    SDL_SetRenderDrawColor(renderer, kButton.r, kButton.g, kButton.b, kButton.a);
+    SDL_RenderFillRect(renderer, &rect);
+    SDL_SetRenderDrawColor(renderer,
+                           kMissionDim.r,
+                           kMissionDim.g,
+                           kMissionDim.b,
+                           kMissionDim.a);
+    SDL_RenderRect(renderer, &rect);
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          kThreeStateButtonFontFamily,
+                          kThreeStateButtonFontSize,
+                          kNovaFontStyleRegular,
+                          kText,
+                          rect.x,
+                          rect.x + rect.w,
+                          ThreeStateButtonLabelBaseline(rect),
+                          label);
+  }
+  if (!status.empty()) {
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          11.0F,
+                          kNovaFontStyleRegular,
+                          kMissionDim,
+                          72.0F,
+                          568.0F,
+                          378.0F,
+                          status);
+  }
+}
+
+LandedExit RunMissionBoardDialog(SdlPlatform &platform,
+                                 GameState &state,
+                                 std::int16_t stellar_id) {
+  (void)stellar_id;
+  const auto contains = [](const SDL_FRect &rect, SDL_FPoint point) {
+    return point.x >= rect.x && point.x < rect.x + rect.w &&
+           point.y >= rect.y && point.y < rect.y + rect.h;
+  };
+  auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
+  auto frame = LoadPictTexture(platform, 0x2139);
+  ServicesButtonArt button_art;
+  (void)button_art.Initialize(platform);
+  NovaFontCache font_cache;
+  const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
+  const MissionBoardLayout layout = LayoutMissionBoard();
+  MissionListEvaluation missions = Mission_EvaluateMissionLists(state);
+  std::size_t selected = 0;
+  std::string status;
+  NovaLog::Info("mission BBS opened at stellar {}: {} available rows (first id {})",
+                static_cast<int>(stellar_id),
+                missions.page_zero.size(),
+                missions.page_zero.empty()
+                    ? -1
+                    : static_cast<int>(missions.page_zero.front()));
+
+  while (!platform.quit_requested()) {
+    DrawSubWindowDialog(platform,
+                        font_cache,
+                        button_art,
+                        backdrop ? backdrop->get() : nullptr,
+                        frame ? frame->get() : nullptr,
+                        LandedService::kMissionBoard,
+                        panel);
+    DrawMissionBoardContents(platform,
+                             font_cache,
+                             state,
+                             layout,
+                             missions,
+                             selected,
+                             status.empty()
+                                 ? (missions.page_zero.empty()
+                                        ? "No missions are currently available"
+                                        : "J/K select   A or Enter accept")
+                                 : status);
+    SDL_RenderPresent(platform.renderer());
+
+    auto accept = [&]() {
+      if (missions.page_zero.empty() || selected >= missions.page_zero.size()) {
+        return;
+      }
+      const auto mission_id = missions.page_zero[selected];
+      if (Mission_ActivateAtSlot(state, mission_id)) {
+        status = "Mission accepted";
+        missions = Mission_EvaluateMissionLists(state);
+        if (selected >= missions.page_zero.size() && !missions.page_zero.empty()) {
+          selected = missions.page_zero.size() - 1;
+        }
+      } else {
+        status = "Mission could not be accepted";
+      }
+    };
+
+    for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
+      if (input->key == TextKey::escape) {
+        return LandedExit::kServiceComplete;
+      }
+      if (input->key == TextKey::enter) {
+        accept();
+        continue;
+      }
+      if (input->key == TextKey::primary) {
+        const SDL_FPoint point = platform.mouse_position();
+        bool handled = false;
+        for (std::size_t row = 0; row < std::size(layout.rows); ++row) {
+          if (contains(layout.rows[row], point) &&
+              row < missions.page_zero.size()) {
+            selected = row;
+            handled = true;
+            break;
+          }
+        }
+        if (!handled && contains(layout.accept, point)) {
+          accept();
+        } else if (!handled && contains(layout.leave, point)) {
+          return LandedExit::kServiceComplete;
+        }
+        continue;
+      }
+      if (input->key != TextKey::character) {
+        continue;
+      }
+      const char key = static_cast<char>(
+          std::tolower(static_cast<unsigned char>(input->character)));
+      if (key == 'l' || key == 'q') {
+        return LandedExit::kServiceComplete;
+      }
+      if (key == 'j' && !missions.page_zero.empty()) {
+        selected = (selected + 1) % missions.page_zero.size();
+      } else if (key == 'k' && !missions.page_zero.empty()) {
+        selected = selected == 0 ? missions.page_zero.size() - 1 : selected - 1;
+      } else if (key == 'a') {
+        accept();
+      }
+    }
+    SDL_Delay(16);
+  }
+  return LandedExit::kQuit;
 }
 
 [[nodiscard]] bool Contains(const SDL_FRect &rect, SDL_FPoint point) {
@@ -805,6 +1027,9 @@ LandedExit NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                                          GameState &state,
                                          LandedService service,
                                          std::int16_t stellar_id) {
+  if (service == LandedService::kMissionBoard) {
+    return RunMissionBoardDialog(platform, state, stellar_id);
+  }
   if (service == LandedService::kOutfit ||
       service == LandedService::kShipyard) {
     return RunStoreDialog(platform, state, service, stellar_id);

@@ -22,6 +22,10 @@ void Mission_ResolveMissionStellarLocators(GameState &state);
 [[nodiscard]] MissionListEvaluation Mission_EvaluateMissionLists(
     GameState &state);
 
+// Mission IDs in this API are zero-based definition indices, matching the
+// original mission lists and MisnActive.mission_template_id. Scenario resource
+// IDs are translated at the ScenarioData boundary.
+//
 // Clean-room counterparts of the accepted-mission portions of
 // Mission_PopulateMissionSlotFromDef (0x0043f8c0) and
 // Mission_ActivateMissionAtSlot (0x0043f100). These functions intentionally

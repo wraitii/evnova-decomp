@@ -32,8 +32,44 @@ The mission-list pipeline is understood in Ghidra but has no C++ equivalent:
 
 This layer determines which missions appear, sorts them, checks availability expressions, resolves destinations, and accepts a mission into one of 16 active slots.
 
-The Mission BBS UI is currently a mocked service screen in `src/game/landed_window.cpp`. The actual dialog entrypoints remain unimplemented:
+The Mission BBS UI is currently a mocked service screen in
+`src/game/landed_window.cpp`. Ghidra distinguishes this from the active-mission
+computer and from the galaxy map:
 
+- `0x0043C470` `NovaUi_RunTravelDestinationMainWindow` is the available-mission
+  BBS. It opens DLOG `0x3EE`, loads PICT `0x2139`, rebuilds the available mission
+  rows, shows the selected mission description (`mission_id + 4000`), and calls
+  `Mission_ActivateMissionAtSlot` when the player accepts a row.
+- `0x004612C0` `NovaUi_DrawCargoMissionStatusPanel` is the in-flight summary
+  of cargo and mission state, not the BBS.
+- `0x00446150` `NovaUi_RunMissionComputerWindow` reviews already-accepted
+  missions. It supports destination context, starmap access, and aborting
+  eligible active missions.
+- `0x0047C8E0` `NovaUi_RunTravelDestinationServicesWindow` is the Bar/services
+  modal, handling news, gambling, and escort-related actions; it is not the
+  Mission BBS.
+
+In our clean-room terminology, “destination main window” means the landed
+current-pilot/travel interaction context associated with the player’s current
+profile and selected stellar. It is distinct from the galaxy map window and
+should not be used as a name for the map itself. The BBS implementation target
+is therefore:
+
+```text
+landed Mission BBS button
+  -> available-mission list
+  -> select mission and inspect description
+  -> Mission_ActivateAtSlot
+  -> return to the landed window
+```
+
+The existing `0x2139` frame in `src/game/docked_dialog.cpp` is the correct BBS
+artwork, but its content should become this available-mission list rather than
+the generic placeholder.
+
+The actual dialog entrypoints remain unimplemented:
+
+- `0x0043C470` available Mission BBS / landed current-pilot window
 - `0x00440C90` mission-computer polling
 - `0x00446150` mission-computer window
 
@@ -96,7 +132,9 @@ This covers destroy, disable, board, escort, rescue, observe, chase-off, and rel
 1. Decode mission resources and formalize mission-related types.
 2. Add mission globals/state for active missions, runtime flags, mission-ship definitions, system cues, and timers.
 3. Implement locator resolution and availability/list evaluation.
-4. Implement mission-board display and accept/decline flow.
+4. Implement Mission BBS display and accept/decline flow in the landed
+   current-pilot/travel context, keeping it separate from the galaxy map and
+   the active-mission computer.
 5. Implement active-mission population, timers, and save/load.
 6. Implement success/failure and reaction scripts.
 7. Implement mission ship/fleet spawning.
@@ -104,3 +142,8 @@ This covers destroy, disable, board, escort, rescue, observe, chase-off, and rel
 9. Add mission markers/highlights and replace mocked Mission BBS/starmap behavior.
 
 The immediate analysis target is `0x0043BBB0` together with the `MisnDef` and `MisnActive` layouts. Representing these in clean-room state avoids spreading opaque byte-offset manipulation through every higher-level mission function.
+
+The clean-room mission APIs now follow the original runtime convention: mission
+list entries and `MisnActive.mission_template_id` are zero-based definition
+indices. The `0x80` resource-id offset is applied only when looking up an mïsn
+resource in `ScenarioData`.

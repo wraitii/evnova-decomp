@@ -89,6 +89,14 @@ struct PilotFile {
   // Junk item quantities (Ghidra g_junk_defs strided counts), block2+0x3488.
   std::array<std::int16_t, 0x80> junk_counts{};
 
+  // Mission persistence from PilotState block1. The original copies these
+  // records byte-for-byte at +0x281e and +0x295e. Keeping them in the save
+  // snapshot makes accepted missions survive a save/load cycle even while
+  // their script and text fields remain only partially understood.
+  std::array<MissionRuntimeFlags, GameState::kMaxActiveMissions>
+      active_mission_runtime_flags{};
+  std::array<ActiveMission, GameState::kMaxActiveMissions> active_missions{};
+
   // Fresh default for a brand-new pilot, mirroring
   // PilotData_InitializePlayerState's absent-block seed: 10000 credits, ship
   // class 0, current system 0, no intro configured yet. The new-game flow then

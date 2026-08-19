@@ -210,19 +210,19 @@ address,name,impl_file,reimpl_pct,comment
 0x0043B740,Ship_AimWeaponPredictive,src/game/ship_ai.cpp,100%,"NovaAi_AimWeaponPredictive: intercept lead for straight/fast-close weapons (mode -1/4/6/7/8/9); t=dist/shot_speed (mode 6 uses the two-regime rocket model with k_mode6_rocket_* constants 19.59/0.316/2.06667), intercept=target_pos+(target_vel-ship_vel)*t, returns game-bearing via the straight BearingDeg fallback for non-lead modes / absent weapon. Used by AI modes 6/7 (hull steering) and fire-time turret aim (modes 4/7/8/9) in NovaWeapon_SpawnProjectile. Ghidra constants 0x005754e0/e8/f0 typed+pre-commented."
 0x0043B8C0,Ship_AimWeaponLeadVelocity,,0%,
 0x0043BA30,Shot_AimStellarBatteryShot,,0%,
-0x0043BBB0,NovaResources_LoadMisnResourceDefs,,0%,
+0x0043BBB0,NovaResources_LoadMisnResourceDefs,src/game/scenario_data.cpp,35%,ScenarioData::LoadFromArchives decodes and retains m\x957n resources; loader-confirmed availability/travel/special-ship offsets, flags, availability text, and priority are projected, with the passenger-ferry baseline gate enabled for fresh clean-room pilots. Runtime reset/lifecycle globals and auxiliary definition projections remain TODO(decomp).
 0x0043C3E0,Misn_ResolveMissionStellarLocators,src/game/mission.cpp,35%,"Direct and -2/-3 locator families now populate the clean-room mission target cache; random travel reachability and remaining locator families are TODO(decomp)."
-0x0043C470,NovaUi_RunTravelDestinationMainWindow,,0%,
+0x0043C470,NovaUi_RunTravelDestinationMainWindow,src/game/docked_dialog.cpp,35%,"Basic landed Mission BBS: evaluates available missions, displays mission rows from the 0x2139 subwindow, supports selection, and accepts through Mission_ActivateAtSlot. Mission descriptions/resources, native list widgets, cargo/mass validation, return missions, and full interaction eligibility remain TODO(decomp)."
 0x0043CC20,Stellar_RebuildTravelDestinationList,,0%,
-0x0043CF00,Mission_EvaluateMissionLists,src/game/mission.cpp,35%,"Availability expressions, absent/active filtering, target resolution, and priority sorting are implemented for the clean-room mission list; native lane assignment and interaction eligibility remain TODO(decomp)."
+0x0043CF00,Mission_EvaluateMissionLists,src/game/mission.cpp,40%,"Availability expressions, zero-based mission filtering, target resolution, and priority sorting are implemented for the clean-room mission list; native lane assignment and interaction eligibility remain TODO(decomp)."
 0x0043D240,Mission_ResolveMissionStellarTargets,src/game/mission.cpp,45%,"Fail/success direct and random locator results resolve to stellar/system ids and special-ship system/count cache fields; visible-system remapping and full locator families remain TODO(decomp)."
 0x0043D490,Mission_ResolveMissionSpecialShipSystem,,0%,
 0x0043D4C0,Mission_ResolveMissionSpecialShipCount,,0%,
 0x0043D510,Mission_SelectMissionStellarByLocator,,0%,
 0x0043E6F0,Mission_SelectMissionSystemByLocator,,0%,
 0x0043F080,Mission_ComputeReactionScheduleAfterSteps,,0%,
-0x0043F100,Mission_ActivateMissionAtSlot,src/game/mission.cpp,20%,"Clean-room free-slot selection, active-mission initialization, and accept-time flag capture are implemented. Capacity/cargo validation, reaction scripts, UI refresh, destination overlay, and automatic resolve branches remain TODO(decomp)."
-0x0043F8C0,Mission_PopulateMissionSlotFromDef,src/game/mission.cpp,35%,"Clean-room transfer of Ghidra-confirmed target, spawn, reputation, text-id, and mission-fleet fields into ActiveMission, retaining the raw m\\x957n payload. Locator resolution, string expansion, randomized STR# entries, and script payloads remain TODO(decomp)."
+0x0043F100,Mission_ActivateMissionAtSlot,src/game/mission.cpp,25%,"Clean-room zero-based mission selection, free-slot initialization, active-mission population, and accept-time flag capture are implemented. Capacity/cargo validation, reaction scripts, UI refresh, destination overlay, and automatic resolve branches remain TODO(decomp)."
+0x0043F8C0,Mission_PopulateMissionSlotFromDef,src/game/mission.cpp,45%,"Clean-room transfer of Ghidra-confirmed target, spawn, zero-based dude/government indices, current-system locator, special-ship type selection, and rearm-timer fields into ActiveMission, retaining the raw m\\x957n payload. Locator reachability, string expansion, randomized STR# entries, and script payloads remain TODO(decomp)."
 0x00440370,Mission_TryConsumeMissionInteractionResources,,0%,
 0x00440410,Mission_ResolveMissionSuccess,,0%,
 0x00440750,Government_ApplyReputationCreditDelta,,0%,
@@ -1029,11 +1029,11 @@ address,name,impl_file,reimpl_pct,comment
 0x004C7820,FUN_004c7820,,0%,
 0x004C7D40,FUN_004c7d40,,0%,
 0x004C7DB0,PilotFile_SaveGame,src/game/pilot_file.cpp,30%,PilotFile_SaveGame: entry -> PilotFileSaveGame(path build from pilot name + serialized tracked subset + write). License-seed check, last-pilot marker file (0x004c7d40) and untracked-block fills not reconstructed. TODO(decomp): autosave cadence in Ship_HandlePlayerShipCore not isolated.
-0x004C7DD0,PilotFile_SaveGameCore,src/game/pilot_file.cpp,30%,PilotFile_SaveGameCore: PilotFileSerialize covers the tracked block1/block2 offsets (cargo, fuel, outfits, weapon banks, credits, junk, nickname, seen-intro) + framing; missions/story/FleetState tables and dates left zero-filled. License-seed ship-class zeroing not reconstructed.
+0x004C7DD0,PilotFile_SaveGameCore,src/game/pilot_file.cpp,45%,PilotFile_SaveGameCore: PilotFileSerialize covers the tracked block1/block2 offsets (cargo, fuel, outfits, weapon banks, credits, junk, nickname, seen-intro) + framing, and now round-trips all 16 MisnRuntimeFlags records plus confirmed MisnActive fields and opaque 0x8e6-byte payloads. Story/FleetState tables and dates remain untracked; license-seed ship-class zeroing is not reconstructed.
 0x004C9E90,Menu_OpenPilotFileDialog,,0%,
 0x004CA120,PilotData_AutoresumeLastPilot,,0%,PilotData_AutoresumeLastPilot (startup auto-resume via last-pilot marker file string 0x82/4) not reconstructed; marker file name unresolved
 0x004CA2C0,PilotDebug_WritePilotLog,,0%,debug-only pilotlog.txt dump (licensed runtime only); not reconstructed
-0x004CB260,PilotFile_LoadSave,src/game/pilot_file.cpp,35%,PilotFile_LoadSave: PilotFileDeserialize + file I/O + name-from-path + jump-dest system resolution for the tracked subset. Shield recompute, def-existence repairs, discovery/reputation/missions/FleetState restores not reconstructed.
+0x004CB260,PilotFile_LoadSave,src/game/pilot_file.cpp,50%,PilotFile_LoadSave: PilotFileDeserialize + file I/O + name-from-path + jump-dest system resolution for the tracked subset, including 16 mission runtime flags and active mission records/payloads. Shield recompute, def-existence repairs, discovery/reputation, mission script execution, and remaining FleetState restores are not reconstructed.
 0x004CD030,PilotFile_ProbeExists,src/game/pilot_file.cpp,90%,PilotFile_ProbeExists: reimplemented as filesystem is_regular_file probe (original opens the file); used by save tests
 0x004CD040,PilotFile_Delete,src/game/pilot_file.cpp,90%,PilotFile_Delete: probe-guarded remove, same guard semantics as original
 0x004CD0B0,FUN_004cd0b0,,0%,

@@ -70,16 +70,33 @@ namespace {
   const auto copy_size = std::min(bytes.size(), mission.raw_payload.size());
   std::copy_n(bytes.begin(), copy_size, mission.raw_payload.begin());
 
+  // These leading fields are the resource values copied into MisnDef by
+  // NovaResources_LoadMisnResourceDefs (0x0043bbb0). The old decoder treated
+  // the return id and fail/success locators as if they started two bytes
+  // later, which shifted the mission target-resolution inputs.
   mission.link_system_filter = ReadBeI16(bytes, 0x00);
+  // Ghidra NovaResources_LoadMisnResourceDefs (0x0043bbb0) copies these
+  // fields from the loader's native offsets. The first six are the Bible's
+  // availability/travel fields, so the special-ship fields are not contiguous
+  // in the way the old provisional decoder assumed.
   mission.return_stellar_id = ReadBeI16(bytes, 0x04);
   mission.special_ship_goal = ReadBeI16(bytes, 0x06);
   mission.special_ship_behavior = ReadBeI16(bytes, 0x08);
   mission.special_ship_start = ReadBeI16(bytes, 0x0a);
+  mission.special_ship_count = ReadBeI16(bytes, 0x12);
+  mission.special_ship_system = ReadBeI16(bytes, 0x10);
+  mission.on_start_condition = ReadBeI16(bytes, 0x5a);
   mission.on_fail_condition = ReadBeI16(bytes, 0x0c);
   mission.on_success_condition = ReadBeI16(bytes, 0x0e);
-  mission.special_ship_system = ReadBeI16(bytes, 0x10);
-  mission.special_ship_count = ReadBeI16(bytes, 0x12);
-  mission.special_ship_dude = ReadBeI16(bytes, 0x20);
+
+  // Mission_PopulateMissionSlotFromDef (0x0043f8c0) reads the mission-ship
+  // dude/system group directly from +0x20..+0x2c. The separate +0x52 dude
+  // value belongs to the loader's auxiliary definition projection and is not
+  // the active mission-ship dude used by the population path.
+  // The accepted-mission population path reads the active ship dude from
+  // resource +0x24. The loader also projects a separate validation copy from
+  // +0x52, which is not the field used by Mission_PopulateMissionSlotFromDef.
+  mission.special_ship_dude = ReadBeI16(bytes, 0x24);
   mission.aux_ship_system = ReadBeI16(bytes, 0x22);
   mission.aux_ship_dude = ReadBeI16(bytes, 0x24);
   mission.cargo_type = ReadBeI16(bytes, 0x40);
@@ -88,8 +105,10 @@ namespace {
   mission.resource_delta_or_cost = ReadBeI32(bytes, 0x4a);
   mission.aux_ships_left = ReadBeI16(bytes, 0x50);
   mission.initial_ship_count = ReadBeI16(bytes, 0x52);
-  mission.flags_primary = ReadBe16(bytes, 0x54);
-  mission.flags_secondary = ReadBe16(bytes, 0x56);
+  // The active-slot population copies these two values from resource +0x50
+  // and +0x52 into MisnActive +0x55/+0x57.
+  mission.flags_primary = ReadBe16(bytes, 0x50);
+  mission.flags_secondary = ReadBe16(bytes, 0x52);
   mission.target_ship_count = ReadBeI16(bytes, 0x20);
   mission.current_system_locator = ReadBeI16(bytes, 0x22);
   mission.special_ship_name_string_id = ReadBeI16(bytes, 0x2a);
@@ -110,6 +129,15 @@ namespace {
   mission.initial_briefing_id = mission.brief_description_ids.front();
   mission.availability_expr = ReadCString(bytes, 0x5c);
   mission.list_priority = ReadBeI16(bytes, 0x7a0);
+  // NovaResources_LoadMisnResourceDefs (0x0043bbb0) canonicalizes these
+  // sentinels before the BBS eligibility pass: negative link filters mean
+  // "any source", while a negative return stellar falls back to stellar 0.
+  if (mission.link_system_filter < -1) {
+    mission.link_system_filter = -1;
+  }
+  if (mission.return_stellar_id < 0) {
+    mission.return_stellar_id = 0;
+  }
   return mission;
 }
 

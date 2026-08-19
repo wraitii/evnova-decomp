@@ -115,26 +115,26 @@ void NovaControlExpression_ExecuteSet(
 struct MissionDef {
   bool present = false;
   std::int16_t link_system_filter = -1;     // MisnDef +0x00
-  std::int16_t return_stellar_id = -1;      // +0x02
-  std::int16_t special_ship_goal = 0;       // +0x06
-  std::int16_t special_ship_behavior = 0;   // +0x08
-  std::int16_t special_ship_start = 0;      // +0x0a
-  std::int16_t special_ship_count = 0;      // +0x12
-  std::int16_t special_ship_system = -1;    // +0x10
-  std::int16_t on_fail_condition = -1;      // +0x0c
-  std::int16_t on_success_condition = -1;   // +0x0e
+  std::int16_t return_stellar_id = -1;      // resource +0x04
+  std::int16_t special_ship_goal = 0;       // resource +0x04
+  std::int16_t special_ship_behavior = 0;   // +0x06
+  std::int16_t special_ship_start = 0;      // +0x08
+  std::int16_t special_ship_count = 0;      // resource +0x12
+  std::int16_t special_ship_system = -1;    // resource +0x10
+  std::int16_t on_start_condition = -1;     // resource +0x5a
+  std::int16_t on_fail_condition = -1;      // resource +0x0c
+  std::int16_t on_success_condition = -1;   // resource +0x0e
   std::int16_t aux_ship_dude = -1;          // resource +0x24
   std::int16_t aux_ship_system = -1;        // resource +0x22
-  std::int16_t special_ship_dude = -1;      // MisnDef +0x1a
-  std::int16_t on_start_condition = -1;     // +0x0e in runtime projection
+  std::int16_t special_ship_dude = -1;      // resource +0x24; active +0x08
   std::int16_t cargo_type = -1;             // +0x40
   std::int16_t cargo_quantity = 0;          // +0x42
   std::int16_t on_resolve_repeat_count = 0; // +0x48
   std::int32_t resource_delta_or_cost = 0;  // +0x4a
   std::int16_t aux_ships_left = 0;          // +0x50
   std::int16_t initial_ship_count = 0;      // +0x52
-  std::uint16_t flags_primary = 0;          // +0x54
-  std::uint16_t flags_secondary = 0;        // +0x56
+  std::uint16_t flags_primary = 0;          // resource +0x50; active +0x55
+  std::uint16_t flags_secondary = 0;        // resource +0x52; active +0x57
   // Additional fields copied by Mission_PopulateMissionSlotFromDef
   // (0x0043f8c0). Names are intentionally descriptive but provisional where
   // the original MissionDef member remains unnamed.

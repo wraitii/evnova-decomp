@@ -174,8 +174,11 @@ There is no mid-game reload path.
   `PilotSave_ValidateBlock` gate (0x008725b0).
 - Not reconstructed: the last-pilot marker file (0x004c7d40 / 0x004ca120;
   marker name string 0x82/4 unresolved), `PilotDebug_WritePilotLog`
-  (0x004ca2c0), and the untracked .plt regions (discovery, reputations,
-  missions/FleetState, dates, story blob, disaster/cron tables).
+  (0x004ca2c0), and the remaining untracked .plt regions (discovery,
+  reputations, dates, story blob, disaster/cron tables, and mission-fleet
+  tables). The 16 mission runtime-flag records and 16 active-mission records
+  are now preserved by the clean-room serializer, including their opaque
+  script/text payload bytes.
 
 ## Quirks / open questions
 

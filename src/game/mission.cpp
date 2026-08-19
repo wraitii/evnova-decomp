@@ -1,6 +1,7 @@
 #include "mission.hpp"
 
 #include "game_state.hpp"
+#include "ship_spawn.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -61,17 +62,41 @@ constexpr std::int16_t kResourceIdBase = 0x80;
 [[nodiscard]] std::vector<std::int16_t> EvaluateMissionPage(
     const GameState &state) {
   std::vector<std::int16_t> result;
+  // Mission_CheckMissionShipInteractionEligibility (0x00441b40) performs
+  // these two definition-level gates before evaluating the location and
+  // player-state filters. Without them, placeholder/one-shot definitions
+  // leak onto the ordinary landed BBS and valid ferry entries can be mixed
+  // with the wrong list lane.
+  const auto selected_stellar = state.travel.selected_stellar_id;
   for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
     const auto &mission = state.scenario.missions[index];
-    const auto id = static_cast<std::int16_t>(index + kResourceIdBase);
-    if (mission.present && mission.is_available_runtime &&
-        !IsActiveMission(state, id)) {
+    // Mission lists use the zero-based definition index. The +0x80 offset is
+    // only a resource-manager convention and is added at ScenarioData::Mission.
+    const auto id = static_cast<std::int16_t>(index);
+    if (!mission.present || !mission.is_available_runtime ||
+        mission.special_ship_start < 1 || mission.return_stellar_id == -1 ||
+        IsActiveMission(state, id)) {
+      continue;
+    }
+    // A concrete 0x80..0x87f link is the stellar that advertises the mission.
+    // During non-landed list evaluation there is no selected stellar yet, so
+    // retain the resource-wide list used by tests and by the travel overlay.
+    if (selected_stellar >= kResourceIdBase &&
+        mission.link_system_filter >= kResourceIdBase &&
+        mission.link_system_filter != selected_stellar) {
+      continue;
+    }
+    if (mission.link_system_filter < -1 ||
+        (mission.link_system_filter >= kResourceIdBase + 0x800)) {
+      continue;
+    }
+    if (mission.present && mission.is_available_runtime) {
       result.push_back(id);
     }
   }
   std::stable_sort(result.begin(), result.end(), [&](auto lhs, auto rhs) {
-    const auto &left = state.scenario.missions[static_cast<std::size_t>(lhs - kResourceIdBase)];
-    const auto &right = state.scenario.missions[static_cast<std::size_t>(rhs - kResourceIdBase)];
+    const auto &left = state.scenario.missions[static_cast<std::size_t>(lhs)];
+    const auto &right = state.scenario.missions[static_cast<std::size_t>(rhs)];
     if (left.list_priority != right.list_priority) {
       return left.list_priority < right.list_priority;
     }
@@ -107,6 +132,53 @@ constexpr std::int16_t kResourceIdBase = 0x80;
   }
   std::uniform_int_distribution<int> roll(0, 5);
   return static_cast<std::int16_t>(roll(state.rng));
+}
+
+[[nodiscard]] std::int16_t ResolveMissionCurrentSystem(
+    const GameState &state, const MissionDef &definition,
+    const MissionTargetResolution &target) {
+  const auto locator = definition.current_system_locator;
+  if (locator == -1) {
+    return state.player.current_system_id;
+  }
+  if (locator == -3) {
+    return target.on_fail_system_id;
+  }
+  if (locator == -4) {
+    return target.on_success_system_id;
+  }
+  if (locator == -2) {
+    // Mission_SelectMissionSystemByLocator(0xfffe, ...) chooses a random
+    // eligible system. The clean-room locator cache has no reachability graph
+    // yet; the player's system is the deterministic safe fallback.
+    return state.player.current_system_id;
+  }
+  if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
+    return ResolveContainingSystem(state, static_cast<std::int16_t>(
+                                             locator - kResourceIdBase));
+  }
+  return -1;
+}
+
+[[nodiscard]] std::int16_t SelectMissionShipType(GameState &state,
+                                                  std::int16_t dude_id,
+                                                  std::uint16_t flags) {
+  if ((flags & 0x0800U) == 0 || dude_id < 0) {
+    return -1;
+  }
+  const auto *dude = state.scenario.Dude(
+      static_cast<std::int16_t>(dude_id + kResourceIdBase));
+  if (dude == nullptr || !dude->present) {
+    return -1;
+  }
+  // Mission_PopulateMissionSlotFromDef first permits available ship types,
+  // then retries with the ignore-availability selector when none remain.
+  const auto selected = NovaDude_SelectShipTypeIndex(*dude, false,
+                                                       state.rng);
+  return selected >= 0 ? static_cast<std::int16_t>(selected)
+                       : static_cast<std::int16_t>(
+                             NovaDude_SelectShipTypeIndex(*dude, true,
+                                                           state.rng));
 }
 
 } // namespace
@@ -170,14 +242,16 @@ bool Mission_PopulateActiveSlot(GameState &state, std::int16_t mission_id,
   if (active_slot >= GameState::kMaxActiveMissions) {
     return false;
   }
-  const auto definition_index = static_cast<std::int32_t>(mission_id) -
-                                kResourceIdBase;
+  // Ghidra's Mission_PopulateMissionSlotFromDef receives the zero-based
+  // mission definition index; translate only when loading the mïsn resource.
+  const auto definition_index = static_cast<std::int32_t>(mission_id);
   if (definition_index < 0 ||
       definition_index >= static_cast<std::int32_t>(
                               state.scenario.missions.size())) {
     return false;
   }
-  const auto *definition = state.scenario.Mission(mission_id);
+  const auto *definition = state.scenario.Mission(
+      static_cast<std::int16_t>(mission_id + kResourceIdBase));
   if (definition == nullptr || !definition->present) {
     return false;
   }
@@ -185,16 +259,21 @@ bool Mission_PopulateActiveSlot(GameState &state, std::int16_t mission_id,
   auto &active = state.active_missions[active_slot];
   active = {};
   const auto &target = state.mission_target_resolutions[
-      static_cast<std::size_t>(mission_id - kResourceIdBase)];
+      static_cast<std::size_t>(mission_id)];
 
   active.on_fail_stellar_id = target.on_fail_stellar_id;
   active.on_success_stellar_id = target.on_success_stellar_id;
   active.target_ship_count = definition->target_ship_count;
   active.dude_def_index = definition->special_ship_dude;
+  if (active.dude_def_index >= kResourceIdBase) {
+    active.dude_def_index =
+        static_cast<std::int16_t>(active.dude_def_index - kResourceIdBase);
+  }
   active.spawn_behavior = definition->spawn_behavior;
   active.fleet_spawn_goal = definition->fleet_spawn_goal;
   active.special_ship_spawn_mode = definition->special_ship_spawn_mode;
-  active.current_system_id = definition->current_system_locator;
+  active.current_system_id = ResolveMissionCurrentSystem(
+      state, *definition, target);
   active.special_ship_system_id = target.special_ship_system_id >= 0
                                       ? target.special_ship_system_id
                                       : ResolveSpecialShipSystem(
@@ -207,6 +286,12 @@ bool Mission_PopulateActiveSlot(GameState &state, std::int16_t mission_id,
   active.mission_link_systems = target.on_fail_system_id;
   active.mission_system_b = target.on_success_system_id;
   active.comp_govt_id = definition->competing_government_id;
+  if (active.comp_govt_id < kResourceIdBase || active.comp_govt_id > 0x17f) {
+    active.comp_govt_id = -1;
+  } else {
+    active.comp_govt_id =
+        static_cast<std::int16_t>(active.comp_govt_id - kResourceIdBase);
+  }
   active.comp_reward_delta = definition->competing_reputation_delta;
   active.flags_primary = definition->flags_primary;
   active.flags_secondary = definition->flags_secondary;
@@ -217,23 +302,34 @@ bool Mission_PopulateActiveSlot(GameState &state, std::int16_t mission_id,
   active.mission_template_id = mission_id;
   active.mission_ship_count_max = definition->mission_ship_count_max;
   active.aux_ships_dude_def_index = definition->auxiliary_ship_dude;
+  if (active.aux_ships_dude_def_index >= kResourceIdBase) {
+    active.aux_ships_dude_def_index = static_cast<std::int16_t>(
+        active.aux_ships_dude_def_index - kResourceIdBase);
+  }
   active.mission_ship_count_active = active.mission_ship_count_max;
+  active.special_ship_type_index = SelectMissionShipType(
+      state, active.dude_def_index, active.flags_primary);
   active.special_ship_name_string_id = definition->special_ship_name_string_id;
   active.random_text_string_id = definition->random_text_string_id;
   active.brief_description_ids = definition->brief_description_ids;
   active.brief_description_id = definition->initial_briefing_id;
-  active.spawn_rearm_timer = definition->special_ship_spawn_mode > 0
-                                 ? 100
-                                 : -1;
+  if (definition->special_ship_spawn_mode < 1) {
+    active.spawn_rearm_timer = -1;
+  } else if (definition->fleet_spawn_goal == 1 &&
+             definition->spawn_behavior == 3) {
+    active.spawn_rearm_timer = 30;
+  } else {
+    std::uniform_int_distribution<int> roll(0, 99);
+    active.spawn_rearm_timer = static_cast<std::int16_t>(100 + roll(state.rng));
+  }
   std::copy(definition->raw_payload.begin(), definition->raw_payload.end(),
             active.raw_payload.begin());
   return true;
 }
 
 bool Mission_ActivateAtSlot(GameState &state, std::int16_t mission_id) {
-  if (mission_id < kResourceIdBase ||
-      mission_id >= kResourceIdBase +
-                         static_cast<std::int16_t>(state.scenario.missions.size())) {
+  if (mission_id < 0 ||
+      mission_id >= static_cast<std::int16_t>(state.scenario.missions.size())) {
     return false;
   }
   std::size_t free_slot = GameState::kMaxActiveMissions;

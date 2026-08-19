@@ -410,6 +410,13 @@ struct PilotControlState {
   bool registered = true;
   bool male = true;
 
+  // Fresh pilots begin with the ordinary passenger-ferry service enabled.
+  // Shipped ferry missions use (P0 & b311) & !b312; b312 is a later
+  // progression/lockout bit. This is provisional until the full pilot-control
+  // block is restored from save data, but keeps the baseline mission board
+  // usable in the clean-room runtime.
+  PilotControlState() { bits.set(311); }
+
   [[nodiscard]] bool ControlBit(std::uint32_t bit) const {
     return bit < kControlBitCount && bits.test(bit);
   }
