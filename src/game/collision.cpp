@@ -4,6 +4,7 @@
 #include "impact_effects.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
+#include "targeting.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -284,8 +285,30 @@ void ResolveShipHit(GameState &state,
   // lethal NPC hit cannot leave its hull silently on screen.
   if (!was_destroyed && IsDestroyed(target) &&
       !target.destruction_visual_triggered) {
+    const ShipClass *ship_class = state.scenario.Ship(
+        static_cast<std::int16_t>(target.ship_class_id + 0x80));
     target.destruction_visual_triggered = true;
-    NovaEffects_SpawnShipDestructionBurst(state, target.pos_x, target.pos_y);
+    const std::int16_t death_delay = ship_class == nullptr
+                                         ? 0
+                                         : std::max<std::int16_t>(
+                                               0, ship_class->death_delay_frames);
+    // Unit/test states without loaded ship tables retain the old armor-only
+    // sentinel; real scenario ships use the Bible DeathDelay timer.
+    if (ship_class != nullptr && death_delay > 0) {
+      target.death_timer_active = static_cast<float>(death_delay);
+    }
+    target.destruction_visual_timer_ms =
+        static_cast<float>(death_delay) * (1000.0F / 30.0F);
+    NovaTargeting_ClearDestroyedShipReferences(state, target_slot);
+    NovaEffects_SpawnShipDestructionBurst(
+        state, target,
+        ship_class == nullptr ? 0
+                              : ship_class->destruction_effect_while_breaking);
+    if (target.destruction_visual_timer_ms <= 0.0F && ship_class != nullptr) {
+      NovaEffects_SpawnShipDestructionFinale(
+          state, target, ship_class->destruction_effect_final);
+      target.destruction_finale_triggered = true;
+    }
   }
 
   if (allow_aggro_updates && target_slot > 0) {

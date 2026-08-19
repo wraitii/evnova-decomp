@@ -391,6 +391,7 @@ void EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
   ship.npc_weapon_bank_ammo.fill(0);
   ship.npc_weapon_bank_secondary.fill(0);
   ship.npc_weapon_bank_cooldown.fill(0.0F);
+  ship.npc_weapon_bank_burst_counter.fill(0);
   const ShipClass *cls = ShipClassFor(state, ship);
   if (cls != nullptr) {
     for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
@@ -401,6 +402,19 @@ void EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
       ship.npc_weapon_bank_ammo[bank] = std::max<std::int16_t>(stock.count, 0);
       // -1 is the original unlimited-secondary sentinel.
       ship.npc_weapon_bank_secondary[bank] = stock.ammo_load;
+    }
+    // Weapon_InitShipWeaponBursts (0x00413810): a configured burst weapon
+    // (burst_cycle AND burst_reset_cooldown) starts with a zeroed burst
+    // counter and its cooldown preloaded to the reset cooldown.
+    for (std::size_t bank = 0; bank < 0x100; ++bank) {
+      const Weapon *w = state.scenario.Weapon(
+          static_cast<std::int16_t>(bank + 0x80));
+      if (w != nullptr && ship.npc_weapon_bank_ammo[bank] > 0 &&
+          w->burst_cycle_ticks > 0 && w->burst_reset_cooldown > 0) {
+        ship.npc_weapon_bank_burst_counter[bank] = 0;
+        ship.npc_weapon_bank_cooldown[bank] =
+            static_cast<float>(w->burst_reset_cooldown);
+      }
     }
   }
   ship.npc_weapon_banks_ship_class = ship.ship_class_id;
@@ -452,6 +466,64 @@ WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank) {
 }
 
 } // namespace
+
+// Mode-6 freeflight-rocket lead constants (Ghidra k_mode6_rocket_* doubles,
+// 0x005754e0/e8/f0, pre-commented). The rocket is still accelerating to speed,
+// so its flight time is computed in two regimes rather than the naive
+// dist/speed: near target (dist <= speed*19.59) it is ~3.16x the naive lead
+// (0.316 speed factor); far target it is (dist - speed*19.59)/speed plus a
+// small 2.06667 spool bonus.
+constexpr float kMode6LeadThresholdFactor = 19.59F;
+constexpr float kMode6LeadNearSpeedFactor = 0.316F;
+constexpr float kMode6LeadFarTimeBonus = 2.06667F;
+
+// Ghidra 0x0043b740 Ship_AimWeaponPredictive. See ship_ai.hpp for the
+// algorithm. Returns the leading intercept bearing when the given weapon is a
+// lead-capable mode, else the straight bearing to the target.
+std::int16_t NovaAi_AimWeaponPredictive(const GameState &state,
+                                        const Ship &ship,
+                                        const Ship &target,
+                                        std::int16_t weapon_id) {
+  // Straight bearing fallback (Math_BearingFromPointToPoint(ship, target)).
+  std::int16_t bearing = static_cast<std::int16_t>(
+      BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
+  if (weapon_id < 0 || weapon_id >= 0x100) {
+    return bearing;
+  }
+  const Weapon *w = state.scenario.Weapon(
+      static_cast<std::int16_t>(weapon_id + 0x80));
+  if (w == nullptr) {
+    return bearing;
+  }
+  const int mode = w->weapon_mode_code;
+  const bool lead_capable =
+      mode == -1 || mode == 4 || (mode >= 6 && mode <= 9);
+  if (!lead_capable) {
+    return bearing;
+  }
+  const float dx = target.pos_x - ship.pos_x;
+  const float dy = target.pos_y - ship.pos_y;
+  const float dist = std::sqrt(dx * dx + dy * dy);
+  const float shot_speed = w->projectile_speed / 100.0F;
+  if (shot_speed <= 0.0F) {
+    return bearing;
+  }
+  float t; // flight time (ticks) to the intercept
+  if (mode == 6) {
+    const float threshold = shot_speed * kMode6LeadThresholdFactor;
+    if (threshold < dist) {
+      t = (dist - threshold) / shot_speed + kMode6LeadFarTimeBonus;
+    } else {
+      t = dist / (shot_speed * kMode6LeadNearSpeedFactor);
+    }
+  } else {
+    t = dist / shot_speed;
+  }
+  const float intercept_x = target.pos_x + (target.vel_x - ship.vel_x) * t;
+  const float intercept_y = target.pos_y + (target.vel_y - ship.vel_y) * t;
+  return static_cast<std::int16_t>(
+      BearingDeg(ship.pos_x, ship.pos_y, intercept_x, intercept_y));
+}
 
 // Ghidra 0x00410f20 Ship_CanShipInterceptCurrentPrimaryTarget. The original's
 // final comparison is deliberately a strict base-speed comparison; the
@@ -2077,7 +2149,14 @@ void NovaAi_ApplyControls(GameState &state,
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
     const float target_bearing_deg =
         BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-    ship.ai_desired_heading_deg = static_cast<std::int16_t>(target_bearing_deg);
+    // Ship_AimWeaponPredictive: steer at the predicted intercept of the live
+    // weapon bank (the original leads with the active bank or the +0xc8da
+    // candidate; a -1 active bank has no weapon context, so the helper falls
+    // back to the straight bearing below). Non-lead weapon modes return the
+    // straight bearing too, matching the original mode-6 branch.
+    ship.ai_desired_heading_deg =
+        NovaAi_AimWeaponPredictive(state, ship, target,
+                                   ship.active_weapon_bank_slot);
     // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
     if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
       ship.ai_forward_thrust_cmd = eff_thrust;
@@ -2247,7 +2326,13 @@ void NovaAi_ApplyControls(GameState &state,
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
     const float target_bearing_deg =
         BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-    ship.ai_desired_heading_deg = static_cast<std::int16_t>(target_bearing_deg);
+    // Mode-7 combat strafe: the original aims at the predicted intercept
+    // (Ship_AimWeaponPredictive with the active bank weapon) whenever a
+    // weapon candidate is present. Mirror mode 6 using the live bank; the
+    // helper returns the straight bearing when no bank is armed.
+    ship.ai_desired_heading_deg =
+        NovaAi_AimWeaponPredictive(state, ship, target,
+                                   ship.active_weapon_bank_slot);
     if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
       // Weapon_SelectDirectFireWeaponBankForPrimaryTarget +
       // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).

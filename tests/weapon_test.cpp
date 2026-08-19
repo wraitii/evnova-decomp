@@ -95,7 +95,7 @@ TEST_CASE("starter light blaster becomes owned and survives a rebuild",
   // transaction.
   NovaWeapon_RebuildBanksFromOwnedOutfits(state);
   CHECK(state.weapon_bank_ammo[0] == 1);
-  CHECK(NovaWeapon_CanFireBank(state, 0));
+  CHECK(NovaWeapon_CanFireWeaponBank(state, state.player, 0));
 }
 
 TEST_CASE("primary fire spawns a light blaster shot then cools down",
@@ -356,7 +356,7 @@ TEST_CASE("fresh-pilot record round-trip keeps the light blaster fireable",
 
   // The seeded Light Blaster must survive the record round-trip.
   CHECK(state.weapon_bank_ammo[0] == 1);
-  CHECK(NovaWeapon_CanFireBank(state, 0));
+  CHECK(NovaWeapon_CanFireWeaponBank(state, state.player, 0));
   NovaWeapon_FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
 }

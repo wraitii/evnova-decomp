@@ -73,6 +73,10 @@ public:
   // span. Falls back to nothing (no spin art) when the cicn set is unavailable.
   void DrawTravelTargetReticle(SdlPlatform &platform, const GameState &state);
 
+  // Ghidra Frame_UpdateFadingEffectSprites (0x0043b170): directional debris
+  // fragments emitted by Ship_SpawnShipDestructionDebrisPuff.
+  void DrawFadingEffects(SdlPlatform &platform, const GameState &state);
+
   // Clean-room click-to-target ship picking: returns the slot of the active
   // NPC ship in the player's system whose sprite bounding span contains the
   // render-coordinate point (rx, ry), nearest first, or -1. Mirrors the

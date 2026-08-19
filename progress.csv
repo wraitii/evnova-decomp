@@ -12,7 +12,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00405120,Ship_ShouldShipPrioritizePlayerThreat,,0%,
 0x004053C0,Mission_UpdateShipMissionStellarAttackDirective,,0%,
 0x00405590,Ship_UpdateShipAiState,src/game/ship_ai.cpp,65%,"NovaAi_UpdateShipState: travel/hold/pursuit/escort/drift/disengage/defunct branches plus attack states 3/4, assist state 0xc, and boarding state 0xd transitions. Cloak-aware target engagement direction, patience braking, and escort/assist engagement downgrades match Ghidra; weapon firing, formation offsets, capture resolution, and HUD/mission flavor remain deferred."
-0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,75%,"NovaAi_ApplyControls: travel modes 1/2/3 faithful; combat modes 5/6/7/8/9/0xb/0xc/0xe/0xf/0x10/0x11/0x12/0x13/0x14/0x16 now port the ground-truth movement (alignment gates, break-off/evasive-boost transitions, relative-velocity brake ladders, velocity-match copy, formation/scripted creeps, escort follow), with mode-5 steering-away quirk (Math_BearingFromPointToPoint target->ship arg order) confirmed from disassembly. Mode 4/0xd hold timers ramped; mode 10 stationary reverse (-5.75/-3.67) fixed. Weapon-bank selects, predictive aim, formation offsets, carrier-bay launches, freeflight anchors and the +0xBD brake-to-boost producer remain deferred (Phases 5/7/8, TODO(decomp))."
+0x00408150,Ship_ApplyShipAiControls,src/game/ship_ai.cpp,80%,"NovaAi_ApplyControls: travel modes 1/2/3 faithful; combat modes 5/6/7/8/9/0xb/0xc/0xe/0xf/0x10/0x11/0x12/0x13/0x14/0x16 port the ground-truth movement (alignment gates, break-off/evasive-boost transitions, relative-velocity brake ladders, velocity-match copy, formation/scripted creeps, escort follow), with mode-5 steering-away quirk (Math_BearingFromPointToPoint target->ship arg order) confirmed from disassembly. Modes 6/7 now steer at a PREDICTIVE lead (Ship_AimWeaponPredictive via NovaAi_AimWeaponPredictive, live active bank; helper falls back to the straight bearing for non-lead modes/absent bank). Mode 4/0xd hold timers ramped; mode 10 stationary reverse fixed. Weapon-bank selects, formation offsets, carrier-bay launches, freeflight anchors, the +0xBD brake-to-boost producer and the +0xc8da candidate-weapon aim path remain deferred (Phases 5/7/8, TODO(decomp))."
 0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,src/game/ship_ai.cpp,40%,"NovaAi_SelectRandomAdjacentTravelStellar: availability/travel-flag/govt-hostility candidates, uniform random pick; weighted scan-mask pools deferred"
 0x0040CC10,Stellar_FindNearestAdjacentTravelStellar,,0%,
 0x0040CD80,Stellar_IsStellarAdjacentToCurrentSystem,src/game/targeting.cpp,100%,"NovaTargeting_IsStellarAdjacentToSystem: matches a stellar id against a system's nav list, preserving the empty-nav-list == adjacent quirk"
@@ -82,7 +82,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00413B60,Ship_SetEscortLaunchOffsetVelocity,,0%,
 0x00414390,Ship_MoveShipTowardFormationOffset,,0%,
 0x00414530,Ship_IsShipInAiState0x11,,0%,
-0x00414550,Weapon_FireShipWeapons,src/game/weapon.cpp,35%,"NPC projectile dispatcher slice: local bank readiness, target/spread shot spawn for modes -1/1/4/6/7/8, finite secondary consumption plus unlimited -1 sentinel, cooldown, fire-latch handoff, and the fire-sound latch (spatial, sourced at the ship). Beam/turret/carrier-bay, burst, energy, recoil, and the flags-0x10 no-stack audio gate remain deferred."
+0x00414550,Weapon_FireShipWeapons,src/game/weapon.cpp,60%,"NovaWeapon_FireNpcWeaponBank: burst volleys (Weapon_GetWeaponBurstAttempts 0x0046f2c0 + per-bank burst-cycle counter/reset-cooldown, Weapon_GetWeaponFireIntervalTicks 0x0046f270, init in EnsureNpcWeaponBanks mirroring Weapon_InitShipWeaponBursts 0x00413810); per-burst readiness gate and ammo consumption; turret arc/quadrant gating (Weapon_IsWeaponArcAllowed 0x0046b360 fixed sectors for modes 3/4 within range_scalar+32, front/rear 46-deg quadrant gate for modes 7/8); fire-time predictive lead for turret modes 4/7/8 (Shot_SpawnShotFromWeapon). Straight modes -1/6 fire along the hull heading (AI now leads it). Cooldown = shots_fired*speed_scalar/mount (or reload for burst) + burst_reset on cycle wrap. Deferred: player-combat-rating cooldown ladder, carrier-bay (mode 99), PD (mode 9) target selection, recoil, energy/fuel paths (TODO(decomp))."
 0x004152E0,Ship_UpdateShipDistressResponseMode,,0%,
 0x004156A0,Ship_ReacquireAiTargetLeader,,0%,
 0x004159A0,Ship_IsShipInAiControlMode0x17,,0%,
@@ -153,7 +153,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00427A90,Shot_QueueBeamHit,src/game/weapon.cpp,30%,"First queue slice: 64 bounded beam records, owner/target/weapon/lifetime state, and direct NPC beam enqueue. Turret quadrant selection, endpoint rendering, forced-targeting variants, and full beam animation remain deferred."
 0x00427DF0,System_RefreshSystemCueFlags,,0%,
 0x00427F40,Mission_ClearSystemCuesForShip,,0%,
-0x00428090,Shot_SpawnShipDestructionDebrisPuff,src/game/impact_effects.cpp,15%,"First destruction-presentation slice: lethal ship transitions queue one stock animated burst through NovaEffects_SpawnShipDestructionBurst; destroyed NPC hulls are suppressed by the flight renderer. Exact original class-specific FadingEffectSpriteState debris sprite, randomized velocity/lifetime, and spatial explosion audio remain TODO(decomp)."
+0x00428090,Shot_SpawnShipDestructionDebrisPuff,src/game/impact_effects.cpp,70%,"NovaEffects_SpawnShipDestructionBurst starts the destruction explosion cadence, reconstructs the 150-249 original-tick directional debris pool with inherited ship velocity, and queues spatial impact audio; special class 0x2ff is absent from shipped resources and the death-timer producer remains partial."
 0x00428260,License_ValidateAgainstKeyTable,,0%,
 0x00428340,Ship_UpdateVisualState,,0%,"Ghidra documents cloak_fade_progress integration: signed latch * (1.5, or 0.75 with ShipClass Flags2 0x0001) * frame time, clamp 0..32, passive decay 1.0 when latch is zero, and scanner/damage cache refresh. It also names the visual fields at +0xC8D6/+0xC8E0/+0xC8E4/+0xC8E8/+0xC8EC/+0xC8F4/+0xC8F6; clean-room visual implementation remains pending."
 0x0042C1B0,Frame_UpdateFreeflightObjectSprites,,0%,
@@ -176,12 +176,12 @@ address,name,impl_file,reimpl_pct,comment
 0x00431530,Shot_UpdateShotGuidance,,0%,
 0x00432470,System_UpdateSystemAndStellarDisplayState,src/game/targeting.cpp,35%,scope 3 marks the entered current system visible, then re-derives stellar system_id/is_available/hazard state via NovaTargeting_UpdateStellarAvailability; discovery flood and sprite-set bookkeeping not reconstructed
 0x00432EA0,Frame_MeasureFrameTiming,,0%,
-0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,42%,"validation prologue, movement/physics, NPC shield/armor recharge scaling, and ionization charge decay are ported; recharge now follows the original fire-restricted gate so disabled/lethal NPCs cannot recover; regression-covered. NPC effective stats include capability 0x400 zeroing, skill/government scaling, velocity-match, mission-ship and ionization branches. The original ionization speed clamp and AI/combat/weapon/travel/disable/mission scopes remain stubbed"
+0x00433050,Ship_HandleShip,src/game/spaceflight.cpp,48%,"Validation prologue, movement/physics, NPC shield/armor recharge scaling, ionization decay, and destroyed-NPC inertness are ported; valid lethal NPCs now stop AI movement, weapons, velocity, and engine glow after validation. NPC effective stats include capability 0x400 zeroing, skill/government scaling, velocity-match, mission-ship and ionization branches. The original ionization speed clamp and AI/combat/weapon/travel/disable/mission scopes remain stubbed"
 0x00435830,Shot_HandleShot,src/game/weapon.cpp,35%,"Shot movement, fractional lifetime/cadence, cooldown advancement, sprite-frame selection, and expiry impact effects are wired into the flight loop. Guidance, proximity fuse, linked shots, and sprite-container side-effects remain TODO(decomp)."
 0x00436910,Asteroid_UpdateSprites,,0%,
 0x00436FF0,NovaUi_ResolveWeaponSplashImpact,,0%,
 0x004374F0,Ship_HandleSpritePairCollision,src/game/collision.cpp,40%,"Direct projectile-vs-ship circle collision replaces the original SpriteLayer callback/pixel-mask path provisionally; owner/target eligibility and the decoded late-collision window now mirror the callback gate. Pixel-mask, freeflight-object, and sprite overlap callbacks remain TODO(decomp)."
-0x00437780,Shot_ResolveShotCollisionHit,src/game/collision.cpp,76%,"Direct and proximity projectile impacts apply damage, ionization/color, impulse, nonlethal variant handling, axis-aligned splash, and shared impact visuals/audio before consuming the shot; lethal transitions now queue one destruction burst and suppress the destroyed NPC hull. Kill chatter, mission reactions, and linked shots remain TODO(decomp)."
+0x00437780,Shot_ResolveShotCollisionHit,src/game/collision.cpp,82%,"Direct and proximity projectile impacts apply damage, ionization/color, impulse, nonlethal variant handling, axis-aligned splash, and shared impact visuals/audio before consuming the shot; lethal transitions now clear player/NPC target references, stop the destroyed NPC on the next ship tick, and queue one burst plus a fading wreck presentation. Kill chatter, mission reactions, and linked shots remain TODO(decomp)."
 0x00437E20,Shot_ResolveCollisions,src/game/collision.cpp,52%,"Projectile-vs-ship collision pass is wired at Frame_TickSystems scope 9 before Shot_HandleShot movement, with decoded late-collision gating, provisional proximity-radius selection, and shared impact effects. Asteroid/stellar/freeflight collision branches remain TODO(decomp)."
 0x004386F0,Shot_DrawBeamQueue,,0%,
 0x00438810,Shot_DrawBeamHitQueueForSurface,,0%,
@@ -201,13 +201,13 @@ address,name,impl_file,reimpl_pct,comment
 0x0043ADB0,Stellar_TickStellarGravityPull,src/game/spaceflight.cpp,10%,"player-only stellar gravity force reconstructed; NPC iteration/crash consequences remain unimplemented"
 0x0043AED0,Stellar_HandleShipStellarCrash,,0%,
 0x0043B020,Ship_SteerVelocityTowardShipHeading,,0%,
-0x0043B170,Frame_UpdateFadingEffectSprites,,0%,
+0x0043B170,Frame_UpdateFadingEffectSprites,src/game/impact_effects.cpp,65%,"NovaEffects_TickFadingEffects advances the 32-slot debris pool with inherited/randomized velocity and lifetime expiry; SDL draw uses special class 0x2ff, while exact sprite anchoring/distance bookkeeping remains partial."
 0x0043B4A0,Math_AddPolarVelocity,src/game/spaceflight.cpp,80%,"polar velocity convention (heading 0=up, clockwise, vel_x=sin, vel_y=-cos) reproduced inline in NovaPlayer_IntegrateMovement; not a distinct function yet"
 0x0043B4E0,Math_AddPolarVelocityWithClamp,src/game/spaceflight.cpp,85%,per-axis polar clamp reproduced faithfully (caps thrust per-axis at polar max projection; no magnitude governor) via NovaPlayer_AddPolarVelocityClamped; angle lookup tables approximated with sin/cos
 0x0043B670,Math_BearingFromPointToPoint,,0%,
 0x0043B6A0,Math_ClampVelocityComponents,,0%,
 0x0043B710,Math_SquaredDistance,,0%,
-0x0043B740,Ship_AimWeaponPredictive,,0%,
+0x0043B740,Ship_AimWeaponPredictive,src/game/ship_ai.cpp,100%,"NovaAi_AimWeaponPredictive: intercept lead for straight/fast-close weapons (mode -1/4/6/7/8/9); t=dist/shot_speed (mode 6 uses the two-regime rocket model with k_mode6_rocket_* constants 19.59/0.316/2.06667), intercept=target_pos+(target_vel-ship_vel)*t, returns game-bearing via the straight BearingDeg fallback for non-lead modes / absent weapon. Used by AI modes 6/7 (hull steering) and fire-time turret aim (modes 4/7/8/9) in NovaWeapon_SpawnProjectile. Ghidra constants 0x005754e0/e8/f0 typed+pre-commented."
 0x0043B8C0,Ship_AimWeaponLeadVelocity,,0%,
 0x0043BA30,Shot_AimStellarBatteryShot,,0%,
 0x0043BBB0,NovaResources_LoadMisnResourceDefs,,0%,
@@ -221,8 +221,8 @@ address,name,impl_file,reimpl_pct,comment
 0x0043D510,Mission_SelectMissionStellarByLocator,,0%,
 0x0043E6F0,Mission_SelectMissionSystemByLocator,,0%,
 0x0043F080,Mission_ComputeReactionScheduleAfterSteps,,0%,
-0x0043F100,Mission_ActivateMissionAtSlot,,0%,
-0x0043F8C0,Mission_PopulateMissionSlotFromDef,,0%,
+0x0043F100,Mission_ActivateMissionAtSlot,src/game/mission.cpp,20%,"Clean-room free-slot selection, active-mission initialization, and accept-time flag capture are implemented. Capacity/cargo validation, reaction scripts, UI refresh, destination overlay, and automatic resolve branches remain TODO(decomp)."
+0x0043F8C0,Mission_PopulateMissionSlotFromDef,src/game/mission.cpp,35%,"Clean-room transfer of Ghidra-confirmed target, spawn, reputation, text-id, and mission-fleet fields into ActiveMission, retaining the raw m\\x957n payload. Locator resolution, string expansion, randomized STR# entries, and script payloads remain TODO(decomp)."
 0x00440370,Mission_TryConsumeMissionInteractionResources,,0%,
 0x00440410,Mission_ResolveMissionSuccess,,0%,
 0x00440750,Government_ApplyReputationCreditDelta,,0%,

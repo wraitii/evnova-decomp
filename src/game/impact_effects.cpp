@@ -51,11 +51,84 @@ void NovaEffects_SpawnImpactEffect(GameState &state,
 }
 
 void NovaEffects_SpawnShipDestructionBurst(GameState &state,
-                                           float x,
-                                           float y) {
-  // Effect 0 is the neutral stock explosion row. Mods may omit its sprite
-  // resource; the normal impact renderer already treats that as a no-op.
-  NovaEffects_SpawnImpactEffect(state, x, y, 0);
+                                           const Ship &ship,
+                                           std::int16_t breaking_effect_id) {
+  const float x = ship.pos_x;
+  const float y = ship.pos_y;
+  // The original's destruction path repeatedly calls the debris-puff helper
+  // while the death presentation is active. The port has no separate
+  // death-timer producer yet, so seed the equivalent short cadence here.
+  // Keep the stock first flash in slot 0; Explode1 is the class-selected
+  // breakup animation that follows it in the original sequence.
+  NovaEffects_SpawnImpactEffect(state, x, y, 0, 0);
+  if (breaking_effect_id >= 0 && breaking_effect_id != 0) {
+    NovaEffects_SpawnImpactEffect(state, x, y, breaking_effect_id, 2);
+  }
+  for (int i = 1; i < 6; ++i) {
+    const float extent = 7.0F + static_cast<float>(i * 3);
+    const float dx = static_cast<float>(RandomRange(state, 2 * static_cast<int>(extent) + 1)) - extent;
+    const float dy = static_cast<float>(RandomRange(state, 2 * static_cast<int>(extent) + 1)) - extent;
+    NovaEffects_SpawnImpactEffect(
+        state, x + dx, y + dy, static_cast<std::int16_t>(i % 2),
+        static_cast<std::int16_t>(i * 5));
+  }
+
+  for (FadingEffectInstance &fragment : state.fading_effect_instances) {
+    if (fragment.lifetime_ticks >= 0.0F) {
+      continue;
+    }
+    fragment.pos_x = x;
+    fragment.pos_y = y;
+    fragment.vel_x = ship.vel_x;
+    fragment.vel_y = ship.vel_y;
+    fragment.lifetime_ticks =
+        static_cast<float>(150 + RandomRange(state, 100));
+    const float angle =
+        static_cast<float>(RandomRange(state, 360)) * 0.01745329252F;
+    const float speed = static_cast<float>(10 + RandomRange(state, 10));
+    fragment.vel_x += std::sin(angle) * speed;
+    fragment.vel_y += -std::cos(angle) * speed;
+    fragment.heading_radians = angle;
+    break;
+  }
+
+  const ImpactEffect *definition = state.scenario.ImpactEffectAt(0);
+  if (definition != nullptr && definition->impact_sound_slot >= 0 &&
+      definition->impact_sound_slot < 64) {
+    state.pending_impact_sounds.push_back(
+        {definition->impact_sound_slot, x, y});
+  }
+  state.pending_destruction_sounds.push_back({x, y});
+}
+
+void NovaEffects_SpawnShipDestructionFinale(GameState &state,
+                                            const Ship &ship,
+                                            std::int16_t final_effect_id) {
+  if (final_effect_id < 0) {
+    return;
+  }
+  const ShipClass *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const std::int16_t mass = ship_class != nullptr ? ship_class->mass_tons : 0;
+  NovaEffects_SpawnAreaImpact(
+      state, ship.pos_x, ship.pos_y, final_effect_id,
+      final_effect_id >= kLargeEffectBase ? mass : 0,
+      true);
+}
+
+void NovaEffects_TickFadingEffects(GameState &state, float elapsed_ticks) {
+  const float delta = std::max(0.0F, elapsed_ticks);
+  for (FadingEffectInstance &fragment : state.fading_effect_instances) {
+    if (fragment.lifetime_ticks < 0.0F) {
+      continue;
+    }
+    fragment.pos_x += fragment.vel_x * delta;
+    fragment.pos_y += fragment.vel_y * delta;
+    fragment.lifetime_ticks -= delta;
+    if (fragment.lifetime_ticks <= 0.0F) {
+      fragment.lifetime_ticks = -1.0F;
+    }
+  }
 }
 
 void NovaEffects_SpawnAreaImpact(GameState &state,
@@ -137,8 +210,8 @@ void NovaEffects_SpawnImpactEffectPackage(GameState &state,
   NovaEffects_SpawnAreaImpact(state, x, y, area_effect_id, 0, play_sound);
 }
 
-void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ms) {
-  const float delta = std::max(0.0F, elapsed_ms);
+void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
+  const float delta = std::max(0.0F, elapsed_ticks);
   for (ImpactEffectInstance &instance : state.impact_effect_instances) {
     if (instance.anim_time < 0.0F) {
       continue;

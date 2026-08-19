@@ -24,6 +24,27 @@
 
 namespace game {
 
+// Ghidra 0x0043b740 Ship_AimWeaponPredictive. Predictive weapon lead-aim:
+// returns the game-degree bearing toward the best intercept point for a
+// straight-flight / fast-close weapon (mode -1/4/6/7/8/9) against a moving
+// target. Leads the target by flight time using RELATIVE velocity
+// (target_vel - ship_vel): intercept = target_pos + (target_vel - ship_vel)*t.
+// t = dist / projectile_speed for straight guns; mode 6 (freeflight rocket)
+// uses the two-regime model (k_mode6_rocket_* constants: threshold 19.59,
+// near-speed factor 0.316, far-time bonus 2.06667) because the rocket is still
+// spooling up. Non-lead weapons (and weapon_id < 0) fall back to the straight
+// bearing to the target's current position, matching the original.
+//
+// Weapon is addressed by bank index (weapon_id + 0x80 in the scenario tables);
+// shot speed is the port's projectile_speed/100 so the lead matches the actual
+// fired shot velocity. Used by the AI control modes 6/7 (steer the hull at the
+// lead) and at fire time for turret modes 4/7/8/9.
+[[nodiscard]] std::int16_t NovaAi_AimWeaponPredictive(
+    const GameState &state,
+    const Ship &ship,
+    const Ship &target,
+    std::int16_t weapon_id);
+
 // Ghidra 0x004688e0 Ship_IsShipDestroyed. True when the death timer is active
 // (death_timer_active > 0) or armor_points <= 0.
 [[nodiscard]] bool NovaAiShip_IsDestroyed(const Ship &ship);

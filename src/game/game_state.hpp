@@ -30,6 +30,77 @@ namespace game {
 // the systems table; indexed by 0-based system resource id.
 using SystemReputation = std::vector<std::int16_t>;
 
+// Runtime flags for one accepted mission. This mirrors the 20-byte
+// MisnRuntimeFlags record used by the original's 16 active-mission slots.
+struct MissionRuntimeFlags {
+  bool is_active = false; // +0x00
+  bool initial_briefing_done = false; // +0x01
+  bool special_ship_attacking = false; // +0x02
+  bool is_failed = false; // +0x03
+  std::uint16_t flags_primary_at_accept = 0; // +0x04
+  std::int16_t deadline_year_month = 0; // +0x06
+  std::int16_t deadline_year_month_ext = 0; // +0x08
+  std::int16_t deadline_day = 0; // +0x0a
+  std::int32_t elapsed_travel_days = 0; // +0x0e
+  std::uint16_t elapsed_travel_subday = 0; // +0x12
+};
+
+// Clean-room active mission state. It intentionally names only the fields
+// confirmed by the MisnActive type layout (size 0x8e6); raw_payload keeps the
+// remaining text/script/runtime bytes available while those semantics are
+// reconstructed. One-to-one mission-slot indexing is preserved.
+struct ActiveMission {
+  std::int16_t on_fail_stellar_id = -1; // +0x00
+  std::int16_t on_success_stellar_id = -1; // +0x04
+  std::int16_t target_ship_count = 0; // +0x06
+  std::int16_t dude_def_index = -1; // +0x08
+  std::int16_t spawn_behavior = 0; // +0x0a
+  std::int16_t fleet_spawn_goal = 0; // +0x0c
+  std::int16_t special_ship_spawn_mode = 0; // +0x0e
+  std::int16_t current_system_id = -1; // +0x10
+  std::int16_t special_ship_system_id = -1; // +0x12
+  std::int16_t special_ship_count = 0; // +0x14
+  std::int16_t mission_link_systems = -1; // +0x16
+  std::int16_t mission_system_b = -1; // +0x18
+  std::int16_t mission_system_c = -1; // +0x1a
+  std::int16_t comp_govt_id = -1; // +0x1c
+  std::int16_t comp_reward_delta = 0; // +0x1e
+  std::int32_t resource_delta_or_cost = 0; // +0x22
+  std::int16_t goal_count_remaining = 0; // +0x2c
+  bool has_been_visited = false; // +0x32
+  bool is_accepted = false; // +0x33
+  std::int16_t mission_template_id = -1; // +0x4d
+  std::int16_t mission_ship_count_max = 0; // +0x61
+  std::int16_t aux_ships_dude_def_index = -1; // +0x63
+  std::int16_t mission_ship_count_active = 0; // +0x6b
+  std::uint16_t flags_primary = 0; // +0x55
+  std::uint16_t flags_secondary = 0; // +0x57
+  std::int16_t special_ship_type_index = -1; // +0x53
+  std::int16_t special_ship_name_string_id = -1; // +0x47
+  std::int16_t special_ship_name_entry = -1; // +0x49
+  std::int16_t random_text_string_id = -1; // +0x4f
+  std::int16_t random_text_entry = -1; // +0x51
+  std::int16_t spawn_rearm_timer = -1; // +0x4b
+  std::int16_t brief_description_id = -1; // +0x35
+  std::array<std::int16_t, 8> brief_description_ids{}; // +0x35..+0x43
+  std::array<std::byte, 0x8e6> raw_payload{};
+};
+
+// Results of Mission_ResolveMissionStellarTargets (0x0043d240) needed by
+// active-slot population. Locator selection is still a separate subsystem;
+// this cache allows the accepted-mission path to remain one-to-one with the
+// original without inventing locator semantics.
+struct MissionTargetResolution {
+  std::int16_t on_fail_stellar_id = -1;
+  std::int16_t on_fail_system_id = -1;
+  std::int16_t on_success_stellar_id = -1;
+  std::int16_t on_success_system_id = -1;
+  std::int16_t special_ship_system_id = -1;
+  std::int16_t special_ship_count = 0;
+  std::int32_t priority_payload = 0;
+  std::int16_t reaction_schedule = 0;
+};
+
 } // namespace game
 
 namespace game {
@@ -128,6 +199,9 @@ struct Ship {
   // (0x00428090 / 0x0043b170); the exact class-specific debris sprite is not
   // represented yet, so the shared impact animation is queued once instead.
   bool destruction_visual_triggered = false;
+  // Briefly keeps the destroyed hull as a dim wreck while its burst plays.
+  float destruction_visual_timer_ms = 0.0F;
+  bool destruction_finale_triggered = false;
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
   // timer consumer is still deferred, so the field remains provisional.
   float hit_reaction_timer = 0.0F;
@@ -152,6 +226,11 @@ struct Ship {
   std::array<std::int16_t, 0x100> npc_weapon_bank_ammo{};
   std::array<std::int16_t, 0x100> npc_weapon_bank_secondary{};
   std::array<float, 0x100> npc_weapon_bank_cooldown{};
+  // Per-bank burst-cycle tick counter (Ghidra ShipState field_0x17c, a
+  // 200-stride int16 array). Driven by Weapon_FireShipWeapons
+  // (NovaWeapon_FireNpcWeaponBank); resets with Weapon_InitShipWeaponBursts
+  // (0x00413810) when the weapon-bank loadout is (re)built.
+  std::array<std::int16_t, 0x100> npc_weapon_bank_burst_counter{};
   std::int16_t npc_weapon_banks_ship_class = -1;
 
   // --- Mission / target/AI slots (added to unblock spawn/targeting) ---
@@ -541,6 +620,19 @@ struct ImpactEffectInstance {
   float delay_timer = 0.0F;
 };
 
+// Ghidra FadingEffectSpriteState (g_fading_effect_pool, 0x00596d00),
+// 32 entries at a 0x18-byte stride. These are the directional fragments
+// emitted while a destroyed ship's death presentation is running. Lifetime
+// and velocity use the original normalized frame-time units.
+struct FadingEffectInstance {
+  float pos_x = 0.0F;
+  float pos_y = 0.0F;
+  float vel_x = 0.0F;
+  float vel_y = 0.0F;
+  float lifetime_ticks = -1.0F;
+  float heading_radians = 0.0F;
+};
+
 // Transient on-screen HUD overlay message state, mirroring the original's
 // g_hud_overlay_msg_buffer / g_hud_overlay_msg_color pair written by
 // NovaHud_ShowOverlayMessage (0x0047e2d0) and replayable by
@@ -668,6 +760,18 @@ struct GameState {
   // NovaData_LoadScenarioResourceTables on the new-game path).
   ScenarioData scenario;
 
+  // Mission runtime tables. The original stores 16 accepted missions and
+  // their 20-byte runtime flag records in separate globals; keeping the same
+  // slot count makes later activation/resolve work one-to-one with Ghidra.
+  static constexpr std::size_t kMaxActiveMissions = 16;
+  std::array<ActiveMission, kMaxActiveMissions> active_missions{};
+  std::array<MissionRuntimeFlags, kMaxActiveMissions>
+      active_mission_runtime_flags{};
+  std::array<MissionTargetResolution, 1000> mission_target_resolutions{};
+  // Mission/system cue bytes are persisted in FleetState at 0x5dde. The
+  // exact cue meanings remain provisional, but the table shape is known.
+  std::array<std::uint16_t, 0x80> system_cues{};
+
   // Per-system faction reputation (Ghidra g_system_reputation 0x00733bc8).
   // Indexed by 0-based system resource id and sized to the systems table on
   // load. The destination-interaction dialog decrements the containing
@@ -714,6 +818,7 @@ struct GameState {
   std::vector<ActiveShot> active_shots;
   std::array<BeamHit, 0x40> beam_hit_queue{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};
+  std::array<FadingEffectInstance, 0x20> fading_effect_instances{};
 
   // The 16-slot asteroid / drift-debris pool (mirrors the original
   // `g_asteroid_states`). Shared by Asteroid_SpawnRecord (spawn), the future
@@ -778,6 +883,13 @@ struct GameState {
   };
 
   std::vector<PendingImpactSound> pending_impact_sounds;
+
+  // snd 372, the dedicated ship-destruction sound (not an impact slot).
+  struct PendingDestructionSound {
+    float src_x = 0.0F;
+    float src_y = 0.0F;
+  };
+  std::vector<PendingDestructionSound> pending_destruction_sounds;
 
   // Decoded hyperspace jump sounds (the original preloads them via
   // FUN_004b0740: LoadStringResourceCopyById(0x80/0x81/0x82) into the jump

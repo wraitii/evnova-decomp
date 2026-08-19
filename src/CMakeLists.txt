@@ -22,6 +22,7 @@ add_library(evnova_runtime
     game/intro_cinematic.cpp
     game/landed_window.cpp
     game/landed_store.cpp
+    game/mission.cpp
     game/asteroid.cpp
     game/collision.cpp
     game/docked_dialog.cpp

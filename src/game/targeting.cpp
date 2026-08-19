@@ -9,6 +9,35 @@
 
 namespace game {
 
+void NovaTargeting_ClearDestroyedShipReferences(GameState &state,
+                                                std::int16_t destroyed_slot) {
+  if (destroyed_slot < 0 ||
+      !state.SlotInRange(static_cast<std::size_t>(destroyed_slot))) {
+    return;
+  }
+  if (state.player.primary_target_ship_slot == destroyed_slot) {
+    state.player.primary_target_ship_slot = -1;
+  }
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.ship_instance_id == destroyed_slot) {
+      continue;
+    }
+    if (ship.primary_target_ship_slot == destroyed_slot) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      ship.primary_target_ship_slot = -1;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_hostility_accumulator = 0;
+    } else if (ship.ai_secondary_target_slot == destroyed_slot) {
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_hostility_accumulator = 0;
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Player scanner capabilities (modType 0x1e cloak-scanner outfit family).
 // ---------------------------------------------------------------------------

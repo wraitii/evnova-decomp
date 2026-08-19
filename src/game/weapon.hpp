@@ -59,12 +59,16 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 // a system/stellar boundary. This does not alter weapon ownership or ammo.
 void NovaWeapon_ClearTransientCombatState(GameState &state);
 
-// Ghidra Weapon_CanFireWeaponBank (0x00468990): whether the given weapon bank
-// may fire right now. The clean-room player model omits the cloak-visibility,
-// NPC ammo and launch-bay-dependency gates; only the ammo/energy sufficiency
-// checks that apply to the player's owned banks are reproduced.
-[[nodiscard]] bool NovaWeapon_CanFireBank(const GameState &state,
-                                          std::int16_t weapon_bank);
+// Ghidra 0x00468990 Weapon_CanFireWeaponBank: whether the given weapon bank
+// may fire right now for a specific ship (player = GameState strided banks;
+// NPC = Ship.npc_weapon_bank_*). Faithful branching on ship_instance_id==0:
+// for the player the secondary-read index is the COST bank (ammo_type), for an
+// NPC it is the FIRING bank itself. Cloak-visibility (flags_secondary 0x4000),
+// launch-bay-dependency (0x80) and fuel-drawn (ammo_type < -999) gates are
+// deferred; only the ammo-sufficiency checks are reproduced.
+[[nodiscard]] bool NovaWeapon_CanFireWeaponBank(const GameState &state,
+                                                const Ship &ship,
+                                                std::int16_t weapon_bank);
 
 // Ghidra Shot_SpawnShotFromWeapon (0x0041fd30): allocate one clean-room shot
 // record, initialize owner/target/system attribution, muzzle position,

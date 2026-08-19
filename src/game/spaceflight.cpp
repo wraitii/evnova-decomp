@@ -65,6 +65,17 @@ void Stub_AiRoutines(GameState &state) {
     if (!ship.is_active || ship.current_system_id != current_system) {
       continue;
     }
+    if (NovaAiShip_IsDestroyed(ship)) {
+      ship.ai_state_code = 0x16;
+      ship.ai_control_mode = 0;
+      ship.ai_forward_thrust_cmd = 0.0F;
+      ship.ai_desired_speed = 0.0F;
+      ship.vel_x = 0.0F;
+      ship.vel_y = 0.0F;
+      ship.engine_glow_level = 0;
+      ship.engine_glow_intensity = 0.0F;
+      continue;
+    }
     // skip_heavy_ai=0: these spawned ships run the full (heavy) AI decision.
     NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, now_ms);
   }
@@ -127,7 +138,6 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     if (!ship.is_active || ship.current_system_id != current_system) {
       continue;
     }
-
     // ---- Ghidra Ship_HandleShip (0x00433050) validation prologue. ----
     // The original deactivates any ship whose class id falls outside [0,0x2ff]
     // or whose class carries the -9999 (0xd8f1) "nonexistent class" sentinel,
@@ -171,6 +181,21 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     if (ship.primary_target_ship_slot < -1 ||
         ship.primary_target_ship_slot > 0x3f) {
       ship.primary_target_ship_slot = -1;
+    }
+
+    // Ship_IsShipDestroyed is an armor/death-timer predicate, not an
+    // allocation guard. Once the validation prologue has accepted the slot,
+    // a destroyed NPC is inert for the rest of this tick.
+    if (NovaAiShip_IsDestroyed(ship)) {
+      ship.ai_state_code = 0x16;
+      ship.ai_control_mode = 0;
+      ship.ai_forward_thrust_cmd = 0.0F;
+      ship.ai_desired_speed = 0.0F;
+      ship.vel_x = 0.0F;
+      ship.vel_y = 0.0F;
+      ship.engine_glow_level = 0;
+      ship.engine_glow_intensity = 0.0F;
+      continue;
     }
 
     NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
@@ -542,6 +567,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           *state.gameplay_sounds[cache_index], gain, 1.0F, 300 + pending.slot);
     }
     state.pending_impact_sounds.clear();
+    constexpr std::size_t kDestructionSoundIndex = 372 - 200;
+    for (const auto &pending : state.pending_destruction_sounds) {
+      if (!state.gameplay_sounds[kDestructionSoundIndex].has_value()) {
+        continue;
+      }
+      const float gain = NovaWeapon_ComputeSpatialFireGain(
+          state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
+      audio.Play(*state.gameplay_sounds[kDestructionSoundIndex], gain, 1.0F,
+                 372);
+    }
+    state.pending_destruction_sounds.clear();
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
     // 'j' key near an available travel point, then drives the visible phases.
     NovaTravel_Tick(state, input.travel, frame_time_ms);

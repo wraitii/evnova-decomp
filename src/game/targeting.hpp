@@ -141,6 +141,11 @@ NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
 [[nodiscard]] bool NovaTargeting_IsShipAcquirableAsTarget(
     const GameState &state, const Ship &candidate, const Ship &acquirer);
 
+// Ghidra Ship_ClearOtherShipsTargetingShip (0x00415dc0): retire target
+// references as soon as an NPC reaches the destroyed state.
+void NovaTargeting_ClearDestroyedShipReferences(GameState &state,
+                                                std::int16_t destroyed_slot);
+
 // Mirrors Ship_FindNextPlayerCycleTarget (0x00461bd0) / _Previous
 // (0x00461f60): returns the next (or previous) eligible ship slot after
 // `current_slot` within `system_id`, wrapping from slot 1 (0 is the player;

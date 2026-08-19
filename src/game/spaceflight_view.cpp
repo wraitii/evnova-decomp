@@ -249,7 +249,9 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
   const auto [camera_x, camera_y] = WorldCameraPosition(state);
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
-    if (!ship.is_active || NovaAiShip_IsDestroyed(ship) ||
+    if (!ship.is_active ||
+        (NovaAiShip_IsDestroyed(ship) &&
+         ship.destruction_visual_timer_ms <= 0.0F) ||
         ship.current_system_id != state.player.current_system_id) {
       continue;
     }
@@ -262,6 +264,11 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
     }
     const int frame =
         FrameForHeading(ship.heading, sprite->frames_per_rotation);
+    SpriteDrawOptions hull_options;
+    if (NovaAiShip_IsDestroyed(ship)) {
+      hull_options.alpha_mod = std::clamp(
+          ship.destruction_visual_timer_ms / 900.0F, 0.0F, 1.0F) * 0.55F;
+    }
     DrawSprite(platform.renderer(),
                sprite->base,
                frame,
@@ -270,7 +277,8 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                camera_x,
                camera_y,
                vp.w,
-               vp.h);
+               vp.h,
+               hull_options);
 
     // Engine-glow layer, drawn over the hull with the same heading-selected
     // frame and a thrust-driven alpha. engine_glow_level is driven in
@@ -531,7 +539,31 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
                                         float dy) {
   // Animated stellar sprite-frame stepping (dwell accumulator cadence).
   AdvanceStellarAnimation(platform, state, frame_time_ms);
-  NovaEffects_TickImpactEffects(state, frame_time_ms);
+  // Impact/debris animation fields are advanced by g_avg_frame_time_ms in the
+  // original. Convert SDL milliseconds to the same 30 Hz simulation cadence;
+  // passing raw milliseconds would consume a 16-frame explosion in one draw.
+  constexpr float kOriginalTickMs = 1000.0F / 30.0F;
+  const float elapsed_ticks = frame_time_ms / kOriginalTickMs;
+  NovaEffects_TickImpactEffects(state, elapsed_ticks);
+  NovaEffects_TickFadingEffects(state, elapsed_ticks);
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    const bool was_visible = ship.destruction_visual_timer_ms > 0.0F;
+    if (ship.destruction_visual_timer_ms > 0.0F) {
+      ship.destruction_visual_timer_ms = std::max(
+          0.0F, ship.destruction_visual_timer_ms - frame_time_ms);
+    }
+    if (was_visible && ship.destruction_visual_timer_ms <= 0.0F &&
+        !ship.destruction_finale_triggered) {
+      const ShipClass *ship_class = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      if (ship_class != nullptr && ship_class->destruction_effect_final >= 0) {
+        NovaEffects_SpawnShipDestructionFinale(
+            state, ship, ship_class->destruction_effect_final);
+      }
+      ship.destruction_finale_triggered = true;
+    }
+  }
   // The original impact updater reads each live Sprite's frame count when it
   // decides that an animation has ended. Resolve that SDL-side fact here,
   // after the simulation timer has advanced, so the GameState pool remains
@@ -566,6 +598,29 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
   } else {
     // Normal in-system parallax (moves by the ship's movement delta).
     UpdateAmbientStars(dx, dy);
+  }
+}
+
+void SpaceflightView::DrawFadingEffects(SdlPlatform &platform,
+                                        const GameState &state) {
+  const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
+  const NpcShipSprite *debris = ShipClassSprite(platform, 0x2ff);
+  if (debris == nullptr || debris->base.frames.empty() ||
+      debris->frames_per_rotation <= 0) {
+    return;
+  }
+  for (const FadingEffectInstance &fragment : state.fading_effect_instances) {
+    if (fragment.lifetime_ticks < 0.0F) {
+      continue;
+    }
+    const int frame =
+        FrameForHeading(fragment.heading_radians, debris->frames_per_rotation);
+    SpriteDrawOptions options;
+    options.alpha_mod =
+        std::clamp(fragment.lifetime_ticks / 249.0F, 0.0F, 1.0F);
+    DrawSprite(platform.renderer(), debris->base, frame, fragment.pos_x,
+               fragment.pos_y, camera_x, camera_y, vp.w, vp.h, options);
   }
 }
 
@@ -956,8 +1011,9 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawStellarBodies(platform, state);     // stellar planets / stations
   DrawShots(platform, state);             // projectiles above stellars
   DrawBeams(platform, state);             // immediate beams above projectiles
-  DrawImpactEffects(platform, state);     // transient impacts above weapons
   DrawNpcShips(platform, state);          // NPC ships above the backdrop/shots
+  DrawImpactEffects(platform, state);     // destruction/impact effects over ships
+  DrawFadingEffects(platform, state);     // directional destruction fragments
   DrawShipTargetReticle(platform, state); // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target
 
@@ -1075,7 +1131,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     return; // no (or invalid) primary target: original hides the brackets
   }
   const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
-  if (!target.is_active ||
+  if (!target.is_active || NovaAiShip_IsDestroyed(target) ||
       target.current_system_id != state.player.current_system_id) {
     return;
   }
@@ -1273,7 +1329,7 @@ std::int16_t SpaceflightView::PickShipAt(SdlPlatform &platform,
   float best_dist_sq = 0.0F;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
-    if (!ship.is_active ||
+    if (!ship.is_active || NovaAiShip_IsDestroyed(ship) ||
         ship.current_system_id != state.player.current_system_id) {
       continue;
     }
