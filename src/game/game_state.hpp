@@ -422,9 +422,11 @@ struct PilotData {
 // scripts mutate it; keeping it in GameState makes those effects saveable
 // rather than ephemeral UI latches.
 struct PilotControlState {
-  static constexpr std::size_t kControlBitCount = 65536;
+  // The Bible defines exactly 10,000 Nova control bits (b0..b9999).
+  static constexpr std::size_t kControlBitCount = 10000;
   std::bitset<kControlBitCount> bits;
   std::bitset<0x800> explored_systems;
+  std::bitset<0x100> active_ranks;
   bool registered = true;
   bool male = true;
 
@@ -796,6 +798,13 @@ struct GameState {
   // Mission/system cue bytes are persisted in FleetState at 0x5dde. The
   // exact cue meanings remain provisional, but the table shape is known.
   std::array<std::uint16_t, 0x80> system_cues{};
+
+  // Mission-script side effects that need to be consumed by UI/audio layers.
+  // They are explicit latches rather than hidden globals, matching the
+  // clean-room state ownership rule.
+  std::vector<std::int16_t> pending_script_sounds;
+  std::int16_t pending_script_message_string_list = -1;
+  bool script_forced_leave_landing = false;
 
   // Per-system faction reputation (Ghidra g_system_reputation 0x00733bc8).
   // Indexed by 0-based system resource id and sized to the systems table on

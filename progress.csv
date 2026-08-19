@@ -249,8 +249,8 @@ address,name,impl_file,reimpl_pct,comment
 0x00447D90,Mission_ResolveMisnSlot,,0%,
 0x00447F00,System_GetSystemDefFlagByte,,0%,
 0x00447F20,Mission_CheckReactionConditionSatisfied,,0%,
-0x00448020,Mission_ExecuteReactionScript,,0%,
-0x00448050,Mission_RunMisnScriptPayload,,0%,
+0x00448020,Mission_ExecuteReactionScript,src/game/mission_script.cpp,70%,Named clean-room entrypoint now executes Bible/Ghidra control-bit and mission-script commands; reaction context and text-tag expansion remain TODO(decomp).
+0x00448050,Mission_RunMisnScriptPayload,src/game/mission_script.cpp,45%,Named payload entrypoint validates mission-slot context and dispatches the shared script engine; payload-specific context effects remain TODO(decomp).
 0x00448090,NovaResources_EvaluateAvailability,,0%,
 0x00448660,Mission_ClearActiveReactionMission,,0%,
 0x00448670,Mission_TriggerReturnMissionInteractions,,0%,
@@ -259,7 +259,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00448BA0,NovaExpression_SkipWhitespace,,0%,
 0x00448BE0,NovaExpression_EvaluateToken,,100%,src/game/scenario_data.cpp NovaControlExpression_Evaluate() ParseTokenTerm (combines tokenizer+evaluator; B/P/G/O/E + literals)
 0x00449020,NovaExpression_EvaluateBoolean,,100%,"src/game/scenario_data.cpp NovaControlExpression_Evaluate() (recursive-descent, empty->true default)"
-0x00449370,Mission_ExecuteMisnScriptEngine,,0%,
+0x00449370,Mission_ExecuteMisnScriptEngine,src/game/mission_script.cpp,75%,Named clean-room interpreter covers Bible opcodes A/F/S/G/D/M/N/C/E/H/K/L/P/Q/T/U/X/Y plus R branches; exact legacy parser quirks and text-tag expansion remain TODO(decomp).
 0x0044A4D0,Ship_ExpandStringPlaceholders,,0%,
 0x0044A980,NovaParser_AllocateBuffer,,0%,
 0x0044A9D0,NovaParser_FreeBuffer,,0%,

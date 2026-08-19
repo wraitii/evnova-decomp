@@ -574,6 +574,10 @@ struct Stellar {
   int max_ship_count = 0;     // StellarDef +0x4e (garrison size; >0x3e9/0x2711
                               //  rescale branches)
   std::uint8_t field_0x47 = 0;
+  // Runtime destruction latch used by the Y/U mission-script operators.
+  // The original stores this across several unnamed StellarDef fields; this
+  // explicit projection keeps the gameplay state testable.
+  bool is_destroyed = false;
 };
 
 // Ghidra GovtDef (g_government_defs, up to 0x100 entries indexed by government
