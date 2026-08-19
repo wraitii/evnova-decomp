@@ -22,6 +22,7 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace game {
@@ -51,6 +52,11 @@ constexpr std::uint32_t kDudeResourceType = 0x649f6465; // d\x9fde
 // 0x004bd3c0 at 0x004c6207) into the DAT_005912dc / DAT_005912f0 global pair,
 // which share one 0x1c-byte-strided 16-row table. See AsteroidDef.
 constexpr std::uint32_t kAsteroidResourceType = 0x729a6964; // r\x9aid
+// m\x957n (0x6d95736e) — mission definitions and their embedded mission-ship
+// records. The original loads up to 1000 entries into MisnDef (stride 0x12c)
+// and later reads the same resource family by mission id when populating an
+// accepted mission. See NovaResources_LoadMisnResourceDefs (0x0043bbb0).
+constexpr std::uint32_t kMissionResourceType = 0x6d95736e;
 // Impact/explosion definition family read by
 // NovaData_LoadScenarioResourceTables (0x004bd3c0). The binary FourCC is shown
 // as 0x629a9a6d by Ghidra; each record is 0x18 bytes in the source resource and
@@ -101,6 +107,85 @@ NovaControlExpression_Evaluate(std::string_view expression,
 void NovaControlExpression_ExecuteSet(
     std::string_view expression, const ControlExpressionMutation &mutation);
 
+// Mission resource definition. This is deliberately a value model rather
+// than a byte-for-byte packed struct: the original's 0x12c-byte MisnDef is a
+// runtime projection of a larger m\x957n resource. Fields below are the
+// offsets/uses established by the Ghidra loader; raw_payload retains the
+// source bytes while the remaining fields are decoded.
+struct MissionDef {
+  bool present = false;
+  std::int16_t link_system_filter = -1; // MisnDef +0x00
+  std::int16_t return_stellar_id = -1; // +0x02
+  std::int16_t special_ship_goal = 0; // +0x06
+  std::int16_t special_ship_behavior = 0; // +0x08
+  std::int16_t special_ship_start = 0; // +0x0a
+  std::int16_t special_ship_count = 0; // +0x12
+  std::int16_t special_ship_system = -1; // +0x10
+  std::int16_t on_fail_condition = -1; // +0x0c
+  std::int16_t on_success_condition = -1; // +0x0e
+  std::int16_t aux_ship_dude = -1; // resource +0x24
+  std::int16_t aux_ship_system = -1; // resource +0x22
+  std::int16_t special_ship_dude = -1; // MisnDef +0x1a
+  std::int16_t on_start_condition = -1; // +0x0e in runtime projection
+  std::int16_t cargo_type = -1; // +0x40
+  std::int16_t cargo_quantity = 0; // +0x42
+  std::int16_t on_resolve_repeat_count = 0; // +0x48
+  std::int32_t resource_delta_or_cost = 0; // +0x4a
+  std::int16_t aux_ships_left = 0; // +0x50
+  std::int16_t initial_ship_count = 0; // +0x52
+  std::uint16_t flags_primary = 0; // +0x54
+  std::uint16_t flags_secondary = 0; // +0x56
+  // Additional fields copied by Mission_PopulateMissionSlotFromDef
+  // (0x0043f8c0). Names are intentionally descriptive but provisional where
+  // the original MissionDef member remains unnamed.
+  std::int16_t target_ship_count = 0; // resource +0x20
+  std::int16_t current_system_locator = -1; // +0x22
+  std::int16_t spawn_behavior = 0; // +0x26
+  std::int16_t fleet_spawn_goal = 0; // +0x28
+  std::int16_t special_ship_spawn_mode = 0; // +0x2c
+  std::int16_t competing_government_id = -1; // +0x2e
+  std::int16_t competing_reputation_delta = 0; // +0x30
+  std::int16_t special_ship_name_string_id = -1; // +0x2a
+  std::int16_t random_text_string_id = -1; // +0x32
+  std::int16_t mission_ship_count_max = 0; // +0x48
+  std::int16_t auxiliary_ship_dude = -1; // +0x4c
+  std::int16_t mission_fleet_metric = 0; // +0x4a
+  std::int16_t start_system_locator = -1; // +0x22, resolved at accept
+  bool start_visited = false; // +0x42
+  std::int16_t initial_briefing_id = -1; // +0x34
+  std::array<std::int16_t, 8> brief_description_ids{}; // +0x34..+0x42
+  // Mission availability expression from the resource string block (+0x5c).
+  // The original caches its result at MisnDef +0x16.
+  std::string availability_expr;
+  bool is_available_runtime = false;
+  // MisnDef +0x128, loaded from mïsn payload +0x7a0. Lower values sort first.
+  std::int16_t list_priority = 0;
+  std::string display_name;
+  std::array<std::byte, 0x7b2> raw_payload{};
+};
+
+// MissionShipDef fields currently identified by the type layout. The large
+// weapon delta arrays are kept because they are semantically load-bearing for
+// mission-ship spawning; unknown bytes remain available in raw_payload.
+struct MissionShipDef {
+  std::int16_t spawn_system_filter = -1; // +0x00
+  std::int16_t government_id = -1; // +0x02
+  std::int16_t ai_behavior_code = 0; // +0x04
+  std::int16_t aggression_level = 0; // +0x06
+  std::int16_t ship_class_id = -1; // +0x0a
+  std::array<std::int16_t, 0x100> weapon_ammo_delta{}; // +0x18
+  std::array<std::int16_t, 0x100> weapon_secondary_delta{}; // +0x418
+  std::int32_t booty_base_credits = 0; // +0x618
+  float shield_armor_scale = 1.0F; // +0x61c
+  bool is_available_runtime = false; // +0x620
+  std::uint8_t runtime_flag_a = 0; // +0x622
+  std::uint8_t runtime_flag_b = 0; // +0x623
+  std::uint8_t unique_spawn_tag = 0; // +0x624
+  std::string availability_expression; // +0x644, max 326 bytes
+  std::int16_t display_name_string_id = -1; // +0x78a
+  std::array<std::byte, 0x794> raw_payload{};
+};
+
 // A single stock weapon triple on a ship class: a weapon id plus how many to
 // equip and the standard ammo load. The original arrays hold eight of these.
 struct ShipDefaultWeaponBank {
@@ -133,6 +218,10 @@ struct ShipClass {
   std::int16_t length_meters = 0;  // Length
   std::int16_t tech_level = 0;     // TechLevel
   std::int32_t cost = 0;           // Cost
+  // Bible: DeathDelay, Explode1, and Explode2.
+  std::int16_t death_delay_frames = 0;
+  std::int16_t destruction_effect_while_breaking = -1;
+  std::int16_t destruction_effect_final = -1;
   std::int16_t display_weight = 0; // DispWeight
 
   // Movement / combat stats (float magnitudes repacked from the short field).
@@ -861,6 +950,7 @@ struct ScenarioData {
   std::vector<Government> governments; // indexed by government_id - 0x80
   std::vector<FleetDef> fleets;        // indexed by fleet_id - 0x80
   std::vector<DudeDef> dudes;          // indexed by dude_id - 0x80
+  std::vector<MissionDef> missions;    // indexed by mission id - 0x80
   // Asteroid/drift class table (r\x9aid family, one row per resource id
   // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
   // the DAT_005912dc / DAT_005912f0 pair.
@@ -885,6 +975,9 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for a dude template (g_dude_defs), or nullptr when
   // outside the loaded range.
   [[nodiscard]] const DudeDef *Dude(std::int16_t resource_id) const;
+  // gh.id 0x80.. lookup for mission definitions, or nullptr when outside the
+  // loaded 1000-entry mission table.
+  [[nodiscard]] const MissionDef *Mission(std::int16_t resource_id) const;
   // gh.id 0x80.. lookup for an asteroid-type row, or nullptr when outside the
   // loaded range.
   [[nodiscard]] const AsteroidDef *AsteroidType(std::int16_t resource_id) const;

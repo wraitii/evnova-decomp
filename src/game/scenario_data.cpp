@@ -65,6 +65,54 @@ namespace {
   return std::string{begin, len};
 }
 
+[[nodiscard]] MissionDef DecodeMission(std::span<const std::byte> bytes) {
+  MissionDef mission;
+  const auto copy_size = std::min(bytes.size(), mission.raw_payload.size());
+  std::copy_n(bytes.begin(), copy_size, mission.raw_payload.begin());
+
+  mission.link_system_filter = ReadBeI16(bytes, 0x00);
+  mission.return_stellar_id = ReadBeI16(bytes, 0x04);
+  mission.special_ship_goal = ReadBeI16(bytes, 0x06);
+  mission.special_ship_behavior = ReadBeI16(bytes, 0x08);
+  mission.special_ship_start = ReadBeI16(bytes, 0x0a);
+  mission.on_fail_condition = ReadBeI16(bytes, 0x0c);
+  mission.on_success_condition = ReadBeI16(bytes, 0x0e);
+  mission.special_ship_system = ReadBeI16(bytes, 0x10);
+  mission.special_ship_count = ReadBeI16(bytes, 0x12);
+  mission.special_ship_dude = ReadBeI16(bytes, 0x20);
+  mission.aux_ship_system = ReadBeI16(bytes, 0x22);
+  mission.aux_ship_dude = ReadBeI16(bytes, 0x24);
+  mission.cargo_type = ReadBeI16(bytes, 0x40);
+  mission.cargo_quantity = ReadBeI16(bytes, 0x42);
+  mission.on_resolve_repeat_count = ReadBeI16(bytes, 0x48);
+  mission.resource_delta_or_cost = ReadBeI32(bytes, 0x4a);
+  mission.aux_ships_left = ReadBeI16(bytes, 0x50);
+  mission.initial_ship_count = ReadBeI16(bytes, 0x52);
+  mission.flags_primary = ReadBe16(bytes, 0x54);
+  mission.flags_secondary = ReadBe16(bytes, 0x56);
+  mission.target_ship_count = ReadBeI16(bytes, 0x20);
+  mission.current_system_locator = ReadBeI16(bytes, 0x22);
+  mission.special_ship_name_string_id = ReadBeI16(bytes, 0x2a);
+  mission.spawn_behavior = ReadBeI16(bytes, 0x26);
+  mission.fleet_spawn_goal = ReadBeI16(bytes, 0x28);
+  mission.random_text_string_id = ReadBeI16(bytes, 0x32);
+  mission.special_ship_spawn_mode = ReadBeI16(bytes, 0x2c);
+  mission.competing_government_id = ReadBeI16(bytes, 0x2e);
+  mission.competing_reputation_delta = ReadBeI16(bytes, 0x30);
+  mission.mission_ship_count_max = ReadBeI16(bytes, 0x48);
+  mission.mission_fleet_metric = ReadBeI16(bytes, 0x4a);
+  mission.auxiliary_ship_dude = ReadBeI16(bytes, 0x4c);
+  mission.start_visited = ReadBeI16(bytes, 0x42) != 0;
+  for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
+    mission.brief_description_ids[i] =
+        ReadBeI16(bytes, 0x34 + i * sizeof(std::int16_t));
+  }
+  mission.initial_briefing_id = mission.brief_description_ids.front();
+  mission.availability_expr = ReadCString(bytes, 0x5c);
+  mission.list_priority = ReadBeI16(bytes, 0x7a0);
+  return mission;
+}
+
 // ---------------------------------------------------------------------------
 // w\x91ap (Weapon) decode
 // ---------------------------------------------------------------------------
@@ -160,7 +208,10 @@ namespace {
   s.max_turret = ReadBeI16(bytes, 0x2c);
   s.tech_level = ReadBeI16(bytes, 0x2e);
   s.cost = ReadBeI32(bytes, 0x30);
+  s.death_delay_frames = ReadBeI16(bytes, 0x34);
   s.armor_recharge = static_cast<float>(ReadBeI16(bytes, 0x36)) / 1000.0F;
+  s.destruction_effect_while_breaking = ReadBeI16(bytes, 0x38);
+  s.destruction_effect_final = ReadBeI16(bytes, 0x3a);
   s.display_weight = ReadBeI16(bytes, 0x3c);
   s.mass_tons = ReadBeI16(bytes, 0x3e);
   s.length_meters = ReadBeI16(bytes, 0x40);
@@ -770,6 +821,14 @@ const DudeDef *ScenarioData::Dude(std::int16_t resource_id) const {
   return index < dudes.size() ? &dudes[index] : nullptr;
 }
 
+const MissionDef *ScenarioData::Mission(std::int16_t resource_id) const {
+  const auto index = static_cast<std::int32_t>(resource_id) - 0x80;
+  if (index < 0 || index >= static_cast<std::int32_t>(missions.size())) {
+    return nullptr;
+  }
+  return &missions[static_cast<std::size_t>(index)];
+}
+
 const AsteroidDef *ScenarioData::AsteroidType(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < asteroid_defs.size() ? &asteroid_defs[index] : nullptr;
@@ -810,6 +869,9 @@ bool ScenarioData::LoadFromArchives() {
   // (the loader's loop bound at 0x004c2c81) at a 0x4a-byte DudeDef stride,
   // indexed by dude id minus 0x80.
   dudes.assign(0x200, {});
+  // The original mission definition table has 1000 entries, indexed by
+  // resource id minus 0x80 (NovaResources_LoadMisnResourceDefs 0x0043bbb0).
+  missions.assign(1000, {});
   // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
   asteroid_defs.assign(0x80, {});
 
@@ -825,6 +887,7 @@ bool ScenarioData::LoadFromArchives() {
   std::size_t loaded_governments = 0;
   std::size_t loaded_fleets = 0;
   std::size_t loaded_dudes = 0;
+  std::size_t loaded_missions = 0;
   std::size_t loaded_asteroid_types = 0;
   std::size_t loaded_impact_effects = 0;
 
@@ -950,6 +1013,20 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_dudes;
     }
   }
+  // Mission definitions (Nova Data m\x957n family). Preserve absent slots as
+  // defaults, matching the original's 1000-entry zero-filled table. The
+  // payload is retained in MissionDef while only loader-confirmed fields are
+  // decoded in this first pass.
+  for (std::int32_t id = 0x80; id < 0x80 + 1000; ++id) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kMissionResourceType, static_cast<std::uint16_t>(id))) {
+      MissionDef mission = DecodeMission(res->bytes);
+      mission.present = true;
+      mission.display_name = res->name;
+      missions[static_cast<std::size_t>(id) - 0x80] = std::move(mission);
+      ++loaded_missions;
+    }
+  }
   // Asteroid-type rows (r\x9aid family), 16 ids 0x80..0x8f.
   for (std::int32_t id = 0x80; id < 0x90; ++id) {
     if (const auto res = NovaResource_LoadNamed(
@@ -980,7 +1057,7 @@ bool ScenarioData::LoadFromArchives() {
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} governments, {} fleet defs, {} dude defs, "
-      "{} asteroid types, {} impact effects",
+      "{} asteroid types, {} impact effects, {} missions",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
@@ -990,7 +1067,8 @@ bool ScenarioData::LoadFromArchives() {
       loaded_fleets,
       loaded_dudes,
       loaded_asteroid_types,
-      loaded_impact_effects);
+      loaded_impact_effects,
+      loaded_missions);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

@@ -211,11 +211,11 @@ address,name,impl_file,reimpl_pct,comment
 0x0043B8C0,Ship_AimWeaponLeadVelocity,,0%,
 0x0043BA30,Shot_AimStellarBatteryShot,,0%,
 0x0043BBB0,NovaResources_LoadMisnResourceDefs,,0%,
-0x0043C3E0,Misn_ResolveMissionStellarLocators,,0%,
+0x0043C3E0,Misn_ResolveMissionStellarLocators,src/game/mission.cpp,35%,"Direct and -2/-3 locator families now populate the clean-room mission target cache; random travel reachability and remaining locator families are TODO(decomp)."
 0x0043C470,NovaUi_RunTravelDestinationMainWindow,,0%,
 0x0043CC20,Stellar_RebuildTravelDestinationList,,0%,
-0x0043CF00,Mission_EvaluateMissionLists,,0%,
-0x0043D240,Mission_ResolveMissionStellarTargets,,0%,
+0x0043CF00,Mission_EvaluateMissionLists,src/game/mission.cpp,35%,"Availability expressions, absent/active filtering, target resolution, and priority sorting are implemented for the clean-room mission list; native lane assignment and interaction eligibility remain TODO(decomp)."
+0x0043D240,Mission_ResolveMissionStellarTargets,src/game/mission.cpp,45%,"Fail/success direct and random locator results resolve to stellar/system ids and special-ship system/count cache fields; visible-system remapping and full locator families remain TODO(decomp)."
 0x0043D490,Mission_ResolveMissionSpecialShipSystem,,0%,
 0x0043D4C0,Mission_ResolveMissionSpecialShipCount,,0%,
 0x0043D510,Mission_SelectMissionStellarByLocator,,0%,
