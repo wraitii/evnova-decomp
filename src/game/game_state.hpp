@@ -123,6 +123,11 @@ struct Ship {
   float ionization_points = 0.0F;   // +0x5C (ionization charge meter)
   float fuel_points = 0.0F;         // +0x38
   float death_timer_active = -1.0F; // +0x3C
+  // Port-side one-shot latch for the first destruction-presentation slice.
+  // The original drives this through Ship_HandleShip's fading-effect pool
+  // (0x00428090 / 0x0043b170); the exact class-specific debris sprite is not
+  // represented yet, so the shared impact animation is queued once instead.
+  bool destruction_visual_triggered = false;
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
   // timer consumer is still deferred, so the field remains provisional.
   float hit_reaction_timer = 0.0F;
@@ -505,6 +510,13 @@ struct BeamHit {
   float target_x = 0.0F;
   float target_y = 0.0F;
   std::int16_t lifetime_ticks = -2; // < -1 means inactive in the original
+  // Port-only sub-tick accumulator. The original decrements lifetime_ticks by
+  // exactly 1 per fixed 30-tick/s TickSystems call, but this port drives the
+  // sim once per rendered frame with a fractional elapsed_ticks (0.5 at 60fps).
+  // lifetime_ticks stays the authoritative whole-tick count (matching the
+  // 0x22-byte record); this float absorbs the remainder so beams expire at the
+  // correct wall-clock time instead of stalling when truncated to int16.
+  float lifetime_remainder = 0.0F;
   std::int16_t animation_counter = 0;
   std::int16_t weapon_id = -1;
   std::int16_t owner_ship_slot = -1;

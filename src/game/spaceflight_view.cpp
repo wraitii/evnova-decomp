@@ -249,7 +249,7 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
   const auto [camera_x, camera_y] = WorldCameraPosition(state);
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
-    if (!ship.is_active ||
+    if (!ship.is_active || NovaAiShip_IsDestroyed(ship) ||
         ship.current_system_id != state.player.current_system_id) {
       continue;
     }

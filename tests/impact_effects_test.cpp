@@ -53,6 +53,9 @@ TEST_CASE("large impact effects scatter children and queue one main sound",
 
 TEST_CASE("impact packages dispatch their configured area effect", "[impact]") {
   GameState state;
+  // ScenarioData allocates the 0x80 asteroid rows during archive loading;
+  // this unit test constructs the state without loading archives.
+  state.scenario.asteroid_defs.resize(0x80);
   state.scenario.asteroid_defs[0].present = true;
   state.scenario.asteroid_defs[0].field_0x10 = 5;
   state.scenario.impact_effects[5].frame_rate_scale = 0.1F;

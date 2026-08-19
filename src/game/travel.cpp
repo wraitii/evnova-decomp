@@ -3,6 +3,7 @@
 #include "../log.hpp"
 #include "hud_overlay.hpp"
 #include "outfit.hpp"
+#include "weapon.hpp"
 
 #include <algorithm>
 #include <array>
@@ -114,6 +115,7 @@ void FireJump(GameState &state) {
 
   // Change system and clear the engaged destination.
   player.current_system_id = t.destination_system_id;
+  NovaWeapon_ClearTransientCombatState(state);
 
   // Refill shields/armor from the effective (outfit-derived) maximums. This
   // also refreshes state.cached_stats, which PlayerMaxSpeed below relies on.

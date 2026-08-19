@@ -55,6 +55,10 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
 // weapon like the Shuttle's Light Blaster is registered as sellable ownership.
 void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 
+// Ghidra Stellar_TravelToSystem (0x00455e10) clears transient combat state at
+// a system/stellar boundary. This does not alter weapon ownership or ammo.
+void NovaWeapon_ClearTransientCombatState(GameState &state);
+
 // Ghidra Weapon_CanFireWeaponBank (0x00468990): whether the given weapon bank
 // may fire right now. The clean-room player model omits the cloak-visibility,
 // NPC ammo and launch-bay-dependency gates; only the ammo/energy sufficiency

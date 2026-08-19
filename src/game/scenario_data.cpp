@@ -139,7 +139,9 @@ namespace {
   s.base_fuel = ReadBeI16(bytes, 0x0a);
   s.free_mass = ReadBeI16(bytes, 0x0c);
   s.base_armor = ReadBeI16(bytes, 0x0e);
-  s.shield_recharge = static_cast<float>(ReadBeI16(bytes, 0x10));
+  // Bible ShieldRech/ArmorRech units are shield/armor points * 1000 per
+  // reference frame: 1000 means one point per 30 Hz frame.
+  s.shield_recharge = static_cast<float>(ReadBeI16(bytes, 0x10)) / 1000.0F;
 
   for (std::size_t i = 0; i < 4; ++i) {
     s.stock_weapons[i].weapon_id = ReadBeI16(bytes, 0x12 + i * 2);
@@ -158,7 +160,7 @@ namespace {
   s.max_turret = ReadBeI16(bytes, 0x2c);
   s.tech_level = ReadBeI16(bytes, 0x2e);
   s.cost = ReadBeI32(bytes, 0x30);
-  s.armor_recharge = static_cast<float>(ReadBeI16(bytes, 0x36));
+  s.armor_recharge = static_cast<float>(ReadBeI16(bytes, 0x36)) / 1000.0F;
   s.display_weight = ReadBeI16(bytes, 0x3c);
   s.mass_tons = ReadBeI16(bytes, 0x3e);
   s.length_meters = ReadBeI16(bytes, 0x40);

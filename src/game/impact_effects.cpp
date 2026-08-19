@@ -50,6 +50,14 @@ void NovaEffects_SpawnImpactEffect(GameState &state,
   }
 }
 
+void NovaEffects_SpawnShipDestructionBurst(GameState &state,
+                                           float x,
+                                           float y) {
+  // Effect 0 is the neutral stock explosion row. Mods may omit its sprite
+  // resource; the normal impact renderer already treats that as a no-op.
+  NovaEffects_SpawnImpactEffect(state, x, y, 0);
+}
+
 void NovaEffects_SpawnAreaImpact(GameState &state,
                                  float x,
                                  float y,

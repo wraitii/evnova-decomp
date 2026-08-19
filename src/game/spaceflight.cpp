@@ -1253,23 +1253,28 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       ship.heading += kTwoPi;
     }
 
-    // Shield / armor regeneration toward their maxima. The original regens
-    // these in the same not-coasting gate as turning. Rates are per-frame at
-    // the reference cadence; scale by elapsed ticks so host frame rate doesn't
-    // change the on-screen pace.
-    const float max_shield = static_cast<float>(ship_class.base_shield);
-    if (ship.shield_points < max_shield) {
-      ship.shield_points = std::min(
-          max_shield,
-          ship.shield_points +
-              static_cast<float>(ship_class.shield_recharge) * elapsed_ticks);
-    }
-    const float max_armor = static_cast<float>(ship_class.base_armor);
-    if (ship.armor_points < max_armor) {
-      ship.armor_points = std::min(
-          max_armor,
-          ship.armor_points +
-              static_cast<float>(ship_class.armor_recharge) * elapsed_ticks);
+    // Ship_HandleShip regenerates only while the ship is not fire-restricted.
+    // In particular, disabled NPCs must not restore shields and lethal hits
+    // must not resurrect a ship whose armor has reached zero. The original
+    // also leaves this whole movement/regen block disabled while coasting.
+    if (!NovaAiShip_IsFireRestricted(state, ship) &&
+        !NovaAiShip_IsDestroyed(ship)) {
+      const float max_shield = static_cast<float>(ship_class.base_shield);
+      if (ship.shield_points < max_shield) {
+        ship.shield_points = std::min(
+            max_shield,
+            ship.shield_points + static_cast<float>(
+                                      ship_class.shield_recharge) *
+                                  elapsed_ticks);
+      }
+      const float max_armor = static_cast<float>(ship_class.base_armor);
+      if (ship.armor_points < max_armor) {
+        ship.armor_points = std::min(
+            max_armor,
+            ship.armor_points + static_cast<float>(
+                                      ship_class.armor_recharge) *
+                                  elapsed_ticks);
+      }
     }
   }
 
@@ -1524,10 +1529,10 @@ void NovaPlayer_TickShieldRecharge(GameState &state, float frame_time_ms) {
     state.stat_cache_valid = true;
   }
   const PlayerEffectiveStats &eff = state.cached_stats;
-  // The recharge rate is in shield points per frame at the reference cadence
-  // (the movement model / Ship_ComputeShipShieldRechargeRate use per-frame); we
-  // scale it by the real frame time so the on-screen pace matches the host.
-  const float rate = eff.shield_recharge * frame_time_ms / 1000.0F;
+  // The recharge rate is in shield points per 30 Hz reference frame. Convert
+  // measured wall-clock time to that same normalized frame unit.
+  const float rate = eff.shield_recharge *
+                     (frame_time_ms / (1000.0F / 30.0F));
   if (rate <= 0.0F) {
     return;
   }

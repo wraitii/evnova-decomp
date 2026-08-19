@@ -13,6 +13,14 @@ void NovaEffects_SpawnImpactEffect(GameState &state,
                                    std::int16_t effect_id,
                                    std::int16_t variant = 0);
 
+// First destruction-presentation slice for Ship_HandleShip /
+// Shot_SpawnShipDestructionDebrisPuff (0x00433050 -> 0x00428090). The exact
+// class-specific fading debris sprite remains deferred; this uses the stock
+// animated impact set 0 as a visible, deterministic burst.
+void NovaEffects_SpawnShipDestructionBurst(GameState &state,
+                                           float x,
+                                           float y);
+
 // Ghidra Shot_SpawnAreaImpactEffects (0x004211d0): spawn the main effect and,
 // for 1000+ effect ids, the two randomized child-impact bands. `radius` is
 // the weapon's splash radius in world pixels.

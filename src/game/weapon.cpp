@@ -49,6 +49,20 @@ const Weapon *WeaponAt(const GameState &state, std::int16_t bank) {
 
 } // namespace
 
+void NovaWeapon_ClearTransientCombatState(GameState &state) {
+  // The original retires every ShotState during Stellar_TravelToSystem and
+  // marks all live beam records inactive during the landing transition.
+  state.active_shots.clear();
+  for (BeamHit &beam : state.beam_hit_queue) {
+    beam = BeamHit{};
+  }
+  for (ImpactEffectInstance &effect : state.impact_effect_instances) {
+    effect = ImpactEffectInstance{};
+  }
+  state.pending_fire_sounds.clear();
+  state.pending_impact_sounds.clear();
+}
+
 void NovaWeapon_SeedBanksFromShipStock(GameState &state,
                                        std::int16_t ship_class_id) {
   // Seeds the player's 0x100 weapon-bank ammo/secondary counters from a ship
@@ -505,8 +519,21 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
     }
     beam.animation_counter = static_cast<std::int16_t>(
         beam.animation_counter + static_cast<std::int16_t>(ticks));
-    beam.lifetime_ticks = static_cast<std::int16_t>(
-        beam.lifetime_ticks - static_cast<std::int16_t>(ticks));
+    // The original counts lifetime down by one whole tick per TickSystems
+    // call at its fixed 30-tick/s cadence. The port runs the sim per rendered
+    // frame, so elapsed_ticks is fractional above 30fps (0.5 at 60fps); a raw
+    // int16 truncation would stall the countdown at 0 and leave every beam
+    // on screen forever. Accumulate the fractional part across frames and
+    // only consume whole ticks. `beam = BeamHit{}` on expiry resets the
+    // remainder with the rest of the record.
+    beam.lifetime_remainder += ticks;
+    const std::int16_t whole_ticks =
+        static_cast<std::int16_t>(beam.lifetime_remainder);
+    if (whole_ticks > 0) {
+      beam.lifetime_remainder -= static_cast<float>(whole_ticks);
+      beam.lifetime_ticks =
+          static_cast<std::int16_t>(beam.lifetime_ticks - whole_ticks);
+    }
     if (beam.lifetime_ticks < 0) {
       beam = BeamHit{};
     }
@@ -515,8 +542,16 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
 
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   const std::int16_t bank = ship.active_weapon_bank_slot;
+  // Ship_HandleShip (0x00433050) keeps destroyed slots around long enough for
+  // their death/debris handling, but Weapon_FireShipWeapons must not launch a
+  // bank that was latched before the lethal hit.
   if (ship.ship_instance_id == 0 || bank < 0 || bank >= 0x100 ||
-      ship.ai_fire_trigger_latch == 0) {
+      ship.ai_fire_trigger_latch == 0 || ship.death_timer_active > 0.0F ||
+      ship.armor_points <= 0.0F) {
+    if (ship.death_timer_active > 0.0F || ship.armor_points <= 0.0F) {
+      ship.active_weapon_bank_slot = -1;
+      ship.ai_fire_trigger_latch = 0;
+    }
     return;
   }
   const std::size_t index = static_cast<std::size_t>(bank);
@@ -533,15 +568,15 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     return;
   }
   const std::int16_t mode = weapon->weapon_mode_code;
-  if (mode == 0) {
+  if (mode == 0 || mode == 3) {
     if (!NovaWeapon_QueueBeamHit(state,
                                  ship.ship_instance_id,
                                  ship.primary_target_ship_slot,
                                  bank)) {
       return;
     }
-  } else if (mode != -1 && mode != 1 && mode != 4 && mode != 6 && mode != 7 &&
-             mode != 8) {
+  } else if (mode != -1 && mode != 1 && mode != 4 && mode != 5 && mode != 6 &&
+             mode != 7 && mode != 8 && mode != 9) {
     return;
   } else {
     const int shot_slot =

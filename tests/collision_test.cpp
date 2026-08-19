@@ -230,6 +230,9 @@ TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
   // original ship handler consumes armor <= 0 on its later pass.
   CHECK(state.ShipAt(1).armor_points == Catch::Approx(-15.0F));
   CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(-1.0F));
+  CHECK(state.ShipAt(1).destruction_visual_triggered);
+  REQUIRE(state.impact_effect_instances[0].effect_id == 0);
+  CHECK(state.impact_effect_instances[0].anim_time == Catch::Approx(0.0F));
   CHECK(!NovaWeapon_CanProjectileHitShip(state, ActiveShot{}, 1));
 }
 

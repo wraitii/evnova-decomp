@@ -6,12 +6,14 @@
 #include "../sdl_platform.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
+#include "ship_ai.hpp"
 #include "targeting.hpp"
 #include "weapon.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -390,47 +392,101 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
       std::string name = target_cls ? target_cls->display_name : "?";
       const Government *govt = state.scenario.Government(
           static_cast<std::int16_t>(target.faction_or_government_id + 0x80));
-      // Portrait: blit the class PICT into the panel's left area at native
-      // size (clipped to the panel). The original's portrait box is centred
-      // toward the panel's left; we place it at the top-left and let the text
-      // read out to its right. TargetPortrait resolves the PICT through the
-      // class's clone source and never returns a textureless entry.
+      const HudPanelRect full_panel = anchor_panel(layout_.target_status_panel);
+      // NovaUi_DrawTargetStatusPanel uses three vertical regions: a centred
+      // name line near the top, a 128x64 portrait in the middle, and a
+      // bottom-left condition line. Keeping these regions separate is
+      // important; the old SDL port rendered identity + condition as one
+      // centered line over the portrait.
+      HudPanelRect name_panel = full_panel;
+      name_panel.bottom = static_cast<std::int16_t>(
+          std::min<int>(full_panel.bottom, full_panel.top + 18));
+      HudPanelRect affiliation_panel = full_panel;
+      affiliation_panel.top = static_cast<std::int16_t>(
+          std::min<int>(full_panel.bottom, full_panel.top + 18));
+      affiliation_panel.bottom = static_cast<std::int16_t>(
+          std::min<int>(full_panel.bottom, full_panel.top + 34));
+      HudPanelRect condition_panel = full_panel;
+      condition_panel.top = static_cast<std::int16_t>(
+          std::max<int>(full_panel.top, full_panel.bottom - 18));
+
+      // TargetPortrait resolves the PICT through the class's clone source and
+      // never returns a textureless entry. The original blits into a fixed
+      // centered 128x64 target rectangle, rather than using native PICT size.
       if (const auto *portrait =
               TargetPortrait(platform, state.scenario, target.ship_class_id)) {
-        const HudPanelRect pp = anchor_panel(layout_.target_status_panel);
-        SDL_FRect box{static_cast<float>(pp.left),
-                      static_cast<float>(pp.top),
-                      static_cast<float>(portrait->width),
-                      static_cast<float>(portrait->height)};
-        if (box.w > static_cast<float>(pp.width())) {
-          box.w = static_cast<float>(pp.width());
-        }
-        if (box.h > static_cast<float>(pp.height())) {
-          box.h = static_cast<float>(pp.height());
-        }
+        constexpr float kPortraitWidth = 128.0F;
+        constexpr float kPortraitHeight = 64.0F;
+        SDL_FRect box{
+            static_cast<float>(full_panel.left) +
+                (static_cast<float>(full_panel.width()) - kPortraitWidth) *
+                    0.5F,
+            static_cast<float>(full_panel.top) + 38.0F,
+            kPortraitWidth,
+            kPortraitHeight};
         SDL_RenderTexture(
             platform.renderer(), portrait->texture->get(), nullptr, &box);
       }
       tgt = name;
-      if (govt != nullptr) {
-        tgt += " [" + govt->name + "]";
+      std::string affiliation = govt != nullptr ? govt->name : "";
+      // NovaUi_DrawTargetStatusPanel (0x0045f530) does not append an
+      // unconditional percentage.  0x0200 hides condition. The original
+      // reports shields while they remain, then uses 0x0100 to select armor
+      // after the shield pool is depleted. A negative shield value by itself
+      // means "shields down", not necessarily "disabled"; the original only
+      // uses the latter wording when its fire-restricted predicate is true.
+      const bool hide_status = target_cls != nullptr &&
+                               (target_cls->capability_flags & 0x0200U) != 0U;
+      if (!hide_status && target_cls != nullptr) {
+        std::string status;
+        const bool shields_down = target.shield_points <= 0.0F;
+        const bool fire_restricted =
+            shields_down && NovaAiShip_IsFireRestricted(state, target);
+        const bool show_armor =
+            shields_down && (target_cls->capability_flags & 0x0100U) != 0U;
+        if (fire_restricted) {
+          status = "DISABLED";
+        } else if (shields_down && !show_armor) {
+          status = "SHIELDS DOWN";
+        } else {
+          const float maximum = static_cast<float>(
+              show_armor ? target_cls->base_armor : target_cls->base_shield);
+          const float current =
+              show_armor ? target.armor_points : target.shield_points;
+          if (maximum <= 0.0F) {
+            status = "N/A";
+          } else if (current > maximum) {
+            status = show_armor ? "ARM OK" : "SHD OK";
+          } else {
+            const int pct = static_cast<int>(std::lround(
+                std::clamp(current / maximum * 100.0F, 0.0F, 100.0F)));
+            status = std::string(show_armor ? "ARM " : "SHD ") +
+                     std::to_string(pct) + "%";
+          }
+        }
+        DrawReadout(platform,
+                    *font_cache_,
+                    static_cast<float>(layout_.font_size),
+                    condition_panel,
+                    status,
+                    value_color,
+                    1.0F);
       }
-      // Status: suppressed by 0x0200; otherwise armour % (0x0100) or shield %.
-      const bool no_status = target_cls != nullptr &&
-                             (target_cls->capability_flags & 0x0200U) != 0U;
-      if (!no_status && target_cls != nullptr) {
-        const bool show_armor = (target_cls->capability_flags & 0x0100U) != 0U;
-        const float maximum =
-            std::max(1.0F,
-                     static_cast<float>(show_armor ? target_cls->base_armor
-                                                   : target_cls->base_shield));
-        const float current =
-            show_armor ? target.armor_points : target.shield_points;
-        const int pct = static_cast<int>(
-            std::clamp(current / maximum * 100.0F, 0.0F, 999.0F));
-        tgt += std::string(show_armor ? " ARM " : " SHD ") +
-               std::to_string(pct) + "%";
-      }
+      DrawReadout(platform,
+                  *font_cache_,
+                  static_cast<float>(layout_.font_size),
+                  name_panel,
+                  tgt,
+                  value_color,
+                  1.0F);
+      DrawReadout(platform,
+                  *font_cache_,
+                  static_cast<float>(layout_.font_size),
+                  affiliation_panel,
+                  affiliation,
+                  value_color,
+                  1.0F);
+      tgt.clear();
     } else {
       const std::int16_t sid = state.travel.selected_stellar_id;
       const auto *st = state.scenario.Stellar(sid);
@@ -443,13 +499,15 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
         tgt = "(none)";
       }
     }
-    DrawReadout(platform,
-                *font_cache_,
-                static_cast<float>(layout_.font_size),
-                anchor_panel(layout_.target_status_panel),
-                tgt,
-                value_color,
-                4.0F);
+    if (!tgt.empty()) {
+      DrawReadout(platform,
+                  *font_cache_,
+                  static_cast<float>(layout_.font_size),
+                  anchor_panel(layout_.target_status_panel),
+                  tgt,
+                  value_color,
+                  4.0F);
+    }
   }
 
   // Cargo/mission panel: current credits, the used cargo holding and the

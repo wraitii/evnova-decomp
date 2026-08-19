@@ -185,6 +185,39 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
   state.pending_fire_sounds.clear();
 }
 
+TEST_CASE("destroyed NPCs neither select nor fire a weapon bank",
+          "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.current_system_id = 0;
+  npc.ai_behavior_code = 3;
+  npc.primary_target_ship_slot = 0;
+  npc.armor_points = 0.0F;
+  npc.shield_points = 100.0F;
+  npc.active_weapon_bank_slot = 0;
+  npc.ai_fire_trigger_latch = 1;
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.current_system_id = 0;
+
+  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  CHECK(npc.active_weapon_bank_slot == -1);
+  CHECK(npc.ai_fire_trigger_latch == 0);
+
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+  CHECK(state.active_shots.empty());
+}
+
 // The distance falloff mirrors NovaAudio_PlaySpatialByDistance (0x004692e0)
 // with the sound-volume extent factored out: full volume within 200 px, then
 // per-channel 1/d^2 falloff (loud channel full at 850 px, quiet channel at
@@ -326,6 +359,61 @@ TEST_CASE("fresh-pilot record round-trip keeps the light blaster fireable",
   CHECK(NovaWeapon_CanFireBank(state, 0));
   NovaWeapon_FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
+}
+
+// Regression: queued beam hits must expire at variable frame rates. The port
+// drives the sim once per rendered frame with a fractional elapsed_ticks
+// (frame_time_ms / 33.33 -> ~0.5 at 60fps); the original counts lifetime down
+// by one whole tick per fixed 30-tick/s TickSystems call. Truncating that
+// fraction to int16 before subtracting stalled the countdown at 0, leaving
+// every beam on screen forever. Exercise the exact 60fps cadence: a 13-tick
+// beam must still free its slot after ~26 frames of 0.5-tick steps.
+TEST_CASE("queued beam hits expire at sub-tick frame rates", "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  Ship &owner = state.ShipAt(1);
+  owner.is_active = true;
+  owner.ship_instance_id = 1;
+  owner.ship_class_id = 0;
+  owner.current_system_id = 0;
+  owner.armor_points = 100.0F;
+  owner.shield_points = 100.0F;
+  owner.pos_x = 100.0F;
+  owner.pos_y = 100.0F;
+
+  Ship &target = state.ShipAt(2);
+  target.is_active = true;
+  target.ship_instance_id = 2;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+  target.shield_points = 100.0F;
+  target.pos_x = 300.0F;
+  target.pos_y = 100.0F;
+
+  // Shot_QueueBeamHit (0x00427a90) stores the weapon def's lifetime without
+  // checking the guidance mode, so the Light Blaster (bank 0, Count 13)
+  // queues a 13-tick beam record.
+  REQUIRE(NovaWeapon_QueueBeamHit(state, 1, 2, 0, -1));
+  const BeamHit &beam = state.beam_hit_queue[0];
+  REQUIRE(beam.lifetime_ticks == 13);
+  REQUIRE(beam.lifetime_remainder == Catch::Approx(0.0F));
+
+  // 60fps frame -> elapsed_ticks ~= 16.7 / 33.3 = 0.5. The pre-fix code
+  // subtracted (int16)0.5 == 0 every frame, so this loop never terminated.
+  int frames = 0;
+  while (beam.lifetime_ticks >= 0 && frames < 200) {
+    NovaWeapon_TickBeamHitQueue(state, 0.5F);
+    ++frames;
+  }
+  // 13 ticks of life at 0.5 ticks/frame: lifetime reaches 0 after 26 frames
+  // and the slot frees on the next whole-tick step (~frame 28).
+  CHECK(frames <= 30);
+  CHECK(beam.lifetime_ticks == -2); // reset to the inactive sentinel
 }
 
 } // namespace game

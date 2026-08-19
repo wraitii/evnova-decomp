@@ -27,13 +27,12 @@ std::array<Effect, 4> OutfitEffects(const Outfit &o) {
           Effect{o.alt_mod_types[2], o.alt_mod_vals[2]}};
 }
 
-// Scale applied to the summed shield-recharge bonuses: shield_recharge bonus
-// (opcode 5) = kShieldRechargeScale / modval, in shield points per frame.
-// Ghidra _DAT_00575778. TODO(decomp): verify magnitude against a capture.
-constexpr float kShieldRechargeScale = 50.0F;
+// Ship_ComputeShipShieldRegenRate multiplies each ModType-5 ModVal by
+// _DAT_00575768 (0.001): recharge resource units are points * 1000/frame.
+constexpr float kShieldRechargeScale = 0.001F;
 
-// Symmetric armor-repair bonus scale (opcode 29). Provisional, same caveat.
-constexpr float kArmorRechargeScale = 50.0F;
+// Symmetric armor-repair bonus scale (opcode 29).
+constexpr float kArmorRechargeScale = 0.001F;
 
 // The inventory mutation / cache helpers update this through GameState.
 // Outfit_ComputePlayerEffectiveStats runs a full 0x200-outfit scan; the
@@ -288,7 +287,7 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   s.thrust_raw = cls->accel;
   s.speed_raw = cls->speed;
   s.turn_raw = cls->turn_rate;
-  // Base recharge rates (the loader scaled ShieldRech/ArmorRech). Opcode 5
+  // Base recharge rates (the loader scales ShieldRech/ArmorRech). Opcode 5
   // (kShieldRecharge) and opcode 29 (kArmorRecharge) add to these.
   s.shield_recharge = cls->shield_recharge;
   s.armor_recharge = cls->armor_recharge;
@@ -327,15 +326,14 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
         break;
       case OutfitEffect::kShieldRecharge: // opcode 5
         if (e.val != 0) {
-          s.shield_recharge +=
-              static_cast<float>(owned) *
-              (kShieldRechargeScale / static_cast<float>(e.val));
+          s.shield_recharge += static_cast<float>(owned * e.val) *
+                               kShieldRechargeScale;
         }
         break;
       case OutfitEffect::kArmorRecharge: // opcode 29
         if (e.val != 0) {
-          s.armor_recharge += static_cast<float>(owned) *
-                              (kArmorRechargeScale / static_cast<float>(e.val));
+          s.armor_recharge += static_cast<float>(owned * e.val) *
+                              kArmorRechargeScale;
         }
         break;
       case OutfitEffect::kFuelCapacity: // opcode 12

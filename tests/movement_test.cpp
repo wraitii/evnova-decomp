@@ -3,6 +3,7 @@
 
 #include "game/spaceflight.hpp"
 #include "game/outfit.hpp"
+#include "game/ship_ai.hpp"
 
 #include <numbers>
 
@@ -125,6 +126,34 @@ TEST_CASE("npc forward thrust accelerates along the heading") {
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
   CHECK(ship.vel_y == Catch::Approx(-10.0F)); // polar(0)= up / -y for sin/cos
   CHECK(ship.pos_y == Catch::Approx(-10.0F));
+}
+
+TEST_CASE("disabled and destroyed NPCs do not regenerate") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass();
+  cls.base_shield = 100;
+  cls.base_armor = 100;
+  cls.shield_recharge = 5.0F;
+  cls.armor_recharge = 5.0F;
+  state.scenario.ships.push_back(cls);
+
+  game::Ship disabled;
+  disabled.ship_class_id = 0;
+  disabled.ship_instance_id = 1;
+  disabled.shield_points = 10.0F;
+  disabled.armor_points = 20.0F; // below the original 33% threshold
+  game::NovaShip_IntegrateNpcMovement(state, disabled, cls, 1.0F);
+  CHECK(game::NovaAiShip_IsFireRestricted(state, disabled));
+  CHECK(disabled.shield_points == Catch::Approx(10.0F));
+  CHECK(disabled.armor_points == Catch::Approx(20.0F));
+
+  game::Ship destroyed = disabled;
+  destroyed.shield_points = 10.0F;
+  destroyed.armor_points = 0.0F;
+  game::NovaShip_IntegrateNpcMovement(state, destroyed, cls, 1.0F);
+  CHECK(game::NovaAiShip_IsDestroyed(destroyed));
+  CHECK(destroyed.shield_points == Catch::Approx(10.0F));
+  CHECK(destroyed.armor_points == Catch::Approx(0.0F));
 }
 
 TEST_CASE("npc reverse absolute-sets velocity to heading * abs(desired)") {

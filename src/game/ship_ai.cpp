@@ -216,14 +216,16 @@ bool NovaAiShip_IsFireRestricted(const GameState &state, const Ship &ship) {
   if (ship.ship_instance_id > 0 && ship.target_stellar_object_id != -1) {
     return true;
   }
-  // Critically-damaged gate: armor below a fraction of max armor. Class
-  // capability_flags & 0x10 chooses the stricter/laxer ratio.
+  // Critically-damaged gate: armor below a fraction of max armor. The Bible
+  // threshold is one third, reduced to one tenth by Ship Flags 0x0010.
+  // This gate is also what suppresses NPC shield/armor regeneration in
+  // Ship_HandleShip, so keep it separate from the destruction predicate.
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   const float max_armor = cls ? static_cast<float>(cls->base_armor) : 0.0F;
   if (max_armor > 0.0F) {
     const float ratio =
-        (cls && (cls->capability_flags & 0x10) != 0) ? 0.2F : 0.25F;
+        (cls && (cls->capability_flags & 0x10) != 0) ? 0.1F : (1.0F / 3.0F);
     if (ship.armor_points < max_armor * ratio) {
       return true;
     }
@@ -590,7 +592,13 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
   // post-state weapon refresh still arms their selected bank; restricting
   // this to escort/mission behaviors (>4) left ordinary hostile NPCs with no
   // active weapon at all.
-  if (ship.ai_behavior_code < 3) {
+  // Ship_IsShipDestroyed (0x004688e0) is a separate gate from the
+  // fire-restricted/disabled predicate.  A lethal hit leaves the ship slot
+  // active during its destruction window, but it must not acquire a fresh
+  // weapon bank in the post-state refresh.
+  if (ship.ai_behavior_code < 3 || NovaAiShip_IsDestroyed(ship)) {
+    ship.active_weapon_bank_slot = -1;
+    ship.ai_fire_trigger_latch = 0;
     return;
   }
   const std::int16_t target_slot = ship.primary_target_ship_slot;
@@ -618,9 +626,10 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
     const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
     if (weapon == nullptr ||
         (weapon->weapon_mode_code != -1 && weapon->weapon_mode_code != 0 &&
-         weapon->weapon_mode_code != 1 && weapon->weapon_mode_code != 4 &&
+         weapon->weapon_mode_code != 1 && weapon->weapon_mode_code != 3 &&
+         weapon->weapon_mode_code != 4 && weapon->weapon_mode_code != 5 &&
          weapon->weapon_mode_code != 6 && weapon->weapon_mode_code != 7 &&
-         weapon->weapon_mode_code != 8) ||
+         weapon->weapon_mode_code != 8 && weapon->weapon_mode_code != 9) ||
         !WeaponBankCanFire(state, ship, bank) ||
         (weapon->flags_secondary & 0x400U) !=
             (target_class->capability_flags & 0x400U)) {

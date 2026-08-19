@@ -71,6 +71,11 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   if (stellar->service_cost > 0 && !fee_waived) {
     state.player.credits -= stellar->service_cost;
   }
+  // Stellar_ProcessTravelAndLanding clears the beam queue immediately on
+  // accepted landing; Stellar_TravelToSystem retires projectile ShotStates
+  // before returning to flight. The modal pauses simulation, so clear the
+  // corresponding clean-room transient pools at this boundary.
+  NovaWeapon_ClearTransientCombatState(state);
   // Stellar_TravelToSystem (0x00455e10) runs Weapon_ReconcileOutfitPoolWith-
   // WeaponBanks at the start of the travel transition, so any stock weapon
   // bank acquired since the last reconcile (e.g. a ship bought at the

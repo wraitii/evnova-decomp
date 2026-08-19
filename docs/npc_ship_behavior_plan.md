@@ -368,9 +368,23 @@ Behavior/supervisor at a time. Each is a self-contained state-machine update.
       ModType-17 resource/eligibility predicate used to keep or enter cloak;
       `Ship_IsShipFireRestricted` (0x004687b0) is the separate true-disabled
       / fire-restriction predicate, including the Bible's 33%/10% armor rule.
-- [ ] **Weapon/bank firing for NPCs**: extend the per-bank ammo/cooldown
-      (currently player-centralized) onto `Ship` (+0xC8 row) and implement NPC
-      fire selection from `active_weapon_bank_slot`. Larger; can be deferred.
+- [x] **Weapon/bank firing for NPCs**: NPC ships now carry per-bank ammo,
+      secondary counters, and cooldowns, select a target-compatible bank, and
+      fire it through the shared projectile/beam paths. The selector includes
+      the original direct modes -1/0/1/3/4/5/6/7/8/9; mode-3 turret beams are
+      queued as immediate hits and modes 5/9 use the straight projectile
+      fallback until their specialized aim/flight paths are decoded. A
+      `Ship_IsShipDestroyed` gate prevents lethal/destruction-window ships from
+      being re-armed or firing a bank latched before impact. Turret arcs,
+      homing guidance, burst counts, fuel-energy weapons, carrier bays, and
+      disable/capture side effects remain TODO(decomp).
+- [x] **First destruction presentation slice**: lethal NPC hits now latch a
+      one-shot destruction visual, queue the existing animated impact sprite,
+      and suppress the destroyed hull in `SpaceflightView::DrawNpcShips`.
+      Ground truth is the separate `Shot_SpawnShipDestructionDebrisPuff`
+      (0x00428090) / `Frame_UpdateFadingEffectSprites` (0x0043b170) path;
+      class-specific fading debris sprites, randomized scatter/lifetime, and
+      spatial explosion audio remain TODO(decomp).
 
 ## Phase 6 -- Land on stellars
 

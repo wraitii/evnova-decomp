@@ -240,6 +240,8 @@ void ResolveShipHit(GameState &state,
     return;
   }
 
+  const bool was_destroyed = IsDestroyed(target);
+
   const int armor_damage = static_cast<int>(weapon->mass_damage);
   const int shield_damage = static_cast<int>(weapon->energy_damage);
   const bool bypass_shields = (weapon->flags & 0x0020U) != 0;
@@ -274,6 +276,16 @@ void ResolveShipHit(GameState &state,
         target.armor_points -= static_cast<float>(armor_damage);
       }
     }
+  }
+
+  // Shot_ResolveShipHitFromWeapon leaves destruction as an armor-state. The
+  // later Ship_HandleShip path owns the original fading debris pool; queue the
+  // first visible equivalent at the exact alive -> destroyed transition so a
+  // lethal NPC hit cannot leave its hull silently on screen.
+  if (!was_destroyed && IsDestroyed(target) &&
+      !target.destruction_visual_triggered) {
+    target.destruction_visual_triggered = true;
+    NovaEffects_SpawnShipDestructionBurst(state, target.pos_x, target.pos_y);
   }
 
   if (allow_aggro_updates && target_slot > 0) {
