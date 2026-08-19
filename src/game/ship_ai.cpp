@@ -407,8 +407,8 @@ void EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
     // (burst_cycle AND burst_reset_cooldown) starts with a zeroed burst
     // counter and its cooldown preloaded to the reset cooldown.
     for (std::size_t bank = 0; bank < 0x100; ++bank) {
-      const Weapon *w = state.scenario.Weapon(
-          static_cast<std::int16_t>(bank + 0x80));
+      const Weapon *w =
+          state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
       if (w != nullptr && ship.npc_weapon_bank_ammo[bank] > 0 &&
           w->burst_cycle_ticks > 0 && w->burst_reset_cooldown > 0) {
         ship.npc_weapon_bank_burst_counter[bank] = 0;
@@ -442,8 +442,26 @@ ReadWeaponBank(const GameState &state, const Ship &ship, std::int16_t bank) {
 [[nodiscard]] bool
 WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank) {
   const WeaponBankState bank_state = ReadWeaponBank(state, ship, bank);
-  return bank_state.ammo > 0 && bank_state.cooldown <= 0.0F &&
-         (bank_state.secondary > 0 || bank_state.secondary == -1);
+  if (bank_state.ammo <= 0 || bank_state.cooldown > 0.0F) {
+    return false;
+  }
+  const Weapon *weapon =
+      state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+  if (weapon == nullptr) {
+    return false;
+  }
+  // Weapon_CanFireWeaponBank (0x00468990) only consults the secondary
+  // counter for ammo-backed weapons and carrier-bay weapons.  Energy weapons
+  // use ammo_type == -1 and remain fireable with a zero secondary counter;
+  // requiring secondary > 0 here incorrectly disables NPC energy guns whose
+  // stock record carries no ammunition load.
+  if (weapon->weapon_mode_code == 99) {
+    return bank_state.secondary >= 1;
+  }
+  if (weapon->ammo_type >= 0 && weapon->ammo_type <= 0xff) {
+    return bank_state.secondary >= 1;
+  }
+  return true;
 }
 
 [[nodiscard]] bool WeaponCanTrackTarget(const ShipClass &ship_class,
@@ -463,6 +481,27 @@ WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank) {
   }
   return distance_sq * kInterceptDistanceScale <=
          weapon.range_scalar * weapon.range_scalar;
+}
+
+[[nodiscard]] bool IsTurretWeaponInTargetRange(const Weapon &weapon,
+                                               const Ship &ship,
+                                               const Ship &target) {
+  // Weapon_IsShipWithinWeaponRangeOfTarget (0x00411600) rounds each absolute
+  // axis delta, then compares the squared sum against (range + 32)^2. Beam
+  // modes use BeamLength; projectile turret modes use the post-load +0x5c
+  // effective range. This is intentionally not the generic intercept estimate.
+  const float dx = std::abs(ship.pos_x - target.pos_x);
+  const float dy = std::abs(ship.pos_y - target.pos_y);
+  const bool beam_mode = weapon.weapon_mode_code == 0 ||
+                         weapon.weapon_mode_code == 3 ||
+                         weapon.weapon_mode_code == 10;
+  const float reach = (beam_mode ? static_cast<float>(weapon.beam_length_px)
+                                 : weapon.range_scalar) +
+                      32.0F;
+  const float rounded_dx = static_cast<float>(std::lround(dx));
+  const float rounded_dy = static_cast<float>(std::lround(dy));
+  return reach > 0.0F &&
+         rounded_dx * rounded_dx + rounded_dy * rounded_dy <= reach * reach;
 }
 
 } // namespace
@@ -490,14 +529,13 @@ std::int16_t NovaAi_AimWeaponPredictive(const GameState &state,
   if (weapon_id < 0 || weapon_id >= 0x100) {
     return bearing;
   }
-  const Weapon *w = state.scenario.Weapon(
-      static_cast<std::int16_t>(weapon_id + 0x80));
+  const Weapon *w =
+      state.scenario.Weapon(static_cast<std::int16_t>(weapon_id + 0x80));
   if (w == nullptr) {
     return bearing;
   }
   const int mode = w->weapon_mode_code;
-  const bool lead_capable =
-      mode == -1 || mode == 4 || (mode >= 6 && mode <= 9);
+  const bool lead_capable = mode == -1 || mode == 4 || (mode >= 6 && mode <= 9);
   if (!lead_capable) {
     return bearing;
   }
@@ -694,6 +732,8 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
       SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
   std::int16_t best_bank = -1;
   std::int32_t best_score = -1;
+  std::int16_t best_turret_bank = -1;
+  std::int32_t best_turret_score = -1;
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
     const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
     if (weapon == nullptr ||
@@ -701,15 +741,22 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
          weapon->weapon_mode_code != 1 && weapon->weapon_mode_code != 3 &&
          weapon->weapon_mode_code != 4 && weapon->weapon_mode_code != 5 &&
          weapon->weapon_mode_code != 6 && weapon->weapon_mode_code != 7 &&
-         weapon->weapon_mode_code != 8 && weapon->weapon_mode_code != 9) ||
+         weapon->weapon_mode_code != 8) ||
         !WeaponBankCanFire(state, ship, bank) ||
         (weapon->flags_secondary & 0x400U) !=
             (target_class->capability_flags & 0x400U)) {
       continue;
     }
-    if (weapon->range_scalar > 0.0F &&
-        distance_sq * kInterceptDistanceScale >
-            weapon->range_scalar * weapon->range_scalar) {
+    const bool turret_mode =
+        weapon->weapon_mode_code == 3 || weapon->weapon_mode_code == 4 ||
+        weapon->weapon_mode_code == 7 || weapon->weapon_mode_code == 8;
+    if (turret_mode) {
+      if (!IsTurretWeaponInTargetRange(*weapon, ship, target)) {
+        continue;
+      }
+    } else if (weapon->range_scalar > 0.0F &&
+               distance_sq * kInterceptDistanceScale >
+                   weapon->range_scalar * weapon->range_scalar) {
       continue;
     }
     const float target_bearing =
@@ -730,9 +777,21 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
       best_bank = bank;
       best_score = score;
     }
+    // Ghidra's Weapon_SelectWeaponBankForCurrentTarget (0x0040ce00) is a
+    // separate turret/quadrant selection path from the guided/direct helpers.
+    // Keep that distinction here: otherwise a higher-damage mode-1 hailgun
+    // permanently wins the clean-room all-mode ranking over an Abomination's
+    // mode-4 pulse cannon, even though the original arms turret banks on
+    // their own control-mode passes.
+    if (turret_mode && (best_turret_bank == -1 || score > best_turret_score)) {
+      best_turret_bank = bank;
+      best_turret_score = score;
+    }
   }
-  if (best_bank != -1) {
-    ship.active_weapon_bank_slot = best_bank;
+  const std::int16_t selected_bank =
+      best_turret_bank != -1 ? best_turret_bank : best_bank;
+  if (selected_bank != -1) {
+    ship.active_weapon_bank_slot = selected_bank;
     ship.ai_fire_trigger_latch = 1;
   }
 }
@@ -2154,9 +2213,8 @@ void NovaAi_ApplyControls(GameState &state,
     // candidate; a -1 active bank has no weapon context, so the helper falls
     // back to the straight bearing below). Non-lead weapon modes return the
     // straight bearing too, matching the original mode-6 branch.
-    ship.ai_desired_heading_deg =
-        NovaAi_AimWeaponPredictive(state, ship, target,
-                                   ship.active_weapon_bank_slot);
+    ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
+        state, ship, target, ship.active_weapon_bank_slot);
     // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
     if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
       ship.ai_forward_thrust_cmd = eff_thrust;
@@ -2330,9 +2388,8 @@ void NovaAi_ApplyControls(GameState &state,
     // (Ship_AimWeaponPredictive with the active bank weapon) whenever a
     // weapon candidate is present. Mirror mode 6 using the live bank; the
     // helper returns the straight bearing when no bank is armed.
-    ship.ai_desired_heading_deg =
-        NovaAi_AimWeaponPredictive(state, ship, target,
-                                   ship.active_weapon_bank_slot);
+    ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
+        state, ship, target, ship.active_weapon_bank_slot);
     if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
       // Weapon_SelectDirectFireWeaponBankForPrimaryTarget +
       // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).

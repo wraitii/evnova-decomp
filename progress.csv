@@ -16,7 +16,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0040C790,Stellar_SelectRandomAdjacentTravelStellar,src/game/ship_ai.cpp,40%,"NovaAi_SelectRandomAdjacentTravelStellar: availability/travel-flag/govt-hostility candidates, uniform random pick; weighted scan-mask pools deferred"
 0x0040CC10,Stellar_FindNearestAdjacentTravelStellar,,0%,
 0x0040CD80,Stellar_IsStellarAdjacentToCurrentSystem,src/game/targeting.cpp,100%,"NovaTargeting_IsStellarAdjacentToSystem: matches a stellar id against a system's nav list, preserving the empty-nav-list == adjacent quirk"
-0x0040CE00,Weapon_SelectWeaponBankForCurrentTarget,,0%,
+0x0040CE00,Weapon_SelectWeaponBankForCurrentTarget,src/game/ship_ai.cpp,45%,"NovaAi_UpdateAutoWeaponSelectionFromTarget: target-validity and bank selection use projectile travel reach (speed * lifetime) with the turret's rounded axis +32 allowance; mode/range ranking remains a clean-room subset."
 0x0040D220,Weapon_SelectGuidedWeaponBankForPrimaryTarget,,0%,
 0x0040D470,Weapon_SelectDirectFireWeaponBankForPrimaryTarget,,0%,
 0x0040D7E0,Weapon_SelectUnguidedWeaponBank,,0%,
@@ -62,7 +62,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00411540,Ship_UpdateAutoWeaponSelectionFromTarget,src/game/ship_ai.cpp,70%,"NovaAi_UpdateAutoWeaponSelectionFromTarget: combat-behavior target validation/stale-target clearing plus unguided/beam/guided mode, ammo, cooldown, capability, range, and arc bank selection with fire latch. Full weapon priority tables and turret spread remain deferred."
 0x004115A0,Ship_IsShipInAiState0x0D,,0%,
 0x004115C0,Ship_ClearShipState0x09Or0x0FToIdle,,0%,
-0x00411600,Weapon_IsShipWithinWeaponRangeOfTarget,,0%,
+0x00411600,Weapon_IsShipWithinWeaponRangeOfTarget,src/game/ship_ai.cpp,35%,"NovaAi_UpdateAutoWeaponSelectionFromTarget range helper: rounds absolute X/Y deltas and compares squared distance against (BeamLength or effective projectile range + 32)^2; angular arc selection remains separate"
 0x00411800,Ship_ComputePerceivedCombatStrengthAgainstShip,,0%,
 0x00411AE0,Ship_ShouldSwitchToEscortWingmanTarget,,0%,
 0x00411B40,Ship_IsWingmanMirrorTargetStillValid,,0%,
@@ -82,7 +82,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00413B60,Ship_SetEscortLaunchOffsetVelocity,,0%,
 0x00414390,Ship_MoveShipTowardFormationOffset,,0%,
 0x00414530,Ship_IsShipInAiState0x11,,0%,
-0x00414550,Weapon_FireShipWeapons,src/game/weapon.cpp,60%,"NovaWeapon_FireNpcWeaponBank: burst volleys (Weapon_GetWeaponBurstAttempts 0x0046f2c0 + per-bank burst-cycle counter/reset-cooldown, Weapon_GetWeaponFireIntervalTicks 0x0046f270, init in EnsureNpcWeaponBanks mirroring Weapon_InitShipWeaponBursts 0x00413810); per-burst readiness gate and ammo consumption; turret arc/quadrant gating (Weapon_IsWeaponArcAllowed 0x0046b360 fixed sectors for modes 3/4 within range_scalar+32, front/rear 46-deg quadrant gate for modes 7/8); fire-time predictive lead for turret modes 4/7/8 (Shot_SpawnShotFromWeapon). Straight modes -1/6 fire along the hull heading (AI now leads it). Cooldown = shots_fired*speed_scalar/mount (or reload for burst) + burst_reset on cycle wrap. Deferred: player-combat-rating cooldown ladder, carrier-bay (mode 99), PD (mode 9) target selection, recoil, energy/fuel paths (TODO(decomp))."
+0x00414550,Weapon_FireShipWeapons,src/game/weapon.cpp,65%,"NovaWeapon_FireNpcWeaponBank: burst volleys (Weapon_GetWeaponBurstAttempts 0x0046f2c0 + per-bank burst-cycle counter/reset-cooldown, Weapon_GetWeaponFireIntervalTicks 0x0046f270, init in EnsureNpcWeaponBanks mirroring Weapon_InitShipWeaponBursts 0x00413810); per-burst readiness gate and live per-shot ammo consumption; energy weapons no longer require a secondary counter; mode-3 beam reach uses BeamLength+32, mode-4/7/8 projectile reach uses effective range+32; fixed flag-based arcs and front/rear 46-deg quadrant gates remain separate; fire-time predictive lead for turret modes 4/7/8 (Shot_SpawnShotFromWeapon). Straight modes -1/6 fire along the hull heading (AI now leads it). Cooldown = shots_fired*speed_scalar/mount (or reload for burst) + burst_reset on cycle wrap. Deferred: player-combat-rating cooldown ladder, carrier-bay (mode 99), PD (mode 9) target selection, recoil, energy/fuel paths (TODO(decomp))."
 0x004152E0,Ship_UpdateShipDistressResponseMode,,0%,
 0x004156A0,Ship_ReacquireAiTargetLeader,,0%,
 0x004159A0,Ship_IsShipInAiControlMode0x17,,0%,
@@ -410,7 +410,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004687B0,Ship_IsShipFireRestricted,src/game/ship_ai.cpp,35%,"NovaAiShip_IsFireRestricted: government/mission/stellar restrictions plus verified Bible armor disable threshold (33%, or 10% with Ship Flags 0x0010); this gate also suppresses NPC recharge; cloak visibility remains separate"
 0x004688E0,Ship_IsShipDestroyed,src/game/ship_ai.cpp,100%,"NovaAiShip_IsDestroyed: death-timer-active or armor<=0"
 0x00468920,Ship_CanPlayerHaveMoreEscorts,,0%,
-0x00468990,Weapon_CanFireWeaponBank,src/game/weapon.cpp,35%,ammo/energy sufficiency gate for a bank via NovaWeapon_CanFireBank (incl. carrier-bay dependency + ammo counter); cloak-visibility / NPC-ammo / launch-bay-dependency gates not reproduced
+0x00468990,Weapon_CanFireWeaponBank,src/game/weapon.cpp,50%,ammo/energy sufficiency gate now distinguishes energy weapons (ammo_type == -1), ammo-backed weapons, and carrier-bay mode 99 for both player and NPC bank storage; cloak-visibility / launch-bay-dependency gates not reproduced
 0x00468AF0,System_HasUsableTravelDestination,,0%,
 0x00468B50,Stellar_IsStellarReachableForTravel,,0%,
 0x00468D90,NovaUi_DrawSystemFactionConflictStatus,,0%,

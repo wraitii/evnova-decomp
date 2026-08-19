@@ -185,6 +185,85 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
   state.pending_fire_sounds.clear();
 }
 
+TEST_CASE("NPC energy weapons do not need a secondary ammo counter",
+          "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  Ship &player = state.player;
+  player.is_active = true;
+  player.ship_instance_id = 0;
+  player.ship_class_id = 0;
+  player.current_system_id = 0;
+  player.armor_points = 100.0F;
+  player.shield_points = 100.0F;
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.current_system_id = 0;
+  npc.ai_behavior_code = 3;
+  npc.primary_target_ship_slot = 0;
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+
+  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  REQUIRE(npc.active_weapon_bank_slot == 0);
+  // The original treats the Light Blaster's ammo_type == -1 as an energy /
+  // unlimited bank; a zero secondary counter must not suppress firing.
+  npc.npc_weapon_bank_secondary[0] = 0;
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(npc.npc_weapon_bank_secondary[0] == 0);
+}
+
+TEST_CASE("Abomination can select and fire its pulse cannon", "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  Ship &player = state.player;
+  player.is_active = true;
+  player.ship_instance_id = 0;
+  player.ship_class_id = 0;
+  player.current_system_id = 0;
+  player.armor_points = 100.0F;
+  player.shield_points = 100.0F;
+  player.pos_x = 0.0F;
+  // The Fusion Pulse Battery's post-load effective range is 55 * 9 = 495 px;
+  // mode-4 turret firing gets the original additional 32-pixel envelope.
+  player.pos_y = -450.0F;
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  // Class resource 0xf2 is the standard Abomination with pulse cannons.
+  npc.ship_class_id = 0xf2 - 0x80;
+  npc.current_system_id = 0;
+  npc.ai_behavior_code = 4;
+  npc.primary_target_ship_slot = 0;
+  npc.armor_points = 100.0F;
+  npc.shield_points = 100.0F;
+  npc.pos_x = 0.0F;
+  npc.pos_y = 0.0F;
+  npc.heading = 0.0F;
+
+  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  // The turret selector must keep the pulse cannon distinct from the loaded
+  // mode-1 hailgun; the original does not let the latter win by damage score.
+  REQUIRE(npc.active_weapon_bank_slot == 34);
+
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].weapon_id == 34);
+}
+
 TEST_CASE("destroyed NPCs neither select nor fire a weapon bank",
           "[weapon][npc]") {
   if (!ArchivesAvailable()) {

@@ -72,12 +72,20 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(w->flags_quaternary == 0U); // was mislabeled 'seeker'
   CHECK(w->flags_secondary == 0U);  // (payload +0x48)
   CHECK(w->flags_tertiary == 2U);   // (payload +0x66)
-  CHECK(w->turret_arc_degrees == 0);
+  CHECK(w->beam_length_px == 0);
   CHECK(w->shot_anim_frame_dwell == 0);
   CHECK(w->kickback_impulse == 0);
   CHECK(w->burst_cycle_ticks == 0); // (the old mislabeled 'max_ammo' at +0x5a)
   CHECK(w->burst_reset_cooldown == 0);
   CHECK(w->retarget_interval_ticks == 0);
+
+  const Weapon *pulse = data.Weapon(0xa2);
+  REQUIRE(pulse != nullptr);
+  CHECK(pulse->weapon_mode_code == 4);
+  CHECK(pulse->projectile_speed == 900.0F); // 9 px/frame * 100
+  CHECK(pulse->lifetime_ticks == 55);
+  CHECK(pulse->beam_length_px == 0);
+  CHECK(pulse->range_scalar == 495.0F); // 9 px/frame * 55 frames
 
   // Outfits load; the first outfit is a weapon-type (ModType 1 -> weapon).
   CHECK(data.Outfit(0x80) != nullptr);

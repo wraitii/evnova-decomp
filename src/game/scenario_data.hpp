@@ -114,45 +114,45 @@ void NovaControlExpression_ExecuteSet(
 // source bytes while the remaining fields are decoded.
 struct MissionDef {
   bool present = false;
-  std::int16_t link_system_filter = -1; // MisnDef +0x00
-  std::int16_t return_stellar_id = -1; // +0x02
-  std::int16_t special_ship_goal = 0; // +0x06
-  std::int16_t special_ship_behavior = 0; // +0x08
-  std::int16_t special_ship_start = 0; // +0x0a
-  std::int16_t special_ship_count = 0; // +0x12
-  std::int16_t special_ship_system = -1; // +0x10
-  std::int16_t on_fail_condition = -1; // +0x0c
-  std::int16_t on_success_condition = -1; // +0x0e
-  std::int16_t aux_ship_dude = -1; // resource +0x24
-  std::int16_t aux_ship_system = -1; // resource +0x22
-  std::int16_t special_ship_dude = -1; // MisnDef +0x1a
-  std::int16_t on_start_condition = -1; // +0x0e in runtime projection
-  std::int16_t cargo_type = -1; // +0x40
-  std::int16_t cargo_quantity = 0; // +0x42
+  std::int16_t link_system_filter = -1;     // MisnDef +0x00
+  std::int16_t return_stellar_id = -1;      // +0x02
+  std::int16_t special_ship_goal = 0;       // +0x06
+  std::int16_t special_ship_behavior = 0;   // +0x08
+  std::int16_t special_ship_start = 0;      // +0x0a
+  std::int16_t special_ship_count = 0;      // +0x12
+  std::int16_t special_ship_system = -1;    // +0x10
+  std::int16_t on_fail_condition = -1;      // +0x0c
+  std::int16_t on_success_condition = -1;   // +0x0e
+  std::int16_t aux_ship_dude = -1;          // resource +0x24
+  std::int16_t aux_ship_system = -1;        // resource +0x22
+  std::int16_t special_ship_dude = -1;      // MisnDef +0x1a
+  std::int16_t on_start_condition = -1;     // +0x0e in runtime projection
+  std::int16_t cargo_type = -1;             // +0x40
+  std::int16_t cargo_quantity = 0;          // +0x42
   std::int16_t on_resolve_repeat_count = 0; // +0x48
-  std::int32_t resource_delta_or_cost = 0; // +0x4a
-  std::int16_t aux_ships_left = 0; // +0x50
-  std::int16_t initial_ship_count = 0; // +0x52
-  std::uint16_t flags_primary = 0; // +0x54
-  std::uint16_t flags_secondary = 0; // +0x56
+  std::int32_t resource_delta_or_cost = 0;  // +0x4a
+  std::int16_t aux_ships_left = 0;          // +0x50
+  std::int16_t initial_ship_count = 0;      // +0x52
+  std::uint16_t flags_primary = 0;          // +0x54
+  std::uint16_t flags_secondary = 0;        // +0x56
   // Additional fields copied by Mission_PopulateMissionSlotFromDef
   // (0x0043f8c0). Names are intentionally descriptive but provisional where
   // the original MissionDef member remains unnamed.
-  std::int16_t target_ship_count = 0; // resource +0x20
-  std::int16_t current_system_locator = -1; // +0x22
-  std::int16_t spawn_behavior = 0; // +0x26
-  std::int16_t fleet_spawn_goal = 0; // +0x28
-  std::int16_t special_ship_spawn_mode = 0; // +0x2c
-  std::int16_t competing_government_id = -1; // +0x2e
-  std::int16_t competing_reputation_delta = 0; // +0x30
+  std::int16_t target_ship_count = 0;            // resource +0x20
+  std::int16_t current_system_locator = -1;      // +0x22
+  std::int16_t spawn_behavior = 0;               // +0x26
+  std::int16_t fleet_spawn_goal = 0;             // +0x28
+  std::int16_t special_ship_spawn_mode = 0;      // +0x2c
+  std::int16_t competing_government_id = -1;     // +0x2e
+  std::int16_t competing_reputation_delta = 0;   // +0x30
   std::int16_t special_ship_name_string_id = -1; // +0x2a
-  std::int16_t random_text_string_id = -1; // +0x32
-  std::int16_t mission_ship_count_max = 0; // +0x48
-  std::int16_t auxiliary_ship_dude = -1; // +0x4c
-  std::int16_t mission_fleet_metric = 0; // +0x4a
-  std::int16_t start_system_locator = -1; // +0x22, resolved at accept
-  bool start_visited = false; // +0x42
-  std::int16_t initial_briefing_id = -1; // +0x34
+  std::int16_t random_text_string_id = -1;       // +0x32
+  std::int16_t mission_ship_count_max = 0;       // +0x48
+  std::int16_t auxiliary_ship_dude = -1;         // +0x4c
+  std::int16_t mission_fleet_metric = 0;         // +0x4a
+  std::int16_t start_system_locator = -1;        // +0x22, resolved at accept
+  bool start_visited = false;                    // +0x42
+  std::int16_t initial_briefing_id = -1;         // +0x34
   std::array<std::int16_t, 8> brief_description_ids{}; // +0x34..+0x42
   // Mission availability expression from the resource string block (+0x5c).
   // The original caches its result at MisnDef +0x16.
@@ -168,20 +168,20 @@ struct MissionDef {
 // weapon delta arrays are kept because they are semantically load-bearing for
 // mission-ship spawning; unknown bytes remain available in raw_payload.
 struct MissionShipDef {
-  std::int16_t spawn_system_filter = -1; // +0x00
-  std::int16_t government_id = -1; // +0x02
-  std::int16_t ai_behavior_code = 0; // +0x04
-  std::int16_t aggression_level = 0; // +0x06
-  std::int16_t ship_class_id = -1; // +0x0a
-  std::array<std::int16_t, 0x100> weapon_ammo_delta{}; // +0x18
+  std::int16_t spawn_system_filter = -1;                    // +0x00
+  std::int16_t government_id = -1;                          // +0x02
+  std::int16_t ai_behavior_code = 0;                        // +0x04
+  std::int16_t aggression_level = 0;                        // +0x06
+  std::int16_t ship_class_id = -1;                          // +0x0a
+  std::array<std::int16_t, 0x100> weapon_ammo_delta{};      // +0x18
   std::array<std::int16_t, 0x100> weapon_secondary_delta{}; // +0x418
-  std::int32_t booty_base_credits = 0; // +0x618
-  float shield_armor_scale = 1.0F; // +0x61c
-  bool is_available_runtime = false; // +0x620
-  std::uint8_t runtime_flag_a = 0; // +0x622
-  std::uint8_t runtime_flag_b = 0; // +0x623
-  std::uint8_t unique_spawn_tag = 0; // +0x624
-  std::string availability_expression; // +0x644, max 326 bytes
+  std::int32_t booty_base_credits = 0;                      // +0x618
+  float shield_armor_scale = 1.0F;                          // +0x61c
+  bool is_available_runtime = false;                        // +0x620
+  std::uint8_t runtime_flag_a = 0;                          // +0x622
+  std::uint8_t runtime_flag_b = 0;                          // +0x623
+  std::uint8_t unique_spawn_tag = 0;                        // +0x624
+  std::string availability_expression;      // +0x644, max 326 bytes
   std::int16_t display_name_string_id = -1; // +0x78a
   std::array<std::byte, 0x794> raw_payload{};
 };
@@ -209,15 +209,15 @@ struct ShipClass {
   std::string short_name;   // shipyard menu label
   std::string long_name;    // purchase dialog / new-pilot text
 
-  std::int16_t cargo_holds = 0;    // Holds
-  std::int16_t base_shield = 0;    // Shield
-  std::int16_t base_armor = 0;     // Armor
-  std::int16_t base_fuel = 0;      // Fuel (100 = 1 jump)
-  std::int16_t free_mass = 0;      // FreeMass
-  std::int16_t mass_tons = 0;      // Mass
-  std::int16_t length_meters = 0;  // Length
-  std::int16_t tech_level = 0;     // TechLevel
-  std::int32_t cost = 0;           // Cost
+  std::int16_t cargo_holds = 0;   // Holds
+  std::int16_t base_shield = 0;   // Shield
+  std::int16_t base_armor = 0;    // Armor
+  std::int16_t base_fuel = 0;     // Fuel (100 = 1 jump)
+  std::int16_t free_mass = 0;     // FreeMass
+  std::int16_t mass_tons = 0;     // Mass
+  std::int16_t length_meters = 0; // Length
+  std::int16_t tech_level = 0;    // TechLevel
+  std::int32_t cost = 0;          // Cost
   // Bible: DeathDelay, Explode1, and Explode2.
   std::int16_t death_delay_frames = 0;
   std::int16_t destruction_effect_while_breaking = -1;
@@ -398,9 +398,10 @@ struct Weapon {
   std::int16_t weapon_mode_code = 0; // (runtime alias of Guidance)
   float projectile_speed = 0.0F;     // Speed_a, raw (pixels/frame * 100);
                                      // divide by 100 for px/frame.
-  // Range scalar used by the AI's intercept/range predicates (WeaponDef
-  // range_scalar, in-memory field_0x5c). Zero means that the source weapon
-  // carries no usable range value.
+  // WeaponDef +0x5c, built by the original loader after all weapons are read.
+  // For projectile-like modes this is the normalized speed * lifetime, plus
+  // any linked weapon contributions. Turret selection adds the original
+  // 32-pixel reach allowance at the call site.
   float range_scalar = 0.0F;
   std::int16_t ammo_type = -1; // AmmoType_c (ammo_or_energy_cost_code)
 
@@ -435,8 +436,9 @@ struct Weapon {
   std::uint16_t flags_secondary = 0;  // (resource +0x48, flags_secondary)
   std::uint16_t flags_tertiary = 0;   // (resource +0x66, flags_tertiary)
 
-  std::int16_t turret_arc_degrees = 0; // (resource +0x30, was mislabeled
-                                       // beam_length)
+  // The resource field is BeamLength, not a turret angle. The original uses
+  // BeamLength + 32 as the range envelope for beam modes 0/3/10.
+  std::int16_t beam_length_px = 0; // resource +0x30 / Ghidra +0x70
   // Ghidra WeaponDef.homing_strength_or_turn_rate (+0x72, loaded from resource
   // +0x32): dual-purpose. For an animation-frame weapon set it is the shot
   // animation frame-dwell time in ms (Shot_HandleShot accumulates it into
@@ -456,6 +458,13 @@ struct Weapon {
                                       // max_ammo)
   std::int16_t burst_reset_cooldown = 0;
   std::int16_t retarget_interval_ticks = 0;
+
+  // Resource +0x3e/+0x40/+0x44 feed the original loader's post-pass range
+  // calculation. A valid link adds that weapon's travel distance; the final
+  // count is used only for the self-link special case.
+  std::int16_t range_link_gate = 0;
+  std::int16_t range_link_weapon_id = -1; // zero-based, -1 when absent
+  std::int16_t range_link_extra_count = 0;
 
   std::array<std::int16_t, 4> jam_vuln{}; // JamVuln1-4 (resource +0x5e..)
 };

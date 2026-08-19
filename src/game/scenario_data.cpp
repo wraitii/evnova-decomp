@@ -138,7 +138,6 @@ namespace {
   w.guidance_mode = ReadBeI16(bytes, 0x08);
   w.weapon_mode_code = w.guidance_mode;
   w.projectile_speed = static_cast<float>(ReadBeI16(bytes, 0x0a));
-  w.range_scalar = std::bit_cast<float>(ReadBe32(bytes, 0x34));
   w.ammo_type = ReadBeI16(bytes, 0x0c);
   w.sprite_id = ReadBeI16(bytes, 0x0e);
   w.inaccuracy = ReadBeI16(bytes, 0x10);
@@ -155,17 +154,67 @@ namespace {
   w.flags_quaternary = ReadBe16(bytes, 0x1e);
   w.flags_secondary = ReadBe16(bytes, 0x48);
   w.flags_tertiary = ReadBe16(bytes, 0x66);
-  w.turret_arc_degrees = ReadBeI16(bytes, 0x30);
+  w.beam_length_px = ReadBeI16(bytes, 0x30);
   w.shot_anim_frame_dwell = ReadBeI16(bytes, 0x32);
   w.kickback_impulse = ReadBeI16(bytes, 0x56);
   w.turret_group_id = ReadBeI16(bytes, 0x58);
   w.burst_cycle_ticks = ReadBeI16(bytes, 0x5a);
   w.burst_reset_cooldown = ReadBeI16(bytes, 0x5c);
   w.retarget_interval_ticks = ReadBeI16(bytes, 0x68);
+  w.range_link_gate = ReadBeI16(bytes, 0x3e);
+  const auto range_link_resource_id = ReadBeI16(bytes, 0x40);
+  w.range_link_weapon_id =
+      range_link_resource_id >= 0x80
+          ? static_cast<std::int16_t>(range_link_resource_id - 0x80)
+          : -1;
+  w.range_link_extra_count = ReadBeI16(bytes, 0x44);
   for (std::size_t i = 0; i < 4; ++i) {
     w.jam_vuln[i] = ReadBeI16(bytes, 0x5e + i * 2);
   }
   return w;
+}
+
+void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
+  // NovaData_LoadScenarioResourceTables (0x004bd3c0) performs this pass
+  // after loading every weapon. Speed is stored in the resource as pixels per
+  // frame * 100, while the runtime range field uses normalized pixels/frame.
+  for (std::size_t index = 0; index < weapons.size(); ++index) {
+    Weapon &weapon = weapons[index];
+    weapon.range_scalar = 0.0F;
+    const auto mode = weapon.weapon_mode_code;
+    if (mode == 0 || mode == 3 || mode == 10) {
+      weapon.range_scalar = static_cast<float>(weapon.beam_length_px);
+      continue;
+    }
+    const bool projectile_range_mode =
+        mode == -1 || mode == 1 || mode == 4 || (mode >= 6 && mode <= 9);
+    if (!projectile_range_mode) {
+      continue;
+    }
+
+    std::size_t current = index;
+    for (std::size_t hops = 0; hops <= weapons.size(); ++hops) {
+      Weapon &linked = weapons[current];
+      weapon.range_scalar += static_cast<float>(linked.lifetime_ticks) *
+                             (linked.projectile_speed / 100.0F);
+      if (linked.range_link_gate < 1 || linked.range_link_weapon_id < 0 ||
+          linked.range_link_weapon_id >=
+              static_cast<std::int16_t>(weapons.size())) {
+        break;
+      }
+      const auto next = static_cast<std::size_t>(linked.range_link_weapon_id);
+      if (next == current) {
+        if (linked.range_link_extra_count > 0) {
+          weapon.range_scalar +=
+              static_cast<float>(linked.lifetime_ticks) *
+              static_cast<float>(linked.range_link_extra_count) *
+              (linked.projectile_speed / 100.0F);
+        }
+        break;
+      }
+      current = next;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -961,6 +1010,7 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_weapons;
     }
   }
+  ComputeWeaponEffectiveRanges(weapons);
   for (std::int32_t id = 0x80; id <= 0x57f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
             scenario::kStellarResourceType, static_cast<std::uint16_t>(id))) {
