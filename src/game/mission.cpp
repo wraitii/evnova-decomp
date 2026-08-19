@@ -2,6 +2,7 @@
 
 #include "game_state.hpp"
 #include "government.hpp"
+#include "outfit.hpp"
 #include "ship_spawn.hpp"
 
 #include <algorithm>
@@ -21,6 +22,45 @@ constexpr std::int16_t kResourceIdBase = 0x80;
       });
 }
 
+[[nodiscard]] bool Mission_PassesAcceptanceResourceGates(
+    const GameState &state, const MissionDef &definition) {
+  if (definition.special_ship_count > 0 && state.player.ship_class_id >= 0) {
+    const auto *ship_class = state.scenario.Ship(static_cast<std::int16_t>(
+        state.player.ship_class_id + kResourceIdBase));
+    if (ship_class != nullptr) {
+      // Mission_ActivateMissionAtSlot checks both cargo and hull mass before
+      // opening its original error dialog. Outfit purchase mass is already
+      // normalized for hull-proportional outfits by ScenarioData.
+      std::int32_t total_mass = ship_class->mass_tons;
+      for (std::size_t outfit_id = 0;
+           outfit_id < state.inventory.outfit_owned_count.size();
+           ++outfit_id) {
+        const auto owned = state.inventory.outfit_owned_count[outfit_id];
+        if (owned <= 0 || outfit_id >= state.scenario.outfits.size()) {
+          continue;
+        }
+        total_mass += static_cast<std::int32_t>(owned) *
+                      state.scenario.outfits[outfit_id].PurchaseMass(
+                          ship_class->mass_tons);
+      }
+      if (total_mass < definition.special_ship_count ||
+          Outfit_ComputeRemainingCargoSpace(state) <
+              definition.special_ship_count) {
+        return false;
+      }
+    }
+  }
+  // Mission_ActivateMissionAtSlot charges the amount below -50000 as an
+  // acceptance cost. The remaining positive/neutral values are rewards or
+  // deferred accounting and do not block the BBS entry.
+  if (definition.resource_delta_or_cost < -50000 &&
+      state.player.credits <
+          -50000 - definition.resource_delta_or_cost) {
+    return false;
+  }
+  return true;
+}
+
 [[nodiscard]] std::int16_t ResolveContainingSystem(const GameState &state,
                                                     std::int16_t stellar_id) {
   if (stellar_id < 0 || stellar_id >=
@@ -30,7 +70,7 @@ constexpr std::int16_t kResourceIdBase = 0x80;
   return state.scenario.stellars[static_cast<std::size_t>(stellar_id)].system_id;
 }
 
-[[nodiscard]] std::int16_t ResolveMissionStellar(const GameState &state,
+[[nodiscard]] std::int16_t ResolveMissionStellar(GameState &state,
                                                  std::int16_t locator,
                                                  std::int16_t excluded,
                                                  std::int16_t fallback) {
@@ -49,11 +89,10 @@ constexpr std::int16_t kResourceIdBase = 0x80;
 
   // Mission_SelectMissionStellarByLocator (0x0043d510) chooses randomly from
   // a filtered stellar set. The clean-room model has no separate travel graph
-  // yet, so availability/system membership are the verified gates and the
-  // A stable first-match policy is used here because locator resolution is
-  // also called while evaluating a const mission-list snapshot. The original
-  // uses NovaRandom_Range; random selection remains a tracked divergence until
-  // the locator cache is made an explicit mutable runtime step.
+  // yet, so availability/system membership remain the verified gates. Keep
+  // the selection random once the candidate set is known; target resolution
+  // is an explicit runtime step and state.rng is the port's replacement for
+  // NovaRandom_Range.
   const auto same_government_class = [&state](std::int16_t lhs,
                                                std::int16_t rhs,
                                                bool require_match) {
@@ -128,7 +167,8 @@ constexpr std::int16_t kResourceIdBase = 0x80;
   if (candidates.empty()) {
     return fallback;
   }
-  return candidates.front();
+  std::uniform_int_distribution<std::size_t> roll(0, candidates.size() - 1);
+  return candidates[roll(state.rng)];
 }
 
 [[nodiscard]] std::vector<std::int16_t> EvaluateMissionPage(
@@ -182,7 +222,10 @@ constexpr std::int16_t kResourceIdBase = 0x80;
       continue;
     }
     if (mission.present && mission.is_available_runtime) {
-      result.push_back(id);
+      if (!IsActiveMission(state, id) &&
+          Mission_PassesAcceptanceResourceGates(state, mission)) {
+        result.push_back(id);
+      }
     }
   }
   std::stable_sort(result.begin(), result.end(), [&](auto lhs, auto rhs) {
@@ -226,10 +269,10 @@ constexpr std::int16_t kResourceIdBase = 0x80;
 }
 
 [[nodiscard]] std::int16_t ResolveMissionSystemByLocator(
-    const GameState &state, std::int16_t locator, std::int16_t fallback);
+    GameState &state, std::int16_t locator, std::int16_t fallback);
 
 [[nodiscard]] std::int16_t ResolveMissionCurrentSystem(
-    const GameState &state, const MissionDef &definition,
+    GameState &state, const MissionDef &definition,
     const MissionTargetResolution &target) {
   const auto locator = definition.current_system_locator;
   if (locator == -1) {
@@ -274,7 +317,7 @@ constexpr std::int16_t kResourceIdBase = 0x80;
 }
 
 [[nodiscard]] std::int16_t ResolveMissionSystemByLocator(
-    const GameState &state, std::int16_t locator, std::int16_t fallback) {
+    GameState &state, std::int16_t locator, std::int16_t fallback) {
   if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
     const auto system_id = static_cast<std::int16_t>(locator - kResourceIdBase);
     return system_id >= 0 &&
@@ -283,21 +326,31 @@ constexpr std::int16_t kResourceIdBase = 0x80;
                : fallback;
   }
   const auto current = state.player.current_system_id;
+  const auto choose_random = [&state](const std::vector<std::int16_t> &candidates,
+                                      std::int16_t no_match) {
+    if (candidates.empty()) {
+      return no_match;
+    }
+    std::uniform_int_distribution<std::size_t> roll(0, candidates.size() - 1);
+    return candidates[roll(state.rng)];
+  };
   if (locator == -2) {
+    std::vector<std::int16_t> candidates;
     for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
       const auto &system = state.scenario.systems[i];
       if (static_cast<std::int16_t>(i) != current && system.is_visible &&
           system.has_explored_flag) {
-        return static_cast<std::int16_t>(i);
+        candidates.push_back(static_cast<std::int16_t>(i));
       }
     }
-    return fallback;
+    return choose_random(candidates, fallback);
   }
   if (locator == -5) {
     if (current < 0 ||
         current >= static_cast<std::int16_t>(state.scenario.systems.size())) {
       return fallback;
     }
+    std::vector<std::int16_t> candidates;
     for (const auto linked_resource_id :
          state.scenario.systems[static_cast<std::size_t>(current)].links) {
       if (linked_resource_id < kResourceIdBase) {
@@ -306,10 +359,10 @@ constexpr std::int16_t kResourceIdBase = 0x80;
       const auto linked = static_cast<std::int16_t>(linked_resource_id - kResourceIdBase);
       if (linked >= 0 && linked < static_cast<std::int16_t>(state.scenario.systems.size()) &&
           state.scenario.systems[static_cast<std::size_t>(linked)].is_visible) {
-        return linked;
+        candidates.push_back(linked);
       }
     }
-    return fallback;
+    return choose_random(candidates, fallback);
   }
   const auto same_class = [&state](std::int16_t lhs, std::int16_t rhs,
                                     bool require_same) {
@@ -356,12 +409,13 @@ constexpr std::int16_t kResourceIdBase = 0x80;
     }
     return false;
   };
+  std::vector<std::int16_t> candidates;
   for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
     if (static_cast<std::int16_t>(i) != current && matches(state.scenario.systems[i])) {
-      return static_cast<std::int16_t>(i);
+      candidates.push_back(static_cast<std::int16_t>(i));
     }
   }
-  return fallback;
+  return choose_random(candidates, fallback);
 }
 
 } // namespace
@@ -482,10 +536,16 @@ bool Mission_PopulateActiveSlot(GameState &state, std::int16_t mission_id,
         static_cast<std::int16_t>(active.comp_govt_id - kResourceIdBase);
   }
   active.comp_reward_delta = definition->competing_reputation_delta;
+  active.on_resolve_repeat_count = definition->on_resolve_repeat_count;
   active.flags_primary = definition->flags_primary;
   active.flags_secondary = definition->flags_secondary;
   active.resource_delta_or_cost = definition->resource_delta_or_cost;
+  active.goal_counter_a = 0;
+  active.goal_counter_b = 0;
+  active.goal_counter_c = 0;
   active.goal_count_remaining = definition->target_ship_count;
+  active.goal_counter_e = 0;
+  active.mission_target_count = definition->target_ship_count;
   active.has_been_visited = definition->start_visited;
   active.is_accepted = false;
   active.mission_template_id = mission_id;
@@ -496,6 +556,8 @@ bool Mission_PopulateActiveSlot(GameState &state, std::int16_t mission_id,
         active.aux_ships_dude_def_index - kResourceIdBase);
   }
   active.mission_ship_count_active = active.mission_ship_count_max;
+  active.mission_fleet_metric_b = definition->auxiliary_ship_dude;
+  active.mission_fleet_metric_c = 0;
   active.special_ship_type_index = SelectMissionShipType(
       state, active.dude_def_index, active.flags_primary);
   active.special_ship_name_string_id = definition->special_ship_name_string_id;
@@ -511,6 +573,22 @@ bool Mission_PopulateActiveSlot(GameState &state, std::int16_t mission_id,
     std::uniform_int_distribution<int> roll(0, 99);
     active.spawn_rearm_timer = static_cast<std::int16_t>(100 + roll(state.rng));
   }
+  std::uniform_int_distribution<int> rearm_roll(0, 69);
+  active.rearm_roll_clock = static_cast<std::int16_t>(70 + rearm_roll(state.rng));
+  const auto copy_text_buffer = [&](auto &destination, std::size_t source_offset) {
+    if (source_offset < definition->raw_payload.size()) {
+      const auto available = definition->raw_payload.size() - source_offset;
+      std::copy_n(definition->raw_payload.begin() +
+                      static_cast<std::ptrdiff_t>(source_offset),
+                  std::min(destination.size(), available), destination.begin());
+    }
+  };
+  copy_text_buffer(active.on_accept_text, 0x15b);
+  copy_text_buffer(active.mission_payload_text_b, 0x25a);
+  copy_text_buffer(active.on_success_text, 0x359);
+  copy_text_buffer(active.on_failure_text, 0x458);
+  copy_text_buffer(active.resolve_script_buffer_start, 0x557);
+  copy_text_buffer(active.state_latch, 0x660);
   std::copy(definition->raw_payload.begin(), definition->raw_payload.end(),
             active.raw_payload.begin());
   return true;
@@ -519,6 +597,12 @@ bool Mission_PopulateActiveSlot(GameState &state, std::int16_t mission_id,
 bool Mission_ActivateAtSlot(GameState &state, std::int16_t mission_id) {
   if (mission_id < 0 ||
       mission_id >= static_cast<std::int16_t>(state.scenario.missions.size())) {
+    return false;
+  }
+  const auto &definition =
+      state.scenario.missions[static_cast<std::size_t>(mission_id)];
+  if (!definition.present || IsActiveMission(state, mission_id) ||
+      !Mission_PassesAcceptanceResourceGates(state, definition)) {
     return false;
   }
   std::size_t free_slot = GameState::kMaxActiveMissions;
@@ -539,6 +623,21 @@ bool Mission_ActivateAtSlot(GameState &state, std::int16_t mission_id) {
   runtime.flags_primary_at_accept =
       state.active_missions[free_slot].flags_primary;
   state.active_missions[free_slot].is_accepted = true;
+  // Mission_ActivateMissionAtSlot suppresses the initial destination briefing
+  // when there is no failure stellar to present. The travel-window half of
+  // this condition is UI-owned; this state-only API can preserve the verified
+  // no-destination branch.
+  runtime.initial_briefing_done =
+      state.active_missions[free_slot].on_fail_stellar_id == -1;
+  // The original treats values below -50000 as an immediate acceptance fee;
+  // the encoded value includes the -50000 sentinel, so preserve its unusual
+  // arithmetic and clamp the resulting credit balance at zero.
+  const auto acceptance_value =
+      state.active_missions[free_slot].resource_delta_or_cost;
+  if (acceptance_value < -50000) {
+    const auto charge = -50000 - acceptance_value;
+    state.player.credits = std::max<std::int32_t>(0, state.player.credits - charge);
+  }
   return true;
 }
 

@@ -65,13 +65,22 @@ struct ActiveMission {
   std::int16_t mission_system_c = -1; // +0x1a
   std::int16_t comp_govt_id = -1; // +0x1c
   std::int16_t comp_reward_delta = 0; // +0x1e
+  std::int16_t on_resolve_repeat_count = 0; // +0x20
   std::int32_t resource_delta_or_cost = 0; // +0x22
+  std::int16_t goal_counter_a = 0; // +0x26
+  std::int16_t goal_counter_b = 0; // +0x28
+  std::int16_t goal_counter_c = 0; // +0x2a
   std::int16_t goal_count_remaining = 0; // +0x2c
+  std::int16_t goal_counter_e = 0; // +0x2e
+  std::int16_t mission_target_count = 0; // +0x30
   bool has_been_visited = false; // +0x32
   bool is_accepted = false; // +0x33
   std::int16_t mission_template_id = -1; // +0x4d
   std::int16_t mission_ship_count_max = 0; // +0x61
   std::int16_t aux_ships_dude_def_index = -1; // +0x63
+  std::int16_t mission_fleet_metric_b = 0; // +0x65
+  std::int16_t mission_fleet_metric_c = 0; // +0x67
+  std::int16_t rearm_roll_clock = 0; // +0x69
   std::int16_t mission_ship_count_active = 0; // +0x6b
   std::uint16_t flags_primary = 0; // +0x55
   std::uint16_t flags_secondary = 0; // +0x57
@@ -83,6 +92,15 @@ struct ActiveMission {
   std::int16_t spawn_rearm_timer = -1; // +0x4b
   std::int16_t brief_description_id = -1; // +0x35
   std::array<std::int16_t, 8> brief_description_ids{}; // +0x35..+0x43
+  // MisnActive's six 255-byte text/script buffers. The resource decoder keeps
+  // the source mïsn payload; activation projects these strings to the active
+  // record at the offsets used by Mission_PopulateMissionSlotFromDef.
+  std::array<std::byte, 255> on_accept_text{}; // +0x1ec
+  std::array<std::byte, 255> mission_payload_text_b{}; // +0x2eb
+  std::array<std::byte, 255> on_success_text{}; // +0x3ea
+  std::array<std::byte, 255> on_failure_text{}; // +0x4e9
+  std::array<std::byte, 255> resolve_script_buffer_start{}; // +0x5e8
+  std::array<std::byte, 255> state_latch{}; // +0x6e7
   std::array<std::byte, 0x8e6> raw_payload{};
 };
 

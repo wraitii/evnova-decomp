@@ -28,8 +28,9 @@ void Mission_ResolveMissionStellarLocators(GameState &state);
 //
 // Clean-room counterparts of the accepted-mission portions of
 // Mission_PopulateMissionSlotFromDef (0x0043f8c0) and
-// Mission_ActivateMissionAtSlot (0x0043f100). These functions intentionally
-// stop before reaction scripts, UI refreshes, and locator selection.
+// Mission_ActivateMissionAtSlot (0x0043f100). They include slot population,
+// acceptance resource gates, counters, and rearm initialization; reaction
+// scripts and UI refreshes remain outside this state-only API.
 [[nodiscard]] bool Mission_PopulateActiveSlot(GameState &state,
                                                std::int16_t mission_id,
                                                std::size_t active_slot);
