@@ -166,8 +166,8 @@ constexpr float kPlayerFuelOfferThreshold = 100.0F;
 
 // ---- Dialog colours --------------------------------------------------------
 constexpr SDL_Color kWindowBg{0, 0, 0, 255};
-constexpr SDL_Color kDim{128, 170, 210, 255};
-constexpr SDL_Color kTitle{202, 224, 255, 255};
+constexpr SDL_Color kDim{192, 192, 192, 255};
+constexpr SDL_Color kTitle{255, 255, 255, 255};
 constexpr SDL_Color kScrim{0, 0, 0, 170};
 
 // Uniform integer in [0, bound). Mirrors NovaRandom_Range using the GameState

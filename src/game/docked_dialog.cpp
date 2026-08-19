@@ -7,6 +7,7 @@
 #include "landed_store.hpp"
 #include "mission.hpp"
 #include "nova_font.hpp"
+#include "hud_overlay.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_visual.hpp"
@@ -42,7 +43,7 @@ constexpr SDL_Color kScrim{0, 0, 0, 150};
 // Colours for the dialog heading/leave labels, matching the docked menu's
 // palette (bright rows for the title, dim rows for the helper text).
 constexpr SDL_Color kTitle{255, 255, 255, 255};
-constexpr SDL_Color kDim{128, 170, 210, 255};
+constexpr SDL_Color kDim{192, 192, 192, 255};
 
 // The heading / leave-button label for each sub-window. Kept close to the
 // game's service labels (ServiceLabel in landed_window.cpp).
@@ -76,6 +77,28 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
   }
   return SdlTexture::Create(
       platform.renderer(), img->width, img->height, img->rgba_pixels);
+}
+
+// Capture the dock after it has been presented and before a nested dialog
+// changes the renderer presentation. This is the same modal-background
+// strategy used by the main-menu pilot dialog and retains all dock-owned
+// content (planet art, labels, status text, and service buttons).
+[[nodiscard]] std::unique_ptr<SdlTexture>
+CaptureDockedBackground(SDL_Renderer *renderer) {
+  SDL_Surface *const surface = SDL_RenderReadPixels(renderer, nullptr);
+  if (surface == nullptr) {
+    NovaLog::Warn("could not snapshot dock before nested dialog: {}",
+                  SDL_GetError());
+    return nullptr;
+  }
+  SDL_Texture *const texture = SDL_CreateTextureFromSurface(renderer, surface);
+  SDL_DestroySurface(surface);
+  if (texture == nullptr) {
+    NovaLog::Warn("could not create dock snapshot texture: {}", SDL_GetError());
+    return nullptr;
+  }
+  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+  return std::make_unique<SdlTexture>(texture);
 }
 
 // Draws one frame of the sub-window dialog: the docked backdrop across the
@@ -196,92 +219,183 @@ void DrawSubWindowDialog(SdlPlatform &platform,
 }
 
 struct MissionBoardLayout {
-  SDL_FRect rows[8]{};
-  SDL_FRect accept{};
-  SDL_FRect leave{};
+  SDL_FRect frame{};
+  SDL_FRect list{};
+  SDL_FRect selected_title{};
+  SDL_FRect description{};
+  SDL_FRect take{};
+  SDL_FRect decline{};
+  SDL_FRect header{};
+  SDL_FRect date{};
+  // Stellar_RebuildTravelDestinationList creates an eight-row native list
+  // control. Its row height is the list control's DITL height divided by that
+  // row count; the old clean-room pass used an unrelated 18-pixel constant.
+  float list_row_pitch = 0.0F;
 };
 
-[[nodiscard]] MissionBoardLayout LayoutMissionBoard() {
-  MissionBoardLayout layout;
-  constexpr float x = 72.0F;
-  constexpr float width = 496.0F;
-  constexpr float row_y = 106.0F;
-  constexpr float row_height = 25.0F;
-  constexpr float row_pitch = 27.0F;
-  for (std::size_t i = 0; i < std::size(layout.rows); ++i) {
-    layout.rows[i] = {x, row_y + static_cast<float>(i) * row_pitch, width,
-                      row_height};
+// NovaUi_DrawListRowCallback (0x00448a30) receives the native row rectangle,
+// places text at row_top + DAT_00735686, and uses a four-pixel left inset.
+// The destination list is configured with the shared 12-point screen font.
+constexpr float kMissionListFontSize = 12.0F;
+
+[[nodiscard]] std::optional<MissionBoardLayout>
+LayoutMissionBoard(const SdlPlatform &platform) {
+  const auto definition = NovaResource_LoadDialogDefinition(0x3ee);
+  const auto items = definition
+                         ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
+                         : std::nullopt;
+  if (!definition || !items) {
+    NovaLog::Todo("Mission BBS DLOG/DITL 0x3ee unavailable; refusing to use "
+                  "synthetic layout");
+    return std::nullopt;
   }
-  layout.accept = {72.0F, 335.0F, 150.0F, 25.0F};
-  layout.leave = {418.0F, 335.0F, 150.0F, 25.0F};
+
+  const float width = static_cast<float>(definition->right - definition->left);
+  const float height = static_cast<float>(definition->bottom - definition->top);
+  const SDL_FPoint output = platform.logical_playfield_size();
+  const SDL_FPoint origin{(output.x - width) / 2.0F,
+                          (output.y - height) / 2.0F};
+  MissionBoardLayout layout;
+  layout.frame = {origin.x, origin.y, width, height};
+  const auto item_rect = [origin](const NovaDialogItem &item) {
+    return SDL_FRect{origin.x + static_cast<float>(item.left),
+                     origin.y + static_cast<float>(item.top),
+                     static_cast<float>(item.right - item.left),
+                     static_cast<float>(item.bottom - item.top)};
+  };
+  for (const auto &item : *items) {
+    switch (item.index) {
+    case 1: // UiPanel_GetEntryInfo entry 2: native mission list
+      layout.list = item_rect(item);
+      break;
+    case 0: // UiPanel_GetEntryInfo entry 1: accept/take button
+      layout.take = item_rect(item);
+      break;
+    case 6: // UiPanel_GetEntryInfo entry 7: leave button
+      layout.decline = item_rect(item);
+      break;
+    case 3: // UiPanel_GetEntryInfo entry 4: destination description
+      layout.description = item_rect(item);
+      break;
+    case 4: // UiPanel_GetEntryInfo entry 5: selected mission title
+      layout.selected_title = item_rect(item);
+      break;
+    case 7: // UiPanel_GetEntryInfo entry 8: heading band
+      layout.header = item_rect(item);
+      break;
+    case 10: // UiPanel_GetEntryInfo entry 11: current date
+      layout.date = item_rect(item);
+      break;
+    default:
+      break;
+    }
+  }
+
+  constexpr float kNativeMissionListRows = 8.0F;
+  if (layout.list.w <= 0.0F || layout.list.h <= 0.0F ||
+      layout.description.w <= 0.0F || layout.take.w <= 0.0F ||
+      layout.decline.w <= 0.0F || layout.header.w <= 0.0F ||
+      layout.date.w <= 0.0F) {
+    NovaLog::Todo("Mission BBS DITL 0x3ee is missing a required control rect");
+    return std::nullopt;
+  }
+  layout.list_row_pitch = layout.list.h / kNativeMissionListRows;
   return layout;
 }
 
 void DrawMissionBoardContents(SdlPlatform &platform,
                               NovaFontCache &font_cache,
+                              const ServicesButtonArt &button_art,
                               const GameState &state,
                               const MissionBoardLayout &layout,
                               const MissionListEvaluation &missions,
                               std::size_t selected,
                               std::string_view status) {
   SDL_Renderer *renderer = platform.renderer();
-  constexpr SDL_Color kText{220, 235, 255, 255};
-  constexpr SDL_Color kMissionDim{128, 170, 210, 255};
-  constexpr SDL_Color kSelected{40, 90, 145, 220};
-  constexpr SDL_Color kButton{24, 58, 96, 255};
+  constexpr SDL_Color kText{255, 255, 255, 255};
+  constexpr SDL_Color kMissionDim{192, 192, 192, 255};
+  constexpr SDL_Color kSelected{255, 255, 255, 255};
+  // NovaUi_DrawListRowCallback (0x00448a30) fills every row from the c.lr
+  // palette: DAT_0073566a is black and DAT_00735670 is 50% red.
+  constexpr SDL_Color kRowNormal{0, 0, 0, 255};
+  constexpr SDL_Color kRowSelected{128, 0, 0, 255};
 
   const auto &rows = missions.page_zero;
+  const std::string heading = NovaHud_LoadStringEntry(0x7d2, 0x167)
+                                  .value_or(
+                                      "The following missions are available here");
   NovaText_Draw(platform,
                 font_cache,
                 NovaFontFamily::kGeneva,
                 12.0F,
-                kNovaFontStyleBold,
+                kNovaFontStyleRegular,
                 kText,
-                72.0F,
-                94.0F,
-                "Available missions");
-  for (std::size_t row = 0; row < std::size(layout.rows); ++row) {
-    const SDL_FRect rect = layout.rows[row];
-    if (row >= rows.size()) {
-      continue;
-    }
-    if (row == selected) {
+                layout.header.x,
+                layout.header.y + layout.header.h - 2.0F,
+                heading);
+  if (layout.list.w > 0.0F && !rows.empty()) {
+    const float row_pitch = layout.list_row_pitch;
+    const float text_x = layout.list.x + 4.0F;
+    for (std::size_t row = 0; row < rows.size() &&
+                              layout.list.y + row * row_pitch <
+                                  layout.list.y + layout.list.h;
+         ++row) {
+      const auto mission_id = rows[row];
+      const auto *definition = state.scenario.Mission(
+          static_cast<std::int16_t>(mission_id + 0x80));
+      const std::string label =
+          definition != nullptr && !definition->display_name.empty()
+              ? definition->display_name
+              : "Mission " + std::to_string(mission_id);
+      const float row_top = layout.list.y + row * row_pitch;
+      const float baseline = row_top + kMissionListFontSize;
+      const SDL_FRect row_rect{layout.list.x, row_top, layout.list.w,
+                               row_pitch};
+      const SDL_Color row_color = row == selected ? kRowSelected : kRowNormal;
       SDL_SetRenderDrawColor(renderer,
-                             kSelected.r,
-                             kSelected.g,
-                             kSelected.b,
-                             kSelected.a);
-      SDL_RenderFillRect(renderer, &rect);
+                             row_color.r,
+                             row_color.g,
+                             row_color.b,
+                             row_color.a);
+      SDL_RenderFillRect(renderer, &row_rect);
+      NovaText_Draw(platform,
+                    font_cache,
+                    NovaFontFamily::kGeneva,
+                    kMissionListFontSize,
+                    kNovaFontStyleRegular,
+                    row == selected ? kSelected : kText,
+                    text_x,
+                    baseline,
+                    label);
     }
-    const auto mission_id = rows[row];
+  }
+
+  if (layout.selected_title.w > 0.0F && !rows.empty() && selected < rows.size()) {
     const auto *definition = state.scenario.Mission(
-        static_cast<std::int16_t>(mission_id + 0x80));
-    const std::string label =
-        definition != nullptr && !definition->display_name.empty()
-            ? definition->display_name
-            : "Mission " + std::to_string(mission_id);
+        static_cast<std::int16_t>(rows[selected] + 0x80));
+    const std::string title = definition != nullptr
+                                  ? definition->display_name
+                                  : "Mission " + std::to_string(rows[selected]);
     NovaText_Draw(platform,
                   font_cache,
                   NovaFontFamily::kGeneva,
                   12.0F,
-                  kNovaFontStyleRegular,
+                  kNovaFontStyleBold,
                   kText,
-                  rect.x + 8.0F,
-                  rect.y + 17.0F,
-                  label);
+                  layout.selected_title.x,
+                  layout.selected_title.y + 15.0F,
+                  title);
   }
 
+  // DITL items 1 and 7 are the small action buttons. DITL item 3 is the list
+  // scrollbar, not a button; painting it as ACCEPT caused the giant overlay.
   for (const auto &[rect, label] :
        std::array<std::pair<SDL_FRect, std::string_view>, 2>{
-           {{layout.accept, "ACCEPT"}, {layout.leave, "LEAVE"}}}) {
-    SDL_SetRenderDrawColor(renderer, kButton.r, kButton.g, kButton.b, kButton.a);
-    SDL_RenderFillRect(renderer, &rect);
-    SDL_SetRenderDrawColor(renderer,
-                           kMissionDim.r,
-                           kMissionDim.g,
-                           kMissionDim.b,
-                           kMissionDim.a);
-    SDL_RenderRect(renderer, &rect);
+           {{layout.take, "Accept"}, {layout.decline, "Leave"}}}) {
+    if (rect.w <= 0.0F) {
+      continue;
+    }
+    button_art.Draw(platform, rect, ButtonState::kNormal);
     NovaText_DrawCentered(platform,
                           font_cache,
                           kThreeStateButtonFontFamily,
@@ -293,6 +407,21 @@ void DrawMissionBoardContents(SdlPlatform &platform,
                           ThreeStateButtonLabelBaseline(rect),
                           label);
   }
+  if (layout.date.w > 0.0F) {
+    // GameState does not yet track g_current_game_year_month/day. Keep the
+    // DITL date field visible with the original new-pilot baseline until that
+    // calendar state is reconstructed.
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          12.0F,
+                          kNovaFontStyleRegular,
+                          kText,
+                          layout.date.x,
+                          layout.date.x + layout.date.w,
+                          layout.date.y + layout.date.h - 2.0F,
+                          "1/1/1999");
+  }
   if (!status.empty()) {
     NovaText_DrawCentered(platform,
                           font_cache,
@@ -300,16 +429,88 @@ void DrawMissionBoardContents(SdlPlatform &platform,
                           11.0F,
                           kNovaFontStyleRegular,
                           kMissionDim,
-                          72.0F,
-                          568.0F,
-                          378.0F,
+                          layout.description.x,
+                          layout.description.x + layout.description.w,
+                          layout.description.y + layout.description.h + 14.0F,
                           status);
   }
+  if (layout.description.w > 0.0F && !rows.empty() && selected < rows.size()) {
+    if (const auto description = NovaResource_LoadDescription(
+            static_cast<std::uint16_t>(rows[selected] + 4000));
+        description && !description->text.empty()) {
+      const float x = layout.description.x + 6.0F;
+      const float width = layout.description.w - 12.0F;
+      const auto lines = WrapDescriptionLines(
+          description->text,
+          static_cast<int>(std::max(1.0F, width)),
+          [&](std::string_view line) {
+            return font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                         12.0F,
+                                         kNovaFontStyleRegular,
+                                         line);
+          });
+      float y = layout.description.y + 15.0F;
+      for (const auto &line : lines) {
+        if (y > layout.description.y + layout.description.h) {
+          break;
+        }
+        NovaText_Draw(platform,
+                      font_cache,
+                      NovaFontFamily::kGeneva,
+                      12.0F,
+                      kNovaFontStyleRegular,
+                      kText,
+                      x,
+                      y,
+                      line);
+        y += 14.0F;
+      }
+    }
+  }
+}
+
+void DrawMissionBoardBase(SdlPlatform &platform,
+                          SDL_Texture *snapshot,
+                          SDL_Texture *backdrop,
+                          SDL_Texture *frame,
+                          const MissionBoardLayout &layout) {
+  SDL_Renderer *renderer = platform.renderer();
+  platform.SetFullscreenPlayfield();
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderClear(renderer);
+  if (snapshot != nullptr) {
+    const SDL_FPoint output = platform.logical_playfield_size();
+    const SDL_FRect snapshot_rect{0.0F, 0.0F, output.x, output.y};
+    SDL_RenderTexture(renderer, snapshot, nullptr, &snapshot_rect);
+  } else if (backdrop != nullptr) {
+    const SDL_FPoint output = platform.logical_playfield_size();
+    float width = 0.0F;
+    float height = 0.0F;
+    SDL_GetTextureSize(backdrop, &width, &height);
+    const SDL_FRect backdrop_rect{(output.x - width) / 2.0F,
+                                  (output.y - height) / 2.0F,
+                                  width,
+                                  height};
+    SDL_RenderTexture(renderer, backdrop, nullptr, &backdrop_rect);
+  }
+  if (frame != nullptr) {
+    SDL_RenderTexture(renderer, frame, nullptr, &layout.frame);
+  } else {
+    SDL_SetRenderDrawColor(renderer, 16, 40, 72, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &layout.frame);
+    SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &layout.frame);
+  }
+  // The original leaves the travel scene behind DLOG 0x3ee and paints the
+  // 0x2139 frame into the dialog bounds. Keep the frame's native dimensions;
+  // stretching it into the 640x480 landed canvas was the source of the old
+  // clipped/offset appearance.
 }
 
 LandedExit RunMissionBoardDialog(SdlPlatform &platform,
                                  GameState &state,
-                                 std::int16_t stellar_id) {
+                                 std::int16_t stellar_id,
+                                 SDL_Texture *docked_snapshot) {
   (void)stellar_id;
   const auto contains = [](const SDL_FRect &rect, SDL_FPoint point) {
     return point.x >= rect.x && point.x < rect.x + rect.w &&
@@ -317,11 +518,14 @@ LandedExit RunMissionBoardDialog(SdlPlatform &platform,
   };
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
   auto frame = LoadPictTexture(platform, 0x2139);
+  SDL_Texture *snapshot = docked_snapshot;
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
-  const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
-  const MissionBoardLayout layout = LayoutMissionBoard();
+  const auto layout = LayoutMissionBoard(platform);
+  if (!layout) {
+    return LandedExit::kServiceComplete;
+  }
   MissionListEvaluation missions = Mission_EvaluateMissionLists(state);
   std::size_t selected = 0;
   std::string status;
@@ -333,24 +537,19 @@ LandedExit RunMissionBoardDialog(SdlPlatform &platform,
                     : static_cast<int>(missions.page_zero.front()));
 
   while (!platform.quit_requested()) {
-    DrawSubWindowDialog(platform,
-                        font_cache,
-                        button_art,
-                        backdrop ? backdrop->get() : nullptr,
-                        frame ? frame->get() : nullptr,
-                        LandedService::kMissionBoard,
-                        panel);
+    DrawMissionBoardBase(platform,
+                         snapshot,
+                         backdrop ? backdrop->get() : nullptr,
+                         frame ? frame->get() : nullptr,
+                         *layout);
     DrawMissionBoardContents(platform,
                              font_cache,
+                             button_art,
                              state,
-                             layout,
+                             *layout,
                              missions,
                              selected,
-                             status.empty()
-                                 ? (missions.page_zero.empty()
-                                        ? "No missions are currently available"
-                                        : "J/K select   A or Enter accept")
-                                 : status);
+                             status);
     SDL_RenderPresent(platform.renderer());
 
     auto accept = [&]() {
@@ -380,17 +579,17 @@ LandedExit RunMissionBoardDialog(SdlPlatform &platform,
       if (input->key == TextKey::primary) {
         const SDL_FPoint point = platform.mouse_position();
         bool handled = false;
-        for (std::size_t row = 0; row < std::size(layout.rows); ++row) {
-          if (contains(layout.rows[row], point) &&
-              row < missions.page_zero.size()) {
+        if (contains(layout->list, point) && !missions.page_zero.empty()) {
+          const auto row = static_cast<std::size_t>(
+              (point.y - layout->list.y) / layout->list_row_pitch);
+          if (row < missions.page_zero.size()) {
             selected = row;
             handled = true;
-            break;
           }
         }
-        if (!handled && contains(layout.accept, point)) {
+        if (!handled && contains(layout->take, point)) {
           accept();
-        } else if (!handled && contains(layout.leave, point)) {
+        } else if (!handled && contains(layout->decline, point)) {
           return LandedExit::kServiceComplete;
         }
         continue;
@@ -518,6 +717,7 @@ struct StoreLabelLines {
 }
 
 void DrawStoreBase(SdlPlatform &platform,
+                   SDL_Texture *snapshot,
                    SDL_Texture *backdrop,
                    SDL_Texture *frame,
                    const StoreLayout &layout) {
@@ -526,7 +726,13 @@ void DrawStoreBase(SdlPlatform &platform,
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
   const SDL_FPoint output = platform.logical_playfield_size();
-  if (backdrop != nullptr) {
+  if (snapshot != nullptr) {
+    // The store opens over the already-rendered Spaceport DLOG. Replaying the
+    // dock snapshot preserves the planet, title, status text, and service
+    // buttons; rebuilding only PICT 0x2134 loses that complete backdrop.
+    const SDL_FRect snapshot_rect{0.0F, 0.0F, output.x, output.y};
+    SDL_RenderTexture(renderer, snapshot, nullptr, &snapshot_rect);
+  } else if (backdrop != nullptr) {
     float width = 0.0F;
     float height = 0.0F;
     SDL_GetTextureSize(backdrop, &width, &height);
@@ -534,11 +740,9 @@ void DrawStoreBase(SdlPlatform &platform,
         (output.x - width) / 2.0F, (output.y - height) / 2.0F, width, height};
     SDL_RenderTexture(renderer, backdrop, nullptr, &dst);
   }
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(renderer, kScrim.r, kScrim.g, kScrim.b, kScrim.a);
-  const SDL_FRect screen{0.0F, 0.0F, output.x, output.y};
-  SDL_RenderFillRect(renderer, &screen);
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  // Ghidra's NovaUi_RedrawTravelOutfitMenu (0x00490c70) and the analogous
+  // shipyard redraw fill and draw their modal window surface, then composite
+  // it over the existing travel scene. There is no full-screen dim/scrim.
   if (frame != nullptr) {
     SDL_RenderTexture(renderer, frame, nullptr, &layout.frame);
   }
@@ -615,7 +819,7 @@ void DrawStoreContents(SdlPlatform &platform,
                        SDL_Texture *selected_image,
                        std::string_view selected_description) {
   constexpr SDL_Color kText{255, 255, 255, 255};
-  constexpr SDL_Color kMuted{128, 170, 210, 255};
+  constexpr SDL_Color kMuted{192, 192, 192, 255};
   const bool outfit_store = session.kind == LandedStoreKind::kOutfitter;
   SDL_Renderer *renderer = platform.renderer();
   for (std::size_t slot = 0; slot < LandedStoreSession::kPageSlots; ++slot) {
@@ -855,7 +1059,8 @@ void DrawStoreContents(SdlPlatform &platform,
 LandedExit RunStoreDialog(SdlPlatform &platform,
                           GameState &state,
                           LandedService service,
-                          std::int16_t stellar_id) {
+                          std::int16_t stellar_id,
+                          SDL_Texture *docked_snapshot) {
   const bool outfit_store = service == LandedService::kOutfit;
   LandedStoreSession session =
       outfit_store ? NovaLanded_OpenOutfitterSession(state, stellar_id)
@@ -863,6 +1068,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
   auto frame =
       LoadPictTexture(platform, NovaDocked_SubWindowFramePict(service));
+  SDL_Texture *snapshot = docked_snapshot;
   StoreTextureCache texture_cache;
   std::string selected_description;
   std::int16_t selected_description_id = -1;
@@ -891,6 +1097,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       selected_description_id = session.selected_id;
     }
     DrawStoreBase(platform,
+                  snapshot,
                   backdrop ? backdrop->get() : nullptr,
                   frame ? frame->get() : nullptr,
                   layout);
@@ -1005,6 +1212,11 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
 
 } // namespace
 
+std::unique_ptr<SdlTexture>
+NovaLanded_CaptureDockedBackground(SdlPlatform &platform) {
+  return CaptureDockedBackground(platform.renderer());
+}
+
 std::uint16_t NovaDocked_SubWindowFramePict(LandedService service) {
   switch (service) {
   case LandedService::kShipyard:
@@ -1026,13 +1238,16 @@ std::uint16_t NovaDocked_SubWindowFramePict(LandedService service) {
 LandedExit NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                                          GameState &state,
                                          LandedService service,
-                                         std::int16_t stellar_id) {
+                                         std::int16_t stellar_id,
+                                         SDL_Texture *docked_snapshot) {
   if (service == LandedService::kMissionBoard) {
-    return RunMissionBoardDialog(platform, state, stellar_id);
+    return RunMissionBoardDialog(
+        platform, state, stellar_id, docked_snapshot);
   }
   if (service == LandedService::kOutfit ||
       service == LandedService::kShipyard) {
-    return RunStoreDialog(platform, state, service, stellar_id);
+    return RunStoreDialog(
+        platform, state, service, stellar_id, docked_snapshot);
   }
   NovaLog::Info("opening docked sub-window dialog '{}' at stellar {}",
                 SubWindowHeading(service),

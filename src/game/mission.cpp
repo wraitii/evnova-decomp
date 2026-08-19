@@ -1,6 +1,7 @@
 #include "mission.hpp"
 
 #include "game_state.hpp"
+#include "government.hpp"
 #include "ship_spawn.hpp"
 
 #include <algorithm>
@@ -33,6 +34,10 @@ constexpr std::int16_t kResourceIdBase = 0x80;
                                                  std::int16_t locator,
                                                  std::int16_t excluded,
                                                  std::int16_t fallback) {
+  if (locator == -1 || locator == -4) {
+    return fallback;
+  }
+
   if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
     const auto stellar_id = static_cast<std::int16_t>(locator - kResourceIdBase);
     if (stellar_id != excluded && stellar_id >= 0 &&
@@ -41,26 +46,93 @@ constexpr std::int16_t kResourceIdBase = 0x80;
     }
     return fallback;
   }
-  // The original -2/-3 families select a random eligible stellar. A stable
-  // first-match policy is used until NovaRandom and travel reachability are
-  // wired into the clean-room locator subsystem.
-  if (locator != -2 && locator != -3) {
+
+  // Mission_SelectMissionStellarByLocator (0x0043d510) chooses randomly from
+  // a filtered stellar set. The clean-room model has no separate travel graph
+  // yet, so availability/system membership are the verified gates and the
+  // A stable first-match policy is used here because locator resolution is
+  // also called while evaluating a const mission-list snapshot. The original
+  // uses NovaRandom_Range; random selection remains a tracked divergence until
+  // the locator cache is made an explicit mutable runtime step.
+  const auto same_government_class = [&state](std::int16_t lhs,
+                                               std::int16_t rhs,
+                                               bool require_match) {
+    if (lhs < 0 || rhs < 0 ||
+        lhs >= static_cast<std::int16_t>(state.scenario.governments.size()) ||
+        rhs >= static_cast<std::int16_t>(state.scenario.governments.size())) {
+      return false;
+    }
+    const auto &left = state.scenario.governments[static_cast<std::size_t>(lhs)];
+    const auto &right = state.scenario.governments[static_cast<std::size_t>(rhs)];
+    for (const auto left_class : left.classes) {
+      if (left_class < 0) {
+        continue;
+      }
+      for (const auto right_class : right.classes) {
+        if (left_class == right_class) {
+          return require_match;
+        }
+      }
+    }
+    return !require_match;
+  };
+  const auto matches = [&](const Stellar &stellar) {
+    if (!stellar.is_available || stellar.system_id < 0 ||
+        stellar.system_id >= static_cast<std::int16_t>(state.scenario.systems.size()) ||
+        (stellar.flags & 0x20U) != 0U) {
+      return false;
+    }
+    const auto stellar_id = static_cast<std::int16_t>(&stellar -
+                                                       state.scenario.stellars.data());
+    if (stellar_id == excluded) {
+      return false;
+    }
+    const auto govt = stellar.government_id;
+    if (locator == -2) {
+      return (stellar.flags & 0x10U) == 0U;
+    }
+    if (locator == -3) {
+      return (stellar.flags & 0x10U) != 0U;
+    }
+    if (locator >= 10000 && locator < 15000) {
+      return govt == static_cast<std::int16_t>(locator - 10000);
+    }
+    if (locator >= 15000 && locator < 20000) {
+      return NovaGovernment_AreGovtsAllied(state.scenario, govt,
+                                           static_cast<std::int16_t>(locator - 15000));
+    }
+    if (locator >= 20000 && locator < 25000) {
+      return govt != static_cast<std::int16_t>(locator - 20000);
+    }
+    if (locator >= 25000 && locator < 30000) {
+      return NovaGovernment_AreGovtsHostileOrXenophobic(
+          state.scenario, govt, static_cast<std::int16_t>(locator - 25000));
+    }
+    if (locator >= 30000 && locator < 31000) {
+      const auto wanted = static_cast<std::int16_t>(locator - 30000);
+      return same_government_class(govt, wanted, true);
+    }
+    if (locator >= 31000 && locator < 32000) {
+      const auto wanted = static_cast<std::int16_t>(locator - 31000);
+      return same_government_class(govt, wanted, false);
+    }
+    return false;
+  };
+
+  std::vector<std::int16_t> candidates;
+  for (std::size_t i = 0; i < state.scenario.stellars.size(); ++i) {
+    if (matches(state.scenario.stellars[i])) {
+      candidates.push_back(static_cast<std::int16_t>(i));
+    }
+  }
+  if (candidates.empty()) {
     return fallback;
   }
-  for (std::size_t i = 0; i < state.scenario.stellars.size(); ++i) {
-    const auto &stellar = state.scenario.stellars[i];
-    if (static_cast<std::int16_t>(i) == excluded || !stellar.is_available ||
-        (locator == -2 && (stellar.flags & 0x20U) != 0) ||
-        (locator == -3 && (stellar.flags & 0x10U) == 0)) {
-      continue;
-    }
-    return static_cast<std::int16_t>(i);
-  }
-  return fallback;
+  return candidates.front();
 }
 
 [[nodiscard]] std::vector<std::int16_t> EvaluateMissionPage(
-    const GameState &state) {
+    const GameState &state, std::int16_t page_group) {
   std::vector<std::int16_t> result;
   // Mission_CheckMissionShipInteractionEligibility (0x00441b40) performs
   // these two definition-level gates before evaluating the location and
@@ -75,7 +147,9 @@ constexpr std::int16_t kResourceIdBase = 0x80;
     const auto id = static_cast<std::int16_t>(index);
     if (!mission.present || !mission.is_available_runtime ||
         mission.special_ship_start < 1 || mission.return_stellar_id == -1 ||
-        IsActiveMission(state, id)) {
+        IsActiveMission(state, id) ||
+        (page_group >= 0 && mission.return_stellar_id != 2 &&
+         mission.return_stellar_id != page_group)) {
       continue;
     }
     // A concrete 0x80..0x87f link is the stellar that advertises the mission.
@@ -85,6 +159,23 @@ constexpr std::int16_t kResourceIdBase = 0x80;
         mission.link_system_filter >= kResourceIdBase &&
         mission.link_system_filter != selected_stellar) {
       continue;
+    }
+    if (mission.link_system_filter >= 5000 &&
+        mission.link_system_filter < 10000) {
+      if (state.player.current_system_id < 0 ||
+          state.player.current_system_id >=
+              static_cast<std::int16_t>(state.scenario.systems.size())) {
+        continue;
+      }
+      const auto adjacent_resource_id =
+          static_cast<std::int16_t>(mission.link_system_filter - 5000);
+      const auto &current_system =
+          state.scenario.systems[static_cast<std::size_t>(
+              state.player.current_system_id)];
+      if (std::find(current_system.links.begin(), current_system.links.end(),
+                    adjacent_resource_id) == current_system.links.end()) {
+        continue;
+      }
     }
     if (mission.link_system_filter < -1 ||
         (mission.link_system_filter >= kResourceIdBase + 0x800)) {
@@ -134,6 +225,9 @@ constexpr std::int16_t kResourceIdBase = 0x80;
   return static_cast<std::int16_t>(roll(state.rng));
 }
 
+[[nodiscard]] std::int16_t ResolveMissionSystemByLocator(
+    const GameState &state, std::int16_t locator, std::int16_t fallback);
+
 [[nodiscard]] std::int16_t ResolveMissionCurrentSystem(
     const GameState &state, const MissionDef &definition,
     const MissionTargetResolution &target) {
@@ -148,16 +242,14 @@ constexpr std::int16_t kResourceIdBase = 0x80;
     return target.on_success_system_id;
   }
   if (locator == -2) {
-    // Mission_SelectMissionSystemByLocator(0xfffe, ...) chooses a random
-    // eligible system. The clean-room locator cache has no reachability graph
-    // yet; the player's system is the deterministic safe fallback.
-    return state.player.current_system_id;
+    return ResolveMissionSystemByLocator(state, locator,
+                                         state.player.current_system_id);
   }
   if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
     return ResolveContainingSystem(state, static_cast<std::int16_t>(
                                              locator - kResourceIdBase));
   }
-  return -1;
+  return ResolveMissionSystemByLocator(state, locator, -1);
 }
 
 [[nodiscard]] std::int16_t SelectMissionShipType(GameState &state,
@@ -181,6 +273,97 @@ constexpr std::int16_t kResourceIdBase = 0x80;
                                                            state.rng));
 }
 
+[[nodiscard]] std::int16_t ResolveMissionSystemByLocator(
+    const GameState &state, std::int16_t locator, std::int16_t fallback) {
+  if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
+    const auto system_id = static_cast<std::int16_t>(locator - kResourceIdBase);
+    return system_id >= 0 &&
+                   system_id < static_cast<std::int16_t>(state.scenario.systems.size())
+               ? system_id
+               : fallback;
+  }
+  const auto current = state.player.current_system_id;
+  if (locator == -2) {
+    for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+      const auto &system = state.scenario.systems[i];
+      if (static_cast<std::int16_t>(i) != current && system.is_visible &&
+          system.has_explored_flag) {
+        return static_cast<std::int16_t>(i);
+      }
+    }
+    return fallback;
+  }
+  if (locator == -5) {
+    if (current < 0 ||
+        current >= static_cast<std::int16_t>(state.scenario.systems.size())) {
+      return fallback;
+    }
+    for (const auto linked_resource_id :
+         state.scenario.systems[static_cast<std::size_t>(current)].links) {
+      if (linked_resource_id < kResourceIdBase) {
+        continue;
+      }
+      const auto linked = static_cast<std::int16_t>(linked_resource_id - kResourceIdBase);
+      if (linked >= 0 && linked < static_cast<std::int16_t>(state.scenario.systems.size()) &&
+          state.scenario.systems[static_cast<std::size_t>(linked)].is_visible) {
+        return linked;
+      }
+    }
+    return fallback;
+  }
+  const auto same_class = [&state](std::int16_t lhs, std::int16_t rhs,
+                                    bool require_same) {
+    if (lhs < 0 || rhs < 0 ||
+        lhs >= static_cast<std::int16_t>(state.scenario.governments.size()) ||
+        rhs >= static_cast<std::int16_t>(state.scenario.governments.size())) {
+      return false;
+    }
+    for (const auto left_class :
+         state.scenario.governments[static_cast<std::size_t>(lhs)].classes) {
+      for (const auto right_class :
+           state.scenario.governments[static_cast<std::size_t>(rhs)].classes) {
+        if (left_class >= 0 && left_class == right_class) {
+          return require_same;
+        }
+      }
+    }
+    return !require_same;
+  };
+  const auto matches = [&](const System &system) {
+    if (!system.is_visible || system.government_id < 0) {
+      return false;
+    }
+    const auto govt = system.government_id;
+    if (locator >= 10000 && locator < 15000) {
+      return govt == locator - 10000;
+    }
+    if (locator >= 15000 && locator < 20000) {
+      return NovaGovernment_AreGovtsAllied(state.scenario, govt,
+                                           locator - 15000);
+    }
+    if (locator >= 20000 && locator < 25000) {
+      return govt != locator - 20000;
+    }
+    if (locator >= 25000 && locator < 30000) {
+      return NovaGovernment_AreGovtsHostileOrXenophobic(
+          state.scenario, govt, locator - 25000);
+    }
+    if (locator >= 30000 && locator < 31000) {
+      return same_class(govt, locator - 30000, true);
+    }
+    if (locator >= 31000 && locator < 32000) {
+      return same_class(govt, locator - 31000, false);
+    }
+    return false;
+  };
+  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+    if (static_cast<std::int16_t>(i) != current && matches(state.scenario.systems[i])) {
+      return static_cast<std::int16_t>(i);
+    }
+  }
+  return fallback;
+}
+
 } // namespace
 
 void Mission_ResolveMissionStellarLocators(GameState &state) {
@@ -195,9 +378,12 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
         state, definition.on_fail_condition, -1, -1);
     target.on_fail_system_id =
         ResolveContainingSystem(state, target.on_fail_stellar_id);
-    target.on_success_stellar_id = ResolveMissionStellar(
-        state, definition.on_success_condition, target.on_fail_stellar_id,
-        target.on_fail_stellar_id);
+    target.on_success_stellar_id = definition.on_success_condition == -1
+                                       ? target.on_fail_stellar_id
+                                       : ResolveMissionStellar(
+                                             state, definition.on_success_condition,
+                                             target.on_fail_stellar_id,
+                                             target.on_fail_stellar_id);
     target.on_success_system_id =
         ResolveContainingSystem(state, target.on_success_stellar_id);
     target.special_ship_system_id =
@@ -231,9 +417,12 @@ MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
   }
   Mission_ResolveMissionStellarLocators(state);
   MissionListEvaluation result;
-  result.page_zero = EvaluateMissionPage(state);
-  // The lane discriminator has not yet been identified in the clean-room
-  // MissionDef; preserve the native two-lane API with an empty second lane.
+  // The clean-room BBS API historically exposed the complete available list
+  // through page_zero. Keep that compatibility lane while page_one exposes
+  // the verified return-mission group for callers that need it explicitly.
+  result.page_zero = EvaluateMissionPage(state, -1);
+  result.page_one = EvaluateMissionPage(state, 1);
+  result.has_return_mission = !result.page_one.empty();
   return result;
 }
 

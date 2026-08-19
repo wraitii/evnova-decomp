@@ -21,12 +21,18 @@
 // service internals.
 
 #include <cstdint>
+#include <memory>
 
 #include "landed_window.hpp"
 
 class SdlPlatform;
+class SdlTexture;
+struct SDL_Texture;
 
 namespace game {
+
+[[nodiscard]] std::unique_ptr<SdlTexture>
+NovaLanded_CaptureDockedBackground(SdlPlatform &platform);
 
 // The sub-window frame PICT resource id backing a docked service. Returns the
 // documented Nova Graphics 3 PICT id, or 0 when the service has no frame art
@@ -46,6 +52,7 @@ NovaDocked_SubWindowFramePict(LandedService service);
 [[nodiscard]] LandedExit NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                                                        GameState &state,
                                                        LandedService service,
-                                                       std::int16_t stellar_id);
+                                                       std::int16_t stellar_id,
+                                                       SDL_Texture *docked_snapshot = nullptr);
 
 } // namespace game

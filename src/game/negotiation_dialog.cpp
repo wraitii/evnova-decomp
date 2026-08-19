@@ -92,8 +92,8 @@ constexpr int kPaymentChancePercent = 0x23;
 
 // Colours shared by the interaction/payment windows.
 constexpr SDL_Color kWindowBg{0, 0, 0, 255};
-constexpr SDL_Color kDim{128, 170, 210, 255};
-constexpr SDL_Color kTitle{202, 224, 255, 255};
+constexpr SDL_Color kDim{192, 192, 192, 255};
+constexpr SDL_Color kTitle{255, 255, 255, 255};
 
 // The dim scrim laid between the flight scene and the modal (the original
 // draws the interaction window over the already-composited gameplay surface).
