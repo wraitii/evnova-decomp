@@ -503,6 +503,93 @@ TEST_CASE("npc jump gate uses the npc's own class fuel") {
   CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
 }
 
+TEST_CASE("state 0x15 jump-in initializer arms reverse departure") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(!state.scenario.stellars.empty());
+  REQUIRE(!state.scenario.ships.empty());
+
+  game::Ship ship;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = 0;
+  ship.ai_target_ship_slot = -1;
+
+  const std::int16_t stellar_id = 0x80;
+  const auto *stellar = state.scenario.Stellar(stellar_id);
+  REQUIRE(stellar != nullptr);
+
+  game::NovaAi_EnterState15JumpOutToSystem(state, ship, stellar_id);
+
+  CHECK(ship.ai_state_code == 0x15);
+  CHECK(ship.ai_control_mode == 0);
+  CHECK(ship.ai_secondary_target_slot == stellar_id);
+  CHECK(ship.primary_target_ship_slot == -1);
+  CHECK(ship.reverse_speed_bias == Catch::Approx(60.0F));
+  CHECK(ship.ai_station_hold_timer == Catch::Approx(-1.0F));
+  CHECK(ship.ai_desired_speed == Catch::Approx(-30.0F));
+  CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-3.0F));
+  CHECK(ship.heading >= 0.0F);
+  CHECK(ship.heading < 2.0F * 3.14159265358979323846F);
+  if (stellar->entry_heading_deg >= 0 && stellar->entry_heading_deg <= 359) {
+    CHECK(ship.heading == Catch::Approx(
+                              static_cast<float>(stellar->entry_heading_deg) *
+                              (3.14159265358979323846F / 180.0F)));
+  }
+}
+
+TEST_CASE("state 0x14 NPC jump transfers to the linked system") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  std::int16_t source_system = -1;
+  std::int16_t target_stellar = -1;
+  std::int16_t destination_system = -1;
+  for (std::size_t system_index = 0;
+       system_index < state.scenario.systems.size() && source_system < 0;
+       ++system_index) {
+    const auto &system = state.scenario.systems[system_index];
+    for (std::size_t slot = 0; slot < system.nav_defs.size(); ++slot) {
+      const auto *stellar = state.scenario.Stellar(system.nav_defs[slot]);
+      if (stellar == nullptr || (stellar->availability_flags & 0x3000) == 0 ||
+          system.links[slot] < 0x80) {
+        continue;
+      }
+      source_system = static_cast<std::int16_t>(system_index);
+      target_stellar = system.nav_defs[slot];
+      destination_system =
+          static_cast<std::int16_t>(system.links[slot] - 0x80);
+      break;
+    }
+  }
+  REQUIRE(source_system >= 0);
+
+  std::int16_t fuel_class = -1;
+  for (std::size_t i = 0; i < state.scenario.ships.size(); ++i) {
+    if (state.scenario.ships[i].base_fuel >= 100) {
+      fuel_class = static_cast<std::int16_t>(i);
+      break;
+    }
+  }
+  REQUIRE(fuel_class >= 0);
+
+  game::Ship ship;
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = fuel_class;
+  ship.current_system_id = source_system;
+  ship.ai_state_code = 0x14;
+  ship.ai_secondary_target_slot = target_stellar;
+  ship.fuel_points = 100.0F;
+
+  REQUIRE(game::NovaAi_CompleteNpcJump(state, ship));
+  CHECK(ship.current_system_id == destination_system);
+  CHECK(ship.fuel_points == Catch::Approx(0.0F));
+  CHECK(ship.ai_state_code == 0x15);
+  CHECK(ship.ai_control_mode == 0);
+  CHECK(ship.vel_x == Catch::Approx(0.0F));
+  CHECK(ship.vel_y == Catch::Approx(0.0F));
+}
+
 // The jump gate also requires CURRENT fuel: a jumping-capable class with an
 // empty tank is refused, mirroring Stellar_HandlePlayerShipCore's
 // `fuel_points < _DAT_005755a4 (100)` jump block.
@@ -836,4 +923,38 @@ TEST_CASE("ApplyControls mode 10 stationary reverse") {
                        /*now_ms=*/0);
   CHECK(ship.ai_desired_speed == Catch::Approx(-5.75F));
   CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-3.67F));
+}
+
+// State 0x08 is the post-entry departure cleanup. Ghidra's state updater
+// selects control mode 0x0a, whose reverse commands are then consumed by the
+// Ship_HandleShip movement/glow path (0x00433050).
+TEST_CASE("state 0x08 drives visible NPC departure reverse") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 0;
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.current_system_id = 0;
+  ship.ship_class_id = 0;
+  ship.armor_points = 30.0F;
+  ship.shield_points = 30.0F;
+  ship.ai_state_code = 8;
+  ship.ai_control_mode = 0;
+  ship.ai_desired_speed = 0.0F;
+  ship.ai_forward_thrust_cmd = 0.0F;
+  ship.heading = 0.0F;
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  REQUIRE(ship.ai_control_mode == 10);
+  game::NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  REQUIRE(ship.ai_desired_speed == Catch::Approx(-5.75F));
+  REQUIRE(ship.ai_forward_thrust_cmd == Catch::Approx(-3.67F));
+
+  game::NovaShip_TickNpcShips(state, 1.0F);
+  CHECK(ship.pos_y < -5.0F);
+  CHECK(ship.engine_glow_level == 0);
 }

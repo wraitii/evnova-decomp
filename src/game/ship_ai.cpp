@@ -196,6 +196,108 @@ void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms) {
   ship.ai_mode_start_time_ms = now_ms;
 }
 
+// Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem.
+void NovaAi_EnterState15JumpOutToSystem(GameState &state,
+                                        Ship &ship,
+                                        std::int16_t stellar_id) {
+  ship.ai_state_code = 0x15;
+  ship.ai_control_mode = 0;
+  ship.primary_target_ship_slot = -1;
+  ship.ai_secondary_target_slot = stellar_id;
+  ship.reverse_speed_bias = 60.0F;
+  ship.ai_station_hold_timer = -1.0F;
+
+  if (stellar_id >= 0 && stellar_id < 0x800) {
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    const bool can_jump = cls != nullptr &&
+                          static_cast<float>(cls->base_fuel) >=
+                              kJumpFuelCost;
+    ship.jump_destination_stellar_id = can_jump ? stellar_id : -2;
+
+    const Stellar *stellar = state.scenario.Stellar(stellar_id);
+    if (stellar != nullptr) {
+      // Ghidra reads StellarDef +0x28 directly. Valid entries are integer
+      // degrees [0, 359]; invalid resource values use NovaRandom_Range(360).
+      // Scenario loading preserves the signed raw word at sp\x9ab +0x1a.
+      const int heading_deg = stellar->entry_heading_deg >= 0 &&
+                                      stellar->entry_heading_deg <= 359
+                                  ? stellar->entry_heading_deg
+                                  : std::uniform_int_distribution<int>(0, 359)(
+                                        state.rng);
+      // The original ShipState stores this field in degrees. Clean-room Ship
+      // stores heading in radians, so convert only at this boundary.
+      ship.heading = static_cast<float>(heading_deg) * kDegToRad;
+    }
+  }
+
+  ship.ai_desired_speed = ship.ai_target_ship_slot == 0 ? -15.0F : -30.0F;
+  ship.ai_forward_thrust_cmd = -3.0F;
+}
+
+bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
+  if (ship.ai_state_code != 0x14 || ship.ai_secondary_target_slot < 0) {
+    return false;
+  }
+  const std::int16_t source_system = ship.current_system_id;
+  const System *source = state.scenario.System(
+      static_cast<std::int16_t>(source_system + 0x80));
+  if (source == nullptr) {
+    return false;
+  }
+
+  std::int16_t destination_resource = -1;
+  for (std::size_t slot = 0; slot < source->nav_defs.size(); ++slot) {
+    if (source->nav_defs[slot] == ship.ai_secondary_target_slot) {
+      destination_resource = source->links[slot];
+      break;
+    }
+  }
+  if (destination_resource < 0x80 ||
+      destination_resource == source_system + 0x80) {
+    return false;
+  }
+  const std::int16_t destination_system =
+      static_cast<std::int16_t>(destination_resource - 0x80);
+  const System *destination = state.scenario.System(destination_resource);
+  if (destination == nullptr ||
+      !NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+    return false;
+  }
+
+  ship.fuel_points = std::max(0.0F, ship.fuel_points - kJumpFuelCost);
+  ship.current_system_id = destination_system;
+  ship.primary_target_ship_slot = -1;
+  ship.ai_target_ship_slot = -1;
+  ship.ai_hostility_accumulator = 0;
+  ship.target_stellar_object_id = -1;
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  ship.speed = 0.0F;
+
+  // Prefer the reverse hyperlink's entry stellar. If the scenario has no
+  // paired NavDef, the system centre remains a valid conservative fallback.
+  std::int16_t entry_stellar = -1;
+  for (std::size_t slot = 0; slot < destination->links.size(); ++slot) {
+    if (destination->links[slot] == source_system + 0x80 &&
+        destination->nav_defs[slot] >= 0x80 &&
+        state.scenario.Stellar(destination->nav_defs[slot]) != nullptr) {
+      entry_stellar = destination->nav_defs[slot];
+      break;
+    }
+  }
+  if (entry_stellar >= 0) {
+    const Stellar *stellar = state.scenario.Stellar(entry_stellar);
+    ship.pos_x = static_cast<float>(stellar->pos_x);
+    ship.pos_y = static_cast<float>(stellar->pos_y);
+  } else {
+    ship.pos_x = static_cast<float>(destination->pos_x);
+    ship.pos_y = static_cast<float>(destination->pos_y);
+  }
+  NovaAi_EnterState15JumpOutToSystem(state, ship, entry_stellar);
+  return true;
+}
+
 // Ghidra 0x004687b0 Ship_IsShipFireRestricted. True when the ship must not
 // fire/act this frame: derelict government (flags_primary 0x800), docked to a
 // stellar (target_stellar_object_id set) for non-player ships, or critically
@@ -1356,6 +1458,10 @@ void NovaAi_UpdateShipState(GameState &state,
         other.ai_state_code = 0x14;
         other.ai_control_mode = 0;
       }
+      // Gameplay-visible NPC system transfer. The original continues through
+      // a shared hyperspace presentation path; this per-ship reconstruction
+      // completes the transfer here once state 0x14 has reached its point.
+      (void)NovaAi_CompleteNpcJump(state, ship);
     }
     return;
   }

@@ -436,6 +436,7 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   }
   st.min_status = ReadBeI16(bytes, 0x16);             // reputation_threshold
   st.engage_highlight_frame = ReadBeI16(bytes, 0x18); // hypergate pulse frame
+  st.entry_heading_deg = ReadBeI16(bytes, 0x1a);      // entry heading
   st.availability_flags = ReadBe16(bytes, 0x20);      // availability_flags
   // Animation timing (Bible AnimDelay / Frame0Bias; Ghidra StellarDef +0x470/
   // +0x472 from payload +0x22/+0x24). See Stellar_UpdateStellarSprites.

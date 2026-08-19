@@ -42,6 +42,31 @@ inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
 // EncounterFleet_SpawnRandomSystemDudeShip.
 constexpr float kSpeedLockedSpeed = 0.0F;
 
+[[nodiscard]] std::int16_t SelectSpawnEntryStellar(GameState &state,
+                                                   std::int16_t system_id) {
+  // Ghidra 0x0046e9e0 Stellar_SelectRandomAdjacentDestination: only one in
+  // three spawn attempts takes the adjacent-stellar jump-in branch. The other
+  // attempts deliberately return -1 and retain the polar spawn below.
+  if (RandomBelow(state, 3) != 0) {
+    return -1;
+  }
+  const System *system = state.scenario.System(
+      static_cast<std::int16_t>(system_id + 0x80));
+  if (system == nullptr) {
+    return -1;
+  }
+  for (std::size_t slot = 0; slot < system->nav_defs.size(); ++slot) {
+    const std::int16_t stellar_id = system->nav_defs[slot];
+    const Stellar *stellar = state.scenario.Stellar(stellar_id);
+    if (stellar_id >= 0x80 && system->links[slot] >= 0x80 &&
+        system->links[slot] != system_id + 0x80 && stellar != nullptr &&
+        (stellar->availability_flags & 0x3000) != 0) {
+      return stellar_id;
+    }
+  }
+  return -1;
+}
+
 } // namespace
 
 // Ghidra 0x004254b0 Ship_AllocateShipSlotInSystem.
@@ -207,12 +232,10 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   ship.jump_destination_stellar_id = -2;
   ship.mission_owner_slot = -1;
 
-  // Positioning (DEFERRED positioning nuance): the original spins the lead out
-  // at a random polar offset (AI state 0x08) or jumps it in at an adjacent
-  // stellar (state 0x15). Those AI-state entries are not yet reconstructed, so
-  // the lead is left at the system origin with a fixed heading and a static
-  // ai_state_code 0 -- visible and positioned for rendering, but not yet given
-  // motion or a spawn animation. TODO(decomp).
+  // Positioning: the original either spins the lead out at a random polar
+  // offset (AI state 0x08) or jumps it in at an adjacent stellar (AI state
+  // 0x15). The selector below restores the original 1-in-3 jump-in gate; the
+  // state-0x08 spin-out behavior itself remains deferred.
   ship.pos_x = 0.0F;
   ship.pos_y = 0.0F;
   ship.vel_x = 0.0F;
@@ -220,6 +243,15 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   ship.speed = 0.0F;
   ship.heading = 0.0F;
   ship.ai_state_code = 0;
+
+  const std::int16_t entry_stellar =
+      SelectSpawnEntryStellar(state, system_id);
+  if (entry_stellar >= 0) {
+    const Stellar *stellar = state.scenario.Stellar(entry_stellar);
+    ship.pos_x = static_cast<float>(stellar->pos_x);
+    ship.pos_y = static_cast<float>(stellar->pos_y);
+    NovaAi_EnterState15JumpOutToSystem(state, ship, entry_stellar);
+  }
 
   return slot;
 }
@@ -619,6 +651,14 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
   ship.speed = 0.0F;
   ship.jump_destination_stellar_id = -2;
   ship.ai_state_code = 0;
+  const std::int16_t entry_stellar =
+      SelectSpawnEntryStellar(state, system_id);
+  if (entry_stellar >= 0) {
+    const Stellar *stellar = state.scenario.Stellar(entry_stellar);
+    ship.pos_x = static_cast<float>(stellar->pos_x);
+    ship.pos_y = static_cast<float>(stellar->pos_y);
+    NovaAi_EnterState15JumpOutToSystem(state, ship, entry_stellar);
+  }
   NovaLog::Info("dude ship placed at ({}, {}) heading {:.2f}",
                 ship.pos_x,
                 ship.pos_y,

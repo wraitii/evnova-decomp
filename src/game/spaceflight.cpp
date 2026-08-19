@@ -55,11 +55,9 @@ void Stub_DrawStatus(GameState &state) { (void)state; }
 // current system. Part 1's target-refresh helpers are reconstructed in ship_ai.
 void Stub_AiRoutines(GameState &state) {
   const std::int16_t current_system = state.player.current_system_id;
-  // now_ms backs the ai_mode_start_time_ms timestamps; the wander/state
-  // machine does not yet consume them (no jump/formation timing gates wired
-  // into this stub), so it is passed as 0 rather than adding an SDL tick read
-  // here -- TODO(decomp) when a timer-consuming AI branch is wired.
-  const std::uint32_t now_ms = 0;
+  // now_ms backs the AI mode/formation timers and must be monotonic across
+  // frames; the original reads its global millisecond tick source here.
+  const std::uint32_t now_ms = SDL_GetTicks();
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
     if (!ship.is_active || ship.current_system_id != current_system) {

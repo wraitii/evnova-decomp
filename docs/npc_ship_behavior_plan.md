@@ -157,8 +157,10 @@ within the 251 px combat station range.
 
 Notes: 0x575118 doubles as mode-1's 1.75 px/tick threshold AND mode-0x15's
 1.75x damp factor. 0x0a is unused/reserved (no block in the original). Mode 10
-(stationary cleanup, written by state 8) parks the ship with desired -5.75 and
-thrust -3.67 (raw floats 0xC0B80000/0xC06AE148). The combat/formation movement
+(departure cleanup, written by state 8) reverses the ship with desired -5.75
+and thrust -3.67 (raw floats 0xC0B80000/0xC06AE148); the ordinary NPC movement
+integrator then moves it backward while the engine glow fades. The
+combat/formation movement
 constants decoded on 2025-08-17: evasive-order gate 123 px (0x575124),
 mode-0xc brake 0.66 (0x575168), position-creep 10x (0x575170), formation
 radius 48 (0x575178), scripted creep spans 150/80 (0x57517c/0x575180) and
@@ -422,12 +424,26 @@ ships leaving the player's view (they stop at the stellar; most then head to
 the system centre for a jump spin-up, Phase 7), plus the population reseed at
 every landing/jump.
 
-## Phase 7 -- Jump between systems (high effort, save for last)
+## Phase 7 -- Jump between systems (in progress)
 
 - [ ] **Hyperspace jump behavior**: state 0x14 ("traveling/jumping to a system",
       sets `jump_destination_stellar_id`, propagates to escorts). Port:
-  - jump-in / jump-out positioning (spin-out AI 0x08 / jump-in AI 0x15,
-    deferred in `NovaEncounter_SpawnFleetLeadShip`);
+  - **Started**: jump-in positioning now uses the original state-0x15 setup
+    (`NovaAi_EnterState15JumpOutToSystem`, Ghidra 0x004159e0) for dude and
+    encounter-lead spawns. StellarDef +0x28 is now decoded from sp\x9ab +0x1a
+    and uses the original 0..359 validation/random fallback.
+  - **Started**: state-0x14 NPC arrivals resolve the source system's
+    NavDef/link pair, consume one jump of fuel, move the ship to the reverse
+    link's entry stellar (or system centre fallback), and re-enter via state
+    0x15. This is the gameplay-visible transfer slice; the original's shared
+    hyperspace presentation/audio path is not yet modelled. The original
+    player hyperspace sequence is in the collapsed `Ship_HandlePlayerShipCore`
+    path (anchor 0x0044f3d0); NPC state 0x15/0x08 uses the ordinary ship
+    movement/engine-glow path and does not call `Stellar_TriggerHyperspaceAudioOnce`
+    (0x00431420), which is player-latched. The remaining NPC visual/audio work
+    is therefore a local departure/arrival effect, not reuse of the player’s
+    full-screen tunnel state.
+  - jump-in / jump-out positioning (spin-out AI 0x08 remains deferred);
   - `Ship_TurnShipTowardHeading` (0x0044c8d0) hyperspace alignment path
     (partially decomposed);
   - state-machine checks that terminate travel and trigger a jump (from
@@ -457,12 +473,13 @@ every landing/jump.
 | 7 | Jump systems | High |
 | 8 | Escort formations | Medium |
 
-**Phases 0-4 and the Phase-6 system-boundary cleanup are live**: NPC ships
+**Phases 0-4, the Phase-6 system-boundary cleanup, and the first Phase-7 NPC
+jump transfer slice are live**: NPC ships
 spawn, move around the system, wander toward travel stellars, and settle there;
 on every landing/jump the vacant-ship cleanup sweeps the cohort and population
 maintenance reseeds it (so NPCs leave the world at system boundaries, exactly
-like the original). Jump (Phase 7) and full combat (Phase 5) are the later,
-bigger lifts.
+like the original). Full hyperspace presentation, escort synchronization, and
+mission/fleet travel remain later lifts.
 
 ## Cross-cutting reminders (per AGENTS.md)
 

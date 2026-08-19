@@ -55,6 +55,18 @@ namespace game {
 // current tick count in ai_mode_start_time_ms.
 void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms);
 
+// Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem. Places an NPC
+// at an adjacent travel stellar's entry point and arms the short reverse-
+// thrust arrival maneuver used by newly spawned ships.
+void NovaAi_EnterState15JumpOutToSystem(GameState &state,
+                                        Ship &ship,
+                                        std::int16_t stellar_id);
+
+// Clean-room cross-system completion for an NPC already in state 0x14. The
+// original's larger hyperspace presentation path is not shared with this
+// per-ship AI tick; this helper performs its gameplay-visible system transfer.
+bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship);
+
 // Ghidra 0x004687b0 Ship_IsShipFireRestricted. True when the ship must not
 // fire/act this frame: derelict government (flags_primary 0x800), docked to a
 // stellar (target_stellar_object_id set) for non-player ships, or critically

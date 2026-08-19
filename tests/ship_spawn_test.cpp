@@ -81,12 +81,22 @@ TEST_CASE("fleet lead spawner shapes the ship from the fleet def") {
         Catch::Approx(static_cast<float>(cls->base_armor)));
   CHECK(ship.mission_fleet_slot == -1);
   CHECK(ship.mission_ship_slot == -1);
-  CHECK(ship.jump_destination_stellar_id == -2);
+  if (ship.ai_state_code == 0x15) {
+    CHECK(ship.jump_destination_stellar_id >= 0x80);
+  } else {
+    CHECK(ship.jump_destination_stellar_id == -2);
+  }
   CHECK(ship.credits == 0);
-  // Position/heading are the neutral defaults for now (AI-entry deferred).
-  CHECK(ship.pos_x == Catch::Approx(0.0F));
-  CHECK(ship.pos_y == Catch::Approx(0.0F));
-  CHECK(ship.ai_state_code == 0);
+  // The original enters fleet leads at an adjacent travel stellar through
+  // Ship_EnterShipAiState0x15 (0x004159e0), when the system has one.
+  if (ship.ai_state_code == 0x15) {
+    CHECK(ship.ai_secondary_target_slot >= 0x80);
+    CHECK(ship.reverse_speed_bias == Catch::Approx(60.0F));
+  } else {
+    CHECK(ship.pos_x == Catch::Approx(0.0F));
+    CHECK(ship.pos_y == Catch::Approx(0.0F));
+    CHECK(ship.ai_state_code == 0);
+  }
 }
 
 // System_TickNpcSpawnMaintenance (0x0041d6e0, ambience slice): over repeated
