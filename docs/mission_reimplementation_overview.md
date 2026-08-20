@@ -110,8 +110,18 @@ Mission ships connect to the existing partial spawn and AI systems:
 - `0x0046AC50` ambient mission-ship spawning
 - `0x00426D10` mission-ship announcements
 - `0x004053C0` mission stellar-attack directive
+- `0x00413610` government assistance/reinforcement trigger
+- `0x0043A020` reinforcement countdown and fleet arrival
 
-Current spawn code skips the mission branch. Mission-fleet ownership, escort counts, and announcements are also absent.
+Current spawn code skips the mission branch. Mission-fleet ownership, escort
+counts, and announcements are also absent. Reinforcement fleets are a related
+but distinct path: combat arms `Government_TryTriggerGovtAssistanceEncounter`,
+which starts the system's `ReinfTime` countdown; when it expires,
+`System_UpdateRandomEncounterCountdown` calls the ordinary `flet` spawner with
+the system's `ReinfFleet` and AI behavior `4`. That common spawner selects the
+same arrival presentation as random encounter fleets: state `0x15` at an
+adjacent restricted stellar, otherwise state `0x08` slowdown. The Bible's
+mission `ShipStart = 1` is a separate mission-special-ship arrival mode.
 
 ## 6. In-flight interactions
 

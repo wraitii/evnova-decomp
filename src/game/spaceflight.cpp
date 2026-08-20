@@ -52,7 +52,8 @@ void Stub_DrawStatus(GameState &state) { (void)state; }
 // NovaAi_UpdateShipAI (src/game/ship_ai.cpp), which dispatches the behavior
 // supervisors + the Ship_UpdateShipAiState state machine + the
 // Ship_ApplyShipAiControls bridge for every active, non-player ship in the
-// current system. Part 1's target-refresh helpers are reconstructed in ship_ai.
+// current system. The original's earlier scope-6 pass only refreshes target
+// bookkeeping; it must not run this full state/control update a second time.
 void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
   const std::int16_t current_system = state.player.current_system_id;
   // now_ms backs the AI mode/formation timers and must be monotonic across
@@ -74,9 +75,15 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
       ship.engine_glow_intensity = 0.0F;
       continue;
     }
+    // Frame_TickSystems skips AI entirely for behavior 0. This is important
+    // for state-8 arrivals: they retain their seeded 50-unit inward velocity
+    // until a behavior-bearing ship takes over the normal AI path.
+    if (ship.ai_behavior_code <= 0) {
+      continue;
+    }
     // skip_heavy_ai=0: these spawned ships run the full (heavy) AI decision.
-    NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, now_ms,
-                        elapsed_ticks * (1000.0F / 30.0F));
+    NovaAi_UpdateShipAI(
+        state, ship, /*skip_heavy_ai=*/false, now_ms, elapsed_ticks);
   }
 }
 
@@ -231,10 +238,12 @@ void NovaFrame_TickSystems(GameState &state,
 
   if (run_full_tick) {
     Stub_DrawStatus(state);                // scope 0xc
-    Stub_AiRoutines(state, elapsed_ticks); // scope 6 (part 1: targeting setup)
     Stub_TickReactionsAndNpcSpawns(state); // scope 0xb
-    Stub_AiRoutines(state, elapsed_ticks); // scope 6 (part 2: per-ship AI)
-    Stub_CalcAiOdds(state);                // scope 0x14
+    // The first original scope-6 pass only refreshes target
+    // flags/reacquisition; the full clean-room AI update belongs here, once,
+    // after spawning.
+    Stub_AiRoutines(state, elapsed_ticks);
+    Stub_CalcAiOdds(state); // scope 0x14
   }
 
   // Always-run scopes that keep advancing during frozen transitions.
@@ -640,13 +649,15 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // AndLanding 0x00457580): the ships left behind by the departure system
       // are vacant (idle wanderers/parked; only non-fire-restricted ships
       // engaging the player survive), so the cohort is swept before the new
-      // system repopulates toward avg_ships (System_TickNpcSpawnMaintenance).
+      // system gets its immediate scattered avg_ships population from the tail
+      // of System_RebuildInitialNpcAndMissionPopulation. Per-tick maintenance
+      // only replenishes later losses through the visible arrival paths.
       // Without this sweep the old system's ships would linger in their
       // previous current_system_id and reappear (still active) whenever the
       // player jumps back.
       NovaShip_DeactivateVacantShipsAndTally(state,
                                              /*keep_player_engaged=*/false);
-      NovaSystem_TickNpcSpawnMaintenance(state, state.player.current_system_id);
+      NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
       // The player's primary target ship lived in the departure system; the
       // vacancy sweep deactivated it (and its slot may be reused by a fresh
       // spawn), so clear the selection and the reticle pulse -- the original
@@ -1202,10 +1213,10 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
 //   desired <  0 : physics override; set velocity to heading * abs(desired)
 //                  instead of integrating thrust, then decay desired toward
 //                  zero by abs(ai_forward_thrust_cmd).
-// ai_maneuver_timer_ms is a coast-through-reversal TIMER (not a brake): while >0
-// it suppresses both turning and thrust (the ship holds heading and coasts);
-// it counts down by frame time each frame and is re-set to a random 30..60
-// when the AI decides to reverse into open space.
+// ai_maneuver_timer_ms is a coast-through-reversal TIMER (not a brake): while
+// >0 it suppresses both turning and thrust (the ship holds heading and coasts);
+// it counts down by normalized elapsed ticks each frame and is re-set to a
+// random 30..59 ticks when the AI decides to reverse into open space.
 //
 // Stats come from NovaShip_ComputeEffectiveStats (Ship_ComputeShipEffective-
 // Thrust / EffectiveMaxSpeed NPC branch): turn = raw_maneuver*0.1 deg/tick,
@@ -1308,8 +1319,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     // In particular, disabled NPCs must not restore shields and lethal hits
     // must not resurrect a ship whose armor has reached zero. The original
     // also leaves this whole movement/regen block disabled while coasting.
-    if (!fire_restricted &&
-        !NovaAiShip_IsDestroyed(ship)) {
+    if (!fire_restricted && !NovaAiShip_IsDestroyed(ship)) {
       const float max_shield = static_cast<float>(ship_class.base_shield);
       if (ship.shield_points < max_shield) {
         ship.shield_points = std::min(
@@ -1386,24 +1396,25 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       } else {
         ship.speed = std::abs(desired);
       }
-      ship.ai_desired_speed += std::abs(ship.ai_forward_thrust_cmd);
+      // The original normally advances this command on a stable ~30 Hz
+      // cadence. Scale the decay by our normalized frame interval so a slow
+      // SDL frame cannot move the ship several ticks at the old speed while
+      // applying only one tick of slowdown.
+      ship.ai_desired_speed +=
+          std::abs(ship.ai_forward_thrust_cmd) * elapsed_ticks;
       // Ship_HandleShip compares the post-thrust absolute speed against the
-      // negative effective max speed. For state 8's -5.75/-3.67 cleanup
-      // command this condition is normally met on the first movement tick,
-      // and Ship_ResetShipPrimaryAndSecondaryTargets exits state 8 to idle.
+      // negative effective max speed. State 8 begins at -50 and advances by
+      // about 1.165 per movement tick, preserving the original visible fast
+      // arrival and gradual slowdown before the reset returns it to idle.
       if (ship.ai_desired_speed >= -eff_max_speed) {
         NovaAi_ResetShipPrimaryAndSecondaryTargets(ship);
-      }
-      // Once the reversal has closed enough distance, the AI decides to coast
-      // through: arm a random 30..60-tick reversal timer (only in open space,
-      // i.e. no current target and not a mission ship). The original also
-      // clears primary/secondary targets here -- that belongs to the AI layer
-      // (deferred). TODO(decomp): mission_ship_slot==0x3ff carve-out. Uses the
-      // same GameState.rng-backed uniform draw the spawner does (RandomBelow,
-      // mirroring NovaRandom_Range) so runs stay reproducible.
-      if (ship.ai_target_ship_slot == -1) {
-        std::uniform_int_distribution<std::int32_t> dist(30, 60);
-        ship.ai_maneuver_timer_ms = static_cast<float>(dist(state.rng));
+        // Only after reaching the effective-speed threshold does the original
+        // arm its short coast-through timer. Arming it on every negative-speed
+        // tick freezes each 1.165-unit slowdown step for several frames.
+        if (ship.ai_target_ship_slot == -1 && ship.mission_ship_slot != 0x3ff) {
+          std::uniform_int_distribution<std::int32_t> dist(30, 59);
+          ship.ai_maneuver_timer_ms = static_cast<float>(dist(state.rng));
+        }
       }
     }
   }
@@ -1490,10 +1501,12 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   }
 
   // --- Coast-through-reversal timer countdown. ---
+  // Despite its legacy field name, the original stores normalized simulation
+  // ticks here: Frame_MeasureFrameTiming scales elapsed milliseconds by 0.03
+  // before publishing g_avg_frame_time_ms.
   if (ship.ai_maneuver_timer_ms > 0.0F) {
-    const float frame_time_ms = elapsed_ticks * (1000.0F / 30.0F);
     ship.ai_maneuver_timer_ms =
-        std::max(0.0F, ship.ai_maneuver_timer_ms - frame_time_ms);
+        std::max(0.0F, ship.ai_maneuver_timer_ms - elapsed_ticks);
   }
 
   // --- Engine glow level (Ghidra ShipState field_0xc8d4). ---

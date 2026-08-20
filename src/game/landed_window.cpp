@@ -99,14 +99,14 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
 
   // Stellar_ProcessTravelAndLanding (0x00457580) runs Ship_DeactivateVacant
   // ShipsAndTally('\0') during the normal arrival, then Mission_SpawnSystemMisn
-  // Ships + System_TickNpcSpawnMaintenance reseed the system's NPC population.
+  // Ships immediately seeds System.avg_ships scattered ambient ships.
   // So a landing (and the subsequent launch) leaves the system with a fresh
   // batch of ships rather than the fleet that had accumulated before docking.
   // The port deactivates the whole vacant cohort (idle wanderers / parked /
   // mission ships; only non-fire-restricted ships actively engaging the player
-  // are spared -- see ship_spawn.hpp), then replenishes toward avg_ships.
+  // are spared -- see ship_spawn.hpp), then rebuilds the initial population.
   NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
-  NovaSystem_TickNpcSpawnMaintenance(state, state.player.current_system_id);
+  NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
 
   ctx.stellar_id = stellar_id;
   ctx.landed = true;
@@ -516,10 +516,11 @@ bool ServiceAvailable(const GameState &state,
 // Draws the docked-screen backdrop + panels + header + service list with the
 // real screen fonts: the destination title in Chicago (charcoal) and the status
 // lines in Geneva. The Spaceport backdrop (`destination_art`) is drawn at
-// native size in the centred DLOG window; the destination planet picture (`planet_art`, PICT
-// link_a + 0x10000) is drawn 1:1 into the Spaceport DITL's 612x285 outer panel
-// at the top-centre (its natural size), over the spaceport. The title band,
-// inner status panel, and buttons are positioned from the laid-out DITL items
+// native size in the centred DLOG window; the destination planet picture
+// (`planet_art`, PICT link_a + 0x10000) is drawn 1:1 into the Spaceport DITL's
+// 612x285 outer panel at the top-centre (its natural size), over the spaceport.
+// The title band, inner status panel, and buttons are positioned from the
+// laid-out DITL items
 // (`layout`) rather than hardcoded geometry.
 void DrawLandedMenu(SdlPlatform &platform,
                     NovaFontCache &font_cache,
@@ -548,7 +549,7 @@ void DrawLandedMenu(SdlPlatform &platform,
 
   const SDL_Color kTitle{255, 255, 255, 255};
   const SDL_Color kBody{255, 255, 255, 255};
-  const SDL_Color kPanel{16, 40, 72, 255};       // flat panel frame fill
+  const SDL_Color kPanel{16, 40, 72, 255}; // flat panel frame fill
 
   // Lay out the panels. The large 612x285 outer panel at the top-centre
   // is the destination-planet frame: the planet picture is drawn into it at its
@@ -607,18 +608,19 @@ void DrawLandedMenu(SdlPlatform &platform,
                         title);
 
   // The stellar's landing description text in the inner content panel (small
-  // Geneva dialog font), word-wrapped to the panel width. The description comes from the
-  // stellar's "desc" landing-description block (NovaResource_LoadStellar-
-  // Description, Ghidra Ui_LoadSelectionDialogResource); when it is absent the
-  // panel falls back to the credits/fuel/hull status lines.
+  // Geneva dialog font), word-wrapped to the panel width. The description comes
+  // from the stellar's "desc" landing-description block
+  // (NovaResource_LoadStellar- Description, Ghidra
+  // Ui_LoadSelectionDialogResource); when it is absent the panel falls back to
+  // the credits/fuel/hull status lines.
   const bool have_status = status_panel.w > 0.0F && status_panel.h > 0.0F;
   constexpr float kDescriptionInset = 4.0F;
   const float body_x = have_status ? status_panel.x + kDescriptionInset
-                                  : panel.x + kDescriptionInset;
+                                   : panel.x + kDescriptionInset;
   float baseline = have_status ? status_panel.y + 13.0F : panel.y + 60.0F;
-  const float body_w = have_status
-                           ? std::max(40.0F, status_panel.w - 2.0F * kDescriptionInset)
-                           : std::max(40.0F, panel.w - 2.0F * kDescriptionInset);
+  const float body_w =
+      have_status ? std::max(40.0F, status_panel.w - 2.0F * kDescriptionInset)
+                  : std::max(40.0F, panel.w - 2.0F * kDescriptionInset);
 
   if (!description.empty()) {
     // Word-wrap the stellar description to the panel width (measured with the
@@ -1019,12 +1021,11 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                   ServiceButtonAt(button_rects, platform.mouse_position())) {
             ctx.selection = static_cast<LandedService>(*slot);
             if (ServiceAvailable(state, ctx.stellar_id, ctx.selection)) {
-              LandedExit exit =
-                  DispatchService(platform,
-                                  state,
-                                  ctx,
-                                  docked_snapshot ? docked_snapshot->get()
-                                                  : nullptr);
+              LandedExit exit = DispatchService(
+                  platform,
+                  state,
+                  ctx,
+                  docked_snapshot ? docked_snapshot->get() : nullptr);
               if (exit == LandedExit::kLaunched) {
                 return LandedExit::kLaunched;
               }

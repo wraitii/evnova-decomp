@@ -43,28 +43,67 @@ inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
 constexpr float kSpeedLockedSpeed = 0.0F;
 
 [[nodiscard]] std::int16_t SelectSpawnEntryStellar(GameState &state,
-                                                   std::int16_t system_id) {
-  // Ghidra 0x0046e9e0 Stellar_SelectRandomAdjacentDestination: only one in
-  // three spawn attempts takes the adjacent-stellar jump-in branch. The other
-  // attempts deliberately return -1 and retain the polar spawn below.
-  if (RandomBelow(state, 3) != 0) {
+                                                   const Ship &ship) {
+  // Ghidra 0x0046e9e0 Stellar_SelectRandomAdjacentDestination does not make a
+  // 1-in-3 yes/no decision for the emergence path. The roll selects a mode for
+  // Stellar_SelectRandomAdjacentTravelStellar; that helper still chooses from
+  // all eligible travel points, and only afterwards does this wrapper accept a
+  // hypergate/wormhole. Treating the roll as a direct gate made every accepted
+  // attempt choose the first restricted stellar and greatly overrepresented
+  // state 0x15 in systems that also have ordinary jump points.
+  //
+  // NovaAi_SelectRandomAdjacentTravelStellar reconstructs the common eligible
+  // candidate pool but not the selector's scan-mask-specific strict flavor.
+  // Consume the original flavor roll to preserve RNG cadence, then validate
+  // the selected candidate exactly as this wrapper does. TODO(decomp): pass
+  // the strict flavor through once the scan-mask pools are fully reconstructed.
+  (void)RandomBelow(state, 3);
+  const std::int16_t stellar_id =
+      NovaAi_SelectRandomAdjacentTravelStellar(state, ship);
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr || (stellar->availability_flags & 0x3000) == 0) {
     return -1;
   }
-  const System *system = state.scenario.System(
-      static_cast<std::int16_t>(system_id + 0x80));
-  if (system == nullptr) {
-    return -1;
+  return stellar_id;
+}
+
+// Ghidra DAT_0057522c: the initial polar velocity added to an NPC entering
+// state 0x08. The original value is a 50.0f literal. Ship.heading is stored in
+// radians in the clean-room state, while the original ShipState stores degrees.
+constexpr float kSpinInVelocity = 50.0F;
+
+// Ghidra 0x0041c710 / 0x0041ba80. The original builds this radius by adding a
+// 50-unit ramp while subtracting 1.16 each iteration, then adds 1000. The
+// resulting 2102.64-unit polar offset is intentionally much larger than the
+// ordinary [-750, 750) allocation scatter.
+[[nodiscard]] float RandomPolarArrivalRadius() {
+  float radius = 0.0F;
+  for (float ramp = 50.0F; ramp > 0.0F; ramp -= 1.16F) {
+    radius += ramp;
   }
-  for (std::size_t slot = 0; slot < system->nav_defs.size(); ++slot) {
-    const std::int16_t stellar_id = system->nav_defs[slot];
-    const Stellar *stellar = state.scenario.Stellar(stellar_id);
-    if (stellar_id >= 0x80 && system->links[slot] >= 0x80 &&
-        system->links[slot] != system_id + 0x80 && stellar != nullptr &&
-        (stellar->availability_flags & 0x3000) != 0) {
-      return stellar_id;
-    }
-  }
-  return -1;
+  return radius + 1000.0F;
+}
+
+void AddArrivalSlowdownVelocity(Ship &ship) {
+  ship.vel_x += std::sin(ship.heading) * kSpinInVelocity;
+  ship.vel_y -= std::cos(ship.heading) * kSpinInVelocity;
+}
+
+void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
+  const float angle =
+      static_cast<float>(RandomBelow(state, 0x168)) * 0.017453292519943295F;
+  const float spawn_radius = RandomPolarArrivalRadius();
+  ship.pos_x = std::sin(angle) * spawn_radius;
+  ship.pos_y = -std::cos(angle) * spawn_radius;
+  ship.heading = std::atan2(-ship.pos_x, ship.pos_y);
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  ship.speed = 0.0F;
+  // heading points from the spawn point back to the system centre, so this
+  // initial 50-unit velocity is inward, matching Math_AddPolarVelocity in the
+  // original spawn path.
+  AddArrivalSlowdownVelocity(ship);
+  NovaAi_EnterState8Slowdown(state, ship);
 }
 
 } // namespace
@@ -173,7 +212,7 @@ int NovaShip_AllocateShipSlot(GameState &state,
 // armor from the ship class, mission slots cleared, escort-eligibility and
 // mining-scoop derived flags, and the timed-action seed. The original also
 // seeds random cargo for carry_cargo_flag & low-default-AI fleets, positions
-// the lead (spin-out / jump-in), copies the 8-bank weapon loadout and spawns
+// the lead (slowdown / jump-in), copies the 8-bank weapon loadout and spawns
 // the escorts; those are deferred and left at defaults here (see header TODO).
 int NovaEncounter_SpawnFleetLeadShip(GameState &state,
                                      std::int16_t system_id,
@@ -234,8 +273,9 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
 
   // Positioning: the original either spins the lead out at a random polar
   // offset (AI state 0x08) or jumps it in at an adjacent stellar (AI state
-  // 0x15). The selector below restores the original 1-in-3 jump-in gate; the
-  // state-0x08 spin-out behavior itself remains deferred.
+  // 0x15). The selector below chooses an eligible travel point first, then
+  // accepts only a restricted stellar for emergence. The state-0x08 fallback
+  // uses the original polar placement and slowdown entry.
   ship.pos_x = 0.0F;
   ship.pos_y = 0.0F;
   ship.vel_x = 0.0F;
@@ -244,13 +284,14 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   ship.heading = 0.0F;
   ship.ai_state_code = 0;
 
-  const std::int16_t entry_stellar =
-      SelectSpawnEntryStellar(state, system_id);
+  const std::int16_t entry_stellar = SelectSpawnEntryStellar(state, ship);
   if (entry_stellar >= 0) {
     const Stellar *stellar = state.scenario.Stellar(entry_stellar);
     ship.pos_x = static_cast<float>(stellar->pos_x);
     ship.pos_y = static_cast<float>(stellar->pos_y);
     NovaAi_EnterState15JumpOutToSystem(state, ship, entry_stellar);
+  } else {
+    PlaceRandomPolarSlowdown(state, ship);
   }
 
   return slot;
@@ -547,7 +588,8 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     ship.vel_x = 0.0F;
     ship.vel_y = 0.0F;
     ship.speed = 0.0F;
-    ship.heading = static_cast<float>(RandomBelow(state, 0x168));
+    ship.heading =
+        static_cast<float>(RandomBelow(state, 0x168)) * 0.017453292519943295F;
     ship.jump_destination_stellar_id = -2;
     ship.ai_state_code = 0;
     ship.ai_control_mode = 0;
@@ -588,7 +630,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
 // encounter fleet (existing NovaEncounter_TrySpawnRandomFleet), else spawns a
 // random system dude ship (discarded when its fuel capacity < 1), then
 // positions the spawned ship at a random polar offset from system centre and
-// faces it toward the origin. The AI-state entry (spin-out / jump-in) and the
+// faces it toward the origin. The AI-state entry (slowdown / jump-in) and the
 // speed polar integration mirror Math_AddPolarVelocity (heading 0 = up, world
 // +y down).
 int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
@@ -631,16 +673,11 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
   // Random polar offset from system centre, magnitude ~the spawn scale
   // (_DAT_0057522c + ramp + _DAT_0057526c). The original picks a radius and
   // adds it in the heading direction: pos += (sin(h), -cos(h)) * speed.
-  const float heading = static_cast<float>(RandomBelow(state, 0x168));
-  // The decomp's radius loop accumulates ~DAT_0057522c at a cadence; we fold it
-  // into a single representative spawn radius for the clean-room (the precise
-  // sum of the loop is provisional until the drifting-sprite scale is
-  // observed). TODO(decomp).
-  constexpr float kSpawnRadius = 300.0F;
-  ship.pos_x = std::sin(heading) * kSpawnRadius;
-  ship.pos_y = -std::cos(heading) * kSpawnRadius;
-  // Face the spawned ship toward the origin (bearing from its position back to
-  // system centre). The original uses Math_BearingFromPointToPoint.
+  const float heading =
+      static_cast<float>(RandomBelow(state, 0x168)) * 0.017453292519943295F;
+  const float spawn_radius = RandomPolarArrivalRadius();
+  ship.pos_x = std::sin(heading) * spawn_radius;
+  ship.pos_y = -std::cos(heading) * spawn_radius;
   // Face the spawned ship toward the origin (bearing from its position back to
   // system centre). The original uses Math_BearingFromPointToPoint; this uses
   // the same heading convention as the rest of the codebase (heading =
@@ -651,19 +688,75 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
   ship.speed = 0.0F;
   ship.jump_destination_stellar_id = -2;
   ship.ai_state_code = 0;
-  const std::int16_t entry_stellar =
-      SelectSpawnEntryStellar(state, system_id);
+  const std::int16_t entry_stellar = SelectSpawnEntryStellar(state, ship);
   if (entry_stellar >= 0) {
     const Stellar *stellar = state.scenario.Stellar(entry_stellar);
     ship.pos_x = static_cast<float>(stellar->pos_x);
     ship.pos_y = static_cast<float>(stellar->pos_y);
     NovaAi_EnterState15JumpOutToSystem(state, ship, entry_stellar);
+  } else {
+    AddArrivalSlowdownVelocity(ship);
+    NovaAi_EnterState8Slowdown(state, ship);
   }
   NovaLog::Info("dude ship placed at ({}, {}) heading {:.2f}",
                 ship.pos_x,
                 ship.pos_y,
                 ship.heading);
   return slot;
+}
+
+// Ghidra 0x0041af90 System_RebuildInitialNpcAndMissionPopulation, initial
+// ambient-population slice. The larger function first restores mission fleets
+// and player escorts,
+// then performs exactly avg_ships attempts here. Unlike per-tick maintenance,
+// its ordinary-dude branch deliberately calls the low-level spawner directly,
+// so those ships keep their inner-system [-750,750) scatter instead of being
+// moved to the polar state-8 / restricted-stellar state-15 arrival paths.
+void NovaSystem_PopulateInitialNpcShips(GameState &state,
+                                        std::int16_t system_id) {
+  const System *sys =
+      state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
+  if (sys == nullptr || sys->avg_ships <= 0) {
+    return;
+  }
+
+  constexpr std::int32_t kDispatchRoll = 7;
+  for (std::int16_t attempt = 0; attempt < sys->avg_ships; ++attempt) {
+    int slot = -1;
+    if (RandomBelow(state, kDispatchRoll) == 0) {
+      // Mission_SpawnMissionShipFromMissionShipDef(system, false, -1).
+      // Mission-ship definitions are not wired to the runtime ship allocator
+      // yet, so preserve the failed-attempt behavior for this branch.
+      NovaLog::Debug("initial NPC population: mission-ship branch deferred");
+      continue;
+    }
+    if (RandomBelow(state, kDispatchRoll) == 0) {
+      // EncounterFleet_TrySpawnRandomEncounterFleet owns its lead/escort
+      // placement; the original does not apply the base-velocity step below to
+      // this branch because it does not return the spawned slot to this caller.
+      (void)NovaEncounter_TrySpawnRandomFleet(
+          state, system_id, /*ignore_ship_availability=*/false);
+      continue;
+    }
+
+    slot = NovaEncounter_SpawnRandomSystemDudeShip(state, system_id, 8);
+    if (slot < 0) {
+      continue;
+    }
+
+    Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (cls == nullptr) {
+      continue;
+    }
+    // The clean-room keeps the Bible's raw speed scale (100 units per
+    // px/reference-tick), whereas g_ship_class_defs contains the runtime float
+    // used by Math_AddPolarVelocityWithClamp in the original.
+    const float base_speed = static_cast<float>(cls->speed) / 100.0F;
+    ship.vel_x = std::sin(ship.heading) * base_speed;
+    ship.vel_y = -std::cos(ship.heading) * base_speed;
+  }
 }
 
 // Ghidra 0x0041d6e0 System_TickNpcSpawnMaintenance (ambience slice). See the
@@ -736,12 +829,14 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 // actively engaging the player -- ai_behavior_code > 4, ai_target_ship_slot ==
 // 0, not docked at a stellar, not in a mission fleet -- AND is not
 // fire-restricted AND `keep_player_engaged` is false (the original's flag==0).
-// State-8 spin-out ships are also vacant: they have no special exemption and
+// State-8 slowdown ships are also vacant: they have no special exemption and
 // are removed by this same outer sweep. Every other ship (idle wanderers/dudes,
-// parked, mission, fire-restricted) is vacant and deactivated. The original runs this on travel/landing arrival
-// (Stellar_ProcessTravelAndLanding 0x00457580) and on system entry
-// (NovaMainLoop_Run 0x00486880) with flag==0, then Mission_SpawnSystemMisnShips
-// + System_TickNpcSpawnMaintenance reseed the population.
+// parked, mission, fire-restricted) is vacant and deactivated. The original
+// runs this on travel/landing arrival (Stellar_ProcessTravelAndLanding
+// 0x00457580) and on system entry (NovaMainLoop_Run 0x00486880) with flag==0,
+// then System_RebuildInitialNpcAndMissionPopulation immediately rebuilds the
+// initial scattered population; System_TickNpcSpawnMaintenance handles later
+// attrition.
 void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
                                             bool keep_player_engaged) {
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {

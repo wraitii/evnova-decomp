@@ -129,10 +129,10 @@ constexpr float kFormationOffsetRadiusPx = 48.0F;
 constexpr float kScriptPosXSpan = 150.0F;
 constexpr float kScriptPosYSpan = 80.0F;
 constexpr float kScriptAlignAddend = 10.0F;
-// Control-mode 10 (stationary cleanup reverse): desired -5.75 px/tick with a
-// -3.67 thrust command (raw float bits 0xC0B80000 / 0xC06AE148).
-constexpr float kMode10ReverseSpeed = -5.75F;
-constexpr float kMode10ReverseThrust = -3.67F;
+// Control-mode 10 arrival slowdown: start at 50 px/tick along the heading and
+// reduce that override by 1.165 each tick (raw bits 0xC2480000 / 0xBF951EB8).
+constexpr float kMode10ReverseSpeed = -50.0F;
+constexpr float kMode10ReverseThrust = -1.165F;
 // Escort-follow half-span stand-in: Sprite_GetShipClassEscortShotHalfSpan
 // (0x004624c0) returns the class escort sprite's shot half-span or its 0x4B =
 // 75 px debug fallback; the clean-room sprite tables are not modelled, so the
@@ -141,11 +141,9 @@ constexpr float kEscortHalfSpanPx = 75.0F;
 
 constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
 constexpr float kFullCircleDeg = 360.0F;
-// The reference simulation cadence (30 Hz): the original's
-// _g_avg_frame_time_ms at 30 fps, used by the control-mode creeps and the
-// velocity-match/scripted ramps (modes 8/0xc/0xf/0x14 read the measured frame
-// time in milliseconds, not the normalized tick unit).
-constexpr float kReferenceFrameTimeMs = 1000.0F / 30.0F;
+// Frame_MeasureFrameTiming multiplies elapsed milliseconds by 0.03 before
+// publishing _g_avg_frame_time_ms, so the AI consumes normalized simulation
+// ticks (about 1.0 at 30 Hz), not literal milliseconds.
 
 // Game-convention angle winding helper (0..360, 0 = up / -y).
 float WrapDeg(float d) {
@@ -212,6 +210,20 @@ void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship) {
   ship.ai_station_hold_timer = 0.0F;
   ship.ai_forward_thrust_cmd = 0.0F;
   ship.ai_desired_speed = 0.0F;
+}
+
+// Ghidra 0x00410e20. This is the ordinary new-NPC arrival/slowdown entry used
+// when no adjacent restricted stellar was selected. The spawn caller supplies
+// the position; the original helper owns these state and animation latches.
+void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
+  ship.ai_state_code = 8;
+  ship.ai_station_hold_timer = -999.0F;
+  ship.waypoint_arrival_marker_a = 1;
+  ship.waypoint_arrival_marker_b = 0;
+  ship.turn_bank_animation_phase = -static_cast<float>(
+      std::uniform_int_distribution<int>{0, 9}(state.rng));
+  // ShipState +0xC8E8 (weapon-sprite flash) is not represented in the
+  // clean-room Ship yet; allocation already supplies its zero default.
 }
 
 // Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem.
@@ -1243,7 +1255,7 @@ void NovaAi_UpdateBehavior0x03(GameState &state,
 void NovaAi_UpdateShipState(GameState &state,
                             Ship &ship,
                             std::uint32_t now_ms,
-                            float frame_time_ms) {
+                            float elapsed_ticks) {
   (void)now_ms;
   auto *scn = &state.scenario;
 
@@ -1332,8 +1344,7 @@ void NovaAi_UpdateShipState(GameState &state,
           ship.target_engagement_patience_timer = static_cast<float>(
               std::uniform_int_distribution<int>{0, 99}(state.rng) + 100);
         } else {
-          constexpr float kOriginalFrameTimeMs = 1000.0F / 30.0F;
-          ship.target_engagement_patience_timer -= kOriginalFrameTimeMs;
+          ship.target_engagement_patience_timer -= elapsed_ticks;
           if (ship.target_engagement_patience_timer <= 0.0F) {
             ship.primary_target_ship_slot = -1;
             ship.ai_state_code = 0;
@@ -1573,10 +1584,10 @@ void NovaAi_UpdateShipState(GameState &state,
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
     ship.ai_control_mode = 0;
-    // Continue drifting along the current heading at a small polar-velocity
-    // step until the coast-through-reversal timer expires.
-    ship.vel_x += std::sin(ship.heading) * (frame_time_ms * 0.7F);
-    ship.vel_y -= std::cos(ship.heading) * (frame_time_ms * 0.7F);
+    // The original advances position directly by g_avg_frame_time_ms * 0.7;
+    // this state does not add that step to persistent velocity.
+    ship.pos_x += std::sin(ship.heading) * (elapsed_ticks * 0.7F);
+    ship.pos_y -= std::cos(ship.heading) * (elapsed_ticks * 0.7F);
     if (ship.ai_maneuver_timer_ms <= 0.0F) {
       ship.ai_state_code = 0;
     }
@@ -1686,7 +1697,7 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Spin-out / leave-system state (state 8). ----
+  // ---- Arrival slowdown state (state 8). ----
   // The movement integrator exits it through
   // Ship_ResetShipPrimaryAndSecondaryTargets after control mode 0x0a's
   // reverse-speed threshold. If it survives that path, the outer
@@ -1953,7 +1964,7 @@ void NovaAi_UpdateShipState(GameState &state,
 // from the Ghidra _DAT_00575xxx globals (see the constant block at the top).
 void NovaAi_ApplyControls(GameState &state,
                           Ship &ship,
-                          float frame_time_ms,
+                          float elapsed_ticks,
                           std::uint32_t now_ms) {
   ship.ai_forward_thrust_cmd = 0.0F;
   ship.ai_fire_trigger_latch = 0;
@@ -2032,11 +2043,18 @@ void NovaAi_ApplyControls(GameState &state,
   switch (ship.ai_control_mode) {
   case 0:
   case 0x17:
-    // Idle: the original has no mode-0 block (thrust stays 0, heading held).
+    // Idle: the original has no mode-0 block (thrust stays 0, heading held),
+    // and importantly does NOT touch ai_desired_speed. The entry reset above
+    // only rewrites a non-negative desired to eff_max_speed; a negative value
+    // (e.g. state-15's -30 or -15 emergence speed seeded by
+    // NovaAi_EnterState15JumpOutToSystem) survives the hold intact and is
+    // handed to the mode-0x0a arrival slowdown, which keeps an already-negative
+    // value. Clobbering it here made gate-emergence ships reseed to -50 and
+    // fly ~1.67x too fast / ~2.8x too far (Ghidra 0x00408150 mode 0 has no
+    // desired-spec write; the auto-weapon select is the only body).
     // Mode 0x17 likewise has no steering block: state 0x14 owns the
     // gate/wormhole handoff and velocity bookkeeping; the surrounding jump
     // path performs the actual transfer.
-    ship.ai_desired_speed = 0.0F;
     break;
 
   case 0x15:
@@ -2044,9 +2062,9 @@ void NovaAi_ApplyControls(GameState &state,
     // the nearest, steers at it (thrust on align, else 1.75x-thrust damp), and
     // drops to control mode 0 when no anchor exists. No freeflight anchors are
     // modelled, so the original's no-anchor outcome (mode 0) holds; real jump
-    // positioning awaits Phase 7.
+    // positioning awaits Phase 7. Like the original, this mode never writes
+    // ai_desired_speed (it transitions to mode 0, which preserves a seed).
     ship.ai_control_mode = 0;
-    ship.ai_desired_speed = 0.0F;
     break;
 
   case 0x16:
@@ -2223,7 +2241,7 @@ void NovaAi_ApplyControls(GameState &state,
         now_ms < ship.ai_mode_start_time_ms) {
       ship.ai_mode_start_time_ms = now_ms;
     }
-    ship.ai_station_hold_timer += frame_time_ms;
+    ship.ai_station_hold_timer += elapsed_ticks;
 
     // Ghidra 0x00408150 compares elapsed wall-clock time against
     // Stellar_GetJumpSequenceDurationMs() / jump_duration_multiplier. The
@@ -2292,7 +2310,7 @@ void NovaAi_ApplyControls(GameState &state,
         ship.ai_desired_speed = -4.0F;
         ship.ai_station_hold_timer += 1.0F;
       } else if (leader_delta <= eff_turn_deg) {
-        ship.ai_maneuver_timer_ms = 180.0F; // raw float 0x43340000
+        ship.ai_maneuver_timer_ms = 180.0F; // normalized ticks, raw 0x43340000
       } else {
         ship.ai_desired_heading_deg = leader.ai_desired_heading_deg;
         ship.ai_station_hold_timer = -4.0F;
@@ -2609,7 +2627,7 @@ void NovaAi_ApplyControls(GameState &state,
     if (kEscortHalfSpanPx < std::abs(target.pos_x - ship.pos_x) ||
         kEscortHalfSpanPx < std::abs(target.pos_y - ship.pos_y)) {
       // Creep toward the followed lead (ai_target_ship_slot) at 10x thrust.
-      const float step = eff_thrust * kFormationCreepFactor * frame_time_ms;
+      const float step = eff_thrust * kFormationCreepFactor * elapsed_ticks;
       const std::int16_t lead_slot = ship.ai_target_ship_slot;
       if (lead_slot > 0 &&
           static_cast<std::size_t>(lead_slot) < GameState::kMaxShips) {
@@ -2784,7 +2802,7 @@ void NovaAi_ApplyControls(GameState &state,
         ship.ai_desired_heading_deg = wrap_deg_int(desired);
       }
       if (ship.ai_state_code == 7 && target_slot != -1) {
-        const float step = eff_thrust * kFormationCreepFactor * frame_time_ms;
+        const float step = eff_thrust * kFormationCreepFactor * elapsed_ticks;
         float anchor_x = target.pos_x;
         float anchor_y = target.pos_y;
         add_polar_step(anchor_x,
@@ -2856,7 +2874,7 @@ void NovaAi_ApplyControls(GameState &state,
         ship.ai_forward_thrust_cmd = 0.0F;
         ship.ai_desired_speed = 0.0F;
         if (ship.speed > 0.0F) {
-          ship.speed = std::max(0.0F, ship.speed - eff_thrust * frame_time_ms);
+          ship.speed = std::max(0.0F, ship.speed - eff_thrust * elapsed_ticks);
         }
       }
     } else {
@@ -2870,10 +2888,10 @@ void NovaAi_ApplyControls(GameState &state,
         ship.speed = 0.0F;
         const float bearing =
             BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
-        add_polar_step(ship.pos_x, ship.pos_y, bearing, frame_time_ms);
+        add_polar_step(ship.pos_x, ship.pos_y, bearing, elapsed_ticks);
       } else {
         // Capture resolution: with the target disabled and within 3 px the
-        // original arms a 100..179-ms reverse-speed-bias timer (random 0x50 +
+        // original arms a 100..179-tick reverse-speed-bias timer (random 0x50 +
         // 100) before entering state 0xe or boarding via
         // Outfit_BoardShipAndTransferCargo. Deferred (TODO(decomp)).
       }
@@ -2923,9 +2941,9 @@ void NovaAi_ApplyControls(GameState &state,
   }
 
   case 10:
-    // Stationary cleanup reverse: hold the ship parked by reversing against
-    // its heading. Raw float commands: desired -5.75 px/tick, thrust -3.67
-    // (bits 0xC0B80000 / 0xC06AE148).
+    // Arrival slowdown: the negative desired speed is a heading-aligned
+    // physics override, while the negative command supplies its per-tick
+    // decay. Raw bits: 0xC2480000 (-50) / 0xBF951EB8 (about -1.165).
     if (ship.ai_desired_speed >= 0.0F) {
       ship.ai_desired_speed = kMode10ReverseSpeed;
     }
@@ -2954,7 +2972,7 @@ void NovaAi_ApplyControls(GameState &state,
     // bearing at the target stands in for the merge gate.
     if (!fire_restricted) {
       const AsteroidState &target = state.asteroid_pool[0];
-      const float step = eff_thrust * kEvasiveThrustFactor * frame_time_ms;
+      const float step = eff_thrust * kEvasiveThrustFactor * elapsed_ticks;
       auto ramp_axis = [&](float &vel, float target_vel) {
         if (vel < target_vel + step) {
           if (target_vel - step < vel) {
@@ -3020,7 +3038,7 @@ void NovaAi_UpdateShipAI(GameState &state,
                          Ship &ship,
                          bool skip_heavy_ai,
                          std::uint32_t now_ms,
-                         float frame_time_ms) {
+                         float elapsed_ticks) {
   // Rare "defunct / retired" global abort (DAT_00596d3d set): skip AI.
   // (Kept as a structural no-op; the latch is not modelled.)
 
@@ -3102,11 +3120,11 @@ void NovaAi_UpdateShipAI(GameState &state,
   }
 
   // Always run the state machine + controls (the original does so after the
-  // heavy block even when bVar6 skipped the heavy decision). frame_time_ms is
-  // the reference cadence (the original reads the _g_avg_frame_time_ms EMA,
-  // ~33.3 ms at 30 fps) for the control-mode position/velocity creeps.
-  NovaAi_UpdateShipState(state, ship, now_ms, frame_time_ms);
-  NovaAi_ApplyControls(state, ship, kReferenceFrameTimeMs, now_ms);
+  // heavy block even when bVar6 skipped the heavy decision). elapsed_ticks is
+  // the normalized cadence published by the original's misleadingly named
+  // _g_avg_frame_time_ms EMA (about 1.0 at 30 Hz).
+  NovaAi_UpdateShipState(state, ship, now_ms, elapsed_ticks);
+  NovaAi_ApplyControls(state, ship, elapsed_ticks, now_ms);
   // Ship_UpdateAutoWeaponSelectionFromTarget (0x00411540) is a post-state
   // refresh. It must run after ApplyControls because that bridge clears the
   // per-frame fire latch before the bank chooser arms it.

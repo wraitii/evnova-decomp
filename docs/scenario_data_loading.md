@@ -71,7 +71,12 @@ globals (AGENTS.md).
   become normalized dude-class bindings, while negative -0x80..-0x17f ids
   become the per-system encounter-fleet binding (SystemDef +0x6a ids / +0x7a
   weights / +0x8a count / +0x8c chance) consumed by
-  EncounterFleet_SelectRandomEncounterFleetDefWeighted (0x0046b6d0).
+  EncounterFleet_SelectRandomEncounterFleetDefWeighted (0x0046b6d0). The
+  separate ReinfFleet/ReinfTime/ReinfIntrval fields are used by
+  Government_TryTriggerGovtAssistanceEncounter (0x00413610) and
+  System_UpdateRandomEncounterCountdown (0x0043a020); expiry invokes the same
+  flet spawner with AI behavior 4, so reinforcement fleets share the
+  state-0x15 restricted-stellar jump-in / state-0x08 slowdown arrival choice.
 - **g\x9avt (government)**: header +00 voice, +02 flags_primary, +04
   scan_mask_short, +06 jam1, +08 flee, +0a disable_pen / +0c board / +0e kill /
   +10 shoot penalties, +12 max_odds, +14 bribe %, +16 combat_rating_src, +18

@@ -190,10 +190,10 @@ struct Ship {
   // increasing clockwise). Ship_HandleShip turns the ship toward this at
   // Ship_ComputeShipMaxTurnRateDeg deg/frame.
   std::int16_t ai_desired_heading_deg = 0; // +0x68
-  // Coast-through-reversal TIMER (NOT a brake): while >0 it suppresses both the
-  // turn-to-heading and forward-thrust blocks so the ship holds heading and
-  // coasts. Set to random 30..60 when the AI decides to reverse, counts down by
-  // frame time each frame.
+  // Coast-through-reversal TIMER (NOT a brake). The `_ms` suffix is a legacy
+  // misnomer: values are normalized ticks (about 1 per frame at 30 Hz). While
+  // positive it suppresses turn/thrust so the ship coasts. Set to random
+  // 30..59 on reversal and decremented by normalized elapsed ticks each frame.
   float ai_maneuver_timer_ms = 0.0F; // +0x4C
   // Station-hold timer driving the hold/approach state (ai_station_hold_timer).
   float ai_station_hold_timer = 0.0F; // +0x50

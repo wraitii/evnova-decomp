@@ -1,9 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include "game/spaceflight.hpp"
 #include "game/outfit.hpp"
 #include "game/ship_ai.hpp"
+#include "game/spaceflight.hpp"
 
 #include <numbers>
 
@@ -201,10 +201,24 @@ TEST_CASE("npc negative speed uses the physics override") {
   // velocity is discarded.
   CHECK(ship.vel_x == Catch::Approx(0.0F));
   CHECK(ship.vel_y == Catch::Approx(-2.0F));
-  // The reverse path arms a 30..60 ms timer, then this movement tick consumes
-  // one reference frame (33.333 ms) from it.
-  CHECK(ship.ai_maneuver_timer_ms >= 0.0F);
-  CHECK(ship.ai_maneuver_timer_ms <= 60.0F - 1000.0F / 30.0F);
+  // The reverse path arms a 30..59-tick timer, then this movement tick consumes
+  // one normalized reference tick from it.
+  CHECK(ship.ai_maneuver_timer_ms >= 29.0F);
+  CHECK(ship.ai_maneuver_timer_ms <= 58.0F);
+}
+
+TEST_CASE("npc arrival slowdown scales its decay across a slow frame") {
+  game::GameState state;
+  game::Ship ship;
+  ship.ai_desired_heading_deg = 0;
+  ship.ai_desired_speed = -30.0F;
+  ship.ai_forward_thrust_cmd = -1.165F;
+  game::ShipClass cls = TestShipClass();
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 2.0F);
+
+  CHECK(ship.ai_desired_speed == Catch::Approx(-27.67F));
+  CHECK(ship.ai_maneuver_timer_ms <= 0.0F);
 }
 
 TEST_CASE("npc inertia-less ships are pinned (vel zeroed, no motion)") {
@@ -483,26 +497,24 @@ TEST_CASE("npc effective stats port the high-confidence modifier branches") {
   game::ShipClass cls = TestShipClass(); // accel 500, speed 400, turn 40
   cls.capability_flags = 0x0400;
   game::Ship ship;
-  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls).thrust_px_per_tick2 ==
-        Catch::Approx(0.0F));
-  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls).max_speed_px_per_tick ==
-        Catch::Approx(0.0F));
-  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls).turn_rate_deg_per_tick ==
-        Catch::Approx(0.0F));
+  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls)
+            .thrust_px_per_tick2 == Catch::Approx(0.0F));
+  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls)
+            .max_speed_px_per_tick == Catch::Approx(0.0F));
+  CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls)
+            .turn_rate_deg_per_tick == Catch::Approx(0.0F));
 
   cls.capability_flags = 0;
   ship.ship_instance_id = 3;
   ship.velocity_match_target_ship_slot = 7;
-  const auto matched =
-      game::NovaShip_ComputeEffectiveStats(state, ship, cls);
+  const auto matched = game::NovaShip_ComputeEffectiveStats(state, ship, cls);
   CHECK(matched.thrust_px_per_tick2 == Catch::Approx(0.1F / 3.0F));
   CHECK(matched.max_speed_px_per_tick == Catch::Approx(4.0F / 3.0F));
   CHECK(matched.turn_rate_deg_per_tick == Catch::Approx(4.0F / 3.0F));
 
   ship.velocity_match_target_ship_slot = -1;
   ship.mission_ship_slot = 0x03ff;
-  const auto mission =
-      game::NovaShip_ComputeEffectiveStats(state, ship, cls);
+  const auto mission = game::NovaShip_ComputeEffectiveStats(state, ship, cls);
   CHECK(mission.thrust_px_per_tick2 == Catch::Approx(0.2F));
   CHECK(mission.max_speed_px_per_tick == Catch::Approx(8.0F));
   CHECK(mission.turn_rate_deg_per_tick == Catch::Approx(5.0F));
@@ -510,8 +522,7 @@ TEST_CASE("npc effective stats port the high-confidence modifier branches") {
   ship.mission_ship_slot = -1;
   ship.ionization_points = 50.0F;
   cls.ionization_capacity = 100;
-  const auto status =
-      game::NovaShip_ComputeEffectiveStats(state, ship, cls);
+  const auto status = game::NovaShip_ComputeEffectiveStats(state, ship, cls);
   CHECK(status.thrust_px_per_tick2 == Catch::Approx(0.05F));
   CHECK(status.max_speed_px_per_tick == Catch::Approx(4.0F));
   CHECK(status.turn_rate_deg_per_tick == Catch::Approx(2.0F));

@@ -503,7 +503,7 @@ TEST_CASE("npc jump gate uses the npc's own class fuel") {
   CHECK_FALSE(game::NovaTravel_CanShipInitiateJumpSequence(state, npc));
 }
 
-TEST_CASE("state 0x15 jump-in initializer arms reverse departure") {
+TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   REQUIRE(!state.scenario.stellars.empty());
@@ -537,6 +537,34 @@ TEST_CASE("state 0x15 jump-in initializer arms reverse departure") {
                               static_cast<float>(*stellar->emergence_angle_deg) *
                               (3.14159265358979323846F / 180.0F)));
   }
+
+  const game::ShipClass *emergence_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  REQUIRE(emergence_class != nullptr);
+  game::NovaShip_IntegrateNpcMovement(
+      state, ship, *emergence_class, /*elapsed_ticks=*/1.0F);
+  CHECK(ship.ai_maneuver_timer_ms == Catch::Approx(59.0F));
+  CHECK(ship.pos_x == Catch::Approx(0.0F));
+  CHECK(ship.pos_y == Catch::Approx(0.0F));
+
+  // Simulate expiry of the 60-tick emergence hold. The first state pass changes
+  // 0x15 to state 8; the next selects mode 0x0a, which must preserve the
+  // already-negative -30 override instead of replacing it with -50.
+  ship.ai_maneuver_timer_ms = 0.0F;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  REQUIRE(ship.ai_state_code == 8);
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  REQUIRE(ship.ai_control_mode == 10);
+  game::NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+  CHECK(ship.ai_desired_speed == Catch::Approx(-30.0F));
+  CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-1.165F));
+
+  game::Ship player_follower;
+  player_follower.ship_class_id = 0;
+  player_follower.ai_target_ship_slot = 0;
+  game::NovaAi_EnterState15JumpOutToSystem(
+      state, player_follower, stellar_id);
+  CHECK(player_follower.ai_desired_speed == Catch::Approx(-15.0F));
 }
 
 TEST_CASE("state 0x14 NPC jump transfers to the linked system") {
@@ -686,7 +714,7 @@ TEST_CASE("ApplyControls mode 5 steers away from the target (original quirk)") {
 
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
 
   // Player is east of the ship: mode 5 must steer west (270 deg), not east.
@@ -696,7 +724,7 @@ TEST_CASE("ApplyControls mode 5 steers away from the target (original quirk)") {
                  (3.14159265358979323846F / 180.0F);
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   const game::ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
@@ -731,7 +759,7 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
   ship.heading = 90.0F * (3.14159265358979323846F / 180.0F); // already aligned
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   REQUIRE(ship.ai_desired_heading_deg == 90);
   CHECK(ship.ai_forward_thrust_cmd ==
@@ -744,7 +772,7 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
   ship.heading = 200.0F * (3.14159265358979323846F / 180.0F);
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   REQUIRE(ship.ai_desired_heading_deg == 200);
   CHECK(ship.ai_forward_thrust_cmd ==
@@ -755,7 +783,7 @@ TEST_CASE("ApplyControls combat modes 6/0x10/0x11 movement fidelity") {
   ship.ai_control_mode = 0x11;
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   CHECK(ship.ai_forward_thrust_cmd ==
         Catch::Approx(eff.thrust_px_per_tick2 * 2.75F).margin(1e-4F));
@@ -788,7 +816,7 @@ TEST_CASE("ApplyControls mode 0xc velocity match") {
   ship.vel_y = 2.0F;
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   CHECK(ship.vel_x == 3.0F); // not copied while outrunning
   // Align with the reverse of the relative-velocity bearing and brake:
@@ -796,7 +824,7 @@ TEST_CASE("ApplyControls mode 0xc velocity match") {
   ship.heading = 310.2F * (3.14159265358979323846F / 180.0F);
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   CHECK(ship.ai_forward_thrust_cmd > 0.0F); // braking on the relative velocity
 
@@ -805,7 +833,7 @@ TEST_CASE("ApplyControls mode 0xc velocity match") {
   ship.vel_y = -0.2F;
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   CHECK(ship.vel_x == 0.4F);
   CHECK(ship.vel_y == -0.2F);
@@ -836,14 +864,14 @@ TEST_CASE("ApplyControls mode 0xf velocity-match pursuit") {
   ship.vel_y = 0.0F;
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   REQUIRE(ship.ai_desired_heading_deg == 270);
   ship.heading = static_cast<float>(ship.ai_desired_heading_deg) *
                  (3.14159265358979323846F / 180.0F);
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   CHECK(ship.ai_forward_thrust_cmd > 0.0F);
 
@@ -852,7 +880,7 @@ TEST_CASE("ApplyControls mode 0xf velocity-match pursuit") {
   ship.vel_y = 0.05F;
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   CHECK(ship.vel_x == 0.1F);
   CHECK(ship.vel_y == 0.0F);
@@ -873,7 +901,7 @@ TEST_CASE("ApplyControls mode 0x12 chase leader") {
   ship.formation_leader_ship_slot = -1;
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   REQUIRE(ship.ai_control_mode == 0); // no leader: idle control
 
@@ -895,7 +923,7 @@ TEST_CASE("ApplyControls mode 0x12 chase leader") {
   leader.heading = 0.0F; // leader facing up: lead point = north of leader
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
   // Lead point is (100, -15*max) north of the leader; the ship at the origin
   // must steer roughly north-east.
@@ -910,9 +938,9 @@ TEST_CASE("ApplyControls mode 0x12 chase leader") {
   CHECK(std::abs(ship.ai_desired_heading_deg - expected) < 1.0F);
 }
 
-// Mode 10 (stationary cleanup) parks the ship by reversing: desired -5.75,
-// thrust -3.67 (the original's raw float commands).
-TEST_CASE("ApplyControls mode 10 stationary reverse") {
+// Mode 10 begins the heading-aligned arrival override at 50 px/tick and
+// reduces it by 1.165 per movement tick (the original's raw float commands).
+TEST_CASE("ApplyControls mode 10 arrival slowdown") {
   GameState state;
   game::Ship &ship = state.ShipAt(1);
   ship.is_active = true;
@@ -921,16 +949,16 @@ TEST_CASE("ApplyControls mode 10 stationary reverse") {
   ship.ai_desired_speed = 0.0F;
   NovaAi_ApplyControls(state,
                        ship,
-                       (1000.0F / 30.0F),
+                       1.0F,
                        /*now_ms=*/0);
-  CHECK(ship.ai_desired_speed == Catch::Approx(-5.75F));
-  CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-3.67F));
+  CHECK(ship.ai_desired_speed == Catch::Approx(-50.0F));
+  CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-1.165F));
 }
 
-// State 0x08 is the post-entry departure cleanup. Ghidra's state updater
-// selects control mode 0x0a, whose reverse commands are then consumed by the
+// State 0x08 is the NPC arrival slowdown. Ghidra's state updater selects
+// control mode 0x0a, whose speed override is then consumed by the
 // Ship_HandleShip movement/glow path (0x00433050).
-TEST_CASE("state 0x08 drives visible NPC departure reverse") {
+TEST_CASE("state 0x08 drives visible high-speed NPC arrival") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.current_system_id = 0;
@@ -950,14 +978,39 @@ TEST_CASE("state 0x08 drives visible NPC departure reverse") {
   ship.pos_x = 0.0F;
   ship.pos_y = 0.0F;
 
-  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
-  REQUIRE(ship.ai_control_mode == 10);
-  game::NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
-  REQUIRE(ship.ai_desired_speed == Catch::Approx(-5.75F));
-  REQUIRE(ship.ai_forward_thrust_cmd == Catch::Approx(-3.67F));
+  const game::ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  REQUIRE(cls != nullptr);
+  const float max_speed =
+      NovaShip_ComputeEffectiveStats(state, ship, *cls).max_speed_px_per_tick;
+  const int expected_slowdown_ticks =
+      static_cast<int>(std::ceil((50.0F - max_speed) / 1.165F));
 
-  game::NovaShip_TickNpcShips(state, 1.0F);
-  CHECK(ship.pos_y < -5.0F);
+  float previous_speed = 51.0F;
+  int slowdown_ticks = 0;
+  while (ship.ai_state_code == 8 && slowdown_ticks < 64) {
+    game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+    REQUIRE(ship.ai_control_mode == 10);
+    game::NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
+    game::NovaShip_TickNpcShips(state, 1.0F);
+    ++slowdown_ticks;
+
+    const float current_speed = std::hypot(ship.vel_x, ship.vel_y);
+    CHECK(current_speed < previous_speed);
+    previous_speed = current_speed;
+    if (ship.ai_state_code == 8) {
+      CHECK(ship.ai_maneuver_timer_ms <= 0.0F);
+    }
+  }
+
+  CHECK(slowdown_ticks == expected_slowdown_ticks);
+  CHECK(ship.ai_state_code == 0);
+  // Ship_HandleShip performs its ordinary end-of-frame timer decrement after
+  // arming the 30..59-tick coast, so the stored value has lost one normalized
+  // reference tick here.
+  CHECK(ship.ai_maneuver_timer_ms >= 29.0F);
+  CHECK(ship.ai_maneuver_timer_ms <= 58.0F);
+  CHECK(ship.pos_y < -500.0F);
   CHECK(ship.engine_glow_level == 0);
 }
 

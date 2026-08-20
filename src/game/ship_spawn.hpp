@@ -107,14 +107,13 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 // or -1 when the def has no lead ship, is unavailable at spawn time
 // (is_available_runtime clear), or no slot is free.
 //
-// TODO(decomp) deferred (see ship_spawn.cpp): the original also positions the
-// lead (spin-out at a random polar offset via AI state 0x08, or jump-in at an
-// adjacent stellar via AI state 0x15), seeds random cargo for carry_cargo_flag
-// fleets, copies the 8-bank weapon loadout, and spawns/links the escorts + the
-// arrival overlay banner. Those are not yet reconstructed (they sit on the
-// deferred AI-state / DudeDef / weapon-bank code); this function leaves the
-// ship at a neutral origin heading (ai_state_code 0) so it is visible and
-// positioned for rendering but not yet animated or armed.
+// Partial/deferred (see ship_spawn.cpp): the adjacent-stellar jump-in branch
+// (AI state 0x15) is reconstructed, including the original selector-flavor
+// roll, restricted-stellar validation, and 60-tick emergence setup. The
+// no-adjacent-stellar fallback still
+// uses the original random polar placement and AI state 0x08 slowdown. Cargo,
+// the 8-bank weapon loadout, escorts, and the arrival overlay banner remain
+// deferred.
 [[nodiscard]] int NovaEncounter_SpawnFleetLeadShip(
     GameState &state, std::int16_t system_id, std::int16_t fleet_def_index);
 
@@ -144,11 +143,22 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 // the spawned ship at a random polar offset from system centre and faces it
 // toward the origin. Returns the spawned ship slot or -1.
 //
-// The 1-in-7 mission-ship branch and the AI-state entry (spin-out / jump-in)
+// The 1-in-7 mission-ship branch and the AI-state entry (slowdown / jump-in)
 // are deferred (mission system / AI-state helpers not reconstructed); see
 // ship_spawn.cpp.
 [[nodiscard]] int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
                                                        std::int16_t system_id);
+
+// Reconstructs the initial ambient-population slice at the end of
+// System_RebuildInitialNpcAndMissionPopulation (Ghidra 0x0041af90). On
+// system/stellar entry it performs System.avg_ships spawn attempts immediately.
+// Ordinary dude ships
+// use EncounterFleet_SpawnRandomSystemDudeShip directly, retaining its
+// [-750,750) scatter, and receive their class base velocity along their random
+// heading. Encounter and mission rolls are kept in their original 1-in-7
+// order; mission-ship creation remains deferred.
+void NovaSystem_PopulateInitialNpcShips(GameState &state,
+                                        std::int16_t system_id);
 
 // Mirrors System_TickNpcSpawnMaintenance (Ghidra 0x0041d6e0), the ambience
 // slice. This reconstructs the random-encounter / drifting-dude population that
@@ -188,11 +198,12 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 //
 // The original runs this with flag==0 on travel/landing arrival
 // (Stellar_ProcessTravelAndLanding 0x00457580) and system entry
-// (NovaMainLoop_Run 0x00486880); the caller then reseeds toward
-// System.avg_ships via NovaSystem_TickNpcSpawnMaintenance, which is what yields
-// the observed "fresh batch of ships" after docking/jumping. Note the original
-// scans ALL slots regardless of system; the clean-room's ships only ever live
-// in the current system, so this matches in practice.
+// (NovaMainLoop_Run 0x00486880);
+// System_RebuildInitialNpcAndMissionPopulation then immediately makes
+// System.avg_ships spawn attempts through its scattered initial-population
+// path. Per-tick maintenance only replenishes later losses. Note the original
+// scans ALL slots regardless of system; the clean-room's ships only
+// ever live in the current system, so this matches in practice.
 void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
                                             bool keep_player_engaged);
 

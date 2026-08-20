@@ -51,24 +51,33 @@ exclusive mapping.
 | `0x05` | Pursue / follow a target | `0x0b`, `0x08` | Approaches target range, then follows/holds. |
 | `0x06` | Park / settle | `0x01` | Brakes to a stop. |
 | `0x07` | Escort / follow primary | `0x08`/`0x09` | Drops to idle if target becomes invalid; detailed formation offsets are incomplete. |
-| `0x08` | Spin-out / leaving cleanup | `0x0a` | Persistent until the ordinary ship handler resets targets; vacant cleanup is the outer fallback. |
+| `0x08` | Arrival slowdown | `0x0a` | Applies the stepped high-speed slowdown command to a newly arriving NPC; the ordinary ship handler later resets it to state 0. |
 | `0x09` | Refuel / transfer service | `0x0b`, `0x01` | Approaches the primary target, stops, then transfers fuel while the target has capacity. |
 | `0x0a` | Assist response | `0x09`, `0x01`, `0x0c` | Long-range pursuit, approach, or velocity-match engagement. |
 | `0x0b` | Station hold / follow target | `0x04`, `0x0d` | Holds near a player/leader; exits if leader's hold state ends. |
 | `0x0c` | Player-oriented assist / hold | `0x09`, `0x0b`, `0x0c` | Clears ordinary targets and selects distance/velocity matching around the player. |
 | `0x0d` | Cloak-engagement wait variant | `0x01` | Uses finite patience before abandoning an unengageable target. |
-| `0x0e` | Fast arrival coast | `0x00` | Clears targets and directly advances along heading at `frame_time_ms * 0.7`; returns idle when timer expires. |
+| `0x0e` | Timed coast / combat break | `0x00` | Clears targets and directly advances position along heading at `elapsed_ticks * 0.7`; returns idle when the normalized-tick timer expires. This is not an NPC jump-in state. |
 | `0x0f` | Boarding / disabled-target approach | `0x0b`, `0x0f` | Rejects non-disabled targets, then approaches and velocity-matches. Capture side effects are deferred. |
 | `0x10` | Scripted asteroid manoeuvre | `0x13`, `0x14` | Uses asteroid-pool slot 0 as the scripted position/velocity target. |
 | `0x11` | Freeflight-anchor positioning | `0x15` | Chooses a freeflight anchor; the anchor model is not reconstructed. |
 | `0x12` | Stellar approach/retreat staging | `0x02`, `0x03`, `0x01`, `0x16` | Uses a selected stellar and weapon range to approach, settle, or retreat. |
 | `0x13` | No dedicated handler | — | No state-specific arm was found in `Ship_UpdateShipAiState`; preserve this neutral label pending caller evidence. |
 | `0x14` | Hypergate/wormhole entry | `0x02`, `0x17` | Negotiates entry by approaching the selected restricted stellar/link. At the entry point it enters mode `0x17` and transfers/vanishes; there is no local mode-`0x04` hyperjump sequence. |
-| `0x15` | Hypergate/wormhole emergence | `0x00` | Spawn/arrival setup at the destination stellar: seeds emergence heading and a short coast timer, then becomes `0x08`. NPCs normally enter this from spawning/arrival, not as a persistent `0x17 -> 0x15` transition. |
+| `0x15` | Hypergate/wormhole emergence | `0x00` | Spawn/arrival setup at the destination stellar: seeds emergence heading, a 60-tick hold (~2 s at 30 Hz), and a slower state-8 entry speed (30 px/tick normally; 15 when targeting the player). Random dudes and encounter-fleet leads use this path when an adjacent restricted stellar is selected. |
 | `0x16` | Defunct cleanup | `0x01` | Clears targets/firing; returns idle after the manoeuvre timer. |
 
 State `0x13` is deliberately neutral: its lack of a state-specific arm is
 evidence, whereas its callers have not yet established a reliable role.
+
+Arrival clarification: the original random-dude and encounter-fleet spawners
+call `Stellar_SelectRandomAdjacentDestination`. Its 1-in-3 roll selects a
+candidate-pool flavor; it is not a direct 1-in-3 emergence gate. The selected
+travel point is accepted for emergence only when it is a restricted stellar.
+On success they place the ship there and enter state `0x15`; on failure they call
+the state-0x08 slowdown entry after placing the ship on a random polar
+offset. State `0x0e` is a separate timed coast/break state selected by combat
+logic and is not the occasional jump-in branch.
 
 ## Movement controls (`ai_control_mode`)
 
@@ -88,7 +97,7 @@ formation, bay-launch, or script side effect is still absent.
 | `0x07` | Combat strafe | Guided predictive aim; thrust gate `turn_rate * 4`; may boost to `0x11`. |
 | `0x08` | Escort follow | Heads at lead; thrust gate `turn_rate + 1°`. Formation/launch handoff is partial. |
 | `0x09` | Hold at distance | Steers at target while distant, otherwise matches velocity bearing in a 15° window. |
-| `0x0a` | Spin-out cleanup | Physics-override command: desired speed -5.75, thrust -3.67. Negative desired speed is a signed override that decays to zero, not reverse acceleration. |
+| `0x0a` | Arrival slowdown command | Physics override: desired speed starts at -50.0 and advances by 1.165 per tick. Its magnitude is the heading-aligned arrival speed, producing the visible fast entry and gradual slowdown rather than reverse acceleration. |
 | `0x0b` | Formation hold | Uses formation offset; desired speed 0 far away and 0.5x max nearby. Formation positioning is partial. |
 | `0x0c` | Velocity match | Matches target velocity/heading within 0.525 px/tick, otherwise brakes on relative velocity. |
 | `0x0d` | Timed formation hold | Copies leader heading/offset and can release after leader hold timer >30. |
@@ -113,7 +122,7 @@ field definitions and uncertainties.
 |---:|---|---|
 | `+0x30` | `ai_forward_thrust_cmd` | Effective raw thrust applied by the integrator. It is **not** a normalized 0–1 throttle. |
 | `+0x34` | `ai_desired_speed` | Positive: normal accelerated target speed. Negative: heading-aligned physics override that moves toward zero. |
-| `+0x4c` | `ai_maneuver_timer_ms` | Coast-through-reversal timer: while positive, suppresses normal turn/thrust. It is not a braking timer. |
+| `+0x4c` | `ai_maneuver_timer_ms` | Coast-through-reversal timer in normalized ticks despite the legacy `_ms` name: while positive, suppresses normal turn/thrust. It is not a braking timer. |
 | `+0x50` | `ai_station_hold_timer` | Holds/approaches a station or leader; meaningful in states `0x0b`, `0x02`, and `0x03`. |
 | `+0x64` | `cloak_fade_progress` | Cloak visual/visibility progress, 0–32; not weapon disable pressure. |
 | `+0x68` | `ai_desired_heading_deg` | Integer degrees: 0 is up, values increase clockwise. |
@@ -149,7 +158,7 @@ labels.
 | `1.5x`, `2.75x`, `1.8x` | Mode-`0x10` thrust, mode-`0x11` thrust, and mode-`0x11` desired-speed multipliers. |
 | `0.525 px/tick` | Modes `0x0c`/`0x0f` velocity-match threshold. |
 | `30` | Mode-`0x0d` leader hold-release timer gate. |
-| `300..499 ms` / `100..174 ms` | Open-space / route-limited departure coast timer after stellar arrival. |
+| `300..499 ticks` / `100..174 ticks` | Open-space / route-limited departure coast timer after stellar arrival. |
 
 ## Travel and lifecycle notes
 
@@ -166,7 +175,10 @@ labels.
 - State `0x08` does not have a fixed timeout in the state handler.  Its normal
   exit is the handler's target reset; `Ship_DeactivateVacantShipsAndTally`
   (0x0041ad50) clears vacant NPCs at system boundaries and tallies docked ships
-  against their stellar before population maintenance reseeds the system.
+  against their stellar before `System_RebuildInitialNpcAndMissionPopulation`
+  immediately
+  seeds the scattered `AvgShips` population. Per-tick maintenance subsequently
+  replaces losses through the polar/hypergate arrival paths.
 
 ## Documentation practice
 

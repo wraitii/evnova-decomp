@@ -39,15 +39,20 @@ namespace game {
 // shot speed is the port's projectile_speed/100 so the lead matches the actual
 // fired shot velocity. Used by the AI control modes 6/7 (steer the hull at the
 // lead) and at fire time for turret modes 4/7/8/9.
-[[nodiscard]] std::int16_t NovaAi_AimWeaponPredictive(
-    const GameState &state,
-    const Ship &ship,
-    const Ship &target,
-    std::int16_t weapon_id);
+[[nodiscard]] std::int16_t NovaAi_AimWeaponPredictive(const GameState &state,
+                                                      const Ship &ship,
+                                                      const Ship &target,
+                                                      std::int16_t weapon_id);
 
 // Ghidra 0x004688e0 Ship_IsShipDestroyed. True when the death timer is active
 // (death_timer_active > 0) or armor_points <= 0.
 [[nodiscard]] bool NovaAiShip_IsDestroyed(const Ship &ship);
+
+// Ghidra 0x0040c790 Stellar_SelectRandomAdjacentTravelStellar. Selects one
+// eligible travel stellar in the ship's current system, applying the currently
+// reconstructed availability and government-hostility filters.
+[[nodiscard]] std::int16_t
+NovaAi_SelectRandomAdjacentTravelStellar(GameState &state, const Ship &ship);
 
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget. Enters AI
 // state 0x02 (local jump-departure staging), clears the current primary target,
@@ -61,11 +66,17 @@ void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms);
 // the per-ship exit used by state 8 after control mode 0x0a's reverse step.
 void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship);
 
+// Ghidra 0x00410e20. Initializes the short NPC arrival/slowdown phase used
+// when a new ship has no adjacent
+// restricted stellar from which to emerge. The caller supplies the initial
+// polar position/velocity; this helper arms the state and its visual latches.
+void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship);
+
 // Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem. Places an NPC
 // at a destination hypergate/wormhole stellar's emergence point, seeds its
-// emergence heading, and arms the short reverse-thrust arrival maneuver used
-// by newly spawned ships. This is not normally a persistent state-0x17
-// successor in the NPC path.
+// emergence heading, and arms a 60-tick hold before the slower arrival
+// override: 30 px/tick normally, or 15 when ai_target_ship_slot is the player.
+// This is not normally a persistent state-0x17 successor in the NPC path.
 void NovaAi_EnterState15JumpOutToSystem(GameState &state,
                                         Ship &ship,
                                         std::int16_t stellar_id);
@@ -126,22 +137,23 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship);
 void NovaAi_UpdateShipState(GameState &state,
                             Ship &ship,
                             std::uint32_t now_ms,
-                            float frame_time_ms = 1000.0F / 30.0F);
+                            float elapsed_ticks = 1.0F);
 
 // Ghidra 0x00408150 Ship_ApplyShipAiControls. Transforms the ship's
 // ai_control_mode (written each frame by the state machine) into the concrete
 // movement fields the integrator consumes: ai_desired_heading_deg,
 // ai_desired_speed, ai_forward_thrust_cmd. This is the bridge that makes the
 // AI state machine actually move ships. Also latches ai_fire_trigger_latch for
-// the firing path (deferred to Phase 5). `frame_time_ms` is the measured frame
-// time used by the position/velocity creeps (the original reads
-// _g_avg_frame_time_ms); `now_ms` backs the mode-4/0xd hold-timer bookkeeping.
+// the firing path (deferred to Phase 5). `elapsed_ticks` is the normalized
+// cadence used by the position/velocity creeps (the original's misleadingly
+// named _g_avg_frame_time_ms is elapsed milliseconds * 0.03); `now_ms` backs
+// the mode-4/0xd wall-clock bookkeeping.
 // The per-mode turn/thrust polynomials come from the decoded _DAT_00575xxx
 // globals; weapon selection, formation offsets and carrier-bay launches are
 // documented no-ops until Phases 5/8.
 void NovaAi_ApplyControls(GameState &state,
                           Ship &ship,
-                          float frame_time_ms,
+                          float elapsed_ticks,
                           std::uint32_t now_ms);
 
 // Ghidra 0x00401000 Ship_UpdateShipAI. The top-level per-ship AI entry: applies
@@ -154,7 +166,7 @@ void NovaAi_UpdateShipAI(GameState &state,
                          Ship &ship,
                          bool skip_heavy_ai,
                          std::uint32_t now_ms,
-                         float frame_time_ms = 1000.0F / 30.0F);
+                         float elapsed_ticks = 1.0F);
 
 // ---------------------------------------------------------------------------
 // Ship-comm / hail predicates and AI state entries (added for the ship-comm

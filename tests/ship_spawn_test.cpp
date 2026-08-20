@@ -1,6 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+
 #include "game/ship_spawn.hpp"
 
 namespace {
@@ -93,9 +95,16 @@ TEST_CASE("fleet lead spawner shapes the ship from the fleet def") {
     CHECK(ship.ai_secondary_target_slot >= 0x80);
     CHECK(ship.ai_maneuver_timer_ms == Catch::Approx(60.0F));
   } else {
-    CHECK(ship.pos_x == Catch::Approx(0.0F));
-    CHECK(ship.pos_y == Catch::Approx(0.0F));
-    CHECK(ship.ai_state_code == 0);
+    // No adjacent restricted stellar: the original enters the ordinary
+    // polar state-0x08 arrival/slowdown phase.
+    CHECK(ship.ai_state_code == 0x08);
+    CHECK(ship.ai_station_hold_timer == Catch::Approx(-999.0F));
+    CHECK(ship.pos_x != Catch::Approx(0.0F));
+    CHECK(ship.pos_y != Catch::Approx(0.0F));
+    CHECK(std::abs(ship.vel_x) + std::abs(ship.vel_y) > 0.0F);
+    // Position dot velocity is negative when the initial slowdown velocity
+    // points back toward the system centre.
+    CHECK(ship.pos_x * ship.vel_x + ship.pos_y * ship.vel_y < 0.0F);
   }
 }
 
@@ -121,6 +130,38 @@ TEST_CASE("system maintenance populates Tichel toward avg_ships") {
   // The maintenance should respect the avg_ships cap (allow a little slack
   // since the dude spawn loop may allocate slightly beyond on a lucky streak).
   CHECK(spawned <= sys->avg_ships + 2);
+}
+
+TEST_CASE("system entry populates scattered ambient ships immediately") {
+  using game::NovaSystem_PopulateInitialNpcShips;
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  constexpr std::int16_t kSystemId = 1; // Tichel, zero-based runtime id
+  state.player.current_system_id = kSystemId;
+  auto &sys = state.scenario.systems[static_cast<std::size_t>(kSystemId)];
+  sys.avg_ships = 20; // enough attempts to cover the two 1-in-7 branches
+
+  NovaSystem_PopulateInitialNpcShips(state, kSystemId);
+
+  int scattered = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const game::Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.current_system_id != kSystemId ||
+        ship.ai_state_code != 0) {
+      continue;
+    }
+    ++scattered;
+    CHECK(ship.pos_x >= -750.0F);
+    CHECK(ship.pos_x < 750.0F);
+    CHECK(ship.pos_y >= -750.0F);
+    CHECK(ship.pos_y < 750.0F);
+    const game::ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    REQUIRE(cls != nullptr);
+    CHECK(std::hypot(ship.vel_x, ship.vel_y) ==
+          Catch::Approx(static_cast<float>(cls->speed) / 100.0F));
+  }
+  CHECK(scattered > 0);
 }
 
 // Ship_DeactivateVacantShipsAndTally (0x0041ad50): the vacancy predicate
