@@ -1398,9 +1398,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // Ghidra Ship_HandleShip (0x00433050), jump-spin-up departure block:
   // Ship_ApplyShipAiControls arms ai_station_hold_timer in control mode 4,
   // but the visible departure movement is applied here. The original first
-  // damps the stopped ship, then accelerates it along its already-aligned
-  // heading with a time-ramped jump speed; control mode 4 itself does not
-  // issue ordinary forward thrust.
+  // damps the stopped ship, then advances its position along the already-
+  // aligned heading with a time-ramped jump speed; this is a position step,
+  // not ordinary thrust into vel_x/vel_y.
   const bool jump_spinup_control =
       ship.ai_station_hold_timer > 0.0F &&
       (ship.ai_state_code == 2 || ship.ai_state_code == 3 ||
@@ -1439,8 +1439,13 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
           kJumpProgressSubtract;
       jump_progress = std::clamp(jump_progress, 0.0F, kJumpProgressCap);
       if (jump_progress > 0.0F) {
-        ship.vel_x += std::sin(ship.heading) * jump_progress * elapsed_ticks;
-        ship.vel_y -= std::cos(ship.heading) * jump_progress * elapsed_ticks;
+        // Ghidra's Math_AddPolarVelocity is passed &ship->pos_x here
+        // (0x004347e8): the jump ramp directly moves the position. Keeping
+        // this out of the ordinary velocity preserves the original launch
+        // cadence and prevents mode 4 from turning the ramp into a slow
+        // acceleration curve.
+        ship.pos_x += std::sin(ship.heading) * jump_progress * elapsed_ticks;
+        ship.pos_y -= std::cos(ship.heading) * jump_progress * elapsed_ticks;
         ship.engine_glow_level = static_cast<std::int16_t>(
             std::min(0x20, static_cast<int>(ship.engine_glow_level) + 3));
       }
@@ -1493,7 +1498,12 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         glow = static_cast<std::int16_t>(glow - 1);
       }
     };
-    if (ship.ai_turn_bias_dir != 0 && (ship_class.sprite_behavior_flags & 2)) {
+    // Ship_HandleShip only derives the bank signal for classes with the
+    // banking flag (bit 0), then applies the glow boost when the engine-glow
+    // flag (bit 1) is also present.
+    if (ship.ai_turn_bias_dir != 0 &&
+        (ship_class.sprite_behavior_flags & 1U) != 0U &&
+        (ship_class.sprite_behavior_flags & 2U) != 0U) {
       if (glow < 0x18) {
         glow = static_cast<std::int16_t>(glow + 2);
         if (glow > 0x18) {
@@ -1519,13 +1529,6 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       if (glow < 0x20) {
         glow = static_cast<std::int16_t>(glow + 1);
       }
-    }
-    // The reversal countdown block also fades the glow once more while its
-    // timer is live (Ship_HandleShip decrements again here), so a reversing
-    // ship fades twice per frame like the original.
-    if (ship.ai_maneuver_timer_ms > 0.0F && ship.ai_state_code != 0x16 &&
-        glow > 0) {
-      glow = static_cast<std::int16_t>(glow - 1);
     }
     ship.engine_glow_intensity =
         std::clamp(static_cast<float>(glow) / 24.0F, 0.0F, 1.0F);

@@ -128,6 +128,30 @@ TEST_CASE("npc forward thrust accelerates along the heading") {
   CHECK(ship.pos_y == Catch::Approx(-10.0F));
 }
 
+TEST_CASE("state 2 mode 4 applies the jump ramp directly to position") {
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ai_state_code = 2;
+  ship.ai_control_mode = 4;
+  ship.ai_station_hold_timer = 1.0F;
+  ship.ai_desired_heading_deg = 0;
+  ship.ai_mode_start_time_ms = 0;
+
+  // The original mode-4 arm (Ship_HandleShip, 0x00433050) adds the ramp to
+  // position; it does not accumulate the ramp into ordinary velocity.
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F, 200);
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F, 233);
+
+  const float first_ramp = 200.0F / 3.5F - 35.0F;
+  const float second_ramp = 233.0F / 3.5F - 35.0F;
+  CHECK(ship.pos_y == Catch::Approx(-(first_ramp + second_ramp)));
+  CHECK(ship.vel_x == Catch::Approx(0.0F));
+  CHECK(ship.vel_y == Catch::Approx(0.0F));
+}
+
 TEST_CASE("disabled and destroyed NPCs do not regenerate") {
   game::GameState state;
   game::ShipClass cls = TestShipClass();
@@ -304,6 +328,40 @@ TEST_CASE("npc glow fades to zero when thrust stops") {
   }
   CHECK(ship.engine_glow_level == 0);
   CHECK(ship.engine_glow_intensity == Catch::Approx(0.0F));
+}
+
+TEST_CASE("npc maneuver timer fades glow only once per frame") {
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  ship.engine_glow_level = 10;
+  ship.ai_forward_thrust_cmd = 0.5F;
+  ship.ai_maneuver_timer_ms = 10.0F;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.0F);
+
+  // Ghidra's glow block takes the single fade label when the maneuver timer
+  // suppresses thrust. It does not apply a second timer-specific decrement.
+  CHECK(ship.engine_glow_level == 9);
+}
+
+TEST_CASE("state 2 mode 4 ramps engine glow with its departure step") {
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ai_state_code = 2;
+  ship.ai_control_mode = 4;
+  ship.ai_station_hold_timer = 1.0F;
+  ship.ai_desired_heading_deg = 0;
+  ship.ai_mode_start_time_ms = 0;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F, 200);
+
+  // Mode 4 adds three, then the ordinary zero-thrust glow path fades once.
+  CHECK(ship.engine_glow_level == 2);
+  CHECK(ship.engine_glow_intensity == Catch::Approx(2.0F / 24.0F));
 }
 
 TEST_CASE("npc_out-of-range class ship is deactivated by the guard") {
