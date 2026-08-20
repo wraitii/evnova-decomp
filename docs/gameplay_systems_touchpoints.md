@@ -177,29 +177,37 @@ Traced from the handlers in `NovaGameplay_UpdateShipAiState` (0x00405590) and it
 | code | meaning |
 |---|---|
 | 0 | idle / track-parked |
-| 1 | travel to system (`ai_secondary_target_slot` = stellar, steers to map coords) |
-| 2 | idle-template / approach station-keeping |
+| 1 | approach selected stellar / map-space coordinate (`ai_secondary_target_slot` = stellar; control mode 2) |
+| 2 | local jump-departure staging: brakes while moving, then uses centre-outward controls 3/4 |
 | 3 | attack target ship (`primary_target_ship_slot`) w/ cloak-aware engagement |
 | 4 | attack target w/ mutual-target & allied-govt chain exclusions |
 | 5 | pursue/attack `ai_target_ship_slot` (chase control 0xb) |
 | 6 | follow/hold (control 1); entered when jump can't initiate in combat |
 | 7 | escort/follow primary at range (control 9), escort-arrive |
-| 8 | disengage cleanup / stationary (control 10) |
+| 8 | spin-out / ship leaving the system (control 0x0a); entered by the state-0x15 stellar-entry path, normally exits to state 0 through `Ship_ResetShipPrimaryAndSecondaryTargets` after the reverse-speed threshold, and can also be removed by the outer vacant-ship sweep |
 | 9 | escort-pursue primary (chase 0xb) |
 | 10 | assist/reaction behavior (from `UpdateShipAssistResponseBehavior`) |
 | 0xb | hold-station / follow target (waits `ai_station_hold_timer`), entry to 5 jump if behavior 5 |
 | 0xc | engage target at turn radius w/ cloak-aware engagement |
 | 0xd | acquire disabled/boardable target (board state) |
-| 0xe | drift/evade (adds polar velocity) |
+| 0xe | fast hyperspace-arrival coast: clears targets, moves directly along the current heading at `frame_time_ms * 0.7`, and returns to state 0 when its positive coast timer expires |
 | 0xf | disabled-pursue/flee at turn radius (gravity-shield scales range) |
 | 0x10 | scripted/invulnerable maneuver — unhittable (seen in `CanWeaponHitTarget` + `UpdateBeamHitQueue`), steers to `g_scripted_maneuver_state_ptr` target |
 | 0x11 | static hold (control 0x15) |
 | 0x12 | attack a stellar system (`ai_secondary_target_slot`) w/ weapon banks |
-| 0x14 | traveling/jumping to a system (sets `jump_destination_stellar_id`, propagates to escorting ships) |
-| 0x15 | disengage (clears target, drops to 8) |
+| 0x14 | hypergate/wormhole entry: approaches the selected restricted stellar/link with mode 2, then hands off through mode 0x17 and transfers/vanishes; no mode-4 local hyperjump sequence |
+| 0x15 | hypergate/wormhole emergence: places/starts a ship at the destination stellar using its emergence angle, arms a short coast timer, then drops into state 8; normally a spawn/arrival entry, not a persistent 0x17 successor |
 | 0x16 | defunct (clears targets) |
 
 Idle / non-combat set (used by `NovaGameplay_IsShipInNonIdleAiState` 0x00411270): `0, 1, 2, 7, 0x14`. Note `0x14` (jump/travel) is in the idle set even though it is an active travel state; the predicate is used to test whether a target ship is *fighting*, not whether it's moving.
+
+The two numeric fields are separate state machines: `ai_state_code` is the
+high-level lifecycle/behavior state, while `ai_control_mode` is the per-frame
+movement command consumed by `Ship_ApplyShipAiControls` and `Ship_HandleShip`.
+In particular, control mode `0x04` is the outbound hyperspace departure
+spin-up, control mode `0x0a` is the fixed-speed spin-out command selected by
+state 8, and control mode `0x0e` is a combat evade mode unrelated to state
+`0x0e`'s fast arrival coast.
 - `0xC906`, `0xC908`, `0xC92E` target/formation/relationship state (provisional)
 - weapon-bank arrays around `+0xC8`, `+0xD0`, `+0xF8` patterns in ship-local bank loops
 

@@ -181,8 +181,10 @@ struct Ship {
   // `engine_thrust` below for the render glow; the AI writes the same field
   // via the reaction/offence helpers.
   float ai_forward_thrust_cmd = 0.0F; // +0x30
-  // Desired scalar speed along the heading: >0 means forward thrust, <=0 means
-  // the absolute-set reverse path (vel set to heading*abs(desired)).
+  // Desired scalar speed along the heading. Positive values use normal thrust;
+  // negative values select the physics-override path, which sets velocity to
+  // heading * abs(desired) instead of integrating acceleration. The signed
+  // value is then advanced toward zero by abs(ai_forward_thrust_cmd).
   float ai_desired_speed = 0.0F; // +0x34
   // Desired heading in the game's integer-degrees convention (heading 0 = up,
   // increasing clockwise). Ship_HandleShip turns the ship toward this at
@@ -192,7 +194,7 @@ struct Ship {
   // turn-to-heading and forward-thrust blocks so the ship holds heading and
   // coasts. Set to random 30..60 when the AI decides to reverse, counts down by
   // frame time each frame.
-  float reverse_speed_bias = 0.0F; // +0x4C
+  float ai_maneuver_timer_ms = 0.0F; // +0x4C
   // Station-hold timer driving the hold/approach state (ai_station_hold_timer).
   float ai_station_hold_timer = 0.0F; // +0x50
   // Wall-clock (SDL ticks) the current AI mode began; used by the jump-sequence

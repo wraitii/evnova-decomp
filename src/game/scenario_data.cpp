@@ -436,8 +436,13 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   }
   st.min_status = ReadBeI16(bytes, 0x16);             // reputation_threshold
   st.engage_highlight_frame = ReadBeI16(bytes, 0x18); // hypergate pulse frame
-  st.entry_heading_deg = ReadBeI16(bytes, 0x1a);      // entry heading
+  st.cust_snd_id = ReadBeI16(bytes, 0x1a);            // CustSndID
   st.availability_flags = ReadBe16(bytes, 0x20);      // availability_flags
+  if ((st.availability_flags & 0x3000U) != 0U) {
+    // CustSndID is an emergence angle only for hypergates (0x1000) and
+    // wormholes (0x2000); ordinary stellar sound ids remain untouched.
+    st.emergence_angle_deg = st.cust_snd_id;
+  }
   // Animation timing (Bible AnimDelay / Frame0Bias; Ghidra StellarDef +0x470/
   // +0x472 from payload +0x22/+0x24). See Stellar_UpdateStellarSprites.
   if (bytes.size() >= 0x26) {

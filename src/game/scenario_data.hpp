@@ -498,14 +498,12 @@ struct Stellar {
   // the animator when unset/out of range.
   std::int16_t engage_highlight_frame = 0;
 
-  // Entry heading used by Ship_EnterShipAiState0x15_JumpOutToSystem
-  // (Ghidra StellarDef +0x28, sp\x9ab payload +0x1a). The loader keeps this
-  // as a signed degree value; the AI accepts only 0..359 and randomizes when
-  // the resource contains any other value.
-  std::int16_t entry_heading_deg = -1;
-
   std::int16_t cust_pict_id = -1; // CustPicID
   std::int16_t cust_snd_id = -1;  // CustSndID
+  // CustSndID (+0x1a) is an ambient sound for ordinary stellars. Only the
+  // 0x1000 hypergate and 0x2000 wormhole lanes reinterpret it as an emergence
+  // angle; ordinary stellars deliberately leave this empty.
+  std::optional<std::int16_t> emergence_angle_deg;
 
   std::int16_t defense_dude_id = -1; // DefenseDude
   std::int16_t defense_count = 0;    // DefCount

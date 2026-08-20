@@ -42,7 +42,7 @@ namespace {
 // these from byte-mislabeled globals at 0x00575000..0x00575200; the values
 // below were decoded from the raw bytes (float vs double from the actual
 // instruction widths) on 2025-08-09 and are typed + pre-commented in the
-// Ghidra DB. See docs/npc_ship_behavior_plan.md "Diagnosis" section. ---
+// Ghidra DB. See docs/npc_ship_behaviour.md "Decoded constants" section. ---
 // "Moving" / arrival-stopped velocity threshold, px/tick (0x575080, double).
 constexpr float kVerySlowSpeed = 0.35F;
 // State-1 travel arrival velocity damp (0x575088, double).
@@ -69,7 +69,7 @@ constexpr float kMode1AlignAddend = 1.0F;
 constexpr float kMode2AlignAddend = 5.0F;
 constexpr float kMode2CloseGatePx = 500.0F;
 constexpr float kMode2ArriveFraction = 0.25F;
-// Mode-3 (approach centre): alignment addend 3.0 (0x575120, float).
+// Mode-3 (depart from centre): alignment addend 3.0 (0x575120, float).
 constexpr float kMode3AlignAddend = 3.0F;
 // Engagement distance within which a ship can fire on or engage a target
 // (0x5750b0, float).
@@ -77,9 +77,15 @@ constexpr float kEngageDist = 165.0F;
 // Assist/response keep-distance thresholds.
 constexpr float kAssistClose = 300.0F;
 constexpr float kAssistFar = 600.0F;
-// Squared-distance threshold for "at system centre" (states 2/3 station-keep);
-// 0x575098 (double) = 1,000,000 px^2 (1000 px radius).
+// Squared-distance threshold for the centre envelope used by departure and
+// attack staging (states 2/3); 0x575098 (double) = 1,000,000 px^2 (1000 px
+// radius).
 constexpr float kCentreRangeSq = 1000000.0F;
+// Stellar_GetJumpSequenceDurationMs (0x0046EFB0) returns 350 ms for the
+// engine-enabled path used by the NPC spin-up. ShipClassDef's duration
+// multiplier is not decoded into ShipClass yet, so retain the original base
+// duration until that field is represented here.
+constexpr float kNpcJumpSpinupDurationMs = 350.0F;
 // Gravity-shield approach multipliers (state 0xd/0xf).
 constexpr float kShieldKeepMult = 4.0F;
 // Combat turn-radius constants from DAT_005750a0/a4/a8/ac. The class turn
@@ -196,6 +202,18 @@ void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms) {
   ship.ai_mode_start_time_ms = now_ms;
 }
 
+// Ghidra 0x00410dd0 Ship_ResetShipPrimaryAndSecondaryTargets.
+void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship) {
+  if (ship.ai_state_code != 9 && ship.ai_state_code != 0xf) {
+    ship.ai_state_code = 0;
+    ship.ai_control_mode = 0;
+  }
+  ship.ai_secondary_target_slot = -1;
+  ship.ai_station_hold_timer = 0.0F;
+  ship.ai_forward_thrust_cmd = 0.0F;
+  ship.ai_desired_speed = 0.0F;
+}
+
 // Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem.
 void NovaAi_EnterState15JumpOutToSystem(GameState &state,
                                         Ship &ship,
@@ -204,15 +222,14 @@ void NovaAi_EnterState15JumpOutToSystem(GameState &state,
   ship.ai_control_mode = 0;
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = stellar_id;
-  ship.reverse_speed_bias = 60.0F;
+  ship.ai_maneuver_timer_ms = 60.0F;
   ship.ai_station_hold_timer = -1.0F;
 
   if (stellar_id >= 0 && stellar_id < 0x800) {
     const ShipClass *cls = state.scenario.Ship(
         static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    const bool can_jump = cls != nullptr &&
-                          static_cast<float>(cls->base_fuel) >=
-                              kJumpFuelCost;
+    const bool can_jump =
+        cls != nullptr && static_cast<float>(cls->base_fuel) >= kJumpFuelCost;
     ship.jump_destination_stellar_id = can_jump ? stellar_id : -2;
 
     const Stellar *stellar = state.scenario.Stellar(stellar_id);
@@ -220,11 +237,12 @@ void NovaAi_EnterState15JumpOutToSystem(GameState &state,
       // Ghidra reads StellarDef +0x28 directly. Valid entries are integer
       // degrees [0, 359]; invalid resource values use NovaRandom_Range(360).
       // Scenario loading preserves the signed raw word at sp\x9ab +0x1a.
-      const int heading_deg = stellar->entry_heading_deg >= 0 &&
-                                      stellar->entry_heading_deg <= 359
-                                  ? stellar->entry_heading_deg
-                                  : std::uniform_int_distribution<int>(0, 359)(
-                                        state.rng);
+      const int heading_deg =
+          stellar->emergence_angle_deg.has_value() &&
+                  *stellar->emergence_angle_deg >= 0 &&
+                  *stellar->emergence_angle_deg <= 359
+              ? *stellar->emergence_angle_deg
+              : std::uniform_int_distribution<int>(0, 359)(state.rng);
       // The original ShipState stores this field in degrees. Clean-room Ship
       // stores heading in radians, so convert only at this boundary.
       ship.heading = static_cast<float>(heading_deg) * kDegToRad;
@@ -240,8 +258,8 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
     return false;
   }
   const std::int16_t source_system = ship.current_system_id;
-  const System *source = state.scenario.System(
-      static_cast<std::int16_t>(source_system + 0x80));
+  const System *source =
+      state.scenario.System(static_cast<std::int16_t>(source_system + 0x80));
   if (source == nullptr) {
     return false;
   }
@@ -1224,13 +1242,14 @@ void NovaAi_UpdateBehavior0x03(GameState &state,
 // weapon selection, cloak engagement, and HUD/mission flavor remain deferred.
 void NovaAi_UpdateShipState(GameState &state,
                             Ship &ship,
-                            std::uint32_t now_ms) {
+                            std::uint32_t now_ms,
+                            float frame_time_ms) {
   (void)now_ms;
   auto *scn = &state.scenario;
 
   // ---- Defunct (0x16) unwind. ----
   if (ship.ai_state_code == 0x16) {
-    if (ship.reverse_speed_bias <= 0.0F) {
+    if (ship.ai_maneuver_timer_ms <= 0.0F) {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
       return;
@@ -1242,9 +1261,9 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // Coast-through-reversal (reverse_speed_bias > 0) only suspends the machine
+  // AI maneuver timer (>0) only suspends the machine
   // for states other than 10 and 0xe (those keep running through the coast).
-  if (ship.reverse_speed_bias > 0.0F && ship.ai_state_code != 10 &&
+  if (ship.ai_maneuver_timer_ms > 0.0F && ship.ai_state_code != 10 &&
       ship.ai_state_code != 0xe) {
     return;
   }
@@ -1396,13 +1415,13 @@ void NovaAi_UpdateShipState(GameState &state,
           std::uniform_int_distribution<std::int32_t> dist(
               (sc2 && (sc2->availability_flags & 2) != 0) ? 100 : 300,
               (sc2 && (sc2->availability_flags & 2) != 0) ? 174 : 499);
-          ship.reverse_speed_bias = static_cast<float>(dist(state.rng));
+          ship.ai_maneuver_timer_ms = static_cast<float>(dist(state.rng));
         }
       }
     }
   }
 
-  // ---- Jumping to a system (state 0x14). ----
+  // ---- Committed inter-system transfer (state 0x14). ----
   if (ship.ai_state_code == 0x14 && ship.ai_secondary_target_slot >= 0 &&
       ship.ai_secondary_target_slot < 0x800) {
     const Stellar *target =
@@ -1422,17 +1441,21 @@ void NovaAi_UpdateShipState(GameState &state,
     const std::int16_t span_q = static_cast<std::int16_t>(half_span / 4);
     const bool far = std::abs(dx) > span_q || std::abs(dy) > span_q;
     if (far) {
+      // Unlike local state 2, this restricted-lane entry does not enter the
+      // ordinary mode-4 hyperjump sequence. It approaches the gate/wormhole
+      // with mode 2, then hands off through mode 0x17.
       ship.ai_control_mode = 2;
-      ship.reverse_speed_bias = -1.0F;
+      ship.ai_maneuver_timer_ms = -1.0F;
     } else {
-      // Arrived at the jump point: hold, clear velocity, and propagate the jump
-      // to any ships actively escorting/tracking this one (Phase 7 wiring).
+      // At the gate/wormhole entry point, the original clears velocity as part
+      // of the handoff, then propagates entry to any active escorts. This is
+      // not a visible mode-4 brake/spin-up phase: the NPC transfers/vanishes.
       ship.vel_x = 0.0F;
       ship.vel_y = 0.0F;
       ship.ai_control_mode = 0x17;
-      if (!(ship.reverse_speed_bias >= 0.0F) ||
-          ship.reverse_speed_bias > 16.0F) {
-        ship.reverse_speed_bias = 16.0F;
+      if (!(ship.ai_maneuver_timer_ms >= 0.0F) ||
+          ship.ai_maneuver_timer_ms > 16.0F) {
+        ship.ai_maneuver_timer_ms = 16.0F;
       }
       // Escort propagation (Ship_UpdateShipAiState state 0x14 successor loop):
       // any active ship whose ai_target_ship_slot == this ship is ordered to
@@ -1458,9 +1481,10 @@ void NovaAi_UpdateShipState(GameState &state,
         other.ai_state_code = 0x14;
         other.ai_control_mode = 0;
       }
-      // Gameplay-visible NPC system transfer. The original continues through
-      // a shared hyperspace presentation path; this per-ship reconstruction
-      // completes the transfer here once state 0x14 has reached its point.
+      // Gameplay-visible NPC gate/wormhole transfer. Mode 0x17 is only the
+      // handoff marker in the AI/control switch; the original continues
+      // through a surrounding presentation/transfer path. This reconstruction
+      // completes that path here once state 0x14 reaches the entry point.
       (void)NovaAi_CompleteNpcJump(state, ship);
     }
     return;
@@ -1470,20 +1494,22 @@ void NovaAi_UpdateShipState(GameState &state,
   if (ship.ai_state_code == 0x15) {
     ship.ai_control_mode = 0;
     ship.primary_target_ship_slot = -1;
-    if (ship.reverse_speed_bias <= 0.0F) {
-      ship.reverse_speed_bias = -1.0F;
+    if (ship.ai_maneuver_timer_ms <= 0.0F) {
+      ship.ai_maneuver_timer_ms = -1.0F;
       ship.ai_state_code = 8;
       ship.ai_secondary_target_slot = -1;
     }
     return;
   }
 
-  // ---- Idle-template / approach station-keeping (state 2). ----
+  // ---- Jump-departure staging (state 2). ----
   if (ship.ai_state_code == 2) {
-    // At system centre -> approach/stop; else station-keep or drift to it.
-    // The "stopped" test uses the same 0.35 px/tick threshold as the original
-    // (_DAT_00575080); the special-loadout arm of the original's mode-4 branch
-    // is not modelled (TODO(decomp): Ship_CheckSpecialLoadoutCapability).
+    // State 2 does not seek the system centre. While moving, it brakes; once
+    // stopped, mode 4 aligns from the centre through the ship and ramps the
+    // departure outward. Inside the centre envelope mode 3 supplies the
+    // outward thrust arm. The "stopped" test uses the same 0.35 px/tick
+    // threshold as the original (_DAT_00575080); the special-loadout arm of
+    // mode 4 is not modelled (TODO(decomp): Ship_CheckSpecialLoadoutCapability).
     if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <= kCentreRangeSq) {
       ship.ai_control_mode = 3;
     } else if (std::abs(ship.vel_x) < kVerySlowSpeed &&
@@ -1540,9 +1566,9 @@ void NovaAi_UpdateShipState(GameState &state,
     ship.ai_control_mode = 0;
     // Continue drifting along the current heading at a small polar-velocity
     // step until the coast-through-reversal timer expires.
-    ship.vel_x += std::sin(ship.heading) * (2.0F);
-    ship.vel_y -= std::cos(ship.heading) * (2.0F);
-    if (ship.reverse_speed_bias <= 0.0F) {
+    ship.vel_x += std::sin(ship.heading) * (frame_time_ms * 0.7F);
+    ship.vel_y -= std::cos(ship.heading) * (frame_time_ms * 0.7F);
+    if (ship.ai_maneuver_timer_ms <= 0.0F) {
       ship.ai_state_code = 0;
     }
     return;
@@ -1607,7 +1633,7 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Escort/follow primary at range (state 7). ----
   if (ship.ai_state_code == 7) {
-    if (ship.primary_target_ship_slot == -1 || ship.reverse_speed_bias > 0.0F) {
+    if (ship.primary_target_ship_slot == -1 || ship.ai_maneuver_timer_ms > 0.0F) {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
       return;
@@ -1651,7 +1677,12 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Stationary cleanup (state 8). ----
+  // ---- Spin-out / leave-system state (state 8). ----
+  // The movement integrator exits it through
+  // Ship_ResetShipPrimaryAndSecondaryTargets after control mode 0x0a's
+  // reverse-speed threshold. If it survives that path, the outer
+  // Ship_DeactivateVacantShipsAndTally sweep at system entry/landing (or the
+  // escape-pod transition) removes the vacant NPC slot.
   if (ship.ai_state_code == 8) {
     ship.ai_station_hold_timer = -999.0F;
     ship.ai_control_mode = 10;
@@ -1777,7 +1808,7 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_control_mode = 1;
       }
     } else {
-      if (ship.reverse_speed_bias > 0.0F) {
+      if (ship.ai_maneuver_timer_ms > 0.0F) {
         ship.ai_state_code = 0;
         ship.ai_control_mode = 0;
         return;
@@ -1836,7 +1867,7 @@ void NovaAi_UpdateShipState(GameState &state,
   if (ship.ai_state_code == 0xd) {
     ship.ai_station_hold_timer = 0.0F;
     const std::int16_t target_slot = ship.primary_target_ship_slot;
-    if (target_slot < 0 || ship.reverse_speed_bias > 0.0F ||
+    if (target_slot < 0 || ship.ai_maneuver_timer_ms > 0.0F ||
         !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
@@ -1873,7 +1904,7 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_control_mode = 6;
       }
     } else if (target.escort_rehired_mark == 0 ||
-               ship.reverse_speed_bias > 0.0F) {
+               ship.ai_maneuver_timer_ms > 0.0F) {
       ship.ai_secondary_target_slot = target_slot;
       const auto *cls = ShipClassFor(state, ship);
       const float turn = cls ? cls->turn_rate * 0.1F : 0.0F;
@@ -1915,7 +1946,6 @@ void NovaAi_ApplyControls(GameState &state,
                           Ship &ship,
                           float frame_time_ms,
                           std::uint32_t now_ms) {
-  (void)frame_time_ms;
   ship.ai_forward_thrust_cmd = 0.0F;
   ship.ai_fire_trigger_latch = 0;
   const ShipClass *cls =
@@ -1994,8 +2024,9 @@ void NovaAi_ApplyControls(GameState &state,
   case 0:
   case 0x17:
     // Idle: the original has no mode-0 block (thrust stays 0, heading held).
-    // Mode 0x17 (jump-arrival hold) also has no block in the original --
-    // thrust stays 0.
+    // Mode 0x17 likewise has no steering block: state 0x14 owns the
+    // gate/wormhole handoff and velocity bookkeeping; the surrounding jump
+    // path performs the actual transfer.
     ship.ai_desired_speed = 0.0F;
     break;
 
@@ -2150,8 +2181,8 @@ void NovaAi_ApplyControls(GameState &state,
   }
 
   case 3:
-    // Approach the system centre: point away from the centre and coast
-    // (desired = 0 -> max-speed clamp in the integrator), thrusting once
+    // Depart from the system centre: point from the centre to the ship and
+    // coast (desired = 0 -> max-speed clamp in the integrator), thrusting once
     // aligned within eff_turn_deg + 3.0 deg.
     if (fire_restricted) {
       break;
@@ -2168,8 +2199,8 @@ void NovaAi_ApplyControls(GameState &state,
     // Jump spin-up: point away from the centre and accumulate the hold timer.
     // The original's completion block (hold timer past the class-scaled jump
     // duration) zeroes the timer, clears the ship's system id and deactivates
-    // it (the actual system transition is Phase 7), so that arm is not wired
-    // yet (TODO(decomp)); the heading + timer ramp below are faithful.
+    // it. The population pass then replenishes the current system, matching
+    // the original's departure lifecycle.
     if (fire_restricted) {
       break;
     }
@@ -2183,7 +2214,20 @@ void NovaAi_ApplyControls(GameState &state,
         now_ms < ship.ai_mode_start_time_ms) {
       ship.ai_mode_start_time_ms = now_ms;
     }
-    ship.ai_station_hold_timer += 1.0F;
+    ship.ai_station_hold_timer += frame_time_ms;
+
+    // Ghidra 0x00408150 compares elapsed wall-clock time against
+    // Stellar_GetJumpSequenceDurationMs() / jump_duration_multiplier. The
+    // class multiplier is not decoded yet; use the faithful 350 ms base and
+    // keep the lifecycle transition exact.
+    if (static_cast<float>(now_ms - ship.ai_mode_start_time_ms) >=
+        kNpcJumpSpinupDurationMs) {
+      ship.ai_station_hold_timer = 0.0F;
+      ship.is_active = false;
+      ship.current_system_id = -1;
+      ship.ai_forward_thrust_cmd = 0.0F;
+      ship.ai_desired_speed = 0.0F;
+    }
     break;
 
   case 0xd: {
@@ -2239,7 +2283,7 @@ void NovaAi_ApplyControls(GameState &state,
         ship.ai_desired_speed = -4.0F;
         ship.ai_station_hold_timer += 1.0F;
       } else if (leader_delta <= eff_turn_deg) {
-        ship.reverse_speed_bias = 180.0F; // raw float 0x43340000
+        ship.ai_maneuver_timer_ms = 180.0F; // raw float 0x43340000
       } else {
         ship.ai_desired_heading_deg = leader.ai_desired_heading_deg;
         ship.ai_station_hold_timer = -4.0F;
@@ -2966,7 +3010,8 @@ void NovaAi_ApplyControls(GameState &state,
 void NovaAi_UpdateShipAI(GameState &state,
                          Ship &ship,
                          bool skip_heavy_ai,
-                         std::uint32_t now_ms) {
+                         std::uint32_t now_ms,
+                         float frame_time_ms) {
   // Rare "defunct / retired" global abort (DAT_00596d3d set): skip AI.
   // (Kept as a structural no-op; the latch is not modelled.)
 
@@ -2978,7 +3023,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   EnsureNpcWeaponBanks(state, ship);
   // Ghidra calls the cloak-trait producer before the state supervisor, but
   // skips it during the coast-through-reversal interval (+0x4c > 0).
-  if (ship.reverse_speed_bias <= 0.0F) {
+  if (ship.ai_maneuver_timer_ms <= 0.0F) {
     NovaAi_UpdateShipCloakStateFromTraits(state, ship);
   }
 
@@ -3051,7 +3096,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   // heavy block even when bVar6 skipped the heavy decision). frame_time_ms is
   // the reference cadence (the original reads the _g_avg_frame_time_ms EMA,
   // ~33.3 ms at 30 fps) for the control-mode position/velocity creeps.
-  NovaAi_UpdateShipState(state, ship, now_ms);
+  NovaAi_UpdateShipState(state, ship, now_ms, frame_time_ms);
   NovaAi_ApplyControls(state, ship, kReferenceFrameTimeMs, now_ms);
   // Ship_UpdateAutoWeaponSelectionFromTarget (0x00411540) is a post-state
   // refresh. It must run after ApplyControls because that bridge clears the
@@ -3148,7 +3193,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
     return true; // docked/landed against a stellar: keeps pressing
   }
   const std::int16_t target_slot = ship.primary_target_ship_slot;
-  const bool coasting_reversal = ship.reverse_speed_bias > 0.0F;
+  const bool coasting_reversal = ship.ai_maneuver_timer_ms > 0.0F;
   const bool engaged =
       !IsDisengageState(ship.ai_state_code, /*include_state18=*/true);
   const Ship *target =
@@ -3184,7 +3229,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
     if (other.ai_target_ship_slot != ship.ship_instance_id) {
       continue;
     }
-    if (other.reverse_speed_bias > 0.0F || !other.is_active) {
+    if (other.ai_maneuver_timer_ms > 0.0F || !other.is_active) {
       continue;
     }
     if (NovaAiShip_IsFireRestricted(state, other)) {
@@ -3326,7 +3371,7 @@ void NovaAi_EnterState9TargetPlayerAndBrake(Ship &ship) {
   ship.primary_target_ship_slot = 0;
   ship.ai_state_code = 9;
   ship.ai_control_mode = 0;
-  ship.reverse_speed_bias = -1.0F;
+  ship.ai_maneuver_timer_ms = -1.0F;
 }
 
 // Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerAndBrake.
@@ -3336,7 +3381,7 @@ void NovaAi_EnterState0FTargetPlayerAndBrake(Ship &ship) {
   ship.primary_target_ship_slot = 0;
   ship.ai_state_code = 0x0F;
   ship.ai_control_mode = 0;
-  ship.reverse_speed_bias = -1.0F;
+  ship.ai_maneuver_timer_ms = -1.0F;
 }
 
 namespace {

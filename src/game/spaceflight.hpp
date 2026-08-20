@@ -127,7 +127,7 @@ void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
 // / ai_desired_speed / ai_forward_thrust_cmd fields; this turns the ship toward
 // the desired heading at the class turn rate (continuous, unlike the player's
 // integer-rounded keyboard path), then applies forward or reverse thrust along
-// the heading and integrates position. Honors the reverse_speed_bias
+// the heading and integrates position. Honors the ai_maneuver_timer_ms
 // coast-through-reversal timer by holding heading and coasting. Derives the
 // effective thrust/max-speed/turn from the class, including the high-confidence
 // NPC capability/velocity-match/mission/ionization branches, and scales all
@@ -135,7 +135,8 @@ void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
 extern void NovaShip_IntegrateNpcMovement(GameState &state,
                                           Ship &ship,
                                           const ShipClass &ship_class,
-                                          float elapsed_ticks);
+                                          float elapsed_ticks,
+                                          std::uint32_t now_ms = 0);
 
 // Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020), the momentum
 // / turn integrator for gravity-shield ships (ShipClassDef.flags_secondary bit

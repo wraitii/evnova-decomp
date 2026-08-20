@@ -122,7 +122,7 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 
 // Mirrors Ship_IsShipEligibleForDistressCall (0x0040f6d0): true when the ship
 // is an active, non-fire-restricted combatant that could call for help -- not
-// coasting through a reversal (reverse_speed_bias <= 0), holding a primary
+// coasting through a reversal (ai_maneuver_timer_ms <= 0), holding a primary
 // target that is either the player or a ship targeting the player, and not in
 // a retreat/disengage AI state (7,9,15,10,11,5,12,18). Used by the
 // nearest-hostile scan and the player target-acquisition predicate.

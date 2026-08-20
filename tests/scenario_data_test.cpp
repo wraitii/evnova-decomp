@@ -527,6 +527,7 @@ TEST_CASE("stellar animation fields decode", "[scenario][stellar]") {
   CHECK(earth->animation_dwell_time == 0);
   CHECK(earth->animation_frame_multiplier == 0);
   CHECK((earth->availability_flags & 0x1000) == 0); // not a hypergate
+  CHECK_FALSE(earth->emergence_angle_deg.has_value());
 
   const Stellar *portkane = data.Stellar(0x89);
   REQUIRE(portkane != nullptr);
@@ -541,6 +542,8 @@ TEST_CASE("stellar animation fields decode", "[scenario][stellar]") {
   REQUIRE(hg != nullptr);
   CHECK(hg->link_a_id == 1);
   CHECK((hg->availability_flags & 0x1000) != 0); // hypergate
+  REQUIRE(hg->emergence_angle_deg.has_value());
+  CHECK(*hg->emergence_angle_deg == hg->cust_snd_id);
   CHECK(hg->engage_highlight_frame == 37);
   CHECK(hg->animation_dwell_time == 0);
   CHECK(hg->animation_frame_multiplier == 0);

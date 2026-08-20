@@ -91,7 +91,7 @@ TEST_CASE("fleet lead spawner shapes the ship from the fleet def") {
   // Ship_EnterShipAiState0x15 (0x004159e0), when the system has one.
   if (ship.ai_state_code == 0x15) {
     CHECK(ship.ai_secondary_target_slot >= 0x80);
-    CHECK(ship.reverse_speed_bias == Catch::Approx(60.0F));
+    CHECK(ship.ai_maneuver_timer_ms == Catch::Approx(60.0F));
   } else {
     CHECK(ship.pos_x == Catch::Approx(0.0F));
     CHECK(ship.pos_y == Catch::Approx(0.0F));

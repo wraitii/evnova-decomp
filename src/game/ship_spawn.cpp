@@ -736,8 +736,9 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 // actively engaging the player -- ai_behavior_code > 4, ai_target_ship_slot ==
 // 0, not docked at a stellar, not in a mission fleet -- AND is not
 // fire-restricted AND `keep_player_engaged` is false (the original's flag==0).
-// Every other ship (idle wanderers/dudes, parked, mission, fire-restricted) is
-// vacant and deactivated. The original runs this on travel/landing arrival
+// State-8 spin-out ships are also vacant: they have no special exemption and
+// are removed by this same outer sweep. Every other ship (idle wanderers/dudes,
+// parked, mission, fire-restricted) is vacant and deactivated. The original runs this on travel/landing arrival
 // (Stellar_ProcessTravelAndLanding 0x00457580) and on system entry
 // (NovaMainLoop_Run 0x00486880) with flag==0, then Mission_SpawnSystemMisnShips
 // + System_TickNpcSpawnMaintenance reseed the population.

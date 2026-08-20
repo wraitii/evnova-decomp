@@ -112,9 +112,9 @@ bool NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
   if (!ship.is_active) {
     return false;
   }
-  // Not coasting through a reversal (the original requires reverse_speed_bias
+  // Not coasting through a reversal (the original requires ai_maneuver_timer_ms
   // <= 0.0; FLOAT_00575000 = 0.0).
-  if (ship.reverse_speed_bias > 0.0F) {
+  if (ship.ai_maneuver_timer_ms > 0.0F) {
     return false;
   }
   if (NovaAiShip_IsFireRestricted(state, ship)) {

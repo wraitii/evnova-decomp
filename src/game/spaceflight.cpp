@@ -53,7 +53,7 @@ void Stub_DrawStatus(GameState &state) { (void)state; }
 // supervisors + the Ship_UpdateShipAiState state machine + the
 // Ship_ApplyShipAiControls bridge for every active, non-player ship in the
 // current system. Part 1's target-refresh helpers are reconstructed in ship_ai.
-void Stub_AiRoutines(GameState &state) {
+void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
   const std::int16_t current_system = state.player.current_system_id;
   // now_ms backs the AI mode/formation timers and must be monotonic across
   // frames; the original reads its global millisecond tick source here.
@@ -75,7 +75,8 @@ void Stub_AiRoutines(GameState &state) {
       continue;
     }
     // skip_heavy_ai=0: these spawned ships run the full (heavy) AI decision.
-    NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, now_ms);
+    NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, now_ms,
+                        elapsed_ticks * (1000.0F / 30.0F));
   }
 }
 
@@ -196,7 +197,8 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       continue;
     }
 
-    NovaShip_IntegrateNpcMovement(state, ship, *cls, elapsed_ticks);
+    NovaShip_IntegrateNpcMovement(
+        state, ship, *cls, elapsed_ticks, SDL_GetTicks());
 
     NovaWeapon_TickNpcWeaponBanks(ship, elapsed_ticks);
     // Ship_HandleShip hands a latched active bank to Weapon_FireShipWeapons.
@@ -229,9 +231,9 @@ void NovaFrame_TickSystems(GameState &state,
 
   if (run_full_tick) {
     Stub_DrawStatus(state);                // scope 0xc
-    Stub_AiRoutines(state);                // scope 6 (part 1: targeting setup)
+    Stub_AiRoutines(state, elapsed_ticks); // scope 6 (part 1: targeting setup)
     Stub_TickReactionsAndNpcSpawns(state); // scope 0xb
-    Stub_AiRoutines(state);                // scope 6 (part 2: per-ship AI)
+    Stub_AiRoutines(state, elapsed_ticks); // scope 6 (part 2: per-ship AI)
     Stub_CalcAiOdds(state);                // scope 0x14
   }
 
@@ -572,8 +574,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       const float gain = NovaWeapon_ComputeSpatialFireGain(
           state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
-      audio.Play(*state.gameplay_sounds[kDestructionSoundIndex], gain, 1.0F,
-                 372);
+      audio.Play(
+          *state.gameplay_sounds[kDestructionSoundIndex], gain, 1.0F, 372);
     }
     state.pending_destruction_sounds.clear();
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
@@ -1197,9 +1199,10 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
 //   desired >  0 : forward thrust toward `desired` speed, per-axis clamped to
 //                  the polar projection of `desired` (Math_AddPolarVelocity-
 //                  WithClamp 0x0043b4e0).
-//   desired <  0 : absolute-set velocity to heading * abs(desired) (the
-//                  reverse/abs-set path), then grow the reversal timer.
-// reverse_speed_bias is a coast-through-reversal TIMER (not a brake): while >0
+//   desired <  0 : physics override; set velocity to heading * abs(desired)
+//                  instead of integrating thrust, then decay desired toward
+//                  zero by abs(ai_forward_thrust_cmd).
+// ai_maneuver_timer_ms is a coast-through-reversal TIMER (not a brake): while >0
 // it suppresses both turning and thrust (the ship holds heading and coasts);
 // it counts down by frame time each frame and is re-set to a random 30..60
 // when the AI decides to reverse into open space.
@@ -1220,7 +1223,8 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
 void NovaShip_IntegrateNpcMovement(GameState &state,
                                    Ship &ship,
                                    const ShipClass &ship_class,
-                                   float elapsed_ticks) {
+                                   float elapsed_ticks,
+                                   std::uint32_t now_ms) {
   constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
   constexpr float kTwoPi = 6.283185307179586F;
   constexpr float kFullCircleDeg = 360.0F;
@@ -1248,11 +1252,11 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // through Ship_SteerVelocityTowardShipHeading instead of vector thrust.
   const bool gravity_shield = NovaShip_HasGravityShield(ship, ship_class);
 
-  // The movement blocks are gated off while coasting through a reversal, and
+  // The movement blocks are gated off while the maneuver timer is active, and
   // for the defunct AI state (0x16) the ship also holds course. The original
   // also gates off ships whose class is the 0x2ff sentinel; those fall through
   // to the inactive-guard at the top of Ship_HandleShip in practice.
-  const bool coasting = ship.reverse_speed_bias > 0.0F;
+  const bool coasting = ship.ai_maneuver_timer_ms > 0.0F;
   const bool holds_course = coasting || ship.ai_state_code == 0x16;
 
   // --- Turn toward the desired heading (continuous AI turn rate). ---
@@ -1297,30 +1301,28 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       if (ship.shield_points < max_shield) {
         ship.shield_points = std::min(
             max_shield,
-            ship.shield_points + static_cast<float>(
-                                      ship_class.shield_recharge) *
-                                  elapsed_ticks);
+            ship.shield_points +
+                static_cast<float>(ship_class.shield_recharge) * elapsed_ticks);
       }
       const float max_armor = static_cast<float>(ship_class.base_armor);
       if (ship.armor_points < max_armor) {
         ship.armor_points = std::min(
             max_armor,
-            ship.armor_points + static_cast<float>(
-                                      ship_class.armor_recharge) *
-                                  elapsed_ticks);
+            ship.armor_points +
+                static_cast<float>(ship_class.armor_recharge) * elapsed_ticks);
       }
     }
   }
 
   // --- Forward / reverse thrust along the heading. ---
-  // When the ship is coasting (reverse_speed_bias > 0) or defunct it skips
+  // When the ship is coasting (ai_maneuver_timer_ms > 0) or defunct it skips
   // thrust entirely and holds velocity. Otherwise, when a forward-thrust
   // command is present, apply the three-branch ai_desired_speed model (the
   // original gates this whole block on ai_forward_thrust_cmd != 0, so a
   // stopped ship with no thrust command drifts without applying any new
   // velocity). The coast case (desired == 0) is a clamped step toward the
   // class top speed; desired > 0 throttles toward it; desired < 0 is the
-  // reverse/absolute-set path. Non-gravity-shield ships apply polar vector
+  // physics-override path. Non-gravity-shield ships apply heading-aligned
   // thrust; gravity-shield ships accumulate a scalar `speed` clamped at the
   // same caps.
   if (!holds_course && ship.ai_forward_thrust_cmd != 0.0F) {
@@ -1361,9 +1363,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         ship.speed = std::clamp(ship.speed + thrust_step, 0.0F, desired);
       }
     } else {
-      // Reverse / absolute-set: non-shield zeroes the vector velocity and
-      // re-imposes it at abs(desired) along the heading; gravity-shield sets
-      // the scalar speed directly.
+      // Physics override: replace the velocity with abs(desired) along the
+      // current heading. Negative throttle is not reverse acceleration; its
+      // magnitude decays the signed desired value toward zero below.
       if (!gravity_shield) {
         ship.vel_x = 0.0F;
         ship.vel_y = 0.0F;
@@ -1372,6 +1374,13 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         ship.speed = std::abs(desired);
       }
       ship.ai_desired_speed += std::abs(ship.ai_forward_thrust_cmd);
+      // Ship_HandleShip compares the post-thrust absolute speed against the
+      // negative effective max speed. For state 8's -5.75/-3.67 cleanup
+      // command this condition is normally met on the first movement tick,
+      // and Ship_ResetShipPrimaryAndSecondaryTargets exits state 8 to idle.
+      if (ship.ai_desired_speed >= -eff_max_speed) {
+        NovaAi_ResetShipPrimaryAndSecondaryTargets(ship);
+      }
       // Once the reversal has closed enough distance, the AI decides to coast
       // through: arm a random 30..60-tick reversal timer (only in open space,
       // i.e. no current target and not a mission ship). The original also
@@ -1381,7 +1390,59 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       // mirroring NovaRandom_Range) so runs stay reproducible.
       if (ship.ai_target_ship_slot == -1) {
         std::uniform_int_distribution<std::int32_t> dist(30, 60);
-        ship.reverse_speed_bias = static_cast<float>(dist(state.rng));
+        ship.ai_maneuver_timer_ms = static_cast<float>(dist(state.rng));
+      }
+    }
+  }
+
+  // Ghidra Ship_HandleShip (0x00433050), jump-spin-up departure block:
+  // Ship_ApplyShipAiControls arms ai_station_hold_timer in control mode 4,
+  // but the visible departure movement is applied here. The original first
+  // damps the stopped ship, then accelerates it along its already-aligned
+  // heading with a time-ramped jump speed; control mode 4 itself does not
+  // issue ordinary forward thrust.
+  const bool jump_spinup_control =
+      ship.ai_station_hold_timer > 0.0F &&
+      (ship.ai_state_code == 2 || ship.ai_state_code == 3 ||
+       ship.ai_state_code == 0xb) &&
+      (ship.ai_control_mode == 4 || ship.ai_control_mode == 0xd) &&
+      !NovaAiShip_IsFireRestricted(state, ship);
+  if (jump_spinup_control) {
+    constexpr float kJumpVelocityDamp = 0.8F;      // DAT_00575488
+    constexpr float kJumpProgressSubtract = 35.0F; // DAT_00575490
+    constexpr float kJumpProgressCap = 50.0F;      // DAT_00575388
+    constexpr float kJumpDurationScale = 0.01F;    // DOUBLE_00575368
+    constexpr float kJumpDurationMs = 350.0F;
+
+    ship.vel_x *= kJumpVelocityDamp;
+    ship.vel_y *= kJumpVelocityDamp;
+
+    const float current_heading_deg = ship.heading / kDegToRad;
+    const float heading_delta_deg = std::remainder(
+        static_cast<float>(ship.ai_desired_heading_deg) - current_heading_deg,
+        360.0F);
+    const bool aligned = std::abs(heading_delta_deg) <=
+                         stats.turn_rate_deg_per_tick * elapsed_ticks;
+    if (!aligned) {
+      // Ghidra resets the mode-start timestamp while the ship is still
+      // turning, so the jump-speed ramp begins only after alignment.
+      ship.ai_mode_start_time_ms = now_ms;
+    } else {
+      // The original uses elapsed wall-clock time multiplied by the ship-class
+      // jump_duration_multiplier, divided by duration_ms * 0.01, then subtracts
+      // 35. That multiplier is not decoded into ShipClass yet; the base 1.0
+      // value preserves the stock timing and is marked as a follow-up gap.
+      const float elapsed_jump_ms =
+          static_cast<float>(now_ms - ship.ai_mode_start_time_ms);
+      float jump_progress =
+          elapsed_jump_ms / (kJumpDurationMs * kJumpDurationScale) -
+          kJumpProgressSubtract;
+      jump_progress = std::clamp(jump_progress, 0.0F, kJumpProgressCap);
+      if (jump_progress > 0.0F) {
+        ship.vel_x += std::sin(ship.heading) * jump_progress * elapsed_ticks;
+        ship.vel_y -= std::cos(ship.heading) * jump_progress * elapsed_ticks;
+        ship.engine_glow_level = static_cast<std::int16_t>(
+            std::min(0x20, static_cast<int>(ship.engine_glow_level) + 3));
       }
     }
   }
@@ -1411,9 +1472,10 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   }
 
   // --- Coast-through-reversal timer countdown. ---
-  if (ship.reverse_speed_bias > 0.0F) {
-    ship.reverse_speed_bias =
-        std::max(0.0F, ship.reverse_speed_bias - elapsed_ticks);
+  if (ship.ai_maneuver_timer_ms > 0.0F) {
+    const float frame_time_ms = elapsed_ticks * (1000.0F / 30.0F);
+    ship.ai_maneuver_timer_ms =
+        std::max(0.0F, ship.ai_maneuver_timer_ms - frame_time_ms);
   }
 
   // --- Engine glow level (Ghidra ShipState field_0xc8d4). ---
@@ -1441,7 +1503,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     }
     if (ship.ai_forward_thrust_cmd <= 0.0F) {
       fade_to_zero();
-    } else if (ship.reverse_speed_bias > 0.0F || ship.ai_state_code == 0x16) {
+    } else if (ship.ai_maneuver_timer_ms > 0.0F || ship.ai_state_code == 0x16) {
       // Thrust command present but the ship is coasting through a reversal (or
       // defunct): the original jumps to the fade label here too.
       fade_to_zero();
@@ -1461,7 +1523,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     // The reversal countdown block also fades the glow once more while its
     // timer is live (Ship_HandleShip decrements again here), so a reversing
     // ship fades twice per frame like the original.
-    if (ship.reverse_speed_bias > 0.0F && ship.ai_state_code != 0x16 &&
+    if (ship.ai_maneuver_timer_ms > 0.0F && ship.ai_state_code != 0x16 &&
         glow > 0) {
       glow = static_cast<std::int16_t>(glow - 1);
     }
@@ -1565,8 +1627,7 @@ void NovaPlayer_TickShieldRecharge(GameState &state, float frame_time_ms) {
   const PlayerEffectiveStats &eff = state.cached_stats;
   // The recharge rate is in shield points per 30 Hz reference frame. Convert
   // measured wall-clock time to that same normalized frame unit.
-  const float rate = eff.shield_recharge *
-                     (frame_time_ms / (1000.0F / 30.0F));
+  const float rate = eff.shield_recharge * (frame_time_ms / (1000.0F / 30.0F));
   if (rate <= 0.0F) {
     return;
   }

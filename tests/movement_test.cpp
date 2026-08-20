@@ -156,7 +156,7 @@ TEST_CASE("disabled and destroyed NPCs do not regenerate") {
   CHECK(destroyed.armor_points == Catch::Approx(0.0F));
 }
 
-TEST_CASE("npc reverse absolute-sets velocity to heading * abs(desired)") {
+TEST_CASE("npc negative speed uses the physics override") {
   game::GameState state;
   game::Ship ship;
   ship.ai_desired_heading_deg = 0;
@@ -167,14 +167,14 @@ TEST_CASE("npc reverse absolute-sets velocity to heading * abs(desired)") {
   game::ShipClass cls = TestShipClass();
 
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
-  // Velocity re-imposed at abs(desired)=2 along heading 0 (up/-y); old velocity
-  // discarded.
+  // Physics override re-imposes abs(desired)=2 along heading 0 (up/-y); old
+  // velocity is discarded.
   CHECK(ship.vel_x == Catch::Approx(0.0F));
   CHECK(ship.vel_y == Catch::Approx(-2.0F));
-  // The reverse path arms the coast-through reversal timer (30..60) in open
-  // space (no current target).
-  CHECK(ship.reverse_speed_bias >= 30.0F);
-  CHECK(ship.reverse_speed_bias <= 60.0F);
+  // The reverse path arms a 30..60 ms timer, then this movement tick consumes
+  // one reference frame (33.333 ms) from it.
+  CHECK(ship.ai_maneuver_timer_ms >= 0.0F);
+  CHECK(ship.ai_maneuver_timer_ms <= 60.0F - 1000.0F / 30.0F);
 }
 
 TEST_CASE("npc inertia-less ships are pinned (vel zeroed, no motion)") {

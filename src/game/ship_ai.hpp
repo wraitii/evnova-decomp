@@ -50,14 +50,22 @@ namespace game {
 [[nodiscard]] bool NovaAiShip_IsDestroyed(const Ship &ship);
 
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget. Enters AI
-// state 0x02 (idle-template / approach station-keeping), clears the current
-// primary target, clamps the station-hold timer below zero, and records the
-// current tick count in ai_mode_start_time_ms.
+// state 0x02 (local jump-departure staging), clears the current primary target,
+// clamps the station-hold timer below zero, and records the current tick count
+// in ai_mode_start_time_ms. The state brakes while moving, then selects the
+// centre-outward mode-3/mode-4 departure path.
 void NovaAi_EnterState2ClearPrimaryTarget(Ship &ship, std::uint32_t now_ms);
 
+// Ghidra 0x00410dd0 Ship_ResetShipPrimaryAndSecondaryTargets. Resets the
+// movement/target state to idle unless the ship is in states 9 or 0xf; this is
+// the per-ship exit used by state 8 after control mode 0x0a's reverse step.
+void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship);
+
 // Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem. Places an NPC
-// at an adjacent travel stellar's entry point and arms the short reverse-
-// thrust arrival maneuver used by newly spawned ships.
+// at a destination hypergate/wormhole stellar's emergence point, seeds its
+// emergence heading, and arms the short reverse-thrust arrival maneuver used
+// by newly spawned ships. This is not normally a persistent state-0x17
+// successor in the NPC path.
 void NovaAi_EnterState15JumpOutToSystem(GameState &state,
                                         Ship &ship,
                                         std::int16_t stellar_id);
@@ -115,7 +123,10 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship);
 // the HUD/mission flavor side-effects (extortion messages, carrier-bay launch,
 // fuel-transfer chatter) are documented no-ops until those systems are
 // reconstructed.
-void NovaAi_UpdateShipState(GameState &state, Ship &ship, std::uint32_t now_ms);
+void NovaAi_UpdateShipState(GameState &state,
+                            Ship &ship,
+                            std::uint32_t now_ms,
+                            float frame_time_ms = 1000.0F / 30.0F);
 
 // Ghidra 0x00408150 Ship_ApplyShipAiControls. Transforms the ship's
 // ai_control_mode (written each frame by the state machine) into the concrete
@@ -142,7 +153,8 @@ void NovaAi_ApplyControls(GameState &state,
 void NovaAi_UpdateShipAI(GameState &state,
                          Ship &ship,
                          bool skip_heavy_ai,
-                         std::uint32_t now_ms);
+                         std::uint32_t now_ms,
+                         float frame_time_ms = 1000.0F / 30.0F);
 
 // ---------------------------------------------------------------------------
 // Ship-comm / hail predicates and AI state entries (added for the ship-comm
@@ -162,7 +174,7 @@ void NovaAi_UpdateShipAI(GameState &state,
 // ship should keep its primary target (or the player under mutual targeting):
 // active, not fire-restricted, holding an AI target and a primary target,
 // passing the cloak-aware engagement predicate, not coasting through a reversal
-// (reverse_speed_bias <= 0), and in a non-disengage AI state (not in
+// (ai_maneuver_timer_ms <= 0), and in a non-disengage AI state (not in
 // {7,9,15,10,11,5,12,18}) -- either directly on the player, on a ship that
 // targets the player, or pressed by a third ship that itself holds the player
 // or a player-targeting primary. Mirrors the original's literal
@@ -219,7 +231,7 @@ NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state);
 
 // Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerAndBrake. Enters AI
 // state 0x09 targeting the player, resets hostility/hold-timer/control, and
-// sets reverse_speed_bias -1 (coast through reversal). Called when the hail
+// sets ai_maneuver_timer_ms -1 (coast through reversal). Called when the hail
 // target agrees to come to the player's aid.
 void NovaAi_EnterState9TargetPlayerAndBrake(Ship &ship);
 

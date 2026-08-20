@@ -89,7 +89,7 @@ TEST_CASE("behavior-0x01 spawn wanders to a travel stellar when idle") {
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = -1;
   ship.travel_transfer_mode = 0;
-  ship.reverse_speed_bias = 0.0F;
+  ship.ai_maneuver_timer_ms = 0.0F;
 
   // Prime the availability refresh for this system.
   NovaTargeting_UpdateStellarAvailability(state);
@@ -524,15 +524,17 @@ TEST_CASE("state 0x15 jump-in initializer arms reverse departure") {
   CHECK(ship.ai_control_mode == 0);
   CHECK(ship.ai_secondary_target_slot == stellar_id);
   CHECK(ship.primary_target_ship_slot == -1);
-  CHECK(ship.reverse_speed_bias == Catch::Approx(60.0F));
+  CHECK(ship.ai_maneuver_timer_ms == Catch::Approx(60.0F));
   CHECK(ship.ai_station_hold_timer == Catch::Approx(-1.0F));
   CHECK(ship.ai_desired_speed == Catch::Approx(-30.0F));
   CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-3.0F));
   CHECK(ship.heading >= 0.0F);
   CHECK(ship.heading < 2.0F * 3.14159265358979323846F);
-  if (stellar->entry_heading_deg >= 0 && stellar->entry_heading_deg <= 359) {
+  if (stellar->emergence_angle_deg.has_value() &&
+      *stellar->emergence_angle_deg >= 0 &&
+      *stellar->emergence_angle_deg <= 359) {
     CHECK(ship.heading == Catch::Approx(
-                              static_cast<float>(stellar->entry_heading_deg) *
+                              static_cast<float>(*stellar->emergence_angle_deg) *
                               (3.14159265358979323846F / 180.0F)));
   }
 }
