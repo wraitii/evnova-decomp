@@ -960,3 +960,21 @@ TEST_CASE("state 0x08 drives visible NPC departure reverse") {
   CHECK(ship.pos_y < -5.0F);
   CHECK(ship.engine_glow_level == 0);
 }
+
+TEST_CASE("state 2 special departure classes skip the outward brake") {
+  GameState state;
+  game::ShipClass cls;
+  cls.flags_secondary = 0x0020;
+  state.scenario.ships.push_back(cls);
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.ship_class_id = 0;
+  ship.ai_state_code = 2;
+  ship.ai_control_mode = 1;
+  ship.pos_x = 1100.0F;
+  ship.vel_x = 10.0F;
+
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+
+  CHECK(ship.ai_control_mode == 4);
+}
