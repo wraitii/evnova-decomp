@@ -30,6 +30,11 @@ weapons, vacant-ship cleanup, and an initial NPC system-transfer slice are
 present.  Mission/fleet policy, full formation handling, specialized weapon
 guidance, and full jump presentation remain incomplete.
 
+Fire-restricted/disabled ships are not frozen in place. `Ship_HandleShip`
+(0x00433050) multiplies `vel_x`, `vel_y`, and scalar `speed` by `0.94`
+(`DAT_00575448`) each frame before position integration. Their AI is suppressed
+and they receive no new thrust orders, so they coast down gradually.
+
 ## State machine (`ai_state_code`)
 
 The names below are descriptive; a few state arms still have deferred mission

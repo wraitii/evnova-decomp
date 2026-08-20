@@ -1258,6 +1258,19 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // to the inactive-guard at the top of Ship_HandleShip in practice.
   const bool coasting = ship.ai_maneuver_timer_ms > 0.0F;
   const bool holds_course = coasting || ship.ai_state_code == 0x16;
+  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, ship);
+
+  // Ship_HandleShip (0x00433050) applies the disabled/derelict damping before
+  // integrating position. DAT_00575448 is the float 0.94: fire-restricted
+  // ships keep drifting, but lose 6% of each velocity component per frame.
+  // This is deliberately separate from AI suppression; it also applies while
+  // the ship is coasting and to the gravity-shield scalar speed.
+  if (fire_restricted) {
+    constexpr float kFireRestrictedVelocityDamp = 0.94F; // DAT_00575448
+    ship.vel_x *= kFireRestrictedVelocityDamp;
+    ship.vel_y *= kFireRestrictedVelocityDamp;
+    ship.speed *= kFireRestrictedVelocityDamp;
+  }
 
   // --- Turn toward the desired heading (continuous AI turn rate). ---
   // The original computes the shortest signed angular delta in degrees from
@@ -1295,7 +1308,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     // In particular, disabled NPCs must not restore shields and lethal hits
     // must not resurrect a ship whose armor has reached zero. The original
     // also leaves this whole movement/regen block disabled while coasting.
-    if (!NovaAiShip_IsFireRestricted(state, ship) &&
+    if (!fire_restricted &&
         !NovaAiShip_IsDestroyed(ship)) {
       const float max_shield = static_cast<float>(ship_class.base_shield);
       if (ship.shield_points < max_shield) {
@@ -1406,7 +1419,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       (ship.ai_state_code == 2 || ship.ai_state_code == 3 ||
        ship.ai_state_code == 0xb) &&
       (ship.ai_control_mode == 4 || ship.ai_control_mode == 0xd) &&
-      !NovaAiShip_IsFireRestricted(state, ship);
+      !fire_restricted;
   if (jump_spinup_control) {
     constexpr float kJumpVelocityDamp = 0.8F;      // DAT_00575488
     constexpr float kJumpProgressSubtract = 35.0F; // DAT_00575490
