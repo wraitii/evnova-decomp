@@ -41,8 +41,8 @@ void NovaTargeting_ClearDestroyedShipReferences(GameState &state,
 // ---------------------------------------------------------------------------
 // Player scanner capabilities (modType 0x1e cloak-scanner outfit family).
 // ---------------------------------------------------------------------------
-// Mirrors Outfit_HasScannerTargetUntargetableCapability (0x0046c930) and
-// Outfit_HasCloakScannerTargetCloakedCapability (0x0046ca60) for the player:
+// Ghidra 0x0046c930 Outfit_HasScannerTargetUntargetableCapability and
+// 0x0046ca60 Outfit_HasCloakScannerTargetCloakedCapability (for the player):
 // any owned outfit whose primary or alternate mod type is 0x1e (kCloakScanner)
 // and whose mod value has bit 0x04 grants targeting of "untargetable" ships
 // (class flags_secondary bit 2), bit 0x08 grants targeting through the
@@ -417,7 +417,7 @@ std::int16_t NovaTargeting_SelectNearestHostileCombatTarget(
 
 
 // ---------------------------------------------------------------------------
-// Mirrors Stellar_IsStellarActive (0x0046E3C0).
+// Ghidra 0x0046E3C0 Stellar_IsStellarActive.
 // ---------------------------------------------------------------------------
 // The original reads the StellarDef's ambient-sprite population (+0x40), its
 // sprite handle (+0x3c, negative = active/reserved) and its engagement access
@@ -429,7 +429,7 @@ bool NovaTargeting_IsStellarActive(const Stellar &st) {
 }
 
 // ---------------------------------------------------------------------------
-// Mirrors Stellar_StellarTargetsSpriteSetActive (0x0046E3F0).
+// Ghidra 0x0046E3F0 Stellar_StellarTargetsSpriteSetActive.
 // ---------------------------------------------------------------------------
 // travel_flags bit 1 is the "has control bit" marker; bit 0x80 is the engaged
 // flag. The stellar is target-active when the control bit is set and sprite
@@ -444,7 +444,7 @@ bool NovaTargeting_StellarTargetsSpriteSetActive(const Stellar &st) {
 }
 
 // ---------------------------------------------------------------------------
-// Mirrors Stellar_IsStellarUsableForTravel (0x0046E440).
+// Ghidra 0x0046E440 Stellar_IsStellarUsableForTravel.
 // ---------------------------------------------------------------------------
 bool NovaTargeting_IsStellarUsableForTravel(const Stellar &st) {
   return NovaTargeting_StellarTargetsSpriteSetActive(st) &&
@@ -452,7 +452,7 @@ bool NovaTargeting_IsStellarUsableForTravel(const Stellar &st) {
 }
 
 // ---------------------------------------------------------------------------
-// Mirrors Stellar_ComputeTravelRangeSq (0x00465610).
+// Ghidra 0x00465610 Stellar_ComputeTravelRangeSq.
 // ---------------------------------------------------------------------------
 // Base no-jump radius 1000; each owned outfit of ModType 23 (hyperspace
 // distance modifier) adds `mod_val * owned_count` to the radius; the result is
@@ -495,7 +495,7 @@ float NovaTargeting_ComputeTravelRangeSq(const GameState &state) {
 }
 
 // ---------------------------------------------------------------------------
-// Mirrors Stellar_IsStellarAdjacentToCurrentSystem (0x0040CD80).
+// Ghidra 0x0040CD80 Stellar_IsStellarAdjacentToCurrentSystem.
 // ---------------------------------------------------------------------------
 // Counts the system's populated nav entries; if there are any, true only when
 // `stellar_id` appears among them. Preserves the original's degenerate "no nav
@@ -520,7 +520,7 @@ bool NovaTargeting_IsStellarAdjacentToSystem(const System &sys,
 }
 
 // ---------------------------------------------------------------------------
-// Mirrors System_FindSystemContainingStellar (0x0046E790).
+// Ghidra 0x0046E790 System_FindSystemContainingStellar.
 // ---------------------------------------------------------------------------
 // Returns the zero-based index of the first system (visible systems preferred,
 // then all systems) whose nav list contains `stellar_id`, else -1. `stellar_id`
@@ -552,7 +552,7 @@ NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
 }
 
 // ---------------------------------------------------------------------------
-// Mirrors scope (3) of System_UpdateSystemAndStellarDisplayState (0x00432470).
+// Ghidra 0x00432470 System_UpdateSystemAndStellarDisplayState (scope 3).
 // ---------------------------------------------------------------------------
 // For the player's current system, re-derive each stellar's owning system_id
 // and is_available / hazard_marker. A stellar whose system is unset or invalid

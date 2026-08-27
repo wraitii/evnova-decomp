@@ -44,7 +44,7 @@
 
 namespace game {
 
-// Mirrors Stellar_IsStellarActive (0x0046E3C0): true when the StellarDef is
+// Ghidra 0x0046E3C0 Stellar_IsStellarActive: true when the StellarDef is
 // "active" for rendering/targeting -- it has spawned at least one sprite (a
 // non-zero sprite population) and the sprite is either presently loaded via a
 // live handle or is engaged (its engagement access counter > 0). The original
@@ -53,7 +53,7 @@ namespace game {
 // (link_a/link_b) selection and defence/target passes.
 [[nodiscard]] bool NovaTargeting_IsStellarActive(const Stellar &st);
 
-// Mirrors Stellar_StellarTargetsSpriteSetActive (0x0046E3F0): true when a
+// Ghidra 0x0046E3F0 Stellar_StellarTargetsSpriteSetActive: true when a
 // StellarDef's sprite set matches its per-stellar targeting activity state.
 // The control bit (travel_flags & 1) must be set and the stellar must be
 // sprite-active exactly when its engaged flag (travel_flags & 0x80) is set
@@ -62,12 +62,12 @@ namespace game {
 [[nodiscard]] bool
 NovaTargeting_StellarTargetsSpriteSetActive(const Stellar &st);
 
-// Mirrors Stellar_IsStellarUsableForTravel (0x0046E440): true when a StellarDef
+// Ghidra 0x0046E440 Stellar_IsStellarUsableForTravel: true when a StellarDef
 // may be a travel/land destination -- it passes StellarTargetsSpriteSetActive
 // and is not in the reserved travel-flag lane (availability_flags & 0x3000).
 [[nodiscard]] bool NovaTargeting_IsStellarUsableForTravel(const Stellar &st);
 
-// Mirrors Stellar_ComputeTravelRangeSq (0x00465610): the squared no-jump /
+// Ghidra 0x00465610 Stellar_ComputeTravelRangeSq: the squared no-jump /
 // travel-engagement radius in world px. Base 1000*1000, to which each owned
 // outfit of ModType 23 (hyperspace distance modifier) adds
 // `mod_val * owned_count`; the sum is clamped >= 0 then squared. Follows the
@@ -75,7 +75,7 @@ NovaTargeting_StellarTargetsSpriteSetActive(const Stellar &st);
 // threshold >= 0.
 [[nodiscard]] float NovaTargeting_ComputeTravelRangeSq(const GameState &state);
 
-// Mirrors Stellar_IsStellarAdjacentToCurrentSystem (0x0040CD80): returns true
+// Ghidra 0x0040CD80 Stellar_IsStellarAdjacentToCurrentSystem: returns true
 // when the given stellar id appears in `sys`'s nav list. Preserves the
 // original's quirk that a system with no nav entries at all reports "true"
 // (degenerate adjacency). `stellar_id` is a resource stellar id (0x80..).
@@ -83,7 +83,7 @@ NovaTargeting_StellarTargetsSpriteSetActive(const Stellar &st);
 NovaTargeting_IsStellarAdjacentToSystem(const System &sys,
                                         std::int16_t stellar_id);
 
-// Mirrors System_FindSystemContainingStellar (0x0046E790): returns the
+// Ghidra 0x0046E790 System_FindSystemContainingStellar: returns the
 // zero-based index of the first system whose nav list contains `stellar_id`,
 // preferring `is_visible` systems before falling back to all systems, or -1
 // when no system owns it.
@@ -91,7 +91,7 @@ NovaTargeting_IsStellarAdjacentToSystem(const System &sys,
 NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
                                           std::int16_t stellar_id);
 
-// Mirrors scope (3) of System_UpdateSystemAndStellarDisplayState (0x00432470):
+// Ghidra 0x00432470 System_UpdateSystemAndStellarDisplayState (scope 3):
 // re-derives, for the player's current system, each stellar's owning
 // `system_id` and `is_available` / `hazard_marker` flags. A stellar is called
 // available when it belongs to (or is re-homed to) a visible system. This is
@@ -111,7 +111,7 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 // class (flags_secondary bit 2) unless the player owns the scanner-target-
 // untargetable outfit. Ported from the Ghidra functions listed per helper.
 
-// Mirrors Ship_IsShipCloakVisibilityThresholdActive (0x0046c7a0): true when
+// Ghidra 0x0046c7a0 Ship_IsShipCloakVisibilityThresholdActive: true when
 // the ship's cloak fade has crossed the targeting/visibility gate. Ghidra's
 // strict comparisons use 24.0 while entering, 8.0 while clearing, and 16.0
 // for the baseline branch; the signed transition latch selects the first two.
@@ -120,7 +120,7 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 [[nodiscard]] bool NovaTargeting_ShipAtCloakVisibilityThreshold(
     const Ship &ship);
 
-// Mirrors Ship_IsShipEligibleForDistressCall (0x0040f6d0): true when the ship
+// Ghidra 0x0040f6d0 Ship_IsShipEligibleForDistressCall: true when the ship
 // is an active, non-fire-restricted combatant that could call for help -- not
 // coasting through a reversal (ai_maneuver_timer_ms <= 0), holding a primary
 // target that is either the player or a ship targeting the player, and not in
@@ -130,7 +130,7 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
                                             const Ship &ship);
 
-// Mirrors Ship_IsShipAcquirableAsTarget (0x0040faa0): pairwise predicate for
+// Ghidra 0x0040faa0 Ship_IsShipAcquirableAsTarget: pairwise predicate for
 // whether `acquirer` should validly acquire `candidate` as a target. The
 // player branch (acquirer.ship_instance_id == 0) returns true when the
 // candidate's government policy flag 0 is set or the candidate is
@@ -146,8 +146,8 @@ NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
 void NovaTargeting_ClearDestroyedShipReferences(GameState &state,
                                                 std::int16_t destroyed_slot);
 
-// Mirrors Ship_FindNextPlayerCycleTarget (0x00461bd0) / _Previous
-// (0x00461f60): returns the next (or previous) eligible ship slot after
+// Ghidra 0x00461bd0 Ship_FindNextPlayerCycleTarget / 0x00461f60 _Previous:
+// returns the next (or previous) eligible ship slot after
 // `current_slot` within `system_id`, wrapping from slot 1 (0 is the player;
 // -1 starts the search at the first/last slot). `include_combat` mirrors the
 // original's held modifier (input commands 0x1d Left-Ctrl / 0x6b 'k'): when
@@ -166,7 +166,7 @@ void NovaTargeting_ClearDestroyedShipReferences(GameState &state,
     std::int16_t system_id,
     bool include_combat);
 
-// Mirrors Ship_SelectNearestEngagedTarget (0x00462850): nearest active,
+// Ghidra 0x00462850 Ship_SelectNearestEngagedTarget: nearest active,
 // non-destroyed ship in the player's system that is visible through the cloak
 // gate (or the player has a cloak scanner), not in AI state 0x15, class
 // not untargetable (or scanner), and whose ai_target_ship_slot is NOT the
@@ -175,7 +175,7 @@ void NovaTargeting_ClearDestroyedShipReferences(GameState &state,
 [[nodiscard]] std::int16_t
 NovaTargeting_SelectNearestEngagedTarget(const GameState &state);
 
-// Mirrors Ship_SelectNearestHostileCombatTarget (0x00462bd0): stricter scan
+// Ghidra 0x00462bd0 Ship_SelectNearestHostileCombatTarget: stricter scan
 // than SelectNearestEngagedTarget -- the candidate must additionally be
 // eligible for a distress call, or locked on its primary target (which must
 // be targeting the player) in AI state 0x04, and not fire-restricted.

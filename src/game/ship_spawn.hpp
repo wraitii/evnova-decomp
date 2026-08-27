@@ -17,7 +17,7 @@
 
 namespace game {
 
-// Mirrors Ship_AllocateShipSlotInSystem (0x004254b0): finds the first inactive
+// Ghidra 0x004254b0 Ship_AllocateShipSlotInSystem: finds the first inactive
 // ship slot in [1, kMaxShips - reserved_tail), marks it active in system_id and
 // resets it to baseline defaults. Returns the allocated slot or -1 when none is
 // free (or the reserved tail consumes the whole array).

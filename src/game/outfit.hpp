@@ -101,7 +101,7 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state);
 // Single-object ownership/limit resolution: the effective owned count and the
 // maximum the player may hold for one outfit, honoring ammo-backed weapon
 // limits, ModType-27 maximum multipliers and the gun/turret slot caps.
-// Mirrors Outfit_ClampOutfitOwnedCountToCurrentLimits (0x004656a0).
+// Ghidra 0x004656a0 Outfit_ClampOutfitOwnedCountToCurrentLimits.
 struct OutfitOwnership {
   std::int16_t effective_owned = 0; // clamped owned count
   std::int16_t max_allowed = 0;     // what the player may hold
@@ -165,7 +165,7 @@ Outfit_ComputeRemainingCargoSpace(const GameState &state);
 [[nodiscard]] bool NovaOutfit_HasCloakShieldDropOnActivation(
     const GameState &state, const Ship &ship);
 
-// Mirrors Ship_GetShipFuelBurnRate (0x0046e060) for the player: the last
+// Ghidra 0x0046e060 Ship_GetShipFuelBurnRate, for the player: the last
 // owned outfit encountered with opcode 15 supplies ModVal / 30 fuel per
 // original simulation tick. The original caches this result until inventory
 // changes; this inexpensive clean-room scan is used only while afterburning.

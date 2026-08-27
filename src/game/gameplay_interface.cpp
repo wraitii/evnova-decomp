@@ -129,7 +129,7 @@ HudPanelRect HudPanel_AnchorTopRight(const HudPanelRect &panel,
 
 GameplayViewportGeometry
 GameplayGeometry_FromSurface(const HudPanelRect &surface_rect) {
-  // Mirrors NovaView_UpdateGameplayViewport (0x00488380) exactly. The cockpit
+  // Ghidra 0x00488380 NovaView_UpdateGameplayViewport (mirrored exactly). The cockpit
   // frame PICT is the shipped resource 8000 (1024x768); the game centres it in
   // the shared offscreen surface rect (DAT_00597954..5a), nudges it up/left by
   // 0x3c for small viewports, then derives the HUD origin (its centre point)

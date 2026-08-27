@@ -240,7 +240,7 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
 }
 
 // ---------------------------------------------------------------------------
-// Mirrors Stellar_FindNearestAvailableTravelStellar (0x00462db0).
+// Ghidra 0x00462db0 Stellar_FindNearestAvailableTravelStellar.
 // ---------------------------------------------------------------------------
 int NovaTravel_FindNearestTravelPoint(const GameState &state) {
   const System *sys = state.scenario.System(CurrentSystemResource(state));
@@ -276,14 +276,14 @@ int NovaTravel_FindNearestTravelPoint(const GameState &state) {
 }
 
 // ---------------------------------------------------------------------------
-// Mirrors Stellar_CanShipInitiateJumpSequence (0x00415b80).
+// Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence.
 // ---------------------------------------------------------------------------
 bool NovaTravel_CanStartJump(const GameState &state) {
   // Player-side convenience wrapper around the faithful per-ship gate.
   return NovaTravel_CanShipInitiateJumpSequence(state, state.player);
 }
 
-// Mirrors Stellar_CanShipInitiateJumpSequence (0x00415b80) for an arbitrary
+// Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence, for an arbitrary
 // (NPC) ship. Gates on the ship's OWN class fuel capacity being at least one
 // jump (kJumpFuelCost) -- NOT the player's, which is what the old NPC AI call
 // sites wrongly used. The original further blocks while the ship is locked to

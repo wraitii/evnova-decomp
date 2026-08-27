@@ -402,7 +402,7 @@ float NovaOutfit_ComputeIonizationDecayRate(const GameState &state,
 // ---------------------------------------------------------------------------
 // Ownership limiting
 // ---------------------------------------------------------------------------
-// Mirrors Outfit_ClampOutfitOwnedCountToCurrentLimits (0x004656a0): resolve
+// Ghidra 0x004656a0 Outfit_ClampOutfitOwnedCountToCurrentLimits: resolve
 // the effective owned count and max-allowed for one outfit, honoring (in
 // order) ammo-backed weapon limits, ModType-27 (kIncreaseMax) maximum
 // multipliers, and the gun/turret slot caps. `outfit_resource_id` is the
@@ -620,8 +620,8 @@ std::int16_t Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state) {
   return static_cast<std::int16_t>(total);
 }
 
-// Player fleet cargo capacity = the player's own outfit-derived capacity (no
-// NPC escorts yet). Mirrors Outfit_ComputeFleetCargoCapacity (0x00469760).
+// Ghidra 0x00469760 Outfit_ComputeFleetCargoCapacity. Player fleet cargo
+// capacity = the player's own outfit-derived capacity (no NPC escorts yet).
 std::int16_t Outfit_ComputePlayerFleetCargoCapacity(const GameState &state) {
   return static_cast<std::int16_t>(
       Outfit_ComputePlayerEffectiveStats(state).cargo_capacity);

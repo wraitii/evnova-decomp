@@ -13,7 +13,7 @@ machine-checkable; the items below are the remaining manual work.
 | Citation / divergence-marker format | ✅ settled, documented in AGENTS.md |
 | Stale "Phase N" / narration comments | 🟧 non-ship_ai done; ship_ai deferred to item 1 |
 | Comment-only `if` blocks in ship_ai.cpp | ☐ open (deferred, item 1) |
-| Divergence-marker sweep (existing TODO(decomp)s) | 🟧 2 converted; rest confirmed unported-scope; citations open |
+| Divergence-marker sweep (existing TODO(decomp)s) | ✅ complete (77 markers reviewed; 2 deliberate-skips converted; citations normalized) |
 | 0x004b8ed0 color-remap gameplay question | ✅ resolved — remap is dead code at runtime |
 
 Verification: `python3 tools/ref_audit.py` — rerun after any rename (code,
@@ -44,7 +44,7 @@ offered", "may fire right now", "for now", "def no longer exists") and were
 left. ship_ai.cpp's "Phase 5/7/8" narration is deferred to item 1 (it is
 intertwined with the stale-deferral cleanup there).
 
-### 3. Divergence-marker sweep
+### 3. Divergence-marker sweep — ✅ complete
 Format is settled in AGENTS.md: plain `TODO(decomp)` = unported scope,
 `TODO(decomp(0xaabbccdd)) skipped: <reason>` = deliberate skip of known
 behavior. Remaining work: sweep the ~77 existing TODO(decomp) markers into
@@ -60,9 +60,21 @@ to the deliberate-skip form:
 - government.cpp `Government_IsShipEligibleForGovernmentAid` +0x83 gate →
   `TODO(decomp(0x0040fd20)) skipped:` (no clean-room +0x83 field).
 
-Still open: normalize bare `// 0x…` and `Mirrors X (0x…)` citations to
-`// Ghidra 0x… Name.` (~44 `Mirrors` + ~48 bare `// 0x` sites; many are
-mid-sentence parenthetical data references that need no change).
+Citation normalization (this pass):
+- All primary-citation `Mirrors X (0x…)` plate comments (directly above a
+  ported function, in targeting.hpp/.cpp, travel.hpp/.cpp, outfit.hpp/.cpp,
+  asteroid.hpp/.cpp, ship_spawn.hpp, gameplay_interface.cpp) normalized to
+  `// Ghidra 0x… Name.` (descriptions preserved).
+- Bare `// 0x…` head annotations in landed_store.hpp normalized to
+  `// Ghidra 0x…`.
+- Left as-is (per “many need no change”): mid-prose `Mirrors`/`// 0x`
+  references and `DAT_…`/data-address citations (pilot_file.hpp,
+  hud_renderer.cpp, spaceflight.cpp, ship_ai.cpp, preferences.hpp,
+  preferences.cpp, starmap.cpp, landed_store.cpp, brgr_archive.cpp), and the
+  module headers already phrased as “mirroring Ghidra 0x… Name.”
+  (new_pilot_flow.hpp, spaceflight.hpp, intro_cinematic.hpp).
+
+`ref_audit.py` clean after the sweep (0 drift, 0 missing, 0 non-function).
 
 ### 4. 0x004b8ed0 color-remap tail — ✅ resolved
 `Resource_LoadPictAsImage` omits the optional post-load color remap

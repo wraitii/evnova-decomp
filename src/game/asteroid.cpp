@@ -117,7 +117,7 @@ int NovaAsteroid_SpawnRecord(GameState &state,
   return static_cast<int>(slot);
 }
 
-// Mirrors Asteroid_Spawn (0x00421830): allocates
+// Ghidra 0x00421830 Asteroid_Spawn: allocates
 // one asteroid / drift debris record into a free pool slot. `place_in_ring ==
 // 0` scatters the target around the player (a [-radius*0.5, +radius*0.5) band
 // with a random velocity), otherwise it parks the target along an axis-aligned
@@ -245,7 +245,7 @@ int NovaAsteroid_Spawn(GameState &state, bool place_in_ring) {
   return static_cast<int>(slot);
 }
 
-// Mirrors Asteroid_InitSystem (0x004216B0):
+// Ghidra 0x004216B0 Asteroid_InitSystem:
 // restores the current system's asteroid / drift-debris population on
 // spaceflight entry / cross-system travel. When the system declares no
 // asteroids (asteroid_count < 1) it sets the NoAsteroids latch
