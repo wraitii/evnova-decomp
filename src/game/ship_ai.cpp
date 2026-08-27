@@ -6,18 +6,20 @@
 //    branch of Outfit_ShipHasGravityShieldOutfit (0x0046df70) via
 //    NovaShip_HasGravityShield, and "effective stats" are the class base
 //    values (the player's outfit/ionization damping is not modelled yet).
-//  * Several per-mode turn/thrust scale constants (the _DAT_005750xx globals)
-//    were provisional; they have since been decoded from the raw bytes and
-//    typed + pre-commented in the Ghidra DB (2025-08-09). The movement modes
-//    (1/2/3/4/0xd) now read the real values; combat-mode constants are only
-//    referenced in comments until those modes are ported.
+//  * The per-mode turn/thrust scale constants (the _DAT_005750xx globals) are
+//    decoded from the raw bytes and typed + pre-commented in the Ghidra DB.
+//    The movement and combat modes read the real values; still-unused
+//    freeflight-anchor constants remain commented-only.
 //  * HUD/mission flavor side-effects (overlay messages, extortion prompts,
 //    fuel-transfer chatter, carrier-bay launch) are documented no-ops until
 //    those systems land; combat-heavy branches that depend on the not-yet-
-//    reconstructed disable/weapon systems are conservatively gated.
-//  * "Wander" is the reintegrated value of Phase 3/4: Behavior 0x01 + state 0/1
-//    makes a ship pick a random adjacent travel stellar and steer toward it,
-//    which is the visible "make them move around the system" milestone.
+//    reconstructed disable systems are conservatively gated. NPC weapon-bank
+//    selection is ported (the NovaAi_Select* helpers); point-defense
+//    auto-select, inbound-threat gating, and formation-offset mirroring remain
+//    TODO(decomp).
+//  * "Wander": Behavior 0x01 + state 0/1 makes a ship pick a random adjacent
+//    travel stellar and steer toward it -- the visible "make them move around
+//    the system" baseline.
 
 #include "ship_ai.hpp"
 
@@ -33,6 +35,7 @@
 #include "spaceflight.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
+#include "weapon.hpp"
 
 namespace game {
 
@@ -141,6 +144,7 @@ constexpr float kEscortHalfSpanPx = 75.0F;
 
 constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
 constexpr float kFullCircleDeg = 360.0F;
+
 // Frame_MeasureFrameTiming multiplies elapsed milliseconds by 0.03 before
 // publishing _g_avg_frame_time_ms, so the AI consumes normalized simulation
 // ticks (about 1.0 at 30 Hz), not literal milliseconds.
@@ -220,8 +224,8 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
   ship.ai_station_hold_timer = -999.0F;
   ship.waypoint_arrival_marker_a = 1;
   ship.waypoint_arrival_marker_b = 0;
-  ship.turn_bank_animation_phase = -static_cast<float>(
-      std::uniform_int_distribution<int>{0, 9}(state.rng));
+  ship.turn_bank_animation_phase =
+      -static_cast<float>(std::uniform_int_distribution<int>{0, 9}(state.rng));
   // ShipState +0xC8E8 (weapon-sprite flash) is not represented in the
   // clean-room Ship yet; allocation already supplies its zero default.
 }
@@ -1521,19 +1525,17 @@ void NovaAi_UpdateShipState(GameState &state,
     // outward thrust arm. The "stopped" test uses the same 0.35 px/tick
     // threshold as the original (_DAT_00575080); special-loadout classes can
     // bypass that brake as described below.
-    const ShipClass *cls =
-        state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
     // Ship_CheckSpecialLoadoutCapability (0x0046d080) bypasses the brake for
     // classes flagged 0x20 in Flags2. Its outfit-based capability (load id
     // 0x25) is not represented in the NPC loadout model yet.
     const bool special_departure =
         cls != nullptr && (cls->flags_secondary & 0x0020U) != 0U;
-    if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <=
-        kCentreRangeSq) {
+    if (SquaredDistance(0.0F, 0.0F, ship.pos_x, ship.pos_y) <= kCentreRangeSq) {
       ship.ai_control_mode = 3;
-    } else if (special_departure ||
-               (std::abs(ship.vel_x) < kVerySlowSpeed &&
-                std::abs(ship.vel_y) < kVerySlowSpeed)) {
+    } else if (special_departure || (std::abs(ship.vel_x) < kVerySlowSpeed &&
+                                     std::abs(ship.vel_y) < kVerySlowSpeed)) {
       ship.ai_control_mode = 4;
     } else {
       ship.ai_control_mode = 1;
@@ -1653,7 +1655,8 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Escort/follow primary at range (state 7). ----
   if (ship.ai_state_code == 7) {
-    if (ship.primary_target_ship_slot == -1 || ship.ai_maneuver_timer_ms > 0.0F) {
+    if (ship.primary_target_ship_slot == -1 ||
+        ship.ai_maneuver_timer_ms > 0.0F) {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
       return;
@@ -1756,8 +1759,8 @@ void NovaAi_UpdateShipState(GameState &state,
   // ---- Attack a stellar system (state 0x12): keep an engagement distance.
   // ----
   if (ship.ai_state_code == 0x12) {
-    // No weapon banks are reconstructed yet (Phase 5), so the ship holds its
-    // current range and lets the player/combat systems advance it later.
+    // Weapon banks are selected by the control modes; this state just holds
+    // its engagement distance and lets the combat systems advance it later.
     if (std::abs(ship.vel_x) >= kVerySlowSpeed ||
         std::abs(ship.vel_y) >= kVerySlowSpeed) {
       ship.ai_control_mode = 1;
@@ -2069,8 +2072,7 @@ void NovaAi_ApplyControls(GameState &state,
 
   case 0x16:
     // Jump-out / retreat: steer at the target stellar's map coordinates and
-    // select a weapon when aligned (weapon selection deferred, Phase 5). The
-    // original never thrusts in this mode.
+    // select a general weapon once aligned. The original never thrusts here.
     if (!fire_restricted && ship.ai_secondary_target_slot >= 0x80) {
       const Stellar *st =
           StellarByResourceId(state, ship.ai_secondary_target_slot);
@@ -2081,7 +2083,9 @@ void NovaAi_ApplyControls(GameState &state,
                        static_cast<float>(st->pos_x),
                        static_cast<float>(st->pos_y)));
         if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
-          // Weapon_SelectGeneralWeaponBank (deferred, Phase 5).
+          // Ghidra 0x00408150 mode 0x16 calls Weapon_SelectGeneralWeaponBank
+          // (0x0040d910) once aligned.
+          NovaAi_SelectGeneralWeaponBank(state, ship);
         }
       }
     }
@@ -2092,7 +2096,7 @@ void NovaAi_ApplyControls(GameState &state,
     // Chase the formation leader: head at the point 15x max-speed in front
     // of the leader's heading (Math_AddPolarVelocity on the leader position)
     // and thrust within turn+20 deg. With no leader the original falls back
-    // to control mode 0; state-4 guided-weapon selection is deferred.
+    // to control mode 0; state-4 guided-weapon selection arms a guided bank.
     if (fire_restricted) {
       break;
     }
@@ -2112,7 +2116,10 @@ void NovaAi_ApplyControls(GameState &state,
       ship.ai_forward_thrust_cmd = eff_thrust;
     }
     if (ship.ai_state_code == 4 && ship.primary_target_ship_slot != -1) {
-      // Weapon_SelectGuidedWeaponBankForPrimaryTarget (deferred, Phase 5).
+      // Ghidra 0x00408150 mode 0x12 calls
+      // Weapon_SelectGuidedWeaponBankForPrimaryTarget (0x0040d220) for state
+      // 4 with a primary target.
+      NovaAi_SelectGuidedWeaponBankForPrimaryTarget(state, ship);
     }
     break;
   }
@@ -2330,9 +2337,10 @@ void NovaAi_ApplyControls(GameState &state,
     // the REVERSE of every other combat mode -- so mode 5 steers away from
     // the target (the close-range "attack while backing off" strafe; the
     // state machine only selects it within the 251 px combat station range).
-    // Formation-offset mirroring and the weapon-bank select for states 3/4 are
-    // deferred. Close (165 px/axis) + the +0xBD latch breaks off to a boost
-    // (0x11); the latch has no producer yet so the transition is inert.
+    // Formation-offset mirroring is deferred; the weapon-bank select for
+    // states 3/4 arms the turret-ish current-target bank. Close (165 px/axis)
+    // + the +0xBD latch breaks off to a boost (0x11); the latch has no
+    // producer yet so the transition is inert.
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
       break;
     }
@@ -2354,7 +2362,9 @@ void NovaAi_ApplyControls(GameState &state,
       ship.ai_desired_speed = 0.0F;
     }
     if (ship.ai_state_code == 3 || ship.ai_state_code == 4) {
-      // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+      // Ghidra 0x00408150 mode 5 calls Weapon_SelectWeaponBankForCurrentTarget
+      // (0x0040ce00) for states 3/4.
+      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
     }
     if (ship.ai_brake_to_boost_latch != 0 &&
         (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange ||
@@ -2368,7 +2378,7 @@ void NovaAi_ApplyControls(GameState &state,
     // Combat pursuit / lead-in: steer at the primary target (predictive aim
     // when a weapon bank is live is deferred, so the straight bearing stands
     // in), thrust once within turn+15 deg. A second turn*3 alignment gate
-    // selects direct-fire weapons (deferred) and, for gravity-shield ships
+    // arms a direct-fire bank and, for gravity-shield ships
     // within 100 px, throttles the cruise down to the target's scalar speed.
     // Break-off: at/inside 165 px (or any distance for non-shield ships) the
     // evasive-break order fires -- a player target must beat the (unmodelled)
@@ -2392,13 +2402,13 @@ void NovaAi_ApplyControls(GameState &state,
     // straight bearing too, matching the original mode-6 branch.
     ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
         state, ship, target, ship.active_weapon_bank_slot);
-    // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
     if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
       ship.ai_forward_thrust_cmd = eff_thrust;
       ship.ai_desired_speed = 0.0F;
     }
     if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
-      // Weapon_SelectDirectFireWeaponBankForPrimaryTarget (deferred).
+      // Ghidra 0x00408150 mode 6 arms a direct-fire bank within turn*3.
+      NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
       const bool gravity_shield =
           cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
       if (gravity_shield && std::abs(ship.pos_x - target.pos_x) < 100.0F &&
@@ -2465,7 +2475,7 @@ void NovaAi_ApplyControls(GameState &state,
     // Evasive break: fly the stored evasive heading (+/-135 deg) at 1.5x
     // thrust with cruise 0, then drop back to combat pursuit (6) once the
     // hull is within turn*3 deg of it (or, for gravity-shield ships, once the
-    // target is beyond 165 px). Weapon selection at close range is deferred.
+    // target is beyond 165 px). Arms the current-target bank while close.
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
       break;
     }
@@ -2474,9 +2484,11 @@ void NovaAi_ApplyControls(GameState &state,
     ship.ai_desired_heading_deg = ship.ai_evasive_heading_deg;
     ship.ai_forward_thrust_cmd = eff_thrust * kEvasiveThrustFactor;
     ship.ai_desired_speed = 0.0F;
-    if (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange ||
+    if (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange &&
         std::abs(ship.pos_y - target.pos_y) < kCombatCloseRange) {
-      // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+      // Ghidra 0x00408150 mode 0x10 arms the current-target bank only while
+      // both axes stay within 165 px (the original uses AND, not OR).
+      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
     }
     const bool gravity_shield =
         cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
@@ -2496,7 +2508,7 @@ void NovaAi_ApplyControls(GameState &state,
 
   case 0x11: {
     // Boost to target: over-speed cruise (2.75x thrust, 1.8x max speed) on
-    // the straight bearing, weapon selection once aligned (deferred), and a
+    // the straight bearing, weapon selection at alignment, and a
     // return to combat pursuit (6) inside 165 px (or a 1-in-100 roll further
     // out). Formation-offset mirroring is deferred (Phase 8).
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
@@ -2520,13 +2532,15 @@ void NovaAi_ApplyControls(GameState &state,
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
     if (dx < kCombatCloseRange && dy < kCombatCloseRange) {
-      // Weapon_SelectWeaponBankForCurrentTarget + direct-fire select
-      // (deferred, Phase 5).
+      // Ghidra 0x00408150 mode 0x11 selects the turret-ish current bank first,
+      // then direct-fire within turn*3 while it is close.
+      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
       if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
-        // Weapon_SelectDirectFireWeaponBankForPrimaryTarget (deferred).
+        NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
       }
     } else if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
-      // Weapon_SelectGuidedWeaponBankForPrimaryTarget (deferred).
+      // Far: within turn*3 the original arms a guided bank.
+      NovaAi_SelectGuidedWeaponBankForPrimaryTarget(state, ship);
     }
     if (dx < kCombatCloseRange && dy < kCombatCloseRange) {
       ship.ai_control_mode = 6;
@@ -2541,8 +2555,9 @@ void NovaAi_ApplyControls(GameState &state,
 
   case 7: {
     // Combat strafe / guided approach: aim (predictive when a weapon bank is
-    // live; deferred -> straight bearing), select weapons at the turn*3 gate
-    // (deferred), thrust at the turn*4 gate, and break off to a boost (0x11)
+    // live; deferred -> straight bearing), select direct-fire/current banks at
+    // the turn*3 gate and a guided bank at the turn*4 thrust gate, then break
+    // off to a boost (0x11)
     // beyond 82 px/axis when the 0xBD latch is set and the target bearing is
     // within 31 deg. Formation-offset mirroring is deferred (Phase 8).
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
@@ -2568,13 +2583,17 @@ void NovaAi_ApplyControls(GameState &state,
     ship.ai_desired_heading_deg = NovaAi_AimWeaponPredictive(
         state, ship, target, ship.active_weapon_bank_slot);
     if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
-      // Weapon_SelectDirectFireWeaponBankForPrimaryTarget +
-      // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+      // Ghidra 0x00408150 mode 7 selects direct-fire then the current-target
+      // bank within turn*3.
+      NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
+      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
     }
     if (std::abs(heading_delta_deg()) < eff_turn_deg * 4.0F) {
       ship.ai_forward_thrust_cmd = eff_thrust;
       ship.ai_desired_speed = 0.0F;
-      // Weapon_SelectGuidedWeaponBankForPrimaryTarget (deferred).
+      // Ghidra 0x00408150 mode 7 arms a guided bank within turn*4, alongside
+      // the thrust/scalar-speed write.
+      NovaAi_SelectGuidedWeaponBankForPrimaryTarget(state, ship);
     }
     if (ship.ai_brake_to_boost_latch != 0 &&
         std::abs(ship.pos_x - target.pos_x) > kBreakOuterGatePx &&
@@ -2904,8 +2923,9 @@ void NovaAi_ApplyControls(GameState &state,
     // (reverse of the velocity bearing, or a predictive aim when a weapon
     // bank is live -- deferred to the straight bearing), thrust once within
     // turn+1 deg; gravity-shield ships reverse-thrust. Once slow, damp by 0.95
-    // and steer at the target, selecting weapons within turn*3 deg (deferred).
-    // The carrier-bay launch (Ship_LaunchShipFromCarrierBay) is deferred.
+    // and steer at the target, arming direct-fire/guided/current banks within
+    // turn*3 deg. The carrier-bay launch (Ship_LaunchShipFromCarrierBay) is
+    // deferred.
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
       break;
     }
@@ -2931,10 +2951,14 @@ void NovaAi_ApplyControls(GameState &state,
       ship.ai_desired_heading_deg = static_cast<std::int16_t>(
           BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
       if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
-        // Weapon_SelectDirectFireWeaponBankForPrimaryTarget +
-        // Weapon_SelectGuidedWeaponBankForPrimaryTarget (deferred, Phase 5).
+        // Ghidra 0x00408150 mode 0xe arms direct-fire then guided within
+        // turn*3 once the ship is slow enough.
+        NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
+        NovaAi_SelectGuidedWeaponBankForPrimaryTarget(state, ship);
       }
-      // Weapon_SelectWeaponBankForCurrentTarget (deferred, Phase 5).
+      // Ghidra 0x00408150 mode 0xe also runs the turret-ish current-target
+      // select each slow frame.
+      NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
     }
     // Ship_LaunchShipFromCarrierBay (deferred).
     break;
@@ -2968,8 +2992,9 @@ void NovaAi_ApplyControls(GameState &state,
     // Scripted velocity-match: ramp velocity toward the asteroid-pool slot-0
     // target velocity at 1.5x thrust per frame-time unit, then creep position
     // within the 150/80 px/axis windows (the original's banded weave). The
-    // lead-velocity aim + unguided-weapon merge are deferred, so the straight
-    // bearing at the target stands in for the merge gate.
+    // unguided weapon is armed at the alignment gate; the lead-velocity aim
+    // (Ship_AimWeaponLeadVelocity) remains deferred, so the straight bearing
+    // at the target stands in for the merge gate.
     if (!fire_restricted) {
       const AsteroidState &target = state.asteroid_pool[0];
       const float step = eff_thrust * kEvasiveThrustFactor * elapsed_ticks;
@@ -3018,7 +3043,9 @@ void NovaAi_ApplyControls(GameState &state,
           ship.pos_x, ship.pos_y, target.target_pos_x, target.target_pos_y));
       if (std::abs(heading_delta_deg()) < eff_turn_deg + kScriptAlignAddend) {
         ship.primary_target_ship_slot = -1;
-        // Weapon_SelectUnguidedWeaponBank (deferred, Phase 5).
+        // Ghidra 0x00408150 mode 0x14 clears the primary target and arms an
+        // unguided bank once aligned at the asteroid target.
+        NovaAi_SelectUnguidedWeaponBank(state, ship);
       }
     }
     break;
@@ -3523,6 +3550,460 @@ void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
   ship.ai_state_code = 4;
   ship.ai_secondary_target_slot = -1;
   ship.primary_target_ship_slot = 0;
+}
+
+namespace {
+
+// Math_ShortestAngleDeltaDeg (0x0046b210): the [0,180] magnitude of the
+// shortest angular separation between two game bearings.
+std::int16_t ShortestAngleDeltaDeg(std::int16_t a, std::int16_t b) {
+  int diff = static_cast<int>(a) - static_cast<int>(b);
+  int mag = (diff ^ (diff >> 31)) - (diff >> 31); // abs
+  if ((a > 0xb3) != (b > 0xb3)) {
+    mag = 0x168 - mag;
+  }
+  if (mag > 0xb4) {
+    mag = 0x168 - mag;
+  }
+  return static_cast<std::int16_t>(mag);
+}
+
+// Ghidra 0x0046b360 Weapon_IsWeaponArcAllowed. Whether the bank's weapon may
+// fire toward `target_bearing` given the ship's heading and class: front
+// (<46 deg), side (<136 deg) and rear sectors are allowed by weapon
+// flags_primary 0x1000/0x2000/0x4000, forced true by the matching
+// ship-class capability bits.
+bool NovaAi_WeaponArcAllowed(const ShipClass &ship_class,
+                             const Weapon &weapon,
+                             std::int16_t heading_deg,
+                             std::int16_t target_bearing_deg) {
+  const std::int16_t delta =
+      ShortestAngleDeltaDeg(heading_deg, target_bearing_deg);
+  bool allowed;
+  if (delta < 0x2e) {
+    allowed = (weapon.flags & 0x1000U) != 0U;
+    if ((ship_class.capability_flags & 0x1000U) != 0U) {
+      allowed = true;
+    }
+  } else if (delta < 0x88) {
+    allowed = (weapon.flags & 0x2000U) != 0U;
+    if ((ship_class.capability_flags & 0x2000U) != 0U) {
+      allowed = true;
+    }
+  } else {
+    allowed = (weapon.flags & 0x4000U) != 0U;
+    if ((ship_class.capability_flags & 0x4000U) != 0U) {
+      allowed = true;
+    }
+  }
+  return allowed;
+}
+
+// Ghidra 0x0046c930 / 0x0046ca60 (shared scan). True when `ship` owns any
+// cloak-scanner outfit (modType 0x1E) whose effect ModVal carries `flag`
+// (0x04 = allow targeting of untargetable ships, 0x08 = allow targeting of
+// cloaked ships). The player path mirrors the targeting.cpp ScannerCapabilities
+// port (same 0x1e scan across primary+alt mod slots); this adds the NPC
+// ship-class default-outfit scan the player-only targeting port omits.
+bool NovaAi_OutfitHasCloakScannerCapability(const GameState &state,
+                                            const Ship &ship,
+                                            std::uint16_t flag) {
+  const auto outfit_has = [flag](const Outfit &o) {
+    const auto one = [flag](std::int16_t type, std::int16_t val) {
+      return type == 0x1E && (static_cast<std::uint16_t>(val) & flag) != 0U;
+    };
+    return one(o.mod_type, o.mod_val) ||
+           one(o.alt_mod_types[0], o.alt_mod_vals[0]) ||
+           one(o.alt_mod_types[1], o.alt_mod_vals[1]) ||
+           one(o.alt_mod_types[2], o.alt_mod_vals[2]);
+  };
+  if (ship.ship_instance_id == 0) {
+    const auto &owned = state.inventory.outfit_owned_count;
+    const auto &outfits = state.scenario.outfits;
+    for (std::size_t id = 0; id < owned.size() && id < outfits.size(); ++id) {
+      if (owned[id] > 0 && outfit_has(outfits[id])) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const ShipClass *cls = ShipClassFor(state, ship);
+  if (cls == nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0; i < cls->default_outfit_ids.size(); ++i) {
+    if (cls->default_outfit_counts[i] <= 0) {
+      continue;
+    }
+    const Outfit *o = state.scenario.Outfit(cls->default_outfit_ids[i]);
+    if (o != nullptr && outfit_has(*o)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+// Ghidra 0x0040ce00 Weapon_SelectWeaponBankForCurrentTarget. Turret-ish bank
+// selection for the current primary target: scans fireable mode-3/4/7/8
+// banks in the allowed arc and range, scores by mass/energy damage, and arms
+// the best (energy-preferred when the target still has shields).
+void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
+  if (NovaAiShip_IsFireRestricted(state, ship)) {
+    return;
+  }
+  // TODO(decomp(0x0043a310)) skipped: the head-of-function
+  // Weapon_SelectTurretTargetWithinArc point-defense auto-selection (which
+  // can fire a turret shot this frame and pick the target itself) is not
+  // reconstructed; turret banks still fire through the normal firing path.
+  const std::int16_t target_slot = ship.primary_target_ship_slot;
+  if (target_slot < 0 ||
+      !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+    return;
+  }
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  if (!target.is_active) {
+    return;
+  }
+  const ShipClass *target_class = ShipClassFor(state, target);
+  if (target_class == nullptr || (target_class->flags_secondary & 4U) != 0U) {
+    return; // class-untargetable
+  }
+  if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, target, ship)) {
+    return;
+  }
+  const ShipClass *ship_class = ShipClassFor(state, ship);
+  const float heading_deg_f = ship.heading / kDegToRad;
+  const std::int16_t heading_deg =
+      static_cast<std::int16_t>(std::lround(heading_deg_f));
+
+  std::int16_t best_mass_bank = -1;
+  std::int16_t best_mass = 0;
+  std::int16_t best_energy_bank = -1;
+  std::int16_t best_energy = 0;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
+    if (bs.ammo <= 0 || bs.cooldown > 0.0F) {
+      continue;
+    }
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (weapon == nullptr) {
+      continue;
+    }
+    const int mode = weapon->weapon_mode_code;
+    const bool turret = mode == 3 || mode == 4 || mode == 7 || mode == 8;
+    if (!turret) {
+      continue;
+    }
+    if ((weapon->flags_secondary & 0x400U) !=
+        (target_class->capability_flags & 0x400U)) {
+      continue;
+    }
+    const std::int16_t bearing = static_cast<std::int16_t>(
+        BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
+
+    // The mode-7/8 rear/turret arc check sets the barrier; then
+    // Weapon_IsWeaponArcAllowed CLEARS it when the bank is allowed in the
+    // facing arc (the original's inversion for these turret weapons).
+    bool barrier = false;
+    if (mode == 7 || mode == 8) {
+      int delta = 0;
+      if (mode == 7) {
+        // Round the continuous |bearing - heading| difference before the
+        // mod-360 wrap, exactly as the original.
+        delta =
+            std::lround(std::abs(static_cast<float>(bearing) - heading_deg_f));
+      } else { // mode 8: reject the bank behind the hull
+        delta = std::abs(static_cast<int>(bearing) -
+                         ((heading_deg + 0xb4) % 0x168));
+      }
+      barrier = (delta % 0x168) < 0x2e;
+    } else {
+      barrier = true;
+    }
+    if (ship_class != nullptr &&
+        NovaAi_WeaponArcAllowed(*ship_class, *weapon, heading_deg, bearing)) {
+      barrier = false;
+    }
+    if (barrier) {
+      barrier = IsTurretWeaponInTargetRange(*weapon, ship, target);
+    }
+    if (!barrier || !NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+      continue;
+    }
+    const std::int16_t mass = weapon->mass_damage < 1 ? 1 : weapon->mass_damage;
+    if (best_mass_bank == -1 || mass > best_mass) {
+      best_mass_bank = bank;
+      best_mass = mass;
+    }
+    const std::int16_t energy =
+        weapon->energy_damage < 1 ? 1 : weapon->energy_damage;
+    if (best_energy_bank == -1 || energy > best_energy) {
+      best_energy_bank = bank;
+      best_energy = energy;
+    }
+  }
+  std::int16_t selected = best_mass_bank;
+  if (target.shield_points >= 0.0F) {
+    selected = best_energy_bank;
+  }
+  if (selected != -1) {
+    ship.active_weapon_bank_slot = selected;
+    ship.ai_fire_trigger_latch = 1;
+  }
+}
+
+// Ghidra 0x0040d220 Weapon_SelectGuidedWeaponBankForPrimaryTarget. Arms the
+// first fireable guided (mode-1) bank that can track the primary target
+// within the (0.95-scaled) intercept range; applies the scanner-untargetable
+// and cloaked-target capability gates.
+void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
+                                                   Ship &ship) {
+  const std::int16_t target_slot = ship.primary_target_ship_slot;
+  if (target_slot < 0 ||
+      !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+    return;
+  }
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  if (ship.current_system_id != target.current_system_id || !target.is_active) {
+    return;
+  }
+  const ShipClass *target_class = ShipClassFor(state, target);
+  if (target_class != nullptr && (target_class->flags_secondary & 4U) != 0U &&
+      !NovaAi_OutfitHasCloakScannerCapability(state, ship, 0x04U)) {
+    return; // class-untargetable and no targeting-scanner outfit
+  }
+  if (NovaTargeting_ShipAtCloakVisibilityThreshold(target) &&
+      !NovaAi_OutfitHasCloakScannerCapability(state, ship, 0x08U)) {
+    return; // cloaked target, no cloak-scanner outfit
+  }
+  // TODO(decomp(0x004221d0)) skipped: Ship_IsInboundThreatExceedingDefenses
+  // (decline guided selection when the target's inbound_weapon_threat exceeds
+  // its shield+armor*1.05 budget) is not modelled -- no inbound-threat field
+  // exists -- so the original's early-return under heavy incoming fire is not
+  // reproduced.
+  const ShipClass *ship_class = ShipClassFor(state, ship);
+  const float distance_sq =
+      SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+
+  std::int16_t chosen = -1;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (weapon == nullptr || bs.ammo <= 0) {
+      continue;
+    }
+    const bool track_ok =
+        ship_class != nullptr && WeaponCanTrackTarget(*ship_class, *weapon);
+    if (weapon->weapon_mode_code != 1 || !track_ok) {
+      continue;
+    }
+    // 0x400-capability match and Weapon_CanFireWeaponBank gate.
+    if ((weapon->flags_secondary & 0x400U) !=
+            (target_class->capability_flags & 0x400U) ||
+        !NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+      continue;
+    }
+    // Guided intercept-range gate: the original reuses the mode-1 0.95 damp
+    // (DOUBLE_005750f0) as the scale against range_scalar^2.
+    if (distance_sq * 0.95F > weapon->range_scalar * weapon->range_scalar) {
+      continue;
+    }
+    chosen = bank;
+    break; // original takes the first qualifying bank
+  }
+  if (chosen != -1) {
+    const WeaponBankState bs = ReadWeaponBank(state, ship, chosen);
+    if (bs.cooldown <= 0.0F) {
+      ship.active_weapon_bank_slot = chosen;
+      ship.ai_fire_trigger_latch = 1;
+    }
+  }
+}
+
+// Ghidra 0x0040d470 Weapon_SelectDirectFireWeaponBankForPrimaryTarget. Arms
+// the best in-range direct-fire bank (modes -1/0/6, or mode 1 when
+// allow_guided_mode) scored by mass/energy damage; mode 6 applies a
+// blast-radius placement gate. When nothing was armed and no non-guided bank
+// was seen, retries once with guided handling allowed.
+void NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(GameState &state,
+                                                       Ship &ship,
+                                                       bool allow_guided_mode) {
+  const std::int16_t target_slot = ship.primary_target_ship_slot;
+  if (target_slot < 0 ||
+      !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+    return;
+  }
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  if (ship.current_system_id != target.current_system_id || !target.is_active) {
+    return;
+  }
+  const ShipClass *target_class = ShipClassFor(state, target);
+  if (target_class == nullptr ||
+      !NovaAiShip_CanEngageTargetUnderCloakRules(state, target, ship)) {
+    return;
+  }
+
+  bool has_non_guided = false;
+  std::int16_t best_mass_bank = -1;
+  std::int16_t best_mass = 0;
+  std::int16_t best_energy_bank = -1;
+  std::int16_t best_energy = 0;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
+    if (bs.ammo <= 0) {
+      continue;
+    }
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (weapon == nullptr) {
+      continue;
+    }
+    const int mode = weapon->weapon_mode_code;
+    const bool mode_ok = mode == -1 || mode == 0 || mode == 6 ||
+                         (mode == 1 && allow_guided_mode);
+    if (!mode_ok) {
+      continue;
+    }
+    if ((weapon->flags_secondary & 0x400U) !=
+        (target_class->capability_flags & 0x400U)) {
+      continue;
+    }
+    if (!NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+      continue;
+    }
+    if (mode != 1) {
+      has_non_guided = true;
+    }
+    if (bs.cooldown > 0.0F) {
+      continue;
+    }
+    if (!IsTurretWeaponInTargetRange(*weapon, ship, target)) {
+      continue;
+    }
+    const std::int16_t mass = weapon->mass_damage < 1 ? 1 : weapon->mass_damage;
+    const std::int16_t energy =
+        weapon->energy_damage < 1 ? 1 : weapon->energy_damage;
+    if (mode == 6 && weapon->blast_radius > 0) {
+      // Mode 6 freeflight rocket: the blast radius * 2.5 (DOUBLE_00575188)
+      // placement gate requires both axis deltas to clear it.
+      const float blast = static_cast<float>(weapon->blast_radius) * 2.5F;
+      const float dx = std::abs(ship.pos_x - target.pos_x);
+      const float dy = std::abs(ship.pos_y - target.pos_y);
+      if (blast <= dx && blast <= dy) {
+        if (best_mass_bank == -1 || mass > best_mass) {
+          best_mass_bank = bank;
+          best_mass = mass;
+        }
+        if (best_energy_bank == -1 || energy > best_energy) {
+          best_energy_bank = bank;
+          best_energy = energy;
+        }
+      }
+    } else {
+      if (best_mass_bank == -1 || mass > best_mass) {
+        best_mass_bank = bank;
+        best_mass = mass;
+      }
+      if (best_energy_bank == -1 || energy > best_energy) {
+        best_energy_bank = bank;
+        best_energy = energy;
+      }
+    }
+  }
+  std::int16_t selected = best_mass_bank;
+  if (target.shield_points >= 0.0F) {
+    selected = best_energy_bank;
+  }
+  if (selected != -1) {
+    ship.active_weapon_bank_slot = selected;
+  }
+  if (ship.active_weapon_bank_slot == -1) {
+    if (!has_non_guided && !allow_guided_mode) {
+      NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, true);
+    }
+  } else {
+    ship.ai_fire_trigger_latch = 1;
+  }
+}
+
+// Ghidra 0x0040d910 Weapon_SelectGeneralWeaponBank. Broad fallback: arms the
+// most recent fireable general weapon (non mode-0/3, mode < 8).
+void NovaAi_SelectGeneralWeaponBank(GameState &state, Ship &ship) {
+  std::int16_t chosen = -1;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
+    if (bs.ammo <= 0 || bs.cooldown > 0.0F) {
+      continue;
+    }
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (weapon == nullptr) {
+      continue;
+    }
+    const int mode = weapon->weapon_mode_code;
+    if (mode == 0 || mode == 3 || mode >= 8) {
+      continue;
+    }
+    if (!NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+      continue;
+    }
+    chosen = bank; // last qualifying bank wins
+  }
+  if (chosen != -1) {
+    ship.active_weapon_bank_slot = chosen;
+    ship.ai_fire_trigger_latch = 1;
+  }
+}
+
+// Ghidra 0x0040d7e0 Weapon_SelectUnguidedWeaponBank. Fallback that arms the
+// highest-damage fireable unguided bank: modes -1/0/6, or mode 7 when there
+// is no primary target. Mode 0 additionally passes only when the weapon's
+// flags_quaternary bit 0 or the ship class's availability bit 0 is clear.
+void NovaAi_SelectUnguidedWeaponBank(GameState &state, Ship &ship) {
+  const ShipClass *cls = ShipClassFor(state, ship);
+  std::int16_t best_bank = -1;
+  std::int16_t best_score = 0;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const WeaponBankState bs = ReadWeaponBank(state, ship, bank);
+    if (bs.ammo <= 0 || bs.cooldown > 0.0F) {
+      continue;
+    }
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (weapon == nullptr) {
+      continue;
+    }
+    const int mode = weapon->weapon_mode_code;
+    const bool has_target = ship.primary_target_ship_slot != -1;
+    const bool mode_ok =
+        mode == -1 || (mode == 6) || (mode == 7 && !has_target) ||
+        (mode == 0 &&
+         (((weapon->flags_quaternary & 1U) == 0U) ||
+          (cls != nullptr && (cls->availability_flags & 1U) == 0U)));
+    if (!mode_ok) {
+      continue;
+    }
+    if ((weapon->flags_secondary & 0x400U) != 0U ||
+        !NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+      continue;
+    }
+    const std::int16_t score =
+        weapon->mass_damage < 1 ? 1 : weapon->mass_damage;
+    if (score > best_score) {
+      best_score = score;
+      best_bank = bank;
+    }
+  }
+  if (best_bank != -1) {
+    ship.active_weapon_bank_slot = best_bank;
+  }
+  if (ship.active_weapon_bank_slot != -1) {
+    ship.ai_fire_trigger_latch = 1;
+  }
 }
 
 } // namespace game

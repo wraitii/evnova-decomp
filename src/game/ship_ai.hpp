@@ -126,6 +126,39 @@ NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
 // active NPC weapon bank for higher-behavior ships and clears stale targets.
 void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship);
 
+// The four per-mode weapon-bank selectors called by the AI control modes
+// (Ghidra 0x00408150). Each is the faithful port of one original selector:
+// direct-fire and guided pick a primary-target weapon, current-target picks a
+// turret-ish bank, and general is the broad fallback.
+
+// Ghidra 0x0040ce00 Weapon_SelectWeaponBankForCurrentTarget. Scans fireable
+// mode-3/4/7/8 turret banks in arc/range, scores by mass/energy damage, and
+// arms the best one.
+void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship);
+
+// Ghidra 0x0040d220 Weapon_SelectGuidedWeaponBankForPrimaryTarget. Arms the
+// first guided (mode-1) bank that can track the primary target within range;
+// applies scanner-untargetable / cloaked-target capability gates.
+void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
+                                                   Ship &ship);
+
+// Ghidra 0x0040d470 Weapon_SelectDirectFireWeaponBankForPrimaryTarget. Arms
+// the best direct-fire bank (modes -1/0/6, or mode-1 when allow_guided_mode)
+// in range, with a mode-6 blast-radius placement gate; retries relaxed once
+// with guided allowed when no bank was armed.
+void NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(GameState &state,
+                                                       Ship &ship,
+                                                       bool allow_guided_mode);
+
+// Ghidra 0x0040d910 Weapon_SelectGeneralWeaponBank. Broad fallback: arms the
+// most recent fireable general weapon (non mode-0/3, mode < 8).
+void NovaAi_SelectGeneralWeaponBank(GameState &state, Ship &ship);
+
+// Ghidra 0x0040d7e0 Weapon_SelectUnguidedWeaponBank. Fallback that arms the
+// highest-damage unguided bank (modes -1/0/6, or mode-7 with no primary
+// target). Used by the scripted mode 0x14 merge gate.
+void NovaAi_SelectUnguidedWeaponBank(GameState &state, Ship &ship);
+
 // Ghidra 0x00405590 Ship_UpdateShipAiState. The per-frame AI state machine.
 // Given the ship's current ai_state_code it maintains that state and writes
 // the companion Ship.ai_control_mode field (consumed by
@@ -149,8 +182,9 @@ void NovaAi_UpdateShipState(GameState &state,
 // named _g_avg_frame_time_ms is elapsed milliseconds * 0.03); `now_ms` backs
 // the mode-4/0xd wall-clock bookkeeping.
 // The per-mode turn/thrust polynomials come from the decoded _DAT_00575xxx
-// globals; weapon selection, formation offsets and carrier-bay launches are
-// documented no-ops until Phases 5/8.
+// globals. Weapon selection is wired in via the four NovaAi_Select* helpers;
+// formation-offset mirroring, predictive-aim-when-bank-live, carrier-bay
+// launches and the +0xBD boost latch remain deferred (TODO(decomp)).
 void NovaAi_ApplyControls(GameState &state,
                           Ship &ship,
                           float elapsed_ticks,
