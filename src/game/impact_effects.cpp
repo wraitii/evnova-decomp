@@ -27,6 +27,7 @@ bool ValidEffectId(std::int16_t effect_id) {
 
 } // namespace
 
+// Ghidra 0x00421500 Shot_SpawnImpactEffectSprite.
 void NovaEffects_SpawnImpactEffect(GameState &state,
                                    float x,
                                    float y,
@@ -50,6 +51,7 @@ void NovaEffects_SpawnImpactEffect(GameState &state,
   }
 }
 
+// Ghidra 0x00428090 Shot_SpawnShipDestructionDebrisPuff.
 void NovaEffects_SpawnShipDestructionBurst(GameState &state,
                                            const Ship &ship,
                                            std::int16_t breaking_effect_id) {
@@ -116,6 +118,7 @@ void NovaEffects_SpawnShipDestructionFinale(GameState &state,
       true);
 }
 
+// Ghidra 0x0043b170 Frame_UpdateFadingEffectSprites.
 void NovaEffects_TickFadingEffects(GameState &state, float elapsed_ticks) {
   const float delta = std::max(0.0F, elapsed_ticks);
   for (FadingEffectInstance &fragment : state.fading_effect_instances) {
@@ -131,6 +134,7 @@ void NovaEffects_TickFadingEffects(GameState &state, float elapsed_ticks) {
   }
 }
 
+// Ghidra 0x004211d0 Shot_SpawnAreaImpactEffects.
 void NovaEffects_SpawnAreaImpact(GameState &state,
                                  float x,
                                  float y,
@@ -192,6 +196,7 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
   }
 }
 
+// Ghidra 0x00462550 Weapon_SpawnWeaponImpactEffectPackage.
 void NovaEffects_SpawnImpactEffectPackage(GameState &state,
                                           float x,
                                           float y,
@@ -210,6 +215,7 @@ void NovaEffects_SpawnImpactEffectPackage(GameState &state,
   NovaEffects_SpawnAreaImpact(state, x, y, area_effect_id, 0, play_sound);
 }
 
+// Ghidra 0x0042e160 Shot_UpdateImpactEffectSprites.
 void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
   const float delta = std::max(0.0F, elapsed_ticks);
   for (ImpactEffectInstance &instance : state.impact_effect_instances) {

@@ -587,8 +587,8 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 // BkgndColor+0x8e (24-bit RRGGBB, Ghidra
 // NovaData_LoadScenario- ResourceTables reads a 32-bit at payload +0x8e and
 // splits the three bytes into SystemDef.field_0x1ee/.f0/.f2), Murk+0x92 (feeds
-// SystemDef.murk at +0xbc; Ghidra previously mislabeled this field
-// "alert_level" - the EV Nova Bible documents Murk as the starfield/ambience
+// SystemDef.murk at +0xbc; the payload name "alert_level" is a misnomer - the
+// EV Nova Bible documents Murk as the starfield/ambience
 // opacity, negative hides the starfield). The loader also reads DudeTypes/Prob
 // (8 shorts each, with id rebasing/prob clamping), ReinfFleet/Time/Intrval near
 // the end of the record, plus the Visibility string.
@@ -679,8 +679,8 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   s.bkgnd_color = ((bkgnd >> 8) & 0xff) << 16 |      // 0x90 -> R
                   ((bkgnd >> 16) & 0xff) << 8 |      // 0x8f -> G
                   ((bkgnd >> 24) & 0xff);            // 0x8e -> B
-  // Murk (s\xd8st +0x92): murkiness 0-100 (SystemDef.murk at +0xbc; Ghidra
-  // previously mislabeled this field "alert_level"); a negative value
+  // Murk (s\xd8st +0x92): murkiness 0-100 (SystemDef.murk at +0xbc; the
+  // payload name "alert_level" is a misnomer); a negative value
   // equivalently hides the starfield (NovaEffects_QueuedAmbientStarParticles
   // clears ambient stars when SystemDef.murk < 0).
   s.murk = ReadBeI16(bytes, 0x92);

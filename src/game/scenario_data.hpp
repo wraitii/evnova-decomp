@@ -573,7 +573,7 @@ struct Stellar {
   // confrontation. field_0x47 is a single-byte derelict / abandoned sentinel
   // that suppresses the hostile re-spawn latching. TODO(decomp): the attack
   // branch that reads them is deferred (see negotiation_dialog.cpp); these
-  // fields are modelled now so the data is present.
+  // fields are modelled so the data is present.
   int present_ship_count = 0; // StellarDef +0x50
   int max_ship_count = 0;     // StellarDef +0x4e (garrison size; >0x3e9/0x2711
                               //  rescale branches)
@@ -730,9 +730,9 @@ struct System {
   // G=byte+0x8f, B=byte+0x8e), so `(c>>16),(c>>8),c` are exactly the colours
   // NovaRender_SetSystemSpaceBackgroundColor paints. Pure black (0) when unset.
   std::uint32_t bkgnd_color = 0;
-  // Murk (s\xd8st +0x92): murkiness 0-100; a negative value hides the starfield
-  // (SystemDef.murk at +0xbc < 0; Ghidra previously mislabeled this field
-  // "alert_level"). Feeds the ambient-star size scale as well.
+  // Murk (s\xd8st +0x92): murkiness 0-100; a negative value hides the
+  // starfield (SystemDef.murk at +0xbc < 0; the payload name "alert_level" is
+  // a misnomer). Feeds the ambient-star size scale as well.
   std::int16_t murk = 0;
   // AstTypes (payload +0x94): flag bits determining which asteroid types appear
   // in the system (EV Nova Bible: bit0 = Small metal r\xf6id 128, bit1 = Medium

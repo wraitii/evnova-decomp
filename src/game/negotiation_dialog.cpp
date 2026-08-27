@@ -224,6 +224,7 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
       platform.renderer(), img->width, img->height, img->rgba_pixels);
 }
 
+// Ghidra 0x004812c0 NovaUi_DrawTravelDestinationInteractionWindow.
 // Draws the interaction-window frame over the dim scrim. The 540x295 backdrop
 // PICT (DLOG 0x3f1) is centred on the 640x480 playfield; over it we draw the
 // destination planet picture into the DITL item-4 image frame on the right, the

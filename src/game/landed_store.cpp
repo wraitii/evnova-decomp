@@ -79,6 +79,8 @@ MeetsRequire(const GameState &state, std::uint32_t lo, std::uint32_t hi) {
 
 } // namespace
 
+// Ghidra 0x0049458d NovaUi_ShipyardSetCursorSlot. The session tracks the
+// 20-slot (4x5 grid) cursor selection and preserves/clears it across paging.
 std::int16_t LandedStoreSession::IdAtCursor() const {
   const std::size_t absolute =
       page_base +
@@ -330,6 +332,8 @@ LandedStoreSession NovaLanded_OpenShipyardSession(const GameState &state,
   return session;
 }
 
+// Ghidra 0x0049d640 Outfit_ComputeScaledPurchasePrice (tech-discount rounding,
+// threshold quanta).
 std::int32_t NovaLanded_ScaledStorePrice(std::int32_t base_price,
                                          std::int16_t item_tech,
                                          std::int16_t stellar_tech,
@@ -378,6 +382,8 @@ std::int32_t NovaLanded_FreeMass(const GameState &state) {
   return free_mass;
 }
 
+// Ghidra 0x00491950 NovaUi_IsTravelOutfitPurchaseAllowed (partial port of the
+// tech/require/availability gate).
 bool NovaLanded_CanBuyOutfit(const GameState &state,
                              std::int16_t stellar_id,
                              std::int16_t outfit_id) {
@@ -531,6 +537,9 @@ std::int32_t NovaLanded_ShipPurchasePrice(const GameState &state,
                       NovaLanded_ShipTradeInValue(state, stellar_id));
 }
 
+// Ghidra 0x00498dc0 NovaUi_UpdateSelectedShipPurchaseAllowed (partial port:
+// selected/current class and net trade-in affordability; the original's full
+// availability checks remain TODO(decomp)).
 bool NovaLanded_CanBuyShip(const GameState &state,
                            std::int16_t stellar_id,
                            std::int16_t ship_id) {

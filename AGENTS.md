@@ -2,10 +2,7 @@
 
 Escape Velocity Nova is Ambrosia Software's 2002 open-world 2D space-trading and combat RPG, with nonlinear faction storylines, ship progression, and a dynamic galaxy economy.
 
-## Current state: recompilation started.
-
-The decomp is now quite advanced.
-The current goal is to continue improving decomp understanding and metadata — function/param/type renames, struct fields, globals, and comments in the Ghidra DB. There is no C++ code in this repo yet; reimplementation has not started. Many _deep_ helper routines and low-level subsystems are still only provisionally named, and numerous struct fields remain untyped/unattributed.
+## Current state: recompilation is well advanced; a C++ reimplementation exists under `src/` (SDL3-based). Ongoing work improves both decomp understanding/metadata and reimplementation coverage.
 
 Ghidra is the decompiler backend — it maintains its own database of the code, with disassembled, decompiled, partial type and symbol information.
 Part of the objective of this metadata work is to improve Ghidra's DB to make future decompiling easier.
@@ -51,6 +48,9 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 
 - Preserve original game behavior first; improve architecture second.
 - Keep a one to one correspondance between reimplementation and ghidra functions. A function re-implementing ghidra functionality should have a comment to the address in the original binary.
+- Citation format: `// Ghidra 0xaabbccdd Original_Name.` directly above the port function. When one original function is spread across port helpers, cite it at the primary site and name the others in the same comment ("… runs inline in X"), not one citation per fragment.
+- Divergence/skip markers: plain `TODO(decomp)` for an unported scope; `TODO(decomp(0xaabbccdd)) skipped: <reason>` when original behavior is known and deliberately not reproduced. Never leave a comment-only `if` block as a deferral marker — either port the call or log the skip.
+- Citation and TODO markers may live in the sibling header when the port is a header inline; the audit (`tools/ref_audit.py`) checks both.
 - If running in undescribed code in ghidra, document it in ghidra first. Feel free to stop coding and do an explanatory improvement pass on ghidra in these cases.
 - Log all divergences or skips when writing new code.
 - When writing or modifying a ghidra-decomp-available function, always check it's ghira decompilation. If necessary, the disassembly can also be checked.

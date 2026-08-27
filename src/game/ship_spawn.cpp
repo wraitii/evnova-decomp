@@ -129,7 +129,7 @@ void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
 //     hit_reaction_timer /
 //     player_aggro_accumulator / ai_turn_bias_dir and the various untyped
 //     field_0x* offsets (0x60/0x64/0xac/0xb0/0xb9/0xbb-0xbd/0xc8cc) are all
-//     left at defaults. Ghidra now names the visual fields at +0xc8d6,
+//     left at defaults. The visual fields at +0xc8d6,
 //     +0xc8e4/+0xc8e8/+0xc8ec, and +0xc8f4/+0xc8f6; their reset/seed behavior
 //     remains deferred with the presentation subsystem.
 //   * the random inits gated on ShipClassDef.combat_state_init_range /
@@ -904,8 +904,8 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
 // Ghidra 0x004ab970 NovaRandom_Reseed. The original reseeds the global LCG
 // with the current millisecond tick count at session bootstrap; we reseed the
 // clean-room mt19937 with an unrelated entropy source (random_device + the
-// steady clock) so a fresh game no longer draws the default-42 deterministic
-// spawn sequence.
+// steady clock) so a fresh game reseeds from an uncorrelated source rather
+// than the default-42 deterministic spawn sequence.
 void NovaGame_ReseedRandom(GameState &state) {
   std::random_device rd;
   const std::uint64_t clock_seed =

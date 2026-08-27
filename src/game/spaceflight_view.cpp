@@ -337,7 +337,8 @@ void SpaceflightView::SpawnAmbientStars(SdlPlatform &platform,
   const bool murk_hides_stars = sys && sys->murk < 0;
 
   if (murk_hides_stars) {
-    // Ghidra NovaEffects_ClearAmbientStarParticles: murk < 0 hides the stars.
+    // Ghidra NovaEffects_ClearAmbientStarParticles [0x0046ede0]: murk < 0 hides
+    // the stars.
     for (auto &s : ambient_stars_) {
       s = {};
     }
@@ -424,9 +425,9 @@ void SpaceflightView::UpdateAmbientStarsTunnel(float jump_heading_rad,
 
 // Draws the solid per-system space backdrop (a flat tint from SystemDef
 // BkgndColor, pure black when unset) and then the active ambient star
-// particles. Ghidra: Frame_RenderViewportBackground clears + fills with the
-// NovaRender_SetSystemSpaceBackgroundColor tint, then
-// Frame_UpdateViewportWrapBackgroundSprites
+// particles. Ghidra [0x00497df0]: Frame_RenderViewportBackground clears + fills
+// with the NovaRender_SetSystemSpaceBackgroundColor [0x0046bbf0] tint, then
+// Frame_UpdateViewportWrapBackgroundSprites [0x0042e590]
 // (+ the sprite-world draw in Frame_SpaceflightLoop scope 2) renders the stars.
 // Each star draws its randomly-chosen frame of the 16-frame star-field sprite
 // sheet (sp\x9an 700, 4x4 grid of 5x5 tiles) at native 1:1 size; a small point
@@ -770,7 +771,7 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
     if (cx < -160 || cx > vp.w + 160 || cy < -160 || cy > vp.h + 160) {
       continue; // off-screen
     }
-    // Pick an 8-bit tint: the stellar's government (now decoded) if present,
+    // Pick an 8-bit tint: the stellar's government (decoded) if present,
     // else the system government.
     std::uint8_t r = 170, g = 170, b = 200;
     const auto *gov = st->government_id >= 0x80

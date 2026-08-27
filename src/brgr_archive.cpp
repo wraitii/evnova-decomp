@@ -811,6 +811,7 @@ namespace {
 
 } // namespace
 
+// Ghidra 0x004cef50 Dialog_ParseItemList.
 std::optional<std::vector<NovaDialogItem>>
 NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
   // The DITL payload is the raw resource (FUN_004cef50 receives the same via

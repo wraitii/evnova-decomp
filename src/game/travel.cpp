@@ -196,6 +196,7 @@ int FindLinkedTravelSlot(const GameState &state,
 
 } // namespace
 
+// Ghidra 0x004a8080 NovaUi_SyncTravelSelectionFromStarmapRoute.
 // ---------------------------------------------------------------------------
 // Plots a galaxy-map destination as the next jump target.
 // ---------------------------------------------------------------------------
@@ -306,6 +307,7 @@ bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
          ship.fuel_points >= kJumpFuelCost;
 }
 
+// Ghidra 0x00467ab0 System_FloodDiscoverAdjacentSystems.
 // ---------------------------------------------------------------------------
 // Discovery flood.
 // ---------------------------------------------------------------------------

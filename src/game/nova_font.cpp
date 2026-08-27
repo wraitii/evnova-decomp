@@ -97,6 +97,11 @@ float QuantizedRasterScale(const SdlPlatform &platform, float point_size) {
 
 } // namespace
 
+// Ghidra 0x004bc670 FontCache_GetOrCreateFontHandle.
+// DrawContext_SetFontId [0x004b6900] and DrawContext_StoreScaledValue
+// [0x004b6920] have no separate port: the "current font/scale" context state
+// they mutate is carried by explicit per-call arguments (family, point size,
+// QuantizedRasterScale) instead of a global draw context.
 // ---------------------------------------------------------------------------
 // NovaFontCache
 // ---------------------------------------------------------------------------
@@ -202,6 +207,7 @@ TTF_Font *NovaFontCache::Font(NovaFontFamily family,
   return font;
 }
 
+// Ghidra 0x004bcad0 DrawContext_GetPascalStringWidth.
 int NovaFontCache::TextWidth(NovaFontFamily family,
                              float point_size,
                              std::uint16_t style,
@@ -218,6 +224,7 @@ int NovaFontCache::TextWidth(NovaFontFamily family,
   return width;
 }
 
+// Ghidra 0x004bca90 DrawContext_DrawPascalString.
 // ---------------------------------------------------------------------------
 // Text drawing
 // ---------------------------------------------------------------------------
@@ -273,6 +280,7 @@ void NovaText_Draw(SdlPlatform &platform,
   SDL_DestroyTexture(texture);
 }
 
+// Ghidra 0x004622f0 DrawContext_DrawCenteredPascalStringInBounds.
 void NovaText_DrawCentered(SdlPlatform &platform,
                            NovaFontCache &cache,
                            NovaFontFamily family,

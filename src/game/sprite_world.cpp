@@ -85,6 +85,7 @@ Sprite_InitFrameImage(float anchor_x, float anchor_y, int width, int height) {
   return image;
 }
 
+// Ghidra 0x00475740 Sprite_AddFrame.
 int Sprite::AddFrame(std::shared_ptr<SpriteFrameImage> frame) {
   if (!frame) {
     return -1; // Ghidra Sprite_AddFrame's null-append failure path
@@ -93,6 +94,7 @@ int Sprite::AddFrame(std::shared_ptr<SpriteFrameImage> frame) {
   return static_cast<int>(frames_.size()) - 1;
 }
 
+// Ghidra 0x00476bd0 Sprite_Release.
 void Sprite::Release() {
   // Releasing the sprite drops each frame's image refcount; an image reaching
   // zero frees its SDL handle (shared_ptr does this automatically).
@@ -127,6 +129,7 @@ const SpriteFrameImage *Sprite::TheFrame(int index) const {
   return frames_[static_cast<std::size_t>(clamped)].get();
 }
 
+// Ghidra 0x00475f70 Sprite_AssignSpriteSet.
 int Sprite_AssignAsset(Sprite &sprite,
                        std::shared_ptr<const SpriteAsset> asset) {
   if (!asset || asset->frames.empty()) {
@@ -154,6 +157,7 @@ int Sprite_AssignAsset(Sprite &sprite,
   return asset->frame_count;
 }
 
+// Ghidra 0x00474ab0 Sprite_CreateFromSpriteSheetResources.
 std::unique_ptr<SpriteAsset> SpriteAsset::LoadSpin(SDL_Renderer *renderer,
                                                    std::uint16_t spin_id) {
   // sp\x9an descriptor -> named rl\x91D sheet of square tiles.

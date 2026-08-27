@@ -109,7 +109,7 @@ void Stub_TickReactionsAndNpcSpawns(GameState &state) {
 void Stub_CalcAiOdds(GameState &state) { (void)state; }
 
 // Ghidra scope 7 of Frame_TickSystems -> Shot_HandleShot (0x00435830). Shot
-// movement/lifetime/cooldown bookkeeping now runs here, after scope 9
+// movement/lifetime/cooldown bookkeeping runs here, after scope 9
 // collision checks, matching the original phase order.
 void Stub_HandleShots(GameState &state, float elapsed_ticks) {
   constexpr float kOriginalTickMs = 1000.0F / 30.0F;
@@ -347,7 +347,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // and per-tick sprite display state are still not reconstructed; the stellar
   // availability re-evaluation (the part of System_UpdateSystemAnd-
   // StellarDisplayState that re-homes each stellar to its system and sets
-  // is_available / hazard flags) is now live via NovaTargeting_UpdateStellar-
+  // is_available / hazard flags) is handled by NovaTargeting_UpdateStellar-
   // Availability. Radar-panel rebuild is a logged divergence.
   NovaTargeting_UpdateStellarAvailability(state);
   NovaLog::Todo("spaceflight pre-loop setup: stellar radar panel rebuild and "
@@ -515,7 +515,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (!state.travel.engaging) {
       NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
     }
-    // Handle this frame's fire input. The shot movement/lifetime update now
+    // Handle this frame's fire input. The shot movement/lifetime update
     // runs from Frame_TickSystems scope 7 after scope 9 collision checks,
     // matching the original collision -> Shot_HandleShot phase order.
     // Gated while a jump is engaged (the original fire-restricts the player
@@ -595,7 +595,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // the fire/arrival, synced with the screen flash). The loop owns the
     // SdlAudio device, so travel only latches flags. Mirrors the original's
     // Stellar_TriggerHyperspaceAudioOnce one-shot (g_playerHyperspaceAudio-
-    // Latch gating NovaEffects_QueueCenteredResource).
+    // Latch gating NovaEffects_QueueCenteredResource)
+    // [Ghidra 0x00431420].
     if (state.warp_up_sound_pending) {
       if (state.warp_up_sound.has_value()) {
         // Fit the native six-second cue within warm-up plus acceleration.
@@ -960,6 +961,10 @@ void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
   vel_y = axis_step(-cos_h * max_speed, -cos_h * thrust_step, vel_y);
 }
 
+// Ghidra 0x0043adb0 Stellar_TickStellarGravityPull (player-side port; NPC
+// iteration/crash consequences not reconstructed). The protected_from_gravity
+// check below ports Stellar_ShipHasGravityShielding (0x0046e120) for the
+// player via owned outfit effects.
 // Ghidra 0x0046e2f0 Ship_AccelerateShipTowardPoint. Stellar_TickStellar-
 // GravityPull passes gravity * frame_time as max_accel, divides by the squared
 // separation (with a tiny-distance floor), then adds the polar result to the
@@ -1021,8 +1026,7 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   stats.max_speed_px_per_tick = static_cast<float>(ship_class.speed) / 100.0F;
   // Ship_ComputeShipEffectiveThrust (0x004640a0) multiplies the loaded accel
   // by DAT_005757a8 = 2.0 before the player applies it as the thrust step, so
-  // the effective thrust is 2*accel/10000 (the reimpl previously
-  // omitted this x2).
+  // the effective thrust is 2*accel/10000 (the x2 is applied here).
   stats.thrust_px_per_tick2 =
       static_cast<float>(ship_class.accel) / 10000.0F * 2.0F;
   const float turn_rad =
@@ -1117,6 +1121,9 @@ namespace {
 
 } // namespace
 
+// Ghidra 0x00463e70 Ship_ComputeShipMaxTurnRateDeg (NPC branch; the player
+// path applies the same base*0.1 + opcode-9/rule inside NovaPlayer_Integrate-
+// Movement).
 NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
                                                  const Ship &ship,
                                                  const ShipClass &ship_class) {
@@ -1202,8 +1209,8 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
 // rounds to integer degrees/frame before integrating. Thrust follows the
 // original three-branch model keyed on ai_desired_speed; ai_forward_thrust_cmd
 // carries the RAW effective thrust value (NovaAi_ApplyControls writes
-// Ship_ComputeShipEffectiveThrust, NOT 1.0 -- writing 1.0 made NPCs
-// accelerate ~50x too fast, fixed 2025-08-09):
+// Ship_ComputeShipEffectiveThrust, NOT 1.0 -- writing 1.0 would make NPCs
+// accelerate ~50x too fast):
 //   desired == 0 : free-coast (the thrust command is applied as a per-axis
 //                  clamped step toward the max-speed projection; gated on
 //                  ai_station_hold_timer <= 0).
@@ -1663,6 +1670,7 @@ void NovaPlayer_TickShieldRecharge(GameState &state, float frame_time_ms) {
   p.shield_points = std::min(eff.max_shield_points, p.shield_points + rate);
 }
 
+// Ghidra 0x00489210 Ship_RunSpaceflightMode.
 void NovaSpaceflight_Run(SdlPlatform &platform,
                          SdlAudio &audio,
                          GameState &state) {

@@ -698,6 +698,7 @@ void DrawKeySettingsDialog(SdlPlatform &platform,
 
 } // namespace
 
+// Ghidra 0x004b4400 NovaPrefs_ResetKeyBindings.
 void KeyBindings::ResetToDefaults() {
   // Values exactly as NovaPrefs_ResetKeyBindings (0x004b4400) writes them.
   // Slot index == command id; value = bound key code (0xff unbound). See the
@@ -721,6 +722,7 @@ void KeyBindings::ResetToDefaults() {
   };
 }
 
+// Ghidra 0x004b4320 NovaPrefs_ResetToDefaults.
 void NovaPreferences::ResetToDefaults() {
   bindings.ResetToDefaults();
   intro_music = true;

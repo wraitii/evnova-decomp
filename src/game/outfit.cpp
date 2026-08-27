@@ -177,6 +177,7 @@ bool NovaOutfit_HasAreaCloakingDevice(const GameState &state,
   return ShipClassHasCloakingDevice(state, ship, true);
 }
 
+// Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags.
 std::int16_t NovaOutfit_GetCloakFuelDrainFlags(
     const GameState &state, const Ship &ship) {
   const Outfit *outfit = FindCloakingDevice(state, ship);
@@ -187,6 +188,7 @@ std::int16_t NovaOutfit_GetCloakFuelDrainFlags(
                                           0x0fU);
 }
 
+// Ghidra 0x00465090 Outfit_GetCloakShieldDrainFlags.
 std::int16_t NovaOutfit_GetCloakShieldDrainFlags(const GameState &state,
                                                 const Ship &ship) {
   const Outfit *outfit = FindCloakingDevice(state, ship);
@@ -197,6 +199,7 @@ std::int16_t NovaOutfit_GetCloakShieldDrainFlags(const GameState &state,
                                           0x0fU);
 }
 
+// Ghidra 0x00464e30 Outfit_HasCloakShieldDropOnActivation.
 bool NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
                                                const Ship &ship) {
   const Outfit *outfit = FindCloakingDevice(state, ship);
@@ -237,6 +240,7 @@ bool NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
   return false;
 }
 
+// Ghidra 0x0046e060 Ship_GetShipFuelBurnRate.
 float Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state) {
   // _DAT_00575858 is 1/30. The original stops at the first opcode-15 slot in
   // an outfit but continues through the table, so a later owned afterburner
@@ -280,6 +284,12 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   PlayerEffectiveStats s;
   // These movement fields remain in their raw resource units until the
   // movement integrator applies the corresponding conversion.
+  // The class-base + opcode-bonus aggregates below fold the separate original
+  // helpers into one pass: Ship_ComputeShipMaxShieldPoints [0x00463550],
+  // Ship_ComputeShipMaxArmor [0x004637a0], Ship_ComputeShipFuelCapacity
+  // [0x00463a20], Ship_ComputeShipShieldRechargeRate [0x00463b30] and
+  // Ship_ComputeShipEffectiveThrust [0x004640a0] (NPC variants ported in
+  // NovaShip_ComputeEffectiveStats).
   s.max_shield_points = static_cast<float>(cls->base_shield);
   s.max_armor_points = static_cast<float>(cls->base_armor);
   s.fuel_capacity = static_cast<float>(cls->base_fuel);
@@ -361,6 +371,7 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   return s;
 }
 
+// Ghidra 0x0046c080 Ship_ComputeIonizationDecayRate.
 float NovaOutfit_ComputeIonizationDecayRate(const GameState &state,
                                             const Ship &ship) {
   const ShipClass *cls = state.scenario.Ship(
@@ -616,6 +627,7 @@ std::int16_t Outfit_ComputePlayerFleetCargoCapacity(const GameState &state) {
       Outfit_ComputePlayerEffectiveStats(state).cargo_capacity);
 }
 
+// Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace.
 std::int16_t Outfit_ComputeRemainingCargoSpace(const GameState &state) {
   const std::int32_t capacity = Outfit_ComputePlayerFleetCargoCapacity(state);
   const std::int32_t used = Outfit_ComputePlayerCargoAndJunkTotal(state);

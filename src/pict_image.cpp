@@ -52,6 +52,7 @@ FindDirectBitsRect(std::span<const std::byte> bytes) {
   return std::nullopt;
 }
 
+// Ghidra 0x004fcc00 Pict_DecodePixmapRows (row decoder referenced throughout).
 [[nodiscard]] bool DecodePackBitsRow(std::span<const std::byte> encoded,
                                      std::span<std::uint8_t> output,
                                      std::size_t unit_size) {
@@ -165,6 +166,12 @@ DecodeClassicBitsRect(std::span<const std::byte> pict_data,
 
 } // namespace
 
+// Ghidra 0x004b9050 Resource_LoadPictAsImage. The WithColorRemap variant
+// [0x004b8ed0] shares this decode path; its optional post-load remap through
+// the DAT_0085faee table is NOT ported here. That remap is confirmed dead
+// code at runtime: both direct callers of 0x004b8ed0 (0x004b9050 and
+// FUN_004b9060) pass a zero remap flag, so the post-load color-remap branch
+// is never taken and omitting it introduces no visual divergence.
 std::optional<PictImage>
 Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   constexpr std::size_t source_and_destination_rects_size = 18;

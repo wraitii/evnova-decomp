@@ -148,7 +148,7 @@ struct IntroCinematicData {
 // A single ship in a system. The original keeps them all in one global array
 // `g_ship_states`, 64 slots each of a `ShipState` (offset 0 = the player). We
 // model the common kinematic/combat/identity subset the reimplementation needs
-// now (movement, targeting, and later the spawn + AI systems). Only the fields
+// (movement, targeting, spawn and AI systems). Only the fields
 // with a clear Ghidra `ShipState` mapping are named with their offset; deep
 // AI/combat fields are added as their systems are reconstructed (see
 // Ship_AllocateShipSlotInSystem 0x004254b0). Index 0 in GameState.ships_ is the
@@ -303,9 +303,9 @@ struct Ship {
   // non-self value gates the NPC effective-stats branch
   // (Ship_ComputeShipEffectiveThrust 0x004640a0 applies the DAT_00575788
   // factor while locked) and blocks Stellar_CanShipInitiateJumpSequence; the
-  // velocity-match control modes are Phase 5/8 TODO(decomp), but the field is
+  // velocity-match control modes are TODO(decomp), but the field is
   // cleared by Ship_DeactivateVacantShipsAndTally (0x0041ad50) and seeded by
-  // Ship_AllocateShipSlotInSystem, so it lives on the struct now.
+  // Ship_AllocateShipSlotInSystem, so it lives on the struct.
   std::int16_t velocity_match_target_ship_slot = -1; // +0xC8DC
   // Stored evasive heading for control mode 0x10 (Ghidra ShipState raw short
   // at +0x8E, between target_stellar_object_id and jump_destination_stellar_id;

@@ -101,6 +101,7 @@ SkipState PollSkip(SdlPlatform &platform) {
 
 } // namespace
 
+// Ghidra 0x0048adc0 IntroCinematic_Run.
 bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
   const auto &cinematic = state.intro_cinematic;

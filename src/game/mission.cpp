@@ -239,6 +239,7 @@ constexpr std::int16_t kResourceIdBase = 0x80;
   return result;
 }
 
+// Ghidra 0x0043d4c0 Mission_ResolveMissionSpecialShipCount.
 [[nodiscard]] std::int16_t ResolveSpecialShipCount(GameState &state,
                                                    std::int16_t encoded) {
   if (encoded >= 0) {
@@ -256,6 +257,7 @@ constexpr std::int16_t kResourceIdBase = 0x80;
       roll(state.rng) + (static_cast<int>(magnitude) + 1) / 2);
 }
 
+// Ghidra 0x0043d490 Mission_ResolveMissionSpecialShipSystem.
 [[nodiscard]] std::int16_t ResolveSpecialShipSystem(GameState &state,
                                                      std::int16_t encoded) {
   if (encoded >= 0 && encoded < 1000) {
@@ -316,6 +318,7 @@ constexpr std::int16_t kResourceIdBase = 0x80;
                                                            state.rng));
 }
 
+// Ghidra 0x0043e6f0 Mission_SelectMissionSystemByLocator.
 [[nodiscard]] std::int16_t ResolveMissionSystemByLocator(
     GameState &state, std::int16_t locator, std::int16_t fallback) {
   if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
@@ -420,6 +423,7 @@ constexpr std::int16_t kResourceIdBase = 0x80;
 
 } // namespace
 
+// Ghidra 0x0043c3e0 Misn_ResolveMissionStellarLocators.
 void Mission_ResolveMissionStellarLocators(GameState &state) {
   for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
     const auto &definition = state.scenario.missions[index];
@@ -447,6 +451,7 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
   }
 }
 
+// Ghidra 0x0043cf00 Mission_EvaluateMissionLists.
 MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
   ControlExpressionState expression;
   expression.get_control_bit = [&state](std::uint32_t bit) {

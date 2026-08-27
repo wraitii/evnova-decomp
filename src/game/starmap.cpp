@@ -658,6 +658,11 @@ bool SystemHasUsableDestination(const ScenarioData &scenario,
 // disc bounds are clamped to it, so no disc is dropped or truncated at the
 // panel edge at any resolution (the original's fixed-size grid + hard viewport
 // clamp could cut edge discs).
+// Ghidra: the per-pixel political overlay folds four original helpers into
+// this function: NovaUi_ProjectSystemToOverlayGrid [0x004a9bf0] (system → grid
+// projection), NovaUi_PaintStarmapDiscRowLoop [0x004aa25e] and
+// NovaUi_PaintStarmapDiscCellStep [0x004aa2da] (disc block iteration), and
+// NovaUi_BlendStarmapOverlayCell [0x004aa2f3] (per-cell strength clamp).
 PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
                                        const MapView &view,
                                        const SDL_FRect &panel) {
@@ -806,6 +811,9 @@ void DrawPoliticalOverlay(SdlPlatform &platform,
 // the Show/Hide Borders toggle is on; the discs carry the government colouring
 // (the original's per-cell government overlay grid), so the markers fall back
 // to their neutral base while it is active.
+// Ghidra 0x004a8100 NovaUi_DrawStarmapRoutesAndMarkers: adjacency link lines
+// and system markers with government tint are spread across this draw pass and
+// NovaStarmap_RunWindow's route bookkeeping.
 void DrawGalaxy(SdlPlatform &platform,
                 NovaFontCache &font_cache,
                 const GameState &state,
@@ -1310,6 +1318,7 @@ float MarkerDistSq(const SDL_FPoint &point, const MappedSystem &m) {
 
 } // namespace
 
+// Ghidra 0x004a9d10 NovaUi_EnableStarmapPoliticalOverlay.
 // ---------------------------------------------------------------------------
 // NovaStarmap_RunWindow (0x004a3aa0 NovaUi_RunStarmapWindow, clean-room).
 // ---------------------------------------------------------------------------

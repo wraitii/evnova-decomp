@@ -350,6 +350,7 @@ void ResolveShipHit(GameState &state,
 bool NovaWeapon_CanProjectileHitShip(const GameState &state,
                                      const ActiveShot &shot,
                                      std::int16_t target_slot) {
+  // Ghidra 0x00426ef0 Weapon_CanWeaponHitTarget.
   const Weapon *weapon = WeaponForShot(state, shot);
   if (weapon == nullptr || !ValidShipSlot(target_slot) || shot.consumed) {
     return false;
@@ -423,6 +424,8 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   return true;
 }
 
+// Ghidra 0x00437e20 Shot_ResolveCollisions; the Ship_HandleSpritePairCollision
+// pair-contact core (0x004374f0) runs inline below.
 void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
   for (ActiveShot &shot : state.active_shots) {
     if (shot.life_ticks_remaining <= 0.0F && shot.life_frames > 0) {

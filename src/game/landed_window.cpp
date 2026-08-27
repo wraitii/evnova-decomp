@@ -248,10 +248,12 @@ struct ServiceColumns {
 // Public adapter (#3): lays the Spaceport dialog (DLOG+ DITL 0x3e8) onto the
 // 640x480 logical panel, centering the dialog window on it and mapping every
 // DITL item to panel space (screen = window_origin + dialog_rect). This
-// replaces the previously hardcoded panel/title/status/button geometry with
-// geometry read straight from Nova.rez. Type definitions live in the header.
+// lays the panel/title/status/button geometry out from coordinates read
+// straight from Nova.rez (no hardcoded layout). Type definitions live here.
 // When the dialog resources are unavailable it falls back to a minimal
 // layout with just the buttons from the hardcoded two-column grid.
+// Ghidra 0x008730a1 Dialog_CreateFromDlog (partial port: window bounds +
+// linked DITL via NovaResource_LoadDialogDefinition, playfield centering).
 bool NovaDialogWindow_Layout(const SDL_FRect &panel, DockedLayout &out) {
   constexpr ServiceColumns kFallback;
   constexpr std::size_t kRows = 4;
@@ -802,6 +804,8 @@ LandedExit DispatchService(SdlPlatform &platform,
 // ---------------------------------------------------------------------------
 // Landed window modal run loop.
 // ---------------------------------------------------------------------------
+// Ghidra 0x0047c8e0 NovaUi_RunTravelDestinationServicesWindow (partial port:
+// the landed services modal via this run loop; Spaceport backdrop PICT 0x2134).
 LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                 GameState &state,
                                 LandedContext &ctx) {

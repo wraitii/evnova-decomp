@@ -61,6 +61,7 @@ constexpr std::int32_t RingSpread(std::int32_t radius) {
 
 } // namespace
 
+// Ghidra 0x00421e60 Asteroid_SpawnRecord.
 int NovaAsteroid_SpawnRecord(GameState &state,
                              float pos_x,
                              float pos_y,

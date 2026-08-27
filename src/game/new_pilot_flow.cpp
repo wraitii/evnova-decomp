@@ -116,6 +116,9 @@ void DrawModalBackground(SdlPlatform &platform,
   SDL_SetRenderViewport(renderer, &modal_viewport);
 }
 
+// Ghidra 0x0048a7e0 Menu_RunPilotSelectionDialog (partial port: the name/
+// selection modal follows DLOG 0xc1d/0xc1e proportions; the resource-backed
+// pilot registry/list binding is still a TODO).
 bool RunTextInputPrompt(SdlPlatform &platform,
                         const std::string &prompt,
                         std::string initial_first,
@@ -325,9 +328,8 @@ namespace {
 void Stub_LoadScenarioResourceTables(GameState &state) {
   // Ghidra 0x004bd3c0 NovaData_LoadScenarioResourceTables reads the scenario
   // resource tables (sh\x95p ships, o\x9ftf outfits, w\x91ap weapons,
-  // sp\x9ab stellars, s\xd8st systems) and rebuilds the global class tables.
-  // The reimplementation does the same into state.scenario; the player ship
-  // can now read its real class stats here.
+  // sp\x9ab stellars, s\xd8st systems) into state.scenario, so the player
+  // ship reads its real class stats here.
   if (!state.scenario.LoadFromArchives()) {
     NovaLog::Todo("scenario resource tables could not be loaded; player world "
                   "uses fallback defaults");
@@ -350,7 +352,7 @@ void Stub_ResetReputationAndWorldTables(GameState &state) {
 void Stub_SeedStartingInventory(GameState &state) {
   // Menu_RunNewGameFlow zeroes the outfit counts and weapon-bank ammo/secondary
   // counters, then seeds them from the starting ship class's default outfit
-  // list (DefaultItems) and stock weapon banks. The ship-class tables are now
+  // list (DefaultItems) and stock weapon banks. The ship-class tables are
   // available in state.scenario, so for the default ship (id 0x80, zero-based
   // 0) the outfit counts are populated from its default items.
   state.inventory.outfit_owned_count.fill(0);
@@ -400,7 +402,7 @@ void Stub_SeedStartingInventory(GameState &state) {
   // it can be sold, and it survives the later bank rebuilds (buy/sell/close).
   NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
   // ResetPlayerShipForNewGame calculated capacities before this inventory was
-  // seeded. Recompute now so the new pilot starts with installed bonuses.
+  // seeded. Recompute so the new pilot starts with installed bonuses.
   OutfitMarkStatsDirty(state);
   const PlayerEffectiveStats effective =
       Outfit_ComputePlayerEffectiveStats(state);
@@ -421,8 +423,8 @@ void Stub_DiscoverStartingSystems(GameState &state) {
   // Menu_RunNewGameFlow sets discovery_state = 1 on the starting system and
   // each adjacent neighbour so the starmap shows the pilot's immediate area.
   // The starting system is the pilot's entry point. Mark the starting system
-  // and its linked neighbours discovered/visible now that the galaxy starmap
-  // (starmap.cpp) reads the explored bits; the flood mirrors the original
+  // and its linked neighbours discovered/visible so the starmap (starmap.cpp)
+  // shows the pilot's immediate area; the flood mirrors the original
   // discovery_state=1 set in Menu_RunNewGameFlow.
   NovaTravel_MarkSystemDiscovered(state, kStartSystemId);
   NovaLog::Info("starting system discovery seeded: {} (resource {}) and "
@@ -434,7 +436,7 @@ void Stub_DiscoverStartingSystems(GameState &state) {
 void Stub_PickFirstTravelDestination(GameState &state) {
   // Ghidra Stellar_FindNearestAvailableTravelStellar picks the first adjacent,
   // reachable travel point as the pilot's initial jump target. The travel
-  // mechanics are reconstructed (travel.cpp): the first-jump target is now
+  // mechanics are reconstructed (travel.cpp): the first-jump target is
   // resolved dynamically at engage time, so this step just validates that the
   // starting system has a reachable outward route and logs it.
   const int slot = NovaTravel_FindNearestTravelPoint(state);

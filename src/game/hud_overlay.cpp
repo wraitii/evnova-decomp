@@ -10,6 +10,7 @@ namespace {
 inline constexpr std::uint32_t kStringResourceType = 0x53545223U;
 } // namespace
 
+// Ghidra 0x0047e2d0 NovaHud_ShowOverlayMessage.
 void NovaHud_ShowOverlayMessage(GameState &state,
                                 std::string message,
                                 std::uint8_t red,
@@ -24,6 +25,7 @@ void NovaHud_ShowOverlayMessage(GameState &state,
   state.hud_overlay.expiry_ms = SDL_GetTicks() + duration_ms;
 }
 
+// Ghidra 0x0047e430 NovaHud_ShowCachedOverlayMessage.
 void NovaHud_ShowCachedOverlayMessage(GameState &state, bool extend) {
   if (!state.hud_overlay.active || state.hud_overlay.message.empty()) {
     return;

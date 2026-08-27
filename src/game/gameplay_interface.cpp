@@ -178,6 +178,7 @@ GameplayGeometry_FromSurface(const HudPanelRect &surface_rect) {
   return g;
 }
 
+// Ghidra 0x004cda50 Ui_InstallGameplayInterfaceLayout.
 std::optional<GameplayInterfaceLayout>
 NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id) {
   const auto payload = NovaResource_Load(kInterfaceLayoutType, interface_id);

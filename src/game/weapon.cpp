@@ -107,6 +107,7 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
   }
 }
 
+// Ghidra 0x00463260 Weapon_RebuildWeaponBankPoolsFromOwnedOutfits.
 void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state) {
   // Zero-sweep all 0x100 banks (the original clears both counters).
   for (std::size_t b = 0; b < 0x100; ++b) {
@@ -402,6 +403,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   return static_cast<int>(state.active_shots.size() - 1);
 }
 
+// Ghidra 0x00455150 Weapon_FirePlayerWeaponBank.
 void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      std::int16_t weapon_bank) {
   if (weapon_bank < 0 || weapon_bank >= 0x100) {
@@ -491,6 +493,7 @@ void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks) {
   }
 }
 
+// Ghidra 0x00427a90 Shot_QueueBeamHit.
 bool NovaWeapon_QueueBeamHit(GameState &state,
                              std::int16_t owner_ship_slot,
                              std::int16_t target_ship_slot,
@@ -536,6 +539,7 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
   return false;
 }
 
+// Ghidra 0x0042f270 Shot_UpdateBeamHitQueue.
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
   const float ticks = std::max(0.0F, elapsed_ticks);
   for (BeamHit &beam : state.beam_hit_queue) {
@@ -799,13 +803,14 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   } else {
     fire_cooldown = static_cast<float>(weapon->reload_ticks);
   }
-  // TODO(decomp): the original also scales this cooldown when firing at the
-  // player by the player-combat-rating ladder (k_npc_fire_cooldown_scale_1p75/
-  // 1p5/1p25/1p1 = 1.75/1.5/1.25/1.1 as rating climbs through ship-strength*
-  // 100/400/800/1600; no scale at >=1600). LARGER cooldown = SLOWER fire, so
-  // hostile NPCs are gentle on weak players and full-rate on veterans.
-  // Deferred: g_player_combat_rating_points is not tracked yet, so the
-  // baseline (full-rate) value is emitted.
+  // Ghidra Weapon_FireShipWeapons (0x00414550) also scales this cooldown
+  // when firing at the player by a combat-rating ladder
+  // (k_npc_fire_cooldown_scale_1p75/1p5/1p25/1p1 = 1.75/1.5/1.25/1.1 as the
+  // rating climbs through ship-strength*100/400/800/1600; no scale at
+  // >=1600). LARGER cooldown = SLOWER fire, so hostile NPCs are gentle on
+  // weak players and full-rate on veterans. TODO(decomp(0x00414550)) skipped:
+  // g_player_combat_rating_points is not tracked, so the baseline (full-rate)
+  // value is emitted.
 
   // Burst cycle (Weapon_FireShipWeapons): count a cycle tick; on the wrap
   // edge (flags_tertiary & 1) consume one round from the secondary ammo bank;
@@ -990,6 +995,9 @@ void NovaWeapon_PreloadFireSound(GameState &state,
   }
 }
 
+// Ghidra 0x004b0740 NovaAudio_PreloadGameplayData (partial: this covers the
+// weapon-fire slice of the original's startup snd preload; effect/cloak
+// ranges remain TODO(decomp)).
 void NovaWeapon_PreloadOwnedFireSounds(GameState &state) {
   // Scan the rebuilt primary weapon banks and preload each distinct owned
   // weapon's fire sound so a bank never misses its first shot (the original

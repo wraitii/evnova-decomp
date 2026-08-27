@@ -12,7 +12,9 @@ struct PictImage {
   std::vector<std::uint8_t> rgba_pixels;
 };
 
-// Ghidra: 0x004b8ed0 Resource_LoadPictAsImageWithColorRemap (subset) + row
+// Ghidra: 0x004b9050 Resource_LoadPictAsImage (+ optional post-load color
+// remap in the WithColorRemap variant 0x004b8ed0, confirmed dead at runtime:
+// all callers pass a zero remap flag) + row
 // decode Pict_DecodePixmapRows (FUN_004fcc00). Decodes a PICT v2
 // DirectBitsRect (opcodes 0x99/0x9A/0x9B) into RGBA. Also handles the classic
 // 1-bit BitsRect form used by the 11x9 preferences arrow PICTs (0x86/0x87).

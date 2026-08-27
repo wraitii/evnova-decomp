@@ -507,6 +507,8 @@ void DrawMissionBoardBase(SdlPlatform &platform,
   // clipped/offset appearance.
 }
 
+// Ghidra 0x0043c470 NovaUi_RunTravelDestinationMainWindow (partial port of the
+// landed Mission BBS: layout, list/description rendering, selection, accept).
 LandedExit RunMissionBoardDialog(SdlPlatform &platform,
                                  GameState &state,
                                  std::int16_t stellar_id,
@@ -748,6 +750,9 @@ void DrawStoreBase(SdlPlatform &platform,
   }
 }
 
+// Ghidra 0x00497b70 NovaUi_BlitPictThumbnailCached: per-modal thumbnail cache.
+// The original's shared 128-entry atlas LRU and three-load-per-redraw cadence
+// are not reproduced.
 struct StoreTextureCache {
   std::unordered_map<std::int16_t, std::unique_ptr<SdlTexture>> pictures;
   std::unordered_map<std::int16_t, std::unique_ptr<SpriteAsset>> ship_sprites;
@@ -1056,6 +1061,15 @@ void DrawStoreContents(SdlPlatform &platform,
                         "Credits: " + std::to_string(state.player.credits));
 }
 
+// Ghidra 0x0048ea70 NovaUi_RunTravelOutfitInteractionLoop and
+// 0x00492f30 NovaUi_RunShipyardPurchaseLoop: one generic store loop replaces
+// both (service is a parameter). The 0x00493fc0 NovaUi_ShipyardHandleSelection
+// Input / 0x0049f3f0 HitTestAndTrackShipyardActionButtons /
+// 0x0049f6f0 DrawShipyardActionButtons / 0x0049f8f0
+// HitTestAndTrackTravelOutfitActionButtons / 0x0049fbb0
+// DrawTravelOutfitActionButtons, the 0x00495c80 NovaUi_DrawShipyardDetailPanel
+// (selection stats block) and the 0x00497b70 BlitPictThumbnailCached
+// cache all run inline within this function and the DrawStore* helpers below.
 LandedExit RunStoreDialog(SdlPlatform &platform,
                           GameState &state,
                           LandedService service,

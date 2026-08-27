@@ -406,11 +406,13 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
   return result;
 }
 
+// Ghidra 0x00448020 Mission_ExecuteReactionScript.
 MissionScriptResult Mission_ExecuteReactionScript(GameState &state,
                                                   std::string_view script) {
   return Mission_ExecuteScript(state, script);
 }
 
+// Ghidra 0x00448050 Mission_RunMisnScriptPayload.
 MissionScriptResult Mission_RunMisnScriptPayload(GameState &state,
                                                  std::string_view script,
                                                  std::size_t mission_slot) {
@@ -423,6 +425,7 @@ MissionScriptResult Mission_RunMisnScriptPayload(GameState &state,
   return Mission_ExecuteScript(state, script);
 }
 
+// Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine.
 MissionScriptResult Mission_ExecuteMisnScriptEngine(GameState &state,
                                                     std::string_view script) {
   return Mission_ExecuteScript(state, script);

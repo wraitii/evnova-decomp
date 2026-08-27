@@ -450,7 +450,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046B4B0,Dude_SelectShipTypeIndexFromDudeDef,src/game/ship_spawn.cpp,75%,NovaDude_SelectShipTypeIndex: weighted pick over a DudeDef's present ship types. Deferred: ship-class runtime-availability expression eval (all listed classes treated as available; only diverges for gated classes, rare for dude traders/pirates).
 0x0046B600,Dude_SelectRandomSystemDudeClassIndex,src/game/ship_spawn.cpp,100%,Reimpl: NovaDude_SelectRandomSystemDudeClassIndex() src/game/ship_spawn.cpp — weighted pick among a System's 8 dude slots (class ids >=0 && <0x200), scalar cumulative-weight bucket + uniform [0,total) draw, returns lowest-index valid slot reaching (draw+1) (mirrors the original's descending overwrite loop). Reproducible over GameState/seed rng. Tested via system 0x80 binding (8 slots weights 30/10/12/5/12/10/1/20) + empty->-1. High confidence.
 0x0046B6D0,EncounterFleet_SelectRandomEncounterFleetDefWeighted,src/game/ship_spawn.cpp,100%,Faithful reimpl as NovaEncounter_SelectFleetDefWeighted (src/game/ship_spawn.cpp/hpp): weighted cumulative-bucket pick among System.encounter_fleet_ids whose FleetDef has a valid lead + is_available_runtime, draw in [0,total), returns the 0-based def index or -1. Weighted distribution verified (weights 10/20/70 -> ~20/38/142/200 across 2000 draws).
-0x0046B870,ShipClass_ComputeShipClassSkillVarianceScale,src/game/ship_spawn.cpp,100%,"NovaShip_SkillVarianceScale: per-NPC multiplier matches the Ghidra formula `(NovaRandom_Range(2*p+1) + (100-p)) * 0.01`; class SkillVar loads from payload +0x60."
+0x0046B870,ShipClass_ComputeShipClassSkillVarianceScale,src/game/ship_spawn.cpp,100%,"SkillVarianceScale (static helper): per-NPC multiplier matches the Ghidra formula `(NovaRandom_Range(2*p+1) + (100-p)) * 0.01`; class SkillVar loads from payload +0x60."
 0x0046B8D0,Ship_HasValidAiTargetShip,,0%,
 0x0046B920,System_ResolveVisibleSystemForTravel,,0%,
 0x0046B9B0,System_ResolveSystemDiscoverySlot,,0%,
@@ -775,14 +775,14 @@ address,name,impl_file,reimpl_pct,comment
 0x004976B0,Ui_ShowDialogFromResource,,0%,
 0x004977D0,Ui_ShowConfirmDialog,,0%,
 0x00497900,NovaUi_ShowTextConfirmCodeDialog,,0%,
-0x00497B70,FUN_00497b70,src/game/docked_dialog.cpp,20%,StoreTextureCache lazily loads and reuses outfit/ship PICT thumbnails per modal; original shared 128-entry atlas LRU and three-load-per-redraw cadence are not reproduced.
+0x00497B70,NovaUi_BlitPictThumbnailCached,src/game/docked_dialog.cpp,20%,Ported inline as the StoreTextureCache helpers: StoreTextureCache lazily loads and reuses outfit/ship PICT thumbnails per modal; original shared 128-entry atlas LRU and three-load-per-redraw cadence are not reproduced.
 0x00497CF0,FUN_00497cf0,,0%,
 0x00497D50,FUN_00497d50,,0%,
 0x00497DF0,Frame_RenderViewportBackground,src/game/spaceflight_view.cpp,50%,system-space backdrop fill reimplemented (DrawBackground: per-system BkgndColor clear + fill + commit); surface/rect-copy plumbing not reconstructed
 0x00497EB0,NovaUi_ShowCaptureDecisionDialog,,0%,
 0x00498110,FUN_00498110,,0%,
 0x004982A0,Ui_RunTravelSelectionDialog,,0%,
-0x00498DC0,FUN_00498dc0,src/game/landed_store.cpp,20%,Partial clean-room ship purchase gate: selected/current class and net trade-in affordability; full original availability/random checks remain TODO(decomp).
+0x00498DC0,NovaUi_UpdateSelectedShipPurchaseAllowed,src/game/landed_store.cpp,20%,Partial clean-room ship purchase gate: selected/current class and net trade-in affordability; full original availability/random checks remain TODO(decomp).
 0x00499150,thunk_FUN_008745b6,,0%,
 0x00499270,FUN_00499270,,0%,
 0x00499870,FUN_00499870,,0%,
@@ -806,10 +806,10 @@ address,name,impl_file,reimpl_pct,comment
 0x0049EEC0,FUN_0049eec0,,0%,
 0x0049EEF0,UiPanel_TrackSixEntryMouseSelection,,0%,
 0x0049F1F0,NovaUi_DrawStarmapButtons,,0%,
-0x0049F3F0,NovaUi_ShipyardPageNavInput,src/game/docked_dialog.cpp,25%,DITL-aligned Leave Buy Info Previous and Next mouse hit tests with enabled paging/purchase state; held-button press tracking remains TODO(decomp).
-0x0049F6F0,NovaUi_ShipyardSelectRow,src/game/docked_dialog.cpp,30%,Draws five Shipyard controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
-0x0049F8F0,NovaUi_HitTestAndTrackTravelOutfitNavButtons,src/game/docked_dialog.cpp,25%,DITL-aligned Leave Buy Sell Previous and Next mouse hit tests with transaction/paging gates; held-button press tracking remains TODO(decomp).
-0x0049FBB0,TravelOutfitMenu_FUN_0049fbb0,src/game/docked_dialog.cpp,30%,Draws five Outfitter controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
+0x0049F3F0,NovaUi_HitTestAndTrackShipyardActionButtons,src/game/docked_dialog.cpp,25%,Ported inline in RunStoreDialog: DITL-aligned Leave Buy Info Previous and Next mouse hit tests with enabled paging/purchase state; held-button press tracking remains TODO(decomp).
+0x0049F6F0,NovaUi_DrawShipyardActionButtons,src/game/docked_dialog.cpp,30%,Ported inline in RunStoreDialog: draws five Shipyard controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
+0x0049F8F0,NovaUi_HitTestAndTrackTravelOutfitActionButtons,src/game/docked_dialog.cpp,25%,Ported inline in RunStoreDialog: DITL-aligned Leave Buy Sell Previous and Next mouse hit tests with transaction/paging gates; held-button press tracking remains TODO(decomp).
+0x0049FBB0,NovaUi_DrawTravelOutfitActionButtons,src/game/docked_dialog.cpp,30%,Ported inline in RunStoreDialog: draws five Outfitter controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
 0x0049FE10,NovaUi_HitTestAndTrackTravelActionButtons,src/game/landed_window.cpp,15%,"mouse-tracking hover for the docked service slots: ServiceButtonAt finds the hovered 145x25 button, ServiceAvailable gates disabled slots (per StellarDef travel_flags/fuel/credits), the hovered enabled slot renders in the pressed state; the original's button-held release-selection loop is not reconstructed"
 0x004A0220,NovaUi_RedrawTravelActionButtons,src/game/landed_window.cpp,30%,docked action-button draw: faithful one-based UiPanel item numbers mapped to zero-based DITL ordinals and original physical order; normal/hover(pressed)/disabled(grey) strips via ServicesButtonArt::Draw + ServiceLabel + ServiceAvailable gating; exact original text-resource draw path remains TODO(decomp)
 0x004A04D0,TravelOutfitMenu_FUN_004a04d0,,0%,
@@ -891,7 +891,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004B0740,NovaAudio_PreloadGameplayData,src/game/weapon.cpp,25%,partial gameplay snd preload: resources 200..455 are decoded into the shared session cache, covering the original weapon/effect/cloak handle range; duration-table setup and original handle allocation remain deferred
 0x004B0A30,FUN_004b0a30,,0%,
 0x004B0C20,Ship_InitGameplayDataTables,,0%,
-0x004B3350,Ship_ResetPlayerShipState,src/game/new_pilot_flow.cpp,34%,Ship_ResetPlayerShipState: track only fields the new-pilot flow / early loop meaningfully need, including the fresh-game 10000-credit seed and active_weapon_bank_slot=-1; shield/armor/fuel are finalized by a post-seed meter recompute (Menu_RunNewGameFlow order) rather than at reset; deep AI/combat fields reset but unused
+0x004B3350,Ship_ResetPlayerShipState,src/game/new_pilot_flow.cpp,34%,ResetPlayerShipForNewGame: track only fields the new-pilot flow / early loop meaningfully need, including the fresh-game 10000-credit seed and active_weapon_bank_slot=-1; shield/armor/fuel are finalized by a post-seed meter recompute (Menu_RunNewGameFlow order) rather than at reset; deep AI/combat fields reset but unused
 0x004B4220,Game_ResetNewGameReputation,,0%,
 0x004B42F0,FUN_004b42f0,,0%,
 0x004B4320,NovaPrefs_ResetToDefaults,src/game/preferences.cpp,70%,"NovaPreferences::ResetToDefaults sets every pref + key bindings; .prf load-override and gameplay consumption deferred"
@@ -944,7 +944,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004B8DC0,Rect_Inset,,0%,
 0x004B8DF0,Rect_Union,,0%,
 0x004B8E90,Rect_ContainsPoint,,0%,
-0x004B8ED0,Resource_LoadPictAsImageWithColorRemap,src/pict_image.cpp,100%,Resource_LoadPictAsImageWithColorRemap: PICT v2 DirectBitsRect RGB555 scope
+0x004B8ED0,Resource_LoadPictAsImageWithColorRemap,src/pict_image.cpp,80%,Resource_LoadPictAsImage: PICT v2 DirectBitsRect RGB555 scope; the optional post-load color-remap tail (8/16-bit remap through DAT_0085faee table) is NOT ported
 0x004B9050,Resource_LoadPictAsImage,src/pict_image.cpp,100%,Resource_LoadPictAsImage: wrapper over LoadWithColorRemap with remap off; used for loading/startup splash PICTs
 0x004B9060,FUN_004b9060,,0%,
 0x004B9070,DrawContext_BlitImageToRect,,0%,
@@ -1199,11 +1199,11 @@ address,name,impl_file,reimpl_pct,comment
 0x004D6770,NovaAudio_CountActiveByHandle,,0%,
 0x004D67D0,NovaAudio_UnregisterCallbacks,,0%,
 0x004D6890,FUN_004d6890,,0%,
-0x004D6900,FUN_004d6900,,0%,snd sample expansion (v+0x80) dup quirk; decoded in NovaSound_Decode
+0x004D6900,NovaSound_ExpandIma4Samples,,0%,snd sample expansion (v+0x80) dup quirk; decoded in NovaSound_DecodePayload
 0x004D6B90,FUN_004d6b90,,0%,
 0x004D6D00,FUN_004d6d00,,0%,
 0x004D6D30,FUN_004d6d30,,0%,
-0x004D6E60,FUN_004d6e60,src/brgr_archive.cpp,60%,snd payload decoder (NovaSound_Decode): format-1 'ima4' extended + 'NONE' 8-bit + format-2 'NONE' 8-bit sub-formats; covers menu blips (600/601/602/603) and weapon fire sounds (snd 200..235, slot->200+slot); other AIFC/16-bit sub-forms still unsupported
+0x004D6E60,NovaSound_DecodePayload,src/brgr_archive.cpp,60%,snd payload decoder (NovaSound_DecodePayload): format-1 'ima4' extended + 'NONE' 8-bit + format-2 'NONE' 8-bit sub-formats; covers menu blips (600/601/602/603) and weapon fire sounds (snd 200..235, slot->200+slot); other AIFC/16-bit sub-forms still unsupported
 0x004D7240,NovaInputQueue_DispatchNextCommand,,0%,
 0x004D72A0,NovaInputQueue_PeekCommand,,0%,
 0x004D72F0,FUN_004d72f0,,0%,
@@ -2423,7 +2423,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00533A30,VorbisDecode_FUN_00533a30,,0%,
 0x00533C30,FUN_00533c30,,0%,
 0x00534010,FUN_00534010,,0%,
-0x00534380,FUN_00534380,src/sdl_music.cpp,100%,background 'bass' music playback via SDL3_mixer
+0x00534380,NovaMusic_SwitchBackgroundTrack,src/sdl_music.cpp,100%,background 'bass' music playback via SDL3_mixer
 0x00534580,FUN_00534580,,0%,
 0x00534930,SplayTree_Insert,,0%,
 0x00534970,FUN_00534970,,0%,
@@ -2939,7 +2939,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00872500,FUN_00872500,,0%,
 0x00872550,FUN_00872550,,0%,
 0x00872560,FUN_00872560,,0%,
-0x008725B0,PilotSave_ValidateBlock,src/game/pilot_file.cpp,30%,PilotSave_ValidateBlock: u16[0] < 0x800 gate reimplemented (BlockPassesGate); checksum branch (LAB_0046f960) unresolved and treated as invalid
+0x008725B0,PilotSave_ValidateBlock,src/game/pilot_file.cpp,30%,BlockPassesGate: u16[0] < 0x800 gate reimplemented (BlockPassesGate); checksum branch (LAB_0046f960) unresolved and treated as invalid
 0x008725E0,FUN_008725e0,,0%,
 0x00872640,FUN_00872640,,0%,
 0x0087265D,FUN_0087265d,,0%,

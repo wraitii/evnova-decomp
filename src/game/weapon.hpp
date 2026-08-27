@@ -16,7 +16,7 @@
 // fireable.
 //
 // The player still only fires the basic projectile branch here. The shared
-// projectile spawn record now carries the ownership/lifetime data consumed by
+// projectile spawn record carries the ownership/lifetime data consumed by
 // the first collision slice; carrier-bay, beam, turret, guided, and launcher
 // branches remain deferred.
 

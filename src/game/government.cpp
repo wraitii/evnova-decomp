@@ -30,6 +30,7 @@ namespace {
 
 } // namespace
 
+// Ghidra 0x0046bc90 Government_AreGovtsAllied.
 bool NovaGovernment_AreGovtsAllied(const ScenarioData &scenario,
                                    std::int16_t govt_a,
                                    std::int16_t govt_b) {
@@ -62,6 +63,7 @@ bool NovaGovernment_AreGovtsAllied(const ScenarioData &scenario,
   return false;
 }
 
+// Ghidra 0x0046bdf0 Government_AreGovtsHostileOrXenophobic.
 bool NovaGovernment_AreGovtsHostileOrXenophobic(const ScenarioData &scenario,
                                                 std::int16_t govt_a,
                                                 std::int16_t govt_b) {
@@ -215,8 +217,10 @@ bool NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
     return true;
   }
 
-  // TODO(decomp): GovtDef +0x83 byte gate (returns true when set) -- the
-  // field has no clean-room counterpart yet.
+  // Ghidra Government_IsShipEligibleForGovernmentAid (0x0040fd20) also returns
+  // true when GovtDef +0x83 is set -- the final gate of the eligibility
+  // branch. TODO(decomp(0x0040fd20)) skipped: no clean-room +0x83 field, so
+  // the gate is not reproduced.
   return false;
 }
 
