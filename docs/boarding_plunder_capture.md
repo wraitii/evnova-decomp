@@ -279,8 +279,19 @@ the target's sprite frame, press **b**.
   re-check whether any archive carries STR# 0x7530 and what its text is.
 - Mission-ship boarding behaviors for later iterations.
 - Capture-decision DITL 0x3fa button labels (decode pending).
-- RESOLVED: the STR# 0x7d2 0x70 odds-row label. The decompile/disasm show the
-  original drawing "Oops! You tripped this ship's security self-destruct
-  mechanism." there, and in-game verification confirms that's the shipped
-  behavior — the engine cheekily reuses the self-destruct string as the
-  capture-odds row label. Reproduce as-is.
+- RESOLVED (corrected 2nd time): the bottom odds-row label is STR# 0x7d2 entry
+  "Capture Odds:" (pool 0x6f), NOT the "Oops!" self-destruct string. An earlier
+  note here claimed the engine cheekily drew the Oops string as the odds-row
+  label "confirmed in-game" — that was a misreading. Root cause: the game's
+  STR# entry helpers (Resource_LoadStringEntry 0x004b8ca0 / DrawStringEntry
+  0x004cd1f0 / AppendStringEntry 0x004cd1a0) take a 1-BASED index
+  (Resource_LoadStringEntry walks `param_3 - 1` length-prefixed strings to skip
+  — see its decompile), while the port's NovaHud_LoadStringEntry is 0-based.
+  Every Ghidra string index in the notes below is therefore +1 vs the shipped
+  pool: window rows pass 0x6c..0x70 = pool title/"Cargo:"/"Ammo:"/"Capture
+  Odds:", the self-destruct overlay passes 0x71 = pool 0x70 "Oops! ...", the
+  cargo-full overlay passes 0x72 = pool 0x71, "of" is 0x187 = pool 0x186, the
+  fuel overlays pass 4/5/6 = pool 3/4/5, and the board denials pass
+  0x81/0x82/0x83 = pool "You can't board this ship." / "You're not close enough
+  to board this ship." / "You're moving too fast to board this ship." The
+  shipped window layout is docs/reference/boarding.jpg.

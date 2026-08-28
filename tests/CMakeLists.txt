@@ -19,6 +19,7 @@ add_executable(evnova_tests
     sprite_test.cpp
     travel_test.cpp
     snd_probe_test.cpp
+    boarding_strings_test.cpp
     weapon_test.cpp
 )
 

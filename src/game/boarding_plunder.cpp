@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <memory>
 #include <optional>
@@ -536,7 +537,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
       target.mission_ship_slot != 0x3ff && !NovaAiShip_IsDestroyed(player);
   if (!eligible) {
     QueueUiSound(state, 3, 1);
-    ShowBoardingOverlay(state, 0x82); // "You can't board this ship."
+    ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
     return;
   }
 
@@ -602,7 +603,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   // Plain ships: Bible "Ships with 0 crew can't be boarded".
   if (target_class->crew < 1) {
     QueueUiSound(state, 3, 1);
-    ShowBoardingOverlay(state, 0x82); // "You can't board this ship."
+    ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
     return;
   }
 
@@ -682,33 +683,51 @@ constexpr unsigned kActionAmmo = 4;
 constexpr unsigned kActionEnergy = 6;
 constexpr unsigned kActionCapture = 7;
 
-// STR# 0x7d2 "misc strings" used by the window.
+// STR# 0x7d2 "misc strings" used by the window (verified against the shipped
+// pool; see docs/reference/boarding.jpg for the shipped window layout).
 constexpr std::uint16_t kMiscStr = 0x7d2;
+constexpr std::uint16_t kMiscTonWord = 0x00;          // "ton"
+constexpr std::uint16_t kMiscTonsWord = 0x01;         // "tons"
+constexpr std::uint16_t kMiscTitle = 0x6c;            // "Select what to
+                                                      // plunder from this
+                                                      // ship:"
 constexpr std::uint16_t kMiscCargoLabel = 0x6d;       // "Cargo:"
 constexpr std::uint16_t kMiscAmmoLabel = 0x6e;        // "Ammo:"
 constexpr std::uint16_t kMiscCaptureOddsLabel = 0x6f; // "Capture Odds:"
-constexpr std::uint16_t kMiscOddsRowLabel = 0x70;     // self-destruct string
-                                                  // (quirk, see doc)
-constexpr std::uint16_t kMiscStoleAll = 0x73;     // "You stole all the"
-constexpr std::uint16_t kMiscOfWord = 0x187;      // "of"
-constexpr std::uint16_t kMiscNoOffer = 0x14f;     // "no offer" dim marker
-constexpr std::uint16_t kMiscCargoFull = 0x72;    // "couldn't store any"
-constexpr std::uint16_t kMiscAmmoFull = 0x75;     // "couldn't store any ammo"
-constexpr std::uint16_t kMiscSelfDestruct = 0x71; // "Oops! ... self-destruct"
-constexpr std::uint16_t kMiscCaptureFailed = 0x7d;
-constexpr std::uint16_t kMiscEscortCap = 0x7c;
-constexpr std::uint16_t kMiscAssignedEscort = 0x7b;
-// Fuel-fill overlays (STR# 0x7d2 entries 4..6, DAT_0072d6cc/d7cc/d8cc).
-constexpr std::uint16_t kMiscFuelNowFull = 4;
-constexpr std::uint16_t kMiscFuelStole = 5;
-constexpr std::uint16_t kMiscFuelTankFull = 6;
-// Key-hint row (DAT_0072f1cc = STR# 0x7d2 entry 0x21).
-constexpr std::uint16_t kMiscKeyHint = 0x21;
+constexpr std::uint16_t kMiscCreditsLabel = 0x20;     // "credits"
+constexpr std::uint16_t kMiscEnergyLabel = 0x06;      // "Energy:"
+constexpr std::uint16_t kMiscStoleAll = 0x73;         // "You stole all the"
+constexpr std::uint16_t kMiscSalvaged = 0x72;         // "You salvaged"
+constexpr std::uint16_t kMiscFromThisShip = 0x6b;     // "from this ship."
+constexpr std::uint16_t kMiscOfWord = 0x186;          // "of"
+constexpr std::uint16_t kMiscNoOffer = 0x14f;         // "none"
+constexpr std::uint16_t kMiscCargoFull = 0x71;        // "You couldn't store any
+                                                      // of the cargo..."
+constexpr std::uint16_t kMiscAmmoFull = 0x74;         // "...any of the ammo..."
+constexpr std::uint16_t kMiscSelfDestruct = 0x70;     // "Oops! You tripped..."
+constexpr std::uint16_t kMiscCaptureFailed = 0x7c;  // "Your attempt to capture
+                                                    // this ship was
+                                                    // unsuccessful."
+constexpr std::uint16_t kMiscEscortCap = 0x7b;      // "You already have the
+                                                    // maximum possible
+                                                    // number of escorts."
+constexpr std::uint16_t kMiscAssignedEscort = 0x7a; // "You assigned this ship
+                                                    // to your fleet of
+                                                    // escorts."
+// Fuel/energy-transfer overlays (STR# 0x7d2 entries 3..5, DAT_0072d6cc/d7cc/
+// d8cc per the original loader).
+constexpr std::uint16_t kMiscFuelNowFull = 0x03;  // "You filled your reactors
+                                                  // and batteries..."
+constexpr std::uint16_t kMiscFuelStole = 0x04;    // "You transferred all of
+                                                  // this ship's energy..."
+constexpr std::uint16_t kMiscFuelTankFull = 0x05; // "You couldn't store any of
+                                                  // the energy..."
 
-// Cargo commodity names live in STR# 0xfa1, entry (cargo_type + 1) — the
-// original loader fills DAT_0069d2cc[cargo_type] from STR# 0xfa1 entry
-// (cargo_type + 1) (Ghidra FUN_004c7040). The boarding roll only ever uses
-// the standard types 0..5.
+// Cargo commodity names: the original loader fills DAT_0069d2cc[cargo_type]
+// via Resource_LoadStringEntry(0xfa1, cargo_type + 1) (FUN_004c7040) — and
+// since that helper is 1-BASED (see 0x004b8ca0), that is 0-based pool entry
+// cargo_type: food / industrial goods / medical supplies / luxury goods /
+// metal / equipment. The boarding roll only ever uses types 0..5.
 constexpr std::uint16_t kCargoNameStr = 0xfa1;
 
 // Panic multipliers after each loot action (Ghidra doubles 00575900/5908/
@@ -762,19 +781,48 @@ std::string LoadBoardMiscString(std::uint16_t index, std::string fallback) {
   return fallback;
 }
 
-// The commodity name for a cargo type (STR# 0xfa1 entry cargo_type+1).
+// Ghidra DrawContext_DrawGroupedUInt: decimal digits grouped in threes with
+// commas, e.g. 26600 -> "26,600".
+std::string GroupedUInt(std::int32_t value) {
+  std::string digits = std::to_string(value);
+  std::string out;
+  out.reserve(digits.size() + digits.size() / 3);
+  for (std::size_t i = 0; i < digits.size(); ++i) {
+    if (i > 0 && (digits.size() - i) % 3 == 0) {
+      out.push_back(',');
+    }
+    out.push_back(digits[i]);
+  }
+  return out;
+}
+
+// The STR# pool stores "credits" lowercase; the shipped window draws the row
+// label capitalized ("Credits:", see docs/reference/boarding.jpg).
+std::string Capitalized(std::string text) {
+  if (!text.empty()) {
+    text[0] =
+        static_cast<char>(std::toupper(static_cast<unsigned char>(text[0])));
+  }
+  return text;
+}
+
+// The commodity name for a cargo type (STR# 0xfa1 entry cargo_type).
 std::string CargoName(const GameState &state, int cargo_type) {
   if (cargo_type < 0 || cargo_type > 5) {
     return "?";
   }
   (void)state;
   if (auto s = NovaHud_LoadStringEntry(
-          kCargoNameStr, static_cast<std::uint16_t>(cargo_type + 1))) {
+          kCargoNameStr, static_cast<std::uint16_t>(cargo_type))) {
     return *s;
   }
   // Fallbacks mirror the six standard boarding commodities.
-  static constexpr const char *kFallback[6] = {
-      "food", "industrial", "medical", "luxury", "metal", "equipment"};
+  static constexpr const char *kFallback[6] = {"food",
+                                               "industrial goods",
+                                               "medical supplies",
+                                               "luxury goods",
+                                               "metal",
+                                               "equipment"};
   return kFallback[static_cast<std::size_t>(cargo_type)];
 }
 
@@ -896,17 +944,18 @@ void DrawBoardOptionButtons(SdlPlatform &platform,
 }
 
 // Ghidra 0x00484d30 NovaUi_DrawBoardingPlunderWindow. Draws the window
-// backdrop (PICT 0x2143) and the offers into the DITL item-4 text panel:
-//   y+12  "Cargo:" label
-//   y+28  "Ammo:" label        | x+50  cargo "<qty> <ton(s)> of <food>"
-//   y+42  key hint             | x+50  credits (grouped)
-//   y+56  "Capture Odds:"      | x+50  ammo "<qty> <weapon>"
-//   y+70  "Energy:" (x+1)      | fuel qty (x+50) | self-destruct string
-//                                (x+120) | odds% "%." (x+195)
-// The "self-destruct string" row label at x+120 reuses STR# 0x7d2 0x70 — the
-// original draws the "Oops! You tripped this ship's security self-destruct
-// mechanism." text there (a shipped quirk we reproduce faithfully; see
-// docs/boarding_plunder_capture.md).
+// backdrop (PICT 0x2143) and the offers into the DITL item-4 text panel.
+// Layout per the shipped window (docs/reference/boarding.jpg):
+//   y+12  "Select what to plunder from this ship:" (title)
+//   y+28  "Cargo:"   | x+50  "<qty> <ton(s)> of <commodity>"
+//   y+42  "Credits:" | x+50  grouped credits
+//   y+56  "Ammo:"    | x+50  "<qty> <weapon>"
+//   y+70  "Energy:" (x+1) | fuel qty (x+50) | "Capture Odds:" (x+120)
+//         odds% "%." (x+195)
+// No-offer values render as STR# 0x7d2 0x14f ("none") in the dimmed colour.
+// The space below these rows is the status line: empty by default (the
+// "Oops! ... self-destruct" string appears only as the HUD overlay when a
+// self-destruct actually fires, never as a panel row).
 void DrawBoardWindow(SdlPlatform &platform,
                      NovaFontCache &font_cache,
                      const ServicesButtonArt &art,
@@ -966,49 +1015,51 @@ void DrawBoardWindow(SdlPlatform &platform,
                   text);
   };
 
-  // Label column (panel x).
+  // Title row, then the label column.
+  draw_text(
+      px,
+      py + 12.0F,
+      LoadBoardMiscString(kMiscTitle, "Select what to plunder from this ship:"),
+      kBoardValue);
   draw_text(px,
-            py + 12.0F,
+            py + 28.0F,
             LoadBoardMiscString(kMiscCargoLabel, "Cargo:"),
             kBoardLabel);
   draw_text(px,
-            py + 28.0F,
-            LoadBoardMiscString(kMiscAmmoLabel, "Ammo:"),
-            kBoardLabel);
-  draw_text(px,
             py + 42.0F,
-            LoadBoardMiscString(kMiscKeyHint, "Collect via:"),
+            Capitalized(LoadBoardMiscString(kMiscCreditsLabel, "credits")) +
+                ":",
             kBoardLabel);
   draw_text(px,
             py + 56.0F,
-            LoadBoardMiscString(kMiscCaptureOddsLabel, "Capture Odds:"),
+            LoadBoardMiscString(kMiscAmmoLabel, "Ammo:"),
             kBoardLabel);
 
   // Value column (panel x + 50).
   const float vx = px + 50.0F;
+  const std::string none = LoadBoardMiscString(kMiscNoOffer, "none");
   if (options.cargo_type == -1) {
-    draw_text(
-        vx, py + 28.0F, LoadBoardMiscString(kMiscNoOffer, "-"), kBoardDim);
+    draw_text(vx, py + 28.0F, none, kBoardDim);
   } else {
     const std::string qty =
         fmt::format("{}", static_cast<int>(options.cargo_quantity));
-    const std::string ton = options.cargo_quantity == 1 ? "ton" : "tons";
-    const std::string text =
-        qty + " " + ton + " of " + CargoName(state, options.cargo_type);
+    const std::string ton_word =
+        options.cargo_quantity == 1
+            ? LoadBoardMiscString(kMiscTonWord, "ton")
+            : LoadBoardMiscString(kMiscTonsWord, "tons");
+    const std::string text = qty + " " + ton_word + " " +
+                             LoadBoardMiscString(kMiscOfWord, "of") + " " +
+                             CargoName(state, options.cargo_type);
     draw_text(vx, py + 28.0F, text, kBoardValue);
   }
   if (options.credits < 1) {
-    draw_text(
-        vx, py + 42.0F, LoadBoardMiscString(kMiscNoOffer, "-"), kBoardDim);
+    draw_text(vx, py + 42.0F, none, kBoardDim);
   } else {
-    draw_text(vx,
-              py + 42.0F,
-              fmt::format("{}", static_cast<int>(options.credits)),
-              kBoardValue);
+    // DrawGroupedUInt: thousands-separated, e.g. "26,600".
+    draw_text(vx, py + 42.0F, GroupedUInt(options.credits), kBoardValue);
   }
   if (options.ammo_bank == -1) {
-    draw_text(
-        vx, py + 56.0F, LoadBoardMiscString(kMiscNoOffer, "-"), kBoardDim);
+    draw_text(vx, py + 56.0F, none, kBoardDim);
   } else {
     const std::string qty =
         fmt::format("{}", static_cast<int>(options.ammo_quantity));
@@ -1018,15 +1069,14 @@ void DrawBoardWindow(SdlPlatform &platform,
     draw_text(vx, py + 56.0F, text, kBoardValue);
   }
 
-  // Fuel / odds row (panel y + 70): fuel label at x+1, fuel qty at x+50,
-  // the odds-row label at x+120 and the odds% at x+195.
-  draw_text(
-      px + 1.0F, py + 70.0F, LoadBoardMiscString(7, "Energy:"), kBoardLabel);
+  // Energy / odds row (panel y + 70): "Energy:" at x+1, fuel qty at x+50,
+  // "Capture Odds:" at x+120 and the odds% + "%" at x+195.
+  draw_text(px + 1.0F,
+            py + 70.0F,
+            LoadBoardMiscString(kMiscEnergyLabel, "Energy:"),
+            kBoardLabel);
   if (options.fuel_quantity < 1) {
-    draw_text(px + 50.0F,
-              py + 70.0F,
-              LoadBoardMiscString(kMiscNoOffer, "-"),
-              kBoardDim);
+    draw_text(px + 50.0F, py + 70.0F, none, kBoardDim);
   } else {
     draw_text(px + 50.0F,
               py + 70.0F,
@@ -1035,7 +1085,7 @@ void DrawBoardWindow(SdlPlatform &platform,
   }
   draw_text(px + 120.0F,
             py + 70.0F,
-            LoadBoardMiscString(kMiscOddsRowLabel, "Oops!"),
+            LoadBoardMiscString(kMiscCaptureOddsLabel, "Capture Odds:"),
             kBoardLabel);
   draw_text(px + 195.0F,
             py + 70.0F,
@@ -1156,6 +1206,12 @@ void SelfDestructTarget(GameState &state) {
   platform.SetCenteredPlayfield();
   const std::array<BoardButton, 6> buttons = BuildBoardButtons();
 
+  // NovaInputQueue_FlushAllCommands: the original discards pending input when
+  // the window opens, so the 'b' keypress that opened it (or a queued click)
+  // can't dispatch a phantom action on the first frame.
+  while (platform.PollTextEvent().has_value()) {
+  }
+
   // local_223: the self-destruct re-roll latch (armed by a loot action).
   bool panic_armed = false;
   bool close = false;
@@ -1264,12 +1320,17 @@ void SelfDestructTarget(GameState &state) {
               "You couldn't store any of the cargo, so you left it.");
         } else {
           PlayTransitionCue(audio, state, 2);
+          // "You salvaged <qty> <ton(s)> of <commodity> from this ship."
           const std::string text =
-              LoadBoardMiscString(kMiscStoleAll, "You stole all the") + " " +
+              LoadBoardMiscString(kMiscSalvaged, "You salvaged") + " " +
               fmt::format("{}", static_cast<int>(options.cargo_quantity)) +
-              " " + (options.cargo_quantity == 1 ? "ton" : "tons") + " " +
-              LoadBoardMiscString(kMiscOfWord, "of") + " " +
-              CargoName(state, options.cargo_type);
+              " " +
+              (options.cargo_quantity == 1
+                   ? LoadBoardMiscString(kMiscTonWord, "ton")
+                   : LoadBoardMiscString(kMiscTonsWord, "tons")) +
+              " " + LoadBoardMiscString(kMiscOfWord, "of") + " " +
+              CargoName(state, options.cargo_type) + " " +
+              LoadBoardMiscString(kMiscFromThisShip, "from this ship.");
           NovaHud_ShowOverlayMessage(state, text);
           if (options.cargo_type >= 0 && options.cargo_type < 6) {
             state.inventory
@@ -1290,9 +1351,12 @@ void SelfDestructTarget(GameState &state) {
         PlayTransitionCue(audio, state, 3);
       } else {
         PlayTransitionCue(audio, state, 2);
+        // "You stole all the <credits> credits from this ship."
         const std::string text =
             LoadBoardMiscString(kMiscStoleAll, "You stole all the") + " " +
-            fmt::format("{}", static_cast<int>(options.credits)) + " credits";
+            GroupedUInt(options.credits) + " " +
+            Capitalized(LoadBoardMiscString(kMiscCreditsLabel, "credits")) +
+            " " + LoadBoardMiscString(kMiscFromThisShip, "from this ship.");
         NovaHud_ShowOverlayMessage(state, text);
         state.player.credits += options.credits;
         options.credits = 0;
@@ -1330,10 +1394,12 @@ void SelfDestructTarget(GameState &state) {
           BoardShowOverlay(state, kMiscAmmoFull, "couldn't store any ammo.");
         } else {
           PlayTransitionCue(audio, state, 2);
+          // "You salvaged <n> <weapon(s)> from this ship."
           const std::string text =
-              LoadBoardMiscString(kMiscStoleAll, "You stole all the") + " " +
+              LoadBoardMiscString(kMiscSalvaged, "You salvaged") + " " +
               fmt::format("{}", transferred) + " " +
-              WeaponOfferName(state, options.ammo_bank, transferred);
+              WeaponOfferName(state, options.ammo_bank, transferred) + " " +
+              LoadBoardMiscString(kMiscFromThisShip, "from this ship.");
           NovaHud_ShowOverlayMessage(state, text);
         }
         options.ammo_quantity = 0;
@@ -1457,6 +1523,14 @@ void SelfDestructTarget(GameState &state) {
         }
       }
     }
+
+    // Frame cap. The original blocks on NovaUi_PollTravelScriptAction for the
+    // next click, so this loop runs at ~60 Hz, not a CPU-burning spin. This
+    // matters for the panic self-destruct re-roll above: it is meant to be
+    // re-checked once per frame (rand(100) <= panic each frame), not on the
+    // very next microsecond after a loot action, which made the window close
+    // "instantly" after any loot.
+    SDL_Delay(16);
   }
 
   // Original restores the draw context and recomputes outfit-derived state on
