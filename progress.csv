@@ -92,7 +92,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00415B00,Ship_IsShipDockedWithTargetInControlMode0x0F,,0%,
 0x00415B80,Stellar_CanShipInitiateJumpSequence,src/game/travel.cpp,95%,jump fuel gating via NovaTravel_CanShipInitiateJumpSequence (ship-aware, used by NPC AI) + NovaTravel_CanStartJump (player convenience wrapper). Gates on BOTH the ship's own class fuel_capacity>=100 AND its current fuel_points>=100 (Stellar_HandlePlayerShipCore refuses to (re)enter hyperspace while fuel_points < _DAT_005755a4); a 'j' with an empty tank shows a HUD-denial overlay. Velocity-match/mission-ship gates deferred
 0x00415C10,Weapon_HasAnyFireableNonSecondaryWeapon,,0%,
-0x00415CB0,Ship_ResetShipAndAttackersAfterBoarding,,0%,
+0x00415CB0,Ship_ResetShipAndAttackersAfterBoarding,src/game/boarding_plunder.cpp,90%,"Ports the attacker-clearing loop and the captured hull's combat/mission reset. TODO(decomp): voice_type_mode roll + government voice override."
 0x00415DC0,Ship_ClearOtherShipsTargetingShip,,0%,
 0x00415E60,Ship_IsShipInAiState0x10,,0%,
 0x00415E80,Ship_IsShipInAiState0x0D,,0%,
@@ -292,7 +292,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00456CA0,Stellar_TravelViaHypergate,,0%,
 0x00457580,Stellar_ProcessTravelAndLanding,src/game/landed_window.cpp,20%,normal ordinary-stellar arrival gate + HUD overlay denial feedback (STR# 0x7d2) reconstructed: active/current-system target, 0x3000/0x20 exclusions, strict 250-unit per-axis envelope, fee gate; overlay text via NovaHud_ShowLandingDenial. Timer/reputation/disabled/hypergate/waiting branches remain TODO(decomp)
 0x00459950,NovaUi_UpdateTravelEngagementProgress,,0%,
-0x0045A3D0,Ship_HandlePlayerBoardTargetCommand,,0%,
+0x0045A3D0,Ship_HandlePlayerBoardTargetCommand,src/game/boarding_plunder.cpp,55%,"Gates (cloak, fire-restricted target, same-system, 0.5 rel-velocity, half-frame range, 30deg heading, crew>=1), velocity match, and plain-ship plunder dispatch are faithful. TODO(decomp): mission arms, post-hit carrier/escort arms (needs ShipClass_CanPlayerCaptureShipClass), Government_ProcessFactionCombatEvent/PropagateHostility."
 0x0045BAA0,Ship_RecenterSpaceObjectsForWorldWrap,,0%,
 0x0045C6D0,Ship_WorldWrapPositionRelativeToPlayer,,0%,
 0x0045C7A0,NovaUi_MarkTravelAndStatusPanelsDirty,,0%,
@@ -409,7 +409,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00468600,Stellar_FormatElapsedTravelTime,,0%,
 0x004687B0,Ship_IsShipFireRestricted,src/game/ship_ai.cpp,35%,"NovaAiShip_IsFireRestricted: government/mission/stellar restrictions plus verified Bible armor disable threshold (33%, or 10% with Ship Flags 0x0010); this gate also suppresses NPC recharge; cloak visibility remains separate"
 0x004688E0,Ship_IsShipDestroyed,src/game/ship_ai.cpp,100%,"NovaAiShip_IsDestroyed: death-timer-active or armor<=0"
-0x00468920,Ship_CanPlayerHaveMoreEscorts,,0%,
+0x00468920,Ship_CanPlayerHaveMoreEscorts,src/game/boarding_plunder.cpp,100%,"Faithful: behavior-6 escort count (ai_target==0, no mission fleet) < 6."
 0x00468990,Weapon_CanFireWeaponBank,src/game/weapon.cpp,50%,ammo/energy sufficiency gate now distinguishes energy weapons (ammo_type == -1), ammo-backed weapons, and carrier-bay mode 99 for both player and NPC bank storage; cloak-visibility / launch-bay-dependency gates not reproduced
 0x00468AF0,System_HasUsableTravelDestination,,0%,
 0x00468B50,Stellar_IsStellarReachableForTravel,,0%,
@@ -711,8 +711,8 @@ address,name,impl_file,reimpl_pct,comment
 0x004826A0,NovaUi_DrawTravelDestinationPaymentWindow,,0%,
 0x004828C0,NovaUi_LoadTravelDestinationPromptString,,0%,
 0x00482910,NovaUi_LoadTravelDestinationStatusString,src/game/negotiation_dialog.cpp,80,status STR# 0xbba loaded via NovaHud_LoadStringEntry with the 5-flavour variant at message*5+random+1 (real per-launch random index)
-0x00482940,NovaUi_RunBoardingPlunderWindow,,0%,
-0x00484230,Ship_BuildBoardingPlunderOptions,,0%,
+0x00482940,NovaUi_RunBoardingPlunderWindow,src/game/boarding_plunder.cpp,10%,"Stub: builds offers and logs; DLOG 0x3f3 modal, loot transfer, panic/self-destruct ladder, capture arm all pending (iteration 3)."
+0x00484230,Ship_BuildBoardingPlunderOptions,src/game/boarding_plunder.cpp,85%,"Faithful rolls: dude/mission booty credits (2.0 threshold + rand branch), booty-flag cargo bins, ammo candidates via Weapon_HasMatchingWeaponAmmoCarried quirk, fuel bins, capture odds (crew+10% escorts+marines, strength accumulator +10 gate, +-5 noise, clamp [1,75], derelict 0x800 + escort-cap zeroing). TODO(decomp): mission-ship booty arm (MissionShipDef +0x618 unmodeled), is_licensed_runtime gate."
 0x00484D30,NovaUi_DrawBoardingPlunderWindow,,0%,
 0x004853A0,NovaUi_RunEscortShipManagementWindow,,0%,
 0x00485970,NovaUi_DrawEscortShipManagementWindow,,0%,

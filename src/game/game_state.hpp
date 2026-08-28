@@ -927,6 +927,26 @@ struct GameState {
   };
   std::vector<PendingDestructionSound> pending_destruction_sounds;
 
+  // Centered UI cue requests consumed by the spaceflight loop (the loop owns
+  // the SDL audio device). Mirrors NovaEffects_QueueCenteredResource with the
+  // transition-table handles: the boarding command denial beeps are
+  // g_transition_sound_handle_table[3] (snd 153), the "boarded" fanfare is
+  // table[4] (snd 154) with the original's repeat count, and the boarding
+  // window plays table[2]/table[3] per action. See
+  // docs/boarding_plunder_capture.md.
+  struct PendingUiSound {
+    std::int16_t transition_index = 0; // 0..5 into transition_sounds
+    std::int16_t count = 1;            // the original's repeat count
+  };
+  std::vector<PendingUiSound> pending_ui_sounds;
+
+  // Decoded UI/transition cue cache (snd 150..155). Ghidra
+  // g_transition_sound_handle_table (00591560) is preloaded by
+  // NovaAudio_PreloadGameplayData (0x004b0740) with
+  // LoadStringResourceCopyById(0x96 + i) for i in 0..4, i.e. snd 150 + i.
+  // The boarding system uses indices 1..4 (snd 151..154); index 5 is spare.
+  std::array<std::optional<NovaSoundData>, 6> transition_sounds{};
+
   // Decoded hyperspace jump sounds (the original preloads them via
   // FUN_004b0740: LoadStringResourceCopyById(0x80/0x81/0x82) into the jump
   // handles g_random_encounter_fleet_defs[0].availability_expression

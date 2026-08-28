@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "asteroid.hpp"
+#include "boarding_plunder.hpp"
 #include "collision.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
@@ -391,6 +392,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool starmap_was_held = false;
   bool land_was_held = false;
   bool target_action_was_held = false;
+  bool board_was_held = false;
   std::int16_t prev_travel_stellar = state.travel.selected_stellar_id;
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = SDL_GetTicks();
@@ -504,6 +506,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     const bool target_action_pressed =
         input.target_action && !target_action_was_held;
     target_action_was_held = input.target_action;
+    const bool board_pressed = input.board && !board_was_held;
+    board_was_held = input.board;
     // The original's movement values are per simulation tick. Its normal
     // cadence is 30 Hz; using a 60 Hz SDL render loop without this conversion
     // advances the player ship at twice the intended speed.
@@ -587,6 +591,28 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           *state.gameplay_sounds[kDestructionSoundIndex], gain, 1.0F, 372);
     }
     state.pending_destruction_sounds.clear();
+    // Centered UI cues from the boarding system (transition-table handles,
+    // snd 150 + index). The flight loop owns the audio device; the modal
+    // windows play their cues through the same queue. Mirrors
+    // NovaEffects_QueueCenteredResource(handle, count, ...).
+    for (const auto &pending : state.pending_ui_sounds) {
+      if (pending.transition_index < 0 ||
+          pending.transition_index >=
+              static_cast<std::int16_t>(state.transition_sounds.size())) {
+        continue;
+      }
+      const auto &sound =
+          state.transition_sounds[static_cast<std::size_t>(
+              pending.transition_index)];
+      if (!sound.has_value()) {
+        continue;
+      }
+      for (std::int16_t repeat = 0; repeat < pending.count; ++repeat) {
+        audio.Play(*sound, 1.0F, 1.0F,
+                   150 + pending.transition_index);
+      }
+    }
+    state.pending_ui_sounds.clear();
     // Cross-system hyperspace jump state machine (travel.cpp): engages on the
     // 'j' key near an available travel point, then drives the visible phases.
     NovaTravel_Tick(state, input.travel, frame_time_ms);
@@ -792,6 +818,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       } else {
         NovaLog::Info("target-action: selected stellar cannot open its "
                       "destination interaction");
+      }
+    }
+    // Board command ('b', edge-triggered): Ship_HandlePlayerBoardTargetCommand
+    // (0x0045a3d0). Like the original's command-latch read in
+    // Ship_HandlePlayerShipCore this runs every frame regardless of jump state;
+    // its own gates reject un-boardable targets. The dispatch may open the
+    // boarding/plunder modal (blocking on the flight loop).
+    if (board_pressed) {
+      NovaBoarding_HandleBoardTargetCommand(platform, audio, state);
+      if (returning_to_menu) {
+        break;
       }
     }
     // In-flight shield regeneration (class base + opcode-5 outfit bonuses),

@@ -75,6 +75,11 @@ struct FlightInput {
   // interaction window for the currently targeted stellar. It is separate
   // from both physical stellar collision and the later docked UI path.
   bool target_action = false;
+  // Edge-triggered board command: 'b' runs Ship_HandlePlayerBoardTargetCommand
+  // (0x0045a3d0) against the primary ship target — disabled-ship validation
+  // (range / relative velocity / heading / crew) and the boarding-plunder
+  // window. Mirrors the original's g_playerBoardTargetCommandLatch channel.
+  bool board = false;
   // Cycle the stellar target. This is a clean-room binding for the original's
   // target-selection command channel; Tab advances through the current
   // system's eligible stellars and Shift+Tab goes backwards.

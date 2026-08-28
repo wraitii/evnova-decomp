@@ -1,0 +1,276 @@
+# Boarding / Plunder / Capture (working doc)
+
+Status: **in progress**. This doc is the map for reconstructing EV Nova's
+boarding window system: the player "board target" command, the plunder modal
+(DLOG 0x3f3), loot transfer, capture odds, escort conversion / ship swap, and
+the surrounding hooks (escort cap, crew/marines, self-destruct panic, derelict
+and unlicensed gates).
+
+Ghidra functions covered (all currently 0% in `progress.csv`):
+
+| Address | Ghidra name | Role |
+|---|---|---|
+| 0x0045a3d0 | Ship_HandlePlayerBoardTargetCommand | player 'b' command: eligibility gates + dispatch |
+| 0x00484230 | Ship_BuildBoardingPlunderOptions | pre-rolls the loot offers + capture odds |
+| 0x00482940 | NovaUi_RunBoardingPlunderWindow | modal loop over DLOG 0x3f3; applies transfers |
+| 0x00484d30 | NovaUi_DrawBoardingPlunderWindow | window painter |
+| 0x004a22e0 | NovaUi_HandleBoardingPlunderOptionButtons | 6-button hit/hover tracking |
+| 0x004a24e0 | NovaUi_DrawBoardingPlunderOptionButtons | three-state button strip |
+| 0x00468920 | Ship_CanPlayerHaveMoreEscorts | behavior-6 escort count < 6 |
+| 0x00497eb0 | NovaUi_ShowCaptureDecisionDialog | DLOG 0x3fa: escort vs swap |
+| 0x00415cb0 | Ship_ResetShipAndAttackersAfterBoarding | clears targeting after capture |
+| 0x004694a0 | ShipClass_CanPlayerCaptureShipClass | fighter-bay/escort-capacity check |
+
+Port home: `src/game/boarding_plunder.hpp` (design exists) /
+`src/game/boarding_plunder.cpp` (missing — the work).
+
+---
+
+## 1. Ground truth
+
+### 1.1 Command gates (0x0045a3d0)
+
+`Ship_HandlePlayerBoardTargetCommand` is the *board* command channel
+(`g_playerBoardTargetCommandLatch`, one-shot per press). Order of checks:
+
+1. Already latched → no-op.
+2. No primary target → no-op.
+3. Player cloak-visibility threshold active → silent no-op.
+4. Target eligible: `field_0xb9 == 0` or (no mission fleet and
+   `post_hit_mode_hint >= 0`), AND `Ship_IsShipFireRestricted(target)`,
+   AND target active, same system, `mission_ship_slot != 0x3ff`,
+   AND not destroyed. On failure: error sound + STR# 0x7d2 **0x82**
+   ("You can't board this ship."), overlay duration 0x168.
+5. Velocity gate: `abs(dvel_x) > 0.5 || abs(dvel_y) > 0.5` (double 00575598 =
+   0.5) → STR# **0x84** "You're moving too fast to board this ship."
+6. Range gate: `abs(dpos_x) <= target_sprite_half_span_x * 0.5` and same for
+   y (per-axis, using the target's sprite half-spans) → STR# **0x83**
+   "You're not close enough to board this ship." (0.5 factor = 00575598.)
+7. Heading gate: `abs(shortest_angle_delta(player, target)) <= 30°`, else
+   try target+180° alignment (`<= 30°` again); fail → silent return.
+8. Boardability: `target.mission_fleet_slot == -1` requires
+   `class.crew (capture_power) >= 1` else STR# **0x82**. (Bible: "Ships with 0
+   crew can't be boarded".)
+9. Mission arms (TODO(decomp) in port): active-mission fleet bounty handling,
+   cargo pickup (`Mission_TryConsumeMissionInteractionResources`), escort
+   repair ("Escort repaired." 0x7e / "Fighter repaired." 0x7f).
+10. Play "boarded" effect `_DAT_00591a74`, hide travel selection sprite,
+    redraw viewport/radar, then dispatch by target class:
+    - plain non-mission ship → **plunder window** (below).
+    - mission ship with special flags → mission interaction window or
+      plunder window (TODO(decomp)).
+    - `post_hit_mode_hint == 0/-1` + capturable class → immediate escort/
+      fighter conversion arms (post-hit surrender): behavior 5 + launch from
+      carrier bay, or behavior 6 escort conversion with armor restore
+      `max_armor * {0.3333|0.1} + 1.0` (00575588/78/80) and cargo transfer.
+11. On return: `target.field_0xb9 = 1`, clear other ships targeting it.
+12. Player velocity is matched to the target on success
+    (`player.vel = target.vel`) before the dispatch.
+
+### 1.2 Offer roll (0x00484230)
+
+ booty_flags = DudeDef.booty_flags of target's dude (target.dude_class_id),
+ else no cargo/credits offers from the dude path. Bits (Bible):
+ 0x1 Food, 0x2 Industrial, 0x4 Medical, 0x8 Luxury, 0x10 Metal,
+ 0x20 Equipment, 0x40 "carries money".
+
+- **Credits** (DAT_007d17e0):
+  - booty_flags & 0x40 → dude path: `credits = round(((cost/1000) * 0.025
+    [+ rand(cost_scale) branch when > 2.0]) * 1000)`, min 1000.
+    (00575910 = 0.025, 00575918 = 1000.0, 00575900 = 2.0 threshold.)
+  - else mission-ship path (no 0x40): `booty_base_credits/1000 * 0.5`
+    (005758a0), same >2.0 random-branch shape, no min-1000 rule.
+  - `< 1` → -1 = no offer.
+- **Cargo** (DAT_007d17d0/d2): only when `(booty_flags & 0xffbf) != 0`.
+  Roll `rand(7)` until the bin matches a set booty bit (bin i ⇔ bit 1<<i,
+  0x40 is the money bit and is NOT a cargo bin). Quantity: `rand((holds+1)/2)
+  + (holds+1)/2` (half to full holds), from `ShipClassDef +0` field
+  (`cargo_holds`). `< 1` → cargo_type = -1.
+- **Ammo** (DAT_007d17d4/d6): count target weapon banks with stock > 0,
+  weapon mode != 99, player can carry that weapon/ammo
+  (`Weapon_HasMatchingWeaponAmmoCarried`). Pick one at random
+  (`rand(0x100)` retry loop). No candidates → -1.
+- **Fuel** (DAT_007d17d8): `rand(class.fuel_max/10) * 10` when fuel_max >= 1,
+  else 0.
+- **Capture odds** (g_capture_odds_percent):
+  - effective crew = player class crew, + `0.1 * Σ crew` of every active
+    behavior-6 escort targeting slot 0 with no mission fleet
+    (00575920 = 0.1, truncating add), + Σ owned outfit "marines" quantities
+    (outfit ModType 0x19 = 25 with ModVal > 0 contributes `ModVal * owned`).
+    A parallel strength accumulator adds `0.1 * Σ strength` of the same
+    escorts (default_ai_behavior > 2 gate applies to both).
+  - odds = `round(crew / (target_class.crew * 10) * 100)` (00575928 = 10,
+    005758f8 = 100).
+  - + Σ `(-ModVal) * owned` for marine outfits with ModVal < 0 (negative =
+    +odds, Bible "−1..−100 increase capture odds by this amount").
+  - if `player_class.strength * 5 < strength_accumulator` (the escort-boosted
+    strength sum, not crew) → +10.
+  - + `5 - rand(0xb)` (±5 noise).
+  - clamp [1, 75] (0x4b).
+  - → 0 when: target govt flags_primary & 0x800 (derelict — "starts out
+    disabled"), or `ShipClassDef[g_expression_ship_class_id].is_licensed_
+    runtime == 0` (the class being evaluated; in this window = the target's
+    class via the expression-eval scratch), or escort cap reached.
+
+### 1.3 Window (0x00482940 / 0x00484d30 / DLOG 0x3f3)
+
+- DLOG 0x3f3 = 309×198, backdrop PICT 0x2143, centred on playfield.
+  DITL 0x3f3 items (0-based, decoded via NovaResource_LoadDialogItems):
+  - [0] 91..217 × 166..191 — Abort (STR# 0x96 0x22)
+  - [1] 110..199 × 110..135 — Cargo (0x27)
+  - [2] 35..124 × 138..163 — Credits (0x28)
+  - [3] 204..293 × 110..135 — Ammo (0x29)
+  - [4] 11..298 × 7..103 — text panel (UserItem; filled black, rows drawn)
+  - [5] 16..105 × 110..135 — Energy (0x2a)
+  - [6] 129..275 × 138..163 — Capture Ship (0x2b)
+  UiPanel entries are 1-based: buttons = entries 1..4 then 6..7 (skipping the
+  text panel at entry 5); original hit code reads exactly that set.
+- Text panel rows (x offsets from panel left, y offsets from panel top):
+  - y+12: "Cargo:" (STR# 0x7d2 0x6d) | y+28: "Ammo:" (0x6e) | y+42: key hint
+    (DAT_0072f1cc pstring through NovaCommand_TranslateByInputMap) |
+    y+56: "Capture Odds:" (0x6f)
+  - values at x+50: y+28 cargo qty "tons of" <commodity>, y+42 credits
+    (grouped), y+56 ammo count + (plural|singular) weapon name (outfit
+    attribute ModType 3 = weapon, ModVal = bank id), y+70: fuel label
+    (DAT_0072d9cc pstring) at x+1, fuel qty at x+50, **STR# 0x7d2 0x70 drawn
+    at x+120 as the "odds" row label** (decompile + disasm confirm
+    `PUSH 0x70; PUSH 0x7d2; CALL Resource_DrawStringEntry` — that entry is
+    "Oops! You tripped this ship's security self-destruct mechanism.", i.e.
+    the original appears to draw a mismatched string here; we reproduce it
+    faithfully and comment), odds% at x+195 + "%." + unlicensed note
+    (`is_licensed_runtime == 0`: note pstring + STR# 30000 entry 1 —
+    string not in our dump; see open questions).
+  - No-offer values render dimmed (color DAT_00733b56) with STR# 0x7d2 0x14f.
+- On open: roll `panic = rand(0x1a) + 0xf` (15..40), build offers, then the
+  mission-ship free-outfit bonus arm (TODO(decomp)).
+- Button actions (NovaUi_PollTravelScriptAction result codes):
+  - 1 = Abort: reset panic to -1, beep, close.
+  - 2 = Cargo: beep if no offer; else clamp quantity to free fleet cargo
+    space (`Outfit_ComputeFleetCargoCapacity - cargo_and_junk_total`); if
+    nothing fits → "You couldn't store any of the cargo..." (0x71); else
+    "You stole all the <qty> <tons|ton> of <commodity>" (0x73 + 0x187 + 0x6c),
+    add to player bin, clear offer. Panic ×2.0, re-arm.
+  - 3 = Credits: "You stole all the <credits> credits" (0x74 + credit
+    display + 0x6c), add to player credits. Panic ×1.25.
+  - 4 = Ammo: find outfit with ModType 3, ModVal = bank; transfer up to the
+    offer count while mass fits and ownership limits allow, incrementing the
+    player's bank counters; "You stole all the <n> <weapon(s)>" (0x73) or
+    "couldn't store any ammo" (0x74). Panic ×2.0.
+  - 6 = Energy: fill player fuel from offer up to capacity difference;
+    "You stole all the <n> fuel" style messages (DAT_0072d7cc/8cc pstrings).
+    Panic ×1.5.
+  - 7 = Capture: derelict govt → odds = -1; roll `rand(100) < odds` (fail →
+    "Your attempt to capture this ship was unsuccessful." 0x7d, close);
+    then 1/10 "Oops" self-destruct roll → shields/armor = 0, death timer
+    armed (0x70 overlay, close); else escort-cap check ("maximum possible
+    number of escorts." 0x7c); else if player class crew >= 1 →
+    **NovaUi_ShowCaptureDecisionDialog** (DLOG 0x3fa 257×114, PICT 0x2144;
+    item0 = swap, item1 = escort; labels TODO from DITL decode);
+    - escort path: run target's OnCapture-ish reaction script
+      (`Mission_ExecuteReactionScript` of ShipClassDef.field_0x3e9),
+      set ai_behavior_code 6 / ai_target 0, armor = `max_armor * 0.5`
+      (005758a0), clear faction/mission links, reset AI runtime fields,
+      `Ship_ResetShipAndAttackersAfterBoarding`, "You assigned this ship to
+      your fleet of escorts." (0x7a).
+    - swap path: confirm-code dialog (rename, random 3 digits appended to
+      class name; STR# 0x7d2 0x76/0x77), on confirm
+      `Outfit_SwapPlayerShipWithEscort` + gameplay layout reinstall.
+- After every action the window repaints and the loop continues until an
+  action closes it. Loot actions set `local_223` (capture re-roll latch:
+  next loop iteration rolls `rand(100) <= panic` → target self-destructs:
+  shields/armor 0, death timer, STR# 0x7d2 0x70 overlay, window closes).
+
+### 1.4 Support functions
+
+- `Ship_CanPlayerHaveMoreEscorts` (0x00468920): count active ships with
+  `ai_behavior_code == 6 && ai_target_ship_slot == 0 &&
+  mission_fleet_slot == -1`; cap 6.
+- `Ship_ResetShipAndAttackersAfterBoarding` (0x00415cb0): for every ship
+  whose primary target is the captured ship: reset ai_state/control, clear
+  target slots, hostility, stellar target. Same reset on the ship itself +
+  `mission_ship_slot = -1`, `voice_type_mode = rand(2)` overridden by class
+  inherent_attributes_govt voice mode.
+- `ShipClass_CanPlayerCaptureShipClass` (0x004694a0): fighter-bay outfit /
+  escort-capacity counting (used by the post-hit arms and swap gating).
+
+## 2. Port design
+
+- New TU `src/game/boarding_plunder.cpp` implementing:
+  - `NovaBoarding_BuildOptions(state)` → `BoardingPlunderOptions` (header
+    exists). Uses `state.rng` via the shared `NovaRandomRange` pattern
+    (uniform_int_distribution, negotiation_dialog style), `ScenarioData`
+    lookups, `ShipClass::crew` as capture_power, `Outfit` mod pairs for
+    marines/weapon attrs, `PlayerInventory`.
+  - `NovaBoarding_RunWindow(platform, audio, state)` → modal loop following
+    the ship-comm dialog pattern: LoadPictTexture(0x2143) backdrop,
+    ServicesButtonArt buttons at DITL rects, NovaFontCache text, hover/press
+    tracking mirroring 0x004a22e0, transfers applied to GameState, HUD
+    overlays via NovaHud_ShowOverlayMessage.
+  - `NovaBoarding_HandleBoardTargetCommand(platform, state)` → gates +
+    dispatch; plunder window only in this pass, mission arms TODO.
+  - `NovaShip_CanPlayerHaveMoreEscorts(state)`.
+  - minimal `Ship_ResetShipAndAttackersAfterBoarding` port (targeting
+    clears; voice_type_mode only when that field exists in the port).
+- Input hook: `FlightInput.board` edge ('b', the original default binding),
+  wired in the spaceflight loop next to target_action.
+- Strings via `NovaHud_LoadStringEntry(0x7d2, ...)` / `0x96` for button
+  labels; commodity/weapon names from `ScenarioData` outfit/cargo tables.
+- Divergences to log in code (TODO(decomp) markers):
+  - mission-ship arms of the board command (interaction window, bounty,
+    cargo pickup) — mission ship defs not modeled.
+  - Capture-decision dialog (DLOG 0x3fa) + ship swap — planned second pass;
+    escort-only in the meantime (header already notes this).
+  - `g_expression_ship_class_id` license gate modeled as target class
+    license runtime state (port: ScenarioData has no license runtime yet —
+    treat all as licensed unless loaded; see open questions).
+  - sounds: original queues centered-resource cues (g_transition_sound_
+    handle_table); port plays through SdlAudio one-shots or logs skips.
+
+## 3. Iterations
+
+1. **DONE — Options + escort cap** — `NovaBoarding_BuildOptions`,
+   `NovaShip_CanPlayerHaveMoreEscorts`, `Weapon_HasMatchingWeaponAmmoCarried`
+   (0x00469230) quirk preserved. Divergence: `rand(0)` reseeds in the
+   original and returns garbage; port returns 0 (fuel roll only).
+2. **DONE — Board command** — `NovaBoarding_HandleBoardTargetCommand`
+   (gates + velocity match + plain-ship dispatch + denial overlays + beeps),
+   `NovaBoarding_ResetShipAndAttackersAfterBoarding`, `FlightInput.board`
+   ('b'), spaceflight hook, `pending_ui_sounds` queue + transition-sound
+   cache (snd 150..155 = g_transition_sound_handle_table[0..5]).
+3. **Window** — modal loop, painter, buttons, loot transfers, panic odds.
+   *IN PROGRESS next.*
+4. **Capture arm** — escort conversion + reset-after-boarding.
+5. **Capture-decision dialog + swap** (0x00497eb0, Outfit_SwapPlayerShip-
+   WithEscort equivalent) — likely needs docked-loadout machinery; scope
+   when reached.
+6. **progress.csv + doc updates** — updated per iteration (1/2 landed).
+
+### In-game verification (iterations 1-2)
+
+To exercise this today: fly, target a disabled hostile ('`' to cycle), slow
+to < 0.5 px/frame relative velocity, align heading within 30°, close to half
+the target's sprite frame, press **b**.
+
+- Confirmed working in-game: gates pass on a disabled target and the stub
+  logs the rolled offers (observed: `cargo(-1) credits=-1 fuel=30
+  capture_odds=10%` — a booty-flagless dude, so no cargo/money offers, while
+  fuel and odds still roll from class stats, matching the original's
+  independence of the two paths).
+- Denial checks: board an undamaged ship → "You can't board this ship.";
+  board at speed → "You're moving too fast..."; board far away → "You're not
+  close enough..."; wrong heading → silent no-op (original behavior).
+- Each denial also beeps (snd 153).
+- Reset-after-boarding is not reachable until iteration 4 (capture arm).
+
+## 4. Open questions / to verify in-game
+
+- STR# 30000 entry 1 (the "unlicensed ship" note appended after the capture
+  odds when the class is unlicensed) — pool not found in the archives dump;
+  re-check whether any archive carries STR# 0x7530 and what its text is.
+- Mission-ship boarding behaviors for later iterations.
+- Capture-decision DITL 0x3fa button labels (decode pending).
+- RESOLVED: the STR# 0x7d2 0x70 odds-row label. The decompile/disasm show the
+  original drawing "Oops! You tripped this ship's security self-destruct
+  mechanism." there, and in-game verification confirms that's the shipped
+  behavior — the engine cheekily reuses the self-destruct string as the
+  capture-odds row label. Reproduce as-is.

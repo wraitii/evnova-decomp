@@ -522,6 +522,7 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.starmap = pressed(SDL_SCANCODE_M);
   input.land = pressed(SDL_SCANCODE_RETURN) || pressed(SDL_SCANCODE_KP_ENTER);
   input.target_action = pressed(SDL_SCANCODE_E);
+  input.board = pressed(SDL_SCANCODE_B);
   input.cycle_target_next = pressed(SDL_SCANCODE_TAB) &&
                             !pressed(SDL_SCANCODE_LSHIFT) &&
                             !pressed(SDL_SCANCODE_RSHIFT);
