@@ -19,8 +19,8 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 - Check the EVN bible ("EV Nova Bible.html") for information.
 - Reference decompiled / disassembled ground truth from the Ghidra API.
 - When grepping, prefer to do it in the repo root and `tools/`; data may not be where you expect.
-- Be conservative with speculative renames; be liberal with factual comments. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.
-- Prefer plate comments for functions; pre-comments for globals/data.
+- Be conservative with speculative renames. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.
+- In ghidra: Prefer plate comments for functions; pre-comments for globals/data.
 - When renaming high-level control-flow functions (startup, run loop, shutdown), also add a short clean-room comment block (2-4 lines) documenting purpose, entry/exit conditions, and confidence/unknowns.
 - If testing game behaviour is required, stop and ask the user for input - you will not be able to interact with the game well enough.
 - Beware of `find` in shell, on macos some commands are very slow if searching the disk.
@@ -60,6 +60,8 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 - Keep SDL handles behind small RAII wrappers.
 - Try to keep game logic independent of SDL, though it's sometimes more practical to bundle the two together.
 - Represent game state explicitly. Avoid hidden globals and singleton managers. This may diverge from the original implementation where practical.
+- Keep comments minimal, the code should be self-explanatory.
+- NO JOURNALLING in the comments.
 - Preserve original constants and quirks when they affect gameplay.
 - Name reconstructed concepts by purpose, not by decompiler-generated names.
 - Document uncertain behavior with TODO(decomp) and supporting evidence. Log verbosely.
