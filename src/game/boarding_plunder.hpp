@@ -82,11 +82,14 @@ struct BoardingWindowResult {
 };
 
 // Ghidra 0x00482940 NovaUi_RunBoardingPlunderWindow (clean-room).
-// Runs the modal boarding/plunder window for state.player's primary target.
-// Builds the plunder offers itself, as the original does, then runs the
-// event loop until the player aborts or the target is lost. The state
-// mutations (cargo/credits/fuel transfer, escort conversion) are applied
-// directly to GameState, as in the original.
+// Runs the modal boarding/plunder window (DLOG 0x3f3, PICT 0x2143) for
+// state.player's primary target. Builds the plunder offers itself, as the
+// original does, then runs the event loop until the player aborts, the target
+// is lost, or a capture resolves. Each loot action (cargo/credits/ammo/fuel)
+// applies its transfer to GameState and re-arms the panic self-destruct
+// re-roll; the capture arm converts the boarded hull to a behavior-6 escort
+// (the capture-decision dialog / ship swap, NovaUi_ShowCaptureDecisionDialog
+// 0x00497eb0, is TODO(decomp) — see the BoardingWindowResult note).
 //
 // Note: the flight loop owns the SDL audio device, so the modal plays its
 // one-shot cues directly through `audio` (the original queues them into

@@ -237,9 +237,19 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    `NovaBoarding_ResetShipAndAttackersAfterBoarding`, `FlightInput.board`
    ('b'), spaceflight hook, `pending_ui_sounds` queue + transition-sound
    cache (snd 150..155 = g_transition_sound_handle_table[0..5]).
-3. **Window** — modal loop, painter, buttons, loot transfers, panic odds.
-   *IN PROGRESS next.*
-4. **Capture arm** — escort conversion + reset-after-boarding.
+3. **DONE — Window** — modal loop, painter, loot transfers, panic odds.
+   `NovaBoarding_RunWindow` (0x00482940) now renders DLOG 0x3f3 (backdrop PICT
+   0x2143, six three-state buttons from DITL 0x3f3, the DITL item-4 text panel
+   with the offer rows incl. the "self-destruct string as odds-row label" quirk),
+   and applies the cargo/credits/ammo/fuel transfers plus the panic self-
+   destruct re-roll ladder. Draw helpers port 0x00484d30 / 0x004a24e0; button
+   hit/hover filtering mirrors 0x004a22e0. Commodity names load from STR# 0xfa1
+   (entry cargo_type+1, the original's DAT_0069d2cc source); weapon names from
+   Outfit LCName/LCPlural.
+4. **Capture arm** — escort conversion + reset-after-boarding. *IN PROGRESS
+   next*: the window already takes the escort-conversion path (behavior 6,
+   armor restore, reset-after-boarding); the capture-decision dialog + ship
+   swap remain deferred.
 5. **Capture-decision dialog + swap** (0x00497eb0, Outfit_SwapPlayerShip-
    WithEscort equivalent) — likely needs docked-loadout machinery; scope
    when reached.

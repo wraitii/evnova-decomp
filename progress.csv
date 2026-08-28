@@ -711,9 +711,9 @@ address,name,impl_file,reimpl_pct,comment
 0x004826A0,NovaUi_DrawTravelDestinationPaymentWindow,,0%,
 0x004828C0,NovaUi_LoadTravelDestinationPromptString,,0%,
 0x00482910,NovaUi_LoadTravelDestinationStatusString,src/game/negotiation_dialog.cpp,80,status STR# 0xbba loaded via NovaHud_LoadStringEntry with the 5-flavour variant at message*5+random+1 (real per-launch random index)
-0x00482940,NovaUi_RunBoardingPlunderWindow,src/game/boarding_plunder.cpp,10%,"Stub: builds offers and logs; DLOG 0x3f3 modal, loot transfer, panic/self-destruct ladder, capture arm all pending (iteration 3)."
+0x00482940,NovaUi_RunBoardingPlunderWindow,src/game/boarding_plunder.cpp,60%,"Clean-room modal over DLOG 0x3f3 (PICT 0x2143): panic=rand(0x1a)+0xf, offer build, six three-state buttons with hover/disable art, DITL item-4 text-panel rows (cargo/ammo/credits/fuel + self-destruct row-label quirk), loot transfers (cargo clamp to fleet capacity, credits add, ammo bank-transfer gated by ownership clamp, fuel fill) each multiply the panic and re-arm the self-destruct roll, capture arm (derelict gate, roll, 1-in-10 Oops, escort-cap gate, behavior-6 escort conversion with armor restore + reset-after-boarding). Direct one-shot cues via SdlAudio. TODO(decomp): mission-ship free-outfit arm, capture-decision dialog + swap (0x00497eb0), reaction script, mass accounting in the ammo loop."
 0x00484230,Ship_BuildBoardingPlunderOptions,src/game/boarding_plunder.cpp,85%,"Faithful rolls: dude/mission booty credits (2.0 threshold + rand branch), booty-flag cargo bins, ammo candidates via Weapon_HasMatchingWeaponAmmoCarried quirk, fuel bins, capture odds (crew+10% escorts+marines, strength accumulator +10 gate, +-5 noise, clamp [1,75], derelict 0x800 + escort-cap zeroing). TODO(decomp): mission-ship booty arm (MissionShipDef +0x618 unmodeled), is_licensed_runtime gate."
-0x00484D30,NovaUi_DrawBoardingPlunderWindow,,0%,
+0x00484D30,NovaUi_DrawBoardingPlunderWindow,src/game/boarding_plunder.cpp,70%,"Draws the PICT 0x2143 backdrop, DITL item-4 text panel (labels/values at the original panel-relative offsets incl. the STR# 0x7d2 0x70 odds-row label quirk; dimmed no-offer markers STR# 0x14f), and the six option buttons via DrawBoardOptionButtons. Commodity names from STR# 0xfa1 entry (type+1); weapon names from Outfit LCName/LCPlural. Runs inline in NovaBoarding_RunWindow (cited at 0x00482940)."
 0x004853A0,NovaUi_RunEscortShipManagementWindow,,0%,
 0x00485970,NovaUi_DrawEscortShipManagementWindow,,0%,
 0x004860B0,Profile_ExpressionGate_860,,0%,
@@ -832,8 +832,8 @@ address,name,impl_file,reimpl_pct,comment
 0x004A1ED0,NovaUi_DrawEscortShipManagementButtons,,0%,
 0x004A2090,NovaUi_HandleTravelDestinationPaymentButtons,,0%,
 0x004A21E0,NovaUi_DrawTravelDestinationPaymentButtons,,0%,
-0x004A22E0,NovaUi_HandleBoardingPlunderOptionButtons,,0%,
-0x004A24E0,NovaUi_DrawBoardingPlunderOptionButtons,,0%,
+0x004A22E0,NovaUi_HandleBoardingPlunderOptionButtons,src/game/boarding_plunder.cpp,50%,"Button hit-test set (items 0..3 then 5..6 -> action codes 1,2,3,4,6,7) and disabled-slot hover filtering; Esc/Enter/click dispatch. Runs inline as the modal poll in NovaBoarding_RunWindow (cited at 0x00482940)."
+0x004A24E0,NovaUi_DrawBoardingPlunderOptionButtons,src/game/boarding_plunder.cpp,70%,"Draws the six DITL option strips via the shared three-state button art: enabled = normal (or hover/pressed) art, disabled (no offer / capture odds < 1) = grey art, labels from STR# 0x96 (Abort 0x22 / Cargo 0x27 / Credits 0x28 / Ammo 0x29 / Energy 0x2a / Capture Ship 0x2b). Runs inline in NovaBoarding_RunWindow (cited at 0x00482940)."
 0x004A26E0,NovaUi_HandleTravelDestinationServicesButtons,,0%,
 0x004A2810,NovaUi_DrawTravelDestinationServicesButtons,,0%,
 0x004A2960,TravelOutfitMenu_FUN_004a2960,,0%,

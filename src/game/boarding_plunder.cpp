@@ -1,15 +1,26 @@
 #include "boarding_plunder.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <memory>
+#include <optional>
 #include <random>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../pict_image.hpp"
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
+#include "government.hpp"
 #include "hud_overlay.hpp"
+#include "nova_font.hpp"
+#include "outfit.hpp"
 #include "scenario_data.hpp"
+#include "services_buttons.hpp"
 #include "ship_ai.hpp"
 #include "ship_visual.hpp"
 #include "targeting.hpp"
@@ -633,27 +644,825 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   NovaTargeting_ClearDestroyedShipReferences(state, target.ship_instance_id);
 }
 
-// Ghidra 0x00482940 NovaUi_RunBoardingPlunderWindow — iteration 3 stub.
-// The modal window (DLOG 0x3f3) is not drawn yet; this builds the offers and
-// reports the skip so the board command can be exercised end-to-end.
-[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(
-    SdlPlatform & /*platform*/, SdlAudio & /*audio*/, GameState &state) {
+namespace {
+
+// Ghidra 0x00482940 NovaUi_RunBoardingPlunderWindow — clean-room port
+// (iteration 3). DLOG 0x3f3 (309x198), backdrop PICT 0x2143, DITL 0x3f3 items:
+//   [0] Abort (STR# 0x96 0x22, 91..217 x 166..191)
+//   [1] Cargo (0x27, 110..199 x 110..135)
+//   [2] Credits (0x28, 35..124 x 138..163)
+//   [3] Ammo (0x29, 204..293 x 110..135)
+//   [4] text panel (UserItem, 11..298 x 7..103)
+//   [5] Energy (0x2a, 16..105 x 110..135)
+//   [6] Capture Ship (0x2b, 129..275 x 138..163)
+// Items 0..3 then 5..6 are the six option buttons (entry 4, the text panel, is
+// skipped); UiPanel entry indices are 1-based, so the action codes read back
+// by NovaUi_PollTravelScriptAction are 1,2,3,4,6,7 (no code 5). The window is
+// centred on the 640x480 playfield.
+constexpr float kBoardWindowX = (640.0F - 309.0F) / 2.0F; // 165.5
+constexpr float kBoardWindowY = (480.0F - 198.0F) / 2.0F; // 141.0
+constexpr float kBoardWindowW = 309.0F;
+constexpr float kBoardWindowH = 198.0F;
+constexpr std::uint16_t kBoardBackdropPict = 0x2143;
+
+// STR# 0x96 button-label pool: Abort/Cargo/Credits/Ammo/Energy/Capture Ship.
+constexpr std::uint16_t kButtonLabelStr = 0x96;
+constexpr std::uint16_t kBtnAbort = 0x22;
+constexpr std::uint16_t kBtnCargo = 0x27;
+constexpr std::uint16_t kBtnCredits = 0x28;
+constexpr std::uint16_t kBtnAmmo = 0x29;
+constexpr std::uint16_t kBtnEnergy = 0x2a;
+constexpr std::uint16_t kBtnCaptureShip = 0x2b;
+
+// Action codes returned for each option button (NovaUi_PollTravelScriptAction).
+constexpr unsigned kActionAbort = 1;
+constexpr unsigned kActionCargo = 2;
+constexpr unsigned kActionCredits = 3;
+constexpr unsigned kActionAmmo = 4;
+constexpr unsigned kActionEnergy = 6;
+constexpr unsigned kActionCapture = 7;
+
+// STR# 0x7d2 "misc strings" used by the window.
+constexpr std::uint16_t kMiscStr = 0x7d2;
+constexpr std::uint16_t kMiscCargoLabel = 0x6d;       // "Cargo:"
+constexpr std::uint16_t kMiscAmmoLabel = 0x6e;        // "Ammo:"
+constexpr std::uint16_t kMiscCaptureOddsLabel = 0x6f; // "Capture Odds:"
+constexpr std::uint16_t kMiscOddsRowLabel = 0x70;     // self-destruct string
+                                                  // (quirk, see doc)
+constexpr std::uint16_t kMiscStoleAll = 0x73;     // "You stole all the"
+constexpr std::uint16_t kMiscOfWord = 0x187;      // "of"
+constexpr std::uint16_t kMiscNoOffer = 0x14f;     // "no offer" dim marker
+constexpr std::uint16_t kMiscCargoFull = 0x72;    // "couldn't store any"
+constexpr std::uint16_t kMiscAmmoFull = 0x75;     // "couldn't store any ammo"
+constexpr std::uint16_t kMiscSelfDestruct = 0x71; // "Oops! ... self-destruct"
+constexpr std::uint16_t kMiscCaptureFailed = 0x7d;
+constexpr std::uint16_t kMiscEscortCap = 0x7c;
+constexpr std::uint16_t kMiscAssignedEscort = 0x7b;
+// Fuel-fill overlays (STR# 0x7d2 entries 4..6, DAT_0072d6cc/d7cc/d8cc).
+constexpr std::uint16_t kMiscFuelNowFull = 4;
+constexpr std::uint16_t kMiscFuelStole = 5;
+constexpr std::uint16_t kMiscFuelTankFull = 6;
+// Key-hint row (DAT_0072f1cc = STR# 0x7d2 entry 0x21).
+constexpr std::uint16_t kMiscKeyHint = 0x21;
+
+// Cargo commodity names live in STR# 0xfa1, entry (cargo_type + 1) — the
+// original loader fills DAT_0069d2cc[cargo_type] from STR# 0xfa1 entry
+// (cargo_type + 1) (Ghidra FUN_004c7040). The boarding roll only ever uses
+// the standard types 0..5.
+constexpr std::uint16_t kCargoNameStr = 0xfa1;
+
+// Panic multipliers after each loot action (Ghidra doubles 00575900/5908/
+// 58e0). Applied to the window's panic value; the self-destruct roll on the
+// next iteration uses it.
+constexpr double kPanicCargo = 2.0;
+constexpr double kPanicCredits = 1.25;
+constexpr double kPanicAmmo = 2.0;
+constexpr double kPanicEnergy = 1.5;
+
+// Capture conversion restores armor to this fraction of the class max armor
+// (Ghidra double 005758a0 = 0.5).
+constexpr float kCapturedArmorFraction = 0.5F;
+
+// Dialog colours (labels DAT_00733b50, values PTR_DAT_00575ad8, dimmed
+// DAT_00733b56, panel fill black).
+constexpr SDL_Color kBoardLabel{192, 192, 192, 255};
+constexpr SDL_Color kBoardValue{255, 255, 255, 255};
+constexpr SDL_Color kBoardDim{128, 128, 128, 255};
+constexpr SDL_Color kBoardPanelBg{0, 0, 0, 255};
+
+// Loads one PICT into a texture (null on failure), mirroring the other modal
+// dialogs.
+std::unique_ptr<SdlTexture> LoadBoardPictTexture(SdlPlatform &platform,
+                                                 std::uint16_t pict_id) {
+  const auto data = NovaResource_LoadPictData(pict_id);
+  if (!data) {
+    return {};
+  }
+  const auto img = Resource_LoadPictAsImage(*data);
+  if (!img) {
+    return {};
+  }
+  return SdlTexture::Create(
+      platform.renderer(), img->width, img->height, img->rgba_pixels);
+}
+
+// Loads a STR# 0x96 button label with a fallback.
+std::string LoadBoardButtonLabel(std::uint16_t index) {
+  if (auto s = NovaHud_LoadStringEntry(kButtonLabelStr, index)) {
+    return *s;
+  }
+  return "?";
+}
+
+// Loads a STR# 0x7d2 overlay fragment with a fallback.
+std::string LoadBoardMiscString(std::uint16_t index, std::string fallback) {
+  if (auto s = NovaHud_LoadStringEntry(kMiscStr, index)) {
+    return *s;
+  }
+  return fallback;
+}
+
+// The commodity name for a cargo type (STR# 0xfa1 entry cargo_type+1).
+std::string CargoName(const GameState &state, int cargo_type) {
+  if (cargo_type < 0 || cargo_type > 5) {
+    return "?";
+  }
+  (void)state;
+  if (auto s = NovaHud_LoadStringEntry(
+          kCargoNameStr, static_cast<std::uint16_t>(cargo_type + 1))) {
+    return *s;
+  }
+  // Fallbacks mirror the six standard boarding commodities.
+  static constexpr const char *kFallback[6] = {
+      "food", "industrial", "medical", "luxury", "metal", "equipment"};
+  return kFallback[static_cast<std::size_t>(cargo_type)];
+}
+
+// One boarding-window option button.
+struct BoardButton {
+  SDL_FRect rect;            // absolute 640x480 screen rect
+  std::uint8_t action_code;  // 1 (Abort) .. 7 (Capture), skipping 5
+  std::uint16_t label_index; // STR# 0x96 index
+  std::string label;
+};
+
+// Builds the six option buttons from the DITL item rects (absolute screen
+// coords). Order matches the hit-test set (items 0..3 then 5..6).
+std::array<BoardButton, 6> BuildBoardButtons() {
+  const auto abs = [](float x, float y, float w, float h) {
+    return SDL_FRect{kBoardWindowX + x, kBoardWindowY + y, w, h};
+  };
+  return std::array<BoardButton, 6>{
+      BoardButton{abs(91.0F, 166.0F, 126.0F, 25.0F),
+                  kActionAbort,
+                  kBtnAbort,
+                  LoadBoardButtonLabel(kBtnAbort)},
+      BoardButton{abs(110.0F, 110.0F, 89.0F, 25.0F),
+                  kActionCargo,
+                  kBtnCargo,
+                  LoadBoardButtonLabel(kBtnCargo)},
+      BoardButton{abs(35.0F, 138.0F, 89.0F, 25.0F),
+                  kActionCredits,
+                  kBtnCredits,
+                  LoadBoardButtonLabel(kBtnCredits)},
+      BoardButton{abs(204.0F, 110.0F, 89.0F, 25.0F),
+                  kActionAmmo,
+                  kBtnAmmo,
+                  LoadBoardButtonLabel(kBtnAmmo)},
+      BoardButton{abs(16.0F, 110.0F, 89.0F, 25.0F),
+                  kActionEnergy,
+                  kBtnEnergy,
+                  LoadBoardButtonLabel(kBtnEnergy)},
+      BoardButton{abs(129.0F, 138.0F, 146.0F, 25.0F),
+                  kActionCapture,
+                  kBtnCaptureShip,
+                  LoadBoardButtonLabel(kBtnCaptureShip)},
+  };
+}
+
+// Finds the zero-based scenario outfit index whose ModType-3 (weapon) mod pair
+// carries ModVal == `weapon_bank`; -1 when none does. Mirrors the scan in
+// NovaUi_DrawBoardingPlunderWindow / HandleBoardingPlunderOptionButtons.
+std::int16_t FindWeaponOutfitIndex(const GameState &state, int weapon_bank) {
+  for (std::size_t i = 0; i < state.scenario.outfits.size(); ++i) {
+    const Outfit &outfit = state.scenario.outfits[i];
+    if (OutfitModPairAt(outfit, 0).type == 3 &&
+        OutfitModPairAt(outfit, 0).val == weapon_bank) {
+      return static_cast<std::int16_t>(i);
+    }
+    for (int pair = 1; pair < kOutfitModPairCount; ++pair) {
+      const OutfitModPair mod = OutfitModPairAt(outfit, pair);
+      if (mod.type == 3 && mod.val == weapon_bank) {
+        return static_cast<std::int16_t>(i);
+      }
+    }
+  }
+  return -1;
+}
+
+// The singular/plural weapon display name for a boarded ammo offer (the
+// original's DAT_0063cccc/65cccc outfit LCName/LCPlural tables).
+std::string
+WeaponOfferName(const GameState &state, int ammo_bank, int quantity) {
+  const std::int16_t index = FindWeaponOutfitIndex(state, ammo_bank);
+  if (index < 0 ||
+      static_cast<std::size_t>(index) >= state.scenario.outfits.size()) {
+    return "?";
+  }
+  const Outfit &outfit =
+      state.scenario.outfits[static_cast<std::size_t>(index)];
+  return quantity < 2
+             ? (outfit.lc_name.empty() ? outfit.name : outfit.lc_name)
+             : (outfit.lc_plural.empty() ? outfit.name : outfit.lc_plural);
+}
+
+// Ghidra 0x004a24e0 NovaUi_DrawBoardingPlunderOptionButtons. Draws the six
+// option strips from the shared three-state button art. Enabled buttons use
+// the normal art (or the pressed/hover art when `hovered`); disabled buttons
+// (no offer / capture odds < 1) use the grey art.
+void DrawBoardOptionButtons(SdlPlatform &platform,
+                            NovaFontCache &font_cache,
+                            const ServicesButtonArt &art,
+                            const std::array<BoardButton, 6> &buttons,
+                            const BoardingPlunderOptions &options,
+                            int hovered) {
+  const bool enabled[6] = {
+      true,                    // Abort always enabled
+      options.cargo_offer(),   // Cargo
+      options.credits_offer(), // Credits
+      options.ammo_offer(),    // Ammo
+      options.fuel_offer(),    // Energy
+      options.capture_offer(), // Capture Ship
+  };
+  constexpr SDL_Color kButtonLabel{255, 255, 255, 255};
+  for (std::size_t i = 0; i < buttons.size(); ++i) {
+    const BoardButton &b = buttons[i];
+    const ButtonState state =
+        !enabled[i] ? ButtonState::kDisabled
+                    : (hovered == static_cast<int>(i) ? ButtonState::kHover
+                                                      : ButtonState::kNormal);
+    art.Draw(platform, b.rect, state);
+    NovaText_DrawCentered(platform,
+                          font_cache,
+                          kThreeStateButtonFontFamily,
+                          kThreeStateButtonFontSize,
+                          kNovaFontStyleRegular,
+                          kButtonLabel,
+                          b.rect.x,
+                          b.rect.x + b.rect.w,
+                          ThreeStateButtonLabelBaseline(b.rect),
+                          b.label);
+  }
+}
+
+// Ghidra 0x00484d30 NovaUi_DrawBoardingPlunderWindow. Draws the window
+// backdrop (PICT 0x2143) and the offers into the DITL item-4 text panel:
+//   y+12  "Cargo:" label
+//   y+28  "Ammo:" label        | x+50  cargo "<qty> <ton(s)> of <food>"
+//   y+42  key hint             | x+50  credits (grouped)
+//   y+56  "Capture Odds:"      | x+50  ammo "<qty> <weapon>"
+//   y+70  "Energy:" (x+1)      | fuel qty (x+50) | self-destruct string
+//                                (x+120) | odds% "%." (x+195)
+// The "self-destruct string" row label at x+120 reuses STR# 0x7d2 0x70 — the
+// original draws the "Oops! You tripped this ship's security self-destruct
+// mechanism." text there (a shipped quirk we reproduce faithfully; see
+// docs/boarding_plunder_capture.md).
+void DrawBoardWindow(SdlPlatform &platform,
+                     NovaFontCache &font_cache,
+                     const ServicesButtonArt &art,
+                     const std::array<BoardButton, 6> &buttons,
+                     const BoardingPlunderOptions &options,
+                     const GameState &state,
+                     SDL_Texture *backdrop,
+                     int hovered) {
+  SDL_Renderer *renderer = platform.renderer();
+  // Full-screen dim scrim behind the window.
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderClear(renderer);
+  platform.SetCenteredPlayfield();
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
+  const SDL_FRect field{0.0F, 0.0F, 640.0F, 480.0F};
+  SDL_RenderFillRect(renderer, &field);
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+  const SDL_FRect window{
+      kBoardWindowX, kBoardWindowY, kBoardWindowW, kBoardWindowH};
+  if (backdrop != nullptr) {
+    SDL_RenderTexture(renderer, backdrop, nullptr, &window);
+  } else {
+    SDL_SetRenderDrawColor(renderer, 16, 40, 72, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &window);
+    SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &window);
+  }
+
+  // Text panel (DITL item 4): 11..298 x 7..103 in window coords, filled
+  // black; labels/values are drawn at panel-relative offsets.
+  const SDL_FRect panel{
+      kBoardWindowX + 11.0F, kBoardWindowY + 7.0F, 287.0F, 96.0F};
+  SDL_SetRenderDrawColor(renderer,
+                         kBoardPanelBg.r,
+                         kBoardPanelBg.g,
+                         kBoardPanelBg.b,
+                         SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &panel);
+  const float px = panel.x;
+  const float py = panel.y;
+
+  const auto draw_text = [&](float x,
+                             float y,
+                             const std::string &text,
+                             SDL_Color color,
+                             float size = 12.0F) {
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  size,
+                  kNovaFontStyleRegular,
+                  color,
+                  x,
+                  y,
+                  text);
+  };
+
+  // Label column (panel x).
+  draw_text(px,
+            py + 12.0F,
+            LoadBoardMiscString(kMiscCargoLabel, "Cargo:"),
+            kBoardLabel);
+  draw_text(px,
+            py + 28.0F,
+            LoadBoardMiscString(kMiscAmmoLabel, "Ammo:"),
+            kBoardLabel);
+  draw_text(px,
+            py + 42.0F,
+            LoadBoardMiscString(kMiscKeyHint, "Collect via:"),
+            kBoardLabel);
+  draw_text(px,
+            py + 56.0F,
+            LoadBoardMiscString(kMiscCaptureOddsLabel, "Capture Odds:"),
+            kBoardLabel);
+
+  // Value column (panel x + 50).
+  const float vx = px + 50.0F;
+  if (options.cargo_type == -1) {
+    draw_text(
+        vx, py + 28.0F, LoadBoardMiscString(kMiscNoOffer, "-"), kBoardDim);
+  } else {
+    const std::string qty =
+        fmt::format("{}", static_cast<int>(options.cargo_quantity));
+    const std::string ton = options.cargo_quantity == 1 ? "ton" : "tons";
+    const std::string text =
+        qty + " " + ton + " of " + CargoName(state, options.cargo_type);
+    draw_text(vx, py + 28.0F, text, kBoardValue);
+  }
+  if (options.credits < 1) {
+    draw_text(
+        vx, py + 42.0F, LoadBoardMiscString(kMiscNoOffer, "-"), kBoardDim);
+  } else {
+    draw_text(vx,
+              py + 42.0F,
+              fmt::format("{}", static_cast<int>(options.credits)),
+              kBoardValue);
+  }
+  if (options.ammo_bank == -1) {
+    draw_text(
+        vx, py + 56.0F, LoadBoardMiscString(kMiscNoOffer, "-"), kBoardDim);
+  } else {
+    const std::string qty =
+        fmt::format("{}", static_cast<int>(options.ammo_quantity));
+    const std::string text =
+        qty + " " +
+        WeaponOfferName(state, options.ammo_bank, options.ammo_quantity);
+    draw_text(vx, py + 56.0F, text, kBoardValue);
+  }
+
+  // Fuel / odds row (panel y + 70): fuel label at x+1, fuel qty at x+50,
+  // the odds-row label at x+120 and the odds% at x+195.
+  draw_text(
+      px + 1.0F, py + 70.0F, LoadBoardMiscString(7, "Energy:"), kBoardLabel);
+  if (options.fuel_quantity < 1) {
+    draw_text(px + 50.0F,
+              py + 70.0F,
+              LoadBoardMiscString(kMiscNoOffer, "-"),
+              kBoardDim);
+  } else {
+    draw_text(px + 50.0F,
+              py + 70.0F,
+              fmt::format("{}", static_cast<int>(options.fuel_quantity)),
+              kBoardValue);
+  }
+  draw_text(px + 120.0F,
+            py + 70.0F,
+            LoadBoardMiscString(kMiscOddsRowLabel, "Oops!"),
+            kBoardLabel);
+  draw_text(px + 195.0F,
+            py + 70.0F,
+            fmt::format("{}%.", static_cast<int>(options.capture_odds_percent)),
+            kBoardValue);
+
+  // Option buttons.
+  DrawBoardOptionButtons(platform, font_cache, art, buttons, options, hovered);
+}
+
+// Plays a transition-table cue directly through the flight-loop-owned audio
+// device (the modal owns no device). Mirrors NovaEffects_QueueCenteredResource
+// on g_transition_sound_handle_table[index] with `count` repeats; index 2 =
+// confirm/taken, 3 = denial/error.
+void PlayTransitionCue(SdlAudio &audio,
+                       GameState &state,
+                       std::int16_t index,
+                       std::int16_t count = 1) {
+  EnsureTransitionSounds(state);
+  if (index < 0 ||
+      index >= static_cast<std::int16_t>(state.transition_sounds.size())) {
+    return;
+  }
+  const auto &sound = state.transition_sounds[static_cast<std::size_t>(index)];
+  if (!sound.has_value()) {
+    return;
+  }
+  for (std::int16_t repeat = 0; repeat < count; ++repeat) {
+    audio.Play(*sound, 1.0F, 1.0F, 150 + index);
+  }
+}
+
+void BoardShowOverlay(GameState &state,
+                      std::uint16_t str_index,
+                      std::string fallback) {
+  NovaHud_ShowOverlayMessage(
+      state, LoadBoardMiscString(str_index, std::move(fallback)));
+}
+
+// The roll => target self-destructs (shields/armor zeroed, death timer armed)
+// with the "Oops" overlay. Re-derives the boarded hull from the player's
+// primary target slot (the one the window was opened on).
+void SelfDestructTarget(GameState &state) {
+  const std::int16_t slot = state.player.primary_target_ship_slot;
+  if (slot < 1 || !state.SlotInRange(static_cast<std::size_t>(slot))) {
+    return;
+  }
+  Ship &hull = state.ShipAt(static_cast<std::size_t>(slot));
+  hull.shield_points = 0.0F;
+  hull.armor_points = 0.0F;
+  hull.death_timer_active = 0.0F;
+  BoardShowOverlay(state,
+                   kMiscSelfDestruct,
+                   "Oops! You tripped this ship's security "
+                   "self-destruct mechanism.");
+}
+
+} // namespace
+
+// Ghidra 0x00482940 NovaUi_RunBoardingPlunderWindow (clean-room, iteration 3).
+// Builds the offers, then runs the modal loop over DLOG 0x3f3 until the player
+// aborts or captures the target. Each loot action applies its transfer to
+// GameState, multiplies the panic value and re-arms the self-destruct re-roll
+// (checked on the next loop iteration). The capture arm converts the boarded
+// hull to a behavior-6 escort (the capture-decision dialog / ship swap,
+// NovaUi_ShowCaptureDecisionDialog 0x00497eb0, is TODO(decomp)). The window
+// plays its one-shot cues directly through `audio` (the flight loop owns the
+// device).
+[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(SdlPlatform &platform,
+                                                          SdlAudio &audio,
+                                                          GameState &state) {
   BoardingWindowResult result;
-  if (state.player.primary_target_ship_slot == -1) {
+
+  const std::int16_t target_slot = state.player.primary_target_ship_slot;
+  if (target_slot < 1 ||
+      !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
     return result; // target lost while the command ran
   }
-  const BoardingPlunderOptions options = NovaBoarding_BuildOptions(state);
+
+  // The window's panic value: rand(0x1a) + 0xf (15..40). Each loot action
+  // multiplies it; the self-destruct re-roll (armed by a loot action) fires
+  // when rand(100) <= panic.
+  std::int32_t panic = NovaRandomRange(state.rng, 0x1a) + 0xf;
+
+  BoardingPlunderOptions options = NovaBoarding_BuildOptions(state);
   NovaLog::Info(
-      "board: window stub — offers cargo({})={}x credits={} ammo({})={}x "
-      "fuel={} capture_odds={}%",
+      "board: opening plunder window — cargo({})={}x credits={} ammo({})={}x "
+      "fuel={} capture_odds={}% panic={}",
       options.cargo_type,
       options.cargo_quantity,
       options.credits,
       options.ammo_bank,
       options.ammo_quantity,
       options.fuel_quantity,
-      options.capture_odds_percent);
-  NovaLog::Todo("board: boarding/plunder window (0x00482940) not drawn yet");
+      options.capture_odds_percent,
+      panic);
+
+  // Mission-ship free-outfit bonus arm (the opening block that grants a random
+  // free outfit to mission ships with booty_ammo_max) is TODO(decomp): the
+  // mission-ship def table is not modelled.
+  if (state.ShipAt(static_cast<std::size_t>(target_slot)).mission_fleet_slot !=
+      -1) {
+    NovaLog::Todo("board: mission-ship free-outfit bonus arm of "
+                  "NovaUi_RunBoardingPlunderWindow not reconstructed");
+  }
+
+  // ---- Assets -------------------------------------------------------------
+  auto backdrop = LoadBoardPictTexture(platform, kBoardBackdropPict);
+  if (!backdrop) {
+    NovaLog::Todo("board: window backdrop PICT 0x2143 unavailable; drawing a "
+                  "bordered placeholder");
+  }
+  ServicesButtonArt art;
+  if (!art.Initialize(platform)) {
+    NovaLog::Warn("three-state button art unavailable for the boarding window");
+  }
+  NovaFontCache font_cache;
+  platform.SetCenteredPlayfield();
+  const std::array<BoardButton, 6> buttons = BuildBoardButtons();
+
+  // local_223: the self-destruct re-roll latch (armed by a loot action).
+  bool panic_armed = false;
+  bool close = false;
+
+  while (!platform.quit_requested() && !close) {
+    // Mouse-hover (mirrors NovaUi_HandleBoardingPlunderOptionButtons 0x004a22e0
+    // filter: disabled slots are excluded from the hovered index).
+    int hovered = -1;
+    const SDL_FPoint mouse = platform.mouse_position();
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+      bool slot_enabled = true;
+      switch (buttons[i].action_code) {
+      case kActionAbort:
+        slot_enabled = true;
+        break;
+      case kActionCargo:
+        slot_enabled = options.cargo_offer();
+        break;
+      case kActionCredits:
+        slot_enabled = options.credits_offer();
+        break;
+      case kActionAmmo:
+        slot_enabled = options.ammo_offer();
+        break;
+      case kActionEnergy:
+        slot_enabled = options.fuel_offer();
+        break;
+      case kActionCapture:
+        slot_enabled = options.capture_offer();
+        break;
+      default:
+        break;
+      }
+      if (slot_enabled && SDL_PointInRectFloat(&mouse, &buttons[i].rect)) {
+        hovered = static_cast<int>(i);
+        break;
+      }
+    }
+
+    DrawBoardWindow(platform,
+                    font_cache,
+                    art,
+                    buttons,
+                    options,
+                    state,
+                    backdrop ? backdrop->get() : nullptr,
+                    hovered);
+    SDL_RenderPresent(platform.renderer());
+
+    // Poll for a button action (1..7). Esc/Enter = Abort; left-click hits the
+    // hovered option button (the original has no keyboard shortcuts beyond
+    // that).
+    int action = 0;
+    for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
+      if (in->key == TextKey::escape || in->key == TextKey::enter) {
+        action = static_cast<int>(kActionAbort);
+        break;
+      }
+      if (in->key == TextKey::primary) {
+        const SDL_FPoint click = platform.mouse_position();
+        for (std::size_t i = 0; i < buttons.size(); ++i) {
+          if (SDL_PointInRectFloat(&click, &buttons[i].rect)) {
+            action = static_cast<int>(buttons[i].action_code);
+            break;
+          }
+        }
+        break;
+      }
+    }
+
+    // Abort (action 1): panic = -1, disarm, close with the confirm cue.
+    if (action == static_cast<int>(kActionAbort)) {
+      panic = -1;
+      panic_armed = false;
+      PlayTransitionCue(audio, state, 2);
+      close = true;
+    }
+
+    // Self-destruct re-roll (armed by the previous iteration's loot action).
+    if (panic_armed && NovaRandomRange(state.rng, 100) <= panic) {
+      SelfDestructTarget(state);
+      PlayTransitionCue(audio, state, 2);
+      result.target_self_destructed = true;
+      close = true;
+      break;
+    }
+    panic_armed = false;
+
+    // ---- Cargo (action 2) -----
+    if (action == static_cast<int>(kActionCargo)) {
+      if (options.cargo_type == -1) {
+        PlayTransitionCue(audio, state, 3); // denial beep
+      } else {
+        // Clamp quantity to the free fleet cargo space.
+        const std::int16_t total = Outfit_ComputePlayerCargoAndJunkTotal(state);
+        const std::int16_t capacity =
+            Outfit_ComputePlayerFleetCargoCapacity(state);
+        if (capacity - total < options.cargo_quantity) {
+          options.cargo_quantity = static_cast<std::int16_t>(capacity - total);
+        }
+        if (options.cargo_quantity < 1) {
+          PlayTransitionCue(audio, state, 2);
+          BoardShowOverlay(
+              state,
+              kMiscCargoFull,
+              "You couldn't store any of the cargo, so you left it.");
+        } else {
+          PlayTransitionCue(audio, state, 2);
+          const std::string text =
+              LoadBoardMiscString(kMiscStoleAll, "You stole all the") + " " +
+              fmt::format("{}", static_cast<int>(options.cargo_quantity)) +
+              " " + (options.cargo_quantity == 1 ? "ton" : "tons") + " " +
+              LoadBoardMiscString(kMiscOfWord, "of") + " " +
+              CargoName(state, options.cargo_type);
+          NovaHud_ShowOverlayMessage(state, text);
+          if (options.cargo_type >= 0 && options.cargo_type < 6) {
+            state.inventory
+                .cargo_bins[static_cast<std::size_t>(options.cargo_type)] +=
+                options.cargo_quantity;
+          }
+          options.cargo_quantity = 0;
+          options.cargo_type = -1;
+        }
+        panic = RoundHalfUp(static_cast<double>(panic) * kPanicCargo);
+        panic_armed = true;
+      }
+    }
+
+    // ---- Credits (action 3) -----
+    if (action == static_cast<int>(kActionCredits)) {
+      if (options.credits < 1) {
+        PlayTransitionCue(audio, state, 3);
+      } else {
+        PlayTransitionCue(audio, state, 2);
+        const std::string text =
+            LoadBoardMiscString(kMiscStoleAll, "You stole all the") + " " +
+            fmt::format("{}", static_cast<int>(options.credits)) + " credits";
+        NovaHud_ShowOverlayMessage(state, text);
+        state.player.credits += options.credits;
+        options.credits = 0;
+        panic = RoundHalfUp(static_cast<double>(panic) * kPanicCredits);
+        panic_armed = true;
+      }
+    }
+
+    // ---- Ammo (action 4) -----
+    if (action == static_cast<int>(kActionAmmo)) {
+      const std::int16_t outfit_index =
+          FindWeaponOutfitIndex(state, options.ammo_bank);
+      if (options.ammo_bank == -1 || outfit_index < 0) {
+        PlayTransitionCue(audio, state, 3);
+      } else {
+        const std::int16_t resource_id =
+            static_cast<std::int16_t>(0x80 + outfit_index);
+        int transferred = 0;
+        // Transfer up to the offer while the ownership maximum allows (the
+        // original's mass gate Ship_ComputeShipCurrentMass is approximated by
+        // the ownership clamp; TODO(decomp): free-mass accounting).
+        while (transferred < options.ammo_quantity) {
+          const OutfitOwnership own =
+              Outfit_ClampOwnedCountToLimits(state, resource_id);
+          if (own.effective_owned >= own.max_allowed) {
+            break;
+          }
+          state.weapon_bank_secondary[static_cast<std::size_t>(
+                                          options.ammo_bank) *
+                                      100] += 1;
+          ++transferred;
+        }
+        if (transferred < 1) {
+          PlayTransitionCue(audio, state, 2);
+          BoardShowOverlay(state, kMiscAmmoFull, "couldn't store any ammo.");
+        } else {
+          PlayTransitionCue(audio, state, 2);
+          const std::string text =
+              LoadBoardMiscString(kMiscStoleAll, "You stole all the") + " " +
+              fmt::format("{}", transferred) + " " +
+              WeaponOfferName(state, options.ammo_bank, transferred);
+          NovaHud_ShowOverlayMessage(state, text);
+        }
+        options.ammo_quantity = 0;
+        options.ammo_bank = -1;
+        panic = RoundHalfUp(static_cast<double>(panic) * kPanicAmmo);
+        panic_armed = true;
+      }
+    }
+
+    // ---- Energy (action 6) -----
+    if (action == static_cast<int>(kActionEnergy)) {
+      if (options.fuel_quantity < 1) {
+        PlayTransitionCue(audio, state, 3);
+      } else {
+        PlayTransitionCue(audio, state, 2);
+        const float capacity = state.cached_stats.fuel_capacity;
+        const double available = static_cast<double>(capacity) -
+                                 static_cast<double>(state.player.fuel_points);
+        int fill = static_cast<int>(std::llround(available));
+        if (fill > options.fuel_quantity) {
+          fill = options.fuel_quantity;
+        }
+        if (fill < 1) {
+          BoardShowOverlay(
+              state, kMiscFuelTankFull, "Your fuel tanks are already full.");
+        } else {
+          state.player.fuel_points += static_cast<float>(fill);
+          if (state.player.fuel_points >= capacity) {
+            BoardShowOverlay(
+                state, kMiscFuelNowFull, "Your fuel tanks are now full.");
+          } else {
+            BoardShowOverlay(
+                state, kMiscFuelStole, fmt::format("You took {} fuel.", fill));
+          }
+        }
+        options.fuel_quantity = 0;
+        panic = RoundHalfUp(static_cast<double>(panic) * kPanicEnergy);
+        panic_armed = true;
+      }
+    }
+
+    // ---- Capture (action 7) -----
+    if (action == static_cast<int>(kActionCapture)) {
+      Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+      // Derelict-government ships can never be captured (the roll becomes -1).
+      if (target.faction_or_government_id != -1) {
+        if (const Government *g =
+                state.scenario.Government(target.faction_or_government_id);
+            g != nullptr && (g->flags_primary & 0x800U) != 0U) {
+          options.capture_odds_percent = -1;
+        }
+      }
+      const std::int16_t roll = NovaRandomRange(state.rng, 100);
+      const bool auto_fail = options.capture_odds_percent < 1;
+      if (roll > options.capture_odds_percent || auto_fail) {
+        close = true;
+        PlayTransitionCue(audio, state, 3);
+        BoardShowOverlay(state,
+                         kMiscCaptureFailed,
+                         "Your attempt to capture this ship was unsuccessful.");
+        result.capture_attempt_failed = true;
+      } else {
+        // 1-in-10 "Oops" self-destruct roll.
+        if (NovaRandomRange(state.rng, 10) == 0) {
+          close = true;
+          SelfDestructTarget(state);
+          PlayTransitionCue(audio, state, 2);
+          result.target_self_destructed = true;
+        } else {
+          PlayTransitionCue(audio, state, 2);
+          if (!NovaShip_CanPlayerHaveMoreEscorts(state)) {
+            PlayTransitionCue(audio, state, 3);
+            BoardShowOverlay(
+                state,
+                kMiscEscortCap,
+                "You already have the maximum possible number of escorts.");
+          } else {
+            // The original shows NovaUi_ShowCaptureDecisionDialog (DLOG 0x3fa,
+            // PICT 0x2144: escort vs. swap) when the player class has
+            // capture_power >= 1 and the swap path can call
+            // Outfit_SwapPlayerShipWithEscort. Both are TODO(decomp); the port
+            // always takes the escort path.
+            NovaLog::Todo("board: NovaUi_ShowCaptureDecisionDialog 0x00497eb0 "
+                          "+ ship-swap not reconstructed; taking escort path");
+            close = true;
+
+            const ShipClass *target_class = state.scenario.Ship(
+                static_cast<std::int16_t>(target.ship_class_id + 0x80));
+            const float max_armor =
+                target_class != nullptr
+                    ? static_cast<float>(target_class->base_armor)
+                    : target.armor_points;
+            // TODO(decomp): the original runs the OnCapture reaction script
+            // (Mission_ExecuteReactionScript of ShipClassDef.field_0x3e9)
+            // before conversion.
+            target.ai_behavior_code = 6;
+            target.ai_target_ship_slot = 0;
+            target.escort_origin_mark = 0; // field_0xbb
+            target.armor_points = max_armor * kCapturedArmorFraction;
+            target.faction_or_government_id = -1;
+            target.mission_ship_slot = -1;
+            target.primary_target_ship_slot = -1;
+            target.escort_rehired_mark = 1; // field_0xb9
+            target.cloak_transition_latch = 0;
+            target.cloak_fade_progress = 0.0F;
+            target.target_stellar_object_id = -1;
+            target.ai_hostility_accumulator = 0;
+            // TODO(decomp): escort_released_mark / escort_upgrade_mark /
+            // jamming_score_* fields are not modelled in the port.
+            target.ai_state_code = 0;
+            target.ai_control_mode = 0;
+            target.ai_secondary_target_slot = -1;
+            NovaBoarding_ResetShipAndAttackersAfterBoarding(state, target);
+            BoardShowOverlay(
+                state,
+                kMiscAssignedEscort,
+                "You assigned this ship to your fleet of escorts.");
+            state.stat_cache_valid = false;
+            result.target_captured_as_escort = true;
+          }
+        }
+      }
+    }
+  }
+
+  // Original restores the draw context and recomputes outfit-derived state on
+  // close; the SDL modal has no context stack, so just mark the derived stats
+  // stale for the flight loop.
+  state.stat_cache_valid = false;
   return result;
 }
 
