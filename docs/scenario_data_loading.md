@@ -6,6 +6,9 @@ flow and spaceflight loop consume. The original rebuilds them at startup in
 resource families by id `0x80..` and parsing a fixed big-endian field layout
 (Macintosh resource heritage) into a set of globals.
 
+The m\xefsn (mission) resource family is decoded too — its verified payload
+offset map lives in `docs/mission_reimplementation_overview.md`.
+
 The scenario tables above are the *numeric data* families. The **in-flight and
 docked UI windows** (ship-comm 0x3ef, negotiation 0x3f1, payment 0x3f0,
 spaceport 0x3e8, ...) are built from a *different* pair of `Nova.rez`
