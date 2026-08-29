@@ -759,6 +759,16 @@ struct System {
   std::int16_t encounter_fleet_count = 0; // SystemDef +0x8a (bound def count)
   std::int16_t encounter_chance_percent = 0; // SystemDef +0x8c (spawn odds)
 
+  // SystemDef +0xb8/+0xba. Visibility twin remap: the scenario loader's
+  // post-load pass (NovaData_LoadScenarioResourceTables 0x004bd3c0) initializes
+  // both to -1, then groups invisible systems with a visible twin sharing the
+  // same position and points parent/root at the match. Consumed by
+  // System_ResolveVisibleSystemForTravel (0x0046b920). The grouping pass itself
+  // is not reconstructed yet (TODO(decomp(0x004beb4f))), so both stay -1 here
+  // and the resolver degrades to the plain is_visible test.
+  std::int16_t visible_parent_system_id = -1;  // +0xb8
+  std::int16_t visibility_root_system_id = -1; // +0xba
+
   // ---- Runtime discovery/visibility state (decoded with, not from, the
   // payload). Mirrors SystemDef is_visible / has_explored_flag / discovery
   // state, maintained by System_UpdateSystemAndStellarDisplayState and the

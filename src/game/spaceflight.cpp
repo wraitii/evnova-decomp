@@ -11,6 +11,7 @@
 #include "hud_renderer.hpp"
 #include "intro_cinematic.hpp"
 #include "landed_window.hpp"
+#include "mission.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
@@ -568,15 +569,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
               static_cast<std::int16_t>(state.transition_sounds.size())) {
         continue;
       }
-      const auto &sound =
-          state.transition_sounds[static_cast<std::size_t>(
-              pending.transition_index)];
+      const auto &sound = state.transition_sounds[static_cast<std::size_t>(
+          pending.transition_index)];
       if (!sound.has_value()) {
         continue;
       }
       for (std::int16_t repeat = 0; repeat < pending.count; ++repeat) {
-        audio.Play(*sound, 1.0F, 1.0F,
-                   150 + pending.transition_index);
+        audio.Play(*sound, 1.0F, 1.0F, 150 + pending.transition_index);
       }
     }
     state.pending_ui_sounds.clear();
@@ -1656,6 +1655,13 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   }
   p.engine_glow_intensity =
       std::clamp(static_cast<float>(p.engine_glow_level) / 24.0F, 0.0F, 1.0F);
+
+  // Ghidra Ship_HandlePlayerShipCore (0x0044aa70) runs Misn_TickActiveMission-
+  // Timers (0x00448910) as part of the per-frame player maintenance. The
+  // original also re-ticks after mission script execution and in
+  // Stellar_ProcessTravelAndLanding (0x004588b1); those clean-room call sites
+  // are not reconstructed yet (TODO(decomp)).
+  Misn_TickActiveMissionTimers(state);
 }
 
 void NovaPlayer_TickShieldRecharge(GameState &state, float frame_time_ms) {

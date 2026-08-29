@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace game {
@@ -19,8 +20,8 @@ struct MissionListEvaluation {
 // Mission_ResolveMissionStellarTargets (0x0043d240).
 void Mission_ResolveMissionStellarLocators(GameState &state);
 
-[[nodiscard]] MissionListEvaluation Mission_EvaluateMissionLists(
-    GameState &state);
+[[nodiscard]] MissionListEvaluation
+Mission_EvaluateMissionLists(GameState &state);
 
 // Mission IDs in this API are zero-based definition indices, matching the
 // original mission lists and MisnActive.mission_template_id. Scenario resource
@@ -32,10 +33,35 @@ void Mission_ResolveMissionStellarLocators(GameState &state);
 // acceptance resource gates, counters, and rearm initialization; reaction
 // scripts and UI refreshes remain outside this state-only API.
 [[nodiscard]] bool Mission_PopulateActiveSlot(GameState &state,
-                                               std::int16_t mission_id,
-                                               std::size_t active_slot);
+                                              std::int16_t mission_id,
+                                              std::size_t active_slot);
 
 [[nodiscard]] bool Mission_ActivateAtSlot(GameState &state,
-                                           std::int16_t mission_id);
+                                          std::int16_t mission_id);
+
+// Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel. Follows a system's
+// visibility remap chain (twin-system links written by the scenario loader)
+// until a visible system is found; -1 for out-of-range ids or chains with no
+// visible member.
+[[nodiscard]] std::int16_t
+Misn_ResolveVisibleSystemForTravel(const GameState &state,
+                                   std::int16_t system_id);
+
+// Ghidra 0x00448910 Misn_TickActiveMissionTimers. Per-tick maintenance over
+// the 16 active-mission runtime slots: resolves each mission's destination
+// system, seeds the spawn/rearm timers and encounter odds from RNG, and
+// clears transient counters. The original also re-ticks after mission script
+// execution and in the landing flow; those call sites are not wired yet
+// (TODO(decomp)).
+void Misn_TickActiveMissionTimers(GameState &state);
+
+// Ghidra 0x00447f20 Mission_CheckReactionConditionSatisfied. Tests a
+// reaction/availability condition string with the shared NCB expression
+// evaluator: empty strings pass, strings without a known expression head fail
+// closed, and adjacent open parens are normalized with a space before
+// evaluation.
+[[nodiscard]] bool
+Mission_CheckReactionConditionSatisfied(const GameState &state,
+                                        std::string_view condition);
 
 } // namespace game
