@@ -700,6 +700,23 @@ constexpr float kBoardWindowW = 309.0F;
 constexpr float kBoardWindowH = 198.0F;
 constexpr std::uint16_t kBoardBackdropPict = 0x2143;
 
+// DLOG 0x3fa (257x114, DITL 0x3fa) — the capture-decision dialog shown after a
+// successful capture roll. Items: [0] upper button (55,51)-(201,77) = action 1
+// "Use As My Ship" (STR# 0x96 0x2e); [1] lower button (55,83)-(201,109) =
+// action 2 "Use As Escort" (STR# 0x96 0x2d); [2] 238x40 text panel (9,6)
+// drawing STR# 0x7d2 0x75. Backdrop PICT 0x2144. Both choices play the
+// transition-table [1] cue. Decoded from the shipped resources (DLOG bounds
+// t40 l40 b154 r297) and NovaUi_RedrawTravelBinaryChoiceButtons's label-index
+// table {0x2e, 0x2d} into the STR# 0x96 pstring table (0-based pool entries).
+constexpr float kCaptureWindowX = (640.0F - 257.0F) / 2.0F; // 191.5
+constexpr float kCaptureWindowY = (480.0F - 114.0F) / 2.0F; // 183.0
+constexpr float kCaptureWindowW = 257.0F;
+constexpr float kCaptureWindowH = 114.0F;
+constexpr std::uint16_t kCaptureBackdropPict = 0x2144;
+constexpr std::uint16_t kCaptureTextStr = 0x75;      // STR# 0x7d2 pool entry
+constexpr std::uint16_t kCaptureBtnMyShip = 0x2e;    // STR# 0x96 pool entry
+constexpr std::uint16_t kCaptureBtnEscort = 0x2d;    // STR# 0x96 pool entry
+
 // STR# 0x96 button-label pool: Abort/Cargo/Credits/Ammo/Energy/Capture Ship.
 constexpr std::uint16_t kButtonLabelStr = 0x96;
 constexpr std::uint16_t kBtnAbort = 0x22;
@@ -1201,6 +1218,224 @@ void SelfDestructTarget(GameState &state) {
                    "self-destruct mechanism.");
 }
 
+// Word-wraps `text` into lines that fit `max_width` logical pixels at the
+// given font. The original's DrawPascalStringInFilledRect word-wraps inside
+// the item rect; the port's NovaText_Draw is single-line.
+std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
+                                      std::string_view text,
+                                      float max_width) {
+  std::vector<std::string> lines;
+  std::string line;
+  std::size_t start = 0;
+  while (start < text.size()) {
+    const std::size_t space = text.find(' ', start);
+    const std::string_view word =
+        text.substr(start, space == std::string_view::npos
+                               ? std::string_view::npos
+                               : space - start);
+    if (!line.empty()) {
+      line += ' ';
+    }
+    line += word;
+    if (font_cache.TextWidth(
+            NovaFontFamily::kGeneva, 11.0F, kNovaFontStyleRegular, line) >
+        max_width) {
+      // Overfull: put the word on its own (or the next) line.
+      if (const std::size_t cut = line.rfind(' '); cut != std::string::npos) {
+        lines.push_back(line.substr(0, cut));
+        line = std::string(word);
+      } else {
+        lines.push_back(line);
+        line.clear();
+      }
+    }
+    if (space == std::string_view::npos) {
+      break;
+    }
+    start = space + 1;
+  }
+  if (!line.empty()) {
+    lines.push_back(line);
+  }
+  return lines;
+}
+
+// Ghidra 0x00497eb0 NovaUi_ShowCaptureDecisionDialog (clean-room). Runs the
+// capture-decision modal (DLOG 0x3fa, PICT 0x2144) after a successful capture
+// roll and returns true for "Use As My Ship" (the swap arm), false for "Use
+// As Escort". The boarding window stays visible beneath, as in the original's
+// composited modal stack. Loop shape mirrors NovaUi_RunBoardingPlunderWindow:
+// input flush on open, ~60 Hz redraw, click answer (the DITL defines no
+// cancel item, so Esc/Enter are inert here).
+[[nodiscard]] bool RunCaptureDecisionDialog(SdlPlatform &platform,
+                                            SdlAudio &audio,
+                                            GameState &state,
+                                            SpaceflightView &view,
+                                            HudRenderer &hud,
+                                            NovaFontCache &font_cache,
+                                            const ServicesButtonArt &art,
+                                            const std::array<BoardButton, 6>
+                                                &board_buttons,
+                                            const BoardingPlunderOptions
+                                                &board_options,
+                                            SDL_Texture *board_backdrop) {
+  struct CaptureButton {
+    SDL_FRect rect;
+    unsigned action_code;
+    std::string label;
+  };
+  const auto abs = [](float x, float y, float w, float h) {
+    return SDL_FRect{kCaptureWindowX + x, kCaptureWindowY + y, w, h};
+  };
+  const std::array<CaptureButton, 2> buttons{
+      CaptureButton{abs(55.0F, 51.0F, 146.0F, 26.0F),
+                    1,
+                    LoadBoardButtonLabel(kCaptureBtnMyShip)},
+      CaptureButton{abs(55.0F, 83.0F, 146.0F, 26.0F),
+                    2,
+                    LoadBoardButtonLabel(kCaptureBtnEscort)},
+  };
+  const SDL_FRect text_panel = abs(9.0F, 6.0F, 238.0F, 40.0F);
+
+  auto backdrop = LoadBoardPictTexture(platform, kCaptureBackdropPict);
+  if (!backdrop) {
+    NovaLog::Todo("board: capture-dialog backdrop PICT 0x2144 unavailable; "
+                  "drawing a bordered placeholder");
+  }
+  const std::string panel_text =
+      LoadBoardMiscString(kCaptureTextStr,
+                          "Do you want to use this ship as an escort, or "
+                          "would you rather trade places with its captain "
+                          "and use it as your own ship?");
+
+  // NovaInputQueue_FlushAllCommands: discard the click that resolved the
+  // capture action so it can't dispatch a phantom choice on the first frame.
+  while (platform.PollTextEvent().has_value()) {
+  }
+
+  bool take_ship = false;
+  bool close = false;
+  while (!platform.quit_requested() && !close) {
+    int hovered = -1;
+    const SDL_FPoint mouse = platform.mouse_position();
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+      if (SDL_PointInRectFloat(&mouse, &buttons[i].rect)) {
+        hovered = static_cast<int>(i);
+        break;
+      }
+    }
+
+    SDL_Renderer *renderer = platform.renderer();
+    // Live game view + the boarding window beneath (the original composites
+    // this dialog over the still-open boarding window).
+    view.DrawGameFrame(platform, state, hud);
+    platform.SetCenteredPlayfield();
+    DrawBoardWindow(platform,
+                    font_cache,
+                    art,
+                    board_buttons,
+                    board_options,
+                    state,
+                    view,
+                    hud,
+                    board_backdrop,
+                    -1);
+
+    const SDL_FRect window{
+        kCaptureWindowX, kCaptureWindowY, kCaptureWindowW, kCaptureWindowH};
+    if (backdrop != nullptr) {
+      SDL_RenderTexture(renderer, backdrop->get(), nullptr, &window);
+    } else {
+      SDL_SetRenderDrawColor(renderer, 16, 40, 72, SDL_ALPHA_OPAQUE);
+      SDL_RenderFillRect(renderer, &window);
+      SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
+      SDL_RenderRect(renderer, &window);
+    }
+
+    // Text panel (DITL item 2): the offer question, word-wrapped like the
+    // original's filled-rect pstring draw.
+    SDL_SetRenderDrawColor(renderer,
+                           kBoardPanelBg.r,
+                           kBoardPanelBg.g,
+                           kBoardPanelBg.b,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &text_panel);
+    const std::vector<std::string> lines =
+        WordWrapText(font_cache, panel_text, text_panel.w - 8.0F);
+    float y = text_panel.y + 7.0F;
+    for (const std::string &line : lines) {
+      NovaText_Draw(platform,
+                    font_cache,
+                    NovaFontFamily::kGeneva,
+                    11.0F,
+                    kNovaFontStyleRegular,
+                    kBoardValue,
+                    text_panel.x + 4.0F,
+                    y,
+                    line);
+      y += 13.0F;
+    }
+
+    // Binary-choice buttons (NovaUi_RedrawTravelBinaryChoiceButtons): the
+    // shared three-state art, hover highlights, no press latching.
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+      art.Draw(platform,
+               buttons[i].rect,
+               hovered == static_cast<int>(i) ? ButtonState::kHover
+                                              : ButtonState::kNormal);
+      NovaText_DrawCentered(platform,
+                            font_cache,
+                            kThreeStateButtonFontFamily,
+                            kThreeStateButtonFontSize,
+                            kNovaFontStyleRegular,
+                            SDL_Color{255, 255, 255, SDL_ALPHA_OPAQUE},
+                            buttons[i].rect.x,
+                            buttons[i].rect.x + buttons[i].rect.w,
+                            ThreeStateButtonLabelBaseline(buttons[i].rect),
+                            buttons[i].label);
+    }
+    SDL_RenderPresent(renderer);
+
+    // Poll: a click on a button resolves the choice. The DITL defines no
+    // cancel item, so the original's loop (and this one) only exits through
+    // the two buttons (or a platform quit).
+    unsigned action = 0;
+    for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
+      if (in->key != TextKey::primary) {
+        continue;
+      }
+      const SDL_FPoint click = platform.mouse_position();
+      for (std::size_t i = 0; i < buttons.size(); ++i) {
+        if (SDL_PointInRectFloat(&click, &buttons[i].rect)) {
+          action = buttons[i].action_code;
+          break;
+        }
+      }
+      if (action == 0) {
+        NovaLog::Info("board: capture-dialog click at ({}, {}) missed both "
+                      "buttons",
+                      click.x,
+                      click.y);
+      }
+      break;
+    }
+    if (action == 1) {
+      take_ship = true;
+      close = true;
+    } else if (action == 2) {
+      take_ship = false;
+      close = true;
+    }
+    SDL_Delay(16);
+  }
+
+  // Both choices play g_transition_sound_handle_table[1].
+  PlayTransitionCue(audio, state, 1);
+  NovaLog::Info("board: capture decision — {}",
+                take_ship ? "use as my ship" : "use as escort");
+  return take_ship;
+}
+
 } // namespace
 
 // Ghidra 0x00482940 NovaUi_RunBoardingPlunderWindow (clean-room, iteration 3).
@@ -1599,12 +1834,36 @@ void SelfDestructTarget(GameState &state) {
                 "You already have the maximum possible number of escorts.");
           } else {
             // The original shows NovaUi_ShowCaptureDecisionDialog (DLOG 0x3fa,
-            // PICT 0x2144: escort vs. swap) when the player class has
-            // capture_power >= 1 and the swap path can call
-            // Outfit_SwapPlayerShipWithEscort. Both are TODO(decomp); the port
-            // always takes the escort path.
-            NovaLog::Todo("board: NovaUi_ShowCaptureDecisionDialog 0x00497eb0 "
-                          "+ ship-swap not reconstructed; taking escort path");
+            // PICT 0x2144: "Use As My Ship" / "Use As Escort") when the
+            // player's class has capture_power (crew) >= 1; with capture_power
+            // 0 it skips straight to the escort conversion.
+            bool take_ship = false;
+            if (const ShipClass *player_class = state.scenario.Ship(
+                    static_cast<std::int16_t>(state.player.ship_class_id +
+                                              0x80));
+                player_class != nullptr && player_class->crew >= 1) {
+              take_ship = RunCaptureDecisionDialog(platform,
+                                                   audio,
+                                                   state,
+                                                   view,
+                                                   hud,
+                                                   font_cache,
+                                                   art,
+                                                   buttons,
+                                                   options,
+                                                   backdrop ? backdrop->get()
+                                                            : nullptr);
+            }
+            if (take_ship) {
+              // TODO(decomp(0x00497eb0)) skipped: the swap arm (rename-confirm
+              // dialog with class name + 3 random digits, then
+              // Outfit_SwapPlayerShipWithEscort + gameplay layout reinstall)
+              // is not reconstructed; the escort conversion below is the
+              // port's fallback for both choices.
+              NovaLog::Todo("board: 'Use As My Ship' chosen, but "
+                            "Outfit_SwapPlayerShipWithEscort is not "
+                            "reconstructed; converting to escort instead");
+            }
             close = true;
             close_reason = "target captured as escort";
 

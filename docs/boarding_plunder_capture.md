@@ -282,13 +282,20 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    `Sprite_GetFrameVerticalHalfSpan` return the FULL frame spans (bounds
    subtraction, default 0x20), so the gate is half the full frame per axis,
    not half of the half-frame (was 2× too strict).
-5. **Capture arm** — escort conversion + reset-after-boarding. *IN PROGRESS
-   next*: the window already takes the escort-conversion path (behavior 6,
-   armor restore, reset-after-boarding); the capture-decision dialog + ship
-   swap remain deferred.
-6. **Capture-decision dialog + swap** (0x00497eb0, Outfit_SwapPlayerShip-
-   WithEscort equivalent) — likely needs docked-loadout machinery; scope
-   when reached.
+5. **Capture arm** — escort conversion + reset-after-boarding. DONE: the
+   window takes the escort-conversion path (behavior 6, armor restore,
+   reset-after-boarding).
+6. **Capture-decision dialog + swap** (0x00497eb0) — dialog DONE:
+   `RunCaptureDecisionDialog` renders DLOG 0x3fa (257x114, backdrop PICT
+   0x2144, item-2 panel STR# 0x7d2 0x75 word-wrapped, binary-choice buttons
+   "Use As My Ship" / "Use As Escort" from STR# 0x96 0x2e/0x2d via the shared
+   three-state art) over the still-open boarding window; both choices play
+   transition-table [1]; shown only when the player class capture_power
+   (crew) >= 1. Strings pinned by tests/boarding_strings_test.cpp. The
+   "Use As My Ship" arm is TODO(decomp(0x00497eb0)) skipped — the rename-
+   confirm + Outfit_SwapPlayerShipWithEscort machinery (docked-loadout
+   transfer + interface reinstall) is deferred; the escort conversion is the
+   port's fallback for both choices (logged).
 7. **progress.csv + doc updates** — updated per iteration (1/2 landed).
 
 ### In-game verification (iterations 1-2)

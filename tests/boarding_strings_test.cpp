@@ -41,6 +41,17 @@ TEST_CASE("STR# 0x7d2 boarding strings (0-based pool indices)") {
   REQUIRE(entry(0x7c) ==
           "Your attempt to capture this ship was unsuccessful.");
 
+  // Capture-decision dialog (DLOG 0x3fa / RunCaptureDecisionDialog): the
+  // offer question drawn into the DITL item-2 text panel.
+  REQUIRE(entry(0x75) ==
+          "Do you want to use this ship as an escort, or would you rather "
+          "trade places with its captain and use it as your own ship?");
+  auto button = [](std::uint16_t index) {
+    return NovaHud_LoadStringEntry(0x96, index);
+  };
+  REQUIRE(button(0x2d).value_or("") == "Use As Escort");
+  REQUIRE(button(0x2e).value_or("") == "Use As My Ship");
+
   // Board-command denial overlays (NovaBoarding_HandleBoardTargetCommand;
   // the original passes 0x82/0x83/0x84 through the 1-based helper).
   REQUIRE(entry(0x81) == "You can't board this ship.");
