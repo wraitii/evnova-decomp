@@ -65,6 +65,27 @@ namespace {
   return std::string{begin, len};
 }
 
+// NUL-terminated C string at `offset`, additionally bounded to `max_len`
+// bytes (fixed-width string fields).
+[[nodiscard]] std::string ReadCStringBounded(std::span<const std::byte> bytes,
+                                             std::size_t offset,
+                                             std::size_t max_len) {
+  return ReadCString(bytes.first(std::min(bytes.size(), offset + max_len)),
+                     offset);
+}
+
+// NameString_StripSubtitleSuffix (0x004cd230): truncates a display name at
+// the first ';' and trims trailing spaces ("Base Name;Sub " -> "Base Name").
+[[nodiscard]] std::string StripSubtitleSuffix(std::string_view name) {
+  if (const auto cut = name.find(';'); cut != std::string_view::npos) {
+    name = name.substr(0, cut);
+  }
+  while (!name.empty() && name.back() == ' ') {
+    name.remove_suffix(1);
+  }
+  return std::string{name};
+}
+
 [[nodiscard]] MissionDef DecodeMission(std::span<const std::byte> bytes) {
   MissionDef mission;
   const auto copy_size = std::min(bytes.size(), mission.raw_payload.size());
@@ -150,6 +171,133 @@ namespace {
     mission.return_stellar_id = 0;
   }
   return mission;
+}
+
+// ---------------------------------------------------------------------------
+// p\x91rs (MissionShipDef / personality) decode
+// ---------------------------------------------------------------------------
+// Ground truth is the personality pass of NovaData_LoadScenarioResourceTables
+// (0x004bd3c0): each record is a fixed big-endian layout (see MissionShipDef
+// comments for the def-side offsets) with per-field validation replicated
+// below. The loader guarantees a 0x190-byte payload before reading the tail
+// fields; records shorter than the field window decode to an inactive def.
+[[nodiscard]] MissionShipDef
+DecodePers(std::span<const std::byte> bytes,
+           const std::vector<ShipClass> &ship_table) {
+  MissionShipDef def;
+  if (bytes.size() < 0x180) {
+    return def;
+  }
+  def.present = true;
+  def.loaded_latch = true;
+
+  def.spawn_system_filter = ReadBeI16(bytes, 0x00);
+  def.government_id = ReadBeI16(bytes, 0x02);
+  // Govt is stored +0x80; anything outside 0x80..0x17f means independent.
+  if (def.government_id < 0x80 || 0x17f < def.government_id) {
+    def.government_id = -1;
+  } else {
+    def.government_id = static_cast<std::int16_t>(def.government_id - 0x80);
+  }
+
+  def.ai_behavior_code = ReadBeI16(bytes, 0x04);
+  def.aggression_level = ReadBeI16(bytes, 0x06);
+  def.cowardice_pct = ReadBeI16(bytes, 0x08);
+
+  // ShipType: ids outside 0x80..0x37f decode to class 0 (original quirk —
+  // the loader's else-branch writes 0, not the -1 sentinel); an in-range id
+  // naming a nonexistent class (tech_level -9999) decodes to -1.
+  def.ship_class_id = ReadBeI16(bytes, 0x0a);
+  if (def.ship_class_id < 0x80 || 0x37f < def.ship_class_id) {
+    def.ship_class_id = 0;
+  } else {
+    def.ship_class_id = static_cast<std::int16_t>(def.ship_class_id - 0x80);
+    if (def.ship_class_id < static_cast<std::int16_t>(ship_table.size()) &&
+        ship_table[static_cast<std::size_t>(def.ship_class_id)].tech_level ==
+            kShipClassNonexistentTechLevel) {
+      def.ship_class_id = -1;
+    }
+  }
+
+  // Four weapon triples: WeapType (+0x0c..), WeapCount (+0x14..), AmmoLoad
+  // (+0x1c..). The Bible documents eight slots but the binary reads and
+  // applies only four, spread into 0x100-entry tables indexed by weapon id
+  // minus 0x80. Ids below 0x80 (including the -1/0 "none" values) add
+  // nothing; out-of-table ids would overwrite adjacent memory in the
+  // original — here they are skipped (no shipped record uses one).
+  for (std::size_t slot = 0; slot < 4; ++slot) {
+    const std::int16_t weapon_id = ReadBeI16(bytes, 0x0c + slot * 2);
+    if (weapon_id <= 0x7f) {
+      continue;
+    }
+    const auto index = static_cast<std::size_t>(weapon_id) - 0x80;
+    if (index >= def.weapon_count_delta.size()) {
+      continue;
+    }
+    def.weapon_count_delta[index] = ReadBeI16(bytes, 0x14 + slot * 2);
+    def.weapon_ammo_load_delta[index] = ReadBeI16(bytes, 0x1c + slot * 2);
+  }
+
+  def.booty_base_credits = ReadBeI32(bytes, 0x24);
+  // ShieldMod percent; the loader divides by the 100.0 double at 0x00575e48
+  // at decode time. Negative values mean "invincible" downstream.
+  def.shield_armor_scale = static_cast<float>(ReadBeI16(bytes, 0x28)) / 100.0F;
+
+  def.hail_pict_id = ReadBeI16(bytes, 0x2a);
+  if (def.hail_pict_id < 0x80) {
+    def.hail_pict_id = -1;
+  }
+  def.comm_quote_id = ReadBeI16(bytes, 0x2c);
+  def.hail_quote_id = ReadBeI16(bytes, 0x2e);
+  // LinkMission is stored +0x80 (mission resource id), no upper clamp.
+  def.link_mission_id = ReadBeI16(bytes, 0x30);
+  if (def.link_mission_id < 0x80) {
+    def.link_mission_id = -1;
+  } else {
+    def.link_mission_id = static_cast<std::int16_t>(def.link_mission_id - 0x80);
+  }
+  def.flags_primary = ReadBe16(bytes, 0x32);
+  def.flags_secondary = ReadBe16(bytes, 0x17e);
+
+  // ActiveOn occupies payload +0x34..+0x133 (0x100-byte field).
+  def.availability_expression = ReadCStringBounded(bytes, 0x34, 0x100);
+
+  // Boarded-grant triple. The loader reads +0x134 -> def+0x784 (class,
+  // < 1 invalidates the whole grant), +0x136 -> def+0x788, +0x138 ->
+  // def+0x786, then clamps def+0x786 to 0..100 and def+0x788 to >= 0. The
+  // clamp windows make def+0x786 the probability and def+0x788 the count,
+  // which is the reverse of the Bible's GrantProb/GrantCount listing order.
+  def.grant_item_class = ReadBeI16(bytes, 0x134);
+  def.grant_count = ReadBeI16(bytes, 0x136);
+  def.grant_probability = ReadBeI16(bytes, 0x138);
+  if (def.grant_item_class < 1) {
+    def.grant_item_class = -1;
+    def.grant_count = 0;
+    def.grant_probability = 0;
+  } else {
+    if (def.grant_probability < 0) {
+      def.grant_probability = 0;
+    }
+    if (def.grant_probability > 100) {
+      def.grant_probability = 100;
+    }
+    if (def.grant_count < 0) {
+      def.grant_count = 0;
+    }
+  }
+
+  // Payload +0x13a free-text name (loader bounds the region to +0x179 and
+  // converts it to a Pascal string in place).
+  def.special_ship_name = ReadCStringBounded(bytes, 0x13a, 0x40);
+
+  // Colour word at +0x17a squashed to three 5-bit channels exactly as the
+  // loader shifts them (>>19, >>5, >>3 — the non-uniform shifts are
+  // original); field naming is provisional.
+  const std::uint32_t color = ReadBe32(bytes, 0x17a);
+  def.color_r5 = static_cast<std::uint8_t>((color >> 19U) & 0x1fU);
+  def.color_g5 = static_cast<std::uint8_t>((color >> 5U) & 0x1fU);
+  def.color_b5 = static_cast<std::uint8_t>((color >> 3U) & 0x1fU);
+  return def;
 }
 
 // ---------------------------------------------------------------------------
@@ -923,6 +1071,15 @@ const MissionDef *ScenarioData::Mission(std::int16_t resource_id) const {
   return &missions[static_cast<std::size_t>(index)];
 }
 
+const MissionShipDef *
+ScenarioData::MissionShip(std::int16_t resource_id) const {
+  const auto index = static_cast<std::int32_t>(resource_id) - 0x80;
+  if (index < 0 || index >= static_cast<std::int32_t>(mission_ships.size())) {
+    return nullptr;
+  }
+  return &mission_ships[static_cast<std::size_t>(index)];
+}
+
 const AsteroidDef *ScenarioData::AsteroidType(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < asteroid_defs.size() ? &asteroid_defs[index] : nullptr;
@@ -966,6 +1123,10 @@ bool ScenarioData::LoadFromArchives() {
   // The original mission definition table has 1000 entries, indexed by
   // resource id minus 0x80 (NovaResources_LoadMisnResourceDefs 0x0043bbb0).
   missions.assign(1000, {});
+  // p\x91rs personality table (g_mission_ship_defs): 0x400 slots, slot i =
+  // resource id 0x80 + i. Absent ids keep inactive rows, matching the
+  // original's zero-filled table.
+  mission_ships.assign(0x400, {});
   // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
   asteroid_defs.assign(0x80, {});
 
@@ -1122,6 +1283,46 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_missions;
     }
   }
+  // p\x91rs personalities (NovaData_LoadScenarioResourceTables personality
+  // pass from 0x004c33de). Decoded after the ship-class table so ShipType
+  // references can be validated against the -9999 tech-level sentinel.
+  std::size_t loaded_mission_ships = 0;
+  for (std::int32_t id = 0x80; id < 0x80 + 0x400; ++id) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kPersResourceType, static_cast<std::uint16_t>(id))) {
+      MissionShipDef def = DecodePers(res->bytes, ships);
+      // +0x624 display_name_buf: record name with the ';'-subtitle stripped
+      // (NameString_StripSubtitleSuffix 0x004cd230).
+      def.display_name = StripSubtitleSuffix(res->name);
+      mission_ships[static_cast<std::size_t>(id) - 0x80] = std::move(def);
+      ++loaded_mission_ships;
+    }
+  }
+  // Display-name id post-pass (0x004c3e20): every slot starts with its own
+  // index at +0x78a, then same-named slots adopt the first slot's id. The
+  // original compares +0x625 name tails with a first-byte bound; exact-name
+  // grouping is equivalent for well-formed names.
+  {
+    std::map<std::string, std::int16_t> first_id_by_name;
+    for (std::size_t i = 0; i < mission_ships.size(); ++i) {
+      mission_ships[i].display_name_string_id = static_cast<std::int16_t>(i);
+    }
+    for (auto &def : mission_ships) {
+      if (def.display_name.empty()) {
+        continue;
+      }
+      if (const auto found = first_id_by_name.find(def.display_name);
+          found != first_id_by_name.end()) {
+        def.display_name_string_id = found->second;
+      } else {
+        first_id_by_name.emplace(def.display_name, def.display_name_string_id);
+      }
+    }
+  }
+  // TODO(decomp(0x004bd3c0)) skipped: the Shareware Enforcer sentinel pass
+  // (slot 0x3ff, from 0x004c3ae2) needs the real-world shareware day counter
+  // (DAT_0059799e via FUN_004d4480: days since the stored first-run
+  // timestamp). Slot 0x3ff stays inactive until that lands.
   // Asteroid-type rows (r\x9aid family), 16 ids 0x80..0x8f.
   for (std::int32_t id = 0x80; id < 0x90; ++id) {
     if (const auto res = NovaResource_LoadNamed(
@@ -1152,7 +1353,7 @@ bool ScenarioData::LoadFromArchives() {
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} governments, {} fleet defs, {} dude defs, "
-      "{} asteroid types, {} impact effects, {} missions",
+      "{} asteroid types, {} impact effects, {} missions, {} personalities",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
@@ -1163,7 +1364,8 @@ bool ScenarioData::LoadFromArchives() {
       loaded_dudes,
       loaded_asteroid_types,
       loaded_impact_effects,
-      loaded_missions);
+      loaded_missions,
+      loaded_mission_ships);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

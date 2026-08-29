@@ -57,6 +57,11 @@ constexpr std::uint32_t kAsteroidResourceType = 0x729a6964; // r\x9aid
 // and later reads the same resource family by mission id when populating an
 // accepted mission. See NovaResources_LoadMisnResourceDefs (0x0043bbb0).
 constexpr std::uint32_t kMissionResourceType = 0x6d95736e;
+// p\x91rs (0x70917273) — AI "personality" (mission-ship) definitions. One
+// record per named AI person; loaded by NovaData_LoadScenarioResourceTables
+// (0x004bd3c0, personality pass around 0x004c4400) into g_mission_ship_defs,
+// 0x400 slots indexed by resource id minus 0x80. See MissionShipDef.
+constexpr std::uint32_t kPersResourceType = 0x70917273;
 // Impact/explosion definition family read by
 // NovaData_LoadScenarioResourceTables (0x004bd3c0). The binary FourCC is shown
 // as 0x629a9a6d by Ghidra; each record is 0x18 bytes in the source resource and
@@ -175,26 +180,67 @@ struct MissionDef {
   std::array<std::byte, 0x7b2> raw_payload{};
 };
 
-// MissionShipDef fields currently identified by the type layout. The large
-// weapon delta arrays are kept because they are semantically load-bearing for
-// mission-ship spawning; unknown bytes remain available in raw_payload.
+// p\x91rs personality definition (g_mission_ship_defs slot, stride 0x794).
+// Field offsets verified against the loader pass in
+// NovaData_LoadScenarioResourceTables (0x004bd3c0); Bible names from the
+// "The p\x91rs resource" section.
 struct MissionShipDef {
-  std::int16_t spawn_system_filter = -1;                    // +0x00
-  std::int16_t government_id = -1;                          // +0x02
-  std::int16_t ai_behavior_code = 0;                        // +0x04
-  std::int16_t aggression_level = 0;                        // +0x06
-  std::int16_t ship_class_id = -1;                          // +0x0a
-  std::array<std::int16_t, 0x100> weapon_ammo_delta{};      // +0x18
-  std::array<std::int16_t, 0x100> weapon_secondary_delta{}; // +0x418
-  std::int32_t booty_base_credits = 0;                      // +0x618
-  float shield_armor_scale = 1.0F;                          // +0x61c
-  bool is_available_runtime = false;                        // +0x620
-  std::uint8_t runtime_flag_a = 0;                          // +0x622
-  std::uint8_t runtime_flag_b = 0;                          // +0x623
-  std::uint8_t unique_spawn_tag = 0;                        // +0x624
-  std::string availability_expression;      // +0x644, max 326 bytes
+  // Presence/runtime gates. +0x620 and +0x623 are both set by the loader for
+  // every present resource (+0x623 after the record is fully decoded); +0x622
+  // is the cached ActiveOn evaluation, refreshed from availability_expression
+  // by the mission-list evaluator (0x0044830c block of Mission_Evaluate-
+  // MissionLists 0x0043cf00) each time it runs.
+  bool present = false;              // +0x620
+  bool loaded_latch = false;         // +0x623
+  bool is_available_runtime = false; // +0x622
+
+  std::int16_t spawn_system_filter = -1; // +0x00 LinkSyst (-1 any; +0x80 sys;
+                                         // 10000/15000/20000/25000 govt codes)
+  std::int16_t government_id = -1;       // +0x02 Govt (0x80.. rebased)
+  std::int16_t ai_behavior_code = -1;    // +0x04 AI Type (raw; the spawner's
+                                         // eligibility gate requires > 0)
+  std::int16_t aggression_level = 0;     // +0x06 Aggress
+  std::int16_t cowardice_pct = 0;        // +0x08 Coward (flee at shield %)
+  std::int16_t ship_class_id = -1;       // +0x0a ShipType (rebased; out of
+                                         // range -> 0, nonexistent -> -1)
+  // +0x0c..+0x22: four weapon triples (Bible documents eight slots; the
+  // binary reads and applies only four). The loader spreads them into
+  // 0x100-entry tables indexed by weapon id minus 0x80: +0x18 WeapCount,
+  // +0x418 AmmoLoad. Applied as deltas on top of the class default loadout.
+  std::array<std::int16_t, 0x100> weapon_count_delta{};     // +0x18
+  std::array<std::int16_t, 0x100> weapon_ammo_load_delta{}; // +0x418
+  std::int32_t booty_base_credits =
+      0;                             // +0x618 Credits (spawner applies +/-25%)
+  float shield_armor_scale = 0.0F;   // +0x61c ShieldMod percent / 100.0
+                                     // (<= 0 skips the shield rescale)
+  std::int16_t hail_pict_id = -1;    // +0x12 HailPict (0xffff when < 0x80)
+  std::int16_t comm_quote_id = 0;    // +0x0c CommQuote (STR# 7100 index)
+  std::int16_t hail_quote_id = 0;    // +0x0e HailQuote (STR# 7101 index)
+  std::int16_t link_mission_id = -1; // +0x10 LinkMission (rebased -0x80)
+  std::int16_t flags_primary = 0;    // +0x14 Flags (grudge/escape pod/
+                                     // quote gates/LinkMission handoff)
+  std::int16_t flags_secondary = 0;  // +0x16 Flags2 (0x0001 starts no fuel)
+
+  std::string availability_expression; // +0x644 ActiveOn (payload +0x34)
+  std::int16_t grant_item_class = -1;  // +0x784 GrantClass (0xffff when < 1)
+  std::int16_t grant_probability = 0;  // +0x786 (payload +0x138, clamped
+                                       // 0..100 — probability-like)
+  std::int16_t grant_count = 0;        // +0x788 (payload +0x136)
+  // Boarded-grant/outfit name ids assigned by the loader post-pass: each def
+  // starts with its own zero-based index; later defs with an identical
+  // display name adopt the first def's id (same-name personalities share one
+  // display-name row).
   std::int16_t display_name_string_id = -1; // +0x78a
-  std::array<std::byte, 0x794> raw_payload{};
+  std::uint8_t color_r5 = 0;                // +0x78c (payload +0x17a >> 19)
+  std::uint8_t color_g5 = 0;                // +0x78e (>> 5)
+  std::uint8_t color_b5 = 0;                // +0x790 (>> 3)
+
+  // +0x624: resource record name with any ';'-subtitle stripped (loader
+  // copies it bounded to 0x1e bytes and uses it for the same-name dedup).
+  std::string display_name;
+  // +0x743: payload +0x13a free-text name (converted to a Pascal string by
+  // the loader; carries the special ship's override name when present).
+  std::string special_ship_name;
 };
 
 // A single stock weapon triple on a ship class: a weapon id plus how many to
@@ -989,6 +1035,11 @@ struct ScenarioData {
   std::vector<FleetDef> fleets;        // indexed by fleet_id - 0x80
   std::vector<DudeDef> dudes;          // indexed by dude_id - 0x80
   std::vector<MissionDef> missions;    // indexed by mission id - 0x80
+  // p\x91rs personality table (g_mission_ship_defs): the original keeps 0x400
+  // slots, slot i = resource id 0x80 + i (absent resources leave an inactive
+  // row). Slot 0x3ff is reserved by the loader for the Shareware Enforcer
+  // sentinel; the enforcer pass is TODO(decomp) — see LoadFromArchives.
+  std::vector<MissionShipDef> mission_ships; // indexed by pers id - 0x80
   // Asteroid/drift class table (r\x9aid family, one row per resource id
   // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
   // the DAT_005912dc / DAT_005912f0 pair.
@@ -1016,6 +1067,10 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for mission definitions, or nullptr when outside the
   // loaded 1000-entry mission table.
   [[nodiscard]] const MissionDef *Mission(std::int16_t resource_id) const;
+  // gh.id 0x80.. lookup for a p\x91rs personality (g_mission_ship_defs), or
+  // nullptr when outside the loaded 0x400-entry table.
+  [[nodiscard]] const MissionShipDef *
+  MissionShip(std::int16_t resource_id) const;
   // gh.id 0x80.. lookup for an asteroid-type row, or nullptr when outside the
   // loaded range.
   [[nodiscard]] const AsteroidDef *AsteroidType(std::int16_t resource_id) const;

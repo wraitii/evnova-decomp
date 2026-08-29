@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 #include <vector>
@@ -874,3 +875,121 @@ TEST_CASE("ship classes derive the sprite clone source", "[scenario][data]") {
 }
 
 } // namespace game
+
+// TEMP probe: dump decoded personalities for cross-checking (drop after pass).
+// përs personalities: pinned against the raw përs 0x83 payload
+// ("Jack Folstam", verified byte-for-byte via a direct resource read).
+TEST_CASE("scenario loads pers personalities", "[scenario][data]") {
+  using namespace game;
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  REQUIRE(data.mission_ships.size() == 0x400);
+  const auto pers_count = static_cast<int>(
+      std::count_if(data.mission_ships.begin(),
+                    data.mission_ships.end(),
+                    [](const MissionShipDef &d) { return d.present; }));
+  CHECK(pers_count == 516);
+
+  // Jack Folstam (p\x91rs 0x83), the Federation storyline contact flying the
+  // "Night-Master": Govt 149 -> 21, ShipType 279 -> 151, LinkMission 140 ->
+  // 12, ShieldMod 200 -> 2.0, weapon triples 133/131/129 x1 and 135 x2 +50
+  // ammo, ActiveOn "b0 & !b8".
+  const MissionShipDef *jack = data.MissionShip(0x83);
+  REQUIRE(jack != nullptr);
+  CHECK(jack->present);
+  CHECK(jack->loaded_latch);
+  CHECK(jack->display_name == "Jack Folstam");
+  CHECK(jack->special_ship_name == "Night-Master");
+  CHECK(jack->spawn_system_filter == 132);
+  CHECK(jack->government_id == 21);
+  CHECK(jack->ai_behavior_code == 3);
+  CHECK(jack->aggression_level == 2);
+  CHECK(jack->cowardice_pct == 25);
+  CHECK(jack->ship_class_id == 151);
+  CHECK(jack->booty_base_credits == 250000);
+  CHECK(jack->shield_armor_scale == 2.0F);
+  CHECK(jack->hail_pict_id == -1); // payload 0 < 0x80
+  CHECK(jack->comm_quote_id == 1);
+  CHECK(jack->hail_quote_id == 1);
+  CHECK(jack->link_mission_id == 12);
+  CHECK(jack->flags_primary == 0x080b);
+  CHECK(jack->flags_secondary == 0);
+  CHECK(jack->availability_expression == "b0 & !b8");
+  CHECK(jack->grant_item_class == -1); // payload 0 -> invalid grant
+  CHECK(jack->grant_probability == 0);
+  CHECK(jack->grant_count == 0);
+  CHECK(jack->color_r5 == 0);
+  CHECK(jack->weapon_count_delta[0x81 - 0x80] == 1);
+  CHECK(jack->weapon_count_delta[0x83 - 0x80] == 1);
+  CHECK(jack->weapon_count_delta[0x85 - 0x80] == 1);
+  CHECK(jack->weapon_count_delta[0x87 - 0x80] == 2);
+  CHECK(jack->weapon_ammo_load_delta[0x87 - 0x80] == 50);
+
+  // Same-name dedup (0x004c3e20 post-pass): the Jack Folstam variants share
+  // one display-name id (the first variant's slot index).
+  const MissionShipDef *jack2 = data.MissionShip(0x84);
+  REQUIRE(jack2 != nullptr);
+  CHECK(jack2->display_name == "Jack Folstam");
+  CHECK(jack2->display_name_string_id == jack->display_name_string_id);
+  CHECK(jack2->ship_class_id == 152);
+
+  // Absent slots stay inactive.
+  const MissionShipDef *absent = data.MissionShip(0x300);
+  REQUIRE((absent == nullptr || !absent->present));
+}
+
+TEST_CASE("temp personality probe", "[.persprobe]") {
+  using namespace game;
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  auto &db = const_cast<std::vector<MissionShipDef> &>(data.mission_ships);
+  (void)db;
+  int shown = 0;
+  for (std::size_t i = 0; i < data.mission_ships.size() && shown < 8; ++i) {
+    const auto &d = data.mission_ships[i];
+    if (!d.present) {
+      continue;
+    }
+    ++shown;
+    INFO("pers id " << (0x80 + i) << " name=" << d.display_name);
+    printf("id %zx (%s): sys=%d govt=%d ai=%d aggr=%d coward=%d class=%d\n",
+           i,
+           d.display_name.c_str(),
+           d.spawn_system_filter,
+           d.government_id,
+           d.ai_behavior_code,
+           d.aggression_level,
+           d.cowardice_pct,
+           d.ship_class_id);
+    printf("  credits=%d shield=%f hailpict=%d comm=%d hail=%d link=%d "
+           "flags=%04x flags2=%04x\n",
+           d.booty_base_credits,
+           d.shield_armor_scale,
+           d.hail_pict_id,
+           d.comm_quote_id,
+           d.hail_quote_id,
+           d.link_mission_id,
+           d.flags_primary,
+           d.flags_secondary);
+    printf("  grants: class=%d prob=%d count=%d | name-id=%d color=%d/%d/%d "
+           "special='%s' avail='%s'\n",
+           d.grant_item_class,
+           d.grant_probability,
+           d.grant_count,
+           d.display_name_string_id,
+           d.color_r5,
+           d.color_g5,
+           d.color_b5,
+           d.special_ship_name.c_str(),
+           d.availability_expression.c_str());
+    for (std::size_t w = 0; w < d.weapon_count_delta.size(); ++w) {
+      if (d.weapon_count_delta[w] != 0) {
+        printf("  weapon +%zx: count=%d ammo=%d\n",
+               w + 0x80,
+               d.weapon_count_delta[w],
+               d.weapon_ammo_load_delta[w]);
+      }
+    }
+  }
+}
