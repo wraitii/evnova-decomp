@@ -228,15 +228,15 @@ address,name,impl_file,reimpl_pct,comment
 0x00440750,Government_ApplyReputationCreditDelta,src/game/government.cpp,100%,Full PayVal port: flat credits (+loadout dirty), -10128/-20128/-30128 rep clears (exact/allied/share-class), -40001..-40099 percent cash; half-even rounding; range map cross-checked against disasm + Bible
 0x00440930,Mission_ResolveMissionFailure,src/game/mission.cpp,80%,Clean-room port: failure payload, half-delta rep subtraction, slot clear + ClearMisnSlotAssignments. Missing: +0x3f failure debrief dialog (logged TODO)
 0x00440AA0,Mission_ClearMisnSlotAssignments,src/game/mission.cpp,90%,Clean-room port: fleet-link/targeting/AI-state-2 reset, optional resolve payload, accepted/active latches. TODO: g_travel_scene_ctx despawn arm + ambient-roll latch
-0x00440BF0,Mission_FailMissionSlotQuick,,0%,
+0x00440BF0,Mission_FailMissionSlotQuick,src/game/mission.cpp,95%,Clean-room port: failure payload, failed latch, conditional ship release. TODO: ambient-roll latch
 0x00440C90,NovaUi_PollMissionComputerWindow,,0%,
 0x00441620,NovaUi_DrawTravelDestinationWindow,,0%,
 0x00441B40,Mission_CheckMissionShipInteractionEligibility,,0%,
 0x00442510,NovaUi_RunMissionShipInteractionWindow,,0%,
-0x00443760,Mission_TickShipInteractionReactions,,0%,
+0x00443760,Mission_TickShipInteractionReactions,src/game/spaceflight.cpp,100%,Trivial 16-slot driver; wired as the mission slice of TickSystems scope 0xb (Stub_TickReactionsAndNpcSpawns)
 0x00443780,Mission_TickReactionSlotsForTravelInteraction,,0%,
 0x004438D0,Mission_ProcessInteractionReactionSlotResources,,0%,
-0x00443C60,Mission_HandleMissionOrSurrenderShipReaction,,0%,
+0x00443C60,Mission_HandleMissionOrSurrenderShipReaction,src/game/mission.cpp,80%,Clean-room port: auto-abort reset, all ShipGoal 0-6 arms (destroy/disable/board/escort/observe/rescue/chase-off), deadline quick-fail with STR# 0x7d2 0x11d overlay, first-completion payload + auto-abort resolve. Skipped: cloaked-observe sprite-rect arm (no viewport model), g_travel_scene_ctx gate, ShipDone dialog (UI, logged)
 0x004444F0,Stellar_BuildTravelDestinationDescription,,0%,
 0x00445D70,Mission_ReplaceSubstringInMissionText,,0%,
 0x00445DC0,NovaUi_RebuildSpecialInteractionList,,0%,
@@ -246,7 +246,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00447170,NovaUi_PollTravelOutfitMenu,,0%,
 0x00447680,NovaUi_DrawTravelOutfitMenu,,0%,
 0x00447A30,Mission_DoesSystemMatchMissionLocator,,0%,
-0x00447D90,Mission_ResolveMisnSlot,,0%,
+0x00447D90,Mission_ResolveMisnSlot,src/game/mission.cpp,90%,Clean-room port: resolve payload, Flags 0x0008 fuel -100, Flags2 0x0002 pay, slot teardown. TODO: daily availability reroll (0x00466cb0), logged
 0x00447F00,System_GetSystemDefFlagByte,,0%,
 0x00447F20,Mission_CheckReactionConditionSatisfied,src/game/mission.cpp,90%,Clean-room port: first-char fail-closed gate + "((" normalization + shared NCB evaluator via MissionControlExpressionState; caller wiring (script engine/spawn filters) pending
 0x00448020,Mission_ExecuteReactionScript,src/game/mission_script.cpp,70%,Named clean-room entrypoint now executes Bible/Ghidra control-bit and mission-script commands; reaction context and text-tag expansion remain TODO(decomp).
@@ -399,7 +399,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00467E20,Frame_FinishBlockingTransitionFrame,,0%,
 0x00467E60,NoSys_NoOp_00467e60,,0%,
 0x00467E70,Stub_NoOp,,0%,
-0x00467E80,Ship_CanMaintainCloakState,,0%,"Ghidra clarified: ModType-17 cloak presence plus configured fuel/shield drain resource checks; gates cloak entry and per-frame maintenance, not surrender"
+0x00467E80,Ship_CanMaintainCloakState,src/game/ship_ai.cpp,80%,Clean-room port as NovaAiShip_CanMaintainCloakState: fire-restriction, ModType-17 device search (player owned / NPC class-default outfits), fuel+shield drain nibbles. Player-only tail (hold latch + Flags2 0x400) provisional
 0x004680D0,Ship_OnShipCloakStateEntered,src/game/ship_ai.cpp,55%,"NovaAi_OnShipCloakStateEntered shares the original cloak-latch normalization and ModType-17 shield-drop transition; player cue/status-panel side effects remain TODO(decomp)."
 0x00468190,Ship_OnShipCloakStateCleared,src/game/ship_ai.cpp,55%,"NovaAi_OnShipCloakStateCleared shares the original cloak-latch recovery transition; player clear cue remains TODO(decomp)."
 0x00468210,Stellar_HasAdjacentAccessibleStellarMatchingTravelFlags,,0%,

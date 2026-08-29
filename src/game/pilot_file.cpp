@@ -200,7 +200,8 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
   // zero (the live clean-room type has no confirmed meaning there).
   constexpr std::size_t kRuntimeFlagsOffset = 0x281e;
   constexpr std::size_t kRuntimeFlagsStride = 0x14;
-  for (std::size_t slot = 0; slot < pilot_file.active_mission_runtime_flags.size();
+  for (std::size_t slot = 0;
+       slot < pilot_file.active_mission_runtime_flags.size();
        ++slot) {
     const auto &flags = pilot_file.active_mission_runtime_flags[slot];
     const auto offset = kRuntimeFlagsOffset + slot * kRuntimeFlagsStride;
@@ -208,16 +209,19 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     block1[offset + 0x01] =
         flags.initial_briefing_done ? std::byte{1} : std::byte{0};
     block1[offset + 0x02] =
-        flags.special_ship_attacking ? std::byte{1} : std::byte{0};
+        flags.objective_complete ? std::byte{1} : std::byte{0};
     block1[offset + 0x03] = flags.is_failed ? std::byte{1} : std::byte{0};
     WriteU16(block1, offset + 0x04, flags.flags_primary_at_accept);
-    WriteU16(block1, offset + 0x06,
+    WriteU16(block1,
+             offset + 0x06,
              static_cast<std::uint16_t>(flags.deadline_year_month));
-    WriteU16(block1, offset + 0x08,
+    WriteU16(block1,
+             offset + 0x08,
              static_cast<std::uint16_t>(flags.deadline_year_month_ext));
-    WriteU16(block1, offset + 0x0a,
-             static_cast<std::uint16_t>(flags.deadline_day));
-    WriteU32(block1, offset + 0x0e,
+    WriteU16(
+        block1, offset + 0x0a, static_cast<std::uint16_t>(flags.deadline_day));
+    WriteU32(block1,
+             offset + 0x0e,
              static_cast<std::uint32_t>(flags.elapsed_travel_days));
     WriteU16(block1, offset + 0x12, flags.elapsed_travel_subday);
   }
@@ -230,7 +234,8 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
   for (std::size_t slot = 0; slot < pilot_file.active_missions.size(); ++slot) {
     const auto &mission = pilot_file.active_missions[slot];
     const auto offset = kActiveMissionsOffset + slot * kActiveMissionStride;
-    std::memcpy(block1.data() + offset, mission.raw_payload.data(),
+    std::memcpy(block1.data() + offset,
+                mission.raw_payload.data(),
                 mission.raw_payload.size());
     const auto put_i16 = [&](std::size_t field, std::int16_t value) {
       WriteU16(block1, offset + field, static_cast<std::uint16_t>(value));
@@ -251,13 +256,16 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     put_i16(0x1c, mission.comp_govt_id);
     put_i16(0x1e, mission.comp_reward_delta);
     put_i16(0x20, mission.goal_count_remaining);
-    WriteU32(block1, offset + 0x22,
+    WriteU32(block1,
+             offset + 0x22,
              static_cast<std::uint32_t>(mission.resource_delta_or_cost));
     put_i16(0x2c, mission.goal_count_remaining);
-    block1[offset + 0x32] = mission.has_been_visited ? std::byte{1} : std::byte{0};
+    block1[offset + 0x32] =
+        mission.has_been_visited ? std::byte{1} : std::byte{0};
     block1[offset + 0x33] = mission.is_accepted ? std::byte{1} : std::byte{0};
     for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
-      put_i16(0x35 + i * sizeof(std::int16_t), mission.brief_description_ids[i]);
+      put_i16(0x35 + i * sizeof(std::int16_t),
+              mission.brief_description_ids[i]);
     }
     put_i16(0x47, mission.special_ship_name_string_id);
     put_i16(0x49, mission.special_ship_name_entry);
@@ -348,8 +356,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
   // The original reads fixed offsets without bounds checks (it assumes
   // full-size blocks from the same game build). To avoid UB on truncated
   // input, tracked fields are only restored when the block covers them.
-  constexpr std::size_t kBlock1TrackedEnd = 0x295e +
-                                             GameState::kMaxActiveMissions * 0x8e6;
+  constexpr std::size_t kBlock1TrackedEnd =
+      0x295e + GameState::kMaxActiveMissions * 0x8e6;
   constexpr std::size_t kBlock2TrackedEnd = 0x5d98 + 0x40;
   if (BlockPassesGate(block1) && block1.size() >= kBlock1TrackedEnd) {
     // jump destination stellar id.
@@ -392,18 +400,21 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
          ++slot) {
       auto &flags = out.active_mission_runtime_flags[slot];
       const auto offset = kRuntimeFlagsOffset + slot * kRuntimeFlagsStride;
-      flags.is_active = std::to_integer<unsigned char>(block1[offset + 0x00]) != 0;
+      flags.is_active =
+          std::to_integer<unsigned char>(block1[offset + 0x00]) != 0;
       flags.initial_briefing_done =
           std::to_integer<unsigned char>(block1[offset + 0x01]) != 0;
-      flags.special_ship_attacking =
+      flags.objective_complete =
           std::to_integer<unsigned char>(block1[offset + 0x02]) != 0;
-      flags.is_failed = std::to_integer<unsigned char>(block1[offset + 0x03]) != 0;
+      flags.is_failed =
+          std::to_integer<unsigned char>(block1[offset + 0x03]) != 0;
       flags.flags_primary_at_accept = ReadU16(block1, offset + 0x04);
       flags.deadline_year_month =
           static_cast<std::int16_t>(ReadU16(block1, offset + 0x06));
       flags.deadline_year_month_ext =
           static_cast<std::int16_t>(ReadU16(block1, offset + 0x08));
-      flags.deadline_day = static_cast<std::int16_t>(ReadU16(block1, offset + 0x0a));
+      flags.deadline_day =
+          static_cast<std::int16_t>(ReadU16(block1, offset + 0x0a));
       flags.elapsed_travel_days =
           static_cast<std::int32_t>(ReadU32(block1, offset + 0x0e));
       flags.elapsed_travel_subday = ReadU16(block1, offset + 0x12);
@@ -413,7 +424,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
     for (std::size_t slot = 0; slot < out.active_missions.size(); ++slot) {
       auto &mission = out.active_missions[slot];
       const auto offset = kActiveMissionsOffset + slot * kActiveMissionStride;
-      std::memcpy(mission.raw_payload.data(), block1.data() + offset,
+      std::memcpy(mission.raw_payload.data(),
+                  block1.data() + offset,
                   mission.raw_payload.size());
       const auto get_i16 = [&](std::size_t field) {
         return static_cast<std::int16_t>(ReadU16(block1, offset + field));
@@ -433,13 +445,16 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.mission_system_c = get_i16(0x1a);
       mission.comp_govt_id = get_i16(0x1c);
       mission.comp_reward_delta = get_i16(0x1e);
-      mission.resource_delta_or_cost = static_cast<std::int32_t>(ReadU32(block1, offset + 0x22));
+      mission.resource_delta_or_cost =
+          static_cast<std::int32_t>(ReadU32(block1, offset + 0x22));
       mission.goal_count_remaining = get_i16(0x2c);
       mission.has_been_visited =
           std::to_integer<unsigned char>(block1[offset + 0x32]) != 0;
-      mission.is_accepted = std::to_integer<unsigned char>(block1[offset + 0x33]) != 0;
+      mission.is_accepted =
+          std::to_integer<unsigned char>(block1[offset + 0x33]) != 0;
       for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
-        mission.brief_description_ids[i] = get_i16(0x35 + i * sizeof(std::int16_t));
+        mission.brief_description_ids[i] =
+            get_i16(0x35 + i * sizeof(std::int16_t));
       }
       mission.special_ship_name_string_id = get_i16(0x47);
       mission.special_ship_name_entry = get_i16(0x49);

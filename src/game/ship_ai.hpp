@@ -216,6 +216,14 @@ void NovaAi_UpdateShipAI(GameState &state,
 [[nodiscard]] bool NovaAiShip_CanEngageTargetUnderCloakRules(
     const GameState &state, const Ship &subject_ship, const Ship &other_ship);
 
+// Ghidra 0x00467e80 Ship_CanMaintainCloakState. Whether the ship can keep (or
+// enter) its cloaking state: not fire-restricted, carries a ModType 17
+// cloaking device (player: owned outfits; NPC: the ship class's default
+// outfit list), and the device's configured fuel/shield drain flags are
+// satisfiable from current resources.
+[[nodiscard]] bool NovaAiShip_CanMaintainCloakState(const GameState &state,
+                                                    const Ship &ship);
+
 // Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget. True when a pursuing
 // ship should keep its primary target (or the player under mutual targeting):
 // active, not fire-restricted, holding an AI target and a primary target,

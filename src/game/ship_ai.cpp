@@ -3228,6 +3228,71 @@ bool NovaAiShip_CanEngageTargetUnderCloakRules(const GameState &state,
   return false;
 }
 
+// Ghidra 0x00467e80 Ship_CanMaintainCloakState.
+bool NovaAiShip_CanMaintainCloakState(const GameState &state,
+                                      const Ship &ship) {
+  if (NovaAiShip_IsFireRestricted(state, ship)) {
+    return false;
+  }
+  // Locate a ModType 17 cloaking device and take its ModVal drain bits. The
+  // player scans owned outfits; NPCs scan the ship class's default outfit
+  // list (no escort exception here, unlike Ship_CanShipEngageTargetUnder-
+  // CloakRules' helper).
+  std::uint16_t mod_val = 0;
+  bool has_cloak = false;
+  const auto scan_outfit = [&mod_val, &has_cloak](const Outfit *outfit) {
+    if (outfit == nullptr || has_cloak) {
+      return;
+    }
+    if (outfit->mod_type == 0x11) {
+      mod_val = static_cast<std::uint16_t>(outfit->mod_val);
+      has_cloak = true;
+      return;
+    }
+    for (std::size_t i = 0; i < outfit->alt_mod_types.size(); ++i) {
+      if (outfit->alt_mod_types[i] == 0x11) {
+        mod_val = static_cast<std::uint16_t>(outfit->alt_mod_vals[i]);
+        has_cloak = true;
+        return;
+      }
+    }
+  };
+  if (ship.ship_instance_id == 0) {
+    for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
+         ++id) {
+      if (state.inventory.outfit_owned_count[id] > 0) {
+        scan_outfit(
+            state.scenario.Outfit(static_cast<std::int16_t>(id + 0x80)));
+      }
+    }
+  } else {
+    const auto *ship_class = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (ship_class != nullptr) {
+      for (std::size_t i = 0; i < ship_class->default_outfit_ids.size(); ++i) {
+        if (ship_class->default_outfit_counts[i] > 0) {
+          scan_outfit(state.scenario.Outfit(ship_class->default_outfit_ids[i]));
+        }
+      }
+    }
+  }
+  if (!has_cloak) {
+    return false;
+  }
+  // ModVal bits 0x0010..0x0080 gate on fuel, 0x0100..0x0800 on shields.
+  if (((mod_val & 0x00f0U) != 0U) && ship.fuel_points <= 0.0F) {
+    return false;
+  }
+  if (((mod_val & 0x0f00U) != 0U) && ship.shield_points <= 0.0F) {
+    return false;
+  }
+  if (ship.ship_instance_id == 0) {
+    // The player-only tail (station-hold latch + class Flags2 0x400) is
+    // decompiler-garbled in the original; TODO(decomp(0x00467e80)) provisional.
+  }
+  return true;
+}
+
 // Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget.
 bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
                                          const Ship &ship) {

@@ -2,6 +2,7 @@
 
 #include "game_state.hpp"
 #include "government.hpp"
+#include "hud_overlay.hpp"
 #include "log.hpp"
 #include "mission_script.hpp"
 #include "outfit.hpp"
@@ -607,8 +608,25 @@ bool Mission_PopulateActiveSlot(GameState &state,
       SelectMissionShipType(state, active.dude_def_index, active.flags_primary);
   active.special_ship_name_string_id = definition->special_ship_name_string_id;
   active.random_text_string_id = definition->random_text_string_id;
-  active.brief_description_ids = definition->brief_description_ids;
+  // Desc ids +0x35..+0x43 (payload +0x34..+0x3e, +0x58, +0x44), normalized
+  // to -1 when unset. Slots: Brief, QuickBrief, LoadCarg, DumpCargo, Comp,
+  // Fail, aux (+0x41), ShipDone.
+  const auto normalize_desc_id = [](std::int16_t id) {
+    return id < 1 ? static_cast<std::int16_t>(-1) : id;
+  };
+  for (std::size_t i = 0; i < 6; ++i) {
+    active.brief_description_ids[i] =
+        normalize_desc_id(definition->text_description_ids[i]);
+  }
+  active.brief_description_ids[6] =
+      normalize_desc_id(definition->slot_aux_text_id);
+  active.brief_description_ids[7] =
+      normalize_desc_id(definition->ship_done_text_id);
   active.brief_description_id = definition->initial_briefing_id;
+  // TimeLimit seeds the deadline countdown; < 1 means no deadline (-32000).
+  active.time_limit_days_remaining = definition->time_limit_days < 1
+                                         ? static_cast<std::int16_t>(-32000)
+                                         : definition->time_limit_days;
   if (definition->special_ship_spawn_mode < 1) {
     active.spawn_rearm_timer = -1;
   } else if (definition->fleet_spawn_goal == 1 &&
@@ -965,6 +983,223 @@ bool Mission_TryConsumeMissionInteractionResources(GameState &state,
   // g_playerInventoryAndLoadoutDirty + Outfit_RecomputeOutfitDerivedState.
   state.stat_cache_valid = false;
   return true;
+}
+
+// Ghidra 0x00440bf0 Mission_FailMissionSlotQuick. Immediate failure path:
+// runs the failure payload, latches the failed flag, and releases assigned
+// ships when the mission has placed any.
+void Mission_FailMissionSlotQuick(GameState &state,
+                                  std::int16_t mission_slot,
+                                  std::uint32_t now_ms) {
+  const auto slot = static_cast<std::size_t>(mission_slot);
+  ActiveMission &mission = state.active_missions[slot];
+  Mission_RunMisnScriptPayload(
+      state, TextOf(mission.on_failure_text), mission_slot);
+  state.active_mission_runtime_flags[slot].is_failed = true;
+  if (mission.has_been_visited) {
+    Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
+  }
+  // Ambient-roll latch invalidation is not modelled (TODO(decomp)).
+}
+
+// Ghidra 0x00447d90 Mission_ResolveMisnSlot. Completes an auto-abort/goal
+// mission: resolve payload, optional daily rerolls, the auto-abort fuel
+// penalty, auto-abort pay, and slot teardown.
+void Mission_ResolveMisnSlot(GameState &state,
+                             std::int16_t mission_slot,
+                             std::uint32_t now_ms) {
+  const auto slot = static_cast<std::size_t>(mission_slot);
+  ActiveMission &mission = state.active_missions[slot];
+  Mission_RunMisnScriptPayload(
+      state, TextOf(mission.resolve_script_buffer_start), mission_slot);
+  // On-resolve repeat count re-runs the daily availability reroll
+  // (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0, not yet
+  // ported; see Mission_ResolveMissionSuccess).
+  if (mission.on_resolve_repeat_count > 0) {
+    NovaLog::Todo("mission resolve repeat-count {} requires the daily "
+                  "availability reroll (0x00466cb0), not yet ported",
+                  mission.on_resolve_repeat_count);
+  }
+  // Bible m\x89sn Flags 0x0008: auto-abort drains 100 units of fuel
+  // (DAT_00575510). The g_player_fuel_panel_dirty latch has no clean-room
+  // equivalent; the HUD recomputes fuel every frame.
+  if ((mission.flags_primary & 0x0008U) != 0U) {
+    state.player.fuel_points -= 100.0F;
+  }
+  // Bible Flags2 0x0002: apply the mission pay on auto-abort.
+  if ((mission.flags_secondary & 0x0002U) != 0U) {
+    NovaGovernment_ApplyReputationCreditDelta(state,
+                                              mission.resource_delta_or_cost);
+  }
+  Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
+}
+
+// Ghidra 0x00443c60 Mission_HandleMissionOrSurrenderShipReaction. Per-tick
+// objective evaluation for one active mission slot: drives the
+// objective-complete/failed runtime latches from the mission goal's counters
+// (Bible ShipGoal: 0 destroy, 1 disable, 2 board, 3 escort, 4 observe,
+// 5 rescue, 6 chase-off; -1 no goal), fails overdue missions, and runs the
+// completion payload + auto-abort resolution when the objective first
+// completes. Only the in-flight caller is wired; the landing-window caller
+// (0x00443780) runs with g_travel_scene_ctx set, which suppresses the
+// deadline arm (TODO(decomp) when that gate is ported).
+void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
+                                                  std::int16_t mission_slot,
+                                                  std::uint32_t now_ms) {
+  const auto slot = static_cast<std::size_t>(mission_slot);
+  MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
+  if (!runtime.is_active) {
+    return;
+  }
+  ActiveMission &mission = state.active_missions[slot];
+  // Auto-abort missions with no goal and exhausted target count drop their
+  // completion latch before re-evaluation.
+  if (mission.spawn_behavior == -1 && mission.target_ship_count > 0 &&
+      mission.goal_count_remaining < 1 &&
+      (mission.flags_primary & 0x0001U) != 0U) {
+    runtime.objective_complete = false;
+  }
+  const bool was_objective_complete = runtime.objective_complete;
+  const std::int16_t goal = mission.spawn_behavior;
+  if (goal == -1 && mission.mission_target_count < 1) {
+    runtime.objective_complete = true;
+  } else {
+    const std::int16_t target_count = mission.mission_target_count;
+    if (target_count < 1) {
+      runtime.objective_complete = true;
+    } else if (goal == -1) {
+      // Auto-abort missions complete immediately unless they still owe
+      // spawn-mode-1 targets with a pending countdown.
+      if ((mission.flags_primary & 0x0001U) == 0U ||
+          mission.goal_count_remaining > 0 ||
+          mission.special_ship_spawn_mode != 1) {
+        runtime.objective_complete = true;
+      }
+    } else if (mission.goal_count_remaining < target_count &&
+               mission.target_ship_count != 0) {
+      runtime.objective_complete = false;
+    } else {
+      // Goal 0 (destroy): all targets destroyed.
+      if (goal == 0 && target_count <= mission.goal_counter_a) {
+        runtime.objective_complete = true;
+      }
+      // Goal 1 (disable): disabled-count suffices; destroying a target
+      // fails the mission.
+      if (goal == 1) {
+        if (mission.goal_counter_a < 1) {
+          if (target_count <= mission.goal_counter_c) {
+            runtime.objective_complete = true;
+          }
+        } else {
+          runtime.is_failed = true;
+        }
+      }
+      // Goals 2 (board) / 5 (rescue): boarded/rescued count.
+      if ((goal == 2 || goal == 5) && target_count <= mission.goal_counter_b) {
+        runtime.objective_complete = true;
+      }
+      // Goal 3 (escort): fails if any escort was destroyed or disabled;
+      // otherwise complete when escorts remain alive.
+      if (goal == 3) {
+        if (mission.goal_counter_a < 1 && mission.goal_counter_c < 1) {
+          std::int16_t survivors = 0;
+          for (std::size_t i = 1; i < state.ships_.size(); ++i) {
+            const Ship &ship = state.ships_[i];
+            if (ship.is_active && ship.mission_fleet_slot == mission_slot) {
+              ++survivors;
+            }
+          }
+          runtime.objective_complete = survivors != 0;
+        } else {
+          runtime.is_failed = true;
+        }
+      }
+      // Goal 4 (observe): in the mission system, some fleet ship must be
+      // seen (uncloaked, or cloaked but onscreen).
+      if (goal == 4 && !runtime.objective_complete) {
+        const std::int16_t raw_system = mission.current_system_id;
+        const std::int16_t resolved =
+            (raw_system < 0 || raw_system >= 0x800)
+                ? -1
+                : Misn_ResolveVisibleSystemForTravel(state, raw_system);
+        if ((resolved == state.player.current_system_id || raw_system == -6) &&
+            mission.target_ship_count <= mission.goal_count_remaining) {
+          for (std::size_t i = 1; i < state.ships_.size(); ++i) {
+            const Ship &ship = state.ships_[i];
+            if (!ship.is_active || ship.mission_fleet_slot != mission_slot) {
+              continue;
+            }
+            if (!NovaAiShip_CanEngageTargetUnderCloakRules(
+                    state, ship, state.player)) {
+              continue;
+            }
+            if (!NovaAiShip_CanMaintainCloakState(state, ship)) {
+              // Uncloaked ships are seen directly.
+              runtime.objective_complete = true;
+              break;
+            }
+            // Cloaked ships require the original's sprite-rect intersection
+            // with the gameplay surface. TODO(decomp(0x00443c60)) skipped:
+            // the clean-room Ship has no sprite-rect/viewport model yet, so
+            // cloaked targets are never "seen" and observe missions whose
+            // targets stay cloaked cannot complete.
+          }
+        }
+      }
+      // Goal 6 (chase-off): chased-off (jumped out) + destroyed count.
+      if (goal == 6) {
+        runtime.objective_complete =
+            static_cast<std::int32_t>(mission.goal_counter_e) +
+                mission.goal_counter_a >=
+            target_count;
+      }
+    }
+  }
+  // Deadline arm (flight only; the landing context suppresses it in the
+  // original): an expired TimeLimit quick-fails the mission. The
+  // STR# 0x7d2 0x11d "mission failed" overlay + centered sound are skipped
+  // for invisible missions (flags-accept 0x0400) in the original; the sound
+  // itself is TODO(decomp) (transition-sound table not modelled).
+  if (!runtime.is_failed && mission.time_limit_days_remaining < 1 &&
+      mission.time_limit_days_remaining > -32000) {
+    runtime.is_failed = true;
+    if ((runtime.flags_primary_at_accept & 0x0400U) == 0U) {
+      if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11d)) {
+        NovaHud_ShowOverlayMessage(state,
+                                   *text,
+                                   /*duration_frames=*/0xf0);
+      }
+    }
+    Mission_FailMissionSlotQuick(state, mission_slot, now_ms);
+  }
+  // First-completion arm: run the ShipDone desc and, for auto-abort
+  // missions, resolve the slot. The +0x43 completion dialog is UI-owned.
+  if (!runtime.is_failed && runtime.objective_complete &&
+      !was_objective_complete) {
+    if (mission.brief_description_ids[7] != -1) {
+      NovaLog::Todo("mission goal-complete dialog (misn {} id {}) not "
+                    "reconstructed yet",
+                    mission.mission_template_id,
+                    mission.brief_description_ids[7]);
+    }
+    if (mission.spawn_behavior != -1) {
+      Mission_RunMisnScriptPayload(
+          state, TextOf(mission.state_latch), mission_slot);
+    }
+    if ((mission.flags_primary & 0x0001U) != 0U) {
+      Mission_ResolveMisnSlot(state, mission_slot, now_ms);
+    }
+  }
+}
+
+// Ghidra 0x00443760 Mission_TickShipInteractionReactions. Per-tick driver
+// over the 16 active-mission slots (TickSystems scope 0xb).
+void Mission_TickShipInteractionReactions(GameState &state,
+                                          std::uint32_t now_ms) {
+  for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+    Mission_HandleMissionOrSurrenderShipReaction(
+        state, static_cast<std::int16_t>(slot), now_ms);
+  }
 }
 
 } // namespace game

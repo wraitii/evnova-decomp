@@ -127,8 +127,7 @@ struct MissionDef {
   std::int16_t aux_ship_dude = -1;          // resource +0x24
   std::int16_t aux_ship_system = -1;        // resource +0x22
   std::int16_t special_ship_dude = -1;      // resource +0x24; active +0x08
-  std::int16_t cargo_type = -1;             // +0x40
-  std::int16_t cargo_quantity = 0;          // +0x42
+  std::int16_t time_limit_days = 0;         // payload +0x40 (active +0x45)
   std::int16_t on_resolve_repeat_count = 0; // +0x48
   std::int32_t resource_delta_or_cost = 0;  // +0x4a
   std::int16_t aux_ships_left = 0;          // +0x50
@@ -153,7 +152,12 @@ struct MissionDef {
   std::int16_t start_system_locator = -1;        // +0x22, resolved at accept
   bool start_visited = false;                    // +0x42
   std::int16_t initial_briefing_id = -1;         // +0x34
-  std::array<std::int16_t, 8> brief_description_ids{}; // +0x34..+0x42
+  // Desc-resource ids from payload +0x34..+0x3e (BriefText, QuickBrief,
+  // LoadCargText, DumpCargoText, CompText, FailText), plus ShipDoneText
+  // (+0x44) and the +0x58 id copied to active slot +0x41 (provisional).
+  std::array<std::int16_t, 6> text_description_ids{}; // +0x34..+0x3e
+  std::int16_t ship_done_text_id = -1;                // +0x44
+  std::int16_t slot_aux_text_id = -1;                 // +0x58 (provisional)
   // Mission availability expression from the resource string block (+0x5c).
   // The original caches its result at MisnDef +0x16.
   std::string availability_expr;

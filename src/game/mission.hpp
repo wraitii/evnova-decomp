@@ -93,6 +93,34 @@ void Mission_ResolveMissionFailure(GameState &state,
                                    std::int16_t mission_slot,
                                    std::uint32_t now_ms);
 
+// Ghidra 0x00440bf0 Mission_FailMissionSlotQuick. Immediate failure path:
+// failure payload, failed latch, and ship release when the mission has
+// placed any.
+void Mission_FailMissionSlotQuick(GameState &state,
+                                  std::int16_t mission_slot,
+                                  std::uint32_t now_ms);
+
+// Ghidra 0x00447d90 Mission_ResolveMisnSlot. Auto-abort/goal completion:
+// resolve payload, optional daily rerolls (TODO(decomp)), the Flags 0x0008
+// 100-unit fuel penalty, Flags2 0x0002 pay application, and slot teardown.
+void Mission_ResolveMisnSlot(GameState &state,
+                             std::int16_t mission_slot,
+                             std::uint32_t now_ms);
+
+// Ghidra 0x00443c60 Mission_HandleMissionOrSurrenderShipReaction. Per-tick
+// objective evaluation for one active mission slot: drives the
+// objective-complete/failed latches from the goal counters (ShipGoal 0-6),
+// quick-fails overdue missions, and runs the completion payload / auto-abort
+// resolution on the first objective-complete transition.
+void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
+                                                  std::int16_t mission_slot,
+                                                  std::uint32_t now_ms);
+
+// Ghidra 0x00443760 Mission_TickShipInteractionReactions. Per-tick driver
+// over the 16 active-mission slots (TickSystems scope 0xb).
+void Mission_TickShipInteractionReactions(GameState &state,
+                                          std::uint32_t now_ms);
+
 // Ghidra 0x0046efd0 Stellar_AreStellarsEquivalent. Two stellar ids match when
 // equal, or when their bodies share the same map position and display name
 // (duplicate-resource twins). Ids are 0x80-based resource ids; anything

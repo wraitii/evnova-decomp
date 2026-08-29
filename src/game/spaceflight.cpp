@@ -98,13 +98,15 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 // Asteroid_Spawn('\x01') (the asteroid ring), before clearing the
 // g_ai_misc_event_flag / g_ai_target_refresh_needed latches.
 //
-// Reconstructed: the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance,
-// which spawns encounter-fleet leads / random dude ships toward avg_ships).
-// Deferred: the mission/combat-chatter/screen-flash/threat reaction helpers,
-// the asteroid ring and the interaction flags (mission + combat systems not
-// yet reconstructed).
+// Reconstructed: the mission interaction-reaction pass (0x00443760) and the
+// NPC-population slice (NovaSystem_TickNpcSpawnMaintenance, which spawns
+// encounter-fleet leads / random dude ships toward avg_ships).
+// Deferred: the combat-chatter/screen-flash/threat reaction helpers,
+// the asteroid ring and the interaction flags (combat systems not yet
+// reconstructed).
 void Stub_TickReactionsAndNpcSpawns(GameState &state) {
-  (void)state;
+  // The original's AI mode timers use a global millisecond tick source.
+  Mission_TickShipInteractionReactions(state, SDL_GetTicks());
   NovaSystem_TickNpcSpawnMaintenance(state, state.player.current_system_id);
 }
 

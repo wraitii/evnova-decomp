@@ -99,8 +99,9 @@ namespace {
   mission.special_ship_dude = ReadBeI16(bytes, 0x24);
   mission.aux_ship_system = ReadBeI16(bytes, 0x22);
   mission.aux_ship_dude = ReadBeI16(bytes, 0x24);
-  mission.cargo_type = ReadBeI16(bytes, 0x40);
-  mission.cargo_quantity = ReadBeI16(bytes, 0x42);
+  // Payload +0x40 is the mission TimeLimit (days); the accepted-mission
+  // population copies it into MisnActive +0x45.
+  mission.time_limit_days = ReadBeI16(bytes, 0x40);
   mission.on_resolve_repeat_count = ReadBeI16(bytes, 0x48);
   mission.resource_delta_or_cost = ReadBeI32(bytes, 0x4a);
   mission.aux_ships_left = ReadBeI16(bytes, 0x50);
@@ -122,11 +123,13 @@ namespace {
   mission.mission_fleet_metric = ReadBeI16(bytes, 0x4a);
   mission.auxiliary_ship_dude = ReadBeI16(bytes, 0x4c);
   mission.start_visited = ReadBeI16(bytes, 0x42) != 0;
-  for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
-    mission.brief_description_ids[i] =
+  for (std::size_t i = 0; i < mission.text_description_ids.size(); ++i) {
+    mission.text_description_ids[i] =
         ReadBeI16(bytes, 0x34 + i * sizeof(std::int16_t));
   }
-  mission.initial_briefing_id = mission.brief_description_ids.front();
+  mission.ship_done_text_id = ReadBeI16(bytes, 0x44);
+  mission.slot_aux_text_id = ReadBeI16(bytes, 0x58);
+  mission.initial_briefing_id = mission.text_description_ids.front();
   mission.availability_expr = ReadCString(bytes, 0x5c);
   mission.list_priority = ReadBeI16(bytes, 0x7a0);
   // NovaResources_LoadMisnResourceDefs (0x0043bbb0) canonicalizes these

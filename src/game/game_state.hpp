@@ -34,15 +34,20 @@ using SystemReputation = std::vector<std::int16_t>;
 // MisnRuntimeFlags record used by the original's 16 active-mission slots.
 struct MissionRuntimeFlags {
   bool is_active = false; // +0x00
+  // Cleared-to-proceed latch: set at acceptance when the mission has no
+  // separate fail/visit stellar, and set by the landing/interaction pass when
+  // the destination stellar requires no special handling.
   bool initial_briefing_done = false; // +0x01
-  bool special_ship_attacking = false; // +0x02
-  bool is_failed = false; // +0x03
+  // Objective-complete latch, driven by the per-goal evaluation in
+  // Mission_HandleMissionOrSurrenderShipReaction (0x00443c60).
+  bool objective_complete = false;           // +0x02
+  bool is_failed = false;                    // +0x03
   std::uint16_t flags_primary_at_accept = 0; // +0x04
-  std::int16_t deadline_year_month = 0; // +0x06
-  std::int16_t deadline_year_month_ext = 0; // +0x08
-  std::int16_t deadline_day = 0; // +0x0a
-  std::int32_t elapsed_travel_days = 0; // +0x0e
-  std::uint16_t elapsed_travel_subday = 0; // +0x12
+  std::int16_t deadline_year_month = 0;      // +0x06
+  std::int16_t deadline_year_month_ext = 0;  // +0x08
+  std::int16_t deadline_day = 0;             // +0x0a
+  std::int32_t elapsed_travel_days = 0;      // +0x0e
+  std::uint16_t elapsed_travel_subday = 0;   // +0x12
 };
 
 // Clean-room active mission state. It intentionally names only the fields
@@ -50,57 +55,67 @@ struct MissionRuntimeFlags {
 // remaining text/script/runtime bytes available while those semantics are
 // reconstructed. One-to-one mission-slot indexing is preserved.
 struct ActiveMission {
-  std::int16_t on_fail_stellar_id = -1; // +0x00
-  std::int16_t on_success_stellar_id = -1; // +0x04
-  std::int16_t target_ship_count = 0; // +0x06
-  std::int16_t dude_def_index = -1; // +0x08
-  std::int16_t spawn_behavior = 0; // +0x0a
-  std::int16_t fleet_spawn_goal = 0; // +0x0c
-  std::int16_t special_ship_spawn_mode = 0; // +0x0e
-  std::int16_t current_system_id = -1; // +0x10
-  std::int16_t special_ship_system_id = -1; // +0x12
-  std::int16_t special_ship_count = 0; // +0x14
-  std::int16_t mission_link_systems = -1; // +0x16
-  std::int16_t mission_system_b = -1; // +0x18
-  std::int16_t mission_system_c = -1; // +0x1a
-  std::int16_t comp_govt_id = -1; // +0x1c
-  std::int16_t comp_reward_delta = 0; // +0x1e
-  std::int16_t on_resolve_repeat_count = 0; // +0x20
-  std::int32_t resource_delta_or_cost = 0; // +0x22
-  std::int16_t goal_counter_a = 0; // +0x26
-  std::int16_t goal_counter_b = 0; // +0x28
-  std::int16_t goal_counter_c = 0; // +0x2a
-  std::int16_t goal_count_remaining = 0; // +0x2c
-  std::int16_t goal_counter_e = 0; // +0x2e
-  std::int16_t mission_target_count = 0; // +0x30
-  bool has_been_visited = false; // +0x32
-  bool is_accepted = false; // +0x33
-  std::int16_t mission_template_id = -1; // +0x4d
-  std::int16_t mission_ship_count_max = 0; // +0x61
-  std::int16_t aux_ships_dude_def_index = -1; // +0x63
-  std::int16_t mission_fleet_metric_b = 0; // +0x65
-  std::int16_t mission_fleet_metric_c = 0; // +0x67
-  std::int16_t rearm_roll_clock = 0; // +0x69
-  std::int16_t mission_ship_count_active = 0; // +0x6b
-  std::uint16_t flags_primary = 0; // +0x55
-  std::uint16_t flags_secondary = 0; // +0x57
-  std::int16_t special_ship_type_index = -1; // +0x53
+  std::int16_t on_fail_stellar_id = -1;          // +0x00
+  std::int16_t on_success_stellar_id = -1;       // +0x04
+  std::int16_t target_ship_count = 0;            // +0x06
+  std::int16_t dude_def_index = -1;              // +0x08
+  std::int16_t spawn_behavior = 0;               // +0x0a
+  std::int16_t fleet_spawn_goal = 0;             // +0x0c
+  std::int16_t special_ship_spawn_mode = 0;      // +0x0e
+  std::int16_t current_system_id = -1;           // +0x10
+  std::int16_t special_ship_system_id = -1;      // +0x12
+  std::int16_t special_ship_count = 0;           // +0x14
+  std::int16_t mission_link_systems = -1;        // +0x16
+  std::int16_t mission_system_b = -1;            // +0x18
+  std::int16_t mission_system_c = -1;            // +0x1a
+  std::int16_t comp_govt_id = -1;                // +0x1c
+  std::int16_t comp_reward_delta = 0;            // +0x1e
+  std::int16_t on_resolve_repeat_count = 0;      // +0x20
+  std::int32_t resource_delta_or_cost = 0;       // +0x22
+  std::int16_t goal_counter_a = 0;               // +0x26
+  std::int16_t goal_counter_b = 0;               // +0x28
+  std::int16_t goal_counter_c = 0;               // +0x2a
+  std::int16_t goal_count_remaining = 0;         // +0x2c
+  std::int16_t goal_counter_e = 0;               // +0x2e
+  std::int16_t mission_target_count = 0;         // +0x30
+  bool has_been_visited = false;                 // +0x32
+  bool is_accepted = false;                      // +0x33
+  std::int16_t mission_template_id = -1;         // +0x4d
+  std::int16_t mission_ship_count_max = 0;       // +0x61
+  std::int16_t aux_ships_dude_def_index = -1;    // +0x63
+  std::int16_t mission_fleet_metric_b = 0;       // +0x65
+  std::int16_t mission_fleet_metric_c = 0;       // +0x67
+  std::int16_t rearm_roll_clock = 0;             // +0x69
+  std::int16_t mission_ship_count_active = 0;    // +0x6b
+  std::uint16_t flags_primary = 0;               // +0x55
+  std::uint16_t flags_secondary = 0;             // +0x57
+  std::int16_t special_ship_type_index = -1;     // +0x53
   std::int16_t special_ship_name_string_id = -1; // +0x47
-  std::int16_t special_ship_name_entry = -1; // +0x49
-  std::int16_t random_text_string_id = -1; // +0x4f
-  std::int16_t random_text_entry = -1; // +0x51
-  std::int16_t spawn_rearm_timer = -1; // +0x4b
-  std::int16_t brief_description_id = -1; // +0x35
+  std::int16_t special_ship_name_entry = -1;     // +0x49
+  std::int16_t random_text_string_id = -1;       // +0x4f
+  std::int16_t random_text_entry = -1;           // +0x51
+  std::int16_t spawn_rearm_timer = -1;           // +0x4b
+  std::int16_t brief_description_id = -1;        // +0x35
+  // Runtime desc-resource ids (+0x35..+0x43, -1 when unset). Slot map from
+  // Mission_PopulateMissionSlotFromDef (0x0043f8c0), matching the Bible's
+  // m\xefsn desc fields: [0] BriefText, [1] QuickBrief, [2] LoadCargText,
+  // [3] DumpCargoText, [4] CompText (success debrief), [5] FailText (failure
+  // debrief), [6] slot +0x41 (m\xefsn +0x58, provisional), [7] ShipDoneText.
   std::array<std::int16_t, 8> brief_description_ids{}; // +0x35..+0x43
+  // +0x45: days remaining before the mission deadline. Seeded from the m\xefsn
+  // TimeLimit at acceptance (-32000 when there is no deadline); the daily
+  // driver (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0, not yet
+  // ported) decrements it once per game day.
+  std::int16_t time_limit_days_remaining = -32000; // +0x45
   // MisnActive's six 255-byte text/script buffers. The resource decoder keeps
   // the source mïsn payload; activation projects these strings to the active
   // record at the offsets used by Mission_PopulateMissionSlotFromDef.
-  std::array<std::byte, 255> on_accept_text{}; // +0x1ec
-  std::array<std::byte, 255> mission_payload_text_b{}; // +0x2eb
-  std::array<std::byte, 255> on_success_text{}; // +0x3ea
-  std::array<std::byte, 255> on_failure_text{}; // +0x4e9
+  std::array<std::byte, 255> on_accept_text{};              // +0x1ec
+  std::array<std::byte, 255> mission_payload_text_b{};      // +0x2eb
+  std::array<std::byte, 255> on_success_text{};             // +0x3ea
+  std::array<std::byte, 255> on_failure_text{};             // +0x4e9
   std::array<std::byte, 255> resolve_script_buffer_start{}; // +0x5e8
-  std::array<std::byte, 255> state_latch{}; // +0x6e7
+  std::array<std::byte, 255> state_latch{};                 // +0x6e7
   std::array<std::byte, 0x8e6> raw_payload{};
 };
 
@@ -925,6 +940,7 @@ struct GameState {
     float src_x = 0.0F;
     float src_y = 0.0F;
   };
+
   std::vector<PendingDestructionSound> pending_destruction_sounds;
 
   // Centered UI cue requests consumed by the spaceflight loop (the loop owns
@@ -938,6 +954,7 @@ struct GameState {
     std::int16_t transition_index = 0; // 0..5 into transition_sounds
     std::int16_t count = 1;            // the original's repeat count
   };
+
   std::vector<PendingUiSound> pending_ui_sounds;
 
   // Decoded UI/transition cue cache (snd 150..155). Ghidra
