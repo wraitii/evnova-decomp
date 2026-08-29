@@ -741,13 +741,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             NovaHud_ShowOverlayMessage(state,
                                        text.value_or("Unable to send hail."));
           } else {
-            (void)NovaShipComm_RunShipDialog(platform, state, ship_target);
+            (void)NovaShipComm_RunShipDialog(
+                platform, state, ship_target, view, hud);
           }
         }
       } else if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
         const std::int16_t dialog_stellar = state.travel.selected_stellar_id;
         const NegotiationExit exit = NovaNegotiation_RunDestinationDialog(
-            platform, state, dialog_stellar);
+            platform, state, dialog_stellar, view, hud);
         if (exit == NegotiationExit::kQuit) {
           returning_to_menu = true;
           break;

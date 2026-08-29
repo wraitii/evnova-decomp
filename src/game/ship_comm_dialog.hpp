@@ -64,9 +64,14 @@ class SdlPlatform;
 
 namespace game {
 
+class HudRenderer;
+class SpaceflightView;
+
 // Runs the DLOG 0x3ef ship-comm modal for the ship in `ship_slot` (must be a
-// valid active NPC slot). Draws PICT 0x213f as the window backdrop on a dim
-// scrim over the flight scene, shows the 200x200 ship portrait (ShipClass
+// valid active NPC slot). Draws PICT 0x213f as the window backdrop over the
+// live flight view (SpaceflightView::DrawGameFrame; the original composites
+// its DLOG over the unmodified gameplay surface), shows the 200x200 ship
+// portrait (ShipClass
 // pict_fallback_sprite_resource_id) on the right and name/government panel on
 // the left, and loops the three context buttons (stacked vertically on the
 // lower-left) until the player closes the channel (Esc/Enter/'e'/Close
@@ -78,7 +83,9 @@ namespace game {
 // be opened (slot invalid / inactive).
 [[nodiscard]] bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                                               GameState &state,
-                                              std::int16_t ship_slot);
+                                              std::int16_t ship_slot,
+                                              SpaceflightView &view,
+                                              HudRenderer &hud);
 
 // Mirrors the bVar1 hail-eligibility gate of Ship_HandlePlayerTargetAction-
 // Command (0x00454910): the player can hail `target` only when the ship is

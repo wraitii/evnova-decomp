@@ -5,9 +5,11 @@
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
 #include "hud_overlay.hpp"
+#include "hud_renderer.hpp"
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
+#include "spaceflight_view.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -91,13 +93,8 @@ constexpr int kPaymentChancePercent = 0x23;
 }
 
 // Colours shared by the interaction/payment windows.
-constexpr SDL_Color kWindowBg{0, 0, 0, 255};
 constexpr SDL_Color kDim{192, 192, 192, 255};
 constexpr SDL_Color kTitle{255, 255, 255, 255};
-
-// The dim scrim laid between the flight scene and the modal (the original
-// draws the interaction window over the already-composited gameplay surface).
-constexpr SDL_Color kScrim{0, 0, 0, 170};
 
 // ---- DLOG 0x3f1 / DITL 0x3f1 geometry ------------------------------------
 // The destination-interaction window is 540x295 (DLOG 0x3f1 bounds = the
@@ -225,7 +222,8 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
 }
 
 // Ghidra 0x004812c0 NovaUi_DrawTravelDestinationInteractionWindow.
-// Draws the interaction-window frame over the dim scrim. The 540x295 backdrop
+// Draws the interaction-window frame over the live flight view. The 540x295
+// backdrop
 // PICT (DLOG 0x3f1) is centred on the 640x480 playfield; over it we draw the
 // destination planet picture into the DITL item-4 image frame on the right, the
 // status/prompt text into the item-3 panel top-left, the stellar header (item
@@ -233,6 +231,9 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
 // vertically down the lower-left column (Leave bottom, Attack middle,
 // Land/Bribe top).
 void DrawNegotiationDialog(SdlPlatform &platform,
+                           const GameState &state,
+                           SpaceflightView &view,
+                           HudRenderer &hud,
                            NovaFontCache &font_cache,
                            const ServicesButtonArt &button_art,
                            SDL_Texture *backdrop,
@@ -243,15 +244,12 @@ void DrawNegotiationDialog(SdlPlatform &platform,
                            std::span<const ServiceButton> buttons,
                            const SDL_FRect &panel) {
   SDL_Renderer *renderer = platform.renderer();
-  SDL_SetRenderDrawColor(
-      renderer, kWindowBg.r, kWindowBg.g, kWindowBg.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(renderer);
+  // Render the live game view beneath the window (the flight sim is paused,
+  // so this redraws the same world each frame): the original draws its DLOG
+  // over the unmodified gameplay surface.
+  view.DrawGameFrame(platform, state, hud);
   platform.SetCenteredPlayfield();
-
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(renderer, kScrim.r, kScrim.g, kScrim.b, kScrim.a);
-  SDL_RenderFillRect(renderer, &panel);
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  (void)panel;
 
   // The interaction-window frame is a fixed 540x295 PICT (DLOG 0x3f1), centred
   // on the 640x480 playfield. All DITL item rects are offset by this origin.
@@ -429,7 +427,9 @@ std::int32_t NovaNegotiation_ComputeBribeCost(std::mt19937 &rng,
 // ---------------------------------------------------------------------------
 NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                                                      GameState &state,
-                                                     std::int16_t stellar_id) {
+                                                     std::int16_t stellar_id,
+                                                     SpaceflightView &view,
+                                                     HudRenderer &hud) {
   NovaLog::Info("opening destination-interaction dialog 0x3f1 for stellar {}",
                 static_cast<int>(stellar_id));
 
@@ -596,6 +596,9 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
 
   while (!platform.quit_requested()) {
     DrawNegotiationDialog(platform,
+                          state,
+                          view,
+                          hud,
                           font_cache,
                           button_art,
                           backdrop ? backdrop->get() : nullptr,

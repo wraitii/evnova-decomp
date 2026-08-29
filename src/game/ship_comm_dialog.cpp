@@ -16,10 +16,12 @@
 #include "../sdl_platform.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
+#include "hud_renderer.hpp"
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
+#include "spaceflight_view.hpp"
 #include "targeting.hpp"
 
 #include <SDL3/SDL.h>
@@ -165,10 +167,8 @@ constexpr double kPaymentRoundFactor = 0.01;
 constexpr float kPlayerFuelOfferThreshold = 100.0F;
 
 // ---- Dialog colours --------------------------------------------------------
-constexpr SDL_Color kWindowBg{0, 0, 0, 255};
 constexpr SDL_Color kDim{192, 192, 192, 255};
 constexpr SDL_Color kTitle{255, 255, 255, 255};
-constexpr SDL_Color kScrim{0, 0, 0, 170};
 
 // Uniform integer in [0, bound). Mirrors NovaRandom_Range using the GameState
 // PRNG so all comm rolls are reproducible per session.
@@ -263,11 +263,15 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
   return static_cast<std::int32_t>(cost_int);
 }
 
-// Draws the comm-window frame over the dim scrim: the PICT 0x213f backdrop
+// Draws the comm-window frame over the live flight view: the PICT 0x213f
+// backdrop
 // centred at natural size (falling back to a bordered placeholder), the ship
 // picture box + name panel in the upper-left, the status text block, and the
 // three context buttons.
 void DrawShipCommDialog(SdlPlatform &platform,
+                        const GameState &state,
+                        SpaceflightView &view,
+                        HudRenderer &hud,
                         NovaFontCache &font_cache,
                         const ServicesButtonArt &button_art,
                         SDL_Texture *backdrop,
@@ -279,15 +283,12 @@ void DrawShipCommDialog(SdlPlatform &platform,
                         std::span<const std::string> button_labels,
                         const SDL_FRect &panel) {
   SDL_Renderer *renderer = platform.renderer();
-  SDL_SetRenderDrawColor(
-      renderer, kWindowBg.r, kWindowBg.g, kWindowBg.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(renderer);
+  // Render the live game view beneath the window (the flight sim is paused,
+  // so this redraws the same world each frame): the original draws its DLOG
+  // over the unmodified gameplay surface.
+  view.DrawGameFrame(platform, state, hud);
   platform.SetCenteredPlayfield();
-
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(renderer, kScrim.r, kScrim.g, kScrim.b, kScrim.a);
-  SDL_RenderFillRect(renderer, &panel);
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  (void)panel;
 
   // The comm window frame is a fixed 423x215 PICT (DLOG 0x3ef), centred on the
   // 640x480 playfield. All DITL item rects are offset by this origin.
@@ -492,7 +493,9 @@ LoadMoodPromptPayFirst(std::int16_t random_index, double personality) {
 // ---------------------------------------------------------------------------
 bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                                 GameState &state,
-                                std::int16_t ship_slot) {
+                                std::int16_t ship_slot,
+                                SpaceflightView &view,
+                                HudRenderer &hud) {
   if (ship_slot <= 0 ||
       ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips)) {
     NovaLog::Warn("ship-comm: slot {} out of range",
@@ -912,6 +915,9 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   // ---- Modal loop ----------------------------------------------------------
   while (!platform.quit_requested()) {
     DrawShipCommDialog(platform,
+                       state,
+                       view,
+                       hud,
                        font_cache,
                        button_art,
                        backdrop ? backdrop->get() : nullptr,

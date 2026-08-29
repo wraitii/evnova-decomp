@@ -48,6 +48,9 @@ class SdlPlatform;
 
 namespace game {
 
+class HudRenderer;
+class SpaceflightView;
+
 // Return code from the negotiation modal. The spaceflight loop either returns
 // to free flight (kClosed / kQuit) or, once the player has successfully landed
 // or paid a bribe to dock, runs the normal Spaceport window for the stellar.
@@ -72,8 +75,10 @@ enum class NegotiationExit : std::uint8_t {
     std::mt19937 &rng, std::int32_t credits, std::int16_t government_id);
 
 // Runs the DLOG 0x3f1 destination-interaction modal for the given stellar
-// (resource id >= 0x80). Draws PICT 0x2140 as the dialog backdrop on a dim
-// scrim over a black playfield, shows the target's status/prompt text (from
+// (resource id >= 0x80). Draws PICT 0x2140 as the dialog backdrop over the
+// live flight view (SpaceflightView::DrawGameFrame; the original composites
+// its DLOG over the unmodified gameplay surface), shows the target's
+// status/prompt text (from
 // STR# 0xbb8/0xbb9/0xbba via NovaHud_LoadStringEntry) and three buttons
 // (Leave, Land/Bribe, Attack), and loops until the player closes it, pays a
 // bribe to dock (returns kProceedToLand with state.travel.selected_stellar_id
@@ -81,6 +86,10 @@ enum class NegotiationExit : std::uint8_t {
 // Mirrors the nested-modality of the original interaction window over the
 // flight scene.
 [[nodiscard]] NegotiationExit NovaNegotiation_RunDestinationDialog(
-    SdlPlatform &platform, GameState &state, std::int16_t stellar_id);
+    SdlPlatform &platform,
+    GameState &state,
+    std::int16_t stellar_id,
+    SpaceflightView &view,
+    HudRenderer &hud);
 
 } // namespace game
