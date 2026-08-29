@@ -355,6 +355,10 @@ struct Ship {
   // it (System_TickNpcSpawnMaintenance 0x0041d6e0).
   std::int16_t jump_destination_system_id = -1; // +0x94
   std::int16_t ai_hostility_accumulator = 0;    // +0x96
+  // Ghidra ShipState +0xC910. Accumulates ROUND(weapon reload) * 1.5 per
+  // player-owned hit (Shot_ResolveShipHitFromWeapon) and gates the
+  // player-retarget chance; reset when the ship retargets onto an attacker.
+  float player_aggro_accumulator = 0.0F; // +0xC910
   // Engagement patience timer while the cloak/targetability predicate rejects
   // a target; when it expires the AI gives up and clears the primary target
   // (Ship_UpdateShipAiState state 4). -1 means no patience interval active.
@@ -375,6 +379,10 @@ struct Ship {
   // Cached ModType 17 bit 0x0008: cloaking deactivates when the ship takes
   // damage. The visual/state updater refreshes this latch lazily.
   std::int16_t cloak_damage_deactivate_latch = 0; // +0xC920
+  // Ghidra ShipState +0xC922. Voice/comm identifier passed to the combat
+  // chatter queue when a ship witnesses a kill. TODO(decomp): no producer
+  // seeds this yet (personality/dude comm data); consumers read it as 0.
+  std::int16_t voice_type_mode = 0; // +0xC922
   // Waypoint arrival marker pair used by ships carrying arrival markers (class
   // sprite_behavior_flags bit 1): waypoint_arrival_marker_a reflects a
   // completed arrival; marker_b counts/suppresses route restarts. -1 = none.
@@ -745,8 +753,13 @@ struct AsteroidState {
   // [0, pertype lifetime) (Asteroid_SpawnRecord) and advanced by wander_speed
   // each tick, wrapping via the sprite descriptor's frame count
   // (Asteroid_UpdateSprites).
-  float wander_radius = 0.0F;          // +0x14
-  float wander_speed = 0.0F;           // +0x18
+  float wander_radius = 0.0F; // +0x14
+  float wander_speed = 0.0F;  // +0x18
+  // Integrity counter seeded from AsteroidDef.wander_table_value (+0x00).
+  // Weapon splash decrements it by the weapon's shield damage (x10 when the
+  // weapon has flags_secondary 0x8000); below zero the destruction package
+  // runs (NovaUi_ResolveWeaponSplashImpact 0x00436ff0 ->
+  // Weapon_SpawnWeaponImpactEffectPackage 0x00462550).
   std::int16_t wander_table_value = 0; // +0x1c
   std::int16_t wander_type = 0; // +0x1e (index into the asteroid-type table)
   bool active = false;          // +0x20
@@ -900,6 +913,14 @@ struct GameState {
   std::array<BeamHit, 0x40> beam_hit_queue{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};
   std::array<FadingEffectInstance, 0x20> fading_effect_instances{};
+
+  // Ghidra g_pending_combat_chatter_{kind,government_id,variant}
+  // (0x007353fe/0x00735400/0x00735402). Written by Frame_QueueCombatChatter
+  // (0x00426ce0) when a ship witnesses a kill; consumed by the deferred
+  // Frame_UpdateCombatChatter pass (TODO(decomp)).
+  std::int16_t pending_combat_chatter_kind = 0;
+  std::int16_t pending_combat_chatter_government_id = -1;
+  std::int16_t pending_combat_chatter_variant = 0;
 
   // The 16-slot asteroid / drift-debris pool (mirrors the original
   // `g_asteroid_states`). Shared by Asteroid_SpawnRecord (spawn), the future

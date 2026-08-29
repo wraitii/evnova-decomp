@@ -37,11 +37,13 @@ namespace {
 // intentionally do nothing; logging them per frame would overwhelm diagnostics.
 void Stub_PlayerCore(GameState &state) { (void)state; }
 
-// Ghidra scope 9 of Frame_TickSystems (0x004186b0) ->
-// Shot_ResolveCollisions (0x00437e20). The first clean-room slice resolves
-// direct projectile-vs-ship impacts; splash, asteroid, stellar, and sprite
-// pixel-mask collision paths remain deferred.
+// Ghidra scope 9 of Frame_TickSystems (0x004186b0). The original splits
+// weapon contact into the sprite-overlap callback Ship_HandleSpritePair-
+// Collision (0x004374f0), which runs during sprite-layer processing, and the
+// blast-proximity pass Shot_ResolveCollisions (0x00437e20) in this scope.
+// Stellar and asteroid contact branches remain deferred.
 void Stub_Collisions(GameState &state) {
+  NovaWeapon_ResolveDirectShotCollisions(state);
   NovaWeapon_ResolveProjectileCollisions(state);
 }
 
@@ -1721,6 +1723,19 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   NovaFrame_SpaceflightLoop(platform, audio, state, returning_to_menu);
 
   NovaLog::Info("leaving spaceflight mode to the main menu");
+}
+
+// Ghidra Frame_QueueCombatChatter (0x00426ce0). The original writes three
+// globals; the clean-room latches the same triple on GameState. The consumer
+// pass (Frame_UpdateCombatChatter, plays the STR# comm audio/visuals) remains
+// TODO(decomp).
+void NovaFrame_QueueCombatChatter(GameState &state,
+                                  std::int16_t kind,
+                                  std::int16_t government_id,
+                                  std::int16_t variant) {
+  state.pending_combat_chatter_kind = kind;
+  state.pending_combat_chatter_government_id = government_id;
+  state.pending_combat_chatter_variant = variant;
 }
 
 } // namespace game

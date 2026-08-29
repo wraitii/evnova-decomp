@@ -452,6 +452,16 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   // one armor point for that variant.
   shot.impact_variant =
       (w->flags_secondary & 0x1000U) != 0U ? static_cast<std::int8_t>(1) : 0;
+  // Shot_SpawnShotFromWeapon (0x0041fd30): owners in disable mode (AI state
+  // 0x0D) also mark their shots to leave the target at 1 armor. The original
+  // additionally marks shots from owners locked on a fire-restricted target
+  // (Ship_IsShipLockedOnTarget); that check is deferred TODO(decomp).
+  if (shot.impact_variant == 0 && owner_ship_slot > 0 &&
+      owner_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips) &&
+      state.ShipAt(static_cast<std::size_t>(owner_ship_slot)).ai_state_code ==
+          0x0D) {
+    shot.impact_variant = 1;
+  }
   state.active_shots.push_back(shot);
   return static_cast<int>(state.active_shots.size() - 1);
 }

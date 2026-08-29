@@ -955,32 +955,40 @@ struct DudeDef {
 //   3-element direction sub-array, +0x14 field(+0x10), +0x16 lifetime.
 struct AsteroidDef {
   // Lowest row field; stored into a spawned AsteroidState's
-  // wander_table_value (+0x1c). Ghidra DAT_005912dc[mode] (+0x00).
-  // Payload word[0x0]. Verbatim, no rebase.
+  // wander_table_value (+0x1c), which doubles as the asteroid's INTEGRITY
+  // COUNTER: NovaUi_ResolveWeaponSplashImpact (0x00436ff0) decrements it by
+  // the hitting weapon's shield damage (x10 for flags_secondary 0x8000) and
+  // runs the destruction package below zero. Ghidra DAT_005912dc[mode]
+  // (+0x00). Payload word[0x0]. Verbatim, no rebase.
   std::int16_t wander_table_value = 0;
   // Float wander-speed scale for this type; `(rand(0x29)+0x50) * this * 0.01`
   // yields a state's wander_speed (+0x18). Ghidra DAT_005912f0[mode]
   // (+0x14). Payload word[0x2] * 0.01 (0x64..0x12c => 0.5..3.0 shipped).
   float wander_speed_multiplier = 1.0F;
-  // +0x02; loader validates payload word[0x6] >= 0. Provisional.
+  // +0x02; DECODED (Weapon_SpawnWeaponImpactEffectPackage 0x00462550): the
+  // number of junk freeflight objects spawned when the asteroid breaks
+  // (object type from +0x04). Loader validates payload word[0x6] >= 0.
   std::int16_t field_0x02 = 0;
-  // +0x04; loader accepts [-6,6] or [0x3e8,0x468). Provisional.
+  // +0x04; DECODED: the freeflight-junk type id spawned on destruction
+  // (freeflight objects are TODO(decomp) in the clean-room). Loader accepts
+  // [-6,6] or [0x3e8,0x468).
   std::int16_t field_0x04 = 0;
-  // +0x0c; loader validates payload word[0x8] >= 0. Provisional.
+  // +0x0c; DECODED: the debris SWParticle burst count emitted by the
+  // destruction package. Loader validates payload word[0x8] >= 0.
   std::int16_t field_0x0c = 0;
-  // +0x10; loader accepts [0,0x40) or [0x3e8,0x428). Provisional (the
-  // ship/dude-id style window hints at a cross-reference).
+  // +0x10; DECODED: the destruction area-effect id (Bible ExplodType-style
+  // impact effect, -1 none) fired by Weapon_SpawnWeaponImpactEffectPackage.
   std::int16_t field_0x10 = 0;
-  // +0x0e; payload word[0x16]. Scales with size tier in the shipped data
-  // (Metal Small 150 / Medium 300 / Big 600 / Huge 1200), consistent with a
-  // wander lifetime/count. PROVISIONAL: Asteroid_SpawnRecord reads the
-  // per-type lifetime from the sprite descriptor (+0x54), not this field; the
-  // drift layer (step 3/4) is expected to connect the two. Kept decoded so
-  // the spawn path has a datapoint.
+  // +0x0e; DECODED: the asteroid's mass used as the divisor when a surviving
+  // asteroid is nudged by weapon impact impulse (NovaUi_ResolveWeaponSplash-
+  // Impact). Scales with size tier in the shipped data (Metal Small 150 /
+  // Medium 300 / Big 600 / Huge 1200).
   std::int16_t lifetime = 0;
-  // 3-element direction sub-array at +0x06/+0x08/+0x0a (payload word[0xe+i*2],
-  // loader rebases 0x80..0x90 by -0x80, else requires <0x10). The third slot
-  // (+0x0a) converges with the standalone +0x0a field.
+  // DECODED (Weapon_SpawnWeaponImpactEffectPackage 0x00462550): on
+  // destruction a big asteroid splits into child asteroids of these two
+  // types (+0x06/+0x08, 0-based r\xf6id indices, -1 = unset); the third slot
+  // (+0x0a) is the split-count base: each break spawns
+  // NovaRandom_Range(base) + ceil(base/2) children.
   std::array<std::int16_t, 3> directions{0, 0, 0};
   // Packed 15-bit tint for the drift sprite, computed from the payload's
   // 3 RGB565 bytes via the loader's 565->555 downsample (red=byte[12]>>3,

@@ -36,6 +36,9 @@ void SeedCollisionScenario(GameState &state) {
   target.current_system_id = 0;
   target.armor_points = 100.0F;
   target.shield_points = 20.0F;
+  // Real ships carry a nonzero InherentAI behavior code; the hit path only
+  // applies aggro/retarget updates when ai_behavior_code > 0 (0x004192d0).
+  target.ai_behavior_code = 5;
   target.pos_x = 10.0F;
   target.pos_y = 0.0F;
   target.collision_radius_px = 10.0F;
@@ -69,7 +72,7 @@ TEST_CASE("projectile impact consumes shields before armor", "[collision]") {
   SpawnTestShot(state);
 
   REQUIRE(NovaWeapon_CanProjectileHitShip(state, state.active_shots[0], 1));
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
 
   CHECK(state.active_shots.empty());
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(10.0F));
@@ -104,7 +107,7 @@ TEST_CASE("player attack alerts same-government NPCs", "[collision][ai]") {
   wingmate.pos_y = 100.0F;
 
   REQUIRE(NovaWeapon_SpawnProjectile(state, 0, 1, 0) == 0);
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
 
   CHECK(wingmate.ai_state_code == 4);
   CHECK(wingmate.primary_target_ship_slot == 0);
@@ -116,12 +119,12 @@ TEST_CASE("player can continue firing after target becomes hostile",
   SeedCollisionScenario(state);
   SpawnTestShot(state);
 
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
   REQUIRE(state.active_shots.empty());
 
   SpawnTestShot(state);
   REQUIRE(NovaWeapon_CanProjectileHitShip(state, state.active_shots[0], 1));
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
 
   CHECK(state.active_shots.empty());
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(0.0F));
@@ -137,7 +140,7 @@ TEST_CASE("collision is resolved before projectile movement", "[collision]") {
   // The target overlaps the shot's current position. Moving first would send
   // this deliberately fast projectile past it; the frame loop's scope 9
   // collision pass must consume it before scope 7 Shot_HandleShot movement.
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
   CHECK(state.active_shots.empty());
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(10.0F));
 }
@@ -189,7 +192,7 @@ TEST_CASE("shield-passing projectile applies direct armor damage",
   state.scenario.weapons[0].flags = 0x0020U;
   SpawnTestShot(state);
 
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
 
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(20.0F));
   CHECK(state.ShipAt(1).armor_points == Catch::Approx(75.0F));
@@ -223,7 +226,7 @@ TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
   state.ShipAt(1).armor_points = 10.0F;
   SpawnTestShot(state);
 
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
 
   CHECK(state.active_shots.empty());
   // Shot_ResolveShipHitFromWeapon does not arm the death timer itself; the
@@ -243,14 +246,60 @@ TEST_CASE("late collision window stops contacts near expiry", "[collision]") {
   SpawnTestShot(state);
 
   state.active_shots[0].life_ticks_remaining = 2.0F;
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(20.0F));
 
   state.active_shots[0].life_ticks_remaining = 4.0F;
-  NovaWeapon_ResolveProjectileCollisions(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
   CHECK(state.active_shots.empty());
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(10.0F));
+}
+
+TEST_CASE("blast weapon strips asteroid integrity, splashes owner, and breaks",
+          "[collision][asteroid]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.blast_radius = 50;
+  weapon.splash_radius = 30;
+  weapon.impact_impulse = 200;
+
+  // One asteroid type: integrity 5, splits into type-0 children (count base
+  // 2 -> 1..2 children per break).
+  state.scenario.asteroid_defs.resize(1);
+  state.scenario.asteroid_defs[0].wander_table_value = 5;
+  state.scenario.asteroid_defs[0].directions = {0, -1, 2};
+
+  // Remove the test target ship so the proximity ship pass cannot claim the
+  // blast before the asteroid scan runs.
+  state.ShipAt(1).is_active = false;
+
+  AsteroidState &asteroid = state.asteroid_pool[0];
+  asteroid.active = true;
+  asteroid.wander_type = 0;
+  asteroid.wander_table_value = 5; // normally seeded by Asteroid_SpawnRecord
+  asteroid.target_pos_x = 0.0F;
+  asteroid.target_pos_y = 0.0F;
+
+  // The player's own blast splashes the player (flags_primary 0x100 clear):
+  // shields 100 -> 90. The proximity ship pass cannot hit the owner, so the
+  // shot survives for the asteroid scan.
+  SpawnTestShot(state);
+  NovaWeapon_ResolveProjectileCollisions(state);
+  REQUIRE(state.active_shots.empty());
+  CHECK(state.player.shield_points == Catch::Approx(90.0F));
+  CHECK(asteroid.wander_table_value == -5); // 5 - energy_damage(10)
+  CHECK(!asteroid.active);
+  // The break spawns 1..2 type-0 children in other pool slots.
+  int children = 0;
+  for (std::size_t i = 1; i < state.asteroid_pool.size(); ++i) {
+    if (state.asteroid_pool[i].active) {
+      CHECK(state.asteroid_pool[i].wander_type == 0);
+      ++children;
+    }
+  }
+  CHECK(children >= 1);
 }
 
 } // namespace game

@@ -1,18 +1,31 @@
 #include "collision.hpp"
 
+#include "asteroid.hpp"
 #include "government.hpp"
 #include "impact_effects.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
+#include "spaceflight.hpp"
 #include "targeting.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <optional>
+#include <utility>
 
 namespace game {
 namespace {
+
+constexpr float kImpulseCloseRangePx = 50.0F;   // DAT_0057522c
+constexpr float kMaxManeuverTimerOnHit = 20.0F; // DAT_00575224
+constexpr float kShieldDepletionFloorFraction =
+    0.1F; // DAT_00575208: shields recharge from a pool bounded at -10% of max
+constexpr float kPlayerAggroPerHitScale = 1.5F; // DAT_00575240
+constexpr float kProximitySpanFraction =
+    0.333005F; // DAT_00575338: blast + ship half-span * ~1/3
+constexpr std::int16_t kShipClassInvalidSentinel = 0x2ff;
 
 [[nodiscard]] const Weapon *WeaponForShot(const GameState &state,
                                           const ActiveShot &shot) {
@@ -27,17 +40,47 @@ namespace {
   return slot >= 0 && slot < static_cast<std::int16_t>(GameState::kMaxShips);
 }
 
+// Ghidra Ship_IsShipDestroyed (0x004688e0): death timer running or armor gone.
 [[nodiscard]] bool IsDestroyed(const Ship &ship) {
   return ship.death_timer_active > 0.0F || ship.armor_points <= 0.0F;
 }
 
+[[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
+                                            const Ship &ship) {
+  return state.scenario.Ship(
+      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+}
+
+[[nodiscard]] bool HasGovernmentFlag(const GameState &state,
+                                     const Ship &ship,
+                                     std::uint16_t flag) {
+  if (ship.faction_or_government_id < 0 ||
+      ship.faction_or_government_id >=
+          static_cast<std::int16_t>(state.scenario.governments.size())) {
+    return false;
+  }
+  return (state.scenario
+              .governments[static_cast<std::size_t>(
+                  ship.faction_or_government_id)]
+              .flags_primary &
+          flag) != 0;
+}
+
+[[nodiscard]] const DudeDef *DudeFor(const GameState &state, const Ship &ship) {
+  if (ship.dude_class_id < 0) {
+    return nullptr;
+  }
+  return state.scenario.Dude(
+      static_cast<std::int16_t>(ship.dude_class_id + 0x80));
+}
+
+// Ghidra Ship_ShipsShareTargetLeaderChain (0x0046d190) walks each ship's
+// ai_target_ship_slot to a root and excludes shots within one escort leader
+// chain. The walk is bounded to tolerate malformed cycles (the original is
+// not; see the function's plate comment).
 [[nodiscard]] bool SharesTargetLeaderChain(const GameState &state,
                                            std::int16_t first_slot,
                                            std::int16_t second_slot) {
-  // Ghidra Ship_ShipsShareTargetLeaderChain (0x0046d190) walks each ship's
-  // ai_target_ship_slot to a root and excludes shots within one escort leader
-  // chain. The current AI model has the same slot-based links, so this keeps
-  // the walk local and bounded while tolerating malformed cycles.
   auto root = [&state](std::int16_t slot) {
     std::int16_t current = slot;
     for (std::size_t step = 0; step < GameState::kMaxShips; ++step) {
@@ -56,19 +99,26 @@ namespace {
   return root(first_slot) == root(second_slot);
 }
 
-[[nodiscard]] bool HasGovernmentFlag(const GameState &state,
-                                     const Ship &ship,
-                                     std::uint16_t flag) {
-  if (ship.faction_or_government_id < 0 ||
-      ship.faction_or_government_id >=
-          static_cast<std::int16_t>(state.scenario.governments.size())) {
-    return false;
+// Weapon_CanWeaponHitTarget walks the owner's ai_target_ship_slot chain and
+// only applies its player-escort/booty gates when that chain reaches slot 0.
+[[nodiscard]] bool OwnerChainReachesPlayer(const GameState &state,
+                                           std::int16_t owner_slot) {
+  std::int16_t current = owner_slot;
+  for (std::size_t step = 0; step < GameState::kMaxShips; ++step) {
+    if (current == 0) {
+      return true;
+    }
+    if (!ValidShipSlot(current)) {
+      return false;
+    }
+    const std::int16_t next =
+        state.ShipAt(static_cast<std::size_t>(current)).ai_target_ship_slot;
+    if (next == -1) {
+      return false;
+    }
+    current = next;
   }
-  return (state.scenario
-              .governments[static_cast<std::size_t>(
-                  ship.faction_or_government_id)]
-              .flags_primary &
-          flag) != 0;
+  return false;
 }
 
 [[nodiscard]] bool ShotIsInLateCollisionWindow(const ActiveShot &shot,
@@ -81,28 +131,28 @@ namespace {
                                       shot.life_ticks_remaining);
   const float collision_end_age = static_cast<float>(
       weapon.lifetime_ticks - weapon.late_collision_window_ticks);
-  // Ship_HandleSpritePairCollision compares the integer lifetime minus the
-  // late-window field against ShotState.life_time and rejects the contact
-  // once that boundary has been crossed.
+  // Both Ship_HandleSpritePairCollision and Shot_ResolveCollisions reject
+  // contacts once life_time drops below the late-window boundary.
   return collision_end_age < shot_age;
 }
 
-void ApplyWeaponOnHitEffects(Ship &target,
-                             const Weapon &weapon,
-                             float impact_x,
-                             float impact_y) {
+// Ghidra Weapon_ApplyWeaponOnHitEffects (0x0046f3f0). Ionization is applied
+// unattenuated for the direct hit (the original passes impact_pos = NULL
+// there) and distance-attenuated inside the splash radius otherwise.
+void ApplyWeaponOnHitEffects(
+    Ship &target,
+    const Weapon &weapon,
+    std::optional<std::pair<float, float>> impact_pos) {
   int points = weapon.ionization_points;
-  if (weapon.splash_radius > 0) {
-    const float dx = target.pos_x - impact_x;
-    const float dy = target.pos_y - impact_y;
+  if (impact_pos.has_value()) {
+    const float dx = target.pos_x - impact_pos->first;
+    const float dy = target.pos_y - impact_pos->second;
     const float radius = static_cast<float>(weapon.splash_radius);
     const float distance_sq = dx * dx + dy * dy;
     const float radius_sq = radius * radius;
     if (distance_sq > radius_sq) {
       points = 0;
     } else if (distance_sq > 0.0F) {
-      // Weapon_ApplyWeaponOnHitEffects (0x0046f3f0): splash ionization is
-      // linearly attenuated by squared distance inside the blast radius.
       points = static_cast<int>(std::lround(static_cast<float>(points) *
                                             (1.0F - distance_sq / radius_sq)));
     }
@@ -113,17 +163,22 @@ void ApplyWeaponOnHitEffects(Ship &target,
   }
 }
 
-void ApplyImpactImpulse(const GameState &state,
-                        const ActiveShot &shot,
-                        const Weapon &weapon,
+// Math_AddPolarVelocityWithClamp (0x0043b4e0): add impact/mass in the
+// impact-to-target direction, then clamp each component to the class's
+// base-speed bound. Ship-class Speed is stored in hundredths of px/frame.
+// TODO(decomp) skipped: the original clamps against
+// Ship_ComputeShipEffectiveMaxSpeed (outfit opcode-8 contributions, NPC skill
+// variance, government combat-rating scale) and widens the player clamp 1.8x
+// while the afterburner is active (DAT_00575218) without gravity pull.
+void ApplyImpactImpulse(GameState &state,
                         Ship &target,
                         float impact_x,
-                        float impact_y) {
-  if (weapon.impact_impulse == 0 || target.ai_station_hold_timer > 0.0F) {
+                        float impact_y,
+                        std::int16_t impact_impulse) {
+  if (impact_impulse == 0 || target.ai_station_hold_timer > 0.0F) {
     return;
   }
-  const ShipClass *target_class = state.scenario.Ship(
-      static_cast<std::int16_t>(target.ship_class_id + 0x80));
+  const ShipClass *target_class = ShipClassFor(state, target);
   if (target_class == nullptr || target_class->mass_tons <= 0 ||
       (target_class->capability_flags & 0x0400U) != 0U) {
     return;
@@ -136,10 +191,7 @@ void ApplyImpactImpulse(const GameState &state,
     return;
   }
 
-  // Math_AddPolarVelocityWithClamp (0x0043b4e0): add impact/mass in the
-  // impact-to-target direction, then clamp each component to the class's
-  // base-speed bound. Ship-class Speed is stored in hundredths of px/frame.
-  const float impulse = static_cast<float>(weapon.impact_impulse) /
+  const float impulse = static_cast<float>(impact_impulse) /
                         static_cast<float>(target_class->mass_tons);
   target.vel_x += dx / distance * impulse;
   target.vel_y += dy / distance * impulse;
@@ -148,7 +200,20 @@ void ApplyImpactImpulse(const GameState &state,
     target.vel_x = std::clamp(target.vel_x, -max_axis_speed, max_axis_speed);
     target.vel_y = std::clamp(target.vel_y, -max_axis_speed, max_axis_speed);
   }
-  (void)shot;
+}
+
+// Shot_ResolveShipHitFromWeapon's leave-one-armor rule: a disable-variant hit
+// stops at 1 armor point instead of destroying the hull.
+void ApplyArmorDamage(Ship &target, int armor_damage, bool force_armor_only) {
+  if (armor_damage <= 0) {
+    return;
+  }
+  if (force_armor_only && target.armor_points > 0.0F &&
+      target.armor_points - static_cast<float>(armor_damage) <= 0.0F) {
+    target.armor_points = 1.0F;
+  } else {
+    target.armor_points -= static_cast<float>(armor_damage);
+  }
 }
 
 // Ghidra Government_PropagateHostilityFromAttack (0x004102e0). A player hit
@@ -158,15 +223,16 @@ void ApplyImpactImpulse(const GameState &state,
 // rules while keeping this clean-room pass limited to the represented fields.
 void PropagateHostilityFromPlayerAttack(GameState &state,
                                         const Ship &target,
-                                        const ActiveShot &shot) {
-  if (shot.owner_ship_slot != 0 || target.pers_def_slot == 0x3ff ||
+                                        std::int16_t owner_ship_slot) {
+  if (owner_ship_slot != 0 || target.pers_def_slot == 0x3ff ||
       state.player.pers_def_slot == 0x3fe) {
     return;
   }
 
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &responder = state.ShipAt(slot);
-    if (!responder.is_active || responder.current_system_id != shot.system_id ||
+    if (!responder.is_active ||
+        responder.current_system_id != state.player.current_system_id ||
         responder.ai_behavior_code < 3 || responder.ai_behavior_code > 4 ||
         responder.ai_state_code == 4 || responder.pers_def_slot == 0x3ff ||
         responder.faction_or_government_id < -1 ||
@@ -219,64 +285,113 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
     if (!eligible) {
       continue;
     }
-    if (responder.ai_target_ship_slot == shot.owner_ship_slot ||
+    if (responder.ai_target_ship_slot == owner_ship_slot ||
         (ValidShipSlot(responder.ai_target_ship_slot) &&
          state.ShipAt(static_cast<std::size_t>(responder.ai_target_ship_slot))
-                 .ai_target_ship_slot == shot.owner_ship_slot)) {
+                 .ai_target_ship_slot == owner_ship_slot)) {
       continue;
     }
     responder.ai_state_code = 4;
-    responder.primary_target_ship_slot = shot.owner_ship_slot;
+    responder.primary_target_ship_slot = owner_ship_slot;
   }
 }
 
-void ResolveShipHit(GameState &state,
-                    const ActiveShot &shot,
-                    Ship &target,
-                    std::int16_t target_slot,
-                    bool allow_aggro_updates,
-                    bool suppress_retarget_logic) {
-  const Weapon *weapon = WeaponForShot(state, shot);
-  if (weapon == nullptr) {
+// Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0). Core ship-hit
+// resolution: impulse, shield-first/armor damage, disable-variant armor
+// clamping, and the aggro/hostility response.
+//
+// TODO(decomp) skipped: the pers-attacker damage multiplier block - DECODED
+// as Shareware Enforcer escalation: attackers with pers_def_slot 0x3ff
+// (enforcer-template ships) deal x3 (days 0-40) / x2 (41-60) / x5 (61-90)
+// armor+shield damage by the shareware trial day counter
+// g_shareware_day_counter (0x0059799e, FUN_004d4480); 91+ days means no
+// boost. Deliberately not reproduced in the clean-room (no shareware trial
+// state). check_fire_restriction_transi-
+// tion is always 0 from both shot paths, so its disabled-armor floor and the
+// mission DISABLE bookkeeping (Mission_FailMissionSlotQuick / goal_counter_c,
+// player "disabled" HUD messages via STR# 0x7d2) are deferred. The full
+// retarget gate chain (system reputation, government max-odds roll, cloak
+// re-entry, escort-command exclusions) is approximated by the conservative
+// subset below, and the kill-side faction combat events plus combat-rating
+// award are deferred. The stellar-target redirect branch (damage x30 toward
+// attackers closer than the stellar under attack) is also deferred.
+void ResolveShipHitFromWeapon(GameState &state,
+                              std::int16_t target_slot,
+                              Ship &target,
+                              float impact_x,
+                              float impact_y,
+                              std::int16_t impact_impulse,
+                              std::int16_t armor_damage,
+                              std::int16_t shield_damage,
+                              std::int16_t attacker_ship_slot,
+                              bool allow_aggro_updates,
+                              bool suppress_retarget_logic,
+                              bool force_armor_only,
+                              bool bypass_shields,
+                              std::int16_t player_aggro_delta) {
+  if (!ValidShipSlot(target_slot) || !target.is_active ||
+      target.ship_class_id < 0) {
     return;
+  }
+  const bool attacker_valid = ValidShipSlot(attacker_ship_slot);
+
+  // Disable-mode attackers (AI state 0x0D) and their leaders force the
+  // leave-one-armor variant so their fire disables rather than destroys the
+  // target they are locked on.
+  if (allow_aggro_updates && attacker_valid && attacker_ship_slot > 0 &&
+      state.ShipAt(static_cast<std::size_t>(attacker_ship_slot))
+              .primary_target_ship_slot == target_slot) {
+    const Ship &attacker =
+        state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
+    if (attacker.ai_state_code == 0x0D) {
+      force_armor_only = true;
+    } else if (attacker.ai_target_ship_slot > 0 &&
+               attacker.ai_target_ship_slot <
+                   static_cast<std::int16_t>(GameState::kMaxShips) &&
+               state.ShipAt(
+                        static_cast<std::size_t>(attacker.ai_target_ship_slot))
+                       .ai_state_code == 0x0D) {
+      force_armor_only = true;
+    }
+  }
+
+  // Negative impulses (pull beams) are ignored at point-blank range.
+  if (impact_impulse < 0 && allow_aggro_updates && attacker_valid &&
+      (std::abs(
+           state.ShipAt(static_cast<std::size_t>(attacker_ship_slot)).pos_x -
+           target.pos_x) < kImpulseCloseRangePx ||
+       std::abs(
+           state.ShipAt(static_cast<std::size_t>(attacker_ship_slot)).pos_y -
+           target.pos_y) < kImpulseCloseRangePx)) {
+    impact_impulse = 0;
   }
 
   const bool was_destroyed = IsDestroyed(target);
 
-  const int armor_damage = static_cast<int>(weapon->mass_damage);
-  const int shield_damage = static_cast<int>(weapon->energy_damage);
-  const bool bypass_shields = (weapon->flags & 0x0020U) != 0;
-  const bool force_armor_only = shot.impact_variant != 0;
+  ApplyImpactImpulse(state, target, impact_x, impact_y, impact_impulse);
 
-  ApplyWeaponOnHitEffects(target, *weapon, shot.pos_x, shot.pos_y);
-  ApplyImpactImpulse(state, shot, *weapon, target, shot.pos_x, shot.pos_y);
+  const ShipClass *target_class = ShipClassFor(state, target);
 
-  // Shot_ResolveShipHitFromWeapon (0x004192d0): shields are consumed first;
-  // once they are down, the weapon's armor damage is applied. The original
-  // passes shields for weapons with Flags bit 0x20 and applies armor directly.
+  // Shields are consumed first; once they are down the armor damage applies.
+  // Depleted shields recharge from a pool bounded at -10% of the ship's max.
   if (!bypass_shields) {
     if (shield_damage > 0) {
       target.shield_points -= static_cast<float>(shield_damage);
     }
     if (target.shield_points <= 0.0F) {
-      if (armor_damage > 0) {
-        if (force_armor_only && target.armor_points > 0.0F &&
-            target.armor_points - static_cast<float>(armor_damage) <= 0.0F) {
-          target.armor_points = 1.0F;
-        } else {
-          target.armor_points -= static_cast<float>(armor_damage);
+      ApplyArmorDamage(target, armor_damage, force_armor_only);
+      if (target_class != nullptr) {
+        const float shield_floor =
+            -kShieldDepletionFloorFraction *
+            static_cast<float>(
+                std::max(0, static_cast<int>(target_class->base_shield)));
+        if (target.shield_points < shield_floor) {
+          target.shield_points = shield_floor;
         }
       }
     }
   } else {
-    if (armor_damage > 0) {
-      if (force_armor_only && target.armor_points > 0.0F &&
-          target.armor_points - static_cast<float>(armor_damage) <= 0.0F) {
-        target.armor_points = 1.0F;
-      } else {
-        target.armor_points -= static_cast<float>(armor_damage);
-      }
-    }
+    ApplyArmorDamage(target, armor_damage, force_armor_only);
   }
 
   // Shot_ResolveShipHitFromWeapon leaves destruction as an armor-state. The
@@ -285,16 +400,14 @@ void ResolveShipHit(GameState &state,
   // lethal NPC hit cannot leave its hull silently on screen.
   if (!was_destroyed && IsDestroyed(target) &&
       !target.destruction_visual_triggered) {
-    const ShipClass *ship_class = state.scenario.Ship(
-        static_cast<std::int16_t>(target.ship_class_id + 0x80));
     target.destruction_visual_triggered = true;
     const std::int16_t death_delay =
-        ship_class == nullptr
+        target_class == nullptr
             ? 0
-            : std::max<std::int16_t>(0, ship_class->death_delay_frames);
+            : std::max<std::int16_t>(0, target_class->death_delay_frames);
     // Unit/test states without loaded ship tables retain the old armor-only
     // sentinel; real scenario ships use the Bible DeathDelay timer.
-    if (ship_class != nullptr && death_delay > 0) {
+    if (target_class != nullptr && death_delay > 0) {
       target.death_timer_active = static_cast<float>(death_delay);
     }
     target.destruction_visual_timer_ms =
@@ -303,39 +416,86 @@ void ResolveShipHit(GameState &state,
     NovaEffects_SpawnShipDestructionBurst(
         state,
         target,
-        ship_class == nullptr ? 0
-                              : ship_class->destruction_effect_while_breaking);
-    if (target.destruction_visual_timer_ms <= 0.0F && ship_class != nullptr) {
+        target_class == nullptr
+            ? 0
+            : target_class->destruction_effect_while_breaking);
+    if (target.destruction_visual_timer_ms <= 0.0F && target_class != nullptr) {
       NovaEffects_SpawnShipDestructionFinale(
-          state, target, ship_class->destruction_effect_final);
+          state, target, target_class->destruction_effect_final);
       target.destruction_finale_triggered = true;
     }
+    // TODO(decomp) skipped: kill-side Government_ProcessFactionCombatEvent
+    // (event 3) plus Frame_AddCombatRatingPoints when the victim's government
+    // tracks reputation.
   }
 
-  if (allow_aggro_updates && target_slot > 0) {
-    target.ai_hostility_accumulator = static_cast<std::int16_t>(
-        std::min(0x7fff,
-                 static_cast<int>(target.ai_hostility_accumulator) +
-                     armor_damage + shield_damage));
-  }
+  if (allow_aggro_updates && target.ai_behavior_code > 0 &&
+      target.ai_station_hold_timer <= 0.0F) {
+    // Player-owned fire accumulates the per-hit aggro weight (weapon reload
+    // scaled by DAT_00575240) regardless of whether the target retargets.
+    if (attacker_ship_slot == 0 && !suppress_retarget_logic) {
+      target.player_aggro_accumulator +=
+          static_cast<float>(player_aggro_delta) * kPlayerAggroPerHitScale;
+    }
 
-  // Minimal aggro transition from the hit path. Mission reactions, faction
-  // reputation, chatter, surrender/disable transitions, and player HUD
-  // messages are deliberately outside this first slice.
-  if (allow_aggro_updates && shot.owner_ship_slot > 0 && target_slot > 0) {
-    target.primary_target_ship_slot = shot.owner_ship_slot;
-  } else if (allow_aggro_updates && shot.owner_ship_slot == 0 &&
-             target_slot > 0) {
-    // Ship_SetShipHostileToPlayer (0x00410700) deliberately changes the
-    // primary target/state only. ai_target_ship_slot is a separate leader /
-    // escort-chain link; overwriting it here makes the next player shot look
-    // like friendly fire through Ship_ShipsShareTargetLeaderChain.
-    NovaAi_SetShipHostileToPlayer(state, target);
-  }
+    const bool self_hit = attacker_valid && attacker_ship_slot == target_slot;
+    if (!self_hit && target_slot != 0) {
+      // Hostility accumulates from positive damage only, and the escort
+      // leader (when it has no stellar assignment) shares the hit.
+      if (armor_damage > 0) {
+        target.ai_hostility_accumulator = static_cast<std::int16_t>(std::min(
+            0x7fff,
+            static_cast<int>(target.ai_hostility_accumulator) + armor_damage));
+      }
+      if (shield_damage > 0) {
+        target.ai_hostility_accumulator = static_cast<std::int16_t>(std::min(
+            0x7fff,
+            static_cast<int>(target.ai_hostility_accumulator) + shield_damage));
+      }
+      if (attacker_valid) {
+        target.primary_target_ship_slot = attacker_ship_slot;
+      }
+      target.player_aggro_accumulator = 0.0F;
+      const std::int16_t leader = target.ai_target_ship_slot;
+      if (leader > 0 &&
+          leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
+          state.ShipAt(static_cast<std::size_t>(leader))
+                  .target_stellar_object_id == -1) {
+        Ship &leader_ship = state.ShipAt(static_cast<std::size_t>(leader));
+        if (armor_damage > 0) {
+          leader_ship.ai_hostility_accumulator = static_cast<std::int16_t>(
+              std::min(0x7fff,
+                       static_cast<int>(leader_ship.ai_hostility_accumulator) +
+                           armor_damage));
+        }
+        if (shield_damage > 0) {
+          leader_ship.ai_hostility_accumulator = static_cast<std::int16_t>(
+              std::min(0x7fff,
+                       static_cast<int>(leader_ship.ai_hostility_accumulator) +
+                           shield_damage));
+        }
+        if (attacker_valid) {
+          leader_ship.primary_target_ship_slot = attacker_ship_slot;
+        }
+      }
+    }
+    // TODO(decomp) skipped: the stellar-target redirect branch, which awards
+    // 30x hostility and retargets ships that are attacking a stellar when the
+    // attacker is closer than half the squared distance to that stellar.
 
-  if (allow_aggro_updates && suppress_retarget_logic &&
-      shot.owner_ship_slot == 0) {
-    PropagateHostilityFromPlayerAttack(state, target, shot);
+    if (attacker_ship_slot == 0) {
+      // Ship_SetShipHostileToPlayer (0x00410700) deliberately changes the
+      // primary target/state only. ai_target_ship_slot is a separate leader /
+      // escort-chain link; overwriting it here makes the next player shot look
+      // like friendly fire through Ship_ShipsShareTargetLeaderChain.
+      NovaAi_SetShipHostileToPlayer(state, target);
+      if (target.ai_maneuver_timer_ms > kMaxManeuverTimerOnHit) {
+        target.ai_maneuver_timer_ms = kMaxManeuverTimerOnHit;
+      }
+    }
+    if (suppress_retarget_logic && attacker_ship_slot == 0) {
+      PropagateHostilityFromPlayerAttack(state, target, attacker_ship_slot);
+    }
   }
 
   // Shot_ResolveShipHitFromWeapon refreshes the non-bypass hit reaction timer.
@@ -344,6 +504,311 @@ void ResolveShipHit(GameState &state,
   if (!bypass_shields) {
     target.hit_reaction_timer = 32.0F;
   }
+  // TODO(decomp) skipped: cloak_damage_deactivate_latch handling
+  // (Ship_OnShipCloakStateCleared) and g_player_status_panel_dirty.
+}
+
+// Ghidra Shot_ResolveShotCollisionHit (0x00437780). Applies the primary area
+// impact effect, the direct damage/impulse/ionization package, and the axis-
+// aligned splash to every other eligible ship.
+//
+// TODO(decomp) skipped: Weapon_SpawnWeaponImpactParticleBurst (the SWParticle
+// impact flurries; gated on WeaponDef.impact_particle_count > 0), and
+// Shot_SpawnLinkedShotsOnImpact (0x00420d30, gated on range_link_gate > 0 and
+// the allow_linked_shots flag). ShotState +0x32 damage_reduction is not
+// carried on ActiveShot; the original zero-initializes it and no writer was
+// found, so the subtraction is a no-op.
+void ResolveShotCollisionHit(GameState &state,
+                             ActiveShot &shot,
+                             Ship &target,
+                             std::int16_t target_slot,
+                             bool allow_linked_shots) {
+  if (target.ship_class_id < 0 ||
+      target.ship_class_id == kShipClassInvalidSentinel) {
+    return;
+  }
+  const Weapon *weapon = WeaponForShot(state, shot);
+  if (weapon == nullptr) {
+    return;
+  }
+
+  NovaEffects_SpawnAreaImpact(state,
+                              shot.pos_x,
+                              shot.pos_y,
+                              weapon->impact_effect_id,
+                              weapon->splash_radius,
+                              true);
+
+  const int armor_damage = weapon->mass_damage;
+  const int shield_damage = weapon->energy_damage;
+
+  // Direct-target ionization is unattenuated (impact_pos = NULL upstream).
+  ApplyWeaponOnHitEffects(target, *weapon, std::nullopt);
+
+  const bool suppress_retarget_logic = shot.target_ship_slot == target_slot;
+  // The per-hit player aggro weight is the weapon's reload interval, rounded.
+  const auto player_aggro_delta = static_cast<std::int16_t>(
+      std::lround(static_cast<float>(weapon->reload_ticks)));
+  const bool target_was_destroyed = IsDestroyed(target);
+
+  ResolveShipHitFromWeapon(state,
+                           target_slot,
+                           target,
+                           shot.pos_x,
+                           shot.pos_y,
+                           weapon->impact_impulse,
+                           armor_damage,
+                           shield_damage,
+                           shot.owner_ship_slot,
+                           /*allow_aggro_updates=*/true,
+                           suppress_retarget_logic,
+                           /*force_armor_only=*/shot.impact_variant != 0,
+                           /*bypass_shields=*/
+                           (weapon->flags & 0x0020U) != 0U,
+                           player_aggro_delta);
+
+  if (weapon->splash_radius > 0) {
+    for (std::int16_t slot = 0;
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
+      // The direct target does not take splash damage on top.
+      if (slot == target_slot) {
+        continue;
+      }
+      // Owner immunity: NPC owners never splash themselves; the player is
+      // splashed by their own weapon unless flags_primary 0x100 is set
+      // (polarity verified against disassembly at 0x00437ac0).
+      if (slot == shot.owner_ship_slot &&
+          ((weapon->flags & 0x0100U) != 0U || shot.owner_ship_slot != 0)) {
+        continue;
+      }
+      Ship &splash_target = state.ShipAt(static_cast<std::size_t>(slot));
+      // The original checks only is_active and the class range here - no
+      // system or capability gate - so splash crosses systems by raw
+      // position. Quirk preserved.
+      if (!splash_target.is_active || splash_target.ship_class_id < 0 ||
+          splash_target.ship_class_id == kShipClassInvalidSentinel) {
+        continue;
+      }
+      if (std::abs(splash_target.pos_x - shot.pos_x) >
+              static_cast<float>(weapon->splash_radius) ||
+          std::abs(splash_target.pos_y - shot.pos_y) >
+              static_cast<float>(weapon->splash_radius)) {
+        continue;
+      }
+      // Splash keeps the full damage (no variant reduction) but honors the
+      // disable variant's leave-one-armor rule; no aggro updates.
+      ResolveShipHitFromWeapon(state,
+                               slot,
+                               splash_target,
+                               shot.pos_x,
+                               shot.pos_y,
+                               weapon->impact_impulse,
+                               weapon->mass_damage,
+                               weapon->energy_damage,
+                               shot.owner_ship_slot,
+                               /*allow_aggro_updates=*/false,
+                               /*suppress_retarget_logic=*/false,
+                               /*force_armor_only=*/shot.impact_variant != 0,
+                               /*bypass_shields=*/
+                               (weapon->flags & 0x0020U) != 0U,
+                               /*player_aggro_delta=*/0);
+      ApplyWeaponOnHitEffects(
+          splash_target, *weapon, std::make_pair(shot.pos_x, shot.pos_y));
+    }
+  }
+
+  // Kill-chatter witness loop: ships whose escort chain is rooted at the
+  // player (ai_target == 0) and that were attacking the destroyed ship queue
+  // one combat chatter line unless their class is flagged mute
+  // (flags_secondary 0x10). Ghidra Shot_ResolveShotCollisionHit tail.
+  if (!target_was_destroyed && IsDestroyed(target)) {
+    for (std::int16_t slot = 1;
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
+      const Ship &witness = state.ShipAt(static_cast<std::size_t>(slot));
+      if (slot == target_slot || !witness.is_active ||
+          witness.ai_target_ship_slot != 0 ||
+          witness.primary_target_ship_slot != target_slot ||
+          witness.ai_behavior_code <= 2 || witness.ai_state_code != 4) {
+        continue;
+      }
+      const ShipClass *witness_class = ShipClassFor(state, witness);
+      if (witness_class == nullptr ||
+          (witness_class->flags_secondary & 0x10U) != 0U) {
+        continue;
+      }
+      NovaFrame_QueueCombatChatter(state,
+                                   2,
+                                   witness_class->inherent_attributes_govt,
+                                   witness.voice_type_mode);
+    }
+  }
+  (void)allow_linked_shots; // linked-shot spawner deferred (see TODO above)
+
+  shot.consumed = true;
+}
+
+// Ghidra Weapon_SpawnWeaponImpactEffectPackage (0x00462550), asteroid arm:
+// a broken asteroid spawns junk freeflight objects, a debris particle burst,
+// its destruction area effect, and splits into child asteroids from its def
+// row (child types +0x06/+0x08, count derived from +0x0a), then deactivates.
+// TODO(decomp) skipped: junk freeflight objects (row +0x02 count, +0x04 type;
+// no freeflight pool yet) and the debris SWParticle burst (row +0x0c).
+void ResolveAsteroidDestructionPackage(GameState &state,
+                                       AsteroidState &asteroid) {
+  const AsteroidDef *def = state.scenario.AsteroidType(
+      static_cast<std::int16_t>(asteroid.wander_type + 0x80));
+  if (def == nullptr) {
+    asteroid.active = false;
+    return;
+  }
+  if (def->field_0x10 != -1) {
+    NovaEffects_SpawnAreaImpact(state,
+                                asteroid.target_pos_x,
+                                asteroid.target_pos_y,
+                                def->field_0x10,
+                                0,
+                                true);
+  }
+  const int count_base = def->directions[2];
+  if (count_base > 0) {
+    const int count =
+        std::uniform_int_distribution<int>{0, count_base - 1}(state.rng) +
+        (count_base + 1) / 2;
+    for (int i = 0; i < count; ++i) {
+      // Both child types unset means the original spawns nothing; a single
+      // set type always spawns; otherwise a random pick per fragment.
+      if (def->directions[0] == -1 && def->directions[1] == -1) {
+        continue;
+      }
+      std::int16_t child_type = def->directions[0];
+      if (def->directions[0] != -1 && def->directions[1] != -1) {
+        child_type = def->directions[std::uniform_int_distribution<int>{0, 1}(
+            state.rng)];
+      } else if (def->directions[0] == -1) {
+        child_type = def->directions[1];
+      }
+      (void)NovaAsteroid_SpawnRecord(
+          state, asteroid.target_pos_x, asteroid.target_pos_y, child_type);
+    }
+  }
+  asteroid.active = false;
+}
+
+// Ghidra NovaUi_ResolveWeaponSplashImpact (0x00436ff0): a blast weapon that
+// reaches an asteroid (flags_quaternary bit 0 clear) spawns the area impact,
+// splashes nearby ships (player-owned shots only), decrements the asteroid's
+// integrity counter by the weapon's shield damage, and either runs the
+// destruction package or nudges the asteroid along the impact.
+void ResolveAsteroidSplashImpact(GameState &state,
+                                 ActiveShot &shot,
+                                 AsteroidState &asteroid) {
+  const Weapon *weapon = WeaponForShot(state, shot);
+  if (weapon == nullptr) {
+    shot.consumed = true;
+    return;
+  }
+
+  NovaEffects_SpawnAreaImpact(state,
+                              shot.pos_x,
+                              shot.pos_y,
+                              weapon->impact_effect_id,
+                              weapon->splash_radius,
+                              true);
+  // TODO(decomp) skipped: Weapon_SpawnWeaponImpactParticleBurst
+  // (impact_particle_count > 0).
+
+  // Ship splash: only player-owned shots splash from asteroid hits, and
+  // unlike the shot-vs-ship splash this arm does exclude immaterial
+  // (capability 0x400) ships.
+  if (shot.owner_ship_slot == 0 && weapon->splash_radius > 0 &&
+      (weapon->flags_secondary & 0x0400U) == 0U) {
+    for (std::int16_t slot = 0;
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
+      // Owner immunity polarity as in Shot_ResolveShotCollisionHit: the
+      // player is splashed unless flags_primary 0x100 is set.
+      if (slot == shot.owner_ship_slot && (weapon->flags & 0x0100U) != 0U) {
+        continue;
+      }
+      Ship &splash_target = state.ShipAt(static_cast<std::size_t>(slot));
+      if (!splash_target.is_active || splash_target.ship_class_id < 0) {
+        continue;
+      }
+      const ShipClass *splash_class = ShipClassFor(state, splash_target);
+      if (splash_class == nullptr ||
+          (splash_class->capability_flags & 0x0400U) != 0U) {
+        continue;
+      }
+      if (std::abs(splash_target.pos_x - shot.pos_x) >
+              static_cast<float>(weapon->splash_radius) ||
+          std::abs(splash_target.pos_y - shot.pos_y) >
+              static_cast<float>(weapon->splash_radius)) {
+        continue;
+      }
+      ResolveShipHitFromWeapon(
+          state,
+          slot,
+          splash_target,
+          shot.pos_x,
+          shot.pos_y,
+          weapon->impact_impulse,
+          weapon->mass_damage,
+          weapon->energy_damage,
+          shot.owner_ship_slot,
+          /*allow_aggro_updates=*/false,
+          /*suppress_retarget_logic=*/false,
+          /*force_armor_only=*/shot.impact_variant != 0,
+          /*bypass_shields=*/(weapon->flags & 0x0020U) != 0U,
+          static_cast<std::int16_t>(
+              std::lround(static_cast<float>(weapon->reload_ticks))));
+      ApplyWeaponOnHitEffects(
+          splash_target, *weapon, std::make_pair(shot.pos_x, shot.pos_y));
+    }
+  }
+
+  // Integrity counter: flags_secondary 0x8000 weapons strip 10x.
+  if ((weapon->flags_secondary & 0x8000U) == 0U) {
+    asteroid.wander_table_value = static_cast<std::int16_t>(
+        asteroid.wander_table_value - weapon->energy_damage);
+  } else {
+    asteroid.wander_table_value = static_cast<std::int16_t>(
+        asteroid.wander_table_value + weapon->energy_damage * -10);
+  }
+
+  if (asteroid.wander_table_value < 0) {
+    ResolveAsteroidDestructionPackage(state, asteroid);
+  } else if (weapon->impact_impulse != 0) {
+    // Surviving asteroids are nudged along the impact direction. The original
+    // reads the bearing from ShotState +0x20 (provisional range_scalar_runtime
+    // in the DB); the clean-room derives it from the shot's velocity. The
+    // impulse is divided by the def's size-scaled mass (row +0x0e) and the
+    // result clamped to +-2.0 px/frame per axis (DAT_0057531c).
+    const AsteroidDef *def = state.scenario.AsteroidType(
+        static_cast<std::int16_t>(asteroid.wander_type + 0x80));
+    if (def != nullptr && def->lifetime > 0) {
+      const float speed = static_cast<float>(weapon->impact_impulse) /
+                          static_cast<float>(def->lifetime);
+      const float bearing_deg = std::atan2(shot.vel_x, -shot.vel_y) *
+                                (180.0F / 3.14159265358979323846F);
+      const float rad = bearing_deg * (3.14159265358979323846F / 180.0F);
+      asteroid.target_vel_x += std::sin(rad) * speed;
+      asteroid.target_vel_y += -std::cos(rad) * speed;
+      asteroid.target_vel_x = std::clamp(asteroid.target_vel_x, -2.0F, 2.0F);
+      asteroid.target_vel_y = std::clamp(asteroid.target_vel_y, -2.0F, 2.0F);
+    }
+  }
+
+  shot.consumed = true;
+}
+
+void RemoveConsumedShots(GameState &state) {
+  state.active_shots.erase(
+      std::remove_if(state.active_shots.begin(),
+                     state.active_shots.end(),
+                     [](const ActiveShot &shot) { return shot.consumed; }),
+      state.active_shots.end());
 }
 
 } // namespace
@@ -358,80 +823,177 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   }
   if (!ValidShipSlot(shot.owner_ship_slot) ||
       shot.owner_ship_slot == target_slot) {
+    // TODO(decomp): unowned shots (e.g. stellar defense batteries) accept
+    // only the recorded target slot; the clean-room has no ownerless shots.
     return false;
   }
-
-  const Ship &owner =
-      state.ShipAt(static_cast<std::size_t>(shot.owner_ship_slot));
+  const std::int16_t owner_slot = shot.owner_ship_slot;
+  const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_slot));
   const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+
   if (!target.is_active || target.current_system_id != shot.system_id ||
       IsDestroyed(target)) {
     return false;
   }
+  // Clean-room guard: the original relies on shot lifetime to drop dead or
+  // departed owners; the explicit checks keep stale shots from damaging
+  // across systems in this simplified model.
   if (owner.current_system_id != shot.system_id || IsDestroyed(owner)) {
     return false;
   }
   if (target.pers_def_slot == 0x3ff) {
     return false;
   }
+  if (target.ship_class_id < 0 ||
+      target.ship_class_id == kShipClassInvalidSentinel) {
+    return false;
+  }
 
-  // Weapon_CanWeaponHitTarget's mode-1 branch rejects a contact other than the
-  // shot's recorded target unless Flags2 bit 0x08 opts into the broader path.
+  // Mode-1 shots reject a contact other than the recorded target unless
+  // flags_secondary bit 0x08 opts into the broader path.
   if (weapon->weapon_mode_code == 1 &&
       (weapon->flags_secondary & 0x0008U) == 0 &&
       shot.target_ship_slot != target_slot) {
     return false;
   }
 
-  // The original avoids collisions between ships pursuing the same target or
-  // sharing a stellar target. These fields are represented directly here,
-  // unlike the original's packed ShipState offsets.
-  if (owner.ai_target_ship_slot >= 0 && target.ai_target_ship_slot >= 0 &&
-      owner.ai_target_ship_slot == target.ai_target_ship_slot) {
+  if (owner.ai_target_ship_slot != -1 && target.ai_target_ship_slot != -1 &&
+      target.ai_target_ship_slot == owner.ai_target_ship_slot) {
+    return false;
+  }
+  if (owner.faction_or_government_id >= 0 &&
+      owner.faction_or_government_id < 0x100 &&
+      target.faction_or_government_id == owner.faction_or_government_id) {
     return false;
   }
   if (owner.target_stellar_object_id != -1 &&
-      owner.target_stellar_object_id == target.target_stellar_object_id) {
+      target.target_stellar_object_id == owner.target_stellar_object_id) {
+    return false;
+  }
+  // TODO(decomp) skipped: the fire-restricted range gate comparing
+  // ShipClassDef +0xa10 against ShotState +0x42 (per-shot scatter range,
+  // 0xffff for non-turret modes) - the field semantics are still provisional.
+
+  const bool owner_chain_to_player = OwnerChainReachesPlayer(state, owner_slot);
+  if (owner_chain_to_player) {
+    // Player-aligned fire never hits the player's own escort chain,
+    // xenophobic (0x40) owner governments, immaterial (0x08) target
+    // governments, or booty-flagged (0x100) dude targets.
+    const std::int16_t target_leader = target.ai_target_ship_slot;
+    const bool target_is_player_escort =
+        target_slot != 0 && ValidShipSlot(target_leader) &&
+        state.ShipAt(static_cast<std::size_t>(target_leader))
+                .ai_target_ship_slot == 0;
+    if (target_is_player_escort) {
+      return false;
+    }
+    if (HasGovernmentFlag(state, owner, 0x0040U)) {
+      return false;
+    }
+    if (HasGovernmentFlag(state, target, 0x0008U)) {
+      return false;
+    }
+    const DudeDef *target_dude = DudeFor(state, target);
+    if (target_dude != nullptr && (target_dude->booty_flags & 0x0100U) != 0U) {
+      return false;
+    }
+    // Owner-side booty gate: when the owner has no valid dude record, the
+    // owner's escort leader's dude record is consulted instead.
+    const DudeDef *owner_dude = DudeFor(state, owner);
+    if (owner_dude == nullptr && ValidShipSlot(owner.ai_target_ship_slot)) {
+      owner_dude = DudeFor(
+          state,
+          state.ShipAt(static_cast<std::size_t>(owner.ai_target_ship_slot)));
+    }
+    if (owner_dude != nullptr && (owner_dude->booty_flags & 0x0100U) != 0U) {
+      return false;
+    }
+  }
+  if (owner_slot > 0 && owner.ai_state_code == 0x10) {
     return false;
   }
 
-  if (owner.faction_or_government_id >= 0 &&
-      owner.faction_or_government_id == target.faction_or_government_id) {
-    return false;
-  }
-  if (SharesTargetLeaderChain(state, shot.owner_ship_slot, target_slot)) {
-    return false;
-  }
-  if (HasGovernmentFlag(state, target, 0x0008U) ||
-      HasGovernmentFlag(state, target, 0x0040U)) {
-    return false;
-  }
-
-  // The original's scripted-maneuver exclusion is on the attacking NPC, not
-  // on the target. The player (slot 0) is not subject to this owner-side gate.
-  if (shot.owner_ship_slot > 0 && owner.ai_state_code == 0x10) {
-    return false;
-  }
-
-  // Weapon_CanWeaponHitTarget requires the target's planet-type capability
-  // bit to agree with Weapon.Flags2 bit 0x400.
-  const ShipClass *target_class = state.scenario.Ship(
-      static_cast<std::int16_t>(target.ship_class_id + 0x80));
+  // The target's planet-type capability bit must agree with weapon
+  // flags_secondary bit 0x400.
+  const ShipClass *target_class = ShipClassFor(state, target);
   if (target_class == nullptr ||
       ((target_class->capability_flags ^ weapon->flags_secondary) & 0x0400U) !=
-          0) {
+          0U) {
+    return false;
+  }
+  // Government aggro flag (0x40): NPC targets carrying it are only hittable
+  // by owners that are neither the player nor player escorts.
+  if (target_slot != 0 && HasGovernmentFlag(state, target, 0x0040U) &&
+      (owner_slot == 0 || (ValidShipSlot(owner.ai_target_ship_slot) &&
+                           owner.ai_target_ship_slot == 0))) {
+    return false;
+  }
+  if (SharesTargetLeaderChain(state, target_slot, owner_slot)) {
     return false;
   }
   return true;
 }
 
-// Ghidra 0x00437e20 Shot_ResolveCollisions; the Ship_HandleSpritePairCollision
-// pair-contact core (0x004374f0) runs inline below.
-void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
+// Ghidra Ship_HandleSpritePairCollision (0x004374f0) with its sprite-layer
+// driver inlined: the original is invoked per overlapping (ship sprite, shot
+// sprite) pair by TestSpriteLayerOverlaps and picks the bounding-circle or
+// pixel-mask test by frame-time budget (circle when avg frame time >= 2.0ms
+// or half-span <= 0x20).
+void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
   for (ActiveShot &shot : state.active_shots) {
     if (shot.life_ticks_remaining <= 0.0F && shot.life_frames > 0) {
       // Compatibility for records created by older callers/tests that only
       // populated the original integer lifetime view.
+      shot.life_ticks_remaining = static_cast<float>(shot.life_frames);
+    }
+    if (shot.consumed || shot.life_ticks_remaining <= 0.0F) {
+      continue;
+    }
+    const Weapon *weapon = WeaponForShot(state, shot);
+    if (weapon == nullptr || shot.system_id != state.player.current_system_id) {
+      continue;
+    }
+
+    for (std::int16_t slot = 0;
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
+      const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
+      if (!target.is_active ||
+          target.current_system_id != state.player.current_system_id) {
+        continue;
+      }
+      if (!NovaWeapon_CanProjectileHitShip(state, shot, slot)) {
+        continue;
+      }
+      // TODO(decomp): pixel-mask overlap (Sprite_TestPixelMaskOverlap
+      // 0x00475c80) when sprites are available; the circle envelope stands in
+      // for Sprite_TestBoundingCircleOverlap.
+      const float dx = target.pos_x - shot.pos_x;
+      const float dy = target.pos_y - shot.pos_y;
+      const float radius = std::max(0.0F, target.collision_radius_px) +
+                           std::max(0.0F, shot.collision_radius_px);
+      if (dx * dx + dy * dy > radius * radius) {
+        continue;
+      }
+      if (ShotIsInLateCollisionWindow(shot, *weapon)) {
+        break;
+      }
+      ResolveShotCollisionHit(state,
+                              shot,
+                              state.ShipAt(static_cast<std::size_t>(slot)),
+                              slot,
+                              /*allow_linked_shots=*/false);
+      break;
+    }
+  }
+  RemoveConsumedShots(state);
+}
+
+// Ghidra Shot_ResolveCollisions (0x00437e20): the blast-proximity pass. It
+// runs after the direct-contact pass, so a shot that already connected skips.
+void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
+  for (ActiveShot &shot : state.active_shots) {
+    if (shot.life_ticks_remaining <= 0.0F && shot.life_frames > 0) {
       shot.life_ticks_remaining = static_cast<float>(shot.life_frames);
     }
     if (shot.consumed || shot.life_ticks_remaining <= 0.0F) {
@@ -452,103 +1014,65 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
       continue;
     }
 
-    std::int16_t best_target = -1;
-    float best_distance_sq = std::numeric_limits<float>::max();
-    for (std::int16_t slot = 0;
-         slot < static_cast<std::int16_t>(GameState::kMaxShips);
-         ++slot) {
-      if (!NovaWeapon_CanProjectileHitShip(state, shot, slot)) {
-        continue;
-      }
-      const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
-      const float dx = target.pos_x - shot.pos_x;
-      const float dy = target.pos_y - shot.pos_y;
-      const float direct_radius = std::max(0.0F, target.collision_radius_px) +
-                                  std::max(0.0F, shot.collision_radius_px);
-      const float proximity_radius =
-          static_cast<float>(
-              std::max(0, static_cast<int>(weapon->blast_radius))) +
-          std::max(0.0F, target.collision_radius_px) * 0.5F;
-      const float radius = std::max(direct_radius, proximity_radius);
-      const float distance_sq = dx * dx + dy * dy;
-      if (distance_sq <= radius * radius && distance_sq < best_distance_sq) {
-        best_target = slot;
-        best_distance_sq = distance_sq;
-      }
-    }
-
-    if (best_target >= 0) {
-      // Ghidra Shot_ResolveShotCollisionHit (0x00437780) emits the primary
-      // impact package before applying direct and splash damage. Splash
-      // targets below reuse the damage path but do not spawn duplicate art.
-      NovaEffects_SpawnAreaImpact(state,
-                                  shot.pos_x,
-                                  shot.pos_y,
-                                  weapon->impact_effect_id,
-                                  weapon->splash_radius,
-                                  true);
-      NovaEffects_SpawnImpactEffectPackage(
-          state, shot.pos_x, shot.pos_y, shot.impact_package_id, false);
-      ResolveShipHit(state,
-                     shot,
-                     state.ShipAt(static_cast<std::size_t>(best_target)),
-                     best_target,
-                     /*allow_aggro_updates=*/true,
-                     /*suppress_retarget_logic=*/
-                     shot.target_ship_slot == best_target);
-
-      // Shot_ResolveShotCollisionHit (0x00437780): a blast damages every
-      // additional active ship in the axis-aligned splash box, excluding the
-      // owner unless Flags bit 0x0100 explicitly allows player hurt.
-      if (weapon->splash_radius > 0) {
-        for (std::int16_t slot = 0;
-             slot < static_cast<std::int16_t>(GameState::kMaxShips);
-             ++slot) {
-          if (slot == best_target || !ValidShipSlot(slot)) {
-            continue;
-          }
-          // The original's Flags bit 0x0100 carve-out is specifically about
-          // the player: NPC owners may receive their own blast damage, while
-          // the player's ship is protected unless that bit is set.
-          if (slot == shot.owner_ship_slot && shot.owner_ship_slot == 0 &&
-              (weapon->flags & 0x0100U) == 0U) {
-            continue;
-          }
-          Ship &splash_target = state.ShipAt(static_cast<std::size_t>(slot));
-          if (!splash_target.is_active ||
-              splash_target.current_system_id != shot.system_id ||
-              IsDestroyed(splash_target)) {
-            continue;
-          }
-          const ShipClass *splash_class = state.scenario.Ship(
-              static_cast<std::int16_t>(splash_target.ship_class_id + 0x80));
-          if (splash_class == nullptr ||
-              (splash_class->capability_flags & 0x0400U) != 0U) {
-            continue;
-          }
-          if (std::abs(splash_target.pos_x - shot.pos_x) >
-                  static_cast<float>(weapon->splash_radius) ||
-              std::abs(splash_target.pos_y - shot.pos_y) >
-                  static_cast<float>(weapon->splash_radius)) {
-            continue;
-          }
-          ResolveShipHit(state,
-                         shot,
-                         splash_target,
-                         slot,
-                         /*allow_aggro_updates=*/false,
-                         /*suppress_retarget_logic=*/false);
+    // TODO(decomp) skipped: the stellar-contact branch (weapons with
+    // flags_secondary 0x400 pixel-mask against the system's stellar sprites,
+    // damaging StellarDef +0x3c and re-arming destroyed bodies) - it needs
+    // sprite masks and the stellar health model.
+    if (weapon->blast_radius > 0) {
+      bool ship_hit = false;
+      for (std::int16_t slot = 0;
+           slot < static_cast<std::int16_t>(GameState::kMaxShips);
+           ++slot) {
+        if (!NovaWeapon_CanProjectileHitShip(state, shot, slot)) {
+          continue;
+        }
+        const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
+        // Ghidra: radius = ROUND(blast_radius + ship half-span * 0.333)
+        // (DAT_00575338); positions and distances are compared in integer
+        // space. The clean-room's collision_radius_px stands in for the
+        // sprite half-span.
+        const auto radius = static_cast<float>(
+            std::lround(static_cast<float>(weapon->blast_radius) +
+                        std::max(0.0F, target.collision_radius_px) *
+                            kProximitySpanFraction));
+        const auto dx =
+            static_cast<int>(std::lround(target.pos_x - shot.pos_x));
+        const auto dy =
+            static_cast<int>(std::lround(target.pos_y - shot.pos_y));
+        if (dx * dx + dy * dy <=
+            static_cast<int>(radius) * static_cast<int>(radius)) {
+          ResolveShotCollisionHit(state,
+                                  shot,
+                                  state.ShipAt(static_cast<std::size_t>(slot)),
+                                  slot,
+                                  /*allow_linked_shots=*/true);
+          ship_hit = true;
+          break;
         }
       }
-      shot.consumed = true;
+      // Asteroid branch: when no ship was hit and flags_quaternary bit 0 is
+      // clear, the 16 asteroid records are scanned (integer dist^2 <=
+      // blast_radius^2, round-half-away positions) and the first contact
+      // runs NovaUi_ResolveWeaponSplashImpact.
+      if (!ship_hit && (weapon->flags_quaternary & 0x0001U) == 0U) {
+        const auto blast = static_cast<int>(weapon->blast_radius);
+        for (AsteroidState &asteroid : state.asteroid_pool) {
+          if (!asteroid.active) {
+            continue;
+          }
+          const auto dx = static_cast<int>(
+              std::lround(std::abs(asteroid.target_pos_x - shot.pos_x)));
+          const auto dy = static_cast<int>(
+              std::lround(std::abs(asteroid.target_pos_y - shot.pos_y)));
+          if (dx * dx + dy * dy <= blast * blast) {
+            ResolveAsteroidSplashImpact(state, shot, asteroid);
+            break;
+          }
+        }
+      }
     }
   }
-
-  state.active_shots.erase(
-      std::remove_if(state.active_shots.begin(),
-                     state.active_shots.end(),
-                     [](const ActiveShot &shot) { return shot.consumed; }),
-      state.active_shots.end());
+  RemoveConsumedShots(state);
 }
 
 void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
@@ -588,13 +1112,23 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                                 true);
     NovaEffects_SpawnImpactEffectPackage(
         state, shot.pos_x, shot.pos_y, shot.impact_package_id, false);
+    ResolveShipHitFromWeapon(state,
+                             target_ship_slot,
+                             target,
+                             shot.pos_x,
+                             shot.pos_y,
+                             weapon->impact_impulse,
+                             weapon->mass_damage,
+                             weapon->energy_damage,
+                             owner_ship_slot,
+                             /*allow_aggro_updates=*/true,
+                             /*suppress_retarget_logic=*/false,
+                             /*force_armor_only=*/impact_variant != 0,
+                             /*bypass_shields=*/
+                             (weapon->flags & 0x0020U) != 0U,
+                             static_cast<std::int16_t>(std::lround(
+                                 static_cast<float>(weapon->reload_ticks))));
   }
-  ResolveShipHit(state,
-                 shot,
-                 target,
-                 target_ship_slot,
-                 /*allow_aggro_updates=*/true,
-                 /*suppress_retarget_logic=*/false);
 }
 
 } // namespace game

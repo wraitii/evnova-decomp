@@ -122,6 +122,14 @@ void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
                                         float &vel_x,
                                         float &vel_y);
 
+// Ghidra Frame_QueueCombatChatter (0x00426ce0): latches one pending combat
+// chatter request (kind, government voice, variant selector) onto GameState.
+// Consumed by the deferred Frame_UpdateCombatChatter pass (TODO(decomp)).
+void NovaFrame_QueueCombatChatter(GameState &state,
+                                  std::int16_t kind,
+                                  std::int16_t government_id,
+                                  std::int16_t variant);
+
 // NPC free-flight movement integrator, ported from the movement block of Ghidra
 // Ship_HandleShip (0x00433050). The AI writes the ship's ai_desired_heading_deg
 // / ai_desired_speed / ai_forward_thrust_cmd fields; this turns the ship toward
