@@ -657,4 +657,44 @@ std::int16_t Outfit_ComputeRemainingCargoSpace(const GameState &state) {
   return static_cast<std::int16_t>(std::max<std::int32_t>(0, capacity - used));
 }
 
+// Ghidra 0x0046cb90 Outfit_HasMiningScoopOutfit. ModType 0x1F in any of the
+// four mod slots of an owned (player) or class-default (NPC) outfit.
+bool NovaOutfit_HasMiningScoopOutfit(const GameState &state, const Ship &ship) {
+  auto outfit_has_scoop = [](const Outfit &outfit) {
+    return outfit.mod_type == 0x1f ||
+           std::any_of(outfit.alt_mod_types.begin(),
+                       outfit.alt_mod_types.end(),
+                       [](std::int16_t type) { return type == 0x1f; });
+  };
+  if (ship.ship_instance_id == 0) {
+    for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
+         ++id) {
+      if (state.inventory.outfit_owned_count[id] <= 0) {
+        continue;
+      }
+      const Outfit *outfit =
+          state.scenario.Outfit(static_cast<std::int16_t>(id + 0x80));
+      if (outfit != nullptr && outfit_has_scoop(*outfit)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return false;
+  }
+  for (std::size_t slot = 0; slot < cls->default_outfit_ids.size(); ++slot) {
+    if (cls->default_outfit_counts[slot] <= 0) {
+      continue;
+    }
+    const Outfit *outfit = state.scenario.Outfit(cls->default_outfit_ids[slot]);
+    if (outfit != nullptr && outfit_has_scoop(*outfit)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace game

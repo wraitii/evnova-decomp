@@ -2,8 +2,12 @@
 
 #include "../log.hpp"
 #include "government.hpp"
+#include "mission.hpp"
+#include "outfit.hpp"
 #include "ship_ai.hpp"
+#include "weapon.hpp"
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <random>
@@ -625,6 +629,236 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
   return -1;
 }
 
+// Ghidra 0x004235c0 Pers_SpawnShipFromPersDef.
+int NovaPers_SpawnShipFromPersDef(GameState &state,
+                                  std::int16_t system_id,
+                                  bool exclude_derelict_govts,
+                                  std::int16_t forced_pers_slot) {
+  std::array<std::uint8_t, 0x400> eligible{};
+  int eligible_count = 0;
+
+  if (forced_pers_slot < 0 || 0x3fe < forced_pers_slot) {
+    // Candidate scan over slots 0..0x3fe: the original loop bound (sVar13 <
+    // 0x3ff) excludes the Shareware Enforcer sentinel slot 0x3ff.
+    const System *system =
+        state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
+    if (system == nullptr) {
+      return -1;
+    }
+    const std::int16_t sys_govt = system->government_id;
+    for (std::size_t slot = 0; slot < 0x3ff; ++slot) {
+      const PersDef &def = state.scenario.pers_defs[slot];
+      if (!(def.present && def.ai_behavior_code > 0 &&
+            def.is_available_runtime && def.loaded_latch)) {
+        continue;
+      }
+      bool ok = false;
+      const std::int16_t filter = def.spawn_system_filter;
+      if (filter == -1 || system_id == filter) {
+        ok = true;
+      }
+      if (0x7f < filter && filter < 10000 && system_id == filter - 0x80) {
+        ok = true;
+      }
+      // 0x270e == 9998: the government-code window excludes 9999, so a raw
+      // filter of 9999 matches systems with government -1 (original quirk).
+      if (0x270e < filter && filter < 15000 && filter - 10000 == sys_govt) {
+        ok = true;
+      }
+      if (14999 < filter && filter < 20000 && sys_govt > -1 &&
+          NovaGovernment_AreGovtsAllied(
+              state.scenario,
+              static_cast<std::int16_t>(filter - 15000),
+              sys_govt)) {
+        ok = true;
+      }
+      if (19999 < filter && filter < 25000 && sys_govt > -1 &&
+          filter - 20000 != sys_govt) {
+        ok = true;
+      }
+      if (24999 < filter && filter < 30000 && sys_govt > -1 &&
+          NovaGovernment_AreGovtsHostileOrXenophobic(
+              state.scenario,
+              static_cast<std::int16_t>(filter - 25000),
+              sys_govt)) {
+        ok = true;
+      }
+      if (ok && exclude_derelict_govts && def.government_id > -1) {
+        const Government *govt = state.scenario.Government(def.government_id);
+        if (govt != nullptr && (govt->flags_primary & 0x0800U) != 0U) {
+          ok = false;
+        }
+      }
+      if (ok && !Mission_CheckReactionConditionSatisfied(
+                    state, def.availability_expression)) {
+        ok = false;
+      }
+      if (ok) {
+        eligible[slot] = 1;
+        ++eligible_count;
+      }
+    }
+  } else {
+    // Forced slot: no scan, and the def is force-marked present so the spawn
+    // proceeds even for an absent përs record (original quirk used by the
+    // ambush and player-core call sites).
+    const auto forced = static_cast<std::size_t>(forced_pers_slot);
+    eligible[forced] = 1;
+    state.scenario.pers_defs[forced].present = true;
+    eligible_count = 1;
+  }
+
+  // Drop candidates whose personality is already active in the ship table:
+  // every active non-fleet ship with a pers slot knocks out candidates with
+  // the same +0x624 first-name-byte and +0x78a display-name id.
+  for (std::size_t ship_slot = 1; ship_slot < GameState::kMaxShips;
+       ++ship_slot) {
+    const Ship &active = state.ShipAt(ship_slot);
+    if (!active.is_active || active.mission_fleet_slot != -1) {
+      continue;
+    }
+    if (active.pers_def_slot < 0 || active.pers_def_slot >= 0x400) {
+      continue;
+    }
+    const PersDef &active_def =
+        state.scenario
+            .pers_defs[static_cast<std::size_t>(active.pers_def_slot)];
+    const auto first_byte = [](const PersDef &def) {
+      return def.display_name.empty() ? '\0' : def.display_name.front();
+    };
+    for (std::size_t cand = 0; cand < 0x400; ++cand) {
+      if (eligible[cand] == 0) {
+        continue;
+      }
+      const PersDef &cand_def = state.scenario.pers_defs[cand];
+      if (first_byte(cand_def) == first_byte(active_def) &&
+          cand_def.display_name_string_id ==
+              active_def.display_name_string_id) {
+        eligible[cand] = 0;
+        --eligible_count;
+      }
+    }
+  }
+
+  if (eligible_count <= 0) {
+    return -1;
+  }
+
+  std::int16_t slot = forced_pers_slot;
+  if (slot == -1) {
+    // The original random range is 0x3fe, so slot 0x3fe is only reachable by
+    // a forced call.
+    slot = RandomBelow(state, 0x3fe);
+  }
+  if (slot < 0 || slot >= 0x400 ||
+      eligible[static_cast<std::size_t>(slot)] == 0) {
+    return -1;
+  }
+  const PersDef &def = state.scenario.pers_defs[static_cast<std::size_t>(slot)];
+
+  const int alloc = NovaShip_AllocateShipSlot(state, system_id, 8);
+  if (alloc < 0) {
+    return -1;
+  }
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(alloc));
+  ship.pers_def_slot = slot;
+  ship.ship_class_id = def.ship_class_id;
+  ship.dude_class_id = -1;
+  ship.faction_or_government_id = def.government_id;
+  ship.ai_behavior_code = def.ai_behavior_code;
+  // Aggress seeds the per-ship cadence slot (+0xC8CC), clamped 1..2 (larger
+  // values collapse to 4).
+  ship.random_ai_render_cadence = def.aggression_level;
+  ship.comm_interacted_mark = 0; // +0xBC
+  ship.afterburner_latch = NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;
+  ship.mining_scoop_active = NovaOutfit_HasMiningScoopOutfit(state, ship);
+  ship.escort_command_code = -1;
+  // Bible përs Flags 0x0002: escape pod & afterburner.
+  if ((def.flags_primary & 0x0002U) != 0U) {
+    ship.afterburner_latch = 1;
+  }
+  if (ship.random_ai_render_cadence < 1) {
+    ship.random_ai_render_cadence = 1;
+  }
+  if (ship.random_ai_render_cadence > 2) {
+    ship.random_ai_render_cadence = 4;
+  }
+
+  // Weapon banks: class stock loadout, then the përs per-weapon count/ammo
+  // deltas (indexed by weapon id - 0x80).
+  NovaWeapon_EnsureNpcWeaponBanks(state, ship);
+  for (std::size_t bank = 0; bank < 0x100; ++bank) {
+    ship.npc_weapon_bank_ammo[bank] = static_cast<std::int16_t>(
+        ship.npc_weapon_bank_ammo[bank] + def.weapon_count_delta[bank]);
+    ship.npc_weapon_bank_secondary[bank] =
+        static_cast<std::int16_t>(ship.npc_weapon_bank_secondary[bank] +
+                                  def.weapon_ammo_load_delta[bank]);
+  }
+
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  ship.shield_points =
+      cls != nullptr ? static_cast<float>(cls->base_shield) : 0.0F;
+  ship.armor_points =
+      cls != nullptr ? static_cast<float>(cls->base_armor) : 0.0F;
+  // Bible përs Flags2 0x0001: starts with zero fuel.
+  if ((def.flags_secondary & 0x0001U) == 0U && cls != nullptr) {
+    ship.fuel_points = static_cast<float>(cls->base_fuel);
+  } else {
+    ship.fuel_points = 0.0F;
+  }
+  // ShieldMod (percent / 100 at decode): positive scales both pools.
+  if (def.shield_armor_scale > 0.0F) {
+    ship.shield_points *= def.shield_armor_scale;
+    ship.armor_points *= def.shield_armor_scale;
+  }
+
+  bool is_derelict = false;
+  if (ship.faction_or_government_id != -1) {
+    const Government *govt =
+        state.scenario.Government(ship.faction_or_government_id);
+    is_derelict = govt != nullptr && (govt->flags_primary & 0x0800U) != 0U;
+  }
+  if (is_derelict && cls != nullptr) {
+    // Derelict government: no shields, reduced armor (Bible shïp Flags
+    // 0x0010: disabled at 10% armor instead of 33%), dead in space.
+    ship.shield_points = 0.0F;
+    const float armor_scale =
+        (cls->capability_flags & 0x10U) != 0U ? 0.1F : 0.32F;
+    ship.armor_points =
+        static_cast<float>(cls->base_armor) * armor_scale - 1.0F;
+    ship.vel_y = 0.0F;
+    ship.vel_x = ship.vel_y;
+    ship.speed = 0.0F;
+  }
+
+  NovaShip_ResetAiBehaviorRuntimeFields(ship);
+
+  if (def.link_mission_id != -1) {
+    // Ghidra calls Mission_ResolveMissionStellarTargets (0x0043d240) for the
+    // LinkMission target block; that resolver is not reconstructed yet.
+    NovaLog::Debug("pers slot {} LinkMission {}: ResolveMissionStellarTargets "
+                   "deferred (TODO(decomp 0x0043d240))",
+                   slot,
+                   def.link_mission_id);
+  }
+
+  if (is_derelict) {
+    // Derelict wrecks get a random spin-out heading (original stores raw
+    // degrees 0..0x167; the clean-room heading is radians) and no engine glow.
+    ship.heading =
+        static_cast<float>(RandomBelow(state, 0x168)) * 0.017453292519943295F;
+    ship.vel_x = 0.0F;
+    ship.speed = 0.0F;
+    ship.engine_glow_level = 0;
+    if ((cls->sprite_behavior_flags & 2U) != 0U) {
+      ship.waypoint_arrival_marker_b = cls->skill_variance_percent - 1;
+    }
+  }
+
+  return alloc;
+}
+
 // Ghidra 0x0041c710 Dude_SpawnRandomDudeShipInSystem. See the header.
 // Rolls 1-in-7 for a mission ship (deferred), else 1-in-7 for a random-
 // encounter fleet (existing NovaEncounter_TrySpawnRandomFleet), else spawns a
@@ -636,13 +870,12 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
 int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
                                          std::int16_t system_id) {
   int slot = -1;
-  // 1-in-7 mission ship branch: mission system not reconstructed; skip it and
-  // let the dude/fleet rolls run instead. TODO(decomp).
+  // 1-in-7 personality branch: Pers_SpawnShipFromPersDef with the derelict-
+  // government exclusion (the ambient roll passes flag=1).
   constexpr std::int32_t kDispatchRoll = 7;
   if (RandomBelow(state, kDispatchRoll) == 0) {
-    // Pers_SpawnShipFromPersDef (deferred).
-    NovaLog::Debug("dude spawn dispatch: mission-ship branch not implemented; "
-                   "falling through to dude/fleet");
+    slot = NovaPers_SpawnShipFromPersDef(
+        state, system_id, /*exclude_derelict_govts=*/true, -1);
   } else if (RandomBelow(state, kDispatchRoll) == 0) {
     (void)NovaEncounter_TrySpawnRandomFleet(state,
                                             system_id,
@@ -724,10 +957,24 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
   for (std::int16_t attempt = 0; attempt < sys->avg_ships; ++attempt) {
     int slot = -1;
     if (RandomBelow(state, kDispatchRoll) == 0) {
-      // Pers_SpawnShipFromPersDef(system, false, -1).
-      // Mission-ship definitions are not wired to the runtime ship allocator
-      // yet, so preserve the failed-attempt behavior for this branch.
-      NovaLog::Debug("initial NPC population: mission-ship branch deferred");
+      // 1-in-7 personality branch (random arm): Pers_SpawnShipFromPersDef
+      // without the derelict exclusion. The original's forced arm (the per-
+      // system special-personality table at SystemDef +0x98) remains deferred
+      // (TODO(decomp): System pers-slot decode). The spawned personality is
+      // left at the allocator scatter; only the ordinary dude branch adds the
+      // class base-velocity step. Derelict personalities are dead in space.
+      const int pers_slot = NovaPers_SpawnShipFromPersDef(
+          state, system_id, /*exclude_derelict_govts=*/false, -1);
+      if (pers_slot >= 0) {
+        Ship &pers = state.ShipAt(static_cast<std::size_t>(pers_slot));
+        const Government *govt =
+            state.scenario.Government(pers.faction_or_government_id);
+        if (govt != nullptr && (govt->flags_primary & 0x0800U) != 0U) {
+          pers.vel_x = 0.0F;
+          pers.vel_y = 0.0F;
+          pers.speed = 0.0F;
+        }
+      }
       continue;
     }
     if (RandomBelow(state, kDispatchRoll) == 0) {

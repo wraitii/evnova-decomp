@@ -14,6 +14,59 @@
 #include <random>
 
 namespace game {
+
+namespace {
+
+[[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
+                                            const Ship &ship) {
+  return state.scenario.Ship(
+      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+}
+
+} // namespace
+
+// Ghidra 0x00413810 Weapon_InitShipWeaponBursts (burst-counter preload slice)
+// plus the ship-class stock-loadout copy shared by the NPC spawn/AI paths
+// (ship_ai.cpp EnsureNpcWeaponBanks). The original's per-class default
+// weapon_ammo/secondary 0x100-entry tables collapse here to the flat
+// bank = weapon id - 0x80 model used by the fire path.
+void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
+  if (ship.ship_instance_id == 0 ||
+      ship.npc_weapon_banks_ship_class == ship.ship_class_id) {
+    return;
+  }
+  ship.npc_weapon_bank_ammo.fill(0);
+  ship.npc_weapon_bank_secondary.fill(0);
+  ship.npc_weapon_bank_cooldown.fill(0.0F);
+  ship.npc_weapon_bank_burst_counter.fill(0);
+  const ShipClass *cls = ShipClassFor(state, ship);
+  if (cls != nullptr) {
+    for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
+      if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
+        continue;
+      }
+      const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
+      ship.npc_weapon_bank_ammo[bank] = std::max<std::int16_t>(stock.count, 0);
+      // -1 is the original unlimited-secondary sentinel.
+      ship.npc_weapon_bank_secondary[bank] = stock.ammo_load;
+    }
+    // Weapon_InitShipWeaponBursts (0x00413810): a configured burst weapon
+    // (burst_cycle AND burst_reset_cooldown) starts with a zeroed burst
+    // counter and its cooldown preloaded to the reset cooldown.
+    for (std::size_t bank = 0; bank < 0x100; ++bank) {
+      const Weapon *w =
+          state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+      if (w != nullptr && ship.npc_weapon_bank_ammo[bank] > 0 &&
+          w->burst_cycle_ticks > 0 && w->burst_reset_cooldown > 0) {
+        ship.npc_weapon_bank_burst_counter[bank] = 0;
+        ship.npc_weapon_bank_cooldown[bank] =
+            static_cast<float>(w->burst_reset_cooldown);
+      }
+    }
+  }
+  ship.npc_weapon_banks_ship_class = ship.ship_class_id;
+}
+
 namespace {
 
 // The clean-room weapon banks are kept in the GameState strided arrays with the

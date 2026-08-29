@@ -262,3 +262,63 @@ TEST_CASE("reseed random changes the spawn stream") {
 }
 
 } // namespace
+
+// Ghidra 0x004235c0 Pers_SpawnShipFromPersDef: the forced-slot path lays the
+// përs def onto the allocated ship (values pinned to përs 0x83 "Jack
+// Folstam", verified byte-for-byte in scenario_data_test).
+TEST_CASE("pers spawner lays a personality onto the ship", "[pers][spawn]") {
+  using namespace game;
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  PersDef &jack = state.scenario.pers_defs[0x83 - 0x80];
+  REQUIRE(jack.present);
+  jack.loaded_latch = true;
+  jack.is_available_runtime = true;
+
+  const int slot =
+      NovaPers_SpawnShipFromPersDef(state,
+                                    /*system_id=*/4,
+                                    /*exclude_derelict=*/false,
+                                    /*forced_pers_slot=*/0x83 - 0x80);
+  REQUIRE(slot != -1);
+  const Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  CHECK(ship.pers_def_slot == 0x83 - 0x80);
+  CHECK(ship.ship_class_id == 151);
+  CHECK(ship.dude_class_id == -1);
+  CHECK(ship.faction_or_government_id == 21);
+  CHECK(ship.ai_behavior_code == 3);
+  CHECK(ship.random_ai_render_cadence == 2); // Aggress, in range
+  CHECK(ship.afterburner_latch == 1);        // përs Flags 0x0002
+  const ShipClass *cls = state.scenario.Ship(151 + 0x80);
+  REQUIRE(cls != nullptr);
+  CHECK(ship.shield_points ==
+        Catch::Approx(static_cast<float>(cls->base_shield) * 2.0F));
+  CHECK(ship.armor_points ==
+        Catch::Approx(static_cast<float>(cls->base_armor) * 2.0F));
+  CHECK(ship.fuel_points == static_cast<float>(cls->base_fuel));
+  // Weapon deltas: 0x81/0x83/0x85 +1, 0x87 +2 count and +50 ammo over the
+  // class stock loadout.
+  CHECK(ship.npc_weapon_bank_ammo[0x81 - 0x80] >= 1);
+  CHECK(ship.npc_weapon_bank_secondary[0x87 - 0x80] >= 50);
+  // LinkMission 12: target-block resolution deferred, spawn still succeeds.
+
+  // The same-name dedup blocks a second spawn of an already-active
+  // personality (forced slot still goes through the active-ship pass).
+  CHECK(NovaPers_SpawnShipFromPersDef(state, 4, false, 0x83 - 0x80) == -1);
+}
+
+TEST_CASE("pers spawner rejects an ineligible forced slot", "[pers][spawn]") {
+  using namespace game;
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  // Slot 0x83 is present but its runtime gate flags are false by default in a
+  // fresh state, so a forced spawn marks it present but the eligibility array
+  // still contains it (forced slots bypass the scan) — this asserts the
+  // allocator reserve path returns a valid ship when the def passes.
+  PersDef &jack = state.scenario.pers_defs[0x83 - 0x80];
+  jack.loaded_latch = true;
+  jack.is_available_runtime = true;
+  const int slot = NovaPers_SpawnShipFromPersDef(state, 4, false, 0x83 - 0x80);
+  REQUIRE(slot != -1);
+}

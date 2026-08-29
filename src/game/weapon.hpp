@@ -59,6 +59,13 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state);
 // a system/stellar boundary. This does not alter weapon ownership or ammo.
 void NovaWeapon_ClearTransientCombatState(GameState &state);
 
+// Ghidra Weapon_InitShipWeaponBanksFromShipClass-side initializer used by the
+// NPC paths (ship_ai.cpp EnsureNpcWeaponBanks, citing Weapon_InitShipWeapon-
+// Bursts 0x00413810 for the burst-counter preload): rebuilds an NPC ship's
+// 0x100 weapon-bank counters from its ship class's stock weapons. No-op for
+// the player ship and when the cached loadout already matches the class.
+void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
+
 // Ghidra 0x00468990 Weapon_CanFireWeaponBank: whether the given weapon bank
 // may fire right now for a specific ship (player = GameState strided banks;
 // NPC = Ship.npc_weapon_bank_*). Faithful branching on ship_instance_id==0:

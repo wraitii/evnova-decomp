@@ -313,4 +313,21 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
 // with TODO(decomp) -- mission ship defs are not modelled.
 void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship);
 
+// Ghidra 0x0046b260 Ship_CanShipUseAfterburner (DB name
+// Ship_IsShipEligibleForEscortOrLaunchBehavior): computes the ShipState +0xBD
+// afterburner latch seeded at spawn time. Zero when another active ship lists
+// this ship's instance id as its formation leader (escorts stay with the
+// leader) or when the class capability flags say never (0x0400 planet-type).
+// Capability 0x0040 is always-afterburner; capability 0x0020 rolls against
+// the player's combat rating (roll + 0x100 <= rating / class Strength). The
+// rating producer is not yet reconstructed, so the roll currently fails
+// (TODO(decomp)).
+[[nodiscard]] bool NovaShip_CanShipUseAfterburner(GameState &state,
+                                                  const Ship &ship);
+
+// Ghidra 0x00402810 Ship_ResetShipAiBehaviorRuntimeFields: resets the core
+// per-behavior runtime slots (ai_state_code/ai_control_mode, travel target
+// cache, escort mirror cache, resolved-target slot).
+void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship);
+
 } // namespace game

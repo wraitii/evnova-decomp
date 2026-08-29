@@ -136,6 +136,22 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 [[nodiscard]] int NovaEncounter_SpawnRandomSystemDudeShip(
     GameState &state, std::int16_t system_id, std::uint16_t reserved_slots);
 
+// Ghidra 0x004235c0 Pers_SpawnShipFromPersDef. Spawns an NPC ship from a
+// përs personality (ScenarioData.pers_defs): builds the eligibility set for
+// system_id (present + AI type > 0 + ActiveOn satisfied, LinkSyst filter match
+// incl. the 10000/15000/20000/25000 government codes, and — when
+// exclude_derelict_govts is set — non-derelict government), drops candidates
+// already active in the ship table (same-name dedup via display-name id), then
+// picks a random eligible slot (or the forced one; forcing also marks the def
+// present) and lays the personality onto a freshly allocated slot: identity,
+// per-weapon count/ammo deltas over the class stock loadout, booty credits,
+// shield/armor scale, afterburner latch, LinkMission resolution, and the
+// derelict-wreck kinematics. Returns the spawned slot or -1.
+[[nodiscard]] int NovaPers_SpawnShipFromPersDef(GameState &state,
+                                                std::int16_t system_id,
+                                                bool exclude_derelict_govts,
+                                                std::int16_t forced_pers_slot);
+
 // Mirrors Dude_SpawnRandomDudeShipInSystem (Ghidra 0x0041c710): the
 // high-level random wandering NPC spawn dispatcher. Rolls 1-in-7 for a mission
 // ship, else 1-in-7 for a random-encounter fleet, else spawns a random system

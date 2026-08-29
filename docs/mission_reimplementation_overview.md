@@ -148,11 +148,16 @@ The interpreter can mutate ships, active missions, system cues, stellar state, o
 
 Mission ships connect to the existing partial spawn and AI systems:
 
-- `0x0041AF90` system mission-ship spawning
-- `0x0041CF40` spawn from a dude definition
-- `0x004235C0` spawn from a mission-ship definition
+- `0x0041AF90` system mission-ship spawning (random personality arm DONE; special-system forced arm open)
+- `0x0041CF40` spawn from a dude definition (mission fleet — open)
+- `0x004235C0` personality spawn — DONE (renamed from
+  "spawn from a mission-ship definition": the përs table drives ambient
+  personalities as well as missions). See `NovaPers_SpawnShipFromPersDef` in
+  `ship_spawn.cpp`. The LinkMission target-block arm is a logged skip until
+  `Mission_ResolveMissionStellarTargets` (0x0043d240) lands, and the forced
+  call sites (ambush 0x426dd0, player-core 0x452d5c) are not wired yet.
 - `0x00426DD0` mission ambush spawning
-- `0x0046AC50` ambient mission-ship spawning
+- `0x0046AC50` ambient mission-ship spawning (Shareware Enforcer path)
 - `0x00426D10` mission-ship announcements
 - `0x004053C0` mission stellar-attack directive
 - `0x00413610` government assistance/reinforcement trigger
@@ -208,9 +213,10 @@ This covers destroy, disable, board, escort, rescue, observe, chase-off, and rel
 
 The data-model/analysis phase this doc originally targeted (`0x0043BBB0` and
 the `MisnDef`/`MisnActive` layouts) is complete — the verified offset maps
-above and the Ghidra struct comments are the reference. The immediate
-implementation target is mission-ship/fleet spawning (0x0041CF40 /
-0x004235C0), which lights up the goal counters.
+above and the Ghidra struct comments are the reference. The personality
+spawner `0x004235C0` is DONE (ambient personalities now spawn); the remaining
+mission-fleet spawner is `0x0041CF40` (dude-def mission fleet), which lights
+up the mission goal counters together with mission-fleet dispatch.
 
 The clean-room mission APIs now follow the original runtime convention: mission
 list entries and `MisnActive.mission_template_id` are zero-based definition

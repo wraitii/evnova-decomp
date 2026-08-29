@@ -519,43 +519,6 @@ RoundedDistanceSquared(float x1, float y1, float x2, float y2) {
   return static_cast<float>(std::lround(SquaredDistance(x1, y1, x2, y2)));
 }
 
-void EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
-  if (ship.ship_instance_id == 0 ||
-      ship.npc_weapon_banks_ship_class == ship.ship_class_id) {
-    return;
-  }
-  ship.npc_weapon_bank_ammo.fill(0);
-  ship.npc_weapon_bank_secondary.fill(0);
-  ship.npc_weapon_bank_cooldown.fill(0.0F);
-  ship.npc_weapon_bank_burst_counter.fill(0);
-  const ShipClass *cls = ShipClassFor(state, ship);
-  if (cls != nullptr) {
-    for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
-      if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
-        continue;
-      }
-      const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-      ship.npc_weapon_bank_ammo[bank] = std::max<std::int16_t>(stock.count, 0);
-      // -1 is the original unlimited-secondary sentinel.
-      ship.npc_weapon_bank_secondary[bank] = stock.ammo_load;
-    }
-    // Weapon_InitShipWeaponBursts (0x00413810): a configured burst weapon
-    // (burst_cycle AND burst_reset_cooldown) starts with a zeroed burst
-    // counter and its cooldown preloaded to the reset cooldown.
-    for (std::size_t bank = 0; bank < 0x100; ++bank) {
-      const Weapon *w =
-          state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
-      if (w != nullptr && ship.npc_weapon_bank_ammo[bank] > 0 &&
-          w->burst_cycle_ticks > 0 && w->burst_reset_cooldown > 0) {
-        ship.npc_weapon_bank_burst_counter[bank] = 0;
-        ship.npc_weapon_bank_cooldown[bank] =
-            static_cast<float>(w->burst_reset_cooldown);
-      }
-    }
-  }
-  ship.npc_weapon_banks_ship_class = ship.ship_class_id;
-}
-
 struct WeaponBankState {
   std::int16_t ammo = 0;
   std::int16_t secondary = 0;
@@ -862,7 +825,7 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
   if (target_class == nullptr) {
     return;
   }
-  EnsureNpcWeaponBanks(state, ship);
+  NovaWeapon_EnsureNpcWeaponBanks(state, ship);
 
   const float distance_sq =
       SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
@@ -2366,7 +2329,7 @@ void NovaAi_ApplyControls(GameState &state,
       // (0x0040ce00) for states 3/4.
       NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
     }
-    if (ship.ai_brake_to_boost_latch != 0 &&
+    if (ship.afterburner_latch != 0 &&
         (std::abs(ship.pos_x - target.pos_x) < kCombatCloseRange ||
          std::abs(ship.pos_y - target.pos_y) < kCombatCloseRange)) {
       ship.ai_control_mode = 0x11;
@@ -2462,7 +2425,7 @@ void NovaAi_ApplyControls(GameState &state,
         }
       }
     }
-    if (ship.ai_brake_to_boost_latch != 0 && dx > kBreakOuterGatePx &&
+    if (ship.afterburner_latch != 0 && dx > kBreakOuterGatePx &&
         dy > kBreakOuterGatePx &&
         std::abs(std::remainder(target_bearing_deg - ship.heading / kDegToRad,
                                 kFullCircleDeg)) < 31.0F) {
@@ -2595,7 +2558,7 @@ void NovaAi_ApplyControls(GameState &state,
       // the thrust/scalar-speed write.
       NovaAi_SelectGuidedWeaponBankForPrimaryTarget(state, ship);
     }
-    if (ship.ai_brake_to_boost_latch != 0 &&
+    if (ship.afterburner_latch != 0 &&
         std::abs(ship.pos_x - target.pos_x) > kBreakOuterGatePx &&
         std::abs(ship.pos_y - target.pos_y) > kBreakOuterGatePx &&
         std::abs(std::remainder(target_bearing_deg - ship.heading / kDegToRad,
@@ -3074,7 +3037,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   // Ship_CanShipInterceptCurrentPrimaryTarget reads the ship-local weapon
   // rows before the post-state auto-selector runs. Seed those rows once from
   // the assigned class so the intercept walk sees NPC guided banks too.
-  EnsureNpcWeaponBanks(state, ship);
+  NovaWeapon_EnsureNpcWeaponBanks(state, ship);
   // Ghidra calls the cloak-trait producer before the state supervisor, but
   // skips it during the coast-through-reversal interval (+0x4c > 0).
   if (ship.ai_maneuver_timer_ms <= 0.0F) {
@@ -4069,6 +4032,59 @@ void NovaAi_SelectUnguidedWeaponBank(GameState &state, Ship &ship) {
   if (ship.active_weapon_bank_slot != -1) {
     ship.ai_fire_trigger_latch = 1;
   }
+}
+
+// Ghidra 0x0046b260 Ship_CanShipUseAfterburner. Returns the low byte the
+// original stores into ShipState +0xBD.
+bool NovaShip_CanShipUseAfterburner(GameState &state, const Ship &ship) {
+  // Another active ship led by this ship's instance id blocks the latch.
+  if (ship.ship_instance_id != 0) {
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      const Ship &other = state.ShipAt(slot);
+      if (static_cast<std::int16_t>(slot) != ship.ship_instance_id &&
+          other.is_active &&
+          other.formation_leader_ship_slot == ship.ship_instance_id) {
+        return false;
+      }
+    }
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return false;
+  }
+  const std::uint16_t capability = cls->capability_flags;
+  if ((capability & 0x0400U) != 0U) {
+    return false; // planet-type ship: never
+  }
+  if ((capability & 0x0040U) != 0U) {
+    return true; // always afterburner (AI ships)
+  }
+  if ((capability & 0x0020U) != 0U) {
+    // Bible shïp Flags 0x0020: afterburner when the player has an advanced
+    // combat rating. The original rolls NovaRandom_Range(0x540) and compares
+    // roll + 0x100 against rating / class Strength (the original divides
+    // unguarded; zero-strength classes would fault, so the division is
+    // guarded here).
+    const auto roll = static_cast<int>(
+        std::uniform_int_distribution<int>{0, 0x53f}(state.rng));
+    const auto threshold =
+        static_cast<int>(state.player_combat_rating_points /
+                         (cls->strength != 0 ? cls->strength : 1));
+    return roll + 0x100 <= threshold;
+  }
+  return false;
+}
+
+// Ghidra 0x00402810 Ship_ResetShipAiBehaviorRuntimeFields.
+void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
+  ship.ai_state_code = 0;
+  ship.ai_control_mode = 0;
+  ship.jump_destination_stellar_id = -2;
+  ship.travel_target_cache = -1;
+  ship.escort_command_code = -1;
+  ship.formation_leader_ship_slot = -1;
+  ship.resolved_ai_target_ship_slot = -1;
 }
 
 } // namespace game

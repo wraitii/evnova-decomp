@@ -186,6 +186,13 @@ Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state);
 [[nodiscard]] float
 NovaOutfit_ComputeIonizationDecayRate(const GameState &state, const Ship &ship);
 
+// Ghidra 0x0046cb90 Outfit_HasMiningScoopOutfit. Whether the ship carries a
+// mining-scoop outfit (ModType 0x1F in any of the four mod slots): the player
+// branch scans owned outfits, the NPC branch scans the ship class's default
+// outfit slots. Seeds the per-ship mining_scoop_active latch at spawn time.
+[[nodiscard]] bool NovaOutfit_HasMiningScoopOutfit(const GameState &state,
+                                                   const Ship &ship);
+
 // Marks the effective-stats cache dirty. Called by the inventory mutation
 // helpers; the spaceflight loop reads cached stats to avoid re-scanning the
 // 0x200-entry outfit table every frame.

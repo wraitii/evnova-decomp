@@ -320,11 +320,11 @@ struct Ship {
   // means "no leader": mode 0x12 (chase leader) falls back to idle control
   // when it is empty.
   std::int16_t formation_leader_ship_slot = -1; // +0xC906
-  // Unnamed ShipState byte +0xBD (allocator-reset only). The original gates
-  // the close-range combat break-offs (mode 0x6/0x7 -> 0x11 boost, mode 0x5
-  // -> 0x11) on this latch; the producer is not yet identified, so the
-  // transitions stay inert in the port (TODO(decomp)).
-  std::int8_t ai_brake_to_boost_latch = 0; // +0xBD (Provisional)
+  // ShipState +0xBD afterburner latch. Producers: Pers_SpawnShipFromPersDef
+  // (0x004235c0) seeds it from Ship_CanShipUseAfterburner (0x0046b260) and
+  // forces it on for përs Flags 0x0002; the close-range combat break-off
+  // modes (0x6/0x7/0x5 -> 0x11 boost) consume it.
+  std::int8_t afterburner_latch = 0; // +0xBD
   // Velocity-match lock (ShipState +0xC8DC): the slot of a ship whose
   // velocity/heading this ship is matching (control mode 0xc/0xf), or -1. A
   // non-self value gates the NPC effective-stats branch
@@ -334,12 +334,18 @@ struct Ship {
   // cleared by Ship_DeactivateVacantShipsAndTally (0x0041ad50) and seeded by
   // Ship_AllocateShipSlotInSystem, so it lives on the struct.
   std::int16_t velocity_match_target_ship_slot = -1; // +0xC8DC
+  // Ghidra ShipState +0xC92E: the AI's resolved-target slot, cleared by
+  // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810).
+  std::int16_t resolved_ai_target_ship_slot = -1; // +0xC92E
   // Stored evasive heading for control mode 0x10 (Ghidra ShipState raw short
   // at +0x8E, between target_stellar_object_id and jump_destination_stellar_id;
   // unnamed in the DB). Ship_ApplyShipAiControls writes current-heading +/-135
   // deg (instance-id parity sign) when it orders the evasive-break, and mode
   // 0x10 steers at this value until it aligns and drops back to mode 0x6.
-  std::int16_t ai_evasive_heading_deg = 0;       // +0x8E (Provisional)
+  std::int16_t ai_evasive_heading_deg = 0; // +0x8E (Provisional)
+  // Ghidra ShipState raw short at +0x90 (unnamed): the travel target cache
+  // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810) clears to -1.
+  std::int16_t travel_target_cache = -1;         // +0x90 (Provisional)
   std::int16_t jump_destination_stellar_id = -1; // +0x92
   std::int16_t ai_hostility_accumulator = 0;     // +0x96
   // Engagement patience timer while the cloak/targetability predicate rejects
@@ -780,6 +786,11 @@ struct GameState {
   // selection. The original uses a global NovaRandom; this is kept local to
   // the state so runs are reproducible when seeded identically.
   std::mt19937 rng{42};
+  // Ghidra g_player_combat_rating_points: aggregate combat-rating score the
+  // afterburner eligibility roll (Ship_CanShipUseAfterburner 0x0046b260)
+  // divides by the ship class's Strength. Producers (kill/rating accrual)
+  // are not yet reconstructed, so it stays 0 (TODO(decomp)).
+  std::int32_t player_combat_rating_points = 0;
   bool game_active = false;  // Ghidra DAT_00596d28
   bool intro_played = false; // Ghidra DAT_00596d35: cleared on new pilot so
                              // the intro cinematic plays on first flight.
