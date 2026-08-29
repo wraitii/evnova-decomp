@@ -99,7 +99,7 @@ TEST_CASE("player attack alerts same-government NPCs", "[collision][ai]") {
   wingmate.faction_or_government_id = 0;
   wingmate.ai_behavior_code = 3;
   wingmate.ai_state_code = 0;
-  wingmate.mission_ship_slot = 0;
+  wingmate.pers_def_slot = 0;
   wingmate.pos_x = 100.0F;
   wingmate.pos_y = 100.0F;
 

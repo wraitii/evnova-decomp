@@ -277,7 +277,12 @@ struct Ship {
 
   // --- Mission / target/AI slots (added to unblock spawn/targeting) ---
   std::int16_t mission_owner_slot = -1; // +0x8A
-  std::int16_t mission_ship_slot = -1;  // +0xC8CE (mission-ship slot link)
+  // Ghidra ShipState +0xC8CE: inbound-weapon-threat latch consumed by the AI
+  // weapon-bank selection path.
+  std::int16_t inbound_weapon_threat = 0; // +0xC8CE
+  // Ghidra ShipState +0xC8D0: përs personality def slot (g_pers_defs) of the
+  // spawned personality ship; -1 when none. 0x3ff marks special sentinels.
+  std::int16_t pers_def_slot = -1;      // +0xC8D0
   std::int16_t mission_fleet_slot = -1; // +0xC8D2
   std::int16_t ai_behavior_code = 0;    // +0x88
   std::int16_t ai_state_code = 0;       // +0xC8C8

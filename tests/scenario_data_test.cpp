@@ -884,18 +884,18 @@ TEST_CASE("scenario loads pers personalities", "[scenario][data]") {
   ScenarioData data;
   REQUIRE(data.LoadFromArchives());
 
-  REQUIRE(data.mission_ships.size() == 0x400);
-  const auto pers_count = static_cast<int>(
-      std::count_if(data.mission_ships.begin(),
-                    data.mission_ships.end(),
-                    [](const MissionShipDef &d) { return d.present; }));
+  REQUIRE(data.pers_defs.size() == 0x400);
+  const auto pers_count = static_cast<int>(std::count_if(
+      data.pers_defs.begin(), data.pers_defs.end(), [](const PersDef &d) {
+        return d.present;
+      }));
   CHECK(pers_count == 516);
 
   // Jack Folstam (p\x91rs 0x83), the Federation storyline contact flying the
   // "Night-Master": Govt 149 -> 21, ShipType 279 -> 151, LinkMission 140 ->
   // 12, ShieldMod 200 -> 2.0, weapon triples 133/131/129 x1 and 135 x2 +50
   // ammo, ActiveOn "b0 & !b8".
-  const MissionShipDef *jack = data.MissionShip(0x83);
+  const PersDef *jack = data.Pers(0x83);
   REQUIRE(jack != nullptr);
   CHECK(jack->present);
   CHECK(jack->loaded_latch);
@@ -928,14 +928,14 @@ TEST_CASE("scenario loads pers personalities", "[scenario][data]") {
 
   // Same-name dedup (0x004c3e20 post-pass): the Jack Folstam variants share
   // one display-name id (the first variant's slot index).
-  const MissionShipDef *jack2 = data.MissionShip(0x84);
+  const PersDef *jack2 = data.Pers(0x84);
   REQUIRE(jack2 != nullptr);
   CHECK(jack2->display_name == "Jack Folstam");
   CHECK(jack2->display_name_string_id == jack->display_name_string_id);
   CHECK(jack2->ship_class_id == 152);
 
   // Absent slots stay inactive.
-  const MissionShipDef *absent = data.MissionShip(0x300);
+  const PersDef *absent = data.Pers(0x300);
   REQUIRE((absent == nullptr || !absent->present));
 }
 
@@ -943,11 +943,11 @@ TEST_CASE("temp personality probe", "[.persprobe]") {
   using namespace game;
   ScenarioData data;
   REQUIRE(data.LoadFromArchives());
-  auto &db = const_cast<std::vector<MissionShipDef> &>(data.mission_ships);
+  auto &db = const_cast<std::vector<PersDef> &>(data.pers_defs);
   (void)db;
   int shown = 0;
-  for (std::size_t i = 0; i < data.mission_ships.size() && shown < 8; ++i) {
-    const auto &d = data.mission_ships[i];
+  for (std::size_t i = 0; i < data.pers_defs.size() && shown < 8; ++i) {
+    const auto &d = data.pers_defs[i];
     if (!d.present) {
       continue;
     }

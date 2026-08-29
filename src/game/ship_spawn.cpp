@@ -261,7 +261,7 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   // Mission/misc slots cleared and derived flags (the original computes
   // escort-eligibility + mining-scoop here; mining-scoop is deferred, kept
   // false).
-  ship.mission_ship_slot = -1;
+  ship.pers_def_slot = -1;
   ship.mission_fleet_slot = -1;
   ship.mining_scoop_active = false;
   ship.ai_hostility_accumulator = 0;
@@ -595,7 +595,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     ship.ai_control_mode = 0;
     ship.mission_fleet_slot = -1;
     ship.mission_owner_slot = -1;
-    ship.mission_ship_slot = -1;
+    ship.pers_def_slot = -1;
     ship.ai_hostility_accumulator = 0;
     ship.ai_target_ship_slot = -1;
     ship.primary_target_ship_slot = -1;
@@ -640,7 +640,7 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
   // let the dude/fleet rolls run instead. TODO(decomp).
   constexpr std::int32_t kDispatchRoll = 7;
   if (RandomBelow(state, kDispatchRoll) == 0) {
-    // Mission_SpawnMissionShipFromMissionShipDef (deferred).
+    // Pers_SpawnShipFromPersDef (deferred).
     NovaLog::Debug("dude spawn dispatch: mission-ship branch not implemented; "
                    "falling through to dude/fleet");
   } else if (RandomBelow(state, kDispatchRoll) == 0) {
@@ -724,7 +724,7 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
   for (std::int16_t attempt = 0; attempt < sys->avg_ships; ++attempt) {
     int slot = -1;
     if (RandomBelow(state, kDispatchRoll) == 0) {
-      // Mission_SpawnMissionShipFromMissionShipDef(system, false, -1).
+      // Pers_SpawnShipFromPersDef(system, false, -1).
       // Mission-ship definitions are not wired to the runtime ship allocator
       // yet, so preserve the failed-attempt behavior for this branch.
       NovaLog::Debug("initial NPC population: mission-ship branch deferred");

@@ -174,17 +174,16 @@ namespace {
 }
 
 // ---------------------------------------------------------------------------
-// p\x91rs (MissionShipDef / personality) decode
+// p\x91rs (PersDef / personality) decode
 // ---------------------------------------------------------------------------
 // Ground truth is the personality pass of NovaData_LoadScenarioResourceTables
-// (0x004bd3c0): each record is a fixed big-endian layout (see MissionShipDef
+// (0x004bd3c0): each record is a fixed big-endian layout (see PersDef
 // comments for the def-side offsets) with per-field validation replicated
 // below. The loader guarantees a 0x190-byte payload before reading the tail
 // fields; records shorter than the field window decode to an inactive def.
-[[nodiscard]] MissionShipDef
-DecodePers(std::span<const std::byte> bytes,
-           const std::vector<ShipClass> &ship_table) {
-  MissionShipDef def;
+[[nodiscard]] PersDef DecodePers(std::span<const std::byte> bytes,
+                                 const std::vector<ShipClass> &ship_table) {
+  PersDef def;
   if (bytes.size() < 0x180) {
     return def;
   }
@@ -1071,13 +1070,12 @@ const MissionDef *ScenarioData::Mission(std::int16_t resource_id) const {
   return &missions[static_cast<std::size_t>(index)];
 }
 
-const MissionShipDef *
-ScenarioData::MissionShip(std::int16_t resource_id) const {
+const PersDef *ScenarioData::Pers(std::int16_t resource_id) const {
   const auto index = static_cast<std::int32_t>(resource_id) - 0x80;
-  if (index < 0 || index >= static_cast<std::int32_t>(mission_ships.size())) {
+  if (index < 0 || index >= static_cast<std::int32_t>(pers_defs.size())) {
     return nullptr;
   }
-  return &mission_ships[static_cast<std::size_t>(index)];
+  return &pers_defs[static_cast<std::size_t>(index)];
 }
 
 const AsteroidDef *ScenarioData::AsteroidType(std::int16_t resource_id) const {
@@ -1123,10 +1121,10 @@ bool ScenarioData::LoadFromArchives() {
   // The original mission definition table has 1000 entries, indexed by
   // resource id minus 0x80 (NovaResources_LoadMisnResourceDefs 0x0043bbb0).
   missions.assign(1000, {});
-  // p\x91rs personality table (g_mission_ship_defs): 0x400 slots, slot i =
+  // p\x91rs personality table (g_pers_defs): 0x400 slots, slot i =
   // resource id 0x80 + i. Absent ids keep inactive rows, matching the
   // original's zero-filled table.
-  mission_ships.assign(0x400, {});
+  pers_defs.assign(0x400, {});
   // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
   asteroid_defs.assign(0x80, {});
 
@@ -1286,16 +1284,16 @@ bool ScenarioData::LoadFromArchives() {
   // p\x91rs personalities (NovaData_LoadScenarioResourceTables personality
   // pass from 0x004c33de). Decoded after the ship-class table so ShipType
   // references can be validated against the -9999 tech-level sentinel.
-  std::size_t loaded_mission_ships = 0;
+  std::size_t loaded_pers = 0;
   for (std::int32_t id = 0x80; id < 0x80 + 0x400; ++id) {
     if (const auto res = NovaResource_LoadNamed(
             scenario::kPersResourceType, static_cast<std::uint16_t>(id))) {
-      MissionShipDef def = DecodePers(res->bytes, ships);
+      PersDef def = DecodePers(res->bytes, ships);
       // +0x624 display_name_buf: record name with the ';'-subtitle stripped
       // (NameString_StripSubtitleSuffix 0x004cd230).
       def.display_name = StripSubtitleSuffix(res->name);
-      mission_ships[static_cast<std::size_t>(id) - 0x80] = std::move(def);
-      ++loaded_mission_ships;
+      pers_defs[static_cast<std::size_t>(id) - 0x80] = std::move(def);
+      ++loaded_pers;
     }
   }
   // Display-name id post-pass (0x004c3e20): every slot starts with its own
@@ -1304,10 +1302,10 @@ bool ScenarioData::LoadFromArchives() {
   // grouping is equivalent for well-formed names.
   {
     std::map<std::string, std::int16_t> first_id_by_name;
-    for (std::size_t i = 0; i < mission_ships.size(); ++i) {
-      mission_ships[i].display_name_string_id = static_cast<std::int16_t>(i);
+    for (std::size_t i = 0; i < pers_defs.size(); ++i) {
+      pers_defs[i].display_name_string_id = static_cast<std::int16_t>(i);
     }
-    for (auto &def : mission_ships) {
+    for (auto &def : pers_defs) {
       if (def.display_name.empty()) {
         continue;
       }
@@ -1365,7 +1363,7 @@ bool ScenarioData::LoadFromArchives() {
       loaded_asteroid_types,
       loaded_impact_effects,
       loaded_missions,
-      loaded_mission_ships);
+      loaded_pers);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

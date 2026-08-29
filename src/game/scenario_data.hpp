@@ -59,8 +59,8 @@ constexpr std::uint32_t kAsteroidResourceType = 0x729a6964; // r\x9aid
 constexpr std::uint32_t kMissionResourceType = 0x6d95736e;
 // p\x91rs (0x70917273) — AI "personality" (mission-ship) definitions. One
 // record per named AI person; loaded by NovaData_LoadScenarioResourceTables
-// (0x004bd3c0, personality pass around 0x004c4400) into g_mission_ship_defs,
-// 0x400 slots indexed by resource id minus 0x80. See MissionShipDef.
+// (0x004bd3c0, personality pass around 0x004c4400) into g_pers_defs,
+// 0x400 slots indexed by resource id minus 0x80. See PersDef.
 constexpr std::uint32_t kPersResourceType = 0x70917273;
 // Impact/explosion definition family read by
 // NovaData_LoadScenarioResourceTables (0x004bd3c0). The binary FourCC is shown
@@ -180,11 +180,11 @@ struct MissionDef {
   std::array<std::byte, 0x7b2> raw_payload{};
 };
 
-// p\x91rs personality definition (g_mission_ship_defs slot, stride 0x794).
+// p\x91rs personality definition (g_pers_defs slot, stride 0x794).
 // Field offsets verified against the loader pass in
 // NovaData_LoadScenarioResourceTables (0x004bd3c0); Bible names from the
 // "The p\x91rs resource" section.
-struct MissionShipDef {
+struct PersDef {
   // Presence/runtime gates. +0x620 and +0x623 are both set by the loader for
   // every present resource (+0x623 after the record is fully decoded); +0x622
   // is the cached ActiveOn evaluation, refreshed from availability_expression
@@ -1035,11 +1035,11 @@ struct ScenarioData {
   std::vector<FleetDef> fleets;        // indexed by fleet_id - 0x80
   std::vector<DudeDef> dudes;          // indexed by dude_id - 0x80
   std::vector<MissionDef> missions;    // indexed by mission id - 0x80
-  // p\x91rs personality table (g_mission_ship_defs): the original keeps 0x400
+  // p\x91rs personality table (g_pers_defs): the original keeps 0x400
   // slots, slot i = resource id 0x80 + i (absent resources leave an inactive
   // row). Slot 0x3ff is reserved by the loader for the Shareware Enforcer
   // sentinel; the enforcer pass is TODO(decomp) — see LoadFromArchives.
-  std::vector<MissionShipDef> mission_ships; // indexed by pers id - 0x80
+  std::vector<PersDef> pers_defs; // indexed by pers id - 0x80
   // Asteroid/drift class table (r\x9aid family, one row per resource id
   // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
   // the DAT_005912dc / DAT_005912f0 pair.
@@ -1067,10 +1067,9 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for mission definitions, or nullptr when outside the
   // loaded 1000-entry mission table.
   [[nodiscard]] const MissionDef *Mission(std::int16_t resource_id) const;
-  // gh.id 0x80.. lookup for a p\x91rs personality (g_mission_ship_defs), or
+  // gh.id 0x80.. lookup for a p\x91rs personality (g_pers_defs), or
   // nullptr when outside the loaded 0x400-entry table.
-  [[nodiscard]] const MissionShipDef *
-  MissionShip(std::int16_t resource_id) const;
+  [[nodiscard]] const PersDef *Pers(std::int16_t resource_id) const;
   // gh.id 0x80.. lookup for an asteroid-type row, or nullptr when outside the
   // loaded range.
   [[nodiscard]] const AsteroidDef *AsteroidType(std::int16_t resource_id) const;

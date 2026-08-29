@@ -34,12 +34,11 @@ TEST_CASE("STR# 0x7d2 boarding strings (0-based pool indices)") {
   REQUIRE(entry(0x72) == "You salvaged");
   REQUIRE(entry(0x73) == "You stole all the");
   REQUIRE(entry(0x74) == "You couldn't store any of the ammo you plundered "
-                          "from this ship.");
+                         "from this ship.");
   REQUIRE(entry(0x7a) == "You assigned this ship to your fleet of escorts.");
   REQUIRE(entry(0x7b) ==
           "You already have the maximum possible number of escorts.");
-  REQUIRE(entry(0x7c) ==
-          "Your attempt to capture this ship was unsuccessful.");
+  REQUIRE(entry(0x7c) == "Your attempt to capture this ship was unsuccessful.");
 
   // Capture-decision dialog (DLOG 0x3fa / RunCaptureDecisionDialog): the
   // offer question drawn into the DITL item-2 text panel.
@@ -62,9 +61,9 @@ TEST_CASE("STR# 0x7d2 boarding strings (0-based pool indices)") {
   REQUIRE(entry(0x03) ==
           "You filled your reactors and batteries with energy from this ship.");
   REQUIRE(entry(0x04) == "You transferred all of this ship's energy to your "
-                          "reactors and batteries.");
+                         "reactors and batteries.");
   REQUIRE(entry(0x05) == "You couldn't store any of the energy you "
-                          "transferred from this ship.");
+                         "transferred from this ship.");
 }
 
 // The six standard boarding commodities (STR# 0xfa1, 0-based entry =

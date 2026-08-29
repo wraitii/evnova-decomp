@@ -29,8 +29,8 @@ TEST_CASE("hyperspace jump sounds (snd 128/130) exist and decode") {
   CHECK(warp_up_decoded->samples.size() > 100000);
   CHECK(warp_up_decoded->sample_rate > 0);
 
-  const auto warp_out = NovaResource_LoadNamed(kResourceTypeSnd,
-                                               static_cast<std::uint16_t>(130));
+  const auto warp_out =
+      NovaResource_LoadNamed(kResourceTypeSnd, static_cast<std::uint16_t>(130));
   REQUIRE(warp_out.has_value());
   CHECK(warp_out->name.find("Warp out") != std::string::npos);
   const auto warp_out_decoded = NovaSound_Decode(warp_out->bytes);

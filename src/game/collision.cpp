@@ -159,8 +159,8 @@ void ApplyImpactImpulse(const GameState &state,
 void PropagateHostilityFromPlayerAttack(GameState &state,
                                         const Ship &target,
                                         const ActiveShot &shot) {
-  if (shot.owner_ship_slot != 0 || target.mission_ship_slot == 0x3ff ||
-      state.player.mission_ship_slot == 0x3fe) {
+  if (shot.owner_ship_slot != 0 || target.pers_def_slot == 0x3ff ||
+      state.player.pers_def_slot == 0x3fe) {
     return;
   }
 
@@ -168,7 +168,7 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
     Ship &responder = state.ShipAt(slot);
     if (!responder.is_active || responder.current_system_id != shot.system_id ||
         responder.ai_behavior_code < 3 || responder.ai_behavior_code > 4 ||
-        responder.ai_state_code == 4 || responder.mission_ship_slot == 0x3ff ||
+        responder.ai_state_code == 4 || responder.pers_def_slot == 0x3ff ||
         responder.faction_or_government_id < -1 ||
         responder.faction_or_government_id >= 0x100) {
       continue;
@@ -288,10 +288,10 @@ void ResolveShipHit(GameState &state,
     const ShipClass *ship_class = state.scenario.Ship(
         static_cast<std::int16_t>(target.ship_class_id + 0x80));
     target.destruction_visual_triggered = true;
-    const std::int16_t death_delay = ship_class == nullptr
-                                         ? 0
-                                         : std::max<std::int16_t>(
-                                               0, ship_class->death_delay_frames);
+    const std::int16_t death_delay =
+        ship_class == nullptr
+            ? 0
+            : std::max<std::int16_t>(0, ship_class->death_delay_frames);
     // Unit/test states without loaded ship tables retain the old armor-only
     // sentinel; real scenario ships use the Bible DeathDelay timer.
     if (ship_class != nullptr && death_delay > 0) {
@@ -301,7 +301,8 @@ void ResolveShipHit(GameState &state,
         static_cast<float>(death_delay) * (1000.0F / 30.0F);
     NovaTargeting_ClearDestroyedShipReferences(state, target_slot);
     NovaEffects_SpawnShipDestructionBurst(
-        state, target,
+        state,
+        target,
         ship_class == nullptr ? 0
                               : ship_class->destruction_effect_while_breaking);
     if (target.destruction_visual_timer_ms <= 0.0F && ship_class != nullptr) {
@@ -370,7 +371,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   if (owner.current_system_id != shot.system_id || IsDestroyed(owner)) {
     return false;
   }
-  if (target.mission_ship_slot == 0x3ff) {
+  if (target.pers_def_slot == 0x3ff) {
     return false;
   }
 

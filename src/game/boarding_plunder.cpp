@@ -38,7 +38,7 @@ constexpr double kCreditRollThreshold = 2.0;  // _DAT_00575900
 constexpr double kCreditScale = 1000.0;       // _DAT_00575918
 constexpr double kDudeBootyCostShare = 0.025; // _DAT_00575910
 // kMissionBootyShare = 0.5 (_DAT_005758a0) applies to the mission-ship booty
-// arm (MissionShipDef +0x618), TODO(decomp) until mission-ship defs are
+// arm (PersDef +0x618), TODO(decomp) until mission-ship defs are
 // modeled.
 constexpr float kEscortStatShare = 0.1F;       // _DAT_00575920
 constexpr float kCaptureOddsScale = 100.0F;    // _DAT_005758f8
@@ -195,9 +195,9 @@ BoardingPlunderOptions NovaBoarding_BuildOptions(GameState &state) {
     if (options.credits < 1000) {
       options.credits = 1000; // dude money always pays at least 1000
     }
-  } else if (target.mission_ship_slot != -1) {
+  } else if (target.pers_def_slot != -1) {
     // Mission-ship booty: half of the mission def's booty_base_credits.
-    // TODO(decomp): the original reads MissionShipDef +0x618
+    // TODO(decomp): the original reads PersDef +0x618
     // (booty_base_credits) from the mission-ship table, which the port does
     // not model yet; mission ships get no credits offer here.
     options.credits = -1;
@@ -431,7 +431,8 @@ void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
   auto text = NovaHud_LoadStringEntry(0x7d2, str_index);
   if (text.has_value()) {
     // Board denials show for 0x168 frames (the doc's recorded duration).
-    NovaHud_ShowOverlayMessage(state, std::move(*text), 0xe0, 0xe0, 0xe0, 0x168);
+    NovaHud_ShowOverlayMessage(
+        state, std::move(*text), 0xe0, 0xe0, 0xe0, 0x168);
   }
 }
 
@@ -451,7 +452,8 @@ struct BoardRangeSpan {
 
 [[nodiscard]] BoardRangeSpan TargetFrameSpan(const Ship &target) {
   const auto class_id = static_cast<std::uint16_t>(target.ship_class_id + 0x80);
-  if (const auto resource = NovaResource_Load(kShipVisualResourceType, class_id)) {
+  if (const auto resource =
+          NovaResource_Load(kShipVisualResourceType, class_id)) {
     if (const auto visual = DecodeShipVisualDescriptor(*resource)) {
       return {static_cast<float>(visual->base_x_size),
               static_cast<float>(visual->base_y_size)};
@@ -490,7 +492,7 @@ void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
   ship.ai_secondary_target_slot = -1;
   ship.ai_hostility_accumulator = 0;
   ship.target_stellar_object_id = -1;
-  ship.mission_ship_slot = -1;
+  ship.pers_def_slot = -1;
 }
 
 // Ghidra 0x0045a3d0 Ship_HandlePlayerBoardTargetCommand.
@@ -541,7 +543,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   const bool eligible =
       rehired_or_surrendering && fire_restricted && target.is_active &&
       player.current_system_id == target.current_system_id &&
-      target.mission_ship_slot != 0x3ff && !NovaAiShip_IsDestroyed(player);
+      target.pers_def_slot != 0x3ff && !NovaAiShip_IsDestroyed(player);
   if (!eligible) {
     // Diagnosis aid: the original denies every non-disabled ship here too
     // (Ship_IsShipFireRestricted must be true). Log which predicate failed
@@ -558,7 +560,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
         fire_restricted,
         target.is_active,
         player.current_system_id == target.current_system_id,
-        target.mission_ship_slot,
+        target.pers_def_slot,
         NovaAiShip_IsDestroyed(player),
         target.armor_points,
         diag_class != nullptr ? diag_class->base_armor : 0,
@@ -713,9 +715,9 @@ constexpr float kCaptureWindowY = (480.0F - 114.0F) / 2.0F; // 183.0
 constexpr float kCaptureWindowW = 257.0F;
 constexpr float kCaptureWindowH = 114.0F;
 constexpr std::uint16_t kCaptureBackdropPict = 0x2144;
-constexpr std::uint16_t kCaptureTextStr = 0x75;      // STR# 0x7d2 pool entry
-constexpr std::uint16_t kCaptureBtnMyShip = 0x2e;    // STR# 0x96 pool entry
-constexpr std::uint16_t kCaptureBtnEscort = 0x2d;    // STR# 0x96 pool entry
+constexpr std::uint16_t kCaptureTextStr = 0x75;   // STR# 0x7d2 pool entry
+constexpr std::uint16_t kCaptureBtnMyShip = 0x2e; // STR# 0x96 pool entry
+constexpr std::uint16_t kCaptureBtnEscort = 0x2d; // STR# 0x96 pool entry
 
 // STR# 0x96 button-label pool: Abort/Cargo/Credits/Ammo/Energy/Capture Ship.
 constexpr std::uint16_t kButtonLabelStr = 0x96;
@@ -1192,12 +1194,13 @@ void BoardShowOverlay(GameState &state,
                       std::string fallback) {
   // Window loot/self-destruct overlays show for 0xf0 frames (the window loop
   // decompile's second argument).
-  NovaHud_ShowOverlayMessage(state,
-                             LoadBoardMiscString(str_index, std::move(fallback)),
-                             0xe0,
-                             0xe0,
-                             0xe0,
-                             0xf0);
+  NovaHud_ShowOverlayMessage(
+      state,
+      LoadBoardMiscString(str_index, std::move(fallback)),
+      0xe0,
+      0xe0,
+      0xe0,
+      0xf0);
 }
 
 // The roll => target self-destructs (shields/armor zeroed, death timer armed)
@@ -1230,9 +1233,9 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
   while (start < text.size()) {
     const std::size_t space = text.find(' ', start);
     const std::string_view word =
-        text.substr(start, space == std::string_view::npos
-                               ? std::string_view::npos
-                               : space - start);
+        text.substr(start,
+                    space == std::string_view::npos ? std::string_view::npos
+                                                    : space - start);
     if (!line.empty()) {
       line += ' ';
     }
@@ -1267,23 +1270,23 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
 // composited modal stack. Loop shape mirrors NovaUi_RunBoardingPlunderWindow:
 // input flush on open, ~60 Hz redraw, click answer (the DITL defines no
 // cancel item, so Esc/Enter are inert here).
-[[nodiscard]] bool RunCaptureDecisionDialog(SdlPlatform &platform,
-                                            SdlAudio &audio,
-                                            GameState &state,
-                                            SpaceflightView &view,
-                                            HudRenderer &hud,
-                                            NovaFontCache &font_cache,
-                                            const ServicesButtonArt &art,
-                                            const std::array<BoardButton, 6>
-                                                &board_buttons,
-                                            const BoardingPlunderOptions
-                                                &board_options,
-                                            SDL_Texture *board_backdrop) {
+[[nodiscard]] bool
+RunCaptureDecisionDialog(SdlPlatform &platform,
+                         SdlAudio &audio,
+                         GameState &state,
+                         SpaceflightView &view,
+                         HudRenderer &hud,
+                         NovaFontCache &font_cache,
+                         const ServicesButtonArt &art,
+                         const std::array<BoardButton, 6> &board_buttons,
+                         const BoardingPlunderOptions &board_options,
+                         SDL_Texture *board_backdrop) {
   struct CaptureButton {
     SDL_FRect rect;
     unsigned action_code;
     std::string label;
   };
+
   const auto abs = [](float x, float y, float w, float h) {
     return SDL_FRect{kCaptureWindowX + x, kCaptureWindowY + y, w, h};
   };
@@ -1460,7 +1463,8 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
     return result; // target lost while the command ran
   }
 
-  const Ship &board_target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  const Ship &board_target =
+      state.ShipAt(static_cast<std::size_t>(target_slot));
   const ShipClass *target_class = state.scenario.Ship(
       static_cast<std::int16_t>(board_target.ship_class_id + 0x80));
 
@@ -1583,19 +1587,17 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
           }
         }
         if (action == 0) {
-          NovaLog::Info("board: click at ({}, {}) missed every button",
-                        click.x,
-                        click.y);
+          NovaLog::Info(
+              "board: click at ({}, {}) missed every button", click.x, click.y);
         }
         break;
       }
     }
     if (action != 0) {
-      NovaLog::Info(
-          "board: action {} ({}) armed={}",
-          action,
-          ActionName(static_cast<unsigned>(action)),
-          panic_armed);
+      NovaLog::Info("board: action {} ({}) armed={}",
+                    action,
+                    ActionName(static_cast<unsigned>(action)),
+                    panic_armed);
     }
 
     // Abort (action 1): panic = -1, disarm, close with the confirm cue.
@@ -1623,8 +1625,9 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
         close_reason = "self-destruct (panic re-roll)";
         break;
       }
-      NovaLog::Info(
-          "board: panic re-roll survived — roll {} > panic {}", trip_roll, panic);
+      NovaLog::Info("board: panic re-roll survived — roll {} > panic {}",
+                    trip_roll,
+                    panic);
     }
     panic_armed = false;
 
@@ -1642,10 +1645,11 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
           options.cargo_quantity = static_cast<std::int16_t>(capacity - total);
         }
         if (options.cargo_quantity < 1) {
-          NovaLog::Info("board: cargo {}t did not fit (free {}/{}); left behind",
-                        options.cargo_type,
-                        capacity - total,
-                        capacity);
+          NovaLog::Info(
+              "board: cargo {}t did not fit (free {}/{}); left behind",
+              options.cargo_type,
+              capacity - total,
+              capacity);
           PlayTransitionCue(audio, state, 2);
           BoardShowOverlay(
               state,
@@ -1838,9 +1842,9 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
             // player's class has capture_power (crew) >= 1; with capture_power
             // 0 it skips straight to the escort conversion.
             bool take_ship = false;
-            if (const ShipClass *player_class = state.scenario.Ship(
-                    static_cast<std::int16_t>(state.player.ship_class_id +
-                                              0x80));
+            if (const ShipClass *player_class =
+                    state.scenario.Ship(static_cast<std::int16_t>(
+                        state.player.ship_class_id + 0x80));
                 player_class != nullptr && player_class->crew >= 1) {
               take_ship = RunCaptureDecisionDialog(platform,
                                                    audio,
@@ -1879,7 +1883,7 @@ std::vector<std::string> WordWrapText(NovaFontCache &font_cache,
             target.escort_origin_mark = 0; // field_0xbb
             target.armor_points = max_armor * kCapturedArmorFraction;
             target.faction_or_government_id = -1;
-            target.mission_ship_slot = -1;
+            target.pers_def_slot = -1;
             target.primary_target_ship_slot = -1;
             target.escort_rehired_mark = 1; // field_0xb9
             target.cloak_transition_latch = 0;

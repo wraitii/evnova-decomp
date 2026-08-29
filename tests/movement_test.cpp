@@ -407,7 +407,7 @@ TEST_CASE(
   // Drifted slot fields out of their legal ranges (Ghidra resets to -1).
   ship.faction_or_government_id = 0x100; // > 0xff
   ship.dude_class_id = 0x200;            // > 0x1ff
-  ship.mission_ship_slot = 0x400;        // > 0x3ff
+  ship.pers_def_slot = 0x400;            // > 0x3ff
   ship.ai_target_ship_slot = 0x40;       // > 0x3f
   ship.target_stellar_object_id = 0x800; // > 0x7ff (resets ai_target_ship_slot)
   ship.mission_fleet_slot = 0x10;        // > 0xf
@@ -417,7 +417,7 @@ TEST_CASE(
   CHECK(ship.is_active); // valid class: not deactivated
   CHECK(ship.faction_or_government_id == -1);
   CHECK(ship.dude_class_id == -1);
-  CHECK(ship.mission_ship_slot == -1);
+  CHECK(ship.pers_def_slot == -1);
   CHECK(ship.ai_target_ship_slot == -1); // reset by both direct check + quirk
   CHECK(ship.mission_fleet_slot == -1);
   CHECK(ship.primary_target_ship_slot == -1);
@@ -513,13 +513,13 @@ TEST_CASE("npc effective stats port the high-confidence modifier branches") {
   CHECK(matched.turn_rate_deg_per_tick == Catch::Approx(4.0F / 3.0F));
 
   ship.velocity_match_target_ship_slot = -1;
-  ship.mission_ship_slot = 0x03ff;
+  ship.pers_def_slot = 0x03ff;
   const auto mission = game::NovaShip_ComputeEffectiveStats(state, ship, cls);
   CHECK(mission.thrust_px_per_tick2 == Catch::Approx(0.2F));
   CHECK(mission.max_speed_px_per_tick == Catch::Approx(8.0F));
   CHECK(mission.turn_rate_deg_per_tick == Catch::Approx(5.0F));
 
-  ship.mission_ship_slot = -1;
+  ship.pers_def_slot = -1;
   ship.ionization_points = 50.0F;
   cls.ionization_capacity = 100;
   const auto status = game::NovaShip_ComputeEffectiveStats(state, ship, cls);

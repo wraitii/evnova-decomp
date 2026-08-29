@@ -38,7 +38,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 3. Player cloak-visibility threshold active → silent no-op.
 4. Target eligible: `field_0xb9 == 0` or (no mission fleet and
    `post_hit_mode_hint >= 0`), AND `Ship_IsShipFireRestricted(target)`,
-   AND target active, same system, `mission_ship_slot != 0x3ff`,
+   AND target active, same system, `pers_def_slot != 0x3ff`,
    AND not destroyed. On failure: error sound + STR# 0x7d2 **0x82**
    ("You can't board this ship."), overlay duration 0x168.
 5. Velocity gate: `abs(dvel_x) > 0.5 || abs(dvel_y) > 0.5` (double 00575598 =
@@ -188,7 +188,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 - `Ship_ResetShipAndAttackersAfterBoarding` (0x00415cb0): for every ship
   whose primary target is the captured ship: reset ai_state/control, clear
   target slots, hostility, stellar target. Same reset on the ship itself +
-  `mission_ship_slot = -1`, `voice_type_mode = rand(2)` overridden by class
+  `pers_def_slot = -1`, `voice_type_mode = rand(2)` overridden by class
   inherent_attributes_govt voice mode.
 - `ShipClass_CanPlayerCaptureShipClass` (0x004694a0): fighter-bay outfit /
   escort-capacity counting (used by the post-hit arms and swap gating).

@@ -770,7 +770,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     // Per-burst ammo consumption (one per successful shot, mirroring the
     // original's loop).
     const std::int16_t secondary = ship.npc_weapon_bank_secondary[index];
-    if (secondary > 0 && ship.mission_ship_slot != 0x3ff &&
+    if (secondary > 0 && ship.pers_def_slot != 0x3ff &&
         (weapon->flags_tertiary & 0x0001U) == 0U) {
       ship.npc_weapon_bank_secondary[index] =
           static_cast<std::int16_t>(secondary - 1);

@@ -82,7 +82,7 @@ TEST_CASE("fleet lead spawner shapes the ship from the fleet def") {
   CHECK(ship.armor_points ==
         Catch::Approx(static_cast<float>(cls->base_armor)));
   CHECK(ship.mission_fleet_slot == -1);
-  CHECK(ship.mission_ship_slot == -1);
+  CHECK(ship.pers_def_slot == -1);
   if (ship.ai_state_code == 0x15) {
     CHECK(ship.jump_destination_stellar_id >= 0x80);
   } else {

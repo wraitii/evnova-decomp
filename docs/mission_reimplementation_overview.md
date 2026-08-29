@@ -40,7 +40,7 @@ countdown (-32000 = none). The Ghidra struct comments carry the same map.
 Ghidra identifies these mission-related runtime types:
 
 - `MisnDef`: 300 bytes, up to 1000 definitions
-- `MissionShipDef`: 1940 bytes
+- `PersDef (Ghidra type still MissionShipDef)`: 1940 bytes
 - `MisnActive`: 2278 bytes, 16 active slots
 - `MisnRuntimeFlags`: 20 bytes per slot
 

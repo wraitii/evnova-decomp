@@ -47,18 +47,18 @@ TEST_CASE("cicn 10008 mask is a corner bracket, not a full block",
   for (std::size_t i = 0; i < img->rgba_pixels.size(); i += 4) {
     if (img->rgba_pixels[i + 3] == 255) {
       ++opaque;
-      if (img->rgba_pixels[i] != 255 ||  // any non-white colour index used
-          img->rgba_pixels[i + 1] != 255 ||
-          img->rgba_pixels[i + 2] != 255) {
+      if (img->rgba_pixels[i] != 255 || // any non-white colour index used
+          img->rgba_pixels[i + 1] != 255 || img->rgba_pixels[i + 2] != 255) {
         any_color = true;
       }
     }
   }
   const int total = 16 * 16;
   CHECK(opaque > 0);
-  CHECK(opaque < total);         // the mask is not the whole 16x16 block
-  CHECK(opaque > total / 5);     // a substantial corner (the observed mask is ~78/256)
-  CHECK(any_color);              // the red->orange gradient palette is applied
+  CHECK(opaque < total); // the mask is not the whole 16x16 block
+  CHECK(opaque >
+        total / 5); // a substantial corner (the observed mask is ~78/256)
+  CHECK(any_color); // the red->orange gradient palette is applied
 }
 
 } // namespace game

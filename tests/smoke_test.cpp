@@ -51,9 +51,8 @@ TEST_CASE("button strip middle tiles decode via the raw-row path") {
       CHECK(img->rgba_pixels.size() == expect_w * 25U * 4U);
       // Middle tiles carry real non-flat button pixels (not a null fallback).
       if (piece == 1) {
-        CHECK(std::ranges::any_of(img->rgba_pixels, [](std::uint8_t c) {
-          return c != 0;
-        }));
+        CHECK(std::ranges::any_of(img->rgba_pixels,
+                                  [](std::uint8_t c) { return c != 0; }));
       }
     }
   }

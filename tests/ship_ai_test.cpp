@@ -335,7 +335,7 @@ TEST_CASE(
   CHECK(game::NovaAiShip_CanEngageTargetUnderCloakRules(
       state, subject_ship, other_ship));
 
-  other_ship.mission_ship_slot = 0x3ff;
+  other_ship.pers_def_slot = 0x3ff;
   subject_ship.ai_state_code = 0x15;
   CHECK_FALSE(game::NovaAiShip_CanEngageTargetUnderCloakRules(
       state, subject_ship, other_ship));
@@ -533,9 +533,9 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   if (stellar->emergence_angle_deg.has_value() &&
       *stellar->emergence_angle_deg >= 0 &&
       *stellar->emergence_angle_deg <= 359) {
-    CHECK(ship.heading == Catch::Approx(
-                              static_cast<float>(*stellar->emergence_angle_deg) *
-                              (3.14159265358979323846F / 180.0F)));
+    CHECK(ship.heading ==
+          Catch::Approx(static_cast<float>(*stellar->emergence_angle_deg) *
+                        (3.14159265358979323846F / 180.0F)));
   }
 
   const game::ShipClass *emergence_class =
@@ -562,8 +562,7 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   game::Ship player_follower;
   player_follower.ship_class_id = 0;
   player_follower.ai_target_ship_slot = 0;
-  game::NovaAi_EnterState15JumpOutToSystem(
-      state, player_follower, stellar_id);
+  game::NovaAi_EnterState15JumpOutToSystem(state, player_follower, stellar_id);
   CHECK(player_follower.ai_desired_speed == Catch::Approx(-15.0F));
 }
 
@@ -586,8 +585,7 @@ TEST_CASE("state 0x14 NPC jump transfers to the linked system") {
       }
       source_system = static_cast<std::int16_t>(system_index);
       target_stellar = system.nav_defs[slot];
-      destination_system =
-          static_cast<std::int16_t>(system.links[slot] - 0x80);
+      destination_system = static_cast<std::int16_t>(system.links[slot] - 0x80);
       break;
     }
   }

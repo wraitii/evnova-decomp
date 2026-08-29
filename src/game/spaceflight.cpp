@@ -173,8 +173,8 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     if (ship.dude_class_id < -1 || ship.dude_class_id > 0x1ff) {
       ship.dude_class_id = -1;
     }
-    if (ship.mission_ship_slot < -1 || ship.mission_ship_slot > 0x3ff) {
-      ship.mission_ship_slot = -1;
+    if (ship.pers_def_slot < -1 || ship.pers_def_slot > 0x3ff) {
+      ship.pers_def_slot = -1;
     }
     if (ship.ai_target_ship_slot < -1 || ship.ai_target_ship_slot > 0x3f) {
       ship.ai_target_ship_slot = -1;
@@ -1182,7 +1182,7 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
   // Mission ships use DAT_005757a8 = 2.0 for thrust, speed and the special
   // low-turn-rate correction. The latter is applied below with the same
   // ordering as Ship_ComputeShipMaxTurnRateDeg.
-  if (ship.mission_ship_slot == 0x03ff) {
+  if (ship.pers_def_slot == 0x03ff) {
     stats.max_speed_px_per_tick *= 2.0F;
     stats.thrust_px_per_tick2 *= 2.0F;
   }
@@ -1190,7 +1190,7 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
   // Ship_ComputeShipMaxTurnRateDeg applies the mission correction before the
   // general one-degree floor, and ionization damping only while the ship is not
   // thrusting. DAT_00575790 is 6.0 and DAT_00575784 is 1.0.
-  if (ship.mission_ship_slot == 0x03ff && stats.turn_rate_deg_per_tick < 6.0F) {
+  if (ship.pers_def_slot == 0x03ff && stats.turn_rate_deg_per_tick < 6.0F) {
     stats.turn_rate_deg_per_tick += 1.0F;
   }
   if (stats.turn_rate_deg_per_tick >= 1.0F) {
@@ -1431,7 +1431,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         // Only after reaching the effective-speed threshold does the original
         // arm its short coast-through timer. Arming it on every negative-speed
         // tick freezes each 1.165-unit slowdown step for several frames.
-        if (ship.ai_target_ship_slot == -1 && ship.mission_ship_slot != 0x3ff) {
+        if (ship.ai_target_ship_slot == -1 && ship.pers_def_slot != 0x3ff) {
           std::uniform_int_distribution<std::int32_t> dist(30, 59);
           ship.ai_maneuver_timer_ms = static_cast<float>(dist(state.rng));
         }

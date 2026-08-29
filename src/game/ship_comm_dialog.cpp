@@ -292,7 +292,8 @@ void DrawShipCommDialog(SdlPlatform &platform,
 
   // The comm window frame is a fixed 423x215 PICT (DLOG 0x3ef), centred on the
   // 640x480 playfield. All DITL item rects are offset by this origin.
-  const SDL_FRect frame{kCommWindowX, kCommWindowY,
+  const SDL_FRect frame{kCommWindowX,
+                        kCommWindowY,
                         static_cast<float>(kCommFrameWidth),
                         static_cast<float>(kCommFrameHeight)};
   if (backdrop != nullptr) {
@@ -398,9 +399,8 @@ void DrawShipCommDialog(SdlPlatform &platform,
                           b.rect.x,
                           b.rect.x + b.rect.w,
                           ThreeStateButtonLabelBaseline(b.rect),
-                          b.slot < button_labels.size()
-                              ? button_labels[b.slot]
-                              : "");
+                          b.slot < button_labels.size() ? button_labels[b.slot]
+                                                        : "");
   }
 }
 
@@ -685,14 +685,19 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   // hit test unambiguous the assistance slot is omitted from the button list
   // for special-mask ships rather than kept-but-hidden.
   const bool keep_assistance = !special_mask;
-  const float greetings_y =
-      special_mask ? kCommButtonYMiddle : kCommButtonYTop;
+  const float greetings_y = special_mask ? kCommButtonYMiddle : kCommButtonYTop;
   const SDL_FRect btn_rects[3] = {
-      {kCommWindowX + kCommButtonX, kCommWindowY + kCommButtonYClose,
-       kCommButtonW, kCommButtonH},
-      {kCommWindowX + kCommButtonX, kCommWindowY + kCommButtonYMiddle,
-       kCommButtonW, kCommButtonH},
-      {kCommWindowX + kCommButtonX, kCommWindowY + greetings_y, kCommButtonW,
+      {kCommWindowX + kCommButtonX,
+       kCommWindowY + kCommButtonYClose,
+       kCommButtonW,
+       kCommButtonH},
+      {kCommWindowX + kCommButtonX,
+       kCommWindowY + kCommButtonYMiddle,
+       kCommButtonW,
+       kCommButtonH},
+      {kCommWindowX + kCommButtonX,
+       kCommWindowY + greetings_y,
+       kCommButtonW,
        kCommButtonH},
   };
   std::vector<ServiceButton> buttons;
@@ -748,8 +753,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       // (STR# 0xbb9). The window stays open until the player closes the
       // channel; the transfer/re-hire runs on close.
       escort_transfer_armed = true;
-      status =
-          LoadCommPrompt(random_index, kMsgEscortGoodbye).value_or(status);
+      status = LoadCommPrompt(random_index, kMsgEscortGoodbye).value_or(status);
       return;
     }
     if (comm_special) {
@@ -776,7 +780,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
               LoadCommPrompt(random_index, kMsgPrepareToDie).value_or(status);
           NovaAi_SetShipHostileToPlayer(state, target);
         } else {
-          status = LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
+          status =
+              LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
         }
       } else {
         status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
@@ -796,10 +801,10 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       // braking onto the player in state 0x09/0x0F.
       if (!NovaAiShip_IsShipBrakingOnPlayerState9(state, target) &&
           !NovaAiShip_IsShipBrakingOnPlayerState0xF(state, target)) {
-        status = target.ai_behavior_code < 5
-                     ? LoadCommPrompt(random_index, kMsgImBusy).value_or(status)
-                     : LoadCommPrompt(random_index, kMsgCantDoSir)
-                           .value_or(status);
+        status =
+            target.ai_behavior_code < 5
+                ? LoadCommPrompt(random_index, kMsgImBusy).value_or(status)
+                : LoadCommPrompt(random_index, kMsgCantDoSir).value_or(status);
       } else {
         status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
       }
@@ -813,8 +818,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       const bool player_fuel_low =
           state.player.fuel_points < kPlayerFuelOfferThreshold &&
           state.cached_stats.fuel_capacity > 0;
-      if (player_fuel_low ||
-          NovaAiShip_IsFireRestricted(state, state.player)) {
+      if (player_fuel_low || NovaAiShip_IsFireRestricted(state, state.player)) {
         if (govt_aid_flag) {
           status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
         } else if (target.ai_behavior_code < 5) {
@@ -822,15 +826,15 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
           const BribeOutcome outcome =
               RunBribePayment(state, bribe_cost, free_help);
           if (outcome == BribeOutcome::kPaid) {
-            status =
-                LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
+            status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
             if (NovaAiShip_IsFireRestricted(state, state.player)) {
               NovaAi_EnterState0FTargetPlayerAndBrake(target);
             } else {
               NovaAi_EnterState9TargetPlayerAndBrake(target);
             }
           } else if (outcome == BribeOutcome::kRefused) {
-            status = LoadCommPrompt(random_index, kMsgComedian).value_or(status);
+            status =
+                LoadCommPrompt(random_index, kMsgComedian).value_or(status);
           } else {
             status =
                 LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
@@ -867,7 +871,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
         } else if (outcome == BribeOutcome::kRefused) {
           status = LoadCommPrompt(random_index, kMsgComedian).value_or(status);
         } else {
-          status = LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
+          status =
+              LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
         }
       } else if (behavior == 3 || behavior == 4) {
         status =
@@ -880,7 +885,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
         } else if (outcome == BribeOutcome::kRefused) {
           status = LoadCommPrompt(random_index, kMsgComedian).value_or(status);
         } else {
-          status = LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
+          status =
+              LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
         }
       } else {
         status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
@@ -1057,7 +1063,7 @@ bool NovaShipComm_TargetEligibleForHail(const GameState &state,
   if (NovaAiShip_IsFireRestricted(state, target)) {
     eligible = false;
   }
-  if (target.mission_ship_slot == 0x3ff) {
+  if (target.pers_def_slot == 0x3ff) {
     eligible = false;
   }
   return eligible;

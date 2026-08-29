@@ -3204,7 +3204,7 @@ bool NovaAiShip_CanEngageTargetUnderCloakRules(const GameState &state,
   if (subject_ship.ai_state_code == 0x15) {
     return false; // jump/travel state: no engagement
   }
-  if (other_ship.mission_ship_slot == 0x3ff) {
+  if (other_ship.pers_def_slot == 0x3ff) {
     return true;
   }
   // The first argument is the subject whose cloak visibility is tested.
@@ -3441,7 +3441,7 @@ bool NovaAiShip_CanShipRespondToDistressCall(const GameState &state,
   if (!responder.is_active || !distressed.is_active) {
     return false;
   }
-  if (distressed.mission_ship_slot == 0x3ff) {
+  if (distressed.pers_def_slot == 0x3ff) {
     return false;
   }
   const std::int16_t govt_a = responder.faction_or_government_id;
@@ -3605,7 +3605,7 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
 }
 
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. The mission-announcement arm
-// is deferred (TODO(decomp): g_mission_ship_defs + Mission_ShowMissionShip-
+// is deferred (TODO(decomp): g_pers_defs + Mission_ShowMissionShip-
 // Announcement are not modelled), so this is the escort-mode/state flip only.
 void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
   (void)state;
