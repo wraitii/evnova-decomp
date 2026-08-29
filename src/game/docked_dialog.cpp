@@ -4,10 +4,10 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "hud_overlay.hpp"
 #include "landed_store.hpp"
 #include "mission.hpp"
 #include "nova_font.hpp"
-#include "hud_overlay.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_visual.hpp"
@@ -241,9 +241,9 @@ constexpr float kMissionListFontSize = 12.0F;
 [[nodiscard]] std::optional<MissionBoardLayout>
 LayoutMissionBoard(const SdlPlatform &platform) {
   const auto definition = NovaResource_LoadDialogDefinition(0x3ee);
-  const auto items = definition
-                         ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
-                         : std::nullopt;
+  const auto items =
+      definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
+                 : std::nullopt;
   if (!definition || !items) {
     NovaLog::Todo("Mission BBS DLOG/DITL 0x3ee unavailable; refusing to use "
                   "synthetic layout");
@@ -321,9 +321,9 @@ void DrawMissionBoardContents(SdlPlatform &platform,
   constexpr SDL_Color kRowSelected{128, 0, 0, 255};
 
   const auto &rows = missions.page_zero;
-  const std::string heading = NovaHud_LoadStringEntry(0x7d2, 0x167)
-                                  .value_or(
-                                      "The following missions are available here");
+  const std::string heading =
+      NovaHud_LoadStringEntry(0x7d2, 0x167)
+          .value_or("The following missions are available here");
   NovaText_Draw(platform,
                 font_cache,
                 NovaFontFamily::kGeneva,
@@ -336,27 +336,24 @@ void DrawMissionBoardContents(SdlPlatform &platform,
   if (layout.list.w > 0.0F && !rows.empty()) {
     const float row_pitch = layout.list_row_pitch;
     const float text_x = layout.list.x + 4.0F;
-    for (std::size_t row = 0; row < rows.size() &&
-                              layout.list.y + row * row_pitch <
-                                  layout.list.y + layout.list.h;
+    for (std::size_t row = 0;
+         row < rows.size() &&
+         layout.list.y + row * row_pitch < layout.list.y + layout.list.h;
          ++row) {
       const auto mission_id = rows[row];
-      const auto *definition = state.scenario.Mission(
-          static_cast<std::int16_t>(mission_id + 0x80));
+      const auto *definition =
+          state.scenario.Mission(static_cast<std::int16_t>(mission_id + 0x80));
       const std::string label =
           definition != nullptr && !definition->display_name.empty()
               ? definition->display_name
               : "Mission " + std::to_string(mission_id);
       const float row_top = layout.list.y + row * row_pitch;
       const float baseline = row_top + kMissionListFontSize;
-      const SDL_FRect row_rect{layout.list.x, row_top, layout.list.w,
-                               row_pitch};
+      const SDL_FRect row_rect{
+          layout.list.x, row_top, layout.list.w, row_pitch};
       const SDL_Color row_color = row == selected ? kRowSelected : kRowNormal;
-      SDL_SetRenderDrawColor(renderer,
-                             row_color.r,
-                             row_color.g,
-                             row_color.b,
-                             row_color.a);
+      SDL_SetRenderDrawColor(
+          renderer, row_color.r, row_color.g, row_color.b, row_color.a);
       SDL_RenderFillRect(renderer, &row_rect);
       NovaText_Draw(platform,
                     font_cache,
@@ -370,7 +367,8 @@ void DrawMissionBoardContents(SdlPlatform &platform,
     }
   }
 
-  if (layout.selected_title.w > 0.0F && !rows.empty() && selected < rows.size()) {
+  if (layout.selected_title.w > 0.0F && !rows.empty() &&
+      selected < rows.size()) {
     const auto *definition = state.scenario.Mission(
         static_cast<std::int16_t>(rows[selected] + 0x80));
     const std::string title = definition != nullptr
@@ -444,10 +442,8 @@ void DrawMissionBoardContents(SdlPlatform &platform,
           description->text,
           static_cast<int>(std::max(1.0F, width)),
           [&](std::string_view line) {
-            return font_cache.TextWidth(NovaFontFamily::kGeneva,
-                                         12.0F,
-                                         kNovaFontStyleRegular,
-                                         line);
+            return font_cache.TextWidth(
+                NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line);
           });
       float y = layout.description.y + 15.0F;
       for (const auto &line : lines) {
@@ -487,10 +483,8 @@ void DrawMissionBoardBase(SdlPlatform &platform,
     float width = 0.0F;
     float height = 0.0F;
     SDL_GetTextureSize(backdrop, &width, &height);
-    const SDL_FRect backdrop_rect{(output.x - width) / 2.0F,
-                                  (output.y - height) / 2.0F,
-                                  width,
-                                  height};
+    const SDL_FRect backdrop_rect{
+        (output.x - width) / 2.0F, (output.y - height) / 2.0F, width, height};
     SDL_RenderTexture(renderer, backdrop, nullptr, &backdrop_rect);
   }
   if (frame != nullptr) {
@@ -531,12 +525,13 @@ LandedExit RunMissionBoardDialog(SdlPlatform &platform,
   MissionListEvaluation missions = Mission_EvaluateMissionLists(state);
   std::size_t selected = 0;
   std::string status;
-  NovaLog::Info("mission BBS opened at stellar {}: {} available rows (first id {})",
-                static_cast<int>(stellar_id),
-                missions.page_zero.size(),
-                missions.page_zero.empty()
-                    ? -1
-                    : static_cast<int>(missions.page_zero.front()));
+  NovaLog::Info(
+      "mission BBS opened at stellar {}: {} available rows (first id {})",
+      static_cast<int>(stellar_id),
+      missions.page_zero.size(),
+      missions.page_zero.empty()
+          ? -1
+          : static_cast<int>(missions.page_zero.front()));
 
   while (!platform.quit_requested()) {
     DrawMissionBoardBase(platform,
@@ -559,10 +554,11 @@ LandedExit RunMissionBoardDialog(SdlPlatform &platform,
         return;
       }
       const auto mission_id = missions.page_zero[selected];
-      if (Mission_ActivateAtSlot(state, mission_id)) {
+      if (Mission_ActivateAtSlot(state, mission_id, stellar_id)) {
         status = "Mission accepted";
         missions = Mission_EvaluateMissionLists(state);
-        if (selected >= missions.page_zero.size() && !missions.page_zero.empty()) {
+        if (selected >= missions.page_zero.size() &&
+            !missions.page_zero.empty()) {
           selected = missions.page_zero.size() - 1;
         }
       } else {
@@ -582,8 +578,8 @@ LandedExit RunMissionBoardDialog(SdlPlatform &platform,
         const SDL_FPoint point = platform.mouse_position();
         bool handled = false;
         if (contains(layout->list, point) && !missions.page_zero.empty()) {
-          const auto row = static_cast<std::size_t>(
-              (point.y - layout->list.y) / layout->list_row_pitch);
+          const auto row = static_cast<std::size_t>((point.y - layout->list.y) /
+                                                    layout->list_row_pitch);
           if (row < missions.page_zero.size()) {
             selected = row;
             handled = true;
@@ -1255,8 +1251,7 @@ LandedExit NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                                          std::int16_t stellar_id,
                                          SDL_Texture *docked_snapshot) {
   if (service == LandedService::kMissionBoard) {
-    return RunMissionBoardDialog(
-        platform, state, stellar_id, docked_snapshot);
+    return RunMissionBoardDialog(platform, state, stellar_id, docked_snapshot);
   }
   if (service == LandedService::kOutfit ||
       service == LandedService::kShipyard) {

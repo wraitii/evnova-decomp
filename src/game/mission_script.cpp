@@ -310,8 +310,12 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
         break;
       case 'S':
         if (operand >= kResourceIdBase && operand < 0x468) {
+          // The original's activation reads ai_secondary_target_slot (the
+          // current travel/landed stellar) for its briefing check.
           (void)Mission_ActivateAtSlot(
-              state, static_cast<std::int16_t>(operand - kResourceIdBase));
+              state,
+              static_cast<std::int16_t>(operand - kResourceIdBase),
+              state.player.ai_secondary_target_slot);
           applied = true;
         }
         break;

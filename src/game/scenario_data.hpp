@@ -114,19 +114,25 @@ void NovaControlExpression_ExecuteSet(
 // source bytes while the remaining fields are decoded.
 struct MissionDef {
   bool present = false;
-  std::int16_t link_system_filter = -1;     // MisnDef +0x00
-  std::int16_t return_stellar_id = -1;      // resource +0x04
-  std::int16_t special_ship_goal = 0;       // resource +0x04
-  std::int16_t special_ship_behavior = 0;   // +0x06
-  std::int16_t special_ship_start = 0;      // +0x08
-  std::int16_t special_ship_count = 0;      // resource +0x12
-  std::int16_t special_ship_system = -1;    // resource +0x10
-  std::int16_t on_start_condition = -1;     // resource +0x5a
-  std::int16_t on_fail_condition = -1;      // resource +0x0c
-  std::int16_t on_success_condition = -1;   // resource +0x0e
-  std::int16_t aux_ship_dude = -1;          // resource +0x24
-  std::int16_t aux_ship_system = -1;        // resource +0x22
-  std::int16_t special_ship_dude = -1;      // resource +0x24; active +0x08
+  std::int16_t link_system_filter = -1;   // MisnDef +0x00
+  std::int16_t return_stellar_id = -1;    // resource +0x04
+  std::int16_t special_ship_goal = 0;     // resource +0x04
+  std::int16_t special_ship_behavior = 0; // +0x06
+  std::int16_t special_ship_start = 0;    // +0x08
+  std::int16_t special_ship_count = 0;    // resource +0x12
+  std::int16_t special_ship_system = -1;  // resource +0x10
+  std::int16_t on_start_condition = -1;   // resource +0x5a
+  std::int16_t on_fail_condition = -1;    // resource +0x0c
+  std::int16_t on_success_condition = -1; // resource +0x0e
+  std::int16_t aux_ship_dude = -1;        // resource +0x24
+  std::int16_t aux_ship_system = -1;      // resource +0x22
+  std::int16_t special_ship_dude = -1;    // resource +0x24; active +0x08
+  // Payload +0x14/+0x16/+0x18: Bible PickupMode (-1 ignored, 0 at mission
+  // start, 1 at TravelStel, 2 when boarding), DropOffMode (0 at TravelStel,
+  // 1 at ReturnStel) and ScanMask (govts whose scanners flag the cargo).
+  std::int16_t pickup_mode = -1;            // +0x14 (active +0x16)
+  std::int16_t drop_off_mode = -1;          // +0x16 (active +0x18)
+  std::int16_t scan_mask = 0;               // +0x18 (active +0x1a)
   std::int16_t time_limit_days = 0;         // payload +0x40 (active +0x45)
   std::int16_t on_resolve_repeat_count = 0; // +0x48
   std::int32_t resource_delta_or_cost = 0;  // +0x4a

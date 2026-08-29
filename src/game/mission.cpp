@@ -67,12 +67,13 @@ MissionControlExpressionState(const GameState &state) {
 
 [[nodiscard]] bool IsActiveMission(const GameState &state,
                                    std::int16_t mission_id) {
-  return std::any_of(state.active_missions.begin(),
-                     state.active_missions.end(),
-                     [mission_id](const ActiveMission &mission) {
-                       return mission.is_accepted &&
-                              mission.mission_template_id == mission_id;
-                     });
+  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+    if (state.active_mission_runtime_flags[slot].is_active &&
+        state.active_missions[slot].mission_template_id == mission_id) {
+      return true;
+    }
+  }
+  return false;
 }
 
 [[nodiscard]] bool
@@ -332,10 +333,10 @@ ResolveMissionCurrentSystem(GameState &state,
     return state.player.current_system_id;
   }
   if (locator == -3) {
-    return target.on_fail_system_id;
+    return target.travel_system_id;
   }
   if (locator == -4) {
-    return target.on_success_system_id;
+    return target.return_system_id;
   }
   if (locator == -2) {
     return ResolveMissionSystemByLocator(
@@ -486,19 +487,22 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
     }
     auto &target = state.mission_target_resolutions[index];
     target = {};
-    target.on_fail_stellar_id =
+    // MisnDef +0x0c/+0x0e are the TravelStel/ReturnStel locators (mïsn
+    // payload +0x0c/+0x0e); the "on_fail/on_success condition" naming was a
+    // misnomer.
+    target.travel_stellar_id =
         ResolveMissionStellar(state, definition.on_fail_condition, -1, -1);
-    target.on_fail_system_id =
-        ResolveContainingSystem(state, target.on_fail_stellar_id);
-    target.on_success_stellar_id =
+    target.travel_system_id =
+        ResolveContainingSystem(state, target.travel_stellar_id);
+    target.return_stellar_id =
         definition.on_success_condition == -1
-            ? target.on_fail_stellar_id
+            ? target.travel_stellar_id
             : ResolveMissionStellar(state,
                                     definition.on_success_condition,
-                                    target.on_fail_stellar_id,
-                                    target.on_fail_stellar_id);
-    target.on_success_system_id =
-        ResolveContainingSystem(state, target.on_success_stellar_id);
+                                    target.travel_stellar_id,
+                                    target.travel_stellar_id);
+    target.return_system_id =
+        ResolveContainingSystem(state, target.return_stellar_id);
     target.special_ship_system_id =
         ResolveSpecialShipSystem(state, definition.special_ship_system);
     target.special_ship_count =
@@ -551,8 +555,8 @@ bool Mission_PopulateActiveSlot(GameState &state,
   const auto &target =
       state.mission_target_resolutions[static_cast<std::size_t>(mission_id)];
 
-  active.on_fail_stellar_id = target.on_fail_stellar_id;
-  active.on_success_stellar_id = target.on_success_stellar_id;
+  active.travel_stellar_id = target.travel_stellar_id;
+  active.return_stellar_id = target.return_stellar_id;
   active.target_ship_count = definition->target_ship_count;
   active.dude_def_index = definition->special_ship_dude;
   if (active.dude_def_index >= kResourceIdBase) {
@@ -572,8 +576,11 @@ bool Mission_PopulateActiveSlot(GameState &state,
       target.special_ship_count > 0
           ? target.special_ship_count
           : ResolveSpecialShipCount(state, definition->special_ship_count);
-  active.mission_link_systems = target.on_fail_system_id;
-  active.mission_system_b = target.on_success_system_id;
+  // Bible PickupMode/DropOffMode/ScanMask (payload +0x14/+0x16/+0x18);
+  // the previous port wrongly filled these with resolved system ids.
+  active.pickup_mode = definition->pickup_mode;
+  active.drop_off_mode = definition->drop_off_mode;
+  active.scan_mask = definition->scan_mask;
   active.comp_govt_id = definition->competing_government_id;
   if (active.comp_govt_id < kResourceIdBase || active.comp_govt_id > 0x17f) {
     active.comp_govt_id = -1;
@@ -593,7 +600,7 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.goal_counter_e = 0;
   active.mission_target_count = definition->target_ship_count;
   active.has_been_visited = definition->start_visited;
-  active.is_accepted = false;
+  active.carrying_resources = false;
   active.mission_template_id = mission_id;
   active.mission_ship_count_max = definition->mission_ship_count_max;
   active.aux_ships_dude_def_index = definition->auxiliary_ship_dude;
@@ -661,7 +668,9 @@ bool Mission_PopulateActiveSlot(GameState &state,
   return true;
 }
 
-bool Mission_ActivateAtSlot(GameState &state, std::int16_t mission_id) {
+bool Mission_ActivateAtSlot(GameState &state,
+                            std::int16_t mission_id,
+                            std::int16_t landed_stellar_id) {
   if (mission_id < 0 ||
       mission_id >= static_cast<std::int16_t>(state.scenario.missions.size())) {
     return false;
@@ -689,13 +698,22 @@ bool Mission_ActivateAtSlot(GameState &state, std::int16_t mission_id) {
   runtime.is_active = true;
   runtime.flags_primary_at_accept =
       state.active_missions[free_slot].flags_primary;
-  state.active_missions[free_slot].is_accepted = true;
-  // Mission_ActivateMissionAtSlot suppresses the initial destination briefing
-  // when there is no failure stellar to present. The travel-window half of
-  // this condition is UI-owned; this state-only API can preserve the verified
-  // no-destination branch.
-  runtime.initial_briefing_done =
-      state.active_missions[free_slot].on_fail_stellar_id == -1;
+  auto &active = state.active_missions[free_slot];
+  // Bible PickupMode 0: the mission cargo is aboard from mission start (the
+  // original shows the LoadCargText desc here; UI-owned, TODO(decomp)).
+  if (active.pickup_mode == 0) {
+    active.carrying_resources = true;
+    if (active.brief_description_ids[2] != -1) {
+      NovaLog::Todo("mission cargo-loaded desc (misn {} id {}) not "
+                    "reconstructed yet",
+                    active.mission_template_id,
+                    active.brief_description_ids[2]);
+    }
+  }
+  // The initial destination briefing is skipped when the mission has no
+  // TravelStel, or when the player accepts it while docked there.
+  runtime.initial_briefing_done = active.travel_stellar_id == -1 ||
+                                  active.travel_stellar_id == landed_stellar_id;
   // The original treats values below -50000 as an immediate acceptance fee;
   // the encoded value includes the -50000 sentinel, so preserve its unusual
   // arithmetic and clamp the resulting credit balance at zero.
@@ -842,8 +860,8 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
                    .resolve_script_buffer_start),
         mission_slot);
   }
-  state.active_missions[static_cast<std::size_t>(mission_slot)].is_accepted =
-      false;
+  state.active_missions[static_cast<std::size_t>(mission_slot)]
+      .carrying_resources = false;
   state.active_mission_runtime_flags[static_cast<std::size_t>(mission_slot)]
       .is_active = false;
   // The original also invalidates g_last_system_for_ambient_rolls (0xffff);
@@ -1199,6 +1217,111 @@ void Mission_TickShipInteractionReactions(GameState &state,
   for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
     Mission_HandleMissionOrSurrenderShipReaction(
         state, static_cast<std::int16_t>(slot), now_ms);
+  }
+}
+
+// Ghidra 0x004438d0 Mission_ProcessInteractionReactionSlotResources. Landing
+// interaction pass for one slot: handles mission-cargo pickup/drop-off at the
+// TravelStel and final delivery at the ReturnStel. The pickup/drop-off desc
+// dialogs are UI-owned and logged when they would fire (TODO(decomp)).
+void Mission_ProcessInteractionReactionSlotResources(
+    GameState &state,
+    std::int16_t mission_slot,
+    std::int16_t landed_stellar_id) {
+  const auto slot = static_cast<std::size_t>(mission_slot);
+  ActiveMission &mission = state.active_missions[slot];
+  MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
+  if (NovaStellar_AreStellarsEquivalent(
+          state, mission.travel_stellar_id, landed_stellar_id)) {
+    if (mission.drop_off_mode == 1 && !mission.carrying_resources) {
+      // Pick up here: gate on hauling the special-ship count as tonnage.
+      if (Mission_TryConsumeMissionInteractionResources(
+              state, mission.special_ship_count)) {
+        mission.carrying_resources = true;
+        runtime.initial_briefing_done = true;
+        if (mission.brief_description_ids[2] != -1) {
+          NovaLog::Todo("mission cargo-loaded desc (misn {} id {}) not "
+                        "reconstructed yet",
+                        mission.mission_template_id,
+                        mission.brief_description_ids[2]);
+        }
+      }
+    } else {
+      runtime.initial_briefing_done = true;
+    }
+    if (mission.drop_off_mode == 0 && mission.carrying_resources) {
+      mission.carrying_resources = false;
+      if (mission.brief_description_ids[3] != -1) {
+        NovaLog::Todo("mission cargo-dropped desc (misn {} id {}) not "
+                      "reconstructed yet",
+                      mission.mission_template_id,
+                      mission.brief_description_ids[3]);
+      }
+      state.stat_cache_valid = false;
+    }
+  }
+  if (NovaStellar_AreStellarsEquivalent(
+          state, mission.return_stellar_id, landed_stellar_id) &&
+      mission.drop_off_mode == 1 && mission.carrying_resources &&
+      (runtime.objective_complete || mission.spawn_behavior == -1 ||
+       (mission.spawn_behavior == 3 && mission.goal_counter_a < 1))) {
+    mission.carrying_resources = false;
+    if (mission.brief_description_ids[3] != -1) {
+      NovaLog::Todo("mission cargo-dropped desc (misn {} id {}) not "
+                    "reconstructed yet",
+                    mission.mission_template_id,
+                    mission.brief_description_ids[3]);
+    }
+    state.stat_cache_valid = false;
+  }
+}
+
+// Ghidra 0x00443780 Mission_TickReactionSlotsForTravelInteraction. The
+// landing gate, run from the travel-destination interaction loop with the
+// current stellar: evaluates objectives, processes cargo interactions, and
+// resolves success/failure when the player is docked at a mission's
+// ReturnStel. Re-runs the mission-list evaluation after any success. The
+// original also calls NovaResources_EvaluateAvailability (0x00448090) every
+// pass; the clean-room availability passes run lazily instead
+// (TODO(decomp)).
+void Mission_TickReactionSlotsForTravelInteraction(
+    GameState &state, std::int16_t landed_stellar_id, std::uint32_t now_ms) {
+  bool resolved_a_success = false;
+  for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
+    }
+    const auto mission_slot = static_cast<std::int16_t>(slot);
+    Mission_HandleMissionOrSurrenderShipReaction(state, mission_slot, now_ms);
+    Mission_ProcessInteractionReactionSlotResources(
+        state, mission_slot, landed_stellar_id);
+    ActiveMission &mission = state.active_missions[slot];
+    MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
+    if (NovaStellar_AreStellarsEquivalent(
+            state, mission.return_stellar_id, landed_stellar_id)) {
+      if (mission.return_stellar_id == mission.travel_stellar_id ||
+          mission.travel_stellar_id == -1) {
+        runtime.initial_briefing_done = true;
+      }
+      if (!runtime.is_failed) {
+        // Escort missions with no destroyed escorts complete on arrival;
+        // the survivor check runs inside the objective evaluation.
+        if (mission.spawn_behavior == 3 && mission.goal_counter_a < 1) {
+          runtime.objective_complete = true;
+        }
+        if (runtime.initial_briefing_done && runtime.objective_complete) {
+          Mission_ResolveMissionSuccess(state, mission_slot);
+          resolved_a_success = true;
+        }
+      } else {
+        Mission_ResolveMissionFailure(state, mission_slot, now_ms);
+      }
+    }
+    Mission_HandleMissionOrSurrenderShipReaction(state, mission_slot, now_ms);
+  }
+  if (resolved_a_success) {
+    // Side-effect call: refreshes availability and the resolved-locator cache.
+    (void)Mission_EvaluateMissionLists(state);
   }
 }
 

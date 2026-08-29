@@ -692,6 +692,12 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       if (NovaLanding_EnterDocked(state, ctx)) {
         NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
                       ctx.stellar_id);
+        // Ghidra NovaUi_RunTravelDestinationInteractionLoop (0x00491f30)
+        // runs Mission_TickReactionSlotsForTravelInteraction (0x00443780)
+        // on every window action; the reimplementation evaluates the pass
+        // once per landing. Mission resolution (credits, text) happens here.
+        Mission_TickReactionSlotsForTravelInteraction(
+            state, ctx.stellar_id, SDL_GetTicks());
         const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
         if (exit == LandedExit::kQuit) {
           returning_to_menu = true;

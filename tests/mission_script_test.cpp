@@ -27,7 +27,6 @@ TEST_CASE("mission script executor reports unknown opcodes") {
 TEST_CASE("mission script executor implements mission lifecycle operators") {
   GameState state;
   state.active_mission_runtime_flags[0].is_active = true;
-  state.active_missions[0].is_accepted = true;
   state.active_missions[0].mission_template_id = 2;
 
   auto result = Mission_ExecuteScript(state, "F130");
@@ -37,7 +36,6 @@ TEST_CASE("mission script executor implements mission lifecycle operators") {
   result = Mission_ExecuteScript(state, "A130");
   REQUIRE(result.ok());
   CHECK_FALSE(state.active_mission_runtime_flags[0].is_active);
-  CHECK_FALSE(state.active_missions[0].is_accepted);
 }
 
 TEST_CASE("mission script executor mutates ranks, exploration, and stellars") {

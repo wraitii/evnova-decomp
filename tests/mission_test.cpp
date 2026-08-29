@@ -36,8 +36,8 @@ TEST_CASE("scenario ferry missions expose their decoded availability fields") {
   std::string first_availability;
   for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
     const auto &mission = state.scenario.missions[index];
-    if (!mission.present || mission.display_name.find("Ferry") ==
-                                std::string::npos) {
+    if (!mission.present ||
+        mission.display_name.find("Ferry") == std::string::npos) {
       continue;
     }
     ++ferry_count;
@@ -45,13 +45,12 @@ TEST_CASE("scenario ferry missions expose their decoded availability fields") {
       first_link = mission.link_system_filter;
       first_availability = mission.availability_expr;
     }
-    INFO("ferry mission index=" << index
-                                 << " link=" << mission.link_system_filter
-                                 << " availability="
-                                 << mission.availability_expr);
+    INFO("ferry mission index="
+         << index << " link=" << mission.link_system_filter
+         << " availability=" << mission.availability_expr);
   }
   INFO("first ferry link=" << first_link
-                            << " availability=" << first_availability);
+                           << " availability=" << first_availability);
   CHECK(ferry_count > 0);
   const auto available = Mission_EvaluateMissionLists(state);
   CHECK(std::any_of(available.page_zero.begin(),
@@ -97,6 +96,7 @@ TEST_CASE(
   definition.special_ship_system = 7;
   definition.special_ship_count = 2;
   definition.current_system_locator = -1;
+  definition.pickup_mode = 0;
 
   state.scenario.stellars.resize(2);
   state.scenario.stellars[0].system_id = 11;
@@ -104,12 +104,12 @@ TEST_CASE(
   state.player.current_system_id = 9;
   Mission_ResolveMissionStellarLocators(state);
 
-  REQUIRE(Mission_ActivateAtSlot(state, 0));
+  REQUIRE(Mission_ActivateAtSlot(state, 0, -1));
   const auto &active = state.active_missions[0];
-  CHECK(active.is_accepted);
+  CHECK(active.carrying_resources); // PickupMode 0: cargo aboard at accept
   CHECK(active.mission_template_id == 0);
-  CHECK(active.on_fail_stellar_id == 0);
-  CHECK(active.on_success_stellar_id == 1);
+  CHECK(active.travel_stellar_id == 0);
+  CHECK(active.return_stellar_id == 1);
   CHECK(active.dude_def_index == 2);
   CHECK(active.aux_ships_dude_def_index == 1);
   CHECK(active.comp_govt_id == 0);

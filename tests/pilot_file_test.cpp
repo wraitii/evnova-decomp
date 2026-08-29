@@ -55,9 +55,9 @@ using game::PilotLoadError;
   p.active_mission_runtime_flags[2].initial_briefing_done = true;
   p.active_mission_runtime_flags[2].deadline_day = 17;
   p.active_mission_runtime_flags[2].elapsed_travel_days = 1234;
-  p.active_missions[2].is_accepted = true;
+  p.active_missions[2].carrying_resources = true;
   p.active_missions[2].mission_template_id = 0x91;
-  p.active_missions[2].on_success_stellar_id = 0x123;
+  p.active_missions[2].return_stellar_id = 0x123;
   p.active_missions[2].resource_delta_or_cost = -4567;
   p.active_missions[2].raw_payload[0x6e] = std::byte{0xa5};
   return p;
@@ -93,9 +93,9 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.active_mission_runtime_flags[2].initial_briefing_done);
   CHECK(out.active_mission_runtime_flags[2].deadline_day == 17);
   CHECK(out.active_mission_runtime_flags[2].elapsed_travel_days == 1234);
-  CHECK(out.active_missions[2].is_accepted);
+  CHECK(out.active_missions[2].carrying_resources);
   CHECK(out.active_missions[2].mission_template_id == 0x91);
-  CHECK(out.active_missions[2].on_success_stellar_id == 0x123);
+  CHECK(out.active_missions[2].return_stellar_id == 0x123);
   CHECK(out.active_missions[2].resource_delta_or_cost == -4567);
   CHECK(out.active_missions[2].raw_payload[0x6e] == std::byte{0xa5});
 }

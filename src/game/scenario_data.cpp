@@ -102,6 +102,9 @@ namespace {
   // Payload +0x40 is the mission TimeLimit (days); the accepted-mission
   // population copies it into MisnActive +0x45.
   mission.time_limit_days = ReadBeI16(bytes, 0x40);
+  mission.pickup_mode = ReadBeI16(bytes, 0x14);
+  mission.drop_off_mode = ReadBeI16(bytes, 0x16);
+  mission.scan_mask = ReadBeI16(bytes, 0x18);
   mission.on_resolve_repeat_count = ReadBeI16(bytes, 0x48);
   mission.resource_delta_or_cost = ReadBeI32(bytes, 0x4a);
   mission.aux_ships_left = ReadBeI16(bytes, 0x50);

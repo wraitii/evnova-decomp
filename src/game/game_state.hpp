@@ -55,31 +55,38 @@ struct MissionRuntimeFlags {
 // remaining text/script/runtime bytes available while those semantics are
 // reconstructed. One-to-one mission-slot indexing is preserved.
 struct ActiveMission {
-  std::int16_t on_fail_stellar_id = -1;          // +0x00
-  std::int16_t on_success_stellar_id = -1;       // +0x04
-  std::int16_t target_ship_count = 0;            // +0x06
-  std::int16_t dude_def_index = -1;              // +0x08
-  std::int16_t spawn_behavior = 0;               // +0x0a
-  std::int16_t fleet_spawn_goal = 0;             // +0x0c
-  std::int16_t special_ship_spawn_mode = 0;      // +0x0e
-  std::int16_t current_system_id = -1;           // +0x10
-  std::int16_t special_ship_system_id = -1;      // +0x12
-  std::int16_t special_ship_count = 0;           // +0x14
-  std::int16_t mission_link_systems = -1;        // +0x16
-  std::int16_t mission_system_b = -1;            // +0x18
-  std::int16_t mission_system_c = -1;            // +0x1a
-  std::int16_t comp_govt_id = -1;                // +0x1c
-  std::int16_t comp_reward_delta = 0;            // +0x1e
-  std::int16_t on_resolve_repeat_count = 0;      // +0x20
-  std::int32_t resource_delta_or_cost = 0;       // +0x22
-  std::int16_t goal_counter_a = 0;               // +0x26
-  std::int16_t goal_counter_b = 0;               // +0x28
-  std::int16_t goal_counter_c = 0;               // +0x2a
-  std::int16_t goal_count_remaining = 0;         // +0x2c
-  std::int16_t goal_counter_e = 0;               // +0x2e
-  std::int16_t mission_target_count = 0;         // +0x30
-  bool has_been_visited = false;                 // +0x32
-  bool is_accepted = false;                      // +0x33
+  // Resolved TravelStel (+0x00, where the mission's visit/pickup happens)
+  // and ReturnStel (+0x04, where the mission completes and pays out).
+  std::int16_t travel_stellar_id = -1;      // +0x00
+  std::int16_t return_stellar_id = -1;      // +0x04
+  std::int16_t target_ship_count = 0;       // +0x06
+  std::int16_t dude_def_index = -1;         // +0x08
+  std::int16_t spawn_behavior = 0;          // +0x0a
+  std::int16_t fleet_spawn_goal = 0;        // +0x0c
+  std::int16_t special_ship_spawn_mode = 0; // +0x0e
+  std::int16_t current_system_id = -1;      // +0x10
+  std::int16_t special_ship_system_id = -1; // +0x12
+  std::int16_t special_ship_count = 0;      // +0x14
+  // Bible PickupMode (+0x16: -1 ignored, 0 at accept, 1 at TravelStel, 2
+  // when boarding), DropOffMode (+0x18: 0 at TravelStel, 1 at ReturnStel)
+  // and ScanMask (+0x1a, govts whose scans flag the cargo).
+  std::int16_t pickup_mode = -1;            // +0x16
+  std::int16_t drop_off_mode = -1;          // +0x18
+  std::int16_t scan_mask = 0;               // +0x1a
+  std::int16_t comp_govt_id = -1;           // +0x1c
+  std::int16_t comp_reward_delta = 0;       // +0x1e
+  std::int16_t on_resolve_repeat_count = 0; // +0x20
+  std::int32_t resource_delta_or_cost = 0;  // +0x22
+  std::int16_t goal_counter_a = 0;          // +0x26
+  std::int16_t goal_counter_b = 0;          // +0x28
+  std::int16_t goal_counter_c = 0;          // +0x2a
+  std::int16_t goal_count_remaining = 0;    // +0x2c
+  std::int16_t goal_counter_e = 0;          // +0x2e
+  std::int16_t mission_target_count = 0;    // +0x30
+  bool has_been_visited = false;            // +0x32
+  // Carrying-the-mission-cargo latch: set at acceptance for PickupMode 0,
+  // set/cleared by the landing interaction pass.
+  bool carrying_resources = false;               // +0x33
   std::int16_t mission_template_id = -1;         // +0x4d
   std::int16_t mission_ship_count_max = 0;       // +0x61
   std::int16_t aux_ships_dude_def_index = -1;    // +0x63
@@ -124,10 +131,10 @@ struct ActiveMission {
 // this cache allows the accepted-mission path to remain one-to-one with the
 // original without inventing locator semantics.
 struct MissionTargetResolution {
-  std::int16_t on_fail_stellar_id = -1;
-  std::int16_t on_fail_system_id = -1;
-  std::int16_t on_success_stellar_id = -1;
-  std::int16_t on_success_system_id = -1;
+  std::int16_t travel_stellar_id = -1;
+  std::int16_t travel_system_id = -1;
+  std::int16_t return_stellar_id = -1;
+  std::int16_t return_system_id = -1;
   std::int16_t special_ship_system_id = -1;
   std::int16_t special_ship_count = 0;
   std::int32_t priority_payload = 0;

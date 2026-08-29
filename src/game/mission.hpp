@@ -36,8 +36,12 @@ Mission_EvaluateMissionLists(GameState &state);
                                               std::int16_t mission_id,
                                               std::size_t active_slot);
 
+// landed_stellar_id is the stellar the player is docked at when accepting
+// (the BBS context); a mission whose TravelStel matches it skips the initial
+// destination briefing.
 [[nodiscard]] bool Mission_ActivateAtSlot(GameState &state,
-                                          std::int16_t mission_id);
+                                          std::int16_t mission_id,
+                                          std::int16_t landed_stellar_id);
 
 // Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel. Follows a system's
 // visibility remap chain (twin-system links written by the scenario loader)
@@ -120,6 +124,21 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
 // over the 16 active-mission slots (TickSystems scope 0xb).
 void Mission_TickShipInteractionReactions(GameState &state,
                                           std::uint32_t now_ms);
+
+// Ghidra 0x004438d0 Mission_ProcessInteractionReactionSlotResources. Landing
+// interaction pass for one slot: mission-cargo pickup/drop-off at the
+// TravelStel and final delivery at the ReturnStel (Bible PickupMode /
+// DropOffMode).
+void Mission_ProcessInteractionReactionSlotResources(
+    GameState &state,
+    std::int16_t mission_slot,
+    std::int16_t landed_stellar_id);
+
+// Ghidra 0x00443780 Mission_TickReactionSlotsForTravelInteraction. The
+// landing gate: evaluates objectives, processes cargo interactions, and
+// resolves success/failure when docked at a mission's ReturnStel.
+void Mission_TickReactionSlotsForTravelInteraction(
+    GameState &state, std::int16_t landed_stellar_id, std::uint32_t now_ms);
 
 // Ghidra 0x0046efd0 Stellar_AreStellarsEquivalent. Two stellar ids match when
 // equal, or when their bodies share the same map position and display name

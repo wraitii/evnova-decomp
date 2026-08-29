@@ -240,8 +240,8 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     const auto put_i16 = [&](std::size_t field, std::int16_t value) {
       WriteU16(block1, offset + field, static_cast<std::uint16_t>(value));
     };
-    put_i16(0x00, mission.on_fail_stellar_id);
-    put_i16(0x04, mission.on_success_stellar_id);
+    put_i16(0x00, mission.travel_stellar_id);
+    put_i16(0x04, mission.return_stellar_id);
     put_i16(0x06, mission.target_ship_count);
     put_i16(0x08, mission.dude_def_index);
     put_i16(0x0a, mission.spawn_behavior);
@@ -250,9 +250,9 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     put_i16(0x10, mission.current_system_id);
     put_i16(0x12, mission.special_ship_system_id);
     put_i16(0x14, mission.special_ship_count);
-    put_i16(0x16, mission.mission_link_systems);
-    put_i16(0x18, mission.mission_system_b);
-    put_i16(0x1a, mission.mission_system_c);
+    put_i16(0x16, mission.pickup_mode);
+    put_i16(0x18, mission.drop_off_mode);
+    put_i16(0x1a, mission.scan_mask);
     put_i16(0x1c, mission.comp_govt_id);
     put_i16(0x1e, mission.comp_reward_delta);
     put_i16(0x20, mission.goal_count_remaining);
@@ -262,7 +262,8 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     put_i16(0x2c, mission.goal_count_remaining);
     block1[offset + 0x32] =
         mission.has_been_visited ? std::byte{1} : std::byte{0};
-    block1[offset + 0x33] = mission.is_accepted ? std::byte{1} : std::byte{0};
+    block1[offset + 0x33] =
+        mission.carrying_resources ? std::byte{1} : std::byte{0};
     for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
       put_i16(0x35 + i * sizeof(std::int16_t),
               mission.brief_description_ids[i]);
@@ -430,8 +431,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       const auto get_i16 = [&](std::size_t field) {
         return static_cast<std::int16_t>(ReadU16(block1, offset + field));
       };
-      mission.on_fail_stellar_id = get_i16(0x00);
-      mission.on_success_stellar_id = get_i16(0x04);
+      mission.travel_stellar_id = get_i16(0x00);
+      mission.return_stellar_id = get_i16(0x04);
       mission.target_ship_count = get_i16(0x06);
       mission.dude_def_index = get_i16(0x08);
       mission.spawn_behavior = get_i16(0x0a);
@@ -440,9 +441,9 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.current_system_id = get_i16(0x10);
       mission.special_ship_system_id = get_i16(0x12);
       mission.special_ship_count = get_i16(0x14);
-      mission.mission_link_systems = get_i16(0x16);
-      mission.mission_system_b = get_i16(0x18);
-      mission.mission_system_c = get_i16(0x1a);
+      mission.pickup_mode = get_i16(0x16);
+      mission.drop_off_mode = get_i16(0x18);
+      mission.scan_mask = get_i16(0x1a);
       mission.comp_govt_id = get_i16(0x1c);
       mission.comp_reward_delta = get_i16(0x1e);
       mission.resource_delta_or_cost =
@@ -450,7 +451,7 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.goal_count_remaining = get_i16(0x2c);
       mission.has_been_visited =
           std::to_integer<unsigned char>(block1[offset + 0x32]) != 0;
-      mission.is_accepted =
+      mission.carrying_resources =
           std::to_integer<unsigned char>(block1[offset + 0x33]) != 0;
       for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
         mission.brief_description_ids[i] =
