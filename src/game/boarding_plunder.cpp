@@ -573,7 +573,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   if (std::fabs(target.vel_x - player.vel_x) > kBoardVelocityGate ||
       std::fabs(target.vel_y - player.vel_y) > kBoardVelocityGate) {
     QueueUiSound(state, 3, 1);
-    ShowBoardingOverlay(state, 0x84); // "You're moving too fast to board..."
+    ShowBoardingOverlay(state, 0x83); // "You're moving too fast to board..."
     return;
   }
 
@@ -582,7 +582,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   if (std::fabs(target.pos_x - player.pos_x) > span.half_x * kBoardRangeShare ||
       std::fabs(target.pos_y - player.pos_y) > span.half_y * kBoardRangeShare) {
     QueueUiSound(state, 3, 1);
-    ShowBoardingOverlay(state, 0x83); // "You're not close enough to board..."
+    ShowBoardingOverlay(state, 0x82); // "You're not close enough to board..."
     return;
   }
 

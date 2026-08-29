@@ -274,6 +274,16 @@ the target's sprite frame, press **b**.
 
 ## 4. Open questions / to verify in-game
 
+- Player death is not handled by the flight sim yet: a destroyed player can
+  keep flying (armor <= 0, no game-over/destruction sequence). This surfaced
+  during boarding tests — the board command correctly denies while destroyed
+  (Ship_IsShipDestroyed gate) but the sim itself never ends the run.
+- Boarding dispatch divergence: the original gates the plain-ship dispatch
+  through ShipClass_CanPlayerCaptureShipClass (0x004694a0) +
+  post_hit_mode_hint, routing fighter-class targets to the "Fighter
+  captured." (pool 0x80) / "Fighter repaired." (pool 0x7f) carrier arms
+  instead of the plunder window; the port always opens the window.
+
 - STR# 30000 entry 1 (the "unlicensed ship" note appended after the capture
   odds when the class is unlicensed) — pool not found in the archives dump;
   re-check whether any archive carries STR# 0x7530 and what its text is.
