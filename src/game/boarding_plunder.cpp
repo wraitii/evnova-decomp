@@ -526,16 +526,40 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
     return;
   }
 
-  // ---- Target eligibility (denials share STR# 0x7d2 0x82) ----------------
+  // ---- Target eligibility (denial = STR# 0x7d2 pool 0x81) -----------------
   const bool rehired_or_surrendering =
       target.escort_rehired_mark == 0 ||
       (target.mission_fleet_slot == -1 && target.post_hit_mode_hint >= 0);
+  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, target);
   const bool eligible =
-      rehired_or_surrendering && NovaAiShip_IsFireRestricted(state, target) &&
-      target.is_active &&
+      rehired_or_surrendering && fire_restricted && target.is_active &&
       player.current_system_id == target.current_system_id &&
       target.mission_ship_slot != 0x3ff && !NovaAiShip_IsDestroyed(player);
   if (!eligible) {
+    // Diagnosis aid: the original denies every non-disabled ship here too
+    // (Ship_IsShipFireRestricted must be true). Log which predicate failed
+    // with the armor state so in-game denials can be attributed.
+    const ShipClass *diag_class = state.scenario.Ship(
+        static_cast<std::int16_t>(target.ship_class_id + 0x80));
+    NovaLog::Info(
+        "board: target slot {} ({}) denied — rehired_mark={} "
+        "fire_restricted={} active={} same_system={} mission_ship={:#x} "
+        "player_destroyed={} armor={:.0f}/{} (disabled < {:.2f})",
+        target_slot,
+        diag_class != nullptr ? diag_class->display_name : "?",
+        target.escort_rehired_mark,
+        fire_restricted,
+        target.is_active,
+        player.current_system_id == target.current_system_id,
+        target.mission_ship_slot,
+        NovaAiShip_IsDestroyed(player),
+        target.armor_points,
+        diag_class != nullptr ? diag_class->base_armor : 0,
+        diag_class != nullptr
+            ? static_cast<float>(diag_class->base_armor) *
+                  ((diag_class->capability_flags & 0x10) != 0 ? 0.1F
+                                                              : 1.0F / 3.0F)
+            : 0.0F);
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
     return;
@@ -602,6 +626,9 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   }
   // Plain ships: Bible "Ships with 0 crew can't be boarded".
   if (target_class->crew < 1) {
+    NovaLog::Info("board: target slot {} ({}) denied — crew 0",
+                  target_slot,
+                  target_class->display_name);
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
     return;
