@@ -123,7 +123,7 @@ TEST_CASE("system maintenance populates Tichel toward avg_ships") {
 
   // Tick many times; the maintenance should fill the system toward avg_ships.
   for (int i = 0; i < 4000; ++i) {
-    NovaSystem_TickNpcSpawnMaintenance(state, 0x81);
+    NovaSystem_TickNpcSpawnMaintenance(state, 0x81, /*now_ms=*/0);
   }
   const int spawned = ActiveShipsInSystem(state, 0x81);
   CHECK(spawned >= 1);

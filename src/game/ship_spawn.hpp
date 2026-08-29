@@ -176,27 +176,79 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 void NovaSystem_PopulateInitialNpcShips(GameState &state,
                                         std::int16_t system_id);
 
-// Mirrors System_TickNpcSpawnMaintenance (Ghidra 0x0041d6e0), the ambience
-// slice. This reconstructs the random-encounter / drifting-dude population that
-// replenishes a system's NPC ships toward its AvgShips cap:
+// Mirrors System_TickNpcSpawnMaintenance (Ghidra 0x0041d6e0). Per-tick NPC
+// population maintenance, in the original's order:
 //
-//  * Count the ambient active ships in `system_id` (active + not engaged on
-//    the player, ai_target_ship_slot != 0).
-//  * While the count lies below System.avg_ships, roll a 1-in-500 encounter
-//    pick gated by encounter_chance_percent: on a hit select a weighted
-//    encounter-fleet def (NovaEncounter_SelectFleetDefWeighted) and spawn its
-//    lead (NovaEncounter_SpawnFleetLeadShip), otherwise spawn a random
-//    system-bound dude ship (NovaDude_SpawnRandomDudeShipInSystem). When the
-//    system has no encounter fleets (encounter_chance_percent == 0) the roll
-//    always falls through to the dude spawn.
+//  1. Mission-fleet stepper over the 16 active-mission slots:
+//     * aux-fleet arm: when the acceptance roll clock (+0x69) has expired and
+//       the aux dude def is set, top the aux fleet up to its remaining
+//       budget (mission_ship_count_active - mission_fleet_metric_c) when the
+//       mission's spawn locator matches this system; flags 0x0010 fleets
+//       never drain their budget (indefinite respawns).
+//     * main-fleet arm: missions whose spawn system matches (or -6 follow)
+//       count down the spawn/rearm timer (+0x4b) and, when it expires,
+//       respawn the fleet toward its target count (special_ship_spawn_mode 1
+//       keeps the alive count at target via goal_count_remaining). Ships
+//       arrive on a ±256 scatter around the shared ~2100-unit polar radius,
+//       oriented on the bearing toward the player's previous system.
+//     * flags 0x0001 missions resolve right after their fleet spawns.
+//  2. Ambience: while the active ambient count lies below System.avg_ships,
+//     roll a 1-in-500 encounter pick gated by encounter_chance_percent: on a
+//     hit select a weighted encounter-fleet def
+//     (NovaEncounter_SelectFleetDefWeighted) and spawn its lead
+//     (NovaEncounter_SpawnFleetLeadShip), otherwise spawn a random
+//     system-bound dude ship (NovaDude_SpawnRandomDudeShipInSystem).
 //
-// Deferred (TODO(decomp), see ship_spawn.cpp): the 16 mission-slot stepper, the
-// stellar-defense ship spawns, the roaming-NPC population cap, the
-// <200-traffic ambient-fleet escalation and the ambient-mission-ship respawn
-// latch. The mission and stellar-defense systems they depend on are not yet
-// reconstructed.
+// Deferred (TODO(decomp), see ship_spawn.cpp): the stellar-defense ship
+// spawns, the roaming-NPC population cap, the <200-traffic ambient-fleet
+// escalation and the ambient-mission-ship respawn latch.
 void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
-                                        std::int16_t system_id);
+                                        std::int16_t system_id,
+                                        std::uint32_t now_ms);
+
+// Mirrors Dude_SpawnShipFromDudeDefInSystem (Ghidra 0x0041c9f0): allocates one
+// ship slot in system_id (reserving slot_pool tail slots), picks a weighted
+// ship type from the dude def and lays on identity, government, AI behavior
+// (dude ai_type or the class default when < 1) and base shield/armor. Returns
+// the slot or -1. The original also copies the class's per-weapon ammo tables
+// into the ship state here; the clean-room builds them lazily on the first
+// AI/fire tick (NovaWeapon_EnsureNpcWeaponBanks).
+[[nodiscard]] int
+NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
+                                      std::int16_t dude_def_index,
+                                      std::int16_t system_id,
+                                      std::int16_t slot_pool,
+                                      bool ignore_ship_availability);
+
+// Ghidra 0x0041cf40 Mission_SpawnMissionShipFromDudeDef. Spawns one mission-
+// fleet ship for active-mission slot mission_fleet_slot from its dude def:
+// allocates a slot (reserve 8), locks the fleet's special-ship-type index when
+// the caller forces a class for a single-ship 0x800-flagged fleet, then lays
+// on identity (mission_fleet_slot + dude_class_id), government, AI behavior,
+// class vitals, skill variance and the waypoint marker. Fleets with behavior
+// 0 (attack) spawn hostile to the player. Returns the slot or -1.
+[[nodiscard]] int
+NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
+                                        std::int16_t dude_class_id,
+                                        std::int16_t forced_ship_class_id,
+                                        std::int16_t spawn_system_id,
+                                        std::int16_t mission_fleet_slot);
+
+// Ghidra mission-fleet restore slice of System_RebuildInitialNpcAndMission-
+// Population (0x0041af90, runs between Ship_DeactivateVacantShipsAndTally and
+// the ambient avg_ships spawns on system/landing entry). For every active
+// mission whose spawn system matches system_id (or follows the player, -6)
+// and whose spawn/rearm timer is idle, respawns the mission fleet via
+// NovaMission_SpawnMissionShipFromDudeDef, applying the spawn-behavior
+// placement arms (3 = center scatter, 5 = derelict wreck, negative
+// ShipStart = arrive at a linked system's nav point, 2 = cloak) and the
+// escort-behavior link. Missions flagged 0x0001 resolve (auto-abort) right
+// after their fleet is placed. copy_player_heading mirrors the original's
+// flag==1 callers (not wired yet; all current call sites pass false).
+void NovaSystem_RestoreMissionFleets(GameState &state,
+                                     std::int16_t system_id,
+                                     bool copy_player_heading,
+                                     std::uint32_t now_ms);
 
 // Mirrors the ship-slot cleanup of Ship_DeactivateVacantShipsAndTally
 // (Ghidra 0x0041ad50): scans every NPC slot and deactivates the "vacant" ones,

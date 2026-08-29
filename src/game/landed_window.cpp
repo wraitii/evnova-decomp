@@ -106,6 +106,10 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   // mission ships; only non-fire-restricted ships actively engaging the player
   // are spared -- see ship_spawn.hpp), then rebuilds the initial population.
   NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
+  NovaSystem_RestoreMissionFleets(state,
+                                  state.player.current_system_id,
+                                  /*copy_player_heading=*/false,
+                                  SDL_GetTicks());
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
 
   ctx.stellar_id = stellar_id;

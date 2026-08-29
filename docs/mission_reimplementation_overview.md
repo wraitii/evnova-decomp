@@ -5,10 +5,12 @@ implemented end to end for non-special-ship missions. `src/game/mission.cpp`,
 `mission_script.cpp`, and the landing path in `spaceflight.cpp` now cover the
 data model, BBS evaluation/activation, the timer tick, per-tick objective
 evaluation, the landing gate, and success/failure resolution with the PayVal
-credit/reputation opcode. Still open: mission-ship/fleet spawning (goal
-counters never increment without it), the daily driver (0x00466CB0: date
-advance, deadline countdown, availability rerolls), and the desc/briefing
-dialogs (logged TODOs). See the progress tracker for per-function percentages.
+credit/reputation opcode. Still open (after the mission-fleet spawn/dispatch
+pass): the daily driver (0x00466CB0: date advance, deadline countdown,
+availability rerolls) and the desc/briefing dialogs (logged TODOs); the
+mission goal counters now receive spawned fleets but still need their
+death/disable/board increment sites. See the progress tracker for
+per-function percentages.
 
 ## Verified m\xefsn payload map (offsets ground-truthed against populate
 0x0043F8C0, the loader 0x0043BBB0, and the EVN Bible)
@@ -146,27 +148,55 @@ The interpreter can mutate ships, active missions, system cues, stellar state, o
 
 ## 5. Mission ships and fleets
 
-Mission ships connect to the existing partial spawn and AI systems:
+Mission ships and fleets are now implemented end to end for the spawn/dispatch
+half (the `0x0041CF40` + dispatch pass):
 
-- `0x0041AF90` system mission-ship spawning (random personality arm DONE; special-system forced arm open)
-- `0x0041CF40` spawn from a dude definition (mission fleet — open)
-- `0x004235C0` personality spawn — DONE (renamed from
-  "spawn from a mission-ship definition": the përs table drives ambient
-  personalities as well as missions). See `NovaPers_SpawnShipFromPersDef` in
-  `ship_spawn.cpp`. The LinkMission target-block arm is a logged skip until
-  `Mission_ResolveMissionStellarTargets` (0x0043d240) lands, and the forced
-  call sites (ambush 0x426dd0, player-core 0x452d5c) are not wired yet.
-- `0x00426DD0` mission ambush spawning
-- `0x0046AC50` ambient mission-ship spawning (Shareware Enforcer path)
-- `0x00426D10` mission-ship announcements
-- `0x004053C0` mission stellar-attack directive
-- `0x00413610` government assistance/reinforcement trigger
-- `0x0043A020` reinforcement countdown and fleet arrival
+- `0x0041CF40` mission-fleet spawn from a dude def — DONE
+  (`NovaMission_SpawnMissionShipFromDudeDef` in `ship_spawn.cpp`): forced-class
+  special-ship-type lock (flags 0x0800 + single-ship fleets), weighted type
+  selection with the ignore-availability fallback, identity
+  (`mission_fleet_slot` + `dude_class_id`), government, AI behavior (dude
+  ai_type or class default), class vitals/skill variance/waypoint marker, and
+  the ShipBehav 0 hostile arm. The eager per-weapon ammo-table copy is
+  replaced by the lazy `NovaWeapon_EnsureNpcWeaponBanks` (same loadout).
+  Missing: the sprite-animation-timer seed from
+  `ShipClassDef.combat_state_init_range` (field not loaded yet).
+- `0x0041c9f0` dude-def spawn — DONE (`NovaDude_SpawnShipFromDudeDefInSystem`),
+  used by the aux-fleet respawn arm.
+- Dispatch — DONE in both owners of the mission-fleet slices:
+  - `0x0041af90` system-entry restore (`NovaSystem_RestoreMissionFleets`,
+    wired at landing, new-game and jump-arrival call sites): locator/system
+    match, escort pre-count for follow-player ShipBehav 1 fleets, placement
+    arms (spawn_behavior 3 center scatter, 5 derelict wreck with the
+    33%/10% armor cut and the +0xB9 deadline latch, negative ShipStart
+    nav-point arrival, ShipStart 2 cloak), escort behavior link, flags
+    0x0001 auto-resolve.
+  - `0x0041d6e0` per-tick respawn (mission stepper inside
+    `NovaSystem_TickNpcSpawnMaintenance`): aux-fleet top-up arm (roll clock,
+    locator match, budget, flags 0x0010 indefinite respawns) and main-fleet
+    rearm arm (spawn/rearm timer countdown, special-ship alive-count top-up
+    via goal_count_remaining, arrival bearing from the player's previous
+    system, ShipState +0x94).
+- `0x0047a30` `Mission_DoesSystemMatchMissionLocator` — DONE (`mission.cpp`):
+  full locator decode incl. the 10000..31999 government codes.
+- `0x0041ad50` deactivation tally arm — DONE (aux respawn budget credit).
 
-Current spawn code skips the mission branch, so the goal counters fed by
-0x00443C60 never increment yet — this is the main gap between the implemented
-mission loop and destroy/escort/observe gameplay. Mission-fleet ownership,
-escort counts, and announcements are also absent. Reinforcement fleets are a related
+Ghidra DB improvements from this pass: `g_active_misn` retyped as
+`MisnActive *`, `g_active_misn_runtime_flags` as `MisnRuntimeFlags *`, and
+ShipState +0x94 named `jump_destination_system_id` (system being jumped
+toward / last left; -1 none, -2 mission-spawn sentinel).
+
+Remaining gaps in this section: the goal-counter increment sites on ship
+death/disable/board (0x00443c60 only evaluates the counters today), the
+hailed-escort respawn call site `0x00454910` (comm-dialog wiring), mission-
+ship announcements `0x00426d10`, ambush spawning `0x00426dd0`, the ambient
+Shareware-Enforcer spawner `0x0046ac50`, the stellar-attack directive
+`0x004053c0`, government assistance/reinforcement (`0x00413610`/`0x0043a020`),
+and the special-system forced personality arm of `0x0041af90`. `0x004235c0`
+personality spawn — DONE (renamed from "spawn from a mission-ship
+definition": the përs table drives ambient personalities as well as
+missions); its LinkMission target-block arm is a logged skip until
+`Mission_ResolveMissionStellarTargets` (0x0043d240) lands. Reinforcement fleets are a related
 but distinct path: combat arms `Government_TryTriggerGovtAssistanceEncounter`,
 which starts the system's `ReinfTime` countdown; when it expires,
 `System_UpdateRandomEncounterCountdown` calls the ordinary `flet` spawner with
@@ -206,8 +236,9 @@ This covers destroy, disable, board, escort, rescue, observe, chase-off, and rel
    for the mission blocks.
 6. ~~Implement success/failure and reaction scripts.~~ DONE (debrief dialogs
    pending).
-7. Implement mission ship/fleet spawning — **next major target**; feeds the
-   goal counters.
+7. ~~Implement mission ship/fleet spawning~~ DONE (0x0041CF40 + dispatch);
+   remaining: goal-counter increment sites on ship death, the hailed-escort
+   respawn (0x00454910) and announcements (0x00426d10).
 8. Connect in-flight objectives, boarding, disable, escort, and interaction reactions — mostly DONE via 0x00443C60; boarding-pickup (PickupMode 2) pending.
 9. Add mission markers/highlights and replace mocked Mission BBS/starmap behavior.
 

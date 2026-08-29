@@ -93,6 +93,38 @@ void AddArrivalSlowdownVelocity(Ship &ship) {
   ship.vel_y -= std::cos(ship.heading) * kSpinInVelocity;
 }
 
+// Ghidra Math_BearingFromPointToPoint with the clean-room heading convention
+// (radians, 0 = up, +x right, +y down): heading = atan2(dx, -dy).
+[[nodiscard]] float
+BearingFromPointToPoint(float from_x, float from_y, float to_x, float to_y) {
+  return std::atan2(to_x - from_x, -(to_y - from_y));
+}
+
+// Shared placement of the mission-fleet respawn arms of
+// System_TickNpcSpawnMaintenance (0x0041d6e0): a ±256 scatter around a point
+// on the shared arrival bearing at the ~2100-unit polar radius, facing back
+// toward the system centre with a 50-unit inward velocity, no AI state entry,
+// and the jump-destination sentinels (-2 stellar / -2 system).
+void PlaceMissionFleetRespawn(GameState &state,
+                              Ship &ship,
+                              float bearing,
+                              std::uint32_t now_ms) {
+  const float radius = RandomPolarArrivalRadius();
+  const float point_x = std::sin(bearing) * radius;
+  const float point_y = -std::cos(bearing) * radius;
+  ship.pos_x = point_x + static_cast<float>(RandomBelow(state, 0x200) - 0x100);
+  ship.pos_y = point_y + static_cast<float>(RandomBelow(state, 0x200) - 0x100);
+  ship.heading = std::atan2(-ship.pos_x, ship.pos_y);
+  ship.jump_destination_stellar_id = -2;
+  ship.jump_destination_system_id = -2;
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  ship.speed = 0.0F;
+  ship.ai_station_hold_timer = -999.0F;
+  ship.ai_mode_start_time_ms = now_ms;
+  AddArrivalSlowdownVelocity(ship);
+}
+
 void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
   const float angle =
       static_cast<float>(RandomBelow(state, 0x168)) * 0.017453292519943295F;
@@ -938,6 +970,270 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
   return slot;
 }
 
+// Ghidra 0x0041c9f0 Dude_SpawnShipFromDudeDefInSystem. See the header. The
+// original also copies the class's per-weapon 0x100-entry ammo/secondary
+// tables into the ship state here; the clean-room builds them lazily on the
+// first AI/fire tick (NovaWeapon_EnsureNpcWeaponBanks, keyed by class id),
+// which yields the same loadout.
+int NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
+                                          std::int16_t dude_def_index,
+                                          std::int16_t system_id,
+                                          std::int16_t slot_pool,
+                                          bool ignore_ship_availability) {
+  const int slot = NovaShip_AllocateShipSlot(state, system_id, slot_pool);
+  if (slot < 0) {
+    return -1;
+  }
+  const DudeDef *dude =
+      state.scenario.Dude(static_cast<std::int16_t>(dude_def_index + 0x80));
+  const int type_slot = dude ? NovaDude_SelectShipTypeIndex(
+                                   *dude, ignore_ship_availability, state.rng)
+                             : -1;
+  if (dude == nullptr || type_slot < 0 || type_slot >= 16) {
+    state.ShipAt(static_cast<std::size_t>(slot)).is_active = false;
+    return -1;
+  }
+
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.dude_class_id = dude_def_index;
+  ship.ship_class_id = dude->ship_types[type_slot];
+  ship.faction_or_government_id = dude->government_id;
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  ship.ai_behavior_code = dude->ai_type < 1
+                              ? (cls != nullptr ? cls->default_ai_behavior : 0)
+                              : dude->ai_type;
+  NovaShip_ResetAiBehaviorRuntimeFields(ship);
+  if (cls != nullptr) {
+    ship.shield_points = static_cast<float>(cls->base_shield);
+    ship.armor_points = static_cast<float>(cls->base_armor);
+  }
+  return slot;
+}
+
+// Ghidra 0x0041cf40 Mission_SpawnMissionShipFromDudeDef. See the header. The
+// original bounds the ship-type index with `< 0x11`, which would read one
+// entry past the 16-slot ship_types table; that is unreachable in practice
+// (every producer stores 0..15), so the clean-room bounds at 16.
+// TODO(decomp) sprite_animation_timer seed from ShipClassDef
+// .combat_state_init_range (+0xa02): the clean-room ShipClass does not load
+// that field yet.
+int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
+                                            std::int16_t dude_class_id,
+                                            std::int16_t forced_ship_class_id,
+                                            std::int16_t spawn_system_id,
+                                            std::int16_t mission_fleet_slot) {
+  const int slot = NovaShip_AllocateShipSlot(state, spawn_system_id, 8);
+  if (slot < 0) {
+    return -1;
+  }
+  // Cadence draw: the original draws NovaRandom_Range(100) here and ignores
+  // the result.
+  (void)RandomBelow(state, 100);
+
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  const auto deactivate = [&ship]() {
+    ship.is_active = false;
+    return -1;
+  };
+  if (mission_fleet_slot < 0 ||
+      mission_fleet_slot >=
+          static_cast<std::int16_t>(state.active_missions.size())) {
+    // The original indexes g_active_misn unchecked; the clean-room guards.
+    NovaLog::Warn("mission ship spawn with out-of-range fleet slot {}",
+                  mission_fleet_slot);
+    return deactivate();
+  }
+  ActiveMission &mission = state.active_missions[mission_fleet_slot];
+  const DudeDef *dude =
+      state.scenario.Dude(static_cast<std::int16_t>(dude_class_id + 0x80));
+  if (dude == nullptr) {
+    return deactivate();
+  }
+
+  // Forced-class lock: single-ship fleets flagged 0x0800 pin the fleet's
+  // special-ship-type index to the forced class (used by the hailed-escort
+  // respawn, Ship_HandlePlayerTargetActionCommand 0x00454910).
+  if (forced_ship_class_id != -1 && (mission.flags_primary & 0x0800U) != 0U &&
+      mission.target_ship_count == 1) {
+    for (std::size_t i = 0; i < dude->ship_types.size(); ++i) {
+      if (forced_ship_class_id == dude->ship_types[i]) {
+        mission.special_ship_type_index = static_cast<std::int16_t>(i);
+        break;
+      }
+    }
+  }
+
+  std::int16_t type_index = mission.special_ship_type_index;
+  if (type_index == -1) {
+    type_index = static_cast<std::int16_t>(NovaDude_SelectShipTypeIndex(
+        *dude, /*ignore_ship_availability=*/false, state.rng));
+    if (type_index == -1) {
+      type_index = static_cast<std::int16_t>(
+          NovaDude_SelectShipTypeIndex(*dude,
+                                       /*ignore_ship_availability=*/true,
+                                       state.rng));
+    }
+  }
+  if (type_index < 0 || type_index >= 16) {
+    return deactivate();
+  }
+
+  ship.mission_fleet_slot = mission_fleet_slot;
+  ship.dude_class_id = dude_class_id;
+  ship.ship_class_id = dude->ship_types[type_index];
+  ship.faction_or_government_id = dude->government_id;
+  ship.escort_rehired_mark = 0;
+  ship.post_hit_mode_hint = -1;
+  ship.cloak_transition_latch = 0;
+  ship.cloak_fade_progress = 0.0F;
+  ship.ai_maneuver_timer_ms = 0.0F;
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  ship.ai_behavior_code = dude->ai_type < 1
+                              ? (cls != nullptr ? cls->default_ai_behavior : 0)
+                              : dude->ai_type;
+  NovaShip_ResetAiBehaviorRuntimeFields(ship);
+  // Weapon loadout: see NovaDude_SpawnShipFromDudeDefInSystem — the
+  // clean-room copies the class stock loadout lazily.
+  if (cls != nullptr) {
+    ship.shield_points = static_cast<float>(cls->base_shield);
+    ship.armor_points = static_cast<float>(cls->base_armor);
+  }
+  ship.timed_action_counter =
+      cls != nullptr ? cls->timed_action_counter_init : -1;
+  ship.waypoint_arrival_marker_b = static_cast<std::int16_t>(
+      (cls != nullptr ? cls->skill_variance_percent : 0) - 1);
+  ship.skill_variance_scale = SkillVarianceScale(state, cls);
+  if (cls != nullptr && cls->skill_variance_percent > 0) {
+    ship.sprite_animation_cycle_index =
+        RandomBelow(state, cls->skill_variance_percent);
+  }
+  if (mission.fleet_spawn_goal == 0) {
+    // ShipBehav 0: the fleet spawns hostile to the player.
+    NovaAi_SetShipHostileToPlayer(state, ship);
+  }
+  return slot;
+}
+
+// Ghidra mission-fleet restore slice of 0x0041af90
+// System_RebuildInitialNpcAndMissionPopulation. See the header.
+void NovaSystem_RestoreMissionFleets(GameState &state,
+                                     std::int16_t system_id,
+                                     bool copy_player_heading,
+                                     std::uint32_t now_ms) {
+  const System *sys =
+      state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
+  for (std::int16_t slot = 0;
+       slot < static_cast<std::int16_t>(state.active_missions.size());
+       ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
+    }
+    ActiveMission &mission = state.active_missions[slot];
+    const std::int16_t raw_system = mission.current_system_id;
+    const std::int16_t resolved =
+        (raw_system < 0 || raw_system >= 0x800)
+            ? static_cast<std::int16_t>(-1)
+            : Misn_ResolveVisibleSystemForTravel(state, raw_system);
+    if (resolved != system_id && raw_system != -6) {
+      continue;
+    }
+    std::int16_t count = mission.target_ship_count;
+    if (count <= 0 || mission.spawn_rearm_timer >= 0) {
+      continue;
+    }
+    // Follow-player escort fleets keep the ships already escorting across
+    // system re-entry and only spawn the difference.
+    if (raw_system == -6 && mission.fleet_spawn_goal == 1) {
+      for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+        const Ship &ship = state.ShipAt(i);
+        if (ship.is_active && ship.mission_fleet_slot == slot) {
+          --count;
+        }
+      }
+    }
+    if (count <= 0) {
+      continue;
+    }
+
+    for (std::int16_t i = 0; i < count; ++i) {
+      const int spawned =
+          NovaMission_SpawnMissionShipFromDudeDef(state,
+                                                  mission.dude_def_index,
+                                                  /*forced_ship_class_id=*/-1,
+                                                  system_id,
+                                                  slot);
+      if (spawned < 0) {
+        // The original prints a three-part debug string here.
+        NovaLog::Debug(
+            "mission fleet {} spawn failed in system {}", slot, system_id);
+        continue;
+      }
+      Ship &ship = state.ShipAt(static_cast<std::size_t>(spawned));
+      if (mission.spawn_behavior == 3) {
+        ship.pos_x = static_cast<float>(RandomBelow(state, 0x200) - 0x100);
+        ship.pos_y = static_cast<float>(RandomBelow(state, 0x200) - 0x100);
+      }
+      if (mission.spawn_behavior == 5) {
+        // Derelict wreck: dead in space, shields gone, armor cut to 33%
+        // (10% for capability-flags 0x10 classes). Rescue missions with a
+        // live (non -32000) deadline latch +0xB9 on the wreck.
+        ship.heading = static_cast<float>(RandomBelow(state, 0x168)) *
+                       0.017453292519943295F;
+        ship.vel_y = 0.0F;
+        ship.vel_x = 0.0F;
+        ship.speed = 0.0F;
+        ship.shield_points = 0.0F;
+        const ShipClass *cls = state.scenario.Ship(
+            static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+        if (cls != nullptr) {
+          // The original's _DAT_00575230 subtrahend is 0.0.
+          const float armor_factor =
+              (cls->capability_flags & 0x10U) != 0U ? 0.1F : 0.33F;
+          ship.armor_points =
+              static_cast<float>(cls->base_armor) * armor_factor;
+        }
+        if (mission.time_limit_days_remaining < 1 &&
+            mission.time_limit_days_remaining > -32000) {
+          ship.escort_rehired_mark = 1;
+        }
+      }
+      const std::int16_t mode = mission.special_ship_spawn_mode;
+      if (mode <= -1 && mode >= -16 && sys != nullptr) {
+        // Negative ShipStart: the fleet arrives at the Nth linked system's
+        // nav point (jump-in from a neighbour).
+        const std::int16_t nav = sys->nav_defs[-1 - mode];
+        if (nav >= 0x80) {
+          if (const Stellar *stellar =
+                  state.scenario.Stellar(static_cast<std::int16_t>(nav - 0x80));
+              stellar != nullptr) {
+            ship.pos_x = static_cast<float>(stellar->pos_x);
+            ship.pos_y = static_cast<float>(stellar->pos_y);
+          }
+        }
+      }
+      if (mission.fleet_spawn_goal == 1) {
+        // ShipBehav 1: escort-formation link on the player.
+        ship.ai_behavior_code = 6;
+        ship.ai_target_ship_slot = 0;
+        ship.resolved_ai_target_ship_slot = 0;
+        ship.formation_leader_ship_slot = 0;
+        if (copy_player_heading) {
+          ship.heading = state.player.heading;
+        }
+      }
+      ship.jump_destination_stellar_id = -2;
+      if (mission.special_ship_spawn_mode == 2) {
+        NovaAi_OnShipCloakStateEntered(state, ship);
+      }
+    }
+    if ((mission.flags_primary & 0x0001U) != 0U) {
+      Mission_ResolveMisnSlot(state, slot, now_ms);
+    }
+  }
+}
+
 // Ghidra 0x0041af90 System_RebuildInitialNpcAndMissionPopulation, initial
 // ambient-population slice. The larger function first restores mission fleets
 // and player escorts,
@@ -1014,7 +1310,124 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
 // most ordinary systems bind no encounter fleets, so the dude spawn is the
 // dominant population path.
 void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
-                                        std::int16_t system_id) {
+                                        std::int16_t system_id,
+                                        std::uint32_t now_ms) {
+  // Mission-fleet respawn stepper (0x0041d6e0's 16-slot mission slice).
+  for (std::int16_t slot = 0;
+       slot < static_cast<std::int16_t>(state.active_missions.size());
+       ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
+    }
+    ActiveMission &mission = state.active_missions[slot];
+
+    // Aux-fleet arm: once the acceptance roll clock has expired, top the aux
+    // dude fleet up to its remaining spawn budget when the mission's spawn
+    // locator matches this system. Flags 0x0010 fleets never drain their
+    // budget, so dead aux ships keep getting replaced.
+    if (mission.rearm_roll_clock < 1 &&
+        mission.aux_ships_dude_def_index != -1 &&
+        mission.mission_fleet_metric_c < mission.mission_ship_count_active) {
+      const std::int16_t deficit = static_cast<std::int16_t>(
+          mission.mission_ship_count_active - mission.mission_fleet_metric_c);
+      if (deficit > 0 &&
+          Mission_DoesSystemMatchMissionLocator(state, system_id, slot)) {
+        const float bearing = static_cast<float>(RandomBelow(state, 0x168)) *
+                              0.017453292519943295F;
+        for (std::int16_t i = 0; i < deficit; ++i) {
+          const int spawned = NovaDude_SpawnShipFromDudeDefInSystem(
+              state,
+              mission.aux_ships_dude_def_index,
+              system_id,
+              /*slot_pool=*/8,
+              /*ignore_ship_availability=*/false);
+          if (spawned < 0) {
+            continue;
+          }
+          Ship &ship = state.ShipAt(static_cast<std::size_t>(spawned));
+          ship.mission_owner_slot = slot;
+          ++mission.mission_fleet_metric_c;
+          if ((mission.flags_primary & 0x0010U) == 0U) {
+            --mission.mission_ship_count_active;
+          }
+          PlaceMissionFleetRespawn(state, ship, bearing, now_ms);
+        }
+        if ((mission.flags_primary & 0x0001U) != 0U) {
+          Mission_ResolveMisnSlot(state, slot, now_ms);
+        }
+      }
+    }
+
+    // Main-fleet arm: missions whose spawn system matches (or -6 follow)
+    // count down their spawn/rearm timer; when it expires, respawn the fleet
+    // toward its target count. special_ship_spawn_mode 1 keeps the alive
+    // count at target via goal_count_remaining; other modes fire once (the
+    // timer is only re-armed by Misn_TickActiveMissionTimers).
+    const std::int16_t raw_system = mission.current_system_id;
+    const std::int16_t resolved =
+        (raw_system < 0 || raw_system >= 0x800)
+            ? static_cast<std::int16_t>(-1)
+            : Misn_ResolveVisibleSystemForTravel(state, raw_system);
+    const bool in_mission_system = raw_system == -6 || resolved == system_id;
+    std::int16_t needed = in_mission_system ? mission.target_ship_count : 0;
+    if (mission.special_ship_spawn_mode == 1) {
+      needed = static_cast<std::int16_t>(mission.target_ship_count -
+                                         mission.goal_count_remaining);
+      if (!in_mission_system && mission.goal_count_remaining < 1) {
+        needed = 0;
+      }
+    }
+    if (needed > 0) {
+      if (mission.spawn_rearm_timer > 0 && mission.spawn_rearm_timer < 0x7d01) {
+        --mission.spawn_rearm_timer;
+      }
+      if (mission.target_ship_count > 0 && mission.spawn_rearm_timer == 0) {
+        mission.spawn_rearm_timer = -1;
+        // The fleet arrives from the direction of the player's previous
+        // system (ShipState +0x94); a random bearing when the player has
+        // none.
+        float bearing = 0.0F;
+        if (state.player.jump_destination_system_id == -1) {
+          bearing = static_cast<float>(RandomBelow(state, 0x168)) *
+                    0.017453292519943295F;
+        } else {
+          const System *from = state.scenario.System(
+              static_cast<std::int16_t>(system_id + 0x80));
+          const System *to = state.scenario.System(static_cast<std::int16_t>(
+              state.player.jump_destination_system_id + 0x80));
+          if (from != nullptr && to != nullptr) {
+            bearing = BearingFromPointToPoint(static_cast<float>(from->pos_x),
+                                              static_cast<float>(from->pos_y),
+                                              static_cast<float>(to->pos_x),
+                                              static_cast<float>(to->pos_y));
+          }
+        }
+        for (std::int16_t i = 0; i < needed; ++i) {
+          const int spawned = NovaMission_SpawnMissionShipFromDudeDef(
+              state,
+              mission.dude_def_index,
+              /*forced_ship_class_id=*/-1,
+              system_id,
+              slot);
+          if (spawned < 0) {
+            continue;
+          }
+          Ship &ship = state.ShipAt(static_cast<std::size_t>(spawned));
+          ++mission.goal_count_remaining;
+          PlaceMissionFleetRespawn(state, ship, bearing, now_ms);
+        }
+        if ((mission.flags_primary & 0x0001U) != 0U) {
+          Mission_ResolveMisnSlot(state, slot, now_ms);
+        }
+      }
+    }
+
+    // Acceptance roll clock stepper.
+    if (mission.rearm_roll_clock > 0 && mission.rearm_roll_clock < 0x7d01) {
+      --mission.rearm_roll_clock;
+    }
+  }
+
   const System *sys =
       state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
   if (sys == nullptr) {
@@ -1125,14 +1538,21 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
         }
       }
     } else {
-      // Mission-fleet current-ship tally (g_random_encounter_fleet_defs
-      // escort current counters): no mission fleets in the clean-room, so
-      // this arm is a documented no-op. TODO(decomp).
-      NovaLog::Debug(
-          "deactivate: mission ship slot {} owner {} tallied to fleet "
-          "(mission fleets not reconstructed)",
-          slot,
-          ship.mission_owner_slot);
+      // Mission-fleet budget credit (0x0041ad50): a still-owned mission ship
+      // leaving play alive credits its mission's aux respawn budget
+      // (mission_ship_count_active), capped at mission_ship_count_max. This
+      // keeps the aux-fleet top-up (System_TickNpcSpawnMaintenance) from
+      // respawning ships that merely left the system.
+      const auto owner = ship.mission_owner_slot;
+      if (owner >= 0 &&
+          owner < static_cast<std::int16_t>(state.active_missions.size()) &&
+          state.active_mission_runtime_flags[owner].is_active) {
+        ActiveMission &mission = state.active_missions[owner];
+        if (mission.mission_ship_count_active <
+            mission.mission_ship_count_max) {
+          ++mission.mission_ship_count_active;
+        }
+      }
     }
 
     // Clear the slot fields, mirroring the original's cleanup writes

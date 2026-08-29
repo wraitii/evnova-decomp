@@ -106,8 +106,10 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 // reconstructed).
 void Stub_TickReactionsAndNpcSpawns(GameState &state) {
   // The original's AI mode timers use a global millisecond tick source.
-  Mission_TickShipInteractionReactions(state, SDL_GetTicks());
-  NovaSystem_TickNpcSpawnMaintenance(state, state.player.current_system_id);
+  const std::uint32_t now_ms = SDL_GetTicks();
+  Mission_TickShipInteractionReactions(state, now_ms);
+  NovaSystem_TickNpcSpawnMaintenance(
+      state, state.player.current_system_id, now_ms);
 }
 
 void Stub_CalcAiOdds(GameState &state) { (void)state; }
@@ -652,6 +654,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // player jumps back.
       NovaShip_DeactivateVacantShipsAndTally(state,
                                              /*keep_player_engaged=*/false);
+      NovaSystem_RestoreMissionFleets(state,
+                                      state.player.current_system_id,
+                                      /*copy_player_heading=*/false,
+                                      SDL_GetTicks());
       NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
       // The player's primary target ship lived in the departure system; the
       // vacancy sweep deactivated it (and its slot may be reused by a fresh

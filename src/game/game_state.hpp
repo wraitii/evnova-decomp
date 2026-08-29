@@ -347,7 +347,14 @@ struct Ship {
   // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810) clears to -1.
   std::int16_t travel_target_cache = -1;         // +0x90 (Provisional)
   std::int16_t jump_destination_stellar_id = -1; // +0x92
-  std::int16_t ai_hostility_accumulator = 0;     // +0x96
+  // Ghidra ShipState +0x94 (named jump_destination_system_id in the DB): the
+  // system the ship is jumping toward / last jumped in from; -1 none, -2 the
+  // mission-spawn sentinel. The player-tick jump branch (0x0044aa70) writes
+  // the PRE-jump current_system_id here, so for the player it holds the
+  // system just left; mission-fleet respawns orient their arrival bearing on
+  // it (System_TickNpcSpawnMaintenance 0x0041d6e0).
+  std::int16_t jump_destination_system_id = -1; // +0x94
+  std::int16_t ai_hostility_accumulator = 0;    // +0x96
   // Engagement patience timer while the cloak/targetability predicate rejects
   // a target; when it expires the AI gives up and clears the primary target
   // (Ship_UpdateShipAiState state 4). -1 means no patience interval active.

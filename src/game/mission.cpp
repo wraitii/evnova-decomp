@@ -757,6 +757,114 @@ std::int16_t Misn_ResolveVisibleSystemForTravel(const GameState &state,
   return -1;
 }
 
+// Ghidra 0x00447a30 Mission_DoesSystemMatchMissionLocator. Tests a system
+// against an active mission's spawn locator (MisnActive +0x65, the m\xefsn
+// mission-fleet locator copied from payload +0x4a):
+//   -1 / -6      the player's current system
+//   -2           the system containing the resolved TravelStel
+//   -3           the system containing the resolved ReturnStel
+//   0x80..0x87f  that system, or its visibility-remap target
+//   5000..9999   that system (- 5000), or any of its 16 links
+//   10000..14999 system government == code - 10000
+//   15000..19999 system government == or allied to code - 15000
+//   20000..24999 system government != code - 20000
+//   25000..29999 system government hostile/xenophobic to code - 25000, or a
+//                xenophobic government (flags_primary bit 0) not allied to it
+//   30000..30999 shares a government class with code - 30000
+//   31000..31999 does not share a government class with code - 31000
+bool Mission_DoesSystemMatchMissionLocator(const GameState &state,
+                                           std::int16_t system_id,
+                                           std::int16_t mission_slot) {
+  if (mission_slot < 0 ||
+      mission_slot >= static_cast<std::int16_t>(state.active_missions.size()) ||
+      system_id < 0 ||
+      system_id >= static_cast<std::int16_t>(state.scenario.systems.size())) {
+    return false;
+  }
+  const ActiveMission &mission = state.active_missions[mission_slot];
+  const std::int16_t locator = mission.mission_fleet_metric_b;
+  const System &system =
+      state.scenario.systems[static_cast<std::size_t>(system_id)];
+  const std::int16_t govt = system.government_id;
+
+  if (locator == -1 || locator == -6) {
+    return system_id == state.player.current_system_id;
+  }
+  if (locator == -2) {
+    return mission.travel_stellar_id != -1 &&
+           ResolveContainingSystem(state, mission.travel_stellar_id) ==
+               system_id;
+  }
+  if (locator == -3) {
+    return mission.return_stellar_id != -1 &&
+           ResolveContainingSystem(state, mission.return_stellar_id) ==
+               system_id;
+  }
+  if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
+    const auto target = static_cast<std::int16_t>(locator - kResourceIdBase);
+    return system_id == target ||
+           system_id == Misn_ResolveVisibleSystemForTravel(state, target);
+  }
+  if (locator >= 5000 && locator <= 9999) {
+    if (system_id == static_cast<std::int16_t>(locator - 5000)) {
+      return true;
+    }
+    const System *base = state.scenario.System(
+        static_cast<std::int16_t>(locator - 5000 + kResourceIdBase));
+    if (base == nullptr) {
+      return false;
+    }
+    for (const std::int16_t link : base->links) {
+      if (link >= kResourceIdBase &&
+          system_id == static_cast<std::int16_t>(link - kResourceIdBase)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (locator >= 10000 && locator < 15000) {
+    return govt >= 0 && govt == static_cast<std::int16_t>(locator - 10000);
+  }
+  if (locator >= 15000 && locator < 20000) {
+    return govt >= 0 && (govt == static_cast<std::int16_t>(locator - 15000) ||
+                         NovaGovernment_AreGovtsAllied(
+                             state.scenario,
+                             govt,
+                             static_cast<std::int16_t>(locator - 15000)));
+  }
+  if (locator >= 20000 && locator < 25000) {
+    return govt != static_cast<std::int16_t>(locator - 20000);
+  }
+  if (locator >= 25000 && locator < 30000) {
+    const auto other = static_cast<std::int16_t>(locator - 25000);
+    if (govt < 0 || other < 0 ||
+        other >= static_cast<std::int16_t>(state.scenario.governments.size())) {
+      return false;
+    }
+    const Government &other_def =
+        state.scenario.governments[static_cast<std::size_t>(other)];
+    if ((other_def.flags_primary & 0x0001U) != 0U && other != govt &&
+        !NovaGovernment_AreGovtsAllied(state.scenario, govt, other)) {
+      return true;
+    }
+    return NovaGovernment_AreGovtsHostileOrXenophobic(
+        state.scenario, govt, other);
+  }
+  if (locator >= 30000 && locator < 31000) {
+    return govt >= 0 && NovaGovernment_DoGovtsShareClass(
+                            state.scenario,
+                            govt,
+                            static_cast<std::int16_t>(locator - 30000));
+  }
+  if (locator >= 31000 && locator < 32000) {
+    return govt >= 0 && !NovaGovernment_DoGovtsShareClass(
+                            state.scenario,
+                            govt,
+                            static_cast<std::int16_t>(locator - 31000));
+  }
+  return false;
+}
+
 void Misn_TickActiveMissionTimers(GameState &state) {
   for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
     if (!state.active_mission_runtime_flags[slot].is_active) {

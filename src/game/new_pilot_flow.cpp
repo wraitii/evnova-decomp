@@ -613,12 +613,13 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
   Stub_PickFirstTravelDestination(state);
   // Ghidra: System_RebuildInitialNpcAndMissionPopulation +
   // System_UpdateSystemAndStellar display state + Asteroid_InitSystem (the
-  // system's asteroid field). The
-  // initial System.avg_ships ambient slice is reconstructed; mission fleets
-  // remain deferred.
+  // system's asteroid field). The mission-fleet restore slice and the initial
+  // System.avg_ships ambient slice are both reconstructed.
+  NovaSystem_RestoreMissionFleets(state,
+                                  state.player.current_system_id,
+                                  /*copy_player_heading=*/false,
+                                  SDL_GetTicks());
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
-  NovaLog::Todo("initial mission fleets are not spawned; mission ship runtime "
-                "allocation remains deferred");
 
   // ---- Step 6: assemble the persistent pilot record and apply it ----------
   // Ghidra keeps the freshly-seeded pilot in a pilot-save block (resource id

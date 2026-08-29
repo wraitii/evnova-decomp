@@ -113,6 +113,11 @@ void FireJump(GameState &state) {
   // Burn the jump's fuel.
   player.fuel_points = std::max(0.0F, player.fuel_points - kJumpFuelCost);
 
+  // Ghidra ShipState +0x94: the player-tick jump branch (0x0044aa70) records
+  // the pre-jump system before switching; mission-fleet respawn arrivals
+  // orient their bearing on it (System_TickNpcSpawnMaintenance 0x0041d6e0).
+  player.jump_destination_system_id = player.current_system_id;
+
   // Change system and clear the engaged destination.
   player.current_system_id = t.destination_system_id;
   NovaWeapon_ClearTransientCombatState(state);

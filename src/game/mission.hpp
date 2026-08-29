@@ -51,6 +51,15 @@ Mission_EvaluateMissionLists(GameState &state);
 Misn_ResolveVisibleSystemForTravel(const GameState &state,
                                    std::int16_t system_id);
 
+// Ghidra 0x00447a30 Mission_DoesSystemMatchMissionLocator. Tests a system
+// against an active mission's spawn locator (MisnActive +0x65): the -1/-6
+// player-system sentinels, -2/-3 TravelStel/ReturnStel containment, plain
+// system ids, the 5000-adjacency and 10000..31999 government codes. Feeds
+// the mission-fleet respawn dispatch (System_TickNpcSpawnMaintenance
+// 0x0041d6e0).
+[[nodiscard]] bool Mission_DoesSystemMatchMissionLocator(
+    const GameState &state, std::int16_t system_id, std::int16_t mission_slot);
+
 // Ghidra 0x00448910 Misn_TickActiveMissionTimers. Per-tick maintenance over
 // the 16 active-mission runtime slots: resolves each mission's destination
 // system, seeds the spawn/rearm timers and encounter odds from RNG, and
