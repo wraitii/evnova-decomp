@@ -224,10 +224,10 @@ address,name,impl_file,reimpl_pct,comment
 0x0043F100,Mission_ActivateMissionAtSlot,src/game/mission.cpp,61%,"Clean-room zero-based mission selection, free-slot initialization, duplicate/definition checks, hull-mass/cargo and negative-credit acceptance gates, active-mission population, goal counters, rearm initialization, acceptance-fee deduction, text/script-buffer projection, and initial-briefing latch are implemented. Reaction execution, UI refresh, destination overlay, and automatic resolve branches remain TODO(decomp)."
 0x0043F8C0,Mission_PopulateMissionSlotFromDef,src/game/mission.cpp,45%,"Clean-room transfer of Ghidra-confirmed target, spawn, zero-based dude/government indices, current-system locator, special-ship type selection, and rearm-timer fields into ActiveMission, retaining the raw m\\x957n payload. Locator reachability, string expansion, randomized STR# entries, and script payloads remain TODO(decomp)."
 0x00440370,Mission_TryConsumeMissionInteractionResources,,0%,
-0x00440410,Mission_ResolveMissionSuccess,,0%,
-0x00440750,Government_ApplyReputationCreditDelta,,0%,
-0x00440930,Mission_ResolveMissionFailure,,0%,
-0x00440AA0,Mission_ClearMisnSlotAssignments,,0%,
+0x00440410,Mission_ResolveMissionSuccess,src/game/mission.cpp,70%,Clean-room port: success payload, govt rep delta (full/allied/hostile x0.5, half-even rounding), PayVal opcode. Missing: +0x3d debrief dialog + on-resolve availability reroll (both logged TODO)
+0x00440750,Government_ApplyReputationCreditDelta,src/game/government.cpp,100%,Full PayVal port: flat credits (+loadout dirty), -10128/-20128/-30128 rep clears (exact/allied/share-class), -40001..-40099 percent cash; half-even rounding; range map cross-checked against disasm + Bible
+0x00440930,Mission_ResolveMissionFailure,src/game/mission.cpp,80%,Clean-room port: failure payload, half-delta rep subtraction, slot clear + ClearMisnSlotAssignments. Missing: +0x3f failure debrief dialog (logged TODO)
+0x00440AA0,Mission_ClearMisnSlotAssignments,src/game/mission.cpp,90%,Clean-room port: fleet-link/targeting/AI-state-2 reset, optional resolve payload, accepted/active latches. TODO: g_travel_scene_ctx despawn arm + ambient-roll latch
 0x00440BF0,Mission_FailMissionSlotQuick,,0%,
 0x00440C90,NovaUi_PollMissionComputerWindow,,0%,
 0x00441620,NovaUi_DrawTravelDestinationWindow,,0%,
@@ -461,7 +461,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046BC50,Government_SetSystemFillColor,,0%,
 0x0046BC90,Government_AreGovtsAllied,src/game/government.cpp,100%,Faithful reimpl as NovaGovernment_AreGovtsAllied (src/game/government.cpp/hpp): self returns true, derelict (flags_primary & 0x800) excluded, then cross-checks classes vs the other's ally list both directions. Verified vs Federation 0x80 / govt 0x81 (not allied) and govts 0x84/0x85 (allied).
 0x0046BDF0,Government_AreGovtsHostileOrXenophobic,src/game/government.cpp,100%,Faithful reimpl as NovaGovernment_AreGovtsHostileOrXenophobic (src/game/government.cpp/hpp): enemy-class cross-check both directions, then fallback not-allied && (either xenophobic flag 0x0001). Verified vs Federation 0x80 hostile to govt 0x81; govts 0x84/0x85 non-hostile; synthetic xenophobic + derelict cases.
-0x0046BFF0,Government_DoGovtsShareClass,,0%,
+0x0046BFF0,Government_DoGovtsShareClass,src/game/government.cpp,100%,Clean-room port as NovaGovernment_DoGovtsShareClass: id equality or shared class_1..4 (no derelict exclusion, matching original)
 0x0046C080,Ship_ComputeIonizationDecayRate,src/game/outfit.cpp,65%,"Class ionization decay rate is loaded from ship payload +0x36a and player ModType 39 ion dissipators are aggregated; per-frame charge decay is wired through Ship_HandleShip's NPC/player update path. Original cache behavior and ionization speed clamp remain TODO(decomp)."
 0x0046C160,Ship_GetIonizationIntensity,src/game/spaceflight.cpp,45%,"NPC ionization normalization is ported through NovaShip_IonizationIntensity; class ionization capacity is loaded from ship payload +0x36c. Player outfit ModType 40 capacity additions and the decay-rate implementation remain TODO(decomp)."
 0x0046C250,System_GetEffectiveMurkPercent,,0%,

@@ -2,10 +2,14 @@
 
 #include "game_state.hpp"
 #include "government.hpp"
+#include "log.hpp"
+#include "mission_script.hpp"
 #include "outfit.hpp"
+#include "ship_ai.hpp"
 #include "ship_spawn.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <random>
 #include <string>
@@ -23,6 +27,18 @@ constexpr std::int16_t kResourceIdBase = 0x80;
   }
   std::uniform_int_distribution<std::int32_t> dist{0, bound - 1};
   return static_cast<std::int16_t>(dist(state.rng));
+}
+
+// Reads a NUL-terminated 255-byte text/script buffer (MisnActive text blocks
+// copied from the mïsn payload) as a string_view.
+[[nodiscard]] std::string_view
+TextOf(const std::array<std::byte, 255> &buffer) {
+  const auto *begin = reinterpret_cast<const char *>(buffer.data());
+  std::size_t length = 0;
+  while (length < buffer.size() && begin[length] != '\0') {
+    ++length;
+  }
+  return {begin, length};
 }
 
 [[nodiscard]] ControlExpressionState
@@ -785,6 +801,137 @@ bool Mission_CheckReactionConditionSatisfied(const GameState &state,
   }
   return NovaControlExpression_Evaluate(normalized,
                                         MissionControlExpressionState(state));
+}
+
+// Ghidra 0x00440aa0 Mission_ClearMisnSlotAssignments. Releases every ship
+// assigned to the mission-fleet slot: clears its fleet link, restores the
+// class-default AI behavior when it held a target, and re-enters AI state 2.
+// TODO(decomp): the original despawns the assigned ships when
+// g_travel_scene_ctx != 0 (the landing/travel scene owns the world); the
+// clean-room runtime has no such context latch yet.
+void Mission_ClearMisnSlotAssignments(GameState &state,
+                                      std::int16_t mission_slot,
+                                      bool emit_completion_payload,
+                                      std::uint32_t now_ms) {
+  for (Ship &ship : state.ships_) {
+    if (!ship.is_active || ship.mission_fleet_slot != mission_slot) {
+      continue;
+    }
+    ship.mission_fleet_slot = -1;
+    if (ship.ai_target_ship_slot != -1) {
+      const auto *ship_class = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + kResourceIdBase));
+      if (ship_class != nullptr) {
+        ship.ai_behavior_code = ship_class->default_ai_behavior;
+      }
+      ship.ai_target_ship_slot = -1;
+      NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+    }
+  }
+  if (emit_completion_payload) {
+    Mission_RunMisnScriptPayload(
+        state,
+        TextOf(state.active_missions[static_cast<std::size_t>(mission_slot)]
+                   .resolve_script_buffer_start),
+        mission_slot);
+  }
+  state.active_missions[static_cast<std::size_t>(mission_slot)].is_accepted =
+      false;
+  state.active_mission_runtime_flags[static_cast<std::size_t>(mission_slot)]
+      .is_active = false;
+  // The original also invalidates g_last_system_for_ambient_rolls (0xffff);
+  // the clean-room ambient-roll cache latch is not modelled (TODO(decomp)).
+}
+
+// Ghidra 0x00440410 Mission_ResolveMissionSuccess.
+void Mission_ResolveMissionSuccess(GameState &state,
+                                   std::int16_t mission_slot) {
+  const auto slot = static_cast<std::size_t>(mission_slot);
+  ActiveMission &mission = state.active_missions[slot];
+  // MisnActive +0x3d selects the success debrief selection dialog
+  // (Ui_LoadSelectionDialogResource + Stellar_BuildTravelDestination-
+  // Description + Ui_RunTravelSelectionDialog). UI-owned; not reconstructed.
+  if (mission.brief_description_ids[4] != -1) {
+    NovaLog::Todo("mission success debrief dialog (misn {} id {}) not "
+                  "reconstructed yet",
+                  mission.mission_template_id,
+                  mission.brief_description_ids[4]);
+  }
+  state.active_mission_runtime_flags[slot].is_active = false;
+  Mission_RunMisnScriptPayload(
+      state, TextOf(mission.on_success_text), mission_slot);
+  // On-resolve repeat count re-runs the daily availability reroll
+  // (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0) once per count.
+  // That driver is not ported yet.
+  if (mission.on_resolve_repeat_count > 0) {
+    NovaLog::Todo("mission success repeat-count {} requires the daily "
+                  "availability reroll (0x00466cb0), not yet ported",
+                  mission.on_resolve_repeat_count);
+  }
+  const std::int16_t govt = mission.comp_govt_id;
+  const std::int16_t delta = mission.comp_reward_delta;
+  if (govt >= 0 && govt < 0x100) {
+    const auto count = static_cast<std::int16_t>(
+        std::min<std::size_t>(state.system_reputation.size(), 0x800));
+    for (std::int16_t i = 0; i < count; ++i) {
+      const std::int16_t system_govt =
+          state.scenario.systems[static_cast<std::size_t>(i)].government_id;
+      auto &rep = state.system_reputation[static_cast<std::size_t>(i)];
+      if (system_govt == govt) {
+        rep = static_cast<std::int16_t>(rep + delta);
+      } else if (system_govt != -1) {
+        if (NovaGovernment_AreGovtsHostileOrXenophobic(
+                state.scenario, system_govt, govt)) {
+          rep = static_cast<std::int16_t>(std::lrint(
+              static_cast<float>(rep) - static_cast<float>(delta) * 0.5F));
+        } else if (NovaGovernment_AreGovtsAllied(
+                       state.scenario, system_govt, govt)) {
+          rep = static_cast<std::int16_t>(std::lrint(
+              static_cast<float>(rep) + static_cast<float>(delta) * 0.5F));
+        }
+      }
+    }
+  }
+  NovaGovernment_ApplyReputationCreditDelta(state,
+                                            mission.resource_delta_or_cost);
+  // Ambient-roll latch invalidation is not modelled (TODO(decomp)).
+}
+
+// Ghidra 0x00440930 Mission_ResolveMissionFailure.
+void Mission_ResolveMissionFailure(GameState &state,
+                                   std::int16_t mission_slot,
+                                   std::uint32_t now_ms) {
+  const auto slot = static_cast<std::size_t>(mission_slot);
+  ActiveMission &mission = state.active_missions[slot];
+  Mission_RunMisnScriptPayload(
+      state, TextOf(mission.on_failure_text), mission_slot);
+  const std::int16_t govt = mission.comp_govt_id;
+  if (govt != -1) {
+    // Failure subtracts half the reputation delta (integer division rounded
+    // toward zero) from every system owned by the competing government.
+    const std::int16_t half_delta =
+        static_cast<std::int16_t>(mission.comp_reward_delta / 2);
+    const auto count = static_cast<std::int16_t>(
+        std::min<std::size_t>(state.system_reputation.size(), 0x800));
+    for (std::int16_t i = 0; i < count; ++i) {
+      const std::int16_t system_govt =
+          state.scenario.systems[static_cast<std::size_t>(i)].government_id;
+      if (system_govt == govt) {
+        auto &rep = state.system_reputation[static_cast<std::size_t>(i)];
+        rep = static_cast<std::int16_t>(rep - half_delta);
+      }
+    }
+  }
+  state.active_mission_runtime_flags[slot].is_active = false;
+  // MisnActive +0x3f selects the failure debrief dialog. UI-owned; not
+  // reconstructed.
+  if (mission.brief_description_ids[5] != -1) {
+    NovaLog::Todo("mission failure debrief dialog (misn {} id {}) not "
+                  "reconstructed yet",
+                  mission.mission_template_id,
+                  mission.brief_description_ids[5]);
+  }
+  Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
 }
 
 } // namespace game

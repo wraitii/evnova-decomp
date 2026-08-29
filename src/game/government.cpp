@@ -1,5 +1,7 @@
 #include "government.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 
 #include "log.hpp"
@@ -105,6 +107,32 @@ bool NovaGovernment_AreGovtsHostileOrXenophobic(const ScenarioData &scenario,
             0x0001U) != 0;
   };
   return xenophobic(govt_a) || xenophobic(govt_b);
+}
+
+// Ghidra 0x0046bff0 Government_DoGovtsShareClass.
+bool NovaGovernment_DoGovtsShareClass(const ScenarioData &scenario,
+                                      std::int16_t govt_a,
+                                      std::int16_t govt_b) {
+  if (govt_a == govt_b) {
+    return true;
+  }
+  if (govt_a < 0 || govt_a >= 0x100 || govt_b < 0 || govt_b >= 0x100) {
+    return false;
+  }
+  const auto idx_a = static_cast<std::size_t>(govt_a);
+  const auto idx_b = static_cast<std::size_t>(govt_b);
+  if (idx_a >= scenario.governments.size() ||
+      idx_b >= scenario.governments.size()) {
+    return false;
+  }
+  const Government &a = scenario.governments[idx_a];
+  const Government &b = scenario.governments[idx_b];
+  for (std::size_t i = 0; i < 4; ++i) {
+    if (a.classes[i] != -1 && a.classes[i] == b.classes[i]) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
@@ -222,6 +250,71 @@ bool NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
   // branch. TODO(decomp(0x0040fd20)) skipped: no clean-room +0x83 field, so
   // the gate is not reproduced.
   return false;
+}
+
+// Ghidra 0x00440750 Government_ApplyReputationCreditDelta. The mission
+// PayVal opcode (EV Nova Bible, mïsn "PayVal"):
+//   1..            flat credit award (inventory/loadout latch dirtied)
+//   -1..-9999      no effect
+//   -10128-g ..    systems of government g (and, in the -20xxx/-30xxx
+//   -20128-g /     ally/class variants) have negative reputation cleared
+//   -30128-g
+//   -40001..-40099 deduct this percentage of the player's cash
+//   <= -40100      no effect (the -50000- range is consumed at acceptance)
+// Reputation/cash rounding matches the original's x87 FISTP half-to-even
+// behavior; DAT_00575500 = 0.5 and DAT_00575508 = 0.01.
+void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
+                                               std::int32_t delta) {
+  const auto clear_negative_reputation = [&state](auto &&matches) {
+    const auto count = static_cast<std::int16_t>(
+        std::min<std::size_t>(state.system_reputation.size(), 0x800));
+    for (std::int16_t i = 0; i < count; ++i) {
+      const std::int16_t system_govt =
+          state.scenario.systems[static_cast<std::size_t>(i)].government_id;
+      if (matches(system_govt) &&
+          state.system_reputation[static_cast<std::size_t>(i)] < 0) {
+        state.system_reputation[static_cast<std::size_t>(i)] = 0;
+      }
+    }
+  };
+  if (delta >= 1) {
+    state.player.credits += delta;
+    // g_playerInventoryAndLoadoutDirty in the original.
+    state.stat_cache_valid = false;
+    return;
+  }
+  if (delta > -20000) {
+    if (delta >= -9999) {
+      return;
+    }
+    const auto govt = static_cast<std::int16_t>(-delta - 10128);
+    clear_negative_reputation(
+        [govt](std::int16_t system_govt) { return system_govt == govt; });
+    return;
+  }
+  if (delta > -30000) {
+    const auto govt = static_cast<std::int16_t>(-delta - 20128);
+    clear_negative_reputation([&state, govt](std::int16_t system_govt) {
+      return NovaGovernment_AreGovtsAllied(state.scenario, system_govt, govt);
+    });
+    return;
+  }
+  if (delta > -40000) {
+    const auto govt = static_cast<std::int16_t>(-delta - 30128);
+    clear_negative_reputation([&state, govt](std::int16_t system_govt) {
+      return NovaGovernment_DoGovtsShareClass(
+          state.scenario, system_govt, govt);
+    });
+    return;
+  }
+  if (delta > -40100) {
+    const auto percent = -delta - 40000;
+    const double adjusted = static_cast<double>(state.player.credits) -
+                            static_cast<double>(state.player.credits) *
+                                static_cast<double>(percent) * 0.01;
+    state.player.credits = static_cast<std::int32_t>(std::lrint(adjusted));
+    return;
+  }
 }
 
 } // namespace game

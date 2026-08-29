@@ -37,6 +37,13 @@ namespace game {
 [[nodiscard]] bool NovaGovernment_AreGovtsHostileOrXenophobic(
     const ScenarioData &scenario, std::int16_t govt_a, std::int16_t govt_b);
 
+// Ghidra 0x0046bff0 Government_DoGovtsShareClass. True when the ids are equal
+// or the two governments share any matching class_1..4 value (a's class
+// non-sentinel and equal to one of b's). Unlike the allied/hostile helpers
+// this check has no derelict exclusion.
+[[nodiscard]] bool NovaGovernment_DoGovtsShareClass(
+    const ScenarioData &scenario, std::int16_t govt_a, std::int16_t govt_b);
+
 // Ghidra 0x0046e860 Government_GetGovernmentPolicyFlag. Reads one of the two
 // per-government boolean policy flags (Government.policy_flags, GovtDef
 // +0x84). flag_index must be 0 or 1; out-of-range government ids read 0.
@@ -61,5 +68,12 @@ namespace game {
 [[nodiscard]] bool
 NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
                                               const Ship &ship);
+
+// Ghidra 0x00440750 Government_ApplyReputationCreditDelta. Applies the
+// mission PayVal opcode: flat credit award (positive), per-government
+// negative-reputation clears (-10128/-20128/-30128 families), or a percentage
+// cash deduction (-40001..-40099). See government.cpp for the full range map.
+void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
+                                               std::int32_t delta);
 
 } // namespace game
