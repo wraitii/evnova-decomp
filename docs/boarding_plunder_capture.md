@@ -267,8 +267,10 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    Message`'s second parameter is a FRAME countdown, not ms/colour:
    `g_hud_overlay_msg_color` doubles as the counter and
    Frame_UpdateScreenFlashTimers (0x0042f1b0) decrements it per frame,
-   clearing the message at zero. The port converts frames at ~60 Hz
-   (board denials 0x168 ≈ 6 s, window loot/trip overlays 0xf0 ≈ 4 s;
+   clearing the message at zero. That decay runs on the 30 Hz
+   Frame_TickSystems cadence (the port renders at ~60 Hz but ticks the sim on
+   the same 30 Hz basis), so the port converts ticks to wall-clock ms at
+   1000/30: board denials 0x168 ≈ 12 s, window loot/trip overlays 0xf0 ≈ 8 s;
    previously these rendered as 250–360 ms, far too short). The window now
    also draws the live overlay message below itself (`HudRenderer::
    DrawOverlayMessage`) as the original's message rect does. Boarding range

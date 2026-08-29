@@ -11,13 +11,13 @@ inline constexpr std::uint32_t kStringResourceType = 0x53545223U;
 } // namespace
 
 // Ghidra 0x0047e2d0 NovaHud_ShowOverlayMessage. The original stores param_2
-// (a frame countdown) in g_hud_overlay_msg_color, which
-// Frame_UpdateScreenFlashTimers (0x0042f1b0) decrements once per rendered
-// frame, clearing the message when it reaches zero — so the message's second
-// parameter is a frame count, not a colour or a millisecond duration. The
-// port keeps wall-clock expiry in GameState but converts frames at the
-// original's ~60 Hz render cadence.
-constexpr std::uint64_t kOverlayFrameMs = 1000U / 60U; // ~16.67 ms per frame
+// (a tick countdown) in g_hud_overlay_msg_color, which
+// Frame_UpdateScreenFlashTimers (0x0042f1b0, called from the 30 Hz
+// Frame_TickSystems) decrements once per tick, clearing the message when it
+// reaches zero — so the message's second parameter is a tick count, not a
+// colour or a millisecond duration. The port keeps wall-clock expiry in
+// GameState but converts ticks at the original's 30 Hz cadence.
+constexpr std::uint64_t kOverlayTickMs = 1000U / 30U;
 void NovaHud_ShowOverlayMessage(GameState &state,
                                 std::string message,
                                 std::uint8_t red,
@@ -30,7 +30,7 @@ void NovaHud_ShowOverlayMessage(GameState &state,
   state.hud_overlay.green = green;
   state.hud_overlay.blue = blue;
   state.hud_overlay.expiry_ms =
-      SDL_GetTicks() + duration_frames * kOverlayFrameMs;
+      SDL_GetTicks() + duration_frames * kOverlayTickMs;
 }
 
 // Ghidra 0x0047e430 NovaHud_ShowCachedOverlayMessage.
@@ -44,7 +44,7 @@ void NovaHud_ShowCachedOverlayMessage(GameState &state, bool extend) {
     const std::uint64_t lifetime =
         state.hud_overlay.expiry_ms > SDL_GetTicks()
             ? state.hud_overlay.expiry_ms - SDL_GetTicks()
-            : 250U * kOverlayFrameMs;
+            : 250U * kOverlayTickMs;
     state.hud_overlay.expiry_ms = SDL_GetTicks() + lifetime;
   }
 }

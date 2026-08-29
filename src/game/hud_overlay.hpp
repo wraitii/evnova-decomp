@@ -23,13 +23,15 @@ namespace game {
 
 // Mirrors NovaHud_ShowOverlayMessage: arms the transient HUD overlay message.
 // Replaces any current message. `duration_frames` is the message lifetime in
-// rendered frames: the original stores param_2 in g_hud_overlay_msg_color,
-// which doubles as the countdown (Frame_UpdateScreenFlashTimers 0x0042f1b0
-// decrements it once per frame and clears the message at zero). The port
-// converts frames at the original's ~60 Hz render cadence. Board denials pass
-// 0x168 and the boarding/plunder window's loot overlays pass 0xf0; landing
-// feedback passes 0xfa. The text is drawn at the bottom of the flight
-// viewport. The `color` is the on-screen RGB tint of the message text.
+// simulation ticks: the original stores param_2 in g_hud_overlay_msg_color,
+// which doubles as the countdown (Frame_UpdateScreenFlashTimers 0x0042f1b0,
+// called from Frame_TickSystems, decrements it once per 30 Hz tick and
+// clears the message at zero). The port converts ticks to wall-clock ms at
+// the original's 30 Hz cadence (its own loop renders at ~60 Hz but ticks the
+// sim on the same 30 Hz basis). Board denials pass 0x168 and the
+// boarding/plunder window's loot overlays pass 0xf0; landing feedback passes
+// 0xfa. The text is drawn at the bottom of the flight viewport. The `color`
+// is the on-screen RGB tint of the message text.
 void NovaHud_ShowOverlayMessage(GameState &state,
                                 std::string message,
                                 std::uint8_t red = 0xe0,
