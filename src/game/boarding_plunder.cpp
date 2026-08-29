@@ -16,6 +16,7 @@
 #include "../pict_image.hpp"
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
+#include "docked_dialog.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "nova_font.hpp"
@@ -493,37 +494,37 @@ void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
 // Clean-room summary (see docs/boarding_plunder_capture.md for the full map):
 // Validates the player's board command against the primary target (fire
 // -restricted target, same system, close range, matched heading, low relative
-// velocity, target crew >= 1), then opens the boarding/plunder window (plain
-// ships). Mission arms and the post-hit escort/fighter arms are TODO(decomp)
-// below. Entry: called on the 'b' edge during flight; the target may be
-// cleared by the dispatch arms. Exit: returns with the target boarded or an
-// STR# 0x7d2 denial overlay queued. Confidence: high on gates, dispatch
-// arms partially reconstructed.
-void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
-                                           SdlAudio &audio,
-                                           GameState &state) {
+// velocity, target crew >= 1), then dispatches the boarding/plunder window
+// (plain ships). Mission arms and the post-hit escort/fighter arms are
+// TODO(decomp) below. Entry: called on the 'b' edge during flight. Exit:
+// returns false after a denial (STR# 0x7d2 overlay queued) or no-op; returns
+// true only after the plain-ship dispatch (velocity matched, "boarded" cue
+// queued) — the caller must then run NovaBoarding_FinishBoardCommand right
+// after presenting a frame so the modal can snapshot it as its background.
+// Confidence: high on gates, dispatch arms partially reconstructed.
+bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
   // The original latches DAT_007354a5 ("player acted") for the frame-timing
   // refresh in Frame_SpaceflightLoop; not modelled here.
   EnsureTransitionSounds(state);
 
   if (state.player.primary_target_ship_slot == -1) {
-    return;
+    return false;
   }
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(state.player)) {
-    return; // player cloaked past the visibility threshold: silent no-op
+    return false; // player cloaked past the visibility threshold: silent no-op
   }
 
   Ship &player = state.player;
   const std::int16_t target_slot = player.primary_target_ship_slot;
   if (target_slot < 1 ||
       !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
-    return;
+    return false;
   }
   Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
   const ShipClass *target_class = state.scenario.Ship(
       static_cast<std::int16_t>(target.ship_class_id + 0x80));
   if (target_class == nullptr) {
-    return;
+    return false;
   }
 
   // ---- Target eligibility (denial = STR# 0x7d2 pool 0x81) -----------------
@@ -562,7 +563,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
             : 0.0F);
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
-    return;
+    return false;
   }
 
   constexpr float kBoardVelocityGate = 0.5F; // _DAT_00575598
@@ -574,7 +575,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
       std::fabs(target.vel_y - player.vel_y) > kBoardVelocityGate) {
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x83); // "You're moving too fast to board..."
-    return;
+    return false;
   }
 
   // ---- Range gate (per-axis, half of the target's sprite frame) ----------
@@ -583,7 +584,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
       std::fabs(target.pos_y - player.pos_y) > span.half_y * kBoardRangeShare) {
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x82); // "You're not close enough to board..."
-    return;
+    return false;
   }
 
   // ---- Heading gate -------------------------------------------------------
@@ -610,7 +611,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
           static_cast<int>(kBoardHeadingToleranceDeg) &&
       shortest_delta(player_heading, target_heading + 180) >
           static_cast<int>(kBoardHeadingToleranceDeg)) {
-    return;
+    return false;
   }
 
   // ---- Boardability -------------------------------------------------------
@@ -622,7 +623,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
                   "arms of Ship_HandlePlayerBoardTargetCommand not "
                   "reconstructed",
                   target.mission_fleet_slot);
-    return;
+    return false;
   }
   // Plain ships: Bible "Ships with 0 crew can't be boarded".
   if (target_class->crew < 1) {
@@ -631,7 +632,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
                   target_class->display_name);
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
-    return;
+    return false;
   }
 
   // ---- Dispatch -----------------------------------------------------------
@@ -661,15 +662,40 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   }
 
   QueueUiSound(state, 4, 8); // the "boarded" cue repeats 8x in the original
-  const BoardingWindowResult result =
-      NovaBoarding_RunWindow(platform, audio, state);
+  return true;
+}
+
+void NovaBoarding_FinishBoardCommand(SdlPlatform &platform,
+                                     SdlAudio &audio,
+                                     GameState &state) {
+  // Snapshot the flight frame the loop just presented: the modal blits it as
+  // its backdrop so the space view stays visible behind the window (same
+  // strategy as the docked dialogs; original composites the DLOG over the
+  // gameplay surface).
+  std::unique_ptr<SdlTexture> background =
+      NovaLanded_CaptureDockedBackground(platform);
+  if (!background) {
+    NovaLog::Warn("board: could not snapshot the flight frame for the plunder "
+                  "window background");
+  }
+  const BoardingWindowResult result = NovaBoarding_RunWindow(
+      platform,
+      audio,
+      state,
+      background ? background->get() : nullptr);
   (void)result;
 
   // After the interaction: latch + clear every ship targeting the boarded
   // hull (Ship_ClearOtherShipsTargetingShip 0x00415dc0; the port's
   // destroyed-reference helper performs the same clearing).
-  target.escort_rehired_mark = 1;
-  NovaTargeting_ClearDestroyedShipReferences(state, target.ship_instance_id);
+  const std::int16_t target_slot = state.player.primary_target_ship_slot;
+  if (target_slot >= 1 &&
+      state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+    Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    target.escort_rehired_mark = 1;
+    NovaTargeting_ClearDestroyedShipReferences(state,
+                                               target.ship_instance_id);
+  }
 }
 
 namespace {
@@ -709,6 +735,25 @@ constexpr unsigned kActionCredits = 3;
 constexpr unsigned kActionAmmo = 4;
 constexpr unsigned kActionEnergy = 6;
 constexpr unsigned kActionCapture = 7;
+
+constexpr std::string_view ActionName(unsigned code) {
+  switch (code) {
+  case kActionAbort:
+    return "Abort";
+  case kActionCargo:
+    return "Cargo";
+  case kActionCredits:
+    return "Credits";
+  case kActionAmmo:
+    return "Ammo";
+  case kActionEnergy:
+    return "Energy";
+  case kActionCapture:
+    return "Capture";
+  default:
+    return "?";
+  }
+}
 
 // STR# 0x7d2 "misc strings" used by the window (verified against the shipped
 // pool; see docs/reference/boarding.jpg for the shipped window layout).
@@ -990,12 +1035,21 @@ void DrawBoardWindow(SdlPlatform &platform,
                      const BoardingPlunderOptions &options,
                      const GameState &state,
                      SDL_Texture *backdrop,
+                     SDL_Texture *background,
                      int hovered) {
   SDL_Renderer *renderer = platform.renderer();
-  // Full-screen dim scrim behind the window.
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
   platform.SetCenteredPlayfield();
+  // Live flight-frame snapshot behind the window (the original composites the
+  // DLOG over the still-visible gameplay surface); fallback is the black
+  // clear above.
+  if (background != nullptr) {
+    SDL_SetTextureBlendMode(background, SDL_BLENDMODE_NONE);
+    const SDL_FRect frame{0.0F, 0.0F, 640.0F, 480.0F};
+    SDL_RenderTexture(renderer, background, nullptr, &frame);
+  }
+  // Dim scrim so the window reads as modal over the space view.
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
   const SDL_FRect field{0.0F, 0.0F, 640.0F, 480.0F};
@@ -1181,9 +1235,11 @@ void SelfDestructTarget(GameState &state) {
 // NovaUi_ShowCaptureDecisionDialog 0x00497eb0, is TODO(decomp)). The window
 // plays its one-shot cues directly through `audio` (the flight loop owns the
 // device).
-[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(SdlPlatform &platform,
-                                                          SdlAudio &audio,
-                                                          GameState &state) {
+[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(
+    SdlPlatform &platform,
+    SdlAudio &audio,
+    GameState &state,
+    SDL_Texture *background) {
   BoardingWindowResult result;
 
   const std::int16_t target_slot = state.player.primary_target_ship_slot;
@@ -1192,15 +1248,22 @@ void SelfDestructTarget(GameState &state) {
     return result; // target lost while the command ran
   }
 
+  const Ship &board_target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  const ShipClass *target_class = state.scenario.Ship(
+      static_cast<std::int16_t>(board_target.ship_class_id + 0x80));
+
   // The window's panic value: rand(0x1a) + 0xf (15..40). Each loot action
   // multiplies it; the self-destruct re-roll (armed by a loot action) fires
-  // when rand(100) <= panic.
+  // when rand(100) <= panic, exactly once on the loop iteration after the
+  // action (the original clears its latch each iteration).
   std::int32_t panic = NovaRandomRange(state.rng, 0x1a) + 0xf;
 
   BoardingPlunderOptions options = NovaBoarding_BuildOptions(state);
   NovaLog::Info(
-      "board: opening plunder window — cargo({})={}x credits={} ammo({})={}x "
-      "fuel={} capture_odds={}% panic={}",
+      "board: opening plunder window for slot {} ({}) — cargo({})={}x "
+      "credits={} ammo({})={}x fuel={} capture_odds={}% panic={}",
+      target_slot,
+      target_class != nullptr ? target_class->display_name : "?",
       options.cargo_type,
       options.cargo_quantity,
       options.credits,
@@ -1213,8 +1276,7 @@ void SelfDestructTarget(GameState &state) {
   // Mission-ship free-outfit bonus arm (the opening block that grants a random
   // free outfit to mission ships with booty_ammo_max) is TODO(decomp): the
   // mission-ship def table is not modelled.
-  if (state.ShipAt(static_cast<std::size_t>(target_slot)).mission_fleet_slot !=
-      -1) {
+  if (board_target.mission_fleet_slot != -1) {
     NovaLog::Todo("board: mission-ship free-outfit bonus arm of "
                   "NovaUi_RunBoardingPlunderWindow not reconstructed");
   }
@@ -1242,6 +1304,7 @@ void SelfDestructTarget(GameState &state) {
   // local_223: the self-destruct re-roll latch (armed by a loot action).
   bool panic_armed = false;
   bool close = false;
+  const char *close_reason = "target lost";
 
   while (!platform.quit_requested() && !close) {
     // Mouse-hover (mirrors NovaUi_HandleBoardingPlunderOptionButtons 0x004a22e0
@@ -1285,6 +1348,7 @@ void SelfDestructTarget(GameState &state) {
                     options,
                     state,
                     backdrop ? backdrop->get() : nullptr,
+                    background,
                     hovered);
     SDL_RenderPresent(platform.renderer());
 
@@ -1305,8 +1369,20 @@ void SelfDestructTarget(GameState &state) {
             break;
           }
         }
+        if (action == 0) {
+          NovaLog::Info("board: click at ({}, {}) missed every button",
+                        click.x,
+                        click.y);
+        }
         break;
       }
+    }
+    if (action != 0) {
+      NovaLog::Info(
+          "board: action {} ({}) armed={}",
+          action,
+          ActionName(static_cast<unsigned>(action)),
+          panic_armed);
     }
 
     // Abort (action 1): panic = -1, disarm, close with the confirm cue.
@@ -1315,21 +1391,34 @@ void SelfDestructTarget(GameState &state) {
       panic_armed = false;
       PlayTransitionCue(audio, state, 2);
       close = true;
+      close_reason = "abort";
     }
 
-    // Self-destruct re-roll (armed by the previous iteration's loot action).
-    if (panic_armed && NovaRandomRange(state.rng, 100) <= panic) {
-      SelfDestructTarget(state);
-      PlayTransitionCue(audio, state, 2);
-      result.target_self_destructed = true;
-      close = true;
-      break;
+    // Self-destruct re-roll: armed by the previous iteration's loot action;
+    // the original rolls exactly once per loot action (its latch clears each
+    // loop iteration), so one rand(100) <= panic check here.
+    if (panic_armed) {
+      const std::int16_t trip_roll = NovaRandomRange(state.rng, 100);
+      if (trip_roll <= panic) {
+        NovaLog::Info("board: self-destruct tripped — roll {} <= panic {}",
+                      trip_roll,
+                      panic);
+        SelfDestructTarget(state);
+        PlayTransitionCue(audio, state, 2);
+        result.target_self_destructed = true;
+        close = true;
+        close_reason = "self-destruct (panic re-roll)";
+        break;
+      }
+      NovaLog::Info(
+          "board: panic re-roll survived — roll {} > panic {}", trip_roll, panic);
     }
     panic_armed = false;
 
     // ---- Cargo (action 2) -----
     if (action == static_cast<int>(kActionCargo)) {
       if (options.cargo_type == -1) {
+        NovaLog::Info("board: cargo clicked with no offer — denial beep");
         PlayTransitionCue(audio, state, 3); // denial beep
       } else {
         // Clamp quantity to the free fleet cargo space.
@@ -1340,6 +1429,10 @@ void SelfDestructTarget(GameState &state) {
           options.cargo_quantity = static_cast<std::int16_t>(capacity - total);
         }
         if (options.cargo_quantity < 1) {
+          NovaLog::Info("board: cargo {}t did not fit (free {}/{}); left behind",
+                        options.cargo_type,
+                        capacity - total,
+                        capacity);
           PlayTransitionCue(audio, state, 2);
           BoardShowOverlay(
               state,
@@ -1366,6 +1459,7 @@ void SelfDestructTarget(GameState &state) {
           }
           options.cargo_quantity = 0;
           options.cargo_type = -1;
+          NovaLog::Info("board: cargo transferred; panic now {}", panic);
         }
         panic = RoundHalfUp(static_cast<double>(panic) * kPanicCargo);
         panic_armed = true;
@@ -1375,6 +1469,7 @@ void SelfDestructTarget(GameState &state) {
     // ---- Credits (action 3) -----
     if (action == static_cast<int>(kActionCredits)) {
       if (options.credits < 1) {
+        NovaLog::Info("board: credits clicked with no offer — denial beep");
         PlayTransitionCue(audio, state, 3);
       } else {
         PlayTransitionCue(audio, state, 2);
@@ -1386,6 +1481,9 @@ void SelfDestructTarget(GameState &state) {
             " " + LoadBoardMiscString(kMiscFromThisShip, "from this ship.");
         NovaHud_ShowOverlayMessage(state, text);
         state.player.credits += options.credits;
+        NovaLog::Info("board: stole {} credits; panic now {}",
+                      options.credits,
+                      RoundHalfUp(static_cast<double>(panic) * kPanicCredits));
         options.credits = 0;
         panic = RoundHalfUp(static_cast<double>(panic) * kPanicCredits);
         panic_armed = true;
@@ -1397,6 +1495,7 @@ void SelfDestructTarget(GameState &state) {
       const std::int16_t outfit_index =
           FindWeaponOutfitIndex(state, options.ammo_bank);
       if (options.ammo_bank == -1 || outfit_index < 0) {
+        NovaLog::Info("board: ammo clicked with no offer — denial beep");
         PlayTransitionCue(audio, state, 3);
       } else {
         const std::int16_t resource_id =
@@ -1429,8 +1528,13 @@ void SelfDestructTarget(GameState &state) {
               LoadBoardMiscString(kMiscFromThisShip, "from this ship.");
           NovaHud_ShowOverlayMessage(state, text);
         }
+        const int offered = options.ammo_quantity;
         options.ammo_quantity = 0;
         options.ammo_bank = -1;
+        NovaLog::Info("board: ammo transferred {} of {}; panic now {}",
+                      transferred,
+                      offered,
+                      RoundHalfUp(static_cast<double>(panic) * kPanicAmmo));
         panic = RoundHalfUp(static_cast<double>(panic) * kPanicAmmo);
         panic_armed = true;
       }
@@ -1439,6 +1543,7 @@ void SelfDestructTarget(GameState &state) {
     // ---- Energy (action 6) -----
     if (action == static_cast<int>(kActionEnergy)) {
       if (options.fuel_quantity < 1) {
+        NovaLog::Info("board: energy clicked with no offer — denial beep");
         PlayTransitionCue(audio, state, 3);
       } else {
         PlayTransitionCue(audio, state, 2);
@@ -1463,6 +1568,9 @@ void SelfDestructTarget(GameState &state) {
           }
         }
         options.fuel_quantity = 0;
+        NovaLog::Info("board: energy transferred {}; panic now {}",
+                      fill,
+                      RoundHalfUp(static_cast<double>(panic) * kPanicEnergy));
         panic = RoundHalfUp(static_cast<double>(panic) * kPanicEnergy);
         panic_armed = true;
       }
@@ -1481,8 +1589,13 @@ void SelfDestructTarget(GameState &state) {
       }
       const std::int16_t roll = NovaRandomRange(state.rng, 100);
       const bool auto_fail = options.capture_odds_percent < 1;
+      NovaLog::Info("board: capture roll {} vs odds {}{}",
+                    roll,
+                    options.capture_odds_percent,
+                    auto_fail ? " (auto-fail)" : "");
       if (roll > options.capture_odds_percent || auto_fail) {
         close = true;
+        close_reason = "capture roll failed";
         PlayTransitionCue(audio, state, 3);
         BoardShowOverlay(state,
                          kMiscCaptureFailed,
@@ -1491,13 +1604,16 @@ void SelfDestructTarget(GameState &state) {
       } else {
         // 1-in-10 "Oops" self-destruct roll.
         if (NovaRandomRange(state.rng, 10) == 0) {
+          NovaLog::Info("board: capture Oops roll hit — self-destruct");
           close = true;
+          close_reason = "capture Oops self-destruct";
           SelfDestructTarget(state);
           PlayTransitionCue(audio, state, 2);
           result.target_self_destructed = true;
         } else {
           PlayTransitionCue(audio, state, 2);
           if (!NovaShip_CanPlayerHaveMoreEscorts(state)) {
+            NovaLog::Info("board: capture blocked by the escort cap");
             PlayTransitionCue(audio, state, 3);
             BoardShowOverlay(
                 state,
@@ -1512,9 +1628,8 @@ void SelfDestructTarget(GameState &state) {
             NovaLog::Todo("board: NovaUi_ShowCaptureDecisionDialog 0x00497eb0 "
                           "+ ship-swap not reconstructed; taking escort path");
             close = true;
+            close_reason = "target captured as escort";
 
-            const ShipClass *target_class = state.scenario.Ship(
-                static_cast<std::int16_t>(target.ship_class_id + 0x80));
             const float max_armor =
                 target_class != nullptr
                     ? static_cast<float>(target_class->base_armor)
@@ -1551,15 +1666,13 @@ void SelfDestructTarget(GameState &state) {
       }
     }
 
-    // Frame cap. The original blocks on NovaUi_PollTravelScriptAction for the
-    // next click, so this loop runs at ~60 Hz, not a CPU-burning spin. This
-    // matters for the panic self-destruct re-roll above: it is meant to be
-    // re-checked once per frame (rand(100) <= panic each frame), not on the
-    // very next microsecond after a loot action, which made the window close
-    // "instantly" after any loot.
+    // Frame cap. The original's NovaUi_PollTravelScriptAction pumps one event
+    // batch per call (15 ms throttle inside UiWindow_RunInteractionLoop), so
+    // this loop runs at ~60 Hz, not a CPU-burning spin.
     SDL_Delay(16);
   }
 
+  NovaLog::Info("board: window closed ({})", close_reason);
   // Original restores the draw context and recomputes outfit-derived state on
   // close; the SDL modal has no context stack, so just mark the derived stats
   // stale for the flight loop.

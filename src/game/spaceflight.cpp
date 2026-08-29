@@ -393,6 +393,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool land_was_held = false;
   bool target_action_was_held = false;
   bool board_was_held = false;
+  // Set by the board dispatch (NovaBoarding_HandleBoardTargetCommand); the
+  // plunder modal opens right after this frame's present so the snapshot taken
+  // by NovaBoarding_FinishBoardCommand holds the live space view.
+  bool open_boarding_window = false;
   std::int16_t prev_travel_stellar = state.travel.selected_stellar_id;
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = SDL_GetTicks();
@@ -823,10 +827,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Board command ('b', edge-triggered): Ship_HandlePlayerBoardTargetCommand
     // (0x0045a3d0). Like the original's command-latch read in
     // Ship_HandlePlayerShipCore this runs every frame regardless of jump state;
-    // its own gates reject un-boardable targets. The dispatch may open the
-    // boarding/plunder modal (blocking on the flight loop).
+    // its own gates reject un-boardable targets. On dispatch the plunder modal
+    // opens after this frame's present (see open_boarding_window above).
     if (board_pressed) {
-      NovaBoarding_HandleBoardTargetCommand(platform, audio, state);
+      open_boarding_window =
+          NovaBoarding_HandleBoardTargetCommand(state);
       if (returning_to_menu) {
         break;
       }
@@ -861,6 +866,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // commit frame.
     DrawInGameFrame(platform, state, view, hud);
     SDL_RenderPresent(platform.renderer());
+
+    // The plain-ship board dispatch ran this frame: open the plunder modal now
+    // that a fresh flight frame is on screen (its snapshot becomes the modal
+    // background).
+    if (open_boarding_window) {
+      open_boarding_window = false;
+      NovaBoarding_FinishBoardCommand(platform, audio, state);
+      if (returning_to_menu) {
+        break;
+      }
+    }
 
     // Ghidra scope 3 "post-draw tasks": pump the primary mouse command; when
     // latched bit sets DAT_00596d38 (return to menu) and, while the frame is

@@ -23,6 +23,8 @@
 
 #include "game_state.hpp"
 
+struct SDL_Texture;
+
 class SdlAudio;
 class SdlPlatform;
 
@@ -94,9 +96,16 @@ struct BoardingWindowResult {
 // Note: the flight loop owns the SDL audio device, so the modal plays its
 // one-shot cues directly through `audio` (the original queues them into
 // NovaEffects_QueueCenteredResource; see the per-cue comments).
-[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(SdlPlatform &platform,
-                                                          SdlAudio &audio,
-                                                          GameState &state);
+//
+// `background` is a snapshot of the live flight frame taken by the flight loop
+// right after it presented (nullable); the modal blits it as its backdrop each
+// frame so the space view stays visible behind the window, matching the
+// original's composited modal over the gameplay surface.
+[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(
+    SdlPlatform &platform,
+    SdlAudio &audio,
+    GameState &state,
+    SDL_Texture *background);
 
 // Ghidra 0x0045a3d0 Ship_HandlePlayerBoardTargetCommand. The player's one-shot
 // "board target" command (input.board edge in the port): validates range /
@@ -104,9 +113,22 @@ struct BoardingWindowResult {
 // then dispatches the plunder window (plain ships) or the mission arms
 // (TODO(decomp)). Denial feedback is STR# 0x7d2 overlays plus a centered
 // error beep queued on GameState.pending_ui_sounds.
-void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
-                                           SdlAudio &audio,
-                                           GameState &state);
+//
+// Returns true only when the plain-ship dispatch ran (the velocity was matched
+// and the "boarded" cue queued): the flight loop must then call
+// NovaBoarding_FinishBoardCommand right after presenting a frame so the modal
+// can snapshot that frame as its background.
+[[nodiscard]] bool NovaBoarding_HandleBoardTargetCommand(GameState &state);
+
+// Second half of the plain-ship board dispatch (same Ghidra function; the
+// window runs after the flight loop's SDL_RenderPresent so the snapshot taken
+// here holds the live space view). Runs NovaBoarding_RunWindow over the
+// primary target, then applies the post-window latch (target.field_0xb9 = 1)
+// and clears every other ship's references to it
+// (Ship_ClearOtherShipsTargetingShip 0x00415dc0).
+void NovaBoarding_FinishBoardCommand(SdlPlatform &platform,
+                                     SdlAudio &audio,
+                                     GameState &state);
 
 // Ghidra 0x00415cb0 Ship_ResetShipAndAttackersAfterBoarding. Clears the
 // targeting state of every active ship whose primary target is `ship`, then

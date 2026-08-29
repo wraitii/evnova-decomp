@@ -246,14 +246,28 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    hit/hover filtering mirrors 0x004a22e0. Commodity names load from STR# 0xfa1
    (entry cargo_type+1, the original's DAT_0069d2cc source); weapon names from
    Outfit LCName/LCPlural.
-4. **Capture arm** — escort conversion + reset-after-boarding. *IN PROGRESS
+4. **Modal background + trip diagnostics** — the flight loop now opens the
+   plunder window right after `SDL_RenderPresent` (dispatch split:
+   `NovaBoarding_HandleBoardTargetCommand` returns the plain-ship flag,
+   `NovaBoarding_FinishBoardCommand` snapshots the presented frame via
+   `NovaLanded_CaptureDockedBackground`, runs the window over it, then applies
+   the post-window latch), so the live space view stays visible behind the
+   modal like the main-menu/docked dialogs. Added action/roll/close logging
+   (`board: action …`, `panic re-roll survived/tripped`, `window closed (…)`).
+   Note verified against the decompile: the panic self-destruct re-roll is ONE
+   `rand(100) <= panic` check on the loop iteration after each *successful*
+   loot action (the original clears its latch every iteration) — the earlier
+   "per frame" note was wrong. Trips on loot clicks (15–40% base, panic
+   ×2/×1.25/×1.5 per action) and capture-fail closes at low odds are authentic
+   original behavior; use the logs to confirm in-game.
+5. **Capture arm** — escort conversion + reset-after-boarding. *IN PROGRESS
    next*: the window already takes the escort-conversion path (behavior 6,
    armor restore, reset-after-boarding); the capture-decision dialog + ship
    swap remain deferred.
-5. **Capture-decision dialog + swap** (0x00497eb0, Outfit_SwapPlayerShip-
+6. **Capture-decision dialog + swap** (0x00497eb0, Outfit_SwapPlayerShip-
    WithEscort equivalent) — likely needs docked-loadout machinery; scope
    when reached.
-6. **progress.csv + doc updates** — updated per iteration (1/2 landed).
+7. **progress.csv + doc updates** — updated per iteration (1/2 landed).
 
 ### In-game verification (iterations 1-2)
 
