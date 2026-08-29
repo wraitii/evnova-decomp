@@ -129,6 +129,13 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
 Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state);
 [[nodiscard]] std::int16_t
 Outfit_ComputePlayerFleetCargoCapacity(const GameState &state);
+// Ghidra 0x0046a730 Ship_ComputeShipTotalMass. The player ship's total
+// tonnage: ship-class base mass plus, for each owned outfit, owned_count *
+// its mass contribution (mod type 2, hull-proportional via the load-time
+// derived PurchaseMass).
+[[nodiscard]] std::int32_t
+Outfit_ComputePlayerTotalMass(const GameState &state);
+
 // Remaining free cargo space, clamped >= 0. This build has no mission-fleet
 // objects, so no mission cargo is committed here.
 [[nodiscard]] std::int16_t
@@ -145,7 +152,7 @@ Outfit_ComputeRemainingCargoSpace(const GameState &state);
 // NPCs also include the original control-mode-0xc escort-target exception
 // involving an area-cloak device.
 [[nodiscard]] bool NovaOutfit_HasCloakingDevice(const GameState &state,
-                                               const Ship &ship);
+                                                const Ship &ship);
 
 // Ghidra 0x00464c80 Outfit_HasAreaCloakingDevice. Same loadout scan, but
 // requires ModType 17 ModVal bit 0x1000 (area cloak).
@@ -155,15 +162,16 @@ Outfit_ComputeRemainingCargoSpace(const GameState &state);
 // Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags and 0x00465090
 // Outfit_GetCloakShieldDrainFlags. These return the ModType 17 fuel/shield
 // drain flag nibbles consulted by Ship_UpdateShipCloakStateFromTraits.
-[[nodiscard]] std::int16_t NovaOutfit_GetCloakFuelDrainFlags(
-    const GameState &state, const Ship &ship);
-[[nodiscard]] std::int16_t NovaOutfit_GetCloakShieldDrainFlags(
-    const GameState &state, const Ship &ship);
+[[nodiscard]] std::int16_t
+NovaOutfit_GetCloakFuelDrainFlags(const GameState &state, const Ship &ship);
+[[nodiscard]] std::int16_t
+NovaOutfit_GetCloakShieldDrainFlags(const GameState &state, const Ship &ship);
 
 // Ghidra 0x00464e30 Outfit_HasCloakShieldDropOnActivation. ModType 17
 // ModVal bit 0x0004 forces shields to zero when cloaking activates.
-[[nodiscard]] bool NovaOutfit_HasCloakShieldDropOnActivation(
-    const GameState &state, const Ship &ship);
+[[nodiscard]] bool
+NovaOutfit_HasCloakShieldDropOnActivation(const GameState &state,
+                                          const Ship &ship);
 
 // Ghidra 0x0046e060 Ship_GetShipFuelBurnRate, for the player: the last
 // owned outfit encountered with opcode 15 supplies ModVal / 30 fuel per
@@ -175,8 +183,8 @@ Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state);
 // Ghidra Ship_ComputeIonizationDecayRate (0x0046c080). Returns the class base
 // dissipation rate plus player-owned ModType 39 (ion dissipator) bonuses.
 // Rates are charge points per millisecond, matching g_avg_frame_time_ms.
-[[nodiscard]] float NovaOutfit_ComputeIonizationDecayRate(
-    const GameState &state, const Ship &ship);
+[[nodiscard]] float
+NovaOutfit_ComputeIonizationDecayRate(const GameState &state, const Ship &ship);
 
 // Marks the effective-stats cache dirty. Called by the inventory mutation
 // helpers; the spaceflight loop reads cached stats to avoid re-scanning the

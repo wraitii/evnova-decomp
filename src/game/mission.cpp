@@ -84,18 +84,7 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
       // Mission_ActivateMissionAtSlot checks both cargo and hull mass before
       // opening its original error dialog. Outfit purchase mass is already
       // normalized for hull-proportional outfits by ScenarioData.
-      std::int32_t total_mass = ship_class->mass_tons;
-      for (std::size_t outfit_id = 0;
-           outfit_id < state.inventory.outfit_owned_count.size();
-           ++outfit_id) {
-        const auto owned = state.inventory.outfit_owned_count[outfit_id];
-        if (owned <= 0 || outfit_id >= state.scenario.outfits.size()) {
-          continue;
-        }
-        total_mass += static_cast<std::int32_t>(owned) *
-                      state.scenario.outfits[outfit_id].PurchaseMass(
-                          ship_class->mass_tons);
-      }
+      const std::int32_t total_mass = Outfit_ComputePlayerTotalMass(state);
       if (total_mass < definition.special_ship_count ||
           Outfit_ComputeRemainingCargoSpace(state) <
               definition.special_ship_count) {
@@ -932,6 +921,50 @@ void Mission_ResolveMissionFailure(GameState &state,
                   mission.brief_description_ids[5]);
   }
   Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
+}
+
+bool NovaStellar_AreStellarsEquivalent(const GameState &state,
+                                       std::int16_t stellar_a,
+                                       std::int16_t stellar_b) {
+  if (stellar_a < 0 || stellar_a >= 0x800 || stellar_b < 0 ||
+      stellar_b >= 0x800) {
+    return false;
+  }
+  if (stellar_a == stellar_b) {
+    return true;
+  }
+  const Stellar *a = state.scenario.Stellar(
+      static_cast<std::int16_t>(stellar_a + kResourceIdBase));
+  const Stellar *b = state.scenario.Stellar(
+      static_cast<std::int16_t>(stellar_b + kResourceIdBase));
+  if (a == nullptr || b == nullptr) {
+    return false;
+  }
+  // Duplicate-resource twins: same body position and same display name.
+  return a->pos_x == b->pos_x && a->pos_y == b->pos_y && a->name == b->name;
+}
+
+bool Mission_TryConsumeMissionInteractionResources(GameState &state,
+                                                   std::int16_t count) {
+  if (count > 0) {
+    if (Outfit_ComputePlayerTotalMass(state) < count) {
+      // The original shows the STR# 0x7d2 0x165 "not enough cargo mass"
+      // selection dialog. UI-owned; not reconstructed (TODO(decomp)).
+      NovaLog::Todo("mission interaction denied: total mass below {} tons",
+                    count);
+      return false;
+    }
+    if (Outfit_ComputeRemainingCargoSpace(state) < count) {
+      // STR# 0x7d2 0x166 "not enough free cargo space" dialog.
+      NovaLog::Todo("mission interaction denied: free cargo space below {} "
+                    "tons",
+                    count);
+      return false;
+    }
+  }
+  // g_playerInventoryAndLoadoutDirty + Outfit_RecomputeOutfitDerivedState.
+  state.stat_cache_valid = false;
+  return true;
 }
 
 } // namespace game

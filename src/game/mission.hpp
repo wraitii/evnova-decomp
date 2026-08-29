@@ -93,4 +93,21 @@ void Mission_ResolveMissionFailure(GameState &state,
                                    std::int16_t mission_slot,
                                    std::uint32_t now_ms);
 
+// Ghidra 0x0046efd0 Stellar_AreStellarsEquivalent. Two stellar ids match when
+// equal, or when their bodies share the same map position and display name
+// (duplicate-resource twins). Ids are 0x80-based resource ids; anything
+// outside [0, 0x800) never matches.
+[[nodiscard]] bool NovaStellar_AreStellarsEquivalent(const GameState &state,
+                                                     std::int16_t stellar_a,
+                                                     std::int16_t stellar_b);
+
+// Ghidra 0x00440370 Mission_TryConsumeMissionInteractionResources. Gates a
+// mission interaction on the player hauling `count` tons: rejects (after
+// showing the original's STR# 0x7d2 0x165/0x166 denial dialog, not yet
+// reconstructed) when total mass or free cargo space is short, otherwise
+// dirties the inventory/loadout latch and succeeds.
+[[nodiscard]] bool
+Mission_TryConsumeMissionInteractionResources(GameState &state,
+                                              std::int16_t count);
+
 } // namespace game

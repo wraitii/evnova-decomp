@@ -50,8 +50,8 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
   const auto matches = [area_only](std::int16_t mod_type,
                                    std::int16_t mod_val) {
     return mod_type == kCloakingDeviceModType &&
-           (!area_only || (static_cast<std::uint16_t>(mod_val) &
-                           kAreaCloakModValFlag) != 0U);
+           (!area_only ||
+            (static_cast<std::uint16_t>(mod_val) & kAreaCloakModValFlag) != 0U);
   };
   if (matches(outfit.mod_type, outfit.mod_val)) {
     return true;
@@ -113,7 +113,8 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
 
   if (ship.ship_instance_id == 0) {
     for (std::size_t index = 0;
-         index < state.inventory.outfit_owned_count.size(); ++index) {
+         index < state.inventory.outfit_owned_count.size();
+         ++index) {
       if (state.inventory.outfit_owned_count[index] <= 0) {
         continue;
       }
@@ -135,8 +136,7 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
     if (ship_class->default_outfit_counts[index] <= 0) {
       continue;
     }
-    if (const Outfit *outfit =
-            find_in(ship_class->default_outfit_ids[index])) {
+    if (const Outfit *outfit = find_in(ship_class->default_outfit_ids[index])) {
       return outfit;
     }
   }
@@ -178,25 +178,23 @@ bool NovaOutfit_HasAreaCloakingDevice(const GameState &state,
 }
 
 // Ghidra 0x00464db0 Outfit_GetCloakFuelDrainFlags.
-std::int16_t NovaOutfit_GetCloakFuelDrainFlags(
-    const GameState &state, const Ship &ship) {
+std::int16_t NovaOutfit_GetCloakFuelDrainFlags(const GameState &state,
+                                               const Ship &ship) {
   const Outfit *outfit = FindCloakingDevice(state, ship);
   return outfit == nullptr
              ? 0
-             : static_cast<std::int16_t>((static_cast<std::uint16_t>(
-                                               outfit->mod_val) >> 4) &
-                                          0x0fU);
+             : static_cast<std::int16_t>(
+                   (static_cast<std::uint16_t>(outfit->mod_val) >> 4) & 0x0fU);
 }
 
 // Ghidra 0x00465090 Outfit_GetCloakShieldDrainFlags.
 std::int16_t NovaOutfit_GetCloakShieldDrainFlags(const GameState &state,
-                                                const Ship &ship) {
+                                                 const Ship &ship) {
   const Outfit *outfit = FindCloakingDevice(state, ship);
   return outfit == nullptr
              ? 0
-             : static_cast<std::int16_t>((static_cast<std::uint16_t>(
-                                               outfit->mod_val) >> 12) &
-                                          0x0fU);
+             : static_cast<std::int16_t>(
+                   (static_cast<std::uint16_t>(outfit->mod_val) >> 12) & 0x0fU);
 }
 
 // Ghidra 0x00464e30 Outfit_HasCloakShieldDropOnActivation.
@@ -336,14 +334,14 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
         break;
       case OutfitEffect::kShieldRecharge: // opcode 5
         if (e.val != 0) {
-          s.shield_recharge += static_cast<float>(owned * e.val) *
-                               kShieldRechargeScale;
+          s.shield_recharge +=
+              static_cast<float>(owned * e.val) * kShieldRechargeScale;
         }
         break;
       case OutfitEffect::kArmorRecharge: // opcode 29
         if (e.val != 0) {
-          s.armor_recharge += static_cast<float>(owned * e.val) *
-                              kArmorRechargeScale;
+          s.armor_recharge +=
+              static_cast<float>(owned * e.val) * kArmorRechargeScale;
         }
         break;
       case OutfitEffect::kFuelCapacity: // opcode 12
@@ -374,8 +372,8 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
 // Ghidra 0x0046c080 Ship_ComputeIonizationDecayRate.
 float NovaOutfit_ComputeIonizationDecayRate(const GameState &state,
                                             const Ship &ship) {
-  const ShipClass *cls = state.scenario.Ship(
-      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   float rate = cls != nullptr ? cls->ionization_decay_rate : 0.0F;
   if (ship.ship_instance_id != 0) {
     return rate;
@@ -625,6 +623,31 @@ std::int16_t Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state) {
 std::int16_t Outfit_ComputePlayerFleetCargoCapacity(const GameState &state) {
   return static_cast<std::int16_t>(
       Outfit_ComputePlayerEffectiveStats(state).cargo_capacity);
+}
+
+// Ghidra 0x0046a730 Ship_ComputeShipTotalMass.
+std::int32_t Outfit_ComputePlayerTotalMass(const GameState &state) {
+  if (state.player.ship_class_id < 0) {
+    return 0;
+  }
+  const auto *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    return 0;
+  }
+  std::int32_t total_mass = ship_class->mass_tons;
+  for (std::size_t outfit_id = 0;
+       outfit_id < state.inventory.outfit_owned_count.size();
+       ++outfit_id) {
+    const auto owned = state.inventory.outfit_owned_count[outfit_id];
+    if (owned <= 0 || outfit_id >= state.scenario.outfits.size()) {
+      continue;
+    }
+    total_mass +=
+        static_cast<std::int32_t>(owned) *
+        state.scenario.outfits[outfit_id].PurchaseMass(ship_class->mass_tons);
+  }
+  return total_mass;
 }
 
 // Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace.

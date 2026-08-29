@@ -223,7 +223,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0043F080,Mission_ComputeReactionScheduleAfterSteps,,0%,
 0x0043F100,Mission_ActivateMissionAtSlot,src/game/mission.cpp,61%,"Clean-room zero-based mission selection, free-slot initialization, duplicate/definition checks, hull-mass/cargo and negative-credit acceptance gates, active-mission population, goal counters, rearm initialization, acceptance-fee deduction, text/script-buffer projection, and initial-briefing latch are implemented. Reaction execution, UI refresh, destination overlay, and automatic resolve branches remain TODO(decomp)."
 0x0043F8C0,Mission_PopulateMissionSlotFromDef,src/game/mission.cpp,45%,"Clean-room transfer of Ghidra-confirmed target, spawn, zero-based dude/government indices, current-system locator, special-ship type selection, and rearm-timer fields into ActiveMission, retaining the raw m\\x957n payload. Locator reachability, string expansion, randomized STR# entries, and script payloads remain TODO(decomp)."
-0x00440370,Mission_TryConsumeMissionInteractionResources,,0%,
+0x00440370,Mission_TryConsumeMissionInteractionResources,src/game/mission.cpp,85%,Clean-room port: mass/cargo gates + loadout dirty. TODO: STR# 0x7d2 0x165/0x166 denial dialogs (UI, logged)
 0x00440410,Mission_ResolveMissionSuccess,src/game/mission.cpp,70%,Clean-room port: success payload, govt rep delta (full/allied/hostile x0.5, half-even rounding), PayVal opcode. Missing: +0x3d debrief dialog + on-resolve availability reroll (both logged TODO)
 0x00440750,Government_ApplyReputationCreditDelta,src/game/government.cpp,100%,Full PayVal port: flat credits (+loadout dirty), -10128/-20128/-30128 rep clears (exact/allied/share-class), -40001..-40099 percent cash; half-even rounding; range map cross-checked against disasm + Bible
 0x00440930,Mission_ResolveMissionFailure,src/game/mission.cpp,80%,Clean-room port: failure payload, half-delta rep subtraction, slot clear + ClearMisnSlotAssignments. Missing: +0x3f failure debrief dialog (logged TODO)
@@ -435,7 +435,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046A220,Outfit_RebuildAvailableOutfitListForTravelStellar,src/game/landed_store.cpp,45%,Partial clean-room availability list: decoded stellar base/special tech gates, valid-resource and owned visibility handling, Require and availability expressions, display-weight-zero inclusion, equal-weight suppression, and descending stable ordering; random stock and full flag semantics remain TODO(decomp).
 0x0046A5D0,Outfit_ComputePlayerCargoAndJunkTotal,,0%,
 0x0046A680,Outfit_HasAnyOwnedItem,,0%,
-0x0046A730,Ship_ComputeShipTotalMass,,0%,
+0x0046A730,Ship_ComputeShipTotalMass,src/game/outfit.cpp,100%,Clean-room port as Outfit_ComputePlayerTotalMass: class base mass + owned outfits' PurchaseMass (load-type-2 mass, hull-proportional via load-time derivation)
 0x0046A7C0,Outfit_ComputeRemainingCargoSpace,,0%,
 0x0046A870,NovaUi_RedrawGameplayViewportAndRadar,,0%,
 0x0046AAD0,NovaEffects_QueueCenteredResource,,0%,
@@ -513,7 +513,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046EF00,CString_Equals,,0%,
 0x0046EF80,NovaUi_HideTravelSelectionSprite,,0%,
 0x0046EFB0,Stellar_GetJumpSequenceDurationMs,,0%,
-0x0046EFD0,Stellar_AreStellarsEquivalent,,0%,
+0x0046EFD0,Stellar_AreStellarsEquivalent,src/game/mission.cpp,100%,Clean-room port as NovaStellar_AreStellarsEquivalent: id equality or same pos+display-name twins; [0,0x800) range gate
 0x0046F100,Government_IsReputationTrackingGovernment,,0%,
 0x0046F140,Ship_HasAnyCargoLootOrActiveMission,,0%,
 0x0046F1E0,Frame_AddCombatRatingPoints,,0%,
