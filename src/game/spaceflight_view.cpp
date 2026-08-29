@@ -5,6 +5,7 @@
 #include "../rle_sprite_sheet.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "hud_renderer.hpp"
 #include "impact_effects.hpp"
 #include "ship_ai.hpp"
 #include "ship_visual.hpp"
@@ -1353,6 +1354,32 @@ std::int16_t SpaceflightView::PickShipAt(SdlPlatform &platform,
     }
   }
   return best;
+}
+
+void SpaceflightView::DrawGameFrame(SdlPlatform &platform,
+                                    const GameState &state,
+                                    HudRenderer &hud) {
+  // The free-flight world extends: draw 1:1 across the whole (possibly larger)
+  // window with no centre-clipping. Modal windows re-assert their own
+  // presentation after this, so set the fullscreen viewport here every frame.
+  platform.SetFullscreenPlayfield();
+  Draw(platform, state);
+  // HUD overlays the extending world at fixed, unscaled size (the project's
+  // resolution policy: more window = more system shown, NOT a bigger HUD).
+  hud.Draw(platform, state);
+  // Hyperspace fire flash: a full-screen white frame at the jump moment (the
+  // original's centered effect 0x32 queued at engage, the 'boom' flash).
+  // Drawn topmost so it also whites out the HUD, then fades over the next few
+  // frames as the loop decays screen_flash_intensity.
+  if (state.screen_flash_intensity > 0.0F) {
+    SDL_Renderer *const renderer = platform.renderer();
+    const std::uint8_t a = static_cast<std::uint8_t>(
+        std::clamp(state.screen_flash_intensity, 0.0F, 1.0F) * 255.0F);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, a);
+    SDL_RenderFillRect(renderer, nullptr);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  }
 }
 
 } // namespace game

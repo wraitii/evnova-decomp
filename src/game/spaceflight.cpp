@@ -254,39 +254,6 @@ void NovaFrame_TickSystems(GameState &state,
   Stub_BeamHitQueue(state, elapsed_ticks);
 }
 
-// Draw one in-game frame. The starfield, stellar bodies and the pilot's ship
-// are handled by the SpaceflightView (gh.getId 0x00417600 scope 2 sprite-world
-// draw + Frame_RenderViewportBackground); the gov-specific HUD (cockpit PICT,
-// life-support bars and readouts) is composited by the HudRenderer over the
-// world, unscaled. The world view is centred on the player so the ship sits at
-// the play-area centre.
-void DrawInGameFrame(SdlPlatform &platform,
-                     GameState &state,
-                     SpaceflightView &view,
-                     HudRenderer &hud) {
-  // The free-flight world extends: draw 1:1 across the whole (possibly larger)
-  // window with no centre-clipping. The landed modal already restores its own
-  // centred playfield each frame, so re-assert the fullscreen viewport here.
-  platform.SetFullscreenPlayfield();
-  view.Draw(platform, state);
-  // HUD overlays the extending world at fixed, unscaled size (the project's
-  // resolution policy: more window = more system shown, NOT a bigger HUD).
-  hud.Draw(platform, state);
-  // Hyperspace fire flash: a full-screen white frame at the jump moment (the
-  // original's centered effect 0x32 queued at engage, the 'boom' flash).
-  // Drawn topmost so it also whites out the HUD, then fades over the next few
-  // frames as the loop decays screen_flash_intensity.
-  if (state.screen_flash_intensity > 0.0F) {
-    SDL_Renderer *const renderer = platform.renderer();
-    const std::uint8_t a = static_cast<std::uint8_t>(
-        std::clamp(state.screen_flash_intensity, 0.0F, 1.0F) * 255.0F);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, a);
-    SDL_RenderFillRect(renderer, nullptr);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-  }
-}
-
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
 // phase skeleton (setup + full first tick, then per-frame pre-draw/sim,
 // drawing, post-draw) and the run_full_tick freeze gate. Simulation is still
@@ -368,7 +335,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   NovaFrame_TickSystems(state,
                         /*run_full_tick=*/true,
                         /*elapsed_ticks=*/1.0F);
-  DrawInGameFrame(platform, state, view, hud);
+  view.DrawGameFrame(platform, state, hud);
   SDL_RenderPresent(platform.renderer());
 
   // ---- Main loop ----------------------------------------------------------
@@ -393,10 +360,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool land_was_held = false;
   bool target_action_was_held = false;
   bool board_was_held = false;
-  // Set by the board dispatch (NovaBoarding_HandleBoardTargetCommand); the
-  // plunder modal opens right after this frame's present so the snapshot taken
-  // by NovaBoarding_FinishBoardCommand holds the live space view.
-  bool open_boarding_window = false;
   std::int16_t prev_travel_stellar = state.travel.selected_stellar_id;
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = SDL_GetTicks();
@@ -827,11 +790,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Board command ('b', edge-triggered): Ship_HandlePlayerBoardTargetCommand
     // (0x0045a3d0). Like the original's command-latch read in
     // Ship_HandlePlayerShipCore this runs every frame regardless of jump state;
-    // its own gates reject un-boardable targets. On dispatch the plunder modal
-    // opens after this frame's present (see open_boarding_window above).
+    // its own gates reject un-boardable targets. The dispatch may open the
+    // boarding/plunder modal (blocking on the flight loop); the modal renders
+    // the live game view beneath itself via SpaceflightView::DrawGameFrame.
     if (board_pressed) {
-      open_boarding_window =
-          NovaBoarding_HandleBoardTargetCommand(state);
+      NovaBoarding_HandleBoardTargetCommand(platform, audio, state, view, hud);
       if (returning_to_menu) {
         break;
       }
@@ -864,19 +827,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
-    DrawInGameFrame(platform, state, view, hud);
+    view.DrawGameFrame(platform, state, hud);
     SDL_RenderPresent(platform.renderer());
-
-    // The plain-ship board dispatch ran this frame: open the plunder modal now
-    // that a fresh flight frame is on screen (its snapshot becomes the modal
-    // background).
-    if (open_boarding_window) {
-      open_boarding_window = false;
-      NovaBoarding_FinishBoardCommand(platform, audio, state, hud);
-      if (returning_to_menu) {
-        break;
-      }
-    }
 
     // Ghidra scope 3 "post-draw tasks": pump the primary mouse command; when
     // latched bit sets DAT_00596d38 (return to menu) and, while the frame is

@@ -246,23 +246,25 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    hit/hover filtering mirrors 0x004a22e0. Commodity names load from STR# 0xfa1
    (entry cargo_type+1, the original's DAT_0069d2cc source); weapon names from
    Outfit LCName/LCPlural.
-4. **Modal background + trip diagnostics** — the flight loop now opens the
-   plunder window right after `SDL_RenderPresent` (dispatch split:
-   `NovaBoarding_HandleBoardTargetCommand` returns the plain-ship flag,
-   `NovaBoarding_FinishBoardCommand` snapshots the presented frame via
-   `SdlPlatform::CapturePlayfieldSnapshot` — the centred 640x480 region read
-   in output pixels, since `SDL_RenderReadPixels` works at backing
-   resolution — and runs the window over it), so the live space view stays
-   visible behind the modal at full playfield size with NO dim scrim (the
-   original composites the DLOG directly over the gameplay surface). Added
-   action/roll/close logging (`board: action …`, `panic re-roll
-   survived/tripped`, `window closed (…)`). Note verified against the
-   decompile: the panic self-destruct re-roll is ONE `rand(100) <= panic`
-   check on the loop iteration after each *successful* loot action (the
-   original clears its latch every iteration) — the earlier "per frame" note
-   was wrong. Trips on loot clicks (15–40% base, panic ×2/×1.25/×1.5 per
-   action) and capture-fail closes at low odds are authentic original
-   behavior; use the logs to confirm in-game.
+4. **Modal background + trip diagnostics** — the plunder window renders the
+   LIVE game view beneath itself every frame: `SpaceflightView::DrawGameFrame`
+   (the former `DrawInGameFrame` — fullscreen world draw + HUD + fire flash)
+   runs, then the window composites over it in the centred 640x480
+   presentation. No pixel snapshots and no scrim: the original draws its DLOG
+   over the unmodified gameplay surface, and the HUD's overlay-message rect
+   (loot / "Oops!" text) stays visible at its normal bottom-of-window spot
+   while the window is open. The flight simulation itself is paused during
+   the modal (the dispatch runs the window synchronously again; the
+   dispatch/post-present split was reverted). Pixel-read snapshots
+   (`SDL_RenderReadPixels` after present) were tried and abandoned: the
+   backbuffer is undefined after present and the reads came back mostly
+   black/mis-scaled. Also added action/roll/close logging (`board: action …`,
+   `panic re-roll survived/tripped`, `window closed (…)`). Note verified
+   against the decompile: the panic self-destruct re-roll is ONE
+   `rand(100) <= panic` check on the loop iteration after each *successful*
+   loot action (the original clears its latch every iteration). Trips on loot
+   clicks (15–40% base, panic ×2/×1.25/×1.5 per action) and capture-fail
+   closes at low odds are authentic original behavior.
 4b. **Overlay lifetime + range gate corrections** — `NovaHud_ShowOverlay-
    Message`'s second parameter is a FRAME countdown, not ms/colour:
    `g_hud_overlay_msg_color` doubles as the counter and

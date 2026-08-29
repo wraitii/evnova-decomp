@@ -169,15 +169,6 @@ public:
   [[nodiscard]] std::uint64_t ticks_ms() const;
   [[nodiscard]] SDL_FPoint mouse_position() const;
 
-  // Snapshot of the centred 640x480 playfield region of the last presented
-  // frame. SDL_RenderReadPixels works in output pixels, so the read rect is
-  // ApplyCenteredPresentation's playfield viewport scaled by the backing
-  // density; the returned texture is density x larger than 640x480 and is
-  // meant to be blitted back into the logical playfield rect 1:1. Null on
-  // failure. Call right after SDL_RenderPresent (backbuffer contents are
-  // undefined afterwards).
-  [[nodiscard]] std::unique_ptr<SdlTexture> CapturePlayfieldSnapshot();
-
   // The current window->content presentation policy for this frame. See
   // SetCenteredPlayfield / SetScaledPlayfield / SetFullscreenPlayfield.
   enum class Presentation { kCentered, kScaled, kFullscreen };

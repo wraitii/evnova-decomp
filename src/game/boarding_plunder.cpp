@@ -25,6 +25,7 @@
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
 #include "ship_visual.hpp"
+#include "spaceflight_view.hpp"
 #include "targeting.hpp"
 
 #include <SDL3/SDL.h>
@@ -499,35 +500,37 @@ void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
 // -restricted target, same system, close range, matched heading, low relative
 // velocity, target crew >= 1), then dispatches the boarding/plunder window
 // (plain ships). Mission arms and the post-hit escort/fighter arms are
-// TODO(decomp) below. Entry: called on the 'b' edge during flight. Exit:
-// returns false after a denial (STR# 0x7d2 overlay queued) or no-op; returns
-// true only after the plain-ship dispatch (velocity matched, "boarded" cue
-// queued) — the caller must then run NovaBoarding_FinishBoardCommand right
-// after presenting a frame so the modal can snapshot it as its background.
+// TODO(decomp) below. Entry: called on the 'b' edge during flight; the modal
+// renders the live game view through `view`/`hud` while it is open. Exit:
+// returns with the target boarded or an STR# 0x7d2 denial overlay queued.
 // Confidence: high on gates, dispatch arms partially reconstructed.
-bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
+void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
+                                           SdlAudio &audio,
+                                           GameState &state,
+                                           SpaceflightView &view,
+                                           HudRenderer &hud) {
   // The original latches DAT_007354a5 ("player acted") for the frame-timing
   // refresh in Frame_SpaceflightLoop; not modelled here.
   EnsureTransitionSounds(state);
 
   if (state.player.primary_target_ship_slot == -1) {
-    return false;
+    return;
   }
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(state.player)) {
-    return false; // player cloaked past the visibility threshold: silent no-op
+    return; // player cloaked past the visibility threshold: silent no-op
   }
 
   Ship &player = state.player;
   const std::int16_t target_slot = player.primary_target_ship_slot;
   if (target_slot < 1 ||
       !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
-    return false;
+    return;
   }
   Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
   const ShipClass *target_class = state.scenario.Ship(
       static_cast<std::int16_t>(target.ship_class_id + 0x80));
   if (target_class == nullptr) {
-    return false;
+    return;
   }
 
   // ---- Target eligibility (denial = STR# 0x7d2 pool 0x81) -----------------
@@ -548,7 +551,7 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
     NovaLog::Info(
         "board: target slot {} ({}) denied — rehired_mark={} "
         "fire_restricted={} active={} same_system={} mission_ship={:#x} "
-        "player_destroyed={} armor={:.0f}/{} (disabled < {:.2f})",
+        "player_destroyed={} armor={:.0f}/{} (boardable when armor < {:.2f})",
         target_slot,
         diag_class != nullptr ? diag_class->display_name : "?",
         target.escort_rehired_mark,
@@ -566,7 +569,7 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
             : 0.0F);
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
-    return false;
+    return;
   }
 
   constexpr float kBoardVelocityGate = 0.5F; // _DAT_00575598
@@ -578,7 +581,7 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
       std::fabs(target.vel_y - player.vel_y) > kBoardVelocityGate) {
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x83); // "You're moving too fast to board..."
-    return false;
+    return;
   }
 
   // ---- Range gate (per-axis, half of the target's full sprite frame) -----
@@ -587,7 +590,7 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
       std::fabs(target.pos_y - player.pos_y) > span.full_y * kBoardRangeShare) {
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x82); // "You're not close enough to board..."
-    return false;
+    return;
   }
 
   // ---- Heading gate -------------------------------------------------------
@@ -614,7 +617,7 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
           static_cast<int>(kBoardHeadingToleranceDeg) &&
       shortest_delta(player_heading, target_heading + 180) >
           static_cast<int>(kBoardHeadingToleranceDeg)) {
-    return false;
+    return;
   }
 
   // ---- Boardability -------------------------------------------------------
@@ -626,7 +629,7 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
                   "arms of Ship_HandlePlayerBoardTargetCommand not "
                   "reconstructed",
                   target.mission_fleet_slot);
-    return false;
+    return;
   }
   // Plain ships: Bible "Ships with 0 crew can't be boarded".
   if (target_class->crew < 1) {
@@ -635,7 +638,7 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
                   target_class->display_name);
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
-    return false;
+    return;
   }
 
   // ---- Dispatch -----------------------------------------------------------
@@ -665,37 +668,15 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
   }
 
   QueueUiSound(state, 4, 8); // the "boarded" cue repeats 8x in the original
-  return true;
-}
-
-void NovaBoarding_FinishBoardCommand(SdlPlatform &platform,
-                                     SdlAudio &audio,
-                                     GameState &state,
-                                     const HudRenderer &hud) {
-  // Snapshot the 640x480 playfield region of the flight frame the loop just
-  // presented: the modal blits it as its backdrop so the space view stays
-  // visible behind the window (the original composites the DLOG over the
-  // gameplay surface).
-  std::unique_ptr<SdlTexture> background = platform.CapturePlayfieldSnapshot();
-  if (!background) {
-    NovaLog::Warn("board: could not snapshot the flight frame for the plunder "
-                  "window background");
-  }
-  const BoardingWindowResult result = NovaBoarding_RunWindow(
-      platform, audio, state, background ? background->get() : nullptr, &hud);
+  const BoardingWindowResult result =
+      NovaBoarding_RunWindow(platform, audio, state, view, hud);
   (void)result;
 
   // After the interaction: latch + clear every ship targeting the boarded
   // hull (Ship_ClearOtherShipsTargetingShip 0x00415dc0; the port's
   // destroyed-reference helper performs the same clearing).
-  const std::int16_t target_slot = state.player.primary_target_ship_slot;
-  if (target_slot >= 1 &&
-      state.SlotInRange(static_cast<std::size_t>(target_slot))) {
-    Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-    target.escort_rehired_mark = 1;
-    NovaTargeting_ClearDestroyedShipReferences(state,
-                                               target.ship_instance_id);
-  }
+  target.escort_rehired_mark = 1;
+  NovaTargeting_ClearDestroyedShipReferences(state, target.ship_instance_id);
 }
 
 namespace {
@@ -1034,31 +1015,17 @@ void DrawBoardWindow(SdlPlatform &platform,
                      const std::array<BoardButton, 6> &buttons,
                      const BoardingPlunderOptions &options,
                      const GameState &state,
+                     SpaceflightView &view,
+                     HudRenderer &hud,
                      SDL_Texture *backdrop,
-                     SDL_Texture *background,
-                     const HudRenderer *hud,
                      int hovered) {
   SDL_Renderer *renderer = platform.renderer();
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(renderer);
+  // Render the live game view normally beneath the window (the flight sim is
+  // paused, so this redraws the same world each frame): the original draws
+  // its DLOG over the unmodified gameplay surface, and the HUD's overlay
+  // message rect (loot / "Oops!" text) stays visible below the window.
+  view.DrawGameFrame(platform, state, hud);
   platform.SetCenteredPlayfield();
-  // Live flight-frame snapshot behind the window (the original composites the
-  // DLOG over the still-visible gameplay surface); fallback is the black
-  // clear above.
-  if (background != nullptr) {
-    SDL_SetTextureBlendMode(background, SDL_BLENDMODE_NONE);
-    const SDL_FRect frame{0.0F, 0.0F, 640.0F, 480.0F};
-    SDL_RenderTexture(renderer, background, nullptr, &frame);
-  }
-  // No scrim: the original composites the DLOG directly over the unmodified
-  // gameplay surface.
-
-  // The original blits loot/self-destruct messages into the gameplay
-  // surface's message rect, which stays visible below the window while the
-  // modal is open.
-  if (hud != nullptr) {
-    hud->DrawOverlayMessage(platform, state, {640.0F, 480.0F});
-  }
 
   const SDL_FRect window{
       kBoardWindowX, kBoardWindowY, kBoardWindowW, kBoardWindowH};
@@ -1245,12 +1212,11 @@ void SelfDestructTarget(GameState &state) {
 // NovaUi_ShowCaptureDecisionDialog 0x00497eb0, is TODO(decomp)). The window
 // plays its one-shot cues directly through `audio` (the flight loop owns the
 // device).
-[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(
-    SdlPlatform &platform,
-    SdlAudio &audio,
-    GameState &state,
-    SDL_Texture *background,
-    const HudRenderer *hud) {
+[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(SdlPlatform &platform,
+                                                          SdlAudio &audio,
+                                                          GameState &state,
+                                                          SpaceflightView &view,
+                                                          HudRenderer &hud) {
   BoardingWindowResult result;
 
   const std::int16_t target_slot = state.player.primary_target_ship_slot;
@@ -1358,9 +1324,9 @@ void SelfDestructTarget(GameState &state) {
                     buttons,
                     options,
                     state,
-                    backdrop ? backdrop->get() : nullptr,
-                    background,
+                    view,
                     hud,
+                    backdrop ? backdrop->get() : nullptr,
                     hovered);
     SDL_RenderPresent(platform.renderer());
 

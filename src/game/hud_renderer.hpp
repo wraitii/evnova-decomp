@@ -65,16 +65,6 @@ public:
   // bars and readouts inherit that horizontal offset.
   void Draw(SdlPlatform &platform, const GameState &state);
 
-  // Draws just the transient overlay message (the tail block of Draw).
-  // Modal windows that composite over a live flight-frame snapshot call this
-  // so loot/self-destruct messages (0xf0-frame overlays) stay visible below
-  // the window while it is open, as the original's message rect does. Pass
-  // `logical` as the 640x480 playfield in that case; empty uses the window
-  // size (the extending flight view).
-  void DrawOverlayMessage(SdlPlatform &platform,
-                          const GameState &state,
-                          SDL_FPoint logical = {0.0F, 0.0F}) const;
-
   [[nodiscard]] bool installed() const { return installed_; }
 
 private:

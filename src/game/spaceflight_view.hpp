@@ -31,6 +31,7 @@ struct SDL_Renderer;
 
 namespace game {
 struct GameState;
+class HudRenderer;
 
 class SpaceflightView {
 public:
@@ -49,6 +50,13 @@ public:
   // starfield, stellar bodies, shots, NPC ships in the current system, player
   // ship) into the current renderer.
   void Draw(SdlPlatform &platform, const GameState &state);
+
+  // Draws one full in-game frame: the extending world via Draw, then the HUD
+  // (cockpit PICT, bars, readouts, overlay message) over it, then the
+  // hyperspace fire flash. The body of spaceflight.cpp's former
+  // DrawInGameFrame; modal windows that composite over the live game view
+  // (the boarding/plunder window) call this instead of snapshotting pixels.
+  void DrawGameFrame(SdlPlatform &platform, const GameState &state, HudRenderer &hud);
 
   // Ghidra NovaUi_UpdateShipTargetReticle (0x0042ede0): draws the 4-corner
   // bracket reticle around the player's primary target ship (state.player
