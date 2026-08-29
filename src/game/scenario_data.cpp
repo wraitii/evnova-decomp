@@ -83,8 +83,8 @@ namespace {
   mission.special_ship_goal = ReadBeI16(bytes, 0x06);
   mission.special_ship_behavior = ReadBeI16(bytes, 0x08);
   mission.special_ship_start = ReadBeI16(bytes, 0x0a);
-  mission.special_ship_count = ReadBeI16(bytes, 0x12);
-  mission.special_ship_system = ReadBeI16(bytes, 0x10);
+  mission.cargo_qty_tons = ReadBeI16(bytes, 0x12);
+  mission.cargo_type_resource = ReadBeI16(bytes, 0x10);
   mission.on_start_condition = ReadBeI16(bytes, 0x5a);
   mission.on_fail_condition = ReadBeI16(bytes, 0x0c);
   mission.on_success_condition = ReadBeI16(bytes, 0x0e);
@@ -106,7 +106,10 @@ namespace {
   mission.drop_off_mode = ReadBeI16(bytes, 0x16);
   mission.scan_mask = ReadBeI16(bytes, 0x18);
   mission.on_resolve_repeat_count = ReadBeI16(bytes, 0x48);
-  mission.resource_delta_or_cost = ReadBeI32(bytes, 0x4a);
+  // PayVal: populate (0x0043f8c0) reads this 4-byte field from payload +0x1c
+  // into MisnActive +0x22. The prior +0x4a read overlapped AuxShipDude/
+  // AuxShipSyst and fed garbage into the fee/pay chain.
+  mission.resource_delta_or_cost = ReadBeI32(bytes, 0x1c);
   mission.aux_ships_left = ReadBeI16(bytes, 0x50);
   mission.initial_ship_count = ReadBeI16(bytes, 0x52);
   // The active-slot population copies these two values from resource +0x50
@@ -123,8 +126,10 @@ namespace {
   mission.competing_government_id = ReadBeI16(bytes, 0x2e);
   mission.competing_reputation_delta = ReadBeI16(bytes, 0x30);
   mission.mission_ship_count_max = ReadBeI16(bytes, 0x48);
-  mission.mission_fleet_metric = ReadBeI16(bytes, 0x4a);
-  mission.auxiliary_ship_dude = ReadBeI16(bytes, 0x4c);
+  // Bible aux-ship fields: AuxShipDude (+0x4a) and AuxShipSyst (+0x4c); the
+  // prior reads were swapped relative to populate (0x0043f8c0).
+  mission.mission_fleet_metric = ReadBeI16(bytes, 0x4c);
+  mission.auxiliary_ship_dude = ReadBeI16(bytes, 0x4a);
   mission.start_visited = ReadBeI16(bytes, 0x42) != 0;
   for (std::size_t i = 0; i < mission.text_description_ids.size(); ++i) {
     mission.text_description_ids[i] =

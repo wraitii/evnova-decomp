@@ -65,8 +65,8 @@ struct ActiveMission {
   std::int16_t fleet_spawn_goal = 0;        // +0x0c
   std::int16_t special_ship_spawn_mode = 0; // +0x0e
   std::int16_t current_system_id = -1;      // +0x10
-  std::int16_t special_ship_system_id = -1; // +0x12
-  std::int16_t special_ship_count = 0;      // +0x14
+  std::int16_t cargo_type_id = -1;          // +0x12
+  std::int16_t cargo_qty_tons = 0;          // +0x14
   // Bible PickupMode (+0x16: -1 ignored, 0 at accept, 1 at TravelStel, 2
   // when boarding), DropOffMode (+0x18: 0 at TravelStel, 1 at ReturnStel)
   // and ScanMask (+0x1a, govts whose scans flag the cargo).
@@ -135,8 +135,8 @@ struct MissionTargetResolution {
   std::int16_t travel_system_id = -1;
   std::int16_t return_stellar_id = -1;
   std::int16_t return_system_id = -1;
-  std::int16_t special_ship_system_id = -1;
-  std::int16_t special_ship_count = 0;
+  std::int16_t cargo_type_id = -1;
+  std::int16_t cargo_qty_tons = 0;
   std::int32_t priority_payload = 0;
   std::int16_t reaction_schedule = 0;
 };

@@ -79,7 +79,7 @@ MissionControlExpressionState(const GameState &state) {
 [[nodiscard]] bool
 Mission_PassesAcceptanceResourceGates(const GameState &state,
                                       const MissionDef &definition) {
-  if (definition.special_ship_count > 0 && state.player.ship_class_id >= 0) {
+  if (definition.cargo_qty_tons > 0 && state.player.ship_class_id >= 0) {
     const auto *ship_class = state.scenario.Ship(static_cast<std::int16_t>(
         state.player.ship_class_id + kResourceIdBase));
     if (ship_class != nullptr) {
@@ -87,9 +87,9 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
       // opening its original error dialog. Outfit purchase mass is already
       // normalized for hull-proportional outfits by ScenarioData.
       const std::int32_t total_mass = Outfit_ComputePlayerTotalMass(state);
-      if (total_mass < definition.special_ship_count ||
+      if (total_mass < definition.cargo_qty_tons ||
           Outfit_ComputeRemainingCargoSpace(state) <
-              definition.special_ship_count) {
+              definition.cargo_qty_tons) {
         return false;
       }
     }
@@ -503,10 +503,10 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
                                     target.travel_stellar_id);
     target.return_system_id =
         ResolveContainingSystem(state, target.return_stellar_id);
-    target.special_ship_system_id =
-        ResolveSpecialShipSystem(state, definition.special_ship_system);
-    target.special_ship_count =
-        ResolveSpecialShipCount(state, definition.special_ship_count);
+    target.cargo_type_id =
+        ResolveSpecialShipSystem(state, definition.cargo_type_resource);
+    target.cargo_qty_tons =
+        ResolveSpecialShipCount(state, definition.cargo_qty_tons);
   }
 }
 
@@ -568,14 +568,17 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.special_ship_spawn_mode = definition->special_ship_spawn_mode;
   active.current_system_id =
       ResolveMissionCurrentSystem(state, *definition, target);
-  active.special_ship_system_id =
-      target.special_ship_system_id >= 0
-          ? target.special_ship_system_id
-          : ResolveSpecialShipSystem(state, definition->special_ship_system);
-  active.special_ship_count =
-      target.special_ship_count > 0
-          ? target.special_ship_count
-          : ResolveSpecialShipCount(state, definition->special_ship_count);
+  // Resolved Bible CargoType/CargoQty (m\xefsn +0x10/+0x12 via the target
+  // table +0x04/+0x06); the prior names special_ship_system_id/count were
+  // misnomers.
+  active.cargo_type_id =
+      target.cargo_type_id >= 0
+          ? target.cargo_type_id
+          : ResolveSpecialShipSystem(state, definition->cargo_type_resource);
+  active.cargo_qty_tons =
+      target.cargo_qty_tons > 0
+          ? target.cargo_qty_tons
+          : ResolveSpecialShipCount(state, definition->cargo_qty_tons);
   // Bible PickupMode/DropOffMode/ScanMask (payload +0x14/+0x16/+0x18);
   // the previous port wrongly filled these with resolved system ids.
   active.pickup_mode = definition->pickup_mode;
@@ -609,7 +612,7 @@ bool Mission_PopulateActiveSlot(GameState &state,
         active.aux_ships_dude_def_index - kResourceIdBase);
   }
   active.mission_ship_count_active = active.mission_ship_count_max;
-  active.mission_fleet_metric_b = definition->auxiliary_ship_dude;
+  active.mission_fleet_metric_b = definition->mission_fleet_metric;
   active.mission_fleet_metric_c = 0;
   active.special_ship_type_index =
       SelectMissionShipType(state, active.dude_def_index, active.flags_primary);
@@ -1236,7 +1239,7 @@ void Mission_ProcessInteractionReactionSlotResources(
     if (mission.drop_off_mode == 1 && !mission.carrying_resources) {
       // Pick up here: gate on hauling the special-ship count as tonnage.
       if (Mission_TryConsumeMissionInteractionResources(
-              state, mission.special_ship_count)) {
+              state, mission.cargo_qty_tons)) {
         mission.carrying_resources = true;
         runtime.initial_briefing_done = true;
         if (mission.brief_description_ids[2] != -1) {

@@ -248,8 +248,8 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     put_i16(0x0c, mission.fleet_spawn_goal);
     put_i16(0x0e, mission.special_ship_spawn_mode);
     put_i16(0x10, mission.current_system_id);
-    put_i16(0x12, mission.special_ship_system_id);
-    put_i16(0x14, mission.special_ship_count);
+    put_i16(0x12, mission.cargo_type_id);
+    put_i16(0x14, mission.cargo_qty_tons);
     put_i16(0x16, mission.pickup_mode);
     put_i16(0x18, mission.drop_off_mode);
     put_i16(0x1a, mission.scan_mask);
@@ -439,8 +439,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.fleet_spawn_goal = get_i16(0x0c);
       mission.special_ship_spawn_mode = get_i16(0x0e);
       mission.current_system_id = get_i16(0x10);
-      mission.special_ship_system_id = get_i16(0x12);
-      mission.special_ship_count = get_i16(0x14);
+      mission.cargo_type_id = get_i16(0x12);
+      mission.cargo_qty_tons = get_i16(0x14);
       mission.pickup_mode = get_i16(0x16);
       mission.drop_off_mode = get_i16(0x18);
       mission.scan_mask = get_i16(0x1a);

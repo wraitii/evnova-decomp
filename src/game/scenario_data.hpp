@@ -119,8 +119,9 @@ struct MissionDef {
   std::int16_t special_ship_goal = 0;     // resource +0x04
   std::int16_t special_ship_behavior = 0; // +0x06
   std::int16_t special_ship_start = 0;    // +0x08
-  std::int16_t special_ship_count = 0;    // resource +0x12
-  std::int16_t special_ship_system = -1;  // resource +0x10
+  std::int16_t cargo_qty_tons = 0;        // resource +0x12 (Bible CargoQty)
+  std::int16_t cargo_type_resource = -1;  // resource +0x10 (Bible CargoType:
+                                          // -1 none, 0-255, 1000 random)
   std::int16_t on_start_condition = -1;   // resource +0x5a
   std::int16_t on_fail_condition = -1;    // resource +0x0c
   std::int16_t on_success_condition = -1; // resource +0x0e

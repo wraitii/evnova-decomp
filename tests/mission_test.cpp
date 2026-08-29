@@ -93,8 +93,8 @@ TEST_CASE(
   definition.flags_secondary = 0x0040;
   definition.on_fail_condition = 0x80;
   definition.on_success_condition = 0x81;
-  definition.special_ship_system = 7;
-  definition.special_ship_count = 2;
+  definition.cargo_type_resource = 7;
+  definition.cargo_qty_tons = 2;
   definition.current_system_locator = -1;
   definition.pickup_mode = 0;
 
