@@ -108,6 +108,26 @@ private:
   TargetPortrait(SdlPlatform &platform,
                  const ScenarioData &scenario,
                  std::int16_t class_id);
+
+  // The four gameplay text panels, one per original draw path. Each mirrors
+  // its Ghidra function: shared top-right anchor transform, label/value
+  // colour split, STR# 0x7d2 strings and per-row cursor geometry.
+  void DrawTravelPanel(SdlPlatform &platform,
+                       const GameState &state,
+                       const SDL_Color &value_color,
+                       const SDL_Color &label_color);
+  void DrawWeaponPanel(SdlPlatform &platform,
+                       const GameState &state,
+                       const SDL_Color &value_color,
+                       const SDL_Color &label_color);
+  void DrawTargetPanel(SdlPlatform &platform,
+                       const GameState &state,
+                       const SDL_Color &value_color,
+                       const SDL_Color &label_color);
+  void DrawCargoPanel(SdlPlatform &platform,
+                      const GameState &state,
+                      const SDL_Color &value_color,
+                      const SDL_Color &label_color);
 };
 
 } // namespace game

@@ -265,6 +265,10 @@ struct ShipClass {
   std::string display_name; // resource name / target display
   std::string short_name;   // shipyard menu label
   std::string long_name;    // purchase dialog / new-pilot text
+  // Ghidra ShipClassDef +0xac <- shp payload +0x6e6 C string (Bible
+  // "Subtitle: The subtitle to show on the target display for this ship
+  // type", e.g. "Class A"). Drawn under the target-panel name.
+  std::string subtitle;
 
   std::int16_t cargo_holds = 0;   // Holds
   std::int16_t base_shield = 0;   // Shield

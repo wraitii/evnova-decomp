@@ -483,6 +483,12 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   // NovaData_LoadScenarioResourceTables (0x004bd3c0).  Only the scripts used
   // by landed stores are named here; the two intervening script blocks remain
   // intentionally unmodelled pending callsite attribution.
+  // Ghidra 0x004bd3c0 ship section: ShipClassDef +0xac <- payload +0x6e6 C
+  // string (Bible Subtitle), Pascal-ized in memory and drawn on the target
+  // display under the ship name.
+  if (bytes.size() >= 0x6e7) {
+    s.subtitle = ReadCString(bytes, 0x6e6);
+  }
   s.availability_expr = ReadCString(bytes, 0x6c);
   s.on_purchase_expr = ReadCString(bytes, 0x26a);
   s.on_retire_expr = ReadCString(bytes, 0x4cf);

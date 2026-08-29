@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "hud_overlay.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
@@ -177,13 +178,6 @@ HudRenderer::TargetPortrait(SdlPlatform &platform,
   return it->second->texture ? it->second.get() : nullptr;
 }
 
-[[nodiscard]] SDL_FRect ProjectPanel(const HudPanelRect &panel) {
-  return SDL_FRect{static_cast<float>(panel.left),
-                   static_cast<float>(panel.top),
-                   static_cast<float>(panel.width()),
-                   static_cast<float>(panel.height())};
-}
-
 // Draws one life-support bar from its real layout panel rect, faithfully
 // reproducing the game's fill geometry (HudBar_FillRect mirrors
 // NovaUi_DrawPlayerShieldBar 0x0045ea66 / _ArmorBar 0x0045ebe8 /
@@ -208,30 +202,233 @@ void DrawLifeBar(SDL_Renderer *renderer,
   SDL_RenderFillRect(renderer, &rect);
 }
 
-// Draws the readout panel text (travel / weapon ammo / target / cargo) at the
-// panel's genuine position, in the interface's value colour and the .ntf body
-// font size (e.g. 12 for Geneva).
-void DrawReadout(SdlPlatform &platform,
-                 NovaFontCache &font,
-                 float font_size_px,
-                 const HudPanelRect &panel,
-                 std::string_view text,
-                 const SDL_Color &color,
-                 float baseline_offset) {
-  if (!panel.valid() || text.empty()) {
+// ---------------------------------------------------------------------------
+// Shared panel-drawing helpers. The original renders every gameplay panel
+// through a DrawContext whose cursor is the text BASELINE, at ui_scale 1 for
+// the shipped 640x480 logical surface, so the scale-rounded offsets in the
+// Ghidra helpers (e.g. "param_4 - 0x16 + round(ui_scale * 22)") reduce to
+// their constants here.
+// ---------------------------------------------------------------------------
+
+// The gameplay-panel STR# pools. Resource_LoadStringEntry (0x004b8ca0) and
+// Resource_DrawStringEntry (0x004cd1f0) take 1-BASED indices; our
+// NovaHud_LoadStringEntry is 0-based, so entries are recorded as 0-based pool
+// indices with the original's call-site value noted. The shipped strings
+// double as fallbacks when the archive is unavailable.
+constexpr std::uint16_t kMiscStringsId = 0x7d2; // STR# 2002 "misc strings"
+
+struct MiscStrEntry {
+  std::uint16_t pool_index;
+  const char *fallback;
+  const char *decompile_arg; // 1-based value passed in the original (comment)
+};
+
+// Travel panel (0x0045e400).
+constexpr MiscStrEntry kMiscNavSystemOff{0x155, "Nav System Off", "0x156"};
+constexpr MiscStrEntry kMiscStellarNavigation{
+    0x156, "Stellar Navigation", "0x157"};
+constexpr MiscStrEntry kMiscNoDestination{0x157, "No Destination", "0x158"};
+constexpr MiscStrEntry kMiscHyperspace{0x158, "Hyperspace", "0x159"};
+constexpr MiscStrEntry kMiscUnexploredSystem{
+    0x159, "Unexplored System", "0x15a"};
+constexpr MiscStrEntry kMiscDisabled{0x15a, "Disabled", "0x15b"};
+constexpr MiscStrEntry kMiscWaiting{0x15b, "Waiting", "0x15c"};
+// Target panel (0x0045f530).
+constexpr MiscStrEntry kMiscNoTarget{0x15c, "No Target", "0x15d"};
+constexpr MiscStrEntry kMiscShieldLabel{0x0c, "Shield:", "0x0d"};
+constexpr MiscStrEntry kMiscNoShields{0x0d, "No Shields", "0x0e"};
+constexpr MiscStrEntry kMiscShieldsDown{0x0e, "Shields Down", "0x0f"};
+constexpr MiscStrEntry kMiscArmorLabel{0x0f, "Armor:", "0x10"};
+constexpr MiscStrEntry kMiscNotApplicable{0x18b, "N/A", "0x18c"};
+constexpr MiscStrEntry kMiscFighter{0xa8, "Fighter", "0xa9"};
+constexpr MiscStrEntry kMiscEscort{0xa7, "Escort", "0xa8"};
+// Weapon panel (0x00460ec0).
+constexpr MiscStrEntry kMiscNoSecondaryWeapon{
+    0x15d, "No Secondary Weapon", "0x15e"};
+// Cargo panel (0x004612c0).
+constexpr MiscStrEntry kMiscFree{0x12, "Free:", "0x13"};
+constexpr MiscStrEntry kMiscSpecial{0x13, "Special:", "0x14"};
+constexpr MiscStrEntry kMiscMultiple{0x14, "Multiple", "0x15"};
+
+[[nodiscard]] std::string MiscString(const MiscStrEntry &entry) {
+  if (auto text = NovaHud_LoadStringEntry(kMiscStringsId, entry.pool_index);
+      text && !text->empty()) {
+    return *text;
+  }
+  return std::string(entry.fallback);
+}
+
+// The cargo-panel bin labels (DAT_0068cccc[0..5] <- STR# 0xfa3) and the
+// short commodity names (DAT_0068d2cc <- STR# 0xfa2). The original's loaders
+// index these pools 1-based; the pools themselves are 0-based here.
+constexpr std::uint16_t kBinLabelsId = 0xfa3;
+constexpr std::string_view kBinLabelFallbacks[6] = {
+    "Food:", "Ind:", "Med:", "LuxG:", "Met:", "Equ:"};
+constexpr std::uint16_t kCommodityShortNamesId = 0xfa2;
+
+[[nodiscard]] std::string PoolString(std::uint16_t resource_id,
+                                     std::uint16_t pool_index,
+                                     std::string_view fallback) {
+  if (auto text = NovaHud_LoadStringEntry(resource_id, pool_index);
+      text && !text->empty()) {
+    return *text;
+  }
+  return std::string(fallback);
+}
+
+// DrawContext_DrawCenteredPascalStringInBounds (0x004622f0) against a panel:
+// centered between the panel's left/right at baseline panel.top + offset.
+void DrawPanelCentered(SdlPlatform &platform,
+                       NovaFontCache &font,
+                       float font_size,
+                       const HudPanelRect &panel,
+                       int top_offset,
+                       std::string_view text,
+                       const SDL_Color &color) {
+  if (text.empty()) {
     return;
   }
-  const SDL_FRect box = ProjectPanel(panel);
   NovaText_DrawCentered(platform,
                         font,
                         NovaFontFamily::kGeneva,
-                        font_size_px,
+                        font_size,
                         kNovaFontStyleRegular,
                         color,
-                        box.x,
-                        box.x + box.w,
-                        box.y + baseline_offset,
+                        static_cast<float>(panel.left),
+                        static_cast<float>(panel.right),
+                        static_cast<float>(panel.top + top_offset),
                         text);
+}
+
+// One DrawPascalString at an explicit cursor; returns the advanced pen x
+// (the original's DrawPascalString advances the DrawContext cursor by the
+// string width, which the label+value rows rely on).
+float DrawPanelTextAt(SdlPlatform &platform,
+                      NovaFontCache &font,
+                      float font_size,
+                      float x,
+                      float baseline_y,
+                      std::string_view text,
+                      const SDL_Color &color) {
+  if (!text.empty()) {
+    NovaText_Draw(platform,
+                  font,
+                  NovaFontFamily::kGeneva,
+                  font_size,
+                  kNovaFontStyleRegular,
+                  color,
+                  x,
+                  baseline_y,
+                  text);
+  }
+  return x +
+         static_cast<float>(font.TextWidth(
+             NovaFontFamily::kGeneva, font_size, kNovaFontStyleRegular, text));
+}
+
+[[nodiscard]] int
+PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
+  return font.TextWidth(
+      NovaFontFamily::kGeneva, font_size, kNovaFontStyleRegular, text);
+}
+
+// "<n>%", "0%" or "100%" exactly as the original composes them: 100% when
+// current >= max, else ROUND(current/max*100) with a literal "0%" floor.
+[[nodiscard]] std::string StatusPercentText(float current, float maximum) {
+  if (current >= maximum) {
+    return "100%";
+  }
+  if (current <= 0.0F) {
+    return "0%";
+  }
+  const int pct = static_cast<int>(
+      std::lround(std::clamp(current / maximum * 100.0F, 0.0F, 100.0F)));
+  return std::to_string(pct) + "%";
+}
+
+// The shared top-right HUD placement transform: every panel translates its
+// cached .ntf rect horizontally by RenderOwner.right - DAT_0088c020 (0xc2,
+// the 194px cockpit strip width).
+[[nodiscard]] HudPanelRect AnchoredPanel(const HudPanelRect &panel,
+                                         SdlPlatform &platform) {
+  const auto playfield = platform.logical_playfield_size();
+  return HudPanel_AnchorTopRight(panel, static_cast<std::int16_t>(playfield.x));
+}
+
+[[nodiscard]] const PersDef *PersAt(const ScenarioData &scenario,
+                                    std::int16_t pers_slot) {
+  if (pers_slot < 0 ||
+      pers_slot >= static_cast<std::int16_t>(scenario.pers_defs.size())) {
+    return nullptr;
+  }
+  const PersDef &pers = scenario.pers_defs[static_cast<std::size_t>(pers_slot)];
+  return pers.present ? &pers : nullptr;
+}
+
+// Resolves an active mission's ship-name (misn +0x2a pool) or subtitle
+// (misn +0x32 pool) string. The original draws the pstring resolved at
+// acceptance (Mission_PopulateMissionSlotFromDef 0x0043f8c0: a random 1-based
+// entry drawn from the pool via Resource_LoadStringEntry); we stored the
+// (pool, entry) pair, so re-resolving at draw time yields the same text.
+[[nodiscard]] std::string MissionShipPoolString(const ActiveMission &mission,
+                                                bool name_pool) {
+  const std::int16_t pool_id = name_pool ? mission.special_ship_name_string_id
+                                         : mission.random_text_string_id;
+  const std::int16_t entry =
+      name_pool ? mission.special_ship_name_entry : mission.random_text_entry;
+  if (pool_id < 0 || entry < 1) {
+    return {};
+  }
+  auto text = NovaHud_LoadStringEntry(static_cast<std::uint16_t>(pool_id),
+                                      static_cast<std::uint16_t>(entry - 1));
+  return text ? *text : std::string{};
+}
+
+// Whether any adjacent, non-hidden system lies within the ship's travel
+// range (the travel-panel jump-title colour test). The decompiled loop reads
+// g_stellar_defs[adjacency].availability_flags with a 0x3000 mask and a
+// zeroed local for one distance endpoint (Ghidra field aliasing); the port
+// tests system visibility and the ship-to-system-centre distance.
+// TODO(decomp): re-derive the exact table/endpoint once SystemDef adjacency
+// typing is settled.
+[[nodiscard]] bool JumpDestinationInRange(const GameState &state) {
+  const System *current = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (current == nullptr) {
+    return false;
+  }
+  const float range_sq = NovaTargeting_ComputeTravelRangeSq(state);
+  for (const std::int16_t link : current->links) {
+    if (link < 0x80) {
+      continue;
+    }
+    const System *destination = state.scenario.System(link);
+    if (destination == nullptr || !destination->is_visible) {
+      continue;
+    }
+    const float dx =
+        state.player.pos_x - static_cast<float>(destination->pos_x);
+    const float dy =
+        state.player.pos_y - static_cast<float>(destination->pos_y);
+    if (dx * dx + dy * dy <= range_sq) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Thousands-grouped credits (DrawContext_DrawGroupedUInt).
+[[nodiscard]] std::string GroupedNumber(std::int32_t value) {
+  std::string digits = std::to_string(value);
+  std::string out;
+  out.reserve(digits.size() + digits.size() / 3);
+  for (std::size_t i = 0; i < digits.size(); ++i) {
+    if (i > 0 && (digits.size() - i) % 3 == 0) {
+      out.push_back(',');
+    }
+    out.push_back(digits[i]);
+  }
+  return out;
 }
 
 void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
@@ -294,248 +491,18 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
               fuel_max,
               ColorOf(layout_.color_word[6]));
 
-  // Readout panels: value colour (slot 0), body font.
+  // The four text panels (Ghidra NovaUi_Draw*StatusPanel 0x0045e400 /
+  // 0x00460ec0 / 0x0045f530 / 0x004612c0). The original blits a saved clean
+  // cockpit backdrop into each panel rect before drawing text; this port
+  // redraws the full cockpit PICT above instead, which covers the same
+  // restore. Label/value colours are the .ntf palette slots +0x00/+0x04
+  // (NovaUi_SetupGameplayPanelColors 0x0045cfc0).
   const SDL_Color value_color = ColorOf(layout_.color_word[0]);
-
-  // Travel-status panel: shows the engaged-jump state while the hyperspace
-  // sequence runs, else the selected destination stellar's name (or the idle
-  // fallback). Mirrors NovaUi_DrawTravelStatusPanel (0x0045e400): a transfer
-  // (mode 2) title + the destination name, the idle message when no target.
-  //
-  // The travel state stores destination ids zero-based; the scenario accessor
-  // keys systems by resource id (index + 0x80), so add the offset before the
-  // lookup or the name resolves to nothing and the HUD shows a bare '?'.
-  {
-    std::string travel;
-    if (state.travel.engaging) {
-      travel = "JUMPING"; // transfer title (STR# 0x7d2/0x157)
-      const auto *dst = state.scenario.System(
-          static_cast<std::int16_t>(state.travel.destination_system_id + 0x80));
-      if (dst && !dst->name.empty()) {
-        travel += " > " + dst->name;
-      }
-    } else if (state.travel.starmap_destination_system_id >= 0) {
-      // A destination is armed -- either plotted from the galaxy starmap, or
-      // cycled with Backslash after entering hyperspace mode (H). Show the
-      // jump/hyperspace destination system (the manual: the nav display reads
-      // "Hyperspace" and lists the destination name).
-      const auto *dst = state.scenario.System(static_cast<std::int16_t>(
-          state.travel.starmap_destination_system_id + 0x80));
-      const std::string prefix =
-          state.travel.hyperspace_mode ? "HYP > " : "JUMP > ";
-      if (dst && !dst->name.empty()) {
-        travel = prefix + dst->name;
-      } else {
-        travel = prefix + "?";
-      }
-    } else {
-      const std::int16_t sid = state.travel.selected_stellar_id;
-      const auto *st = state.scenario.Stellar(sid);
-      if (st && !st->name.empty()) {
-        travel = st->name;
-      } else {
-        travel = "NO TARGET"; // idle message (STR# 0x7d2/0x156)
-      }
-    }
-    DrawReadout(platform,
-                *font_cache_,
-                static_cast<float>(layout_.font_size),
-                anchor_panel(layout_.travel_status_panel),
-                travel,
-                value_color,
-                4.0F);
-  }
-
-  // Weapon/ammo panel: current active weapon bank name, with an ammo count for
-  // ammo-based weapons (mirrors NovaUi_DrawActiveWeaponAmmoPanel 0x00460ec0).
-  // Energy/unlimited weapons (ammo_type == -1 or flags_secondary & 0x40) show
-  // the bank name without a count; a missing/invalid bank shows the idle
-  // label instead of a count.
-  {
-    std::string text;
-    const std::int16_t bank = state.player.active_weapon_bank_slot;
-    const bool empty = bank < 0 || bank >= 0x100 ||
-                       NovaWeapon_BankDisplayName(state, bank) == "?";
-    if (empty) {
-      text = "NO WEAPON"; // STR# 0x7d2/0x15e idle label
-    } else {
-      text = NovaWeapon_BankDisplayName(state, bank);
-      const std::int16_t ammo = NovaWeapon_BankAmmoCount(state, bank);
-      if (ammo >= 0) {
-        text += " - " + std::to_string(ammo);
-      }
-    }
-    DrawReadout(platform,
-                *font_cache_,
-                static_cast<float>(layout_.font_size),
-                anchor_panel(layout_.weapon_ammo_panel),
-                text,
-                value_color,
-                4.0F);
-  }
-
-  // Target panel: when a ship is the primary target (backquote cycle / 'o' /
-  // mouse click) shows the ship's class name + government + a shield/armor
-  // status line, mirroring NovaUi_DrawTargetStatusPanel (0x0045f530). Class
-  // capability flag 0x0200 suppresses the status (gov name only); 0x0100 shows
-  // armor percent instead of shield. A manually selected travel stellar
-  // persists while flying toward it. (The per-class Subtitle is deferred:
-  // TODO(decomp) -- needs the shp Subtitle field.)
-  {
-    std::string tgt;
-    const std::int16_t ship_slot = state.player.primary_target_ship_slot;
-    if (ship_slot > 0 &&
-        state.SlotInRange(static_cast<std::size_t>(ship_slot))) {
-      const Ship &target = state.ShipAt(static_cast<std::size_t>(ship_slot));
-      const ShipClass *target_cls = state.scenario.Ship(
-          static_cast<std::int16_t>(target.ship_class_id + 0x80));
-      std::string name = target_cls ? target_cls->display_name : "?";
-      const Government *govt = state.scenario.Government(
-          static_cast<std::int16_t>(target.faction_or_government_id + 0x80));
-      const HudPanelRect full_panel = anchor_panel(layout_.target_status_panel);
-      // NovaUi_DrawTargetStatusPanel uses three vertical regions: a centred
-      // name line near the top, a 128x64 portrait in the middle, and a
-      // bottom-left condition line. Keeping these regions separate is
-      // important; the old SDL port rendered identity + condition as one
-      // centered line over the portrait.
-      HudPanelRect name_panel = full_panel;
-      name_panel.bottom = static_cast<std::int16_t>(
-          std::min<int>(full_panel.bottom, full_panel.top + 18));
-      HudPanelRect affiliation_panel = full_panel;
-      affiliation_panel.top = static_cast<std::int16_t>(
-          std::min<int>(full_panel.bottom, full_panel.top + 18));
-      affiliation_panel.bottom = static_cast<std::int16_t>(
-          std::min<int>(full_panel.bottom, full_panel.top + 34));
-      HudPanelRect condition_panel = full_panel;
-      condition_panel.top = static_cast<std::int16_t>(
-          std::max<int>(full_panel.top, full_panel.bottom - 18));
-
-      // TargetPortrait resolves the PICT through the class's clone source and
-      // never returns a textureless entry. The original blits into a fixed
-      // centered 128x64 target rectangle, rather than using native PICT size.
-      if (const auto *portrait =
-              TargetPortrait(platform, state.scenario, target.ship_class_id)) {
-        constexpr float kPortraitWidth = 128.0F;
-        constexpr float kPortraitHeight = 64.0F;
-        SDL_FRect box{
-            static_cast<float>(full_panel.left) +
-                (static_cast<float>(full_panel.width()) - kPortraitWidth) *
-                    0.5F,
-            static_cast<float>(full_panel.top) + 38.0F,
-            kPortraitWidth,
-            kPortraitHeight};
-        SDL_RenderTexture(
-            platform.renderer(), portrait->texture->get(), nullptr, &box);
-      }
-      tgt = name;
-      std::string affiliation = govt != nullptr ? govt->name : "";
-      // NovaUi_DrawTargetStatusPanel (0x0045f530) does not append an
-      // unconditional percentage.  0x0200 hides condition. The original
-      // reports shields while they remain, then uses 0x0100 to select armor
-      // after the shield pool is depleted. A negative shield value by itself
-      // means "shields down", not necessarily "disabled"; the original only
-      // uses the latter wording when its fire-restricted predicate is true.
-      const bool hide_status = target_cls != nullptr &&
-                               (target_cls->capability_flags & 0x0200U) != 0U;
-      if (!hide_status && target_cls != nullptr) {
-        std::string status;
-        const bool shields_down = target.shield_points <= 0.0F;
-        const bool fire_restricted =
-            shields_down && NovaAiShip_IsFireRestricted(state, target);
-        const bool show_armor =
-            shields_down && (target_cls->capability_flags & 0x0100U) != 0U;
-        if (fire_restricted) {
-          status = "DISABLED";
-        } else if (shields_down && !show_armor) {
-          status = "SHIELDS DOWN";
-        } else {
-          const float maximum = static_cast<float>(
-              show_armor ? target_cls->base_armor : target_cls->base_shield);
-          const float current =
-              show_armor ? target.armor_points : target.shield_points;
-          if (maximum <= 0.0F) {
-            status = "N/A";
-          } else if (current > maximum) {
-            status = show_armor ? "ARM OK" : "SHD OK";
-          } else {
-            const int pct = static_cast<int>(std::lround(
-                std::clamp(current / maximum * 100.0F, 0.0F, 100.0F)));
-            status = std::string(show_armor ? "ARM " : "SHD ") +
-                     std::to_string(pct) + "%";
-          }
-        }
-        DrawReadout(platform,
-                    *font_cache_,
-                    static_cast<float>(layout_.font_size),
-                    condition_panel,
-                    status,
-                    value_color,
-                    1.0F);
-      }
-      DrawReadout(platform,
-                  *font_cache_,
-                  static_cast<float>(layout_.font_size),
-                  name_panel,
-                  tgt,
-                  value_color,
-                  1.0F);
-      DrawReadout(platform,
-                  *font_cache_,
-                  static_cast<float>(layout_.font_size),
-                  affiliation_panel,
-                  affiliation,
-                  value_color,
-                  1.0F);
-      tgt.clear();
-    } else {
-      const std::int16_t sid = state.travel.selected_stellar_id;
-      const auto *st = state.scenario.Stellar(sid);
-      if (st && !st->name.empty()) {
-        tgt = st->name;
-        if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
-          tgt += " [INTERACT]";
-        }
-      } else {
-        tgt = "(none)";
-      }
-    }
-    if (!tgt.empty()) {
-      DrawReadout(platform,
-                  *font_cache_,
-                  static_cast<float>(layout_.font_size),
-                  anchor_panel(layout_.target_status_panel),
-                  tgt,
-                  value_color,
-                  4.0F);
-    }
-  }
-
-  // Cargo/mission panel: current credits, the used cargo holding and the
-  // remaining free fleet cargo space. Mirrors
-  // NovaUi_DrawCargoMissionStatusPanel (0x004612c0)'s essential readout: the 6
-  // cargo-bin list (only non-empty bins, and their labels are not reconstructed
-  // here, TODO(decomp)) and the fleet free-space value
-  // (Outfit_ComputeFleetCargoCapacity - cargo+junk total). The escort/command
-  // summary line is omitted until fleet state exists.
-  {
-    const std::int16_t free_space = Outfit_ComputeRemainingCargoSpace(state);
-    const std::int16_t used = Outfit_ComputePlayerCargoAndJunkTotal(state);
-    char cargo[96];
-    std::snprintf(cargo,
-                  sizeof(cargo),
-                  "CR %d  CARGO %d/%d",
-                  state.player.credits,
-                  used,
-                  used + free_space);
-    DrawReadout(platform,
-                *font_cache_,
-                static_cast<float>(layout_.font_size),
-                anchor_panel(layout_.cargo_status_panel),
-                cargo,
-                value_color,
-                4.0F);
-  }
-
+  const SDL_Color label_color = ColorOf(layout_.color_word[1]);
+  DrawTravelPanel(platform, state, value_color, label_color);
+  DrawWeaponPanel(platform, state, value_color, label_color);
+  DrawTargetPanel(platform, state, value_color, label_color);
+  DrawCargoPanel(platform, state, value_color, label_color);
   // Transient HUD overlay message (NovaHud_ShowOverlayMessage / the landing &
   // negotiation feedback text): drawn centered near the bottom of the flight
   // viewport while the wall-clock expiry has not passed. Mirrors the original
@@ -563,6 +530,578 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
         baseline,
         msg.message);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra 0x0045e400 NovaUi_DrawTravelStatusPanel.
+//
+// Three states keyed off the player's travel sequence:
+//   * idle (travel_transfer_mode == -1): the "Nav System Off" label centered
+//     at baseline top+22.
+//   * transfer (mode 2): "Stellar Navigation" title at top+12 plus the
+//     targeted stellar's display name (or "No Destination") at top+29.
+//   * jump (mode 3): "Hyperspace" title at top+12 plus the destination
+//     system's name ("Unexplored System" while undiscovered) at top+29.
+// Titles draw in the label colour, switching to the value colour while the
+// station-hold timer runs; the jump destination switches to the label colour
+// when no adjacent system is in range or fuel is short and the hold has not
+// started. The port derives the mode from the explicit TravelState (the
+// original reads the player ship's travel_transfer_mode latch).
+// ---------------------------------------------------------------------------
+void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
+                                  const GameState &state,
+                                  const SDL_Color &value_color,
+                                  const SDL_Color &label_color) {
+  const HudPanelRect panel =
+      AnchoredPanel(layout_.travel_status_panel, platform);
+  if (!panel.valid()) {
+    return;
+  }
+  NovaFontCache &font = *font_cache_;
+  const float font_size = static_cast<float>(layout_.font_size);
+  const auto &travel = state.travel;
+
+  if (travel.engaging || travel.hyperspace_mode) {
+    // Jump sequence (original travel_transfer_mode == 3).
+    const bool holding = state.player.ai_station_hold_timer > 0.0F;
+    DrawPanelCentered(platform,
+                      font,
+                      font_size,
+                      panel,
+                      12,
+                      MiscString(kMiscHyperspace),
+                      holding ? value_color : label_color);
+
+    std::int16_t destination = -1;
+    if (travel.engaging) {
+      destination = travel.destination_system_id;
+      if (destination < 0 && travel.travel_slot >= 0 &&
+          travel.travel_slot < 16) {
+        if (const System *current =
+                state.scenario.System(static_cast<std::int16_t>(
+                    state.player.current_system_id + 0x80))) {
+          destination =
+              current->links[static_cast<std::size_t>(travel.travel_slot)];
+        }
+      }
+    } else {
+      destination = travel.starmap_destination_system_id;
+    }
+
+    const System *system =
+        destination >= 0 ? state.scenario.System(
+                               static_cast<std::int16_t>(destination + 0x80))
+                         : nullptr;
+    if (system == nullptr) {
+      DrawPanelCentered(platform,
+                        font,
+                        font_size,
+                        panel,
+                        29,
+                        MiscString(kMiscNoDestination),
+                        label_color);
+      return;
+    }
+    // Undiscovered systems hide their name (SystemDef.discovery_state < 1;
+    // the port approximates with the explored flag).
+    const std::string name = system->has_explored_flag
+                                 ? system->name
+                                 : MiscString(kMiscUnexploredSystem);
+    const bool fueled = state.player.fuel_points >= 100.0F;
+    const bool reachable = JumpDestinationInRange(state);
+    const bool dimmed = (!reachable || !fueled) && !holding;
+    DrawPanelCentered(platform,
+                      font,
+                      font_size,
+                      panel,
+                      29,
+                      name,
+                      dimmed ? label_color : value_color);
+    return;
+  }
+
+  if (travel.selected_stellar_id >= 0) {
+    // Travel transfer (original travel_transfer_mode == 2).
+    const bool holding = state.player.ai_station_hold_timer > 0.0F;
+    DrawPanelCentered(platform,
+                      font,
+                      font_size,
+                      panel,
+                      12,
+                      MiscString(kMiscStellarNavigation),
+                      holding ? value_color : label_color);
+    const Stellar *stellar = state.scenario.Stellar(travel.selected_stellar_id);
+    if (stellar == nullptr || stellar->name.empty()) {
+      DrawPanelCentered(platform,
+                        font,
+                        font_size,
+                        panel,
+                        29,
+                        MiscString(kMiscNoDestination),
+                        label_color);
+    } else {
+      DrawPanelCentered(
+          platform, font, font_size, panel, 29, stellar->name, value_color);
+    }
+    return;
+  }
+
+  DrawPanelCentered(platform,
+                    font,
+                    font_size,
+                    panel,
+                    22,
+                    MiscString(kMiscNavSystemOff),
+                    label_color);
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra 0x00460ec0 NovaUi_DrawActiveWeaponAmmoPanel. One centered row at
+// baseline top+12: the idle STR# label when no bank is active (label colour),
+// otherwise the active bank's name in the value colour, suffixed
+// " - <ammo>" for ammo-driven weapons (energy weapons: ammo_type -1 or
+// flags_secondary 0x40; mode <-999 codes also draw the bare name).
+// ---------------------------------------------------------------------------
+void HudRenderer::DrawWeaponPanel(SdlPlatform &platform,
+                                  const GameState &state,
+                                  const SDL_Color &value_color,
+                                  const SDL_Color &label_color) {
+  const HudPanelRect panel = AnchoredPanel(layout_.weapon_ammo_panel, platform);
+  if (!panel.valid()) {
+    return;
+  }
+  NovaFontCache &font = *font_cache_;
+  const float font_size = static_cast<float>(layout_.font_size);
+
+  const std::int16_t bank = state.player.active_weapon_bank_slot;
+  const Weapon *weapon =
+      bank >= 0 ? state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80))
+                : nullptr;
+  if (bank < 0 || weapon == nullptr) {
+    DrawPanelCentered(platform,
+                      font,
+                      font_size,
+                      panel,
+                      12,
+                      MiscString(kMiscNoSecondaryWeapon),
+                      label_color);
+    return;
+  }
+
+  std::string text = weapon->name;
+  const bool energy_weapon =
+      weapon->ammo_type == -1 || (weapon->flags_secondary & 0x40U) != 0U;
+  const bool special_mode = weapon->ammo_type < -999;
+  if (!energy_weapon && !special_mode) {
+    if (const std::int16_t ammo = NovaWeapon_BankAmmoCount(state, bank);
+        ammo >= 0) {
+      text += " - ";
+      text += std::to_string(ammo);
+    }
+  }
+  DrawPanelCentered(platform, font, font_size, panel, 12, text, value_color);
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra 0x0045f530 NovaUi_DrawTargetStatusPanel.
+//
+// With no primary target: the centered "No Target" label at baseline
+// top+47. With one: centered name at top+16 (mission-ship STR# name, else
+// p}brs display name, else ship-class name), centered subtitle at top+29 in
+// the .ntf secondary font size (mission subtitle pool, p}brs special-ship
+// name, else the class Subtitle), the 128x64 clone-source portrait blitted
+// into a rect centered on the panel, a bottom-left shield/armor status row
+// at baseline bottom-6 starting at left+5, and a bottom-right government (or
+// fighter/escort) footer right-aligned at right-7. The original's AI/debug
+// overlay (g_target_status_debug_overlay_active) is not reproduced.
+// TODO(decomp(0x0045f530)) skipped: debug overlay rows (gated by a debug
+// config byte, never set in normal play).
+// ---------------------------------------------------------------------------
+void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
+                                  const GameState &state,
+                                  const SDL_Color &value_color,
+                                  const SDL_Color &label_color) {
+  const HudPanelRect panel =
+      AnchoredPanel(layout_.target_status_panel, platform);
+  if (!panel.valid()) {
+    return;
+  }
+  NovaFontCache &font = *font_cache_;
+  const float font_size = static_cast<float>(layout_.font_size);
+  // DAT_0073567a: the .ntf SubtitleSize (+0xa2).
+  const float subtitle_size = layout_.font_size_2 > 0
+                                  ? static_cast<float>(layout_.font_size_2)
+                                  : font_size;
+
+  const std::int16_t slot = state.player.primary_target_ship_slot;
+  if (slot < 0 || !state.SlotInRange(static_cast<std::size_t>(slot))) {
+    DrawPanelCentered(platform,
+                      font,
+                      font_size,
+                      panel,
+                      47,
+                      MiscString(kMiscNoTarget),
+                      label_color);
+    return;
+  }
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
+  const ShipClass *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(target.ship_class_id + 0x80));
+  const PersDef *pers = PersAt(state.scenario, target.pers_def_slot);
+  const bool has_fleet =
+      target.mission_fleet_slot >= 0 &&
+      target.mission_fleet_slot <
+          static_cast<std::int16_t>(state.active_missions.size());
+  const ActiveMission *mission =
+      has_fleet ? &state.active_missions[static_cast<std::size_t>(
+                      target.mission_fleet_slot)]
+                : nullptr;
+
+  // Top name: mission ship name > p}brs display name > class name.
+  std::string name;
+  if (mission != nullptr) {
+    name = MissionShipPoolString(*mission, /*name_pool=*/true);
+  }
+  if (name.empty()) {
+    if (target.pers_def_slot >= 0 && pers != nullptr) {
+      name = pers->display_name;
+    } else {
+      name = ship_class != nullptr ? ship_class->display_name : "?";
+    }
+  }
+  DrawPanelCentered(platform, font, font_size, panel, 16, name, value_color);
+
+  // Subtitle: mission subtitle pool > p}brs special-ship name > class
+  // Subtitle (each level falls through when its source is empty).
+  std::string subtitle;
+  if (mission != nullptr) {
+    subtitle = MissionShipPoolString(*mission, /*name_pool=*/false);
+  } else if (pers != nullptr) {
+    subtitle = pers->special_ship_name;
+  }
+  if (subtitle.empty() && ship_class != nullptr) {
+    subtitle = ship_class->subtitle;
+  }
+  DrawPanelCentered(
+      platform, font, subtitle_size, panel, 29, subtitle, value_color);
+
+  // Portrait: 128x64 rect centered on the panel (FUN_008747f3), blitting the
+  // clone-source class's target PICT (DAT_00596d44 table).
+  if (ship_class != nullptr) {
+    if (const auto *portrait =
+            TargetPortrait(platform, state.scenario, target.ship_class_id)) {
+      const float center_x =
+          static_cast<float>(panel.left + panel.right + 1) / 2.0F;
+      const float center_y =
+          static_cast<float>(panel.top + panel.bottom + 1) / 2.0F;
+      const SDL_FRect box{center_x - 64.0F, center_y - 32.0F, 128.0F, 64.0F};
+      SDL_RenderTexture(
+          platform.renderer(), portrait->texture->get(), nullptr, &box);
+    }
+  }
+
+  const Government *government =
+      target.faction_or_government_id >= 0
+          ? state.scenario.Government(static_cast<std::int16_t>(
+                target.faction_or_government_id + 0x80))
+          : nullptr;
+
+  // ---- Bottom-left status row (baseline bottom-6) -----------------------
+  if (target.pers_def_slot == 0x3ff) {
+    // Shareware-Enforcer sentinel: the "Df " static pstring (DAT_0056c740).
+    DrawPanelCentered(platform,
+                      font,
+                      font_size,
+                      panel,
+                      panel.bottom - panel.top - 6,
+                      "Df ",
+                      value_color);
+    return;
+  }
+  if (ship_class != nullptr && (ship_class->capability_flags & 0x200U) != 0U) {
+    // Flags 0x200: suppress the status line, show the government centered.
+    if (government != nullptr) {
+      DrawPanelCentered(platform,
+                        font,
+                        font_size,
+                        panel,
+                        panel.bottom - panel.top - 6,
+                        government->name,
+                        label_color);
+    }
+    return;
+  }
+  if (pers != nullptr && pers->shield_armor_scale < 0.0F) {
+    // p}brs ShieldMod below zero: government name replaces the status row.
+    if (government != nullptr) {
+      DrawPanelCentered(platform,
+                        font,
+                        font_size,
+                        panel,
+                        panel.bottom - panel.top - 6,
+                        government->name,
+                        label_color);
+    }
+    return;
+  }
+
+  const float status_y = static_cast<float>(panel.bottom - 6);
+  const float status_x = static_cast<float>(panel.left + 5);
+  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, target);
+  const float shields = target.shield_points;
+  if (fire_restricted) {
+    // Special mission ships held for pickup read "Waiting" once their armor
+    // clears the decoded fraction; everything else reads "Disabled".
+    // TODO(decomp): the original also gates on the mission's
+    // special_ship_attacking latch and the target's boarded_target_latch;
+    // neither field is modelled yet.
+    bool waiting = false;
+    if (mission != nullptr && mission->spawn_behavior == 5 &&
+        state
+            .active_mission_runtime_flags[static_cast<std::size_t>(
+                target.mission_fleet_slot)]
+            .is_active &&
+        ship_class != nullptr) {
+      const float max_armor = static_cast<float>(ship_class->base_armor);
+      const float armor = target.armor_points;
+      // The non-0x10 branch's decompiled threshold is negative (max * -0.241
+      // <= armor * 100), i.e. always satisfied for non-negative armor.
+      waiting = (ship_class->capability_flags & 0x10U) != 0U
+                    ? max_armor * 10.0F <= armor * 100.0F
+                    : max_armor * -0.241F <= armor * 100.0F;
+    }
+    DrawPanelTextAt(platform,
+                    font,
+                    font_size,
+                    status_x,
+                    status_y,
+                    MiscString(waiting ? kMiscWaiting : kMiscDisabled),
+                    value_color);
+  } else if (shields > 0.0F) {
+    // "Shield: <n>%" (100% once current reaches the computed maximum).
+    float pen = DrawPanelTextAt(platform,
+                                font,
+                                font_size,
+                                status_x,
+                                status_y,
+                                MiscString(kMiscShieldLabel) + " ",
+                                label_color);
+    const float max_shield = ship_class != nullptr
+                                 ? static_cast<float>(ship_class->base_shield)
+                                 : 0.0F;
+    // TODO(decomp): Ship_ComputeShipMaxShieldPoints includes outfit mods;
+    // the port reads the class base until the NPC outfit pipeline exists.
+    const std::string pct =
+        max_shield > 0.0F ? StatusPercentText(shields, max_shield) : "100%";
+    DrawPanelTextAt(platform, font, font_size, pen, status_y, pct, value_color);
+  } else if (ship_class != nullptr &&
+             (ship_class->capability_flags & 0x100U) != 0U) {
+    // Shields down + Flags 0x100: armor percentage readout.
+    float pen = DrawPanelTextAt(platform,
+                                font,
+                                font_size,
+                                status_x,
+                                status_y,
+                                MiscString(kMiscArmorLabel) + " ",
+                                label_color);
+    const float max_armor = static_cast<float>(ship_class->base_armor);
+    const std::string pct =
+        max_armor > 0.0F ? StatusPercentText(target.armor_points, max_armor)
+                         : MiscString(kMiscNotApplicable);
+    DrawPanelTextAt(platform, font, font_size, pen, status_y, pct, value_color);
+  } else {
+    // Shields down: "No Shields" when the class carries no shield generator
+    // at all, "Shields Down" otherwise.
+    const bool no_shield_generator =
+        ship_class == nullptr || ship_class->base_shield < 1;
+    DrawPanelTextAt(
+        platform,
+        font,
+        font_size,
+        status_x,
+        status_y,
+        MiscString(no_shield_generator ? kMiscNoShields : kMiscShieldsDown),
+        value_color);
+  }
+
+  // ---- Bottom-right footer ----------------------------------------------
+  if (government != nullptr) {
+    const std::string &text = government->name;
+    NovaText_Draw(platform,
+                  font,
+                  NovaFontFamily::kGeneva,
+                  font_size,
+                  kNovaFontStyleRegular,
+                  label_color,
+                  static_cast<float>(panel.right - 7 -
+                                     PanelTextWidth(font, font_size, text)),
+                  status_y,
+                  text);
+  } else if ((target.ai_target_ship_slot == 0 ||
+              target.post_hit_mode_hint >= 0) &&
+             (target.ai_behavior_code == 5 || target.post_hit_mode_hint == 0)) {
+    const bool light_ship =
+        ship_class != nullptr && ship_class->mass_tons < 100;
+    const std::string text =
+        MiscString(light_ship ? kMiscFighter : kMiscEscort);
+    NovaText_Draw(platform,
+                  font,
+                  NovaFontFamily::kGeneva,
+                  font_size,
+                  kNovaFontStyleRegular,
+                  label_color,
+                  static_cast<float>(panel.right - 7 -
+                                     PanelTextWidth(font, font_size, text)),
+                  status_y,
+                  text);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra 0x004612c0 NovaUi_DrawCargoMissionStatusPanel.
+//
+// Left-aligned rows at fixed offsets from the panel origin:
+//   * six cargo-bin rows (labels STR# 0xfa3[i], values at x+41) starting at
+//     top+12 on a 14px pitch, only when the bin holds tonnage;
+//   * "Free: <n>" (label x+77, value x+110, top+12) with the clamped fleet
+//     free cargo space;
+//   * "Special:" (x+77, top+30) with the carried mission-cargo commodity
+//     short name (STR# 0xfa2), a junk-def name when exactly one junk type is
+//     held, or "Multiple" (value x+87, top+46);
+//   * "Cr:" (x+77, top+66) with the grouped credits value (x+87, top+82).
+// TODO(decomp): junk-def names (g_junk_defs +0x128) are not decoded yet, so
+// the single-junk-type branch logs and leaves the value empty.
+// ---------------------------------------------------------------------------
+void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
+                                 const GameState &state,
+                                 const SDL_Color &value_color,
+                                 const SDL_Color &label_color) {
+  const HudPanelRect panel =
+      AnchoredPanel(layout_.cargo_status_panel, platform);
+  if (!panel.valid()) {
+    return;
+  }
+  NovaFontCache &font = *font_cache_;
+  const float font_size = static_cast<float>(layout_.font_size);
+  const float left = static_cast<float>(panel.left);
+  const float top = static_cast<float>(panel.top);
+
+  // Cargo-bin rows (cursor offsets are raw constants, no ui_scale).
+  for (std::size_t i = 0; i < state.inventory.cargo_bins.size(); ++i) {
+    const std::int16_t count = state.inventory.cargo_bins[i];
+    if (count <= 0) {
+      continue;
+    }
+    const std::string label = PoolString(
+        kBinLabelsId, static_cast<std::uint16_t>(i), kBinLabelFallbacks[i]);
+    const float y = top + static_cast<float>((i + 1) * 14 - 2);
+    DrawPanelTextAt(
+        platform, font, font_size, left + 3.0F, y, label, label_color);
+    DrawPanelTextAt(platform,
+                    font,
+                    font_size,
+                    left + 41.0F,
+                    y,
+                    std::to_string(count),
+                    value_color);
+  }
+
+  // Free fleet cargo space (Outfit_ComputeFleetCargoCapacity - holdings,
+  // clamped at zero).
+  DrawPanelTextAt(platform,
+                  font,
+                  font_size,
+                  left + 77.0F,
+                  top + 12.0F,
+                  MiscString(kMiscFree),
+                  label_color);
+  DrawPanelTextAt(platform,
+                  font,
+                  font_size,
+                  left + 110.0F,
+                  top + 12.0F,
+                  std::to_string(Outfit_ComputeRemainingCargoSpace(state)),
+                  value_color);
+
+  // "Special:" row: carried mission cargo / junk summary.
+  std::int16_t cargo_missions = 0;
+  std::int16_t first_cargo_type = -1;
+  for (std::size_t i = 0; i < state.active_missions.size(); ++i) {
+    const auto &flags = state.active_mission_runtime_flags[i];
+    const auto &mission = state.active_missions[i];
+    if (flags.is_active && mission.carrying_resources &&
+        mission.cargo_type_id >= 0 && mission.cargo_type_id < 0x4f) {
+      if (cargo_missions == 0) {
+        first_cargo_type = mission.cargo_type_id;
+      }
+      ++cargo_missions;
+    }
+  }
+  std::int16_t junk_types = 0;
+  for (const std::int16_t held : state.inventory.junk_counts) {
+    if (held > 0) {
+      ++junk_types;
+    }
+  }
+  if (cargo_missions > 0 || junk_types > 0) {
+    DrawPanelTextAt(platform,
+                    font,
+                    font_size,
+                    left + 77.0F,
+                    top + 30.0F,
+                    MiscString(kMiscSpecial),
+                    label_color);
+    std::string value;
+    if (cargo_missions == 1) {
+      value = PoolString(kCommodityShortNamesId,
+                         static_cast<std::uint16_t>(first_cargo_type),
+                         "cargo");
+    } else if (junk_types == 1) {
+      // TODO(decomp): g_junk_defs display names (+0x128, 0x526 stride) are
+      // not decoded yet; the original draws the junk def name here.
+      static bool junk_name_logged = false;
+      if (!junk_name_logged) {
+        NovaLog::Warn("cargo panel: junk def names not decoded; "
+                      "special row left blank");
+        junk_name_logged = true;
+      }
+    } else {
+      value = MiscString(kMiscMultiple);
+    }
+    DrawPanelTextAt(platform,
+                    font,
+                    font_size,
+                    left + 87.0F,
+                    top + 46.0F,
+                    value,
+                    value_color);
+  }
+
+  // Credits row: the label is the "credits" pstring (DAT_0072f1cc = STR#
+  // 0x7d2 pool 0x20) whose first character the original translates through
+  // the input map, so the leading letter always shows the key bound to the
+  // credits command; the port keeps the literal 'c'.
+  // TODO(decomp(0x004612c0)) skipped: NovaCommand_TranslateByInputMap key
+  // translation (input-map table not reconstructed).
+  std::string credits_label = PoolString(kMiscStringsId, 0x20, "credits");
+  if (!credits_label.empty()) {
+    credits_label[0] = 'c';
+  }
+  credits_label += ":";
+  DrawPanelTextAt(platform,
+                  font,
+                  font_size,
+                  left + 77.0F,
+                  top + 66.0F,
+                  credits_label,
+                  label_color);
+  DrawPanelTextAt(platform,
+                  font,
+                  font_size,
+                  left + 87.0F,
+                  top + 82.0F,
+                  GroupedNumber(state.player.credits),
+                  value_color);
 }
 
 } // namespace game
