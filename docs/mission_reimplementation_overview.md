@@ -223,6 +223,44 @@ The runtime interaction chain is now largely implemented:
 
 This covers destroy, disable, board, escort, rescue, observe, chase-off, and related objective families. The goal counters only move once mission-ship spawning lands.
 
+### 6.1 Decoded goal-counter producers (Ghidra pass, port pending)
+
+The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`, and live in three functions:
+
+- **Destroy — `Ship_UpdateVisualState` 0x00428340** (destruction arm): when a
+  destroyed ship has `mission_fleet_slot != -1` and is not the player:
+  quick-fail gate (mission active, not failed, `goal_counter_a == 0`,
+  spawn_behavior 1/3, or 2/5 with the +0xB9 boarded latch clear, runtime
+  flags 0x0400 clear) → snd + STR# 0x7d2:0x11c + `Mission_FailMissionSlotQuick`;
+  then `goal_counter_a++`; then `target_ship_count--` (remaining fleet ships —
+  this is what stops the system-entry restore from respawning a wiped fleet).
+- **Disable — `Shot_ResolveShipHitFromWeapon` 0x004192d0** (fire-restriction
+  arm): `goal_counter_c++`; spawn_behavior 3 (escort) quick-fails unless
+  flags 0x0400 (goal 1 destroys-fail handled in 0x00443c60 evaluation).
+- **Board/rescue — `Ship_HandlePlayerBoardTargetCommand` 0x0045a3d0**:
+  `goal_counter_b++` on the target's fleet for both the board-cargo arm
+  (pickup_mode 2, after `Mission_TryConsumeMissionInteractionResources`) and
+  the rescue special-ship arm (spawn_behavior 2/5 + flags 0x0001 + single-ship
+  fleet); both set the target's +0xB9 boarded latch.
+
+Completion semantics in 0x00443c60 compare the counters against
+`mission_target_count` (the untouched total): destroy `total <= a`, disable
+`total <= c` (any destroy fails), board/rescue `total <= b`, escort = fleet
+survivors with a/c == 0.
+
+Also decoded: the **arrival mission-fleet slice** of
+`Stellar_ProcessTravelAndLanding` 0x00457580 — seeds follow-player fleet
+rearm state (`spawn_rearm_timer` 0x7fff/−1, `goal_count_remaining` from the
+alive aux count, scan-mask random immediate re-arm), jumps out ShipBehav 0
+follow fleets via AI state 0x15, and calls `Mission_TrySpawnMissionShipAmbush`
+on landing.
+
+Ghidra DB annotations added: plate comments on the three writer sites and
+0x00457580, field comments on MisnActive
+`target_ship_count`/`goal_counter_a/b/c`/`mission_fleet_metric_c`/
+`mission_ship_count_active`/`spawn_rearm_timer`, and ShipState +0xB9 named
+`boarded_target_latch`.
+
 ## Recommended order
 
 1. ~~Decode mission resources and formalize mission-related types.~~ DONE.
