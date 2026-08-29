@@ -553,12 +553,11 @@ std::optional<NovaMainMenuStyle> NovaResource_LoadMainMenuStyle() {
 
 std::optional<std::vector<std::byte>>
 NovaResource_LoadSndData(std::uint16_t resource_id) {
-  const auto resource_data = NovaResource_Load(kResourceTypeSnd, resource_id);
-  if (!resource_data) {
-    NovaLog::Todo("snd \x20resource {} could not be located", resource_id);
-    return std::nullopt;
-  }
-  return resource_data;
+  // Silent on miss: the original probes whole contiguous ranges (the 200..455
+  // gameplay table and 300..363 impact table in FUN_004b0740) and tolerates
+  // the many ids that do not exist in Nova Sounds.rez, so a miss is normal.
+  // Callers that care about a specific sound log their own diagnostic.
+  return NovaResource_Load(kResourceTypeSnd, resource_id);
 }
 
 std::optional<NovaSoundData>
