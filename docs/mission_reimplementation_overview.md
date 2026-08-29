@@ -243,6 +243,28 @@ The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`, a
   the rescue special-ship arm (spawn_behavior 2/5 + flags 0x0001 + single-ship
   fleet); both set the target's +0xB9 boarded latch.
 
+Also decoded in the same 0x004192d0 read (port target: collision.cpp hit path):
+
+- **Disable-transition armor pin**: on the fire-restricted *transition*
+  (pre-damage `Ship_IsShipFireRestricted` false, post-damage true, and the
+  caller's `check_fire_restriction_transition` set), armor is reset to 33% of
+  max (10% with capability flags 0x10; +0x575238/+0x575208 doubles, +0.0
+  offset). This is the lock that keeps disabled ships fire-restricted —
+  Ship_HandleShip suppresses shield/armor regeneration while restricted.
+- **Player-destruction mission arm**: when the *player* transitions to
+  fire-restricted or is destroyed (both with pre-state transition gates),
+  every active mission with flags 0x0004 quick-fails (snd + STR# 0x7d2:0x11c
+  overlay). The player-destruction arm also shows the STR# 0x7d2:0x120
+  destruction overlay, or the pers-0x3ff (Shareware Enforcer) taunt from
+  STR# 30000 8+rand(6) when the killer was an Enforcer.
+- Hit-path context worth porting alongside: pre-damage state capture
+  (`local_12a` = fire-restricted before damage, `local_11d` = destroyed
+  before damage) drives all transition gates; attacker-pers-0x3ff damage
+  scaling (×2/×3/×5 by `_DAT_0059799e` tiers 0x28/0x3d/0x5b); station-hold
+  state 0x0D forces armor-only hits; docked ships take no impulse
+  (`ai_station_hold_timer <= 0`); shields clamp to −10% of max
+  (`_DAT_00575208`) rather than zeroing.
+
 Completion semantics in 0x00443c60 compare the counters against
 `mission_target_count` (the untouched total): destroy `total <= a`, disable
 `total <= c` (any destroy fails), board/rescue `total <= b`, escort = fleet
