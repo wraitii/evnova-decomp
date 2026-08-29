@@ -10,19 +10,27 @@ namespace {
 inline constexpr std::uint32_t kStringResourceType = 0x53545223U;
 } // namespace
 
-// Ghidra 0x0047e2d0 NovaHud_ShowOverlayMessage.
+// Ghidra 0x0047e2d0 NovaHud_ShowOverlayMessage. The original stores param_2
+// (a frame countdown) in g_hud_overlay_msg_color, which
+// Frame_UpdateScreenFlashTimers (0x0042f1b0) decrements once per rendered
+// frame, clearing the message when it reaches zero — so the message's second
+// parameter is a frame count, not a colour or a millisecond duration. The
+// port keeps wall-clock expiry in GameState but converts frames at the
+// original's ~60 Hz render cadence.
+constexpr std::uint64_t kOverlayFrameMs = 1000U / 60U; // ~16.67 ms per frame
 void NovaHud_ShowOverlayMessage(GameState &state,
                                 std::string message,
                                 std::uint8_t red,
                                 std::uint8_t green,
                                 std::uint8_t blue,
-                                std::uint64_t duration_ms) {
+                                std::uint64_t duration_frames) {
   state.hud_overlay.active = true;
   state.hud_overlay.message = std::move(message);
   state.hud_overlay.red = red;
   state.hud_overlay.green = green;
   state.hud_overlay.blue = blue;
-  state.hud_overlay.expiry_ms = SDL_GetTicks() + duration_ms;
+  state.hud_overlay.expiry_ms =
+      SDL_GetTicks() + duration_frames * kOverlayFrameMs;
 }
 
 // Ghidra 0x0047e430 NovaHud_ShowCachedOverlayMessage.
@@ -36,7 +44,7 @@ void NovaHud_ShowCachedOverlayMessage(GameState &state, bool extend) {
     const std::uint64_t lifetime =
         state.hud_overlay.expiry_ms > SDL_GetTicks()
             ? state.hud_overlay.expiry_ms - SDL_GetTicks()
-            : 250U;
+            : 250U * kOverlayFrameMs;
     state.hud_overlay.expiry_ms = SDL_GetTicks() + lifetime;
   }
 }
@@ -154,7 +162,9 @@ void NovaHud_ShowLandingDenial(GameState &state,
     // Fall back to a plain English phrase when the STR# pool is unavailable.
     text = std::string("Unable to land here.");
   }
-  NovaHud_ShowOverlayMessage(state, *text, 0xe0, 0xe0, 0xe0, 360U);
+  // 0x168 frames, the original's recorded overlay duration for landing
+  // feedback (Stellar_ProcessTravelAndLanding).
+  NovaHud_ShowOverlayMessage(state, *text, 0xe0, 0xe0, 0xe0, 0x168U);
 }
 
 } // namespace game

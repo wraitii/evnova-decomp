@@ -356,6 +356,38 @@ void SdlPlatform::ApplyCenteredPresentation() {
 
 void SdlPlatform::SetFullscreenPlayfield() { ApplyFullscreenPresentation(); }
 
+std::unique_ptr<SdlTexture>
+SdlPlatform::CapturePlayfieldSnapshot() {
+  if (!renderer_) {
+    return nullptr;
+  }
+  const float density = WindowPixelDensity();
+  int w = kPlayfieldWidth;
+  int h = kPlayfieldHeight;
+  SDL_GetWindowSize(window_.get(), &w, &h);
+  // Same centring math as ApplyCenteredPresentation, in output pixels.
+  const int ox = std::max(0, w - kPlayfieldWidth) / 2;
+  const int oy = std::max(0, h - kPlayfieldHeight) / 2;
+  const SDL_Rect rect{static_cast<int>(ox * density),
+                      static_cast<int>(oy * density),
+                      static_cast<int>(kPlayfieldWidth * density),
+                      static_cast<int>(kPlayfieldHeight * density)};
+  SDL_Surface *const surface = SDL_RenderReadPixels(renderer_.get(), &rect);
+  if (surface == nullptr) {
+    NovaLog::Warn("could not read the playfield snapshot: {}", SDL_GetError());
+    return nullptr;
+  }
+  SDL_Texture *const texture = SDL_CreateTextureFromSurface(renderer_.get(), surface);
+  SDL_DestroySurface(surface);
+  if (texture == nullptr) {
+    NovaLog::Warn("could not create the playfield snapshot texture: {}",
+                  SDL_GetError());
+    return nullptr;
+  }
+  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+  return std::make_unique<SdlTexture>(texture);
+}
+
 void SdlPlatform::SetScaledPlayfield() { ApplyScaledPresentation(); }
 
 void SdlPlatform::SetCenteredPlayfield() { ApplyCenteredPresentation(); }

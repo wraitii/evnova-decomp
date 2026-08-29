@@ -30,6 +30,8 @@ class SdlPlatform;
 
 namespace game {
 
+class HudRenderer;
+
 // The boarding-window offer set. Replaces the original's globals:
 //   cargo_type          DAT_007d17d0  (0..6 commodity bin, -1 = no offer)
 //   cargo_quantity      DAT_007d17d2
@@ -105,7 +107,8 @@ struct BoardingWindowResult {
     SdlPlatform &platform,
     SdlAudio &audio,
     GameState &state,
-    SDL_Texture *background);
+    SDL_Texture *background,
+    const HudRenderer *hud);
 
 // Ghidra 0x0045a3d0 Ship_HandlePlayerBoardTargetCommand. The player's one-shot
 // "board target" command (input.board edge in the port): validates range /
@@ -128,7 +131,8 @@ struct BoardingWindowResult {
 // (Ship_ClearOtherShipsTargetingShip 0x00415dc0).
 void NovaBoarding_FinishBoardCommand(SdlPlatform &platform,
                                      SdlAudio &audio,
-                                     GameState &state);
+                                     GameState &state,
+                                     const HudRenderer &hud);
 
 // Ghidra 0x00415cb0 Ship_ResetShipAndAttackersAfterBoarding. Clears the
 // targeting state of every active ship whose primary target is `ship`, then

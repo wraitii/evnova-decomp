@@ -613,7 +613,7 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
                                0xe0,
                                0xe0,
                                0xe0,
-                               600U);
+                               0x168U);
     return;
   }
   const int slot = (t.travel_slot >= 0 && t.starmap_destination_system_id >= 0)

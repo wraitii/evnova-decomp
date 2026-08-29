@@ -16,9 +16,9 @@
 #include "../pict_image.hpp"
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
-#include "docked_dialog.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
+#include "hud_renderer.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
@@ -429,31 +429,34 @@ void QueueUiSound(GameState &state, std::int16_t index, std::int16_t count) {
 void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
   auto text = NovaHud_LoadStringEntry(0x7d2, str_index);
   if (text.has_value()) {
-    NovaHud_ShowOverlayMessage(state, std::move(*text));
+    // Board denials show for 0x168 frames (the doc's recorded duration).
+    NovaHud_ShowOverlayMessage(state, std::move(*text), 0xe0, 0xe0, 0xe0, 0x168);
   }
 }
 
 // The board command's proximity gate compares per-axis position deltas with
-// half the target's current sprite frame spans x 0.5
+// half the target's current sprite frame spans
 // (Sprite_GetShotHalfSpan / Sprite_GetFrameVerticalHalfSpan in the original).
-// The port has no per-ship sprite layer state, so the frame dimensions come
-// from the class's sh\x8an descriptor (base frame size / 2). Ships without a
-// decodable descriptor fall back to the provisional collision radius.
+// Those helpers return the FULL frame span (a bounds subtraction, like the
+// reticle's use in SpaceflightView; their "HalfSpan" names are misleading),
+// and default to 0x20 when sprite data is missing. The port reads the same
+// spans from the class's sh\x8an descriptor at the renderer's id convention
+// (ship_class_id + 0x80); ships without a decodable descriptor fall back to
+// the original's 32px default.
 struct BoardRangeSpan {
-  float half_x = 0.0F;
-  float half_y = 0.0F;
+  float full_x = 32.0F; // Sprite_GetShotHalfSpan fallback 0x20
+  float full_y = 32.0F; // Sprite_GetFrameVerticalHalfSpan fallback 0x20
 };
 
-[[nodiscard]] BoardRangeSpan TargetSpriteHalfSpan(const Ship &target) {
-  if (const auto resource =
-          NovaResource_Load(kShipVisualResourceType,
-                            static_cast<std::uint16_t>(target.ship_class_id))) {
+[[nodiscard]] BoardRangeSpan TargetFrameSpan(const Ship &target) {
+  const auto class_id = static_cast<std::uint16_t>(target.ship_class_id + 0x80);
+  if (const auto resource = NovaResource_Load(kShipVisualResourceType, class_id)) {
     if (const auto visual = DecodeShipVisualDescriptor(*resource)) {
-      return {static_cast<float>(visual->base_x_size) / 2.0F,
-              static_cast<float>(visual->base_y_size) / 2.0F};
+      return {static_cast<float>(visual->base_x_size),
+              static_cast<float>(visual->base_y_size)};
     }
   }
-  return {target.collision_radius_px, target.collision_radius_px};
+  return {};
 }
 
 } // namespace
@@ -567,7 +570,7 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
   }
 
   constexpr float kBoardVelocityGate = 0.5F; // _DAT_00575598
-  constexpr float kBoardRangeShare = 0.5F;   // same constant, per-axis span
+  constexpr float kBoardRangeShare = 0.5F; // same constant, per-axis frame span
   constexpr float kBoardHeadingToleranceDeg = 30.0F;
 
   // ---- Relative velocity gate -------------------------------------------
@@ -578,10 +581,10 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
     return false;
   }
 
-  // ---- Range gate (per-axis, half of the target's sprite frame) ----------
-  const BoardRangeSpan span = TargetSpriteHalfSpan(target);
-  if (std::fabs(target.pos_x - player.pos_x) > span.half_x * kBoardRangeShare ||
-      std::fabs(target.pos_y - player.pos_y) > span.half_y * kBoardRangeShare) {
+  // ---- Range gate (per-axis, half of the target's full sprite frame) -----
+  const BoardRangeSpan span = TargetFrameSpan(target);
+  if (std::fabs(target.pos_x - player.pos_x) > span.full_x * kBoardRangeShare ||
+      std::fabs(target.pos_y - player.pos_y) > span.full_y * kBoardRangeShare) {
     QueueUiSound(state, 3, 1);
     ShowBoardingOverlay(state, 0x82); // "You're not close enough to board..."
     return false;
@@ -667,22 +670,19 @@ bool NovaBoarding_HandleBoardTargetCommand(GameState &state) {
 
 void NovaBoarding_FinishBoardCommand(SdlPlatform &platform,
                                      SdlAudio &audio,
-                                     GameState &state) {
-  // Snapshot the flight frame the loop just presented: the modal blits it as
-  // its backdrop so the space view stays visible behind the window (same
-  // strategy as the docked dialogs; original composites the DLOG over the
+                                     GameState &state,
+                                     const HudRenderer &hud) {
+  // Snapshot the 640x480 playfield region of the flight frame the loop just
+  // presented: the modal blits it as its backdrop so the space view stays
+  // visible behind the window (the original composites the DLOG over the
   // gameplay surface).
-  std::unique_ptr<SdlTexture> background =
-      NovaLanded_CaptureDockedBackground(platform);
+  std::unique_ptr<SdlTexture> background = platform.CapturePlayfieldSnapshot();
   if (!background) {
     NovaLog::Warn("board: could not snapshot the flight frame for the plunder "
                   "window background");
   }
   const BoardingWindowResult result = NovaBoarding_RunWindow(
-      platform,
-      audio,
-      state,
-      background ? background->get() : nullptr);
+      platform, audio, state, background ? background->get() : nullptr, &hud);
   (void)result;
 
   // After the interaction: latch + clear every ship targeting the boarded
@@ -1036,6 +1036,7 @@ void DrawBoardWindow(SdlPlatform &platform,
                      const GameState &state,
                      SDL_Texture *backdrop,
                      SDL_Texture *background,
+                     const HudRenderer *hud,
                      int hovered) {
   SDL_Renderer *renderer = platform.renderer();
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
@@ -1049,12 +1050,15 @@ void DrawBoardWindow(SdlPlatform &platform,
     const SDL_FRect frame{0.0F, 0.0F, 640.0F, 480.0F};
     SDL_RenderTexture(renderer, background, nullptr, &frame);
   }
-  // Dim scrim so the window reads as modal over the space view.
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
-  const SDL_FRect field{0.0F, 0.0F, 640.0F, 480.0F};
-  SDL_RenderFillRect(renderer, &field);
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  // No scrim: the original composites the DLOG directly over the unmodified
+  // gameplay surface.
+
+  // The original blits loot/self-destruct messages into the gameplay
+  // surface's message rect, which stays visible below the window while the
+  // modal is open.
+  if (hud != nullptr) {
+    hud->DrawOverlayMessage(platform, state, {640.0F, 480.0F});
+  }
 
   const SDL_FRect window{
       kBoardWindowX, kBoardWindowY, kBoardWindowW, kBoardWindowH};
@@ -1202,8 +1206,14 @@ void PlayTransitionCue(SdlAudio &audio,
 void BoardShowOverlay(GameState &state,
                       std::uint16_t str_index,
                       std::string fallback) {
-  NovaHud_ShowOverlayMessage(
-      state, LoadBoardMiscString(str_index, std::move(fallback)));
+  // Window loot/self-destruct overlays show for 0xf0 frames (the window loop
+  // decompile's second argument).
+  NovaHud_ShowOverlayMessage(state,
+                             LoadBoardMiscString(str_index, std::move(fallback)),
+                             0xe0,
+                             0xe0,
+                             0xe0,
+                             0xf0);
 }
 
 // The roll => target self-destructs (shields/armor zeroed, death timer armed)
@@ -1239,7 +1249,8 @@ void SelfDestructTarget(GameState &state) {
     SdlPlatform &platform,
     SdlAudio &audio,
     GameState &state,
-    SDL_Texture *background) {
+    SDL_Texture *background,
+    const HudRenderer *hud) {
   BoardingWindowResult result;
 
   const std::int16_t target_slot = state.player.primary_target_ship_slot;
@@ -1349,6 +1360,7 @@ void SelfDestructTarget(GameState &state) {
                     state,
                     backdrop ? backdrop->get() : nullptr,
                     background,
+                    hud,
                     hovered);
     SDL_RenderPresent(platform.renderer());
 

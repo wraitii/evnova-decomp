@@ -250,16 +250,34 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    plunder window right after `SDL_RenderPresent` (dispatch split:
    `NovaBoarding_HandleBoardTargetCommand` returns the plain-ship flag,
    `NovaBoarding_FinishBoardCommand` snapshots the presented frame via
-   `NovaLanded_CaptureDockedBackground`, runs the window over it, then applies
-   the post-window latch), so the live space view stays visible behind the
-   modal like the main-menu/docked dialogs. Added action/roll/close logging
-   (`board: action …`, `panic re-roll survived/tripped`, `window closed (…)`).
-   Note verified against the decompile: the panic self-destruct re-roll is ONE
-   `rand(100) <= panic` check on the loop iteration after each *successful*
-   loot action (the original clears its latch every iteration) — the earlier
-   "per frame" note was wrong. Trips on loot clicks (15–40% base, panic
-   ×2/×1.25/×1.5 per action) and capture-fail closes at low odds are authentic
-   original behavior; use the logs to confirm in-game.
+   `SdlPlatform::CapturePlayfieldSnapshot` — the centred 640x480 region read
+   in output pixels, since `SDL_RenderReadPixels` works at backing
+   resolution — and runs the window over it), so the live space view stays
+   visible behind the modal at full playfield size with NO dim scrim (the
+   original composites the DLOG directly over the gameplay surface). Added
+   action/roll/close logging (`board: action …`, `panic re-roll
+   survived/tripped`, `window closed (…)`). Note verified against the
+   decompile: the panic self-destruct re-roll is ONE `rand(100) <= panic`
+   check on the loop iteration after each *successful* loot action (the
+   original clears its latch every iteration) — the earlier "per frame" note
+   was wrong. Trips on loot clicks (15–40% base, panic ×2/×1.25/×1.5 per
+   action) and capture-fail closes at low odds are authentic original
+   behavior; use the logs to confirm in-game.
+4b. **Overlay lifetime + range gate corrections** — `NovaHud_ShowOverlay-
+   Message`'s second parameter is a FRAME countdown, not ms/colour:
+   `g_hud_overlay_msg_color` doubles as the counter and
+   Frame_UpdateScreenFlashTimers (0x0042f1b0) decrements it per frame,
+   clearing the message at zero. The port converts frames at ~60 Hz
+   (board denials 0x168 ≈ 6 s, window loot/trip overlays 0xf0 ≈ 4 s;
+   previously these rendered as 250–360 ms, far too short). The window now
+   also draws the live overlay message below itself (`HudRenderer::
+   DrawOverlayMessage`) as the original's message rect does. Boarding range
+   gate fixed: the sh\x8an descriptor is loaded at `ship_class_id + 0x80`
+   (the renderer's id convention; the old code silently fell back to the
+   collision radius), and `Sprite_GetShotHalfSpan` /
+   `Sprite_GetFrameVerticalHalfSpan` return the FULL frame spans (bounds
+   subtraction, default 0x20), so the gate is half the full frame per axis,
+   not half of the half-frame (was 2× too strict).
 5. **Capture arm** — escort conversion + reset-after-boarding. *IN PROGRESS
    next*: the window already takes the escort-conversion path (behavior 6,
    armor restore, reset-after-boarding); the capture-decision dialog + ship

@@ -872,7 +872,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // background).
     if (open_boarding_window) {
       open_boarding_window = false;
-      NovaBoarding_FinishBoardCommand(platform, audio, state);
+      NovaBoarding_FinishBoardCommand(platform, audio, state, hud);
       if (returning_to_menu) {
         break;
       }
