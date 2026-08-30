@@ -1,42 +1,40 @@
 #pragma once
 
 // Clean-room reconstruction of the in-space destination-interaction modal
-// (the "negotiate a landing" window), from the E/target-action pathway that is
-// distinct from normal arrival docking. In the original the spaceflight loop's
-// Ship_HandlePlayerTargetActionCommand (0x004418d0 stellar branch) calls
-// NovaUi_RunTravelDestinationInteractionWindow (0x00480030), which builds
-// DLOG 0x3f1 over the flight scene, backed by PICT 0x2140, with the three
-// primary- (context) buttons laid out by NovaUi_DrawTravelDestinationPrimary-
-// Buttons (0x004a0f90). This module mirrors docked_dialog: it renders a modal
-// window on screen and runs a small SDL loop, but drives the
-// landing-negotiation state machine instead of the Spaceport service list.
+// (the "hail a planet/station" window), from the E/target-action pathway that
+// is distinct from normal arrival docking. In the original the spaceflight
+// loop's Ship_HandlePlayerTargetActionCommand (0x004418d0 stellar branch)
+// calls NovaUi_RunTravelDestinationInteractionWindow (0x00480030), which
+// builds DLOG 0x3f1 over the flight scene, backed by PICT 0x2140. Despite the
+// "negotiation" shape the window is a communications channel: the STR# 0xbba
+// status text opens with "Communications channel open to <stellar>." and the
+// buttons (labels from the STR# 0x96 pool via the DAT_007d83aa cache, see
+// NovaUi_DrawTravelDestinationPrimaryButtons 0x004a0f90) are
+//
+//   Close Channel (bottom) / Greetings | Offer Bribe (top) /
+//   Demand Tribute | Release (middle, disabled for dominated uninhabited
+//   bodies)
+//
+// Landing NEVER happens through this window's buttons: it stays on the normal
+// second-E landing-request flow. The one exception is a successful bribe
+// (Offer Bribe -> DLOG 0x3f0 payment window 0x00482280): the original then
+// shows the "<name>, you're cleared to land. Commence final approach." HUD
+// overlay and sets the engage handoff directly.
 //
 // The negotiation state the original keeps in globals is derived here and
-// carried explicitly on GameState (bribe cost, denied/hostile latches, per-
-// system reputation). The three interlinked windows share this state:
+// carried explicitly (bribe cost, denied latch, bribe-offer latch, per-system
+// reputation). All window geometry is laid out from the real DLOG/DITL 0x3f1
+// resources (a 540x295 backdrop PICT 0x2140 centred on the 640x480 playfield)
+// with hard-coded fallbacks only when the resources fail to load.
 //
-//   DLOG 0x3f1  the destination-interaction window (this module);
-//   DLOG 0x3f0  the payment modal (NovaUi_RunTravelDestinationPaymentWindow
-//               0x00482280) shown over the interaction window when a bribe is
-//               accepted, backed by PICT 0x2142;
-//   DLOG 0x3e8  the normal Spaceport window reached after a successful
-//               land/bribe (not built here; hand off through
-//               state.travel.selected_stellar_id).
-//
-// The window itself is laid out from the real DLOG/DITL 0x3f1 (a 540x295
-// backdrop PICT 0x2140 centred on the playfield), with the three primary
-// buttons stacked vertically down the lower-left column (DITL items 0/1/2:
-// Leave bottom, Attack middle, Land/Bribe top), the destination planet picture
-// in the DITL item-4 frame on the right, the status/prompt text in the item-3
-// panel and the stellar header name in the item-5 block -- mirroring how the
-// ship-comm dialog reads its DITL.
-//
-// SCOPE: the bribe-cost computation, denied/hostile derivation, bribe-
-// eligibility gate, the land/status primary action and the payment window are
-// reconstructed. The attack/confrontation branch (reputation decrement, hostile
-// ship spawns via _Stellar_SpawnHostileShipForStellar, and Mission_ExecuteReac-
-// tionScript) and the price-haggle counter-offer in the payment window are
-// deferred with loud Todo(decomp) logs (AGENTS.md "leave" decisions).
+// SCOPE: the bribe-cost computation, denied derivation (incl. the government
+// policy-flag override), bribe-eligibility gate, Greetings/refusal status
+// ladders, the payment window (rendered each frame over the interaction
+// window, boarding-plunder style) and the bribe-success landing handoff are
+// reconstructed. The Demand Tribute / Release branch (reputation decrement,
+// Government_ProcessFactionCombatEvent, defense-fleet spawns via
+// Stellar_SpawnHostileShipForStellar, domination latches and
+// Mission_ExecuteReactionScript) is deferred with a loud Todo(decomp).
 
 #include <cstdint>
 #include <random>
@@ -52,13 +50,13 @@ class HudRenderer;
 class SpaceflightView;
 
 // Return code from the negotiation modal. The spaceflight loop either returns
-// to free flight (kClosed / kQuit) or, once the player has successfully landed
-// or paid a bribe to dock, runs the normal Spaceport window for the stellar.
+// to free flight (kClosed / kQuit) or, once the player has paid a successful
+// bribe, runs the normal Spaceport window for the stellar.
 enum class NegotiationExit : std::uint8_t {
-  kClosed,        // dismissed (Leave / Esc / close) without buying in
+  kClosed,        // dismissed (Close Channel / Esc / close) without buying in
   kQuit,          // the platform quit latch tripped
-  kProceedToLand, // the player secured docking (land or paid bribe); the
-                  // caller should open the Spaceport for the target stellar
+  kProceedToLand, // the player paid an accepted bribe; the caller should open
+                  // the Spaceport for the target stellar
 };
 
 // Computes the credits-scaled base of the destination-interaction bribe
@@ -66,11 +64,11 @@ enum class NegotiationExit : std::uint8_t {
 // NovaUi_RunTravelDestinationInteractionWindow (0x00480030): a random pick over
 // `credits * 1e-06` drawn from `rng` (NovaRandom_Range), expressed as
 // `pick * 1000 + 3000`, then clamped down to 1/3 of credits, rounded down to
-// the nearest 1000 and clamped to [1000, 900000]. The returning base is NOT yet
+// the nearest 1000 and clamped to [1000, 900000]. The returned base is NOT yet
 // scaled for the government's 1.5x "bribes the player" flag (that scale is
 // applied by NovaNegotiation_RunDestinationDialog when it resolves the
-// faction), so the helper ignores `government_id`; passing the same `rng` makes
-// the cost reproducible per session.
+// faction), so the helper ignores `government_id`; passing the same `rng`
+// makes the cost reproducible per session.
 [[nodiscard]] std::int32_t NovaNegotiation_ComputeBribeCost(
     std::mt19937 &rng, std::int32_t credits, std::int16_t government_id);
 
@@ -78,18 +76,16 @@ enum class NegotiationExit : std::uint8_t {
 // (resource id >= 0x80). Draws PICT 0x2140 as the dialog backdrop over the
 // live flight view (SpaceflightView::DrawGameFrame; the original composites
 // its DLOG over the unmodified gameplay surface), shows the target's
-// status/prompt text (from
-// STR# 0xbb8/0xbb9/0xbba via NovaHud_LoadStringEntry) and three buttons
-// (Leave, Land/Bribe, Attack), and loops until the player closes it, pays a
-// bribe to dock (returns kProceedToLand with state.travel.selected_stellar_id
-// set), or the platform quits. The attack button is deferred (loud Todo).
-// Mirrors the nested-modality of the original interaction window over the
-// flight scene.
-[[nodiscard]] NegotiationExit NovaNegotiation_RunDestinationDialog(
-    SdlPlatform &platform,
-    GameState &state,
-    std::int16_t stellar_id,
-    SpaceflightView &view,
-    HudRenderer &hud);
+// status/prompt text (STR# 0xbba / 0xbb8 flavour variants), the header block
+// (name, destination description, Status: word) and the three comm buttons,
+// and loops until the player closes the channel, pays an accepted bribe
+// (returns kProceedToLand with state.travel.selected_stellar_id set), or the
+// platform quits. The Demand Tribute / Release button is deferred (loud Todo).
+[[nodiscard]] NegotiationExit
+NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
+                                     GameState &state,
+                                     std::int16_t stellar_id,
+                                     SpaceflightView &view,
+                                     HudRenderer &hud);
 
 } // namespace game

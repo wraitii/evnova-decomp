@@ -45,9 +45,8 @@ constexpr std::uint16_t kCommFramePict = 0x213f;
 // 215-tall backdrop and are clipped/redundant in the shipped window.
 constexpr int kCommFrameWidth = 423;
 constexpr int kCommFrameHeight = 215;
-// Window origin on the 640x480 playfield (centred frame).
-constexpr float kCommWindowX = (640 - kCommFrameWidth) / 2.0F;
-constexpr float kCommWindowY = (480 - kCommFrameHeight) / 2.0F;
+// Window origin on the 640x480 playfield: the frame is centred (truncated
+// half-offsets, Dialog_CreateFromDlog) in LoadCommFrameLayout below.
 // Portrait (DITL item 10): 200x200 on the right side.
 constexpr SDL_FRect kCommPictureRect{216.0F, 7.0F, 200.0F, 200.0F};
 // Ship name (DITL item 9) / status block (DITL item 11).
@@ -65,6 +64,86 @@ constexpr float kCommButtonH = 26.0F;
 constexpr float kCommButtonYTop = 125.0F;    // Greetings button
 constexpr float kCommButtonYMiddle = 153.0F; // assistance button
 constexpr float kCommButtonYClose = 181.0F;
+
+// One frame's worth of comm-window geometry (DLOG/DITL 0x3ef), mapped into
+// the centred 640x480 playfield canvas. Loaded from the real DITL at runtime
+// (going-forward policy, see docs/dlog_ditl_dialog_format.md); the constants
+// above are the fallback used when the resources fail to decode.
+struct CommFrameLayout {
+  SDL_FRect window{};
+  SDL_FRect buttons[3]{}; // DITL items 0/1/2: Close Channel / middle / top
+  SDL_FRect name{};       // item 9
+  SDL_FRect picture{};    // item 10 (200x200 portrait)
+  SDL_FRect status{};     // item 11 (prompt block)
+};
+
+[[nodiscard]] CommFrameLayout LoadCommFrameLayout() {
+  CommFrameLayout layout;
+  layout.window = {std::truncf((640.0F - kCommFrameWidth) * 0.5F),
+                   std::truncf((480.0F - kCommFrameHeight) * 0.5F),
+                   static_cast<float>(kCommFrameWidth),
+                   static_cast<float>(kCommFrameHeight)};
+  const auto local = [&](float x, float y, float w, float h) {
+    return SDL_FRect{layout.window.x + x, layout.window.y + y, w, h};
+  };
+  layout.buttons[0] =
+      local(kCommButtonX, kCommButtonYClose, kCommButtonW, kCommButtonH);
+  layout.buttons[1] =
+      local(kCommButtonX, kCommButtonYMiddle, kCommButtonW, kCommButtonH);
+  layout.buttons[2] =
+      local(kCommButtonX, kCommButtonYTop, kCommButtonW, kCommButtonH);
+  layout.name =
+      local(kCommNameRect.x, kCommNameRect.y, kCommNameRect.w, kCommNameRect.h);
+  layout.picture = local(kCommPictureRect.x,
+                         kCommPictureRect.y,
+                         kCommPictureRect.w,
+                         kCommPictureRect.h);
+  layout.status = local(kCommStatusRect.x,
+                        kCommStatusRect.y,
+                        kCommStatusRect.w,
+                        kCommStatusRect.h);
+
+  const auto definition = NovaResource_LoadDialogDefinition(0x3ef);
+  const auto items =
+      definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
+                 : std::nullopt;
+  if (!definition || !items) {
+    NovaLog::Todo("DLOG/DITL 0x3ef unavailable; using the shipped-geometry "
+                  "fallback for the ship-comm window");
+    return layout;
+  }
+  const float width = static_cast<float>(definition->right - definition->left);
+  const float height = static_cast<float>(definition->bottom - definition->top);
+  layout.window = {std::truncf((640.0F - width) * 0.5F),
+                   std::truncf((480.0F - height) * 0.5F),
+                   width,
+                   height};
+  for (const auto &item : *items) {
+    const SDL_FRect rect{layout.window.x + static_cast<float>(item.left),
+                         layout.window.y + static_cast<float>(item.top),
+                         static_cast<float>(item.right - item.left),
+                         static_cast<float>(item.bottom - item.top)};
+    switch (item.index) {
+    case 0:
+    case 1:
+    case 2:
+      layout.buttons[item.index] = rect;
+      break;
+    case 9:
+      layout.name = rect;
+      break;
+    case 10:
+      layout.picture = rect;
+      break;
+    case 11:
+      layout.status = rect;
+      break;
+    default:
+      break;
+    }
+  }
+  return layout;
+}
 
 // Prompt pools: STR# 0xbb8 "Ship Comm Strings" for prompt_index < 0x26, STR#
 // 0xbb9 "More Ship Comm" for prompt_index >= 0x26 (the escort-goodbye pool),
@@ -245,9 +324,9 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
   std::int64_t upper = static_cast<std::int64_t>(std::floor(
       static_cast<double>(std::max(std::int32_t{1}, credits)) * fraction));
   upper = std::max<std::int64_t>(1, upper);
-  const std::int64_t pick =
-      1 +
-      static_cast<std::int64_t>(NovaRandomRange(rng, static_cast<int>(upper)));
+  // NovaRandom_Range is [0, bound); the decompile multiplies the raw pick:
+  // `(rand(upper) * 1000 + base) * personality` -- no +1.
+  const std::int64_t pick = NovaRandomRange(rng, static_cast<int>(upper));
   double cost = static_cast<double>((pick * kBribeGrouping + base)) *
                 static_cast<double>(personality);
   std::int64_t cost_int = RoundDouble(cost);
@@ -284,6 +363,7 @@ void DrawShipCommDialog(SdlPlatform &platform,
                         std::string_view prompt_text,
                         std::span<const ServiceButton> buttons,
                         std::span<const std::string> button_labels,
+                        const CommFrameLayout &layout,
                         const SDL_FRect &panel) {
   SDL_Renderer *renderer = platform.renderer();
   // Render the live game view beneath the window (the flight sim is paused,
@@ -293,12 +373,9 @@ void DrawShipCommDialog(SdlPlatform &platform,
   platform.SetCenteredPlayfield();
   (void)panel;
 
-  // The comm window frame is a fixed 423x215 PICT (DLOG 0x3ef), centred on the
-  // 640x480 playfield. All DITL item rects are offset by this origin.
-  const SDL_FRect frame{kCommWindowX,
-                        kCommWindowY,
-                        static_cast<float>(kCommFrameWidth),
-                        static_cast<float>(kCommFrameHeight)};
+  // The comm window frame is the DITL 0x3ef window (the 423x215 PICT 0x213f
+  // backdrop), centred on the 640x480 playfield.
+  const SDL_FRect &frame = layout.window;
   if (backdrop != nullptr) {
     SDL_RenderTexture(renderer, backdrop, nullptr, &frame);
   } else {
@@ -309,12 +386,9 @@ void DrawShipCommDialog(SdlPlatform &platform,
     SDL_RenderRect(renderer, &frame);
   }
 
-  // Ship portrait (DITL item 10): a 200x200 box on the right side of the
-  // frame, filled by the class's 200x200 portrait PICT (5000 + class id).
-  const SDL_FRect picture{kCommWindowX + kCommPictureRect.x,
-                          kCommWindowY + kCommPictureRect.y,
-                          kCommPictureRect.w,
-                          kCommPictureRect.h};
+  // Ship portrait (DITL item 10): the class's 200x200 portrait PICT
+  // (5000 + class id) in the item's box on the frame's right.
+  const SDL_FRect &picture = layout.picture;
   if (ship_picture != nullptr) {
     SDL_RenderTexture(renderer, ship_picture, nullptr, &picture);
   } else {
@@ -336,10 +410,7 @@ void DrawShipCommDialog(SdlPlatform &platform,
 
   // Ship name (DITL item 9) at the top of the frame's left panel, with the
   // government / escort status line beneath it.
-  const SDL_FRect name{kCommWindowX + kCommNameRect.x,
-                       kCommWindowY + kCommNameRect.y,
-                       kCommNameRect.w,
-                       kCommNameRect.h};
+  const SDL_FRect &name = layout.name;
   NovaText_DrawCentered(platform,
                         font_cache,
                         NovaFontFamily::kGeneva,
@@ -364,10 +435,7 @@ void DrawShipCommDialog(SdlPlatform &platform,
   }
 
   // Prompt / status message text (DITL item 11) below the name.
-  const SDL_FRect status{kCommWindowX + kCommStatusRect.x,
-                         kCommWindowY + kCommStatusRect.y,
-                         kCommStatusRect.w,
-                         kCommStatusRect.h};
+  const SDL_FRect &status = layout.status;
   if (!prompt_text.empty()) {
     NovaText_DrawCentered(platform,
                           font_cache,
@@ -643,6 +711,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     NovaLog::Warn("three-state button art unavailable for the comm dialog "
                   "buttons");
   }
+  const CommFrameLayout layout = LoadCommFrameLayout();
   NovaFontCache font_cache;
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   platform.SetCenteredPlayfield();
@@ -690,29 +759,18 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   // hit test unambiguous the assistance slot is omitted from the button list
   // for special-mask ships rather than kept-but-hidden.
   const bool keep_assistance = !special_mask;
-  const float greetings_y = special_mask ? kCommButtonYMiddle : kCommButtonYTop;
-  const SDL_FRect btn_rects[3] = {
-      {kCommWindowX + kCommButtonX,
-       kCommWindowY + kCommButtonYClose,
-       kCommButtonW,
-       kCommButtonH},
-      {kCommWindowX + kCommButtonX,
-       kCommWindowY + kCommButtonYMiddle,
-       kCommButtonW,
-       kCommButtonH},
-      {kCommWindowX + kCommButtonX,
-       kCommWindowY + greetings_y,
-       kCommButtonW,
-       kCommButtonH},
-  };
+  // For special-scan-mask ships the original drops the Greetings button down
+  // to the middle rect (DITL item 1, y=153) while the assistance slot hits
+  // the offscreen item 3 -- the omitted assistance slot here leaves the
+  // middle rect free for Greetings.
   std::vector<ServiceButton> buttons;
   buttons.reserve(3);
-  for (std::uint8_t i = 0; i < 3; ++i) {
-    if (!keep_assistance && i == kAssistance) {
-      continue; // Assistance (slot 1) is suppressed for special-mask ships.
-    }
-    buttons.push_back(ServiceButton{btn_rects[i], i});
+  buttons.push_back(ServiceButton{layout.buttons[0], kCloseChannel});
+  if (keep_assistance) {
+    buttons.push_back(ServiceButton{layout.buttons[1], kAssistance});
   }
+  buttons.push_back(ServiceButton{
+      special_mask ? layout.buttons[1] : layout.buttons[2], kGreetings});
   std::string assistance_label;
   if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
     assistance_label = LoadButtonLabel(kBtnBegForMercy);
@@ -938,6 +996,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                        status,
                        buttons,
                        button_labels,
+                       layout,
                        panel);
     SDL_RenderPresent(platform.renderer());
 

@@ -157,7 +157,7 @@ All values are window-local (0,0 = window top-left, matching the backdrop).
 | DLOG | window | DITL items (x=left..right, y=top..bottom) |
 |------|--------|---------------------------------------------|
 | `0x03ef` ship-comm (PICT `0x213f`) | 423×215 | btn0 Close Channel `(21,181)-(187,207)` (bottom), btn1 Request Assistance / Beg For Mercy / Release `(21,153)-(187,179)` (middle), btn2 Greetings `(21,125)-(187,151)` (top); name `(11,8)-(203,66)`; status `(40,73)-(174,119)`; portrait `(216,7)-(416,207)`. The three button labels come from the STR# 0x96 indices DAT_007d82ee (0x14 Close Channel) / f0 (0x16 Request Assistance, 0x18 Beg For Mercy, 0x1f Release) / f2 (0x15 Greetings) in NovaUi_DrawTravelDestinationContextButtons; each label matches its slot's action (slot 1 runs the assistance dialogue, slot 2 shows the hail-info text). |
-| `0x03f0` payment/bribe (PICT `0x2142`) | 262×107 | btn0 `(58,74)-(204,100)`, btn1 `(58,39)-(204,65)`, head `(7,6)-(255,31)` |
+| `0x03f0` payment/bribe (PICT `0x2142`) | 262×107 | btn0 Accept Price / Accept Payment `(58,74)-(204,100)` (bottom), btn1 Lower Price / Demand More `(58,39)-(204,65)` (top), prompt band `(7,6)-(255,31)`. Labels from STR# 0x96 via the DAT_007d830a mode table: mode 1 (debt) = {0x1b Accept Payment, 0x1c Demand More}, mode 2 (bribe) = {0x1d Accept Price, 0x1e Lower Price}. |
 | `0x03f1` destination/negotiation (PICT `0x2140`) | 540×295 | btn0 Leave `(27,244)-(173,270)`, btn1 Land/Bribe `(27,184)-(173,210)`, btn2 Attack `(27,214)-(173,240)`; text `(5,5)-(205,65)`; target picture `(222,5)-(532,288)` |
 | `0x03e8` spaceport (PICT `0x2134`) | 618×517 | large body `(3,3)-(615,288)`; content panel `(160,327)-(461,512)`; eight 145×25 buttons down both sides + bottom bars |
 
@@ -210,11 +210,19 @@ constexpr SDL_FRect kCommPictureRect{216, 7, 200, 200};          // DITL item 10
 
 The **destination-interaction (negotiation) window** gets the same treatment in
 `src/game/negotiation_dialog.cpp`: DLOG 0x3f1 / PICT 0x2140 is a fixed 540x295
-frame centred on the playfield, with the three primary buttons stacked
-vertically down the lower-left column (DITL items 0/1/2 -> Leave bottom,
-Attack middle, Land/Bribe top), the destination planet PICT in the item-4 image
-frame on the right, the status/prompt text in the item-3 panel, and the stellar
-header name in the item-5 block. The rects were cross-checked against the
+frame centred on the playfield. The window is a *communications* window, not a
+negotiation form: the status panel opens with STR# 0xbba "Communications
+channel open to <stellar>." and the three buttons (DITL items 0/1/2, stacked
+vertically down the lower-left: bottom/middle/top = 244/214/184) carry STR#
+0x96 labels per the verified DAT_007d82f4 mapping in
+NovaUi_DrawTravelDestinationPrimaryButtons -- Close Channel (bottom, 0x14),
+Greetings (top, 0x15) or Offer Bribe (0x17) when denied, Demand Tribute
+(middle, 0x2c) or Release (0x1f) once the stellar is dominated. Landing never
+happens through this window (the second-E landing request owns that); only a
+successful bribe (payment window 0x3f0) sets the travel handoff. The header
+(item 5) draws name + destination desc (desc key link_a+7000, fallback STR#
+0x44c link_a+1) + a "Status:" word line (Forbidden/Hostile/Dominated/Owned/
+Uninhabited). The rects were cross-checked against the
 `NovaResource_LoadDialogItems` parser output for DITL 0x3f1 (items:
 `{146x26 buttons at x=27..173 y=244/184/214}`, `text 5,5..205,65`,
 `image 222,5..532,288`, `header 16,82..136,132`).

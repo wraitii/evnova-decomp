@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "nova_font.hpp"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <random>
@@ -27,53 +29,82 @@
 namespace game {
 namespace {
 
-// ---- Deferred attack/confrontation hooks (TODO(decomp)) -------------------
-// The original's attack branch in NovaUi_RunTravelDestinationInteractionWindow
-// (0x00480030) invokes two faction-combat hooks that are intentionally NOT
-// reconstructed yet (the attack branch is out of scope for this pass). Their
-// exact decomp signatures are recorded here so a later pass can wire them up:
+// ---- Deferred Demand Tribute / Release hooks (TODO(decomp)) ----------------
+// The middle button's branch in NovaUi_RunTravelDestinationInteractionWindow
+// (0x00480030, local_11e == 3) is intentionally NOT reconstructed yet. It
+// spans (decomp, verified 2024 read):
 //
 //   Government_ProcessFactionCombatEvent 0x00466fc0
-//     float __cdecl (short system_id, short faction_or_government_id,
-//                    short event_code, short mission_fleet_slot)
-//     Propagates a combat event (3 = hostile attack here) to the faction in a
-//     system and nearby systems, adjusting per-system reputation (the field we
-//     model as GameState.system_reputation).
+//     (system_id, government_id, 3, -1) per attack/demand pulse
+//   Stellar_SpawnHostileShipForStellar (defense-fleet spawns, capped by
+//     StellarDef max_ship_count/present_ship_count bookkeeping)
+//   the domination latch: StellarDef.hazard_marker = 1, tribute status
+//     (STR# 0xbba msg 25/26), present_ship_count reset, plus the release
+//     mirror branch (msg 35/36, hazard_marker = 0)
+//   Mission_ExecuteReactionScript 0x00448020 on the stellar's reaction
+//     scripts (StellarDef field_0x68 / 0x167)
 //
-//   Mission_ExecuteReactionScript 0x00448020
-//     void __cdecl (char * reaction_script_ptr)
-//     Runs the target stellar's reaction-script string (StellarDef.field_0x68
-//     / 0x167) after an attack.
-//
-// Both are called only from the deferred attack branch, so no stub is emitted
-// here (an unused declaration would trip -Werror); the signatures above are the
-// contract a future attack-branch reconstruction should implement.
+// All are called only from that branch, so no stub is emitted here (an unused
+// declaration would trip -Werror).
 
 // ---- Resource ids (EV Nova Graphics 3 / Nova Data) ------------------------
-// The destination-interaction window's backdrop PICT (DLOG 0x3f1).
+// The destination-interaction window's backdrop PICT (DLOG 0x3f1) and the
+// payment modal's backdrop PICT (DLOG 0x3f0).
 constexpr std::uint16_t kNegotiationBackdropPict = 0x2140;
-
-// The payment modal's backdrop PICT (DLOG 0x3f0) is 0x2142; used by the
-// deferred full payment-window reconstruction (see the header scope note).
+constexpr std::uint16_t kPaymentBackdropPict = 0x2142;
 
 // STR# pools carrying the interaction status / prompt text. Status strings
 // (STR# 0xbba) and prompts (STR# 0xbb8 for prompt_index < 0x26, 0xbb9
 // otherwise) each store five flavour variants per message; the dialog picks
 // one at `index*5 + random + 1` (see NovaUi_LoadTravelDestinationStatusString
-// 0x00482910 / NovaUi_LoadTravelDestinationPromptString 0x004828c0, which
-// reads STR# 0xbb8 for prompt indices below 0x26).
+// 0x00482910 / NovaUi_LoadTravelDestinationPromptString 0x004828c0).
 constexpr std::uint16_t kStatusStr = 0xbba;
 constexpr std::uint16_t kPromptStr = 0xbb8;
+// STR# 0x7d2 "misc strings" (1-based entry numbers, as the original passes
+// them to Resource_LoadStringEntry / Resource_DrawStringEntry).
+constexpr std::uint16_t kMiscStr = 0x7d2;
+// STR# 0x44c: the shipped stellar-class descriptor fragments ("[Class M]",
+// "[Ice Moon]", ...) used when the stellar's own destination desc resource is
+// absent (0x00480030: FUN_004c73b0(link_a_id + 7000) fallback).
+constexpr std::uint16_t kStellarClassStr = 0x44c;
+
+// STR# 0x96 button-label entries (1-based; the original indexes the
+// DAT_007d83aa cache by the 0-based pool index, entry = pool + 1):
+constexpr std::uint16_t kButtonLabelStr = 0x96;
+constexpr std::uint16_t kBtnCloseChannel = 0x15;  // pool 0x14 "Close Channel"
+constexpr std::uint16_t kBtnGreetings = 0x16;     // pool 0x15 "Greetings"
+constexpr std::uint16_t kBtnOfferBribe = 0x18;    // pool 0x17 "Offer Bribe"
+constexpr std::uint16_t kBtnRelease = 0x20;       // pool 0x1f "Release"
+constexpr std::uint16_t kBtnDemandTribute = 0x2d; // pool 0x2c "Demand Tribute"
+constexpr std::uint16_t kBtnAcceptPrice = 0x1e;   // pool 0x1d "Accept Price"
+constexpr std::uint16_t kBtnLowerPrice = 0x1f;    // pool 0x1e "Lower Price"
+
+// STR# 0x7d2 entries used here (1-based; pool = entry - 1):
+constexpr std::uint16_t kMiscClearedToDock = 0x5f; // "you're cleared to dock."
+constexpr std::uint16_t kMiscClearedToLand = 0x62; // "you're cleared to land."
+constexpr std::uint16_t kMiscFinalApproach = 0x64; // "Commence final approach."
+constexpr std::uint16_t kMiscCredit = 0x20;        // "credit"
+constexpr std::uint16_t kMiscCredits = 0x21;       // "credits"
+constexpr std::uint16_t kMiscPayYou = 0xbc;        // "I'll pay you"
+constexpr std::uint16_t kMiscStatusLabel = 0xc4;   // "Status:"
+constexpr std::uint16_t kMiscUninhabited = 0xaa;   // "Uninhabited"
+constexpr std::uint16_t kMiscOwned = 0xab;         // "Owned"
+constexpr std::uint16_t kMiscDominated = 0xac;     // "Dominated"
+constexpr std::uint16_t kMiscForbidden = 0xad;     // "Forbidden"
+constexpr std::uint16_t kMiscHostile = 0xae;       // "Hostile"
 
 // Status/prompt message indices used by the dialog loop (see the decomp of
-// NovaUi_RunTravelDestinationInteractionWindow). Kept explicit so the variant
-// arithmetic (`index*5 + random + 1`) is readable at the call sites.
-constexpr std::uint16_t kMsgWelcomeStatus = 0; // welcome status (not denied)
-constexpr std::uint16_t kMsgRefusedPrompt = 2; // denied, not hostile prompt
-constexpr std::uint16_t kMsgRefuseNoBribe = 9; // refused, no bribe offered
-constexpr std::uint16_t kMsgCannotAfford = 4;  // credits < payment amount
-constexpr std::uint16_t kMsgBribeDeclined = 6; // haggle counter-offer
-constexpr std::uint16_t kMsgBribeOffered = 8;  // offered before payment
+// NovaUi_RunTravelDestinationInteractionWindow 0x00480030). Kept explicit so
+// the variant arithmetic (`index*5 + random + 1`) is readable at call sites.
+constexpr std::uint16_t kMsgWelcomeStatus = 0; // "Communications channel
+                                               // open to " (+ name + ".")
+constexpr std::uint16_t kMsgNoResponse = 1;    // uninhabited prompt
+constexpr std::uint16_t kMsgDeniedPrompt = 2;  // "What is it you want?"
+constexpr std::uint16_t kMsgCannotAfford = 4;  // "Stop wasting our time."
+constexpr std::uint16_t kMsgBribeDeclined = 6; // "No way. Leave immediately."
+constexpr std::uint16_t kMsgBribeOffered = 8;  // "We'll let you slip by..."
+constexpr std::uint16_t kMsgGreetingResponse = 9; // "Hello there." etc.
+constexpr std::uint16_t kMsgRefuseNoBribe = 9; // "Yeah, right." (status pool)
 
 // g_travel_interaction_bribe_random_latch gate: a per-launch roll in [0,100)
 // from NovaRandom_Range(100); values > 0x1e (i.e. greater than 30) admit a
@@ -81,74 +112,20 @@ constexpr std::uint16_t kMsgBribeOffered = 8;  // offered before payment
 constexpr int kBribeLatchCutoff = 0x1e; // 30
 
 // The payment window (DLOG 0x3f0) success chance, passed as `chance_percent`
-// by the bribe path (0x23 = 35% chance the bribe is accepted).
+// by the bribe path (0x23 = 35% chance "Lower Price" is granted).
 constexpr int kPaymentChancePercent = 0x23;
-
-// Indexes the five-variant STR# pools: each message's variants live at
-// `message_index*5 + variant_index + 1`, with variant_index in [0,5) chosen
-// by NovaRandom_Range(5) at launch (`g_travel_interaction_random_index`).
-[[nodiscard]] std::uint16_t StringVariantIndex(std::int16_t random_index,
-                                               std::uint16_t message_index) {
-  return static_cast<std::uint16_t>(message_index * 5u + random_index + 1);
-}
-
-// Colours shared by the interaction/payment windows.
-constexpr SDL_Color kDim{192, 192, 192, 255};
-constexpr SDL_Color kTitle{255, 255, 255, 255};
-
-// ---- DLOG 0x3f1 / DITL 0x3f1 geometry ------------------------------------
-// The destination-interaction window is 540x295 (DLOG 0x3f1 bounds = the
-// backdrop PICT 0x2140, decodes to exactly 540x295), centred on the 640x480
-// playfield. All DITL item rects are window-local (0,0 = the backdrop's
-// top-left); they must be offset by the centred window origin before drawing.
-//
-// Layout (entry numbers are one-based UiPanel_GetEntryInfo indices, matching
-// NovaUi_HandleTravelDestinationPrimaryButtons reading entries 1/2/3 and
-// NovaUi_DrawTravelDestinationInteractionWindow reading entries 4/5/6):
-//   [0] Leave (entry 1)       x=27..173 y=244..270  (bottom)
-//   [1] Land/Bribe (entry 2)  x=27..173 y=184..210  (top)
-//   [2] Attack (entry 3)      x=27..173 y=214..240  (middle)
-//   The listed [n] are the *resources* for each slot; the window shows them
-//   stacked vertically on the lower-left column (bottom-to-top: Leave, Attack,
-//   Land/Bribe).
-constexpr int kNegotiationFrameWidth = 540;
-constexpr int kNegotiationFrameHeight = 295;
-constexpr float kNegotiationWindowX = (640 - kNegotiationFrameWidth) / 2.0F;
-constexpr float kNegotiationWindowY = (480 - kNegotiationFrameHeight) / 2.0F;
-// The three primary buttons (DITL items 0/1/2), each a 146x26 box at x=27..
-// 173, stacked vertically. DITL item 0 = Leave (y=244, bottom), item 1 =
-// Land/Bribe (y=184, top), item 2 = Attack (y=214, middle).
-constexpr float kNegotiationButtonX = 27.0F + kNegotiationWindowX;
-constexpr float kNegotiationButtonW = 146.0F;
-constexpr float kNegotiationButtonH = 26.0F;
-constexpr float kNegotiationButtonYLeave =
-    kNegotiationWindowY + 244.0F; // DITL item 0
-constexpr float kNegotiationButtonYLand =
-    kNegotiationWindowY + 184.0F; // DITL item 1
-constexpr float kNegotiationButtonYAttack =
-    kNegotiationWindowY + 214.0F; // DITL item 2
-// Status/prompt text panel (DITL item 3, entry 4): 200x60 at x=5..205,
-// y=5..65 -- the top-left text block on the frame.
-constexpr SDL_FRect kNegotiationStatusRect{5.0F, 5.0F, 200.0F, 60.0F};
-// Target stellar image frame (DITL item 4, entry 5): a 310x283 box at
-// x=222..532, y=5..288 on the right side of the frame -- filled by the
-// destination planet picture.
-constexpr SDL_FRect kNegotiationImageRect{222.0F, 5.0F, 310.0F, 283.0F};
-// Destination header block (DITL item 5, entry 6): a 120x50 box at x=16..136,
-// y=82..132 -- holds the stellar display name and a short note.
-constexpr SDL_FRect kNegotiationHeaderRect{16.0F, 82.0F, 120.0F, 50.0F};
-
-// ---- Government flag gates (GovtDef.flags_primary) ------------------------
-// 0x8000: the faction "bribes the player" -- raises the bribe cost 1.5x and
-// forces bribe eligibility. 0x4000: the faction's ships will take a bribe (an
-// additional way to become bribe-eligible). Both read by
-// NovaUi_RunTravelDestinationInteractionWindow from government.flags_primary.
-constexpr std::uint16_t kGovtFlagBribeCostly = 0x8000;
-constexpr std::uint16_t kGovtFlagBribable = 0x4000;
+// Payment-window factors (mirrors the Ghidra doubles): on a granted "Lower
+// Price" the bribe-mode amount scales by 0.75 (_DAT_005758f0) and rounds to
+// /100 (_DAT_00575898).
+constexpr double kPaymentBribeScale = 0.75;
+constexpr double kPaymentRoundFactor = 0.01;
+// A declined/closed bribe bumps the counter-offer price by this much and
+// resets the latch to force an eventual offer (0x00480030).
+constexpr std::int32_t kHaggleIncrement = 1000;
 
 // ---- Bribe cost constants (mirrors the Ghidra global doubles) -------------
 // The random bribe upper bound is a meagre fraction of the player's credits
-// (_DAT_005758d8 = 1e-06, so `random(credits * 1e-06)`).
+// (_DAT_005758d8 = 1e-06, so `random(credits * 1e-06) * 1000 + 3000`).
 constexpr double kCreditsBribeFraction = 1e-06;
 // The government 1.5x bribe-cost scale (_DAT_005758e0).
 constexpr double kGovtBribeCostMultiplier = 1.5;
@@ -159,34 +136,187 @@ constexpr std::int32_t kBribeGrouping = 1000;     // round down to /1000
 constexpr std::int32_t kBribeLowerBound = 1000;   // >= 1000
 constexpr std::int32_t kBribeUpperBound = 900000; // <= 900000
 
-// ---- Payment-window (DLOG 0x3f0) factors (mirrors the Ghidra doubles) -----
-// On a successful confirm the payment amount is inflated per mode then
-// rounded to /100 (_DAT_00575898 = 0.01): debt mode scales by 1.33
-// (_DAT_005758e8, reserved for the mission/return payoff, not used here),
-// bribe mode by 0.75 (_DAT_005758f0).
-constexpr double kPaymentBribeScale = 0.75;
-constexpr double kPaymentRoundFactor = 0.01;
+// ---- Government flag gates (GovtDef.flags_primary) ------------------------
+// 0x8000: the faction "bribes the player" -- raises the bribe cost 1.5x and
+// forces bribe eligibility. 0x4000: the faction's ships will take a bribe.
+// Both read by NovaUi_RunTravelDestinationInteractionWindow.
+constexpr std::uint16_t kGovtFlagBribeCostly = 0x8000;
+constexpr std::uint16_t kGovtFlagBribable = 0x4000;
 
-// A declined bribe bumps the counter-offer price by this much and resets the
-// latch to force an eventual offer
-// (NovaUi_RunTravelDestinationInteractionWindow).
-constexpr std::int32_t kHaggleIncrement = 1000;
+// Indexes the five-variant STR# pools: each message's variants live at
+// `message_index*5 + variant_index + 1`, with variant_index in [0,5) chosen
+// by NovaRandom_Range(5) at launch (`g_travel_interaction_random_index`).
+[[nodiscard]] std::uint16_t StringVariantIndex(std::int16_t random_index,
+                                               std::uint16_t message_index) {
+  return static_cast<std::uint16_t>(message_index * 5u + random_index + 1);
+}
 
-// Uniform integer in [0, bound). Mirrors the game's NovaRandom_Range using the
-// GameState PRNG so negotiation rolls are reproducible per session.
-[[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
-  if (bound <= 1) {
-    return 0;
+// ---- Palette ---------------------------------------------------------------
+// PTR_DAT_00575ad8 -> RGBColor (65535,65535,65535) white and
+// PTR_DAT_00575ae4 -> (65535,0,0) red, read from the binary. The remaining
+// colours are runtime-initialized (PTR_DAT_00575acc and the SHORT_ARRAY_0073-
+// 3b* c.lr palette entries live in .bss); black and the two greys mirror the
+// approximations boarding_plunder.cpp established against the shipped art.
+constexpr SDL_Color kWhite{255, 255, 255, 255}; // PTR_DAT_00575ad8
+constexpr SDL_Color kBlack{0, 0, 0, 255};       // PTR_DAT_00575acc (runtime)
+constexpr SDL_Color kGrey{128, 128, 128, 255};  // DAT_00733b56 (runtime)
+constexpr SDL_Color kLightGrey{192, 192, 192, 255}; // DAT_00733b50 (runtime)
+constexpr SDL_Color kRed{255, 0, 0, 255};           // PTR_DAT_00575ae4
+// The "Forbidden" status word draws with a stack-built RGBColor
+// (0xffff, 0x6666, 0). SHORT_ARRAY_00733b32 (Owned/Dominated) is unreadable
+// .bss; the same warm tone is used for it (TODO(decomp): verify).
+constexpr SDL_Color kStatusOrange{255, 102, 0, 255};
+
+// ---- DLOG 0x3f1 layout ----------------------------------------------------
+// All geometry comes from the real DLOG/DITL 0x3f1 resources, mapped into the
+// centred 640x480 playfield canvas. The constants below are the fallback used
+// when the resources fail to decode; they mirror the shipped DITL (see
+// docs/dlog_ditl_dialog_format.md).
+constexpr float kNegotiationFrameWidth = 540.0F;
+constexpr float kNegotiationFrameHeight = 295.0F;
+constexpr SDL_FRect kFallbackButtonRects[3] = {
+    {27.0F, 244.0F, 146.0F, 26.0F}, // item 0: Close Channel (bottom)
+    {27.0F, 184.0F, 146.0F, 26.0F}, // item 1: Greetings / Offer Bribe (top)
+    {27.0F, 214.0F, 146.0F, 26.0F}, // item 2: Demand Tribute / Release (middle)
+};
+constexpr SDL_FRect kFallbackStatusRect{5.0F, 5.0F, 200.0F, 60.0F};   // item 3
+constexpr SDL_FRect kFallbackImageRect{222.0F, 5.0F, 310.0F, 283.0F}; // item 4
+constexpr SDL_FRect kFallbackHeaderRect{16.0F, 82.0F, 120.0F, 50.0F}; // item 5
+
+// One frame's worth of geometry + text, shared by the draw path and the
+// payment sub-window (which re-renders the interaction window beneath itself
+// every frame, like the boarding capture-decision dialog).
+struct NegotiationFrame {
+  SDL_FRect window{};
+  SDL_FRect buttons[3]{};
+  SDL_FRect status_panel{};
+  SDL_FRect image{};
+  SDL_FRect header{};
+  std::string button_labels[3];
+  bool tribute_enabled = false;
+  std::string status;
+  std::string name;
+  std::string description;
+  std::string status_label;
+  std::string status_word;
+  SDL_Color status_word_color = kWhite;
+};
+
+[[nodiscard]] SDL_FRect OffsetRect(SDL_FRect rect, SDL_FPoint origin) {
+  rect.x += origin.x;
+  rect.y += origin.y;
+  return rect;
+}
+
+// Loads DLOG 0x3f1 + DITL, centred on the fixed 640x480 canvas like
+// Dialog_CreateFromDlog; fills `frame`'s geometry from DITL items 0..5.
+// Returns false (leaving the shipped-DITL fallback geometry) when the
+// resources are unavailable.
+[[nodiscard]] bool LoadNegotiationGeometry(SDL_FRect *buttons,
+                                           SDL_FRect &status_panel,
+                                           SDL_FRect &image,
+                                           SDL_FRect &header,
+                                           SDL_FRect &window) {
+  const auto definition = NovaResource_LoadDialogDefinition(0x3f1);
+  const auto items =
+      definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
+                 : std::nullopt;
+  if (!definition || !items) {
+    return false;
   }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<int>{0, bound - 1}(rng));
+  const float width = static_cast<float>(definition->right - definition->left);
+  const float height = static_cast<float>(definition->bottom - definition->top);
+  const SDL_FPoint origin{std::truncf((640.0F - width) * 0.5F),
+                          std::truncf((480.0F - height) * 0.5F)};
+  window = {origin.x, origin.y, width, height};
+  for (const auto &item : *items) {
+    const SDL_FRect rect =
+        OffsetRect({static_cast<float>(item.left),
+                    static_cast<float>(item.top),
+                    static_cast<float>(item.right - item.left),
+                    static_cast<float>(item.bottom - item.top)},
+                   origin);
+    switch (item.index) {
+    case 0:
+    case 1:
+    case 2:
+      buttons[item.index] = rect;
+      break;
+    case 3:
+      status_panel = rect;
+      break;
+    case 4:
+      image = rect;
+      break;
+    case 5:
+      header = rect;
+      break;
+    default:
+      break;
+    }
+  }
+  return true;
 }
 
-// Round-half-up integer form of Ghidra's double-to-int ROUND().
-[[nodiscard]] std::int32_t RoundDouble(double v) {
-  return static_cast<std::int32_t>(std::llround(v));
+// ---- DLOG 0x3f0 (payment) layout -----------------------------------------
+constexpr float kPaymentFrameWidth = 262.0F;
+constexpr float kPaymentFrameHeight = 107.0F;
+constexpr SDL_FRect kFallbackPaymentButtonRects[2] = {
+    {58.0F, 74.0F, 146.0F, 26.0F}, // item 0: Accept Price (bottom)
+    {58.0F, 39.0F, 146.0F, 26.0F}, // item 1: Lower Price (top)
+};
+constexpr SDL_FRect kFallbackPaymentTextRect{
+    7.0F, 6.0F, 248.0F, 25.0F}; // item 2
+
+struct PaymentFrame {
+  SDL_FRect window{};
+  SDL_FRect buttons[2]{};
+  SDL_FRect text_band{};
+};
+
+[[nodiscard]] PaymentFrame LoadPaymentGeometry() {
+  PaymentFrame frame;
+  frame.window = {std::truncf((640.0F - kPaymentFrameWidth) * 0.5F),
+                  std::truncf((480.0F - kPaymentFrameHeight) * 0.5F),
+                  kPaymentFrameWidth,
+                  kPaymentFrameHeight};
+  frame.buttons[0] = OffsetRect(kFallbackPaymentButtonRects[0],
+                                {frame.window.x, frame.window.y});
+  frame.buttons[1] = OffsetRect(kFallbackPaymentButtonRects[1],
+                                {frame.window.x, frame.window.y});
+  frame.text_band =
+      OffsetRect(kFallbackPaymentTextRect, {frame.window.x, frame.window.y});
+  const auto definition = NovaResource_LoadDialogDefinition(0x3f0);
+  const auto items =
+      definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
+                 : std::nullopt;
+  if (!definition || !items) {
+    NovaLog::Todo("DLOG/DITL 0x3f0 unavailable; using the shipped-geometry "
+                  "fallback for the payment window");
+    return frame;
+  }
+  const float width = static_cast<float>(definition->right - definition->left);
+  const float height = static_cast<float>(definition->bottom - definition->top);
+  const SDL_FPoint origin{std::truncf((640.0F - width) * 0.5F),
+                          std::truncf((480.0F - height) * 0.5F)};
+  frame.window = {origin.x, origin.y, width, height};
+  for (const auto &item : *items) {
+    const SDL_FRect rect =
+        OffsetRect({static_cast<float>(item.left),
+                    static_cast<float>(item.top),
+                    static_cast<float>(item.right - item.left),
+                    static_cast<float>(item.bottom - item.top)},
+                   origin);
+    if (item.index <= 1) {
+      frame.buttons[item.index] = rect;
+    } else if (item.index == 2) {
+      frame.text_band = rect;
+    }
+  }
+  return frame;
 }
 
+// ---- STR# helpers ---------------------------------------------------------
 // Loads one flavour variant of a status (STR# 0xbba) message. `random_index`
 // is the per-launch flavour pick; mirrors NovaUi_LoadTravelDestinationStatus-
 // String (0x00482910) loading `message*5 + random + 1` (a 1-based entry
@@ -207,6 +337,14 @@ LoadPromptVariant(std::int16_t random_index, std::uint16_t message_index) {
       kPromptStr, StringVariantIndex(random_index, message_index));
 }
 
+// Loads a STR# 0x96 button label with a literal fallback for missing
+// resources.
+[[nodiscard]] std::string LoadButtonLabel(std::uint16_t entry,
+                                          std::string_view fallback) {
+  return NovaHud_LoadStringEntry(kButtonLabelStr, entry)
+      .value_or(std::string{fallback});
+}
+
 // Loads one PICT resource into a texture (null on failure to locate/decode).
 std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
                                             std::uint16_t pict_id) {
@@ -222,15 +360,77 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
       platform.renderer(), img->width, img->height, img->rgba_pixels);
 }
 
+// Ghidra DrawContext_DrawGroupedUInt (see boarding_plunder.cpp): decimal
+// digits grouped in threes with commas.
+[[nodiscard]] std::string GroupedUInt(std::int32_t value) {
+  const std::string digits = std::to_string(value);
+  std::string out;
+  out.reserve(digits.size() + digits.size() / 3);
+  for (std::size_t i = 0; i < digits.size(); ++i) {
+    if (i > 0 && (digits.size() - i) % 3 == 0) {
+      out.push_back(',');
+    }
+    out.push_back(digits[i]);
+  }
+  return out;
+}
+
+// Uniform integer in [0, bound). Mirrors the game's NovaRandom_Range using the
+// GameState PRNG so negotiation rolls are reproducible per session.
+[[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
+  if (bound <= 1) {
+    return 0;
+  }
+  return static_cast<std::int16_t>(
+      std::uniform_int_distribution<int>{0, bound - 1}(rng));
+}
+
+// Round-half-up integer form of Ghidra's double-to-int ROUND().
+[[nodiscard]] std::int32_t RoundDouble(double v) {
+  return static_cast<std::int32_t>(std::llround(v));
+}
+
+// ---- Drawing --------------------------------------------------------------
+
+// Draws one button slot with the shared three-state art. The hovered slot
+// draws the pressed art (NovaUi_DrawTravelDestinationPrimaryButtons passes
+// the highlighted slot through to NovaUi_DrawThreeStateButton).
+void DrawDialogButton(SdlPlatform &platform,
+                      NovaFontCache &font_cache,
+                      const ServicesButtonArt &button_art,
+                      const SDL_FRect &rect,
+                      std::string_view label,
+                      bool enabled,
+                      bool hovered) {
+  const ButtonState state =
+      !enabled ? ButtonState::kDisabled
+               : (hovered ? ButtonState::kHover : ButtonState::kNormal);
+  button_art.Draw(platform, rect, state);
+  // Three-state button labels: white on the normal/hover art, 50% grey on the
+  // disabled art, plain screen font (NovaUi_DrawThreeStateButton label table
+  // DAT_007d8350).
+  constexpr SDL_Color kLabel{255, 255, 255, 255};
+  constexpr SDL_Color kLabelGrey{128, 128, 128, 255};
+  NovaText_DrawCentered(platform,
+                        font_cache,
+                        kThreeStateButtonFontFamily,
+                        kThreeStateButtonFontSize,
+                        kNovaFontStyleRegular,
+                        enabled ? kLabel : kLabelGrey,
+                        rect.x,
+                        rect.x + rect.w,
+                        ThreeStateButtonLabelBaseline(rect),
+                        label);
+}
+
 // Ghidra 0x004812c0 NovaUi_DrawTravelDestinationInteractionWindow.
-// Draws the interaction-window frame over the live flight view. The 540x295
-// backdrop
-// PICT (DLOG 0x3f1) is centred on the 640x480 playfield; over it we draw the
-// destination planet picture into the DITL item-4 image frame on the right, the
-// status/prompt text into the item-3 panel top-left, the stellar header (item
-// 5) name block, and the three primary buttons (items 0/1/2) stacked
-// vertically down the lower-left column (Leave bottom, Attack middle,
-// Land/Bribe top).
+// Draws the interaction-window frame over the live flight view: the 540x295
+// backdrop PICT (DLOG 0x3f1) centred on the playfield, the three comm
+// buttons, the inverted status/prompt panel (DITL item 3: white fill, black
+// wrapped text -- the net look of the original's fill + filled-rect text +
+// InvertRect sequence), the destination picture (item 4) and the header block
+// (item 5: name, description, Status: word, left-aligned baselines at
+// +12/+26/+42).
 void DrawNegotiationDialog(SdlPlatform &platform,
                            const GameState &state,
                            SpaceflightView &view,
@@ -239,153 +439,298 @@ void DrawNegotiationDialog(SdlPlatform &platform,
                            const ServicesButtonArt &button_art,
                            SDL_Texture *backdrop,
                            SDL_Texture *planet_art,
-                           std::string_view status,
-                           std::string_view header,
-                           std::string_view land_label,
-                           std::span<const ServiceButton> buttons,
-                           const SDL_FRect &panel) {
+                           const NegotiationFrame &frame,
+                           int hovered_slot) {
   SDL_Renderer *renderer = platform.renderer();
   // Render the live game view beneath the window (the flight sim is paused,
   // so this redraws the same world each frame): the original draws its DLOG
   // over the unmodified gameplay surface.
   view.DrawGameFrame(platform, state, hud);
   platform.SetCenteredPlayfield();
-  (void)panel;
 
-  // The interaction-window frame is a fixed 540x295 PICT (DLOG 0x3f1), centred
-  // on the 640x480 playfield. All DITL item rects are offset by this origin.
-  const SDL_FRect frame{kNegotiationWindowX,
-                        kNegotiationWindowY,
-                        static_cast<float>(kNegotiationFrameWidth),
-                        static_cast<float>(kNegotiationFrameHeight)};
   if (backdrop != nullptr) {
-    SDL_RenderTexture(renderer, backdrop, nullptr, &frame);
+    SDL_RenderTexture(renderer, backdrop, nullptr, &frame.window);
   } else {
-    // No backdrop art: draw a bordered placeholder so the dialog stays legible.
-    SDL_SetRenderDrawColor(renderer, 16, 40, 72, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &frame);
-    SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &frame);
+    SDL_SetRenderDrawColor(
+        renderer, kBlack.r, kBlack.g, kBlack.b, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &frame.window);
   }
 
-  // Destination planet picture (DITL item 4, entry 5): a 310x283 frame on the
-  // right side of the window (x=222..532, y=5..288). The original scales the
-  // target stellar's ambient sprite into this panel; we draw the destination
-  // planet PICT 1:1 (like the ship-comm portrait), with a bordered placeholder
-  // when the picture is absent.
-  const SDL_FRect picture{kNegotiationWindowX + kNegotiationImageRect.x,
-                          kNegotiationWindowY + kNegotiationImageRect.y,
-                          kNegotiationImageRect.w,
-                          kNegotiationImageRect.h};
+  // Comm buttons (DITL items 0/1/2, bottom/top/middle).
+  for (int slot = 0; slot < 3; ++slot) {
+    const bool enabled = slot != 2 || frame.tribute_enabled;
+    DrawDialogButton(platform,
+                     font_cache,
+                     button_art,
+                     frame.buttons[slot],
+                     frame.button_labels[slot],
+                     enabled,
+                     hovered_slot == slot);
+  }
+
+  // Status / prompt panel (DITL item 3, entry 4): white fill with black
+  // word-wrapped text (the original fills white, draws the pstring in a
+  // filled rect and inverts).
+  SDL_FRect inner = frame.status_panel;
+  inner.x += 1.0F;
+  inner.y += 1.0F;
+  inner.w -= 2.0F;
+  inner.h -= 2.0F;
+  SDL_SetRenderDrawColor(
+      renderer, kWhite.r, kWhite.g, kWhite.b, SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &inner);
+  if (!frame.status.empty()) {
+    inner.x += 4.0F;
+    inner.y += 2.0F;
+    inner.w -= 8.0F;
+    const auto lines = WrapDescriptionLines(
+        frame.status,
+        static_cast<int>(std::max(1.0F, inner.w)),
+        [&](std::string_view line) {
+          return static_cast<int>(font_cache.TextWidth(
+              NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line));
+        });
+    float baseline = inner.y + 12.0F;
+    for (const std::string &line : lines) {
+      if (baseline > frame.status_panel.y + frame.status_panel.h) {
+        break;
+      }
+      NovaText_Draw(platform,
+                    font_cache,
+                    NovaFontFamily::kGeneva,
+                    12.0F,
+                    kNovaFontStyleRegular,
+                    kBlack,
+                    inner.x,
+                    baseline,
+                    line);
+      baseline += 13.0F;
+    }
+  }
+
+  // Destination picture (DITL item 4, entry 5). The original blits the target
+  // stellar's ambient spin sprite centred in the panel; the port draws the
+  // destination planet PICT fitted (same divergence documented in
+  // landed_window.cpp), with a bordered placeholder when absent.
   if (planet_art != nullptr) {
-    // Scale the planet art to fit the panel while preserving aspect ratio.
     float aw = 0.0F;
     float ah = 0.0F;
     SDL_GetTextureSize(planet_art, &aw, &ah);
-    SDL_FRect dst = picture;
+    SDL_FRect dst = frame.image;
     if (aw > 0.0F && ah > 0.0F) {
-      const float scale = std::min(picture.w / aw, picture.h / ah);
+      const float scale = std::min(frame.image.w / aw, frame.image.h / ah);
       dst.w = aw * scale;
       dst.h = ah * scale;
-      dst.x = picture.x + (picture.w - dst.w) / 2.0F;
-      dst.y = picture.y + (picture.h - dst.h) / 2.0F;
+      dst.x = frame.image.x + (frame.image.w - dst.w) / 2.0F;
+      dst.y = frame.image.y + (frame.image.h - dst.h) / 2.0F;
     }
     SDL_RenderTexture(renderer, planet_art, nullptr, &dst);
   } else {
     SDL_SetRenderDrawColor(renderer, 8, 24, 44, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &picture);
+    SDL_RenderFillRect(renderer, &frame.image);
     SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &picture);
+    SDL_RenderRect(renderer, &frame.image);
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
                           11.0F,
                           kNovaFontStyleRegular,
-                          kDim,
-                          picture.x,
-                          picture.x + picture.w,
-                          picture.y + picture.h / 2.0F,
+                          kGrey,
+                          frame.image.x,
+                          frame.image.x + frame.image.w,
+                          frame.image.y + frame.image.h / 2.0F,
                           "[no picture]");
   }
 
-  // Destination header (DITL item 5, entry 6): the stellar display name and a
-  // short note in the small box under the status panel.
-  const SDL_FRect header_rect{kNegotiationWindowX + kNegotiationHeaderRect.x,
-                              kNegotiationWindowY + kNegotiationHeaderRect.y,
-                              kNegotiationHeaderRect.w,
-                              kNegotiationHeaderRect.h};
-  if (!header.empty()) {
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleBold,
-                          kTitle,
-                          header_rect.x,
-                          header_rect.x + header_rect.w,
-                          header_rect.y + header_rect.h / 2.0F + 2.0F,
-                          header);
+  // Header block (DITL item 5, entry 6): name (white, +12), destination
+  // description (grey, +26), Status: label + word (+42), all left-aligned.
+  const float left = frame.header.x;
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                12.0F,
+                kNovaFontStyleRegular,
+                kWhite,
+                left,
+                frame.header.y + 12.0F,
+                frame.name);
+  if (!frame.description.empty()) {
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kGrey,
+                  left,
+                  frame.header.y + 26.0F,
+                  frame.description);
+  }
+  if (!frame.status_label.empty()) {
+    const float label_width = font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                                   12.0F,
+                                                   kNovaFontStyleRegular,
+                                                   frame.status_label + " ");
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kLightGrey,
+                  left,
+                  frame.header.y + 42.0F,
+                  frame.status_label);
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  frame.status_word_color,
+                  left + label_width,
+                  frame.header.y + 42.0F,
+                  frame.status_word);
+  }
+}
+
+// Ghidra 0x004826a0 NovaUi_DrawTravelDestinationPaymentWindow: the DLOG 0x3f0
+// payment modal over the still-rendered interaction window. Prompt band
+// (DITL item 2): "<I'll pay you> <grouped amount> <credit(s)>." in white;
+// buttons Accept Price (item 0, bottom) / Lower Price (item 1, top).
+void DrawPaymentWindow(SdlPlatform &platform,
+                       NovaFontCache &font_cache,
+                       const ServicesButtonArt &button_art,
+                       SDL_Texture *backdrop,
+                       const PaymentFrame &frame,
+                       std::int32_t payment_amount,
+                       int hovered_slot) {
+  SDL_Renderer *renderer = platform.renderer();
+  if (backdrop != nullptr) {
+    SDL_RenderTexture(renderer, backdrop, nullptr, &frame.window);
+  } else {
+    SDL_SetRenderDrawColor(
+        renderer, kBlack.r, kBlack.g, kBlack.b, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &frame.window);
   }
 
-  // Status / prompt text block (DITL item 3, entry 4): a 200x60 panel at the
-  // top-left of the frame (x=5..205, y=5..65), centred vertically.
-  const SDL_FRect status_rect{kNegotiationWindowX + kNegotiationStatusRect.x,
-                              kNegotiationWindowY + kNegotiationStatusRect.y,
-                              kNegotiationStatusRect.w,
-                              kNegotiationStatusRect.h};
-  if (!status.empty()) {
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleBold,
-                          kTitle,
-                          status_rect.x,
-                          status_rect.x + status_rect.w,
-                          status_rect.y + status_rect.h / 2.0F,
-                          status);
+  // Prompt band (DITL item 2, entry 3): white left-aligned text, cursor at
+  // +4/+12 like the original.
+  const std::string credit_word =
+      NovaHud_LoadStringEntry(kMiscStr,
+                              payment_amount < 2 ? kMiscCredit : kMiscCredits)
+          .value_or(payment_amount < 2 ? "credit" : "credits");
+  const std::string prompt =
+      NovaHud_LoadStringEntry(kMiscStr, kMiscPayYou).value_or("I'll pay you") +
+      " " + GroupedUInt(payment_amount) + " " + credit_word + ".";
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                12.0F,
+                kNovaFontStyleRegular,
+                kWhite,
+                frame.text_band.x + 4.0F,
+                frame.text_band.y + 12.0F,
+                prompt);
+
+  DrawDialogButton(platform,
+                   font_cache,
+                   button_art,
+                   frame.buttons[0],
+                   LoadButtonLabel(kBtnAcceptPrice, "Accept Price"),
+                   true,
+                   hovered_slot == 0);
+  DrawDialogButton(platform,
+                   font_cache,
+                   button_art,
+                   frame.buttons[1],
+                   LoadButtonLabel(kBtnLowerPrice, "Lower Price"),
+                   true,
+                   hovered_slot == 1);
+}
+
+// Outcome of the payment modal (NovaUi_RunTravelDestinationPaymentWindow
+// 0x00482280): kPaid (Accept Price, or a granted Lower Price discount),
+// kRefused (a declined Lower Price roll) or kClosed (Esc; the caller treats
+// it like a refusal).
+enum class PaymentResult { kPaid, kRefused, kClosed };
+
+// Runs the DLOG 0x3f0 payment modal for the bribe path. `draw_underneath`
+// re-renders the flight view + interaction window each frame (the boarding
+// capture-decision dialog's keep-rendering pattern). The acceptance roll is
+// made once when the window opens; a granted "Lower Price" discounts the
+// payment amount by the bribe-mode factor (0.75x, DAT_005758f0) rounded to
+// /100 (DAT_00575898) and leaves the window open on the new figure.
+[[nodiscard]] PaymentResult
+RunBribePaymentWindow(SdlPlatform &platform,
+                      GameState &state,
+                      NovaFontCache &font_cache,
+                      const ServicesButtonArt &button_art,
+                      SDL_Texture *backdrop,
+                      const std::function<void()> &draw_underneath,
+                      std::int32_t &payment_amount) {
+  const PaymentFrame frame = LoadPaymentGeometry();
+  // The window-open roll: "Lower Price" is granted when rand(100) <= 0x23.
+  bool lower_granted = NovaRandomRange(state.rng, 100) <= kPaymentChancePercent;
+  // The original's sVar4 result latch: once "Lower Price" is granted the
+  // window stays open on the discounted figure and any later exit returns
+  // "paid"; Esc before any decision returns "closed".
+  bool paid = false;
+
+  // NovaInputQueue_FlushAllCommands: the original discards pending input when
+  // the window opens, so the confirming click can't double-dispatch.
+  while (platform.PollTextEvent().has_value()) {
   }
 
-  // The three primary buttons stacked vertically down the lower-left column
-  // (DITL items 0/1/2): Leave at the bottom, Attack in the middle, Land/Bribe
-  // at the top -- each a 146x26 box at x=27..173. Labels follow the original
-  // per-slot table ({LEAVE, LAND/BRIBE, ATTACK}); the attack branch is
-  // deferred (see the header scope note).
-  // Three-state button labels: white on the normal art, plain screen font
-  // (the original's shared renderer never bolds them; see
-  // NovaUi_InitThreeStateButtonArt DAT_007d8350 / NovaUi_DrawThreeStateButton).
-  constexpr SDL_Color kButtonLabel{255, 255, 255, 255};
-  const std::string_view labels[3] = {"LEAVE", land_label, "ATTACK"};
-  for (const ServiceButton &b : buttons) {
-    const std::size_t slot = static_cast<std::size_t>(b.slot) < 3
-                                 ? static_cast<std::size_t>(b.slot)
-                                 : 0;
-    button_art.Draw(platform, b.rect, ButtonState::kNormal);
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          kThreeStateButtonFontFamily,
-                          kThreeStateButtonFontSize,
-                          kNovaFontStyleRegular,
-                          kButtonLabel,
-                          b.rect.x,
-                          b.rect.x + b.rect.w,
-                          ThreeStateButtonLabelBaseline(b.rect),
-                          labels[slot]);
-  }
+  while (!platform.quit_requested()) {
+    int hovered = -1;
+    const SDL_FPoint mouse = platform.mouse_position();
+    for (int slot = 0; slot < 2; ++slot) {
+      const SDL_FRect rect = frame.buttons[slot];
+      if (SDL_PointInRectFloat(&mouse, &rect)) {
+        hovered = slot;
+        break;
+      }
+    }
 
-  // Footer hint, just above the top (Land/Bribe) button's rect.
-  const float hint_y =
-      buttons.empty() ? 480.0F - 50.0F : buttons[0].rect.y - 16.0F;
-  NovaText_DrawCentered(platform,
-                        font_cache,
-                        NovaFontFamily::kGeneva,
-                        12.0F,
-                        kNovaFontStyleRegular,
-                        kDim,
-                        panel.x,
-                        panel.x + panel.w,
-                        hint_y,
-                        "Esc / Enter / click to close");
+    draw_underneath();
+    DrawPaymentWindow(platform,
+                      font_cache,
+                      button_art,
+                      backdrop,
+                      frame,
+                      payment_amount,
+                      hovered);
+    SDL_RenderPresent(platform.renderer());
+
+    for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
+      if (in->key == TextKey::escape || in->key == TextKey::enter) {
+        return paid ? PaymentResult::kPaid : PaymentResult::kClosed;
+      }
+      if (in->key != TextKey::primary) {
+        continue;
+      }
+      const SDL_FPoint click = platform.mouse_position();
+      if (SDL_PointInRectFloat(&click, &frame.buttons[0])) {
+        // Accept Price: pay the offered (possibly already discounted) amount.
+        return PaymentResult::kPaid;
+      }
+      if (SDL_PointInRectFloat(&click, &frame.buttons[1])) {
+        // Lower Price: the window-open roll decides. Granted -> discount
+        // 0.75x, round to /100, keep the window open on the new figure (the
+        // latch clears, so a second Lower Price is refused).
+        if (!lower_granted) {
+          return PaymentResult::kRefused;
+        }
+        payment_amount = RoundDouble(static_cast<double>(payment_amount) *
+                                     kPaymentBribeScale);
+        payment_amount = RoundDouble(static_cast<double>(payment_amount) *
+                                     kPaymentRoundFactor) *
+                         100;
+        lower_granted = false;
+        paid = true;
+      }
+    }
+    SDL_Delay(16);
+  }
+  return paid ? PaymentResult::kPaid : PaymentResult::kClosed;
 }
 
 } // namespace
@@ -400,17 +745,17 @@ std::int32_t NovaNegotiation_ComputeBribeCost(std::mt19937 &rng,
                        // (which resolves the government table); this helper is
                        // kept pure and returns the un-scaled base cost.
   // Base: `random(0..ceil(credits * 1e-06)) * 1000 + 3000`, mirroring the
-  // decompile `g_travel_bribe_cost = (NovaRandom_Range(credits*1e-06)) * 1000
-  // + 3000`. The random upper bound is `credits * 1e-06`, drawn from the same
-  // GameState PRNG so the price is reproducible per session.
-  std::int64_t upper = static_cast<std::int64_t>(
-      std::floor(static_cast<double>(std::max(std::int32_t{1}, credits)) *
-                 kCreditsBribeFraction));
-  upper = std::max<std::int64_t>(1, upper);
-  const std::int64_t pick =
-      1 +
-      static_cast<std::int64_t>(NovaRandomRange(rng, static_cast<int>(upper)));
-  std::int64_t cost = pick * kBribeGrouping + kBribeBaseAdd;
+  // decompile `g_travel_bribe_cost = NovaRandom_Range(credits*1e-06) * 1000
+  // + 3000` (no +1; NovaRandom_Range is [0, bound) -- cf. boarding panic
+  // `rand(0x1a) + 0xf` = 15..40). Drawn from the same GameState PRNG so the
+  // price is reproducible per session.
+  std::int32_t upper = RoundDouble(
+      std::max(1.0,
+               static_cast<double>(std::max(std::int32_t{1}, credits)) *
+                   kCreditsBribeFraction));
+  std::int64_t cost =
+      static_cast<std::int64_t>(NovaRandomRange(rng, upper)) * kBribeGrouping +
+      kBribeBaseAdd;
 
   // Clamp to 1/3 of credits, round down to /1000, then clamp bounds.
   std::int64_t credit_cap = static_cast<std::int64_t>(
@@ -426,6 +771,7 @@ std::int32_t NovaNegotiation_ComputeBribeCost(std::mt19937 &rng,
 // ---------------------------------------------------------------------------
 // SDL modal
 // ---------------------------------------------------------------------------
+// Ghidra 0x00480030 NovaUi_RunTravelDestinationInteractionWindow.
 NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                                                      GameState &state,
                                                      std::int16_t stellar_id,
@@ -442,160 +788,222 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
     return NegotiationExit::kClosed;
   }
 
-  // Derive the negotiation state (mirrors NovaUi_RunTravelDestinationInterac-
-  // tionWindow's opening gates):
-  //   denied: the stellar's reputation_threshold gates landing. 0x7fff means
-  //           "always denied"; -0x7fff means "never denied"; otherwise the
-  //           containing system's reputation must be >= the threshold.
+  // Item 1: per-launch random flavour index (g_travel_interaction_random_index)
+  // and the bribe-offer latch (g_travel_interaction_bribe_random_latch), both
+  // from the GameState PRNG so they are reproducible per session. The
+  // original's latch persists across windows; the port re-rolls per run
+  // (TODO(decomp): latch persistence divergence).
+  const std::int16_t random_index = NovaRandomRange(state.rng, 5);
+  const int bribe_random_latch = NovaRandomRange(state.rng, 100);
+
+  // Denied latch (g_travel_interaction_denied_state): the stellar's
+  // reputation_threshold gates landing against the CURRENT system's
+  // reputation. 0x7fff means "always denied"; -0x7fff "never".
   const std::int16_t sys_index =
-      stellar->system_id >= 0 &&
-              stellar->system_id <
+      state.player.current_system_id >= 0 &&
+              state.player.current_system_id <
                   static_cast<std::int16_t>(state.system_reputation.size())
-          ? stellar->system_id
+          ? state.player.current_system_id
           : -1;
   const std::int16_t sys_rep =
       sys_index >= 0
           ? state.system_reputation[static_cast<std::size_t>(sys_index)]
           : 0;
-  const bool always_denied = (stellar->min_status == 0x7fff);
-  const bool never_denied = (stellar->min_status == -0x7fff);
-  const bool denied =
-      always_denied || (!never_denied && sys_rep < stellar->min_status);
-
-  // Item 1: per-launch random flavour index (g_travel_interaction_random_index)
-  // and the bribe-offer latch (g_travel_interaction_bribe_random_latch), both
-  // from the GameState PRNG so they are reproducible per session and stable
-  // across the modal's redraws.
-  const std::int16_t random_index = NovaRandomRange(state.rng, 5);
-  int bribe_random_latch = NovaRandomRange(state.rng, 100);
-
-  // bribe-eligible mirrors the original gates: a denied target accepts a bribe
-  // from a faction whose ships take bribes (0x4000) or, with no faction at all,
-  // only when the per-launch latch exceeds the 0x1e cutoff; the faction whose
-  // ships are "bribes the player" (0x8000) forces an offer regardless.
+  bool denied =
+      (stellar->min_status == 0x7fff) ||
+      (stellar->min_status != -0x7fff && sys_rep < stellar->min_status);
   const Government *gov =
       stellar->government_id != -1
           ? state.scenario.Government(stellar->government_id)
           : nullptr;
-  const bool no_faction = gov == nullptr;
-  const bool gov_bribable =
-      gov != nullptr && (gov->flags_primary & kGovtFlagBribable) != 0U;
-  const bool gov_costly =
-      gov != nullptr && (gov->flags_primary & kGovtFlagBribeCostly) != 0U;
-  const bool latch_admits = bribe_random_latch > kBribeLatchCutoff;
-  const bool bribe_eligible =
-      (denied && (no_faction || gov_bribable) && latch_admits) || gov_costly;
+  if (denied && gov != nullptr) {
+    // Government policy-flag override (Government_GetGovernmentPolicyFlag
+    // index 1): a set flag clears the denial. The GovtDef +0x83 byte gate
+    // (field_0x83 != 0 -> not denied) is not modelled (no clean-room field;
+    // TODO(decomp)).
+    if (NovaGovernment_GetPolicyFlag(
+            state.scenario, stellar->government_id, 1)) {
+      denied = false;
+    }
+  }
+
+  // Bribe-offer latch: the per-launch roll (> 0x1e) admits an offer for a
+  // faction-less stellar or one whose government takes bribes (0x4000); the
+  // "bribes the player" flag (0x8000) forces an offer regardless.
+  bool bribe_offered = false;
+  if (bribe_random_latch > kBribeLatchCutoff) {
+    if (gov == nullptr || (gov->flags_primary & kGovtFlagBribable) != 0U) {
+      bribe_offered = true;
+    }
+  }
+  if (gov != nullptr && (gov->flags_primary & kGovtFlagBribeCostly) != 0U) {
+    bribe_offered = true;
+  }
 
   // Resolve the bribe cost (credits-scaled, random, clamped) with the
   // government's 1.5x scale applied when the costly-bribe flag is set.
   std::int32_t bribe_cost = NovaNegotiation_ComputeBribeCost(
       state.rng, state.player.credits, stellar->government_id);
-  if (gov_costly) {
-    bribe_cost = static_cast<std::int32_t>(std::llround(
-        static_cast<double>(bribe_cost) * kGovtBribeCostMultiplier));
+  if (gov != nullptr && (gov->flags_primary & kGovtFlagBribeCostly) != 0U) {
+    bribe_cost =
+        RoundDouble(static_cast<double>(bribe_cost) * kGovtBribeCostMultiplier);
   }
 
-  // Load the status/prompt text, indexing one of the five STR# flavour variants
-  // via StringVariantIndex (which applies `message*5 + random_index + 1`).
-  // Not denied -> welcome status 0; denied (no hostility modeled) -> the
-  // refused/approach prompt 2, mirroring the original's initial text.
-  std::string status;
-  if (denied) {
-    if (auto s = LoadPromptVariant(random_index, kMsgRefusedPrompt)) {
-      status = *s;
+  // ---- Window content --------------------------------------------------
+  NegotiationFrame frame;
+  frame.window = {std::truncf((640.0F - kNegotiationFrameWidth) * 0.5F),
+                  std::truncf((480.0F - kNegotiationFrameHeight) * 0.5F),
+                  kNegotiationFrameWidth,
+                  kNegotiationFrameHeight};
+  for (int i = 0; i < 3; ++i) {
+    frame.buttons[i] =
+        OffsetRect(kFallbackButtonRects[i], {frame.window.x, frame.window.y});
+  }
+  frame.status_panel =
+      OffsetRect(kFallbackStatusRect, {frame.window.x, frame.window.y});
+  frame.image =
+      OffsetRect(kFallbackImageRect, {frame.window.x, frame.window.y});
+  frame.header =
+      OffsetRect(kFallbackHeaderRect, {frame.window.x, frame.window.y});
+  if (!LoadNegotiationGeometry(frame.buttons,
+                               frame.status_panel,
+                               frame.image,
+                               frame.header,
+                               frame.window)) {
+    NovaLog::Todo("DLOG/DITL 0x3f1 unavailable; using the shipped-geometry "
+                  "fallback for the destination-interaction window");
+  }
+
+  frame.tribute_enabled =
+      !(stellar->hazard_marker && (stellar->availability_flags & 0x20) != 0U);
+  frame.button_labels[0] = LoadButtonLabel(kBtnCloseChannel, "Close Channel");
+  frame.button_labels[1] = denied
+                               ? LoadButtonLabel(kBtnOfferBribe, "Offer Bribe")
+                               : LoadButtonLabel(kBtnGreetings, "Greetings");
+  frame.button_labels[2] =
+      stellar->hazard_marker
+          ? LoadButtonLabel(kBtnRelease, "Release")
+          : LoadButtonLabel(kBtnDemandTribute, "Demand Tribute");
+  frame.name = stellar->name;
+
+  // Destination description (0x00480030): the desc resource keyed at
+  // link_a_id + 7000, falling back to the shipped stellar-class fragment
+  // STR# 0x44c at link_a_id + 1.
+  if (const auto desc = NovaResource_LoadDescription(
+          static_cast<std::uint16_t>(stellar->link_a_id + 7000));
+      desc && !desc->text.empty()) {
+    frame.description = desc->text;
+  } else {
+    frame.description = NovaHud_LoadStringEntry(
+                            kStellarClassStr,
+                            static_cast<std::uint16_t>(stellar->link_a_id + 1))
+                            .value_or("");
+  }
+
+  // Header Status: word. A normal landable stellar draws no Status: line;
+  // uninhabited / dominated / denied bodies draw "Status:" plus a colored
+  // word ("Hostile" goes red once the system reputation has gone negative).
+  if ((stellar->flags & 0x20) != 0U) {
+    frame.status_word = NovaHud_LoadStringEntry(kMiscStr, kMiscUninhabited)
+                            .value_or("Uninhabited");
+    frame.status_word_color = kLightGrey; // SHORT_ARRAY_00733b50
+  } else if (stellar->hazard_marker) {
+    frame.status_word =
+        NovaHud_LoadStringEntry(kMiscStr,
+                                (stellar->availability_flags & 0x20) != 0U
+                                    ? kMiscOwned
+                                    : kMiscDominated)
+            .value_or("Dominated");
+    // SHORT_ARRAY_00733b32 is runtime-initialized (unreadable .bss).
+    frame.status_word_color = kStatusOrange;
+  } else if (denied) {
+    if (sys_rep < 0) {
+      frame.status_word =
+          NovaHud_LoadStringEntry(kMiscStr, kMiscHostile).value_or("Hostile");
+      frame.status_word_color = kRed;
     } else {
-      status = "The " + stellar->name + " refuses to let you land.";
+      frame.status_word = NovaHud_LoadStringEntry(kMiscStr, kMiscForbidden)
+                              .value_or("Forbidden");
+      frame.status_word_color = kStatusOrange;
+    }
+  }
+  if (!frame.status_word.empty()) {
+    frame.status_label =
+        NovaHud_LoadStringEntry(kMiscStr, kMiscStatusLabel).value_or("Status:");
+  }
+
+  // Initial status text (the branch ladder before the modal loop): welcome +
+  // name when landing is open (or already dominated), the hostile prompt when
+  // denied, "No response." for uninhabited bodies.
+  if ((stellar->flags & 0x20) == 0U) {
+    if (!denied || stellar->hazard_marker) {
+      frame.status = LoadStatusVariant(random_index, kMsgWelcomeStatus)
+                         .value_or("Communications channel open to ") +
+                     stellar->name + ".";
+    } else {
+      frame.status = LoadPromptVariant(random_index, kMsgDeniedPrompt)
+                         .value_or("What is it you want?");
     }
   } else {
-    if (auto p = LoadStatusVariant(random_index, kMsgWelcomeStatus)) {
-      status = *p;
-    } else {
-      status = "How would you like to approach " + stellar->name + "?";
-    }
+    frame.status = LoadPromptVariant(random_index, kMsgNoResponse)
+                       .value_or("No response.");
   }
 
+  // ---- Assets -----------------------------------------------------------
   auto backdrop = LoadPictTexture(platform, kNegotiationBackdropPict);
   if (!backdrop) {
     NovaLog::Todo("destination-interaction backdrop PICT 0x2140 unavailable; "
-                  "drawing a bordered placeholder");
+                  "drawing a flat background");
+  }
+  auto payment_backdrop = LoadPictTexture(platform, kPaymentBackdropPict);
+  if (!payment_backdrop) {
+    NovaLog::Todo("payment backdrop PICT 0x2142 unavailable; drawing a flat "
+                  "background");
   }
 
   // The destination planet picture shown in the DITL item-4 image frame (the
   // original scales the target stellar's ambient sprite into it). The planet
   // PICT comes from the same selection the docked screen uses: the stellar's
   // custom picture (engage_highlight_frame >= 0x80) or link_a_id + 0x2710.
-  // This mirrors the destination-planet art in landed_window.cpp.
   std::unique_ptr<SdlTexture> planet_art;
-  if (stellar) {
-    const std::int16_t stell_pict =
-        (stellar->engage_highlight_frame >= 0x80)
-            ? stellar->engage_highlight_frame
-            : static_cast<std::int16_t>(stellar->link_a_id + 0x2710);
-    if (stell_pict >= 0x80) {
-      planet_art =
-          LoadPictTexture(platform, static_cast<std::uint16_t>(stell_pict));
-      if (planet_art) {
-        NovaLog::Info("negotiation destination PICT 0x{} ({}) for stellar {}",
-                      static_cast<int>(stell_pict),
-                      stellar->name,
-                      static_cast<int>(stellar_id));
-      } else {
-        NovaLog::Todo("no negotiation destination PICT {} for stellar '{}'; "
-                      "the image frame stays a flat placeholder",
-                      static_cast<int>(stell_pict),
-                      stellar->name);
-      }
+  const std::int16_t stell_pict =
+      (stellar->engage_highlight_frame >= 0x80)
+          ? stellar->engage_highlight_frame
+          : static_cast<std::int16_t>(stellar->link_a_id + 0x2710);
+  if (stell_pict >= 0x80) {
+    planet_art =
+        LoadPictTexture(platform, static_cast<std::uint16_t>(stell_pict));
+    if (planet_art) {
+      NovaLog::Info("negotiation destination PICT 0x{} ({}) for stellar {}",
+                    static_cast<int>(stell_pict),
+                    stellar->name,
+                    static_cast<int>(stellar_id));
+    } else {
+      NovaLog::Todo("no negotiation destination PICT {} for stellar '{}'; "
+                    "the image frame stays a flat placeholder",
+                    static_cast<int>(stell_pict),
+                    stellar->name);
     }
   }
+
   ServicesButtonArt button_art;
   if (!button_art.Initialize(platform)) {
     NovaLog::Warn("three-state button art unavailable for the negotiation "
                   "dialog buttons");
   }
   NovaFontCache font_cache;
-  const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   platform.SetCenteredPlayfield();
 
-  // The middle button label: "LAND" when docking is freely allowed, "BRIBE"
-  // when the faction refuses and a bribe is on offer (mirrors the original
-  // label swap 0x15 land / 0x17 bribe gated on
-  // g_travel_interaction_denied_state).
-  const std::string land_label = (denied && bribe_eligible) ? "BRIBE" : "LAND";
-
-  // ---- Button geometry / hit-testing --------------------------------------
-  // The three primary buttons stack vertically down the frame's lower-left
-  // column (DITL items 0/1/2), each 146x26 at x=27..173, slot order bottom-to-
-  // top: Leave (item 0, y=244), Attack (item 2, y=214), Land/Bribe (item 1,
-  // y=184). The existing `ServiceButton`/`ServiceButtonAt` abstractions make
-  // the drawn rects and the click hit-test share identical geometry.
-  enum ButtonSlot : std::uint8_t { kLeave = 0, kLandBribe = 1, kAttack = 2 };
-
-  const SDL_FRect btn_rects[3] = {
-      {kNegotiationButtonX,
-       kNegotiationButtonYLeave,
-       kNegotiationButtonW,
-       kNegotiationButtonH},
-      {kNegotiationButtonX,
-       kNegotiationButtonYLand,
-       kNegotiationButtonW,
-       kNegotiationButtonH},
-      {kNegotiationButtonX,
-       kNegotiationButtonYAttack,
-       kNegotiationButtonW,
-       kNegotiationButtonH},
-  };
   std::vector<ServiceButton> buttons;
   buttons.reserve(3);
   for (std::uint8_t i = 0; i < 3; ++i) {
-    buttons.push_back(ServiceButton{btn_rects[i], i});
+    buttons.push_back(ServiceButton{frame.buttons[i], i});
   }
 
-  // Destination header: the stellar display name shown in the DITL item-5
-  // (entry 6) block, mirroring NovaUi_DrawTravelDestinationInteractionWindow
-  // drawing g_stellar_defs[...].display_name there.
-  const std::string header = stellar->name;
-
-  while (!platform.quit_requested()) {
+  // One full frame of the interaction window + present; the payment window
+  // re-renders this beneath itself every frame (boarding keep-rendering
+  // pattern).
+  const auto draw_dialog = [&]() {
     DrawNegotiationDialog(platform,
                           state,
                           view,
@@ -604,129 +1012,139 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                           button_art,
                           backdrop ? backdrop->get() : nullptr,
                           planet_art ? planet_art->get() : nullptr,
-                          status,
-                          header,
-                          land_label,
-                          buttons,
-                          panel);
+                          frame,
+                          -1);
+    SDL_RenderPresent(platform.renderer());
+  };
+
+  // The top button's action (NovaUi_PollTravelScriptAction ordinal 2 = DITL
+  // item 1): Greetings when landing is open, the bribe ladder when denied.
+  bool proceed_to_land = false;
+  const auto run_comm_action = [&]() {
+    if (!denied || stellar->hazard_marker) {
+      if (!denied) {
+        // Greetings: the greeting-response flavour prompt (msg 9).
+        frame.status = LoadPromptVariant(random_index, kMsgGreetingResponse)
+                           .value_or(frame.status);
+      } else {
+        // Dominated target: rude dismissal (status msg 4).
+        frame.status = LoadStatusVariant(random_index, kMsgCannotAfford)
+                           .value_or(frame.status);
+      }
+      return;
+    }
+    if (!bribe_offered) {
+      // Offering a bribe with none on the table: refusal (status msg 9).
+      frame.status = LoadStatusVariant(random_index, kMsgRefuseNoBribe)
+                         .value_or(frame.status);
+      return;
+    }
+    // Offer Bribe: the offer line, then the DLOG 0x3f0 payment window.
+    if (auto s = LoadStatusVariant(random_index, kMsgBribeOffered)) {
+      frame.status = *s;
+    }
+    std::int32_t payment_amount = bribe_cost;
+    const PaymentResult result = RunBribePaymentWindow(
+        platform,
+        state,
+        font_cache,
+        button_art,
+        payment_backdrop ? payment_backdrop->get() : nullptr,
+        draw_dialog,
+        payment_amount);
+    if (state.player.credits < payment_amount) {
+      frame.status = LoadStatusVariant(random_index, kMsgCannotAfford)
+                         .value_or(frame.status);
+    } else if (result == PaymentResult::kPaid) {
+      // The original's HUD overlay composes "<name>, you're cleared to
+      // dock/land. Commence final approach." (STR# 0x7d2 0x5f/0x62 + 100)
+      // and sets the travel handoff directly.
+      const std::string cleared =
+          NovaHud_LoadStringEntry(kMiscStr,
+                                  (stellar->flags & 0x10) != 0U
+                                      ? kMiscClearedToDock
+                                      : kMiscClearedToLand)
+              .value_or("you're cleared to land.");
+      const std::string approach =
+          NovaHud_LoadStringEntry(kMiscStr, kMiscFinalApproach)
+              .value_or("Commence final approach.");
+      NovaHud_ShowOverlayMessage(state,
+                                 stellar->name + ", " + cleared + " " +
+                                     approach,
+                                 0xe0,
+                                 0xe0,
+                                 0xe0,
+                                 250);
+      state.player.credits -= payment_amount;
+      proceed_to_land = true;
+    } else {
+      // Refused / closed: the haggle -- +1000, latch reset (offer stays
+      // available per the original's bribe_offered = false), status msg 6.
+      bribe_offered = false;
+      bribe_cost += kHaggleIncrement;
+      frame.status = LoadStatusVariant(random_index, kMsgBribeDeclined)
+                         .value_or(frame.status);
+    }
+  };
+
+  // NovaInputQueue_FlushAllCommands: the original discards pending input when
+  // the window opens (called five times in 0x00480030).
+  while (platform.PollTextEvent().has_value()) {
+  }
+
+  while (!platform.quit_requested()) {
+    // Mouse-hover highlight over enabled slots (the original redraws with the
+    // hovered slot as the pressed button).
+    int hovered = -1;
+    const SDL_FPoint mouse = platform.mouse_position();
+    for (int slot = 0; slot < 3; ++slot) {
+      if ((slot != 2 || frame.tribute_enabled) &&
+          SDL_PointInRectFloat(&mouse, &frame.buttons[slot])) {
+        hovered = slot;
+        break;
+      }
+    }
+    DrawNegotiationDialog(platform,
+                          state,
+                          view,
+                          hud,
+                          font_cache,
+                          button_art,
+                          backdrop ? backdrop->get() : nullptr,
+                          planet_art ? planet_art->get() : nullptr,
+                          frame,
+                          hovered);
     SDL_RenderPresent(platform.renderer());
 
-    bool proceed_to_land = false;
-    bool redraw_status = false;
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
       switch (in->key) {
       case TextKey::escape:
       case TextKey::enter:
+        // Close Channel (the original's action-1 path).
         return NegotiationExit::kClosed;
       case TextKey::primary: {
-        // Click the Leave / Land-Bribe / Attack button under the cursor
-        // (ServiceButtonAt hit-test). A click outside the buttons is ignored.
         const auto clicked =
             ServiceButtonAt(buttons, platform.mouse_position());
         if (!clicked) {
           break;
         }
-        switch (static_cast<ButtonSlot>(*clicked)) {
-        case kLeave:
+        switch (*clicked) {
+        case 0:
           return NegotiationExit::kClosed;
-        case kLandBribe:
-          if (denied && !bribe_eligible) {
-            // The faction refuses with no bribe on offer: show the refusal
-            // status and stay.
-            if (auto s = LoadStatusVariant(random_index, kMsgRefuseNoBribe)) {
-              status = *s;
-            } else {
-              status = "The " + stellar->name + " refuses to let you land.";
-            }
-            redraw_status = true;
-            break;
-          }
-          if (denied) {
-            // Item 3: bribe path -- a nested DLOG 0x3f0-style payment confirm.
-            // Show the offered bribe status, then let the player confirm or
-            // refuse (the price-haggle). This is a single-pass confirm: the
-            // payment sub-window closes on the first decision (pay / haggle /
-            // exit), avoiding a nested busy-wait.
-            if (auto s = LoadStatusVariant(random_index, kMsgBribeOffered)) {
-              status = *s;
-            }
-            redraw_status = true;
-
-            // The eventual resolution of the payment sub-window.
-            bool paid_ok = false;
-            bool haggled = false;
-            std::int32_t charged = 0;
-            for (std::optional<TextInput> p; (p = platform.PollTextEvent());) {
-              if (p->key == TextKey::escape || p->key == TextKey::enter) {
-                break; // player closes the payment sub-window, no decision
-              }
-              if (p->key != TextKey::primary) {
-                continue;
-              }
-              // Roll the payment window's random success (35%) and, on
-              // success, inflate the bribe by the bribe-mode factor then round
-              // to /100 (mirrors NovaUi_RunTravelDestinationPaymentWindow).
-              const int can_pay =
-                  NovaRandomRange(state.rng, 100) <= kPaymentChancePercent;
-              if (!can_pay) {
-                // Haggle counter-offer: declined bribe -> +1000 price and the
-                // offer is kept available to re-try (the original resets the
-                // random latch so an offer is eventually re-made).
-                bribe_cost += kHaggleIncrement;
-                if (auto s =
-                        LoadStatusVariant(random_index, kMsgBribeDeclined)) {
-                  status = *s;
-                }
-                haggled = true;
-                break;
-              }
-              charged = bribe_cost;
-              charged = RoundDouble(kPaymentBribeScale * charged);
-              charged = RoundDouble(kPaymentRoundFactor * charged) * 100;
-              if (state.player.credits < charged) {
-                if (auto s =
-                        LoadStatusVariant(random_index, kMsgCannotAfford)) {
-                  status = *s;
-                }
-                redraw_status = true;
-                break;
-              }
-              paid_ok = true;
-              break;
-            }
-
-            if (haggled) {
-              // The dialog stays open with the raised counter-offer; the
-              // player may re-click the Bribe button to try again.
-              redraw_status = true;
-            } else if (paid_ok) {
-              state.player.credits -= charged;
-              NovaLog::Info("bribe of {} accepted at stellar {}; dock "
-                            "granted",
-                            charged,
-                            static_cast<int>(stellar_id));
-              NovaHud_ShowOverlayMessage(
-                  state, "Bribe accepted -- docking.", 0xe0, 0xe0, 0xe0, 250);
-              proceed_to_land = true;
-            }
-            break;
-          }
-          // Not denied: the player simply lands.
-          NovaLog::Info("landing accepted at stellar {} via the interaction "
-                        "dialog",
-                        static_cast<int>(stellar_id));
-          proceed_to_land = true;
+        case 1:
+          run_comm_action();
           break;
-        case kAttack:
-          // The attack/confrontation branch is out of scope for this pass (a
-          // loud Todo; see the header scope note). Leave it a no-op that shows
-          // the refusal status so the player is not trapped.
-          NovaLog::Todo("target-action: attack/confrontation branch at a "
-                        "destination is not reconstructed");
-          if (auto s = LoadStatusVariant(random_index, kMsgRefuseNoBribe)) {
-            status = *s;
+        case 2:
+          if (frame.tribute_enabled) {
+            // Demand Tribute / Release (action 3) is deferred: domination
+            // latch, defense-fleet spawns, faction combat event and reaction
+            // scripts (see the file-head note).
+            NovaLog::Todo("target-action: Demand Tribute / Release branch of "
+                          "NovaUi_RunTravelDestinationInteractionWindow is not "
+                          "reconstructed");
           }
-          redraw_status = true;
+          break;
+        default:
           break;
         }
         break;
@@ -738,13 +1156,9 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
 
     if (proceed_to_land) {
       // Hand off to the Spaceport (DLOG 0x3e8) by staging the target stellar,
-      // exactly as the original's land/bribe path sets
-      // g_travel_selected_stellar_id.
+      // exactly as the original's bribe path sets g_travel_selected_stellar_id.
       state.travel.selected_stellar_id = stellar_id;
       return NegotiationExit::kProceedToLand;
-    }
-    if (redraw_status) {
-      continue; // re-draw with the updated status immediately
     }
     SDL_Delay(16);
   }

@@ -780,11 +780,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           break;
         }
         if (exit == NegotiationExit::kProceedToLand) {
-          // The player landed or paid a bribe: open the Spaceport (DLOG 0x3e8).
-          // The original's bribe/land handoff sets g_travel_selected_stellar_id
-          // + g_travel_engage_timer (the travel-to-system warp) rather than
-          // requiring the 250-unit arrival envelope, so co-locate the ship at
-          // the destination before the normal dock gate.
+          // The player paid an accepted bribe in the interaction window (the
+          // only path out of that window that docks; landing itself stays on
+          // the normal second-E request flow). The original's bribe handoff
+          // sets g_travel_selected_stellar_id + g_travel_engage_timer (the
+          // travel-to-system warp) rather than requiring the 250-unit arrival
+          // envelope, so co-locate the ship at the destination before the
+          // normal dock gate.
           const auto *st =
               state.scenario.Stellar(state.travel.selected_stellar_id);
           if (st != nullptr) {
