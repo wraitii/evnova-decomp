@@ -133,6 +133,21 @@ void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks);
 // resolve each queued direct impact once.
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks);
 
+// Ghidra Shot_UpdateShotGuidance (0x00431530): per-frame projectile guidance.
+// State machine on ActiveShot.retarget_cooldown: 0 = mode-1 homing (target
+// bearing chase at the weapon's guided_turn_rate, jamming lock defeat via
+// Ship.jamming_score vs the shot's per-channel vulnerability rolls, cloak
+// dumb-fire, 45-deg lock drop for Seeker 0x4000, 1-in-10 asteroid decoy scan
+// for Seeker 0x0002, owner-retarget rolls for Seeker 0x8000), 999 =
+// interference weave, 998 = inert (target lost), 1 = asteroid target.
+// Mode 6 rockets blend their velocity onto the aim heading; mode 5 bombs turn
+// their nose onto the velocity vector. Called from NovaWeapon_TickShots before
+// the position integration; elapsed_ticks stands in for the original's
+// normalized frame scale (g_avg_frame_tick_scale).
+void NovaWeapon_UpdateShotGuidance(GameState &state,
+                                   ActiveShot &shot,
+                                   float elapsed_ticks);
+
 // Per-frame shot + cooldown bookkeeping for the firing path. Advances each
 // active shot by its velocity, counts down its remaining life, and steps the
 // time-animated shot-frame cycle (frame_cycle_index / anim_elapsed at the

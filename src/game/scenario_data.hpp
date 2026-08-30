@@ -508,6 +508,12 @@ struct Weapon {
   // payload keeps it at 0, which makes even an animated frame-stepper advance
   // every frame.
   std::int16_t shot_anim_frame_dwell = 0;
+  // Ghidra WeaponDef.guided_turn_rate (+0x58, float): guided missile turn rate
+  // in game degrees/tick. Loaded from payload +0x6a (Bible "GuidedTurn") * 0.1
+  // (k_guided_turn_scale_f64 @0x00575e58). Shot_UpdateShotGuidance integrates
+  // the shot heading by this each frame; a defeated jamming lock zeroes it or
+  // (Seeker 0x0010) negates it so the missile flies away.
+  float guided_turn_rate = 0.0F;
   std::int16_t kickback_impulse =
       0; // (resource +0x56, WeaponDef field_0x12;
          // recoil kickback, was mislabeled burst_count)

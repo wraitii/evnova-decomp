@@ -67,7 +67,7 @@ globals (AGENTS.md).
   AvgShips64, Govt66 (rebased to 0.. space; <0x80 / >0x17f -> -1), Message68,
   Asteroids6a, Interference6c, DudeTypes at `0x6e` (rebased -0x80; <0x80 />0x47e
   -> -1) with % Prob at `0x7e` (clamped 0..100), BkgndColor+0x8e, Murk+0x92,
-  ReinfFleet/Time/Interval +0x196..+0x19a, Visibility +0x96. Verified against
+  ReinfFleet/Time/Interval +0x196..+0x19a. SystemDef runtime +0x96 is Interference (payload +0x6c; the loader writes it to dude_types-2), consumed by the guided-shot confusion roll in Shot_SpawnShotFromWeapon 0x0041fd30 — an earlier revision of this note mislabeled +0x96 'Visibility'. Verified against
   system 0x80 (links 199/200/202/129/135, avg 4, govt 128->0, message -1,
   asteroids 3, dude types 510/155/156/128, probs 50/1/1/10). Dude1-8 at +0x44
   and their weights at +0x54 are split by the loader: ordinary 0x80..0x27f ids

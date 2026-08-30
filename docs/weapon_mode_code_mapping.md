@@ -43,23 +43,48 @@ In-flight homing is separate and only activates for **mode 1** (`NovaGameplay_Up
 tracks/retargets only when mode==1). So mode-6 rockets do NOT chase after launch; they fly straight along the fired lead.
 The "chasing" missiles are mode 1 homing weapons.
 
-## Homing / seek lock vs jamming (mode 1) — mapped
+## Homing / seek lock vs jamming (mode 1) — mapped (revised 2024 against 0x00431530/0x0041fd30 disasm+decomp)
 
 Guided (mode-1) homing shots carry **four independent seek channels** `ShotState.lock_quality_0..3` (+0x38). The four channels
-are the EVN Bible's "four jamming types" (the IR/radar/etc. seek-and-jam counters).
+are the EVN Bible's four jamming types. **At spawn (Shot_SpawnShotFromWeapon):** `lock_quality[ch] = 0` when
+`WeaponDef.jam_vuln[ch] < 1`, else `Random(JamVuln[ch]+1)` — i.e. a per-channel roll in `[0, JamVuln]`. Despite the name,
+lock_quality is really a **jam-vulnerability roll**: higher JamVuln ⇒ larger roll ⇒ easier to defeat.
 
-- **Attack power (weapon, seeding):** `WeaponDef.jam_vuln_1..4` (+0xBA) seed the shot's lock quality at spawn
-  (`SpawnShotFromWeapon`): `lock_quality[i] = 0` if `jam_vuln[i] < 1`, else `Random(0..jam_vuln[i])`.
-- **Defense (ship, target jamming):** `ShipState.jamming_score_1..4` (+0xC926), lazily computed by
-  `NovaGameplay_GetShipJammingScore(ship, ch)` = owning-govt `InhJam1-4` (govt def +0x56) + outfit effect opcodes
-  `0x21..0x24` (EVN Bible outfit "Jamming Type 1-4") bonuses, halved when the ship faction has govt flag `0x80`, clamped 0-100.
-- **Lock gate:** in `NovaGameplay_UpdateShotGuidance`, a seek channel grants a usable lock only while
-  `lock_quality[i] > 100 - jamming_score[i]`. Higher target jamming raises this threshold, so a jammed missile loses its
-  usable lock and flies straight (misses / goes dumb). The loop breaks on the first viable channel.
+**Defense (target ship):** `ShipState.jamming_score_1..4` (+0xC926), lazily computed by `Ship_GetShipJammingScore`
+(0x00464810): base = owning govt `InhJam1-4` (GovtDef +0x56) via the ship class's `InherentGovt`; outfit ModType opcodes
+`0x21..0x24` (Bible "Jamming Type 1-4") add their ModVal — the player sums every owned outfit, an NPC sums each mounted
+stock outfit once (not per count); NPC ships whose faction has govt flag `0x80` are halved; clamped 0-100; cached per ship
+(reseeded -1 at ship-slot allocation).
 
-Point-defense interplay and the "turns away if jammed" (flags_tertiary 0x0010) / "may attack parent if jammed"
-(flags_quaternary 0x8000) behaviors live in the projectile-guidance and AI routing; the 0x8000 re-target-to-owner penalty is
-visible in `UpdateShotGuidance`.
+**Lock gate (Shot_UpdateShotGuidance, per frame, first defeated channel only):** the channel is **DEFEATED** while
+`jamming_score[ch] > 100 - lock_quality[ch]`. On defeat: turn rate → 0 (missile flies straight) unless Seeker flag
+`0x0010` ("Turns away if jammed", flags_quaternary — the doc previously mislabeled it flags_tertiary) negates it
+(`turn *= -1.0`, k_jammed_turn_sign_f32 @0x575350); with Seeker `0x8000` ("May attack parent ship if jammed") a 1/500 roll
+retargets the shot onto its owner. A channel with `lock_quality == 0` is never defeated, so weapons with no JamVuln set
+home unconditionally.
+
+**Other seeker-flag behaviors (flags_quaternary / Bible Seeker, verified against 0x00431530):**
+- `0x0002` decoyed by asteroids: 1/10 per frame, an active asteroid within 200 px on both axes and within 16 deg of the
+  shot heading latches `retarget_cooldown = 1` (target_ship_slot becomes an asteroid pool index).
+- `0x0008` confused by sensor interference: at spawn, `Random(100 / frame_scale) + 1 <= SystemDef.interference (+0x96,
+  payload +0x6c)` latches `retarget_cooldown = 999` — the weave state (heading zig-zags on a 300-frame phase,
+  `g_license_check_frame_counter % 300 < 150` selects the direction; 1/1000 owner-retarget escape with 0x8000).
+- `0x4000` loses lock if target not directly ahead: within 250 px on both axes with the target more than 45 deg off the
+  nose, the lock drops (target = -1).
+- `retarget_cooldown == 998` is the inert latch Shot_HandleShot sets when a state-0 shot's target dies.
+
+**Turn rate:** `WeaponDef.guided_turn_rate` (+0x58 float) = wëap payload +0x6a (Bible "GuidedTurn") * 0.1, in degrees per
+tick. Homing only runs while remaining life > frame_scale * 30 (k_guidance_life_gate_f64 @0x5754c0) — guided weapons fly
+straight over roughly their final second; the 999/1 states use a bare 15-tick gate (0x575400).
+
+**Mode-6 rockets** do not chase: they fire along the lead bearing (Ship_AimWeaponPredictive two-regime model) and then
+blend velocity toward the heading each frame: `vel = (vel*94 + polar(heading,speed)*5) * 0.01` (0x57540c/0x575408/0x575368).
+Mode-6 shots launched by the player keep pure inherited velocity at spawn (no polar add); NPC bays get the full polar
+vector. Player mode-5 bombs keep inherited velocity * 0.8.
+
+Point-defense (mode 9) shots are targetless and fly straight — `Shot_UpdateShotGuidance` returns immediately for mode 9;
+the lead was applied at fire time (mode-9 PD target selection, Weapon_SelectTurretTargetWithinArc 0x0043a310, remains
+unported).
 
 ## Notes for future RE
 

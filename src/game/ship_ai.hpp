@@ -44,6 +44,19 @@ namespace game {
                                                       const Ship &target,
                                                       std::int16_t weapon_id);
 
+// Ghidra 0x00464810 Ship_GetShipJammingScore. Electronic-warfare jamming score
+// (0..100) of `ship` for one seek channel (0..3), lazily computed and cached in
+// Ship.jamming_score (the original's ShipState +0xC926). Base value is the
+// owning government's inherent jam (InhJam1-4); outfit ModType opcodes
+// 0x21..0x24 (Jamming Type 1-4) add their ModVal per owned instance for the
+// player or per mounted stock outfit for an NPC. NPCs whose government has
+// flags_primary 0x80 get half credit. Returns 0 for fire-restricted ships.
+// The player's cache is invalidated on outfit changes and at system
+// transitions; the original only reseeds it when a ship slot is allocated.
+[[nodiscard]] int NovaAi_GetShipJammingScore(const GameState &state,
+                                             Ship &ship,
+                                             int seek_channel);
+
 // Ghidra 0x004688e0 Ship_IsShipDestroyed. True when the death timer is active
 // (death_timer_active > 0) or armor_points <= 0.
 [[nodiscard]] bool NovaAiShip_IsDestroyed(const Ship &ship);

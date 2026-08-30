@@ -342,6 +342,9 @@ namespace {
   w.flags_tertiary = ReadBe16(bytes, 0x66);
   w.beam_length_px = ReadBeI16(bytes, 0x30);
   w.shot_anim_frame_dwell = ReadBeI16(bytes, 0x32);
+  // GuidedTurn (payload +0x6a): loader scales by 0.1 into the float
+  // WeaponDef.guided_turn_rate (degrees/tick used by shot guidance).
+  w.guided_turn_rate = static_cast<float>(ReadBeI16(bytes, 0x6a)) * 0.1F;
   w.kickback_impulse = ReadBeI16(bytes, 0x56);
   w.turret_group_id = ReadBeI16(bytes, 0x58);
   w.burst_cycle_ticks = ReadBeI16(bytes, 0x5a);

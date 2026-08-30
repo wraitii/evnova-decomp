@@ -251,6 +251,12 @@ struct Ship {
   // here by Weapon_ApplyWeaponOnHitEffects; the status renderer is deferred.
   std::uint32_t ionization_color = 0;
 
+  // Ghidra ShipState.jamming_score_1..4 (+0xC926): lazily computed electronic-
+  // warfare jamming scores (0..100) per seek channel, consumed by the guided-
+  // shot jamming check (NovaAi_GetShipJammingScore, 0x00464810). -1 = uncached;
+  // the original reseeds -1 when a ship slot is allocated.
+  std::array<std::int16_t, 4> jamming_score{{-1, -1, -1, -1}};
+
   // --- Identity / placement ---
   std::int16_t ship_class_id = 0;             // +0x76 (zero-based ship index)
   std::int16_t ship_instance_id = 0;          // +0x86 (0 = player)
@@ -654,6 +660,20 @@ struct ActiveShot {
   // sets need these; static/heading sets (Light Blaster) leave them unused.
   int frame_cycle_index = 0; // ShotState.frame_cycle_index (+0x3e)
   float anim_elapsed = 0.0F; // ShotState.anim_elapsed, in ms
+  // Ghidra ShotState.heading_deg (+0x20): flight heading in game degrees
+  // [0,360). Guided shots integrate this toward the target bearing and rebuild
+  // velocity from it each frame; the renderer maps it to the shot sprite frame
+  // (frame_count * heading / 360).
+  float heading_deg = 0.0F;
+  // Ghidra ShotState.retarget_cooldown (+0x30): guidance state latch. 0 =
+  // normal homing, 1 = asteroid target (target_ship_slot indexes the asteroid
+  // pool), 998 = inert (target lost), 999 = interference weave.
+  std::int16_t retarget_cooldown = 0;
+  // Ghidra ShotState.lock_quality_0..3 (+0x38): per-seek-channel jam
+  // vulnerability rolls seeded from the weapon's jam_vuln at spawn
+  // (Random(0..vuln)); compared against the target's jamming score in
+  // NovaWeapon_UpdateShotGuidance.
+  std::array<std::int16_t, 4> lock_quality{};
 };
 
 // Ghidra g_beam_hit_queue / Shot_QueueBeamHit (0x00427a90). The original
@@ -910,6 +930,18 @@ struct GameState {
   // oriented by its velocity as Shot_HandleShot picks the heading frame.
   // Each entry is one fired round at a given world position/velocity.
   std::vector<ActiveShot> active_shots;
+
+  // Normalized simulation scale of the most recent frame (the port's equivalent
+  // of g_avg_frame_tick_scale at the time a shot spawned / last ticked). Spawn-
+  // time rolls that the original expresses as Random(100 / frame_scale) read
+  // this instead of threading elapsed ticks through every fire path.
+  float last_frame_tick_scale = 1.0F;
+  // Port stand-in for g_license_check_frame_counter: incremented once per
+  // simulated frame. The guided-shot interference weave (retarget_cooldown 999)
+  // phases its zig-zag off `counter % 300 < 150`; the original's shareware
+  // license-check duties for this counter are not reproduced.
+  std::uint32_t spaceflight_frame_counter = 0;
+
   std::array<BeamHit, 0x40> beam_hit_queue{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};
   std::array<FadingEffectInstance, 0x20> fading_effect_instances{};

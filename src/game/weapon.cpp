@@ -17,6 +17,15 @@ namespace game {
 
 namespace {
 
+// Shot_UpdateShotGuidance constants (typed + pre-commented in the Ghidra DB).
+inline constexpr float kGuidanceLifeGateF64 = 30.0F;      // 0x005754c0
+inline constexpr float kGuidanceLifeGateLooseF64 = 15.0F; // 0x00575400
+inline constexpr float kJamTurnSignF32 = -1.0F;           // 0x00575350
+inline constexpr float kRocketBlendOldF32 = 94.0F;        // 0x0057540c
+inline constexpr float kRocketBlendNewF32 = 5.0F;         // 0x00575408
+inline constexpr float kOnePercentF64 = 0.01F;            // 0x00575368
+inline constexpr float kBombNoseTurnRate = 1.0F;          // 0x00575318
+
 [[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
                                             const Ship &ship) {
   return state.scenario.Ship(
@@ -114,11 +123,111 @@ const Weapon *WeaponAt(const GameState &state, std::int16_t bank) {
   return state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
 }
 
+// ---- Guidance math (Math_* helpers cited from Shot_UpdateShotGuidance) ----
+
+// Ghidra 0x0046b210 Math_ShortestAngleDeltaDeg: absolute shortest angular
+// distance between two game-degree bearings, in [0,180]. The original loses
+// the rotation sign; direction is recovered by comparing the raw wrapped
+// delta against the 181-degree split (see NovaWeapon_TurnShotToward).
+int ShortestAngleDeltaDeg(int from, int to) {
+  int delta = std::abs(from - to);
+  if ((from > 179) != (to > 179)) {
+    delta = 360 - delta;
+  }
+  if (delta > 180) {
+    delta = 360 - delta;
+  }
+  return delta;
+}
+
+// The original's ROUND-then-wrap heading quantization: round to nearest
+// integer degree, then a single-step wrap into [0,360) (k_wrap_360_f32
+// 0x005753b8). The per-frame turn is far smaller than 360 deg, so one
+// subtraction matches the original's do-while.
+int RoundHeadingDeg(float deg) {
+  const int rounded = static_cast<int>(std::lround(deg));
+  return (rounded % 360 + 360) % 360;
+}
+
+// Ghidra 0x0043b4a0 Math_AddPolarVelocity: ADD a polar vector onto an XY
+// velocity pair using the game angle convention (sin for x, -cos for y).
+void AddPolarVelocity(float bearing_deg,
+                      float speed,
+                      float &vel_x,
+                      float &vel_y) {
+  const float rad = bearing_deg * (3.14159265358979323846F / 180.0F);
+  vel_x += std::sin(rad) * speed;
+  vel_y -= std::cos(rad) * speed;
+}
+
+// Ghidra 0x0043b6a0 Math_ClampVelocityComponents: componentwise box clamp to
+// +/- max_speed.
+void ClampVelocityComponents(float &vel_x, float &vel_y, float max_speed) {
+  vel_x = std::clamp(vel_x, -max_speed, max_speed);
+  vel_y = std::clamp(vel_y, -max_speed, max_speed);
+}
+
+// Shared tail of every guidance state: wrap the heading into [0,360), then
+// rebuild the shot velocity from scratch as polar(heading, projectile_speed)
+// clamped componentwise to the projectile speed.
+void WrapHeadingAndRebuildVelocity(const Weapon &weapon, ActiveShot &shot) {
+  shot.heading_deg = std::fmod(shot.heading_deg, 360.0F);
+  if (shot.heading_deg < 0.0F) {
+    shot.heading_deg += 360.0F;
+  }
+  const float speed = weapon.projectile_speed / 100.0F;
+  float vel_x = 0.0F;
+  float vel_y = 0.0F;
+  AddPolarVelocity(static_cast<float>(RoundHeadingDeg(shot.heading_deg)),
+                   speed,
+                   vel_x,
+                   vel_y);
+  ClampVelocityComponents(vel_x, vel_y, speed);
+  shot.vel_x = vel_x;
+  shot.vel_y = vel_y;
+}
+
+// One guidance turn step (shared by states 0/1/999): rotate the shot heading
+// toward `bearing` by at most turn_rate degrees, choosing the shorter wrap
+// direction (the original splits at 181 degrees).
+void TurnShotToward(ActiveShot &shot,
+                    int bearing,
+                    float turn_rate,
+                    float frame_scale) {
+  const int heading = RoundHeadingDeg(shot.heading_deg);
+  const int delta = ShortestAngleDeltaDeg(bearing, heading);
+  if (static_cast<int>(std::lround(std::abs(turn_rate))) >= delta) {
+    return; // within one tick's turn of the bearing; hold
+  }
+  int forward = bearing - heading;
+  forward %= 360;
+  if (forward < 0) {
+    forward += 360;
+  }
+  if (forward < 181) {
+    shot.heading_deg += turn_rate * frame_scale;
+  } else {
+    shot.heading_deg -= turn_rate * frame_scale;
+  }
+}
+
+// NovaRandom_Range([0,n)) stand-in on the GameState LCG.
+int RandomBelow(GameState &state, int n) {
+  if (n <= 0) {
+    return 0;
+  }
+  return std::uniform_int_distribution<int>{0, n - 1}(state.rng);
+}
+
 } // namespace
 
 void NovaWeapon_ClearTransientCombatState(GameState &state) {
   // The original retires every ShotState during Stellar_TravelToSystem and
   // marks all live beam records inactive during the landing transition.
+  // Ship slots (including the player's) get their jamming-score cache reseeded
+  // to -1 at allocation; the port resets the persistent player ship here and
+  // on outfit changes (OutfitMarkStatsDirty) instead.
+  state.player.jamming_score.fill(-1);
   state.active_shots.clear();
   for (BeamHit &beam : state.beam_hit_queue) {
     beam = BeamHit{};
@@ -366,33 +475,41 @@ int NovaWeapon_SpawnProjectile(GameState &state,
                        ? state.ShipAt(static_cast<std::size_t>(owner_ship_slot))
                              .current_system_id
                        : state.player.current_system_id;
+  // Fuse: a weapon without a fuse gets the -1.0 "no fuse" sentinel (the port
+  // does not tick fuses yet; the field is carried for that slice).
+  shot.fuse_elapsed = w->fuse_ticks < 1 ? -1.0F : 0.0F;
+  shot.retarget_cooldown = 0;
 
+  const int mode = w->weapon_mode_code;
+  constexpr float kDegPerRad = 180.0F / 3.14159265358979323846F;
+  // Shot heading in game degrees throughout; the muzzle geometry converts back
+  // to radians locally (Ship.heading is stored in radians).
   float heading = 0.0F;
+  // Shot_SpawnShotFromWeapon local_36: modes 4/7/8 fired with a target are
+  // "aimed" (bearing to the target, then overwritten by the predictive lead).
+  bool aim_led = false;
   if (owner_in_range) {
     const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
     shot.pos_x = owner.pos_x;
     shot.pos_y = owner.pos_y;
-    heading = owner.heading;
-
-    // Shot_SpawnShotFromWeapon (0x0041fd30): straight projectiles (mode -1/6)
-    // fire along the ship's HULL heading -- which the AI control modes 6/7
-    // have already aimed at a predicted intercept via Ship_AimWeaponPredictive
-    // -- while turreted modes (4/7/8/9) with a live target are re-aimed at
-    // fire time with the predictive lead. The player path (slot 0) retains
-    // current-heading behavior until its own aim branches are ported.
-    if (owner_ship_slot != 0 && target_ship_slot >= 0 &&
-        target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips)) {
+    shot.vel_x = owner.vel_x;
+    shot.vel_y = owner.vel_y;
+    heading = owner.heading * kDegPerRad;
+    const bool target_in_range =
+        target_ship_slot >= 0 &&
+        target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips);
+    if ((mode == 4 || mode == 7 || mode == 8) && target_in_range) {
       const Ship &target =
           state.ShipAt(static_cast<std::size_t>(target_ship_slot));
-      const int mode = w->weapon_mode_code;
-      if (target.is_active &&
-          target.current_system_id == owner.current_system_id &&
-          (mode == 4 || mode == 7 || mode == 8 || mode == 9)) {
-        const std::int16_t lead_bearing =
-            NovaAi_AimWeaponPredictive(state, owner, target, weapon_id);
-        heading = static_cast<float>(lead_bearing) *
-                  (3.14159265358979323846F / 180.0F);
-      }
+      heading = BearingDeg(shot.pos_x, shot.pos_y, target.pos_x, target.pos_y);
+      aim_led = true;
+    }
+    // Player-launched freefall bombs keep only 80% of the ship's velocity
+    // (k_bomb_launch_vel_scale_f64 0x005752a0); NPC bays fire a full polar
+    // vector instead (see the velocity rules below).
+    if (owner_ship_slot == 0 && mode == 5) {
+      shot.vel_x *= 0.8F;
+      shot.vel_y *= 0.8F;
     }
 
     // The player sh\x8an descriptor supplies the four-barrel muzzle geometry.
@@ -403,8 +520,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
         turret_group < 4) {
       auto &quadrant = state.player.muzzle_quadrant[turret_group];
       if (quadrant < 0 || quadrant > 3) {
-        quadrant = static_cast<std::int8_t>(
-            std::uniform_int_distribution<int>{0, 3}(state.rng));
+        quadrant = static_cast<std::int8_t>(RandomBelow(state, 4));
       }
       const int q = quadrant;
       const float forward =
@@ -412,8 +528,8 @@ int NovaWeapon_SpawnProjectile(GameState &state,
       const float lateral =
           static_cast<float>(owner.muzzle_lateral[turret_group][q]);
       const float drop = static_cast<float>(owner.muzzle_drop[turret_group][q]);
-      const float sin_heading = std::sin(heading);
-      const float cos_heading = std::cos(heading);
+      const float sin_heading = std::sin(heading / kDegPerRad);
+      const float cos_heading = std::cos(heading / kDegPerRad);
       shot.pos_x += (sin_heading * forward + cos_heading * lateral) *
                     owner.muzzle_scale_x;
       shot.pos_y += (-cos_heading * forward + sin_heading * lateral) *
@@ -423,24 +539,70 @@ int NovaWeapon_SpawnProjectile(GameState &state,
     }
   }
 
-  // The original jitters the firing bearing by the weapon's spread field.
-  // Full turret/lead rules remain deferred, but the signed angular spread is
-  // preserved for the basic straight-flight path.
-  if (apply_random_spread && w->inaccuracy > 0 && w->weapon_mode_code != 5) {
-    const int spread = std::uniform_int_distribution<int>{
-        -static_cast<int>(w->inaccuracy),
-        static_cast<int>(w->inaccuracy)}(state.rng);
-    heading += static_cast<float>(spread) * (3.14159265358979323846F / 180.0F);
+  shot.heading_deg = static_cast<float>(RoundHeadingDeg(heading));
+
+  // Interference confusion (mode 1 + Seeker 0x0008): at launch the system's
+  // Interference stat gates a Random(k_interference_scale / frame_scale) roll;
+  // a hit latches the 999 weave state for the whole flight.
+  if (mode == 1 && (w->flags_quaternary & 0x0008U) != 0U && owner_in_range) {
+    const System *system =
+        state.scenario.System(static_cast<std::int16_t>(shot.system_id + 0x80));
+    if (system != nullptr && system->interference > 0) {
+      const int roll_range =
+          std::max(1,
+                   static_cast<int>(std::lround(
+                       100.0F / std::max(0.01F, state.last_frame_tick_scale))));
+      if (RandomBelow(state, roll_range) + 1 <= system->interference) {
+        shot.retarget_cooldown = 999;
+      }
+    }
   }
 
-  const float speed = static_cast<float>(w->projectile_speed) / 100.0F;
-  if (owner_in_range) {
+  if (aim_led && owner_in_range) {
+    // Ship_AimWeaponPredictive overwrites the plain bearing with the intercept
+    // lead for every owner (player turrets included).
     const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
-    shot.vel_x = std::sin(heading) * speed + owner.vel_x;
-    shot.vel_y = -std::cos(heading) * speed + owner.vel_y;
-  } else {
-    shot.vel_x = std::sin(heading) * speed;
-    shot.vel_y = -std::cos(heading) * speed;
+    const Ship &target =
+        state.ShipAt(static_cast<std::size_t>(target_ship_slot));
+    heading = static_cast<float>(
+        NovaAi_AimWeaponPredictive(state, owner, target, weapon_id));
+    shot.heading_deg = static_cast<float>(RoundHeadingDeg(heading));
+  }
+
+  // Positive shot_random_spread jitters the firing bearing by
+  // [-spread, spread) (NovaRandom_Range(spread*2) - spread), wrapped into
+  // [0,360). Mode 5 jitters AFTER the velocity block instead (below).
+  auto apply_spread = [&]() {
+    if (w->inaccuracy > 0) {
+      shot.heading_deg = static_cast<float>(
+          static_cast<int>(shot.heading_deg) +
+          RandomBelow(state, static_cast<int>(w->inaccuracy) * 2) -
+          w->inaccuracy);
+      shot.heading_deg =
+          std::fmod(std::fmod(shot.heading_deg, 360.0F) + 360.0F, 360.0F);
+    }
+  };
+  if (apply_random_spread && mode != 5) {
+    apply_spread();
+  }
+
+  // Velocity rules: modes other than 5/6 (and mode 5/6 launched by an NPC bay,
+  // owner slot > 0) rebuild the vector as owner velocity + polar(heading,
+  // speed). Ownerless or player-launched mode 5/6 keep the inherited velocity
+  // only: bombs fall, rockets accelerate onto their heading in the guidance
+  // pass. TODO(decomp(0x0046c320)) skipped: negative shot_random_spread marks
+  // parallel multi-barrel launch whose velocity leaves along the hull heading
+  // +/- |spread| from the selected muzzle side; that needs the turret-quadrant
+  // side result (ShipClassDef +0xa42 lateral offsets), not decoded yet.
+  const float speed = w->projectile_speed / 100.0F;
+  if ((mode != 5 && mode != 6) || shot.owner_ship_slot > 0) {
+    AddPolarVelocity(static_cast<float>(RoundHeadingDeg(shot.heading_deg)),
+                     speed,
+                     shot.vel_x,
+                     shot.vel_y);
+  }
+  if (apply_random_spread && mode == 5) {
+    apply_spread();
   }
 
   shot.life_ticks_remaining =
@@ -462,8 +624,266 @@ int NovaWeapon_SpawnProjectile(GameState &state,
           0x0D) {
     shot.impact_variant = 1;
   }
+  // Suicide weapons (ammo cost -999) consume the firing ship entirely.
+  if (w->ammo_type == -999 && owner_in_range && !spawn_without_owner) {
+    Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+    owner.shield_points = 0.0F;
+    owner.armor_points = 0.0F;
+  }
+  // Seek-channel seeding: each channel rolls a jam vulnerability in
+  // [0, JamVuln] (0 when the channel is unused); Shot_UpdateShotGuidance
+  // checks these rolls against the target's jamming score per frame.
+  for (std::size_t channel = 0; channel < shot.lock_quality.size(); ++channel) {
+    const std::int16_t vuln = w->jam_vuln[channel];
+    shot.lock_quality[channel] =
+        vuln < 1 ? 0 : static_cast<std::int16_t>(RandomBelow(state, vuln + 1));
+  }
   state.active_shots.push_back(shot);
   return static_cast<int>(state.active_shots.size() - 1);
+}
+
+// Ghidra Shot_UpdateShotGuidance (0x00431530): per-frame projectile guidance,
+// ported per the plate comment in the Ghidra DB (state machine on
+// ShotState.retarget_cooldown: 0 homing, 1 asteroid target, 998 inert latch,
+// 999 interference weave; mode-6 rocket acceleration blend and mode-5 bomb
+// nose-follow post passes). `elapsed_ticks` stands in for the original's
+// g_avg_frame_tick_scale.
+void NovaWeapon_UpdateShotGuidance(GameState &state,
+                                   ActiveShot &shot,
+                                   float elapsed_ticks) {
+  const Weapon *w = WeaponAt(state, shot.weapon_id);
+  if (w == nullptr) {
+    return;
+  }
+  const int mode = w->weapon_mode_code;
+  if (mode == 9) {
+    // Point-defense shots fly straight; the lead was applied at fire time.
+    return;
+  }
+  const float frame_scale = std::max(0.0F, elapsed_ticks);
+  const int cooldown = shot.retarget_cooldown;
+
+  if (cooldown == 0) {
+    if (mode != 1) {
+      return; // only homing weapons guide in the normal state
+    }
+    // The target must be gone (-1) or active in the shot's system.
+    const std::int16_t target_slot = shot.target_ship_slot;
+    if (target_slot != -1) {
+      if (!state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+        return;
+      }
+      const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+      if (!target.is_active || target.current_system_id != shot.system_id) {
+        return;
+      }
+    }
+
+    int bearing = RoundHeadingDeg(shot.heading_deg);
+    if (target_slot != -1) {
+      const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+      bearing = static_cast<int>(
+          BearingDeg(shot.pos_x, shot.pos_y, target.pos_x, target.pos_y));
+    }
+    const float turn_rate = w->guided_turn_rate;
+    const float remaining =
+        static_cast<float>(w->lifetime_ticks) - shot.life_ticks_remaining;
+    // Homing runs only while more than frame_scale * 30 ticks of life remain:
+    // guided weapons fly dumb over roughly their final second.
+    if (frame_scale * kGuidanceLifeGateF64 < remaining) {
+      float effective_turn = turn_rate;
+      // Jamming: the first seek channel whose vulnerability roll loses to the
+      // target's jamming score dulls (or reverses) the turn and can flip the
+      // missile onto its owner.
+      if (target_slot != -1) {
+        Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+        for (int channel = 0; channel < 4; ++channel) {
+          const int lock = shot.lock_quality[channel];
+          if (lock <= 0) {
+            continue;
+          }
+          if (NovaAi_GetShipJammingScore(state, target, channel) > 100 - lock) {
+            if (effective_turn > 0.0F) {
+              effective_turn = ((w->flags_quaternary & 0x0010U) != 0U)
+                                   ? effective_turn * kJamTurnSignF32
+                                   : 0.0F;
+            }
+            if ((w->flags_quaternary & 0x8000U) != 0U &&
+                RandomBelow(state, 500) == 0 && shot.owner_ship_slot >= 0 &&
+                shot.owner_ship_slot <
+                    static_cast<std::int16_t>(GameState::kMaxShips)) {
+              shot.target_ship_slot = shot.owner_ship_slot;
+              shot.owner_ship_slot = -1;
+            }
+            break;
+          }
+        }
+      }
+      // A target the owner cannot legitimately engage (cloak rules) makes the
+      // missile go dumb; Seeker 0x8000 may retarget the owner instead.
+      if (target_slot != -1 && shot.owner_ship_slot >= 0 &&
+          shot.owner_ship_slot <
+              static_cast<std::int16_t>(GameState::kMaxShips)) {
+        const Ship &target =
+            state.ShipAt(static_cast<std::size_t>(target_slot));
+        const Ship &owner =
+            state.ShipAt(static_cast<std::size_t>(shot.owner_ship_slot));
+        if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, target, owner)) {
+          effective_turn = 0.0F;
+          if ((w->flags_quaternary & 0x8000U) != 0U &&
+              RandomBelow(state, 1000) == 0) {
+            shot.target_ship_slot = shot.owner_ship_slot;
+            shot.owner_ship_slot = -1;
+          }
+        }
+      }
+      // Seeker 0x4000 (loses lock if target not directly ahead): inside 250 px
+      // on both axes with the target more than 45 deg off the nose, drop it.
+      if (target_slot != -1 && (w->flags_quaternary & 0x4000U) != 0U) {
+        const Ship &target =
+            state.ShipAt(static_cast<std::size_t>(target_slot));
+        if (std::abs(target.pos_x - shot.pos_x) < 250.0F &&
+            std::abs(target.pos_y - shot.pos_y) < 250.0F) {
+          const int to_target = static_cast<int>(
+              BearingDeg(shot.pos_x, shot.pos_y, target.pos_x, target.pos_y));
+          const int off_nose =
+              std::abs(to_target - RoundHeadingDeg(shot.heading_deg)) % 360;
+          if (off_nose > 45) {
+            shot.target_ship_slot = -1;
+          }
+        }
+      }
+      TurnShotToward(shot, bearing, effective_turn, frame_scale);
+      WrapHeadingAndRebuildVelocity(*w, shot);
+    }
+    // Seeker 0x0002 (decoyed by asteroids): 1-in-10 per frame, a nearby active
+    // asteroid roughly ahead (200 px box, 16 deg cone) becomes the target and
+    // latches state 1.
+    if ((w->flags_quaternary & 0x0002U) != 0U && RandomBelow(state, 10) == 0) {
+      for (std::size_t i = 0; i < state.asteroid_pool.size(); ++i) {
+        const AsteroidState &asteroid = state.asteroid_pool[i];
+        if (!asteroid.active) {
+          continue;
+        }
+        if (std::abs(asteroid.target_pos_x - shot.pos_x) >= 200.0F ||
+            std::abs(asteroid.target_pos_y - shot.pos_y) >= 200.0F) {
+          continue;
+        }
+        const int to_asteroid =
+            static_cast<int>(BearingDeg(shot.pos_x,
+                                        shot.pos_y,
+                                        asteroid.target_pos_x,
+                                        asteroid.target_pos_y));
+        if (ShortestAngleDeltaDeg(to_asteroid,
+                                  RoundHeadingDeg(shot.heading_deg)) < 16) {
+          shot.retarget_cooldown = 1;
+          shot.target_ship_slot = static_cast<std::int16_t>(i);
+          break;
+        }
+      }
+    }
+    return;
+  }
+
+  if (cooldown == 999) {
+    // Confused by interference: weave left/right on a 300-frame phase while
+    // more than 15 ticks of life remain, then rebuild the velocity.
+    const float remaining =
+        static_cast<float>(w->lifetime_ticks) - shot.life_ticks_remaining;
+    if (kGuidanceLifeGateLooseF64 < remaining) {
+      const int effective_turn =
+          static_cast<int>(std::lround(w->guided_turn_rate));
+      if (state.spaceflight_frame_counter % 300 < 150) {
+        shot.heading_deg -= static_cast<float>(effective_turn);
+      } else {
+        shot.heading_deg += static_cast<float>(effective_turn);
+      }
+    }
+    WrapHeadingAndRebuildVelocity(*w, shot);
+    // Seeker 0x8000 may recover, retargeting onto the owner.
+    if ((w->flags_quaternary & 0x8000U) != 0U &&
+        RandomBelow(state, 1000) == 0 && shot.owner_ship_slot >= 0 &&
+        shot.owner_ship_slot <
+            static_cast<std::int16_t>(GameState::kMaxShips)) {
+      shot.retarget_cooldown = 0;
+      shot.target_ship_slot = shot.owner_ship_slot;
+      shot.owner_ship_slot = -1;
+    }
+    return;
+  }
+  if (cooldown == 998) {
+    return; // inert latch (target lost); no guidance, no velocity rebuild
+  }
+
+  // Any other state (set 1 = asteroid target): fly toward the recorded
+  // asteroid slot (or straight ahead once it deactivates).
+  int bearing = RoundHeadingDeg(shot.heading_deg);
+  if (cooldown == 1) {
+    const std::int16_t asteroid_slot = shot.target_ship_slot;
+    if (asteroid_slot == -1) {
+      bearing = RoundHeadingDeg(shot.heading_deg);
+    } else if (asteroid_slot <
+               static_cast<std::int16_t>(state.asteroid_pool.size())) {
+      const AsteroidState &asteroid =
+          state.asteroid_pool[static_cast<std::size_t>(asteroid_slot)];
+      if (!asteroid.active) {
+        shot.target_ship_slot = -1;
+        bearing = RoundHeadingDeg(shot.heading_deg);
+      } else {
+        bearing = static_cast<int>(BearingDeg(shot.pos_x,
+                                              shot.pos_y,
+                                              asteroid.target_pos_x,
+                                              asteroid.target_pos_y));
+      }
+    } else {
+      shot.target_ship_slot = -1;
+    }
+  }
+  const float remaining =
+      static_cast<float>(w->lifetime_ticks) - shot.life_ticks_remaining;
+  if (kGuidanceLifeGateLooseF64 < remaining) {
+    TurnShotToward(shot, bearing, w->guided_turn_rate, frame_scale);
+  }
+  WrapHeadingAndRebuildVelocity(*w, shot);
+
+  // Mode 6 (freeflight rocket): blend the inherited velocity toward the aim
+  // heading -- (vel*94 + polar*5) * 0.01 per frame.
+  if (mode == 6) {
+    const float speed = w->projectile_speed / 100.0F;
+    float polar_x = 0.0F;
+    float polar_y = 0.0F;
+    AddPolarVelocity(static_cast<float>(RoundHeadingDeg(shot.heading_deg)),
+                     speed,
+                     polar_x,
+                     polar_y);
+    shot.vel_x =
+        (shot.vel_x * kRocketBlendOldF32 + polar_x * kRocketBlendNewF32) *
+        kOnePercentF64;
+    shot.vel_y =
+        (shot.vel_y * kRocketBlendOldF32 + polar_y * kRocketBlendNewF32) *
+        kOnePercentF64;
+  }
+  // Mode 5 (freefall bomb): the nose follows the velocity vector, turning
+  // toward it by 1 deg/frame (g_cloak_fade_passive_decay 0x00575318).
+  if (mode == 5) {
+    // Scale the velocity before the bearing math as the original does
+    // (k_bearing_precision_scale_f64 1000.0).
+    const int vel_bearing = static_cast<int>(
+        BearingDeg(0.0F, 0.0F, shot.vel_x * 1000.0F, shot.vel_y * 1000.0F));
+    if (ShortestAngleDeltaDeg(vel_bearing, RoundHeadingDeg(shot.heading_deg)) >
+        0) {
+      int forward = vel_bearing - RoundHeadingDeg(shot.heading_deg);
+      forward %= 360;
+      if (forward < 0) {
+        forward += 360;
+      }
+      if (forward < 181) {
+        shot.heading_deg += kBombNoseTurnRate;
+      } else {
+        shot.heading_deg -= kBombNoseTurnRate;
+      }
+    }
+  }
 }
 
 // Ghidra 0x00455150 Weapon_FirePlayerWeaponBank.
@@ -492,14 +912,15 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
   // Weapon_FirePlayerWeaponBank passes the selected primary target through to
   // Shot_SpawnShotFromWeapon, including for the straight projectile modes.
   // Keeping that context on the shared record is important for mode-1
-  // target-only collision eligibility.
+  // target-only collision eligibility. The spawn applies the weapon's heading
+  // spread internally (it is not caller-gated in the original).
   const int shot_slot =
       NovaWeapon_SpawnProjectile(state,
                                  0,
                                  state.player.primary_target_ship_slot,
                                  weapon_bank,
                                  /*spawn_without_owner=*/false,
-                                 /*apply_random_spread=*/false);
+                                 /*apply_random_spread=*/true);
   if (shot_slot < 0) {
     return;
   }
@@ -939,30 +1360,55 @@ void NovaWeapon_StepShotAnimation(GameState &state,
 void NovaWeapon_TickShots(GameState &state,
                           float frame_time_ms,
                           float elapsed_ticks) {
-  // Advance shots by velocity and lifetime; drop expired rounds. Also step the
-  // time-animated shot-frame cycle (Shot_HandleShot animated branch) for
-  // weapons that use it; static/heading shot sets are untouched.
+  // Advance shots per Shot_HandleShot (0x00435830): sanitize ownership/target
+  // latches, count lifetime down, run the guidance pass, then integrate the
+  // position with the (possibly rebuilt) velocity. Shots that cross zero are
+  // retired with the weapon's expiry impact; collision-resolved shots are
+  // consumed earlier in the frame by the collision pass.
   auto &shots = state.active_shots;
   const float tick_scale = std::max(0.0F, elapsed_ticks);
+  state.last_frame_tick_scale = tick_scale;
+  ++state.spaceflight_frame_counter;
   for (auto &shot : shots) {
     if (shot.consumed) {
       continue;
     }
-    shot.pos_x += shot.vel_x * tick_scale;
-    shot.pos_y += shot.vel_y * tick_scale;
-    if (shot.life_ticks_remaining <= 0.0F) {
-      shot.life_ticks_remaining = static_cast<float>(shot.life_frames);
+    const Weapon *weapon = WeaponAt(state, shot.weapon_id);
+    if (weapon == nullptr) {
+      shot.consumed = true;
+      continue;
     }
+    // Owner sanitation and the target latches. Point-defense shots are always
+    // targetless (they were lead-aimed at fire time); a mode-1 shot whose
+    // recorded target died latches 998 and flies inert for the rest of its
+    // life.
+    if (shot.owner_ship_slot < -1 ||
+        shot.owner_ship_slot >=
+            static_cast<std::int16_t>(GameState::kMaxShips)) {
+      shot.owner_ship_slot = -1;
+    }
+    if (weapon->weapon_mode_code == 9) {
+      shot.target_ship_slot = -1;
+    } else {
+      const std::int16_t target = shot.target_ship_slot;
+      if (target < 0 ||
+          target >= static_cast<std::int16_t>(GameState::kMaxShips)) {
+        shot.target_ship_slot = -1;
+      } else if (shot.retarget_cooldown == 0 &&
+                 !state.ShipAt(static_cast<std::size_t>(target)).is_active) {
+        shot.retarget_cooldown = 998;
+        shot.target_ship_slot = -1;
+      }
+    }
+
     shot.life_ticks_remaining -= tick_scale;
     shot.life_frames =
         static_cast<int>(std::ceil(std::max(0.0F, shot.life_ticks_remaining)));
-    if (shot.life_ticks_remaining <= 0.0F &&
-        shot.system_id == state.player.current_system_id) {
+    if (shot.life_ticks_remaining <= 0.0F) {
       // Ghidra Shot_HandleShot (0x00435830) emits the weapon's expiry/fuse
-      // impact before hiding the shot. Collision-resolved shots are removed
-      // earlier in the frame and therefore do not reach this branch.
-      if (const Weapon *weapon = WeaponAt(state, shot.weapon_id);
-          weapon != nullptr) {
+      // impact for shots in the player's system (gated in the original by
+      // life > k_shot_expiry_min_life -63000, which a -1 expiry satisfies).
+      if (shot.system_id == state.player.current_system_id) {
         NovaEffects_SpawnAreaImpact(state,
                                     shot.pos_x,
                                     shot.pos_y,
@@ -970,15 +1416,19 @@ void NovaWeapon_TickShots(GameState &state,
                                     weapon->splash_radius,
                                     true);
       }
+      shot.consumed = true;
+      continue;
     }
+    // Guidance runs before movement: a homing shot turns and rebuilds its
+    // velocity, then the (possibly new) vector integrates this frame.
+    NovaWeapon_UpdateShotGuidance(state, shot, tick_scale);
+    shot.pos_x += shot.vel_x * tick_scale;
+    shot.pos_y += shot.vel_y * tick_scale;
     NovaWeapon_StepShotAnimation(state, shot, frame_time_ms);
   }
   shots.erase(std::remove_if(shots.begin(),
                              shots.end(),
-                             [](const ActiveShot &s) {
-                               return s.consumed ||
-                                      s.life_ticks_remaining <= 0.0F;
-                             }),
+                             [](const ActiveShot &s) { return s.consumed; }),
               shots.end());
   // Count every weapon-bank cooldown down toward zero.
   for (float &cd : state.weapon_bank_cooldown) {

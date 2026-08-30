@@ -147,7 +147,15 @@ void MarkStatsDirty(GameState &state) { state.stat_cache_valid = false; }
 
 } // namespace
 
-void OutfitMarkStatsDirty(GameState &state) { MarkStatsDirty(state); }
+void OutfitMarkStatsDirty(GameState &state) {
+  MarkStatsDirty(state);
+  // Ownership changes alter the outfit-derived jamming bonuses, so the
+  // player's lazily cached Ship.jamming_score channels (Ghidra ShipState
+  // +0xC926) must recompute. The original only reseeds the cache when a ship
+  // slot is allocated; the port also resets it here and at system transitions
+  // (NovaWeapon_ClearTransientCombatState) so purchases apply immediately.
+  state.player.jamming_score.fill(-1);
+}
 
 // Ghidra 0x00464b50 Outfit_HasCloakingDevice.
 bool NovaOutfit_HasCloakingDevice(const GameState &state, const Ship &ship) {

@@ -662,6 +662,90 @@ std::int16_t NovaAi_AimWeaponPredictive(const GameState &state,
       BearingDeg(ship.pos_x, ship.pos_y, intercept_x, intercept_y));
 }
 
+int NovaAi_GetShipJammingScore(const GameState &state,
+                               Ship &ship,
+                               int seek_channel) {
+  if (seek_channel < 0 || seek_channel > 3) {
+    return 0;
+  }
+  if (NovaAiShip_IsFireRestricted(state, ship)) {
+    return 0;
+  }
+  const int cached = ship.jamming_score[static_cast<std::size_t>(seek_channel)];
+  if (cached >= 0) {
+    return cached;
+  }
+
+  int score = 0;
+  // Base: the ship class's inherent-attributes government InhJam value.
+  const ShipClass *cls = ShipClassFor(state, ship);
+  const std::int16_t inherent_govt =
+      cls != nullptr ? cls->inherent_attributes_govt : -1;
+  if (inherent_govt < 0 || inherent_govt > 0xff) {
+    score = 0;
+  } else if (const Government *govt =
+                 state.scenario.Government(inherent_govt + 0x80);
+             govt != nullptr) {
+    score = govt->inherent_jam[static_cast<std::size_t>(seek_channel)];
+  }
+
+  // Outfit bonuses: ModType opcodes 0x21..0x24 (Jamming Type 1-4) contribute
+  // their ModVal. The player sums every owned outfit; an NPC sums each mounted
+  // stock outfit once (not per count), matching 0x00464810.
+  auto contributes = [seek_channel, &score](const Outfit &outfit) {
+    std::array<std::int16_t, 4> types{outfit.mod_type,
+                                      outfit.alt_mod_types[0],
+                                      outfit.alt_mod_types[1],
+                                      outfit.alt_mod_types[2]};
+    std::array<std::int16_t, 4> vals{outfit.mod_val,
+                                     outfit.alt_mod_vals[0],
+                                     outfit.alt_mod_vals[1],
+                                     outfit.alt_mod_vals[2]};
+    for (std::size_t i = 0; i < types.size(); ++i) {
+      if (types[i] ==
+          static_cast<std::int16_t>(seek_channel +
+                                    static_cast<int>(OutfitEffect::kJam1))) {
+        score += vals[i];
+      }
+    }
+  };
+  if (ship.ship_instance_id == 0) {
+    const auto &outfits = state.scenario.outfits;
+    for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size();
+         ++i) {
+      if (state.inventory.outfit_owned_count[i] > 0 && i < outfits.size()) {
+        contributes(outfits[i]);
+      }
+    }
+  } else if (cls != nullptr) {
+    for (std::size_t slot = 0; slot < cls->default_outfit_ids.size(); ++slot) {
+      if (cls->default_outfit_counts[slot] <= 0) {
+        continue;
+      }
+      const std::int16_t outfit_id = cls->default_outfit_ids[slot];
+      if (outfit_id < 0 || outfit_id >= static_cast<std::int16_t>(
+                                            state.scenario.outfits.size())) {
+        continue;
+      }
+      contributes(state.scenario.outfits[static_cast<std::size_t>(outfit_id)]);
+    }
+    // Fraction-specific government flag 0x80 halves the NPC's score.
+    // faction_or_government_id indexes g_government_defs directly (zero-based).
+    if (ship.faction_or_government_id >= 0) {
+      const auto gid = static_cast<std::size_t>(ship.faction_or_government_id);
+      if (gid < state.scenario.governments.size() &&
+          (state.scenario.governments[gid].flags_primary & 0x80U) != 0U) {
+        score = score >> 1;
+      }
+    }
+  }
+
+  score = std::clamp(score, 0, 100);
+  ship.jamming_score[static_cast<std::size_t>(seek_channel)] =
+      static_cast<std::int16_t>(score);
+  return score;
+}
+
 // Ghidra 0x00410f20 Ship_CanShipInterceptCurrentPrimaryTarget. The original's
 // final comparison is deliberately a strict base-speed comparison; the
 // preceding weapon-bank walk only establishes the guided/intercept context.
