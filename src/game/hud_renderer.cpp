@@ -213,47 +213,43 @@ void DrawLifeBar(SDL_Renderer *renderer,
 // ---------------------------------------------------------------------------
 
 // The gameplay-panel STR# pools. Resource_LoadStringEntry (0x004b8ca0) and
-// Resource_DrawStringEntry (0x004cd1f0) take 1-BASED indices; our
-// NovaHud_LoadStringEntry is 0-based, so entries are recorded as 0-based pool
-// indices with the original's call-site value noted. The shipped strings
-// double as fallbacks when the archive is unavailable.
+// Resource_DrawStringEntry (0x004cd1f0) take 1-BASED entry numbers, and so
+// does our NovaHud_LoadStringEntry; every entry recorded below is the value
+// seen at the original call site. The shipped strings double as fallbacks
+// when the archive is unavailable.
 constexpr std::uint16_t kMiscStringsId = 0x7d2; // STR# 2002 "misc strings"
 
 struct MiscStrEntry {
-  std::uint16_t pool_index;
+  std::uint16_t entry; // 1-based STR# 0x7d2 entry number
   const char *fallback;
-  const char *decompile_arg; // 1-based value passed in the original (comment)
 };
 
 // Travel panel (0x0045e400).
-constexpr MiscStrEntry kMiscNavSystemOff{0x155, "Nav System Off", "0x156"};
-constexpr MiscStrEntry kMiscStellarNavigation{
-    0x156, "Stellar Navigation", "0x157"};
-constexpr MiscStrEntry kMiscNoDestination{0x157, "No Destination", "0x158"};
-constexpr MiscStrEntry kMiscHyperspace{0x158, "Hyperspace", "0x159"};
-constexpr MiscStrEntry kMiscUnexploredSystem{
-    0x159, "Unexplored System", "0x15a"};
-constexpr MiscStrEntry kMiscDisabled{0x15a, "Disabled", "0x15b"};
-constexpr MiscStrEntry kMiscWaiting{0x15b, "Waiting", "0x15c"};
+constexpr MiscStrEntry kMiscNavSystemOff{0x156, "Nav System Off"};
+constexpr MiscStrEntry kMiscStellarNavigation{0x157, "Stellar Navigation"};
+constexpr MiscStrEntry kMiscNoDestination{0x158, "No Destination"};
+constexpr MiscStrEntry kMiscHyperspace{0x159, "Hyperspace"};
+constexpr MiscStrEntry kMiscUnexploredSystem{0x15a, "Unexplored System"};
+constexpr MiscStrEntry kMiscDisabled{0x15b, "Disabled"};
+constexpr MiscStrEntry kMiscWaiting{0x15c, "Waiting"};
 // Target panel (0x0045f530).
-constexpr MiscStrEntry kMiscNoTarget{0x15c, "No Target", "0x15d"};
-constexpr MiscStrEntry kMiscShieldLabel{0x0c, "Shield:", "0x0d"};
-constexpr MiscStrEntry kMiscNoShields{0x0d, "No Shields", "0x0e"};
-constexpr MiscStrEntry kMiscShieldsDown{0x0e, "Shields Down", "0x0f"};
-constexpr MiscStrEntry kMiscArmorLabel{0x0f, "Armor:", "0x10"};
-constexpr MiscStrEntry kMiscNotApplicable{0x18b, "N/A", "0x18c"};
-constexpr MiscStrEntry kMiscFighter{0xa8, "Fighter", "0xa9"};
-constexpr MiscStrEntry kMiscEscort{0xa7, "Escort", "0xa8"};
+constexpr MiscStrEntry kMiscNoTarget{0x15d, "No Target"};
+constexpr MiscStrEntry kMiscShieldLabel{0x0d, "Shield:"};
+constexpr MiscStrEntry kMiscNoShields{0x0e, "No Shields"};
+constexpr MiscStrEntry kMiscShieldsDown{0x0f, "Shields Down"};
+constexpr MiscStrEntry kMiscArmorLabel{0x10, "Armor:"};
+constexpr MiscStrEntry kMiscNotApplicable{0x18c, "N/A"};
+constexpr MiscStrEntry kMiscFighter{0xa9, "Fighter"};
+constexpr MiscStrEntry kMiscEscort{0xa8, "Escort"};
 // Weapon panel (0x00460ec0).
-constexpr MiscStrEntry kMiscNoSecondaryWeapon{
-    0x15d, "No Secondary Weapon", "0x15e"};
+constexpr MiscStrEntry kMiscNoSecondaryWeapon{0x15e, "No Secondary Weapon"};
 // Cargo panel (0x004612c0).
-constexpr MiscStrEntry kMiscFree{0x12, "Free:", "0x13"};
-constexpr MiscStrEntry kMiscSpecial{0x13, "Special:", "0x14"};
-constexpr MiscStrEntry kMiscMultiple{0x14, "Multiple", "0x15"};
+constexpr MiscStrEntry kMiscFree{0x13, "Free:"};
+constexpr MiscStrEntry kMiscSpecial{0x14, "Special:"};
+constexpr MiscStrEntry kMiscMultiple{0x15, "Multiple"};
 
 [[nodiscard]] std::string MiscString(const MiscStrEntry &entry) {
-  if (auto text = NovaHud_LoadStringEntry(kMiscStringsId, entry.pool_index);
+  if (auto text = NovaHud_LoadStringEntry(kMiscStringsId, entry.entry);
       text && !text->empty()) {
     return *text;
   }
@@ -262,16 +258,17 @@ constexpr MiscStrEntry kMiscMultiple{0x14, "Multiple", "0x15"};
 
 // The cargo-panel bin labels (DAT_0068cccc[0..5] <- STR# 0xfa3) and the
 // short commodity names (DAT_0068d2cc <- STR# 0xfa2). The original's loaders
-// index these pools 1-based; the pools themselves are 0-based here.
+// fill slot n from 1-based entry n+1 (NovaData_LoadDisplayNamePstringTables
+// 0x004c7040), so callers below pass entry = slot + 1.
 constexpr std::uint16_t kBinLabelsId = 0xfa3;
 constexpr std::string_view kBinLabelFallbacks[6] = {
     "Food:", "Ind:", "Med:", "LuxG:", "Met:", "Equ:"};
 constexpr std::uint16_t kCommodityShortNamesId = 0xfa2;
 
 [[nodiscard]] std::string PoolString(std::uint16_t resource_id,
-                                     std::uint16_t pool_index,
+                                     std::uint16_t entry,
                                      std::string_view fallback) {
-  if (auto text = NovaHud_LoadStringEntry(resource_id, pool_index);
+  if (auto text = NovaHud_LoadStringEntry(resource_id, entry);
       text && !text->empty()) {
     return *text;
   }
@@ -372,6 +369,8 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
 // acceptance (Mission_PopulateMissionSlotFromDef 0x0043f8c0: a random 1-based
 // entry drawn from the pool via Resource_LoadStringEntry); we stored the
 // (pool, entry) pair, so re-resolving at draw time yields the same text.
+// The stored entry is already the original's 1-based value
+// (NovaRandom_Range(count) + 1, Mission_PopulateMissionSlotFromDef 0x0043f8c0).
 [[nodiscard]] std::string MissionShipPoolString(const ActiveMission &mission,
                                                 bool name_pool) {
   const std::int16_t pool_id = name_pool ? mission.special_ship_name_string_id
@@ -382,7 +381,7 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
     return {};
   }
   auto text = NovaHud_LoadStringEntry(static_cast<std::uint16_t>(pool_id),
-                                      static_cast<std::uint16_t>(entry - 1));
+                                      static_cast<std::uint16_t>(entry));
   return text ? *text : std::string{};
 }
 
@@ -999,7 +998,7 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
       continue;
     }
     const std::string label = PoolString(
-        kBinLabelsId, static_cast<std::uint16_t>(i), kBinLabelFallbacks[i]);
+        kBinLabelsId, static_cast<std::uint16_t>(i + 1), kBinLabelFallbacks[i]);
     const float y = top + static_cast<float>((i + 1) * 14 - 2);
     DrawPanelTextAt(
         platform, font, font_size, left + 3.0F, y, label, label_color);
@@ -1060,7 +1059,7 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
     std::string value;
     if (cargo_missions == 1) {
       value = PoolString(kCommodityShortNamesId,
-                         static_cast<std::uint16_t>(first_cargo_type),
+                         static_cast<std::uint16_t>(first_cargo_type + 1),
                          "cargo");
     } else if (junk_types == 1) {
       // TODO(decomp): g_junk_defs display names (+0x128, 0x526 stride) are
@@ -1089,7 +1088,7 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
   // credits command; the port keeps the literal 'c'.
   // TODO(decomp(0x004612c0)) skipped: NovaCommand_TranslateByInputMap key
   // translation (input-map table not reconstructed).
-  std::string credits_label = PoolString(kMiscStringsId, 0x20, "credits");
+  std::string credits_label = PoolString(kMiscStringsId, 0x21, "credits");
   if (!credits_label.empty()) {
     credits_label[0] = 'c';
   }

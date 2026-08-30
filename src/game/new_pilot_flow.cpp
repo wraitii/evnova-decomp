@@ -165,17 +165,16 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
   // Row 4: the new-pilot (Strict Play) checkbox state from the current flag.
   UiControl_SetValue(*window, 4, state.pilot.strict_play ? 1 : 0);
   // Rows 8/9: random sample Full Name / Nickname from STR# 0x80 rows 1-3 /
-  // 4-6. The port's NovaHud_LoadStringEntry is 0-based (the original's
-  // Resource_LoadStringEntry is 1-based), so the row ranges map to indices
-  // 0-2 / 3-5.
+  // 4-6 (1-based, like every STR# entry number).
   UiPanel_SetEntryTextPascal(
       *window, 8,
-      NovaHud_LoadStringEntry(0x80, static_cast<std::uint16_t>(RandomIndex(state, 3)))
+      NovaHud_LoadStringEntry(
+          0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 1))
           .value_or(""));
   UiPanel_SetEntryTextPascal(
       *window, 9,
       NovaHud_LoadStringEntry(
-          0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 3))
+          0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 4))
           .value_or(""));
   UiPanel_SetTextEntrySelectionRange(*window, 8, 0, 0xfe);
 
@@ -564,19 +563,19 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                   ->long_name
             : "";
     std::string prompt;
-    // STR# 0x7d2 row 0x79 (1-based) = pool index 0x78 in the port decoder.
-    if (auto prefix = NovaHud_LoadStringEntry(0x7d2, 0x78)) {
+    // STR# 0x7d2 row 0x79 (1-based): "Now, please christen your brand-new".
+    if (auto prefix = NovaHud_LoadStringEntry(0x7d2, 0x79)) {
       prompt = *prefix + " ";
     } else {
       NovaLog::Todo("STR# 0x7d2 row 0x79 (christening prompt prefix) "
                     "unavailable");
     }
     prompt += class_caption + ": ";
-    // STR# 0x80 rows 7-9 (1-based) = pool indices 6-8: the random suggested
-    // ship names ('Ring of Glory', 'Snowy Owl', 'Cardinal Virtue').
+    // STR# 0x80 rows 7-9 (1-based): the random suggested ship names ('Ring
+    // of Glory', 'Snowy Owl', 'Cardinal Virtue').
     const std::string suggested =
         NovaHud_LoadStringEntry(
-            0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 6))
+            0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 7))
             .value_or("");
     auto ship_name = NovaUi_ShowTextEntryDialog(
         platform, font_cache, prompt, suggested, 0x40, render_background);

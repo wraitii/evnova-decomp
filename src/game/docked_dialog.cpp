@@ -323,6 +323,8 @@ void DrawMissionBoardContents(SdlPlatform &platform,
 
   const auto &rows = missions.page_zero;
   const std::string heading =
+      // 0x167 is the original's 1-based entry -> "The following missions are
+      // available here:".
       NovaHud_LoadStringEntry(0x7d2, 0x167)
           .value_or("The following missions are available here");
   NovaText_Draw(platform,
@@ -826,17 +828,18 @@ struct StoreTextureCache {
 }
 
 // Label/unit text for the store and ship-info panels, from the game-strings
-// pool STR# 0x7d2 (Nova Data 5). NovaHud_LoadStringEntry takes the 0-based
-// pool index; the original's Resource_DrawStringEntry (0x004cd1f0) /
-// Resource_LoadStringEntry (0x004b8ca0) take the 1-based entry number, so each
-// index passed here is one less than the value seen in the decompile. The
+// pool STR# 0x7d2 (Nova Data 5). The original's Resource_DrawStringEntry
+// (0x004cd1f0) / Resource_LoadStringEntry (0x004b8ca0) take the 1-based entry
+// number; the indices passed here are the original's values minus one (pool
+// indices), so InfoString adds the 1 back for the 1-based helper. The
 // original also caches a few entries as Pascal strings in static storage
 // (DAT_0072d3cc "ton", DAT_0072d9cc "Energy:", DAT_0072ddcc "Shields:"); the
 // pool loads below cover them. The armor row's cached pstring (DAT_0072e3cc)
 // is pool 0x0f "Armor:" — not 0x10, which is the boarding screen's
 // "Armor Status:".
 [[nodiscard]] std::string InfoString(std::uint16_t pool_index) {
-  return NovaHud_LoadStringEntry(0x7d2, pool_index).value_or(std::string{});
+  return NovaHud_LoadStringEntry(0x7d2, static_cast<std::uint16_t>(pool_index + 1U))
+      .value_or(std::string{});
 }
 
 void DrawStoreContents(SdlPlatform &platform,
@@ -1499,7 +1502,7 @@ void DrawShipyardInfoPanel(SdlPlatform &platform,
                         layout.button.x,
                         layout.button.x + layout.button.w,
                         ThreeStateButtonLabelBaseline(layout.button),
-                        NovaHud_LoadStringEntry(0x96, 4).value_or("Done"));
+                        NovaHud_LoadStringEntry(0x96, 0x5).value_or("Done"));
 }
 
 // One full frame of the store screen, shared by the store loop and the Info

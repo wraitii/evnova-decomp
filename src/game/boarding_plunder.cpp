@@ -428,6 +428,7 @@ void QueueUiSound(GameState &state, std::int16_t index, std::int16_t count) {
 }
 
 void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
+  // str_index is the 1-based STR# 0x7d2 entry number.
   auto text = NovaHud_LoadStringEntry(0x7d2, str_index);
   if (text.has_value()) {
     // Board denials show for 0x168 frames (the doc's recorded duration).
@@ -570,7 +571,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
                                                               : 1.0F / 3.0F)
             : 0.0F);
     QueueUiSound(state, 3, 1);
-    ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
+    ShowBoardingOverlay(state, 0x82); // "You can't board this ship."
     return;
   }
 
@@ -582,7 +583,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   if (std::fabs(target.vel_x - player.vel_x) > kBoardVelocityGate ||
       std::fabs(target.vel_y - player.vel_y) > kBoardVelocityGate) {
     QueueUiSound(state, 3, 1);
-    ShowBoardingOverlay(state, 0x83); // "You're moving too fast to board..."
+    ShowBoardingOverlay(state, 0x84); // "You're moving too fast to board..."
     return;
   }
 
@@ -591,7 +592,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   if (std::fabs(target.pos_x - player.pos_x) > span.full_x * kBoardRangeShare ||
       std::fabs(target.pos_y - player.pos_y) > span.full_y * kBoardRangeShare) {
     QueueUiSound(state, 3, 1);
-    ShowBoardingOverlay(state, 0x82); // "You're not close enough to board..."
+    ShowBoardingOverlay(state, 0x83); // "You're not close enough to board..."
     return;
   }
 
@@ -639,7 +640,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
                   target_slot,
                   target_class->display_name);
     QueueUiSound(state, 3, 1);
-    ShowBoardingOverlay(state, 0x81); // "You can't board this ship."
+    ShowBoardingOverlay(state, 0x82); // "You can't board this ship."
     return;
   }
 
@@ -706,27 +707,29 @@ constexpr std::uint16_t kBoardBackdropPict = 0x2143;
 // successful capture roll. Items: [0] upper button (55,51)-(201,77) = action 1
 // "Use As My Ship" (STR# 0x96 0x2e); [1] lower button (55,83)-(201,109) =
 // action 2 "Use As Escort" (STR# 0x96 0x2d); [2] 238x40 text panel (9,6)
-// drawing STR# 0x7d2 0x75. Backdrop PICT 0x2144. Both choices play the
+// drawing STR# 0x7d2 0x76. Backdrop PICT 0x2144. Both choices play the
 // transition-table [1] cue. Decoded from the shipped resources (DLOG bounds
 // t40 l40 b154 r297) and NovaUi_RedrawTravelBinaryChoiceButtons's label-index
-// table {0x2e, 0x2d} into the STR# 0x96 pstring table (0-based pool entries).
+// table {0x2e, 0x2d} into the STR# 0x96 pstring table (0-based pool entries;
+// the STR# entry numbers below are those + 1).
 constexpr float kCaptureWindowX = (640.0F - 257.0F) / 2.0F; // 191.5
 constexpr float kCaptureWindowY = (480.0F - 114.0F) / 2.0F; // 183.0
 constexpr float kCaptureWindowW = 257.0F;
 constexpr float kCaptureWindowH = 114.0F;
 constexpr std::uint16_t kCaptureBackdropPict = 0x2144;
-constexpr std::uint16_t kCaptureTextStr = 0x75;   // STR# 0x7d2 pool entry
-constexpr std::uint16_t kCaptureBtnMyShip = 0x2e; // STR# 0x96 pool entry
-constexpr std::uint16_t kCaptureBtnEscort = 0x2d; // STR# 0x96 pool entry
+constexpr std::uint16_t kCaptureTextStr = 0x76;   // STR# 0x7d2 1-based entry
+constexpr std::uint16_t kCaptureBtnMyShip = 0x2f; // STR# 0x96 1-based entry
+constexpr std::uint16_t kCaptureBtnEscort = 0x2e; // STR# 0x96 1-based entry
 
 // STR# 0x96 button-label pool: Abort/Cargo/Credits/Ammo/Energy/Capture Ship.
+// 1-based entry numbers, as passed to Resource_LoadStringEntry.
 constexpr std::uint16_t kButtonLabelStr = 0x96;
-constexpr std::uint16_t kBtnAbort = 0x22;
-constexpr std::uint16_t kBtnCargo = 0x27;
-constexpr std::uint16_t kBtnCredits = 0x28;
-constexpr std::uint16_t kBtnAmmo = 0x29;
-constexpr std::uint16_t kBtnEnergy = 0x2a;
-constexpr std::uint16_t kBtnCaptureShip = 0x2b;
+constexpr std::uint16_t kBtnAbort = 0x23;
+constexpr std::uint16_t kBtnCargo = 0x28;
+constexpr std::uint16_t kBtnCredits = 0x29;
+constexpr std::uint16_t kBtnAmmo = 0x2a;
+constexpr std::uint16_t kBtnEnergy = 0x2b;
+constexpr std::uint16_t kBtnCaptureShip = 0x2c;
 
 // Action codes returned for each option button (NovaUi_PollTravelScriptAction).
 constexpr unsigned kActionAbort = 1;
@@ -755,51 +758,50 @@ constexpr std::string_view ActionName(unsigned code) {
   }
 }
 
-// STR# 0x7d2 "misc strings" used by the window (verified against the shipped
-// pool; see docs/reference/boarding.jpg for the shipped window layout).
+// STR# 0x7d2 "misc strings" used by the window (1-based entry numbers, as the
+// original passes them to Resource_LoadStringEntry/Resource_DrawStringEntry;
+// verified against the shipped pool and docs/reference/boarding.jpg).
 constexpr std::uint16_t kMiscStr = 0x7d2;
-constexpr std::uint16_t kMiscTonWord = 0x00;          // "ton"
-constexpr std::uint16_t kMiscTonsWord = 0x01;         // "tons"
-constexpr std::uint16_t kMiscTitle = 0x6c;            // "Select what to
+constexpr std::uint16_t kMiscTonWord = 0x01;          // "ton"
+constexpr std::uint16_t kMiscTonsWord = 0x02;         // "tons"
+constexpr std::uint16_t kMiscTitle = 0x6d;            // "Select what to
                                                       // plunder from this
                                                       // ship:"
-constexpr std::uint16_t kMiscCargoLabel = 0x6d;       // "Cargo:"
-constexpr std::uint16_t kMiscAmmoLabel = 0x6e;        // "Ammo:"
-constexpr std::uint16_t kMiscCaptureOddsLabel = 0x6f; // "Capture Odds:"
-constexpr std::uint16_t kMiscCreditsLabel = 0x20;     // "credits"
-constexpr std::uint16_t kMiscEnergyLabel = 0x06;      // "Energy:"
-constexpr std::uint16_t kMiscStoleAll = 0x73;         // "You stole all the"
-constexpr std::uint16_t kMiscSalvaged = 0x72;         // "You salvaged"
-constexpr std::uint16_t kMiscFromThisShip = 0x6b;     // "from this ship."
-constexpr std::uint16_t kMiscOfWord = 0x186;          // "of"
-constexpr std::uint16_t kMiscNoOffer = 0x14f;         // "none"
-constexpr std::uint16_t kMiscCargoFull = 0x71;        // "You couldn't store any
+constexpr std::uint16_t kMiscCargoLabel = 0x6e;       // "Cargo:"
+constexpr std::uint16_t kMiscAmmoLabel = 0x6f;        // "Ammo:"
+constexpr std::uint16_t kMiscCaptureOddsLabel = 0x70; // "Capture Odds:"
+constexpr std::uint16_t kMiscCreditsLabel = 0x21;     // "credits"
+constexpr std::uint16_t kMiscEnergyLabel = 0x07;      // "Energy:"
+constexpr std::uint16_t kMiscStoleAll = 0x74;         // "You stole all the"
+constexpr std::uint16_t kMiscSalvaged = 0x73;         // "You salvaged"
+constexpr std::uint16_t kMiscFromThisShip = 0x6c;     // "from this ship."
+constexpr std::uint16_t kMiscOfWord = 0x187;          // "of"
+constexpr std::uint16_t kMiscNoOffer = 0x14f;         // "None"
+constexpr std::uint16_t kMiscCargoFull = 0x72;        // "You couldn't store any
                                                       // of the cargo..."
-constexpr std::uint16_t kMiscAmmoFull = 0x74;         // "...any of the ammo..."
-constexpr std::uint16_t kMiscSelfDestruct = 0x70;     // "Oops! You tripped..."
-constexpr std::uint16_t kMiscCaptureFailed = 0x7c;  // "Your attempt to capture
+constexpr std::uint16_t kMiscAmmoFull = 0x75;         // "...any of the ammo..."
+constexpr std::uint16_t kMiscSelfDestruct = 0x71;     // "Oops! You tripped..."
+constexpr std::uint16_t kMiscCaptureFailed = 0x7d;  // "Your attempt to capture
                                                     // this ship was
                                                     // unsuccessful."
-constexpr std::uint16_t kMiscEscortCap = 0x7b;      // "You already have the
+constexpr std::uint16_t kMiscEscortCap = 0x7c;      // "You already have the
                                                     // maximum possible
                                                     // number of escorts."
-constexpr std::uint16_t kMiscAssignedEscort = 0x7a; // "You assigned this ship
+constexpr std::uint16_t kMiscAssignedEscort = 0x7b; // "You assigned this ship
                                                     // to your fleet of
                                                     // escorts."
-// Fuel/energy-transfer overlays (STR# 0x7d2 entries 3..5, DAT_0072d6cc/d7cc/
-// d8cc per the original loader).
-constexpr std::uint16_t kMiscFuelNowFull = 0x03;  // "You filled your reactors
+// Fuel/energy-transfer overlays (STR# 0x7d2 entries 4..6 = pool 0x03..0x05,
+// DAT_0072d6cc/d7cc/d8cc per the original loader).
+constexpr std::uint16_t kMiscFuelNowFull = 0x04;  // "You filled your reactors
                                                   // and batteries..."
-constexpr std::uint16_t kMiscFuelStole = 0x04;    // "You transferred all of
+constexpr std::uint16_t kMiscFuelStole = 0x05;    // "You transferred all of
                                                   // this ship's energy..."
-constexpr std::uint16_t kMiscFuelTankFull = 0x05; // "You couldn't store any of
+constexpr std::uint16_t kMiscFuelTankFull = 0x06; // "You couldn't store any of
                                                   // the energy..."
 
 // Cargo commodity names: the original loader fills DAT_0069d2cc[cargo_type]
-// via Resource_LoadStringEntry(0xfa1, cargo_type + 1) (FUN_004c7040) — and
-// since that helper is 1-BASED (see 0x004b8ca0), that is 0-based pool entry
-// cargo_type: food / industrial goods / medical supplies / luxury goods /
-// metal / equipment. The boarding roll only ever uses types 0..5.
+// via Resource_LoadStringEntry(0xfa1, cargo_type + 1) (FUN_004c7040); the
+// boarding roll only ever uses types 0..5.
 constexpr std::uint16_t kCargoNameStr = 0xfa1;
 
 // Panic multipliers after each loot action (Ghidra doubles 00575900/5908/
@@ -885,7 +887,7 @@ std::string CargoName(const GameState &state, int cargo_type) {
   }
   (void)state;
   if (auto s = NovaHud_LoadStringEntry(
-          kCargoNameStr, static_cast<std::uint16_t>(cargo_type))) {
+          kCargoNameStr, static_cast<std::uint16_t>(cargo_type + 1))) {
     return *s;
   }
   // Fallbacks mirror the six standard boarding commodities.

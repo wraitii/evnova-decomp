@@ -938,7 +938,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004B8AE0,FUN_004b8ae0,,0%,
 0x004B8C20,Render_ReleaseWindowDC,,0%,
 0x004B8C40,Render_RebindWindowSurface,,0%,
-0x004B8CA0,Resource_LoadStringEntry,,0%,
+0x004B8CA0,Resource_LoadStringEntry,src/game/hud_overlay.cpp,95,Port helper NovaHud_LoadStringEntry/DecodeStringEntry take 1-based entry numbers like the original; nullopt instead of empty string on missing entry so callers keep fallbacks
 0x004B8D50,Rect_Offset,,0%,
 0x004B8D80,FUN_004b8d80,,0%,
 0x004B8DC0,Rect_Inset,,0%,

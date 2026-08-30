@@ -1293,6 +1293,8 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
       mission.time_limit_days_remaining > -32000) {
     runtime.is_failed = true;
     if ((runtime.flags_primary_at_accept & 0x0400U) == 0U) {
+      // STR# 0x7d2 entry 0x11d (1-based) = "Time limit exceeded - mission
+      // failed." (Mission_HandleMissionOrSurrenderShipReaction 0x00443c60).
       if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11d)) {
         NovaHud_ShowOverlayMessage(state,
                                    *text,

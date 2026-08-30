@@ -754,15 +754,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           if (target.ai_station_hold_timer > 0.0F) {
             // Ship is launching/entering hyperspace: cannot hail.
             const bool restricted = NovaAiShip_IsFireRestricted(state, target);
+            // Entry numbers exactly as the original passes them (1-based):
+            // 0x35 = "No response." (fire-restricted target), 0x36 = "Unable
+            // to send hail - target ship is entering hyperspace."
             const auto text =
                 NovaHud_LoadStringEntry(0x7d2, restricted ? 0x35 : 0x36);
             NovaHud_ShowOverlayMessage(state,
                                        text.value_or("Unable to send hail."));
           } else if (!NovaShipComm_TargetEligibleForHail(state, target)) {
             const auto text =
-                NovaHud_LoadStringEntry(0x7d2, 0x35); // "Unable to send hail
-                                                      // - target ship is
-                                                      // entering hyperspace."
+                NovaHud_LoadStringEntry(0x7d2, 0x35); // "No response."
             NovaHud_ShowOverlayMessage(state,
                                        text.value_or("Unable to send hail."));
           } else {

@@ -67,17 +67,17 @@ void NovaHud_TickOverlay(GameState &state) {
 
 std::optional<std::string>
 NovaHud_DecodeStringEntry(std::span<const std::byte> pool,
-                          std::uint16_t index) {
+                          std::uint16_t entry) {
   if (pool.size() < 2) {
     return std::nullopt;
   }
   const std::uint16_t count = (static_cast<std::uint16_t>(pool[0]) << 8) |
                               static_cast<std::uint16_t>(pool[1]);
-  if (index >= count) {
+  if (entry == 0 || entry > count) {
     return std::nullopt;
   }
   std::size_t p = 2;
-  for (std::uint16_t i = 0; i < index; ++i) {
+  for (std::uint16_t i = 1; i < entry; ++i) {
     if (p >= pool.size()) {
       return std::nullopt;
     }
@@ -104,17 +104,20 @@ NovaHud_DecodeStringEntry(std::span<const std::byte> pool,
 }
 
 std::optional<std::string> NovaHud_LoadStringEntry(std::uint16_t resource_id,
-                                                   std::uint16_t index) {
+                                                   std::uint16_t entry) {
   const auto bytes = NovaResource_Load(kStringResourceType, resource_id);
   if (!bytes) {
     return std::nullopt;
   }
-  return NovaHud_DecodeStringEntry(*bytes, index);
+  return NovaHud_DecodeStringEntry(*bytes, entry);
 }
 
 namespace {
-// STR# 0x7d2 (landing/docking feedback) entry indices, from
-// Stellar_ProcessTravelAndLanding.
+// STR# 0x7d2 (landing/docking feedback) entry numbers, exactly as the original
+// passes them to Resource_LoadStringEntry (1-based; Stellar_ProcessTravelAndLanding
+// 0x00457580). pool content: 0x3c "You don't have enough", 0x3e "to pay the
+// docking fee.", 0x3f "to pay the landing fee.", 0x42/0x43 too-far station/planet,
+// 0x46/0x47 too-fast station/planet, 0x56 "dock at ", 0x57 "land on ".
 inline constexpr std::uint16_t kStrId = 0x7d2;
 inline constexpr std::uint16_t kTooFarStation = 0x43;
 inline constexpr std::uint16_t kTooFarPlanet = 0x44;
@@ -133,10 +136,13 @@ void NovaHud_ShowLandingDenial(GameState &state,
   case LandedDenial::kNone:
     return;
   case LandedDenial::kUnavailable:
+    // TODO(decomp): the original composes the 0x54 lead-in ("Your ship is
+    // unable to") with the 0x55/0x56 wormhole/hypergate variants too; the port
+    // shows only the dock/land fragment.
     text = NovaHud_LoadStringEntry(
         kStrId,
-        is_station ? static_cast<std::uint16_t>(0x57) // "dock at ..."
-                   : static_cast<std::uint16_t>(0x58) // "land on ..."
+        is_station ? static_cast<std::uint16_t>(0x57) // "dock at "
+                   : static_cast<std::uint16_t>(0x58) // "land on "
     );
     break;
   case LandedDenial::kTooFar:

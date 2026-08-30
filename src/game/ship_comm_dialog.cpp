@@ -74,21 +74,23 @@ constexpr std::uint16_t kPromptStr = 0xbb8;
 constexpr std::uint16_t kPromptStrHigh = 0xbb9;
 
 // STR# 0x7d2 "misc strings": the ship status labels drawn under the ship
-// picture ("Fighter" / "Captured Escort"). (The hail-failure overlays 0x35/
-// 0x36 are used by the spaceflight target-action handler directly.)
+// picture (1-based entries: 0xa9 "Fighter" / 0xa7 "Captured Escort").
+// (The hail-failure overlays 0x35/0x36 are used by the spaceflight target-
+// action handler directly.)
 constexpr std::uint16_t kMiscStr = 0x7d2;
-constexpr std::uint16_t kMiscFighterLabel = 0xa8;        // "Fighter"
-constexpr std::uint16_t kMiscCapturedEscortLabel = 0xa6; // "Captured Escort"
+constexpr std::uint16_t kMiscFighterLabel = 0xa9;        // "Fighter"
+constexpr std::uint16_t kMiscCapturedEscortLabel = 0xa7; // "Captured Escort"
 
 // STR# 0x96 "button labels" (the three-state button label table DAT_007d82ee/
-// f0/f2 indexes in the original): 0x14 Close Channel, 0x15 Greetings,
-// 0x16 Request Assistance, 0x18 Beg For Mercy, 0x1f Release.
+// f0/f2 indexes in the original), as 1-based entry numbers: 0x15 Close
+// Channel, 0x16 Greetings, 0x17 Request Assistance, 0x19 Beg For Mercy,
+// 0x20 Release.
 constexpr std::uint16_t kButtonLabelStr = 0x96;
-constexpr std::uint16_t kBtnCloseChannel = 0x14;
-constexpr std::uint16_t kBtnGreetings = 0x15;
-constexpr std::uint16_t kBtnRequestAssistance = 0x16;
-constexpr std::uint16_t kBtnBegForMercy = 0x18;
-constexpr std::uint16_t kBtnRelease = 0x1f;
+constexpr std::uint16_t kBtnCloseChannel = 0x15;
+constexpr std::uint16_t kBtnGreetings = 0x16;
+constexpr std::uint16_t kBtnRequestAssistance = 0x17;
+constexpr std::uint16_t kBtnBegForMercy = 0x19;
+constexpr std::uint16_t kBtnRelease = 0x20;
 
 // ---- Prompt message indices (into the *5+random+1 pools) ------------------
 // Names come from the actual STR# 0xbb8 content (see the pool dump).
@@ -194,10 +196,11 @@ LoadCommPrompt(std::int16_t random_index, std::uint16_t prompt_index) {
     return NovaHud_LoadStringEntry(
         kPromptStr,
         static_cast<std::uint16_t>(prompt_index * 5u + random_index + 1));
+  } else {
+    const std::uint16_t entry =
+        static_cast<std::uint16_t>(prompt_index * 5u + random_index - 0xbd);
+    return NovaHud_LoadStringEntry(kPromptStrHigh, entry);
   }
-  const std::uint16_t entry =
-      static_cast<std::uint16_t>(prompt_index * 5u + random_index - 0xbd);
-  return NovaHud_LoadStringEntry(kPromptStrHigh, entry);
 }
 
 // Loads a STR# 0x96 button label with a fallback for missing resources.
@@ -480,7 +483,8 @@ LoadMoodPromptPayFirst(std::int16_t random_index, double personality) {
   // TODO(decomp): dude-def hail_info_types / stellar-scan assembly of
   // NovaUi_BuildShipCommHailInfoText branch 0 is not reconstructed; the
   // original's default fragment is shown instead.
-  if (auto s = NovaHud_LoadStringEntry(kMiscStr, 0xaf)) {
+  // 1-based STR# 0x7d2 entry 0xb0 = "is a good place to".
+  if (auto s = NovaHud_LoadStringEntry(kMiscStr, 0xb0)) {
     return *s; // "is a good place to"
   }
   return {};
@@ -656,7 +660,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   }();
   const std::string status_line = [&]() {
     if (target.escort_origin_mark == 0) {
-      // "Fighter" (0xa8) / "Captured Escort" (0xa6) label under the name.
+      // "Fighter" / "Captured Escort" label under the name (1-based entries
+      // 0xa9 / 0xa7).
       return NovaHud_LoadStringEntry(kMiscStr, kMiscFighterLabel)
           .value_or(govt_line);
     }

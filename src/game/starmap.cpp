@@ -161,14 +161,15 @@ constexpr SDL_Color kReachableLink{120, 255, 170, 255}; // plotted-route accent
 // The bottom button row, in left-to-right screen order (DITL items 8,7,9,3,4,0
 // -> 1-based entries 9,8,10,4,5,1 -> NovaUi_StarmapWindowInnerLoop actions
 // Show Borders, Clear Route, Find, zoom out, zoom in, Done). The labels come
-// from STR# 0x96 "button labels" (NovaHud_LoadStringEntry).
+// from STR# 0x96 "button labels" (NovaHud_LoadStringEntry, 1-based entry
+// numbers).
 enum class StarmapButton : std::size_t {
-  kShowBorders = 0, // STR# 0x96 [55] / [56] (Show/Hide Borders)
-  kClearRoute = 1,  // STR# 0x96 [48]
-  kFind = 2,        // STR# 0x96 [59]
-  kZoomOut = 3,     // STR# 0x96 [16] '-'
-  kZoomIn = 4,      // STR# 0x96 [17] '+'
-  kDone = 5,        // STR# 0x96 [4]
+  kShowBorders = 0, // STR# 0x96 0x38 / 0x39 (Show/Hide Borders)
+  kClearRoute = 1,  // STR# 0x96 0x31
+  kFind = 2,        // STR# 0x96 0x3c
+  kZoomOut = 3,     // STR# 0x96 0x11 '-'
+  kZoomIn = 4,      // STR# 0x96 0x12 '+'
+  kDone = 5,        // STR# 0x96 0x5
 };
 
 // The starmap geometry resolved from the DLOG/DITL dialog resources: the full
@@ -1202,22 +1203,22 @@ std::string StarmapButtonLabel(StarmapButton button, bool show_borders) {
   std::uint16_t index = 0;
   switch (button) {
   case StarmapButton::kShowBorders:
-    index = show_borders ? 56 : 55; // Hide Borders / Show Borders
+    index = show_borders ? 0x39 : 0x38; // Hide Borders / Show Borders
     break;
   case StarmapButton::kClearRoute:
-    index = 48;
+    index = 0x31;
     break;
   case StarmapButton::kFind:
-    index = 59;
+    index = 0x3c;
     break;
   case StarmapButton::kZoomOut:
-    index = 16; // '-'
+    index = 0x11; // '-'
     break;
   case StarmapButton::kZoomIn:
-    index = 17; // '+'
+    index = 0x12; // '+'
     break;
   case StarmapButton::kDone:
-    index = 4;
+    index = 0x5;
     break;
   }
   if (auto s = NovaHud_LoadStringEntry(0x96, index)) {

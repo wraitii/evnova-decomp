@@ -46,7 +46,9 @@ LoadRandomStringListEntry(std::mt19937 &rng, std::int32_t resource_id) {
   if (count == 0) {
     return std::nullopt;
   }
-  std::uniform_int_distribution<std::uint16_t> pick(0, count - 1);
+  // Entry numbers are 1-based (the original rolls NovaRandom_Range(count) + 1,
+  // see Mission_PopulateMissionSlotFromDef 0x0043f8c0).
+  std::uniform_int_distribution<std::uint16_t> pick(1, count);
   return NovaHud_LoadStringEntry(static_cast<std::uint16_t>(resource_id),
                                  pick(rng));
 }

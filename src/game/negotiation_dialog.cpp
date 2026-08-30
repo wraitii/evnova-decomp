@@ -189,7 +189,8 @@ constexpr std::int32_t kHaggleIncrement = 1000;
 
 // Loads one flavour variant of a status (STR# 0xbba) message. `random_index`
 // is the per-launch flavour pick; mirrors NovaUi_LoadTravelDestinationStatus-
-// String (0x00482910) loading `message*5 + random + 1`.
+// String (0x00482910) loading `message*5 + random + 1` (a 1-based entry
+// number, matching the 1-based STR# helper).
 [[nodiscard]] std::optional<std::string>
 LoadStatusVariant(std::int16_t random_index, std::uint16_t message_index) {
   return NovaHud_LoadStringEntry(
@@ -198,8 +199,8 @@ LoadStatusVariant(std::int16_t random_index, std::uint16_t message_index) {
 
 // Loads one flavour variant of a prompt (STR# 0xbb8) message. Mirrors
 // NovaUi_LoadTravelDestinationPromptString (0x004828c0) for the common
-// prompt_index < 0x26 range (loading `message*5 + random + 1`); the 0xbb9
-// higher-index branch is unused by this dialog.
+// prompt_index < 0x26 range (loading the 1-based entry `message*5 + random +
+// 1`); the 0xbb9 higher-index branch is unused by this dialog.
 [[nodiscard]] std::optional<std::string>
 LoadPromptVariant(std::int16_t random_index, std::uint16_t message_index) {
   return NovaHud_LoadStringEntry(

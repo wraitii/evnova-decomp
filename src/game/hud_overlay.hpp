@@ -56,19 +56,22 @@ void NovaHud_TickOverlay(GameState &state);
 
 // Loads one entry from a STR# string pool (Ghidra Resource_LoadStringEntry
 // 0x004b8ca0). The pool is fetched from the archives via
-// NovaResource_Load(0x53545223, resource_id) and entry `index` (0-based) is
-// decoded by the STR# format (big-endian u16 count, then length-prefixed
-// strings). Returns the entry, or std::nullopt when the pool/index is missing.
-// Used to build the landing/negotiation feedback text (STR# 0x7d2).
+// NovaResource_Load(0x53545223, resource_id) and `entry` is the 1-BASED entry
+// number, exactly like the original helper (it walks entry-1 length-prefixed
+// strings from the big-endian u16 count header; entry 0 and entries past the
+// count select nothing). Returns the entry, or std::nullopt when the
+// pool/entry is missing. Used to build the landing/negotiation feedback text
+// (STR# 0x7d2).
 [[nodiscard]] std::optional<std::string>
-NovaHud_LoadStringEntry(std::uint16_t resource_id, std::uint16_t index);
+NovaHud_LoadStringEntry(std::uint16_t resource_id, std::uint16_t entry);
 
 // Pure STR# pool decoder (exposed for the data-loading unit test): given the
 // raw pool payload (big-endian u16 string count, then per-entry 1-byte length
-// + bytes), returns entry `index` (0-based) or std::nullopt when out of range
-// or malformed.
+// + bytes), returns the 1-BASED entry `entry` or std::nullopt when the entry
+// is 0, out of range, or the pool is malformed (the original yields an empty
+// string in those cases; nullopt lets callers keep their fallback text).
 [[nodiscard]] std::optional<std::string>
-NovaHud_DecodeStringEntry(std::span<const std::byte> pool, std::uint16_t index);
+NovaHud_DecodeStringEntry(std::span<const std::byte> pool, std::uint16_t entry);
 
 // Composes and shows the on-screen HUD overlay for a denied landing request,
 // mirroring the Stellar_ProcessTravelAndLanding feedback cases (STR# 0x7d2).

@@ -37,29 +37,31 @@ std::vector<std::byte> MakePool(std::initializer_list<const char *> items) {
 TEST_CASE("STR# pool decodes length-prefixed entries and rejects malformed "
           "input",
           "[hud_overlay]") {
-  // Happy path: big-endian count, then length-prefixed entries.
+  // Happy path: big-endian count, then length-prefixed entries. Entry numbers
+  // are 1-based, matching Resource_LoadStringEntry (0x004b8ca0).
   const auto pool =
       MakePool({"land on Planet", "dock at Station", "too far", "too fast"});
-  REQUIRE(NovaHud_DecodeStringEntry(pool, 0) ==
-          std::optional<std::string>("land on Planet"));
   REQUIRE(NovaHud_DecodeStringEntry(pool, 1) ==
-          std::optional<std::string>("dock at Station"));
+          std::optional<std::string>("land on Planet"));
   REQUIRE(NovaHud_DecodeStringEntry(pool, 2) ==
-          std::optional<std::string>("too far"));
+          std::optional<std::string>("dock at Station"));
   REQUIRE(NovaHud_DecodeStringEntry(pool, 3) ==
+          std::optional<std::string>("too far"));
+  REQUIRE(NovaHud_DecodeStringEntry(pool, 4) ==
           std::optional<std::string>("too fast"));
 
-  // Out-of-range and malformed indices are rejected.
-  CHECK(NovaHud_DecodeStringEntry(pool, 4) == std::nullopt);
+  // Entry 0 (rejected by the original too) and out-of-range entries.
+  CHECK(NovaHud_DecodeStringEntry(pool, 0) == std::nullopt);
+  CHECK(NovaHud_DecodeStringEntry(pool, 5) == std::nullopt);
   CHECK(NovaHud_DecodeStringEntry(pool, 0xffff) == std::nullopt);
 
-  // Empty pool (count 0) -> index 0 rejected.
+  // Empty pool (count 0) -> entry 1 rejected.
   std::vector<std::byte> empty{std::byte{0}, std::byte{0}};
-  CHECK(NovaHud_DecodeStringEntry(empty, 0) == std::nullopt);
+  CHECK(NovaHud_DecodeStringEntry(empty, 1) == std::nullopt);
 
   // Truncated pool (no count) -> rejected.
   std::vector<std::byte> truncated{std::byte{'a'}};
-  CHECK(NovaHud_DecodeStringEntry(truncated, 0) == std::nullopt);
+  CHECK(NovaHud_DecodeStringEntry(truncated, 1) == std::nullopt);
 }
 
 } // namespace
