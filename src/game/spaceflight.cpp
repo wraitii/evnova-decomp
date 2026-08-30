@@ -1424,21 +1424,49 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       } else {
         ship.speed = std::abs(desired);
       }
-      // The original normally advances this command on a stable ~30 Hz
-      // cadence. Scale the decay by our normalized frame interval so a slow
-      // SDL frame cannot move the ship several ticks at the old speed while
-      // applying only one tick of slowdown.
+      // NOTE(decomp) deliberate divergence: the original advances this decay
+      // per rendered frame without scaling by g_avg_frame_time_ms
+      // (Ship_HandleShip 0x00433050, at 0x00433b03: desired +=
+      // fabsf(ai_forward_thrust_cmd)), while capping frame time at 21 ms
+      // (Frame_MeasureFrameTiming 0x00432ea0), so its arrival slowdown
+      // collapsed faster on faster machines (up to ~1.6x at the ~47 fps
+      // ceiling). We deliberately normalize the decay to the 30 Hz simulation
+      // cadence (elapsed_ticks) so the glide duration is machine-independent.
       ship.ai_desired_speed +=
           std::abs(ship.ai_forward_thrust_cmd) * elapsed_ticks;
-      // Ship_HandleShip compares the post-thrust absolute speed against the
-      // negative effective max speed. State 8 begins at -50 and advances by
-      // about 1.165 per movement tick, preserving the original visible fast
-      // arrival and gradual slowdown before the reset returns it to idle.
-      if (ship.ai_desired_speed >= -eff_max_speed) {
+      // Ship_HandleShip (0x00433050) hands the ship to
+      // Ship_ResetShipPrimaryAndSecondaryTargets once the desired speed has
+      // risen above the negative effective max speed. The threshold uses
+      // min(self, lead target) when a valid lead (0..0x3f) is followed
+      // (0x00433b26-0x00433b8e). State 8 begins at -50 and advances ~1.165
+      // per movement tick before the reset returns the ship to idle and arms
+      // the 30..59-tick coast-through timer (armed once: the reset clears the
+      // desired speed and thrust command, so the branch is not re-entered).
+      float threshold_max_speed = eff_max_speed;
+      if (ship.ai_target_ship_slot >= 0 &&
+          ship.ai_target_ship_slot <= 0x3f &&
+          state.SlotInRange(static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+        const Ship &lead =
+            state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+        const ShipClass *lead_class = state.scenario.Ship(
+            static_cast<std::int16_t>(lead.ship_class_id + 0x80));
+        if (lead_class != nullptr) {
+          const NpcEffectiveStats lead_stats =
+              NovaShip_ComputeEffectiveStats(state, lead, *lead_class);
+          threshold_max_speed =
+              std::min(threshold_max_speed, lead_stats.max_speed_px_per_tick);
+        }
+      }
+      if (ship.ai_desired_speed >= -threshold_max_speed) {
         NovaAi_ResetShipPrimaryAndSecondaryTargets(ship);
-        // Only after reaching the effective-speed threshold does the original
-        // arm its short coast-through timer. Arming it on every negative-speed
-        // tick freezes each 1.165-unit slowdown step for several frames.
+        if (gravity_shield) {
+          // Gravity-shield completion quirk (0x00434f7e): the original zeroes
+          // the vector velocity and re-commands the scalar override at the
+          // threshold max speed instead of keeping the glide velocity.
+          ship.ai_desired_speed = threshold_max_speed;
+          ship.vel_x = 0.0F;
+          ship.vel_y = 0.0F;
+        }
         if (ship.ai_target_ship_slot == -1 && ship.pers_def_slot != 0x3ff) {
           std::uniform_int_distribution<std::int32_t> dist(30, 59);
           ship.ai_maneuver_timer_ms = static_cast<float>(dist(state.rng));

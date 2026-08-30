@@ -1957,6 +1957,17 @@ void NovaAi_ApplyControls(GameState &state,
     ship.ai_desired_speed = max_speed;
   }
 
+  // Ship_ApplyShipAiControls entry (0x00408150) also syncs
+  // ai_desired_heading_deg to the rounded current heading every frame, before
+  // the mode switch. Steering modes overwrite it immediately after; unsteered
+  // modes (0 idle drift, 10 arrival slowdown) inherit "desired == current" and
+  // therefore hold heading exactly -- this is what keeps the state-8 jump-in
+  // and gate-emergence glides straight instead of wheeling toward a stale
+  // steering target. ShipState stores the field in degrees while the clean-room
+  // heading is radians, so convert at this boundary.
+  ship.ai_desired_heading_deg =
+      static_cast<std::int16_t>(WrapDeg(std::round(ship.heading / kDegToRad)));
+
   // Shortest signed angle (deg) from the current heading to the desired one.
   auto heading_delta_deg = [&]() {
     const float cur_deg = ship.heading / kDegToRad;
