@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <string>
@@ -809,6 +810,35 @@ struct StoreTextureCache {
   return result;
 }
 
+// Ghidra DrawContext_DrawGroupedUInt (see boarding_plunder.cpp): decimal
+// digits grouped in threes with commas.
+[[nodiscard]] std::string GroupedUInt(std::int32_t value) {
+  const std::string digits = std::to_string(value);
+  std::string out;
+  out.reserve(digits.size() + digits.size() / 3);
+  for (std::size_t i = 0; i < digits.size(); ++i) {
+    if (i > 0 && (digits.size() - i) % 3 == 0) {
+      out.push_back(',');
+    }
+    out.push_back(digits[i]);
+  }
+  return out;
+}
+
+// Label/unit text for the store and ship-info panels, from the game-strings
+// pool STR# 0x7d2 (Nova Data 5). NovaHud_LoadStringEntry takes the 0-based
+// pool index; the original's Resource_DrawStringEntry (0x004cd1f0) /
+// Resource_LoadStringEntry (0x004b8ca0) take the 1-based entry number, so each
+// index passed here is one less than the value seen in the decompile. The
+// original also caches a few entries as Pascal strings in static storage
+// (DAT_0072d3cc "ton", DAT_0072d9cc "Energy:", DAT_0072ddcc "Shields:"); the
+// pool loads below cover them. The armor row's cached pstring (DAT_0072e3cc)
+// is pool 0x0f "Armor:" — not 0x10, which is the boarding screen's
+// "Armor Status:".
+[[nodiscard]] std::string InfoString(std::uint16_t pool_index) {
+  return NovaHud_LoadStringEntry(0x7d2, pool_index).value_or(std::string{});
+}
+
 void DrawStoreContents(SdlPlatform &platform,
                        NovaFontCache &font_cache,
                        const ServicesButtonArt &button_art,
@@ -930,10 +960,28 @@ void DrawStoreContents(SdlPlatform &platform,
     const std::int32_t price =
         outfit_store
             ? NovaLanded_OutfitPrice(state, stellar_id, session.selected_id)
-            : NovaLanded_ShipPurchasePrice(
-                  state, stellar_id, session.selected_id);
+            : 0; // Ship price rows render in the details-panel block below.
+    const std::int32_t ship_price =
+        outfit_store
+            ? 0
+            : NovaLanded_ShipPurchasePrice(state, stellar_id,
+                                           session.selected_id);
     if (selected_image != nullptr) {
       SDL_RenderTexture(renderer, selected_image, nullptr, &layout.preview);
+    } else {
+      // Empty preview frame placeholder ('No Picture' / 'Available'), entry 8
+      // of both store redraws (0x004948b0 / 0x00490c70).
+      const float mid = layout.preview.y + layout.preview.h / 2.0F;
+      NovaText_DrawCentered(platform, font_cache, NovaFontFamily::kGeneva,
+                            9.0F, kNovaFontStyleRegular, kMuted,
+                            layout.preview.x,
+                            layout.preview.x + layout.preview.w, mid - 6.0F,
+                            InfoString(0xd4));
+      NovaText_DrawCentered(platform, font_cache, NovaFontFamily::kGeneva,
+                            9.0F, kNovaFontStyleRegular, kMuted,
+                            layout.preview.x,
+                            layout.preview.x + layout.preview.w, mid + 6.0F,
+                            InfoString(0xd5));
     }
     NovaText_DrawCentered(platform,
                           font_cache,
@@ -1002,46 +1050,61 @@ void DrawStoreContents(SdlPlatform &platform,
             lines[i]);
       }
     } else {
+      // Ghidra NovaUi_DrawShipyardShipList 0x004948b0: the right-hand panels
+      // show the desc text (DITL entry 6) and the Ship Price / Trade-In /
+      // Final Price / You Have block (entry 9, values left-aligned at +0x46);
+      // the full stat block lives in the Info sub-modal (0x00495c80).
       const ShipClass *ship = state.scenario.Ship(session.selected_id);
-      const std::array<std::string, 6> lines{
-          "Price: " + std::to_string(price),
-          "Shields: " + std::to_string(ship->base_shield),
-          "Armor: " + std::to_string(ship->base_armor),
-          "Cargo: " + std::to_string(ship->cargo_holds),
-          "Mass: " + std::to_string(ship->mass_tons),
-          "Crew: " + std::to_string(ship->crew)};
-      for (std::size_t i = 0; i < lines.size(); ++i) {
-        NovaText_DrawCentered(platform,
-                              font_cache,
-                              NovaFontFamily::kGeneva,
-                              9.0F,
-                              kNovaFontStyleRegular,
-                              kMuted,
-                              layout.details.x + 2.0F,
-                              layout.details.x + layout.details.w - 2.0F,
-                              layout.details.y + 14.0F +
-                                  static_cast<float>(i) * 14.0F,
-                              lines[i]);
+      const std::int32_t trade_in =
+          NovaLanded_ShipTradeInValue(state, stellar_id);
+      const std::int16_t player_class =
+          static_cast<std::int16_t>(state.player.ship_class_id + 0x80);
+      if (session.selected_id != player_class) {
+        const auto price_row = [&](float dy, std::uint16_t label,
+                                   std::int32_t value) {
+          NovaText_Draw(platform, font_cache, NovaFontFamily::kGeneva, 10.0F,
+                        kNovaFontStyleRegular, kMuted, layout.details.x + 2.0F,
+                        layout.details.y + dy, InfoString(label));
+          NovaText_Draw(platform, font_cache, NovaFontFamily::kGeneva, 10.0F,
+                        kNovaFontStyleRegular, kText,
+                        layout.details.x + 72.0F, layout.details.y + dy,
+                        GroupedUInt(value) + " " + InfoString(0x21));
+        };
+        price_row(12.0F, 0xe0, ship_price);                      // Ship Price:
+        price_row(24.0F, 0xe1, trade_in);                        // Trade-In:
+        price_row(48.0F, 0xe2,
+                  std::max<std::int32_t>(0, ship_price - trade_in)); // Final Price:
+        price_row(72.0F, 0xd8, state.player.credits);            // You Have:
       }
-      const std::array<std::string, 5> comparison{
-          "Trade-in: " +
-              std::to_string(NovaLanded_ShipTradeInValue(state, stellar_id)),
-          "Speed: " + std::to_string(static_cast<int>(ship->speed)),
-          "Acceleration: " + std::to_string(static_cast<int>(ship->accel)),
-          "Maneuver: " + std::to_string(static_cast<int>(ship->turn_rate)),
-          "Fuel: " + std::to_string(ship->base_fuel)};
-      for (std::size_t i = 0; i < comparison.size(); ++i) {
+      const std::string title_text =
+          ship == nullptr ? std::string{} : ship->display_name;
+      NovaText_DrawCentered(platform,
+                            font_cache,
+                            NovaFontFamily::kGeneva,
+                            12.0F,
+                            kNovaFontStyleBold,
+                            kText,
+                            layout.description.x + 4.0F,
+                            layout.description.x + layout.description.w - 4.0F,
+                            layout.description.y + 18.0F,
+                            title_text);
+      const auto lines = WrapDescriptionLines(
+          selected_description, 28, [](std::string_view text) {
+            return static_cast<int>(text.size());
+          });
+      for (std::size_t i = 0; i < std::min<std::size_t>(lines.size(), 16);
+           ++i) {
         NovaText_DrawCentered(
             platform,
             font_cache,
             NovaFontFamily::kGeneva,
-            10.0F,
-            i == 0 ? kNovaFontStyleBold : kNovaFontStyleRegular,
+            9.0F,
+            kNovaFontStyleRegular,
             kMuted,
             layout.description.x + 5.0F,
             layout.description.x + layout.description.w - 5.0F,
-            layout.description.y + 48.0F + static_cast<float>(i) * 22.0F,
-            comparison[i]);
+            layout.description.y + 39.0F + static_cast<float>(i) * 13.0F,
+            lines[i]);
       }
     }
   }
@@ -1057,15 +1120,496 @@ void DrawStoreContents(SdlPlatform &platform,
                         "Credits: " + std::to_string(state.player.credits));
 }
 
+// ---------------------------------------------------------------------------
+// Ghidra 0x004956a0 NovaUi_RunShipyardDetailWindow + 0x00495c80
+// NovaUi_DrawShipyardDetailPanel: the Shipyard's Info sub-modal.
+//
+// The window is DLOG 0x3ed (DITL 0x3ed, backdrop PICT 0x213a "Ship
+// Description", 250x285) unless the selected ship's desc resource (ship class
+// id + 13000) carries a Graphic PICT that actually loads, in which case it is
+// DLOG 0x3fb (backdrop PICT 0x213b "Ship description + pict", 614x537) and the
+// Graphic is blitted into DITL entry 7 (the shipped descs point at the 600x400
+// PICT 20128+ set, matching the entry rect exactly).
+struct ShipyardInfoLayout {
+  SDL_FRect window{};
+  SDL_FRect button{};   // entry 1: "Done" (STR# 0x96 entry 5)
+  SDL_FRect title{};    // entry 3: ship display name
+  SDL_FRect stats{};    // entry 5: two-column stat block
+  SDL_FRect picture{};  // entry 7: desc Graphic PICT (custom variant only)
+  SDL_FRect weapons{};  // entry 8: stock weapons block (custom variant only)
+  bool custom_picture = false;
+};
+
+[[nodiscard]] ShipyardInfoLayout LayoutShipyardInfo(const SdlPlatform &platform,
+                                                    bool custom_picture) {
+  const SDL_FPoint output = platform.logical_playfield_size();
+  const float width = custom_picture ? 614.0F : 250.0F;
+  const float height = custom_picture ? 537.0F : 285.0F;
+  const SDL_FPoint origin{std::max(0.0F, (output.x - width) / 2.0F),
+                          std::max(0.0F, (output.y - height) / 2.0F)};
+  auto at = [origin](SDL_FRect rect) { return OffsetRect(rect, origin); };
+
+  ShipyardInfoLayout layout;
+  layout.custom_picture = custom_picture;
+  layout.window = at({0.0F, 0.0F, width, height});
+  if (custom_picture) {
+    layout.button = at({503.0F, 507.0F, 99.0F, 25.0F});
+    layout.title = at({7.0F, 413.0F, 600.0F, 24.0F});
+    layout.stats = at({11.0F, 442.0F, 256.0F, 92.0F});
+    layout.picture = at({7.0F, 6.0F, 600.0F, 400.0F});
+    layout.weapons = at({266.0F, 442.0F, 342.0F, 59.0F});
+  } else {
+    layout.button = at({86.0F, 253.0F, 74.0F, 25.0F});
+    layout.title = at({3.0F, 3.0F, 240.0F, 24.0F});
+    layout.stats = at({9.0F, 32.0F, 234.0F, 214.0F});
+  }
+  return layout;
+}
+
+// Label/unit text for the ship-info panel, from STR# 0x7d2 (see InfoString
+// above for the 0-based pool index convention).
+
+// "Accel:" rating word. The loader stores base_accel as payload/10000 (the
+// 10000.0 divisor is the double at 0x575e68); the panel compares that against
+// the descending double thresholds at 0x575960..0x575988 (FCOM chain).
+[[nodiscard]] std::string AccelRating(float accel_payload) {
+  const double rating = accel_payload / 10000.0;
+  if (rating > 0.073) {
+    return InfoString(0xf4); // Excellent
+  }
+  if (rating > 0.055) {
+    return InfoString(0xf5); // Very Good
+  }
+  if (rating > 0.038) {
+    return InfoString(0xf6); // Good
+  }
+  if (rating > 0.025) {
+    return InfoString(0xf7); // Average
+  }
+  if (rating > 0.013) {
+    return InfoString(0xf8); // Poor
+  }
+  if (rating <= 0.0) {
+    return InfoString(0x18b); // N/A
+  }
+  return InfoString(0xf9); // Terrible
+}
+
+// "Turn:" rating word. base_turn_rate_deg = payload * 0.1
+// (k_guided_turn_scale_f64 at 0x575e58), compared against the float
+// thresholds 0..5 at 0x575990..0x5759a4.
+[[nodiscard]] std::string TurnRating(float turn_payload) {
+  const float rating = turn_payload * 0.1F;
+  if (rating > 5.0F) {
+    return InfoString(0xf4);
+  }
+  if (rating > 4.0F) {
+    return InfoString(0xf5);
+  }
+  if (rating > 3.0F) {
+    return InfoString(0xf6);
+  }
+  if (rating > 2.0F) {
+    return InfoString(0xf7);
+  }
+  if (rating > 1.0F) {
+    return InfoString(0xf8);
+  }
+  if (rating > 0.0F) {
+    return InfoString(0xf9);
+  }
+  return InfoString(0x18b);
+}
+
+// The "Standard Weapons" lines (loop inline in the detail panel, walking the
+// 0x100 weapon slots; the loader seeds slot i from each mounted stock bank as
+// default_weapon_ammo[i] = count and default_weapon_secondary[i] = ammo_load,
+// both indexed by the zero-based weapon id). Guns (ModType 1) print
+// "<count> <name>" with a plural "s" and a " + <ammo_load> ammo" tail when the
+// bank loads rounds; mode-99 banks (carried ships) print the bank's ammo_load
+// against the ModType-3 fighter-bay outfit instead. Verified against shïp
+// 0x08f Fed Carrier (bay bank 149/1/4) and 0x080 Shuttle (gun 128/1/-1).
+[[nodiscard]] std::vector<std::string>
+StockWeaponLines(const GameState &state, const ShipClass &ship) {
+  std::vector<std::string> lines;
+  auto outfit_for_slot = [&](std::int16_t mod_type,
+                             std::size_t slot) -> const Outfit * {
+    for (const Outfit &outfit : state.scenario.outfits) {
+      if (outfit.mod_type == mod_type &&
+          outfit.mod_val == static_cast<std::int16_t>(slot) &&
+          outfit.tech_level < 0x7fff) {
+        return &outfit;
+      }
+    }
+    return nullptr;
+  };
+  for (std::size_t slot = 0; slot < 0x100; ++slot) {
+    const ShipDefaultWeaponBank *bank = nullptr;
+    for (const ShipDefaultWeaponBank &candidate : ship.stock_weapons) {
+      if (candidate.weapon_id >= 0x80 && candidate.weapon_id < 0x180 &&
+          static_cast<std::size_t>(candidate.weapon_id - 0x80) == slot) {
+        bank = &candidate;
+        break;
+      }
+    }
+    if (bank == nullptr || bank->count <= 0) {
+      continue;
+    }
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(slot + 0x80));
+    const bool is_bay =
+        weapon != nullptr && weapon->weapon_mode_code == 99;
+    const Outfit *outfit =
+        outfit_for_slot(is_bay ? 3 : 1, slot);
+    // The original still draws the bare count when the outfit lookup fails;
+    // a nameless "2" line is noise, so skip instead.
+    if (outfit == nullptr) {
+      continue;
+    }
+    const std::int16_t count = is_bay ? bank->ammo_load : bank->count;
+    std::string line = std::to_string(count) + " " + outfit->name;
+    if (count > 1) {
+      line += "s";
+    }
+    if (!is_bay && bank->ammo_load > 0) {
+      line += " + " + std::to_string(bank->ammo_load) + " " + InfoString(0xf2);
+    }
+    lines.push_back(std::move(line));
+  }
+  return lines;
+}
+
+void DrawShipyardInfoPanel(SdlPlatform &platform,
+                           NovaFontCache &font_cache,
+                           const ServicesButtonArt &button_art,
+                           const GameState &state,
+                           const LandedStoreSession &session,
+                           const ShipyardInfoLayout &layout,
+                           SDL_Texture *backdrop,
+                           SDL_Texture *custom_picture) {
+  const ShipClass *ship = state.scenario.Ship(session.selected_id);
+  if (ship == nullptr) {
+    return;
+  }
+  SDL_Renderer *renderer = platform.renderer();
+  // Shared dialog palette: black fill, white values/title, grey labels (same
+  // colours the boarding window uses for PTR_DAT_00575ad8 / DAT_00733b56).
+  constexpr SDL_Color kBg{0, 0, 0, 255};
+  constexpr SDL_Color kValue{255, 255, 255, 255};
+  constexpr SDL_Color kLabel{128, 128, 128, 255};
+  constexpr NovaFontFamily kFont = NovaFontFamily::kGeneva;
+  constexpr float kTextSize = 10.0F;
+  // The title font is DAT_0085fb12 with scaled size 0x12; Geneva 18 matches
+  // the window art's name strip.
+  constexpr float kTitleSize = 18.0F;
+
+  SDL_SetRenderDrawColor(renderer, kBg.r, kBg.g, kBg.b, SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &layout.window);
+  if (backdrop != nullptr) {
+    SDL_RenderTexture(renderer, backdrop, nullptr, &layout.window);
+  }
+
+  // Title: the base variant draws the stripped record name (ShipClassDef+0x6c,
+  // filled by the loader through NameString_StripSubtitleSuffix); the custom
+  // variant draws the shïp +0x62e string (DAT_005a9bcc table) = long_name.
+  const std::string &title =
+      layout.custom_picture ? ship->long_name : ship->display_name;
+  NovaText_DrawCentered(platform,
+                        font_cache,
+                        kFont,
+                        kTitleSize,
+                        kNovaFontStyleRegular,
+                        kValue,
+                        layout.title.x,
+                        layout.title.x + layout.title.w,
+                        layout.title.y + 18.0F,
+                        title);
+
+  SDL_RenderFillRect(renderer, &layout.stats);
+  const float stats_left = layout.stats.x;
+  const float stats_top = layout.stats.y;
+  auto row = [&](float label_x,
+                 float value_x,
+                 float dy,
+                 const std::string &label,
+                 const std::string &value) {
+    NovaText_Draw(platform,
+                  font_cache,
+                  kFont,
+                  kTextSize,
+                  kNovaFontStyleRegular,
+                  kLabel,
+                  label_x,
+                  stats_top + dy,
+                  label);
+    NovaText_Draw(platform,
+                  font_cache,
+                  kFont,
+                  kTextSize,
+                  kNovaFontStyleRegular,
+                  kValue,
+                  value_x,
+                  stats_top + dy,
+                  value);
+  };
+
+  const std::string none = InfoString(0x14e); // "None"
+  const std::string ton = InfoString(0x0);
+  const std::string tons = InfoString(0x1);
+  auto quantity = [](int count, const std::string &singular,
+                     const std::string &plural) {
+    return std::to_string(count) + " " +
+           (count == 1 ? singular : plural);
+  };
+
+  // Left column (label at +0, value at +0x2d; rows every 0xc from +0xc).
+  // Speed: the original rounds base_speed (stored payload/100) times the
+  // 100.0 multiplier at 0x575958; the port keeps the raw payload value.
+  row(stats_left, stats_left + 45.0F, 12.0F, InfoString(0xe4),
+      std::to_string(std::lround(ship->speed)));
+  row(stats_left, stats_left + 45.0F, 24.0F, InfoString(0xe5),
+      AccelRating(ship->accel));
+  row(stats_left, stats_left + 45.0F, 36.0F, InfoString(0xe6),
+      TurnRating(ship->turn_rate));
+  row(stats_left, stats_left + 45.0F, 48.0F, InfoString(0x0a),
+      ship->base_shield > 0 ? std::to_string(ship->base_shield) : none);
+  row(stats_left, stats_left + 45.0F, 60.0F, InfoString(0x0f),
+      ship->base_armor > 0 ? std::to_string(ship->base_armor) : none);
+  row(stats_left, stats_left + 45.0F, 72.0F, InfoString(0xe7),
+      ship->max_gun > 0
+          ? InfoString(0xed) + " " + std::to_string(ship->max_gun)
+          : none);
+  row(stats_left, stats_left + 45.0F, 84.0F, InfoString(0xe8),
+      ship->max_turret > 0
+          ? InfoString(0xed) + " " + std::to_string(ship->max_turret)
+          : none);
+
+  // Right column (label at +0x82, value at +0xaf). "Space:" is the shïp
+  // FreeMass: the original recomputes it per draw by re-subtracting the stock
+  // outfit masses that the loader (0x004bd3c0 post-pass) folded into
+  // ShipClassDef+0x4; that round trip always lands back on the payload value
+  // clamped at zero, which the port keeps as free_mass.
+  constexpr float kRightLabelDx = 130.0F;
+  constexpr float kRightValueDx = 175.0F;
+  row(stats_left + kRightLabelDx, stats_left + kRightValueDx, 12.0F,
+      InfoString(0xe9),
+      quantity(std::max(0, static_cast<int>(ship->free_mass)), ton, tons));
+  row(stats_left + kRightLabelDx, stats_left + kRightValueDx, 24.0F,
+      InfoString(0x6d), quantity(ship->cargo_holds, ton, tons));
+  const int jumps = ship->base_fuel / 100; // Bible: Fuel 100 = 1 jump.
+  row(stats_left + kRightLabelDx, stats_left + kRightValueDx, 36.0F,
+      InfoString(0x06),
+      jumps > 0 ? quantity(jumps, InfoString(0xee), InfoString(0xef)) : none);
+  row(stats_left + kRightLabelDx, stats_left + kRightValueDx, 48.0F,
+      InfoString(0xea),
+      std::to_string(ship->length_meters) + " " + InfoString(0xf3));
+  row(stats_left + kRightLabelDx, stats_left + kRightValueDx, 60.0F,
+      InfoString(0xeb), quantity(ship->mass_tons, ton, tons));
+  if (ship->crew > 0) {
+    row(stats_left + kRightLabelDx, stats_left + kRightValueDx, 72.0F,
+        InfoString(0xec), std::to_string(ship->crew));
+  }
+
+  const std::vector<std::string> weapons = StockWeaponLines(state, *ship);
+  const std::string weapons_label =
+      weapons.empty() ? InfoString(0xf1) : InfoString(0xf0);
+  if (!layout.custom_picture) {
+    // Base variant: the block lives inside the stats panel, label at +0x6c
+    // and lines 8px indented, 12px apart from +0x78.
+    NovaText_Draw(platform,
+                  font_cache,
+                  kFont,
+                  kTextSize,
+                  kNovaFontStyleRegular,
+                  kValue,
+                  stats_left,
+                  stats_top + 108.0F,
+                  weapons_label);
+    float line_y = stats_top + 120.0F;
+    for (const std::string &line : weapons) {
+      NovaText_Draw(platform,
+                    font_cache,
+                    kFont,
+                    kTextSize,
+                    kNovaFontStyleRegular,
+                    kValue,
+                    stats_left + 8.0F,
+                    line_y,
+                    line);
+      line_y += 12.0F;
+    }
+  } else {
+    // Custom variant: the label sits at the top of the entry-8 panel (top
+    // + 0xc) and the weapon lines are joined with ", " into one block drawn
+    // below it (top + 0x10; the original fills that block and inverts it —
+    // the net white-on-black look is kept). The joined block is wrapped here;
+    // the original lets DrawPascalStringInFilledRect clip it.
+    NovaText_Draw(platform,
+                  font_cache,
+                  kFont,
+                  kTextSize,
+                  kNovaFontStyleRegular,
+                  kValue,
+                  layout.weapons.x,
+                  layout.weapons.y + 12.0F,
+                  weapons_label);
+    if (!weapons.empty()) {
+      std::string block;
+      for (std::size_t i = 0; i < weapons.size(); ++i) {
+        if (i > 0) {
+          block += ", ";
+        }
+        block += weapons[i];
+      }
+      const auto lines = WrapDescriptionLines(
+          block, 60,
+          [](std::string_view text) { return static_cast<int>(text.size()); });
+      // Block top is + 0x10 (a filled-rect top in the original, not a text
+      // baseline), so the first line starts one 12px line below it — otherwise
+      // its ascenders collide with the heading above.
+      float line_y = layout.weapons.y + 28.0F;
+      for (std::size_t i = 0;
+           i < lines.size() && line_y < layout.weapons.y + layout.weapons.h;
+           ++i) {
+        NovaText_Draw(platform,
+                      font_cache,
+                      kFont,
+                      kTextSize,
+                      kNovaFontStyleRegular,
+                      kValue,
+                      layout.weapons.x,
+                      line_y,
+                      lines[i]);
+        line_y += 12.0F;
+      }
+    }
+  }
+
+  if (layout.custom_picture && custom_picture != nullptr) {
+    SDL_RenderTexture(renderer, custom_picture, nullptr, &layout.picture);
+  }
+
+  button_art.Draw(platform, layout.button, ButtonState::kNormal);
+  NovaText_DrawCentered(platform,
+                        font_cache,
+                        kThreeStateButtonFontFamily,
+                        kThreeStateButtonFontSize,
+                        kNovaFontStyleRegular,
+                        kValue,
+                        layout.button.x,
+                        layout.button.x + layout.button.w,
+                        ThreeStateButtonLabelBaseline(layout.button),
+                        NovaHud_LoadStringEntry(0x96, 4).value_or("Done"));
+}
+
+// One full frame of the store screen, shared by the store loop and the Info
+// sub-modal: like the modern UiWindow_RunInteractionLoop render_background
+// path, the sub-modal keeps re-rendering the store behind its window every
+// frame instead of compositing over a stale snapshot.
+void RenderStoreScreen(SdlPlatform &platform,
+                       NovaFontCache &font_cache,
+                       const ServicesButtonArt &button_art,
+                       GameState &state,
+                       const LandedStoreSession &session,
+                       std::int16_t stellar_id,
+                       StoreTextureCache &texture_cache,
+                       SDL_Texture *docked_snapshot,
+                       SDL_Texture *dock_backdrop,
+                       SDL_Texture *store_frame,
+                       std::string_view selected_description) {
+  const bool outfit_store = session.kind == LandedStoreKind::kOutfitter;
+  const StoreLayout layout = LayoutStore(platform, outfit_store);
+  SDL_Texture *selected_image = StorePreviewTexture(
+      platform, texture_cache, outfit_store, session.selected_id);
+  DrawStoreBase(platform, docked_snapshot, dock_backdrop, store_frame, layout);
+  DrawStoreContents(platform, font_cache, button_art, state, session, stellar_id,
+                    layout, texture_cache, selected_image,
+                    selected_description);
+}
+
+// Ghidra 0x004956a0 NovaUi_RunShipyardDetailWindow: modal loop over the
+// shipyard store. The window closes on the Done button (the original's only
+// exit) or Escape. TODO(decomp(0x004956a0)) skipped: the original re-enters
+// the starmap (action 4), player special interaction (action 2) and mission
+// computer (action 6) windows from inside this loop; the store modal does not
+// host those nested interactions yet, so the Info window only offers Done.
+void RunShipyardInfoDialog(SdlPlatform &platform,
+                           GameState &state,
+                           const LandedStoreSession &session,
+                           std::int16_t stellar_id,
+                           SDL_Texture *docked_snapshot,
+                           SDL_Texture *dock_backdrop,
+                           SDL_Texture *store_frame,
+                           StoreTextureCache &texture_cache,
+                           NovaFontCache &font_cache,
+                           const ServicesButtonArt &button_art,
+                           std::string_view selected_description) {
+  std::unique_ptr<SdlTexture> custom_picture;
+  bool custom = false;
+  std::uint16_t backdrop_pict = 0x213a;
+  if (session.selected_id >= 0x80) {
+    // The desc key is the zero-based ship class + 13000 (the original's
+    // g_shipyard_selected_ship_class_id is the 0-based defs index; the port's
+    // selected_id is the raw 0x80-based resource id).
+    if (const auto desc = NovaResource_LoadDescription(
+            static_cast<std::uint16_t>(session.selected_id - 0x80 + 13000));
+        desc && desc->dialog_variant >= 0x80) {
+      custom_picture = LoadPictTexture(platform, desc->dialog_variant);
+      if (custom_picture) {
+        custom = true;
+        backdrop_pict = 0x213b;
+      }
+    }
+  }
+  auto backdrop = LoadPictTexture(platform, backdrop_pict);
+  while (!platform.quit_requested()) {
+    RenderStoreScreen(platform, font_cache, button_art, state, session,
+                      stellar_id, texture_cache, docked_snapshot, dock_backdrop,
+                      store_frame, selected_description);
+    const ShipyardInfoLayout layout = LayoutShipyardInfo(platform, custom);
+    DrawShipyardInfoPanel(platform,
+                          font_cache,
+                          button_art,
+                          state,
+                          session,
+                          layout,
+                          backdrop ? backdrop->get() : nullptr,
+                          custom_picture ? custom_picture->get() : nullptr);
+    SDL_RenderPresent(platform.renderer());
+    bool done = false;
+    for (std::optional<TextInput> input;
+         (input = platform.PollTextEvent()) && !done;) {
+      if (input->key == TextKey::escape) {
+        done = true;
+      } else if (input->key == TextKey::character) {
+        const char key = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(input->character)));
+        if (key == 'l') {
+          done = true;
+        }
+      } else if (input->key == TextKey::primary) {
+        if (Contains(layout.button, platform.mouse_position())) {
+          done = true;
+        }
+      }
+    }
+    if (done) {
+      return;
+    }
+    SDL_Delay(16);
+  }
+}
+
 // Ghidra 0x0048ea70 NovaUi_RunTravelOutfitInteractionLoop and
 // 0x00492f30 NovaUi_RunShipyardPurchaseLoop: one generic store loop replaces
 // both (service is a parameter). The 0x00493fc0 NovaUi_ShipyardHandleSelection
 // Input / 0x0049f3f0 HitTestAndTrackShipyardActionButtons /
 // 0x0049f6f0 DrawShipyardActionButtons / 0x0049f8f0
 // HitTestAndTrackTravelOutfitActionButtons / 0x0049fbb0
-// DrawTravelOutfitActionButtons, the 0x00495c80 NovaUi_DrawShipyardDetailPanel
-// (selection stats block) and the 0x00497b70 BlitPictThumbnailCached
-// cache all run inline within this function and the DrawStore* helpers below.
+// DrawTravelOutfitActionButtons and the 0x00497b70 BlitPictThumbnailCached
+// cache all run inline within this function and the DrawStore* helpers below;
+// the 0x004956a0/0x00495c80 detail window runs in RunShipyardInfoDialog above
+// (opened by the Info action button).
 LandedExit RunStoreDialog(SdlPlatform &platform,
                           GameState &state,
                           LandedService service,
@@ -1087,40 +1631,26 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   NovaFontCache font_cache;
   while (!platform.quit_requested()) {
     const StoreLayout layout = LayoutStore(platform, outfit_store);
-    SDL_Texture *selected_image = StorePreviewTexture(
-        platform, texture_cache, outfit_store, session.selected_id);
-    if (outfit_store && session.selected_id != selected_description_id) {
+    if (session.selected_id != selected_description_id) {
       selected_description.clear();
       if (session.selected_id >= 0x80) {
-        // The Outfitter (DLOG 0x3ea) keys the outfit 'd\x91sc' description
-        // resource at its zero-based outfit index + 3000 (Ghidra
-        // NovaUi_HandleTravelOutfitMenuInput 0x004903c0 calls
-        // Ui_LoadSelectionDialogResource(..., g_travel_outfit_selected_id +
-        // 3000) where that selected id is 0-based). selected_id here is the
-        // raw 0x80+ resource id, so subtract the 0x80 base before the offset.
-        const auto desc_id =
-            static_cast<std::uint16_t>(session.selected_id - 0x80 + 3000);
+        // The selection-desc resource is keyed at the zero-based item index
+        // plus the family base: outfits (DLOG 0x3ea) at +3000 (Ghidra
+        // NovaUi_HandleTravelOutfitMenuInput 0x004903c0), ship classes at
+        // +13000 (NovaUi_ShipyardHandleSelectionInput 0x00493fc0). The port's
+        // selected_id is the raw 0x80+ resource id, so subtract 0x80 first.
+        const auto desc_id = static_cast<std::uint16_t>(
+            (outfit_store ? 3000 : 13000) + (session.selected_id - 0x80));
         if (const auto description = NovaResource_LoadDescription(desc_id)) {
           selected_description = description->text;
         }
       }
       selected_description_id = session.selected_id;
     }
-    DrawStoreBase(platform,
-                  snapshot,
-                  backdrop ? backdrop->get() : nullptr,
-                  frame ? frame->get() : nullptr,
-                  layout);
-    DrawStoreContents(platform,
-                      font_cache,
-                      button_art,
-                      state,
-                      session,
-                      stellar_id,
-                      layout,
-                      texture_cache,
-                      selected_image,
-                      selected_description);
+    RenderStoreScreen(platform, font_cache, button_art, state, session,
+                      stellar_id, texture_cache, snapshot,
+                      backdrop ? backdrop->get() : nullptr,
+                      frame ? frame->get() : nullptr, selected_description);
     SDL_RenderPresent(platform.renderer());
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
       if (input->key == TextKey::escape) {
@@ -1166,6 +1696,13 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           NovaLanded_RefreshStoreSession(state, session, stellar_id);
           continue;
         }
+        if (key == 'i' && !outfit_store && session.selected_id >= 0) {
+          RunShipyardInfoDialog(platform, state, session, stellar_id, snapshot,
+                                backdrop ? backdrop->get() : nullptr,
+                                frame ? frame->get() : nullptr, texture_cache,
+                                font_cache, button_art, selected_description);
+          continue;
+        }
       }
       if (input->key != TextKey::primary)
         continue;
@@ -1208,11 +1745,20 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         }
         continue;
       }
-      if (outfit_store && Contains(layout.sell_or_info, point) &&
-          session.selected_id >= 0) {
-        (void)NovaLanded_SellOutfit(
-            state, session, stellar_id, session.selected_id, 1);
-        NovaLanded_RefreshStoreSession(state, session, stellar_id);
+      if (Contains(layout.sell_or_info, point) && session.selected_id >= 0) {
+        if (outfit_store) {
+          (void)NovaLanded_SellOutfit(
+              state, session, stellar_id, session.selected_id, 1);
+          NovaLanded_RefreshStoreSession(state, session, stellar_id);
+        } else {
+          // The shipyard's third action button is Info
+          // (0x0049f3f0 HitTestAndTrackShipyardActionButtons index 2), which
+          // opens the detail window (0x004956a0).
+          RunShipyardInfoDialog(platform, state, session, stellar_id, snapshot,
+                                backdrop ? backdrop->get() : nullptr,
+                                frame ? frame->get() : nullptr, texture_cache,
+                                font_cache, button_art, selected_description);
+        }
       }
     }
     SDL_Delay(16);

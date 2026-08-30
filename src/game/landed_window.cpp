@@ -382,10 +382,12 @@ WrapDescriptionLines(std::string_view text,
   std::string line;
   std::size_t i = 0;
   while (i < text.size()) {
-    // Skip inter-word whitespace; a newline forces an explicit line break.
+    // Skip inter-word whitespace; a newline (desc resources use the Mac '\r')
+    // forces an explicit line break.
     while (i < text.size() &&
-           (text[i] == ' ' || text[i] == '\n' || text[i] == '\t')) {
-      if (text[i] == '\n' && !line.empty()) {
+           (text[i] == ' ' || text[i] == '\n' || text[i] == '\r' ||
+            text[i] == '\t')) {
+      if ((text[i] == '\n' || text[i] == '\r') && !line.empty()) {
         lines.push_back(line);
         line.clear();
       }
@@ -396,7 +398,8 @@ WrapDescriptionLines(std::string_view text,
     }
     std::size_t word_end = i;
     while (word_end < text.size() && text[word_end] != ' ' &&
-           text[word_end] != '\n' && text[word_end] != '\t') {
+           text[word_end] != '\n' && text[word_end] != '\r' &&
+           text[word_end] != '\t') {
       ++word_end;
     }
     const std::size_t word_len = word_end - i;

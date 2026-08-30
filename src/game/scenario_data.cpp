@@ -1162,10 +1162,11 @@ bool ScenarioData::LoadFromArchives() {
     if (const auto res = NovaResource_LoadNamed(
             scenario::kShipResourceType, static_cast<std::uint16_t>(id))) {
       ShipClass cls = DecodeShip(res->bytes);
-      // The ship class display name is the resource record name (the loader
-      // reads it via ResourceData_ReadEntryMetadata + StripSubtitleSuffix), not
-      // a numeric header field.
-      cls.display_name = res->name;
+      // The ship class display name is the resource record name with the
+      // ';'-subtitle suffix stripped (the loader fills ShipClassDef+0x6c via
+      // ResourceData_ReadEntryMetadata + NameString_StripSubtitleSuffix
+      // 0x004cd230, bounded to 0x3f chars), not a numeric header field.
+      cls.display_name = StripSubtitleSuffix(res->name);
       const std::size_t index = static_cast<std::size_t>(id) - 0x80;
       // Clone-source derivation: the sh\x8an descriptor shares the class id,
       // and its BaseImageID (+0x00) is the sheet the class's sprites are cut
