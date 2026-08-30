@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 
 namespace game {
 
@@ -95,6 +97,118 @@ float QuantizedRasterScale(const SdlPlatform &platform, float point_size) {
   return raster_size / logical_size;
 }
 
+constexpr std::uint32_t Tag(std::string_view tag) {
+  return (static_cast<std::uint32_t>(tag[0]) << 24) |
+         (static_cast<std::uint32_t>(tag[1]) << 16) |
+         (static_cast<std::uint32_t>(tag[2]) << 8) |
+         static_cast<std::uint32_t>(tag[3]);
+}
+
+std::uint16_t ReadU16(const std::uint8_t *p) {
+  return static_cast<std::uint16_t>((p[0] << 8) | p[1]);
+}
+
+std::uint32_t ReadU32(const std::uint8_t *p) {
+  return (static_cast<std::uint32_t>(p[0]) << 24) |
+         (static_cast<std::uint32_t>(p[1]) << 16) |
+         (static_cast<std::uint32_t>(p[2]) << 8) | p[3];
+}
+
+void WriteU16(std::uint8_t *p, std::uint16_t v) {
+  p[0] = static_cast<std::uint8_t>(v >> 8);
+  p[1] = static_cast<std::uint8_t>(v);
+}
+
+void WriteU32(std::uint8_t *p, std::uint32_t v) {
+  p[0] = static_cast<std::uint8_t>(v >> 24);
+  p[1] = static_cast<std::uint8_t>(v >> 16);
+  p[2] = static_cast<std::uint8_t>(v >> 8);
+  p[3] = static_cast<std::uint8_t>(v);
+}
+
+// TODO(decomp(0x004bc670)) skipped: embedded-bitmap sanitization. The CE
+// release's bundled Geneva.ttf is a FontForge conversion whose EBDT/EBLC
+// bitmap strikes carry glyph advances inconsistent with the font's own
+// outlines (e.g. 'i' at 20 ppem: bitmap advance 8 px vs outline 4.7 px; 'r'
+// 12 vs 7.7) -- and FreeType serves a strike whenever the requested pixel
+// size matches one exactly, which our 10 px x density raster sizes always
+// do. The original's text engines (GDI on CE, classic Mac bitmap Geneva)
+// never rasterized these broken strikes, so drawing through them reproduces
+// nothing faithful. We rewrite the sfnt table directory in memory with the
+// bitmap tables (EBDT/EBLC/EBSC/bdat/bloc) removed, forcing outline
+// rendering; the outlines are genuine Geneva (hmtx identical to Apple's
+// system face) and render correctly. When `strip_strikes` is false the file
+// bytes are returned unmodified (used for the OS-substituted faces, whose
+// embedded strikes -- where present -- are legitimate hand-tuned Apple
+// bitmaps). Returns the raw file bytes unchanged when the file has no
+// strippable tables or does not parse as an sfnt.
+std::vector<std::uint8_t> LoadFontFileStrippedOfBitmapStrikes(
+    const std::string &path, bool strip_strikes, bool &stripped) {
+  stripped = false;
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    return {};
+  }
+  std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
+                                  std::istreambuf_iterator<char>());
+  if (bytes.size() < 12) {
+    return bytes;
+  }
+  if (!strip_strikes) {
+    return bytes;
+  }
+  const std::uint32_t sfnt_version = ReadU32(bytes.data());
+  if (sfnt_version != 0x00010000U && sfnt_version != Tag("true") &&
+      sfnt_version != Tag("OTTO")) {
+    return bytes;
+  }
+  constexpr std::array<std::uint32_t, 5> kBitmapTags{
+      Tag("EBDT"), Tag("EBLC"), Tag("EBSC"), Tag("bdat"), Tag("bloc")};
+  const std::uint16_t num_tables = ReadU16(bytes.data() + 4);
+  if (bytes.size() < 12U + static_cast<size_t>(num_tables) * 16U) {
+    return bytes;
+  }
+  std::vector<const std::uint8_t *> kept;
+  bool has_bitmap_tables = false;
+  for (std::uint16_t i = 0; i < num_tables; ++i) {
+    const std::uint8_t *entry = bytes.data() + 12 + static_cast<size_t>(i) * 16U;
+    const std::uint32_t tag = ReadU32(entry);
+    if (std::find(kBitmapTags.begin(), kBitmapTags.end(), tag) !=
+        kBitmapTags.end()) {
+      has_bitmap_tables = true;
+      continue;
+    }
+    kept.push_back(entry);
+  }
+  if (!has_bitmap_tables) {
+    return bytes;
+  }
+
+  // Rebuild the file: new directory, then the kept tables at fresh
+  // 4-byte-aligned offsets. FreeType does not validate checksums, so the
+  // stale head.checkSumAdjustment is left alone.
+  std::size_t data_offset = 12 + kept.size() * 16U;
+  for (const std::uint8_t *entry : kept) {
+    data_offset = (data_offset + ReadU32(entry + 12) + 3U) & ~3U;
+  }
+  std::vector<std::uint8_t> out(data_offset);
+  WriteU32(out.data(), sfnt_version);
+  WriteU16(out.data() + 4, static_cast<std::uint16_t>(kept.size()));
+  std::size_t write_offset = 12 + kept.size() * 16U;
+  for (std::size_t i = 0; i < kept.size(); ++i) {
+    const std::uint8_t *entry = kept[i];
+    std::uint8_t *out_entry = out.data() + 12 + i * 16U;
+    std::memcpy(out_entry, entry, 16);
+    WriteU32(out_entry + 8, static_cast<std::uint32_t>(write_offset));
+    const std::uint32_t length = ReadU32(entry + 12);
+    std::memcpy(out.data() + write_offset, bytes.data() + ReadU32(entry + 8),
+                length);
+    write_offset = (write_offset + length + 3U) & ~3U;
+  }
+  stripped = true;
+  return out;
+}
+
 } // namespace
 
 // Ghidra 0x004bc670 FontCache_GetOrCreateFontHandle.
@@ -120,6 +234,7 @@ void NovaFontCache::Clear() {
     }
   }
   fonts_.clear();
+  font_buffers_.clear();
 }
 
 std::string NovaFontCache::ResolveFontFile(NovaFontFamily family) const {
@@ -177,9 +292,35 @@ TTF_Font *NovaFontCache::Font(NovaFontFamily family,
     return nullptr;
   }
 
+  // Load (and for the bundled CE faces, sanitize) the file image; FreeType
+  // reads tables lazily through the stream, so the buffer is owned by the
+  // cache and must outlive the face.
+  std::shared_ptr<std::vector<std::uint8_t>> image;
+  const auto image_it = font_buffers_.find(file);
+  if (image_it != font_buffers_.end()) {
+    image = image_it->second;
+  } else {
+    // Only the bundled CE faces are sanitized: their FontForge-converted
+    // embedded strikes are corrupt (see LoadFontFileStrippedOfBitmapStrikes).
+    const bool bundled_ce_face = family == NovaFontFamily::kChicago ||
+                                 family == NovaFontFamily::kGeneva;
+    bool stripped = false;
+    image = std::make_shared<std::vector<std::uint8_t>>(
+        LoadFontFileStrippedOfBitmapStrikes(file, bundled_ce_face, stripped));
+    if (stripped) {
+      NovaLog::Info(
+          "font '{}' contains embedded bitmap strikes with advances "
+          "inconsistent with its outlines; stripped them at load time",
+          file);
+    }
+    font_buffers_.emplace(file, image);
+  }
+
   // This size is the concrete raster size requested by the caller. Text draw
   // calls multiply their logical size by the current output density first.
-  TTF_Font *font = TTF_OpenFont(file.c_str(), point_size);
+  SDL_IOStream *io =
+      SDL_IOFromMem(image->data(), static_cast<std::size_t>(image->size()));
+  TTF_Font *font = TTF_OpenFontIO(io, true, point_size);
   if (font == nullptr) {
     NovaLog::Warn("font family {} failed to open '{}': {}",
                   static_cast<unsigned>(family),

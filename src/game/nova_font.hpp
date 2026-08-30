@@ -34,9 +34,11 @@
 // every modal.
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "../sdl_platform.hpp"
 
@@ -131,6 +133,11 @@ private:
   [[nodiscard]] std::string ResolveFontFile(NovaFontFamily family) const;
 
   std::unordered_map<FontKey, TTF_Font *, FontKeyHash> fonts_;
+  // Backing bytes for faces opened through TTF_OpenFontIO: FreeType reads
+  // tables lazily through the SDL_IOStream, so the (sanitized) file image
+  // must outlive every TTF_Font opened from it.
+  std::unordered_map<std::string, std::shared_ptr<std::vector<std::uint8_t>>>
+      font_buffers_;
   // Whether the (refcounted) SDL_ttf library is currently held by this cache;
   // set lazily on first font open and torn down by the destructor. SDL_ttf's
   // refcount makes nested caches safe.
