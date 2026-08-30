@@ -104,14 +104,18 @@ after the 2-byte count, so the first rect's `top` is at payload offset 6.
 After each item's 14-byte header, skip its variable tail so the walker lands on
 the next item (always re-aligned to an even offset):
 
-| item type         | tail                                             |
+| item type         | tail starting at item+13                         |
 |-------------------|--------------------------------------------------|
-| string types `4/5/6/8/0x10` | a Pascal string title starting at item+13: skip its length byte + that many chars |
-| icon/pict/control `7/0x20/0x40` | skip 8 extra ushorts (16 bytes)       |
-| everything else (buttons/plain) | skip 7 extra ushorts (14 bytes)      |
+| string types `4/5/6/8/0x10` | a Pascal string: the length byte at item+13, then that many chars |
+| control `7/0x20/0x40` | 2 bytes: `[subtype u8][refcon BE u16]` at item+13..+15 (the refcon names a MENU / PICT resource) |
+| everything else (buttons/plain) | nothing — item+13 is a single pad byte |
 
 The even re-alignment is the gotcha that mis-aligns every subsequent rect if you
-drop it. The `dlg` subcommand of `rez_extract.py` applies the same arithmetic.
+drop it. (An older revision of this table claimed controls skip 16 tail bytes
+and plain items 14; that came from a stale parser — the validated rule above
+walks DITL 0xc1d/0xc1e/0xbb9 to an exact end-of-payload fit and agrees with
+`NovaResource_LoadDialogItems`. `tools/rez_extract.py dlg` applies the same
+arithmetic.)
 
 ---
 

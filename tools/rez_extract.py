@@ -325,15 +325,27 @@ def main():
                         print(f"    {s!r}")
 
     if args.mode == 'dlg':
-        # Decode the DLOG/DITL dialog resources from the core UI archive.
-        # DLOG selects a DITL by id; a DITL (classic Mac DlgTemplate) is a
-        # big-endian item list: [count:u16][version:u16] then per item
-        # [top,i16][left,i16][bottom,i16][right,i16][type:u8][payload]. Payload is
-        # a PascalString title for text/button/icon types, else a 5-byte refCon.
+        # Decode the DLOG/DITL dialog resources. Mirrors the C++ reference
+        # parser (NovaResource_LoadDialogDefinition / NovaResource_LoadDialogItems
+        # in src/brgr_archive.cpp, = Ghidra 0x004cef50 Dialog_ParseItemList):
+        #   DLOG: bounds (top,left,bottom,right) as 4 BE i16 at 0..7; the
+        #         linked DITL id is the BE u16 at 18..19. Window size is
+        #         (right-left) x (bottom-top).
+        #   DITL: [count:u16] then count+1 item records (the trailing one is a
+        #         zero terminator). Each record starts with a 4-byte prologue,
+        #         then the rect (top,left,bottom,right) at +4..+11 and the
+        #         type byte at +12 (bit 7 = enabled/hilite flag). Tails after
+        #         the header: string types (4,5,6,8,0x10) carry a Pascal
+        #         string at +13; control types (7,0x20,0x40) carry
+        #         [subtype u8][refcon BE u16] at +13..+15 (the refcon names a
+        #         MENU / PICT resource); everything else a 1-byte pad. Each
+        #         item re-aligns to an even offset. Rects map as
+        #         x = left..right, y = top..bottom and may legitimately fall
+        #         outside the DLOG bounds (see docs/dlog_ditl_dialog_format.md).
         import struct
-        ITEM = {1: 'UserItem', 2: 'frame', 3: 'Icon?(Button)', 4: 'Button',
-                5: 'CheckBox', 6: 'RadioButton', 7: 'ScrollBar', 8: 'StaticText',
-                9: 'EditText', 11: 'Icon', 0xD: 'User', 0x20: 'Gauge', 0x40: 'Slider'}
+        ITEM = {1: 'UserItem', 2: 'frame', 4: 'Button', 5: 'CheckBox',
+                6: 'RadioButton', 7: 'Popup', 8: 'StaticText',
+                0x10: 'EditText', 0x20: 'Gauge', 0x40: 'Image'}
         for a in archives:
             dlog = {rid: idx for tc, idx, rid, _ in a.map_records if tc == b'DLOG'}
             ditl = {rid: idx for tc, idx, rid, _ in a.map_records if tc == b'DITL'}
@@ -342,27 +354,39 @@ def main():
             print(f"\n===== {a.name} dialogs =====")
             for rid, idx in sorted(dlog.items()):
                 d = a.payload(idx)
-                bnds = struct.unpack('>4h', d[2:10])
-                dlog_id = int.from_bytes(d[0x12:0x14], 'big')
-                print(f"  DLOG {rid:#06x} bounds=({bnds[1]},{bnds[0]}..{bnds[3]},{bnds[2]}) "
-                      f"{bnds[3]-bnds[1]}x{bnds[2]-bnds[0]} -> DITL {dlog_id:#06x}")
+                top, left, bot, right = struct.unpack('>4h', d[0:8])
+                ditl_id = struct.unpack('>H', d[18:20])[0]
+                print(f"  DLOG {rid:#06x} {right-left}x{bot-top} at ({left},{top}) "
+                      f"-> DITL {ditl_id:#06x}")
             for rid, idx in sorted(ditl.items()):
                 data = a.payload(idx)
                 n = struct.unpack('>H', data[0:2])[0]
                 print(f"  DITL {rid:#06x}  {n} items")
-                q = 4
-                for i in range(n):
-                    if q + 10 > len(data):
+                q = 2
+                for i in range(n + 1):
+                    if q + 14 > len(data):
+                        print(f"      [{i:2d}] <out of bounds at offset {q}>")
                         break
-                    top, left, bot, right = struct.unpack('>4h', data[q:q+8]); q += 8
-                    it = data[q]; q += 1
-                    title = ''
-                    if it in (4, 5, 6, 8, 9, 11, 12, 0xD, 0x10, 0x14, 0x15, 0x21, 0x22, 0x24, 0x2d):
-                        L = data[q]; title = data[q+1:q+1+L].decode('latin1'); q += 1 + L
+                    top, left, bot, right = struct.unpack('>4h', data[q+4:q+12])
+                    type_byte = data[q+12]
+                    typ = type_byte & 0x7f
+                    extra = ''
+                    if typ in (4, 5, 6, 8, 0x10):
+                        L = data[q+13]
+                        extra = data[q+14:q+14+L].decode('mac-roman', 'replace')
+                        q = q + 13 + 1 + L
+                    elif typ in (7, 0x20, 0x40):
+                        refcon = struct.unpack('>H', data[q+14:q+16])[0]
+                        extra = f"subtype={data[q+13]:#04x} refcon={refcon:#06x}"
+                        q = q + 16
                     else:
-                        q += 5
+                        q = q + 14
+                    if q % 2:
+                        q += 1
+                    flag = 'on ' if type_byte & 0x80 else ''
                     print(f"      [{i:2d}] x={left:>4}..{right:>4} y={top:>4}..{bot:>4} "
-                          f"{right-left:>3}x{bot-top:>3} type={it:#04x} {ITEM.get(it,'?'):<10} {title!r}")
+                          f"{right-left:>3}x{bot-top:>3} type={typ:#04x} "
+                          f"{ITEM.get(typ, '?'):<10} {flag}{extra!r}")
         return
 
 

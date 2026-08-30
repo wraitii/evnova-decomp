@@ -24,6 +24,8 @@ constexpr SDL_Color kBevelFill{136, 136, 136, 255};      // 0x0056f11e
 constexpr SDL_Color kBevelPressedFill{97, 97, 97, 255};  // 0x0056f124
 constexpr SDL_Color kBevelShadow{58, 58, 58, 255};       // 0x0056f12a
 constexpr SDL_Color kControlText{0, 0, 0, 255};
+// Characters inside an edit-text selection invert to white on the highlight.
+constexpr SDL_Color kSelectionText{255, 255, 255, 255};
 
 constexpr float kDialogFontSize = 12.0F;
 // Popup entry height the original's popup drawer uses (0x14 units).
@@ -278,6 +280,16 @@ void UiWindow_Draw(SdlPlatform &platform,
   SDL_RenderFillRect(renderer, &window.window_rect);
   FrameRect(renderer, window.window_rect);
 
+  // The original draws items into the dialog's own window surface, so the
+  // window edge clips them (DITL 0xc1e carries the Character popup at y=277
+  // and vestigial "name3:" items at y=357 in a 213-tall window; those must
+  // stay invisible). The port composites straight onto the renderer, so clip
+  // the item pass to the window rect instead.
+  const SDL_Rect clip{static_cast<int>(window.window_rect.x),
+                      static_cast<int>(window.window_rect.y),
+                      static_cast<int>(window.window_rect.w),
+                      static_cast<int>(window.window_rect.h)};
+  SDL_SetRenderClipRect(renderer, &clip);
   for (std::size_t row = 1; row <= window.items.size(); ++row) {
     const auto &item = window.items[row - 1];
     auto &entry = window.state[row - 1];
@@ -371,30 +383,56 @@ void UiWindow_Draw(SdlPlatform &platform,
       FrameRect(renderer, box);
       const float text_left = box.x + 3.0F;
       const float baseline = box.y + box.h - 3.0F;
-      NovaText_Draw(platform,
-                    font_cache,
-                    NovaFontFamily::kGeneva,
-                    kDialogFontSize,
-                    kNovaFontStyleRegular,
-                    kControlText,
-                    text_left,
-                    baseline,
-                    entry.text);
-      if (focused) {
-        if (entry.selection_start < entry.selection_end) {
-          // Inverted selection between the two character offsets.
-          const float x0 = text_left + TextWidth(font_cache, entry.text.substr(
-                               0, static_cast<std::size_t>(entry.selection_start)));
-          const float x1 = text_left + TextWidth(font_cache, entry.text.substr(
-                               0, static_cast<std::size_t>(entry.selection_end)));
-          SDL_SetRenderDrawColor(renderer,
-                                 kControlText.r,
-                                 kControlText.g,
-                                 kControlText.b,
-                                 SDL_ALPHA_OPAQUE);
-          const SDL_FRect sel{x0, box.y + 1.0F, std::max(1.0F, x1 - x0), box.h - 2.0F};
-          SDL_RenderFillRect(renderer, &sel);
-        } else {
+      // Inverted selection between the two character offsets: the highlight
+      // backdrop goes down first and the selected characters draw in white
+      // through it (drawing the field black first painted them out).
+      const bool has_selection =
+          focused && entry.selection_start < entry.selection_end &&
+          entry.selection_end <= static_cast<std::int32_t>(entry.text.size());
+      if (has_selection) {
+        const auto start = static_cast<std::size_t>(entry.selection_start);
+        const auto end = static_cast<std::size_t>(entry.selection_end);
+        const float x0 =
+            text_left + TextWidth(font_cache, entry.text.substr(0, start));
+        const float x1 =
+            text_left + TextWidth(font_cache, entry.text.substr(0, end));
+        SDL_SetRenderDrawColor(renderer,
+                               kControlText.r,
+                               kControlText.g,
+                               kControlText.b,
+                               SDL_ALPHA_OPAQUE);
+        const SDL_FRect sel{x0, box.y + 1.0F, std::max(1.0F, x1 - x0), box.h - 2.0F};
+        SDL_RenderFillRect(renderer, &sel);
+        const auto draw_span = [&](std::size_t from,
+                                   std::size_t to,
+                                   float x,
+                                   const SDL_Color &color) {
+          if (to > from) {
+            NovaText_Draw(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          kDialogFontSize,
+                          kNovaFontStyleRegular,
+                          color,
+                          x,
+                          baseline,
+                          entry.text.substr(from, to - from));
+          }
+        };
+        draw_span(0, start, text_left, kControlText);
+        draw_span(start, end, x0, kSelectionText);
+        draw_span(end, entry.text.size(), x1, kControlText);
+      } else {
+        NovaText_Draw(platform,
+                      font_cache,
+                      NovaFontFamily::kGeneva,
+                      kDialogFontSize,
+                      kNovaFontStyleRegular,
+                      kControlText,
+                      text_left,
+                      baseline,
+                      entry.text);
+        if (focused) {
           // Blinking caret line (the original toggles its latch every 15 ms).
           const float caret_x =
               text_left +
@@ -551,6 +589,7 @@ void UiWindow_Draw(SdlPlatform &platform,
       break;
     }
   }
+  SDL_SetRenderClipRect(renderer, nullptr);
 }
 
 void UiWindow_RunInteractionLoop(

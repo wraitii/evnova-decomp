@@ -1072,7 +1072,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004CEEC0,FUN_004ceec0,,0%,
 0x004CEF50,Dialog_ParseItemList,src/brgr_archive.cpp,70%,"DITL item parser reimplemented as NovaResource_LoadDialogItems: BE count, rect/type bytes, per-type tail skip, even align; validates the 8 docked Spaceport buttons"
 0x004CF1C0,FUN_004cf1c0,,0%,
-0x004CF760,UiWindow_CreateFromDialogResource,,0%,
+0x004CF760,UiWindow_CreateFromDialogResource,src/game/ui_dialog.cpp,60%,Ported on SDL: DLOG+DITL load, Dialog_CreateFromDlog centring, MENU-seeded type-7 popups; diverges by compositing straight onto the renderer (documented) instead of an owner draw surface
 0x004CF890,UiWindow_Destroy,,0%,
 0x004CF960,UiPanel_GetEntryInfo,,0%,
 0x004CF9F0,UiPanel_SetEntryRect,,0%,
@@ -1092,13 +1092,13 @@ address,name,impl_file,reimpl_pct,comment
 0x004CFD90,FUN_004cfd90,,0%,
 0x004CFDB0,UiWindow_MarkDirty,,0%,
 0x004CFDC0,FUN_004cfdc0,,0%,
-0x004CFDD0,UiWindow_RunInteractionLoop,,0%,
+0x004CFDD0,UiWindow_RunInteractionLoop,src/game/ui_dialog.cpp,55%,Ported per-frame modal loop: render_background pump, mouse activation (buttons/checkbox/popups/edit focus), typing/backspace with selection, Enter/Escape activation; original DIK-driven activation set TODO(decomp)
 0x004D0610,FUN_004d0610,,0%,
 0x004D0640,FUN_004d0640,,0%,
 0x004D0A50,FUN_004d0a50,,0%,
 0x004D0B70,FUN_004d0b70,,0%,
 0x004D0BD0,FUN_004d0bd0,,0%,
-0x004D0D00,UiWindow_Draw,,0%,
+0x004D0D00,UiWindow_Draw,src/game/ui_dialog.cpp,65%,Ported control drawer: bevel triples, buttons/checkbox/static/edit/popup/image (PICT refcon) items, window-rect clipping (0xc1e offscreen Character popup stays hidden), inverted selection = white text on black backdrop; gauge payloads TODO(decomp)
 0x004D16F0,FUN_004d16f0,,0%,
 0x004D17A0,DrawContext_SaveAndSetOwnerContext,,0%,
 0x004D17B0,NovaRender_GetMainWindowOwner,,0%,
