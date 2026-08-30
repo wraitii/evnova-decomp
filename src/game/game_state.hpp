@@ -842,6 +842,13 @@ struct GameState {
   // per AGENTS.md (no hidden globals) and rendered by the HudRenderer.
   HudOverlayState hud_overlay;
 
+  // --- Stellar radar / minimap (Ghidra globals consumed by
+  // NovaUi_DrawStellarRadarPanel 0x0045d600) -----------------------------
+  // Ghidra g_proximity_scan_detected (0x007caba0): per-tick interference roll
+  // latch (Frame_RollProximityScanDetection 0x0045d030). While set the radar
+  // draws sensor static instead of contact blips.
+  bool proximity_scan_detected = false;
+
   // Target-reticle pulse values (Ghidra g_travel_target_reticle_pulse
   // DAT_00735490 / g_ship_target_reticle_pulse DAT_00735494). Set to 256.0
   // (0x43800000) when the corresponding target is (re)selected, then decay

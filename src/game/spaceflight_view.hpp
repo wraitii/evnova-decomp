@@ -56,7 +56,9 @@ public:
   // hyperspace fire flash. The body of spaceflight.cpp's former
   // DrawInGameFrame; modal windows that composite over the live game view
   // (the boarding/plunder window) call this instead of snapshotting pixels.
-  void DrawGameFrame(SdlPlatform &platform, const GameState &state, HudRenderer &hud);
+  void DrawGameFrame(SdlPlatform &platform,
+                     const GameState &state,
+                     HudRenderer &hud);
 
   // Ghidra NovaUi_UpdateShipTargetReticle (0x0042ede0): draws the 4-corner
   // bracket reticle around the player's primary target ship (state.player
@@ -181,6 +183,12 @@ private:
   // Ghidra: g_weapon_sprite_set_table + the stellar/spin sprite-set tables.
   SpriteStore sprite_store_;
 
+public:
+  // Radar blip sizing reads the stellar spin sets (Sprite_GetShotHalfSpan
+  // 0x00462390 on the loaded set); the HUD renderer gets read access here.
+  [[nodiscard]] SpriteStore &sprite_store() { return sprite_store_; }
+
+private:
   // The ship-target reticle's 16-frame corner-bracket set (cicn 10008-10023)
   // and the travel reticle's 8-frame set (cicn 10000-10007), loaded on first
   // use. A failed load stays empty so a missing asset is not retried every

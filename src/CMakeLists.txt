@@ -34,6 +34,7 @@ add_library(evnova_runtime
     game/nova_font.cpp
     game/outfit.cpp
     game/pilot_file.cpp
+    game/radar_panel.cpp
     game/preferences.cpp
     game/spaceflight.cpp
     game/spaceflight_view.cpp

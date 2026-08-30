@@ -129,11 +129,11 @@ HudPanelRect HudPanel_AnchorTopRight(const HudPanelRect &panel,
 
 GameplayViewportGeometry
 GameplayGeometry_FromSurface(const HudPanelRect &surface_rect) {
-  // Ghidra 0x00488380 NovaView_UpdateGameplayViewport (mirrored exactly). The cockpit
-  // frame PICT is the shipped resource 8000 (1024x768); the game centres it in
-  // the shared offscreen surface rect (DAT_00597954..5a), nudges it up/left by
-  // 0x3c for small viewports, then derives the HUD origin (its centre point)
-  // and the HUD anchor (origin - 0x200/-0x180).
+  // Ghidra 0x00488380 NovaView_UpdateGameplayViewport (mirrored exactly). The
+  // cockpit frame PICT is the shipped resource 8000 (1024x768); the game
+  // centres it in the shared offscreen surface rect (DAT_00597954..5a), nudges
+  // it up/left by 0x3c for small viewports, then derives the HUD origin (its
+  // centre point) and the HUD anchor (origin - 0x200/-0x180).
   constexpr std::int16_t kFrameWidth = 1024;
   constexpr std::int16_t kFrameHeight = 768;
   constexpr std::int16_t kNarrowViewport = 0x300;  // 768
@@ -192,6 +192,7 @@ NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id) {
   }
   const std::span<const std::byte> bytes{*payload};
   GameplayInterfaceLayout out;
+  out.radar_panel = ReadPanel(bytes, 0x08); // RadarArea
   out.shield_panel = ReadPanel(bytes, 0x18);
   out.armor_panel = ReadPanel(bytes, 0x24);
   out.fuel_panel = ReadPanel(bytes, 0x30);
@@ -210,10 +211,15 @@ NovaResource_LoadGameplayInterfaceLayout(std::uint16_t interface_id) {
   out.font_size_2 = ReadBe16(bytes, 0xa2);
   out.interface_bg_pict_id =
       std::max<std::uint16_t>(0x80, ReadBe16(bytes, 0xa4));
-  NovaLog::Info("gameplay interface layout {:#04x}: shield ({},{})-({},{}), "
+  NovaLog::Info("gameplay interface layout {:#04x}: radar ({},{})-({},{}), "
+                "shield ({},{})-({},{}), "
                 "armor ({},{})-({},{}), fuel ({},{})-({},{}), target "
                 "({},{})-({},{}), bg PICT {}, font '{}' {}",
                 interface_id,
+                out.radar_panel.left,
+                out.radar_panel.top,
+                out.radar_panel.right,
+                out.radar_panel.bottom,
                 out.shield_panel.left,
                 out.shield_panel.top,
                 out.shield_panel.right,

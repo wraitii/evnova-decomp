@@ -221,13 +221,14 @@ class SpriteStore {
 public:
   // Returns the cached asset for a spin descriptor id, or null when it cannot
   // be loaded. A failed load is not cached (a transiently-missing set is
-  // re-queried).
+  // re-queried). Const so read-only consumers (e.g. radar blip sizing) can
+  // share the store; the cache itself is lazy.
   [[nodiscard]] const SpriteAsset *Spin(SDL_Renderer *renderer,
-                                        std::uint16_t spin_id);
+                                        std::uint16_t spin_id) const;
 
 private:
   // spin descriptor resource id -> loaded set (or null on failure).
-  std::vector<std::unique_ptr<SpriteAsset>> sets_;
+  mutable std::vector<std::unique_ptr<SpriteAsset>> sets_;
 };
 
 // Draw options for one sprite instance, mirroring the original sprite's

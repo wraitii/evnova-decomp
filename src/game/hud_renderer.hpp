@@ -33,15 +33,19 @@
 #include "gameplay_interface.hpp"
 #include "nova_font.hpp"
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <random>
 
 class SdlPlatform;
 class SdlTexture;
 struct SDL_Renderer;
 
 namespace game {
+
+class SpriteStore;
 
 class HudRenderer {
 public:
@@ -64,6 +68,11 @@ public:
   // cockpit PICT is drawn at native size pinned to the viewport top-right;
   // bars and readouts inherit that horizontal offset.
   void Draw(SdlPlatform &platform, const GameState &state);
+
+  // Non-owning pointer to the spaceflight view's sprite store, used to
+  // resolve each stellar body's spin sprite half-span for the radar blip
+  // size tiers (Sprite_GetShotHalfSpan 0x00462390 on the loaded spin set).
+  void AttachSpriteStore(const SpriteStore *store) { sprite_store_ = store; }
 
   [[nodiscard]] bool installed() const { return installed_; }
 
@@ -100,6 +109,20 @@ private:
 
   std::map<std::int16_t, std::unique_ptr<PortraitEntry>> portraits_;
 
+  // --- Stellar radar state (NovaUi_DrawStellarRadarPanel 0x0045d600) -----
+  const SpriteStore *sprite_store_ = nullptr;
+  // Ghidra g_last_target_status_poll_tick / g_target_status_blink_phase
+  // (0x007cab74 / 0x007cab6c): the >= 15 ms target-status poll cadence that
+  // toggles the blink phase inside NovaUi_RefreshGameplayPanels (0x0045d320).
+  std::uint32_t radar_poll_ms_ = 0;
+  std::int16_t radar_blink_phase_ = 0;
+  // Sensor-static tiles drawn while a proximity scan is detected (the
+  // original's 10 preloaded 'ppat' resources 128..137, DAT_00733b7c). The
+  // original picks a tile from the shared NovaRandom stream each frame; the
+  // port keeps its own stream (TODO(decomp): decode the 'ppat' resources).
+  std::mt19937 radar_rng_{1337};
+  std::array<std::unique_ptr<SdlTexture>, 10> radar_static_{};
+
   // Loads (and caches) the target-panel portrait for a zero-based ship class
   // id, resolving the portrait PICT through the class's clone source, or null
   // when unavailable (null is also returned for a cached-but-textureless
@@ -108,6 +131,13 @@ private:
   TargetPortrait(SdlPlatform &platform,
                  const ScenarioData &scenario,
                  std::int16_t class_id);
+
+  // Ghidra 0x0045d600 NovaUi_DrawStellarRadarPanel. Draws the stellar radar
+  // panel: cockpit backing (or IFF black fill), the current system's stellar
+  // bodies and local ships as colour/size-tiered blips, the blinking primary
+  // target blip, the far-from-origin direction arrow, and sensor static while
+  // a proximity scan is detected.
+  void DrawRadarPanel(SdlPlatform &platform, const GameState &state);
 
   // The four gameplay text panels, one per original draw path. Each mirrors
   // its Ghidra function: shared top-right anchor transform, label/value

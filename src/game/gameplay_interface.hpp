@@ -43,13 +43,17 @@ struct HudPanelRect {
 // Byte offsets follow Ui_InstallGameplayInterfaceLayout: the fighter/industry
 // HUD colors are 24-bit RGB words at +0x00/+0x04/+0x10/+0x14/+0x20/+0x2c/+0x38/
 // +0x3c (stored in the payload as the raw little-endian RGB24 word, which reads
-// back as a distinct (r,g,b) triple); the three life-support bars sit at +0x18
-// (shield), +0x24 (armor), +0x30 (fuel); the readout panels at +0x40 (travel
-// status), +0x48 (weapon ammo), +0x50 (target status), +0x58 (cargo/mission
-// status). +0x60 is the display font family name (Pascal string after
+// back as a distinct (r,g,b) triple); +0x08 is the radar panel rect
+// (RadarArea); the three life-support bars sit at +0x18 (shield), +0x24
+// (armor), +0x30 (fuel); the readout panels at +0x40 (travel status), +0x48
+// (weapon ammo), +0x50 (target status), +0x58 (cargo/mission status). +0x60 is
+// the display font family name (Pascal string after
 // CString_ToPascalStringInPlace), +0xa0/+0xa2 are the two font sizes, and +0xa4
 // is the cockpit/interface background PICT resource id (clamped to >= 0x80).
 struct GameplayInterfaceLayout {
+  // +0x08 (RadarArea): the stellar radar panel rect the blip renderer fills;
+  // DAT_007355dc..e2 in NovaUi_DrawStellarRadarPanel (0x0045d600).
+  HudPanelRect radar_panel;
   HudPanelRect shield_panel;        // +0x18 g_player_shield_panel_*
   HudPanelRect armor_panel;         // +0x24 g_player_armor_panel_*
   HudPanelRect fuel_panel;          // +0x30 g_player_fuel_panel_*
@@ -61,8 +65,9 @@ struct GameplayInterfaceLayout {
   // HUD colour palette (raw little-endian 32-bit word per colour slot at the
   // colour offsets +0x00/+0x04/+0x10/+0x14/+0x20/+0x2c/+0x38/+0x3c). Each is
   // the value the archive carries; the consumer picks its own channel order
-  // (see gameplay_interface.cpp). The meaning of each slot is provisional
-  // (value text / label / bar fills per NovaUi_SetupGameplayPanelColors).
+  // (see gameplay_interface.cpp). Slots +0x10/+0x14 are the radar blip colours
+  // (BrightRadar for ships, DimRadar for stellar bodies; the pointer globals
+  // DAT_007cab9c/DAT_007cab98 of NovaUi_SetupGameplayPanelColors 0x0045cfc0).
   std::uint32_t color_word[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
   std::string font_family_name;  // +0x60

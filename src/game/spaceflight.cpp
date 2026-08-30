@@ -14,6 +14,7 @@
 #include "mission.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
+#include "radar_panel.hpp"
 #include "ship_ai.hpp"
 #include "ship_comm_dialog.hpp"
 #include "ship_spawn.hpp"
@@ -47,7 +48,13 @@ void Stub_Collisions(GameState &state) {
   NovaWeapon_ResolveProjectileCollisions(state);
 }
 
-void Stub_DrawStatus(GameState &state) { (void)state; }
+// Ghidra scope 0xc of Frame_TickSystems: the per-tick status/scan pass. Its
+// reconstructed member is the radar proximity-scan roll
+// (Frame_RollProximityScanDetection 0x0045d030, g_proximity_scan_detected),
+// which drives the radar panel's interference static.
+void Stub_DrawStatus(GameState &state) {
+  Frame_RollProximityScanDetection(state);
+}
 
 // Ghidra scope 6 parts 1 & 2 of Frame_TickSystems (0x004186b0). Part 1 ran the
 // per-frame targeting setup (Ship_UpdateAutoWeaponSelectionFromTarget etc.);
@@ -281,6 +288,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // composited over the world each frame.
   HudRenderer hud;
   hud.Install(platform, state);
+  // The radar resolves stellar blip sizes through the view's sprite store
+  // (Sprite_GetShotHalfSpan on each loaded spin set).
+  hud.AttachSpriteStore(&view.sprite_store());
 
   // Preload the complete gameplay sound handle table before the first frame.
   // The original does this during session setup; limiting the cache to owned
@@ -1443,9 +1453,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       // the 30..59-tick coast-through timer (armed once: the reset clears the
       // desired speed and thrust command, so the branch is not re-entered).
       float threshold_max_speed = eff_max_speed;
-      if (ship.ai_target_ship_slot >= 0 &&
-          ship.ai_target_ship_slot <= 0x3f &&
-          state.SlotInRange(static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+      if (ship.ai_target_ship_slot >= 0 && ship.ai_target_ship_slot <= 0x3f &&
+          state.SlotInRange(
+              static_cast<std::size_t>(ship.ai_target_ship_slot))) {
         const Ship &lead =
             state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
         const ShipClass *lead_class = state.scenario.Ship(

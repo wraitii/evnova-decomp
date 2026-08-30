@@ -298,11 +298,11 @@ address,name,impl_file,reimpl_pct,comment
 0x0045C7A0,NovaUi_MarkTravelAndStatusPanelsDirty,,0%,
 0x0045C880,Ship_CommandPlayerEscortGroup,,0%,
 0x0045CFC0,NovaUi_SetupGameplayPanelColors,,0%,
-0x0045D030,Frame_RollProximityScanDetection,,0%,
-0x0045D0A0,NovaUi_RebuildStellarRadarPanel,,0%,
+0x0045D030,Frame_RollProximityScanDetection,src/game/radar_panel.cpp,100%,"Frame_RollProximityScanDetection: odds = clamp(system interference - owned ModType-24 sum, 0, 100); roll(0..99)+1 <= odds latches GameState.proximity_scan_detected (g_proximity_scan_detected 0x007caba0). Wired to TickSystems scope 0xc."
+0x0045D0A0,NovaUi_RebuildStellarRadarPanel,src/game/hud_renderer.cpp,25%,"Backdrop/IFF-black fill and radar rect translate are reproduced inside HudRenderer::DrawRadarPanel; the offscreen radar buffer rebuild + dirty-mark fan-out is subsumed by the port redrawing the cockpit + radar each frame."
 0x0045D287,NovaUi_BlitGameplayClipRect,,0%,
-0x0045D320,NovaUi_RefreshGameplayPanels,,0%,
-0x0045D600,NovaUi_DrawStellarRadarPanel,,0%,
+0x0045D320,NovaUi_RefreshGameplayPanels,src/game/hud_renderer.cpp,15%,"Only the >=15ms target-status poll cadence (g_last_target_status_poll_tick/g_target_status_blink_phase toggle) and the radar dispatch are reproduced, as HudRenderer members; the other panel dirty-dispatch paths are separate draw calls here."
+0x0045D600,NovaUi_DrawStellarRadarPanel,src/game/hud_renderer.cpp,85%,"HudRenderer::DrawRadarPanel: 1/32 blip scale with ceil rounding, stellar disc/box tiers from spin half-span (0x20 default), density-scanner big-ship boxes (mass>=100), cloak visibility gate, IFF colours + black backdrop, blinking target blip, far-from-origin arrow (7000000 dist-sq, 25..50px shaft, +-135deg 6px wings), static while scan detected. Divergences: direct composite instead of offscreen buffer; static tiles procedural (ppat not decoded); original center-dot under static draws at an uninitialized cursor and is skipped."
 0x0045E400,NovaUi_DrawTravelStatusPanel,src/game/hud_renderer.cpp,95%,Faithful rewrite: idle ("Nav System Off" @top+22 label) / transfer ("Stellar Navigation" @+12 + stellar name @+29 value) / jump ("Hyperspace" @+12 + destination @+29, "Unexplored System" while undiscovered); STR# 0x7d2 strings, label/value colours, hold-timer colour switch and the jump-range/fuel dimming logic. Mode derives from TravelState (original reads the ship travel_transfer_mode latch); the decompiled reachability loop's field aliasing approximated via system visibility + ship-to-centre distance (TODO in code).
 0x0045E9C0,NovaUi_DrawPlayerShieldArmorPanels,,0%,
 0x0045EA66,NovaUi_DrawPlayerShieldBar,src/game/hud_renderer.cpp,60%,aspect-driven fill geometry (HudBar_FillRect + DrawLifeBar): tall slots fill top-down, wide fill right-to-left, colour from gov panel slot; still missing cockpit-trough pre-blit / dirty-rect restore
@@ -363,10 +363,10 @@ address,name,impl_file,reimpl_pct,comment
 0x00464E30,Outfit_HasCloakShieldDropOnActivation,src/game/outfit.cpp,90%,"NovaOutfit_HasCloakShieldDropOnActivation scans the active player/NPC loadout for ModType 17 and tests ModVal bit 0x04."
 0x00464F60,Outfit_HasCloakDamageDeactivateFlag,,0%,
 0x00465090,Outfit_GetCloakShieldDrainFlags,src/game/outfit.cpp,90%,"NovaOutfit_GetCloakShieldDrainFlags scans the active player/NPC loadout for ModType 17 and returns ModVal bits 8..11, the cloak shield-drain flags."
-0x004651A0,Outfit_HasCloakRadarVisibilityFlag,,0%,
-0x004652A0,Outfit_HasCloakScannerRevealForSurface,,0%,
-0x00465410,Outfit_HasPlayerOwnedOutfitType0x0D_Cached,,0%,
-0x004654B0,Outfit_HasPlayerOwnedOutfitType0x0E_Cached,,0%,
+0x004651A0,Outfit_HasCloakRadarVisibilityFlag,src/game/radar_panel.cpp,100%,"Outfit_HasCloakRadarVisibility: ModType 17 ModVal bit 0x0002, player-owned inventory scan vs NPC ship-class default loadout (same split as Outfit_HasCloakingDevice)."
+0x004652A0,Outfit_HasCloakScannerRevealForSurface,src/game/radar_panel.cpp,45%,"Player_HasCloakScannerReveal scans owned ModType-30 ModVal bits (0x0002 screen / 0x0001 radar); the cached ShipState +0xC91C/+0xC91E population path remains TODO(decomp)."
+0x00465410,Outfit_HasPlayerOwnedOutfitType0x0D_Cached,src/game/radar_panel.cpp,80%,"Outfit_PlayerHasDensityScanner: ModType-13 ownership via Outfit_HasOwnedEffect (outfit.cpp); the -1 sentinel memoization global is not reproduced (scan is cheap)."
+0x004654B0,Outfit_HasPlayerOwnedOutfitType0x0E_Cached,src/game/radar_panel.cpp,80%,"Outfit_PlayerHasIffOutfit: ModType-14 ownership via Outfit_HasOwnedEffect (outfit.cpp); the -1 sentinel memoization global is not reproduced (scan is cheap)."
 0x00465550,Stellar_ComputeHyperspaceTravelDays,,0%,
 0x00465610,Stellar_ComputeTravelRangeSq,src/game/targeting.cpp,100%,"NovaTargeting_ComputeTravelRangeSq: base 1000 + ModType-23 outfit sum (primary+alt slots * owned count), clamped >=0 then squared"
 0x004656A0,Outfit_ClampOutfitOwnedCountToCurrentLimits,,0%,
@@ -375,8 +375,8 @@ address,name,impl_file,reimpl_pct,comment
 0x00465D90,Ship_FormatLocalizedCountWord,,0%,
 0x00465E50,Outfit_CanAffordAndCarryItem,,0%,
 0x00465EA0,Outfit_HasOutfitItemInPool,,0%,
-0x00465F00,Ship_GetShipRadarColor,,0%,
-0x00466030,Stellar_GetStellarRadarColor,,0%,
+0x00465F00,Ship_GetShipRadarColor,src/game/radar_panel.cpp,100%,"Ship_RadarDisplayColor: player cyan, fire-restricted 0x4000 grey (NovaAiShip_IsFireRestricted), distress-eligible red, ai_target chain green/blue; fixed triples from Settings_InitTimingPresets 0x004ad7c0."
+0x00466030,Stellar_GetStellarRadarColor,src/game/radar_panel.cpp,100%,"Stellar_RadarDisplayColor: inactive/uninhabited grey, hazard green, wormhole (0,22000,22000), hypergate policy-flag-1 yellow else reputation ladder, ordinary bodies reputation ladder via GameState.system_reputation."
 0x00466260,Stellar_ComputeStellarDisplayColor,,0%,
 0x00466540,Rect_CenterImageInRect,,0%,
 0x004665F0,NovaText_StripLeadingArticle,,0%,
@@ -441,7 +441,7 @@ address,name,impl_file,reimpl_pct,comment
 0x0046AAD0,NovaEffects_QueueCenteredResource,,0%,
 0x0046AB00,NovaAudio_PreStageJumpSoundBySeconds,,0%,
 0x0046AB60,Frame_UpdateEffectIntensityGlobal,,0%,
-0x0046ABB0,Ship_GetScannerStrength,,0%,
+0x0046ABB0,Ship_GetScannerStrength,src/game/radar_panel.cpp,90%,"Ship_ComputeScannerStrength: owned_count * ModVal summed over ModType 0x18 slots, clamp [-100,100]; the DAT_007356ba memoization sentinel is not reproduced."
 0x0046AC50,Mission_SpawnAmbientMissionShip,,0%,
 0x0046B210,Math_ShortestAngleDeltaDeg,,0%,
 0x0046B260,Ship_CanShipUseAfterburner,src/game/ship_ai.cpp,95%,"Renamed from Ship_IsShipEligibleForEscortOrLaunchBehavior after the +0xBD consumer analysis. Ported as NovaShip_CanShipUseAfterburner: formation-leader block, capability 0x400/0x40 gates, 0x20 rating roll (NovaRandom_Range(0x540)+0x100 <= rating/Strength). rating producer TODO(decomp) (field seeded 0)."
@@ -942,7 +942,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004B8D50,Rect_Offset,,0%,
 0x004B8D80,FUN_004b8d80,,0%,
 0x004B8DC0,Rect_Inset,,0%,
-0x004B8DF0,Rect_Union,,0%,
+0x004B8DF0,Rect_Intersect,src/game/hud_renderer.cpp,100%,"IntersectRadarRect: QD SectRect (max lefts/tops, min rights/bottoms, empty when edges touch) used to clip every radar blip rect to the panel rect; renamed in the DB from the former misnomer Rect_Union."
 0x004B8E90,Rect_ContainsPoint,,0%,
 0x004B8ED0,Resource_LoadPictAsImageWithColorRemap,src/pict_image.cpp,80%,Resource_LoadPictAsImage: PICT v2 DirectBitsRect RGB555 scope; the optional post-load color-remap tail (8/16-bit remap through DAT_0085faee table) is NOT ported
 0x004B9050,Resource_LoadPictAsImage,src/pict_image.cpp,100%,Resource_LoadPictAsImage: wrapper over LoadWithColorRemap with remap off; used for loading/startup splash PICTs
@@ -959,7 +959,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004B97E0,DrawContext_DrawLineTo,,0%,
 0x004BA2F0,DrawContext_SetCursorPosAdjusted,,0%,
 0x004BA320,FUN_004ba320,,0%,
-0x004BA350,FUN_004ba350,,0%,
+0x004BA350,FUN_004ba350,src/game/hud_renderer.cpp,85%,"DrawRadarDisc: midpoint circle outline (8-way, 1px plot, d=1-r) with the same centre/radius derivation from the radar-clipped rect; the fat-pixel filled-run branch (context pixel scale != 1) is not reproduced (port contexts are always 1x1)."
 0x004BB260,FUN_004bb260,,0%,
 0x004BB860,FUN_004bb860,,0%,
 0x004BB870,FUN_004bb870,,0%,
@@ -985,7 +985,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004BBD30,FUN_004bbd30,,0%,
 0x004BBD40,FUN_004bbd40,,0%,
 0x004BBD50,Resource_LoadPixPat,,0%,
-0x004BBDC0,FUN_004bbdc0,,0%,
+0x004BBDC0,FUN_004bbdc0,src/game/hud_renderer.cpp,60%,"Tiled-fill logic ported (SDL_RenderTextureTiled over the radar rect); the 10 preloaded ppat resources 128..137 (DAT_00733b7c) are replaced by procedurally generated noise tiles (TODO(decomp))."
 0x004BBF90,ResourceError_SetMessageContext,,0%,
 0x004BC070,ResourceError_ShowMessageDialog,,0%,
 0x004BC0E0,NovaPlatform_MarkTickAndWait,,0%,

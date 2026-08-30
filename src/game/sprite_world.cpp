@@ -230,7 +230,8 @@ std::unique_ptr<SpriteAsset> SpriteAsset::LoadCicnSet(SDL_Renderer *renderer,
     }
     const auto image = Resource_LoadCicnAsImage(*data);
     if (!image) {
-      NovaLog::Warn("cicn frame {}: could not decode", static_cast<unsigned>(id));
+      NovaLog::Warn("cicn frame {}: could not decode",
+                    static_cast<unsigned>(id));
       return nullptr;
     }
     auto texture = SdlTexture::Create(
@@ -250,8 +251,7 @@ std::unique_ptr<SpriteAsset> SpriteAsset::LoadCicnSet(SDL_Renderer *renderer,
     // from the icon rect. The original's reticle updaters position the four
     // brackets WITHOUT the half-span compensation the ship/stellar updaters
     // apply, so the frame's top-left lands exactly on the placement point.
-    asset->frames.push_back(
-        SpriteFrame{std::move(texture), 0.0F, 0.0F});
+    asset->frames.push_back(SpriteFrame{std::move(texture), 0.0F, 0.0F});
   }
   if (asset->frames.empty()) {
     return nullptr;
@@ -260,7 +260,7 @@ std::unique_ptr<SpriteAsset> SpriteAsset::LoadCicnSet(SDL_Renderer *renderer,
 }
 
 const SpriteAsset *SpriteStore::Spin(SDL_Renderer *renderer,
-                                     std::uint16_t spin_id) {
+                                     std::uint16_t spin_id) const {
   const auto index = static_cast<std::size_t>(spin_id);
   if (sets_.size() <= index) {
     sets_.resize(index + 1);

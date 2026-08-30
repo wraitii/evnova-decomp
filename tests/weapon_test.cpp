@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <filesystem>
 
 #include "game/game_state.hpp"
@@ -56,6 +57,26 @@ void SeedStockWeaponBanks(GameState &state) {
   }
   state.weapon_bank_cooldown.fill(0.0F);
   state.active_shots.clear();
+}
+
+// The Light Blaster carries Inaccuracy10 = 9 (weapon 0x80), so the firing
+// bearing is jittered by uniform [-9, +8] degrees before the velocity is
+// projected (NovaWeapon fire path, apply_spread: NovaRandom_Range(spread*2)
+// - spread; the original does not gate the spread on the caller either).
+// The velocity is therefore only deterministic up to the spread envelope:
+// assert the speed exactly and the bearing within the envelope, rather than
+// exact components (those depend on the internal RNG roll sequence).
+void CheckShotVelocity(const ActiveShot &shot,
+                       float heading_deg,
+                       float speed_px_per_frame) {
+  CHECK(std::hypot(shot.vel_x, shot.vel_y) ==
+        Catch::Approx(speed_px_per_frame));
+  const float kRadToDeg = 180.0F / 3.14159265358979F;
+  float bearing = std::atan2(shot.vel_x, -shot.vel_y) * kRadToDeg;
+  float offset = bearing - heading_deg;
+  // Wrap into (-180, 180].
+  offset = std::fmod(std::fmod(offset, 360.0F) + 540.0F, 360.0F) - 180.0F;
+  CHECK(std::abs(offset) <= 9.0F);
 }
 } // namespace
 
@@ -119,9 +140,9 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   CHECK(state.active_shots[0].pos_x == Catch::Approx(100.0F));
   CHECK(state.active_shots[0].pos_y == Catch::Approx(200.0F));
   // WeaponDef Speed is px/frame * 100; the light blaster is 1500 -> 15
-  // px/frame, so heading 0 projects to vel_y = -15.
-  CHECK(state.active_shots[0].vel_x == Catch::Approx(0.0F));
-  CHECK(state.active_shots[0].vel_y == Catch::Approx(-15.0F));
+  // px/frame. The Inaccuracy10 = 9 bearing jitter (see CheckShotVelocity)
+  // keeps the exact components random, so only the envelope is pinned.
+  CheckShotVelocity(state.active_shots[0], 0.0F, 15.0F);
   // Life = WeaponDef Count (13 ticks).
   CHECK(state.active_shots[0].life_frames == 13);
   // The bank went into cooldown (reload 10 ticks) so a back-to-back fire is a
@@ -405,9 +426,8 @@ TEST_CASE("light blaster exits the nose barrel, not the hull centre",
   //   y += (F=10 along -y => -10*0.71) - drop(-2) = -7.1 + 2 = -5.1
   CHECK(shot.pos_x == Catch::Approx(100.0F + 3.0F));
   CHECK(shot.pos_y == Catch::Approx(200.0F - 10.0F * 0.71F + 2.0F)); // -5.1
-  // Velocity still points up (-y) along the heading regardless of the offset.
-  CHECK(shot.vel_x == Catch::Approx(0.0F));
-  CHECK(shot.vel_y == Catch::Approx(-15.0F));
+  // Velocity: 15 px/frame within the Inaccuracy10 = 9 spread envelope.
+  CheckShotVelocity(shot, 0.0F, 15.0F);
 }
 
 // Regression: the new-pilot flow seeds the weapon banks (Step 4) and then

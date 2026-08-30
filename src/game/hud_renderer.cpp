@@ -7,7 +7,9 @@
 #include "hud_overlay.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
+#include "radar_panel.hpp"
 #include "ship_ai.hpp"
+#include "sprite_world.hpp"
 #include "targeting.hpp"
 #include "weapon.hpp"
 
@@ -462,6 +464,10 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
                                static_cast<float>(cockpit_h_)};
     SDL_RenderTexture(renderer, cockpit_->get(), nullptr, &strip_rect);
   }
+
+  // Stellar radar panel (NovaUi_DrawStellarRadarPanel 0x0045d600): composites
+  // onto the cockpit art before the other panels refresh.
+  DrawRadarPanel(platform, state);
 
   // Life-support bars, drawn inside their genuine top-right-strip rects. The
   // Federation shield/armor/fuel slots are x=35..184 at y=200/216/234, and
@@ -1102,6 +1108,382 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
                   top + 82.0F,
                   GroupedNumber(state.player.credits),
                   value_color);
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra 0x0045d600 NovaUi_DrawStellarRadarPanel (with 0x0045d0a0 the rebuild/
+// backdrop path, 0x004ba350 the blip disc plot, 0x004bbdc0 the static tiling
+// and 0x0045d320 the blink-poll cadence).
+//
+// The original renders the panel into an offscreen buffer that is blitted
+// back onto the gameplay surface; this port composites directly, redrawing
+// the cockpit PICT every frame where the original re-blits the cached backing
+// rect (RebuildStellarRadarPanel's backdrop restore). Everything else mirrors
+// the decompilation: 1/32 position scale, blip colour/size tiers, the blink
+// phase, the far-from-origin arrow and the interference static.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Fixed radar constants (DAT_005756d0 / b0 / b8 / bc / c0, DAT_00733b74).
+constexpr double kRadarScale = 0.03125;            // contact scale (1/32)
+constexpr double kRadarHomeDistanceSq = 7000000.0; // origin-arrow threshold
+constexpr float kRadarArrowShaftNear = 25.0F;
+constexpr float kRadarArrowShaftFar = 50.0F;
+constexpr float kRadarArrowWingLength = 6.0F;
+constexpr float kRadarArrowWingDeg = 135.0F; // 0x87 bearing offsets
+constexpr std::int16_t kRadarDefaultHalfSpan = 0x20;
+constexpr int kRadarStaticTileSize = 64;
+
+// The original's ROUND(value) + (fraction > 0) pattern resolves to ceil for
+// non-integers, identity for integers (FIST round-to-nearest then bump).
+[[nodiscard]] int CeilRadar(float value) {
+  const int truncated = static_cast<int>(value);
+  return value > static_cast<float>(truncated) ? truncated + 1 : truncated;
+}
+
+// Rect_Intersect (0x004b8df0, formerly misnamed Rect_Union in the DB) is a
+// QD SectRect: it clips `blip` to
+// `radar` and reports whether any area survives (empty when edges touch).
+[[nodiscard]] bool IntersectRadarRect(HudPanelRect &blip,
+                                      const HudPanelRect &radar) {
+  blip.left = std::max(blip.left, radar.left);
+  blip.top = std::max(blip.top, radar.top);
+  blip.right = std::min(blip.right, radar.right);
+  blip.bottom = std::min(blip.bottom, radar.bottom);
+  return blip.left < blip.right && blip.top < blip.bottom;
+}
+
+void DrawRadarPoint(SDL_Renderer *renderer,
+                    int x,
+                    int y,
+                    const HudPanelRect &clip) {
+  if (x < clip.left || x > clip.right || y < clip.top || y > clip.bottom) {
+    return;
+  }
+  SDL_RenderPoint(renderer, static_cast<float>(x), static_cast<float>(y));
+}
+
+// Ghidra 0x004ba350 FUN_004ba350 with the draw context's 1x1 pixel scale:
+// a midpoint-circle outline (8-way symmetric, single-pixel plot) inscribed in
+// the rect, radius (bottom-top)/2, centre ((left+right+1)/2, (top+bottom+1)/2).
+void DrawRadarDisc(SDL_Renderer *renderer, const HudPanelRect &rect) {
+  const int cx = (rect.left + rect.right + 1) / 2;
+  const int cy = (rect.top + rect.bottom + 1) / 2;
+  const int radius = (rect.bottom - rect.top) / 2;
+  int x = 0;
+  int y = radius;
+  int d = 1 - radius;
+  while (x <= y) {
+    DrawRadarPoint(renderer, cx + x, cy + y, rect);
+    DrawRadarPoint(renderer, cx - x, cy + y, rect);
+    DrawRadarPoint(renderer, cx + x, cy - y, rect);
+    DrawRadarPoint(renderer, cx - x, cy - y, rect);
+    DrawRadarPoint(renderer, cx + y, cy + x, rect);
+    DrawRadarPoint(renderer, cx - y, cy + x, rect);
+    DrawRadarPoint(renderer, cx + y, cy - x, rect);
+    DrawRadarPoint(renderer, cx - y, cy - x, rect);
+    if (d < 0) {
+      d += 2 * x + 3;
+    } else {
+      d += 2 * (x - y) + 5;
+      --y;
+    }
+    ++x;
+  }
+}
+
+// DrawContext_FrameRect16WithCurrentColor: QuickDraw FrameRect, boundary
+// inclusive (a 3x3 rect frames a 3x3 hollow box).
+void DrawRadarBox(SDL_Renderer *renderer, const HudPanelRect &rect) {
+  const SDL_FRect top{static_cast<float>(rect.left),
+                      static_cast<float>(rect.top),
+                      static_cast<float>(rect.right - rect.left + 1),
+                      1.0F};
+  const SDL_FRect bottom{static_cast<float>(rect.left),
+                         static_cast<float>(rect.bottom),
+                         static_cast<float>(rect.right - rect.left + 1),
+                         1.0F};
+  const SDL_FRect left_edge{static_cast<float>(rect.left),
+                            static_cast<float>(rect.top),
+                            1.0F,
+                            static_cast<float>(rect.bottom - rect.top + 1)};
+  const SDL_FRect right_edge{static_cast<float>(rect.right),
+                             static_cast<float>(rect.top),
+                             1.0F,
+                             static_cast<float>(rect.bottom - rect.top + 1)};
+  SDL_RenderFillRect(renderer, &top);
+  SDL_RenderFillRect(renderer, &bottom);
+  SDL_RenderFillRect(renderer, &left_edge);
+  SDL_RenderFillRect(renderer, &right_edge);
+}
+
+// Math_BearingFromPointToPoint (0x0043b670) / Math_AddPolarVelocity
+// (0x0043b4a0) conventions: heading 0 = up, clockwise, x += sin, y -= -cos.
+[[nodiscard]] float
+RadarBearingDeg(float from_x, float from_y, float to_x, float to_y) {
+  constexpr float kRadToDeg = 180.0F / 3.14159265358979F;
+  const float deg = std::atan2(to_x - from_x, -(to_y - from_y)) * kRadToDeg;
+  return deg < 0.0F ? deg + 360.0F : deg;
+}
+
+void RadarPolarOffset(float bearing_deg, float distance, float &x, float &y) {
+  constexpr float kDegToRad = 3.14159265358979F / 180.0F;
+  x += std::sin(bearing_deg * kDegToRad) * distance;
+  y -= std::cos(bearing_deg * kDegToRad) * distance;
+}
+
+} // namespace
+
+void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
+                                 const GameState &state) {
+  // RadarArea validity gate (DAT_007355de < DAT_007355e2 && dc < e0).
+  if (!(layout_.radar_panel.left < layout_.radar_panel.right) ||
+      !(layout_.radar_panel.top < layout_.radar_panel.bottom)) {
+    return;
+  }
+  SDL_Renderer *renderer = platform.renderer();
+  const auto playfield = platform.logical_playfield_size();
+  const HudPanelRect radar = HudPanel_AnchorTopRight(
+      layout_.radar_panel, static_cast<std::int16_t>(playfield.x));
+
+  // Target-status poll (NovaUi_RefreshGameplayPanels 0x0045d320): toggles the
+  // blink phase every >= 15 ms poll, which also re-marks the radar dirty
+  // (i.e. the panel redraws every poll).
+  const std::uint32_t now = SDL_GetTicks();
+  if (now - radar_poll_ms_ >= 15) {
+    radar_poll_ms_ = now;
+    radar_blink_phase_ =
+        static_cast<std::int16_t>((radar_blink_phase_ + 1) & 1);
+  }
+
+  const bool iff = Outfit_PlayerHasIffOutfit(state);
+  const bool density = Outfit_PlayerHasDensityScanner(state);
+  // g_is_system_transition_active: the port's travel transition latch.
+  const bool force_empty = state.travel.engaging;
+
+  // Backdrop: IFF radar fills black (DAT_00733b74); otherwise the cockpit
+  // PICT drawn above is the backing the original re-blits.
+  if (iff) {
+    const SDL_FRect backdrop{static_cast<float>(radar.left),
+                             static_cast<float>(radar.top),
+                             static_cast<float>(radar.right - radar.left),
+                             static_cast<float>(radar.bottom - radar.top)};
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &backdrop);
+  }
+
+  const SDL_Color bright = ColorOf(layout_.color_word[2]); // BrightRadar
+  const SDL_Color dim = ColorOf(layout_.color_word[3]);    // DimRadar
+  const float center_x = static_cast<float>(radar.left + radar.right) * 0.5F;
+  const float center_y = static_cast<float>(radar.top + radar.bottom) * 0.5F;
+
+  const auto blip_pos = [&](float world_x, float world_y) {
+    const int dx = CeilRadar(world_x - state.player.pos_x);
+    const int dy = CeilRadar(world_y - state.player.pos_y);
+    return std::pair<int, int>{
+        CeilRadar(static_cast<float>(static_cast<double>(center_x) +
+                                     static_cast<double>(dx) * kRadarScale)),
+        CeilRadar(static_cast<float>(static_cast<double>(center_y) +
+                                     static_cast<double>(dy) * kRadarScale))};
+  };
+
+  if (!force_empty && state.proximity_scan_detected) {
+    // Interference static: tile one of ten pre-rendered noise patterns over
+    // the panel (FUN_004bbdc0). The original tiles a random NovaRandom-picked
+    // 'ppat' resource 128..137 (DAT_00733b7c); the port generates its own
+    // noise tiles.
+    // TODO(decomp(0x004bbdc0)) partial: 'ppat' resources not decoded.
+    if (!radar_static_[0]) {
+      std::uniform_int_distribution<int> shade(0, 255);
+      std::vector<std::uint8_t> pixels(
+          static_cast<std::size_t>(kRadarStaticTileSize) *
+          kRadarStaticTileSize * 4);
+      for (int tile = 0; tile < 10; ++tile) {
+        for (std::size_t i = 0; i < pixels.size(); i += 4) {
+          const std::uint8_t v = static_cast<std::uint8_t>(shade(radar_rng_));
+          pixels[i] = v;
+          pixels[i + 1] = v;
+          pixels[i + 2] = v;
+          pixels[i + 3] = SDL_ALPHA_OPAQUE;
+        }
+        radar_static_[static_cast<std::size_t>(tile)] = SdlTexture::Create(
+            renderer, kRadarStaticTileSize, kRadarStaticTileSize, pixels);
+      }
+    }
+    std::uniform_int_distribution<int> pick(0, 9);
+    if (const SdlTexture *tile =
+            radar_static_[static_cast<std::size_t>(pick(radar_rng_))].get()) {
+      const SDL_FRect dst{static_cast<float>(radar.left),
+                          static_cast<float>(radar.top),
+                          static_cast<float>(radar.right - radar.left),
+                          static_cast<float>(radar.bottom - radar.top)};
+      SDL_RenderTextureTiled(renderer, tile->get(), nullptr, 1.0F, &dst);
+    }
+    // The original's center-dot still executes here but at an uninitialized
+    // cursor position (NovaRandom's tile index reuse); skipped as invisible.
+    return;
+  }
+
+  if (!force_empty) {
+    const auto *sys = state.scenario.System(
+        static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+    if (sys != nullptr) {
+      // Stellar bodies (NavDef1-16, the decomp's adjacency_system_ids +0x10
+      // alias of SystemDef stellar_ids at +0x2a).
+      for (const std::int16_t nav : sys->nav_defs) {
+        if (nav < 0x80) {
+          continue;
+        }
+        const Stellar *st = state.scenario.Stellar(nav);
+        if (st == nullptr) {
+          continue;
+        }
+        const auto [bx, by] = blip_pos(static_cast<float>(st->pos_x),
+                                       static_cast<float>(st->pos_y));
+        const SDL_Color color =
+            iff ? Stellar_RadarDisplayColor(state, *st) : dim;
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+        const bool planet = (st->flags & 0x10U) == 0U &&
+                            (st->availability_flags & 0x3000U) == 0U;
+        if (planet) {
+          // Disc radius tier from the spin sprite half-span
+          // (Sprite_GetShotHalfSpan 0x00462390, default 0x20).
+          std::int16_t half_span = kRadarDefaultHalfSpan;
+          if (sprite_store_ != nullptr) {
+            const SpriteAsset *set = sprite_store_->Spin(
+                renderer, static_cast<std::uint16_t>(st->link_a_id + 1000));
+            if (set != nullptr && !set->frames.empty()) {
+              half_span = static_cast<std::int16_t>(set->tile_width / 2);
+            }
+          }
+          const int inset = half_span < 200 ? (half_span < 90 ? -1 : -2) : -3;
+          HudPanelRect rect{static_cast<std::int16_t>(bx),
+                            static_cast<std::int16_t>(by),
+                            static_cast<std::int16_t>(bx),
+                            static_cast<std::int16_t>(by)};
+          rect.left += inset;
+          rect.top += inset;
+          rect.right -= inset;
+          rect.bottom -= inset;
+          if (IntersectRadarRect(rect, radar)) {
+            DrawRadarDisc(renderer, rect);
+          }
+        } else {
+          // Stations / hypergates / wormholes: hollow 3x3 box.
+          HudPanelRect rect{static_cast<std::int16_t>(bx - 1),
+                            static_cast<std::int16_t>(by - 1),
+                            static_cast<std::int16_t>(bx + 1),
+                            static_cast<std::int16_t>(by + 1)};
+          if (IntersectRadarRect(rect, radar)) {
+            DrawRadarBox(renderer, rect);
+          }
+        }
+      }
+      // Ships (slots 1..0x3f; 0 is the player).
+      const bool scanner_radar = Player_HasCloakScannerRadarReveal(state);
+      for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+        const Ship &ship = state.ShipAt(slot);
+        if (!ship.is_active ||
+            ship.current_system_id != state.player.current_system_id) {
+          continue;
+        }
+        bool visible = false;
+        if (!NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
+          visible = true;
+        } else if (Outfit_HasCloakRadarVisibility(state, ship) ||
+                   scanner_radar) {
+          visible = true;
+        }
+        if (!visible) {
+          continue;
+        }
+        const auto [bx, by] = blip_pos(ship.pos_x, ship.pos_y);
+        SDL_Color color = bright;
+        if (iff) {
+          if (state.player.primary_target_ship_slot ==
+                  static_cast<std::int16_t>(slot) &&
+              radar_blink_phase_ != 0) {
+            color = kRadarTargetBlinkColor;
+          } else {
+            color = Ship_RadarDisplayColor(state, ship);
+          }
+        }
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+        const ShipClass *cls = state.scenario.Ship(
+            static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+        const bool big_blip =
+            density && cls != nullptr && cls->mass_tons >= 100;
+        if (!big_blip) {
+          // Single-pixel dot, inclusive radar-bounds test.
+          if (bx >= radar.left && bx <= radar.right && by >= radar.top &&
+              by <= radar.bottom) {
+            SDL_RenderPoint(
+                renderer, static_cast<float>(bx), static_cast<float>(by));
+          }
+        } else {
+          HudPanelRect rect{static_cast<std::int16_t>(bx - 1),
+                            static_cast<std::int16_t>(by - 1),
+                            static_cast<std::int16_t>(bx + 1),
+                            static_cast<std::int16_t>(by + 1)};
+          if (IntersectRadarRect(rect, radar)) {
+            DrawRadarBox(renderer, rect);
+          }
+        }
+      }
+    }
+  }
+
+  // Player blip (centre dot).
+  {
+    const SDL_Color color =
+        iff ? Ship_RadarDisplayColor(state, state.player) : bright;
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    SDL_RenderPoint(renderer, center_x, center_y);
+  }
+
+  // Far-from-origin direction arrow: while a primary target keeps the blink
+  // phase cycling, not in hyperspace transfer, the current system has navs,
+  // and the ship is > sqrt(7000000) px from the system origin, flash an arrow
+  // pointing back toward the origin.
+  if (radar_blink_phase_ != 0 && state.player.travel_transfer_mode != 3) {
+    const auto *sys = state.scenario.System(
+        static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+    const int nav_count =
+        sys ? static_cast<int>(
+                  std::count_if(sys->nav_defs.begin(),
+                                sys->nav_defs.end(),
+                                [](std::int16_t nav) { return nav >= 0x80; }))
+            : 0;
+    const float dist_sq = state.player.pos_x * state.player.pos_x +
+                          state.player.pos_y * state.player.pos_y;
+    if (nav_count > 0 && static_cast<double>(dist_sq) > kRadarHomeDistanceSq) {
+      const float bearing =
+          RadarBearingDeg(state.player.pos_x, state.player.pos_y, 0.0F, 0.0F);
+      float start_x = center_x;
+      float start_y = center_y;
+      RadarPolarOffset(bearing, kRadarArrowShaftNear, start_x, start_y);
+      float end_x = center_x;
+      float end_y = center_y;
+      RadarPolarOffset(bearing, kRadarArrowShaftFar, end_x, end_y);
+      SDL_SetRenderDrawColor(renderer, dim.r, dim.g, dim.b, dim.a);
+      SDL_RenderLine(renderer,
+                     CeilRadar(start_x),
+                     CeilRadar(start_y),
+                     CeilRadar(end_x),
+                     CeilRadar(end_y));
+      for (const float wing : {-kRadarArrowWingDeg, kRadarArrowWingDeg}) {
+        float wing_x = end_x;
+        float wing_y = end_y;
+        RadarPolarOffset(bearing + wing, kRadarArrowWingLength, wing_x, wing_y);
+        SDL_RenderLine(renderer,
+                       CeilRadar(end_x),
+                       CeilRadar(end_y),
+                       CeilRadar(wing_x),
+                       CeilRadar(wing_y));
+      }
+      SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    }
+  }
 }
 
 } // namespace game
