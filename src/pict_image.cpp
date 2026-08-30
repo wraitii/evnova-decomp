@@ -12,42 +12,210 @@ namespace {
 
 [[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
                                      std::size_t offset) {
-  return std::to_integer<std::uint16_t>(bytes[offset]) << 8U |
-         std::to_integer<std::uint16_t>(bytes[offset + 1]);
+  return static_cast<std::uint16_t>(
+      (std::to_integer<std::uint16_t>(bytes[offset]) << 8U) |
+      std::to_integer<std::uint16_t>(bytes[offset + 1]));
 }
 
-struct DirectBitsOpcode {
-  std::size_t payload = 0;
-  std::uint16_t opcode = 0;
+// Ghidra DAT_00570344: operand-size table consumed by the
+// Pict_ParseDirectBitsRect opcode walker. Entry n is the payload byte count
+// following PICT opcode n; a value of -1 means "skip 2 bytes" (opcode with an
+// unknown/variable payload is re-synced past a halfword). Only opcodes below
+// 0xa2 reach the table; the BitsRect family, version markers and the other
+// special cases are handled by the walker itself.
+constexpr std::array<std::int32_t, 0xa2> kOpcodePayloadSize = {
+    0,  0,  8,  2,  // 0x00
+    2,  2,  4,  4,  // 0x04
+    2,  8,  8,  4,  // 0x08
+    4,  2,  4,  4,  // 0x0c
+    8,  1,  0,  0,  // 0x10
+    0,  2,  2,  0,  // 0x14
+    0,  0,  6,  6,  // 0x18
+    0,  6,  0,  6,  // 0x1c
+    8,  4,  6,  2,  // 0x20
+    -1, -1, -1, -1, // 0x24
+    0,  0,  0,  0,  // 0x28
+    -1, -1, -1, -1, // 0x2c
+    8,  8,  8,  8,  // 0x30
+    8,  8,  8,  8,  // 0x34
+    0,  0,  0,  0,  // 0x38
+    0,  0,  0,  0,  // 0x3c
+    8,  8,  8,  8,  // 0x40
+    8,  8,  8,  8,  // 0x44
+    0,  0,  0,  0,  // 0x48
+    0,  0,  0,  0,  // 0x4c
+    8,  8,  8,  8,  // 0x50
+    8,  8,  8,  8,  // 0x54
+    0,  0,  0,  0,  // 0x58
+    0,  0,  0,  0,  // 0x5c
+    12, 12, 12, 12, // 0x60
+    12, 12, 12, 12, // 0x64
+    4,  4,  4,  4,  // 0x68
+    4,  4,  4,  4,  // 0x6c
+    0,  0,  0,  0,  // 0x70
+    0,  0,  0,  0,  // 0x74
+    0,  0,  0,  0,  // 0x78
+    0,  0,  0,  0,  // 0x7c
+    0,  0,  0,  0,  // 0x80
+    0,  0,  0,  0,  // 0x84
+    0,  0,  0,  0,  // 0x88
+    0,  0,  0,  0,  // 0x8c
+    0,  0,  -1, -1, // 0x90 (0x90/0x91 handled by the walker)
+    -1, -1, -1, -1, // 0x94
+    -1, -1, -1, -1, // 0x98 (0x98-0x9b handled by the walker)
+    -1, -1, -1, -1, // 0x9c
+    2,  0,          // 0xa0
 };
 
-[[nodiscard]] std::optional<std::size_t>
-FindClassicBitsRect(std::span<const std::byte> bytes) {
-  // The small preference arrow PICTs are classic bitmap pictures. Their
-  // BitsRect opcode is byte-aligned at an odd offset after the v1 header, so
-  // they cannot be handled by the word-aligned DirectBitsRect scanner.
-  for (std::size_t offset = 10; offset + 1 < bytes.size(); ++offset) {
-    if (std::to_integer<std::uint8_t>(bytes[offset]) == 0x90) {
-      return offset + 1;
-    }
-  }
-  return std::nullopt;
-}
+// Ghidra 0x004fd0a0 Pict_ParseDirectBitsRect (opcode scan). Walks the PICT v2
+// opcode stream from the 0x0011 0x02FF version marker, skipping opcode
+// payloads exactly as the original does (fixed sizes from DAT_00570344,
+// length-prefixed blocks, and the special-cased opcodes), until a BitsRect
+// family opcode (0x90/0x91/0x98-0x9b) is reached. Image dimensions start at
+// the v2 frame rect and are overridden by the 10-byte rect blocks carried by
+// opcode 0x0001; the BitsRect PixMap bounds are never consulted for size.
+// The original also walks version-1 streams here; those reach the classic
+// scanner in the caller instead.
+struct BitsRectLocation {
+  std::size_t payload = 0;
+  std::uint16_t opcode = 0;
+  std::size_t width = 0;
+  std::size_t height = 0;
+};
 
-[[nodiscard]] std::optional<DirectBitsOpcode>
-FindDirectBitsRect(std::span<const std::byte> bytes) {
-  // PICT v2 opcodes are word-aligned relative to the start of the resource.
-  // This remains a deliberately narrow scanner, but avoiding odd offsets keeps
-  // pixel/payload bytes from being mistaken for an opcode in the observed
-  // DirectBitsRect resources.
-  for (std::size_t offset = 10; offset + 2 <= bytes.size(); offset += 2) {
-    // The original decoder accepts both DirectBitsRect opcodes used by the
-    // shipped resources. Most PICTs use 0x9a; the Key Settings backdrop
-    // (PICT 0x8b) uses the older 0x99 spelling with the same pixmap payload.
-    if (ReadBe16(bytes, offset) == 0x0099 ||
-        ReadBe16(bytes, offset) == 0x009a) {
-      return DirectBitsOpcode{offset + 2, ReadBe16(bytes, offset)};
+[[nodiscard]] std::optional<BitsRectLocation>
+WalkToBitsRect(std::span<const std::byte> bytes) {
+  if (bytes.size() < 12) {
+    return std::nullopt;
+  }
+  std::size_t version_pos = 10;
+  while (version_pos < bytes.size() &&
+         std::to_integer<std::uint8_t>(bytes[version_pos]) == 0) {
+    ++version_pos;
+  }
+  if (version_pos + 3 > bytes.size() ||
+      std::to_integer<std::uint8_t>(bytes[version_pos]) != 0x11) {
+    return std::nullopt;
+  }
+  const auto version = std::to_integer<std::uint8_t>(bytes[version_pos + 1]);
+  if (version != 2 ||
+      std::to_integer<std::uint8_t>(bytes[version_pos + 2]) != 0xff) {
+    // Version 1 pictures (and unknown versions) fall back to the classic
+    // scanner in the caller.
+    return std::nullopt;
+  }
+
+  std::int32_t width = static_cast<std::int16_t>(ReadBe16(bytes, 8)) -
+                       static_cast<std::int16_t>(ReadBe16(bytes, 4));
+  std::int32_t height = static_cast<std::int16_t>(ReadBe16(bytes, 6)) -
+                        static_cast<std::int16_t>(ReadBe16(bytes, 2));
+
+  std::size_t pos = version_pos + 3;
+  while (pos + 2 <= bytes.size()) {
+    if ((pos & 1U) != 0U) {
+      // The original consumes one pad byte when the stream drifts off the
+      // word alignment before reading the next opcode.
+      ++pos;
+      if (pos + 2 > bytes.size()) {
+        break;
+      }
     }
+    const auto opcode = ReadBe16(bytes, pos);
+    pos += 2;
+    if (opcode < 0xa2) {
+      if (opcode == 0x0001) {
+        if (pos + 2 > bytes.size()) {
+          return std::nullopt;
+        }
+        const auto block_size = ReadBe16(bytes, pos);
+        // A 10-byte block whose payload parses as a rect updates the image
+        // dimensions (the guarded branch of the original).
+        if (block_size == 10 && pos + 10 <= bytes.size()) {
+          const auto top = ReadBe16(bytes, pos + 2);
+          const auto left = ReadBe16(bytes, pos + 4);
+          const auto bottom = ReadBe16(bytes, pos + 6);
+          const auto right = ReadBe16(bytes, pos + 8);
+          if (bottom > top && right > left) {
+            width = right - left;
+            height = bottom - top;
+          }
+        }
+        if (pos + block_size > bytes.size()) {
+          return std::nullopt;
+        }
+        pos += block_size;
+        continue;
+      }
+      if (opcode == 0x0012 || opcode == 0x0013 || opcode == 0x0014) {
+        NovaLog::Todo("unsupported PICT pattern opcode {:#06x}", opcode);
+        return std::nullopt;
+      }
+      if (opcode == 0x001b) {
+        pos += 6;
+        continue;
+      }
+      if (opcode >= 0x0070 && opcode <= 0x0077) {
+        if (pos + 2 > bytes.size()) {
+          return std::nullopt;
+        }
+        pos += ReadBe16(bytes, pos);
+        continue;
+      }
+      if ((opcode >= 0x0090 && opcode <= 0x0091) ||
+          (opcode >= 0x0098 && opcode <= 0x009b)) {
+        if (width <= 0 || height <= 0) {
+          return std::nullopt;
+        }
+        return BitsRectLocation{pos,
+                                opcode,
+                                static_cast<std::size_t>(width),
+                                static_cast<std::size_t>(height)};
+      }
+      if (opcode == 0x00a1) {
+        if (pos + 4 > bytes.size()) {
+          return std::nullopt;
+        }
+        pos += ReadBe16(bytes, pos + 2) + 4U;
+        continue;
+      }
+      const auto skip = kOpcodePayloadSize[opcode];
+      pos += skip < 0 ? 2U : static_cast<std::size_t>(skip);
+      continue;
+    }
+    if (opcode == 0x0c00) {
+      pos += 24;
+      continue;
+    }
+    if (opcode == 0x0028) {
+      if (pos + 5 > bytes.size()) {
+        return std::nullopt;
+      }
+      pos += 5U + std::to_integer<std::uint8_t>(bytes[pos + 4]);
+      continue;
+    }
+    if (opcode == 0x8200 || opcode == 0x8201) {
+      // TODO(decomp(0x004fd0a0)) skipped: QuickTime-compressed PICT payloads;
+      // the original hands them to the QuickTime decompressor. No shipped
+      // Nova dialog PICT uses this encoding.
+      NovaLog::Todo("QuickTime-compressed PICT unsupported");
+      return std::nullopt;
+    }
+    if (opcode == 0x00ff || opcode == 0xffff) {
+      // End of picture without an image opcode.
+      return std::nullopt;
+    }
+    if ((opcode >= 0x00d0 && opcode <= 0x00fe) || opcode >= 0x8100) {
+      if (pos + 2 > bytes.size()) {
+        return std::nullopt;
+      }
+      pos += ReadBe16(bytes, pos);
+      continue;
+    }
+    if (opcode > 0x00ff && opcode < 0x8000) {
+      pos += (opcode >> 7) & 0xffU;
+      continue;
+    }
+    // [0x00a2,0x00af], [0x00b0,0x00cf] and [0x8000,0x80ff] carry no payload.
   }
   return std::nullopt;
 }
@@ -164,6 +332,31 @@ DecodeClassicBitsRect(std::span<const std::byte> pict_data,
   return image;
 }
 
+// The small preference arrow PICTs are classic bitmap pictures. Their
+// BitsRect opcode is byte-aligned at an odd offset after the v1 header, so
+// they cannot be handled by the word-aligned v2 opcode walker; the original
+// walks those streams with single-byte opcodes, which this narrow scanner
+// approximates by searching for the 0x90 BitsRect byte directly.
+[[nodiscard]] std::optional<std::size_t>
+FindClassicBitsRect(std::span<const std::byte> bytes) {
+  for (std::size_t offset = 10; offset + 1 < bytes.size(); ++offset) {
+    if (std::to_integer<std::uint8_t>(bytes[offset]) == 0x90) {
+      return offset + 1;
+    }
+  }
+  return std::nullopt;
+}
+
+using Palette = std::array<std::array<std::uint8_t, 3>, 256>;
+
+// Ghidra DAT_005705cc: the game's built-in 8-bit palette, copied over any
+// image that decodes without an inline ColorTable. White entry 0, black rest.
+[[nodiscard]] Palette DefaultPalette() {
+  Palette palette{};
+  palette[0] = {255, 255, 255};
+  return palette;
+}
+
 } // namespace
 
 // Ghidra 0x004b9050 Resource_LoadPictAsImage. The WithColorRemap variant
@@ -174,64 +367,73 @@ DecodeClassicBitsRect(std::span<const std::byte> pict_data,
 // is never taken and omitting it introduces no visual divergence.
 std::optional<PictImage>
 Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
-  constexpr std::size_t source_and_destination_rects_size = 18;
-  const auto direct_bits = FindDirectBitsRect(pict_data);
-  if (!direct_bits) {
+  const auto bits = WalkToBitsRect(pict_data);
+  if (!bits) {
     if (const auto classic_bits = FindClassicBitsRect(pict_data)) {
       if (const auto image = DecodeClassicBitsRect(pict_data, *classic_bits)) {
         return image;
       }
     }
-    NovaLog::Todo("unsupported PICT: no DirectBitsRect opcode");
+    NovaLog::Todo("unsupported PICT: no BitsRect opcode");
     return std::nullopt;
   }
 
-  const auto base = direct_bits->payload;
-  // 0x99 stores the PixMap without its four-byte baseAddr; 0x9a includes that
-  // field before the same 46-byte PixMap header. PICT 0x8b is the former. The
-  // size below is the PixMap header itself; the optional baseAddr is already
-  // represented by pixmap_base.
-  const bool compact_pixmap = direct_bits->opcode == 0x0099;
-  const std::size_t pixmap_base = base + (compact_pixmap ? 0 : 4);
-  constexpr std::size_t pixmap_size = 46;
-  if (pixmap_base + pixmap_size + source_and_destination_rects_size >
-      pict_data.size()) {
-    NovaLog::Todo("unsupported PICT: truncated PixMap header");
+  const auto opcode = bits->opcode;
+  // DirectPixMapRect (0x9a/0x9b) stores a 4-byte baseAddr before rowBytes and
+  // never carries an inline ColorTable; the BitsRect/PackBitsRect variants
+  // (0x90/0x91/0x98/0x99) start at rowBytes and do.
+  const bool direct = opcode == 0x009a || opcode == 0x009b;
+  const bool region_variant =
+      opcode == 0x0091 || opcode == 0x0099 || opcode == 0x009b;
+  const auto width = bits->width;
+  const auto height = bits->height;
+
+  std::size_t pos = bits->payload;
+  if (direct) {
+    pos += 4;
+  }
+  if (pos + 2 > pict_data.size()) {
+    NovaLog::Todo("unsupported PICT: truncated rowBytes field");
     return std::nullopt;
   }
-  // The 0x8b resource stores 0x804a here; the high bit is a PixMap flag and
-  // the actual packed row is 74 bytes.
-  const auto row_bytes =
-      static_cast<std::size_t>(ReadBe16(pict_data, pixmap_base) & 0x3fffU);
-  const auto top = ReadBe16(pict_data, pixmap_base + 2);
-  const auto left = ReadBe16(pict_data, pixmap_base + 4);
-  const auto bottom = ReadBe16(pict_data, pixmap_base + 6);
-  const auto right = ReadBe16(pict_data, pixmap_base + 8);
-  const auto pixel_size = ReadBe16(pict_data, pixmap_base + 28);
-  const auto component_count = ReadBe16(pict_data, pixmap_base + 30);
-  const auto width = static_cast<std::size_t>(right - left);
-  const auto height = static_cast<std::size_t>(bottom - top);
-  if (bottom <= top || right <= left ||
-      width > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
-      height > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
-      width > std::numeric_limits<std::size_t>::max() / 4 / height) {
-    NovaLog::Todo("unsupported PICT DirectBitsRect dimensions");
-    return std::nullopt;
+  const auto row_bytes_raw = ReadBe16(pict_data, pos);
+  const auto row_bytes = static_cast<std::size_t>(row_bytes_raw & 0x7fffU);
+  // rowBytes + bounds; the game takes the image dimensions from the frame
+  // (and opcode-0x0001 blocks), never from the PixMap bounds.
+  pos += 10;
+
+  // The PixMap body follows the bounds for DirectPixMapRect and for any
+  // packed (high rowBytes bit) variant; plain 1-bit BitMaps stop at bounds.
+  std::size_t pixel_size = 1;
+  std::size_t component_count = 1;
+  if (direct || (row_bytes_raw & 0x8000U) != 0) {
+    constexpr std::size_t pixmap_body_size = 36;
+    if (pos + pixmap_body_size > pict_data.size()) {
+      NovaLog::Todo("unsupported PICT: truncated PixMap header");
+      return std::nullopt;
+    }
+    pixel_size = ReadBe16(pict_data, pos + 18);
+    component_count = ReadBe16(pict_data, pos + 20);
+    pos += pixmap_body_size;
   }
 
   // Decoded row layout per bit depth, matching the game's FUN_004fcc00:
-  // 16-bit stays 2 bytes/pixel (big-endian 5-5-5), 32-bit expands to 4
-  // bytes/pixel. The packbits unit is 2 for 16-bit and 1 for 32-bit.
-  std::size_t unit_size = 1;
-  std::size_t row_out_bytes = 0;
+  // 8-bit indexed expands through the palette, 16-bit stays 2 bytes/pixel
+  // (big-endian 5-5-5), 32-bit expands to 4 bytes/pixel. The packbits unit is
+  // 2 for 16-bit and 1 otherwise.
   enum class PixelFormat {
-    kUnsupported,
+    kIndexed8,
     kMonochrome,
     kRgb555,
-    kRgb24Planar
-  } format = PixelFormat::kUnsupported;
-  if (pixel_size == 1 && component_count == 1) {
-    unit_size = 1;
+    kRgb24Planar,
+  };
+  PixelFormat format = PixelFormat::kIndexed8;
+  std::size_t unit_size = 1;
+  std::size_t row_out_bytes = 0;
+  if (pixel_size == 8 && component_count == 1) {
+    row_out_bytes = width;
+    format = PixelFormat::kIndexed8;
+  } else if (pixel_size == 1 && component_count == 1) {
     row_out_bytes = row_bytes;
     format = PixelFormat::kMonochrome;
   } else if (pixel_size == 16 && component_count == 3) {
@@ -244,18 +446,73 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
     // packbits unit 1 into width*3 bytes laid out as R, then G, then B planes
     // and interleaves them. rowBytes is still width*4 (the pixmap's), which
     // only controls whether the row length is 1 or 2 bytes.
-    unit_size = 1;
     row_out_bytes = width * 3;
     format = PixelFormat::kRgb24Planar;
   } else {
-    NovaLog::Todo(
-        "unsupported PICT DirectBitsRect layout ({}-bit, {} components)",
-        pixel_size,
-        component_count);
+    // TODO(decomp(0x004fcc00)) skipped: 32-bit 4-component sources take the
+    // unported depth-0x20 row path; no shipped Nova resource uses it.
+    NovaLog::Todo("unsupported PICT BitsRect layout ({}-bit, {} components)",
+                  pixel_size,
+                  component_count);
+    return std::nullopt;
+  }
+  if (format == PixelFormat::kMonochrome && width > row_bytes * 8U) {
+    NovaLog::Todo("PICT 1-bit width {} exceeds row bytes {}", width, row_bytes);
     return std::nullopt;
   }
   if (row_bytes < row_out_bytes) {
     NovaLog::Todo("PICT rowBytes {} < expected {}", row_bytes, row_out_bytes);
+    return std::nullopt;
+  }
+
+  Palette palette = DefaultPalette();
+  if (!direct && (row_bytes_raw & 0x8000U) != 0) {
+    // Inline ColorTable: ctSeed (4), ctFlags (2), ctSize (2), then
+    // ctSize+1 entries of (value, red, green, blue) halfwords. When ctFlags
+    // bit 15 is set the entry values are ignored and indexes are sequential;
+    // the original clamps writes to the 256-entry palette.
+    constexpr std::size_t color_table_header_size = 8;
+    if (pos + color_table_header_size > pict_data.size()) {
+      NovaLog::Todo("PICT color table header is truncated");
+      return std::nullopt;
+    }
+    const auto ct_flags = ReadBe16(pict_data, pos + 4);
+    const auto entry_count =
+        static_cast<std::size_t>(ReadBe16(pict_data, pos + 6)) + 1U;
+    if (pos + color_table_header_size + entry_count * 8 > pict_data.size()) {
+      NovaLog::Todo("PICT color table ({} entries) overruns resource",
+                    entry_count);
+      return std::nullopt;
+    }
+    pos += color_table_header_size;
+    const bool sequential = (ct_flags & 0x8000U) != 0;
+    for (std::size_t entry = 0; entry < entry_count; ++entry) {
+      const auto index =
+          sequential ? entry
+                     : static_cast<std::size_t>(ReadBe16(pict_data, pos));
+      if (index < palette.size()) {
+        palette[index] = {
+            static_cast<std::uint8_t>(ReadBe16(pict_data, pos + 2) >> 8U),
+            static_cast<std::uint8_t>(ReadBe16(pict_data, pos + 4) >> 8U),
+            static_cast<std::uint8_t>(ReadBe16(pict_data, pos + 6) >> 8U)};
+      }
+      pos += 8;
+    }
+  }
+
+  // Source rect, destination rect, transfer mode.
+  pos += 18;
+  if (region_variant) {
+    // Rgn variants carry a region whose own size field includes its 2 size
+    // bytes, so advancing by the value skips exactly the region.
+    if (pos + 2 > pict_data.size()) {
+      NovaLog::Todo("PICT region size field is truncated");
+      return std::nullopt;
+    }
+    pos += ReadBe16(pict_data, pos);
+  }
+  if (pos > pict_data.size()) {
+    NovaLog::Todo("PICT row data starts past the resource");
     return std::nullopt;
   }
 
@@ -264,119 +521,76 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   image.height = static_cast<int>(height);
   image.rgba_pixels.resize(width * height * 4);
   std::vector<std::uint8_t> row(row_bytes);
-  std::array<std::array<std::uint8_t, 4>, 2> monochrome_colors{
-      std::array<std::uint8_t, 4>{0, 0, 0, 255},
-      std::array<std::uint8_t, 4>{255, 255, 255, 255}};
-  std::size_t source = pixmap_base + pixmap_size;
-  if (format == PixelFormat::kMonochrome) {
-    // 1-bit DirectBitsRect resources carry a ColorTable between the PixMap
-    // and the source/destination rectangles. PICT 0x8b uses two entries.
-    if (source + 8 > pict_data.size()) {
-      NovaLog::Todo("PICT monochrome color table is truncated");
-      return std::nullopt;
-    }
-    const auto color_count =
-        static_cast<std::size_t>(ReadBe16(pict_data, source + 6)) + 1;
-    if (color_count > 256 || source + 8 + color_count * 8 > pict_data.size()) {
-      NovaLog::Todo("unsupported PICT monochrome color table");
-      return std::nullopt;
-    }
-    for (std::size_t entry = 0; entry < color_count; ++entry) {
-      const std::size_t offset = source + 8 + entry * 8;
-      const auto index = ReadBe16(pict_data, offset);
-      if (index >= monochrome_colors.size()) {
-        continue;
-      }
-      monochrome_colors[index] = {
-          static_cast<std::uint8_t>(ReadBe16(pict_data, offset + 2) >> 8U),
-          static_cast<std::uint8_t>(ReadBe16(pict_data, offset + 4) >> 8U),
-          static_cast<std::uint8_t>(ReadBe16(pict_data, offset + 6) >> 8U),
-          255};
-    }
-    source += 8 + color_count * 8;
-  }
-  source += source_and_destination_rects_size;
-  if (compact_pixmap) {
-    // DirectBitsRect 0x99 places a byte-counted preamble in front of the
-    // PackBits rows. Pict_ParseDirectBitsRect advances over that block before
-    // passing the stream to Pict_DecodePixmapRows.
-    if (source + 2 > pict_data.size()) {
-      NovaLog::Todo("PICT 0x99 row preamble is truncated");
-      return std::nullopt;
-    }
-    const auto preamble_size =
-        static_cast<std::size_t>(ReadBe16(pict_data, source));
-    if (source + preamble_size > pict_data.size()) {
-      NovaLog::Todo("PICT 0x99 row preamble exceeds resource");
-      return std::nullopt;
-    }
-    source += preamble_size;
-  }
 
-  // The game's row decoder FUN_004fcc00 switches on the row byte count: when
-  // `rowBytes < 8` the packed row is stored RAW (no per-row length prefix and
-  // no packbits) and rowBytes bytes are copied straight into the output row
-  // (param_3 < 8 branch), advancing the source by rowBytes each row. Only
-  // wider rows (>= 8 bytes) carry the length-prefixed packbits payload. The
-  // 2px-wide three-state button middle tiles (rowBytes = 4) hit the raw path,
-  // so the always-packbits path below rejected them with a bogus "packbits
-  // decode failed" and the button bodies never rendered.
-  const bool raw_rows = row_bytes < 8;
-  for (int y = 0; y < image.height; ++y) {
+  // The game's row decoder FUN_004fcc00 switches on the masked row byte
+  // count: when it is 0 the pixmap's expected row size is used, when < 8 the
+  // packed row is stored RAW (no per-row length prefix and no packbits) and
+  // copied straight into the output row, and only wider rows (>= 8 bytes)
+  // carry the length-prefixed packbits payload (1-byte length for <= 0xfa,
+  // else big-endian 2 bytes). The 2px-wide three-state button middle tiles
+  // (rowBytes 4) take the raw path.
+  const auto effective_row_bytes = row_bytes != 0 ? row_bytes : row_out_bytes;
+  const bool raw_rows = effective_row_bytes < 8;
+  for (std::size_t y = 0; y < height; ++y) {
     if (raw_rows) {
       // Raw copy: no length prefix, no packbits. Guard the tail so a
       // truncated resource is rejected rather than over-read.
-      if (source + row_bytes > pict_data.size()) {
+      if (pos + effective_row_bytes > pict_data.size()) {
         NovaLog::Todo("PICT row {}: raw data truncated", y);
         return std::nullopt;
       }
-      for (std::size_t n = 0; n < row_bytes; ++n) {
-        row[n] = std::to_integer<std::uint8_t>(pict_data[source + n]);
+      for (std::size_t n = 0; n < effective_row_bytes; ++n) {
+        row[n] = std::to_integer<std::uint8_t>(pict_data[pos + n]);
       }
-      source += row_bytes;
+      pos += effective_row_bytes;
     } else {
-      const auto row_length = ReadRowLength(pict_data, source, row_bytes);
+      const auto row_length =
+          ReadRowLength(pict_data, pos, effective_row_bytes);
       if (!row_length) {
-        NovaLog::Todo("PICT row {}: bad length at {}", y, source);
+        NovaLog::Todo("PICT row {}: bad length at {}", y, pos);
         return std::nullopt;
       }
-      source += row_length->second;
-      const auto packed = pict_data.subspan(source, row_length->first);
+      pos += row_length->second;
+      const auto packed = pict_data.subspan(pos, row_length->first);
       if (!DecodePackBitsRow(packed, row, unit_size)) {
         NovaLog::Todo("PICT row {}: packbits decode failed", y);
         return std::nullopt;
       }
-      source += row_length->first;
+      pos += row_length->first;
     }
     for (std::size_t x = 0; x < width; ++x) {
-      const auto destination = (static_cast<std::size_t>(y) * width + x) * 4;
-      if (format == PixelFormat::kMonochrome) {
+      std::uint8_t red = 0;
+      std::uint8_t green = 0;
+      std::uint8_t blue = 0;
+      if (format == PixelFormat::kIndexed8) {
+        const auto color = palette[row[x]];
+        red = color[0];
+        green = color[1];
+        blue = color[2];
+      } else if (format == PixelFormat::kMonochrome) {
+        // FUN_004fcac0 expands 1-bit rows MSB-first into 0/1 indices.
         const auto byte = row[x / 8];
-        const auto color_index = (byte >> (7U - (x % 8U))) & 1U;
-        const auto color = monochrome_colors[color_index];
-        image.rgba_pixels[destination] = color[0];
-        image.rgba_pixels[destination + 1] = color[1];
-        image.rgba_pixels[destination + 2] = color[2];
-        image.rgba_pixels[destination + 3] = color[3];
+        const auto color = palette[(byte >> (7U - (x % 8U))) & 1U];
+        red = color[0];
+        green = color[1];
+        blue = color[2];
       } else if (format == PixelFormat::kRgb555) {
-        const auto pixel =
-            static_cast<std::uint16_t>(row[x * 2]) << 8U | row[x * 2 + 1];
-        image.rgba_pixels[destination] =
-            static_cast<std::uint8_t>(((pixel >> 10U) & 31U) * 255U / 31U);
-        image.rgba_pixels[destination + 1] =
-            static_cast<std::uint8_t>(((pixel >> 5U) & 31U) * 255U / 31U);
-        image.rgba_pixels[destination + 2] =
-            static_cast<std::uint8_t>((pixel & 31U) * 255U / 31U);
-        image.rgba_pixels[destination + 3] = 255;
+        const auto pixel = static_cast<std::uint16_t>(
+            (static_cast<std::uint16_t>(row[x * 2]) << 8U) | row[x * 2 + 1]);
+        red = static_cast<std::uint8_t>(((pixel >> 10U) & 31U) * 255U / 31U);
+        green = static_cast<std::uint8_t>(((pixel >> 5U) & 31U) * 255U / 31U);
+        blue = static_cast<std::uint8_t>((pixel & 31U) * 255U / 31U);
       } else {
-        // RG B planar interleave (FUN_004fcc00, depth 0x18).
-        image.rgba_pixels[destination] = static_cast<std::uint8_t>(row[x]);
-        image.rgba_pixels[destination + 1] =
-            static_cast<std::uint8_t>(row[width + x]);
-        image.rgba_pixels[destination + 2] =
-            static_cast<std::uint8_t>(row[width * 2 + x]);
-        image.rgba_pixels[destination + 3] = 255;
+        // RGB planar interleave (FUN_004fcc00, depth 0x18).
+        red = row[x];
+        green = row[width + x];
+        blue = row[width * 2 + x];
       }
+      const auto destination = (y * width + x) * 4U;
+      image.rgba_pixels[destination] = red;
+      image.rgba_pixels[destination + 1] = green;
+      image.rgba_pixels[destination + 2] = blue;
+      image.rgba_pixels[destination + 3] = 255;
     }
   }
   return image;

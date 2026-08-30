@@ -944,8 +944,8 @@ address,name,impl_file,reimpl_pct,comment
 0x004B8DC0,Rect_Inset,,0%,
 0x004B8DF0,Rect_Intersect,src/game/hud_renderer.cpp,100%,"IntersectRadarRect: QD SectRect (max lefts/tops, min rights/bottoms, empty when edges touch) used to clip every radar blip rect to the panel rect; renamed in the DB from the former misnomer Rect_Union."
 0x004B8E90,Rect_ContainsPoint,,0%,
-0x004B8ED0,Resource_LoadPictAsImageWithColorRemap,src/pict_image.cpp,80%,Resource_LoadPictAsImage: PICT v2 DirectBitsRect RGB555 scope; the optional post-load color-remap tail (8/16-bit remap through DAT_0085faee table) is NOT ported
-0x004B9050,Resource_LoadPictAsImage,src/pict_image.cpp,100%,Resource_LoadPictAsImage: wrapper over LoadWithColorRemap with remap off; used for loading/startup splash PICTs
+0x004B8ED0,Resource_LoadPictAsImageWithColorRemap,src/pict_image.cpp,85%,"Resource_LoadPictAsImage: BitsRect family (0x90/0x91/0x98-0x9b) incl. 8-bit indexed + 1-bit + RGB555 + demoted-24-bit paths via the ported opcode walker; the optional post-load color-remap tail (DAT_0085faee) is NOT ported (confirmed dead: all callers pass remap off)"
+0x004B9050,Resource_LoadPictAsImage,src/pict_image.cpp,100%,Resource_LoadPictAsImage: wrapper over LoadWithColorRemap with remap off; used for loading/startup splash PICTs and dialog DITL image items
 0x004B9060,FUN_004b9060,,0%,
 0x004B9070,DrawContext_BlitImageToRect,,0%,
 0x004B9130,Image_Destroy,,0%,
@@ -1673,10 +1673,10 @@ address,name,impl_file,reimpl_pct,comment
 0x004FC430,FUN_004fc430,,0%,
 0x004FC4E0,FUN_004fc4e0,,0%,
 0x004FC570,FUN_004fc570,,0%,
-0x004FCA30,FUN_004fca30,,0%,
-0x004FCAC0,FUN_004fcac0,,0%,
-0x004FCC00,Pict_DecodePixmapRows,src/pict_image.cpp,45%,PICT row decoder reimplemented: packbits + raw-copy paths, 1-byte/BE16 row length, and 1-bit expansion used by Key Settings PICT 0x8b; remaining depth/planar/masking/buffer behavior is out of scope
-0x004FD0A0,FUN_004fd0a0,,0%,
+0x004FCA30,FUN_004fca30,src/pict_image.cpp,80%,"PixMap body copy (rowBytes/bounds + 36-byte body fields incl. pixelSize/cmpCount and the 32->24-bit demotion input) inlined into Resource_LoadPictAsImage BitsRect parse; pmTable handle semantics not applicable to file-based tables"
+0x004FCAC0,FUN_004fcac0,src/pict_image.cpp,60%,"Row expander: 1-bit MSB-first expansion semantics confirmed and used via the monochrome path; 2/4-bit expansion branches and raw passthrough cases remain unported"
+0x004FCC00,Pict_DecodePixmapRows,src/pict_image.cpp,70%,"PICT row decoder: packbits + raw-copy paths, masked-rowBytes 1-byte/BE16 length rule, 1-bit expansion and 8-bit indexed palette output used by PICTs 0x81/0x82/0x8b; depth-0x20 4-component path and output-buffer aliasing details remain out of scope"
+0x004FD0A0,Pict_ParseDirectBitsRect,src/pict_image.cpp,70%,"Opcode walker ported (DAT_00570344 operand table, 0x0001 rect dim override, region/length skips, v2 scan from 0x0011 0x02FF) + BitsRect parse incl. 8-bit indexed ColorTable (sequential ctFlags) and default DAT_005705cc palette; v1 byte-opcode walking and QuickTime 0x8200/0x8201 path TODO(decomp)"
 0x004FDB60,FUN_004fdb60,,0%,
 0x004FDB90,FUN_004fdb90,,0%,
 0x004FDBF0,FUN_004fdbf0,,0%,
