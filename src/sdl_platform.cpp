@@ -310,7 +310,11 @@ void SdlPlatform::ApplyFullscreenPresentation() {
   // window-coordinate point, no clipping. On a high-density display the
   // renderer scale maps that unit to the backing pixels without changing how
   // much world fits in the window.
+  ApplyWindowPointDrawing();
   presentation_ = Presentation::kFullscreen;
+}
+
+void SdlPlatform::ApplyWindowPointDrawing() {
   SDL_SetRenderLogicalPresentation(
       renderer_.get(), 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
   SDL_SetRenderViewport(renderer_.get(), nullptr);
@@ -422,6 +426,7 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
       continue;
     }
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
+      mouse_window_point_ = {event.motion.x, event.motion.y};
       SDL_RenderCoordinatesFromWindow(renderer_.get(),
                                       event.motion.x,
                                       event.motion.y,
@@ -431,6 +436,7 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
     }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
         event.button.button == SDL_BUTTON_LEFT) {
+      mouse_window_point_ = {event.button.x, event.button.y};
       SDL_RenderCoordinatesFromWindow(renderer_.get(),
                                       event.button.x,
                                       event.button.y,
@@ -611,3 +617,38 @@ std::uint64_t SdlPlatform::ticks_ms() const { return SDL_GetTicks(); }
 // letterboxed scale-mode presentation maps through SDL's logical src/dst rects.
 // So it is returned unchanged for hit-testing.
 SDL_FPoint SdlPlatform::mouse_position() const { return mouse_position_; }
+
+SDL_FPoint SdlPlatform::mouse_window_point() const {
+  return mouse_window_point_;
+}
+
+SDL_FRect SdlPlatform::playfield_window_rect() const {
+  int w = kPlayfieldWidth;
+  int h = kPlayfieldHeight;
+  SDL_GetWindowSize(window_.get(), &w, &h);
+  const float fw = static_cast<float>(w);
+  const float fh = static_cast<float>(h);
+  switch (presentation_) {
+  case Presentation::kScaled: {
+    // The logical LETTERBOX mode maps the 640x480 canvas uniformly into the
+    // window; reproduce its dst rect in window points.
+    const float scale =
+        std::min(fw / static_cast<float>(kPlayfieldWidth),
+                 fh / static_cast<float>(kPlayfieldHeight));
+    const float dst_w = static_cast<float>(kPlayfieldWidth) * scale;
+    const float dst_h = static_cast<float>(kPlayfieldHeight) * scale;
+    return SDL_FRect{(fw - dst_w) * 0.5F, (fh - dst_h) * 0.5F, dst_w, dst_h};
+  }
+  case Presentation::kCentered: {
+    // ApplyCenteredPresentation integer-centres the native panel.
+    const int ox = std::max(0, w - kPlayfieldWidth) / 2;
+    const int oy = std::max(0, h - kPlayfieldHeight) / 2;
+    return SDL_FRect{static_cast<float>(ox), static_cast<float>(oy),
+                     static_cast<float>(kPlayfieldWidth),
+                     static_cast<float>(kPlayfieldHeight)};
+  }
+  case Presentation::kFullscreen:
+  default:
+    return SDL_FRect{0.0F, 0.0F, fw, fh};
+  }
+}

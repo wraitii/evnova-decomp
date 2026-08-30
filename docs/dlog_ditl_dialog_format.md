@@ -215,10 +215,36 @@ header name in the item-5 block. The rects were cross-checked against the
 `{146x26 buttons at x=27..173 y=244/184/214}`, `text 5,5..205,65`,
 `image 222,5..532,288`, `header 16,82..136,132`).
 
-If a future pass needs to render *any* dialog from its resource (rather than a
-hard-coded one), the natural path is to parse the DITL once into `NovaDialogItem`
-rects (already exposed by `brgr_archive.cpp`), offset each by the centred window
-origin, and draw the controls by ordinal.
+**Current policy: load DITLs at runtime.** The hard-coded rects above were the
+setup the recompilation started with; the going-forward approach is to consume
+the DLOG/DITL resources exactly like the game does. `src/game/ui_dialog.cpp`
+implements the SDL-backed port of the original's dialog runtime
+(`UiWindow_CreateFromDialogResource` 0x004cf760, `UiWindow_Draw` 0x004d0d00,
+`UiWindow_RunInteractionLoop` 0x004cfdd0 and the `UiPanel_*`/`UiControl_*`
+accessors): it loads a DLOG + DITL through `NovaResource_LoadDialogDefinition` /
+`NovaResource_LoadDialogItems`, centres the window per `Dialog_CreateFromDlog`,
+draws the controls from the parsed item rects, and reports interactions as the
+1-based ordinal of the activated control (that is what the `local_130` codes in
+every `UiWindow_RunInteractionLoop` call site are — OK = its ordinal, Cancel =
+its ordinal, a checkbox = its ordinal). Game-specific dialog ports (e.g. the
+new-pilot dialog, `src/game/new_pilot_flow.cpp`) should be written against this
+layer near-verbatim, not against hard-coded geometry. The hard-coded layouts
+in `preferences.cpp` / `ship_comm_dialog.cpp` / `negotiation_dialog.cpp` are
+legacy and migrate to `ui_dialog` opportunistically.
+
+One extra resource linkage the parser must surface: a **type-7 item's tail
+carries a MENU resource id in its first tail short**, and the engine turns that
+item into a popup filled from that MENU (e.g. DITL 0xc1d item 10 → MENU 0x1f4
+"Gender", item 12 → MENU 0x1f5 "Character", whose entries are filled at
+runtime from the pilot/châr family). `NovaResource_LoadDialogItems` now exposes
+this as `NovaDialogItem::menu_resource_id`, and `NovaResource_LoadMenuDefinition`
+parses the MENU payload (title + entries).
+
+> Type-7 vs type-0x80: the generic control drawer `UiWindow_Draw` handles
+> popups natively only for type 0x80; type-7 items are skipped by the generic
+> drawer and handled by the stock dialog callback installed via
+> `UiWindow_SetDrawCallback(window, 1)`. Both carry a list of Pascal entries
+> addressed through `UiPanel_GetEntryTextPascalIndexed`.
 
 ## 8. Quick recipe to read an unknown DLOG/DITL
 
@@ -232,3 +258,52 @@ origin, and draw the controls by ordinal.
    dialog's input handler in Ghidra.
 5. Cross-check by overlaying the item boxes on the backdrop (as was done to
    verify the ship-comm layout).
+
+## 9. Worked example: the new-pilot dialogs (0xc1d / 0xc1e / 0xbb9)
+
+The new-game pilot dialogs are fully decoded; use them as the reference for how
+DITL ordinals map to `UiPanel_*` rows and how popups get their content.
+
+### DLOG 0xc1d (multi-entry census) and 0xc1e (single) — both -> DITL 0xc1d/0xc1e
+
+Same 14-item template, two window sizes: 0xc1d is 326x247, 0xc1e is 326x213.
+Rows below are the 1-based ordinals used by
+`Menu_RunPilotSelectionDialog` (0x0048a7e0) — row N = DITL item N-1:
+
+| Row | Item | Control | Role |
+|-----|------|---------|------|
+| 1 | 0 | button `OK` (70x20, bottom-right) | activation code 1 |
+| 2 | 1 | button `Cancel` (70x20, bottom-left) | activation code 2 |
+| 3 | 2 | type-0x40 image 182x22 | decorative plate |
+| 4 | 3 | checkbox `Strict Play` | toggles the new-pilot flag (code 4); persisted to DAT_00596d2f by the flow |
+| 5 | 4 | static `Full Name:` | label |
+| 6 | 5 | static `Nickname:` | label |
+| 7 | 6 | static `name3:` (y=357, offscreen both variants) | vestigial third field |
+| 8 | 7 | edit text 170x16 | **Full Name**; prefilled from STR# 0x80 rows 1-3 (random), copied back to DAT_007d20b7; the `.plt` file is named `<Full Name>.plt` |
+| 9 | 8 | edit text 170x16 | **Nickname**; prefilled from STR# 0x80 rows 4-6, copied back to DAT_007d21b7 |
+| 10 | 9 | edit text (offscreen) | vestigial |
+| 11 | 10 | type-7 popup 200x20 -> **MENU 0x1f4 `Gender`** (Male/Female) | selection -> DAT_007d23b7; the flow lowercases its first char and compares to 'm' (0x6d) to latch DAT_00734c1c (male) |
+| 12 | 11 | static `Create a new pilot:` | title |
+| 13 | 12 | type-7 popup 271x20 -> **MENU 0x1f5 `Character`** (entries filled at runtime from the 0x63688a72 pilot/châr family) | selection -> DAT_007d22b7 = character-template key for `PilotData_InitializePlayerState`; only inside 0xc1d's window (0xc1e pushes it to y=277, offscreen) |
+| 14 | 13 | type-0x40 image 32x32 (top-left) | pilot icon |
+
+The variant pick: `ResourceData_CountEntries(0x63688a72)` minus hidden entries
+(name starts with `.`) — stock Nova only ships the hidden `.Trader` châr, so
+the census is 0 and **stock always shows 0xc1e** (no Character popup). Mods
+adding visible châr entries get 0xc1d. Preselection scans for the entry marked
+active/default (`PilotData_FindActivePilotName`, bit 0 of the flags at block
++0x132) and `UiControl_SetValue`s the popup to its index.
+
+### DLOG 0xbb9 — the shared text-entry modal
+
+`NovaUi_ShowTextConfirmCodeDialog` (0x00497900) opens DLOG 0xbb9, sets row 3 to
+the prompt Pascal string and row 5 to the initial edit text (select-all), then
+loops on activation codes: **1 = OK** (accept if the text is <= the max-length
+arg, else re-select the field and keep the loop open), **6 = Cancel**. The final
+row-5 text lands in DAT_007d4c0e. The new-game flow uses it as the ship
+christening box: prompt = STR# 0x7d2 row 0x79 ("Now, please christen your
+brand-new") + ` ` + `<ship class long name>` + `: ` (class name from the
+DAT_005a9bcc 0x100-stride Pascal table, indexed by the châr's ShipType),
+initial text = a random STR# 0x80 row 7-9 ship name ('Ring of Glory', 'Snowy
+Owl', 'Cardinal Virtue'), max 0x40 chars. The result, article-stripped, becomes
+the ship name (DAT_00599acc, the .plt trailer string).

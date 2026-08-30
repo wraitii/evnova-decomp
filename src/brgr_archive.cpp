@@ -884,6 +884,17 @@ NovaResource_LoadDialogItems(std::uint16_t dialog_item_list_id) {
     case 0x20:
     case 0x40:
       next = pos + 16; // +8 ushorts
+      // The control tail is [subtype byte][BE u16 refcon]: type-7 popups load
+      // the MENU named by the refcon, 0x40 image items blit the PICT (verified
+      // on DITL 0xc1d: item 2 -> PICT 129 (Strict Play note art), item 10 ->
+      // MENU 0x1f4 "Gender", item 12 -> MENU 0x1f5 "Character", item 13 ->
+      // PICT 130 (pilot icon)).
+      if (pos + 16 <= size) {
+        item.popup_subtype = std::to_integer<std::uint8_t>((*data)[pos + 13]);
+        item.refcon = static_cast<std::uint16_t>(
+            (std::to_integer<unsigned>((*data)[pos + 14]) << 8U) |
+            std::to_integer<unsigned>((*data)[pos + 15]));
+      }
       break;
     default:
       next = pos + 14; // +7 ushorts
@@ -952,6 +963,38 @@ std::optional<NovaCharacterIntro> NovaResource_LoadCharacterIntro() {
                 intro.pict_ids[2],
                 intro.delay_ticks[0] * 60);
   return intro;
+}
+
+std::optional<NovaMenuDefinition>
+NovaResource_LoadMenuDefinition(std::uint16_t menu_id) {
+  const auto data = NovaResource_Load(kResourceTypeMenu, menu_id);
+  if (!data || data->size() < 0x10) {
+    NovaLog::Todo("MENU {:#06x} absent or truncated", menu_id);
+    return std::nullopt;
+  }
+  const auto bytes = std::span{*data};
+  NovaMenuDefinition out;
+  std::size_t pos = 0x0e; // classic menu header is 0x10 bytes; title len at 0x0e
+  const std::size_t title_len = std::to_integer<std::size_t>(bytes[pos]);
+  ++pos;
+  if (pos + title_len > bytes.size()) {
+    return std::nullopt;
+  }
+  out.title.assign(reinterpret_cast<const char *>(bytes.data()) + pos,
+                   title_len);
+  pos += title_len;
+  // Entries: [pascal string][u16 cmd][u16 glyph], trailing 0x00 terminator.
+  while (pos < bytes.size() && std::to_integer<unsigned>(bytes[pos]) != 0) {
+    const std::size_t len = std::to_integer<std::size_t>(bytes[pos]);
+    ++pos;
+    if (pos + len > bytes.size()) {
+      break;
+    }
+    out.entries.emplace_back(reinterpret_cast<const char *>(bytes.data()) + pos,
+                             len);
+    pos += len + 4; // cmd + glyph shorts
+  }
+  return out;
 }
 
 std::optional<NovaStellarDescription>

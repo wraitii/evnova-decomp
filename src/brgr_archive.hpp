@@ -71,6 +71,22 @@ struct NovaCharacterIntro {
   std::array<std::int16_t, 4> delay_ticks{0, 0, 0, 0};  // PictDelay1-4
 };
 
+// A MENU resource as rendered by the stock dialog popup controls: a 0x10-byte
+// classic menu header (id/proc/width/height/enable flags), a Pascal title, then
+// entries of [Pascal string][u16 cmd][u16 glyph] terminated by a trailing 0x00.
+// The type-7 DITL controls reference these by id (NovaDialogItem::
+// menu_resource_id); popup entries may also be filled at runtime (the new-pilot
+// dialog's Character popup, MENU 0x1f5, ships empty and gets the 0x63688a72
+// family census). TODO(decomp): confirm the cmd/glyph u16 fields.
+struct NovaMenuDefinition {
+  std::string title;
+  std::vector<std::string> entries;
+};
+
+// Loads and parses a MENU resource. Returns nullopt when absent or too short.
+[[nodiscard]] std::optional<NovaMenuDefinition>
+NovaResource_LoadMenuDefinition(std::uint16_t menu_id);
+
 // Ghidra NovaData_LoadScenarioResourceTables loads the character resource
 // (ch\x9ar, here the default .Trader id 0x0080) that defines a new pilot's
 // intro cinematic. Returns nullopt when the archive/field set is absent.
@@ -226,6 +242,10 @@ struct NovaDialogItem {
   std::int16_t bottom = 0;
   std::int16_t right = 0;
   std::uint8_t type = 0;
+  // Bit 7 of the raw type byte. NOT an enable/draw gate: UiWindow_Draw draws
+  // every item whose flag byte is nonzero and ignores this bit (DITL 0xc1d
+  // ships all interactive controls with bit 7 clear and they render in the
+  // real game). Kept for resource fidelity only.
   bool enabled = true;
   // The item's Pascal-string caption, captured for text-like item types
   // (4 button, 5 checkbox, 6 radio, 8 static, 0x10 edit). Checkbox/static
@@ -233,6 +253,13 @@ struct NovaDialogItem {
   // "Ship Animations"); plain/control items leave it empty. Stored as the
   // raw resource bytes (no NUL padding).
   std::string title;
+  // Types 7/0x20/0x40 only: the tail's subtype byte and the BE u16 refcon.
+  // The engine resolves the refcon per subtype: type-7 popups load a MENU
+  // resource (DITL 0xc1d item 10 -> MENU 0x1f4 "Gender", item 12 -> MENU
+  // 0x1f5 "Character" whose entries are filled at runtime), 0x40 image items
+  // blit a PICT (DITL 0xc1d items 2/13 -> PICT 129/130).
+  std::uint8_t popup_subtype = 0;
+  std::uint16_t refcon = 0;
 };
 
 // Ghidra: FUN_004cef50 (called by UiWindow_CreateFromDialogResource after it

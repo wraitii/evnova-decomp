@@ -10,6 +10,7 @@ add_executable(evnova_tests
     movement_test.cpp
     mission_test.cpp
     mission_script_test.cpp
+    new_pilot_dialog_test.cpp
     pilot_file_test.cpp
     preferences_test.cpp
     scenario_data_test.cpp

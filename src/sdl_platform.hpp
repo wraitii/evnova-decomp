@@ -207,6 +207,26 @@ public:
   void SetScaledPlayfield();
   void SetFullscreenPlayfield();
 
+  // Raw mouse position in window coordinates (SDL window points), unmapped by
+  // any presentation transform. The dialog runtime composites over the last
+  // presented frame and draws at 1:1 window scale, so it maps the mouse
+  // against the playfield's on-screen rect itself instead of relying on the
+  // active presentation's coordinate mapping.
+  [[nodiscard]] SDL_FPoint mouse_window_point() const;
+
+  // Where the 640x480 logical content canvas currently sits on the window, in
+  // window points (letterboxed dst rect in the scaled presentation, the
+  // integer-centred panel in the centred one, the whole window in fullscreen).
+  [[nodiscard]] SDL_FRect playfield_window_rect() const;
+
+  // Transient drawing mode for modal windows that composite over the last
+  // presented frame: logical presentation disabled, no viewport, 1 drawing
+  // unit = 1 window point. Unlike the Set*Playfield modes this leaves
+  // presentation_ (and therefore playfield_window_rect) untouched, so the
+  // caller keeps seeing the underlying screen's geometry; the next
+  // Set*Playfield call from the active screen restores its own state.
+  void ApplyWindowPointDrawing();
+
 private:
   // The 640x480 logical content canvas shared by the fixed screens. This is
   // scaled up to the window in kScaled presentation and clipped centred in
@@ -229,6 +249,7 @@ private:
   bool quit_requested_ = false;
   Presentation presentation_ = Presentation::kFullscreen;
   SDL_FPoint mouse_position_{};
+  SDL_FPoint mouse_window_point_{};
   std::unique_ptr<SDL_Window, WindowDeleter> window_;
   std::unique_ptr<SDL_Renderer, RendererDeleter> renderer_;
 };

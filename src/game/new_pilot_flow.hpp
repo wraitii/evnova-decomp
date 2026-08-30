@@ -3,11 +3,17 @@
 // Clean-room reconstruction of the new-game flow, mirroring Ghidra
 // 0x00489d70 Menu_RunNewGameFlow. The original runs a chain of modal dialogs
 // and setup steps synchronously; this reimplementation keeps the same ordering
-// and per-step semantics, but each deeply-data-dependent subsystem is isolated
-// behind a small function so unsupported tables can be stubbed with an
-// explicit log. See new_pilot_flow.cpp for the per-step NOTES/DIVERGENCE marks.
+// and per-step semantics. The pilot-selection dialog is a port of
+// Menu_RunPilotSelectionDialog (0x0048a7e0) running on the SDL-backed dialog
+// runtime (ui_dialog.hpp) with the real DLOG 0xc1d/0xc1e resources; the
+// ship-christening box is the shared text-entry dialog (0x00497900, DLOG
+// 0xbb9). Each deeply-data-dependent setup step is isolated behind a small
+// function so unsupported tables can be stubbed with an explicit log. See
+// new_pilot_flow.cpp for the per-step NOTES/DIVERGENCE marks.
 
 #include "game_state.hpp"
+
+#include <functional>
 
 class SdlPlatform;
 
@@ -20,6 +26,11 @@ namespace game {
 // (the caller should switch to the intro cinematic / in-game mode). On cancel
 // or on any skipped-but-required step it returns false and the main menu stays
 // up. Mirrors Menu_RunNewGameFlow's early returns on dialog cancel.
-bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state);
+// `render_background` is invoked once per dialog frame to keep the menu
+// rendering behind the modal windows (see ui_dialog.hpp).
+bool NovaNewPilotFlow_Run(
+    SdlPlatform &platform,
+    GameState &state,
+    const std::function<void()> &render_background = {});
 
 } // namespace game

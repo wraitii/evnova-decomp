@@ -4,16 +4,21 @@
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "hud_overlay.hpp"
+#include "nova_font.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
 #include "ship_spawn.hpp"
 #include "travel.hpp"
+#include "ui_dialog.hpp"
 #include "weapon.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <functional>
 #include <random>
 #include <span>
 #include <string>
@@ -22,21 +27,6 @@
 namespace game {
 namespace {
 
-// The original builds these from string-table entries (Resource_LoadStringEntry
-// with ids 0x80..). Rather than depend on the string-table resource format
-// (not reconstructed), the reimplementation sources the same wording inline
-// and logs the divergence. The click-backed full-screen context menu and text
-// confirm dialog also predate the current framework, so they are reduced to
-// small modal prompts with the same semantics (see below).
-constexpr std::array<std::string_view, 7> kOpenerFirstNames{
-    "the newcomer",
-    "the wanderer",
-    "the trader",
-    "the mercenary",
-    "the courier",
-    "the smuggler",
-    "the pilot",
-};
 // Where a brand-new pilot begins. The real game randomizes the start system
 // among a few candidates at PilotData_InitializePlayerState (fresh-seed picks a
 // random valid starting system from the pilot-block's four stored choices); we
@@ -45,6 +35,32 @@ constexpr std::array<std::string_view, 7> kOpenerFirstNames{
 // the pilot-block start candidates are decoded.
 constexpr std::int16_t kStartSystemId = 1;            // zero-based (Tichel)
 constexpr std::int16_t kStartSystemResourceId = 0x81; // resource id
+
+// NovaText_StripLeadingArticle: drops the leading article from a name string.
+// TODO(decomp): the original's exact article set is not reconstructed; the
+// stock STR# 0x80 sample names carry none, so this only guards mod-added
+// entries (provisional).
+void StripLeadingArticle(std::string &name) {
+  constexpr std::string_view kThe = "the ";
+  if (name.size() > kThe.size() && std::equal(kThe.begin(), kThe.end(),
+                                              name.begin(), [](char a, char b) {
+                                                return std::tolower(
+                                                           static_cast<unsigned char>(a)) ==
+                                                       b;
+                                              })) {
+    name.erase(0, kThe.size());
+  }
+}
+
+// NameString_StripSubtitleSuffix: drops a trailing "the <x>"-style suffix.
+// TODO(decomp): suffix marker not reconstructed; provisional no-op that keeps
+// the call-site ordering visible.
+void StripSubtitleSuffix(std::string &) {}
+
+[[nodiscard]] int RandomIndex(GameState &state, int count) {
+  return static_cast<int>(
+      std::uniform_int_distribution<int>{0, count - 1}(state.rng));
+}
 
 // Picks the stellar resource id the player should spawn near in a system: the
 // first owned body (running the system's nav_defs). This stands in for the
@@ -62,258 +78,224 @@ PickLandingStellarResource(std::span<const std::int16_t> nav_defs) {
 }
 
 // ===========================================================================
-// Modal prompt helpers
+// Dialog ports (run on the SDL-backed dialog runtime in ui_dialog.cpp)
 // ---------------------------------------------------------------------------
-// The original performs all dialog interaction synchronously inside the flow
-// (blocking modal loops). These clean-room loops keep that behaviour, but use
-// the stock pilot-selection window's proportions and classic white/grey
-// controls instead of the temporary blue prompt. Geometry and captions follow
-// DLOG 0xc1d/0xc1e and Menu_RunPilotSelectionDialog; the resource-backed
-// pilot registry/list binding is still a separate TODO.
 
-[[nodiscard]] std::unique_ptr<SdlTexture>
-CaptureModalBackground(SDL_Renderer *renderer) {
-  SDL_Surface *const surface = SDL_RenderReadPixels(renderer, nullptr);
-  if (surface == nullptr) {
-    NovaLog::Warn("could not snapshot menu frame before pilot dialog: {}",
-                  SDL_GetError());
-    return nullptr;
+// The 0x63688a72 family census Menu_RunPilotSelectionDialog performs: count
+// the family's non-hidden entries (metadata name not starting with '.'). The
+// port enumerates the ch\x9ar resources loaded from the archives; the original
+// also merges the in-memory pilot blocks created during a session.
+// TODO(decomp): in-memory registry merge not reconstructed.
+struct PilotTemplateEntry {
+  std::uint16_t resource_id = 0;
+  std::string name;
+  bool hidden = false;
+};
+
+[[nodiscard]] std::vector<PilotTemplateEntry>
+EnumeratePilotTemplates() {
+  std::vector<PilotTemplateEntry> out;
+  for (const auto &[type_code, id] : NovaResource_AllKeys()) {
+    if (type_code != kResourceTypeCharacter) {
+      continue;
+    }
+    if (std::any_of(out.begin(), out.end(),
+                    [&](const PilotTemplateEntry &e) { return e.resource_id == id; })) {
+      continue;
+    }
+    auto named = NovaResource_LoadNamed(kResourceTypeCharacter, id);
+    if (!named) {
+      continue;
+    }
+    PilotTemplateEntry entry;
+    entry.resource_id = id;
+    entry.name = named->name;
+    entry.hidden = !named->name.empty() && named->name[0] == '.';
+    out.push_back(std::move(entry));
   }
-  SDL_Texture *const texture = SDL_CreateTextureFromSurface(renderer, surface);
-  SDL_DestroySurface(surface);
-  if (texture == nullptr) {
-    NovaLog::Warn("could not create pilot-dialog background texture: {}",
-                  SDL_GetError());
-    return nullptr;
-  }
-  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
-  return std::make_unique<SdlTexture>(texture);
+  return out;
 }
 
-void DrawModalBackground(SdlPlatform &platform,
-                         SDL_Renderer *renderer,
-                         const SdlTexture *background) {
-  platform.SetFullscreenPlayfield();
-  const auto size = platform.logical_playfield_size();
-  if (background == nullptr) {
-    SDL_SetRenderDrawColor(renderer, 18, 24, 32, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(renderer);
-  } else {
-    // SDL_RenderReadPixels returns output/backing dimensions. Replay the
-    // complete snapshot across the real fullscreen canvas before installing
-    // the centered logical modal viewport.
-    const SDL_FRect destination{0.0F, 0.0F, size.x, size.y};
-    SDL_RenderTexture(renderer, background->get(), nullptr, &destination);
+// Ghidra 0x004cd350 PilotData_ResolveStartType: the starting ship class from
+// the named character block (+4 minus 0x80; values < 0x80 resolve to class 0).
+[[nodiscard]] std::int16_t
+ResolveStartTypeFromTemplate(const std::string &template_name) {
+  for (const auto &entry : EnumeratePilotTemplates()) {
+    if (entry.name != template_name) {
+      continue;
+    }
+    const auto block =
+        NovaResource_Load(kResourceTypeCharacter, entry.resource_id);
+    if (!block || block->size() < 6) {
+      return 0;
+    }
+    const std::int16_t designator = static_cast<std::int16_t>(
+        (std::to_integer<unsigned>((*block)[4]) << 8U) |
+        std::to_integer<unsigned>((*block)[5]));
+    return designator >= 0x80
+               ? static_cast<std::int16_t>(designator - 0x80)
+               : 0;
   }
-  // The background occupies the real fullscreen canvas. Dialog controls use
-  // the original 640x480 coordinate system, centered over that canvas.
-  const SDL_Rect modal_viewport{
-      static_cast<int>(std::max(0.0F, (size.x - 640.0F) * 0.5F)),
-      static_cast<int>(std::max(0.0F, (size.y - 480.0F) * 0.5F)),
-      640,
-      480,
-  };
-  SDL_SetRenderViewport(renderer, &modal_viewport);
+  return 0;
 }
 
-// Ghidra 0x0048a7e0 Menu_RunPilotSelectionDialog (partial port: the name/
-// selection modal follows DLOG 0xc1d/0xc1e proportions; the resource-backed
-// pilot registry/list binding is still a TODO).
-bool RunTextInputPrompt(SdlPlatform &platform,
-                        const std::string &prompt,
-                        std::string initial_first,
-                        std::string initial_last,
-                        std::string &first,
-                        std::string &last,
-                        const SdlTexture *background) {
-  SDL_Renderer *const renderer = platform.renderer();
-  constexpr std::string_view kNavKeys =
-      "ENTER accept    ESC cancel    BACKSPACE erase";
-  constexpr std::size_t kMaxChars = 48;
+// Ghidra 0x0048a7e0 Menu_RunPilotSelectionDialog. DITL rows (1-based):
+// 4 = Strict Play checkbox (code 4), 8/9 = Full Name / Nickname edit texts
+// (prefilled from STR# 0x80 rows 1-3 / 4-6), 11 = Gender popup (MENU 0x1f4),
+// 13 = Character popup (MENU 0x1f5, filled from the 0x63688a72 family census;
+// offscreen in the 0xc1e single-pilot variant). Accept validates both names
+// <= 0x18 chars, refusing to close until they pass. Returns true on OK.
+bool RunPilotSelectionDialog(SdlPlatform &platform,
+                             NovaFontCache &font_cache,
+                             GameState &state,
+                             const std::function<void()> &render_background) {
+  // Variant pick: 0xc1d when two or more non-hidden entries exist, else 0xc1e
+  // (stock Nova only ships the hidden .Trader, so its census is 0).
+  const auto templates = EnumeratePilotTemplates();
+  const int visible = static_cast<int>(std::count_if(
+      templates.begin(), templates.end(),
+      [](const PilotTemplateEntry &e) { return !e.hidden; }));
+  const std::uint16_t dialog_id = visible >= 2 ? 0xc1d : 0xc1e;
 
-  std::array<std::string *, 2> fields{&first, &last};
-  *fields[0] = std::move(initial_first);
-  *fields[1] = std::move(initial_last);
-  std::size_t active_field = 0;
-  bool running = true;
-  while (running && !platform.quit_requested()) {
-    for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
-      switch (input->key) {
-      case TextKey::enter:
-        running = false; // accept
-        break;
-      case TextKey::escape:
-        return false;
-      case TextKey::backspace:
-        if (!fields[active_field]->empty()) {
-          fields[active_field]->pop_back();
-        }
-        break;
-      case TextKey::character:
-        if (fields[active_field]->size() < kMaxChars) {
-          fields[active_field]->push_back(input->character);
-        }
-        break;
-      case TextKey::physical:
-        // DIK_TAB (0x0f) moves between the two text-entry controls, as in the
-        // original dialog's focus navigation.
-        if (input->key_code == 0x0f) {
-          active_field = (active_field + 1) % fields.size();
-        }
-        break;
-      case TextKey::none:
-        break;
-      case TextKey::primary: {
-        const auto point = platform.mouse_position();
-        if (point.x >= 258.0F && point.x < 452.0F && point.y >= 168.0F &&
-            point.y < 190.0F) {
-          active_field = 0;
-        } else if (point.x >= 258.0F && point.x < 452.0F && point.y >= 197.0F &&
-                   point.y < 219.0F) {
-          active_field = 1;
-        } else if (point.x >= 168.0F && point.x < 230.0F && point.y >= 300.0F &&
-                   point.y < 328.0F) {
-          running = false;
-        } else if (point.x >= 395.0F && point.x < 465.0F && point.y >= 300.0F &&
-                   point.y < 328.0F) {
-          return false;
-        }
-        break;
-      }
+  auto window = UiWindow_CreateFromDialogResource(platform, dialog_id);
+  if (!window) {
+    return false;
+  }
+
+  // Row 4: the new-pilot (Strict Play) checkbox state from the current flag.
+  UiControl_SetValue(*window, 4, state.pilot.strict_play ? 1 : 0);
+  // Rows 8/9: random sample Full Name / Nickname from STR# 0x80 rows 1-3 /
+  // 4-6. The port's NovaHud_LoadStringEntry is 0-based (the original's
+  // Resource_LoadStringEntry is 1-based), so the row ranges map to indices
+  // 0-2 / 3-5.
+  UiPanel_SetEntryTextPascal(
+      *window, 8,
+      NovaHud_LoadStringEntry(0x80, static_cast<std::uint16_t>(RandomIndex(state, 3)))
+          .value_or(""));
+  UiPanel_SetEntryTextPascal(
+      *window, 9,
+      NovaHud_LoadStringEntry(
+          0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 3))
+          .value_or(""));
+  UiPanel_SetTextEntrySelectionRange(*window, 8, 0, 0xfe);
+
+  // Row 13 (0xc1d only): the Character popup, filled from the census and
+  // preselected to the active/default entry. TODO(decomp): the original
+  // preselects via PilotData_FindActivePilotName (flags bit 0 at block+0x132);
+  // the port defaults to the first entry.
+  if (dialog_id == 0xc1d) {
+    std::vector<std::string> names;
+    for (const auto &entry : templates) {
+      if (!entry.hidden) {
+        names.push_back(entry.name);
       }
     }
+    UiPanel_SetEntryListItems(*window, 13, "Character", std::move(names));
+    UiControl_SetValue(*window, 13, 1);
+  }
 
-    DrawModalBackground(platform, renderer, background);
-    // DLOG 0xc1e is 326x213 and is centred by the original dialog manager.
-    const SDL_FRect panel{157.0F, 133.0F, 326.0F, 213.0F};
-    const SDL_FRect panel_shadow{154.0F, 136.0F, 329.0F, 213.0F};
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &panel_shadow);
-    SDL_SetRenderDrawColor(renderer, 232, 232, 232, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 24, 24, 24, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 210, 210, 210, SDL_ALPHA_OPAQUE);
-    const SDL_FRect title_bar{158.0F, 134.0F, 324.0F, 23.0F};
-    SDL_RenderFillRect(renderer, &title_bar);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 170.0F, 142.0F, "New Pilot");
-    SDL_RenderDebugText(renderer, 176.0F, 157.0F, prompt.c_str());
-    SDL_RenderDebugText(renderer, 176.0F, 176.0F, "Full Name:");
-    SDL_RenderDebugText(renderer, 176.0F, 205.0F, "Nickname:");
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
-    const SDL_FRect entry{258.0F, 168.0F, 194.0F, 22.0F};
-    SDL_RenderFillRect(renderer, &entry);
-    SDL_SetRenderDrawColor(renderer, 80, 80, 80, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &entry);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    const std::string first_shown = first + (active_field == 0 ? "_" : "");
-    SDL_RenderDebugText(renderer, 264.0F, 176.0F, first_shown.c_str());
-    SDL_SetRenderDrawColor(renderer,
-                           active_field == 1 ? 255 : 190,
-                           active_field == 1 ? 255 : 190,
-                           active_field == 1 ? 255 : 190,
-                           SDL_ALPHA_OPAQUE);
-    const SDL_FRect nickname{258.0F, 197.0F, 194.0F, 22.0F};
-    SDL_RenderFillRect(renderer, &nickname);
-    SDL_SetRenderDrawColor(renderer, 90, 90, 90, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &nickname);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    const std::string last_shown = last + (active_field == 1 ? "_" : "");
-    SDL_RenderDebugText(renderer, 264.0F, 205.0F, last_shown.c_str());
-    SDL_RenderDebugText(renderer, 176.0F, 226.0F, "Gender");
-    SDL_SetRenderDrawColor(renderer, 160, 160, 160, SDL_ALPHA_OPAQUE);
-    const SDL_FRect gender{258.0F, 216.0F, 100.0F, 22.0F};
-    SDL_RenderFillRect(renderer, &gender);
-    SDL_SetRenderDrawColor(renderer, 70, 70, 70, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &gender);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 318.0F, 224.0F, "Male");
-    SDL_RenderDebugText(renderer, 176.0F, 248.0F, "[ ] Strict Play");
-    SDL_RenderDebugText(
-        renderer, 176.0F, 262.0F, "If you check this box, when you're dead,");
-    SDL_RenderDebugText(
-        renderer, 176.0F, 276.0F, "you're dead. No reincarnation allowed.");
-    SDL_RenderDebugText(renderer, 176.0F, 310.0F, "Cancel");
-    SDL_RenderDebugText(renderer, 405.0F, 310.0F, "OK");
-    SDL_SetRenderDrawColor(renderer, 90, 90, 90, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 176.0F, 336.0F, kNavKeys.data());
-    SDL_RenderPresent(renderer);
-    SDL_Delay(16);
+  short code = -1;
+  bool accepted = false;
+  bool cancelled = false;
+  while (!accepted && !cancelled && !platform.quit_requested()) {
+    UiWindow_RunInteractionLoop(
+        platform, font_cache, *window, &code, render_background);
+    if (code == 1) { // OK: validate both name fields, stay open on violation.
+      bool valid = true;
+      for (const std::size_t row : {std::size_t{8}, std::size_t{9}}) {
+        if (UiPanel_GetEntryTextPascal(*window, row).size() > 0x18) {
+          // (The original's FontCache_NoOpCleanup here is a no-op.)
+          UiPanel_SetTextEntrySelectionRange(*window, row, 0, 0x17);
+          valid = false;
+          break;
+        }
+      }
+      accepted = valid;
+    }
+    if (code == 4) { // Strict Play checkbox: the dialog owns the toggle.
+      state.pilot.strict_play =
+          UiControl_GetValue(*window, 4) == 0;
+      UiControl_SetValue(*window, 4, state.pilot.strict_play ? 1 : 0);
+    }
+    if (code == 2) { // Cancel
+      cancelled = true;
+    }
+    code = -1;
+  }
+  if (!accepted) {
+    return false;
+  }
+
+  // Copy the names back (the original strips articles/subtitle suffixes from
+  // these buffers right after the dialog returns).
+  state.pilot.first_name = UiPanel_GetEntryTextPascal(*window, 8);
+  state.pilot.last_name = UiPanel_GetEntryTextPascal(*window, 9);
+  StripLeadingArticle(state.pilot.first_name);
+  StripLeadingArticle(state.pilot.last_name);
+  StripSubtitleSuffix(state.pilot.first_name);
+  StripSubtitleSuffix(state.pilot.last_name);
+  state.pilot.strict_play = UiControl_GetValue(*window, 4) != 0;
+
+  // Row 11: Gender popup selection; the flow latches male on a first char of
+  // 'm' (MWRuntime_FUN_004d6230 table lookup compared to 0x6d).
+  if (const auto gender = UiPanel_GetEntryTextPascalIndexed(
+          *window, 11, UiControl_GetValue(*window, 11))) {
+    state.pilot.male =
+        !gender->empty() &&
+        std::tolower(static_cast<unsigned char>((*gender)[0])) == 'm';
+  }
+  state.control.male = state.pilot.male;
+
+  // Row 13: the selected character-template name (empty in the 0xc1e variant;
+  // Menu_RunNewGameFlow then falls back to the family's first entry).
+  if (dialog_id == 0xc1d) {
+    if (const auto choice = UiPanel_GetEntryTextPascalIndexed(
+            *window, 13, UiControl_GetValue(*window, 13))) {
+      state.pilot.character_template = *choice;
+    }
   }
   return true;
 }
 
-// The original follows pilot selection with a small modal ship-name editor.
-bool RunShipNamePrompt(SdlPlatform &platform,
-                       std::string initial,
-                       std::string &out,
-                       const SdlTexture *background) {
-  SDL_Renderer *const renderer = platform.renderer();
-  constexpr std::string_view kNavKeys =
-      "ENTER accept    ESC cancel    BACKSPACE erase";
-  out = std::move(initial);
-  while (!platform.quit_requested()) {
-    for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
-      if (input->key == TextKey::enter) {
-        return !out.empty();
-      }
-      if (input->key == TextKey::escape) {
-        return false;
-      }
-      if (input->key == TextKey::backspace) {
-        if (!out.empty()) {
-          out.pop_back();
-        }
-      } else if (input->key == TextKey::character && out.size() < 32) {
-        out.push_back(input->character);
-      } else if (input->key == TextKey::primary) {
-        const auto point = platform.mouse_position();
-        if (point.x >= 350.0F && point.x < 430.0F && point.y >= 238.0F &&
-            point.y < 266.0F) {
-          return !out.empty();
-        }
-        if (point.x >= 240.0F && point.x < 325.0F && point.y >= 238.0F &&
-            point.y < 266.0F) {
-          return false;
-        }
+// Ghidra 0x00497900 NovaUi_ShowTextConfirmCodeDialog: the shared text-entry
+// modal (DLOG 0xbb9; row 3 = prompt, row 5 = edit text, codes 1 = OK / 6 =
+// Cancel). Accept only when the text fits max_chars, else re-select the field
+// and continue. Returns the final text on accept, nullopt on cancel.
+[[nodiscard]] std::optional<std::string>
+NovaUi_ShowTextEntryDialog(SdlPlatform &platform,
+                           NovaFontCache &font_cache,
+                           std::string_view prompt,
+                           std::string_view initial_text,
+                           std::int32_t max_chars,
+                           const std::function<void()> &render_background) {
+  auto window = UiWindow_CreateFromDialogResource(platform, 0xbb9);
+  if (!window) {
+    return std::nullopt;
+  }
+  UiPanel_SetEntryTextPascal(*window, 3, prompt);
+  UiPanel_SetEntryTextPascal(*window, 5, initial_text);
+  UiPanel_SetTextEntrySelectionRange(*window, 5, 0, 0xfe);
+
+  short code = -1;
+  bool accepted = false;
+  while (!accepted && !platform.quit_requested()) {
+    UiWindow_RunInteractionLoop(
+        platform, font_cache, *window, &code, render_background);
+    if (code == 1) {
+      if (static_cast<std::int32_t>(
+              UiPanel_GetEntryTextPascal(*window, 5).size()) > max_chars) {
+        UiPanel_SetTextEntrySelectionRange(*window, 5, 0, max_chars - 1);
+      } else {
+        accepted = true;
       }
     }
-    DrawModalBackground(platform, renderer, background);
-    const SDL_FRect panel{157.0F, 151.0F, 326.0F, 145.0F};
-    const SDL_FRect panel_shadow{154.0F, 154.0F, 329.0F, 145.0F};
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &panel_shadow);
-    SDL_SetRenderDrawColor(renderer, 232, 232, 232, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 24, 24, 24, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 210, 210, 210, SDL_ALPHA_OPAQUE);
-    const SDL_FRect title_bar{158.0F, 152.0F, 324.0F, 23.0F};
-    SDL_RenderFillRect(renderer, &title_bar);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 170.0F, 160.0F, "Name your ship:");
-    const SDL_FRect entry{210.0F, 184.0F, 230.0F, 22.0F};
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &entry);
-    SDL_SetRenderDrawColor(renderer, 80, 80, 80, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &entry);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    const std::string shown = out + "_";
-    SDL_RenderDebugText(renderer, 216.0F, 192.0F, shown.c_str());
-    SDL_RenderDebugText(renderer, 242.0F, 238.0F, "Cancel");
-    SDL_RenderDebugText(renderer, 355.0F, 238.0F, "OK");
-    SDL_SetRenderDrawColor(renderer, 90, 90, 90, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 176.0F, 276.0F, kNavKeys.data());
-    SDL_RenderPresent(renderer);
-    SDL_Delay(16);
+    if (code == 6) {
+      return std::nullopt;
+    }
+    code = -1;
   }
-  return false;
-}
-
-[[nodiscard]] int RandomIndex(GameState &state, int count) {
-  return static_cast<int>(
-      std::uniform_int_distribution<int>{0, count - 1}(state.rng));
+  return accepted ? std::make_optional(UiPanel_GetEntryTextPascal(*window, 5))
+                  : std::nullopt;
 }
 
 } // namespace
@@ -518,7 +500,7 @@ void ResetPlayerShipForNewGame(GameState &state) {
   state.player.vel_x = state.player.vel_y = 0.0F;
   state.player.heading = 0.0F;
   state.player.speed = 0.0F;
-  state.player.ship_class_id = 0; // default class (ship id 0x80)
+  state.player.ship_class_id = state.pilot.start_type_code; // ch r ShipType
   // Ship_ResetPlayerShipState leaves the active weapon bank unselected (-1);
   // the firing loop (NovaWeapon_FirePlayerPrimary) fires every loaded bank
   // regardless, so the selection latch is only carried for save/UI fidelity.
@@ -540,40 +522,70 @@ void SetNewGameDateAndStrings(GameState &state) {
 
 } // namespace
 
-bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
-  // ---- Step 1: random opener strings + pilot naming/selection ------------
-  // Ghidra: NovaRandom_Range(3) twice, Resource_LoadStringEntry into
-  // DAT_007d20b7/DAT_007d21b7, then Menu_RunPilotSelectionDialog which fills
-  // the pilot's first/last name. Strips articles/subtitles afterwards.
-  // Replaced opener-source with kOpenerFirstNames; selection with
-  // RunTextInputPrompt.
-  // Ghidra picks a random opener string to prefill the callsign; kOpenerFirst
-  // names stand in for the string-table entries and seed the suggestion.
-  state.pilot.first_name.clear();
-  const std::string suggested = std::string(
-      kOpenerFirstNames[static_cast<std::size_t>(RandomIndex(state, 7))]);
-  const auto frozen_menu = CaptureModalBackground(platform.renderer());
-  if (!RunTextInputPrompt(platform,
-                          "Enter pilot name (TAB switches fields):",
-                          suggested,
-                          {},
-                          state.pilot.first_name,
-                          state.pilot.last_name,
-                          frozen_menu.get())) {
-    return false;
-  }
-  if (state.pilot.first_name.empty()) {
-    NovaLog::Warn("new pilot cancelled: empty callsign");
+bool NovaNewPilotFlow_Run(SdlPlatform &platform,
+                          GameState &state,
+                          const std::function<void()> &render_background) {
+  // ---- Step 1: pilot naming/selection ------------------------------------
+  // Ghidra: Menu_RunNewGameFlow prefills DAT_007d20b7/DAT_007d21b7 with random
+  // STR# 0x80 sample names (done inside the dialog port) and runs
+  // Menu_RunPilotSelectionDialog (0x0048a7e0), which fills the Full Name /
+  // Nickname fields, the Strict Play flag, the Gender popup and the character
+  // template; the port strips articles/subtitle suffixes inside the dialog
+  // port, matching the original's post-accept strip.
+  NovaFontCache font_cache;
+  if (!RunPilotSelectionDialog(platform, font_cache, state, render_background)) {
     return false;
   }
 
-  // ---- Step 2: ship naming -------------------------------------------------
-  // The original opens a second modal to name the newly initialized ship.
-  if (!RunShipNamePrompt(
-          platform, "Shuttle", state.player.ship_name, frozen_menu.get())) {
-    return false;
+  // The 0xc1e variant leaves the Character popup offscreen; the flow falls
+  // back to the family's first entry (stock: the hidden .Trader).
+  if (state.pilot.character_template.empty()) {
+    const auto templates = EnumeratePilotTemplates();
+    if (!templates.empty()) {
+      state.pilot.character_template = templates.front().name;
+    }
   }
-  state.pilot.start_type_code = 0;
+  state.pilot.start_type_code =
+      ResolveStartTypeFromTemplate(state.pilot.character_template);
+
+  // ---- Step 2: ship christening -------------------------------------------
+  // Ghidra: NovaUi_ShowTextConfirmCodeDialog (DLOG 0xbb9) with prompt =
+  // STR# 0x7d2 row 0x79 + the start class's long name (DAT_005a9bcc table;
+  // the port reads Ship::long_name from the scenario tables) and initial text
+  // = a random STR# 0x80 row 7-9 ship name, max 0x40 chars. The result is
+  // article-stripped into the ship-name global (DAT_00599acc).
+  {
+    const std::string class_caption =
+        state.scenario.Ship(static_cast<std::int16_t>(
+                                state.pilot.start_type_code + 0x80))
+            ? state.scenario
+                  .Ship(static_cast<std::int16_t>(
+                      state.pilot.start_type_code + 0x80))
+                  ->long_name
+            : "";
+    std::string prompt;
+    // STR# 0x7d2 row 0x79 (1-based) = pool index 0x78 in the port decoder.
+    if (auto prefix = NovaHud_LoadStringEntry(0x7d2, 0x78)) {
+      prompt = *prefix + " ";
+    } else {
+      NovaLog::Todo("STR# 0x7d2 row 0x79 (christening prompt prefix) "
+                    "unavailable");
+    }
+    prompt += class_caption + ": ";
+    // STR# 0x80 rows 7-9 (1-based) = pool indices 6-8: the random suggested
+    // ship names ('Ring of Glory', 'Snowy Owl', 'Cardinal Virtue').
+    const std::string suggested =
+        NovaHud_LoadStringEntry(
+            0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 6))
+            .value_or("");
+    auto ship_name = NovaUi_ShowTextEntryDialog(
+        platform, font_cache, prompt, suggested, 0x40, render_background);
+    if (!ship_name) {
+      return false;
+    }
+    StripLeadingArticle(*ship_name);
+    state.player.ship_name = std::move(*ship_name);
+  }
 
   // ---- Step 3: overwrite-existing-pilot confirmation ----------------------
   // Ghidra: builds <nova_files><name>.plt, PilotFile_ProbeExists, and on hit
@@ -620,6 +632,20 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
                                   /*copy_player_heading=*/false,
                                   SDL_GetTicks());
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
+  // TODO(decomp(0x00489d70)) skipped scopes from Menu_RunNewGameFlow's
+  // fresh-world tail, each with a known original call:
+  //   - Ship_DeactivateVacantShipsAndTally(1)
+  //   - Frame_TriggerSystemRegionEvents(current system)
+  //   - NovaResources_EvaluateAvailability() (per-stellar availability rolls)
+  //   - the stellar hazard-marker pass (availability flags 0x20/0x40 over all
+  //     0x800 stellars)
+  //   - the live date-block copy (g_current_game_year_month/day, DAT_00735460)
+  //   - starmap pan origin init + current-system field_0xc8/0xc4
+  //   - per-ship zeroing of ionization_points/field_0xb0/
+  //     turn_bank_animation_phase/ai_turn_bias_dir and DAT_007cab1c = 0xfffd
+  //   - the second PilotData_InitializePlayerState pass (param 0) after the
+  //     availability rolls
+  //   - PilotFile_SaveGame(final stellar) — no .plt writer yet (Step 3 log)
 
   // ---- Step 6: assemble the persistent pilot record and apply it ----------
   // Ghidra keeps the freshly-seeded pilot in a pilot-save block (resource id
@@ -694,8 +720,9 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform, GameState &state) {
                 state.intro_cinematic.duration_60h_ticks[2]);
 
   // ---- Step 7: mark active ------------------------------------------------
-  // Ghidra: DAT_00596d28 = 1 (game active), DAT_00596d2f = repoChoice.
-  state.pilot.selected_reputation = 0;
+  // Ghidra: DAT_00596d28 = 1 (game active), DAT_00596d2f = the dialog's
+  // Strict Play checkbox state (latched by the dialog port into
+  // state.pilot.strict_play).
   state.game_active = true;
   NovaLog::Info("new pilot active: callsign '{}', start type {}",
                 state.pilot.first_name,

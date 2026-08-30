@@ -463,14 +463,22 @@ struct Ship {
 // unchanged after the rename. New code should use `Ship` directly.
 using PlayerShip = Ship;
 
-// The new pilot's identity (first/last name) and start configuration, filled
-// by the pilot-naming dialog in the new-game flow. Ghidra keeps these in
-// DAT_007d20b7 (first) / DAT_007d21b7 (last) and DAT_007d22b7 (start type).
+// The new pilot's identity and new-game dialog selections, filled by
+// Menu_RunPilotSelectionDialog (0x0048a7e0). Ghidra keeps the names in
+// DAT_007d20b7 (Full Name, also the <name>.plt file stem) / DAT_007d21b7
+// (Nickname), the character-template choice in DAT_007d22b7, and the Gender
+// popup selection in DAT_007d23b7 (first char latched into DAT_00734c1c).
 struct PilotData {
   std::string first_name;
   std::string last_name;
   std::int16_t start_type_code = 0;     // PilotData_ResolveStartType result
-  std::int16_t selected_reputation = 0; // pilot-selection-dialog choice
+  // Row-4 Strict Play checkbox (the new-pilot flag, DAT_00596d2f).
+  bool strict_play = false;
+  // Row-11 Gender popup (MENU 0x1f4); 'm' latch = DAT_00734c1c.
+  bool male = true;
+  // Row-13 Character popup (MENU 0x1f5): the selected ch r template name
+  // (DAT_007d22b7), empty when the 0xc1e variant left the popup offscreen.
+  std::string character_template;
 };
 
 // Persistent scenario-control state (the original pilot NCB/control-bit

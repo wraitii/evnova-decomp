@@ -969,8 +969,13 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // Runs the modal new-pilot flow (naming, confirm, reset, scenario load,).
     // On success the flow marks the game active and we return to the menu; the
     // player then chooses ENTER SPACE to play (intro cinematic plays then).
+    // The dialogs keep re-rendering the menu behind themselves each frame.
     NovaRender_RedrawAndPresentFrame(runtime, 0);
-    if (game::NovaNewPilotFlow_Run(runtime.platform, runtime.game)) {
+    if (game::NovaNewPilotFlow_Run(runtime.platform,
+                                   runtime.game,
+                                   [&runtime] {
+                                     NovaRender_RedrawAndPresentFrame(runtime, 0);
+                                   })) {
       runtime.status_text = "New pilot created. Choose ENTER SPACE to fly.";
     } else {
       runtime.status_text = "New game cancelled.";

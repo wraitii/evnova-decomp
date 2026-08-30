@@ -735,8 +735,8 @@ address,name,impl_file,reimpl_pct,comment
 0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
 0x00488650,Menu_RunSettingsDialog,src/game/preferences.cpp,75%,"core modal: DLOG 0xfa3 geometry, toggles, sliders, OK/cancel, and Key Settings sub-dialog; .prf persistence and windowed-mode live toggle remain TODO"
 0x00489210,Ship_RunSpaceflightMode,src/game/spaceflight.cpp,10%,"Ship_RunSpaceflightMode skeleton: faithful loop/cadence, gameplay scopes stubbed"
-0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,80%,New-pilot path preserves reset/refilled stats and seeded inventory and now reconciles seeded weapon banks into owned outfits (stock Light Blaster registered/sellable); dialogs, scenario population, discovery remain partial
-0x0048A7E0,Menu_RunPilotSelectionDialog,src/game/new_pilot_flow.cpp,15%,Clean-room modal now follows the original 0xc1d/0xc1e window proportions and pilot-selection control layout; resource-backed controls, pilot registry/list binding, and full accept/cancel semantics remain TODO(decomp)
+0x00489D70,Menu_RunNewGameFlow,src/game/new_pilot_flow.cpp,65%,Dialog chain now ported on the dialog runtime (selection dialog 0x0048a7e0 + christening 0x00497900, STR#/MENU resources) and reset/inventory/bank-reconcile preserved; still missing Ship_DeactivateVacantShipsAndTally, Frame_TriggerSystemRegionEvents, NovaResources_EvaluateAvailability, stellar flag pass, date block copy, second InitializePlayerState pass, .plt write
+0x0048A7E0,Menu_RunPilotSelectionDialog,src/game/new_pilot_flow.cpp,70%,Ported on the SDL dialog runtime (ui_dialog.cpp) from real DLOG 0xc1d/0xc1e: variant census, row 4 Strict Play toggle (code 4), rows 8/9 STR# 0x80 prefills + 0x18 validation, row 11 Gender popup (MENU 0x1f4, 'm' latch), row 13 Character popup (MENU 0x1f5 runtime fill), copy-back; in-memory registry merge and PilotData_FindActivePilotName preselect remain TODO(decomp)
 0x0048ADC0,IntroCinematic_Run,src/game/intro_cinematic.cpp,85%,Timed configured-frame playback; Enter/Space/click advance one frame; native command/cursor paths and travel dialog partial
 0x0048B230,NovaRender_PresentBlockingTransitionFrame,,0%,
 0x0048B250,NovaAudio_PreloadTransitionEffects,,0%,NovaAudio_PreloadTransitionEffects into DAT_007d24b8
@@ -774,7 +774,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00497500,NovaMainLoop_PumpAndYieldFrames,,0%,
 0x004976B0,Ui_ShowDialogFromResource,,0%,
 0x004977D0,Ui_ShowConfirmDialog,,0%,
-0x00497900,NovaUi_ShowTextConfirmCodeDialog,,0%,
+0x00497900,NovaUi_ShowTextConfirmCodeDialog,src/game/new_pilot_flow.cpp,75%,Ported as NovaUi_ShowTextEntryDialog: DLOG 0xbb9, rows 3/5, select-all, max-length re-select loop, codes 1/6; stock draw callback id 1 not fully reconstructed
 0x00497B70,NovaUi_BlitPictThumbnailCached,src/game/docked_dialog.cpp,20%,Ported inline as the StoreTextureCache helpers: StoreTextureCache lazily loads and reuses outfit/ship PICT thumbnails per modal; original shared 128-entry atlas LRU and three-load-per-redraw cadence are not reproduced.
 0x00497CF0,FUN_00497cf0,,0%,
 0x00497D50,FUN_00497d50,,0%,
@@ -1043,7 +1043,7 @@ address,name,impl_file,reimpl_pct,comment
 0x004CD1F0,Resource_DrawStringEntry,,0%,
 0x004CD230,NameString_StripSubtitleSuffix,,0%,
 0x004CD290,PilotData_FindActivePilotName,,0%,
-0x004CD350,PilotData_ResolveStartType,,0%,
+0x004CD350,PilotData_ResolveStartType,src/game/new_pilot_flow.cpp,70%,ResolveStartTypeFromTemplate: ch r block+4 minus 0x80 with <0x80 -> 0 fallback; block grow/release and by-key access semantics not reproduced
 0x004CD3B0,IntroCinematic_SetupFrames,src/game/pilot_file.cpp,40%,IntroCinematic_SetupFrames: fills intro-frames subset of the record; full .plt field surface not covered
 0x004CD4B0,PilotData_InitializePlayerState,src/game/pilot_file.cpp,100%,PilotData_InitializePlayerState absent-block seed (in-memory; no .plt writer)
 0x004CD7E0,FUN_004cd7e0,,0%,
