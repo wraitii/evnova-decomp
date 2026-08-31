@@ -776,6 +776,24 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
   }
   DrawPanelCentered(platform, font, font_size, panel, 16, name, value_color);
 
+  // Portrait: 128x64 rect centered on the panel (FUN_008747f3), blitting the
+  // clone-source class's target PICT (DAT_00596d44 table). Drawn after the
+  // name line but BEFORE the subtitle, exactly as the original orders the
+  // three (NovaUi_DrawTargetStatusPanel 0x0045f530): the class-variant
+  // subtitle draws over the portrait.
+  if (ship_class != nullptr) {
+    if (const auto *portrait =
+            TargetPortrait(platform, state.scenario, target.ship_class_id)) {
+      const float center_x =
+          static_cast<float>(panel.left + panel.right + 1) / 2.0F;
+      const float center_y =
+          static_cast<float>(panel.top + panel.bottom + 1) / 2.0F;
+      const SDL_FRect box{center_x - 64.0F, center_y - 32.0F, 128.0F, 64.0F};
+      SDL_RenderTexture(
+          platform.renderer(), portrait->texture->get(), nullptr, &box);
+    }
+  }
+
   // Subtitle: mission subtitle pool > p}brs special-ship name > class
   // Subtitle (each level falls through when its source is empty).
   std::string subtitle;
@@ -789,21 +807,6 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
   }
   DrawPanelCentered(
       platform, font, subtitle_size, panel, 29, subtitle, value_color);
-
-  // Portrait: 128x64 rect centered on the panel (FUN_008747f3), blitting the
-  // clone-source class's target PICT (DAT_00596d44 table).
-  if (ship_class != nullptr) {
-    if (const auto *portrait =
-            TargetPortrait(platform, state.scenario, target.ship_class_id)) {
-      const float center_x =
-          static_cast<float>(panel.left + panel.right + 1) / 2.0F;
-      const float center_y =
-          static_cast<float>(panel.top + panel.bottom + 1) / 2.0F;
-      const SDL_FRect box{center_x - 64.0F, center_y - 32.0F, 128.0F, 64.0F};
-      SDL_RenderTexture(
-          platform.renderer(), portrait->texture->get(), nullptr, &box);
-    }
-  }
 
   const Government *government =
       target.faction_or_government_id >= 0
@@ -831,7 +834,7 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                         font_size,
                         panel,
                         panel.bottom - panel.top - 6,
-                        government->name,
+                        government->target_code,
                         label_color);
     }
     return;
@@ -844,7 +847,7 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                         font_size,
                         panel,
                         panel.bottom - panel.top - 6,
-                        government->name,
+                        government->target_code,
                         label_color);
     }
     return;
@@ -931,7 +934,10 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
 
   // ---- Bottom-right footer ----------------------------------------------
   if (government != nullptr) {
-    const std::string &text = government->name;
+    // The original draws the g_government_name_table entry here -- the
+    // gövt payload +0x44 "TargetCode" short string (" Fed.", "Auroran"),
+    // not the resource record name (NovaUi_DrawTargetStatusPanel 0x0045f530).
+    const std::string &text = government->target_code;
     NovaText_Draw(platform,
                   font,
                   NovaFontFamily::kGeneva,

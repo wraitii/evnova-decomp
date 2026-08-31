@@ -42,12 +42,10 @@ constexpr std::int16_t kStartSystemResourceId = 0x81; // resource id
 // entries (provisional).
 void StripLeadingArticle(std::string &name) {
   constexpr std::string_view kThe = "the ";
-  if (name.size() > kThe.size() && std::equal(kThe.begin(), kThe.end(),
-                                              name.begin(), [](char a, char b) {
-                                                return std::tolower(
-                                                           static_cast<unsigned char>(a)) ==
-                                                       b;
-                                              })) {
+  if (name.size() > kThe.size() &&
+      std::equal(kThe.begin(), kThe.end(), name.begin(), [](char a, char b) {
+        return std::tolower(static_cast<unsigned char>(a)) == b;
+      })) {
     name.erase(0, kThe.size());
   }
 }
@@ -92,15 +90,15 @@ struct PilotTemplateEntry {
   bool hidden = false;
 };
 
-[[nodiscard]] std::vector<PilotTemplateEntry>
-EnumeratePilotTemplates() {
+[[nodiscard]] std::vector<PilotTemplateEntry> EnumeratePilotTemplates() {
   std::vector<PilotTemplateEntry> out;
   for (const auto &[type_code, id] : NovaResource_AllKeys()) {
     if (type_code != kResourceTypeCharacter) {
       continue;
     }
-    if (std::any_of(out.begin(), out.end(),
-                    [&](const PilotTemplateEntry &e) { return e.resource_id == id; })) {
+    if (std::any_of(out.begin(), out.end(), [&](const PilotTemplateEntry &e) {
+          return e.resource_id == id;
+        })) {
       continue;
     }
     auto named = NovaResource_LoadNamed(kResourceTypeCharacter, id);
@@ -132,9 +130,8 @@ ResolveStartTypeFromTemplate(const std::string &template_name) {
     const std::int16_t designator = static_cast<std::int16_t>(
         (std::to_integer<unsigned>((*block)[4]) << 8U) |
         std::to_integer<unsigned>((*block)[5]));
-    return designator >= 0x80
-               ? static_cast<std::int16_t>(designator - 0x80)
-               : 0;
+    return designator >= 0x80 ? static_cast<std::int16_t>(designator - 0x80)
+                              : 0;
   }
   return 0;
 }
@@ -153,8 +150,9 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
   // (stock Nova only ships the hidden .Trader, so its census is 0).
   const auto templates = EnumeratePilotTemplates();
   const int visible = static_cast<int>(std::count_if(
-      templates.begin(), templates.end(),
-      [](const PilotTemplateEntry &e) { return !e.hidden; }));
+      templates.begin(), templates.end(), [](const PilotTemplateEntry &e) {
+        return !e.hidden;
+      }));
   const std::uint16_t dialog_id = visible >= 2 ? 0xc1d : 0xc1e;
 
   auto window = UiWindow_CreateFromDialogResource(platform, dialog_id);
@@ -167,12 +165,14 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
   // Rows 8/9: random sample Full Name / Nickname from STR# 0x80 rows 1-3 /
   // 4-6 (1-based, like every STR# entry number).
   UiPanel_SetEntryTextPascal(
-      *window, 8,
+      *window,
+      8,
       NovaHud_LoadStringEntry(
           0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 1))
           .value_or(""));
   UiPanel_SetEntryTextPascal(
-      *window, 9,
+      *window,
+      9,
       NovaHud_LoadStringEntry(
           0x80, static_cast<std::uint16_t>(RandomIndex(state, 3) + 4))
           .value_or(""));
@@ -212,8 +212,7 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
       accepted = valid;
     }
     if (code == 4) { // Strict Play checkbox: the dialog owns the toggle.
-      state.pilot.strict_play =
-          UiControl_GetValue(*window, 4) == 0;
+      state.pilot.strict_play = UiControl_GetValue(*window, 4) == 0;
       UiControl_SetValue(*window, 4, state.pilot.strict_play ? 1 : 0);
     }
     if (code == 2) { // Cancel
@@ -507,6 +506,14 @@ void ResetPlayerShipForNewGame(GameState &state) {
   state.player.timed_action_counter = -1;
   state.player.death_timer_active = -1.0F;
   state.player.is_active = true;
+  // Clear the death / escape-pod latches a previous flight may have left set
+  // (the original's new-game reset path clears DAT_00596d38 / DAT_007354a5).
+  state.game_over_pending = false;
+  state.return_to_menu_pending = false;
+  state.distress_cue_active = false;
+  state.distress_cue_active_prev = false;
+  state.bomb_detonation_timer = 0.0F;
+  state.recently_hit_timer = 0.0F;
 }
 
 void SetNewGameDateAndStrings(GameState &state) {
@@ -532,7 +539,8 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // template; the port strips articles/subtitle suffixes inside the dialog
   // port, matching the original's post-accept strip.
   NovaFontCache font_cache;
-  if (!RunPilotSelectionDialog(platform, font_cache, state, render_background)) {
+  if (!RunPilotSelectionDialog(
+          platform, font_cache, state, render_background)) {
     return false;
   }
 
@@ -555,11 +563,11 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // article-stripped into the ship-name global (DAT_00599acc).
   {
     const std::string class_caption =
-        state.scenario.Ship(static_cast<std::int16_t>(
-                                state.pilot.start_type_code + 0x80))
+        state.scenario.Ship(
+            static_cast<std::int16_t>(state.pilot.start_type_code + 0x80))
             ? state.scenario
-                  .Ship(static_cast<std::int16_t>(
-                      state.pilot.start_type_code + 0x80))
+                  .Ship(static_cast<std::int16_t>(state.pilot.start_type_code +
+                                                  0x80))
                   ->long_name
             : "";
     std::string prompt;

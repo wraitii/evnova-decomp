@@ -648,10 +648,15 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 //   flee +8, disable_penalty +10, board +12, kill +14, shoot +16, max_odds
 //   +18, bribe +20, combat_rating_src +22, class1-4 +0x18, ally1-4 +0x20,
 //   enemy1-4 +0x28, pilot_skill_src +0x30, ai_skill +0x32, comm_name +0x34,
-//   name_table +0x44, scan_lo +0x54, scan_hi +0x58, jam2-4 +0x5c..+0x62,
+//   target_code +0x44, scan_lo +0x54, scan_hi +0x58, jam2-4 +0x5c..+0x62,
 //   medium_name +0x64, theme_color RGB24 +0xa4, ship_color RGB24 +0xa8,
 //   interface_id +0xac, news_pic_id +0xae. The record name (resource.map, via
 //   ResourceData_ReadEntryMetadata + StripSubtitleSuffix) is the display name.
+// Name-table mapping verified against the loader's government pass: the
+// runtime 0x100-stride pstring tables are g_government_name_table <- +0x44
+// (the Bible's TargetCode, drawn by the target-status panel),
+// g_government_comm_name_table <- +0x34 (CommName) and
+// g_government_medium_name_table <- +0x64 (MediumName).
 [[nodiscard]] Government DecodeGovernment(std::span<const std::byte> bytes) {
   Government g;
 
@@ -705,7 +710,9 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   g.ai_skill_percent = ReadBeI16(bytes, 0x32);
 
   g.comm_name = ReadCString(bytes, 0x34);
-  g.name = ReadCString(bytes, 0x44);
+  // Payload +0x44 is the TargetCode short string (g_government_name_table in
+  // the loader); the display name comes from the resource record name instead.
+  g.target_code = ReadCString(bytes, 0x44);
   g.medium_name = ReadCString(bytes, 0x64);
 
   g.scan_mask_lo = ReadBe32(bytes, 0x54);
@@ -1248,8 +1255,9 @@ bool ScenarioData::LoadFromArchives() {
             NovaResource_LoadNamed(scenario::kGovernmentResourceType,
                                    static_cast<std::uint16_t>(id))) {
       game::Government gov = DecodeGovernment(res->bytes);
-      // The record name is authoritative for the display name; comm/medium
-      // name tables come from the numeric payload strings (DecodeGovernment).
+      // The record name is authoritative for the display name; the
+      // target-code/comm/medium name tables come from the numeric payload
+      // strings (DecodeGovernment).
       gov.name = res->name;
       governments[static_cast<std::size_t>(id) - 0x80] = std::move(gov);
       ++loaded_governments;

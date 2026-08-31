@@ -3,10 +3,14 @@
 // Clean-room targeting / selection / landing primitives.
 //
 // Two independent target channels exist in the original: the *travel/landing
-// stellar* (ai_secondary_target_slot, auto-seeded to the nearest playable
-// stellar each frame, cycled with Tab) and the *primary target ship* (a slot
-// in g_ship_states, selected with the backquote cycle, the nearest-hostile/
-// engaged commands, or a mouse click). Both are reconstructed here as pure
+// stellar* (ai_secondary_target_slot, set only by explicit player commands --
+// number keys, click, nearest, land, starmap route, destination cycle -- and
+// cleared on system arrival; there is NO per-frame auto-seed) and the
+// *primary target ship* (a slot in g_ship_states, selected with the backquote
+// cycle, the nearest-hostile/engaged commands, or a mouse click, validated
+// each frame by the Ship_HandlePlayerShipCore prologue). The two channels are
+// independent: the original happily shows a ship reticle and a stellar
+// selection at the same time. Both are reconstructed here as pure
 // predicates and geometry over the scenario tables + the player's GameState
 // -- the self-contained subset that does not need the NPC ship-fleet
 // container or the interaction dialogs. Each maps a named Ghidra function
@@ -117,8 +121,8 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 // for the baseline branch; the signed transition latch selects the first two.
 // Ship.cloak_fade_progress is advanced by the visual updater, not by weapon-hit
 // damage.
-[[nodiscard]] bool NovaTargeting_ShipAtCloakVisibilityThreshold(
-    const Ship &ship);
+[[nodiscard]] bool
+NovaTargeting_ShipAtCloakVisibilityThreshold(const Ship &ship);
 
 // Ghidra 0x0040f6d0 Ship_IsShipEligibleForDistressCall: true when the ship
 // is an active, non-fire-restricted combatant that could call for help -- not
@@ -155,16 +159,16 @@ void NovaTargeting_ClearDestroyedShipReferences(GameState &state,
 // targets the player, excluding mission-fleet escorts) are candidates;
 // otherwise only non-relevant ships are. Returns `current_slot` unchanged
 // when no candidate exists (the caller clears the target on a no-op).
-[[nodiscard]] std::int16_t NovaTargeting_FindNextPlayerCycleTarget(
-    const GameState &state,
-    std::int16_t current_slot,
-    std::int16_t system_id,
-    bool include_combat);
-[[nodiscard]] std::int16_t NovaTargeting_FindPreviousPlayerCycleTarget(
-    const GameState &state,
-    std::int16_t current_slot,
-    std::int16_t system_id,
-    bool include_combat);
+[[nodiscard]] std::int16_t
+NovaTargeting_FindNextPlayerCycleTarget(const GameState &state,
+                                        std::int16_t current_slot,
+                                        std::int16_t system_id,
+                                        bool include_combat);
+[[nodiscard]] std::int16_t
+NovaTargeting_FindPreviousPlayerCycleTarget(const GameState &state,
+                                            std::int16_t current_slot,
+                                            std::int16_t system_id,
+                                            bool include_combat);
 
 // Ghidra 0x00462850 Ship_SelectNearestEngagedTarget: nearest active,
 // non-destroyed ship in the player's system that is visible through the cloak
@@ -183,14 +187,24 @@ NovaTargeting_SelectNearestEngagedTarget(const GameState &state);
 [[nodiscard]] std::int16_t
 NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state);
 
-// Per-frame player travel targeting. Normal stellar selection requires only a
-// current-system available stellar with travel_flags bit 1. 0x3000 special
-// lanes additionally require NovaTargeting_ComputeTravelRangeSq proximity.
-// A player-cycled target remains selected while valid.
-void NovaTargeting_UpdatePlayerTarget(GameState &state);
+// Per-frame player target validation. The original never auto-seeds a
+// stellar target each frame -- ai_secondary_target_slot is only set by
+// explicit commands (number keys, click, nearest, land, starmap route,
+// destination cycle) and both selections are cleared on system arrival.
+void NovaTargeting_ValidatePlayerTarget(GameState &state);
+
+// Ghidra 0x00462db0 Stellar_FindNearestAvailableTravelStellar: the nearest
+// current-system stellar passing the travel gates (available, travel_flags
+// bit 1, restricted 0x3000 lanes inside the no-jump radius). Returns the
+// stellar resource id or -1. The original runs this only from the land /
+// target-nearest commands (and the new-game flow), never per frame.
+[[nodiscard]] std::int16_t
+NovaTargeting_FindNearestAvailableTravelStellar(const GameState &state);
 
 // Select the next (or previous when `forward` is false) playable stellar in
-// the current system. Returns false when there is no eligible stellar.
+// the current system. Like the ship cycle, the search does not wrap: advancing
+// past the last (or first) candidate clears the selection back to "none" and
+// returns false; cycling from "none" picks the first (or last) candidate.
 bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward);
 
 // Mirrors Ship_HandlePlayerTargetActionCommand's stellar branch: a target

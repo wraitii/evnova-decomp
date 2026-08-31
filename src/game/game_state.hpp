@@ -247,6 +247,11 @@ struct Ship {
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
   // timer consumer is still deferred, so the field remains provisional.
   float hit_reaction_timer = 0.0F;
+  // Ghidra ShipState +0xB9: boarding/boarding-target latch. Set when a ship
+  // boards its target (boarding_plunder), cleared for healthy player ships in
+  // PlayerTick_StatusAndOutfitEvents, and read by the fire-restriction and
+  // disable bookkeeping predicates.
+  std::int8_t boarded_target_latch = 0;
   // Ghidra ShipState field_0xB0. Weapon on-hit ionization colors are ORed
   // here by Weapon_ApplyWeaponOnHitEffects; the status renderer is deferred.
   std::uint32_t ionization_color = 0;
@@ -471,7 +476,7 @@ using PlayerShip = Ship;
 struct PilotData {
   std::string first_name;
   std::string last_name;
-  std::int16_t start_type_code = 0;     // PilotData_ResolveStartType result
+  std::int16_t start_type_code = 0; // PilotData_ResolveStartType result
   // Row-4 Strict Play checkbox (the new-pilot flag, DAT_00596d2f).
   bool strict_play = false;
   // Row-11 Gender popup (MENU 0x1f4); 'm' latch = DAT_00734c1c.
@@ -532,14 +537,15 @@ struct TravelState {
   // from the current system; otherwise the jump falls back to the nearest
   // available travel point.
   std::int16_t starmap_destination_system_id = -1;
-  // The stellar resource id currently auto-targeted for travel/landing (the
-  // nearest playable stellar in the current system), mirroring the original's
-  // auto-set ai_secondary_target_slot / travel_transfer_mode == 2. -1 when no
-  // stellar qualifies. Set each frame by NovaTargeting_UpdatePlayerTarget.
+  // The stellar resource id currently targeted for travel/landing, mirroring
+  // the original's ai_secondary_target_slot with travel_transfer_mode == 2.
+  // -1 when nothing is targeted. Only set by explicit player commands (Tab
+  // cycle, land command's nearest auto-pick, starmap plot) -- the original
+  // never auto-seeds it per frame -- and cleared on system arrival.
   std::int16_t selected_stellar_id = -1;
-  // Once the player cycles targets, retain that choice while it remains a
-  // valid stellar in the current system. Otherwise UpdatePlayerTarget seeds
-  // this field from the nearest eligible stellar, matching entry behavior.
+  // True while the selection came from an explicit player command rather than
+  // an auto-pick. Vestigial since the per-frame nearest-stellar auto-seed was
+  // removed (the original has none); kept for the starmap-plot path.
   bool selected_stellar_is_manual = false;
   // Legacy latch retained for future arrival/docked reconstruction. Target
   // selection and target action do not set it: they only select a travel
@@ -956,6 +962,30 @@ struct GameState {
   // phases its zig-zag off `counter % 300 < 150`; the original's shareware
   // license-check duties for this counter are not reproduced.
   std::uint32_t spaceflight_frame_counter = 0;
+
+  // --- PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240) ------
+  // g_player_carried_bomb_outfit_class: 0 = no carried bomb, 1 = escape-pod
+  // variant, otherwise the bomb outfit's def id. Writers (bomb purchase/
+  // loading) are deferred TODO(decomp); it stays 0 until then.
+  std::int16_t bomb_outfit_class = 0;
+  // g_bomb_detonation_timer: countdown toward g_bomb_detonation_interval_
+  // frames while a bomb is carried; rerolled (Random(100)) once it expires.
+  float bomb_detonation_timer = 0.0F;
+  // g_player_recently_hit_timer (Ghidra DAT_0073549c): armed to 300 ticks
+  // when the player takes a hit (Shot_ResolveShipHitFromWeapon), decays one
+  // tick per frame while at or above the cutoff; suppresses armor
+  // regeneration and the disabled auto-repair pass until below the cutoff.
+  // The hit-arming site is not yet ported (TODO(decomp) in collision.cpp).
+  float recently_hit_timer = 0.0F;
+  // DAT_00596d36 / DAT_00596d37: current + previous 60-frame
+  // any-distress-eligible-ship probe, for the distress-alert rising edge.
+  bool distress_cue_active = false;
+  bool distress_cue_active_prev = false;
+  // DAT_00596d38: player death bookkeeping finished (latched for the
+  // game-over/return-to-menu flow, consumed by the spaceflight loop).
+  bool game_over_pending = false;
+  // DAT_007354a5: escape-pod bomb deployment latch (return to the menu shell).
+  bool return_to_menu_pending = false;
 
   std::array<BeamHit, 0x40> beam_hit_queue{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};

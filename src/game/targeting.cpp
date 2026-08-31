@@ -78,8 +78,8 @@ ScannerCapabilities(const GameState &state) {
     if (owned[id] <= 0) {
       continue;
     }
-    const auto *outfit = state.scenario.Outfit(
-        static_cast<std::int16_t>(id + 0x80));
+    const auto *outfit =
+        state.scenario.Outfit(static_cast<std::int16_t>(id + 0x80));
     if (outfit) {
       check_mods(*outfit);
     }
@@ -91,9 +91,12 @@ ScannerCapabilities(const GameState &state) {
 // Ship_IsShipCloakVisibilityThresholdActive (0x0046c7a0).
 // ---------------------------------------------------------------------------
 bool NovaTargeting_ShipAtCloakVisibilityThreshold(const Ship &ship) {
-  constexpr float kEnteringCloakThreshold = 24.0F; // g_cloak_visibility_enter_threshold
-  constexpr float kClearingCloakThreshold = 8.0F;  // g_cloak_visibility_clear_threshold
-  constexpr float kBaselineThreshold = 16.0F;      // g_cloak_visibility_baseline_threshold
+  constexpr float kEnteringCloakThreshold =
+      24.0F; // g_cloak_visibility_enter_threshold
+  constexpr float kClearingCloakThreshold =
+      8.0F; // g_cloak_visibility_clear_threshold
+  constexpr float kBaselineThreshold =
+      16.0F; // g_cloak_visibility_baseline_threshold
   const float progress = ship.cloak_fade_progress;
   if (progress > kEnteringCloakThreshold && ship.cloak_transition_latch >= 0) {
     return true;
@@ -177,8 +180,7 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
     if (!other.is_active || other.ai_target_ship_slot != candidate_id) {
       continue;
     }
-    if (acquirer.primary_target_ship_slot !=
-        static_cast<std::int16_t>(slot)) {
+    if (acquirer.primary_target_ship_slot != static_cast<std::int16_t>(slot)) {
       continue;
     }
     if (slot == static_cast<std::size_t>(acquirer.ship_instance_id) ||
@@ -221,12 +223,13 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
 // outfit), and the relevance-vs-modifier equality (`relevant == include_combat`
 // -- no modifier cycles non-relevant ships, the modifier cycles relevant
 // ones).
-[[nodiscard]] bool ShipIsCycleEligible(const GameState &state,
-                                       std::int16_t slot,
-                                       std::int16_t system_id,
-                                       bool include_combat,
-                                       const PlayerScannerCapabilities &scanner,
-                                       const std::array<bool, GameState::kMaxShips> &relevant) {
+[[nodiscard]] bool
+ShipIsCycleEligible(const GameState &state,
+                    std::int16_t slot,
+                    std::int16_t system_id,
+                    bool include_combat,
+                    const PlayerScannerCapabilities &scanner,
+                    const std::array<bool, GameState::kMaxShips> &relevant) {
   const Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
   if (!ship.is_active || NovaAiShip_IsDestroyed(ship)) {
     return false;
@@ -251,11 +254,10 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
   return is_relevant == include_combat;
 }
 
-std::int16_t NovaTargeting_FindNextPlayerCycleTarget(
-    const GameState &state,
-    std::int16_t current_slot,
-    std::int16_t system_id,
-    bool include_combat) {
+std::int16_t NovaTargeting_FindNextPlayerCycleTarget(const GameState &state,
+                                                     std::int16_t current_slot,
+                                                     std::int16_t system_id,
+                                                     bool include_combat) {
   const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
   std::array<bool, GameState::kMaxShips> relevant{};
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
@@ -266,14 +268,17 @@ std::int16_t NovaTargeting_FindNextPlayerCycleTarget(
         state, slot, system_id, include_combat, scanner, relevant);
   };
   if (current_slot == -1) {
-    for (std::int16_t slot = 1; slot < static_cast<std::int16_t>(GameState::kMaxShips); ++slot) {
+    for (std::int16_t slot = 1;
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
       if (eligible(slot)) {
         return slot;
       }
     }
   } else {
     for (std::int16_t slot = static_cast<std::int16_t>(current_slot + 1);
-         slot < static_cast<std::int16_t>(GameState::kMaxShips); ++slot) {
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
       if (eligible(slot)) {
         return slot;
       }
@@ -282,11 +287,11 @@ std::int16_t NovaTargeting_FindNextPlayerCycleTarget(
   return current_slot;
 }
 
-std::int16_t NovaTargeting_FindPreviousPlayerCycleTarget(
-    const GameState &state,
-    std::int16_t current_slot,
-    std::int16_t system_id,
-    bool include_combat) {
+std::int16_t
+NovaTargeting_FindPreviousPlayerCycleTarget(const GameState &state,
+                                            std::int16_t current_slot,
+                                            std::int16_t system_id,
+                                            bool include_combat) {
   const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
   std::array<bool, GameState::kMaxShips> relevant{};
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
@@ -297,14 +302,18 @@ std::int16_t NovaTargeting_FindPreviousPlayerCycleTarget(
         state, slot, system_id, include_combat, scanner, relevant);
   };
   if (current_slot == -1) {
-    for (std::int16_t slot = static_cast<std::int16_t>(GameState::kMaxShips - 1);
-         slot >= 1; --slot) {
+    for (std::int16_t slot =
+             static_cast<std::int16_t>(GameState::kMaxShips - 1);
+         slot >= 1;
+         --slot) {
       if (eligible(slot)) {
         return slot;
       }
     }
   } else {
-    for (std::int16_t slot = static_cast<std::int16_t>(current_slot - 1); slot >= 1; --slot) {
+    for (std::int16_t slot = static_cast<std::int16_t>(current_slot - 1);
+         slot >= 1;
+         --slot) {
       if (eligible(slot)) {
         return slot;
       }
@@ -322,19 +331,18 @@ std::int16_t NovaTargeting_FindPreviousPlayerCycleTarget(
 // cloak gate (or cloak scanner), in the player's system, not in AI state 0x15
 // (engaged scan only), not class-untargetable (or scanner), and NOT already
 // locked onto the player (ai_target_ship_slot != 0).
-[[nodiscard]] bool ShipIsNearestScanEligible(
-    const GameState &state,
-    const Ship &ship,
-    const PlayerScannerCapabilities &scanner,
-    bool require_not_fire_restricted,
-    bool exclude_state_15) {
+[[nodiscard]] bool
+ShipIsNearestScanEligible(const GameState &state,
+                          const Ship &ship,
+                          const PlayerScannerCapabilities &scanner,
+                          bool require_not_fire_restricted,
+                          bool exclude_state_15) {
   if (!ship.is_active || NovaAiShip_IsDestroyed(ship) ||
       ship.ai_target_ship_slot == 0 ||
       ship.current_system_id != state.player.current_system_id) {
     return false;
   }
-  if (require_not_fire_restricted &&
-      NovaAiShip_IsFireRestricted(state, ship)) {
+  if (require_not_fire_restricted && NovaAiShip_IsFireRestricted(state, ship)) {
     return false;
   }
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship) &&
@@ -359,7 +367,9 @@ std::int16_t NovaTargeting_SelectNearestEngagedTarget(const GameState &state) {
   float best_dist_sq = -1.0F;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
-    if (!ShipIsNearestScanEligible(state, ship, scanner,
+    if (!ShipIsNearestScanEligible(state,
+                                   ship,
+                                   scanner,
                                    /*require_not_fire_restricted=*/false,
                                    /*exclude_state_15=*/true)) {
       continue;
@@ -375,14 +385,16 @@ std::int16_t NovaTargeting_SelectNearestEngagedTarget(const GameState &state) {
   return best;
 }
 
-std::int16_t NovaTargeting_SelectNearestHostileCombatTarget(
-    const GameState &state) {
+std::int16_t
+NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state) {
   const PlayerScannerCapabilities scanner = ScannerCapabilities(state);
   std::int16_t best = -1;
   float best_dist_sq = -1.0F;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
-    if (!ShipIsNearestScanEligible(state, ship, scanner,
+    if (!ShipIsNearestScanEligible(state,
+                                   ship,
+                                   scanner,
                                    /*require_not_fire_restricted=*/true,
                                    /*exclude_state_15=*/false)) {
       continue;
@@ -414,7 +426,6 @@ std::int16_t NovaTargeting_SelectNearestHostileCombatTarget(
   }
   return best;
 }
-
 
 // ---------------------------------------------------------------------------
 // Ghidra 0x0046E3C0 Stellar_IsStellarActive.
@@ -607,65 +618,81 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state) {
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// Per-frame player stellar-target selection.
+// Per-frame player target validation (0x0044aa70 prologue).
 // ---------------------------------------------------------------------------
-void NovaTargeting_UpdatePlayerTarget(GameState &state) {
+// Ship_HandlePlayerShipCore's opening block: the player's primary ship target
+// is a persistent selection, not a per-frame scan, and it survives the
+// target's own movement (including a jump into another system) -- it only
+// drops when the target is inactive, destroyed, entering hyperspace (AI state
+// 0x15), or cloaked past the visibility threshold while it pursues its own AI
+// target (that last gate lifted by the cloak-scanner outfit). The stellar
+// target has no per-frame validation at all; it is cleared on system arrival
+// (same prologue function's transition block) and by the clear-target command.
+void NovaTargeting_ValidatePlayerTarget(GameState &state) {
+  const std::int16_t target_slot = state.player.primary_target_ship_slot;
+  if (target_slot < 1 ||
+      target_slot >= static_cast<std::int16_t>(GameState::kMaxShips)) {
+    return;
+  }
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  bool invalid = !target.is_active || NovaAiShip_IsDestroyed(target) ||
+                 target.ai_state_code == 0x15;
+  if (!invalid && NovaTargeting_ShipAtCloakVisibilityThreshold(target) &&
+      target.ai_target_ship_slot != 0) {
+    // The cloak drop only applies while the target is busy with its own AI
+    // target (not when it hunts the player); the cloak-scanner outfit lifts it.
+    invalid = !ScannerCapabilities(state).can_target_cloaked;
+  }
+  if (invalid) {
+    state.player.primary_target_ship_slot = -1;
+    state.ship_reticle_pulse = 0.0F;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra 0x00462db0 Stellar_FindNearestAvailableTravelStellar.
+// ---------------------------------------------------------------------------
+std::int16_t
+NovaTargeting_FindNearestAvailableTravelStellar(const GameState &state) {
   const auto *cur = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   if (!cur) {
-    state.travel.selected_stellar_id = -1;
-    state.travel.selected_stellar_is_manual = false;
-    return;
+    return -1;
   }
-  const auto selectable = [&](std::int16_t sid) {
-    if (sid < 0x80) {
-      return false;
-    }
-    const auto *st = state.scenario.Stellar(sid);
-    if (!st || !st->is_available ||
-        st->system_id != state.player.current_system_id ||
-        (st->flags & 1U) == 0U) {
-      return false;
-    }
-    // Stellar_FindNearestAvailableTravelStellar accepts ordinary available
-    // travel points at any distance. Only availability_flags 0x3000 lanes
-    // require the no-jump-radius proximity test.
-    if ((st->availability_flags & 0x3000U) == 0U) {
-      return true;
-    }
-    const float dx = state.player.pos_x - static_cast<float>(st->pos_x);
-    const float dy = state.player.pos_y - static_cast<float>(st->pos_y);
-    return dx * dx + dy * dy <= NovaTargeting_ComputeTravelRangeSq(state);
-  };
-  if (state.travel.selected_stellar_is_manual &&
-      selectable(state.travel.selected_stellar_id)) {
-    return;
-  }
-  state.travel.selected_stellar_is_manual = false;
-  const float px = state.player.pos_x;
-  const float py = state.player.pos_y;
-
   std::int16_t best = -1;
   float best_dist_sq = 1e12F;
   for (const auto nav : cur->nav_defs) {
     if (nav < 0x80) {
       continue;
     }
-    if (!selectable(nav)) {
+    const auto *st = state.scenario.Stellar(nav);
+    if (!st || !st->is_available ||
+        st->system_id != state.player.current_system_id ||
+        (st->flags & 1U) == 0U) {
       continue;
     }
-    const auto *st = state.scenario.Stellar(nav);
-    const float dx = px - static_cast<float>(st->pos_x);
-    const float dy = py - static_cast<float>(st->pos_y);
+    const float dx = state.player.pos_x - static_cast<float>(st->pos_x);
+    const float dy = state.player.pos_y - static_cast<float>(st->pos_y);
     const float dist_sq = dx * dx + dy * dy;
+    // Restricted 0x3000 lanes need the no-jump-radius proximity test.
+    if ((st->availability_flags & 0x3000U) != 0U &&
+        dist_sq > NovaTargeting_ComputeTravelRangeSq(state)) {
+      continue;
+    }
     if (dist_sq < best_dist_sq) {
       best_dist_sq = dist_sq;
       best = nav;
     }
   }
-  state.travel.selected_stellar_id = best;
+  return best;
 }
 
+// ---------------------------------------------------------------------------
+// Stellar-target cycling. The original has no per-stellar cycle command (its
+// cycle-travel-target command rotates adjacent *systems*); this clean-room
+// Tab binding follows the ship-cycle semantics: the search does not wrap, and
+// advancing past either end clears the selection back to "none".
+// ---------------------------------------------------------------------------
 bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward) {
   const auto *cur = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
@@ -694,17 +721,37 @@ bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward) {
     state.travel.selected_stellar_is_manual = false;
     return false;
   }
-  std::size_t current = count;
+  // No wrap: advancing past the last candidate (or backwards past the first)
+  // clears the selection to "none", like the ship cycle's caller clearing on
+  // a no-op. Cycling from "none" picks the first (forward) or last
+  // (backwards) candidate.
+  const std::size_t none = count;
+  std::size_t current = none;
   for (std::size_t i = 0; i < count; ++i) {
     if (candidates[i] == state.travel.selected_stellar_id) {
       current = i;
       break;
     }
   }
-  const std::size_t next =
-      current == count
-          ? (forward ? 0 : count - 1)
-          : (forward ? (current + 1) % count : (current + count - 1) % count);
+  std::size_t next;
+  if (current == none) {
+    // Selection is "none" (or a stale id no longer eligible): start fresh.
+    next = forward ? 0 : count - 1;
+  } else if (forward) {
+    if (current + 1 >= count) {
+      state.travel.selected_stellar_id = -1;
+      state.travel.selected_stellar_is_manual = false;
+      return false;
+    }
+    next = current + 1;
+  } else {
+    if (current == 0) {
+      state.travel.selected_stellar_id = -1;
+      state.travel.selected_stellar_is_manual = false;
+      return false;
+    }
+    next = current - 1;
+  }
   state.travel.selected_stellar_id = candidates[next];
   state.travel.selected_stellar_is_manual = true;
   return true;
@@ -718,8 +765,7 @@ bool NovaTargeting_CanOpenTravelDestinationInteraction(const GameState &state) {
   const auto *st = state.scenario.Stellar(sid);
   if (!st || !st->is_available ||
       st->system_id != state.player.current_system_id ||
-      (st->availability_flags & 0x3000U) != 0U ||
-      (st->flags & 0x20U) != 0U ||
+      (st->availability_flags & 0x3000U) != 0U || (st->flags & 0x20U) != 0U ||
       !NovaTargeting_StellarTargetsSpriteSetActive(*st)) {
     return false;
   }

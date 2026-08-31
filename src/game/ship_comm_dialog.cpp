@@ -17,6 +17,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
+#include "landed_window.hpp"
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
@@ -39,19 +40,20 @@ constexpr std::uint16_t kCommFramePict = 0x213f;
 // window-relative (0,0) = top-left of the backdrop. The three context buttons
 // are DITL items 0/1/2 stacked *vertically* on the lower-left (166x26 each at
 // x=21..187, y=125/153/181), NOT a bottom row; the ship portrait is DITL item
-// 10, a 200x200 box on the right (x=216..416, y=7..207); the ship name is item
-// 9 (x=11..203, y=8..66) and the status/prompt block is item 11 (x=40..174,
-// y=73..119). The remaining DITL items (3..8, below y=207) sit past the
-// 215-tall backdrop and are clipped/redundant in the shipped window.
+// 10, a 200x200 box on the right (x=216..416, y=7..207); the prompt/status
+// text panel is item 9 (x=11..203, y=8..66) and the class/comm-name/status
+// block is item 11 (x=40..174, y=73..119). The remaining DITL items (3..8,
+// below y=207) sit past the 215-tall backdrop and are clipped/redundant in
+// the shipped window.
 constexpr int kCommFrameWidth = 423;
 constexpr int kCommFrameHeight = 215;
 // Window origin on the 640x480 playfield: the frame is centred (truncated
 // half-offsets, Dialog_CreateFromDlog) in LoadCommFrameLayout below.
 // Portrait (DITL item 10): 200x200 on the right side.
 constexpr SDL_FRect kCommPictureRect{216.0F, 7.0F, 200.0F, 200.0F};
-// Ship name (DITL item 9) / status block (DITL item 11).
-constexpr SDL_FRect kCommNameRect{11.0F, 8.0F, 192.0F, 58.0F};
-constexpr SDL_FRect kCommStatusRect{40.0F, 73.0F, 134.0F, 46.0F};
+// Prompt/status text panel (DITL item 9) / class+status block (DITL item 11).
+constexpr SDL_FRect kCommPromptPanelRect{11.0F, 8.0F, 192.0F, 58.0F};
+constexpr SDL_FRect kCommInfoPanelRect{40.0F, 73.0F, 134.0F, 46.0F};
 // Buttons (DITL items 0/1/2), 166x26, stacked vertically. DITL item 0 = the
 // Close Channel button (y=181, bottom), item 1 = the assistance button
 // (y=153, middle: label Request Assistance | Beg For Mercy | Release, runs
@@ -71,10 +73,10 @@ constexpr float kCommButtonYClose = 181.0F;
 // above are the fallback used when the resources fail to decode.
 struct CommFrameLayout {
   SDL_FRect window{};
-  SDL_FRect buttons[3]{}; // DITL items 0/1/2: Close Channel / middle / top
-  SDL_FRect name{};       // item 9
-  SDL_FRect picture{};    // item 10 (200x200 portrait)
-  SDL_FRect status{};     // item 11 (prompt block)
+  SDL_FRect buttons[3]{};   // DITL items 0/1/2: Close Channel / middle / top
+  SDL_FRect prompt_panel{}; // item 9 (word-wrapped comm prompt text)
+  SDL_FRect picture{};      // item 10 (200x200 portrait)
+  SDL_FRect info_panel{};   // item 11 (Class:/comm-name/Status: block)
 };
 
 [[nodiscard]] CommFrameLayout LoadCommFrameLayout() {
@@ -92,16 +94,18 @@ struct CommFrameLayout {
       local(kCommButtonX, kCommButtonYMiddle, kCommButtonW, kCommButtonH);
   layout.buttons[2] =
       local(kCommButtonX, kCommButtonYTop, kCommButtonW, kCommButtonH);
-  layout.name =
-      local(kCommNameRect.x, kCommNameRect.y, kCommNameRect.w, kCommNameRect.h);
+  layout.prompt_panel = local(kCommPromptPanelRect.x,
+                              kCommPromptPanelRect.y,
+                              kCommPromptPanelRect.w,
+                              kCommPromptPanelRect.h);
   layout.picture = local(kCommPictureRect.x,
                          kCommPictureRect.y,
                          kCommPictureRect.w,
                          kCommPictureRect.h);
-  layout.status = local(kCommStatusRect.x,
-                        kCommStatusRect.y,
-                        kCommStatusRect.w,
-                        kCommStatusRect.h);
+  layout.info_panel = local(kCommInfoPanelRect.x,
+                            kCommInfoPanelRect.y,
+                            kCommInfoPanelRect.w,
+                            kCommInfoPanelRect.h);
 
   const auto definition = NovaResource_LoadDialogDefinition(0x3ef);
   const auto items =
@@ -130,13 +134,13 @@ struct CommFrameLayout {
       layout.buttons[item.index] = rect;
       break;
     case 9:
-      layout.name = rect;
+      layout.prompt_panel = rect;
       break;
     case 10:
       layout.picture = rect;
       break;
     case 11:
-      layout.status = rect;
+      layout.info_panel = rect;
       break;
     default:
       break;
@@ -152,13 +156,16 @@ struct CommFrameLayout {
 constexpr std::uint16_t kPromptStr = 0xbb8;
 constexpr std::uint16_t kPromptStrHigh = 0xbb9;
 
-// STR# 0x7d2 "misc strings": the ship status labels drawn under the ship
-// picture (1-based entries: 0xa9 "Fighter" / 0xa7 "Captured Escort").
-// (The hail-failure overlays 0x35/0x36 are used by the spaceflight target-
-// action handler directly.)
+// STR# 0x7d2 "misc strings": entries drawn into the item-11 info block
+// (1-based; NovaUi_DrawTargetShipCommWindow 0x0047fb70): 0xc3
+// "Class:", 0xc4 "Status:", 0xa8 "Escort" / 0xa6 "Hired Escort" (picked by
+// ShipState +0xbb, the port's escort_origin_mark), 0xae "Hostile".
 constexpr std::uint16_t kMiscStr = 0x7d2;
-constexpr std::uint16_t kMiscFighterLabel = 0xa9;        // "Fighter"
-constexpr std::uint16_t kMiscCapturedEscortLabel = 0xa7; // "Captured Escort"
+constexpr std::uint16_t kMiscClassLabel = 0xc3;       // "Class:"
+constexpr std::uint16_t kMiscStatusLabel = 0xc4;      // "Status:"
+constexpr std::uint16_t kMiscEscortLabel = 0xa8;      // "Escort"
+constexpr std::uint16_t kMiscHiredEscortLabel = 0xa6; // "Hired Escort"
+constexpr std::uint16_t kMiscHostileLabel = 0xae;     // "Hostile"
 
 // STR# 0x96 "button labels" (the three-state button label table DAT_007d82ee/
 // f0/f2 indexes in the original), as 1-based entry numbers: 0x15 Close
@@ -248,8 +255,18 @@ constexpr double kPaymentRoundFactor = 0.01;
 constexpr float kPlayerFuelOfferThreshold = 100.0F;
 
 // ---- Dialog colours --------------------------------------------------------
+// The item-11 info block fills with the space-black colour and labels draw
+// in the 50% grey (SHORT_ARRAY_00733b56); the Escort/Hired Escort status
+// word uses the same warm runtime tone as the destination window's
+// Owned/Dominated words (SHORT_ARRAY_00733b32, unreadable .bss --
+// TODO(decomp): verify). "Hostile" draws red with the weight flag set
+// (FUN_004b6940(1)).
 constexpr SDL_Color kDim{192, 192, 192, 255};
 constexpr SDL_Color kTitle{255, 255, 255, 255};
+constexpr SDL_Color kBlack{0, 0, 0, 255};
+constexpr SDL_Color kPanelGrey{128, 128, 128, 255};
+constexpr SDL_Color kStatusOrange{255, 102, 0, 255};
+constexpr SDL_Color kHostileRed{255, 0, 0, 255};
 
 // Uniform integer in [0, bound). Mirrors NovaRandom_Range using the GameState
 // PRNG so all comm rolls are reproducible per session.
@@ -348,8 +365,10 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
 // Draws the comm-window frame over the live flight view: the PICT 0x213f
 // backdrop
 // centred at natural size (falling back to a bordered placeholder), the ship
-// picture box + name panel in the upper-left, the status text block, and the
-// three context buttons.
+// picture box (item 10), the class/comm-name/status block (item 11), the
+// word-wrapped prompt panel (item 9), and the three context buttons. Panel
+// text is the shared 12-point screen font (DAT_00735684/DAT_00735686 =
+// Geneva 12 regular), left-aligned.
 void DrawShipCommDialog(SdlPlatform &platform,
                         const GameState &state,
                         SpaceflightView &view,
@@ -358,8 +377,11 @@ void DrawShipCommDialog(SdlPlatform &platform,
                         const ServicesButtonArt &button_art,
                         SDL_Texture *backdrop,
                         SDL_Texture *ship_picture,
-                        std::string_view ship_name,
-                        std::string_view name_status,
+                        const Ship &target,
+                        bool escort_latched,
+                        std::string_view class_name,
+                        bool pers_placeholder,
+                        std::string_view comm_name,
                         std::string_view prompt_text,
                         std::span<const ServiceButton> buttons,
                         std::span<const std::string> button_labels,
@@ -408,45 +430,155 @@ void DrawShipCommDialog(SdlPlatform &platform,
                           "[no picture]");
   }
 
-  // Ship name (DITL item 9) at the top of the frame's left panel, with the
-  // government / escort status line beneath it.
-  const SDL_FRect &name = layout.name;
-  NovaText_DrawCentered(platform,
-                        font_cache,
-                        NovaFontFamily::kGeneva,
-                        13.0F,
-                        kNovaFontStyleBold,
-                        kTitle,
-                        name.x,
-                        name.x + name.w,
-                        name.y + name.h / 2.0F + 2.0F,
-                        ship_name);
-  if (!name_status.empty()) {
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          NovaFontFamily::kGeneva,
-                          11.0F,
-                          kNovaFontStyleRegular,
-                          kDim,
-                          name.x,
-                          name.x + name.w,
-                          name.y + name.h / 2.0F + 14.0F,
-                          name_status);
+  // Class / comm-name / status block (DITL item 11, entry 12). The original
+  // fills the rect black and draws left-aligned Geneva-12 lines (0x0047fb70):
+  // the grey "Class:" label (STR# 0x7d2 0xc3) with the white class name at
+  // +0x23 (the pers 0x3ff placeholder "Ambrosia Mascot", DAT_0056cc30,
+  // replaces it), the white "(<comm name>)" line at +0x19 for faction ships
+  // (the DAT_0056cc40/44 parens around the government comm-name table entry),
+  // and the grey "Status:" line (0xc4) at +0x28. The status word is the
+  // orange Escort (0xa8) / Hired Escort (0xa6, +0xbb set) -- suppressed once
+  // the ship has an AI target or the escort-release latch (DAT_007d17f5) is
+  // armed -- or a red "Hostile" while the ship is keep-pressing.
+  const SDL_FRect &info = layout.info_panel;
+  SDL_SetRenderDrawColor(
+      renderer, kBlack.r, kBlack.g, kBlack.b, SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &info);
+  const std::string class_label =
+      NovaHud_LoadStringEntry(kMiscStr, kMiscClassLabel).value_or("Class:");
+  const std::string status_label =
+      NovaHud_LoadStringEntry(kMiscStr, kMiscStatusLabel).value_or("Status:");
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                12.0F,
+                kNovaFontStyleRegular,
+                kPanelGrey,
+                info.x,
+                info.y + 12.0F,
+                class_label);
+  const std::string class_value = pers_placeholder
+                                      ? std::string{"Ambrosia Mascot"}
+                                      : std::string{class_name};
+  NovaText_Draw(platform,
+                font_cache,
+                NovaFontFamily::kGeneva,
+                12.0F,
+                kNovaFontStyleRegular,
+                kTitle,
+                info.x + 35.0F,
+                info.y + 12.0F,
+                class_value);
+  if (!pers_placeholder && !comm_name.empty()) {
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kTitle,
+                  info.x + 35.0F,
+                  info.y + 25.0F,
+                  "(" + std::string{comm_name} + ")");
+  }
+  if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kPanelGrey,
+                  info.x,
+                  info.y + 40.0F,
+                  status_label);
+    // The original appends the DAT_0056cc48 two-space pstring before the
+    // bold-flipped "Hostile".
+    const float hostile_x =
+        info.x +
+        static_cast<float>(font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                                12.0F,
+                                                kNovaFontStyleRegular,
+                                                status_label + "  "));
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleBold,
+                  kHostileRed,
+                  hostile_x,
+                  info.y + 40.0F,
+                  NovaHud_LoadStringEntry(kMiscStr, kMiscHostileLabel)
+                      .value_or("Hostile"));
+  } else if (target.ai_target_ship_slot == 0 && !escort_latched) {
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kPanelGrey,
+                  info.x,
+                  info.y + 40.0F,
+                  status_label);
+    const std::string status_word =
+        NovaHud_LoadStringEntry(kMiscStr,
+                                target.escort_origin_mark != 0
+                                    ? kMiscHiredEscortLabel
+                                    : kMiscEscortLabel)
+            .value_or(target.escort_origin_mark != 0 ? "Hired Escort"
+                                                     : "Escort");
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  12.0F,
+                  kNovaFontStyleRegular,
+                  kStatusOrange,
+                  info.x + 35.0F,
+                  info.y + 40.0F,
+                  status_word);
   }
 
-  // Prompt / status message text (DITL item 11) below the name.
-  const SDL_FRect &status = layout.status;
+  // Prompt / status message panel (DITL item 9, entry 10). The original
+  // fills the inset rect white, draws the prompt word-wrapped in black into
+  // a white-filled inner rect and InvertRects the panel (0x0047fb70 via
+  // DrawContext_DrawPascalStringInFilledRect 0x004bcd30, DT_WORDBREAK); the
+  // colours cancel under the inversion, so the net look is a black panel
+  // with white wrapped text, left-aligned from the inner top.
+  const SDL_FRect &prompt_panel = layout.prompt_panel;
+  SDL_FRect prompt_inner = prompt_panel;
+  prompt_inner.x += 1.0F;
+  prompt_inner.y += 1.0F;
+  prompt_inner.w -= 2.0F;
+  prompt_inner.h -= 2.0F;
+  SDL_SetRenderDrawColor(
+      renderer, kBlack.r, kBlack.g, kBlack.b, SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &prompt_inner);
   if (!prompt_text.empty()) {
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleBold,
-                          kTitle,
-                          status.x,
-                          status.x + status.w,
-                          status.y + status.h / 2.0F,
-                          prompt_text);
+    prompt_inner.x += 4.0F;
+    prompt_inner.y += 2.0F;
+    prompt_inner.w -= 8.0F;
+    prompt_inner.h -= 4.0F;
+    const auto lines = WrapDescriptionLines(
+        prompt_text,
+        static_cast<int>(std::max(1.0F, prompt_inner.w)),
+        [&](std::string_view line) {
+          return static_cast<int>(font_cache.TextWidth(
+              NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line));
+        });
+    float baseline = prompt_inner.y + 12.0F;
+    for (const std::string &line : lines) {
+      if (baseline > prompt_panel.y + prompt_panel.h) {
+        break;
+      }
+      NovaText_Draw(platform,
+                    font_cache,
+                    NovaFontFamily::kGeneva,
+                    12.0F,
+                    kNovaFontStyleRegular,
+                    kTitle,
+                    prompt_inner.x,
+                    baseline,
+                    line);
+      baseline += 13.0F;
+    }
   }
 
   // Three context buttons stacked vertically on the lower-left (DITL items
@@ -697,14 +829,30 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     NovaLog::Todo("ship-comm: frame PICT 0x213f unavailable; drawing a "
                   "bordered placeholder");
   }
-  // Ship portrait PICT: ShipClass.pict_fallback_sprite_resource_id (5000 +
-  // class id, populated by the scenario loader at startup) decodes to a
-  // 200x200 portrait drawn into DITL item 10 on the frame's right.
+  // Ship portrait PICT (0x0047e470): the class's 200x200 portrait PICT
+  // (ShipClass.pict_fallback_sprite_resource_id, 5000 + class id, populated
+  // by the scenario loader at startup), overridden by the ship's pers
+  // personality HailPict (+0x12) when it names a real PICT (> 0x7f).
   std::unique_ptr<SdlTexture> ship_picture;
-  if (ship_class != nullptr &&
-      ship_class->pict_fallback_sprite_resource_id != 0) {
-    ship_picture =
-        LoadPictTexture(platform, ship_class->pict_fallback_sprite_resource_id);
+  {
+    std::uint16_t pict_id = 0;
+    if (ship_class != nullptr &&
+        ship_class->pict_fallback_sprite_resource_id != 0) {
+      pict_id = ship_class->pict_fallback_sprite_resource_id;
+    }
+    if (target.pers_def_slot >= 0 &&
+        target.pers_def_slot <
+            static_cast<std::int16_t>(state.scenario.pers_defs.size())) {
+      const PersDef &pers =
+          state.scenario
+              .pers_defs[static_cast<std::size_t>(target.pers_def_slot)];
+      if (pers.present && pers.hail_pict_id > 0x7f) {
+        pict_id = static_cast<std::uint16_t>(pers.hail_pict_id);
+      }
+    }
+    if (pict_id != 0) {
+      ship_picture = LoadPictTexture(platform, pict_id);
+    }
   }
   ServicesButtonArt button_art;
   if (!button_art.Initialize(platform)) {
@@ -716,27 +864,17 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   platform.SetCenteredPlayfield();
 
-  // Ship name panel: "<ship class name>" + government comm name. The original
-  // reads the government comm-name table (DAT_007d1d0c) or a "?" placeholder
-  // for faction-less ships; the clean-room Government carries comm_name.
-  const std::string ship_name =
+  // Item-11 info block contents (0x0047e470 + 0x0047fb70): the class name
+  // (DAT_006bd2cc class-name table), the pers 0x3ff "Ambrosia Mascot"
+  // placeholder (DAT_0056cc30) and the government comm-name table entry
+  // (DAT_007d1d0c; faction-less ships get an empty pstring, DAT_0056cc2c,
+  // which drops the parenthesised line).
+  const std::string class_name =
       ship_class != nullptr ? ship_class->display_name : target.ship_name;
-  const std::string govt_line = [&]() {
-    if (govt != nullptr) {
-      return govt->comm_name;
-    }
-    return std::string("?");
-  }();
-  const std::string status_line = [&]() {
-    if (target.escort_origin_mark == 0) {
-      // "Fighter" / "Captured Escort" label under the name (1-based entries
-      // 0xa9 / 0xa7).
-      return NovaHud_LoadStringEntry(kMiscStr, kMiscFighterLabel)
-          .value_or(govt_line);
-    }
-    return NovaHud_LoadStringEntry(kMiscStr, kMiscCapturedEscortLabel)
-        .value_or(govt_line);
-  }();
+  const bool pers_placeholder = target.pers_def_slot == 0x3ff;
+  const std::string comm_name = govt != nullptr && !govt->comm_name.empty()
+                                    ? govt->comm_name
+                                    : std::string{};
 
   // ---- Buttons -------------------------------------------------------------
   // Slots: 0 Close Channel (bottom), 1 the assistance button (middle; label
@@ -991,8 +1129,11 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                        button_art,
                        backdrop ? backdrop->get() : nullptr,
                        ship_picture ? ship_picture->get() : nullptr,
-                       ship_name,
-                       status_line,
+                       target,
+                       escort_transfer_armed,
+                       class_name,
+                       pers_placeholder,
+                       comm_name,
                        status,
                        buttons,
                        button_labels,

@@ -9,6 +9,7 @@
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
+#include "impact_effects.hpp"
 #include "intro_cinematic.hpp"
 #include "landed_window.hpp"
 #include "mission.hpp"
@@ -32,6 +33,70 @@
 #include <string>
 
 namespace game {
+
+// --- PlayerTick_StatusAndOutfitEvents constants (Ghidra globals) -----------
+// g_fire_restricted_velocity_damp (0x00575570, double): per-frame velocity
+// damping while fire-restricted (disabled).
+constexpr float kPlayerFireRestrictedVelocityDamp = 0.995F;
+// Player recently-hit timer (g_player_recently_hit_timer, DAT_0073549c):
+// armed to 300 ticks when the player takes a hit, decays one tick per frame
+// while at or above the cutoff; gates the disabled auto-repair pass until a
+// the post-hit regen-suppression window expires.
+constexpr float kRecentlyHitRegenCutoff = 0.0F;
+// g_jump_turnaround_turn_rate_addend (0x0057555c, float): death-timer
+// countdown step per 30 Hz tick.
+constexpr float kJumpTurnaroundTurnRateAddend = 1.0F;
+// DAT_00575538: shared zero sentinel for the death-timer / bomb-timer floors.
+constexpr float kDeathTimerExpireFloor = 0.0F;
+// Disabled auto-repair armor restore: max_armor * fraction + addend.
+// g_auto_repair_armor_fraction (DAT_00575588, double 1/3) is the standard
+// rate, g_auto_repair_armor_fraction_0x10 (DAT_00575578, double 0.1) the Ship
+// Flags 0x10 variant, g_armor_state_addend (DAT_00575580, double 1.0) the
+// shared addend. The +1 lifts the hull just above the disable threshold so
+// the ship un-disables after the repair.
+constexpr float kAutoRepairArmorFraction = 1.0F / 3.0F;
+constexpr float kAutoRepairArmorFractionFlag0x10 = 0.1F;
+constexpr float kAutoRepairArmorAddend = 1.0F;
+// Bomb-detonation self-damage roll: max_armor * 0.5 + 1.0
+// (g_bomb_damage_armor_fraction DAT_00575598 / g_armor_state_addend
+// DAT_00575580), drawn via Random(roll) and added to max_armor.
+constexpr float kBombDamageArmorFraction = 0.5F;
+constexpr float kBombDamageArmorAddend = 1.0F;
+// g_bomb_detonation_timer floor sentinel (DAT_00575538) and reroll ceiling
+// (0x0044da75 rolls Random(100)).
+constexpr float kBombDetonationTimerFloor = 0.0F;
+constexpr std::int16_t kBombDetonationRerollMax = 100;
+// g_bomb_detonation_interval_frames (0x00575590, float): the countdown window
+// in 30 Hz reference frames before a carried bomb detonates.
+constexpr float kBombDetonationIntervalFrames = 300.0F;
+// Outfit ModType codes scanned in the four mod-type slots (decompile offsets
+// name-0x26..-0x20, 0x37c-byte def stride).
+constexpr std::int16_t kBombEscapePodModType = 0x2F; // self-destruct escape pod
+constexpr std::int16_t kBombWeaponModType = 0x32;    // carried bomb
+constexpr std::int16_t kAutoRepairOutfitModType = 0x31; // repair system
+// STR# 0x7d2 entries used by the block.
+constexpr std::uint16_t kStringListFlightText = 0x7D2;
+constexpr std::uint16_t kStrAutoRepairEngaged =
+    0x25; // "repair systems engaged"
+constexpr std::uint16_t kStrEscapePodDeployed = 0x26;
+constexpr std::uint16_t kStrBombYou = 0x27; // "You " prefix
+constexpr std::uint16_t kStrBombDetonatedSingular = 0x28;
+constexpr std::uint16_t kStrBombDetonatedPlural = 0x29;
+// g_transition_sound_handle_table (snd 150+i): [4] auto-repair cue, [5]
+// distress alert (_DAT_0059155c, snd 155 via LoadStringResourceCopyById).
+constexpr std::int16_t kAutoRepairSoundTransitionIndex = 4;
+constexpr std::int16_t kDistressCueSoundTransitionIndex = 5;
+// HUD overlay durations (simulation ticks).
+constexpr std::uint64_t kOverlayDurationAutoRepair = 250; // 0xfa
+constexpr std::uint64_t kOverlayDurationBomb = 400;       // 0x190
+constexpr std::uint64_t kOverlayDurationEscapePod = 360;  // 0x168
+// Bomb outfit defs carry a 0x80-biased area-impact effect id in ModVal.
+constexpr std::int16_t kBombEffectIdBias = 0x80;
+// Frame_ShouldTriggerAutoRepairTick reroll: _DAT_00575830 = 500.0 (the range
+// base) and _FLOAT_005757d8 = 0.0 (the low-tick-scale gate).
+constexpr float kFrameScaleAutoRepairRerollGate = 0.0F;
+constexpr int kAutoRepairFrameRerollRange = 500;
+
 namespace {
 
 // Frame_TickSystems preserves the original scope order. Unimplemented scopes
@@ -393,6 +458,39 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       returning_to_menu = true;
       break;
     }
+    // PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240): death
+    // bookkeeping, fire-restricted damping, disabled auto-repair, the periodic
+    // distress cue, and carried-bomb detonation. Runs ahead of the flight
+    // input pass, matching the original's dispatch order. `true` means the
+    // death/inactive branch consumed the frame (flight input is skipped).
+    // Once the bookkeeping latches game_over_pending the original returns to
+    // the pilot/menu flow via its restart command; TODO(decomp(0x0044abf8))
+    // skipped: that command channel is not reconstructed, so the port leaves
+    // flight mode instead.
+    // True when PlayerTick_StatusAndOutfitEvents' death branch consumed the
+    // frame (flight input is skipped, matching the original's early return).
+    bool player_status_consumed = false;
+    if (NovaPlayer_TickStatusAndOutfitEvents(
+            state, frame_time_ms / (1000.0F / 30.0F))) {
+      if (state.game_over_pending) {
+        returning_to_menu = true;
+        break;
+      }
+      player_status_consumed = true;
+    }
+    // DAT_007354a5: the escape-pod bomb variant latches an immediate return
+    // to the menu shell after its deployment overlay.
+    if (state.return_to_menu_pending) {
+      state.return_to_menu_pending = false;
+      returning_to_menu = true;
+      break;
+    }
+    // Per-frame player-target validation (Ship_HandlePlayerShipCore 0x0044aa70
+    // prologue): the ship target drops when the target ship is inactive,
+    // destroyed, entering hyperspace (AI state 0x15) or cloaked past the
+    // visibility gate -- which is how a targeted ship jumping out releases the
+    // selection. The stellar selection has no per-frame validation.
+    NovaTargeting_ValidatePlayerTarget(state);
     const bool target_cycle =
         input.cycle_target_next || input.cycle_target_previous;
     if (target_cycle && !target_cycle_was_held) {
@@ -472,17 +570,34 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
     }
     nearest_was_held = nearest_pressed;
-    // Click-to-target ship selection (the manual: "click on a ship to select
-    // it with your targeting sensors"). The picked ship is selected as the
-    // primary target; clicking empty space does nothing.
+    // Click-to-target (PlayerTick_MouseTargetAndControlCommands 0x0044e019):
+    // the pass captures the pre-click ship target, clears the target when the
+    // click lands on the player's own sprite, picks a ship under the cursor,
+    // and only scans stellar sprites when the ship target is unchanged from
+    // the pre-click value (no ship hit, or the already-targeted ship was
+    // clicked). A stellar hit selects it as the travel target and re-arms the
+    // travel reticle pulse at 256.0 (0x43800000).
     if (input.primary_clicked) {
+      const std::int16_t pre_click_target =
+          state.player.primary_target_ship_slot;
+      if (view.ClickInPlayerSprite(
+              platform, state, input.mouse_x, input.mouse_y)) {
+        state.player.primary_target_ship_slot = -1;
+      }
       const std::int16_t picked =
           view.PickShipAt(platform, state, input.mouse_x, input.mouse_y);
       if (picked != -1) {
         state.player.primary_target_ship_slot = picked;
         state.ship_reticle_pulse = 256.0F;
-      } else {
-        NovaLog::Info("click-to-target: no ship under cursor");
+      }
+      if (state.player.primary_target_ship_slot == pre_click_target) {
+        const std::int16_t stellar =
+            view.PickStellarAt(platform, state, input.mouse_x, input.mouse_y);
+        if (stellar >= 0x80 && stellar != state.travel.selected_stellar_id) {
+          state.travel.selected_stellar_id = stellar;
+          state.travel.selected_stellar_is_manual = true;
+          state.travel_reticle_pulse = 256.0F;
+        }
       }
     }
     const bool land_pressed = input.land && !land_was_held;
@@ -500,7 +615,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // (heading/velocity/glow) for the brake, alignment hold and zoom thrust;
     // the player's normal movement integration is suspended so it does not
     // overwrite the jump's flight. NovaTravel_Tick below drives the phases.
-    if (!state.travel.engaging) {
+    if (!player_status_consumed && !state.travel.engaging) {
       NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
     }
     // Handle this frame's fire input. The shot movement/lifetime update
@@ -687,14 +802,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       state.travel.selected_stellar_id = -1;
       state.travel.selected_stellar_is_manual = false;
     }
-    // Seed an automatic target, while retaining a stellar chosen by Tab/
-    // Shift+Tab. This keeps navigation purposeful instead of retargeting to
-    // whichever body happens to be closest each frame. A change to the selected
-    // travel stellar re-arms the travel reticle pulse
-    // (NovaUi_UpdateTravelTarget Reticle's re-arm at 0x43800000), mirroring the
-    // original arming _g_travel_target_reticle_pulse whenever
-    // ai_secondary_target_slot is assigned a fresh stellar.
-    NovaTargeting_UpdatePlayerTarget(state);
+    // No per-frame stellar auto-seed: the original only sets
+    // ai_secondary_target_slot from explicit commands (the land command's
+    // nearest-pick below, number keys, click, nearest, starmap route). The
+    // selection therefore stays empty until the player targets something, and
+    // a ship target and a stellar selection can coexist as in the original.
+    // A change to the selected travel stellar re-arms the travel reticle pulse
+    // (the original arms _g_travel_target_reticle_pulse whenever
+    // ai_secondary_target_slot is assigned a fresh stellar).
     if (state.travel.selected_stellar_id != prev_travel_stellar) {
       state.travel_reticle_pulse = 256.0F;
       prev_travel_stellar = state.travel.selected_stellar_id;
@@ -706,6 +821,18 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // overlay (STR# 0x7d2 messages) instead of a bare log line. Gated while a
     // jump is engaged (fire-restricted through brake + hold + zoom).
     if (land_pressed && !state.travel.engaging) {
+      // The original's land command (binding 5 in Ship_HandlePlayerShipCore
+      // 0x0044aa70) auto-picks the nearest available travel stellar when no
+      // stellar is currently targeted (travel_transfer_mode != 2 or
+      // ai_secondary_target_slot == -1) before running the arrival checks.
+      if (state.travel.selected_stellar_id < 0) {
+        const std::int16_t nearest =
+            NovaTargeting_FindNearestAvailableTravelStellar(state);
+        if (nearest >= 0x80) {
+          state.travel.selected_stellar_id = nearest;
+          state.travel_reticle_pulse = 256.0F;
+        }
+      }
       LandedContext ctx;
       if (NovaLanding_EnterDocked(state, ctx)) {
         NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
@@ -1650,6 +1777,371 @@ void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
   // the previous velocity at most `step` per axis, never crossing it.
   ship.vel_x = new_vx + std::clamp(prev_vel_x - new_vx, -step, step);
   ship.vel_y = new_vy + std::clamp(prev_vel_y - new_vy, -step, step);
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra PlayerTick_StatusAndOutfitEvents (internal label of
+// Ship_HandlePlayerShipCore 0x0044aa70, block 0x0044b240..0x0044b7c4 plus the
+// carried-bomb tails at 0x0044da75/0x0044daa0 and the death-bookkeeping
+// prologue of the parent).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Mirrors the original's NovaRandom_Range(n) -> integer in [0, n) (draws from
+// GameState.rng like the other clean-room roll sites).
+std::int16_t RollRandom(GameState &state, std::int32_t n) {
+  if (n <= 0) {
+    return 0;
+  }
+  std::uniform_int_distribution<std::int32_t> dist{0, n - 1};
+  return static_cast<std::int16_t>(dist(state.rng));
+}
+
+// Outfit-def scan shared by Frame_ShouldTriggerAutoRepairTick (0x0046e540) and
+// the carried-bomb detonation scans: the original walks the four mod-type
+// words of every owned outfit (decompile `name - 0x26 + i*2`, 0x37c-byte def
+// stride) and reports the first matching def.
+const Outfit *FindOutfitWithModType(const GameState &state,
+                                    std::size_t outfit_index,
+                                    std::int16_t mod_type) {
+  if (outfit_index >= state.scenario.outfits.size()) {
+    return nullptr;
+  }
+  const Outfit &def = state.scenario.outfits[outfit_index];
+  if (def.mod_type == mod_type) {
+    return &def;
+  }
+  for (const std::int16_t alt : def.alt_mod_types) {
+    if (alt == mod_type) {
+      return &def;
+    }
+  }
+  return nullptr;
+}
+
+// Ghidra Frame_ShouldTriggerAutoRepairTick (0x0046e540): random gate (1-in-N,
+// N = 500 with the low-tick-scale reroll; 500 / frame tick scale otherwise),
+// a destroyed-ship veto, and the repair outfit's ModType 0x31 presence among
+// owned outfits (player path). The original additionally checks fire-
+// restriction; the player caller already gates on it.
+bool Frame_ShouldTriggerAutoRepairTick(GameState &state) {
+  const int roll_range =
+      state.last_frame_tick_scale <= kFrameScaleAutoRepairRerollGate
+          ? kAutoRepairFrameRerollRange
+          : static_cast<int>(static_cast<float>(kAutoRepairFrameRerollRange) /
+                             state.last_frame_tick_scale);
+  if (RollRandom(state, roll_range) != 0) {
+    return false;
+  }
+  if (NovaAiShip_IsDestroyed(state.player)) {
+    return false;
+  }
+  for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
+                            idx < state.inventory.outfit_owned_count.size();
+       ++idx) {
+    if (state.inventory.outfit_owned_count[idx] > 0 &&
+        FindOutfitWithModType(state, idx, kAutoRepairOutfitModType) !=
+            nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra PlayerTick_StatusAndOutfitEvents sub-branch 0x0044ab50: on death with
+// a carried bomb, open the escape-pod selection dialog (first owned outfit
+// with ModType 0x2f / ModVal > 0).
+void RunDeathEscapePodScan(GameState &state) {
+  for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
+                            idx < state.inventory.outfit_owned_count.size();
+       ++idx) {
+    if (state.inventory.outfit_owned_count[idx] <= 0) {
+      continue;
+    }
+    const Outfit *pod =
+        FindOutfitWithModType(state, idx, kBombEscapePodModType);
+    if (pod == nullptr || pod->mod_val <= 0) {
+      continue;
+    }
+    // TODO(decomp(0x0044ab6c)) skipped: NovaUi_HideTravelSelectionSprite,
+    // NovaUi_RedrawGameplayViewportAndRadar, NovaPlatform_EnsureCursorVisible,
+    // Ui_LoadSelectionDialogResource / Ui_RunTravelSelectionDialog and
+    // NovaUi_MarkTravelAndStatusPanelsDirty are presentation passes of the
+    // interactive selection-dialog shell, not reconstructed yet.
+    NovaLog::Info("escape pod dialog requested (outfit {})", pod->name);
+    break;
+  }
+}
+
+// Message composer for the bomb/escape-pod overlays: STR# 0x7d2 entry 0x27
+// ("You ") + outfit LC name/plural + entry 0x28/0x29. The original copies the
+// name out of stride-0x100 Pascal-string arrays indexed by outfit id; the
+// clean-room uses the decoded LC fields.
+std::string ComposeBombOverlay(const GameState &state,
+                               std::size_t outfit_index,
+                               bool plural) {
+  std::string text =
+      NovaHud_LoadStringEntry(kStringListFlightText, kStrBombYou).value_or("") +
+      " ";
+  const Outfit &def = state.scenario.outfits[outfit_index];
+  text += plural ? def.lc_plural : def.lc_name;
+  text += " ";
+  text += NovaHud_LoadStringEntry(kStringListFlightText,
+                                  plural ? kStrBombDetonatedPlural
+                                         : kStrBombDetonatedSingular)
+              .value_or("");
+  return text;
+}
+
+// Ghidra 0x0044daa0 escape-pod bomb variant (carried bomb outfit class 1):
+// kills shields/armor immediately, stops the hyperspace audio, shows the
+// deployment overlay, and returns to the menu shell (DAT_007354a5).
+void DetonateEscapePodBomb(GameState &state) {
+  PlayerShip &p = state.player;
+  p.armor_points = -1.0F;
+  p.shield_points = -1.0F;
+  p.ai_station_hold_timer = -1.0F;
+
+  std::string text;
+  for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
+                            idx < state.inventory.outfit_owned_count.size();
+       ++idx) {
+    const auto owned = state.inventory.outfit_owned_count[idx];
+    if (owned <= 0) {
+      continue;
+    }
+    if (FindOutfitWithModType(state, idx, kBombEscapePodModType) == nullptr) {
+      continue;
+    }
+    // Singular/plural choice reproduces the original's name-flag ladder: the
+    // plural name needs owned >= 2 and a non-empty plural, the singular needs
+    // owned == 1 and a non-empty name; otherwise no name message is shown.
+    const Outfit &pod_def = state.scenario.outfits[idx];
+    const bool has_plural = !pod_def.lc_plural.empty();
+    const bool has_singular = !pod_def.lc_name.empty();
+    if (owned < 2 || !has_plural) {
+      if (owned != 1 || !has_singular) {
+        break; // deployment only, no composed name message
+      }
+    }
+    text = ComposeBombOverlay(state, idx, owned >= 2);
+    break;
+  }
+  if (text.empty()) {
+    // DAT_007354a4 can hold a custom latched message; the fallback is STR#
+    // 0x7d2 entry 0x26. The custom-message source is not reconstructed yet
+    // (TODO(decomp)).
+    text = NovaHud_LoadStringEntry(kStringListFlightText, kStrEscapePodDeployed)
+               .value_or("");
+  }
+  NovaHud_ShowOverlayMessage(
+      state, text, 0xe0, 0xe0, 0xe0, kOverlayDurationEscapePod);
+
+  // NovaAudio_UnregisterCallbacks on the warp-up / warp-up-x2 handles (the
+  // port's pending one-shots are drained by the loop; clear the latches).
+  state.warp_up_sound_pending = false;
+  state.warp_out_sound_pending = false;
+  state.return_to_menu_pending = true;
+}
+
+// Ghidra 0x0044b446 bomb detonation: message, impact effect from the def's
+// 0x80-biased ModVal, outfit removal, and an armor-piercing self-damage roll
+// of max_armor * fraction + addend (bypass_shields, force_armor_only,
+// suppress_retarget, no aggro).
+void DetonateCarriedBomb(GameState &state) {
+  PlayerShip &p = state.player;
+  for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
+                            idx < state.inventory.outfit_owned_count.size();
+       ++idx) {
+    if (state.inventory.outfit_owned_count[idx] <= 0) {
+      continue;
+    }
+    const Outfit *bomb = FindOutfitWithModType(state, idx, kBombWeaponModType);
+    if (bomb == nullptr) {
+      continue;
+    }
+    NovaHud_ShowOverlayMessage(
+        state,
+        ComposeBombOverlay(
+            state, idx, state.inventory.outfit_owned_count[idx] >= 2),
+        0xe0,
+        0xe0,
+        0xe0,
+        kOverlayDurationBomb);
+    if (bomb->mod_val >= kBombEffectIdBias &&
+        bomb->mod_val < kBombEffectIdBias + 0x40) {
+      NovaEffects_SpawnAreaImpact(
+          state,
+          p.pos_x,
+          p.pos_y,
+          static_cast<std::int16_t>(bomb->mod_val - kBombEffectIdBias),
+          0,
+          true);
+    }
+    state.inventory.outfit_owned_count[idx] = 0;
+
+    const ShipClass *cls =
+        state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+    const float max_armor = cls ? static_cast<float>(cls->base_armor) : 0.0F;
+    const int roll =
+        RollRandom(state,
+                   static_cast<int>(max_armor * kBombDamageArmorFraction +
+                                    kBombDamageArmorAddend));
+    NovaCollision_ResolveShipHitFromWeaponSlot(
+        state,
+        0,
+        p.pos_x,
+        p.pos_y,
+        0,
+        static_cast<std::int16_t>(roll + max_armor),
+        0,
+        0xFFFF,
+        false,
+        false,
+        true,
+        true,
+        0);
+    break;
+  }
+  // Ghidra g_player_status_panel_dirty + Outfit_RecomputeOutfitDerivedState:
+  // the outfit pool changed, so derived stats must be recomputed.
+  state.stat_cache_valid = false;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+}
+
+} // namespace
+
+// Ghidra PlayerTick_StatusAndOutfitEvents: internal label of
+// Ship_HandlePlayerShipCore (0x0044aa70), block 0x0044b240..0x0044b7c4 with the
+// carried-bomb tails at 0x0044da75/0x0044daa0. Runs after the hyperspace-exit
+// gate and before the manual-flight block, ahead of every flight-input branch.
+bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
+                                          float elapsed_ticks) {
+  PlayerShip &p = state.player;
+
+  // --- Player-death bookkeeping (Ship_HandlePlayerShipCore prologue) ------
+  // Ship_UpdateVisualState (0x00428340) deactivates any destroyed ship once
+  // its death-timer presentation finishes; that pass is not reconstructed for
+  // the player yet, so the player-side slice is bridged here.
+  if (p.is_active && p.death_timer_active > kDeathTimerExpireFloor) {
+    // Death presentation running: tick the timer down; the original skips the
+    // whole status/outfit block for the dying ship (inactive-branch return).
+    p.death_timer_active -= elapsed_ticks;
+    if (p.death_timer_active <= kDeathTimerExpireFloor) {
+      // Presentation finished: deactivate (Ship_UpdateVisualState 0x00428340
+      // tail: Sprite_SetVisible(0), is_active = 0, ai_target_ship_slot = -1).
+      // The port has no per-ship sprite records.
+      p.is_active = false;
+      p.ai_target_ship_slot = -1;
+    }
+    return true;
+  }
+
+  // --- Inactive branch (0x0044aa70 prologue) -------------------------------
+  if (!p.is_active) {
+    if (p.death_timer_active > kDeathTimerExpireFloor) {
+      // Ghidra _g_jump_turnaround_turn_rate_addend decrement; floor sentinel
+      // is DAT_00575538.
+      p.death_timer_active -= kJumpTurnaroundTurnRateAddend;
+      if (p.death_timer_active > kDeathTimerExpireFloor) {
+        return true;
+      }
+    }
+    if (state.bomb_outfit_class != 0) {
+      RunDeathEscapePodScan(state);
+    }
+    // Ghidra DAT_00596d38, consumed by the spaceflight loop.
+    state.game_over_pending = true;
+    // Restart command (0x0044abf8): the original polls key-binding slot 0x20
+    // through NovaInput_IsCommandActiveWithGameplayGuards and calls
+    // Ship_ResetPlayerShipState to relaunch. TODO(decomp(0x0044abf8)) skipped:
+    // the gameplay-command input channel is not reconstructed; the spaceflight
+    // loop returns to the menu shell on the death latch instead.
+    return true;
+  }
+
+  // --- Fire-restricted damping (0x0044b240) --------------------------------
+  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, p);
+  if (fire_restricted) {
+    p.vel_x *= kPlayerFireRestrictedVelocityDamp;
+    p.vel_y *= kPlayerFireRestrictedVelocityDamp;
+  } else {
+    p.boarded_target_latch = 0;
+  }
+
+  // g_player_recently_hit_timer (DAT_0073549c): armed to 300 ticks when the
+  // player takes a hit, decays one tick per frame while at or above the
+  // cutoff; suppresses armor regeneration and the disabled auto-repair pass
+  // until it falls back below the cutoff.
+  if (kRecentlyHitRegenCutoff <= state.recently_hit_timer) {
+    state.recently_hit_timer -= elapsed_ticks;
+  }
+
+  // --- Disabled auto-repair (0x0044b2a5) -----------------------------------
+  if (fire_restricted && state.recently_hit_timer < kRecentlyHitRegenCutoff &&
+      Frame_ShouldTriggerAutoRepairTick(state)) {
+    const ShipClass *cls =
+        state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+    if (cls != nullptr) {
+      const float max_armor = static_cast<float>(cls->base_armor);
+      p.armor_points =
+          (cls->capability_flags & 0x10) != 0
+              ? max_armor * kAutoRepairArmorFractionFlag0x10 +
+                    kAutoRepairArmorAddend
+              : max_armor * kAutoRepairArmorFraction + kAutoRepairArmorAddend;
+    }
+    NovaHud_ShowOverlayMessage(
+        state,
+        NovaHud_LoadStringEntry(kStringListFlightText, kStrAutoRepairEngaged)
+            .value_or(""),
+        0xe0,
+        0xe0,
+        0xe0,
+        kOverlayDurationAutoRepair);
+    state.pending_ui_sounds.push_back(
+        GameState::PendingUiSound{kAutoRepairSoundTransitionIndex, 1});
+  }
+
+  // --- Distress-call cue (0x0044b3a8, tail at 0x0044d410) ------------------
+  // Every 60th frame the original re-evaluates Ship_AreAnyShipsEligibleFor-
+  // DistressCall; a rising edge with no blocking timed action plays the
+  // distress alert (g_transition_sound_handle_table[5], snd 155) five times.
+  if (state.spaceflight_frame_counter % 60 == 0) {
+    state.distress_cue_active_prev = state.distress_cue_active;
+    state.distress_cue_active =
+        NovaAi_AreAnyShipsEligibleForDistressCall(state);
+    if (state.distress_cue_active && !state.distress_cue_active_prev &&
+        p.timed_action_counter < 1) {
+      state.pending_ui_sounds.push_back(
+          GameState::PendingUiSound{kDistressCueSoundTransitionIndex, 5});
+      // The original also sets g_travel_countdown = 0x1e when
+      // g_pref_sound_volume < 2; the preference and the countdown consumer are
+      // not modelled yet (TODO(decomp)).
+    }
+  }
+
+  // --- Carried-bomb countdown / detonation (0x0044b3d4) ---------------------
+  if (state.bomb_outfit_class == 0) {
+    state.bomb_detonation_timer = 0.0F;
+  } else if (state.bomb_detonation_timer < kBombDetonationTimerFloor) {
+    // 0x0044da75 tail: expired timer rerolls a whole number of intervals.
+    state.bomb_detonation_timer =
+        static_cast<float>(RollRandom(state, kBombDetonationRerollMax));
+  } else if (!NovaAiShip_IsDestroyed(p)) {
+    state.bomb_detonation_timer += elapsed_ticks;
+    if (state.bomb_detonation_timer > kBombDetonationIntervalFrames) {
+      state.pending_impact_sounds.push_back(
+          GameState::PendingImpactSound{0, p.pos_x, p.pos_y});
+      if (state.bomb_outfit_class == 1) {
+        DetonateEscapePodBomb(state);
+      } else {
+        DetonateCarriedBomb(state);
+      }
+    }
+  }
+  return false;
 }
 
 void NovaPlayer_UpdateFromInput(GameState &state,

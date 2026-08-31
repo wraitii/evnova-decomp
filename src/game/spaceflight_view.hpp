@@ -97,6 +97,27 @@ public:
   std::int16_t
   PickShipAt(SdlPlatform &platform, const GameState &state, float rx, float ry);
 
+  // Clean-room click-to-target stellar picking (the stellar arm of the
+  // original's mouse-target pass, PlayerTick_MouseTargetAndControlCommands
+  // 0x0044e019): returns the resource id of the current system's available
+  // stellar whose ambient sprite (spin set link_a_id + 1000) contains the
+  // render-coordinate point, or -1. The original hit-tests the ambient
+  // sprite's current-frame rect, expanded 16px per side when shorter than
+  // 0x30, and only considers sprites that are alive (sprite_handle_active);
+  // approximated here with the loaded spin set's tile extent (TODO(decomp)).
+  std::int16_t PickStellarAt(SdlPlatform &platform,
+                             const GameState &state,
+                             float rx,
+                             float ry);
+
+  // True when the render-coordinate point lands on the player's own sprite
+  // (the original's self-click branch clears the primary ship target).
+  // Half-extent approximation with the same 0x30/16px inset expansion.
+  bool ClickInPlayerSprite(SdlPlatform &platform,
+                           const GameState &state,
+                           float rx,
+                           float ry);
+
   // Ghidra NovaEffects_QueuedAmbientStarParticles (0x0046ebf0): (re)spawns the
   // 20-slot ambient starfield around the player ship. Spawn count is
   // round(viewportHeight / 600.0 * 20.0) fresh stars; each gets a random world
@@ -187,6 +208,16 @@ public:
   // Radar blip sizing reads the stellar spin sets (Sprite_GetShotHalfSpan
   // 0x00462390 on the loaded set); the HUD renderer gets read access here.
   [[nodiscard]] SpriteStore &sprite_store() { return sprite_store_; }
+
+  // Current animation frame index for a stellar's ambient sprite (0 for
+  // single-frame bodies / bodies of other systems). Read by the destination-
+  // interaction window so its thumbnail shows the same frame the system view
+  // does (Ghidra: the g_stellar_ambient_sprites current-frame draw in
+  // NovaUi_DrawTravelDestinationInteractionWindow 0x004812c0).
+  [[nodiscard]] int StellarCurrentFrame(std::int16_t stellar_id) const {
+    const auto it = stellar_anims_.find(stellar_id);
+    return it != stellar_anims_.end() ? it->second.current_frame : 0;
+  }
 
 private:
   // The ship-target reticle's 16-frame corner-bracket set (cicn 10008-10023)

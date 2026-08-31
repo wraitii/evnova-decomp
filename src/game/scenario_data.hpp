@@ -662,9 +662,16 @@ struct Stellar {
 // Field names mirror the EV Nova Bible `govmnt`/`government` layout; each
 // notes the Ghidra GovtDef member (and the source payload offset) it decodes.
 struct Government {
-  std::string name;        // resource record name (display / HUD label)
-  std::string comm_name;   // name table (comm chatter / fame label)
-  std::string medium_name; // medium name table (mission/map label)
+  std::string name; // resource record name (display / HUD label)
+  std::string
+      target_code; // name table (payload +0x44; g_government_name_table):
+                   // the short string the target-status panel shows
+                   // (Bible "TargetCode", e.g. " Fed.")
+  std::string
+      comm_name; // name table (payload +0x34; g_government_comm_name_table;
+                 // Bible "CommName" -- comm chatter / fame label)
+  std::string
+      medium_name; // medium name table (payload +0x64; Bible "MediumName")
 
   // GovtDef +0x3e/+0x40: voice_type_code and its decoded companion mode. The
   // loader recodes raw 0..7 voices as mode -1, voices offset by 1000 as mode 1

@@ -15,10 +15,14 @@
 // (labels from the STR# 0x96 "button labels" pool entries 0x14/0x15/0x16/
 // 0x18/0x1f). The window is laid out from DLOG/DITL 0x3ef: the 423x215 PICT
 // 0x213f backdrop is centred on the 640x480 playfield, with the 200x200 ship
-// portrait (ShipClass pict_fallback_sprite_resource_id = PICT 5000+class, from
+// portrait (ShipClass pict_fallback_sprite_resource_id = PICT 5000+class,
+// overridden by the pers HailPict, from
 // NovaData_LoadAllShipClassVisualAndLaunchData 0x004aeda0) in DITL item 10 on
-// the right, the ship name in item 9 and the status/prompt block in item 11,
-// and the three context buttons stacked *vertically* on the lower-left in DITL
+// the right, the word-wrapped comm prompt panel in item 9 and the Class:/
+// comm-name/Status: block in item 11 (drawn by
+// NovaUi_DrawTargetShipCommWindow 0x0047fb70, renamed 2024 from the
+// misleading "...BribeWindow" label), and the three
+// context buttons stacked *vertically* on the lower-left in DITL
 // items 0/1/2 (Close Channel at the bottom, Request Assistance / Beg For
 // Mercy / Release in the middle, Greetings at the top; each button's label
 // matches its action -- slot 1 runs the assistance dialogue, slot 2 shows

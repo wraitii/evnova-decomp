@@ -74,6 +74,16 @@ extern void NovaPlayer_UpdateFromInput(GameState &state,
                                        const FlightInput &input,
                                        float elapsed_ticks);
 
+// Per-frame player status/outfit maintenance (Ghidra
+// PlayerTick_StatusAndOutfit- Events, internal label of
+// Ship_HandlePlayerShipCore 0x0044aa70): fire- restricted velocity damping, the
+// disabled auto-repair system, the periodic distress-call cue, and carried-bomb
+// countdown/detonation. Must run before the flight input pass each frame (the
+// original dispatches it ahead of the manual- flight block). Returns true when
+// the player ship is no longer active (death bookkeeping consumed the frame).
+extern bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
+                                                 float elapsed_ticks);
+
 // Per-frame in-flight shield regeneration (the spaceflight loop calls this
 // once a frame). Restores the player's shields toward the effective maximum at
 // the recorded shield-recharge rate (class base + outfit opcode-18 bonuses,

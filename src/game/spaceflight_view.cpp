@@ -267,8 +267,9 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
         FrameForHeading(ship.heading, sprite->frames_per_rotation);
     SpriteDrawOptions hull_options;
     if (NovaAiShip_IsDestroyed(ship)) {
-      hull_options.alpha_mod = std::clamp(
-          ship.destruction_visual_timer_ms / 900.0F, 0.0F, 1.0F) * 0.55F;
+      hull_options.alpha_mod =
+          std::clamp(ship.destruction_visual_timer_ms / 900.0F, 0.0F, 1.0F) *
+          0.55F;
     }
     DrawSprite(platform.renderer(),
                sprite->base,
@@ -552,8 +553,8 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
     Ship &ship = state.ShipAt(slot);
     const bool was_visible = ship.destruction_visual_timer_ms > 0.0F;
     if (ship.destruction_visual_timer_ms > 0.0F) {
-      ship.destruction_visual_timer_ms = std::max(
-          0.0F, ship.destruction_visual_timer_ms - frame_time_ms);
+      ship.destruction_visual_timer_ms =
+          std::max(0.0F, ship.destruction_visual_timer_ms - frame_time_ms);
     }
     if (was_visible && ship.destruction_visual_timer_ms <= 0.0F &&
         !ship.destruction_finale_triggered) {
@@ -621,8 +622,16 @@ void SpaceflightView::DrawFadingEffects(SdlPlatform &platform,
     SpriteDrawOptions options;
     options.alpha_mod =
         std::clamp(fragment.lifetime_ticks / 249.0F, 0.0F, 1.0F);
-    DrawSprite(platform.renderer(), debris->base, frame, fragment.pos_x,
-               fragment.pos_y, camera_x, camera_y, vp.w, vp.h, options);
+    DrawSprite(platform.renderer(),
+               debris->base,
+               frame,
+               fragment.pos_x,
+               fragment.pos_y,
+               camera_x,
+               camera_y,
+               vp.w,
+               vp.h,
+               options);
   }
 }
 
@@ -1009,14 +1018,14 @@ void SpaceflightView::DrawBeams(SdlPlatform &platform, const GameState &state) {
 // composed precedence auditable and lets a future layer-table refactor replace
 // the fixed sequence wholesale.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
-  DrawBackground(platform, state);        // backmost: tint + ambient stars
-  DrawStellarBodies(platform, state);     // stellar planets / stations
-  DrawShots(platform, state);             // projectiles above stellars
-  DrawBeams(platform, state);             // immediate beams above projectiles
-  DrawNpcShips(platform, state);          // NPC ships above the backdrop/shots
-  DrawImpactEffects(platform, state);     // destruction/impact effects over ships
-  DrawFadingEffects(platform, state);     // directional destruction fragments
-  DrawShipTargetReticle(platform, state); // target brackets over the ships
+  DrawBackground(platform, state);    // backmost: tint + ambient stars
+  DrawStellarBodies(platform, state); // stellar planets / stations
+  DrawShots(platform, state);         // projectiles above stellars
+  DrawBeams(platform, state);         // immediate beams above projectiles
+  DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
+  DrawImpactEffects(platform, state); // destruction/impact effects over ships
+  DrawFadingEffects(platform, state); // directional destruction fragments
+  DrawShipTargetReticle(platform, state);   // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target
 
   // Player ship at the play-area centre, frame selected by heading. Because
@@ -1354,6 +1363,78 @@ std::int16_t SpaceflightView::PickShipAt(SdlPlatform &platform,
     }
   }
   return best;
+}
+
+std::int16_t SpaceflightView::PickStellarAt(SdlPlatform &platform,
+                                            const GameState &state,
+                                            float rx,
+                                            float ry) {
+  const auto *sys = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (!sys) {
+    return -1;
+  }
+  const Viewport vp = CurrentViewport(platform);
+  const float wx = rx - static_cast<float>(vp.w) / 2.0F + state.player.pos_x;
+  const float wy = ry - static_cast<float>(vp.h) / 2.0F + state.player.pos_y;
+  std::int16_t best = -1;
+  float best_dist_sq = 0.0F;
+  for (const auto nav : sys->nav_defs) {
+    if (nav < 0x80) {
+      continue;
+    }
+    const auto *st = state.scenario.Stellar(nav);
+    if (!st || !st->is_available ||
+        st->system_id != state.player.current_system_id) {
+      continue;
+    }
+    // The original hit-tests the live ambient sprite (sprite_handle_active);
+    // a stellar with no loaded spin set has no sprite to click.
+    const SpriteAsset *set = sprite_store_.Spin(
+        platform.renderer(), static_cast<std::uint16_t>(st->link_a_id + 1000));
+    if (set == nullptr || set->frames.empty()) {
+      continue;
+    }
+    float half_w = static_cast<float>(set->tile_width) * 0.5F;
+    float half_h = static_cast<float>(set->tile_height) * 0.5F;
+    if (set->tile_height < 0x30) {
+      // Rect_Inset(&rect, -0x10, -0x10): small sprites get a 16px grab halo.
+      half_w += 16.0F;
+      half_h += 16.0F;
+    }
+    const float dx = static_cast<float>(st->pos_x) - wx;
+    const float dy = static_cast<float>(st->pos_y) - wy;
+    if (std::abs(dx) > half_w || std::abs(dy) > half_h) {
+      continue;
+    }
+    const float dist_sq = dx * dx + dy * dy;
+    if (best == -1 || dist_sq < best_dist_sq) {
+      best_dist_sq = dist_sq;
+      best = nav;
+    }
+  }
+  return best;
+}
+
+bool SpaceflightView::ClickInPlayerSprite(SdlPlatform &platform,
+                                          const GameState &state,
+                                          float rx,
+                                          float ry) {
+  if (ship_.frames.empty()) {
+    return false;
+  }
+  const Viewport vp = CurrentViewport(platform);
+  const float wx = rx - static_cast<float>(vp.w) / 2.0F + state.player.pos_x;
+  const float wy = ry - static_cast<float>(vp.h) / 2.0F + state.player.pos_y;
+  float half_w = static_cast<float>(ship_.tile_width) * 0.5F;
+  float half_h = static_cast<float>(ship_.tile_height) * 0.5F;
+  if (ship_.tile_height < 0x30) {
+    half_w += 16.0F;
+    half_h += 16.0F;
+  }
+  const float dx = state.player.pos_x - wx;
+  const float dy = state.player.pos_y - wy;
+  return std::abs(dx) <= half_w && std::abs(dy) <= half_h;
 }
 
 void SpaceflightView::DrawGameFrame(SdlPlatform &platform,

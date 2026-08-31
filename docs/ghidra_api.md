@@ -387,160 +387,6 @@ Update function signature. All params are optional except addr, avoid setting un
 
 Note: Keys must match the parameter names in the current decomp output (e.g., `a0`, `a1`, `player`, `flags`). Use `/function/{addr}/decompile` to see current names before modifying.
 
-### GET /function/{addr}/storage
-
-Inspect an exact function entry's return and parameter storage. The response includes the
-calling convention, whether custom storage is enabled, Ghidra's storage serialization, and
-decoded register/stack pieces. Unlike the other function read endpoints, `addr` must be the
-function entry rather than merely an address contained by the function.
-
-### POST /function/signature/custom
-
-Validate or replace a function's complete ordered parameter list using Ghidra custom storage.
-The address must be an exact function entry. Omitting `confirm` (or setting it to `false`) is a
-read-only validation that returns the current and proposed signatures. Pass `confirm: true` only
-after reviewing that result.
-
-**Body:**
-
-```json
-{
-  "addr": "0x0044d371",
-  "parameters": [
-    {
-      "name": "ship",
-      "type": "ShipState *",
-      "storage": { "register": "ESI" }
-    },
-    {
-      "name": "jump_progress",
-      "type": "float",
-      "storage": { "stack_offset": "0x184" },
-      "comment": "Optional parameter comment"
-    }
-  ],
-  "return": { "type": "void" },
-  "confirm": false
-}
-```
-
-`parameters` is always the complete ordered list; an empty array is valid for a no-parameter
-function. Each parameter must use exactly one storage form:
-
-```json
-{ "register": "ESI" }
-{ "stack_offset": "0x184" }
-{ "serialized": "<Ghidra VariableStorage serialization>" }
-```
-
-The serialized form supports compound and other storage layouts and can round-trip the
-`serialization` value returned by `/function/{addr}/storage`.
-
-If `return` is omitted, the existing return metadata is preserved. A `void` return must not
-specify storage. A non-void return type may omit storage only when the existing return storage is
-valid and has the same size; otherwise explicit storage is required.
-
-Validation rejects unknown types/registers, storage/type size mismatches, duplicate parameter
-names, and overlapping parameter storage. A confirmed update is performed in one Ghidra
-transaction using `CUSTOM_STORAGE` and reports the committed storage afterward.
-
-### GET /function/{addr}/body
-
-Inspect an exact function entry's body ownership. Returns the total byte and range counts,
-minimum/maximum addresses, every inclusive address range, and a SHA-256 `body_fingerprint` over
-the canonical range list. Use that fingerprint as the stale-state guard for clear and body-update
-requests.
-
-### POST /function/clear
-
-Validate or remove one exact function definition. This removes function ownership and
-function-specific metadata; it does not clear instructions, data, or references.
-
-```json
-{
-  "addr": "0x0044d371",
-  "expected_name": "Frame_HandlePlayerEscapePodSequence",
-  "expected_body_fingerprint": "7e29b657...",
-  "confirm": false
-}
-```
-
-### POST /function/create
-
-Validate or create one function with an explicit, instruction-aligned body. `ranges` are inclusive.
-Automatic control-flow body inference is intentionally not supported by this endpoint.
-
-```json
-{
-  "addr": "0x0044d371",
-  "name": "Ship_CompleteHyperspaceExitWithOptionalVelocity",
-  "ranges": [
-    { "start": "0x0044d371", "end": "0x0044d38d" }
-  ],
-  "confirm": false
-}
-```
-
-### POST /function/body/set
-
-Validate or replace one existing function's body while preserving its function metadata.
-
-```json
-{
-  "addr": "0x0044d371",
-  "expected_name": "Frame_HandlePlayerEscapePodSequence",
-  "expected_body_fingerprint": "7e29b657...",
-  "ranges": [
-    { "start": "0x0044d371", "end": "0x0044d38d" }
-  ],
-  "confirm": false
-}
-```
-
-### POST /function/restructure
-
-Atomically validate or apply multiple clear, body-update, and create operations. Use this endpoint
-for splitting or reorganizing functions so an intermediate failure cannot leave partial body
-ownership changes.
-
-```json
-{
-  "clear": [
-    {
-      "addr": "0x0044d371",
-      "expected_name": "Frame_HandlePlayerEscapePodSequence",
-      "expected_body_fingerprint": "7e29b657..."
-    }
-  ],
-  "set_body": [
-    {
-      "addr": "0x0044aa70",
-      "expected_name": "Ship_HandlePlayerShipCore",
-      "expected_body_fingerprint": "...",
-      "ranges": [
-        { "start": "0x0044aa70", "end": "0x0044b11c" }
-      ]
-    }
-  ],
-  "create": [
-    {
-      "addr": "0x0044d371",
-      "name": "Ship_CompleteHyperspaceExitWithOptionalVelocity",
-      "ranges": [
-        { "start": "0x0044d371", "end": "0x0044d38d" }
-      ]
-    }
-  ],
-  "confirm": false
-}
-```
-
-All four write endpoints default to validation-only. Confirmed writes require `confirm: true`.
-Validation requires exact function entries, verifies expected names/fingerprints, checks range
-ordering and instruction boundaries, requires each entry inside its proposed body, and rejects
-final overlaps. A confirmed restructure is one Ghidra transaction and rolls back completely on
-failure. Apply custom signatures separately after inspecting newly created functions.
-
 ### GET /labels/{addr}
 
 List all symbols at an address with type, namespace, source, and primary/dynamic state.
@@ -551,31 +397,18 @@ Validation-first label management. Create accepts `{addr, name, primary?, confir
 containing function namespace when present, otherwise the global namespace. Delete and set-primary
 accept `{addr, name, confirm?}` and operate only on `LABEL` symbols, never function symbols.
 
-### GET /instruction/{addr}/flow
-
-Inspect one exact instruction's bytes, raw/effective flow, override, default/current fallthrough,
-destinations, owner, and `instruction_fingerprint`.
-
-### POST /instruction/flow
-
-Validate or update instruction flow with a required stale-state fingerprint. `flow_override` is one
-of `NONE`, `BRANCH`, `CALL`, `CALL_RETURN`, or `RETURN`. `fallthrough` may be an address, `none`, or
-`default` (clear the fallthrough override).
-
-```json
-{
-  "addr": "0x0044bef7",
-  "expected_instruction_fingerprint": "935660f8...",
-  "flow_override": "NONE",
-  "fallthrough": "default",
-  "confirm": false
-}
-```
-
 ### GET /function/{addr}/cfg and `/range/{start}/{end}/cfg`
 
-Return `BasicBlockModel` blocks for an exact function body or address range, including block ranges,
-flow types, destinations, and current function ownership.
+Compact `BasicBlockModel` output for the body of the function containing `addr` (like the other
+function read actions), or for an explicit address range. First line is a summary; each following
+line is one basic block: `start-end type -> <dest> <flow> ...`. Flow labels: `fall`
+(fall-through), `jcc` (conditional), `jmp` (unconditional), `jmp*` (computed), `call`/`call*`
+(direct/computed call targets), `term` (terminator, e.g. return or jump-thunk).
+
+### GET /range/{addr}/disasm
+
+Disassemble the basic block containing `addr` (as reported by the CFG endpoints). Use
+`/range/{start}/{end}/disasm` for arbitrary ranges.
 
 ### POST /full_decompile
 

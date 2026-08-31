@@ -813,6 +813,41 @@ void RemoveConsumedShots(GameState &state) {
 
 } // namespace
 
+// Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0) wrapper: resolve a hit
+// against a ship given by slot (validates the slot / active state).
+void NovaCollision_ResolveShipHitFromWeaponSlot(
+    GameState &state,
+    std::int16_t target_slot,
+    float impact_x,
+    float impact_y,
+    std::int16_t impact_impulse,
+    std::int16_t armor_damage,
+    std::int16_t shield_damage,
+    std::int16_t attacker_ship_slot,
+    bool allow_aggro_updates,
+    bool suppress_retarget_logic,
+    bool force_armor_only,
+    bool bypass_shields,
+    std::int16_t player_aggro_delta) {
+  if (!ValidShipSlot(target_slot)) {
+    return;
+  }
+  ResolveShipHitFromWeapon(state,
+                           target_slot,
+                           state.ShipAt(static_cast<std::size_t>(target_slot)),
+                           impact_x,
+                           impact_y,
+                           impact_impulse,
+                           armor_damage,
+                           shield_damage,
+                           attacker_ship_slot,
+                           allow_aggro_updates,
+                           suppress_retarget_logic,
+                           force_armor_only,
+                           bypass_shields,
+                           player_aggro_delta);
+}
+
 bool NovaWeapon_CanProjectileHitShip(const GameState &state,
                                      const ActiveShot &shot,
                                      std::int16_t target_slot) {

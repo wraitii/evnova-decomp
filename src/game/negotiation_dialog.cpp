@@ -11,6 +11,7 @@
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "spaceflight_view.hpp"
+#include "sprite_world.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -426,11 +427,11 @@ void DrawDialogButton(SdlPlatform &platform,
 // Ghidra 0x004812c0 NovaUi_DrawTravelDestinationInteractionWindow.
 // Draws the interaction-window frame over the live flight view: the 540x295
 // backdrop PICT (DLOG 0x3f1) centred on the playfield, the three comm
-// buttons, the inverted status/prompt panel (DITL item 3: white fill, black
-// wrapped text -- the net look of the original's fill + filled-rect text +
-// InvertRect sequence), the destination picture (item 4) and the header block
-// (item 5: name, description, Status: word, left-aligned baselines at
-// +12/+26/+42).
+// buttons, the status/prompt panel (DITL item 3: the original's fill +
+// filled-rect text + InvertRect sequence nets to black fill with white
+// wrapped text), the ambient stellar sprite thumbnail (item 4) and the
+// header block (item 5: name, description, Status: word, left-aligned
+// baselines at +12/+26/+42).
 void DrawNegotiationDialog(SdlPlatform &platform,
                            const GameState &state,
                            SpaceflightView &view,
@@ -439,6 +440,8 @@ void DrawNegotiationDialog(SdlPlatform &platform,
                            const ServicesButtonArt &button_art,
                            SDL_Texture *backdrop,
                            SDL_Texture *planet_art,
+                           const Stellar &stellar,
+                           std::int16_t stellar_id,
                            const NegotiationFrame &frame,
                            int hovered_slot) {
   SDL_Renderer *renderer = platform.renderer();
@@ -468,21 +471,25 @@ void DrawNegotiationDialog(SdlPlatform &platform,
                      hovered_slot == slot);
   }
 
-  // Status / prompt panel (DITL item 3, entry 4): white fill with black
-  // word-wrapped text (the original fills white, draws the pstring in a
-  // filled rect and inverts).
+  // Status / prompt panel (DITL item 3, entry 4). The original fills the
+  // inset rect white, word-wraps the status text into a white-filled inner
+  // rect in black and then InvertRects the panel (0x004812c0 via
+  // DrawContext_DrawPascalStringInFilledRect 0x004bcd30, DT_WORDBREAK);
+  // fill and text colours cancel under the inversion, so the net look is a
+  // black panel with white wrapped text, left-aligned from the inner top.
   SDL_FRect inner = frame.status_panel;
   inner.x += 1.0F;
   inner.y += 1.0F;
   inner.w -= 2.0F;
   inner.h -= 2.0F;
   SDL_SetRenderDrawColor(
-      renderer, kWhite.r, kWhite.g, kWhite.b, SDL_ALPHA_OPAQUE);
+      renderer, kBlack.r, kBlack.g, kBlack.b, SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &inner);
   if (!frame.status.empty()) {
     inner.x += 4.0F;
     inner.y += 2.0F;
     inner.w -= 8.0F;
+    inner.h -= 4.0F;
     const auto lines = WrapDescriptionLines(
         frame.status,
         static_cast<int>(std::max(1.0F, inner.w)),
@@ -500,7 +507,7 @@ void DrawNegotiationDialog(SdlPlatform &platform,
                     NovaFontFamily::kGeneva,
                     12.0F,
                     kNovaFontStyleRegular,
-                    kBlack,
+                    kWhite,
                     inner.x,
                     baseline,
                     line);
@@ -508,11 +515,35 @@ void DrawNegotiationDialog(SdlPlatform &platform,
     }
   }
 
-  // Destination picture (DITL item 4, entry 5). The original blits the target
-  // stellar's ambient spin sprite centred in the panel; the port draws the
-  // destination planet PICT fitted (same divergence documented in
-  // landed_window.cpp), with a bordered placeholder when absent.
-  if (planet_art != nullptr) {
+  // Destination picture (DITL item 4, entry 5): the target stellar's ambient
+  // system sprite, blitted centred at native size in the panel (the original
+  // looks the stellar up in the ambient sprite pool and centres its current
+  // spin frame by half-span, clipped only to the window surface --
+  // 0x004812c0). The port resolves the same frame through the shared spin-set
+  // store (link_a_id + 1000) + the view's animation state; the docked-screen
+  // planet PICT is a logged port-only fallback for missing spin sets.
+  bool drew_sprite = false;
+  const SpriteAsset *spin_set = view.sprite_store().Spin(
+      renderer, static_cast<std::uint16_t>(stellar.link_a_id + 1000));
+  if (spin_set != nullptr && !spin_set->frames.empty()) {
+    const int frame_idx = std::clamp(
+        view.StellarCurrentFrame(stellar_id), 0, spin_set->frame_count - 1);
+    const SpriteFrame &sprite_frame =
+        spin_set->frames[static_cast<std::size_t>(frame_idx)];
+    if (sprite_frame.texture != nullptr) {
+      float aw = 0.0F;
+      float ah = 0.0F;
+      SDL_GetTextureSize(sprite_frame.texture->get(), &aw, &ah);
+      SDL_FRect dst{frame.image.x + (frame.image.w - aw) / 2.0F,
+                    frame.image.y + (frame.image.h - ah) / 2.0F,
+                    aw,
+                    ah};
+      SDL_RenderTexture(renderer, sprite_frame.texture->get(), nullptr, &dst);
+      drew_sprite = true;
+    }
+  }
+  if (!drew_sprite && planet_art != nullptr) {
+    // Silent per frame; the fallback decision is logged once at window setup.
     float aw = 0.0F;
     float ah = 0.0F;
     SDL_GetTextureSize(planet_art, &aw, &ah);
@@ -525,7 +556,7 @@ void DrawNegotiationDialog(SdlPlatform &platform,
       dst.y = frame.image.y + (frame.image.h - dst.h) / 2.0F;
     }
     SDL_RenderTexture(renderer, planet_art, nullptr, &dst);
-  } else {
+  } else if (!drew_sprite) {
     SDL_SetRenderDrawColor(renderer, 8, 24, 44, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(renderer, &frame.image);
     SDL_SetRenderDrawColor(renderer, 80, 140, 190, SDL_ALPHA_OPAQUE);
@@ -974,10 +1005,19 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
     planet_art =
         LoadPictTexture(platform, static_cast<std::uint16_t>(stell_pict));
     if (planet_art) {
-      NovaLog::Info("negotiation destination PICT 0x{} ({}) for stellar {}",
-                    static_cast<int>(stell_pict),
-                    stellar->name,
-                    static_cast<int>(stellar_id));
+      // The picture panel shows the stellar's ambient spin sprite (0x004812c0);
+      // this PICT is only the port's fallback when the spin set fails to load.
+      if (view.sprite_store().Spin(
+              platform.renderer(),
+              static_cast<std::uint16_t>(stellar->link_a_id + 1000)) ==
+          nullptr) {
+        NovaLog::Todo("destination-interaction: stellar '{}' has no spin set "
+                      "{}; the item-4 thumbnail falls back to the docked "
+                      "planet PICT 0x{} (port-only divergence)",
+                      stellar->name,
+                      stellar->link_a_id + 1000,
+                      static_cast<int>(stell_pict));
+      }
     } else {
       NovaLog::Todo("no negotiation destination PICT {} for stellar '{}'; "
                     "the image frame stays a flat placeholder",
@@ -1012,6 +1052,8 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                           button_art,
                           backdrop ? backdrop->get() : nullptr,
                           planet_art ? planet_art->get() : nullptr,
+                          *stellar,
+                          stellar_id,
                           frame,
                           -1);
     SDL_RenderPresent(platform.renderer());
@@ -1112,6 +1154,8 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                           button_art,
                           backdrop ? backdrop->get() : nullptr,
                           planet_art ? planet_art->get() : nullptr,
+                          *stellar,
+                          stellar_id,
                           frame,
                           hovered);
     SDL_RenderPresent(platform.renderer());
