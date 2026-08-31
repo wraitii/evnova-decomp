@@ -43,7 +43,7 @@ WinMain (0x00871450)
                     - action 3  Ship_RunSpaceflightMode        (enter spaceflight)
                        -> IntroCinematic_Run        // play INTRO CINEMATIC (new pilot only)
                     - action 4  Menu_RunSettingsDialog        (preferences)
-                    - action 5/6 Menu_OpenGalaxyMapDialog     (galaxy/starmap)
+                    - action 5/6 Menu_OpenGalaxyMapDialog     (About Nova; misnomer, d£sc 0x7fff)
         -> QuickTime_Terminate
 ```
 
@@ -76,16 +76,22 @@ depending on the game-active flag:
 - `DAT_00596d28` — game-session active flag.
   - `0`  → no game loaded → **main menu / title screen**.
   - `!=0` → pilot game running (set by Menu_RunNewGameFlow and pilot-file open).
-- Menu branch: when `DAT_00596d28 == 0` and the blink/pulse timer `DAT_007d251c` has reached
-  its threshold `DAT_007d254e`, it draws the pulsing centered prompt (string key `0x7d2/0x114`).
-- Active-game branch: draws the status panel (ship name, load, system, combat rank, date,
-  ship image) and the top-of-screen info rows.
-- In both branches it blits the 6 focus sprites (`DAT_00596cb8`) and draws the HUD focus overlay.
-
-Blink/pulse timers (shared word array at `0x007d2518`, 3 elements = `g_timer_decay_counters`,
-`DAT_007d251a`, `DAT_007d251c`), reset at main-loop entry and clamped to 32000 when input is
-ready; compared against thresholds `DAT_007d254a/4c/4e`. `DAT_007d251c`/`DAT_007d254e` drive the
-main-menu prompt pulse.
+- Menu branch: when `DAT_00596d28 == 0` and the third slide-reveal counter has
+  reached its threshold (`g_hud_overlay_decay_counters[2] >=
+  g_hud_overlay_decay_thresholds[2]`), it draws the steady centered prompt
+  string (STR# 0x7d2 entry 0x114, 1-based → "No Pilot File Loaded"). There is
+  no blink timer: the gate is the reveal completion, and the string stays up.
+  The older "pulsing prompt / blink timer DAT_007d251c" reading was a
+  misinterpretation — DAT_007d251c/007d254e ARE that counter/threshold pair.
+- Active-game branch: draws the bottom pilot status panel (Pilot Name / Ship
+  Name / Ship Class left column; "Legal status in current system" (ladder STR#
+  0x86, 0x00468d90) / Combat Rating (0x00469030, STR# 0x8a) / Current Date
+  right column; "<name> has been killed" when destroyed, with a "Oh my God!
+  They killed Kenny!" easter egg for a pilot named Kenny, DAT_0056ce68) and
+  the clone-source ship portrait (DAT_00596d44) centered between the columns.
+  Text is Geneva size 9 (g_main_menu_font_id 3, 0x004b32aa), labels dark red
+  (DAT_00735652 = RGB555 0x84d0,0,0) and values bright red (DAT_0073564c =
+  0xffff,0,0).
 
 ### Main-menu command/action mapping
 
@@ -99,7 +105,7 @@ main-menu prompt pulse.
 | `q`   | 2      | Quit (sets `DAT_00596d39`) |
 | `e`   | 3      | Enter Spaceflight (`Ship_RunSpaceflightMode`) |
 | `p`   | 4      | Preferences (`Menu_RunSettingsDialog`, dialog `0xfa3`) |
-| `a`   | 5/6    | Galaxy/Starmap (`Menu_OpenGalaxyMapDialog`) |
+| `a`   | 5/6    | About Nova (`Menu_OpenGalaxyMapDialog` 0x00486120 — misnomer; loads dësc 0x7fff "About text" into the selection dialog, DLOG `0xbbb`; the spœn 605 button is labelled ABOUT NOVA) |
 | `x`   | —      | Immediate travel-selection dialog |
 
 - `Menu_OpenPilotFileDialog` (0x004c9e90, formerly `FUN_004c9e90`) — GetOpenFileNameA pilot selector; on selection

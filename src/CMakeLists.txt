@@ -26,6 +26,7 @@ add_library(evnova_runtime
     game/mission_script.cpp
     game/asteroid.cpp
     game/boarding_plunder.cpp
+    game/about_dialog.cpp
     game/collision.cpp
     game/docked_dialog.cpp
     game/negotiation_dialog.cpp

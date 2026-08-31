@@ -1,9 +1,13 @@
 #include "nova_app.hpp"
 
 #include "brgr_archive.hpp"
+#include "game/about_dialog.hpp"
+#include "game/hud_overlay.hpp"
 #include "game/new_pilot_flow.hpp"
 #include "game/nova_font.hpp"
+#include "game/ship_ai.hpp"
 #include "game/spaceflight.hpp"
+#include "game/targeting.hpp"
 #include "log.hpp"
 #include "pict_image.hpp"
 #include "rle_sprite_sheet.hpp"
@@ -22,12 +26,12 @@ struct MenuEntry {
 };
 
 constexpr std::array kMenuEntries{
-    MenuEntry{GameModeAction::new_game, "NEW GAME  [N]"},
-    MenuEntry{GameModeAction::open_pilot, "OPEN PILOT [O]"},
-    MenuEntry{GameModeAction::quit, "QUIT        [Q]"},
-    MenuEntry{GameModeAction::enter_spaceflight, "ENTER SPACE"},
-    MenuEntry{GameModeAction::preferences, "PREFERENCES [P]"},
-    MenuEntry{GameModeAction::starmap, "STAR MAP    [A]"},
+    MenuEntry{GameModeAction::new_game, "NEW PILOT"},
+    MenuEntry{GameModeAction::open_pilot, "OPEN PILOT"},
+    MenuEntry{GameModeAction::quit, "QUIT NOVA"},
+    MenuEntry{GameModeAction::enter_spaceflight, "ENTER SHIP"},
+    MenuEntry{GameModeAction::preferences, "SET PREFS"},
+    MenuEntry{GameModeAction::about_nova, "ABOUT NOVA"},
 };
 
 constexpr float kMenuCoordinateScale = 640.0F / 1024.0F;
@@ -51,6 +55,17 @@ constexpr std::uint64_t kStartupSplashDurationMs = 1'850;
 // every host frame made the flame flicker far too quickly in SDL.
 constexpr std::uint64_t kMenuTitleFrameDurationMs = 40;
 constexpr std::uint64_t kMenuRevealFrameDurationMs = 16;
+
+// The original draws menu text with g_main_menu_font_id 3 (Geneva) size 9 in
+// the 1024x768 backdrop space (Ghidra 0x004b32aa NovaData_LoadScenarioResource
+// Tables + 0x004874d5 NovaRender_RedrawAndPresentFrame); the port draws in the
+// 640x480 logical playfield, so the size scales with the 0.625 art factor.
+constexpr float kMenuFontLogicalSize = 9.0F * kMenuCoordinateScale;
+// Menu label/value colours. Ghidra 0x004b3262/0x004b327d seed DAT_0073564c
+// (values, RGB555 triplet 0xffff,0,0) and DAT_00735652 (labels, 0x84d0,0,0);
+// the text engine scales each 5-bit component by 8 (FUN_004bc760).
+constexpr SDL_Color kMenuLabelColor{128, 0, 0, SDL_ALPHA_OPAQUE};
+constexpr SDL_Color kMenuValueColor{248, 0, 0, SDL_ALPHA_OPAQUE};
 
 [[nodiscard]] SDL_FRect MenuRect(const NovaRuntime &runtime,
                                  std::size_t index) {
@@ -433,23 +448,482 @@ void UpdateMenuCenterPreview(NovaRuntime &runtime, std::uint64_t now_ms) {
   const auto elapsed_ms = std::min<std::uint64_t>(
       now_ms - runtime.menu_center_preview_last_update_ms, 100);
   runtime.menu_center_preview_last_update_ms = now_ms;
-  // The original fades this central preview through the shared menu timer.
-  // Use elapsed time so a 30 Hz or 144 Hz presentation does not change the
-  // apparent alpha curve.
-  const auto intensity_step = static_cast<int>((elapsed_ms * 32U) / 180U);
+  // Ghidra 0x0048c210 NovaHud_UpdateFocusAnimationState: the fade eases ±4 per
+  // 1ms tick toward 0x20 while the hovered lane is stable, and the lane only
+  // switches once the fade has decayed to 0. NovaHud_RenderFocusOverlay draws
+  // the frame opaque at fade 0x20 and via the tinted rgb15 blit below that
+  // (BlitTintedRgb15), which a texture-alpha fade reproduces.
+  const auto step = static_cast<int>(elapsed_ms) * 4;
   if (runtime.menu_center_preview_frame == desired_frame) {
     runtime.menu_center_preview_intensity = static_cast<std::uint8_t>(
-        std::min<int>(32,
-                      runtime.menu_center_preview_intensity +
-                          std::max<int>(1, intensity_step)));
+        std::min<int>(32, runtime.menu_center_preview_intensity +
+                              std::max<int>(1, step)));
   } else if (runtime.menu_center_preview_intensity > 0) {
     runtime.menu_center_preview_intensity = static_cast<std::uint8_t>(
-        std::max<int>(0,
-                      runtime.menu_center_preview_intensity -
-                          std::max<int>(1, intensity_step)));
+        std::max<int>(0, runtime.menu_center_preview_intensity -
+                             std::max<int>(1, step)));
   } else {
     runtime.menu_center_preview_frame = desired_frame;
   }
+}
+
+// Ghidra 0x00469030 NovaUi_DrawCombatRankLabel. Maps the raw combat-rating
+// points to a rank index (thresholds 100/200/400/800/1600/3200/6400/12800/
+// 25600) and returns the STR# 0x8a label (1-based entry rank+1).
+[[nodiscard]] std::string MenuCombatRankLabel(const game::GameState &state) {
+  std::int32_t rank = state.player_combat_rating_points > 0 ? 1 : 0;
+  constexpr std::array<std::int32_t, 9> kThresholds{
+      99, 199, 399, 799, 1599, 3199, 6399, 12799, 25599};
+  for (std::size_t i = 0; i < kThresholds.size(); ++i) {
+    if (state.player_combat_rating_points > kThresholds[i]) {
+      rank = static_cast<std::int32_t>(i) + 2;
+    }
+  }
+  auto label =
+      game::NovaHud_LoadStringEntry(0x8a, static_cast<std::uint16_t>(rank + 1));
+  return label.value_or(std::string());
+}
+
+// Ghidra 0x00468d90 NovaUi_DrawSystemFactionConflictStatus (with the
+// System_HasUsableTravelDestination 0x00468af0 gate the caller applies first).
+// Maps the system reputation against the owning government's crime tolerance
+// (GovtDef flee_shield_threshold) onto the STR# 0x86 "Legal Status" ladder;
+// hazard-bearing destinations report the Military Dictator/Governor rows and
+// xenophobic governments (flags_primary bit 0) report nothing (index 0 ->
+// STR# 0x7d2 0x18c "N/A"). The original's signed-overflow ladder reduces to
+// plain comparisons for the shipped positive tolerances.
+[[nodiscard]] std::string
+MenuSystemLegalStatusText(const game::GameState &state,
+                          std::int16_t system_id) {
+  const auto *system = state.scenario.System(system_id);
+  if (system == nullptr) {
+    return {};
+  }
+  constexpr int kNaStringEntry = 0x18c;
+  // System_HasUsableTravelDestination over the first four nav defs.
+  bool usable_destination = false;
+  for (std::size_t i = 0; i < 4; ++i) {
+    const std::int16_t nav = system->nav_defs[i];
+    const auto *stellar = state.scenario.Stellar(nav);
+    if (stellar == nullptr || (stellar->flags & 0x20U) != 0U ||
+        (stellar->availability_flags & 0x3000U) != 0U) {
+      continue;
+    }
+    usable_destination = true;
+    break;
+  }
+  if (!usable_destination) {
+    return game::NovaHud_LoadStringEntry(0x7d2, kNaStringEntry)
+        .value_or(std::string());
+  }
+
+  int tolerance = 0;
+  if (system->government_id >= 0) {
+    if (const auto *gov = state.scenario.Government(system->government_id)) {
+      tolerance = gov->flee_shield_threshold;
+    }
+  }
+  const int reputation =
+      system_id >= 0 && static_cast<std::size_t>(system_id) <
+                            state.system_reputation.size()
+          ? state.system_reputation[static_cast<std::size_t>(system_id)]
+          : 0;
+
+  int status = 0;
+  if (reputation < 0) {
+    status = 2;
+  }
+  if (reputation < -tolerance) {
+    status = 3;
+  }
+  if (reputation < tolerance * -4) {
+    status = 4;
+  }
+  if (reputation < tolerance * -0x10) {
+    status = 5;
+  }
+  if (reputation < tolerance * -0x40) {
+    status = 6;
+  }
+  if (reputation < tolerance * -0x100) {
+    status = 7;
+  }
+  if (reputation < tolerance * -0x400) {
+    status = 8;
+  }
+  if (reputation < tolerance * -0x1000) {
+    status = 9;
+  }
+  if (reputation == 0) {
+    status = 1;
+  }
+  if (reputation > 0) {
+    status = 10;
+  }
+  if (reputation >= tolerance * 4) {
+    status = 11;
+  }
+  if (reputation > tolerance * 0x10) {
+    status = 12;
+  }
+  if (reputation > tolerance * 0x40) {
+    status = 13;
+  }
+  if (reputation > tolerance * 0x100) {
+    status = 14;
+  }
+  if (reputation > tolerance * 0x400) {
+    status = 15;
+  }
+  // Hazard-bearing nav destinations report the military rows (the original
+  // scans nav slots 0..2 only).
+  int normal_destinations = 0;
+  int hazard_destinations = 0;
+  for (std::size_t i = 0; i < 3; ++i) {
+    const std::int16_t nav = system->nav_defs[i];
+    const auto *stellar = state.scenario.Stellar(nav);
+    if (stellar == nullptr || !stellar->is_available ||
+        (stellar->flags & 0x20U) != 0U ||
+        !game::NovaTargeting_IsStellarUsableForTravel(*stellar)) {
+      continue;
+    }
+    if (stellar->hazard_marker) {
+      ++hazard_destinations;
+    } else {
+      ++normal_destinations;
+    }
+  }
+  if (hazard_destinations > 0) {
+    status = normal_destinations < 1 ? 17 : 16;
+  }
+  if (system->government_id >= 0) {
+    if (const auto *gov = state.scenario.Government(system->government_id);
+        gov != nullptr && (gov->flags_primary & 1) != 0) {
+      status = 0;
+    }
+  }
+  if (status == 0) {
+    return game::NovaHud_LoadStringEntry(0x7d2, kNaStringEntry)
+        .value_or(std::string());
+  }
+  return game::NovaHud_LoadStringEntry(0x86,
+                                       static_cast<std::uint16_t>(status + 1))
+      .value_or(std::string());
+}
+
+// Ghidra 0x00468450 NovaText_FormatDateString. Formats
+// "<Mon.> <day><st/nd/rd/th>, <year>" from STR# 0x89 (abbreviated month names
+// at entry month+12; ordinal suffixes at 0x19-0x1c with the 11-13 -> th rule).
+[[nodiscard]] std::string FormatGameDateString(int year, int month, int day) {
+  std::string text;
+  if (auto name = game::NovaHud_LoadStringEntry(
+          0x89, static_cast<std::uint16_t>(month + 0xc))) {
+    text += *name;
+  }
+  text += " ";
+  text += std::to_string(day);
+  const char *suffix = "th";
+  switch (day % 10) {
+  case 1:
+    suffix = "st";
+    break;
+  case 2:
+    suffix = "nd";
+    break;
+  case 3:
+    suffix = "rd";
+    break;
+  default:
+    break;
+  }
+  if (day > 10 && day < 14) {
+    suffix = "th";
+  }
+  text += suffix;
+  text += ", ";
+  text += std::to_string(year);
+  return text;
+}
+
+void DrawMenuText(SdlPlatform &platform,
+                  game::NovaFontCache &font_cache,
+                  float x,
+                  float baseline_y,
+                  const std::string &text,
+                  const SDL_Color &color) {
+  game::NovaText_Draw(platform,
+                      font_cache,
+                      game::NovaFontFamily::kGeneva,
+                      kMenuFontLogicalSize,
+                      game::kNovaFontStyleRegular,
+                      color,
+                      x,
+                      baseline_y,
+                      text);
+}
+
+void DrawMenuTextCentered(SdlPlatform &platform,
+                          game::NovaFontCache &font_cache,
+                          float x_left,
+                          float x_right,
+                          float baseline_y,
+                          const std::string &text,
+                          const SDL_Color &color) {
+  game::NovaText_DrawCentered(platform,
+                              font_cache,
+                              game::NovaFontFamily::kGeneva,
+                              kMenuFontLogicalSize,
+                              game::kNovaFontStyleRegular,
+                              color,
+                              x_left,
+                              x_right,
+                              baseline_y,
+                              text);
+}
+
+// The pilot status panel (Ghidra 0x004873b0, DAT_00596d28 != 0 branch): two
+// columns of Geneva status text below the buttons plus the clone-source ship
+// portrait centered between them. All offsets below are 1024x768 backdrop
+// space relative to the backdrop-frame centre, scaled by 0.625 like the art.
+void DrawMenuStatusPanel(NovaRuntime &runtime) {
+  SDL_Renderer *const renderer = runtime.platform.renderer();
+  auto &font_cache = runtime.font_cache;
+  const auto &game = runtime.game;
+  constexpr float kOriginX = 320.0F;
+  constexpr float kOriginY = 240.0F;
+  constexpr float kLeftLabelX = kOriginX - 190.0F * kMenuCoordinateScale;
+  constexpr float kLeftValueX = kOriginX - 185.0F * kMenuCoordinateScale;
+  constexpr float kRightLabelX = kOriginX + 120.0F * kMenuCoordinateScale;
+  constexpr float kRightValueX = kOriginX + 125.0F * kMenuCoordinateScale;
+  const auto baseline = [&](int offset_1024) {
+    return kOriginY + static_cast<float>(offset_1024) * kMenuCoordinateScale;
+  };
+
+  // Destroyed-pilot branch: "<name> has been killed" (STR# 0x7d2 0x115); a
+  // pilot named exactly Kenny gets the DAT_0056ce68 easter egg instead.
+  if (game::NovaAiShip_IsDestroyed(game.player)) {
+    std::string name = game.pilot.first_name;
+    if (!game.pilot.last_name.empty()) {
+      if (!name.empty()) {
+        name += " ";
+      }
+      name += game.pilot.last_name;
+    }
+    std::string line;
+    if (name == "Kenny") {
+      line = "Oh my God! They killed Kenny!";
+    } else {
+      line = name + " " +
+             game::NovaHud_LoadStringEntry(0x7d2, 0x115)
+                 .value_or("has been killed");
+    }
+    DrawMenuTextCentered(runtime.platform,
+                         font_cache,
+                         kOriginX - 150.0F * kMenuCoordinateScale,
+                         kOriginX + 150.0F * kMenuCoordinateScale,
+                         baseline(0x136),
+                         line,
+                         kMenuLabelColor);
+    return;
+  }
+
+  std::string pilot_name = game.pilot.first_name;
+  if (!game.pilot.last_name.empty()) {
+    if (!pilot_name.empty()) {
+      pilot_name += " ";
+    }
+    pilot_name += game.pilot.last_name;
+  }
+  const auto *ship_class = game.scenario.Ship(
+      static_cast<std::int16_t>(game.player.ship_class_id + 0x80));
+  // TODO(decomp) skipped: the live game calendar (g_current_game_year_month/
+  // day, Ghidra 0x00468450 callers) is not tracked by GameState yet; draw the
+  // original fresh-pilot baseline date.
+  const std::string date_text = FormatGameDateString(1999, 1, 1);
+
+  struct StatusRow {
+    float label_x;
+    float value_x;
+    int label_baseline;
+    int value_baseline;
+    std::string label;
+    std::string value;
+  };
+
+  const std::array rows{
+      StatusRow{
+          kLeftLabelX,
+          kLeftValueX,
+          0xfa,
+          0x106,
+          game::NovaHud_LoadStringEntry(0x7d2, 0xfb).value_or("Pilot Name:"),
+          pilot_name},
+      StatusRow{
+          kLeftLabelX,
+          kLeftValueX,
+          0x11e,
+          0x12a,
+          game::NovaHud_LoadStringEntry(0x7d2, 0xff).value_or("Ship Name:"),
+          game.player.ship_name},
+      StatusRow{
+          kLeftLabelX,
+          kLeftValueX,
+          0x142,
+          0x14e,
+          game::NovaHud_LoadStringEntry(0x7d2, 0x100).value_or("Ship Class:"),
+          ship_class != nullptr ? ship_class->display_name : ""},
+      StatusRow{kLeftValueX,
+                kLeftValueX,
+                0x15a,
+                0x15a,
+                "",
+                ship_class != nullptr ? ship_class->subtitle : ""},
+      StatusRow{kRightLabelX,
+                kRightLabelX,
+                0xfa,
+                0x106,
+                game::NovaHud_LoadStringEntry(0x7d2, 0x116)
+                    .value_or("Legal status in"),
+                ""},
+      StatusRow{kRightValueX,
+                kRightValueX,
+                0x106,
+                0x112,
+                game::NovaHud_LoadStringEntry(0x7d2, 0x117)
+                    .value_or("current system:"),
+                MenuSystemLegalStatusText(game, game.player.current_system_id)},
+      StatusRow{
+          kRightLabelX,
+          kRightValueX,
+          0x12a,
+          0x136,
+          game::NovaHud_LoadStringEntry(0x7d2, 0xfe).value_or("Combat Rating:"),
+          MenuCombatRankLabel(game)},
+      StatusRow{
+          kRightLabelX,
+          kRightValueX,
+          0x14e,
+          0x15a,
+          game::NovaHud_LoadStringEntry(0x7d2, 0xfc).value_or("Current Date:"),
+          date_text},
+  };
+  for (const auto &row : rows) {
+    if (!row.label.empty()) {
+      DrawMenuText(runtime.platform,
+                   font_cache,
+                   row.label_x,
+                   baseline(row.label_baseline),
+                   row.label,
+                   kMenuLabelColor);
+    }
+    if (!row.value.empty()) {
+      DrawMenuText(runtime.platform,
+                   font_cache,
+                   row.value_x,
+                   baseline(row.value_baseline),
+                   row.value,
+                   kMenuValueColor);
+    }
+  }
+
+  // Ship portrait (Ghidra: DAT_00596d44[clone_source] blit, 128x64 class
+  // portrait centered on the panel origin, top at origin + 0x118).
+  const std::int16_t class_id = game.player.ship_class_id;
+  if (runtime.menu_status_portrait_class != class_id) {
+    runtime.menu_status_portrait.reset();
+    runtime.menu_status_portrait_class = class_id;
+    std::int16_t pict_class = class_id;
+    if (ship_class != nullptr && ship_class->clone_source_ship_class >= 0) {
+      pict_class = ship_class->clone_source_ship_class;
+    }
+    if (const auto pict_data = NovaResource_LoadPictData(
+            static_cast<std::uint16_t>(3000 + pict_class))) {
+      if (const auto pict = Resource_LoadPictAsImage(*pict_data)) {
+        runtime.menu_status_portrait = SdlTexture::Create(
+            renderer, pict->width, pict->height, pict->rgba_pixels);
+      }
+    }
+  }
+  if (runtime.menu_status_portrait) {
+    float width = 0.0F;
+    float height = 0.0F;
+    SDL_GetTextureSize(runtime.menu_status_portrait->get(), &width, &height);
+    const SDL_FRect destination{kOriginX - width * kMenuCoordinateScale / 2.0F,
+                                baseline(0x118),
+                                width * kMenuCoordinateScale,
+                                height * kMenuCoordinateScale};
+    SDL_RenderTexture(
+        renderer, runtime.menu_status_portrait->get(), nullptr, &destination);
+  }
+}
+
+// Rebuilds the OR-composited rollover preview texture when the displayed
+// frame changes. Ghidra 0x0048c580 NovaHud_RenderFocusOverlay: at rest the
+// frame is drawn through BlitPixie_BlitRectRawCopy -> BlitRaw, whose span
+// primitive BlitPixel_CopyOrSpan (0x00473b60) ORs each 16-bit source pixel
+// into the destination. The frames are authored for that: their "plate"
+// pixels are near-black RGB555 and disappear under OR, while the bright
+// glyph bits merge into the backdrop (skipped pixels keep the destination).
+void UpdateCenterPreviewCompositedTexture(NovaRuntime &runtime) {
+  const auto &asset = runtime.main_menu_center_preview_asset;
+  if (!asset || asset->textures.empty() || !runtime.main_menu_style ||
+      runtime.main_menu_backdrop_rgba.empty()) {
+    return;
+  }
+  const auto frame = std::min(runtime.menu_center_preview_frame,
+                              asset->textures.size() - 1);
+  if (runtime.main_menu_center_preview_composited_valid &&
+      runtime.main_menu_center_preview_composited_frame == frame &&
+      runtime.main_menu_center_preview_composited) {
+    return;
+  }
+
+  const auto origin = runtime.main_menu_style->center_preview_origin;
+  const int width = asset->sheet.width;
+  const int height = asset->sheet.height;
+  const auto &frame_pixels = asset->sheet.frames[frame].rgba_pixels;
+  std::vector<std::uint8_t> composited(
+      static_cast<std::size_t>(width) * height * 4, 0);
+  for (int y = 0; y < height; ++y) {
+    const int backdrop_y = origin.y + y;
+    if (backdrop_y < 0 || backdrop_y >= runtime.main_menu_backdrop_height) {
+      continue;
+    }
+    for (int x = 0; x < width; ++x) {
+      const int backdrop_x = origin.x + x;
+      if (backdrop_x < 0 || backdrop_x >= runtime.main_menu_backdrop_width) {
+        continue;
+      }
+      const auto destination = (static_cast<std::size_t>(y) * width + x) * 4;
+      const auto source =
+          (static_cast<std::size_t>(backdrop_y) *
+               runtime.main_menu_backdrop_width +
+           backdrop_x) * 4;
+      if (frame_pixels[destination + 3] == 0) {
+        // RLE skip opcode: the destination pixel is kept.
+        for (int c = 0; c < 3; ++c) {
+          composited[destination + c] =
+              runtime.main_menu_backdrop_rgba[source + c];
+        }
+      } else {
+        // BlitPixel_CopyOrSpan: OR in 5-bit components, as the 16-bit
+        // surface stores them.
+        for (int c = 0; c < 3; ++c) {
+          const auto merged = static_cast<std::uint8_t>(
+              (runtime.main_menu_backdrop_rgba[source + c] >> 3) |
+              (frame_pixels[destination + c] >> 3));
+          composited[destination + c] =
+              static_cast<std::uint8_t>((merged << 3) | (merged >> 2));
+        }
+      }
+      composited[destination + 3] = 255;
+    }
+  }
+
+  runtime.main_menu_center_preview_composited = SdlTexture::Create(
+      runtime.platform.renderer(), width, height, composited);
+  runtime.main_menu_center_preview_composited_frame = frame;
+  runtime.main_menu_center_preview_composited_valid = true;
 }
 
 } // namespace
@@ -480,13 +954,11 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   // Resource and QuickTime startup are not reconstructed yet. Licence checks
   // are deliberately skipped.
   runtime.game_active = false;
-  // Idle main menu shows only the pulsing "SELECT A COMMAND" prompt; there is
-  // no placeholder status line in the original (Ghidra 0x004873b0). status_text
-  // is left empty until a menu action reports something.
-  runtime.status_text.reset();
+  // Idle main menu shows only the "No Pilot File Loaded" prompt (or, with a
+  // pilot loaded, the status panel); the original draws no other status line
+  // (Ghidra 0x004873b0).
   runtime.startup_phase = StartupPhase::loading_splash;
   runtime.startup_phase_started_ms = runtime.platform.ticks_ms();
-  runtime.next_menu_prompt_toggle_ms = runtime.startup_phase_started_ms + 650;
   // Ghidra: FUN_004ad960, which loads sp\x95n 600-605 into DAT_00596cb8.
   for (std::size_t index = 0;
        index < runtime.main_menu_sprite_definitions.size();
@@ -566,6 +1038,10 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
         NovaLog::Error("main-menu backdrop PICT 0x1f40 decoded but SDL "
                        "texture upload failed");
       }
+      // Kept for the OR-composited rollover preview (see NovaRuntime).
+      runtime.main_menu_backdrop_rgba = pict->rgba_pixels;
+      runtime.main_menu_backdrop_width = pict->width;
+      runtime.main_menu_backdrop_height = pict->height;
     } else {
       NovaLog::Todo("main-menu backdrop PICT 0x1f40 failed to decode");
     }
@@ -681,7 +1157,6 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
                  kStartupSplashDurationMs) {
     runtime.startup_phase = StartupPhase::main_menu;
     runtime.startup_phase_started_ms = now_ms;
-    runtime.next_menu_prompt_toggle_ms = now_ms + 650;
     InitializeMenuEntrance(runtime, now_ms);
   }
 
@@ -721,12 +1196,6 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
     }
     NovaGameMode_DispatchAction(runtime, *runtime.requested_action);
     runtime.requested_action.reset();
-  }
-
-  if (runtime.startup_phase == StartupPhase::main_menu &&
-      now_ms >= runtime.next_menu_prompt_toggle_ms) {
-    runtime.menu_prompt_visible = !runtime.menu_prompt_visible;
-    runtime.next_menu_prompt_toggle_ms = now_ms + 650;
   }
 }
 
@@ -900,21 +1369,42 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
     const auto alpha = static_cast<std::uint8_t>(
         static_cast<unsigned>(runtime.menu_center_preview_intensity) * 255U /
         32U);
-    SDL_SetTextureAlphaMod(asset.textures[frame]->get(), alpha);
-    SDL_RenderTexture(
-        renderer, asset.textures[frame]->get(), nullptr, &destination);
+    // Rest-state drawing ORs the frame into the backdrop (BlitRaw /
+    // BlitPixel_CopyOrSpan); draw the pre-composited texture when the real
+    // backdrop is available, the raw frame over the fallback background
+    // otherwise. The alpha fade approximates the original's 8ms tinted
+    // cross-fade (BlitTintedRgb15).
+    SDL_Texture *preview_texture = asset.textures[frame]->get();
+    if (runtime.main_menu_style && !runtime.main_menu_backdrop_rgba.empty()) {
+      UpdateCenterPreviewCompositedTexture(runtime);
+      if (runtime.main_menu_center_preview_composited) {
+        preview_texture = runtime.main_menu_center_preview_composited->get();
+      }
+    }
+    SDL_SetTextureAlphaMod(preview_texture, alpha);
+    SDL_RenderTexture(renderer, preview_texture, nullptr, &destination);
     SDL_SetTextureAlphaMod(asset.textures[frame]->get(), SDL_ALPHA_OPAQUE);
   }
 
-  // Only the pulsing "SELECT A COMMAND" prompt is drawn by the original idle
-  // main menu (Ghidra 0x004873b0, string key 0x7d2/0x114). status_text is shown
-  // underneath only when a menu action has produced feedback.
-  if (MenuEntranceComplete(runtime) && runtime.status_text) {
-    SDL_SetRenderDrawColor(renderer, 159, 190, 227, SDL_ALPHA_OPAQUE);
-    DrawDebugTextCentered(renderer, 320.0F, 370.0F, *runtime.status_text);
-  }
-  if (MenuEntranceComplete(runtime) && runtime.menu_prompt_visible) {
-    DrawDebugTextCentered(renderer, 320.0F, 394.0F, "SELECT A COMMAND");
+  // Bottom text block (Ghidra 0x004873b0). Without a pilot the menu shows
+  // STR# 0x7d2 entry 0x114 ("No Pilot File Loaded") centered under the
+  // buttons; it appears once the third slide reveal completes and stays
+  // steady (the draw gate is reveal-counter >= threshold, not a blink timer).
+  // With a pilot loaded it is replaced by the two-column pilot status panel.
+  if (MenuEntranceComplete(runtime)) {
+    if (!runtime.game.game_active) {
+      if (auto prompt = game::NovaHud_LoadStringEntry(0x7d2, 0x114)) {
+        DrawMenuTextCentered(runtime.platform,
+                             runtime.font_cache,
+                             320.0F - 150.0F * kMenuCoordinateScale,
+                             320.0F + 150.0F * kMenuCoordinateScale,
+                             240.0F + 310.0F * kMenuCoordinateScale,
+                             *prompt,
+                             kMenuLabelColor);
+      }
+    } else {
+      DrawMenuStatusPanel(runtime);
+    }
   }
 
   if (mode == 1) {
@@ -971,32 +1461,30 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // player then chooses ENTER SPACE to play (intro cinematic plays then).
     // The dialogs keep re-rendering the menu behind themselves each frame.
     NovaRender_RedrawAndPresentFrame(runtime, 0);
-    if (game::NovaNewPilotFlow_Run(runtime.platform,
-                                   runtime.game,
-                                   [&runtime] {
-                                     NovaRender_RedrawAndPresentFrame(runtime, 0);
-                                   })) {
-      runtime.status_text = "New pilot created. Choose ENTER SPACE to fly.";
+    if (game::NovaNewPilotFlow_Run(runtime.platform, runtime.game, [&runtime] {
+          NovaRender_RedrawAndPresentFrame(runtime, 0);
+        })) {
+      NovaLog::Info("new pilot created; choose ENTER SHIP to fly");
     } else {
-      runtime.status_text = "New game cancelled.";
+      NovaLog::Info("new game cancelled");
     }
     break;
   }
   case GameModeAction::open_pilot:
     NovaLog::Todo("Open Pilot file dialog is not reconstructed.");
-    runtime.status_text = "Open Pilot flow is not reconstructed yet.";
     break;
   case GameModeAction::quit:
     runtime.quit_requested = true;
     break;
   case GameModeAction::enter_spaceflight: {
     // Ghidra: param_1 == 3. Run spaceflight only when there is an active,
-    // living pilot; otherwise show the error blip (an effect the placeholder
-    // build cannot show, so a status line is used instead).
+    // living pilot; otherwise play the error blip (NovaEffects_QueueCentered
+    // Resource of the transition sound table entry 3, which the placeholder
+    // build cannot show, so it is logged instead).
     const auto player_alive = runtime.game.player.is_active &&
                               runtime.game.player.death_timer_active < 0.0F;
     if (!runtime.game.game_active || !player_alive) {
-      runtime.status_text = "Spaceflight requires an active pilot.";
+      NovaLog::Info("ENTER SHIP ignored: no active living pilot");
       break;
     }
     // Blocking: plays the intro cinematic on first entry, then the in-game
@@ -1008,7 +1496,6 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     if (resume_menu_music) {
       runtime.music.Play();
     }
-    runtime.status_text = "Returned from spaceflight.";
     break;
   }
   case GameModeAction::preferences: {
@@ -1021,16 +1508,24 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
                                                         runtime.music,
                                                         font_cache,
                                                         runtime.prefs);
-    runtime.status_text =
-        saved ? "Preferences saved." : "Preferences cancelled.";
+    NovaLog::Info("preferences {}", saved ? "saved" : "cancelled");
     // Force a redraw so the menu backdrop (and any brightness change) is seen.
     NovaRender_RedrawAndPresentFrame(runtime, 1);
     break;
   }
-  case GameModeAction::starmap:
-    NovaLog::Todo("Star Map dialog requires system/route tables.");
-    runtime.status_text = "Star Map requires an active pilot.";
+  case GameModeAction::about_nova: {
+    // Ghidra: param_1 == 5 -> 0x00486120 (named Menu_OpenGalaxyMapDialog in
+    // Ghidra; the sp\x95n 605 button is labelled ABOUT NOVA, the shortcut is
+    // 'a', and the dialog loads the d\x91sc 0x7fff "About text" resource, so
+    // the Galaxy/Starmap role in the plate comment is a misnomer).
+    // The modal keeps re-rendering the menu behind itself each frame.
+    NovaRender_RedrawAndPresentFrame(runtime, 0);
+    game::NovaMenu_RunAboutDialog(
+        runtime.platform, runtime.font_cache, [&runtime] {
+          NovaRender_RedrawAndPresentFrame(runtime, 0);
+        });
     break;
+  }
   }
 }
 
@@ -1041,10 +1536,12 @@ std::optional<GameModeAction> NovaCommand_TranslateByInputMap(char command) {
     return GameModeAction::new_game;
   case 'o':
     return GameModeAction::open_pilot;
+  case 'e':
+    return GameModeAction::enter_spaceflight;
   case 'p':
     return GameModeAction::preferences;
   case 'a':
-    return GameModeAction::starmap;
+    return GameModeAction::about_nova;
   case 'q':
     return GameModeAction::quit;
   default:

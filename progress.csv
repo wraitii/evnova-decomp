@@ -405,7 +405,7 @@ address,name,impl_file,reimpl_pct,comment
 0x00468210,Stellar_HasAdjacentAccessibleStellarMatchingTravelFlags,,0%,
 0x004682D0,Stellar_HasAdjacentAccessibleStellarForTravelMode,,0%,
 0x004683B0,NovaRandom_Range,,0%,
-0x00468450,NovaText_FormatDateString,,0%,
+0x00468450,NovaText_FormatDateString,src/nova_app.cpp,90%,FormatGameDateString: month names/ordinal suffixes from STR# 0x89; live game calendar not tracked by GameState yet so the panel draws the fresh-pilot baseline date
 0x00468600,Stellar_FormatElapsedTravelTime,,0%,
 0x004687B0,Ship_IsShipFireRestricted,src/game/ship_ai.cpp,50%,"NovaAiShip_IsFireRestricted: derelict-govt (0x800), stellar-target, and armor disable gates ported; armor branch verified literal against the decompile - armor*100 (kFireRestrictArmorPctScale 0x575800) < max*(33.33 @0x575808 normal / 10.0 @0x5757f8 capability 0x10), exactly the Bible 33%/10%; Ghidra threshold constants renamed (were semantically swapped). Remaining: mission-fleet spawn_behavior-5 branch (needs mission runtime records)."
 0x004688E0,Ship_IsShipDestroyed,src/game/ship_ai.cpp,100%,"NovaAiShip_IsDestroyed: death-timer-active or armor<=0"
@@ -413,8 +413,8 @@ address,name,impl_file,reimpl_pct,comment
 0x00468990,Weapon_CanFireWeaponBank,src/game/weapon.cpp,50%,ammo/energy sufficiency gate now distinguishes energy weapons (ammo_type == -1), ammo-backed weapons, and carrier-bay mode 99 for both player and NPC bank storage; cloak-visibility / launch-bay-dependency gates not reproduced
 0x00468AF0,System_HasUsableTravelDestination,,0%,
 0x00468B50,Stellar_IsStellarReachableForTravel,,0%,
-0x00468D90,NovaUi_DrawSystemFactionConflictStatus,,0%,
-0x00469030,NovaUi_DrawCombatRankLabel,,0%,
+0x00468D90,NovaUi_DrawSystemFactionConflictStatus,src/nova_app.cpp,90%,MenuSystemLegalStatusText: reputation/crime-tolerance ladder + hazard nav scan + N/A gate; signed-overflow guards reduced to plain comparisons (shipped tolerances positive)
+0x00469030,NovaUi_DrawCombatRankLabel,src/nova_app.cpp,100%,MenuCombatRankLabel: threshold ladder verbatim, labels from STR# 0x8a (1-based rank+1)
 0x00469100,Outfit_ComputeOwnedOutfitResaleTotal,,0%,
 0x00469230,Weapon_HasMatchingWeaponAmmoCarried,,0%,
 0x004692E0,NovaAudio_PlaySpatialByDistance,,0%,
@@ -722,14 +722,14 @@ address,name,impl_file,reimpl_pct,comment
 0x004860F0,Compiler_UninitializedReturn,,0%,
 0x00486100,Profile_ExpressionTimestamp_860,,0%,
 0x00486110,Compiler_ReturnZero,,0%,
-0x00486120,Menu_OpenGalaxyMapDialog,,0%,
+0x00486120,Menu_OpenGalaxyMapDialog,src/game/about_dialog.cpp,50%,Misnamed in Ghidra: this is the ABOUT NOVA dialog (d£sc 0x7fff via the selection-dialog path, DLOG 0xbbb). Port draws the DLOG geometry + scrollable text provisionally; original text-editor control (FUN_004bcd90) not reconstructed
 0x004861B0,NovaHud_TrackFocusHoverIndex,src/nova_app.cpp,100%,NovaHud_TrackFocusHoverIndex menu hover tracking
 0x00486790,View_ResetCameraAndHover,,0%,
 0x00486880,NovaMainLoop_Run,src/nova_app.cpp,100%,NovaMainLoop_Run
 0x00486EC0,NoSys_NoOp_00486ec0,,0%,
-0x00486ED0,NovaGameMode_DispatchAction,src/nova_app.cpp,100%,NovaGameMode_DispatchAction; menu music now stops for blocking spaceflight and resumes on return when Intro Music is enabled; other mode-dispatch divergences remain documented in source
+0x00486ED0,NovaGameMode_DispatchAction,src/nova_app.cpp,100%,NovaGameMode_DispatchAction; action 5 now opens the About Nova dialog (Ghidra's Menu_OpenGalaxyMapDialog is a misnomer); menu music stops for spaceflight and resumes on return when Intro Music is enabled
 0x004872A0,NovaCommand_DispatchToMode,,0%,
-0x004873B0,NovaRender_RedrawAndPresentFrame,src/nova_app.cpp,100%,NovaRender_RedrawAndPresentFrame; menu title cadence and center-preview alpha timing are timer based; authored row reveal remains at the original 16ms presentation cadence
+0x004873B0,NovaRender_RedrawAndPresentFrame,src/nova_app.cpp,100%,NovaRender_RedrawAndPresentFrame; bottom text block ported: steady "No Pilot File Loaded" prompt (STR# 0x7d2 0x114) when no pilot, two-column pilot status panel + clone-source portrait when one is; menu title cadence and center-preview alpha timing are timer based
 0x00487FCD,NovaRender_RestoreClippedRegion,,0%,
 0x00488080,NovaMainLoop_UpdateFrame,src/nova_app.cpp,100%,NovaMainLoop_UpdateFrame
 0x00488380,NovaView_UpdateGameplayViewport,src/game/gameplay_interface.cpp,45%,frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
@@ -748,9 +748,9 @@ address,name,impl_file,reimpl_pct,comment
 0x0048BC90,NovaHud_UpdateLayoutState,,0%,
 0x0048BF40,Hud_FreeTransientEffects,,0%,
 0x0048BFB0,Frame_TickTimerDecayAndEffects,,0%,
-0x0048C210,NovaHud_UpdateFocusAnimationState,,0%,
+0x0048C210,NovaHud_UpdateFocusAnimationState,src/nova_app.cpp,70%,UpdateMenuCenterPreview: fade eases ±4/ms toward 0x20 and the lane switches only after decay (verified against NovaHud_RenderFocusOverlay's tinted/opaque blit paths); the once-per-ms tick and the sprite pixel-test are folded into the SDL frame loop
 0x0048C3C0,NovaHud_RenderOverlays,,0%,
-0x0048C580,NovaHud_RenderFocusOverlay,,0%,
+0x0048C580,NovaHud_RenderFocusOverlay,src/nova_app.cpp,80%,Center-preview draw: rest state = OR-composite of the frame into the backdrop (BlitRaw -> BlitPixel_CopyOrSpan, verified in-game vs pilot.png), alpha fade approximates the BlitTintedRgb15 cross-fade; the lane-clamp/anchor plumbing lives in the menu renderer
 0x0048C730,NovaUi_HandleTravelDestinationInteractionLoop,,0%,
 0x0048D190,NovaUi_HandleTravelServicesMenuInput,,0%,
 0x0048D5A0,TravelOutfitMenu_FUN_0048d5a0,,0%,

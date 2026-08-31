@@ -2,6 +2,7 @@
 
 #include "brgr_archive.hpp"
 #include "game/game_state.hpp"
+#include "game/nova_font.hpp"
 #include "game/preferences.hpp"
 #include "rle_sprite_sheet.hpp"
 #include "sdl_audio.hpp"
@@ -14,13 +15,17 @@
 #include <optional>
 #include <vector>
 
+// The action codes are the original's NovaGameMode_DispatchAction selectors;
+// the six menu focus sprites (sp\x95n 600-605) map lane index -> action code
+// directly (Ghidra 0x00486880 NovaMainLoop_Run: hovered lane is dispatched
+// verbatim). Lane 5 is the ABOUT NOVA button.
 enum class GameModeAction : std::uint8_t {
   new_game = 0,
   open_pilot = 1,
   quit = 2,
   enter_spaceflight = 3,
   preferences = 4,
-  starmap = 5,
+  about_nova = 5,
 };
 
 enum class StartupPhase : std::uint8_t {
@@ -60,6 +65,16 @@ struct NovaRuntime {
   std::vector<std::unique_ptr<SdlTexture>> main_menu_logo_textures;
   // Ghidra: sp\x95n 607, one center-preview frame per menu action plus idle.
   std::optional<NovaMenuSpriteAsset> main_menu_center_preview_asset;
+  // The rollover's rest-state blit is BlitPixel_CopyOrSpan (Ghidra 0x00473b60):
+  // the frame is OR-ed onto the backdrop per 16-bit pixel, so its near-black
+  // "plate" pixels vanish and only the bright glyph bits merge in. The port
+  // keeps the backdrop pixels and pre-composites the same OR per frame.
+  std::vector<std::uint8_t> main_menu_backdrop_rgba;
+  int main_menu_backdrop_width = 0;
+  int main_menu_backdrop_height = 0;
+  std::unique_ptr<SdlTexture> main_menu_center_preview_composited;
+  std::size_t main_menu_center_preview_composited_frame = 0;
+  bool main_menu_center_preview_composited_valid = false;
   // Ghidra: sp\x95n 608-610, three PICT animation strips that reveal the
   // paired rows of buttons as the main menu opens.
   std::array<std::vector<std::unique_ptr<SdlTexture>>, 3>
@@ -68,22 +83,22 @@ struct NovaRuntime {
       main_menu_sprite_definitions;
   std::array<std::optional<NovaMenuSpriteAsset>, 6> main_menu_sprite_assets;
   std::optional<NovaMainMenuStyle> main_menu_style;
+  // Geneva.ttf face cache for the menu status text (the original draws menu
+  // text with g_main_menu_font_id 3 / size 9, Ghidra 0x004b32aa).
+  game::NovaFontCache font_cache;
+  // 128x64 clone-source portrait PICT (3000 + class) shown in the pilot status
+  // panel; cached per class id, -1 = none loaded yet.
+  std::unique_ptr<SdlTexture> menu_status_portrait;
+  std::int16_t menu_status_portrait_class = -1;
   StartupPhase startup_phase = StartupPhase::loading_splash;
   bool game_active = false;
   bool quit_requested = false;
-  bool menu_prompt_visible = true;
   std::optional<GameModeAction> hovered_action;
   // Hovered action as of the previous frame; a change between frames triggers
   // the menu hover blip (matching the game's transition test).
   std::optional<GameModeAction> previous_hovered_action;
   std::optional<GameModeAction> requested_action;
-  // Status line printed under the menu when a menu action has been triggered.
-  // When empty (idle), the original draws no status line, only the pulsing
-  // "SELECT A COMMAND" prompt (string key 0x7d2/0x114, Ghidra
-  // 0x004873b0 NovaRender_RedrawAndPresentFrame).
-  std::optional<const char *> status_text;
   std::uint64_t startup_phase_started_ms = 0;
-  std::uint64_t next_menu_prompt_toggle_ms = 0;
   std::uint64_t next_menu_top_animation_ms = 0;
   std::uint64_t next_menu_reveal_frame_ms = 0;
   std::uint64_t menu_center_preview_last_update_ms = 0;
