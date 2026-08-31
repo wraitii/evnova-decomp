@@ -8,6 +8,7 @@
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
+#include "targeting.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -112,6 +113,64 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
   }
   return state.scenario.stellars[static_cast<std::size_t>(stellar_id)]
       .system_id;
+}
+
+// Ghidra 0x00448090 NovaResources_EvaluateAvailability, stellar/system
+// membership prologue: every stellar's runtime owning-system slot is reset,
+// each SystemDef.is_visible is recomputed from the explored flag and the
+// Visibility expression, then every visible system re-homes its nav stellars
+// whose slot is still unset (first visible system wins; a system claims its
+// hidden visibility-parent chain with it). Unexplored systems' stellars keep
+// system_id = -1 and are therefore invisible to locator-family resolution.
+// The mïsn availability-expression arm of 0x00448090 runs inline in
+// Mission_EvaluateMissionLists.
+void EvaluateAvailabilityStellarMembership(GameState &state) {
+  const ControlExpressionState expression =
+      MissionControlExpressionState(state);
+  for (auto &stellar : state.scenario.stellars) {
+    stellar.system_id = -1;
+  }
+  auto &systems = state.scenario.systems;
+  std::vector<bool> claimed(systems.size(), false);
+  for (std::size_t i = 0; i < systems.size(); ++i) {
+    auto &system = systems[i];
+    if (!system.has_explored_flag) {
+      system.is_visible = false;
+      continue;
+    }
+    system.is_visible =
+        NovaControlExpression_Evaluate(system.visibility_expr, expression);
+  }
+  for (std::size_t i = 0; i < systems.size(); ++i) {
+    auto &system = systems[i];
+    if (!system.has_explored_flag || !system.is_visible || claimed[i]) {
+      continue;
+    }
+    claimed[i] = true;
+    for (std::int16_t parent = system.visible_parent_system_id;
+         parent >= 0 && static_cast<std::size_t>(parent) < systems.size();
+         parent = systems[static_cast<std::size_t>(parent)]
+                      .visible_parent_system_id) {
+      claimed[static_cast<std::size_t>(parent)] = true;
+    }
+    for (const std::int16_t nav : system.nav_defs) {
+      if (nav < kResourceIdBase || nav >= kResourceIdBase + 0x800) {
+        continue;
+      }
+      const std::size_t stellar_index =
+          static_cast<std::size_t>(nav - kResourceIdBase);
+      if (stellar_index < state.scenario.stellars.size() &&
+          state.scenario.stellars[stellar_index].system_id == -1) {
+        state.scenario.stellars[stellar_index].system_id =
+            static_cast<std::int16_t>(i);
+      }
+    }
+  }
+  // The per-frame display pass (scope 3 of
+  // System_UpdateSystemAndStellarDisplayState 0x00432470) refreshes
+  // is_available/hazard_marker from the new membership map; the original
+  // relies on the last per-tick pass having run with the same map.
+  NovaTargeting_UpdateStellarAvailability(state);
 }
 
 // Mission_SelectMissionStellarByLocator (0x0043d510) filters all stellars
@@ -778,6 +837,10 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
 
 // Ghidra 0x0043cf00 Mission_EvaluateMissionLists.
 MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
+  // The original opens with NovaResources_EvaluateAvailability (0x00448090):
+  // refresh stellar system membership + system visibility, then re-cache the
+  // mïsn availability expressions (the loop below).
+  EvaluateAvailabilityStellarMembership(state);
   const ControlExpressionState expression =
       MissionControlExpressionState(state);
   for (auto &mission : state.scenario.missions) {

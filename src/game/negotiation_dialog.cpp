@@ -845,7 +845,8 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
       (stellar->min_status != -0x7fff && sys_rep < stellar->min_status);
   const Government *gov =
       stellar->government_id != -1
-          ? state.scenario.Government(stellar->government_id)
+          ? state.scenario.Government(
+                static_cast<std::int16_t>(stellar->government_id + 0x80))
           : nullptr;
   if (denied && gov != nullptr) {
     // Government policy-flag override (Government_GetGovernmentPolicyFlag
@@ -1007,10 +1008,9 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
     if (planet_art) {
       // The picture panel shows the stellar's ambient spin sprite (0x004812c0);
       // this PICT is only the port's fallback when the spin set fails to load.
-      if (view.sprite_store().Spin(
-              platform.renderer(),
-              static_cast<std::uint16_t>(stellar->link_a_id + 1000)) ==
-          nullptr) {
+      if (view.sprite_store().Spin(platform.renderer(),
+                                   static_cast<std::uint16_t>(
+                                       stellar->link_a_id + 1000)) == nullptr) {
         NovaLog::Todo("destination-interaction: stellar '{}' has no spin set "
                       "{}; the item-4 thumbnail falls back to the docked "
                       "planet PICT 0x{} (port-only divergence)",

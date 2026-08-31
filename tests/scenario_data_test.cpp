@@ -354,12 +354,15 @@ TEST_CASE("stellar spin sprites resolve from Nova Graphics",
   const game::Stellar *earth = data.Stellar(0x80);
   REQUIRE(earth != nullptr);
   CHECK(earth->link_a_id == 0);
-  CHECK(earth->government_id == 0x80);
+  // The stellar decode surfaces link_a_id and the government id. The loader
+  // (0x004bd3c0) rebases Govt into the 0.. space: Federation (resource 0x80)
+  // decodes as 0.
+  CHECK(earth->government_id == 0);
   CHECK(earth->pos_x == 0);
   CHECK(earth->pos_y == 0);
   // A governed stellar resolves to a real government whose theme colour tints
   // its HUD/planet presentation.
-  const game::Government *gov = data.Government(earth->government_id);
+  const game::Government *gov = data.Government(earth->government_id + 0x80);
   REQUIRE(gov != nullptr);
   CHECK(gov->present);
 }

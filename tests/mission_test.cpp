@@ -115,3 +115,48 @@ TEST_CASE(
   CHECK(state.active_mission_runtime_flags[0].flags_primary_at_accept ==
         0x8123);
 }
+
+// Regression: a fresh new-game pilot landed at Tichel (system 0x81) must find
+// the generic Federation "Ferry Passengers to <DST>" missions on the mission
+// computer lane. Exercises the 0x00448090 EvaluateAvailability stellar
+// membership prologue + the AvailStel govt-lane gate end to end.
+TEST_CASE("fresh BBS at Tichel offers Federation ferry passenger missions") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 1; // Tichel (zero-based)
+  state.player.ship_class_id = 0;
+  state.player.credits = 10000;
+  state.system_reputation.assign(state.scenario.systems.size(), 0);
+  // Selected stellar = the landing anchor the land command auto-picks.
+  std::int16_t anchor = -1;
+  if (const auto *sys = state.scenario.System(0x81); sys != nullptr) {
+    for (const auto nav : sys->nav_defs) {
+      if (nav >= 0x80) {
+        anchor = nav;
+        break;
+      }
+    }
+  }
+  REQUIRE(anchor >= 0x80);
+  state.travel.selected_stellar_id = anchor;
+  Mission_RerollOfferingRolls(state);
+  // Pin the per-def AvailRandom rolls to 1 so the 60% definitions always pass
+  // gate 4; the reroll cadence itself is covered elsewhere.
+  for (auto &roll : state.mission_offering_rolls) {
+    roll = 1;
+  }
+
+  const auto evaluation = Mission_EvaluateMissionLists(state);
+  int ferry_rows = 0;
+  for (const auto mission_id : evaluation.page_zero) {
+    const auto &mission =
+        state.scenario.missions[static_cast<std::size_t>(mission_id)];
+    if (mission.display_name.find("Ferry Passengers") != std::string::npos) {
+      // Only the Federation variants (AvailStel 10000 = "stellar of government
+      // 0") may appear at Tichel.
+      CHECK(mission.link_system_filter == 10000);
+      ++ferry_rows;
+    }
+  }
+  CHECK(ferry_rows == 3);
+}

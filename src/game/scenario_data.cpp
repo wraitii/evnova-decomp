@@ -601,9 +601,13 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   st.special_tech[0] = ReadBeI16(bytes, 0x0e);
   st.special_tech[1] = ReadBeI16(bytes, 0x10);
   st.special_tech[2] = ReadBeI16(bytes, 0x12);
-  st.government_id = ReadBeI16(bytes, 0x14); // Govt (resource id; <0x80 -> -1)
+  st.government_id = ReadBeI16(bytes, 0x14); // Govt (resource id)
+  // Loader 0x004bd3c0 rebases into the 0.. space: < 0x80 -> -1, else -0x80.
+  // The AvailStel govt lanes (m\xefsn 10000..31999) compare these rebased ids.
   if (st.government_id < 0x80) {
     st.government_id = -1;
+  } else {
+    st.government_id = static_cast<std::int16_t>(st.government_id - 0x80);
   }
   st.min_status = ReadBeI16(bytes, 0x16);             // reputation_threshold
   st.engage_highlight_frame = ReadBeI16(bytes, 0x18); // hypergate pulse frame
