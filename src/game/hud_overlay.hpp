@@ -39,6 +39,14 @@ void NovaHud_ShowOverlayMessage(GameState &state,
                                 std::uint8_t blue = 0xe0,
                                 std::uint64_t duration_frames = 250);
 
+// Duration-only form: the message overlays driven by gameplay events
+// (mission failure/disable/destruction STR# 0x7d2 0x11c/0x11d/0x11f/0x120)
+// pass a duration (0xf0/0x168/5000) and the shared g_hud_overlay_text_color,
+// which the port renders with the default tint.
+void NovaHud_ShowOverlayMessage(GameState &state,
+                                std::string message,
+                                std::uint64_t duration_frames);
+
 // Mirrors NovaHud_ShowCachedOverlayMessage: re-arms the last shown message for
 // repaint (the original re-displays g_hud_overlay_msg_buffer after a
 // refresh/system pass). Does nothing when no message is cached/active. When

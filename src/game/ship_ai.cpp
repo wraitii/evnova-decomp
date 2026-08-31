@@ -1973,7 +1973,7 @@ void NovaAi_UpdateShipState(GameState &state,
       } else if (ship.ai_control_mode != 0x10 && ship.ai_control_mode != 0x11) {
         ship.ai_control_mode = 6;
       }
-    } else if (target.escort_rehired_mark == 0 ||
+    } else if (target.boarded_target_latch == 0 ||
                ship.ai_maneuver_timer_ms > 0.0F) {
       ship.ai_secondary_target_slot = target_slot;
       const auto *cls = ShipClassFor(state, ship);

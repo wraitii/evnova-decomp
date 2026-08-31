@@ -404,6 +404,8 @@ TEST_CASE(
   ship.is_active = true;
   ship.current_system_id = 0;
   ship.ship_class_id = 0;
+  ship.armor_points = 10.0F; // alive: destroyed hulls now run the death
+                             // presentation (Ship_UpdateVisualState 0x428340)
   // Drifted slot fields out of their legal ranges (Ghidra resets to -1).
   ship.faction_or_government_id = 0x100; // > 0xff
   ship.dude_class_id = 0x200;            // > 0x1ff

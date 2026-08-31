@@ -19,6 +19,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
+#include "mission.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
@@ -538,7 +539,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
 
   // ---- Target eligibility (denial = STR# 0x7d2 pool 0x81) -----------------
   const bool rehired_or_surrendering =
-      target.escort_rehired_mark == 0 ||
+      target.boarded_target_latch == 0 ||
       (target.mission_fleet_slot == -1 && target.post_hit_mode_hint >= 0);
   const bool fire_restricted = NovaAiShip_IsFireRestricted(state, target);
   const bool eligible =
@@ -557,7 +558,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
         "player_destroyed={} armor={:.0f}/{} (boardable when armor < {:.2f})",
         target_slot,
         diag_class != nullptr ? diag_class->display_name : "?",
-        target.escort_rehired_mark,
+        target.boarded_target_latch,
         fire_restricted,
         target.is_active,
         player.current_system_id == target.current_system_id,
@@ -624,18 +625,64 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   }
 
   // ---- Boardability -------------------------------------------------------
-  // Mission-fleet arms (bounty target / cargo pickup / escort repair) are
-  // TODO(decomp): the mission-ship def table is not modelled; those arms
-  // also cover the STR# 0x7d2 0x7e/0x7f "repaired" messages.
+  // Mission arms (Ship_HandlePlayerBoardTargetCommand 0x0045a3d0): the
+  // pickup_mode-2 cargo pickup and the spawn_behavior 2/5 + flags 0x0001
+  // single-ship rescue arm write goal_counter_b, set the target's boarded
+  // latch and clear other ships' targeting before falling through to the
+  // capture flow. Inactive-mission ships board like plain ships. The
+  // mission-ship interaction window branch (pers-linked targets,
+  // 0x00442510) is not reachable in the port yet (TODO(decomp)).
   if (target.mission_fleet_slot != -1) {
-    NovaLog::Todo("board: mission-fleet target boarded (slot {}); mission "
-                  "arms of Ship_HandlePlayerBoardTargetCommand not "
-                  "reconstructed",
-                  target.mission_fleet_slot);
-    return;
+    const auto mission_idx =
+        static_cast<std::size_t>(target.mission_fleet_slot);
+    if (state.active_mission_runtime_flags[mission_idx].is_active) {
+      ActiveMission &mission = state.active_missions[mission_idx];
+      const std::uint16_t mission_flags = mission.flags_primary;
+      if (mission.pickup_mode == 2) {
+        // Board-for-cargo: the interaction resource gate; on denial the
+        // mission's own STR# 0x7d2 0x165/0x166 dialog shows (logged TODO in
+        // Mission_TryConsumeMissionInteractionResources) and the command
+        // silently returns, exactly like the original's bVar5 path.
+        if (!Mission_TryConsumeMissionInteractionResources(
+                state, mission.cargo_qty_tons)) {
+          return;
+        }
+        mission.goal_counter_b =
+            static_cast<std::int16_t>(mission.goal_counter_b + 1);
+        mission.carrying_resources = true;
+        // Cargo pickup overlay: STR# 0x7d2 0x6a + " " + optional 0x6b + the
+        // cargo item name (CREC table) + " " + 0x6c. The name table is not
+        // loaded in the port, so the message shows without the item name.
+        // TODO(decomp): CREC cargo-name table (DAT_0069d2cc) + 0x6b/0x6c
+        // composition.
+        if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x6a)) {
+          NovaHud_ShowOverlayMessage(state,
+                                     *text,
+                                     /*duration_frames=*/std::uint64_t{0xfa});
+        }
+        QueueUiSound(state, 4, 8);
+      } else if ((mission.spawn_behavior == 2 || mission.spawn_behavior == 5) &&
+                 (mission_flags & 0x0001U) != 0U &&
+                 mission.target_ship_count == 1) {
+        // Rescue/board-captain arm. flags 0x0008 swaps the generic STR# 0x7d2
+        // 0x7e "boarding" message for a class-name message whose tail strings
+        // (DAT_0072d5cc / DAT_00599acc) are not reconstructed. TODO(decomp).
+        ShowBoardingOverlay(state, 0x7e);
+        QueueUiSound(state, 4, 8);
+        mission.goal_counter_b =
+            static_cast<std::int16_t>(mission.goal_counter_b + 1);
+        target.ai_maneuver_timer_ms = 100.0F;
+        target.boarded_target_latch = 1;
+        NovaTargeting_ClearDestroyedShipReferences(state,
+                                                   target.ship_instance_id);
+      }
+      // Any other active-mission ship boards like a plain ship (cVar12 = 1).
+    }
   }
-  // Plain ships: Bible "Ships with 0 crew can't be boarded".
-  if (target_class->crew < 1) {
+  // Plain ships: Bible "Ships with 0 crew can't be boarded". Mission ships
+  // skip this gate (the original's crew check lives only in the
+  // mission_fleet_slot == -1 branch).
+  if (target.mission_fleet_slot == -1 && target_class->crew < 1) {
     NovaLog::Info("board: target slot {} ({}) denied — crew 0",
                   target_slot,
                   target_class->display_name);
@@ -678,7 +725,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   // After the interaction: latch + clear every ship targeting the boarded
   // hull (Ship_ClearOtherShipsTargetingShip 0x00415dc0; the port's
   // destroyed-reference helper performs the same clearing).
-  target.escort_rehired_mark = 1;
+  target.boarded_target_latch = 1;
   NovaTargeting_ClearDestroyedShipReferences(state, target.ship_instance_id);
 }
 
@@ -1887,7 +1934,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
             target.faction_or_government_id = -1;
             target.pers_def_slot = -1;
             target.primary_target_ship_slot = -1;
-            target.escort_rehired_mark = 1; // field_0xb9
+            target.boarded_target_latch = 1; // field_0xb9
             target.cloak_transition_latch = 0;
             target.cloak_fade_progress = 0.0F;
             target.target_stellar_object_id = -1;

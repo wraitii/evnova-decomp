@@ -1223,7 +1223,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     target.ai_target_ship_slot = -1;
     target.ai_behavior_code =
         ship_class != nullptr ? ship_class->default_ai_behavior : 1;
-    target.escort_rehired_mark = 1;
+    target.boarded_target_latch = 1;
     target.post_hit_mode_hint = -1;
     // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810) subset:
     target.ai_state_code = 0;

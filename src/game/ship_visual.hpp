@@ -15,6 +15,8 @@
 #include <optional>
 #include <span>
 
+#include "game_state.hpp"
+
 namespace game {
 
 // Resource four-byte type code for the ship-animation descriptor (sh\x8an).
@@ -73,6 +75,7 @@ struct ShipVisualDescriptor {
     std::array<std::int16_t, 4> forward{}; // field_0xa44 per quadrant
     std::array<std::int16_t, 4> drop{};    // field_0xa82 per quadrant
   };
+
   std::array<TurretGroupMuzzle, 4> turret_muzzles{};
   // Weapon-exit compress scales (ShipClassDef field_0xaa4/0xaa8), already
   // multiplied by the 0.01 compress factor (raw sh\x8an short * 0.01; for the
@@ -86,5 +89,25 @@ struct ShipVisualDescriptor {
 // when the payload is too small for the header fields.
 [[nodiscard]] std::optional<ShipVisualDescriptor>
 DecodeShipVisualDescriptor(std::span<const std::byte> resource_data);
+
+// Ghidra 0x00428340 Ship_UpdateVisualState, destruction slice (NPC hulls).
+// Advances one destroyed ship's death presentation and runs the once-only
+// destruction finale when the timer enters the (0, 2] tick window: blast
+// damage to nearby hulls, the mission DESTRUCTION bookkeeping (quick-fail
+// arm + goal_counter_a++ + target_ship_count--), the personality
+// deactivation, and the hull deactivation. Reseeding when the timer has run
+// out (DeathDelay) matches the original; hulls with DeathDelay 0 destruct
+// immediately in the port (the original would linger forever - the port
+// already spawns finale visuals immediately for those at the hit site).
+// The debris-puff window (timer > 2) and audio are visual-only and owned by
+// the SDL view (divergence logged in collision.cpp at the hit transition).
+void NovaShip_TickDestroyedShipVisualState(GameState &state,
+                                           Ship &ship,
+                                           float elapsed_ticks);
+
+// Ghidra 0x00428340 Ship_UpdateVisualState, destruction finale arm only.
+// Runs the once-per-wreck bookkeeping and deactivates the hull; exported for
+// the player-ship death path, which ticks its own presentation timer.
+void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship);
 
 } // namespace game

@@ -2,7 +2,9 @@
 
 #include "asteroid.hpp"
 #include "government.hpp"
+#include "hud_overlay.hpp"
 #include "impact_effects.hpp"
+#include "mission.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight.hpp"
@@ -13,6 +15,7 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <random>
 #include <utility>
 
 namespace game {
@@ -26,6 +29,35 @@ constexpr float kPlayerAggroPerHitScale = 1.5F; // DAT_00575240
 constexpr float kProximitySpanFraction =
     0.333005F; // DAT_00575338: blast + ship half-span * ~1/3
 constexpr std::int16_t kShipClassInvalidSentinel = 0x2ff;
+// Disable-transition armor pin (Shot_ResolveShipHitFromWeapon 0x0041a4b0):
+// _DAT_00575238 = 1/3 and _DAT_00575208 = 0.1 for capability-flags 0x10 hulls,
+// both +1.0 (_DAT_00575230).
+constexpr float kDisableArmorPinFraction = 1.0F / 3.0F;
+constexpr float kDisableArmorPinFractionCap0x10 = 0.1F;
+
+// Ghidra Shot_ResolveShipHitFromWeapon player arms: quick-fail the first
+// active, unfailed mission with flags 0x0004 (fail when the player is
+// disabled/destroyed), with the STR# 0x7d2 0x11c overlay.
+void QuickFailPlayerDependencyMissions(GameState &state) {
+  for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+    const MissionRuntimeFlags &runtime =
+        state.active_mission_runtime_flags[slot];
+    const ActiveMission &mission = state.active_missions[slot];
+    if (!runtime.is_active || runtime.is_failed ||
+        (mission.flags_primary & 0x0004U) == 0U) {
+      continue;
+    }
+    state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
+    if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11c)) {
+      NovaHud_ShowOverlayMessage(
+          state, *text, /*duration_frames=*/std::uint64_t{0xf0});
+    }
+    Mission_FailMissionSlotQuick(state,
+                                 static_cast<std::int16_t>(slot),
+                                 static_cast<std::uint32_t>(SDL_GetTicks()));
+    break;
+  }
+}
 
 [[nodiscard]] const Weapon *WeaponForShot(const GameState &state,
                                           const ActiveShot &shot) {
@@ -306,15 +338,18 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
 // armor+shield damage by the shareware trial day counter
 // g_shareware_day_counter (0x0059799e, FUN_004d4480); 91+ days means no
 // boost. Deliberately not reproduced in the clean-room (no shareware trial
-// state). check_fire_restriction_transi-
-// tion is always 0 from both shot paths, so its disabled-armor floor and the
-// mission DISABLE bookkeeping (Mission_FailMissionSlotQuick / goal_counter_c,
-// player "disabled" HUD messages via STR# 0x7d2) are deferred. The full
+// state). check_fire_restriction_transition is 0 from the shot paths and 1
+// from the hull-destruction blast (Ship_UpdateVisualState 0x00428340), which
+// arms the disable-transition armor pin (33%/10% + 1 armor) and the mission
+// DISABLE bookkeeping (escort-goal quick-fail + goal_counter_c++, STR# 0x7d2
+// 0x11c) and the player "disabled" overlay (STR# 0x7d2 0x11f). The full
 // retarget gate chain (system reputation, government max-odds roll, cloak
 // re-entry, escort-command exclusions) is approximated by the conservative
 // subset below, and the kill-side faction combat events plus combat-rating
 // award are deferred. The stellar-target redirect branch (damage x30 toward
 // attackers closer than the stellar under attack) is also deferred.
+} // namespace
+
 void ResolveShipHitFromWeapon(GameState &state,
                               std::int16_t target_slot,
                               Ship &target,
@@ -328,7 +363,8 @@ void ResolveShipHitFromWeapon(GameState &state,
                               bool suppress_retarget_logic,
                               bool force_armor_only,
                               bool bypass_shields,
-                              std::int16_t player_aggro_delta) {
+                              std::int16_t player_aggro_delta,
+                              bool check_fire_restriction_transition) {
   if (!ValidShipSlot(target_slot) || !target.is_active ||
       target.ship_class_id < 0) {
     return;
@@ -367,6 +403,8 @@ void ResolveShipHitFromWeapon(GameState &state,
   }
 
   const bool was_destroyed = IsDestroyed(target);
+  // Ghidra local_12a: fire-restricted (disabled) before this hit applied.
+  const bool was_fire_restricted = NovaAiShip_IsFireRestricted(state, target);
 
   ApplyImpactImpulse(state, target, impact_x, impact_y, impact_impulse);
 
@@ -427,6 +465,113 @@ void ResolveShipHitFromWeapon(GameState &state,
     // TODO(decomp) skipped: kill-side Government_ProcessFactionCombatEvent
     // (event 3) plus Frame_AddCombatRatingPoints when the victim's government
     // tracks reputation.
+  }
+
+  // ---- Fire-restriction (disable) transition arms (0x0041a4b0..) ---------
+  const bool now_fire_restricted = NovaAiShip_IsFireRestricted(state, target);
+  if (now_fire_restricted) {
+    // Disable-transition armor pin: armor locks at 33% of max (+1 armor;
+    // 10% for capability-flags 0x10 hulls), keeping the hull fire-restricted
+    // (Ship_HandleShip suppresses regeneration while restricted). Only the
+    // destruction-blast caller passes the transition flag, exactly like the
+    // original's check_fire_restriction_transition argument.
+    if (check_fire_restriction_transition && !was_fire_restricted &&
+        target_class != nullptr) {
+      const float max_armor =
+          target_slot == 0 && state.stat_cache_valid
+              ? state.cached_stats.max_armor_points
+              : static_cast<float>(target_class->base_armor);
+      target.armor_points =
+          (target_class->capability_flags & 0x10) != 0U
+              ? max_armor * kDisableArmorPinFractionCap0x10 + 1.0F
+              : max_armor * kDisableArmorPinFraction + 1.0F;
+    }
+    // Mission DISABLE bookkeeping: counts one disable per mission ship on the
+    // transition into fire-restriction; an escort-goal (spawn_behavior 3)
+    // mission quick-fails on the first disable unless flags 0x0400 (invisible)
+    // hid it.
+    const std::int16_t fleet_slot = target.mission_fleet_slot;
+    if (!was_fire_restricted && fleet_slot >= 0 &&
+        fleet_slot < static_cast<std::int16_t>(GameState::kMaxActiveMissions) &&
+        target.target_stellar_object_id == -1) {
+      MissionRuntimeFlags &runtime =
+          state.active_mission_runtime_flags[static_cast<std::size_t>(
+              fleet_slot)];
+      ActiveMission &mission =
+          state.active_missions[static_cast<std::size_t>(fleet_slot)];
+      if (runtime.is_active) {
+        if (!runtime.is_failed && mission.goal_counter_c == 0 &&
+            mission.spawn_behavior == 3 &&
+            (mission.flags_primary & 0x0400U) == 0U) {
+          state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
+          if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11c)) {
+            NovaHud_ShowOverlayMessage(
+                state, *text, /*duration_frames=*/std::uint64_t{0xf0});
+          }
+          Mission_FailMissionSlotQuick(
+              state, fleet_slot, static_cast<std::uint32_t>(SDL_GetTicks()));
+        }
+        mission.goal_counter_c =
+            static_cast<std::int16_t>(mission.goal_counter_c + 1);
+      }
+    }
+    // Post-hit behavior hint for surrendered escorts (ai_target_ship_slot 0,
+    // not a mission ship): stores how the boarding/escort-conversion flow
+    // treats this hull. Cargo transfer for behavior-6 escorts is TODO(decomp)
+    // (Outfit_TransferCargoAndJunkToEscortByRatio 0x00469810).
+    if (target.ai_target_ship_slot == 0 && fleet_slot == -1) {
+      target.post_hit_mode_hint =
+          target.ai_behavior_code == 5
+              ? 0
+              : (target.escort_origin_mark == 0 ? 2 : 1);
+      target.ai_target_ship_slot = -1;
+      target.ai_behavior_code = target_class != nullptr
+                                    ? target_class->default_ai_behavior
+                                    : target.ai_behavior_code;
+    }
+    // Player disable arm (transition): "ship disabled" overlay, rearm the
+    // recent-hit regen latch, round armor to whole points (original quirk),
+    // and quick-fail every mission flagged 0x0004 (fail on player disable).
+    if (target_slot == 0 && !was_fire_restricted) {
+      state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
+      if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11f)) {
+        NovaHud_ShowOverlayMessage(
+            state, *text, /*duration_frames=*/std::uint64_t{0xf0});
+      }
+      state.recently_hit_timer = 300.0F;
+      target.armor_points = static_cast<float>(
+          static_cast<int>(std::llround(target.armor_points)));
+      QuickFailPlayerDependencyMissions(state);
+    }
+  }
+
+  // Player destruction arm (transition into destroyed): "ship destroyed"
+  // overlay unless the disable or a Shareware-Enforcer taunt already showed,
+  // plus the same flags-0x0004 mission quick-fail sweep.
+  if (target_slot == 0 && IsDestroyed(target) && !was_destroyed) {
+    state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
+    bool taunt_shown = false;
+    if (allow_aggro_updates && ValidShipSlot(attacker_ship_slot) &&
+        attacker_ship_slot > 0 &&
+        state.ShipAt(static_cast<std::size_t>(attacker_ship_slot))
+                .pers_def_slot == 0x3ff) {
+      // STR# 30000 entries 8..13: Shareware Enforcer taunts.
+      std::uniform_int_distribution<std::int32_t> taunt_roll{0, 5};
+      if (auto text = NovaHud_LoadStringEntry(
+              30000, static_cast<std::uint16_t>(8 + taunt_roll(state.rng)))) {
+        NovaHud_ShowOverlayMessage(
+            state, *text, /*duration_frames=*/std::uint64_t{5000});
+        taunt_shown = true;
+      }
+    }
+    if (!taunt_shown && !state.player_disable_message_shown) {
+      if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x120)) {
+        NovaHud_ShowOverlayMessage(
+            state, *text, /*duration_frames=*/std::uint64_t{0xf0});
+      }
+    }
+    state.player_disable_message_shown = true;
+    QuickFailPlayerDependencyMissions(state);
   }
 
   if (allow_aggro_updates && target.ai_behavior_code > 0 &&
@@ -811,7 +956,7 @@ void RemoveConsumedShots(GameState &state) {
       state.active_shots.end());
 }
 
-} // namespace
+namespace {} // namespace
 
 // Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0) wrapper: resolve a hit
 // against a ship given by slot (validates the slot / active state).

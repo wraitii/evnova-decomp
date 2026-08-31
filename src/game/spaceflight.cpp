@@ -19,6 +19,7 @@
 #include "ship_ai.hpp"
 #include "ship_comm_dialog.hpp"
 #include "ship_spawn.hpp"
+#include "ship_visual.hpp"
 #include "spaceflight_view.hpp"
 #include "starmap.hpp"
 #include "targeting.hpp"
@@ -271,7 +272,10 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
 
     // Ship_IsShipDestroyed is an armor/death-timer predicate, not an
     // allocation guard. Once the validation prologue has accepted the slot,
-    // a destroyed NPC is inert for the rest of this tick.
+    // a destroyed NPC is inert for the rest of this tick. Ship_HandleShip
+    // decrements the death presentation timer here (one tick per frame,
+    // g_cloak_fade_passive_decay = 1.0, paused while gameplay time is
+    // frozen); the destruction finale runs in the visual-state pass below.
     if (NovaAiShip_IsDestroyed(ship)) {
       ship.ai_state_code = 0x16;
       ship.ai_control_mode = 0;
@@ -281,6 +285,9 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       ship.vel_y = 0.0F;
       ship.engine_glow_level = 0;
       ship.engine_glow_intensity = 0.0F;
+      if (ship.death_timer_active > 0.0F) {
+        ship.death_timer_active -= elapsed_ticks;
+      }
       continue;
     }
 
@@ -293,6 +300,21 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
 
     // The separate ionization speed clamp remains deferred.
     TickIonizationDecay(state, ship, elapsed_ticks);
+  }
+
+  // Ship_UpdateVisualState (0x00428340) destruction pass: runs after every
+  // Ship_HandleShip integration (Frame_TickSystems scope order), finishing
+  // the death presentation of destroyed hulls and applying the blast/mission
+  // bookkeeping exactly once as each wreck expires.
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.current_system_id != current_system) {
+      continue;
+    }
+    if (!NovaAiShip_IsDestroyed(ship)) {
+      continue;
+    }
+    NovaShip_TickDestroyedShipVisualState(state, ship, elapsed_ticks);
   }
 }
 
@@ -311,6 +333,10 @@ void Stub_BeamHitQueue(GameState &state, float elapsed_ticks) {
 void NovaFrame_TickSystems(GameState &state,
                            bool run_full_tick,
                            float elapsed_ticks) {
+  // g_player_disable_message_shown reset site (Ghidra 0x00417669 in the
+  // spaceflight frame loop): the latch suppresses the duplicate destruction
+  // overlay within one frame only.
+  state.player_disable_message_shown = false;
   // scope 10 "player": always runs.
   Stub_PlayerCore(state);
   // scope 9 "collisions": always runs.
@@ -2030,11 +2056,10 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
     // whole status/outfit block for the dying ship (inactive-branch return).
     p.death_timer_active -= elapsed_ticks;
     if (p.death_timer_active <= kDeathTimerExpireFloor) {
-      // Presentation finished: deactivate (Ship_UpdateVisualState 0x00428340
-      // tail: Sprite_SetVisible(0), is_active = 0, ai_target_ship_slot = -1).
-      // The port has no per-ship sprite records.
-      p.is_active = false;
-      p.ai_target_ship_slot = -1;
+      // Presentation finished: run the Ship_UpdateVisualState (0x00428340)
+      // destruction finale (blast damage to nearby hulls; the mission arm is
+      // player-exempt), which deactivates the hull and clears its target.
+      NovaShip_RunShipDestructionFinale(state, p);
     }
     return true;
   }

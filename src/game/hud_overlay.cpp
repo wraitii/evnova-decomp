@@ -18,6 +18,7 @@ inline constexpr std::uint32_t kStringResourceType = 0x53545223U;
 // colour or a millisecond duration. The port keeps wall-clock expiry in
 // GameState but converts ticks at the original's 30 Hz cadence.
 constexpr std::uint64_t kOverlayTickMs = 1000U / 30U;
+
 void NovaHud_ShowOverlayMessage(GameState &state,
                                 std::string message,
                                 std::uint8_t red,
@@ -31,6 +32,14 @@ void NovaHud_ShowOverlayMessage(GameState &state,
   state.hud_overlay.blue = blue;
   state.hud_overlay.expiry_ms =
       SDL_GetTicks() + duration_frames * kOverlayTickMs;
+}
+
+// Duration-only overload: see hud_overlay.hpp.
+void NovaHud_ShowOverlayMessage(GameState &state,
+                                std::string message,
+                                std::uint64_t duration_frames) {
+  NovaHud_ShowOverlayMessage(
+      state, std::move(message), 0xe0, 0xe0, 0xe0, duration_frames);
 }
 
 // Ghidra 0x0047e430 NovaHud_ShowCachedOverlayMessage.
@@ -114,10 +123,11 @@ std::optional<std::string> NovaHud_LoadStringEntry(std::uint16_t resource_id,
 
 namespace {
 // STR# 0x7d2 (landing/docking feedback) entry numbers, exactly as the original
-// passes them to Resource_LoadStringEntry (1-based; Stellar_ProcessTravelAndLanding
-// 0x00457580). pool content: 0x3c "You don't have enough", 0x3e "to pay the
-// docking fee.", 0x3f "to pay the landing fee.", 0x42/0x43 too-far station/planet,
-// 0x46/0x47 too-fast station/planet, 0x56 "dock at ", 0x57 "land on ".
+// passes them to Resource_LoadStringEntry (1-based;
+// Stellar_ProcessTravelAndLanding 0x00457580). pool content: 0x3c "You don't
+// have enough", 0x3e "to pay the docking fee.", 0x3f "to pay the landing fee.",
+// 0x42/0x43 too-far station/planet, 0x46/0x47 too-fast station/planet, 0x56
+// "dock at ", 0x57 "land on ".
 inline constexpr std::uint16_t kStrId = 0x7d2;
 inline constexpr std::uint16_t kTooFarStation = 0x43;
 inline constexpr std::uint16_t kTooFarPlanet = 0x44;

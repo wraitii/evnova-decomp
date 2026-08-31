@@ -408,13 +408,13 @@ struct Ship {
 
   // --- Ship-comm dialog latches (Provisional; see ship_comm_dialog.cpp) -----
   // The comm window (NovaUi_RunTargetShipCommWindow 0x0047e470) reads/writes
-  // three unnamed ShipState bytes. +0xB9 is set when a hailed escort is
-  // re-hired (escort_rehired_mark), +0xBB gates the dialog's status label
+  // three unnamed ShipState bytes. +0xB9 is the boarded-target latch (kept in
+  // the main field block above as boarded_target_latch; the comm re-hire
+  // writes the same byte), +0xBB gates the dialog's status label
   // (0 = "Fighter" STR# 0x7d2 0xa8, else "Captured Escort" 0xa6:
   // escort_origin_mark), and +0xBC is set after any ship-comm dialog closes
   // (comm_interacted_mark). Names are conservative/Provisional pending the
   // wider escort/fleet system.
-  std::int8_t escort_rehired_mark = 0;  // +0xB9 (Provisional)
   std::int8_t escort_origin_mark = 0;   // +0xBB (Provisional)
   std::int8_t comm_interacted_mark = 0; // +0xBC (Provisional)
   // ShipState +0xC8DE post_hit_mode_hint: the AI's post-hit behavior hint
@@ -975,8 +975,13 @@ struct GameState {
   // when the player takes a hit (Shot_ResolveShipHitFromWeapon), decays one
   // tick per frame while at or above the cutoff; suppresses armor
   // regeneration and the disabled auto-repair pass until below the cutoff.
-  // The hit-arming site is not yet ported (TODO(decomp) in collision.cpp).
   float recently_hit_timer = 0.0F;
+  // Ghidra g_player_disable_message_shown (0x007354aa): set when the disable
+  // arm of Shot_ResolveShipHitFromWeapon shows the STR# 0x7d2 0x11f "ship
+  // disabled" overlay, so the destruction arm of the same hit path suppresses
+  // the duplicate STR# 0x7d2 0x120 "ship destroyed" overlay. Reset each
+  // flight frame by the status tick (TODO(decomp): reset site).
+  bool player_disable_message_shown = false;
   // DAT_00596d36 / DAT_00596d37: current + previous 60-frame
   // any-distress-eligible-ship probe, for the distress-alert rising edge.
   bool distress_cue_active = false;

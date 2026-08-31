@@ -1298,7 +1298,7 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
       if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11d)) {
         NovaHud_ShowOverlayMessage(state,
                                    *text,
-                                   /*duration_frames=*/0xf0);
+                                   /*duration_frames=*/std::uint64_t{0xf0});
       }
     }
     Mission_FailMissionSlotQuick(state, mission_slot, now_ms);

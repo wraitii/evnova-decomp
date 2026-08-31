@@ -32,6 +32,25 @@ namespace game {
                                                    const ActiveShot &shot,
                                                    std::int16_t target_slot);
 
+// Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0) core: shield-first/
+// armor damage, disable-transition arms, aggro/hostility response. Exported
+// for the hull-destruction blast in Ship_UpdateVisualState 0x00428340.
+void ResolveShipHitFromWeapon(GameState &state,
+                              std::int16_t target_slot,
+                              Ship &target,
+                              float impact_x,
+                              float impact_y,
+                              std::int16_t impact_impulse,
+                              std::int16_t armor_damage,
+                              std::int16_t shield_damage,
+                              std::int16_t attacker_ship_slot,
+                              bool allow_aggro_updates,
+                              bool suppress_retarget_logic,
+                              bool force_armor_only,
+                              bool bypass_shields,
+                              std::int16_t player_aggro_delta,
+                              bool check_fire_restriction_transition = false);
+
 // Ghidra Shot_ResolveShipHitFromWeapon (0x004192d0) wrapper: resolve a hit
 // against a ship given by slot (validates the slot / active state).
 void NovaCollision_ResolveShipHitFromWeaponSlot(

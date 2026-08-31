@@ -1083,7 +1083,7 @@ int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
   ship.dude_class_id = dude_class_id;
   ship.ship_class_id = dude->ship_types[type_index];
   ship.faction_or_government_id = dude->government_id;
-  ship.escort_rehired_mark = 0;
+  ship.boarded_target_latch = 0;
   ship.post_hit_mode_hint = -1;
   ship.cloak_transition_latch = 0;
   ship.cloak_fade_progress = 0.0F;
@@ -1196,7 +1196,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
         }
         if (mission.time_limit_days_remaining < 1 &&
             mission.time_limit_days_remaining > -32000) {
-          ship.escort_rehired_mark = 1;
+          ship.boarded_target_latch = 1;
         }
       }
       const std::int16_t mode = mission.special_ship_spawn_mode;

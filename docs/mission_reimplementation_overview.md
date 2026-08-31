@@ -223,25 +223,43 @@ The runtime interaction chain is now largely implemented:
 
 This covers destroy, disable, board, escort, rescue, observe, chase-off, and related objective families. The goal counters only move once mission-ship spawning lands.
 
-### 6.1 Decoded goal-counter producers (Ghidra pass, port pending)
+### 6.1 Goal-counter producers (Ghidra pass + port, 2025-08)
 
-The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`, and live in three functions:
+The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`, and all three live sites are now ported:
 
-- **Destroy — `Ship_UpdateVisualState` 0x00428340** (destruction arm): when a
-  destroyed ship has `mission_fleet_slot != -1` and is not the player:
-  quick-fail gate (mission active, not failed, `goal_counter_a == 0`,
-  spawn_behavior 1/3, or 2/5 with the +0xB9 boarded latch clear, runtime
-  flags 0x0400 clear) → snd + STR# 0x7d2:0x11c + `Mission_FailMissionSlotQuick`;
-  then `goal_counter_a++`; then `target_ship_count--` (remaining fleet ships —
-  this is what stops the system-entry restore from respawning a wiped fleet).
+- **Destroy — `Ship_UpdateVisualState` 0x00428340** (destruction arm):
+  PORTED as `NovaShip_TickDestroyedShipVisualState` /
+  `NovaShip_RunShipDestructionFinale` (`src/game/ship_visual.cpp`); the NPC
+  pass runs after `Ship_HandleShip` in `Stub_HandleShips` (death-timer
+  decrement in the destroyed branch, finale when 0 < timer <= 2.0,
+  DAT_0057531c). Ported: the hull blast (radius `mass*1.4+3.125`, damage
+  `mass*1.275+2.875`, capability-flags 0x400 and pers-0x3ff hulls exempt,
+  force-armor-only hits with the transition check armed), the quick-fail gate
+  (mission active, not failed, `goal_counter_a == 0`, spawn_behavior 1/3, or
+  2/5 with the +0xB9 boarded latch clear, runtime flags 0x0400 clear) → snd +
+  STR# 0x7d2:0x11c + `Mission_FailMissionSlotQuick`, then `goal_counter_a++`,
+  `target_ship_count--` (stops the system-entry restore respawning a wiped
+  fleet), and the pers present-flag deactivation. The player death path calls
+  the finale directly (mission arm is player-exempt). Visual-only slices
+  (debris puffs above 2.0, sprite layering, audio) stay in the SDL view,
+  which already spawns destruction visuals at the hit transition — divergence
+  logged in `ship_visual.cpp`.
 - **Disable — `Shot_ResolveShipHitFromWeapon` 0x004192d0** (fire-restriction
-  arm): `goal_counter_c++`; spawn_behavior 3 (escort) quick-fails unless
-  flags 0x0400 (goal 1 destroys-fail handled in 0x00443c60 evaluation).
+  arm): PORTED in `collision.cpp` (transition-gated by the caller's
+  `check_fire_restriction_transition`, set by the hull blast):
+  `goal_counter_c++`; spawn_behavior 3 (escort) quick-fails unless flags
+  0x0400 (goal 1 destroys-fail handled in 0x00443c60 evaluation); the armor
+  pin and the player disable/destruction arms below are ported with the
+  per-frame `g_player_disable_message_shown` latch (reset 0x00417669).
 - **Board/rescue — `Ship_HandlePlayerBoardTargetCommand` 0x0045a3d0**:
-  `goal_counter_b++` on the target's fleet for both the board-cargo arm
-  (pickup_mode 2, after `Mission_TryConsumeMissionInteractionResources`) and
-  the rescue special-ship arm (spawn_behavior 2/5 + flags 0x0001 + single-ship
-  fleet); both set the target's +0xB9 boarded latch.
+  PORTED in `boarding_plunder.cpp`: `goal_counter_b++` on the target's fleet
+  for both the board-cargo arm (pickup_mode 2, after
+  `Mission_TryConsumeMissionInteractionResources`, carrying_resources latch,
+  STR# 0x7d2 0x6a overlay without the CREC cargo name — TODO) and the rescue
+  special-ship arm (spawn_behavior 2/5 + flags 0x0001 + single-ship fleet;
+  overlay 0x7e, ai_maneuver_timer 100); both set the target's +0xB9 boarded
+  latch. The port's duplicate provisional +0xB9 field (`escort_rehired_mark`)
+  was consolidated into `boarded_target_latch`.
 
 Also decoded in the same 0x004192d0 read (port target: collision.cpp hit path):
 
@@ -280,8 +298,14 @@ on landing.
 Ghidra DB annotations added: plate comments on the three writer sites and
 0x00457580, field comments on MisnActive
 `target_ship_count`/`goal_counter_a/b/c`/`mission_fleet_metric_c`/
-`mission_ship_count_active`/`spawn_rearm_timer`, and ShipState +0xB9 named
-`boarded_target_latch`.
+`mission_ship_count_active`/`spawn_rearm_timer`, ShipState +0xB9 named
+`boarded_target_latch`, and (2025-08 pass) the destruction/disable constants
+renamed and retyped: `g_destroyed_finale_threshold_f32` (0x0057531c, 2.0),
+the puff-roll thresholds 20/40/60 (0x00575320/24/28), the 0.25 puff offset
+scale (0x00575330), the player ×3 death-timer scale (0x00575378), the hull
+blast radius/damage scales + addends (0x00575380..0x00575398), the
+DeathDelay-half fraction (0x005753f8, 0.5), and the armor-pin fraction/addend
+(0x00575238/0x00575230, 1/3 and 1.0).
 
 ## Recommended order
 
@@ -297,9 +321,10 @@ Ghidra DB annotations added: plate comments on the three writer sites and
 6. ~~Implement success/failure and reaction scripts.~~ DONE (debrief dialogs
    pending).
 7. ~~Implement mission ship/fleet spawning~~ DONE (0x0041CF40 + dispatch);
-   remaining: goal-counter increment sites on ship death, the hailed-escort
-   respawn (0x00454910) and announcements (0x00426d10).
-8. Connect in-flight objectives, boarding, disable, escort, and interaction reactions — mostly DONE via 0x00443C60; boarding-pickup (PickupMode 2) pending.
+   remaining: the hailed-escort respawn (0x00454910) and announcements
+   (0x00426d10). Goal-counter increment sites on ship death/disable/board
+   are DONE (see 6.1).
+8. Connect in-flight objectives, boarding, disable, escort, and interaction reactions — mostly DONE via 0x00443C60; boarding-pickup (PickupMode 2) DONE.
 9. Add mission markers/highlights and replace mocked Mission BBS/starmap behavior.
 
 The data-model/analysis phase this doc originally targeted (`0x0043BBB0` and
