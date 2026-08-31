@@ -5,6 +5,7 @@
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
+#include "mission.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
@@ -638,6 +639,9 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                                   state.player.current_system_id,
                                   /*copy_player_heading=*/false,
                                   SDL_GetTicks());
+  // First offering roll for the fresh world (Ship_InitGameplayDataTables
+  // 0x00458802 arm also re-rolls on arrival; the loader zeroed the table).
+  Mission_RerollOfferingRolls(state);
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
   // TODO(decomp(0x00489d70)) skipped scopes from Menu_RunNewGameFlow's
   // fresh-world tail, each with a known original call:

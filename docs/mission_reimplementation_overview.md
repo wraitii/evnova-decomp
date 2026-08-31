@@ -12,12 +12,15 @@ mission goal counters now receive spawned fleets but still need their
 death/disable/board increment sites. See the progress tracker for
 per-function percentages.
 
-## Verified m\xefsn payload map (offsets ground-truthed against populate
-0x0043F8C0, the loader 0x0043BBB0, and the EVN Bible)
+## Verified m\xefsn payload map (offsets ground-truthed against the loader
+0x0043BBB0, populate 0x0043F8C0, and the EVN Bible; CORRECTED 2025-08: the
+loader skips payload +0x002, so the Bible's AvailLoc/Record/Rating/Random
+sit at +0x004/+0x006/+0x008/+0x00a and TravelStel/ReturnStel at
++0x00c/+0x00e — an earlier revision of this map listed them two bytes lower)
 
 ```text
-+0x000 AvailStel      +0x002 AvailLoc       +0x004 AvailRecord
-+0x006 AvailRating    +0x008 AvailRandom    +0x00c TravelStel
++0x000 AvailStel      +0x004 AvailLoc       +0x006 AvailRecord
++0x008 AvailRating    +0x00a AvailRandom    +0x00c TravelStel
 +0x00e ReturnStel     +0x010 CargoType      +0x012 CargoQty (tons)
 +0x014 PickupMode     +0x016 DropOffMode    +0x018 ScanMask
 +0x01c PayVal (4b)    +0x020 ShipCount      +0x022 ShipSyst (-6 = follow player)
@@ -27,8 +30,9 @@ per-function percentages.
                       (Brief, QuickBrief, LoadCarg, DumpCargo, Comp, Fail)
 +0x040 TimeLimit      +0x044 ShipDoneText   +0x048 AuxShipCount
 +0x04a AuxShipDude    +0x04c AuxShipSyst    +0x050 Flags / +0x052 Flags2
-+0x058 desc id (slot +0x41, provisional)    +0x05a OnStart set-string?
-+0x05c Availability expr                    +0x7a0 list priority
++0x058 desc id (slot +0x41, provisional)    +0x05a Ship restriction
++0x05c Availability expr                    +0x656/+0x65a Require mask (8b)
++0x7a0 list priority
 ```
 
 MisnActive highlights: +0x00 TravelStel / +0x04 ReturnStel (resolved),
@@ -62,7 +66,23 @@ pilot file round-trips active missions.
 
 The mission-list pipeline is implemented in `src/game/mission.cpp`:
 
-- `0x0043CF00` `Mission_EvaluateMissionLists` — DONE
+- `0x0043CF00` `Mission_EvaluateMissionLists` — DONE (85%): two offering
+  lanes (0 = mission computer, 1 = bar/services) driven by the
+  `0x00441B40` eligibility chain; stable **descending** `list_priority`
+  order (the original's bucket pass emits the highest MisnDef +0x128
+  priority first).TODO(decomp): per-eligible-def target resolution and the
+  `g_return_mission_list` finalize arm.
+- `0x00441B40` `Mission_CheckMissionShipInteractionEligibility` — offering
+  slice DONE (60%): the ten-gate chain (AvailStel locator families incl.
+  the 31000-lane −30000 binary quirk, availability expression,
+  AvailRecord vs `g_system_reputation`, AvailRating, AvailRandom vs the
+  per-definition warp roll (`g_mission_offering_rolls`, DAT_00734c20,
+  redrawn 1..100 on arrival and zeroed on duplicate accept), Flags2-0x0001
+  cargo space, the 64-bit Require mask (`mïsn +0x656/+0x65a` via
+  `NovaOutfit_EvaluateRequireMask`), the Ship restriction (+0x5a), Flags
+  0x2000/0x4000 class arms, the PayVal credits gate, locator-candidate
+  sanity, and the same-system (visibility-root) denial). Interaction-context
+  callers remain TODO(decomp).
 - `0x0043F100` `Mission_ActivateMissionAtSlot` — DONE (BBS passes the landed
   stellar; script `S` opcode passes `ai_secondary_target_slot`)
 - `0x00447F20` mission condition-expression evaluation — DONE

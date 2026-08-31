@@ -12,18 +12,20 @@ TEST_CASE("mission lists use zero-based definition indices") {
   state.scenario.missions.resize(3);
   state.scenario.missions[0].present = true;
   state.scenario.missions[0].list_priority = 20;
-  state.scenario.missions[0].special_ship_start = 1;
-  state.scenario.missions[0].return_stellar_id = 0;
+  state.scenario.missions[0].avail_random = 1;
+  state.scenario.missions[0].avail_location = 0;
   state.scenario.missions[1].present = true;
   state.scenario.missions[1].list_priority = 10;
-  state.scenario.missions[1].special_ship_start = 1;
-  state.scenario.missions[1].return_stellar_id = 0;
+  state.scenario.missions[1].avail_random = 1;
+  state.scenario.missions[1].avail_location = 0;
   state.scenario.missions[2].present = true;
   state.scenario.missions[2].availability_expr = "B7";
 
   auto result = Mission_EvaluateMissionLists(state);
 
-  REQUIRE(result.page_zero == std::vector<std::int16_t>{1, 0});
+  // List priority sorts descending (the original bucket pass emits the
+  // highest MisnDef +0x128 priority first).
+  REQUIRE(result.page_zero == std::vector<std::int16_t>{0, 1});
   CHECK(result.page_zero != std::vector<std::int16_t>{0x80});
 }
 
@@ -52,23 +54,17 @@ TEST_CASE("scenario ferry missions expose their decoded availability fields") {
   INFO("first ferry link=" << first_link
                            << " availability=" << first_availability);
   CHECK(ferry_count > 0);
-  const auto available = Mission_EvaluateMissionLists(state);
-  CHECK(std::any_of(available.page_zero.begin(),
-                    available.page_zero.end(),
-                    [&state](std::int16_t mission_id) {
-                      const auto *mission = state.scenario.Mission(
-                          static_cast<std::int16_t>(mission_id + 0x80));
-                      return mission != nullptr &&
-                             mission->display_name.find("Ferry") !=
-                                 std::string::npos;
-                    }));
 
   // Tichel's BBS advertises the concrete source stellar carried by the
-  // mission definition rather than the containing system.
+  // mission definition rather than the containing system. The first Ferry
+  // (Mu'Randa) is an AvailLoc-3 (spaceport-dialog) definition gated by
+  // AvailRating 600, so simulate the plot-stage player and expect it on the
+  // services lane (page_one) once the source stellar is selected.
+  state.player_combat_rating_points = 1000;
   state.travel.selected_stellar_id = first_link;
   const auto at_tichel = Mission_EvaluateMissionLists(state);
-  CHECK(std::any_of(at_tichel.page_zero.begin(),
-                    at_tichel.page_zero.end(),
+  CHECK(std::any_of(at_tichel.page_one.begin(),
+                    at_tichel.page_one.end(),
                     [&state](std::int16_t mission_id) {
                       const auto *mission = state.scenario.Mission(
                           static_cast<std::int16_t>(mission_id + 0x80));
@@ -91,8 +87,8 @@ TEST_CASE(
   definition.competing_reputation_delta = -3;
   definition.flags_primary = 0x8123;
   definition.flags_secondary = 0x0040;
-  definition.on_fail_condition = 0x80;
-  definition.on_success_condition = 0x81;
+  definition.travel_stellar_locator = 0x80;
+  definition.return_stellar_locator = 0x81;
   definition.cargo_type_resource = 7;
   definition.cargo_qty_tons = 2;
   definition.current_system_locator = -1;

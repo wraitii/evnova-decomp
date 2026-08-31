@@ -97,18 +97,18 @@ namespace {
   // later, which shifted the mission target-resolution inputs.
   mission.link_system_filter = ReadBeI16(bytes, 0x00);
   // Ghidra NovaResources_LoadMisnResourceDefs (0x0043bbb0) copies these
-  // fields from the loader's native offsets. The first six are the Bible's
-  // availability/travel fields, so the special-ship fields are not contiguous
-  // in the way the old provisional decoder assumed.
-  mission.return_stellar_id = ReadBeI16(bytes, 0x04);
-  mission.special_ship_goal = ReadBeI16(bytes, 0x06);
-  mission.special_ship_behavior = ReadBeI16(bytes, 0x08);
-  mission.special_ship_start = ReadBeI16(bytes, 0x0a);
+  // fields from the loader's native offsets. Bible names (availability block
+  // + the two travel locators): AvailLoc/AvailRecord/AvailRating/AvailRandom,
+  // then TravelStel/ReturnStel. Payload +0x02 is skipped by the loader.
+  mission.avail_location = ReadBeI16(bytes, 0x04);
+  mission.avail_record = ReadBeI16(bytes, 0x06);
+  mission.avail_rating = ReadBeI16(bytes, 0x08);
+  mission.avail_random = ReadBeI16(bytes, 0x0a);
+  mission.travel_stellar_locator = ReadBeI16(bytes, 0x0c);
+  mission.return_stellar_locator = ReadBeI16(bytes, 0x0e);
   mission.cargo_qty_tons = ReadBeI16(bytes, 0x12);
   mission.cargo_type_resource = ReadBeI16(bytes, 0x10);
-  mission.on_start_condition = ReadBeI16(bytes, 0x5a);
-  mission.on_fail_condition = ReadBeI16(bytes, 0x0c);
-  mission.on_success_condition = ReadBeI16(bytes, 0x0e);
+  mission.ship_restriction_filter = ReadBeI16(bytes, 0x5a);
 
   // Mission_PopulateMissionSlotFromDef (0x0043f8c0) reads the mission-ship
   // dude/system group directly from +0x20..+0x2c. The separate +0x52 dude
@@ -160,6 +160,10 @@ namespace {
   mission.slot_aux_text_id = ReadBeI16(bytes, 0x58);
   mission.initial_briefing_id = mission.text_description_ids.front();
   mission.availability_expr = ReadCString(bytes, 0x5c);
+  // 64-bit Require mask (Outfit_EvaluateRequireMask gate in the offering
+  // eligibility chain, 0x00441b40).
+  mission.require_mask_lo = ReadBe32(bytes, 0x656);
+  mission.require_mask_hi = ReadBe32(bytes, 0x65a);
   mission.list_priority = ReadBeI16(bytes, 0x7a0);
   // NovaResources_LoadMisnResourceDefs (0x0043bbb0) canonicalizes these
   // sentinels before the BBS eligibility pass: negative link filters mean
@@ -167,8 +171,8 @@ namespace {
   if (mission.link_system_filter < -1) {
     mission.link_system_filter = -1;
   }
-  if (mission.return_stellar_id < 0) {
-    mission.return_stellar_id = 0;
+  if (mission.avail_location < 0) {
+    mission.avail_location = 0;
   }
   return mission;
 }

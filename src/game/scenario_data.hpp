@@ -119,20 +119,33 @@ void NovaControlExpression_ExecuteSet(
 // source bytes while the remaining fields are decoded.
 struct MissionDef {
   bool present = false;
-  std::int16_t link_system_filter = -1;   // MisnDef +0x00
-  std::int16_t return_stellar_id = -1;    // resource +0x04
-  std::int16_t special_ship_goal = 0;     // resource +0x04
-  std::int16_t special_ship_behavior = 0; // +0x06
-  std::int16_t special_ship_start = 0;    // +0x08
-  std::int16_t cargo_qty_tons = 0;        // resource +0x12 (Bible CargoQty)
-  std::int16_t cargo_type_resource = -1;  // resource +0x10 (Bible CargoType:
-                                          // -1 none, 0-255, 1000 random)
-  std::int16_t on_start_condition = -1;   // resource +0x5a
-  std::int16_t on_fail_condition = -1;    // resource +0x0c
-  std::int16_t on_success_condition = -1; // resource +0x0e
-  std::int16_t aux_ship_dude = -1;        // resource +0x24
-  std::int16_t aux_ship_system = -1;      // resource +0x22
-  std::int16_t special_ship_dude = -1;    // resource +0x24; active +0x08
+  std::int16_t link_system_filter = -1; // MisnDef +0x00
+  // Payload +0x04: Bible AvailLoc — where the mission is offered. The loader
+  // clamps negative values to 0 (mission computer); lane 0 = offered at the
+  // mission computer, lane 1 = bar/other locations, 2 = offered from a ship
+  // (interaction context only).
+  std::int16_t avail_location = 0; // +0x04 (Ghidra: return_stellar_id)
+  // Payload +0x06: Bible AvailRecord — legal-record gate (0 ignored, positive
+  // = record must be >= value, negative = record must be <= value,
+  // -32000/-32001 = stellar domination arms).
+  std::int16_t avail_record = 0; // +0x06 (Ghidra: special_ship_goal)
+  // Payload +0x08: Bible AvailRating — combat-rating gate (-1/0 ignored).
+  std::int16_t avail_rating = -1; // +0x08 (Ghidra: special_ship_behavior)
+  // Payload +0x0a: Bible AvailRandom — percent chance (>=100 always; <1 never).
+  std::int16_t avail_random = 0; // +0x0a (Ghidra: special_ship_start)
+  std::int16_t travel_stellar_locator = -1; // payload +0x0c (TravelStel)
+  std::int16_t return_stellar_locator = -1; // payload +0x0e (ReturnStel)
+  std::int16_t cargo_qty_tons = 0;          // resource +0x12 (Bible CargoQty)
+  std::int16_t cargo_type_resource = -1;    // resource +0x10 (Bible CargoType:
+                                            // -1 none, 0-255, 1000 random)
+  // Payload +0x5a: Bible "Ship" restriction (0x80..0x37f player class must
+  // match; 0x468..0x767 must not match; 0x850..0x94f inherent-govt match;
+  // 0xc38..0xd37 inherent-govt mismatch; other values ignored).
+  std::int16_t ship_restriction_filter =
+      -1;                              // +0x5a (Ghidra: on_start_condition)
+  std::int16_t aux_ship_dude = -1;     // resource +0x24
+  std::int16_t special_ship_dude = -1; // resource +0x24; active +0x08
+  std::int16_t aux_ship_system = -1;   // resource +0x22
   // Payload +0x14/+0x16/+0x18: Bible PickupMode (-1 ignored, 0 at mission
   // start, 1 at TravelStel, 2 when boarding), DropOffMode (0 at TravelStel,
   // 1 at ReturnStel) and ScanMask (govts whose scanners flag the cargo).
@@ -174,6 +187,11 @@ struct MissionDef {
   // The original caches its result at MisnDef +0x16.
   std::string availability_expr;
   bool is_available_runtime = false;
+  // Payload +0x656/+0x65a: 64-bit Require mask, checked against the player's
+  // aggregated Contribute mask by Outfit_EvaluateRequireMask (0x0046cd80)
+  // in the offering eligibility chain.
+  std::uint32_t require_mask_lo = 0; // +0x656
+  std::uint32_t require_mask_hi = 0; // +0x65a
   // MisnDef +0x128, loaded from mïsn payload +0x7a0. Lower values sort first.
   std::int16_t list_priority = 0;
   std::string display_name;

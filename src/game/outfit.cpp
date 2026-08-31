@@ -705,4 +705,41 @@ bool NovaOutfit_HasMiningScoopOutfit(const GameState &state, const Ship &ship) {
   return false;
 }
 
+void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,
+                                               std::uint32_t &contribute_lo,
+                                               std::uint32_t &contribute_hi) {
+  contribute_lo = 0;
+  contribute_hi = 0;
+  // Ship-class baseline contribute (ShipClassDef field_0xa30/0xa34).
+  const std::int16_t ship_class_id = state.player.ship_class_id;
+  const ShipClass *cls =
+      ship_class_id >= 0
+          ? state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80))
+          : nullptr;
+  if (cls != nullptr) {
+    contribute_lo |= cls->contribute_lo;
+    contribute_hi |= cls->contribute_hi;
+  }
+  // Owned outfits contribute while at least one unit is held.
+  for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
+                          i < state.scenario.outfits.size();
+       ++i) {
+    if (state.inventory.outfit_owned_count[i] > 0) {
+      contribute_lo |= state.scenario.outfits[i].contribute_lo;
+      contribute_hi |= state.scenario.outfits[i].contribute_hi;
+    }
+  }
+}
+
+bool NovaOutfit_EvaluateRequireMask(const GameState &state,
+                                    std::uint32_t require_lo,
+                                    std::uint32_t require_hi) {
+  std::uint32_t contribute_lo = 0;
+  std::uint32_t contribute_hi = 0;
+  NovaOutfit_AccumulatePlayerContributeMask(
+      state, contribute_lo, contribute_hi);
+  return (require_lo & contribute_lo) == require_lo &&
+         (require_hi & contribute_hi) == require_hi;
+}
+
 } // namespace game

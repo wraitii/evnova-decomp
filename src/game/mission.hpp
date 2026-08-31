@@ -134,6 +134,13 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
 void Mission_TickShipInteractionReactions(GameState &state,
                                           std::uint32_t now_ms);
 
+// Ghidra 0x00458802 slice of Stellar_ProcessTravelAndLanding (and the game
+// -start init at Ship_InitGameplayDataTables): redraws the per-definition
+// offering roll (1..100) consumed by the AvailRandom gate of the mission
+// offering eligibility chain. Call on every system arrival and when a new
+// pilot starts.
+void Mission_RerollOfferingRolls(GameState &state);
+
 // Ghidra 0x004438d0 Mission_ProcessInteractionReactionSlotResources. Landing
 // interaction pass for one slot: mission-cargo pickup/drop-off at the
 // TravelStel and final delivery at the ReturnStel (Bible PickupMode /

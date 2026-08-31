@@ -114,31 +114,11 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
       .system_id;
 }
 
-[[nodiscard]] std::int16_t ResolveMissionStellar(GameState &state,
-                                                 std::int16_t locator,
-                                                 std::int16_t excluded,
-                                                 std::int16_t fallback) {
-  if (locator == -1 || locator == -4) {
-    return fallback;
-  }
-
-  if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
-    const auto stellar_id =
-        static_cast<std::int16_t>(locator - kResourceIdBase);
-    if (stellar_id != excluded && stellar_id >= 0 &&
-        stellar_id <
-            static_cast<std::int16_t>(state.scenario.stellars.size())) {
-      return stellar_id;
-    }
-    return fallback;
-  }
-
-  // Mission_SelectMissionStellarByLocator (0x0043d510) chooses randomly from
-  // a filtered stellar set. The clean-room model has no separate travel graph
-  // yet, so availability/system membership remain the verified gates. Keep
-  // the selection random once the candidate set is known; target resolution
-  // is an explicit runtime step and state.rng is the port's replacement for
-  // NovaRandom_Range.
+// Mission_SelectMissionStellarByLocator (0x0043d510) filters all stellars
+// against a locator family. The clean-room model has no separate travel graph
+// yet, so availability/system membership remain the verified gates.
+[[nodiscard]] std::vector<std::int16_t> CollectStellarLocatorCandidates(
+    const GameState &state, std::int16_t locator, std::int16_t excluded) {
   const auto same_government_class = [&state](std::int16_t lhs,
                                               std::int16_t rhs,
                                               bool require_match) {
@@ -213,6 +193,30 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
       candidates.push_back(static_cast<std::int16_t>(i));
     }
   }
+  return candidates;
+}
+
+[[nodiscard]] std::int16_t ResolveMissionStellar(GameState &state,
+                                                 std::int16_t locator,
+                                                 std::int16_t excluded,
+                                                 std::int16_t fallback) {
+  if (locator == -1 || locator == -4) {
+    return fallback;
+  }
+
+  if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
+    const auto stellar_id =
+        static_cast<std::int16_t>(locator - kResourceIdBase);
+    if (stellar_id != excluded && stellar_id >= 0 &&
+        stellar_id <
+            static_cast<std::int16_t>(state.scenario.stellars.size())) {
+      return stellar_id;
+    }
+    return fallback;
+  }
+
+  const std::vector<std::int16_t> candidates =
+      CollectStellarLocatorCandidates(state, locator, excluded);
   if (candidates.empty()) {
     return fallback;
   }
@@ -220,71 +224,333 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
   return candidates[roll(state.rng)];
 }
 
-[[nodiscard]] std::vector<std::int16_t>
-EvaluateMissionPage(const GameState &state, std::int16_t page_group) {
-  std::vector<std::int16_t> result;
-  // Mission_CheckMissionShipInteractionEligibility (0x00441b40) performs
-  // these two definition-level gates before evaluating the location and
-  // player-state filters. Without them, placeholder/one-shot definitions
-  // leak onto the ordinary landed BBS and valid ferry entries can be mixed
-  // with the wrong list lane.
-  const auto selected_stellar = state.travel.selected_stellar_id;
-  for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
-    const auto &mission = state.scenario.missions[index];
-    // Mission lists use the zero-based definition index. The +0x80 offset is
-    // only a resource-manager convention and is added at ScenarioData::Mission.
-    const auto id = static_cast<std::int16_t>(index);
-    if (!mission.present || !mission.is_available_runtime ||
-        mission.special_ship_start < 1 || mission.return_stellar_id == -1 ||
-        IsActiveMission(state, id) ||
-        (page_group >= 0 && mission.return_stellar_id != 2 &&
-         mission.return_stellar_id != page_group)) {
-      continue;
+// Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility, offering
+// slice (the BBS list builder calls it with the interaction context clear and
+// param_2 = 0). Evaluates the original's ten definition-level gates in order:
+// [0] AvailStel locator vs the selected/landed stellar, [1] cached
+// availability expression, [2] AvailRecord vs system reputation, [3]
+// AvailRating vs combat rating, [4] AvailRandom vs the per-definition roll,
+// [5] free cargo space (Flags2 0x0001), [6] the 64-bit Require mask,
+// [7] the Ship restriction (+0x5a), [8] Flags 0x2000/0x4000 ship-class arms,
+// [9] the PayVal acceptance-credit gate, then the travel/return locator
+// candidate sanity checks and the same-system denial arm. The earlier top
+// gates (AvailStel < -31999, AvailRandom < 1, AvailLoc -1, AvailLoc-2 context,
+// page-lane selection) also live here.
+[[nodiscard]] bool CheckOfferingEligibility(const GameState &state,
+                                            std::size_t def_index,
+                                            std::int16_t page_group,
+                                            bool interaction_context) {
+  const MissionDef &def = state.scenario.missions[def_index];
+  const auto def_id = static_cast<std::int16_t>(def_index);
+
+  // ---- Top gates (0x00441b4f..) ------------------------------------------
+  if (def.link_system_filter < -31999 || def.avail_random < 1 ||
+      def.avail_location == -1) {
+    return false;
+  }
+  // AvailLoc 2 (offered from a ship) only in the mission-ship interaction
+  // context; in the list context AvailLoc selects the lane (0 = mission
+  // computer, other = bar/services lane).
+  if (def.avail_location == 2) {
+    if (!interaction_context) {
+      return false;
     }
-    // A concrete 0x80..0x87f link is the stellar that advertises the mission.
-    // During non-landed list evaluation there is no selected stellar yet, so
-    // retain the resource-wide list used by tests and by the travel overlay.
-    if (selected_stellar >= kResourceIdBase &&
-        mission.link_system_filter >= kResourceIdBase &&
-        mission.link_system_filter != selected_stellar) {
-      continue;
+  } else if (interaction_context) {
+    return false;
+  } else if ((page_group == 0) != (def.avail_location == 0)) {
+    return false;
+  }
+
+  // ---- Gate 0: AvailStel locator vs the selected/landed stellar ----------
+  // The original reads g_travel_selected_stellar_ptr / the player's
+  // ai_secondary_target_slot (the travel slot); the port keeps the selected
+  // travel stellar (0x80-based resource id) in GameState::travel.
+  const std::int16_t selected_stellar = state.travel.selected_stellar_id;
+  const std::int16_t selected_index =
+      selected_stellar >= kResourceIdBase
+          ? static_cast<std::int16_t>(selected_stellar - kResourceIdBase)
+          : static_cast<std::int16_t>(-1);
+  std::int16_t selected_govt = -1;
+  if (selected_index >= 0 &&
+      selected_index <
+          static_cast<std::int16_t>(state.scenario.stellars.size())) {
+    selected_govt =
+        state.scenario.stellars[static_cast<std::size_t>(selected_index)]
+            .government_id;
+  }
+  const auto same_government_class = [&](std::int16_t lhs, std::int16_t rhs) {
+    if (lhs < 0 || rhs < 0 ||
+        lhs >= static_cast<std::int16_t>(state.scenario.governments.size()) ||
+        rhs >= static_cast<std::int16_t>(state.scenario.governments.size())) {
+      return false;
     }
-    if (mission.link_system_filter >= 5000 &&
-        mission.link_system_filter < 10000) {
-      if (state.player.current_system_id < 0 ||
-          state.player.current_system_id >=
+    const auto &left =
+        state.scenario.governments[static_cast<std::size_t>(lhs)];
+    const auto &right =
+        state.scenario.governments[static_cast<std::size_t>(rhs)];
+    for (const auto left_class : left.classes) {
+      if (left_class < 0) {
+        continue;
+      }
+      for (const auto right_class : right.classes) {
+        if (left_class == right_class) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  const std::int16_t filter = def.link_system_filter;
+  if (filter != -1 && !interaction_context) {
+    bool location_ok = false;
+    if (filter >= kResourceIdBase && filter < kResourceIdBase + 0x800) {
+      location_ok = selected_index == filter - kResourceIdBase;
+    } else if (filter >= 5000 && filter <= 0x270e) {
+      // Bible 5000-7047: a stellar in the system adjacent to the player's
+      // current one (the binary scans the 16-entry link list).
+      if (state.player.current_system_id >= 0 &&
+          state.player.current_system_id <
               static_cast<std::int16_t>(state.scenario.systems.size())) {
-        continue;
+        const auto adjacent_resource_id =
+            static_cast<std::int16_t>(filter - 5000);
+        const auto &current_system =
+            state.scenario.systems[static_cast<std::size_t>(
+                state.player.current_system_id)];
+        location_ok =
+            std::find(current_system.links.begin(),
+                      current_system.links.end(),
+                      adjacent_resource_id) != current_system.links.end();
       }
-      const auto adjacent_resource_id =
-          static_cast<std::int16_t>(mission.link_system_filter - 5000);
-      const auto &current_system =
-          state.scenario.systems[static_cast<std::size_t>(
-              state.player.current_system_id)];
-      if (std::find(current_system.links.begin(),
-                    current_system.links.end(),
-                    adjacent_resource_id) == current_system.links.end()) {
-        continue;
+    } else if (filter >= 10000 && filter < 15000) {
+      location_ok = selected_govt == filter - 10000;
+    } else if (filter >= 15000 && filter < 20000) {
+      location_ok =
+          selected_govt != -1 && NovaGovernment_AreGovtsAllied(
+                                     state.scenario,
+                                     static_cast<std::int16_t>(filter - 15000),
+                                     selected_govt);
+    } else if (filter >= 20000 && filter < 25000) {
+      location_ok = selected_govt != filter - 20000;
+    } else if (filter >= 25000 && filter < 30000) {
+      location_ok =
+          selected_govt != -1 && NovaGovernment_AreGovtsHostileOrXenophobic(
+                                     state.scenario,
+                                     static_cast<std::int16_t>(filter - 25000),
+                                     selected_govt);
+    } else if (filter >= 30000 && filter < 31000) {
+      location_ok = same_government_class(filter - 30000, selected_govt);
+    } else if (filter >= 31000 && filter < 32000) {
+      // Binary quirk (0x00441e26): the not-my-class lane subtracts 30000, not
+      // 31000, so the id lands outside the govt table; the bounds-safe helper
+      // therefore makes this lane pass whenever a governed stellar is
+      // selected. Quirk preserved.
+      location_ok = selected_govt != -1 &&
+                    !same_government_class(filter - 30000, selected_govt);
+    }
+    if (!location_ok) {
+      return false;
+    }
+  }
+
+  // ---- Gate 1: cached availability expression ----------------------------
+  if (!def.is_available_runtime) {
+    return false;
+  }
+
+  // ---- Gate 2: AvailRecord vs the current system's reputation ------------
+  if (def.avail_record != 0) {
+    if (def.avail_record == -32000 || def.avail_record == -32001) {
+      // Bible: offered when the player has dominated the (selected) stellar /
+      // any stellar. Domination state is not modeled yet (TODO(decomp)):
+      // fail open like the domination arms passing.
+    } else {
+      std::int16_t reputation = 0;
+      if (state.player.current_system_id >= 0 &&
+          state.player.current_system_id <
+              static_cast<std::int16_t>(state.system_reputation.size())) {
+        reputation = state.system_reputation[static_cast<std::size_t>(
+            state.player.current_system_id)];
       }
-    }
-    if (mission.link_system_filter < -1 ||
-        (mission.link_system_filter >= kResourceIdBase + 0x800)) {
-      continue;
-    }
-    if (mission.present && mission.is_available_runtime) {
-      if (!IsActiveMission(state, id) &&
-          Mission_PassesAcceptanceResourceGates(state, mission)) {
-        result.push_back(id);
+      if (def.avail_record < 0 ? !(reputation <= def.avail_record)
+                               : !(def.avail_record <= reputation)) {
+        return false;
       }
     }
   }
+
+  // ---- Gate 3: AvailRating vs combat rating ------------------------------
+  if (def.avail_rating >= 1 &&
+      def.avail_rating > state.player_combat_rating_points) {
+    return false;
+  }
+
+  // ---- Gate 4: AvailRandom vs the per-definition warp roll ---------------
+  if (def.avail_random < 100) {
+    const std::int16_t roll = def_index < state.mission_offering_rolls.size()
+                                  ? state.mission_offering_rolls[def_index]
+                                  : 0;
+    if (roll > def.avail_random) {
+      return false;
+    }
+  }
+
+  // ---- Gate 5: free cargo space ------------------------------------------
+  // List context: only Flags2 0x0001 requests the check; interaction context
+  // always requires room for the cargo load.
+  if (interaction_context ? def.cargo_qty_tons >= 1
+                          : (def.flags_secondary & 0x0001U) != 0U) {
+    if (Outfit_ComputeRemainingCargoSpace(state) < def.cargo_qty_tons) {
+      return false;
+    }
+  }
+
+  // ---- Gate 6: 64-bit Require mask ---------------------------------------
+  if (!NovaOutfit_EvaluateRequireMask(
+          state, def.require_mask_lo, def.require_mask_hi)) {
+    return false;
+  }
+
+  // ---- Gate 7: Ship restriction (+0x5a) ----------------------------------
+  {
+    const std::int16_t v = def.ship_restriction_filter;
+    bool ship_ok = true;
+    const ShipClass *player_class =
+        state.player.ship_class_id >= 0
+            ? state.scenario.Ship(static_cast<std::int16_t>(
+                  state.player.ship_class_id + kResourceIdBase))
+            : nullptr;
+    const std::int16_t player_class_index = state.player.ship_class_id;
+    if (v > 0x7f && v < 0x381) {
+      ship_ok = player_class_index == v - 0x80;
+    } else if (v >= 0x468 && v <= 0x768) {
+      ship_ok = player_class_index != v - 0x468;
+    } else if (v > 0x84f && v < 0x951) {
+      const std::int16_t wanted = static_cast<std::int16_t>(v - 0x850);
+      ship_ok = player_class != nullptr &&
+                (player_class->inherent_combat_govt == wanted ||
+                 player_class->inherent_attributes_govt == wanted);
+    } else if (v >= 0xc38 && v <= 0xd38) {
+      const std::int16_t wanted = static_cast<std::int16_t>(v - 0xc38);
+      ship_ok = player_class == nullptr ||
+                (player_class->inherent_combat_govt != wanted &&
+                 player_class->inherent_attributes_govt != wanted);
+    }
+    if (!ship_ok) {
+      return false;
+    }
+  }
+
+  // ---- Gate 8: Flags 0x2000/0x4000 ship-class arms -----------------------
+  {
+    const ShipClass *player_class =
+        state.player.ship_class_id >= 0
+            ? state.scenario.Ship(static_cast<std::int16_t>(
+                  state.player.ship_class_id + kResourceIdBase))
+            : nullptr;
+    const std::int16_t ai_behavior =
+        player_class != nullptr ? player_class->default_ai_behavior : 0;
+    if ((def.flags_primary & 0x2000U) != 0U && ai_behavior < 3) {
+      return false;
+    }
+    if ((def.flags_primary & 0x4000U) != 0U && ai_behavior > 2) {
+      return false;
+    }
+  }
+
+  // ---- Gate 9: PayVal acceptance-credit gate -----------------------------
+  if (def.resource_delta_or_cost < -50000 &&
+      state.player.credits < -50000 - def.resource_delta_or_cost) {
+    return false;
+  }
+
+  // ---- Travel/Return locator candidate sanity ----------------------------
+  // A locator family with no reachable stellar denies the offering.
+  const auto locator_has_candidate = [&](std::int16_t locator) {
+    if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
+      const auto stellar_id =
+          static_cast<std::int16_t>(locator - kResourceIdBase);
+      return stellar_id >= 0 &&
+             stellar_id <
+                 static_cast<std::int16_t>(state.scenario.stellars.size());
+    }
+    if (locator == -2 || locator == -3 || locator > 0) {
+      return !CollectStellarLocatorCandidates(state, locator, -1).empty();
+    }
+    return true;
+  };
+  if (!locator_has_candidate(def.travel_stellar_locator) ||
+      !locator_has_candidate(def.return_stellar_locator)) {
+    return false;
+  }
+
+  // ---- Same-system denial arm --------------------------------------------
+  // When AvailStel is not a direct stellar, a TravelStel/ReturnStel inside the
+  // player's current system (same visibility root) is never offered. The
+  // binary resolves both systems through System_ResolveSystemDiscoverySlot
+  // (0x0046b9b0), which maps hidden systems to their visibility root.
+  const auto discovery_root = [&](std::int16_t system_id) -> std::int16_t {
+    if (system_id < 0 ||
+        system_id >= static_cast<std::int16_t>(state.scenario.systems.size())) {
+      return -1;
+    }
+    const System &system =
+        state.scenario.systems[static_cast<std::size_t>(system_id)];
+    return system.visibility_root_system_id != -1
+               ? system.visibility_root_system_id
+               : system_id;
+  };
+  if (def.link_system_filter < kResourceIdBase ||
+      def.link_system_filter >= kResourceIdBase + 0x800) {
+    const std::int16_t player_root =
+        discovery_root(state.player.current_system_id);
+    for (const std::int16_t locator :
+         {def.travel_stellar_locator, def.return_stellar_locator}) {
+      if (locator > 0x7f && locator < 0x880) {
+        const std::int16_t stellar_index =
+            static_cast<std::int16_t>(locator - kResourceIdBase);
+        if (stellar_index >= 0 &&
+            stellar_index <
+                static_cast<std::int16_t>(state.scenario.stellars.size())) {
+          const std::int16_t destination_system =
+              state.scenario.stellars[static_cast<std::size_t>(stellar_index)]
+                  .system_id;
+          if (destination_system >= 0 &&
+              discovery_root(destination_system) == player_root) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  // ---- Duplicate-active check --------------------------------------------
+  return !IsActiveMission(state, def_id);
+}
+
+// Ghidra 0x0043cf00 Mission_EvaluateMissionLists lane builder. Collects every
+// definition that passes the 0x00441b40 eligibility chain for `page_group`
+// (0 = mission computer, 1 = bar/services lane) and orders it by list
+// priority: the original's selection sort (0x0043d0c0 bucket pass) emits the
+// highest MisnDef +0x128 priority first, ties in definition order.
+[[nodiscard]] std::vector<std::int16_t>
+EvaluateMissionPage(const GameState &state, std::int16_t page_group) {
+  std::vector<std::int16_t> result;
+  for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
+    const auto &mission = state.scenario.missions[index];
+    // Absent definitions mirror the loader's zeroed AvailRandom, which the
+    // eligibility top gate rejects.
+    if (!mission.present) {
+      continue;
+    }
+    if (CheckOfferingEligibility(state, index, page_group, false)) {
+      result.push_back(static_cast<std::int16_t>(index));
+    }
+  }
+  // Stable descending priority order (ties keep definition order).
   std::stable_sort(result.begin(), result.end(), [&](auto lhs, auto rhs) {
     const auto &left = state.scenario.missions[static_cast<std::size_t>(lhs)];
     const auto &right = state.scenario.missions[static_cast<std::size_t>(rhs)];
-    if (left.list_priority != right.list_priority) {
-      return left.list_priority < right.list_priority;
-    }
-    return lhs < rhs;
+    return left.list_priority > right.list_priority;
   });
   return result;
 }
@@ -491,14 +757,14 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
     // payload +0x0c/+0x0e); the "on_fail/on_success condition" naming was a
     // misnomer.
     target.travel_stellar_id =
-        ResolveMissionStellar(state, definition.on_fail_condition, -1, -1);
+        ResolveMissionStellar(state, definition.travel_stellar_locator, -1, -1);
     target.travel_system_id =
         ResolveContainingSystem(state, target.travel_stellar_id);
     target.return_stellar_id =
-        definition.on_success_condition == -1
+        definition.return_stellar_locator == -1
             ? target.travel_stellar_id
             : ResolveMissionStellar(state,
-                                    definition.on_success_condition,
+                                    definition.return_stellar_locator,
                                     target.travel_stellar_id,
                                     target.travel_stellar_id);
     target.return_system_id =
@@ -521,11 +787,14 @@ MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
   }
   Mission_ResolveMissionStellarLocators(state);
   MissionListEvaluation result;
-  // The clean-room BBS API historically exposed the complete available list
-  // through page_zero. Keep that compatibility lane while page_one exposes
-  // the verified return-mission group for callers that need it explicitly.
-  result.page_zero = EvaluateMissionPage(state, -1);
+  // Two offering lanes per the original (g_mission_slot_list[2][1000],
+  // evaluated with g_misn_list_page_group = 0 then 1 so the eligibility
+  // AvailLoc gate filters per lane): lane 0 = mission computer, lane 1 =
+  // bar/services locations.
+  result.page_zero = EvaluateMissionPage(state, 0);
   result.page_one = EvaluateMissionPage(state, 1);
+  // The original derives this from g_return_mission_list (built by the
+  // landing/interaction pass), not from the bar lane. Provisional.
   result.has_return_mission = !result.page_one.empty();
   return result;
 }
@@ -1161,6 +1430,21 @@ void Mission_ResolveMisnSlot(GameState &state,
                                               mission.resource_delta_or_cost);
   }
   Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
+}
+
+// Ghidra 0x00458802 (inside Stellar_ProcessTravelAndLanding): draws the
+// per-definition offering roll (NovaRandom_Range(100) + 1, i.e. 1..100) for
+// every mission definition, then re-runs Mission_EvaluateMissionLists. Called
+// at game start and on every system arrival; the port evaluates lists on
+// demand, so only the rolls are refreshed here.
+void Mission_RerollOfferingRolls(GameState &state) {
+  std::uniform_int_distribution<int> roll(1, 100);
+  const std::size_t count = std::min<std::size_t>(
+      state.mission_offering_rolls.size(), state.scenario.missions.size());
+  for (std::size_t i = 0; i < count; ++i) {
+    state.mission_offering_rolls[i] =
+        static_cast<std::int16_t>(roll(state.rng));
+  }
 }
 
 // Ghidra 0x00443c60 Mission_HandleMissionOrSurrenderShipReaction. Per-tick

@@ -811,6 +811,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                       state.player.current_system_id,
                                       /*copy_player_heading=*/false,
                                       SDL_GetTicks());
+      // Offering rolls redraw on every system arrival (Stellar_ProcessTravel
+      // AndLanding 0x00458802: roll 1..100 per definition, then re-evaluate
+      // the mission lists).
+      Mission_RerollOfferingRolls(state);
       NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
       // The player's primary target ship lived in the departure system; the
       // vacancy sweep deactivated it (and its slot may be reused by a fresh

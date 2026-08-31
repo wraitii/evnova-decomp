@@ -1,4 +1,5 @@
 #include "landed_window.hpp"
+#include "mission.hpp"
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
@@ -110,6 +111,9 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
                                   state.player.current_system_id,
                                   /*copy_player_heading=*/false,
                                   SDL_GetTicks());
+  // Offering rolls redraw on landing too (Stellar_ProcessTravelAndLanding
+  // 0x00458802 arm).
+  Mission_RerollOfferingRolls(state);
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
 
   ctx.stellar_id = stellar_id;
@@ -384,9 +388,8 @@ WrapDescriptionLines(std::string_view text,
   while (i < text.size()) {
     // Skip inter-word whitespace; a newline (desc resources use the Mac '\r')
     // forces an explicit line break.
-    while (i < text.size() &&
-           (text[i] == ' ' || text[i] == '\n' || text[i] == '\r' ||
-            text[i] == '\t')) {
+    while (i < text.size() && (text[i] == ' ' || text[i] == '\n' ||
+                               text[i] == '\r' || text[i] == '\t')) {
       if ((text[i] == '\n' || text[i] == '\r') && !line.empty()) {
         lines.push_back(line);
         line.clear();

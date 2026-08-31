@@ -896,6 +896,13 @@ struct GameState {
   std::array<MissionRuntimeFlags, kMaxActiveMissions>
       active_mission_runtime_flags{};
   std::array<MissionTargetResolution, 1000> mission_target_resolutions{};
+  // Ghidra DAT_00734c20: per-definition offering roll, drawn 1..100 for every
+  // mission definition on system arrival (Stellar_ProcessTravelAndLanding
+  // 0x00458802) and initialised at game start. Mission_EvaluateMissionLists
+  // offers a definition only when roll <= AvailRandom (>=100 always offered);
+  // Mission_ActivateMissionAtSlot's duplicate arm zeroes the roll (0x0043f5a5)
+  // so a resolved mission is not re-offered until the next warp-in.
+  std::array<std::int16_t, 1000> mission_offering_rolls{};
   // Mission/system cue bytes are persisted in FleetState at 0x5dde. The
   // exact cue meanings remain provisional, but the table shape is known.
   std::array<std::uint16_t, 0x80> system_cues{};

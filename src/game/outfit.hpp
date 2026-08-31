@@ -198,4 +198,21 @@ NovaOutfit_ComputeIonizationDecayRate(const GameState &state, const Ship &ship);
 // 0x200-entry outfit table every frame.
 void OutfitMarkStatsDirty(GameState &state);
 
+// Ghidra Mission_AccumulatePlayerContributeMask (0x0046cca0): aggregates the
+// 64-bit Contribute mask from the player's ship class and owned outfits.
+// TODO(decomp) skipped: the active-mission cue arms (g_system_cues 0x120-
+// stride contribute pairs) and the cron-event contributes, which the port's
+// provisional cue model does not carry yet.
+void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,
+                                               std::uint32_t &contribute_lo,
+                                               std::uint32_t &contribute_hi);
+
+// Ghidra Outfit_EvaluateRequireMask (0x0046cd80): a 64-bit Require mask is
+// satisfied when every required bit is present in the player's aggregated
+// Contribute mask. Used by outfit purchase gates and the mission offering
+// eligibility chain (m\xefsn payload +0x656/+0x65a).
+[[nodiscard]] bool NovaOutfit_EvaluateRequireMask(const GameState &state,
+                                                  std::uint32_t require_lo,
+                                                  std::uint32_t require_hi);
+
 } // namespace game
