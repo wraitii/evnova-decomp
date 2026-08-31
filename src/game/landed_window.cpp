@@ -903,6 +903,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   const auto desc = NovaResource_LoadStellarDescription(ctx.stellar_id);
   if (desc) {
     description = desc->text;
+    Mission_ExpandStringPlaceholders(state, description);
     NovaLog::Info("landed description for stellar {} ({} chars)",
                   static_cast<int>(ctx.stellar_id),
                   description.size());
@@ -974,6 +975,38 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   // Keep mouse coordinates in the same unrestricted window space as the
   // native-size DLOG/DITL geometry, even if the previous context was flight.
   platform.SetFullscreenPlayfield();
+
+  // Mission offers with AvailLoc 3 pop as the player docks: the Spaceport
+  // loop (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30) sets
+  // g_misn_list_page_group = 3 and calls Mission_TriggerReturnMission-
+  // Interactions(3) (0x00448670) right after the window is up, before its
+  // input loop. Reproduce that ordering: render the dock once, snapshot it as
+  // the offer modal's backing store, then run the offer pass. TODO(decomp):
+  // the original also re-runs the pass on Spaceport action 0xf and consumes
+  // the DAT_00776af4 recheck timer in the services windows.
+  DrawLandedMenu(platform,
+                 font_cache,
+                 button_art,
+                 state,
+                 ctx,
+                 destination_art ? destination_art->get() : nullptr,
+                 planet_art ? planet_art->get() : nullptr,
+                 description,
+                 panel,
+                 layout,
+                 button_rects,
+                 std::nullopt);
+  docked_snapshot = NovaLanded_CaptureDockedBackground(platform);
+  SDL_RenderPresent(platform.renderer());
+  (void)Mission_TriggerLandingInteractions(
+      state, 3, SDL_GetTicks(), [&](std::int16_t mission_def) {
+        return NovaMission_RunOfferWindow(
+            platform,
+            state,
+            mission_def,
+            ctx.stellar_id,
+            docked_snapshot ? docked_snapshot->get() : nullptr);
+      });
 
   while (!platform.quit_requested()) {
     // Compute the mouse-hovered service (for hover state on the buttons).

@@ -5,6 +5,7 @@
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
+#include "intro_cinematic.hpp"
 #include "mission.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
@@ -180,9 +181,10 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
   UiPanel_SetTextEntrySelectionRange(*window, 8, 0, 0xfe);
 
   // Row 13 (0xc1d only): the Character popup, filled from the census and
-  // preselected to the active/default entry. TODO(decomp): the original
-  // preselects via PilotData_FindActivePilotName (flags bit 0 at block+0x132);
-  // the port defaults to the first entry.
+  // preselected to the active/default entry. Ghidra preselects via
+  // PilotData_FindActivePilotName (0x004cd290, flags bit 0 at block+0x132); a
+  // name that is not in the visible census (stock: the hidden .Trader is the
+  // active entry) keeps the first row selected.
   if (dialog_id == 0xc1d) {
     std::vector<std::string> names;
     for (const auto &entry : templates) {
@@ -190,8 +192,16 @@ bool RunPilotSelectionDialog(SdlPlatform &platform,
         names.push_back(entry.name);
       }
     }
+    const std::string active_pilot = PilotData_FindActivePilotName();
+    std::size_t preselect = 0;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+      if (names[i] == active_pilot) {
+        preselect = i;
+        break;
+      }
+    }
     UiPanel_SetEntryListItems(*window, 13, "Character", std::move(names));
-    UiControl_SetValue(*window, 13, 1);
+    UiControl_SetValue(*window, 13, static_cast<short>(preselect + 1));
   }
 
   short code = -1;
@@ -690,23 +700,6 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   record.heading = state.player.heading;
   record.speed = state.player.speed;
 
-  // IntroCinematic_SetupFrames reads the intro frames from the pilot-save
-  // block (+0x20 / +0x28 / +0x30). Here the record is seeded from the default
-  // character (ch\x9ar) resource's IntroPict1-4 / PictDelay1-4 fields: the
-  // stock .Trader pilot uses IntroPict 0x2008/0x2009/0x200a for 45 1/60s ticks
-  // each. post_intro_dest_id stays at the no-save default 0x7ffd ("no stellar
-  // yet", but != -1 so the destination dialog still opens).
-  if (const auto char_intro = NovaResource_LoadCharacterIntro()) {
-    record.intro_source_pict_ids = char_intro->pict_ids;
-    record.intro_duration_60h_ticks = char_intro->delay_ticks;
-  } else {
-    // IntroCinematic_SetupFrames' own no-save fallback: a single PICT 0x2008
-    // shown for 10 ticks.
-    record.intro_source_pict_ids = {0x2008, -1, -1, -1};
-    record.intro_duration_60h_ticks = {10, 0, 0, 0};
-  }
-  record.post_intro_dest_id = 0x7ffd;
-
   // Carry the weapon banks seeded in Step 4 (from the starting ship's stock
   // weapons) into the record, otherwise PilotFileApply below copies a fresh
   // record whose banks are all zero and clobbers the seeded Light Blaster
@@ -720,15 +713,24 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // perform). The intro and spaceflight modes read these live fields. The
   // record is kept in memory only (no .plt writer); see PilotFileApply.
   PilotFileApply(record, state);
-  NovaLog::Info("new-game intro configured: frames {} {} {} {} for {} {} {} "
-                "ticks each (character resource)",
+  // Ghidra 0x004cd3b0 IntroCinematic_SetupFrames: reads the keyed pilot block
+  // (selected character template; absent block -> the no-save default) and
+  // fills g_intro_cinematic, clamping ids/durations. Stock data: block
+  // ".Trader" -> PICTs 0x2008/0x2009/0x200a for 45 ticks each, post-intro
+  // destination -1 (no dialog).
+  NovaIntroCinematic_SetupFrames(state, state.pilot.character_template);
+  NovaLog::Info("new-game intro configured: frames {} {} {} {} for {} {} {} {} "
+                "ticks each (pilot block '{}', post-intro destination {})",
                 state.intro_cinematic.source_pict_ids[0],
                 state.intro_cinematic.source_pict_ids[1],
                 state.intro_cinematic.source_pict_ids[2],
                 state.intro_cinematic.source_pict_ids[3],
                 state.intro_cinematic.duration_60h_ticks[0],
                 state.intro_cinematic.duration_60h_ticks[1],
-                state.intro_cinematic.duration_60h_ticks[2]);
+                state.intro_cinematic.duration_60h_ticks[2],
+                state.intro_cinematic.duration_60h_ticks[3],
+                state.pilot.character_template,
+                state.intro_cinematic.post_intro_dest_id);
 
   // ---- Step 7: mark active ------------------------------------------------
   // Ghidra: DAT_00596d28 = 1 (game active), DAT_00596d2f = the dialog's

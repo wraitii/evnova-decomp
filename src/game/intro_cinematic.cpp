@@ -3,6 +3,7 @@
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../pict_image.hpp"
+#include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
 
@@ -10,8 +11,8 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <optional>
+#include <span>
 #include <string_view>
 
 namespace game {
@@ -22,13 +23,15 @@ namespace {
 // is 60 ms of wall time. Kept verbatim so the default single-frame intro holds
 // for the same 600 ms it does in the original.
 constexpr std::uint64_t kMsPer60Tick = 60;
-// Ghidra IntroCinematic_Run queues hint string `LoadStringResourceCopyById
-// (0x7533)` centered over the frame. The STR# pool 0x7533 is not reconstructed
-// (the string-table loader is not implemented), so the wording is sourced
-// inline and the divergence logged; functionally it is the same one-line
-// first-flight hint.
-constexpr std::string_view kFirstFlightHint =
-    "A NEW LIFE BEGINS ... press ENTER or SPACE to continue";
+// Ghidra IntroCinematic_Run plays snd 0x7533 alongside each arted frame
+// (loaded via NovaSound_LoadDecodedById 0x004bc2a0, which loads the `snd `
+// resource and decodes it; NovaAudio_QueueCenteredSound -> Audio_AllocateVoiceSlot queues it with
+// a stereo-width of 10 and a centered pan pair DAT_007353f2/DAT_007353f2, and
+// the decoded payload is freed after the frame's wait). Stock Nova ships no
+// snd 0x7533, so the intro is silent there; a scenario that provides it gets
+// it back. Stereo width/pan are not modelled by SdlAudio::Play, so the cue
+// plays at unity gain.
+constexpr std::uint16_t kIntroSoundId = 0x7533;
 
 // Mirrors the splash presentation path in nova_app.cpp: the original centers
 // each intro PICT at native size on the offscreen surface and clips overflow;
@@ -51,49 +54,53 @@ void PresentPict(SDL_Renderer *renderer, const PictImage &pict) {
   SDL_RenderTexture(renderer, texture->get(), nullptr, &destination);
 }
 
-// Drains any queued input events the modal wait loop did not consume (the
-// original calls NovaInputQueue_FlushAllCommands several times on exit).
-void DrainInput(SdlPlatform &platform) {
-  while (platform.PollTextEvent()) {
-  }
-}
-
 // Ghidra IntroCinematic_Run's post-intro epilogue: after the last frame, when
-// g_intro_cinematic.post_intro_dest_id != -1 it opens the travel-selection
-// dialog for that destination
-// (Ui_RunTravelSelectionDialog, gating DAT_007d1fa6 = 1). The full systems
-// dialog is not reconstructed, so this reproduces the *gating* faithfully and
-// logs what is skipped. With the new-game default post_intro_dest_id = 0x7ffd
-// the gate always opens, mirroring the original's expectation that the pilot
-// picks a first destination after the intro.
+// not skipped and g_intro_cinematic.post_intro_dest_id != -1 it opens the
+// travel-selection dialog for that destination (Ui_LoadSelectionDialogResource
+// + Stellar_BuildTravelDestinationDescription + Ui_RunTravelSelectionDialog,
+// gating DAT_007d1fa6 = 1). The dialog itself is not reconstructed. Stock
+// Nova's .Trader block carries post_intro_dest_id = -1, so the epilogue never
+// opens there; the no-save SetupFrames fallback uses 0x7ffd, which does open.
 void RunPostIntroDestinationStub(const GameState &state) {
   if (!state.intro_cinematic.should_open_post_intro_dialog()) {
     return;
   }
   NovaLog::Todo(
-      "post-intro travel-selection dialog (Ui_RunTravelSelectionDialog) is "
-      "not reconstructed: the intro gated on post_intro_dest_id {} but no "
-      "destination dialog/systems table is available",
+      "post-intro travel-selection dialog (Ui_RunTravelSelectionDialog "
+      "0x004982a0 / Ui_LoadSelectionDialogResource 0x004c6d50) is not "
+      "reconstructed: the intro gated on post_intro_dest_id {} but no "
+      "destination dialog is available",
       state.intro_cinematic.post_intro_dest_id);
 }
 
-// A pointer press inside the render rect makes IntroCinematic_Run leave its
-// current frame wait (`local_19`); it does not set the routine's separate
-// command latch (`bVar9`) and therefore does not discard the remaining frames.
-// Enter (0x1c) and Space (0x39) have the same per-frame effect. SDL exposes
-// only the pointer press here, so it maps to that mouse path. Escape is not a
-// cinematic skip key in the original.
-struct SkipState {
+// Per-iteration input poll of the intro wait loop. Mirrors the original's
+// split:
+//   - Enter (0x1c) and Space (0x39) end only the current frame's wait
+//     (the outer loop then presents the next configured PICT);
+//   - the primary command (g_player_key_bindings[0x17], default 0x01 = the
+//     primary mouse command) latches bVar9, which breaks out of the wait AND
+//     the frame loop, skipping all remaining frames.
+// Input_PumpAndTestCommand polls a key-state table (FUN_004f1900:
+// DAT_0086e098[code] & 1) and the wait loop spins without a delay, so a
+// pressed button is observed on the next iteration and trips the skip latch;
+// the separate in-rect click path (local_19, frame-advance only) is only
+// reachable for a full press+release inside one poll interval. Our 16 ms
+// polling loop therefore maps every primary press to the skip latch.
+// TODO(decomp): read the binding slot instead of assuming the default.
+struct IntroInput {
   bool frame_done = false;
+  bool skip_all = false;
 };
 
-SkipState PollSkip(SdlPlatform &platform) {
-  SkipState result;
+IntroInput PollIntroInput(SdlPlatform &platform) {
+  IntroInput result;
   for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
     if (input->key == TextKey::enter ||
-        (input->key == TextKey::character && input->character == ' ') ||
-        input->key == TextKey::primary) {
+        (input->key == TextKey::character && input->character == ' ')) {
       result.frame_done = true;
+    }
+    if (input->key == TextKey::primary) {
+      result.skip_all = true;
     }
   }
   return result;
@@ -101,10 +108,92 @@ SkipState PollSkip(SdlPlatform &platform) {
 
 } // namespace
 
+// Ghidra 0x004cd3b0 IntroCinematic_SetupFrames.
+void NovaIntroCinematic_SetupFrames(GameState &state,
+                                    std::string_view block_key) {
+  auto &cinematic = state.intro_cinematic;
+
+  // Ghidra: DAT_00863d60 = ResourceData_AccessByKey(0x63688a72, pilot_data).
+  const auto block = NovaResource_AccessCharacterBlockByKey(block_key);
+  if (!block) {
+    // No-save default: one PICT 0x2008 for 10 ticks, destination 0x7ffd
+    // ("no stellar yet", but != -1 so the post-intro dialog still opens).
+    cinematic.post_intro_dest_id = 0x7ffd;
+    cinematic.source_pict_ids = {0x2008, -1, -1, -1};
+    cinematic.duration_60h_ticks = {10, 0, 0, 0};
+    NovaLog::Info("intro cinematic: no pilot block for '{}'; using the "
+                  "no-save default frame",
+                  block_key);
+    return;
+  }
+
+  const auto bytes = std::span{block->bytes};
+  const auto read_i16 = [&bytes](std::size_t offset) {
+    if (offset + 2 > bytes.size()) {
+      // The original grows short blocks to 0x16a (ResourceData_EnsureBlockSize)
+      // before reading; absent that, reads past the block stay zero.
+      return static_cast<std::int16_t>(0);
+    }
+    return static_cast<std::int16_t>(
+        (std::to_integer<unsigned>(bytes[offset]) << 8U) |
+        std::to_integer<unsigned>(bytes[offset + 1]));
+  };
+
+  cinematic.post_intro_dest_id = read_i16(0x30);
+  for (std::size_t i = 0; i < cinematic.source_pict_ids.size(); ++i) {
+    auto frame_id = read_i16(0x20 + i * 2);
+    auto duration = read_i16(0x28 + i * 2);
+    // Frame ids below 0x80 are not PICTs; the original rewrites them to the
+    // "no art" pair. Valid frames clamp the duration to [0, 300] ticks.
+    if (frame_id < 0x80) {
+      frame_id = -1;
+      duration = 0;
+    } else {
+      duration = std::clamp<std::int16_t>(duration, 0, 300);
+    }
+    cinematic.source_pict_ids[i] = frame_id;
+    cinematic.duration_60h_ticks[i] = duration;
+  }
+  NovaLog::Info("intro cinematic configured from block '{}': frames {} {} {} "
+                "{} for {} {} {} {} ticks, post-intro destination {}",
+                block->name,
+                cinematic.source_pict_ids[0],
+                cinematic.source_pict_ids[1],
+                cinematic.source_pict_ids[2],
+                cinematic.source_pict_ids[3],
+                cinematic.duration_60h_ticks[0],
+                cinematic.duration_60h_ticks[1],
+                cinematic.duration_60h_ticks[2],
+                cinematic.duration_60h_ticks[3],
+                cinematic.post_intro_dest_id);
+}
+
 // Ghidra 0x0048adc0 IntroCinematic_Run.
-bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
+bool NovaIntroCinematic_Run(SdlPlatform &platform,
+                            SdlAudio &audio,
+                            GameState &state) {
   SDL_Renderer *const renderer = platform.renderer();
   const auto &cinematic = state.intro_cinematic;
+
+  // The skip latch is polled at entry too: a primary press already held when
+  // the cinematic starts skips straight to the epilogue gate.
+  IntroInput input_state;
+  for (std::optional<TextInput> held; (held = platform.PollTextEvent());) {
+    if (held->key == TextKey::primary) {
+      input_state.skip_all = true;
+    }
+  }
+
+  // Decode the intro sound once for the run (the original decodes the snd
+  // resource per arted frame and frees it after the frame's wait).
+  std::optional<NovaSoundData> intro_sound;
+  if (const auto snd = NovaResource_LoadSndData(kIntroSoundId)) {
+    intro_sound = NovaSound_Decode(*snd);
+    if (!intro_sound) {
+      NovaLog::Todo("intro sound snd 0x{:04x} could not be decoded",
+                    kIntroSoundId);
+    }
+  }
 
   // A frame-specific advance only ends that frame's wait. In particular, a
   // click during the first stock frame advances to the second stock frame.
@@ -123,8 +212,8 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
     }
 
     // Load and present this frame's art. Ghidra: Resource_LoadPictAsImage on
-    // source_pict_ids[i], center + blit onto the offscreen surface, draw it to
-    // the render-owner rect with the first-flight hint overlaid.
+    // source_pict_ids[i], center + blit onto the offscreen surface, commit
+    // the frame to the render-owner rect.
     std::optional<PictImage> pict = std::nullopt;
     if (const auto pict_data =
             NovaResource_LoadPictData(static_cast<std::uint16_t>(pict_id))) {
@@ -135,13 +224,16 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
                     "blank frame",
                     pict_id);
     }
+    if (intro_sound) {
+      audio.Play(*intro_sound);
+    }
 
     const auto start_ms = platform.ticks_ms();
     const auto duration_ms =
         static_cast<std::uint64_t>(
             std::max<int>(0, cinematic.duration_60h_ticks[frame_index])) *
         kMsPer60Tick;
-    while (!platform.quit_requested()) {
+    while (!platform.quit_requested() && !input_state.skip_all) {
       SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(renderer);
       // The intro cinematic renders as a fixed screen, upscaled to the window
@@ -150,46 +242,38 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state) {
       if (pict) {
         PresentPict(renderer, *pict);
       }
-      SDL_SetRenderDrawColor(renderer, 202, 224, 255, SDL_ALPHA_OPAQUE);
-      const auto hint_width =
-          static_cast<float>(std::strlen(kFirstFlightHint.data())) * 8.0F;
-      SDL_RenderDebugText(renderer,
-                          (640.0F - hint_width) / 2.0F,
-                          452.0F,
-                          kFirstFlightHint.data());
       SDL_RenderPresent(renderer);
 
-      // Wait out the per-frame duration. Keyboard and pointer input advance
-      // one frame only; the outer loop then presents the next configured PICT.
-      const auto skip = PollSkip(platform);
-      if (platform.quit_requested()) {
-        break;
-      }
-      if (skip.frame_done) {
-        break;
-      }
-      if (platform.ticks_ms() - start_ms >= duration_ms) {
+      // Wait out the per-frame duration; Enter/Space advance one frame, the
+      // primary command skips the rest.
+      const auto polled = PollIntroInput(platform);
+      input_state.skip_all = input_state.skip_all || polled.skip_all;
+      if (platform.quit_requested() || input_state.skip_all ||
+          polled.frame_done || platform.ticks_ms() - start_ms >= duration_ms) {
         break;
       }
       SDL_Delay(16);
     }
-    if (platform.quit_requested()) {
+    if (platform.quit_requested() || input_state.skip_all) {
       break;
     }
   }
 
-  DrainInput(platform);
+  // Ghidra: NovaInputQueue_FlushAllCommands x4 on exit.
+  while (platform.PollTextEvent()) {
+  }
 
-  // Ghidra: after the sequence, if post_intro_dest_id != -1, open the
-  // travel-selection dialog. `intro_played`
-  // is *not* set here: Ship_RunSpaceflightMode sets DAT_00596d35 after
-  // IntroCinematic_Run returns (see spaceflight.cpp).
-  if (!platform.quit_requested()) {
+  // Ghidra: after the sequence, if not skipped and post_intro_dest_id != -1,
+  // open the travel-selection dialog. `intro_played` is *not* set here:
+  // Ship_RunSpaceflightMode sets DAT_00596d35 after IntroCinematic_Run
+  // returns (see spaceflight.cpp).
+  if (!platform.quit_requested() && !input_state.skip_all) {
     NovaLog::Info("intro cinematic finished (input may have advanced "
                   "individual frames)");
     RunPostIntroDestinationStub(state);
   }
-  return !platform.quit_requested();
+  // Return the bVar9 mirror (see intro_cinematic.hpp).
+  return !input_state.skip_all;
 }
 
 } // namespace game

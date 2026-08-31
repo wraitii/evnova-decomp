@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string_view>
 #include <vector>
 
@@ -19,6 +20,24 @@ struct MissionListEvaluation {
 // Misn_ResolveMissionStellarLocators (0x0043c3e0) and
 // Mission_ResolveMissionStellarTargets (0x0043d240).
 void Mission_ResolveMissionStellarLocators(GameState &state);
+
+// Ghidra 0x0044a4d0 Ship_ExpandStringPlaceholders. Expands the desc/misn text
+// placeholder blocks the original runs inside Ui_LoadSelectionDialogResource
+// (0x004c6d50) on every desc load:
+//   {g"a" "b"} / {G"a" "b"}  gender-conditional text (a = male arm, b =
+//                            female arm; the player's 'm' latch chooses)
+//   {pN"a" "b"}              player-ship-count conditional (N)
+//   {bN"a" "b"}              base-ship-count conditional (N)
+//   !                         leading negator inside a block
+// with backslash escapes inside the quoted strings. Unmatched '{' content is
+// swallowed (the original's state 1 has no terminator branch -- quirk kept),
+// and the negator latch persists across blocks (also kept).
+// TODO(decomp): the {p}/{b} condition bodies (licensed/shareware day counter
+// and the ship-count byte table at DAT_005914cc) are unresolved; the port
+// currently evaluates both as true (the licensed-game {p} arm) and logs. The
+// trailing <PSRK>/<SSRK> ship-class cache pass has no port consumer yet.
+void Mission_ExpandStringPlaceholders(const GameState &state,
+                                      std::string &text);
 
 [[nodiscard]] MissionListEvaluation
 Mission_EvaluateMissionLists(GameState &state);
@@ -153,6 +172,33 @@ void Mission_TickShipInteractionReactions(GameState &state,
 // offering eligibility chain. Call on every system arrival and when a new
 // pilot starts.
 void Mission_RerollOfferingRolls(GameState &state);
+
+// Outcome of one mission-offer interaction window (NovaUi_RunMissionShip-
+// InteractionWindow 0x00442510 return values).
+enum class MissionOfferResult {
+  kAccepted,         // Mission_ActivateMissionAtSlot succeeded (return 1)
+  kDeclined,         // player took the decline arm (return 0)
+  kActivationFailed, // auto-accept/window accept failed (return -1)
+};
+
+// Ghidra 0x00448670 Mission_TriggerReturnMissionInteractions. Runs one
+// mission-offer interaction for `context` (the original's first parameter,
+// matched against MisnDef AvailLoc; the Spaceport loop calls it with 3 right
+// after landing, the services windows with their own lanes). Clears the
+// per-definition shown latch whenever the context changes away from 3, walks
+// the lane-1 offering list for the first definition whose AvailLoc == context
+// that still passes the eligibility chain and has not been shown, shows it via
+// `run_offer`, and re-arms the recheck timer (DAT_00776af4 = now + rand(0..29)
+// + 30). An accepted offer removes the definition from the offering list --
+// the port re-evaluates lists on demand, and an activated mission fails the
+// duplicate-active check on the next evaluation, so the removal is implicit.
+// Returns true when an offer interaction ran.
+[[nodiscard]] bool Mission_TriggerLandingInteractions(
+    GameState &state,
+    std::int16_t context,
+    std::uint32_t now_ms,
+    const std::function<MissionOfferResult(std::int16_t mission_def)>
+        &run_offer);
 
 // Ghidra 0x004438d0 Mission_ProcessInteractionReactionSlotResources. Landing
 // interaction pass for one slot: mission-cargo pickup/drop-off at the

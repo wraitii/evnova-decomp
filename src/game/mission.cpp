@@ -1034,16 +1034,11 @@ bool Mission_ActivateAtSlot(GameState &state,
   runtime.flags_primary_at_accept =
       state.active_missions[free_slot].flags_primary;
   auto &active = state.active_missions[free_slot];
-  // Bible PickupMode 0: the mission cargo is aboard from mission start (the
-  // original shows the LoadCargText desc here; UI-owned, TODO(decomp)).
+  // Bible PickupMode 0: the mission cargo is aboard from mission start. The
+  // LoadCargText desc dialog (payload +0x38) is UI-owned and runs in
+  // NovaMission_RunAcceptanceDialogs (docked_dialog.cpp) after activation.
   if (active.pickup_mode == 0) {
     active.carrying_resources = true;
-    if (active.brief_description_ids[2] != -1) {
-      NovaLog::Todo("mission cargo-loaded desc (misn {} id {}) not "
-                    "reconstructed yet",
-                    active.mission_template_id,
-                    active.brief_description_ids[2]);
-    }
   }
   // The initial destination briefing is skipped when the mission has no
   // TravelStel, or when the player accepts it while docked there.
@@ -1508,6 +1503,182 @@ void Mission_RerollOfferingRolls(GameState &state) {
     state.mission_offering_rolls[i] =
         static_cast<std::int16_t>(roll(state.rng));
   }
+}
+
+// Ghidra 0x00448670 Mission_TriggerReturnMissionInteractions. See the header
+// comment. The original walks the persistent lane-1 list (g_return_mission_list
+// = g_mission_slot_list[1], rebuilt by Mission_EvaluateMissionLists on every
+// arrival); the port rebuilds the lane fresh here with the same page-group
+// gate, which also re-applies the eligibility chain the original re-checks at
+// walk time. The original's walk call passes the interaction flag, but the
+// Spaceport loop clears the interaction context before entering, so the list-
+// context gate set applies.
+bool Mission_TriggerLandingInteractions(
+    GameState &state,
+    std::int16_t context,
+    std::uint32_t now_ms,
+    const std::function<MissionOfferResult(std::int16_t)> &run_offer) {
+  // Context latch (DAT_00774ae2): switching to any context other than 3
+  // clears the per-definition shown latches, so a mission declined at one
+  // location type is offered again at the next matching landing.
+  if (context != state.mission_interaction_context) {
+    if (context != 3) {
+      state.mission_interaction_shown.fill(0);
+    }
+    state.mission_interaction_context = context;
+  }
+
+  // Walk the lane-1 list for the first definition whose AvailLoc == context
+  // that has not been shown yet. The original walks the lane list rebuilt by
+  // Mission_EvaluateMissionLists (which also re-caches the availability
+  // expressions); the port rebuilds it fresh here, and the shown latch is
+  // applied exactly as the original's DAT_00773eed check.
+  const std::vector<std::int16_t> lane =
+      Mission_EvaluateMissionLists(state).page_one;
+  std::int16_t candidate = -1;
+  for (const std::int16_t def : lane) {
+    if (def < 0 ||
+        def >= static_cast<std::int16_t>(state.scenario.missions.size())) {
+      continue;
+    }
+    if (state.scenario.missions[static_cast<std::size_t>(def)].avail_location ==
+            context &&
+        state.mission_interaction_shown[static_cast<std::size_t>(def)] == 0) {
+      candidate = def;
+      break;
+    }
+  }
+  if (candidate < 0) {
+    return false;
+  }
+
+  const MissionOfferResult result = run_offer(candidate);
+  if (result == MissionOfferResult::kActivationFailed) {
+    // The original latches only the -1 (activation-failed) return; an accept
+    // removes the entry from the offering list and a plain decline leaves it
+    // re-offerable (see 0x00448670's -1 arm).
+    state.mission_interaction_shown[static_cast<std::size_t>(candidate)] = 1;
+  }
+  // Recheck timer: DAT_00776af4 = NovaTime_GetTicksMs() + NovaRandom_Range(30)
+  // + 30. Consumed by the services windows; stored for the future consumers.
+  state.mission_interaction_recheck_at_ms =
+      static_cast<std::int32_t>(now_ms) +
+      static_cast<std::int32_t>(RandomBelow(state, 0x1e)) + 0x1e;
+  return true;
+}
+
+// Ghidra 0x0044a4d0 Ship_ExpandStringPlaceholders. See the header comment for
+// the grammar. Character-state machine over the text (the original walks the
+// shared DAT_007c8a10 buffer in place):
+//   0 copy-through ('{' -> 1)   1 header: g/G/p/P/b/B/'!'
+//   2 digit accumulation        3 scan to opening quote of the chosen arm
+//   4 copy arm (\\-escapes)     5 scan past the opening quote (rejected arm)
+//   6 skip rejected arm         7 post-arm: '}' ends, '"' copies another arm
+//   8 discard until '}'
+void Mission_ExpandStringPlaceholders(const GameState &state,
+                                      std::string &text) {
+  std::string out;
+  out.reserve(text.size());
+  int machine = 0;
+  bool negate = false; // '!' seen in the current header (never reset: quirk)
+  bool escaped = false;
+  int count = 0;
+  for (const char ch : text) {
+    switch (machine) {
+    case 1:
+      if (ch == 'g' || ch == 'G') {
+        // DAT_00734c1c ('m' latch): 1 = male -> first arm; '!' swaps.
+        const bool male = state.control.male != negate;
+        machine = male ? 3 : 5;
+      } else if (ch == 'p' || ch == 'P') {
+        count = 0;
+        machine = 2;
+      } else if (ch == 'b' || ch == 'B') {
+        count = 0;
+        machine = 2;
+      } else if (ch == '!') {
+        negate = true;
+      }
+      // Any other header character is swallowed and the machine stays in 1
+      // (the original has no terminator branch in this state).
+      break;
+    case 2: {
+      if (ch >= '0' && ch <= '9') {
+        count = count * 10 + (ch - '0');
+        break;
+      }
+      // Condition bodies. {pN}: licensed game passes unconditionally; the
+      // shareware day-counter arm is not modeled. {bN}: the original reads a
+      // byte table at DAT_005914cc + N whose meaning is unresolved.
+      // TODO(decomp) skipped: {p} shareware arm and the {b} byte table; both
+      // evaluate as true here (fleet/announcement texts only). `count` carries
+      // the parsed N for when those arms are reconstructed.
+      (void)count;
+      bool pass = true;
+      if (negate) {
+        pass = !pass;
+      }
+      if (pass) {
+        machine = ch == '"' ? 4 : 3;
+      } else {
+        machine = ch == '"' ? 6 : 5;
+      }
+      break;
+    }
+    case 3:
+      if (ch == '"') {
+        machine = 4;
+      }
+      break;
+    case 4:
+      if (ch == '\\') {
+        escaped = true;
+      } else if (ch != '"' || escaped) {
+        out += ch;
+        escaped = false;
+      } else {
+        machine = 8;
+      }
+      break;
+    case 5:
+      if (ch == '"') {
+        machine = 6;
+      }
+      break;
+    case 6:
+      if (ch == '\\') {
+        escaped = true;
+      } else if (ch != '"' || escaped) {
+        escaped = false;
+      } else {
+        machine = 7;
+      }
+      break;
+    case 7:
+      if (ch == '}') {
+        machine = 0;
+      } else if (ch == '"') {
+        machine = 4;
+      }
+      break;
+    case 8:
+      if (ch == '}') {
+        machine = 0;
+      }
+      break;
+    default:
+      if (ch == '{') {
+        machine = 1;
+      } else {
+        out += ch;
+      }
+      break;
+    }
+  }
+  // TODO(decomp) skipped: the original's trailing <PSRK...>/<SSRK...> scan
+  // caches referenced ship-class ids for later name resolution; the port has
+  // no consumer for that cache yet.
+  text = std::move(out);
 }
 
 // ---------------------------------------------------------------------------

@@ -1560,7 +1560,7 @@ void NovaWeapon_PreloadGameplaySounds(GameState &state) {
 // Ghidra NovaAudio_PlaySpatialByDistance (0x004692e0): the original computes
 // left/right channel gains from the rounded source/listener displacement,
 // clamps each channel to the [extent/8, extent] band, then averages the
-// channels (NovaEffects_QueueCenteredResource -> Audio_AllocateVoiceSlot feeds
+// channels (NovaAudio_QueueCenteredSound -> Audio_AllocateVoiceSlot feeds
 // a single mono gain to the mixer). The extent is the sound-volume scaled
 // global (0..0x100, Frame_UpdateEffectIntensityGlobal), so the *distance*
 // behavior factors out into a pure 0..1 attenuation; the caller's master

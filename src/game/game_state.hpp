@@ -876,7 +876,7 @@ struct GameState {
 
   // Full-screen flash intensity [0..1] at the hyperspace fire moment (the
   // original's centered effect 0x32 queued via
-  // NovaEffects_QueueCenteredResource at jump engage -- the 'boom' white
+  // NovaAudio_QueueCenteredSound at jump engage -- the 'boom' white
   // frame). Set to 1.0 when the boom fires at the jump's arrival, then decayed
   // by the spaceflight loop; the in-game frame draw overlays a white fullscreen
   // rect with this alpha. 0 when no flash is active.
@@ -903,6 +903,18 @@ struct GameState {
   // Mission_ActivateMissionAtSlot's duplicate arm zeroes the roll (0x0043f5a5)
   // so a resolved mission is not re-offered until the next warp-in.
   std::array<std::int16_t, 1000> mission_offering_rolls{};
+  // Ghidra DAT_00773eed: per-definition "interaction already shown" latch
+  // (one byte per mission definition). Set when an offer interaction window
+  // ends without accepting (Mission_TriggerReturnMissionInteractions 0x00448670
+  // return -1 arm); cleared wholesale the next time the interaction walk runs
+  // in a context other than 3 (DAT_00774ae2).
+  std::array<std::uint8_t, 1000> mission_interaction_shown{};
+  // Ghidra DAT_00774ae2: the context the interaction walk last ran in.
+  std::int16_t mission_interaction_context = 0;
+  // Ghidra DAT_00776af4: post-interaction recheck timer
+  // (NovaTime_GetTicksMs + NovaRandom_Range(0x1e) + 0x1e). Only the services
+  // windows consume it; the port stores it for the future consumers.
+  std::int32_t mission_interaction_recheck_at_ms = 0;
   // Mission/system cue bytes are persisted in FleetState at 0x5dde. The
   // exact cue meanings remain provisional, but the table shape is known.
   std::array<std::uint16_t, 0x80> system_cues{};
@@ -1084,7 +1096,7 @@ struct GameState {
   std::vector<PendingDestructionSound> pending_destruction_sounds;
 
   // Centered UI cue requests consumed by the spaceflight loop (the loop owns
-  // the SDL audio device). Mirrors NovaEffects_QueueCenteredResource with the
+  // the SDL audio device). Mirrors NovaAudio_QueueCenteredSound with the
   // transition-table handles: the boarding command denial beeps are
   // g_transition_sound_handle_table[3] (snd 153), the "boarded" fanfare is
   // table[4] (snd 154) with the original's repeat count, and the boarding
@@ -1100,12 +1112,12 @@ struct GameState {
   // Decoded UI/transition cue cache (snd 150..155). Ghidra
   // g_transition_sound_handle_table (00591560) is preloaded by
   // NovaAudio_PreloadGameplayData (0x004b0740) with
-  // LoadStringResourceCopyById(0x96 + i) for i in 0..4, i.e. snd 150 + i.
+  // NovaSound_LoadDecodedById(0x96 + i) for i in 0..4, i.e. snd 150 + i.
   // The boarding system uses indices 1..4 (snd 151..154); index 5 is spare.
   std::array<std::optional<NovaSoundData>, 6> transition_sounds{};
 
   // Decoded hyperspace jump sounds (the original preloads them via
-  // FUN_004b0740: LoadStringResourceCopyById(0x80/0x81/0x82) into the jump
+  // FUN_004b0740: NovaSound_LoadDecodedById(0x80/0x81/0x82) into the jump
   // handles g_random_encounter_fleet_defs[0].availability_expression
   // +0x8c/+0x90/+0x94).
   // snd 128 Warp up is played during the pre-jump hold; snd 130 Warp out at

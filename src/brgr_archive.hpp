@@ -61,16 +61,6 @@ constexpr std::uint32_t kResourceTypeStringTable = 0x53545223;
 // Bible `ch♦r` IntroPict1-4 / PictDelay1-4). Only Nova Data 1.rez holds it.
 constexpr std::uint32_t kResourceTypeCharacter = 0x63688a72;
 
-// The new-pilot intro portion of the ch\x9ar character resource (Ghidra
-// IntroCinematic_SetupFrames reads these same fields from the pilot-save
-// block). Up to four PICT ids shown in sequence; the delay field is stored in
-// 1/60s ticks and feeds IntroCinematicData::duration_60h_ticks directly (the
-// intro timer waits ticks * 60 ms).
-struct NovaCharacterIntro {
-  std::array<std::int16_t, 4> pict_ids{-1, -1, -1, -1}; // IntroPict1-4
-  std::array<std::int16_t, 4> delay_ticks{0, 0, 0, 0};  // PictDelay1-4
-};
-
 // A MENU resource as rendered by the stock dialog popup controls: a 0x10-byte
 // classic menu header (id/proc/width/height/enable flags), a Pascal title, then
 // entries of [Pascal string][u16 cmd][u16 glyph] terminated by a trailing 0x00.
@@ -90,8 +80,6 @@ NovaResource_LoadMenuDefinition(std::uint16_t menu_id);
 // Ghidra NovaData_LoadScenarioResourceTables loads the character resource
 // (ch\x9ar, here the default .Trader id 0x0080) that defines a new pilot's
 // intro cinematic. Returns nullopt when the archive/field set is absent.
-[[nodiscard]] std::optional<NovaCharacterIntro>
-NovaResource_LoadCharacterIntro();
 
 // Ghidra: FUN_004ce250 + FUN_004cdfa0 (resource lookup by type + id). Returns
 // the raw resource payload; the first archive holding a matching record wins,
@@ -110,6 +98,20 @@ struct NovaResource {
 
 [[nodiscard]] std::optional<NovaResource>
 NovaResource_LoadNamed(std::uint32_t type_code, std::uint16_t resource_id);
+
+// Ghidra 0x004ce300 ResourceData_AccessByKey restricted to the pilot-save
+// family (0x63688a72, key = the registered metadata name): returns the first
+// family entry whose registered name matches `key`, as ResourceData_FindByKey
+// would, with the block materialized for reads. The primary keyed accessor
+// used with the pilot-save id across the new-game flow (Menu_RunNewGameFlow
+// keys the block by the dialog's selected character template name, falling
+// back to family entry 1 when the 0xc1e dialog variant left it empty).
+// The original also merges in-memory pilot blocks created during the session
+// into the registry; the reimplementation has no in-session registry, so
+// session-created pilots are invisible to the lookup.
+// TODO(decomp) once a .plt writer feeds the registry.
+[[nodiscard]] std::optional<NovaResource>
+NovaResource_AccessCharacterBlockByKey(std::string_view key);
 
 // Ghidra: FUN_004ce2a0 + FUN_004ce030 (n-th record of a type, 1-based). The
 // game reads the c\x9alr style through this accessor rather than by id.

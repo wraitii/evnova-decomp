@@ -1,5 +1,6 @@
 #include "pilot_file.hpp"
 
+#include "../brgr_archive.hpp"
 #include "../log.hpp"
 
 #include <algorithm>
@@ -620,6 +621,29 @@ void PilotFileDelete(const std::filesystem::path &path) {
     std::error_code ec;
     std::filesystem::remove(path, ec);
   }
+}
+
+std::string PilotData_FindActivePilotName() {
+  // Ghidra 0x004cd290: scans the 0x63688a72 family in registry order; the
+  // first entry with flags bit 0 set at block+0x132 donates its metadata
+  // name. No active entry -> the empty default (DAT_0056df7d). The u16 flags
+  // word is big-endian like the rest of the resource block.
+  for (const auto &[type_code, id] : NovaResource_AllKeys()) {
+    if (type_code != kResourceTypeCharacter) {
+      continue;
+    }
+    const auto block = NovaResource_LoadNamed(kResourceTypeCharacter, id);
+    if (!block || block->bytes.size() < 0x134) {
+      continue;
+    }
+    const auto flags = static_cast<std::uint16_t>(
+        (std::to_integer<unsigned>(block->bytes[0x132]) << 8U) |
+        std::to_integer<unsigned>(block->bytes[0x133]));
+    if ((flags & 1) != 0) {
+      return block->name;
+    }
+  }
+  return {};
 }
 
 } // namespace game

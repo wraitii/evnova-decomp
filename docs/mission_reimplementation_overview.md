@@ -81,8 +81,43 @@ The mission-list pipeline is implemented in `src/game/mission.cpp`:
   cargo space, the 64-bit Require mask (`mïsn +0x656/+0x65a` via
   `NovaOutfit_EvaluateRequireMask`), the Ship restriction (+0x5a), Flags
   0x2000/0x4000 class arms, the PayVal credits gate, locator-candidate
-  sanity, and the same-system (visibility-root) denial). Interaction-context
-  callers remain TODO(decomp).
+  sanity, and the same-system (visibility-root) denial). The on-landing
+  offer pass consumes it via the lane-1 walk below; the reaction-condition
+  cache refresh of the original's param_2 callers remains TODO(decomp).
+- `0x0044A4D0` `Ship_ExpandStringPlaceholders` — DONE (80%) as
+  `Mission_ExpandStringPlaceholders`: the `{g}/{G}/{pN}/{bN}/!` placeholder
+  state machine with escapes (quirks kept), gender arm reading the 'm'
+  latch; wired at the desc consumers like the original's load-time pass in
+  `Ui_LoadSelectionDialogResource`. TODO(decomp): {p} shareware arm, {b}
+  byte table, <PSRK>/<SSRK> cache.
+- `0x004982A0` `Ui_RunTravelSelectionDialog` — ported (70%) as
+  `NovaUi_RunTextReaderDialog` (`selection_text_dialog.cpp`) on the shared
+  `NovaTextScrollView` (clean-room `NovaTextView` 0x004BCD90 family):
+  DLOG 0xbbb geometry, backdrop strip 0x214c-0x214e, auto-shrink to the
+  measured text height, ±10px scrolling with drawn arrow states, starmap
+  action. TODO(decomp): variant ≥ 0x80 DLOG 0xbbc arm, status-string
+  display, starmap preselect, static-surface redraw variants.
+- `0x0043F100` `Mission_ActivateMissionAtSlot` — the acceptance UI chain
+  (Brief dialog payload +0x34 with starmap access, LoadCarg dialog +0x38 on
+  PickupMode 0) runs after activation via `NovaMission_RunAcceptanceDialogs`
+  from both the offer-window and Mission BBS accept paths; the decline arm
+  of the offer window shows the payload +0x58 desc (if any) and executes the
+  +0x25a reaction script via `Mission_ExecuteReactionScript`.
+- `0x00448670` `Mission_TriggerReturnMissionInteractions` — DONE (85%) as
+  `Mission_TriggerLandingInteractions` (mission.cpp): context latch
+  (DAT_00774ae2) with the non-3 wholesale clear of the shown latches
+  (DAT_00773eed), lane-1 walk for the first `AvailLoc == context`
+  definition still passing eligibility, offer via a `run_offer` callback,
+  −1-return latch, and the DAT_00776af4 recheck timer. The Spaceport
+  wiring (0x00491F30's `g_misn_list_page_group = 3` + context-3 call on
+  landing) runs in `NovaLanded_RunWindow` over a dock snapshot.
+- `0x00442510` `NovaUi_RunMissionShipInteractionWindow` — partial (35%) as
+  `NovaMission_RunOfferWindow` (docked_dialog.cpp): the text-offer arm over
+  DLOG 0x3f8/DITL 1016 with the STR# 0x96 button defaults, the +0x18-&4
+  empty-text auto-accept arm, and accept via `Mission_ActivateAtSlot`.
+  TODO(decomp): mission-ship/hail branches, the variant ≥ 0x80 DLOG 0x3fc
+  art path, status-string panel, nested starmap/special/mission-computer
+  actions, text-view scrolling, and the decline-arm reaction script.
 - `0x0043F100` `Mission_ActivateMissionAtSlot` — DONE (BBS passes the landed
   stellar; script `S` opcode passes `ai_secondary_target_slot`)
 - `0x00447F20` mission condition-expression evaluation — DONE

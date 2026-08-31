@@ -405,7 +405,7 @@ namespace {
 
 // Lazi ly decodes snd 150 + i into GameState.transition_sounds, mirroring
 // NovaAudio_PreloadGameplayData (0x004b0740) which fills
-// g_transition_sound_handle_table[i] with LoadStringResourceCopyById(0x96+i).
+// g_transition_sound_handle_table[i] with NovaSound_LoadDecodedById(0x96+i).
 // Called before any boarding cue plays so the first beep doesn't hitch.
 void EnsureTransitionSounds(GameState &state) {
   for (std::size_t i = 0; i < state.transition_sounds.size(); ++i) {
@@ -1217,7 +1217,7 @@ void DrawBoardWindow(SdlPlatform &platform,
 }
 
 // Plays a transition-table cue directly through the flight-loop-owned audio
-// device (the modal owns no device). Mirrors NovaEffects_QueueCenteredResource
+// device (the modal owns no device). Mirrors NovaAudio_QueueCenteredSound
 // on g_transition_sound_handle_table[index] with `count` repeats; index 2 =
 // confirm/taken, 3 = denial/error.
 void PlayTransitionCue(SdlAudio &audio,

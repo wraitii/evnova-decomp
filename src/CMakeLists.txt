@@ -24,6 +24,7 @@ add_library(evnova_runtime
     game/landed_store.cpp
     game/mission.cpp
     game/mission_script.cpp
+    game/selection_text_dialog.cpp
     game/asteroid.cpp
     game/boarding_plunder.cpp
     game/about_dialog.cpp

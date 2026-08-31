@@ -24,6 +24,7 @@
 #include <memory>
 
 #include "landed_window.hpp"
+#include "mission.hpp"
 
 class SdlPlatform;
 class SdlTexture;
@@ -49,10 +50,33 @@ NovaDocked_SubWindowFramePict(LandedService service);
 // internal "launch" choice (future) escalates to kLaunched. The docked menu's
 // centred playfield is re-asserted each frame. Mirrors the nested-modality of
 // the original sub-windows over the same backing store.
-[[nodiscard]] LandedExit NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
-                                                       GameState &state,
-                                                       LandedService service,
-                                                       std::int16_t stellar_id,
-                                                       SDL_Texture *docked_snapshot = nullptr);
+[[nodiscard]] LandedExit
+NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
+                              GameState &state,
+                              LandedService service,
+                              std::int16_t stellar_id,
+                              SDL_Texture *docked_snapshot = nullptr);
+
+// Ghidra 0x00442510 NovaUi_RunMissionShipInteractionWindow (partial port: the
+// text-offer arm). Shows mission definition `mission_def`'s dësc
+// (mission_def + 4000) in a read-only text view over DLOG 0x3f8, with the
+// Accept/Decline buttons (captions from the mïsn payload +0x75f/+0x77f,
+// defaulting to STR# 0x96 entries 0x32/0x33). Accept activates the mission at
+// the slot with `landed_stellar_id` as the BBS context; decline runs nothing
+// (the payload decline script/reaction chain is not wired yet). Returns the
+// offer outcome for Mission_TriggerLandingInteractions' latch handling.
+// TODO(decomp) skipped: the mission-ship/hail branches (AvailLoc 2), the
+// variant >= 0x80 DLOG 0x3fc art path, the status-string panel (DITL entry 4),
+// and the starmap/special-interaction/mission-computer actions (4/5/7). The
+// decline arm now shows the payload +0x58 desc via the text reader and runs
+// the +0x25a reaction script; the accept arm runs the 0x0043f100 Brief/
+// LoadCarg acceptance dialogs. Port conveniences beyond the original: Esc
+// counts as decline, DIK arrows scroll.
+[[nodiscard]] MissionOfferResult
+NovaMission_RunOfferWindow(SdlPlatform &platform,
+                           GameState &state,
+                           std::int16_t mission_def,
+                           std::int16_t landed_stellar_id,
+                           SDL_Texture *docked_snapshot = nullptr);
 
 } // namespace game

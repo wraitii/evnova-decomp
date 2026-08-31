@@ -7,8 +7,10 @@
 #include "hud_overlay.hpp"
 #include "landed_store.hpp"
 #include "mission.hpp"
+#include "mission_script.hpp"
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
+#include "selection_text_dialog.hpp"
 #include "services_buttons.hpp"
 #include "ship_visual.hpp"
 #include "sprite_world.hpp"
@@ -442,11 +444,14 @@ void DrawMissionBoardContents(SdlPlatform &platform,
     if (const auto description = NovaResource_LoadDescription(
             static_cast<std::uint16_t>(rows[selected] + 4000));
         description && !description->text.empty()) {
-      // The original loads the desc into the shared scratch and runs the same
-      // wildcard pass as the list rows (NovaUi_RunTravelDestinationMainWindow
-      // 0x0043c470 -> Stellar_BuildTravelDestinationDescription).
+      // The original loads the desc into the shared scratch (running the
+      // placeholder pass at load, 0x004c6d50) and runs the same wildcard pass
+      // as the list rows (NovaUi_RunTravelDestinationMainWindow 0x0043c470 ->
+      // Stellar_BuildTravelDestinationDescription).
+      std::string loaded_text = description->text;
+      Mission_ExpandStringPlaceholders(state, loaded_text);
       const std::string expanded_text = Mission_ExpandMissionWildcards(
-          state, description->text, true, rows[selected]);
+          state, loaded_text, true, rows[selected]);
       const float x = layout.description.x + 6.0F;
       const float width = layout.description.w - 12.0F;
       const auto lines = WrapDescriptionLines(
@@ -512,6 +517,12 @@ void DrawMissionBoardBase(SdlPlatform &platform,
   // clipped/offset appearance.
 }
 
+// Acceptance UI chain shared by every accept path; defined below.
+void NovaMission_RunAcceptanceDialogs(SdlPlatform &platform,
+                                      GameState &state,
+                                      std::int16_t mission_def,
+                                      SDL_Texture *docked_snapshot);
+
 // Ghidra 0x0043c470 NovaUi_RunTravelDestinationMainWindow (partial port of the
 // landed Mission BBS: layout, list/description rendering, selection, accept).
 LandedExit RunMissionBoardDialog(SdlPlatform &platform,
@@ -572,6 +583,11 @@ LandedExit RunMissionBoardDialog(SdlPlatform &platform,
             !missions.page_zero.empty()) {
           selected = missions.page_zero.size() - 1;
         }
+        // Mission_ActivateMissionAtSlot (0x0043f100) shows the Brief/
+        // LoadCarg dialogs after slot population; the state-only port
+        // activates above, so run the UI chain here.
+        NovaMission_RunAcceptanceDialogs(
+            platform, state, mission_id, docked_snapshot);
       } else {
         status = "Mission could not be accepted";
       }
@@ -1970,6 +1986,370 @@ LandedExit NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
     SDL_Delay(16);
   }
   return LandedExit::kQuit;
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra 0x00442510 NovaUi_RunMissionShipInteractionWindow (partial port: the
+// text-offer arm). Window DLOG 0x3f8 (DITL 1016: entry 1 = accept button,
+// entry 2 = decline button, entry 3 = read-only text view); background =
+// PICT 0x214a (main art, top-anchored) with strips 0x2149 (top) and 0x214b
+// (bottom). Button captions come from the mïsn payload +0x75f/+0x77f, which
+// the original truncates at the first non-lowercase byte and replaces with
+// STR# 0x96 entries 0x32/0x1b (accept) and 0x33 (decline) when empty.
+namespace {
+
+// Fills the reader text the way the original's callers fill
+// g_selection_dialog_text: desc load (which runs the placeholder pass at
+// load time, 0x004c6d50) + the wildcard pass. `active_slot >= 0` selects the
+// active arm of the wildcard pass (mission_id = active slot).
+[[nodiscard]] std::string LoadMissionText(const GameState &state,
+                                          std::uint16_t desc_id,
+                                          bool offering_arm,
+                                          std::int16_t mission_id) {
+  std::string text;
+  if (const auto desc = NovaResource_LoadDescription(desc_id)) {
+    text = desc->text;
+    Mission_ExpandStringPlaceholders(state, text);
+    text =
+        Mission_ExpandMissionWildcards(state, text, offering_arm, mission_id);
+  }
+  return text;
+}
+
+[[nodiscard]] std::optional<std::size_t>
+FindActiveMissionSlot(const GameState &state, std::int16_t mission_def) {
+  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+    if (state.active_mission_runtime_flags[slot].is_active &&
+        state.active_missions[slot].mission_template_id == mission_def) {
+      return slot;
+    }
+  }
+  return std::nullopt;
+}
+
+// Ghidra 0x0043f100 Mission_ActivateMissionAtSlot runs the acceptance UI
+// chain after slot population: the Brief dialog (payload +0x34 desc) with
+// starmap access, and the LoadCarg dialog (payload +0x38 desc) when
+// PickupMode 0 puts cargo on board at accept. The port keeps
+// Mission_ActivateAtSlot state-only, so this UI slice lives here and every
+// accept path (mission-offer window, Mission BBS) invokes it.
+void NovaMission_RunAcceptanceDialogs(SdlPlatform &platform,
+                                      GameState &state,
+                                      std::int16_t mission_def,
+                                      SDL_Texture *docked_snapshot) {
+  const MissionDef *def =
+      state.scenario.Mission(static_cast<std::int16_t>(mission_def + 0x80));
+  if (def == nullptr) {
+    return;
+  }
+  const std::optional<std::size_t> slot =
+      FindActiveMissionSlot(state, mission_def);
+  if (def->initial_briefing_id >= 0x80) {
+    const std::string text =
+        LoadMissionText(state,
+                        static_cast<std::uint16_t>(def->initial_briefing_id),
+                        false,
+                        slot ? static_cast<std::int16_t>(*slot) : -1);
+    if (!text.empty()) {
+      NovaUi_RunTextReaderDialog(platform, state, text, true, docked_snapshot);
+    }
+  }
+  if (def->pickup_mode == 0 && def->text_description_ids[2] >= 0x80) {
+    const std::string text = LoadMissionText(
+        state,
+        static_cast<std::uint16_t>(def->text_description_ids[2]),
+        false,
+        slot ? static_cast<std::int16_t>(*slot) : -1);
+    if (!text.empty()) {
+      NovaUi_RunTextReaderDialog(platform, state, text, false, docked_snapshot);
+    }
+  }
+}
+
+// Reads a NUL-terminated C string at a mïsn payload offset.
+[[nodiscard]] std::string_view PayloadCString(const MissionDef &def,
+                                              std::size_t offset) {
+  const auto *bytes = def.raw_payload.data();
+  std::size_t length = 0;
+  while (offset + length < def.raw_payload.size() &&
+         std::to_integer<unsigned>(bytes[offset + length]) != 0U) {
+    ++length;
+  }
+  return {reinterpret_cast<const char *>(bytes + offset), length};
+}
+
+} // namespace
+
+MissionOfferResult NovaMission_RunOfferWindow(SdlPlatform &platform,
+                                              GameState &state,
+                                              std::int16_t mission_def,
+                                              std::int16_t landed_stellar_id,
+                                              SDL_Texture *docked_snapshot) {
+  if (mission_def < 0 || mission_def >= 1000) {
+    return MissionOfferResult::kDeclined;
+  }
+  const MissionDef *def =
+      state.scenario.Mission(static_cast<std::int16_t>(mission_def + 0x80));
+  if (def == nullptr) {
+    return MissionOfferResult::kDeclined;
+  }
+  // DAT_00773ee9: (MisnDef +0x18 & 4) == 0. When the bit is set and the offer
+  // text is empty the original activates the mission without showing a window.
+  const bool normal_arm = (def->scan_mask & 4) == 0;
+
+  // dësc (def + 4000): the original expands the {g}/{G}/{p}/{b} placeholder
+  // blocks at load (Ui_LoadSelectionDialogResource 0x004c6d50 ->
+  // Ship_ExpandStringPlaceholders 0x0044a4d0), then the wildcard pass composes
+  // the final offer text (Stellar_BuildTravelDestinationDescription).
+  std::string text;
+  const std::uint16_t desc_id = static_cast<std::uint16_t>(mission_def + 4000);
+  if (const auto desc = NovaResource_LoadDescription(desc_id)) {
+    text = desc->text;
+    Mission_ExpandStringPlaceholders(state, text);
+    text = Mission_ExpandMissionWildcards(state, text, true, mission_def);
+  }
+  if (!normal_arm && text.empty()) {
+    if (!Mission_ActivateAtSlot(state, mission_def, landed_stellar_id)) {
+      return MissionOfferResult::kActivationFailed;
+    }
+    NovaMission_RunAcceptanceDialogs(
+        platform, state, mission_def, docked_snapshot);
+    return MissionOfferResult::kAccepted;
+  }
+
+  const auto dlog = NovaResource_LoadDialogDefinition(0x3f8);
+  const auto items =
+      dlog ? NovaResource_LoadDialogItems(dlog->dialog_item_list_id)
+           : std::nullopt;
+  if (!dlog || !items) {
+    // The original bails with return 0 (declined) when the window resource is
+    // unusable.
+    NovaLog::Todo("mission offer DLOG/DITL 0x3f8 unavailable; declining offer "
+                  "for misn def {}",
+                  mission_def);
+    return MissionOfferResult::kDeclined;
+  }
+  // TODO(decomp(0x00442510)) skipped: variant >= 0x80 switches to DLOG 0x3fc
+  // + PICT 0x2150. dësc 4123 (the tutorial offer) has variant 0.
+  if (const auto desc = NovaResource_LoadDescription(desc_id);
+      desc && desc->dialog_variant >= 0x80) {
+    NovaLog::Todo("mission offer dësc {} uses the >= 0x80 art variant "
+                  "(DLOG 0x3fc path); rendering the 0x3f8 window instead",
+                  desc_id);
+  }
+
+  const float win_w = static_cast<float>(dlog->right - dlog->left);
+  const float win_h = static_cast<float>(dlog->bottom - dlog->top);
+  const SDL_FPoint output = platform.logical_playfield_size();
+  const SDL_FPoint origin{(output.x - win_w) / 2.0F, (output.y - win_h) / 2.0F};
+  const auto item_rect = [&](std::size_t index) {
+    for (const auto &item : *items) {
+      if (item.index == index) {
+        return SDL_FRect{origin.x + static_cast<float>(item.left),
+                         origin.y + static_cast<float>(item.top),
+                         static_cast<float>(item.right - item.left),
+                         static_cast<float>(item.bottom - item.top)};
+      }
+    }
+    return SDL_FRect{};
+  };
+  const SDL_FRect accept_rect = item_rect(0);  // UiPanel entry 1
+  const SDL_FRect decline_rect = item_rect(1); // UiPanel entry 2
+  const SDL_FRect text_rect = item_rect(2);    // UiPanel entry 3: text view
+  // Entries 9/10 (DITL items 8/9) are the text-view scroll arrows. Their
+  // glyphs are part of the bottom-strip art (PICT 0x214b); only the hit-test
+  // rects are used here. Action 9 (entry 9) = scroll +10px (down), action 10
+  // (entry 10) = -10px (up) in NovaUi_ScrollSelectionText.
+  const SDL_FRect scroll_down_rect = item_rect(8);
+  const SDL_FRect scroll_up_rect = item_rect(9);
+
+  // Button captions: payload +0x75f/+0x77f C-strings truncated at the first
+  // non-lowercase byte (0x00442510 caption-normalisation loop), else the STR#
+  // 0x96 defaults (0x32 "Yes", or 0x1b "Okay" in the +0x18-&4 arm; 0x33 "No").
+  const auto payload_caption = [&](std::size_t offset) {
+    const auto *bytes = def->raw_payload.data();
+    std::string out;
+    for (std::size_t i = offset; i < def->raw_payload.size(); ++i) {
+      const char c = static_cast<char>(std::to_integer<unsigned>(bytes[i]));
+      if (c < 'a' || c > 'z') {
+        break;
+      }
+      out += c;
+    }
+    return out;
+  };
+  std::string accept_caption = payload_caption(0x75f);
+  if (accept_caption.empty()) {
+    accept_caption = NovaHud_LoadStringEntry(0x96, normal_arm ? 0x32 : 0x1b)
+                         .value_or(normal_arm ? "Yes" : "Okay");
+  }
+  std::string decline_caption = payload_caption(0x77f);
+  if (decline_caption.empty()) {
+    decline_caption = NovaHud_LoadStringEntry(0x96, 0x33).value_or("No");
+  }
+
+  auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
+  auto art_main = LoadPictTexture(platform, 0x214a);
+  auto art_top = LoadPictTexture(platform, 0x2149);
+  auto art_bottom = LoadPictTexture(platform, 0x214b);
+  if (art_main == nullptr || art_top == nullptr || art_bottom == nullptr) {
+    NovaLog::Todo("mission offer window art PICTs 0x2149/0x214a/0x214b "
+                  "incomplete; using a flat window fill");
+  }
+  ServicesButtonArt button_art;
+  (void)button_art.Initialize(platform);
+  NovaFontCache font_cache;
+  // Shared read-only text view (NovaTextView 0x004bcd90) over DITL entry 3.
+  NovaTextScrollView view(font_cache, text, text_rect);
+  // One window frame over the docked backing store. The original's draw
+  // callback (NovaUi_DrawTravelOutfitMenu 0x00447680) fills the window, blits
+  // the main art top-anchored (clipped), then the top and bottom strips.
+  auto draw_frame = [&]() {
+    platform.SetFullscreenPlayfield();
+    SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(platform.renderer());
+    if (docked_snapshot != nullptr) {
+      const SDL_FRect snapshot_rect{0.0F, 0.0F, output.x, output.y};
+      SDL_RenderTexture(
+          platform.renderer(), docked_snapshot, nullptr, &snapshot_rect);
+    } else if (backdrop != nullptr) {
+      const SDL_FRect backdrop_rect{origin.x - (640.0F - win_w) / 2.0F,
+                                    origin.y - (480.0F - win_h) / 2.0F,
+                                    640.0F,
+                                    480.0F};
+      SDL_RenderTexture(
+          platform.renderer(), backdrop->get(), nullptr, &backdrop_rect);
+    }
+    const SDL_FRect window{origin.x, origin.y, win_w, win_h};
+    SDL_SetRenderDrawColor(platform.renderer(), 16, 40, 72, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(platform.renderer(), &window);
+    if (art_main != nullptr) {
+      float w = 0.0F;
+      float h = 0.0F;
+      SDL_GetTextureSize(art_main->get(), &w, &h);
+      const SDL_FRect main_rect{
+          origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
+      SDL_RenderTexture(
+          platform.renderer(), art_main->get(), nullptr, &main_rect);
+    }
+    if (art_top != nullptr) {
+      float w = 0.0F;
+      float h = 0.0F;
+      SDL_GetTextureSize(art_top->get(), &w, &h);
+      const SDL_FRect top_rect{
+          origin.x, origin.y, std::min(w, win_w), std::min(h, win_h)};
+      SDL_RenderTexture(
+          platform.renderer(), art_top->get(), nullptr, &top_rect);
+    }
+    if (art_bottom != nullptr) {
+      float w = 0.0F;
+      float h = 0.0F;
+      SDL_GetTextureSize(art_bottom->get(), &w, &h);
+      const SDL_FRect bottom_rect{origin.x,
+                                  origin.y + win_h - std::min(h, win_h),
+                                  std::min(w, win_w),
+                                  std::min(h, win_h)};
+      SDL_RenderTexture(
+          platform.renderer(), art_bottom->get(), nullptr, &bottom_rect);
+    }
+
+    // Text view: dark fill + wrapped offer text, scrolled inside a clip to
+    // the view rect; the arrow buttons are runtime-drawn (0x004a1820).
+    view.Draw(platform);
+    NovaUi_DrawScrollArrow(
+        platform, scroll_up_rect, true, view.scroll_offset() > 0.0F);
+    NovaUi_DrawScrollArrow(platform,
+                           scroll_down_rect,
+                           false,
+                           view.scroll_offset() < view.max_scroll());
+
+    for (const auto &[rect, caption] :
+         std::array<std::pair<SDL_FRect, const std::string &>, 2>{
+             {{accept_rect, accept_caption},
+              {decline_rect, decline_caption}}}) {
+      button_art.Draw(platform, rect, ButtonState::kNormal);
+      NovaText_DrawCentered(platform,
+                            font_cache,
+                            kThreeStateButtonFontFamily,
+                            kThreeStateButtonFontSize,
+                            kNovaFontStyleRegular,
+                            SDL_Color{255, 255, 255, 255},
+                            rect.x,
+                            rect.x + rect.w,
+                            ThreeStateButtonLabelBaseline(rect),
+                            caption);
+    }
+    SDL_RenderPresent(platform.renderer());
+  };
+
+  draw_frame();
+  while (!platform.quit_requested()) {
+    for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
+      if (input->key == TextKey::escape) {
+        // Divergence: the original window exits only through its two buttons;
+        // Esc is the port's universal modal cancel and counts as a decline.
+        NovaLog::Todo("offer window Esc counts as decline; the original has "
+                      "no Esc exit (0x00442510)");
+        return MissionOfferResult::kDeclined;
+      }
+      if (input->key == TextKey::primary) {
+        const SDL_FPoint point = platform.mouse_position();
+        if (Contains(accept_rect, point)) {
+          if (!Mission_ActivateAtSlot(state, mission_def, landed_stellar_id)) {
+            return MissionOfferResult::kActivationFailed;
+          }
+          // 0x00442510's accept arm activates, then Mission_ActivateMission-
+          // AtSlot (0x0043f100) shows the Brief/LoadCarg dialogs inline.
+          NovaMission_RunAcceptanceDialogs(
+              platform, state, mission_def, docked_snapshot);
+          return MissionOfferResult::kAccepted;
+        }
+        if (Contains(decline_rect, point)) {
+          // 0x00442510's decline arm: the payload +0x58 desc (slot_aux_text)
+          // opens the text reader when present, then the decline reaction
+          // script (payload +0x25a) runs either way. The original composes
+          // the follow-up text with the active-arm wildcard pass against
+          // slot -1 (nothing resolves); the port keeps the load-time
+          // placeholder pass only.
+          if (def->slot_aux_text_id >= 0x80) {
+            const std::string followup_text = LoadMissionText(
+                state,
+                static_cast<std::uint16_t>(def->slot_aux_text_id),
+                false,
+                -1);
+            if (!followup_text.empty()) {
+              NovaUi_RunTextReaderDialog(
+                  platform, state, followup_text, false, docked_snapshot);
+            }
+          }
+          (void)Mission_ExecuteReactionScript(state,
+                                              PayloadCString(*def, 0x25a));
+          return MissionOfferResult::kDeclined;
+        }
+        // Arrow buttons (entries 9/10), NovaUi_ScrollSelectionText ±10px per
+        // action in 0x00442510. The original gates action 9 on the maxed
+        // latch and action 10 on the scrolled latch; the clamp covers both.
+        if (Contains(scroll_down_rect, point)) {
+          view.ScrollBy(10.0F);
+        } else if (Contains(scroll_up_rect, point)) {
+          view.ScrollBy(-10.0F);
+        }
+        continue;
+      }
+      if (input->key == TextKey::physical) {
+        // Port convenience: DIK arrows scroll the view (the original scrolls
+        // only via the two arrow buttons).
+        if (input->key_code == 0xc8) { // DIK_UP
+          view.ScrollBy(-10.0F);
+        } else if (input->key_code == 0xd0) { // DIK_DOWN
+          view.ScrollBy(10.0F);
+        }
+      }
+    }
+    draw_frame();
+    SDL_Delay(16);
+  }
+  return MissionOfferResult::kDeclined;
 }
 
 } // namespace game

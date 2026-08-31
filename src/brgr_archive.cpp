@@ -931,38 +931,23 @@ NovaResource_LoadDialogDefinition(std::uint16_t dialog_id) {
   return def;
 }
 
-std::optional<NovaCharacterIntro> NovaResource_LoadCharacterIntro() {
-  // The default ch\x9ar (character) resource id 0x0080 (".Trader") in Nova
-  // Data 1.rez carries the new-pilot intro fields at the same offsets Ghidra
-  // IntroCinematic_SetupFrames reads from the pilot-save block: IntroPict1-4
-  // at +0x20 and PictDelay1-4 at +0x28 (both 1/60s-tick units; the intro timer
-  // multiplies by 60 ms/unit). A value of -1 (0xffff) terminates the list.
-  const auto resource_data = NovaResource_Load(kResourceTypeCharacter, 0x0080);
-  if (!resource_data) {
-    NovaLog::Todo("default character resource (ch\\x9ar 0x0080) not loaded; "
-                  "intro defaults to the single-frame fallback");
-    return std::nullopt;
-  }
-  const auto bytes = std::span{*resource_data};
-  NovaCharacterIntro intro;
-  for (std::size_t i = 0; i < intro.pict_ids.size(); ++i) {
-    intro.pict_ids[i] = ReadBeI16(bytes, 0x20 + i * 2);
-    intro.delay_ticks[i] = ReadBeI16(bytes, 0x28 + i * 2);
-    if (intro.pict_ids[i] < 1) {
-      // A -1/0 terminator ends the sequence (later slots carry 0xff/0xffff).
-      for (std::size_t j = i; j < intro.pict_ids.size(); ++j) {
-        intro.pict_ids[j] = -1;
-        intro.delay_ticks[j] = 0;
-      }
-      break;
+std::optional<NovaResource>
+NovaResource_AccessCharacterBlockByKey(std::string_view key) {
+  // Ghidra 0x004ce300 ResourceData_AccessByKey -> ResourceData_FindByKey:
+  // linear scan of the family's registered entries, matching the metadata
+  // name (block+0xe). The archive world enumerates the ch\x9ar resources
+  // loaded from the .rez files; the in-memory registry slice is not
+  // reconstructed (see header TODO).
+  for (const auto &[type_code, id] : NovaResource_AllKeys()) {
+    if (type_code != kResourceTypeCharacter) {
+      continue;
+    }
+    auto entry = NovaResource_LoadNamed(kResourceTypeCharacter, id);
+    if (entry && entry->name == key) {
+      return entry;
     }
   }
-  NovaLog::Info("default character intro: frames {} {} {}, {}-ms delays",
-                intro.pict_ids[0],
-                intro.pict_ids[1],
-                intro.pict_ids[2],
-                intro.delay_ticks[0] * 60);
-  return intro;
+  return std::nullopt;
 }
 
 std::optional<NovaMenuDefinition>
@@ -974,7 +959,8 @@ NovaResource_LoadMenuDefinition(std::uint16_t menu_id) {
   }
   const auto bytes = std::span{*data};
   NovaMenuDefinition out;
-  std::size_t pos = 0x0e; // classic menu header is 0x10 bytes; title len at 0x0e
+  std::size_t pos =
+      0x0e; // classic menu header is 0x10 bytes; title len at 0x0e
   const std::size_t title_len = std::to_integer<std::size_t>(bytes[pos]);
   ++pos;
   if (pos + title_len > bytes.size()) {

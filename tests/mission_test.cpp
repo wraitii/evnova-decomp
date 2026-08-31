@@ -247,3 +247,38 @@ TEST_CASE("unresolvable offer destinations fall back to the return target") {
       state, "Deliver to <DST> in <DSY>", true, 0);
   CHECK(expanded == "Deliver to Earth in Sol");
 }
+
+TEST_CASE("string placeholder expansion handles gender blocks and quirks") {
+  GameState state; // pilot defaults: male ('m' latch = DAT_00734c1c)
+
+  std::string male = R"(a {G"m'boy" "lass"} b)";
+  Mission_ExpandStringPlaceholders(state, male);
+  CHECK(male == "a m'boy b");
+
+  state.control.male = false;
+  std::string female = R"(a {G"m'boy" "lass"} b)";
+  Mission_ExpandStringPlaceholders(state, female);
+  CHECK(female == "a lass b");
+
+  // '!' negator swaps the arms.
+  state.control.male = true;
+  std::string negated = R"({!G"first" "second"})";
+  Mission_ExpandStringPlaceholders(state, negated);
+  CHECK(negated == "second");
+
+  // Backslash escapes protect quotes inside an arm.
+  std::string escaped = R"({G"a\"b" "c"})";
+  Mission_ExpandStringPlaceholders(state, escaped);
+  CHECK(escaped == "a\"b");
+
+  // Literal text without braces passes through untouched.
+  std::string plain = "no blocks here";
+  Mission_ExpandStringPlaceholders(state, plain);
+  CHECK(plain == "no blocks here");
+
+  // Quirk: a '{' header with no g/G/p/P/b/B/'!' swallows the rest of the text
+  // (the original's header state has no terminator branch).
+  std::string swallowed = "keep {x drop";
+  Mission_ExpandStringPlaceholders(state, swallowed);
+  CHECK(swallowed == "keep ");
+}

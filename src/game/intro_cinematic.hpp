@@ -18,8 +18,19 @@
 #include "game_state.hpp"
 
 class SdlPlatform;
+class SdlAudio;
 
 namespace game {
+
+// Ghidra 0x004cd3b0 IntroCinematic_SetupFrames: fills state.intro_cinematic
+// from the pilot-save block keyed by `block_key` (the selected character
+// template's registered name; Menu_RunNewGameFlow falls back to family entry
+// 1 when the 0xc1e dialog variant left the selection empty). Absent block ->
+// the no-save default (single PICT 0x2008 for 10 ticks, destination 0x7ffd).
+// Frame ids below 0x80 are rewritten to -1 with duration 0; durations clamp
+// to [0, 300] 1/60s ticks.
+void NovaIntroCinematic_SetupFrames(GameState &state,
+                                    std::string_view block_key);
 
 // Plays the intro cinematic sequence described by state.intro_cinematic.
 // Returns the mirror of the original's bVar9 skip latch: true if the sequence
@@ -27,6 +38,8 @@ namespace game {
 // dialog may open), false if skipped by a primary click. Enter/Space
 // fast-forward only the current frame and do not flip the return value, exactly
 // as in Ghidra.
-bool NovaIntroCinematic_Run(SdlPlatform &platform, GameState &state);
+bool NovaIntroCinematic_Run(SdlPlatform &platform,
+                            SdlAudio &audio,
+                            GameState &state);
 
 } // namespace game

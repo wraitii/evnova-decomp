@@ -129,10 +129,26 @@ boot-phase splash above; it is a timed scripted sequence tied to a starting a ru
 - For each of (up to 4) intro frames: loads/fills the frame PICT (id from
   g_intro_cinematic.source_pict_ids[i]), centers and blits it to the shared offscreen surface
   `DAT_00597950`, then waits the per-frame duration (g_intro_cinematic.duration_60h_ticks[i],
-  in 1/60s ticks → ms = ticks*60). Enter, Space, or a pointer click advances only the current
-  frame; `0xffff` on a frame id terminates the frame list.
-- After the sequence, if a post-intro travel destination is set
-  (g_intro_cinematic.post_intro_dest_id != -1) it opens the intro travel-selection dialog.
+  in 1/60s ticks → ms = ticks*60). **Frame ids below 0x80 are rewritten to -1 with duration 0**
+  and valid frames' durations clamp to `[0, 300]` (both in `IntroCinematic_SetupFrames`).
+- Input split (verified against the key-state polling in `Input_PumpAndTestCommand` →
+  `FUN_004f1900`, a *level* table, and the delay-free wait loop): Enter (0x1c) and Space (0x39)
+  advance only the current frame; the **primary command** (`g_player_key_bindings[0x17]`, default
+  0x01 = the mouse) latches `bVar9`, which skips **all** remaining frames and suppresses the
+  post-intro dialog. A separate in-rect click latch (`local_19`) advances one frame, but is only
+  reachable when a full press+release lands inside one poll interval, so in practice a click
+  skips the whole intro.
+- Each arted frame also plays **snd 0x7533** (loaded via `NovaSound_LoadDecodedById`
+  0x004bc2a0, formerly misnamed `LoadStringResourceCopyById`; `NovaAudio_QueueCenteredSound` →
+  `Audio_AllocateVoiceSlot` queues it centered). Stock Nova ships no snd 0x7533, so the intro
+  is silent there. There is **no** on-screen hint text in the original (an earlier reading
+  treated the sound id as a string resource — that was wrong).
+- After the sequence, if not skipped and a post-intro travel destination is set
+  (g_intro_cinematic.post_intro_dest_id != -1) it opens the intro travel-selection dialog
+  (`Ui_LoadSelectionDialogResource` + `Stellar_BuildTravelDestinationDescription` +
+  `Ui_RunTravelSelectionDialog`, gating `DAT_007d1fa6 = 1`). **Stock data never opens it**: the
+  .Trader block carries post_intro_dest_id = -1; the 0x7ffd "open anyway" value only occurs in
+  the no-save fallback.
 
 Intro frame data lives in a single typed structure:
 
@@ -147,10 +163,16 @@ extern IntroCinematicData g_intro_cinematic;   // resolves from 0x007d1f42
 ```
 
 `IntroCinematic_SetupFrames` (0x004cd3b0, formerly `FUN_004cd3b0`)
-- Reads the pilot-save data block (`FUN_004ce300`, key `0x63688a72`) and populates
-  `g_intro_cinematic`: source_pict_ids (block `+0x20`), duration_60h_ticks (block `+0x28`), and
-  post_intro_dest_id (block `+0x30`).
-- When no pilot save exists, defaults to a single intro frame PICT `0x2008` for 10 ticks.
+- Resolves the pilot block via `ResourceData_AccessByKey(0x63688a72, key)` where key is the
+  **selected character template's registered name** (`DAT_007d22b7`, filled from the pilot
+  dialog; `Menu_RunNewGameFlow` falls back to family entry 1 when the 0xc1e variant leaves it
+  empty) and populates `g_intro_cinematic`: source_pict_ids (block `+0x20`), duration_60h_ticks
+  (block `+0x28`), and post_intro_dest_id (block `+0x30`).
+- When no pilot block exists, defaults to a single intro frame PICT `0x2008` for 10 ticks with
+  destination 0x7ffd.
+- Companion accessors: `ResourceData_AccessByKey` (0x004ce300) and
+  `PilotData_FindActivePilotName` (0x004cd290, first family entry with flags bit 0 set at
+  block+0x132 — stock: .Trader — used to preselect the dialog's Character popup).
 - Called **only** from `Menu_RunNewGameFlow` (new game), never during app boot, and before
   `IntroCinematic_Run` plays.
 

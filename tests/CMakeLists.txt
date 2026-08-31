@@ -5,6 +5,7 @@ add_executable(evnova_tests
     gameplay_interface_test.cpp
     government_test.cpp
     hud_overlay_test.cpp
+    intro_cinematic_test.cpp
     impact_effects_test.cpp
     landed_window_test.cpp
     movement_test.cpp
@@ -20,6 +21,7 @@ add_executable(evnova_tests
     sprite_test.cpp
     travel_test.cpp
     snd_probe_test.cpp
+    desc_probe.cpp
     boarding_strings_test.cpp
     weapon_test.cpp
 )

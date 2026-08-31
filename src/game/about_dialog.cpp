@@ -181,8 +181,8 @@ void NovaMenu_RunAboutDialog(SdlPlatform &platform,
                            SDL_ALPHA_OPAQUE);
     SDL_RenderRect(renderer, &layout.window);
 
-    // Scrolling text region. TODO(decomp): the original's text editor control
-    // (FUN_004bcd90) styles/wraps this region; the port draws the d\x91sc
+    // Scrolling text region. TODO(decomp): the original's read-only text view
+    // (NovaTextView_Create 0x004bcd90) styles/wraps this region; the port draws the d\x91sc
     // lines verbatim and clips to the DITL rect.
     for (std::size_t i = 0; i < lines.size(); ++i) {
       const float line_top = layout.text_area.y +

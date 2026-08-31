@@ -84,7 +84,7 @@ constexpr std::uint16_t kStrBombYou = 0x27; // "You " prefix
 constexpr std::uint16_t kStrBombDetonatedSingular = 0x28;
 constexpr std::uint16_t kStrBombDetonatedPlural = 0x29;
 // g_transition_sound_handle_table (snd 150+i): [4] auto-repair cue, [5]
-// distress alert (_DAT_0059155c, snd 155 via LoadStringResourceCopyById).
+// distress alert (_DAT_0059155c, snd 155 via NovaSound_LoadDecodedById).
 constexpr std::int16_t kAutoRepairSoundTransitionIndex = 4;
 constexpr std::int16_t kDistressCueSoundTransitionIndex = 5;
 // HUD overlay durations (simulation ticks).
@@ -396,7 +396,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // zoom; snd 129 'Warp up.x2' is the faster engine variant) and snd 130
   // 'Warp out' (the ~2.5 s boom at the fire/arrival instant). Mirrors
   // FUN_004b0740 preloading the jump handles
-  // (LoadStringResourceCopyById(0x80/0x81/0x82) -> snd 128/129/130) so the
+  // (NovaSound_LoadDecodedById(0x80/0x81/0x82) -> snd 128/129/130) so the
   // first jump plays them without a decode hitch. Missing resources -> the
   // jump plays silently (travel.cpp falls back to fixed durations).
   if (!state.warp_up_sound.has_value()) {
@@ -719,7 +719,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Centered UI cues from the boarding system (transition-table handles,
     // snd 150 + index). The flight loop owns the audio device; the modal
     // windows play their cues through the same queue. Mirrors
-    // NovaEffects_QueueCenteredResource(handle, count, ...).
+    // NovaAudio_QueueCenteredSound(handle, count, ...).
     for (const auto &pending : state.pending_ui_sounds) {
       if (pending.transition_index < 0 ||
           pending.transition_index >=
@@ -744,7 +744,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // the fire/arrival, synced with the screen flash). The loop owns the
     // SdlAudio device, so travel only latches flags. Mirrors the original's
     // Stellar_TriggerHyperspaceAudioOnce one-shot (g_playerHyperspaceAudio-
-    // Latch gating NovaEffects_QueueCenteredResource)
+    // Latch gating NovaAudio_QueueCenteredSound)
     // [Ghidra 0x00431420].
     if (state.warp_up_sound_pending) {
       if (state.warp_up_sound.has_value()) {
@@ -2273,7 +2273,7 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   // skip result already gates (a stub of) the post-intro travel-selection
   // dialog internally, so its return value needs no action here.
   if (!state.intro_played) {
-    (void)NovaIntroCinematic_Run(platform, state);
+    (void)NovaIntroCinematic_Run(platform, audio, state);
     // Ghidra: DAT_00596d35 = 0x01, the latch IntroCinematic_SetupFrames/
     // Game_ResetNewGameState clear on a new pilot (see new_pilot_flow.cpp).
     state.intro_played = true;

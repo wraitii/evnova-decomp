@@ -96,7 +96,7 @@ struct BoardingWindowResult {
 //
 // Note: the flight loop owns the SDL audio device, so the modal plays its
 // one-shot cues directly through `audio` (the original queues them into
-// NovaEffects_QueueCenteredResource; see the per-cue comments).
+// NovaAudio_QueueCenteredSound; see the per-cue comments).
 //
 // The modal renders the live game view beneath itself each frame via
 // `view.DrawGameFrame` (world + HUD across the whole window) and composites

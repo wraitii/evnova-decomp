@@ -110,6 +110,24 @@ struct PilotFile {
 // IntroCinematic_SetupFrames after the block is created).
 void PilotFileApply(const PilotFile &pilot_file, GameState &state);
 
+// See pilot_file.hpp. Iterates the family in registry order (resource id
+// order in the archive world); only entries whose flags bit 0 is set are
+// considered, and the first match wins (the original keeps scanning but its
+// name buffer is already filled by then). The original also grows each
+// visited entry to 0x16a bytes (ResourceData_EnsureBlockSize) and caches the
+// found block in DAT_00863d60; archive blocks are fixed-size here, and the
+// stock .Trader block is exactly 0x16a bytes, so both are no-ops. The
+// in-memory registry slice (session-created pilots) is not reconstructed.
+// TODO(decomp) once a .plt writer feeds the registry.
+[[nodiscard]] std::string PilotData_FindActivePilotName();
+
+// Ghidra 0x004cd290 PilotData_FindActivePilotName: returns the registered
+// name of the first pilot-save family entry (0x63688a72) whose per-entry
+// flags at block+0x132 have bit 0 set ("active"), or an empty string when no
+// entry is active (the original's default is the empty Pascal string at
+// DAT_0056df7d). Used to preselect the most recently active pilot in the
+// new-pilot dialog's Character popup.
+
 // Collect the live GameState into a PilotFile record (the inverse of
 // PilotFileApply; the original saver reads the globals directly).
 [[nodiscard]] PilotFile PilotFileCollectFromState(const GameState &state);
