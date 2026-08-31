@@ -160,3 +160,90 @@ TEST_CASE("fresh BBS at Tichel offers Federation ferry passenger missions") {
   }
   CHECK(ferry_rows == 3);
 }
+
+TEST_CASE("mission wildcard expansion resolves destinations and identity") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.scenario.missions.resize(1);
+  auto &def = state.scenario.missions[0];
+  def.present = true;
+  def.resource_delta_or_cost = 5000;
+  def.travel_stellar_locator = 0x80;
+  def.return_stellar_locator = -1;
+  def.cargo_type_resource = 6; // *passengers
+  def.cargo_qty_tons = 3;
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[0].name = "Earth";
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[1].name = "Tichel II";
+  state.scenario.stellars[1].system_id = 1;
+  state.scenario.systems.resize(2);
+  state.scenario.systems[0].name = "Sol";
+  state.scenario.systems[1].name = "Tichel";
+  state.pilot.first_name = "Jane Trader";
+  state.player.ship_name = "Kestrel";
+  state.player.ship_class_id = 0;
+  if (state.scenario.Ship(0x80) != nullptr) {
+    // ship type name comes from the shp resource name
+  }
+  Mission_ResolveMissionStellarLocators(state);
+
+  const std::string expanded = Mission_ExpandMissionWildcards(
+      state,
+      "Ferry <CQ> tons of <CT> from <RST> to <DST> in <DSY> for <PAY> cr, "
+      "<PN> of the <PSN> (<PST>). Deadline <DL>, signed <OSN>/<SN>/<REG>",
+      true,
+      0);
+  CHECK(expanded.find("Ferry 3 tons of passengers") != std::string::npos);
+  CHECK(expanded.find("to Earth in Sol") != std::string::npos);
+  CHECK(expanded.find("for 5,000 cr") != std::string::npos);
+  CHECK(expanded.find("Jane Trader of the Kestrel") != std::string::npos);
+  CHECK(expanded.find("<DST>") == std::string::npos);
+  CHECK(expanded.find("<CT>") == std::string::npos);
+  // Tokens without a modeled source keep the original's [Error] sentinel.
+  CHECK(expanded.find("Deadline [Error]") != std::string::npos);
+  CHECK(expanded.find("signed [Error]/[Error]/EV Nova Community") !=
+        std::string::npos);
+  // <PST> comes from the ship class display name.
+  INFO("expanded: " << expanded);
+  CHECK(expanded.find("(<") == std::string::npos);
+}
+
+TEST_CASE("mission pay wildcard handles the cost and percentage encodings") {
+  GameState state;
+  state.player.credits = 10000;
+  auto expand = [&state](std::int32_t pay) {
+    GameState probe = state;
+    probe.scenario.missions.resize(1);
+    probe.scenario.missions[0].present = true;
+    probe.scenario.missions[0].resource_delta_or_cost = pay;
+    probe.scenario.stellars.resize(1);
+    Mission_ResolveMissionStellarLocators(probe);
+    return Mission_ExpandMissionWildcards(probe, "<PAY>", true, 0);
+  };
+  CHECK(expand(5000) == "5,000");
+  CHECK(expand(1234567) == "1.23M");
+  CHECK(expand(-55000) == "5,000");  // acceptance cost encoding
+  CHECK(expand(-40005) == "500");    // 5% of 10000 credits
+  CHECK(expand(-60000) == "10,000"); // acceptance cost encoding
+  CHECK(expand(0) == "0");
+}
+
+TEST_CASE("unresolvable offer destinations fall back to the return target") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.scenario.missions.resize(1);
+  state.scenario.missions[0].present = true;
+  // TravelStel unresolvable (no stellar), ReturnStel = stellar 0.
+  state.scenario.missions[0].travel_stellar_locator = 0x87f;
+  state.scenario.missions[0].return_stellar_locator = 0x80;
+  state.scenario.stellars.resize(1);
+  state.scenario.stellars[0].name = "Earth";
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].name = "Sol";
+  Mission_ResolveMissionStellarLocators(state);
+  const std::string expanded = Mission_ExpandMissionWildcards(
+      state, "Deliver to <DST> in <DSY>", true, 0);
+  CHECK(expanded == "Deliver to Earth in Sol");
+}

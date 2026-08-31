@@ -1510,6 +1510,260 @@ void Mission_RerollOfferingRolls(GameState &state) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Mission-text wildcard expansion (Bible "special symbols")
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Ghidra 0x00445d70 Mission_ReplaceSubstringInMissionText: replace every
+// occurrence of `token` in `text` with `replacement` (the original loops
+// CStringBuffer_ReplaceSubstring 0x004bc100 over the shared scratch buffer
+// until no match remains).
+void ReplaceMissionToken(std::string &text,
+                         const std::string &token,
+                         const std::string &replacement) {
+  if (token.empty()) {
+    return;
+  }
+  std::size_t pos = 0;
+  while ((pos = text.find(token, pos)) != std::string::npos) {
+    text.replace(pos, token.size(), replacement);
+    pos += replacement.size();
+  }
+}
+
+// Stellar name for <DST>/<RST>; the locals in 0x004444f0 start as "[Error]"
+// and keep it when the id is out of range or the display name is empty.
+[[nodiscard]] std::string MissionStellarName(const GameState &state,
+                                             std::int16_t stellar_id) {
+  if (stellar_id < 0 ||
+      stellar_id >= static_cast<std::int16_t>(state.scenario.stellars.size())) {
+    return "[Error]";
+  }
+  const auto &stellar =
+      state.scenario.stellars[static_cast<std::size_t>(stellar_id)];
+  return stellar.name.empty() ? "[Error]" : stellar.name;
+}
+
+// System name for <DSY>/<RSY>. The original resolves the stellar's owning
+// system through System_ResolveVisibleSystemForTravel, then the discovery
+// slot, then System_FindSystemContainingStellar; the port's membership map is
+// already the visible-system resolution, so the visible-root fallback and a
+// raw-id fallback cover it.
+[[nodiscard]] std::string MissionSystemName(const GameState &state,
+                                            std::int16_t system_id) {
+  std::int16_t resolved = Misn_ResolveVisibleSystemForTravel(state, system_id);
+  if (resolved == -1) {
+    resolved = system_id;
+  }
+  if (resolved < 0 ||
+      resolved >= static_cast<std::int16_t>(state.scenario.systems.size())) {
+    return "[Error]";
+  }
+  const auto &system =
+      state.scenario.systems[static_cast<std::size_t>(resolved)];
+  return system.name.empty() ? "[Error]" : system.name;
+}
+
+// Ghidra 0x00465c10 CString_AppendFormattedQuantity: plain digits below 1000,
+// comma grouping below one million, x.xxM above.
+[[nodiscard]] std::string FormatMissionQuantity(std::uint32_t value) {
+  if (value < 1000) {
+    return std::to_string(value);
+  }
+  if (value < 1000000) {
+    const auto thousands = value / 1000;
+    const auto remainder = value % 1000;
+    return std::to_string(thousands) + "," +
+           std::string(remainder < 100 ? 1 : 0, '0') +
+           std::string(remainder < 10 ? 1 : 0, '0') + std::to_string(remainder);
+  }
+  const auto millions = value / 1000000;
+  const auto fraction = (value % 1000000) / 10000;
+  return std::to_string(millions) + "." +
+         std::string(fraction < 10 ? 1 : 0, '0') + std::to_string(fraction) +
+         "M";
+}
+
+// <PAY>: PayVal encoding shared with the acceptance-credit gate - positive is
+// the credit amount, -50001.. is an acceptance cost (abs - 50000), and
+// -40001..-40035 is a percentage (0.01 per unit, DOUBLE_00575508) of the
+// player's current credits. The remaining negative encodings show 0.
+[[nodiscard]] std::string MissionPayText(const GameState &state,
+                                         std::int32_t pay_val) {
+  std::int64_t shown = 0;
+  if (pay_val > 0) {
+    shown = pay_val;
+  } else if (pay_val < -50000) {
+    shown = -static_cast<std::int64_t>(pay_val) - 50000;
+  } else if (pay_val < -40000) {
+    const double scaled = static_cast<double>(state.player.credits) *
+                          (static_cast<double>(-pay_val) - 40000.0) * 0.01;
+    shown = std::llround(scaled);
+    if (shown < 0) {
+      shown = 0;
+    }
+  }
+  return FormatMissionQuantity(static_cast<std::uint32_t>(shown));
+}
+
+// <CT>: the STR# 0xfa1 commodity name for the mission cargo type, with the
+// leading '*' quantityless marker stripped (Bible note on quantityless cargo).
+[[nodiscard]] std::string MissionCargoName(std::int16_t cargo_type) {
+  if (cargo_type < 0 || cargo_type >= 0x100) {
+    return "[Error]";
+  }
+  auto name = NovaHud_LoadStringEntry(
+      0xfa1, static_cast<std::uint16_t>(cargo_type + 1));
+  if (!name) {
+    return "[Error]";
+  }
+  if (!name->empty() && name->front() == '*') {
+    name->erase(name->begin());
+  }
+  return *name;
+}
+
+// <PRK>/<SRK>/<RRK>: the highest-weighted active rank names scan the rank
+// (system-cue) table, which is not reconstructed yet; the original falls back
+// to STR# 0x7d2 entry 0x155 ("captain") when no rank applies.
+[[nodiscard]] std::string MissionRankFallback() {
+  return NovaHud_LoadStringEntry(0x7d2, 0x155).value_or("captain");
+}
+
+} // namespace
+
+// Ghidra 0x004444f0 Stellar_BuildTravelDestinationDescription (wildcard pass)
+// + 0x00445d70 Mission_ReplaceSubstringInMissionText. Expands the Bible
+// mission-text wildcards in `text` and returns the result. `offering_list`
+// selects the offer-row arm (mission_id = definition index, targets read from
+// mission_target_resolutions, pay from the definition); the active arm reads
+// the accepted mission slot. Tokens without a modeled source expand to the
+// original's "[Error]" sentinel.
+std::string Mission_ExpandMissionWildcards(const GameState &state,
+                                           std::string_view text,
+                                           bool offering_list,
+                                           std::int16_t mission_id) {
+  std::int16_t travel_stellar = -1;
+  std::int16_t travel_system = -1;
+  std::int16_t return_stellar = -1;
+  std::int16_t return_system = -1;
+  std::int16_t cargo_type = -1;
+  std::int16_t cargo_qty = 0;
+  std::int32_t pay_val = 0;
+  std::string special_ship_name;
+  const ActiveMission *active = nullptr;
+  if (offering_list) {
+    if (mission_id >= 0 &&
+        static_cast<std::size_t>(mission_id) < state.scenario.missions.size()) {
+      const auto &target =
+          state
+              .mission_target_resolutions[static_cast<std::size_t>(mission_id)];
+      travel_stellar = target.travel_stellar_id;
+      travel_system = target.travel_system_id;
+      return_stellar = target.return_stellar_id;
+      return_system = target.return_system_id;
+      cargo_type = target.cargo_type_id;
+      cargo_qty = target.cargo_qty_tons;
+      pay_val = state.scenario.missions[static_cast<std::size_t>(mission_id)]
+                    .resource_delta_or_cost;
+    }
+  } else if (mission_id >= 0 &&
+             static_cast<std::size_t>(mission_id) <
+                 state.active_missions.size() &&
+             state
+                 .active_mission_runtime_flags[static_cast<std::size_t>(
+                     mission_id)]
+                 .is_active) {
+    active = &state.active_missions[static_cast<std::size_t>(mission_id)];
+    travel_stellar = active->travel_stellar_id;
+    return_stellar = active->return_stellar_id;
+    travel_system = ResolveContainingSystem(state, travel_stellar);
+    return_system = ResolveContainingSystem(state, return_stellar);
+    cargo_type = active->cargo_type_id;
+    cargo_qty = active->cargo_qty_tons;
+    pay_val = active->resource_delta_or_cost;
+    // TODO(decomp): the special-ship name is picked from the STR# pool at
+    // acceptance (g_active_misn +0x40 mission_fleet_name); the port stores
+    // only the pool id, so <SN> keeps the [Error] sentinel until then.
+  }
+
+  std::string destination = MissionStellarName(state, travel_stellar);
+  std::string destination_system = MissionSystemName(state, travel_system);
+  const std::string return_dest = MissionStellarName(state, return_stellar);
+  const std::string return_system_name =
+      MissionSystemName(state, return_system);
+  // An unresolvable destination falls back to the return destination when that
+  // one resolves (the original's "[Error]" equality swap).
+  if (destination == "[Error]" && return_dest != "[Error]") {
+    destination = return_dest;
+  }
+  if (destination_system == "[Error]" && return_system_name != "[Error]") {
+    destination_system = return_system_name;
+  }
+
+  // Player identity: pilot.first_name is the full name (DAT_007d20b7),
+  // pilot.last_name the nickname (DAT_007d21b7; <PNN> falls back to the full
+  // name when unset).
+  const std::string player_name = state.pilot.first_name;
+  const std::string nickname = state.pilot.last_name.empty()
+                                   ? state.pilot.first_name
+                                   : state.pilot.last_name;
+  std::string ship_type = "[Error]";
+  if (state.player.ship_class_id >= 0) {
+    if (const auto *ship_class = state.scenario.Ship(static_cast<std::int16_t>(
+            state.player.ship_class_id + kResourceIdBase));
+        ship_class != nullptr && !ship_class->display_name.empty()) {
+      ship_type = ship_class->display_name;
+    }
+  }
+
+  std::string result(text);
+  ReplaceMissionToken(result, "<DST>", destination);
+  ReplaceMissionToken(result, "<DSY>", destination_system);
+  ReplaceMissionToken(result, "<RST>", return_dest);
+  ReplaceMissionToken(result, "<RSY>", return_system_name);
+  ReplaceMissionToken(result, "<CT>", MissionCargoName(cargo_type));
+  ReplaceMissionToken(
+      result, "<CQ>", cargo_type >= 0 ? std::to_string(cargo_qty) : "[Error]");
+  ReplaceMissionToken(result,
+                      "<SN>",
+                      active != nullptr && !special_ship_name.empty()
+                          ? special_ship_name
+                          : "[Error]");
+  // TODO(decomp(0x004444f0)) skipped: <DL> needs the game calendar (the port
+  // does not model the start date / deadline clock yet); the original formats
+  // Stellar_FormatElapsedTravelTime over the deadline fields and keeps
+  // "[Error]" when the deadline equals the current date.
+  ReplaceMissionToken(result, "<DL>", "[Error]");
+  ReplaceMissionToken(result, "<PN>", player_name);
+  ReplaceMissionToken(result, "<PNN>", nickname);
+  ReplaceMissionToken(result,
+                      "<PSN>",
+                      state.player.ship_name.empty() ? std::string("[Error]")
+                                                     : state.player.ship_name);
+  ReplaceMissionToken(result, "<PST>", ship_type);
+  // <OSN> is only resolvable in the ship-offering interaction context
+  // (g_ship_states[g_ship_offering_slot].pers name); the port has no offering
+  // ship wired yet, so it keeps the sentinel.
+  ReplaceMissionToken(result, "<OSN>", "[Error]");
+  // TODO(decomp): rank names/weights live on the rank (system-cue) defs, not
+  // reconstructed; the fallback arm emits "captain".
+  const std::string rank_fallback = MissionRankFallback();
+  ReplaceMissionToken(result, "<PRK>", rank_fallback);
+  ReplaceMissionToken(result, "<SRK>", rank_fallback);
+  ReplaceMissionToken(result, "<RRK>", rank_fallback);
+  ReplaceMissionToken(result, "<PAY>", MissionPayText(state, pay_val));
+  // FUN_004d45a0: the registration name, or the shared "EV Nova Community"
+  // string when no name is registered. The port has no registration system.
+  ReplaceMissionToken(result, "<REG>", "EV Nova Community");
+  // TODO(decomp(0x004444f0)) skipped: the <PRK%i>/<SRK%i> per-government rank
+  // variants and the unregistered letter-scramble block (DAT_007354a4) need
+  // the rank system / shareware model respectively.
+  return result;
+}
+
 // Ghidra 0x00443c60 Mission_HandleMissionOrSurrenderShipReaction. Per-tick
 // objective evaluation for one active mission slot: drives the
 // objective-complete/failed runtime latches from the mission goal's counters

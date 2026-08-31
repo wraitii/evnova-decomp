@@ -23,6 +23,19 @@ void Mission_ResolveMissionStellarLocators(GameState &state);
 [[nodiscard]] MissionListEvaluation
 Mission_EvaluateMissionLists(GameState &state);
 
+// Ghidra 0x004444f0 Stellar_BuildTravelDestinationDescription (wildcard pass)
+// + 0x00445d70 Mission_ReplaceSubstringInMissionText. Expands the Bible
+// mission-text wildcards (<DST>, <DSY>, <RST>, <RSY>, <CT>, <CQ>, <SN>, <DL>,
+// <PN>, <PNN>, <PSN>, <PST>, <OSN>, <PRK>, <SRK>, <RRK>, <PAY>, <REG>) in
+// `text`. `offering_list` selects the offer-row arm (mission_id = definition
+// index, targets from mission_target_resolutions); the active arm reads the
+// accepted mission slot.
+[[nodiscard]] std::string
+Mission_ExpandMissionWildcards(const GameState &state,
+                               std::string_view text,
+                               bool offering_list,
+                               std::int16_t mission_id);
+
 // Mission IDs in this API are zero-based definition indices, matching the
 // original mission lists and MisnActive.mission_template_id. Scenario resource
 // IDs are translated at the ScenarioData boundary.
