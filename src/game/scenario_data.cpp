@@ -1302,7 +1302,10 @@ bool ScenarioData::LoadFromArchives() {
             scenario::kMissionResourceType, static_cast<std::uint16_t>(id))) {
       MissionDef mission = DecodeMission(res->bytes);
       mission.present = true;
-      mission.display_name = res->name;
+      // Ghidra 0x0043bbb0 (misn loader) runs the resource name through
+      // NameString_StripSubtitleSuffix (0x004cd230) before storing it, so the
+      // BBS/computer list rows show "Base Name" for "Base Name;Subtitle".
+      mission.display_name = StripSubtitleSuffix(res->name);
       missions[static_cast<std::size_t>(id) - 0x80] = std::move(mission);
       ++loaded_missions;
     }

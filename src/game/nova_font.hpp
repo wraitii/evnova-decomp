@@ -101,6 +101,13 @@ public:
                               std::uint16_t style,
                               std::string_view text);
 
+  // Line pitch (ascent + descent + external leading) the original's
+  // multi-line DT_WORDBREAK draws advance by (NovaText_DrawText's
+  // filled-rect mode, e.g. the mission-info description panel).
+  [[nodiscard]] int LineHeight(NovaFontFamily family,
+                               float point_size,
+                               std::uint16_t style = kNovaFontStyleRegular);
+
   // True when the source font file for `family` could be located (bundled
   // Charcoal/Geneva TTF or an OS font our resolver maps it to). Used to log a
   // clear divergence when a look is unavailable rather than silently falling

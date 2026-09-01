@@ -169,7 +169,7 @@ Remaining dialog entrypoints:
 
 - `0x00440C90` mission-computer polling — open (this is the BBS/destination
   window poller, not the I-key window)
-- `0x00446150` mission-computer window — DONE (70%) as
+- `0x00446150` mission-computer window — DONE (75%) as
   `NovaMission_RunMissionInfoWindow` (`docked_dialog.cpp`): the in-flight
   active-missions modal (gameplay command 0x28, default key I; the caller in
   `spaceflight.cpp` counts visible missions first and plays the denied cue +
@@ -181,13 +181,24 @@ Remaining dialog entrypoints:
   +0x32 `can_abort`), the starmap action with the flags 0x100 destination
   preselect, and the abort arm (flags 0x40 → −5× CompReward over every
   system the CompGovt owns, then `Mission_ClearMisnSlotAssignments(slot,
-  1)`). Skips: game-calendar date line, ai_secondary_target_slot restore
-  around a nested map destination window. It renders the live flight view
-  beneath itself — like every modal in the port, per the layering divergence
-  documented in docs/dlog_ditl_dialog_format.md §7.1 (the docked-layer
-  snapshot plumbing was removed in the same pass).
+  1)`). Rendering fidelity (2025 pass): all window text uses the shared
+  Geneva-9 screen font (DAT_00735684/86, set in 0x004b0c20); list rows sit
+  on the fixed 12px native pitch (DAT_0088c01c 8 × 1.5 scale at
+  0x005754f8) with matching click hit-testing (click past the last row
+  deselects, per 0x004d1db0); the description panel is black with white
+  wrapped text — the fill + InvertRect cancel of 0x00446e00, not a white
+  panel. Skips: game-calendar date line, ai_secondary_target_slot restore
+  around a nested map destination window, list scrollbar. It renders the
+  live flight view beneath itself — like every modal in the port, per the
+  layering divergence documented in docs/dlog_ditl_dialog_format.md §7.1
+  (the docked-layer snapshot plumbing was removed in the same pass).
 - `0x0043C470` available Mission BBS — ported in `docked_dialog.cpp`
-  (`RunMissionBoardDialog`), desc rendering TODO
+  (`RunMissionBoardDialog`); 2025 fidelity pass: Geneva-9 screen font and
+  fixed 12px native list row pitch, selected-title panel in white Times 18
+  with a black no-selection fill, description panel as the fill+InvertRect
+  black/white pattern of the draw 0x00441620, heading/date greys
+  (DAT_00733b50/5c), and mission display names strip the ';'-subtitle per
+  the 0x0043bbb0 loader (NameString_StripSubtitleSuffix 0x004cd230).
 
 ## 3. Mission completion and failure
 

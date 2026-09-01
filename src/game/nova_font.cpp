@@ -365,6 +365,16 @@ int NovaFontCache::TextWidth(NovaFontFamily family,
   return width;
 }
 
+// Line pitch of the original's DT_WORDBREAK multi-line draws: the GDI text
+// engine advances by tmHeight + tmExternalLeading, which TTF_FontHeight
+// mirrors closely enough at Nova's small UI sizes.
+int NovaFontCache::LineHeight(NovaFontFamily family,
+                              float point_size,
+                              std::uint16_t style) {
+  TTF_Font *font = Font(family, point_size, style);
+  return font != nullptr ? TTF_GetFontHeight(font) : 0;
+}
+
 // Ghidra 0x004bca90 DrawContext_DrawPascalString.
 // ---------------------------------------------------------------------------
 // Text drawing

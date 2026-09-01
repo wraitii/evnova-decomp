@@ -225,16 +225,19 @@ struct MissionBoardLayout {
   SDL_FRect decline{};
   SDL_FRect header{};
   SDL_FRect date{};
-  // Stellar_RebuildTravelDestinationList creates an eight-row native list
-  // control. Its row height is the list control's DITL height divided by that
-  // row count; the old clean-room pass used an unrelated 18-pixel constant.
-  float list_row_pitch = 0.0F;
 };
 
 // NovaUi_DrawListRowCallback (0x00448a30) receives the native row rectangle,
 // places text at row_top + DAT_00735686, and uses a four-pixel left inset.
-// The destination list is configured with the shared 12-point screen font.
-constexpr float kMissionListFontSize = 12.0F;
+// Both mission lists render with the shared screen font DAT_00735684/86 —
+// Geneva 9, initialised in Ship_InitGameplayDataTables (0x004b0c20).
+constexpr float kMissionListFontSize = 9.0F;
+// Native list-control row pitch: the rebuild passes
+// (Stellar_RebuildTravelDestinationList 0x0043cc20 and
+// NovaUi_RebuildSpecialInteractionList 0x00445dc0) size rows as
+// DAT_0088c01c (8) x the 1.5 UI-scale double (0x005754f8) — 12px,
+// independent of the DITL rect height.
+constexpr float kMissionListRowPitch = 12.0F;
 
 [[nodiscard]] std::optional<MissionBoardLayout>
 LayoutMissionBoard(const SdlPlatform &platform) {
@@ -289,7 +292,6 @@ LayoutMissionBoard(const SdlPlatform &platform) {
     }
   }
 
-  constexpr float kNativeMissionListRows = 8.0F;
   if (layout.list.w <= 0.0F || layout.list.h <= 0.0F ||
       layout.description.w <= 0.0F || layout.take.w <= 0.0F ||
       layout.decline.w <= 0.0F || layout.header.w <= 0.0F ||
@@ -297,7 +299,6 @@ LayoutMissionBoard(const SdlPlatform &platform) {
     NovaLog::Todo("Mission BBS DITL 0x3ee is missing a required control rect");
     return std::nullopt;
   }
-  layout.list_row_pitch = layout.list.h / kNativeMissionListRows;
   return layout;
 }
 
@@ -312,29 +313,43 @@ void DrawMissionBoardContents(SdlPlatform &platform,
   SDL_Renderer *renderer = platform.renderer();
   constexpr SDL_Color kText{255, 255, 255, 255};
   constexpr SDL_Color kMissionDim{192, 192, 192, 255};
-  constexpr SDL_Color kSelected{255, 255, 255, 255};
   // NovaUi_DrawListRowCallback (0x00448a30) fills every row from the c.lr
   // palette: DAT_0073566a is black and DAT_00735670 is 50% red.
   constexpr SDL_Color kRowNormal{0, 0, 0, 255};
   constexpr SDL_Color kRowSelected{128, 0, 0, 255};
+  // Window furniture colours (Settings_InitTimingPresets 0x004ad7c0, triples
+  // consumed by NovaUi_DrawTravelDestinationWindow 0x00441620): the heading
+  // band uses the 0xc000 grey DAT_00733b50, the date the 0x4000 grey
+  // DAT_00733b5c, and the selected title white PTR_DAT_00575ad8.
+  constexpr SDL_Color kHeadingGrey{192, 192, 192, 255};
+  constexpr SDL_Color kDateGrey{64, 64, 64, 255};
+  // The selected-mission title panel uses the Times 18 face
+  // (DrawContext_SetFontId of the "Times" family + StoreScaledValue 0x12).
+  constexpr float kMissionTitleFontSize = 18.0F;
 
   const auto &rows = missions.page_zero;
   const std::string heading =
       // 0x167 is the original's 1-based entry -> "The following missions are
-      // available here:".
+      // available here:". The heading cursor helper (FUN_00874124) bakes in a
+      // +12px baseline offset from the entry-8 rect top.
       NovaHud_LoadStringEntry(0x7d2, 0x167)
           .value_or("The following missions are available here");
   NovaText_Draw(platform,
                 font_cache,
                 NovaFontFamily::kGeneva,
-                12.0F,
+                kMissionListFontSize,
                 kNovaFontStyleRegular,
-                kText,
+                kHeadingGrey,
                 layout.header.x,
-                layout.header.y + layout.header.h - 2.0F,
+                layout.header.y + 12.0F,
                 heading);
   if (layout.list.w > 0.0F && !rows.empty()) {
-    const float row_pitch = layout.list_row_pitch;
+    const SDL_Rect list_clip{static_cast<int>(layout.list.x),
+                             static_cast<int>(layout.list.y),
+                             static_cast<int>(layout.list.w),
+                             static_cast<int>(layout.list.h)};
+    SDL_SetRenderClipRect(renderer, &list_clip);
+    const float row_pitch = kMissionListRowPitch;
     const float text_x = layout.list.x + 4.0F;
     for (std::size_t row = 0;
          row < rows.size() &&
@@ -361,13 +376,23 @@ void DrawMissionBoardContents(SdlPlatform &platform,
                     NovaFontFamily::kGeneva,
                     kMissionListFontSize,
                     kNovaFontStyleRegular,
-                    row == selected ? kSelected : kText,
+                    kText,
                     text_x,
                     baseline,
                     label);
     }
+    SDL_SetRenderClipRect(renderer, nullptr);
   }
 
+  // Selected-title panel (entry 5): with no selection the original fills the
+  // rect black (0x00441620's g_selected_misn_slot_index == -1 arm); with a
+  // selection it draws the wildcard-expanded mission name in white Times 18,
+  // single line, baseline at the rect top + 18 (FUN_00872560 cursor model).
+  if (layout.selected_title.w > 0.0F) {
+    SDL_SetRenderDrawColor(
+        renderer, kRowNormal.r, kRowNormal.g, kRowNormal.b, kRowNormal.a);
+    SDL_RenderFillRect(renderer, &layout.selected_title);
+  }
   if (layout.selected_title.w > 0.0F && !rows.empty() &&
       selected < rows.size()) {
     const auto *definition = state.scenario.Mission(
@@ -379,12 +404,12 @@ void DrawMissionBoardContents(SdlPlatform &platform,
             : "Mission " + std::to_string(rows[selected]);
     NovaText_Draw(platform,
                   font_cache,
-                  NovaFontFamily::kGeneva,
-                  12.0F,
-                  kNovaFontStyleBold,
+                  NovaFontFamily::kTimes,
+                  kMissionTitleFontSize,
+                  kNovaFontStyleRegular,
                   kText,
                   layout.selected_title.x,
-                  layout.selected_title.y + 15.0F,
+                  layout.selected_title.y + kMissionTitleFontSize,
                   title);
   }
 
@@ -409,18 +434,18 @@ void DrawMissionBoardContents(SdlPlatform &platform,
                           label);
   }
   if (layout.date.w > 0.0F) {
-    // GameState does not yet track g_current_game_year_month/day. Keep the
-    // DITL date field visible with the original new-pilot baseline until that
-    // calendar state is reconstructed.
+    // NovaText_FormatDateString over g_current_game_year_month/day; the
+    // calendar is not reconstructed yet (same placeholder as the original's
+    // DITL date field when state is absent). Date colour is the 0x4000 grey.
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
-                          12.0F,
+                          kMissionListFontSize,
                           kNovaFontStyleRegular,
-                          kText,
+                          kDateGrey,
                           layout.date.x,
                           layout.date.x + layout.date.w,
-                          layout.date.y + layout.date.h - 2.0F,
+                          layout.date.y + kMissionListFontSize,
                           "1/1/1999");
   }
   if (!status.empty()) {
@@ -435,42 +460,60 @@ void DrawMissionBoardContents(SdlPlatform &platform,
                           layout.description.y + layout.description.h + 14.0F,
                           status);
   }
-  if (layout.description.w > 0.0F && !rows.empty() && selected < rows.size()) {
-    if (const auto description = NovaResource_LoadDescription(
-            static_cast<std::uint16_t>(rows[selected] + 4000));
-        description && !description->text.empty()) {
-      // The original loads the desc into the shared scratch (running the
-      // placeholder pass at load, 0x004c6d50) and runs the same wildcard pass
-      // as the list rows (NovaUi_RunTravelDestinationMainWindow 0x0043c470 ->
-      // Stellar_BuildTravelDestinationDescription).
-      std::string loaded_text = description->text;
-      Mission_ExpandStringPlaceholders(state, loaded_text);
-      const std::string expanded_text = Mission_ExpandMissionWildcards(
-          state, loaded_text, true, rows[selected]);
-      const float x = layout.description.x + 6.0F;
-      const float width = layout.description.w - 12.0F;
-      const auto lines = WrapDescriptionLines(
-          expanded_text,
-          static_cast<int>(std::max(1.0F, width)),
-          [&](std::string_view line) {
-            return font_cache.TextWidth(
-                NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line);
-          });
-      float y = layout.description.y + 15.0F;
-      for (const auto &line : lines) {
-        if (y > layout.description.y + layout.description.h) {
-          break;
+  if (layout.description.w > 0.0F) {
+    // Description panel (entry 4, 0x00441620): the selected mission's desc
+    // (misn id + 4000) drawn with the fill + InvertRect cancel pattern — net
+    // look is a BLACK panel with white left-aligned wrapped Geneva-9 text,
+    // baseline at rect.top + 9, wrapping across the full rect width. With no
+    // selection the original fills the rect black directly.
+    SDL_SetRenderDrawColor(
+        renderer, kRowNormal.r, kRowNormal.g, kRowNormal.b, kRowNormal.a);
+    SDL_RenderFillRect(renderer, &layout.description);
+    if (!rows.empty() && selected < rows.size()) {
+      if (const auto description = NovaResource_LoadDescription(
+              static_cast<std::uint16_t>(rows[selected] + 4000));
+          description && !description->text.empty()) {
+        // The original loads the desc into the shared scratch (running the
+        // placeholder pass at load, 0x004c6d50) and runs the same wildcard
+        // pass as the list rows (NovaUi_RunTravelDestinationMainWindow
+        // 0x0043c470 -> Stellar_BuildTravelDestinationDescription).
+        std::string loaded_text = description->text;
+        Mission_ExpandStringPlaceholders(state, loaded_text);
+        const std::string expanded_text = Mission_ExpandMissionWildcards(
+            state, loaded_text, true, rows[selected]);
+        const auto lines = WrapDescriptionLines(
+            expanded_text,
+            static_cast<int>(std::max(1.0F, layout.description.w)),
+            [&](std::string_view line) {
+              return font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                          kMissionListFontSize,
+                                          kNovaFontStyleRegular,
+                                          line);
+            });
+        const SDL_Rect desc_clip{static_cast<int>(layout.description.x),
+                                 static_cast<int>(layout.description.y),
+                                 static_cast<int>(layout.description.w),
+                                 static_cast<int>(layout.description.h)};
+        SDL_SetRenderClipRect(renderer, &desc_clip);
+        const float line_pitch = static_cast<float>(font_cache.LineHeight(
+            NovaFontFamily::kGeneva, kMissionListFontSize));
+        float y = layout.description.y + kMissionListFontSize;
+        for (const auto &line : lines) {
+          if (y > layout.description.y + layout.description.h) {
+            break;
+          }
+          NovaText_Draw(platform,
+                        font_cache,
+                        NovaFontFamily::kGeneva,
+                        kMissionListFontSize,
+                        kNovaFontStyleRegular,
+                        kText,
+                        layout.description.x,
+                        y,
+                        line);
+          y += line_pitch;
         }
-        NovaText_Draw(platform,
-                      font_cache,
-                      NovaFontFamily::kGeneva,
-                      12.0F,
-                      kNovaFontStyleRegular,
-                      kText,
-                      x,
-                      y,
-                      line);
-        y += 14.0F;
+        SDL_SetRenderClipRect(renderer, nullptr);
       }
     }
   }
@@ -611,7 +654,7 @@ RunMissionBoardDialog(SdlPlatform &platform,
         bool handled = false;
         if (contains(layout->list, point) && !missions.page_zero.empty()) {
           const auto row = static_cast<std::size_t>((point.y - layout->list.y) /
-                                                    layout->list_row_pitch);
+                                                    kMissionListRowPitch);
           if (row < missions.page_zero.size()) {
             selected = row;
             handled = true;
@@ -2591,9 +2634,14 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
   constexpr SDL_Color kText{255, 255, 255, 255};
   constexpr SDL_Color kRowNormal{0, 0, 0, 255};
   constexpr SDL_Color kRowSelected{128, 0, 0, 255};
-  constexpr SDL_Color kPanelBg{255, 255, 255, 255};
-  constexpr SDL_Color kPanelText{0, 0, 0, 255};
-  constexpr SDL_Color kFailedText{255, 96, 96, 255};
+  // Every string in this window uses the shared screen font DAT_00735684 /
+  // DAT_00735686, initialised to Geneva 9 by Ship_InitGameplayDataTables
+  // (0x004b0c20: MOV word ptr [0x00735686],0x9) -- not the cïlr-configured
+  // Chicago 12 of the button captions.
+  constexpr float kMissionInfoFontSize = 9.0F;
+  // Native list row pitch: NovaUi_RebuildSpecialInteractionList (0x00445dc0)
+  // sizes rows as DAT_0088c01c (8) x the 1.5 UI-scale double at 0x005754f8.
+  constexpr float kMissionInfoRowPitch = 12.0F;
 
   const auto draw_frame = [&]() {
     SDL_Renderer *renderer = platform.renderer();
@@ -2618,14 +2666,16 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
         // STR# 0x7d2 1-based entry 0x168, "Currently active missions:".
         NovaHud_LoadStringEntry(0x7d2, 0x168)
             .value_or("Currently active missions:");
+    // Cursor set to the entry-3 rect top-left; the baseline lands at
+    // rect.top + the scaled font size (9).
     NovaText_Draw(platform,
                   font_cache,
                   NovaFontFamily::kGeneva,
-                  12.0F,
+                  kMissionInfoFontSize,
                   kNovaFontStyleRegular,
                   kText,
-                  layout->header.x + 4.0F,
-                  layout->header.y + layout->header.h - 2.0F,
+                  layout->header.x,
+                  layout->header.y + kMissionInfoFontSize,
                   heading);
     if (layout->date.w > 0.0F) {
       // NovaText_FormatDateString over g_current_game_year_month/day; the
@@ -2633,26 +2683,32 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
       NovaText_DrawCentered(platform,
                             font_cache,
                             NovaFontFamily::kGeneva,
-                            12.0F,
+                            kMissionInfoFontSize,
                             kNovaFontStyleRegular,
                             kText,
                             layout->date.x,
                             layout->date.x + layout->date.w,
-                            layout->date.y + layout->date.h - 2.0F,
+                            layout->date.y + kMissionInfoFontSize,
                             "1/1/1999");
     }
 
-    // Rows: black fill, selected row in the 50%-red highlight; failed rows
-    // keep the 0xa5 marker (drawn tinted here; the original's list renderer
-    // colours the marker line itself).
+    // Rows: black fill, selected row in the 50%-red highlight, white text
+    // throughout (NovaUi_DrawListRowCallback draws the failed 0xa5 marker as
+    // part of the row string in the shared text colour, no separate tint).
+    // Rows keep the fixed 12px native pitch and are clipped to the list rect
+    // like the original's DrawContext clipping.
     if (layout->list.w > 0.0F && !rows.empty()) {
-      const float row_pitch = layout->list.h / static_cast<float>(rows.size());
+      const SDL_Rect list_clip{static_cast<int>(layout->list.x),
+                               static_cast<int>(layout->list.y),
+                               static_cast<int>(layout->list.w),
+                               static_cast<int>(layout->list.h)};
+      SDL_SetRenderClipRect(renderer, &list_clip);
       const float text_x = layout->list.x + 4.0F;
       for (std::size_t row = 0; row < rows.size(); ++row) {
         const float row_top =
-            layout->list.y + static_cast<float>(row) * row_pitch;
+            layout->list.y + static_cast<float>(row) * kMissionInfoRowPitch;
         const SDL_FRect row_rect{
-            layout->list.x, row_top, layout->list.w, row_pitch};
+            layout->list.x, row_top, layout->list.w, kMissionInfoRowPitch};
         const bool is_selected = static_cast<int>(row) == selected;
         const SDL_Color fill = is_selected ? kRowSelected : kRowNormal;
         SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, fill.a);
@@ -2660,33 +2716,44 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
         NovaText_Draw(platform,
                       font_cache,
                       NovaFontFamily::kGeneva,
-                      12.0F,
+                      kMissionInfoFontSize,
                       kNovaFontStyleRegular,
-                      rows[row].failed ? kFailedText : kText,
+                      kText,
                       text_x,
-                      row_top + 12.0F,
+                      row_top + kMissionInfoFontSize,
                       rows[row].text);
       }
+      SDL_SetRenderClipRect(renderer, nullptr);
     }
 
-    // Description panel: the original fills the rect, draws the text, then
-    // InvertRects it, yielding a white panel with black text; with no
-    // selection the panel stays black (0x00446e00's DAT_0077430c == -1 arm).
-    const SDL_Color panel_bg = selected >= 0 ? kPanelBg : kRowNormal;
+    // Description panel (0x00446e00): the filled-rect draw paints a white
+    // rect with black text and the follow-up DrawContext_InvertRect cancels
+    // both, so the net panel is BLACK with white left-aligned wrapped text
+    // (the same invert-video pattern as the status panels of 0x004812c0 /
+    // 0x0047fb70). The no-selection arm fills the rect black directly.
+    // Text starts at the rect's top-left with the 9pt baseline and wraps
+    // across the full rect width, clipped to the rect.
     SDL_SetRenderDrawColor(
-        renderer, panel_bg.r, panel_bg.g, panel_bg.b, panel_bg.a);
+        renderer, kRowNormal.r, kRowNormal.g, kRowNormal.b, kRowNormal.a);
     SDL_RenderFillRect(renderer, &layout->description);
     if (selected >= 0 && !description.empty()) {
-      const float x = layout->description.x + 6.0F;
-      const float width = layout->description.w - 12.0F;
       const auto lines = WrapDescriptionLines(
           description,
-          static_cast<int>(std::max(1.0F, width)),
+          static_cast<int>(std::max(1.0F, layout->description.w)),
           [&](std::string_view line) {
-            return font_cache.TextWidth(
-                NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line);
+            return font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                        kMissionInfoFontSize,
+                                        kNovaFontStyleRegular,
+                                        line);
           });
-      float y = layout->description.y + 14.0F;
+      const SDL_Rect desc_clip{static_cast<int>(layout->description.x),
+                               static_cast<int>(layout->description.y),
+                               static_cast<int>(layout->description.w),
+                               static_cast<int>(layout->description.h)};
+      SDL_SetRenderClipRect(renderer, &desc_clip);
+      const float line_pitch = static_cast<float>(
+          font_cache.LineHeight(NovaFontFamily::kGeneva, kMissionInfoFontSize));
+      float y = layout->description.y + kMissionInfoFontSize;
       for (const auto &line : lines) {
         if (y > layout->description.y + layout->description.h) {
           break;
@@ -2694,14 +2761,15 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
         NovaText_Draw(platform,
                       font_cache,
                       NovaFontFamily::kGeneva,
-                      12.0F,
+                      kMissionInfoFontSize,
                       kNovaFontStyleRegular,
-                      kPanelText,
-                      x,
+                      kText,
+                      layout->description.x,
                       y,
                       line);
-        y += 14.0F;
+        y += line_pitch;
       }
+      SDL_SetRenderClipRect(renderer, nullptr);
     }
 
     // Abort/Done (three-state strips 0x1d4c family; captions STR# 0x96
@@ -2811,14 +2879,22 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
       if (input->key == TextKey::primary) {
         const SDL_FPoint point = platform.mouse_position();
         bool handled = false;
-        if (contains(layout->list, point) && !rows.empty()) {
-          const float row_pitch =
-              layout->list.h / static_cast<float>(rows.size());
-          const auto row =
-              static_cast<std::size_t>((point.y - layout->list.y) / row_pitch);
-          if (row < rows.size() && static_cast<int>(row) != selected) {
-            selected = static_cast<int>(row);
-            description = BuildMissionInfoDescription(state, rows[row].slot);
+        if (contains(layout->list, point)) {
+          // FUN_004d1db0: the list control maps the click to row
+          // (click_y - list.top) / native row pitch (+ scroll, always 0
+          // here); a click past the last row finds no matching list row and
+          // deselects (DAT_0077430c resets to -1).
+          const auto row = static_cast<std::size_t>((point.y - layout->list.y) /
+                                                    kMissionInfoRowPitch);
+          const int new_selected =
+              !rows.empty() && row < rows.size() ? static_cast<int>(row) : -1;
+          if (new_selected != selected) {
+            selected = new_selected;
+            description =
+                selected >= 0
+                    ? BuildMissionInfoDescription(
+                          state, rows[static_cast<std::size_t>(selected)].slot)
+                    : std::string();
           }
           handled = true;
         }
