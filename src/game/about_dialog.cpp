@@ -230,7 +230,7 @@ void NovaMenu_RunAboutDialog(SdlPlatform &platform,
                           layout.ok_button.y + layout.ok_button.h / 2.0F + 4.0F,
                           "OK");
 
-    SDL_RenderPresent(renderer);
+    platform.Present();
 
     while (const auto input = platform.PollTextEvent()) {
       switch (input->key) {

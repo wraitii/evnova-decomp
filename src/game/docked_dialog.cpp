@@ -542,6 +542,13 @@ RunMissionBoardDialog(SdlPlatform &platform,
   if (!layout) {
     return LandedExit::kServiceComplete;
   }
+  ProbeUiAutoClear probe_ui_guard(platform);
+  platform.PublishProbeUi("mission_bbs",
+                          {{"window", layout->frame},
+                           {"list", layout->list},
+                           {"take", layout->take},
+                           {"decline", layout->decline},
+                           {"description", layout->description}});
   MissionListEvaluation missions = Mission_EvaluateMissionLists(state);
   std::size_t selected = 0;
   std::string status;
@@ -567,7 +574,7 @@ RunMissionBoardDialog(SdlPlatform &platform,
                              missions,
                              selected,
                              status);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     auto accept = [&]() {
       if (missions.page_zero.empty() || selected >= missions.page_zero.size()) {
@@ -1664,6 +1671,9 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
                       store_frame,
                       selected_description);
     const ShipyardInfoLayout layout = LayoutShipyardInfo(platform, custom);
+    platform.PublishProbeUi("shipyard_info",
+                            {{"window", layout.window},
+                             {"done", layout.button}});
     DrawShipyardInfoPanel(platform,
                           font_cache,
                           button_art,
@@ -1672,7 +1682,7 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
                           layout,
                           backdrop ? backdrop->get() : nullptr,
                           custom_picture ? custom_picture->get() : nullptr);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
     bool done = false;
     for (std::optional<TextInput> input;
          (input = platform.PollTextEvent()) && !done;) {
@@ -1725,8 +1735,16 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
+  ProbeUiAutoClear probe_ui_guard(platform);
   while (!platform.quit_requested()) {
     const StoreLayout layout = LayoutStore(platform, outfit_store);
+    platform.PublishProbeUi(outfit_store ? "outfitter" : "shipyard",
+                            {{"window", layout.frame},
+                             {"leave", layout.leave},
+                             {"buy", layout.buy},
+                             {"sell_or_info", layout.sell_or_info},
+                             {"previous", layout.previous},
+                             {"next", layout.next}});
     if (session.selected_id != selected_description_id) {
       selected_description.clear();
       if (session.selected_id >= 0x80) {
@@ -1754,7 +1772,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
                       backdrop ? backdrop->get() : nullptr,
                       frame ? frame->get() : nullptr,
                       selected_description);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
     for (std::optional<TextInput> input; (input = platform.PollTextEvent());) {
       if (input->key == TextKey::escape) {
         if (outfit_store)
@@ -1964,7 +1982,7 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                         frame ? frame->get() : nullptr,
                         service,
                         panel);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     // Close the dialog on Esc / Enter / a left click or primary press
     // anywhere on the window (the original's sub-windows close via their
@@ -2163,6 +2181,17 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   const SDL_FRect scroll_down_rect = item_rect(8);
   const SDL_FRect scroll_up_rect = item_rect(9);
 
+  // Publish the window's control rects to the probe harness (window-point
+  // space) so the harness can click by intent; cleared when this modal exits.
+  ProbeUiAutoClear probe_ui_guard(platform);
+  platform.PublishProbeUi("mission_offer",
+                          {{"window", {origin.x, origin.y, win_w, win_h}},
+                           {"accept", accept_rect},
+                           {"decline", decline_rect},
+                           {"text", text_rect},
+                           {"scroll_up", scroll_up_rect},
+                           {"scroll_down", scroll_down_rect}});
+
   // Button captions: payload +0x75f/+0x77f C-strings truncated at the first
   // non-lowercase byte (0x00442510 caption-normalisation loop), else the STR#
   // 0x96 defaults (0x32 "Yes", or 0x1b "Okay" in the +0x18-&4 arm; 0x33 "No").
@@ -2280,7 +2309,7 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                             ThreeStateButtonLabelBaseline(rect),
                             caption);
     }
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
   };
 
   draw_frame();
@@ -2535,6 +2564,13 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
   if (!layout) {
     return;
   }
+  ProbeUiAutoClear probe_ui_guard(platform);
+  platform.PublishProbeUi("mission_info",
+                          {{"window", layout->frame},
+                           {"abort", layout->abort_button},
+                           {"done", layout->done_button},
+                           {"list", layout->list},
+                           {"description", layout->description}});
   auto frame = LoadPictTexture(platform, kMissionInfoFramePict);
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
@@ -2703,7 +2739,7 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
                           layout->done_button.x + layout->done_button.w,
                           ThreeStateButtonLabelBaseline(layout->done_button),
                           NovaHud_LoadStringEntry(0x96, 0x5).value_or("Done"));
-    SDL_RenderPresent(renderer);
+    platform.Present();
   };
 
   // Ghidra action 5 (0x00446150): the abort arm.

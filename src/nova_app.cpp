@@ -5,6 +5,7 @@
 #include "game/hud_overlay.hpp"
 #include "game/new_pilot_flow.hpp"
 #include "game/nova_font.hpp"
+#include "game/probe_state.hpp"
 #include "game/ship_ai.hpp"
 #include "game/spaceflight.hpp"
 #include "game/targeting.hpp"
@@ -186,6 +187,33 @@ LoadPictSpriteFrames(SDL_Renderer *renderer,
 [[nodiscard]] bool MenuEntranceComplete(const NovaRuntime &runtime) {
   return MenuRowRevealed(runtime, 0) && MenuRowRevealed(runtime, 1) &&
          MenuRowRevealed(runtime, 2);
+}
+
+// Probe-harness support (docs/probe_harness.md): publish the menu's button
+// rects so /probe/click can target them by intent ("new_pilot",
+// "enter_ship", ...). MenuRect is in the 640x480 logical canvas while
+// /probe/click consumes window points, so map through the scaled
+// presentation's on-screen rect. Only revealed rows are published, matching
+// the hover hit-test's gating. No effect on game behaviour.
+void PublishMainMenuProbeUi(NovaRuntime &runtime) {
+  static constexpr std::array<std::string_view, kMenuEntries.size()> kNames{
+      "new_pilot", "open_pilot", "quit_nova",
+      "enter_ship", "set_prefs", "about_nova"};
+  const SDL_FRect playfield = runtime.platform.playfield_window_rect();
+  const float sx = playfield.w / 640.0F;
+  const float sy = playfield.h / 480.0F;
+  std::vector<std::pair<std::string, SDL_FRect>> named;
+  for (std::size_t index = 0; index < kMenuEntries.size(); ++index) {
+    if (!MenuRowRevealed(runtime, index % 3)) {
+      continue;
+    }
+    const SDL_FRect rect = MenuRect(runtime, index);
+    named.emplace_back(
+        std::string(kNames[index]),
+        SDL_FRect{playfield.x + rect.x * sx, playfield.y + rect.y * sy,
+                  rect.w * sx, rect.h * sy});
+  }
+  runtime.platform.PublishProbeUi("main_menu", std::move(named));
 }
 
 [[nodiscard]] bool MenuSpriteContainsOpaquePixel(const NovaRuntime &runtime,
@@ -945,6 +973,11 @@ int NovaApp_Run(NovaRuntime &runtime) {
   if (!runtime.platform.Initialize()) {
     return 1;
   }
+  // External probe harness (docs/probe_harness.md): the state reader runs on
+  // the main thread at the pump, so it can safely walk the live GameState.
+  runtime.platform.probe().SetStateProvider([&runtime](const std::string &query) {
+    return ProbeState_Snapshot(runtime.game, query);
+  });
   NovaGameSession_Run(runtime);
   return 0;
 }
@@ -1172,6 +1205,7 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
     UpdateMenuEntrance(runtime, now_ms);
     runtime.hovered_action = NovaHud_TrackFocusHoverIndex(runtime);
     UpdateMenuCenterPreview(runtime, now_ms);
+    PublishMainMenuProbeUi(runtime);
   } else {
     runtime.hovered_action.reset();
   }
@@ -1208,12 +1242,12 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   runtime.platform.SetScaledPlayfield();
   if (runtime.startup_phase == StartupPhase::loading_splash) {
     NovaUi_PresentLoadingSplashFrame(runtime);
-    SDL_RenderPresent(renderer);
+    runtime.platform.Present();
     return;
   }
   if (runtime.startup_phase == StartupPhase::startup_splash) {
     NovaUi_PresentStartupSplashFrame(runtime);
-    SDL_RenderPresent(renderer);
+    runtime.platform.Present();
     return;
   }
 
@@ -1408,7 +1442,7 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   }
 
   if (mode == 1) {
-    SDL_RenderPresent(renderer);
+    runtime.platform.Present();
   }
 }
 
@@ -1447,6 +1481,11 @@ void NovaUi_PresentStartupSplashFrame(NovaRuntime &runtime) {
 
 // Ghidra: 0x00486ed0 NovaGameMode_DispatchAction
 void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
+  // Probe-harness hygiene (docs/probe_harness.md): every mode change drops the
+  // outgoing screen's published rects so /probe/ui never reports stale layout
+  // (e.g. main-menu buttons while in flight). Each screen republishes on its
+  // own frames; modals clear themselves via ProbeUiAutoClear.
+  runtime.platform.ClearProbeUi();
   switch (action) {
   case GameModeAction::new_game: {
     // Ghidra: param_1 == 0. If a game is already active the original asks

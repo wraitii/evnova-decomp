@@ -1139,7 +1139,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                        button_labels,
                        layout,
                        panel);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     bool close_channel = false;
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {

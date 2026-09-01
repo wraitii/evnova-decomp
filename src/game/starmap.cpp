@@ -1568,7 +1568,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
                 show_borders,
                 zoom_level,
                 hovered_button);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     // Process one batch of raw editable keys / clicks.
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {

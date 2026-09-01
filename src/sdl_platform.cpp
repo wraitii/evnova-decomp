@@ -2,6 +2,7 @@
 #include "log.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace {
 // The original renders onto a 1024x768 internal canvas which it then scales to
@@ -16,6 +17,8 @@ constexpr int kPlayfieldHeight = 480;
 // upscaled fixed screens render their 1024-native art at ~1:1.
 constexpr int kMinimumWindowWidth = 1024;
 constexpr int kMinimumWindowHeight = 768;
+// Default port for the external probe harness (override with EVN_PROBE_PORT).
+constexpr int kDefaultProbePort = 8190;
 
 // Convert SDL's physical scancode to the DirectInput-style code stored in the
 // original g_player_key_bindings table. The Windows CE build used a small
@@ -300,6 +303,18 @@ bool SdlPlatform::Initialize() {
 
   SDL_SetRenderVSync(renderer_.get(), 1);
   SetFullscreenPlayfield();
+
+  // External probe harness (docs/probe_harness.md): enabled only via the
+  // environment; the game runs completely unmodified without it.
+  if (std::getenv("EVN_PROBE") != nullptr) {
+    int port = kDefaultProbePort;
+    if (const char *requested = std::getenv("EVN_PROBE_PORT");
+        requested != nullptr) {
+      port = std::atoi(requested);
+    }
+    probe_.Start(port);
+    probe_.SetQuitLatch([this] { quit_requested_ = true; });
+  }
   return true;
 }
 
@@ -405,7 +420,20 @@ float SdlPlatform::text_raster_scale() const {
                static_cast<float>(output_height) / kPlayfieldHeight));
 }
 
+// Pushes fresh window geometry to the probe, then services the harness
+// (queued jobs, injected events, pause latch).
+void SdlPlatform::PumpProbe() {
+  int window_width = 0;
+  int window_height = 0;
+  SDL_GetWindowSize(window_.get(), &window_width, &window_height);
+  probe_.SetGeometry({static_cast<float>(window_width),
+                      static_cast<float>(window_height)},
+                     playfield_window_rect());
+  probe_.Pump();
+}
+
 std::optional<TextInput> SdlPlatform::PollTextEvent() {
+  PumpProbe();
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
     if (event.type == SDL_EVENT_QUIT) {
@@ -482,6 +510,7 @@ FlightInput SdlPlatform::PollFlightInput() {
   // state reflects the latest presses/releases. Then read the live key state
   // for the flight controls (edge-agnostic, so holding a key steers).
   FlightInput input;
+  PumpProbe();
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
     if (event.type == SDL_EVENT_QUIT) {
@@ -515,8 +544,10 @@ FlightInput SdlPlatform::PollFlightInput() {
     }
   }
   const bool *const keys = SDL_GetKeyboardState(nullptr);
+  // Virtual held keys from the probe harness (SDL_GetKeyboardState cannot see
+  // injected events), merged into the same channel as the physical keys.
   const auto pressed = [&](SDL_Scancode scancode) {
-    return keys[scancode] != 0;
+    return keys[scancode] != 0 || probe_.VirtualKey(scancode);
   };
   input.turn_left = pressed(SDL_SCANCODE_LEFT) || pressed(SDL_SCANCODE_A);
   input.turn_right = pressed(SDL_SCANCODE_RIGHT) || pressed(SDL_SCANCODE_D);
@@ -564,7 +595,16 @@ FlightInput SdlPlatform::PollFlightInput() {
   return input;
 }
 
+void SdlPlatform::Present() {
+  // Capture while the frame about to be swapped in is still the active render
+  // target; SDL_RenderReadPixels after SDL_RenderPresent reads an undefined
+  // backbuffer under the GPU backends.
+  probe_.OnPresent(renderer_.get());
+  SDL_RenderPresent(renderer_.get());
+}
+
 std::optional<char> SdlPlatform::PollCommandEvent() {
+  PumpProbe();
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
     if (event.type == SDL_EVENT_QUIT) {
@@ -594,6 +634,8 @@ std::optional<char> SdlPlatform::PollCommandEvent() {
         return 'n';
       case SDLK_O:
         return 'o';
+      case SDLK_E:
+        return 'e';
       case SDLK_P:
         return 'p';
       case SDLK_A:

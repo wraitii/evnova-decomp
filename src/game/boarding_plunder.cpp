@@ -1446,7 +1446,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
                             ThreeStateButtonLabelBaseline(buttons[i].rect),
                             buttons[i].label);
     }
-    SDL_RenderPresent(renderer);
+    platform.Present();
 
     // Poll: a click on a button resolves the choice. The DITL defines no
     // cancel item, so the original's loop (and this one) only exits through
@@ -1616,7 +1616,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
                     hud,
                     backdrop ? backdrop->get() : nullptr,
                     hovered);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     // Poll for a button action (1..7). Esc/Enter = Abort; left-click hits the
     // hovered option button (the original has no keyboard shortcuts beyond

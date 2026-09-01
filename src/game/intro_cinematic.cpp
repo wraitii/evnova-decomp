@@ -242,7 +242,7 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
       if (pict) {
         PresentPict(renderer, *pict);
       }
-      SDL_RenderPresent(renderer);
+      platform.Present();
 
       // Wait out the per-frame duration; Enter/Space advance one frame, the
       // primary command skips the rest.

@@ -729,7 +729,7 @@ RunBribePaymentWindow(SdlPlatform &platform,
                       frame,
                       payment_amount,
                       hovered);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
       if (in->key == TextKey::escape || in->key == TextKey::enter) {
@@ -1056,7 +1056,7 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                           stellar_id,
                           frame,
                           -1);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
   };
 
   // The top button's action (NovaUi_PollTravelScriptAction ordinal 2 = DITL
@@ -1158,7 +1158,7 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                           stellar_id,
                           frame,
                           hovered);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
       switch (in->key) {

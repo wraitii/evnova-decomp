@@ -24,6 +24,7 @@ add_library(evnova_runtime
     game/landed_store.cpp
     game/mission.cpp
     game/mission_script.cpp
+    game/probe_state.cpp
     game/selection_text_dialog.cpp
     game/asteroid.cpp
     game/boarding_plunder.cpp
@@ -54,6 +55,7 @@ add_library(evnova_runtime
     log.cpp
     nova_app.cpp
     pict_image.cpp
+    probe_server.cpp
     rle_sprite_sheet.cpp
     sdl_audio.cpp
     sdl_music.cpp

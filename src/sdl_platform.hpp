@@ -8,6 +8,8 @@
 #include <span>
 #include <string>
 
+#include "probe_server.hpp"
+
 // Key a modal text/input dialog can act on. The menu's command channel only
 // reports a fixed action-key set, so dialogs read raw editable keys through a
 // separate channel.
@@ -174,6 +176,31 @@ public:
   [[nodiscard]] std::uint64_t ticks_ms() const;
   [[nodiscard]] SDL_FPoint mouse_position() const;
 
+  // Frame-boundary hook: captures a pending probe screenshot (while the
+  // current frame is still the active render target), counts step frames,
+  // then presents. Every game loop must present through this instead of
+  // calling SDL_RenderPresent directly (see docs/probe_harness.md).
+  void Present();
+
+  // The external probe harness (inert unless EVN_PROBE=1). See
+  // docs/probe_harness.md; NovaApp_Run registers the state provider here.
+  [[nodiscard]] ProbeServer &probe() { return probe_; }
+
+  // UI layout registry: the active modal publishes its named control rects
+  // (window-point space) so the harness can click by intent. No-op without
+  // the harness; pair with ProbeUiAutoClear so a closing modal leaves nothing
+  // stale.
+  void PublishProbeUi(std::string window_name,
+                      std::vector<std::pair<std::string, SDL_FRect>> rects) {
+    std::vector<ProbeNamedRect> named;
+    named.reserve(rects.size());
+    for (auto &entry : rects) {
+      named.push_back({std::move(entry.first), entry.second});
+    }
+    probe_.PublishUi(std::move(window_name), std::move(named));
+  }
+  void ClearProbeUi() { probe_.ClearUi(); }
+
   // The current window->content presentation policy for this frame. See
   // SetCenteredPlayfield / SetScaledPlayfield / SetFullscreenPlayfield.
   enum class Presentation { kCentered, kScaled, kFullscreen };
@@ -250,11 +277,26 @@ private:
     void operator()(SDL_Renderer *renderer) const;
   };
 
+  // Pushes fresh window geometry to the probe, then services the harness.
+  void PumpProbe();
+
   bool sdl_initialized_ = false;
   bool quit_requested_ = false;
+  ProbeServer probe_;
   Presentation presentation_ = Presentation::kFullscreen;
   SDL_FPoint mouse_position_{};
   SDL_FPoint mouse_window_point_{};
   std::unique_ptr<SDL_Window, WindowDeleter> window_;
   std::unique_ptr<SDL_Renderer, RendererDeleter> renderer_;
+};
+
+// Clears the probe UI layout registry at scope exit so a closed modal never
+// leaves stale clickable rects behind (see SdlPlatform::PublishProbeUi).
+struct ProbeUiAutoClear {
+  SdlPlatform &platform;
+  explicit ProbeUiAutoClear(SdlPlatform &platform_ref)
+      : platform(platform_ref) {}
+  ~ProbeUiAutoClear() { platform.ClearProbeUi(); }
+  ProbeUiAutoClear(const ProbeUiAutoClear &) = delete;
+  ProbeUiAutoClear &operator=(const ProbeUiAutoClear &) = delete;
 };

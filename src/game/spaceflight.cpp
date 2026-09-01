@@ -445,7 +445,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                         /*run_full_tick=*/true,
                         /*elapsed_ticks=*/1.0F);
   view.DrawGameFrame(platform, state, hud);
-  SDL_RenderPresent(platform.renderer());
+  platform.Present();
 
   // ---- Main loop ----------------------------------------------------------
   // Ghidra exits when DAT_00596d39 (hard quit) or DAT_00596d38 (the primary
@@ -1067,7 +1067,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
     view.DrawGameFrame(platform, state, hud);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     // Ghidra scope 3 "post-draw tasks": pump the primary mouse command; when
     // latched bit sets DAT_00596d38 (return to menu) and, while the frame is

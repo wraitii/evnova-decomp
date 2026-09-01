@@ -248,6 +248,14 @@ void NovaUi_RunTextReaderDialog(
     layout.window.y += std::round(shrink / 2.0F);
   }
 
+  // Publish the final (post-auto-size) control rects to the probe harness.
+  ProbeUiAutoClear probe_ui_guard(platform);
+  platform.PublishProbeUi("text_reader",
+                          {{"window", layout.window},
+                           {"done", layout.done_button},
+                           {"scroll_up", layout.arrow_up},
+                           {"scroll_down", layout.arrow_down}});
+
   const auto draw_frame = [&]() {
     // Deliberate divergence (see docs/dlog_ditl_dialog_format.md): the
     // background is re-rendered every frame and the modal window is layered
@@ -287,7 +295,7 @@ void NovaUi_RunTextReaderDialog(
                           layout.done_button.x + layout.done_button.w,
                           ThreeStateButtonLabelBaseline(layout.done_button),
                           layout.done_caption);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
   };
 
   draw_frame();

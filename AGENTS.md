@@ -25,6 +25,7 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 - If testing game behaviour is required, stop and ask the user for input - you will not be able to interact with the game well enough.
 - Beware of `find` in shell, on macos some commands are very slow if searching the disk.
 - **DO NOT use tail/head with cmake build**, or add a small timeout. tail/head can hang if there are fewer lines output than expected.
+- **External probe harness**: `EVN_PROBE=1` starts a localhost HTTP control surface (pause/step, input injection, state reads, screenshots, log tailing). See `docs/probe_harness.md`. Any new game loop must present through `SdlPlatform::Present()` (not `SDL_RenderPresent`) and poll input through the existing platform channels so the probe keeps working everywhere.
 
 ## Function progress tracker (`progress.csv`)
 

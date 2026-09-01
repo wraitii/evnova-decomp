@@ -1011,7 +1011,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                  layout,
                  button_rects,
                  std::nullopt);
-  SDL_RenderPresent(platform.renderer());
+  platform.Present();
   (void)Mission_TriggerLandingInteractions(
       state, 3, SDL_GetTicks(), [&](std::int16_t mission_def) {
         return NovaMission_RunOfferWindow(
@@ -1046,7 +1046,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                    layout,
                    button_rects,
                    hovered);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     // Poll discrete raw keys for the modal (dedicated channel, so it never
     // interferes with the spaceflight flight controls). Keyboard shortcuts are

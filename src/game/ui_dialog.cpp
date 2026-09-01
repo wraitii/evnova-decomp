@@ -7,6 +7,7 @@
 #include <SDL3/SDL_render.h>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 
@@ -612,6 +613,39 @@ void UiWindow_RunInteractionLoop(
       platform.playfield_window_rect(),
       static_cast<float>(window.definition.right - window.definition.left),
       static_cast<float>(window.definition.bottom - window.definition.top));
+
+  // Publish the dialog's buttons to the probe harness (window-point rects,
+  // named by their Pascal titles: "ok", "cancel", ...). Single generic site
+  // covering every UiWindow dialog; cleared when this interaction returns.
+  {
+    std::vector<std::pair<std::string, SDL_FRect>> named_rects;
+    named_rects.emplace_back("window", window.window_rect);
+    for (std::size_t row = 1; row <= window.items.size(); ++row) {
+      const auto &item = window.items[row - 1];
+      if (item.type != 4) {
+        continue;
+      }
+      std::string name = item.title;
+      for (char &c : name) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      if (name.empty()) {
+        name = "button_" + std::to_string(row);
+      }
+      named_rects.emplace_back(std::move(name),
+                               ItemRect(item, window.window_rect));
+    }
+    platform.PublishProbeUi(
+        "ui_dialog_ditl_" + std::to_string(window.definition.dialog_item_list_id),
+        std::move(named_rects));
+  }
+  ProbeUiAutoClear probe_ui_guard(platform);
+
+  // Frame-start cursor sample, used for hover-style reads only. Click
+  // handling re-samples at event time (see the primary case) so a click that
+  // arrives mid-frame is hit-tested at its own position, not the previous
+  // frame's cursor. Required for the external probe harness
+  // (docs/probe_harness.md), whose injected clicks always land mid-frame.
   const SDL_FPoint mouse = platform.mouse_window_point();
   auto activate = [&](std::size_t row) {
     *code_out = static_cast<short>(row);
@@ -630,6 +664,11 @@ void UiWindow_RunInteractionLoop(
   for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
     switch (in->key) {
     case TextKey::primary: {
+      // The click's own position (probe-harness support,
+      // docs/probe_harness.md): the down event updates the platform's tracked
+      // window point before this case runs, so re-sample here instead of
+      // trusting the frame-start sample.
+      const SDL_FPoint click = platform.mouse_window_point();
       // An expanded popup consumes the whole click: selecting an entry,
       // re-clicking the control, or clicking anywhere else all just close it.
       // (Without this, clicks landing on the dropdown area would fall through
@@ -642,7 +681,7 @@ void UiWindow_RunInteractionLoop(
         const SDL_FRect list{
             box.x, box.y + box.h, box.w,
             kPopupRowHeight * static_cast<float>(entry.popup_entries.size())};
-        if (Contains(list, mouse.x, mouse.y)) {
+        if (Contains(list, click.x, click.y)) {
           entry.value = std::clamp(
               static_cast<int>((mouse.y - list.y) / kPopupRowHeight) + 1,
               1,
@@ -655,7 +694,7 @@ void UiWindow_RunInteractionLoop(
         const auto &item = window.items[row - 1];
         auto &entry = window.state[row - 1];
         const SDL_FRect box = ItemRect(item, window.window_rect);
-        if (!Contains(box, mouse.x, mouse.y)) {
+        if (!Contains(box, click.x, click.y)) {
           continue;
         }
         switch (item.type) {
@@ -752,7 +791,7 @@ void UiWindow_RunInteractionLoop(
   }
 
   UiWindow_Draw(platform, font_cache, window);
-  SDL_RenderPresent(platform.renderer());
+  platform.Present();
   // Modal-loop cadence: the original yields through its frame pump
   // (NovaPlatform_PumpWindowEventsThrottled); other ported dialogs use 16 ms.
   SDL_Delay(16);

@@ -1018,7 +1018,7 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
     const SDL_FPoint mouse = platform.mouse_position();
     const auto hover = HitTestControl(layout, mouse.x, mouse.y);
     DrawSettingsDialog(platform, font_cache, layout, prefs, artwork, hover);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     for (auto in = platform.PollTextEvent(); in;
          in = platform.PollTextEvent()) {
@@ -1028,7 +1028,12 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
       case TextKey::enter:
         return true; // Enter acts as OK.
       case TextKey::primary: {
-        const auto hit = HitTestControl(layout, mouse.x, mouse.y);
+        // Probe-harness support (docs/probe_harness.md): injected clicks land
+        // mid-frame, so hit-test at the click event's own position instead of
+        // the frame-start capture above (which the click hasn't updated yet).
+        // Real clicks benefit identically; behaviour is otherwise unchanged.
+        const SDL_FPoint click = platform.mouse_position();
+        const auto hit = HitTestControl(layout, click.x, click.y);
         if (!hit) {
           break;
         }
@@ -1109,7 +1114,7 @@ bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
                           backdrop ? backdrop->get() : nullptr,
                           working,
                           selected_row);
-    SDL_RenderPresent(platform.renderer());
+    platform.Present();
 
     for (auto in = platform.PollTextEvent(); in;
          in = platform.PollTextEvent()) {
