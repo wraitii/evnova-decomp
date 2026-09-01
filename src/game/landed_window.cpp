@@ -20,6 +20,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -768,8 +769,7 @@ void DrawLandedMenu(SdlPlatform &platform,
 LandedExit DispatchService(SdlPlatform &platform,
                            GameState &state,
                            LandedContext &ctx,
-                           SDL_Texture *docked_snapshot) {
-  (void)platform;
+                           const std::function<void()> &render_background) {
   switch (ctx.selection) {
   case LandedService::kLaunch:
     NovaLog::Info("launching from stellar {} back into space",
@@ -793,7 +793,7 @@ LandedExit DispatchService(SdlPlatform &platform,
     // service content (buy/sell tables, outfit list, shipyard purchases, bar
     // holovid/gamble, map navigation) is still out of scope behind the frame.
     const LandedExit dialog_exit = NovaLanded_RunSubWindowDialog(
-        platform, state, ctx.selection, ctx.stellar_id, docked_snapshot);
+        platform, state, ctx.selection, ctx.stellar_id, render_background);
     if (dialog_exit == LandedExit::kQuit) {
       return LandedExit::kQuit;
     }
@@ -949,7 +949,25 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   }
 
   bool entered_sub_screen = false;
-  std::unique_ptr<SdlTexture> docked_snapshot;
+
+  // Re-renders the docked menu each frame: sub-dialogs (BBS, stores, offer
+  // windows, text readers) layer themselves over this live background instead
+  // of a captured snapshot (deliberate divergence, see
+  // docs/dlog_ditl_dialog_format.md).
+  const std::function<void()> render_background = [&] {
+    DrawLandedMenu(platform,
+                   font_cache,
+                   button_art,
+                   state,
+                   ctx,
+                   destination_art ? destination_art->get() : nullptr,
+                   planet_art ? planet_art->get() : nullptr,
+                   description,
+                   panel,
+                   layout,
+                   button_rects,
+                   std::nullopt);
+  };
 
   // Activates the currently-selected service, leaving the dock when the player
   // picks Launch. On a mocked sub-screen (trade/outfit/shipyard/bar/...) the
@@ -960,11 +978,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     if (!ServiceAvailable(state, ctx.stellar_id, ctx.selection)) {
       return false;
     }
-    LandedExit exit =
-        DispatchService(platform,
-                        state,
-                        ctx,
-                        docked_snapshot ? docked_snapshot->get() : nullptr);
+    LandedExit exit = DispatchService(platform, state, ctx, render_background);
     if (exit == LandedExit::kLaunched) {
       return true;
     }
@@ -980,8 +994,9 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   // loop (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30) sets
   // g_misn_list_page_group = 3 and calls Mission_TriggerReturnMission-
   // Interactions(3) (0x00448670) right after the window is up, before its
-  // input loop. Reproduce that ordering: render the dock once, snapshot it as
-  // the offer modal's backing store, then run the offer pass. TODO(decomp):
+  // input loop. Reproduce that ordering: render the dock once, then run the
+  // offer pass over the live dock (the offer window re-renders it each
+  // frame). TODO(decomp):
   // the original also re-runs the pass on Spaceport action 0xf and consumes
   // the DAT_00776af4 recheck timer in the services windows.
   DrawLandedMenu(platform,
@@ -996,16 +1011,11 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                  layout,
                  button_rects,
                  std::nullopt);
-  docked_snapshot = NovaLanded_CaptureDockedBackground(platform);
   SDL_RenderPresent(platform.renderer());
   (void)Mission_TriggerLandingInteractions(
       state, 3, SDL_GetTicks(), [&](std::int16_t mission_def) {
         return NovaMission_RunOfferWindow(
-            platform,
-            state,
-            mission_def,
-            ctx.stellar_id,
-            docked_snapshot ? docked_snapshot->get() : nullptr);
+            platform, state, mission_def, ctx.stellar_id, render_background);
       });
 
   while (!platform.quit_requested()) {
@@ -1036,8 +1046,6 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                    layout,
                    button_rects,
                    hovered);
-    // Capture the actual dock before SDL presents/swaps its backbuffer.
-    docked_snapshot = NovaLanded_CaptureDockedBackground(platform);
     SDL_RenderPresent(platform.renderer());
 
     // Poll discrete raw keys for the modal (dedicated channel, so it never
@@ -1068,11 +1076,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                   ServiceButtonAt(button_rects, platform.mouse_position())) {
             ctx.selection = static_cast<LandedService>(*slot);
             if (ServiceAvailable(state, ctx.stellar_id, ctx.selection)) {
-              LandedExit exit = DispatchService(
-                  platform,
-                  state,
-                  ctx,
-                  docked_snapshot ? docked_snapshot->get() : nullptr);
+              LandedExit exit =
+                  DispatchService(platform, state, ctx, render_background);
               if (exit == LandedExit::kLaunched) {
                 return LandedExit::kLaunched;
               }

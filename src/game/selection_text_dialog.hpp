@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -76,13 +77,17 @@ void NovaUi_DrawScrollArrow(SdlPlatform &platform,
 // +/-10 px; action 4 opens the starmap when `allow_starmap` is set (the port
 // keys it to 'm' in place of the original's key binding); Esc/Enter also
 // close (port divergence, the original exits only via Done).
+// `render_background` re-renders the preserved underlying screen (docked
+// menu, flight view, ...) each frame so the modal just layers its window on
+// top; without it the screen is cleared to black.
 // TODO(decomp) skipped: the variant >= 0x80 DLOG 0xbbc + PICT 0x214f art
 // path, the desc status-string display, and g_selection_dialog_over_static-
 // _surface redraw variants.
-void NovaUi_RunTextReaderDialog(SdlPlatform &platform,
-                                GameState &state,
-                                const std::string &text,
-                                bool allow_starmap,
-                                SDL_Texture *docked_snapshot = nullptr);
+void NovaUi_RunTextReaderDialog(
+    SdlPlatform &platform,
+    GameState &state,
+    const std::string &text,
+    bool allow_starmap,
+    const std::function<void()> &render_background = {});
 
 } // namespace game

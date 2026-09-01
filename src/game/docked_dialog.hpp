@@ -21,19 +21,26 @@
 // service internals.
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include "landed_window.hpp"
 #include "mission.hpp"
 
+class SdlAudio;
 class SdlPlatform;
 class SdlTexture;
 struct SDL_Texture;
 
 namespace game {
 
-[[nodiscard]] std::unique_ptr<SdlTexture>
-NovaLanded_CaptureDockedBackground(SdlPlatform &platform);
+class HudRenderer;
+class SpaceflightView;
+
+// Modal layering (deliberate divergence, see docs/dlog_ditl_dialog_format.md):
+// every sub-window re-renders the preserved underlying screen each frame (the
+// docked Spaceport menu, or the live flight view) and layers its DLOG window
+// on top, instead of compositing over a captured snapshot.
 
 // The sub-window frame PICT resource id backing a docked service. Returns the
 // documented Nova Graphics 3 PICT id, or 0 when the service has no frame art
@@ -41,21 +48,20 @@ NovaLanded_CaptureDockedBackground(SdlPlatform &platform);
 [[nodiscard]] std::uint16_t
 NovaDocked_SubWindowFramePict(LandedService service);
 
-// Runs one sub-window dialog modal over the docked screen for `service`. Draws
-// the docked backdrop (PICT 0x2134) across the full 640x480 playfield, a dim
-// scrim, then the service's frame PICT (NovaDocked_SubWindowFramePict)
+// Runs one sub-window dialog modal over the docked screen for `service`.
+// `render_background` re-renders the docked menu each frame; the dialog adds
+// a dim scrim, then the service's frame PICT (NovaDocked_SubWindowFramePict)
 // centered at its natural size, with the service heading and a grey-backed
 // "Leave" button. Loops until the player closes the dialog (Esc, Enter, or a
 // click/primary press anywhere), the platform quits (returns kQuit), or an
-// internal "launch" choice (future) escalates to kLaunched. The docked menu's
-// centred playfield is re-asserted each frame. Mirrors the nested-modality of
-// the original sub-windows over the same backing store.
-[[nodiscard]] LandedExit
-NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
-                              GameState &state,
-                              LandedService service,
-                              std::int16_t stellar_id,
-                              SDL_Texture *docked_snapshot = nullptr);
+// internal "launch" choice (future) escalates to kLaunched. Mirrors the
+// nested-modality of the original sub-windows over the same backing store.
+[[nodiscard]] LandedExit NovaLanded_RunSubWindowDialog(
+    SdlPlatform &platform,
+    GameState &state,
+    LandedService service,
+    std::int16_t stellar_id,
+    const std::function<void()> &render_background = {});
 
 // Ghidra 0x00442510 NovaUi_RunMissionShipInteractionWindow (partial port: the
 // text-offer arm). Shows mission definition `mission_def`'s dësc
@@ -77,6 +83,23 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                            GameState &state,
                            std::int16_t mission_def,
                            std::int16_t landed_stellar_id,
-                           SDL_Texture *docked_snapshot = nullptr);
+                           const std::function<void()> &render_background = {});
+
+// Ghidra 0x00446150 NovaUi_RunMissionComputerWindow: the in-flight "mission
+// computer" window (gameplay command 0x28, default key I) listing the
+// pilot's active missions with each selection's quick-brief text. Renders
+// the live flight view beneath itself (SpaceflightView::DrawGameFrame, the
+// boarding/comm-dialog pattern). Supports the starmap action (with the
+// selected mission's destination preselect) and
+// aborting missions whose CanAbort latch is set (flags 0x40 apply the -5x
+// CompReward reputation reversal). See docked_dialog.cpp for the ported
+// helper sites and skips. Opening with zero visible missions is refused by
+// the caller (Ship_HandlePlayerShipCore plays the denied cue and the STR#
+// 0x7d2 0x162 overlay instead).
+void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
+                                      SdlAudio &audio,
+                                      GameState &state,
+                                      SpaceflightView &view,
+                                      HudRenderer &hud);
 
 } // namespace game

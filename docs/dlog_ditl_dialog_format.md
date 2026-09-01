@@ -258,6 +258,37 @@ parses the MENU payload (title + entries).
 > `UiWindow_SetDrawCallback(window, 1)`. Both carry a list of Pascal entries
 > addressed through `UiPanel_GetEntryTextPascalIndexed`.
 
+## 7.1 Modal layering: re-render the background (deliberate divergence)
+
+In the original, every dialog is a Mac window composited by the toolbox over
+the *single* game surface: the game scene stays put underneath and the window
+just draws into its own rect. Our SDL build has no per-window compositing, so
+each modal owns the whole screen for a frame — and it must decide what fills
+the rest of it.
+
+**Policy (deliberate divergence from the original's mechanics, not from its
+look): every modal re-renders the preserved underlying screen each frame and
+layers its DLOG window on top.**
+
+* In-flight modals (ship-comm, boarding/plunder, the mission-info window
+  0x00446150) call `SpaceflightView::DrawGameFrame` every frame and then draw
+  their window in the centred 640x480 canvas. The flight sim is paused, so
+  this redraws the same world; stars/animated sprites keep animating, which
+  reads better than a frozen frame.
+* Docked modals (Mission BBS 0x3ee, trade/outfit/shipyard stores, the offer
+  window 0x3f8, the text readers) receive a `render_background` callback that
+  re-invokes `DrawLandedMenu` (landed_window.cpp) and draw it beneath their
+  window.
+* Chained dialogs (Brief → LoadCarg after a BBS accept) each re-render the
+  same base background, so the chain never stacks a dialog on top of the
+  dialog that just closed.
+
+Earlier revisions captured the presented frame (`SDL_RenderReadPixels`) and
+replayed it as a backdrop texture; that path caused stretched/letterboxed
+mis-rendering and is being removed. If you add a new modal, take a
+`const std::function<void()> &render_background` (or `view`/`hud` refs in the
+flight layer) and re-render — do not capture frames.
+
 ## 8. Quick recipe to read an unknown DLOG/DITL
 
 1. `python3 tools/rez_extract.py dlg` — list all DLOGs/DITLs and sizes.

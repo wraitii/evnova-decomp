@@ -212,11 +212,12 @@ struct ReaderLayout {
 
 } // namespace
 
-void NovaUi_RunTextReaderDialog(SdlPlatform &platform,
-                                GameState &state,
-                                const std::string &text,
-                                bool allow_starmap,
-                                SDL_Texture *docked_snapshot) {
+void NovaUi_RunTextReaderDialog(
+    SdlPlatform &platform,
+    GameState &state,
+    const std::string &text,
+    bool allow_starmap,
+    const std::function<void()> &render_background) {
   ReaderLayout layout = LoadReaderLayout();
   if (layout.window.w <= 0.0F) {
     return;
@@ -245,14 +246,18 @@ void NovaUi_RunTextReaderDialog(SdlPlatform &platform,
   }
 
   const auto draw_frame = [&]() {
-    platform.SetFullscreenPlayfield();
-    SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(platform.renderer());
-    if (docked_snapshot != nullptr) {
-      const SDL_FRect snapshot_rect{0.0F, 0.0F, 640.0F, 480.0F};
-      SDL_RenderTexture(
-          platform.renderer(), docked_snapshot, nullptr, &snapshot_rect);
+    // Deliberate divergence (see docs/dlog_ditl_dialog_format.md): the
+    // background is re-rendered every frame and the modal window is layered
+    // on top; the original composites the dialog over the single game
+    // surface. Without a background renderer the screen clears to black.
+    if (render_background) {
+      render_background();
+    } else {
+      SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+      SDL_RenderClear(platform.renderer());
     }
+    // The reader's DLOG coordinates are window-point space.
+    platform.SetFullscreenPlayfield();
     SDL_SetRenderDrawColor(platform.renderer(), 16, 40, 72, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(platform.renderer(), &layout.window);
     if (!DrawBackdropStrip(platform, layout.window)) {

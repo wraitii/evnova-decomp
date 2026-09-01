@@ -526,6 +526,8 @@ FlightInput SdlPlatform::PollFlightInput() {
       pressed(SDL_SCANCODE_LCTRL) || pressed(SDL_SCANCODE_RCTRL);
   input.travel = pressed(SDL_SCANCODE_J);
   input.starmap = pressed(SDL_SCANCODE_M);
+  // Gameplay command 0x28 (default DIK 0x17 = I): the active-missions window.
+  input.mission_info = pressed(SDL_SCANCODE_I);
   input.land = pressed(SDL_SCANCODE_RETURN) || pressed(SDL_SCANCODE_KP_ENTER);
   input.target_action = pressed(SDL_SCANCODE_E);
   input.board = pressed(SDL_SCANCODE_B);
@@ -632,9 +634,8 @@ SDL_FRect SdlPlatform::playfield_window_rect() const {
   case Presentation::kScaled: {
     // The logical LETTERBOX mode maps the 640x480 canvas uniformly into the
     // window; reproduce its dst rect in window points.
-    const float scale =
-        std::min(fw / static_cast<float>(kPlayfieldWidth),
-                 fh / static_cast<float>(kPlayfieldHeight));
+    const float scale = std::min(fw / static_cast<float>(kPlayfieldWidth),
+                                 fh / static_cast<float>(kPlayfieldHeight));
     const float dst_w = static_cast<float>(kPlayfieldWidth) * scale;
     const float dst_h = static_cast<float>(kPlayfieldHeight) * scale;
     return SDL_FRect{(fw - dst_w) * 0.5F, (fh - dst_h) * 0.5F, dst_w, dst_h};
@@ -643,7 +644,8 @@ SDL_FRect SdlPlatform::playfield_window_rect() const {
     // ApplyCenteredPresentation integer-centres the native panel.
     const int ox = std::max(0, w - kPlayfieldWidth) / 2;
     const int oy = std::max(0, h - kPlayfieldHeight) / 2;
-    return SDL_FRect{static_cast<float>(ox), static_cast<float>(oy),
+    return SDL_FRect{static_cast<float>(ox),
+                     static_cast<float>(oy),
                      static_cast<float>(kPlayfieldWidth),
                      static_cast<float>(kPlayfieldHeight)};
   }

@@ -57,7 +57,13 @@ struct StarmapResult {
 // gameplay state. Requires a valid scenario (a no-scenario starmap is a no-op
 // that returns kContinue with no destination). On close the returned
 // StarmapResult carries the destination system id the player left selected.
-[[nodiscard]] StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
-                                                  GameState &state);
+// `preselected_system_id` (>= 0) seeds the highlighted system, mirroring
+// g_starmap_selected_system_id which NovaUi_RunMissionComputerWindow
+// (0x00446150) arms from the selected mission's destination before opening
+// the map; -1 keeps the default current-system selection.
+[[nodiscard]] StarmapResult
+NovaStarmap_RunWindow(SdlPlatform &platform,
+                      GameState &state,
+                      std::int16_t preselected_system_id = -1);
 
 } // namespace game

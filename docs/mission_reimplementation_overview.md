@@ -28,7 +28,7 @@ sit at +0x004/+0x006/+0x008/+0x00a and TravelStel/ReturnStel at
 +0x02a ShipNameID     +0x02c ShipStart      +0x02e CompGovt
 +0x030 CompReward     +0x032 ShipSubtitle   +0x034..+0x03e desc ids
                       (Brief, QuickBrief, LoadCarg, DumpCargo, Comp, Fail)
-+0x040 TimeLimit      +0x044 ShipDoneText   +0x048 AuxShipCount
++0x040 TimeLimit      +0x042 CanAbort       +0x044 ShipDoneText   +0x048 AuxShipCount
 +0x04a AuxShipDude    +0x04c AuxShipSyst    +0x050 Flags / +0x052 Flags2
 +0x058 desc id (slot +0x41, provisional)    +0x05a Ship restriction
 +0x05c Availability expr                    +0x656/+0x65a Require mask (8b)
@@ -37,7 +37,9 @@ sit at +0x004/+0x006/+0x008/+0x00a and TravelStel/ReturnStel at
 
 MisnActive highlights: +0x00 TravelStel / +0x04 ReturnStel (resolved),
 +0x12/+0x14 resolved CargoType/CargoQty, +0x16/+0x18/+0x1a
-PickupMode/DropOffMode/ScanMask, +0x33 carrying latch, +0x35..+0x43 desc ids
+PickupMode/DropOffMode/ScanMask, +0x32 can_abort (the mïsn CanAbort flag,
+payload +0x42 — renamed from the earlier "has_been_visited" reading), +0x33
+carrying latch, +0x35..+0x43 desc ids
 (+0x41 from payload +0x58, provisional; +0x43 ShipDone), +0x45 TimeLimit
 countdown (-32000 = none). The Ghidra struct comments carry the same map.
 
@@ -165,9 +167,25 @@ the generic placeholder.
 
 Remaining dialog entrypoints:
 
-- `0x00440C90` mission-computer polling — open
-- `0x00446150` mission-computer window — open (review/abort accepted
-  missions)
+- `0x00440C90` mission-computer polling — open (this is the BBS/destination
+  window poller, not the I-key window)
+- `0x00446150` mission-computer window — DONE (70%) as
+  `NovaMission_RunMissionInfoWindow` (`docked_dialog.cpp`): the in-flight
+  active-missions modal (gameplay command 0x28, default key I; the caller in
+  `spaceflight.cpp` counts visible missions first and plays the denied cue +
+  STR# 0x7d2 0x162 overlay when there are none). DLOG/DITL 0x3f4 + PICT
+  0x2145 layout, the 0x00445dc0 list rebuild (skips flags 0x400 invisible
+  missions; failed rows keep the DAT_0056c328 0xa5 marker), the selected
+  mission's quick-brief desc through the placeholder + wildcard passes, the
+  Abort/Done button pair (STR# 0x96 0x23/0x5; Abort enabled on MisnActive
+  +0x32 `can_abort`), the starmap action with the flags 0x100 destination
+  preselect, and the abort arm (flags 0x40 → −5× CompReward over every
+  system the CompGovt owns, then `Mission_ClearMisnSlotAssignments(slot,
+  1)`). Skips: game-calendar date line, ai_secondary_target_slot restore
+  around a nested map destination window. It renders the live flight view
+  beneath itself — like every modal in the port, per the layering divergence
+  documented in docs/dlog_ditl_dialog_format.md §7.1 (the docked-layer
+  snapshot plumbing was removed in the same pass).
 - `0x0043C470` available Mission BBS — ported in `docked_dialog.cpp`
   (`RunMissionBoardDialog`), desc rendering TODO
 

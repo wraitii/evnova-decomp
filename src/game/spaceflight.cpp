@@ -6,6 +6,7 @@
 #include "asteroid.hpp"
 #include "boarding_plunder.hpp"
 #include "collision.hpp"
+#include "docked_dialog.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -465,6 +466,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool ship_cycle_was_held = false;
   bool nearest_was_held = false;
   bool starmap_was_held = false;
+  bool mission_info_was_held = false;
   bool land_was_held = false;
   bool target_action_was_held = false;
   bool board_was_held = false;
@@ -786,6 +788,35 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       state.travel_reticle_pulse = 256.0F;
     }
     starmap_was_held = starmap_held;
+    // Active-missions command ('i', edge-triggered; gameplay command 0x28):
+    // Ship_HandlePlayerShipCore 0x0044aa70 counts the non-invisible active
+    // missions and either plays the denied cue + "You have no active
+    // missions." overlay (STR# 0x7d2 0x162, 0xf0 ticks) or opens the
+    // mission-computer window (NovaUi_RunMissionComputerWindow 0x00446150).
+    // Gated while a jump is engaged like the other interaction windows.
+    const bool mission_info_held = input.mission_info;
+    if (mission_info_held && !mission_info_was_held && !state.travel.engaging) {
+      std::size_t visible_missions = 0;
+      for (std::size_t slot = 0;
+           slot < state.active_mission_runtime_flags.size();
+           ++slot) {
+        const auto &flags = state.active_mission_runtime_flags[slot];
+        if (flags.is_active && (flags.flags_primary_at_accept & 0x400) == 0U) {
+          ++visible_missions;
+        }
+      }
+      if (visible_missions == 0) {
+        state.pending_ui_sounds.push_back({3, 1});
+        NovaHud_ShowOverlayMessage(
+            state,
+            NovaHud_LoadStringEntry(0x7d2, 0x162)
+                .value_or("You have no active missions."),
+            static_cast<std::uint64_t>(0xf0));
+      } else {
+        NovaMission_RunMissionInfoWindow(platform, audio, state, view, hud);
+      }
+    }
+    mission_info_was_held = mission_info_held;
     // When a jump completed this frame, re-spawn the starfield for the new
     // system (the original's jump completion re-runs
     // NovaEffects_QueuedAmbientStarParticles).

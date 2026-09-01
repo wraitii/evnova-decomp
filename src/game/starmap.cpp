@@ -1323,7 +1323,9 @@ float MarkerDistSq(const SDL_FPoint &point, const MappedSystem &m) {
 // ---------------------------------------------------------------------------
 // NovaStarmap_RunWindow (0x004a3aa0 NovaUi_RunStarmapWindow, clean-room).
 // ---------------------------------------------------------------------------
-StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
+StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
+                                    GameState &state,
+                                    std::int16_t preselected_system_id) {
   // No scenario tables -> nothing to map.
   if (state.scenario.systems.empty()) {
     NovaLog::Warn("starmap opened with no scenario system table; closing");
@@ -1413,6 +1415,13 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform, GameState &state) {
   };
 
   std::int16_t selected_id = state.player.current_system_id;
+  // Caller-supplied highlight (mission-info window preselects the selected
+  // mission's destination system; see the header note).
+  if (preselected_system_id >= 0 &&
+      static_cast<std::size_t>(preselected_system_id) <
+          state.scenario.systems.size()) {
+    selected_id = preselected_system_id;
+  }
   bool tab_was_held = false;
   bool backslash_was_held = false;
   // Political-overlay toggle (the original's Show/Hide Borders button, action

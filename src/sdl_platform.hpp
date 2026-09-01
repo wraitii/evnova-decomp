@@ -66,6 +66,11 @@ struct FlightInput {
   // through NovaInput_IsCommandActiveWithGameplayGuards; this build binds it to
   // a single key distinct from the steer/travel/target inputs.
   bool starmap = false;
+  // Edge-triggered active-missions command: 'i' opens the mission-info
+  // ("mission computer") window listing the pilot's active missions. Mirrors
+  // gameplay command 0x28 in Ship_HandlePlayerShipCore (0x0044aa70), whose
+  // default binding is DIK 0x17 = I (NovaPrefs_ResetKeyBindings 0x004b4400).
+  bool mission_info = false;
   // Edge-triggered normal arrival command: Return. When the currently selected
   // ordinary stellar is inside the 250-unit arrival envelope, this follows the
   // ticker-text / Spaceport path in Stellar_ProcessTravelAndLanding instead of
