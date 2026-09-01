@@ -282,6 +282,12 @@ layers its DLOG window on top.**
 * Chained dialogs (Brief → LoadCarg after a BBS accept) each re-render the
   same base background, so the chain never stacks a dialog on top of the
   dialog that just closed.
+* Gameplay time freezes while a modal owns the loop (the original's
+  g_gameplay_time_frozen). The flight loop resyncs its frame-time clock
+  (`resync_frame_clock` in spaceflight.cpp) after every blocking modal
+  returns — starmap, mission-info window, comm/negotiation dialogs,
+  landing and boarding — so the wall-clock gap is never integrated as one
+  giant flight frame on resume.
 
 Earlier revisions captured the presented frame (`SDL_RenderReadPixels`) and
 replayed it as a backdrop texture; that path caused stretched/letterboxed

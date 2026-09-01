@@ -471,6 +471,12 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool target_action_was_held = false;
   bool board_was_held = false;
   std::int16_t prev_travel_stellar = state.travel.selected_stellar_id;
+  // Gameplay time freezes while a blocking modal owns the loop (the original's
+  // g_gameplay_time_frozen around interaction windows); every modal return
+  // site calls resync_frame_clock() so the wall-clock gap is never integrated
+  // as one giant flight frame (ship integration, ambient stars, shield
+  // recharge and the reticle decay all scale by frame_time_ms).
+  const auto resync_frame_clock = [&] { prev_tick_ms = SDL_GetTicks(); };
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = SDL_GetTicks();
     const float frame_time_ms =
@@ -786,6 +792,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // travel stellar (the original re-arms the travel pulse on map return
       // via NovaUi_MarkTravelAndStatusPanelsDirty).
       state.travel_reticle_pulse = 256.0F;
+      // The map blocked the loop; freeze gameplay time across it.
+      resync_frame_clock();
     }
     starmap_was_held = starmap_held;
     // Active-missions command ('i', edge-triggered; gameplay command 0x28):
@@ -814,6 +822,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             static_cast<std::uint64_t>(0xf0));
       } else {
         NovaMission_RunMissionInfoWindow(platform, audio, state, view, hud);
+        // The mission-computer window blocked the loop; freeze gameplay time
+        // across it.
+        resync_frame_clock();
       }
     }
     mission_info_was_held = mission_info_held;
@@ -909,6 +920,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           returning_to_menu = true;
           break;
         }
+        // Docking blocked the loop for the whole landing; freeze gameplay
+        // time across it (launch re-enters flight with a fresh clock).
+        resync_frame_clock();
       } else {
         const auto *st =
             state.scenario.Stellar(state.travel.selected_stellar_id);
@@ -957,6 +971,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           } else {
             (void)NovaShipComm_RunShipDialog(
                 platform, state, ship_target, view, hud);
+            // The comm dialog blocked the loop; freeze gameplay time.
+            resync_frame_clock();
           }
         }
       } else if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
@@ -967,6 +983,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           returning_to_menu = true;
           break;
         }
+        // The destination-interaction window blocked the loop; freeze
+        // gameplay time across it.
+        resync_frame_clock();
         if (exit == NegotiationExit::kProceedToLand) {
           // The player paid an accepted bribe in the interaction window (the
           // only path out of that window that docks; landing itself stays on
@@ -992,6 +1011,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
               returning_to_menu = true;
               break;
             }
+            resync_frame_clock();
           } else {
             NovaLog::Warn("destination-interaction dialog staged a landing at "
                           "stellar {} but arrival was refused ({})",
@@ -1015,6 +1035,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       if (returning_to_menu) {
         break;
       }
+      // The boarding/plunder modal blocked the loop; freeze gameplay time.
+      resync_frame_clock();
     }
     // In-flight shield regeneration (class base + opcode-5 outfit bonuses),
     // scaled by the real frame time. The original's player-update path ticks

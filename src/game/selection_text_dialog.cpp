@@ -127,8 +127,11 @@ struct ReaderLayout {
 };
 
 // Window bounds + control rects from the real DLOG/DITL, centred on the
-// playfield (Dialog_CreateFromDlog 0x008730a1).
-[[nodiscard]] ReaderLayout LoadReaderLayout() {
+// fullscreen window-coordinate space the docked menu and store windows use
+// (Dialog_CreateFromDlog 0x008730a1 centred on the original's fixed 640x480
+// canvas; the port's docked screen spans the whole window, so centring on
+// logical_playfield_size keeps the reader over the dock's centre).
+[[nodiscard]] ReaderLayout LoadReaderLayout(const SdlPlatform &platform) {
   ReaderLayout layout;
   const auto definition = NovaResource_LoadDialogDefinition(kReaderDialogId);
   const auto items =
@@ -141,7 +144,7 @@ struct ReaderLayout {
   }
   const float win_w = static_cast<float>(definition->right - definition->left);
   const float win_h = static_cast<float>(definition->bottom - definition->top);
-  const SDL_FPoint output{640.0F, 480.0F};
+  const SDL_FPoint output = platform.logical_playfield_size();
   const SDL_FPoint origin{(output.x - win_w) / 2.0F, (output.y - win_h) / 2.0F};
   layout.window = {origin.x, origin.y, win_w, win_h};
   const auto rect = [&](std::size_t index) {
@@ -218,7 +221,7 @@ void NovaUi_RunTextReaderDialog(
     const std::string &text,
     bool allow_starmap,
     const std::function<void()> &render_background) {
-  ReaderLayout layout = LoadReaderLayout();
+  ReaderLayout layout = LoadReaderLayout(platform);
   if (layout.window.w <= 0.0F) {
     return;
   }

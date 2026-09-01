@@ -2308,10 +2308,12 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
         if (Contains(decline_rect, point)) {
           // 0x00442510's decline arm: the payload +0x58 desc (slot_aux_text)
           // opens the text reader when present, then the decline reaction
-          // script (payload +0x25a) runs either way. The original composes
-          // the follow-up text with the active-arm wildcard pass against
-          // slot -1 (nothing resolves); the port keeps the load-time
-          // placeholder pass only.
+          // script (payload +0x25a) runs either way. Text composition
+          // mirrors the original (Ui_LoadSelectionDialogResource placeholder
+          // pass + Stellar_BuildTravelDestinationDescription('\0', -1)):
+          // the active-arm wildcard pass against slot -1, so mission-specific
+          // tokens fall back to their [Error] sentinels while player tokens
+          // still resolve.
           if (def->slot_aux_text_id >= 0x80) {
             const std::string followup_text = LoadMissionText(
                 state,
