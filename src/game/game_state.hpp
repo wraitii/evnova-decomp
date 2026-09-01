@@ -83,7 +83,11 @@ struct ActiveMission {
   std::int16_t goal_count_remaining = 0;    // +0x2c
   std::int16_t goal_counter_e = 0;          // +0x2e
   std::int16_t mission_target_count = 0;    // +0x30
-  bool has_been_visited = false;            // +0x32
+  // The misn CanAbort flag (payload +0x42, copied at accept by
+  // Mission_PopulateMissionSlotFromDef 0x0043f8c0). Gates the player-abort arm
+  // of the mission-info window (0x00446150 action 5) and the quick-fail fleet
+  // release (0x00440bf0). (Was misnamed has_been_visited.)
+  bool can_abort = false; // +0x32
   // Carrying-the-mission-cargo latch: set at acceptance for PickupMode 0,
   // set/cleared by the landing interaction pass.
   bool carrying_resources = false;               // +0x33

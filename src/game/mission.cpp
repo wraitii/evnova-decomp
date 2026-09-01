@@ -934,7 +934,7 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.goal_count_remaining = definition->target_ship_count;
   active.goal_counter_e = 0;
   active.mission_target_count = definition->target_ship_count;
-  active.has_been_visited = definition->start_visited;
+  active.can_abort = definition->can_abort;
   active.carrying_resources = false;
   active.mission_template_id = mission_id;
   active.mission_ship_count_max = definition->mission_ship_count_max;
@@ -1443,7 +1443,8 @@ bool Mission_TryConsumeMissionInteractionResources(GameState &state,
 
 // Ghidra 0x00440bf0 Mission_FailMissionSlotQuick. Immediate failure path:
 // runs the failure payload, latches the failed flag, and releases assigned
-// ships when the mission has placed any.
+// ships when the misn CanAbort latch is set (the original reuses that flag
+// here as the fleet-release gate).
 void Mission_FailMissionSlotQuick(GameState &state,
                                   std::int16_t mission_slot,
                                   std::uint32_t now_ms) {
@@ -1452,7 +1453,7 @@ void Mission_FailMissionSlotQuick(GameState &state,
   Mission_RunMisnScriptPayload(
       state, TextOf(mission.on_failure_text), mission_slot);
   state.active_mission_runtime_flags[slot].is_failed = true;
-  if (mission.has_been_visited) {
+  if (mission.can_abort) {
     Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
   }
   // Ambient-roll latch invalidation is not modelled (TODO(decomp)).

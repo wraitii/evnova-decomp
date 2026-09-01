@@ -151,7 +151,7 @@ namespace {
   // prior reads were swapped relative to populate (0x0043f8c0).
   mission.mission_fleet_metric = ReadBeI16(bytes, 0x4c);
   mission.auxiliary_ship_dude = ReadBeI16(bytes, 0x4a);
-  mission.start_visited = ReadBeI16(bytes, 0x42) != 0;
+  mission.can_abort = ReadBeI16(bytes, 0x42) != 0;
   for (std::size_t i = 0; i < mission.text_description_ids.size(); ++i) {
     mission.text_description_ids[i] =
         ReadBeI16(bytes, 0x34 + i * sizeof(std::int16_t));

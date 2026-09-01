@@ -175,8 +175,10 @@ struct MissionDef {
   std::int16_t auxiliary_ship_dude = -1;         // +0x4c
   std::int16_t mission_fleet_metric = 0;         // +0x4a
   std::int16_t start_system_locator = -1;        // +0x22, resolved at accept
-  bool start_visited = false;                    // +0x42
-  std::int16_t initial_briefing_id = -1;         // +0x34
+  // Bible CanAbort (0 = player cannot abort, 1 = can); Ghidra MisnActive
+  // +0x32 can_abort.
+  bool can_abort = false;                // +0x42
+  std::int16_t initial_briefing_id = -1; // +0x34
   // Desc-resource ids from payload +0x34..+0x3e (BriefText, QuickBrief,
   // LoadCargText, DumpCargoText, CompText, FailText), plus ShipDoneText
   // (+0x44) and the +0x58 id copied to active slot +0x41 (provisional).

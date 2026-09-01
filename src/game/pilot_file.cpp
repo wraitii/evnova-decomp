@@ -261,8 +261,7 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
              offset + 0x22,
              static_cast<std::uint32_t>(mission.resource_delta_or_cost));
     put_i16(0x2c, mission.goal_count_remaining);
-    block1[offset + 0x32] =
-        mission.has_been_visited ? std::byte{1} : std::byte{0};
+    block1[offset + 0x32] = mission.can_abort ? std::byte{1} : std::byte{0};
     block1[offset + 0x33] =
         mission.carrying_resources ? std::byte{1} : std::byte{0};
     for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
@@ -450,7 +449,7 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.resource_delta_or_cost =
           static_cast<std::int32_t>(ReadU32(block1, offset + 0x22));
       mission.goal_count_remaining = get_i16(0x2c);
-      mission.has_been_visited =
+      mission.can_abort =
           std::to_integer<unsigned char>(block1[offset + 0x32]) != 0;
       mission.carrying_resources =
           std::to_integer<unsigned char>(block1[offset + 0x33]) != 0;
