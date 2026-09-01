@@ -52,17 +52,28 @@ The map is driven by the scenario `syst` table (`ScenarioData.systems`, the
   NOT paired 1:1 with every `links` entry in the scenario data; a jump's target
   is a `System.links` hyperlink, resolved purely against `links` (travel.cpp).
 
-Visibility / exploration (fog of war):
+Visibility / exploration (fog of war) — CORRECTED model (verified against the
+binary, see "System discovery" below):
 
-- `System.is_visible` / `System.has_explored_flag` (mirror `SystemDef`) gate
-  which systems the player may target/draw as known.
-- `GameState.control.explored_systems` — persistent bitset (0x800) of explored
-  zero-based system ids; `landed_store.cpp` reads it for availability
-  expressions.
-
-The original floods discovery on system entry (`System_RebuildSystemVisibilityMap`
-`0x00467970`, `System_FloodDiscoverAdjacentSystems` `0x00467ab0`,
-`System_ResolveSystemDiscoverySlot` `0x0046b9b0`).
+- `SystemDef.has_explored_flag` (+0x1ed) is a load-time "syst resource exists"
+  flag: the scenario loader sets it for every loaded system,
+  `Ship_InitGameplayDataTables` clears it at session start, and NOTHING writes
+  it at runtime. It is not a fog bit.
+- `SystemDef.is_visible` (+0x1eb) is re-derived from it by
+  `NovaResources_EvaluateAvailability` `0x00448090` (has_explored && the
+  system's visibility NCB expression at +0xec).
+- The real fog record is `SystemDef.discovery_state` (+0x90, short): 0 =
+  unknown, >=1 = visited (in-flight hyperspace arrival writes 1, landed
+  stellar travel and map-outfit reveals write 2), persisted per system as
+  u16[0x800] in the pilot save (block1 + 0x1a, `PilotFile_SaveGameCore`
+  `0x004c7dd0` / `LoadSave` `0x004cb260`). The debug reveal-all cheat writes 2
+  everywhere.
+- The starmap draws a marker when `discovery_state > 0` OR the transient
+  `discovered_this_rebuild` latch (+0x1ec) is set; that latch is recomputed by
+  `System_RebuildSystemVisibilityMap` `0x00467970` and the per-tick
+  `System_UpdateSystemAndStellarDisplayState` `0x00432470` as: every visited
+  system, plus every travel-resolvable link neighbour of one. So the map shows
+  exactly one jump ahead; unvisited neighbours appear but stay unexplored.
 
 ## Clean-room implementation (`src/game/starmap.cpp`)
 
@@ -70,14 +81,18 @@ The original floods discovery on system entry (`System_RebuildSystemVisibilityMa
 the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
 
 - Draws the galaxy graph: `System.links` as lines (deduplicated by drawing from
-  the lower index), system nodes as filled circles, and labels for explored /
-  current / selected systems. Only *discovered* systems are drawn at all: each
-  marker is gated on the explored/visible flag (matching the original's
-  `is_visible && has_explored_flag` marker gate in `NovaUi_DrawStarmapRoutesAndMarkers`),
-  a link line draws only when BOTH its endpoints are explored, and undiscovered
-  systems have no marker, no label, cannot be clicked and are excluded from the
-  Tab/Backslash cycle. Undiscovered far-flung systems therefore don't stagger the
-  view either.
+  the lower index), system nodes as filled circles, and labels for visited /
+  current / selected systems. The drawn set is the original's: each marker is
+  gated on visited (discovery_state > 0) or the discovered_this_rebuild latch
+  (visited systems plus their one-hop link neighbours — the marker latch in
+  `NovaUi_DrawStarmapRoutesAndMarkers` accepts both), a link line draws only
+  when both endpoints are on the map AND at least one endpoint is visited (the
+  original draws adjacency lines only from visited systems), labels draw for
+  visited systems only (zoom-gated, plus always for current/selected), and
+  unknown systems have no marker, no label, cannot be clicked and are excluded
+  from search. The Tab/Backslash cycle covers every valid link destination
+  (the original's command-0x60 cycle has no discovery gate). Far-flung
+  unknown systems therefore don't stagger the view either.
 - Markers are true solid discs (filled triangle-fan via the geometry path), so the
   node sits exactly on its system position; link endpoints share the same panel
   origin as the markers (the raw world projection is offset by the panel origin),
@@ -86,7 +101,12 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   additionally tinted toward their owning government's theme colour
   (`Government.theme_red/green/blue`, the political-map
   affiliation drawn by `NovaUi_DrawStarmapPoliticalOverlay`), so explored
-  systems read as their faction's territory at a glance.
+  systems read as their faction's territory at a glance. Merely-revealed
+  (latched, unvisited) systems draw dim grey: the original's marker colour
+  gate `Stellar_ComputeStellarDisplayColor` `0x00466260` returns the 0x4000
+  grey (SHORT_ARRAY_00733b5c, 64/255 per channel) whenever
+  `discovery_state < 1`, so a map reveal reads as full-colour visited nodes
+  out to its ModVal rank plus a dim one-jump-ahead ring.
 - Zoom is stepped through a handful of fixed levels (a modest geometric series,
   x1.5 per level, over the whole-galaxy fit: level 0 = whole galaxy, higher =
   closer), matching the original's stepped zoom rather than a continuous slider.
@@ -126,7 +146,7 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   previews the currently highlighted destination on every redraw.
 - Rendering fidelity: link lines render as thick quads (2px at the current
   system, brighter for current-adjacent links), marker nodes scale up with
-  zoom (mirroring the original's zoom-dependant marker insets), and explored-
+  zoom (mirroring the original's zoom-dependant marker insets), and visited-
   system name labels appear only once the map is zoomed in past a threshold
   (mirroring the original's zoom-gated labels, Dat_00575a10) while the
   current / selected system names stay always visible.
@@ -156,10 +176,56 @@ panel then shows "JUMP > <destination>" and `NovaTravel_Tick` engages that
 jump on 'j' (falling back to the nearest travel point when no direct slot). On
 completion `CompleteJump` clears the plot.
 
-Jump discovery: `NovaTravel_MarkSystemDiscovered` (travel.cpp) marks a reached
-system + its `links` neighbours explored/visible. Called on jump completion
-(`CompleteJump`) and on new-game start (`new_pilot_flow.cpp`), so the map shows
-the explored blobs grow as the player jumps.
+Jump discovery (clean-room): the original books the entered system as visited
+(`discovery_state >= 1` on the discovery slot + current system, in-flight
+arrival) then rebuilds the reveal latch — only the arrival system is flooded
+(`System_RebuildSystemVisibilityMap(cur, 0, 1)`); the one-jump-ahead window
+comes from the transient latch, so neighbours show on the map WITHOUT becoming
+explored. Clean-room wiring (travel.cpp):
+
+- `NovaSystem_OnSystemEntered(state, id, level)` — arrival helper: marks slot
+  + current visited at `level` and rebuilds. Level 1 on hyperspace completion
+  (`FireJump`) and new-game start; level 2 on landed stellar travel
+  (`NovaLanding_EnterDocked`), mirroring `Stellar_TravelToSystem` `0x00455e10`.
+- `NovaSystem_FloodDiscoverAdjacentSystems` — `0x00467ab0`; depth-gated
+  recursion used by the rebuild and (with depth = ModVal) by map outfits.
+  TODO(decomp(0x00467bd0)): the per-system region-event trigger is skipped.
+- `NovaSystem_RebuildDiscoveryState` — `0x00467970`; rebuild + latch pass.
+- The clean-room keeps `is_visible`/`has_explored_flag` as the per-visit
+  targeting-fog record (the original's are load-time flags) and mirrors every
+  visited system into `GameState.control.explored_systems`, the bitset the NCB
+  `has_explored` test and save format read. Divergences are logged at each
+  site.
+- The pilot save's discovery block (u16[0x800]) is still TODO(decomp) in
+  `pilot_file.cpp`.
+
+## The map outfit (`Outfit_GrantOutfitToPlayer` `0x00427770`)
+
+Outfits with **ModType 16** are one-shot "map" purchases: the original's grant
+function runs on every shop take (outfitter `0x0048ea70`, mission script engine
+`0x00449370`, boarding window `0x00482940`) and NEVER increments the owned
+count for them — the outfit is consumed by its effect. ModVal selects the
+reveal:
+
+- `>= 1`: flood-reveals every system within ModVal links of the current system
+  (`System_RebuildSystemVisibilityMap(cur, ModVal, 2)`).
+- `== -1`: reveals every neutral (government -1) system that has a usable
+  travel destination (`System_HasUsableTravelDestination` `0x00468af0`:
+  nav stellar with travel_flags 0x20 clear and availability 0x3000 clear).
+- `<= -1000`: reveals every system whose government lists `-(ModVal + 1000)`
+  in any of its Class 1-4 fields (GovtDef +0x26..+0x2c).
+
+The same function also consumes **ModType 43** (paint: 15-bit ModVal decoded to
+5-bit RGB tint, rendering not modelled in the clean-room yet) and **ModType 21**
+(clean record: clears negative system reputation — ModVal -1 targets every
+system, otherwise the government id in ModVal). Any other mod combination just
+stacks the outfit in the owned inventory.
+
+Clean-room: `NovaOutfit_GrantOutfitToPlayer` (outfit.cpp) ports all four paths;
+wired at the outfitter buy (`NovaLanded_BuyOutfit` — a consumed item returns
+after one unit instead of stacking) and the mission script 'G' grant opcode.
+The `DAT_007d4c08/09` dirty latches (map/record UI refresh) have no clean-room
+consumer and are skipped.
 
 ## Divergences / deferred (TODO)
 

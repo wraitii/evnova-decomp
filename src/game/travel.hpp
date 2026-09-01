@@ -48,6 +48,10 @@
 // depth (Stellar_ComputeShipJumpDepth); those remain documented divergences
 // for a later pass.
 
+#include <cstdint>
+
+#include <vector>
+
 #include "game_state.hpp"
 
 namespace game {
@@ -100,14 +104,88 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 // view branches on state.travel.engaging to render the star tunnel. The
 // completed jump does NOT re-spawn the starfield itself; the spaceflight loop
 // observes just_completed and calls SpaceflightView::SpawnAmbientStars.
-// Completion-scope discovery helper: marks `zero_based_system_id` explored
-// (and each of its linked neighbours visible/explored) so the galaxy starmap
-// reveals the neighbourhood when the player enters a system. Mirrors the
-// discovery flood that runs on system entry in the original
-// (System_FloodDiscoverAdjacentSystems / System_RebuildSystemVisibilityMap).
-// Idempotent; safe on empty/out-of-range systems.
-void NovaTravel_MarkSystemDiscovered(GameState &state,
-                                     std::int16_t zero_based_system_id);
+// ---- Galaxy discovery (fog of war) ---------------------------------------
+// The original's per-system fog state is SystemDef.discovery_state (+0x90):
+// 0 = unknown, >=1 = visited (in-flight jump arrival writes 1, landed/stellar
+// travel and map-outfit reveals write 2), persisted per system as u16[0x800]
+// in the pilot save (PilotFile_SaveGameCore 0x004c7dd0 / LoadSave 0x004cb260).
+// The starmap draws a system when discovery_state > 0 or the transient
+// discovered_this_rebuild latch is set (visited systems plus their one-hop
+// link neighbours, recomputed by the rebuild pass).
+
+// Ghidra 0x0046b9b0 System_ResolveSystemDiscoverySlot. Discovery state is
+// booked on a system's visibility root when the twin grouping has remapped it;
+// the clean-room keeps the root ids at -1 (grouping pass not reconstructed),
+// so this degrades to the system id itself.
+[[nodiscard]] std::int16_t
+NovaSystem_ResolveDiscoverySlot(const GameState &state, std::int16_t system_id);
+
+// Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel. Follows the
+// visibility root/parent chain to a visible system; degrades to the plain
+// is_visible test while the twin grouping is not reconstructed.
+[[nodiscard]] std::int16_t
+NovaSystem_ResolveVisibleForTravel(const GameState &state,
+                                   std::int16_t system_id);
+
+// Ghidra 0x00468af0 System_HasUsableTravelDestination. True when the system
+// lists at least one stellar that is a normal, reachable destination
+// (travel_flags bit 0x20 clear and availability_flags & 0x3000 clear).
+[[nodiscard]] bool
+NovaSystem_HasUsableTravelDestination(const GameState &state,
+                                      std::int16_t system_id);
+
+// Marks one system visited at `level` (>=1): bumps discovery_state to `level`,
+// and keeps the clean-room per-system fog bits + explored bitset in sync (the
+// clean-room keeps is_visible/has_explored_flag as the targeting-fog record,
+// while in the original both are load-time "syst exists" flags and targeting
+// is not discovery-gated). Ghidra: the discovery_state writes of
+// System_FloodDiscoverAdjacentSystems 0x00467ab0 plus the arrival pre-latches
+// (0x0044aa70 PlayerTick_SystemTransitionAndArrival / 0x00455e10
+// Stellar_TravelToSystem).
+void NovaSystem_MarkSystemVisited(GameState &state,
+                                  std::int16_t zero_based_system_id,
+                                  std::int16_t level);
+
+// Ghidra 0x00467ab0 System_FloodDiscoverAdjacentSystems. Recursive flood over
+// the system link graph up to `max_depth` links out, bumping each reached
+// system's discovery_state to at least `threshold` and booking the state on
+// the reached system's discovery slot. The original triggers system-region
+// events per newly reached system (Frame_TriggerSystemEvents 0x00467bd0);
+// TODO(decomp(0x00467bd0)) skipped: region trigger defs are not modelled.
+// `visited` is the per-flood re-entry mask (the original's DAT_007cc590),
+// sized 0x800 by the caller. Divergence: the original recurses only through
+// systems that resolve visible (always true there -- is_visible is a load-time
+// flag); the clean-room's is_visible is per-visit fog, so the flood recurses
+// through any in-range link target or the reveal would die at the fog line.
+void NovaSystem_FloodDiscoverAdjacentSystems(
+    GameState &state,
+    std::int16_t zero_based_system_id,
+    std::int16_t depth,
+    std::int16_t max_depth,
+    std::int16_t threshold,
+    std::vector<std::uint8_t> &visited);
+
+// Ghidra 0x00467970 System_RebuildSystemVisibilityMap. Clears the flood mask,
+// floods from `origin_zero_based` up to `max_depth` links at discovery
+// `threshold`, then rebuilds the transient discovered_this_rebuild latch:
+// every visited system gets it, and so does every travel-resolvable link
+// neighbour of one (that latch is what lets the starmap show one jump ahead
+// without marking the neighbour visited). Also recomputed per tick by the
+// original's System_UpdateSystemAndStellarDisplayState 0x00432470.
+void NovaSystem_RebuildDiscoveryState(GameState &state,
+                                      std::int16_t origin_zero_based,
+                                      std::int16_t max_depth,
+                                      std::int16_t threshold);
+
+// System-entry discovery: books the entered system (and its discovery slot)
+// as visited at `level`, then rebuilds the map reveal from it. `level` is 1
+// for an in-flight hyperspace arrival (0x0044aa70) and 2 for the landed
+// stellar-travel arrival (0x00455e10 Stellar_TravelToSystem) and for
+// map-outfit reveals (Outfit_GrantOutfitToPlayer 0x00427770, which floods
+// deeper -- see NovaOutfit_ApplyMapReveal).
+void NovaSystem_OnSystemEntered(GameState &state,
+                                std::int16_t zero_based_system_id,
+                                std::int16_t level);
 
 // Plots `destination_zero_based` (a system selected in the galaxy starmap) as
 // the player's next-jump destination. Finds the current system's travel slot

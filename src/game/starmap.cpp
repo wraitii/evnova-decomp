@@ -7,6 +7,7 @@
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
+#include "travel.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -153,6 +154,12 @@ constexpr SDL_Color kLinkLine{58, 82, 116, 200};
 constexpr SDL_Color kLinkLineCurrent{96, 150, 214, 255};
 constexpr SDL_Color kMarkerExplored{150, 196, 244, 255};
 constexpr SDL_Color kMarkerCurrent{255, 214, 100, 255};
+// Merely-revealed (latched, unvisited) systems draw grey: the original's
+// marker colour gate Stellar_ComputeStellarDisplayColor 0x00466260 returns the
+// 0x4000 grey (SHORT_ARRAY_00733b5c, each channel 0x4000 = 64/255) whenever
+// discovery_state < 1, so the map outfit's one-jump-ahead window reads as dim
+// unknowns rather than visited systems.
+constexpr SDL_Color kMarkerRevealed{64, 64, 64, 255};
 constexpr SDL_Color kTextBody{200, 214, 232, 255};
 constexpr SDL_Color kTextDim{110, 132, 158, 255};
 constexpr SDL_Color kSelectionBox{110, 170, 230, 255};
@@ -234,39 +241,54 @@ struct MapView {
   }
 };
 
-// Whether the pilot has explored `zero_based_id` (the GameState explored bit
-// mirrored to the scenario's per-system flag). Interprets ids conservatively:
-// an out-of-range id is not explored.
-bool SystemExplored(const GameState &state, std::int16_t zero_based_id) {
-  if (zero_based_id < 0) {
+// Whether the pilot has VISITED `zero_based_id`: the per-system fog record is
+// SystemDef.discovery_state (+0x90, persisted in the pilot save), 0 = unknown,
+// >=1 = visited (jump arrival writes 1, landed/stellar travel and map-outfit
+// reveals write 2). Out-of-range ids are conservatively unknown.
+bool SystemVisited(const GameState &state, std::int16_t zero_based_id) {
+  if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
+                               state.scenario.systems.size()) {
     return false;
   }
-  const std::size_t idx = static_cast<std::size_t>(zero_based_id);
-  if (idx < state.control.explored_systems.size()) {
-    return state.control.explored_systems.test(idx);
+  return state.scenario.systems[static_cast<std::size_t>(zero_based_id)]
+             .discovery_state > 0;
+}
+
+// Whether the system appears on the current map view at all: visited, or
+// latched by the last discovery rebuild (a one-hop link neighbour of a
+// visited system — the original's discovered_this_rebuild, recomputed by
+// System_RebuildSystemVisibilityMap 0x00467970). Merely-revealed neighbours
+// draw markers but are not themselves explored.
+bool SystemOnMap(const GameState &state, std::int16_t zero_based_id) {
+  if (SystemVisited(state, zero_based_id)) {
+    return true;
   }
-  return false;
+  if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
+                               state.scenario.systems.size()) {
+    return false;
+  }
+  return state.scenario.systems[static_cast<std::size_t>(zero_based_id)]
+      .discovered_this_rebuild;
 }
 
 // Computes the world->panel transform that fits the world bounding box of the
-// *explored* systems into the panel (`only_explored`). The original only draws
-// markers for systems with is_visible && has_explored_flag set (see
-// NovaUi_DrawStarmapRoutesAndMarkers), so fitting to just the explored set
-// both matches that fog of war and keeps the initial view sensibly close-in
-// instead of spanning the whole (mostly unplotted) galaxy. When no system is
-// explored yet the fit falls back to every system so there is still something
-// to frame. Returns false when there is no finite extent to fit (empty /
-// degenerate galaxy), in which case the map is left unchanged.
+// *visited* systems into the panel (`only_visited`). The starmap's fog record
+// is discovery_state, so fitting to just the visited set both matches the fog
+// of war and keeps the initial view sensibly close-in instead of spanning the
+// whole (mostly unplotted) galaxy. When no system is visited yet the fit falls
+// back to every system so there is still something to frame. Returns false
+// when there is no finite extent to fit (empty / degenerate galaxy), in which
+// case the map is left unchanged.
 bool FitMapView(const GameState &state,
                 MapView &out_view,
                 float panel_w,
                 float panel_h,
-                bool only_explored) {
+                bool only_visited) {
   const auto &systems = state.scenario.systems;
   float min_x = 0.0F, min_y = 0.0F, max_x = 0.0F, max_y = 0.0F;
   bool seeded = false;
   for (std::size_t i = 0; i < systems.size(); ++i) {
-    if (only_explored && !SystemExplored(state, static_cast<std::int16_t>(i))) {
+    if (only_visited && !SystemVisited(state, static_cast<std::int16_t>(i))) {
       continue;
     }
     const System &sys = systems[i];
@@ -614,35 +636,14 @@ struct PoliticalOverlay {
   std::vector<std::uint8_t> rgba;
 };
 
-// Ghidra 0x00468af0 System_HasUsableTravelDestination: true when at least one
-// of the system's first four nav defs (the original's SystemDef.stellar_ids at
-// +0x2a, i.e. NavDef1-4) resolves to a stellar whose travel_flags bit 0x20 is
-// clear and availability_flags & 0x3000 is clear -- a normal, reachable
-// destination. Gates which systems paint a government disc on the starmap.
-bool SystemHasUsableDestination(const ScenarioData &scenario,
-                                const System &sys) {
-  for (std::size_t i = 0; i < 4; ++i) {
-    const std::int16_t nav = sys.nav_defs[i];
-    if (nav < 0x80) {
-      continue;
-    }
-    const Stellar *st = scenario.Stellar(nav);
-    if (st == nullptr) {
-      continue;
-    }
-    if ((st->flags & 0x20U) != 0U || (st->availability_flags & 0x3000U) != 0U) {
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
+// (System_HasUsableTravelDestination 0x00468af0 is shared via travel.hpp —
+// see NovaSystem_HasUsableTravelDestination.)
 
 // Builds the political overlay for the current view. Mirrors
 // NovaUi_BuildStarmapPoliticalOverlay (0x004a9d50) / NovaUi_PaintStarmapGovDisc
-// (0x004aa070): eligible systems are is_visible && has_explored_flag (the
-// clean-room discovery flags; the original used is_visible &&
-// discovered_this_rebuild && discovery_state > 0), with a valid government
+// (0x004aa070): eligible systems are visited (discovery_state > 0 — the
+// original's is_visible && discovered_this_rebuild && discovery_state > 0
+// latch; the clean-room's is_visible is per-visit fog), with a valid government
 // (scan_mask bit 2 clear) and at least one usable travel destination. Disc
 // radius is world-constant (22 world-units, or 11 for the small tier) so it
 // scales with the links/markers on zoom; strength is a normalized quadratic
@@ -688,8 +689,8 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
 
   for (std::size_t i = 0; i < systems.size(); ++i) {
     const auto id = static_cast<std::int16_t>(i);
-    if (!SystemExplored(state, id)) {
-      continue; // fog of war: undiscovered systems paint no territory
+    if (!SystemVisited(state, id)) {
+      continue; // fog of war: only visited systems paint territory
     }
     const System &sys = systems[i];
     if (sys.government_id < 0) {
@@ -700,7 +701,8 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
     if (gv == nullptr || (gv->scan_mask_short & 0x0004U) != 0U) {
       continue; // no government / map-mask bit 2: no disc
     }
-    if (!SystemHasUsableDestination(state.scenario, sys)) {
+    if (!NovaSystem_HasUsableTravelDestination(state,
+                                               static_cast<std::int16_t>(i))) {
       continue; // no reachable destination: no territory
     }
     const bool small_tier = (gv->scan_mask_short & 0x0002U) != 0U;
@@ -857,9 +859,11 @@ void DrawGalaxy(SdlPlatform &platform,
 
   // Link lines, avoiding duplicates (links are symmetric in the System table:
   // system A lists B and B lists A). A link is drawn only when BOTH endpoints
-  // are explored/visible; the original draws adjacency lines only for
-  // is_visible && has_explored_flag systems, so undiscovered links (and their
-  // far ends) stay hidden until the pilot gets close.
+  // appear on the map (visited or revealed by the last discovery rebuild) and
+  // at least one endpoint is actually visited — the original draws adjacency
+  // lines only from visited systems (discovery_state > 0 in
+  // NovaUi_DrawStarmapRoutesAndMarkers' link pass), so a chain of merely-
+  // revealed neighbours draws no lines between itself.
   const auto draw_link = [&](std::int16_t a, std::int16_t b) {
     if (a < 0 || b < 0) {
       return;
@@ -869,7 +873,10 @@ void DrawGalaxy(SdlPlatform &platform,
     if (idx_a >= systems.size() || idx_b >= systems.size()) {
       return;
     }
-    if (!SystemExplored(state, a) || !SystemExplored(state, b)) {
+    if (!SystemOnMap(state, a) || !SystemOnMap(state, b)) {
+      return;
+    }
+    if (!SystemVisited(state, a) && !SystemVisited(state, b)) {
       return;
     }
     const System &sa = systems[idx_a];
@@ -951,12 +958,14 @@ void DrawGalaxy(SdlPlatform &platform,
   // Markers + names.
   for (const auto &m : mapped) {
     const bool is_current = m.zero_based_id == current;
-    const bool explored = SystemExplored(state, m.zero_based_id);
+    const bool visited = SystemVisited(state, m.zero_based_id);
+    const bool on_map = SystemOnMap(state, m.zero_based_id);
     const bool selected = m.zero_based_id == selected_id;
-    // Fog of war: only draw markers for systems the pilot has discovered. The
-    // original gates every marker on is_visible && has_explored_flag, so an
-    // undiscovered system is simply absent from the map (no node, no label).
-    if (!explored && !is_current) {
+    // Fog of war: draw markers for visited systems and for merely-revealed
+    // one-hop neighbours (the original's marker latch accepts
+    // discovered_this_rebuild too — NovaUi_DrawStarmapRoutesAndMarkers), so
+    // an unknown system is simply absent from the map (no node, no label).
+    if (!on_map && !is_current) {
       continue;
     }
     // Colour by owning government (political-map tint) blended into the
@@ -971,6 +980,13 @@ void DrawGalaxy(SdlPlatform &platform,
     }
     if (selected) {
       c = kSelectionBox;
+    }
+    // Unvisited but revealed (discovered_this_rebuild latch) systems draw
+    // grey — the original's marker colour gate on discovery_state (see
+    // kMarkerRevealed). Wins over the selection tint; the selection ring
+    // still marks it.
+    if (!visited) {
+      c = kMarkerRevealed;
     }
     // Marker radius scales a touch with zoom (larger close-up), mirroring the
     // original's zoom-dependent marker insets (Rect_Inset -4 vs -6 in
@@ -993,12 +1009,13 @@ void DrawGalaxy(SdlPlatform &platform,
         (plotted_direct && m.zero_based_id == plotted)) {
       DrawRing(renderer, m.sx, m.sy, r + 1.5F, kReachableLink);
     }
-    // Label the current / selected systems always; label explored systems
-    // only when zoomed in enough, mirroring the original's zoom-gated labels
-    // (names draw once the map is close enough, Dat_00575a10). Unexplored
-    // names stay hidden entirely (matching the original's fog of war).
+    // Label the current / selected systems always; label visited systems only
+    // when zoomed in enough, mirroring the original's zoom-gated labels
+    // (names draw once the map is close enough, Dat_00575a10). Merely-revealed
+    // one-hop neighbours and unknown systems draw no names (matching the
+    // original's label gate on discovery_state > 0).
     const bool named =
-        is_current || selected || (explored && view.scale >= kLabelZoomMin);
+        is_current || selected || (visited && view.scale >= kLabelZoomMin);
     if (named) {
       if (m.zero_based_id >= 0 &&
           static_cast<std::size_t>(m.zero_based_id) < systems.size()) {
@@ -1066,15 +1083,18 @@ void DrawSidePanels(SdlPlatform &platform,
       static_cast<std::size_t>(selected_id) < state.scenario.systems.size()) {
     const System &sys =
         state.scenario.systems[static_cast<std::size_t>(selected_id)];
-    const bool explored = SystemExplored(state, selected_id);
+    const bool visited = SystemVisited(state, selected_id);
     const bool is_current = selected_id == state.player.current_system_id;
     sys_name = sys.name;
     if (is_current) {
       status = "current system";
       status_color = kMarkerCurrent;
-    } else if (explored) {
+    } else if (visited) {
       status = "explored";
       status_color = kTextBody;
+    } else if (SystemOnMap(state, selected_id)) {
+      status = "revealed";
+      status_color = kTextDim;
     } else {
       status = "undiscovered";
       status_color = kTextDim;
@@ -1370,7 +1390,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   PoliticalOverlay overlay;
   bool overlay_needs_rebuild = true;
   const float whole_fit_scale =
-      FitMapView(state, view, panel.w, panel.h, /*only_explored=*/false)
+      FitMapView(state, view, panel.w, panel.h, /*only_visited=*/false)
           ? view.scale
           : 1.0F;
   int zoom_level = kStarmapStartLevel;
@@ -1454,7 +1474,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
           return static_cast<char>(std::tolower(c));
         });
     for (std::size_t i = 0; i < systems.size(); ++i) {
-      if (!SystemExplored(state, static_cast<std::int16_t>(i))) {
+      if (!SystemOnMap(state, static_cast<std::int16_t>(i))) {
         continue;
       }
       std::string name = systems[i].name;
@@ -1496,12 +1516,9 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
         if (dest < 0 || static_cast<std::size_t>(dest) >= n) {
           continue; // dangling link
         }
-        // Only cycle explored systems (undiscovered links have no map node to
-        // select; the discovery flood keeps the current system's direct links
-        // explored, so this filter is just defensive).
-        if (!SystemExplored(state, dest)) {
-          continue;
-        }
+        // Cycle every valid link destination (the original's command-0x60
+        // block cycles travel slots without a discovery gate — the manual's
+        // "all the systems that are linked to your current system").
         if (std::find(tab_order.begin(), tab_order.end(), dest) ==
             tab_order.end()) {
           tab_order.push_back(dest);
@@ -1682,14 +1699,14 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
         if (button_clicked) {
           break;
         }
-        // Select the nearest *discovered* marker within a click radius; empty
-        // click keeps the current selection. Undiscovered systems have no map
-        // presence, so they cannot be picked either.
+        // Select the nearest marker present on the map within a click radius;
+        // empty click keeps the current selection. Systems off the map
+        // (unknown, not even revealed) have no marker to pick.
         std::int16_t best = -1;
         float best_d = 18.0F * 18.0F;
         for (const auto &m : mapped) {
           if (m.zero_based_id != state.player.current_system_id &&
-              !SystemExplored(state, m.zero_based_id)) {
+              !SystemOnMap(state, m.zero_based_id)) {
             continue;
           }
           const float d = MarkerDistSq(mp, m);

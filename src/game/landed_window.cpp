@@ -12,6 +12,7 @@
 #include "services_buttons.hpp"
 #include "ship_spawn.hpp"
 #include "targeting.hpp"
+#include "travel.hpp"
 #include "weapon.hpp"
 
 #include <SDL3/SDL.h>
@@ -89,6 +90,12 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   state.player.vel_x = 0.0F;
   state.player.vel_y = 0.0F;
   state.player.speed = 0.0F;
+
+  // Stellar_TravelToSystem (0x00455e10) books the arrival at discovery level
+  // 2 (discovery_state >= 2 on slot + current, then
+  // System_RebuildSystemVisibilityMap(cur, 0, 2)) — the landed/stellar travel
+  // path reveals deeper than a plain hyperspace arrival.
+  NovaSystem_OnSystemEntered(state, state.player.current_system_id, 2);
 
   // Stellar_TravelToSystem restores the effective hull and shield capacities
   // after the destination interaction loop returns.

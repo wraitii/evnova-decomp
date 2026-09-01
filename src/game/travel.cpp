@@ -130,9 +130,11 @@ void FireJump(GameState &state) {
   state.cached_stats = eff;
   state.stat_cache_valid = true;
 
-  // Reveal the destination system and its immediate neighbourhood (the
-  // original's System_FloodDiscoverAdjacentSystems on arrival).
-  NovaTravel_MarkSystemDiscovered(state, t.destination_system_id);
+  // Book the arrival as visited at level 1 and rebuild the map reveal (the
+  // original's arrival block: discovery_state >= 1 on slot + current, then
+  // System_RebuildSystemVisibilityMap(cur, 0, 1) -- only the arrival system is
+  // flooded; the one-hop window comes from the discovered_this_rebuild latch).
+  NovaSystem_OnSystemEntered(state, t.destination_system_id, 1);
 
   // Arrive just outside the destination system's center on the far side along
   // the jump heading, and move at top speed along the ship's heading (which
@@ -312,41 +314,218 @@ bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
          ship.fuel_points >= kJumpFuelCost;
 }
 
-// Ghidra 0x00467ab0 System_FloodDiscoverAdjacentSystems.
+// Ghidra 0x0046b9b0 System_ResolveSystemDiscoverySlot.
 // ---------------------------------------------------------------------------
-// Discovery flood.
+// Galaxy discovery (fog of war). See travel.hpp for the model: the original's
+// per-system fog record is SystemDef.discovery_state (+0x90), the starmap's
+// "one jump ahead" window is the transient discovered_this_rebuild latch.
 // ---------------------------------------------------------------------------
-void NovaTravel_MarkSystemDiscovered(GameState &state,
-                                     std::int16_t zero_based_system_id) {
-  const std::size_t count = state.scenario.systems.size();
-  const auto mark = [&](std::int16_t zero_based) {
-    if (zero_based < 0 || static_cast<std::size_t>(zero_based) >= count) {
-      return;
+std::int16_t NovaSystem_ResolveDiscoverySlot(const GameState &state,
+                                             std::int16_t system_id) {
+  if (system_id < 0 ||
+      static_cast<std::size_t>(system_id) >= state.scenario.systems.size()) {
+    return -1;
+  }
+  const std::int16_t root =
+      state.scenario.systems[static_cast<std::size_t>(system_id)]
+          .visibility_root_system_id;
+  if (root != -1) {
+    return root;
+  }
+  return system_id;
+}
+
+// Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel. The twin-grouping
+// pass is not reconstructed (visible_parent/root stay -1), so this degrades to
+// the plain is_visible test on the requested system.
+std::int16_t NovaSystem_ResolveVisibleForTravel(const GameState &state,
+                                                std::int16_t system_id) {
+  if (system_id < 0 ||
+      static_cast<std::size_t>(system_id) >= state.scenario.systems.size()) {
+    return -1;
+  }
+  const auto &sys = state.scenario.systems[static_cast<std::size_t>(system_id)];
+  if (sys.visibility_root_system_id != -1) {
+    std::int16_t candidate = sys.visibility_root_system_id;
+    while (candidate >= 0 && static_cast<std::size_t>(candidate) <
+                                 state.scenario.systems.size()) {
+      if (state.scenario.systems[static_cast<std::size_t>(candidate)]
+              .is_visible) {
+        return candidate;
+      }
+      candidate = state.scenario.systems[static_cast<std::size_t>(candidate)]
+                      .visible_parent_system_id;
     }
-    const std::size_t idx = static_cast<std::size_t>(zero_based);
-    auto &sys = state.scenario.systems[idx];
-    // Keep the scenario's per-system visibility flag in sync so target/fog
-    // helpers that consult is_visible stay correct (targeting.cpp forces the
-    // current system visible; we extend that to neighbours reached by jump).
-    sys.is_visible = true;
-    sys.has_explored_flag = true;
-    if (idx < state.control.explored_systems.size()) {
-      state.control.explored_systems.set(idx);
+    return -1;
+  }
+  return sys.is_visible ? system_id : -1;
+}
+
+// Ghidra 0x00468af0 System_HasUsableTravelDestination. Scans the departure
+// stellar list (nav_stellar_ids) and accepts a spob that is a normal,
+// reachable destination: travel_flags bit 0x20 clear and availability_flags
+// & 0x3000 clear. The original scans the first four slots only.
+bool NovaSystem_HasUsableTravelDestination(const GameState &state,
+                                           std::int16_t system_id) {
+  if (system_id < 0 ||
+      static_cast<std::size_t>(system_id) >= state.scenario.systems.size()) {
+    return false;
+  }
+  const auto &navs =
+      state.scenario.systems[static_cast<std::size_t>(system_id)].nav_defs;
+  for (std::size_t i = 0; i < 4 && i < navs.size(); ++i) {
+    const auto *stellar = state.scenario.Stellar(navs[i]);
+    if (stellar == nullptr) {
+      continue;
     }
-  };
-  mark(zero_based_system_id);
-  // Reveal the immediate neighbourhood too (links are stored as system
-  // *resource* ids in System.links).
-  const auto *sys = state.scenario.System(
-      static_cast<std::int16_t>(zero_based_system_id + 0x80));
-  if (!sys) {
+    if ((stellar->flags & 0x20U) == 0U &&
+        (stellar->availability_flags & 0x3000U) == 0U) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void NovaSystem_MarkSystemVisited(GameState &state,
+                                  std::int16_t zero_based_system_id,
+                                  std::int16_t level) {
+  if (zero_based_system_id < 0 ||
+      static_cast<std::size_t>(zero_based_system_id) >=
+          state.scenario.systems.size()) {
     return;
   }
-  for (const std::int16_t link : sys->links) {
-    if (link >= 0x80) {
-      mark(static_cast<std::int16_t>(link - 0x80));
+  const std::size_t idx = static_cast<std::size_t>(zero_based_system_id);
+  auto &sys = state.scenario.systems[idx];
+  if (sys.discovery_state < level) {
+    sys.discovery_state = level;
+  }
+  // Keep the clean-room per-visit fog bits + the persistent explored bitset in
+  // sync (the original's is_visible/has_explored_flag are load-time flags; see
+  // scenario_data.hpp).
+  sys.is_visible = true;
+  sys.has_explored_flag = true;
+  if (idx < state.control.explored_systems.size()) {
+    state.control.explored_systems.set(idx);
+  }
+}
+
+void NovaSystem_FloodDiscoverAdjacentSystems(
+    GameState &state,
+    std::int16_t zero_based_system_id,
+    std::int16_t depth,
+    std::int16_t max_depth,
+    std::int16_t threshold,
+    std::vector<std::uint8_t> &visited) {
+  if (depth > max_depth) {
+    return;
+  }
+  if (zero_based_system_id < 0 ||
+      static_cast<std::size_t>(zero_based_system_id) >=
+          state.scenario.systems.size()) {
+    return;
+  }
+  const std::size_t idx = static_cast<std::size_t>(zero_based_system_id);
+  if (idx >= visited.size() || visited[idx] != 0) {
+    return;
+  }
+  visited[idx] = 1;
+  // TODO(decomp(0x00467bd0)) skipped: Frame_TriggerSystemRegionEvents fires
+  // the system's rectangular mission region triggers per newly reached
+  // system; the region trigger defs are not modelled yet.
+  NovaSystem_MarkSystemVisited(state, zero_based_system_id, threshold);
+
+  const std::int16_t slot =
+      NovaSystem_ResolveDiscoverySlot(state, zero_based_system_id);
+  if (slot != zero_based_system_id && slot >= 0 &&
+      static_cast<std::size_t>(slot) < state.scenario.systems.size()) {
+    auto &slot_sys = state.scenario.systems[static_cast<std::size_t>(slot)];
+    if (slot_sys.discovery_state < threshold) {
+      slot_sys.discovery_state = threshold;
     }
   }
+
+  // Links are stored as system resource ids in System.links (the original
+  // rebases them to zero-based at load). Divergence (see travel.hpp): the
+  // original recurses only through systems that resolve visible, which there
+  // is always true; recursing through any in-range link keeps map reveals
+  // working across the clean-room's per-visit fog bits.
+  const auto &sys = state.scenario.systems[idx];
+  for (const std::int16_t link : sys.links) {
+    if (link < 0x80) {
+      continue;
+    }
+    const std::int16_t target = static_cast<std::int16_t>(link - 0x80);
+    if (target < 0 ||
+        static_cast<std::size_t>(target) >= state.scenario.systems.size()) {
+      continue;
+    }
+    NovaSystem_FloodDiscoverAdjacentSystems(
+        state,
+        target,
+        static_cast<std::int16_t>(depth + 1),
+        max_depth,
+        threshold,
+        visited);
+  }
+}
+
+void NovaSystem_RebuildDiscoveryState(GameState &state,
+                                      std::int16_t origin_zero_based,
+                                      std::int16_t max_depth,
+                                      std::int16_t threshold) {
+  if (state.scenario.systems.empty()) {
+    return;
+  }
+  std::vector<std::uint8_t> visited(state.scenario.systems.size(), 0);
+  NovaSystem_FloodDiscoverAdjacentSystems(
+      state, origin_zero_based, 0, max_depth, threshold, visited);
+
+  // Post-pass: rebuild the transient discovered_this_rebuild latch — every
+  // visited system gets it, plus every travel-resolvable link neighbour of
+  // one. (The original re-marks this latch in the same two steps; the twin
+  // clearing in System_UpdateSystemAndStellarDisplayState 0x00432470 only
+  // matters for visibility twins, which are not reconstructed here.)
+  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+    state.scenario.systems[i].discovered_this_rebuild = false;
+  }
+  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+    auto &sys = state.scenario.systems[i];
+    if (sys.discovery_state <= 0) {
+      continue;
+    }
+    sys.discovered_this_rebuild = true;
+    for (const std::int16_t link : sys.links) {
+      if (link < 0x80) {
+        continue;
+      }
+      // Links are stored as system resource ids (the original rebases them to
+      // zero-based at load and resolves them through
+      // System_ResolveVisibleSystemForTravel 0x0046b920, which always succeeds
+      // there because is_visible is a load-time flag). Divergence: the
+      // clean-room's is_visible is per-visit fog, so the neighbour latch
+      // resolves the link target directly instead of through that gate.
+      const std::int16_t target = static_cast<std::int16_t>(link - 0x80);
+      if (target >= 0 &&
+          static_cast<std::size_t>(target) < state.scenario.systems.size()) {
+        state.scenario.systems[static_cast<std::size_t>(target)]
+            .discovered_this_rebuild = true;
+      }
+    }
+  }
+}
+
+void NovaSystem_OnSystemEntered(GameState &state,
+                                std::int16_t zero_based_system_id,
+                                std::int16_t level) {
+  // Arrival pre-latch: the entered system and its discovery slot are booked as
+  // visited even before the flood (0x0044aa70 writes level 1 for hyperspace
+  // arrivals, 0x00455e10 Stellar_TravelToSystem writes level 2).
+  NovaSystem_MarkSystemVisited(state, zero_based_system_id, level);
+  NovaSystem_MarkSystemVisited(
+      state,
+      NovaSystem_ResolveDiscoverySlot(state, zero_based_system_id),
+      level);
+  NovaSystem_RebuildDiscoveryState(state, zero_based_system_id, 0, level);
 }
 
 // ---------------------------------------------------------------------------

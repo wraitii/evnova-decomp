@@ -411,13 +411,13 @@ void Stub_SeedStartingInventory(GameState &state) {
 }
 
 void Stub_DiscoverStartingSystems(GameState &state) {
-  // Menu_RunNewGameFlow sets discovery_state = 1 on the starting system and
-  // each adjacent neighbour so the starmap shows the pilot's immediate area.
-  // The starting system is the pilot's entry point. Mark the starting system
-  // and its linked neighbours discovered/visible so the starmap (starmap.cpp)
-  // shows the pilot's immediate area; the flood mirrors the original
-  // discovery_state=1 set in Menu_RunNewGameFlow.
-  NovaTravel_MarkSystemDiscovered(state, kStartSystemId);
+  // The original books the starting system as visited (discovery_state = 1,
+  // both the ship-init and per-tick latches in Ship_HandlePlayerShipCore
+  // 0x0044aa70) and rebuilds the map reveal from it
+  // (System_RebuildSystemVisibilityMap(cur, 0, 1)). Only the start system is
+  // marked visited; its linked neighbours show on the starmap via the
+  // discovered_this_rebuild latch without becoming explored themselves.
+  NovaSystem_OnSystemEntered(state, kStartSystemId, 1);
   NovaLog::Info("starting system discovery seeded: {} (resource {}) and "
                 "adjacent neighbours now visible on the starmap",
                 kStartSystemId,

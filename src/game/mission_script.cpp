@@ -4,6 +4,7 @@
 #include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "outfit.hpp"
+#include "travel.hpp"
 #include "weapon.hpp"
 
 #include <algorithm>
@@ -388,6 +389,12 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
         if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
           state.control.explored_systems.set(
               static_cast<std::size_t>(operand - kResourceIdBase));
+          // Reveal on the galaxy map too: the starmap draws from the per-
+          // system discovery state, so a script-revealed system needs its
+          // discovery_state bumped (level 1 = visited). TODO(decomp): the
+          // original opcode's exact discovery write is not yet traced.
+          NovaSystem_MarkSystemVisited(
+              state, static_cast<std::int16_t>(operand - kResourceIdBase), 1);
           applied = true;
         }
         break;

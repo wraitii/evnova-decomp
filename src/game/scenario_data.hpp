@@ -865,11 +865,33 @@ struct System {
 
   // ---- Runtime discovery/visibility state (decoded with, not from, the
   // payload). Mirrors SystemDef is_visible / has_explored_flag / discovery
-  // state, maintained by System_UpdateSystemAndStellarDisplayState and the
-  // discovery flood (System_FloodDiscoverAdjacentSystems). These gate which
-  // systems (and hence their stellars) the player may target. ----
+  // state. NOTE on the original's semantics: has_explored_flag (+0x1ed) is a
+  // load-time "syst resource exists" flag (set by the scenario loader pass in
+  // NovaData_LoadScenarioResourceTables 0x004bd3c0, cleared by
+  // Ship_InitGameplayDataTables 0x004b0c20, never written at runtime), and
+  // is_visible (+0x1eb) is re-derived from it by
+  // NovaResources_EvaluateAvailability 0x00448090 (has_explored && the
+  // system's visibility NCB). The per-system FOG state is discovery_state
+  // below; the clean-room keeps is_visible/has_explored_flag as the per-visit
+  // targeting-fog record instead (targeting.cpp gates stellar targets on it),
+  // kept in sync by the discovery helpers in travel.cpp. ----
   bool is_visible = false;
   bool has_explored_flag = false;
+
+  // Ghidra SystemDef +0x90 (short): persistent fog-of-war state, saved per
+  // system as u16[0x800] in the pilot save (PilotFile_SaveGameCore
+  // 0x004c7dd0 / LoadSave 0x004cb260). 0 = unknown; >=1 = visited (in-flight
+  // jump arrival writes 1, landed/stellar travel and map-outfit reveals write
+  // 2; the debug galaxy reveal also writes 2 everywhere).
+  std::int16_t discovery_state = 0;
+
+  // Ghidra SystemDef +0x1ec: transient "drawn on the current map view" latch,
+  // recomputed by System_RebuildSystemVisibilityMap (0x00467970) and the per-
+  // tick System_UpdateSystemAndStellarDisplayState (0x00432470): true for
+  // visited systems and every travel-resolvable link neighbour of one. This
+  // is what lets the starmap show one jump ahead without marking the
+  // neighbour visited.
+  bool discovered_this_rebuild = false;
 };
 
 // Ghidra RandomEncounterFleetDef (g_random_encounter_fleet_defs, up to 0x100

@@ -595,7 +595,12 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
       }
     }
     // Original also tries System_FindSystemContainingStellar then any explored
-    // system, then 0. TODO(decomp): explored-check + discovery-block restore.
+    // system, then 0. TODO(decomp): the save's per-system discovery block
+    // (u16[0x800] of SystemDef.discovery_state at block1 + 0x1a,
+    // PilotFile_SaveGameCore 0x004c7dd0 / LoadSave 0x004cb260) is not yet
+    // serialized by this clean-room save format; restoring it should re-mark
+    // each visited system (NovaSystem_MarkSystemVisited) and rebuild the map
+    // reveal from the restored system.
     return 0;
   }();
 

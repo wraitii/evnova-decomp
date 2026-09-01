@@ -12,41 +12,59 @@
 namespace {
 
 using game::GameState;
+using game::NovaSystem_OnSystemEntered;
 using game::NovaTravel_CycleDestinationSystem;
-using game::NovaTravel_MarkSystemDiscovered;
 using game::NovaTravel_PlotStarmapDestination;
 using game::NovaTravel_Tick;
 
-// Returns whether the scenario marks zero-based `id` visible/explored and the
-// pilot's explored bitset holds it.
-bool IsDiscovered(const GameState &state, std::int16_t zero_based_id) {
+// Returns whether zero-based `id` is visited (the per-system fog record):
+// discovery_state > 0 mirrored to the clean-room fog bits + the pilot's
+// explored bitset.
+bool IsVisited(const GameState &state, std::int16_t zero_based_id) {
   if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
                                state.scenario.systems.size()) {
     return false;
   }
   const std::size_t idx = static_cast<std::size_t>(zero_based_id);
   const auto &sys = state.scenario.systems[idx];
-  return sys.is_visible && sys.has_explored_flag &&
+  return sys.discovery_state > 0 && sys.is_visible && sys.has_explored_flag &&
          idx < state.control.explored_systems.size() &&
          state.control.explored_systems.test(idx);
 }
 
+// Returns whether `id` appears on the map view without being visited (the
+// discovered_this_rebuild latch for one-hop neighbours of visited systems).
+bool IsRevealedOnly(const GameState &state, std::int16_t zero_based_id) {
+  if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
+                               state.scenario.systems.size()) {
+    return false;
+  }
+  return !IsVisited(state, zero_based_id) &&
+         state.scenario.systems[static_cast<std::size_t>(zero_based_id)]
+             .discovered_this_rebuild;
+}
+
 } // namespace
 
-// The discovery flood that runs on a completed jump must reveal the reached
-// system AND its linked neighbours (the immediate neighbourhood the starmap
-// shows as progressed), across both the scenario per-system flag and the
-// pilot's explored bitset.
-TEST_CASE("jump discovery reveals the destination and its neighbours") {
+// The discovery pass that runs on a completed jump must mark the reached
+// system visited and latch its linked neighbours as revealed (the one-jump-
+// ahead window the starmap shows) WITHOUT marking those neighbours explored —
+// the original's arrival block floods depth 0 only
+// (System_RebuildSystemVisibilityMap(cur, 0, 1)) and the neighbour window is
+// the transient discovered_this_rebuild latch.
+TEST_CASE(
+    "jump discovery marks the destination visited and neighbours revealed") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
   REQUIRE(!state.scenario.systems.empty());
   // Exhaustively: clear every system, then pick one with outward links and
-  // confirm the flood marks it and each of those links.
+  // confirm only it is visited while each of those links is merely revealed.
   for (auto &sys : state.scenario.systems) {
     sys.is_visible = false;
     sys.has_explored_flag = false;
+    sys.discovery_state = 0;
+    sys.discovered_this_rebuild = false;
   }
   state.control.explored_systems.reset();
 
@@ -55,21 +73,23 @@ TEST_CASE("jump discovery reveals the destination and its neighbours") {
       state.scenario.System(static_cast<std::int16_t>(start + 0x80));
   REQUIRE(sys != nullptr);
 
-  NovaTravel_MarkSystemDiscovered(state, start);
+  NovaSystem_OnSystemEntered(state, start, 1);
 
-  // The reached system is revealed.
-  CHECK(IsDiscovered(state, start));
+  // The reached system is visited.
+  CHECK(IsVisited(state, start));
 
-  // Every outward link (stored as a system resource id >= 0x80) is revealed
-  // too.
+  // Every outward link (stored as a system resource id >= 0x80) shows on the
+  // map but is NOT explored itself.
   for (const std::int16_t link : sys->links) {
     if (link < 0x80) {
       continue;
     }
-    CHECK(IsDiscovered(state, static_cast<std::int16_t>(link - 0x80)));
+    const auto dest = static_cast<std::int16_t>(link - 0x80);
+    CHECK(IsRevealedOnly(state, dest));
+    CHECK_FALSE(IsVisited(state, dest));
   }
 
-  // A system that was neither reached nor linked stays hidden.
+  // A system that was neither reached nor linked stays fully hidden.
   bool found_unrelated = false;
   for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
     const std::int16_t id = static_cast<std::int16_t>(i);
@@ -84,7 +104,8 @@ TEST_CASE("jump discovery reveals the destination and its neighbours") {
       }
     }
     if (!linked) {
-      CHECK_FALSE(IsDiscovered(state, id));
+      CHECK_FALSE(IsVisited(state, id));
+      CHECK_FALSE(IsRevealedOnly(state, id));
       found_unrelated = true;
     }
   }
@@ -96,9 +117,9 @@ TEST_CASE("jump discovery guards out-of-range systems") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   const std::size_t before = state.control.explored_systems.count();
-  NovaTravel_MarkSystemDiscovered(state, -5);
-  NovaTravel_MarkSystemDiscovered(
-      state, static_cast<std::int16_t>(state.scenario.systems.size() + 10));
+  NovaSystem_OnSystemEntered(state, -5, 1);
+  NovaSystem_OnSystemEntered(
+      state, static_cast<std::int16_t>(state.scenario.systems.size() + 10), 1);
   CHECK(state.control.explored_systems.count() == before);
 }
 
