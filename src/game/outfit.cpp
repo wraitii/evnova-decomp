@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "targeting.hpp"
+#include "travel.hpp"
 
 namespace game {
 namespace {
@@ -605,6 +606,138 @@ std::int16_t Outfit_RemoveOutfit(GameState &state,
     OutfitMarkStatsDirty(state);
   }
   return removed;
+}
+
+// ---------------------------------------------------------------------------
+// On-acquire side effects
+// ---------------------------------------------------------------------------
+// Ghidra 0x00427770 Outfit_GrantOutfitToPlayer. See outfit.hpp for the effect
+// inventory. Returns true when the outfit was a consumed one-shot effect item
+// (map reveal / paint / clean-record) rather than a stackable owned outfit.
+bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
+                                    std::int16_t outfit_zero_based_id) {
+  if (outfit_zero_based_id < 0 || outfit_zero_based_id >= 0x200) {
+    return false;
+  }
+  const Outfit *outfit = state.scenario.Outfit(
+      static_cast<std::int16_t>(outfit_zero_based_id + 0x80));
+  if (outfit == nullptr) {
+    return false;
+  }
+
+  // Ordered dispatch, mirroring the original (0x00427770): the FIRST
+  // ModType-16 slot reveals, the first ModType-43 slot paints, and the
+  // ModType-21 record clears only run when neither of those consumed the
+  // outfit (the original checks its map latch + paint flag before the record
+  // pass). Ownership increments only for plain outfits.
+  bool has_map = false;
+  std::int16_t map_val = 0;
+  bool has_paint = false;
+  for (const Effect &e : OutfitEffects(*outfit)) {
+    if (e.type == static_cast<std::int16_t>(OutfitEffect::kMap) && !has_map) {
+      has_map = true;
+      map_val = e.val;
+    } else if (e.type == static_cast<std::int16_t>(OutfitEffect::kPaint)) {
+      has_paint = true;
+    }
+  }
+
+  bool consumed = false;
+  if (has_map) {
+    // Galaxy-map reveal. The discovery threshold is always 2: revealed
+    // systems read as visited, indistinguishable from a landed arrival. The
+    // reveal floods map_val links deep from the current system (stock maps:
+    // ModVal 1-3, Dr Ralph's Exploration Map 10).
+    if (map_val >= 1) {
+      // Reveal everything within ModVal links of the current system.
+      NovaSystem_RebuildDiscoveryState(
+          state, state.player.current_system_id, map_val, 2);
+    } else if (map_val == -1) {
+      // Reveal all neutral systems with a usable destination. The original
+      // also gates on is_visible, which is load-time true there; the
+      // clean-room's is_visible is per-visit fog, so the gate is dropped
+      // (loaded systems count as visible, as in the original).
+      for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+        const auto id = static_cast<std::int16_t>(i);
+        const System &sys = state.scenario.systems[i];
+        if (sys.government_id == -1 &&
+            NovaSystem_HasUsableTravelDestination(state, id)) {
+          NovaSystem_RebuildDiscoveryState(state, id, 0, 2);
+        }
+      }
+    } else if (map_val <= -1000) {
+      // Reveal every system whose government carries the target class id in
+      // any of its Class 1-4 fields (same is_visible divergence as above).
+      const std::int16_t target_class =
+          static_cast<std::int16_t>(-(map_val + 1000));
+      for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+        const System &sys = state.scenario.systems[i];
+        if (sys.government_id < 0) {
+          continue;
+        }
+        const Government *gov = state.scenario.Government(
+            static_cast<std::int16_t>(sys.government_id + 0x80));
+        if (gov == nullptr) {
+          continue;
+        }
+        const bool matches = std::any_of(
+            gov->classes.begin(),
+            gov->classes.end(),
+            [target_class](std::int16_t c) { return c == target_class; });
+        if (matches) {
+          NovaSystem_RebuildDiscoveryState(
+              state, static_cast<std::int16_t>(i), 0, 2);
+        }
+      }
+    }
+    // The map latch (DAT_007d4c08) is set whenever a map slot exists, any
+    // value: it blocks further map purchases until the outfitter reopens.
+    state.control.map_grant_latch = true;
+    consumed = true;
+  }
+
+  if (!consumed && !has_paint) {
+    // Clean-record pass: every ModType-21 slot clears negative system
+    // reputation — ModVal -1 targets every system (the original's is_visible
+    // gate is load-time true there), otherwise the government id in ModVal.
+    // Legal-record display is not modelled yet; the reputation table is the
+    // persisted effect.
+    bool cleared = false;
+    for (const Effect &e : OutfitEffects(*outfit)) {
+      if (e.type != static_cast<std::int16_t>(OutfitEffect::kCleanRecord)) {
+        continue;
+      }
+      for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+        const System &sys = state.scenario.systems[i];
+        const bool target = e.val == -1 || sys.government_id == e.val;
+        if (target && i < state.system_reputation.size() &&
+            state.system_reputation[i] < 0) {
+          state.system_reputation[i] = 0;
+        }
+      }
+      cleared = true;
+    }
+    if (cleared) {
+      state.control.record_grant_latch = true; // DAT_007d4c09
+      consumed = true;
+    }
+  }
+
+  if (has_paint) {
+    // Ghidra decodes ModVal as 15-bit RGB into 5-bit channels
+    // (DAT_00733b4a/b/c/e). Ship paint rendering is not modelled yet.
+    // TODO(decomp): store + consume the tint in ship_visual once paint is
+    // reconstructed; for now the outfit is still treated as consumed
+    // (non-stackable), matching the original's ownership behavior.
+    consumed = true;
+  }
+
+  if (consumed) {
+    return true;
+  }
+  // Plain outfit: just add it to the owned inventory.
+  (void)Outfit_AddInstalledOutfit(state, outfit_zero_based_id, 1);
+  return false;
 }
 
 // ---------------------------------------------------------------------------

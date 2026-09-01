@@ -306,8 +306,11 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
         break;
       case 'G':
         if (operand >= kResourceIdBase && operand < 0x280) {
-          (void)Outfit_AddInstalledOutfit(
-              state, static_cast<std::int16_t>(operand - kResourceIdBase), 1);
+          // Ghidra 0x00427770 Outfit_GrantOutfitToPlayer: mission outfit
+          // grants run the same on-acquire effects (map reveal / paint /
+          // clean-record) as a shop take.
+          (void)NovaOutfit_GrantOutfitToPlayer(
+              state, static_cast<std::int16_t>(operand - kResourceIdBase));
           applied = true;
         }
         break;

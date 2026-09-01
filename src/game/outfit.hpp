@@ -121,6 +121,31 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
                                                std::int16_t outfit_resource_id,
                                                std::int16_t count);
 
+// Applies the on-acquire side effects of granting the player one outfit id
+// (zero-based, matching Outfit_AddInstalledOutfit / Outfit_RemoveOutfit).
+// Ghidra 0x00427770 Outfit_GrantOutfitToPlayer. Scans the outfit's four
+// (ModType, ModVal) slots:
+//  - ModType 16 (kMap): galaxy-map reveal (see below) -> returns consumed;
+//  - ModType 43 (kPaint): ship tint -> consumed (rendering not modelled yet);
+//  - ModType 21 (kCleanRecord): clears negative system reputation (-1 = all
+//    visible systems, else the government id in ModVal) -> consumed;
+//  - otherwise: adds one to the owned inventory (via
+//    Outfit_AddInstalledOutfit) -> returns NOT consumed.
+// A consumed outfit is a one-shot effect item: it does not stack in the
+// inventory, matching the original (map/paint/record outfits never increment
+// g_outfit_owned_count).
+//
+// The map reveal (ModType 16 ModVal):
+//  - >= 1: flood-reveals every system within ModVal links of the player's
+//    current system at discovery level 2;
+//  - == -1: reveals every visible neutral (government -1) system that has a
+//    usable travel destination;
+//  - <= -1000: reveals every visible system whose government lists
+//    -(ModVal + 1000) in its Class 1-4 fields.
+[[nodiscard]] bool
+NovaOutfit_GrantOutfitToPlayer(GameState &state,
+                               std::int16_t outfit_resource_id);
+
 // Cargo bookkeeping (mirrors Outfit_ComputePlayerCargoAndJunkTotal /
 // ComputeFleetCargoCapacity / ComputeRemainingCargoSpace). Single-ship player
 // capacity for now (no NPC fleet), so fleet capacity == the player's own

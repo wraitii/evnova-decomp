@@ -304,6 +304,11 @@ LandedStoreSession NovaLanded_OpenOutfitterSession(GameState &state,
                                                    std::int16_t stellar_id) {
   LandedStoreSession session;
   session.kind = LandedStoreKind::kOutfitter;
+  // The outfitter clears both one-shot effect latches on entry
+  // (NovaUi_RunTravelOutfitInteractionLoop 0x0048ea70): one map purchase and
+  // one record-clean per visit.
+  state.control.map_grant_latch = false;
+  state.control.record_grant_latch = false;
   // Ghidra NovaUi_RunTravelOutfitInteractionLoop (0x0048ea70) runs
   // Weapon_ReconcileOutfitPoolWithWeaponBanks at modal entry, before
   // Outfit_RebuildAvailableOutfitListForTravelStellar builds the listing, so
@@ -395,6 +400,29 @@ bool NovaLanded_CanBuyOutfit(const GameState &state,
       !NovaControlExpression_Evaluate(outfit->availability_expr,
                                       NovaLanded_ControlExpressionState(state)))
     return false;
+  // One-shot effect latches (0x00491950's mod-slot scan): a ModType-16 map
+  // outfit is unpurchasable once a map grant ran this outfitter visit, and a
+  // ModType-21 record-clean once a record grant ran. A map slot wins when
+  // both are present, as in the original's if-chain.
+  bool has_map = false;
+  bool has_record = false;
+  const auto mod_slots = {
+      std::pair{outfit->mod_type, outfit->mod_val},
+      std::pair{outfit->alt_mod_types[0], outfit->alt_mod_vals[0]},
+      std::pair{outfit->alt_mod_types[1], outfit->alt_mod_vals[1]},
+      std::pair{outfit->alt_mod_types[2], outfit->alt_mod_vals[2]}};
+  for (const auto &slot : mod_slots) {
+    if (slot.first == static_cast<std::int16_t>(OutfitEffect::kMap)) {
+      has_map = true;
+    } else if (slot.first ==
+               static_cast<std::int16_t>(OutfitEffect::kCleanRecord)) {
+      has_record = true;
+    }
+  }
+  if (has_map && state.control.map_grant_latch)
+    return false;
+  if (!has_map && has_record && state.control.record_grant_latch)
+    return false;
   const ShipClass *ship = state.scenario.Ship(
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
   if (ship == nullptr ||
@@ -419,9 +447,19 @@ std::int16_t NovaLanded_BuyOutfit(GameState &state,
        ++bought) {
     const std::int32_t price =
         NovaLanded_OutfitPrice(state, stellar_id, outfit_id);
-    if (Outfit_AddInstalledOutfit(
-            state, static_cast<std::int16_t>(outfit_id - 0x80), 1) != 1)
-      break;
+    // Ghidra 0x00427770 Outfit_GrantOutfitToPlayer runs on every shop take:
+    // plain outfits stack in the inventory, while map-reveal / paint /
+    // clean-record outfits are consumed one-shot effect items that never
+    // enter the owned inventory.
+    if (NovaOutfit_GrantOutfitToPlayer(
+            state, static_cast<std::int16_t>(outfit_id - 0x80))) {
+      // One-shot effect item: the purchase applies and the unit is consumed,
+      // so multi-unit buys stop here.
+      state.player.credits -= price;
+      NovaLanded_ExecuteControlSet(
+          state, state.scenario.Outfit(outfit_id)->on_purchase_expr);
+      return 1;
+    }
     state.player.credits -= price;
     NovaLanded_ExecuteControlSet(
         state, state.scenario.Outfit(outfit_id)->on_purchase_expr);
