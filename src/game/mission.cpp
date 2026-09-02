@@ -9,6 +9,7 @@
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
 #include "targeting.hpp"
+#include "travel.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -115,6 +116,8 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
       .system_id;
 }
 
+} // namespace
+
 // Ghidra 0x00448090 NovaResources_EvaluateAvailability, stellar/system
 // membership prologue: every stellar's runtime owning-system slot is reset,
 // each SystemDef.is_visible is recomputed from the Visibility NCB (the
@@ -123,10 +126,11 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
 // whose slot is still unset (first visible system wins; a system claims its
 // hidden visibility-parent chain with it). Systems hidden by the NCB keep
 // system_id = -1 on their stellars and are therefore invisible to
-// locator-family resolution.
+// locator-family resolution. External linkage: the flight loop, the starmap
+// and the new-game flow all re-run it outside mission.cpp.
 // The mïsn availability-expression arm of 0x00448090 runs inline in
 // Mission_EvaluateMissionLists.
-void EvaluateAvailabilityStellarMembership(GameState &state) {
+void NovaResources_EvaluateAvailability(GameState &state) {
   const ControlExpressionState expression =
       MissionControlExpressionState(state);
   for (auto &stellar : state.scenario.stellars) {
@@ -173,7 +177,37 @@ void EvaluateAvailabilityStellarMembership(GameState &state) {
   // is_available/hazard_marker from the new membership map; the original
   // relies on the last per-tick pass having run with the same map.
   NovaTargeting_UpdateStellarAvailability(state);
+
+  // Tail of 0x00448090: if the player's current system just failed its
+  // Visibility NCB, resolve it to the visible member of its twin group and
+  // relocate everything there; if the whole group is invisible, force the
+  // discovery slot visible so the pilot is never stranded in hidden space.
+  const std::int16_t current = state.player.current_system_id;
+  if (current < 0 ||
+      static_cast<std::size_t>(current) >= state.scenario.systems.size()) {
+    return;
+  }
+  if (!state.scenario.systems[static_cast<std::size_t>(current)].is_visible) {
+    std::int16_t resolved = NovaSystem_ResolveVisibleForTravel(state, current);
+    if (resolved < 0) {
+      resolved = NovaSystem_ResolveDiscoverySlot(state, current);
+      if (resolved < 0) {
+        resolved = current;
+      }
+      NovaLog::Warn(
+          "current system {} invisible with no visible twin; forcing slot "
+          "visible",
+          current);
+      state.scenario.systems[static_cast<std::size_t>(resolved)].is_visible =
+          true;
+    }
+    state.player.current_system_id = resolved;
+    // TODO(decomp): the original also rewrites every active ship state's and
+    // shot's current-system field to the resolved system (0x0044821a).
+  }
 }
+
+namespace {
 
 // Mission_SelectMissionStellarByLocator (0x0043d510) filters all stellars
 // against a locator family. The clean-room model has no separate travel graph
@@ -842,7 +876,7 @@ MissionListEvaluation Mission_EvaluateMissionLists(GameState &state) {
   // The original opens with NovaResources_EvaluateAvailability (0x00448090):
   // refresh stellar system membership + system visibility, then re-cache the
   // mïsn availability expressions (the loop below).
-  EvaluateAvailabilityStellarMembership(state);
+  NovaResources_EvaluateAvailability(state);
   const ControlExpressionState expression =
       MissionControlExpressionState(state);
   for (auto &mission : state.scenario.missions) {

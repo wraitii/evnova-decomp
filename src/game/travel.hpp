@@ -208,12 +208,13 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
 
 // Cycles the player's next-jump destination SYSTEM through the systems
 // directly linked to the current system, in slot order. Mirrors the original's
-// command-0x60 block in Ship_HandlePlayerShip (g_playerCycleTravelTarget-
-// CommandLatch / travel_transfer_mode == 3 / ai_secondary_target_slot++): a
-// destination is only offered when its link slot resolves to a travelable
-// system. Each press advances (forward=true) or retreats (forward=false) one
-// slot (wrapping); sets the travel slot + destination on state.travel so 'j'
-// jumps there and the HUD shows the name. Returns the newly selected
+// key-binding-13 block in PlayerTick_TargetAndTravelCommands (0x0044b8b9..
+// 0x0044def6, g_playerCycleTravelTargetCommandLatch / travel_transfer_mode ==
+// 3 / ai_secondary_target_slot++): a destination is only offered when its link
+// slot resolves to a visible system through the twin chain. Each press
+// advances (forward=true) or retreats (forward=false) one slot (wrapping); sets
+// the travel slot + destination on state.travel so 'j' jumps there and the HUD
+// shows the name. Returns the newly selected
 // destination zero-based system id, or -1 when the current system has no
 // travelable links.
 [[nodiscard]] std::int16_t NovaTravel_CycleDestinationSystem(GameState &state,
@@ -244,18 +245,16 @@ void NovaStarmap_SyncTravelSelectionFromRoute(GameState &state);
 // True when the route has at least one plotted hop (Ghidra DAT_007dc744).
 [[nodiscard]] bool NovaStarmap_RouteHasHops(const GameState &state);
 
-// Appends a hop to the route after validating it extends the chain (the
-// starmap's shift-click path, 0x004a3aa0 action-3 branch): the candidate must
-// be a travel-resolvable link neighbour of the current route tail (or of the
-// current system when the route is empty). Returns true when appended.
-bool NovaStarmap_AppendRouteHop(GameState &state,
-                                std::int16_t destination_zero_based);
-
-// Removes the last plotted hop when it matches `destination_zero_based`
-// (shift-clicking the route tail truncates the chain). Returns true when a hop
-// was removed.
-bool NovaStarmap_TruncateRouteAt(GameState &state,
-                                 std::int16_t destination_zero_based);
+// Edits the plotted route at the twin-resolved clicked system (the starmap's
+// shift-click path, Ghidra 0x004a47cc): reset when the hit is on the current
+// system's discovery slot, truncate when it slot-matches a plotted hop (that
+// hop and everything after are cleared, then the hit is re-appended, so the
+// route ends AT the clicked hop), pop the tail when it is a twin of it, and
+// otherwise append when the tail is visited (or the hit latched) and the hit
+// is a travel-resolvable adjacency of the tail. Returns true only when the
+// click appended a hop (the original moves the map selection in that case
+// alone).
+bool NovaStarmap_EditRouteAtHop(GameState &state, std::int16_t hit);
 
 // Resets the route to just the current system (the Clear Route button,
 // 0x004a3aa0 action-8 branch) and disarms the plotted travel slot.

@@ -418,6 +418,10 @@ void Stub_DiscoverStartingSystems(GameState &state) {
   // marked visited; its linked neighbours show on the starmap via the
   // discovered_this_rebuild latch without becoming explored themselves.
   NovaSystem_OnSystemEntered(state, kStartSystemId, 1);
+  // Ghidra NovaResources_EvaluateAvailability 0x00448090 runs at game-session
+  // bootstrap: filter every system's is_visible through its Visibility NCB
+  // (hiding the invisible story-twin clones) before anything reads it.
+  NovaResources_EvaluateAvailability(state);
   NovaLog::Info("starting system discovery seeded: {} (resource {}) and "
                 "adjacent neighbours now visible on the starmap",
                 kStartSystemId,

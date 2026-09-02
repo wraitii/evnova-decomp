@@ -424,9 +424,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // and per-tick sprite display state are still not reconstructed; the stellar
   // availability re-evaluation (the part of System_UpdateSystemAnd-
   // StellarDisplayState that re-homes each stellar to its system and sets
-  // is_available / hazard flags) is handled by NovaTargeting_UpdateStellar-
-  // Availability. Radar-panel rebuild is a logged divergence.
-  NovaTargeting_UpdateStellarAvailability(state);
+  // is_available / hazard flags) runs inside NovaResources_EvaluateAvailabil-
+  // ity. Radar-panel rebuild is a logged divergence.
+  NovaResources_EvaluateAvailability(state);
   NovaLog::Todo("spaceflight pre-loop setup: stellar radar panel rebuild and "
                 "per-tick sprite display state still not reconstructed");
   const bool ship_ready = view.EnsureShipSprite(platform, state);
@@ -533,9 +533,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     target_cycle_was_held = target_cycle;
     // Destination-SYSTEM cycling (Backslash / Shift+Backslash): rotate the
     // next-jump destination through the systems directly linked to the
-    // current one. Mirrors the original's command-0x60 channel in
-    // Ship_HandlePlayerShip (g_playerCycleTravelTargetCommandLatch; default
-    // Backslash per the EV Nova manual). Edge-latched so held-\ steps one
+    // current one. Mirrors the original's key-binding-13 block in
+    // PlayerTick_TargetAndTravelCommands (g_playerCycleTravelTargetCommandLatch
+    // at 0x0044b8b9..0x0044def6). Edge-latched so held-\ steps one
     // system per press. Setting a destination arms travel mode but does NOT
     // engage the jump -- that stays on the 'j' travel key (NovaTravel_Tick).
     const bool destination_cycle =
@@ -556,6 +556,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // pick the destination system"). The latch is cleared when a jump lands.
     if (input.hyperspace_mode && !hyperspace_was_held) {
       state.travel.hyperspace_mode = true;
+      // Entering hyperspace mode latches plotted-jump mode 3 with no slot
+      // (0x0044de28: mode=3, ai_secondary_target_slot=-1).
+      state.player.travel_transfer_mode = 3;
     }
     hyperspace_was_held = input.hyperspace_mode;
     // Ship-target cycling: backquote (`) / Shift+backquote, with the
@@ -1058,10 +1061,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // steps each animated stellar one animation segment (Stellar_UpdateStellar-
     // Sprites), both on the single frame_time_ms cadence (see the header).
     view.AdvanceAnimations(platform, state, frame_time_ms, delta_x, delta_y);
-    // Re-derive stellar availability for the current system each tick (scope 3
-    // of System_UpdateSystemAndStellarDisplayState). This keeps stellar
-    // is_available / hazard state in step as the player moves between systems.
-    NovaTargeting_UpdateStellarAvailability(state);
+    // Re-derive visibility + stellar availability each tick
+    // (NovaResources_EvaluateAvailability 0x00448090 runs per frame in the
+    // original's flight loop, refreshing is_visible from the Visibility NCBs
+    // and re-homing the stellars — its tail is the scope-3
+    // System_UpdateSystemAndStellarDisplayState availability pass). This
+    // keeps story-flag twin swaps (system government changes) in step while
+    // in flight.
+    NovaResources_EvaluateAvailability(state);
 
     // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
     // cursor update.

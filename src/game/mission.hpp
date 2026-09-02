@@ -100,6 +100,13 @@ Misn_ResolveVisibleSystemForTravel(const GameState &state,
 // (TODO(decomp)).
 void Misn_TickActiveMissionTimers(GameState &state);
 
+// Ghidra 0x00448090 NovaResources_EvaluateAvailability (system slice):
+// re-evaluates every system's is_visible from its Visibility NCB, re-homes
+// each nav stellar to the first visible claiming system, and relocates the
+// player out of a current system whose visibility failed. The mïsn
+// availability arm runs inline in Mission_EvaluateMissionLists.
+void NovaResources_EvaluateAvailability(GameState &state);
+
 // Ghidra 0x00447f20 Mission_CheckReactionConditionSatisfied. Tests a
 // reaction/availability condition string with the shared NCB expression
 // evaluator: empty strings pass, strings without a known expression head fail

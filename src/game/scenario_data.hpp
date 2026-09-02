@@ -32,11 +32,11 @@ namespace game {
 // resource.map records and the constants in brgr_archive.cpp).
 // --------------------------------------------------------------------------
 namespace scenario {
-constexpr std::uint32_t kShipResourceType = 0x73689570;       // sh\x95p
-constexpr std::uint32_t kOutfitResourceType = 0x6f9f7466;     // o\x9ftf
-constexpr std::uint32_t kWeaponResourceType = 0x77916170;     // w\x91ap
-constexpr std::uint32_t kStellarResourceType = 0x73709a62;    // sp\x9ab
-constexpr std::uint32_t kSystemResourceType = 0x73d87374;     // s\xd8st
+constexpr std::uint32_t kShipResourceType = 0x73689570;    // sh\x95p
+constexpr std::uint32_t kOutfitResourceType = 0x6f9f7466;  // o\x9ftf
+constexpr std::uint32_t kWeaponResourceType = 0x77916170;  // w\x91ap
+constexpr std::uint32_t kStellarResourceType = 0x73709a62; // sp\x9ab
+constexpr std::uint32_t kSystemResourceType = 0x73d87374;  // s\xd8st
 // n\x91bu "nebula" resources (the star-map background regions; loader call
 // FUN_004ce250(0x6e916275, id) in NovaData_LoadScenarioResourceTables
 // 0x004bd3c0, ids 0x80..0x9f).
@@ -781,10 +781,11 @@ struct Government {
 // rectangle (normal-zoom coordinates) plus two NCB strings, and two runtime
 // bytes -- the cached ActiveOn result (+0x8) and the explored latch (+0x9).
 struct Nebula {
-  std::int16_t x = 0;      // XPos (payload +0x00)
-  std::int16_t y = 0;      // YPos (payload +0x02)
-  std::int16_t width = 0;  // XSize (payload +0x04); 0 when the resource is absent
-  std::int16_t height = 0; // YSize (payload +0x06)
+  std::int16_t x = 0; // XPos (payload +0x00)
+  std::int16_t y = 0; // YPos (payload +0x02)
+  std::int16_t width =
+      0; // XSize (payload +0x04); 0 when the resource is absent
+  std::int16_t height = 0;           // YSize (payload +0x06)
   std::string active_on_expression;  // payload +0x08 (CString copy at +0xa)
   std::string on_explore_expression; // payload +0x107
   // ---- Runtime state (decoded with, not from, the payload). active_on is
@@ -883,12 +884,13 @@ struct System {
   std::int16_t encounter_chance_percent = 0; // SystemDef +0x8c (spawn odds)
 
   // SystemDef +0xb8/+0xba. Visibility twin remap: the scenario loader's
-  // post-load pass (NovaData_LoadScenarioResourceTables 0x004bd3c0) initializes
-  // both to -1, then groups invisible systems with a visible twin sharing the
-  // same position and points parent/root at the match. Consumed by
-  // System_ResolveVisibleSystemForTravel (0x0046b920). The grouping pass itself
-  // is not reconstructed yet (TODO(decomp(0x004beb4f))), so both stay -1 here
-  // and the resolver degrades to the plain is_visible test.
+  // post-load pass (NovaData_LoadScenarioResourceTables 0x004bd3c0 /
+  // 0x004beb4f) initializes both to -1, then groups decoded systems sharing
+  // the same map position: the lowest id becomes the group root, later twins
+  // chain via visible_parent_system_id, and every twin's
+  // visibility_root_system_id points at the root. Consumed by
+  // System_ResolveVisibleSystemForTravel (0x0046b920) and
+  // System_ResolveSystemDiscoverySlot (0x0046b9b0).
   std::int16_t visible_parent_system_id = -1;  // +0xb8
   std::int16_t visibility_root_system_id = -1; // +0xba
 
@@ -1125,11 +1127,11 @@ struct ImpactEffect {
 // range so callers can index directly; missing/empty resources decode to
 // defaults (the original zero-fills those slots).
 struct ScenarioData {
-  std::vector<ShipClass> ships;        // indexed by ship_id - 0x80
-  std::vector<Outfit> outfits;         // indexed by outfit_id - 0x80
-  std::vector<Weapon> weapons;         // indexed by weapon_id - 0x80
-  std::vector<Stellar> stellars;       // indexed by stellar_id - 0x80
-  std::vector<System> systems;         // indexed by system_id - 0x80
+  std::vector<ShipClass> ships;  // indexed by ship_id - 0x80
+  std::vector<Outfit> outfits;   // indexed by outfit_id - 0x80
+  std::vector<Weapon> weapons;   // indexed by weapon_id - 0x80
+  std::vector<Stellar> stellars; // indexed by stellar_id - 0x80
+  std::vector<System> systems;   // indexed by system_id - 0x80
   // n\x91bu nebula/region table (g_system_region_trigger_defs): up to 32
   // entries, index = resource id - 0x80; absent ids keep width/height 0
   // (the original zero-fills the trigger rects before probing each id).

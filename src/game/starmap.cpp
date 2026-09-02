@@ -6,6 +6,7 @@
 #include "../pict_image.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
+#include "mission.hpp"
 #include "nova_font.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
@@ -212,30 +213,49 @@ struct MappedSystem {
   float sy = 0.0F;
 };
 
+// Ghidra 0x0046b9b0 System_ResolveSystemDiscoverySlot: a system's fog record
+// lives on its visibility-group root (the loader's twin grouping, 0x004bd3c0).
+[[nodiscard]] std::int16_t DiscoverySlot(const GameState &state,
+                                         std::int16_t system_id) {
+  if (system_id < 0 ||
+      static_cast<std::size_t>(system_id) >= state.scenario.systems.size()) {
+    return -1;
+  }
+  const std::int16_t root =
+      state.scenario.systems[static_cast<std::size_t>(system_id)]
+          .visibility_root_system_id;
+  return root != -1 ? root : system_id;
+}
+
 // Whether the pilot has VISITED `zero_based_id` (SystemDef.discovery_state,
-// the persisted fog record).
+// the persisted fog record). Matches the original's map gates, which also
+// require the system to pass its Visibility NCB (is_visible) -- an invisible
+// story twin never shows even if its fog slot holds a stale visit.
 bool SystemVisited(const GameState &state, std::int16_t zero_based_id) {
   if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
                                state.scenario.systems.size()) {
     return false;
   }
-  return state.scenario.systems[static_cast<std::size_t>(zero_based_id)]
-             .discovery_state > 0;
+  const System &sys =
+      state.scenario.systems[static_cast<std::size_t>(zero_based_id)];
+  return sys.is_visible && sys.has_explored_flag && sys.discovery_state > 0;
 }
 
-// Whether the system appears on the map at all: visited, or latched by the
-// last discovery rebuild (the original's marker latch also accepts
+// Whether the system appears on the map at all: the marker pass's outer gate
+// is is_visible && has_explored_flag (0x004a8100), then visited, or latched by
+// the last discovery rebuild (the original's marker latch also accepts
 // discovered_this_rebuild -- one jump ahead shows as a marker).
 bool SystemOnMap(const GameState &state, std::int16_t zero_based_id) {
-  if (SystemVisited(state, zero_based_id)) {
-    return true;
-  }
   if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
                                state.scenario.systems.size()) {
     return false;
   }
-  return state.scenario.systems[static_cast<std::size_t>(zero_based_id)]
-      .discovered_this_rebuild;
+  const System &sys =
+      state.scenario.systems[static_cast<std::size_t>(zero_based_id)];
+  if (!sys.is_visible || !sys.has_explored_flag) {
+    return false;
+  }
+  return sys.discovery_state > 0 || sys.discovered_this_rebuild;
 }
 
 // STR# 0x7d2 / 0x86 / 0xfa0 strings the map draws, cached at window open.
@@ -455,12 +475,16 @@ struct NebulaTier {
 
 using NebulaTiers = std::array<NebulaTier, 7>;
 
-// The selection / mission-target marker icons are color icons (CICN 0x3a99 /
-// 0x3a98, loaded by the startup loader at 0x004aea40 and blitted at the
-// selected / mission-target systems in the marker pass).
+// The mission-target marker icon is a color icon (CICN 0x3a98, loaded by the
+// startup loader at 0x004ad960 into DAT_007dc3b0 and blitted at mission-
+// target systems in the marker pass). CICN 0x3a99 (DAT_007dc3b4, green) is
+// the misn-flags-0x100 "Show green arrow on map in initial briefing"
+// highlight: it only draws when the map is opened by the mission-briefing
+// flow with the mission's system preselected (DAT_007dc745), never in the
+// plain flight map -- so the clean-room does not render it (TODO(decomp):
+// the destination-window/briefing starmap sub-flow).
 struct MarkerIcons {
   std::unique_ptr<SdlTexture> mission_target; // CICN 0x3a98
-  std::unique_ptr<SdlTexture> selected;       // CICN 0x3a99
 };
 
 std::unique_ptr<SdlTexture> LoadCicnTexture(SdlPlatform &platform,
@@ -480,7 +504,6 @@ std::unique_ptr<SdlTexture> LoadCicnTexture(SdlPlatform &platform,
 MarkerIcons LoadMarkerIcons(SdlPlatform &platform) {
   MarkerIcons icons;
   icons.mission_target = LoadCicnTexture(platform, 0x3a98);
-  icons.selected = LoadCicnTexture(platform, 0x3a99);
   return icons;
 }
 
@@ -673,11 +696,8 @@ void DrawReticle(SDL_Renderer *renderer, float cx, float cy, float half) {
       {r, b - 1}, // right edge
   };
   for (int i = 0; i < 16; i += 2) {
-    SDL_RenderLine(renderer,
-                   segs[i].x,
-                   segs[i].y,
-                   segs[i + 1].x,
-                   segs[i + 1].y);
+    SDL_RenderLine(
+        renderer, segs[i].x, segs[i].y, segs[i + 1].x, segs[i + 1].y);
   }
 }
 
@@ -1113,21 +1133,22 @@ void DrawGalaxy(SdlPlatform &platform,
         continue;
       }
       // The original resolves the far end with System_ResolveVisibleSystemFor-
-      // Travel (0x0046b920), which passes for any system whose availability
-      // gate holds -- visitation does NOT gate the target, so lines reach
-      // unvisited latched neighbours. The clean-room's NovaSystem_Resolve-
-      // VisibleForTravel gates on the per-visit targeting fog (the logged
-      // is_visible repurpose), so the map resolves the raw link id instead;
-      // the visibility-root remap is TODO(decomp) and unused in the base
-      // scenario.
-      const std::int16_t target = static_cast<std::int16_t>(link - 0x80);
-      if (target < 0 ||
-          static_cast<std::size_t>(target) >= systems.size()) {
+      // Travel (0x0046b920): the line only draws to a system whose Visibility
+      // NCB currently holds (an invisible twin group ends the line), and the
+      // loader's link normalization (0x004bd3c0) already points every Con at
+      // the target's visibility root. Visitation does NOT gate the target, so
+      // lines still reach unvisited latched neighbours.
+      const std::int16_t target = NovaSystem_ResolveVisibleForTravel(
+          state, static_cast<std::int16_t>(link - 0x80));
+      if (target < 0) {
         continue;
       }
       // The committed-jump slot of the current system draws dark green
-      // (DAT_00733b38); everything else grey (DAT_00733b62).
+      // (DAT_00733b38) while a plotted jump is armed (travel_transfer_mode
+      // == 3, 0x004a8100 line-225 gate); everything else grey
+      // (DAT_00733b62).
       const bool active_jump =
+          state.player.travel_transfer_mode == 3 &&
           static_cast<std::int16_t>(i) == current &&
           state.travel.travel_slot >= 0 &&
           state.travel.travel_slot <
@@ -1138,6 +1159,27 @@ void DrawGalaxy(SdlPlatform &platform,
                 active_jump ? kJumpGreen : kLinkGrey);
     }
     drawn[i] = 1;
+  }
+
+  // Plotted-jump accent line (0x004a8100 line-290 pass): while a jump is
+  // armed (travel_transfer_mode == 3), one thick dark-green line runs from
+  // the current system to the travel-resolvable destination of the armed
+  // slot. Slot-driven, NOT selection-driven, and absent whenever the mode
+  // latch is not 3 (cleared implicitly by every disarm path).
+  if (state.player.travel_transfer_mode == 3 && current >= 0 &&
+      static_cast<std::size_t>(current) < systems.size()) {
+    const std::int16_t slot = state.travel.travel_slot;
+    const System &cur_sys = systems[static_cast<std::size_t>(current)];
+    if (slot >= 0 && slot < static_cast<std::int16_t>(cur_sys.links.size()) &&
+        cur_sys.links[static_cast<std::size_t>(slot)] >= 0x80) {
+      const std::int16_t dest = NovaSystem_ResolveVisibleForTravel(
+          state,
+          static_cast<std::int16_t>(
+              cur_sys.links[static_cast<std::size_t>(slot)] - 0x80));
+      if (dest >= 0) {
+        draw_link(current, dest, kJumpGreen);
+      }
+    }
   }
 
   // Markers (marker pass of 0x004a8100): the disc + ring draws ONLY for
@@ -1156,10 +1198,22 @@ void DrawGalaxy(SdlPlatform &platform,
                               ? kCurrentDotInsetZoomedIn
                               : kCurrentDotInset;
   for (const MappedSystem &m : mapped) {
-    const bool is_mission_target =
-        std::find(mission_targets.begin(),
-                  mission_targets.end(),
-                  m.zero_based_id) != mission_targets.end();
+    // Outer marker-pass gate (0x004a8100): is_visible && has_explored_flag.
+    // Invisible story twins never draw a marker, ring or arrow.
+    const System &sys = systems[static_cast<std::size_t>(m.zero_based_id)];
+    if (!sys.is_visible || !sys.has_explored_flag) {
+      continue;
+    }
+    // Mission targets compare through the discovery slot (0x004a8ec2 resolves
+    // both ends with System_ResolveSystemDiscoverySlot), so a twin group
+    // matches whichever member holds the mission locator.
+    const std::int16_t slot = DiscoverySlot(state, m.zero_based_id);
+    const bool is_mission_target = std::any_of(
+        mission_targets.begin(),
+        mission_targets.end(),
+        [&](std::int16_t target) {
+          return target != -1 && DiscoverySlot(state, target) == slot;
+        });
     if (!SystemOnMap(state, m.zero_based_id) &&
         m.zero_based_id != selected_id && !is_mission_target) {
       continue;
@@ -1173,19 +1227,18 @@ void DrawGalaxy(SdlPlatform &platform,
              StellarDisplayColor(state, m.zero_based_id),
              static_cast<double>(view.zoom) < kZoomInLimit ? 2.0F : 1.0F);
 
-    // Mission-target arrow (CICN 0x3a98) and selected arrow (CICN 0x3a99):
-    // 16px boxes whose inner corner sits on the marker rect corner
-    // (0x004a8fbd: Rect_Inset of the marker rect by -6, then the icon rect
-    // spans 16px further out) - the target arrow points down-right from the
-    // up-left, the selected arrow points down-left from the up-right.
+    // Mission-target arrow (CICN 0x3a98): a 16px box up-left of the marker
+    // whose inner corner sits on the marker rect corner (the marker rect is
+    // the centre inset by -4/-6, then the icon rect spans 16px further out,
+    // 0x004a9847); the arrow points down-right at the node. The original
+    // suppresses it on the selected system (BL cleared on slot match,
+    // 0x004a8e5c). The green CICN 0x3a99 (selected/briefing arrow) only
+    // draws in the mission-briefing map flow (DAT_007dc745), which the
+    // clean-room does not reconstruct -- see the MarkerIcons note.
     if (is_mission_target && m.zero_based_id != selected_id &&
         icons.mission_target) {
-      const SDL_FRect dst{m.sx - 22.0F, m.sy - 22.0F, 16.0F, 16.0F};
+      const SDL_FRect dst{m.sx - r - 16.0F, m.sy - r - 16.0F, 16.0F, 16.0F};
       SDL_RenderTexture(renderer, icons.mission_target->get(), nullptr, &dst);
-    }
-    if (m.zero_based_id == selected_id && icons.selected) {
-      const SDL_FRect dst{m.sx + 6.0F, m.sy - 22.0F, 16.0F, 16.0F};
-      SDL_RenderTexture(renderer, icons.selected->get(), nullptr, &dst);
     }
   }
 
@@ -1915,6 +1968,9 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   }
 
   NovaFontCache font_cache;
+  // Ghidra 0x00448090: refresh the Visibility NCB / discovery state before
+  // anything reads it (the original re-evaluates per frame).
+  NovaResources_EvaluateAvailability(state);
   const StarmapGeometry geometry = ResolveStarmapGeometry();
   const StarmapStrings strings = LoadStarmapStrings();
   auto backdrop = LoadStarmapBackdrop(platform);
@@ -1976,12 +2032,29 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   }
   const SDL_FRect &panel = geometry.map;
 
-  // Selected system: the plotted jump's destination while one is armed
-  // (0x004a3f30), otherwise the current system.
+  // Selected system (0x004a3aa0 open-init): while a plotted jump is armed
+  // (travel_transfer_mode == 3 with a valid slot) the map opens preselected
+  // on that jump's travel-resolvable destination; otherwise on the current
+  // system.
   std::int16_t selected_id = state.player.current_system_id;
-  if (state.travel.travel_slot >= 0 &&
-      state.travel.starmap_destination_system_id >= 0) {
-    selected_id = state.travel.starmap_destination_system_id;
+  if (state.player.travel_transfer_mode == 3 &&
+      state.travel.travel_slot >= 0 &&
+      static_cast<std::size_t>(state.player.current_system_id) <
+          state.scenario.systems.size()) {
+    const System &cur_sys = state.scenario.systems[static_cast<std::size_t>(
+        state.player.current_system_id)];
+    if (state.travel.travel_slot <
+        static_cast<std::int16_t>(cur_sys.links.size())) {
+      const std::int16_t link =
+          cur_sys.links[static_cast<std::size_t>(state.travel.travel_slot)];
+      if (link >= 0x80) {
+        const std::int16_t dest = NovaSystem_ResolveVisibleForTravel(
+            state, static_cast<std::int16_t>(link - 0x80));
+        if (dest >= 0) {
+          selected_id = dest;
+        }
+      }
+    }
   }
   if (preselected_system_id >= 0 &&
       static_cast<std::size_t>(preselected_system_id) <
@@ -2024,31 +2097,10 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
     }
   };
 
-  // Tab / Backslash cycle: the current system's directly linked destination
-  // systems (the manual's "all the systems that are linked to your current
-  // system"; clean-room addition per the manual -- the original's map has no
-  // keyboard cycle).
-  std::vector<std::int16_t> tab_order;
-  {
-    const std::size_t n = state.scenario.systems.size();
-    if (state.player.current_system_id >= 0 &&
-        static_cast<std::size_t>(state.player.current_system_id) < n) {
-      for (const std::int16_t link : state.scenario
-                                         .systems[static_cast<std::size_t>(
-                                             state.player.current_system_id)]
-                                         .links) {
-        if (link < 0x80) {
-          continue;
-        }
-        const std::int16_t dest = static_cast<std::int16_t>(link - 0x80);
-        if (dest >= 0 && static_cast<std::size_t>(dest) < n &&
-            std::find(tab_order.begin(), tab_order.end(), dest) ==
-                tab_order.end()) {
-          tab_order.push_back(dest);
-        }
-      }
-    }
-  }
+  // Tab / Backslash have no map function in the original: the route-editing
+  // trigger is Shift+click (pane-action commands 0x2a/0x36 = LShift/RShift,
+  // verified against 0x004a4353's action-3 branch), so the clean-room keeps no
+  // keyboard cycle.
 
   NovaLog::Info("opening galaxy starmap ({} systems, {} nebulae)",
                 state.scenario.systems.size(),
@@ -2058,8 +2110,6 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   bool overlay_needs_rebuild = true;
   bool dragging = false;
   SDL_FPoint drag_last{};
-  bool tab_was_held = false;
-  bool backslash_was_held = false;
 
   const auto close_with_selection = [&]() {
     // Ghidra 0x004a8f50 exit path: re-arm the travel slot from the plotted
@@ -2239,45 +2289,124 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
             mp.y >= panel.y + panel.h) {
           break;
         }
-        // Map-panel click (0x004a3cdd action 3): the FIRST system in id order
-        // whose marker rect (inset -10) contains the point wins. Only
-        // revealed systems (discovered_this_rebuild, the fog latch) are
-        // clickable.
-        std::int16_t hit = -1;
-        for (const MappedSystem &m : mapped) {
-          if (!SystemOnMap(state, m.zero_based_id)) {
-            continue;
-          }
-          if (std::abs(mp.x - m.sx) <= kClickInset &&
-              std::abs(mp.y - m.sy) <= kClickInset) {
-            hit = m.zero_based_id;
-            break;
-          }
-        }
+        // Map-panel click (0x004a3cdd action 3): the first VISIBLE system in
+        // id order whose marker rect (inset -10) contains the point AND that
+        // passes the acceptance gate wins; the hit is then resolved through
+        // the visibility chain (System_ResolveVisibleSystemForTravel
+        // 0x0046b920) so a twin group always selects its currently visible
+        // member. The gate (0x004a4773): a click is accepted on a system that
+        // is latched by the last discovery rebuild, is a mission target (raw
+        // id compare, 0x004a4659), or is already selected -- otherwise only
+        // when it is a travel-resolvable adjacency of the current system
+        // (plain click) or of the plotted route's tail (shift-click, which
+        // additionally accepts positional twins of the tail, 0x004a4899;
+        // with no hops plotted the shift source is the current system and
+        // the twin check is skipped). Everything else reads as empty space
+        // and begins a drag-pan.
         const bool shift =
             (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_LSHIFT] != 0) ||
             (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_RSHIFT] != 0);
+        std::int16_t hit = -1;
+        std::int16_t shift_tail = -1;
+        if (shift) {
+          for (const std::int16_t hop : state.travel.starmap_route) {
+            if (hop != -1) {
+              shift_tail = hop;
+            }
+          }
+          if (shift_tail == state.player.current_system_id) {
+            // Route[0] anchors the current system, not a plotted hop.
+            shift_tail = -1;
+          }
+        }
+        for (const MappedSystem &m : mapped) {
+          const std::int16_t cid = m.zero_based_id;
+          const System &cand =
+              state.scenario.systems[static_cast<std::size_t>(cid)];
+          if (!cand.is_visible) {
+            continue;
+          }
+          if (std::abs(mp.x - m.sx) > kClickInset ||
+              std::abs(mp.y - m.sy) > kClickInset) {
+            continue;
+          }
+          bool accept = cand.discovered_this_rebuild || cid == selected_id ||
+                        std::any_of(mission_targets.begin(),
+                                    mission_targets.end(),
+                                    [&](std::int16_t target) {
+                                      return target == cid;
+                                    });
+          if (!accept) {
+            const std::int16_t adj_source =
+                shift && shift_tail >= 0 ? shift_tail
+                                         : state.player.current_system_id;
+            const System &src =
+                state.scenario.systems[static_cast<std::size_t>(adj_source)];
+            if (shift && shift_tail >= 0 && src.pos_x == cand.pos_x &&
+                src.pos_y == cand.pos_y) {
+              accept = true;
+            } else {
+              for (const std::int16_t link : src.links) {
+                if (link < 0x80) {
+                  continue;
+                }
+                const std::int16_t resolved = NovaSystem_ResolveVisibleForTravel(
+                    state, static_cast<std::int16_t>(link - 0x80));
+                if (resolved < 0 ||
+                    static_cast<std::size_t>(resolved) >=
+                        state.scenario.systems.size()) {
+                  continue;
+                }
+                if (resolved == cid) {
+                  accept = true;
+                  break;
+                }
+                const System &rsys =
+                    state.scenario.systems[static_cast<std::size_t>(resolved)];
+                if (rsys.pos_x == cand.pos_x && rsys.pos_y == cand.pos_y) {
+                  accept = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (accept) {
+            hit = cid;
+            break;
+          }
+        }
+        if (hit >= 0) {
+          hit = NovaSystem_ResolveVisibleForTravel(state, hit);
+        }
         if (hit < 0) {
           // Empty space: begin a drag-pan (0x004a3f60 drag loop).
           dragging = true;
           drag_last = mp;
           break;
         }
-        selected_id = hit;
+        if (hit < 0) {
+          break;
+        }
         search_active = false;
         if (shift) {
-          // Route editing: shift-clicking the route tail truncates it,
-          // otherwise the hop is appended (0x004a5400 route branch).
-          if (!NovaStarmap_TruncateRouteAt(state, hit)) {
-            NovaStarmap_AppendRouteHop(state, hit);
+          // Shift-click: route editing (0x004a47cc) — reset at the current
+          // system's slot, truncate at a plotted hop (the route ends AT the
+          // clicked system), pop a twin of the tail, append when the hit
+          // extends the chain. The original moves the selection only when
+          // the click appends a hop.
+          if (NovaStarmap_EditRouteAtHop(state, hit)) {
+            selected_id = hit;
           }
-        } else if (hit == state.player.current_system_id) {
-          // Re-selecting the current system clears the plot (0x004a5760).
-          state.travel.travel_slot = -1;
         } else {
-          // A plain click arms the travel slot when the system is directly
-          // linked and clears it otherwise (0x004a5840).
-          if (!NovaTravel_PlotStarmapDestination(state, hit)) {
+          selected_id = hit;
+          if (hit == state.player.current_system_id) {
+            // Re-selecting the current system disarms the plotted jump
+            // (0x004a4e70 slot clear via the adjacency-scan miss).
+            state.travel.travel_slot = -1;
+            state.travel.starmap_destination_system_id = -1;
+          } else if (!NovaTravel_PlotStarmapDestination(state, hit)) {
+            // A plain click arms the travel slot when the system is directly
+            // linked and clears it otherwise (0x004a5840).
             state.travel.travel_slot = -1;
           }
         }
@@ -2340,32 +2469,6 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
       state.starmap_pan_y = view.pan_y;
       overlay_needs_rebuild = true;
     }
-
-    // Tab / Backslash step the selection through the destination ring.
-    const bool shift_held =
-        keys[SDL_SCANCODE_LSHIFT] != 0 || keys[SDL_SCANCODE_RSHIFT] != 0;
-    const bool tab_pressed = keys[SDL_SCANCODE_TAB] != 0;
-    const bool backslash_pressed = keys[SDL_SCANCODE_BACKSLASH] != 0;
-    if ((tab_pressed || backslash_pressed) && !tab_was_held &&
-        !backslash_was_held && !tab_order.empty()) {
-      const bool forward = !shift_held;
-      auto it = std::find(tab_order.begin(), tab_order.end(), selected_id);
-      if (it == tab_order.end()) {
-        selected_id = tab_order[forward ? 0 : tab_order.size() - 1];
-      } else {
-        const std::size_t index =
-            static_cast<std::size_t>(it - tab_order.begin());
-        if (forward && index + 1 >= tab_order.size()) {
-          selected_id = tab_order.front();
-        } else if (!forward && index == 0) {
-          selected_id = tab_order.back();
-        } else {
-          selected_id = tab_order[index + (forward ? 1 : -1)];
-        }
-      }
-    }
-    tab_was_held = tab_pressed;
-    backslash_was_held = backslash_pressed;
   }
 
   StarmapResult quit;

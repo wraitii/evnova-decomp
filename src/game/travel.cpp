@@ -201,10 +201,18 @@ int FindLinkedTravelSlot(const GameState &state,
   if (!sys) {
     return -1;
   }
-  const std::int16_t dest_resource =
-      static_cast<std::int16_t>(destination_zero_based + 0x80);
   for (std::size_t slot = 0; slot < sys->links.size(); ++slot) {
-    if (sys->links[slot] == dest_resource) {
+    const std::int16_t link = sys->links[slot];
+    if (link < 0x80) {
+      continue;
+    }
+    // Ghidra 0x004a5840 compares the clicked system against the LINK resolved
+    // through the visibility chain (System_ResolveVisibleSystemForTravel
+    // 0x0046b920), not the raw link id — a visible twin arms the slot whose
+    // raw link points at a currently hidden root.
+    if (NovaSystem_ResolveVisibleForTravel(
+            state, static_cast<std::int16_t>(link - 0x80)) ==
+        destination_zero_based) {
       return static_cast<int>(slot);
     }
   }
@@ -244,6 +252,9 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
   // the travel reticle/HUD point at it.
   t.travel_slot = static_cast<std::int16_t>(slot);
   t.destination_system_id = destination_zero_based;
+  // Plotted-jump mode latch (0x004a491e): the accent line and the jump HUD
+  // read travel_transfer_mode == 3.
+  state.player.travel_transfer_mode = 3;
   const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
   if (stellar_id >= 0x80) {
     t.engaged_stellar_id = stellar_id;
@@ -345,9 +356,10 @@ std::int16_t NovaSystem_ResolveDiscoverySlot(const GameState &state,
   return system_id;
 }
 
-// Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel. The twin-grouping
-// pass is not reconstructed (visible_parent/root stay -1), so this degrades to
-// the plain is_visible test on the requested system.
+// Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel. Follows the
+// visibility-root/parent chain built by the loader's twin-grouping pass
+// (0x004bd3c0 / 0x004beb4f) to the first twin whose Visibility NCB currently
+// holds; a group with no visible member resolves to -1.
 std::int16_t NovaSystem_ResolveVisibleForTravel(const GameState &state,
                                                 std::int16_t system_id) {
   if (system_id < 0 ||
@@ -454,19 +466,19 @@ void NovaSystem_FloodDiscoverAdjacentSystems(
     }
   }
 
-  // Links are stored as system resource ids in System.links. The original
-  // recurses through System_ResolveVisibleSystemForTravel, which there passes
-  // for every loaded system (is_visible is a loader-set load-time flag), so
-  // the clean-room recursing through any in-range link target matches that
-  // behaviour; the visibility-root remap is TODO(decomp).
+  // Links are stored as system resource ids in System.links (already
+  // normalized to visibility roots by the scenario loader, 0x004bd3c0). The
+  // original recurses through System_ResolveVisibleSystemForTravel
+  // (0x0046b920), which returns -1 for systems whose Visibility NCB currently
+  // fails -- an invisible twin group blocks the flood entirely.
   const auto &sys = state.scenario.systems[idx];
   for (const std::int16_t link : sys.links) {
     if (link < 0x80) {
       continue;
     }
-    const std::int16_t target = static_cast<std::int16_t>(link - 0x80);
-    if (target < 0 ||
-        static_cast<std::size_t>(target) >= state.scenario.systems.size()) {
+    const std::int16_t target = NovaSystem_ResolveVisibleForTravel(
+        state, static_cast<std::int16_t>(link - 0x80));
+    if (target < 0) {
       continue;
     }
     NovaSystem_FloodDiscoverAdjacentSystems(
@@ -491,16 +503,18 @@ void NovaSystem_RebuildDiscoveryState(GameState &state,
       state, origin_zero_based, 0, max_depth, threshold, visited);
 
   // Post-pass: rebuild the transient discovered_this_rebuild latch — every
-  // visited system gets it, plus every travel-resolvable link neighbour of
-  // one. (The original re-marks this latch in the same two steps; the twin
-  // clearing in System_UpdateSystemAndStellarDisplayState 0x00432470 only
-  // matters for visibility twins, which are not reconstructed here.)
+  // VISIBLE visited system gets it, plus every travel-resolvable link
+  // neighbour of one (System_RebuildSystemVisibilityMap 0x00467970 gates the
+  // source on is_visible && has_explored_flag && discovery_state > 0 and
+  // resolves each link through System_ResolveVisibleSystemForTravel
+  // 0x0046b920, so invisible twin clones never latch and never show on the
+  // map).
   for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
     state.scenario.systems[i].discovered_this_rebuild = false;
   }
   for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
     auto &sys = state.scenario.systems[i];
-    if (sys.discovery_state <= 0) {
+    if (sys.discovery_state <= 0 || !sys.is_visible || !sys.has_explored_flag) {
       continue;
     }
     sys.discovered_this_rebuild = true;
@@ -508,14 +522,9 @@ void NovaSystem_RebuildDiscoveryState(GameState &state,
       if (link < 0x80) {
         continue;
       }
-      // Links are stored as system resource ids. The original resolves them
-      // through System_ResolveVisibleSystemForTravel 0x0046b920, which passes
-      // for every loaded system (is_visible is a loader-set load-time flag),
-      // so the neighbour latch resolves the link target directly - same
-      // behaviour; the visibility-root remap is TODO(decomp).
-      const std::int16_t target = static_cast<std::int16_t>(link - 0x80);
-      if (target >= 0 &&
-          static_cast<std::size_t>(target) < state.scenario.systems.size()) {
+      const std::int16_t target = NovaSystem_ResolveVisibleForTravel(
+          state, static_cast<std::int16_t>(link - 0x80));
+      if (target >= 0) {
         state.scenario.systems[static_cast<std::size_t>(target)]
             .discovered_this_rebuild = true;
       }
@@ -558,8 +567,8 @@ void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
     // The original caches the ActiveOn evaluation (+0x8 byte) in
     // NovaResources_EvaluateAvailability; re-evaluating per check is
     // equivalent (controls only change through set expressions).
-    neb.active_on = NovaControlExpression_Evaluate(neb.active_on_expression,
-                                                   expression);
+    neb.active_on =
+        NovaControlExpression_Evaluate(neb.active_on_expression, expression);
     if (!neb.active_on || neb.explored) {
       continue;
     }
@@ -603,15 +612,19 @@ void NovaSystem_OnSystemEntered(GameState &state,
 }
 
 // ---------------------------------------------------------------------------
-// Destination-system cycling (the Backslash / command-0x60 channel).
+// Destination-system cycling (key binding 13; Ghidra 0x0044b8b9..0x0044def6 in
+// PlayerTick_TargetAndTravelCommands, g_playerCycleTravelTargetCommandLatch).
 // ---------------------------------------------------------------------------
-// Mirrors the command-0x60 block in Ship_HandlePlayerShip
-// (g_playerCycleTravelTargetCommandLatch): builds the set of travelable
-// destination slots for the current system, then nudges the travel-slot
-// selector one slot forward/backward through them (wrapping). A slot is a
-// candidate when its linked destination (System.links[slot] >= 0x80) resolves
-// to a real, non-self system. On a hit it sets the travel slot + destination
-// on state.travel so 'j' jumps there and the HUD travel panel shows the name.
+// Mirrors the original: a candidate slot is one whose linked destination
+// resolves to a visible system through the visibility chain
+// (System_ResolveVisibleSystemForTravel 0x0046b920, 0x0044de58) and is not a
+// self-link; pressing the key arms travel mode 3 and advances the slot
+// selector forward/backward through the candidates (wrapping 0..15). The
+// destination is the RESOLVED twin of the raw link, so 'j' jumps to whichever
+// group member currently passes its Visibility NCB.
+// Divergences: the original gates the latch on a fuel check ([ship+0x50] vs
+// DAT_00575538) and plays a centered UI sound (NovaAudio_QueueCenteredSound
+// 0x0044de80); the clean-room does neither.
 std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
   TravelState &t = state.travel;
   const System *sys = state.scenario.System(CurrentSystemResource(state));
@@ -621,8 +634,8 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
   const std::int16_t current_res = CurrentSystemResource(state);
   const std::size_t n = state.scenario.systems.size();
 
-  // Collect candidate slots: every link slot whose destination is a real,
-  // non-self system.
+  // Collect candidate slots: every link slot whose destination resolves to a
+  // visible system (twin-resolved) and does not loop back to the current one.
   std::array<int, 16> slots{};
   std::size_t count = 0;
   for (std::size_t slot = 0; slot < sys->links.size(); ++slot) {
@@ -630,9 +643,10 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
     if (link < 0x80 || link == current_res) {
       continue; // no link, or it loops back to the current system
     }
-    const std::int16_t dest = static_cast<std::int16_t>(link - 0x80);
+    const std::int16_t dest = NovaSystem_ResolveVisibleForTravel(
+        state, static_cast<std::int16_t>(link - 0x80));
     if (dest < 0 || static_cast<std::size_t>(dest) >= n) {
-      continue; // dangling link to an out-of-range system
+      continue; // link leads into an invisible twin group
     }
     slots[count++] = static_cast<int>(slot);
   }
@@ -656,12 +670,16 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
           ? (forward ? 0 : count - 1)
           : (forward ? (index + 1) % count : (index + count - 1) % count);
   const int slot = slots[next];
-  const std::int16_t dest = static_cast<std::int16_t>(
-      sys->links[static_cast<std::size_t>(slot)] - 0x80);
+  const std::int16_t dest = NovaSystem_ResolveVisibleForTravel(
+      state,
+      static_cast<std::int16_t>(sys->links[static_cast<std::size_t>(slot)] -
+                                0x80));
 
   t.travel_slot = static_cast<std::int16_t>(slot);
   t.starmap_destination_system_id = dest;
   t.destination_system_id = dest;
+  // Cycle latches plotted-jump mode 3 like the starmap arm (0x0044dea7).
+  state.player.travel_transfer_mode = 3;
   const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
   if (stellar_id >= 0x80) {
     t.engaged_stellar_id = stellar_id;
@@ -946,10 +964,10 @@ void NovaStarmap_NormalizeRoutePlan(GameState &state) {
 
 void NovaStarmap_NormalizeRouteToCurrentSystem(GameState &state) {
   auto &route = state.travel.starmap_route;
-  const std::int16_t first_hop = NovaSystem_ResolveVisibleForTravel(
-      state, route[1]);
-  const std::int16_t current = NovaSystem_ResolveVisibleForTravel(
-      state, state.player.current_system_id);
+  const std::int16_t first_hop =
+      NovaSystem_ResolveVisibleForTravel(state, route[1]);
+  const std::int16_t current =
+      NovaSystem_ResolveVisibleForTravel(state, state.player.current_system_id);
   if (first_hop != -1 && first_hop == current) {
     // The ship just arrived at the plotted first hop: consume it.
     route[0] = -1;
@@ -964,8 +982,8 @@ void NovaStarmap_SyncTravelSelectionFromRoute(GameState &state) {
   if (t.starmap_route[1] == -1) {
     return;
   }
-  const std::int16_t first_hop = NovaSystem_ResolveVisibleForTravel(
-      state, t.starmap_route[1]);
+  const std::int16_t first_hop =
+      NovaSystem_ResolveVisibleForTravel(state, t.starmap_route[1]);
   const System *sys = state.scenario.System(CurrentSystemResource(state));
   if (!sys) {
     return;
@@ -980,9 +998,12 @@ void NovaStarmap_SyncTravelSelectionFromRoute(GameState &state) {
       t.travel_slot = static_cast<std::int16_t>(slot);
       t.starmap_destination_system_id = first_hop;
       t.selected_stellar_is_manual = true;
-      NovaLog::Info("starmap route re-armed: next hop system {} on link slot {}",
-                    first_hop,
-                    slot);
+      // Route re-arm (0x004a8080) also latches plotted-jump mode 3.
+      state.player.travel_transfer_mode = 3;
+      NovaLog::Info(
+          "starmap route re-armed: next hop system {} on link slot {}",
+          first_hop,
+          slot);
       return;
     }
   }
@@ -992,72 +1013,124 @@ bool NovaStarmap_RouteHasHops(const GameState &state) {
   return state.travel.starmap_route[1] != -1;
 }
 
-bool NovaStarmap_AppendRouteHop(GameState &state,
-                                std::int16_t destination_zero_based) {
+// Ghidra 0x004a47cc (NovaUi_StarmapWindowInnerLoop, shift-click branch): edits
+// the plotted route at the twin-resolved clicked system `hit`:
+//   - hit on the current system's discovery slot: reset the route to empty
+//   - hit slot-matches an already-plotted hop: clear that hop and everything
+//     plotted after it, then FALL THROUGH (the original does not return
+//     here): the tail/append logic below re-appends the hit when the gate
+//     still passes, so the route ends AT the clicked hop rather than before
+//     it
+//   - hit shares the tail's map position (a twin of it): pop the tail,
+//     suppressing the append
+//   - else append when the tail is visited or the hit is latched
+//     (discovered_this_rebuild) and the hit is a travel-resolvable adjacency
+//     of the tail (System_ResolveVisibleSystemForTravel 0x0046b920 on both
+//     ends)
+// Returns true when the click appended a hop: the original moves the map
+// selection (g_starmap_selected_system_id) only in that case.
+bool NovaStarmap_EditRouteAtHop(GameState &state, std::int16_t hit) {
   auto &route = state.travel.starmap_route;
-  if (destination_zero_based < 0 ||
-      static_cast<std::size_t>(destination_zero_based) >=
-          state.scenario.systems.size()) {
+  if (hit < 0 ||
+      static_cast<std::size_t>(hit) >= state.scenario.systems.size()) {
     return false;
   }
-  // The candidate must extend the chain: a travel-resolvable link neighbour
-  // of the route tail (or of the current system when the route is empty).
-  std::int16_t tail = state.player.current_system_id;
-  for (std::size_t i = route.size(); i > 0; --i) {
-    if (route[i - 1] != -1) {
-      tail = route[i - 1];
-      break;
-    }
-  }
-  const System *tail_sys = state.scenario.System(
-      static_cast<std::int16_t>(tail + 0x80));
-  if (!tail_sys) {
-    return false;
-  }
-  bool linked = false;
-  for (const std::int16_t link : tail_sys->links) {
-    if (link < 0x80) {
-      continue;
-    }
-    if (NovaSystem_ResolveVisibleForTravel(
-            state, static_cast<std::int16_t>(link - 0x80)) ==
-        NovaSystem_ResolveVisibleForTravel(state, destination_zero_based)) {
-      linked = true;
-      break;
-    }
-  }
-  if (!linked) {
-    return false;
-  }
-  if (route[0] == -1) {
-    route[0] = state.player.current_system_id;
-    route[1] = destination_zero_based;
-    return true;
-  }
-  for (std::size_t i = 0; i < route.size(); ++i) {
-    if (route[i] == -1) {
-      route[i] = destination_zero_based;
-      return true;
-    }
-  }
-  return false; // route full (32 slots)
-}
+  // The original runs the route normalizer first (0x004a7e80, call at
+  // 0x004a47d9).
+  NovaStarmap_NormalizeRoutePlan(state);
 
-bool NovaStarmap_TruncateRouteAt(GameState &state,
-                                 std::int16_t destination_zero_based) {
-  auto &route = state.travel.starmap_route;
-  for (std::size_t i = route.size(); i > 1; --i) {
-    if (route[i - 1] != -1) {
-      if (route[i - 1] == destination_zero_based) {
-        // Same position as the last hop: pop it (the original compares the
-        // system positions, 0x004a5525).
-        route[i - 1] = -1;
-        return true;
+  const std::int16_t current = state.player.current_system_id;
+  const std::int16_t hit_slot = NovaSystem_ResolveDiscoverySlot(state, hit);
+  if (hit_slot == NovaSystem_ResolveDiscoverySlot(state, current)) {
+    // Shift-clicking the current system's slot resets the route to empty.
+    // The original then falls into the tail/append logic, but that is a
+    // no-op here: route[0] is -1 so the twin-pop guard fails, and no link
+    // of the current system resolves back into its own group (self-links
+    // are dropped at load), so the append gate can never fire.
+    route.fill(-1);
+    return false;
+  }
+
+  // Truncate: the first plotted hop whose discovery slot matches the hit is
+  // cleared along with everything plotted after it (the scan stops at the
+  // first empty slot). Control falls through to the tail/append logic.
+  for (std::size_t i = 1; i < route.size(); ++i) {
+    if (route[i] == -1) {
+      break;
+    }
+    if (NovaSystem_ResolveDiscoverySlot(state, route[i]) == hit_slot) {
+      for (std::size_t k = i; k < route.size(); ++k) {
+        route[k] = -1;
       }
-      return false;
+      break;
     }
   }
-  return false;
+
+  // Tail recompute: count = index of the first empty slot from 1 (-1 when
+  // the route is completely full; the original normalizes that to one hop
+  // from the current system, 0x004a4b4a).
+  int count = -1;
+  for (std::size_t i = 1; i < route.size(); ++i) {
+    if (route[i] == -1) {
+      count = static_cast<int>(i);
+      break;
+    }
+  }
+  if (count < 0) {
+    if (route[0] == -1) {
+      route[0] = current;
+    }
+    count = 1;
+  }
+
+  const auto &hit_sys = state.scenario.systems[static_cast<std::size_t>(hit)];
+  // Append gate + adjacency, computed against the pre-pop tail; the twin-pop
+  // below overrides the result.
+  bool append = false;
+  std::int16_t tail = current;
+  if (count >= 2) {
+    tail = route[count - 1];
+    const std::int16_t tail_resolved =
+        NovaSystem_ResolveVisibleForTravel(state, tail);
+    if (tail_resolved != tail && tail_resolved != -1) {
+      tail = tail_resolved;
+    }
+  }
+  const auto &tail_sys =
+      state.scenario.systems[static_cast<std::size_t>(tail)];
+  if (tail_sys.discovery_state > 0 || hit_sys.discovered_this_rebuild) {
+    for (const std::int16_t link : tail_sys.links) {
+      if (link < 0x80) {
+        continue;
+      }
+      if (NovaSystem_ResolveVisibleForTravel(
+              state, static_cast<std::int16_t>(link - 0x80)) == hit) {
+        append = true;
+        break;
+      }
+    }
+  }
+
+  // A hit sharing the last plotted hop's map position (its visibility twin)
+  // pops that hop instead of appending.
+  if (count > 0 && route[count - 1] >= 0 &&
+      static_cast<std::size_t>(route[count - 1]) <
+          state.scenario.systems.size()) {
+    const auto &last_sys = state.scenario.systems[static_cast<std::size_t>(
+        route[count - 1])];
+    if (hit_sys.pos_x == last_sys.pos_x && hit_sys.pos_y == last_sys.pos_y) {
+      route[count - 1] = -1;
+      append = false;
+    }
+  }
+
+  if (append) {
+    if (route[0] == -1) {
+      route[0] = current;
+    }
+    route[static_cast<std::size_t>(count)] = hit;
+  }
+  return append;
 }
 
 void NovaStarmap_ClearRoute(GameState &state) {

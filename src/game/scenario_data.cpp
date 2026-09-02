@@ -1270,6 +1270,107 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_systems;
     }
   }
+
+  // Ghidra 0x004beb4f (inside NovaData_LoadScenarioResourceTables
+  // 0x004bd3c0): visibility-twin grouping. The scenario repeats syst
+  // resources at identical map positions for story-driven government swaps
+  // (e.g. Koria Federation/rebel-assimilated, the whole Vell-os b330 region);
+  // the first decoded id at each position becomes the group ROOT and the
+  // rest chain off it via visible_parent_system_id, so
+  // System_ResolveSystemDiscoverySlot / System_ResolveVisibleSystemFor-
+  // Travel (0x0046b9b0 / 0x0046b920) can pick whichever twin's Visibility
+  // NCB currently holds. Runs while is_visible is still the loader-set
+  // "syst decoded" flag for every entry, exactly like the original.
+  auto &system_table = systems;
+  for (std::size_t i = 0; i < system_table.size(); ++i) {
+    system_table[i].visible_parent_system_id = -1;
+    system_table[i].visibility_root_system_id = -1;
+  }
+  for (std::size_t i = 0; i < system_table.size(); ++i) {
+    if (!system_table[i].has_explored_flag ||
+        system_table[i].visibility_root_system_id != -1) {
+      continue;
+    }
+    system_table[i].visibility_root_system_id = static_cast<std::int16_t>(i);
+    std::int16_t chain = static_cast<std::int16_t>(i);
+    for (std::size_t j = 0; j < system_table.size(); ++j) {
+      if (!system_table[j].has_explored_flag ||
+          system_table[j].pos_x != system_table[i].pos_x ||
+          system_table[j].pos_y != system_table[i].pos_y) {
+        continue;
+      }
+      // Already grouped under an earlier root (only possible for j < i,
+      // whose group claimed this position first).
+      if (system_table[j].visibility_root_system_id != -1 && !(i < j)) {
+        continue;
+      }
+      system_table[static_cast<std::size_t>(chain)].visible_parent_system_id =
+          static_cast<std::int16_t>(j);
+      system_table[j].visibility_root_system_id = static_cast<std::int16_t>(i);
+      chain = static_cast<std::int16_t>(j);
+    }
+  }
+
+  // Link normalization (0x004bd3c0, after the grouping pass). Pass 1: prune
+  // Con slots pointing at ids with no decoded syst (the loader logs these;
+  // the clean-room logs a terse note). Out-of-range raw Con values (the
+  // loader rebases only 0x80..0x87f, else -1) become -1 here too.
+  for (std::size_t i = 0; i < system_table.size(); ++i) {
+    if (!system_table[i].has_explored_flag) {
+      continue;
+    }
+    for (std::int16_t &link : system_table[i].links) {
+      const std::int16_t target = static_cast<std::int16_t>(link - 0x80);
+      if (link < 0x80 || target < 0 ||
+          static_cast<std::size_t>(target) >= system_table.size() ||
+          !system_table[static_cast<std::size_t>(target)].has_explored_flag) {
+        if (link >= 0x80) {
+          NovaLog::Info(
+              "system 0x{:x}: pruning link 0x{:x} (no syst)", i + 0x80, link);
+        }
+        link = -1;
+      }
+    }
+  }
+  // Pass 2: remap every link to its target's visibility ROOT
+  // (System_ResolveSystemDiscoverySlot 0x0046b9b0), drop links resolving to
+  // the source's own discovery slot, and deduplicate repeated targets.
+  const auto discovery_slot = [&system_table](std::int16_t id) {
+    if (id < 0 || static_cast<std::size_t>(id) >= system_table.size()) {
+      return static_cast<std::int16_t>(-1);
+    }
+    const std::int16_t root =
+        system_table[static_cast<std::size_t>(id)].visibility_root_system_id;
+    return root != -1 ? root : id;
+  };
+  for (std::size_t i = 0; i < system_table.size(); ++i) {
+    if (!system_table[i].has_explored_flag) {
+      continue;
+    }
+    const std::int16_t self_slot = discovery_slot(static_cast<std::int16_t>(i));
+    for (std::size_t k = 0; k < system_table[i].links.size(); ++k) {
+      std::int16_t &link = system_table[i].links[k];
+      if (link < 0x80) {
+        continue;
+      }
+      const std::int16_t resolved =
+          discovery_slot(static_cast<std::int16_t>(link - 0x80));
+      bool duplicate = resolved == self_slot;
+      for (std::size_t prev = 0; prev < k && !duplicate; ++prev) {
+        const std::int16_t prev_target =
+            static_cast<std::int16_t>(system_table[i].links[prev] - 0x80);
+        if (system_table[i].links[prev] >= 0x80 &&
+            discovery_slot(prev_target) == resolved) {
+          duplicate = true;
+        }
+      }
+      if (duplicate) {
+        link = -1;
+        continue;
+      }
+      link = static_cast<std::int16_t>(resolved + 0x80);
+    }
+  }
   // n\x91bu nebula/region backdrops (g_system_region_trigger_defs fill loop
   // in NovaData_LoadScenarioResourceTables 0x004bd3c0: 32 slots, each probed
   // as id 0x80 + i; absent resources leave the rect zeroed so the starmap
@@ -1278,9 +1379,8 @@ bool ScenarioData::LoadFromArchives() {
   nebulae.assign(0x20, {});
   std::size_t loaded_nebulae = 0;
   for (std::int32_t id = 0x80; id <= 0x9f; ++id) {
-    if (const auto res =
-            NovaResource_Load(scenario::kNebulaResourceType,
-                              static_cast<std::uint16_t>(id))) {
+    if (const auto res = NovaResource_Load(scenario::kNebulaResourceType,
+                                           static_cast<std::uint16_t>(id))) {
       game::Nebula neb;
       neb.x = ReadBeI16(*res, 0x00);
       neb.y = ReadBeI16(*res, 0x02);

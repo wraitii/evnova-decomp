@@ -11,6 +11,7 @@
 #include "ship_ai.hpp"
 #include "sprite_world.hpp"
 #include "targeting.hpp"
+#include "travel.hpp"
 #include "weapon.hpp"
 
 #include <SDL3/SDL.h>
@@ -403,8 +404,16 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
     if (link < 0x80) {
       continue;
     }
-    const System *destination = state.scenario.System(link);
-    if (destination == nullptr || !destination->is_visible) {
+    // Links point at visibility-group roots after the loader's normalization;
+    // resolve to the twin whose Visibility NCB currently holds.
+    const std::int16_t target = NovaSystem_ResolveVisibleForTravel(
+        state, static_cast<std::int16_t>(link - 0x80));
+    if (target < 0) {
+      continue;
+    }
+    const System *destination =
+        state.scenario.System(static_cast<std::int16_t>(target + 0x80));
+    if (destination == nullptr) {
       continue;
     }
     const float dx =

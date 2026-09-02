@@ -68,10 +68,24 @@ binary, see "System discovery" below):
   `System_UpdateSystemAndStellarDisplayState` `0x00432470` scope 3: defined
   (`+0x45`, set by the loader) stellars owned by a visible system become
   available, and `availability_flags & 0x20` sets the hazard marker. Because
-  the system flags are load-time-true, this is effectively GLOBAL - every
-  stellar of every loaded system is available whether or not the player ever
-  visited it. The starmap ring colours grade those nav stellars, so map-
-  revealed systems read as coloured immediately.
+  `is_visible` is re-filtered per system through its Visibility NCB (see
+  below), stellars of NCB-hidden systems stay unavailable.
+- **Visibility twins**: the scenario repeats `syst` resources at identical
+  map coordinates for story-driven government swaps (Koria's
+  Federation/rebel pair, the whole Vell-os `b330` region, the Polaris `b88`
+  swaps, ...). The loader's twin-grouping pass (`0x004bd3c0` / `0x004beb4f`)
+  groups every decoded system sharing a position: the lowest id becomes the
+  group ROOT (`visibility_root_system_id`), later twins chain through
+  `visible_parent_system_id`. `NovaResources_EvaluateAvailability` `0x00448090`
+  then re-filters `is_visible` through each system's Visibility NCB, and
+  `System_ResolveVisibleSystemForTravel` `0x0046b920` /
+  `System_ResolveSystemDiscoverySlot` `0x0046b9b0` walk the chain to the twin
+  whose expression currently holds. A follow-up loader pass also rewrites
+  every Con link to point at the target's visibility ROOT (dropping self-slot
+  and duplicate links), so the whole travel/discovery/graph machinery only
+  ever sees group roots. Systems whose whole group fails its NCB at game
+  start (the clones) are invisible: no marker, no link line, no label,
+  unreachable by flood and travel.
 - The real fog record is `SystemDef.discovery_state` (+0x90, short): 0 =
   unknown, >=1 = visited (in-flight hyperspace arrival writes 1, landed
   stellar travel and map-outfit reveals write 2), persisted per system as
@@ -81,9 +95,11 @@ binary, see "System discovery" below):
 - The starmap draws a marker when `discovery_state > 0` OR the transient
   `discovered_this_rebuild` latch (+0x1ec) is set; that latch is recomputed by
   `System_RebuildSystemVisibilityMap` `0x00467970` and the per-tick
-  `System_UpdateSystemAndStellarDisplayState` `0x00432470` as: every visited
-  system, plus every travel-resolvable link neighbour of one. So the map shows
-  exactly one jump ahead; unvisited neighbours appear but stay unexplored.
+  `System_UpdateSystemAndStellarDisplayState` `0x00432470` as: every VISIBLE
+  visited system, plus every travel-resolvable link neighbour of one (links
+  resolved through `System_ResolveVisibleSystemForTravel`). So the map shows
+  exactly one jump ahead; unvisited neighbours appear but stay unexplored,
+  and invisible twin clones never latch at all.
 
 ## Clean-room implementation (`src/game/starmap.cpp`)
 
@@ -93,17 +109,22 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
 - Draws the galaxy graph: `System.links` as lines (deduplicated by drawing
   from the lower index), system nodes as filled circles, and labels for
   visited systems. The drawn set is the original's (`NovaUi_DrawStarmapRoutes
-  AndMarkers` 0x004a8100): markers draw only for the current system, visited
+  AndMarkers` 0x004a8100): the whole pass sits behind the outer
+  `is_visible && has_explored_flag` gate, so NCB-hidden twin clones never
+  draw; markers draw only for the current system, visited
   (discovery_state > 0) systems, or systems latched by the last discovery
   rebuild (visited plus one-hop neighbours; mission targets and the selection
-  always draw), a link line radiates only FROM a visited system (no discovery
-  gate on the target, so lines reach one hop into unrevealed space), labels
+  always draw, compared through discovery slots 0x0046b9b0), a link line
+  radiates only FROM a visited system and resolves each link through
+  `NovaSystem_ResolveVisibleForTravel` (0x0046b920 — an invisible twin group
+  ends the line, so lines still reach one hop into unrevealed space), labels
   draw for visited systems only (zoom-gated, plus always for the selected
   system — the label pass does NOT accept the reveal latch), and unknown
-  systems have no marker, no label, cannot be clicked and are excluded from
-  search. The Tab/Backslash cycle covers every valid link destination
-  (the original's command-0x60 cycle has no discovery gate). Far-flung
-  unknown systems therefore don't stagger the view either.
+  systems (invisible twin groups, or groups whose NCB fails) have no marker,
+  no label, cannot be clicked and are excluded from search. There is NO
+  keyboard cycle on the original's map (Tab/Backslash do nothing — the pane
+  action's 0x2a/0x36 commands are LShift/RShift, i.e. Shift+click route
+  editing). Far-flung unknown systems therefore don't stagger the view either.
 - Markers are true solid discs (filled triangle-fan via the geometry path), so the
   node sits exactly on its system position; link endpoints share the same panel
   origin as the markers (the raw world projection is offset by the panel origin),
@@ -130,37 +151,65 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   current system's on-screen position (like the original's fixed pan reference),
   so the current system stays put rather than racing to a corner of the panel.
   Pan (arrow keys) scrolls the camera, content moving opposite the key direction
-  (Right shows what lies to the right of the current view); mouse click or
-  Tab/Backslash selects/cycles a system.
+  (Right shows what lies to the right of the current view); clicking a system
+  selects it subject to the acceptance gate below (the hit is then resolved
+  through the visibility twin chain, 0x0046b920).
 - Selection reticle: the selected system's green marker is 8 disjoint 4px
   corner ticks around the 13x13 reticle rect (0x004a5a40's eight independent
   SetCursorPos/DrawLineTo pairs) — a partial square with gaps at the edge
   midpoints, never joined into full edges or a cross inside. (An earlier
   clean-room version fed all 16 endpoints to one SDL_RenderLines call, which
   polylines them into full edges plus diagonal connector lines — fixed.)
-- Selection/jump accent: when the highlighted system is a directly-linked jump
-  destination of the current system, a thick green line is drawn from the
-  current system to it (plus a small green ring at that node), making the
-  planned next hop obvious before committing.
-- Tab / Backslash step the selection through the *destination ring* computed
-  once per session: each system *directly linked* to the player's current
-  system (the EV Nova manual: "press Tab or Backslash to cycle through all the
-  systems that are linked to your current system"). The ring contains ONLY those
-  destination systems -- never the current system itself (jumping to where you
-  already are is meaningless). Shift+Tab / Shift+Backslash step backwards.
-  Anchored to the player's current system, so a single-link system offers just
-  that one destination rather than chain-walking outward; when the current
-  selection isn't in the ring (e.g. the current system) the first forward step
-  lands on the first destination and the first backward step on the last. The
-  committed plotted jump to the highlighted system is shown as the thick green
-  current-path line + small green target marker.
+- The two 16px corner arrows are mission-driven, not selection-driven
+  (EVN bible misn flags 0x2 / 0x100, confirmed against vanilla screenshots):
+  CICN 0x3a98 (red, pointing down-right from up-left of the marker, box
+  corner on the inset marker-rect corner) marks mission-target systems and is
+  suppressed on the selected system (0x004a8e5c clears the mission flag on a
+  selection-slot match). CICN 0x3a99 (green, pointing down-left from
+  up-right) is the misn 0x100 "show green arrow on map in initial briefing"
+  highlight: it only draws when the map is opened by the mission-briefing
+  flow with the mission's system preselected (DAT_007dc745) — never in the
+  plain flight map, so the clean-room does not render it (TODO(decomp): the
+  briefing starmap sub-flow). The selection itself is marked by the green
+  corner-tick reticle only.
+- Click acceptance gate (0x004a4773): a click only LANDS on a system that is
+  latched by the last discovery rebuild, is a mission target (raw id compare,
+  0x004a4659), or is already selected -- otherwise only when it is a
+  travel-resolvable adjacency of the current system (plain click) or of the
+  plotted route's tail (shift-click, which additionally accepts positional
+  twins of the tail, 0x004a4899; with no hops plotted the shift source is
+  the current system and the twin check is skipped). Every other click reads
+  as empty space and begins a drag-pan -- distant visited systems are NOT
+  clickable (an earlier clean-room revision accepted any visible system).
+  The accepted hit is then resolved through the visibility twin chain
+  (0x0046b920).
+- Shift+click edits the *plotted route* (Ghidra 0x004a47cc; the pane-action
+  commands 0x2a/0x36 are LShift/RShift — Tab/Backslash have NO map function,
+  an earlier clean-room "destination-ring cycle" was an invention and was
+  removed): reset when the hit is on the current system's discovery slot,
+  truncate when it slot-matches a plotted hop (that hop and everything after
+  are cleared, then the hit is re-appended by the fall-through tail/append
+  logic, so the route ends AT the clicked hop — verified against the
+  disassembly: the truncate branch at 0x004a4a70 falls through to the tail
+  recompute at 0x004a4b1c), pop the tail when it is a twin of it, and
+  otherwise append when the tail is visited (or the hit is latched) and the
+  hit is a travel-resolvable adjacency of the tail. The normalizer
+  (0x004a7e80) runs first, and the map selection moves only when the click
+  appends. Every comparison runs through the visibility chain, so hidden
+  twin clones can never enter a route.
 - Committed-jump accent (faithful to the original): the *active* plotted jump
-  (travel_transfer_mode == 3) is drawn as a single thick green line from the
-  current system to its directly-linked destination, with a small green link
-  marker at that destination. This deliberately does NOT fan green over every
-  reachable link from the selected node (the original only highlights the jump
-  the player has committed to). Distinct from the *selection* accent above, which
-  previews the currently highlighted destination on every redraw.
+  is drawn only while the travel-transfer latch is 3 (0x004a8100 line-225
+  gate + line-290 accent pass): the current system's armed slot link tints
+  dark green (DAT_00733b38) and one thick dark-green line runs from the
+  current system to the travel-resolvable destination of the armed slot.
+  The latch is set by the starmap plain-click arm (0x004a491e), the route
+  re-arm (0x004a8080), the hyperspace-mode toggle and the Backslash cycle
+  (0x0044de28 / 0x0044dea7); the Clear Route button clears the armed slot
+  (0x004a3aa0 action 8) which kills the accent, and a shift-click route
+  reset deliberately leaves the armed jump alone (verified: the reset branch
+  only clears the route array). An earlier clean-room revision drove this
+  accent from the selection with no mode gate, which let it linger with no
+  relationship to the armed jump.
 - Rendering fidelity: link lines render as thick quads (2px at the current
   system, brighter for current-adjacent links), marker nodes scale up with
   zoom (mirroring the original's zoom-dependant marker insets), and visited-
@@ -205,18 +254,27 @@ explored. Clean-room wiring (travel.cpp):
   (`FireJump`) and new-game start; level 2 on landed stellar travel
   (`NovaLanding_EnterDocked`), mirroring `Stellar_TravelToSystem` `0x00455e10`.
 - `NovaSystem_FloodDiscoverAdjacentSystems` — `0x00467ab0`; depth-gated
-  recursion used by the rebuild and (with depth = ModVal) by map outfits.
+  recursion used by the rebuild and (with depth = ModVal) by map outfits;
+  neighbours recurse through `NovaSystem_ResolveVisibleForTravel` (0x0046b920)
+  like the original, so an invisible twin group blocks the flood.
   TODO(decomp(0x00467bd0)): the per-system region-event trigger is skipped.
 - `NovaSystem_RebuildDiscoveryState` — `0x00467970`; rebuild + latch pass.
-- The clean-room now mirrors the original's flag semantics: the scenario
-  decoder sets `is_visible`/`has_explored_flag` for every decoded system (an
-  earlier revision kept them as a per-visit fog record; that diverged from the
-  binary and left every far system's stellars unavailable - grey starmap rings
-  for map reveals - so it was reverted). `NovaTargeting_UpdateStellar-
-  Availability` (the scope-3 port) homes every loaded system's nav stellars
-  and marks them available globally. Every visited system is mirrored into
-  `GameState.control.explored_systems`, the bitset the NCB `has_explored` test
-  and save format read.
+- The clean-room mirrors the original's flag semantics: the scenario decoder
+  sets `is_visible`/`has_explored_flag` for every decoded system (an earlier
+  revision kept them as a per-visit fog record; that diverged from the binary
+  and left every far system's stellars unavailable - grey starmap rings for
+  map reveals - so it was reverted), and `NovaResources_EvaluateAvailability`
+  (0x00448090, mission.cpp) then re-filters `is_visible` through each
+  system's Visibility NCB - at new-game start, per flight frame, on starmap
+  open and on mission-list evaluation - relocating the player via the twin
+  chain if the current system's group goes invisible. The loader's
+  twin-grouping + link-normalization passes (0x004beb4f) are ported in
+  `scenario_data.cpp`: same-position story clones (Koria;Rebs, the b330
+  Vell-os region, the b88 Polaris swaps, ...) group under one root and every
+  Con link is rewritten to point at the root, so the invisible clones are
+  unreachable and unrendered until their NCB holds. Every visited system is
+  mirrored into `GameState.control.explored_systems`, the bitset the NCB
+  `has_explored` test and save format read.
 - The pilot save's discovery block (u16[0x800]) is still TODO(decomp) in
   `pilot_file.cpp`.
 
@@ -282,8 +340,10 @@ consumer and are skipped.
   (the original persists a default-Off preference; the clean-room has no prefs
   store yet) and the Show/Hide Borders button toggles it; while active the
   markers drop to their neutral base.
-- No plotted-route editing or multi-hop route → travel-target sync (only the
-  immediate first hop is resolved to a travel slot).
+- Multi-hop plotted routes exist (Shift+click route editing, green route
+  chain, route → travel-target sync on close and on jump arrival), but the
+  mission-info window's destination-window sub-flow (DAT_007354a6 route mode)
+  is still not reconstructed.
 - No mission-highlight icons / mission jump planning.
 - No licence-seed easter-egg branch.
 - Pan/zoom are keyboard-driven; no drag-to-pan / wheel zoom yet.
