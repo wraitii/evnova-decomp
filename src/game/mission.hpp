@@ -69,8 +69,8 @@ Mission_ExpandMissionWildcards(const GameState &state,
                                               std::size_t active_slot);
 
 // landed_stellar_id is the stellar the player is docked at when accepting
-// (the BBS context); a mission whose TravelStel matches it skips the initial
-// destination briefing.
+// (the BBS context) as a 0x80-based resource id; a mission whose resolved
+// TravelStel matches it skips the initial destination briefing.
 [[nodiscard]] bool Mission_ActivateAtSlot(GameState &state,
                                           std::int16_t mission_id,
                                           std::int16_t landed_stellar_id);
@@ -127,23 +127,31 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
                                       bool emit_completion_payload,
                                       std::uint32_t now_ms);
 
-// Ghidra 0x00440410 Mission_ResolveMissionSuccess. Runs the success payload,
-// applies the competing-government reputation delta across systems (equal
-// governments in full, allies/hostiles scaled by 0.5), and applies the
-// PayVal credit/reputation opcode. The success debrief dialog
-// (MisnActive +0x3d) and the on-resolve availability reroll
-// (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0) are not
-// reconstructed yet (TODO(decomp)); both are logged when they would fire.
-void Mission_ResolveMissionSuccess(GameState &state, std::int16_t mission_slot);
+// UI sink for the mission debrief text-reader dialogs (MisnActive +0x3d Comp
+// on success, +0x3f Fail on failure). The landing gate invokes it with the
+// composed dialog text; the flight-layer caller wires it to
+// NovaUi_RunTextReaderDialog. Unset sinks keep the pre-port TODO logging.
+using MissionDebriefSink = std::function<void(const std::string &text)>;
+
+// Ghidra 0x00440410 Mission_ResolveMissionSuccess. Shows the success debrief
+// dialog (+0x3d Comp dësc) through `debrief` when wired, runs the success
+// payload, applies the competing-government reputation delta across systems
+// (equal governments in full, allies/hostiles scaled by 0.5), and applies the
+// PayVal credit/reputation opcode. The on-resolve availability reroll
+// (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0) is not
+// reconstructed yet (TODO(decomp)); it is logged when it would fire.
+void Mission_ResolveMissionSuccess(GameState &state,
+                                   std::int16_t mission_slot,
+                                   const MissionDebriefSink &debrief = {});
 
 // Ghidra 0x00440930 Mission_ResolveMissionFailure. Runs the failure payload,
 // subtracts half the reputation delta from the competing government's
-// systems, clears the slot, and releases assigned ships. The failure debrief
-// dialog (MisnActive +0x3f) is not reconstructed yet (TODO(decomp)); it is
-// logged when it would fire.
+// systems, clears the slot, shows the failure debrief dialog (+0x3f Fail
+// dësc) through `debrief` when wired, and releases assigned ships.
 void Mission_ResolveMissionFailure(GameState &state,
                                    std::int16_t mission_slot,
-                                   std::uint32_t now_ms);
+                                   std::uint32_t now_ms,
+                                   const MissionDebriefSink &debrief = {});
 
 // Ghidra 0x00440bf0 Mission_FailMissionSlotQuick. Immediate failure path:
 // failure payload, failed latch, and ship release when the mission has
@@ -210,7 +218,8 @@ enum class MissionOfferResult {
 // Ghidra 0x004438d0 Mission_ProcessInteractionReactionSlotResources. Landing
 // interaction pass for one slot: mission-cargo pickup/drop-off at the
 // TravelStel and final delivery at the ReturnStel (Bible PickupMode /
-// DropOffMode).
+// DropOffMode). `landed_stellar_id` is a 0-based stellar index (the driver
+// rebases the 0x80-based context id).
 void Mission_ProcessInteractionReactionSlotResources(
     GameState &state,
     std::int16_t mission_slot,
@@ -218,14 +227,21 @@ void Mission_ProcessInteractionReactionSlotResources(
 
 // Ghidra 0x00443780 Mission_TickReactionSlotsForTravelInteraction. The
 // landing gate: evaluates objectives, processes cargo interactions, and
-// resolves success/failure when docked at a mission's ReturnStel.
+// resolves success/failure when docked at a mission's ReturnStel. `debrief`
+// receives the success/failure debrief dialog texts. `landed_stellar_id` is
+// the docked stellar as a 0x80-based resource id (the port's travel-context
+// convention); it is rebased to the targets' 0-based index space internally.
 void Mission_TickReactionSlotsForTravelInteraction(
-    GameState &state, std::int16_t landed_stellar_id, std::uint32_t now_ms);
+    GameState &state,
+    std::int16_t landed_stellar_id,
+    std::uint32_t now_ms,
+    const MissionDebriefSink &debrief = {});
 
 // Ghidra 0x0046efd0 Stellar_AreStellarsEquivalent. Two stellar ids match when
 // equal, or when their bodies share the same map position and display name
-// (duplicate-resource twins). Ids are 0x80-based resource ids; anything
-// outside [0, 0x800) never matches.
+// (duplicate-resource twins). Ids are 0-based stellar indices (the original
+// indexes g_stellar_defs directly); anything outside [0, 0x800) never
+// matches. Callers holding a 0x80-based resource id must rebase first.
 [[nodiscard]] bool NovaStellar_AreStellarsEquivalent(const GameState &state,
                                                      std::int16_t stellar_a,
                                                      std::int16_t stellar_b);

@@ -17,6 +17,7 @@
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
 #include "radar_panel.hpp"
+#include "selection_text_dialog.hpp"
 #include "ship_ai.hpp"
 #include "ship_comm_dialog.hpp"
 #include "ship_spawn.hpp"
@@ -31,6 +32,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <random>
 #include <string>
 
@@ -920,8 +922,18 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         // runs Mission_TickReactionSlotsForTravelInteraction (0x00443780)
         // on every window action; the reimplementation evaluates the pass
         // once per landing. Mission resolution (credits, text) happens here.
+        // The debrief dialogs (MisnActive +0x3d/+0x3f) are the original's
+        // Ui_RunTravelSelectionDialog modals; layered over the live flight
+        // view like every port modal (docs/dlog_ditl_dialog_format.md
+        // §7.1). The original shows them over the destination-window
+        // context instead (logged divergence).
+        const std::function<void(const std::string &)> debrief_dialog =
+            [&](const std::string &text) {
+              view.DrawGameFrame(platform, state, hud);
+              NovaUi_RunTextReaderDialog(platform, state, text, false);
+            };
         Mission_TickReactionSlotsForTravelInteraction(
-            state, ctx.stellar_id, SDL_GetTicks());
+            state, ctx.stellar_id, SDL_GetTicks(), debrief_dialog);
         const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
         if (exit == LandedExit::kQuit) {
           returning_to_menu = true;

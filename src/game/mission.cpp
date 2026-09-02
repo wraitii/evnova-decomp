@@ -1,5 +1,6 @@
 #include "mission.hpp"
 
+#include "../brgr_archive.hpp"
 #include "game_state.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
@@ -1077,9 +1078,16 @@ bool Mission_ActivateAtSlot(GameState &state,
     active.carrying_resources = true;
   }
   // The initial destination briefing is skipped when the mission has no
-  // TravelStel, or when the player accepts it while docked there.
+  // TravelStel, or when the player accepts it while docked there. Callers
+  // pass `landed_stellar_id` as a 0x80-based resource id; resolved targets
+  // are 0-based stellar indices (see Mission_TickReactionSlotsForTravel-
+  // Interaction for the convention note).
+  const std::int16_t landed_index =
+      landed_stellar_id >= kResourceIdBase
+          ? static_cast<std::int16_t>(landed_stellar_id - kResourceIdBase)
+          : landed_stellar_id;
   runtime.initial_briefing_done = active.travel_stellar_id == -1 ||
-                                  active.travel_stellar_id == landed_stellar_id;
+                                  active.travel_stellar_id == landed_index;
   // The original treats values below -50000 as an immediate acceptance fee;
   // the encoded value includes the -50000 sentinel, so preserve its unusual
   // arithmetic and clamp the resulting credit balance at zero.
@@ -1090,6 +1098,14 @@ bool Mission_ActivateAtSlot(GameState &state,
     state.player.credits =
         std::max<std::int32_t>(0, state.player.credits - charge);
   }
+  // Ghidra 0x0043f100: the on-accept payload (MisnActive +0x1ec, mïsn
+  // payload +0x15b) runs at the end of the original activate function,
+  // before the caller's acceptance dialogs. Tutorial missions use it to set
+  // chain bits and reveal the destination system (X opcode).
+  Mission_RunMisnScriptPayload(
+      state,
+      TextOf(state.active_missions[free_slot].on_accept_text),
+      static_cast<std::int16_t>(free_slot));
   return true;
 }
 
@@ -1344,17 +1360,36 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
 
 // Ghidra 0x00440410 Mission_ResolveMissionSuccess.
 void Mission_ResolveMissionSuccess(GameState &state,
-                                   std::int16_t mission_slot) {
+                                   std::int16_t mission_slot,
+                                   const MissionDebriefSink &debrief) {
   const auto slot = static_cast<std::size_t>(mission_slot);
   ActiveMission &mission = state.active_missions[slot];
   // MisnActive +0x3d selects the success debrief selection dialog
   // (Ui_LoadSelectionDialogResource + Stellar_BuildTravelDestination-
-  // Description + Ui_RunTravelSelectionDialog). UI-owned; not reconstructed.
-  if (mission.brief_description_ids[4] != -1) {
-    NovaLog::Todo("mission success debrief dialog (misn {} id {}) not "
-                  "reconstructed yet",
-                  mission.mission_template_id,
-                  mission.brief_description_ids[4]);
+  // Description + Ui_RunTravelSelectionDialog). Composed while the slot is
+  // still active so the wildcard pass reads the slot data.
+  const std::int16_t comp_text_id = mission.brief_description_ids[4];
+  std::string comp_text;
+  if (comp_text_id >= 0x80) {
+    if (const auto desc = NovaResource_LoadDescription(
+            static_cast<std::uint16_t>(comp_text_id))) {
+      comp_text = desc->text;
+      Mission_ExpandStringPlaceholders(state, comp_text);
+      comp_text =
+          Mission_ExpandMissionWildcards(state, comp_text, false, mission_slot);
+    }
+  }
+  if (!comp_text.empty()) {
+    if (debrief) {
+      debrief(comp_text);
+    } else {
+      NovaLog::Todo("mission success debrief dialog (misn {} id {}) has no "
+                    "UI sink",
+                    mission.mission_template_id,
+                    comp_text_id);
+    }
+  } else if (comp_text_id >= 0x80) {
+    NovaLog::Todo("mission success debrief dësc {} loaded empty", comp_text_id);
   }
   state.active_mission_runtime_flags[slot].is_active = false;
   Mission_RunMisnScriptPayload(
@@ -1399,11 +1434,26 @@ void Mission_ResolveMissionSuccess(GameState &state,
 // Ghidra 0x00440930 Mission_ResolveMissionFailure.
 void Mission_ResolveMissionFailure(GameState &state,
                                    std::int16_t mission_slot,
-                                   std::uint32_t now_ms) {
+                                   std::uint32_t now_ms,
+                                   const MissionDebriefSink &debrief) {
   const auto slot = static_cast<std::size_t>(mission_slot);
   ActiveMission &mission = state.active_missions[slot];
   Mission_RunMisnScriptPayload(
       state, TextOf(mission.on_failure_text), mission_slot);
+  // The debrief text is composed before the slot is torn down so the active
+  // arm of the wildcard pass still reads it; the original shows the dialog
+  // after clearing the active flag.
+  const std::int16_t fail_text_id = mission.brief_description_ids[5];
+  std::string fail_text;
+  if (fail_text_id >= 0x80) {
+    if (const auto desc = NovaResource_LoadDescription(
+            static_cast<std::uint16_t>(fail_text_id))) {
+      fail_text = desc->text;
+      Mission_ExpandStringPlaceholders(state, fail_text);
+      fail_text =
+          Mission_ExpandMissionWildcards(state, fail_text, false, mission_slot);
+    }
+  }
   const std::int16_t govt = mission.comp_govt_id;
   if (govt != -1) {
     // Failure subtracts half the reputation delta (integer division rounded
@@ -1422,13 +1472,18 @@ void Mission_ResolveMissionFailure(GameState &state,
     }
   }
   state.active_mission_runtime_flags[slot].is_active = false;
-  // MisnActive +0x3f selects the failure debrief dialog. UI-owned; not
-  // reconstructed.
-  if (mission.brief_description_ids[5] != -1) {
-    NovaLog::Todo("mission failure debrief dialog (misn {} id {}) not "
-                  "reconstructed yet",
-                  mission.mission_template_id,
-                  mission.brief_description_ids[5]);
+  // MisnActive +0x3f selects the failure debrief dialog.
+  if (!fail_text.empty()) {
+    if (debrief) {
+      debrief(fail_text);
+    } else {
+      NovaLog::Todo("mission failure debrief dialog (misn {} id {}) has no "
+                    "UI sink",
+                    mission.mission_template_id,
+                    fail_text_id);
+    }
+  } else if (fail_text_id >= 0x80) {
+    NovaLog::Todo("mission failure debrief dësc {} loaded empty", fail_text_id);
   }
   Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
 }
@@ -2146,6 +2201,8 @@ void Mission_TickShipInteractionReactions(GameState &state,
 // interaction pass for one slot: handles mission-cargo pickup/drop-off at the
 // TravelStel and final delivery at the ReturnStel. The pickup/drop-off desc
 // dialogs are UI-owned and logged when they would fire (TODO(decomp)).
+// `landed_stellar_id` is a 0-based stellar index (the original passes
+// ai_secondary_target_slot, which indexes g_stellar_defs directly).
 void Mission_ProcessInteractionReactionSlotResources(
     GameState &state,
     std::int16_t mission_slot,
@@ -2207,7 +2264,19 @@ void Mission_ProcessInteractionReactionSlotResources(
 // pass; the clean-room availability passes run lazily instead
 // (TODO(decomp)).
 void Mission_TickReactionSlotsForTravelInteraction(
-    GameState &state, std::int16_t landed_stellar_id, std::uint32_t now_ms) {
+    GameState &state,
+    std::int16_t landed_stellar_id,
+    std::uint32_t now_ms,
+    const MissionDebriefSink &debrief) {
+  // Callers pass the docked stellar in the port's travel-context convention
+  // (0x80-based resource id, like GameState::travel.selected_stellar_id);
+  // resolved mission targets are 0-based stellar indices (the original's
+  // MisnActive convention: Stellar_AreStellarsEquivalent 0x0046efd0 and the
+  // 0x0043d240 target table both index g_stellar_defs directly). Rebase here.
+  const std::int16_t landed_index =
+      landed_stellar_id >= kResourceIdBase
+          ? static_cast<std::int16_t>(landed_stellar_id - kResourceIdBase)
+          : landed_stellar_id;
   bool resolved_a_success = false;
   for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
     if (!state.active_mission_runtime_flags[slot].is_active) {
@@ -2216,11 +2285,11 @@ void Mission_TickReactionSlotsForTravelInteraction(
     const auto mission_slot = static_cast<std::int16_t>(slot);
     Mission_HandleMissionOrSurrenderShipReaction(state, mission_slot, now_ms);
     Mission_ProcessInteractionReactionSlotResources(
-        state, mission_slot, landed_stellar_id);
+        state, mission_slot, landed_index);
     ActiveMission &mission = state.active_missions[slot];
     MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
     if (NovaStellar_AreStellarsEquivalent(
-            state, mission.return_stellar_id, landed_stellar_id)) {
+            state, mission.return_stellar_id, landed_index)) {
       if (mission.return_stellar_id == mission.travel_stellar_id ||
           mission.travel_stellar_id == -1) {
         runtime.initial_briefing_done = true;
@@ -2232,11 +2301,11 @@ void Mission_TickReactionSlotsForTravelInteraction(
           runtime.objective_complete = true;
         }
         if (runtime.initial_briefing_done && runtime.objective_complete) {
-          Mission_ResolveMissionSuccess(state, mission_slot);
+          Mission_ResolveMissionSuccess(state, mission_slot, debrief);
           resolved_a_success = true;
         }
       } else {
-        Mission_ResolveMissionFailure(state, mission_slot, now_ms);
+        Mission_ResolveMissionFailure(state, mission_slot, now_ms, debrief);
       }
     }
     Mission_HandleMissionOrSurrenderShipReaction(state, mission_slot, now_ms);

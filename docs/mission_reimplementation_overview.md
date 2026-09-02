@@ -66,6 +66,16 @@ pilot file round-trips active missions.
 
 ## 2. Mission-board availability and activation
 
+**Stellar id conventions (verified against 0x0043d240/0x0046efd0):** resolved
+mission targets (MisnActive +0x00/+0x04 and the DAT_00776b04 target table) are
+**0-based stellar indices** — the original indexes `g_stellar_defs[]` directly
+with them. The port's travel/landed context (`GameState::travel.selected_
+stellar_id`, `LandedContext.stellar_id`) keeps **0x80-based resource ids**;
+mission APIs taking a landed stellar rebase at the boundary
+(`Mission_TickReactionSlotsForTravelInteraction`, `Mission_ActivateAtSlot`).
+Comparing the two spaces directly silently broke tutorial-001 completion (the
+ReturnStel gate never matched).
+
 The mission-list pipeline is implemented in `src/game/mission.cpp`:
 
 - `0x0043CF00` `Mission_EvaluateMissionLists` — DONE (85%): two offering
@@ -99,9 +109,11 @@ The mission-list pipeline is implemented in `src/game/mission.cpp`:
   measured text height, ±10px scrolling with drawn arrow states, starmap
   action. TODO(decomp): variant ≥ 0x80 DLOG 0xbbc arm, status-string
   display, starmap preselect, static-surface redraw variants.
-- `0x0043F100` `Mission_ActivateMissionAtSlot` — the acceptance UI chain
-  (Brief dialog payload +0x34 with starmap access, LoadCarg dialog +0x38 on
-  PickupMode 0) runs after activation via `NovaMission_RunAcceptanceDialogs`
+- `0x0043F100` `Mission_ActivateMissionAtSlot` — the on-accept payload
+  (mïsn +0x15b set-expression: chain bits, X system-reveal, S auto-start) runs
+  at the end of `Mission_ActivateAtSlot` like the original. The acceptance UI
+  chain (Brief dialog payload +0x34 with starmap access, LoadCarg dialog +0x38
+  on PickupMode 0) runs after activation via `NovaMission_RunAcceptanceDialogs`
   from both the offer-window and Mission BBS accept paths; the decline arm
   of the offer window shows the payload +0x58 desc (if any) and executes the
   +0x25a reaction script via `Mission_ExecuteReactionScript`.
@@ -204,8 +216,13 @@ Remaining dialog entrypoints:
 
 Implemented in `src/game/mission.cpp` / `mission_script.cpp`:
 
-- `0x00440410` success — DONE (debrief dialog TODO)
-- `0x00440930` failure — DONE (debrief dialog TODO)
+- `0x00440410` success — DONE. The +0x3d Comp dësc debrief text-reader dialog
+  runs through the landing-gate debrief sink (`MissionDebriefSink` wired to
+  `NovaUi_RunTextReaderDialog` in spaceflight.cpp; layered over the live
+  flight view, whereas the original shows it over the destination-window
+  context — logged divergence).
+- `0x00440930` failure — DONE (same debrief-sink path for the +0x3f Fail
+  dësc).
 - `0x00447D90` active mission resolution — DONE
 - `0x00440AA0` mission/fleet assignment cleanup — DONE
 - `0x00440BF0` quick failure — DONE
@@ -403,7 +420,7 @@ DeathDelay-half fraction (0x005753f8, 0.5), and the armor-pin fraction/addend
 5. Active-mission timers DONE; daily driver (0x00466CB0) open; save/load DONE
    for the mission blocks.
 6. ~~Implement success/failure and reaction scripts.~~ DONE (debrief dialogs
-   pending).
+   wired to the landing-gate sink).
 7. ~~Implement mission ship/fleet spawning~~ DONE (0x0041CF40 + dispatch);
    remaining: the hailed-escort respawn (0x00454910) and announcements
    (0x00426d10). Goal-counter increment sites on ship death/disable/board

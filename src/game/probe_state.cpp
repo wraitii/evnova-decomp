@@ -24,6 +24,7 @@ struct Json {
     text += name;
     text += "\":";
   }
+
   void str(std::string_view name, std::string_view value) {
     key(name);
     text += "\"";
@@ -54,6 +55,7 @@ struct Json {
     }
     text += "\"";
   }
+
   template <typename T> void num(std::string_view name, T value) {
     key(name);
     if constexpr (std::is_floating_point_v<T>) {
@@ -64,15 +66,18 @@ struct Json {
       text += std::to_string(value);
     }
   }
+
   void boolean(std::string_view name, bool value) {
     key(name);
     text += value ? "true" : "false";
   }
+
   // Adds a pre-rendered array as one member (see JsonArr).
   void array(std::string_view name, const std::string &elements) {
     key(name);
     text += elements;
   }
+
   std::string done() {
     text += "}";
     return text;
@@ -82,6 +87,7 @@ struct Json {
 struct JsonArr {
   std::string text = "[";
   bool first = true;
+
   void raw(const std::string &element) {
     if (!first) {
       text += ",";
@@ -89,6 +95,7 @@ struct JsonArr {
     first = false;
     text += element;
   }
+
   std::string done() {
     text += "]";
     return text;
@@ -109,8 +116,8 @@ struct JsonArr {
 std::string ProbeState_Snapshot(const GameState &state,
                                 const std::string &query) {
   const std::int16_t system_id = state.player.current_system_id;
-  const System *system = state.scenario.System(
-      static_cast<std::int16_t>(system_id + 0x80));
+  const System *system =
+      state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
   const ShipClass *ship_class = state.scenario.Ship(
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
 
@@ -193,10 +200,17 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("pickup_mode", mission.pickup_mode);
       row.num("drop_off_mode", mission.drop_off_mode);
       row.num("travel_stellar_id", mission.travel_stellar_id);
+      // MisnActive stellar ids are 0-based indices; StellarName takes the
+      // 0x80-based resource id.
       row.str("travel_stellar",
-              StellarName(state, mission.travel_stellar_id));
+              StellarName(
+                  state,
+                  static_cast<std::int16_t>(mission.travel_stellar_id + 0x80)));
       row.num("return_stellar_id", mission.return_stellar_id);
-      row.str("return_stellar", StellarName(state, mission.return_stellar_id));
+      row.str("return_stellar",
+              StellarName(
+                  state,
+                  static_cast<std::int16_t>(mission.return_stellar_id + 0x80)));
       row.num("reward", mission.resource_delta_or_cost);
       row.num("time_limit_days_remaining", mission.time_limit_days_remaining);
       row.num("goal_count_remaining", mission.goal_count_remaining);
@@ -215,8 +229,8 @@ std::string ProbeState_Snapshot(const GameState &state,
           ship.current_system_id != state.player.current_system_id) {
         continue;
       }
-      const ShipClass *cls =
-          state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
       Json row;
       row.num("slot", slot);
       row.num("ship_class_id", ship.ship_class_id);
@@ -248,7 +262,8 @@ std::string ProbeState_Snapshot(const GameState &state,
     j.num("starmap_destination_system_id",
           state.travel.starmap_destination_system_id);
     j.num("selected_stellar_id", state.travel.selected_stellar_id);
-    j.boolean("selected_stellar_is_manual", state.travel.selected_stellar_is_manual);
+    j.boolean("selected_stellar_is_manual",
+              state.travel.selected_stellar_is_manual);
     j.boolean("hyperspace_mode", state.travel.hyperspace_mode);
     return j.done();
   }

@@ -282,3 +282,69 @@ TEST_CASE("string placeholder expansion handles gender blocks and quirks") {
   Mission_ExpandStringPlaceholders(state, swallowed);
   CHECK(swallowed == "keep ");
 }
+
+// Regression test for the Sol tutorial (mïsn resource 251, "Head to Sol;
+// Tutorial 001"): the on-accept payload (b8339 X130) must reveal Sol, and
+// landing on Earth (spob 128) must resolve the mission through the debrief
+// sink and set the on-success bit 9200 that gates Tutorial 002. The landing
+// gate receives the docked stellar as a 0x80-based resource id; the resolved
+// ReturnStel is a 0-based index — this flow broke when the two conventions
+// were compared directly.
+TEST_CASE("tutorial 001 reveals Sol on accept and completes on landing") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const std::size_t tutorial_001 = 251 - 0x80;
+  const std::size_t tutorial_002 = 630 - 0x80;
+  REQUIRE(tutorial_001 < state.scenario.missions.size());
+  REQUIRE(state.scenario.missions[tutorial_001].present);
+  REQUIRE(state.scenario.missions[tutorial_002].present);
+
+  Mission_ResolveMissionStellarLocators(state);
+  REQUIRE(Mission_ActivateAtSlot(state,
+                                 static_cast<std::int16_t>(tutorial_001),
+                                 /*landed_stellar_id=*/-1));
+
+  // On-accept payload: bit 8339 set, Sol (system resource 130, def 2)
+  // explored.
+  CHECK(state.control.ControlBit(8339));
+  CHECK(state.control.explored_systems.test(2));
+
+  // Tutorial 002's AvailBits (b9200 & !(b9201 | b9215)) must still fail
+  // before completion.
+  CHECK_FALSE(state.scenario.missions[tutorial_002].is_available_runtime);
+
+  // Land on Earth (spob resource 128). The gate must resolve the mission as a
+  // success and hand the Comp dësc (9200) text to the debrief sink.
+  std::string debrief_text;
+  int debrief_calls = 0;
+  Mission_TickReactionSlotsForTravelInteraction(state,
+                                                /*landed_stellar_id=*/0x80,
+                                                /*now_ms=*/0,
+                                                [&](const std::string &text) {
+                                                  ++debrief_calls;
+                                                  debrief_text = text;
+                                                });
+  CHECK(debrief_calls == 1);
+  CHECK_FALSE(debrief_text.empty());
+
+  bool still_active = false;
+  for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+    if (state.active_mission_runtime_flags[slot].is_active &&
+        state.active_missions[slot].mission_template_id ==
+            static_cast<std::int16_t>(tutorial_001)) {
+      still_active = true;
+    }
+  }
+  CHECK_FALSE(still_active);
+
+  // On-success payload: bit 9200 set, which unlocks Tutorial 002's
+  // availability expression.
+  CHECK(state.control.ControlBit(9200));
+
+  // Re-run the availability pass: Tutorial 002's expression now passes.
+  Mission_ResolveMissionStellarLocators(state);
+  const auto evaluation = Mission_EvaluateMissionLists(state);
+  CHECK(state.scenario.missions[tutorial_002].is_available_runtime);
+  (void)evaluation;
+}
