@@ -117,11 +117,13 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
 
 // Ghidra 0x00448090 NovaResources_EvaluateAvailability, stellar/system
 // membership prologue: every stellar's runtime owning-system slot is reset,
-// each SystemDef.is_visible is recomputed from the explored flag and the
-// Visibility expression, then every visible system re-homes its nav stellars
+// each SystemDef.is_visible is recomputed from the Visibility NCB (the
+// has_explored_flag gate passes for every loaded syst - the loader sets the
+// flag at decode time), then every visible system re-homes its nav stellars
 // whose slot is still unset (first visible system wins; a system claims its
-// hidden visibility-parent chain with it). Unexplored systems' stellars keep
-// system_id = -1 and are therefore invisible to locator-family resolution.
+// hidden visibility-parent chain with it). Systems hidden by the NCB keep
+// system_id = -1 on their stellars and are therefore invisible to
+// locator-family resolution.
 // The mïsn availability-expression arm of 0x00448090 runs inline in
 // Mission_EvaluateMissionLists.
 void EvaluateAvailabilityStellarMembership(GameState &state) {

@@ -37,6 +37,10 @@ constexpr std::uint32_t kOutfitResourceType = 0x6f9f7466;     // o\x9ftf
 constexpr std::uint32_t kWeaponResourceType = 0x77916170;     // w\x91ap
 constexpr std::uint32_t kStellarResourceType = 0x73709a62;    // sp\x9ab
 constexpr std::uint32_t kSystemResourceType = 0x73d87374;     // s\xd8st
+// n\x91bu "nebula" resources (the star-map background regions; loader call
+// FUN_004ce250(0x6e916275, id) in NovaData_LoadScenarioResourceTables
+// 0x004bd3c0, ids 0x80..0x9f).
+constexpr std::uint32_t kNebulaResourceType = 0x6e916275;     // n\x91bu
 constexpr std::uint32_t kGovernmentResourceType = 0x679a7674; // g\x9avt
 constexpr std::uint32_t kFleetResourceType = 0x666c9174;      // fl\x91t
 // d\x9fde (0x649f6465) — the "dude" (NPC pilot/drifter) template family. One
@@ -608,10 +612,14 @@ struct Stellar {
   std::array<std::int16_t, 8> hyperlinks{
       -1, -1, -1, -1, -1, -1, -1, -1}; // HyperLink1-8
 
-  // service_cost (StellarDef +0x38, payload +0x234; ServiceCost): the landing/
-  // Destination service cost. Its exact collection path remains unverified;
-  // do not treat this as a direct target-action docking fee.
+  // service_cost (payload +0x234; StellarDef +0x38), a destination-service
+  // value whose collection path is not yet reconstructed.
   std::int32_t service_cost = 0;
+  // Payload +0x238 (StellarDef +0x46c): nonzero marks the stellar as a
+  // "gravity shear" navigation hazard on the starmap's Navigation Hazards
+  // line (NovaUi_RedrawStarmapWindow 0x004a62f0 tests this field). The
+  // Bible-name for this payload word is unverified -- TODO(decomp).
+  std::int16_t gravity_shear = 0;
   // Gravity is a float in the original; stored as its encoded half/short here.
   std::int16_t gravity = 0;         // Gravity
   std::int16_t weapon_id = -1;      // Weapon
@@ -767,6 +775,27 @@ struct Government {
 
 // Ghidra SystemDef (g_system_defs, entries indexed by system id minus 0x80).
 // One star system; links to 16 others and holds stellar nav defaults.
+// Ghidra g_system_region_trigger_defs (stride 0x208, up to 32 entries loaded
+// from n\x91bu resources in NovaData_LoadScenarioResourceTables 0x004bd3c0).
+// Each record is one nebula/region backdrop on the galaxy starmap: a world
+// rectangle (normal-zoom coordinates) plus two NCB strings, and two runtime
+// bytes -- the cached ActiveOn result (+0x8) and the explored latch (+0x9).
+struct Nebula {
+  std::int16_t x = 0;      // XPos (payload +0x00)
+  std::int16_t y = 0;      // YPos (payload +0x02)
+  std::int16_t width = 0;  // XSize (payload +0x04); 0 when the resource is absent
+  std::int16_t height = 0; // YSize (payload +0x06)
+  std::string active_on_expression;  // payload +0x08 (CString copy at +0xa)
+  std::string on_explore_expression; // payload +0x107
+  // ---- Runtime state (decoded with, not from, the payload). active_on is
+  // re-evaluated wherever the original refreshes availability (empty
+  // expressions evaluate true); explored latches once any visited system's
+  // position falls inside the rect inset by 8 (System region-event pass
+  // 0x00467bd0), which then executes the OnExplore set expression once.
+  bool active_on = false;
+  bool explored = false;
+};
+
 struct System {
   std::string name;       // resource name / map label
   std::int16_t pos_x = 0; // xPos
@@ -865,16 +894,19 @@ struct System {
 
   // ---- Runtime discovery/visibility state (decoded with, not from, the
   // payload). Mirrors SystemDef is_visible / has_explored_flag / discovery
-  // state. NOTE on the original's semantics: has_explored_flag (+0x1ed) is a
-  // load-time "syst resource exists" flag (set by the scenario loader pass in
-  // NovaData_LoadScenarioResourceTables 0x004bd3c0, cleared by
-  // Ship_InitGameplayDataTables 0x004b0c20, never written at runtime), and
-  // is_visible (+0x1eb) is re-derived from it by
-  // NovaResources_EvaluateAvailability 0x00448090 (has_explored && the
-  // system's visibility NCB). The per-system FOG state is discovery_state
-  // below; the clean-room keeps is_visible/has_explored_flag as the per-visit
-  // targeting-fog record instead (targeting.cpp gates stellar targets on it),
-  // kept in sync by the discovery helpers in travel.cpp. ----
+  // state. Original semantics (verified against the loader 0x004bd3c0 and
+  // NovaResources_EvaluateAvailability 0x00448090): has_explored_flag
+  // (+0x1ed) and is_visible (+0x1eb) are set to 1 by the scenario loader for
+  // every decoded syst - they are LOADED/availability flags, not fog (the
+  // loader is the runtime writer; Ship_InitGameplayDataTables 0x004b0c20 only
+  // clears them during startup, before the loader runs).
+  // EvaluateAvailability re-filters is_visible through the system's
+  // Visibility NCB. The per-system FOG state is discovery_state below.
+  // NOTE: an earlier clean-room revision kept these two as a per-visit fog
+  // record; that diverged from the binary and left every far system's
+  // stellars unavailable (grey starmap rings for map reveals), so the loader
+  // semantics were restored - the fog consumers read discovery_state /
+  // discovered_this_rebuild / control.explored_systems instead.
   bool is_visible = false;
   bool has_explored_flag = false;
 
@@ -1098,6 +1130,10 @@ struct ScenarioData {
   std::vector<Weapon> weapons;         // indexed by weapon_id - 0x80
   std::vector<Stellar> stellars;       // indexed by stellar_id - 0x80
   std::vector<System> systems;         // indexed by system_id - 0x80
+  // n\x91bu nebula/region table (g_system_region_trigger_defs): up to 32
+  // entries, index = resource id - 0x80; absent ids keep width/height 0
+  // (the original zero-fills the trigger rects before probing each id).
+  std::vector<Nebula> nebulae;         // indexed by nebula_id - 0x80
   std::vector<Government> governments; // indexed by government_id - 0x80
   std::vector<FleetDef> fleets;        // indexed by fleet_id - 0x80
   std::vector<DudeDef> dudes;          // indexed by dude_id - 0x80

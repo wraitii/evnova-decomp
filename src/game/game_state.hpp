@@ -553,6 +553,18 @@ struct TravelState {
   // from the current system; otherwise the jump falls back to the nearest
   // available travel point.
   std::int16_t starmap_destination_system_id = -1;
+  // The plotted starmap route (Ghidra DAT_00735404, 32 shorts; 0xffff = empty
+  // slot): route[0] is the current system and route[1..] the planned hops.
+  // Shift-clicking systems in the starmap appends/truncates hops; a plain
+  // click plots only the immediate destination above. When a jump arrives at
+  // route[1] the hop is consumed (System_NormalizePlannedRouteToCurrentSystem
+  // 0x004a7fc0) and the HUD travel slot re-syncs from the next hop
+  // (NovaUi_SyncTravelSelectionFromStarmapRoute 0x004a8080).
+  std::array<std::int16_t, 0x20> starmap_route = [] {
+    std::array<std::int16_t, 0x20> route{};
+    route.fill(-1);
+    return route;
+  }();
   // The stellar resource id currently targeted for travel/landing, mirroring
   // the original's ai_secondary_target_slot with travel_transfer_mode == 2.
   // -1 when nothing is targeted. Only set by explicit player commands (Tab
@@ -867,6 +879,17 @@ struct GameState {
   PilotData pilot;
   PilotControlState control;
   TravelState travel;
+
+  // Galaxy starmap view state (Ghidra g_starmap_zoom 0x005759d8,
+  // g_starmap_pan_origin_x/y 0x005997b4). Zoom is a world->screen DIVISOR
+  // (bigger = more zoomed out; the original's data default 0.5625 opens the
+  // map at ~178% magnification). The pan origin is the world point projected
+  // to the map panel centre; the original resets it to the current system's
+  // position on jump arrival (0x0044f8a6) and leaves it untouched on map
+  // open, so the view persists across map sessions within a game.
+  float starmap_zoom = 0.5625F;
+  float starmap_pan_x = 0.0F;
+  float starmap_pan_y = 0.0F;
   IntroCinematicData intro_cinematic;
   // The transient HUD overlay message (see HudOverlayState). Kept on GameState
   // per AGENTS.md (no hidden globals) and rendered by the HudRenderer.

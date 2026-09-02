@@ -56,12 +56,22 @@ Visibility / exploration (fog of war) — CORRECTED model (verified against the
 binary, see "System discovery" below):
 
 - `SystemDef.has_explored_flag` (+0x1ed) is a load-time "syst resource exists"
-  flag: the scenario loader sets it for every loaded system,
-  `Ship_InitGameplayDataTables` clears it at session start, and NOTHING writes
-  it at runtime. It is not a fog bit.
+  flag: the scenario loader sets it (and `is_visible`) to 1 for every decoded
+  syst (`NovaData_LoadScenarioResourceTables` `0x004bd3c0`;
+  `Ship_InitGameplayDataTables` `0x004b0c20` only clears them during startup,
+  BEFORE the loader runs, so the loader is the effective runtime writer). It
+  is not a fog bit.
 - `SystemDef.is_visible` (+0x1eb) is re-derived from it by
   `NovaResources_EvaluateAvailability` `0x00448090` (has_explored && the
   system's visibility NCB expression at +0xec).
+- Stellar `is_available` (+0x44) is runtime state recomputed per tick by
+  `System_UpdateSystemAndStellarDisplayState` `0x00432470` scope 3: defined
+  (`+0x45`, set by the loader) stellars owned by a visible system become
+  available, and `availability_flags & 0x20` sets the hazard marker. Because
+  the system flags are load-time-true, this is effectively GLOBAL - every
+  stellar of every loaded system is available whether or not the player ever
+  visited it. The starmap ring colours grade those nav stellars, so map-
+  revealed systems read as coloured immediately.
 - The real fog record is `SystemDef.discovery_state` (+0x90, short): 0 =
   unknown, >=1 = visited (in-flight hyperspace arrival writes 1, landed
   stellar travel and map-outfit reveals write 2), persisted per system as
@@ -80,17 +90,18 @@ binary, see "System discovery" below):
 `NovaStarmap_RunWindow(SdlPlatform&, GameState&)` is a modal loop modelled on
 the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
 
-- Draws the galaxy graph: `System.links` as lines (deduplicated by drawing from
-  the lower index), system nodes as filled circles, and labels for visited /
-  current / selected systems. The drawn set is the original's: each marker is
-  gated on visited (discovery_state > 0) or the discovered_this_rebuild latch
-  (visited systems plus their one-hop link neighbours — the marker latch in
-  `NovaUi_DrawStarmapRoutesAndMarkers` accepts both), a link line draws only
-  when both endpoints are on the map AND at least one endpoint is visited (the
-  original draws adjacency lines only from visited systems), labels draw for
-  visited systems only (zoom-gated, plus always for current/selected), and
-  unknown systems have no marker, no label, cannot be clicked and are excluded
-  from search. The Tab/Backslash cycle covers every valid link destination
+- Draws the galaxy graph: `System.links` as lines (deduplicated by drawing
+  from the lower index), system nodes as filled circles, and labels for
+  visited systems. The drawn set is the original's (`NovaUi_DrawStarmapRoutes
+  AndMarkers` 0x004a8100): markers draw only for the current system, visited
+  (discovery_state > 0) systems, or systems latched by the last discovery
+  rebuild (visited plus one-hop neighbours; mission targets and the selection
+  always draw), a link line radiates only FROM a visited system (no discovery
+  gate on the target, so lines reach one hop into unrevealed space), labels
+  draw for visited systems only (zoom-gated, plus always for the selected
+  system — the label pass does NOT accept the reveal latch), and unknown
+  systems have no marker, no label, cannot be clicked and are excluded from
+  search. The Tab/Backslash cycle covers every valid link destination
   (the original's command-0x60 cycle has no discovery gate). Far-flung
   unknown systems therefore don't stagger the view either.
 - Markers are true solid discs (filled triangle-fan via the geometry path), so the
@@ -121,6 +132,12 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   Pan (arrow keys) scrolls the camera, content moving opposite the key direction
   (Right shows what lies to the right of the current view); mouse click or
   Tab/Backslash selects/cycles a system.
+- Selection reticle: the selected system's green marker is 8 disjoint 4px
+  corner ticks around the 13x13 reticle rect (0x004a5a40's eight independent
+  SetCursorPos/DrawLineTo pairs) — a partial square with gaps at the edge
+  midpoints, never joined into full edges or a cross inside. (An earlier
+  clean-room version fed all 16 endpoints to one SDL_RenderLines call, which
+  polylines them into full edges plus diagonal connector lines — fixed.)
 - Selection/jump accent: when the highlighted system is a directly-linked jump
   destination of the current system, a thick green line is drawn from the
   current system to it (plus a small green ring at that node), making the
@@ -191,11 +208,15 @@ explored. Clean-room wiring (travel.cpp):
   recursion used by the rebuild and (with depth = ModVal) by map outfits.
   TODO(decomp(0x00467bd0)): the per-system region-event trigger is skipped.
 - `NovaSystem_RebuildDiscoveryState` — `0x00467970`; rebuild + latch pass.
-- The clean-room keeps `is_visible`/`has_explored_flag` as the per-visit
-  targeting-fog record (the original's are load-time flags) and mirrors every
-  visited system into `GameState.control.explored_systems`, the bitset the NCB
-  `has_explored` test and save format read. Divergences are logged at each
-  site.
+- The clean-room now mirrors the original's flag semantics: the scenario
+  decoder sets `is_visible`/`has_explored_flag` for every decoded system (an
+  earlier revision kept them as a per-visit fog record; that diverged from the
+  binary and left every far system's stellars unavailable - grey starmap rings
+  for map reveals - so it was reverted). `NovaTargeting_UpdateStellar-
+  Availability` (the scope-3 port) homes every loaded system's nav stellars
+  and marks them available globally. Every visited system is mirrored into
+  `GameState.control.explored_systems`, the bitset the NCB `has_explored` test
+  and save format read.
 - The pilot save's discovery block (u16[0x800]) is still TODO(decomp) in
   `pilot_file.cpp`.
 

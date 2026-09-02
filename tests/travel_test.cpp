@@ -18,8 +18,8 @@ using game::NovaTravel_PlotStarmapDestination;
 using game::NovaTravel_Tick;
 
 // Returns whether zero-based `id` is visited (the per-system fog record):
-// discovery_state > 0 mirrored to the clean-room fog bits + the pilot's
-// explored bitset.
+// discovery_state > 0 mirrored to the pilot's explored bitset. (SystemDef
+// is_visible/has_explored_flag are load-time flags, not fog.)
 bool IsVisited(const GameState &state, std::int16_t zero_based_id) {
   if (zero_based_id < 0 || static_cast<std::size_t>(zero_based_id) >=
                                state.scenario.systems.size()) {
@@ -27,7 +27,7 @@ bool IsVisited(const GameState &state, std::int16_t zero_based_id) {
   }
   const std::size_t idx = static_cast<std::size_t>(zero_based_id);
   const auto &sys = state.scenario.systems[idx];
-  return sys.discovery_state > 0 && sys.is_visible && sys.has_explored_flag &&
+  return sys.discovery_state > 0 &&
          idx < state.control.explored_systems.size() &&
          state.control.explored_systems.test(idx);
 }
@@ -58,11 +58,11 @@ TEST_CASE(
   REQUIRE(state.scenario.LoadFromArchives());
 
   REQUIRE(!state.scenario.systems.empty());
-  // Exhaustively: clear every system, then pick one with outward links and
-  // confirm only it is visited while each of those links is merely revealed.
+  // Exhaustively: clear the fog record (discovery_state; the load-time
+  // is_visible/has_explored_flag flags stay as decoded), then pick one system
+  // with outward links and confirm only it is visited while each of those
+  // links is merely revealed.
   for (auto &sys : state.scenario.systems) {
-    sys.is_visible = false;
-    sys.has_explored_flag = false;
     sys.discovery_state = 0;
     sys.discovered_this_rebuild = false;
   }

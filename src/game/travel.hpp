@@ -134,13 +134,10 @@ NovaSystem_ResolveVisibleForTravel(const GameState &state,
 NovaSystem_HasUsableTravelDestination(const GameState &state,
                                       std::int16_t system_id);
 
-// Marks one system visited at `level` (>=1): bumps discovery_state to `level`,
-// and keeps the clean-room per-system fog bits + explored bitset in sync (the
-// clean-room keeps is_visible/has_explored_flag as the targeting-fog record,
-// while in the original both are load-time "syst exists" flags and targeting
-// is not discovery-gated). Ghidra: the discovery_state writes of
-// System_FloodDiscoverAdjacentSystems 0x00467ab0 plus the arrival pre-latches
-// (0x0044aa70 PlayerTick_SystemTransitionAndArrival / 0x00455e10
+// Marks one system visited at `level` (>=1): bumps discovery_state to `level`
+// and mirrors into the persistent explored bitset. Ghidra: the discovery_state
+// writes of System_FloodDiscoverAdjacentSystems 0x00467ab0 plus the arrival
+// pre-latches (0x0044aa70 PlayerTick_SystemTransitionAndArrival / 0x00455e10
 // Stellar_TravelToSystem).
 void NovaSystem_MarkSystemVisited(GameState &state,
                                   std::int16_t zero_based_system_id,
@@ -152,11 +149,13 @@ void NovaSystem_MarkSystemVisited(GameState &state,
 // the reached system's discovery slot. The original triggers system-region
 // events per newly reached system (Frame_TriggerSystemEvents 0x00467bd0);
 // TODO(decomp(0x00467bd0)) skipped: region trigger defs are not modelled.
-// `visited` is the per-flood re-entry mask (the original's DAT_007cc590),
-// sized 0x800 by the caller. Divergence: the original recurses only through
-// systems that resolve visible (always true there -- is_visible is a load-time
-// flag); the clean-room's is_visible is per-visit fog, so the flood recurses
-// through any in-range link target or the reveal would die at the fog line.
+// `visited` is the per-flood re-entry mask (the original's
+// g_stellar_flood_visit_mask, DAT_007cc590), sized 0x800 by the caller. The
+// original recurses only through systems that resolve visible via
+// System_ResolveVisibleSystemForTravel; there that is availability visibility
+// (is_visible is a loader-set load-time flag), so every loaded system's links
+// flood - the clean-room recurses through any in-range link target, which
+// matches that behaviour (the visibility-root remap is TODO(decomp)).
 void NovaSystem_FloodDiscoverAdjacentSystems(
     GameState &state,
     std::int16_t zero_based_system_id,
@@ -187,6 +186,15 @@ void NovaSystem_OnSystemEntered(GameState &state,
                                 std::int16_t zero_based_system_id,
                                 std::int16_t level);
 
+// Ghidra 0x00467bd0 (the system-region event pass the flood invokes per newly
+// reached system). For every n\x91bu nebula whose cached ActiveOn result is
+// true and whose explored latch is still clear: when the system's position
+// falls inside the nebula rect inset by 8, latch it explored and execute the
+// nebula's OnExplore control-bit set expression once. (The original also
+// prints a debug log line; we log at info instead.)
+void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
+                                          std::int16_t zero_based_system_id);
+
 // Plots `destination_zero_based` (a system selected in the galaxy starmap) as
 // the player's next-jump destination. Finds the current system's travel slot
 // whose linked destination matches and stores the resolved slot + stellar on
@@ -210,6 +218,48 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
 // travelable links.
 [[nodiscard]] std::int16_t NovaTravel_CycleDestinationSystem(GameState &state,
                                                              bool forward);
+
+// ---------------------------------------------------------------------------
+// Plotted starmap route (Ghidra DAT_00735404 = state.travel.starmap_route).
+//
+// Shift-clicking systems in the galaxy map extends/truncates a multi-hop route
+// anchored at the current system; the drawn chain is green. The route persists
+// across map sessions and advances hop-by-hop as the player jumps.
+// ---------------------------------------------------------------------------
+
+// Ghidra 0x004a7e80 NovaUi_NormalizeStarmapRoutePlan. Drops a leading empty
+// slot; clears the whole route when the first hop is missing.
+void NovaStarmap_NormalizeRoutePlan(GameState &state);
+
+// Ghidra 0x004a7fc0 System_NormalizePlannedRouteToCurrentSystem (called from
+// the arrival tick). When the next plotted hop is the system just entered, the
+// hop is consumed; when no hop is plotted the route resets to empty.
+void NovaStarmap_NormalizeRouteToCurrentSystem(GameState &state);
+
+// Ghidra 0x004a8080 NovaUi_SyncTravelSelectionFromStarmapRoute. Arms the
+// player's travel slot from the first plotted hop when it is directly linked
+// from the current system (the HUD then shows the plotted jump).
+void NovaStarmap_SyncTravelSelectionFromRoute(GameState &state);
+
+// True when the route has at least one plotted hop (Ghidra DAT_007dc744).
+[[nodiscard]] bool NovaStarmap_RouteHasHops(const GameState &state);
+
+// Appends a hop to the route after validating it extends the chain (the
+// starmap's shift-click path, 0x004a3aa0 action-3 branch): the candidate must
+// be a travel-resolvable link neighbour of the current route tail (or of the
+// current system when the route is empty). Returns true when appended.
+bool NovaStarmap_AppendRouteHop(GameState &state,
+                                std::int16_t destination_zero_based);
+
+// Removes the last plotted hop when it matches `destination_zero_based`
+// (shift-clicking the route tail truncates the chain). Returns true when a hop
+// was removed.
+bool NovaStarmap_TruncateRouteAt(GameState &state,
+                                 std::int16_t destination_zero_based);
+
+// Resets the route to just the current system (the Clear Route button,
+// 0x004a3aa0 action-8 branch) and disarms the plotted travel slot.
+void NovaStarmap_ClearRoute(GameState &state);
 
 void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms);
 

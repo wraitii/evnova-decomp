@@ -653,10 +653,9 @@ bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
       NovaSystem_RebuildDiscoveryState(
           state, state.player.current_system_id, map_val, 2);
     } else if (map_val == -1) {
-      // Reveal all neutral systems with a usable destination. The original
-      // also gates on is_visible, which is load-time true there; the
-      // clean-room's is_visible is per-visit fog, so the gate is dropped
-      // (loaded systems count as visible, as in the original).
+      // Reveal all neutral systems with a usable destination. The original's
+      // is_visible gate is a loader-set load-time flag, so every loaded
+      // system passes - the clean-room mirrors that by not gating at all.
       for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
         const auto id = static_cast<std::int16_t>(i);
         const System &sys = state.scenario.systems[i];
@@ -667,7 +666,8 @@ bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
       }
     } else if (map_val <= -1000) {
       // Reveal every system whose government carries the target class id in
-      // any of its Class 1-4 fields (same is_visible divergence as above).
+      // any of its Class 1-4 fields (the original's is_visible gate passes
+      // for every loaded system, as above).
       const std::int16_t target_class =
           static_cast<std::int16_t>(-(map_val + 1000));
       for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {

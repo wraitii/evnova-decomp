@@ -19,18 +19,34 @@
 // as the right-hand selected-system detail column (entry 6) and item 1 as the
 // bottom status bar (entry 2).
 //
-// Remaining divergences from the original: no mission-highlight route editing,
-// no starmap search dialog and no licence-seed easter-egg branch. The focus is
-// a faithful, useful navigation surface for the jump player.
+// Remaining divergences from the original: the inline Find stands in for the
+// modal search dialog (DLOG 0xbbd), the destination-window route-editing
+// sub-flow (DAT_007354a6 / hypergate destination selection through the map)
+// is not reconstructed, and the Show/Hide Borders preference defaults ON
+// (no prefs store yet; the original defaults OFF and persists the choice).
+// The view (zoom divisor + pan origin) and the plotted route persist across
+// map sessions in GameState; the route re-arms hop-by-hop on jump arrival.
 //
-// The political/government overlay (the original's
-// NovaUi_DrawStarmapPoliticalOverlay) IS implemented: fading government discs
-// behind every discovered, reachable system, toggled by the Show/Hide Borders
-// button (ON by default). Unlike the original's opaque 16px overlay blocks it
-// renders the same strength field per-pixel as a smooth, translucent fade.
+// The political/government overlay (NovaUi_DrawStarmapPoliticalOverlay) is
+// rendered from the original's exact strength field: radius
+// round(22/zoom)+12 grid units (1 unit = 2 screen px, so ~102px at the
+// default zoom, discs merging into territory blobs), strength
+// clamp((r^2-d^2)*fade*zoom, 1..255), painted opaque as theme*strength/512
+// (16-bit RGBColor >> 8). The clean-room rasterizes the same field per-pixel
+// instead of the original's 16px blocks, so the gradient reads smooth at any
+// window scale. The map graph is fog-gated: markers draw for visited systems
+// plus the one-jump-ahead reveal latch (grey rings for the latched-unvisited),
+// status colours for visited ones; labels for visited systems only. The per-
+// system visibility NCB that can hide systems is TODO(decomp).
+// When opened from spaceflight the flight frame keeps rendering behind the
+// modal window (world + HUD visible around it); the galaxy viewport itself is
+// opaque black. Docked callers fall back to a plain backdrop (logged
+// divergence).
 
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "hud_renderer.hpp"
+#include "spaceflight_view.hpp"
 
 namespace game {
 
@@ -61,9 +77,17 @@ struct StarmapResult {
 // g_starmap_selected_system_id which NovaUi_RunMissionComputerWindow
 // (0x00446150) arms from the selected mission's destination before opening
 // the map; -1 keeps the default current-system selection.
+//
+// `flight_view`/`hud` (spaceflight caller) composite the modal over the live
+// game frame: the world + HUD render behind the window and the world re-draws
+// clipped to the galaxy viewport, so the moving starfield shows through the
+// map like the original. Callers without a flight view (docked menus) fall
+// back to the opaque PICT backdrop.
 [[nodiscard]] StarmapResult
 NovaStarmap_RunWindow(SdlPlatform &platform,
                       GameState &state,
-                      std::int16_t preselected_system_id = -1);
+                      std::int16_t preselected_system_id = -1,
+                      SpaceflightView *flight_view = nullptr,
+                      HudRenderer *hud = nullptr);
 
 } // namespace game

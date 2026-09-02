@@ -478,6 +478,12 @@ void ResetPlayerShipForNewGame(GameState &state) {
   // heading -> vel = (sin, -cos); pos += vel * dt).
   state.player.current_system_id = kStartSystemId;
   state.player.credits = 10000;
+  // Ghidra 0x0048a3a5 (Menu_RunNewGameFlow): the starmap pan origin starts on
+  // the starting system's position so the map opens centred there.
+  if (const auto *start_sys = state.scenario.System(kStartSystemResourceId)) {
+    state.starmap_pan_x = static_cast<float>(start_sys->pos_x);
+    state.starmap_pan_y = static_cast<float>(start_sys->pos_y);
+  }
 
   state.player.pos_x = 0.0F;
   // Spawn just below the starting system's landing stellar so the body is

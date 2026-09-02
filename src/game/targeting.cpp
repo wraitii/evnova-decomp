@@ -573,24 +573,42 @@ NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
 void NovaTargeting_UpdateStellarAvailability(GameState &state) {
   const std::int16_t current_sys =
       static_cast<std::int16_t>(state.player.current_system_id);
-  if (current_sys >= 0 &&
-      static_cast<std::size_t>(current_sys) < state.scenario.systems.size()) {
-    // A ship can only be flying in a system the original has already entered;
-    // keep that system visible even though the discovery flood and pilot-file
-    // discovery bits are not reconstructed yet. Without this invariant every
-    // local stellar is filtered out by the availability refresh.
-    state.scenario.systems[static_cast<std::size_t>(current_sys)].is_visible =
-        true;
-  }
   const auto *cur =
       state.scenario.System(static_cast<std::int16_t>(current_sys + 0x80));
   if (!cur) {
     return;
   }
-  // Home to / mark available every stellar currently owned by a visible system.
+  // Home every loaded system's nav stellars first (the membership claim of
+  // NovaResources_EvaluateAvailability 0x00448090, first system wins; the
+  // original's is_visible/has_explored_flag gates are load-time-true there,
+  // so every loaded syst claims its stellars regardless of visitation). This
+  // must not be gated on the discovery fog: the starmap ring colours grade
+  // far systems' nav stellars through is_available.
+  for (std::size_t sys_idx = 0; sys_idx < state.scenario.systems.size();
+       ++sys_idx) {
+    const System &system = state.scenario.systems[sys_idx];
+    for (const std::int16_t nav : system.nav_defs) {
+      if (nav < 0x80) {
+        continue;
+      }
+      const std::size_t stellar_idx =
+          static_cast<std::size_t>(nav - 0x80);
+      if (stellar_idx >= state.scenario.stellars.size()) {
+        continue;
+      }
+      Stellar &st = state.scenario.stellars[stellar_idx];
+      if (st.system_id < 0 ||
+          st.system_id >= static_cast<std::int16_t>(
+                              state.scenario.systems.size())) {
+        st.system_id = static_cast<std::int16_t>(sys_idx);
+      }
+    }
+  }
+  // Mark available every stellar owned by a loaded, NCB-visible system
+  // (0x00432470 scope 3; the owning system's is_visible is a loaded/NCB flag,
+  // not the discovery fog).
   for (std::size_t idx = 0; idx < state.scenario.stellars.size(); ++idx) {
     Stellar &st = state.scenario.stellars[idx];
-    const std::int16_t resource = static_cast<std::int16_t>(idx + 0x80);
     st.is_available = false;
     st.hazard_marker = false;
 
@@ -598,7 +616,7 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state) {
     // in the current system's nav list (the original fixes missing system ids
     // to the current system by scanning the current nav list).
     if (st.system_id < 0 || st.system_id >= 0x800) {
-      if (NovaTargeting_IsStellarAdjacentToSystem(*cur, resource)) {
+      if (NovaTargeting_IsStellarAdjacentToSystem(*cur, idx + 0x80)) {
         st.system_id = current_sys;
       }
     }

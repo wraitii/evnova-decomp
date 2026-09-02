@@ -608,8 +608,9 @@ void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
       return;
     }
     // Undiscovered systems hide their name (SystemDef.discovery_state < 1;
-    // the port approximates with the explored flag).
-    const std::string name = system->has_explored_flag
+    // the original's has_explored_flag is load-time-true and cannot serve as
+    // this gate).
+    const std::string name = system->discovery_state > 0
                                  ? system->name
                                  : MiscString(kMiscUnexploredSystem);
     const bool fueled = state.player.fuel_points >= 100.0F;

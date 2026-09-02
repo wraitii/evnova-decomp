@@ -642,6 +642,11 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (bytes.size() >= 0x238) {
     st.service_cost = ReadBeI32(bytes, 0x234);
   }
+  // Payload +0x238 (StellarDef +0x46c) -> the starmap "gravity shear"
+  // hazard flag (NovaUi_RedrawStarmapWindow 0x004a62f0).
+  if (bytes.size() >= 0x23a) {
+    st.gravity_shear = ReadBeI16(bytes, 0x238);
+  }
   return st;
 }
 
@@ -778,6 +783,13 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   System s;
   s.pos_x = ReadBeI16(bytes, 0x00);
   s.pos_y = ReadBeI16(bytes, 0x02);
+  // Ghidra NovaData_LoadScenarioResourceTables 0x004bd3c0 sets is_visible and
+  // has_explored_flag to 1 for every decoded syst: they are LOADED/availability
+  // flags, not per-visit fog (the fog record is discovery_state below).
+  // NovaResources_EvaluateAvailability 0x00448090 later re-filters is_visible
+  // through the system's Visibility NCB when mission lists are evaluated.
+  s.is_visible = true;
+  s.has_explored_flag = true;
   for (std::size_t i = 0; i < s.links.size(); ++i) {
     s.links[i] = ReadBeI16(bytes, 0x04 + i * 2);
     s.nav_defs[i] = ReadBeI16(bytes, 0x24 + i * 2);
@@ -1258,6 +1270,28 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_systems;
     }
   }
+  // n\x91bu nebula/region backdrops (g_system_region_trigger_defs fill loop
+  // in NovaData_LoadScenarioResourceTables 0x004bd3c0: 32 slots, each probed
+  // as id 0x80 + i; absent resources leave the rect zeroed so the starmap
+  // skips them). Payload: 4 BE i16 rect fields, ActiveOn CString at +0x08,
+  // OnExplore CString at +0x107.
+  nebulae.assign(0x20, {});
+  std::size_t loaded_nebulae = 0;
+  for (std::int32_t id = 0x80; id <= 0x9f; ++id) {
+    if (const auto res =
+            NovaResource_Load(scenario::kNebulaResourceType,
+                              static_cast<std::uint16_t>(id))) {
+      game::Nebula neb;
+      neb.x = ReadBeI16(*res, 0x00);
+      neb.y = ReadBeI16(*res, 0x02);
+      neb.width = ReadBeI16(*res, 0x04);
+      neb.height = ReadBeI16(*res, 0x06);
+      neb.active_on_expression = ReadCString(*res, 0x08);
+      neb.on_explore_expression = ReadCStringBounded(*res, 0x107, 0x100);
+      nebulae[static_cast<std::size_t>(id) - 0x80] = std::move(neb);
+      ++loaded_nebulae;
+    }
+  }
   for (std::int32_t id = 0x80; id <= 0x17f; ++id) {
     if (const auto res =
             NovaResource_LoadNamed(scenario::kGovernmentResourceType,
@@ -1379,13 +1413,14 @@ bool ScenarioData::LoadFromArchives() {
 
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
-      "{} systems, {} governments, {} fleet defs, {} dude defs, "
+      "{} systems, {} nebulae, {} governments, {} fleet defs, {} dude defs, "
       "{} asteroid types, {} impact effects, {} missions, {} personalities",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
       loaded_stellars,
       loaded_systems,
+      loaded_nebulae,
       loaded_governments,
       loaded_fleets,
       loaded_dudes,

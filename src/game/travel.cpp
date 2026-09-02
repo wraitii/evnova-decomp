@@ -167,6 +167,16 @@ void FireJump(GameState &state) {
   t.destination_system_id = -1;
   t.hyperspace_mode = false;
   t.just_completed = true;
+  // Arrival route maintenance (Ship_HandlePlayerShipCore's arrival tick):
+  // the map pan re-centres on the new system (0x0044f8a6), a plotted route
+  // hop that matched this system is consumed
+  // (System_NormalizePlannedRouteToCurrentSystem 0x004a7fc0) and the travel
+  // slot re-arms from the next hop
+  // (NovaUi_SyncTravelSelectionFromStarmapRoute 0x004a8080).
+  state.starmap_pan_x = cx;
+  state.starmap_pan_y = cy;
+  NovaStarmap_NormalizeRouteToCurrentSystem(state);
+  NovaStarmap_SyncTravelSelectionFromRoute(state);
   // The jump completes at the fire/arrival instant: the ship is now in the
   // NEW system at max speed and control returns to normal flight (the world
   // scrolls past as the ship coasts through the new system). There is no
@@ -399,11 +409,10 @@ void NovaSystem_MarkSystemVisited(GameState &state,
   if (sys.discovery_state < level) {
     sys.discovery_state = level;
   }
-  // Keep the clean-room per-visit fog bits + the persistent explored bitset in
-  // sync (the original's is_visible/has_explored_flag are load-time flags; see
-  // scenario_data.hpp).
-  sys.is_visible = true;
-  sys.has_explored_flag = true;
+  // Mirror into the persistent explored bitset (the NCB `has_explored` test
+  // and the pilot-save discovery block read it). SystemDef.is_visible /
+  // has_explored_flag are load-time flags set by the scenario decoder and are
+  // NOT fog (see scenario_data.hpp); the fog record is discovery_state.
   if (idx < state.control.explored_systems.size()) {
     state.control.explored_systems.set(idx);
   }
@@ -429,9 +438,10 @@ void NovaSystem_FloodDiscoverAdjacentSystems(
     return;
   }
   visited[idx] = 1;
-  // TODO(decomp(0x00467bd0)) skipped: Frame_TriggerSystemRegionEvents fires
-  // the system's rectangular mission region triggers per newly reached
-  // system; the region trigger defs are not modelled yet.
+  // The original fires the system's rectangular nebula/region triggers per
+  // newly reached system (Frame_TriggerSystemEvents 0x00467bd0), latching
+  // explored nebulae and running their OnExplore set expressions.
+  NovaSystem_TriggerNebulaRegionEvents(state, zero_based_system_id);
   NovaSystem_MarkSystemVisited(state, zero_based_system_id, threshold);
 
   const std::int16_t slot =
@@ -444,11 +454,11 @@ void NovaSystem_FloodDiscoverAdjacentSystems(
     }
   }
 
-  // Links are stored as system resource ids in System.links (the original
-  // rebases them to zero-based at load). Divergence (see travel.hpp): the
-  // original recurses only through systems that resolve visible, which there
-  // is always true; recursing through any in-range link keeps map reveals
-  // working across the clean-room's per-visit fog bits.
+  // Links are stored as system resource ids in System.links. The original
+  // recurses through System_ResolveVisibleSystemForTravel, which there passes
+  // for every loaded system (is_visible is a loader-set load-time flag), so
+  // the clean-room recursing through any in-range link target matches that
+  // behaviour; the visibility-root remap is TODO(decomp).
   const auto &sys = state.scenario.systems[idx];
   for (const std::int16_t link : sys.links) {
     if (link < 0x80) {
@@ -498,12 +508,11 @@ void NovaSystem_RebuildDiscoveryState(GameState &state,
       if (link < 0x80) {
         continue;
       }
-      // Links are stored as system resource ids (the original rebases them to
-      // zero-based at load and resolves them through
-      // System_ResolveVisibleSystemForTravel 0x0046b920, which always succeeds
-      // there because is_visible is a load-time flag). Divergence: the
-      // clean-room's is_visible is per-visit fog, so the neighbour latch
-      // resolves the link target directly instead of through that gate.
+      // Links are stored as system resource ids. The original resolves them
+      // through System_ResolveVisibleSystemForTravel 0x0046b920, which passes
+      // for every loaded system (is_visible is a loader-set load-time flag),
+      // so the neighbour latch resolves the link target directly - same
+      // behaviour; the visibility-root remap is TODO(decomp).
       const std::int16_t target = static_cast<std::int16_t>(link - 0x80);
       if (target >= 0 &&
           static_cast<std::size_t>(target) < state.scenario.systems.size()) {
@@ -511,6 +520,71 @@ void NovaSystem_RebuildDiscoveryState(GameState &state,
             .discovered_this_rebuild = true;
       }
     }
+  }
+}
+
+void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
+                                          std::int16_t zero_based_system_id) {
+  if (state.scenario.nebulae.empty() || zero_based_system_id < 0 ||
+      static_cast<std::size_t>(zero_based_system_id) >=
+          state.scenario.systems.size()) {
+    return;
+  }
+  const System &sys =
+      state.scenario.systems[static_cast<std::size_t>(zero_based_system_id)];
+  ControlExpressionState expression;
+  expression.get_control_bit = [&state](std::uint32_t bit) {
+    return state.control.ControlBit(bit);
+  };
+  expression.is_registered = [&state](std::uint32_t) {
+    return state.control.registered;
+  };
+  expression.is_male = [&state] { return state.control.male; };
+  expression.owns_outfit = [&state](std::int16_t id) {
+    return id >= 0 &&
+           id < static_cast<std::int16_t>(
+                    state.inventory.outfit_owned_count.size()) &&
+           state.inventory.outfit_owned_count[static_cast<std::size_t>(id)] > 0;
+  };
+  expression.has_explored = [&state](std::int16_t id) {
+    return id >= 0 && id < 0x800 &&
+           state.control.explored_systems.test(static_cast<std::size_t>(id));
+  };
+  for (Nebula &neb : state.scenario.nebulae) {
+    // No rect (absent resource): skip, like the original's zero-filled slot.
+    if (neb.width == 0 || neb.height == 0) {
+      continue;
+    }
+    // The original caches the ActiveOn evaluation (+0x8 byte) in
+    // NovaResources_EvaluateAvailability; re-evaluating per check is
+    // equivalent (controls only change through set expressions).
+    neb.active_on = NovaControlExpression_Evaluate(neb.active_on_expression,
+                                                   expression);
+    if (!neb.active_on || neb.explored) {
+      continue;
+    }
+    // Rect inset by 8 around the nebula rect, then a point test on the
+    // system's world position (0x00467c57).
+    const int x0 = neb.x + 8;
+    const int y0 = neb.y + 8;
+    const int x1 = neb.x + neb.width - 8;
+    const int y1 = neb.y + neb.height - 8;
+    if (sys.pos_x < x0 || sys.pos_x > x1 || sys.pos_y < y0 || sys.pos_y > y1) {
+      continue;
+    }
+    neb.explored = true;
+    NovaLog::Info("nebula region reached at system {} (resource {}); running "
+                  "OnExplore expression",
+                  zero_based_system_id,
+                  zero_based_system_id + 0x80);
+    // Ghidra Mission_ExecuteReactionScript on the OnExplore set string
+    // (0x00467cc1); the clean-room executor handles the control-bit set
+    // grammar (Bxxx / !Bxxx / Bxxx=0).
+    NovaControlExpression_ExecuteSet(
+        neb.on_explore_expression,
+        ControlExpressionMutation{[&state](std::uint32_t bit, bool value) {
+          state.control.SetControlBit(bit, value);
+        }});
   }
 }
 
@@ -849,6 +923,151 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
       stellar_id,
       slot,
       dest_zero_based);
+}
+
+// ---------------------------------------------------------------------------
+// Plotted starmap route (state.travel.starmap_route; Ghidra DAT_00735404).
+// ---------------------------------------------------------------------------
+
+void NovaStarmap_NormalizeRoutePlan(GameState &state) {
+  auto &route = state.travel.starmap_route;
+  // Ghidra 0x004a7e80: drop a leading empty slot by shifting left, and clear
+  // the whole route when the first hop is missing.
+  if (route[0] == -1) {
+    for (std::size_t i = 0; i + 1 < route.size(); ++i) {
+      route[i] = route[i + 1];
+    }
+    route.back() = -1;
+  }
+  if (route[1] == -1) {
+    route.fill(-1);
+  }
+}
+
+void NovaStarmap_NormalizeRouteToCurrentSystem(GameState &state) {
+  auto &route = state.travel.starmap_route;
+  const std::int16_t first_hop = NovaSystem_ResolveVisibleForTravel(
+      state, route[1]);
+  const std::int16_t current = NovaSystem_ResolveVisibleForTravel(
+      state, state.player.current_system_id);
+  if (first_hop != -1 && first_hop == current) {
+    // The ship just arrived at the plotted first hop: consume it.
+    route[0] = -1;
+    NovaStarmap_NormalizeRoutePlan(state);
+  } else if (first_hop == -1) {
+    route.fill(-1);
+  }
+}
+
+void NovaStarmap_SyncTravelSelectionFromRoute(GameState &state) {
+  auto &t = state.travel;
+  if (t.starmap_route[1] == -1) {
+    return;
+  }
+  const std::int16_t first_hop = NovaSystem_ResolveVisibleForTravel(
+      state, t.starmap_route[1]);
+  const System *sys = state.scenario.System(CurrentSystemResource(state));
+  if (!sys) {
+    return;
+  }
+  for (std::size_t slot = 0; slot < sys->links.size(); ++slot) {
+    const std::int16_t link = sys->links[slot];
+    if (link < 0x80) {
+      continue;
+    }
+    if (NovaSystem_ResolveVisibleForTravel(
+            state, static_cast<std::int16_t>(link - 0x80)) == first_hop) {
+      t.travel_slot = static_cast<std::int16_t>(slot);
+      t.starmap_destination_system_id = first_hop;
+      t.selected_stellar_is_manual = true;
+      NovaLog::Info("starmap route re-armed: next hop system {} on link slot {}",
+                    first_hop,
+                    slot);
+      return;
+    }
+  }
+}
+
+bool NovaStarmap_RouteHasHops(const GameState &state) {
+  return state.travel.starmap_route[1] != -1;
+}
+
+bool NovaStarmap_AppendRouteHop(GameState &state,
+                                std::int16_t destination_zero_based) {
+  auto &route = state.travel.starmap_route;
+  if (destination_zero_based < 0 ||
+      static_cast<std::size_t>(destination_zero_based) >=
+          state.scenario.systems.size()) {
+    return false;
+  }
+  // The candidate must extend the chain: a travel-resolvable link neighbour
+  // of the route tail (or of the current system when the route is empty).
+  std::int16_t tail = state.player.current_system_id;
+  for (std::size_t i = route.size(); i > 0; --i) {
+    if (route[i - 1] != -1) {
+      tail = route[i - 1];
+      break;
+    }
+  }
+  const System *tail_sys = state.scenario.System(
+      static_cast<std::int16_t>(tail + 0x80));
+  if (!tail_sys) {
+    return false;
+  }
+  bool linked = false;
+  for (const std::int16_t link : tail_sys->links) {
+    if (link < 0x80) {
+      continue;
+    }
+    if (NovaSystem_ResolveVisibleForTravel(
+            state, static_cast<std::int16_t>(link - 0x80)) ==
+        NovaSystem_ResolveVisibleForTravel(state, destination_zero_based)) {
+      linked = true;
+      break;
+    }
+  }
+  if (!linked) {
+    return false;
+  }
+  if (route[0] == -1) {
+    route[0] = state.player.current_system_id;
+    route[1] = destination_zero_based;
+    return true;
+  }
+  for (std::size_t i = 0; i < route.size(); ++i) {
+    if (route[i] == -1) {
+      route[i] = destination_zero_based;
+      return true;
+    }
+  }
+  return false; // route full (32 slots)
+}
+
+bool NovaStarmap_TruncateRouteAt(GameState &state,
+                                 std::int16_t destination_zero_based) {
+  auto &route = state.travel.starmap_route;
+  for (std::size_t i = route.size(); i > 1; --i) {
+    if (route[i - 1] != -1) {
+      if (route[i - 1] == destination_zero_based) {
+        // Same position as the last hop: pop it (the original compares the
+        // system positions, 0x004a5525).
+        route[i - 1] = -1;
+        return true;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+void NovaStarmap_ClearRoute(GameState &state) {
+  auto &route = state.travel.starmap_route;
+  route.fill(-1);
+  route[0] = state.player.current_system_id;
+  // The original also disarms the plotted jump and resets the selection to
+  // the current system (0x004a3aa0 action-8 branch).
+  state.travel.travel_slot = -1;
+  state.travel.starmap_destination_system_id = -1;
 }
 
 } // namespace game
