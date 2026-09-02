@@ -527,6 +527,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // visibility gate -- which is how a targeted ship jumping out releases the
     // selection. The stellar selection has no per-frame validation.
     NovaTargeting_ValidatePlayerTarget(state);
+    // Ghidra System_UpdateSystemAndStellarDisplayState (0x00432470) scope B:
+    // per-tick recompute of the transient discovered_this_rebuild latch (the
+    // starmap's one-jump-ahead window), so script reveals (mïsn X opcode) get
+    // their grey neighbour ring without waiting for the next system entry.
+    NovaSystem_RebuildDiscoveredLatch(state);
     const bool target_cycle =
         input.cycle_target_next || input.cycle_target_previous;
     if (target_cycle && !target_cycle_was_held) {

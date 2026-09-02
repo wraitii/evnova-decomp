@@ -502,13 +502,34 @@ void NovaSystem_RebuildDiscoveryState(GameState &state,
   NovaSystem_FloodDiscoverAdjacentSystems(
       state, origin_zero_based, 0, max_depth, threshold, visited);
 
-  // Post-pass: rebuild the transient discovered_this_rebuild latch — every
-  // VISIBLE visited system gets it, plus every travel-resolvable link
-  // neighbour of one (System_RebuildSystemVisibilityMap 0x00467970 gates the
-  // source on is_visible && has_explored_flag && discovery_state > 0 and
-  // resolves each link through System_ResolveVisibleSystemForTravel
-  // 0x0046b920, so invisible twin clones never latch and never show on the
-  // map).
+  NovaSystem_RebuildDiscoveredLatch(state);
+}
+
+void NovaSystem_RebuildDiscoveredLatch(GameState &state) {
+  // Twin propagation (System_UpdateSystemAndStellarDisplayState 0x00432470
+  // scope B first loop): a system inherits the max discovery_state of its
+  // discovery-slot twin.
+  for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
+    auto &sys = state.scenario.systems[i];
+    if (!sys.has_explored_flag) {
+      continue;
+    }
+    const std::int16_t slot =
+        NovaSystem_ResolveDiscoverySlot(state, static_cast<std::int16_t>(i));
+    if (slot == static_cast<std::int16_t>(i) || slot < 0 ||
+        static_cast<std::size_t>(slot) >= state.scenario.systems.size()) {
+      continue;
+    }
+    const auto &twin = state.scenario.systems[static_cast<std::size_t>(slot)];
+    if (sys.discovery_state < twin.discovery_state) {
+      sys.discovery_state = twin.discovery_state;
+    }
+  }
+
+  // Latch pass (0x00432470 scope B tail, also the 0x00467970 rebuild tail):
+  // every visible visited system latches itself, and so does every travel-
+  // resolvable link neighbour — that latch is the starmap's one-jump-ahead
+  // window. Invisible twin clones never latch and never show on the map.
   for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
     state.scenario.systems[i].discovered_this_rebuild = false;
   }
@@ -1096,8 +1117,7 @@ bool NovaStarmap_EditRouteAtHop(GameState &state, std::int16_t hit) {
       tail = tail_resolved;
     }
   }
-  const auto &tail_sys =
-      state.scenario.systems[static_cast<std::size_t>(tail)];
+  const auto &tail_sys = state.scenario.systems[static_cast<std::size_t>(tail)];
   if (tail_sys.discovery_state > 0 || hit_sys.discovered_this_rebuild) {
     for (const std::int16_t link : tail_sys.links) {
       if (link < 0x80) {
@@ -1116,8 +1136,8 @@ bool NovaStarmap_EditRouteAtHop(GameState &state, std::int16_t hit) {
   if (count > 0 && route[count - 1] >= 0 &&
       static_cast<std::size_t>(route[count - 1]) <
           state.scenario.systems.size()) {
-    const auto &last_sys = state.scenario.systems[static_cast<std::size_t>(
-        route[count - 1])];
+    const auto &last_sys =
+        state.scenario.systems[static_cast<std::size_t>(route[count - 1])];
     if (hit_sys.pos_x == last_sys.pos_x && hit_sys.pos_y == last_sys.pos_y) {
       route[count - 1] = -1;
       append = false;

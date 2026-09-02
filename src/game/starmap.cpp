@@ -475,16 +475,17 @@ struct NebulaTier {
 
 using NebulaTiers = std::array<NebulaTier, 7>;
 
-// The mission-target marker icon is a color icon (CICN 0x3a98, loaded by the
-// startup loader at 0x004ad960 into DAT_007dc3b0 and blitted at mission-
-// target systems in the marker pass). CICN 0x3a99 (DAT_007dc3b4, green) is
-// the misn-flags-0x100 "Show green arrow on map in initial briefing"
-// highlight: it only draws when the map is opened by the mission-briefing
-// flow with the mission's system preselected (DAT_007dc745), never in the
-// plain flight map -- so the clean-room does not render it (TODO(decomp):
-// the destination-window/briefing starmap sub-flow).
+// The mission-target marker icons are color icons loaded together by the
+// starmap asset loader (0x004aea40: Resource_LoadCicn 0x3a98 -> DAT_007dc3b0,
+// 0x3a99 -> DAT_007dc3b4). In the marker pass (0x004a8100) the red 0x3a98
+// arrow draws up-left of mission-target systems, suppressed on the selected
+// system; the green 0x3a99 arrow draws up-right of the selected system (the
+// DAT_007dc745 briefing-map latch only controls that selection clears the
+// mission-target override — it does not gate the green arrow, which draws in
+// the plain flight map too).
 struct MarkerIcons {
   std::unique_ptr<SdlTexture> mission_target; // CICN 0x3a98
+  std::unique_ptr<SdlTexture> selected_arrow; // CICN 0x3a99
 };
 
 std::unique_ptr<SdlTexture> LoadCicnTexture(SdlPlatform &platform,
@@ -504,6 +505,7 @@ std::unique_ptr<SdlTexture> LoadCicnTexture(SdlPlatform &platform,
 MarkerIcons LoadMarkerIcons(SdlPlatform &platform) {
   MarkerIcons icons;
   icons.mission_target = LoadCicnTexture(platform, 0x3a98);
+  icons.selected_arrow = LoadCicnTexture(platform, 0x3a99);
   return icons;
 }
 
@@ -1206,7 +1208,8 @@ void DrawGalaxy(SdlPlatform &platform,
     }
     // Mission targets compare through the discovery slot (0x004a8ec2 resolves
     // both ends with System_ResolveSystemDiscoverySlot), so a twin group
-    // matches whichever member holds the mission locator.
+    // matches whichever member holds the mission locator. Selection compares
+    // through the discovery slots the same way (0x004a8f0a).
     const std::int16_t slot = DiscoverySlot(state, m.zero_based_id);
     const bool is_mission_target = std::any_of(
         mission_targets.begin(),
@@ -1214,8 +1217,10 @@ void DrawGalaxy(SdlPlatform &platform,
         [&](std::int16_t target) {
           return target != -1 && DiscoverySlot(state, target) == slot;
         });
-    if (!SystemOnMap(state, m.zero_based_id) &&
-        m.zero_based_id != selected_id && !is_mission_target) {
+    const bool is_selected =
+        selected_id >= 0 && slot == DiscoverySlot(state, selected_id);
+    if (!SystemOnMap(state, m.zero_based_id) && !is_selected &&
+        !is_mission_target) {
       continue;
     }
     const float r = marker_inset;
@@ -1228,17 +1233,20 @@ void DrawGalaxy(SdlPlatform &platform,
              static_cast<double>(view.zoom) < kZoomInLimit ? 2.0F : 1.0F);
 
     // Mission-target arrow (CICN 0x3a98): a 16px box up-left of the marker
-    // whose inner corner sits on the marker rect corner (the marker rect is
-    // the centre inset by -4/-6, then the icon rect spans 16px further out,
-    // 0x004a9847); the arrow points down-right at the node. The original
-    // suppresses it on the selected system (BL cleared on slot match,
-    // 0x004a8e5c). The green CICN 0x3a99 (selected/briefing arrow) only
-    // draws in the mission-briefing map flow (DAT_007dc745), which the
-    // clean-room does not reconstruct -- see the MarkerIcons note.
-    if (is_mission_target && m.zero_based_id != selected_id &&
-        icons.mission_target) {
+    // (0x004a8e5c), pointing down-right at the node. The original suppresses
+    // it on the selected system (override cleared when the selected slot
+    // matches and the briefing latch DAT_007dc745 is clear, 0x004a8f0a).
+    // Selected arrow (CICN 0x3a99, DAT_007dc3b4): 16px box up-right of the
+    // marker (0x004a9040), drawn for ANY selected system — so selecting a
+    // mission target swaps the red arrow for the green one rather than
+    // dropping the marker entirely.
+    if (is_mission_target && !is_selected && icons.mission_target) {
       const SDL_FRect dst{m.sx - r - 16.0F, m.sy - r - 16.0F, 16.0F, 16.0F};
       SDL_RenderTexture(renderer, icons.mission_target->get(), nullptr, &dst);
+    }
+    if (is_selected && icons.selected_arrow) {
+      const SDL_FRect dst{m.sx + r, m.sy - r - 16.0F, 16.0F, 16.0F};
+      SDL_RenderTexture(renderer, icons.selected_arrow->get(), nullptr, &dst);
     }
   }
 
@@ -1937,10 +1945,14 @@ std::vector<std::int16_t> BuildMissionTargetSystems(const GameState &state) {
     const ActiveMission &mission = state.active_missions[slot];
     for (const std::int16_t stellar_id :
          {mission.travel_stellar_id, mission.return_stellar_id}) {
-      if (stellar_id < 0x80) {
+      // MisnActive +0x00/+0x04 hold 0-based stellar indices (the original's
+      // g_stellar_defs convention); ScenarioData::Stellar takes the 0x80-
+      // based resource id.
+      if (stellar_id < 0) {
         continue;
       }
-      const Stellar *st = state.scenario.Stellar(stellar_id);
+      const Stellar *st =
+          state.scenario.Stellar(static_cast<std::int16_t>(stellar_id + 0x80));
       if (st == nullptr || st->system_id < 0) {
         continue;
       }
@@ -2037,12 +2049,12 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
   // on that jump's travel-resolvable destination; otherwise on the current
   // system.
   std::int16_t selected_id = state.player.current_system_id;
-  if (state.player.travel_transfer_mode == 3 &&
-      state.travel.travel_slot >= 0 &&
+  if (state.player.travel_transfer_mode == 3 && state.travel.travel_slot >= 0 &&
       static_cast<std::size_t>(state.player.current_system_id) <
           state.scenario.systems.size()) {
-    const System &cur_sys = state.scenario.systems[static_cast<std::size_t>(
-        state.player.current_system_id)];
+    const System &cur_sys =
+        state.scenario
+            .systems[static_cast<std::size_t>(state.player.current_system_id)];
     if (state.travel.travel_slot <
         static_cast<std::int16_t>(cur_sys.links.size())) {
       const std::int16_t link =
@@ -2330,12 +2342,11 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
               std::abs(mp.y - m.sy) > kClickInset) {
             continue;
           }
-          bool accept = cand.discovered_this_rebuild || cid == selected_id ||
-                        std::any_of(mission_targets.begin(),
-                                    mission_targets.end(),
-                                    [&](std::int16_t target) {
-                                      return target == cid;
-                                    });
+          bool accept =
+              cand.discovered_this_rebuild || cid == selected_id ||
+              std::any_of(mission_targets.begin(),
+                          mission_targets.end(),
+                          [&](std::int16_t target) { return target == cid; });
           if (!accept) {
             const std::int16_t adj_source =
                 shift && shift_tail >= 0 ? shift_tail
@@ -2350,11 +2361,11 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
                 if (link < 0x80) {
                   continue;
                 }
-                const std::int16_t resolved = NovaSystem_ResolveVisibleForTravel(
-                    state, static_cast<std::int16_t>(link - 0x80));
-                if (resolved < 0 ||
-                    static_cast<std::size_t>(resolved) >=
-                        state.scenario.systems.size()) {
+                const std::int16_t resolved =
+                    NovaSystem_ResolveVisibleForTravel(
+                        state, static_cast<std::int16_t>(link - 0x80));
+                if (resolved < 0 || static_cast<std::size_t>(resolved) >=
+                                        state.scenario.systems.size()) {
                   continue;
                 }
                 if (resolved == cid) {
@@ -2385,6 +2396,13 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
           break;
         }
         if (hit < 0) {
+          if (!shift) {
+            // Plain click on empty space DESELECTS: the original assigns
+            // g_starmap_selected_system_id straight from the hit-test result
+            // (0x004a4433 arm), which is -1 on a miss — the selection
+            // reticle and the green selected arrow (CICN 0x3a99) both drop.
+            selected_id = -1;
+          }
           break;
         }
         search_active = false;

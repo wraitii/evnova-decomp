@@ -160,18 +160,28 @@ the negotiation/landed dialogs (SDL3, logical 640x480 centred playfield):
   midpoints, never joined into full edges or a cross inside. (An earlier
   clean-room version fed all 16 endpoints to one SDL_RenderLines call, which
   polylines them into full edges plus diagonal connector lines — fixed.)
-- The two 16px corner arrows are mission-driven, not selection-driven
-  (EVN bible misn flags 0x2 / 0x100, confirmed against vanilla screenshots):
-  CICN 0x3a98 (red, pointing down-right from up-left of the marker, box
-  corner on the inset marker-rect corner) marks mission-target systems and is
-  suppressed on the selected system (0x004a8e5c clears the mission flag on a
-  selection-slot match). CICN 0x3a99 (green, pointing down-left from
-  up-right) is the misn 0x100 "show green arrow on map in initial briefing"
-  highlight: it only draws when the map is opened by the mission-briefing
-  flow with the mission's system preselected (DAT_007dc745) — never in the
-  plain flight map, so the clean-room does not render it (TODO(decomp): the
-  briefing starmap sub-flow). The selection itself is marked by the green
-  corner-tick reticle only.
+- The two 16px corner arrows (marker pass 0x004a8100; both CICNs load
+  together at 0x004aea40: 0x3a98 -> DAT_007dc3b0, 0x3a99 -> DAT_007dc3b4):
+  CICN 0x3a98 (red, pointing down-right from up-left of the marker) marks
+  mission-target systems and is suppressed on the selected system (0x004a8e5c
+  clears the mission flag on a selection-slot match unless the briefing-map
+  latch DAT_007dc745 is set). CICN 0x3a99 (green, pointing down-left from
+  up-right, 0x004a9040) is the SELECTION arrow: it draws for ANY selected
+  system — the disassembly sets the green flag unconditionally on a
+  selection-slot match (0x004a8e51) and the DAT_007dc745 briefing latch only
+  controls the red-arrow suppression. The Bible's misn 0x100 "show green
+  arrow on map in initial briefing" works through the briefing map's
+  destination PRESELECT: the preselected mission system is simply selected,
+  so it wears the green arrow. Selecting a mission-target system therefore
+  swaps the red arrow for the green one. Clicking empty space deselects (the
+  original assigns g_starmap_selected_system_id straight from the hit test,
+  -1 on a miss), dropping both the reticle and the green arrow.
+- Fog ring: the starmap's "one jump ahead" window is the transient
+  discovered_this_rebuild latch, recomputed EVERY flight tick by
+  System_UpdateSystemAndStellarDisplayState 0x00432470 scope B (twin
+  discovery_state propagation, latch clear, then visible visited systems +
+  their travel-resolvable link neighbours). This is why a script reveal (mïsn
+  X) grows its grey neighbour ring immediately without a system entry.
 - Click acceptance gate (0x004a4773): a click only LANDS on a system that is
   latched by the last discovery rebuild, is a mission target (raw id compare,
   0x004a4659), or is already selected -- otherwise only when it is a

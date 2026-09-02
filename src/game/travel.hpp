@@ -176,6 +176,15 @@ void NovaSystem_RebuildDiscoveryState(GameState &state,
                                       std::int16_t max_depth,
                                       std::int16_t threshold);
 
+// Ghidra System_UpdateSystemAndStellarDisplayState (0x00432470) scope B, plus
+// the latch tail of System_RebuildSystemVisibilityMap (0x00467970): propagates
+// discovery_state across discovery-slot twins, clears the transient
+// discovered_this_rebuild latch, then latches every visible visited system
+// and every travel-resolvable link neighbour (the starmap's one-jump-ahead
+// window). The original re-runs this every flight tick, so a script reveal
+// (mïsn X) grows its grey neighbour ring immediately.
+void NovaSystem_RebuildDiscoveredLatch(GameState &state);
+
 // System-entry discovery: books the entered system (and its discovery slot)
 // as visited at `level`, then rebuilds the map reveal from it. `level` is 1
 // for an in-flight hyperspace arrival (0x0044aa70) and 2 for the landed
