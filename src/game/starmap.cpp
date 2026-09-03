@@ -1479,8 +1479,7 @@ void DrawTextAt(SdlPlatform &platform,
 // bar (DITL item 1 / entry 2), reproducing NovaUi_RedrawStarmapWindow's
 // 0x004a6219..0x004a6d40 text layout (offsets are DITL authoring pixels,
 // scaled by the window fit). The original right-aligns the game date in the
-// status bar; the calendar is not reconstructed yet (same TODO as the docked
-// dialogs), so that field is left undrawn here.
+// status bar (NovaText_FormatDateString; now drawn).
 void DrawSidePanels(SdlPlatform &platform,
                     NovaFontCache &font_cache,
                     const GameState &state,
@@ -1774,6 +1773,21 @@ void DrawSidePanels(SdlPlatform &platform,
   }
   // "Navigation Hazards:" + the composed asteroid / interference / visibility
   // description (0x004a6219 second half). "<Unknown>" until visited.
+  // The game date right-aligned in the status bar (0x004a6219's date arm).
+  {
+    const std::string date_text = NovaText_FormatDateString(state.date, true);
+    const float date_w = static_cast<float>(font_cache.TextWidth(
+        NovaFontFamily::kGeneva, 10.0F, kNovaFontStyleRegular, date_text));
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  10.0F,
+                  kNovaFontStyleRegular,
+                  kColorWhite,
+                  bar.x + bar.w - 10.0F * s - date_w,
+                  bar.y + 12.0F * s,
+                  date_text);
+  }
   DrawTextAt(platform,
              font_cache,
              bar.x + 10.0F * s,

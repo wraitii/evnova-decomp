@@ -434,9 +434,8 @@ void DrawMissionBoardContents(SdlPlatform &platform,
                           label);
   }
   if (layout.date.w > 0.0F) {
-    // NovaText_FormatDateString over g_current_game_year_month/day; the
-    // calendar is not reconstructed yet (same placeholder as the original's
-    // DITL date field when state is absent). Date colour is the 0x4000 grey.
+    // NovaText_FormatDateString (0x00468450) over the current game date;
+    // date colour is the 0x4000 grey.
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
@@ -446,7 +445,7 @@ void DrawMissionBoardContents(SdlPlatform &platform,
                           layout.date.x,
                           layout.date.x + layout.date.w,
                           layout.date.y + kMissionListFontSize,
-                          "1/1/1999");
+                          NovaText_FormatDateString(state.date, true));
   }
   if (!status.empty()) {
     NovaText_DrawCentered(platform,
@@ -1714,9 +1713,8 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
                       store_frame,
                       selected_description);
     const ShipyardInfoLayout layout = LayoutShipyardInfo(platform, custom);
-    platform.PublishProbeUi("shipyard_info",
-                            {{"window", layout.window},
-                             {"done", layout.button}});
+    platform.PublishProbeUi(
+        "shipyard_info", {{"window", layout.window}, {"done", layout.button}});
     DrawShipyardInfoPanel(platform,
                           font_cache,
                           button_art,
@@ -2329,9 +2327,13 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     // Text view: dark fill + wrapped offer text, scrolled inside a clip to
     // the view rect; the arrow buttons are runtime-drawn (0x004a1820).
     view.Draw(platform);
-    NovaUi_DrawScrollArrow(
-        platform, scroll_up_rect, true, view.scroll_offset() > 0.0F);
     NovaUi_DrawScrollArrow(platform,
+                           button_art,
+                           scroll_up_rect,
+                           true,
+                           view.scroll_offset() > 0.0F);
+    NovaUi_DrawScrollArrow(platform,
+                           button_art,
                            scroll_down_rect,
                            false,
                            view.scroll_offset() < view.max_scroll());
@@ -2678,8 +2680,7 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
                   layout->header.y + kMissionInfoFontSize,
                   heading);
     if (layout->date.w > 0.0F) {
-      // NovaText_FormatDateString over g_current_game_year_month/day; the
-      // calendar is not reconstructed yet (same placeholder as the BBS).
+      // NovaText_FormatDateString (0x00468450) over the current game date.
       NovaText_DrawCentered(platform,
                             font_cache,
                             NovaFontFamily::kGeneva,
@@ -2689,7 +2690,7 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
                             layout->date.x,
                             layout->date.x + layout->date.w,
                             layout->date.y + kMissionInfoFontSize,
-                            "1/1/1999");
+                            NovaText_FormatDateString(state.date, true));
     }
 
     // Rows: black fill, selected row in the 50%-red highlight, white text

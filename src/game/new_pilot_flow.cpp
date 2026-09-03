@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <ctime>
 #include <functional>
 #include <random>
 #include <span>
@@ -377,9 +378,9 @@ void Stub_SeedStartingInventory(GameState &state) {
   // > 0) into the matching secondary/ammo counter. The starter Shuttle's
   // single Light Blaster ({0x80, 1, -1}: 1 mounted, unlimited ammo) thereby
   // lands in bank 0 with weapon_bank_ammo[0] = 1 > 0, so the primary-fire
-  // loop (NovaWeapon_TickPlayerWeaponCommands primary-fire arm) can fire it. The stock_weapons decode
-  // and the loader's default_weapon_ammo/secondary mapping are verified in
-  // tests/scenario_data_test.cpp.
+  // loop (NovaWeapon_TickPlayerWeaponCommands primary-fire arm) can fire it.
+  // The stock_weapons decode and the loader's default_weapon_ammo/secondary
+  // mapping are verified in tests/scenario_data_test.cpp.
   NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
   // Reset any lingering per-bank cooldown so a fresh pilot can fire
   // immediately on entering spaceflight.
@@ -521,8 +522,9 @@ void ResetPlayerShipForNewGame(GameState &state) {
   state.player.speed = 0.0F;
   state.player.ship_class_id = state.pilot.start_type_code; // ch r ShipType
   // Ship_ResetPlayerShipState leaves the active weapon bank unselected (-1);
-  // the firing loop (NovaWeapon_TickPlayerWeaponCommands) fires every loaded bank
-  // regardless, so the selection latch is only carried for save/UI fidelity.
+  // the firing loop (NovaWeapon_TickPlayerWeaponCommands) fires every loaded
+  // bank regardless, so the selection latch is only carried for save/UI
+  // fidelity.
   state.player.active_weapon_bank_slot = -1;
   state.player.timed_action_counter = -1;
   state.player.death_timer_active = -1.0F;
@@ -538,13 +540,22 @@ void ResetPlayerShipForNewGame(GameState &state) {
 }
 
 void SetNewGameDateAndStrings(GameState &state) {
-  // The original copies the starting year/month/day and sets the opener string
-  // globals (DAT_005997cc / DAT_005999cc). The in-engine date drives the
-  // pause-menu clock and event scheduling; it is not surfaced in this build.
-  // The opener strings are stored on state->pilot by the naming step above.
-  (void)state;
-  NovaLog::Debug("new-game date and opener strings set (in build: opener "
-                 "strings stored on pilot only)");
+  // Ghidra 0x004b4690 Game_ResetNewGameState -> DrawContext_ReadRenderParams
+  // (0x004bbb10) + FUN_004fdcb0: the in-game calendar is seeded from the
+  // local clock — the real month/day/year with the year advanced by 250
+  // (0xfa). The opener strings are stored on state->pilot by the naming step
+  // above.
+  const std::time_t now = std::time(nullptr);
+  std::tm local{};
+  // localtime_r is POSIX; keep the fallback for non-POSIX hosts.
+#ifdef _WIN32
+  localtime_s(&local, &now);
+#else
+  localtime_r(&now, &local);
+#endif
+  state.date.year = static_cast<std::int16_t>(local.tm_year + 1900 + 250);
+  state.date.month = static_cast<std::int16_t>(local.tm_mon + 1);
+  state.date.day = static_cast<std::int16_t>(local.tm_mday);
 }
 
 } // namespace

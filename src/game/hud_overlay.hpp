@@ -73,6 +73,13 @@ void NovaHud_TickOverlay(GameState &state);
 [[nodiscard]] std::optional<std::string>
 NovaHud_LoadStringEntry(std::uint16_t resource_id, std::uint16_t entry);
 
+// Entry count of a STR# pool (the big-endian u16 header), or 0 when the pool
+// is missing or truncated. Used to draw the original's NovaRandom_Range(count)
+// bound when picking a random pool entry (Mission_PopulateMissionSlotFromDef
+// 0x0043f8c0 rolls NovaRandom_Range(count) + 1 for the 1-based entry).
+[[nodiscard]] std::uint16_t
+NovaHud_StringPoolEntryCount(std::uint16_t resource_id);
+
 // Pure STR# pool decoder (exposed for the data-loading unit test): given the
 // raw pool payload (big-endian u16 string count, then per-entry 1-byte length
 // + bytes), returns the 1-BASED entry `entry` or std::nullopt when the entry

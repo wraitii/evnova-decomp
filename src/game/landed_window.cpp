@@ -9,6 +9,7 @@
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
+#include "selection_text_dialog.hpp"
 #include "services_buttons.hpp"
 #include "ship_spawn.hpp"
 #include "targeting.hpp"
@@ -105,6 +106,12 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   state.player.armor_points = effective.max_armor_points;
   state.cached_stats = effective;
   state.stat_cache_valid = true;
+
+  // Stellar_TravelToSystem (0x00455e10 / call site 0x00456033) advances the
+  // calendar one day per landing, immediately after the shield/armor
+  // restore and before the Spaceport interaction loop (whose mission gate
+  // therefore sees the post-landing date when failing overdue deadlines).
+  Mission_TickDailyWorldUpdate(state);
 
   // Stellar_ProcessTravelAndLanding (0x00457580) runs Ship_DeactivateVacant
   // ShipsAndTally('\0') during the normal arrival, then Mission_SpawnSystemMisn
@@ -1019,6 +1026,18 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                  button_rects,
                  std::nullopt);
   platform.Present();
+  // Mission resolution runs once on Spaceport entry, before the AvailLoc-3
+  // offer pass below. That is the original's position in
+  // NovaUi_RunTravelDestinationInteractionLoop (0x00491f30), which calls
+  // Mission_TickReactionSlotsForTravelInteraction (0x00443780) a single
+  // time after the window is up; the loop's per-action 0xf arm only re-runs
+  // the offer pass. The success/failure debrief readers layer over the live
+  // dock through render_background.
+  Mission_TickReactionSlotsForTravelInteraction(
+      state, ctx.stellar_id, SDL_GetTicks(), [&](const std::string &text) {
+        NovaUi_RunTextReaderDialog(
+            platform, state, text, false, render_background);
+      });
   (void)Mission_TriggerLandingInteractions(
       state, 3, SDL_GetTicks(), [&](std::int16_t mission_def) {
         return NovaMission_RunOfferWindow(

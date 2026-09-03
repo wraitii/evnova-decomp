@@ -121,6 +121,16 @@ std::optional<std::string> NovaHud_LoadStringEntry(std::uint16_t resource_id,
   return NovaHud_DecodeStringEntry(*bytes, entry);
 }
 
+std::uint16_t NovaHud_StringPoolEntryCount(std::uint16_t resource_id) {
+  const auto bytes = NovaResource_Load(kStringResourceType, resource_id);
+  if (!bytes || bytes->size() < 2) {
+    return 0;
+  }
+  return static_cast<std::uint16_t>(
+      (std::to_integer<std::uint8_t>((*bytes)[0]) << 8U) |
+      std::to_integer<std::uint8_t>((*bytes)[1]));
+}
+
 namespace {
 // STR# 0x7d2 (landing/docking feedback) entry numbers, exactly as the original
 // passes them to Resource_LoadStringEntry (1-based;

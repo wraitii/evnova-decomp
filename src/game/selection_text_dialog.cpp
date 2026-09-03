@@ -5,6 +5,7 @@
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "hud_overlay.hpp"
 #include "landed_window.hpp"
 #include "nova_font.hpp"
 #include "services_buttons.hpp"
@@ -22,12 +23,12 @@ namespace {
 
 constexpr std::uint16_t kReaderDialogId = 0xbbb;
 
-// Shared selection-dialog text metrics: the 12pt Geneva selection font and
-// the wrap/leading the view applies (NovaTextView_SetText + UpdateContent-
-// Height measure with the same face).
-constexpr float kTextSize = 12.0F;
-constexpr float kLineHeight = 14.0F;
-constexpr float kFirstLineOffset = 15.0F;
+// Shared selection-dialog text metrics: the reader's text view uses the
+// shared Geneva-9 screen font (DAT_00735684/86, set in 0x004b0c20) with the
+// 11pt leading the landed-description/about texts use.
+constexpr float kTextSize = 9.0F;
+constexpr float kLineHeight = 11.0F;
+constexpr float kFirstLineOffset = 11.0F;
 constexpr float kTextInset = 6.0F;
 
 [[nodiscard]] bool Contains(const SDL_FRect &rect, SDL_FPoint point) {
@@ -47,10 +48,10 @@ NovaTextScrollView::NovaTextScrollView(NovaFontCache &fonts,
         return fonts.TextWidth(
             NovaFontFamily::kGeneva, kTextSize, kNovaFontStyleRegular, line);
       });
-  const float content_height =
-      kFirstLineOffset + static_cast<float>(lines_.size()) * kLineHeight + 6.0F;
-  content_height_ = content_height;
-  max_scroll_ = std::max(0.0F, content_height - view_rect.h);
+  const float wrapped_height = static_cast<float>(lines_.size()) * kLineHeight;
+  text_height_ = wrapped_height;
+  content_height_ = kFirstLineOffset + wrapped_height + 6.0F;
+  max_scroll_ = std::max(0.0F, content_height_ - view_rect.h);
 }
 
 void NovaTextScrollView::ScrollBy(float delta) {
@@ -88,30 +89,48 @@ void NovaTextScrollView::Draw(SdlPlatform &platform) const {
 }
 
 void NovaUi_DrawScrollArrow(SdlPlatform &platform,
+                            const ServicesButtonArt &button_art,
                             const SDL_FRect &rect,
                             bool up,
                             bool enabled) {
+  button_art.Draw(
+      platform, rect, enabled ? ButtonState::kNormal : ButtonState::kDisabled);
+  // Vector chevron (0x004a3340): '^' apexes up, '&' apexes down. Integer
+  // geometry off the button rect: s = width/10, apex at the rounded
+  // midpoint ((l+r+1)/2); each arm spans 2s. The 2x2 pen is approximated by
+  // stroking each arm at the four 2x2 offsets. Glyph colours come from the
+  // button-label câlr table (white enabled, 0x262626 disabled).
+  const int l = static_cast<int>(std::lround(rect.x));
+  const int r = static_cast<int>(std::lround(rect.x + rect.w));
+  const int t = static_cast<int>(std::lround(rect.y));
+  const int b = static_cast<int>(std::lround(rect.y + rect.h));
+  const int s = (r - l) / 10;
+  if (s <= 0) {
+    return;
+  }
+  const int cx = (l + r + 1) / 2;
+  const int cy = (t + b + 1) / 2;
+  const int apex_y = up ? cy - s : cy + s;
+  const int base_y = up ? cy + s : cy - s;
   SDL_Renderer *renderer = platform.renderer();
-  constexpr SDL_Color kFill{16, 40, 72, 255};
-  constexpr SDL_Color kFrame{80, 140, 190, 255};
-  const SDL_Color &glyph =
-      enabled ? SDL_Color{255, 255, 255, 255} : SDL_Color{128, 128, 128, 255};
-  SDL_SetRenderDrawColor(renderer, kFill.r, kFill.g, kFill.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderFillRect(renderer, &rect);
-  SDL_SetRenderDrawColor(
-      renderer, kFrame.r, kFrame.g, kFrame.b, SDL_ALPHA_OPAQUE);
-  SDL_RenderRect(renderer, &rect);
-  const float cx = rect.x + rect.w / 2.0F;
-  const float cy = rect.y + rect.h / 2.0F;
-  SDL_SetRenderDrawColor(renderer, glyph.r, glyph.g, glyph.b, SDL_ALPHA_OPAQUE);
-  for (int i = 0; i < 5; ++i) {
-    const float y = up ? cy - 2.0F + static_cast<float>(i)
-                       : cy + 2.0F - static_cast<float>(i);
-    SDL_RenderLine(renderer,
-                   cx - static_cast<float>(i) - 1.0F,
-                   y,
-                   cx + static_cast<float>(i) + 1.0F,
-                   y);
+  if (enabled) {
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
+  } else {
+    SDL_SetRenderDrawColor(renderer, 0x26, 0x26, 0x26, SDL_ALPHA_OPAQUE);
+  }
+  for (const int ox : {0, 1}) {
+    for (const int oy : {0, 1}) {
+      SDL_RenderLine(renderer,
+                     static_cast<float>(cx + ox),
+                     static_cast<float>(apex_y + oy),
+                     static_cast<float>(cx - 2 * s + ox),
+                     static_cast<float>(base_y + oy));
+      SDL_RenderLine(renderer,
+                     static_cast<float>(cx + ox),
+                     static_cast<float>(apex_y + oy),
+                     static_cast<float>(cx + 2 * s + ox),
+                     static_cast<float>(base_y + oy));
+    }
   }
 }
 
@@ -123,7 +142,7 @@ struct ReaderLayout {
   SDL_FRect text_area{};   // UiPanel entry 3
   SDL_FRect arrow_up{};    // UiPanel entry 5
   SDL_FRect arrow_down{};  // UiPanel entry 6
-  std::string done_caption = "Done";
+  std::string done_caption = "Okay";
 };
 
 // Window bounds + control rects from the real DLOG/DITL, centred on the
@@ -162,55 +181,51 @@ struct ReaderLayout {
   layout.text_area = rect(2);   // UiPanel entry 3
   layout.arrow_up = rect(4);    // UiPanel entry 5
   layout.arrow_down = rect(5);  // UiPanel entry 6
-  // The Done caption lives in the DITL item's own Pascal string when the
-  // resource carries one.
-  for (const auto &item : *items) {
-    if (item.index == 0 && !item.title.empty()) {
-      layout.done_caption = item.title;
-      break;
-    }
+  // The button caption is not the DITL title (entry 1 is a title-less
+  // userItem): the 0x004a2ac0 painter labels it from STR# 0x96 slot 0x1a
+  // (1-based entry 0x1b, "Okay"), like every selection dialog.
+  if (const auto caption = NovaHud_LoadStringEntry(0x96, 0x1b)) {
+    layout.done_caption = *caption;
   }
   return layout;
 }
 
-// Backdrop strip: PICT 0x214c/0x214d/0x214e blitted main-art top-anchored
-// with the top and bottom strips over it (NovaUi_DrawSelectionDialogContent
-// 0x00499870). Returns false when any piece is missing.
-[[nodiscard]] bool DrawBackdropStrip(SdlPlatform &platform,
-                                     const SDL_FRect &window) {
-  const auto load = [&](std::uint16_t id) {
-    const auto data = NovaResource_LoadPictData(id);
-    const auto image = data ? Resource_LoadPictAsImage(*data) : std::nullopt;
-    if (!data || !image) {
-      return std::unique_ptr<SdlTexture>{};
-    }
-    return SdlTexture::Create(
-        platform.renderer(), image->width, image->height, image->rgba_pixels);
-  };
-  auto main = load(0x214d);
-  auto top = load(0x214c);
-  auto bottom = load(0x214e);
-  if (main == nullptr || top == nullptr || bottom == nullptr) {
-    return false;
+// Backdrop for the < 0x80 variant: three PICTs composed by
+// NovaUi_DrawSelectionDialogContent 0x00499870 in order body -> top ->
+// bottom: 0x214d (441x365) at window.y + height(0x214c), 0x214c (441x9) at
+// the window top, 0x214e (441x40) anchored to the window bottom (it wins
+// where the over-tall body overlaps). DAT_007d4bf0/4bf4 are overlapping
+// aliases of the image-slot array's entries 1/2 and stay set for the reader
+// -- the >= 0x80 art variant is the only path that zeroes them. Blits clip
+// to the window rect (the painter draws inside the modal window's context).
+// Loaded once per dialog, not per frame.
+struct ReaderBackdrop {
+  std::unique_ptr<SdlTexture> top;    // 0x214c
+  std::unique_ptr<SdlTexture> body;   // 0x214d
+  std::unique_ptr<SdlTexture> bottom; // 0x214e
+};
+
+[[nodiscard]] std::unique_ptr<SdlTexture>
+LoadBackdropPict(SdlPlatform &platform, std::uint16_t pict_id) {
+  const auto data = NovaResource_LoadPictData(pict_id);
+  const auto image = data ? Resource_LoadPictAsImage(*data) : std::nullopt;
+  if (!data || !image) {
+    return nullptr;
   }
-  const auto blit = [&](SdlTexture &texture, const SDL_FRect &dst) {
-    SDL_RenderTexture(platform.renderer(), texture.get(), nullptr, &dst);
-  };
-  float w = 0.0F;
-  float h = 0.0F;
-  SDL_GetTextureSize(main->get(), &w, &h);
-  blit(*main,
-       {window.x, window.y, std::min(w, window.w), std::min(h, window.h)});
-  SDL_GetTextureSize(top->get(), &w, &h);
-  blit(*top,
-       {window.x, window.y, std::min(w, window.w), std::min(h, window.h)});
-  SDL_GetTextureSize(bottom->get(), &w, &h);
-  blit(*bottom,
-       {window.x,
-        window.y + window.h - std::min(h, window.h),
-        std::min(w, window.w),
-        std::min(h, window.h)});
-  return true;
+  return SdlTexture::Create(
+      platform.renderer(), image->width, image->height, image->rgba_pixels);
+}
+
+[[nodiscard]] ReaderBackdrop LoadReaderBackdrop(SdlPlatform &platform) {
+  ReaderBackdrop backdrop;
+  backdrop.top = LoadBackdropPict(platform, 0x214c);
+  backdrop.body = LoadBackdropPict(platform, 0x214d);
+  backdrop.bottom = LoadBackdropPict(platform, 0x214e);
+  if (!backdrop.top || !backdrop.body || !backdrop.bottom) {
+    NovaLog::Todo("text-reader backdrop PICT 0x214c/0x214d/0x214e missing; "
+                  "window stays a flat fill");
+  }
+  return backdrop;
 }
 
 } // namespace
@@ -229,24 +244,46 @@ void NovaUi_RunTextReaderDialog(
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
-  NovaTextScrollView view(font_cache, text, layout.text_area);
+  // Ui_RunTravelSelectionDialog appends "\r" to the selection text before
+  // building the view (a no-op for empty text, which shows no dialog); the
+  // wrapper treats it as a plain line break.
+  const std::string shown_text = text.empty() ? text : text + "\r";
+  NovaTextScrollView view(font_cache, shown_text, layout.text_area);
 
-  // Auto-size arm (0x004982a0): when the text is shorter than the view the
-  // window shrinks (content clamped to a minimum of 0x30) and the controls
-  // below the text area (entries 1/5/6) shift up to hug it. The original
-  // re-centres the moved window; the port matches that with rounded half
-  // shifts.
-  if (view.max_scroll() <= 0.0F && view.content_height() < layout.text_area.h) {
-    const float shortfall = layout.text_area.h - view.content_height();
-    const float shrink = shortfall + 16.0F; // the -0x10 adjustment
+  // Auto-size arm (0x004982a0): when the measured wrapped text height is
+  // shorter than the view the window shrinks. The measurement (pure text
+  // height, no insets, NovaText_MeasureWrappedTextHeight 0x004bcc70) is
+  // clamped to a 0x30 minimum, shrink = view height - measured - 0x10;
+  // entries 1/5/6 shift up by the shrink and entry 3's bottom rises. The
+  // window then resizes and drops by round(shrink * 0.3) (DAT_005759a8,
+  // 0.3f) to re-balance it. The original does this in window-local
+  // coordinates, so the drop carries the child items with it; the port's
+  // rects are absolute, so every rect shifts down by the same amount.
+  if (view.text_height() < layout.text_area.h) {
+    const float measured = std::max(view.text_height(), 48.0F);
+    const float shrink = layout.text_area.h - measured - 16.0F;
     const auto shift_up = [&](SDL_FRect &rect) { rect.y -= shrink; };
     shift_up(layout.done_button);
     shift_up(layout.arrow_up);
     shift_up(layout.arrow_down);
     layout.text_area.h -= shrink;
     layout.window.h -= shrink;
-    layout.window.y += std::round(shrink / 2.0F);
+    const float drop = std::round(shrink * 0.3F);
+    const auto drop_rect = [&](SDL_FRect &rect) { rect.y += drop; };
+    drop_rect(layout.window);
+    drop_rect(layout.done_button);
+    drop_rect(layout.arrow_up);
+    drop_rect(layout.arrow_down);
+    // Entry 3's top stays fixed relative to the window; only its bottom
+    // rises with the shrink, so it takes the drop but not the shift-up.
+    drop_rect(layout.text_area);
+    // The original republishes the shrunk entry-3 rect into the view; without
+    // this the view keeps drawing (and black-filling) the full pre-shrink
+    // text area, covering the backdrop strips.
+    view.SetViewRect(layout.text_area);
   }
+
+  const ReaderBackdrop backdrop = LoadReaderBackdrop(platform);
 
   // Publish the final (post-auto-size) control rects to the probe harness.
   ProbeUiAutoClear probe_ui_guard(platform);
@@ -269,20 +306,62 @@ void NovaUi_RunTextReaderDialog(
     }
     // The reader's DLOG coordinates are window-point space.
     platform.SetFullscreenPlayfield();
-    SDL_SetRenderDrawColor(platform.renderer(), 16, 40, 72, SDL_ALPHA_OPAQUE);
+    // Window fill is the black space-background colour (PTR_DAT_00575acc),
+    // matching the opaque black text panel below.
+    SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(platform.renderer(), &layout.window);
-    if (!DrawBackdropStrip(platform, layout.window)) {
-      NovaLog::Todo("text-reader backdrop PICTs 0x214c/0x214d/0x214e "
-                    "incomplete; using a flat window fill");
+    // Backdrop composite (0x00499870): body 0x214d first, then the top
+    // strip 0x214c, then the bottom strip 0x214c-anchored 0x214e -- the
+    // bottom strip paints over the body's overhang. All blits clip to the
+    // window rect.
+    if (backdrop.top || backdrop.body || backdrop.bottom) {
+      const SDL_Rect window_clip{static_cast<int>(layout.window.x),
+                                 static_cast<int>(layout.window.y),
+                                 static_cast<int>(layout.window.w),
+                                 static_cast<int>(layout.window.h)};
+      SDL_SetRenderClipRect(platform.renderer(), &window_clip);
+      const auto blit = [&](const std::unique_ptr<SdlTexture> &texture,
+                            float y) {
+        if (!texture) {
+          return;
+        }
+        float w = 0.0F;
+        float h = 0.0F;
+        SDL_GetTextureSize(texture->get(), &w, &h);
+        const SDL_FRect dst{layout.window.x, y, w, h};
+        SDL_RenderTexture(platform.renderer(), texture->get(), nullptr, &dst);
+      };
+      float top_h = 0.0F;
+      if (backdrop.top) {
+        SDL_GetTextureSize(backdrop.top->get(), nullptr, &top_h);
+      }
+      blit(backdrop.body, layout.window.y + top_h);
+      blit(backdrop.top, layout.window.y);
+      float bottom_h = 0.0F;
+      if (backdrop.bottom) {
+        SDL_GetTextureSize(backdrop.bottom->get(), nullptr, &bottom_h);
+      }
+      blit(backdrop.bottom, layout.window.y + layout.window.h - bottom_h);
+      SDL_SetRenderClipRect(platform.renderer(), nullptr);
     }
 
     view.Draw(platform);
-    NovaUi_DrawScrollArrow(
-        platform, layout.arrow_up, true, view.scroll_offset() > 0.0F);
-    NovaUi_DrawScrollArrow(platform,
-                           layout.arrow_down,
-                           false,
-                           view.scroll_offset() < view.max_scroll());
+    // Arrow states (0x004a2ac0): scrollable direction -> normal, otherwise
+    // disabled; when NEITHER direction can scroll both buttons take state
+    // 0xfffe and are not drawn at all (a fitted view shows no arrows).
+    if (view.scroll_offset() > 0.0F ||
+        view.scroll_offset() < view.max_scroll()) {
+      NovaUi_DrawScrollArrow(platform,
+                             button_art,
+                             layout.arrow_up,
+                             true,
+                             view.scroll_offset() > 0.0F);
+      NovaUi_DrawScrollArrow(platform,
+                             button_art,
+                             layout.arrow_down,
+                             false,
+                             view.scroll_offset() < view.max_scroll());
+    }
 
     button_art.Draw(platform, layout.done_button, ButtonState::kNormal);
     NovaText_DrawCentered(platform,
@@ -314,10 +393,13 @@ void NovaUi_RunTextReaderDialog(
           return;
         }
         // Scroll arrows (actions 5/6, +/-10 px per NovaUi_ScrollSelectionText
-        // in the modal loop).
-        if (Contains(layout.arrow_down, point)) {
+        // in the modal loop; the original gates action 5 on can-scroll-up and
+        // action 6 on can-scroll-down).
+        if (Contains(layout.arrow_down, point) &&
+            view.scroll_offset() < view.max_scroll()) {
           view.ScrollBy(10.0F);
-        } else if (Contains(layout.arrow_up, point)) {
+        } else if (Contains(layout.arrow_up, point) &&
+                   view.scroll_offset() > 0.0F) {
           view.ScrollBy(-10.0F);
         }
         continue;

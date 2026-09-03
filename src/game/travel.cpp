@@ -2,6 +2,7 @@
 
 #include "../log.hpp"
 #include "hud_overlay.hpp"
+#include "mission.hpp"
 #include "outfit.hpp"
 #include "weapon.hpp"
 
@@ -135,6 +136,16 @@ void FireJump(GameState &state) {
   // System_RebuildSystemVisibilityMap(cur, 0, 1) -- only the arrival system is
   // flooded; the one-hop window comes from the discovered_this_rebuild latch).
   NovaSystem_OnSystemEntered(state, t.destination_system_id, 1);
+
+  // Hyperspace arrival advances the calendar once per jump day
+  // (PlayerTick_SystemTransitionAndArrival 0x0044f954: the daily world
+  // update runs max(travel days) times over the player and jumping escorts;
+  // the port evaluates the player's ship, TODO(decomp) escort max).
+  const int travel_days =
+      NovaStellar_ComputeHyperspaceTravelDays(state, player);
+  for (int day = 0; day < travel_days; ++day) {
+    Mission_TickDailyWorldUpdate(state);
+  }
 
   // Arrive just outside the destination system's center on the far side along
   // the jump heading, and move at top speed along the ship's heading (which

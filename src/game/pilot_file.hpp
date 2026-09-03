@@ -60,6 +60,8 @@ struct PilotFile {
   std::int16_t ship_class_id = 0; // block1+0x02 (0 = default class)
   std::int16_t current_system_id = 0;
   std::int16_t active_weapon_bank_slot = 0;
+  // The in-game calendar (block1+0x14/+0x16/+0x18 month/day/year).
+  GameDate date{};
   std::int16_t timed_action_counter = -1;
   float death_timer_active = -1.0F;
   float shield_points = 0.0F; // block1+0x10 as u16 (rounded; not read back)

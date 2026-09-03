@@ -32,6 +32,16 @@ using SystemReputation = std::vector<std::int16_t>;
 
 // Runtime flags for one accepted mission. This mirrors the 20-byte
 // MisnRuntimeFlags record used by the original's 16 active-mission slots.
+// In-game calendar (Ghidra g_current_game_year_month / g_current_game_day,
+// a {year, month, day} short triple at 0x00735458). Months/days are 1-based;
+// the original's clock-seeded start can hold months > 12, and the advance
+// timer only renormalises them past December on rollover.
+struct GameDate {
+  std::int16_t year = 1900;
+  std::int16_t month = 1;
+  std::int16_t day = 1;
+};
+
 struct MissionRuntimeFlags {
   bool is_active = false; // +0x00
   // Cleared-to-proceed latch: set at acceptance when the mission has no
@@ -43,11 +53,16 @@ struct MissionRuntimeFlags {
   bool objective_complete = false;           // +0x02
   bool is_failed = false;                    // +0x03
   std::uint16_t flags_primary_at_accept = 0; // +0x04
-  std::int16_t deadline_year_month = 0;      // +0x06
-  std::int16_t deadline_year_month_ext = 0;  // +0x08
-  std::int16_t deadline_day = 0;             // +0x0a
-  std::int32_t elapsed_travel_days = 0;      // +0x0e
-  std::uint16_t elapsed_travel_subday = 0;   // +0x12
+  // Absolute deadline date, computed at acceptance from the current calendar
+  // plus the m\xefsn TimeLimit (Mission_ComputeDateAfterSteps
+  // 0x0043f080 writes {year, month, day} here). Zero when the mission has no
+  // deadline. (Ghidra named the first two shorts deadline_year_month/_ext
+  // from the packed (year,month) argument shape.)
+  std::int16_t deadline_year = 0;          // +0x06
+  std::int16_t deadline_month = 0;         // +0x08
+  std::int16_t deadline_day = 0;           // +0x0a
+  std::int32_t elapsed_travel_days = 0;    // +0x0e
+  std::uint16_t elapsed_travel_subday = 0; // +0x12
 };
 
 // Clean-room active mission state. It intentionally names only the fields
@@ -952,6 +967,10 @@ struct GameState {
   // return -1 arm); cleared wholesale the next time the interaction walk runs
   // in a context other than 3 (DAT_00774ae2).
   std::array<std::uint8_t, 1000> mission_interaction_shown{};
+  // In-game calendar (g_current_game_year_month/g_current_game_day). Seeded
+  // by the new-game flow (real clock date with year + 250) and advanced once
+  // per NovaMission_TickDailyWorldUpdate call.
+  GameDate date{};
   // Ghidra DAT_00774ae2: the context the interaction walk last ran in.
   std::int16_t mission_interaction_context = 0;
   // Ghidra DAT_00776af4: post-interaction recheck timer

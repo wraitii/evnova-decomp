@@ -48,7 +48,7 @@ is written with `FUN_004f22e0` (C-string + NUL) and read with
 | 0x0004 | u16[6] | cargo (commodity) counts `cargo_bin[0..5]` |
 | 0x0010 | u16 | shield points (rounded). **Not read back by the loader** — it recomputes max shield from class+outfits. |
 | 0x0012 | u16 | fuel points (rounded). Loader restores fuel from here. |
-| 0x0014 | u16 | month |
+| 0x0014 | u16 | month (in-game calendar; ported as `GameState::date`) |
 | 0x0016 | u16 | day |
 | 0x0018 | u16 | year |
 | 0x001a | u16[0x800] | per-system discovery/scan state (0x1000 bytes) |

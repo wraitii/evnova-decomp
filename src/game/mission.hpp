@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -254,5 +255,51 @@ void Mission_TickReactionSlotsForTravelInteraction(
 [[nodiscard]] bool
 Mission_TryConsumeMissionInteractionResources(GameState &state,
                                               std::int16_t count);
+
+struct GameDate;
+struct Ship;
+
+// Ghidra 0x00466c40 Mission_AdvanceGameDate. Advances a game
+// date one day: month lengths 31 / 30 / Feb 28 (29 on the original's leap
+// quirk (year + (year < 0 ? 3 : 0)) & 3 == 0), rolling month -> year; a
+// month past 12 rolls at the next month end (the clock-seeded start date can
+// hold months > 12).
+void Mission_AdvanceGameDate(GameDate &date);
+
+// Ghidra 0x0043f080 Mission_ComputeDateAfterSteps. Returns a
+// clone of the current in-game date advanced by `steps` days; the deadline
+// date the mission-acceptance path stores into the slot runtime flags.
+[[nodiscard]] GameDate Mission_ComputeDateAfterSteps(const GameState &state,
+                                                     std::int16_t steps);
+
+// Ghidra 0x00465550 Stellar_ComputeHyperspaceTravelDays. Jump duration in
+// whole days: 1 day at <= 99 tons hull mass, 2 at 100-199, 3 above; the
+// player additionally adds owned-count x ModVal for every owned outfit whose
+// one of the four ModTypes is 0x16 (jump-time booster), clamped to >= 1.
+// TODO(decomp): the original takes the max over the player and every
+// jumping escort; the port evaluates the player's ship only.
+[[nodiscard]] int
+NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
+                                        const Ship &ship);
+
+// Ghidra 0x00466cb0 ShipClass_RerollShipClassAvailabilityChances (the daily
+// world-update driver; runs once per elapsed game-day). Advances the
+// calendar and counts down every active mission's deadline. TODO(decomp)
+// skipped slices: Mission_TickDailyCronEvents (0x00439500; cron table not
+// decoded), Outfit_CollectStellarIncome, System_UpdateDisasterStates, the
+// per-stellar active/inactive daily schedule + resupply roll (0x800 x 0x498
+// loop; needs the StellarDef schedule/set-string fields), the per-system
+// dude_prob +0x1c suppression countdown, and the ship/outfit availability
+// rerolls (ShipClassDef/OutfitDef avail-roll fields not modeled).
+void Mission_TickDailyWorldUpdate(GameState &state);
+
+// Ghidra 0x00468450 NovaText_FormatDateString / 0x00468600
+// Stellar_FormatElapsedTravelTime (shared body). Formats "MONTH DAYst, YEAR"
+// from STR# 0x89 (st/nd/rd/th suffixes with the 11-13 -> th special case).
+// The HUD/UI sites use the abbreviated month names (entries 13-24, the
+// 0x00468450 shape); the <DL> mission token uses the full names (entries
+// 1-12, the 0x00468600 shape).
+[[nodiscard]] std::string NovaText_FormatDateString(const GameDate &date,
+                                                    bool abbreviated_month);
 
 } // namespace game

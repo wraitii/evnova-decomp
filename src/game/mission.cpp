@@ -33,6 +33,24 @@ constexpr std::int16_t kResourceIdBase = 0x80;
   return static_cast<std::int16_t>(dist(state.rng));
 }
 
+// Draws the 1-based STR# entry for a mission name pool, mirroring the
+// Mission_PopulateMissionSlotFromDef (0x0043f8c0) fleet-name rolls
+// (NovaRandom_Range(count) + 1). Returns -1 when the mïsn pool id is
+// unset or the pool is missing/empty (the original leaves the entry at -1),
+// so callers can assign unconditionally over reused slots.
+[[nodiscard]] std::int16_t RollMissionStringPoolEntry(GameState &state,
+                                                      std::int16_t pool_id) {
+  if (pool_id < 0) {
+    return -1;
+  }
+  const std::uint16_t count =
+      NovaHud_StringPoolEntryCount(static_cast<std::uint16_t>(pool_id));
+  if (count == 0) {
+    return -1;
+  }
+  return static_cast<std::int16_t>(RandomBelow(state, count) + 1);
+}
+
 // Reads a NUL-terminated 255-byte text/script buffer (MisnActive text blocks
 // copied from the mïsn payload) as a string_view.
 [[nodiscard]] std::string_view
@@ -987,6 +1005,16 @@ bool Mission_PopulateActiveSlot(GameState &state,
       SelectMissionShipType(state, active.dude_def_index, active.flags_primary);
   active.special_ship_name_string_id = definition->special_ship_name_string_id;
   active.random_text_string_id = definition->random_text_string_id;
+  // Fleet-name rolls (0x0043f8c0): both name buffers start empty; when the
+  // mïsn pool id is not -1 the pool id is latched and a random 1-based entry
+  // is drawn (NovaRandom_Range(count) + 1). The entry stays -1 when the pool
+  // is absent, and assigning unconditionally also clears any stale entry
+  // from the slot's previous occupant. The <SN> wildcard arm re-resolves
+  // the stored (pool, entry) pair (cf. MissionShipPoolString).
+  active.special_ship_name_entry =
+      RollMissionStringPoolEntry(state, active.special_ship_name_string_id);
+  active.random_text_entry =
+      RollMissionStringPoolEntry(state, active.random_text_string_id);
   // Desc ids +0x35..+0x43 (payload +0x34..+0x3e, +0x58, +0x44), normalized
   // to -1 when unset. Slots: Brief, QuickBrief, LoadCarg, DumpCargo, Comp,
   // Fail, aux (+0x41), ShipDone.
@@ -1070,7 +1098,17 @@ bool Mission_ActivateAtSlot(GameState &state,
   runtime.is_active = true;
   runtime.flags_primary_at_accept =
       state.active_missions[free_slot].flags_primary;
+  // Ghidra 0x0043f100: with a TimeLimit, the absolute deadline date
+  // (today + TimeLimit days) is computed at acceptance into the runtime
+  // flags (+0x06/+0x08/+0x0a) for the <DL> token.
   auto &active = state.active_missions[free_slot];
+  if (active.time_limit_days_remaining > 0) {
+    const GameDate deadline =
+        Mission_ComputeDateAfterSteps(state, active.time_limit_days_remaining);
+    runtime.deadline_year = deadline.year;
+    runtime.deadline_month = deadline.month;
+    runtime.deadline_day = deadline.day;
+  }
   // Bible PickupMode 0: the mission cargo is aboard from mission start. The
   // LoadCargText desc dialog (payload +0x38) is UI-owned and runs in
   // NovaMission_RunAcceptanceDialogs (docked_dialog.cpp) after activation.
@@ -1367,17 +1405,32 @@ void Mission_ResolveMissionSuccess(GameState &state,
   // MisnActive +0x3d selects the success debrief selection dialog
   // (Ui_LoadSelectionDialogResource + Stellar_BuildTravelDestination-
   // Description + Ui_RunTravelSelectionDialog). Composed while the slot is
-  // still active so the wildcard pass reads the slot data.
+  // still active so the wildcard pass reads the slot data. The dialog is
+  // gated on +0x3d != -1; a missing resource yields empty text, which shows
+  // no dialog (the original's empty-text arm).
   const std::int16_t comp_text_id = mission.brief_description_ids[4];
   std::string comp_text;
-  if (comp_text_id >= 0x80) {
+  std::int16_t comp_variant = 0;
+  if (comp_text_id != -1) {
     if (const auto desc = NovaResource_LoadDescription(
             static_cast<std::uint16_t>(comp_text_id))) {
       comp_text = desc->text;
+      comp_variant = desc->dialog_variant;
+      if (!desc->status.empty()) {
+        NovaLog::Todo("mission success debrief desc {} status string not "
+                      "displayed (0x004982a0)",
+                      comp_text_id);
+      }
       Mission_ExpandStringPlaceholders(state, comp_text);
       comp_text =
           Mission_ExpandMissionWildcards(state, comp_text, false, mission_slot);
     }
+  }
+  if (comp_variant >= 0x80) {
+    NovaLog::Todo("mission success debrief desc {} variant {:#x}: DLOG 0xbbc "
+                  "+ PICT 0x214f art path not reconstructed",
+                  comp_text_id,
+                  comp_variant);
   }
   if (!comp_text.empty()) {
     if (debrief) {
@@ -1388,19 +1441,16 @@ void Mission_ResolveMissionSuccess(GameState &state,
                     mission.mission_template_id,
                     comp_text_id);
     }
-  } else if (comp_text_id >= 0x80) {
+  } else if (comp_text_id != -1) {
     NovaLog::Todo("mission success debrief dësc {} loaded empty", comp_text_id);
   }
   state.active_mission_runtime_flags[slot].is_active = false;
   Mission_RunMisnScriptPayload(
       state, TextOf(mission.on_success_text), mission_slot);
-  // On-resolve repeat count re-runs the daily availability reroll
-  // (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0) once per count.
-  // That driver is not ported yet.
-  if (mission.on_resolve_repeat_count > 0) {
-    NovaLog::Todo("mission success repeat-count {} requires the daily "
-                  "availability reroll (0x00466cb0), not yet ported",
-                  mission.on_resolve_repeat_count);
+  // On-resolve repeat count (Bible DatePostInc) re-runs the daily world
+  // update (0x00466cb0) once per count, advancing the calendar.
+  for (std::int16_t i = 0; i < mission.on_resolve_repeat_count; ++i) {
+    Mission_TickDailyWorldUpdate(state);
   }
   const std::int16_t govt = mission.comp_govt_id;
   const std::int16_t delta = mission.comp_reward_delta;
@@ -1440,20 +1490,6 @@ void Mission_ResolveMissionFailure(GameState &state,
   ActiveMission &mission = state.active_missions[slot];
   Mission_RunMisnScriptPayload(
       state, TextOf(mission.on_failure_text), mission_slot);
-  // The debrief text is composed before the slot is torn down so the active
-  // arm of the wildcard pass still reads it; the original shows the dialog
-  // after clearing the active flag.
-  const std::int16_t fail_text_id = mission.brief_description_ids[5];
-  std::string fail_text;
-  if (fail_text_id >= 0x80) {
-    if (const auto desc = NovaResource_LoadDescription(
-            static_cast<std::uint16_t>(fail_text_id))) {
-      fail_text = desc->text;
-      Mission_ExpandStringPlaceholders(state, fail_text);
-      fail_text =
-          Mission_ExpandMissionWildcards(state, fail_text, false, mission_slot);
-    }
-  }
   const std::int16_t govt = mission.comp_govt_id;
   if (govt != -1) {
     // Failure subtracts half the reputation delta (integer division rounded
@@ -1472,7 +1508,36 @@ void Mission_ResolveMissionFailure(GameState &state,
     }
   }
   state.active_mission_runtime_flags[slot].is_active = false;
-  // MisnActive +0x3f selects the failure debrief dialog.
+  // MisnActive +0x3f selects the failure debrief dialog. Composed after the
+  // slot is torn down like the original, so the wildcard pass takes its
+  // inactive arm and mission-specific tokens expand to "[Error]"
+  // (Stellar_BuildTravelDestinationDescription 0x004444f0 jumps to the
+  // shared tail when the slot is not active -- quirk kept). Gated on +0x3f
+  // != -1; a missing resource yields empty text, which shows no dialog.
+  const std::int16_t fail_text_id = mission.brief_description_ids[5];
+  std::string fail_text;
+  std::int16_t fail_variant = 0;
+  if (fail_text_id != -1) {
+    if (const auto desc = NovaResource_LoadDescription(
+            static_cast<std::uint16_t>(fail_text_id))) {
+      fail_text = desc->text;
+      fail_variant = desc->dialog_variant;
+      if (!desc->status.empty()) {
+        NovaLog::Todo("mission failure debrief desc {} status string not "
+                      "displayed (0x004982a0)",
+                      fail_text_id);
+      }
+      Mission_ExpandStringPlaceholders(state, fail_text);
+      fail_text =
+          Mission_ExpandMissionWildcards(state, fail_text, false, mission_slot);
+    }
+  }
+  if (fail_variant >= 0x80) {
+    NovaLog::Todo("mission failure debrief desc {} variant {:#x}: DLOG 0xbbc "
+                  "+ PICT 0x214f art path not reconstructed",
+                  fail_text_id,
+                  fail_variant);
+  }
   if (!fail_text.empty()) {
     if (debrief) {
       debrief(fail_text);
@@ -1482,7 +1547,7 @@ void Mission_ResolveMissionFailure(GameState &state,
                     mission.mission_template_id,
                     fail_text_id);
     }
-  } else if (fail_text_id >= 0x80) {
+  } else if (fail_text_id != -1) {
     NovaLog::Todo("mission failure debrief dësc {} loaded empty", fail_text_id);
   }
   Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
@@ -1560,13 +1625,10 @@ void Mission_ResolveMisnSlot(GameState &state,
   ActiveMission &mission = state.active_missions[slot];
   Mission_RunMisnScriptPayload(
       state, TextOf(mission.resolve_script_buffer_start), mission_slot);
-  // On-resolve repeat count re-runs the daily availability reroll
-  // (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0, not yet
-  // ported; see Mission_ResolveMissionSuccess).
-  if (mission.on_resolve_repeat_count > 0) {
-    NovaLog::Todo("mission resolve repeat-count {} requires the daily "
-                  "availability reroll (0x00466cb0), not yet ported",
-                  mission.on_resolve_repeat_count);
+  // On-resolve repeat count (Bible DatePostInc) re-runs the daily world
+  // update (0x00466cb0) once per count, advancing the calendar.
+  for (std::int16_t i = 0; i < mission.on_resolve_repeat_count; ++i) {
+    Mission_TickDailyWorldUpdate(state);
   }
   // Bible m\x89sn Flags 0x0008: auto-abort drains 100 units of fuel
   // (DAT_00575510). The g_player_fuel_panel_dirty latch has no clean-room
@@ -1797,7 +1859,8 @@ void ReplaceMissionToken(std::string &text,
 }
 
 // Stellar name for <DST>/<RST>; the locals in 0x004444f0 start as "[Error]"
-// and keep it when the id is out of range or the display name is empty.
+// and keep it only when the id is out of range -- the original copies an
+// empty display name verbatim.
 [[nodiscard]] std::string MissionStellarName(const GameState &state,
                                              std::int16_t stellar_id) {
   if (stellar_id < 0 ||
@@ -1806,27 +1869,26 @@ void ReplaceMissionToken(std::string &text,
   }
   const auto &stellar =
       state.scenario.stellars[static_cast<std::size_t>(stellar_id)];
-  return stellar.name.empty() ? "[Error]" : stellar.name;
+  return stellar.name;
 }
 
 // System name for <DSY>/<RSY>. The original resolves the stellar's owning
 // system through System_ResolveVisibleSystemForTravel, then the discovery
 // slot, then System_FindSystemContainingStellar; the port's membership map is
-// already the visible-system resolution, so the visible-root fallback and a
-// raw-id fallback cover it.
+// already the visible-system resolution, so only the visible resolve runs
+// here; when it fails the original keeps "[Error]" (no raw-id fallback).
+// Like stellar names, an empty system name is copied verbatim.
 [[nodiscard]] std::string MissionSystemName(const GameState &state,
                                             std::int16_t system_id) {
-  std::int16_t resolved = Misn_ResolveVisibleSystemForTravel(state, system_id);
-  if (resolved == -1) {
-    resolved = system_id;
-  }
+  // No raw-id fallback: when visibility resolution fails the original keeps
+  // "[Error]".
+  const std::int16_t resolved =
+      Misn_ResolveVisibleSystemForTravel(state, system_id);
   if (resolved < 0 ||
       resolved >= static_cast<std::int16_t>(state.scenario.systems.size())) {
     return "[Error]";
   }
-  const auto &system =
-      state.scenario.systems[static_cast<std::size_t>(resolved)];
-  return system.name.empty() ? "[Error]" : system.name;
+  return state.scenario.systems[static_cast<std::size_t>(resolved)].name;
 }
 
 // Ghidra 0x00465c10 CString_AppendFormattedQuantity: plain digits below 1000,
@@ -1850,9 +1912,9 @@ void ReplaceMissionToken(std::string &text,
 }
 
 // <PAY>: PayVal encoding shared with the acceptance-credit gate - positive is
-// the credit amount, -50001.. is an acceptance cost (abs - 50000), and
-// -40001..-40035 is a percentage (0.01 per unit, DOUBLE_00575508) of the
-// player's current credits. The remaining negative encodings show 0.
+// the credit amount, below -50000 is an acceptance cost (abs - 50000), and
+// -40035..-40001 is a percentage (|PayVal| - 40000 hundredths, DOUBLE_00575508)
+// of the player's current credits. The remaining negative encodings show 0.
 [[nodiscard]] std::string MissionPayText(const GameState &state,
                                          std::int32_t pay_val) {
   std::int64_t shown = 0;
@@ -1860,10 +1922,14 @@ void ReplaceMissionToken(std::string &text,
     shown = pay_val;
   } else if (pay_val < -50000) {
     shown = -static_cast<std::int64_t>(pay_val) - 50000;
-  } else if (pay_val < -40000) {
-    const double scaled = static_cast<double>(state.player.credits) *
-                          (static_cast<double>(-pay_val) - 40000.0) * 0.01;
-    shown = std::llround(scaled);
+  } else if (pay_val < -40000 && pay_val >= -40035) {
+    // Percent-of-holdings arm: float arithmetic with half-even rounding like
+    // the x87 FISTP path (cf. the reputation loop in
+    // Mission_ResolveMissionSuccess).
+    const float magnitude = static_cast<float>(-pay_val - 40000);
+    const float scaled =
+        static_cast<float>(state.player.credits) * magnitude * 0.01F;
+    shown = std::lrint(scaled);
     if (shown < 0) {
       shown = 0;
     }
@@ -1947,11 +2013,21 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
     cargo_type = active->cargo_type_id;
     cargo_qty = active->cargo_qty_tons;
     pay_val = active->resource_delta_or_cost;
-    // TODO(decomp): the special-ship name is picked from the STR# pool at
-    // acceptance (g_active_misn +0x40 mission_fleet_name); the port stores
-    // only the pool id, so <SN> keeps the [Error] sentinel until then.
   }
 
+  // <SN>: g_active_misn +0x40 mission_fleet_name, drawn at acceptance from
+  // the +0x2a pool (Mission_PopulateMissionSlotFromDef 0x0043f8c0); empty
+  // when no pool was drawn. Re-resolving the stored (pool, entry) pair
+  // yields the same text (cf. MissionShipPoolString in hud_renderer.cpp).
+  // Inactive slots keep the "[Error]" sentinel (the original's LAB arm
+  // skips the mission-token fill when the slot is not active).
+  if (active != nullptr && active->special_ship_name_entry >= 1) {
+    if (auto name = NovaHud_LoadStringEntry(
+            static_cast<std::uint16_t>(active->special_ship_name_string_id),
+            static_cast<std::uint16_t>(active->special_ship_name_entry))) {
+      special_ship_name = *name;
+    }
+  }
   std::string destination = MissionStellarName(state, travel_stellar);
   std::string destination_system = MissionSystemName(state, travel_system);
   const std::string return_dest = MissionStellarName(state, return_stellar);
@@ -1990,16 +2066,36 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
   ReplaceMissionToken(result, "<CT>", MissionCargoName(cargo_type));
   ReplaceMissionToken(
       result, "<CQ>", cargo_type >= 0 ? std::to_string(cargo_qty) : "[Error]");
-  ReplaceMissionToken(result,
-                      "<SN>",
-                      active != nullptr && !special_ship_name.empty()
-                          ? special_ship_name
-                          : "[Error]");
-  // TODO(decomp(0x004444f0)) skipped: <DL> needs the game calendar (the port
-  // does not model the start date / deadline clock yet); the original formats
-  // Stellar_FormatElapsedTravelTime over the deadline fields and keeps
-  // "[Error]" when the deadline equals the current date.
-  ReplaceMissionToken(result, "<DL>", "[Error]");
+  ReplaceMissionToken(
+      result, "<SN>", active != nullptr ? special_ship_name : "[Error]");
+  // <DL> (0x004444f0 active-slot arm): the runtime flags' absolute deadline
+  // date formatted with the full month names; when the deadline equals the
+  // current date the original's format buffer keeps its empty init content,
+  // so the token expands to "". TODO(decomp): the offer-row arm formats a
+  // date from the mission target-resolution table, which the port does not
+  // track yet.
+  if (active != nullptr && mission_id >= 0 &&
+      static_cast<std::size_t>(mission_id) <
+          state.active_mission_runtime_flags.size()) {
+    const MissionRuntimeFlags &slot =
+        state
+            .active_mission_runtime_flags[static_cast<std::size_t>(mission_id)];
+    if (slot.deadline_year != 0) {
+      const GameDate deadline{
+          slot.deadline_year, slot.deadline_month, slot.deadline_day};
+      std::string deadline_text;
+      if (deadline.year != state.date.year ||
+          deadline.month != state.date.month ||
+          deadline.day != state.date.day) {
+        deadline_text = NovaText_FormatDateString(deadline, false);
+      }
+      ReplaceMissionToken(result, "<DL>", deadline_text);
+    } else {
+      ReplaceMissionToken(result, "<DL>", "[Error]");
+    }
+  } else {
+    ReplaceMissionToken(result, "<DL>", "[Error]");
+  }
   ReplaceMissionToken(result, "<PN>", player_name);
   ReplaceMissionToken(result, "<PNN>", nickname);
   ReplaceMissionToken(result,
@@ -2314,6 +2410,150 @@ void Mission_TickReactionSlotsForTravelInteraction(
     // Side-effect call: refreshes availability and the resolved-locator cache.
     (void)Mission_EvaluateMissionLists(state);
   }
+}
+
+// Ghidra 0x00466c40 Mission_AdvanceGameDate.
+void Mission_AdvanceGameDate(GameDate &date) {
+  std::int16_t month_days = 31;
+  switch (date.month) {
+  case 4:
+  case 6:
+  case 9:
+  case 11:
+    month_days = 30;
+    break;
+  case 2:
+    // Leap quirk kept: (year + (year < 0 ? 3 : 0)) & 3 == fixup in the
+    // original, i.e. simply year divisible by 4.
+    month_days = (date.year & 3) == 0 ? 29 : 28;
+    break;
+  default:
+    break;
+  }
+  date.day = static_cast<std::int16_t>(date.day + 1);
+  if (date.day > month_days) {
+    date.day = 1;
+    date.month = static_cast<std::int16_t>(date.month + 1);
+    if (date.month > 12) {
+      date.month = 1;
+      date.year = static_cast<std::int16_t>(date.year + 1);
+    }
+  }
+}
+
+// Ghidra 0x0043f080 Mission_ComputeDateAfterSteps. The original
+// leaves the out buffer untouched for steps < 1; callers only invoke it with
+// a positive count (see Mission_ActivateAtSlot).
+GameDate Mission_ComputeDateAfterSteps(const GameState &state,
+                                       std::int16_t steps) {
+  GameDate out = state.date;
+  for (std::int16_t i = 0; i < steps; ++i) {
+    Mission_AdvanceGameDate(out);
+  }
+  return out;
+}
+
+// Ghidra 0x00465550 Stellar_ComputeHyperspaceTravelDays.
+int NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
+                                            const Ship &ship) {
+  const ShipClass *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(ship.ship_class_id + kResourceIdBase));
+  if (ship_class == nullptr) {
+    return 1;
+  }
+  int days = ship_class->mass_tons <= 99 ? 1 : 2;
+  if (ship_class->mass_tons > 199) {
+    ++days;
+  }
+  // The jump-time outfit arm applies only to the player (ShipState +0x86
+  // ship_instance_id == 0): every owned outfit whose one of the four
+  // ModTypes is 0x16 adds owned-count x ModVal days.
+  if (ship.ship_instance_id == 0) {
+    for (std::size_t outfit = 0;
+         outfit < state.inventory.outfit_owned_count.size();
+         ++outfit) {
+      const std::int16_t owned = state.inventory.outfit_owned_count[outfit];
+      if (owned <= 0) {
+        continue;
+      }
+      const Outfit *def = state.scenario.Outfit(
+          static_cast<std::int16_t>(outfit + kResourceIdBase));
+      if (def == nullptr) {
+        continue;
+      }
+      if (def->mod_type == 0x16) {
+        days += owned * def->mod_val;
+      }
+      for (std::size_t i = 0; i < def->alt_mod_types.size(); ++i) {
+        if (def->alt_mod_types[i] == 0x16) {
+          days += owned * def->alt_mod_vals[i];
+        }
+      }
+    }
+  }
+  return std::max(days, 1);
+}
+
+// Ghidra 0x00466cb0 ShipClass_RerollShipClassAvailabilityChances (daily
+// world-update driver; see mission.hpp for the skipped slices).
+void Mission_TickDailyWorldUpdate(GameState &state) {
+  Mission_AdvanceGameDate(state.date);
+  // Active-mission deadline countdown (MisnActive +0x45, 16 slots). The
+  // -32000 no-deadline sentinel stays negative and is never touched.
+  for (auto &mission : state.active_missions) {
+    if (mission.time_limit_days_remaining > 0) {
+      mission.time_limit_days_remaining =
+          static_cast<std::int16_t>(mission.time_limit_days_remaining - 1);
+    }
+  }
+}
+
+namespace {
+
+// Shared body of NovaText_FormatDateString (0x00468450) and
+// Stellar_FormatElapsedTravelTime (0x00468600): "MONTH DAYst, YEAR" with the
+// STR# 0x89 month table and day suffixes (st/nd/rd by last digit, th
+// otherwise, 11-13 forced back to th).
+[[nodiscard]] std::string FormatDateString(const GameDate &date,
+                                           std::uint16_t month_entry) {
+  std::string out;
+  if (const auto month = NovaHud_LoadStringEntry(0x89, month_entry)) {
+    out += *month;
+  }
+  out += ' ';
+  out += std::to_string(date.day);
+  std::uint16_t suffix = 0x1c; // "th"
+  const int digit = date.day % 10;
+  if (digit == 1) {
+    suffix = 0x19;
+  } else if (digit == 2) {
+    suffix = 0x1a;
+  } else if (digit == 3) {
+    suffix = 0x1b;
+  }
+  if (date.day > 10 && date.day < 14) {
+    suffix = 0x1c;
+  }
+  if (const auto text = NovaHud_LoadStringEntry(0x89, suffix)) {
+    out += *text;
+  }
+  out += ", ";
+  out += std::to_string(date.year);
+  return out;
+}
+
+} // namespace
+
+std::string NovaText_FormatDateString(const GameDate &date,
+                                      bool abbreviated_month) {
+  // The UI sites (BBS date 0x00441620, mission-info window, starmap status
+  // bar) use the abbreviated month names (STR# 0x89 entries 13-24);
+  // Stellar_FormatElapsedTravelTime (arrival message / <DL> token) uses the
+  // full names (entries 1-12).
+  return FormatDateString(date,
+                          static_cast<std::uint16_t>(abbreviated_month
+                                                         ? date.month + 12
+                                                         : date.month));
 }
 
 } // namespace game

@@ -17,7 +17,6 @@
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
 #include "radar_panel.hpp"
-#include "selection_text_dialog.hpp"
 #include "ship_ai.hpp"
 #include "ship_comm_dialog.hpp"
 #include "ship_spawn.hpp"
@@ -951,26 +950,28 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       if (NovaLanding_EnterDocked(state, ctx)) {
         NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
                       ctx.stellar_id);
-        // Ghidra NovaUi_RunTravelDestinationInteractionLoop (0x00491f30)
-        // runs Mission_TickReactionSlotsForTravelInteraction (0x00443780)
-        // on every window action; the reimplementation evaluates the pass
-        // once per landing. Mission resolution (credits, text) happens here.
-        // The debrief dialogs (MisnActive +0x3d/+0x3f) are the original's
-        // Ui_RunTravelSelectionDialog modals; layered over the live flight
-        // view like every port modal (docs/dlog_ditl_dialog_format.md
-        // §7.1). The original shows them over the destination-window
-        // context instead (logged divergence).
-        const std::function<void(const std::string &)> debrief_dialog =
-            [&](const std::string &text) {
-              view.DrawGameFrame(platform, state, hud);
-              NovaUi_RunTextReaderDialog(platform, state, text, false);
-            };
-        Mission_TickReactionSlotsForTravelInteraction(
-            state, ctx.stellar_id, SDL_GetTicks(), debrief_dialog);
+        // Mission resolution (Mission_TickReactionSlotsForTravelInteraction
+        // 0x00443780, including the success/failure debrief readers) runs
+        // once on Spaceport entry inside NovaLanded_RunWindow, matching its
+        // position in NovaUi_RunTravelDestinationInteractionLoop
+        // (0x00491f30): after the window is up, before the AvailLoc-3 offer
+        // pass, with debriefs layered over the dock.
         const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
         if (exit == LandedExit::kQuit) {
           returning_to_menu = true;
           break;
+        }
+        if (exit == LandedExit::kLaunched) {
+          // Launch (Ship_HandlePlayerShipCore 0x0044aa70 launch block, call
+          // site 0x0044d870): 15..44 game-days pass for the time spent
+          // docked. The original block also reloads weapon bank ammo and
+          // refills fuel -- TODO(decomp), the port refills at dock entry.
+          const int docked_days =
+              15 +
+              std::uniform_int_distribution<std::int32_t>(0, 29)(state.rng);
+          for (int day = 0; day < docked_days; ++day) {
+            Mission_TickDailyWorldUpdate(state);
+          }
         }
         // Docking blocked the loop for the whole landing; freeze gameplay
         // time across it (launch re-enters flight with a fresh clock).
@@ -1062,6 +1063,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             if (landed == LandedExit::kQuit) {
               returning_to_menu = true;
               break;
+            }
+            if (landed == LandedExit::kLaunched) {
+              // Launch day advance, same as the normal dock exit above
+              // (0x0044aa70 launch block, 0x0044d870 call site).
+              const int docked_days =
+                  15 +
+                  std::uniform_int_distribution<std::int32_t>(0, 29)(state.rng);
+              for (int day = 0; day < docked_days; ++day) {
+                Mission_TickDailyWorldUpdate(state);
+              }
             }
             resync_frame_clock();
           } else {

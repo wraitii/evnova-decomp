@@ -70,12 +70,13 @@ PilotFile PilotFile::Fresh() {
   // Ghidra 0x004cd4b0 PilotData_InitializePlayerState, absent-block seed:
   // g_ship_states->credits = 10000, ship_class_id = 0, current_system_id = 0,
   // combat rating = 0, in-game date 1999/1/1, per-govt reputation reset. The
-  // date/reputation/combat-rating fields are not tracked by GameState yet, so
-  // only the ship-core defaults are seeded here.
+  // reputation/combat-rating fields are not tracked by GameState yet, so
+  // only the ship-core defaults and the calendar are seeded here.
   PilotFile fresh;
   fresh.credits = 10000;
   fresh.ship_class_id = 0;
   fresh.current_system_id = 0;
+  fresh.date = GameDate{1999, 1, 1};
   return fresh;
 }
 
@@ -90,6 +91,7 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   state.player.ship_class_id = pilot_file.ship_class_id;
   state.player.current_system_id = pilot_file.current_system_id;
   state.player.active_weapon_bank_slot = pilot_file.active_weapon_bank_slot;
+  state.date = pilot_file.date;
   state.player.timed_action_counter = pilot_file.timed_action_counter;
   state.player.death_timer_active = pilot_file.death_timer_active;
   state.player.shield_points = pilot_file.shield_points;
@@ -126,6 +128,7 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.credits = state.player.credits;
   out.ship_class_id = state.player.ship_class_id;
   out.current_system_id = state.player.current_system_id;
+  out.date = state.date;
   out.active_weapon_bank_slot = state.player.active_weapon_bank_slot;
   out.timed_action_counter = state.player.timed_action_counter;
   out.death_timer_active = state.player.death_timer_active;
@@ -176,8 +179,11 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
   WriteU16(block1,
            0x12,
            static_cast<std::uint16_t>(RoundToInt16(pilot_file.fuel_points)));
-  // +0x14/+0x16/+0x18 month/day/year: GameState does not track the in-game
-  // date (g_current_game_year_month / g_current_game_day). TODO(decomp).
+  // +0x14/+0x16/+0x18 month/day/year: the in-game calendar
+  // (g_current_game_year_month / g_current_game_day).
+  WriteU16(block1, 0x14, static_cast<std::uint16_t>(pilot_file.date.month));
+  WriteU16(block1, 0x16, static_cast<std::uint16_t>(pilot_file.date.day));
+  WriteU16(block1, 0x18, static_cast<std::uint16_t>(pilot_file.date.year));
   for (std::size_t i = 0; i < pilot_file.outfit_owned_count.size(); ++i) {
     WriteU16(block1,
              0x101a + 2 * i,
@@ -213,12 +219,11 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
         flags.objective_complete ? std::byte{1} : std::byte{0};
     block1[offset + 0x03] = flags.is_failed ? std::byte{1} : std::byte{0};
     WriteU16(block1, offset + 0x04, flags.flags_primary_at_accept);
-    WriteU16(block1,
-             offset + 0x06,
-             static_cast<std::uint16_t>(flags.deadline_year_month));
+    WriteU16(
+        block1, offset + 0x06, static_cast<std::uint16_t>(flags.deadline_year));
     WriteU16(block1,
              offset + 0x08,
-             static_cast<std::uint16_t>(flags.deadline_year_month_ext));
+             static_cast<std::uint16_t>(flags.deadline_month));
     WriteU16(
         block1, offset + 0x0a, static_cast<std::uint16_t>(flags.deadline_day));
     WriteU32(block1,
@@ -381,7 +386,10 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
     // / Ship_ComputeShipMaxArmor). TODO(decomp): recompute-equivalent once the
     // outfit math is reconstructed; fuel is restored from +0x12.
     out.fuel_points = static_cast<float>(ReadU16(block1, 0x12));
-    // +0x14/+0x16/+0x18 dates: not tracked. TODO(decomp).
+    // +0x14/+0x16/+0x18 month/day/year: the in-game calendar.
+    out.date.month = static_cast<std::int16_t>(ReadU16(block1, 0x14));
+    out.date.day = static_cast<std::int16_t>(ReadU16(block1, 0x16));
+    out.date.year = static_cast<std::int16_t>(ReadU16(block1, 0x18));
     for (std::size_t i = 0; i < out.outfit_owned_count.size(); ++i) {
       out.outfit_owned_count[i] =
           static_cast<std::int16_t>(ReadU16(block1, 0x101a + 2 * i));
@@ -410,9 +418,9 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       flags.is_failed =
           std::to_integer<unsigned char>(block1[offset + 0x03]) != 0;
       flags.flags_primary_at_accept = ReadU16(block1, offset + 0x04);
-      flags.deadline_year_month =
+      flags.deadline_year =
           static_cast<std::int16_t>(ReadU16(block1, offset + 0x06));
-      flags.deadline_year_month_ext =
+      flags.deadline_month =
           static_cast<std::int16_t>(ReadU16(block1, offset + 0x08));
       flags.deadline_day =
           static_cast<std::int16_t>(ReadU16(block1, offset + 0x0a));

@@ -5,11 +5,13 @@ implemented end to end for non-special-ship missions. `src/game/mission.cpp`,
 `mission_script.cpp`, and the landing path in `spaceflight.cpp` now cover the
 data model, BBS evaluation/activation, the timer tick, per-tick objective
 evaluation, the landing gate, and success/failure resolution with the PayVal
-credit/reputation opcode. Still open (after the mission-fleet spawn/dispatch
-pass): the daily driver (0x00466CB0: date advance, deadline countdown,
-availability rerolls) and the desc/briefing dialogs (logged TODOs); the
-mission goal counters now receive spawned fleets but still need their
-death/disable/board increment sites. See the progress tracker for
+credit/reputation opcode. The daily driver is now ported (2025 dates pass): Mission_TickDailyWorldUpdate
+(0x00466CB0) advances the in-game calendar (GameDate, seeded from the local
+clock with year+250 at new game, round-tripped in the .plt block1 +0x14/16/18),
+counts down mission deadlines, and runs on hyperspace arrival (1/2/3 days by
+hull mass), landing (1 day) and launch (15..44 docked days); DatePostInc
+re-runs it per count. Still open in the driver: cron events, stellar income,
+disaster states, per-stellar schedules, availability rerolls. See the progress tracker for
 per-function percentages.
 
 ## Verified m\xefsn payload map (offsets ground-truthed against the loader
@@ -96,6 +98,15 @@ The mission-list pipeline is implemented in `src/game/mission.cpp`:
   sanity, and the same-system (visibility-root) denial). The on-landing
   offer pass consumes it via the lane-1 walk below; the reaction-condition
   cache refresh of the original's param_2 callers remains TODO(decomp).
+- Calendar/deadline plumbing (2025 dates pass): `GameDate` in
+  `game_state.hpp`; `Mission_AdvanceGameDate` (0x00466c40),
+  `Mission_ComputeDateAfterSteps` (0x0043f080, stores the absolute deadline
+  into the runtime flags +0x06/+0x08/+0x0a at acceptance),
+  `NovaStellar_ComputeHyperspaceTravelDays` (0x00465550), and
+  `NovaText_FormatDateString` (0x00468450/0x00468600, STR# 0x89). Wired into
+  the BBS/mission-info/starmap date lines and the `<DL>` token (active-slot
+  arm; deadline==today -> empty string).
+
 - `0x0044A4D0` `Ship_ExpandStringPlaceholders` — DONE (80%) as
   `Mission_ExpandStringPlaceholders`: the `{g}/{G}/{pN}/{bN}/!` placeholder
   state machine with escapes (quirks kept), gender arm reading the 'm'
@@ -105,9 +116,11 @@ The mission-list pipeline is implemented in `src/game/mission.cpp`:
 - `0x004982A0` `Ui_RunTravelSelectionDialog` — ported (70%) as
   `NovaUi_RunTextReaderDialog` (`selection_text_dialog.cpp`) on the shared
   `NovaTextScrollView` (clean-room `NovaTextView` 0x004BCD90 family):
-  DLOG 0xbbb geometry, backdrop strip 0x214c-0x214e, auto-shrink to the
-  measured text height, ±10px scrolling with drawn arrow states, starmap
-  action. TODO(decomp): variant ≥ 0x80 DLOG 0xbbc arm, status-string
+  DLOG 0xbbb geometry, 3-PICT backdrop (0x214d body / 0x214c top strip /
+  0x214e bottom strip, 0x00499870 order), auto-shrink to the
+  measured pure-text height (clamped to 0x30; entry 3 bottom rises, entries
+  1/5/6 shift up, window + children drop round(shrink*0.3)), ±10px
+  scrolling with drawn arrow states, starmap action. TODO(decomp): variant ≥ 0x80 DLOG 0xbbc arm, status-string
   display, starmap preselect, static-surface redraw variants.
 - `0x0043F100` `Mission_ActivateMissionAtSlot` — the on-accept payload
   (mïsn +0x15b set-expression: chain bits, X system-reveal, S auto-start) runs
@@ -315,7 +328,8 @@ The runtime interaction chain is now largely implemented:
 - `0x00443760` per-tick interaction reactions — DONE (driver wired in
   TickSystems scope 0xb)
 - `0x00443780` reaction-slot travel interaction — DONE (landing gate, runs
-  once per docking; the original runs it per destination-window action)
+  once on Spaceport entry ahead of the AvailLoc-3 offer pass, debriefs
+  layered over the dock — the original's single call position in 0x00491f30)
 - `0x004438D0` reaction resource processing — DONE (cargo pickup/drop-off)
 - `0x00443C60` mission/surrender/boarding reaction handling — DONE for all
   ShipGoal arms; skipped: cloaked-target sprite-rect visibility for observe
