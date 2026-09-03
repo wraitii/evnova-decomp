@@ -3,7 +3,7 @@
 #include "../log.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
-#include "outfit.hpp"
+#include "targeting.hpp"
 #include "weapon.hpp"
 
 #include <algorithm>
@@ -13,19 +13,21 @@
 namespace game {
 namespace {
 
-constexpr float kWarmupMs = 2000.0F;
-// TODO(decomp): derive this from ShipClassDef.jump_duration_multiplier.
-constexpr float kZoomMs = 2200.0F;
+// Turn-around velocity damp per 30 Hz tick while the brake phase runs.
+// The original is g_jump_turnaround_velocity_damp 0x5755f0 = 0.99203847;
+// deliberate feel tuning (divergence): 0.985 brakes decisively from the
+// moment the jump engages instead of coasting through the first second.
+constexpr float kTurnDamp = 0.985F;
 
-// The stopped threshold for the turn-around: the original's Ship_HandlePlayer-
-// Ship pre-fire block treats |round(vel_x)| < 2 && |round(vel_y)| < 2 as
-// "come to a stop", at which point it starts the warp-up hold. We use a
-// tighter absolute stop so the flip-and-boost cut leaves no drift.
-constexpr float kStoppedVel = 0.5F;
+// Deliberate feel tuning (divergence): the original's brake retro-thrust is
+// the bare effective thrust once the hull faces the departure bearing; the
+// port doubles it so the initial slowdown reads harder.
+constexpr float kBrakeThrustScale = 2.0F;
 
-// Turn-around damp: while turning, the ship brakes by this factor per frame
-// (original g_jump_turnaround_velocity_damp 0x5755f0, a double 0.992).
-constexpr float kTurnDamp = 0.992F;
+// Slow-phase velocity damp per 30 Hz tick during the stationary hold
+// (g_hyperspace_slow_phase_velocity_damp 0x5755f8, double 0.98006866),
+// gentler than the turn-around's 0.99204.
+constexpr float kSlowPhaseVelDamp = 0.98006866F;
 
 // The pre-fire turnaround turns at the class turn rate (Ship_ComputeShipMax
 // TurnRateDeg 0x00463e70, floor 1.0 deg/tick) -- no speed-up. The "+1" addend
@@ -36,25 +38,63 @@ constexpr float kTurnDamp = 0.992F;
 constexpr float kTurnRateAddend = 1.0F;
 constexpr float kTurnAroundAlignDeg = 20.0F;
 
-// Slow-phase velocity damp during the stationary hold
-// (g_hyperspace_slow_phase_velocity_damp 0x5755f8 = 0.98), gentler than the
-// turn-around's 0.992.
-constexpr float kSlowPhaseVelDamp = 0.98F;
+// Tunnel ramp schedule (Ship_HandlePlayerShipCore tunnel block, ~0x004505e0).
+// VERIFIED UNITS (the historical _ms names are lies -- see the Ghidra plate
+// comments): the elapsed clock and the duration share the 1/60 s tick unit
+// (NovaTime_GetTickCount60Hz counts 1/60 s; the duration is the Warp up cue's
+// own length in the same unit, snd 128 frames*60/rate = 364, loader
+// 0x004b0a07). progress = elapsed_60hz * jump_duration_multiplier
+//   / (duration_60hz * 0.01)      (g_hyperspace_jump_duration_scale 0x575560)
+//   - escape_pod_offset / multiplier (0x575568 = 35.0)
+// For a mult=1 stock ship: onset (progress > 0) at tick 127 = 2.12 s into the
+// hold, the min(progress, 50) px/tick cap at tick 309 = 5.16 s, and the fire
+// lands when the cue (staged at rate 1/multiplier) finishes at tick 364 =
+// 6.07 s -- a couple of seconds of stationary alignment, then the
+// acceleration with the glow overdriving, then the boom.
+constexpr float kHyperspaceTickHz = 60.0F;
+constexpr float kJumpDuration60HzTicks =
+    364.0F; // g_hyperspace_jump_duration_engine_60hz (snd 128 frames*60/rate)
+constexpr float kJumpDurationScale = 0.01F;   // 0x575560
+constexpr float kEscapePodTimeOffset = 35.0F; // 0x575568
+constexpr float kTunnelSpeedCap = 50.0F; // 0x5755d8 threshold and literal cap
+// ShipClassDef.jump_duration_multiplier is not decoded yet; the scenario
+// loader derives it from the chassis capability flags (flags&1: 0.7, &2: 1.3,
+// &4: 1.6, else 1.0, all *1.3, min 0.5 -- NovaData_LoadScenarioResourceTables
+// 0x004bd3c0, shp pass). Same follow-up gap as the NPC spin-up in
+// ship_ai.cpp. Pinned to 1.0, which also pins the cue playback rate to 1.0
+// (the original stages it at rate 1/multiplier, 0x0046ab00) so the ramp
+// schedule and the cue-gated fire stay aligned.
+constexpr float kJumpDurationMultiplier = 1.0F;
+
+// The stationary hold must run at least this many 30 Hz ticks before the fire
+// (g_hyperspace_engage_hold_30hz 0x5755a8, float 30.0 -- 30 Hz ticks because
+// the hold timer accumulates g_avg_frame_tick_scale = elapsed_ms * 0.03;
+// 30 ticks = 1.0 s). The fire additionally waits for the 'Warp up' cue to
+// finish (the caller reports the live voice count; see NovaTravel_Tick).
+constexpr float kEngageHoldTicks = 30.0F;
+
+// In-tunnel alignment window (deg): the hull must face the jump bearing within
+// max(class turn rate, 30.0) for the tunnel ramp to apply (the tunnel block of
+// Ship_HandlePlayerShipCore; the 30.0 floor is the literal 0x41f00000 used when
+// the class turn rate does not exceed g_hyperspace_engage_hold_30hz).
+constexpr float kTunnelAlignDeg = 30.0F;
+
+// The stopped test for the turn-around handoff: the original's jump dispatch
+// treats |round(vel_x)| < 2 && |round(vel_y)| < 2 (px/tick, ShipState +0x20)
+// as "come to a stop", at which point the hold begins.
+constexpr float kStoppedRoundedVel = 2.0F;
+
+// Arrival position hurl (px) from the destination system center along the
+// departure map bearing + 180 (g_hyperspace_engage_velocity_hurl 0x57600,
+// float 1350.0): the ship materializes on the near side of the new system and
+// streaks through the center at max speed under normal flight.
+constexpr float kArrivalHurlPx = 1350.0F;
 
 // Engine-glow caps (the original's ShipState +0xc8d4 glow counter): 24 is the
 // normal-thrust ramp target (2 per tick * 12 in the tune), and the quick-ramp
-// step during the turnaround “overdrives” it by +3/frame to the same 24 cap.
-// The glow is turned during the brake (~up to 24), faded while coasting to a
-// stop, then re-ramped +3/frame to 24 during the zoom thrust.
+// step during the turnaround "overdrives" it by +3/tick to the same 24 cap.
 constexpr std::int16_t kGlowMax = 24;
 constexpr std::int16_t kGlowFastStep = 3;
-
-// Arrival spawn offset (px) from the destination system center, on the far
-// side along the jump heading so the ship streaks past the center at speed.
-// (Divergence: the original snaps to the system origin and applies a
-// 1350-unit position hurl away from the destination bearing; we keep a
-// moderate offset so the destination's stellar bodies stay in view.)
-constexpr float kArrivalOffset = 160.0F;
 
 // Player max speed scale: px/tick = eff.speed_raw / kMaxSpeedScale (the
 // movement integrator's max_speed_px_per_tick). Used for the arrival-at-speed
@@ -92,14 +132,14 @@ float PlayerMaxSpeed(const GameState &state) {
 }
 
 // Completes an engaged jump: the fire/arrival moment. Mirrors the fire +
-// arrival block in Stellar_HandlePlayerHyperspaceSequence (0x0044f3d0): the
-// full-screen flash and the 'Warp out' boom, the fuel burn, the system change
-// with the ship repositioned at a radial offset from the destination center
-// and moving at its top speed, the shield/armor refill, and the discovery
-// flood. The jump completes here (at the end of the zoom), arriving already in
-// the NEW system at max speed; the ship then coasts through it in normal
-// flight, which is why the system change is done here rather than after a
-// separate tunnel phase.
+// arrival block at PlayerTick_HyperspaceSequenceAnchor (0x0044f3d0) and
+// PlayerTick_SystemTransitionAndArrival (0x0044f660) in
+// Ship_HandlePlayerShipCore: the 'Warp out' boom, the position hurl 1350 px
+// from the destination center along the map bearing + 180 with velocity reset
+// to max speed along the current heading, the fuel burn, the system change,
+// and the discovery flood. No shield/armor refill happens (the original
+// restores nothing on hyperspace arrival). Control returns to normal flight
+// immediately; the ship coasts through the new system.
 void FireJump(GameState &state) {
   TravelState &t = state.travel;
   PlayerShip &player = state.player;
@@ -123,13 +163,8 @@ void FireJump(GameState &state) {
   player.current_system_id = t.destination_system_id;
   NovaWeapon_ClearTransientCombatState(state);
 
-  // Refill shields/armor from the effective (outfit-derived) maximums. This
-  // also refreshes state.cached_stats, which PlayerMaxSpeed below relies on.
-  const PlayerEffectiveStats eff = Outfit_ComputePlayerEffectiveStats(state);
-  player.shield_points = eff.max_shield_points;
-  player.armor_points = eff.max_armor_points;
-  state.cached_stats = eff;
-  state.stat_cache_valid = true;
+  // Refill nothing: the original's arrival block does NOT restore
+  // shields/armor on hyperspace arrival (divergence removed).
 
   // Book the arrival as visited at level 1 and rebuild the map reveal (the
   // original's arrival block: discovery_state >= 1 on slot + current, then
@@ -147,24 +182,66 @@ void FireJump(GameState &state) {
     Mission_TickDailyWorldUpdate(state);
   }
 
-  // Arrive just outside the destination system's center on the far side along
-  // the jump heading, and move at top speed along the ship's heading (which
-  // the brake/hold aligned onto the jump vector and the zoom thrust along) --
-  // the original's arrival "at full speed into the new system", streaking past
-  // the center in normal flight.
+  // Arrive 1350 px from the destination system's center on the near side
+  // along the jump heading's reverse (Math_BearingFromPointToPoint(cur,dest)
+  // + 180 at 0x0044f5ae, magnitude g_hyperspace_engage_velocity_hurl 1350),
+  // and reset velocity to max speed along the ship's heading (which the hold
+  // aligned onto the map travel bearing) -- "at full speed into the new
+  // system", streaking past the center in normal flight.
   const auto *dest_sys = state.scenario.System(
       static_cast<std::int16_t>(t.destination_system_id + 0x80));
   const float cx = dest_sys ? static_cast<float>(dest_sys->pos_x) : 0.0F;
   const float cy = dest_sys ? static_cast<float>(dest_sys->pos_y) : 0.0F;
-  const float arrival_speed = std::max(PlayerMaxSpeed(state), 1.0F);
-  player.pos_x = cx - std::sin(t.jump_heading_rad) * kArrivalOffset;
-  player.pos_y = cy + std::cos(t.jump_heading_rad) * kArrivalOffset;
+  const float arrival_speed = PlayerMaxSpeed(state);
+  player.pos_x = cx - std::sin(t.jump_heading_rad) * kArrivalHurlPx;
+  player.pos_y = cy + std::cos(t.jump_heading_rad) * kArrivalHurlPx;
   player.vel_x = std::sin(player.heading) * arrival_speed;
   player.vel_y = -std::cos(player.heading) * arrival_speed;
   player.speed = arrival_speed;
 
+  // Arrival overlay (0x0044f954 tail): a random "Entering the / Jumping into
+  // the / Arriving in the" lead (STR# 0x7d2 0x2b..0x2d), the system display
+  // name, " system on " (0x30), the formatted arrival date
+  // (Stellar_FormatElapsedTravelTime -> NovaText_FormatDateString full month
+  // names), and the no-nav appendix (0x31). Skipped when the system defines
+  // an event message instead (System_ShowSystemEventMessage, field_0x92 --
+  // TODO(decomp) not modelled).
+  if (dest_sys != nullptr) {
+    const std::uint16_t lead =
+        0x2b + static_cast<std::uint16_t>(
+                   std::uniform_int_distribution<int>{0, 2}(state.rng));
+    std::string msg;
+    if (const auto text = NovaHud_LoadStringEntry(0x7d2, lead)) {
+      msg = *text;
+    }
+    msg += " ";
+    msg += dest_sys->name;
+    msg += " ";
+    if (const auto text = NovaHud_LoadStringEntry(0x7d2, 0x30)) {
+      msg += *text;
+    }
+    msg += " ";
+    msg += NovaText_FormatDateString(state.date, false);
+    msg += ".";
+    // 0x31 "No stellar objects present." when the system defines no navs.
+    bool has_navs = false;
+    for (const std::int16_t nav : dest_sys->nav_defs) {
+      if (nav >= 0x80) {
+        has_navs = true;
+        break;
+      }
+    }
+    if (!has_navs) {
+      if (const auto text = NovaHud_LoadStringEntry(0x7d2, 0x31)) {
+        msg += " ";
+        msg += *text;
+      }
+    }
+    NovaHud_ShowOverlayMessage(state, msg, static_cast<std::uint64_t>(0xf0U));
+  }
+
   NovaLog::Info("hyperspace jump fired: system id {} (resource {}) after "
-                "burning {} fuel; shields/armor refilled",
+                "burning {} fuel",
                 state.player.current_system_id,
                 static_cast<int>(CurrentSystemResource(state)),
                 static_cast<int>(kJumpFuelCost));
@@ -178,6 +255,9 @@ void FireJump(GameState &state) {
   t.destination_system_id = -1;
   t.hyperspace_mode = false;
   t.just_completed = true;
+  // Arrival clears the plotted-jump latch (travel_transfer_mode = -1 at
+  // 0x0044f660) so the nav panel drops back to the idle state.
+  state.player.travel_transfer_mode = -1;
   // Arrival route maintenance (Ship_HandlePlayerShipCore's arrival tick):
   // the map pan re-centres on the new system (0x0044f8a6), a plotted route
   // hop that matched this system is consumed
@@ -194,8 +274,9 @@ void FireJump(GameState &state) {
   // separate in-tunnel phase after this.
   t.engaging = false;
   t.jump_phase = TravelState::JumpPhase::kIdle;
-  t.hold_elapsed_ms = 0.0F;
-  t.zoom_elapsed_ms = 0.0F;
+  t.hold_ticks = 0.0F;
+  t.tunnel_elapsed_60hz = 0.0F;
+  t.hold_audio_latch = false;
   t.warp_up_started = false;
   t.jump_heading_rad = 0.0F;
 }
@@ -258,20 +339,20 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
   // The destination is resolved purely from the hyperlink (System.links[slot]);
   // a NavDef departure-point stellar at the same slot is NOT required -- the
   // scenario data does not pair them 1:1 (e.g. Kania links to Tichel at slot 3
-  // with no travel stellar there, yet 'j' still jumps Kania->Tichel). If a
-  // departure-point stellar does exist, surface it as the selected target so
-  // the travel reticle/HUD point at it.
+  // with no travel stellar there, yet 'j' still jumps Kania->Tichel). Latching
+  // plotted-jump mode 3 clears the stellar selection (the original's
+  // g_travel_selected_stellar_id = -1 in PlayerTick_HyperspaceCommand): the
+  // travel reticle hides and the nav panel switches to the Hyperspace
+  // destination display.
   t.travel_slot = static_cast<std::int16_t>(slot);
   t.destination_system_id = destination_zero_based;
   // Plotted-jump mode latch (0x004a491e): the accent line and the jump HUD
   // read travel_transfer_mode == 3.
   state.player.travel_transfer_mode = 3;
   const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
-  if (stellar_id >= 0x80) {
-    t.engaged_stellar_id = stellar_id;
-    t.selected_stellar_id = stellar_id;
-  }
-  t.selected_stellar_is_manual = true;
+  t.engaged_stellar_id = stellar_id >= 0x80 ? stellar_id : -1;
+  t.selected_stellar_id = -1;
+  t.selected_stellar_is_manual = false;
   NovaLog::Info("plotted starmap jump to system {} (hyperlink slot {})",
                 destination_zero_based,
                 slot);
@@ -710,12 +791,14 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
   t.travel_slot = static_cast<std::int16_t>(slot);
   t.starmap_destination_system_id = dest;
   t.destination_system_id = dest;
-  // Cycle latches plotted-jump mode 3 like the starmap arm (0x0044dea7).
+  // Cycle latches plotted-jump mode 3 like the starmap arm (0x0044dea7);
+  // mode 3 clears the stellar selection (reticle hides -- see
+  // PlayerTick_HyperspaceCommand).
   state.player.travel_transfer_mode = 3;
   const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
-  if (stellar_id >= 0x80) {
-    t.engaged_stellar_id = stellar_id;
-  }
+  t.engaged_stellar_id = stellar_id >= 0x80 ? stellar_id : -1;
+  t.selected_stellar_id = -1;
+  t.selected_stellar_is_manual = false;
   NovaLog::Info(
       "cycled destination system to {} (hyperlink slot {})", dest, slot);
   return dest;
@@ -724,7 +807,10 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
 // ---------------------------------------------------------------------------
 // Cross-system jump state machine.
 // ---------------------------------------------------------------------------
-void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
+void NovaTravel_Tick(GameState &state,
+                     bool travel_input,
+                     float frame_time_ms,
+                     bool warp_up_sound_active) {
   TravelState &t = state.travel;
   t.just_completed = false;
 
@@ -773,17 +859,20 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
 
     switch (t.jump_phase) {
     case TravelState::JumpPhase::kBrake: {
-      // Pre-fire turn-around, mirroring the travel_transfer_mode == 3 block in
-      // Ship_HandlePlayerShip (0x0044b120): while the ship still has velocity
-      // it turns toward the REVERSE of its velocity (bearing from vel*100 back
-      // to origin), brakes by g_jump_turnaround_velocity_damp (0.992) per
-      // frame, and once within the facing window
-      // (max(class turn + 1, 20) deg -- a gate, not a turn speed) applies
-      // effective thrust back along it to visibly stop the ship. Ends when the
-      // ship has come to a stop (|vel| < kStoppedVel) -- the original's
-      // LAB_0044edfd handoff to the warp-up hold.
-      if (std::abs(player.vel_x) >= kStoppedVel ||
-          std::abs(player.vel_y) >= kStoppedVel) {
+      // Pre-fire turn-around, mirroring the jump dispatch in
+      // Ship_HandlePlayerShipCore (0x0044c195 engage / 0x0044fff0 continuation
+      // anchor): while |round(vel)| >= 2 on either axis the ship faces the
+      // REVERSE of its velocity (bearing of vel*100 from the origin), brakes
+      // by g_jump_turnaround_velocity_damp (0x99204) per 30 Hz tick, and once
+      // within the facing window (max(class turn + 1, 20) deg -- a gate, not a
+      // turn speed) applies effective thrust back along it to stop the ship.
+      // Ends at the original's |round(vel_x)| < 2 && |round(vel_y)| < 2 stop
+      // test -- the hold begins and the 'Warp up' cue pre-stages there
+      // (0x0044c4e9).
+      const bool stopped =
+          std::abs(std::round(player.vel_x)) < kStoppedRoundedVel &&
+          std::abs(std::round(player.vel_y)) < kStoppedRoundedVel;
+      if (!stopped) {
         // Still moving: turn around to face the reverse of the velocity.
         const float vel_heading = std::atan2(player.vel_x, -player.vel_y);
         float desired =
@@ -800,101 +889,112 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
             std::abs(std::remainder(desired - player.heading, kTwoPi)) *
             (180.0F / 3.14159265358979323846F);
         if (delta_deg < turn_align_window) {
-          const float thrust = PlayerThrust(state);
+          const float thrust = PlayerThrust(state) * kBrakeThrustScale;
           player.vel_x += std::sin(player.heading) * thrust * ticks;
           player.vel_y += -std::cos(player.heading) * thrust * ticks;
           ramp_glow(kGlowFastStep);
         } else {
           fade_glow();
         }
-        // Brake (original g_jump_turnaround_velocity_damp = 0.992) and keep
-        // the ship coasting through the deceleration.
-        player.vel_x *= kTurnDamp;
-        player.vel_y *= kTurnDamp;
+        // Brake (g_jump_turnaround_velocity_damp, applied per 30 Hz tick) and
+        // keep the ship coasting through the deceleration.
+        const float damp = std::pow(kTurnDamp, ticks);
+        player.vel_x *= damp;
+        player.vel_y *= damp;
         player.speed = std::hypot(player.vel_x, player.vel_y);
         player.pos_x += player.vel_x * ticks;
         player.pos_y += player.vel_y * ticks;
       } else {
-        // First finish the map-vector turn; Warp up starts with the launch.
+        // Stopped: begin the stationary hold. The original pre-stages the
+        // 'Warp up' cue here (NovaAudio_PreStageJumpSoundBySeconds at
+        // 0x0044c4e9, ai_station_hold_timer = 2.0).
         t.jump_phase = TravelState::JumpPhase::kHold;
-        t.hold_elapsed_ms = 0.0F;
+        t.hold_ticks = 0.0F;
+        t.hold_audio_latch = false;
+        if (!t.warp_up_started) {
+          t.warp_up_started = true;
+          state.warp_up_sound_pending = true;
+        }
       }
       break;
     }
     case TravelState::JumpPhase::kHold: {
-      // Stationary alignment hold: the ship sits at the jump point, damping
-      // the remaining drift by the slow-phase damp
-      // (g_hyperspace_slow_phase_velocity_damp 0.98) and turning onto the jump
-      // heading at class rate (the original's slow-turn re-aim
-      // Ship_TurnShipTowardHeading in Stellar_HandlePlayerHyperspaceSequence --
-      // the frame skipped alignment with the ship's actual jump vector). The
-      // engine glow fades. After a short charging beat once aligned with the
-      // jump vector, the zoom begins.
-      player.vel_x *= kSlowPhaseVelDamp;
-      player.vel_y *= kSlowPhaseVelDamp;
+      // Stationary alignment hold (the hold branch of the fire-restricted
+      // window, decompile around 0x0044f3d0): velocity damps by
+      // g_hyperspace_slow_phase_velocity_damp (0.98007) per tick, the hull
+      // turns onto the map-space bearing toward the destination system (the
+      // per-frame ai_desired_heading_deg = Bearing(cur,dest) re-aim at
+      // LAB_0044edfd) at the class turn rate, and the engine glow fades. The
+      // fire lands once the hold passes g_hyperspace_engage_hold_30hz (30
+      // ticks) AND the 'Warp up' cue is no longer active
+      // (NovaAudio_CountActiveByHandle latch, g_playerHyperspaceAudioLatch).
+      const float damp = std::pow(kSlowPhaseVelDamp, ticks);
+      player.vel_x *= damp;
+      player.vel_y *= damp;
       player.speed = std::hypot(player.vel_x, player.vel_y);
       fade_glow();
       // Align onto the jump heading at the class turn rate.
       turn_toward(
           t.jump_heading_rad,
           std::max(std::round(state.cached_stats.turn_raw * 0.1F), 1.0F));
-      const float alignment_error =
-          std::abs(std::remainder(t.jump_heading_rad - player.heading, kTwoPi));
-      if (alignment_error < 0.001F) {
-        t.jump_phase = TravelState::JumpPhase::kWarmup;
-        t.hold_elapsed_ms = 0.0F;
-        t.warp_up_started = true;
-        state.warp_up_sound_pending = true;
-      }
-      break;
-    }
-    case TravelState::JumpPhase::kWarmup:
-      player.vel_x *= kSlowPhaseVelDamp;
-      player.vel_y *= kSlowPhaseVelDamp;
-      player.speed = std::hypot(player.vel_x, player.vel_y);
-      fade_glow();
-      t.hold_elapsed_ms += frame_time_ms;
-      if (t.hold_elapsed_ms >= kWarmupMs) {
-        t.jump_phase = TravelState::JumpPhase::kZoom;
-        t.zoom_elapsed_ms = 0.0F;
-      }
-      break;
-    case TravelState::JumpPhase::kZoom: {
-      // Acceleration-zoom: the ship thrusts to max speed along the jump
-      // heading as the origin system parallaxes away (the ambient-star tunnel
-      // streaks via SpaceflightView::UpdateAmbientStarsTunnel, driven by the
-      // world movement delta). The engine glow ramps +3/frame toward 24
-      // (powered warp). Mirrors the original's in-tunnel flight whose length
-      // is Stellar_GetJumpSequenceDurationMs (350) / jump_duration_multiplier;
-      // here a fixed kZoomMs fallback (TODO(decomp): decode the class
-      // multiplier and use 350/m).
-      player.vel_x *= kSlowPhaseVelDamp;
-      player.vel_y *= kSlowPhaseVelDamp;
-      player.speed = std::hypot(player.vel_x, player.vel_y);
-      // Accelerate along the jump heading to max speed (polar clamp).
-      const float max_speed = std::max(PlayerMaxSpeed(state), 1.0F);
-      const float thrust = PlayerThrust(state);
-      player.vel_x += std::sin(t.jump_heading_rad) * thrust * ticks;
-      player.vel_y += -std::cos(t.jump_heading_rad) * thrust * ticks;
-      const float speed = std::hypot(player.vel_x, player.vel_y);
-      if (speed > max_speed) {
-        const float scale = max_speed / speed;
-        player.vel_x *= scale;
-        player.vel_y *= scale;
-      }
-      player.heading = t.jump_heading_rad;
-      player.speed = std::hypot(player.vel_x, player.vel_y);
-      // Advance world position so the origin system scrolls away.
+      // Keep integrating the residual drift; the fire overwrites it.
       player.pos_x += player.vel_x * ticks;
       player.pos_y += player.vel_y * ticks;
-      ramp_glow(kGlowFastStep);
 
-      t.zoom_elapsed_ms += frame_time_ms;
-      if (t.zoom_elapsed_ms >= kZoomMs) {
-        // Boom/arrival: full-screen flash + 'Warp out' boom + system change
-        // (see FireJump). The ship arrives in the NEW system at max speed and
-        // control returns to normal flight.
+      t.hold_ticks += ticks;
+      // Tunnel ramp clock: 60 Hz ticks elapsed since the hold began (the
+      // original stamps ai_mode_start_time_ms at the hold, 0x0044c4e9, and
+      // reads NovaTime_GetTickCount60Hz in its tunnel block).
+      t.tunnel_elapsed_60hz += frame_time_ms * (kHyperspaceTickHz / 1000.0F);
+      if (t.hold_ticks > kEngageHoldTicks && !warp_up_sound_active) {
+        t.hold_audio_latch = true;
+      }
+      if (t.hold_ticks >= kEngageHoldTicks && t.hold_audio_latch) {
+        // Boom/arrival: full-screen flash + 'Warp out' boom + the 1350 px
+        // hurl + system change (see FireJump). Control returns to normal
+        // flight immediately.
         FireJump(state);
+      }
+      if (t.jump_phase != TravelState::JumpPhase::kHold) {
+        // The fire landed this frame; the original's arrival block resets the
+        // hold timer before its tunnel block runs, so the tunnel motion is
+        // skipped on the fire frame.
+        break;
+      }
+      // In-tunnel acceleration (the tunnel block of Ship_HandlePlayerShipCore,
+      // after the hold/fire branch): once the stopped hull faces the jump
+      // bearing within max(class turn, 30 deg), the position advances along
+      // the heading by min(progress, 50) px/tick -- a direct position step,
+      // NOT thrust into vel_x/vel_y (which stay damped near zero) -- and the
+      // engine glow overdrives +4/tick up to 32, past the normal-thrust cap of
+      // 24. With the verified 60 Hz tick units the schedule is: ~2.1 s of
+      // stationary alignment while the cue rises, the ramp to the 50 px/tick
+      // cap by ~5.2 s, and the boom when the cue finishes at ~6.1 s.
+      // TODO(decomp): the original also drives the starfield streak visual
+      // from this progress (FLOAT_007354a0 = progress*0.3 - 15.0, clamped
+      // [0,100]); the streak render pass is not reconstructed.
+      // TODO(decomp): the original skips the tunnel while the ship is
+      // fire-restricted (disabled); the disabled state is not modelled for the
+      // player yet.
+      const float heading_deg =
+          player.heading * (180.0F / 3.14159265358979323846F);
+      const float jump_deg =
+          t.jump_heading_rad * (180.0F / 3.14159265358979323846F);
+      const float align_delta_deg =
+          std::abs(std::remainder(jump_deg - heading_deg, 360.0F));
+      if (align_delta_deg <= std::max(class_turn_deg, kTunnelAlignDeg)) {
+        const float progress =
+            t.tunnel_elapsed_60hz * kJumpDurationMultiplier /
+                (kJumpDuration60HzTicks * kJumpDurationScale) -
+            kEscapePodTimeOffset / kJumpDurationMultiplier;
+        if (progress > 0.0F) {
+          const float step = std::min(progress, kTunnelSpeedCap) * ticks;
+          player.pos_x += std::sin(player.heading) * step;
+          player.pos_y += -std::cos(player.heading) * step;
+          player.engine_glow_level =
+              std::min<std::int16_t>(0x20, player.engine_glow_level + 4);
+          refresh_glow();
+        }
       }
       break;
     }
@@ -905,58 +1005,94 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
     return;
   }
 
-  // (a) Idle: wait for the travel key. When a starmap plot armed a specific
-  // travel slot, jump toward that plotted destination; otherwise fall back to
-  // the nearest available travel point (the original's
-  // Stellar_FindNearestAvailableTravelStellar behaviour via 'j').
+  // (a) Idle: wait for the travel key. The original's jump dispatch
+  // (Ship_HandlePlayerShipCore 0x0044c195, binding 14) requires a plotted
+  // destination (travel_transfer_mode == 3 with ai_secondary_target_slot !=
+  // -1): a bare 'j' with nothing plotted only raises the "select a
+  // destination" reminder (0x0044c628, STR# 0x7d2 0x1c) -- there is no
+  // nearest-travel-point fallback on the player jump.
   if (!travel_input) {
     return;
-  }
-  if (!NovaTravel_CanStartJump(state)) {
-    // A 'j' press with an empty tank is refused with a HUD-overlay denial,
-    // mirroring the original's jump block showing the "not enough fuel"
-    // message rather than silently ignoring the command.
-    NovaHud_ShowOverlayMessage(state,
-                               "Not enough fuel to make a hyperspace jump.",
-                               0xe0,
-                               0xe0,
-                               0xe0,
-                               0x168U);
-    return;
-  }
-  const int slot = (t.travel_slot >= 0 && t.starmap_destination_system_id >= 0)
-                       ? static_cast<int>(t.travel_slot)
-                       : NovaTravel_FindNearestTravelPoint(state);
-  if (slot < 0) {
-    return; // no travel point in range/available
   }
   const System *sys = state.scenario.System(CurrentSystemResource(state));
   if (!sys) {
     return;
   }
-  const std::int16_t dest_resource = sys->links[static_cast<std::size_t>(slot)];
-  if (dest_resource < 0x80 || dest_resource == CurrentSystemResource(state)) {
-    // No valid outward link, or it points back at the current system.
+  const auto overlay_denial = [&](std::uint16_t entry) {
+    const auto text = NovaHud_LoadStringEntry(0x7d2, entry);
+    NovaHud_ShowOverlayMessage(
+        state, text.value_or(""), 0xfa, 0x00, 0x0c, 0xf0U);
+  };
+  if (t.starmap_destination_system_id < 0 || t.travel_slot < 0) {
+    overlay_denial(0x1c); // "You have to select a destination before you can
+                          // start a hyperspace jump."
     return;
   }
+  if (!NovaTravel_CanStartJump(state)) {
+    // Fuel below one jump: STR# 0x7d2 0x9 "Insufficient energy for
+    // hyperspace jump." (the cached string DAT_0072dccc shown at 0x0044c6b8).
+    overlay_denial(0x9);
+    return;
+  }
+  const std::size_t slot = static_cast<std::size_t>(t.travel_slot);
+  const std::int16_t dest_resource = sys->links[slot];
+  if (dest_resource < 0x80 ||
+      NovaSystem_ResolveVisibleForTravel(
+          state, static_cast<std::int16_t>(dest_resource - 0x80)) !=
+          t.starmap_destination_system_id) {
+    // The armed slot no longer resolves to the plotted destination (stale
+    // arm after a system change): treat as nothing plotted.
+    overlay_denial(0x1c);
+    return;
+  }
+  // No-jump radius around the SYSTEM CENTER (0x0044c220 loop +
+  // Stellar_ComputeTravelRangeSq 0x00465610): while a non-restricted nav
+  // stellar exists and the ship sits inside the travel range measured from
+  // the origin, the engage is refused with STR# 0x7d2 0x2a. Ships with the
+  // fast-jump capability (Bible outfit 37) skip the stop requirement
+  // entirely; TODO(decomp) Ship_CheckSpecialLoadoutCapability 0x0046d080.
+  bool has_usable_nav = false;
+  for (const std::int16_t nav : sys->nav_defs) {
+    if (nav < 0x80) {
+      continue;
+    }
+    const Stellar *nav_stellar = state.scenario.Stellar(nav);
+    if (nav_stellar != nullptr &&
+        (nav_stellar->availability_flags & 0x3000U) == 0U) {
+      has_usable_nav = true;
+      break;
+    }
+  }
+  const float dist_sq = state.player.pos_x * state.player.pos_x +
+                        state.player.pos_y * state.player.pos_y;
+  if (has_usable_nav && dist_sq <= NovaTargeting_ComputeTravelRangeSq(state)) {
+    overlay_denial(0x2a); // "Can't initiate hyperspace jump - not yet far
+                          // enough away from system center."
+    return;
+  }
+
   const std::int16_t dest_zero_based =
       static_cast<std::int16_t>(dest_resource - 0x80);
-  const std::int16_t stellar_id = sys->nav_defs[static_cast<std::size_t>(slot)];
+  const std::int16_t stellar_id = sys->nav_defs[slot];
 
-  t.travel_slot = static_cast<std::int16_t>(slot);
-  t.engaged_stellar_id = stellar_id;
+  t.engaged_stellar_id = stellar_id >= 0x80 ? stellar_id : -1;
   t.destination_system_id = dest_zero_based;
   t.starmap_destination_system_id = dest_zero_based;
 
+  // A plotted (mode-3) jump clears the stellar selection every frame in the
+  // original (g_travel_selected_stellar_id = -1 at PlayerTick_Hyperspace-
+  // Command): the target reticle hides and the nav panel switches to the
+  // Hyperspace destination display.
+  t.selected_stellar_id = -1;
+  t.selected_stellar_is_manual = false;
+
   // The original turns toward the map-space bearing from the current system
   // to its linked destination; in-system player coordinates are unrelated.
-  const System *source_sys =
-      state.scenario.System(CurrentSystemResource(state));
   const System *dest_sys =
       state.scenario.System(static_cast<std::int16_t>(dest_zero_based + 0x80));
-  if (source_sys != nullptr && dest_sys != nullptr) {
-    const float dx = static_cast<float>(dest_sys->pos_x - source_sys->pos_x);
-    const float dy = static_cast<float>(dest_sys->pos_y - source_sys->pos_y);
+  if (dest_sys != nullptr) {
+    const float dx = static_cast<float>(dest_sys->pos_x - sys->pos_x);
+    const float dy = static_cast<float>(dest_sys->pos_y - sys->pos_y);
     t.jump_heading_rad = std::atan2(dx, -dy);
   } else {
     // Fallback: keep the current heading.
@@ -966,11 +1102,12 @@ void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms) {
   t.engaging = true;
   t.jump_phase = TravelState::JumpPhase::kBrake;
   t.warp_up_started = false;
-  t.hold_elapsed_ms = 0.0F;
-  t.zoom_elapsed_ms = 0.0F;
+  t.hold_ticks = 0.0F;
+  t.tunnel_elapsed_60hz = 0.0F;
+  t.hold_audio_latch = false;
   NovaLog::Debug(
       "hyperspace jump engaged: from stellar {} (slot {}) to system {}",
-      stellar_id,
+      t.engaged_stellar_id,
       slot,
       dest_zero_based);
 }
@@ -1029,9 +1166,11 @@ void NovaStarmap_SyncTravelSelectionFromRoute(GameState &state) {
             state, static_cast<std::int16_t>(link - 0x80)) == first_hop) {
       t.travel_slot = static_cast<std::int16_t>(slot);
       t.starmap_destination_system_id = first_hop;
-      t.selected_stellar_is_manual = true;
-      // Route re-arm (0x004a8080) also latches plotted-jump mode 3.
+      // Route re-arm (0x004a8080) also latches plotted-jump mode 3 and
+      // clears the stellar selection.
       state.player.travel_transfer_mode = 3;
+      t.selected_stellar_id = -1;
+      t.selected_stellar_is_manual = false;
       NovaLog::Info(
           "starmap route re-armed: next hop system {} on link slot {}",
           first_hop,

@@ -613,18 +613,30 @@ struct TravelState {
   // re-spawn the starfield once). Set at the fire moment (the system change),
   // cleared each tick.
   bool just_completed = false;
-  // Brake, align, warm up, then zoom to arrival.
-  enum class JumpPhase { kIdle, kBrake, kHold, kWarmup, kZoom };
+  // Brake to a near stop, then the stationary warp-up hold (whose tail is the
+  // tunnel: the ship accelerates along the jump bearing while the Warp up cue
+  // finishes), then the fire/arrival. The fire hurls the ship 1350 px past
+  // the destination center at max speed and returns control to normal flight
+  // immediately; there is no post-fire tunnel in the new system.
+  enum class JumpPhase { kIdle, kBrake, kHold };
   JumpPhase jump_phase = JumpPhase::kIdle;
   // Whether Warp up has been started for this jump.
   bool warp_up_started = false;
-  // Jump-phase accumulators (ms): frame_time accumulates each tick so the
-  // phase timing is frame-rate independent and unit-testable. hold_elapsed_ms
-  // drives the stationary-alignment hold; zoom_elapsed_ms drives the
-  // acceleration-zoom tunnel (approx. of 350/jump_duration_multiplier; the
-  // class multiplier is not yet decoded -- TODO(decomp)).
-  float hold_elapsed_ms = 0.0F;
-  float zoom_elapsed_ms = 0.0F;
+  // Hold-phase elapsed time in 30 Hz simulation ticks. The fire lands once the
+  // hold passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks) AND the Warp
+  // up cue has finished playing (the original's NovaAudio_CountActiveByHandle
+  // gate, mirrored through hold_audio_latch).
+  float hold_ticks = 0.0F;
+  bool hold_audio_latch = false;
+  // Tunnel ramp clock in 1/60 s ticks, accumulated since the hold began (the
+  // original stamps ai_mode_start_time_ms when the hold starts, 0x0044c4e9,
+  // and reads its 60 Hz tick counter in the tunnel block -- NOT ms despite
+  // the ai_mode_start_time_ms name; see NovaTime_GetTickCount60Hz). Drives
+  // the in-tunnel position ramp: progress = elapsed*multiplier
+  // /(364*0.01) - 35/multiplier px/tick, capped at 50, applied while the hull
+  // faces the jump bearing (onset ~2.1 s, cap ~5.2 s, boom at the ~6.1 s cue
+  // end for a mult=1 stock ship).
+  float tunnel_elapsed_60hz = 0.0F;
   // The jump direction in the reimpl's radians heading convention (0 = up,
   // clockwise): the bearing from the departure point toward the destination
   // system center. The brake/hold align the hull onto this bearing for the
@@ -974,8 +986,8 @@ struct GameState {
   // Ghidra DAT_00774ae2: the context the interaction walk last ran in.
   std::int16_t mission_interaction_context = 0;
   // Ghidra DAT_00776af4: post-interaction recheck timer
-  // (NovaTime_GetTicksMs + NovaRandom_Range(0x1e) + 0x1e). Only the services
-  // windows consume it; the port stores it for the future consumers.
+  // (NovaTime_GetTickCount60Hz + NovaRandom_Range(0x1e) + 0x1e). Only the
+  // services windows consume it; the port stores it for the future consumers.
   std::int32_t mission_interaction_recheck_at_ms = 0;
   // Mission/system cue bytes are persisted in FleetState at 0x5dde. The
   // exact cue meanings remain provisional, but the table shape is known.

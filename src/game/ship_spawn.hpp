@@ -276,7 +276,7 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
                                             bool keep_player_engaged);
 
 // Mirrors NovaRandom_Reseed (Ghidra 0x004ab970 -> NovaRandom_Range(0)), which
-// mixes NovaTime_GetTicksMs() into the global LCG. The original calls this
+// mixes NovaTime_GetTickCount60Hz() into the global LCG. The original calls this
 // once at game-session bootstrap (NovaGameSession_Run 0x00416100) so each
 // session's NovaRandom draws differ. The clean-room GameState keeps its own
 // mt19937 in `state.rng` (seeded 42 by default); this reseeds it with fresh

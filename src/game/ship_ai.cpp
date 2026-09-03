@@ -84,10 +84,13 @@ constexpr float kAssistFar = 600.0F;
 // attack staging (states 2/3); 0x575098 (double) = 1,000,000 px^2 (1000 px
 // radius).
 constexpr float kCentreRangeSq = 1000000.0F;
-// Stellar_GetJumpSequenceDurationMs (0x0046EFB0) returns 350 ms for the
+// Stellar_GetJumpSequenceDuration60Hz (0x0046EFB0) returns 350 for the
 // engine-enabled path used by the NPC spin-up. ShipClassDef's duration
 // multiplier is not decoded into ShipClass yet, so retain the original base
-// duration until that field is represented here.
+// duration until that field is represented here. NOTE: the original compares
+// this against 60 Hz tick elapsed time, i.e. a ~5.8 s NPC spin-up; the port's
+// NPC path measures wall-clock ms, so the port's spin-up is 350 ms --
+// TODO(decomp) unify on the 60 Hz tick unit.
 constexpr float kNpcJumpSpinupDurationMs = 350.0F;
 // Gravity-shield approach multipliers (state 0xd/0xf).
 constexpr float kShieldKeepMult = 4.0F;
@@ -2308,10 +2311,11 @@ void NovaAi_ApplyControls(GameState &state,
     }
     ship.ai_station_hold_timer += elapsed_ticks;
 
-    // Ghidra 0x00408150 compares elapsed wall-clock time against
-    // Stellar_GetJumpSequenceDurationMs() / jump_duration_multiplier. The
-    // class multiplier is not decoded yet; use the faithful 350 ms base and
-    // keep the lifecycle transition exact.
+    // Ghidra 0x00408150 compares elapsed 60 Hz tick time against
+    // Stellar_GetJumpSequenceDuration60Hz() / jump_duration_multiplier. The
+    // class multiplier is not decoded yet; use the faithful 350 base and
+    // keep the lifecycle transition exact. (Port measures ms; see the
+    // kNpcJumpSpinupDurationMs note.)
     if (static_cast<float>(now_ms - ship.ai_mode_start_time_ms) >=
         kNpcJumpSpinupDurationMs) {
       ship.ai_station_hold_timer = 0.0F;

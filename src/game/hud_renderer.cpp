@@ -575,9 +575,12 @@ void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
   const float font_size = static_cast<float>(layout_.font_size);
   const auto &travel = state.travel;
 
-  if (travel.engaging || travel.hyperspace_mode) {
-    // Jump sequence (original travel_transfer_mode == 3).
-    const bool holding = state.player.ai_station_hold_timer > 0.0F;
+  if (travel.engaging || travel.hyperspace_mode ||
+      state.player.travel_transfer_mode == 3) {
+    // Jump sequence / plotted destination (original travel_transfer_mode ==
+    // 3): the "Hyperspace" title plus the destination system's name.
+    const bool holding =
+        state.travel.jump_phase == TravelState::JumpPhase::kHold;
     DrawPanelCentered(platform,
                       font,
                       font_size,

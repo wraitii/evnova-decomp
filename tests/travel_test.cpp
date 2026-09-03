@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
@@ -178,11 +179,14 @@ TEST_CASE("starmap plot arms the travel slot only for linked destinations") {
   }
   REQUIRE(unrelated >= 0);
 
-  // Directly-linked destination: arms the travel slot.
+  // Directly-linked destination: arms the travel slot. Mode-3 plotted jumps
+  // clear the stellar selection (the reticle hides; the nav panel switches to
+  // the Hyperspace display).
   REQUIRE(NovaTravel_PlotStarmapDestination(state, linked_dest));
   CHECK(state.travel.starmap_destination_system_id == linked_dest);
   CHECK(state.travel.travel_slot >= 0);
-  CHECK(state.travel.selected_stellar_is_manual);
+  CHECK_FALSE(state.travel.selected_stellar_is_manual);
+  CHECK(state.travel.selected_stellar_id == -1);
 
   // Reset for the negative cases, then check a non-linked destination.
   state.travel.starmap_destination_system_id = -1;
@@ -233,10 +237,13 @@ TEST_CASE("plot to a hyperlink without a paired nav-def stellar still jumps") {
   CHECK(state.travel.travel_slot == tichel_slot);
   CHECK(state.travel.destination_system_id == 1);
 
-  // Pressing 'j' to completion must land in Tichel (system id 1). The hold
-  // lasts the warp-up cue (fallback 6 s in tick-only tests) plus the ~2.5 s
-  // in-tunnel coast, so allow ~13 s of frames.
+  // Pressing 'j' to completion must land in Tichel (system id 1). The ship
+  // starts beyond the no-jump radius so the engage passes; the brake is short
+  // (velocity 0) and the fire lands once the hold passes 30 ticks with no
+  // 'Warp up' voice active (~1 s of frames at 16.67 ms).
   state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F; // beyond the 1000 px no-jump radius
   for (int f = 0; f < 800 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   }
@@ -332,18 +339,20 @@ TEST_CASE("destination-system cycle steps and wraps") {
 
 // The pre-fire turn-around: engaging 'j' while the ship is still moving must
 // turn the hull (toward the reverse of the velocity, i.e. back toward the jump
-// vector) and brake the velocity to a stop before the tunnel fires -- the
-// original's Ship_HandlePlayerShip travel_transfer_mode == 3 block
-// (0x0044b120). The jump still completes to the plotted destination.
+// vector) and brake the velocity to the |round(vel)| < 2 stop before the hold
+// fires -- the original's jump dispatch in Ship_HandlePlayerShipCore
+// (0x0044c195 / 0x0044fff0). The jump still completes to the plotted
+// destination.
 TEST_CASE("jump engages with a moving ship: turns around and brakes") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
   // Kania (0) -> Tichel (1); give the ship a healthy outward drift so the
-  // turn-around actually has something to brake.
+  // turn-around actually has something to brake, parked beyond the 1000 px
+  // no-jump radius so the engage passes.
   state.player.current_system_id = 0;
-  state.player.pos_x = 300.0F;
-  state.player.pos_y = 300.0F;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
   state.player.heading = 0.0F; // up
   state.player.vel_x = 8.0F;   // flying rightward (heading 90 deg)
   state.player.vel_y = 0.0F;
@@ -366,64 +375,47 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
   CHECK(state.player.heading != heading_after_engage);
   CHECK(std::hypot(state.player.vel_x, state.player.vel_y) < initial_speed);
 
-  // Let the whole sequence run; it must still land in Tichel. The brake takes
-  // ~345 frames to slow |vel| 8 -> 0.5 at 0.992/frame, the alignment hold a
-  // fixed 550 ms, and the zoom 700 ms: ~1.5 s total (much faster than the old
-  // ~13 s cue/tunnel cadence).
-  for (int f = 0; f < 800 && !state.travel.just_completed; ++f) {
+  // Let the whole sequence run; it must still land in Tichel. The brake needs
+  // ~240 ticks to slow |vel| 8 -> the |round(vel)| < 2 stop at 0.99204/tick,
+  // then the hold fires once it passes 30 ticks (~1 s) with no 'Warp up'
+  // voice active in tick-only tests.
+  for (int f = 0; f < 1200 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
   }
   CHECK(state.travel.just_completed);
   CHECK(state.player.current_system_id == 1);
 }
 
-TEST_CASE("jump starts Warp up when alignment hands off to launch") {
+// The stationary hold starts the 'Warp up' cue the moment the brake hands
+// off (the original pre-stages the sound at the stop), then the fire lands
+// once the hold passes the 30-tick engage threshold with the cue finished.
+TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F; // beyond the no-jump radius
   state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
   state.stat_cache_valid = true;
   REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
 
-  // The stopped handoff only enters the alignment hold.
+  // The stopped handoff enters the hold and latches the cue immediately.
   NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   REQUIRE(state.travel.engaging);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
   REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
-  CHECK_FALSE(state.warp_up_sound_pending);
-  CHECK_FALSE(state.travel.warp_up_started);
-
-  // The sound is latched precisely when turn completion starts the zoom.
-  bool cue_latched = false;
-  for (int f = 0; f < 240 && !state.travel.just_completed; ++f) {
-    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-    if (state.warp_up_sound_pending) {
-      cue_latched = true;
-      state.warp_up_sound_pending = false;
-      break;
-    }
-  }
-  REQUIRE(cue_latched);
   CHECK(state.travel.warp_up_started);
-  CHECK_FALSE(state.warp_up_sound_pending);
-  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kWarmup);
+  CHECK(state.warp_up_sound_pending);
+  state.warp_up_sound_pending = false; // consumed by the audio loop
 
-  // The longer zoom then lands the boom/arrival.
-  bool flash_armed = false;
-  bool warp_out_latched = false;
-  for (int f = 0; f < 420 && !state.travel.just_completed; ++f) {
+  // With no cue voice active the fire lands just past the 30-tick threshold
+  // (0.5 ticks per 16.67 ms frame -> ~62 frames).
+  for (int f = 0; f < 200 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-    if (state.screen_flash_intensity > 0.0F) {
-      flash_armed = true;
-    }
-    if (state.warp_out_sound_pending) {
-      warp_out_latched = true;
-    }
   }
   CHECK(state.travel.just_completed);
-  CHECK(flash_armed);
-  CHECK(warp_out_latched);
   CHECK(state.player.current_system_id == 1);
 }
 
@@ -448,59 +440,42 @@ TEST_CASE("jump heading uses the linked systems' map vector") {
                                 6.28318530717958646F)) < 0.001F);
 }
 
-// The zoom advances the ship at increasing speed along the jump heading
-// (the origin system parallaxes away) and the jump completes AT the end of
-// the zoom with the arrival already in the new system; there is no separate
-// in-tunnel coast phase after the fire.
-TEST_CASE("jump zoom accelerates the ship then arrives (no post-fire tunnel)") {
+// The fire lands while the ship is still in the ORIGIN system and hurls it
+// 1350 px from the destination center along the reverse of the jump bearing,
+// moving at max speed along its heading; there is no separate in-tunnel coast
+// phase after the fire.
+TEST_CASE("jump fire hurls the ship 1350 px past the destination center") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F; // beyond the no-jump radius
   state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
   state.stat_cache_valid = true;
   REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
-  // Populate the effective-stats cache the spaceflight loop maintains so the
-  // zoom's thrust (PlayerThrust) is nonzero (cached_stats defaults to 0).
-  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
-  state.stat_cache_valid = true;
 
-  // Burn through the hold to the zoom.
-  for (int f = 0; f < 200 && state.travel.jump_phase !=
-                                 game::TravelState::JumpPhase::kZoom;
-       ++f) {
+  const float max_speed = state.cached_stats.speed_raw / 100.0F;
+  REQUIRE(max_speed > 0.0F);
+
+  for (int f = 0; f < 400 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
   }
-  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kZoom);
-  REQUIRE(state.travel.engaging);
-  REQUIRE(state.player.current_system_id == 0); // still in the ORIGIN system
-
-  const float x0 = state.player.pos_x;
-  const float y0 = state.player.pos_y;
-  for (int f = 0; f < 20; ++f) {
-    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  }
-  // The ship is actually accelerating forward: position advances and the
-  // heading points along the jump bearing, so the origin system falls away.
-  CHECK(std::hypot(state.player.pos_x - x0, state.player.pos_y - y0) > 1.0F);
-  const float align_delta = std::abs(
-      std::remainder(state.travel.jump_heading_rad - state.player.heading,
-                     6.28318530717958646F));
-  CHECK(align_delta < 0.5F);
-
-  // The zoom ends in the boom/arrival: the jump completes at the fire, already
-  // coiling into the NEW system at max speed.
-  for (int f = 0; f < 200 && !state.travel.just_completed; ++f) {
-    NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
-  }
-  CHECK(state.travel.just_completed);
-  CHECK(state.player.current_system_id == 1);
+  REQUIRE(state.travel.just_completed);
+  REQUIRE(state.player.current_system_id == 1);
   CHECK_FALSE(state.travel.engaging);
   CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kIdle);
-  // Arrived at max speed along the jump heading.
+
+  // Arrived at max speed along the heading, exactly 1350 px from the
+  // destination system center (g_hyperspace_engage_velocity_hurl).
   const float arrival_speed =
       std::hypot(state.player.vel_x, state.player.vel_y);
-  CHECK(arrival_speed > 1.0F);
+  CHECK(arrival_speed == Catch::Approx(max_speed).epsilon(0.01F));
+  const auto *dest = state.scenario.System(0x81);
+  REQUIRE(dest != nullptr);
+  const float hurl = std::hypot(state.player.pos_x - dest->pos_x,
+                                state.player.pos_y - dest->pos_y);
+  CHECK(hurl == Catch::Approx(1350.0F).epsilon(0.01F));
 }
 
 // The fire moment must arm the full-screen flash (the original's centered
@@ -516,7 +491,10 @@ TEST_CASE("jump fire arms the screen flash") {
   REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
 
   bool flash_armed = false;
-  // Alignment and the longer zoom precede the fire.
+  // Engage with the ship beyond the no-jump radius; the brake + hold then
+  // lead to the fire.
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F;
   for (int f = 0; f < 420 && !state.travel.just_completed; ++f) {
     NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
     if (state.screen_flash_intensity > 0.0F) {

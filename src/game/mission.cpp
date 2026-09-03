@@ -1713,7 +1713,7 @@ bool Mission_TriggerLandingInteractions(
     // re-offerable (see 0x00448670's -1 arm).
     state.mission_interaction_shown[static_cast<std::size_t>(candidate)] = 1;
   }
-  // Recheck timer: DAT_00776af4 = NovaTime_GetTicksMs() + NovaRandom_Range(30)
+  // Recheck timer: DAT_00776af4 = NovaTime_GetTickCount60Hz() + NovaRandom_Range(30)
   // + 30. Consumed by the services windows; stored for the future consumers.
   state.mission_interaction_recheck_at_ms =
       static_cast<std::int32_t>(now_ms) +

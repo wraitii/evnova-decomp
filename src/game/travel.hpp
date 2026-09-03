@@ -2,16 +2,13 @@
 
 // Clean-room cross-system travel (the plain hyperspace jump between adjacent
 // systems). This does NOT cover hypergate/wormhole destination selection
-// (which needs the interaction dialog) or the full in-flight hyperspace flight
-// (Stellar_HandlePlayerHyperspaceSequence, 0x0044f3d0 -- 2670 lines entangled
-// with audio, fleet warp-sync and missions). It reconstructs the faithful,
-// self-contained primitives and string them into an explicit jump state
+// (which needs the interaction dialog). It reconstructs the faithful,
+// self-contained primitives and strings them into an explicit jump state
 // machine that the spaceflight loop ticks once a frame:
 //
-//   Stellar_FindNearestAvailableTravelStellar  (0x00462db0)  nearest travel pt
-//   Stellar_CanShipInitiateJumpSequence        (0x00415b80)  fuel/mission gate
-//   the jump-complete block in Ship_HandlePlayerShipCore      fuel burn + the
-//     current_system_id change, reposition, shield/armor refill, star re-spawn
+//   the jump blocks in Ship_HandlePlayerShipCore (0x0044aa70): the engage
+//     gates (0x0044c195 dispatch), the turnaround/hold physics, and the fire
+//     + arrival block at PlayerTick_HyperspaceSequenceAnchor (0x0044f3d0)
 //
 // Mapping (confirmed from the decomp + the Bible): a System's adjacency block
 // is 32 entries -- indices 0..15 are the destination systems (Con1-16, our
@@ -22,31 +19,36 @@
 // links to Tichel at slot 3 with no travel stellar there, yet 'j' still jumps
 // Kania->Tichel). So a plotted destination is resolved purely against links.
 //
-// The in-flight hyperspace flight is modelled as visible phases (see the
-// NovaTravel_Tick notes below), mirroring the original's pre-fire block in
-// Ship_HandlePlayerShip (0x0044b120, travel_transfer_mode == 3):
-//   kBrake -- while the ship still has velocity it turns around (at the class
-//     turn rate) to face the REVERSE of its velocity (flying out from the
-//     system, that points back toward the jump vector), brakes by
-//     _DAT_005755f0 (0.992)/frame, and once within max(class turn+1, 20) deg of
-//     that bearing (a facing window, not a turn speed) thrusts back along it,
-//     ramping the engine glow by +3/frame to 24. Ends when the ship has come
-//     to a stop (/vel/ < 0.5).
-//   kHold -- finishes turning the hull onto the destination-system bearing.
-//   kWarmup -- starts the rising 'Warp up' cue and holds for two seconds.
-//   kZoom -- the engine glow ramps and the
-//     ship thrusts to max speed along the jump heading so the ORIGIN system
-//     parallaxes away (spaceflight view renders the streaking star tunnel via
-//     the world movement delta). Duration approximates the original's
-//     Stellar_GetJumpSequenceDurationMs / ShipClassDef.jump_duration_multiplier
-//     (TODO(decomp)).
-//   fire -- at the end of the zoom the boom/arrival lands: full-screen flash +
-//     'Warp out' cue + system change, arriving in the NEW system at max speed;
-//     control returns to normal flight (no separate post-fire tunnel phase).
-// The original also stages jump audio (Stellar_TriggerHyperspaceAudioOnce,
-// NovaAudio_PreStageJumpSoundBySeconds) and warp-syncs escort ships by jump
-// depth (Stellar_ComputeShipJumpDepth); those remain documented divergences
-// for a later pass.
+// The visible phases are (see the NovaTravel_Tick notes below):
+//   kBrake -- while |round(vel)| >= 2 on either axis the ship faces the
+//     REVERSE of its velocity, retro-thrusts once inside the facing window
+//     max(class turn+1, 20) deg (a facing window, not a turn speed), ramps
+//     the engine glow by +3/tick to 24, and damps velocity by
+//     g_jump_turnaround_velocity_damp (0x5755f0, 0.99204) per 30 Hz tick.
+//   kHold -- velocity damps by g_hyperspace_slow_phase_velocity_damp
+//     (0x5755f8, 0.98007), the hull turns onto the map bearing toward the
+//     destination system (the per-frame re-aim at LAB_0044edfd), and the
+//     'Warp up' cue plays. The tail of the hold is the TUNNEL: once the hull
+//     faces the jump bearing within max(class turn, 30 deg) the position
+//     advances along it by min(progress, 50) px/tick with progress =
+//     elapsed_60hz*multiplier/(364*0.01) - 35/multiplier -- both the elapsed
+//     clock and the 364 duration are 1/60 s ticks (duration = the cue's own
+//     length, snd 128 frames*60/rate), so for a stock ship the ramp starts
+//     ~2.1 s into the hold and hits the cap at ~5.2 s -- and the engine glow
+//     overdrives +4/tick to 32 (past the normal 24). The fire lands once the
+//     hold passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks) and the
+//     cue has finished (~6.1 s) -- the boom lands as the cue resolves.
+//   fire -- the boom/arrival: full-screen flash + 'Warp out' cue + the
+//     position hurl 1350 px from the destination center along the map
+//     bearing + 180, velocity reset to max speed along the current heading,
+//     fuel burn + system change. Control returns to normal flight
+//     immediately (no separate post-fire tunnel phase); the ship streaks
+//     through the new system while coasting.
+// Known remaining divergences: escort warp-sync and the multi-jump outfit
+// (Stellar_ComputeShipJumpDepth 0x0046cdd0), ShipClassDef
+// jump_duration_multiplier-driven audio staging
+// (NovaAudio_PreStageJumpSoundBySeconds), the multi-hop planned-route jump
+// continuation, and the disabled-in-jump 'hyperspace field collapsed' exit.
 
 #include <cstdint>
 
@@ -61,6 +63,13 @@ namespace game {
 // (class fuel_capacity >= 100) / the completion decrement `fuel_points -=
 // FLOAT_kJumpFuelCost` (named 0x005755a4 in Ghidra).
 inline constexpr float kJumpFuelCost = 100.0F;
+
+// Voice tag for the 'Warp up' cue (snd 128) played at the start of the
+// stationary hold. The fire gate counts active instances of this handle
+// (NovaAudio_CountActiveByHandle on g_hyperspace_sound_handle_warp_up) and
+// only fires the jump once the cue has finished; the spaceflight loop passes
+// the live count into NovaTravel_Tick.
+inline constexpr int kHyperspaceWarpUpSoundKey = 128;
 
 // Ghidra 0x00462db0 Stellar_FindNearestAvailableTravelStellar: returns the
 // travel-slot index (0..15) of the nearest available travel stellar in the
@@ -91,19 +100,38 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
                                        const Ship &ship);
 
 // Ticks the cross-system travel state machine once per spaceflight frame.
-// Handles (a) engaging a jump when the travel key is pressed near an available
-// travel point, (b) running the engaged visible phases (brake onto the reverse
-// of the jump vector, a short alignment hold, then the zoom thrust at max
-// speed while the origin starfield streams away), and (c) completing the jump
-// at the end of the zoom (fuel burn + system change + arrival at max speed +
-// refill).
-// `travel_input` is the edge-triggered travel key state; `frame_time_ms` scales
-// the phases. Reads/writes state.travel; sets just_completed the frame the
-// jump lands. Requires a valid scenario. While engaging, the caller must skip
-// player movement integration (the jump owns the ship) and the spaceflight
-// view branches on state.travel.engaging to render the star tunnel. The
-// completed jump does NOT re-spawn the starfield itself; the spaceflight loop
-// observes just_completed and calls SpaceflightView::SpawnAmbientStars.
+// Mirrors the jump blocks of Ship_HandlePlayerShipCore (0x0044aa70):
+//  (a) Engage (travel key, original binding 14): requires a plotted
+//      destination (travel_transfer_mode == 3; a bare 'j' with nothing plotted
+//      only shows the "select a destination" reminder, 0x0044c628), fuel >=
+//      100, and the ship to be outside the no-jump radius around the SYSTEM
+//      CENTER (Stellar_ComputeTravelRangeSq 0x00465610; denial STR# 0x7d2
+//      0x2a). Engaging clears the stellar selection (the reticle hides, the
+//      nav panel switches to Hyperspace) and starts the brake.
+//  (b) kBrake: while |round(vel)| >= 2 on either axis the ship faces the
+//      REVERSE of its velocity and retro-thrusts once inside the facing window
+//      max(class turn + 1, 20 deg), damping velocity by
+//      g_jump_turnaround_velocity_damp (0x5755f0, 0.9920) per 30 Hz tick.
+//  (c) kHold: velocity damps by g_hyperspace_slow_phase_velocity_damp
+//      (0x5755f8, 0.9801), the hull turns onto the map bearing toward the
+//      destination system, and the 'Warp up' cue plays. The fire lands when
+//      the hold passes 30 ticks (30 Hz) and the cue has finished
+//      (g_hyperspace_engage_hold_30hz 0x5755a8); the tunnel ramp schedule is
+//      cue-relative (see (b)/(c) notes in the NovaTravel_Tick docs below).
+//  (d) Fire (0x0044f3d0 area): position hurls 1350 px
+//      (g_hyperspace_engage_velocity_hurl 0x57600) from the destination
+//      center along the map bearing + 180 (the near side), velocity resets to
+//      max speed along the current heading, fuel burns, the system changes
+//      and control returns to normal flight immediately -- the ship streaks
+//      through the new system while coasting.
+// `travel_input` is the edge-triggered travel key state; `frame_time_ms`
+// scales the phases; `warp_up_sound_active` reports whether the 'Warp up' cue
+// (kHyperspaceWarpUpSoundKey) is still playing, gating the fire exactly like
+// the original's audio latch. Reads/writes state.travel; sets just_completed
+// the frame the jump lands. While engaging, the caller must skip player
+// movement integration (the jump owns the ship). The completed jump does NOT
+// re-spawn the starfield itself; the spaceflight loop observes just_completed
+// and calls SpaceflightView::SpawnAmbientStars.
 // ---- Galaxy discovery (fog of war) ---------------------------------------
 // The original's per-system fog state is SystemDef.discovery_state (+0x90):
 // 0 = unknown, >=1 = visited (in-flight jump arrival writes 1, landed/stellar
@@ -269,6 +297,13 @@ bool NovaStarmap_EditRouteAtHop(GameState &state, std::int16_t hit);
 // 0x004a3aa0 action-8 branch) and disarms the plotted travel slot.
 void NovaStarmap_ClearRoute(GameState &state);
 
-void NovaTravel_Tick(GameState &state, bool travel_input, float frame_time_ms);
+// `warp_up_sound_active`: true while the 'Warp up' cue voice is still playing
+// (SdlAudio::CountActiveByKey(kHyperspaceWarpUpSoundKey) > 0). The fire gate
+// waits for it to finish once the hold passes 30 ticks, mirroring the
+// original's NovaAudio_CountActiveByHandle latch.
+void NovaTravel_Tick(GameState &state,
+                     bool travel_input,
+                     float frame_time_ms,
+                     bool warp_up_sound_active = false);
 
 } // namespace game

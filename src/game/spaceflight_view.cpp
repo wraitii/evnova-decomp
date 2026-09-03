@@ -24,7 +24,6 @@ namespace game {
 namespace {
 
 constexpr float kTwoPi = 6.283185307179586F;
-constexpr float kTunnelSpeedPxPerMs = 1.2F;
 // Fixed logical play area reserved at the bottom of the window for the HUD
 // strip (the placeholder HUD sits at y 400..460). At the default 640x480 window
 // the space viewport is the 640x400 region above it.
@@ -42,18 +41,11 @@ struct Viewport {
   int h = kViewportHeight;
 };
 
-// During the jump zoom the player stays screen-centred while the rest of the
-// current system is driven backward at the same pace as the warp-star field.
+// During the jump the ship stays screen-centred; the camera is the plain
+// player position (the tunnel ramp drives the ship's own position, so the
+// camera ride comes for free).
 std::pair<float, float> WorldCameraPosition(const GameState &state) {
-  float x = state.player.pos_x;
-  float y = state.player.pos_y;
-  if (state.travel.engaging &&
-      state.travel.jump_phase == TravelState::JumpPhase::kZoom) {
-    const float drive = kTunnelSpeedPxPerMs * state.travel.zoom_elapsed_ms;
-    x += std::sin(state.travel.jump_heading_rad) * drive;
-    y -= std::cos(state.travel.jump_heading_rad) * drive;
-  }
-  return {x, y};
+  return {state.player.pos_x, state.player.pos_y};
 }
 
 [[nodiscard]] Viewport CurrentViewport(const SdlPlatform &platform) {
@@ -755,32 +747,6 @@ void SpaceflightView::UpdateAmbientStars(float dx, float dy) {
   }
 }
 
-// Drives the starfield during the hyperspace zoom. The ship accelerates to
-// max speed and its world position advances each frame (travel.cpp kZoom), so
-// every world item scrolls past the camera; on top of that the ambient stars
-// get this uniform warp drive along the REVERSE of the jump heading so the
-// field visibly streaks as the origin system whooshes away. The wrap-around in
-// DrawBackground keeps the field continuously populated as stars leave one
-// edge and re-enter the opposite. `speed` is the overall tunnel pace
-// (independent of the saved per-particle parallax speed, which would
-// otherwise freeze slow stars).
-void SpaceflightView::UpdateAmbientStarsTunnel(float jump_heading_rad,
-                                               float frame_time_ms) {
-  // Tunnel stream speed in px/ms (a brisk forward whoosh that reads clearly
-  // over the ~700 ms zoom). Measured against the 400px-tall viewport.
-  const float drive = kTunnelSpeedPxPerMs * frame_time_ms;
-  // Reverse heading: stars stream backward relative to the forward jump.
-  const float dx = -std::sin(jump_heading_rad) * drive;
-  const float dy = std::cos(jump_heading_rad) * drive;
-  for (auto &s : ambient_stars_) {
-    if (!s.active) {
-      continue;
-    }
-    s.pos_x += dx;
-    s.pos_y += dy;
-  }
-}
-
 // Draws the solid per-system space backdrop (a flat tint from SystemDef
 // BkgndColor, pure black when unset) and then the active ambient star
 // particles. Ghidra [0x00497df0]: Frame_RenderViewportBackground clears + fills
@@ -817,15 +783,6 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   // indexed blend), not a pixel dimension - so each star stays ~5px regardless.
   const Viewport vp = CurrentViewport(platform);
   const SpriteAsset *sheet = StarFieldSheet(platform);
-  // During the hyperspace zoom, draw each streaming star as a short
-  // motion-blur streak along the reverse of the jump heading (like the
-  // original's tunnel whoosh). The star positions themselves are driven each
-  // frame by UpdateAmbientStarsTunnel; here we add the visual rails.
-  const bool tunnel = state.travel.engaging &&
-                      state.travel.jump_phase == TravelState::JumpPhase::kZoom;
-  const float tunnel_sx = -std::sin(state.travel.jump_heading_rad);
-  const float tunnel_sy = std::cos(state.travel.jump_heading_rad);
-  constexpr int kTunnelStreakSteps = 6;
   for (const auto &s : ambient_stars_) {
     if (!s.active) {
       continue;
@@ -836,40 +793,16 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
       SpriteDrawOptions opts;
       opts.wrap = true;
       opts.linear_scale = true;
-      if (tunnel) {
-        // Draw the star several times receding along the reverse heading with
-        // increasing spacing and fading alpha, producing a streaking rail.
-        constexpr float kStepPx = 7.0F;
-        for (int i = 0; i < kTunnelStreakSteps; ++i) {
-          opts.alpha_mod = 1.0F - static_cast<float>(i) /
-                                      static_cast<float>(kTunnelStreakSteps);
-          const float sx =
-              s.pos_x + tunnel_sx * kStepPx * static_cast<float>(i);
-          const float sy =
-              s.pos_y + tunnel_sy * kStepPx * static_cast<float>(i);
-          DrawSprite(renderer,
-                     *sheet,
-                     s.frame,
-                     sx,
-                     sy,
-                     state.player.pos_x,
-                     state.player.pos_y,
-                     vp.w,
-                     vp.h,
-                     opts);
-        }
-      } else {
-        DrawSprite(renderer,
-                   *sheet,
-                   s.frame,
-                   s.pos_x,
-                   s.pos_y,
-                   state.player.pos_x,
-                   state.player.pos_y,
-                   vp.w,
-                   vp.h,
-                   opts);
-      }
+      DrawSprite(renderer,
+                 *sheet,
+                 s.frame,
+                 s.pos_x,
+                 s.pos_y,
+                 state.player.pos_x,
+                 state.player.pos_y,
+                 vp.w,
+                 vp.h,
+                 opts);
       continue;
     }
     // Fallback when the star-field sheet is unavailable: a small single-pixel
@@ -945,19 +878,12 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
       instance.anim_time = -1.0F;
     }
   }
-  // Ambient-star spatial parallax (moves by the ship's movement delta).
-  if (state.travel.engaging &&
-      state.travel.jump_phase == TravelState::JumpPhase::kZoom) {
-    // Hyperspace tunnel: the stars stream backward past the (fixed) ship as
-    // it accelerates into the jump. Override the normal ship-parallax movement
-    // with a large drive along the reverse of the jump heading each frame so
-    // the field visibly streaks; the stars wrap around the viewport in
-    // DrawBackground so the tunnel stays populated.
-    UpdateAmbientStarsTunnel(state.travel.jump_heading_rad, frame_time_ms);
-  } else {
-    // Normal in-system parallax (moves by the ship's movement delta).
-    UpdateAmbientStars(dx, dy);
-  }
+  // Ambient-star spatial parallax (moves by the ship's movement delta). The
+  // pre-fire tunnel rush is carried by the ship's own position ramp (see
+  // TravelState::tunnel_elapsed_60hz in travel.cpp), which this camera parallax
+  // follows; TODO(decomp) the original additionally streaks the starfield
+  // from the tunnel progress (FLOAT_007354a0 = progress*0.3 - 15.0).
+  UpdateAmbientStars(dx, dy);
 }
 
 void SpaceflightView::DrawFadingEffects(SdlPlatform &platform,
@@ -1634,7 +1560,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
 // original's ai_secondary_target_slot >= 0) the four corner brackets are drawn
 // around that stellar at its screen position, using the 8-frame cicn set
 // 10000-10007 (frame = base + corner; base is 0 or 4 by the destination's
-// orientation flag -- approximated as 0 here, TODO(decomp)). The offset is
+// hazard marker). The offset is
 // ceil(max(frame height, frame width)/2) + the decaying travel pulse, sized by
 // the destination stellar's sprite set; the corners use the same asymmetric
 // placement as the ship reticle. There is no SDL-line fallback: a missing cicn
@@ -1644,6 +1570,13 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
   const std::int16_t stellar_id = state.travel.selected_stellar_id;
   if (stellar_id < 0x80) {
     return; // no destination selected
+  }
+  // The original draws the brackets only while travel_transfer_mode == 2
+  // (stellar navigation): a plotted jump (mode 3) or an engaged sequence
+  // hides them regardless of the selection (0x0042eac0's early-out).
+  if (state.travel.engaging || state.travel.hyperspace_mode ||
+      state.player.travel_transfer_mode == 3) {
+    return;
   }
   const auto *st = state.scenario.Stellar(stellar_id);
   if (!st || !st->is_available ||
@@ -1674,9 +1607,10 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
   }
   const float off = std::ceil(full * 0.5F) + std::round(pulse);
 
-  // Frame base 0 (the original reads the destination's orientation flag for
-  // this; ours is not yet reconstructed, so 0).
-  const int frame_base = 0;
+  // Frame base by the destination's hazard marker (Ghidra StellarDef
+  // hazard_marker +0x46 in NovaUi_UpdateTravelTargetReticle 0x0042eac0:
+  // marker clear -> frames 0..3, set -> frames 4..7 of cicn 10000+).
+  const int frame_base = st->hazard_marker ? 4 : 0;
   const float pos[4][2] = {{wx - off - 16.0F, wy - off - 16.0F},
                            {wx + off, wy - off - 16.0F},
                            {wx + off, wy + off},

@@ -781,9 +781,15 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
     }
     state.pending_ui_sounds.clear();
-    // Cross-system hyperspace jump state machine (travel.cpp): engages on the
-    // 'j' key near an available travel point, then drives the visible phases.
-    NovaTravel_Tick(state, input.travel, frame_time_ms);
+    // Cross-system hyperspace jump state machine (travel.cpp): engages on
+    // the 'j' key with a plotted destination, then drives the brake and the
+    // warp-up hold before the fire. The 'Warp up' voice count gates the fire
+    // like the original's NovaAudio_CountActiveByHandle latch.
+    NovaTravel_Tick(state,
+                    input.travel,
+                    frame_time_ms,
+                    audio.CountActiveByKey(game::kHyperspaceWarpUpSoundKey) >
+                        0);
     // Play the hyperspace jump sounds latched by the travel state machine
     // (the 'Warp up' cue as the zoom thrust begins and the 'Warp out' boom at
     // the fire/arrival, synced with the screen flash). The loop owns the
@@ -793,8 +799,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // [Ghidra 0x00431420].
     if (state.warp_up_sound_pending) {
       if (state.warp_up_sound.has_value()) {
-        // Fit the native six-second cue within warm-up plus acceleration.
-        audio.Play(*state.warp_up_sound, 1.0F, 1.5F);
+        // The fire gate in NovaTravel_Tick waits for this voice to finish, and
+        // the tunnel ramp schedule is cue-relative, so this rate sets the
+        // whole jump cadence. The original stages the cue at rate
+        // 1.0/jump_duration_multiplier (0x0046ab00: 65536/multiplier
+        // fixed-point; chassis-derived 0.91..2.08 -> rates 0.48..1.1). The
+        // port pins the multiplier to 1.0 (not decoded into ShipClass yet),
+        // so the cue plays at rate 1.0: 6.08 s of rising cue, ~2.1 s of
+        // stationary hold, ramp onset, boom as the cue resolves.
+        audio.Play(
+            *state.warp_up_sound, 1.0F, 1.0F, game::kHyperspaceWarpUpSoundKey);
       }
       state.warp_up_sound_pending = false;
     }
