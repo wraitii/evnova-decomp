@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <vector>
 
 // Forward declarations of the SDL types (defined in sdl_platform.hpp / SDL3,
@@ -312,10 +313,24 @@ private:
   // Ghidra Shot_UpdateImpactEffectSprites (0x0042e160): draws the 32-slot
   // impact animation pool above shots and beams but below ship sprites.
   void DrawImpactEffects(SdlPlatform &platform, const GameState &state);
-  // Minimal SDL representation of Ghidra Shot_DrawBeamQueue: draws live beam
-  // queue endpoints as one-segment lines. Beam flare/kink geometry remains
-  // deferred until the original beam sprite fields are reconstructed.
-  void DrawBeams(SdlPlatform &platform, const GameState &state);
+  // Ghidra 0x00438c40 (unnamed under-ships beam pass, draw proc of the second
+  // gameplay sprite-world layer): draws queued beams whose weapon sets
+  // flags_secondary 0x2000 (Bible "display the beam underneath ships").
+  // Below shots/ships, above the background.
+  void DrawBeamsUnderShips(SdlPlatform &platform, const GameState &state);
+  // Ghidra Shot_DrawBeamHitQueueForSurface (0x00438810), visible non-0x2000
+  // path: the topmost gameplay layer draws every other queued beam above ships
+  // and effects. The original's kinked/flare branches (and twin Shot_DrawBeam-
+  // Queue 0x004386f0) are sprite-world save/restore erase machinery, replaced
+  // wholesale by SDL's back buffer - TODO(decomp(0x004386f0)) skipped:
+  // software surface-restore pass has no SDL equivalent.
+  void DrawBeamsOverShips(SdlPlatform &platform, const GameState &state);
+  // Jitter source for lightning beams (Ghidra SWBeams_DrawThickFadingBeam
+  // 0x0047a410 draws rand()% per segment). Draw-phase rand() calls mutate the
+  // original's global RNG stream; this port keeps that out of GameState.rng,
+  // so jitter is not replay-identical - TODO(decomp) verify against original
+  // draw determinism.
+  std::mt19937 beam_jitter_rng_{0x424b4541U};
 };
 
 } // namespace game

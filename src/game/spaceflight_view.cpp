@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <random>
 #include <string>
+#include <tuple>
 
 namespace game {
 namespace {
@@ -87,6 +88,361 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
   }
   return static_cast<std::int16_t>(
       std::uniform_int_distribution<int>{0, bound - 1}(rng));
+}
+
+// ---- beam rendering (Ghidra SWBeams.c family) -----------------------------
+
+[[nodiscard]] std::tuple<std::uint8_t, std::uint8_t, std::uint8_t>
+SplitRgb(std::uint32_t packed) {
+  return {static_cast<std::uint8_t>(packed >> 16 & 0xffU),
+          static_cast<std::uint8_t>(packed >> 8 & 0xffU),
+          static_cast<std::uint8_t>(packed & 0xffU)};
+}
+
+// Ghidra Beam_DrawBlendedSegment (0x00479590) + Beam_BlendLineSegment
+// (0x004797b0) alpha profile, re-expressed for SDL. The original rasterizes a
+// 15-bit Bresenham line, blending the beam colour over the saved backdrop at a
+// per-pixel fade on a 0..0x20 scale; here the same profile drives 8-bit-alpha
+// SDL points (alpha*255/32 matches the original alpha/32 linear blend).
+// Per-pixel profile: holds `start_fade`, ramps +1/px up to `plateau` across
+// the first `start_ramp` px, then falls 1/px across the final `end_fade` px
+// before the far endpoint, stopping when it reaches zero. All inputs clamp to
+// 0..0x20 exactly as Beam_DrawBlendedSegment does.
+// Divergence: the original blends in RGB555 surface space; SDL blends 8-bit
+// RGB channels (higher fidelity, same profile).
+void DrawBeamBlendedLine(SDL_Renderer *renderer,
+                         int x0,
+                         int y0,
+                         int x1,
+                         int y1,
+                         std::uint8_t red,
+                         std::uint8_t green,
+                         std::uint8_t blue,
+                         int plateau,
+                         int start_fade,
+                         int start_ramp,
+                         int end_fade) {
+  const auto clamp32 = [](int v) { return std::clamp(v, 0, 0x20); };
+  plateau = clamp32(plateau);
+  start_fade = clamp32(start_fade);
+  start_ramp = clamp32(start_ramp);
+  end_fade = clamp32(end_fade);
+
+  const int dx = x1 - x0;
+  const int dy = y1 - y0;
+  const int adx = std::abs(dx);
+  const int ady = std::abs(dy);
+  const int steps = std::max(adx, ady);
+  if (steps == 0) {
+    return;
+  }
+
+  int alpha = start_ramp > 0 ? start_fade : plateau;
+  int x = x0;
+  int y = y0;
+  const int x_step = dx < 0 ? -1 : 1;
+  const int y_step = dy < 0 ? -1 : 1;
+  int err = steps / 2;
+  for (int step = 0;; ++step) {
+    if (alpha <= 0) {
+      return;
+    }
+    SDL_SetRenderDrawColor(renderer,
+                           red,
+                           green,
+                           blue,
+                           static_cast<std::uint8_t>(alpha * 255 / 0x20));
+    SDL_RenderPoint(renderer, static_cast<float>(x), static_cast<float>(y));
+    if (step == steps) {
+      return;
+    }
+    if (adx >= ady) {
+      x += x_step;
+      err -= ady;
+      if (err < 0) {
+        y += y_step;
+        err += adx;
+      }
+    } else {
+      y += y_step;
+      err -= adx;
+      if (err < 0) {
+        x += x_step;
+        err += ady;
+      }
+    }
+    // BlendLineSegment adjusts the fade after each Bresenham step, measuring
+    // distance along the dominant axis.
+    const int from_start = adx >= ady ? std::abs(x - x0) : std::abs(y - y0);
+    if (from_start < start_ramp) {
+      if (alpha < plateau) {
+        ++alpha;
+      }
+    } else if (steps - from_start < end_fade) {
+      --alpha;
+    } else if (alpha != plateau) {
+      alpha = plateau;
+    }
+  }
+}
+
+// Ghidra SWBeams_DrawShortBeam (0x00479fe0): core + corona of a straight beam
+// between (xa,ya) = muzzle and (xb,yb) = target. Parallel lines are offset
+// along the axis perpendicular to the beam, exactly like the original.
+// Core pass i (i < width): offsets ±i, plateau alpha 0x20 - 0x10*i, fading out
+// over the last 0x14 - 0xa*i px at the target end. Width 0 draws no core
+// (Bible: "A BeamWidth of 0 will have no center beam, just corona glow").
+// Corona pass k: offsets ±(width + k), plateau 0x10 - k*falloff (drawn while
+// > 2), ramping in over 8 - 2k px from the muzzle and out over 8 + 6k px at
+// the target; the caller grows falloff by the decay counter as the beam dies.
+void DrawBeamCoreAndCorona(SDL_Renderer *renderer,
+                           int xa,
+                           int ya,
+                           int xb,
+                           int yb,
+                           std::uint32_t core_color,
+                           int width,
+                           std::uint32_t corona_color,
+                           int falloff) {
+  const bool horizontal = std::abs(xb - xa) >= std::abs(yb - ya);
+  const auto offset_a = [&](int off) -> std::pair<int, int> {
+    return horizontal ? std::pair{xa, ya - off} : std::pair{xa - off, ya};
+  };
+  const auto offset_b = [&](int off) -> std::pair<int, int> {
+    return horizontal ? std::pair{xb, yb - off} : std::pair{xb - off, yb};
+  };
+
+  // Core.
+  const auto [cr, cg, cb] = SplitRgb(core_color);
+  for (int i = 0; i < width; ++i) {
+    const int alpha = 0x20 - 0x10 * i;
+    if (alpha <= 0) {
+      break;
+    }
+    const int end_fade = 0x14 - 0xa * i;
+    const auto [ax, ay] = offset_a(i);
+    const auto [bx, by] = offset_b(i);
+    DrawBeamBlendedLine(
+        renderer, ax, ay, bx, by, cr, cg, cb, alpha, alpha, 0, end_fade);
+    if (i > 0) {
+      const auto [ax2, ay2] = offset_a(-i);
+      const auto [bx2, by2] = offset_b(-i);
+      DrawBeamBlendedLine(
+          renderer, ax2, ay2, bx2, by2, cr, cg, cb, alpha, alpha, 0, end_fade);
+    }
+  }
+
+  // Corona. The original gates the loop on a positive falloff (a zero/negative
+  // value would otherwise never terminate the alpha countdown).
+  const auto [kr, kg, kb] = SplitRgb(corona_color);
+  if (falloff > 0) {
+    int k = 0;
+    int alpha = 0x10;
+    do {
+      const auto [ax, ay] = offset_a(width + k);
+      const auto [bx, by] = offset_b(width + k);
+      DrawBeamBlendedLine(renderer,
+                          ax,
+                          ay,
+                          bx,
+                          by,
+                          kr,
+                          kg,
+                          kb,
+                          alpha,
+                          8 - 2 * k,
+                          2 * k,
+                          8 + 6 * k);
+      const auto [ax2, ay2] = offset_a(-(width + k));
+      const auto [bx2, by2] = offset_b(-(width + k));
+      DrawBeamBlendedLine(renderer,
+                          ax2,
+                          ay2,
+                          bx2,
+                          by2,
+                          kr,
+                          kg,
+                          kb,
+                          alpha,
+                          8 - 2 * k,
+                          2 * k,
+                          8 + 6 * k);
+      alpha -= falloff;
+      ++k;
+    } while (alpha > 2);
+  }
+}
+
+// Ghidra SWBeams_DrawThickFadingBeam (0x0047a410): lightning-beam plotter.
+// Chains round(max(|dx|,|dy|) * density / 2) jittered segments from muzzle to
+// target (jitter ±amplitude per axis; the final two steps land on the exact
+// target), and for each segment draws parallel lines at perpendicular offsets
+// 0..width-1 (mirrored past offset 0) at alpha base - j*0x20/(width+1).
+// Only the first segment ending exactly at the target fades, over 0x20 px.
+void DrawLightningBeam(SDL_Renderer *renderer,
+                       std::mt19937 &rng,
+                       int xa,
+                       int ya,
+                       int xb,
+                       int yb,
+                       std::uint32_t color,
+                       int width,
+                       int density,
+                       int amplitude,
+                       int base_alpha) {
+  const int reach = std::max(std::abs(xb - xa), std::abs(yb - ya));
+  int steps = static_cast<int>(std::lround(static_cast<float>(reach) *
+                                           static_cast<float>(density) * 0.5F));
+  steps = std::max(steps, 1);
+  const float step_x = static_cast<float>(xb - xa) / steps;
+  const float step_y = static_cast<float>(yb - ya) / steps;
+  std::uniform_int_distribution<int> jitter{-amplitude, amplitude};
+
+  const bool horizontal = std::abs(xb - xa) >= std::abs(yb - ya);
+  const auto [cr, cg, cb] = SplitRgb(color);
+
+  int prev_x = xa;
+  int prev_y = ya;
+  for (int idx = 0; idx < steps; ++idx) {
+    int cur_x;
+    int cur_y;
+    if (idx >= steps - 2) {
+      cur_x = xb;
+      cur_y = yb;
+    } else {
+      cur_x =
+          static_cast<int>(std::ceil(xa + step_x * (idx + 1))) + jitter(rng);
+      cur_y =
+          static_cast<int>(std::ceil(ya + step_y * (idx + 1))) + jitter(rng);
+    }
+    const int end_fade = idx == steps - 2 ? 0x20 : 0;
+    for (int j = 0; j < width; ++j) {
+      const int alpha = std::max(1, base_alpha - j * (0x20 / (width + 1)));
+      if (horizontal) {
+        DrawBeamBlendedLine(renderer,
+                            prev_x,
+                            prev_y + j,
+                            cur_x,
+                            cur_y + j,
+                            cr,
+                            cg,
+                            cb,
+                            alpha,
+                            alpha,
+                            0,
+                            end_fade);
+        if (j > 0) {
+          DrawBeamBlendedLine(renderer,
+                              prev_x,
+                              prev_y - j,
+                              cur_x,
+                              cur_y - j,
+                              cr,
+                              cg,
+                              cb,
+                              alpha,
+                              alpha,
+                              0,
+                              end_fade);
+        }
+      } else {
+        DrawBeamBlendedLine(renderer,
+                            prev_x + j,
+                            prev_y,
+                            cur_x + j,
+                            cur_y,
+                            cr,
+                            cg,
+                            cb,
+                            alpha,
+                            alpha,
+                            0,
+                            end_fade);
+        if (j > 0) {
+          DrawBeamBlendedLine(renderer,
+                              prev_x - j,
+                              prev_y,
+                              cur_x - j,
+                              cur_y,
+                              cr,
+                              cg,
+                              cb,
+                              alpha,
+                              alpha,
+                              0,
+                              end_fade);
+        }
+      }
+    }
+    prev_x = cur_x;
+    prev_y = cur_y;
+  }
+}
+
+// Shared per-beam appearance for the two visible beam passes (Ghidra 0x00438c40
+// and Shot_DrawBeamHitQueueForSurface 0x00438810, which feed the same SWBeams
+// plotters with the same arguments; 0x00438810's twin-surface branches differ
+// only by destination surface).
+void DrawQueuedBeam(SdlPlatform &platform,
+                    std::mt19937 &jitter_rng,
+                    const GameState &state,
+                    const BeamHit &beam,
+                    const Weapon &weapon) {
+  const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
+  const auto screen_x = [&](float world_x) {
+    return static_cast<int>(
+        std::lround(world_x - camera_x + static_cast<float>(vp.w) / 2.0F));
+  };
+  const auto screen_y = [&](float world_y) {
+    return static_cast<int>(
+        std::lround(world_y - camera_y + static_cast<float>(vp.h) / 2.0F));
+  };
+  const int xa = screen_x(beam.source_x);
+  const int ya = screen_y(beam.source_y);
+  const int xb = screen_x(beam.target_x);
+  const int yb = screen_y(beam.target_y);
+  // WeaponDef +0x72 doubles as Bible BeamWidth for beam modes.
+  const int width = weapon.shot_anim_frame_dwell;
+  SDL_Renderer *renderer = platform.renderer();
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+  if (weapon.beam_lightning_density > 0) {
+    DrawLightningBeam(renderer,
+                      jitter_rng,
+                      xa,
+                      ya,
+                      xb,
+                      yb,
+                      weapon.beam_core_color,
+                      width,
+                      weapon.beam_lightning_density,
+                      weapon.beam_lightning_amplitude,
+                      0x20 - beam.animation_counter);
+  } else {
+    DrawBeamCoreAndCorona(renderer,
+                          xa,
+                          ya,
+                          xb,
+                          yb,
+                          weapon.beam_core_color,
+                          width,
+                          weapon.beam_corona_color,
+                          weapon.beam_falloff + beam.animation_counter);
+  }
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
+// Common queue gate for the visible beam passes: the original skips records
+// whose lifetime is below the active sentinel or whose owner slot is unset.
+[[nodiscard]] bool BeamRecordVisible(const GameState &state,
+                                     const BeamHit &beam) {
+  if (beam.lifetime_ticks < -1 || beam.weapon_id < 0 ||
+      beam.owner_ship_slot < 0) {
+    return false;
+  }
+  const Weapon *weapon =
+      state.scenario.Weapon(static_cast<std::int16_t>(beam.weapon_id + 0x80));
+  return weapon != nullptr;
 }
 
 } // namespace
@@ -958,44 +1314,46 @@ void SpaceflightView::DrawImpactEffects(SdlPlatform &platform,
   }
 }
 
-void SpaceflightView::DrawBeams(SdlPlatform &platform, const GameState &state) {
-  const Viewport vp = CurrentViewport(platform);
-  const auto [camera_x, camera_y] = WorldCameraPosition(state);
-  SDL_Renderer *const renderer = platform.renderer();
+// Ghidra 0x00438c40 (unnamed under-ships beam pass): draw proc of the second
+// gameplay sprite-world layer, below shots and ships. Draws only beams whose
+// weapon sets flags_secondary 0x2000 (Bible "display the beam underneath
+// ships"); all other beams render on the topmost layer instead.
+void SpaceflightView::DrawBeamsUnderShips(SdlPlatform &platform,
+                                          const GameState &state) {
   for (const BeamHit &beam : state.beam_hit_queue) {
-    if (beam.lifetime_ticks < -1 || beam.weapon_id < 0 ||
-        beam.owner_ship_slot < 0) {
+    if (!BeamRecordVisible(state, beam)) {
       continue;
     }
     const Weapon *weapon =
         state.scenario.Weapon(static_cast<std::int16_t>(beam.weapon_id + 0x80));
-    if (weapon == nullptr) {
+    if ((weapon->flags_secondary & 0x2000U) == 0U) {
       continue;
     }
-    const auto screen_x = [camera_x, &vp](float world_x) {
-      return world_x - camera_x + static_cast<float>(vp.w) / 2.0F;
-    };
-    const auto screen_y = [camera_y, &vp](float world_y) {
-      return world_y - camera_y + static_cast<float>(vp.h) / 2.0F;
-    };
-    const std::uint32_t packed = weapon->ionization_color;
-    const std::uint8_t red =
-        packed != 0 ? static_cast<std::uint8_t>(packed >> 16) : 255;
-    const std::uint8_t green =
-        packed != 0 ? static_cast<std::uint8_t>(packed >> 8)
-                    : (weapon->energy_damage > weapon->mass_damage ? 220 : 150);
-    const std::uint8_t blue =
-        packed != 0 ? static_cast<std::uint8_t>(packed)
-                    : (weapon->energy_damage > weapon->mass_damage ? 255 : 64);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer, red, green, blue, 220);
-    SDL_RenderLine(renderer,
-                   screen_x(beam.source_x),
-                   screen_y(beam.source_y),
-                   screen_x(beam.target_x),
-                   screen_y(beam.target_y));
+    DrawQueuedBeam(platform, beam_jitter_rng_, state, beam, *weapon);
   }
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
+// Ghidra Shot_DrawBeamHitQueueForSurface (0x00438810), visible path: the
+// topmost gameplay layer draws every beam that does NOT set flags_secondary
+// 0x2000 (those render underneath ships via DrawBeamsUnderShips). The
+// original's kinked/flare branches and its twin Shot_DrawBeamQueue
+// (0x004386f0) copy saved background pixels back along the previous frame's
+// beam line — sprite-world save/restore erase machinery with no SDL
+// equivalent, deliberately not reproduced.
+// TODO(decomp(0x00438810)) skipped: twin-surface / erase branches.
+void SpaceflightView::DrawBeamsOverShips(SdlPlatform &platform,
+                                         const GameState &state) {
+  for (const BeamHit &beam : state.beam_hit_queue) {
+    if (!BeamRecordVisible(state, beam)) {
+      continue;
+    }
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(beam.weapon_id + 0x80));
+    if ((weapon->flags_secondary & 0x2000U) != 0U) {
+      continue;
+    }
+    DrawQueuedBeam(platform, beam_jitter_rng_, state, beam, *weapon);
+  }
 }
 
 // Draws the whole in-flight world, compositing every visible entity in the
@@ -1005,28 +1363,35 @@ void SpaceflightView::DrawBeams(SdlPlatform &platform, const GameState &state) {
 // bottom to top, is locked as:
 //
 //   background (space tint + ambient starfield)   -- DrawBackground
-//   stellar bodies (planets / stations)           -- DrawStellarBodies
+//   under-ships beams (flags_secondary 0x2000)     -- DrawBeamsUnderShips
+//   stellar bodies (planets / stations)            -- DrawStellarBodies
 //   shots / projectiles                           -- DrawShots
 //   NPC ships (active ships in the current system) -- DrawNpcShips
 //   player ship + engine-glow                     -- (below)
+//   over-ships beams (all other beams)             -- DrawBeamsOverShips
 //
 // That is: the player's hull and glow composite over everything else in the
 // scene (front-most), NPC ships and shots pass between the ship and the
-// stellar/backdrop layers. This matches a ship-centred camera where the
-// player's own ship is the front-most occupant of the scene. Keeping the order
+// stellar/backdrop layers, and beam weapons render in two of the original's
+// sprite-world layers: 0x2000-flagged beams sit on the second layer (above
+// the backdrop only, Ghidra 0x00438c40) while every other beam sits on the
+// topmost layer above ships and effects (Ghidra Shot_DrawBeamHitQueueFor-
+// Surface 0x00438810). Keeping the order
 // explicit here (rather than spread across the per-subsystem drawers) makes the
 // composed precedence auditable and lets a future layer-table refactor replace
 // the fixed sequence wholesale.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
-  DrawBackground(platform, state);    // backmost: tint + ambient stars
+  DrawBackground(platform, state); // backmost: tint + ambient stars
+  DrawBeamsUnderShips(platform,
+                      state);         // flags-0x2000 beams above backdrop only
   DrawStellarBodies(platform, state); // stellar planets / stations
   DrawShots(platform, state);         // projectiles above stellars
-  DrawBeams(platform, state);         // immediate beams above projectiles
   DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
   DrawImpactEffects(platform, state); // destruction/impact effects over ships
   DrawFadingEffects(platform, state); // directional destruction fragments
   DrawShipTargetReticle(platform, state);   // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target
+  DrawBeamsOverShips(platform, state);      // topmost layer: normal beams
 
   // Player ship at the play-area centre, frame selected by heading. Because
   // the camera is centred on the player, drawing at the ship's own world

@@ -106,8 +106,21 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship);
 // Shared with the spawn-maintenance cleanup
 // (NovaShip_DeactivateVacantShipsAndTally 0x0041ad50), which spares
 // non-fire-restricted ships actively engaging the player.
-[[nodiscard]] bool NovaAiShip_IsFireRestricted(const GameState &state,
-                                               const Ship &ship);
+[[nodiscard]] // Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot
+              // (formerly the
+              // misnamed Weapon_IsWeaponArcAllowed): whether the bearing lies
+              // in one of the weapon's turret blind-spot sectors (front <46 deg
+              // / side <136 deg / rear; weapon flags_primary
+              // 0x1000/0x2000/0x4000, force-overridden by the matching
+              // ShipClass capability flags). Turreted fire/selection paths
+              // reject the bank while the target is in a blind spot.
+              [[nodiscard]] bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
+                  const ShipClass &ship_class,
+                  const Weapon &weapon,
+                  std::int16_t heading_deg,
+                  std::int16_t target_bearing_deg);
+
+bool NovaAiShip_IsFireRestricted(const GameState &state, const Ship &ship);
 
 // Ghidra 0x004680d0 Ship_OnShipCloakStateEntered. Starts the signed cloak
 // transition and drops shields when ModType 17 requests it.

@@ -377,7 +377,7 @@ void Stub_SeedStartingInventory(GameState &state) {
   // > 0) into the matching secondary/ammo counter. The starter Shuttle's
   // single Light Blaster ({0x80, 1, -1}: 1 mounted, unlimited ammo) thereby
   // lands in bank 0 with weapon_bank_ammo[0] = 1 > 0, so the primary-fire
-  // loop (NovaWeapon_FirePlayerPrimary) can fire it. The stock_weapons decode
+  // loop (NovaWeapon_TickPlayerWeaponCommands primary-fire arm) can fire it. The stock_weapons decode
   // and the loader's default_weapon_ammo/secondary mapping are verified in
   // tests/scenario_data_test.cpp.
   NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
@@ -521,7 +521,7 @@ void ResetPlayerShipForNewGame(GameState &state) {
   state.player.speed = 0.0F;
   state.player.ship_class_id = state.pilot.start_type_code; // ch r ShipType
   // Ship_ResetPlayerShipState leaves the active weapon bank unselected (-1);
-  // the firing loop (NovaWeapon_FirePlayerPrimary) fires every loaded bank
+  // the firing loop (NovaWeapon_TickPlayerWeaponCommands) fires every loaded bank
   // regardless, so the selection latch is only carried for save/UI fidelity.
   state.player.active_weapon_bank_slot = -1;
   state.player.timed_action_counter = -1;

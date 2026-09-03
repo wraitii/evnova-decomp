@@ -426,9 +426,9 @@ void SdlPlatform::PumpProbe() {
   int window_width = 0;
   int window_height = 0;
   SDL_GetWindowSize(window_.get(), &window_width, &window_height);
-  probe_.SetGeometry({static_cast<float>(window_width),
-                      static_cast<float>(window_height)},
-                     playfield_window_rect());
+  probe_.SetGeometry(
+      {static_cast<float>(window_width), static_cast<float>(window_height)},
+      playfield_window_rect());
   probe_.Pump();
 }
 
@@ -553,8 +553,7 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.turn_right = pressed(SDL_SCANCODE_RIGHT) || pressed(SDL_SCANCODE_D);
   input.thrust = pressed(SDL_SCANCODE_UP) || pressed(SDL_SCANCODE_W);
   input.reverse = pressed(SDL_SCANCODE_DOWN) || pressed(SDL_SCANCODE_S);
-  input.afterburner =
-      pressed(SDL_SCANCODE_LCTRL) || pressed(SDL_SCANCODE_RCTRL);
+  input.afterburner = pressed(SDL_SCANCODE_Z);
   input.travel = pressed(SDL_SCANCODE_J);
   input.starmap = pressed(SDL_SCANCODE_M);
   // Gameplay command 0x28 (default DIK 0x17 = I): the active-missions window.
@@ -592,6 +591,13 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.select_nearest_engaged = pressed(SDL_SCANCODE_O) && alt_held;
   // Primary fire (held): space. See FlightInput::fire for the mapping note.
   input.fire = pressed(SDL_SCANCODE_SPACE);
+  // Secondary fire (held): Left Ctrl (the original's binding slot 3 default).
+  input.fire_secondary = pressed(SDL_SCANCODE_LCTRL);
+  // Secondary-bank cycle: X next, Shift+X previous (original: W + Shift pair).
+  input.cycle_secondary = pressed(SDL_SCANCODE_X) && !shift_held;
+  input.cycle_secondary_backwards = pressed(SDL_SCANCODE_X) && shift_held;
+  // Deselect secondary: C (original default S is reverse here).
+  input.clear_secondary = pressed(SDL_SCANCODE_C);
   return input;
 }
 

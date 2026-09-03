@@ -49,15 +49,30 @@ struct FlightInput {
   bool turn_right = false; // right / 'd'
   bool thrust = false;     // up / 'w' (accelerate toward heading)
   bool reverse = false;    // down / 's' (turn ship to fly backward)
-  // Held afterburner command. The original maps this through the configurable
-  // gameplay-command table; this clean-room binding uses Ctrl so it remains
-  // independent of target cycling (Shift+Tab).
+  // Held afterburner command, Z (the original's binding slot 0x18 default,
+  // DIK 0x2c). Previously on Ctrl; moved back to the original default when
+  // secondary fire took Ctrl (binding slot 3).
   bool afterburner = false;
-  // Primary fire: space (hold to keep firing the player's main weapon bank).
-  // Stand-in for the original's primary-fire input command; the Ghost map is
-  // not reconstructed, so this build binds the logical primary-fire command to
-  // the space bar (documented divergence).
+  // Primary fire: space (hold to keep firing all primary banks). Mirrors the
+  // original's primary-fire command (binding slot 2, default DIK 0x39 =
+  // space) read through NovaInput_IsCommandActiveWithGameplayGuards.
   bool fire = false;
+  // Secondary fire (hold): Left Ctrl, the original's binding slot 3 default
+  // (DIK 0x1d). Fires the currently selected secondary bank
+  // (active_weapon_bank_slot). Documented divergence: the clean-room build
+  // previously held afterburner on Ctrl; afterburner has moved to Z (the
+  // original's slot 0x18 default, DIK 0x2c) to free the original binding.
+  bool fire_secondary = false;
+  // Cycle the selected secondary weapon: X (next), Shift+X (previous). The
+  // original binds slot 0 to DIK 0x11 = W with its 0x38/0x6f Shift pair as
+  // the backwards modifier; W/S are the port's thrust/reverse keys
+  // (documented divergence), so X stands in. Edge-resolved by the flight loop
+  // against g_playerSecondaryCycleCommandLatch (DAT_007cab42).
+  bool cycle_secondary = false;
+  bool cycle_secondary_backwards = false;
+  // Deselect the secondary weapon: C (the original's slot 1 default is
+  // DIK 0x1f = S, taken by reverse; documented divergence).
+  bool clear_secondary = false;
   // Edge-triggered travel engage: 'j' (hyperspace jump toward the nearest
   // available travel point). The original uses a separate travel command
   // channel; this build maps it to a dedicated key so it is distinct from the
@@ -199,6 +214,7 @@ public:
     }
     probe_.PublishUi(std::move(window_name), std::move(named));
   }
+
   void ClearProbeUi() { probe_.ClearUi(); }
 
   // The current window->content presentation policy for this frame. See
@@ -294,9 +310,12 @@ private:
 // leaves stale clickable rects behind (see SdlPlatform::PublishProbeUi).
 struct ProbeUiAutoClear {
   SdlPlatform &platform;
+
   explicit ProbeUiAutoClear(SdlPlatform &platform_ref)
       : platform(platform_ref) {}
+
   ~ProbeUiAutoClear() { platform.ClearProbeUi(); }
+
   ProbeUiAutoClear(const ProbeUiAutoClear &) = delete;
   ProbeUiAutoClear &operator=(const ProbeUiAutoClear &) = delete;
 };

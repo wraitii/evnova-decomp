@@ -525,13 +525,35 @@ struct Weapon {
   // BeamLength + 32 as the range envelope for beam modes 0/3/10.
   std::int16_t beam_length_px = 0; // resource +0x30 / Ghidra +0x70
   // Ghidra WeaponDef.homing_strength_or_turn_rate (+0x72, loaded from resource
-  // +0x32): dual-purpose. For an animation-frame weapon set it is the shot
-  // animation frame-dwell time in ms (Shot_HandleShot accumulates it into
-  // ShotState.anim_elapsed and steps frame_cycle_index each time the dwell is
-  // crossed); for guided weapons it is the turn rate. The Light Blaster's
-  // payload keeps it at 0, which makes even an animated frame-stepper advance
-  // every frame.
+  // +0x32): triple-purpose. For beam weapons (modes 0/3/10) it is the Bible
+  // BeamWidth: the core radius in pixels (0 = no center beam, corona only, and
+  // the SWBeams renderer forces it to 1 for lightning beams). For an
+  // animation-frame weapon set it is the shot animation frame-dwell time in ms
+  // (Shot_HandleShot accumulates it into ShotState.anim_elapsed and steps
+  // frame_cycle_index each time the dwell is crossed); for guided weapons it is
+  // the turn rate. The Light Blaster's payload keeps it at 0, which makes even
+  // an animated frame-stepper advance every frame.
   std::int16_t shot_anim_frame_dwell = 0;
+
+  // Beam render fields (SWBeams renderer, WeaponDef +0x74/+0x76/+0x78/
+  // +0x84/+0x88; verified against the loader copy at 0x004bd3c0).
+  // Bible Falloff (resource +0x34): corona falloff rate, 2..16 in practice.
+  // The loader defaults it to 0x10 when a beam has no value and zeroes it for
+  // lightning beams (which have no corona). Larger = corona falls off faster;
+  // beam lifetime extends by 16 - falloff decay ticks when fuse_ticks > 0.
+  std::int16_t beam_falloff = 0;
+  // Bible LiDensity (resource +0x6e): 0 = normal straight beam; > 0 = lightning
+  // beam with this many zig-zags per 100 px (loader clamps to >= 2).
+  std::int16_t beam_lightning_density = 0;
+  // Bible LiAmplitude (resource +0x70): lightning zig-zag amplitude in pixels
+  // (loader clamps to >= 1 when lightning).
+  std::int16_t beam_lightning_amplitude = 0;
+  // Bible BeamColor (resource +0x36) / CoronaColor (+0x3a), packed 0x00RRGGBB.
+  // The original converts these to RGB555/palette entries per surface depth for
+  // its 15-bit beam blending; this port keeps them 24-bit (SDL blends in 8-bit
+  // channels instead).
+  std::uint32_t beam_core_color = 0;
+  std::uint32_t beam_corona_color = 0;
   // Ghidra WeaponDef.guided_turn_rate (+0x58, float): guided missile turn rate
   // in game degrees/tick. Loaded from payload +0x6a (Bible "GuidedTurn") * 0.1
   // (k_guided_turn_scale_f64 @0x00575e58). Shot_UpdateShotGuidance integrates

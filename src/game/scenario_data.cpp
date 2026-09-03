@@ -346,6 +346,30 @@ namespace {
   w.flags_tertiary = ReadBe16(bytes, 0x66);
   w.beam_length_px = ReadBeI16(bytes, 0x30);
   w.shot_anim_frame_dwell = ReadBeI16(bytes, 0x32);
+  // Beam render fields (Bible Falloff/BeamColor/CoronaColor/LiDensity/
+  // LiAmplitude), with the loader's post-read normalization from 0x004bd3c0:
+  // beams without an explicit falloff default to 0x10; lightning beams clamp
+  // density to >= 2, drop the corona falloff, and force width/amplitude >= 1.
+  w.beam_falloff = ReadBeI16(bytes, 0x34);
+  w.beam_core_color = ReadBe32(bytes, 0x36) & 0x00ffffffU;
+  w.beam_corona_color = ReadBe32(bytes, 0x3a) & 0x00ffffffU;
+  w.beam_lightning_density = ReadBeI16(bytes, 0x6e);
+  w.beam_lightning_amplitude = ReadBeI16(bytes, 0x70);
+  if (w.beam_length_px > 0 && w.beam_falloff < 1) {
+    w.beam_falloff = 0x10;
+  }
+  if (w.beam_lightning_density > 0) {
+    if (w.beam_lightning_density < 2) {
+      w.beam_lightning_density = 2;
+    }
+    w.beam_falloff = 0;
+    if (w.shot_anim_frame_dwell < 1) {
+      w.shot_anim_frame_dwell = 1;
+    }
+    if (w.beam_lightning_amplitude < 1) {
+      w.beam_lightning_amplitude = 1;
+    }
+  }
   // GuidedTurn (payload +0x6a): loader scales by 0.1 into the float
   // WeaponDef.guided_turn_rate (degrees/tick used by shot guidance).
   w.guided_turn_rate = static_cast<float>(ReadBeI16(bytes, 0x6a)) * 0.1F;

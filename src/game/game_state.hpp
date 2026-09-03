@@ -735,6 +735,10 @@ struct BeamHit {
   // 0x22-byte record); this float absorbs the remainder so beams expire at the
   // correct wall-clock time instead of stalling when truncated to int16.
   float lifetime_remainder = 0.0F;
+  // Ghidra record +0x12: decay-phase counter. Only incremented while the
+  // beam's lifetime sits at 0 with a positive WeaponDef fuse_ticks (Bible
+  // "Decay"); holds the beam on screen until counter + beam_falloff >= 0x10
+  // and drives the corona-shrink / lightning-fade in the beam renderer.
   std::int16_t animation_counter = 0;
   std::int16_t weapon_id = -1;
   std::int16_t owner_ship_slot = -1;
@@ -1000,6 +1004,19 @@ struct GameState {
   // zero-based weapon id (bank slot).
   std::array<float, 0x100> weapon_bank_cooldown{};
 
+  // Per-bank burst-cycle counter (Ghidra ShipState field_0x17c, a 200-stride
+  // int16 array). Advanced once per fired volley by the fire path; when it
+  // reaches Weapon_GetWeaponFireIntervalTicks (0x0046f270) the bank wraps to
+  // 0 and preloads burst_reset_cooldown. Player banks; NPCs keep
+  // Ship.npc_weapon_bank_burst_counter.
+  std::array<std::int16_t, 0x100> weapon_bank_burst_counter{};
+
+  // g_playerSecondaryCycleCommandLatch (DAT_007cab42): secondary-weapon-cycle
+  // command edge latch, set when the cycle command executes and cleared when
+  // the key is released; MarkTravel-style modal exits re-arm it so a held key
+  // does not re-fire (TODO(decomp): swallow site).
+  bool secondary_cycle_command_latch = false;
+
   // Lightweight ground-truth of fired shots (projectiles / beams) in flight,
   // reconstructed for the player's primary weapon. The original keeps these in
   // the ShotState swath (g_shot_states) with full sprite/guidance/collision
@@ -1047,7 +1064,11 @@ struct GameState {
   // DAT_00596d38: player death bookkeeping finished (latched for the
   // game-over/return-to-menu flow, consumed by the spaceflight loop).
   bool game_over_pending = false;
-  // DAT_007354a5: escape-pod bomb deployment latch (return to the menu shell).
+  // Port channel for the escape-pod bomb arm's immediate return to the menu
+  // shell. The original's restart command channel (0x0044abf8) is not
+  // reconstructed (TODO(decomp)); the nearby global DAT_007354a5 is the
+  // general "player did a command this frame" flag (see its Ghidra
+  // pre-comment), not a menu-return latch.
   bool return_to_menu_pending = false;
 
   std::array<BeamHit, 0x40> beam_hit_queue{};

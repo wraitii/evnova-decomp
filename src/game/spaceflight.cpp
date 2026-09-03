@@ -467,6 +467,12 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool hyperspace_was_held = false;
   bool ship_cycle_was_held = false;
   bool nearest_was_held = false;
+  // Secondary-weapon command edges (PlayerTick_WeaponCommands): the cycle is
+  // edge-resolved against g_playerSecondaryCycleCommandLatch semantics (set
+  // on execution, cleared on release); the clear-selection arm is already
+  // single-shot but stays consistent with the same was-held pattern.
+  bool secondary_cycle_was_held = false;
+  bool clear_secondary_was_held = false;
   bool starmap_was_held = false;
   bool mission_info_was_held = false;
   bool land_was_held = false;
@@ -662,14 +668,36 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (!player_status_consumed && !state.travel.engaging) {
       NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
     }
-    // Handle this frame's fire input. The shot movement/lifetime update
-    // runs from Frame_TickSystems scope 7 after scope 9 collision checks,
-    // matching the original collision -> Shot_HandleShot phase order.
-    // Gated while a jump is engaged (the original fire-restricts the player
-    // through the brake, hold and zoom).
-    if (input.fire && !state.travel.engaging) {
-      NovaWeapon_FirePlayerPrimary(state);
+    // PlayerTick_WeaponCommands (0x0044aa70 block 0x0044BEB0) +
+    // PlayerTick_WeaponCycleContinuation (0x0044EAB4): primary fire loop,
+    // selected-secondary fire, unfirable-bank auto-clear, the wrapped
+    // secondary-bank cycle and the clear-selection arm. The original gates
+    // the fire arms on the station-hold/maneuver timers and the
+    // fire-restricted state inside the dispatch; the port additionally
+    // suspends the whole pass while the jump state machine owns the ship
+    // (matching the fire-restriction the original applies through the brake,
+    // hold and zoom phases).
+    if (!state.travel.engaging) {
+      const bool cycle_secondary =
+          input.cycle_secondary && !secondary_cycle_was_held;
+      const bool clear_secondary =
+          input.clear_secondary && !clear_secondary_was_held;
+      NovaWeapon_TickPlayerWeaponCommands(
+          state,
+          {.fire_primary_held = input.fire,
+           .fire_secondary_held = input.fire_secondary,
+           .cycle_secondary = cycle_secondary,
+           .cycle_secondary_backwards = input.cycle_secondary_backwards,
+           .clear_secondary = clear_secondary},
+          frame_time_ms / kOriginalTickMs);
+      secondary_cycle_was_held = input.cycle_secondary;
+      clear_secondary_was_held = input.clear_secondary;
     }
+    // Cooldown-decay tail of PlayerTick_WeaponCommands: runs unconditionally
+    // in the original player tick, including during engaged jumps (the
+    // ammo>0 gate and the ionization pin live inside).
+    NovaWeapon_TickPlayerWeaponBankCooldowns(state,
+                                             frame_time_ms / kOriginalTickMs);
     // Play every fire sound latched this frame by the player or NPC firing
     // routines (a round actually spawned). The firing routines append
     // GameState.pending_fire_sounds; this loop owns the SdlAudio device, plays

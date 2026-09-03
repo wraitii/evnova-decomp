@@ -3691,36 +3691,9 @@ std::int16_t ShortestAngleDeltaDeg(std::int16_t a, std::int16_t b) {
   return static_cast<std::int16_t>(mag);
 }
 
-// Ghidra 0x0046b360 Weapon_IsWeaponArcAllowed. Whether the bank's weapon may
-// fire toward `target_bearing` given the ship's heading and class: front
-// (<46 deg), side (<136 deg) and rear sectors are allowed by weapon
-// flags_primary 0x1000/0x2000/0x4000, forced true by the matching
-// ship-class capability bits.
-bool NovaAi_WeaponArcAllowed(const ShipClass &ship_class,
-                             const Weapon &weapon,
-                             std::int16_t heading_deg,
-                             std::int16_t target_bearing_deg) {
-  const std::int16_t delta =
-      ShortestAngleDeltaDeg(heading_deg, target_bearing_deg);
-  bool allowed;
-  if (delta < 0x2e) {
-    allowed = (weapon.flags & 0x1000U) != 0U;
-    if ((ship_class.capability_flags & 0x1000U) != 0U) {
-      allowed = true;
-    }
-  } else if (delta < 0x88) {
-    allowed = (weapon.flags & 0x2000U) != 0U;
-    if ((ship_class.capability_flags & 0x2000U) != 0U) {
-      allowed = true;
-    }
-  } else {
-    allowed = (weapon.flags & 0x4000U) != 0U;
-    if ((ship_class.capability_flags & 0x4000U) != 0U) {
-      allowed = true;
-    }
-  }
-  return allowed;
-}
+// Ghidra 0x0046b360 Math_ShortestAngleDeltaDeg helper stays file-local below;
+// the blind-spot sector test is exported (see NovaAi_WeaponIsTargetBearingIn-
+// TurretBlindSpot after this namespace).
 
 // Ghidra 0x0046c930 / 0x0046ca60 (shared scan). True when `ship` owns any
 // cloak-scanner outfit (modType 0x1E) whose effect ModVal carries `flag`
@@ -3767,6 +3740,40 @@ bool NovaAi_OutfitHasCloakScannerCapability(const GameState &state,
 }
 
 } // namespace
+
+// Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot (formerly the
+// misnamed Weapon_IsWeaponArcAllowed): whether the bearing lies in one of the
+// weapon's turret blind-spot sectors. Front (<46 deg), side (<136 deg), rear;
+// a sector is BLIND when the weapon's flags_primary 0x1000/0x2000/0x4000 is
+// set, force-overridden ON by the matching ShipClass capability flags (Bible:
+// "Turreted weapon has a blind spot to the front/sides/rear"). Callers reject
+// the bank while the target is in a blind spot.
+bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
+    const ShipClass &ship_class,
+    const Weapon &weapon,
+    std::int16_t heading_deg,
+    std::int16_t target_bearing_deg) {
+  const std::int16_t delta =
+      ShortestAngleDeltaDeg(heading_deg, target_bearing_deg);
+  bool blind;
+  if (delta < 0x2e) {
+    blind = (weapon.flags & 0x1000U) != 0U;
+    if ((ship_class.capability_flags & 0x1000U) != 0U) {
+      blind = true;
+    }
+  } else if (delta < 0x88) {
+    blind = (weapon.flags & 0x2000U) != 0U;
+    if ((ship_class.capability_flags & 0x2000U) != 0U) {
+      blind = true;
+    }
+  } else {
+    blind = (weapon.flags & 0x4000U) != 0U;
+    if ((ship_class.capability_flags & 0x4000U) != 0U) {
+      blind = true;
+    }
+  }
+  return blind;
+}
 
 // Ghidra 0x0040ce00 Weapon_SelectWeaponBankForCurrentTarget. Turret-ish bank
 // selection for the current primary target: scans fireable mode-3/4/7/8
@@ -3846,8 +3853,13 @@ void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
     } else {
       barrier = true;
     }
+    // Ghidra Weapon_SelectWeaponBankForCurrentTarget (0x0040ce00): a target
+    // in one of the weapon's turret blind-spot sectors disqualifies the bank;
+    // otherwise the bank stays a candidate and still passes the range check.
+    // (The former NovaAi_WeaponArcAllowed call had this polarity inverted.)
     if (ship_class != nullptr &&
-        NovaAi_WeaponArcAllowed(*ship_class, *weapon, heading_deg, bearing)) {
+        NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
+            *ship_class, *weapon, heading_deg, bearing)) {
       barrier = false;
     }
     if (barrier) {

@@ -66,6 +66,14 @@ void NovaWeapon_ClearTransientCombatState(GameState &state);
 // the player ship and when the cached loadout already matches the class.
 void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
 
+// Ghidra 0x0046f2c0 Weapon_GetWeaponBurstAttempts: shots per trigger pull.
+// Non-burst weapons (flags_primary 0x40 clear) fire exactly one; burst banks
+// start from the mounted ammo count capped by the cost bank's loaded
+// secondary (or fuel_points / per-shot fuel for ammo_type < -999).
+[[nodiscard]] int NovaWeapon_GetWeaponBurstAttempts(const GameState &state,
+                                                    const Ship &ship,
+                                                    std::int16_t weapon_bank);
+
 // Ghidra 0x00468990 Weapon_CanFireWeaponBank: whether the given weapon bank
 // may fire right now for a specific ship (player = GameState strided banks;
 // NPC = Ship.npc_weapon_bank_*). Faithful branching on ship_instance_id==0:
@@ -103,11 +111,42 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
 void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      std::int16_t weapon_bank);
 
-// Primary-fire dispatch mirroring the Ship_HandlePlayerShipControl loop: for
-// every bank with ammo > 0 and whose weapon is NOT a secondary (Weapon.flags
-// bit 0x2 unset), attempts to fire it. The player's main (Light Blaster) bank
-// is such a bank, so holding fire fires it on a cadence.
-void NovaWeapon_FirePlayerPrimary(GameState &state);
+// PlayerTick_WeaponCommands (0x0044BEB0) + PlayerTick_WeaponCycleContinuation
+// (0x0044EAB4) of Ship_HandlePlayerShipCore (0x0044aa70): the player's weapon
+// command inputs, edge/hold-resolved by the spaceflight loop (the original
+// reads g_player_key_bindings through NovaInput_IsCommandActiveWithGameplay-
+// Guards with its 0x38/0x6f direction-modifier pair).
+struct PlayerWeaponCommandInput {
+  // Binding slot 2 (default DIK 0x39 = space): fire every primary bank.
+  bool fire_primary_held = false;
+  // Binding slot 3 (default DIK 0x1d = Left Ctrl): fire the selected
+  // secondary bank (active_weapon_bank_slot).
+  bool fire_secondary_held = false;
+  // Binding slot 0 (default DIK 0x11 = W): cycle the secondary bank. The
+  // caller edge-resolves this against g_playerSecondaryCycleCommandLatch
+  // (DAT_007cab42).
+  bool cycle_secondary = false;
+  // Direction modifier (original 0x38/0x6f = Shift pair): cycle backwards.
+  bool cycle_secondary_backwards = false;
+  // Binding slot 1 (default DIK 0x1f = S): deselect the secondary bank.
+  bool clear_secondary = false;
+};
+
+// The weapon command dispatch: primary fire loop, selected-secondary fire,
+// auto-clear of an unfirable flags-0x800 bank, the wrapped secondary-bank
+// cycle (count eligible banks, denial/accept cue, skip ineligible banks) and
+// the clear-selection arm. Firing arms are gated on ai_station_hold_timer /
+// ai_maneuver_timer_ms expiry and the fire-restricted (disabled) state.
+void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
+                                         const PlayerWeaponCommandInput &input,
+                                         float elapsed_ticks);
+
+// Cooldown-decay tail of PlayerTick_WeaponCommands: per bank with ammo, decay
+// the cooldown by the frame tick scale, and pin banks whose weapon has
+// flags_quaternary 0x20 at a 1-tick cooldown while the player is ionized
+// (Ship_GetIonizationIntensity > 0).
+void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
+                                              float elapsed_ticks);
 
 // Ghidra Weapon_FireShipWeapons (0x00414550): fire the selected NPC bank for
 // one volley. This slice covers projectile modes -1, 1, 4, 6, 7, and 8;
@@ -120,14 +159,18 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship);
 // Ship_HandleShip (0x00433050): count down NPC-local bank cooldowns.
 void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks);
 
-// Ghidra Shot_QueueBeamHit (0x00427A90): enqueue one immediate NPC beam hit.
-// The queue is gameplay-complete for direct target impacts; beam rendering and
-// turret quadrant selection remain deferred.
+// Ghidra Shot_QueueBeamHit (0x00427A90): enqueue one immediate beam hit.
+// The queue is gameplay-complete for direct target impacts; turret quadrant
+// selection and the original's per-frame endpoint re-derivation
+// (Shot_UpdateBeamHitQueue 0x0042F270) remain deferred. With a valid target
+// the beam endpoint tracks the target; otherwise firing_bearing_deg aims the
+// endpoint downrange at BeamLength + 32 (the original's beam reach constant).
 [[nodiscard]] bool NovaWeapon_QueueBeamHit(GameState &state,
                                            std::int16_t owner_ship_slot,
                                            std::int16_t target_ship_slot,
                                            std::int16_t weapon_id,
-                                           std::int16_t forced_targeting = -1);
+                                           std::int16_t forced_targeting = -1,
+                                           std::int16_t firing_bearing_deg = 0);
 
 // Ghidra Shot_UpdateBeamHitQueue (0x0042F270): advance beam lifetimes and
 // resolve each queued direct impact once.

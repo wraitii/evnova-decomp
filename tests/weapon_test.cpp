@@ -18,8 +18,8 @@ namespace game {
 // that get the player's main weapon shooting, against the shipped Nova data:
 // the starter ship (class 0x80) mounts one Light Blaster (stock weapon
 // {id 0x80, count 1, ammo -1=unlimited}) in bank 0, so weapon_bank_ammo[0]
-// must be 1 and the primary-fire path (NovaWeapon_FirePlayerPrimary) must be
-// able to fire it.
+// must be 1 and the primary-fire path (the primary-fire arm of
+// NovaWeapon_TickPlayerWeaponCommands) must be able to fire it.
 
 namespace {
 bool ArchivesAvailable() {
@@ -35,6 +35,21 @@ bool ArchivesAvailable() {
 
 // Replicates Stub_SeedStartingInventory's stock-weapon -> bank population
 // (new_pilot_flow.cpp, mirroring Menu_RunNewGameFlow).
+// Fires the primary banks through the player weapon-command dispatch (the
+// fire_primary_held arm), bypassing live input. The dispatch's fire arms are
+// gated on the fire-restricted (disabled) state, so the hull is first brought
+// to full armor -- the state every real flow produces (new-game meter
+// finalize, pilot restore) but a bare GameState does not.
+void FirePlayerPrimary(GameState &state) {
+  const auto *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  if (ship_class != nullptr) {
+    state.player.armor_points = static_cast<float>(ship_class->base_armor);
+  }
+  NovaWeapon_TickPlayerWeaponCommands(
+      state, PlayerWeaponCommandInput{.fire_primary_held = true}, 0.0F);
+}
+
 void SeedStockWeaponBanks(GameState &state) {
   const auto *ship = state.scenario.Ship(
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
@@ -133,7 +148,7 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   state.player.pos_y = 200.0F;
   SeedStockWeaponBanks(state);
 
-  NovaWeapon_FirePlayerPrimary(state);
+  FirePlayerPrimary(state);
   // One Light Blaster round spawned, from the ship, moving upward (-y).
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].weapon_id == 0);
@@ -148,7 +163,7 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   // The bank went into cooldown (reload 10 ticks) so a back-to-back fire is a
   // no-op while cooling down.
   CHECK(state.weapon_bank_cooldown[0] > 0.0F);
-  NovaWeapon_FirePlayerPrimary(state);
+  FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1); // no second shot while cooling down
 }
 
@@ -375,7 +390,7 @@ TEST_CASE("second mounted weapon halves the bank cooldown", "[weapon]") {
 
   // One Light Blaster mounted: cooldown = reload(10) / ammo(1) = 10 ticks.
   REQUIRE(state.weapon_bank_ammo[0] == 1);
-  NovaWeapon_FirePlayerPrimary(state);
+  FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
   const float single_cooldown = state.weapon_bank_cooldown[0];
   REQUIRE(single_cooldown == Catch::Approx(10.0F));
@@ -383,7 +398,7 @@ TEST_CASE("second mounted weapon halves the bank cooldown", "[weapon]") {
   // A second identical weapon in the same bank halves the cooldown.
   state.weapon_bank_ammo[0] = 2;
   state.weapon_bank_cooldown[0] = 0.0F; // back off cooldown
-  NovaWeapon_FirePlayerPrimary(state);
+  FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 2); // previous shot still flying
   CHECK(state.weapon_bank_cooldown[0] == Catch::Approx(single_cooldown / 2.0F));
 }
@@ -418,7 +433,7 @@ TEST_CASE("light blaster exits the nose barrel, not the hull centre",
   state.player.muzzle_drop[0] = {-2, -2, -2, -2};
   state.player.muzzle_quadrant[0] = 0; // pin the first barrel
 
-  NovaWeapon_FirePlayerPrimary(state);
+  FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
   const auto &shot = state.active_shots[0];
   // Heading 0: forward offset F=10 along -y (nose), lateral L=3 along +x;
@@ -456,7 +471,7 @@ TEST_CASE("fresh-pilot record round-trip keeps the light blaster fireable",
   // The seeded Light Blaster must survive the record round-trip.
   CHECK(state.weapon_bank_ammo[0] == 1);
   CHECK(NovaWeapon_CanFireWeaponBank(state, state.player, 0));
-  NovaWeapon_FirePlayerPrimary(state);
+  FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
 }
 
