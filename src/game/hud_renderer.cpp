@@ -393,40 +393,6 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
 // tests system visibility and the ship-to-system-centre distance.
 // TODO(decomp): re-derive the exact table/endpoint once SystemDef adjacency
 // typing is settled.
-[[nodiscard]] bool JumpDestinationInRange(const GameState &state) {
-  const System *current = state.scenario.System(
-      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
-  if (current == nullptr) {
-    return false;
-  }
-  const float range_sq = NovaTargeting_ComputeTravelRangeSq(state);
-  for (const std::int16_t link : current->links) {
-    if (link < 0x80) {
-      continue;
-    }
-    // Links point at visibility-group roots after the loader's normalization;
-    // resolve to the twin whose Visibility NCB currently holds.
-    const std::int16_t target = NovaSystem_ResolveVisibleForTravel(
-        state, static_cast<std::int16_t>(link - 0x80));
-    if (target < 0) {
-      continue;
-    }
-    const System *destination =
-        state.scenario.System(static_cast<std::int16_t>(target + 0x80));
-    if (destination == nullptr) {
-      continue;
-    }
-    const float dx =
-        state.player.pos_x - static_cast<float>(destination->pos_x);
-    const float dy =
-        state.player.pos_y - static_cast<float>(destination->pos_y);
-    if (dx * dx + dy * dy <= range_sq) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Thousands-grouped credits (DrawContext_DrawGroupedUInt).
 [[nodiscard]] std::string GroupedNumber(std::int32_t value) {
   std::string digits = std::to_string(value);
@@ -535,16 +501,15 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
     const auto logical = platform.logical_playfield_size();
     const float left = 25.0F;
     const float baseline = logical.y - 5.0F - 26.0F + 12.0F;
-    NovaText_Draw(
-        platform,
-        *font_cache_,
-        NovaFontFamily::kGeneva,
-        size,
-        kNovaFontStyleRegular,
-        SDL_Color{msg.red, msg.green, msg.blue, SDL_ALPHA_OPAQUE},
-        left,
-        baseline,
-        msg.message);
+    NovaText_Draw(platform,
+                  *font_cache_,
+                  NovaFontFamily::kGeneva,
+                  size,
+                  kNovaFontStyleRegular,
+                  SDL_Color{msg.red, msg.green, msg.blue, SDL_ALPHA_OPAQUE},
+                  left,
+                  baseline,
+                  msg.message);
   }
 }
 
@@ -559,10 +524,12 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
 //   * jump (mode 3): "Hyperspace" title at top+12 plus the destination
 //     system's name ("Unexplored System" while undiscovered) at top+29.
 // Titles draw in the label colour, switching to the value colour while the
-// station-hold timer runs; the jump destination switches to the label colour
-// when no adjacent system is in range or fuel is short and the hold has not
-// started. The port derives the mode from the explicit TravelState (the
-// original reads the player ship's travel_transfer_mode latch).
+// station-hold timer runs; the jump destination draws in the value colour
+// only while the ship is beyond the no-jump radius (NovaTravel_PlayerIn-
+// JumpRange, the same probe as the flight-tail range cue) or the hold has
+// started, and fuel covers a jump -- label colour otherwise. The port
+// derives the mode from the explicit TravelState (the original reads the
+// player ship's travel_transfer_mode latch).
 // ---------------------------------------------------------------------------
 void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
                                   const GameState &state,
@@ -628,8 +595,8 @@ void HudRenderer::DrawTravelPanel(SdlPlatform &platform,
                                  ? system->name
                                  : MiscString(kMiscUnexploredSystem);
     const bool fueled = state.player.fuel_points >= 100.0F;
-    const bool reachable = JumpDestinationInRange(state);
-    const bool dimmed = (!reachable || !fueled) && !holding;
+    const bool in_jump_range = NovaTravel_PlayerInJumpRange(state);
+    const bool dimmed = (!in_jump_range || !fueled) && !holding;
     DrawPanelCentered(platform,
                       font,
                       font_size,

@@ -15,6 +15,7 @@ namespace {
 using game::GameState;
 using game::NovaSystem_OnSystemEntered;
 using game::NovaTravel_CycleDestinationSystem;
+using game::NovaTravel_PlayerInJumpRange;
 using game::NovaTravel_PlotStarmapDestination;
 using game::NovaTravel_Tick;
 
@@ -691,4 +692,26 @@ TEST_CASE("entering jump range with a plotted jump cues the UI sound") {
   NovaTravel_Tick(state, false, 16.67F);
   CHECK(state.travel.jump_range_cue_latch);
   CHECK(state.pending_ui_sounds.empty());
+}
+
+// The shared no-jump-radius probe (flight-tail cue + travel-panel colour,
+// Ship_HandlePlayerShipCore ~0x00450a2c / NovaUi_DrawTravelStatusPanel
+// 0x0045e400): true when no NON-restricted nav of the current system is
+// within Stellar_ComputeTravelRangeSq of the SYSTEM CENTER; a system with
+// only restricted (0x3000) navs is always "in range".
+TEST_CASE(
+    "jump-range probe keys on the system center and non-restricted navs") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 0;
+
+  // Parked on the system center with usable navs: inside the radius.
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  CHECK_FALSE(NovaTravel_PlayerInJumpRange(state));
+
+  // Far out: beyond the radius.
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  CHECK(NovaTravel_PlayerInJumpRange(state));
 }

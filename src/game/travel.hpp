@@ -79,6 +79,17 @@ inline constexpr int kHyperspaceWarpUpSoundKey = 128;
 // (availability_flags & 0x3000) require the ship to be within the jump range.
 [[nodiscard]] int NovaTravel_FindNearestTravelPoint(const GameState &state);
 
+// Ghidra Ship_HandlePlayerShipCore range probe (the flight-tail jump-range cue
+// ~0x00450a2c and the NovaUi_DrawTravelStatusPanel 0x0045e400 destination
+// colour test run the identical loop): true when the ship is far enough from
+// the system center to jump -- no NON-restricted nav stellar of the current
+// system sits within Stellar_ComputeTravelRangeSq of it. The distance is
+// always measured from the system center (0,0); the nav loop only asks
+// whether any non-restricted nav exists, so a system with none is always
+// "in range". Restricted travel stellars (availability_flags 0x3000) do not
+// gate the probe.
+[[nodiscard]] bool NovaTravel_PlayerInJumpRange(const GameState &state);
+
 // Ghidra 0x00415b80 Stellar_CanShipInitiateJumpSequence: returns true when
 // the player ship may initiate a hyperspace jump. Gates on the ship class
 // fuel capacity being at least one jump (kJumpFuelCost) and the ship not

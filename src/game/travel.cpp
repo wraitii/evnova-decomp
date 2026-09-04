@@ -154,26 +154,7 @@ void TickJumpRangeCue(GameState &state) {
   if (state.player.travel_transfer_mode != 3 || t.travel_slot < 0) {
     return;
   }
-  const System *sys = state.scenario.System(CurrentSystemResource(state));
-  if (sys == nullptr) {
-    return;
-  }
-  bool in_jump_range = true;
-  for (const std::int16_t nav : sys->nav_defs) {
-    if (nav < 0x80) {
-      continue; // no travel point in this slot
-    }
-    const Stellar *st = state.scenario.Stellar(nav);
-    if (st == nullptr || (st->availability_flags & 0x3000U) != 0U) {
-      continue; // restricted travel stellars do not gate the range
-    }
-    const float dist_sq = state.player.pos_x * state.player.pos_x +
-                          state.player.pos_y * state.player.pos_y;
-    if (dist_sq <= NovaTargeting_ComputeTravelRangeSq(state)) {
-      in_jump_range = false;
-      break;
-    }
-  }
+  const bool in_jump_range = NovaTravel_PlayerInJumpRange(state);
   if (!in_jump_range) {
     t.jump_range_cue_latch = false;
     return;
@@ -373,6 +354,29 @@ int FindLinkedTravelSlot(const GameState &state,
 }
 
 } // namespace
+
+bool NovaTravel_PlayerInJumpRange(const GameState &state) {
+  const System *sys = state.scenario.System(CurrentSystemResource(state));
+  if (sys == nullptr) {
+    return false;
+  }
+  const float range_sq = NovaTargeting_ComputeTravelRangeSq(state);
+  for (const std::int16_t nav : sys->nav_defs) {
+    if (nav < 0x80) {
+      continue; // no travel point in this slot
+    }
+    const Stellar *st = state.scenario.Stellar(nav);
+    if (st == nullptr || (st->availability_flags & 0x3000U) != 0U) {
+      continue; // restricted travel stellars do not gate the probe
+    }
+    const float dist_sq = state.player.pos_x * state.player.pos_x +
+                          state.player.pos_y * state.player.pos_y;
+    if (dist_sq <= range_sq) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // Ghidra 0x004a8080 NovaUi_SyncTravelSelectionFromStarmapRoute.
 // ---------------------------------------------------------------------------

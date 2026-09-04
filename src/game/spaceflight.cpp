@@ -765,7 +765,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Centered UI cues from the boarding system (transition-table handles,
     // snd 150 + index). The flight loop owns the audio device; the modal
     // windows play their cues through the same queue. Mirrors
-    // NovaAudio_QueueCenteredSound(handle, count, ...).
+    // NovaAudio_QueueCenteredSound(handle, count, ...). The lazy decode runs
+    // here so every gameplay-side queuer (jump-range cue, auto-repair,
+    // distress alert) sees a loaded table even without a boarding pass.
+    EnsureTransitionSounds(state);
     for (const auto &pending : state.pending_ui_sounds) {
       if (pending.transition_index < 0 ||
           pending.transition_index >=
