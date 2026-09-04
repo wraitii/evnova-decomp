@@ -807,7 +807,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   } else {
     status = "Communications channel open.";
   }
-  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, target);
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, target);
   if (!fire_restricted && !special_mask) {
     if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
       status = LoadCommPrompt(random_index, kMsgWhatDoYouWant).value_or(status);
@@ -1013,13 +1013,13 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     }
     if (!NovaAi_AreAnyShipsEligibleForDistressCall(state)) {
       // No distress call in progress: the fuel-offer branch triggers when the
-      // player's tank is low (or the player is fire-restricted). A govt-aid
+      // player's tank is low (or the player is disabled). A govt-aid
       // ship (xenophobic flag) refuses with "In your dreams, pal." instead;
       // otherwise "You're not in any trouble."
       const bool player_fuel_low =
           state.player.fuel_points < kPlayerFuelOfferThreshold &&
           state.cached_stats.fuel_capacity > 0;
-      if (player_fuel_low || NovaAiShip_IsFireRestricted(state, state.player)) {
+      if (player_fuel_low || NovaAiShip_IsDisabled(state, state.player)) {
         if (govt_aid_flag) {
           status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
         } else if (target.ai_behavior_code < 5) {
@@ -1028,7 +1028,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
               RunBribePayment(state, bribe_cost, free_help);
           if (outcome == BribeOutcome::kPaid) {
             status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
-            if (NovaAiShip_IsFireRestricted(state, state.player)) {
+            if (NovaAiShip_IsDisabled(state, state.player)) {
               NovaAi_EnterState0FTargetPlayerAndBrake(target);
             } else {
               NovaAi_EnterState9TargetPlayerAndBrake(target);
@@ -1265,7 +1265,7 @@ bool NovaShipComm_TargetEligibleForHail(const GameState &state,
   if (target.ship_class_id == 0x2ff) {
     eligible = false; // special non-comm ship class
   }
-  if (NovaAiShip_IsFireRestricted(state, target)) {
+  if (NovaAiShip_IsDisabled(state, target)) {
     eligible = false;
   }
   if (target.pers_def_slot == 0x3ff) {

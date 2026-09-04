@@ -49,7 +49,7 @@
 // Mercy | Release), 'g' the Greetings button.
 //
 // SCOPE: the window shell, the initial prompt selection, the Greetings state
-// machine (fire-restricted / escort cargo-transfer / keep-pressing-target /
+// machine (disabled / escort cargo-transfer / keep-pressing-target /
 // comm-aid / distress / fuel-bribe branches), the bribe payment sub-window
 // (single-pass DLOG 0x3f0-style confirm, 35% acceptance, 0.75x discount,
 // +1000 haggle) and the escort release side-effects on close are
@@ -93,7 +93,7 @@ class SpaceflightView;
 
 // Mirrors the bVar1 hail-eligibility gate of Ship_HandlePlayerTargetAction-
 // Command (0x00454910): the player can hail `target` only when the ship is
-// not fire-restricted, is not a 0x3ff mission slot, is not ship class 0x2ff,
+// not disabled, is not a 0x3ff mission slot, is not ship class 0x2ff,
 // and (when it holds an AI target or a mission fleet) neither its own nor its
 // class's inherent government carries the busy flag (flags_primary 0x400).
 [[nodiscard]] bool NovaShipComm_TargetEligibleForHail(const GameState &state,

@@ -119,7 +119,7 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   // So a landing (and the subsequent launch) leaves the system with a fresh
   // batch of ships rather than the fleet that had accumulated before docking.
   // The port deactivates the whole vacant cohort (idle wanderers / parked /
-  // mission ships; only non-fire-restricted ships actively engaging the player
+  // mission ships; only non-disabled ships actively engaging the player
   // are spared -- see ship_spawn.hpp), then rebuilds the initial population.
   NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
   NovaSystem_RestoreMissionFleets(state,

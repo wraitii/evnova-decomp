@@ -870,7 +870,7 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
 
   const float status_y = static_cast<float>(panel.bottom - 6);
   const float status_x = static_cast<float>(panel.left + 5);
-  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, target);
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, target);
   const float shields = target.shield_points;
   if (fire_restricted) {
     // Special mission ships held for pickup read "Waiting" once their armor

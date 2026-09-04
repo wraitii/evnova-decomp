@@ -169,7 +169,7 @@ TEST_CASE("disabled and destroyed NPCs do not regenerate") {
   disabled.vel_y = -10.0F;
   disabled.speed = 10.0F;
   game::NovaShip_IntegrateNpcMovement(state, disabled, cls, 1.0F);
-  CHECK(game::NovaAiShip_IsFireRestricted(state, disabled));
+  CHECK(game::NovaAiShip_IsDisabled(state, disabled));
   CHECK(disabled.shield_points == Catch::Approx(10.0F));
   CHECK(disabled.armor_points == Catch::Approx(20.0F));
   // Ship_HandleShip's DAT_00575448 damping is gradual, not an immediate stop.

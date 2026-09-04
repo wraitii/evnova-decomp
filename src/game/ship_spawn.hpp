@@ -256,9 +256,9 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
 // it is actively engaging the player -- ai_behavior_code > 4,
 // ai_target_ship_slot
 // == 0, not docked at a stellar (target_stellar_object_id == -1), not in a
-// mission fleet -- AND is not fire-restricted AND `keep_player_engaged` is
+// mission fleet -- AND is not disabled AND `keep_player_engaged` is
 // false (the original's flag==0). Everything else (idle wanderers/dudes,
-// parked-at-stellar ships, mission ships, fire-restricted ships) is
+// parked-at-stellar ships, mission ships, disabled ships) is
 // deactivated: parked ships increment their stellar's present_ship_count
 // (capped at max_ship_count), mission ships would increment their mission
 // fleet's current-ship count (mission fleets not reconstructed; logged no-op),

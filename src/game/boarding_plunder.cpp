@@ -542,14 +542,14 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   const bool rehired_or_surrendering =
       target.boarded_target_latch == 0 ||
       (target.mission_fleet_slot == -1 && target.post_hit_mode_hint >= 0);
-  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, target);
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, target);
   const bool eligible =
       rehired_or_surrendering && fire_restricted && target.is_active &&
       player.current_system_id == target.current_system_id &&
       target.pers_def_slot != 0x3ff && !NovaAiShip_IsDestroyed(player);
   if (!eligible) {
     // Diagnosis aid: the original denies every non-disabled ship here too
-    // (Ship_IsShipFireRestricted must be true). Log which predicate failed
+    // (Ship_IsShipDisabled must be true). Log which predicate failed
     // with the armor state so in-game denials can be attributed.
     const ShipClass *diag_class = state.scenario.Ship(
         static_cast<std::int16_t>(target.ship_class_id + 0x80));

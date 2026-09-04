@@ -130,6 +130,18 @@ int SdlAudio::CountActiveByKey(int sound_key) const {
   return active;
 }
 
+void SdlAudio::StopByKey(int sound_key) {
+  if (sound_key < 0) {
+    return;
+  }
+  for (Voice &voice : voices_) {
+    if (voice.key == sound_key) {
+      SDL_ClearAudioStream(voice.stream.get());
+      voice.key = -1;
+    }
+  }
+}
+
 void SdlAudio::StopAll() {
   for (Voice &voice : voices_) {
     SDL_ClearAudioStream(voice.stream.get());

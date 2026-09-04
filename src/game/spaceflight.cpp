@@ -39,12 +39,13 @@ namespace game {
 
 // --- PlayerTick_StatusAndOutfitEvents constants (Ghidra globals) -----------
 // g_fire_restricted_velocity_damp (0x00575570, double): per-frame velocity
-// damping while fire-restricted (disabled).
+// damping while disabled (disabled).
 constexpr float kPlayerFireRestrictedVelocityDamp = 0.995F;
 // Player recently-hit timer (g_player_recently_hit_timer, DAT_0073549c):
 // armed to 300 ticks when the player takes a hit, decays one tick per frame
-// while at or above the cutoff; gates the disabled auto-repair pass until a
-// the post-hit regen-suppression window expires.
+// while at or above g_hyperspace_progress_onset_threshold (0x575540, 0.0);
+// gates the disabled auto-repair pass until the post-hit regen-suppression
+// window expires.
 constexpr float kRecentlyHitRegenCutoff = 0.0F;
 // g_jump_turnaround_turn_rate_addend (0x0057555c, float): death-timer
 // countdown step per 30 Hz tick.
@@ -500,7 +501,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       break;
     }
     // PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240): death
-    // bookkeeping, fire-restricted damping, disabled auto-repair, the periodic
+    // bookkeeping, disabled damping, disabled auto-repair, the periodic
     // distress cue, and carried-bomb detonation. Runs ahead of the flight
     // input pass, matching the original's dispatch order. `true` means the
     // death/inactive branch consumed the frame (flight input is skipped).
@@ -672,9 +673,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // selected-secondary fire, unfirable-bank auto-clear, the wrapped
     // secondary-bank cycle and the clear-selection arm. The original gates
     // the fire arms on the station-hold/maneuver timers and the
-    // fire-restricted state inside the dispatch; the port additionally
+    // disabled state inside the dispatch; the port additionally
     // suspends the whole pass while the jump state machine owns the ship
-    // (matching the fire-restriction the original applies through the brake,
+    // (matching the disable restriction the original applies through the brake,
     // hold and zoom phases).
     if (!state.travel.engaging) {
       const bool cycle_secondary =
@@ -812,6 +813,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       state.warp_up_sound_pending = false;
     }
+    if (state.warp_up_cancel_pending) {
+      audio.StopByKey(game::kHyperspaceWarpUpSoundKey);
+      state.warp_up_cancel_pending = false;
+    }
     if (state.warp_out_sound_pending) {
       if (state.warp_out_sound.has_value()) {
         audio.Play(*state.warp_out_sound);
@@ -894,7 +899,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // Ship_DeactivateVacantShipsAndTally ('\0') runs at system-entry
       // (NovaMainLoop_Run 0x00486880's 0x90 latch and Stellar_ProcessTravel-
       // AndLanding 0x00457580): the ships left behind by the departure system
-      // are vacant (idle wanderers/parked; only non-fire-restricted ships
+      // are vacant (idle wanderers/parked; only non-disabled ships
       // engaging the player survive), so the cohort is swept before the new
       // system gets its immediate scattered avg_ships population from the tail
       // of System_RebuildInitialNpcAndMissionPopulation. Per-tick maintenance
@@ -946,7 +951,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // opening the Spaceport only when the selected ordinary stellar is inside
     // its arrival envelope. The rejection feedback is shown as an on-screen HUD
     // overlay (STR# 0x7d2 messages) instead of a bare log line. Gated while a
-    // jump is engaged (fire-restricted through brake + hold + zoom).
+    // jump is engaged (disabled through brake + hold + zoom).
     if (land_pressed && !state.travel.engaging) {
       // The original's land command (binding 5 in Ship_HandlePlayerShipCore
       // 0x0044aa70) auto-picks the nearest available travel stellar when no
@@ -1008,7 +1013,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // text; the beep is not modelled). Mission-ship defs are not modelled, so
     // the original's NovaUi_RunMissionShipInteractionWindow branch never
     // triggers here (TODO(decomp)). Gated while a jump is engaged
-    // (fire-restricted through brake + hold + zoom).
+    // (disabled through brake + hold + zoom).
     if (target_action_pressed && !state.travel.engaging) {
       const std::int16_t ship_target = state.player.primary_target_ship_slot;
       if (ship_target > 0 &&
@@ -1022,9 +1027,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
               state.ShipAt(static_cast<std::size_t>(ship_target));
           if (target.ai_station_hold_timer > 0.0F) {
             // Ship is launching/entering hyperspace: cannot hail.
-            const bool restricted = NovaAiShip_IsFireRestricted(state, target);
+            const bool restricted = NovaAiShip_IsDisabled(state, target);
             // Entry numbers exactly as the original passes them (1-based):
-            // 0x35 = "No response." (fire-restricted target), 0x36 = "Unable
+            // 0x35 = "No response." (disabled target), 0x36 = "Unable
             // to send hail - target ship is entering hyperspace."
             const auto text =
                 NovaHud_LoadStringEntry(0x7d2, restricted ? 0x35 : 0x36);
@@ -1598,10 +1603,10 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // to the inactive-guard at the top of Ship_HandleShip in practice.
   const bool coasting = ship.ai_maneuver_timer_ms > 0.0F;
   const bool holds_course = coasting || ship.ai_state_code == 0x16;
-  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, ship);
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
 
   // Ship_HandleShip (0x00433050) applies the disabled/derelict damping before
-  // integrating position. DAT_00575448 is the float 0.94: fire-restricted
+  // integrating position. DAT_00575448 is the float 0.94: disabled
   // ships keep drifting, but lose 6% of each velocity component per frame.
   // This is deliberately separate from AI suppression; it also applies while
   // the ship is coasting and to the gravity-shield scalar speed.
@@ -1644,7 +1649,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       ship.heading += kTwoPi;
     }
 
-    // Ship_HandleShip regenerates only while the ship is not fire-restricted.
+    // Ship_HandleShip regenerates only while the ship is not disabled.
     // In particular, disabled NPCs must not restore shields and lethal hits
     // must not resurrect a ship whose armor has reached zero. The original
     // also leaves this whole movement/regen block disabled while coasting.
@@ -2223,7 +2228,7 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
   }
 
   // --- Fire-restricted damping (0x0044b240) --------------------------------
-  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, p);
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, p);
   if (fire_restricted) {
     p.vel_x *= kPlayerFireRestrictedVelocityDamp;
     p.vel_y *= kPlayerFireRestrictedVelocityDamp;

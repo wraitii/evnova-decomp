@@ -125,7 +125,7 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 NovaTargeting_ShipAtCloakVisibilityThreshold(const Ship &ship);
 
 // Ghidra 0x0040f6d0 Ship_IsShipEligibleForDistressCall: true when the ship
-// is an active, non-fire-restricted combatant that could call for help -- not
+// is an active, non-disabled combatant that could call for help -- not
 // coasting through a reversal (ai_maneuver_timer_ms <= 0), holding a primary
 // target that is either the player or a ship targeting the player, and not in
 // a retreat/disengage AI state (7,9,15,10,11,5,12,18). Used by the
@@ -182,7 +182,7 @@ NovaTargeting_SelectNearestEngagedTarget(const GameState &state);
 // Ghidra 0x00462bd0 Ship_SelectNearestHostileCombatTarget: stricter scan
 // than SelectNearestEngagedTarget -- the candidate must additionally be
 // eligible for a distress call, or locked on its primary target (which must
-// be targeting the player) in AI state 0x04, and not fire-restricted.
+// be targeting the player) in AI state 0x04, and not disabled.
 // Returns the slot or -1 when none.
 [[nodiscard]] std::int16_t
 NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state);

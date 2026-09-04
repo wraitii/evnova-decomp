@@ -1488,10 +1488,10 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 // Vacancy predicate (bVar3 in the decomp): a slot is SPARED only when it is
 // actively engaging the player -- ai_behavior_code > 4, ai_target_ship_slot ==
 // 0, not docked at a stellar, not in a mission fleet -- AND is not
-// fire-restricted AND `keep_player_engaged` is false (the original's flag==0).
+// disabled AND `keep_player_engaged` is false (the original's flag==0).
 // State-8 slowdown ships are also vacant: they have no special exemption and
 // are removed by this same outer sweep. Every other ship (idle wanderers/dudes,
-// parked, mission, fire-restricted) is vacant and deactivated. The original
+// parked, mission, disabled) is vacant and deactivated. The original
 // runs this on travel/landing arrival (Stellar_ProcessTravelAndLanding
 // 0x00457580) and on system entry (NovaMainLoop_Run 0x00486880) with flag==0,
 // then System_RebuildInitialNpcAndMissionPopulation immediately rebuilds the
@@ -1503,11 +1503,11 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
     Ship &ship = state.ShipAt(slot);
 
     // Vacancy predicate: spared only when actively engaging the player and
-    // (with flag==0) not fire-restricted.
+    // (with flag==0) not disabled.
     bool vacant = true;
     if (ship.ai_behavior_code > 4 && ship.ai_target_ship_slot == 0 &&
         ship.target_stellar_object_id == -1 && ship.mission_fleet_slot == -1) {
-      if (!NovaAiShip_IsFireRestricted(state, ship) && !keep_player_engaged) {
+      if (!NovaAiShip_IsDisabled(state, ship) && !keep_player_engaged) {
         vacant = false;
       }
     }

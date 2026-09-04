@@ -136,7 +136,7 @@ struct PlayerWeaponCommandInput {
 // auto-clear of an unfirable flags-0x800 bank, the wrapped secondary-bank
 // cycle (count eligible banks, denial/accept cue, skip ineligible banks) and
 // the clear-selection arm. Firing arms are gated on ai_station_hold_timer /
-// ai_maneuver_timer_ms expiry and the fire-restricted (disabled) state.
+// ai_maneuver_timer_ms expiry and the disabled (disabled) state.
 void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
                                          const PlayerWeaponCommandInput &input,
                                          float elapsed_ticks);

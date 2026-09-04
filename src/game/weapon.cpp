@@ -618,7 +618,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
       (w->flags_secondary & 0x1000U) != 0U ? static_cast<std::int8_t>(1) : 0;
   // Shot_SpawnShotFromWeapon (0x0041fd30): owners in disable mode (AI state
   // 0x0D) also mark their shots to leave the target at 1 armor. The original
-  // additionally marks shots from owners locked on a fire-restricted target
+  // additionally marks shots from owners locked on a disabled target
   // (Ship_IsShipLockedOnTarget); that check is deferred TODO(decomp).
   if (shot.impact_variant == 0 && owner_ship_slot > 0 &&
       owner_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips) &&
@@ -1188,10 +1188,10 @@ void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
                                          float /*elapsed_ticks*/) {
   Ship &player = state.player;
   // Fire arms require the station-hold and maneuver timers to be expired and
-  // the ship not fire-restricted (disabled / derelict-government gate).
+  // the ship not disabled (disabled / derelict-government gate).
   const bool controls_live = player.ai_station_hold_timer <= 0.0F;
   const bool maneuver_done = player.ai_maneuver_timer_ms <= 0.0F;
-  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, player);
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, player);
 
   // Primary fire: every bank with ammo whose weapon is not a secondary
   // (flags bit 0x2 clear).

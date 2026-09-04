@@ -70,7 +70,7 @@ public:
   // the four corner-bracket sprites (cicn 10008-10023) placed at
   // the original's asymmetric positions (TL/BL get the extra 16px left margin,
   // the top row an extra 16px above); the frame index encodes target state
-  // (fire-restricted 0xc / targeting-the-player 0x8 / distress-eligible 0x0 /
+  // (disabled 0xc / targeting-the-player 0x8 / distress-eligible 0x0 /
   // other 0x4). Frame anchors are the cicn frames' top-left (0,0), matching
   // SpriteFrame_CreateFromRect. Falls back to the SDL-line diagnostic brackets
   // when the cicn set cannot be loaded.

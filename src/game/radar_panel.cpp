@@ -70,7 +70,7 @@ SDL_Color Ship_RadarDisplayColor(const GameState &state, const Ship &ship) {
   if (ship.ship_instance_id == 0) {
     return kIffPlayerColor;
   }
-  if (NovaAiShip_IsFireRestricted(state, ship)) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
     return kIffShipFireRestricted;
   }
   if (NovaTargeting_IsShipEligibleForDistressCall(state, ship)) {

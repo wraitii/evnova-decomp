@@ -32,7 +32,7 @@ inline constexpr SDL_Color kRadarTargetBlinkColor{
 struct Stellar;
 
 // Ghidra 0x00465f00 Ship_GetShipRadarColor. IFF radar colour of one ship:
-// the player is cyan, fire-restricted ships dark grey, distress-eligible
+// the player is cyan, disabled ships dark grey, distress-eligible
 // (actively attacking the player's side) ships red, ships moving on/with the
 // player green and unaligned/blue everything else.
 [[nodiscard]] SDL_Color Ship_RadarDisplayColor(const GameState &state,

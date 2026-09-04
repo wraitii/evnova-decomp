@@ -45,6 +45,10 @@ public:
   // Number of voices still playing (draining) with the given key. Mirrors
   // NovaAudio_CountActiveByHandle for the no-stack fire-sound gate.
   [[nodiscard]] int CountActiveByKey(int sound_key) const;
+  // Stops every active voice tagged with the given key (clears its queued
+  // PCM). Mirrors NovaAudio_UnregisterCallbacks on a playing handle -- used
+  // when the disabled-jump collapse cancels the 'Warp up' cue mid-play.
+  void StopByKey(int sound_key);
   void StopAll();
   void SetMasterVolume(float volume);
 

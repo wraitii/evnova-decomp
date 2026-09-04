@@ -335,12 +335,14 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
   return true;
 }
 
-// Ghidra 0x004687b0 Ship_IsShipFireRestricted. True when the ship must not
-// fire/act this frame: derelict government (flags_primary 0x800), docked to a
-// stellar (target_stellar_object_id set) for non-player ships, or critically
-// damaged (armor below a government/aggression-dependent fraction of max). The
-// mission-fleet escort-without-flight gate is deferred (no mission fleets yet).
-bool NovaAiShip_IsFireRestricted(const GameState &state, const Ship &ship) {
+// Ghidra 0x004687b0 Ship_IsShipDisabled. True when the ship must not
+// fire/act this frame: derelict government (flags_primary 0x800), mission
+// spawn_behavior-5 special ships not yet attacking (TODO(decomp):
+// special_ship_attacking runtime flag unmodelled), or critically damaged
+// (armor below 1/3 of max, 1/10 with capability flags 0x10). Non-player ships
+// with a stellar target are exempt -- the original returns not-disabled
+// without reaching the armor check (0x00468856 XOR AL,AL early-out).
+bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship) {
   if (ship.faction_or_government_id >= 0) {
     // faction_or_government_id is a zero-based government id (indexes
     // g_government_defs directly in the original / scenario.governments here).
@@ -351,9 +353,10 @@ bool NovaAiShip_IsFireRestricted(const GameState &state, const Ship &ship) {
       return true;
     }
   }
-  // Non-player ships attached to a stellar (docked/landed target) hold fire.
+  // Ships attached to a stellar (landing/jump-out approach) are never
+  // disabled, even when crippled; the armor gate below is skipped.
   if (ship.ship_instance_id > 0 && ship.target_stellar_object_id != -1) {
-    return true;
+    return false;
   }
   // Critically-damaged gate: armor below a fraction of max armor. The Bible
   // threshold is one third, reduced to one tenth by Ship Flags 0x0010.
@@ -416,7 +419,7 @@ void NovaAi_OnShipCloakStateCleared(Ship &ship) { ClearCloakTransition(ship); }
 void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   constexpr float kCloakTargetDistance = 165.0F; // DAT_005750b0
   if (!NovaOutfit_HasCloakingDevice(state, ship) ||
-      NovaAiShip_IsFireRestricted(state, ship)) {
+      NovaAiShip_IsDisabled(state, ship)) {
     if (ship.cloak_fade_progress > 0.0F) {
       NovaAi_OnShipCloakStateCleared(ship);
     }
@@ -671,7 +674,7 @@ int NovaAi_GetShipJammingScore(const GameState &state,
   if (seek_channel < 0 || seek_channel > 3) {
     return 0;
   }
-  if (NovaAiShip_IsFireRestricted(state, ship)) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
     return 0;
   }
   const int cached = ship.jamming_score[static_cast<std::size_t>(seek_channel)];
@@ -827,7 +830,7 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
         !NovaAiShip_CanEngageTargetUnderCloakRules(state, ship, candidate)) {
       continue;
     }
-    if (NovaAiShip_IsFireRestricted(state, candidate) &&
+    if (NovaAiShip_IsDisabled(state, candidate) &&
         candidate.escort_command_code != 2) {
       continue;
     }
@@ -889,7 +892,7 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
   // this to escort/mission behaviors (>4) left ordinary hostile NPCs with no
   // active weapon at all.
   // Ship_IsShipDestroyed (0x004688e0) is a separate gate from the
-  // fire-restricted/disabled predicate.  A lethal hit leaves the ship slot
+  // disabled predicate.  A lethal hit leaves the ship slot
   // active during its destruction window, but it must not acquire a fresh
   // weapon bank in the post-state refresh.
   if (ship.ai_behavior_code < 3 || NovaAiShip_IsDestroyed(ship)) {
@@ -904,7 +907,7 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
     return;
   }
   const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-  if (!target.is_active || NovaAiShip_IsFireRestricted(state, target)) {
+  if (!target.is_active || NovaAiShip_IsDisabled(state, target)) {
     ship.primary_target_ship_slot = -1;
     return;
   }
@@ -1056,7 +1059,7 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
         candidate.current_system_id != ship.current_system_id ||
         candidate.ai_state_code == 0x15 ||
         candidate.target_stellar_object_id != -1 ||
-        NovaAiShip_IsFireRestricted(state, candidate) ||
+        NovaAiShip_IsDisabled(state, candidate) ||
         NovaTargeting_ShipAtCloakVisibilityThreshold(candidate)) {
       continue;
     }
@@ -1144,7 +1147,7 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state,
 void NovaAi_UpdateBehavior0x01(GameState &state,
                                Ship &ship,
                                std::uint32_t now_ms) {
-  if (NovaAiShip_IsFireRestricted(state, ship)) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
     return;
   }
   const std::int16_t st = ship.ai_state_code;
@@ -1215,7 +1218,7 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
 void NovaAi_UpdateBehavior0x02(GameState &state,
                                Ship &ship,
                                std::uint32_t now_ms) {
-  if (NovaAiShip_IsFireRestricted(state, ship)) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
     return;
   }
   if (ship.ai_state_code == 9 || ship.ai_state_code == 0xf ||
@@ -1254,7 +1257,7 @@ void NovaAi_UpdateBehavior0x02(GameState &state,
 void NovaAi_UpdateBehavior0x03(GameState &state,
                                Ship &ship,
                                std::uint32_t now_ms) {
-  if (NovaAiShip_IsFireRestricted(state, ship)) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
     return;
   }
   if (ship.ai_state_code == 9 || ship.ai_state_code == 0xf ||
@@ -1766,9 +1769,9 @@ void NovaAi_UpdateShipState(GameState &state,
   if (ship.ai_state_code == 0xf && ship.primary_target_ship_slot != -1) {
     if (!state.SlotInRange(
             static_cast<std::size_t>(ship.primary_target_ship_slot)) ||
-        !NovaAiShip_IsFireRestricted(state,
-                                     state.ShipAt(static_cast<std::size_t>(
-                                         ship.primary_target_ship_slot)))) {
+        !NovaAiShip_IsDisabled(state,
+                               state.ShipAt(static_cast<std::size_t>(
+                                   ship.primary_target_ship_slot)))) {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
       ship.primary_target_ship_slot = -1;
@@ -1966,7 +1969,7 @@ void NovaAi_UpdateShipState(GameState &state,
     ship.ai_secondary_target_slot = -1;
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
-    if (!NovaAiShip_IsFireRestricted(state, target)) {
+    if (!NovaAiShip_IsDisabled(state, target)) {
       if (dx > kCombatCloseRange || dy > kCombatCloseRange) {
         if (NovaAiShip_CanInterceptCurrentPrimaryTarget(state, ship)) {
           ship.ai_control_mode = ship.ai_behavior_code < 3 ? 5 : 0xe;
@@ -2085,9 +2088,9 @@ void NovaAi_ApplyControls(GameState &state,
     return slot;
   };
 
-  // Ship_IsShipFireRestricted gate: the original skips every combat/behavior
-  // mode for fire-restricted ships (they fall through with thrust 0).
-  const bool fire_restricted = NovaAiShip_IsFireRestricted(state, ship);
+  // Ship_IsShipDisabled gate: the original skips every combat/behavior
+  // mode for disabled ships (they fall through with thrust 0).
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
 
   // The mode-0x6 evasive-break player gate (NovaAi_PlayerCombatRatingGate
   // 0x0046b330: a 1-in-0x540 roll beaten by the player's combat-rating
@@ -2673,7 +2676,7 @@ void NovaAi_ApplyControls(GameState &state,
     // ship creeps its position toward ai_target_ship_slot at 10x thrust per
     // frame and drops desired speed by the same step; inside, the original
     // launches/hands off the escort (deferred, Phase 8) or clears the escort
-    // for a non-capturable player escort. A destroyed/fire-restricted ship or
+    // for a non-capturable player escort. A destroyed/disabled ship or
     // a missing secondary target falls back to idle (state/control 0).
     const std::int16_t target_slot = ship.ai_secondary_target_slot;
     if (target_slot == -1) {
@@ -3132,7 +3135,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   // (Kept as a structural no-op; the latch is not modelled.)
 
   // Fire-restricted ships skip the heavy behavior selection this frame.
-  const bool restricted = NovaAiShip_IsFireRestricted(state, ship);
+  const bool restricted = NovaAiShip_IsDisabled(state, ship);
   // Ship_CanShipInterceptCurrentPrimaryTarget reads the ship-local weapon
   // rows before the post-state auto-selector runs. Seed those rows once from
   // the assigned class so the intercept walk sees NPC guided banks too.
@@ -3143,7 +3146,7 @@ void NovaAi_UpdateShipAI(GameState &state,
     NovaAi_UpdateShipCloakStateFromTraits(state, ship);
   }
 
-  // Auto-guard: a fire-restricted ship ignores the whole AI selection and just
+  // Auto-guard: a disabled ship ignores the whole AI selection and just
   // holds its current state/controls; mirrors the original clearing the target
   // slots and control to 0 first.
   if (restricted) {
@@ -3293,7 +3296,7 @@ bool NovaAiShip_CanEngageTargetUnderCloakRules(const GameState &state,
 // Ghidra 0x00467e80 Ship_CanMaintainCloakState.
 bool NovaAiShip_CanMaintainCloakState(const GameState &state,
                                       const Ship &ship) {
-  if (NovaAiShip_IsFireRestricted(state, ship)) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
     return false;
   }
   // Locate a ModType 17 cloaking device and take its ModVal drain bits. The
@@ -3358,7 +3361,7 @@ bool NovaAiShip_CanMaintainCloakState(const GameState &state,
 // Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget.
 bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
                                          const Ship &ship) {
-  if (!ship.is_active || NovaAiShip_IsFireRestricted(state, ship)) {
+  if (!ship.is_active || NovaAiShip_IsDisabled(state, ship)) {
     return false;
   }
   // The original admits an unset (-1) AI target here; it specifically rejects
@@ -3413,7 +3416,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
     if (other.ai_maneuver_timer_ms > 0.0F || !other.is_active) {
       continue;
     }
-    if (NovaAiShip_IsFireRestricted(state, other)) {
+    if (NovaAiShip_IsDisabled(state, other)) {
       continue;
     }
     const std::int16_t o_target = other.primary_target_ship_slot;
@@ -3437,7 +3440,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
 // Ghidra 0x0040fc00 Ship_IsShipEligibleForCommAidInteraction.
 bool NovaAiShip_IsShipEligibleForCommAidInteraction(const GameState &state,
                                                     const Ship &ship) {
-  if (!ship.is_active || NovaAiShip_IsFireRestricted(state, ship)) {
+  if (!ship.is_active || NovaAiShip_IsDisabled(state, ship)) {
     return false;
   }
   for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
@@ -3466,13 +3469,13 @@ bool NovaAiShip_IsShipEligibleForCommAidInteraction(const GameState &state,
 // Ghidra 0x0040fca0 / 0x0040fce0.
 bool NovaAiShip_IsShipBrakingOnPlayerState9(const GameState &state,
                                             const Ship &ship) {
-  return ship.is_active && !NovaAiShip_IsFireRestricted(state, ship) &&
+  return ship.is_active && !NovaAiShip_IsDisabled(state, ship) &&
          ship.primary_target_ship_slot == 0 && ship.ai_state_code == 9;
 }
 
 bool NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
                                               const Ship &ship) {
-  return ship.is_active && !NovaAiShip_IsFireRestricted(state, ship) &&
+  return ship.is_active && !NovaAiShip_IsDisabled(state, ship) &&
          ship.primary_target_ship_slot == 0 && ship.ai_state_code == 0x0F;
 }
 
@@ -3578,7 +3581,7 @@ namespace {
   if (candidate.ship_instance_id == self_id) {
     return false;
   }
-  if (NovaAiShip_IsFireRestricted(state, candidate) ||
+  if (NovaAiShip_IsDisabled(state, candidate) ||
       NovaAiShip_IsDestroyed(candidate)) {
     return false;
   }
@@ -3784,7 +3787,7 @@ bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
 // banks in the allowed arc and range, scores by mass/energy damage, and arms
 // the best (energy-preferred when the target still has shields).
 void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
-  if (NovaAiShip_IsFireRestricted(state, ship)) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
     return;
   }
   // TODO(decomp(0x0043a310)) skipped: the head-of-function

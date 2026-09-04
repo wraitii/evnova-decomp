@@ -120,7 +120,7 @@ bool NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
   if (ship.ai_maneuver_timer_ms > 0.0F) {
     return false;
   }
-  if (NovaAiShip_IsFireRestricted(state, ship)) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
     return false;
   }
   const std::int16_t target = ship.primary_target_ship_slot;
@@ -150,7 +150,7 @@ bool NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
 bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
                                             const Ship &candidate,
                                             const Ship &acquirer) {
-  if (!acquirer.is_active || NovaAiShip_IsFireRestricted(state, acquirer)) {
+  if (!acquirer.is_active || NovaAiShip_IsDisabled(state, acquirer)) {
     return false;
   }
   const std::int16_t candidate_id = candidate.ship_instance_id;
@@ -327,7 +327,7 @@ NovaTargeting_FindPreviousPlayerCycleTarget(const GameState &state,
 // (0x00462bd0).
 // ---------------------------------------------------------------------------
 // Shared "nearest target" candidate core for the two player scans: active,
-// not destroyed, not fire-restricted (hostile scan only), visible through the
+// not destroyed, not disabled (hostile scan only), visible through the
 // cloak gate (or cloak scanner), in the player's system, not in AI state 0x15
 // (engaged scan only), not class-untargetable (or scanner), and NOT already
 // locked onto the player (ai_target_ship_slot != 0).
@@ -342,7 +342,7 @@ ShipIsNearestScanEligible(const GameState &state,
       ship.current_system_id != state.player.current_system_id) {
     return false;
   }
-  if (require_not_fire_restricted && NovaAiShip_IsFireRestricted(state, ship)) {
+  if (require_not_fire_restricted && NovaAiShip_IsDisabled(state, ship)) {
     return false;
   }
   if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship) &&

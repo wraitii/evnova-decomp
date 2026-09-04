@@ -276,7 +276,7 @@ struct Ship {
   float hit_reaction_timer = 0.0F;
   // Ghidra ShipState +0xB9: boarding/boarding-target latch. Set when a ship
   // boards its target (boarding_plunder), cleared for healthy player ships in
-  // PlayerTick_StatusAndOutfitEvents, and read by the fire-restriction and
+  // PlayerTick_StatusAndOutfitEvents, and read by the disable restriction and
   // disable bookkeeping predicates.
   std::int8_t boarded_target_latch = 0;
   // Ghidra ShipState field_0xB0. Weapon on-hit ionization colors are ORed
@@ -1179,6 +1179,10 @@ struct GameState {
   // One-shot audio requests consumed by the spaceflight loop.
   bool warp_up_sound_pending = false;
   bool warp_out_sound_pending = false;
+  // Cancel a playing 'Warp up' cue (SdlAudio::StopByKey on its key). Set by
+  // the disabled-jump collapse (NovaTravel_Tick), mirroring the original's
+  // NovaAudio_UnregisterCallbacks on the warp-up handle at 0x0044b0d0.
+  bool warp_up_cancel_pending = false;
 
   // Decoded player weapon fire sounds, keyed by the weapon's `fire_sound`
   // slot. Ghidra Weapon_FirePlayerWeaponBank resolves the weapon's

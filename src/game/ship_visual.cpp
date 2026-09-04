@@ -136,7 +136,7 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
 
   // Hull blast: hull mass drives the splash radius and damage; capability
   // flags 0x400 hulls (mass-less/damped) do not blast. Ships within the
-  // per-axis radius take the damage as a fire-restriction-checking hit (no
+  // per-axis radius take the damage as a disable restriction-checking hit (no
   // aggro; the original passes force_armor_only 1, transition check 1). The
   // original has no same-system gate here - quirk preserved, matching the
   // weapon splash path.

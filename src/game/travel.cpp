@@ -3,6 +3,7 @@
 #include "../log.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
+#include "ship_ai.hpp"
 #include "targeting.hpp"
 #include "weapon.hpp"
 
@@ -54,8 +55,13 @@ constexpr float kTurnAroundAlignDeg = 20.0F;
 constexpr float kHyperspaceTickHz = 60.0F;
 constexpr float kJumpDuration60HzTicks =
     364.0F; // g_hyperspace_jump_duration_engine_60hz (snd 128 frames*60/rate)
-constexpr float kJumpDurationScale = 0.01F;   // 0x575560
-constexpr float kEscapePodTimeOffset = 35.0F; // 0x575568
+constexpr float kJumpDurationScale = 0.01F; // 0x575560
+constexpr float kJumpProgressOffset =
+    35.0F; // g_hyperspace_jump_progress_offset 0x575568
+// The progress-onset threshold the jump progress tests against (g_hyperspace-
+// progress_onset_threshold 0x575540, 0.0): the tunnel ramp starts and the
+// disabled-jump collapse gains its exit velocity once progress crosses it.
+constexpr float kJumpProgressOnsetThreshold = 0.0F;
 constexpr float kTunnelSpeedCap = 50.0F; // 0x5755d8 threshold and literal cap
 // ShipClassDef.jump_duration_multiplier is not decoded yet; the scenario
 // loader derives it from the chassis capability flags (flags&1: 0.7, &2: 1.3,
@@ -828,6 +834,51 @@ void NovaTravel_Tick(GameState &state,
     const float ticks = frame_time_ms / (1000.0F / 30.0F);
     Ship &player = state.player;
 
+    // Jump-sequence clock (60 Hz ticks since the mode stamp): stamped at the
+    // engage and re-stamped when the stationary hold begins (ai_mode_start_
+    // time_ms, 0x0044c4e9), read by both the tunnel ramp and the collapse.
+    t.tunnel_elapsed_60hz += frame_time_ms * (kHyperspaceTickHz / 1000.0F);
+
+    // Disabled-jump collapse (Ship_HandlePlayerShipCore 0x0044b037 gate).
+    // Becoming disabled any time between the engage and the fire aborts the
+    // jump on that frame: hold timer = -1, the 'Warp up' cue is cancelled,
+    // the centered 'boom' effect 0x32 queues (white flash + Warp out sound),
+    // and STR# 0x7d2 0x23 overlays. NO system change -- the ship stays in
+    // the current system. The exit velocity clause only applies once the
+    // tunnel ramp had begun (progress past the onset threshold): velocity is
+    // zeroed then set to min(progress, max speed) along the heading; earlier
+    // in the sequence the velocity is left as-is (the turnaround damping has
+    // it near zero). The hold accumulator freezing (0x0044c940) is subsumed
+    // by the abort.
+    if (NovaAiShip_IsDisabled(state, player)) {
+      const float progress = t.tunnel_elapsed_60hz * kJumpDurationMultiplier /
+                                 (kJumpDuration60HzTicks * kJumpDurationScale) -
+                             kJumpProgressOffset / kJumpDurationMultiplier;
+      if (progress > kJumpProgressOnsetThreshold) {
+        const float speed = std::min(progress, PlayerMaxSpeed(state));
+        player.vel_x = std::sin(player.heading) * speed;
+        player.vel_y = -std::cos(player.heading) * speed;
+        player.speed = speed;
+      }
+      state.screen_flash_intensity = 1.0F;
+      state.warp_out_sound_pending = true;
+      state.warp_up_cancel_pending = true;
+      t.jump_phase = TravelState::JumpPhase::kIdle;
+      t.engaging = false;
+      t.hold_ticks = 0.0F;
+      t.tunnel_elapsed_60hz = 0.0F;
+      t.hold_audio_latch = false;
+      t.warp_up_started = false;
+      // The plotted destination stays armed (the original keeps travel_
+      // transfer_mode 3 and the secondary target); the player can re-engage
+      // once repaired.
+      const auto text = NovaHud_LoadStringEntry(0x7d2, 0x23);
+      NovaHud_ShowOverlayMessage(
+          state, text.value_or(""), 0xfa, 0x00, 0x0c, 0xf0U);
+      NovaLog::Info("hyperspace field collapsed: jump disabled mid-sequence");
+      return;
+    }
+
     // Update the engine-glow intensity from the level counter (0..24).
     const auto refresh_glow = [&]() {
       player.engine_glow_intensity = std::clamp(
@@ -915,6 +966,9 @@ void NovaTravel_Tick(GameState &state,
         t.jump_phase = TravelState::JumpPhase::kHold;
         t.hold_ticks = 0.0F;
         t.hold_audio_latch = false;
+        // The hold-begin block re-stamps the jump clock (ai_mode_start_time_ms
+        // at 0x0044c4e9), so the tunnel schedule runs from here.
+        t.tunnel_elapsed_60hz = 0.0F;
         // The hold-begin block also latches the flight-hint state to 0x7fff
         // (Ship_HandlePlayerShipCore 0x0044c561), arming the launch departure
         // message for every landing until a pre-jump landing consumes it.
@@ -927,7 +981,7 @@ void NovaTravel_Tick(GameState &state,
       break;
     }
     case TravelState::JumpPhase::kHold: {
-      // Stationary alignment hold (the hold branch of the fire-restricted
+      // Stationary alignment hold (the hold branch of the disabled
       // window, decompile around 0x0044f3d0): velocity damps by
       // g_hyperspace_slow_phase_velocity_damp (0.98007) per tick, the hull
       // turns onto the map-space bearing toward the destination system (the
@@ -950,10 +1004,6 @@ void NovaTravel_Tick(GameState &state,
       player.pos_y += player.vel_y * ticks;
 
       t.hold_ticks += ticks;
-      // Tunnel ramp clock: 60 Hz ticks elapsed since the hold began (the
-      // original stamps ai_mode_start_time_ms at the hold, 0x0044c4e9, and
-      // reads NovaTime_GetTickCount60Hz in its tunnel block).
-      t.tunnel_elapsed_60hz += frame_time_ms * (kHyperspaceTickHz / 1000.0F);
       if (t.hold_ticks > kEngageHoldTicks && !warp_up_sound_active) {
         t.hold_audio_latch = true;
       }
@@ -981,9 +1031,6 @@ void NovaTravel_Tick(GameState &state,
       // TODO(decomp): the original also drives the starfield streak visual
       // from this progress (FLOAT_007354a0 = progress*0.3 - 15.0, clamped
       // [0,100]); the streak render pass is not reconstructed.
-      // TODO(decomp): the original skips the tunnel while the ship is
-      // fire-restricted (disabled); the disabled state is not modelled for the
-      // player yet.
       const float heading_deg =
           player.heading * (180.0F / 3.14159265358979323846F);
       const float jump_deg =
@@ -994,7 +1041,7 @@ void NovaTravel_Tick(GameState &state,
         const float progress =
             t.tunnel_elapsed_60hz * kJumpDurationMultiplier /
                 (kJumpDuration60HzTicks * kJumpDurationScale) -
-            kEscapePodTimeOffset / kJumpDurationMultiplier;
+            kJumpProgressOffset / kJumpDurationMultiplier;
         if (progress > 0.0F) {
           const float step = std::min(progress, kTunnelSpeedCap) * ticks;
           player.pos_x += std::sin(player.heading) * step;
@@ -1020,6 +1067,11 @@ void NovaTravel_Tick(GameState &state,
   // destination" reminder (0x0044c628, STR# 0x7d2 0x1c) -- there is no
   // nearest-travel-point fallback on the player jump.
   if (!travel_input) {
+    return;
+  }
+  // Disabled ships cannot engage (0x0044c1a3): the jump dispatch bails on
+  // Ship_IsShipDisabled before any denial feedback -- a silent refusal.
+  if (NovaAiShip_IsDisabled(state, state.player)) {
     return;
   }
   const System *sys = state.scenario.System(CurrentSystemResource(state));

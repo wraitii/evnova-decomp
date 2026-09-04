@@ -47,6 +47,16 @@ bool IsRevealedOnly(const GameState &state, std::int16_t zero_based_id) {
 
 } // namespace
 
+// Gives the player a healthy hull (a launched pilot always has full armor;
+// a default-constructed ship's armor of 0 would read as disabled and the
+// jump dispatch silently refuses -- Ship_IsShipDisabled 0x004687b0).
+void MakePlayerHealthy(GameState &state) {
+  const auto *cls = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  REQUIRE(cls != nullptr);
+  state.player.armor_points = static_cast<float>(cls->base_armor);
+}
+
 // The discovery pass that runs on a completed jump must mark the reached
 // system visited and latch its linked neighbours as revealed (the one-jump-
 // ahead window the starmap shows) WITHOUT marking those neighbours explored —
@@ -213,6 +223,7 @@ TEST_CASE("starmap plot arms the travel slot only for linked destinations") {
 TEST_CASE("plot to a hyperlink without a paired nav-def stellar still jumps") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
 
   // Verify the scenario shape that exercises the fix: Kania links to Tichel at
   // a slot whose nav_defs entry is empty.
@@ -346,6 +357,7 @@ TEST_CASE("destination-system cycle steps and wraps") {
 TEST_CASE("jump engages with a moving ship: turns around and brakes") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
 
   // Kania (0) -> Tichel (1); give the ship a healthy outward drift so the
   // turn-around actually has something to brake, parked beyond the 1000 px
@@ -392,6 +404,7 @@ TEST_CASE("jump engages with a moving ship: turns around and brakes") {
 TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
   state.player.pos_x = 0.0F;
@@ -422,6 +435,7 @@ TEST_CASE("jump hold starts Warp up then fires past the engage threshold") {
 TEST_CASE("jump heading uses the linked systems' map vector") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
   state.player.pos_x = 123456.0F;
@@ -447,6 +461,7 @@ TEST_CASE("jump heading uses the linked systems' map vector") {
 TEST_CASE("jump fire hurls the ship 1350 px past the destination center") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
   state.player.pos_x = 0.0F;
@@ -484,6 +499,7 @@ TEST_CASE("jump fire hurls the ship 1350 px past the destination center") {
 TEST_CASE("jump fire arms the screen flash") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
   state.player.current_system_id = 0;
   state.player.fuel_points = 500;
   state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
@@ -503,4 +519,117 @@ TEST_CASE("jump fire arms the screen flash") {
   }
   CHECK(state.travel.just_completed);
   CHECK(flash_armed);
+}
+
+// A disabled (fire-restricted) ship cannot ENGAGE a jump: the original's
+// dispatch bails on Ship_IsShipDisabled (0x0044c1a3) before any denial
+// feedback -- a silent refusal, not an overlay.
+TEST_CASE("disabled ship cannot engage a jump") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 0;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F; // beyond the no-jump radius
+  state.player.fuel_points = 500;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  // Default-constructed hull: armor 0 -> disabled. A healthy hull would
+  // engage here (see the fire tests).
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  CHECK_FALSE(state.travel.engaging);
+}
+
+// Becoming disabled between the engage and the fire collapses the jump
+// (Ship_HandlePlayerShipCore 0x0044b037): the sequence aborts with NO system
+// change, the flash + 'Warp out' boom arm, the 'Warp up' cue cancels, and --
+// once the tunnel ramp had begun (progress past onset) -- the velocity is
+// rebuilt at min(progress, max speed) along the heading.
+TEST_CASE("disabled mid-jump collapses the field in the same system") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.engaging);
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kBrake);
+
+  // Run the brake + hold with the 'Warp up' cue still "playing" so the fire
+  // cannot land before the tunnel onset (~2.12 s into the hold).
+  for (int f = 0; f < 600; ++f) {
+    NovaTravel_Tick(state,
+                    /*travel_input=*/false,
+                    16.67F,
+                    /*warp_up_sound_active=*/true);
+    if (state.travel.jump_phase == game::TravelState::JumpPhase::kHold &&
+        f > 200) {
+      break;
+    }
+  }
+  REQUIRE(state.travel.jump_phase == game::TravelState::JumpPhase::kHold);
+  // Past the tunnel onset (progress > 0: 127 ticks after the hold stamp).
+  NovaTravel_Tick(state, false, 16.67F, true);
+
+  const std::int16_t system_before = state.player.current_system_id;
+  const float heading_before = state.player.heading;
+
+  // Now cripple the hull: the next tick must collapse the field.
+  state.player.armor_points = 0.0F;
+  NovaTravel_Tick(state, false, 16.67F, true);
+
+  CHECK_FALSE(state.travel.engaging);
+  CHECK(state.travel.jump_phase == game::TravelState::JumpPhase::kIdle);
+  CHECK(state.player.current_system_id == system_before);
+  CHECK(state.screen_flash_intensity == 1.0F);
+  CHECK(state.warp_out_sound_pending);
+  CHECK(state.warp_up_cancel_pending);
+  // Exit velocity: min(progress, max speed) along the heading.
+  const float speed = std::hypot(state.player.vel_x, state.player.vel_y);
+  CHECK(speed > 0.0F);
+  CHECK(speed <= state.cached_stats.speed_raw / 100.0F + 0.01F);
+  CHECK(state.player.vel_x ==
+        Catch::Approx(std::sin(heading_before) * speed).epsilon(0.01F));
+  CHECK(state.player.vel_y ==
+        Catch::Approx(-std::cos(heading_before) * speed).epsilon(0.01F));
+}
+
+// Disabled DURING the brake (before the tunnel onset): the jump still aborts,
+// but the velocity clause does not apply -- the ship keeps its damped
+// turnaround velocity.
+TEST_CASE("disabled before tunnel onset aborts without the exit velocity") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = -3000.0F;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+
+  NovaTravel_Tick(state, /*travel_input=*/true, 16.67F);
+  REQUIRE(state.travel.engaging);
+
+  // A couple of brake frames only -- nowhere near the ~2.12 s onset.
+  NovaTravel_Tick(state, false, 16.67F);
+  const float vel_x_before = state.player.vel_x;
+  const float vel_y_before = state.player.vel_y;
+
+  state.player.armor_points = 0.0F;
+  NovaTravel_Tick(state, false, 16.67F);
+
+  CHECK_FALSE(state.travel.engaging);
+  CHECK(state.player.current_system_id == 0);
+  CHECK_FALSE(state.warp_out_sound_pending == false);
+  CHECK(state.warp_up_cancel_pending);
+  CHECK(state.player.vel_x == vel_x_before);
+  CHECK(state.player.vel_y == vel_y_before);
 }

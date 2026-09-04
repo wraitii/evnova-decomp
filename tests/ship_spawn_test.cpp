@@ -188,7 +188,7 @@ TEST_CASE("deactivate vacant ships spares only player-engaged non-restricted") {
   engaged.ai_behavior_code = 5;
   engaged.ai_target_ship_slot = 0;
   // A real spawned ship carries its class hull; the bare allocator leaves
-  // armor at 0, which NovaAiShip_IsFireRestricted would read as critical
+  // armor at 0, which NovaAiShip_IsDisabled would read as critical
   // damage. Restore it so the ship counts as actively engaging the player.
   const auto *engaged_cls =
       st.scenario.Ship(0x80); // class 0 (allocator default)

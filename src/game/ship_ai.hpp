@@ -50,7 +50,7 @@ namespace game {
 // owning government's inherent jam (InhJam1-4); outfit ModType opcodes
 // 0x21..0x24 (Jamming Type 1-4) add their ModVal per owned instance for the
 // player or per mounted stock outfit for an NPC. NPCs whose government has
-// flags_primary 0x80 get half credit. Returns 0 for fire-restricted ships.
+// flags_primary 0x80 get half credit. Returns 0 for disabled ships.
 // The player's cache is invalidated on outfit changes and at system
 // transitions; the original only reseeds it when a ship slot is allocated.
 [[nodiscard]] int NovaAi_GetShipJammingScore(const GameState &state,
@@ -99,13 +99,18 @@ void NovaAi_EnterState15JumpOutToSystem(GameState &state,
 // per-ship AI tick; this helper performs its gameplay-visible system transfer.
 bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship);
 
-// Ghidra 0x004687b0 Ship_IsShipFireRestricted. True when the ship must not
-// fire/act this frame: derelict government (flags_primary 0x800), docked to a
-// stellar (target_stellar_object_id set) for non-player ships, or critically
-// damaged (armor below a government/aggression-dependent fraction of max).
+// Ghidra 0x004687b0 Ship_IsShipDisabled. True when the ship must not
+// fire/act this frame. Sources: derelict government (flags_primary 0x800;
+// Bible: "ships of this govt start out disabled (derelicts)"), mission
+// spawn_behavior-5 special ships not yet attacking (TODO(decomp): the
+// special_ship_attacking runtime flag is not modelled yet), or critically
+// damaged (armor below 1/3 of max, or 1/10 with Ship capability flags 0x10).
+// Non-player ships with a stellar target are exempt: the original returns
+// not-disabled for them without reaching the armor check (0x00468856), so
+// ships on a landing/jump-out approach never count as disabled.
 // Shared with the spawn-maintenance cleanup
 // (NovaShip_DeactivateVacantShipsAndTally 0x0041ad50), which spares
-// non-fire-restricted ships actively engaging the player.
+// non-disabled ships actively engaging the player.
 [[nodiscard]] // Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot
               // (formerly the
               // misnamed Weapon_IsWeaponArcAllowed): whether the bearing lies
@@ -114,13 +119,13 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship);
               // 0x1000/0x2000/0x4000, force-overridden by the matching
               // ShipClass capability flags). Turreted fire/selection paths
               // reject the bank while the target is in a blind spot.
-              [[nodiscard]] bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
-                  const ShipClass &ship_class,
-                  const Weapon &weapon,
-                  std::int16_t heading_deg,
-                  std::int16_t target_bearing_deg);
+[[nodiscard]] bool
+NovaAi_WeaponIsTargetBearingInTurretBlindSpot(const ShipClass &ship_class,
+                                              const Weapon &weapon,
+                                              std::int16_t heading_deg,
+                                              std::int16_t target_bearing_deg);
 
-bool NovaAiShip_IsFireRestricted(const GameState &state, const Ship &ship);
+bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship);
 
 // Ghidra 0x004680d0 Ship_OnShipCloakStateEntered. Starts the signed cloak
 // transition and drops shields when ModType 17 requests it.
@@ -243,7 +248,7 @@ void NovaAi_UpdateShipAI(GameState &state,
     const GameState &state, const Ship &subject_ship, const Ship &other_ship);
 
 // Ghidra 0x00467e80 Ship_CanMaintainCloakState. Whether the ship can keep (or
-// enter) its cloaking state: not fire-restricted, carries a ModType 17
+// enter) its cloaking state: not disabled, carries a ModType 17
 // cloaking device (player: owned outfits; NPC: the ship class's default
 // outfit list), and the device's configured fuel/shield drain flags are
 // satisfiable from current resources.
@@ -252,7 +257,7 @@ void NovaAi_UpdateShipAI(GameState &state,
 
 // Ghidra 0x0040f780 Ship_ShouldShipKeepPressingTarget. True when a pursuing
 // ship should keep its primary target (or the player under mutual targeting):
-// active, not fire-restricted, holding an AI target and a primary target,
+// active, not disabled, holding an AI target and a primary target,
 // passing the cloak-aware engagement predicate, not coasting through a reversal
 // (ai_maneuver_timer_ms <= 0), and in a non-disengage AI state (not in
 // {7,9,15,10,11,5,12,18}) -- either directly on the player, on a ship that
@@ -316,11 +321,11 @@ NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state);
 void NovaAi_EnterState9TargetPlayerAndBrake(Ship &ship);
 
 // Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerAndBrake. Same as
-// the 0x09 entry but for fire-restricted ships (state 0x0F).
+// the 0x09 entry but for disabled ships (state 0x0F).
 void NovaAi_EnterState0FTargetPlayerAndBrake(Ship &ship);
 
 // Ghidra 0x00410b00 Ship_EnterShipAiState0x04_TargetRandomUnengagedShip.
-// Counts same-system ships that are not fire-restricted, not destroyed, hold
+// Counts same-system ships that are not disabled, not destroyed, hold
 // the player as primary target and are in AI state 0x03/0x04; picks one at
 // random, stores it in primary_target_ship_slot and enters ai_state_code
 // 0x04 (clears the target to -1 when none).

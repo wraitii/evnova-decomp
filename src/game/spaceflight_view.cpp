@@ -1385,9 +1385,9 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
 // bracket is a cloned sprite from the 16-frame cicn set 10008-10023; the frame
 // index is `state_base + corner` where state_base encodes the target's
 // disposition:
-//   0xc fire-restricted (grey: can't fire -- near-disabled armor < 1/3 max,
+//   0xc disabled (grey: can't fire -- near-disabled armor < 1/3 max,
 //   boarding, travel-to-stellar, or govt no-fire flag;
-//   Ship_IsShipFireRestricted 0x004687b0), 0x8 targeting the player (or a
+//   Ship_IsShipDisabled 0x004687b0), 0x8 targeting the player (or a
 //   player-targeting chain), 0x0 distress-eligible, 0x4 other.
 // The bracket offset is (max(target frame height, target frame width) + 1) / 2
 // rounded up plus the decaying reticle pulse; the four sprites are then placed
@@ -1454,7 +1454,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
 
   // Bracket frame base by target state (mirrors the reticle's sVar4 branch).
   int frame_base = 4; // other
-  if (NovaAiShip_IsFireRestricted(state, target)) {
+  if (NovaAiShip_IsDisabled(state, target)) {
     frame_base = 0xc;
   } else {
     if (target.ai_target_ship_slot == 0 &&
@@ -1527,7 +1527,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   const SDL_Color color = [&]() -> SDL_Color {
     switch (frame_base) {
     case 0xc:
-      return SDL_Color{150, 150, 150, SDL_ALPHA_OPAQUE}; // fire-restricted
+      return SDL_Color{150, 150, 150, SDL_ALPHA_OPAQUE}; // disabled
     case 0x8:
       return SDL_Color{80, 255, 120, SDL_ALPHA_OPAQUE}; // engaged w/ player
     case 0x0:

@@ -403,8 +403,8 @@ void ResolveShipHitFromWeapon(GameState &state,
   }
 
   const bool was_destroyed = IsDestroyed(target);
-  // Ghidra local_12a: fire-restricted (disabled) before this hit applied.
-  const bool was_fire_restricted = NovaAiShip_IsFireRestricted(state, target);
+  // Ghidra local_12a: disabled (disabled) before this hit applied.
+  const bool was_fire_restricted = NovaAiShip_IsDisabled(state, target);
 
   ApplyImpactImpulse(state, target, impact_x, impact_y, impact_impulse);
 
@@ -468,10 +468,10 @@ void ResolveShipHitFromWeapon(GameState &state,
   }
 
   // ---- Fire-restriction (disable) transition arms (0x0041a4b0..) ---------
-  const bool now_fire_restricted = NovaAiShip_IsFireRestricted(state, target);
+  const bool now_fire_restricted = NovaAiShip_IsDisabled(state, target);
   if (now_fire_restricted) {
     // Disable-transition armor pin: armor locks at 33% of max (+1 armor;
-    // 10% for capability-flags 0x10 hulls), keeping the hull fire-restricted
+    // 10% for capability-flags 0x10 hulls), keeping the hull disabled
     // (Ship_HandleShip suppresses regeneration while restricted). Only the
     // destruction-blast caller passes the transition flag, exactly like the
     // original's check_fire_restriction_transition argument.
@@ -487,7 +487,7 @@ void ResolveShipHitFromWeapon(GameState &state,
               : max_armor * kDisableArmorPinFraction + 1.0F;
     }
     // Mission DISABLE bookkeeping: counts one disable per mission ship on the
-    // transition into fire-restriction; an escort-goal (spawn_behavior 3)
+    // transition into disable restriction; an escort-goal (spawn_behavior 3)
     // mission quick-fails on the first disable unless flags 0x0400 (invisible)
     // hid it.
     const std::int16_t fleet_slot = target.mission_fleet_slot;
@@ -1050,7 +1050,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
       target.target_stellar_object_id == owner.target_stellar_object_id) {
     return false;
   }
-  // TODO(decomp) skipped: the fire-restricted range gate comparing
+  // TODO(decomp) skipped: the disabled range gate comparing
   // ShipClassDef +0xa10 against ShotState +0x42 (per-shot scatter range,
   // 0xffff for non-turret modes) - the field semantics are still provisional.
 
