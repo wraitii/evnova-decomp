@@ -975,17 +975,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           returning_to_menu = true;
           break;
         }
+        // Launch itself advances nothing: the landing already ticked the
+        // daily world update once (Stellar_TravelToSystem 0x00455e10), and
+        // the original launch block does not touch the calendar.
+        // TODO(decomp(0x0044d870)) skipped: the 15..44-day daily-driver loop
+        // belongs to the death/escape-pod respawn (PlayerTick_TimedAction-
+        // Transition 0x0044d490), not to launch -- previously misattributed
+        // here and charging 16..45 days per landing.
         if (exit == LandedExit::kLaunched) {
-          // Launch (Ship_HandlePlayerShipCore 0x0044aa70 launch block, call
-          // site 0x0044d870): 15..44 game-days pass for the time spent
-          // docked. The original block also reloads weapon bank ammo and
-          // refills fuel -- TODO(decomp), the port refills at dock entry.
-          const int docked_days =
-              15 +
-              std::uniform_int_distribution<std::int32_t>(0, 29)(state.rng);
-          for (int day = 0; day < docked_days; ++day) {
-            Mission_TickDailyWorldUpdate(state);
-          }
+          // Stellar_TravelToSystem tail (0x00456323): the "leaving
+          // <stellar> on <date>" overlay shows as the player departs.
+          NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
         }
         // Docking blocked the loop for the whole landing; freeze gameplay
         // time across it (launch re-enters flight with a fresh clock).
@@ -1078,15 +1078,12 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
               returning_to_menu = true;
               break;
             }
+            // Launch advances nothing (see the dock-exit note above); the
+            // landing tick already covered the calendar.
+            // TODO(decomp(0x0044d870)) skipped: 15..44-day loop belongs to
+            // the death respawn (0x0044d490), not launch.
             if (landed == LandedExit::kLaunched) {
-              // Launch day advance, same as the normal dock exit above
-              // (0x0044aa70 launch block, 0x0044d870 call site).
-              const int docked_days =
-                  15 +
-                  std::uniform_int_distribution<std::int32_t>(0, 29)(state.rng);
-              for (int day = 0; day < docked_days; ++day) {
-                Mission_TickDailyWorldUpdate(state);
-              }
+              NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
             }
             resync_frame_clock();
           } else {

@@ -622,6 +622,17 @@ struct TravelState {
   JumpPhase jump_phase = JumpPhase::kIdle;
   // Whether Warp up has been started for this jump.
   bool warp_up_started = false;
+  // The one-shot flight-tutorial hint state (Ghidra DAT_007cab1c, a global
+  // stepped by the per-second hint overlay block of Ship_HandlePlayerShipCore
+  // 0x0044aa70; -3 -> -2 -> -1 -> 0 -> 1 -> 2). Values >= 3 only occur as the
+  // 0x7fff latch set at the jump hold-begin (0x0044c561), hyperspace arrival
+  // (0x0044f83f) and Ship_ResetPlayerShipState (0x004b3a3b; TODO(decomp) when
+  // the death respawn is ported); while latched, landing shows the launch
+  // departure message (Stellar_TravelToSystem tail 0x00456323) instead of
+  // re-arming the hints. A landing taken below 3 resets to -1. A fresh pilot
+  // starts at -3 (0xfffd, new-game state reset 0x0048a600). The hint overlay
+  // texts themselves (the DAT_0072exxxcc queue) are TODO(decomp).
+  std::int16_t travel_hint_state = -3;
   // Hold-phase elapsed time in 30 Hz simulation ticks. The fire lands once the
   // hold passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks) AND the Warp
   // up cue has finished playing (the original's NovaAudio_CountActiveByHandle

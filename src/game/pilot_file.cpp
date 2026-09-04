@@ -613,6 +613,12 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   }();
 
   PilotFileApply(record, state);
+  // The original's session-start path (PilotData_AutoresumeLastPilot
+  // 0x004ca120 / Menu_OpenPilotFileDialog 0x004c9e90) runs Ship_ResetPlayer-
+  // ShipState (which latches the flight-hint state to 0x7fff, 0x004b3a3b)
+  // before PilotFile_LoadSave, and LoadSave itself never writes DAT_007cab1c
+  // -- so a resumed pilot starts with the launch departure message armed.
+  state.travel.travel_hint_state = 0x7fff;
   NovaLog::Debug("pilot load: '{}' restored (jump dest stellar {}, system {})",
                  path.string(),
                  record.jump_dest_stellar,

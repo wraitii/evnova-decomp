@@ -96,4 +96,15 @@ void NovaHud_ShowLandingDenial(GameState &state,
                                LandedDenial denial,
                                bool is_station);
 
+// Composes and shows the launch departure overlay shown when the player
+// leaves a stellar after landing (Stellar_TravelToSystem tail 0x00455e10,
+// block 0x00456323): a random lead variant (STR# 0x7d2 0x37..0x3b "Launching
+// from"/"Blasting off from"/"Taking off from"/"Leaving"/"Departing"), the
+// stellar display name, "on" (0x3c), the full-month-name date
+// (Stellar_FormatElapsedTravelTime shape), and ".". Only shown while the
+// flight-hint state is latched at 0x7fff (see TravelState::travel_hint_state);
+// a pre-first-jump landing (< 3) is silent and resets the state to -1.
+void NovaHud_ShowLaunchDepartureMessage(GameState &state,
+                                        std::int16_t stellar_id);
+
 } // namespace game

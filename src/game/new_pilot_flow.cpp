@@ -734,6 +734,12 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // perform). The intro and spaceflight modes read these live fields. The
   // record is kept in memory only (no .plt writer); see PilotFileApply.
   PilotFileApply(record, state);
+  // Menu_RunNewGameFlow's state-reset tail (0x0048a600) ends with the
+  // flight-hint state at -3 (0xfffd): the Ship_ResetPlayerShipState 0x7fff
+  // latch from earlier in the bootstrap is overwritten, so a brand-new pilot
+  // gets no launch departure message until the first hyperspace jump (the
+  // flight-tutorial hints arm instead).
+  state.travel.travel_hint_state = -3;
   // Ghidra 0x004cd3b0 IntroCinematic_SetupFrames: reads the keyed pilot block
   // (selected character template; absent block -> the no-save default) and
   // fills g_intro_cinematic, clamping ids/durations. Stock data: block

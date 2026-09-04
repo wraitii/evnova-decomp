@@ -518,21 +518,24 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   DrawTargetPanel(platform, state, value_color, label_color);
   DrawCargoPanel(platform, state, value_color, label_color);
   // Transient HUD overlay message (NovaHud_ShowOverlayMessage / the landing &
-  // negotiation feedback text): drawn centered near the bottom of the flight
-  // viewport while the wall-clock expiry has not passed. Mirrors the original
-  // drawing the shared message rect (g_hud_overlay_message_rect) with the
-  // cached message colour. See hud_overlay.hpp. The spaceflight loop clears an
-  // expired message (Draw is const over state).
+  // negotiation feedback text). Mirrors the original's shared message rect
+  // (g_hud_overlay_message_rect, laid out in FUN_004af020's tail): left =
+  // window left + 25, bottom = window bottom - 5, height 26 * ui_scale (the
+  // 640x480 logical band spans x 25..width-244, y height-31..height-5 -- the
+  // lower-left). DrawContext_DrawPascalStringInFilledRect (0x004bcd30) draws
+  // the text LEFT-aligned at the rect's left edge with the cursor 12px below
+  // the rect top (every ShowOverlayMessage call site passes font_id 0 /
+  // scaled_value 0xc); the band right edge (--DAT_0088c020-50) is provisional.
+  // Multi-line word wrap is TODO(decomp); current messages are single-line.
   if (state.hud_overlay.active &&
       (state.hud_overlay.expiry_ms == 0 ||
        SDL_GetTicks() < state.hud_overlay.expiry_ms)) {
     const auto &msg = state.hud_overlay;
     const float size = static_cast<float>(layout_.font_size) + 3.0F;
     const auto logical = platform.logical_playfield_size();
-    const float left = 0.0F;
-    const float right = logical.x;
-    const float baseline = logical.y - 8.0F;
-    NovaText_DrawCentered(
+    const float left = 25.0F;
+    const float baseline = logical.y - 5.0F - 26.0F + 12.0F;
+    NovaText_Draw(
         platform,
         *font_cache_,
         NovaFontFamily::kGeneva,
@@ -540,7 +543,6 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
         kNovaFontStyleRegular,
         SDL_Color{msg.red, msg.green, msg.blue, SDL_ALPHA_OPAQUE},
         left,
-        right,
         baseline,
         msg.message);
   }

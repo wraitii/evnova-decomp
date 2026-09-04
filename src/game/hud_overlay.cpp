@@ -1,8 +1,11 @@
 #include "hud_overlay.hpp"
 
 #include "../brgr_archive.hpp"
+#include "mission.hpp"
 
 #include <SDL3/SDL.h>
+
+#include <random>
 
 namespace game {
 namespace {
@@ -191,6 +194,57 @@ void NovaHud_ShowLandingDenial(GameState &state,
   // 0x168 frames, the original's recorded overlay duration for landing
   // feedback (Stellar_ProcessTravelAndLanding).
   NovaHud_ShowOverlayMessage(state, *text, 0xe0, 0xe0, 0xe0, 0x168U);
+}
+
+// Ghidra Stellar_TravelToSystem tail block (0x00455e10, 0x00456323):
+namespace {
+// STR# 0x7d2 launch-departure pool: 0x37..0x3b are the five "leaving" lead
+// variants, 0x3c is the "on" connector before the date.
+inline constexpr std::uint16_t kLaunchMsgStrId = 0x7d2;
+inline constexpr std::uint16_t kLaunchOn = 0x3c;
+} // namespace
+
+// <variant> <stellar> on <date>." runs after the destination-interaction
+// loop returns, i.e. as the player launches. The gate mirrors DAT_007cab1c:
+// below 3 (fresh-pilot flight-tutorial hints still active) the message is
+// skipped and the state resets to -1; at 0x7fff (latched by the jump
+// hold-begin 0x0044c561, hyperspace arrival 0x0044f83f and ship resets) the
+// message shows every launch and the state is left latched (the original's
+// JMP LAB_00456158 skips the reset).
+// TODO(decomp) skipped: the original shows the queued-message buffer
+// DAT_007354d0 instead (500 frames) when a pending system/event message was
+// staged at landing; the port does not model that queue yet.
+void NovaHud_ShowLaunchDepartureMessage(GameState &state,
+                                        std::int16_t stellar_id) {
+  if (state.travel.travel_hint_state < 3) {
+    state.travel.travel_hint_state = -1;
+    return;
+  }
+  const std::uint16_t variant =
+      0x37 + static_cast<std::uint16_t>(
+                 std::uniform_int_distribution<int>{0, 4}(state.rng));
+  std::string msg;
+  if (const auto text = NovaHud_LoadStringEntry(kLaunchMsgStrId, variant)) {
+    msg = *text;
+  }
+  msg += " ";
+  if (const auto *stellar = state.scenario.Stellar(stellar_id)) {
+    // StellarDef +0x48 display name, copied bounded to 0x3f bytes.
+    msg += stellar->name.substr(0, 0x3f);
+  }
+  msg += " ";
+  if (const auto text = NovaHud_LoadStringEntry(kLaunchMsgStrId, kLaunchOn)) {
+    msg += *text;
+  }
+  msg += " ";
+  // Stellar_FormatElapsedTravelTime shape: full month names (STR# 0x89
+  // entries 1-12). The trailing chär/save-carried date suffix
+  // (DAT_00733b1c, save block +0x5eee) is empty for stock pilots.
+  msg += NovaText_FormatDateString(state.date, false);
+  msg += ".";
+  NovaHud_ShowOverlayMessage(state, msg, static_cast<std::uint64_t>(0xf0U));
+  // The original re-arms the cached overlay (0x0045646e).
+  NovaHud_ShowCachedOverlayMessage(state, /*extend=*/true);
 }
 
 } // namespace game

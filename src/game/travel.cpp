@@ -250,6 +250,10 @@ void FireJump(GameState &state) {
   // fire; the spaceflight loop re-spawns the starfield/asteroids for the new
   // system when it observes just_completed.
   t.travel_slot = -1;
+  // Arrival re-latches the flight-hint state to 0x7fff (PlayerTick_System-
+  // TransitionAndArrival 0x0044f83f), keeping the launch departure message
+  // armed for the system's landings.
+  t.travel_hint_state = 0x7fff;
   t.engaged_stellar_id = -1;
   t.starmap_destination_system_id = -1;
   t.destination_system_id = -1;
@@ -911,6 +915,10 @@ void NovaTravel_Tick(GameState &state,
         t.jump_phase = TravelState::JumpPhase::kHold;
         t.hold_ticks = 0.0F;
         t.hold_audio_latch = false;
+        // The hold-begin block also latches the flight-hint state to 0x7fff
+        // (Ship_HandlePlayerShipCore 0x0044c561), arming the launch departure
+        // message for every landing until a pre-jump landing consumes it.
+        t.travel_hint_state = 0x7fff;
         if (!t.warp_up_started) {
           t.warp_up_started = true;
           state.warp_up_sound_pending = true;
