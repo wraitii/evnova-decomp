@@ -526,8 +526,14 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   s.short_name = ReadCString(bytes, 0x5ce);
   s.long_name = ReadCString(bytes, 0x62e);
   s.buy_random = ReadBeI16(bytes, 0x388);
+  if (s.buy_random > 100) {
+    s.buy_random = 100;
+  }
   s.hire_random = ReadBeI16(bytes, 0x38a);
-  // Store masks (loader 0x004bd3c0): Contribute at shp +0x64/+0x68 and Require
+  if (s.hire_random > 100) {
+    s.hire_random = 100;
+  } // Store masks (loader 0x004bd3c0): Contribute at shp +0x64/+0x68 and
+    // Require
   // at +0x380/+0x384 feed the player's aggregate Contribute/Require masks.
   // (These are the ship-class baseline contributions combined with owned
   // outfits for Require checks; the earlier payload at +0x72a is the ship's
@@ -581,8 +587,14 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   o.lc_plural = ReadCString(bytes, 0x3ab);        // LCPlural
   o.display_weight = ReadBeI16(bytes, 0x3ec);     // DispWeight
   o.sprite_id = ReadBeI16(bytes, 0x3ee);          // Graphic (p\x9ari sprite)
-  o.buy_random = ReadBeI16(bytes, 0x3f0);         // BuyRandom (1-100)
-  o.item_class = ReadBeI16(bytes, 0x3f2);         // ItemClass
+  o.stock_threshold = ReadBeI16(bytes, 0x3f0);    // In-Stock % (clamped 0..100)
+  if (o.stock_threshold < 0) {
+    o.stock_threshold = 0;
+  }
+  if (o.stock_threshold > 100) {
+    o.stock_threshold = 100;
+  }
+  o.item_class = ReadBeI16(bytes, 0x3f2); // ItemClass
   o.persistent_on_ship_swap = (o.flags & 0x0004U) != 0U;
   // The loader (0x004bd3c0) stores weapon/ammo/bomb mod values zero-based,
   // subtracting 0x80 from any ModVal > 0x7f when the matching ModType is 1
@@ -671,7 +683,73 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (bytes.size() >= 0x23a) {
     st.gravity_shear = ReadBeI16(bytes, 0x238);
   }
+  // Tribute (StellarDef +0x46a <- payload +0x0a; the loader falls back to
+  // 1000 x TechLevel for < 1, applied by the daily income pass 0x00423540).
+  st.tribute = ReadBeI16(bytes, 0x0a);
+  if (st.tribute < 1) {
+    st.tribute = static_cast<std::int16_t>(st.tech_level * 1000);
+  }
+  // Schedule/garrison tail (loader 0x004bd3c0): garrison size (payload
+  // +0x1e -> StellarDef +0x468) seeds the present-ship count with the
+  // loader's rescale branches; the ambient sprite population (+0x23c ->
+  // +0x40, the daily tick's activity gate) and the schedule countdown seed
+  // (+0x242 -> +0x47a) + fire script (+0x345 -> +0x365) drive the per-day
+  // schedule slice of Mission_TickDailyWorldUpdate.
+  if (bytes.size() >= 0x240) {
+    st.max_ship_count = ReadBeI16(bytes, 0x1e);
+    if (st.max_ship_count < 0x3e9) {
+      st.present_ship_count = st.max_ship_count;
+    } else if (st.max_ship_count < 0x2711) {
+      st.present_ship_count = st.max_ship_count / 10 - 100;
+    } else {
+      st.present_ship_count = st.max_ship_count / 10 - 1000;
+    }
+    st.sprite_population = ReadBeI32(bytes, 0x23c);
+    st.sprite_handle_active = st.sprite_population < 0;
+  }
+  if (bytes.size() >= 0x346) {
+    st.schedule_days = ReadBeI16(bytes, 0x242);
+  }
+  if (bytes.size() >= 0x445) {
+    st.schedule_script = ReadCStringBounded(bytes, 0x345, 0xff);
+  }
   return st;
+}
+
+// crön decode (loader cron pass, NovaData_LoadScenarioResourceTables
+// 0x004bd3c0). The three strings are NUL-terminated C strings inside fixed
+// 255-byte payload fields (the loader CString_Copy's them verbatim).
+[[nodiscard]] CronEventDef DecodeCron(std::span<const std::byte> bytes) {
+  CronEventDef def;
+  def.present = true;
+  def.first_day = ReadBeI16(bytes, 0x00);
+  def.first_month = ReadBeI16(bytes, 0x02);
+  def.first_year = ReadBeI16(bytes, 0x04);
+  def.last_day = ReadBeI16(bytes, 0x06);
+  def.last_month = ReadBeI16(bytes, 0x08);
+  def.last_year = ReadBeI16(bytes, 0x0a);
+  def.trigger_odds = ReadBeI16(bytes, 0x0c);
+  def.duration = ReadBeI16(bytes, 0x0e);
+  def.pre_holdoff = ReadBeI16(bytes, 0x10);
+  def.post_holdoff = ReadBeI16(bytes, 0x12);
+  def.flags = ReadBe16(bytes, 0x16);
+  def.enable_on = ReadCStringBounded(bytes, 0x18, 0xff);
+  def.on_start = ReadCStringBounded(bytes, 0x117, 0xff);
+  def.on_end = ReadCStringBounded(bytes, 0x216, 0xff);
+  def.contribute_lo = ReadBe32(bytes, 0x316);
+  def.contribute_hi = ReadBe32(bytes, 0x31a);
+  def.require_lo = ReadBe32(bytes, 0x31e);
+  def.require_hi = ReadBe32(bytes, 0x322);
+  for (std::size_t i = 0; i < 4; ++i) {
+    std::int16_t govt = ReadBeI16(bytes, 0x326 + i * 2);
+    // Loader: < 0x80 -> no government, else rebase to the 0.. space.
+    def.news_govts[i] =
+        govt < 0x80 ? -1 : static_cast<std::int16_t>(govt - 0x80);
+    std::int16_t str = ReadBeI16(bytes, 0x32e + i * 2);
+    // Loader: < -1 -> no STR# id.
+    def.govt_news_strs[i] = str < -1 ? -1 : str;
+  }
+  return def;
 }
 
 // ---------------------------------------------------------------------------
@@ -1185,6 +1263,9 @@ bool ScenarioData::LoadFromArchives() {
   // resource id 0x80 + i. Absent ids keep inactive rows, matching the
   // original's zero-filled table.
   pers_defs.assign(0x400, {});
+  // crön events: 0x200 slots, resource ids 0x80..0x27f. Absent ids keep
+  // !present rows, matching the loader's 0xffff duration sentinel.
+  cron_events.assign(0x200, {});
   // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
   asteroid_defs.assign(0x80, {});
 
@@ -1483,6 +1564,18 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_pers;
     }
   }
+  // crön events (loader cron pass, after the përs personalities). 0x200
+  // slots, slot i = resource id 0x80 + i; absent resources keep !present,
+  // matching the loader's 0xffff duration sentinel that the daily tick
+  // skips on.
+  std::size_t loaded_crons = 0;
+  for (std::int32_t id = 0x80; id < 0x80 + 0x200; ++id) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kCronResourceType, static_cast<std::uint16_t>(id))) {
+      cron_events[static_cast<std::size_t>(id) - 0x80] = DecodeCron(res->bytes);
+      ++loaded_crons;
+    }
+  }
   // Display-name id post-pass (0x004c3e20): every slot starts with its own
   // index at +0x78a, then same-named slots adopt the first slot's id. The
   // original compares +0x625 name tails with a first-byte bound; exact-name
@@ -1538,7 +1631,8 @@ bool ScenarioData::LoadFromArchives() {
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} nebulae, {} governments, {} fleet defs, {} dude defs, "
-      "{} asteroid types, {} impact effects, {} missions, {} personalities",
+      "{} asteroid types, {} impact effects, {} missions, {} personalities, "
+      "{} cron events",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
@@ -1551,7 +1645,8 @@ bool ScenarioData::LoadFromArchives() {
       loaded_asteroid_types,
       loaded_impact_effects,
       loaded_missions,
-      loaded_pers);
+      loaded_pers,
+      loaded_crons);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

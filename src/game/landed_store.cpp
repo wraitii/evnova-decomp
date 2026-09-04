@@ -171,7 +171,7 @@ void NovaLanded_ExecuteControlSet(GameState &state,
 }
 
 std::vector<std::int16_t>
-BuildOutfitterIds(const GameState &state,
+BuildOutfitterIds(GameState &state,
                   const Stellar &stellar,
                   const ControlExpressionState &expr) {
   std::vector<std::int16_t> ids;
@@ -195,6 +195,21 @@ BuildOutfitterIds(const GameState &state,
           visible && MeetsRequire(state, outfit.require_lo, outfit.require_hi);
     if (owned && (outfit.flags & 0x0800U) != 0U)
       visible = true;
+    // Daily in-stock gate (Outfit_RebuildAvailableOutfitListForTravelStellar
+    // 0x0046a220): an unowned outfit shows only while the per-day stock roll
+    // is non-zero and <= the def's In-Stock percent; owning a visible one
+    // zeroes its roll, holding it in stock for the rest of the day (the next
+    // daily reroll in 0x00466cb0 refreshes it).
+    if (visible) {
+      if (owned) {
+        state.outfit_stock_rolls[i] = 0;
+      } else {
+        const std::int16_t roll = state.outfit_stock_rolls[i];
+        if (outfit.stock_threshold < 1 || outfit.stock_threshold < roll) {
+          visible = false;
+        }
+      }
+    }
     if (visible)
       ids.push_back(static_cast<std::int16_t>(i + 0x80));
   }
@@ -232,10 +247,14 @@ std::vector<std::int16_t> BuildShipyardIds(const GameState &state,
     // latch. A zero BuyRandom is unconditional: the class is never offered
     // for purchase. Nova's many mission/paint/loadout variants deliberately
     // use zero here, so admitting them based on tech alone floods the list
-    // with duplicate hulls. Positive-percent daily rolls remain TODO(decomp)
-    // until the per-day runtime availability state is represented.
+    // with duplicate hulls. Positive percents then gate on the per-day limit
+    // roll (ShipClassDef +0xa2c, rerolled by the 0x00466cb0 tail): the class
+    // is offered while the roll is <= BuyRandom.
+    const std::int16_t limit_roll = i < state.ship_class_limit_rolls.size()
+                                        ? state.ship_class_limit_rolls[i]
+                                        : 0;
     if (ship.display_name.empty() || ship.buy_random <= 0 ||
-        !HasTech(stellar, ship.tech_level))
+        limit_roll > ship.buy_random || !HasTech(stellar, ship.tech_level))
       continue;
     if ((ship.availability_flags & 0x0200U) != 0U &&
         !MeetsRequire(state, ship.require_lo, ship.require_hi))

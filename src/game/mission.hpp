@@ -119,10 +119,10 @@ Mission_CheckReactionConditionSatisfied(const GameState &state,
 
 // Ghidra 0x00440aa0 Mission_ClearMisnSlotAssignments. Releases every ship
 // assigned to the mission-fleet slot (clearing its fleet/targeting state and,
-// in the original, despawning it while the travel scene owns the world),
-// optionally runs the slot's resolve-script payload, then clears the slot's
-// accepted/active latches. The original's g_travel_scene_ctx despawn arm and
-// the ambient-roll latch are not modelled yet (TODO(decomp)).
+// when the travel scene owns the world (state.in_travel_scene), despawning
+// it), optionally runs the slot's resolve-script payload, then clears the
+// slot's accepted/active latches. The ambient-roll latch is not modelled yet
+// (TODO(decomp)).
 void Mission_ClearMisnSlotAssignments(GameState &state,
                                       std::int16_t mission_slot,
                                       bool emit_completion_payload,
@@ -138,9 +138,8 @@ using MissionDebriefSink = std::function<void(const std::string &text)>;
 // dialog (+0x3d Comp dësc) through `debrief` when wired, runs the success
 // payload, applies the competing-government reputation delta across systems
 // (equal governments in full, allies/hostiles scaled by 0.5), and applies the
-// PayVal credit/reputation opcode. The on-resolve availability reroll
-// (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0) is not
-// reconstructed yet (TODO(decomp)); it is logged when it would fire.
+// PayVal credit/reputation opcode. The on-resolve repeat count (Bible
+// DatePostInc) re-runs the daily world update once per count.
 void Mission_ResolveMissionSuccess(GameState &state,
                                    std::int16_t mission_slot,
                                    const MissionDebriefSink &debrief = {});
@@ -162,8 +161,9 @@ void Mission_FailMissionSlotQuick(GameState &state,
                                   std::uint32_t now_ms);
 
 // Ghidra 0x00447d90 Mission_ResolveMisnSlot. Auto-abort/goal completion:
-// resolve payload, optional daily rerolls (TODO(decomp)), the Flags 0x0008
-// 100-unit fuel penalty, Flags2 0x0002 pay application, and slot teardown.
+// resolve payload, on-resolve repeat count (DatePostInc daily world update),
+// the Flags 0x0008 100-unit fuel penalty, Flags2 0x0002 pay application, and
+// slot teardown.
 void Mission_ResolveMisnSlot(GameState &state,
                              std::int16_t mission_slot,
                              std::uint32_t now_ms);
@@ -282,15 +282,27 @@ void Mission_AdvanceGameDate(GameDate &date);
 NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
                                         const Ship &ship);
 
+// Ghidra 0x00439500 Mission_TickDailyCronEvents. Once-per-game-day driver
+// over the 0x200 crön event slots (see CronEventDef): date-window + odds
+// + Require/EnableOn activation, duration/holdoff countdowns, and the
+// OnStart/OnEnd set-strings through the reaction-script executor. Called by
+// Mission_TickDailyWorldUpdate right after the calendar advance.
+void Mission_TickDailyCronEvents(GameState &state);
+
+// Ghidra 0x00423540 Outfit_CollectStellarIncome (clean-room name:
+// Stellar_CollectDailyTributeIncome). Daily tribute pass over available
+// stellars carrying the +0x46 marker. Called by Mission_TickDailyWorldUpdate.
+void Stellar_CollectDailyTributeIncome(GameState &state);
+
 // Ghidra 0x00466cb0 ShipClass_RerollShipClassAvailabilityChances (the daily
 // world-update driver; runs once per elapsed game-day). Advances the
-// calendar and counts down every active mission's deadline. TODO(decomp)
-// skipped slices: Mission_TickDailyCronEvents (0x00439500; cron table not
-// decoded), Outfit_CollectStellarIncome, System_UpdateDisasterStates, the
-// per-stellar active/inactive daily schedule + resupply roll (0x800 x 0x498
-// loop; needs the StellarDef schedule/set-string fields), the per-system
-// dude_prob +0x1c suppression countdown, and the ship/outfit availability
-// rerolls (ShipClassDef/OutfitDef avail-roll fields not modeled).
+// calendar, ticks the crön events, counts down every active mission's
+// deadline, collects tribute income, runs the per-stellar garrison resupply
+// + schedule countdown, and rerolls ship/outfit availability. TODO(decomp)
+// skipped slices: System_UpdateDisasterStates (0x00424f90; dïsaster resource
+// family not decoded), the per-system dude_prob +0x1c suppression countdown,
+// and the system-cue (rank) daily credits -- none of those tables are
+// modelled.
 void Mission_TickDailyWorldUpdate(GameState &state);
 
 // Ghidra 0x00468450 NovaText_FormatDateString / 0x00468600

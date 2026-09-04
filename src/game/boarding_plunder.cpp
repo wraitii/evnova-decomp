@@ -401,12 +401,11 @@ BoardingPlunderOptions NovaBoarding_BuildOptions(GameState &state) {
 // Board command + capture reset (iterations 2/4 of the boarding work)
 // ---------------------------------------------------------------------------
 
-namespace {
-
-// Lazi ly decodes snd 150 + i into GameState.transition_sounds, mirroring
+// Lazily decodes snd 150 + i into GameState.transition_sounds, mirroring
 // NovaAudio_PreloadGameplayData (0x004b0740) which fills
 // g_transition_sound_handle_table[i] with NovaSound_LoadDecodedById(0x96+i).
-// Called before any boarding cue plays so the first beep doesn't hitch.
+// Called before any transition-table cue plays so the first beep doesn't
+// hitch.
 void EnsureTransitionSounds(GameState &state) {
   for (std::size_t i = 0; i < state.transition_sounds.size(); ++i) {
     if (state.transition_sounds[i].has_value()) {
@@ -420,6 +419,8 @@ void EnsureTransitionSounds(GameState &state) {
     }
   }
 }
+
+namespace {
 
 // Queues a transition-table cue on GameState.pending_ui_sounds (drained by
 // the spaceflight loop). `index` is the g_transition_sound_handle_table slot:

@@ -154,10 +154,10 @@ TEST_CASE("outfit tail fields decode at their real payload offsets",
   CHECK(o->max_count == 8);
   CHECK(o->flags == 0x0001U); // fixed gun
   CHECK(o->cost == 5000);
-  // Tail block: DispWeight, Graphic, BuyRandom, ItemClass from +0x3ec..+0x3f3.
+  // Tail block: DispWeight, Graphic, InStock %, ItemClass from +0x3ec..+0x3f3.
   CHECK(o->display_weight == 0);
   CHECK(o->sprite_id == 0);
-  CHECK(o->buy_random == 100);
+  CHECK(o->stock_threshold == 100);
   CHECK(o->item_class == 0x7f);
   // ShortName / LCName / LCPlural Pascal strings (here stored as C strings
   // trimmed of their length byte by the loader; we surface them as-is).

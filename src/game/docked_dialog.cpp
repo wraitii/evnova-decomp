@@ -2579,10 +2579,9 @@ BuildMissionInfoRows(const GameState &state) {
 // arm (reputation penalty + Mission_ClearMisnSlotAssignments(slot, 1)).
 // Port conveniences: Esc closes; the open/close/denied cues play through
 // `audio` directly instead of the queued centered-sound channel.
-// TODO(decomp) skipped: the game-calendar date line (GameState does not yet
-// track the calendar; the BBS keeps the same placeholder), and restoring
-// ai_secondary_target_slot/travel_transfer_mode around a nested map
-// destination window (the map runs inspect-only here).
+// TODO(decomp) skipped: restoring ai_secondary_target_slot/
+// travel_transfer_mode around a nested map destination window (the map runs
+// inspect-only here).
 void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
                                       SdlAudio &audio,
                                       GameState &state,

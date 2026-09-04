@@ -1,8 +1,10 @@
 #include "game/game_state.hpp"
 #include "game/mission.hpp"
+#include "game/outfit.hpp"
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdio>
 #include <string>
 
 using namespace game;
@@ -200,8 +202,11 @@ TEST_CASE("mission wildcard expansion resolves destinations and identity") {
   CHECK(expanded.find("Jane Trader of the Kestrel") != std::string::npos);
   CHECK(expanded.find("<DST>") == std::string::npos);
   CHECK(expanded.find("<CT>") == std::string::npos);
-  // Tokens without a modeled source keep the original's [Error] sentinel.
-  CHECK(expanded.find("Deadline [Error]") != std::string::npos);
+  // No TimeLimit on the definition: the target block's deadline stays zeroed
+  // (0x0043d240 leaves the fields untouched for steps < 1) and the offer-row
+  // <DL> arm formats that zero date -- the original's " 0th, 0" garbage. The
+  // "[Error]" init is only kept when the stored deadline equals today.
+  CHECK(expanded.find("Deadline  0th, 0") != std::string::npos);
   CHECK(expanded.find("signed [Error]/[Error]/EV Nova Community") !=
         std::string::npos);
   // <PST> comes from the ship class display name.
@@ -347,4 +352,80 @@ TEST_CASE("tutorial 001 reveals Sol on accept and completes on landing") {
   const auto evaluation = Mission_EvaluateMissionLists(state);
   CHECK(state.scenario.missions[tutorial_002].is_available_runtime);
   (void)evaluation;
+}
+
+TEST_CASE("crön events arm on the daily tick, contribute, and retire") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  // The original keeps 0x200 crön slots indexed by resource id - 0x80.
+  REQUIRE(state.scenario.cron_events.size() == 0x200);
+
+  // Synthetic event: eligible immediately, two active days, observable
+  // OnStart/OnEnd (control bit 300 set on start, cleared on end), and a
+  // Contribute bit the Require gate can verify.
+  auto &def = state.scenario.cron_events[0];
+  def = {};
+  def.present = true;
+  def.duration = 2;
+  def.trigger_odds = 100; // rand(101) <= 100: activates on the first tick
+  def.on_start = "b300";
+  def.on_end = "!b300";
+  def.contribute_lo = 1U << 5;
+  // (Require left empty: the gate tests the PLAYER's aggregate mask, and the
+  // event's own contribute only counts while it is active.)
+
+  // Before the first tick the event is idle and contributes nothing.
+  CHECK_FALSE(NovaOutfit_EvaluateRequireMask(state, 1U << 5, 0U));
+
+  // Day 1: armed, OnStart ran, past the (zero) pre-holdoff -> contributes.
+  Mission_TickDailyCronEvents(state);
+  CHECK(state.cron_event_states[0].is_active);
+  CHECK(state.cron_event_states[0].duration_counter == 2);
+  CHECK(state.control.ControlBit(300));
+  CHECK(NovaOutfit_EvaluateRequireMask(state, 1U << 5, 0U));
+
+  // Day 2: duration counts down, still active.
+  Mission_TickDailyCronEvents(state);
+  CHECK(state.cron_event_states[0].is_active);
+  CHECK(state.cron_event_states[0].duration_counter == 1);
+
+  // Day 3: duration expires -> OnEnd ran, slot deactivates, contribute drops.
+  Mission_TickDailyCronEvents(state);
+  CHECK_FALSE(state.cron_event_states[0].is_active);
+  CHECK_FALSE(state.control.ControlBit(300));
+  CHECK_FALSE(NovaOutfit_EvaluateRequireMask(state, 1U << 5, 0U));
+}
+
+TEST_CASE("crön date window and post-holdoff gate the daily tick") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  auto &def = state.scenario.cron_events[1];
+  def = {};
+  def.present = true;
+  def.duration = 1;
+  def.trigger_odds = 100;
+  def.on_start = "b301";
+  // A FirstYear in the future keeps the event idle even at odds 100.
+  def.first_year = 2999;
+  Mission_TickDailyCronEvents(state);
+  CHECK_FALSE(state.cron_event_states[1].is_active);
+  CHECK_FALSE(state.control.ControlBit(301));
+
+  // Zero-duration event with a post-holdoff: start+end fire on the same day
+  // and the slot stays busy (holding off) before deactivating.
+  def.first_year = -1;
+  def.duration = 0;
+  def.post_holdoff = 2;
+  def.on_start = "b301";
+  def.on_end = "!b301";
+  Mission_TickDailyCronEvents(state);
+  CHECK(state.cron_event_states[1].is_active);
+  CHECK(state.cron_event_states[1].duration_counter == -1);
+  CHECK_FALSE(state.control.ControlBit(301)); // OnEnd already ran
+  CHECK(state.cron_event_states[1].holdoff_counter == 2);
+  Mission_TickDailyCronEvents(state);
+  CHECK(state.cron_event_states[1].is_active); // waiting out the holdoff
+  Mission_TickDailyCronEvents(state);
+  CHECK_FALSE(state.cron_event_states[1].is_active);
 }

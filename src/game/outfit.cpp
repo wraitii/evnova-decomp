@@ -862,6 +862,20 @@ void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,
       contribute_hi |= state.scenario.outfits[i].contribute_hi;
     }
   }
+  // Active crön events contribute once past their pre-holdoff wait
+  // (Mission_AccumulatePlayerContributeMask 0x0046cca0 cron arm). The
+  // original's rank (system-cue) arm is skipped there too -- ranks are not
+  // modelled (TODO(decomp)).
+  const std::size_t cron_count = std::min(state.scenario.cron_events.size(),
+                                          state.cron_event_states.size());
+  for (std::size_t i = 0; i < cron_count; ++i) {
+    const auto &runtime = state.cron_event_states[i];
+    const auto &def = state.scenario.cron_events[i];
+    if (runtime.is_active && def.present && runtime.holdoff_counter < 1) {
+      contribute_lo |= def.contribute_lo;
+      contribute_hi |= def.contribute_hi;
+    }
+  }
 }
 
 bool NovaOutfit_EvaluateRequireMask(const GameState &state,

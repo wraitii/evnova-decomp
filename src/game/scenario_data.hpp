@@ -71,6 +71,12 @@ constexpr std::uint32_t kPersResourceType = 0x70917273;
 // as 0x629a9a6d by Ghidra; each record is 0x18 bytes in the source resource and
 // contributes the three runtime fields below.
 constexpr std::uint32_t kImpactEffectResourceType = 0x629a9a6d;
+// crön (0x63729a6e) — time-dependent event definitions, driven once per
+// game-day by Mission_TickDailyCronEvents (0x00439500) after the calendar
+// advance. The original loads 0x200 slots (resource id 0x80 + i) into the
+// g_cron_event_states blocks (stride 0x350) in the cron pass of
+// NovaData_LoadScenarioResourceTables (0x004bd3c0). See CronEventDef.
+constexpr std::uint32_t kCronResourceType = 0x63729a6e;
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -395,8 +401,14 @@ struct ShipClass {
   std::uint32_t contribute_hi = 0;
   std::uint32_t require_lo = 0;
   std::uint32_t require_hi = 0;
-  std::int16_t buy_random = 100;
-  std::int16_t hire_random = 100;
+  // Availability percent pair (payload +0x388/+0x38a, clamped 0..100 by the
+  // loader). buy_random is the static "readily available" percent the
+  // shipyard buy list requires the per-day limit roll (GameState.
+  // ship_class_limit_rolls, rerolled by 0x00466cb0's tail) to meet;
+  // hire_random is the threshold half, consumed by the hire lane
+  // (TODO(decomp): lane not modelled).
+  std::int16_t buy_random = 0;
+  std::int16_t hire_random = 0;
 };
 
 // Ghidra OutfitDef (g_outfit_defs, 0x200 entries indexed by outfit id minus
@@ -439,9 +451,12 @@ struct Outfit {
   std::uint32_t require_lo = 0;    // Require (low word)
   std::uint32_t require_hi = 0;    // Require (high word)
 
-  std::int16_t item_class = 0;   // ItemClass
-  std::int16_t buy_random = 100; // BuyRandom (1-100; <1/ >100 mean 100)
-  std::int16_t sprite_id = 0;    // Graphic (p\x9ari sprite id)
+  std::int16_t item_class = 0; // ItemClass
+  // Bible-style "in stock" percent (OutfitDef +0x1c from o\9ftf payload +0x3f0,
+  // clamped 0..100 by the loader): the outfitter lists an unowned outfit only
+  // while the per-day stock roll (GameState.outfit_stock_rolls) is <= this.
+  std::int16_t stock_threshold = 0;
+  std::int16_t sprite_id = 0; // Graphic (p\x9ari sprite id)
   // Runtime field_0x378 is initialized from Flags bit 0x0004 and is the
   // marker retained across player-ship replacement.
   bool persistent_on_ship_swap = false;
@@ -598,8 +613,12 @@ struct Stellar {
   std::int16_t link_b_id = -1;
 
   std::uint32_t flags = 0; // travel_flags (+0x06; land/dock/trade, economy...)
-  std::uint16_t availability_flags = 0;       // availability_flags (+0x20)
-  std::int32_t tribute = 0;                   // Tribute
+  std::uint16_t availability_flags = 0; // availability_flags (+0x20)
+  // Bible "Tribute": the stellar's daily payout when dominated (StellarDef
+  // +0x46a). Payload +0x0a; -1/0 falls back to 1000 x TechLevel in the
+  // loader. Collected once per game-day by the income pass (0x00423540) for
+  // available stellars carrying the +0x46 marker.
+  std::int16_t tribute = 0;
   std::int16_t tech_level = 0;                // TechLevel
   std::array<std::int16_t, 8> special_tech{}; // SpecialTech1-8
 
@@ -694,11 +713,72 @@ struct Stellar {
   int present_ship_count = 0; // StellarDef +0x50
   int max_ship_count = 0;     // StellarDef +0x4e (garrison size; >0x3e9/0x2711
                               //  rescale branches)
+  // Daily-schedule state decoded from the sp\9bb tail (loader 0x004bd3c0).
+  // schedule_days (+0x47a) is the seed from payload +0x242: while the stellar
+  // is sprite-active and the seed is >= 0, the daily world update decrements
+  // the countdown and, when it expires, runs the payload +0x345 set-string
+  // through the reaction-script executor and latches the countdown off. A
+  // negative seed pins the countdown at 1 (never fires). The original counts
+  // down in StellarDef +0x47c, the same field the targeting code uses as the
+  // engagement-access counter -- one shared runtime word; the port keeps both
+  // views on it (engage_access is bumped by targeting, the daily tick drives
+  // it as the countdown).
+  std::int16_t schedule_days = 0; // payload +0x242 (StellarDef +0x47a)
+  std::string schedule_script;    // payload +0x345 (StellarDef +0x365)
+  // Day counter (StellarDef +0x2a): bumped once per game-day by the tribute
+  // income pass (0x00423540) while the stellar pays out. No other consumer
+  // decoded yet.
+  std::int16_t held_days = 0;
   std::uint8_t field_0x47 = 0;
   // Runtime destruction latch used by the Y/U mission-script operators.
   // The original stores this across several unnamed StellarDef fields; this
   // explicit projection keeps the gameplay state testable.
   bool is_destroyed = false;
+};
+
+// Ghidra CronEventDef (the defined payload half of a g_cron_event_states
+// block, 0x350 stride, 0x200 slots indexed by crön resource id minus 0x80).
+// A crön defines an invisible time-dependent event: between FirstDay/Month/
+// Year and LastDay/Month/Year it rolls trigger_odds once per game-day and,
+// when the Require mask and EnableOn expression hold, becomes active for
+// duration days (with pre/post holdoff delays), running its OnStart/OnEnd
+// control-bit set strings via the reaction-script executor. While active (and
+// past the pre-holdoff) its Contribute bits join the player's aggregate
+// Contribute mask. Payload offsets from the loader's cron pass
+// (NovaData_LoadScenarioResourceTables 0x004bd3c0, block size 0x336).
+struct CronEventDef {
+  bool present = false; // loader: resource exists (block +0x01)
+
+  std::int16_t first_day = -1;   // payload +0x00
+  std::int16_t first_month = -1; // payload +0x02
+  std::int16_t first_year = -1;  // payload +0x04
+  std::int16_t last_day = -1;    // payload +0x06
+  std::int16_t last_month = -1;  // payload +0x08
+  std::int16_t last_year = -1;   // payload +0x0a
+  // Bible "Random": percent chance per eligible day. A block whose duration
+  // is -1 (absent slot sentinel) is never ticked.
+  std::int16_t trigger_odds = -1; // payload +0x0c
+  std::int16_t duration = -1;     // payload +0x0e
+  std::int16_t pre_holdoff = 0;   // payload +0x10
+  std::int16_t post_holdoff = 0;  // payload +0x12
+  // 0x0001 iterative OnStart, 0x0002 iterative OnEnd (loop while Require and
+  // EnableOn hold, bail-out after 0x2711 iterations).
+  std::uint16_t flags = 0; // payload +0x16 (block +0x3c)
+  std::string enable_on;   // payload +0x18 (block +0x50)
+  std::string on_start;    // payload +0x117 (block +0x14f)
+  std::string on_end;      // payload +0x216 (block +0x24e)
+  // Contribute joins the player's aggregate mask while active; Require gates
+  // activation. (Loader: block +0x40/+0x44 <- payload +0x316/+0x31a,
+  // block +0x48/+0x4c <- payload +0x31e/+0x322.)
+  std::uint32_t contribute_lo = 0;
+  std::uint32_t contribute_hi = 0;
+  std::uint32_t require_lo = 0;
+  std::uint32_t require_hi = 0;
+  // News overrides while active: on stellars allied with news_govts[i] a
+  // string is drawn from STR# govt_news_strs[i]. Loader: < 0x80 -> -1 for the
+  // govts; < -1 -> -1 for the STR ids.
+  std::array<std::int16_t, 4> news_govts{-1, -1, -1, -1};     // payload +0x326
+  std::array<std::int16_t, 4> govt_news_strs{-1, -1, -1, -1}; // payload +0x32e
 };
 
 // Ghidra GovtDef (g_government_defs, up to 0x100 entries indexed by government
@@ -1167,6 +1247,10 @@ struct ScenarioData {
   // row). Slot 0x3ff is reserved by the loader for the Shareware Enforcer
   // sentinel; the enforcer pass is TODO(decomp) — see LoadFromArchives.
   std::vector<PersDef> pers_defs; // indexed by pers id - 0x80
+  // crön time-dependent events (g_cron_event_states defined half): 0x200
+  // slots, slot i = resource id 0x80 + i; absent resources stay !present.
+  // See CronEventDef and Mission_TickDailyCronEvents (0x00439500).
+  std::vector<CronEventDef> cron_events; // indexed by crön id - 0x80
   // Asteroid/drift class table (r\x9aid family, one row per resource id
   // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
   // the DAT_005912dc / DAT_005912f0 pair.

@@ -158,6 +158,14 @@ struct MissionTargetResolution {
   std::int16_t cargo_qty_tons = 0;
   std::int32_t priority_payload = 0;
   std::int16_t reaction_schedule = 0;
+  // The offer-row <DL> date: Mission_ResolveMissionStellarTargets (0x0043d240)
+  // stores Mission_ComputeDateAfterSteps (0x0043f080) over the definition's
+  // TimeLimit. Zeroed when there is no TimeLimit (the original leaves the
+  // block fields untouched for steps < 1); the <DL> pass then formats the
+  // zero date, matching the original's garbage.
+  std::int16_t deadline_year = 0;
+  std::int16_t deadline_month = 0;
+  std::int16_t deadline_day = 0;
 };
 
 } // namespace game
@@ -994,8 +1002,38 @@ struct GameState {
   // by the new-game flow (real clock date with year + 250) and advanced once
   // per NovaMission_TickDailyWorldUpdate call.
   GameDate date{};
+
+  // crön event runtime half (g_cron_event_states 0x005914c0, one 0x350-stride
+  // block per crön def; the date-window/odds/script halves live on
+  // CronEventDef). The tick (Mission_TickDailyCronEvents 0x00439500) runs
+  // once per game-day.
+  struct CronEventState {
+    bool is_active = false;            // block +0x00
+    std::int16_t duration_counter = 0; // block +0x26 (days left active)
+    std::int16_t holdoff_counter = 0;  // block +0x28 (pre/post holdoff wait)
+  };
+
+  std::array<CronEventState, 0x200> cron_event_states{};
+  // Per-definition daily outfit "in stock" rolls (OutfitDef +0x1e; rerolled
+  // to rand(100)+1 each game-day by the world-update tail of 0x00466cb0, and
+  // zeroed while the player owns the outfit -- a same-day restock latch).
+  std::array<std::int16_t, 0x200> outfit_stock_rolls{};
+  // Per-class daily availability rolls (ShipClassDef +0xa2a/+0xa2c, the
+  // "licensed" slots; the static unlicensed halves are ShipClass::buy_random
+  // /hire_random). Rerolled to rand(100)+1 each game-day. The shipyard buy
+  // list offers a class while limit_roll <= buy_random; the hire lane gates
+  // on the threshold pair (hire lane itself is TODO(decomp)).
+  std::array<std::int16_t, 0x200> ship_class_limit_rolls{};
+  std::array<std::int16_t, 0x200> ship_class_threshold_rolls{};
   // Ghidra DAT_00774ae2: the context the interaction walk last ran in.
   std::int16_t mission_interaction_context = 0;
+  // Ghidra g_travel_scene_ctx (0x007d2b78): the landing DLOG 1000 window
+  // handle, nonzero while the travel-destination window owns the world --
+  // i.e. during Mission_TickReactionSlotsForTravelInteraction's landing pass
+  // (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30 clears it right
+  // after the pass). Gates the deadline quick-fail (0x00443c60) and the
+  // Mission_ClearMisnSlotAssignments despawn arm (0x00440aa0).
+  bool in_travel_scene = false;
   // Ghidra DAT_00776af4: post-interaction recheck timer
   // (NovaTime_GetTickCount60Hz + NovaRandom_Range(0x1e) + 0x1e). Only the
   // services windows consume it; the port stores it for the future consumers.

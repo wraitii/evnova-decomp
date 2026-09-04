@@ -1,6 +1,7 @@
 #include "mission.hpp"
 
 #include "../brgr_archive.hpp"
+#include "boarding_plunder.hpp"
 #include "game_state.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
@@ -887,6 +888,16 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
         ResolveSpecialShipSystem(state, definition.cargo_type_resource);
     target.cargo_qty_tons =
         ResolveSpecialShipCount(state, definition.cargo_qty_tons);
+    // The per-definition deadline for the offer-row <DL> token (0x0043d240
+    // tail): today + TimeLimit, untouched (zeroed by the reset above) when
+    // the mission has no TimeLimit.
+    if (definition.time_limit_days > 0) {
+      const GameDate deadline =
+          Mission_ComputeDateAfterSteps(state, definition.time_limit_days);
+      target.deadline_year = deadline.year;
+      target.deadline_month = deadline.month;
+      target.deadline_day = deadline.day;
+    }
   }
 }
 
@@ -1359,9 +1370,10 @@ bool Mission_CheckReactionConditionSatisfied(const GameState &state,
 // Ghidra 0x00440aa0 Mission_ClearMisnSlotAssignments. Releases every ship
 // assigned to the mission-fleet slot: clears its fleet link, restores the
 // class-default AI behavior when it held a target, and re-enters AI state 2.
-// TODO(decomp): the original despawns the assigned ships when
-// g_travel_scene_ctx != 0 (the landing/travel scene owns the world); the
-// clean-room runtime has no such context latch yet.
+// While the travel scene owns the world (state.in_travel_scene, the
+// original's g_travel_scene_ctx) the released ships are despawned instead:
+// the landing pass runs while the destination window owns the world, so the
+// released fleet must not linger into the flight scene.
 void Mission_ClearMisnSlotAssignments(GameState &state,
                                       std::int16_t mission_slot,
                                       bool emit_completion_payload,
@@ -1379,6 +1391,9 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
       }
       ship.ai_target_ship_slot = -1;
       NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+    }
+    if (state.in_travel_scene) {
+      ship.is_active = false;
     }
   }
   if (emit_completion_payload) {
@@ -1713,7 +1728,8 @@ bool Mission_TriggerLandingInteractions(
     // re-offerable (see 0x00448670's -1 arm).
     state.mission_interaction_shown[static_cast<std::size_t>(candidate)] = 1;
   }
-  // Recheck timer: DAT_00776af4 = NovaTime_GetTickCount60Hz() + NovaRandom_Range(30)
+  // Recheck timer: DAT_00776af4 = NovaTime_GetTickCount60Hz() +
+  // NovaRandom_Range(30)
   // + 30. Consumed by the services windows; stored for the future consumers.
   state.mission_interaction_recheck_at_ms =
       static_cast<std::int32_t>(now_ms) +
@@ -2071,9 +2087,7 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
   // <DL> (0x004444f0 active-slot arm): the runtime flags' absolute deadline
   // date formatted with the full month names; when the deadline equals the
   // current date the original's format buffer keeps its empty init content,
-  // so the token expands to "". TODO(decomp): the offer-row arm formats a
-  // date from the mission target-resolution table, which the port does not
-  // track yet.
+  // so the token expands to "".
   if (active != nullptr && mission_id >= 0 &&
       static_cast<std::size_t>(mission_id) <
           state.active_mission_runtime_flags.size()) {
@@ -2094,7 +2108,26 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
       ReplaceMissionToken(result, "<DL>", "[Error]");
     }
   } else {
-    ReplaceMissionToken(result, "<DL>", "[Error]");
+    // Offer-row arm: the per-definition target block's deadline, formatted
+    // the same way. The buffer keeps its "[Error]" init only when the stored
+    // deadline equals today; no-TimeLimit missions have zeroed block fields
+    // (0x0043d240 leaves them untouched for steps < 1), so their <DL>
+    // expands to the zero date, matching the original's garbage.
+    std::string deadline_text = std::string("[Error]");
+    if (mission_id >= 0 && static_cast<std::size_t>(mission_id) <
+                               state.mission_target_resolutions.size()) {
+      const MissionTargetResolution &target =
+          state
+              .mission_target_resolutions[static_cast<std::size_t>(mission_id)];
+      const GameDate deadline{
+          target.deadline_year, target.deadline_month, target.deadline_day};
+      if (deadline.year != state.date.year ||
+          deadline.month != state.date.month ||
+          deadline.day != state.date.day) {
+        deadline_text = NovaText_FormatDateString(deadline, false);
+      }
+    }
+    ReplaceMissionToken(result, "<DL>", deadline_text);
   }
   ReplaceMissionToken(result, "<PN>", player_name);
   ReplaceMissionToken(result, "<PNN>", nickname);
@@ -2129,9 +2162,10 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
 // (Bible ShipGoal: 0 destroy, 1 disable, 2 board, 3 escort, 4 observe,
 // 5 rescue, 6 chase-off; -1 no goal), fails overdue missions, and runs the
 // completion payload + auto-abort resolution when the objective first
-// completes. Only the in-flight caller is wired; the landing-window caller
-// (0x00443780) runs with g_travel_scene_ctx set, which suppresses the
-// deadline arm (TODO(decomp) when that gate is ported).
+// completes. The deadline arm is suppressed while the travel scene owns the
+// world (state.in_travel_scene): the landing gate (0x00443780) runs with the
+// destination window up, which clears g_travel_scene_ctx only after the
+// pass.
 void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
                                                   std::int16_t mission_slot,
                                                   std::uint32_t now_ms) {
@@ -2244,17 +2278,22 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
       }
     }
   }
-  // Deadline arm (flight only; the landing context suppresses it in the
-  // original): an expired TimeLimit quick-fails the mission. The
-  // STR# 0x7d2 0x11d "mission failed" overlay + centered sound are skipped
-  // for invisible missions (flags-accept 0x0400) in the original; the sound
-  // itself is TODO(decomp) (transition-sound table not modelled).
-  if (!runtime.is_failed && mission.time_limit_days_remaining < 1 &&
+  // Deadline arm: an expired TimeLimit quick-fails the mission, except while
+  // the travel scene owns the world (g_travel_scene_ctx != 0 in the original:
+  // the landing pass resolves missions docked, never on the clock). The
+  // STR# 0x7d2 0x11d "mission failed" overlay + transition-table cue 3 are
+  // skipped for invisible missions (flags-accept 0x0400).
+  if (!runtime.is_failed && !state.in_travel_scene &&
+      mission.time_limit_days_remaining < 1 &&
       mission.time_limit_days_remaining > -32000) {
     runtime.is_failed = true;
     if ((runtime.flags_primary_at_accept & 0x0400U) == 0U) {
-      // STR# 0x7d2 entry 0x11d (1-based) = "Time limit exceeded - mission
-      // failed." (Mission_HandleMissionOrSurrenderShipReaction 0x00443c60).
+      // NovaAudio_QueueCenteredSound(g_transition_sound_handle_table[3], 1)
+      // then STR# 0x7d2 entry 0x11d (1-based) = "Time limit exceeded -
+      // mission failed." (Mission_HandleMissionOrSurrenderShipReaction
+      // 0x00443c60).
+      EnsureTransitionSounds(state);
+      state.pending_ui_sounds.push_back({3, 1});
       if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11d)) {
         NovaHud_ShowOverlayMessage(state,
                                    *text,
@@ -2373,6 +2412,12 @@ void Mission_TickReactionSlotsForTravelInteraction(
       landed_stellar_id >= kResourceIdBase
           ? static_cast<std::int16_t>(landed_stellar_id - kResourceIdBase)
           : landed_stellar_id;
+  // The original runs this pass with g_travel_scene_ctx set to the landing
+  // window handle (NovaUi_RunTravelDestinationInteractionLoop 0x00491f30
+  // clears it only after the pass): the deadline arm stays suppressed and
+  // released mission ships despawn while the destination window owns the
+  // world.
+  state.in_travel_scene = true;
   bool resolved_a_success = false;
   for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
     if (!state.active_mission_runtime_flags[slot].is_active) {
@@ -2410,6 +2455,7 @@ void Mission_TickReactionSlotsForTravelInteraction(
     // Side-effect call: refreshes availability and the resolved-locator cache.
     (void)Mission_EvaluateMissionLists(state);
   }
+  state.in_travel_scene = false;
 }
 
 // Ghidra 0x00466c40 Mission_AdvanceGameDate.
@@ -2494,10 +2540,209 @@ int NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
   return std::max(days, 1);
 }
 
+namespace {
+
+// Ghidra 0x0046c800 Frame_IsRectVisibleInViewport (the crön-event arm; the
+// same helper also culls rects elsewhere). Called with a g_cron_event_states
+// block pointer it reads FirstYear/FirstMonth/FirstDay (+2/+4/+6) and
+// LastYear/LastMonth/LastDay (+0x10/+0x12/+0x14) as an activation date
+// window against the current game date:
+// - FirstYear > 0 && year < FirstYear -> too early. FirstMonth == 0 gates on
+//   FirstDay alone (day-of-month, any month); FirstMonth > 0 && FirstDay == 0
+//   gates on the month alone; both > 0 gate on month*0x20 + day. A negative
+//   FirstMonth or FirstDay field means "ignore this field" (Bible: 0 or -1).
+// - Last* mirror the check with the comparisons inverted.
+// Quirks preserved verbatim, including the month*0x20 composite comparison.
+[[nodiscard]] bool CronEventDateWindowAllows(const CronEventDef &def,
+                                             const GameDate &date) {
+  if (def.first_year > 0 && date.year < def.first_year) {
+    return false;
+  }
+  if (def.first_month == 0) {
+    if (def.first_day > 0 && date.day < def.first_day) {
+      return false;
+    }
+  } else if (def.first_month < 1 || def.first_day != 0) {
+    if (def.first_month > 0 && def.first_day > 0 &&
+        date.month * 0x20 + date.day < def.first_month * 0x20 + def.first_day) {
+      return false;
+    }
+  } else if (def.first_month < date.month) {
+    return false;
+  }
+  if (def.last_year > 0 && def.last_year < date.year) {
+    return false;
+  }
+  if (def.last_month == 0) {
+    if (def.last_day > 0) {
+      if (def.last_day < date.day) {
+        return false;
+      }
+      return true;
+    }
+  } else if (def.last_month < 1 || def.last_day != 0) {
+    if (def.last_month > 0 && def.last_day > 0 &&
+        def.last_month * 0x20 + def.last_day < date.month * 0x20 + date.day) {
+      return false;
+    }
+  } else if (def.last_month < date.month) {
+    return false;
+  }
+  return true;
+}
+
+// Ghidra 0x00439750 Mission_ActivateCronEvent. Fires the event's OnStart
+// set-string through the reaction-script executor. With flags 0x0001 the
+// original re-runs it while the Require mask and EnableOn expression hold,
+// bailing out after 0x2711 iterations (a guard against infinite loops).
+void Mission_ActivateCronEvent(GameState &state, std::int16_t cron_index) {
+  const CronEventDef &def =
+      state.scenario.cron_events[static_cast<std::size_t>(cron_index)];
+  if ((def.flags & 0x0001U) == 0U) {
+    Mission_ExecuteReactionScript(state, def.on_start);
+    return;
+  }
+  std::int16_t iterations = 0;
+  while (iterations < 0x2711) {
+    if (!NovaOutfit_EvaluateRequireMask(
+            state, def.require_lo, def.require_hi) ||
+        !Mission_CheckReactionConditionSatisfied(state, def.enable_on)) {
+      break;
+    }
+    Mission_ExecuteReactionScript(state, def.on_start);
+    ++iterations;
+  }
+}
+
+// Ghidra 0x004398b0 Mission_TerminateCronEvent. Fires OnEnd; flags 0x0002
+// selects the same iterative arm as activation.
+void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
+  const CronEventDef &def =
+      state.scenario.cron_events[static_cast<std::size_t>(cron_index)];
+  if ((def.flags & 0x0002U) == 0U) {
+    Mission_ExecuteReactionScript(state, def.on_end);
+    return;
+  }
+  std::int16_t iterations = 0;
+  while (iterations < 0x2711) {
+    if (!NovaOutfit_EvaluateRequireMask(
+            state, def.require_lo, def.require_hi) ||
+        !Mission_CheckReactionConditionSatisfied(state, def.enable_on)) {
+      break;
+    }
+    Mission_ExecuteReactionScript(state, def.on_end);
+    ++iterations;
+  }
+}
+
+} // namespace
+
+// Ghidra 0x00439500 Mission_TickDailyCronEvents. Once-per-game-day driver
+// over the 0x200 crön slots (called from Mission_TickDailyWorldUpdate right
+// after the calendar advance):
+// - idle events roll rand(101) against the trigger odds; on a hit, the
+//   date-window, Require-mask and EnableOn gates arm the event: active,
+//   duration_counter = duration, then either the pre-holdoff wait or an
+//   immediate OnStart (with an immediate OnEnd when duration == 0, latching
+//   duration_counter to -1 so only the post-holdoff wait remains).
+// - active events count down: holdoff first (a pre-holdoff expiry fires
+//   OnStart; a post-holdoff expiry deactivates), then duration (OnEnd;
+//   deactivation unless a post-holdoff wait keeps the slot busy).
+// Events with no TimeLimit (duration == -1, the absent-slot sentinel) are
+// never touched.
+void Mission_TickDailyCronEvents(GameState &state) {
+  const std::size_t count = std::min(state.scenario.cron_events.size(),
+                                     state.cron_event_states.size());
+  for (std::size_t index = 0; index < count; ++index) {
+    const CronEventDef &def = state.scenario.cron_events[index];
+    auto &runtime = state.cron_event_states[index];
+    if (def.duration < 0 || !def.present) {
+      continue;
+    }
+    if (!runtime.is_active) {
+      if (std::uniform_int_distribution<int>{0, 100}(state.rng) >
+          def.trigger_odds) {
+        continue;
+      }
+      if (!CronEventDateWindowAllows(def, state.date) ||
+          !NovaOutfit_EvaluateRequireMask(
+              state, def.require_lo, def.require_hi) ||
+          !Mission_CheckReactionConditionSatisfied(state, def.enable_on)) {
+        continue;
+      }
+      runtime.is_active = true;
+      runtime.duration_counter = def.duration;
+      if (def.pre_holdoff < 1) {
+        runtime.holdoff_counter = 0;
+        Mission_ActivateCronEvent(state, static_cast<std::int16_t>(index));
+        if (def.duration == 0) {
+          Mission_TerminateCronEvent(state, static_cast<std::int16_t>(index));
+          runtime.duration_counter = -1;
+          if (def.post_holdoff > 0) {
+            runtime.holdoff_counter = def.post_holdoff;
+          }
+        }
+      } else {
+        runtime.holdoff_counter = def.pre_holdoff;
+      }
+    } else if (runtime.holdoff_counter < 1) {
+      --runtime.duration_counter;
+      if (runtime.duration_counter < 1) {
+        Mission_TerminateCronEvent(state, static_cast<std::int16_t>(index));
+        if (def.post_holdoff < 1) {
+          runtime.is_active = false;
+        } else {
+          runtime.holdoff_counter = def.post_holdoff;
+        }
+      }
+    } else {
+      --runtime.holdoff_counter;
+      if (runtime.holdoff_counter < 1) {
+        if (runtime.duration_counter < 0) {
+          runtime.is_active = false;
+        } else {
+          Mission_ActivateCronEvent(state, static_cast<std::int16_t>(index));
+          if (runtime.duration_counter == 0) {
+            Mission_TerminateCronEvent(state, static_cast<std::int16_t>(index));
+          }
+        }
+      }
+    }
+  }
+}
+
+// Ghidra 0x00423540 Outfit_CollectStellarIncome. Daily tribute pass: every
+// available stellar carrying the +0x46 marker (its system visible + the 0x20
+// availability bit, set by the display-state refresh) pays its Tribute value
+// (payload +0x0a, default 1000 x TechLevel) and bumps its day counter
+// (StellarDef +0x2a) unless the currently docked stellar carries the same
+// 0x20 marker. TODO(decomp): the domination flow that grants a stellar the
+// +0x46 marker is not modelled, so the pass stays idle in practice.
+void Stellar_CollectDailyTributeIncome(GameState &state) {
+  const std::size_t count =
+      std::min(state.scenario.stellars.size(), static_cast<std::size_t>(0x800));
+  for (std::size_t i = 0; i < count; ++i) {
+    Stellar &stellar = state.scenario.stellars[i];
+    if (!stellar.is_available || !stellar.hazard_marker) {
+      continue;
+    }
+    const Stellar *docked = state.scenario.Stellar(
+        static_cast<std::int16_t>(state.travel.selected_stellar_id));
+    if (docked == nullptr || (docked->availability_flags & 0x20U) == 0U) {
+      ++stellar.held_days;
+    }
+    state.player.credits += stellar.tribute;
+    // g_playerInventoryAndLoadoutDirty = 1: the port's stat cache is the
+    // consumer of that latch.
+    state.stat_cache_valid = false;
+  }
+}
+
 // Ghidra 0x00466cb0 ShipClass_RerollShipClassAvailabilityChances (daily
-// world-update driver; see mission.hpp for the skipped slices).
+// world-update driver; see mission.hpp for the remaining skipped slices).
 void Mission_TickDailyWorldUpdate(GameState &state) {
   Mission_AdvanceGameDate(state.date);
+  Mission_TickDailyCronEvents(state);
   // Active-mission deadline countdown (MisnActive +0x45, 16 slots). The
   // -32000 no-deadline sentinel stays negative and is never touched.
   for (auto &mission : state.active_missions) {
@@ -2505,6 +2750,69 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
       mission.time_limit_days_remaining =
           static_cast<std::int16_t>(mission.time_limit_days_remaining - 1);
     }
+  }
+  Stellar_CollectDailyTributeIncome(state);
+  // Per-stellar daily schedule + garrison resupply (0x800 x 0x498 loop):
+  // available stellars only. TODO(decomp) skipped inside this loop: the two
+  // daily-zeroed scratch fields (StellarDef +0x2e/+0x494) have no modelled
+  // consumer, and System_UpdateDisasterStates (0x00424f90) needs the
+  // dïsaster resource family.
+  const std::size_t stellar_count =
+      std::min(state.scenario.stellars.size(), static_cast<std::size_t>(0x800));
+  for (std::size_t i = 0; i < stellar_count; ++i) {
+    Stellar &stellar = state.scenario.stellars[i];
+    if (!stellar.is_available) {
+      continue;
+    }
+    // Garrison resupply (gated on the +0x46 marker like the income pass): a
+    // garrison size above 1000 wraps modulo 1000, and the count creeps back
+    // up one ship per 0x1c2-roll hit while below quota.
+    if (stellar.hazard_marker) {
+      int max = stellar.max_ship_count;
+      if (max > 1000) {
+        max %= 1000;
+      }
+      if (stellar.present_ship_count < max &&
+          std::uniform_int_distribution<int>{0, 0x1c1}(state.rng) == 0) {
+        ++stellar.present_ship_count;
+      }
+    }
+    // Schedule countdown (StellarDef +0x47c, shared with the engagement-
+    // access counter). Runs only while the stellar is sprite-active: a
+    // negative seed pins the countdown at 1 (never fires); an expiring
+    // countdown latches 0xffff, clears the sprite handle and fires the
+    // schedule set-string once.
+    if (NovaTargeting_IsStellarActive(stellar)) {
+      if (stellar.schedule_days < 0) {
+        stellar.engage_access = 1;
+      } else if (--stellar.engage_access < 1) {
+        stellar.engage_access = -1;
+        stellar.sprite_handle_active = stellar.sprite_population < 0;
+        Mission_ExecuteReactionScript(state, stellar.schedule_script);
+      }
+    } else {
+      stellar.sprite_handle_active = stellar.sprite_population < 0;
+      stellar.engage_access = -1;
+    }
+  }
+  // Ship/outfit availability rerolls (the driver's tail): every ship class
+  // gets fresh 1..100 licensed threshold/limit rolls, every outfit a fresh
+  // 1..100 stock roll. TODO(decomp) skipped: the per-system dude_prob
+  // +0x1c suppression countdown and the system-cue (rank) daily credits --
+  // neither table is modelled.
+  const std::size_t ship_count =
+      std::min(state.scenario.ships.size(), static_cast<std::size_t>(0x300));
+  for (std::size_t i = 0; i < ship_count; ++i) {
+    state.ship_class_limit_rolls[i] = static_cast<std::int16_t>(
+        std::uniform_int_distribution<int>{0, 99}(state.rng) + 1);
+    state.ship_class_threshold_rolls[i] = static_cast<std::int16_t>(
+        std::uniform_int_distribution<int>{0, 99}(state.rng) + 1);
+  }
+  const std::size_t outfit_count =
+      std::min(state.scenario.outfits.size(), static_cast<std::size_t>(0x200));
+  for (std::size_t i = 0; i < outfit_count; ++i) {
+    state.outfit_stock_rolls[i] = static_cast<std::int16_t>(
+        std::uniform_int_distribution<int>{0, 99}(state.rng) + 1);
   }
 }
 

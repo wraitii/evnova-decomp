@@ -109,6 +109,11 @@ struct BoardingWindowResult {
                                                           SpaceflightView &view,
                                                           HudRenderer &hud);
 
+// Lazily decodes snd 150 + i into GameState.transition_sounds (mirrors
+// NovaAudio_PreloadGameplayData 0x004b0740). Call before queueing a
+// transition-table cue so the first play doesn't hitch.
+void EnsureTransitionSounds(GameState &state);
+
 // Ghidra 0x0045a3d0 Ship_HandlePlayerBoardTargetCommand. The player's one-shot
 // "board target" command (input.board edge in the port): validates range /
 // relative velocity / heading alignment / boardability of the primary target,
