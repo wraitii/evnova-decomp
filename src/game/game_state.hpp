@@ -647,6 +647,11 @@ struct TravelState {
   // gate, mirrored through hold_audio_latch).
   float hold_ticks = 0.0F;
   bool hold_audio_latch = false;
+  // Rising-edge latch for the "entered jump range" cue (Ghidra DAT_007cab34):
+  // set while a plotted (mode-3) jump is armed and the ship is far enough
+  // from the system center to jump, cleared otherwise. The transition-sound
+  // cue fires on the 0 -> 1 edge (see TickJumpRangeCue in travel.cpp).
+  bool jump_range_cue_latch = false;
   // Tunnel ramp clock in 1/60 s ticks, accumulated since the hold began (the
   // original stamps ai_mode_start_time_ms when the hold starts, 0x0044c4e9,
   // and reads its 60 Hz tick counter in the tunnel block -- NOT ms despite

@@ -137,6 +137,57 @@ float PlayerMaxSpeed(const GameState &state) {
   return state.cached_stats.speed_raw / kMaxSpeedScale;
 }
 
+// Ghidra flight-tail block of Ship_HandlePlayerShipCore (~0x00450a2c): with a
+// plotted jump armed (travel_transfer_mode 3 + secondary target), a per-tick
+// range probe from the system center over NON-restricted nav stellars drives
+// a rising-edge cue. On the 0 -> 1 edge of the in-range latch (DAT_007cab34)
+// while not engaged and with fuel for one jump: transition-table sound [4]
+// queues (pending_ui_sounds), the travel status panel is marked dirty (no
+// port equivalent -- the HUD repaints per frame), and the current overlay
+// message (e.g. the 'not yet far enough away' denial) is cleared by a 1-tick
+// empty overwrite. The latch updates whenever the jump is armed -- including
+// while engaged, where the cue itself is suppressed (hold timer > 0). The
+// original never resets the latch on arrival; it only re-arms/clears while a
+// jump is armed, so the port mirrors the stale-latch behavior.
+void TickJumpRangeCue(GameState &state) {
+  TravelState &t = state.travel;
+  if (state.player.travel_transfer_mode != 3 || t.travel_slot < 0) {
+    return;
+  }
+  const System *sys = state.scenario.System(CurrentSystemResource(state));
+  if (sys == nullptr) {
+    return;
+  }
+  bool in_jump_range = true;
+  for (const std::int16_t nav : sys->nav_defs) {
+    if (nav < 0x80) {
+      continue; // no travel point in this slot
+    }
+    const Stellar *st = state.scenario.Stellar(nav);
+    if (st == nullptr || (st->availability_flags & 0x3000U) != 0U) {
+      continue; // restricted travel stellars do not gate the range
+    }
+    const float dist_sq = state.player.pos_x * state.player.pos_x +
+                          state.player.pos_y * state.player.pos_y;
+    if (dist_sq <= NovaTargeting_ComputeTravelRangeSq(state)) {
+      in_jump_range = false;
+      break;
+    }
+  }
+  if (!in_jump_range) {
+    t.jump_range_cue_latch = false;
+    return;
+  }
+  if (!t.jump_range_cue_latch && !t.engaging &&
+      state.player.fuel_points >= kJumpFuelCost) {
+    state.pending_ui_sounds.push_back({4, 1});
+    if (state.hud_overlay.active) {
+      NovaHud_ShowOverlayMessage(state, "", 0xe0U, 0xe0U, 0xe0U, 1);
+    }
+  }
+  t.jump_range_cue_latch = true;
+}
+
 // Completes an engaged jump: the fire/arrival moment. Mirrors the fire +
 // arrival block at PlayerTick_HyperspaceSequenceAnchor (0x0044f3d0) and
 // PlayerTick_SystemTransitionAndArrival (0x0044f660) in
@@ -876,7 +927,8 @@ void NovaTravel_Tick(GameState &state,
       NovaHud_ShowOverlayMessage(
           state, text.value_or(""), 0xfa, 0x00, 0x0c, 0xf0U);
       NovaLog::Info("hyperspace field collapsed: jump disabled mid-sequence");
-      return;
+      // Fall through (no return): the original's flight tail still runs in
+      // the collapse frame, so the jump-range cue can fire on the same tick.
     }
 
     // Update the engine-glow intensity from the level counter (0..24).
@@ -1057,6 +1109,10 @@ void NovaTravel_Tick(GameState &state,
     default:
       break;
     }
+    // The original's flight tail runs after the phase machine even while
+    // engaged: the range latch keeps updating, but the cue is suppressed by
+    // the hold timer (t.engaging here).
+    TickJumpRangeCue(state);
     return;
   }
 
@@ -1067,6 +1123,7 @@ void NovaTravel_Tick(GameState &state,
   // destination" reminder (0x0044c628, STR# 0x7d2 0x1c) -- there is no
   // nearest-travel-point fallback on the player jump.
   if (!travel_input) {
+    TickJumpRangeCue(state);
     return;
   }
   // Disabled ships cannot engage (0x0044c1a3): the jump dispatch bails on
@@ -1170,6 +1227,9 @@ void NovaTravel_Tick(GameState &state,
       t.engaged_stellar_id,
       slot,
       dest_zero_based);
+  // Flight tail (engaged now: the cue is suppressed on the engage frame,
+  // matching the original's tail-after-commands order).
+  TickJumpRangeCue(state);
 }
 
 // ---------------------------------------------------------------------------

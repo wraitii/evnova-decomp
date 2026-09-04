@@ -633,3 +633,62 @@ TEST_CASE("disabled before tunnel onset aborts without the exit velocity") {
   CHECK(state.player.vel_x == vel_x_before);
   CHECK(state.player.vel_y == vel_y_before);
 }
+
+// The "entered jump range" cue (Ship_HandlePlayerShipCore flight tail,
+// ~0x00450a2c): with a plotted mode-3 jump armed, the rising edge of the
+// in-range latch queues transition-table sound [4]; the latch updates
+// whenever the jump is armed (no re-edge while it stays in range, no edge on
+// leaving, suppressed while engaged or without fuel for a jump).
+TEST_CASE("entering jump range with a plotted jump cues the UI sound") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  MakePlayerHealthy(state);
+  state.player.current_system_id = 0;
+  state.player.fuel_points = 500;
+  state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.stat_cache_valid = true;
+
+  // Plot while far outside the no-jump radius: the first armed tick crosses
+  // the latch edge and queues the cue.
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  REQUIRE(NovaTravel_PlotStarmapDestination(state, 1));
+  NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
+  REQUIRE(state.pending_ui_sounds.size() == 1);
+  CHECK(state.pending_ui_sounds[0].transition_index == 4);
+  CHECK(state.pending_ui_sounds[0].count == 1);
+  CHECK(state.travel.jump_range_cue_latch);
+  state.pending_ui_sounds.clear();
+
+  // Still in range: no new edge, no new cue.
+  NovaTravel_Tick(state, false, 16.67F);
+  CHECK(state.pending_ui_sounds.empty());
+
+  // Back inside the radius: the latch clears silently (leaving range is not
+  // an edge).
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  NovaTravel_Tick(state, false, 16.67F);
+  CHECK(state.pending_ui_sounds.empty());
+  CHECK_FALSE(state.travel.jump_range_cue_latch);
+
+  // Leaving again re-arms the edge and the cue fires once more.
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  NovaTravel_Tick(state, false, 16.67F);
+  REQUIRE(state.pending_ui_sounds.size() == 1);
+  CHECK(state.pending_ui_sounds[0].transition_index == 4);
+  state.pending_ui_sounds.clear();
+
+  // No fuel for a jump: the latch still arms but the cue is suppressed
+  // (the original gates the sound on fuel >= kJumpFuelCost).
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  NovaTravel_Tick(state, false, 16.67F);
+  state.player.fuel_points = 50.0F;
+  state.player.pos_x = 3000.0F;
+  state.player.pos_y = 3000.0F;
+  NovaTravel_Tick(state, false, 16.67F);
+  CHECK(state.travel.jump_range_cue_latch);
+  CHECK(state.pending_ui_sounds.empty());
+}
