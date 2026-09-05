@@ -1,12 +1,14 @@
 #include "landed_store.hpp"
 
 #include "outfit.hpp"
+#include "ship_spawn.hpp"
 #include "weapon.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <random>
 
 namespace game {
 namespace {
@@ -237,9 +239,20 @@ BuildOutfitterIds(GameState &state,
   return ids;
 }
 
+// Ghidra 0x00469e90 NovaUi_RebuildShipyardAvailabilityList: shared filter
+// chain (tech level, per-class daily roll pair, Require bits, availability
+// expression, display-weight ordering and the 0x4000 equal-weight
+// suppression). `hire_mode` selects the ShipClassDef +0xa2a threshold pair
+// (HireRandom) instead of the +0xa2c limit pair (BuyRandom).
+// TODO(decomp) skipped: the original multiplies the daily hire roll by the
+// shareware-license flag (ShipClassDef[g_expression_ship_class_id]
+// +0xab8, a global registration byte the decompiler patterns as a class
+// field): an unregistered binary treats every class with HireRandom != 0 as
+// always offered. This port models the registered behavior only.
 std::vector<std::int16_t> BuildShipyardIds(const GameState &state,
                                            const Stellar &stellar,
-                                           const ControlExpressionState &expr) {
+                                           const ControlExpressionState &expr,
+                                           bool hire_mode) {
   std::vector<std::int16_t> ids;
   for (std::size_t i = 0; i < state.scenario.ships.size() && i < 0x200; ++i) {
     const ShipClass &ship = state.scenario.ships[i];
@@ -249,12 +262,19 @@ std::vector<std::int16_t> BuildShipyardIds(const GameState &state,
     // use zero here, so admitting them based on tech alone floods the list
     // with duplicate hulls. Positive percents then gate on the per-day limit
     // roll (ShipClassDef +0xa2c, rerolled by the 0x00466cb0 tail): the class
-    // is offered while the roll is <= BuyRandom.
-    const std::int16_t limit_roll = i < state.ship_class_limit_rolls.size()
-                                        ? state.ship_class_limit_rolls[i]
-                                        : 0;
-    if (ship.display_name.empty() || ship.buy_random <= 0 ||
-        limit_roll > ship.buy_random || !HasTech(stellar, ship.tech_level))
+    // is offered while the roll is <= BuyRandom. The hire lane mirrors this
+    // with HireRandom (+0xa2a) and the threshold roll.
+    const std::int16_t roll = hire_mode
+                                  ? (i < state.ship_class_threshold_rolls.size()
+                                         ? state.ship_class_threshold_rolls[i]
+                                         : 0)
+                                  : (i < state.ship_class_limit_rolls.size()
+                                         ? state.ship_class_limit_rolls[i]
+                                         : 0);
+    const std::int16_t random_percent =
+        hire_mode ? ship.hire_random : ship.buy_random;
+    if (ship.display_name.empty() || random_percent <= 0 ||
+        roll > random_percent || !HasTech(stellar, ship.tech_level))
       continue;
     if ((ship.availability_flags & 0x0200U) != 0U &&
         !MeetsRequire(state, ship.require_lo, ship.require_hi))
@@ -299,9 +319,10 @@ void NovaLanded_RefreshStoreSession(GameState &state,
   if (stellar == nullptr)
     return;
   const auto expr = NovaLanded_ControlExpressionState(state);
-  const auto fresh = session.kind == LandedStoreKind::kOutfitter
-                         ? BuildOutfitterIds(state, *stellar, expr)
-                         : BuildShipyardIds(state, *stellar, expr);
+  const auto fresh =
+      session.kind == LandedStoreKind::kOutfitter
+          ? BuildOutfitterIds(state, *stellar, expr)
+          : BuildShipyardIds(state, *stellar, expr, session.hire_mode);
   if (fresh == session.available_ids) {
     return;
   }
@@ -344,15 +365,18 @@ LandedStoreSession NovaLanded_OpenOutfitterSession(GameState &state,
 }
 
 LandedStoreSession NovaLanded_OpenShipyardSession(const GameState &state,
-                                                  std::int16_t stellar_id) {
+                                                  std::int16_t stellar_id,
+                                                  bool hire_mode) {
   LandedStoreSession session;
   session.kind = LandedStoreKind::kShipyard;
+  session.hire_mode = hire_mode;
   session.opening_outfit_counts = state.inventory.outfit_owned_count;
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   if (stellar == nullptr)
     return session;
   const auto expr = NovaLanded_ControlExpressionState(state);
-  session.available_ids = BuildShipyardIds(state, *stellar, expr);
+  session.available_ids =
+      BuildShipyardIds(state, *stellar, expr, session.hire_mode);
   return session;
 }
 
@@ -604,6 +628,59 @@ bool NovaLanded_CanBuyShip(const GameState &state,
          ship_id != state.player.ship_class_id + 0x80 &&
          state.player.credits >=
              NovaLanded_ShipPurchasePrice(state, stellar_id, ship_id);
+}
+
+// Ghidra 0x00498dc0's escort-hire arm. The multiplier is DAT_00575950,
+// the double 0.1; the original's FISTP dance resolves to round-to-nearest.
+std::int32_t NovaLanded_ShipHirePrice(const GameState &state,
+                                      std::int16_t stellar_id,
+                                      std::int16_t ship_id) {
+  const ShipClass *ship = state.scenario.Ship(ship_id);
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (ship == nullptr || stellar == nullptr)
+    return 0;
+  const std::int32_t scaled = NovaLanded_ScaledStorePrice(
+      ship->cost, ship->tech_level, stellar->tech_level);
+  return std::max(0, RoundNearest(static_cast<float>(scaled) * 0.1F));
+}
+
+// Ghidra 0x00498dc0 (hire arm): affordability against the hire price only --
+// no trade-in, no current-class rejection. The Require/Availability gates
+// already ran when the listing was built (0x00469e90).
+bool NovaLanded_CanHireShip(const GameState &state,
+                            std::int16_t stellar_id,
+                            std::int16_t ship_id) {
+  return IsValidShip(state, ship_id) &&
+         state.player.credits >=
+             NovaLanded_ShipHirePrice(state, stellar_id, ship_id);
+}
+
+// Ghidra 0x00492f30's hire-mode confirm arm.
+int NovaLanded_HireShip(GameState &state,
+                        std::int16_t stellar_id,
+                        std::int16_t ship_id) {
+  if (!NovaLanded_CanHireShip(state, stellar_id, ship_id))
+    return -1;
+  state.player.credits -= NovaLanded_ShipHirePrice(state, stellar_id, ship_id);
+  const int slot = NovaShipClass_SpawnEscortShipFromClass(
+      state, static_cast<std::int16_t>(ship_id - 0x80), stellar_id);
+  if (slot == -1) {
+    // Refund: the original deducts before spawning and leaves the player
+    // charged even on the (unreachable in practice) allocation failure;
+    // the port restores the credits instead.
+    state.player.credits +=
+        NovaLanded_ShipHirePrice(state, stellar_id, ship_id);
+    return -1;
+  }
+  // The original rerolls ShipClassDef +0xa2a to rand(100)+1 after a hire so
+  // the class drops off the daily hire list; the clean-room keeps the roll in
+  // GameState.ship_class_threshold_rolls.
+  const std::size_t def = static_cast<std::size_t>(ship_id - 0x80);
+  if (def < state.ship_class_threshold_rolls.size()) {
+    state.ship_class_threshold_rolls[def] = static_cast<std::int16_t>(
+        std::uniform_int_distribution<int>{0, 99}(state.rng) + 1);
+  }
+  return slot;
 }
 
 bool NovaLanded_ReplacePlayerShip(GameState &state,

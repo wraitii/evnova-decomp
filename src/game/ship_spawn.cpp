@@ -239,6 +239,66 @@ int NovaShip_AllocateShipSlot(GameState &state,
   return slot;
 }
 
+// Ghidra 0x00422400 ShipClass_SpawnEscortShipFromClass.
+int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
+                                           std::int16_t ship_class_id,
+                                           std::int16_t spawn_stellar_id) {
+  const std::int16_t system_id = state.player.current_system_id;
+  const int slot = NovaShip_AllocateShipSlot(state, system_id, 8);
+  if (slot == -1 || ship_class_id < 0) {
+    return -1;
+  }
+
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = ship_class_id;
+  ship.ai_behavior_code = 6;
+  ship.ai_target_ship_slot = 0;
+  ship.faction_or_government_id = -1;
+  ship.random_ai_render_cadence = 2;
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80));
+  ship.shield_points =
+      static_cast<float>(cls != nullptr ? cls->base_shield : 0);
+  ship.armor_points = static_cast<float>(cls != nullptr ? cls->base_armor : 0);
+  ship.dude_class_id = -1;
+  ship.afterburner_latch = NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;
+  ship.mining_scoop_active = NovaOutfit_HasMiningScoopOutfit(state, ship);
+  // ShipState +0xBB: the hired-escort origin mark (the comm dialog's
+  // "Captured Escort" status gate); the original sets it at every escort
+  // spawn, hired or restored.
+  ship.escort_origin_mark = 1;
+  ship.mission_fleet_slot = -1;
+  ship.mission_owner_slot = -1;
+  ship.escort_command_code = -1;
+  ship.jamming_score = {-1, -1, -1, -1};
+
+  if (spawn_stellar_id == -1) {
+    ship.pos_x = state.player.pos_x;
+    ship.pos_y = state.player.pos_y;
+    ship.heading = state.player.heading;
+    // Math_AddPolarVelocity 0x0043b4a0 with a random bearing and a
+    // 50 + rand(0x32) speed: the game convention is vel_x += sin, vel_y -= cos.
+    const float speed = static_cast<float>(RandomBelow(state, 0x32) + 0x32);
+    const float bearing_deg = static_cast<float>(RandomBelow(state, 0x168));
+    const float bearing_rad = bearing_deg * (3.14159265358979323846F / 180.0F);
+    ship.vel_x += std::sin(bearing_rad) * speed;
+    ship.vel_y -= std::cos(bearing_rad) * speed;
+  } else if (const Stellar *stellar = state.scenario.Stellar(spawn_stellar_id);
+             stellar != nullptr) {
+    ship.pos_x = static_cast<float>(stellar->pos_x);
+    ship.pos_y = static_cast<float>(stellar->pos_y);
+  }
+
+  // Stock loadout: the original copies all eight 100-stride weapon-bank
+  // ammo/secondary rows from the class defaults here; the clean-room builds
+  // the same loadout eagerly via the shared NPC bank initializer.
+  NovaWeapon_EnsureNpcWeaponBanks(state, ship);
+
+  NovaShip_ResetAiBehaviorRuntimeFields(ship);
+  NovaShip_EnterLeaderReturnStateFromAiTarget(state, ship);
+  return slot;
+}
+
 // Ghidra 0x004259b0 EncounterFleet_SpawnRandomEncounterFleet -- lead-ship
 // slice only. See the header for the field rationale and the deferred parts.
 //

@@ -206,6 +206,21 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
                                         std::int16_t system_id,
                                         std::uint32_t now_ms);
 
+// Ghidra 0x00422400 ShipClass_SpawnEscortShipFromClass. Allocates a ship slot
+// in the player's current system (reserved tail 8) and populates it as a
+// player fleet escort: identity from the zero-based ship class id, AI
+// behavior 6 attached to the player (ai_target_ship_slot 0), base shield /
+// armor, afterburner + mining-scoop latches, hired-escort origin mark
+// (+0xBB), no mission linkage, jamming caches cold, stock weapon banks, then
+// AI runtime reset and the leader-return AI entry. `spawn_stellar_id` -1
+// places it at the player with a random polar drift velocity; otherwise at
+// that stellar's map position. Used by the shipyard hire path and saved-escort
+// restore. Returns the allocated slot, or -1 when no slot is free.
+[[nodiscard]] int
+NovaShipClass_SpawnEscortShipFromClass(GameState &state,
+                                       std::int16_t ship_class_id,
+                                       std::int16_t spawn_stellar_id);
+
 // Mirrors Dude_SpawnShipFromDudeDefInSystem (Ghidra 0x0041c9f0): allocates one
 // ship slot in system_id (reserving slot_pool tail slots), picks a weighted
 // ship type from the dude def and lays on identity, government, AI behavior
@@ -276,8 +291,8 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
                                             bool keep_player_engaged);
 
 // Mirrors NovaRandom_Reseed (Ghidra 0x004ab970 -> NovaRandom_Range(0)), which
-// mixes NovaTime_GetTickCount60Hz() into the global LCG. The original calls this
-// once at game-session bootstrap (NovaGameSession_Run 0x00416100) so each
+// mixes NovaTime_GetTickCount60Hz() into the global LCG. The original calls
+// this once at game-session bootstrap (NovaGameSession_Run 0x00416100) so each
 // session's NovaRandom draws differ. The clean-room GameState keeps its own
 // mt19937 in `state.rng` (seeded 42 by default); this reseeds it with fresh
 // entropy so the new-game flow spawns a different,

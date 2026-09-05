@@ -5,6 +5,7 @@
 #include "../pict_image.hpp"
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
+#include "boarding_plunder.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "landed_store.hpp"
@@ -14,6 +15,7 @@
 #include "scenario_data.hpp"
 #include "selection_text_dialog.hpp"
 #include "services_buttons.hpp"
+#include "ship_ai.hpp"
 #include "ship_visual.hpp"
 #include "spaceflight_view.hpp"
 #include "sprite_world.hpp"
@@ -829,6 +831,7 @@ struct StoreTextureCache {
 };
 
 [[nodiscard]] SDL_Texture *StorePreviewTexture(SdlPlatform &platform,
+                                               const GameState &state,
                                                StoreTextureCache &cache,
                                                bool outfit_store,
                                                std::int16_t id) {
@@ -846,10 +849,24 @@ struct StoreTextureCache {
                ? sprite->second->frames.front().texture->get()
                : nullptr;
   }
-  const std::int32_t pict_id =
-      outfit_store ? static_cast<std::int32_t>(id - 0x80) + 6000
-                   : static_cast<std::int32_t>(id - 0x80) + 5000;
-  auto picture = LoadPictTexture(platform, static_cast<std::uint16_t>(pict_id));
+  // Ship thumbnails use the class's resolved portrait PICT
+  // (ShipClassDef +0xa0a pict_fallback_sprite_resource_id, the id
+  // NovaUi_DrawShipyardShipList 0x004948b0 passes to
+  // NovaUi_BlitPictThumbnailCached 0x00497b70): PICT 5000+class when it
+  // exists, else the clone-source class's portrait (0x004aeda0). Computing
+  // 5000+id here instead showed the wrong ship for clone classes (e.g. the
+  // Used Heavy Shuttle).
+  const ShipClass *ship_class =
+      outfit_store ? nullptr : state.scenario.Ship(id);
+  const std::uint16_t portrait_pict =
+      ship_class != nullptr ? ship_class->pict_fallback_sprite_resource_id : 0;
+  const std::int32_t pict_id = outfit_store
+                                   ? static_cast<std::int32_t>(id - 0x80) + 6000
+                                   : static_cast<std::int32_t>(portrait_pict);
+  auto picture =
+      pict_id > 0
+          ? LoadPictTexture(platform, static_cast<std::uint16_t>(pict_id))
+          : nullptr;
   if (picture) {
     SDL_Texture *result = picture->get();
     cache.pictures.emplace(id, std::move(picture));
@@ -860,9 +877,9 @@ struct StoreTextureCache {
     return nullptr;
   }
 
-  // NovaData_LoadAllShipClassVisualAndLaunchData prefers the class PICT at
-  // (zero-based class + 5000), then falls back to the cloned ship sprite set.
-  // We do the same for plug-in ships whose preview PICT is absent.
+  // ShipClass visual fallback for classes with no resolvable portrait: the
+  // port's extra safety net (the original leaves the atlas cell black,
+  // NovaUi_BlitPictThumbnailCached 0x00497b70).
   const auto visual_data = NovaResource_Load(kShipVisualResourceType,
                                              static_cast<std::uint16_t>(id));
   if (!visual_data) {
@@ -941,8 +958,8 @@ void DrawStoreContents(SdlPlatform &platform,
                            selected ? 255 : 190,
                            SDL_ALPHA_OPAQUE);
     SDL_RenderRect(renderer, &rect);
-    if (SDL_Texture *thumbnail =
-            StorePreviewTexture(platform, texture_cache, outfit_store, id)) {
+    if (SDL_Texture *thumbnail = StorePreviewTexture(
+            platform, state, texture_cache, outfit_store, id)) {
       const SDL_FRect thumbnail_rect{
           rect.x + (rect.w - 32.0F) / 2.0F, rect.y + 3.0F, 32.0F, 32.0F};
       SDL_RenderTexture(renderer, thumbnail, nullptr, &thumbnail_rect);
@@ -996,6 +1013,8 @@ void DrawStoreContents(SdlPlatform &platform,
       session.selected_id >= 0 &&
       (outfit_store
            ? NovaLanded_CanBuyOutfit(state, stellar_id, session.selected_id)
+       : session.hire_mode
+           ? NovaLanded_CanHireShip(state, stellar_id, session.selected_id)
            : NovaLanded_CanBuyShip(state, stellar_id, session.selected_id));
   const bool sell_allowed =
       outfit_store && session.selected_id >= 0 &&
@@ -1003,7 +1022,7 @@ void DrawStoreContents(SdlPlatform &platform,
       (state.scenario.Outfit(session.selected_id)->flags & 0x0008U) == 0U;
   const std::array<std::tuple<SDL_FRect, std::string_view, bool>, 5> controls{
       {{layout.leave, "LEAVE", true},
-       {layout.buy, "BUY", buy_allowed},
+       {layout.buy, session.hire_mode ? "HIRE" : "BUY", buy_allowed},
        {layout.sell_or_info,
         outfit_store ? "SELL" : "INFO",
         outfit_store ? sell_allowed : session.selected_id >= 0},
@@ -1140,10 +1159,41 @@ void DrawStoreContents(SdlPlatform &platform,
       // the full stat block lives in the Info sub-modal (0x00495c80).
       const ShipClass *ship = state.scenario.Ship(session.selected_id);
       const std::int32_t trade_in =
-          NovaLanded_ShipTradeInValue(state, stellar_id);
+          session.hire_mode ? 0
+                            : NovaLanded_ShipTradeInValue(state, stellar_id);
       const std::int16_t player_class =
           static_cast<std::int16_t>(state.player.ship_class_id + 0x80);
-      if (session.selected_id != player_class) {
+      if (session.hire_mode) {
+        // Ghidra NovaUi_DrawShipyardShipList 0x004948b0 hire-mode arm: the
+        // price block shows the Hire Escort line (10% of the scaled purchase
+        // price, DAT_00575950) instead of the trade-in ladder.
+        const auto price_row =
+            [&](float dy, std::uint16_t label, std::int32_t value) {
+              NovaText_Draw(platform,
+                            font_cache,
+                            NovaFontFamily::kGeneva,
+                            10.0F,
+                            kNovaFontStyleRegular,
+                            kMuted,
+                            layout.details.x + 2.0F,
+                            layout.details.y + dy,
+                            InfoString(label));
+              NovaText_Draw(platform,
+                            font_cache,
+                            NovaFontFamily::kGeneva,
+                            10.0F,
+                            kNovaFontStyleRegular,
+                            kText,
+                            layout.details.x + 72.0F,
+                            layout.details.y + dy,
+                            GroupedUInt(value) + " " + InfoString(0x21));
+            };
+        price_row(
+            12.0F,
+            0xe3,
+            NovaLanded_ShipHirePrice(state, stellar_id, session.selected_id));
+        price_row(36.0F, 0xd8, state.player.credits); // You Have:
+      } else if (session.selected_id != player_class) {
         const auto price_row =
             [&](float dy, std::uint16_t label, std::int32_t value) {
               NovaText_Draw(platform,
@@ -1650,7 +1700,7 @@ void RenderStoreScreen(SdlPlatform &platform,
   const bool outfit_store = session.kind == LandedStoreKind::kOutfitter;
   const StoreLayout layout = LayoutStore(platform, outfit_store);
   SDL_Texture *selected_image = StorePreviewTexture(
-      platform, texture_cache, outfit_store, session.selected_id);
+      platform, state, texture_cache, outfit_store, session.selected_id);
   DrawStoreBase(
       platform, render_background, dock_backdrop, store_frame, layout);
   DrawStoreContents(platform,
@@ -1762,11 +1812,24 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
                           GameState &state,
                           LandedService service,
                           std::int16_t stellar_id,
-                          const std::function<void()> &render_background) {
+                          const std::function<void()> &render_background,
+                          bool hire_mode = false) {
   const bool outfit_store = service == LandedService::kOutfit;
   LandedStoreSession session =
-      outfit_store ? NovaLanded_OpenOutfitterSession(state, stellar_id)
-                   : NovaLanded_OpenShipyardSession(state, stellar_id);
+      outfit_store
+          ? NovaLanded_OpenOutfitterSession(state, stellar_id)
+          : NovaLanded_OpenShipyardSession(state, stellar_id, hire_mode);
+  // Ghidra 0x00492f30: an empty availability list pops the STR# 0x7d2
+  // 0xdf/0xe0 notice (per mode) instead of opening the store window.
+  if (!outfit_store && hire_mode && session.available_ids.empty()) {
+    NovaUi_RunTextReaderDialog(
+        platform,
+        state,
+        InfoString(0xdf) /* "There are no ships available for hire." */,
+        false,
+        render_background);
+    return LandedExit::kServiceComplete;
+  }
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
   auto frame =
       LoadPictTexture(platform, NovaDocked_SubWindowFramePict(service));
@@ -1841,6 +1904,14 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
             (void)NovaLanded_BuyOutfit(
                 state, stellar_id, session.selected_id, 1);
             NovaLanded_RefreshStoreSession(state, session, stellar_id);
+          } else if (session.hire_mode) {
+            // Ghidra 0x00492f30 hire arm (the g_shipyard_purchase_mode==1
+            // branch of the confirm action): charge + spawn + daily reroll.
+            if (NovaLanded_HireShip(state, stellar_id, session.selected_id) !=
+                -1) {
+              session = NovaLanded_OpenShipyardSession(
+                  state, stellar_id, session.hire_mode);
+            }
           } else {
             const ShipClass *ship = state.scenario.Ship(session.selected_id);
             (void)NovaLanded_ReplacePlayerShip(
@@ -1903,6 +1974,11 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         if (outfit_store) {
           (void)NovaLanded_BuyOutfit(state, stellar_id, session.selected_id, 1);
           NovaLanded_RefreshStoreSession(state, session, stellar_id);
+        } else if (session.hire_mode) {
+          if (NovaLanded_HireShip(state, stellar_id, session.selected_id) !=
+              -1) {
+            session = NovaLanded_OpenShipyardSession(state, stellar_id, true);
+          }
         } else {
           const ShipClass *ship = state.scenario.Ship(session.selected_id);
           (void)NovaLanded_ReplacePlayerShip(
@@ -1942,6 +2018,486 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   return LandedExit::kQuit;
 }
 
+// ---------------------------------------------------------------------------
+// Ghidra 0x0047c8e0 NovaUi_RunTravelDestinationServicesWindow + 0x0047cfe0
+// NovaUi_DrawTravelDestinationServicesWindow + 0x004a2810/0x004a26e0 the
+// six-button action strip + the 0x0047cdb0 input callback (all running inline
+// here): the spaceport Bar modal. Window DLOG 0x3f5, or 0x3fd when the
+// destination desc (stellar id + 10000) ships a Graphic PICT; backdrop PICT
+// 0x2137/0x2138; the prompt text is the desc's main text; entry 7 holds the
+// prompt panel and entry 8 the art panel.
+
+constexpr std::uint16_t kBarDialogId = 0x3f5;
+constexpr std::uint16_t kBarDialogWithArtId = 0x3fd;
+constexpr std::uint16_t kNewsDialogId = 0x3f6;
+constexpr std::uint16_t kBarBackdropPict = 0x2137;
+constexpr std::uint16_t kBarBackdropWithArtPict = 0x2138;
+constexpr std::uint16_t kNewsDefaultPict = 9000;
+
+// STR# 0x96 button-label pool indices per DITL slot (DAT_007d831a). Slots 3
+// and 5 are never written by the original (0x004a2810 writes only 0/1/2/4)
+// AND their DITL rects lie outside the window (clipped away there, skipped
+// by slot_visible here), so they are unreachable either way.
+constexpr std::array<std::uint16_t, 6> kBarButtonLabels{
+    0, 10, 0x0b, 0xffff, 0x0c, 0xffff};
+
+// Ghidra 0x0047d600 NovaUi_RedrawTravelNewsHeader: composes the news-window
+// texts shown by the Bar's Holovid button. Headline: a random STR# 0x1fa4
+// (Commercials) entry, falling back to STR# 0x7d2 0xbe when the pool is
+// missing. Body: a random STR# 0x1fa5 (Generic News) entry, falling back to
+// 0x7d2 0xbf.
+// TODO(decomp): the two higher-precedence arms -- the disaster-report text
+// (g_disaster_defs scan; the dïsaster family is not modelled,
+// System_UpdateDisasterStates 0x00424f90 is 0%) and the crön-news arm (active
+// crön events carry allied-government news STR# ids at block +0x2a/+0x32 and
+// a plain text id at +0x3a; the clean-room CronEventState does not model
+// those fields yet).
+void NovaBar_ComposeNewsTexts(GameState &state,
+                              std::string &headline,
+                              std::string &body) {
+  (void)state;
+  headline.clear();
+  body.clear();
+  const auto roll_entry =
+      [&](std::uint16_t pool) -> std::optional<std::string> {
+    const std::uint16_t count = NovaHud_StringPoolEntryCount(pool);
+    if (count == 0) {
+      return std::nullopt;
+    }
+    const auto entry = static_cast<std::uint16_t>(
+        std::uniform_int_distribution<int>{0, count - 1}(state.rng) + 1);
+    return NovaHud_LoadStringEntry(pool, entry);
+  };
+  headline = roll_entry(0x1fa4).value_or(
+      NovaHud_LoadStringEntry(0x7d2, 0xbe).value_or("No news is good news"));
+  body = roll_entry(0x1fa5).value_or(
+      NovaHud_LoadStringEntry(0x7d2, 0xbf).value_or(""));
+}
+
+// Ghidra 0x0047d180 NovaUi_RunTravelNewsWindow + 0x0047d370
+// NovaUi_DrawTravelNewsWindow (inline): the Holovid window (DLOG 0x3f6). The
+// news PICT is the destination government's news_pic_id, else the generic
+// PICT 9000; the headline band sits at (left+10, top+140, right-10,
+// bottom-180) and the body panel at (left+10, top+170, right-4, bottom-10);
+// both are the original's filled+inverted rects, i.e. a black panel with
+// white wrapped Geneva-12 text. Esc/Return or a click inside the window
+// closes it.
+void RunBarNewsWindow(SdlPlatform &platform,
+                      GameState &state,
+                      std::int16_t stellar_id,
+                      const std::function<void()> &render_background) {
+  std::string headline;
+  std::string body;
+  NovaBar_ComposeNewsTexts(state, headline, body);
+
+  // Government news PICT with the 9000 fallback (0x0047d180 prologue).
+  std::int16_t news_pict = kNewsDefaultPict;
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar != nullptr && stellar->government_id != -1) {
+    const Government *govt = state.scenario.Government(stellar->government_id);
+    if (govt != nullptr && govt->news_pic_id != -1) {
+      news_pict = govt->news_pic_id;
+    }
+  }
+  auto news_art =
+      LoadPictTexture(platform, static_cast<std::uint16_t>(news_pict));
+  if (news_art == nullptr && news_pict != kNewsDefaultPict) {
+    news_art = LoadPictTexture(platform, kNewsDefaultPict);
+  }
+
+  const auto dlog = NovaResource_LoadDialogDefinition(kNewsDialogId);
+  const auto items =
+      dlog ? NovaResource_LoadDialogItems(dlog->dialog_item_list_id)
+           : std::nullopt;
+  if (!dlog || !items) {
+    NovaLog::Todo("news DLOG/DITL 0x3f6 unavailable; skipping the Holovid "
+                  "window");
+    return;
+  }
+  const float win_w = static_cast<float>(dlog->right - dlog->left);
+  const float win_h = static_cast<float>(dlog->bottom - dlog->top);
+  const SDL_FPoint output = platform.logical_playfield_size();
+  const SDL_FPoint origin{(output.x - win_w) / 2.0F, (output.y - win_h) / 2.0F};
+  const SDL_FRect window{origin.x, origin.y, win_w, win_h};
+
+  auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
+  ServicesButtonArt button_art;
+  (void)button_art.Initialize(platform);
+  NovaFontCache font_cache;
+
+  const auto draw_frame = [&]() {
+    platform.SetFullscreenPlayfield();
+    SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(platform.renderer());
+    if (render_background) {
+      render_background();
+    } else if (backdrop != nullptr) {
+      SDL_RenderTexture(platform.renderer(), backdrop->get(), nullptr, nullptr);
+    }
+    // Window fill + news art blitted over the window rect (0x0047d370).
+    SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(platform.renderer(), &window);
+    if (news_art != nullptr) {
+      SDL_RenderTexture(platform.renderer(), news_art->get(), nullptr, &window);
+    }
+    // The two filled+inverted text panels -> black panels, white text.
+    const auto draw_panel = [&](const SDL_FRect &rect,
+                                const std::string &text) {
+      if (rect.w <= 0.0F || rect.h <= 0.0F || text.empty()) {
+        return;
+      }
+      SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+      SDL_RenderFillRect(platform.renderer(), &rect);
+      const auto lines = WrapDescriptionLines(
+          text,
+          static_cast<int>(std::max(1.0F, rect.w)),
+          [&](std::string_view line) {
+            return font_cache.TextWidth(
+                NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line);
+          });
+      const SDL_Rect clip{static_cast<int>(rect.x),
+                          static_cast<int>(rect.y),
+                          static_cast<int>(rect.w),
+                          static_cast<int>(rect.h)};
+      SDL_SetRenderClipRect(platform.renderer(), &clip);
+      constexpr SDL_Color kWhite{255, 255, 255, 255};
+      float y = rect.y + 12.0F;
+      for (const auto &line : lines) {
+        if (y > rect.y + rect.h) {
+          break;
+        }
+        NovaText_Draw(platform,
+                      font_cache,
+                      NovaFontFamily::kGeneva,
+                      12.0F,
+                      kNovaFontStyleRegular,
+                      kWhite,
+                      rect.x,
+                      y,
+                      line);
+        y += static_cast<float>(
+            font_cache.LineHeight(NovaFontFamily::kGeneva, 12.0F));
+      }
+      SDL_SetRenderClipRect(platform.renderer(), nullptr);
+    };
+    // MacOS rects are left/top/right/bottom pairs; the original's panel
+    // rects translate to these offsets inside the window.
+    draw_panel({window.x + 10.0F,
+                window.y + 140.0F,
+                win_w - 20.0F,
+                std::max(0.0F, win_h - 180.0F - 140.0F)},
+               headline);
+    draw_panel({window.x + 10.0F,
+                window.y + 170.0F,
+                win_w - 14.0F,
+                std::max(0.0F, win_h - 10.0F - 170.0F)},
+               body);
+    platform.Present();
+  };
+
+  ProbeUiAutoClear probe_ui_guard(platform);
+  platform.PublishProbeUi("bar_news", {{"window", window}, {"close", window}});
+  while (!platform.quit_requested()) {
+    draw_frame();
+    for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
+      const bool close_key =
+          in->key == TextKey::escape || in->key == TextKey::enter;
+      const bool close_click = in->key == TextKey::primary &&
+                               Contains(window, platform.mouse_position());
+      if (close_key || close_click) {
+        return;
+      }
+    }
+    SDL_Delay(16);
+  }
+}
+
+// Ghidra 0x0047c8e0 NovaUi_RunTravelDestinationServicesWindow.
+LandedExit RunBarDialog(SdlPlatform &platform,
+                        GameState &state,
+                        std::int16_t stellar_id,
+                        const std::function<void()> &render_background) {
+  // Prompt text: the destination desc (stellar id + 10000) run through the
+  // placeholder pass (Ui_LoadSelectionDialogResource 0x004c6d50). A variant
+  // >= 0x80 is the art PICT and selects the DLOG 0x3fd / PICT 0x2138 pair.
+  std::string prompt_text;
+  std::uint16_t art_pict = 0;
+  if (const auto desc = NovaResource_LoadDescription(static_cast<std::uint16_t>(
+          static_cast<std::uint16_t>(stellar_id) + 10000U))) {
+    prompt_text = desc->text;
+    Mission_ExpandStringPlaceholders(state, prompt_text);
+    if (desc->dialog_variant >= 0x80) {
+      art_pict = static_cast<std::uint16_t>(desc->dialog_variant);
+    }
+  }
+  const bool has_art = art_pict != 0;
+
+  const std::uint16_t dialog_id = has_art ? kBarDialogWithArtId : kBarDialogId;
+  const auto dlog = NovaResource_LoadDialogDefinition(dialog_id);
+  const auto items =
+      dlog ? NovaResource_LoadDialogItems(dlog->dialog_item_list_id)
+           : std::nullopt;
+  if (!dlog || !items) {
+    NovaLog::Todo("bar DLOG/DITL 0x{:x} unavailable; returning to the dock "
+                  "menu",
+                  dialog_id);
+    return LandedExit::kServiceComplete;
+  }
+
+  auto bar_art = LoadPictTexture(
+      platform, has_art ? kBarBackdropWithArtPict : kBarBackdropPict);
+  auto destination_art =
+      has_art ? LoadPictTexture(platform, art_pict) : nullptr;
+  auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
+  ServicesButtonArt button_art;
+  (void)button_art.Initialize(platform);
+  NovaFontCache font_cache;
+
+  const float win_w = static_cast<float>(dlog->right - dlog->left);
+  const float win_h = static_cast<float>(dlog->bottom - dlog->top);
+  const SDL_FPoint output = platform.logical_playfield_size();
+  const SDL_FPoint origin{(output.x - win_w) / 2.0F, (output.y - win_h) / 2.0F};
+  const SDL_FRect window{origin.x, origin.y, win_w, win_h};
+  const auto item_rect = [&](std::size_t index) {
+    for (const auto &item : *items) {
+      if (item.index == index) {
+        return SDL_FRect{origin.x + static_cast<float>(item.left),
+                         origin.y + static_cast<float>(item.top),
+                         static_cast<float>(item.right - item.left),
+                         static_cast<float>(item.bottom - item.top)};
+      }
+    }
+    return SDL_FRect{};
+  };
+  std::array<SDL_FRect, 6> buttons{};
+  for (std::size_t slot = 0; slot < buttons.size(); ++slot) {
+    buttons[slot] = item_rect(slot); // UiPanel entries 1..6
+  }
+  // DITL 0x3f5/0x3fd define two extra inert button slots (3 and 5) whose
+  // rects extend below the DLOG bottom edge (relative tops 214/227 vs a 185px
+  // window). The original never shows them because modal windows clip
+  // drawing to the DLOG bounds; skip any button rect that does not fit so
+  // the strip stays inside the modal.
+  const auto slot_visible = [&](const SDL_FRect &rect) {
+    return rect.w > 0.0F && rect.h > 0.0F && rect.x >= window.x &&
+           rect.y >= window.y &&
+           rect.x + rect.w <= window.x + window.w + 0.5F &&
+           rect.y + rect.h <= window.y + window.h + 0.5F;
+  };
+  const SDL_FRect prompt_rect = item_rect(6); // UiPanel entry 7
+  const SDL_FRect art_rect = item_rect(7);    // UiPanel entry 8
+
+  // 0x004a2810: slots 0-3 always enabled, slot 4 (Hire Escort) gated on the
+  // escort-capacity check, slot 5 always disabled.
+  const auto slot_enabled = [&](std::size_t slot) {
+    if (slot == 4) {
+      return NovaShip_CanPlayerHaveMoreEscorts(state);
+    }
+    return slot != 5;
+  };
+
+  const auto draw_frame = [&]() {
+    platform.SetFullscreenPlayfield();
+    SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(platform.renderer());
+    if (render_background) {
+      render_background();
+    } else if (backdrop != nullptr) {
+      SDL_RenderTexture(platform.renderer(), backdrop->get(), nullptr, nullptr);
+    }
+    // Window fill + backdrop PICT (0x0047cfe0).
+    SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(platform.renderer(), &window);
+    if (bar_art != nullptr) {
+      SDL_RenderTexture(platform.renderer(), bar_art->get(), nullptr, &window);
+    }
+    // Destination art panel (entry 8, 0x3fd pair only).
+    if (destination_art != nullptr) {
+      SDL_RenderTexture(
+          platform.renderer(), destination_art->get(), nullptr, &art_rect);
+    }
+    // Prompt panel (entry 7): filled+inverted -> black panel, white text.
+    if (!prompt_text.empty()) {
+      SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+      SDL_RenderFillRect(platform.renderer(), &prompt_rect);
+      const auto lines = WrapDescriptionLines(
+          prompt_text,
+          static_cast<int>(std::max(1.0F, prompt_rect.w)),
+          [&](std::string_view line) {
+            return font_cache.TextWidth(
+                NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line);
+          });
+      const SDL_Rect clip{static_cast<int>(prompt_rect.x),
+                          static_cast<int>(prompt_rect.y),
+                          static_cast<int>(prompt_rect.w),
+                          static_cast<int>(prompt_rect.h)};
+      SDL_SetRenderClipRect(platform.renderer(), &clip);
+      constexpr SDL_Color kWhite{255, 255, 255, 255};
+      float y = prompt_rect.y + 12.0F;
+      for (const auto &line : lines) {
+        if (y > prompt_rect.y + prompt_rect.h) {
+          break;
+        }
+        NovaText_Draw(platform,
+                      font_cache,
+                      NovaFontFamily::kGeneva,
+                      12.0F,
+                      kNovaFontStyleRegular,
+                      kWhite,
+                      prompt_rect.x,
+                      y,
+                      line);
+        y += static_cast<float>(
+            font_cache.LineHeight(NovaFontFamily::kGeneva, 12.0F));
+      }
+      SDL_SetRenderClipRect(platform.renderer(), nullptr);
+    }
+    // The six-button strip. Hover highlights a slot the way
+    // 0x004a26e0's hit-test loop re-draws with the pressed art.
+    const SDL_FPoint mouse = platform.mouse_position();
+    constexpr SDL_Color kLabel{255, 255, 255, 255};
+    constexpr SDL_Color kLabelGrey{128, 128, 128, 255};
+    for (std::size_t slot = 0; slot < buttons.size(); ++slot) {
+      if (!slot_visible(buttons[slot])) {
+        continue;
+      }
+      const bool enabled = slot_enabled(slot);
+      const bool hovered = enabled && Contains(buttons[slot], mouse);
+      button_art.Draw(platform,
+                      buttons[slot],
+                      !enabled  ? ButtonState::kDisabled
+                      : hovered ? ButtonState::kHover
+                                : ButtonState::kNormal);
+      const std::uint16_t label_id = kBarButtonLabels[slot];
+      if (label_id == 0xffff) {
+        continue;
+      }
+      const auto label = NovaHud_LoadStringEntry(
+          0x96, static_cast<std::uint16_t>(label_id + 1U));
+      NovaText_DrawCentered(platform,
+                            font_cache,
+                            kThreeStateButtonFontFamily,
+                            kThreeStateButtonFontSize,
+                            kNovaFontStyleRegular,
+                            enabled ? kLabel : kLabelGrey,
+                            buttons[slot].x,
+                            buttons[slot].x + buttons[slot].w,
+                            ThreeStateButtonLabelBaseline(buttons[slot]),
+                            label.value_or(""));
+    }
+    platform.Present();
+  };
+
+  ProbeUiAutoClear probe_ui_guard(platform);
+  platform.PublishProbeUi("bar",
+                          {{"window", window},
+                           {"leave", buttons[0]},
+                           {"gamble", buttons[1]},
+                           {"holovid", buttons[2]},
+                           {"hire_escort", buttons[4]}});
+
+  // Modal action dispatcher (0x0047c8e0's action arms). Returns true when
+  // the bar window should close.
+  const auto run_action = [&](std::int16_t action) -> bool {
+    switch (action) {
+    case 2: {
+      // Gamble (NovaUi_RunBarGamblingWindow 0x0047dc50 -- the DB name was
+      // NovaUi_RunTravelGoodsFlashWindow before the 2026 decode).
+      if (state.player.credits < 1) {
+        // STR# 0x7d2 0x169 via the shared text-reader dialog.
+        NovaUi_RunTextReaderDialog(
+            platform,
+            state,
+            NovaHud_LoadStringEntry(0x7d2, 0x169)
+                .value_or("Sorry, you don't have enough credits to bet today."),
+            false,
+            render_background);
+      } else {
+        // TODO(decomp(0x0047dc50)) skipped: the gambling window (DLOG 0x3ff,
+        // backdrop 0x2151, bet 1000/10000 arms, 4x payout on the rand(4)
+        // match, outcome descs 0x7ff8+roll) is not reconstructed.
+        NovaLog::Todo("bar gamble window 0x0047dc50 not reconstructed yet");
+      }
+      break;
+    }
+    case 3:
+      // Holovid / news window (NovaUi_RunTravelNewsWindow 0x0047d180).
+      RunBarNewsWindow(platform, state, stellar_id, render_background);
+      break;
+    case 5:
+      // Hire Escort: capacity gate + the shipyard purchase loop in hire mode
+      // (g_shipyard_purchase_mode = 1).
+      if (NovaShip_CanPlayerHaveMoreEscorts(state)) {
+        (void)RunStoreDialog(platform,
+                             state,
+                             LandedService::kShipyard,
+                             stellar_id,
+                             render_background,
+                             /*hire_mode=*/true);
+      }
+      break;
+    default:
+      break;
+    }
+    return false;
+  };
+
+  while (!platform.quit_requested()) {
+    draw_frame();
+    bool close = false;
+    for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {
+      const SDL_FPoint point = platform.mouse_position();
+      if (in->key == TextKey::escape || in->key == TextKey::enter) {
+        close = true; // action 1: Leave
+        break;
+      }
+      if (in->key == TextKey::character) {
+        // 0x0047cdb0's key arms: g/r gamble, w/n holovid, h/e hire.
+        const char key = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(in->character)));
+        if (key == 'g' || key == 'r') {
+          close = run_action(2);
+        } else if (key == 'w' || key == 'n') {
+          close = run_action(3);
+        } else if (key == 'h' || key == 'e') {
+          close = run_action(5);
+        }
+        if (close) {
+          break;
+        }
+        continue;
+      }
+      if (in->key != TextKey::primary) {
+        continue;
+      }
+      // Button hit test (0x004a26e0): slot 0 Leave, 1 Gamble, 2 Holovid,
+      // 4 Hire Escort; the out-of-window slots are unreachable (clipped),
+      // and the remaining inert slot redraws only.
+      for (std::size_t slot = 0; slot < buttons.size(); ++slot) {
+        if (slot_visible(buttons[slot]) && Contains(buttons[slot], point)) {
+          if (slot == 0) {
+            close = true;
+          } else if (slot_enabled(slot)) {
+            const std::array<std::int16_t, 6> slot_action{1, 2, 3, -1, 5, -1};
+            if (slot_action[slot] > 0) {
+              close = run_action(slot_action[slot]);
+            }
+          }
+          break;
+        }
+      }
+      if (close) {
+        break;
+      }
+    }
+    if (close) {
+      return LandedExit::kServiceComplete;
+    }
+    SDL_Delay(16);
+  }
+  return LandedExit::kQuit;
+}
+
 } // namespace
 
 std::uint16_t NovaDocked_SubWindowFramePict(LandedService service) {
@@ -1971,6 +2527,9 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
   if (service == LandedService::kMissionBoard) {
     return RunMissionBoardDialog(
         platform, state, stellar_id, render_background);
+  }
+  if (service == LandedService::kBar) {
+    return RunBarDialog(platform, state, stellar_id, render_background);
   }
   if (service == LandedService::kOutfit ||
       service == LandedService::kShipyard) {

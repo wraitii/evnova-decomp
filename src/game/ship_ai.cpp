@@ -1065,8 +1065,14 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
     }
 
     const bool player_contact = slot == 0;
-    const bool candidate_is_engaged = candidate.ai_target_ship_slot == 0 ||
-                                      candidate.primary_target_ship_slot == 0;
+    // "Engaged with the player" means *attacking* the player
+    // (primary_target_ship_slot == 0). The ai_target_ship_slot == 0 marker
+    // instead identifies ships ATTACHED to the player -- the player's hired
+    // escorts -- so counting it here made every hostile behavior-0x03 NPC
+    // acquire the nearest escort on sight (Ghidra 0x0040e020 never treats an
+    // escort attach marker as hostility: escorts carry government -1 and
+    // only become targets through the hit/hostility-propagation paths).
+    const bool candidate_is_engaged = candidate.primary_target_ship_slot == 0;
     bool hostile_contact = candidate_is_engaged;
     if (!hostile_contact && ship.faction_or_government_id >= 0 &&
         candidate.faction_or_government_id >= 0) {
@@ -4199,6 +4205,33 @@ void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
   ship.escort_command_code = -1;
   ship.formation_leader_ship_slot = -1;
   ship.resolved_ai_target_ship_slot = -1;
+}
+
+// Ghidra 0x00410d10 Ship_EnterLeaderReturnStateFromAiTarget; the behavior-5
+// follower sweep at the tail is 0x00410cb0
+// Ship_EnterShipAiState0x05_ReturnToAiTargetLeader run inline.
+void NovaShip_EnterLeaderReturnStateFromAiTarget(GameState &state, Ship &ship) {
+  ship.primary_target_ship_slot = -1;
+  ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
+  if (ship.ai_behavior_code == 5) {
+    ship.ai_state_code = 10;
+  } else if (ship.ai_target_ship_slot == 0) {
+    ship.ai_state_code = 0x0c;
+  } else {
+    ship.ai_state_code = 10;
+  }
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &follower = state.ShipAt(slot);
+    if (follower.is_active &&
+        static_cast<std::int16_t>(slot) != ship.ship_instance_id &&
+        follower.ai_target_ship_slot == ship.ship_instance_id &&
+        follower.ai_behavior_code == 5) {
+      follower.primary_target_ship_slot = -1;
+      follower.ai_secondary_target_slot = follower.ai_target_ship_slot;
+      follower.ai_state_code = 5;
+      follower.ai_control_mode = 0;
+    }
+  }
 }
 
 } // namespace game

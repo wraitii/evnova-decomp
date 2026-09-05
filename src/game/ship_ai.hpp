@@ -361,4 +361,16 @@ void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship);
 // cache, escort mirror cache, resolved-target slot).
 void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship);
 
+// Ghidra 0x00468920 Ship_CanPlayerHaveMoreEscorts is declared in
+// boarding_plunder.hpp (its first reconstruction was the capture flow).
+
+// Ghidra 0x00410d10 Ship_EnterLeaderReturnStateFromAiTarget (with the
+// behavior-5 follower sweep of 0x00410cb0
+// Ship_EnterShipAiState0x05_ReturnToAiTargetLeader running inline): clears
+// the primary target, mirrors ai_target_ship_slot into the secondary slot,
+// and enters AI state 0x0c for ships attached to the player (behavior != 5)
+// or 0x0a otherwise; every active behavior-5 (deployed fighter) ship whose
+// leader is this ship re-enters state 0x05.
+void NovaShip_EnterLeaderReturnStateFromAiTarget(GameState &state, Ship &ship);
+
 } // namespace game
