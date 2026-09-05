@@ -45,9 +45,16 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
   if (d.base_set_count < 1) {
     d.base_set_count = 1;
   }
-  d.base_x_size = ReadBe16(resource_data, 0x06);           // BaseXSize
-  d.base_y_size = ReadBe16(resource_data, 0x08);           // BaseYSize
-  d.base_transparency = ReadBeI16(resource_data, 0x0a);    // BaseTransp
+  d.base_x_size = ReadBe16(resource_data, 0x06);        // BaseXSize
+  d.base_y_size = ReadBe16(resource_data, 0x08);        // BaseYSize
+  d.base_transparency = ReadBeI16(resource_data, 0x0a); // BaseTransp
+  // Alternate (bank/unfold) sprite sheet. Ghidra Ship_UpdateVisualState
+  // (0x00428340) assigns g_ship_sprite_alt[class] to the ship sprite and
+  // composes the displayed frame as row * FramesPer + heading_frame, with the
+  // alternate rows living after the base rows in frame order.
+  d.alt_image_id = ReadBe16(resource_data, 0x0c);          // AltImageID
+  d.alt_mask_id = ReadBe16(resource_data, 0x0e);           // AltMaskID
+  d.alt_set_count = ReadBeI16(resource_data, 0x10);        // AltSetCount
   d.sprite_behavior_flags = ReadBe16(resource_data, 0x2e); // Flags
   d.anim_delay = ReadBeI16(resource_data, 0x30);           // AnimDelay
   d.weapon_decay = ReadBeI16(resource_data, 0x32);         // WeapDecay

@@ -72,6 +72,29 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
   return frame;
 }
 
+// Ghidra Ship_UpdateVisualState (0x00428340) frame composition: the displayed
+// index is row * frames_per_rotation + heading_frame. Row 0 is the straight-
+// flight rotation grid; for banking classes (sh\x8an Flags & 1) the sprite's
+// alternate rows show the bank-left (row 1) / bank-right (row 2) cycle chosen
+// by ai_turn_bias_dir (+0xc8f8). The row is clamped to the loaded rows so a
+// class without an alt sheet falls back to row 0.
+[[nodiscard]] int ComposeShipFrameIndex(const Ship &ship,
+                                        std::uint16_t sprite_behavior_flags,
+                                        int frames_per_rotation,
+                                        int row_count) {
+  int row = 0;
+  if ((sprite_behavior_flags & 1U) != 0U) {
+    if (ship.ai_turn_bias_dir < 0) {
+      row = 1;
+    } else if (ship.ai_turn_bias_dir > 0) {
+      row = 2;
+    }
+  }
+  row = std::clamp(row, 0, std::max(1, row_count) - 1);
+  return row * frames_per_rotation +
+         FrameForHeading(ship.heading, frames_per_rotation);
+}
+
 // Uniform integer in [0, bound). Mirrors the game's NovaRandom_Range seeded
 // from the GameState PRNG so the spawn layout is reproducible per session.
 [[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
@@ -490,6 +513,31 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   }
   ship_ = std::move(*base);
   ship_frames_per_rotation_ = visual->frames_per_rotation;
+  ship_sprite_behavior_flags_ = visual->sprite_behavior_flags;
+  // Append the sh\x8an alternate sheet (bank-left/bank-right rows) so the
+  // composed frame index row * frames_per_rotation + heading_frame used by
+  // Ghidra Ship_UpdateVisualState (0x00428340) addresses the right frames.
+  // The original appends g_ship_sprite_alt[class] via Sprite_AssignSpriteSet;
+  // a missing/odd-sized alt sheet just leaves the ship with its straight row.
+  if (visual->alt_image_id > 0) {
+    if (auto alt = SpriteAsset::LoadSheet(renderer, visual->alt_image_id);
+        alt && alt->tile_width == ship_.tile_width &&
+        alt->tile_height == ship_.tile_height) {
+      ship_.frames.insert(ship_.frames.end(),
+                          std::make_move_iterator(alt->frames.begin()),
+                          std::make_move_iterator(alt->frames.end()));
+      ship_.frame_count = static_cast<int>(ship_.frames.size());
+    } else if (alt) {
+      NovaLog::Warn("ship sprite: alt sheet {} tile size {}x{} != base {}x{}; "
+                    "bank rows skipped",
+                    visual->alt_image_id,
+                    alt->tile_width,
+                    alt->tile_height,
+                    ship_.tile_width,
+                    ship_.tile_height);
+    }
+  }
+  ship_row_count_ = std::max(1, ship_.frame_count / ship_frames_per_rotation_);
 
   // Engine-glow layer (GlowImageID). The original loads it into the per-class
   // glow sprite set sharing the base's rotation grid (same frame count, set by
@@ -558,6 +606,23 @@ SpaceflightView::ShipClassSprite(SdlPlatform &platform,
   }
   entry.base = std::move(*base);
   entry.frames_per_rotation = visual->frames_per_rotation;
+  entry.sprite_behavior_flags = visual->sprite_behavior_flags;
+  // Append the sh\x8an alt sheet (bank rows) the same way the original
+  // assigns g_ship_sprite_alt[class]; see the player-path note in
+  // EnsureShipSprite.
+  if (visual->alt_image_id > 0) {
+    if (auto alt =
+            SpriteAsset::LoadSheet(platform.renderer(), visual->alt_image_id);
+        alt && alt->tile_width == entry.base.tile_width &&
+        alt->tile_height == entry.base.tile_height) {
+      entry.base.frames.insert(entry.base.frames.end(),
+                               std::make_move_iterator(alt->frames.begin()),
+                               std::make_move_iterator(alt->frames.end()));
+      entry.base.frame_count = static_cast<int>(entry.base.frames.size());
+    }
+  }
+  entry.row_count =
+      std::max(1, entry.base.frame_count / entry.frames_per_rotation);
   // Engine-glow layer (GlowImageID), sharing the base's rotation grid. An
   // absent glow image id, or a glow sheet that fails to load, just means the
   // NPC has no glow layer (not fatal).
@@ -611,8 +676,10 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
         sprite->frames_per_rotation <= 0) {
       continue;
     }
-    const int frame =
-        FrameForHeading(ship.heading, sprite->frames_per_rotation);
+    const int frame = ComposeShipFrameIndex(ship,
+                                            sprite->sprite_behavior_flags,
+                                            sprite->frames_per_rotation,
+                                            sprite->row_count);
     SpriteDrawOptions hull_options;
     if (NovaAiShip_IsDestroyed(ship)) {
       hull_options.alpha_mod =
@@ -1324,8 +1391,10 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   // position lands it at the viewport centre (world==camera -> centre).
   if (!ship_.frames.empty() && ship_frames_per_rotation_ > 0) {
     const Viewport vp = CurrentViewport(platform);
-    const int frame =
-        FrameForHeading(state.player.heading, ship_frames_per_rotation_);
+    const int frame = ComposeShipFrameIndex(state.player,
+                                            ship_sprite_behavior_flags_,
+                                            ship_frames_per_rotation_,
+                                            ship_row_count_);
     DrawSprite(platform.renderer(),
                ship_,
                frame,
@@ -1356,7 +1425,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
         glow_last_drawn_ = true;
       }
       const int glow_frame =
-          FrameForHeading(state.player.heading, ship_frames_per_rotation_);
+          std::min(frame, std::max(0, glow_.frame_count - 1));
       SpriteDrawOptions opts;
       opts.alpha_mod = state.player.engine_glow_intensity;
       DrawSprite(platform.renderer(),

@@ -39,6 +39,15 @@ struct ShipVisualDescriptor {
   // BaseTransp (+0x0a): inherent transparency 0..32 (the loader stores this in
   // ShipClassDef.base_transparency).
   std::int16_t base_transparency = 0;
+  // AltImageID/AltMaskID (+0x0c/+0x0e): the alternate sprite sheet (bank/
+  // unfold rows) appended after the base rotation rows in the same Sprite
+  // (Ghidra Sprite_AssignSpriteSet with g_ship_sprite_alt[class]). > 0 when
+  // the class has one.
+  std::uint16_t alt_image_id = 0;
+  std::uint16_t alt_mask_id = 0;
+  // AltSetCount (+0x10): alternate rows appended after the base rotation row
+  // (banking ships carry 2: bank-left, bank-right).
+  std::int16_t alt_set_count = 0;
   // FramesPer (+0x34): rotating frames for one full revolution (loader default
   // 36). Total frames in the sheet = base_set_count * frames_per_rotation.
   std::int16_t frames_per_rotation = 36;

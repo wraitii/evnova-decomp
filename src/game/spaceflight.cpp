@@ -3055,6 +3055,63 @@ void NovaPlayer_UpdateFromInput(GameState &state,
     p.fuel_points = std::max(0.0F, p.fuel_points - fuel_burn * elapsed_ticks);
   }
 
+  // Ghidra PlayerTick_ManualFlightAndRegeneration turn-bank animation block
+  // (~0x0044cd00): banking classes (sh\x8an Flags & 1) accumulate
+  // turn_bank_animation_phase (+0xc8e4) while a turn is held (capped +16 /
+  // -16, DAT_005755c0/c4), decay it toward zero at 2x frame rate
+  // (DAT_00575618) when straight, and raise ai_turn_bias_dir (+0xc8f8) once
+  // the phase passes the +6/-6 hysteresis thresholds (DAT_005755c8 = 6,
+  // DAT_00575620 = -6). The sprite layer maps the bias to the bank-left /
+  // bank-right alt rows (Ship_UpdateVisualState 0x00428340).
+  // TODO(decomp): the jump-turnaround alignment continuation also feeds the
+  // turn direction into this block (local_265 arm at LAB_0044c92e).
+  p.ai_turn_bias_dir = 0;
+  int turn_dir = 0;
+  if (input.turn_left && !input.turn_right) {
+    turn_dir = -1;
+  } else if (input.turn_right && !input.turn_left) {
+    turn_dir = 1;
+  }
+  const ShipClass *player_cls =
+      state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+  if (player_cls != nullptr && (player_cls->sprite_behavior_flags & 1U) != 0U) {
+    constexpr float kBankPhaseCap = 16.0F;
+    constexpr float kBankDecayRate = 2.0F;
+    constexpr float kBankBiasThreshold = 6.0F;
+    if (turn_dir == 0) {
+      const float decay = kBankDecayRate * elapsed_ticks;
+      if (p.turn_bank_animation_phase > decay) {
+        p.turn_bank_animation_phase -= decay;
+      } else if (p.turn_bank_animation_phase < -decay) {
+        p.turn_bank_animation_phase += decay;
+      } else {
+        p.turn_bank_animation_phase = 0.0F;
+      }
+    } else {
+      if (turn_dir > 0 && p.turn_bank_animation_phase < kBankPhaseCap) {
+        p.turn_bank_animation_phase += elapsed_ticks;
+      }
+      if (turn_dir < 0 && p.turn_bank_animation_phase > -kBankPhaseCap) {
+        p.turn_bank_animation_phase -= elapsed_ticks;
+      }
+    }
+    if (turn_dir >= 1 && p.turn_bank_animation_phase > kBankBiasThreshold) {
+      p.ai_turn_bias_dir = 1;
+    } else if (turn_dir <= 0 &&
+               p.turn_bank_animation_phase < -kBankBiasThreshold) {
+      p.ai_turn_bias_dir = -1;
+    }
+    // Station-hold / maneuver-lock reset arm: while the hold or a maneuver
+    // lockout is active the phase snaps to zero (station hold past the
+    // 30-tick engage gate) and the glow fades one step (handled by the
+    // target-based glow drive below; the original decays it explicitly here).
+    if ((p.ai_maneuver_timer_ms > 0.0F || p.ai_station_hold_timer > 0.0F) &&
+        p.ai_station_hold_timer > 30.0F) {
+      p.turn_bank_animation_phase = 0.0F;
+      p.ai_turn_bias_dir = 0;
+    }
+  }
+
   // ShipState +0xc8d4 is an integer engine/glow control, not a free-running
   // alpha ramp. Normal thrust approaches 24; afterburning extends it to 32;
   // coasting and reverse decrement by one renderer frame. This makes the
@@ -3063,9 +3120,17 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   // reconstructed.
   const std::int16_t glow_target =
       afterburner_active ? 32 : (p.engine_thrust ? 24 : 0);
-  if (p.engine_glow_level < glow_target) {
+  // Banking boost (Flags & 2 classes): the original adds +2 per frame while
+  // ai_turn_bias_dir is set, capped at 0x18 -- equivalent to holding the
+  // cruise glow while banking without thrust.
+  const std::int16_t effective_glow_target =
+      (p.ai_turn_bias_dir != 0 && player_cls != nullptr &&
+       (player_cls->sprite_behavior_flags & 2U) != 0U)
+          ? std::max<std::int16_t>(glow_target, 24)
+          : glow_target;
+  if (p.engine_glow_level < effective_glow_target) {
     ++p.engine_glow_level;
-  } else if (p.engine_glow_level > glow_target) {
+  } else if (p.engine_glow_level > effective_glow_target) {
     --p.engine_glow_level;
   }
   p.engine_glow_intensity =

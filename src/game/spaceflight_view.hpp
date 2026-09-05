@@ -240,6 +240,11 @@ private:
   // Rotation frames for one full revolution (sh\x8an FramesPer, default 36);
   // frame count = base_set_count * frames_per_rotation.
   int ship_frames_per_rotation_ = 36;
+  // Total sprite rows (frame_count / frames_per_rotation) after appending the
+  // sh\x8an alt sheet: row 0 = straight flight, rows 1/2 = bank left/right
+  // selected by ai_turn_bias_dir (Ship_UpdateVisualState 0x00428340).
+  int ship_row_count_ = 1;
+  std::uint16_t ship_sprite_behavior_flags_ = 0;
   // Whether this class's sh\x8an descriptor named a glow layer at all (so
   // EnsureShipSprite does not retry a missing sheet every frame).
   bool has_glow_ = false;
@@ -259,6 +264,10 @@ private:
     SpriteAsset glow;      // engine-glow layer (empty when the class has none)
     bool has_glow = false; // whether a glow layer is present/loaded
     int frames_per_rotation = 36;
+    // Sprite rows after the alt-sheet append + the class's sh\x8an Flags
+    // (row 1/2 = bank left/right when Flags & 1).
+    int row_count = 1;
+    std::uint16_t sprite_behavior_flags = 0;
   };
 
   std::map<std::int16_t, NpcShipSprite> npc_ship_sprites_;
