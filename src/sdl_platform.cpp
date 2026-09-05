@@ -603,6 +603,30 @@ FlightInput SdlPlatform::PollFlightInput() {
   return input;
 }
 
+bool SdlPlatform::IsOriginalKeyCodeHeld(std::uint16_t key_code) {
+  // Reverse of the OriginalKeyCode mapping for the codes the binding-table
+  // consumers currently need (escort-command slots 0x2a/0x2b..0x33 and the
+  // 0x38 arm modifier; the 0x6f half has no clean-room scancode mapping --
+  // TODO(decomp): identify the physical key behind DIK-style code 0x6f).
+  SDL_Scancode scancode;
+  switch (key_code) {
+  case 0x02: scancode = SDL_SCANCODE_1; break;
+  case 0x03: scancode = SDL_SCANCODE_2; break;
+  case 0x04: scancode = SDL_SCANCODE_3; break;
+  case 0x05: scancode = SDL_SCANCODE_4; break;
+  case 0x06: scancode = SDL_SCANCODE_5; break;
+  case 0x12: scancode = SDL_SCANCODE_E; break;
+  case 0x20: scancode = SDL_SCANCODE_D; break;
+  case 0x21: scancode = SDL_SCANCODE_F; break;
+  case 0x2e: scancode = SDL_SCANCODE_C; break;
+  case 0x2f: scancode = SDL_SCANCODE_V; break;
+  case 0x38: scancode = SDL_SCANCODE_LALT; break;
+  default: return false;
+  }
+  const bool *const keys = SDL_GetKeyboardState(nullptr);
+  return keys[scancode] != 0 || probe_.VirtualKey(scancode);
+}
+
 void SdlPlatform::Present() {
   // Capture while the frame about to be swapped in is still the active render
   // target; SDL_RenderReadPixels after SDL_RenderPresent reads an undefined

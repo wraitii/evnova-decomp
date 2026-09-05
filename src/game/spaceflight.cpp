@@ -7,6 +7,7 @@
 #include "boarding_plunder.hpp"
 #include "collision.hpp"
 #include "docked_dialog.hpp"
+#include "escort_commands.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -376,7 +377,8 @@ void NovaFrame_TickSystems(GameState &state,
 void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                SdlAudio &audio,
                                GameState &state,
-                               bool &returning_to_menu) {
+                               bool &returning_to_menu,
+                               const NovaPreferences &prefs) {
   SpaceflightView view;
   // The government-specific HUD (Interface layout + cockpit PICT) is resolved
   // once on spaceflight entry (Ui_InstallGameplayInterfaceLayout) and re-
@@ -711,6 +713,30 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           frame_time_ms / kOriginalTickMs);
       secondary_cycle_was_held = input.cycle_secondary;
       clear_secondary_was_held = input.clear_secondary;
+      // Escort Commands overlay + order dispatch (PlayerTick_Auxiliary-
+      // Commands escort blocks 0x00450ae7..0x00450f67, Ship_CommandPlayer-
+      // EscortGroup 0x0045c880): the keys resolve through the binding table
+      // (slots 0x2a / 0x2b..0x2f / 0x30..0x33) against the live keyboard
+      // state, matching the original's command-active reads.
+      const auto &escort_key = prefs.bindings.cmd_to_key;
+      const auto escort_held =
+          [&platform](std::uint16_t code) {
+            return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
+          };
+      NovaEscort_TickPlayerEscortCommands(
+          state,
+          {.panel_toggle_held = escort_held(escort_key[0x2a]),
+           .select_group_held = {escort_held(escort_key[0x2b]),
+                                 escort_held(escort_key[0x2c]),
+                                 escort_held(escort_key[0x2d]),
+                                 escort_held(escort_key[0x2e]),
+                                 escort_held(escort_key[0x2f])},
+           .order_attack_held = escort_held(escort_key[0x30]),
+           .order_defend_held = escort_held(escort_key[0x31]),
+           .order_hold_held = escort_held(escort_key[0x32]),
+           .order_formation_held = escort_held(escort_key[0x33]),
+           .arm_modifier_held = escort_held(0x38)},
+          SDL_GetTicks() * 60 / 1000);
     }
     // Cooldown-decay tail of PlayerTick_WeaponCommands: runs unconditionally
     // in the original player tick, including during engaged jumps (the
@@ -3221,7 +3247,8 @@ void NovaPlayer_TickRegeneration(GameState &state, float frame_time_ms) {
 // Ghidra 0x00489210 Ship_RunSpaceflightMode.
 void NovaSpaceflight_Run(SdlPlatform &platform,
                          SdlAudio &audio,
-                         GameState &state) {
+                         GameState &state,
+                         const NovaPreferences &prefs) {
   NovaLog::Info("entering spaceflight mode");
 
   // Preflight: the new-game intro cinematic plays on the pilot's first entry
@@ -3240,7 +3267,7 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   // Ghidra Ship_RunSpaceflightMode: preflight owns the gameplay surface, runs
   // Frame_SpaceflightLoop, then tears the mode back down to the menu shell.
   bool returning_to_menu = false;
-  NovaFrame_SpaceflightLoop(platform, audio, state, returning_to_menu);
+  NovaFrame_SpaceflightLoop(platform, audio, state, returning_to_menu, prefs);
 
   NovaLog::Info("leaving spaceflight mode to the main menu");
 }

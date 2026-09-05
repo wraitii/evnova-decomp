@@ -353,6 +353,9 @@ struct Ship {
   // and mission models only use the neutral default so far, but the field is
   // needed to preserve the state-0x05+ branch shape.
   std::int16_t escort_command_code = 0; // +0xC90A (provisional)
+  // Ghidra ShipState +0xC90C (provisional): set when an escort-group order
+  // changed this ship's command, consumed by the AI/comm-chatter pass.
+  std::int16_t escort_command_pending = 0;
   // Formation lead whose engine-glow/formation-offset this ship mirrors in the
   // escort control modes (ShipState +0xC906 formation_leader_ship_slot). <1
   // means "no leader": mode 0x12 (chase leader) falls back to idle control
@@ -554,6 +557,32 @@ struct PilotControlState {
       bits.set(bit, value);
     }
   }
+};
+
+// In-flight Escort Commands overlay + group-order state (Ghidra g_target_
+// category_panel_timer, g_selected_target_category, g_target_category_
+// command[4], g_target_category_key_latch[5], g_escort_command_key_latch[4],
+// DAT_007cab49 toggle latch, DAT_007cab56 attached-count cache,
+// g_target_category_key_time_ms). Reconstructed in escort_commands.cpp.
+struct EscortCommandState {
+  static constexpr std::size_t kGroupCount = 4;
+  // > 0 while the overlay is shown (Ui_ShowTargetCategoryPanel 0x0049e8d0
+  // writes 0x20; decayed only while the toggle key is held past 0x1e0 ticks,
+  // and cleared by the toggle or on system arrival).
+  std::int16_t panel_timer = 0;
+  // Selected group: -1 = All Ships, 0..3 = class_category group.
+  std::int16_t selected_category = -1;
+  // Current order per group: 0 Formation, 1 Defend, 2 Attack, 3 Return to
+  // Hangar, 4 Hold Position (STR# 0x7d2 0x91..0x95).
+  std::array<std::int16_t, kGroupCount> group_command{};
+  std::array<std::uint8_t, 5> select_key_latch{};
+  std::array<std::uint8_t, kGroupCount> order_key_latch{};
+  std::uint8_t panel_toggle_latch = 0;
+  // Filtered attached-ship count cache (DAT_007cab56), -1 when stale.
+  std::int16_t attached_count_cache = -1;
+  std::int64_t key_time_60hz = 0;
+  // One-frame close request from the toggle (the original's local_265).
+  bool close_pending = false;
 };
 
 // Travel-selection / cross-system jump state. Ghidra keeps the jump/landing
@@ -936,6 +965,7 @@ struct GameState {
   PilotData pilot;
   PilotControlState control;
   TravelState travel;
+  EscortCommandState escort;
 
   // Galaxy starmap view state (Ghidra g_starmap_zoom 0x005759d8,
   // g_starmap_pan_origin_x/y 0x005997b4). Zoom is a world->screen DIVISOR

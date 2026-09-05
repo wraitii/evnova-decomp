@@ -193,6 +193,10 @@ public:
   [[nodiscard]] std::optional<TextInput> PollTextEvent();
   // Live keyboard-state flight control snapshot (held-key steering).
   [[nodiscard]] FlightInput PollFlightInput();
+  // Live held-state of an original DIK-style key code (the values stored in
+  // KeyBindings::cmd_to_key, e.g. the escort-command slots 0x2a/0x2b..0x33).
+  // Covers the codes the current consumers use; unmapped codes return false.
+  [[nodiscard]] bool IsOriginalKeyCodeHeld(std::uint16_t key_code);
   [[nodiscard]] bool quit_requested() const;
   [[nodiscard]] std::uint64_t ticks_ms() const;
   [[nodiscard]] SDL_FPoint mouse_position() const;

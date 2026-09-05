@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "escort_commands.hpp"
 #include "hud_overlay.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
@@ -483,6 +484,7 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   DrawWeaponPanel(platform, state, value_color, label_color);
   DrawTargetPanel(platform, state, value_color, label_color);
   DrawCargoPanel(platform, state, value_color, label_color);
+  DrawEscortCommandsPanel(platform, state, value_color, label_color);
   // Transient HUD overlay message (NovaHud_ShowOverlayMessage / the landing &
   // negotiation feedback text). Mirrors the original's shared message rect
   // (g_hud_overlay_message_rect, laid out in FUN_004af020's tail): left =
@@ -1220,6 +1222,93 @@ void RadarPolarOffset(float bearing_deg, float distance, float &x, float &y) {
 }
 
 } // namespace
+
+// Ghidra 0x0049e430 Ui_DrawTargetCategoryPanel: the in-flight "Escort
+// Commands" overlay (header STR# 0x7d2 0x85). Five rows numbered 1..5: All
+// Ships (-1) then one per class_category group (0 Fighters .. 3 Freighters,
+// 0x8c..0x8f); rows whose group has no attached ships draw dimmed, the
+// selected row draws highlighted, and present groups show their current
+// order word (0x91 Defend / 0x92 Attack / 0x93 Hold Position / 0x94 Return
+// to Hangar). The original draws this as an opaque boxed strip over the
+// gameplay view; the clean-room centers a boxed panel in the viewport.
+void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
+                                          const GameState &state,
+                                          const SDL_Color &value_color,
+                                          const SDL_Color &label_color) {
+  const auto &escort = state.escort;
+  if (escort.panel_timer <= 0) {
+    return;
+  }
+  SDL_Renderer *renderer = platform.renderer();
+  NovaFontCache &font = *font_cache_;
+  const float font_size = static_cast<float>(layout_.font_size);
+  constexpr int kRowHeight = 18;
+  constexpr int kRowBaseline = 12;
+  constexpr float kBoxWidth = 220.0F;
+  constexpr float kBoxHeight = 34.0F + 5.0F * kRowHeight;
+
+  const auto logical = platform.logical_playfield_size();
+  const float left = (logical.x - kBoxWidth) / 2.0F;
+  const float top = 40.0F;
+
+  // Opaque backing + frame (the original's FillRect16/FrameRect16 pair).
+  const SDL_FRect box{left, top, kBoxWidth, kBoxHeight};
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &box);
+  SDL_SetRenderDrawColor(renderer, label_color.r, label_color.g,
+                         label_color.b, SDL_ALPHA_OPAQUE);
+  SDL_RenderRect(renderer, &box);
+
+  if (auto title = NovaHud_LoadStringEntry(0x7d2, 0x85)) {
+    NovaText_DrawCentered(platform, font, NovaFontFamily::kGeneva, font_size,
+                          kNovaFontStyleRegular, value_color, left,
+                          left + kBoxWidth, top + 8.0F, *title);
+  }
+
+  struct RowDef {
+    std::uint16_t name_entry;
+    std::int16_t category; // -1 = All Ships
+  };
+  static constexpr RowDef kRows[5] = {
+      {0x90, -1}, {0x8c, 0}, {0x8d, 1}, {0x8e, 2}, {0x8f, 3}};
+  // Order word per code 1..4 (0x95 Formation covers code 0, not shown).
+  static constexpr std::uint16_t kOrderEntries[5] = {
+      0x95, 0x91, 0x92, 0x94, 0x93};
+
+  for (int row = 0; row < 5; ++row) {
+    const float row_top = top + 26.0F + row * kRowHeight;
+    const auto &def = kRows[row];
+    const bool selected = escort.selected_category == def.category;
+    const bool present =
+        def.category < 0 || NovaEscort_GroupPresent(state, def.category);
+
+    if (selected) {
+      const SDL_FRect highlight{left + 3.0F, row_top, kBoxWidth - 6.0F,
+                                static_cast<float>(kRowHeight)};
+      SDL_SetRenderDrawColor(renderer, label_color.r, label_color.g,
+                             label_color.b, 48);
+      SDL_RenderFillRect(renderer, &highlight);
+    }
+
+    const SDL_Color &color = present ? value_color : label_color;
+    const float baseline = row_top + static_cast<float>(kRowBaseline);
+    float pen = DrawPanelTextAt(platform, font, font_size, left + 10.0F,
+                                baseline, std::to_string(row + 1), color);
+    pen = DrawPanelTextAt(platform, font, font_size, pen + 4.0F, baseline,
+                          MiscString({def.name_entry, ""}), color);
+    if (def.category >= 0 && present) {
+      const std::int16_t order =
+          escort.group_command[static_cast<std::size_t>(def.category)];
+      if (order > 0 && order <= 4) {
+        if (auto word = NovaHud_LoadStringEntry(
+                0x7d2, kOrderEntries[static_cast<std::size_t>(order)])) {
+          DrawPanelTextAt(platform, font, font_size, pen + 10.0F, baseline,
+                          *word, label_color);
+        }
+      }
+    }
+  }
+}
 
 void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
                                  const GameState &state) {

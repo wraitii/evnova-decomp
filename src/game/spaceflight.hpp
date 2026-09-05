@@ -17,6 +17,7 @@
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "preferences.hpp"
 
 class SdlPlatform;
 
@@ -32,7 +33,8 @@ namespace game {
 // shell.
 void NovaSpaceflight_Run(SdlPlatform &platform,
                          SdlAudio &audio,
-                         GameState &state);
+                         GameState &state,
+                         const NovaPreferences &prefs);
 
 // Ship-class movement stats derived from the raw resource as the original
 // loader (NovaData_LoadScenarioResourceTables 0x004bd3c0) derives

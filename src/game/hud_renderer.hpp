@@ -137,6 +137,10 @@ private:
   // bodies and local ships as colour/size-tiered blips, the blinking primary
   // target blip, the far-from-origin direction arrow, and sensor static while
   // a proximity scan is detected.
+  void DrawEscortCommandsPanel(SdlPlatform &platform,
+                               const GameState &state,
+                               const SDL_Color &value_color,
+                               const SDL_Color &label_color);
   void DrawRadarPanel(SdlPlatform &platform, const GameState &state);
 
   // The four gameplay text panels, one per original draw path. Each mirrors
@@ -154,8 +158,7 @@ private:
                        const GameState &state,
                        const SDL_Color &value_color,
                        const SDL_Color &label_color);
-  void DrawCargoPanel(SdlPlatform &platform,
-                      const GameState &state,
+  void DrawCargoPanel(SdlPlatform &platform,                      const GameState &state,
                       const SDL_Color &value_color,
                       const SDL_Color &label_color);
 };

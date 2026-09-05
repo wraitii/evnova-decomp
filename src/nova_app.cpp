@@ -1531,7 +1531,8 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // Ship_RunSpaceflightMode being called inline from the dispatcher.
     const bool resume_menu_music = runtime.prefs.intro_music;
     runtime.music.Stop();
-    game::NovaSpaceflight_Run(runtime.platform, runtime.audio, runtime.game);
+    game::NovaSpaceflight_Run(runtime.platform, runtime.audio, runtime.game,
+                              runtime.prefs);
     if (resume_menu_music) {
       runtime.music.Play();
     }
