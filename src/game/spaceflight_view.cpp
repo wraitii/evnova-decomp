@@ -514,29 +514,14 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   ship_ = std::move(*base);
   ship_frames_per_rotation_ = visual->frames_per_rotation;
   ship_sprite_behavior_flags_ = visual->sprite_behavior_flags;
-  // Append the sh\x8an alternate sheet (bank-left/bank-right rows) so the
-  // composed frame index row * frames_per_rotation + heading_frame used by
-  // Ghidra Ship_UpdateVisualState (0x00428340) addresses the right frames.
-  // The original appends g_ship_sprite_alt[class] via Sprite_AssignSpriteSet;
-  // a missing/odd-sized alt sheet just leaves the ship with its straight row.
-  if (visual->alt_image_id > 0) {
-    if (auto alt = SpriteAsset::LoadSheet(renderer, visual->alt_image_id);
-        alt && alt->tile_width == ship_.tile_width &&
-        alt->tile_height == ship_.tile_height) {
-      ship_.frames.insert(ship_.frames.end(),
-                          std::make_move_iterator(alt->frames.begin()),
-                          std::make_move_iterator(alt->frames.end()));
-      ship_.frame_count = static_cast<int>(ship_.frames.size());
-    } else if (alt) {
-      NovaLog::Warn("ship sprite: alt sheet {} tile size {}x{} != base {}x{}; "
-                    "bank rows skipped",
-                    visual->alt_image_id,
-                    alt->tile_width,
-                    alt->tile_height,
-                    ship_.tile_width,
-                    ship_.tile_height);
-    }
-  }
+  // NOTE(decomp): the basic sprite sets all live in the SAME rl\x91D sheet
+  // (Bible BaseSetCount: "the graphics for all of a ship's basic sprite sets
+  // are stored in the same PICT/rleD/rle8 resource"). Verified: the shuttle
+  // sheet (rl\x91D 1000) holds 108 frames = 3 rows of 36 (level / bank left /
+  // bank right, Bible Flags 0x0001). The sh\x8an AltImageID pair (+0x0c) is a
+  // separate alternate sheet only used by the special Flags 0x0002 cycler
+  // (Ghidra ShipClass_LoadShipClassVisualAndLaunchData gates it on
+  // AltImageID > 0 && AltSetCount > 0) and is not appended to the base rows.
   ship_row_count_ = std::max(1, ship_.frame_count / ship_frames_per_rotation_);
 
   // Engine-glow layer (GlowImageID). The original loads it into the per-class
@@ -607,20 +592,8 @@ SpaceflightView::ShipClassSprite(SdlPlatform &platform,
   entry.base = std::move(*base);
   entry.frames_per_rotation = visual->frames_per_rotation;
   entry.sprite_behavior_flags = visual->sprite_behavior_flags;
-  // Append the sh\x8an alt sheet (bank rows) the same way the original
-  // assigns g_ship_sprite_alt[class]; see the player-path note in
-  // EnsureShipSprite.
-  if (visual->alt_image_id > 0) {
-    if (auto alt =
-            SpriteAsset::LoadSheet(platform.renderer(), visual->alt_image_id);
-        alt && alt->tile_width == entry.base.tile_width &&
-        alt->tile_height == entry.base.tile_height) {
-      entry.base.frames.insert(entry.base.frames.end(),
-                               std::make_move_iterator(alt->frames.begin()),
-                               std::make_move_iterator(alt->frames.end()));
-      entry.base.frame_count = static_cast<int>(entry.base.frames.size());
-    }
-  }
+  // Basic sets all live in the base sheet (see the player-path note in
+  // EnsureShipSprite); no alt-sheet append.
   entry.row_count =
       std::max(1, entry.base.frame_count / entry.frames_per_rotation);
   // Engine-glow layer (GlowImageID), sharing the base's rotation grid. An

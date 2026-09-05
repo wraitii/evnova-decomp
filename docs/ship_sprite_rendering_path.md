@@ -40,6 +40,7 @@ big-endian fields (offsets verified against the Shuttle class 0x80 payload):
 | +0x1e   | LightImageID | -> g_ship_sprite_light (running lights) |
 | +0x26   | WeapImageID | -> g_ship_sprite_weapon (weapon effects) |
 | +0x2e   | Flags        | -> `sprite_behavior_flags` (bank/unfold/carry bits) |
+| +0x30   | AnimDelay    | -> `combat_state_init_range` (cycle dwell)          |
 | +0x30   | AnimDelay    | -> `combat_state_init_range` |
 | +0x32   | WeapDecay    | -> `weapon_glow_decay_rate` = WeapDecay * 0.003484 |
 | +0x34   | FramesPer    | -> `frames_per_rotation` (default 36) |
@@ -167,3 +168,24 @@ the class -> decode `rl\x91D` BaseImageID -> index frame by heading -> draw.
   `System_InitRoamingShips` / Step 5 encounter maintenance (it does not yet
   honour each def's spawn_system_filter, the availability expression, or spawn
   escorts).
+
+## Sprite rows / banking (verified 2026, data + Bible)
+
+All basic sprite sets live in the SAME `rl\x91D` resource named by
+`BaseImageID` (Bible `BaseSetCount`: "the graphics for all of a ship's basic
+sprite sets are stored in the same PICT/rleD/rle8 resource"). Verified from
+the data: the shuttle sheet (`rl\x91D` 1000) is 24x24 with a header count of
+108 = 3 rows x FramesPer 36. `Ship_UpdateVisualState` (0x00428340) composes
+the displayed frame as
+
+    frame = bias_row * frames_per_rotation + heading_frame
+
+with `bias_row` from `ai_turn_bias_dir` (+0xc8f8) for classes whose sh\x8an
+Flags have bit 0 (Bible 0x0001: "The first set of sprites is used for level
+flight, the second for banking left, and the third for banking right"). The
+`AltImageID`/`AltSetCount` descriptor fields (+0x0c/+0x10) name a SEPARATE
+alternate sheet used by the Flags 0x0002 set-cycling animation (Ghidra
+0x004b4ee0 gates it on AltImageID > 0 && AltSetCount > 0); it is never
+appended to the base rows. The clean-room renderer mirrors this in
+`ComposeShipFrameIndex` (spaceflight_view.cpp); `ShipClass.sprite_behavior_
+flags` is decoded in scenario_data.cpp from sh\x8an +0x2e.

@@ -1314,6 +1314,14 @@ bool ScenarioData::LoadFromArchives() {
                                           static_cast<std::uint16_t>(id));
       if (shan && shan->size() >= 2) {
         const std::uint16_t base_image = ReadBe16(*shan, 0x00);
+        // Ghidra ShipClass_LoadShipClassVisualAndLaunchData (0x004b4ee0)
+        // copies sh\x8an +0x2e into ShipClassDef +0xa24. Bible Flags 0x0001:
+        // "extra frames in base image are used to display banking. The first
+        // set of sprites is used for level flight, the second for banking
+        // left, and the third for banking right." Consumers: the turn-bank
+        // bias blocks, the waypoint-marker arm (weapon.cpp), and the combat-
+        // animation cycle.
+        cls.sprite_behavior_flags = ReadBe16(*shan, 0x2e);
         if (const auto found = first_class_by_base_image.find(base_image);
             found != first_class_by_base_image.end()) {
           cls.clone_source_ship_class = found->second;

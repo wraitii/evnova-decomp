@@ -46,6 +46,12 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(ship->stock_weapons[0].count == 1);
   CHECK(ship->stock_weapons[0].ammo_load == -1); // no ammo (unlimited)
 
+  // Sprite behavior flags come from the sh\x8an descriptor (+0x2e), copied by
+  // the loader pass (Ghidra 0x004b4ee0 -> ShipClassDef +0xa24). The shuttle's
+  // sh\x8an carries Flags 0x0041: bit 0 = banking (base sheet rows: level /
+  // bank left / bank right, Bible Flags 0x0001), bit 6 = 0x40.
+  CHECK(ship->sprite_behavior_flags == 0x0041);
+
   // Weapon id 0x80 (a projectile): values verified from its payload.
   const Weapon *w = data.Weapon(0x80);
   REQUIRE(w != nullptr);
