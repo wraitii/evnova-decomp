@@ -598,6 +598,8 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.cycle_secondary_backwards = pressed(SDL_SCANCODE_X) && shift_held;
   // Deselect secondary: C (original default S is reverse here).
   input.clear_secondary = pressed(SDL_SCANCODE_C);
+  // Eject: Alt+X (original 0x38/0x6f arm pair + binding slot 0x11 = X).
+  input.eject = pressed(SDL_SCANCODE_X) && alt_held;
   return input;
 }
 

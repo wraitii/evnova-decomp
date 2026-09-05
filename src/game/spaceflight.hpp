@@ -79,10 +79,13 @@ extern void NovaPlayer_UpdateFromInput(GameState &state,
 // Ship_HandlePlayerShipCore 0x0044aa70): fire- restricted velocity damping, the
 // disabled auto-repair system, the periodic distress-call cue, and carried-bomb
 // countdown/detonation. Must run before the flight input pass each frame (the
-// original dispatches it ahead of the manual- flight block). Returns true when
-// the player ship is no longer active (death bookkeeping consumed the frame).
+// original dispatches it ahead of the manual- flight block). `eject_command`
+// carries the eject key state for the destroyed-ship escape-pod block
+// (0x004510b9). Returns true when the player ship is no longer active (death
+// bookkeeping consumed the frame).
 extern bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
-                                                 float elapsed_ticks);
+                                                 float elapsed_ticks,
+                                                 bool eject_command);
 
 // Per-frame in-flight shield regeneration (the spaceflight loop calls this
 // once a frame). Restores the player's shields toward the effective maximum at
@@ -94,6 +97,21 @@ extern bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
 // grows shield_points.
 extern void NovaPlayer_TickShieldRecharge(GameState &state,
                                           float frame_time_ms);
+
+// Ghidra PlayerTick_TimedActionTransition (internal label of
+// Ship_HandlePlayerShipCore 0x0044aa70; block 0x0044d490..0x0044da70). While
+// the player's blocking timed action is armed (the escape-pod flight launched
+// by the eject transform), moves the ship at the effective thrust/top speed
+// along the current heading, decrements the countdown, and - on reaching zero -
+// runs the death/escape-pod respawn transition: mission abort, player-ship
+// reset, the fresh ship class's OnPurchase script, emergency-destination
+// relocation, weapon-bank reload, meters refill, world re-population, the
+// 15..44 elapsed-day catch-up and the registration-number reroll. The
+// original returns from the player core while a timed action runs, so the
+// caller must skip the remaining player command blocks. Returns true when the
+// timed action was active this frame.
+extern bool NovaPlayer_TickTimedActionTransition(GameState &state,
+                                                 float elapsed_ticks);
 
 // Effective NPC movement stats, ported from the NPC branch of Ghidra
 // Ship_ComputeShipEffectiveThrust (0x004640a0) /

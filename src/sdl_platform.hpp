@@ -73,6 +73,12 @@ struct FlightInput {
   // Deselect the secondary weapon: C (the original's slot 1 default is
   // DIK 0x1f = S, taken by reverse; documented divergence).
   bool clear_secondary = false;
+  // Eject command: Alt+X. The original eject (PlayerTick eject block,
+  // Ship_HandlePlayerShipCore 0x004510b9) requires the 0x38/0x6f arm-modifier
+  // pair (Left Alt) plus binding slot 0x11, whose default is DIK 0x2d = X;
+  // plain/Shift+X are taken by the secondary-cycle bindings here. Only
+  // consumed while the player ship is destroyed and owns an auto-eject outfit.
+  bool eject = false;
   // Edge-triggered travel engage: 'j' (hyperspace jump toward the nearest
   // available travel point). The original uses a separate travel command
   // channel; this build maps it to a dedicated key so it is distinct from the

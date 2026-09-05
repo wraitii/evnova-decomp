@@ -14,6 +14,7 @@
 #include "intro_cinematic.hpp"
 #include "landed_window.hpp"
 #include "mission.hpp"
+#include "mission_script.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
 #include "radar_panel.hpp"
@@ -513,11 +514,28 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // frame (flight input is skipped, matching the original's early return).
     bool player_status_consumed = false;
     if (NovaPlayer_TickStatusAndOutfitEvents(
-            state, frame_time_ms / (1000.0F / 30.0F))) {
+            state, frame_time_ms / (1000.0F / 30.0F), input.eject)) {
       if (state.game_over_pending) {
         returning_to_menu = true;
         break;
       }
+      player_status_consumed = true;
+    }
+    // PlayerTick_TimedActionTransition (0x0044d490): while a blocking timed
+    // action is armed (escape-pod flight) the original returns from the
+    // player core after moving the ship and ticking the countdown; flight
+    // input and the weapon/target command blocks are skipped. On zero the
+    // respawn transition runs inside this call. The eject frame suppresses
+    // the tick once (the original's dispatch has already passed when the
+    // eject transform arms the countdown).
+    bool timed_action_active = false;
+    if (state.timed_action_suppress_this_frame) {
+      state.timed_action_suppress_this_frame = false;
+    } else {
+      timed_action_active = NovaPlayer_TickTimedActionTransition(
+          state, frame_time_ms / (1000.0F / 30.0F));
+    }
+    if (timed_action_active) {
       player_status_consumed = true;
     }
     // DAT_007354a5: the escape-pod bomb variant latches an immediate return
@@ -676,8 +694,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // disabled state inside the dispatch; the port additionally
     // suspends the whole pass while the jump state machine owns the ship
     // (matching the disable restriction the original applies through the brake,
-    // hold and zoom phases).
-    if (!state.travel.engaging) {
+    // hold and zoom phases) and while a blocking timed action runs (the
+    // original returns from the player core before the weapon block).
+    if (!state.travel.engaging && !timed_action_active) {
       const bool cycle_secondary =
           input.cycle_secondary && !secondary_cycle_was_held;
       const bool clear_secondary =
@@ -2182,12 +2201,498 @@ void DetonateCarriedBomb(GameState &state) {
 
 } // namespace
 
+// Ghidra PlayerTick_TimedActionTransition support: the eject/escape-pod
+// transform arm (Ship_HandlePlayerShipCore 0x004510b9..0x00453910), the
+// Ship_ResetPlayerShipState (0x004b3350) respawn reset, and the
+// Stellar_FindReachableEmergencyDestinationStellar flood (0x00467710 /
+// 0x004677a0).
+// ---------------------------------------------------------------------------
+namespace {
+
+// Bible oütf ModType entries driving the eject gate.
+constexpr std::int16_t kAutoEjectOutfitModType =
+    0x14; // ModType 20 "auto-eject"
+constexpr std::int16_t kEscapePodOutfitModType =
+    0x0b; // ModType 11 "escape pod"
+// Launch-bay weapons: weapon_mode_code 99; the carried craft class is
+// ammo_type - 0x80 and must set shïp Flags 0x8000 (escape ship type).
+constexpr std::int16_t kBayWeaponModeCode = 99;
+constexpr std::uint16_t kEscapeShipClassFlag = 0x8000;
+// The escape pod ship class: decompile constant 0x2ff is the zero-based index
+// (ship id 0x37f).
+constexpr std::int16_t kEscapePodShipClassIndex = 0x2ff;
+// The escape-pod flight arms the blocking timed action for 0x15e ticks.
+constexpr std::int16_t kEscapePodTimedActionTicks = 0x15e;
+// Eject gate: the death presentation must be at least half spent
+// (death_timer <= ShipClass.death_delay_frames * g_bomb_damage_armor_fraction
+// DAT_00575598 = 0.5, the same global the bomb self-damage roll uses) or be
+// within g_hyperspace_engage_hold_30hz (0x5755a8, 30) ticks of ending.
+constexpr float kEjectDeathDelayScale = kBombDamageArmorFraction;
+constexpr float kEjectArmHoldTicks = 30.0F;
+// Respawn catch-up: rand(30) + 15 Mission_TickDailyWorldUpdate passes.
+constexpr std::int16_t kRespawnDailyUpdateRange = 30;
+constexpr std::int16_t kRespawnDailyUpdateBase = 15;
+// STR# 0x7d2 entry 0x34: "You abandon your ship for" (fighter variant).
+constexpr std::uint16_t kStrAbandonShipFor = 0x34;
+// The 0x100 player weapon banks store their live counter at slot 0 of a
+// 100-int16 stride.
+constexpr std::size_t kPlayerBankStride = 100;
+
+// Ghidra Outfit_HasAutoEjectOutfit (0x00464700): any owned outfit with
+// ModType 0x14 (Bible "auto-eject", which requires an escape pod to work).
+bool Outfit_HasAutoEjectOutfit(const GameState &state) {
+  for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
+                            idx < state.inventory.outfit_owned_count.size();
+       ++idx) {
+    if (state.inventory.outfit_owned_count[idx] > 0 &&
+        FindOutfitWithModType(state, idx, kAutoEjectOutfitModType) != nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra Weapon_HasLaunchBayWeapon (0x00464520): any weapon bank whose def is
+// mode 99 (launch bay), whose mounted count is >= 1, and whose carried class
+// sets the 0x8000 escape-ship flag.
+bool Weapon_HasPlayerLaunchBayWeapon(const GameState &state) {
+  for (std::size_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *def =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (def == nullptr || def->weapon_mode_code != kBayWeaponModeCode) {
+      continue;
+    }
+    if (state.weapon_bank_ammo[bank * kPlayerBankStride] < 1) {
+      continue;
+    }
+    const ShipClass *carried = state.scenario.Ship(def->ammo_type);
+    if (carried != nullptr &&
+        (carried->capability_flags & kEscapeShipClassFlag) != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra ShipClass_FindLaunchBayShipClassId (0x00464590): the zero-based class
+// index of the first ejectable bay fighter, -1 when none.
+std::int16_t Weapon_FindLaunchBayShipClassIndex(const GameState &state) {
+  for (std::size_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *def =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (def == nullptr || def->weapon_mode_code != kBayWeaponModeCode) {
+      continue;
+    }
+    if (state.weapon_bank_ammo[bank * kPlayerBankStride] < 1) {
+      continue;
+    }
+    if (def->ammo_type < 0x80) {
+      continue;
+    }
+    const ShipClass *carried = state.scenario.Ship(def->ammo_type);
+    if (carried != nullptr &&
+        (carried->capability_flags & kEscapeShipClassFlag) != 0) {
+      return static_cast<std::int16_t>(def->ammo_type - 0x80);
+    }
+  }
+  return -1;
+}
+
+// Ghidra Outfit_HasSpecialMovementOutfitOrLaunchBay (0x004644a0, renamed
+// Outfit_HasEscapePodOrLaunchBay): an owned escape-pod outfit (ModType 0xb)
+// or an ejectable launch bay.
+bool Outfit_HasEscapePodOrLaunchBay(const GameState &state) {
+  for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
+                            idx < state.inventory.outfit_owned_count.size();
+       ++idx) {
+    if (state.inventory.outfit_owned_count[idx] > 0 &&
+        FindOutfitWithModType(state, idx, kEscapePodOutfitModType) != nullptr) {
+      return true;
+    }
+  }
+  return Weapon_HasPlayerLaunchBayWeapon(state);
+}
+
+// Zeroes the live (slot 0) counter of every player weapon bank and the per-
+// bank cooldown/burst state before a stock reseed (the original sweeps all
+// 0x100 banks in the eject/respawn paths).
+void ZeroPlayerWeaponBanks(GameState &state) {
+  for (std::size_t bank = 0; bank < 0x100; ++bank) {
+    state.weapon_bank_ammo[bank * kPlayerBankStride] = 0;
+    state.weapon_bank_secondary[bank * kPlayerBankStride] = 0;
+  }
+  state.weapon_bank_cooldown.fill(0.0F);
+  state.weapon_bank_burst_counter.fill(0);
+  state.active_shots.clear();
+}
+
+// Drops non-persistent outfits (OutfitDef field_0x378 / Flags 0x0004 survive
+// a ship replacement).
+void ClearNonPersistentOutfits(GameState &state) {
+  for (std::size_t idx = 0; idx < state.inventory.outfit_owned_count.size();
+       ++idx) {
+    const Outfit *def = idx < state.scenario.outfits.size()
+                            ? &state.scenario.outfits[idx]
+                            : nullptr;
+    if (def == nullptr || !def->persistent_on_ship_swap) {
+      state.inventory.outfit_owned_count[idx] = 0;
+    }
+  }
+}
+
+// Ghidra Ship_ResetPlayerShipState (0x004b3350), param_1 == 0 (the respawn
+// call). Fresh kinematics, the hardcoded fresh class 0, recomputed meters and
+// cleared targeting/AI/travel state.
+void RespawnResetPlayerShipState(GameState &state) {
+  PlayerShip &p = state.player;
+  p.pos_x = 50.0F;
+  p.pos_y = 50.0F;
+  p.vel_x = 0.0F;
+  p.vel_y = 0.0F;
+  p.speed = 0.0F;
+  p.heading = 0.0F;
+  p.ship_class_id = 0; // the reset always lands the player in class 0 (id 0x80)
+  p.is_active = true;
+  p.cloak_transition_latch = 0;
+  p.cloak_fade_progress = 0.0F;
+  p.travel_transfer_mode = -1;
+  p.faction_or_government_id = -1;
+  p.ai_behavior_code = -1;
+  p.current_system_id = 0; // overwritten by the emergency destination
+
+  // Meters are computed BEFORE the outfit counts are cleared (original
+  // order), so the pre-death outfit bonuses still apply to class 0 here.
+  state.stat_cache_valid = false;
+  const PlayerEffectiveStats eff = Outfit_ComputePlayerEffectiveStats(state);
+  p.shield_points = eff.max_shield_points;
+  p.armor_points = eff.max_armor_points;
+  p.fuel_points = eff.fuel_capacity;
+  state.cached_stats = eff;
+  state.stat_cache_valid = true;
+
+  p.primary_target_ship_slot = -1;
+  p.ai_secondary_target_slot = -1;
+  p.active_weapon_bank_slot = -1;
+  p.ai_target_ship_slot = -1;
+  p.mission_fleet_slot = -1;
+  p.pers_def_slot = -1;
+  p.ai_control_mode = 0;
+  p.ai_state_code = 0;
+  p.death_timer_active = -999.0F;
+  p.ionization_points = 0.0F;
+  // TODO(decomp(0x004b3350)) skipped: field_0xb0/field_0x60 latch words,
+  // weapon_exit_animation_phase, alternate_sprite_cycle_index and
+  // last_weapon_fire_time_ms - not modelled on Ship.
+  p.sprite_animation_cycle_index = 0;
+  p.waypoint_arrival_marker_a = 1;
+  p.waypoint_arrival_marker_b = 0;
+  p.turn_bank_animation_phase = 0.0F;
+  p.ai_turn_bias_dir = 0;
+  p.hit_reaction_timer = 0.0F;
+  p.player_aggro_accumulator = 0.0F;
+  p.sprite_animation_timer = 0.0F;
+  p.skill_variance_scale = 1.0F;
+  p.ai_station_hold_timer = 0.0F;
+  p.jump_destination_system_id = -1;
+  p.engine_glow_level = 0;
+  p.velocity_match_target_ship_slot = -1;
+
+  ZeroPlayerWeaponBanks(state);
+  NovaWeapon_SeedBanksFromShipStock(state, p.ship_class_id);
+
+  // The plotted starmap route (DAT_00735404, 0x20 slots).
+  state.travel.starmap_route.fill(-1);
+
+  ClearNonPersistentOutfits(state);
+  state.inventory.cargo_bins.fill(0);
+  state.inventory.junk_counts.fill(0);
+
+  // TODO(decomp(0x004b3350)) skipped: DAT_007353f4, g_last_system_for_ambient_
+  // rolls, _g_playerSelfDestructCountdown, g_travel_engage_timer,
+  // g_travel_interaction_action_index_b / bribe_random_latch, DAT_00596d32/33
+  // and g_travel_countdown - not modelled yet.
+  state.travel.selected_stellar_id = -1;
+  state.travel.travel_hint_state = 0x7fff; // hint latch (0x004b3a3b)
+  state.distress_cue_active = false;
+  state.distress_cue_active_prev = false;
+  p.timed_action_counter = -1;
+
+  Mission_RerollOfferingRolls(state);
+
+  // Impact-effect instance timers back to the inactive sentinel.
+  for (auto &effect : state.impact_effect_instances) {
+    effect.anim_time = -1.0F;
+    effect.delay_timer = 0.0F;
+  }
+  // TODO(decomp(0x004b3350)) skipped: the directional weapon effect instance
+  // pool reset (g_directional_weapon_effect_instances).
+
+  // Reroll the per-class licensed availability rolls.
+  for (auto &roll : state.ship_class_limit_rolls) {
+    roll = static_cast<std::int16_t>(RollRandom(state, 100) + 1);
+  }
+  for (auto &roll : state.ship_class_threshold_rolls) {
+    roll = static_cast<std::int16_t>(RollRandom(state, 100) + 1);
+  }
+}
+
+// Ghidra 0x00467710/0x004677a0 Stellar_FindReachableEmergencyDestination-
+// Stellar{,Recursive}: depth-first flood over visible, discovered neighbour
+// systems for an available, travel-usable, ship-selling (travel_flags & 8)
+// stellar whose reputation threshold the containing system meets. Returns the
+// stellar resource id, or -1 when no neighbour qualifies. The start system's
+// own stellars are never scanned (you always respawn elsewhere).
+std::int16_t
+Stellar_FindReachableEmergencyDestination(GameState &state,
+                                          std::int16_t origin_zero_based) {
+  const auto &systems = state.scenario.systems;
+  std::vector<char> visited(systems.size(), 0);
+  if (origin_zero_based < 0 ||
+      static_cast<std::size_t>(origin_zero_based) >= systems.size()) {
+    return -1;
+  }
+
+  auto neighbour_eligible = [&](std::size_t idx) -> bool {
+    const System &sys = systems[idx];
+    return sys.is_visible && sys.discovered_this_rebuild &&
+           sys.discovery_state > 0;
+  };
+  auto scan_stellars = [&](std::size_t idx) -> std::int16_t {
+    const System &sys = systems[idx];
+    for (std::int16_t nav : sys.nav_defs) {
+      if (nav < 0x80) {
+        continue;
+      }
+      const Stellar *st = state.scenario.Stellar(nav);
+      if (st == nullptr || !st->is_available ||
+          !NovaTargeting_IsStellarUsableForTravel(*st) ||
+          (st->flags & 8) == 0 || st->min_status == 0x7fff) {
+        continue;
+      }
+      const std::int16_t reputation = idx < state.system_reputation.size()
+                                          ? state.system_reputation[idx]
+                                          : 0;
+      if (st->min_status <= reputation || st->min_status == -0x7fff) {
+        return nav;
+      }
+    }
+    return -1;
+  };
+
+  // Recursive flood, matching the original's two passes per system: scan
+  // neighbours for an eligible stellar first, then recurse into them.
+  std::function<std::int16_t(std::size_t)> recurse =
+      [&](std::size_t idx) -> std::int16_t {
+    visited[idx] = 1;
+    const System &sys = systems[idx];
+    for (std::int16_t link : sys.links) {
+      if (link < 0x80) {
+        continue;
+      }
+      const std::size_t next = static_cast<std::size_t>(link - 0x80);
+      if (next >= systems.size() || visited[next] != 0 ||
+          !neighbour_eligible(next)) {
+        continue;
+      }
+      if (const std::int16_t found = scan_stellars(next); found >= 0x80) {
+        return found;
+      }
+    }
+    for (std::int16_t link : sys.links) {
+      if (link < 0x80) {
+        continue;
+      }
+      const std::size_t next = static_cast<std::size_t>(link - 0x80);
+      if (next >= systems.size() || visited[next] != 0 ||
+          !neighbour_eligible(next)) {
+        continue;
+      }
+      if (const std::int16_t found = recurse(next); found >= 0x80) {
+        return found;
+      }
+    }
+    return -1;
+  };
+
+  visited[static_cast<std::size_t>(origin_zero_based)] = 1;
+  return recurse(static_cast<std::size_t>(origin_zero_based));
+}
+
+// Ghidra eject block (Ship_HandlePlayerShipCore 0x004510b9..0x00453910): the
+// destroyed player's eject transform. Spawns the derelict wreck of the old
+// hull, runs the old class's OnRetire expression (ShipClassDef+0x4e8 <- shp
+// payload 0x4cf), then rebuilds the player as either the escape pod (ship id
+// 0x37f, arming the 0x15e-tick respawn timed action) or a carried bay fighter
+// (Flags 0x8000 class at 50..79% stats, no timed action), relaunches at top
+// speed along the current heading and re-seeds loadout/meters.
+void RunPlayerEjectTransform(GameState &state) {
+  PlayerShip &p = state.player;
+
+  // Derelict wreck of the abandoned hull (Ship_AllocateShipSlotInSystem
+  // (current_system, 0)); combat AI re-targets it below.
+  const std::int16_t wreck_slot = static_cast<std::int16_t>(
+      NovaShip_AllocateShipSlot(state, p.current_system_id, 0));
+  if (wreck_slot >= 0) {
+    Ship &wreck = state.ShipAt(static_cast<std::size_t>(wreck_slot));
+    wreck.ai_behavior_code = -1;
+    wreck.pos_x = p.pos_x;
+    wreck.pos_y = p.pos_y;
+    wreck.vel_x = p.vel_x;
+    wreck.vel_y = p.vel_y;
+    wreck.heading = p.heading;
+    wreck.ship_class_id = p.ship_class_id;
+    wreck.death_timer_active = p.death_timer_active;
+    wreck.ionization_points = 0.0F;
+    // TODO(decomp(0x00451130)) skipped: field_0xb0/field_0x60 latch words,
+    // weapon_exit_animation_phase, alternate_sprite_cycle_index,
+    // sprite_animation_cycle_index, ai_turn_bias_dir, sprite_animation_timer
+    // wreck copies and the sprite-set assignment - partly unmodelled.
+    wreck.shield_points = p.shield_points;
+    wreck.armor_points = p.armor_points;
+    wreck.boarded_target_latch = 1;
+  }
+
+  p.death_timer_active = -1.0F;
+  p.primary_target_ship_slot = -1;
+  p.ai_secondary_target_slot = -1;
+  p.active_weapon_bank_slot = -1;
+
+  // Old ship class's OnRetire reaction script.
+  if (const ShipClass *old_cls = state.scenario.Ship(
+          static_cast<std::int16_t>(p.ship_class_id + 0x80))) {
+    (void)Mission_ExecuteReactionScript(state, old_cls->on_retire_expr);
+  }
+
+  if (!Weapon_HasPlayerLaunchBayWeapon(state)) {
+    // Escape pod: full base shields/armor, 350-tick respawn countdown, and
+    // every ship targeting the player drops it.
+    p.ship_class_id = kEscapePodShipClassIndex;
+    if (const ShipClass *pod = state.scenario.Ship(0x37f)) {
+      p.shield_points = static_cast<float>(pod->base_shield);
+      p.armor_points = static_cast<float>(pod->base_armor);
+    } else {
+      NovaLog::Todo("escape pod ship class 0x37f not in scenario tables; "
+                    "pod stats left unchanged");
+    }
+    p.timed_action_counter = kEscapePodTimedActionTicks;
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      Ship &ship = state.ShipAt(slot);
+      if (ship.is_active && ship.primary_target_ship_slot == 0) {
+        ship.primary_target_ship_slot = -1;
+      }
+    }
+  } else {
+    // Bay fighter: 50..79% of the carried class's base stats, no respawn
+    // timed action, and the "You abandon your ship for <class>." overlay.
+    const std::int16_t fighter_index =
+        Weapon_FindLaunchBayShipClassIndex(state);
+    const ShipClass *fighter =
+        fighter_index >= 0 ? state.scenario.Ship(static_cast<std::int16_t>(
+                                 fighter_index + 0x80))
+                           : nullptr;
+    if (fighter == nullptr) {
+      NovaLog::Todo("eject: launch bay present but no Flags-0x8000 fighter "
+                    "class resolved; staying in the current class");
+    } else {
+      p.ship_class_id = fighter_index;
+      p.shield_points = static_cast<float>((RollRandom(state, 30) + 50) *
+                                           fighter->base_shield) *
+                        0.01F;
+      p.armor_points = static_cast<float>((RollRandom(state, 30) + 50) *
+                                          fighter->base_armor) *
+                       0.01F;
+      p.fuel_points = static_cast<float>((RollRandom(state, 30) + 50) *
+                                         fighter->base_fuel) *
+                      0.01F;
+      p.timed_action_counter = -1;
+      std::string text =
+          NovaHud_LoadStringEntry(kStringListFlightText, kStrAbandonShipFor)
+              .value_or("") +
+          " " + fighter->display_name + ".";
+      NovaHud_ShowOverlayMessage(
+          state, text, 0xe0, 0xe0, 0xe0, kOverlayDurationAutoRepair);
+    }
+  }
+
+  // Common tail: NPC retarget pass, launch velocity, loadout rebuild.
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active) {
+      continue;
+    }
+    if (!NovaTargeting_IsShipEligibleForDistressCall(state, ship)) {
+      if (ship.ai_target_ship_slot == 0 &&
+          p.ship_class_id == kEscapePodShipClassIndex) {
+        ship.ai_target_ship_slot = -1;
+      }
+    } else {
+      // Combat AI switches onto the fresh wreck.
+      if (ship.primary_target_ship_slot == 0) {
+        ship.primary_target_ship_slot = wreck_slot;
+      }
+      if (ship.ai_secondary_target_slot == 0) {
+        ship.ai_secondary_target_slot = wreck_slot;
+      }
+    }
+  }
+  // TODO(decomp(0x00453830)) skipped: Sprite_AssignSpriteSet / frame reset
+  // (the clean-room sprite layer re-derives visuals from the class id).
+
+  // Relaunch: velocity reset, then a full-speed polar step along the heading
+  // (Math_AddPolarVelocity 0x0043b4a0, unclamped).
+  p.vel_x = 0.0F;
+  p.vel_y = 0.0F;
+  state.stat_cache_valid = false;
+  const PlayerEffectiveStats launch_eff =
+      Outfit_ComputePlayerEffectiveStats(state);
+  state.cached_stats = launch_eff;
+  state.stat_cache_valid = true;
+  p.vel_x += std::sin(p.heading) * (launch_eff.speed_raw / 100.0F);
+  p.vel_y -= std::cos(p.heading) * (launch_eff.speed_raw / 100.0F);
+
+  // Loadout rebuild: non-persistent outfits are lost, weapon banks reseeded
+  // from the new class's stock, and the bank/outfit pools reconciled.
+  ClearNonPersistentOutfits(state);
+  ZeroPlayerWeaponBanks(state);
+  NovaWeapon_SeedBanksFromShipStock(state, p.ship_class_id);
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+  if (const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(p.ship_class_id + 0x80))) {
+    for (std::size_t i = 0; i < cls->default_outfit_ids.size(); ++i) {
+      const std::int16_t id = cls->default_outfit_ids[i];
+      if (id >= 0x80 && cls->default_outfit_counts[i] > 0 &&
+          static_cast<std::size_t>(id - 0x80) <
+              state.inventory.outfit_owned_count.size()) {
+        state.inventory.outfit_owned_count[id - 0x80] =
+            static_cast<std::int16_t>(
+                state.inventory.outfit_owned_count[id - 0x80] +
+                cls->default_outfit_counts[i]);
+      }
+    }
+  }
+
+  // Launch cue: NovaAudio_QueueCenteredSound(DAT_00591a80, 0x32, ...).
+  // TODO(decomp(0x00453810)) skipped: the DAT_00591a80 sound handle is not
+  // mapped to the port's transition/impact tables yet.
+  state.warp_up_sound_pending = false;
+  state.warp_out_sound_pending = false;
+  p.ai_station_hold_timer = 0.0F;
+  p.death_timer_active = -1.0F;
+  // The original's timed-action dispatch has already run when the eject
+  // transform arms the countdown; suppress the port's timed-action tick for
+  // this frame (consumed by the spaceflight loop).
+  state.timed_action_suppress_this_frame = true;
+}
+
+} // namespace
+
 // Ghidra PlayerTick_StatusAndOutfitEvents: internal label of
 // Ship_HandlePlayerShipCore (0x0044aa70), block 0x0044b240..0x0044b7c4 with the
 // carried-bomb tails at 0x0044da75/0x0044daa0. Runs after the hyperspace-exit
 // gate and before the manual-flight block, ahead of every flight-input branch.
 bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
-                                          float elapsed_ticks) {
+                                          float elapsed_ticks,
+                                          bool eject_command) {
   PlayerShip &p = state.player;
 
   // --- Player-death bookkeeping (Ship_HandlePlayerShipCore prologue) ------
@@ -2195,6 +2700,23 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
   // its death-timer presentation finishes; that pass is not reconstructed for
   // the player yet, so the player-side slice is bridged here.
   if (p.is_active && p.death_timer_active > kDeathTimerExpireFloor) {
+    // PlayerTick eject block (0x004510b9..0x00453910): while the death
+    // presentation runs, the eject command (0x38/0x6f arm pair + binding
+    // slot 0x11) with an owned auto-eject outfit transforms the player into
+    // the escape pod or a carried bay fighter. Allowed once the presentation
+    // is at least half spent (or within 30 ticks of ending).
+    if (eject_command && Outfit_HasAutoEjectOutfit(state) &&
+        Outfit_HasEscapePodOrLaunchBay(state)) {
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(p.ship_class_id + 0x80));
+      const float death_delay =
+          cls != nullptr ? static_cast<float>(cls->death_delay_frames) : 0.0F;
+      if (p.death_timer_active <= death_delay * kEjectDeathDelayScale ||
+          p.death_timer_active <= kEjectArmHoldTicks) {
+        RunPlayerEjectTransform(state);
+        return true;
+      }
+    }
     // Death presentation running: tick the timer down; the original skips the
     // whole status/outfit block for the dying ship (inactive-branch return).
     p.death_timer_active -= elapsed_ticks;
@@ -2310,6 +2832,165 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
     }
   }
   return false;
+}
+
+// Ghidra PlayerTick_TimedActionTransition (internal label of
+// Ship_HandlePlayerShipCore 0x0044aa70; block 0x0044d490..0x0044da70), reached
+// from the status/outfit dispatch while timed_action_counter > 0. The original
+// returns from the player core after this block; the caller must skip the
+// remaining player command passes.
+bool NovaPlayer_TickTimedActionTransition(GameState &state,
+                                          float elapsed_ticks) {
+  PlayerShip &p = state.player;
+  if (p.timed_action_counter <= 0) {
+    return false;
+  }
+
+  // Blocking movement: full effective thrust along the current heading,
+  // per-axis polar-clamped at the effective top speed (Math_AddPolarVelocity-
+  // WithClamp 0x0043b4e0), then the position integration.
+  if (!state.stat_cache_valid) {
+    state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+    state.stat_cache_valid = true;
+  }
+  const PlayerEffectiveStats &eff = state.cached_stats;
+  const float max_speed = eff.speed_raw / 100.0F;
+  const float thrust_step = eff.thrust_raw / 10000.0F * 2.0F * elapsed_ticks;
+  NovaPlayer_AddPolarVelocityClamped(
+      p.heading, thrust_step, max_speed, p.vel_x, p.vel_y);
+  p.pos_x += p.vel_x * elapsed_ticks;
+  p.pos_y += p.vel_y * elapsed_ticks;
+
+  p.timed_action_counter =
+      static_cast<std::int16_t>(p.timed_action_counter - 1);
+  if (p.timed_action_counter != 0) {
+    return true;
+  }
+
+  // --- Countdown reached zero: the death/escape-pod respawn transition ----
+  // TODO(decomp(0x0044d570)) skipped: the blocking presentation passes -
+  // Frame_CommitFrameAndLatchTransitionWait / Frame_FinishBlockingTransition-
+  // Frame, the black DrawContext wipes, NovaEffects ambient-star clear/queue,
+  // SWParticles_ResetEntries, SpriteWorld_ReleaseAllSpriteFrames,
+  // NovaPlatform_EnsureCursorVisible, and the dësc 13999 death dialog
+  // (Ui_LoadSelectionDialogResource + Ui_RunTravelSelectionDialog; dësc 13999
+  // is the Bible "message shown after the player uses an escape pod").
+  NovaLog::Info("escape-pod respawn: blocking transition (dësc 13999 dialog "
+                "not reconstructed)");
+
+  // Abort every active mission (Mission_ClearMisnSlotAssignments(slot, 1)).
+  const std::uint32_t now_ms = SDL_GetTicks();
+  for (std::size_t slot = 0; slot < state.active_mission_runtime_flags.size();
+       ++slot) {
+    if (state.active_mission_runtime_flags[slot].is_active) {
+      Mission_ClearMisnSlotAssignments(state,
+                                       static_cast<std::int16_t>(slot),
+                                       /*emit_completion_payload=*/true,
+                                       now_ms);
+      state.active_mission_runtime_flags[slot].is_active = false;
+    }
+  }
+
+  // Ship_ResetPlayerShipState(0) + the fresh (class 0) ship's OnPurchase
+  // reaction script (ShipClassDef+0x1eb <- shp payload 0x26a).
+  RespawnResetPlayerShipState(state);
+  if (const ShipClass *cls = state.scenario.Ship(0x80)) {
+    (void)Mission_ExecuteReactionScript(state, cls->on_purchase_expr);
+  }
+  // Ship_DeactivateVacantShipsAndTally(1, 1): the clean-room models the
+  // second flag through keep_player_engaged.
+  NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/true);
+
+  // Relocate to the nearest reachable emergency destination (a ship-selling,
+  // reputation-acceptable stellar in a visible, discovered neighbour system).
+  const std::int16_t dest_stellar =
+      Stellar_FindReachableEmergencyDestination(state, p.current_system_id);
+  if (dest_stellar < 0x80) {
+    p.current_system_id = 0;
+  } else if (const Stellar *st = state.scenario.Stellar(dest_stellar);
+             st != nullptr && st->system_id >= 0) {
+    p.current_system_id = st->system_id;
+  } else {
+    p.current_system_id = 0;
+  }
+  if (const System *sys = state.scenario.System(
+          static_cast<std::int16_t>(p.current_system_id + 0x80))) {
+    // Starmap pan origin re-centres on the new system.
+    state.starmap_pan_x = static_cast<float>(sys->pos_x);
+    state.starmap_pan_y = static_cast<float>(sys->pos_y);
+  }
+
+  // Weapon banks reloaded from the fresh class's stock (the reset already
+  // reseeded them; the original re-runs the sweep here).
+  ZeroPlayerWeaponBanks(state);
+  NovaWeapon_SeedBanksFromShipStock(state, p.ship_class_id);
+
+  // System_RebuildSystemVisibilityMap(cur, 0, 1).
+  NovaSystem_RebuildDiscoveryState(state, p.current_system_id, 0, 1);
+  // TODO(decomp(0x0044d814)) skipped: NovaEffects_QueuedAmbientStarParticles.
+
+  // Meters refill. Original quirk (0x0044d83f, verified: both call sites
+  // target 0x00463550): the ARMOR refill uses Ship_ComputeShipMaxShieldPoints,
+  // so the player returns with armor equal to the max SHIELD value. Preserve.
+  state.stat_cache_valid = false;
+  const PlayerEffectiveStats refill = Outfit_ComputePlayerEffectiveStats(state);
+  p.fuel_points = refill.fuel_capacity;
+  p.shield_points = refill.max_shield_points;
+  p.armor_points = refill.max_shield_points;
+  state.cached_stats = refill;
+  state.stat_cache_valid = true;
+
+  // Re-populate the system's NPC/mission ships.
+  NovaSystem_PopulateInitialNpcShips(state, p.current_system_id);
+  NovaSystem_RestoreMissionFleets(
+      state, p.current_system_id, /*copy_player_heading=*/false, now_ms);
+
+  // The world catches up over rand(30) + 15 elapsed game-days.
+  const std::int16_t elapsed_days = static_cast<std::int16_t>(
+      RollRandom(state, kRespawnDailyUpdateRange) + kRespawnDailyUpdateBase);
+  for (std::int16_t day = 0; day < elapsed_days; ++day) {
+    Mission_TickDailyWorldUpdate(state);
+  }
+
+  // System_UpdateSystemAndStellarDisplayState (0x00432470) display-state pass.
+  NovaTargeting_UpdateStellarAvailability(state);
+
+  // Fresh registration number: class display name + four rand(9)+1 digits
+  // (never 0).
+  if (const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(p.ship_class_id + 0x80))) {
+    std::string registration = cls->display_name + " ";
+    for (int digit = 0; digit < 4; ++digit) {
+      registration += std::to_string(RollRandom(state, 9) + 1);
+    }
+    p.ship_name = registration;
+  }
+  // TODO(decomp(0x0044d91e)) skipped: the viewport/radar redraw and the
+  // per-panel dirty flags (the clean-room re-renders every frame).
+
+  // Rebuild the per-system reputations from each system government's bribe
+  // percentage (g_system_reputation over all 0x800 systems).
+  const std::size_t system_count =
+      std::min(state.scenario.systems.size(), state.system_reputation.size());
+  for (std::size_t i = 0; i < system_count; ++i) {
+    const std::int16_t govt = state.scenario.systems[i].government_id;
+    const Government *gov_def =
+        govt >= 0
+            ? state.scenario.Government(static_cast<std::int16_t>(govt + 0x80))
+            : nullptr;
+    state.system_reputation[i] =
+        gov_def != nullptr ? gov_def->bribe_cost_percent : 0;
+  }
+
+  // Conditional post-respawn auto-save (DAT_00596d2f: save at the first nav
+  // stellar of the new system, else slot 0). TODO(decomp(0x0044da30))
+  // skipped: the autosave preference flag and PilotFileSaveGame wiring.
+  NovaLog::Info("escape-pod respawn complete: system {}, class {}, ' {}'",
+                p.current_system_id,
+                p.ship_class_id,
+                p.ship_name);
+  // Frame_FinishBlockingTransitionFrame: presentation pass, skipped above.
+  return true;
 }
 
 void NovaPlayer_UpdateFromInput(GameState &state,

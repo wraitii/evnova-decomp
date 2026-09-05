@@ -1155,6 +1155,12 @@ struct GameState {
   // general "player did a command this frame" flag (see its Ghidra
   // pre-comment), not a menu-return latch.
   bool return_to_menu_pending = false;
+  // One-frame latch set by RunPlayerEjectTransform (Ghidra eject block
+  // 0x004510b9): the original's timed-action dispatch has already passed when
+  // the eject transform arms the escape-pod countdown, so the pod does not
+  // move until the next frame. The spaceflight loop consumes this to skip the
+  // NovaPlayer_TickTimedActionTransition call on the eject frame only.
+  bool timed_action_suppress_this_frame = false;
 
   std::array<BeamHit, 0x40> beam_hit_queue{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};
