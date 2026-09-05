@@ -35,11 +35,11 @@ enum class OutfitEffect : std::int16_t {
   kCargoSpace = 2, // tons of cargo space to add (installed permanently)
   kAmmo = 3,       // id of the associated weapon/ammo resource
   kShield = 4,     // shield points to add to max capacity
-  kUnknown5 = 5,
-  kArmor = 6,       // armor points to add to max capacity
-  kAccelerator = 7, // accel to add (see sh\x8an)
-  kSpeed = 8,       // speed to add (see sh\x8an)
-  kTurn = 9,        // turn change (100 = 30 deg/sec)
+  kShieldRecharge = 5, // faster shield recharge (1000 = one more point/frame)
+  kArmor = 6,          // armor points to add to max capacity
+  kAccelerator = 7,    // accel to add (see sh\x8an)
+  kSpeed = 8,          // speed to add (see sh\x8an)
+  kTurn = 9,           // turn change (100 = 30 deg/sec)
   kUnused10 = 10,
   kEscapePod = 11,       // ignored
   kFuelCapacity = 12,    // extra fuel (100 = 1 jump)
@@ -48,7 +48,8 @@ enum class OutfitEffect : std::int16_t {
   kAfterburner = 15,     // fuel use (units/sec)
   kMap = 16,             // starmap exploration range
   kCloaking = 17,        // cloaking device behavior flags
-  kShieldRecharge = 18,  // verified by Ship_ComputeShipShieldRechargeRate
+  kFuelScoop = 18,       // frames per 1 unit of fuel; negative = fuel suck (see
+                         // Ship_ComputeShipFuelRechargeRate 0x00463b30)
   kAutoRefuel = 19,      // ignored
   kAutoEject = 20,       // ignored (needs escape pod)
   kCleanRecord = 21,     // govt id to clear legal record with

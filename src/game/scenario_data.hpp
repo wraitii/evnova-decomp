@@ -345,6 +345,11 @@ struct ShipClass {
   // used to seed each NPC's skill_variance_scale; it also gates some AI
   // cadence decisions. Valid stock values are 1..50%.
   std::int16_t skill_variance_percent = 0;
+  // Ghidra ShipClassDef +0x34 (shïp payload +0x5e, written by loader
+  // 0x004bd3c0). Bible FuelRegen: "frames per 1 unit of fuel generated",
+  // consumed by Ship_ComputeShipFuelRechargeRate 0x00463b30; the player only
+  // benefits when class capability flag 0x0008 is set.
+  std::int16_t fuel_regen = 0;
   // Ghidra ShipClassDef +0x9FA (ionization capacity). NPC effective-stat
   // helpers divide ShipState.ionization_points by this value; zero means
   // no ionization bar. The scenario loader reads the packed resource field at

@@ -308,6 +308,14 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   // (kShieldRecharge) and opcode 29 (kArmorRecharge) add to these.
   s.shield_recharge = cls->shield_recharge;
   s.armor_recharge = cls->armor_recharge;
+  // Class-inherent fuel regeneration (Bible FuelRegen, payload +0x5e ->
+  // ShipClassDef +0x34): frames per 1 unit of fuel, so the per-frame rate is
+  // 1 / FuelRegen (DAT_00575778 = 1.0). The player only benefits when the
+  // class capability flag 0x0008 is set (0x00463b30 gates the base arm on
+  // capability_flags & 8 for ship_instance_id 0; NPC ships always qualify).
+  if (cls->fuel_regen > 0 && (cls->capability_flags & 0x0008U) != 0U) {
+    s.fuel_regen_rate += 1.0F / static_cast<float>(cls->fuel_regen);
+  }
 
   // Outfit opcode bonuses, weighted by owned count. Mirrors the exact
   // aggregate shapes: 4 effect slots per outfit, only outfits with an owned
@@ -345,6 +353,16 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
         if (e.val != 0) {
           s.shield_recharge +=
               static_cast<float>(owned * e.val) * kShieldRechargeScale;
+        }
+        break;
+      case OutfitEffect::kFuelScoop: // opcode 18 (Ship_ComputeShipFuelRecharge
+                                     // Rate 0x00463b30 outfit arm): each owned
+                                     // scoop adds owned * (1 / ModVal) units
+                                     // per frame; a negative ModVal is fuel
+                                     // suck.
+        if (e.val != 0) {
+          s.fuel_regen_rate +=
+              static_cast<float>(owned) / static_cast<float>(e.val);
         }
         break;
       case OutfitEffect::kArmorRecharge: // opcode 29

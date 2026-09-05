@@ -500,6 +500,10 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
     }
   }
   s.skill_variance_percent = ReadBeI16(bytes, 0x60);
+  // Bible FuelRegen (payload +0x5e -> ShipClassDef +0x34): frames per 1 unit
+  // of fuel regenerated; verified against loader 0x004bd3c0 (payload 0x5e
+  // feeds the short consumed by Ship_ComputeShipFuelRechargeRate 0x00463b30).
+  s.fuel_regen = ReadBeI16(bytes, 0x5e);
   // Ghidra NovaData_LoadScenarioResourceTables (0x004bd3c0) copies the
   // ionization capacity from ShipClassDef.ionization_capacity at payload
   // +0x36c. It is distinct from the nearby default-outfit count block.

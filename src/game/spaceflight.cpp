@@ -201,17 +201,17 @@ void Stub_HandleShots(GameState &state, float elapsed_ticks) {
   NovaWeapon_TickShots(state, elapsed_ticks * kOriginalTickMs, elapsed_ticks);
 }
 
-// Ship_HandleShip (0x00433050): ionization decay uses measured frame time in
-// milliseconds, unlike movement's normalized tick unit.
+// Ship_HandleShip (0x00433050) ionization decay tail + Ship_ComputeIonization-
+// DecayRate (0x0046c080): both NPC and player paths multiply the rate by
+// g_avg_frame_tick_scale (30 Hz tick units), NOT milliseconds.
 void TickIonizationDecay(GameState &state, Ship &ship, float elapsed_ticks) {
   if (ship.ionization_points <= 0.0F) {
     ship.ionization_points = 0.0F;
     return;
   }
-  const float frame_time_ms = elapsed_ticks * (1000.0F / 30.0F);
   const float decay_rate = NovaOutfit_ComputeIonizationDecayRate(state, ship);
   ship.ionization_points =
-      std::max(0.0F, ship.ionization_points - decay_rate * frame_time_ms);
+      std::max(0.0F, ship.ionization_points - decay_rate * elapsed_ticks);
 }
 
 // Ghidra scope 4/5 of Frame_TickSystems: per-ship simulation. For the NPC
@@ -1139,10 +1139,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // The boarding/plunder modal blocked the loop; freeze gameplay time.
       resync_frame_clock();
     }
-    // In-flight shield regeneration (class base + opcode-5 outfit bonuses),
-    // scaled by the real frame time. The original's player-update path ticks
-    // shields each frame; armor does not regenerate in flight.
-    NovaPlayer_TickShieldRecharge(state, frame_time_ms);
+    // In-flight regeneration (PlayerTick_ManualFlightAndRegeneration tail,
+    // 0x0044c980 block of Ship_HandlePlayerShipCore): shield/armor recovery,
+    // ionization decay + the ionized-velocity damping, then the fuel-scoop
+    // recharge, all on the original's per-frame cadence.
+    NovaPlayer_TickRegeneration(state, frame_time_ms);
     // Expire any transient HUD overlay message once its wall-clock deadline
     // passes (the draw path is const over state).
     NovaHud_TickOverlay(state);
@@ -3025,6 +3026,24 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   effective_class.accel = eff.thrust_raw;
   effective_class.speed = eff.speed_raw;
   effective_class.turn_rate = eff.turn_raw;
+  // Player tails of Ship_ComputeShipEffectiveThrust (0x004640a0) and
+  // Ship_ComputeShipMaxTurnRateDeg (0x00463e70): while ionized, thrust is
+  // always damped by (1 - intensity) and the turn rate is damped the same
+  // way while the ship is not thrusting (TODO(decomp): the original gates
+  // the turn damping on ShipState +0x28/+0x5c whose player-side meaning is
+  // not fully pinned down; "not thrusting" follows the helper's plate note).
+  if (p.ionization_points > 0.0F) {
+    const ShipClass *cls =
+        state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+    if (cls != nullptr) {
+      const float intensity =
+          std::min(0.7F, NovaShip_IonizationIntensity(p, *cls));
+      effective_class.accel *= (1.0F - intensity);
+      if (!input.thrust) {
+        effective_class.turn_rate *= (1.0F - intensity);
+      }
+    }
+  }
   if (afterburner_active && !gravity_present) {
     // DAT_00575610 = 1.8: the afterburner control branch raises the speed cap
     // while no stellar gravity pull is active.
@@ -3035,8 +3054,6 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   if (afterburner_active) {
     p.fuel_points = std::max(0.0F, p.fuel_points - fuel_burn * elapsed_ticks);
   }
-
-  TickIonizationDecay(state, p, elapsed_ticks);
 
   // ShipState +0xc8d4 is an integer engine/glow control, not a free-running
   // alpha ramp. Normal thrust approaches 24; afterburning extends it to 32;
@@ -3062,22 +3079,78 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   Misn_TickActiveMissionTimers(state);
 }
 
-void NovaPlayer_TickShieldRecharge(GameState &state, float frame_time_ms) {
+// Ghidra PlayerTick_ManualFlightAndRegeneration regeneration tail (internal
+// block of Ship_HandlePlayerShipCore 0x0044aa70, ~0x0044cb90..0x0044cd2d):
+// per-frame shield/armor recovery, ionization decay with the ionized-velocity
+// damping, and the fuel-scoop recharge, in the original's block order. All
+// rates are per 30 Hz frame; frame_time_ms is converted to the original's
+// g_avg_frame_tick_scale (ms * 0.03) unit.
+void NovaPlayer_TickRegeneration(GameState &state, float frame_time_ms) {
   PlayerShip &p = state.player;
-  // Resolve the effective stats (cache when possible) for the current
-  // recharge rate and max shield.
   if (!state.stat_cache_valid) {
     state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
     state.stat_cache_valid = true;
   }
   const PlayerEffectiveStats &eff = state.cached_stats;
-  // The recharge rate is in shield points per 30 Hz reference frame. Convert
-  // measured wall-clock time to that same normalized frame unit.
-  const float rate = eff.shield_recharge * (frame_time_ms / (1000.0F / 30.0F));
-  if (rate <= 0.0F) {
-    return;
+  const float tick_scale = frame_time_ms / (1000.0F / 30.0F);
+  const bool destroyed = NovaAiShip_IsDestroyed(p);
+  const bool disabled = NovaAiShip_IsDisabled(state, p);
+
+  // Shields recover whenever the hull is intact and not disabled (no
+  // recently-hit gate, and the original does not clamp to max within the
+  // frame -- the < max gate applies to the next frame's addition).
+  if (!destroyed && !disabled && p.shield_points < eff.max_shield_points) {
+    p.shield_points += std::max(0.0F, eff.shield_recharge) * tick_scale;
   }
-  p.shield_points = std::min(eff.max_shield_points, p.shield_points + rate);
+  // Armor recovery additionally holds off until the post-hit suppression
+  // window (g_player_recently_hit_timer, armed +300 on a hit) has decayed
+  // below zero. The rate is the class ArmorRech base (0 on stock ships) plus
+  // ModType-29 outfit bonuses (Bible: 1000 = one more point per frame); the
+  // cheat-mode latch scales it by k_armor_regen_player_scale_f32 = 50
+  // (Ship_ComputeShipArmorRegenRate 0x004638e0 player tail).
+  if (!destroyed && !disabled && p.armor_points < eff.max_armor_points &&
+      state.recently_hit_timer < 0.0F) {
+    float armor_rate = std::max(0.0F, eff.armor_recharge);
+    if (state.cheat_mode_active) {
+      armor_rate *= 50.0F;
+    }
+    p.armor_points += armor_rate * tick_scale;
+  }
+
+  // Ionization decay, then the ionized-velocity damping: each velocity axis
+  // is pulled toward (1 - intensity) * effective max speed at
+  // DAT_00575670 = 0.025 per frame (a soft ramp, distinct from the hard
+  // per-axis clamp in the movement block).
+  if (p.ionization_points > 0.0F) {
+    TickIonizationDecay(state, p, tick_scale);
+    const ShipClass *cls =
+        state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+    float intensity =
+        cls != nullptr ? NovaShip_IonizationIntensity(p, *cls) : 0.0F;
+    intensity = std::min(0.7F, intensity); // _DAT_00575668
+    const float ionized_cap = (1.0F - intensity) * (eff.speed_raw / 100.0F);
+    const float damp_step = 0.025F * tick_scale;
+    if (p.vel_x > ionized_cap) {
+      p.vel_x = std::max(ionized_cap, p.vel_x - damp_step);
+    } else if (p.vel_x < -ionized_cap) {
+      p.vel_x = std::min(-ionized_cap, p.vel_x + damp_step);
+    }
+    if (p.vel_y > ionized_cap) {
+      p.vel_y = std::max(ionized_cap, p.vel_y - damp_step);
+    } else if (p.vel_y < -ionized_cap) {
+      p.vel_y = std::min(-ionized_cap, p.vel_y + damp_step);
+    }
+  } else {
+    p.ionization_points = 0.0F;
+  }
+
+  // Fuel-scoop recharge (Ship_ComputeShipFuelRechargeRate 0x00463b30 via its
+  // HandlePlayerShipCore call site): rate cached in the stats snapshot; a
+  // negative rate is the "fuel sucking" mode. Then the original clamps fuel
+  // to [0, fuel capacity].
+  p.fuel_points += eff.fuel_regen_rate * tick_scale;
+  p.fuel_points =
+      std::clamp(p.fuel_points, 0.0F, static_cast<float>(eff.fuel_capacity));
 }
 
 // Ghidra 0x00489210 Ship_RunSpaceflightMode.

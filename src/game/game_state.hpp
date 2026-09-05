@@ -685,6 +685,8 @@ struct PlayerEffectiveStats {
   float turn_raw = 0.0F;          // opcode 9 raw turn (deg/frame after *0.1)
   float shield_recharge = 0.0F;   // 0x00463b30 opcode 5
   float armor_recharge = 0.0F;    // opcode 29 armor repair rate
+  float fuel_regen_rate = 0.0F;   // 0x00463b30 fuel-scoop units per frame
+                                  // (class FuelRegen + opcode 18 scoops)
   int max_guns = 0;               // class MaxGun + opcode 45
   int max_turrets = 0;            // class MaxTur + opcode 46
 };
@@ -1136,6 +1138,15 @@ struct GameState {
   // tick per frame while at or above the cutoff; suppresses armor
   // regeneration and the disabled auto-repair pass until below the cutoff.
   float recently_hit_timer = 0.0F;
+  // Ghidra DAT_00596d3a: cheat-mode latch. When set, the cheat-command suite
+  // in Ship_HandlePlayerShipCore becomes live (free refits/rearm, target
+  // destruction, etc., TODO(decomp): toggle commands not ported) and a few
+  // helpers change behavior: Outfit_HasPlayerOwnedOutfitType0x0F_Cached
+  // (0x00464760) reports the afterburner as owned, and
+  // Ship_ComputeShipArmorRegenRate (0x004638e0) scales the player's armor
+  // regen by k_armor_regen_player_scale_f32 (0x00575770) = 50. Stays false in
+  // normal play until the cheat command block is reconstructed.
+  bool cheat_mode_active = false;
   // Ghidra g_player_disable_message_shown (0x007354aa): set when the disable
   // arm of Shot_ResolveShipHitFromWeapon shows the STR# 0x7d2 0x11f "ship
   // disabled" overlay, so the destruction arm of the same hit path suppresses

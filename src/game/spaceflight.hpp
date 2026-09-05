@@ -92,11 +92,12 @@ extern bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
 // the recorded shield-recharge rate (class base + outfit opcode-18 bonuses,
 // scaled by frame time), capped so it never exceeds max shield points.
 // Mirrors the shield-regen portion of the original's per-frame player update.
-// Armor does NOT regenerate in flight (the original only repairs armor while
-// landed/at the shipyard or via the disabled auto-repair system), so this only
-// grows shield_points.
-extern void NovaPlayer_TickShieldRecharge(GameState &state,
-                                          float frame_time_ms);
+// Ghidra PlayerTick_ManualFlightAndRegeneration regeneration tail (internal
+// block of Ship_HandlePlayerShipCore 0x0044aa70, ~0x0044cb90..0x0044cd2d):
+// shield/armor recovery (held off while destroyed/disabled; armor also waits
+// out the post-hit suppression window), ionization decay with the ionized-
+// velocity damping, and the fuel-scoop recharge, in the original order.
+extern void NovaPlayer_TickRegeneration(GameState &state, float frame_time_ms);
 
 // Ghidra PlayerTick_TimedActionTransition (internal label of
 // Ship_HandlePlayerShipCore 0x0044aa70; block 0x0044d490..0x0044da70). While
