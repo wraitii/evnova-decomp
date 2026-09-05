@@ -24,6 +24,16 @@ Ship_UpdateShipAI
   -> Ship_HandleShip (turn, accelerate/coast, integrate position, visuals)
 ```
 
+Every full tick, Frame_TickSystems' scope-6 leader-flag pass first snapshots
+every `ai_target_ship_slot` (the table `Ship_ReacquireAiTargetLeader`
+searches), clears the per-ship flag bytes +0xC0/+0xC1/+0xC2, then for each
+active behavior>4 ship in the player's system validates/reacquires the AI
+target leader and marks the target (+0xC0, slot 0 = player), the formation
+leader (+0xC1), and the resolved AI target (+0xC2). +0xC2 is what gates the
+per-frame formation passes: `Ship_UpdateShipAI` calls
+`Ship_UpdateEscortFormations(ship, 0)` for flagged NPC leaders, and the
+player core does the same at 0x00451003.
+
 The reconstruction ticks active non-player ships in the current system by the
 same frame cadence.  The core movement, wander/travel, combat pursuit, NPC
 weapons, vacant-ship cleanup, and an initial NPC system-transfer slice are
@@ -50,7 +60,7 @@ exclusive mapping.
 | `0x04` | Attack engagement | `0x05`/`0x06` | Cloak-aware eligibility can brake/wait, clear the target, or fall back to travel. |
 | `0x05` | Pursue / follow a target | `0x0b`, `0x08` | Approaches target range, then follows/holds. |
 | `0x06` | Park / settle | `0x01` | Brakes to a stop. |
-| `0x07` | Escort / follow primary | `0x08`/`0x09` | Drops to idle if target becomes invalid; detailed formation offsets are incomplete. |
+| `0x07` | Escort / follow primary | `0x08`/`0x09` | Drops to idle if target becomes invalid; wedge offsets come from the per-frame formation pass. |
 | `0x08` | Arrival slowdown | `0x0a` | Applies the stepped high-speed slowdown command to a newly arriving NPC; the ordinary ship handler later resets it to state 0. |
 | `0x09` | Refuel / transfer service | `0x0b`, `0x01` | Approaches the primary target, stops, then transfers fuel while the target has capacity. |
 | `0x0a` | Assist response | `0x09`, `0x01`, `0x0c` | Long-range pursuit, approach, or velocity-match engagement. |
@@ -98,7 +108,7 @@ formation, bay-launch, or script side effect is still absent.
 | `0x08` | Escort follow | Heads at lead; thrust gate `turn_rate + 1°`. Formation/launch handoff is partial. |
 | `0x09` | Hold at distance | Steers at target while distant, otherwise matches velocity bearing in a 15° window. |
 | `0x0a` | Arrival slowdown command | Physics override: desired speed starts at -50.0 and advances by 1.165 per tick. Its magnitude is the heading-aligned arrival speed, producing the visible fast entry and gradual slowdown rather than reverse acceleration. |
-| `0x0b` | Formation hold | Uses formation offset; desired speed 0 far away and 0.5x max nearby. Formation positioning is partial. |
+| `0x0b` | Formation hold | Uses formation offset; desired speed 0 far away and 0.5x max nearby. Smooth offset creep + leader glow copy wired. |
 | `0x0c` | Velocity match | Matches target velocity/heading within 0.525 px/tick, otherwise brakes on relative velocity. |
 | `0x0d` | Timed formation hold | Copies leader heading/offset and can release after leader hold timer >30. |
 | `0x0e` | Combat evade/brake | Mode-1-style brake aimed at target; distinct from state `0x0e`. |
@@ -140,6 +150,34 @@ field definitions and uncertainties.
 | `+0xc8f8` | `ai_turn_bias_dir` | `-1/0/+1` visual banking direction produced by turning. |
 | `+0xc906` | `formation_leader_ship_slot` | Formation leader; mode `0x12` idles when empty. |
 
+## Escort formations and system adoption
+
+- `Ship_UpdateEscortFormations` (0x00413990) assigns every ship whose
+  `resolved_ai_target_ship_slot` equals the leader's slot a wedge slot:
+  spacing radius = ceil(max participant escort-sprite span * 0.7) clamped to
+  24..60 px, offsets from `Ship_SetEscortLaunchOffsetVelocity` (0x00413b60),
+  which has two slot tables (2..0x15) selected by the parity of the follower
+  count. The offset lands in ShipState field_0x28/0x2c (now named
+  `formation_offset_x/y`), in the leader's heading frame, trailing behind.
+- `Ship_MoveShipTowardFormationOffset` (0x00414390) moves the follower onto
+  that offset: snap (direct position write; used at system entry and
+  encounter-fleet spawning, skipping state-0x15 arrivals) or smooth per-axis
+  creep at effective thrust * 10 px/tick inside an 8 px deadzone, suppressed
+  while the station-hold timer runs, damped by ionization
+  (1 - min(intensity, 0.8) above intensity 2.5). The combat/hold control
+  modes 5/6/7/0xb/0xc/0xd call the smooth variant alongside the leader glow
+  copy.
+- The escort-adoption slice of `System_RebuildInitialNpcAndMissionPopulation`
+  (0x0041af90) transfers ships attached to the player (`ai_target_ship_slot
+  == 0`) into the player's system at every system entry: disabled ships are
+  deactivated (behavior-6 cargo escorts hand cargo back first), the rest run
+  `Ship_ResetShipToDefaultCombatState` (0x0041e240; the flag arm refills
+  shields/armor/weapon stock), then the wedge snaps around the player. When
+  the player's station-hold timer is nonzero -- jump arrival windows it at
+  -999 (0x0044fa83 / 0x0044faa2) -- each attached ship is additionally pushed
+  ~892 px behind its own heading and flung forward at 50 px/tick: escorts
+  stream in behind the jumping player.
+
 ## Decoded constants
 
 Names belong in code/Ghidra when a constant has a single stable use; this table
@@ -150,6 +188,8 @@ labels.
 | Value | Uses |
 |---:|---|
 | `0.35 px/tick` | Arrival/stopped threshold; final brake-to-idle threshold. |
+| `0.7`, `24..60 px`, `8 px` | Formation radius scale/clamp and smooth-creep deadzone (0x5751a8 / clamps / 0x5751b4). |
+| `45.0 - 1.165*k` summed, `50 px/tick` | Escort scatter distance behind the player (~892 px) and forward launch velocity at system adoption (0x57524c/0x575250/0x57522c). |
 | `0.94`, `0.95`, `0.98` | Respectively aligned-slow brake, near-stop/hold damping, and stellar-arrival damping. |
 | `(9 - min(turn_rate, 8)) * 8 + 32 px` | Per-axis state-`0x01` stellar arrival range. |
 | `500 px`, `0.25x max speed` | Mode-`0x02` near-stellar gate and arrival cruise speed. |

@@ -32,6 +32,7 @@ add_library(evnova_runtime
     game/collision.cpp
     game/docked_dialog.cpp
     game/escort_commands.cpp
+    game/escort_formation.cpp
     game/negotiation_dialog.cpp
     game/ship_comm_dialog.cpp
     game/new_pilot_flow.cpp

@@ -8,6 +8,7 @@
 #include "collision.hpp"
 #include "docked_dialog.hpp"
 #include "escort_commands.hpp"
+#include "escort_formation.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -141,6 +142,10 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
   // now_ms backs the AI mode/formation timers and must be monotonic across
   // frames; the original reads its global millisecond tick source here.
   const std::uint32_t now_ms = SDL_GetTicks();
+  // Frame_TickSystems (0x004186b0) scope-6 leader-flag pass: snapshot AI
+  // targets, reacquire dead leaders, and refresh the +0xC0/+0xC1/+0xC2
+  // leader bytes that gate the per-frame escort formation updates.
+  NovaEscort_TickLeaderFlags(state);
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
     if (!ship.is_active || ship.current_system_id != current_system) {
@@ -688,6 +693,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (!player_status_consumed && !state.travel.engaging) {
       NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
     }
+    // Ship_HandlePlayerShipCore (0x00451003): with escorts resolved on the
+    // player, the player core refreshes their wedge offsets every frame
+    // (smooth mode). The +0xC2 flag comes from NovaEscort_TickLeaderFlags in
+    // the scope-6 pass. Gated off while the jump state machine owns the ship,
+    // matching the original's engage path bypassing this command block.
+    if (!state.travel.engaging && state.player.ai_selected_as_resolved_target) {
+      NovaEscort_UpdateFormations(state, state.player, /*snap=*/false);
+    }
     // PlayerTick_WeaponCommands (0x0044aa70 block 0x0044BEB0) +
     // PlayerTick_WeaponCycleContinuation (0x0044EAB4): primary fire loop,
     // selected-secondary fire, unfirable-bank auto-clear, the wrapped
@@ -957,6 +970,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // player jumps back.
       NovaShip_DeactivateVacantShipsAndTally(state,
                                              /*keep_player_engaged=*/false);
+      // Escort adoption (System_RebuildInitialNpcAndMissionPopulation
+      // 0x0041af90, reached from the jump-arrival block at 0x0044fa91):
+      // attached ships (ai_target_ship_slot == 0) that survived the sweep are
+      // adopted into the arrival system (Ship_ResetShipToDefaultCombatState
+      // 0x0041e240, flag = 0: no refill on a jump), the wedge snaps around
+      // the player, and because the player core windows its station-hold
+      // timer at -999 around the rebuild (0x0044fa83 / 0x0044faa2) each
+      // attached ship is pushed ~892 px behind and flung forward at 50 px/tick
+      // -- escorts stream in behind the jumping player.
+      state.player.ai_station_hold_timer = -999.0F;
+      NovaSystem_RestorePlayerEscorts(state, /*refill=*/false, now_ms);
       NovaSystem_RestoreMissionFleets(state,
                                       state.player.current_system_id,
                                       /*copy_player_heading=*/false,
@@ -966,6 +990,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // the mission lists).
       Mission_RerollOfferingRolls(state);
       NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
+      // 0x0044faa2: the -999 hold-timer window closes right after the
+      // rebuild returns.
+      state.player.ai_station_hold_timer = 0.0F;
       // The player's primary target ship lived in the departure system; the
       // vacancy sweep deactivated it (and its slot may be reused by a fresh
       // spawn), so clear the selection and the reticle pulse -- the original

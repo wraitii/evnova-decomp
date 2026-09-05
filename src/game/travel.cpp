@@ -257,11 +257,15 @@ void FireJump(GameState &state) {
     travel_days = std::max(
         travel_days, NovaStellar_ComputeHyperspaceTravelDays(state, attached));
   }
-  // TODO(decomp): attached ships that CAN jump are counted here but are
-  // never transferred to the new system (the original hands them over via
-  // the escort-leader paths, Ship_PropagateLeaderRetreatStateToFollowers et
-  // al.; the port's vacancy sweep only spares them, leaving them active in
-  // the departure system) -- escort/fleet transfer is not reconstructed.
+  // Attached ships that can jump are counted here but not transferred at
+  // jump time -- like the original, they keep the departure system id until
+  // the escort-adoption slice of System_RebuildInitialNpcAndMission-
+  // Population (0x0041af90) runs at arrival (NovaSystem_RestorePlayerEscorts,
+  // called from the spaceflight loop's just_completed block).
+  // TODO(decomp): mission-fleet attached ships (mission_fleet_slot != -1) are
+  // left to NovaSystem_RestoreMissionFleets, and the launch/landing escort
+  // lifecycle (deactivate + re-summon from the persistent fleet) is not
+  // reconstructed.
   for (int day = 0; day < travel_days; ++day) {
     Mission_TickDailyWorldUpdate(state);
   }
