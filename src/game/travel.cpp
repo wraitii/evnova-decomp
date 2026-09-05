@@ -137,6 +137,24 @@ float PlayerMaxSpeed(const GameState &state) {
   return state.cached_stats.speed_raw / kMaxSpeedScale;
 }
 
+// Ghidra 0x00465d90 Ship_FormatLocalizedCountWord (the count-word half;
+// TODO(decomp) skipped: the original's translate_first flag passes the first
+// character through NovaCommand_TranslateByInputMap, an input-map highlight
+// quirk not modelled here). Counts 1..10 load STR# 0x89 "Date/Numbers"
+// entries 0x1d..0x26 ("one".."ten"); anything else renders as decimal digits
+// (PascalString_FromUInt). Used by the arrival "fighter(s) abandoned"
+// tally (0x0044fc92).
+std::string FormatArrivalCountWord(int count) {
+  if (count < 1 || 10 < count) {
+    return std::to_string(count);
+  }
+  if (const auto text =
+          NovaHud_LoadStringEntry(0x89, static_cast<std::uint16_t>(count + 0x1c))) {
+    return *text;
+  }
+  return std::to_string(count);
+}
+
 // Ghidra flight-tail block of Ship_HandlePlayerShipCore (~0x00450a2c): with a
 // plotted jump armed (travel_transfer_mode 3 + secondary target), a per-tick
 // range probe from the system center over NON-restricted nav stellars drives
@@ -210,12 +228,40 @@ void FireJump(GameState &state) {
   // flooded; the one-hop window comes from the discovered_this_rebuild latch).
   NovaSystem_OnSystemEntered(state, t.destination_system_id, 1);
 
-  // Hyperspace arrival advances the calendar once per jump day
-  // (PlayerTick_SystemTransitionAndArrival 0x0044f954: the daily world
-  // update runs max(travel days) times over the player and jumping escorts;
-  // the port evaluates the player's ship, TODO(decomp) escort max).
-  const int travel_days =
-      NovaStellar_ComputeHyperspaceTravelDays(state, player);
+  // Hyperspace arrival advances the calendar once per jump day. Ghidra
+  // PlayerTick_SystemTransitionAndArrival: the player's travel days seed the
+  // max (0x0044f8b2), the abandoned-fighter walk (0x0044f8d6, below) extends
+  // it over every still-active attached ship, then Mission_TickDailyWorld-
+  // Update runs that many times (0x0044f95f).
+  int travel_days = NovaStellar_ComputeHyperspaceTravelDays(state, player);
+  // Abandoned-fighter walk (0x0044f8d6): over every active ship attached to
+  // the player (ai_target_ship_slot == 0) that is not disabled -- deployed
+  // carrier fighters (ai_behavior_code 5, seeded by Weapon_SpawnShipFrom-
+  // CarrierBayWeapon 0x0041e640) that cannot jump are deactivated and
+  // tallied for the arrival overlay's "fighter(s) abandoned" appendix;
+  // every still-active attached ship (fighters and behavior-6 escorts
+  // alike) contributes its travel days to the max.
+  int abandoned_fighters = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &attached = state.ShipAt(slot);
+    if (!attached.is_active || attached.ai_target_ship_slot != 0 ||
+        NovaAiShip_IsDisabled(state, attached)) {
+      continue;
+    }
+    if (attached.ai_behavior_code == 5 &&
+        !NovaTravel_CanShipInitiateJumpSequence(state, attached)) {
+      attached.is_active = false;
+      ++abandoned_fighters;
+      continue;
+    }
+    travel_days = std::max(
+        travel_days, NovaStellar_ComputeHyperspaceTravelDays(state, attached));
+  }
+  // TODO(decomp): attached ships that CAN jump are counted here but are
+  // never transferred to the new system (the original hands them over via
+  // the escort-leader paths, Ship_PropagateLeaderRetreatStateToFollowers et
+  // al.; the port's vacancy sweep only spares them, leaving them active in
+  // the departure system) -- escort/fleet transfer is not reconstructed.
   for (int day = 0; day < travel_days; ++day) {
     Mission_TickDailyWorldUpdate(state);
   }
@@ -275,6 +321,20 @@ void FireJump(GameState &state) {
         msg += *text;
       }
     }
+    // Abandoned-fighter tally appendix (0x0044fc62): "  (" + count word +
+    // " " + "fighter abandoned" (count == 1, 0xa4) / "fighters abandoned"
+    // (0xa5) + ")". Note the original's two leading spaces.
+    if (abandoned_fighters > 0) {
+      msg += "  (";
+      msg += FormatArrivalCountWord(abandoned_fighters);
+      msg += " ";
+      const std::uint16_t word_id =
+          abandoned_fighters == 1 ? 0xa4 : 0xa5;
+      if (const auto text = NovaHud_LoadStringEntry(0x7d2, word_id)) {
+        msg += *text;
+      }
+      msg += ")";
+    }
     NovaHud_ShowOverlayMessage(state, msg, static_cast<std::uint64_t>(0xf0U));
   }
 
@@ -288,6 +348,9 @@ void FireJump(GameState &state) {
   // fire; the spaceflight loop re-spawns the starfield/asteroids for the new
   // system when it observes just_completed.
   t.travel_slot = -1;
+  // Arrival clears the travel/landing stellar selection (g_travel_selected_
+  // stellar_id = 0xffff at 0x0044f7fa).
+  t.selected_stellar_id = -1;
   // Arrival re-latches the flight-hint state to 0x7fff (PlayerTick_System-
   // TransitionAndArrival 0x0044f83f), keeping the launch departure message
   // armed for the system's landings.
@@ -300,6 +363,24 @@ void FireJump(GameState &state) {
   // Arrival clears the plotted-jump latch (travel_transfer_mode = -1 at
   // 0x0044f660) so the nav panel drops back to the idle state.
   state.player.travel_transfer_mode = -1;
+  // Mission offering reroll (0x0044f86f: 1000 x rand(100)+1 over the mission
+  // definition table) -- the same pass Mission_RerollOfferingRolls
+  // reconstructs for the landing arrival (the original fills all 1000 slots
+  // unconditionally; the helper stops at the definition count, which is all
+  // the consumers read).
+  Mission_RerollOfferingRolls(state);
+  // Arrival closes the Escort Commands overlay (0x0044fe0b writes 0 to
+  // g_target_category_panel_timer).
+  state.escort.panel_timer = 0;
+  // TODO(decomp(0x0044f803)) skipped: the remaining arrival resets target
+  // globals the port does not model -- g_travel_engage_timer (0xffff),
+  // g_last_system_for_ambient_rolls (0xffff), the interaction bribe latch
+  // (-1) and action index (rand 0x800), DAT_00596d30/31 (0), the ambient
+  // mission-spawn re-arm DAT_007353f4 = rand(30)+30 (its consumer
+  // Mission_SpawnAmbientMissionShip is unported), g_travel_countdown (0),
+  // the HUD dirty flags (immediate-mode rendering makes them moot) and the
+  // starmap-window hide (Sprite_SetVisible 0x0044f857; the map is modal in
+  // the port and cannot be open during flight).
   // Arrival route maintenance (Ship_HandlePlayerShipCore's arrival tick):
   // the map pan re-centres on the new system (0x0044f8a6), a plotted route
   // hop that matched this system is consumed
@@ -308,6 +389,16 @@ void FireJump(GameState &state) {
   // (NovaUi_SyncTravelSelectionFromStarmapRoute 0x004a8080).
   state.starmap_pan_x = cx;
   state.starmap_pan_y = cy;
+  // Route wipe on mismatch (0x0044f9ec): when the next plotted hop is not
+  // the system just entered, the whole 16-hop route is discarded wholesale;
+  // when it matches, the hop is consumed by the normalize below. The
+  // multi-jump continuation path (not ported) skips this wipe.
+  if (t.starmap_route[1] != -1 &&
+      NovaSystem_ResolveVisibleForTravel(state, t.starmap_route[1]) !=
+          NovaSystem_ResolveVisibleForTravel(
+              state, state.player.current_system_id)) {
+    t.starmap_route.fill(-1);
+  }
   NovaStarmap_NormalizeRouteToCurrentSystem(state);
   NovaStarmap_SyncTravelSelectionFromRoute(state);
   // The jump completes at the fire/arrival instant: the ship is now in the

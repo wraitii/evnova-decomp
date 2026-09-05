@@ -62,7 +62,7 @@ is written with `FUN_004f22e0` (C-string + NUL) and read with
 | 0xb7be | 0x2710 (10000) | persistent story/event data (`_DAT_005914cc` blob; contents unidentified) |
 | 0xdece | u8[0x800] | per-stellar saved byte (gated on `special_tech+0x2f`) |
 | 0xe6ce | u16[0x40] | fleet/escort ship class ids — behavior-6 (mission) escorts; +1000 marks `field_0xbb` |
-| 0xe74e | u16[0x40] | escort class ids — behavior-5 (autopilot) escorts |
+| 0xe74e | u16[0x40] | carried-fighter class ids — behavior-5 ships (deployed carrier fighters: Weapon_SpawnShipFromCarrierBayWeapon 0x0041e640 seeds ai_behavior_code 5 + ai_target_ship_slot = owner). At a hyperspace jump the arrival walk 0x0044f8d6 deactivates the ones that cannot jump and the overlay tallies them as "fighter(s) abandoned" (STR# 0x7d2 0xa4/0xa5) |
 | 0xe7ce | u16[0x40] | escort upgrade flags |
 | 0xe84e | u16[0x40] | escort released flags |
 | 0xe8ce | u16[0x40] | voice type modes for active player-affiliated ships (behavior > 4, no mission) |

@@ -276,8 +276,9 @@ void Mission_AdvanceGameDate(GameDate &date);
 // whole days: 1 day at <= 99 tons hull mass, 2 at 100-199, 3 above; the
 // player additionally adds owned-count x ModVal for every owned outfit whose
 // one of the four ModTypes is 0x16 (jump-time booster), clamped to >= 1.
-// TODO(decomp): the original takes the max over the player and every
-// jumping escort; the port evaluates the player's ship only.
+// The outfit arm is player-only (ship_instance_id == 0). The arrival caller
+// takes the max over the player and every attached ship (0x0044f8d6 walk,
+// ported in FireJump); this helper evaluates one ship.
 [[nodiscard]] int
 NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
                                         const Ship &ship);
