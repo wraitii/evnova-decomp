@@ -767,6 +767,7 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
     if (r_px < 0.5) {
       continue;
     }
+    // Ghidra 0x004A9BF0 NovaUi_ProjectSystemToOverlayGrid runs inline here.
     const SDL_FPoint centre = view.Project(panel.w,
                                            panel.h,
                                            static_cast<float>(sys.pos_x),
@@ -783,6 +784,8 @@ PoliticalOverlay BuildPoliticalOverlay(const GameState &state,
         std::min(out.width, static_cast<int>(std::ceil(cx + r_px)) + 1);
     const int by1 =
         std::min(out.height, static_cast<int>(std::ceil(cy + r_px)) + 1);
+    // Ghidra 0x004AA25E NovaUi_PaintStarmapDiscRowLoop and 0x004AA2DA
+    // NovaUi_PaintStarmapDiscCellStep run inline in these two loops.
     for (int py = by0; py < by1; ++py) {
       for (int px = bx0; px < bx1; ++px) {
         // Distance in grid units (1 unit = 2 screen px).
@@ -2285,6 +2288,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
             button_clicked = true;
             switch (static_cast<StarmapButton>(i)) {
             case StarmapButton::kShowBorders:
+              // Ghidra 0x004A9D10 NovaUi_EnableStarmapPoliticalOverlay.
               show_borders = !show_borders;
               overlay_needs_rebuild = true;
               break;

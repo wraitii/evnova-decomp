@@ -553,6 +553,8 @@ std::optional<NovaMainMenuStyle> NovaResource_LoadMainMenuStyle() {
 
 std::optional<std::vector<std::byte>>
 NovaResource_LoadSndData(std::uint16_t resource_id) {
+  // Ghidra 0x004BC2A0 NovaSound_LoadDecodedById. Resource acquisition is here;
+  // its decode tail runs in NovaSound_Decode below.
   // Silent on miss: the original probes whole contiguous ranges (the 200..455
   // gameplay table and 300..363 impact table in FUN_004b0740) and tolerates
   // the many ids that do not exist in Nova Sounds.rez, so a miss is normal.

@@ -487,7 +487,7 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   DrawEscortCommandsPanel(platform, state, value_color, label_color);
   // Transient HUD overlay message (NovaHud_ShowOverlayMessage / the landing &
   // negotiation feedback text). Mirrors the original's shared message rect
-  // (g_hud_overlay_message_rect, laid out in FUN_004af020's tail): left =
+  // (Ghidra 0x004AF020 FUN_004af020 tail runs inline here): left =
   // window left + 25, bottom = window bottom - 5, height 26 * ui_scale (the
   // 640x480 logical band spans x 25..width-244, y height-31..height-5 -- the
   // lower-left). DrawContext_DrawPascalStringInFilledRect (0x004bcd30) draws

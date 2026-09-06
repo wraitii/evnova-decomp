@@ -1177,9 +1177,10 @@ namespace {
 
 } // namespace
 
-// Ghidra 0x0044aa70 PlayerTick_WeaponCommands (0x0044BEB0) +
-// PlayerTick_WeaponCycleContinuation (0x0044EAB4, reordered block shared with
-// the parent tick's stack state). Dispatch order matches the decompile:
+// Ghidra 0x0044BEB0 PlayerTick_WeaponCommands, internal label of
+// Ship_HandlePlayerShipCore 0x0044AA70. Synthetic CFG: 0x0044BEB0 ->
+// 0x0044C0B1; includes PlayerTick_WeaponCycleContinuation at 0x0044EAB4 but
+// excludes the face-target command. Dispatch order matches the decompile:
 // primary fire, selected-secondary fire, unfirable-bank auto-clear, the
 // secondary-bank cycle, and the clear-selection arm. The cooldown-decay tail
 // runs unconditionally in NovaWeapon_TickPlayerWeaponBankCooldowns.

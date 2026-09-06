@@ -148,8 +148,8 @@ std::string FormatArrivalCountWord(int count) {
   if (count < 1 || 10 < count) {
     return std::to_string(count);
   }
-  if (const auto text =
-          NovaHud_LoadStringEntry(0x89, static_cast<std::uint16_t>(count + 0x1c))) {
+  if (const auto text = NovaHud_LoadStringEntry(
+          0x89, static_cast<std::uint16_t>(count + 0x1c))) {
     return *text;
   }
   return std::to_string(count);
@@ -332,8 +332,7 @@ void FireJump(GameState &state) {
       msg += "  (";
       msg += FormatArrivalCountWord(abandoned_fighters);
       msg += " ";
-      const std::uint16_t word_id =
-          abandoned_fighters == 1 ? 0xa4 : 0xa5;
+      const std::uint16_t word_id = abandoned_fighters == 1 ? 0xa4 : 0xa5;
       if (const auto text = NovaHud_LoadStringEntry(0x7d2, word_id)) {
         msg += *text;
       }
@@ -399,8 +398,8 @@ void FireJump(GameState &state) {
   // multi-jump continuation path (not ported) skips this wipe.
   if (t.starmap_route[1] != -1 &&
       NovaSystem_ResolveVisibleForTravel(state, t.starmap_route[1]) !=
-          NovaSystem_ResolveVisibleForTravel(
-              state, state.player.current_system_id)) {
+          NovaSystem_ResolveVisibleForTravel(state,
+                                             state.player.current_system_id)) {
     t.starmap_route.fill(-1);
   }
   NovaStarmap_NormalizeRouteToCurrentSystem(state);
@@ -967,6 +966,10 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
 // ---------------------------------------------------------------------------
 // Cross-system jump state machine.
 // ---------------------------------------------------------------------------
+// Ghidra Ship_HandlePlayerShipCore 0x0044AA70, composed from disjoint internal
+// CFGs: engage 0x0044C18A, tunnel 0x0044CCAF -> 0x0044CFFE, fire/arrival
+// 0x0044F3D0 and 0x0044F660, turnaround 0x0044FFF0, and flight-tail range cue
+// 0x0044D0C3 -> 0x00450717. These remain one coupled travel state machine.
 void NovaTravel_Tick(GameState &state,
                      bool travel_input,
                      float frame_time_ms,

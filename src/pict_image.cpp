@@ -402,6 +402,9 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
   // (and opcode-0x0001 blocks), never from the PixMap bounds.
   pos += 10;
 
+  // Ghidra 0x004FCA30 FUN_004fca30 runs inline here: instead of copying and
+  // byte-swapping the 36-byte PixMap body, the port reads its big-endian fields
+  // directly from the resource stream.
   // The PixMap body follows the bounds for DirectPixMapRect and for any
   // packed (high rowBytes bit) variant; plain 1-bit BitMaps stop at bounds.
   std::size_t pixel_size = 1;
@@ -568,7 +571,8 @@ Resource_LoadPictAsImage(std::span<const std::byte> pict_data) {
         green = color[1];
         blue = color[2];
       } else if (format == PixelFormat::kMonochrome) {
-        // FUN_004fcac0 expands 1-bit rows MSB-first into 0/1 indices.
+        // Ghidra 0x004FCAC0 FUN_004fcac0 expands 1-bit rows MSB-first into
+        // 0/1 indices; its 2/4-bit arms remain unported.
         const auto byte = row[x / 8];
         const auto color = palette[(byte >> (7U - (x % 8U))) & 1U];
         red = color[0];

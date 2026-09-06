@@ -2751,10 +2751,10 @@ void RunPlayerEjectTransform(GameState &state) {
 
 } // namespace
 
-// Ghidra PlayerTick_StatusAndOutfitEvents: internal label of
-// Ship_HandlePlayerShipCore (0x0044aa70), block 0x0044b240..0x0044b7c4 with the
-// carried-bomb tails at 0x0044da75/0x0044daa0. Runs after the hyperspace-exit
-// gate and before the manual-flight block, ahead of every flight-input branch.
+// Ghidra 0x0044B240 PlayerTick_StatusAndOutfitEvents, internal label of
+// Ship_HandlePlayerShipCore. Synthetic CFG: 0x0044B240 ->
+// [0x0044B7C4, 0x0044D490]; includes the reordered carried-bomb tails. Runs
+// after the hyperspace-exit gate and before every flight-input branch.
 bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
                                           float elapsed_ticks,
                                           bool eject_command) {
@@ -2899,11 +2899,10 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
   return false;
 }
 
-// Ghidra PlayerTick_TimedActionTransition (internal label of
-// Ship_HandlePlayerShipCore 0x0044aa70; block 0x0044d490..0x0044da70), reached
-// from the status/outfit dispatch while timed_action_counter > 0. The original
-// returns from the player core after this block; the caller must skip the
-// remaining player command passes.
+// Ghidra 0x0044D490 PlayerTick_TimedActionTransition, internal label of
+// Ship_HandlePlayerShipCore. Synthetic CFGs: dispatch 0x0044D490 -> 0x0044D510;
+// movement/respawn 0x0044D510 -> 0x0044D560. Reached from the status/outfit
+// dispatch while timed_action_counter > 0; consumes the remaining player tick.
 bool NovaPlayer_TickTimedActionTransition(GameState &state,
                                           float elapsed_ticks) {
   PlayerShip &p = state.player;
@@ -3058,69 +3057,13 @@ bool NovaPlayer_TickTimedActionTransition(GameState &state,
   return true;
 }
 
-void NovaPlayer_UpdateFromInput(GameState &state,
-                                const FlightInput &input,
-                                float elapsed_ticks) {
+// Ghidra 0x0044CA6B PlayerTick_TurnBankAnimation, internal label of
+// Ship_HandlePlayerShipCore. Synthetic CFG: 0x0044CA6B -> 0x0044CB99.
+static void TickPlayerTurnBankAnimation(GameState &state,
+                                        const FlightInput &input,
+                                        float elapsed_ticks) {
   PlayerShip &p = state.player;
-
-  // Resolve the outfit-derived effective movement stats (class base + owned
-  // outfit opcode 7/8/9 bonuses), reading the cached snapshot when still
-  // valid. The cache is invalidated by the inventory mutation helpers and the
-  // new-pilot ship-class reset.
-  if (!state.stat_cache_valid) {
-    state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
-    state.stat_cache_valid = true;
-  }
-  const PlayerEffectiveStats &eff = state.cached_stats;
-
-  const float fuel_burn = Outfit_GetPlayerAfterburnerFuelBurnRate(state);
-  const bool afterburner_active = input.afterburner && !input.reverse &&
-                                  fuel_burn <= p.fuel_points &&
-                                  fuel_burn > 0.0F;
-  // Ghidra's old name g_player_in_gravity_well is misleading: this is the
-  // opcode-15 afterburner latch. Stellar_TickStellarGravityPull independently
-  // sets g_gravity_pull_active, which disables the afterburner's boosted speed
-  // branch but does not prevent normal thrust.
-  const bool gravity_present =
-      NovaPlayer_ApplyStellarGravity(state, elapsed_ticks);
-
-  // Map the effective raw stats onto the movement integrator's ShipClass view
-  // (it divides raw accel/speed by the loader scale; turn is deg/tick).
-  ShipClass effective_class;
-  effective_class.accel = eff.thrust_raw;
-  effective_class.speed = eff.speed_raw;
-  effective_class.turn_rate = eff.turn_raw;
-  // Player tails of Ship_ComputeShipEffectiveThrust (0x004640a0) and
-  // Ship_ComputeShipMaxTurnRateDeg (0x00463e70): while ionized, thrust is
-  // always damped by (1 - intensity) and the turn rate is damped the same
-  // way while the ship is not thrusting (TODO(decomp): the original gates
-  // the turn damping on ShipState +0x28/+0x5c whose player-side meaning is
-  // not fully pinned down; "not thrusting" follows the helper's plate note).
-  if (p.ionization_points > 0.0F) {
-    const ShipClass *cls =
-        state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
-    if (cls != nullptr) {
-      const float intensity =
-          std::min(0.7F, NovaShip_IonizationIntensity(p, *cls));
-      effective_class.accel *= (1.0F - intensity);
-      if (!input.thrust) {
-        effective_class.turn_rate *= (1.0F - intensity);
-      }
-    }
-  }
-  if (afterburner_active && !gravity_present) {
-    // DAT_00575610 = 1.8: the afterburner control branch raises the speed cap
-    // while no stellar gravity pull is active.
-    effective_class.speed *= 1.8F;
-  }
-  (void)NovaPlayer_IntegrateMovement(p, input, effective_class, elapsed_ticks);
-
-  if (afterburner_active) {
-    p.fuel_points = std::max(0.0F, p.fuel_points - fuel_burn * elapsed_ticks);
-  }
-
-  // Ghidra PlayerTick_ManualFlightAndRegeneration turn-bank animation block
-  // (~0x0044cd00): banking classes (sh\x8an Flags & 1) accumulate
+  // Banking classes (sh\x8an Flags & 1) accumulate
   // turn_bank_animation_phase (+0xc8e4) while a turn is held (capped +16 /
   // -16, DAT_005755c0/c4), decay it toward zero at 2x frame rate
   // (DAT_00575618) when straight, and raise ai_turn_bias_dir (+0xc8f8) once
@@ -3175,7 +3118,63 @@ void NovaPlayer_UpdateFromInput(GameState &state,
       p.ai_turn_bias_dir = 0;
     }
   }
+}
 
+// Ghidra 0x0044C8D0 PlayerTick_ManualFlightAndRegeneration, internal umbrella
+// of Ship_HandlePlayerShipCore. Relevant synthetic CFGs: turn input
+// 0x0044C92E -> 0x0044C980; afterburner 0x0044C9AB -> 0x0044CA3D; thrust/glow
+// 0x0044CA3D -> 0x0044CA6B; bank animation 0x0044CA6B -> 0x0044CB99.
+void NovaPlayer_UpdateFromInput(GameState &state,
+                                const FlightInput &input,
+                                float elapsed_ticks) {
+  PlayerShip &p = state.player;
+  if (!state.stat_cache_valid) {
+    state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
+    state.stat_cache_valid = true;
+  }
+  const PlayerEffectiveStats &eff = state.cached_stats;
+
+  const float fuel_burn = Outfit_GetPlayerAfterburnerFuelBurnRate(state);
+  const bool afterburner_active = input.afterburner && !input.reverse &&
+                                  fuel_burn <= p.fuel_points &&
+                                  fuel_burn > 0.0F;
+  // Ghidra's old name g_player_in_gravity_well is misleading: this is the
+  // opcode-15 afterburner latch. Stellar_TickStellarGravityPull independently
+  // sets g_gravity_pull_active, which disables the afterburner's boosted speed
+  // branch but does not prevent normal thrust.
+  const bool gravity_present =
+      NovaPlayer_ApplyStellarGravity(state, elapsed_ticks);
+
+  ShipClass effective_class;
+  effective_class.accel = eff.thrust_raw;
+  effective_class.speed = eff.speed_raw;
+  effective_class.turn_rate = eff.turn_raw;
+  // Player tails of Ship_ComputeShipEffectiveThrust (0x004640a0) and
+  // Ship_ComputeShipMaxTurnRateDeg (0x00463e70). TODO(decomp): the original
+  // turn-damping gate uses ShipState +0x28/+0x5c, which is not fully decoded.
+  if (p.ionization_points > 0.0F) {
+    const ShipClass *cls =
+        state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+    if (cls != nullptr) {
+      const float intensity =
+          std::min(0.7F, NovaShip_IonizationIntensity(p, *cls));
+      effective_class.accel *= (1.0F - intensity);
+      if (!input.thrust) {
+        effective_class.turn_rate *= (1.0F - intensity);
+      }
+    }
+  }
+  if (afterburner_active && !gravity_present) {
+    effective_class.speed *= 1.8F;
+  }
+  (void)NovaPlayer_IntegrateMovement(p, input, effective_class, elapsed_ticks);
+  if (afterburner_active) {
+    p.fuel_points = std::max(0.0F, p.fuel_points - fuel_burn * elapsed_ticks);
+  }
+
+  TickPlayerTurnBankAnimation(state, input, elapsed_ticks);
+  const ShipClass *player_cls =
+      state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
   // ShipState +0xc8d4 is an integer engine/glow control, not a free-running
   // alpha ramp. Normal thrust approaches 24; afterburning extends it to 32;
   // coasting and reverse decrement by one renderer frame. This makes the
@@ -3208,12 +3207,10 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   Misn_TickActiveMissionTimers(state);
 }
 
-// Ghidra PlayerTick_ManualFlightAndRegeneration regeneration tail (internal
-// block of Ship_HandlePlayerShipCore 0x0044aa70, ~0x0044cb90..0x0044cd2d):
-// per-frame shield/armor recovery, ionization decay with the ionized-velocity
-// damping, and the fuel-scoop recharge, in the original's block order. All
-// rates are per 30 Hz frame; frame_time_ms is converted to the original's
-// g_avg_frame_tick_scale (ms * 0.03) unit.
+// Ghidra PlayerTick_ManualFlightAndRegeneration, internal umbrella of
+// Ship_HandlePlayerShipCore 0x0044AA70. Synthetic CFGs: shield/armor
+// 0x0044CB99 -> 0x0044CCAF; ionization/fuel 0x00450717 -> 0x004507B4.
+// These disjoint regions are one passive per-frame regeneration concern.
 void NovaPlayer_TickRegeneration(GameState &state, float frame_time_ms) {
   PlayerShip &p = state.player;
   if (!state.stat_cache_valid) {

@@ -23,12 +23,13 @@ constexpr std::int16_t kDeployedFighterBehavior = 5;
 // (0x00450e48/0x00450ee1) -- TODO(decomp(ShipState +0xC4)): that field is not
 // modelled, so the port counts plain attached presence.
 enum class AttachFilter {
-  kAny,          // active + ai_target_ship_slot == 0
-  kJumpCapable,  // + not disabled, not destroyed (the count cache)
-  kRecoverable,  // + behavior 5 (deployed fighters)
+  kAny,         // active + ai_target_ship_slot == 0
+  kJumpCapable, // + not disabled, not destroyed (the count cache)
+  kRecoverable, // + behavior 5 (deployed fighters)
 };
 
-[[nodiscard]] int CountAttached(const GameState &state, AttachFilter filter,
+[[nodiscard]] int CountAttached(const GameState &state,
+                                AttachFilter filter,
                                 std::int16_t category) {
   int count = 0;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
@@ -37,8 +38,7 @@ enum class AttachFilter {
       continue;
     }
     if (filter == AttachFilter::kJumpCapable &&
-        (NovaAiShip_IsDisabled(state, ship) ||
-         NovaAiShip_IsDestroyed(ship))) {
+        (NovaAiShip_IsDisabled(state, ship) || NovaAiShip_IsDestroyed(ship))) {
       continue;
     }
     if (filter == AttachFilter::kRecoverable &&
@@ -79,19 +79,39 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
   std::uint16_t entry = 0;
   if (holding) {
     switch (command) {
-    case 3: entry = 0x9b; break; // "returning to hangar."
-    case 0: entry = 0x9c; break; // "returning to formation."
-    case 4: entry = 0x9d; break; // "holding position."
-    case 1: entry = 0x9e; break; // "defending."
-    default: entry = 0x9a; break; // "will attack." / "attacking target."
+    case 3:
+      entry = 0x9b;
+      break; // "returning to hangar."
+    case 0:
+      entry = 0x9c;
+      break; // "returning to formation."
+    case 4:
+      entry = 0x9d;
+      break; // "holding position."
+    case 1:
+      entry = 0x9e;
+      break; // "defending."
+    default:
+      entry = 0x9a;
+      break; // "will attack." / "attacking target."
     }
   } else {
     switch (command) {
-    case 3: entry = 0x96; break; // "will return to hangar."
-    case 0: entry = 0x97; break; // "will return to formation."
-    case 4: entry = 0x98; break; // "will hold position."
-    case 1: entry = 0x99; break; // "will defend."
-    default: entry = 0x9a; break; // "will attack."
+    case 3:
+      entry = 0x96;
+      break; // "will return to hangar."
+    case 0:
+      entry = 0x97;
+      break; // "will return to formation."
+    case 4:
+      entry = 0x98;
+      break; // "will hold position."
+    case 1:
+      entry = 0x99;
+      break; // "will defend."
+    default:
+      entry = 0x9a;
+      break; // "will attack."
     }
   }
   if (command == 2) {
@@ -99,8 +119,7 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
     // attached ship, the holding form reads "attacking target." (0x9f);
     // otherwise the plain "will attack." (0x9a).
     const std::int16_t player_target = state.player.primary_target_ship_slot;
-    if (holding && player_target != -1 &&
-        player_target != 0 &&
+    if (holding && player_target != -1 && player_target != 0 &&
         state.SlotInRange(static_cast<std::size_t>(player_target)) &&
         state.ShipAt(static_cast<std::size_t>(player_target))
                 .ai_target_ship_slot != 0) {
@@ -113,6 +132,9 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
 
 } // namespace
 
+// Ghidra Ship_HandlePlayerShipCore 0x0044AA70 auxiliary escort-command CFGs:
+// panel entry 0x00450B4E, selection/order arms 0x00450C24..0x00450F67, with
+// reordered continuations at 0x00452820..0x004529A8.
 void NovaEscort_TickPlayerEscortCommands(GameState &state,
                                          const EscortCommandInput &input,
                                          std::int64_t now_60hz) {
@@ -210,10 +232,18 @@ void NovaEscort_TickPlayerEscortCommands(GameState &state,
     // (0x00450d52).
     std::int16_t command = 0;
     switch (key) {
-    case 0: command = 2; break;
-    case 1: command = 1; break;
-    case 2: command = 4; break;
-    default: command = input.arm_modifier_held ? 3 : 0; break;
+    case 0:
+      command = 2;
+      break;
+    case 1:
+      command = 1;
+      break;
+    case 2:
+      command = 4;
+      break;
+    default:
+      command = input.arm_modifier_held ? 3 : 0;
+      break;
     }
     if (escort.selected_category == -1) {
       // 0x00452aa2: with no group selected the order arms every group slot.
@@ -273,8 +303,7 @@ bool NovaEscort_CommandPlayerEscortGroup(GameState &state,
     }
     const ShipClass *cls = state.scenario.Ship(
         static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    if (cls == nullptr ||
-        (category != -1 && cls->class_category != category)) {
+    if (cls == nullptr || (category != -1 && cls->class_category != category)) {
       continue;
     }
     if (command != ship.escort_command_code) {
@@ -324,12 +353,11 @@ bool NovaEscort_CommandPlayerEscortGroup(GameState &state,
   if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x86)) {
     message = *text;
   }
-  const std::uint16_t group_entry =
-      category == 0     ? 0x87
-      : category == 1   ? 0x88
-      : category == 2   ? 0x89
-      : category == 3   ? 0x8a
-                        : 0x8b;
+  const std::uint16_t group_entry = category == 0   ? 0x87
+                                    : category == 1 ? 0x88
+                                    : category == 2 ? 0x89
+                                    : category == 3 ? 0x8a
+                                                    : 0x8b;
   if (auto text = NovaHud_LoadStringEntry(0x7d2, group_entry)) {
     message += *text;
   }
