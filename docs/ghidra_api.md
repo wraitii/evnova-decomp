@@ -141,6 +141,75 @@ curl -s -X POST "http://127.0.0.1:8166/function/decompile" \
   -d '{"addrs": ["0x401234", "0x401500"]}'
 ```
 
+### POST /function/synthetic-decompile
+
+Decompile a CFG region as a read-only synthetic function. `entry` and every
+member of `stops` may be an address or a uniquely resolving label. CFG traversal
+starts at `entry` and stops before each boundary. `inputs` optionally maps a
+register or `stack:<offset>` storage to a name and type. High-confidence inputs
+are inferred automatically; explicit mappings replace inference for the same
+storage. Uncertain inputs remain visible using Ghidra's normal `unaff_*` or
+`in_stack_*` names. No function records, bodies, bytes, labels, or other program
+metadata are changed.
+
+Parent-SSA inference has a five-second timeout by default. If the parent is too
+large, the view continues with region-local physical inference and manual
+overrides. Pass `"force_infer":true` to allow the full 60-second parent pass.
+
+Parameters:
+
+- `entry` (alias `start`) - required basic-block entry address or unique label
+- `stops` (alias `stop`) - required JSON array or comma-separated boundary list;
+  traversal excludes these blocks and each supplied stop must be reachable
+- `name` - optional synthetic function name
+- `inputs` - optional storage overrides keyed by register (for example `ESI`) or
+  `stack:<offset>`, each containing `name` and `type`
+- `force_infer` - optional Boolean, default `false`
+
+```bash
+curl -s -X POST "http://127.0.0.1:8166/function/synthetic-decompile" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entry":"LAB_00401530",
+    "stops":["LAB_0040132b"],
+    "name":"View_DispatchShipAiBehavior",
+    "inputs":{
+      "EBP":{"name":"ship","type":"ShipState *"},
+      "stack:6":{"name":"mission_attack","type":"bool"}
+    }
+  }'
+```
+
+### POST /function/synthetic-suggestions
+
+Suggest single-entry CFG regions with a common continuation. Branch blocks
+are considered as starts by default. Set `named_labels_as_starts:true` to also
+consider blocks carrying a non-dynamic primary label. Copy a suggested start and
+stop into `/function/synthetic-decompile`. Output is one compact line per suggestion:
+`START (LABEL) -> [STOP (LABEL), ...] (x blocks, y bytes, z calls, score)`.
+The parenthesized label is omitted when an address has no primary label or only
+has a default `LAB_<address>` label.
+Contained suggestions are indented beneath larger selected regions.
+`max_depth` controls nesting below each root and defaults to `3`; use `0` for
+roots only or a larger value for a fuller outline.
+`min_blocks` defaults to `5`; `max_blocks` defaults to and is capped at `500`.
+There is no result-count limit; use the block bounds and nesting depth to control
+the outline.
+
+Parameters:
+
+- `function` (alias `addr`) - required exact function name or contained address
+- `named_labels_as_starts` - optional Boolean, default `false`
+- `min_blocks` - optional integer from 2 through 100, default `5`
+- `max_blocks` - optional integer from `min_blocks` through 500, default `500`
+- `max_depth` - optional integer from 0 through 50, default `3`
+
+```bash
+curl -s -X POST "http://127.0.0.1:8166/function/synthetic-suggestions" \
+  -H "Content-Type: application/json" \
+  -d '{"function":"Ship_UpdateShipAI"}'
+```
+
 ## Data Analysis
 
 ### GET /symbol/{addr}
@@ -386,6 +455,17 @@ Update function signature. All params are optional except addr, avoid setting un
 ```
 
 Note: Keys must match the parameter names in the current decomp output (e.g., `a0`, `a1`, `player`, `flags`). Use `/function/{addr}/decompile` to see current names before modifying.
+
+Only fields explicitly present in the request are committed. In particular, renaming one parameter
+does not commit the decompiler's inferred types for the return value or other parameters.
+
+### POST /function/signature/reset
+
+Remove a committed function prototype so Ghidra can infer it again. This preserves the function
+name, namespace, comments, locals, and calling convention, but removes all parameters and resets the
+return type/signature source to defaults.
+
+**Body:** `{addr: "00421f50", confirm: true}`
 
 ### GET /labels/{addr}
 

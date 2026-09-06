@@ -115,14 +115,19 @@ Prefer the tool, but curl can otherwise be used directly. All endpoints return p
 - `GET /function/{addr}/xrefs` — xrefs to the function
 - `GET /function/{addr}/strings` — strings referenced in the function body
 - `POST /function/decompile` — `{addrs: [...]}` — batch decompile
+- `POST /function/synthetic-decompile` — read-only decompile of a CFG region: `{entry|start, stops|stop, name?, inputs?, force_infer?}`; stops are excluded reachable boundaries, inputs override inferred register/`stack:<offset>` values, and `force_infer` permits the full 60-second parent-SSA pass instead of the default five-second timeout
+- `POST /function/synthetic-suggestions` — suggest nested single-entry CFG regions with common continuations: `{function|addr, named_labels_as_starts?, min_blocks?, max_blocks?, max_depth?}`
 - `GET /symbol/{addr}` — auto-dispatch to `/function/` or `/data/` depending on what's at the address
+- `GET /labels/{addr}` — list every symbol at an address, including namespace, source, and primary/dynamic state
 - `GET /data/{addr}` — label/type/size & xrefs for an address. Good to explore vtables.
 - `GET /type/{name}/layout` (alias `info`) — size + members
 - `GET /type/{name}/methods?start=...&end=...` — functions in class namespace
 - `GET /type/{name}/xrefs` — cross-references to class methods
 - `GET /type/{name}/uses` — global symbols of a type (useful for vtables)
 - `GET /range/{start}/{end}/disasm` — disassembly for address range (code or data). Good to explore vtables.
+- `GET /range/{addr}/disasm` — disassemble the basic block containing an address
 - `GET /range/{start}/{end}/bytes` — hexdump of bytes in range
+- `GET /function/{addr}/cfg` or `/range/{start}/{end}/cfg` — compact basic-block CFG with flow-labelled destinations
 - `GET /operand_search?op={scalar}&filter=...&context_filter=...&before=...&after=...&start=...&end=...` — find functions containing instructions using a scalar operand (memory displacements, immediates); `op` is decimal or 0x-hex. Use `/operand_search/decomp` or `/operand_search/disasm` for context views at the site.
 
 ## Write endpoints (ask before using)
@@ -131,11 +136,15 @@ Prefer the tool, but curl can otherwise be used directly. All endpoints return p
 - `POST /function/rename` — `{addr, new_name}` — no `::` allowed; see reclassify for class methods.
 - `POST /function/reclassify` — `{addr, class, new_name?}` — class must match existing struct/comp type; creates class namespace if missing
 - `POST /class/create` — `{class_name, struct_size?}` — creates a class/namespace for reclassify
+- `POST /type/rename` — `{name, new_name}` — rename a type
 - `POST /struct/modify_field` — `{struct, offset, name, data_type, comment?}` — modify a struct field at a specific offset
 - `POST /type/tag_vtable` — `{type, vtable_type, vtable_addr, set_field_type_if_undefined?}` — standardize a class's vtable link
 - `POST /symbol/retype` — `{addr, data_type}` — retype a global symbol (supports pointers, arrays)
 - `POST /comment/set` — `{addr|function_addr, comment, kind=plate|pre|post|eol}`
-- `POST /function/signature` — `{addr, return_type?, name?, a0?, a1?, ...}` (param keys use actual names from decomp output, e.g., `a0`, `player`, `flags`)
+- `POST /function/signature` — `{addr, return_type?, name?, a0?, a1?, ...}` (param keys use actual names from decomp output, e.g., `a0`, `player`, `flags`; only explicitly supplied fields are committed)
+- `POST /function/signature/reset` — `{addr, confirm: true}` — remove the committed prototype and restore type inference while preserving name, namespace, comments, locals, and calling convention
+- `POST /label/create` — `{addr, name, primary?, confirm?}` — create a label in the containing function namespace, or globally when outside a function
+- `POST /label/delete` or `/label/set_primary` — `{addr, name, confirm?}` — operate only on label symbols, never function symbols
 - `POST /full_decompile` — `{folder: "/abs/path"}` — decompile every function to one `.c` file per function
 
 ## Notes
