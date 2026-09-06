@@ -2491,10 +2491,14 @@ LandedExit RunBarDialog(SdlPlatform &platform,
       }
     }
     if (close) {
+      // Mission_ClearActiveReactionMission (0x00448660) runs on the window
+      // teardown path of NovaUi_RunTravelDestinationServicesWindow.
+      Mission_ClearActiveReactionMission(state);
       return LandedExit::kServiceComplete;
     }
     SDL_Delay(16);
   }
+  Mission_ClearActiveReactionMission(state);
   return LandedExit::kQuit;
 }
 

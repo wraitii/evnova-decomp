@@ -2136,10 +2136,27 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
                       state.player.ship_name.empty() ? std::string("[Error]")
                                                      : state.player.ship_name);
   ReplaceMissionToken(result, "<PST>", ship_type);
-  // <OSN> is only resolvable in the ship-offering interaction context
-  // (g_ship_states[g_ship_offering_slot].pers name); the port has no offering
-  // ship wired yet, so it keeps the sentinel.
-  ReplaceMissionToken(result, "<OSN>", "[Error]");
+  // <OSN>: the speaking mission ship's personality display name, read from
+  // the DAT_0077430e speaker latch (valid slots 1..0x3f only). Outside an
+  // announcement context it keeps the [Error] sentinel.
+  std::string speaker_name = "[Error]";
+  if (state.mission_speaker_ship_slot >= 0 &&
+      state.mission_speaker_ship_slot < 0x40) {
+    const Ship &speaker =
+        state.ShipAt(static_cast<std::size_t>(state.mission_speaker_ship_slot));
+    if (speaker.pers_def_slot >= 0 &&
+        static_cast<std::size_t>(speaker.pers_def_slot) <
+            state.scenario.pers_defs.size()) {
+      const std::string &name =
+          state.scenario
+              .pers_defs[static_cast<std::size_t>(speaker.pers_def_slot)]
+              .display_name;
+      if (!name.empty()) {
+        speaker_name = name;
+      }
+    }
+  }
+  ReplaceMissionToken(result, "<OSN>", speaker_name);
   // TODO(decomp): rank names/weights live on the rank (system-cue) defs, not
   // reconstructed; the fallback arm emits "captain".
   const std::string rank_fallback = MissionRankFallback();
@@ -2862,6 +2879,235 @@ std::string NovaText_FormatDateString(const GameDate &date,
                           static_cast<std::uint16_t>(abbreviated_month
                                                          ? date.month + 12
                                                          : date.month));
+}
+
+// Ghidra 0x00426d10 Mission_ShowMissionShipAnnouncement.
+void Mission_ShowMissionShipAnnouncement(GameState &state,
+                                         std::int16_t hail_quote_id) {
+  // NovaAudio_QueueCenteredSound(g_transition_sound_handle_table[4], 1,
+  // g_centered_audio_gain): the flight loop consumes pending_ui_sounds and
+  // plays transition-table cue 4 directly.
+  state.pending_ui_sounds.push_back({/*transition_index=*/4, /*count=*/1});
+
+  // Hail text: first string of STR# (hail_quote_id + 4999) when present,
+  // else entry hail_quote_id of STR# 0x1bbd (7101, the pers HailQuote pool).
+  // TODO(decomp): the original copies the raw STR# resource bytes into the
+  // scratch and pstring-converts in place; the port decodes entry 1 of the
+  // pool instead (same text for well-formed pools).
+  std::optional<std::string> text;
+  if (hail_quote_id >= 0) {
+    text = NovaHud_LoadStringEntry(
+        static_cast<std::uint16_t>(hail_quote_id + 4999), /*entry=*/1);
+    if (!text) {
+      text = NovaHud_LoadStringEntry(0x1bbd,
+                                     static_cast<std::uint16_t>(hail_quote_id));
+    }
+  }
+  if (!text) {
+    NovaLog::Warn("mission hail: no text for pers hail id {}", hail_quote_id);
+    return;
+  }
+
+  Mission_ExpandStringPlaceholders(state, *text);
+  // Stellar_BuildTravelDestinationDescription(0, -1) (0x004444f0): the
+  // wildcard pass with the mission context cleared -- mission destination
+  // tokens expand to their [Error] sentinels, <OSN> to the speaking ship's
+  // personality name (read from the DAT_0077430e speaker latch).
+  *text = Mission_ExpandMissionWildcards(state,
+                                         *text,
+                                         /*offering_list=*/false,
+                                         /*mission_id=*/-1);
+  NovaHud_ShowOverlayMessage(state,
+                             std::move(*text),
+                             /*duration_frames=*/std::uint64_t{0x1a4});
+}
+
+// Ghidra 0x00426dd0 Mission_TrySpawnMissionShipAmbush.
+void Mission_TrySpawnMissionShipAmbush(GameState &state) {
+  // Gate: the ambush personality (pers slot 0x3fe) must be defined by the
+  // scenario (present + loaded latch; PersDef +0x620/+0x623).
+  const PersDef &ambusher =
+      state.scenario.pers_defs[static_cast<std::size_t>(0x3fe)];
+  if (!ambusher.present || !ambusher.loaded_latch) {
+    return;
+  }
+
+  // Candidate count: dominated/hazard stellars that are currently
+  // available with the availability_flags 0x20 bit clear (StellarDef
+  // +0x44/+0x46/+0x34 read through the g_stellar_defs scan).
+  std::int16_t candidates = 0;
+  for (const Stellar &stellar : state.scenario.stellars) {
+    if (stellar.is_available && stellar.hazard_marker &&
+        (stellar.availability_flags & 0x20U) == 0U) {
+      ++candidates;
+    }
+  }
+
+  bool fire = false;
+  if (candidates == 1) {
+    fire = RandomBelow(state, 10) == 0;
+  } else if (candidates > 1) {
+    fire = RandomBelow(state, 5) == 0;
+  }
+  if (!fire) {
+    return;
+  }
+
+  // TODO(decomp(0x00426dd0)) skipped: g_hud_overlay_msg_color = 0xffff is a
+  // dead store in the original (NovaHud_ShowOverlayMessage overwrites the
+  // countdown before anything reads it).
+  const int slot =
+      NovaPers_SpawnShipFromPersDef(state,
+                                    state.player.current_system_id,
+                                    /*exclude_derelict_govts=*/true,
+                                    /*forced_pers_slot=*/0x3fe);
+  if (slot < 0) {
+    return;
+  }
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  // Ship_SetShipHostileToPlayer: its own pers Flags 0x10 arm may hail first
+  // (speaker latched inside).
+  NovaAi_SetShipHostileToPlayer(state, ship);
+  state.mission_speaker_ship_slot = ship.ship_instance_id;
+  Mission_ShowMissionShipAnnouncement(state, ambusher.hail_quote_id);
+  state.mission_speaker_ship_slot = -1;
+}
+
+// Ghidra 0x00448660 Mission_ClearActiveReactionMission.
+void Mission_ClearActiveReactionMission(GameState &state) {
+  state.mission_interaction_context = -1;
+}
+
+// Ghidra 0x0046f140 Ship_HasAnyCargoLootOrActiveMission.
+bool Ship_HasAnyCargoLootOrActiveMission(const GameState &state) {
+  for (const std::int16_t bin : state.inventory.cargo_bins) {
+    if (bin > 0) {
+      return true;
+    }
+  }
+  for (const std::int16_t junk : state.inventory.junk_counts) {
+    if (junk > 0) {
+      return true;
+    }
+  }
+  for (const auto &flags : state.active_mission_runtime_flags) {
+    if (flags.is_active) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility.
+bool Mission_CheckMissionShipInteractionEligibility(const GameState &state,
+                                                    std::int16_t mission_id,
+                                                    bool interaction_context) {
+  if (mission_id < 0 ||
+      static_cast<std::size_t>(mission_id) >= state.scenario.missions.size()) {
+    return false;
+  }
+  return CheckOfferingEligibility(state,
+                                  static_cast<std::size_t>(mission_id),
+                                  /*page_group=*/0,
+                                  interaction_context);
+}
+
+// Ghidra 0x00433050 mission-hail ladder (runs inline in Ship_HandleShip).
+void Mission_TickShipHailLadder(GameState &state,
+                                Ship &ship,
+                                std::int64_t now_60hz) {
+  if (ship.pers_def_slot < 0 || static_cast<std::size_t>(ship.pers_def_slot) >=
+                                    state.scenario.pers_defs.size()) {
+    return;
+  }
+  const PersDef &pers =
+      state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
+  if (pers.hail_quote_id == -1 || !pers.present) {
+    return;
+  }
+  // The player must not be station-held, the hailing ship must be visible
+  // to the player under the cloak rules, alive, and not under escort control.
+  if (state.player.ai_station_hold_timer > 0.0F ||
+      !NovaAiShip_CanEngageTargetUnderCloakRules(state, state.player, ship) ||
+      NovaAiShip_IsDestroyed(ship) || ship.ai_control_mode == 4 ||
+      ship.ai_control_mode == 0x0D) {
+    return;
+  }
+
+  const auto flags = static_cast<std::uint16_t>(pers.flags_primary);
+  bool allow = true;
+  // Flags 0x20: the ship hails only in its paired disable state -- disabled
+  // ships hail only with 0x20 set, healthy ships only with it clear.
+  const bool disabled = NovaAiShip_IsDisabled(state, ship);
+  if (disabled != ((flags & 0x20U) != 0U)) {
+    allow = false;
+  }
+  // Flags 0x10: one distress hail while not disabled, bypassing the throttle
+  // below (the local_14 override in the original).
+  bool distress_override = false;
+  if ((flags & 0x10U) != 0U && !disabled) {
+    if (ship.mission_hail_latch != 0) {
+      allow = false;
+    } else if (NovaTargeting_IsShipEligibleForDistressCall(state, ship)) {
+      distress_override = true;
+    } else {
+      allow = false;
+    }
+  }
+  // Flags 0x04: hail only after the personality has been loaded/marked
+  // present by the mission-list evaluator (+0x621 latch).
+  if ((flags & 0x04U) != 0U && !pers.loaded_latch) {
+    allow = false;
+  }
+  // Flags 0x08: hail only when the ship's government would aid the player.
+  if ((flags & 0x08U) != 0U &&
+      !NovaGovernment_IsShipEligibleForGovernmentAid(state, ship)) {
+    allow = false;
+  }
+  // Flags 0x400 + LinkMission: the linked mission must currently offer from
+  // a ship (the original runs the check with g_travel_scene_ctx = 1).
+  if ((flags & 0x400U) != 0U && pers.link_mission_id != -1 &&
+      !Mission_CheckMissionShipInteractionEligibility(state,
+                                                      pers.link_mission_id,
+                                                      /*interaction_context=*/
+                                                      true)) {
+    allow = false;
+  }
+  // Flags 0x800: silent while the ship holds AI state 2 (clear primary).
+  if ((flags & 0x800U) != 0U && ship.ai_state_code == 2) {
+    allow = false;
+  }
+  // Flags 0x1000/0x2000/0x4000: silent versus player classes whose inherent
+  // AI matches the masked band (1 / 2 / >2 respectively).
+  const ShipClass *player_class = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + kResourceIdBase));
+  const std::int16_t player_ai =
+      player_class != nullptr ? player_class->default_ai_behavior : 0;
+  if (((flags & 0x1000U) != 0U && player_ai == 1) ||
+      ((flags & 0x2000U) != 0U && player_ai == 2) ||
+      ((flags & 0x4000U) != 0U && player_ai > 2)) {
+    allow = false;
+  }
+  // Flags 0x80: one hail per personality ship.
+  if ((flags & 0x80U) != 0U && ship.mission_hail_latch != 0) {
+    allow = false;
+  }
+  if (!allow) {
+    return;
+  }
+  // Throttle: 1-in-0x8c roll, no overlay currently showing, and the +0xAC
+  // re-hail window (+0xa8c = 2692 60 Hz ticks, ~45 s) expired. The distress
+  // override bypasses all three.
+  if (!distress_override &&
+      !(RandomBelow(state, 0x8c) == 0 && !state.hud_overlay.active &&
+        now_60hz > ship.last_mission_hail_tick_60hz + 0xa8c)) {
+    return;
+  }
+  state.mission_speaker_ship_slot = ship.ship_instance_id;
+  Mission_ShowMissionShipAnnouncement(state, pers.hail_quote_id);
+  state.mission_speaker_ship_slot = -1;
+  ship.mission_hail_latch = 1;
+  ship.last_mission_hail_tick_60hz = static_cast<std::int32_t>(now_60hz);
 }
 
 } // namespace game

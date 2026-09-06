@@ -302,11 +302,18 @@ toward / last left; -1 none, -2 mission-spawn sentinel).
 
 Remaining gaps in this section: the goal-counter increment sites on ship
 death/disable/board (0x00443c60 only evaluates the counters today), the
-hailed-escort respawn call site `0x00454910` (comm-dialog wiring), mission-
-ship announcements `0x00426d10`, ambush spawning `0x00426dd0`, the ambient
+hailed-escort respawn call site `0x00454910` (comm-dialog wiring), the ambient
 Shareware-Enforcer spawner `0x0046ac50`, the stellar-attack directive
 `0x004053c0`, government assistance/reinforcement (`0x00413610`/`0x0043a020`),
-and the special-system forced personality arm of `0x0041af90`. `0x004235c0`
+and the special-system forced personality arm of `0x0041af90`. Mission-ship
+announcements `0x00426d10` are DONE (`Mission_ShowMissionShipAnnouncement`,
+mission.cpp), ambush spawning `0x00426dd0` is DONE
+(`Mission_TrySpawnMissionShipAmbush`, wired at the jump-arrival tail in
+spaceflight.cpp), and the Ship_HandleShip per-frame hail ladder is DONE
+(`Mission_TickShipHailLadder`: the full pers Flags gate chain, the distress
+throttle bypass, and the 1-in-0x8C roll + `+0xAC` re-hail window). The
+`0x452d5c` forced-pers-0x201 call site is a debug/cheat spawn key arm
+(0x00452b71) and is deliberately skipped. `0x004235c0`
 personality spawn — DONE (renamed from "spawn from a mission-ship
 definition": the përs table drives ambient personalities as well as
 missions); its LinkMission target-block arm is a logged skip until
@@ -436,9 +443,10 @@ DeathDelay-half fraction (0x005753f8, 0.5), and the armor-pin fraction/addend
 6. ~~Implement success/failure and reaction scripts.~~ DONE (debrief dialogs
    wired to the landing-gate sink).
 7. ~~Implement mission ship/fleet spawning~~ DONE (0x0041CF40 + dispatch);
-   remaining: the hailed-escort respawn (0x00454910) and announcements
-   (0x00426d10). Goal-counter increment sites on ship death/disable/board
-   are DONE (see 6.1).
+   remaining: the hailed-escort respawn (0x00454910). Announcements
+   (0x00426d10), the ambush spawner (0x00426dd0), and the HandleShip per-frame
+   hail ladder are DONE. Goal-counter increment sites on ship death/disable/
+   board are DONE (see 6.1).
 8. Connect in-flight objectives, boarding, disable, escort, and interaction reactions — mostly DONE via 0x00443C60; boarding-pickup (PickupMode 2) DONE.
 9. Add mission markers/highlights and replace mocked Mission BBS/starmap behavior.
 

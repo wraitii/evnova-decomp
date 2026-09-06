@@ -283,6 +283,15 @@ struct Ship {
   // here by Weapon_ApplyWeaponOnHitEffects; the status renderer is deferred.
   std::uint32_t ionization_color = 0;
 
+  // Ghidra ShipState +0xAC: 60 Hz tick (NovaTime_GetTickCount60Hz) the ship
+  // last played its mission-ship hail announcement; Ship_HandleShip re-hails
+  // only once tick + 0xa8c (2692 ticks, ~45 s) has passed.
+  std::int32_t last_mission_hail_tick_60hz = 0;
+  // Ghidra ShipState +0xBC: mission-hail latch. Set after a ship has spoken
+  // once (Mission_ShowMissionShipAnnouncement callers); the pers Flags 0x80
+  // "no repeat hail" gate reads it to keep one-shot hailers silent.
+  std::int8_t mission_hail_latch = 0;
+
   // Ghidra ShipState.jamming_score_1..4 (+0xC926): lazily computed electronic-
   // warfare jamming scores (0..100) per seek channel, consumed by the guided-
   // shot jamming check (NovaAi_GetShipJammingScore, 0x00464810). -1 = uncached;
@@ -1087,6 +1096,11 @@ struct GameState {
   std::array<std::int16_t, 0x200> ship_class_threshold_rolls{};
   // Ghidra DAT_00774ae2: the context the interaction walk last ran in.
   std::int16_t mission_interaction_context = 0;
+  // Ghidra DAT_0077430e: the ship instance currently speaking a mission-ship
+  // announcement (latched around Mission_ShowMissionShipAnnouncement calls;
+  // -1 none). The <OSN> mission-text wildcard expands to the speaker's
+  // personality display name.
+  std::int16_t mission_speaker_ship_slot = -1;
   // Ghidra g_travel_scene_ctx (0x007d2b78): the landing DLOG 1000 window
   // handle, nonzero while the travel-destination window owns the world --
   // i.e. during Mission_TickReactionSlotsForTravelInteraction's landing pass

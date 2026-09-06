@@ -339,9 +339,11 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
 
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Flips the ship hostile: sets
 // ai_state_code 0x04, clears the secondary target, targets the player, and
-// drops escort control modes 0x04/0x0D. The mission-side announcement arm
-// (Mission_ShowMissionShipAnnouncement for mission-ship slots) is deferred
-// with TODO(decomp) -- mission ship defs are not modelled.
+// drops escort control modes 0x04/0x0D. The pers announcement arm runs first:
+// a personality ship (pers_def_slot set, no mission fleet) whose pers Flags
+// carry 0x10 plays Mission_ShowMissionShipAnnouncement once (speaker latched
+// in state.mission_speaker_ship_slot, +0xBC hail latch set), unless disabled
+// or destroyed or still pressing its previous target.
 void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship);
 
 // Ghidra 0x0046b260 Ship_CanShipUseAfterburner (DB name

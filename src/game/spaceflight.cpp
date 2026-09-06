@@ -308,6 +308,10 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     // Ship_HandleShip hands a latched active bank to Weapon_FireShipWeapons.
     NovaWeapon_FireNpcWeaponBank(state, ship);
 
+    // Mission-hail ladder (0x00433050 inline block, after the shield/armor
+    // recharge in the original's ordering).
+    Mission_TickShipHailLadder(state, ship, SDL_GetTicks() * 60 / 1000);
+
     // The separate ionization speed clamp remains deferred.
     TickIonizationDecay(state, ship, elapsed_ticks);
   }
@@ -732,10 +736,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // (slots 0x2a / 0x2b..0x2f / 0x30..0x33) against the live keyboard
       // state, matching the original's command-active reads.
       const auto &escort_key = prefs.bindings.cmd_to_key;
-      const auto escort_held =
-          [&platform](std::uint16_t code) {
-            return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
-          };
+      const auto escort_held = [&platform](std::uint16_t code) {
+        return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
+      };
       NovaEscort_TickPlayerEscortCommands(
           state,
           {.panel_toggle_held = escort_held(escort_key[0x2a]),
@@ -990,6 +993,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // the mission lists).
       Mission_RerollOfferingRolls(state);
       NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
+      // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of
+      // Stellar_ProcessTravelAndLanding's system-transition slice, after the
+      // population rebuild. TODO(decomp): the mission-fleet rearm/jump-in
+      // arms of that slice (Misn_TickActiveMissionTimers transition pass,
+      // per-mission spawn_rearm re-arm, follow-player ShipBehav 0 fleet
+      // jump-in) are not reconstructed yet; the ambush is position-faithful
+      // relative to the slices that exist.
+      Mission_TrySpawnMissionShipAmbush(state);
       // 0x0044faa2: the -999 hold-timer window closes right after the
       // rebuild returns.
       state.player.ai_station_hold_timer = 0.0F;

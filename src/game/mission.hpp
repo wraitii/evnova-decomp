@@ -315,4 +315,61 @@ void Mission_TickDailyWorldUpdate(GameState &state);
 [[nodiscard]] std::string NovaText_FormatDateString(const GameDate &date,
                                                     bool abbreviated_month);
 
+// Ghidra 0x00426d10 Mission_ShowMissionShipAnnouncement. Plays the mission-
+// ship hail: transition-table cue 4, then the hail text -- first string of
+// STR# (hail_quote_id + 4999) when that resource exists, else entry
+// hail_quote_id of STR# 7101 (the pers HailQuote pool) -- run through the
+// desc placeholder expansion and the mission-wildcard pass (mission context
+// cleared, so mission tokens expand to their [Error] sentinels and <OSN> to
+// the speaking ship's personality name via state.mission_speaker_ship_slot).
+// The caller latches mission_speaker_ship_slot around the call. Shows the
+// result as a 420-tick (0x1a4) HUD overlay.
+void Mission_ShowMissionShipAnnouncement(GameState &state,
+                                         std::int16_t hail_quote_id);
+
+// Ghidra 0x00426dd0 Mission_TrySpawnMissionShipAmbush. When the scenario
+// defines the ambush personality (pers slot 0x3fe present + loaded), counts
+// the current system's dominated/hazard stellars (is_available +
+// hazard_marker set, availability_flags 0x20 clear) and rolls 1-in-10 (one
+// candidate) / 1-in-5 (several) per call. On a hit spawns the forced
+// personality 0x3fe in the player's system, flips it hostile (whose pers
+// Flags 0x10 arm may hail first), then latches the speaker and plays the
+// personality's own hail announcement. Called from the system-arrival slice
+// of Stellar_ProcessTravelAndLanding (0x00457580).
+void Mission_TrySpawnMissionShipAmbush(GameState &state);
+
+// Ghidra 0x00448660 Mission_ClearActiveReactionMission. Clears the
+// interaction-walk context latch (DAT_00774ae2 -> -1); the travel-services /
+// outfit / shipyard windows call it on close.
+void Mission_ClearActiveReactionMission(GameState &state);
+
+// Ghidra 0x0046f140 Ship_HasAnyCargoLootOrActiveMission. True when the
+// player carries any cargo, any junk, or has any active mission slot. Used
+// by the player special-interaction window and its tab strip.
+[[nodiscard]] bool Ship_HasAnyCargoLootOrActiveMission(const GameState &state);
+
+// Ghidra 0x00441b40 Mission_CheckMissionShipInteractionEligibility public
+// wrapper (the BBS list builder uses the internal offering slice with the
+// interaction context clear). `interaction_context` mirrors the original's
+// g_travel_scene_ctx set around ship-offering calls: AvailLoc 2 defs are
+// then the only eligible lane, the AvailStel locator gate relaxes to a pass,
+// and the cargo gate switches to the "carrying >= 1 ton" arm. The original's
+// param_2 recompute-reaction-cache arm (0x77f642) is TODO(decomp).
+[[nodiscard]] bool Mission_CheckMissionShipInteractionEligibility(
+    const GameState &state, std::int16_t mission_id, bool interaction_context);
+
+// Ghidra 0x00433050 mission-hail ladder (runs inline in Ship_HandleShip,
+// after the shield/armor recharge, before the velocity-match block).
+// Per-frame eligibility ladder over the ship's personality Flags for the
+// idle mission-ship hail: Flags 0x20 (disabled-hail pairing), 0x10 (distress
+// hail with throttle bypass), 0x04 (loaded latch), 0x08 (government aid),
+// 0x400 + LinkMission (offering eligibility), 0x800 (AI state 2),
+// 0x1000/0x2000/0x4000 (player-class AI gates), 0x80 (no repeat). Fires on
+// the distress override or a 1-in-0x8C roll gated on no overlay showing and
+// the +0xAC re-hail window (+0xa8c ticks); on fire it latches the speaker,
+// announces the pers hail, and sets the +0xBC hail latch and +0xAC tick.
+void Mission_TickShipHailLadder(GameState &state,
+                                Ship &ship,
+                                std::int64_t now_60hz);
+
 } // namespace game

@@ -31,6 +31,7 @@
 
 #include "escort_formation.hpp"
 #include "government.hpp"
+#include "mission.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "spaceflight.hpp"
@@ -100,7 +101,8 @@ constexpr float kShieldKeepMult = 4.0F;
 // branches use it.
 constexpr float kTurnRadiusBase = 10.0F;
 constexpr float kTurnRadiusScale50 = 50.0F;
-constexpr float kAssistTurnRadiusScale = 30.0F;  // FLOAT_005750c0 (state 0xc outer band)
+constexpr float kAssistTurnRadiusScale =
+    30.0F; // FLOAT_005750c0 (state 0xc outer band)
 // FLOAT_005750d0 = 60.0: state-0xc inner band (mode 9 beyond it, mode 0xb
 // between outer and inner). 15.0 (FLOAT_005750d4) belongs to state 9's range.
 constexpr float kAssistInnerTurnRadiusScale = 60.0F;
@@ -2404,8 +2406,8 @@ void NovaAi_ApplyControls(GameState &state,
       if (ship.formation_leader_ship_slot > 0 &&
           state.SlotInRange(
               static_cast<std::size_t>(ship.formation_leader_ship_slot))) {
-        NovaEscort_MoveTowardFormationOffset(state, ship, /*snap=*/false,
-                                             elapsed_ticks);
+        NovaEscort_MoveTowardFormationOffset(
+            state, ship, /*snap=*/false, elapsed_ticks);
       }
       ship.engine_glow_level = leader.engine_glow_level;
     }
@@ -2430,8 +2432,8 @@ void NovaAi_ApplyControls(GameState &state,
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
-      NovaEscort_MoveTowardFormationOffset(state, ship, /*snap=*/false,
-                                           elapsed_ticks);
+      NovaEscort_MoveTowardFormationOffset(
+          state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
               .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
@@ -2609,8 +2611,8 @@ void NovaAi_ApplyControls(GameState &state,
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
-      NovaEscort_MoveTowardFormationOffset(state, ship, /*snap=*/false,
-                                           elapsed_ticks);
+      NovaEscort_MoveTowardFormationOffset(
+          state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
               .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
@@ -2655,8 +2657,8 @@ void NovaAi_ApplyControls(GameState &state,
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
-      NovaEscort_MoveTowardFormationOffset(state, ship, /*snap=*/false,
-                                           elapsed_ticks);
+      NovaEscort_MoveTowardFormationOffset(
+          state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
               .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
@@ -2824,8 +2826,8 @@ void NovaAi_ApplyControls(GameState &state,
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
-      NovaEscort_MoveTowardFormationOffset(state, ship, /*snap=*/false,
-                                           elapsed_ticks);
+      NovaEscort_MoveTowardFormationOffset(
+          state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
               .ShipAt(static_cast<std::size_t>(ship.formation_leader_ship_slot))
@@ -2935,8 +2937,8 @@ void NovaAi_ApplyControls(GameState &state,
         // Ship_MoveShipTowardFormationOffset (0x00408150 mode-0xc else arm,
         // snap=0): with no state-7 anchor the ship still keeps its assigned
         // wedge offset.
-        NovaEscort_MoveTowardFormationOffset(state, ship, /*snap=*/false,
-                                             elapsed_ticks);
+        NovaEscort_MoveTowardFormationOffset(
+            state, ship, /*snap=*/false, elapsed_ticks);
       }
       ship.engine_glow_level = target.engine_glow_level;
     } else {
@@ -3714,11 +3716,23 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
   ship.ai_state_code = 4;
 }
 
-// Ghidra 0x00410700 Ship_SetShipHostileToPlayer. The mission-announcement arm
-// is deferred (TODO(decomp): g_pers_defs + Mission_ShowMissionShip-
-// Announcement are not modelled), so this is the escort-mode/state flip only.
+// Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Ports the escort-mode/state
+// flip plus the pers announcement arm: a personality ship (no mission fleet)
+// whose pers Flags carry 0x10 hails once when made hostile, unless it is
+// already disabled/destroyed or still pressing its previous target.
 void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
-  (void)state;
+  if (!NovaAiShip_ShouldKeepPressingTarget(state, ship) &&
+      ship.pers_def_slot >= 0 && ship.mission_fleet_slot == -1) {
+    const auto &pers =
+        state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
+    if ((static_cast<std::uint16_t>(pers.flags_primary) & 0x10U) != 0U &&
+        !NovaAiShip_IsDisabled(state, ship) && !NovaAiShip_IsDestroyed(ship)) {
+      state.mission_speaker_ship_slot = ship.ship_instance_id;
+      Mission_ShowMissionShipAnnouncement(state, pers.hail_quote_id);
+      ship.mission_hail_latch = 1;
+      state.mission_speaker_ship_slot = -1;
+    }
+  }
   if (ship.ai_control_mode == 4 || ship.ai_control_mode == 0x0D) {
     ship.ai_control_mode = 0;
   }
