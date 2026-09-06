@@ -1697,7 +1697,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00501D50	FUN_00501d50		0%	
 0x00501E30	FUN_00501e30		0%	
 0x00501EB0	FUN_00501eb0		0%	
-0x00501EF0	FUN_00501ef0		0%	
+0x00501EF0	ResourceData_FindNodeForHandle		0%	Resource-registry handle lookup: walks registry nodes (head DAT_00864f38) to find the owner of a locked block handle; used by ResourceData_ResolveSlotByHandle and ResourceData_ReleaseEntry.
 0x00501FF0	FUN_00501ff0		0%	
 0x00502080	FUN_00502080		0%	
 0x00502490	FUN_00502490		0%	
@@ -1841,7 +1841,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00508D80	GraphicsStringTable_FindEntry		0%	
 0x00508E00	FUN_00508e00		0%	
 0x00508E50	FUN_00508e50		0%	
-0x00508FBD	FUN_00508fbd		0%	
+0x00508FBD	MemOrStream_ResolveId		0%	Registry id resolver, provisional: opens the entry for a small-int resource id against a registry root; callers chain it for path resolution (MemOrStream_OpenOrResolvePath 0x004da370).
 0x00509241	FUN_00509241		0%	
 0x00509301	FUN_00509301		0%	
 0x00509323	FUN_00509323		0%	

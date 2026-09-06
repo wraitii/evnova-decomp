@@ -50,8 +50,8 @@ how much of each function has been re-implemented.
 `decomp-skipped.tsv` — functions deliberately **not** reimplemented (replaced by
 SDL3 / OS / bundled codecs):
 `address\tname\tlibrary\tcomment`. `library` is the reason class
-(`blitter | qtml-iml | msl-crt | crt | winsock | vorbis | libpng | libjpeg |
-codec-unknown`). Library renames made in Ghidra must be mirrored into the
+(`blitter | qtml-iml | msl-crt | crt | winsock | vorbis | libpng | libjpeg`).
+Library renames made in Ghidra must be mirrored into the
 `name` column here. Rows move from progress to skipped only via a deliberate
 decision recorded in `comment`; the glue strip (~0x004E7389–0x00514593) and
 late-linked game code (≥0x00569C9C) stay in progress until triaged.

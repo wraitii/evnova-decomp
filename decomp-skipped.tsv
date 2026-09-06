@@ -51,7 +51,7 @@ address	name	library	comment
 0x004E71F4	FUN_004e71f4	blitter	
 0x004E72B3	FUN_004e72b3	blitter	
 0x005145ED	ImlProbe_IsJfifHeader	qtml-iml	
-0x00514627	FUN_00514627	qtml-iml	
+0x00514627	ImlJpeg_DecodeToBitmap	qtml-iml	
 0x0051491D	FUN_0051491d	qtml-iml	
 0x0051494C	FUN_0051494c	qtml-iml	
 0x0051496D	FUN_0051496d	qtml-iml	
@@ -390,7 +390,7 @@ address	name	library	comment
 0x00532E20	VorbisDecode_FUN_00532e20	vorbis	
 0x00532FF0	FUN_00532ff0	vorbis	
 0x00533150	FUN_00533150	vorbis	
-0x00533370	FUN_00533370	vorbis	
+0x00533370	VorbisDecode_UnpackSetupHeader	vorbis	
 0x005337C0	VorbisDecode_FUN_005337c0	vorbis	
 0x00533A30	VorbisDecode_FUN_00533a30	vorbis	
 0x00533C30	FUN_00533c30	vorbis	
@@ -404,29 +404,29 @@ address	name	library	comment
 0x00534DA0	FUN_00534da0	vorbis	
 0x00534DE0	FUN_00534de0	vorbis	
 0x00534E00	FUN_00534e00	vorbis	
-0x00534E20	FUN_00534e20	codec-unknown	provisional category
-0x00534E3F	FUN_00534e3f	codec-unknown	provisional category
-0x00534EE2	FUN_00534ee2	codec-unknown	provisional category
-0x00534F7C	FUN_00534f7c	codec-unknown	provisional category
-0x00534FF1	FUN_00534ff1	codec-unknown	provisional category
-0x00535188	FUN_00535188	codec-unknown	provisional category
-0x00535193	FUN_00535193	codec-unknown	provisional category
-0x0053526D	FUN_0053526d	codec-unknown	provisional category
-0x00535304	FUN_00535304	codec-unknown	provisional category
-0x0053533D	FUN_0053533d	codec-unknown	provisional category
-0x005356D5	FUN_005356d5	codec-unknown	provisional category
-0x00535788	FUN_00535788	codec-unknown	provisional category
-0x005358A3	FUN_005358a3	codec-unknown	provisional category
-0x00535958	FUN_00535958	codec-unknown	provisional category
-0x00535AB9	FUN_00535ab9	codec-unknown	provisional category
-0x00535B87	FUN_00535b87	codec-unknown	provisional category
-0x00535DAE	FUN_00535dae	codec-unknown	provisional category
-0x00535EBB	FUN_00535ebb	codec-unknown	provisional category
-0x0053618C	FUN_0053618c	codec-unknown	provisional category
-0x0053649E	FUN_0053649e	codec-unknown	provisional category
-0x005367AB	FUN_005367ab	codec-unknown	provisional category
+0x00534E20	FUN_00534e20	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00534E3F	FUN_00534e3f	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00534EE2	FUN_00534ee2	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00534F7C	FUN_00534f7c	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00534FF1	FUN_00534ff1	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535188	JpegDecode_DestroyDecompress	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535193	JpegDecode_CreateDecompress	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x0053526D	FUN_0053526d	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535304	FUN_00535304	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x0053533D	FUN_0053533d	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x005356D5	FUN_005356d5	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535788	FUN_00535788	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x005358A3	FUN_005358a3	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535958	FUN_00535958	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535AB9	FUN_00535ab9	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535B87	FUN_00535b87	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535DAE	FUN_00535dae	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x00535EBB	FUN_00535ebb	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x0053618C	FUN_0053618c	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x0053649E	FUN_0053649e	qtml-iml	IML JPEG import core (0x00514627 driver)
+0x005367AB	FUN_005367ab	qtml-iml	IML JPEG import core (0x00514627 driver)
 0x00536AED	FUN_00536aed	libpng	
-0x00536BA8	FUN_00536ba8	libpng	
+0x00536BA8	JpegDecode_ReadScanline	libpng	
 0x00536C3D	FUN_00536c3d	libpng	
 0x00536CE9	FUN_00536ce9	libpng	
 0x00536DAC	PNG_SetErrorCallbacks	libpng	
@@ -755,49 +755,49 @@ address	name	library	comment
 0x005567B0	FUN_005567b0	libpng	
 0x00556A20	FUN_00556a20	libpng	
 0x00557400	FUN_00557400	libpng	
-0x00557690	FUN_00557690	vorbis	provisional category
-0x00557760	FUN_00557760	vorbis	provisional category
-0x00557910	FUN_00557910	vorbis	provisional category
-0x00557AF0	FUN_00557af0	vorbis	provisional category
-0x005581E0	FUN_005581e0	vorbis	provisional category
-0x00558310	FUN_00558310	vorbis	provisional category
-0x005584B0	FUN_005584b0	vorbis	provisional category
-0x00558600	FUN_00558600	vorbis	provisional category
-0x00558B10	FUN_00558b10	vorbis	provisional category
-0x00558DF0	FUN_00558df0	vorbis	provisional category
-0x00559260	FUN_00559260	vorbis	provisional category
-0x005597F0	FUN_005597f0	vorbis	provisional category
-0x00559B70	FUN_00559b70	vorbis	provisional category
-0x00559DE0	FUN_00559de0	vorbis	provisional category
-0x00559E20	FUN_00559e20	vorbis	provisional category
-0x00559F60	FUN_00559f60	vorbis	provisional category
-0x0055A550	FUN_0055a550	vorbis	provisional category
-0x0055BD00	FUN_0055bd00	vorbis	provisional category
-0x0055BD10	FUN_0055bd10	vorbis	provisional category
-0x0055BD70	FUN_0055bd70	vorbis	provisional category
-0x0055C080	FUN_0055c080	vorbis	provisional category
-0x0055C630	FUN_0055c630	vorbis	provisional category
-0x0055CAA0	FUN_0055caa0	vorbis	provisional category
-0x0055E5B0	FUN_0055e5b0	vorbis	provisional category
-0x0055E900	FUN_0055e900	vorbis	provisional category
-0x0055EE50	FUN_0055ee50	vorbis	provisional category
-0x0055F160	FUN_0055f160	vorbis	provisional category
-0x0055F5B0	FUN_0055f5b0	vorbis	provisional category
-0x00561070	FUN_00561070	vorbis	provisional category
-0x00561360	FUN_00561360	vorbis	provisional category
-0x005613A0	FUN_005613a0	vorbis	provisional category
-0x005613E0	FUN_005613e0	vorbis	provisional category
-0x00561450	FUN_00561450	vorbis	provisional category
-0x00561497	FUN_00561497	vorbis	provisional category
-0x00561498	FUN_00561498	vorbis	provisional category
-0x0056149B	FUN_0056149b	vorbis	provisional category
-0x005614B1	FUN_005614b1	vorbis	provisional category
-0x005614B6	FUN_005614b6	vorbis	provisional category
-0x005614C1	FUN_005614c1	vorbis	provisional category
-0x005614CC	FUN_005614cc	vorbis	provisional category
-0x005614D7	FUN_005614d7	vorbis	provisional category
+0x00557690	FUN_00557690	vorbis	
+0x00557760	VorbisResidue0_PackHeader	vorbis	
+0x00557910	VorbisResidue0_UnpackHeader	vorbis	
+0x00557AF0	FUN_00557af0	vorbis	
+0x005581E0	FUN_005581e0	vorbis	
+0x00558310	FUN_00558310	vorbis	
+0x005584B0	FUN_005584b0	vorbis	
+0x00558600	FUN_00558600	vorbis	
+0x00558B10	FUN_00558b10	vorbis	
+0x00558DF0	FUN_00558df0	vorbis	
+0x00559260	FUN_00559260	vorbis	
+0x005597F0	FUN_005597f0	vorbis	
+0x00559B70	FUN_00559b70	vorbis	
+0x00559DE0	FUN_00559de0	vorbis	
+0x00559E20	FUN_00559e20	vorbis	
+0x00559F60	FUN_00559f60	vorbis	
+0x0055A550	FUN_0055a550	vorbis	
+0x0055BD00	FUN_0055bd00	vorbis	
+0x0055BD10	FUN_0055bd10	vorbis	
+0x0055BD70	FUN_0055bd70	vorbis	
+0x0055C080	FUN_0055c080	vorbis	
+0x0055C630	FUN_0055c630	vorbis	
+0x0055CAA0	FUN_0055caa0	vorbis	
+0x0055E5B0	FUN_0055e5b0	vorbis	
+0x0055E900	FUN_0055e900	vorbis	
+0x0055EE50	FUN_0055ee50	vorbis	
+0x0055F160	FUN_0055f160	vorbis	
+0x0055F5B0	FUN_0055f5b0	vorbis	
+0x00561070	FUN_00561070	vorbis	
+0x00561360	FUN_00561360	vorbis	
+0x005613A0	FUN_005613a0	vorbis	
+0x005613E0	FUN_005613e0	vorbis	
+0x00561450	FUN_00561450	vorbis	
+0x00561497	FUN_00561497	vorbis	
+0x00561498	FUN_00561498	vorbis	
+0x0056149B	FUN_0056149b	vorbis	
+0x005614B1	FUN_005614b1	vorbis	
+0x005614B6	FUN_005614b6	vorbis	
+0x005614C1	FUN_005614c1	vorbis	
+0x005614CC	FUN_005614cc	vorbis	
+0x005614D7	FUN_005614d7	vorbis	
 0x005614E2	JpegDecode_FUN_005614e2	libjpeg	
-0x005615AA	FUN_005615aa	vorbis	provisional category
+0x005615AA	FUN_005615aa	vorbis	
 0x005615C1	FUN_005615c1	libjpeg	
 0x005616CE	FUN_005616ce	libjpeg	
 0x00561880	FUN_00561880	libjpeg	
