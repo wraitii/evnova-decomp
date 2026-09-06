@@ -492,7 +492,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046CDD0	Stellar_ComputeShipJumpDepth		0%	
 0x0046CEC0	Weapon_GetShipMaxWeaponRange		0%	
 0x0046D080	Ship_CheckSpecialLoadoutCapability		0%	
-0x0046D190	Ship_ShipsShareSquadRoot		70%	Implemented as SharesSquadRoot in src/game/collision.cpp: walks both ai_target chains to roots and compares. Divergence: bounded walk tolerating malformed cycles (original is unbounded).
+0x0046D190	Ship_ShipsShareSquadRoot		70%	Implemented as SharesSquadRoot in src/game/collision.cpp: walks both squad-leader chains to roots and compares. Divergence: bounded walk tolerating malformed cycles (original is unbounded).
 0x0046D250	PascalString_ToCStringInPlace		0%	
 0x0046D380	CString_ToPascalStringInPlace		0%	
 0x0046D4B0	Outfit_RecomputeOutfitDerivedState		0%	

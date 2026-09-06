@@ -145,13 +145,13 @@ field definitions and uncertainties.
 | `+0x68` | `ai_desired_heading_deg` | Integer degrees: 0 is up, values increase clockwise. |
 | `+0x6c` | `ai_secondary_target_slot` | Polymorphic secondary ship slot or selected travel stellar resource ID. |
 | `+0x70` | `primary_target_ship_slot` | Principal combat target. |
-| `+0x9a` | `squad_leader_ship_slot` | Squad leader / attachment anchor (renamed from `ai_target_ship_slot` 2026): carrier for behavior-5 fighters, protected ship (usually the player) for behavior-6 escorts, assist target for behavior >4. Not a hostile target; roots the friendly-fire squad chain and drives leadership succession (0x004156a0). |
-| `+0xc0` | `is_any_ships_squad_leader` | Scope-6 flag: some active ship holds this slot as its squad leader. Not combat targeting. |
 | `+0x8e` | `ai_evasive_heading_deg` | Stored `±135°` escape heading for mode `0x10`; name remains provisional. |
 | `+0x92` | `jump_destination_stellar_id` | Stellar reached/selected for a possible jump. |
+| `+0x9a` | `squad_leader_ship_slot` | Squad leader / attachment anchor (renamed from `ai_target_ship_slot` 2026): carrier for behavior-5 fighters, protected ship (usually the player) for behavior-6 escorts, assist target for behavior >4. Not a hostile target; roots the friendly-fire squad chain and drives leadership succession (0x004156a0). |
 | `+0xa4` | `ai_mode_start_time_ms` | Wall-clock timestamp used by jump/formation timing. |
 | `+0xba` | `ai_fire_trigger_latch` | Requests a fire of the selected weapon bank. |
 | `+0xbd` | `ai_brake_to_boost_latch` | Unidentified producer; gates several close-range mode-`0x11` boosts. Provisional. |
+| `+0xc0` | `is_any_ships_squad_leader` | Scope-6 flag: some active ship holds this slot as its squad leader. Not combat targeting. |
 | `+0xc8c8` | `ai_state_code` | High-level AI state. |
 | `+0xc8ca` | `ai_control_mode` | Low-level movement order. |
 | `+0xc8d8` | `cloak_transition_latch` | Signed cloak enter/exit request. |

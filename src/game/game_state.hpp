@@ -409,7 +409,7 @@ struct Ship {
   // cleared by Ship_DeactivateVacantShipsAndTally (0x0041ad50) and seeded by
   // Ship_AllocateShipSlotInSystem, so it lives on the struct.
   std::int16_t velocity_match_target_ship_slot = -1; // +0xC8DC
-  // Ghidra ShipState +0xC92E: the AI's resolved-target slot, cleared by
+  // Ghidra ShipState +0xC92E: the AI's resolved squad leader, cleared by
   // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810).
   std::int16_t resolved_squad_leader_ship_slot = -1; // +0xC92E
   // Stored evasive heading for control mode 0x10 (Ghidra ShipState raw short

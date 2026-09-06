@@ -375,7 +375,7 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
 // 0x04 with a random combat target chosen relative to the ship's squad leader
 // (squad_leader_ship_slot, +0x9A): the player (slot 0) is admitted only while
 // the squad leader still presses its own target, other candidates when the
-// squad leader (or the ship itself, when the leader is the player) would keep
+// squad leader (or the candidate itself, when the squad leader is the player) would keep
 // pressing / can acquire them. Clears the primary target without a state change
 // when no candidate exists.
 void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
