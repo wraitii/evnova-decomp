@@ -447,12 +447,12 @@ address	name	library	comment
 0x00537535	FUN_00537535	libpng	
 0x0053759C	FUN_0053759c	libpng	
 0x005377EA	FUN_005377ea	libpng	
-0x005378C6	FUN_005378c6	libpng	
+0x005378C6	PngPush_ReadIDAT	libpng	provisional
 0x00537CCF	FUN_00537ccf	libpng	
-0x00537D25	FUN_00537d25	libpng	
+0x00537D25	PngReadRow	libpng	
 0x005381A3	FUN_005381a3	libpng	
-0x005381D3	FUN_005381d3	libpng	
-0x005386A0	FUN_005386a0	libpng	
+0x005381D3	PngHandleChunk_IDAT	libpng	
+0x005386A0	PngCreateReadStruct	libpng	
 0x00538852	FUN_00538852	libpng	
 0x00538871	PNG_FUN_00538871	libpng	
 0x005388B3	PNG_FUN_005388b3	libpng	
@@ -503,7 +503,7 @@ address	name	library	comment
 0x0053D711	PNG_FUN_0053d711	libpng	
 0x0053D814	PNG_FUN_0053d814	libpng	
 0x0053D9AD	PNG_FUN_0053d9ad	libpng	
-0x0053DAB9	PNG_FUN_0053dab9	libpng	
+0x0053DAB9	PngDoRgbToGray	libpng	
 0x0053DF54	FUN_0053df54	libpng	
 0x0053E110	FUN_0053e110	libpng	
 0x0053F003	FUN_0053f003	libpng	
@@ -682,19 +682,19 @@ address	name	library	comment
 0x0054E764	FUN_0054e764	libpng	
 0x0054E8AB	FUN_0054e8ab	libpng	
 0x0054E92C	FUN_0054e92c	libpng	
-0x0054EA54	JpegDecode_FUN_0054ea54	libjpeg	
-0x0054EAE6	JpegDecode_FUN_0054eae6	libjpeg	
-0x0054EC68	JpegDecode_FUN_0054ec68	libjpeg	
-0x0054EE3E	JpegDecode_FUN_0054ee3e	libjpeg	
-0x0054EE51	JpegDecode_FUN_0054ee51	libjpeg	
-0x0054EE6A	JpegDecode_FUN_0054ee6a	libjpeg	
+0x0054EA54	JpegDecode_FUN_0054ea54	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0054EAE6	JpegDecode_FUN_0054eae6	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0054EC68	JpegDecode_FUN_0054ec68	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0054EE3E	JpegDecode_FUN_0054ee3e	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0054EE51	JpegDecode_FUN_0054ee51	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0054EE6A	JpegDecode_FUN_0054ee6a	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
 0x0054EEB3	FUN_0054eeb3	libpng	
 0x0054EECE	FUN_0054eece	libpng	
 0x0054EEDD	FUN_0054eedd	libpng	
 0x0054F083	FUN_0054f083	libpng	
-0x0054F289	JpegDecode_FUN_0054f289	libjpeg	
-0x0054F31C	JpegDecode_FUN_0054f31c	libjpeg	
-0x0054F50C	JpegDecode_FUN_0054f50c	libjpeg	
+0x0054F289	JpegDecode_FUN_0054f289	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0054F31C	JpegDecode_FUN_0054f31c	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0054F50C	JpegDecode_FUN_0054f50c	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
 0x0054F58B	FUN_0054f58b	libpng	
 0x0054F596	FUN_0054f596	libpng	
 0x0054F71B	FUN_0054f71b	libpng	
@@ -728,12 +728,12 @@ address	name	library	comment
 0x0055233D	PNG_FUN_0055233d	libpng	
 0x0055249C	PNG_FUN_0055249c	libpng	
 0x005525F6	PNG_FUN_005525f6	libpng	
-0x00552647	PNG_FUN_00552647	libpng	
-0x005527D8	PNG_FUN_005527d8	libpng	
+0x00552647	PngHandleChunk_PLTE	libpng	
+0x005527D8	PngReadInfo	libpng	provisional
 0x005529CE	FUN_005529ce	libpng	
-0x00552CA8	PNG_FUN_00552ca8	libpng	
+0x00552CA8	PngCrcFinish	libpng	
 0x00552DD8	PNG_FUN_00552dd8	libpng	
-0x00552E01	PNG_FUN_00552e01	libpng	
+0x00552E01	PngGetUint31	libpng	
 0x00552E46	Ordinal_51	msl-crt	
 0x00552F20	FUN_00552f20	libpng	
 0x00552F60	FUN_00552f60	libpng	
@@ -796,92 +796,92 @@ address	name	library	comment
 0x005614C1	FUN_005614c1	vorbis	
 0x005614CC	FUN_005614cc	vorbis	
 0x005614D7	FUN_005614d7	vorbis	
-0x005614E2	JpegDecode_FUN_005614e2	libjpeg	
+0x005614E2	JpegDecode_FUN_005614e2	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
 0x005615AA	FUN_005615aa	vorbis	
-0x005615C1	FUN_005615c1	libjpeg	
-0x005616CE	FUN_005616ce	libjpeg	
-0x00561880	FUN_00561880	libjpeg	
-0x00561988	FUN_00561988	libjpeg	
-0x00561A7F	FUN_00561a7f	libjpeg	
-0x00561B11	FUN_00561b11	libjpeg	
-0x00561B93	FUN_00561b93	libjpeg	
-0x00561C77	FUN_00561c77	libjpeg	
-0x00561DAE	FUN_00561dae	libjpeg	
-0x00561EFF	FUN_00561eff	libjpeg	
-0x00561FC4	JpegDecode_FUN_00561fc4	libjpeg	
-0x005620EF	FUN_005620ef	libjpeg	
-0x00562201	FUN_00562201	libjpeg	
-0x00562223	FUN_00562223	libjpeg	
-0x005622BF	FUN_005622bf	libjpeg	
-0x005625E7	FUN_005625e7	libjpeg	
-0x005626A4	FUN_005626a4	libjpeg	
-0x0056278E	FUN_0056278e	libjpeg	
-0x00562906	FUN_00562906	libjpeg	
-0x00562B43	FUN_00562b43	libjpeg	
-0x00562BDB	FUN_00562bdb	libjpeg	
-0x00562D13	FUN_00562d13	libjpeg	
-0x00562EB4	FUN_00562eb4	libjpeg	
-0x00563172	FUN_00563172	libjpeg	
-0x005631E1	JpegDecode_FUN_005631e1	libjpeg	
-0x00563306	FUN_00563306	libjpeg	
-0x00563540	FUN_00563540	libjpeg	
-0x005636C7	FUN_005636c7	libjpeg	
-0x005636FD	FUN_005636fd	libjpeg	
-0x005637AF	FUN_005637af	libjpeg	
-0x005637C7	JpegDecode_FUN_005637c7	libjpeg	
-0x00563AB7	FUN_00563ab7	libjpeg	
-0x00563BFB	FUN_00563bfb	libjpeg	
-0x00563C7C	FUN_00563c7c	libjpeg	
-0x00563CE0	FUN_00563ce0	libjpeg	
-0x00563DD9	JpegDecode_FUN_00563dd9	libjpeg	
-0x00563FC4	FUN_00563fc4	libjpeg	
-0x00564119	FUN_00564119	libjpeg	
-0x005641AF	FUN_005641af	libjpeg	
-0x0056421C	FUN_0056421c	libjpeg	
-0x0056425C	FUN_0056425c	libjpeg	
-0x00564325	FUN_00564325	libjpeg	
-0x005643FC	FUN_005643fc	libjpeg	
-0x00564418	JpegDecode_FUN_00564418	libjpeg	
-0x005644A1	FUN_005644a1	libjpeg	
-0x0056452A	FUN_0056452a	libjpeg	
-0x005645B7	FUN_005645b7	libjpeg	
-0x005646E3	JpegDecode_FUN_005646e3	libjpeg	
-0x0056475F	FUN_0056475f	libjpeg	
-0x00564956	JpegDecode_FUN_00564956	libjpeg	
-0x005649C3	FUN_005649c3	libjpeg	
-0x00564E23	FUN_00564e23	libjpeg	
-0x00564F52	FUN_00564f52	libjpeg	
-0x0056521E	FUN_0056521e	libjpeg	
-0x0056549D	FUN_0056549d	libjpeg	
-0x005656E9	JpegDecode_FUN_005656e9	libjpeg	
-0x0056572D	FUN_0056572d	libjpeg	
-0x00565C28	FUN_00565c28	libjpeg	
-0x00565CF5	FUN_00565cf5	libjpeg	
-0x00565E22	JpegDecode_FUN_00565e22	libjpeg	
-0x00566083	FUN_00566083	libjpeg	
-0x005661A0	JpegDecode_FUN_005661a0	libjpeg	
-0x0056628F	FUN_0056628f	libjpeg	
-0x00566898	FUN_00566898	libjpeg	
-0x00566977	FUN_00566977	libjpeg	
-0x00566AD5	FUN_00566ad5	libjpeg	
-0x00566C71	FUN_00566c71	libjpeg	
-0x00566EE7	FUN_00566ee7	libjpeg	
-0x00566F3B	JpegDecode_FUN_00566f3b	libjpeg	
-0x005670B6	FUN_005670b6	libjpeg	
-0x005670DC	FUN_005670dc	libjpeg	
-0x00567263	FUN_00567263	libjpeg	
-0x005672D6	FUN_005672d6	libjpeg	
-0x0056737D	FUN_0056737d	libjpeg	
-0x00567450	FUN_00567450	libjpeg	
-0x00567560	FUN_00567560	libjpeg	
-0x005678A0	FUN_005678a0	libjpeg	
-0x00567D90	FUN_00567d90	libjpeg	
-0x00568110	FUN_00568110	libjpeg	
-0x00568BF0	FUN_00568bf0	libjpeg	
-0x00568C40	FUN_00568c40	libjpeg	
-0x00568E23	FUN_00568e23	libjpeg	
-0x0056918A	FUN_0056918a	libjpeg	
-0x005697F8	FUN_005697f8	libjpeg	
+0x005615C1	FUN_005615c1	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005616CE	FUN_005616ce	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561880	FUN_00561880	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561988	FUN_00561988	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561A7F	FUN_00561a7f	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561B11	FUN_00561b11	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561B93	FUN_00561b93	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561C77	FUN_00561c77	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561DAE	FUN_00561dae	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561EFF	FUN_00561eff	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00561FC4	JpegDecode_FUN_00561fc4	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005620EF	FUN_005620ef	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00562201	FUN_00562201	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00562223	FUN_00562223	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005622BF	FUN_005622bf	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005625E7	FUN_005625e7	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005626A4	FUN_005626a4	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056278E	FUN_0056278e	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00562906	FUN_00562906	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00562B43	FUN_00562b43	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00562BDB	FUN_00562bdb	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00562D13	FUN_00562d13	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00562EB4	FUN_00562eb4	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563172	FUN_00563172	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005631E1	JpegDecode_FUN_005631e1	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563306	FUN_00563306	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563540	FUN_00563540	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005636C7	FUN_005636c7	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005636FD	FUN_005636fd	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005637AF	FUN_005637af	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005637C7	JpegDecode_FUN_005637c7	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563AB7	FUN_00563ab7	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563BFB	FUN_00563bfb	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563C7C	FUN_00563c7c	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563CE0	FUN_00563ce0	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563DD9	JpegDecode_FUN_00563dd9	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00563FC4	FUN_00563fc4	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00564119	FUN_00564119	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005641AF	FUN_005641af	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056421C	FUN_0056421c	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056425C	FUN_0056425c	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00564325	FUN_00564325	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005643FC	FUN_005643fc	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00564418	JpegDecode_FUN_00564418	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005644A1	FUN_005644a1	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056452A	FUN_0056452a	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005645B7	FUN_005645b7	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005646E3	JpegDecode_FUN_005646e3	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056475F	FUN_0056475f	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00564956	JpegDecode_FUN_00564956	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005649C3	FUN_005649c3	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00564E23	FUN_00564e23	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00564F52	FUN_00564f52	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056521E	FUN_0056521e	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056549D	FUN_0056549d	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005656E9	JpegDecode_FUN_005656e9	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056572D	FUN_0056572d	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00565C28	FUN_00565c28	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00565CF5	FUN_00565cf5	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00565E22	JpegDecode_FUN_00565e22	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00566083	FUN_00566083	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005661A0	JpegDecode_FUN_005661a0	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056628F	FUN_0056628f	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00566898	FUN_00566898	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00566977	FUN_00566977	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00566AD5	FUN_00566ad5	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00566C71	FUN_00566c71	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00566EE7	FUN_00566ee7	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00566F3B	JpegDecode_FUN_00566f3b	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005670B6	FUN_005670b6	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005670DC	FUN_005670dc	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00567263	FUN_00567263	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005672D6	FUN_005672d6	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056737D	FUN_0056737d	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00567450	FUN_00567450	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00567560	FUN_00567560	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005678A0	FUN_005678a0	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00567D90	FUN_00567d90	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00568110	FUN_00568110	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00568BF0	FUN_00568bf0	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00568C40	FUN_00568c40	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x00568E23	FUN_00568e23	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x0056918A	FUN_0056918a	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
+0x005697F8	FUN_005697f8	qtml-iml	IML JPEG codec (not IJG; interleaved 0x54axxx-0x569xxx)
 0x008757E0	thunk_NovaUi_DrawPlayerShieldBar	crt	
 0x008757F0	thunk_NovaUi_DrawPlayerArmorBar	crt	
 0x00875800	thunk_NovaUi_DrawPlayerFuelLevelBar	crt	
