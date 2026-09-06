@@ -80,7 +80,7 @@ TEST_CASE("projectile impact consumes shields before armor", "[collision]") {
   CHECK(state.ShipAt(1).primary_target_ship_slot == 0);
   // A player attack sets the hostile primary target, but does not overwrite
   // the separate escort/leader-chain link.
-  CHECK(state.ShipAt(1).ai_target_ship_slot == -1);
+  CHECK(state.ShipAt(1).squad_leader_ship_slot == -1);
   CHECK(state.ShipAt(1).ai_hostility_accumulator == 35);
   CHECK(state.ShipAt(1).hit_reaction_timer == Catch::Approx(32.0F));
   CHECK(state.ShipAt(1).ai_state_code == 4);

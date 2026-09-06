@@ -508,7 +508,7 @@ void DrawShipCommDialog(SdlPlatform &platform,
                   info.y + 40.0F,
                   NovaHud_LoadStringEntry(kMiscStr, kMiscHostileLabel)
                       .value_or("Hostile"));
-  } else if (target.ai_target_ship_slot == 0 && !escort_latched) {
+  } else if (target.squad_leader_ship_slot == 0 && !escort_latched) {
     NovaText_Draw(platform,
                   font_cache,
                   NovaFontFamily::kGeneva,
@@ -718,7 +718,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   // escort-management window in the original (NovaUi_RunEscortShipManagement-
   // Window 0x004853a0); that window is not reconstructed, so the comm dialog
   // stands in (the assistance button still runs the escort-release flow).
-  if (target.ai_behavior_code == 6 && target.ai_target_ship_slot == 0 &&
+  if (target.ai_behavior_code == 6 && target.squad_leader_ship_slot == 0 &&
       target.mission_fleet_slot == -1) {
     NovaLog::Todo("ship-comm: escort-management window 0x004853a0 not "
                   "reconstructed; showing the comm dialog instead");
@@ -811,7 +811,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   if (!fire_restricted && !special_mask) {
     if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
       status = LoadCommPrompt(random_index, kMsgWhatDoYouWant).value_or(status);
-    } else if (target.ai_target_ship_slot != 0) {
+    } else if (target.squad_leader_ship_slot != 0) {
       status = NovaGovernment_IsShipEligibleForGovernmentAid(state, target)
                    ? LoadCommPrompt(random_index, kMsgHailOpen).value_or(status)
                    : LoadCommPrompt(random_index, kMsgWhatDoYouWant)
@@ -912,8 +912,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   std::string assistance_label;
   if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
     assistance_label = LoadButtonLabel(kBtnBegForMercy);
-  } else if (target.ai_target_ship_slot == 0 && target.ai_behavior_code == 6 &&
-             !mission_escort) {
+  } else if (target.squad_leader_ship_slot == 0 &&
+             target.ai_behavior_code == 6 && !mission_escort) {
     assistance_label = LoadButtonLabel(kBtnRelease);
   } else {
     assistance_label = LoadButtonLabel(kBtnRequestAssistance);
@@ -948,7 +948,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       status = LoadCommPrompt(random_index, kMsgNoResponse).value_or(status);
       return;
     }
-    if (target.ai_target_ship_slot == 0 && target.ai_behavior_code == 6 &&
+    if (target.squad_leader_ship_slot == 0 && target.ai_behavior_code == 6 &&
         !mission_escort) {
       // Escort release: latch the cargo transfer and show the goodbye message
       // (STR# 0xbb9). The window stays open until the player closes the
@@ -1220,7 +1220,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     NovaLog::Todo("ship-comm: escort cargo transfer "
                   "(Outfit_TransferCargoAndJunkToEscortByRatio 0x00469810) not "
                   "reconstructed");
-    target.ai_target_ship_slot = -1;
+    target.squad_leader_ship_slot = -1;
     target.ai_behavior_code =
         ship_class != nullptr ? ship_class->default_ai_behavior : 1;
     target.boarded_target_latch = 1;
@@ -1242,7 +1242,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
 bool NovaShipComm_TargetEligibleForHail(const GameState &state,
                                         const Ship &target) {
   bool eligible = true;
-  if (target.ai_target_ship_slot != 0 || target.mission_fleet_slot != -1) {
+  if (target.squad_leader_ship_slot != 0 || target.mission_fleet_slot != -1) {
     // Busy ships whose government (or whose class's inherent government)
     // carries the 0x400 busy flag cannot be hailed.
     if (target.faction_or_government_id != -1) {

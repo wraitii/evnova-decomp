@@ -182,7 +182,7 @@ void NovaEscort_MoveTowardFormationOffset(GameState &state,
   if (!snap_to_offset && ship.ai_station_hold_timer > 0.0F) {
     return;
   }
-  const std::int16_t resolved = ship.resolved_ai_target_ship_slot;
+  const std::int16_t resolved = ship.resolved_squad_leader_ship_slot;
   if (resolved < 0 ||
       resolved >= static_cast<std::int16_t>(GameState::kMaxShips)) {
     return;
@@ -237,7 +237,7 @@ void NovaEscort_UpdateFormations(GameState &state, Ship &leader, bool snap) {
     if (other.ship_instance_id == leader.ship_instance_id || !other.is_active) {
       continue;
     }
-    if (other.resolved_ai_target_ship_slot != leader.ship_instance_id) {
+    if (other.resolved_squad_leader_ship_slot != leader.ship_instance_id) {
       continue;
     }
     span = static_cast<std::int16_t>(std::max<std::int16_t>(
@@ -276,9 +276,9 @@ void NovaEscort_UpdateFormationsForPlayer(GameState &state) {
   NovaEscort_UpdateFormations(state, state.player, /*snap=*/true);
 }
 
-// Ghidra 0x004156a0 Ship_ReacquireAiTargetLeader.
-void NovaEscort_ReacquireAiTargetLeader(GameState &state, Ship &ship) {
-  const std::int16_t stale = ship.ai_target_ship_slot;
+// Ghidra 0x004156a0 Ship_ReacquireSquadLeader.
+void NovaEscort_ReacquireSquadLeader(GameState &state, Ship &ship) {
+  const std::int16_t stale = ship.squad_leader_ship_slot;
   if (stale < 0 || stale >= static_cast<std::int16_t>(GameState::kMaxShips)) {
     return;
   }
@@ -294,7 +294,8 @@ void NovaEscort_ReacquireAiTargetLeader(GameState &state, Ship &ship) {
   int replacement_mass = 0;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &candidate = state.ShipAt(slot);
-    if (!candidate.is_active || stale != state.ai_target_slot_snapshot[slot] ||
+    if (!candidate.is_active ||
+        stale != state.squad_leader_slot_snapshot[slot] ||
         NovaAiShip_IsDisabled(state, candidate)) {
       continue;
     }
@@ -310,7 +311,7 @@ void NovaEscort_ReacquireAiTargetLeader(GameState &state, Ship &ship) {
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   if (replacement == -1) {
     // No sibling can lead: revert to the class default AI (state 0x13 idle).
-    ship.ai_target_ship_slot = -1;
+    ship.squad_leader_ship_slot = -1;
     ship.ai_behavior_code =
         cls != nullptr ? cls->default_ai_behavior : ship.ai_behavior_code;
     ship.ai_state_code = 0x13;
@@ -350,10 +351,10 @@ void NovaEscort_ReacquireAiTargetLeader(GameState &state, Ship &ship) {
       ship.ai_state_code = old_leader.ai_state_code;
       ship.ai_control_mode = old_leader.ai_control_mode;
     }
-    ship.ai_target_ship_slot = -1;
+    ship.squad_leader_ship_slot = -1;
     return;
   }
-  ship.ai_target_ship_slot = replacement;
+  ship.squad_leader_ship_slot = replacement;
   if (ship.ai_behavior_code == 5) {
     ship.ai_behavior_code = 6;
   }
@@ -366,10 +367,10 @@ void NovaEscort_ReacquireAiTargetLeader(GameState &state, Ship &ship) {
 // (disassembly 0x00418a04..0x00418db4).
 void NovaEscort_TickLeaderFlags(GameState &state) {
   for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
-    state.ai_target_slot_snapshot[slot] =
-        state.ShipAt(slot).ai_target_ship_slot;
+    state.squad_leader_slot_snapshot[slot] =
+        state.ShipAt(slot).squad_leader_ship_slot;
     Ship &ship = state.ShipAt(slot);
-    ship.ai_targeted_by_any_ship = false;
+    ship.is_any_ships_squad_leader = false;
     ship.ai_followed_as_leader = false;
     ship.ai_selected_as_resolved_target = false;
   }
@@ -380,18 +381,18 @@ void NovaEscort_TickLeaderFlags(GameState &state) {
         ship.current_system_id != current_system) {
       continue;
     }
-    const std::int16_t target = ship.ai_target_ship_slot;
+    const std::int16_t target = ship.squad_leader_ship_slot;
     if (target < 1) {
       if (target == 0) {
-        state.player.ai_targeted_by_any_ship = true;
+        state.player.is_any_ships_squad_leader = true;
       }
     } else {
-      NovaEscort_ReacquireAiTargetLeader(state, ship);
-      const std::int16_t reacquired = ship.ai_target_ship_slot;
+      NovaEscort_ReacquireSquadLeader(state, ship);
+      const std::int16_t reacquired = ship.squad_leader_ship_slot;
       if (reacquired != -1 &&
           state.SlotInRange(static_cast<std::size_t>(reacquired))) {
         state.ShipAt(static_cast<std::size_t>(reacquired))
-            .ai_targeted_by_any_ship = true;
+            .is_any_ships_squad_leader = true;
       }
     }
     // Provisional: the original additionally requires the leader slot to be
@@ -413,14 +414,14 @@ void NovaEscort_TickLeaderFlags(GameState &state) {
         resolved = ship.formation_leader_ship_slot;
       }
       if (resolved == -1) {
-        resolved = ship.ai_target_ship_slot;
+        resolved = ship.squad_leader_ship_slot;
       }
     }
     // The original writes the resolved value back into the ship
     // (LAB_00418d70); the escort formation pass and the wedge-offset
     // movement arms key off this field, so skipping the write leaves hired
     // escorts with resolved == -1 and an inert formation system.
-    ship.resolved_ai_target_ship_slot = resolved;
+    ship.resolved_squad_leader_ship_slot = resolved;
     if (resolved >= 0 &&
         resolved < static_cast<std::int16_t>(GameState::kMaxShips)) {
       state.ShipAt(static_cast<std::size_t>(resolved))
@@ -433,7 +434,7 @@ void NovaEscort_TickLeaderFlags(GameState &state) {
 void NovaShip_ResetToDefaultCombatState(GameState &state,
                                         Ship &ship,
                                         bool refill) {
-  if (ship.ai_target_ship_slot != 0) {
+  if (ship.squad_leader_ship_slot != 0) {
     return;
   }
   ship.jump_destination_stellar_id = -2;
@@ -462,7 +463,7 @@ void NovaShip_ResetToDefaultCombatState(GameState &state,
   ship.current_system_id = state.player.current_system_id;
   ship.heading = state.player.heading;
   ship.formation_leader_ship_slot = -1;
-  ship.resolved_ai_target_ship_slot = 0;
+  ship.resolved_squad_leader_ship_slot = 0;
   ship.formation_offset_x = 0.0F;
   ship.formation_offset_y = 0.0F;
   // The original arms the PLAYER's +0xC2 here so the per-frame formation pass
@@ -478,7 +479,7 @@ void NovaShip_ResetToDefaultCombatState(GameState &state,
     ship.npc_weapon_banks_ship_class = -1;
     NovaWeapon_EnsureNpcWeaponBanks(state, ship);
   }
-  NovaShip_EnterLeaderReturnStateFromAiTarget(state, ship);
+  NovaShip_EnterSquadReturnState(state, ship);
 }
 
 // Ghidra 0x0041af90 System_RebuildInitialNpcAndMissionPopulation, escort
@@ -489,7 +490,7 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
   (void)now_ms;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
-    if (!ship.is_active || ship.ai_target_ship_slot != 0) {
+    if (!ship.is_active || ship.squad_leader_ship_slot != 0) {
       continue;
     }
     if (NovaAiShip_IsDisabled(state, ship)) {
@@ -504,7 +505,7 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
                       "without cargo hand-back");
       }
       // The original only clears is_active here (0x0041b026); the ship stays
-      // "attached" (ai_target_ship_slot == 0) while inactive.
+      // "attached" (squad_leader_ship_slot == 0) while inactive.
       ship.is_active = false;
       continue;
     }
@@ -525,7 +526,7 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
     }
     for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
       Ship &ship = state.ShipAt(slot);
-      if (!ship.is_active || ship.ai_target_ship_slot != 0) {
+      if (!ship.is_active || ship.squad_leader_ship_slot != 0) {
         continue;
       }
       const float heading_deg = static_cast<float>(RoundHeadingDeg(ship));

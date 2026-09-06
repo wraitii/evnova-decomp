@@ -24,15 +24,22 @@ Ship_UpdateShipAI
   -> Ship_HandleShip (turn, accelerate/coast, integrate position, visuals)
 ```
 
-Every full tick, Frame_TickSystems' scope-6 leader-flag pass first snapshots
-every `ai_target_ship_slot` (the table `Ship_ReacquireAiTargetLeader`
+Every full tick, Frame_TickSystems' scope-6 squad-flag pass first snapshots
+every `squad_leader_ship_slot` (the table `Ship_ReacquireSquadLeader`
 searches), clears the per-ship flag bytes +0xC0/+0xC1/+0xC2, then for each
-active behavior>4 ship in the player's system validates/reacquires the AI
-target leader and marks the target (+0xC0, slot 0 = player), the formation
-leader (+0xC1), and the resolved AI target (+0xC2). +0xC2 is what gates the
+active behavior>4 ship in the player's system validates/reacquires its squad
+leader and marks the squad-leader role (+0xC0, slot 0 = player), the formation
+leader (+0xC1), and the resolved squad leader (+0xC2). +0xC2 is what gates the
 per-frame formation passes: `Ship_UpdateShipAI` calls
-`Ship_UpdateEscortFormations(ship, 0)` for flagged NPC leaders, and the
+`Ship_UpdateEscortFormations(ship, 0)` for flagged NPC squad leaders, and the
 player core does the same at 0x00451003.
+
+Terminology (2026 rename): `squad_leader_ship_slot` (+0x9A, formerly
+`ai_target_ship_slot`) is the ship a behavior-5 fighter, behavior-6 escort, or
+behavior>4 assist ship is attached to -- its squad leader, not a hostile
+target. The carrier for fighters, the player for hired escorts, the assist
+target otherwise. Leadership succession (0x004156a0) passes the squad to the
+heaviest squadmate when the leader is lost.
 
 The reconstruction ticks active non-player ships in the current system by the
 same frame cadence.  The core movement, wander/travel, combat pursuit, NPC
@@ -138,6 +145,8 @@ field definitions and uncertainties.
 | `+0x68` | `ai_desired_heading_deg` | Integer degrees: 0 is up, values increase clockwise. |
 | `+0x6c` | `ai_secondary_target_slot` | Polymorphic secondary ship slot or selected travel stellar resource ID. |
 | `+0x70` | `primary_target_ship_slot` | Principal combat target. |
+| `+0x9a` | `squad_leader_ship_slot` | Squad leader / attachment anchor (renamed from `ai_target_ship_slot` 2026): carrier for behavior-5 fighters, protected ship (usually the player) for behavior-6 escorts, assist target for behavior >4. Not a hostile target; roots the friendly-fire squad chain and drives leadership succession (0x004156a0). |
+| `+0xc0` | `is_any_ships_squad_leader` | Scope-6 flag: some active ship holds this slot as its squad leader. Not combat targeting. |
 | `+0x8e` | `ai_evasive_heading_deg` | Stored `±135°` escape heading for mode `0x10`; name remains provisional. |
 | `+0x92` | `jump_destination_stellar_id` | Stellar reached/selected for a possible jump. |
 | `+0xa4` | `ai_mode_start_time_ms` | Wall-clock timestamp used by jump/formation timing. |
@@ -153,7 +162,7 @@ field definitions and uncertainties.
 ## Escort formations and system adoption
 
 - `Ship_UpdateEscortFormations` (0x00413990) assigns every ship whose
-  `resolved_ai_target_ship_slot` equals the leader's slot a wedge slot:
+  `resolved_squad_leader_ship_slot` equals the leader's slot a wedge slot:
   spacing radius = ceil(max participant escort-sprite span * 0.7) clamped to
   24..60 px, offsets from `Ship_SetEscortLaunchOffsetVelocity` (0x00413b60),
   which has two slot tables (2..0x15) selected by the parity of the follower
@@ -168,7 +177,7 @@ field definitions and uncertainties.
   modes 5/6/7/0xb/0xc/0xd call the smooth variant alongside the leader glow
   copy.
 - The escort-adoption slice of `System_RebuildInitialNpcAndMissionPopulation`
-  (0x0041af90) transfers ships attached to the player (`ai_target_ship_slot
+  (0x0041af90) transfers ships attached to the player (`squad_leader_ship_slot
   == 0`) into the player's system at every system entry: disabled ships are
   deactivated (behavior-6 cargo escorts hand cargo back first), the rest run
   `Ship_ResetShipToDefaultCombatState` (0x0041e240; the flag arm refills

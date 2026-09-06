@@ -273,7 +273,7 @@ void NovaAi_EnterState15JumpOutToSystem(GameState &state,
     }
   }
 
-  ship.ai_desired_speed = ship.ai_target_ship_slot == 0 ? -15.0F : -30.0F;
+  ship.ai_desired_speed = ship.squad_leader_ship_slot == 0 ? -15.0F : -30.0F;
   ship.ai_forward_thrust_cmd = -3.0F;
 }
 
@@ -310,7 +310,7 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
   ship.fuel_points = std::max(0.0F, ship.fuel_points - kJumpFuelCost);
   ship.current_system_id = destination_system;
   ship.primary_target_ship_slot = -1;
-  ship.ai_target_ship_slot = -1;
+  ship.squad_leader_ship_slot = -1;
   ship.ai_hostility_accumulator = 0;
   ship.target_stellar_object_id = -1;
   ship.vel_x = 0.0F;
@@ -499,11 +499,12 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   if ((flags & 0x2000U) != 0U && ship.ai_state_code == 0) {
     should_enter = true;
   }
-  if (ship.ai_behavior_code > 4 && ship.ai_target_ship_slot >= 0 &&
+  if (ship.ai_behavior_code > 4 && ship.squad_leader_ship_slot >= 0 &&
       ship.ai_control_mode == 0xc &&
-      state.SlotInRange(static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+      state.SlotInRange(
+          static_cast<std::size_t>(ship.squad_leader_ship_slot))) {
     const Ship &target =
-        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+        state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot));
     should_enter =
         should_enter || NovaTargeting_ShipAtCloakVisibilityThreshold(target);
   }
@@ -827,9 +828,9 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
   for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
     const Ship &candidate = state.ShipAt(slot);
     if (candidate.ship_instance_id == self ||
-        candidate.ship_instance_id == candidate.ai_target_ship_slot ||
-        candidate.ship_instance_id == ship.ai_target_ship_slot ||
-        candidate.ai_target_ship_slot == ship.ai_target_ship_slot ||
+        candidate.ship_instance_id == candidate.squad_leader_ship_slot ||
+        candidate.ship_instance_id == ship.squad_leader_ship_slot ||
+        candidate.squad_leader_ship_slot == ship.squad_leader_ship_slot ||
         !candidate.is_active || candidate.ai_state_code == 0x15 ||
         NovaAiShip_IsDestroyed(candidate) ||
         !NovaAiShip_CanEngageTargetUnderCloakRules(state, ship, candidate)) {
@@ -841,14 +842,14 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
     }
 
     bool target_context_ok = false;
-    if (candidate.ai_target_ship_slot == 0) {
+    if (candidate.squad_leader_ship_slot == 0) {
       target_context_ok = NovaAiShip_ShouldKeepPressingTarget(state, candidate);
-    } else if (ship.ai_target_ship_slot >= 0 &&
+    } else if (ship.squad_leader_ship_slot >= 0 &&
                state.SlotInRange(
-                   static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+                   static_cast<std::size_t>(ship.squad_leader_ship_slot))) {
       target_context_ok = NovaTargeting_IsShipAcquirableAsTarget(
           state,
-          state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot)),
+          state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot)),
           candidate);
     }
     if (!target_context_ok) {
@@ -856,8 +857,10 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
     }
 
     const float target_distance_sq = RoundedDistanceSquared(
-        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot)).pos_x,
-        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot)).pos_y,
+        state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot))
+            .pos_x,
+        state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot))
+            .pos_y,
         candidate.pos_x,
         candidate.pos_y);
     if (score_flags > 0 &&
@@ -1071,7 +1074,7 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
 
     const bool player_contact = slot == 0;
     // "Engaged with the player" means *attacking* the player
-    // (primary_target_ship_slot == 0). The ai_target_ship_slot == 0 marker
+    // (primary_target_ship_slot == 0). The squad_leader_ship_slot == 0 marker
     // instead identifies ships ATTACHED to the player -- the player's hired
     // escorts -- so counting it here made every hostile behavior-0x03 NPC
     // acquire the nearest escort on sight (Ghidra 0x0040e020 never treats an
@@ -1208,7 +1211,7 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
   // Hostility escalation: once the ship feels threatened and has a target.
   if (ship.ai_hostility_accumulator > 0 &&
       ship.primary_target_ship_slot != -1) {
-    if (ship.ai_target_ship_slot == 0) {
+    if (ship.squad_leader_ship_slot == 0) {
       ship.ai_state_code = 10;
       ship.ai_secondary_target_slot = 0;
     } else {
@@ -1251,7 +1254,7 @@ void NovaAi_UpdateBehavior0x02(GameState &state,
     const float dy = std::abs(ship.pos_y - target.pos_y);
     if (dx < 1251.0F && dy < 1251.0F && ship.ai_station_hold_timer <= 0.0F) {
       ship.ai_state_code = 4;
-    } else if (ship.ai_target_ship_slot == 0) {
+    } else if (ship.squad_leader_ship_slot == 0) {
       ship.ai_state_code = 10;
       ship.ai_secondary_target_slot = 0;
     } else {
@@ -1369,7 +1372,7 @@ void NovaAi_UpdateShipState(GameState &state,
     }
   }
   if (ship.ai_station_hold_timer > 0.0F) {
-    if (ship.ai_target_ship_slot == 0) {
+    if (ship.squad_leader_ship_slot == 0) {
       ship.ai_state_code = 0xb;
     } else if (ship.primary_target_ship_slot == -1) {
       ship.ai_state_code = 2;
@@ -1385,7 +1388,7 @@ void NovaAi_UpdateShipState(GameState &state,
     if (!NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
       ship.ai_state_code = 5;
       ship.primary_target_ship_slot = -1;
-      ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
+      ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
     }
   }
 
@@ -1537,7 +1540,7 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_maneuver_timer_ms = 16.0F;
       }
       // Escort propagation (Ship_UpdateShipAiState state 0x14 successor loop):
-      // any active ship whose ai_target_ship_slot == this ship is ordered to
+      // any active ship whose squad_leader_ship_slot == this ship is ordered to
       // jump with it. Provisionally wired here (Phase 7).
       for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
         Ship &other = state.ShipAt(slot);
@@ -1545,10 +1548,10 @@ void NovaAi_UpdateShipState(GameState &state,
             other.ship_instance_id == ship.ship_instance_id) {
           continue;
         }
-        if (other.ai_target_ship_slot != ship.ship_instance_id) {
+        if (other.squad_leader_ship_slot != ship.ship_instance_id) {
           continue;
         }
-        other.ai_target_ship_slot = -1;
+        other.squad_leader_ship_slot = -1;
         other.ai_behavior_code = ship.ai_behavior_code;
         if (other.ai_behavior_code > 3) {
           other.ai_behavior_code = 3;
@@ -1609,7 +1612,7 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Hold-station / follow target (state 0xb). ----
   if (ship.ai_state_code == 0xb) {
-    const std::int16_t target = ship.ai_target_ship_slot;
+    const std::int16_t target = ship.squad_leader_ship_slot;
     if (target == -1) {
       ship.primary_target_ship_slot = -1;
       ship.ai_secondary_target_slot = -1;
@@ -1660,10 +1663,10 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Pursuit (state 5) toward ai_target_ship_slot. ----
-  if (ship.ai_state_code == 5 && ship.ai_target_ship_slot != -1 &&
+  // ---- Pursuit (state 5) toward squad_leader_ship_slot. ----
+  if (ship.ai_state_code == 5 && ship.squad_leader_ship_slot != -1 &&
       ship.target_stellar_object_id == -1) {
-    ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
+    ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
     const auto *cls =
         scn->Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
     const float base_turn = cls ? cls->turn_rate * 0.1F : 0.0F;
@@ -1671,7 +1674,7 @@ void NovaAi_UpdateShipState(GameState &state,
         100,
         static_cast<int>((kTurnRadiusBase - base_turn) * kTurnRadiusScale50)));
     const Ship &tgt =
-        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+        state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot));
     if (std::abs(ship.pos_x - tgt.pos_x) > range ||
         std::abs(ship.pos_y - tgt.pos_y) > range) {
       ship.ai_control_mode = 0xb;
@@ -1683,12 +1686,12 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Assistance/response (state 10) toward ai_target_ship_slot. ----
-  if (ship.ai_state_code == 10 && ship.ai_target_ship_slot != -1 &&
+  // ---- Assistance/response (state 10) toward squad_leader_ship_slot. ----
+  if (ship.ai_state_code == 10 && ship.squad_leader_ship_slot != -1 &&
       ship.target_stellar_object_id == -1) {
-    ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
+    ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
     const Ship &tgt =
-        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+        state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot));
     if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, tgt, ship)) {
       const bool far_from_target =
           std::abs(ship.pos_x - tgt.pos_x) > kAssistFar ||
@@ -1873,12 +1876,12 @@ void NovaAi_UpdateShipState(GameState &state,
                  ship.ai_control_mode != 4) {
         ship.ai_control_mode = 5;
         if (ship.faction_or_government_id >= 0 &&
-            ship.ai_target_ship_slot != 0 &&
+            ship.squad_leader_ship_slot != 0 &&
             target.faction_or_government_id >= 0 &&
             NovaGovernment_AreGovtsAllied(state.scenario,
                                           ship.faction_or_government_id,
                                           target.faction_or_government_id) &&
-            target.ai_target_ship_slot == 0) {
+            target.squad_leader_ship_slot == 0) {
           ship.ai_state_code = 0;
           ship.ai_control_mode = 0;
           ship.primary_target_ship_slot = -1;
@@ -1900,8 +1903,8 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_control_mode = 0;
         return;
       }
-      if (ship.ai_target_ship_slot != -1 &&
-          ship.ai_target_ship_slot == ship.primary_target_ship_slot) {
+      if (ship.squad_leader_ship_slot != -1 &&
+          ship.squad_leader_ship_slot == ship.primary_target_ship_slot) {
         ship.ai_state_code = 0;
         ship.ai_control_mode = 0;
         ship.primary_target_ship_slot = -1;
@@ -1961,9 +1964,9 @@ void NovaAi_UpdateShipState(GameState &state,
       return;
     }
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-    if (ship.ai_target_ship_slot != -1 &&
-        (target_slot == ship.ai_target_ship_slot ||
-         target.ai_target_ship_slot == ship.ai_target_ship_slot)) {
+    if (ship.squad_leader_ship_slot != -1 &&
+        (target_slot == ship.squad_leader_ship_slot ||
+         target.squad_leader_ship_slot == ship.squad_leader_ship_slot)) {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
       ship.primary_target_ship_slot = -1;
@@ -2342,18 +2345,18 @@ void NovaAi_ApplyControls(GameState &state,
 
   case 0xd: {
     // Formation hold with leader release (Ship_MoveShipTowardFormationOffset
-    // 0x00414390 remains Phase 8). ai_target_ship_slot is the followed leader.
-    // While the leader's station-hold timer runs (>1.0) the ship matches the
-    // leader's spin-up: damp to a standstill (0.95, desired -4.0, timer +1)
-    // once the leader is within 11 deg of its own desired heading; once the
-    // ship's own hold timer passes 30 and the leader is not the player, the
-    // ship releases back to its class default behavior (state 2 / mode 4).
-    // Otherwise it copies the leader's velocity and glow (formation offset
-    // deferred).
+    // 0x00414390 remains Phase 8). squad_leader_ship_slot is the followed
+    // leader. While the leader's station-hold timer runs (>1.0) the ship
+    // matches the leader's spin-up: damp to a standstill (0.95, desired -4.0,
+    // timer +1) once the leader is within 11 deg of its own desired heading;
+    // once the ship's own hold timer passes 30 and the leader is not the
+    // player, the ship releases back to its class default behavior (state 2 /
+    // mode 4). Otherwise it copies the leader's velocity and glow (formation
+    // offset deferred).
     if (fire_restricted) {
       break;
     }
-    const std::int16_t leader_slot = ship.ai_target_ship_slot;
+    const std::int16_t leader_slot = ship.squad_leader_ship_slot;
     if (leader_slot < 0 ||
         !state.SlotInRange(static_cast<std::size_t>(leader_slot))) {
       break;
@@ -2369,7 +2372,7 @@ void NovaAi_ApplyControls(GameState &state,
       }
       if (ship.ai_station_hold_timer > 30.0F && leader_slot != 0) {
         ship.ai_desired_heading_deg = leader.ai_desired_heading_deg;
-        ship.ai_target_ship_slot = -1;
+        ship.squad_leader_ship_slot = -1;
         ship.ai_behavior_code =
             cls ? cls->default_ai_behavior : ship.ai_behavior_code;
         ship.ai_state_code = 2;
@@ -2700,7 +2703,7 @@ void NovaAi_ApplyControls(GameState &state,
   case 8: {
     // Escort follow: steer at the escorted ship (ai_secondary_target_slot)
     // and thrust within turn+1 deg. Outside the class escort half-span the
-    // ship creeps its position toward ai_target_ship_slot at 10x thrust per
+    // ship creeps its position toward squad_leader_ship_slot at 10x thrust per
     // frame and drops desired speed by the same step; inside, the original
     // launches/hands off the escort (deferred, Phase 8) or clears the escort
     // for a non-capturable player escort. A destroyed/disabled ship or
@@ -2737,9 +2740,9 @@ void NovaAi_ApplyControls(GameState &state,
     }
     if (kEscortHalfSpanPx < std::abs(target.pos_x - ship.pos_x) ||
         kEscortHalfSpanPx < std::abs(target.pos_y - ship.pos_y)) {
-      // Creep toward the followed lead (ai_target_ship_slot) at 10x thrust.
+      // Creep toward the followed lead (squad_leader_ship_slot) at 10x thrust.
       const float step = eff_thrust * kFormationCreepFactor * elapsed_ticks;
-      const std::int16_t lead_slot = ship.ai_target_ship_slot;
+      const std::int16_t lead_slot = ship.squad_leader_ship_slot;
       if (lead_slot > 0 &&
           static_cast<std::size_t>(lead_slot) < GameState::kMaxShips) {
         const Ship &lead = state.ShipAt(static_cast<std::size_t>(lead_slot));
@@ -3192,7 +3195,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   // holds its current state/controls; mirrors the original clearing the target
   // slots and control to 0 first.
   if (restricted) {
-    ship.ai_target_ship_slot = -1;
+    ship.squad_leader_ship_slot = -1;
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
     ship.ai_hostility_accumulator = 0;
@@ -3247,7 +3250,7 @@ void NovaAi_UpdateShipAI(GameState &state,
       // hull back into mode 9 with its 50 px/tick launch velocity and no
       // braking (TODO(decomp): divergence glue, see the scatter comment in
       // escort_formation.cpp).
-      if (ship.ai_target_ship_slot != -1 && ship.ai_state_code != 8) {
+      if (ship.squad_leader_ship_slot != -1 && ship.ai_state_code != 8) {
         ship.ai_state_code = 10;
       }
       NovaAi_UpdateBehavior0x02(state, ship, now_ms);
@@ -3325,7 +3328,7 @@ bool NovaAiShip_CanEngageTargetUnderCloakRules(const GameState &state,
   }
   // A ship tracking this subject and carrying a cloaking device can still be
   // engaged, even though the subject is hidden.
-  if (other_ship.ai_target_ship_slot == subject_ship.ship_instance_id &&
+  if (other_ship.squad_leader_ship_slot == subject_ship.ship_instance_id &&
       NovaOutfit_HasCloakingDevice(state, other_ship)) {
     return true;
   }
@@ -3414,7 +3417,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
   // The original admits an unset (-1) AI target here; it specifically rejects
   // the player slot 0 because that path is handled by the primary-target and
   // mutual-target checks below.
-  if (ship.ai_target_ship_slot == 0 || ship.primary_target_ship_slot == -1) {
+  if (ship.squad_leader_ship_slot == 0 || ship.primary_target_ship_slot == -1) {
     return false;
   }
   if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, ship, state.player)) {
@@ -3441,8 +3444,8 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
   }
   // The target ship points at the player (the original evaluates this block
   // and the identical sVar6 != -1 block below separately; both require the
-  // target's ai_target_ship_slot to be the player).
-  if (target != nullptr && target->ai_target_ship_slot == 0) {
+  // target's squad_leader_ship_slot to be the player).
+  if (target != nullptr && target->squad_leader_ship_slot == 0) {
     if (!coasting_reversal && engaged) {
       return true;
     }
@@ -3451,13 +3454,13 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
     }
   }
   // A third ship pressing this ship: scan the other slots for one whose
-  // ai_target_ship_slot is this ship's instance id, is not coasting through a
-  // reversal, is active, unrestricted, and (like the direct checks) in a
+  // squad_leader_ship_slot is this ship's instance id, is not coasting through
+  // a reversal, is active, unrestricted, and (like the direct checks) in a
   // non-disengage state while itself holding the player or a player-targeting
   // ship as primary.
   for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
     const Ship &other = state.ShipAt(j);
-    if (other.ai_target_ship_slot != ship.ship_instance_id) {
+    if (other.squad_leader_ship_slot != ship.ship_instance_id) {
       continue;
     }
     if (other.ai_maneuver_timer_ms > 0.0F || !other.is_active) {
@@ -3476,7 +3479,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
         static_cast<std::size_t>(o_target) < GameState::kMaxShips) {
       const Ship &other_target =
           state.ShipAt(static_cast<std::size_t>(o_target));
-      if (engaged && other_target.ai_target_ship_slot == 0) {
+      if (engaged && other_target.squad_leader_ship_slot == 0) {
         return true;
       }
     }
@@ -3538,8 +3541,8 @@ bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship) {
   return ship.ai_behavior_code == 5 && ship.ai_state_code == 5;
 }
 
-// Ghidra 0x00410e80 Ship_IsShipInEscortControlMode4Or0x0D.
-bool NovaAiShip_IsShipInEscortControlMode4Or0xD(const Ship &ship) {
+// Ghidra 0x00410e80 Ship_IsShipInHoldStateWithControlMode4Or0x0D.
+bool NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship) {
   const std::int16_t s = ship.ai_state_code;
   return (s == 2 || s == 3 || s == 0x0B) &&
          (ship.ai_control_mode == 4 || ship.ai_control_mode == 0x0D);
@@ -3634,10 +3637,10 @@ bool NovaAiShip_HasShipDistressResponder(const GameState &state,
   return false;
 }
 
-// Ghidra 0x00410110 Ship_HasAnyDistressResponderForShip.
-bool NovaAiShip_HasAnyDistressResponderForShip(const GameState &state,
-                                               const Ship &ship,
-                                               const Ship &context_ship) {
+// Ghidra 0x00410110 Ship_HasIncomingDistressSupportForShip.
+bool NovaAiShip_HasIncomingDistressSupport(const GameState &state,
+                                           const Ship &ship,
+                                           const Ship &context_ship) {
   if (ship.ship_instance_id == 0) {
     return NovaAiShip_HasShipDistressResponder(state, context_ship);
   }
@@ -3652,8 +3655,8 @@ bool NovaAiShip_HasAnyDistressResponderForShip(const GameState &state,
       continue;
     }
     if (NovaTargeting_IsShipAcquirableAsTarget(state, candidate, ship) &&
-        NovaAiShip_CanShipRespondToDistressCall(state, context_ship,
-                                                candidate)) {
+        NovaAiShip_CanShipRespondToDistressCall(
+            state, context_ship, candidate)) {
       return true;
     }
   }
@@ -3781,8 +3784,9 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
   ship.ai_state_code = 4;
 }
 
-// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_SetRetreatThrottle.
-void NovaAi_EnterStateBSetRetreatThrottle(Ship &ship, std::uint32_t now_60hz) {
+// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_ClearTargetsSeedHold.
+void NovaAi_EnterStateBClearTargetsSeedHold(Ship &ship,
+                                            std::uint32_t now_60hz) {
   ship.ai_state_code = 0x0B;
   ship.ai_hostility_accumulator = 0;
   ship.primary_target_ship_slot = -1;
@@ -3792,18 +3796,19 @@ void NovaAi_EnterStateBSetRetreatThrottle(Ship &ship, std::uint32_t now_60hz) {
   }
 }
 
-// Ghidra 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToAiTargetLeader.
-void NovaAi_EnterState5ReturnToAiTargetLeader(Ship &ship) {
+// Ghidra 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToSquadLeader.
+void NovaAi_EnterState5ReturnToSquadLeader(Ship &ship) {
   ship.primary_target_ship_slot = -1;
-  ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
+  ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
   ship.ai_state_code = 5;
   ship.ai_control_mode = 0;
 }
 
-// Ghidra 0x00410900 Ship_EnterShipAiState0x04_TargetRandomRelativeContact.
-void NovaAi_EnterState4TargetRandomRelativeContact(GameState &state,
-                                                   Ship &ship) {
-  const std::int16_t leader_slot = ship.ai_target_ship_slot;
+// Ghidra 0x00410900
+// Ship_EnterShipAiState0x04_TargetRandomRelativeToSquadLeader.
+void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
+                                                         Ship &ship) {
+  const std::int16_t leader_slot = ship.squad_leader_ship_slot;
   const bool leader_valid =
       leader_slot >= 0 &&
       static_cast<std::size_t>(leader_slot) < GameState::kMaxShips;
@@ -3811,12 +3816,12 @@ void NovaAi_EnterState4TargetRandomRelativeContact(GameState &state,
       leader_valid ? &state.ShipAt(static_cast<std::size_t>(leader_slot))
                    : nullptr;
 
-  // Per-candidate eligibility, relative to the ai_target_ship_slot leader.
-  // Slot 0 (the player) is special: the gate tests the LEADER's pressing
+  // Per-candidate eligibility, relative to the ship's squad leader. Slot 0
+  // (the player) is special: the gate tests the SQUAD LEADER's pressing
   // state, not the candidate's (disasm 0x00410993 / 0x00410ab6). Other
   // candidates are admitted by the leader's pressing state when the leader is
   // the player, otherwise by pairwise acquirability from the leader. The
-  // original dereferences g_ship_states + ai_target_ship_slot without a
+  // original dereferences g_ship_states + squad_leader_ship_slot without a
   // bounds check; a negative/unset leader (-1) fails the gate here.
   // TODO(decomp(0x00410900)): confirm no caller reaches this without a leader.
   auto candidate_gate = [&](const Ship &candidate, std::int16_t slot) {
@@ -4418,18 +4423,18 @@ void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship) {
   ship.travel_target_cache = -1;
   ship.escort_command_code = -1;
   ship.formation_leader_ship_slot = -1;
-  ship.resolved_ai_target_ship_slot = -1;
+  ship.resolved_squad_leader_ship_slot = -1;
 }
 
-// Ghidra 0x00410d10 Ship_EnterLeaderReturnStateFromAiTarget; the behavior-5
+// Ghidra 0x00410d10 Ship_EnterSquadReturnState; the behavior-5
 // follower sweep at the tail is 0x00410cb0
-// Ship_EnterShipAiState0x05_ReturnToAiTargetLeader run inline.
-void NovaShip_EnterLeaderReturnStateFromAiTarget(GameState &state, Ship &ship) {
+// Ship_EnterShipAiState0x05_ReturnToSquadLeader run inline.
+void NovaShip_EnterSquadReturnState(GameState &state, Ship &ship) {
   ship.primary_target_ship_slot = -1;
-  ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
+  ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
   if (ship.ai_behavior_code == 5) {
     ship.ai_state_code = 10;
-  } else if (ship.ai_target_ship_slot == 0) {
+  } else if (ship.squad_leader_ship_slot == 0) {
     ship.ai_state_code = 0x0c;
   } else {
     ship.ai_state_code = 10;
@@ -4438,10 +4443,10 @@ void NovaShip_EnterLeaderReturnStateFromAiTarget(GameState &state, Ship &ship) {
     Ship &follower = state.ShipAt(slot);
     if (follower.is_active &&
         static_cast<std::int16_t>(slot) != ship.ship_instance_id &&
-        follower.ai_target_ship_slot == ship.ship_instance_id &&
+        follower.squad_leader_ship_slot == ship.ship_instance_id &&
         follower.ai_behavior_code == 5) {
       follower.primary_target_ship_slot = -1;
-      follower.ai_secondary_target_slot = follower.ai_target_ship_slot;
+      follower.ai_secondary_target_slot = follower.squad_leader_ship_slot;
       follower.ai_state_code = 5;
       follower.ai_control_mode = 0;
     }

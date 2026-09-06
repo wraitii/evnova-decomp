@@ -209,7 +209,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 // Ghidra 0x00422400 ShipClass_SpawnEscortShipFromClass. Allocates a ship slot
 // in the player's current system (reserved tail 8) and populates it as a
 // player fleet escort: identity from the zero-based ship class id, AI
-// behavior 6 attached to the player (ai_target_ship_slot 0), base shield /
+// behavior 6 attached to the player (squad_leader_ship_slot 0), base shield /
 // armor, afterburner + mining-scoop latches, hired-escort origin mark
 // (+0xBB), no mission linkage, jamming caches cold, stock weapon banks, then
 // AI runtime reset and the leader-return AI entry. `spawn_stellar_id` -1
@@ -269,7 +269,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
 // (Ghidra 0x0041ad50): scans every NPC slot and deactivates the "vacant" ones,
 // tallying them into their spawn-quota bucket first. A slot is SPARED only when
 // it is actively engaging the player -- ai_behavior_code > 4,
-// ai_target_ship_slot
+// squad_leader_ship_slot
 // == 0, not docked at a stellar (target_stellar_object_id == -1), not in a
 // mission fleet -- AND is not disabled AND `keep_player_engaged` is
 // false (the original's flag==0). Everything else (idle wanderers/dudes,

@@ -173,7 +173,7 @@ NovaTargeting_FindPreviousPlayerCycleTarget(const GameState &state,
 // Ghidra 0x00462850 Ship_SelectNearestEngagedTarget: nearest active,
 // non-destroyed ship in the player's system that is visible through the cloak
 // gate (or the player has a cloak scanner), not in AI state 0x15, class
-// not untargetable (or scanner), and whose ai_target_ship_slot is NOT the
+// not untargetable (or scanner), and whose squad_leader_ship_slot is NOT the
 // player (ships already locked onto the player are excluded). Returns the
 // slot or -1 when none.
 [[nodiscard]] std::int16_t

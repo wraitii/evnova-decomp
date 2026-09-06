@@ -197,7 +197,7 @@ int NovaShip_AllocateShipSlot(GameState &state,
   ship.is_active = true;
   ship.current_system_id = system_id;
   // ShipState +0x86: NPC ship identity. The original compares instance ids
-  // against slot-indexed targeting fields (ai_target_ship_slot /
+  // against slot-indexed targeting fields (squad_leader_ship_slot /
   // primary_target_ship_slot) and 0 means "the player", so an NPC's instance
   // id must equal its slot. Ghidra Ship_AllocateShipSlotInSystem (0x004254b0)
   // does not write the field itself -- it relies on the per-slot identity
@@ -215,7 +215,7 @@ int NovaShip_AllocateShipSlot(GameState &state,
   ship.ai_control_mode = 0;
   ship.mission_fleet_slot = -1;
   ship.ai_hostility_accumulator = 0;
-  ship.ai_target_ship_slot = -1;
+  ship.squad_leader_ship_slot = -1;
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = -1;
   ship.death_timer_active = 0.0F;
@@ -252,7 +252,7 @@ int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
   Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
   ship.ship_class_id = ship_class_id;
   ship.ai_behavior_code = 6;
-  ship.ai_target_ship_slot = 0;
+  ship.squad_leader_ship_slot = 0;
   ship.faction_or_government_id = -1;
   ship.random_ai_render_cadence = 2;
   const ShipClass *cls =
@@ -295,7 +295,7 @@ int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
   NovaWeapon_EnsureNpcWeaponBanks(state, ship);
 
   NovaShip_ResetAiBehaviorRuntimeFields(ship);
-  NovaShip_EnterLeaderReturnStateFromAiTarget(state, ship);
+  NovaShip_EnterSquadReturnState(state, ship);
   return slot;
 }
 
@@ -693,7 +693,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     ship.mission_owner_slot = -1;
     ship.pers_def_slot = -1;
     ship.ai_hostility_accumulator = 0;
-    ship.ai_target_ship_slot = -1;
+    ship.squad_leader_ship_slot = -1;
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
     ship.death_timer_active = 0.0F;
@@ -1276,8 +1276,8 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
       if (mission.fleet_spawn_goal == 1) {
         // ShipBehav 1: escort-formation link on the player.
         ship.ai_behavior_code = 6;
-        ship.ai_target_ship_slot = 0;
-        ship.resolved_ai_target_ship_slot = 0;
+        ship.squad_leader_ship_slot = 0;
+        ship.resolved_squad_leader_ship_slot = 0;
         ship.formation_leader_ship_slot = 0;
         if (copy_player_heading) {
           ship.heading = state.player.heading;
@@ -1364,7 +1364,7 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
 
 // Ghidra 0x0041d6e0 System_TickNpcSpawnMaintenance (ambience slice). See the
 // header. The original counts the ambient active ships in the system whose
-// ai_target_ship_slot != 0 (ships not actively engaged on the player), then
+// squad_leader_ship_slot != 0 (ships not actively engaged on the player), then
 // below the AvgShips cap rolls a 1-in-500 encounter pick (gated by
 // encounter_chance_percent) and otherwise spawns a random dude ship. Tichel and
 // most ordinary systems bind no encounter fleets, so the dude spawn is the
@@ -1495,12 +1495,12 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
   }
 
   // Count ambient ships: active, in this system, and not targeting the player
-  // (ai_target_ship_slot != 0). Slot 0 (the player) is not counted.
+  // (squad_leader_ship_slot != 0). Slot 0 (the player) is not counted.
   int ambient = 0;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
     if (ship.is_active && ship.current_system_id == system_id &&
-        ship.ai_target_ship_slot != 0) {
+        ship.squad_leader_ship_slot != 0) {
       ++ambient;
     }
   }
@@ -1546,17 +1546,16 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 // then clears is_active and the targeting/mission/system slots.
 //
 // Vacancy predicate (bVar3 in the decomp): a slot is SPARED only when it is
-// actively engaging the player -- ai_behavior_code > 4, ai_target_ship_slot ==
-// 0, not docked at a stellar, not in a mission fleet -- AND is not
-// disabled AND `keep_player_engaged` is false (the original's flag==0).
-// State-8 slowdown ships are also vacant: they have no special exemption and
-// are removed by this same outer sweep. Every other ship (idle wanderers/dudes,
-// parked, mission, disabled) is vacant and deactivated. The original
-// runs this on travel/landing arrival (Stellar_ProcessTravelAndLanding
-// 0x00457580) and on system entry (NovaMainLoop_Run 0x00486880) with flag==0,
-// then System_RebuildInitialNpcAndMissionPopulation immediately rebuilds the
-// initial scattered population; System_TickNpcSpawnMaintenance handles later
-// attrition.
+// actively engaging the player -- ai_behavior_code > 4, squad_leader_ship_slot
+// == 0, not docked at a stellar, not in a mission fleet -- AND is not disabled
+// AND `keep_player_engaged` is false (the original's flag==0). State-8 slowdown
+// ships are also vacant: they have no special exemption and are removed by this
+// same outer sweep. Every other ship (idle wanderers/dudes, parked, mission,
+// disabled) is vacant and deactivated. The original runs this on travel/landing
+// arrival (Stellar_ProcessTravelAndLanding 0x00457580) and on system entry
+// (NovaMainLoop_Run 0x00486880) with flag==0, then
+// System_RebuildInitialNpcAndMissionPopulation immediately rebuilds the initial
+// scattered population; System_TickNpcSpawnMaintenance handles later attrition.
 void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
                                             bool keep_player_engaged) {
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
@@ -1565,7 +1564,7 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
     // Vacancy predicate: spared only when actively engaging the player and
     // (with flag==0) not disabled.
     bool vacant = true;
-    if (ship.ai_behavior_code > 4 && ship.ai_target_ship_slot == 0 &&
+    if (ship.ai_behavior_code > 4 && ship.squad_leader_ship_slot == 0 &&
         ship.target_stellar_object_id == -1 && ship.mission_fleet_slot == -1) {
       if (!NovaAiShip_IsDisabled(state, ship) && !keep_player_engaged) {
         vacant = false;
@@ -1624,7 +1623,7 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
     ship.velocity_match_target_ship_slot = -1;
     ship.mission_owner_slot = -1;
     ship.current_system_id = -1;
-    ship.ai_target_ship_slot = -1;
+    ship.squad_leader_ship_slot = -1;
   }
 }
 

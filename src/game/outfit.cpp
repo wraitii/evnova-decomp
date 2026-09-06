@@ -165,10 +165,11 @@ bool NovaOutfit_HasCloakingDevice(const GameState &state, const Ship &ship) {
   }
   // Ghidra's helper includes this NPC-only escort/control-mode exception
   // before scanning the ship class's default loadout.
-  if (ship.ai_target_ship_slot >= 0 && ship.ai_control_mode == 0xc &&
-      state.SlotInRange(static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+  if (ship.squad_leader_ship_slot >= 0 && ship.ai_control_mode == 0xc &&
+      state.SlotInRange(
+          static_cast<std::size_t>(ship.squad_leader_ship_slot))) {
     const Ship &target =
-        state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+        state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot));
     if (NovaTargeting_ShipAtCloakVisibilityThreshold(target) &&
         NovaOutfit_HasAreaCloakingDevice(state, target)) {
       return true;

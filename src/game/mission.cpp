@@ -1383,13 +1383,13 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
       continue;
     }
     ship.mission_fleet_slot = -1;
-    if (ship.ai_target_ship_slot != -1) {
+    if (ship.squad_leader_ship_slot != -1) {
       const auto *ship_class = state.scenario.Ship(
           static_cast<std::int16_t>(ship.ship_class_id + kResourceIdBase));
       if (ship_class != nullptr) {
         ship.ai_behavior_code = ship_class->default_ai_behavior;
       }
-      ship.ai_target_ship_slot = -1;
+      ship.squad_leader_ship_slot = -1;
       NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
     }
     if (state.in_travel_scene) {

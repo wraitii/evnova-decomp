@@ -235,7 +235,7 @@ void FireJump(GameState &state) {
   // Update runs that many times (0x0044f95f).
   int travel_days = NovaStellar_ComputeHyperspaceTravelDays(state, player);
   // Abandoned-fighter walk (0x0044f8d6): over every active ship attached to
-  // the player (ai_target_ship_slot == 0) that is not disabled -- deployed
+  // the player (squad_leader_ship_slot == 0) that is not disabled -- deployed
   // carrier fighters (ai_behavior_code 5, seeded by Weapon_SpawnShipFrom-
   // CarrierBayWeapon 0x0041e640) that cannot jump are deactivated and
   // tallied for the arrival overlay's "fighter(s) abandoned" appendix;
@@ -244,7 +244,7 @@ void FireJump(GameState &state) {
   int abandoned_fighters = 0;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &attached = state.ShipAt(slot);
-    if (!attached.is_active || attached.ai_target_ship_slot != 0 ||
+    if (!attached.is_active || attached.squad_leader_ship_slot != 0 ||
         NovaAiShip_IsDisabled(state, attached)) {
       continue;
     }

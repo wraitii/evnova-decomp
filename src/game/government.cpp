@@ -158,7 +158,7 @@ bool NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
   if (NovaAiShip_ShouldKeepPressingTarget(state, ship)) {
     return false;
   }
-  if (ship.ai_target_ship_slot == 0) {
+  if (ship.squad_leader_ship_slot == 0) {
     return true;
   }
   if (ship.faction_or_government_id != -1 &&

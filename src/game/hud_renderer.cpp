@@ -932,7 +932,7 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
                                      PanelTextWidth(font, font_size, text)),
                   status_y,
                   text);
-  } else if ((target.ai_target_ship_slot == 0 ||
+  } else if ((target.squad_leader_ship_slot == 0 ||
               target.post_hit_mode_hint >= 0) &&
              (target.ai_behavior_code == 5 || target.post_hit_mode_hint == 0)) {
     const bool light_ship =
@@ -1152,9 +1152,10 @@ void DrawRadarPoint(SDL_Renderer *renderer,
   SDL_RenderPoint(renderer, static_cast<float>(x), static_cast<float>(y));
 }
 
-// Ghidra 0x004ba350 DrawContext_DrawCircleInRect with the draw context's 1x1 pixel scale:
-// a midpoint-circle outline (8-way symmetric, single-pixel plot) inscribed in
-// the rect, radius (bottom-top)/2, centre ((left+right+1)/2, (top+bottom+1)/2).
+// Ghidra 0x004ba350 DrawContext_DrawCircleInRect with the draw context's 1x1
+// pixel scale: a midpoint-circle outline (8-way symmetric, single-pixel plot)
+// inscribed in the rect, radius (bottom-top)/2, centre ((left+right+1)/2,
+// (top+bottom+1)/2).
 void DrawRadarDisc(SDL_Renderer *renderer, const HudPanelRect &rect) {
   const int cx = (rect.left + rect.right + 1) / 2;
   const int cy = (rect.top + rect.bottom + 1) / 2;
@@ -1255,20 +1256,28 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
   const SDL_FRect box{left, top, kBoxWidth, kBoxHeight};
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &box);
-  SDL_SetRenderDrawColor(renderer, label_color.r, label_color.g,
-                         label_color.b, SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(
+      renderer, label_color.r, label_color.g, label_color.b, SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &box);
 
   if (auto title = NovaHud_LoadStringEntry(0x7d2, 0x85)) {
-    NovaText_DrawCentered(platform, font, NovaFontFamily::kGeneva, font_size,
-                          kNovaFontStyleRegular, value_color, left,
-                          left + kBoxWidth, top + 8.0F, *title);
+    NovaText_DrawCentered(platform,
+                          font,
+                          NovaFontFamily::kGeneva,
+                          font_size,
+                          kNovaFontStyleRegular,
+                          value_color,
+                          left,
+                          left + kBoxWidth,
+                          top + 8.0F,
+                          *title);
   }
 
   struct RowDef {
     std::uint16_t name_entry;
     std::int16_t category; // -1 = All Ships
   };
+
   static constexpr RowDef kRows[5] = {
       {0x90, -1}, {0x8c, 0}, {0x8d, 1}, {0x8e, 2}, {0x8f, 3}};
   // Order word per code 1..4 (0x95 Formation covers code 0, not shown).
@@ -1283,27 +1292,44 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
         def.category < 0 || NovaEscort_GroupPresent(state, def.category);
 
     if (selected) {
-      const SDL_FRect highlight{left + 3.0F, row_top, kBoxWidth - 6.0F,
+      const SDL_FRect highlight{left + 3.0F,
+                                row_top,
+                                kBoxWidth - 6.0F,
                                 static_cast<float>(kRowHeight)};
-      SDL_SetRenderDrawColor(renderer, label_color.r, label_color.g,
-                             label_color.b, 48);
+      SDL_SetRenderDrawColor(
+          renderer, label_color.r, label_color.g, label_color.b, 48);
       SDL_RenderFillRect(renderer, &highlight);
     }
 
     const SDL_Color &color = present ? value_color : label_color;
     const float baseline = row_top + static_cast<float>(kRowBaseline);
-    float pen = DrawPanelTextAt(platform, font, font_size, left + 10.0F,
-                                baseline, std::to_string(row + 1), color);
-    pen = DrawPanelTextAt(platform, font, font_size, pen + 4.0F, baseline,
-                          MiscString({def.name_entry, ""}), color);
+    float pen = DrawPanelTextAt(platform,
+                                font,
+                                font_size,
+                                left + 10.0F,
+                                baseline,
+                                std::to_string(row + 1),
+                                color);
+    pen = DrawPanelTextAt(platform,
+                          font,
+                          font_size,
+                          pen + 4.0F,
+                          baseline,
+                          MiscString({def.name_entry, ""}),
+                          color);
     if (def.category >= 0 && present) {
       const std::int16_t order =
           escort.group_command[static_cast<std::size_t>(def.category)];
       if (order > 0 && order <= 4) {
         if (auto word = NovaHud_LoadStringEntry(
                 0x7d2, kOrderEntries[static_cast<std::size_t>(order)])) {
-          DrawPanelTextAt(platform, font, font_size, pen + 10.0F, baseline,
-                          *word, label_color);
+          DrawPanelTextAt(platform,
+                          font,
+                          font_size,
+                          pen + 10.0F,
+                          baseline,
+                          *word,
+                          label_color);
         }
       }
     }
@@ -1365,9 +1391,9 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
 
   if (!force_empty && state.proximity_scan_detected) {
     // Interference static: tile one of ten pre-rendered noise patterns over
-    // the panel (DrawContext_TileImageInRect 0x004bbdc0). The original tiles a random NovaRandom-picked
-    // 'ppat' resource 128..137 (DAT_00733b7c); the port generates its own
-    // noise tiles.
+    // the panel (DrawContext_TileImageInRect 0x004bbdc0). The original tiles a
+    // random NovaRandom-picked 'ppat' resource 128..137 (DAT_00733b7c); the
+    // port generates its own noise tiles.
     // TODO(decomp(0x004bbdc0)) partial: 'ppat' resources not decoded.
     if (!radar_static_[0]) {
       std::uniform_int_distribution<int> shade(0, 255);

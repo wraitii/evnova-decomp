@@ -1499,7 +1499,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   if (NovaAiShip_IsDisabled(state, target)) {
     frame_base = 0xc;
   } else {
-    if (target.ai_target_ship_slot == 0 &&
+    if (target.squad_leader_ship_slot == 0 &&
         target.target_stellar_object_id == -1) {
       frame_base = 8; // directly targeting the player
     } else {
@@ -1508,11 +1508,11 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     }
     // The original re-checks the chain AFTER the state branches and overrides
     // 0/4: targeting a ship that itself targets the player reads as 8.
-    if (target.ai_target_ship_slot > 0 &&
+    if (target.squad_leader_ship_slot > 0 &&
         state.SlotInRange(
-            static_cast<std::size_t>(target.ai_target_ship_slot)) &&
-        state.ShipAt(static_cast<std::size_t>(target.ai_target_ship_slot))
-                .ai_target_ship_slot == 0) {
+            static_cast<std::size_t>(target.squad_leader_ship_slot)) &&
+        state.ShipAt(static_cast<std::size_t>(target.squad_leader_ship_slot))
+                .squad_leader_ship_slot == 0) {
       frame_base = 8;
     }
   }

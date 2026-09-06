@@ -23,7 +23,7 @@ constexpr std::int16_t kDeployedFighterBehavior = 5;
 // (0x00450e48/0x00450ee1) -- TODO(decomp(ShipState +0xC4)): that field is not
 // modelled, so the port counts plain attached presence.
 enum class AttachFilter {
-  kAny,         // active + ai_target_ship_slot == 0
+  kAny,         // active + squad_leader_ship_slot == 0
   kJumpCapable, // + not disabled, not destroyed (the count cache)
   kRecoverable, // + behavior 5 (deployed fighters)
 };
@@ -34,7 +34,7 @@ enum class AttachFilter {
   int count = 0;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
-    if (!ship.is_active || ship.ai_target_ship_slot != 0) {
+    if (!ship.is_active || ship.squad_leader_ship_slot != 0) {
       continue;
     }
     if (filter == AttachFilter::kJumpCapable &&
@@ -122,7 +122,7 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
     if (holding && player_target != -1 && player_target != 0 &&
         state.SlotInRange(static_cast<std::size_t>(player_target)) &&
         state.ShipAt(static_cast<std::size_t>(player_target))
-                .ai_target_ship_slot != 0) {
+                .squad_leader_ship_slot != 0) {
       entry = 0x9f; // "attacking target."
     }
   }
@@ -298,7 +298,7 @@ bool NovaEscort_CommandPlayerEscortGroup(GameState &state,
   std::int16_t message_command = command;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
-    if (!ship.is_active || ship.ai_target_ship_slot != 0) {
+    if (!ship.is_active || ship.squad_leader_ship_slot != 0) {
       continue;
     }
     const ShipClass *cls = state.scenario.Ship(

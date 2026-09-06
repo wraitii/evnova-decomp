@@ -9,7 +9,7 @@
 // 2 Warships / 3 Freighters, the Bible EscortType classes); the order keys
 // F/D/V/C (slots 0x30..0x33) issue Attack / Defend / Hold Position /
 // Formation, with the arm-modifier pair turning Formation into Return to
-// Hangar. Orders dispatch to attached ships (ai_target_ship_slot == 0);
+// Hangar. Orders dispatch to attached ships (squad_leader_ship_slot == 0);
 // with the panel closed they always target every attached ship.
 
 #include <array>
@@ -59,7 +59,7 @@ void NovaEscort_TickPlayerEscortCommands(GameState &state,
                                            std::int16_t category);
 
 // Ghidra 0x0045c880 Ship_CommandPlayerEscortGroup: applies `command` to every
-// active ship attached to the player (ai_target_ship_slot == 0) whose class
+// active ship attached to the player (squad_leader_ship_slot == 0) whose class
 // category matches, or to all of them when `category` is -1. Deployed
 // fighters (ai_behavior_code 5) take every order; other attached ships accept
 // every order except Return to Hangar, which reverts to Formation. Attack

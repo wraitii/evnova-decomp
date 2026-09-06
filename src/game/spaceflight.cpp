@@ -263,14 +263,15 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     if (ship.pers_def_slot < -1 || ship.pers_def_slot > 0x3ff) {
       ship.pers_def_slot = -1;
     }
-    if (ship.ai_target_ship_slot < -1 || ship.ai_target_ship_slot > 0x3f) {
-      ship.ai_target_ship_slot = -1;
+    if (ship.squad_leader_ship_slot < -1 ||
+        ship.squad_leader_ship_slot > 0x3f) {
+      ship.squad_leader_ship_slot = -1;
     }
     if (ship.target_stellar_object_id < -1 ||
         ship.target_stellar_object_id > 0x7ff) {
-      // Ghidra quirk: this range check resets ai_target_ship_slot, not
+      // Ghidra quirk: this range check resets squad_leader_ship_slot, not
       // target_stellar_object_id.
-      ship.ai_target_ship_slot = -1;
+      ship.squad_leader_ship_slot = -1;
     }
     if (ship.mission_fleet_slot < -1 || ship.mission_fleet_slot > 0xf) {
       ship.mission_fleet_slot = -1;
@@ -975,8 +976,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                              /*keep_player_engaged=*/false);
       // Escort adoption (System_RebuildInitialNpcAndMissionPopulation
       // 0x0041af90, reached from the jump-arrival block at 0x0044fa91):
-      // attached ships (ai_target_ship_slot == 0) that survived the sweep are
-      // adopted into the arrival system (Ship_ResetShipToDefaultCombatState
+      // attached ships (squad_leader_ship_slot == 0) that survived the sweep
+      // are adopted into the arrival system (Ship_ResetShipToDefaultCombatState
       // 0x0041e240, flag = 0: no refill on a jump), the wedge snaps around
       // the player, and because the player core windows its station-hold
       // timer at -999 around the rebuild (0x0044fa83 / 0x0044faa2) each
@@ -1847,11 +1848,12 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       // the 30..59-tick coast-through timer (armed once: the reset clears the
       // desired speed and thrust command, so the branch is not re-entered).
       float threshold_max_speed = eff_max_speed;
-      if (ship.ai_target_ship_slot >= 0 && ship.ai_target_ship_slot <= 0x3f &&
+      if (ship.squad_leader_ship_slot >= 0 &&
+          ship.squad_leader_ship_slot <= 0x3f &&
           state.SlotInRange(
-              static_cast<std::size_t>(ship.ai_target_ship_slot))) {
+              static_cast<std::size_t>(ship.squad_leader_ship_slot))) {
         const Ship &lead =
-            state.ShipAt(static_cast<std::size_t>(ship.ai_target_ship_slot));
+            state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot));
         const ShipClass *lead_class = state.scenario.Ship(
             static_cast<std::int16_t>(lead.ship_class_id + 0x80));
         if (lead_class != nullptr) {
@@ -1871,7 +1873,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
           ship.vel_x = 0.0F;
           ship.vel_y = 0.0F;
         }
-        if (ship.ai_target_ship_slot == -1 && ship.pers_def_slot != 0x3ff) {
+        if (ship.squad_leader_ship_slot == -1 && ship.pers_def_slot != 0x3ff) {
           std::uniform_int_distribution<std::int32_t> dist(30, 59);
           ship.ai_maneuver_timer_ms = static_cast<float>(dist(state.rng));
         }
@@ -2486,7 +2488,7 @@ void RespawnResetPlayerShipState(GameState &state) {
   p.primary_target_ship_slot = -1;
   p.ai_secondary_target_slot = -1;
   p.active_weapon_bank_slot = -1;
-  p.ai_target_ship_slot = -1;
+  p.squad_leader_ship_slot = -1;
   p.mission_fleet_slot = -1;
   p.pers_def_slot = -1;
   p.ai_control_mode = 0;
@@ -2734,9 +2736,9 @@ void RunPlayerEjectTransform(GameState &state) {
       continue;
     }
     if (!NovaTargeting_IsShipEligibleForDistressCall(state, ship)) {
-      if (ship.ai_target_ship_slot == 0 &&
+      if (ship.squad_leader_ship_slot == 0 &&
           p.ship_class_id == kEscapePodShipClassIndex) {
-        ship.ai_target_ship_slot = -1;
+        ship.squad_leader_ship_slot = -1;
       }
     } else {
       // Combat AI switches onto the fresh wreck.

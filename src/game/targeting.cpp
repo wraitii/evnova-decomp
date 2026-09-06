@@ -138,7 +138,8 @@ bool NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
     return true;
   }
   if (target < static_cast<std::int16_t>(GameState::kMaxShips) &&
-      state.ShipAt(static_cast<std::size_t>(target)).ai_target_ship_slot == 0) {
+      state.ShipAt(static_cast<std::size_t>(target)).squad_leader_ship_slot ==
+          0) {
     return true;
   }
   return false;
@@ -154,7 +155,7 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
     return false;
   }
   const std::int16_t candidate_id = candidate.ship_instance_id;
-  if (acquirer.ai_target_ship_slot == candidate_id) {
+  if (acquirer.squad_leader_ship_slot == candidate_id) {
     return false; // already locked onto the candidate
   }
   if (acquirer.ship_instance_id == 0) {
@@ -177,7 +178,7 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
   }
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &other = state.ShipAt(slot);
-    if (!other.is_active || other.ai_target_ship_slot != candidate_id) {
+    if (!other.is_active || other.squad_leader_ship_slot != candidate_id) {
       continue;
     }
     if (acquirer.primary_target_ship_slot != static_cast<std::int16_t>(slot)) {
@@ -197,23 +198,23 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
 // ---------------------------------------------------------------------------
 // Per-ship "combat relevance" flag (the acStack_90 markability table built in
 // the first loop of Ship_FindNextPlayerCycleTarget). A ship is relevant when
-// it targets the player directly (ai_target_ship_slot == 0) or targets a ship
-// that itself targets the player, provided it is not a mission-fleet escort.
-// The mission-fleet-escort arm (acStack_50: fleet def active byte != 0 and
-// escort flag short == 1) is not modelled because mission-fleet defs are not
-// reconstructed yet (TODO(decomp)); it is always false here.
+// it targets the player directly (squad_leader_ship_slot == 0) or targets a
+// ship that itself targets the player, provided it is not a mission-fleet
+// escort. The mission-fleet-escort arm (acStack_50: fleet def active byte != 0
+// and escort flag short == 1) is not modelled because mission-fleet defs are
+// not reconstructed yet (TODO(decomp)); it is always false here.
 [[nodiscard]] bool ShipIsCycleRelevant(const GameState &state,
                                        const Ship &ship) {
-  if (ship.ai_target_ship_slot == 0) {
+  if (ship.squad_leader_ship_slot == 0) {
     return true; // directly targeting the player
   }
-  const std::int16_t target = ship.ai_target_ship_slot;
+  const std::int16_t target = ship.squad_leader_ship_slot;
   if (target == -1 || ship.target_stellar_object_id != -1 ||
       !state.SlotInRange(static_cast<std::size_t>(target))) {
     return false;
   }
-  return state.ShipAt(static_cast<std::size_t>(target)).ai_target_ship_slot ==
-         0;
+  return state.ShipAt(static_cast<std::size_t>(target))
+             .squad_leader_ship_slot == 0;
 }
 
 // Shared candidate test for the cycle search loops. Mirrors the filter chain
@@ -330,7 +331,7 @@ NovaTargeting_FindPreviousPlayerCycleTarget(const GameState &state,
 // not destroyed, not disabled (hostile scan only), visible through the
 // cloak gate (or cloak scanner), in the player's system, not in AI state 0x15
 // (engaged scan only), not class-untargetable (or scanner), and NOT already
-// locked onto the player (ai_target_ship_slot != 0).
+// locked onto the player (squad_leader_ship_slot != 0).
 [[nodiscard]] bool
 ShipIsNearestScanEligible(const GameState &state,
                           const Ship &ship,
@@ -338,7 +339,7 @@ ShipIsNearestScanEligible(const GameState &state,
                           bool require_not_fire_restricted,
                           bool exclude_state_15) {
   if (!ship.is_active || NovaAiShip_IsDestroyed(ship) ||
-      ship.ai_target_ship_slot == 0 ||
+      ship.squad_leader_ship_slot == 0 ||
       ship.current_system_id != state.player.current_system_id) {
     return false;
   }
@@ -407,7 +408,7 @@ NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state) {
       const std::int16_t t = ship.primary_target_ship_slot;
       if (t >= 0 && t < static_cast<std::int16_t>(GameState::kMaxShips)) {
         const Ship &target = state.ShipAt(static_cast<std::size_t>(t));
-        if (target.is_active && target.ai_target_ship_slot == 0 &&
+        if (target.is_active && target.squad_leader_ship_slot == 0 &&
             ship.ai_state_code == 4) {
           hostile = true;
         }
@@ -591,15 +592,14 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state) {
       if (nav < 0x80) {
         continue;
       }
-      const std::size_t stellar_idx =
-          static_cast<std::size_t>(nav - 0x80);
+      const std::size_t stellar_idx = static_cast<std::size_t>(nav - 0x80);
       if (stellar_idx >= state.scenario.stellars.size()) {
         continue;
       }
       Stellar &st = state.scenario.stellars[stellar_idx];
       if (st.system_id < 0 ||
-          st.system_id >= static_cast<std::int16_t>(
-                              state.scenario.systems.size())) {
+          st.system_id >=
+              static_cast<std::int16_t>(state.scenario.systems.size())) {
         st.system_id = static_cast<std::int16_t>(sys_idx);
       }
     }
@@ -656,7 +656,7 @@ void NovaTargeting_ValidatePlayerTarget(GameState &state) {
   bool invalid = !target.is_active || NovaAiShip_IsDestroyed(target) ||
                  target.ai_state_code == 0x15;
   if (!invalid && NovaTargeting_ShipAtCloakVisibilityThreshold(target) &&
-      target.ai_target_ship_slot != 0) {
+      target.squad_leader_ship_slot != 0) {
     // The cloak drop only applies while the target is busy with its own AI
     // target (not when it hunts the player); the cloak-scanner outfit lifts it.
     invalid = !ScannerCapabilities(state).can_target_cloaked;

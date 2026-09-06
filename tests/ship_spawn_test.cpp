@@ -42,7 +42,7 @@ TEST_CASE("allocated slot is baselined for the requested system") {
   CHECK(ship.ai_state_code == 0);
   CHECK(ship.ai_control_mode == 0);
   CHECK(ship.primary_target_ship_slot == -1);
-  CHECK(ship.ai_target_ship_slot == -1);
+  CHECK(ship.squad_leader_ship_slot == -1);
   CHECK(ship.mission_fleet_slot == -1);
   CHECK(ship.credits == 0);
   CHECK(ship.death_timer_active == Catch::Approx(0.0F));
@@ -166,7 +166,7 @@ TEST_CASE("system entry populates scattered ambient ships immediately") {
 
 // Ship_DeactivateVacantShipsAndTally (0x0041ad50): the vacancy predicate
 // spares ONLY non-fire-restricted ships actively engaging the player
-// (behavior > 4, ai_target_ship_slot == 0, not docked, no mission fleet, flag
+// (behavior > 4, squad_leader_ship_slot == 0, not docked, no mission fleet, flag
 // == 0). Idle wanderers/dudes, parked ships and fire-restricted ships are all
 // deactivated; parked ships are tallied into their stellar's present_ship_count
 // (capped at max_ship_count) before the slot is cleared.
@@ -186,7 +186,7 @@ TEST_CASE("deactivate vacant ships spares only player-engaged non-restricted") {
   REQUIRE(engaged_slot != -1);
   auto &engaged = st.ShipAt(static_cast<std::size_t>(engaged_slot));
   engaged.ai_behavior_code = 5;
-  engaged.ai_target_ship_slot = 0;
+  engaged.squad_leader_ship_slot = 0;
   // A real spawned ship carries its class hull; the bare allocator leaves
   // armor at 0, which NovaAiShip_IsDisabled would read as critical
   // damage. Restore it so the ship counts as actively engaging the player.
@@ -202,7 +202,7 @@ TEST_CASE("deactivate vacant ships spares only player-engaged non-restricted") {
   REQUIRE(parked_slot != -1);
   auto &parked = st.ShipAt(static_cast<std::size_t>(parked_slot));
   parked.ai_behavior_code = 5;
-  parked.ai_target_ship_slot = 0;
+  parked.squad_leader_ship_slot = 0;
   parked.target_stellar_object_id = 0x81; // some stellar resource id
   auto &stellar = st.scenario.stellars[0x81 - 0x80];
   stellar.max_ship_count = 3;
@@ -221,7 +221,7 @@ TEST_CASE("deactivate vacant ships spares only player-engaged non-restricted") {
   // Cleared fields on the deactivated parked ship.
   CHECK(parked.target_stellar_object_id == -1);
   CHECK(parked.current_system_id == -1);
-  CHECK(parked.ai_target_ship_slot == -1);
+  CHECK(parked.squad_leader_ship_slot == -1);
   CHECK(parked.mission_fleet_slot == -1);
   CHECK(parked.mission_owner_slot == -1);
   CHECK(parked.velocity_match_target_ship_slot == -1);

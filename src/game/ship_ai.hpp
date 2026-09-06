@@ -88,8 +88,9 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship);
 // Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem. Places an NPC
 // at a destination hypergate/wormhole stellar's emergence point, seeds its
 // emergence heading, and arms a 60-tick hold before the slower arrival
-// override: 30 px/tick normally, or 15 when ai_target_ship_slot is the player.
-// This is not normally a persistent state-0x17 successor in the NPC path.
+// override: 30 px/tick normally, or 15 when squad_leader_ship_slot is the
+// player. This is not normally a persistent state-0x17 successor in the NPC
+// path.
 void NovaAi_EnterState15JumpOutToSystem(GameState &state,
                                         Ship &ship,
                                         std::int16_t stellar_id);
@@ -292,8 +293,9 @@ NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
 // Ghidra 0x004102b0 Ship_IsShipLockedOnAttackerInAiState0x04. True when the
 // ship is in AI state 0x04 and holds `attacker`'s instance id as its primary
 // target. Gates the distress-response tiers and the shot-hit aggro logic.
-[[nodiscard]] bool NovaAiShip_IsShipLockedOnAttackerInState4(
-    const Ship &ship, const Ship &attacker);
+[[nodiscard]] bool
+NovaAiShip_IsShipLockedOnAttackerInState4(const Ship &ship,
+                                          const Ship &attacker);
 
 // Ghidra 0x00410ce0 / 0x00410e80 / 0x00410ec0 / 0x00410ee0 / 0x00410f00 /
 // 0x004112a0. Small AI state/control-mode predicates used by the supervisors,
@@ -303,7 +305,8 @@ NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
 //   state 0x08 (arrival slowdown); control mode 0x0C (velocity match);
 //   state 4 (combat engagement); state 2 (idle travel staging).
 [[nodiscard]] bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship);
-[[nodiscard]] bool NovaAiShip_IsShipInEscortControlMode4Or0xD(const Ship &ship);
+[[nodiscard]] bool
+NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiState8(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiControlModeC(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiState4(const Ship &ship);
@@ -334,14 +337,14 @@ NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state);
 [[nodiscard]] bool NovaAiShip_HasShipDistressResponder(const GameState &state,
                                                        const Ship &ship);
 
-// Ghidra 0x00410110 Ship_HasAnyDistressResponderForShip. Aggregate
+// Ghidra 0x00410110 Ship_HasIncomingDistressSupportForShip. Aggregate
 // distress-responder probe: a player-owned `ship` delegates to
 // NovaAiShip_HasShipDistressResponder; otherwise true when `ship` itself is
 // still pressing its target, or when some other active ship (excluding
 // `ship` and `context_ship`) can acquire `ship` as a target and qualifies as
 // a responder for `context_ship`. Used to double an ally's perceived combat
 // strength when support is incoming.
-[[nodiscard]] bool NovaAiShip_HasAnyDistressResponderForShip(
+[[nodiscard]] bool NovaAiShip_HasIncomingDistressSupport(
     const GameState &state, const Ship &ship, const Ship &context_ship);
 
 // Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerAndBrake. Enters AI
@@ -367,27 +370,27 @@ void NovaAi_EnterState4TargetRandomUnengagedShip(GameState &state, Ship &ship);
 void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
                                                    Ship &ship);
 
-// Ghidra 0x00410900 Ship_EnterShipAiState0x04_TargetRandomRelativeContact.
-// Enters AI state 0x04 with a random combat target chosen "relative to" the
-// ship's ai_target_ship_slot leader: the player (slot 0) is admitted only
-// while the leader still presses its own target, other candidates when the
-// leader (or the ship itself, when the leader is the player) would keep
-// pressing / can acquire them. Clears the primary target without a state
-// change when no candidate exists.
-void NovaAi_EnterState4TargetRandomRelativeContact(GameState &state,
-                                                   Ship &ship);
+// Ghidra 0x00410900
+// Ship_EnterShipAiState0x04_TargetRandomRelativeToSquadLeader. Enters AI state
+// 0x04 with a random combat target chosen relative to the ship's squad leader
+// (squad_leader_ship_slot, +0x9A): the player (slot 0) is admitted only while
+// the squad leader still presses its own target, other candidates when the
+// squad leader (or the ship itself, when the leader is the player) would keep
+// pressing / can acquire them. Clears the primary target without a state change
+// when no candidate exists.
+void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
+                                                         Ship &ship);
 
-// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_SetRetreatThrottle. Enters AI
+// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_ClearTargetsSeedHold. Enters AI
 // state 0x0B with the primary target cleared; when the station-hold timer is
 // not running, seeds the 1.0-tick hold and stamps the 60 Hz mode start.
-// Called by Ship_PropagateLeaderRetreatStateToFollowers when a leader
-// retreats.
-void NovaAi_EnterStateBSetRetreatThrottle(Ship &ship, std::uint32_t now_60hz);
+// Called by Ship_PropagateRetreatToSquad when a squad leader retreats.
+void NovaAi_EnterStateBClearTargetsSeedHold(Ship &ship, std::uint32_t now_60hz);
 
-// Ghidra 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToAiTargetLeader. Clears
-// the primary target, mirrors ai_target_ship_slot into the secondary slot,
-// and enters AI state 0x05 with control mode 0 (return to the leader).
-void NovaAi_EnterState5ReturnToAiTargetLeader(Ship &ship);
+// Ghidra 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToSquadLeader. Clears
+// the primary target, mirrors squad_leader_ship_slot into the secondary slot,
+// and enters AI state 0x05 with control mode 0 (return to the squad leader).
+void NovaAi_EnterState5ReturnToSquadLeader(Ship &ship);
 
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Flips the ship hostile: sets
 // ai_state_code 0x04, clears the secondary target, targets the player, and
@@ -418,13 +421,12 @@ void NovaShip_ResetAiBehaviorRuntimeFields(Ship &ship);
 // Ghidra 0x00468920 Ship_CanPlayerHaveMoreEscorts is declared in
 // boarding_plunder.hpp (its first reconstruction was the capture flow).
 
-// Ghidra 0x00410d10 Ship_EnterLeaderReturnStateFromAiTarget (with the
-// behavior-5 follower sweep of 0x00410cb0
-// Ship_EnterShipAiState0x05_ReturnToAiTargetLeader running inline): clears
-// the primary target, mirrors ai_target_ship_slot into the secondary slot,
-// and enters AI state 0x0c for ships attached to the player (behavior != 5)
-// or 0x0a otherwise; every active behavior-5 (deployed fighter) ship whose
-// leader is this ship re-enters state 0x05.
-void NovaShip_EnterLeaderReturnStateFromAiTarget(GameState &state, Ship &ship);
+// Ghidra 0x00410d10 Ship_EnterSquadReturnState (with the behavior-5 squad
+// sweep of 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToSquadLeader running
+// inline): clears the primary target, mirrors squad_leader_ship_slot into the
+// secondary slot, and enters AI state 0x0c for ships attached to the player
+// (behavior != 5) or 0x0a otherwise; every active behavior-5 (deployed
+// fighter) ship whose squad leader is this ship re-enters state 0x05.
+void NovaShip_EnterSquadReturnState(GameState &state, Ship &ship);
 
 } // namespace game

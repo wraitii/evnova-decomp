@@ -183,7 +183,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 ### 1.4 Support functions
 
 - `Ship_CanPlayerHaveMoreEscorts` (0x00468920): count active ships with
-  `ai_behavior_code == 6 && ai_target_ship_slot == 0 &&
+  `ai_behavior_code == 6 && squad_leader_ship_slot == 0 &&
   mission_fleet_slot == -1`; cap 6.
 - `Ship_ResetShipAndAttackersAfterBoarding` (0x00415cb0): for every ship
   whose primary target is the captured ship: reset ai_state/control, clear

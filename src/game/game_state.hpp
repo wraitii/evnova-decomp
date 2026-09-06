@@ -355,8 +355,15 @@ struct Ship {
   std::int16_t travel_transfer_mode = 0;      // +0x2A (provisional offset)
   std::int16_t primary_target_ship_slot = -1; // +0x70
   std::int16_t ai_secondary_target_slot =
-      -1;                                // +0x6C (also a travel/stellar slot)
-  std::int16_t ai_target_ship_slot = -1; // +0x9A
+      -1; // +0x6C (also a travel/stellar slot)
+  // Squad leader / behavior anchor (Ghidra ShipState +0x9A
+  // squad_leader_ship_slot, renamed from ai_target_ship_slot 2026): the ship
+  // this NPC is attached to -- the carrier for behavior-5 fighters, the
+  // protected ship (usually the player) for behavior-6 escorts, the assist
+  // target for behavior >4 otherwise. -1 = no squad. It is an attachment, NOT
+  // a hostile target; the friendly-fire squad-root chain and the formation
+  // passes depend on that.
+  std::int16_t squad_leader_ship_slot = -1;   // +0x9A
   std::int16_t target_stellar_object_id = -1; // +0x8C
   // Escort command selected by the assist supervisor. The clean-room dialog
   // and mission models only use the neutral default so far, but the field is
@@ -377,14 +384,15 @@ struct Ship {
   // Ship_ResetShipToDefaultCombatState (0x0041e240).
   float formation_offset_x = 0.0F; // +0x28
   float formation_offset_y = 0.0F; // +0x2C
-  // Leader/bookkeeping flag bytes (ShipState +0xC0/+0xC1/+0xC2), refreshed
+  // Squad/bookkeeping flag bytes (ShipState +0xC0/+0xC1/+0xC2), refreshed
   // every full tick by the Frame_TickSystems (0x004186b0) scope-6 pass:
-  // +0xC0 some active ship in the system targets this ship (slot 0 => the
-  // player), +0xC1 some ship's formation_leader_ship_slot is this slot, and
-  // +0xC2 some ship's resolved_ai_target_ship_slot is this slot -- the byte
+  // +0xC0 some active ship holds this ship as its squad leader (renamed from
+  // ai_targeted_by_any_ship 2026; NOT combat targeting), +0xC1 some ship's
+  // formation_leader_ship_slot is this slot, and +0xC2 some ship's
+  // resolved_squad_leader_ship_slot is this slot -- the byte
   // Ship_UpdateShipAI (0x00401000) and the player core (0x00451003) gate
   // their per-frame Ship_UpdateEscortFormations pass on.
-  bool ai_targeted_by_any_ship = false;        // +0xC0
+  bool is_any_ships_squad_leader = false;      // +0xC0
   bool ai_followed_as_leader = false;          // +0xC1
   bool ai_selected_as_resolved_target = false; // +0xC2
   // ShipState +0xBD afterburner latch. Producers: Pers_SpawnShipFromPersDef
@@ -403,7 +411,7 @@ struct Ship {
   std::int16_t velocity_match_target_ship_slot = -1; // +0xC8DC
   // Ghidra ShipState +0xC92E: the AI's resolved-target slot, cleared by
   // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810).
-  std::int16_t resolved_ai_target_ship_slot = -1; // +0xC92E
+  std::int16_t resolved_squad_leader_ship_slot = -1; // +0xC92E
   // Stored evasive heading for control mode 0x10 (Ghidra ShipState raw short
   // at +0x8E, between target_stellar_object_id and jump_destination_stellar_id;
   // unnamed in the DB). Ship_ApplyShipAiControls writes current-heading +/-135
@@ -976,11 +984,11 @@ struct GameState {
     return slot < kMaxShips;
   }
 
-  // Ghidra g_ship_ai_target_slot_snapshot (DAT_00591100): per-tick copy of
-  // every ship's ai_target_ship_slot taken by the Frame_TickSystems scope-6
-  // leader-flag pass before Ship_ReacquireAiTargetLeader (0x004156a0) runs,
-  // so leader replacement can find followers of the stale leader.
-  std::array<std::int16_t, kMaxShips> ai_target_slot_snapshot{};
+  // Ghidra g_ship_squad_leader_slot_snapshot (DAT_00591100): per-tick copy of
+  // every ship's squad_leader_ship_slot taken by the Frame_TickSystems scope-6
+  // pass before Ship_ReacquireSquadLeader (0x004156a0) runs, so leadership
+  // succession can find squadmates of the stale leader.
+  std::array<std::int16_t, kMaxShips> squad_leader_slot_snapshot{};
 
   // Seeded PRNG backing the new-game flow's random opener strings and start
   // selection. The original uses a global NovaRandom; this is kept local to

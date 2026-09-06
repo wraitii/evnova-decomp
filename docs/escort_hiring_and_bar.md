@@ -5,7 +5,7 @@ Ghidra (2026 pass). The clean-room counterparts live in
 `src/game/docked_dialog.cpp` (`RunBarDialog`, `RunBarNewsWindow`), 
 `src/game/landed_store.cpp` (hire lane), `src/game/ship_spawn.cpp`
 (`NovaShipClass_SpawnEscortShipFromClass`), and `src/game/ship_ai.cpp`
-(`NovaShip_EnterLeaderReturnStateFromAiTarget`).
+(`NovaShip_EnterSquadReturnState`).
 
 ## The Bar modal (`NovaUi_RunTravelDestinationServicesWindow` 0x0047c8e0)
 
@@ -70,7 +70,7 @@ Ghidra (2026 pass). The clean-room counterparts live in
 ## Hiring
 
 - **Capacity gate** `Ship_CanPlayerHaveMoreEscorts` (0x00468920): counts
-  active ships with `ai_behavior_code == 6`, `ai_target_ship_slot == 0`,
+  active ships with `ai_behavior_code == 6`, `squad_leader_ship_slot == 0`,
   `mission_fleet_slot == -1`; cap **6**. Shared with the capture keep-ship
   flow (port: `boarding_plunder.cpp`).
 - **Hire listing** (`NovaUi_RebuildShipyardAvailabilityList` 0x00469e90, mode
@@ -94,7 +94,7 @@ Ghidra (2026 pass). The clean-room counterparts live in
   ("Hire Escort") and the price panel shows "Hiring Price:" (0x7d2 0xe3).
 - **Escort spawn** (`ShipClass_SpawnEscortShipFromClass` 0x00422400):
   `Ship_AllocateShipSlotInSystem(current_system, reserve 8)`, then
-  `ai_behavior_code = 6`, `ai_target_ship_slot = 0`, government −1,
+  `ai_behavior_code = 6`, `squad_leader_ship_slot = 0`, government −1,
   `random_ai_render_cadence = 2`, base shield/armor, afterburner latch
   (0x0046b260), mining-scoop latch (0x0046cb90), **+0xBB hired-origin mark
   set** (the comm dialog's "Captured Escort"/"Hired Escort" status gate),
@@ -104,7 +104,7 @@ Ghidra (2026 pass). The clean-room counterparts live in
   a random polar drift (`Math_AddPolarVelocity`, bearing `rand(0x168)°`,
   speed `50 + rand(0x32)`); otherwise at the stellar's map position. Finally
   `Ship_ResetShipAiBehaviorRuntimeFields` (0x00402810) and
-  `Ship_EnterLeaderReturnStateFromAiTarget` (0x00410d10): escorts attached to
+  `Ship_EnterSquadReturnState` (0x00410d10): escorts attached to
   the player enter **AI state 0x0c** (player-oriented assist/hold) with the
   secondary target mirroring the attach slot; behavior-5 followers of this
   ship re-enter state 0x05 (0x00410cb0 inline).
@@ -131,7 +131,7 @@ Ghidra (2026 pass). The clean-room counterparts live in
 ## Escort AI notes (for the upcoming pass)
 
 - Hired escorts are `ai_behavior_code == 6` ships attached to the player
-  (`ai_target_ship_slot == 0`); the escort-command overlay (E key) already
+  (`squad_leader_ship_slot == 0`); the escort-command overlay (E key) already
   dispatches orders to them (`escort_commands.cpp`, order codes in
   `EscortOrder`).
 - State 0x0c (`Ship_UpdateShipAiState` arm) is the hire default; the escort

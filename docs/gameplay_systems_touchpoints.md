@@ -83,8 +83,8 @@ Observed responsibilities:
   does not set the death timer at impact; destruction remains an armor-state
   result consumed by the ship handler.
 - A player hit calls `Ship_SetShipHostileToPlayer` (`0x00410700`): it sets the
-  hostile AI state and primary target, but leaves `ai_target_ship_slot` alone.
-  That field is also used by `Ship_ShipsShareTargetLeaderChain`; treating it
+  hostile AI state and primary target, but leaves `squad_leader_ship_slot` alone.
+  That field is also used by `Ship_ShipsShareSquadRoot`; treating it
   as the immediate attacker incorrectly makes subsequent player shots look
   like friendly fire.
 - Blast-radius splash damage uses the impact resolver for each additional ship
@@ -181,7 +181,7 @@ Traced from the handlers in `NovaGameplay_UpdateShipAiState` (0x00405590) and it
 | 2 | local jump-departure staging: brakes while moving, then uses centre-outward controls 3/4 |
 | 3 | attack target ship (`primary_target_ship_slot`) w/ cloak-aware engagement |
 | 4 | attack target w/ mutual-target & allied-govt chain exclusions |
-| 5 | pursue/attack `ai_target_ship_slot` (chase control 0xb) |
+| 5 | pursue/attack `squad_leader_ship_slot` (chase control 0xb) |
 | 6 | follow/hold (control 1); entered when jump can't initiate in combat |
 | 7 | escort/follow primary at range (control 9), escort-arrive |
 | 8 | NPC arrival slowdown (control 0x0a); entered directly by ordinary polar arrivals and after the state-0x15 stellar-entry hold, runs a heading-aligned speed override from 50 (or the state-0x15 override of 30/15) downward in ~1.165-unit normalized-tick steps, normally exits to state 0 through `Ship_ResetShipPrimaryAndSecondaryTargets` at the effective-speed threshold, and can also be removed by the outer vacant-ship sweep |
@@ -196,7 +196,7 @@ Traced from the handlers in `NovaGameplay_UpdateShipAiState` (0x00405590) and it
 | 0x11 | static hold (control 0x15) |
 | 0x12 | attack a stellar system (`ai_secondary_target_slot`) w/ weapon banks |
 | 0x14 | hypergate/wormhole entry: approaches the selected restricted stellar/link with mode 2, then hands off through mode 0x17 and transfers/vanishes; no mode-4 local hyperjump sequence |
-| 0x15 | hypergate/wormhole emergence: places a ship at the destination stellar using its emergence angle, holds for 60 normalized ticks (~2 s at 30 Hz), then drops into state 8 with a 30 px/tick arrival override (15 when `ai_target_ship_slot == 0`); normally a spawn/arrival entry, not a persistent 0x17 successor |
+| 0x15 | hypergate/wormhole emergence: places a ship at the destination stellar using its emergence angle, holds for 60 normalized ticks (~2 s at 30 Hz), then drops into state 8 with a 30 px/tick arrival override (15 when `squad_leader_ship_slot == 0`); normally a spawn/arrival entry, not a persistent 0x17 successor |
 | 0x16 | defunct (clears targets) |
 
 Idle / non-combat set (used by `NovaGameplay_IsShipInNonIdleAiState` 0x00411270): `0, 1, 2, 7, 0x14`. Note `0x14` (jump/travel) is in the idle set even though it is an active travel state; the predicate is used to test whether a target ship is *fighting*, not whether it's moving.

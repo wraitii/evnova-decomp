@@ -146,7 +146,7 @@ TEST_CASE("behavior-0x02 promotes an established hostile contact") {
   ship.ai_hostility_accumulator = 1;
   // This is a hostile contact, not an escort target. Ghidra's state-4 branch
   // intentionally clears a primary target when the two slots are identical.
-  ship.ai_target_ship_slot = -1;
+  ship.squad_leader_ship_slot = -1;
   ship.primary_target_ship_slot = 0;
   ship.pos_x = 100.0F;
   ship.pos_y = 0.0F;
@@ -277,13 +277,13 @@ TEST_CASE("assist helper chooses the lowest positive candidate score") {
       state.ShipAt(static_cast<std::size_t>(candidate_slot));
   helper.is_active = true;
   helper.armor_points = 100.0F;
-  helper.ai_target_ship_slot = 0;
+  helper.squad_leader_ship_slot = 0;
   helper.primary_target_ship_slot = 0;
   helper.pos_x = 500.0F;
   helper.pos_y = 0.0F;
   candidate.is_active = true;
   candidate.armor_points = 100.0F;
-  candidate.ai_target_ship_slot = 1;
+  candidate.squad_leader_ship_slot = 1;
   candidate.primary_target_ship_slot = 0;
   candidate.pos_x = 100.0F;
   candidate.pos_y = 0.0F;
@@ -328,7 +328,7 @@ TEST_CASE(
       state, subject_ship, other_ship));
 
   other_ship.pos_x = 100.0F;
-  other_ship.ai_target_ship_slot = subject_ship.ship_instance_id;
+  other_ship.squad_leader_ship_slot = subject_ship.ship_instance_id;
   state.scenario.ships[0].default_outfit_ids[0] = 0x80;
   state.scenario.ships[0].default_outfit_counts[0] = 1;
   state.scenario.outfits[0].mod_type = 0x11;
@@ -512,7 +512,7 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   game::Ship ship;
   ship.ship_instance_id = 1;
   ship.ship_class_id = 0;
-  ship.ai_target_ship_slot = -1;
+  ship.squad_leader_ship_slot = -1;
 
   const std::int16_t stellar_id = 0x80;
   const auto *stellar = state.scenario.Stellar(stellar_id);
@@ -561,7 +561,7 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
 
   game::Ship player_follower;
   player_follower.ship_class_id = 0;
-  player_follower.ai_target_ship_slot = 0;
+  player_follower.squad_leader_ship_slot = 0;
   game::NovaAi_EnterState15JumpOutToSystem(state, player_follower, stellar_id);
   CHECK(player_follower.ai_desired_speed == Catch::Approx(-15.0F));
 }
@@ -673,7 +673,7 @@ SpawnCombatTestShip(GameState &state, int sys_idx, std::int16_t class_id) {
           ->base_armor);
   ship.ai_secondary_target_slot = -1;
   ship.primary_target_ship_slot = -1;
-  ship.ai_target_ship_slot = -1;
+  ship.squad_leader_ship_slot = -1;
   ship.faction_or_government_id = -1;
   ship.target_stellar_object_id = -1;
   return ship;

@@ -143,7 +143,7 @@ bool NovaShip_CanPlayerHaveMoreEscorts(const GameState &state) {
   std::int16_t escorts = 0;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
-    if (!ship.is_active || ship.ai_target_ship_slot != 0 ||
+    if (!ship.is_active || ship.squad_leader_ship_slot != 0 ||
         ship.ai_behavior_code != 6 || ship.mission_fleet_slot == -1) {
       continue;
     }
@@ -302,7 +302,7 @@ BoardingPlunderOptions NovaBoarding_BuildOptions(GameState &state) {
   float crew_acc = static_cast<float>(player_class->crew);
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &escort = state.ShipAt(slot);
-    if (!escort.is_active || escort.ai_target_ship_slot != 0 ||
+    if (!escort.is_active || escort.squad_leader_ship_slot != 0 ||
         escort.ai_behavior_code != 6 || escort.mission_fleet_slot == -1) {
       continue;
     }
@@ -1929,7 +1929,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
             // (Mission_ExecuteReactionScript of ShipClassDef.field_0x3e9)
             // before conversion.
             target.ai_behavior_code = 6;
-            target.ai_target_ship_slot = 0;
+            target.squad_leader_ship_slot = 0;
             target.escort_origin_mark = 0; // field_0xbb
             target.armor_points = max_armor * kCapturedArmorFraction;
             target.faction_or_government_id = -1;

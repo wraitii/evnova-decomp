@@ -106,21 +106,21 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
       static_cast<std::int16_t>(ship.dude_class_id + 0x80));
 }
 
-// Ghidra Ship_ShipsShareTargetLeaderChain (0x0046d190) walks each ship's
-// ai_target_ship_slot to a root and excludes shots within one escort leader
+// Ghidra Ship_ShipsShareSquadRoot (0x0046d190) walks each ship's
+// squad_leader_ship_slot to a root and excludes shots within one squad-root
 // chain. The walk is bounded to tolerate malformed cycles (the original is
 // not; see the function's plate comment).
-[[nodiscard]] bool SharesTargetLeaderChain(const GameState &state,
-                                           std::int16_t first_slot,
-                                           std::int16_t second_slot) {
+[[nodiscard]] bool SharesSquadRoot(const GameState &state,
+                                   std::int16_t first_slot,
+                                   std::int16_t second_slot) {
   auto root = [&state](std::int16_t slot) {
     std::int16_t current = slot;
     for (std::size_t step = 0; step < GameState::kMaxShips; ++step) {
       if (!ValidShipSlot(current)) {
         return current;
       }
-      const std::int16_t next =
-          state.ShipAt(static_cast<std::size_t>(current)).ai_target_ship_slot;
+      const std::int16_t next = state.ShipAt(static_cast<std::size_t>(current))
+                                    .squad_leader_ship_slot;
       if (!ValidShipSlot(next) || next == current) {
         return current;
       }
@@ -131,7 +131,7 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
   return root(first_slot) == root(second_slot);
 }
 
-// Weapon_CanWeaponHitTarget walks the owner's ai_target_ship_slot chain and
+// Weapon_CanWeaponHitTarget walks the owner's squad_leader_ship_slot chain and
 // only applies its player-escort/booty gates when that chain reaches slot 0.
 [[nodiscard]] bool OwnerChainReachesPlayer(const GameState &state,
                                            std::int16_t owner_slot) {
@@ -144,7 +144,7 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
       return false;
     }
     const std::int16_t next =
-        state.ShipAt(static_cast<std::size_t>(current)).ai_target_ship_slot;
+        state.ShipAt(static_cast<std::size_t>(current)).squad_leader_ship_slot;
     if (next == -1) {
       return false;
     }
@@ -317,10 +317,11 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
     if (!eligible) {
       continue;
     }
-    if (responder.ai_target_ship_slot == owner_ship_slot ||
-        (ValidShipSlot(responder.ai_target_ship_slot) &&
-         state.ShipAt(static_cast<std::size_t>(responder.ai_target_ship_slot))
-                 .ai_target_ship_slot == owner_ship_slot)) {
+    if (responder.squad_leader_ship_slot == owner_ship_slot ||
+        (ValidShipSlot(responder.squad_leader_ship_slot) &&
+         state.ShipAt(
+                  static_cast<std::size_t>(responder.squad_leader_ship_slot))
+                 .squad_leader_ship_slot == owner_ship_slot)) {
       continue;
     }
     responder.ai_state_code = 4;
@@ -381,11 +382,11 @@ void ResolveShipHitFromWeapon(GameState &state,
         state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
     if (attacker.ai_state_code == 0x0D) {
       force_armor_only = true;
-    } else if (attacker.ai_target_ship_slot > 0 &&
-               attacker.ai_target_ship_slot <
+    } else if (attacker.squad_leader_ship_slot > 0 &&
+               attacker.squad_leader_ship_slot <
                    static_cast<std::int16_t>(GameState::kMaxShips) &&
-               state.ShipAt(
-                        static_cast<std::size_t>(attacker.ai_target_ship_slot))
+               state.ShipAt(static_cast<std::size_t>(
+                                attacker.squad_leader_ship_slot))
                        .ai_state_code == 0x0D) {
       force_armor_only = true;
     }
@@ -515,16 +516,16 @@ void ResolveShipHitFromWeapon(GameState &state,
             static_cast<std::int16_t>(mission.goal_counter_c + 1);
       }
     }
-    // Post-hit behavior hint for surrendered escorts (ai_target_ship_slot 0,
+    // Post-hit behavior hint for surrendered escorts (squad_leader_ship_slot 0,
     // not a mission ship): stores how the boarding/escort-conversion flow
     // treats this hull. Cargo transfer for behavior-6 escorts is TODO(decomp)
     // (Outfit_TransferCargoAndJunkToEscortByRatio 0x00469810).
-    if (target.ai_target_ship_slot == 0 && fleet_slot == -1) {
+    if (target.squad_leader_ship_slot == 0 && fleet_slot == -1) {
       target.post_hit_mode_hint =
           target.ai_behavior_code == 5
               ? 0
               : (target.escort_origin_mark == 0 ? 2 : 1);
-      target.ai_target_ship_slot = -1;
+      target.squad_leader_ship_slot = -1;
       target.ai_behavior_code = target_class != nullptr
                                     ? target_class->default_ai_behavior
                                     : target.ai_behavior_code;
@@ -601,7 +602,7 @@ void ResolveShipHitFromWeapon(GameState &state,
         target.primary_target_ship_slot = attacker_ship_slot;
       }
       target.player_aggro_accumulator = 0.0F;
-      const std::int16_t leader = target.ai_target_ship_slot;
+      const std::int16_t leader = target.squad_leader_ship_slot;
       if (leader > 0 &&
           leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
           state.ShipAt(static_cast<std::size_t>(leader))
@@ -630,9 +631,10 @@ void ResolveShipHitFromWeapon(GameState &state,
 
     if (attacker_ship_slot == 0) {
       // Ship_SetShipHostileToPlayer (0x00410700) deliberately changes the
-      // primary target/state only. ai_target_ship_slot is a separate leader /
-      // escort-chain link; overwriting it here makes the next player shot look
-      // like friendly fire through Ship_ShipsShareTargetLeaderChain.
+      // primary target/state only. squad_leader_ship_slot is the squad-leader
+      // attachment link (not a combat target); overwriting it here makes the
+      // next player shot look like friendly fire through
+      // Ship_ShipsShareSquadRoot.
       NovaAi_SetShipHostileToPlayer(state, target);
       if (target.ai_maneuver_timer_ms > kMaxManeuverTimerOnHit) {
         target.ai_maneuver_timer_ms = kMaxManeuverTimerOnHit;
@@ -773,7 +775,7 @@ void ResolveShotCollisionHit(GameState &state,
          ++slot) {
       const Ship &witness = state.ShipAt(static_cast<std::size_t>(slot));
       if (slot == target_slot || !witness.is_active ||
-          witness.ai_target_ship_slot != 0 ||
+          witness.squad_leader_ship_slot != 0 ||
           witness.primary_target_ship_slot != target_slot ||
           witness.ai_behavior_code <= 2 || witness.ai_state_code != 4) {
         continue;
@@ -1037,8 +1039,9 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     return false;
   }
 
-  if (owner.ai_target_ship_slot != -1 && target.ai_target_ship_slot != -1 &&
-      target.ai_target_ship_slot == owner.ai_target_ship_slot) {
+  if (owner.squad_leader_ship_slot != -1 &&
+      target.squad_leader_ship_slot != -1 &&
+      target.squad_leader_ship_slot == owner.squad_leader_ship_slot) {
     return false;
   }
   if (owner.faction_or_government_id >= 0 &&
@@ -1059,11 +1062,11 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     // Player-aligned fire never hits the player's own escort chain,
     // xenophobic (0x40) owner governments, immaterial (0x08) target
     // governments, or booty-flagged (0x100) dude targets.
-    const std::int16_t target_leader = target.ai_target_ship_slot;
+    const std::int16_t target_leader = target.squad_leader_ship_slot;
     const bool target_is_player_escort =
         target_slot != 0 && ValidShipSlot(target_leader) &&
         state.ShipAt(static_cast<std::size_t>(target_leader))
-                .ai_target_ship_slot == 0;
+                .squad_leader_ship_slot == 0;
     if (target_is_player_escort) {
       return false;
     }
@@ -1078,12 +1081,12 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
       return false;
     }
     // Owner-side booty gate: when the owner has no valid dude record, the
-    // owner's escort leader's dude record is consulted instead.
+    // owner's squad leader's dude record is consulted instead.
     const DudeDef *owner_dude = DudeFor(state, owner);
-    if (owner_dude == nullptr && ValidShipSlot(owner.ai_target_ship_slot)) {
+    if (owner_dude == nullptr && ValidShipSlot(owner.squad_leader_ship_slot)) {
       owner_dude = DudeFor(
           state,
-          state.ShipAt(static_cast<std::size_t>(owner.ai_target_ship_slot)));
+          state.ShipAt(static_cast<std::size_t>(owner.squad_leader_ship_slot)));
     }
     if (owner_dude != nullptr && (owner_dude->booty_flags & 0x0100U) != 0U) {
       return false;
@@ -1104,11 +1107,11 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   // Government aggro flag (0x40): NPC targets carrying it are only hittable
   // by owners that are neither the player nor player escorts.
   if (target_slot != 0 && HasGovernmentFlag(state, target, 0x0040U) &&
-      (owner_slot == 0 || (ValidShipSlot(owner.ai_target_ship_slot) &&
-                           owner.ai_target_ship_slot == 0))) {
+      (owner_slot == 0 || (ValidShipSlot(owner.squad_leader_ship_slot) &&
+                           owner.squad_leader_ship_slot == 0))) {
     return false;
   }
-  if (SharesTargetLeaderChain(state, target_slot, owner_slot)) {
+  if (SharesSquadRoot(state, target_slot, owner_slot)) {
     return false;
   }
   return true;
