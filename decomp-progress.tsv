@@ -34,30 +34,30 @@ address	name	impl_file	reimpl_pct	comment
 0x0040FD20	Government_IsShipEligibleForGovernmentAid	src/game/government.cpp	75%	NovaGovernment_IsShipEligibleForGovernmentAid: keep-pressing/idle/policy-factionless gates + xenophobic/0x0002/allied/hostile reputation-vs-flee-threshold ladders. Mission-fleet branch (fleet defs) and GovtDef +0x83 gate deferred TODO(decomp)
 0x00410060	Ship_AreAnyShipsEligibleForDistressCall	src/game/ship_ai.cpp	100%	NovaAi_AreAnyShipsEligibleForDistressCall: scans NPC slots via NovaTargeting_IsShipEligibleForDistressCall
 0x004100A0	Ship_HasShipDistressResponder	src/game/ship_ai.cpp	100%	NovaAiShip_HasShipDistressResponder: scan for a pressing ship that can respond to the target's distress call
-0x00410110	Ship_HasAnyDistressResponderForShip		0%	
+0x00410110	Ship_HasAnyDistressResponderForShip	src/game/ship_ai.cpp	100%	NovaAiShip_HasAnyDistressResponderForShip: player-owned ship delegates to NovaAiShip_HasShipDistressResponder; otherwise pressing-ship shortcut + scan for an active other ship (excluding ship/context) that can acquire ship and qualify via CanShipRespondToDistressCall(context, candidate). Arg order preserved verbatim.
 0x004101D0	Ship_CanShipRespondToDistressCall	src/game/ship_ai.cpp	100%	NovaAiShip_CanShipRespondToDistressCall: identity/activity/mission-slot gates + govt hostile/xenophobic relation rules
-0x004102B0	Ship_IsShipLockedOnAttackerInAiState0x04		0%	
+0x004102B0	Ship_IsShipLockedOnAttackerInAiState0x04	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipLockedOnAttackerInState4: primary_target_ship_slot == attacker instance id && state 4.
 0x004102E0	Government_PropagateHostilityFromAttack	src/game/collision.cpp	50%	Player weapon hits now propagate the original state-4/primary-player response gates across government relations, policy/xenophobic/derelict flags, distress eligibility, mission exclusions, and leader-target links. Mission side effects and some packed-state edge cases remain TODO(decomp).
 0x00410670	Ship_EnterShipAiState0x02_ClearPrimaryTarget	src/game/ship_ai.cpp	100%	NovaAi_EnterState2ClearPrimaryTarget: enters state 2, clears primary, clamps hold timer, records ai_mode_start_time_ms
-0x004106B0	Ship_EnterShipAiState0x0B_SetRetreatThrottle		0%	
+0x004106B0	Ship_EnterShipAiState0x0B_SetRetreatThrottle	src/game/ship_ai.cpp	100%	NovaAi_EnterStateBSetRetreatThrottle: state 0x0B, hostility accumulator + primary target cleared; seeds 1.0-tick station hold and stamps the 60 Hz mode start only when the hold timer is <= 0. now_60hz injected (original calls NovaTime_GetTickCount60Hz).
 0x00410700	Ship_SetShipHostileToPlayer	src/game/ship_ai.cpp	80%	NovaAi_SetShipHostileToPlayer: state 4 + target player + clear secondary + escort-control-mode drop. Pers announcement arm now PORTED (keep-pressing gate + pers_def_slot set + no mission fleet + pers Flags 0x10 + not disabled/destroyed -> speaker latch + Mission_ShowMissionShipAnnouncement + Ship +0xBC hail latch).
 0x004107E0	Ship_EnterShipAiState0x04_TargetRandomCombatCandidate	src/game/ship_ai.cpp	100%	NovaAi_EnterState4TargetRandomCombatCandidate: count + random pick of distress-eligible same-system ships
-0x00410900	Ship_EnterShipAiState0x04_TargetRandomRelativeContact		0%	
+0x00410900	Ship_EnterShipAiState0x04_TargetRandomRelativeContact	src/game/ship_ai.cpp	100%	NovaAi_EnterState4TargetRandomRelativeContact: count pass (no is_active gate) + NovaRandom_Range(0x40) pick pass including the player; slot-0 gate tests the LEADER (ai_target_ship_slot) pressing state, others use leader pressing (leader==player) or pairwise acquirability, verified from disasm 0x00410993/0x00410ab6. Count<1 clears the primary target without a state change. Unset leader (-1) fails the gate TODO(decomp) pending caller evidence.
 0x00410B00	Ship_EnterShipAiState0x04_TargetRandomUnengagedShip	src/game/ship_ai.cpp	100%	NovaAi_EnterState4TargetRandomUnengagedShip: count + random pick of player-targeting state-3/4 same-system ships
 0x00410C30	Ship_EnterShipAiState0x09_TargetPlayerAndBrake	src/game/ship_ai.cpp	100%	NovaAi_EnterState9TargetPlayerAndBrake: hostility/hold-timer/control reset + target player + state 9 + reversal bias -1
 0x00410C70	Ship_EnterShipAiState0x0F_TargetPlayerAndBrake	src/game/ship_ai.cpp	100%	NovaAi_EnterState0FTargetPlayerAndBrake: same as state 9 entry with state 0x0F
-0x00410CB0	Ship_EnterShipAiState0x05_ReturnToAiTargetLeader		0%	
-0x00410CE0	Ship_IsShipInAiBehavior5State0x05		0%	
+0x00410CB0	Ship_EnterShipAiState0x05_ReturnToAiTargetLeader	src/game/ship_ai.cpp	100%	NovaAi_EnterState5ReturnToAiTargetLeader: primary cleared, ai_target_ship_slot mirrored to secondary, state 5, control mode 0.
+0x00410CE0	Ship_IsShipInAiBehavior5State0x05	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipInAiBehavior5State5: behavior 5 && state 5.
 0x00410D10	Ship_EnterLeaderReturnStateFromAiTarget	src/game/ship_ai.cpp	95%	Ported as NovaShip_EnterLeaderReturnStateFromAiTarget: primary-target clear + ai_secondary mirror + state 0x0c/0x0a selection by behavior/leader context
 0x00410DD0	Ship_ResetShipPrimaryAndSecondaryTargets	src/game/ship_ai.cpp	100%	NovaAi_ResetShipPrimaryAndSecondaryTargets: faithful movement/target reset; exits state 8 to idle after the control-mode-0x0a reverse-speed threshold while preserving the original state 9/0xf exception.
 0x00410E20	Ship_EnterShipAiState0x08_Slowdown	src/game/ship_ai.cpp	70%	NovaAi_EnterState8Slowdown: arms state 0x08 arrival slowdown, -999 station timer, waypoint markers, and randomized turn-bank phase; ShipState +0xC8E8 weapon-sprite flash remains unmodelled.
-0x00410E80	Ship_IsShipInEscortControlMode4Or0x0D		0%	
-0x00410EC0	Ship_IsShipInAiState0x08		0%	
-0x00410EE0	Ship_IsShipInAiControlMode0x0C		0%	
-0x00410F00	Ship_IsShipInAiState0x04		0%	
+0x00410E80	Ship_IsShipInEscortControlMode4Or0x0D	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipInEscortControlMode4Or0xD: state in {2,3,0x0B} && control mode 4 or 0x0D.
+0x00410EC0	Ship_IsShipInAiState0x08	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipInAiState8: state 8.
+0x00410EE0	Ship_IsShipInAiControlMode0x0C	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipInAiControlModeC: control mode 0x0C.
+0x00410F00	Ship_IsShipInAiState0x04	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipInAiState4: state 4.
 0x00410F20	Ship_CanShipInterceptCurrentPrimaryTarget	src/game/ship_ai.cpp	75%	NovaAiShip_CanInterceptCurrentPrimaryTarget: active/system/mass/relative-bearing gate and strict class-speed comparison ported, with the available guided-bank walk. Weapon field_0x58 threshold and full NPC bank runtime remain partial.
 0x00411270	Ship_IsShipInNonIdleAiState	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipInNonIdleAiState: state not in {0
-0x004112A0	Ship_IsShipInAiState0x02		0%	
+0x004112A0	Ship_IsShipInAiState0x02	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipInAiState2: state 2.
 0x004112C0	Ship_ShowPlayerInterceptTauntIfEligible		0%	
 0x00411540	Ship_UpdateAutoWeaponSelectionFromTarget	src/game/ship_ai.cpp	70%	NovaAi_UpdateAutoWeaponSelectionFromTarget: combat-behavior target validation/stale-target clearing plus unguided/beam/guided mode, ammo, cooldown, capability, range, and arc bank selection with fire latch. Full weapon priority tables and turret spread remain deferred.
 0x004115A0	Ship_IsShipInAiState0x0D		0%	

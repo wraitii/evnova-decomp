@@ -289,6 +289,26 @@ NovaAiShip_IsShipBrakingOnPlayerState9(const GameState &state,
 NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
                                          const Ship &ship);
 
+// Ghidra 0x004102b0 Ship_IsShipLockedOnAttackerInAiState0x04. True when the
+// ship is in AI state 0x04 and holds `attacker`'s instance id as its primary
+// target. Gates the distress-response tiers and the shot-hit aggro logic.
+[[nodiscard]] bool NovaAiShip_IsShipLockedOnAttackerInState4(
+    const Ship &ship, const Ship &attacker);
+
+// Ghidra 0x00410ce0 / 0x00410e80 / 0x00410ec0 / 0x00410ee0 / 0x00410f00 /
+// 0x004112a0. Small AI state/control-mode predicates used by the supervisors,
+// the escort command dispatch, and the disable-outfit logic:
+//   behavior-5 ship in state 5 (deployed fighter returning);
+//   state {2,3,0x0B} with control mode 4 or 0x0D (escort hold variants);
+//   state 0x08 (arrival slowdown); control mode 0x0C (velocity match);
+//   state 4 (combat engagement); state 2 (idle travel staging).
+[[nodiscard]] bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship);
+[[nodiscard]] bool NovaAiShip_IsShipInEscortControlMode4Or0xD(const Ship &ship);
+[[nodiscard]] bool NovaAiShip_IsShipInAiState8(const Ship &ship);
+[[nodiscard]] bool NovaAiShip_IsShipInAiControlModeC(const Ship &ship);
+[[nodiscard]] bool NovaAiShip_IsShipInAiState4(const Ship &ship);
+[[nodiscard]] bool NovaAiShip_IsShipInAiState2(const Ship &ship);
+
 // Ghidra 0x00411270 Ship_IsShipInNonIdleAiState. True when the ship's
 // ai_state_code is not one of the idle/non-combat states {0 (track-parked), 1
 // (docked), 2 (idle-template), 7 (escort-arrive), 0x14 (jump/travel)}.
@@ -314,6 +334,16 @@ NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state);
 [[nodiscard]] bool NovaAiShip_HasShipDistressResponder(const GameState &state,
                                                        const Ship &ship);
 
+// Ghidra 0x00410110 Ship_HasAnyDistressResponderForShip. Aggregate
+// distress-responder probe: a player-owned `ship` delegates to
+// NovaAiShip_HasShipDistressResponder; otherwise true when `ship` itself is
+// still pressing its target, or when some other active ship (excluding
+// `ship` and `context_ship`) can acquire `ship` as a target and qualifies as
+// a responder for `context_ship`. Used to double an ally's perceived combat
+// strength when support is incoming.
+[[nodiscard]] bool NovaAiShip_HasAnyDistressResponderForShip(
+    const GameState &state, const Ship &ship, const Ship &context_ship);
+
 // Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerAndBrake. Enters AI
 // state 0x09 targeting the player, resets hostility/hold-timer/control, and
 // sets ai_maneuver_timer_ms -1 (coast through reversal). Called when the hail
@@ -336,6 +366,28 @@ void NovaAi_EnterState4TargetRandomUnengagedShip(GameState &state, Ship &ship);
 // requires NovaTargeting_IsShipEligibleForDistressCall.
 void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
                                                    Ship &ship);
+
+// Ghidra 0x00410900 Ship_EnterShipAiState0x04_TargetRandomRelativeContact.
+// Enters AI state 0x04 with a random combat target chosen "relative to" the
+// ship's ai_target_ship_slot leader: the player (slot 0) is admitted only
+// while the leader still presses its own target, other candidates when the
+// leader (or the ship itself, when the leader is the player) would keep
+// pressing / can acquire them. Clears the primary target without a state
+// change when no candidate exists.
+void NovaAi_EnterState4TargetRandomRelativeContact(GameState &state,
+                                                   Ship &ship);
+
+// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_SetRetreatThrottle. Enters AI
+// state 0x0B with the primary target cleared; when the station-hold timer is
+// not running, seeds the 1.0-tick hold and stamps the 60 Hz mode start.
+// Called by Ship_PropagateLeaderRetreatStateToFollowers when a leader
+// retreats.
+void NovaAi_EnterStateBSetRetreatThrottle(Ship &ship, std::uint32_t now_60hz);
+
+// Ghidra 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToAiTargetLeader. Clears
+// the primary target, mirrors ai_target_ship_slot into the secondary slot,
+// and enters AI state 0x05 with control mode 0 (return to the leader).
+void NovaAi_EnterState5ReturnToAiTargetLeader(Ship &ship);
 
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Flips the ship hostile: sets
 // ai_state_code 0x04, clears the secondary target, targets the player, and

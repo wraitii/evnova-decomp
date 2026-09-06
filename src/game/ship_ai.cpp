@@ -3526,6 +3526,45 @@ bool NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
          ship.primary_target_ship_slot == 0 && ship.ai_state_code == 0x0F;
 }
 
+// Ghidra 0x004102b0 Ship_IsShipLockedOnAttackerInAiState0x04.
+bool NovaAiShip_IsShipLockedOnAttackerInState4(const Ship &ship,
+                                               const Ship &attacker) {
+  return ship.primary_target_ship_slot == attacker.ship_instance_id &&
+         ship.ai_state_code == 4;
+}
+
+// Ghidra 0x00410ce0 Ship_IsShipInAiBehavior5State0x05.
+bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship) {
+  return ship.ai_behavior_code == 5 && ship.ai_state_code == 5;
+}
+
+// Ghidra 0x00410e80 Ship_IsShipInEscortControlMode4Or0x0D.
+bool NovaAiShip_IsShipInEscortControlMode4Or0xD(const Ship &ship) {
+  const std::int16_t s = ship.ai_state_code;
+  return (s == 2 || s == 3 || s == 0x0B) &&
+         (ship.ai_control_mode == 4 || ship.ai_control_mode == 0x0D);
+}
+
+// Ghidra 0x00410ec0 Ship_IsShipInAiState0x08.
+bool NovaAiShip_IsShipInAiState8(const Ship &ship) {
+  return ship.ai_state_code == 8;
+}
+
+// Ghidra 0x00410ee0 Ship_IsShipInAiControlMode0x0C.
+bool NovaAiShip_IsShipInAiControlModeC(const Ship &ship) {
+  return ship.ai_control_mode == 0x0C;
+}
+
+// Ghidra 0x00410f00 Ship_IsShipInAiState0x04.
+bool NovaAiShip_IsShipInAiState4(const Ship &ship) {
+  return ship.ai_state_code == 4;
+}
+
+// Ghidra 0x004112a0 Ship_IsShipInAiState0x02.
+bool NovaAiShip_IsShipInAiState2(const Ship &ship) {
+  return ship.ai_state_code == 2;
+}
+
 // Ghidra 0x00411270 Ship_IsShipInNonIdleAiState.
 bool NovaAiShip_IsShipInNonIdleAiState(const Ship &ship) {
   const std::int16_t s = ship.ai_state_code;
@@ -3589,6 +3628,32 @@ bool NovaAiShip_HasShipDistressResponder(const GameState &state,
     }
     if (NovaAiShip_ShouldKeepPressingTarget(state, other) &&
         NovaAiShip_CanShipRespondToDistressCall(state, ship, other)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x00410110 Ship_HasAnyDistressResponderForShip.
+bool NovaAiShip_HasAnyDistressResponderForShip(const GameState &state,
+                                               const Ship &ship,
+                                               const Ship &context_ship) {
+  if (ship.ship_instance_id == 0) {
+    return NovaAiShip_HasShipDistressResponder(state, context_ship);
+  }
+  if (NovaAiShip_ShouldKeepPressingTarget(state, ship)) {
+    return true;
+  }
+  for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
+    const Ship &candidate = state.ShipAt(j);
+    if (!candidate.is_active ||
+        static_cast<std::int16_t>(j) == context_ship.ship_instance_id ||
+        static_cast<std::int16_t>(j) == ship.ship_instance_id) {
+      continue;
+    }
+    if (NovaTargeting_IsShipAcquirableAsTarget(state, candidate, ship) &&
+        NovaAiShip_CanShipRespondToDistressCall(state, context_ship,
+                                                candidate)) {
       return true;
     }
   }
@@ -3714,6 +3779,102 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
     }
   }
   ship.ai_state_code = 4;
+}
+
+// Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_SetRetreatThrottle.
+void NovaAi_EnterStateBSetRetreatThrottle(Ship &ship, std::uint32_t now_60hz) {
+  ship.ai_state_code = 0x0B;
+  ship.ai_hostility_accumulator = 0;
+  ship.primary_target_ship_slot = -1;
+  if (ship.ai_station_hold_timer <= 0.0F) {
+    ship.ai_station_hold_timer = 1.0F;
+    ship.ai_mode_start_time_ms = now_60hz;
+  }
+}
+
+// Ghidra 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToAiTargetLeader.
+void NovaAi_EnterState5ReturnToAiTargetLeader(Ship &ship) {
+  ship.primary_target_ship_slot = -1;
+  ship.ai_secondary_target_slot = ship.ai_target_ship_slot;
+  ship.ai_state_code = 5;
+  ship.ai_control_mode = 0;
+}
+
+// Ghidra 0x00410900 Ship_EnterShipAiState0x04_TargetRandomRelativeContact.
+void NovaAi_EnterState4TargetRandomRelativeContact(GameState &state,
+                                                   Ship &ship) {
+  const std::int16_t leader_slot = ship.ai_target_ship_slot;
+  const bool leader_valid =
+      leader_slot >= 0 &&
+      static_cast<std::size_t>(leader_slot) < GameState::kMaxShips;
+  const Ship *leader =
+      leader_valid ? &state.ShipAt(static_cast<std::size_t>(leader_slot))
+                   : nullptr;
+
+  // Per-candidate eligibility, relative to the ai_target_ship_slot leader.
+  // Slot 0 (the player) is special: the gate tests the LEADER's pressing
+  // state, not the candidate's (disasm 0x00410993 / 0x00410ab6). Other
+  // candidates are admitted by the leader's pressing state when the leader is
+  // the player, otherwise by pairwise acquirability from the leader. The
+  // original dereferences g_ship_states + ai_target_ship_slot without a
+  // bounds check; a negative/unset leader (-1) fails the gate here.
+  // TODO(decomp(0x00410900)): confirm no caller reaches this without a leader.
+  auto candidate_gate = [&](const Ship &candidate, std::int16_t slot) {
+    if (slot == 0) {
+      return leader != nullptr &&
+             NovaAiShip_ShouldKeepPressingTarget(state, *leader);
+    }
+    if (leader_slot == 0) {
+      return NovaAiShip_ShouldKeepPressingTarget(state, candidate);
+    }
+    return leader != nullptr &&
+           NovaTargeting_IsShipAcquirableAsTarget(state, candidate, *leader);
+  };
+
+  // Count pass: no is_active gate (disabled/system checks only, matching the
+  // original's 0x00410910 ladder).
+  std::int16_t count = 0;
+  for (std::size_t j = 0; j < GameState::kMaxShips; ++j) {
+    const auto slot = static_cast<std::int16_t>(j);
+    if (slot == ship.ship_instance_id || slot == leader_slot) {
+      continue;
+    }
+    const Ship &candidate = state.ShipAt(j);
+    if (NovaAiShip_IsDisabled(state, candidate) ||
+        candidate.current_system_id != ship.current_system_id) {
+      continue;
+    }
+    if (candidate_gate(candidate, slot)) {
+      ++count;
+    }
+  }
+  if (count < 1) {
+    // Clears the primary target only; no state change (disasm 0x004109d0).
+    ship.primary_target_ship_slot = -1;
+    return;
+  }
+
+  // Random pick over slots 0..0x3f (NovaRandom_Range(0x40), so the player IS
+  // an admittable pick) until a valid candidate is found; the count pass
+  // guarantees at least one exists. The pick pass adds the is_active gate.
+  for (;;) {
+    const auto pick = static_cast<std::int16_t>(NovaAiRandomRange(state, 0x40));
+    if (pick == ship.ship_instance_id || pick == leader_slot) {
+      continue;
+    }
+    const Ship &candidate = state.ShipAt(static_cast<std::size_t>(pick));
+    if (!candidate.is_active ||
+        candidate.current_system_id != ship.current_system_id ||
+        NovaAiShip_IsDisabled(state, candidate)) {
+      continue;
+    }
+    if (candidate_gate(candidate, pick)) {
+      ship.ai_secondary_target_slot = -1;
+      ship.primary_target_ship_slot = pick;
+      ship.ai_state_code = 4;
+      return;
+    }
+  }
 }
 
 // Ghidra 0x00410700 Ship_SetShipHostileToPlayer. Ports the escort-mode/state
