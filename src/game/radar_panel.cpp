@@ -76,15 +76,15 @@ SDL_Color Ship_RadarDisplayColor(const GameState &state, const Ship &ship) {
   if (NovaTargeting_IsShipEligibleForDistressCall(state, ship)) {
     return kIffStellarHostile;
   }
-  const std::int16_t ai_target = ship.squad_leader_ship_slot;
-  if (ai_target == 0 && ship.target_stellar_object_id == -1) {
+  const std::int16_t squad_leader = ship.squad_leader_ship_slot;
+  if (squad_leader == 0 && ship.target_stellar_object_id == -1) {
     return kIffShipAttackingWithPlayer;
   }
-  if (ai_target == -1) {
+  if (squad_leader == -1) {
     return kIffShipNeutral;
   }
-  if (state.SlotInRange(static_cast<std::size_t>(ai_target)) &&
-      state.ShipAt(static_cast<std::size_t>(ai_target))
+  if (state.SlotInRange(static_cast<std::size_t>(squad_leader)) &&
+      state.ShipAt(static_cast<std::size_t>(squad_leader))
               .squad_leader_ship_slot == 0) {
     return kIffShipAttackingWithPlayer;
   }

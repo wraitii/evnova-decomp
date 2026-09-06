@@ -24,7 +24,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0040D9A0	Ship_LaunchShipFromCarrierBay		0%	
 0x0040DB70	NovaUi_DrawAiStateMnemonic		0%	
 0x0040DDC0	NovaUi_DrawAiControlModeMnemonic		0%	
-0x0040E020	Ship_AcquirePrimaryTargetForShip	src/game/ship_ai.cpp	45%	NovaAi_AcquirePrimaryTarget: nearest same-system active contact selection with hostile-government/player-directed filters and engaged-contact priority (2026 fix: engaged" = primary_target_ship_slot == 0 only; the ai_target_ship_slot == 0 escort-attach marker was wrongly counted as hostility
+0x0040E020	Ship_AcquirePrimaryTargetForShip	src/game/ship_ai.cpp	45%	NovaAi_AcquirePrimaryTarget: nearest same-system active contact selection with hostile-government/player-directed filters and engaged-contact priority (2026 fix: engaged" = primary_target_ship_slot == 0 only; the squad_leader_ship_slot == 0 escort-attach marker was wrongly counted as hostility
 0x0040F6D0	Ship_IsShipEligibleForDistressCall	src/game/targeting.cpp	100%	NovaTargeting_IsShipEligibleForDistressCall: active + not coasting-through-reversal (ai_maneuver_timer_ms <= 0) + not fire-restricted + primary target is the player or a player-targeting ship + not in retreat states {7
 0x0040F780	Ship_ShouldShipKeepPressingTarget	src/game/ship_ai.cpp	100%	NovaAiShip_ShouldKeepPressingTarget: pursuit-retention predicate (active/unrestricted/AI+primary target/cloak-aware engagement gates, reversal-coast + non-disengage state checks on the player, a player-targeting target, or a third ship pressing it). Literal port incl. the original's primary_target_ship_slot==ship_instance_id comparison in the third-ship scan
 0x0040FAA0	Ship_IsShipAcquirableAsTarget	src/game/targeting.cpp	100%	NovaTargeting_IsShipAcquirableAsTarget: player branch (govt policy flag 0 or distress-eligible) + NPC branch (primary-target / mutual-target scan with the same retreat-state gate).
@@ -46,7 +46,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00410B00	Ship_EnterShipAiState0x04_TargetRandomUnengagedShip	src/game/ship_ai.cpp	100%	NovaAi_EnterState4TargetRandomUnengagedShip: count + random pick of player-targeting state-3/4 same-system ships
 0x00410C30	Ship_EnterShipAiState0x09_TargetPlayerAndBrake	src/game/ship_ai.cpp	100%	NovaAi_EnterState9TargetPlayerAndBrake: hostility/hold-timer/control reset + target player + state 9 + reversal bias -1
 0x00410C70	Ship_EnterShipAiState0x0F_TargetPlayerAndBrake	src/game/ship_ai.cpp	100%	NovaAi_EnterState0FTargetPlayerAndBrake: same as state 9 entry with state 0x0F
-0x00410CB0	Ship_EnterShipAiState0x05_ReturnToSquadLeader	src/game/ship_ai.cpp	100%	NovaAi_EnterState5ReturnToSquadLeader: primary cleared, ai_target_ship_slot mirrored to secondary, state 5, control mode 0.
+0x00410CB0	Ship_EnterShipAiState0x05_ReturnToSquadLeader	src/game/ship_ai.cpp	100%	NovaAi_EnterState5ReturnToSquadLeader: primary cleared, squad_leader_ship_slot mirrored to secondary, state 5, control mode 0.
 0x00410CE0	Ship_IsShipInAiBehavior5State0x05	src/game/ship_ai.cpp	100%	NovaAiShip_IsShipInAiBehavior5State5: behavior 5 && state 5.
 0x00410D10	Ship_EnterSquadReturnState	src/game/ship_ai.cpp	95%	Ported as NovaShip_EnterSquadReturnState: primary-target clear + ai_secondary mirror + state 0x0c/0x0a selection by behavior/leader context
 0x00410DD0	Ship_ResetShipPrimaryAndSecondaryTargets	src/game/ship_ai.cpp	100%	NovaAi_ResetShipPrimaryAndSecondaryTargets: faithful movement/target reset; exits state 8 to idle after the control-mode-0x0a reverse-speed threshold while preserving the original state 9/0xf exception.
