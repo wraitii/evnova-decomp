@@ -992,6 +992,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // AndLanding 0x00458802: roll 1..100 per definition, then re-evaluate
       // the mission lists).
       Mission_RerollOfferingRolls(state);
+      // TODO(decomp(0x0044fb39)): the jump-arrival slice also advances one
+      // daily world tick per escort travel day and runs Frame_JitterPlayerStat-
+      // Modifiers + Frame_RerollPlayerStatModifiers (0x0044fb2d/0x0044fb39)
+      // before Misn_TickActiveMissionTimers; not run here yet.
       NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
       // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of
       // Stellar_ProcessTravelAndLanding's system-transition slice, after the
@@ -1066,14 +1070,18 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
           returning_to_menu = true;
           break;
         }
-        // Launch itself advances nothing: the landing already ticked the
-        // daily world update once (Stellar_TravelToSystem 0x00455e10), and
-        // the original launch block does not touch the calendar.
+        // Launch runs the launch tail below (which contains the original's
+        // single daily world tick, 0x00456033).
         // TODO(decomp(0x0044d870)) skipped: the 15..44-day daily-driver loop
         // belongs to the death/escape-pod respawn (PlayerTick_TimedAction-
         // Transition 0x0044d490), not to launch -- previously misattributed
         // here and charging 16..45 days per landing.
         if (exit == LandedExit::kLaunched) {
+          // Stellar_TravelToSystem launch tail (0x00455f99..0x00456268):
+          // velocity/position reset, shield/armor refill, the daily world
+          // tick, stat-modifier jitter/reroll, autosave, random launch
+          // heading, travel-selection reset and the shot wipe.
+          NovaLanding_LaunchFromStellar(state, ctx.stellar_id);
           // Stellar_TravelToSystem tail (0x00456323): the "leaving
           // <stellar> on <date>" overlay shows as the player departs.
           NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
@@ -1169,11 +1177,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
               returning_to_menu = true;
               break;
             }
-            // Launch advances nothing (see the dock-exit note above); the
-            // landing tick already covered the calendar.
-            // TODO(decomp(0x0044d870)) skipped: 15..44-day loop belongs to
+            // Stellar_TravelToSystem launch tail (0x00455f99..0x00456268); see
+            // the dock-exit note above. The original's launch block does not
+            // advance extra calendar days: the single daily world tick of the
+            // tail is run inside NovaLanding_LaunchFromStellar.
+            // TODO(decomp(0x0044d870)) skipped: the 15..44-day loop belongs to
             // the death respawn (0x0044d490), not launch.
             if (landed == LandedExit::kLaunched) {
+              NovaLanding_LaunchFromStellar(state, ctx.stellar_id);
               NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
             }
             resync_frame_clock();
@@ -2102,6 +2113,13 @@ bool Frame_ShouldTriggerAutoRepairTick(GameState &state) {
   return false;
 }
 
+// Jump-arrival call site note: the in-flight jump-arrival block of
+// Ship_HandlePlayerShipCore (PlayerTick_SystemTransitionAndArrival
+// 0x0044f660) also runs Frame_JitterPlayerStatModifiers + Frame_RerollPlayer-
+// StatModifiers at 0x0044fb39, after the escort travel-day daily passes. The
+// port's jump-arrival does not run them yet (see the TODO in the loop's
+// just_completed block).
+
 // Ghidra PlayerTick_StatusAndOutfitEvents sub-branch 0x0044ab50: on death with
 // a carried bomb, open the escape-pod selection dialog (first owned outfit
 // with ModType 0x2f / ModVal > 0).
@@ -2265,6 +2283,36 @@ void DetonateCarriedBomb(GameState &state) {
 }
 
 } // namespace
+
+// Jump-arrival call-site note for the pair below: the in-flight jump-arrival
+// block of Ship_HandlePlayerShipCore (PlayerTick_SystemTransitionAndArrival
+// 0x0044f660) also runs both functions at 0x0044fb39, after the escort
+// travel-day daily passes. The port's jump-arrival does not run them yet
+// (see the TODO in the loop's just_completed block).
+
+// Ghidra 0x00431480 Frame_JitterPlayerStatModifiers. The two-step jitter and
+// the [85,115] clamp are branch-faithful (NovaRandom_Range(3): 0 -> -1,
+// 1 -> +1, 2 -> unchanged).
+void NovaFrame_JitterPlayerStatModifiers(GameState &state) {
+  for (std::size_t i = 0; i < 2; ++i) {
+    const int roll = RollRandom(state, 3);
+    if (roll == 0) {
+      --state.player_stat_modifier_pct[i];
+    } else if (roll == 1) {
+      ++state.player_stat_modifier_pct[i];
+    }
+    state.player_stat_modifier_pct[i] =
+        std::clamp<std::int16_t>(state.player_stat_modifier_pct[i], 0x55, 0x73);
+  }
+}
+
+// Ghidra 0x00431500 Frame_RerollPlayerStatModifiers: [90,114] percent.
+void NovaFrame_RerollPlayerStatModifiers(GameState &state) {
+  for (std::size_t i = 2; i < 4; ++i) {
+    state.player_stat_modifier_pct[i] =
+        static_cast<std::int16_t>(RollRandom(state, 0x15) + 0x5a);
+  }
+}
 
 // Ghidra PlayerTick_TimedActionTransition support: the eject/escape-pod
 // transform arm (Ship_HandlePlayerShipCore 0x004510b9..0x00453910), the

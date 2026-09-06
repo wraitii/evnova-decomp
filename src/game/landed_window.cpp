@@ -25,8 +25,11 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
+
+#include "spaceflight.hpp"
 
 namespace game {
 
@@ -75,43 +78,73 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
   if (stellar->service_cost > 0 && !fee_waived) {
     state.player.credits -= stellar->service_cost;
   }
-  // Stellar_ProcessTravelAndLanding clears the beam queue immediately on
-  // accepted landing; Stellar_TravelToSystem retires projectile ShotStates
-  // before returning to flight. The modal pauses simulation, so clear the
-  // corresponding clean-room transient pools at this boundary.
-  NovaWeapon_ClearTransientCombatState(state);
-  // Stellar_TravelToSystem (0x00455e10) runs Weapon_ReconcileOutfitPoolWith-
+  // Stellar_TravelToSystem (0x00455e37) runs Weapon_ReconcileOutfitPoolWith-
   // WeaponBanks at the start of the travel transition, so any stock weapon
   // bank acquired since the last reconcile (e.g. a ship bought at the
   // shipyard with mounted stock guns) becomes a sellable owned outfit. Landed
   // Offfitter session buys/sells use this same reconcile at modal entry.
   NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
-  state.player.pos_x = static_cast<float>(stellar->pos_x);
-  state.player.pos_y = static_cast<float>(stellar->pos_y);
-  state.player.vel_x = 0.0F;
-  state.player.vel_y = 0.0F;
-  state.player.speed = 0.0F;
+  // Stellar_TravelToSystem (0x00455e57): landing at a landable stellar
+  // (travel_flags 0x20 clear -- the only kind that passes the dock gate
+  // above) runs Outfit_RefuelShipWithCredits (0x004250f0): when the player
+  // owns any outfit with ModType 19 (auto-refueller; the Bible marks it
+  // "ignored" but the engine consumes it here), fuel is topped up to the
+  // effective capacity at 1 credit per unit, clamped to the wallet. The
+  // else-arm (travel_flags 0x20 set -> centered transition sound [1]) is
+  // unreachable through this dock gate, matching the original's flow where
+  // 0x20 targets arrive only via other transitions.
+  for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
+                            idx < state.inventory.outfit_owned_count.size();
+       ++idx) {
+    if (state.inventory.outfit_owned_count[idx] <= 0) {
+      continue;
+    }
+    const Outfit &def = state.scenario.outfits[idx];
+    const bool is_auto_refueller =
+        def.mod_type == static_cast<std::int16_t>(OutfitEffect::kAutoRefuel) ||
+        std::any_of(def.alt_mod_types.begin(),
+                    def.alt_mod_types.end(),
+                    [](std::int16_t mod) {
+                      return mod == static_cast<std::int16_t>(
+                                        OutfitEffect::kAutoRefuel);
+                    });
+    if (!is_auto_refueller) {
+      continue;
+    }
+    const PlayerEffectiveStats eff = Outfit_ComputePlayerEffectiveStats(state);
+    state.cached_stats = eff;
+    state.stat_cache_valid = true;
+    // The original rounds fuel to the nearest unit (ROUND) before topping
+    // up (0x00425150).
+    const std::int16_t fuel_now =
+        static_cast<std::int16_t>(std::lrintf(state.player.fuel_points));
+    if (fuel_now >= static_cast<std::int16_t>(eff.fuel_capacity)) {
+      break;
+    }
+    state.player.fuel_points = static_cast<float>(fuel_now);
+    const float missing = eff.fuel_capacity - state.player.fuel_points;
+    const std::int32_t spend = static_cast<std::int32_t>(std::min<std::int64_t>(
+        state.player.credits, static_cast<std::int64_t>(missing)));
+    state.player.credits -= spend;
+    state.player.fuel_points += static_cast<float>(spend);
+    NovaLog::Info("auto-refueller: bought {:.0f} fuel for {} credits at "
+                  "stellar {}",
+                  missing,
+                  spend,
+                  stellar_id);
+    break;
+  }
+  // Stellar_TravelToSystem (0x00455e37) runs Weapon_ReconcileOutfitPoolWith-
+  // WeaponBanks at the start of the travel transition, so any stock weapon
+  // bank acquired since the last reconcile (e.g. a ship bought at the
+  // shipyard with mounted stock guns) becomes a sellable owned outfit. Landed
+  // Offfitter session buys/sells use this same reconcile at modal entry.
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
 
-  // Stellar_TravelToSystem (0x00455e10) books the arrival at discovery level
-  // 2 (discovery_state >= 2 on slot + current, then
-  // System_RebuildSystemVisibilityMap(cur, 0, 2)) — the landed/stellar travel
-  // path reveals deeper than a plain hyperspace arrival.
-  NovaSystem_OnSystemEntered(state, state.player.current_system_id, 2);
-
-  // Stellar_TravelToSystem restores the effective hull and shield capacities
-  // after the destination interaction loop returns.
-  const PlayerEffectiveStats effective =
-      Outfit_ComputePlayerEffectiveStats(state);
-  state.player.shield_points = effective.max_shield_points;
-  state.player.armor_points = effective.max_armor_points;
-  state.cached_stats = effective;
-  state.stat_cache_valid = true;
-
-  // Stellar_TravelToSystem (0x00455e10 / call site 0x00456033) advances the
-  // calendar one day per landing, immediately after the shield/armor
-  // restore and before the Spaceport interaction loop (whose mission gate
-  // therefore sees the post-landing date when failing overdue deadlines).
-  Mission_TickDailyWorldUpdate(state);
+  // NOTE: the ship's meters (shield/armor), position/velocity and the
+  // calendar are deliberately NOT touched here. The original restores all of
+  // that in the launch tail, after the interaction loop returns -- see
+  // NovaLanding_LaunchFromStellar.
 
   // Stellar_ProcessTravelAndLanding (0x00457580) runs Ship_DeactivateVacant
   // ShipsAndTally('\0') during the normal arrival, then Mission_SpawnSystemMisn
@@ -140,6 +173,74 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
                 stellar->name,
                 state.player.credits);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Stellar_TravelToSystem (0x00455e10): launch tail, 0x00455f99..0x00456268.
+// Runs when the destination-interaction loop returns, i.e. on leaving the
+// dock. The caller then shows the departure overlay and resyncs its frame
+// clock (the original zeroes g_avg_frame_tick_scale at 0x00456174).
+// ---------------------------------------------------------------------------
+void NovaLanding_LaunchFromStellar(GameState &state, std::int16_t stellar_id) {
+  // 0x00455f99/0x0045600b: velocity and speed kill. The original zeroes the
+  // velocity once more after the reposition; one pass is equivalent.
+  state.player.vel_x = 0.0F;
+  state.player.vel_y = 0.0F;
+  state.player.speed = 0.0F;
+  // 0x00455fa6: reposition at the stellar centre unless the jump-arrival path
+  // staged g_skip_player_reposition_once (0x00449bda). The port's hypergate
+  // arrival never chains straight into this tail, so it always repositions.
+  if (const auto *stellar = state.scenario.Stellar(stellar_id)) {
+    state.player.pos_x = static_cast<float>(stellar->pos_x);
+    state.player.pos_y = static_cast<float>(stellar->pos_y);
+  }
+  // 0x00456020/0x0045602a: shield and armor refill to the effective maxima.
+  const PlayerEffectiveStats effective =
+      Outfit_ComputePlayerEffectiveStats(state);
+  state.player.shield_points = effective.max_shield_points;
+  state.player.armor_points = effective.max_armor_points;
+  state.cached_stats = effective;
+  state.stat_cache_valid = true;
+  // 0x00456033: the single daily world tick runs at LAUNCH, after the
+  // interaction loop -- the Spaceport's mission gate therefore saw the
+  // pre-landing date when failing overdue deadlines.
+  Mission_TickDailyWorldUpdate(state);
+  // 0x00456038: the persisted stat-modifier jitter/reroll pair
+  // (Frame_JitterPlayerStatModifiers 0x00431480 /
+  // Frame_RerollPlayerStatModifiers 0x00431500).
+  NovaFrame_JitterPlayerStatModifiers(state);
+  NovaFrame_RerollPlayerStatModifiers(state);
+  // 0x004560a0: the per-active-mission rearm/roll loop here is an inline
+  // duplicate of the Misn_TickActiveMissionTimers (0x00448910) tail, which
+  // the port already runs per frame; no separate call needed.
+  // 0x00456060..0x0045609b: discovery booking at level 2 (slot + current
+  // system), visibility rebuild and region events.
+  NovaSystem_OnSystemEntered(state, state.player.current_system_id, 2);
+  // 0x00456103: launch autosave, with the docked stellar as the restore
+  // point (block1 +0x00). TODO(decomp(0x00456103)) skipped: the game flow
+  // keeps pilot records in memory only (see new_pilot_flow.cpp); the save
+  // call is wired once the flow resolves its nova-files directory.
+  NovaLog::Todo("launch: pilot autosave (PilotFile_SaveGame) not wired yet");
+  // 0x00456109: random launch heading, rand(0x168) = 0..359 degrees (the
+  // port stores radians).
+  {
+    constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
+    std::uniform_int_distribution<int> heading_roll{0, 0x168 - 1};
+    state.player.heading =
+        static_cast<float>(heading_roll(state.rng)) * kDegToRad;
+  }
+  // 0x00456128: NovaUi_MarkTravelAndStatusPanelsDirty swallows every player
+  // command edge latch; the port edge-resolves commands per frame instead
+  // (TODO(decomp(0x0045c7a0)) skipped).
+  // 0x00456158: travel-selection and engage-timer reset.
+  state.travel.selected_stellar_id = -1;
+  state.travel.selected_stellar_is_manual = false;
+  // 0x00456195..0x00456250: wipe the transient shot pool (every ShotState
+  // fuse reset to -2.0).
+  NovaWeapon_ClearTransientCombatState(state);
+  // 0x00456256: DAT_00597974 = tick60 - 60 re-arms the cursor-anchored
+  // travel-selection sprite. TODO(decomp(0x00439280)) skipped: that sprite
+  // channel is not reconstructed.
 }
 
 // ---------------------------------------------------------------------------

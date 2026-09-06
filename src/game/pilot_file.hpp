@@ -90,6 +90,11 @@ struct PilotFile {
       weapon_bank_secondary{}; // block1+0x261a
   // Junk item quantities (Ghidra g_junk_defs strided counts), block2+0x3488.
   std::array<std::int16_t, 0x80> junk_counts{};
+  // The persisted player stat modifier quartet (DAT_007353f6..0x7353fd,
+  // percentages; see GameState.player_stat_modifier_pct). SaveGameCore writes
+  // them at FleetState block2 +0x3588/+0x358a/+0x358c/+0x358e and LoadSave
+  // restores all four (0x004cb260).
+  std::array<std::int16_t, 4> stat_modifier_pct{100, 100, 100, 100};
 
   // Mission persistence from PilotState block1. The original copies these
   // records byte-for-byte at +0x281e and +0x295e. Keeping them in the save

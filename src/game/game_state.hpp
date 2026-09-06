@@ -991,6 +991,15 @@ struct GameState {
   // divides by the ship class's Strength. Producers (kill/rating accrual)
   // are not yet reconstructed, so it stays 0 (TODO(decomp)).
   std::int32_t player_combat_rating_points = 0;
+  // Ghidra DAT_007353f6..0x7353fd: four persisted player stat modifiers held
+  // as percentages. [0]/[1] random-walk +-1 with 2-in-3 probability, clamped
+  // to [0x55,0x73] = [85,115], at Frame_JitterPlayerStatModifiers 0x00431480;
+  // [2]/[3] reroll to rand(0x15)+0x5a = [90,114] at Frame_RerollPlayerStat-
+  // Modifiers 0x00431500. Both run at the launch tail and at the in-flight
+  // jump arrival; Ship_ResetPlayerShipState (0x004b3e36) seeds 100. Persisted
+  // in the pilot save at FleetState block2 +0x3588. Provisional: the gameplay
+  // consumer is not decoded (TODO(decomp)).
+  std::array<std::int16_t, 4> player_stat_modifier_pct{100, 100, 100, 100};
   bool game_active = false;  // Ghidra DAT_00596d28
   bool intro_played = false; // Ghidra DAT_00596d35: cleared on new pilot so
                              // the intro cinematic plays on first flight.

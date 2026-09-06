@@ -50,7 +50,11 @@ enum class OutfitEffect : std::int16_t {
   kCloaking = 17,        // cloaking device behavior flags
   kFuelScoop = 18,       // frames per 1 unit of fuel; negative = fuel suck (see
                          // Ship_ComputeShipFuelRechargeRate 0x00463b30)
-  kAutoRefuel = 19,      // ignored
+  kAutoRefuel = 19,      // auto-refueller: tops fuel to capacity at 1
+                         // credit/unit on landing at a landable stellar
+                         // (Outfit_RefuelShipWithCredits 0x004250f0, run
+                         // from Stellar_TravelToSystem 0x00455e57; the
+                         // Bible's "ignored" note is wrong for the engine)
   kAutoEject = 20,       // ignored (needs escape pod)
   kCleanRecord = 21,     // govt id to clear legal record with
   kHyperspaceSpeed = 22, // +/- days hyperspace travel time

@@ -113,6 +113,7 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   state.inventory.cargo_bins = pilot_file.cargo_bins;
   state.inventory.outfit_owned_count = pilot_file.outfit_owned_count;
   state.inventory.junk_counts = pilot_file.junk_counts;
+  state.player_stat_modifier_pct = pilot_file.stat_modifier_pct;
   state.weapon_bank_ammo = pilot_file.weapon_bank_ammo;
   state.weapon_bank_secondary = pilot_file.weapon_bank_secondary;
   state.active_mission_runtime_flags = pilot_file.active_mission_runtime_flags;
@@ -150,6 +151,7 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.cargo_bins = state.inventory.cargo_bins;
   out.outfit_owned_count = state.inventory.outfit_owned_count;
   out.junk_counts = state.inventory.junk_counts;
+  out.stat_modifier_pct = state.player_stat_modifier_pct;
   out.weapon_bank_ammo = state.weapon_bank_ammo;
   out.weapon_bank_secondary = state.weapon_bank_secondary;
   out.active_mission_runtime_flags = state.active_mission_runtime_flags;
@@ -296,6 +298,13 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     WriteU16(block2,
              0x3488 + 2 * i,
              static_cast<std::uint16_t>(pilot_file.junk_counts[i]));
+  }
+  // +0x3588..+0x358e stat modifier quartet (SaveGameCore 0x004c7dd0 writes
+  // DAT_007353f6/f8/fa/fc here; LoadSave 0x004cb260 restores all four).
+  for (std::size_t i = 0; i < pilot_file.stat_modifier_pct.size(); ++i) {
+    WriteU16(block2,
+             0x3588 + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.stat_modifier_pct[i]));
   }
   // +0x5d98 pilot nickname C-string, capped at 0x40 bytes like the original
   // CString_CopyBounded(&DAT_005999cc, ..., 0x40).
@@ -503,6 +512,12 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       out.junk_counts[i] =
           static_cast<std::int16_t>(ReadU16(block2, 0x3488 + 2 * i));
       // Original zeroes junk whose def no longer exists. TODO(decomp).
+    }
+    // +0x3588..+0x358e stat modifier quartet (LoadSave 0x004cb260 restores
+    // DAT_007353f6/f8/fa/fc from here).
+    for (std::size_t i = 0; i < out.stat_modifier_pct.size(); ++i) {
+      out.stat_modifier_pct[i] =
+          static_cast<std::int16_t>(ReadU16(block2, 0x3588 + 2 * i));
     }
     // +0x5d98 nickname C-string (0x40 cap, NUL-terminated).
     out.nickname.clear();

@@ -21,10 +21,10 @@
 //
 // OUT OF SCOPE for the MVP (each is a loud NovaLog::Todo stub): cargo buy/sell,
 // outfitting, shipyard purchasing, the bar mini-game, starmap, mission
-// computer, and the landing/launch cinematic transitions. The generic
-// housekeeping that the original always performs on landing (refill shields
-// and armor, deduct the stellar service cost) is real; refueling and armor
-// repair are handled as actual state mutations so the loop is exerciseable.
+// computer, and the landing/launch cinematic transitions. The arrival-side
+// accounting that the original always performs (fee deduction, auto-refuel-
+// ler refuel) is real; shield/armor refill and the calendar tick happen at
+// LAUNCH (Stellar_TravelToSystem's post-loop tail), not at arrival.
 
 #include <cstdint>
 #include <functional>
@@ -162,12 +162,28 @@ struct LandedContext {
 // Applies the normal-arrival subset of Stellar_ProcessTravelAndLanding
 // (0x00457580) / Stellar_TravelToSystem (0x00455e10): the selected stellar
 // must be an ordinary active destination and within the original's 250-unit
-// per-axis arrival envelope. Then verifies its fee, stops/positions the ship,
-// restores armor/shields, and prepares the Spaceport context. This keeps the
-// modal UI out of the transition so its accounting is testable. Returns false
-// without mutating the player when arrival cannot proceed.
+// per-axis arrival envelope. Then verifies its fee, runs the arrival-side
+// auto-refueller refuel (Outfit_RefuelShipWithCredits 0x004250f0), reconciles
+// the outfit pool and prepares the Spaceport context. This keeps the modal UI
+// out of the transition so its accounting is testable. Returns false without
+// mutating the player when arrival cannot proceed. Ship meters and the
+// calendar are NOT touched here: the original restores/refills them in the
+// LAUNCH tail (0x00455f99..0x00456268), after the interaction loop returns --
+// see NovaLanding_LaunchFromStellar.
 [[nodiscard]] bool NovaLanding_EnterDocked(GameState &state,
                                            LandedContext &ctx);
+
+// Ghidra 0x00455e10 Stellar_TravelToSystem, launch tail (0x00455f99..
+// 0x00456268): runs when the destination-interaction loop returns, i.e. on
+// leaving the dock. Zeroes velocity and repositions the ship at the stellar
+// centre, refills shields and armor to the effective maxima, runs the single
+// daily world tick (0x00456033 -- so the Spaceport's mission gate sees the
+// pre-landing date), jitters/rerolls the persisted stat modifiers, saves the
+// pilot, rolls a random launch heading, resets the travel selection, and
+// wipes the transient shot pool. The caller then shows the departure overlay
+// (0x00456323, NovaHud_ShowLaunchDepartureMessage) and resyncs its frame
+// clock (the original zeroes g_avg_frame_tick_scale at 0x00456174).
+void NovaLanding_LaunchFromStellar(GameState &state, std::int16_t stellar_id);
 
 // Refuels the player ship toward its effective fuel capacity. Mirrors the
 // landed fuel service: the player pays a per-unit price for the fuel added,

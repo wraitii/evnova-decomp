@@ -86,7 +86,7 @@ TEST_CASE("landing description word-wrap produces distinct lines",
   CHECK(long_word[0] == "supercalifragilistic");
 }
 
-TEST_CASE("normal landing arrival charges once and restores the docked ship",
+TEST_CASE("normal landing arrival charges once; launch restores the ship",
           "[landed_window]") {
   // SDL-free core of Stellar_TravelToSystem's normal-arrival bookkeeping.
   // The target is deliberately an inactive (not currently rendered) stellar:
@@ -126,6 +126,17 @@ TEST_CASE("normal landing arrival charges once and restores the docked ship",
   CHECK(ctx.stellar_id == 0x80);
   CHECK(state.travel.landed_this_frame);
   CHECK(state.player.credits == 25);
+  // Arrival does NOT touch the ship's meters or kinematics: the original
+  // leaves them to the launch tail, after the interaction loop returns
+  // (Stellar_TravelToSystem 0x00455f99..0x0045602f).
+  CHECK(state.player.pos_x == 3.0F);
+  CHECK(state.player.pos_y == -300.0F);
+  CHECK(state.player.shield_points == 1.0F);
+  CHECK(state.player.armor_points == 2.0F);
+
+  // Launch tail (0x00455f99..0x00456268): reposition + velocity kill,
+  // shield/armor refill to the effective maxima, daily world tick.
+  game::NovaLanding_LaunchFromStellar(state, ctx.stellar_id);
   CHECK(state.player.pos_x == 123.0F);
   CHECK(state.player.pos_y == -456.0F);
   CHECK(state.player.vel_x == 0.0F);
@@ -133,4 +144,9 @@ TEST_CASE("normal landing arrival charges once and restores the docked ship",
   CHECK(state.player.speed == 0.0F);
   CHECK(state.player.shield_points == 300.0F);
   CHECK(state.player.armor_points == 250.0F);
+  // 0x00456109: the launch heading is a fresh rand(0x168) roll.
+  CHECK(state.player.heading >= 0.0F);
+  CHECK(state.player.heading < 6.2831855F);
+  // 0x00456158: the travel selection resets on launch.
+  CHECK(state.travel.selected_stellar_id == -1);
 }
