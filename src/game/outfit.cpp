@@ -294,7 +294,7 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   // The class-base + opcode-bonus aggregates below fold the separate original
   // helpers into one pass: Ship_ComputeShipMaxShieldPoints [0x00463550],
   // Ship_ComputeShipMaxArmor [0x004637a0], Ship_ComputeShipFuelCapacity
-  // [0x00463a20], Ship_ComputeShipShieldRechargeRate [0x00463b30] and
+  // [0x00463a20], Ship_ComputeShipFuelRechargeRate [0x00463b30] and
   // Ship_ComputeShipEffectiveThrust [0x004640a0] (NPC variants ported in
   // NovaShip_ComputeEffectiveStats).
   s.max_shield_points = static_cast<float>(cls->base_shield);

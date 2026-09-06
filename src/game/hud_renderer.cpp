@@ -1152,7 +1152,7 @@ void DrawRadarPoint(SDL_Renderer *renderer,
   SDL_RenderPoint(renderer, static_cast<float>(x), static_cast<float>(y));
 }
 
-// Ghidra 0x004ba350 FUN_004ba350 with the draw context's 1x1 pixel scale:
+// Ghidra 0x004ba350 DrawContext_DrawCircleInRect with the draw context's 1x1 pixel scale:
 // a midpoint-circle outline (8-way symmetric, single-pixel plot) inscribed in
 // the rect, radius (bottom-top)/2, centre ((left+right+1)/2, (top+bottom+1)/2).
 void DrawRadarDisc(SDL_Renderer *renderer, const HudPanelRect &rect) {
@@ -1365,7 +1365,7 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
 
   if (!force_empty && state.proximity_scan_detected) {
     // Interference static: tile one of ten pre-rendered noise patterns over
-    // the panel (FUN_004bbdc0). The original tiles a random NovaRandom-picked
+    // the panel (DrawContext_TileImageInRect 0x004bbdc0). The original tiles a random NovaRandom-picked
     // 'ppat' resource 128..137 (DAT_00733b7c); the port generates its own
     // noise tiles.
     // TODO(decomp(0x004bbdc0)) partial: 'ppat' resources not decoded.
