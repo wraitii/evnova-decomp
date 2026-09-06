@@ -6,7 +6,7 @@ boarding window system: the player "board target" command, the plunder modal
 the surrounding hooks (escort cap, crew/marines, self-destruct panic, derelict
 and unlicensed gates).
 
-Ghidra functions covered (all currently 0% in `progress.csv`):
+Ghidra functions covered (all currently 0% in `decomp-progress.tsv`):
 
 | Address | Ghidra name | Role |
 |---|---|---|

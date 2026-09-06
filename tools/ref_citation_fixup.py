@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Add missing `// Ghidra 0xADDR <Name>.` citations to reimplemented functions.
 
-Reads progress.csv, finds rows whose impl_file does not mention the row's
+Reads decomp-progress.tsv, finds rows whose impl_file does not mention the row's
 address, locates the port function in the impl file (exact or normalized symbol
 match), and inserts the citation as the first line of the doc-comment block
 immediately above the definition.
@@ -98,7 +98,11 @@ def main() -> None:
     if args.apply and args.dry_run:
         ap.error("--apply and --dry-run are mutually exclusive")
 
-    rows = list(csv.DictReader(open(ROOT / "progress.csv")))
+    rows = []
+    for line in (ROOT / "decomp-progress.tsv").read_text().splitlines()[1:]:
+        vals = line.split("\t")
+        vals += [""] * (5 - len(vals))
+        rows.append(dict(zip(["address", "name", "impl_file", "reimpl_pct", "comment"], vals)))
     cache: dict[str, tuple[list[str], str]] = {}
     plan: list[tuple[str, int, str, str, str]] = []  # file, lineno, citation
     skipped: list[str] = []

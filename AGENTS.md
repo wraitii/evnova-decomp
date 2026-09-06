@@ -27,11 +27,15 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
 - **DO NOT use tail/head with cmake build**, or add a small timeout. tail/head can hang if there are fewer lines output than expected.
 - **External probe harness**: `EVN_PROBE=1` starts a localhost HTTP control surface (pause/step, input injection, state reads, screenshots, log tailing). See `docs/probe_harness.md`. Any new game loop must present through `SdlPlatform::Present()` (not `SDL_RenderPresent`) and poll input through the existing platform channels so the probe keeps working everywhere.
 
-## Function progress tracker (`progress.csv`)
+## Function progress trackers (`decomp-progress.tsv` + `decomp-skipped.tsv`)
 
-The project root `progress.csv` tracks one row per Ghidra function:
-`address,name,impl_file,reimpl_pct,comment`. It is the canonical record of how
-much of each function has been re-implemented.
+Two tab-separated files at the project root jointly track **one row per Ghidra
+function** (the pair must stay disjoint and cover the decompile dump;
+`tools/ref_audit.py` checks this).
+
+`decomp-progress.tsv` — functions to be reimplemented:
+`address\tname\timpl_file\treimpl_pct\tcomment`. It is the canonical record of
+how much of each function has been re-implemented.
 
 - **Keep it always up to date**, conservatively, whenever you make a code change that re-implements or partially re-implements a Ghidra function: update that row's `reimpl_pct`, `impl_file`, and `comment` in the same commit.
 - `reimpl_pct` is an **estimate of reimplementation completeness**, 0% to 100%.
@@ -40,8 +44,17 @@ much of each function has been re-implemented.
   - `0%` — not reimplemented (regardless of whether the function is already named/annotated in Ghidra; only reimplementation progress counts here).
 - `impl_file` is the `src/...` path that reimplements the function (empty when `0%`).
 - `comment` is a short note (confidence, known gaps/divergences, TODO(decomp)).
-- **Edit `progress.csv` in place**.
-- **`progress.csv` is very large (~3200 rows). Never rewrite it wholesale or dump it to your context. Always locate the target address with grep and make surgical, in-place edits (edit tool / patch), leaving all other rows intact.**
+- **Edit `decomp-progress.tsv` in place**.
+- **`decomp-progress.tsv` is very large (~2200 rows). Never rewrite it wholesale or dump it to your context. Always locate the target address with grep and make surgical, in-place edits (edit tool / patch), leaving all other rows intact.**
+
+`decomp-skipped.tsv` — functions deliberately **not** reimplemented (replaced by
+SDL3 / OS / bundled codecs):
+`address\tname\tlibrary\tcomment`. `library` is the reason class
+(`blitter | qtml-iml | msl-crt | crt | winsock | vorbis | libpng | libjpeg |
+codec-unknown`). Library renames made in Ghidra must be mirrored into the
+`name` column here. Rows move from progress to skipped only via a deliberate
+decision recorded in `comment`; the glue strip (~0x004E7389–0x00514593) and
+late-linked game code (≥0x00569C9C) stay in progress until triaged.
 
 ## C++ reimplementation phase
 

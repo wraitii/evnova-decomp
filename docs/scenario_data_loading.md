@@ -120,5 +120,5 @@ record name / later string blocks rather than the numeric header.
 - resolves the initial travel destination from the starting system's first
   outward link (system adjacency now readable).
 
-`progress.csv` row for `0x004BD3C0` was raised to 30% to reflect the
+`decomp-progress.tsv` row for `0x004BD3C0` was raised to 30% to reflect the
 resource-family decoding slice.

@@ -12,6 +12,7 @@ Writes a report to analysis/ref_audit.txt. Read-only; no writes to the DB.
 """
 import csv
 import json
+import os
 import re
 import urllib.request
 from collections import Counter
@@ -62,8 +63,21 @@ def file_symbols(text: str) -> set[str]:
     return syms
 
 
+def load_tsv(path: Path, fields: list[str]) -> list[dict]:
+    """Tab-separated rows; tolerates stray whitespace, no quoting ever."""
+    out = []
+    for line in path.read_text().splitlines()[1:]:
+        if not line.strip():
+            continue
+        vals = line.split("\t")
+        vals += [""] * (len(fields) - len(vals))
+        out.append(dict(zip(fields, vals)))
+    return out
+
+
 def main() -> None:
-    rows = list(csv.DictReader(open(ROOT / "progress.csv")))
+    fields = ["address", "name", "impl_file", "reimpl_pct", "comment"]
+    rows = load_tsv(ROOT / "decomp-progress.tsv", fields)
     file_cache: dict[str, tuple[str, set[str]]] = {}
 
     ghidra_mismatch = []      # ghidra name != csv name
@@ -103,8 +117,31 @@ def main() -> None:
         if addr.lower() not in haystack.lower():
             no_citation.append(f"{r['address']} {r['name']} -> {r['impl_file']}")
 
+    # census: progress + skipped must be disjoint and cover the decompile dump
     out = []
-    out.append(f"rows with impl_file: {sum(1 for r in rows if r['impl_file'])}")
+    skipped = load_tsv(ROOT / "decomp-skipped.tsv", ["address", "name", "library", "comment"])
+    p_addrs = {r["address"].lower() for r in rows}
+    s_addrs = {r["address"].lower() for r in skipped}
+    overlap = p_addrs & s_addrs
+    out.append(f"\n== census ==")
+    out.append(f"progress rows: {len(rows)}  skipped rows: {len(skipped)}")
+    if overlap:
+        out.append(f"!! overlap between progress and skipped ({len(overlap)}): {sorted(overlap)[:10]}")
+    else:
+        out.append("progress/skipped disjoint: ok")
+    dump = Path("/tmp/ghidra_full_decompile")
+    if dump.is_dir():
+        dump_addrs = {f"0x{p[:8].lower()}" for p in os.listdir(dump) if p.endswith(".c")}
+        tracked = p_addrs | s_addrs
+        missing = dump_addrs - tracked - {r["address"].lower() for r in rows if "INTERNAL LABEL" in r["comment"]}
+        if missing:
+            out.append(f"!! functions in decompile dump without a row ({len(missing)}): {sorted(missing)[:10]}")
+        else:
+            out.append(f"census vs decompile dump ({len(dump_addrs)} functions): complete")
+    else:
+        out.append("(no decompile dump at /tmp/ghidra_full_decompile; union check skipped)")
+
+    out.append(f"\nrows with impl_file: {sum(1 for r in rows if r['impl_file'])}")
     out.append(f"\n== Ghidra name != csv name ({len(ghidra_mismatch)}) ==")
     out += sorted(ghidra_mismatch)
     out.append(f"\n== address not cited in impl file or sibling header ({len(no_citation)}) ==")
