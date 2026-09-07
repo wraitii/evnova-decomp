@@ -1371,9 +1371,15 @@ bool ScenarioData::LoadFromArchives() {
         cls.muzzle_scale_far_x = muzzle_scale(0x8c);
         cls.muzzle_scale_far_y = muzzle_scale(0x8e);
         cls.muzzle_ready = true;
+        // Combat/sprite animation cadence seed (ShipClassDef +0x9fe <- sh\x8an
+        // +0x30, loader 0x004b4ee0); drawn by the spawn paths.
+        cls.combat_state_init_range = ReadBeI16(*shan, 0x30);
         if (const auto found = first_class_by_base_image.find(base_image);
             found != first_class_by_base_image.end()) {
           cls.clone_source_ship_class = found->second;
+          // Escort type is the clone source class (ShipClassDef +0xa08); the
+          // original leaves it at -1 when the sprite is built fresh.
+          cls.escort_type = found->second;
         } else {
           cls.clone_source_ship_class = static_cast<std::int16_t>(index);
           first_class_by_base_image.emplace(base_image,

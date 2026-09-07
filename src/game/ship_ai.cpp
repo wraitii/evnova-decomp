@@ -34,6 +34,7 @@
 #include "mission.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
+#include "ship_spawn.hpp"
 #include "spaceflight.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
@@ -2008,6 +2009,13 @@ void NovaAi_UpdateShipState(GameState &state,
       ship.primary_target_ship_slot = -1;
       ship.ai_secondary_target_slot = -1;
     }
+    // LAB_00406bc2 tail: while a state-2 target stays valid and the ship is
+    // not disabled, every frame runs the carrier-bay launch driver (and in
+    // the original Government_TryTriggerGovtAssistanceEncounter 0x00413610,
+    // not yet reimplemented -- TODO(decomp)).
+    if (!NovaAiShip_IsDisabled(state, ship)) {
+      NovaShip_LaunchShipFromCarrierBay(state, ship);
+    }
     return;
   }
 
@@ -2753,14 +2761,20 @@ void NovaAi_ApplyControls(GameState &state,
       }
       ship.ai_desired_speed -= step;
     } else {
-      // Inside the escort half-span: the original launches the escort from
-      // the carrier bay (or, for the player's slot, clears the escort when
-      // the class cannot be captured). Both arms are deferred (Phase 8).
+      // Inside the escort half-span: dock arrival. Non-player fighters are
+      // absorbed back into the carrier's bay (Ship_LaunchCarriedShipFromBay
+      // 0x00415ea0). For the player's slot the original first gates on
+      // ShipClass_CanPlayerCaptureShipClass (0x004694a0, not yet
+      // reimplemented): capturable classes dock the same way, non-capturable
+      // ones clear the escort -- we only model the clear arm.
+      // TODO(decomp(0x004694a0)) skipped: player capture-capability gate.
       if (ship.ship_instance_id == 0) {
         ship.ai_state_code = 0xc;
         ship.ai_control_mode = 0;
         ship.primary_target_ship_slot = -1;
         ship.ai_secondary_target_slot = -1;
+      } else {
+        NovaShip_RecoverCarriedShipToBay(state, ship);
       }
     }
     break;
@@ -3056,7 +3070,10 @@ void NovaAi_ApplyControls(GameState &state,
       // select each slow frame.
       NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
     }
-    // Ship_LaunchShipFromCarrierBay (deferred).
+    // Mode-0xe tail: the carrier-bay launch driver runs every frame while
+    // the mode is active (original: after the fast/slow branches, guarded
+    // only by the mode + target + fire-restriction gate above).
+    NovaShip_LaunchShipFromCarrierBay(state, ship);
     break;
   }
 
