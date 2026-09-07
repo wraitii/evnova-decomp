@@ -122,47 +122,72 @@ int NovaWeapon_ClassifyAmmoReadiness(const GameState &state, const Ship &ship) {
   return 0;
 }
 
-// Ghidra 0x00411600 Weapon_IsShipWithinWeaponRangeOfTarget, slot == -1 arm.
-bool NovaWeapon_ShipWithinAnyStockWeaponRange(const GameState &state,
-                                              const Ship &ship,
-                                              const Ship &target) {
-  // The original rounds each absolute axis delta (round-half-away-from-zero)
-  // before squaring.
-  const float rounded_dx = static_cast<float>(std::lround(
-      std::abs(ship.pos_x - target.pos_x)));
-  const float rounded_dy = static_cast<float>(std::lround(
-      std::abs(ship.pos_y - target.pos_y)));
-  const int distance_sq =
-      static_cast<int>(rounded_dx * rounded_dx + rounded_dy * rounded_dy);
+namespace {
 
-  const ShipClass *cls = state.scenario.Ship(
-      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-  if (cls == nullptr) {
+// One axis of the 0x00411600 envelope. The original rounds |delta| with FISTP
+// (nearest-even) then backs the integer off by one when it rounded up -- a
+// net floor() for the non-negative magnitude (disasm 0x00411620..0x00411659).
+[[nodiscard]] int FloorAbsDelta(float delta) {
+  return static_cast<int>(std::abs(delta));
+}
+
+} // namespace
+
+// Ghidra 0x00411600 Weapon_IsShipWithinWeaponRangeOfTarget (disasm
+// 0x00411773..0x00411800): the reach envelope is
+//   floor(|dx|)^2 + floor(|dy|)^2 <= reach^2
+// with reach = beam_length_px + 32 for weapon modes 0 and 3 (exact integer
+// add), and floor(range_scalar + 32.0f) for every other mode. Mode 10 is NOT
+// a beam here despite the original's stale plate comment (corrected 2026).
+// weapon_slot >= 0 checks that bank; -1 scans the class's stock-armed banks
+// (default ammo > 0, weapon_mode_code < 9) and accepts on the first hit.
+bool NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,
+                                              const Ship &ship,
+                                              const Ship &target,
+                                              std::int16_t weapon_slot) {
+  const int dx = FloorAbsDelta(ship.pos_x - target.pos_x);
+  const int dy = FloorAbsDelta(ship.pos_y - target.pos_y);
+  const int distance_sq = dx * dx + dy * dy;
+  auto reach_squared = [](const Weapon &weapon) {
+    const int reach =
+        weapon.weapon_mode_code == 0 || weapon.weapon_mode_code == 3
+            ? weapon.beam_length_px + 32
+            : static_cast<int>(std::floor(weapon.range_scalar + 32.0F));
+    return reach * reach;
+  };
+  if (weapon_slot < 0) {
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (cls == nullptr) {
+      return false;
+    }
+    // Stock-armed bank lookup: the original walks g_ship_class_defs[class].
+    // default_weapon_ammo[0..0xff] > 0; the port's collapsed stock_weapons
+    // table is equivalent (one entry per armed bank).
+    for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
+      if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180 ||
+          stock.count <= 0) {
+        continue;
+      }
+      const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
+      if (weapon == nullptr || weapon->weapon_mode_code >= 9) {
+        continue;
+      }
+      if (distance_sq <= reach_squared(*weapon)) {
+        return true;
+      }
+    }
     return false;
   }
-  // Stock-armed bank lookup: the original walks g_ship_class_defs[class].
-  // default_weapon_ammo[0..0xff] > 0; the port's collapsed stock_weapons
-  // table is equivalent (one entry per armed bank).
-  for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
-    if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180 ||
-        stock.count <= 0) {
-      continue;
-    }
-    const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
-    if (weapon == nullptr || weapon->weapon_mode_code >= 9) {
-      continue;
-    }
-    const float reach =
-        (weapon->weapon_mode_code == 0 || weapon->weapon_mode_code == 3
-             ? static_cast<float>(weapon->beam_length_px)
-             : weapon->range_scalar) +
-        32.0F;
-    if (reach > 0.0F &&
-        distance_sq <= static_cast<int>(reach * reach)) {
-      return true;
-    }
+  if (weapon_slot >= 0x100) {
+    return false;
   }
-  return false;
+  const Weapon *weapon =
+      state.scenario.Weapon(static_cast<std::int16_t>(weapon_slot + 0x80));
+  if (weapon == nullptr) {
+    return false;
+  }
+  return distance_sq <= reach_squared(*weapon);
 }
 
 namespace {

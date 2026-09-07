@@ -79,14 +79,16 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
 [[nodiscard]] int NovaWeapon_ClassifyAmmoReadiness(const GameState &state,
                                                    const Ship &ship);
 
-// Ghidra 0x00411600 Weapon_IsShipWithinWeaponRangeOfTarget, slot == -1 arm:
-// true when any stock-armed class weapon bank (default ammo count > 0,
-// weapon_mode_code < 9) reaches `target` with the envelope (BeamLength or
-// effective projectile range + 32)^2 around the rounded axis deltas. The
-// single-slot arm of the original stays inline in the AI's per-weapon helper
-// (IsTurretWeaponInTargetRange, ship_ai.cpp).
-[[nodiscard]] bool NovaWeapon_ShipWithinAnyStockWeaponRange(
-    const GameState &state, const Ship &ship, const Ship &target);
+// Ghidra 0x00411600 Weapon_IsShipWithinWeaponRangeOfTarget. Reach envelope
+// floor(|dx|)^2 + floor(|dy|)^2 <= reach^2; beam reach (modes 0/3 only) is
+// beam_length_px + 32 exactly, everything else floors range_scalar + 32.0f.
+// weapon_slot >= 0 checks that bank; -1 scans stock-armed class banks with
+// weapon_mode_code < 9 (first hit wins).
+[[nodiscard]] bool
+NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,
+                                         const Ship &ship,
+                                         const Ship &target,
+                                         std::int16_t weapon_slot);
 
 // Ghidra 0x0046f2c0 Weapon_GetWeaponBurstAttempts: shots per trigger pull.
 // Non-burst weapons (flags_primary 0x40 clear) fire exactly one; burst banks

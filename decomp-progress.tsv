@@ -62,7 +62,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00411540	Ship_UpdateAutoWeaponSelectionFromTarget	src/game/ship_ai.cpp	70%	NovaAi_UpdateAutoWeaponSelectionFromTarget: combat-behavior target validation/stale-target clearing plus unguided/beam/guided mode, ammo, cooldown, capability, range, and arc bank selection with fire latch. Full weapon priority tables and turret spread remain deferred.
 0x004115A0	Ship_IsShipInAiState0x0D		0%	
 0x004115C0	Ship_ClearShipState0x09Or0x0FToIdle		0%	
-0x00411600	Weapon_IsShipWithinWeaponRangeOfTarget	src/game/weapon.cpp	70%	Single-slot envelope remains inline in ship_ai.cpp (IsTurretWeaponInTargetRange, modes 0/3/10 vs the original's 0/3 here -- TODO(decomp) reconcile); the slot == -1 arm now ported as NovaWeapon_ShipWithinAnyStockWeaponRange (class stock-armed banks, mode < 9, +32 reach envelope), wired into the assist supervisor's default arm (0x004048a0).
+0x00411600	Weapon_IsShipWithinWeaponRangeOfTarget	src/game/weapon.cpp	100%	NovaWeapon_ShipWithinWeaponRangeOfTarget: full port, both arms. Envelope floor(|dx|)^2+floor(|dy|)^2 <= reach^2 -- the original's FISTP(nearest)+round-up-backoff sequence nets to floor; reach = beam_length+32 exactly for modes 0/3 ONLY, floor(range_scalar+32) otherwise (mode 10 is NOT a beam; stale Ghidra plate comment corrected 2026). -1 arm scans stock-armed class banks with mode < 9. Replaced the former divergent IsTurretWeaponInTargetRange (modes 0/3/10, lround deltas, unrounded reach) at all three former call sites (0x0040ce00 turret gate, 0x0040d470 direct-fire gate, assist supervisor default arm).
 0x00411800	Ship_ComputePerceivedCombatStrengthAgainstShip		0%	
 0x00411AE0	Ship_ShouldSwitchToEscortWingmanTarget		0%	
 0x00411B40	Ship_IsWingmanMirrorTargetStillValid		0%	
