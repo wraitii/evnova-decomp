@@ -174,8 +174,9 @@ names and never correctness.
 Parameters:
 
 - `entry` (alias `start`) - required basic-block entry address or unique label
-- `stops` (alias `stop`) - required JSON array or comma-separated boundary list;
-  traversal excludes these blocks and each supplied stop must be reachable
+- `stops` (alias `stop`) - optional JSON array or comma-separated boundary list;
+  traversal excludes these blocks and each supplied stop must be reachable. Omit it
+  for a region that runs to the parent's own return - see below
 - `name` - optional synthetic function name
 - `names` - optional `off`, `auto` (default) or `full`
 - `inputs` - optional storage overrides keyed by register (for example `ESI`) or
@@ -188,6 +189,7 @@ Parameters:
 - `trace` - optional Boolean, default `false`; reports how each op of the region
   paired up with the parent's, for diagnosing a type or name that did not carry
   over
+- `max_blocks` - optional block budget, 1 through 5000, default `500`
 - `force_infer` - deprecated alias for `"names":"full"`
 
 The reply reports `inputs` and `output_candidates` alongside the C, so you can
@@ -201,13 +203,22 @@ The return value matters more than it looks. Without one, a region whose only
 product is a live-out - a predicate chain setting a flag register, say -
 decompiles to an empty `void` body, because nothing it computes is observable.
 
-**Multi-exit regions.** A region with several stops carries a product the storage
-analysis cannot see: which boundary it took. With more than one stop the view
+**Regions that return.** Leaving through the parent's own `ret` is a boundary
+like any other, and the only one available to a region that runs to the end of
+its parent. Give no `stops` at all and the region ends at those returns: the
+reply reports `"returns": true`, and the view inherits the parent's return type
+and storage, since nothing is live out past a return. This is what lets a tail
+be lifted out whole - on a 40KB parent, collapsing the tail leaves a 167-line
+skeleton that decompiles in 0.3s instead of 49s.
+
+**Multi-exit regions.** A region with several boundaries carries a product the
+storage analysis cannot see: which one it took. With more than one the view
 returns that instead - each boundary becomes `return <n>;`, and the reply's
-`exit_codes` maps each `n` to its stop address and label. Without it the C ends
+`exit_codes` maps each `n` to its stop address and label, with the parent's
+return appearing as `"kind": "return"` when the region can also end that way. Without it the C ends
 in several returns the reader cannot tell apart. Control it with `exits`:
 
-- `auto` (default) - the exit code wins whenever there is more than one stop
+- `auto` (default) - the exit code wins whenever there is more than one boundary
 - `on` - same, and rejected together with an explicit `output`
 - `off` - no exit code; the return goes back to the recovered data output
 
@@ -261,9 +272,10 @@ What is left is the parent's own skeleton - the control flow between the regions
 Parameters:
 
 - `function` (alias `addr`) - required exact function name or contained address
-- `regions` - required JSON array of `{entry, stops, name?, inputs?, output?,
-  output_type?, names?}` objects, each taking the same fields as
-  `/function/synthetic-decompile`; regions may not overlap
+- `regions` - required JSON array of `{entry, stops?, name?, inputs?, output?,
+  output_type?, names?, max_blocks?}` objects, each taking the same fields as
+  `/function/synthetic-decompile`; regions may not overlap, and a region with no
+  `stops` collapses into a tail call
 - `names` - optional default `off`/`auto`/`full` for every region
 - `bodies` - optional Boolean, default `true`; `false` returns the overview alone
 - `plan` - optional Boolean, default `false`; `true` reports the regions and
@@ -271,12 +283,18 @@ Parameters:
   checked before paying for it
 - `timeout` - optional parent decompile timeout in seconds, 1 through 600,
   default `60`
+- `max_blocks` - optional default block budget for every region
 
 The reply reports each region's name, entry, stops (with `exit_code` where
 present), recovered `signature`, `decompile_ms` and `c`, the parent's `c`, and a
 `timing` breakdown. A branch that lands inside a region rather than on its entry
-cannot go through the call, so that path is decompiled inline and the region's
-entry address is listed under `reentered`.
+cannot go through the call, so that path is decompiled inline and the region
+body appears in the parent anyway. That is a property of the CFG, so it is
+reported as `reentered` (`region`, `block`, `from`) before any decompiling -
+`plan:true` shows it, and the fix is to split the region at the block named.
+
+The parent's decompilation, which the naming overlay needs, is shared across
+every region in one request rather than fetched per region.
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8166/function/parent-view" \
@@ -303,7 +321,20 @@ has a default `LAB_<address>` label.
 Contained suggestions are indented beneath larger selected regions.
 `max_depth` controls nesting below each root and defaults to `3`; use `0` for
 roots only or a larger value for a fuller outline.
-`min_blocks` defaults to `5`; `max_blocks` defaults to and is capped at `500`.
+`min_blocks` defaults to `5`; `max_blocks` defaults to `500` and is capped at
+`5000`, matching what a view will accept.
+
+Branches whose paths never reconverge are not a failed suggestion: they are a
+region that ends by returning from the parent. Those are listed separately under
+`-- to return` with a `[return]` boundary, because such a region contains every
+suggestion after it and would otherwise become the root of the outline and hide
+it. A region running from the function's own entry to its returns is the whole
+function, and is not suggested.
+
+Metrowerks and similar compilers reach distant labels through one-instruction
+jump islands parked at the end of the function. Those are spliced out of the
+graph, so a short backward branch is not reported as a 38KB span and an island
+is never offered as a start.
 There is no result-count limit; use the block bounds and nesting depth to control
 the outline.
 
