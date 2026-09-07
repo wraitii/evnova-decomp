@@ -542,7 +542,9 @@ struct Weapon {
   std::uint16_t flags_tertiary = 0;   // (resource +0x66, flags_tertiary)
 
   // The resource field is BeamLength, not a turret angle. The original uses
-  // BeamLength + 32 as the range envelope for beam modes 0/3/10.
+  // BeamLength + 32 as the reach envelope only for beam modes 0 and 3
+  // (Weapon_IsShipWithinWeaponRangeOfTarget 0x00411600; mode 10 takes the
+  // range_scalar path there, disasm-verified 2026).
   std::int16_t beam_length_px = 0; // resource +0x30 / Ghidra +0x70
   // Ghidra WeaponDef.homing_strength_or_turn_rate (+0x72, loaded from resource
   // +0x32): triple-purpose. For beam weapons (modes 0/3/10) it is the Bible

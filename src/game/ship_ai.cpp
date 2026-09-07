@@ -594,27 +594,6 @@ WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank) {
          weapon.range_scalar * weapon.range_scalar;
 }
 
-[[nodiscard]] bool IsTurretWeaponInTargetRange(const Weapon &weapon,
-                                               const Ship &ship,
-                                               const Ship &target) {
-  // Weapon_IsShipWithinWeaponRangeOfTarget (0x00411600) rounds each absolute
-  // axis delta, then compares the squared sum against (range + 32)^2. Beam
-  // modes use BeamLength; projectile turret modes use the post-load +0x5c
-  // effective range. This is intentionally not the generic intercept estimate.
-  const float dx = std::abs(ship.pos_x - target.pos_x);
-  const float dy = std::abs(ship.pos_y - target.pos_y);
-  const bool beam_mode = weapon.weapon_mode_code == 0 ||
-                         weapon.weapon_mode_code == 3 ||
-                         weapon.weapon_mode_code == 10;
-  const float reach = (beam_mode ? static_cast<float>(weapon.beam_length_px)
-                                 : weapon.range_scalar) +
-                      32.0F;
-  const float rounded_dx = static_cast<float>(std::lround(dx));
-  const float rounded_dy = static_cast<float>(std::lround(dy));
-  return reach > 0.0F &&
-         rounded_dx * rounded_dx + rounded_dy * rounded_dy <= reach * reach;
-}
-
 } // namespace
 
 // Mode-6 freeflight-rocket lead constants (Ghidra k_mode6_rocket_* doubles,
@@ -948,7 +927,10 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
         weapon->weapon_mode_code == 3 || weapon->weapon_mode_code == 4 ||
         weapon->weapon_mode_code == 7 || weapon->weapon_mode_code == 8;
     if (turret_mode) {
-      if (!IsTurretWeaponInTargetRange(*weapon, ship, target)) {
+      // Ghidra 0x0040ce00 gates turret banks through
+      // Weapon_IsShipWithinWeaponRangeOfTarget (0x00411600) with the bank.
+      if (!NovaWeapon_ShipWithinWeaponRangeOfTarget(
+              state, ship, target, bank)) {
         continue;
       }
     } else if (weapon->range_scalar > 0.0F &&
@@ -3601,11 +3583,12 @@ void NovaAi_UpdateAssistResponseBehavior(GameState &state,
     ship.ai_station_hold_timer = -1.0F;
     ship.ai_maneuver_timer_ms = -1.0F;
     if (ship.primary_target_ship_slot != -1 &&
-        !NovaWeapon_ShipWithinAnyStockWeaponRange(
+        !NovaWeapon_ShipWithinWeaponRangeOfTarget(
             state,
             ship,
             state.ShipAt(
-                static_cast<std::size_t>(ship.primary_target_ship_slot)))) {
+                static_cast<std::size_t>(ship.primary_target_ship_slot)),
+            -1)) {
       ship.primary_target_ship_slot = -1;
     }
     if (ship.primary_target_ship_slot == -1) {
@@ -4439,7 +4422,8 @@ void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
       barrier = false;
     }
     if (barrier) {
-      barrier = IsTurretWeaponInTargetRange(*weapon, ship, target);
+      barrier =
+          NovaWeapon_ShipWithinWeaponRangeOfTarget(state, ship, target, bank);
     }
     if (!barrier || !NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
       continue;
@@ -4592,7 +4576,7 @@ void NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(GameState &state,
     if (bs.cooldown > 0.0F) {
       continue;
     }
-    if (!IsTurretWeaponInTargetRange(*weapon, ship, target)) {
+    if (!NovaWeapon_ShipWithinWeaponRangeOfTarget(state, ship, target, bank)) {
       continue;
     }
     const std::int16_t mass = weapon->mass_damage < 1 ? 1 : weapon->mass_damage;
