@@ -19,7 +19,7 @@ Ghidra functions covered (all currently 0% in `decomp-progress.tsv`):
 | 0x00468920 | Ship_CanPlayerHaveMoreEscorts | behavior-6 escort count < 6 |
 | 0x00497eb0 | NovaUi_ShowCaptureDecisionDialog | DLOG 0x3fa: escort vs swap |
 | 0x00415cb0 | Ship_ResetShipAndAttackersAfterBoarding | clears targeting after capture |
-| 0x004694a0 | ShipClass_CanPlayerCaptureShipClass | fighter-bay/escort-capacity check |
+| 0x004694a0 | ShipClass_HasPlayerBayCapacityFor | fighter-bay/escort-capacity check |
 
 Port home: `src/game/boarding_plunder.hpp` (design exists) /
 `src/game/boarding_plunder.cpp` (missing — the work).
@@ -190,7 +190,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
   target slots, hostility, stellar target. Same reset on the ship itself +
   `pers_def_slot = -1`, `voice_type_mode = rand(2)` overridden by class
   inherent_attributes_govt voice mode.
-- `ShipClass_CanPlayerCaptureShipClass` (0x004694a0): fighter-bay outfit /
+- `ShipClass_HasPlayerBayCapacityFor` (0x004694a0): fighter-bay outfit /
   escort-capacity counting (used by the post-hit arms and swap gating).
 
 ## 2. Port design
@@ -297,6 +297,44 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    transfer + interface reinstall) is deferred; the escort conversion is the
    port's fallback for both choices (logged).
 7. **progress.csv + doc updates** — updated per iteration (1/2 landed).
+8. **AI boarding resolution (0x00412550) + capture-variant supervisor
+   (0x004038b0)** — DONE, wired:
+   - `NovaBoarding_BoardShipAndTransferCargo` (boarding_plunder.cpp) ports
+     the AI boarding resolution: capture-odds model (NOTE: the AI version
+     reads ShipClassDef.**strength** (+0xc) as the base crew on both sides —
+     NOT capture_power/crew like the player window — plus marine outfits
+     ModType 0x19; odds = crew*100/(crew*2), ±10 noise, clamp [10,100];
+     boarder-side negative marines raise the odds, victim-side lower them,
+     all via 16-bit wrap arithmetic congruent to plain signed adds), the
+     credits share vs the player (odds*29*1e-4 — disasm 0x00412d6a gives 29,
+     not the decompiler's 0x1e=30; doubles 00575020 = 0.01), the loot HUD
+     overlay ("<n> tons of cargo [and <c> credits] stolen!", 400 frames) +
+     transition-table[1] voice, the conversion roll (odds<41 → cheat-only;
+     else rand(0x65) <= odds*0.5), faction conversion to a behavior-6
+     follower of the boarder (armor = max*0.66, shields 0, latch/AI reset,
+     "Escort/Fighter stolen!" overlay + victim targeter reset), and the
+     mission-failure arm (flags_primary 0x8000) when the player is boarded.
+     Ghidra updates: full plate comment on 0x00412550, and the shared
+     constants 00575020/005751a0 retyped double + renamed
+     CONST_0_01_f64 / CONST_2_0_f64.
+     Divergence: TODO(decomp) skipped — the bin-to-bin cargo plunder needs
+     per-Ship cargo bins (port models bins only on PlayerInventory, and an
+     AI boarder has nowhere to carry plunder), so the loot overlay only
+     reports the credits share.
+   - `NovaAi_UpdateBehavior0x03CaptureVariant` (ship_ai.cpp) ports the
+     supervisor end to end (0x16 guard, disabled-ship scan via
+     NovaAi_SelectNearestDisabledShipForBoarding, acquire/travel ladder,
+     capture-approach 0xd vs attack 4 arbitration on crew/capturable kind,
+     boarded-latch conflict scan -> yield 0x16 with timer 120, the mode-0xf
+     boarding handoff, the no-fireable-weapon abandon arm, the ammo-depleted
+     stand-down) and the dispatcher now selects it when the faction's
+     government flags_primary has 0x1000 (Bible: "warships will plunder
+     non-mission, trader-type enemies"). Plate comment refreshed on
+     0x004038b0.
+   - Remaining gap: the approach drive (state 0xd -> control 0xf -> timer
+     expiry) lives in the partially ported state machine
+     (NovaAi_UpdateShipState / ApplyControls); until that slice lands the
+     handoff may not trigger end-to-end in-game. Needs probe verification.
 
 ### In-game verification (iterations 1-2)
 
@@ -322,7 +360,7 @@ the target's sprite frame, press **b**.
   during boarding tests — the board command correctly denies while destroyed
   (Ship_IsShipDestroyed gate) but the sim itself never ends the run.
 - Boarding dispatch divergence: the original gates the plain-ship dispatch
-  through ShipClass_CanPlayerCaptureShipClass (0x004694a0) +
+  through ShipClass_HasPlayerBayCapacityFor (0x004694a0) +
   post_hit_mode_hint, routing fighter-class targets to the "Fighter
   captured." (pool 0x80) / "Fighter repaired." (pool 0x7f) carrier arms
   instead of the plunder window; the port always opens the window.

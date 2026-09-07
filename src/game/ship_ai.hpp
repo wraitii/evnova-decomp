@@ -253,6 +253,16 @@ void NovaAi_UpdateShipAI(GameState &state,
                          std::uint32_t now_ms,
                          float elapsed_ticks = 1.0F);
 
+// Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03CaptureVariant. The
+// plunder-flavored hostile-behavior variant for factions whose government
+// flags_primary carries 0x1000: hunts disabled boardable victims, arbitrates
+// capture (0xd) versus attack (4), performs the AI boarding handoff from
+// control mode 0xf via Outfit_BoardShipAndTransferCargo, and abandons
+// targets it cannot press (depleted ammo / no fireable weapon).
+void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
+                                             Ship &ship,
+                                             std::uint32_t now_ms);
+
 // Ghidra 0x004048a0 Ship_UpdateShipAssistResponseBehavior. Per-frame supervisor
 // for behavior > 4 ships: releases squads whose leader vanished, arms the
 // leader-jump-prep sync into AI state 0x0B (disengage + hold formation while

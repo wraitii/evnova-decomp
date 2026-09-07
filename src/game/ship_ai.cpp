@@ -29,6 +29,7 @@
 #include <random>
 #include <vector>
 
+#include "boarding_plunder.hpp"
 #include "escort_formation.hpp"
 #include "government.hpp"
 #include "mission.hpp"
@@ -1308,6 +1309,191 @@ void NovaAi_UpdateBehavior0x03(GameState &state,
       ship.primary_target_ship_slot = -1;
       ship.ai_state_code = 0;
     }
+  }
+}
+
+// Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03CaptureVariant. The
+// plunder-flavored variant of hostile behavior 0x03, selected by the
+// dispatcher when the ship's faction has government flags_primary 0x1000
+// (Bible: "warships will plunder non-mission, trader-type enemies"). Instead
+// of only fighting, the ship scans for disabled boardable victims
+// (Ship_SelectNearestDisabledShipForBoarding), marks already-boarded targets
+// for the attack/yield decision, performs the actual boarding handoff
+// (Outfit_BoardShipAndTransferCargo) from AI control mode 0xf, and abandons
+// targets it cannot plausibly capture (no fireable weapons / depleted ammo).
+void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
+                                             Ship &ship,
+                                             std::uint32_t now_ms) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
+    return;
+  }
+  if (ship.ai_state_code == 0x16) {
+    return;
+  }
+
+  // Drop a destroyed/missing primary target.
+  if (ship.primary_target_ship_slot != -1) {
+    const auto slot = static_cast<std::size_t>(ship.primary_target_ship_slot);
+    if (!state.SlotInRange(slot) || !state.ShipAt(slot).is_active ||
+        NovaAiShip_IsDestroyed(state.ShipAt(slot))) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_state_code = 0;
+    }
+  }
+
+  // Re-acquire while idle, or while targetless outside the boarding handoff
+  // state 0xe (which keeps the secondary-target boarding victim alive).
+  if (ship.ai_state_code == 0 ||
+      (ship.primary_target_ship_slot == -1 && ship.ai_state_code != 0xe)) {
+    ship.primary_target_ship_slot = -1;
+    NovaAi_SelectNearestDisabledShipForBoarding(state, ship);
+    if (ship.primary_target_ship_slot == -1) {
+      NovaAi_AcquirePrimaryTarget(state, ship);
+    }
+    if (ship.primary_target_ship_slot == -1) {
+      // No victim or hostile around: the travel ladder. Settles at a valid
+      // stellar, wanders to a random adjacent one, or jumps away.
+      const System *sys = state.scenario.System(
+          static_cast<std::int16_t>(ship.current_system_id + 0x80));
+      const bool at_stellar = sys != nullptr &&
+                              ship.jump_destination_stellar_id >= 0 &&
+                              NovaTargeting_IsStellarAdjacentToSystem(
+                                  *sys, ship.jump_destination_stellar_id);
+      if (!at_stellar) {
+        if (ship.ai_secondary_target_slot == -1) {
+          ship.ai_secondary_target_slot =
+              NovaAi_SelectRandomAdjacentTravelStellar(state, ship);
+          if (ship.ai_secondary_target_slot == -1) {
+            if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+              NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+            } else {
+              ship.ai_state_code = 6;
+            }
+          } else {
+            ship.travel_transfer_mode = 2;
+            ship.ai_state_code = 1;
+          }
+        } else if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+          NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+        } else {
+          ship.ai_state_code = 6;
+        }
+      } else if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+        NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+      } else {
+        ship.ai_state_code = 6;
+      }
+    } else {
+      // A victim/hostile was acquired: capture-approach (0xd) only for the
+      // player, a surrendering post-hit contact, or a low-AI class with
+      // capture capability; otherwise it is just an attack (4).
+      const Ship &target =
+          state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+      const ShipClass *target_class = state.scenario.Ship(
+          static_cast<std::int16_t>(target.ship_class_id + 0x80));
+      const bool capturable_kind =
+          target.ship_instance_id == 0 || target.post_hit_mode_hint >= 0 ||
+          (target_class != nullptr && target_class->default_ai_behavior < 3);
+      if (capturable_kind && target_class != nullptr &&
+          target_class->crew != 0) {
+        ship.ai_state_code = 0xd;
+      } else {
+        ship.ai_state_code = 4;
+      }
+    }
+  }
+
+  // Attack/capture arbitration on the current primary target.
+  if (ship.primary_target_ship_slot != -1 &&
+      (ship.ai_state_code == 0xd || ship.ai_state_code == 4)) {
+    const auto target_slot =
+        static_cast<std::size_t>(ship.primary_target_ship_slot);
+    const Ship &target = state.ShipAt(target_slot);
+    const ShipClass *target_class = state.scenario.Ship(
+        static_cast<std::int16_t>(target.ship_class_id + 0x80));
+    const bool capturable_kind =
+        ship.primary_target_ship_slot == 0 || target.post_hit_mode_hint >= 0 ||
+        (target_class != nullptr && target_class->default_ai_behavior < 3);
+    if (capturable_kind && target_class != nullptr && target_class->crew > 0) {
+      if (target.boarded_target_latch == 0) {
+        // Not yet boarded: press the capture approach.
+        ship.ai_state_code = 0xd;
+      } else {
+        // Already boarded: fall back to attack, but yield (state 0x16) when
+        // another able ship is actively boarding the same victim.
+        ship.ai_state_code = 4;
+        for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+          const std::int16_t index = static_cast<std::int16_t>(slot);
+          const Ship &competitor = state.ShipAt(slot);
+          if (!competitor.is_active || index == ship.ship_instance_id ||
+              index == ship.primary_target_ship_slot ||
+              competitor.squad_leader_ship_slot == 0 ||
+              NovaAiShip_IsDisabled(state, competitor) ||
+              competitor.primary_target_ship_slot !=
+                  ship.primary_target_ship_slot ||
+              (competitor.ai_state_code != 0xd &&
+               competitor.ai_control_mode != 0xe)) {
+            continue;
+          }
+          ship.ai_state_code = 0x16;
+          ship.ai_control_mode = 0;
+          ship.primary_target_ship_slot = -1;
+          ship.ai_secondary_target_slot = -1;
+          ship.ai_hostility_accumulator = 0;
+          ship.ai_maneuver_timer_ms = 120.0F;
+          break;
+        }
+      }
+    } else {
+      ship.ai_state_code = 4;
+    }
+  }
+
+  // Boarding handoff: the approach ran to completion (control mode 0xf) with
+  // a victim latched into the secondary slot and the maneuver timer spent.
+  if (ship.ai_state_code == 4 && ship.ai_control_mode == 0xf &&
+      ship.ai_secondary_target_slot != -1 &&
+      ship.ai_maneuver_timer_ms <= 0.0F &&
+      // Port plumbing: the original indexes g_ship_states raw; a stellar id
+      // left in the secondary slot would read out of bounds, which the slot
+      // range guard rejects instead.
+      state.SlotInRange(
+          static_cast<std::size_t>(ship.ai_secondary_target_slot))) {
+    Ship &victim =
+        state.ShipAt(static_cast<std::size_t>(ship.ai_secondary_target_slot));
+    ship.ai_maneuver_timer_ms = 100.0F;
+    ship.ai_state_code = 0xe;
+    ship.ai_control_mode = 0;
+    ship.target_stellar_object_id = -1;
+    NovaBoarding_BoardShipAndTransferCargo(state, ship, victim, now_ms);
+    ship.primary_target_ship_slot = -1;
+    ship.ai_secondary_target_slot = -1;
+  }
+
+  // Abandon an already-disabled victim when this ship has no way to press
+  // the attack (no fireable non-secondary weapon, or every bank depleted).
+  if (ship.ai_state_code == 4 && ship.primary_target_ship_slot != -1) {
+    const auto target_slot =
+        static_cast<std::size_t>(ship.primary_target_ship_slot);
+    const Ship &target = state.ShipAt(target_slot);
+    const ShipClass *target_class = state.scenario.Ship(
+        static_cast<std::int16_t>(target.ship_class_id + 0x80));
+    if ((target_class != nullptr && target_class->default_ai_behavior > 2) &&
+        ship.primary_target_ship_slot != 0 && target.post_hit_mode_hint < 0 &&
+        (!NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship) ||
+         NovaWeapon_ClassifyAmmoReadiness(state, ship) == 2)) {
+      ship.ai_state_code = 0;
+      ship.primary_target_ship_slot = -1;
+    }
+  }
+
+  // Out of ammunition during an attack/capture: stand down entirely.
+  if ((ship.ai_state_code == 4 || ship.ai_state_code == 0xd) &&
+      NovaWeapon_ClassifyAmmoReadiness(state, ship) == 2) {
+    ship.ai_state_code = 0;
+    ship.ai_control_mode = 0;
+    ship.primary_target_ship_slot = -1;
+    ship.ai_secondary_target_slot = -1;
   }
 }
 
@@ -2824,10 +3010,10 @@ void NovaAi_ApplyControls(GameState &state,
       // Inside the escort half-span: dock arrival. The original docks the
       // fighter into the carrier's bay (Ship_LaunchCarriedShipFromBay
       // 0x00415ea0) when the player can capture/retain that class
-      // (ShipClass_CanPlayerCaptureShipClass 0x004694a0); otherwise it
+      // (ShipClass_HasPlayerBayCapacityFor 0x004694a0); otherwise it
       // clears the escort handoff.
       if (ship.ship_instance_id == 0) {
-        if (NovaShipClass_CanPlayerCaptureShipClass(state,
+        if (NovaShipClass_HasPlayerBayCapacityFor(state,
                                                     ship.ship_class_id)) {
           NovaShip_RecoverCarriedShipToBay(state, ship);
         } else {
@@ -3333,11 +3519,25 @@ void NovaAi_UpdateShipAI(GameState &state,
     } else if (behavior == 2) {
       NovaAi_UpdateBehavior0x02(state, ship, now_ms);
     } else if (behavior == 3) {
-      // Ship_UpdateShipAiBehavior0x03 (0x00402e50) now has the hostile target
-      // acquisition/travel fallback. The capture variant (0x004038b0) still
-      // falls through this path because capture_power and the disabled-ship
-      // scan are not represented in ScenarioData yet.
-      NovaAi_UpdateBehavior0x03(state, ship, now_ms);
+      // Ship_UpdateShipAI (0x00401000) dispatch: hostile behavior 0x03 has a
+      // plunder/capture variant selected by the faction's government
+      // flags_primary 0x1000 (Bible: "warships will plunder non-mission,
+      // trader-type enemies").
+      bool capture_variant = false;
+      if (ship.faction_or_government_id != -1) {
+        if (const Government *govt =
+                state.scenario.Government(ship.faction_or_government_id);
+            govt != nullptr && (govt->flags_primary & 0x1000U) != 0U) {
+          capture_variant = true;
+        }
+      }
+      if (capture_variant) {
+        NovaAi_UpdateBehavior0x03CaptureVariant(state, ship, now_ms);
+      } else {
+        // Ship_UpdateShipAiBehavior0x03 (0x00402e50) has the hostile target
+        // acquisition/travel fallback.
+        NovaAi_UpdateBehavior0x03(state, ship, now_ms);
+      }
     } else if (behavior == 4) {
       // Ship_UpdateShipAiCombatState (0x00403de0): reuse the reconstructed
       // hostile path so an existing target is also promoted into state 4.

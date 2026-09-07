@@ -6,7 +6,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00402980	Ship_UpdateShipAiAvailabilityBehavior		0%	
 0x00402BD0	Ship_UpdateShipAiBehavior0x02	src/game/ship_ai.cpp	65%	NovaAi_UpdateBehavior0x02: travel/jump fallback plus hostile-contact promotion using the Ghidra 0x4e3 per-axis gate; player assist state 10 and contact attack state 3 are wired. Government chatter/assistance encounter side effects deferred.
 0x00402E50	Ship_UpdateShipAiBehavior0x03	src/game/ship_ai.cpp	60%	NovaAi_UpdateBehavior0x03: same-system hostile target acquisition, target validation, pursuit state 4, and travel/jump fallback are implemented. Government flee/reinforcement, weapon readiness, mission-fleet, and capture branches remain TODO(decomp).
-0x004038B0	Ship_UpdateShipAiBehavior0x03CaptureVariant	src/game/ship_ai.cpp	15%	Behavior 0x03 capture variant currently shares the reconstructed hostile acquisition/pursuit path through NovaAi_UpdateShipAI; disabled-ship boarding selection, capture_power, cargo transfer, and capture retreat are deferred.
+0x004038B0	Ship_UpdateShipAiBehavior0x03CaptureVariant	src/game/ship_ai.cpp	90%	NovaAi_UpdateBehavior0x03CaptureVariant: full flow ported (0x16 guard, dead-target drop, disabled-ship scan -> acquire -> travel ladder, capture-approach 0xd vs attack 4 arbitration on crew/capturable-kind, boarded-latch conflict scan -> yield 0x16, mode-0xf boarding handoff into Outfit_BoardShipAndTransferCargo, no-fireable-weapon abandon, ammo-depleted stand-down) and dispatched from the supervisor on govt flags 0x1000. The approach drive itself (state 0xd -> control 0xf timer) lives in the partially ported state machine, so the handoff may not trigger end-to-end yet.
 0x00403DE0	Ship_UpdateShipAiCombatState	src/game/ship_ai.cpp	25%	Behavior 0x04 reuses the reconstructed hostile target/pursuit path for both target acquisition and existing-target promotion; full combat supervisor target-chain, flee, weapon-readiness, and mission logic remain deferred.
 0x004048A0	Ship_UpdateShipAssistResponseBehavior	src/game/ship_ai.cpp	70%	Ported as NovaAi_UpdateAssistResponseBehavior (replaces the old force-state-10 dispatch glue): early exits, no-leader/leader-lost release, leader-jump-prep arm into state 0x0B (gravity-shield detach, disasm-verified unconditional hold-timer disjunct), target validation, command decode (player category table + sub-leader mirror), ammo-readiness downgrade, and command arms 1/2/3/4/default. Deferred: govt voice override, pending-latch reset for chatter (consumer unported), g_target_category_command writers (player core 0x00450d88) so the table stays all -1.
 0x00405120	Ship_ShouldShipPrioritizePlayerThreat		0%	
@@ -70,10 +70,10 @@ address	name	impl_file	reimpl_pct	comment
 0x00411D00	Ship_UpdateShipCloakStateFromTraits	src/game/ship_ai.cpp	85%	NovaAi_UpdateShipCloakStateFromTraits ports the ModType-17 loadout/resource/weapon-cooldown and ShipClass Flags2 0x100..0x2000 cloak gates, including shared transition latch and shield-drop behavior; player cues and mission fields remain deferred.
 0x00412030	Ship_FindBestAssistTargetForShip	src/game/ship_ai.cpp	70%	NovaAi_FindBestAssistTargetForShip: 64-slot lowest-positive score scan and 0x12090 category/range scoring ported. Mission/escort command context and generalized cloak-engagement exceptions remain partial.
 0x00412090	Ship_ScoreAssistTargetForShip		0%	
-0x00412330	Ship_SelectNearestDisabledShipForBoarding	src/game/ship_ai.cpp	100%	NovaAi_SelectNearestDisabledShipForBoarding: full gate chain (not self / not own fighter, active, unboarded, disabled, non-mission, player-or-low-AI-or-fireable-weapon eligibility via 0x00415C10, capture_power > 0 = Bible Crew, allied-govt skip except player-dependents) + truncated-squared-distance nearest pick -> primary target + AI state 0x0d. Not yet wired: sole caller Ship_UpdateShipAiBehavior0x03CaptureVariant (0x004038b0) is not reimplemented.
+0x00412330	Ship_SelectNearestDisabledShipForBoarding	src/game/ship_ai.cpp	100%	NovaAi_SelectNearestDisabledShipForBoarding: full gate chain (not self / not own fighter, active, unboarded, disabled, non-mission, player-or-low-AI-or-fireable-weapon eligibility via 0x00415C10, capture_power > 0 = Bible Crew, allied-govt skip except player-dependents) + truncated-squared-distance nearest pick -> primary target + AI state 0x0d. Wired by NovaAi_UpdateBehavior0x03CaptureVariant (0x004038b0).
 0x004124F0	Ship_IsShipLockedOnTarget		0%	
 0x00412530	Ship_IsShipInAiControlMode0x0F		0%	
-0x00412550	Outfit_BoardShipAndTransferCargo		0%	
+0x00412550	Outfit_BoardShipAndTransferCargo	src/game/boarding_plunder.cpp	80%	NovaBoarding_BoardShipAndTransferCargo: capture-odds model (class Strength + marine outfits both sides, crew*100/(crew*2) rounded, +/-10 noise, clamp [10,100]; boarder negatives raise / victim negatives lower), credits share odds*29*1e-4 vs the player, loot HUD overlay + transition-table voice, conversion roll (odds/2, cheat arm, <41 gate), faction conversion to behavior-6 follower (armor 66% max, shields 0, latch/AI reset), victim targeter reset with "Escort/Fighter stolen!" overlay, misn flags_primary 0x8000 failure when the player is boarded. TODO(decomp) skipped: bin-to-bin cargo plunder (per-Ship cargo bins unmodeled; player-only PlayerInventory).
 0x004133F0	Ship_UpdateShipCombatOddsScore		0%	Ghidra clarified: computes hostile/allied strength ratio into ai_odds_score, with player combat rating contribution when acquirable; not disable pressure or aggression tolerance
 0x00413610	Government_TryTriggerGovtAssistanceEncounter		0%	
 0x00413810	Weapon_InitShipWeaponBursts	src/game/weapon.cpp	100%	Burst-counter preload slice runs inside NovaWeapon_EnsureNpcWeaponBanks (per-bank zeroed burst counter + cooldown preloaded to burst_reset_cooldown for configured burst weapons); the stock-loadout copy is the port collapsed shared prefix (see EnsureNpcWeaponBanks).
@@ -244,8 +244,8 @@ address	name	impl_file	reimpl_pct	comment
 0x00446150	NovaUi_RunMissionComputerWindow	src/game/docked_dialog.cpp	80%	Ported as NovaMission_RunMissionInfoWindow (opens from the in-flight command 0x28 / I key, spaceflight.cpp): DLOG 0x3f4 + PICT 0x2145 layout from the DITL, active-mission list (skip flags 0x400) via the 0x00445dc0 rebuild, selected quick-brief desc via the placeholder+wildcard passes, Abort/Done three-state buttons (STR# 0x96 0x5/0x23; Abort gated on MisnActive can_abort), starmap action with the 0x100 destination preselect (clean-room starmap preselect param), and the abort arm (flags 0x40 -> -5x CompReward per owned system + Mission_ClearMisnSlotAssignments(slot,1)). 2025 fidelity pass: shared screen font Geneva 9 (DAT_00735684/86 set in 0x004b0c20) for heading/date/list/desc, native 12px list row pitch (DAT_0088c01c 8 x 1.5 scale at 0x005754f8) with click hit-test + click-past-list deselects, desc panel rendered black bg / white text (fill+InvertRect pattern of 0x00446e00). Skips: queued centered-sound channel (cues play direct), ai_secondary_target_slot restore around a nested map destination window, list scrollbar. Background now re-renders the live docked menu / flight view per frame instead of replaying a captured snapshot (deliberate divergence, docs/dlog_ditl_dialog_format.md section 7.1).
 0x00446770	NovaUi_PollSpecialInteractionWindow	src/game/docked_dialog.cpp	50%	Poll actions ported inside NovaMission_RunMissionInfoWindow: arrow selection, Enter/Esc/I close, M starmap, list hit-test, Abort/Done buttons. The original's scroll-up/down list-control paging and the selection-change refresh flags are approximated by a full redraw each frame - TODO(decomp).
 0x00446E00	NovaUi_DrawSpecialInteractionWindow	src/game/docked_dialog.cpp	60%	Draw ported inside NovaMission_RunMissionInfoWindow draw_frame: black fill + PICT 0x2145 blit, STR# 0x7d2 0x168 heading, date line (placeholder), row list, white description panel (the original fills + draws + inverts), button pair. Native list-control polish and the c.lr palette subtleties approximated - TODO(decomp).
-0x00447170	NovaUi_PollTravelOutfitMenu		0%	
-0x00447680	NovaUi_DrawTravelOutfitMenu		0%	
+0x00447170	NovaUi_PollOutfitterMenu		0%	
+0x00447680	NovaUi_DrawOutfitterMenu		0%	
 0x00447A30	Mission_DoesSystemMatchMissionLocator	src/game/mission.cpp	95%	Mission_DoesSystemMatchMissionLocator: full locator decode (-1/-6 player system
 0x00447D90	Mission_ResolveMisnSlot	src/game/mission.cpp	95%	Clean-room port: resolve payload
 0x00447F00	System_GetSystemDefFlagByte		0%	
@@ -305,7 +305,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00456CA0	Stellar_TravelViaHypergate		0%	
 0x00457580	Stellar_ProcessTravelAndLanding	src/game/landed_window.cpp	25%	normal ordinary-stellar arrival gate + HUD overlay denial feedback (STR# 0x7d2) reconstructed: active/current-system target | Mission_TrySpawnMissionShipAmbush tail (0x00426dd0) wired at the jump-arrival population-rebuild site (spaceflight.cpp); the slice's Misn_TickActiveMissionTimers transition pass, per-mission spawn_rearm re-arm and follow-player ShipBehav 0 fleet jump-in remain TODO(decomp).
 0x00459950	NovaUi_UpdateTravelEngagementProgress		0%	
-0x0045A3D0	Ship_HandlePlayerBoardTargetCommand	src/game/boarding_plunder.cpp	75%	Gates (cloak, boarded-latch, fire-restricted target, same-system, 0.5 rel-velocity, half-of-full-frame range per axis, 30deg heading, crew>=1), velocity match, plain-ship plunder dispatch, and the STR# 0x7d2 denial overlays (pool 0x81/0x82/0x83) are faithful. Mission arms PORTED: pickup_mode-2 cargo pickup (TryConsume gate, goal_counter_b++, carrying_resources, STR# 0x7d2 0x6a overlay without the CREC cargo name, sound 4x8) and the spawn_behavior 2/5 + flags 0x0001 single-ship rescue arm (overlay 0x7e, goal_counter_b++, ai_maneuver_timer 100, +0xB9 latch, target clearing); inactive-mission ships fall through to the plain flow. TODO(decomp): flags-0x0008 class-name overlay tail strings (DAT_0072d5cc/DAT_00599acc), post-hit carrier/escort arms (ShipClass_CanPlayerCaptureShipClass), mission-ship interaction window (0x00442510), Government_ProcessFactionCombatEvent/PropagateHostility.
+0x0045A3D0	Ship_HandlePlayerBoardTargetCommand	src/game/boarding_plunder.cpp	75%	Gates (cloak, boarded-latch, fire-restricted target, same-system, 0.5 rel-velocity, half-of-full-frame range per axis, 30deg heading, crew>=1), velocity match, plain-ship plunder dispatch, and the STR# 0x7d2 denial overlays (pool 0x81/0x82/0x83) are faithful. Mission arms PORTED: pickup_mode-2 cargo pickup (TryConsume gate, goal_counter_b++, carrying_resources, STR# 0x7d2 0x6a overlay without the CREC cargo name, sound 4x8) and the spawn_behavior 2/5 + flags 0x0001 single-ship rescue arm (overlay 0x7e, goal_counter_b++, ai_maneuver_timer 100, +0xB9 latch, target clearing); inactive-mission ships fall through to the plain flow. TODO(decomp): flags-0x0008 class-name overlay tail strings (DAT_0072d5cc/DAT_00599acc), post-hit carrier/escort arms (ShipClass_HasPlayerBayCapacityFor), mission-ship interaction window (0x00442510), Government_ProcessFactionCombatEvent/PropagateHostility.
 0x0045BAA0	Ship_RecenterSpaceObjectsForWorldWrap		0%	
 0x0045C6D0	Ship_WorldWrapPositionRelativeToPlayer		0%	
 0x0045C7A0	NovaUi_MarkTravelAndStatusPanelsDirty		0%	
@@ -432,7 +432,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004692E0	NovaAudio_PlaySpatialByDistance		0%	
 0x00469480	Stub_NoOp_00469480		0%	
 0x00469490	Stub_NoOp_00469490		0%	
-0x004694A0	ShipClass_CanPlayerCaptureShipClass	src/game/ship_spawn.cpp	100%	NovaShipClass_CanPlayerCaptureShipClass: bay resolution (direct class match, escort_type clone-family fallback, ModType-3 fighter-bay outfit), occupancy = loaded secondary or owned count, capacity = WeaponDef.max_ammo (Bible MaxAmmo, payload +0x6c, now decoded) x mounted or outfit Max, + active behavior-5 fighter count. Wired into the mode-8 dock player arm (replaces the former TODO). Player board command (0x0045a3d0) and UI purchase gate (0x00491950) call sites remain unwired.
+0x004694A0	ShipClass_HasPlayerBayCapacityFor	src/game/ship_spawn.cpp	100%	NovaShipClass_HasPlayerBayCapacityFor: bay resolution (direct class match, escort_type clone-family fallback, ModType-3 fighter-bay outfit), occupancy = loaded secondary or owned count, capacity = WeaponDef.max_ammo (Bible MaxAmmo, payload +0x6c, now decoded) x mounted or outfit Max, + active behavior-5 fighter count. Wired into the mode-8 dock player arm (replaces the former TODO). Player board command (0x0045a3d0) and UI purchase gate (0x00491950) call sites remain unwired.
 0x004656a0	Outfit_ClampOutfitOwnedCountToCurrentLimits	src/game/outfit.cpp	90%	ownership limiting (Max, ammo-bank, ModType-27 multipliers, gun/turret slot caps) reconstructed; full 0x100x100 ammo-bank stride now modelled
 0x00469760	Outfit_ComputeFleetCargoCapacity	src/game/outfit.cpp	50%	player-only fleet cargo capacity via Outfit_ComputePlayerFleetCargoCapacity; no NPC escort freighters yet
 0x0046a5d0	Outfit_ComputePlayerCargoAndJunkTotal	src/game/outfit.cpp	80%	player cargo+junk total from 6 bins + junk array; mission-cargo path deferred
@@ -765,14 +765,14 @@ address	name	impl_file	reimpl_pct	comment
 0x0048C580	NovaHud_RenderFocusOverlay	src/nova_app.cpp	80%	Center-preview draw: rest state = OR-composite of the frame into the backdrop (BlitRaw -> BlitPixel_CopyOrSpan
 0x0048C730	NovaUi_HandleTravelDestinationInteractionLoop		0%	
 0x0048D190	NovaUi_HandleTravelServicesMenuInput		0%	
-0x0048D5A0	TravelOutfitMenu_FUN_0048d5a0		0%	
+0x0048D5A0	OutfitterMenu_FUN_0048d5a0		0%	
 0x0048D6F0	NovaUi_RedrawTravelServicesMenu		0%	
 0x0048E970	NovaUi_LoadTravelOverlaySprites		0%	
-0x0048EA70	NovaUi_RunTravelOutfitInteractionLoop	src/game/docked_dialog.cpp	43%	Partial clean-room modal: native 765x321 frame and DITL-aligned 4x5 grid/action controls; row paging; one-item buy/sell with in-place list refresh preserving the opening-count snapshot (same-session full-price refund vs half-price resale
-0x004903C0	NovaUi_HandleTravelOutfitMenuInput	src/game/docked_dialog.cpp	30%	Mouse grid/action handling plus B/S/P/N/L shortcuts drive selection buy/sell paging and exit; buy/sell both refresh the visible list in place and load the outfit description at zero-based id+3000 (`selected_id - 0x80 + 3000`). Original command-map navigation and quantity modifiers remain TODO(decomp).
-0x004909A0	TravelOutfitMenu_FUN_004909a0		0%	
-0x00490C70	NovaUi_RedrawTravelOutfitMenu	src/game/docked_dialog.cpp	50%	Partial clean-room redraw using native PICT 0x2136 and original DITL geometry: 4x5 grid with zero-based outfit index+6000 PICT thumbnails selected 200x200 preview desc resource-id (zero-based+3000) price credits mass/free-mass selection and disabled action states; encoded newline splitting and one/two-line baselines match the original; exact cache cadence and scripted color variants remain TODO(decomp).
-0x00491950	NovaUi_IsTravelOutfitPurchaseAllowed	src/game/landed_store.cpp	50%	Partial clean-room purchase gate: tech/special-tech Require availability expressions ownership limits credits free-mass gate
+0x0048EA70	NovaUi_RunOutfitterInteractionLoop	src/game/docked_dialog.cpp	43%	Partial clean-room modal: native 765x321 frame and DITL-aligned 4x5 grid/action controls; row paging; one-item buy/sell with in-place list refresh preserving the opening-count snapshot (same-session full-price refund vs half-price resale
+0x004903C0	NovaUi_HandleOutfitterMenuInput	src/game/docked_dialog.cpp	30%	Mouse grid/action handling plus B/S/P/N/L shortcuts drive selection buy/sell paging and exit; buy/sell both refresh the visible list in place and load the outfit description at zero-based id+3000 (`selected_id - 0x80 + 3000`). Original command-map navigation and quantity modifiers remain TODO(decomp).
+0x004909A0	OutfitterMenu_FUN_004909a0		0%	
+0x00490C70	NovaUi_RedrawOutfitterMenu	src/game/docked_dialog.cpp	50%	Partial clean-room redraw using native PICT 0x2136 and original DITL geometry: 4x5 grid with zero-based outfit index+6000 PICT thumbnails selected 200x200 preview desc resource-id (zero-based+3000) price credits mass/free-mass selection and disabled action states; encoded newline splitting and one/two-line baselines match the original; exact cache cadence and scripted color variants remain TODO(decomp).
+0x00491950	NovaUi_IsOutfitterPurchaseAllowed	src/game/landed_store.cpp	50%	NovaLanded_CanBuyOutfit: tech/special-tech Require availability expressions ownership limits credits free-mass gate and the one-shot map/record-grant latches. Not yet ported: the mode-99 bay-craft arm, negative-cargo-space arm (ShipClassDef +0xa40), the four license/contraband outfit-id families vs local govt (gated on g_is_system_transition_active), and the price-check reads g_outfitter_selected_id (quirk, harmless at current call sites).
 0x00491F30	NovaUi_RunTravelDestinationInteractionLoop		0%	
 0x00492C40	NovaUi_RenderTravelDestinationOverlay		0%	
 0x00492F10	NovaUi_PollTravelScriptAction		0%	
@@ -820,24 +820,24 @@ address	name	impl_file	reimpl_pct	comment
 0x0049F1F0	NovaUi_DrawStarmapButtons		0%	
 0x0049F3F0	NovaUi_HitTestAndTrackShipyardActionButtons	src/game/docked_dialog.cpp	25%	Ported inline in RunStoreDialog: DITL-aligned Leave Buy Info Previous and Next mouse hit tests with enabled paging/purchase state; held-button press tracking remains TODO(decomp).
 0x0049F6F0	NovaUi_DrawShipyardActionButtons	src/game/docked_dialog.cpp	30%	Ported inline in RunStoreDialog: draws five Shipyard controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
-0x0049F8F0	NovaUi_HitTestAndTrackTravelOutfitActionButtons	src/game/docked_dialog.cpp	25%	Ported inline in RunStoreDialog: DITL-aligned Leave Buy Sell Previous and Next mouse hit tests with transaction/paging gates; held-button press tracking remains TODO(decomp).
-0x0049FBB0	NovaUi_DrawTravelOutfitActionButtons	src/game/docked_dialog.cpp	30%	Ported inline in RunStoreDialog: draws five Outfitter controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
+0x0049F8F0	NovaUi_HitTestAndTrackOutfitterActionButtons	src/game/docked_dialog.cpp	25%	Ported inline in RunStoreDialog: DITL-aligned Leave Buy Sell Previous and Next mouse hit tests with transaction/paging gates; held-button press tracking remains TODO(decomp).
+0x0049FBB0	NovaUi_DrawOutfitterActionButtons	src/game/docked_dialog.cpp	30%	Ported inline in RunStoreDialog: draws five Outfitter controls at original DITL rectangles with normal/disabled states and dispatches their modal actions; exact original label resources and pressed tracking remain TODO(decomp).
 0x0049FE10	NovaUi_HitTestAndTrackTravelActionButtons	src/game/landed_window.cpp	15%	mouse-tracking hover for the docked service slots: ServiceButtonAt finds the hovered 145x25 button, ServiceAvailable gates disabled slots (per StellarDef travel_flags/fuel/credits), the hovered enabled slot renders in the pressed state; the original's button-held release-selection loop is not reconstructed
 0x004A0220	NovaUi_RedrawTravelActionButtons	src/game/landed_window.cpp	30%	docked action-button draw: faithful one-based UiPanel item numbers mapped to zero-based DITL ordinals and original physical order; normal/hover(pressed)/disabled(grey) strips via ServicesButtonArt::Draw + ServiceLabel + ServiceAvailable gating; exact original text-resource draw path remains TODO(decomp)
-0x004A04D0	TravelOutfitMenu_FUN_004a04d0		0%	
-0x004A06A0	TravelOutfitMenu_FUN_004a06a0		0%	
+0x004A04D0	OutfitterMenu_FUN_004a04d0		0%	
+0x004A06A0	OutfitterMenu_FUN_004a06a0		0%	
 0x004A0810	NovaUi_HitTestAndTrackTravelBinaryChoiceButtons		0%	
 0x004A0950	NovaUi_RedrawTravelBinaryChoiceButtons		0%	
 0x004A09E0	NovaUi_HandleTravelDestinationContextButtons		0%	
 0x004A0BC0	NovaUi_DrawTravelDestinationContextButtons		0%	
 0x004A0E50	NovaUi_HandleTravelDestinationPrimaryButtons		0%	
 0x004A0F90	NovaUi_DrawTravelDestinationPrimaryButtons	src/game/negotiation_dialog.cpp	60	label selection ported inline in negotiation_dialog.cpp NegotiationFrame assembly + DrawNegotiationDialog: per-slot STR# 0x96 pool indices {0x14 Close Channel, 0x15 Greetings|0x17 Offer Bribe, 0x2c Demand Tribute|0x1f Release} via NovaHud_LoadStringEntry + three-state art with hover-as-pressed; the shared UiPanel rect-fetch approximated by the runtime DITL layout, disabled-slot grey art by ServicesButtonArt ButtonState::kDisabled
-0x004A1130	TravelOutfitMenu_FUN_004a1130		0%	
-0x004A1290	TravelOutfitMenu_FUN_004a1290		0%	
-0x004A13C0	TravelOutfitMenu_FUN_004a13c0	src/game/docked_dialog.cpp	40%	Button hit-test/press loop ported inline in NovaMission_RunMissionInfoWindow (Abort/Done rect hit tests + grey disabled art); the original's hold-for-release press tracking is a click + hover approximation - TODO(decomp).
-0x004A1520	TravelOutfitMenu_FUN_004a1520	src/game/docked_dialog.cpp	40%	Button-strip draw ported inline in NovaMission_RunMissionInfoWindow (ServicesButtonArt strips + STR# 0x96 captions instead of the baked-caption three-state bitmaps - documented divergence); art-index table DAT_007d82fe = {4, 0x22} is the Done/Abort pair.
-0x004A1670	TravelOutfitMenu_FUN_004a1670		0%	
-0x004A1820	TravelOutfitMenu_FUN_004a1820		0%	
+0x004A1130	OutfitterMenu_FUN_004a1130		0%	
+0x004A1290	OutfitterMenu_FUN_004a1290		0%	
+0x004A13C0	OutfitterMenu_FUN_004a13c0	src/game/docked_dialog.cpp	40%	Button hit-test/press loop ported inline in NovaMission_RunMissionInfoWindow (Abort/Done rect hit tests + grey disabled art); the original's hold-for-release press tracking is a click + hover approximation - TODO(decomp).
+0x004A1520	OutfitterMenu_FUN_004a1520	src/game/docked_dialog.cpp	40%	Button-strip draw ported inline in NovaMission_RunMissionInfoWindow (ServicesButtonArt strips + STR# 0x96 captions instead of the baked-caption three-state bitmaps - documented divergence); art-index table DAT_007d82fe = {4, 0x22} is the Done/Abort pair.
+0x004A1670	OutfitterMenu_FUN_004a1670		0%	
+0x004A1820	OutfitterMenu_FUN_004a1820		0%	
 0x004A1AE0	NovaUi_HandlePlayerSpecialInteractionTabs		0%	
 0x004A1C40	NovaUi_DrawPlayerSpecialInteractionTabs		0%	
 0x004A1D90	NovaUi_HandleEscortShipManagementButtons		0%	
@@ -848,10 +848,10 @@ address	name	impl_file	reimpl_pct	comment
 0x004A24E0	NovaUi_DrawBoardingPlunderOptionButtons	src/game/boarding_plunder.cpp	70%	Draws the six DITL option strips via the shared three-state button art: enabled = normal (or hover/pressed) art, disabled (no offer / capture odds < 1) = grey art, labels from STR# 0x96 (Abort 0x22 / Cargo 0x27 / Credits 0x28 / Ammo 0x29 / Energy 0x2a / Capture Ship 0x2b). Runs inline in NovaBoarding_RunWindow (cited at 0x00482940).
 0x004A26E0	NovaUi_HandleTravelDestinationServicesButtons	src/game/docked_dialog.cpp	70%	Hit-test + hover highlight ported inline in RunBarDialog: slots 0/1/2/4 dispatch actions 1/2/3/5
 0x004A2810	NovaUi_DrawTravelDestinationServicesButtons	src/game/docked_dialog.cpp	70%	Ported in RunBarDialog's button strip: STR# 0x96 label pool per slot {0
-0x004A2960	TravelOutfitMenu_FUN_004a2960		0%	
-0x004A2AC0	TravelOutfitMenu_FUN_004a2ac0		0%	
-0x004A2C30	TravelOutfitMenu_FUN_004a2c30		0%	
-0x004A2DE0	TravelOutfitMenu_FUN_004a2de0		0%	
+0x004A2960	OutfitterMenu_FUN_004a2960		0%	
+0x004A2AC0	OutfitterMenu_FUN_004a2ac0		0%	
+0x004A2C30	OutfitterMenu_FUN_004a2c30		0%	
+0x004A2DE0	OutfitterMenu_FUN_004a2de0		0%	
 0x004A2F50	NovaUi_InitThreeStateButtonArt	src/game/services_buttons.cpp	40%	art cache via ServicesButtonArt::Initialize (ServicesButtonArt 0x1d4c..0x1d54 strips + 0x1db0.. cap masks
 0x004A3300	NovaUi_ShutdownThreeStateButtonArt		0%	
 0x004A3340	NovaUi_DrawThreeStateButton	src/game/services_buttons.cpp	50%	three-state body render via ServicesButtonArt::Draw: state pick (0
