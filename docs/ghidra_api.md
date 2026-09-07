@@ -145,16 +145,31 @@ curl -s -X POST "http://127.0.0.1:8166/function/decompile" \
 
 Decompile a CFG region as a read-only synthetic function. `entry` and every
 member of `stops` may be an address or a uniquely resolving label. CFG traversal
-starts at `entry` and stops before each boundary. `inputs` optionally maps a
-register or `stack:<offset>` storage to a name and type. High-confidence inputs
-are inferred automatically; explicit mappings replace inference for the same
-storage. Uncertain inputs remain visible using Ghidra's normal `unaff_*` or
-`in_stack_*` names. No function records, bodies, bytes, labels, or other program
-metadata are changed.
+starts at `entry` and stops before each boundary. No function records, bodies,
+bytes, labels, or other program metadata are changed.
 
-Parent-SSA inference has a five-second timeout by default. If the parent is too
-large, the view continues with region-local physical inference and manual
-overrides. Pass `"force_infer":true` to allow the full 60-second parent pass.
+The region's **signature is derived without decompiling anything**. A liveness
+pass over raw instruction pcode finds the storage the region reads before writing
+(its parameters) and the storage it writes and leaves unread on the way to a
+boundary (its return value). Stack slots come from the stack references already
+attached to the listing, rebased from the parent's frame to the region entry.
+This matters most on exactly the functions these views are for: on a 40KB parent
+whose own decompilation takes 38 seconds, a region view returns in under a
+second, with the same signature either way.
+
+The decompiler is used only to put better **names and types** on storage that has
+already been identified, and never changes which storage is selected. Control it
+with `names`:
+
+- `off` - dataflow names only (`ebp`, `stack_40`), and no decompilation at all
+- `auto` (default) - try the parent for five seconds, fall back silently
+- `full` - allow the full 60-second parent pass
+
+Naming needs both the parent's decompilation, which holds the semantics, and a
+region-local draft, which holds the physical storage - a `__cdecl` pointer
+parameter lives at a stack slot in the parent but in a register in the region.
+Both are skipped entirely under `off` or when the parent times out, which costs
+names and never correctness.
 
 Parameters:
 
@@ -162,9 +177,44 @@ Parameters:
 - `stops` (alias `stop`) - required JSON array or comma-separated boundary list;
   traversal excludes these blocks and each supplied stop must be reachable
 - `name` - optional synthetic function name
+- `names` - optional `off`, `auto` (default) or `full`
 - `inputs` - optional storage overrides keyed by register (for example `ESI`) or
-  `stack:<offset>`, each containing `name` and `type`
-- `force_infer` - optional Boolean, default `false`
+  `stack:<offset>`, each containing `name` and `type`; these replace inference
+  for the same storage
+- `output` - optional `auto` (default), `none`, or a storage name from
+  `output_candidates` to force that storage as the return value
+- `output_type` - optional type name overriding the inferred return type
+- `exits` - optional `auto` (default), `on` or `off`; see multi-exit regions below
+- `force_infer` - deprecated alias for `"names":"full"`
+
+The reply reports `inputs` and `output_candidates` alongside the C, so you can
+see what was recovered and override it. Only *plausible* output storage is
+selected automatically - callee-saved registers or the ABI return register,
+flagged `"plausible": true` - because a dirty volatile scratch register is
+usually just residue from the region's last call. Force one of the others with
+`output` when you know better.
+
+The return value matters more than it looks. Without one, a region whose only
+product is a live-out - a predicate chain setting a flag register, say -
+decompiles to an empty `void` body, because nothing it computes is observable.
+
+**Multi-exit regions.** A region with several stops carries a product the storage
+analysis cannot see: which boundary it took. With more than one stop the view
+returns that instead - each boundary becomes `return <n>;`, and the reply's
+`exit_codes` maps each `n` to its stop address and label. Without it the C ends
+in several returns the reader cannot tell apart. Control it with `exits`:
+
+- `auto` (default) - the exit code wins whenever there is more than one stop
+- `on` - same, and rejected together with an explicit `output`
+- `off` - no exit code; the return goes back to the recovered data output
+
+A data live-out is not lost when the exit code takes the return, only unreturned:
+it still shows in `output_candidates`, and `exits:"off"` returns it instead.
+
+Known limits: only one live-out becomes the return, so a region producing two
+values silently drops the second; stack live-outs are detected but never selected
+automatically; and a value left in the return register by the region's last call
+is not treated as an output unless forced.
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8166/function/synthetic-decompile" \
@@ -173,10 +223,62 @@ curl -s -X POST "http://127.0.0.1:8166/function/synthetic-decompile" \
     "entry":"LAB_00401530",
     "stops":["LAB_0040132b"],
     "name":"View_DispatchShipAiBehavior",
+    "names":"full",
     "inputs":{
       "EBP":{"name":"ship","type":"ShipState *"},
       "stack:6":{"name":"mission_attack","type":"bool"}
     }
+  }'
+```
+
+### POST /function/parent-view
+
+Show a parent function with chosen CFG regions collapsed into calls to their
+synthetic views, and (by default) each of those views decompiled alongside it.
+Read-only: no function records, bodies, bytes, labels or other program metadata
+are changed.
+
+Each region's entry instruction is replaced by `result = View_X(...)` followed by
+the branch to whichever boundary the result names, so the region's own
+instructions become unreachable and are never decompiled into the parent. The
+signature on that call is the one `/function/synthetic-decompile` recovers, from
+the same dataflow pass, so the parent shows the region's real arguments and
+return. Regions with several stops are always given exit codes, because the
+parent needs them to pick the boundary to branch to.
+
+What is left is the parent's own skeleton - the control flow between the regions
+- plus one self-contained function per region.
+
+Parameters:
+
+- `function` (alias `addr`) - required exact function name or contained address
+- `regions` - required JSON array of `{entry, stops, name?, inputs?, output?,
+  output_type?, names?}` objects, each taking the same fields as
+  `/function/synthetic-decompile`; regions may not overlap
+- `names` - optional default `off`/`auto`/`full` for every region
+- `bodies` - optional Boolean, default `true`; `false` returns the overview alone
+- `plan` - optional Boolean, default `false`; `true` reports the regions and
+  their recovered signatures without decompiling anything, so a split can be
+  checked before paying for it
+- `timeout` - optional parent decompile timeout in seconds, 1 through 600,
+  default `60`
+
+The reply reports each region's name, entry, stops (with `exit_code` where
+present), recovered `signature`, `decompile_ms` and `c`, the parent's `c`, and a
+`timing` breakdown. A branch that lands inside a region rather than on its entry
+cannot go through the call, so that path is decompiled inline and the region's
+entry address is listed under `reentered`.
+
+```bash
+curl -s -X POST "http://127.0.0.1:8166/function/parent-view" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "function":"Ship_UpdateShipAI",
+    "regions":[
+      {"entry":"00401530","stops":["0040132b"],"name":"View_DispatchBehavior"},
+      {"entry":"004012ae","stops":["00401323","004014c2","004014b4"],
+       "name":"View_MaybeRetarget"}
+    ]
   }'
 ```
 
