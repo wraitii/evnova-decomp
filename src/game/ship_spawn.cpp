@@ -2019,4 +2019,116 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
   fighter.ai_behavior_code = -1;
 }
 
+bool NovaShipClass_CanPlayerCaptureShipClass(GameState &state,
+                                             std::int16_t ship_class_id,
+                                             std::int16_t outfit_slot,
+                                             std::int16_t weapon_bank) {
+  // Occupancy starts from the resolved holding: the bay's loaded fighter
+  // count, or the outfit's owned count when both slots are given.
+  std::int16_t resolved_outfit = outfit_slot;
+  std::int16_t resolved_bank = weapon_bank;
+  std::int16_t occupancy = 0;
+
+  if (outfit_slot == -1 && weapon_bank == -1) {
+    // Resolve the bay weapon that would hold this class: first by direct
+    // class match, then by escort_type (clone-family) fallback -- the same
+    // mapping Ship_LaunchCarriedShipFromBay uses.
+    const ShipClass *target_cls =
+        state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80));
+    const std::int16_t target_escort =
+        target_cls != nullptr ? target_cls->escort_type : -1;
+    // First scan: direct class match over all banks.
+    for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+      const Weapon *def =
+          state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+      if (def == nullptr || def->weapon_mode_code != 99 ||
+          state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100] < 1) {
+        continue;
+      }
+      if (static_cast<std::int16_t>(def->ammo_type - 0x80) == ship_class_id) {
+        resolved_bank = bank;
+        break;
+      }
+    }
+    // Second scan: escort_type (clone-family) fallback.
+    if (resolved_bank == -1) {
+      for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+        const Weapon *def =
+            state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+        if (def == nullptr || def->weapon_mode_code != 99 ||
+            state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100] < 1) {
+          continue;
+        }
+        const ShipClass *carried = state.scenario.Ship(def->ammo_type);
+        if (carried != nullptr && carried->escort_type == target_escort) {
+          resolved_bank = bank;
+          break;
+        }
+      }
+    }
+    if (resolved_bank == -1) {
+      return false;
+    }
+
+    // Then the fighter-bay outfit (ModType 3) bound to that bank.
+    const std::size_t outfit_count =
+        std::min<std::size_t>(state.scenario.outfits.size(), 0x200);
+    for (std::size_t i = 0; i < outfit_count && resolved_outfit == -1; ++i) {
+      const Outfit &outfit = state.scenario.outfits[i];
+      const std::array<std::int16_t, 4> types{outfit.mod_type,
+                                              outfit.alt_mod_types[0],
+                                              outfit.alt_mod_types[1],
+                                              outfit.alt_mod_types[2]};
+      const std::array<std::int16_t, 4> vals{outfit.mod_val,
+                                             outfit.alt_mod_vals[0],
+                                             outfit.alt_mod_vals[1],
+                                             outfit.alt_mod_vals[2]};
+      for (std::size_t m = 0; m < 4; ++m) {
+        if (types[m] == 3 && vals[m] == resolved_bank) {
+          resolved_outfit = static_cast<std::int16_t>(i);
+          break;
+        }
+      }
+    }
+    if (resolved_outfit == -1) {
+      return false;
+    }
+    occupancy =
+        state.weapon_bank_secondary[static_cast<std::size_t>(resolved_bank) *
+                                    100];
+  } else if (outfit_slot == -1 || weapon_bank == -1) {
+    return false;
+  } else {
+    occupancy =
+        state.inventory
+            .outfit_owned_count[static_cast<std::size_t>(resolved_outfit)];
+  }
+
+  // Bay capacity: Bible MaxAmmo per mounted weapon instance, or the outfit's
+  // Max field when MaxAmmo is 0/-1.
+  const Weapon *bay_weapon =
+      state.scenario.Weapon(static_cast<std::int16_t>(resolved_bank + 0x80));
+  const int capacity =
+      bay_weapon != nullptr && bay_weapon->max_ammo >= 1
+          ? static_cast<int>(bay_weapon->max_ammo) *
+                state.weapon_bank_ammo[static_cast<std::size_t>(resolved_bank) *
+                                       100]
+          : static_cast<int>(
+                state.scenario
+                    .outfits[static_cast<std::size_t>(resolved_outfit)]
+                    .max_count);
+
+  // Active carried fighters of this class following the player.
+  int carried = 0;
+  for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+    const Ship &other = state.ShipAt(i);
+    if (other.is_active && other.ship_class_id == ship_class_id &&
+        other.squad_leader_ship_slot == 0 && other.ai_behavior_code == 5 &&
+        other.mission_fleet_slot == -1) {
+      ++carried;
+    }
+  }
+  return occupancy + carried < capacity;
+}
+
 } // namespace game

@@ -70,7 +70,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00411D00	Ship_UpdateShipCloakStateFromTraits	src/game/ship_ai.cpp	85%	NovaAi_UpdateShipCloakStateFromTraits ports the ModType-17 loadout/resource/weapon-cooldown and ShipClass Flags2 0x100..0x2000 cloak gates, including shared transition latch and shield-drop behavior; player cues and mission fields remain deferred.
 0x00412030	Ship_FindBestAssistTargetForShip	src/game/ship_ai.cpp	70%	NovaAi_FindBestAssistTargetForShip: 64-slot lowest-positive score scan and 0x12090 category/range scoring ported. Mission/escort command context and generalized cloak-engagement exceptions remain partial.
 0x00412090	Ship_ScoreAssistTargetForShip		0%	
-0x00412330	Ship_SelectNearestDisabledShipForBoarding		0%	
+0x00412330	Ship_SelectNearestDisabledShipForBoarding	src/game/ship_ai.cpp	100%	NovaAi_SelectNearestDisabledShipForBoarding: full gate chain (not self / not own fighter, active, unboarded, disabled, non-mission, player-or-low-AI-or-fireable-weapon eligibility via 0x00415C10, capture_power > 0 = Bible Crew, allied-govt skip except player-dependents) + truncated-squared-distance nearest pick -> primary target + AI state 0x0d. Not yet wired: sole caller Ship_UpdateShipAiBehavior0x03CaptureVariant (0x004038b0) is not reimplemented.
 0x004124F0	Ship_IsShipLockedOnTarget		0%	
 0x00412530	Ship_IsShipInAiControlMode0x0F		0%	
 0x00412550	Outfit_BoardShipAndTransferCargo		0%	
@@ -432,7 +432,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004692E0	NovaAudio_PlaySpatialByDistance		0%	
 0x00469480	Stub_NoOp_00469480		0%	
 0x00469490	Stub_NoOp_00469490		0%	
-0x004694A0	ShipClass_CanPlayerCaptureShipClass		0%	
+0x004694A0	ShipClass_CanPlayerCaptureShipClass	src/game/ship_spawn.cpp	100%	NovaShipClass_CanPlayerCaptureShipClass: bay resolution (direct class match, escort_type clone-family fallback, ModType-3 fighter-bay outfit), occupancy = loaded secondary or owned count, capacity = WeaponDef.max_ammo (Bible MaxAmmo, payload +0x6c, now decoded) x mounted or outfit Max, + active behavior-5 fighter count. Wired into the mode-8 dock player arm (replaces the former TODO). Player board command (0x0045a3d0) and UI purchase gate (0x00491950) call sites remain unwired.
 0x004656a0	Outfit_ClampOutfitOwnedCountToCurrentLimits	src/game/outfit.cpp	90%	ownership limiting (Max, ammo-bank, ModType-27 multipliers, gun/turret slot caps) reconstructed; full 0x100x100 ammo-bank stride now modelled
 0x00469760	Outfit_ComputeFleetCargoCapacity	src/game/outfit.cpp	50%	player-only fleet cargo capacity via Outfit_ComputePlayerFleetCargoCapacity; no NPC escort freighters yet
 0x0046a5d0	Outfit_ComputePlayerCargoAndJunkTotal	src/game/outfit.cpp	80%	player cargo+junk total from 6 bins + junk array; mission-cargo path deferred

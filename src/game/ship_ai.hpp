@@ -198,6 +198,13 @@ void NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(GameState &state,
 // most recent fireable general weapon (non mode-0/3, mode < 8).
 void NovaAi_SelectGeneralWeaponBank(GameState &state, Ship &ship);
 
+// Ghidra 0x00412330 Ship_SelectNearestDisabledShipForBoarding. Finds the
+// nearest boardable ship (disabled, unboarded, non-mission, capture_power >
+// 0, not allied unless it is a player-dependent) and enters AI state 0x0d
+// with it as the primary target. See the implementation comment for the full
+// gate chain.
+void NovaAi_SelectNearestDisabledShipForBoarding(GameState &state, Ship &ship);
+
 // Ghidra 0x0040d7e0 Weapon_SelectUnguidedWeaponBank. Fallback that arms the
 // highest-damage unguided bank (modes -1/0/6, or mode-7 with no primary
 // target). Used by the scripted mode 0x14 merge gate.
