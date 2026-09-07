@@ -306,8 +306,11 @@ void NovaGame_ReseedRandom(GameState &state);
 // class = bay weapon ammo_type - 0x80, with launch spread (weapon
 // Inaccuracy10) and launch velocity (weapon Speed_a/100 clamped per-axis to
 // the fighter's effective max speed). Mirrors the sibling escort-command and
-// squad bookkeeping, then seeds the stock 8-bank loadout. Returns the new
-// ship slot, or -1 on a bad bank / no free slot.
+// squad bookkeeping, then seeds the stock 8-bank loadout. Divergence: the
+// original returns a plain bool in AL (true = spawned; XOR AL,AL /
+// MOV AL,1 rets, verified 0x0041e674/0x0041f321) and discards the slot;
+// returning the slot is a deliberate clean-room superset. Returns -1 on a
+// bad bank / no free slot.
 [[nodiscard]] int NovaWeapon_SpawnShipFromCarrierBayWeapon(
     GameState &state, const Ship &launcher, std::int16_t weapon_bank);
 
