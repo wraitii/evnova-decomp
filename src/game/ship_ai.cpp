@@ -613,9 +613,21 @@ std::int16_t NovaAi_AimWeaponPredictive(const GameState &state,
                                         const Ship &ship,
                                         const Ship &target,
                                         std::int16_t weapon_id) {
-  // Straight bearing fallback (Math_BearingFromPointToPoint(ship, target)).
+  return NovaAi_AimWeaponPredictiveFrom(
+      state, ship, target, weapon_id, ship.pos_x, ship.pos_y);
+}
+
+// Ghidra 0x0043b740 Ship_AimWeaponPredictive with the fourth argument
+// (float *ship_pos_xy) supplied: the muzzle position after quadrant geometry.
+std::int16_t NovaAi_AimWeaponPredictiveFrom(const GameState &state,
+                                            const Ship &ship,
+                                            const Ship &target,
+                                            std::int16_t weapon_id,
+                                            float origin_x,
+                                            float origin_y) {
+  // Straight bearing fallback (Math_BearingFromPointToPoint(origin, target)).
   std::int16_t bearing = static_cast<std::int16_t>(
-      BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y));
+      BearingDeg(origin_x, origin_y, target.pos_x, target.pos_y));
   if (weapon_id < 0 || weapon_id >= 0x100) {
     return bearing;
   }
@@ -629,8 +641,8 @@ std::int16_t NovaAi_AimWeaponPredictive(const GameState &state,
   if (!lead_capable) {
     return bearing;
   }
-  const float dx = target.pos_x - ship.pos_x;
-  const float dy = target.pos_y - ship.pos_y;
+  const float dx = target.pos_x - origin_x;
+  const float dy = target.pos_y - origin_y;
   const float dist = std::sqrt(dx * dx + dy * dy);
   const float shot_speed = w->projectile_speed / 100.0F;
   if (shot_speed <= 0.0F) {
@@ -650,7 +662,7 @@ std::int16_t NovaAi_AimWeaponPredictive(const GameState &state,
   const float intercept_x = target.pos_x + (target.vel_x - ship.vel_x) * t;
   const float intercept_y = target.pos_y + (target.vel_y - ship.vel_y) * t;
   return static_cast<std::int16_t>(
-      BearingDeg(ship.pos_x, ship.pos_y, intercept_x, intercept_y));
+      BearingDeg(origin_x, origin_y, intercept_x, intercept_y));
 }
 
 int NovaAi_GetShipJammingScore(const GameState &state,

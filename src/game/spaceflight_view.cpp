@@ -489,19 +489,6 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
                   ship_class->display_name);
     return false;
   }
-  // Copy the sh\x8an weapon-exit geometry into the player ship so the firing
-  // path (NovaWeapon_FirePlayerWeaponBank) can offset shots to the gun barrel.
-  for (std::size_t g = 0; g < visual->turret_muzzles.size(); ++g) {
-    for (std::size_t q = 0; q < 4; ++q) {
-      state.player.muzzle_lateral[g][q] = visual->turret_muzzles[g].lateral[q];
-      state.player.muzzle_forward[g][q] = visual->turret_muzzles[g].forward[q];
-      state.player.muzzle_drop[g][q] = visual->turret_muzzles[g].drop[q];
-    }
-    state.player.muzzle_quadrant[g] = -1; // first shot picks a random barrel
-  }
-  state.player.muzzle_scale_x = visual->muzzle_scale_x;
-  state.player.muzzle_scale_y = visual->muzzle_scale_y;
-  state.player.muzzle_ready = true;
   SDL_Renderer *const renderer = platform.renderer();
   // Bare rl\x91D ship sheets load through the shared sheet decoder.
   auto base = SpriteAsset::LoadSheet(renderer, visual->base_image_id);
