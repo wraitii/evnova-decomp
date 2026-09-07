@@ -134,6 +134,20 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
 void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
                                                      Ship &ship);
 
+// Ghidra 0x00412550 Outfit_BoardShipAndTransferCargo. AI boarding resolution,
+// called by the capture-variant AI supervisor when its board approach
+// completes (and reachable against the player). Moves as much cargo as fits
+// from `boarded` to `boarder`, takes a share of the player's credits when the
+// player is the victim, shows the loot HUD overlay, and (for non-player,
+// non-mission victims) rolls the capture-odds conversion: the victim becomes
+// a behavior-6 follower of the boarder with its faction converted. Mission
+// failures armed with flags_primary 0x8000 fire when the player is boarded.
+// `now_ms` is the port's sim clock for the mission teardown helpers.
+void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
+                                            Ship &boarder,
+                                            Ship &boarded,
+                                            std::uint32_t now_ms);
+
 // Ghidra 0x00468920 Ship_CanPlayerHaveMoreEscorts. True while the count of
 // active behavior-6 escorts (targeting the player, no mission fleet) is
 // below the soft cap of 6. Shared by the capture arm and the hire path.

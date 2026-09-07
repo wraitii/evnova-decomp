@@ -708,7 +708,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
 
   // Post-hit arms (post_hit_mode_hint 0/-1 => "Fighter captured." carrier-bay
   // conversion; hint >= 1 with escort capacity => direct escort conversion)
-  // depend on ShipClass_CanPlayerCaptureShipClass (0x004694a0, the fighter-bay
+  // depend on ShipClass_HasPlayerBayCapacityFor (0x004694a0, the fighter-bay
   // outfit scan), which the port does not model yet. They are reachable only
   // for carriers that surrendered after combat; the plain plunder window
   // handles the common path. TODO(decomp).
@@ -1969,6 +1969,328 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
   // stale for the flight loop.
   state.stat_cache_valid = false;
   return result;
+}
+
+// Ghidra 0x00412550 Outfit_BoardShipAndTransferCargo. AI boarding
+// resolution (the capture-variant supervisor calls it when its board approach
+// completes; it is also reachable against the player). Stages:
+//   1. cargo plunder: random-bin transfer up to the boarder's free hold space,
+//   2. credits share when the victim is the player,
+//   3. loot HUD overlay + transition-table voice cue,
+//   4. capture-odds conversion for non-player, non-mission victims: the
+//      victim becomes a behavior-6 follower of the boarder (faction
+//      converted, shields zeroed, armor restored to 66%),
+//   5. mission failure for missions armed with flags_primary 0x8000 when the
+//      player is boarded.
+// Capture-odds model (ship-class Strength + marine outfits, Bible ModType
+// 25): positive marine ModVals add crew; negative ModVals on the BOARDER's
+// loadout raise the odds ("-1..-100 increase capture odds by this amount");
+// negative ModVals on the victim lower them. The original's 16-bit unsigned
+// wrap arithmetic is congruent (mod 2^16, and every later use sign-extends
+// the low half) to the plain signed adds used here.
+void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
+                                            Ship &boarder,
+                                            Ship &boarded,
+                                            std::uint32_t now_ms) {
+  if (NovaAiShip_IsDestroyed(boarded) || !boarded.is_active) {
+    return;
+  }
+
+  const ShipClass *boarder_class = state.scenario.Ship(
+      static_cast<std::int16_t>(boarder.ship_class_id + 0x80));
+  const ShipClass *boarded_class = state.scenario.Ship(
+      static_cast<std::int16_t>(boarded.ship_class_id + 0x80));
+
+  // ---- Capture odds -------------------------------------------------------
+  std::int32_t boarder_crew =
+      boarder_class != nullptr ? boarder_class->strength : 0;
+  std::int32_t boarded_crew =
+      boarded_class != nullptr ? boarded_class->strength : 0;
+
+  // Positive marines on the boarder's class default loadout add crew.
+  for (std::size_t slot = 0; boarder_class != nullptr &&
+                             slot < boarder_class->default_outfit_ids.size();
+       ++slot) {
+    if (boarder_class->default_outfit_counts[slot] <= 0) {
+      continue;
+    }
+    const Outfit *outfit =
+        state.scenario.Outfit(boarder_class->default_outfit_ids[slot]);
+    if (outfit == nullptr) {
+      continue;
+    }
+    for (int pair = 0; pair < kOutfitModPairCount; ++pair) {
+      const OutfitModPair mod = OutfitModPairAt(*outfit, pair);
+      if (mod.type == kMarinesModType && mod.val > 0) {
+        boarder_crew += mod.val * boarder_class->default_outfit_counts[slot];
+      }
+    }
+  }
+
+  // Victim crew: the player contributes its whole owned-outfit marine pool,
+  // NPCs their class default loadout.
+  if (boarded.ship_instance_id == 0) {
+    for (std::size_t index = 0; index < state.scenario.outfits.size();
+         ++index) {
+      const std::int16_t owned = state.inventory.outfit_owned_count[index];
+      if (owned <= 0) {
+        continue;
+      }
+      const Outfit &outfit = state.scenario.outfits[index];
+      for (int pair = 0; pair < kOutfitModPairCount; ++pair) {
+        const OutfitModPair mod = OutfitModPairAt(outfit, pair);
+        if (mod.type == kMarinesModType && mod.val > 0) {
+          boarded_crew += mod.val * owned;
+        }
+      }
+    }
+  } else {
+    for (std::size_t slot = 0; boarded_class != nullptr &&
+                               slot < boarded_class->default_outfit_ids.size();
+         ++slot) {
+      if (boarded_class->default_outfit_counts[slot] <= 0) {
+        continue;
+      }
+      const Outfit *outfit =
+          state.scenario.Outfit(boarded_class->default_outfit_ids[slot]);
+      if (outfit == nullptr) {
+        continue;
+      }
+      for (int pair = 0; pair < kOutfitModPairCount; ++pair) {
+        const OutfitModPair mod = OutfitModPairAt(*outfit, pair);
+        if (mod.type == kMarinesModType && mod.val > 0) {
+          boarded_crew += mod.val * boarded_class->default_outfit_counts[slot];
+        }
+      }
+    }
+  }
+  if (static_cast<std::int16_t>(boarded_crew) < 1) {
+    boarded_crew = 1;
+  }
+
+  // odds = boarder_crew * 100 / (boarded_crew * 2), rounded half away from
+  // zero (the doubles: 00575010 = 100, 005751a0 = 2).
+  std::int32_t odds = RoundHalfUp(
+      static_cast<float>(static_cast<double>(boarder_crew) * 100.0 /
+                         (static_cast<double>(boarded_crew) * 2.0)));
+
+  // Negative marines: the boarder's raise the odds, the victim's lower them.
+  for (std::size_t slot = 0; boarder_class != nullptr &&
+                             slot < boarder_class->default_outfit_ids.size();
+       ++slot) {
+    if (boarder_class->default_outfit_counts[slot] <= 0) {
+      continue;
+    }
+    const Outfit *outfit =
+        state.scenario.Outfit(boarder_class->default_outfit_ids[slot]);
+    if (outfit == nullptr) {
+      continue;
+    }
+    for (int pair = 0; pair < kOutfitModPairCount; ++pair) {
+      const OutfitModPair mod = OutfitModPairAt(*outfit, pair);
+      if (mod.type == kMarinesModType && mod.val < 0) {
+        odds -= mod.val * boarder_class->default_outfit_counts[slot];
+      }
+    }
+  }
+  if (boarded.ship_instance_id == 0) {
+    for (std::size_t index = 0; index < state.scenario.outfits.size();
+         ++index) {
+      const std::int16_t owned = state.inventory.outfit_owned_count[index];
+      if (owned <= 0) {
+        continue;
+      }
+      const Outfit &outfit = state.scenario.outfits[index];
+      for (int pair = 0; pair < kOutfitModPairCount; ++pair) {
+        const OutfitModPair mod = OutfitModPairAt(outfit, pair);
+        if (mod.type == kMarinesModType && mod.val < 0) {
+          odds += mod.val * owned;
+        }
+      }
+    }
+  } else {
+    for (std::size_t slot = 0; boarded_class != nullptr &&
+                               slot < boarded_class->default_outfit_ids.size();
+         ++slot) {
+      if (boarded_class->default_outfit_counts[slot] <= 0) {
+        continue;
+      }
+      const Outfit *outfit =
+          state.scenario.Outfit(boarded_class->default_outfit_ids[slot]);
+      if (outfit == nullptr) {
+        continue;
+      }
+      for (int pair = 0; pair < kOutfitModPairCount; ++pair) {
+        const OutfitModPair mod = OutfitModPairAt(*outfit, pair);
+        if (mod.type == kMarinesModType && mod.val < 0) {
+          odds += mod.val * boarded_class->default_outfit_counts[slot];
+        }
+      }
+    }
+  }
+
+  // +-10 noise (10 - rand(0x15)) and clamp to [10, 100]; every consumer
+  // sign-extends the low 16 bits, as the original's (short) casts do.
+  odds += 10 - NovaRandomRange(state.rng, 0x15);
+  if (static_cast<std::int16_t>(odds) < 10) {
+    odds = 10;
+  }
+  if (100 < static_cast<std::int16_t>(odds)) {
+    odds = 100;
+  }
+
+  // ---- Random-bin cargo transfer ------------------------------------------
+  // TODO(decomp) skipped: the original moves cargo bin-by-bin from the
+  // victim's ShipState.field_0x7a..0x84 bins into the boarder's, capped by
+  // the boarder's free Holds and the victim's capacity (Ship_ComputeShip-
+  // TotalMass for a player victim). The port models cargo bins only on the
+  // player's PlayerInventory, not per Ship, and an AI boarder has nowhere to
+  // carry plundered bins, so no transfer can be represented. The loot
+  // overlay therefore only ever reports the credits share below.
+  const std::int32_t transferred = 0;
+
+  // ---- Credits share (only when the victim is the player) -----------------
+  // transfer = credits * odds * 29 * 0.0001 (disasm 0x00412d6a: odds*29 then
+  // two 0.01 multiplies; the decompiler's 0x1e is a misread).
+  std::int32_t credits_taken = 0;
+  if (boarded.ship_instance_id == 0) {
+    const float raw =
+        static_cast<float>(static_cast<double>(29 * static_cast<int>(odds)) *
+                           0.01 * static_cast<double>(boarded.credits) * 0.01);
+    credits_taken = RoundHalfUp(raw);
+    boarder.credits += credits_taken;
+    boarded.credits -= credits_taken;
+  } else {
+    // NPC victims simply lose their (unused) credits.
+    boarded.credits = 0;
+  }
+
+  // ---- Loot HUD overlay ---------------------------------------------------
+  const bool show_loot_message =
+      boarded.ship_instance_id == 0 ||
+      (boarded.squad_leader_ship_slot == -1 &&
+       boarded.mission_fleet_slot == -1 && boarded.post_hit_mode_hint > 0);
+  if (show_loot_message) {
+    // g_playerInventoryAndLoadoutDirty.
+    state.stat_cache_valid = false;
+    if (transferred > 0 || credits_taken > 0) {
+      std::string text;
+      if (transferred > 0) {
+        text += GroupedUInt(transferred);
+        text += ' ';
+        text +=
+            LoadBoardMiscString(transferred == 1 ? kMiscTonWord : kMiscTonsWord,
+                                transferred == 1 ? "ton" : "tons");
+        text += ' ';
+        text += LoadBoardMiscString(kMiscOfWord, "of");
+        text += ' ';
+        // STR# 0x7d2 0x175 (pool "cargo").
+        text += LoadBoardMiscString(0x175, "cargo");
+        text += ' ';
+        if (credits_taken > 0) {
+          // STR# 0x7d2 0x188 ("and").
+          text += LoadBoardMiscString(0x188, "and");
+          text += ' ';
+        }
+      }
+      if (credits_taken > 0) {
+        if (transferred < 1) {
+          text.clear();
+        }
+        text += GroupedUInt(credits_taken);
+        text += ' ';
+        text += credits_taken < 2 ? "credit" : "credits";
+        text += ' ';
+      }
+      // STR# 0x7d2 0x176 ("stolen!").
+      text += LoadBoardMiscString(0x176, "stolen!");
+      // 400-frame overlay (decompile argument) with the shared HUD tint.
+      NovaHud_ShowOverlayMessage(
+          state, std::move(text), static_cast<std::uint64_t>(400U));
+      // Voice: transition-table slot 1 via NovaAudio_FillVoiceSlotDescriptor.
+      QueueUiSound(state, 1, 1);
+    }
+  }
+
+  // The player and mission-fleet ships are never converted.
+  if (boarded.ship_instance_id == 0 || boarded.mission_fleet_slot != -1) {
+    if (boarded.ship_instance_id == 0) {
+      // Missions armed with flags_primary 0x8000 fail when their captain is
+      // boarded/captured.
+      for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+        const MissionRuntimeFlags &runtime =
+            state.active_mission_runtime_flags[slot];
+        if (runtime.is_active && !runtime.is_failed &&
+            (state.active_missions[slot].flags_primary & 0x8000U) != 0U) {
+          Mission_ResolveMissionFailure(
+              state, static_cast<std::int16_t>(slot), now_ms);
+        }
+      }
+    }
+    return;
+  }
+
+  // ---- Capture-odds conversion --------------------------------------------
+  // odds < 41 only converts under the cheat flag; otherwise the roll must
+  // not exceed odds/2 (double 00575038 = 0.5).
+  bool convert = false;
+  if (static_cast<std::int16_t>(odds) < 0x29) {
+    convert = state.cheat_mode_active;
+  } else {
+    const int roll = NovaRandomRange(state.rng, 0x65);
+    convert = !(static_cast<double>(static_cast<std::int16_t>(odds)) * 0.5 <
+                static_cast<double>(roll));
+    if (!convert) {
+      convert = state.cheat_mode_active;
+    }
+  }
+  if (!convert) {
+    return;
+  }
+
+  // "Fighter/Escort stolen!" + victim's targeters drop it. STR# 0x7d2 0xa9
+  // ("Fighter") for post-hit hint 0, 0xa8 ("Escort") otherwise.
+  if (boarded.squad_leader_ship_slot == 0 || boarded.post_hit_mode_hint >= 0) {
+    const std::uint16_t kind_entry =
+        boarded.post_hit_mode_hint == 0 ? 0xa9 : 0xa8;
+    std::string text = LoadBoardMiscString(kind_entry, "Escort");
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      Ship &attacker = state.ShipAt(slot);
+      if (!attacker.is_active ||
+          attacker.primary_target_ship_slot != boarded.ship_instance_id) {
+        continue;
+      }
+      attacker.primary_target_ship_slot = -1;
+      attacker.ai_secondary_target_slot = -1;
+      attacker.ai_state_code = 0;
+      attacker.ai_control_mode = 0;
+      attacker.ai_hostility_accumulator = 0;
+    }
+    text += ' ';
+    text += LoadBoardMiscString(0x176, "stolen!");
+    NovaHud_ShowOverlayMessage(
+        state, std::move(text), static_cast<std::uint64_t>(400U));
+    QueueUiSound(state, 1, 1);
+  }
+
+  // Faction conversion: the victim becomes the boarder's behavior-6 follower.
+  boarded.squad_leader_ship_slot = boarder.ship_instance_id;
+  boarded.faction_or_government_id = boarder.faction_or_government_id;
+  boarded.pers_def_slot = -1;
+  boarded.ai_behavior_code = 6;
+  boarded.post_hit_mode_hint = -1;
+  boarded.ai_state_code = 0;
+  boarded.ai_control_mode = 0;
+  boarded.boarded_target_latch = 0;
+  boarded.ai_maneuver_timer_ms = 150.0F;
+  // Ship_ComputeShipMaxArmor (0x004637a0) x double 00575168 = 0.66. The NPC
+  // mission-fleet multiplier / behavior-5 difficulty scaling of that helper
+  // is not modelled (TODO(decomp)).
+  const float max_armor = boarded_class != nullptr
+                              ? static_cast<float>(boarded_class->base_armor)
+                              : boarded.armor_points;
+  boarded.armor_points = max_armor * 0.66F;
+  boarded.shield_points = 0.0F;
 }
 
 } // namespace game
