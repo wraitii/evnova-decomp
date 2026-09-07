@@ -646,6 +646,8 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state) {
 // target (that last gate lifted by the cloak-scanner outfit). The stellar
 // target has no per-frame validation at all; it is cleared on system arrival
 // (same prologue function's transition block) and by the clear-target command.
+// Ghidra Ship_HandlePlayerShipCore 0x0044AA70 synthetic CFG:
+// player-target validation 0x0044ADA1 -> 0x0044AEFB.
 void NovaTargeting_ValidatePlayerTarget(GameState &state) {
   const std::int16_t target_slot = state.player.primary_target_ship_slot;
   if (target_slot < 1 ||

@@ -69,6 +69,10 @@ namespace game {
 NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
                                               const Ship &ship);
 
+// Ghidra 0x00413610 Government_TryTriggerGovtAssistanceEncounter.
+[[nodiscard]] bool NovaGovernment_TryTriggerAssistanceEncounter(
+    GameState &state, const Ship &ship, bool force);
+
 // Ghidra 0x00440750 Government_ApplyReputationCreditDelta. Applies the
 // mission PayVal opcode: flat credit award (positive), per-government
 // negative-reputation clears (-10128/-20128/-30128 families), or a percentage

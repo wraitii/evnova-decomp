@@ -70,12 +70,16 @@ void RouteMap_Open(GameState &state);
 // zoom handling stays live in the original's invisible-but-flagged window).
 void RouteMap_Tick(GameState &state, const RouteMapZoomInput &input);
 
-// Ghidra 0x0044e027 PlayerTick_RouteMapClickBranch. While the overlay is up
-// and ai_station_hold_timer <= 0, clicks inside the overlay rect select an
-// adjacent system as travel destination or clear the selection at the chart
-// centre; everything else keeps normal click-to-target.
-RouteMapClickResult RouteMap_HandleClick(GameState &state, SdlPlatform &platform,
-                                         float click_x, float click_y);
+// Ghidra Ship_HandlePlayerShipCore multi-exit synthetic CFG:
+// 0x0044E035 -> [0x0044BC1E, 0x0044E490], entered through
+// PlayerTick_RouteMapClickBranch at 0x0044E027. While the overlay is up and
+// ai_station_hold_timer <= 0, clicks inside the overlay rect select an adjacent
+// system as travel destination or clear the selection at the chart centre;
+// everything else keeps normal click-to-target.
+RouteMapClickResult RouteMap_HandleClick(GameState &state,
+                                         SdlPlatform &platform,
+                                         float click_x,
+                                         float click_y);
 
 // Ghidra FUN_004ab9d4 rect derivation: top-left square of the view, side
 // round(view_width * DAT_00575a80) clamped to min 200 (the scale factor is an

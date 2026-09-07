@@ -1263,6 +1263,10 @@ void NovaAi_UpdateBehavior0x02(GameState &state,
       ship.ai_state_code = 3;
     }
   }
+  if (ship.ai_state_code == 3) {
+    (void)NovaGovernment_TryTriggerAssistanceEncounter(
+        state, ship, /*force=*/false);
+  }
 }
 
 // Ghidra 0x00402e50 Ship_UpdateShipAiBehavior0x03. Hostile behavior acquires
@@ -1794,6 +1798,10 @@ void NovaAi_UpdateShipState(GameState &state,
     } else {
       ship.ai_control_mode = 1;
     }
+    if (!NovaAiShip_IsDisabled(state, ship)) {
+      (void)NovaGovernment_TryTriggerAssistanceEncounter(
+          state, ship, /*force=*/false);
+    }
     return;
   }
 
@@ -1831,6 +1839,10 @@ void NovaAi_UpdateShipState(GameState &state,
         ship.ai_state_code = 0;
         ship.ai_control_mode = 0;
       }
+    }
+    if (ship.ai_state_code == 3) {
+      (void)NovaGovernment_TryTriggerAssistanceEncounter(
+          state, ship, /*force=*/false);
     }
     return;
   }
@@ -2280,6 +2292,64 @@ void NovaAi_SelectNearestDisabledShipForBoarding(GameState &state, Ship &ship) {
     ship.ai_state_code = 0x0d;
     ship.ai_control_mode = 0;
   }
+}
+
+// Ghidra 0x004133F0 Ship_UpdateShipCombatOddsScore.
+void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
+  const ShipClass *ship_class = ShipClassFor(state, ship);
+  std::int16_t allied_strength =
+      ship_class != nullptr ? ship_class->strength : 0;
+  std::int16_t hostile_strength = 0;
+
+  if (NovaTargeting_IsShipAcquirableAsTarget(state, state.player, ship)) {
+    const ShipClass *player_class = ShipClassFor(state, state.player);
+    const ShipClass *rating_baseline = state.scenario.Ship(0x80);
+    if (player_class != nullptr && rating_baseline != nullptr) {
+      const std::int32_t divisor =
+          static_cast<std::int32_t>(rating_baseline->strength) * 0x1900;
+      float rating_scale =
+          divisor != 0
+              ? static_cast<float>(state.player_combat_rating_points / divisor)
+              : 1.0F;
+      rating_scale = std::clamp(rating_scale, 1.0F, 2.0F);
+      hostile_strength = static_cast<std::int16_t>(std::lround(
+          static_cast<float>(player_class->strength) * rating_scale));
+    }
+  }
+
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &other = state.ShipAt(slot);
+    if (!other.is_active || other.ship_instance_id == ship.ship_instance_id ||
+        NovaAiShip_IsDisabled(state, other)) {
+      continue;
+    }
+    const ShipClass *other_class = ShipClassFor(state, other);
+    if (other_class == nullptr) {
+      continue;
+    }
+    if (NovaGovernment_AreGovtsAllied(state.scenario,
+                                      other.faction_or_government_id,
+                                      ship.faction_or_government_id)) {
+      allied_strength =
+          static_cast<std::int16_t>(allied_strength + other_class->strength);
+      continue;
+    }
+    if (NovaGovernment_AreGovtsHostileOrXenophobic(
+            state.scenario,
+            other.faction_or_government_id,
+            ship.faction_or_government_id) ||
+        (other.primary_target_ship_slot == ship.ship_instance_id &&
+         other.ai_state_code == 4)) {
+      hostile_strength =
+          static_cast<std::int16_t>(hostile_strength + other_class->strength);
+    }
+  }
+
+  if (allied_strength == 0) {
+    allied_strength = 1;
+  }
+  ship.ai_odds_score = static_cast<float>(hostile_strength) /
+                       static_cast<float>(allied_strength);
 }
 
 // ---- Ghidra 0x00408150 Ship_ApplyShipAiControls : the movement bridge. ----
@@ -3025,7 +3095,7 @@ void NovaAi_ApplyControls(GameState &state,
       // clears the escort handoff.
       if (ship.ship_instance_id == 0) {
         if (NovaShipClass_HasPlayerBayCapacityFor(state,
-                                                    ship.ship_class_id)) {
+                                                  ship.ship_class_id)) {
           NovaShip_RecoverCarriedShipToBay(state, ship);
         } else {
           ship.ai_state_code = 0xc;

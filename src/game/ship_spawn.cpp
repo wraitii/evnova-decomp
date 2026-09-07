@@ -328,7 +328,8 @@ int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
 // the escorts; those are deferred and left at defaults here (see header TODO).
 int NovaEncounter_SpawnFleetLeadShip(GameState &state,
                                      std::int16_t system_id,
-                                     std::int16_t fleet_def_index) {
+                                     std::int16_t fleet_def_index,
+                                     std::int16_t ai_behavior_code) {
   const FleetDef *def =
       state.scenario.Fleet(static_cast<std::int16_t>(fleet_def_index + 0x80));
   if (def == nullptr) {
@@ -357,7 +358,9 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   // argument; this slice models the -1 flavor, whose effective behavior is the
   // lead ship class's default AI (the code-6 escort behavior is the escorts'
   // concern).
-  ship.ai_behavior_code = cls != nullptr ? cls->default_ai_behavior : 0;
+  ship.ai_behavior_code = ai_behavior_code >= 0
+                              ? ai_behavior_code
+                              : (cls != nullptr ? cls->default_ai_behavior : 0);
 
   if (cls != nullptr) {
     ship.skill_variance_scale = SkillVarianceScale(state, cls);
@@ -407,6 +410,44 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   }
 
   return slot;
+}
+
+// Ghidra 0x0043A020 System_UpdateRandomEncounterCountdown.
+void NovaSystem_UpdateReinforcementCountdown(GameState &state,
+                                             float elapsed_ticks) {
+  const std::int16_t system_id = state.player.current_system_id;
+  if (system_id < 0 ||
+      static_cast<std::size_t>(system_id) >= GameState::kMaxSystems) {
+    return;
+  }
+  const System *system =
+      state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
+  if (system == nullptr || system->reinf_fleet < 0) {
+    return;
+  }
+  const auto index = static_cast<std::size_t>(system_id);
+  float &countdown = state.reinforcement_countdown[index];
+  if (countdown <= 0.0F) {
+    return;
+  }
+  countdown -= elapsed_ticks;
+  if (countdown > 0.0F) {
+    if (countdown < static_cast<float>(system->reinf_time) * 0.25F &&
+        state.reinforcement_retrigger_delay[index] < 1) {
+      // TODO(decomp(0x0043A020)) skipped: reinforcement warning overlay and
+      // centered alert sound are not reproduced yet.
+      NovaLog::Todo("reinforcement countdown: warning presentation not ported");
+      state.reinforcement_retrigger_delay[index] =
+          std::max<std::int16_t>(system->reinf_interval, 1);
+    }
+    return;
+  }
+
+  (void)NovaEncounter_SpawnFleetLeadShip(
+      state, system_id, system->reinf_fleet, /*ai_behavior_code=*/4);
+  countdown = -1.0F;
+  state.reinforcement_retrigger_delay[index] =
+      std::max<std::int16_t>(system->reinf_interval, 1);
 }
 
 // Ghidra 0x0046b6d0 EncounterFleet_SelectRandomEncounterFleetDefWeighted.

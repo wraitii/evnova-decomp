@@ -5,6 +5,7 @@
 #include <cstddef>
 
 #include "log.hpp"
+#include "outfit.hpp"
 #include "ship_ai.hpp"
 
 namespace game {
@@ -250,6 +251,98 @@ bool NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
   // branch. TODO(decomp(0x0040fd20)) skipped: no clean-room +0x83 field, so
   // the gate is not reproduced.
   return false;
+}
+
+// Ghidra 0x00413610 Government_TryTriggerGovtAssistanceEncounter.
+bool NovaGovernment_TryTriggerAssistanceEncounter(GameState &state,
+                                                  const Ship &ship,
+                                                  bool force) {
+  if (ship.faction_or_government_id < 0 || ship.current_system_id < 0) {
+    return false;
+  }
+  const auto system_index = static_cast<std::size_t>(ship.current_system_id);
+  if (system_index >= GameState::kMaxSystems) {
+    return false;
+  }
+  const System *system = state.scenario.System(
+      static_cast<std::int16_t>(ship.current_system_id + 0x80));
+  if (system == nullptr || system->reinf_fleet < 0 ||
+      state.reinforcement_countdown[system_index] > 0.0F ||
+      state.reinforcement_retrigger_delay[system_index] > 0 ||
+      ship.ai_odds_score <= 0.0F) {
+    return false;
+  }
+  const FleetDef *fleet = state.scenario.Fleet(
+      static_cast<std::int16_t>(system->reinf_fleet + 0x80));
+  if (fleet == nullptr || fleet->government_id < 0 ||
+      !NovaGovernment_AreGovtsAllied(state.scenario,
+                                     ship.faction_or_government_id,
+                                     fleet->government_id)) {
+    return false;
+  }
+  const Government *reinforcement_govt =
+      state.scenario.GovernmentByIndex(fleet->government_id);
+  if (reinforcement_govt == nullptr ||
+      (!force &&
+       reinforcement_govt->pilot_skill_scale * 0.5F >= ship.ai_odds_score)) {
+    return false;
+  }
+
+  // The original reads cached global/per-government ModType-44 inhibitor
+  // bytes built by Outfit_RecomputeOutfitDerivedState. Re-evaluating the same
+  // owned-outfit/class match here avoids hidden mutable government state, but
+  // does not preserve the original's stale-cache quirk after outfit removal.
+  // TODO(decomp(0x0046D4B0)) skipped: stale reinforcement-inhibitor cache.
+  bool inhibited = false;
+  for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size() &&
+                           id < state.scenario.outfits.size();
+       ++id) {
+    if (state.inventory.outfit_owned_count[id] <= 0) {
+      continue;
+    }
+    const Outfit &outfit = state.scenario.outfits[id];
+    const std::array<std::int16_t, 4> types{outfit.mod_type,
+                                            outfit.alt_mod_types[0],
+                                            outfit.alt_mod_types[1],
+                                            outfit.alt_mod_types[2]};
+    const std::array<std::int16_t, 4> values{outfit.mod_val,
+                                             outfit.alt_mod_vals[0],
+                                             outfit.alt_mod_vals[1],
+                                             outfit.alt_mod_vals[2]};
+    for (std::size_t effect = 0; effect < types.size(); ++effect) {
+      if (types[effect] !=
+          static_cast<std::int16_t>(OutfitEffect::kReinforceInhibitor)) {
+        continue;
+      }
+      if (values[effect] == -1) {
+        inhibited = true;
+        break;
+      }
+      const auto matches_class = [&](std::int16_t govt_id) {
+        const Government *govt = state.scenario.GovernmentByIndex(govt_id);
+        return govt != nullptr &&
+               std::find(govt->classes.begin(),
+                         govt->classes.end(),
+                         values[effect]) != govt->classes.end();
+      };
+      inhibited = matches_class(ship.faction_or_government_id) ||
+                  matches_class(fleet->government_id);
+      if (inhibited) {
+        break;
+      }
+    }
+    if (inhibited) {
+      break;
+    }
+  }
+  if (inhibited) {
+    state.reinforcement_retrigger_delay[system_index] = 1;
+    return false;
+  }
+
+  state.reinforcement_countdown[system_index] =
+      static_cast<float>(system->reinf_time);
+  return true;
 }
 
 // Ghidra 0x00440750 Government_ApplyReputationCreditDelta. The mission

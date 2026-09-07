@@ -114,8 +114,16 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 // uses the original random polar placement and AI state 0x08 slowdown. Cargo,
 // the 8-bank weapon loadout, escorts, and the arrival overlay banner remain
 // deferred.
-[[nodiscard]] int NovaEncounter_SpawnFleetLeadShip(
-    GameState &state, std::int16_t system_id, std::int16_t fleet_def_index);
+[[nodiscard]] int
+NovaEncounter_SpawnFleetLeadShip(GameState &state,
+                                 std::int16_t system_id,
+                                 std::int16_t fleet_def_index,
+                                 std::int16_t ai_behavior_code = -1);
+
+// Ghidra 0x0043A020 System_UpdateRandomEncounterCountdown. Advances the
+// current system's armed reinforcement timer and spawns its fleet on expiry.
+void NovaSystem_UpdateReinforcementCountdown(GameState &state,
+                                             float elapsed_ticks);
 
 // Mirrors EncounterFleet_SpawnRandomSystemDudeShip (Ghidra 0x0041ba80):
 // spawns a single random system-bound NPC (dude) ship. Scans the first inactive

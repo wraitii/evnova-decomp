@@ -1,14 +1,11 @@
 #pragma once
 
-// Clean-room reconstruction of the in-game spaceflight mode, mirroring Ghidra
-// 0x00489210 Ship_RunSpaceflightMode and its contained 0x00417600
-// Frame_SpaceflightLoop / 0x004186b0 Frame_TickSystems. The full flight/AI/
-// combat simulation is not reconstructed; this module provides the faithful
-// *skeleton*: it plays the new-game intro cinematic on first entry, then runs
-// the in-system loop with the original's phase/scope ordering
-// (Frame_SpaceflightLoop pre-draw/sim/draw/post-draw and Frame_TickSystems's
-// run_full_tick-gated scopes). Unimplemented scopes are no-ops until their
-// subsystem is reconstructed.
+// Public interface for the clean-room spaceflight mode. The implementation
+// mirrors Ghidra 0x00489210 Ship_RunSpaceflightMode and its contained
+// 0x00417600 Frame_SpaceflightLoop / 0x004186b0 Frame_TickSystems. See the
+// audited Ship_HandlePlayerShipCore region inventory in spaceflight.cpp for
+// internal PlayerTick_* boundaries; those labels are navigation metadata, not
+// original source-level functions or part of this public API.
 //
 // The reimplementation's escape back to the menu diverges from the original,
 // which latches DAT_00596d38 on the primary mouse command through the pause
@@ -76,15 +73,16 @@ extern void NovaPlayer_UpdateFromInput(GameState &state,
                                        const FlightInput &input,
                                        float elapsed_ticks);
 
-// Per-frame player status/outfit maintenance (Ghidra
-// PlayerTick_StatusAndOutfit- Events, internal label of
-// Ship_HandlePlayerShipCore 0x0044aa70): fire- restricted velocity damping, the
-// disabled auto-repair system, the periodic distress-call cue, and carried-bomb
-// countdown/detonation. Must run before the flight input pass each frame (the
-// original dispatches it ahead of the manual- flight block). `eject_command`
+// Per-frame player status/outfit maintenance from Ship_HandlePlayerShipCore
+// 0x0044aa70 (internal label PlayerTick_StatusAndOutfitEvents): fire-restricted
+// velocity damping, disabled auto-repair, the periodic distress-call cue, and
+// carried-bomb countdown/detonation. Must run before the flight input pass each
+// frame (the
+// original dispatches it ahead of the manual-flight block). `eject_command`
 // carries the eject key state for the destroyed-ship escape-pod block
-// (0x004510b9). Returns true when the player ship is no longer active (death
-// bookkeeping consumed the frame).
+// (synthetic CFG 0x00451024 -> 0x00451630). Returns true when death/inactive
+// bookkeeping consumed the player tick; the caller must skip timed actions
+// and every later player-command region for that frame.
 extern bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
                                                  float elapsed_ticks,
                                                  bool eject_command);
@@ -101,17 +99,15 @@ extern void NovaFrame_JitterPlayerStatModifiers(GameState &state);
 // rand(0x15)+0x5a = [90,114] percent. Same call sites as the jitter.
 extern void NovaFrame_RerollPlayerStatModifiers(GameState &state);
 
-// Per-frame in-flight shield regeneration (the spaceflight loop calls this
-// once a frame). Restores the player's shields toward the effective maximum at
-// the recorded shield-recharge rate (class base + outfit opcode-18 bonuses,
-// scaled by frame time), capped so it never exceeds max shield points.
-// Mirrors the shield-regen portion of the original's per-frame player update.
-// Ghidra PlayerTick_ManualFlightAndRegeneration regeneration tail (internal
-// block of Ship_HandlePlayerShipCore 0x0044aa70, ~0x0044cb90..0x0044cd2d):
-// shield/armor recovery (held off while destroyed/disabled; armor also waits
-// out the post-hit suppression window), ionization decay with the ionized-
-// velocity damping, and the fuel-scoop recharge, in the original order.
-extern void NovaPlayer_TickRegeneration(GameState &state, float frame_time_ms);
+// Ghidra Ship_HandlePlayerShipCore synthetic region
+// PlayerTick_ShieldAndArmorRegeneration 0x0044CB99 -> 0x0044CCAF.
+extern void NovaPlayer_TickShieldAndArmorRegeneration(GameState &state,
+                                                      float frame_time_ms);
+
+// Ghidra Ship_HandlePlayerShipCore synthetic region
+// PlayerTick_IonizationAndFuelRegeneration 0x00450717 -> 0x004507B4.
+extern void NovaPlayer_TickIonizationAndFuelRegeneration(GameState &state,
+                                                         float frame_time_ms);
 
 // Ghidra PlayerTick_TimedActionTransition (internal label of
 // Ship_HandlePlayerShipCore 0x0044aa70; block 0x0044d490..0x0044da70). While
