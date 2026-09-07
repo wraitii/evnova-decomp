@@ -355,6 +355,13 @@ struct ShipClass {
   // no ionization bar. The scenario loader reads the packed resource field at
   // payload +0x36C.
   std::int16_t ionization_capacity = 0;
+  // Ghidra ShipClassDef +0xA04 (shïp payload +0x36E, Bible KeyCarried): the
+  // zero-based "key carried ship type" class id. The loader (0x004bd3c0,
+  // disasm 0x004c1967..0x004c19be) rebases resource values >= 0x80 by -0x80
+  // and stores -1 for anything below. Weapon_HasLoadedLaunchBayAmmo
+  // (0x00464670) matches a loaded mode-99 bay weapon whose ammo_type - 0x80
+  // equals this id; -1 disables the launch-bay fire gate.
+  std::int16_t key_carried_ship_class = -1;
   // Ghidra ShipClassDef +0x48 / resource payload +0x36A. Base ionization
   // dissipation rate in charge points per millisecond after the loader's
   // 0.01 scale and minimum-one clamp.

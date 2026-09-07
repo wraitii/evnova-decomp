@@ -516,6 +516,122 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
   }
 }
 
+// Ghidra 0x00464670 Weapon_HasLoadedLaunchBayAmmo (disasm
+// 0x00464670..0x004646f6): true when the ship's class has a KeyCarried
+// fighter and one of its banks holds a mode-99 bay weapon with mounted
+// ammo > 0 and loaded secondary > 0 whose ammo_type - 0x80 equals the
+// KeyCarried id. -1 KeyCarried short-circuits to false.
+bool NovaWeapon_HasLoadedLaunchBayAmmo(const GameState &state,
+                                       const Ship &ship) {
+  const ShipClass *cls = ShipClassFor(state, ship);
+  if (cls == nullptr || cls->key_carried_ship_class < 0) {
+    return false;
+  }
+  const bool is_player = ship.ship_instance_id == 0;
+  auto bank_ammo = [&](std::int16_t bank) -> std::int16_t {
+    return is_player
+               ? BankAmmo(state, bank)
+               : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+  };
+  auto bank_secondary = [&](std::int16_t bank) -> std::int16_t {
+    return is_player
+               ? BankSecondary(state, bank)
+               : ship.npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+  };
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *w = WeaponAt(state, bank);
+    if (w == nullptr || w->weapon_mode_code != 99) {
+      continue;
+    }
+    if (bank_ammo(bank) <= 0 || bank_secondary(bank) <= 0) {
+      continue;
+    }
+    if (static_cast<std::int16_t>(w->ammo_type - 0x80) ==
+        cls->key_carried_ship_class) {
+      return true;
+    }
+  }
+  return false;
+}
+
+namespace {
+
+// The FISTP(nearest-even) + signed/unsigned backoff idiom used by the range
+// functions (disasm 0x0046cfe1..0x0046d01f): nets to floor() for value >= 0
+// and to ceil() for value < 0. Range data is non-negative, so this is
+// floor() in practice (same idiom as FloorAbsDelta at 0x00411600).
+[[nodiscard]] int RoundRangeEnvelope(float value) {
+  int rounded = static_cast<int>(std::nearbyint(value));
+  const float remainder = value - static_cast<float>(rounded);
+  if (value >= 0.0F) {
+    if (remainder < 0.0F) { // FISTP rounded up
+      --rounded;
+    }
+  } else if (remainder > 0.0F) { // FISTP rounded down
+    ++rounded;
+  }
+  return rounded;
+}
+
+// DAT_00575850 (== DAT_005750b8, the AI call site's scale): mode-1 guided.
+inline constexpr float kGuidedMaxRangeScale = 0.85F;
+// DAT_005757c8: mode-6 rocket.
+inline constexpr float kRocketMaxRangeScale = 0.5F;
+
+} // namespace
+
+// Ghidra 0x0046CEC0 Weapon_GetShipMaxWeaponRange (disasm
+// 0x0046cec0..0x0046d081): the furthest effective reach over the ship's
+// armed (bank ammo > 0), fireable (Weapon_CanFireWeaponBank) banks, used by
+// the AI state machine to size approach/keep-distance envelopes (the
+// 0x00406a4e call site scales it by 0.85). Reach per weapon mode:
+//   0/3: beam_length_px (signed); -1/4/7: RoundRangeEnvelope(range_scalar);
+//   1: RoundRangeEnvelope(range_scalar * 0.85);
+//   6: RoundRangeEnvelope(range_scalar * 0.5); else 0. The original's case
+//   list tests mode 7 twice and omits mode 8, so turret projectiles
+//   contribute 0 (quirk kept). Max is clamped to 0x7fff.
+int NovaWeapon_GetShipMaxWeaponRange(const GameState &state, const Ship &ship) {
+  const bool is_player = ship.ship_instance_id == 0;
+  auto bank_ammo = [&](std::int16_t bank) -> std::int16_t {
+    return is_player
+               ? BankAmmo(state, bank)
+               : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+  };
+  int max_range = 0;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    if (bank_ammo(bank) <= 0) {
+      continue;
+    }
+    if (!NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+      continue;
+    }
+    const Weapon *w = WeaponAt(state, bank);
+    if (w == nullptr) {
+      // The original reads the raw def table; missing defs cannot occur for
+      // armed banks in the clean-room model either.
+      continue;
+    }
+    const std::int16_t mode = w->weapon_mode_code;
+    int reach = 0;
+    if (mode == 0 || mode == 3) {
+      reach = w->beam_length_px;
+    } else if (mode == -1 || mode == 4 || mode == 7) {
+      reach = RoundRangeEnvelope(w->range_scalar);
+    } else if (mode == 1) {
+      reach = RoundRangeEnvelope(w->range_scalar * kGuidedMaxRangeScale);
+    } else if (mode == 6) {
+      reach = RoundRangeEnvelope(w->range_scalar * kRocketMaxRangeScale);
+    }
+    if (reach > max_range) {
+      max_range = reach;
+    }
+  }
+  if (max_range >= 0x7fff) {
+    max_range = 0x7fff;
+  }
+  return max_range;
+}
+
 bool NovaWeapon_CanFireWeaponBank(const GameState &state,
                                   const Ship &ship,
                                   std::int16_t weapon_bank) {
@@ -527,6 +643,23 @@ bool NovaWeapon_CanFireWeaponBank(const GameState &state,
     return false;
   }
   const bool is_player = ship.ship_instance_id == 0;
+  // NPC-only mount gate: a bank whose weapon flags_secondary 0x100 is set
+  // never fires on NPC ships; the player is exempt.
+  if (!is_player && (w->flags_secondary & 0x0100) != 0) {
+    return false;
+  }
+  // Cloak gate: at the cloak-visibility threshold only weapons flagged
+  // 0x4000 (Bible "Weapon can be fired while cloaked") fire.
+  if (NovaTargeting_ShipAtCloakVisibilityThreshold(ship) &&
+      (w->flags_secondary & 0x4000) == 0) {
+    return false;
+  }
+  // Launch-bay dependency: flags_secondary 0x80 weapons fire only while the
+  // class's KeyCarried fighter sits loaded in a bay.
+  if ((w->flags_secondary & 0x0080) != 0 &&
+      !NovaWeapon_HasLoadedLaunchBayAmmo(state, ship)) {
+    return false;
+  }
   // Read the ship's own loaded secondary ammo: the player's banks live in the
   // GameState strided arrays (BankSecondary), an NPC's on
   // Ship.npc_weapon_bank_*
@@ -537,23 +670,29 @@ bool NovaWeapon_CanFireWeaponBank(const GameState &state,
                ? BankSecondary(state, slot)
                : ship.npc_weapon_bank_secondary[static_cast<std::size_t>(slot)];
   };
-  // Carrier-bay weapons (mode 99) need a loaded ship in the secondary counter
-  // (the original reads the firing bank's counter; launch-bay-dependency gate
-  // 0x80 is deferred).
   if (w->weapon_mode_code == 99) {
+    // Carrier-bay weapon: needs a loaded ship in the firing bank's counter.
     return loaded_secondary(weapon_bank) >= 1;
   }
-  // Ammo/energy requirement. ammo_type (Ghidra ammo_or_energy_cost_code) <
-  // -999 means the weapon draws energy from fuel (not implemented; the Light
-  // Blaster and most gun weapons are free). In [0,255] it needs carried
-  // ammunition; otherwise (-1 = unlimited) no ammo is required. The original
-  // reads the COST bank's counter for the player, but the FIRING bank's for
-  // an NPC (0x00468990's ship_instance_id==0 branch) -- reproduced below.
+  // Ammo/energy requirement. ammo_type (Ghidra ammo_or_energy_cost_code) in
+  // [0,255] needs carried ammunition; [-999,-1] is free-energy (no check);
+  // <= -1000 draws fuel. The original reads the COST bank's counter for the
+  // player, but the FIRING bank's for an NPC (0x00468990's
+  // ship_instance_id==0 branch) -- reproduced below.
   const int cost = w->ammo_type;
   if (cost >= 0 && cost <= 0xff) {
     const std::int16_t slot =
         is_player ? static_cast<std::int16_t>(cost) : weapon_bank;
     if (loaded_secondary(slot) < 1) {
+      return false;
+    }
+  } else if (cost <= -1000) {
+    // Fuel-drawn: per-shot fuel = (|cost| - 1000) * 0.1 (DAT_00575810);
+    // the original's FCOMPP passes on equality and unordered. Note the
+    // readiness classifier 0x004138a0 compares against |cost| - 1000
+    // UNSCALED -- an original inconsistency preserved on both sides.
+    const float required = static_cast<float>(-cost - 1000) * 0.1F;
+    if (ship.fuel_points < required) {
       return false;
     }
   }

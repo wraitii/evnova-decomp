@@ -98,13 +98,36 @@ NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,
                                                     const Ship &ship,
                                                     std::int16_t weapon_bank);
 
+// Ghidra 0x00464670 Weapon_HasLoadedLaunchBayAmmo: true when the ship's
+// class has a KeyCarried fighter (ShipClass.key_carried_ship_class) and one
+// of its 0x100 banks holds a mode-99 bay weapon with mounted ammo > 0 and
+// loaded secondary > 0 whose ammo_type - 0x80 equals the KeyCarried id.
+[[nodiscard]] bool NovaWeapon_HasLoadedLaunchBayAmmo(const GameState &state,
+                                                     const Ship &ship);
+
+// Ghidra 0x0046CEC0 Weapon_GetShipMaxWeaponRange: the furthest effective
+// reach over the ship's armed (bank ammo > 0), fireable
+// (NovaWeapon_CanFireWeaponBank) banks. Reach per weapon mode: 0/3 =
+// beam_length_px; -1/4/7 = floor(range_scalar) (the original's case list
+// tests mode 7 twice and omits mode 8, so turret projectiles contribute 0);
+// 1 = floor(range_scalar * 0.85); 6 = floor(range_scalar * 0.5); else 0.
+// Returns the maximum, clamped to 0x7fff. Feeds the AI state machine's
+// approach/keep-distance envelope (scaled by 0.85 at 0x00406a4e).
+[[nodiscard]] int NovaWeapon_GetShipMaxWeaponRange(const GameState &state,
+                                                   const Ship &ship);
+
 // Ghidra 0x00468990 Weapon_CanFireWeaponBank: whether the given weapon bank
 // may fire right now for a specific ship (player = GameState strided banks;
 // NPC = Ship.npc_weapon_bank_*). Faithful branching on ship_instance_id==0:
 // for the player the secondary-read index is the COST bank (ammo_type), for an
-// NPC it is the FIRING bank itself. Cloak-visibility (flags_secondary 0x4000),
-// launch-bay-dependency (0x80) and fuel-drawn (ammo_type < -999) gates are
-// deferred; only the ammo-sufficiency checks are reproduced.
+// NPC it is the FIRING bank itself. Gates, in original order: NPC-only
+// flags_secondary 0x100 mount gate; cloak-visibility threshold (0x4000 =
+// Bible "can be fired while cloaked"); launch-bay dependency (0x80, resolved
+// through Weapon_HasLoadedLaunchBayAmmo); carrier-bay mode-99 loaded counter;
+// ammo_type [0,0xff] counter; fuel-drawn ammo_type <= -1000 with per-shot
+// fuel (|cost| - 1000) * 0.1 (DAT_00575810; FCOMPP passes on equality -- the
+// readiness classifier 0x004138a0 compares UNSCALED, an original
+// inconsistency preserved on both sides). Returns a plain bool (AL only).
 [[nodiscard]] bool NovaWeapon_CanFireWeaponBank(const GameState &state,
                                                 const Ship &ship,
                                                 std::int16_t weapon_bank);
