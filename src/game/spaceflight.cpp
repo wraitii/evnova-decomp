@@ -375,6 +375,295 @@ void NovaFrame_TickSystems(GameState &state,
   Stub_BeamHitQueue(state, elapsed_ticks);
 }
 
+// ---------------------------------------------------------------------------
+// Explicit splits of Ship_HandlePlayerShipCore (0x0044aa70). The core is one
+// Metrowerks-collapsed routine; the loop below is its per-frame dispatch and
+// these helpers are its named regions (see the plate comment and the
+// PlayerTick_* labels in Ghidra). Each helper cites its anchor block.
+// ---------------------------------------------------------------------------
+
+// Edge-latch state for NovaPlayer_TickTargetAndTravelCommands: the original
+// carries the command latches (g_playerCycleTargetCommandLatch,
+// g_playerCycleTravelTargetCommandLatch, g_playerHyperspaceModeCommandLatch,
+// g_playerSecondaryTargetLatch, g_playerNearestTargetLatch) in globals.
+struct PlayerTargetTravelLatches {
+  bool target_cycle_was_held = false;
+  bool destination_cycle_was_held = false;
+  bool hyperspace_was_held = false;
+  bool ship_cycle_was_held = false;
+  bool nearest_was_held = false;
+  // Trailing travel-reticle re-arm basis (see NovaFrame_SpaceflightLoop).
+  std::int16_t prev_travel_stellar = -1;
+};
+
+// Ghidra 0x0044aa70 PlayerTick_TargetAndTravelCommands (0x0044b7c4..0x0044bc1e
+// + the hyperspace-mode arm 0x0044b95f): per-frame target validation, the
+// Tab stellar cycle, Backslash destination-system cycle (refreshing the
+// route-map overlay at 0x0044b8ab), the H hyperspace-mode arm, the backquote
+// ship cycle and the 'o' nearest-hostile/engaged selection. Click-to-target
+// (0x0044e019) stays in the loop: it belongs to the separate mouse block and
+// needs the SpaceflightView sprite picking.
+void NovaPlayer_TickTargetAndTravelCommands(GameState &state,
+                                            const FlightInput &input,
+                                            PlayerTargetTravelLatches &l) {
+  // Per-frame player-target validation (Ship_HandlePlayerShipCore 0x0044aa70
+  // prologue): the ship target drops when the target ship is inactive,
+  // destroyed, entering hyperspace (AI state 0x15) or cloaked past the
+  // visibility gate -- which is how a targeted ship jumping out releases the
+  // selection. The stellar selection has no per-frame validation.
+  NovaTargeting_ValidatePlayerTarget(state);
+  // Ghidra System_UpdateSystemAndStellarDisplayState (0x00432470) scope B:
+  // per-tick recompute of the transient discovered_this_rebuild latch (the
+  // starmap's one-jump-ahead window), so script reveals (misn X opcode) get
+  // their grey neighbour ring without waiting for the next system entry.
+  NovaSystem_RebuildDiscoveredLatch(state);
+  const bool target_cycle =
+      input.cycle_target_next || input.cycle_target_previous;
+  if (target_cycle && !l.target_cycle_was_held) {
+    NovaTargeting_CyclePlayerStellarTarget(state, input.cycle_target_next);
+  }
+  l.target_cycle_was_held = target_cycle;
+  // Destination-SYSTEM cycling (Backslash / Shift+Backslash): rotate the
+  // next-jump destination through the systems directly linked to the current
+  // one. Mirrors the original's key-binding-13 block in PlayerTick_TargetAnd-
+  // TravelCommands (g_playerCycleTravelTargetCommandLatch at
+  // 0x0044b8b9..0x0044def6). Edge-latched so held-\ steps one system per
+  // press. Setting a destination arms travel mode but does NOT engage the
+  // jump -- that stays on the 'j' travel key (NovaTravel_Tick).
+  const bool destination_cycle =
+      input.cycle_destination_next || input.cycle_destination_previous;
+  if (destination_cycle && !l.destination_cycle_was_held) {
+    const std::int16_t dest =
+        NovaTravel_CycleDestinationSystem(state, input.cycle_destination_next);
+    // Ghidra 0x0044b8ab: the core refreshes the route-map overlay after the
+    // destination command (NovaUi_UpdateTravelSelectionOverlay) -- the
+    // overlay opens/re-stamps regardless of whether a candidate was found.
+    RouteMap_Open(state);
+    if (dest >= 0) {
+      // Destination cycled; travel mode is armed but the jump awaits 'j'.
+      NovaLog::Info("backslash: destination system {}", dest);
+    } else {
+      NovaLog::Info("backslash: no travelable destination from this system");
+    }
+  }
+  l.destination_cycle_was_held = destination_cycle;
+  // Hyperspace-mode toggle (H): latch the off-map destination-selection
+  // channel (the manual's "press H to set hyperspace mode, then Backslash to
+  // pick the destination system"). The latch is cleared when a jump lands.
+  if (input.hyperspace_mode && !l.hyperspace_was_held) {
+    state.travel.hyperspace_mode = true;
+    // Entering hyperspace mode latches plotted-jump mode 3 with no slot
+    // (0x0044de28: mode=3, ai_secondary_target_slot=-1).
+    state.player.travel_transfer_mode = 3;
+    // Ghidra 0x0044b95f: the hyperspace-mode arm block refreshes the
+    // route-map overlay like the cycle command.
+    RouteMap_Open(state);
+  }
+  l.hyperspace_was_held = input.hyperspace_mode;
+  // Ship-target cycling: backquote (`) / Shift+backquote, with the
+  // combat-relevant-only modifier (Alt or 'k'). Mirrors the original's
+  // Ship_HandlePlayerShip cycle-target block (0x0044b120): a no-op result or
+  // a self-result clears the target, otherwise the new slot is stored and
+  // the reticle pulse is re-armed at 256.0 (0x43800000).
+  const bool ship_cycle =
+      input.cycle_ship_target_next || input.cycle_ship_target_previous;
+  if (ship_cycle && !l.ship_cycle_was_held) {
+    const std::int16_t next =
+        input.cycle_ship_target_next
+            ? NovaTargeting_FindNextPlayerCycleTarget(
+                  state,
+                  state.player.primary_target_ship_slot,
+                  state.player.current_system_id,
+                  input.cycle_ship_include_combat)
+            : NovaTargeting_FindPreviousPlayerCycleTarget(
+                  state,
+                  state.player.primary_target_ship_slot,
+                  state.player.current_system_id,
+                  input.cycle_ship_include_combat);
+    if (next == state.player.primary_target_ship_slot ||
+        next == state.player.ship_instance_id) {
+      state.player.primary_target_ship_slot = -1;
+    } else {
+      state.player.primary_target_ship_slot = next;
+      state.ship_reticle_pulse = 256.0F;
+    }
+  }
+  l.ship_cycle_was_held = ship_cycle;
+  // "Target nearest" command: 'o' selects the nearest hostile combat target
+  // (Ship_SelectNearestHostileCombatTarget 0x00462bd0), Alt+'o' the nearest
+  // engaged target (0x00462850). A miss (-1) leaves the current target
+  // untouched; a new slot re-arms the reticle pulse.
+  const bool nearest_pressed =
+      input.select_nearest_hostile || input.select_nearest_engaged;
+  if (nearest_pressed && !l.nearest_was_held) {
+    const std::int16_t slot =
+        input.select_nearest_hostile
+            ? NovaTargeting_SelectNearestHostileCombatTarget(state)
+            : NovaTargeting_SelectNearestEngagedTarget(state);
+    if (slot != -1 && slot != state.player.primary_target_ship_slot) {
+      state.player.primary_target_ship_slot = slot;
+      state.ship_reticle_pulse = 256.0F;
+    }
+  }
+  l.nearest_was_held = nearest_pressed;
+}
+
+// Ghidra 0x0044aa70 PlayerTick_JumpArrivalBlock (0x0044fa72 -> [0x0044fd2e],
+// synthetic plan score 0.76): cross-system jump arrival -- asteroid/starfield
+// re-init, the vacant-ship sweep, escort adoption + mission-fleet restoration
+// inside the -999 station-hold window, offering rerolls, the scattered NPC
+// population and the arrival ambush, then the target/selection reset. The
+// entering-system arrival message and the escort travel-day daily tick +
+// stat-modifier reroll (0x0044fb2d/0x0044fb39) of the original slice are
+// TODO(decomp) inside.
+void NovaPlayer_TickJumpArrival(SdlPlatform &platform,
+                                SpaceflightView &view,
+                                GameState &state,
+                                std::uint64_t now_ms) {
+  // When a jump completed this frame, re-spawn the starfield for the new
+  // system (the original's jump completion re-runs
+  // NovaEffects_QueuedAmbientStarParticles).
+  if (!state.travel.just_completed) {
+    return;
+  }
+  // Cross-system travel re-initializes the asteroids for the new system,
+  // matching the original's jump-completion re-run of Asteroid_InitSystem.
+  NovaAsteroid_InitSystem(state);
+  view.SpawnAmbientStars(platform, state);
+  // Ship_DeactivateVacantShipsAndTally ('\0') runs at system-entry
+  // (NovaMainLoop_Run 0x00486880's 0x90 latch and Stellar_ProcessTravel-
+  // AndLanding 0x00457580): the ships left behind by the departure system
+  // are vacant (idle wanderers/parked; only non-disabled ships
+  // engaging the player survive), so the cohort is swept before the new
+  // system gets its immediate scattered avg_ships population from the tail
+  // of System_RebuildInitialNpcAndMissionPopulation. Per-tick maintenance
+  // only replenishes later losses through the visible arrival paths.
+  // Without this sweep the old system's ships would linger in their
+  // previous current_system_id and reappear (still active) whenever the
+  // player jumps back.
+  NovaShip_DeactivateVacantShipsAndTally(state,
+                                         /*keep_player_engaged=*/false);
+  // Escort adoption (System_RebuildInitialNpcAndMissionPopulation
+  // 0x0041af90, reached from the jump-arrival block at 0x0044fa91):
+  // attached ships (squad_leader_ship_slot == 0) that survived the sweep
+  // are adopted into the arrival system (Ship_ResetShipToDefaultCombatState
+  // 0x0041e240, flag = 0: no refill on a jump), the wedge snaps around
+  // the player, and because the player core windows its station-hold
+  // timer at -999 around the rebuild (0x0044fa83 / 0x0044faa2) each
+  // attached ship is pushed ~892 px behind and flung forward at 50 px/tick
+  // -- escorts stream in behind the jumping player.
+  state.player.ai_station_hold_timer = -999.0F;
+  NovaSystem_RestorePlayerEscorts(state, /*refill=*/false, now_ms);
+  NovaSystem_RestoreMissionFleets(state,
+                                  state.player.current_system_id,
+                                  /*copy_player_heading=*/false,
+                                  SDL_GetTicks());
+  // Offering rolls redraw on every system arrival (Stellar_ProcessTravel
+  // AndLanding 0x00458802: roll 1..100 per definition, then re-evaluate
+  // the mission lists).
+  Mission_RerollOfferingRolls(state);
+  // TODO(decomp(0x0044fb39)): the jump-arrival slice also advances one
+  // daily world tick per escort travel day and runs Frame_JitterPlayerStat-
+  // Modifiers + Frame_RerollPlayerStatModifiers (0x0044fb2d/0x0044fb39)
+  // before Misn_TickActiveMissionTimers; not run here yet.
+  NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
+  // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of
+  // Stellar_ProcessTravelAndLanding's system-transition slice, after the
+  // population rebuild. TODO(decomp): the mission-fleet rearm/jump-in
+  // arms of that slice (Misn_TickActiveMissionTimers transition pass,
+  // per-mission spawn_rearm re-arm, follow-player ShipBehav 0 fleet
+  // jump-in) are not reconstructed yet; the ambush is position-faithful
+  // relative to the slices that exist.
+  Mission_TrySpawnMissionShipAmbush(state);
+  // 0x0044faa2: the -999 hold-timer window closes right after the
+  // rebuild returns.
+  state.player.ai_station_hold_timer = 0.0F;
+  // The player's primary target ship lived in the departure system; the
+  // vacancy sweep deactivated it (and its slot may be reused by a fresh
+  // spawn), so clear the selection and the reticle pulse -- the original
+  // resets primary_target_ship_slot on system entry.
+  state.player.primary_target_ship_slot = -1;
+  state.ship_reticle_pulse = 0.0F;
+  // Re-arm the landed system's stellar availability immediately (mirrors
+  // system-entry re-deriving display state) and clear any manual travel
+  // selection left over from the departure system, so the automatic target
+  // below starts from the new system's own stellars rather than a stale
+  // one. Without this the travel/land reticle can point at the previous
+  // system's target for a frame.
+  NovaTargeting_UpdateStellarAvailability(state);
+  state.travel.selected_stellar_id = -1;
+  state.travel.selected_stellar_is_manual = false;
+}
+
+// Loop-exit result of NovaPlayer_TickLandCommand: the Spaceport modal can
+// quit the app or block the frame (the loop freezes gameplay time across it).
+enum class LandCommandResult {
+  kContinue,
+  kQuit,
+  kBlockedFrame,
+};
+
+// Ghidra 0x0044aa70 PlayerTick_LandCommandDispatch (0x00451f8f ->
+// [0x004520ea], synthetic plan score 0.98): the land command (binding 5) with
+// its nearest-available-stellar auto-pick and the arrival checks opening the
+// Spaceport. Divergence TODO(decomp): the original re-picks the nearest
+// available travel stellar every 60 frames while travel mode is armed
+// (DAT_007cab1c < 2, g_license_check_frame_counter gate in the decompile);
+// the port auto-picks only once per press when nothing is targeted.
+LandCommandResult NovaPlayer_TickLandCommand(SdlPlatform &platform,
+                                             GameState &state) {
+  // The original's land command (binding 5 in Ship_HandlePlayerShipCore
+  // 0x0044aa70) auto-picks the nearest available travel stellar when no
+  // stellar is currently targeted (travel_transfer_mode != 2 or
+  // ai_secondary_target_slot == -1) before running the arrival checks.
+  if (state.travel.selected_stellar_id < 0) {
+    const std::int16_t nearest =
+        NovaTargeting_FindNearestAvailableTravelStellar(state);
+    if (nearest >= 0x80) {
+      state.travel.selected_stellar_id = nearest;
+      state.travel_reticle_pulse = 256.0F;
+    }
+  }
+  LandedContext ctx;
+  if (NovaLanding_EnterDocked(state, ctx)) {
+    NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
+                  ctx.stellar_id);
+    // Mission resolution (Mission_TickReactionSlotsForTravelInteraction
+    // 0x00443780, including the success/failure debrief readers) runs
+    // once on Spaceport entry inside NovaLanded_RunWindow, matching its
+    // position in NovaUi_RunTravelDestinationInteractionLoop
+    // (0x00491f30): after the window is up, before the AvailLoc-3 offer
+    // pass, with debriefs layered over the dock.
+    const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
+    if (exit == LandedExit::kQuit) {
+      return LandCommandResult::kQuit;
+    }
+    // Launch runs the launch tail below (which contains the original's
+    // single daily world tick, 0x00456033).
+    // TODO(decomp(0x0044d870)) skipped: the 15..44-day daily-driver loop
+    // belongs to the death/escape-pod respawn (PlayerTick_TimedAction-
+    // Transition 0x0044d490), not to launch -- previously misattributed
+    // here and charging 16..45 days per landing.
+    if (exit == LandedExit::kLaunched) {
+      // Stellar_TravelToSystem launch tail (0x00455f99..0x00456268):
+      // velocity/position reset, shield/armor refill, the daily world
+      // tick, stat-modifier jitter/reroll, autosave, random launch
+      // heading, travel-selection reset and the shot wipe.
+      NovaLanding_LaunchFromStellar(state, ctx.stellar_id);
+      // Stellar_TravelToSystem tail (0x00456323): the "leaving
+      // <stellar> on <date>" overlay shows as the player departs.
+      NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
+    }
+    // Docking blocked the loop for the whole landing; freeze gameplay
+    // time across it (launch re-enters flight with a fresh clock).
+    return LandCommandResult::kBlockedFrame;
+  }
+  const auto *st = state.scenario.Stellar(state.travel.selected_stellar_id);
+  const bool is_station = st != nullptr && (st->flags & 0x10U) != 0U;
+  NovaHud_ShowLandingDenial(state, ctx.denial, is_station);
+  return LandCommandResult::kContinue;
+}
+
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
 // phase skeleton (setup + full first tick, then per-frame pre-draw/sim,
 // drawing, post-draw) and the run_full_tick freeze gate. Simulation is still
@@ -476,11 +765,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // Real frame-time basis for the per-frame ambient/stellar animation steppers
   // (the original accumulates _g_avg_frame_time_ms).
   std::uint64_t prev_tick_ms = SDL_GetTicks();
-  bool target_cycle_was_held = false;
-  bool destination_cycle_was_held = false;
-  bool hyperspace_was_held = false;
-  bool ship_cycle_was_held = false;
-  bool nearest_was_held = false;
+  // Edge-latch state of the core's target/travel command block (see
+  // PlayerTargetTravelLatches).
+  PlayerTargetTravelLatches target_travel_latches;
+  target_travel_latches.prev_travel_stellar = state.travel.selected_stellar_id;
   // Secondary-weapon command edges (PlayerTick_WeaponCommands): the cycle is
   // edge-resolved against g_playerSecondaryCycleCommandLatch semantics (set
   // on execution, cleared on release); the clear-selection arm is already
@@ -492,7 +780,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   bool land_was_held = false;
   bool target_action_was_held = false;
   bool board_was_held = false;
-  std::int16_t prev_travel_stellar = state.travel.selected_stellar_id;
   // Gameplay time freezes while a blocking modal owns the loop (the original's
   // g_gameplay_time_frozen around interaction windows); every modal return
   // site calls resync_frame_clock() so the wall-clock gap is never integrated
@@ -577,52 +864,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // starmap's one-jump-ahead window), so script reveals (mïsn X opcode) get
     // their grey neighbour ring without waiting for the next system entry.
     NovaSystem_RebuildDiscoveredLatch(state);
-    const bool target_cycle =
-        input.cycle_target_next || input.cycle_target_previous;
-    if (target_cycle && !target_cycle_was_held) {
-      NovaTargeting_CyclePlayerStellarTarget(state, input.cycle_target_next);
-    }
-    target_cycle_was_held = target_cycle;
-    // Destination-SYSTEM cycling (Backslash / Shift+Backslash): rotate the
-    // next-jump destination through the systems directly linked to the
-    // current one. Mirrors the original's key-binding-13 block in
-    // PlayerTick_TargetAndTravelCommands (g_playerCycleTravelTargetCommandLatch
-    // at 0x0044b8b9..0x0044def6). Edge-latched so held-\ steps one
-    // system per press. Setting a destination arms travel mode but does NOT
-    // engage the jump -- that stays on the 'j' travel key (NovaTravel_Tick).
-    const bool destination_cycle =
-        input.cycle_destination_next || input.cycle_destination_previous;
-    if (destination_cycle && !destination_cycle_was_held) {
-      const std::int16_t dest = NovaTravel_CycleDestinationSystem(
-          state, input.cycle_destination_next);
-      // Ghidra 0x0044b8ab: the core refreshes the route-map overlay after the
-      // destination command (NovaUi_UpdateTravelSelectionOverlay) — the
-      // overlay opens/re-stamps regardless of whether a candidate was found.
-      RouteMap_Open(state);
-      if (dest >= 0) {
-        // Destination cycled; travel mode is armed but the jump awaits 'j'.
-        NovaLog::Info("backslash: destination system {}", dest);
-      } else {
-        NovaLog::Info("backslash: no travelable destination from this system");
-      }
-    }
-    destination_cycle_was_held = destination_cycle;
-    // Hyperspace-mode toggle (H): latch the off-map destination-selection
-    // channel (the manual's "press H to set hyperspace mode, then Backslash to
-    // pick the destination system"). The latch is cleared when a jump lands.
-    if (input.hyperspace_mode && !hyperspace_was_held) {
-      state.travel.hyperspace_mode = true;
-      // Entering hyperspace mode latches plotted-jump mode 3 with no slot
-      // (0x0044de28: mode=3, ai_secondary_target_slot=-1).
-      state.player.travel_transfer_mode = 3;
-      // Ghidra 0x004b95f: the hyperspace-mode arm block refreshes the
-      // route-map overlay like the cycle command.
-      RouteMap_Open(state);
-    }
-    hyperspace_was_held = input.hyperspace_mode;
+    NovaPlayer_TickTargetAndTravelCommands(state, input, target_travel_latches);
     // Route-map overlay zoom + auto-dismiss (Ghidra 0x0045216e /
-    // 0x0042f23e). Zoom keys are raw scancodes: minus/equals and the numpad
-    // -/+ pair; the modifier-combo guard covers shift/ctrl/alt
+    // 0x0042f23e, the PlayerTick_AuxiliaryCommands zoom block). Zoom keys
+    // are raw scancodes: minus/equals and the numpad -/+ pair; the
+    // modifier-combo guard covers shift/ctrl/alt
     // (TODO(decomp): original commands 0x6b/0x6f not modelled).
     RouteMap_Tick(
         state,
@@ -634,52 +880,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                 platform.IsOriginalKeyCodeHeld(0x36) ||
                                 platform.IsOriginalKeyCodeHeld(0x1d) ||
                                 platform.IsOriginalKeyCodeHeld(0x38)});
-    // Ship-target cycling: backquote (`) / Shift+backquote, with the
-    // combat-relevant-only modifier (Alt or 'k'). Mirrors the original's
-    // Ship_HandlePlayerShip cycle-target block (0x0044b120): a no-op result or
-    // a self-result clears the target, otherwise the new slot is stored and
-    // the reticle pulse is re-armed at 256.0 (0x43800000).
-    const bool ship_cycle =
-        input.cycle_ship_target_next || input.cycle_ship_target_previous;
-    if (ship_cycle && !ship_cycle_was_held) {
-      const std::int16_t next =
-          input.cycle_ship_target_next
-              ? NovaTargeting_FindNextPlayerCycleTarget(
-                    state,
-                    state.player.primary_target_ship_slot,
-                    state.player.current_system_id,
-                    input.cycle_ship_include_combat)
-              : NovaTargeting_FindPreviousPlayerCycleTarget(
-                    state,
-                    state.player.primary_target_ship_slot,
-                    state.player.current_system_id,
-                    input.cycle_ship_include_combat);
-      if (next == state.player.primary_target_ship_slot ||
-          next == state.player.ship_instance_id) {
-        state.player.primary_target_ship_slot = -1;
-      } else {
-        state.player.primary_target_ship_slot = next;
-        state.ship_reticle_pulse = 256.0F;
-      }
-    }
-    ship_cycle_was_held = ship_cycle;
-    // "Target nearest" command: 'o' selects the nearest hostile combat target
-    // (Ship_SelectNearestHostileCombatTarget 0x00462bd0), Alt+'o' the nearest
-    // engaged target (0x00462850). A miss (-1) leaves the current target
-    // untouched; a new slot re-arms the reticle pulse.
-    const bool nearest_pressed =
-        input.select_nearest_hostile || input.select_nearest_engaged;
-    if (nearest_pressed && !nearest_was_held) {
-      const std::int16_t slot =
-          input.select_nearest_hostile
-              ? NovaTargeting_SelectNearestHostileCombatTarget(state)
-              : NovaTargeting_SelectNearestEngagedTarget(state);
-      if (slot != -1 && slot != state.player.primary_target_ship_slot) {
-        state.player.primary_target_ship_slot = slot;
-        state.ship_reticle_pulse = 256.0F;
-      }
-    }
-    nearest_was_held = nearest_pressed;
     // Click-to-target (PlayerTick_MouseTargetAndControlCommands 0x0044e019):
     // while the route-map overlay is up the click is routed to the chart
     // first (PlayerTick_RouteMapClickBranch 0x0044e027): a neighbour marker
@@ -791,6 +991,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
            .arm_modifier_held = escort_held(0x38)},
           SDL_GetTicks() * 60 / 1000);
     }
+    // Ghidra 0x00450710 PlayerTick_AuxiliaryCommands coverage map: the port
+    // reconstructs the fuel-scoop tail (NovaPlayer_TickRegeneration), the
+    // escort/category command group (above), the route-map zoom block
+    // (0x0045216e, RouteMap_Tick) and the ionization/fuel regeneration arm
+    // (0x00450717, NovaPlayer_TickRegeneration).
+    // TODO(decomp(0x00450fd9)) skipped: the cheat/debug-spawn arm
+    // (PlayerTick_CheatAndSpawnCommands, plan score 1.37) -- instant-jump
+    // cheat (command 0xe) and the 0x38/0x6f/0x1d/0x6b/0x2a debug ship-spawn
+    // combos. Also unported: the FPS toggle and the launch-bay command
+    // slices of the same region.
     // Cooldown-decay tail of PlayerTick_WeaponCommands: runs unconditionally
     // in the original player tick, including during engaged jumps (the
     // ammo>0 gate and the ionization pin live inside).
@@ -989,78 +1199,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
     }
     mission_info_was_held = mission_info_held;
-    // When a jump completed this frame, re-spawn the starfield for the new
-    // system (the original's jump completion re-runs
-    // NovaEffects_QueuedAmbientStarParticles).
-    if (state.travel.just_completed) {
-      // Cross-system travel re-initializes the asteroids for the new system,
-      // matching the original's jump-completion re-run of Asteroid_InitSystem.
-      NovaAsteroid_InitSystem(state);
-      view.SpawnAmbientStars(platform, state);
-      // Ship_DeactivateVacantShipsAndTally ('\0') runs at system-entry
-      // (NovaMainLoop_Run 0x00486880's 0x90 latch and Stellar_ProcessTravel-
-      // AndLanding 0x00457580): the ships left behind by the departure system
-      // are vacant (idle wanderers/parked; only non-disabled ships
-      // engaging the player survive), so the cohort is swept before the new
-      // system gets its immediate scattered avg_ships population from the tail
-      // of System_RebuildInitialNpcAndMissionPopulation. Per-tick maintenance
-      // only replenishes later losses through the visible arrival paths.
-      // Without this sweep the old system's ships would linger in their
-      // previous current_system_id and reappear (still active) whenever the
-      // player jumps back.
-      NovaShip_DeactivateVacantShipsAndTally(state,
-                                             /*keep_player_engaged=*/false);
-      // Escort adoption (System_RebuildInitialNpcAndMissionPopulation
-      // 0x0041af90, reached from the jump-arrival block at 0x0044fa91):
-      // attached ships (squad_leader_ship_slot == 0) that survived the sweep
-      // are adopted into the arrival system (Ship_ResetShipToDefaultCombatState
-      // 0x0041e240, flag = 0: no refill on a jump), the wedge snaps around
-      // the player, and because the player core windows its station-hold
-      // timer at -999 around the rebuild (0x0044fa83 / 0x0044faa2) each
-      // attached ship is pushed ~892 px behind and flung forward at 50 px/tick
-      // -- escorts stream in behind the jumping player.
-      state.player.ai_station_hold_timer = -999.0F;
-      NovaSystem_RestorePlayerEscorts(state, /*refill=*/false, now_ms);
-      NovaSystem_RestoreMissionFleets(state,
-                                      state.player.current_system_id,
-                                      /*copy_player_heading=*/false,
-                                      SDL_GetTicks());
-      // Offering rolls redraw on every system arrival (Stellar_ProcessTravel
-      // AndLanding 0x00458802: roll 1..100 per definition, then re-evaluate
-      // the mission lists).
-      Mission_RerollOfferingRolls(state);
-      // TODO(decomp(0x0044fb39)): the jump-arrival slice also advances one
-      // daily world tick per escort travel day and runs Frame_JitterPlayerStat-
-      // Modifiers + Frame_RerollPlayerStatModifiers (0x0044fb2d/0x0044fb39)
-      // before Misn_TickActiveMissionTimers; not run here yet.
-      NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
-      // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of
-      // Stellar_ProcessTravelAndLanding's system-transition slice, after the
-      // population rebuild. TODO(decomp): the mission-fleet rearm/jump-in
-      // arms of that slice (Misn_TickActiveMissionTimers transition pass,
-      // per-mission spawn_rearm re-arm, follow-player ShipBehav 0 fleet
-      // jump-in) are not reconstructed yet; the ambush is position-faithful
-      // relative to the slices that exist.
-      Mission_TrySpawnMissionShipAmbush(state);
-      // 0x0044faa2: the -999 hold-timer window closes right after the
-      // rebuild returns.
-      state.player.ai_station_hold_timer = 0.0F;
-      // The player's primary target ship lived in the departure system; the
-      // vacancy sweep deactivated it (and its slot may be reused by a fresh
-      // spawn), so clear the selection and the reticle pulse -- the original
-      // resets primary_target_ship_slot on system entry.
-      state.player.primary_target_ship_slot = -1;
-      state.ship_reticle_pulse = 0.0F;
-      // Re-arm the landed system's stellar availability immediately (mirrors
-      // system-entry re-deriving display state) and clear any manual travel
-      // selection left over from the departure system, so the automatic target
-      // below starts from the new system's own stellars rather than a stale
-      // one. Without this the travel/land reticle can point at the previous
-      // system's target for a frame.
-      NovaTargeting_UpdateStellarAvailability(state);
-      state.travel.selected_stellar_id = -1;
-      state.travel.selected_stellar_is_manual = false;
-    }
+    // Cross-system jump arrival (PlayerTick_JumpArrivalBlock 0x0044fa72;
+    // NovaPlayer_TickJumpArrival above).
+    NovaPlayer_TickJumpArrival(platform, view, state, now_ms);
     // No per-frame stellar auto-seed: the original only sets
     // ai_secondary_target_slot from explicit commands (the land command's
     // nearest-pick below, number keys, click, nearest, starmap route). The
@@ -1069,9 +1210,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // A change to the selected travel stellar re-arms the travel reticle pulse
     // (the original arms _g_travel_target_reticle_pulse whenever
     // ai_secondary_target_slot is assigned a fresh stellar).
-    if (state.travel.selected_stellar_id != prev_travel_stellar) {
+    if (state.travel.selected_stellar_id !=
+        target_travel_latches.prev_travel_stellar) {
       state.travel_reticle_pulse = 256.0F;
-      prev_travel_stellar = state.travel.selected_stellar_id;
+      target_travel_latches.prev_travel_stellar =
+          state.travel.selected_stellar_id;
     }
     // Normal arrival (Return) is independent of target action: the original
     // player-ship tick directly invokes Stellar_ProcessTravelAndLanding here,
@@ -1080,57 +1223,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // overlay (STR# 0x7d2 messages) instead of a bare log line. Gated while a
     // jump is engaged (disabled through brake + hold + zoom).
     if (land_pressed && !state.travel.engaging) {
-      // The original's land command (binding 5 in Ship_HandlePlayerShipCore
-      // 0x0044aa70) auto-picks the nearest available travel stellar when no
-      // stellar is currently targeted (travel_transfer_mode != 2 or
-      // ai_secondary_target_slot == -1) before running the arrival checks.
-      if (state.travel.selected_stellar_id < 0) {
-        const std::int16_t nearest =
-            NovaTargeting_FindNearestAvailableTravelStellar(state);
-        if (nearest >= 0x80) {
-          state.travel.selected_stellar_id = nearest;
-          state.travel_reticle_pulse = 256.0F;
-        }
+      const LandCommandResult landed = NovaPlayer_TickLandCommand(platform, state);
+      if (landed == LandCommandResult::kQuit) {
+        returning_to_menu = true;
+        break;
       }
-      LandedContext ctx;
-      if (NovaLanding_EnterDocked(state, ctx)) {
-        NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
-                      ctx.stellar_id);
-        // Mission resolution (Mission_TickReactionSlotsForTravelInteraction
-        // 0x00443780, including the success/failure debrief readers) runs
-        // once on Spaceport entry inside NovaLanded_RunWindow, matching its
-        // position in NovaUi_RunTravelDestinationInteractionLoop
-        // (0x00491f30): after the window is up, before the AvailLoc-3 offer
-        // pass, with debriefs layered over the dock.
-        const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
-        if (exit == LandedExit::kQuit) {
-          returning_to_menu = true;
-          break;
-        }
-        // Launch runs the launch tail below (which contains the original's
-        // single daily world tick, 0x00456033).
-        // TODO(decomp(0x0044d870)) skipped: the 15..44-day daily-driver loop
-        // belongs to the death/escape-pod respawn (PlayerTick_TimedAction-
-        // Transition 0x0044d490), not to launch -- previously misattributed
-        // here and charging 16..45 days per landing.
-        if (exit == LandedExit::kLaunched) {
-          // Stellar_TravelToSystem launch tail (0x00455f99..0x00456268):
-          // velocity/position reset, shield/armor refill, the daily world
-          // tick, stat-modifier jitter/reroll, autosave, random launch
-          // heading, travel-selection reset and the shot wipe.
-          NovaLanding_LaunchFromStellar(state, ctx.stellar_id);
-          // Stellar_TravelToSystem tail (0x00456323): the "leaving
-          // <stellar> on <date>" overlay shows as the player departs.
-          NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
-        }
-        // Docking blocked the loop for the whole landing; freeze gameplay
-        // time across it (launch re-enters flight with a fresh clock).
+      if (landed == LandCommandResult::kBlockedFrame) {
         resync_frame_clock();
-      } else {
-        const auto *st =
-            state.scenario.Stellar(state.travel.selected_stellar_id);
-        const bool is_station = st != nullptr && (st->flags & 0x10U) != 0U;
-        NovaHud_ShowLandingDenial(state, ctx.denial, is_station);
       }
     }
     // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
