@@ -908,7 +908,13 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
     return;
   }
   const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-  if (!target.is_active || NovaAiShip_IsDisabled(state, target)) {
+  // 0x00411540 gates the whole refresh on behavior >= 5, so its disabled-
+  // target clear never applied to behavior-3 capture drives boarding a
+  // disabled victim. The port runs the refresh for behaviors 3/4 (the
+  // original arms their banks elsewhere, TODO(decomp)), so the clear is
+  // restricted to behaviors >= 5 to keep the state-0xd boarding target alive.
+  if (!target.is_active ||
+      (ship.ai_behavior_code >= 5 && NovaAiShip_IsDisabled(state, target))) {
     ship.primary_target_ship_slot = -1;
     return;
   }
@@ -1960,13 +1966,19 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Disabled/hidden pursuer-flee at turn radius (state 0xf). ----
+  // ---- Assist approach to a disabled ship (state 0xf). Entered from the
+  // comm-window Request Assistance / Beg For Mercy arm
+  // (Ship_EnterShipAiState0x0F 0x00410c70, player as primary target): keep
+  // within (10 - turn) * 30 + 50 px (x4 gravity shield) of the cripple,
+  // velocity-matching (mode 0xf) when close; the repair itself happens in the
+  // mode-0xf within-3 px arm of NovaAi_ApplyControls. Leaves the state when
+  // the target is gone or no longer disabled.
   if (ship.ai_state_code == 0xf && ship.primary_target_ship_slot != -1) {
-    if (!state.SlotInRange(
-            static_cast<std::size_t>(ship.primary_target_ship_slot)) ||
-        !NovaAiShip_IsDisabled(state,
-                               state.ShipAt(static_cast<std::size_t>(
-                                   ship.primary_target_ship_slot)))) {
+    const auto target_slot =
+        static_cast<std::size_t>(ship.primary_target_ship_slot);
+    if (!state.SlotInRange(target_slot) ||
+        !state.ShipAt(target_slot).is_active ||
+        !NovaAiShip_IsDisabled(state, state.ShipAt(target_slot))) {
       ship.ai_state_code = 0;
       ship.ai_control_mode = 0;
       ship.primary_target_ship_slot = -1;
@@ -1978,9 +1990,8 @@ void NovaAi_UpdateShipState(GameState &state,
         scn->Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
     const float base_turn = cls ? cls->turn_rate * 0.1F : 0.0F;
     const std::int16_t range = static_cast<std::int16_t>(
-        (kTurnRadiusBase - base_turn) * kTurnRadiusScale50 + 50.0F);
-    const Ship &tgt =
-        state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+        (kTurnRadiusBase - base_turn) * kAssistTurnRadiusScale + 50.0F);
+    const Ship &tgt = state.ShipAt(target_slot);
     // Gravity-shield ships scale the keeping range up (they drift at a larger
     // turn radius).
     const bool gravity_shield_0f = cls && NovaShip_HasGravityShield(ship, *cls);
@@ -3222,14 +3233,12 @@ void NovaAi_ApplyControls(GameState &state,
     // Velocity-match pursuit of a disabled/secondary target: brake on the
     // RELATIVE velocity (mode-1 style, threshold 0.525 px/tick); once matched,
     // copy the target's velocity and heading and creep position toward it at
-    // one frame-time unit per frame. The capture/boarding resolution that the
-    // original performs once within 3 px (state 0xd/0xf arms) is deferred
-    // (TODO(decomp): Outfit_BoardShipAndTransferCargo).
+    // one frame-time unit per frame.
     if (fire_restricted || ship.ai_secondary_target_slot == -1) {
       break;
     }
     const std::int16_t target_slot = ship.ai_secondary_target_slot;
-    const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
     const float rel_x = ship.vel_x - target.vel_x;
     const float rel_y = ship.vel_y - target.vel_y;
     const bool gravity_shield =
@@ -3268,10 +3277,28 @@ void NovaAi_ApplyControls(GameState &state,
             BearingDeg(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
         add_polar_step(ship.pos_x, ship.pos_y, bearing, elapsed_ticks);
       } else {
-        // Capture resolution: with the target disabled and within 3 px the
-        // original arms a 100..179-tick reverse-speed-bias timer (random 0x50 +
-        // 100) before entering state 0xe or boarding via
-        // Outfit_BoardShipAndTransferCargo. Deferred (TODO(decomp)).
+        // Within 3 px (FLOAT_00575120): boarding/assist resolution. With the
+        // maneuver timer spent and the ship not in the post-board drift (state
+        // 0xe), latch the victim as a boarding target and arm the 100..179-tick
+        // pause (random 0x50 + 100) that the capture supervisor's handoff
+        // (Ship_UpdateShipAiBehavior0x03CaptureVariant 0x004038b0) waits on
+        // before Outfit_BoardShipAndTransferCargo. While the pause counts down
+        // inside (0,100] in assist state 0xf (comm-window Request Assistance),
+        // the arm instead clears the latch and repairs the victim back above
+        // the disable threshold (+1.0 armor per tick, FLOAT_00575018).
+        if (ship.ai_maneuver_timer_ms <= 0.0F) {
+          if (ship.ai_state_code != 0xe) {
+            target.boarded_target_latch = 1;
+            ship.ai_maneuver_timer_ms = static_cast<float>(
+                std::uniform_int_distribution<int>{0, 0x4f}(state.rng) + 100);
+          }
+        } else if (ship.ai_maneuver_timer_ms <= 100.0F &&
+                   ship.ai_state_code == 0xf) {
+          target.boarded_target_latch = 0;
+          while (NovaAiShip_IsDisabled(state, target)) {
+            target.armor_points += 1.0F;
+          }
+        }
       }
     }
     break;
@@ -3525,8 +3552,12 @@ void NovaAi_UpdateShipAI(GameState &state,
       // trader-type enemies").
       bool capture_variant = false;
       if (ship.faction_or_government_id != -1) {
+        // Ship.faction_or_government_id is a zero-based def index (the
+        // original reads g_government_defs[faction] directly); the 0x80-based
+        // Government() lookup here previously made the capture variant
+        // unreachable for every ship.
         if (const Government *govt =
-                state.scenario.Government(ship.faction_or_government_id);
+                state.scenario.GovernmentByIndex(ship.faction_or_government_id);
             govt != nullptr && (govt->flags_primary & 0x1000U) != 0U) {
           capture_variant = true;
         }
@@ -4109,13 +4140,13 @@ bool NovaAiShip_IsShipEligibleForCommAidInteraction(const GameState &state,
 }
 
 // Ghidra 0x0040fca0 / 0x0040fce0.
-bool NovaAiShip_IsShipBrakingOnPlayerState9(const GameState &state,
+bool NovaAiShip_IsShipAssistingPlayerState9(const GameState &state,
                                             const Ship &ship) {
   return ship.is_active && !NovaAiShip_IsDisabled(state, ship) &&
          ship.primary_target_ship_slot == 0 && ship.ai_state_code == 9;
 }
 
-bool NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
+bool NovaAiShip_IsShipAssistingPlayerState0xF(const GameState &state,
                                               const Ship &ship) {
   return ship.is_active && !NovaAiShip_IsDisabled(state, ship) &&
          ship.primary_target_ship_slot == 0 && ship.ai_state_code == 0x0F;
@@ -4255,8 +4286,8 @@ bool NovaAiShip_HasIncomingDistressSupport(const GameState &state,
   return false;
 }
 
-// Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerAndBrake.
-void NovaAi_EnterState9TargetPlayerAndBrake(Ship &ship) {
+// Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerForAssist.
+void NovaAi_EnterState9TargetPlayerForAssist(Ship &ship) {
   ship.ai_hostility_accumulator = 0;
   ship.ai_station_hold_timer = 0.0F;
   ship.primary_target_ship_slot = 0;
@@ -4265,8 +4296,8 @@ void NovaAi_EnterState9TargetPlayerAndBrake(Ship &ship) {
   ship.ai_maneuver_timer_ms = -1.0F;
 }
 
-// Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerAndBrake.
-void NovaAi_EnterState0FTargetPlayerAndBrake(Ship &ship) {
+// Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerForAssist.
+void NovaAi_EnterState0FTargetPlayerForAssist(Ship &ship) {
   ship.ai_hostility_accumulator = 0;
   ship.ai_station_hold_timer = 0.0F;
   ship.primary_target_ship_slot = 0;

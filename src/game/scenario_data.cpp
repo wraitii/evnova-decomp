@@ -1212,6 +1212,12 @@ const Government *ScenarioData::Government(std::int16_t resource_id) const {
   return index < governments.size() ? &governments[index] : nullptr;
 }
 
+const Government *ScenarioData::GovernmentByIndex(std::int16_t index) const {
+  return index >= 0 && static_cast<std::size_t>(index) < governments.size()
+             ? &governments[static_cast<std::size_t>(index)]
+             : nullptr;
+}
+
 const FleetDef *ScenarioData::Fleet(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < fleets.size() ? &fleets[index] : nullptr;

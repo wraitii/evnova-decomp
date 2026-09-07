@@ -1315,6 +1315,14 @@ struct ScenarioData {
   // the source resources themselves use ids 0x80..0xbf.
   std::array<ImpactEffect, 64> impact_effects{};
 
+  // g_government_defs[faction] style lookup: zero-based index, unlike the
+  // 0x80-based resource-id Government() below. Ship.faction_or_government_id
+  // and the ship-class inherent-government fields live in this space (the
+  // original indexes the def array directly with them). Declared before the
+  // Government() member because that member's name shadows the struct type.
+  [[nodiscard]] const struct Government *
+  GovernmentByIndex(std::int16_t index) const;
+
   // gh.id 0x80.. lookup for government/faction data.
   [[nodiscard]] const Government *Government(std::int16_t resource_id) const;
 
