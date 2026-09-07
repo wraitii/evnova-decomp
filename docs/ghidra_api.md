@@ -311,40 +311,85 @@ curl -s -X POST "http://127.0.0.1:8166/function/parent-view" \
 
 ### POST /function/synthetic-suggestions
 
-Suggest single-entry CFG regions with a common continuation. Branch blocks
-are considered as starts by default. Set `named_labels_as_starts:true` to also
-consider blocks carrying a non-dynamic primary label. Copy a suggested start and
-stop into `/function/synthetic-decompile`. Output is one compact line per suggestion:
-`START (LABEL) -> [STOP (LABEL), ...] (x blocks, y bytes, z calls, score)`.
-The parenthesized label is omitted when an address has no primary label or only
-has a default `LAB_<address>` label.
-Contained suggestions are indented beneath larger selected regions.
-`max_depth` controls nesting below each root and defaults to `3`; use `0` for
-roots only or a larger value for a fuller outline.
-`min_blocks` defaults to `5`; `max_blocks` defaults to `500` and is capped at
-`5000`, matching what a view will accept.
+Propose a way to break a function up. The reply leads with a **plan**: a set of
+non-overlapping regions that between them cover as much of the parent as they
+can, each ready to paste into `/function/parent-view` or
+`/function/synthetic-decompile`.
 
-Branches whose paths never reconverge are not a failed suggestion: they are a
-region that ends by returning from the parent. Those are listed separately under
-`-- to return` with a `[return]` boundary, because such a region contains every
-suggestion after it and would otherwise become the root of the outline and hide
-it. A region running from the function's own entry to its returns is the whole
-function, and is not suggested.
+Candidates are the regions between a block and its **immediate post-dominator**,
+taken from real dominator and post-dominator trees rather than from a search for
+where two branch arms happen to meet. Such a region is single-entry and
+single-exit by construction, so the parent can replace it with one call and one
+branch, and nothing else in the parent falls into its middle.
 
-Metrowerks and similar compilers reach distant labels through one-instruction
-jump islands parked at the end of the function. Those are spliced out of the
-graph, so a short backward branch is not reported as a 38KB span and an island
-is never offered as a start.
-There is no result-count limit; use the block bounds and nesting depth to control
-the outline.
+Being a valid region is not the same as being a useful one, so every candidate is
+then run through the same dataflow pass that gives a view its signature. A
+suggestion therefore reports the parameters and return value the split would
+actually produce - the thing that decides whether a region reads as a function or
+as a slice through the middle of the parent's state - and is scored on them. A
+region reading two registers scores well; one reading nine does not.
+
+Raising `max_regions` only ever appends. The greedy runs down one fixed ranking,
+so a longer plan is the shorter one plus more - a region is never dropped or
+reshuffled when the limit goes up - which is why the limit is effectively off by
+default and `min_score` is the real quality control.
+
+Output is one line per region, in address order under the plan header:
+
+```
+-- plan: 16 regions, 17881 of 39831 bytes (45%), Ship_HandlePlayerShipCore keeps 21950 bytes
+  0044b037 (PlayerTick_HyperspaceExitGate) -> [0044b23f]  17 blocks, 611 bytes, 13 calls  |  EDI(ESI) +1 scratch  |  1.29
+```
+
+`EDI(ESI)` is the recovered signature: the region returns `EDI` and takes `ESI`.
+`+1 scratch` counts further live-outs the parent would have to carry by hand, and
+counts against the score. The parenthesized label is omitted when an address has
+no primary label or only a default `LAB_<address>` one.
+
+Regions that overlap the plan are listed after it under `-- alternatives`, ranked
+by score; they are choices to make *instead of* a plan entry, not as well as one.
+Set `alternatives:false` for the plan alone.
+
+A region whose paths never reconverge ends by returning from the parent and is
+shown with a `[return]` boundary. A region running from the function's own entry
+is the whole function, and is not suggested.
+
+Where a rare path escapes early - a bail-out to shared cleanup, say -
+reconvergence is a long way off, and the single-exit region is most of the
+function or does not exist at all. For those a second candidate is built from
+everything the block *dominates*, which is single-entry whatever its shape, and
+is reported with several stops for `/function/parent-view` to give exit codes to.
+That costs the parent a switch to read, so each boundary past the first counts
+against the score and such a region has to be a distinctly better unit to be
+proposed at all: on a 40KB parent one of 47 plan entries was multi-exit. Set
+`max_exits:1` to leave them out entirely.
+
+Regions sharing an exit are the same split proposed a block or two apart, so only
+the widest of each such chain is reported. Metrowerks and similar compilers reach
+distant labels through one-instruction jump islands parked at the end of the
+function; those are spliced out of the graph, so a short backward branch is not
+reported as a 38KB span and an island is never offered as a start.
 
 Parameters:
 
 - `function` (alias `addr`) - required exact function name or contained address
-- `named_labels_as_starts` - optional Boolean, default `false`
-- `min_blocks` - optional integer from 2 through 100, default `5`
-- `max_blocks` - optional integer from `min_blocks` through 500, default `500`
-- `max_depth` - optional integer from 0 through 50, default `3`
+- `max_regions` - optional integer from 1 through 500, default `500`; a cap on
+  plan length, off by default because raising it only appends
+- `min_score` - optional number, default `0.35`; the quality floor for the plan,
+  and the setting that actually decides how much is proposed. Lowering it trades
+  coherence for coverage, with diminishing returns: on a 40KB parent `0.35` gives
+  48 regions over 70% of the function and `0` gives 67 over 81%
+- `max_exits` - optional integer from 1 through 8, default `3`; `1` proposes only
+  regions with a single continuation
+- `alternatives` - optional Boolean, default `true`
+- `named_labels_as_starts` - optional Boolean, default `true`; also consider
+  blocks carrying a non-dynamic primary label, not only branch and merge points
+- `min_blocks` - optional integer from 2 through 100, default `4`
+- `min_bytes` - optional integer, default `96`
+- `max_blocks` - optional integer from `min_blocks` through 5000, default `500`,
+  matching what a view will accept
+- `max_depth` - optional integer from 0 through 50, default `2`; how many
+  alternatives to list
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8166/function/synthetic-suggestions" \
