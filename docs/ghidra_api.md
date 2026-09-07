@@ -214,6 +214,12 @@ in several returns the reader cannot tell apart. Control it with `exits`:
 A data live-out is not lost when the exit code takes the return, only unreturned:
 it still shows in `output_candidates`, and `exits:"off"` returns it instead.
 
+The exit code returns in the ABI return register, so a region that also leaves a
+call result there shows a `scratch_<reg>` local. That is the register's entry
+value, not a parameter the recovery missed: a call's return register counts as
+clobbered, and passing it in would hand the region whatever happened to be
+there.
+
 Known limits: only one live-out becomes the return, so a region producing two
 values silently drops the second; stack live-outs are detected but never selected
 automatically; and a value left in the return register by the region's last call
