@@ -725,15 +725,17 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   }
 
   // ---- Opening gates (mirrors 0x0047e470) ---------------------------------
+  // Ship faction and class inherent-govt fields are zero-based def indexes.
   const Government *govt =
       target.faction_or_government_id != -1
-          ? state.scenario.Government(target.faction_or_government_id)
+          ? state.scenario.GovernmentByIndex(target.faction_or_government_id)
           : nullptr;
   const ShipClass *ship_class = state.scenario.Ship(
       static_cast<std::int16_t>(target.ship_class_id + 0x80));
   const Government *class_govt =
       ship_class != nullptr && ship_class->inherent_attributes_govt != -1
-          ? state.scenario.Government(ship_class->inherent_attributes_govt)
+          ? state.scenario.GovernmentByIndex(
+                ship_class->inherent_attributes_govt)
           : nullptr;
 
   // bribe-offered latch (g_travel_interaction_bribe_offered): faction-less
@@ -1000,8 +1002,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       // The ship is already busy with something: "I'm busy." / "Sorry sir, I
       // can't do that." (escorts), or "Okay, I'm on my way." when it is
       // braking onto the player in state 0x09/0x0F.
-      if (!NovaAiShip_IsShipBrakingOnPlayerState9(state, target) &&
-          !NovaAiShip_IsShipBrakingOnPlayerState0xF(state, target)) {
+      if (!NovaAiShip_IsShipAssistingPlayerState9(state, target) &&
+          !NovaAiShip_IsShipAssistingPlayerState0xF(state, target)) {
         status =
             target.ai_behavior_code < 5
                 ? LoadCommPrompt(random_index, kMsgImBusy).value_or(status)
@@ -1029,9 +1031,9 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
           if (outcome == BribeOutcome::kPaid) {
             status = LoadCommPrompt(random_index, kMsgOnMyWay).value_or(status);
             if (NovaAiShip_IsDisabled(state, state.player)) {
-              NovaAi_EnterState0FTargetPlayerAndBrake(target);
+              NovaAi_EnterState0FTargetPlayerForAssist(target);
             } else {
-              NovaAi_EnterState9TargetPlayerAndBrake(target);
+              NovaAi_EnterState9TargetPlayerForAssist(target);
             }
           } else if (outcome == BribeOutcome::kRefused) {
             status =

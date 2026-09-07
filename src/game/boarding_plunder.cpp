@@ -376,7 +376,7 @@ BoardingPlunderOptions NovaBoarding_BuildOptions(GameState &state) {
   // be captured.
   if (target.faction_or_government_id != -1) {
     if (const Government *govt =
-            state.scenario.Government(target.faction_or_government_id);
+            state.scenario.GovernmentByIndex(target.faction_or_government_id);
         govt != nullptr && (govt->flags_primary & 0x800U) != 0U) {
       options.capture_odds_percent = 0;
     }
@@ -1848,8 +1848,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
       Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
       // Derelict-government ships can never be captured (the roll becomes -1).
       if (target.faction_or_government_id != -1) {
-        if (const Government *g =
-                state.scenario.Government(target.faction_or_government_id);
+        if (const Government *g = state.scenario.GovernmentByIndex(
+                target.faction_or_government_id);
             g != nullptr && (g->flags_primary & 0x800U) != 0U) {
           options.capture_odds_percent = -1;
         }

@@ -321,15 +321,16 @@ void NovaAi_UpdateAssistResponseBehavior(GameState &state,
 NovaAiShip_IsShipEligibleForCommAidInteraction(const GameState &state,
                                                const Ship &ship);
 
-// Ghidra 0x0040fca0 / 0x0040fce0. True when the ship is braking/throttled
-// while locked onto the player in AI state 0x09 (escort-pursue) / 0x0F
-// (pursue-with-restrictions). Gates the ship-comm dialog's "on my way" vs
-// "I'm busy" prompt pick.
+// Ghidra 0x0040fca0 / 0x0040fce0 Ship_IsShipAssistingPlayerInAiState0x09/0x0F.
+// True when an active, non-disabled ship targets the player in the assist
+// states 9 / 0xf (entered from the comm-window Request Assistance / Beg For
+// Mercy action). Gates the ship-comm dialog's "on my way" vs "I'm busy"
+// prompt pick and re-requesting assistance from a ship already helping.
 [[nodiscard]] bool
-NovaAiShip_IsShipBrakingOnPlayerState9(const GameState &state,
+NovaAiShip_IsShipAssistingPlayerState9(const GameState &state,
                                        const Ship &ship);
 [[nodiscard]] bool
-NovaAiShip_IsShipBrakingOnPlayerState0xF(const GameState &state,
+NovaAiShip_IsShipAssistingPlayerState0xF(const GameState &state,
                                          const Ship &ship);
 
 // Ghidra 0x004102b0 Ship_IsShipLockedOnAttackerInAiState0x04. True when the
@@ -389,15 +390,18 @@ NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state);
 [[nodiscard]] bool NovaAiShip_HasIncomingDistressSupport(
     const GameState &state, const Ship &ship, const Ship &context_ship);
 
-// Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerAndBrake. Enters AI
+// Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerForAssist. Enters AI
 // state 0x09 targeting the player, resets hostility/hold-timer/control, and
-// sets ai_maneuver_timer_ms -1 (coast through reversal). Called when the hail
-// target agrees to come to the player's aid.
-void NovaAi_EnterState9TargetPlayerAndBrake(Ship &ship);
+// sets ai_maneuver_timer_ms to -1 (keeps the state machine live and arms the
+// mode-0xf arrival resolution). Called from the comm window when the hail
+// target agrees to come to a non-disabled player's aid (combat assist).
+void NovaAi_EnterState9TargetPlayerForAssist(Ship &ship);
 
-// Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerAndBrake. Same as
-// the 0x09 entry but for disabled ships (state 0x0F).
-void NovaAi_EnterState0FTargetPlayerAndBrake(Ship &ship);
+// Ghidra 0x00410c70 Ship_EnterShipAiState0x0F_TargetPlayerForAssist. Same as
+// the 0x09 entry but for a disabled player (state 0x0F, the assist/hover
+// approach: the helper velocity-matches and repairs the player back above the
+// disable threshold via the mode-0xf within-3px arm in NovaAi_ApplyControls).
+void NovaAi_EnterState0FTargetPlayerForAssist(Ship &ship);
 
 // Ghidra 0x00410b00 Ship_EnterShipAiState0x04_TargetRandomUnengagedShip.
 // Counts same-system ships that are not disabled, not destroyed, hold

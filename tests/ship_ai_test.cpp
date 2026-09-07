@@ -1029,3 +1029,205 @@ TEST_CASE("state 2 special departure classes skip the outward brake") {
 
   CHECK(ship.ai_control_mode == 4);
 }
+
+namespace {
+
+// First ship-class index matching a predicate over the loaded stock scenario.
+[[nodiscard]] int FindClassIndex(const game::GameState &state,
+                                 const auto &pred) {
+  for (std::size_t i = 0; i < state.scenario.ships.size(); ++i) {
+    if (pred(state.scenario.ships[i])) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+} // namespace
+
+// End-to-end capture-approach drive (Ghidra 0x004038b0 supervisor -> 0x00405590
+// state 0xd -> 0x00408150 mode 0xf -> Outfit_BoardShipAndTransferCargo): a
+// behavior-3 plunderer of a flags_primary 0x1000 government acquires a
+// disabled low-AI victim, latches it inside 3 px and arms the 100..179-tick
+// boarding pause, then hands off to the boarding resolution. The capture
+// conversion roll is forced through state.cheat_mode_active so the victim's
+// escort-conversion post-conditions are deterministic.
+TEST_CASE("capture-approach drive boards a disabled ship end-to-end",
+          "[ai][boarding]") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.cheat_mode_active = true;
+
+  // Plunderer government: first with the Bible "warships will plunder non-
+  // mission, trader-type enemies" flag; if stock data carries none, arm it on
+  // govt 0 (test-only scenario mutation).
+  std::size_t govt_idx = state.scenario.governments.size();
+  for (std::size_t i = 0; i < state.scenario.governments.size(); ++i) {
+    if ((state.scenario.governments[i].flags_primary & 0x1000U) != 0U) {
+      govt_idx = i;
+      break;
+    }
+  }
+  if (govt_idx == state.scenario.governments.size()) {
+    govt_idx = 0;
+    state.scenario.governments[0].flags_primary |= 0x1000U;
+  }
+  const auto govt_id = static_cast<std::int16_t>(govt_idx);
+
+  // Boarder class without sprite flag 2 (the port's provisional heavy-AI
+  // cadence gate then runs the supervisor every tick) and with a moderate
+  // maneuver rating, so the state-0xd keep-away range (10 - turn*0.1)*30
+  // stays positive and wide.
+  const int boarder_class = FindClassIndex(state, [](const game::ShipClass &c) {
+    return (c.sprite_behavior_flags & 2U) == 0U && c.turn_rate > 0.0F &&
+           c.turn_rate < 60.0F;
+  });
+  REQUIRE(boarder_class >= 0);
+  // A free-energy armed bank keeps Weapon_ClassifyShipWeaponAmmoReadiness off
+  // the stand-down arm (readiness 2 resets states 4/0xd).
+  int free_energy_bank = -1;
+  for (std::size_t w = 0; w < state.scenario.weapons.size(); ++w) {
+    if (state.scenario.weapons[w].ammo_type >= -1000 &&
+        state.scenario.weapons[w].ammo_type <= -1) {
+      free_energy_bank = static_cast<int>(w);
+      break;
+    }
+  }
+  REQUIRE(free_energy_bank >= 0);
+
+  // Victim class: low default AI (boardable "capturable kind") with capture
+  // power (crew > 0) and enough armor to sit clearly under the 1/3 disable
+  // threshold when crippled.
+  const int victim_class = FindClassIndex(state, [](const game::ShipClass &c) {
+    return c.default_ai_behavior < 3 && c.crew > 0 && c.base_armor >= 30;
+  });
+  REQUIRE(victim_class >= 0);
+
+  const int boarder_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(boarder_slot > 0);
+  game::Ship &boarder = state.ShipAt(static_cast<std::size_t>(boarder_slot));
+  boarder.ship_class_id = static_cast<std::int16_t>(boarder_class);
+  boarder.faction_or_government_id = govt_id;
+  boarder.ai_behavior_code = 3;
+  boarder.armor_points = static_cast<float>(
+      state.scenario.ships[static_cast<std::size_t>(boarder_class)].base_armor);
+  boarder.npc_weapon_bank_ammo[static_cast<std::size_t>(free_energy_bank)] = 1;
+  boarder.pos_x = 0.0F; // override the allocator's spawn scatter
+  boarder.pos_y = 0.0F;
+
+  const int victim_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(victim_slot > 0);
+  game::Ship &victim = state.ShipAt(static_cast<std::size_t>(victim_slot));
+  victim.ship_class_id = static_cast<std::int16_t>(victim_class);
+  victim.faction_or_government_id = -1;
+  victim.pos_x = 2.0F; // within 3 px: the mode-0xf arm fires on arrival
+  victim.pos_y = 0.0F;
+  victim.armor_points = static_cast<float>(
+      state.scenario.ships[static_cast<std::size_t>(victim_class)].base_armor /
+      10);
+  REQUIRE(game::NovaAiShip_IsDisabled(state, victim));
+
+  bool handed_off = false;
+  std::uint32_t now_ms = 0;
+  for (int t = 0; t < 600 && !handed_off; ++t) {
+    game::NovaAi_UpdateShipAI(state, boarder, /*skip_heavy_ai=*/false, now_ms);
+    now_ms += 33;
+    if (t == 5) {
+      // Mid-approach: victim latched, boarding pause armed, velocity-match
+      // hold (control 0xf) active.
+      CHECK(victim.boarded_target_latch == 1);
+      CHECK(boarder.ai_maneuver_timer_ms > 0.0F);
+      CHECK(boarder.ai_maneuver_timer_ms <= 179.0F);
+      CHECK(boarder.ai_control_mode == 0xf);
+    }
+    if (boarder.ai_state_code == 0xe &&
+        boarder.ai_maneuver_timer_ms == 100.0F) {
+      handed_off = true; // the supervisor's boarding handoff just fired
+    }
+    // Ship_HandleShip's coast-timer countdown (spaceflight.cpp).
+    boarder.ai_maneuver_timer_ms =
+        std::max(0.0F, boarder.ai_maneuver_timer_ms - 1.0F);
+  }
+  REQUIRE(handed_off);
+
+  // Conversion post-conditions (cheat-forced): the victim becomes a
+  // behavior-6 follower of the boarder at 66% armor with dropped shields.
+  const auto &vcls =
+      state.scenario.ships[static_cast<std::size_t>(victim_class)];
+  CHECK(victim.ai_behavior_code == 6);
+  CHECK(victim.faction_or_government_id == govt_id);
+  CHECK(victim.squad_leader_ship_slot == boarder.ship_instance_id);
+  CHECK(victim.boarded_target_latch == 0);
+  CHECK(victim.shield_points == 0.0F);
+  CHECK(
+      victim.armor_points ==
+      Catch::Approx(static_cast<float>(vcls.base_armor) * 0.66F).margin(0.5F));
+  CHECK(!game::NovaAiShip_IsDisabled(state, victim));
+}
+
+// End-to-end assist approach (Ghidra 0x00410c70 entry -> 0x00405590 state 0xf
+// -> 0x00408150 mode 0xf): a hailed helper targeting a disabled player
+// velocity-matches, latches the player on arrival, then the assist arm clears
+// the latch and repairs the player back above the disable threshold before
+// leaving state 0xf.
+TEST_CASE("hailed helper repairs a disabled player via assist state 0xf",
+          "[ai][boarding]") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int player_class = FindClassIndex(state, [](const game::ShipClass &c) {
+    return c.base_armor >= 30 && (c.capability_flags & 0x10U) == 0U;
+  });
+  REQUIRE(player_class >= 0);
+  const float player_max_armor = static_cast<float>(
+      state.scenario.ships[static_cast<std::size_t>(player_class)].base_armor);
+
+  game::Ship &player = state.player;
+  player.is_active = true;
+  player.ship_class_id = static_cast<std::int16_t>(player_class);
+  player.armor_points = 1.0F; // well under the 1/3 disable threshold
+  REQUIRE(game::NovaAiShip_IsDisabled(state, player));
+
+  const int helper_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(helper_slot > 0);
+  game::Ship &helper = state.ShipAt(static_cast<std::size_t>(helper_slot));
+  helper.ship_class_id = static_cast<std::int16_t>(player_class);
+  helper.armor_points = player_max_armor; // helper itself fully operational
+  helper.pos_x = 2.0F;
+  helper.pos_y = 2.0F; // within 3 px: the arrival arm fires immediately
+  game::NovaAi_EnterState0FTargetPlayerForAssist(helper);
+  CHECK(helper.ai_state_code == 0xf);
+  CHECK(helper.ai_maneuver_timer_ms == -1.0F);
+
+  bool saw_assist_approach = false;
+  bool saw_player_latched = false;
+  bool saw_helper_released = false;
+  std::uint32_t now_ms = 0;
+  for (int t = 0; t < 1200; ++t) {
+    game::NovaAi_UpdateShipAI(state, helper, /*skip_heavy_ai=*/false, now_ms);
+    now_ms += 33;
+    if (helper.ai_state_code == 0xf && helper.ai_secondary_target_slot == 0) {
+      saw_assist_approach = true;
+    }
+    if (player.boarded_target_latch == 1) {
+      // The arrival arm latches the player before the assist arm clears it.
+      saw_player_latched = true;
+    }
+    if (!game::NovaAiShip_IsDisabled(state, player) &&
+        helper.ai_state_code == 0 && helper.ai_control_mode == 0 &&
+        helper.primary_target_ship_slot == -1) {
+      saw_helper_released = true;
+      break;
+    }
+    helper.ai_maneuver_timer_ms =
+        std::max(0.0F, helper.ai_maneuver_timer_ms - 1.0F);
+  }
+  CHECK(saw_assist_approach);
+  CHECK(saw_player_latched);
+  CHECK(saw_helper_released);
+
+  CHECK(!game::NovaAiShip_IsDisabled(state, player));
+  CHECK(player.armor_points >= player_max_armor / 3.0F);
+  CHECK(player.boarded_target_latch == 0);
+  CHECK(helper.primary_target_ship_slot == -1);
+}

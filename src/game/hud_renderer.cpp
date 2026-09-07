@@ -61,7 +61,7 @@ constexpr std::int16_t kDefaultInterfaceId = 0x80;
     if (gov == -1) {
       gov = cls.inherent_combat_govt;
     }
-    const Government *g = state.scenario.Government(gov);
+    const Government *g = state.scenario.GovernmentByIndex(gov);
     if (g && g->interface_id >= 0x80) {
       return g->interface_id;
     }
