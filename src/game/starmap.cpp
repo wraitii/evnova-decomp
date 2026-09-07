@@ -483,10 +483,9 @@ using NebulaTiers = std::array<NebulaTier, 7>;
 // DAT_007dc745 briefing-map latch only controls that selection clears the
 // mission-target override — it does not gate the green arrow, which draws in
 // the plain flight map too).
-struct MarkerIcons {
-  std::unique_ptr<SdlTexture> mission_target; // CICN 0x3a98
-  std::unique_ptr<SdlTexture> selected_arrow; // CICN 0x3a99
-};
+// (NovaStarmap_MarkerIcons lives in starmap.hpp so the route-map overlay can
+// share the loaded CICN textures.)
+using MarkerIcons = NovaStarmap_MarkerIcons;
 
 std::unique_ptr<SdlTexture> LoadCicnTexture(SdlPlatform &platform,
                                             std::uint16_t resource_id) {
@@ -503,10 +502,7 @@ std::unique_ptr<SdlTexture> LoadCicnTexture(SdlPlatform &platform,
 }
 
 MarkerIcons LoadMarkerIcons(SdlPlatform &platform) {
-  MarkerIcons icons;
-  icons.mission_target = LoadCicnTexture(platform, 0x3a98);
-  icons.selected_arrow = LoadCicnTexture(platform, 0x3a99);
-  return icons;
+  return NovaStarmap_LoadMarkerIcons(platform);
 }
 
 // Resolves the starmap window + panes + button row from the DLOG 0x7d0 /
@@ -672,9 +668,11 @@ void DrawRule(SDL_Renderer *renderer, float x0, float x1, float y) {
 // draws eight independent SetCursorPos/DrawLineTo pairs, so the result is a
 // partial square (corner brackets with gaps at the edge midpoints), never a
 // cross inside.
-void DrawReticle(SDL_Renderer *renderer, float cx, float cy, float half) {
+void DrawReticle(SDL_Renderer *renderer, float cx, float cy, float half,
+                 float alpha = 1.0F) {
   SDL_SetRenderDrawColor(
-      renderer, kRouteGreen.r, kRouteGreen.g, kRouteGreen.b, SDL_ALPHA_OPAQUE);
+      renderer, kRouteGreen.r, kRouteGreen.g, kRouteGreen.b,
+      static_cast<std::uint8_t>(static_cast<float>(SDL_ALPHA_OPAQUE) * alpha));
   const float l = cx - half;
   const float r = cx + half;
   const float t = cy - half;
@@ -1064,10 +1062,19 @@ void DrawGalaxy(SdlPlatform &platform,
                 std::int16_t selected_id,
                 const PoliticalOverlay *overlay,
                 const std::vector<std::int16_t> &mission_targets,
-                const MarkerIcons &icons) {
+                const MarkerIcons &icons,
+                float alpha = 1.0F) {
   const auto &systems = state.scenario.systems;
   const std::int16_t current = state.player.current_system_id;
   SDL_Renderer *renderer = platform.renderer();
+  // Route-map overlay fade (Ghidra 0x00439bd0 blit tint): multiplies every
+  // element colour; 1.0 = the opaque starmap-window rendering.
+  const auto tint = [alpha](SDL_Color c) {
+    if (alpha < 1.0F) {
+      c.a = static_cast<std::uint8_t>(static_cast<float>(c.a) * alpha);
+    }
+    return c;
+  };
 
   const SDL_Rect clip{static_cast<int>(geometry.map.x),
                       static_cast<int>(geometry.map.y),
@@ -1105,7 +1112,7 @@ void DrawGalaxy(SdlPlatform &platform,
                     SDL_FPoint{ma->sx, ma->sy},
                     SDL_FPoint{mb->sx, mb->sy},
                     2.0F,
-                    kRouteGreen);
+                    tint(kRouteGreen));
     }
   }
 
@@ -1126,7 +1133,7 @@ void DrawGalaxy(SdlPlatform &platform,
                   SDL_FPoint{ma->sx, ma->sy},
                   SDL_FPoint{mb->sx, mb->sy},
                   1.0F,
-                  color);
+                  tint(color));
   };
   for (std::size_t i = 0; i < systems.size(); ++i) {
     const System &sys = systems[i];
@@ -1227,12 +1234,12 @@ void DrawGalaxy(SdlPlatform &platform,
       continue;
     }
     const float r = marker_inset;
-    DrawDisc(renderer, m.sx, m.sy, r, kColorBlack);
+    DrawDisc(renderer, m.sx, m.sy, r, tint(kColorBlack));
     DrawRing(renderer,
              m.sx,
              m.sy,
              r,
-             StellarDisplayColor(state, m.zero_based_id),
+             tint(StellarDisplayColor(state, m.zero_based_id)),
              static_cast<double>(view.zoom) < kZoomInLimit ? 2.0F : 1.0F);
 
     // Mission-target arrow (CICN 0x3a98): a 16px box up-left of the marker
@@ -1245,10 +1252,14 @@ void DrawGalaxy(SdlPlatform &platform,
     // dropping the marker entirely.
     if (is_mission_target && !is_selected && icons.mission_target) {
       const SDL_FRect dst{m.sx - r - 16.0F, m.sy - r - 16.0F, 16.0F, 16.0F};
+      SDL_SetTextureAlphaMod(icons.mission_target->get(),
+                             static_cast<std::uint8_t>(255.0F * alpha));
       SDL_RenderTexture(renderer, icons.mission_target->get(), nullptr, &dst);
     }
     if (is_selected && icons.selected_arrow) {
       const SDL_FRect dst{m.sx + r, m.sy - r - 16.0F, 16.0F, 16.0F};
+      SDL_SetTextureAlphaMod(icons.selected_arrow->get(),
+                             static_cast<std::uint8_t>(255.0F * alpha));
       SDL_RenderTexture(renderer, icons.selected_arrow->get(), nullptr, &dst);
     }
   }
@@ -1256,7 +1267,7 @@ void DrawGalaxy(SdlPlatform &platform,
   // The current system's small cyan dot (drawn after the whole marker loop).
   if (const MappedSystem *cur = find_mapped(current);
       cur != nullptr && current >= 0) {
-    DrawDisc(renderer, cur->sx, cur->sy, dot_inset, kColorCyan);
+    DrawDisc(renderer, cur->sx, cur->sy, dot_inset, tint(kColorCyan));
   }
 
   // Selection reticle (green corner ticks around the -8 rect).
@@ -1264,7 +1275,7 @@ void DrawGalaxy(SdlPlatform &platform,
     const float half = static_cast<double>(view.zoom) < kZoomInLimit
                            ? kReticleInsetZoomedIn
                            : kReticleInset;
-    DrawReticle(renderer, sel->sx, sel->sy, half);
+    DrawReticle(renderer, sel->sx, sel->sy, half, alpha);
   }
 
   // Labels (label pass of 0x004a8100): white, offset (+7, +4) from the marker
@@ -1285,7 +1296,7 @@ void DrawGalaxy(SdlPlatform &platform,
                   NovaFontFamily::kGeneva,
                   10.0F,
                   kNovaFontStyleRegular,
-                  kColorWhite,
+                  tint(kColorWhite),
                   m.sx + kLabelOffsetX,
                   m.sy + kLabelOffsetY,
                   systems[static_cast<std::size_t>(m.zero_based_id)].name);
@@ -1477,6 +1488,7 @@ void DrawTextAt(SdlPlatform &platform,
 }
 
 } // namespace
+
 
 // The right-hand detail column (DITL item 5 / entry 6) and the bottom status
 // bar (DITL item 1 / entry 2), reproducing NovaUi_RedrawStarmapWindow's
@@ -1982,6 +1994,77 @@ std::vector<std::int16_t> BuildMissionTargetSystems(const GameState &state) {
 }
 
 } // namespace
+
+// Ghidra 0x004a99f0 Ui_DrawSystemRouteMap draw pass (see starmap.hpp). The
+// original re-renders NovaUi_DrawStarmapRoutesAndMarkers into a dedicated
+// square surface with g_starmap_pan_origin swapped to the current system and
+// g_starmap_zoom swapped to g_route_map_zoom_scale; the port projects
+// directly with a temporary MapView. Background fill + border stand in for
+// the unresolved PTR_DAT_00575acc / DAT_00735658 colours (TODO(decomp)).
+void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
+                                   NovaFontCache &font_cache,
+                                   const GameState &state,
+                                   const SDL_FRect &rect,
+                                   float zoom,
+                                   std::int16_t selected_id,
+                                   float alpha,
+                                   const NovaStarmap_MarkerIcons &icons) {
+  if (state.scenario.systems.empty() || rect.w <= 0.0F || rect.h <= 0.0F) {
+    return;
+  }
+  SDL_Renderer *renderer = platform.renderer();
+  const std::int16_t current_id = state.player.current_system_id;
+  if (current_id < 0 ||
+      static_cast<std::size_t>(current_id) >= state.scenario.systems.size()) {
+    return;
+  }
+  const System &current = state.scenario.systems[static_cast<std::size_t>(current_id)];
+  const MapView view{zoom, static_cast<float>(current.pos_x),
+                     static_cast<float>(current.pos_y)};
+  StarmapGeometry geometry{};
+  geometry.map = rect;
+
+  // Fill (DrawContext_FillRect16 at 0x004a9a2a): the same per-system space
+  // background colour the gameplay surface is cleared with
+  // (NovaRender_SetSystemSpaceBackgroundColor, PTR_DAT_00575acc -> the
+  // surface at 0x0085f6e8), so the opaque overlay blends with space while
+  // hiding the world behind it. Border DAT_00735658 is a scenario-derived UI
+  // colour (loader byte at def+0x8a, 0x004c686e); grey stand-in (TODO(decomp)).
+  const auto *cur_def =
+      state.scenario.System(static_cast<std::int16_t>(current_id + 0x80));
+  const std::uint32_t bg = cur_def ? cur_def->bkgnd_color : 0;
+  SDL_SetRenderDrawColor(renderer,
+                         static_cast<std::uint8_t>((bg >> 16) & 0xff),
+                         static_cast<std::uint8_t>((bg >> 8) & 0xff),
+                         static_cast<std::uint8_t>(bg & 0xff),
+                         SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &rect);
+
+  const auto mapped = BuildMappedSystems(state, view, rect);
+  const std::vector<std::int16_t> mission_targets =
+      BuildMissionTargetSystems(state);
+  DrawGalaxy(platform,
+             font_cache,
+             state,
+             mapped,
+             view,
+             geometry,
+             selected_id,
+             /*overlay=*/nullptr,
+             mission_targets,
+             icons,
+             alpha);
+
+  SDL_SetRenderDrawColor(renderer, 96, 96, 96, 255);
+  SDL_RenderRect(renderer, &rect);
+}
+
+NovaStarmap_MarkerIcons NovaStarmap_LoadMarkerIcons(SdlPlatform &platform) {
+  NovaStarmap_MarkerIcons icons;
+  icons.mission_target = LoadCicnTexture(platform, 0x3a98);
+  icons.selected_arrow = LoadCicnTexture(platform, 0x3a99);
+  return icons;
+}
 
 // ---------------------------------------------------------------------------
 // Ghidra 0x004a3aa0 NovaUi_RunStarmapWindow (clean-room modal loop).
