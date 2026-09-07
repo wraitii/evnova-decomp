@@ -556,6 +556,108 @@ bool NovaWeapon_HasLoadedLaunchBayAmmo(const GameState &state,
 
 namespace {
 
+// Shared predicate of Weapon_HasLaunchBayWeapon (0x00464520) and
+// Weapon_FindLaunchBayWeaponBank (0x00464600): a bank is a loaded launch bay
+// when its def is mode 99, the bank's mounted counter is > 0, and the carried
+// ship class (ammo_type) sets capability Flags 0x8000 (Bible: escape-ship
+// type). The original indexes g_ship_class_defs[ammo_type - 0x80] without a
+// range check; scenario.Ship() returning nullptr for bad ids is the safe
+// superset (mode-99 weapons always carry a valid class id).
+constexpr std::int16_t kBayWeaponModeCode = 99;
+constexpr std::uint16_t kEscapeShipClassFlag = 0x8000;
+
+[[nodiscard]] bool IsLoadedLaunchBayBank(const GameState &state,
+                                         const Ship &ship,
+                                         std::int16_t bank) {
+  const Weapon *def = WeaponAt(state, bank);
+  if (def == nullptr || def->weapon_mode_code != kBayWeaponModeCode) {
+    return false;
+  }
+  const bool is_player = ship.ship_instance_id == 0;
+  const std::int16_t mounted =
+      is_player ? BankAmmo(state, bank)
+                : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+  if (mounted < 1) {
+    return false;
+  }
+  const ShipClass *carried = state.scenario.Ship(def->ammo_type);
+  return carried != nullptr &&
+         (carried->capability_flags & kEscapeShipClassFlag) != 0;
+}
+
+} // namespace
+
+// Ghidra 0x00464520 Weapon_HasLaunchBayWeapon (disasm 0x00464520..0x0046458e):
+// true when any of the ship's 0x100 banks is a loaded launch bay
+// (IsLoadedLaunchBayBank). Reads the bank's MOUNTED counter, not the loaded
+// secondary, so a stocked-but-unloaded bay still counts. Gates the eject
+// transform (Outfit_HasEscapePodOrLaunchBay 0x004644a0) and ship handling.
+bool NovaWeapon_HasLaunchBayWeapon(const GameState &state, const Ship &ship) {
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    if (IsLoadedLaunchBayBank(state, ship, bank)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ghidra 0x00464600 Weapon_FindLaunchBayWeaponBank (disasm
+// 0x00464600..0x0046466e): the first loaded launch-bay bank, or -1.
+// Called from Ship_HandleShip for carrier-bay launches.
+std::int16_t NovaWeapon_FindLaunchBayWeaponBank(const GameState &state,
+                                                const Ship &ship) {
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    if (IsLoadedLaunchBayBank(state, ship, bank)) {
+      return bank;
+    }
+  }
+  return -1;
+}
+
+// Ghidra 0x00415C10 Weapon_HasAnyFireableNonSecondaryWeapon (disasm
+// 0x00415c10..0x00415cb2): true when some bank with mounted ammo > 0 holds a
+// damaging (MassDmg > 0), non-secondary (Flags2 0x1000 clear) weapon in a
+// straight-flight mode the AI can drive (-1/0/3/4/6/7/8 -- the original's
+// (mode - 6) < 3 unsigned test includes 6, 7 and 8) that also passes
+// Weapon_CanFireWeaponBank (0x00468990).
+bool NovaWeapon_HasAnyFireableNonSecondaryWeapon(const GameState &state,
+                                                 const Ship &ship) {
+  const bool is_player = ship.ship_instance_id == 0;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const std::int16_t mounted =
+        is_player ? BankAmmo(state, bank)
+                  : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+    if (mounted <= 0) {
+      continue;
+    }
+    const Weapon *def = WeaponAt(state, bank);
+    if (def == nullptr || def->mass_damage <= 0) {
+      continue;
+    }
+    if ((def->flags_secondary & 0x1000) != 0) {
+      continue;
+    }
+    switch (def->weapon_mode_code) {
+    case -1:
+    case 0:
+    case 3:
+    case 4:
+    case 6:
+    case 7:
+    case 8:
+      break;
+    default:
+      continue;
+    }
+    if (NovaWeapon_CanFireWeaponBank(state, ship, bank)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+namespace {
+
 // The FISTP(nearest-even) + signed/unsigned backoff idiom used by the range
 // functions (disasm 0x0046cfe1..0x0046d01f): nets to floor() for value >= 0
 // and to ceil() for value < 0. Range data is non-negative, so this is

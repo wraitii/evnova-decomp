@@ -105,6 +105,26 @@ NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,
 [[nodiscard]] bool NovaWeapon_HasLoadedLaunchBayAmmo(const GameState &state,
                                                      const Ship &ship);
 
+// Ghidra 0x00464520 Weapon_HasLaunchBayWeapon: true when any of the ship's
+// banks is a mode-99 bay weapon with mounted ammo > 0 whose carried ship
+// class (ammo_type) sets capability Flags 0x8000 (escape-ship type). Reads
+// the mounted counter, not the loaded secondary.
+[[nodiscard]] bool NovaWeapon_HasLaunchBayWeapon(const GameState &state,
+                                                 const Ship &ship);
+
+// Ghidra 0x00464600 Weapon_FindLaunchBayWeaponBank: the first loaded
+// launch-bay bank (same predicate as NovaWeapon_HasLaunchBayWeapon), or -1.
+[[nodiscard]] std::int16_t
+NovaWeapon_FindLaunchBayWeaponBank(const GameState &state, const Ship &ship);
+
+// Ghidra 0x00415C10 Weapon_HasAnyFireableNonSecondaryWeapon: true when some
+// bank with mounted ammo > 0 holds a damaging, non-secondary (Flags2 0x1000
+// clear) weapon in a straight-flight mode (-1/0/3/4/6/7/8) that passes
+// NovaWeapon_CanFireWeaponBank.
+[[nodiscard]] bool
+NovaWeapon_HasAnyFireableNonSecondaryWeapon(const GameState &state,
+                                            const Ship &ship);
+
 // Ghidra 0x0046CEC0 Weapon_GetShipMaxWeaponRange: the furthest effective
 // reach over the ship's armed (bank ammo > 0), fireable
 // (NovaWeapon_CanFireWeaponBank) banks. Reach per weapon mode: 0/3 =
