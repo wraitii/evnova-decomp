@@ -66,6 +66,28 @@ void NovaWeapon_ClearTransientCombatState(GameState &state);
 // the player ship and when the cached loadout already matches the class.
 void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
 
+// Ghidra 0x004138a0 Weapon_ClassifyShipWeaponAmmoReadiness. Classifies the
+// NPC ship's armed weapon banks into three readiness buckets:
+//   2 = no armed banks, or every armed bank is depleted;
+//   1 = armed banks exist and every usable (cost-bearing) bank is depleted;
+//   0 = at least one armed bank is ready.
+// A bank is armed when npc_weapon_bank_ammo > 0. Its def's ammo_type
+// (ammo_or_energy_cost_code) classifies it: >= 0 secondary-ammo (ready while
+// npc_weapon_bank_secondary > 0); < -1000 fuel weapon (ready while fuel_points
+// is STRICTLY greater than |cost| - 1000, equality counts depleted); [-1000,-1]
+// free-energy (armed, never depleted).
+[[nodiscard]] int NovaWeapon_ClassifyAmmoReadiness(const GameState &state,
+                                                   const Ship &ship);
+
+// Ghidra 0x00411600 Weapon_IsShipWithinWeaponRangeOfTarget, slot == -1 arm:
+// true when any stock-armed class weapon bank (default ammo count > 0,
+// weapon_mode_code < 9) reaches `target` with the envelope (BeamLength or
+// effective projectile range + 32)^2 around the rounded axis deltas. The
+// single-slot arm of the original stays inline in the AI's per-weapon helper
+// (IsTurretWeaponInTargetRange, ship_ai.cpp).
+[[nodiscard]] bool NovaWeapon_ShipWithinAnyStockWeaponRange(
+    const GameState &state, const Ship &ship, const Ship &target);
+
 // Ghidra 0x0046f2c0 Weapon_GetWeaponBurstAttempts: shots per trigger pull.
 // Non-burst weapons (flags_primary 0x40 clear) fire exactly one; burst banks
 // start from the mounted ammo count capped by the cost bank's loaded

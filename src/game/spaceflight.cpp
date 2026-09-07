@@ -503,6 +503,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     const float frame_time_ms =
         std::max(1.0F, static_cast<float>(now_ms - prev_tick_ms));
     prev_tick_ms = now_ms;
+    // Port stand-in for NovaTime_GetTickCount60Hz's g_frame_tick_count_60hz
+    // (see GameState::tick_60hz): re-derived from the wall clock each frame.
+    state.tick_60hz = static_cast<std::uint32_t>(now_ms * 60ULL / 1000ULL);
     // Player control (heading/throttle) is read here once so the ship flies
     // while the simulation stubs do not, and the same snapshot feeds the
     // travel/jump channel. Movement integrates into PlayerShip.

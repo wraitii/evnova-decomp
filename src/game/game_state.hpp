@@ -1208,6 +1208,20 @@ struct GameState {
   // phases its zig-zag off `counter % 300 < 150`; the original's shareware
   // license-check duties for this counter are not reproduced.
   std::uint32_t spaceflight_frame_counter = 0;
+  // Port stand-in for g_frame_tick_count_60hz (0x00865858, NovaTime_
+  // GetTickCount60Hz 0x004d5e10): wall-clock 1/60 s ticks. The original bumps
+  // the global from the input-helper thread once per 16.664 ms; the port
+  // re-derives it from the flight-loop frame clock (now_ms * 60 / 1000,
+  // truncated) once per frame. ai_mode_start_time_ms stamps compare against
+  // this counter.
+  std::uint32_t tick_60hz = 0;
+  // Ghidra g_target_category_command (0x007354c4, short[4]): the escort-group
+  // command the player issued per ship-class category. Initialized to -1 by
+  // Ship_InitGameplayDataTables (0x004b0c20); the player-core command dispatch
+  // (0x00450d88, unported) writes the dialog selection and resets idle
+  // categories to 0. Until that slice is ported the table stays -1, which the
+  // assist supervisor (0x004048a0) coerces to command 0 (formation).
+  std::array<std::int16_t, 4> target_category_command{{-1, -1, -1, -1}};
 
   // --- PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240) ------
   // g_player_carried_bomb_outfit_class: 0 = no carried bomb, 1 = escape-pod

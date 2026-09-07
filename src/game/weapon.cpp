@@ -78,6 +78,93 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
   ship.npc_weapon_banks_ship_class = ship.ship_class_id;
 }
 
+// Ghidra 0x004138a0 Weapon_ClassifyShipWeaponAmmoReadiness.
+int NovaWeapon_ClassifyAmmoReadiness(const GameState &state, const Ship &ship) {
+  int armed = 0;
+  int usable = 0;
+  int depleted = 0;
+  for (std::size_t bank = 0; bank < ship.npc_weapon_bank_ammo.size(); ++bank) {
+    if (ship.npc_weapon_bank_ammo[bank] <= 0) {
+      continue;
+    }
+    ++armed;
+    const Weapon *weapon = state.scenario.Weapon(
+        static_cast<std::int16_t>(static_cast<std::int16_t>(bank) + 0x80));
+    if (weapon == nullptr) {
+      // Missing defs cannot occur for stock-armed banks; the original reads
+      // the raw def table, which decodes as a free-energy weapon here.
+      continue;
+    }
+    const std::int16_t cost = weapon->ammo_type;
+    if (cost >= 0) {
+      // Secondary-ammo weapon: ready while rounds remain.
+      ++usable;
+      if (ship.npc_weapon_bank_secondary[bank] < 1) {
+        ++depleted;
+      }
+    } else if (cost < -1000) {
+      // Fuel weapon: |cost| - 1000 fuel per shot. The original's FCOMP treats
+      // fuel == required as depleted (strict > passes).
+      ++usable;
+      const float required = static_cast<float>(-cost - 1000);
+      if (!(ship.fuel_points > required)) {
+        ++depleted;
+      }
+    }
+    // cost in [-1000, -1]: free-energy; armed and never depleted.
+  }
+  if (armed == 0 || (depleted > 0 && depleted == armed)) {
+    return 2;
+  }
+  if (depleted > 0 && depleted == usable) {
+    return 1;
+  }
+  return 0;
+}
+
+// Ghidra 0x00411600 Weapon_IsShipWithinWeaponRangeOfTarget, slot == -1 arm.
+bool NovaWeapon_ShipWithinAnyStockWeaponRange(const GameState &state,
+                                              const Ship &ship,
+                                              const Ship &target) {
+  // The original rounds each absolute axis delta (round-half-away-from-zero)
+  // before squaring.
+  const float rounded_dx = static_cast<float>(std::lround(
+      std::abs(ship.pos_x - target.pos_x)));
+  const float rounded_dy = static_cast<float>(std::lround(
+      std::abs(ship.pos_y - target.pos_y)));
+  const int distance_sq =
+      static_cast<int>(rounded_dx * rounded_dx + rounded_dy * rounded_dy);
+
+  const ShipClass *cls = state.scenario.Ship(
+      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return false;
+  }
+  // Stock-armed bank lookup: the original walks g_ship_class_defs[class].
+  // default_weapon_ammo[0..0xff] > 0; the port's collapsed stock_weapons
+  // table is equivalent (one entry per armed bank).
+  for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
+    if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180 ||
+        stock.count <= 0) {
+      continue;
+    }
+    const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
+    if (weapon == nullptr || weapon->weapon_mode_code >= 9) {
+      continue;
+    }
+    const float reach =
+        (weapon->weapon_mode_code == 0 || weapon->weapon_mode_code == 3
+             ? static_cast<float>(weapon->beam_length_px)
+             : weapon->range_scalar) +
+        32.0F;
+    if (reach > 0.0F &&
+        distance_sq <= static_cast<int>(reach * reach)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 
 // The clean-room weapon banks are kept in the GameState strided arrays with the

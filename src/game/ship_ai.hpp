@@ -234,6 +234,19 @@ void NovaAi_UpdateShipAI(GameState &state,
                          std::uint32_t now_ms,
                          float elapsed_ticks = 1.0F);
 
+// Ghidra 0x004048a0 Ship_UpdateShipAssistResponseBehavior. Per-frame supervisor
+// for behavior > 4 ships: releases squads whose leader vanished, arms the
+// leader-jump-prep sync into AI state 0x0B (disengage + hold formation while
+// the leader charges a jump; gravity-shield ships detach and travel on their
+// own), validates the primary target, decodes the escort command (player
+// category table / sub-leader mirror), and runs the command arms (1 assist,
+// 2 attack, 3 return-to-hangar, 4 cease fire, 0/default formation). Deferred:
+// the government voice override and the pending-latch reset for chatter (the
+// chatter consumer pass is TODO(decomp)).
+void NovaAi_UpdateAssistResponseBehavior(GameState &state,
+                                         Ship &ship,
+                                         std::uint32_t now_ms);
+
 // ---------------------------------------------------------------------------
 // Ship-comm / hail predicates and AI state entries (added for the ship-comm
 // dialog 0x0047e470). Each maps one Ghidra function; the comm dialog branches
@@ -375,17 +388,31 @@ void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
 // 0x04 with a random combat target chosen relative to the ship's squad leader
 // (squad_leader_ship_slot, +0x9A): the player (slot 0) is admitted only while
 // the squad leader still presses its own target, other candidates when the
-// squad leader (or the candidate itself, when the squad leader is the player) would keep
-// pressing / can acquire them. Clears the primary target without a state change
-// when no candidate exists.
+// squad leader (or the candidate itself, when the squad leader is the player)
+// would keep pressing / can acquire them. Clears the primary target without a
+// state change when no candidate exists.
 void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
                                                          Ship &ship);
 
 // Ghidra 0x004106b0 Ship_EnterShipAiState0x0B_ClearTargetsSeedHold. Enters AI
 // state 0x0B with the primary target cleared; when the station-hold timer is
 // not running, seeds the 1.0-tick hold and stamps the 60 Hz mode start.
-// Called by Ship_PropagateRetreatToSquad when a squad leader retreats.
+// Called when a squad leader charges a jump: by Ship_SyncJumpStateToSquad
+// (0x00422340) and the leader-jump-prep arm of
+// Ship_UpdateShipAssistResponseBehavior (0x004048a0).
 void NovaAi_EnterStateBClearTargetsSeedHold(Ship &ship, std::uint32_t now_60hz);
+
+// Ghidra 0x00422340 Ship_SyncJumpStateToSquad. During the squad leader's
+// jump-engage hold, syncs the leader's hold clock into every active squadmate
+// without a stellar attachment: forces the -2 primary-target sentinel and
+// enters AI state 0x0B, so squadmates disengage and hold formation until the
+// jump fires. The system transfer itself happens at arrival via escort
+// adoption (System_RebuildInitialNpcAndMissionPopulation 0x0041af90), not
+// here. Slot 0 is skipped by the original scan (the player is never a
+// follower).
+void NovaAi_SyncJumpStateToSquad(GameState &state,
+                                 Ship &leader,
+                                 std::uint32_t now_60hz);
 
 // Ghidra 0x00410cb0 Ship_EnterShipAiState0x05_ReturnToSquadLeader. Clears
 // the primary target, mirrors squad_leader_ship_slot into the secondary slot,

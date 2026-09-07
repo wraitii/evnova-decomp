@@ -1135,6 +1135,12 @@ void NovaTravel_Tick(GameState &state,
       break;
     }
     case TravelState::JumpPhase::kHold: {
+      // Ghidra 0x0044c705: every tick of the engage hold opens with the squad
+      // sync (Ship_SyncJumpStateToSquad) -- escorts with no stellar attachment
+      // copy the leader's hold clock, drop their target (-2 sentinel) and
+      // enter AI state 0x0B, holding formation until the jump fires. They
+      // transfer systems at arrival via escort adoption, not here.
+      NovaAi_SyncJumpStateToSquad(state, player, state.tick_60hz);
       // Stationary alignment hold (the hold branch of the disabled
       // window, decompile around 0x0044f3d0): velocity damps by
       // g_hyperspace_slow_phase_velocity_damp (0.98007) per tick, the hull
