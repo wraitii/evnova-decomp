@@ -19,8 +19,8 @@
 #include "mission_script.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
-#include "route_map.hpp"
 #include "radar_panel.hpp"
+#include "route_map.hpp"
 #include "ship_ai.hpp"
 #include "ship_comm_dialog.hpp"
 #include "ship_spawn.hpp"
@@ -468,18 +468,17 @@ void NovaPlayer_TickTargetAndTravelCommands(GameState &state,
   const bool ship_cycle =
       input.cycle_ship_target_next || input.cycle_ship_target_previous;
   if (ship_cycle && !l.ship_cycle_was_held) {
-    const std::int16_t next =
-        input.cycle_ship_target_next
-            ? NovaTargeting_FindNextPlayerCycleTarget(
-                  state,
-                  state.player.primary_target_ship_slot,
-                  state.player.current_system_id,
-                  input.cycle_ship_include_combat)
-            : NovaTargeting_FindPreviousPlayerCycleTarget(
-                  state,
-                  state.player.primary_target_ship_slot,
-                  state.player.current_system_id,
-                  input.cycle_ship_include_combat);
+    const std::int16_t next = input.cycle_ship_target_next
+                                  ? NovaTargeting_FindNextPlayerCycleTarget(
+                                        state,
+                                        state.player.primary_target_ship_slot,
+                                        state.player.current_system_id,
+                                        input.cycle_ship_include_combat)
+                                  : NovaTargeting_FindPreviousPlayerCycleTarget(
+                                        state,
+                                        state.player.primary_target_ship_slot,
+                                        state.player.current_system_id,
+                                        input.cycle_ship_include_combat);
     if (next == state.player.primary_target_ship_slot ||
         next == state.player.ship_instance_id) {
       state.player.primary_target_ship_slot = -1;
@@ -887,9 +886,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // clicks outside the chart fall through to the normal ship/stellar pick.
     const RouteMapClickResult route_map_click =
         input.primary_clicked
-            ? RouteMap_HandleClick(
-                  state, platform, static_cast<float>(input.mouse_x),
-                  static_cast<float>(input.mouse_y))
+            ? RouteMap_HandleClick(state,
+                                   platform,
+                                   static_cast<float>(input.mouse_x),
+                                   static_cast<float>(input.mouse_y))
             : RouteMapClickResult::kNotHandled;
     if (input.primary_clicked &&
         (route_map_click == RouteMapClickResult::kNotHandled ||
@@ -1223,7 +1223,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // overlay (STR# 0x7d2 messages) instead of a bare log line. Gated while a
     // jump is engaged (disabled through brake + hold + zoom).
     if (land_pressed && !state.travel.engaging) {
-      const LandCommandResult landed = NovaPlayer_TickLandCommand(platform, state);
+      const LandCommandResult landed =
+          NovaPlayer_TickLandCommand(platform, state);
       if (landed == LandCommandResult::kQuit) {
         returning_to_menu = true;
         break;
@@ -2506,26 +2507,12 @@ bool Outfit_HasAutoEjectOutfit(const GameState &state) {
   return false;
 }
 
-// Ghidra Weapon_HasLaunchBayWeapon (0x00464520): any weapon bank whose def is
-// mode 99 (launch bay), whose mounted count is >= 1, and whose carried class
-// sets the 0x8000 escape-ship flag.
+// Ghidra Weapon_HasLaunchBayWeapon (0x00464520), player specialization:
+// the canonical Ship-taking port lives in weapon.cpp
+// (NovaWeapon_HasLaunchBayWeapon); the player's banks are the GameState
+// strided arrays, reached via ships[0].
 bool Weapon_HasPlayerLaunchBayWeapon(const GameState &state) {
-  for (std::size_t bank = 0; bank < 0x100; ++bank) {
-    const Weapon *def =
-        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
-    if (def == nullptr || def->weapon_mode_code != kBayWeaponModeCode) {
-      continue;
-    }
-    if (state.weapon_bank_ammo[bank * kPlayerBankStride] < 1) {
-      continue;
-    }
-    const ShipClass *carried = state.scenario.Ship(def->ammo_type);
-    if (carried != nullptr &&
-        (carried->capability_flags & kEscapeShipClassFlag) != 0) {
-      return true;
-    }
-  }
-  return false;
+  return NovaWeapon_HasLaunchBayWeapon(state, state.player);
 }
 
 // Ghidra ShipClass_FindLaunchBayShipClassId (0x00464590): the zero-based class

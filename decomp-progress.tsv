@@ -91,7 +91,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00415AD0	Stellar_IsShipHeadingToStellarInAiState0x01Or0x14		0%	
 0x00415B00	Ship_IsShipDockedWithTargetInControlMode0x0F		0%	
 0x00415B80	Stellar_CanShipInitiateJumpSequence	src/game/travel.cpp	95%	jump fuel gating via NovaTravel_CanShipInitiateJumpSequence (ship-aware
-0x00415C10	Weapon_HasAnyFireableNonSecondaryWeapon		0%	
+0x00415C10	Weapon_HasAnyFireableNonSecondaryWeapon	src/game/weapon.cpp	100%	NovaWeapon_HasAnyFireableNonSecondaryWeapon: mounted ammo > 0 + MassDmg > 0 + Flags2 0x1000 clear + straight-flight mode set (-1/0/3/4/6/7/8) + Weapon_CanFireWeaponBank gate.
 0x00415CB0	Ship_ResetShipAndAttackersAfterBoarding	src/game/boarding_plunder.cpp	90%	Ports the attacker-clearing loop and the captured hull's combat/mission reset. TODO(decomp): voice_type_mode roll + government voice override.
 0x00415DC0	Ship_ClearOtherShipsTargetingShip		0%	
 0x00415E60	Ship_IsShipInAiState0x10		0%	
@@ -361,9 +361,9 @@ address	name	impl_file	reimpl_pct	comment
 0x004640A0	Ship_ComputeShipEffectiveThrust	src/game/spaceflight.cpp	95%	NPC effective-stat branches are ported through NovaShip_ComputeEffectiveStats; player outfit aggregation remains in src/game/outfit.cpp
 0x004642E0	Ship_ComputeShipEffectiveMaxSpeed		60%	NPC branch ported into NovaShip_ComputeEffectiveStats (capability 0x400 zero, skill/government scaling, velocity-match 1/3, mission 0x3ff x2), shared by NovaShip_IntegrateNpcMovement + NovaAi_ApplyControls. Player outfit path + target/cap components remain TODO(decomp)
 0x004644A0	Outfit_HasSpecialMovementOutfitOrLaunchBay		0%	
-0x00464520	Weapon_HasLaunchBayWeapon		0%	
+0x00464520	Weapon_HasLaunchBayWeapon	src/game/weapon.cpp	100%	NovaWeapon_HasLaunchBayWeapon: mode-99 bank with mounted ammo > 0 whose carried class (ammo_type) sets capability Flags 0x8000. Player specialization delegates from spaceflight.cpp.
 0x00464590	ShipClass_FindLaunchBayShipClassId		0%	
-0x00464600	Weapon_FindLaunchBayWeaponBank		0%	
+0x00464600	Weapon_FindLaunchBayWeaponBank	src/game/weapon.cpp	100%	NovaWeapon_FindLaunchBayWeaponBank: first bank matching the 0x00464520 predicate, -1 when none. Not yet wired into Ship_HandleShip call site.
 0x00464670	Weapon_HasLoadedLaunchBayAmmo	src/game/weapon.cpp	100%	NovaWeapon_HasLoadedLaunchBayAmmo: faithful port; KeyCarried gate (ShipClass.key_carried_ship_class, loader-rebased) + mode-99 bank scan with mounted ammo>0, loaded secondary>0, ammo_type-0x80 == KeyCarried. Player/NPC counter storage split mirrors CanFire.
 0x00464700	Outfit_HasPlayerOwnedOutfitType0x14		0%	
 0x00464760	Outfit_HasPlayerOwnedOutfitType0x0F_Cached		0%	
@@ -428,7 +428,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00468D90	NovaUi_DrawSystemFactionConflictStatus	src/nova_app.cpp	92%	Two ports: MenuSystemLegalStatusText (nova_app.cpp, menu pilot screen) and LegalStatusText (starmap.cpp, side panel). The starmap port scans the first THREE nav defs per the binary (0x00468ea0 loop bound < 3) - the menu port's four-deep scan is a small divergence to reconcile. Signed-overflow guards reduced to plain comparisons (shipped tolerances positive).
 0x00469030	NovaUi_DrawCombatRankLabel	src/nova_app.cpp	100%	MenuCombatRankLabel: threshold ladder verbatim
 0x00469100	Outfit_ComputeOwnedOutfitResaleTotal		0%	
-0x00469230	Weapon_HasMatchingWeaponAmmoCarried		0%	
+0x00469230	Weapon_HasMatchingWeaponAmmoCarried	src/game/boarding_plunder.cpp	100%	Ported inline as PlayerCarriesMatchingWeaponAmmo: player bank scan by ammo_type, preserving the first-armed-mode-99-bank early-return quirk.
 0x004692E0	NovaAudio_PlaySpatialByDistance		0%	
 0x00469480	Stub_NoOp_00469480		0%	
 0x00469490	Stub_NoOp_00469490		0%	
