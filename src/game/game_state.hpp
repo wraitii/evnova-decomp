@@ -1003,6 +1003,21 @@ struct GameState {
   TravelState travel;
   EscortCommandState escort;
 
+  // In-flight route-map overlay state (the small non-blocking galaxy chart).
+  // Ghidra g_routeMapVisibleFlag 0x007354b2 (1 while the overlay is up;
+  // cleared 500 ticks after the last interaction -- 0x0042f23e),
+  // g_routeMapInteractionTick60hz 0x00597970 (60Hz tick of the last overlay
+  // interaction; basis of the fade at 0x00439bd0), g_route_map_zoom_scale
+  // 0x005759e0 (x1.3333/x0.75 steps, capped [0.5, 2.0], reset to 1.0 on
+  // open) and g_playerRouteMapZoomCommandLatch 0x007cab47 (zoom edge latch).
+  // See route_map.hpp for the full chain.
+  struct {
+    bool overlay_visible = false;
+    std::uint32_t interaction_tick_60hz = 0;
+    float zoom_scale = 1.0F;
+    bool zoom_command_latch = false;
+  } route_map;
+
   // Galaxy starmap view state (Ghidra g_starmap_zoom 0x005759d8,
   // g_starmap_pan_origin_x/y 0x005997b4). Zoom is a world->screen DIVISOR
   // (bigger = more zoomed out; the original's data default 0.5625 opens the

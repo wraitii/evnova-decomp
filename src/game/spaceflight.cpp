@@ -19,6 +19,7 @@
 #include "mission_script.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
+#include "route_map.hpp"
 #include "radar_panel.hpp"
 #include "ship_ai.hpp"
 #include "ship_comm_dialog.hpp"
@@ -498,6 +499,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // as one giant flight frame (ship integration, ambient stars, shield
   // recharge and the reticle decay all scale by frame_time_ms).
   const auto resync_frame_clock = [&] { prev_tick_ms = SDL_GetTicks(); };
+  // Route-map overlay session assets (Ghidra FUN_004ab9d4 creates the
+  // surface + CICNs once at flight-interface setup; the port caches the
+  // marker textures + label font for the whole flight loop).
+  RouteMapView route_map_view;
+  route_map_view.Load(platform);
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = SDL_GetTicks();
     const float frame_time_ms =
@@ -589,6 +595,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (destination_cycle && !destination_cycle_was_held) {
       const std::int16_t dest = NovaTravel_CycleDestinationSystem(
           state, input.cycle_destination_next);
+      // Ghidra 0x0044b8ab: the core refreshes the route-map overlay after the
+      // destination command (NovaUi_UpdateTravelSelectionOverlay) — the
+      // overlay opens/re-stamps regardless of whether a candidate was found.
+      RouteMap_Open(state);
       if (dest >= 0) {
         // Destination cycled; travel mode is armed but the jump awaits 'j'.
         NovaLog::Info("backslash: destination system {}", dest);
@@ -605,8 +615,25 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // Entering hyperspace mode latches plotted-jump mode 3 with no slot
       // (0x0044de28: mode=3, ai_secondary_target_slot=-1).
       state.player.travel_transfer_mode = 3;
+      // Ghidra 0x004b95f: the hyperspace-mode arm block refreshes the
+      // route-map overlay like the cycle command.
+      RouteMap_Open(state);
     }
     hyperspace_was_held = input.hyperspace_mode;
+    // Route-map overlay zoom + auto-dismiss (Ghidra 0x0045216e /
+    // 0x0042f23e). Zoom keys are raw scancodes: minus/equals and the numpad
+    // -/+ pair; the modifier-combo guard covers shift/ctrl/alt
+    // (TODO(decomp): original commands 0x6b/0x6f not modelled).
+    RouteMap_Tick(
+        state,
+        {.zoom_in_held = platform.IsOriginalKeyCodeHeld(0x0c) ||
+                         platform.IsOriginalKeyCodeHeld(0x4a),
+         .zoom_out_held = platform.IsOriginalKeyCodeHeld(0x0d) ||
+                          platform.IsOriginalKeyCodeHeld(0x4e),
+         .modifier_combo_held = platform.IsOriginalKeyCodeHeld(0x2a) ||
+                                platform.IsOriginalKeyCodeHeld(0x36) ||
+                                platform.IsOriginalKeyCodeHeld(0x1d) ||
+                                platform.IsOriginalKeyCodeHeld(0x38)});
     // Ship-target cycling: backquote (`) / Shift+backquote, with the
     // combat-relevant-only modifier (Alt or 'k'). Mirrors the original's
     // Ship_HandlePlayerShip cycle-target block (0x0044b120): a no-op result or
@@ -654,13 +681,19 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     }
     nearest_was_held = nearest_pressed;
     // Click-to-target (PlayerTick_MouseTargetAndControlCommands 0x0044e019):
-    // the pass captures the pre-click ship target, clears the target when the
-    // click lands on the player's own sprite, picks a ship under the cursor,
-    // and only scans stellar sprites when the ship target is unchanged from
-    // the pre-click value (no ship hit, or the already-targeted ship was
-    // clicked). A stellar hit selects it as the travel target and re-arms the
-    // travel reticle pulse at 256.0 (0x43800000).
-    if (input.primary_clicked) {
+    // while the route-map overlay is up the click is routed to the chart
+    // first (PlayerTick_RouteMapClickBranch 0x0044e027): a neighbour marker
+    // selects the travel destination, the centre clears the selection, and
+    // clicks outside the chart fall through to the normal ship/stellar pick.
+    const RouteMapClickResult route_map_click =
+        input.primary_clicked
+            ? RouteMap_HandleClick(
+                  state, platform, static_cast<float>(input.mouse_x),
+                  static_cast<float>(input.mouse_y))
+            : RouteMapClickResult::kNotHandled;
+    if (input.primary_clicked &&
+        (route_map_click == RouteMapClickResult::kNotHandled ||
+         route_map_click == RouteMapClickResult::kOutside)) {
       const std::int16_t pre_click_target =
           state.player.primary_target_ship_slot;
       if (view.ClickInPlayerSprite(
@@ -1252,6 +1285,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
     view.DrawGameFrame(platform, state, hud);
+    // Route-map overlay blit (Ghidra 0x00439bd0, drawn over the frame after
+    // the HUD overlay message, before the target-category panel): draws only
+    // while the overlay flag is up, alpha-faded per the interaction timer.
+    route_map_view.Draw(platform, state);
     platform.Present();
 
     // Ghidra scope 3 "post-draw tasks": pump the primary mouse command; when

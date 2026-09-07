@@ -66,6 +66,34 @@ struct StarmapResult {
   std::int16_t destination_system_id = -1;
 };
 
+// Marker arrow textures shared by the starmap window and the route-map
+// overlay chart (Ghidra CICN 0x3a98 -> DAT_007dc3b0, 0x3a99 -> DAT_007dc3b4).
+struct NovaStarmap_MarkerIcons {
+  std::unique_ptr<SdlTexture> mission_target; // CICN 0x3a98
+  std::unique_ptr<SdlTexture> selected_arrow; // CICN 0x3a99
+};
+
+// Loads the marker arrow CICNs (Ghidra LoadMarkerIcons); missing resources
+// simply leave the members null (the arrows are skipped at draw time).
+[[nodiscard]] NovaStarmap_MarkerIcons
+NovaStarmap_LoadMarkerIcons(SdlPlatform &platform);
+
+// Ghidra 0x004a99f0 Ui_DrawSystemRouteMap draw pass: renders the route-map
+// overlay chart (the shared NovaUi_DrawStarmapRoutesAndMarkers pass minus the
+// nebulae/political layers, which the flight route map never draws) into
+// `rect` at the given zoom, panned on the current system. `alpha` multiplies
+// every element colour (the original applies it as the blit tint at
+// 0x00439bd0). Background fill + border colours TODO(decomp): PTR_DAT_00575acc
+// / DAT_00735658 are unresolved globals.
+void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
+                                   NovaFontCache &font_cache,
+                                   const GameState &state,
+                                   const SDL_FRect &rect,
+                                   float zoom,
+                                   std::int16_t selected_id,
+                                   float alpha,
+                                   const NovaStarmap_MarkerIcons &icons);
+
 // Runs the modal galaxy starmap until the player closes it or the app quits.
 // Opens over the current flight scene (the caller should have already drawn
 // and presented the frame). Reads the scenario's System table, the player's
