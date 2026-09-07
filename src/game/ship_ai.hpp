@@ -44,6 +44,18 @@ namespace game {
                                                       const Ship &target,
                                                       std::int16_t weapon_id);
 
+// Same algorithm with the 0x0043b740 fourth argument (float *ship_pos_xy):
+// the straight bearing and intercept distance are measured from the given
+// origin (the muzzle position after quadrant geometry) instead of the hull
+// centre. Ship velocity for the lead term still comes from the ship.
+[[nodiscard]] std::int16_t
+NovaAi_AimWeaponPredictiveFrom(const GameState &state,
+                               const Ship &ship,
+                               const Ship &target,
+                               std::int16_t weapon_id,
+                               float origin_x,
+                               float origin_y);
+
 // Ghidra 0x00464810 Ship_GetShipJammingScore. Electronic-warfare jamming score
 // (0..100) of `ship` for one seek channel (0..3), lazily computed and cached in
 // Ship.jamming_score (the original's ShipState +0xC926). Base value is the

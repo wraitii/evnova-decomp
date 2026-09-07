@@ -147,13 +147,30 @@ TEST_CASE("primary fire spawns a light blaster shot then cools down",
   state.player.pos_x = 100.0F;
   state.player.pos_y = 200.0F;
   SeedStockWeaponBanks(state);
+  // Pin the barrel: the original re-rolls a random quadrant when the
+  // per-ship state is unseeded, so leave it unpinned and the spawn x varies
+  // +/- one barrel offset.
+  state.player.muzzle_quadrant[0] = 0;
 
   FirePlayerPrimary(state);
-  // One Light Blaster round spawned, from the ship, moving upward (-y).
+  // One Light Blaster round spawned, from the group-0 barrel (not the hull
+  // centre), moving upward (-y). Expected muzzle offset mirrors the
+  // dedicated barrel test below: class geometry + near scale pair at
+  // bearing 0 (acc_y = -forward < 0).
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].weapon_id == 0);
-  CHECK(state.active_shots[0].pos_x == Catch::Approx(100.0F));
-  CHECK(state.active_shots[0].pos_y == Catch::Approx(200.0F));
+  const ShipClass *shuttle_cls =
+      state.scenario.Ship(static_cast<std::int16_t>(0 + 0x80));
+  REQUIRE(shuttle_cls != nullptr);
+  CHECK(state.active_shots[0].pos_x ==
+        Catch::Approx(100.0F +
+                      static_cast<float>(shuttle_cls->muzzle_lateral[0][0]) *
+                          shuttle_cls->muzzle_scale_near_x));
+  CHECK(state.active_shots[0].pos_y ==
+        Catch::Approx(200.0F -
+                      static_cast<float>(shuttle_cls->muzzle_forward[0][0]) *
+                          shuttle_cls->muzzle_scale_near_y -
+                      static_cast<float>(shuttle_cls->muzzle_drop[0][0])));
   // WeaponDef Speed is px/frame * 100; the light blaster is 1500 -> 15
   // px/frame. The Inaccuracy10 = 9 bearing jitter (see CheckShotVelocity)
   // keeps the exact components random, so only the envelope is pinned.
@@ -405,11 +422,12 @@ TEST_CASE("second mounted weapon halves the bank cooldown", "[weapon]") {
 
 // Regression: the light blaster (a turret-group-0 weapon) should exit the
 // nose barrel of the ship rather than dead-centre. The muzzle geometry is
-// decoded from the ship's sh\x8an descriptor into GameState::player.muzzle_*
-// (see ShipVisualDescriptor.turret_muzzles and SpaceflightView::Ensure-
-// ShipSprite); here we reproduce the Shuttle's actual group-0 quadrant data
-// (lateral = 3/-3, forward = 10, drop = -2, compress scale = 1.0/0.71) and
-// check the fired shot is offset off the centre by the muzzle vector.
+// decoded from the class's sh\x8an descriptor into ShipClass.muzzle_* at
+// scenario load (ShipClass.muzzle_ready); here we read the REAL Shuttle
+// group-0 quadrant-0 barrel and check the fired shot is offset off the centre
+// by the faithful Weapon_ApplyTurretSpreadVelocity vector: acc = polar(
+// bearing, forward) + polar(bearing + 90, lateral), scaled by the near pair
+// when acc_y < 0, then pos.y -= drop.
 TEST_CASE("light blaster exits the nose barrel, not the hull centre",
           "[weapon]") {
   if (!ArchivesAvailable()) {
@@ -423,24 +441,24 @@ TEST_CASE("light blaster exits the nose barrel, not the hull centre",
   state.player.pos_y = 200.0F;
   SeedStockWeaponBanks(state);
 
-  // Populate muzzle geometry as EnsureShipSprite would from the Shuttle sh\x8an
-  // payload (weapon turret group 0).
-  state.player.muzzle_ready = true;
-  state.player.muzzle_scale_x = 1.0F;
-  state.player.muzzle_scale_y = 0.71F;
-  state.player.muzzle_forward[0] = {10, 10, 10, 10};
-  state.player.muzzle_lateral[0] = {3, -3, 3, -3};
-  state.player.muzzle_drop[0] = {-2, -2, -2, -2};
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(0 + 0x80));
+  REQUIRE(cls != nullptr);
+  REQUIRE(cls->muzzle_ready);
   state.player.muzzle_quadrant[0] = 0; // pin the first barrel
 
   FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
   const auto &shot = state.active_shots[0];
-  // Heading 0: forward offset F=10 along -y (nose), lateral L=3 along +x;
-  //   x += (±3) * 1.0
-  //   y += (F=10 along -y => -10*0.71) - drop(-2) = -7.1 + 2 = -5.1
-  CHECK(shot.pos_x == Catch::Approx(100.0F + 3.0F));
-  CHECK(shot.pos_y == Catch::Approx(200.0F - 10.0F * 0.71F + 2.0F)); // -5.1
+  // Heading 0 -> displayed rotation frame 0 -> muzzle bearing 0:
+  //   acc = (lateral, -forward); acc_y < 0 selects the NEAR scale pair.
+  const float lateral = static_cast<float>(cls->muzzle_lateral[0][0]);
+  const float forward = static_cast<float>(cls->muzzle_forward[0][0]);
+  const float drop = static_cast<float>(cls->muzzle_drop[0][0]);
+  CHECK(shot.pos_x ==
+        Catch::Approx(100.0F + lateral * cls->muzzle_scale_near_x));
+  CHECK(shot.pos_y ==
+        Catch::Approx(200.0F - forward * cls->muzzle_scale_near_y - drop));
   // Velocity: 15 px/frame within the Inaccuracy10 = 9 spread envelope.
   CheckShotVelocity(shot, 0.0F, 15.0F);
 }

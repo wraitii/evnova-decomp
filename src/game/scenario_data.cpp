@@ -1332,6 +1332,45 @@ bool ScenarioData::LoadFromArchives() {
         // bias blocks, the waypoint-marker arm (weapon.cpp), and the combat-
         // animation cycle.
         cls.sprite_behavior_flags = ReadBe16(*shan, 0x2e);
+        // Rotation frame count (ShipClassDef +0xa06): sh\x8an +0x34 FramesPer,
+        // 36 when 0 (ShipClass_LoadShipClassVisualAndLaunchData default).
+        {
+          const std::int16_t frames = ReadBeI16(*shan, 0x34);
+          cls.frames_per_rotation = frames != 0 ? frames : 36;
+        }
+        // Weapon-exit (muzzle) geometry. Loader copy map (0x004b4ee0,
+        // sh\x8an -> ShipClassDef +0xa42..+0xab0) combined with the barrel
+        // indexing of Weapon_ApplyTurretSpreadVelocity (0x0046c5c0),
+        // i = turret_group*4 + quadrant:
+        //   lateral[g][q] = sh\x8an 0x48 + 8g + 2q  (class +0xa42 + 4i)
+        //   forward[g][q] = sh\x8an 0x50 + 8g + 2q  (class +0xa44 + 4i)
+        //   drop[g][q]    = sh\x8an 0x90 + 8g + 2q  (class +0xa82 + 2i)
+        // Reads past the payload are zero (the loader pads the descriptor
+        // block to 0xc0 before copying).
+        auto muzzle_read = [&shan](int offset) -> std::int16_t {
+          return offset + 2 <= static_cast<int>(shan->size())
+                     ? ReadBeI16(*shan, static_cast<std::size_t>(offset))
+                     : static_cast<std::int16_t>(0);
+        };
+        for (int g = 0; g < 4; ++g) {
+          for (int q = 0; q < 4; ++q) {
+            cls.muzzle_lateral[g][q] = muzzle_read(0x48 + 8 * g + 2 * q);
+            cls.muzzle_forward[g][q] = muzzle_read(0x50 + 8 * g + 2 * q);
+            cls.muzzle_drop[g][q] = muzzle_read(0x90 + 8 * g + 2 * q);
+          }
+        }
+        // Near/far compress scales (class +0xaa4/+0xaa8 and +0xaac/+0xab0):
+        // raw sh\x8an short * g_ship_weapon_exit_compress_scale (0x00575ac0 =
+        // 0.01f), each clamped to 1.0 when <= 0 (loader tail).
+        auto muzzle_scale = [&muzzle_read](int offset) -> float {
+          const float value = static_cast<float>(muzzle_read(offset)) * 0.01F;
+          return value <= 0.0F ? 1.0F : value;
+        };
+        cls.muzzle_scale_near_x = muzzle_scale(0x88);
+        cls.muzzle_scale_near_y = muzzle_scale(0x8a);
+        cls.muzzle_scale_far_x = muzzle_scale(0x8c);
+        cls.muzzle_scale_far_y = muzzle_scale(0x8e);
+        cls.muzzle_ready = true;
         if (const auto found = first_class_by_base_image.find(base_image);
             found != first_class_by_base_image.end()) {
           cls.clone_source_ship_class = found->second;

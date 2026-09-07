@@ -362,6 +362,29 @@ struct ShipClass {
   // (0x00464670) matches a loaded mode-99 bay weapon whose ammo_type - 0x80
   // equals this id; -1 disables the launch-bay fire gate.
   std::int16_t key_carried_ship_class = -1;
+  // Ghidra ShipClassDef +0xa06 (sh\x8an +0x34 FramesPer, 36 when 0): the
+  // rotation-grid frame count. The turret muzzle bearing is the displayed
+  // rotation frame scaled back to degrees (Weapon_SelectTurretQuadrant
+  // 0x0046c320 reads it as (sprite_frame %% frames) * 360 / frames).
+  std::int16_t frames_per_rotation = 36;
+  // Weapon-exit (muzzle) geometry, decoded from the sh\x8an by the scenario
+  // loader (mirrors the ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0
+  // copy into ShipClassDef +0xa42..+0xab0). EVN ships have up to four turret
+  // groups of four quadrant barrels; Weapon_ApplyTurretSpreadVelocity
+  // (0x0046c5c0) offsets a projectile to the barrel indexed
+  // [turret_group][quadrant] and Weapon_SelectTurretQuadrant (0x0046c320)
+  // cycles the quadrant per ship.
+  bool muzzle_ready = false;
+  std::array<std::array<std::int16_t, 4>, 4> muzzle_lateral{};
+  std::array<std::array<std::int16_t, 4>, 4> muzzle_forward{};
+  std::array<std::array<std::int16_t, 4>, 4> muzzle_drop{};
+  // Weapon-exit compress scales: near pair applied when the barrel
+  // displacement lands above the hull centre (y < 0), far pair otherwise
+  // (Weapon_ApplyTurretSpreadVelocity 0x0046c5c0).
+  float muzzle_scale_near_x = 1.0F;
+  float muzzle_scale_near_y = 1.0F;
+  float muzzle_scale_far_x = 1.0F;
+  float muzzle_scale_far_y = 1.0F;
   // Ghidra ShipClassDef +0x48 / resource payload +0x36A. Base ionization
   // dissipation rate in charge points per millisecond after the loader's
   // 0.01 scale and minimum-one clamp.

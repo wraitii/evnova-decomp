@@ -699,6 +699,160 @@ bool NovaWeapon_CanFireWeaponBank(const GameState &state,
   return true;
 }
 
+namespace {
+
+// The displayed rotation frame of the ship's sprite. TODO(decomp): the
+// original reads the sprite object's rotation counter (sprite+0x68) modulo
+// FramesPer; the port derives the same displayed frame from the heading with
+// the renderer's mapping (spaceflight_view FrameForHeading).
+[[nodiscard]] int RotationFrameForShip(const Ship &ship,
+                                       int frames_per_rotation) {
+  if (frames_per_rotation < 1) {
+    return 0;
+  }
+  const float kTwoPi = 6.28318530717958647692F;
+  const float normalized = std::fmod(ship.heading + kTwoPi, kTwoPi);
+  int frame =
+      static_cast<int>(std::lround(normalized / kTwoPi *
+                                   static_cast<float>(frames_per_rotation))) %
+      frames_per_rotation;
+  if (frame < 0) {
+    frame += frames_per_rotation;
+  }
+  return frame;
+}
+
+// Ghidra 0x0046c5c0 Weapon_ApplyTurretSpreadVelocity: apply one turret
+// group's quadrant-barrel muzzle displacement to a position. Accumulates
+// polar(forward, ship_bearing) + polar(lateral, ship_bearing + 90 mod 360)
+// (barrel i = group*4+quadrant; ShipClass.muzzle_forward/lateral), scales x
+// by the NEAR pair (muzzle_scale_near_*) when the accumulated y < 0 and the
+// FAR pair otherwise, then pos += (scaled_x, scaled_y - drop).
+void ApplyTurretSpreadVelocity(const ShipClass &cls,
+                               float &pos_x,
+                               float &pos_y,
+                               std::int16_t ship_bearing_deg,
+                               int turret_group_id,
+                               int quadrant_index) {
+  if (turret_group_id < 0 || turret_group_id >= 4 || quadrant_index < 0 ||
+      quadrant_index >= 4) {
+    return;
+  }
+  float acc_x = 0.0F;
+  float acc_y = 0.0F;
+  AddPolarVelocity(
+      static_cast<float>(ship_bearing_deg),
+      static_cast<float>(cls.muzzle_forward[turret_group_id][quadrant_index]),
+      acc_x,
+      acc_y);
+  // (bearing + 90) truncated modulo 360 (C signed-division semantics).
+  int side_bearing = static_cast<int>(ship_bearing_deg) + 90;
+  side_bearing -= 360 * (side_bearing / 360);
+  AddPolarVelocity(
+      static_cast<float>(side_bearing),
+      static_cast<float>(cls.muzzle_lateral[turret_group_id][quadrant_index]),
+      acc_x,
+      acc_y);
+  const float scale_x =
+      acc_y < 0.0F ? cls.muzzle_scale_near_x : cls.muzzle_scale_far_x;
+  const float scale_y =
+      acc_y < 0.0F ? cls.muzzle_scale_near_y : cls.muzzle_scale_far_y;
+  pos_x += acc_x * scale_x;
+  pos_y += acc_y * scale_y -
+           static_cast<float>(cls.muzzle_drop[turret_group_id][quadrant_index]);
+}
+
+// Ghidra 0x0046c4e0 Weapon_ChooseBestTurretQuadrantForTarget: apply each of
+// the four quadrant barrel offsets to the muzzle position and return the
+// quadrant minimizing the squared distance to the target point. Returns 0
+// (not -1) for invalid arguments -- original quirk.
+[[nodiscard]] int
+ChooseBestTurretQuadrantForTarget(const ShipClass &cls,
+                                  float muzzle_x,
+                                  float muzzle_y,
+                                  std::int16_t ship_bearing_deg,
+                                  int turret_group_id,
+                                  float target_x,
+                                  float target_y) {
+  if (turret_group_id < 0 || turret_group_id >= 4) {
+    return 0;
+  }
+  int best = -1;
+  float best_dist_sq = 0.0F;
+  for (int quadrant = 0; quadrant < 4; ++quadrant) {
+    float x = muzzle_x;
+    float y = muzzle_y;
+    ApplyTurretSpreadVelocity(
+        cls, x, y, ship_bearing_deg, turret_group_id, quadrant);
+    const float dx = x - target_x;
+    const float dy = y - target_y;
+    const float dist_sq = dx * dx + dy * dy;
+    if (best == -1 || dist_sq < best_dist_sq) {
+      best = quadrant;
+      best_dist_sq = dist_sq;
+    }
+  }
+  return best;
+}
+
+} // namespace
+
+// Ghidra 0x0046c320 Weapon_SelectTurretQuadrant: pick and advance the firing
+// barrel quadrant for the weapon's turret group, offsetting muzzle_pos to the
+// barrel. The bearing is the DISPLAYED rotation frame scaled back to degrees
+// (frame * 360 / frames_per_rotation, floor idiom). When the weapon has
+// flags_tertiary 0x10 and a target position is supplied, the quadrant is
+// replaced by the target-nearest barrel (0x0046c4e0); an out-of-range stored
+// quadrant re-rolls randomly in [0,4). Returns the quadrant used, or -1 when
+// the weapon has no valid turret group. The quadrant advances modulo 4 after
+// every shot (per-ship state, Ship.muzzle_quadrant).
+std::int16_t NovaWeapon_SelectTurretQuadrant(GameState &state,
+                                             Ship &ship,
+                                             std::int16_t weapon_id,
+                                             float &muzzle_x,
+                                             float &muzzle_y,
+                                             const float *target_pos) {
+  const Weapon *w = WeaponAt(state, weapon_id);
+  const ShipClass *cls = ShipClassFor(state, ship);
+  if (w == nullptr || cls == nullptr) {
+    return -1;
+  }
+  const int group = static_cast<int>(w->turret_group_id);
+  if (group < 0 || group >= 4) {
+    return -1;
+  }
+  const int frames =
+      cls->frames_per_rotation > 0 ? cls->frames_per_rotation : 36;
+  const int frame = RotationFrameForShip(ship, frames);
+  const std::int16_t ship_bearing_deg =
+      static_cast<std::int16_t>(RoundRangeEnvelope(
+          static_cast<float>(frame) * (360.0F / static_cast<float>(frames))));
+  auto &quadrant_state = ship.muzzle_quadrant[static_cast<std::size_t>(group)];
+  if ((w->flags_tertiary & 0x10) != 0 && target_pos != nullptr) {
+    quadrant_state = static_cast<std::int8_t>(
+        ChooseBestTurretQuadrantForTarget(*cls,
+                                          muzzle_x,
+                                          muzzle_y,
+                                          ship_bearing_deg,
+                                          group,
+                                          *target_pos,
+                                          *(target_pos + 1)));
+  }
+  if (quadrant_state < 0 || quadrant_state > 3) {
+    quadrant_state = static_cast<std::int8_t>(RandomBelow(state, 4));
+  }
+  const int quadrant = quadrant_state;
+  ApplyTurretSpreadVelocity(
+      *cls, muzzle_x, muzzle_y, ship_bearing_deg, group, quadrant);
+  quadrant_state = static_cast<std::int8_t>((quadrant + 1) & 3);
+  // The original re-validates after the advance (unreachable with the mod-4
+  // update) and re-rolls randomly when still invalid.
+  if (quadrant_state < 0 || quadrant_state > 3) {
+    quadrant_state = static_cast<std::int8_t>(RandomBelow(state, 4));
+  }
+  return static_cast<std::int16_t>(quadrant);
+}
+
 int NovaWeapon_SpawnProjectile(GameState &state,
                                std::int16_t owner_ship_slot,
                                std::int16_t target_ship_slot,
@@ -741,8 +895,15 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   // Shot_SpawnShotFromWeapon local_36: modes 4/7/8 fired with a target are
   // "aimed" (bearing to the target, then overwritten by the predictive lead).
   bool aim_led = false;
+  // Shot_SpawnShotFromWeapon local_30: parallel-launch side for negative
+  // spread weapons (0 = fire along the aim heading; +/-1 = hull heading
+  // +/- |spread|, see the velocity block).
+  int parallel_side = 0;
+  // Weapon_SelectTurretQuadrant result (-1 when the weapon has no turret
+  // group or no owner context).
+  int turret_quadrant = -1;
   if (owner_in_range) {
-    const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+    Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
     shot.pos_x = owner.pos_x;
     shot.pos_y = owner.pos_y;
     shot.vel_x = owner.vel_x;
@@ -765,30 +926,34 @@ int NovaWeapon_SpawnProjectile(GameState &state,
       shot.vel_y *= 0.8F;
     }
 
-    // The player sh\x8an descriptor supplies the four-barrel muzzle geometry.
-    // NPC muzzle descriptors are not represented yet, so their projectiles
-    // fall back to the hull origin until that data is decoded.
-    const int turret_group = static_cast<int>(w->turret_group_id);
-    if (owner_ship_slot == 0 && owner.muzzle_ready && turret_group >= 0 &&
-        turret_group < 4) {
-      auto &quadrant = state.player.muzzle_quadrant[turret_group];
-      if (quadrant < 0 || quadrant > 3) {
-        quadrant = static_cast<std::int8_t>(RandomBelow(state, 4));
+    // Shot_SpawnShotFromWeapon: Weapon_SelectTurretQuadrant (0x0046c320)
+    // picks/advances the barrel quadrant and offsets the spawn position to
+    // the muzzle; with a target slot it also feeds the target position for
+    // the flags_tertiary 0x10 target-nearest quadrant choice.
+    const float *target_pos =
+        target_ship_slot >= 0 && target_ship_slot < static_cast<std::int16_t>(
+                                                        GameState::kMaxShips)
+            ? &state.ShipAt(static_cast<std::size_t>(target_ship_slot)).pos_x
+            : nullptr;
+    turret_quadrant = NovaWeapon_SelectTurretQuadrant(
+        state, owner, weapon_id, shot.pos_x, shot.pos_y, target_pos);
+    // Negative shot_random_spread marks parallel multi-barrel launch; the
+    // sign of the selected barrel's lateral offset picks the side of the
+    // hull heading the volley leaves on (used by the velocity block below).
+    if (w->inaccuracy < 0 && turret_quadrant >= 0) {
+      const ShipClass *owner_cls = ShipClassFor(state, owner);
+      const int group = static_cast<int>(w->turret_group_id);
+      if (owner_cls != nullptr && owner_cls->muzzle_ready && group >= 0 &&
+          group < 4) {
+        const std::int16_t lateral =
+            owner_cls->muzzle_lateral[static_cast<std::size_t>(
+                group)][static_cast<std::size_t>(turret_quadrant)];
+        if (lateral < 0) {
+          parallel_side = -1;
+        } else if (lateral > 0) {
+          parallel_side = 1;
+        }
       }
-      const int q = quadrant;
-      const float forward =
-          static_cast<float>(owner.muzzle_forward[turret_group][q]);
-      const float lateral =
-          static_cast<float>(owner.muzzle_lateral[turret_group][q]);
-      const float drop = static_cast<float>(owner.muzzle_drop[turret_group][q]);
-      const float sin_heading = std::sin(heading / kDegPerRad);
-      const float cos_heading = std::cos(heading / kDegPerRad);
-      shot.pos_x += (sin_heading * forward + cos_heading * lateral) *
-                    owner.muzzle_scale_x;
-      shot.pos_y += (-cos_heading * forward + sin_heading * lateral) *
-                        owner.muzzle_scale_y -
-                    drop;
-      quadrant = static_cast<std::int8_t>((q + 1) & 3);
     }
   }
 
@@ -813,12 +978,13 @@ int NovaWeapon_SpawnProjectile(GameState &state,
 
   if (aim_led && owner_in_range) {
     // Ship_AimWeaponPredictive overwrites the plain bearing with the intercept
-    // lead for every owner (player turrets included).
+    // lead for every owner (player turrets included). The original measures
+    // from the muzzle position (fourth argument), already quadrant-offset.
     const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
     const Ship &target =
         state.ShipAt(static_cast<std::size_t>(target_ship_slot));
-    heading = static_cast<float>(
-        NovaAi_AimWeaponPredictive(state, owner, target, weapon_id));
+    heading = static_cast<float>(NovaAi_AimWeaponPredictiveFrom(
+        state, owner, target, weapon_id, shot.pos_x, shot.pos_y));
     shot.heading_deg = static_cast<float>(RoundHeadingDeg(heading));
   }
 
@@ -843,16 +1009,31 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   // owner slot > 0) rebuild the vector as owner velocity + polar(heading,
   // speed). Ownerless or player-launched mode 5/6 keep the inherited velocity
   // only: bombs fall, rockets accelerate onto their heading in the guidance
-  // pass. TODO(decomp(0x0046c320)) skipped: negative shot_random_spread marks
-  // parallel multi-barrel launch whose velocity leaves along the hull heading
-  // +/- |spread| from the selected muzzle side; that needs the turret-quadrant
-  // side result (ShipClassDef +0xa42 lateral offsets), not decoded yet.
+  // pass. Negative shot_random_spread (parallel_side != 0) fires along the
+  // hull heading +/- |spread| from the selected muzzle side. Original quirk:
+  // the hull heading is stored in RADIANS but |spread| is added to it and the
+  // sum is consumed as DEGREES by Math_AddPolarVelocity -- reproduced as-is.
   const float speed = w->projectile_speed / 100.0F;
   if ((mode != 5 && mode != 6) || shot.owner_ship_slot > 0) {
-    AddPolarVelocity(static_cast<float>(RoundHeadingDeg(shot.heading_deg)),
-                     speed,
-                     shot.vel_x,
-                     shot.vel_y);
+    if (owner_ship_slot < 0 ||
+        owner_ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips) ||
+        parallel_side == 0) {
+      AddPolarVelocity(static_cast<float>(RoundHeadingDeg(shot.heading_deg)),
+                       speed,
+                       shot.vel_x,
+                       shot.vel_y);
+    } else {
+      const Ship &owner =
+          state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
+      const float abs_spread = std::fabs(static_cast<float>(w->inaccuracy));
+      float launch_deg = parallel_side > 0 ? abs_spread + owner.heading
+                                           : owner.heading - abs_spread;
+      launch_deg = std::fmod(std::fmod(launch_deg, 360.0F) + 360.0F, 360.0F);
+      AddPolarVelocity(static_cast<float>(RoundRangeEnvelope(launch_deg)),
+                       speed,
+                       shot.vel_x,
+                       shot.vel_y);
+    }
   }
   if (apply_random_spread && mode == 5) {
     apply_spread();

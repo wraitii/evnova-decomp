@@ -132,6 +132,21 @@ NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,
                                                 const Ship &ship,
                                                 std::int16_t weapon_bank);
 
+// Ghidra 0x0046c320 Weapon_SelectTurretQuadrant: pick and advance the firing
+// barrel quadrant for the weapon's turret group (per-ship rotation state,
+// Ship.muzzle_quadrant), offsetting muzzle_x/muzzle_y to the barrel via
+// Weapon_ApplyTurretSpreadVelocity (0x0046c5c0). The muzzle bearing is the
+// displayed rotation frame scaled back to degrees. When the weapon has
+// flags_tertiary 0x10 and target_pos is non-null, the quadrant is replaced by
+// the target-nearest barrel (0x0046c4e0). Returns the quadrant used, or -1
+// when the weapon has no valid turret group.
+std::int16_t NovaWeapon_SelectTurretQuadrant(GameState &state,
+                                             Ship &ship,
+                                             std::int16_t weapon_id,
+                                             float &muzzle_x,
+                                             float &muzzle_y,
+                                             const float *target_pos);
+
 // Ghidra Shot_SpawnShotFromWeapon (0x0041fd30): allocate one clean-room shot
 // record, initialize owner/target/system attribution, muzzle position,
 // heading/spread, inherited velocity, lifetime, and the provisional collision
