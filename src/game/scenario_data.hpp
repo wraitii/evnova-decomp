@@ -324,8 +324,10 @@ struct ShipClass {
 
   std::int16_t default_ai_behavior = 0; // InherentAI
   std::int16_t class_category = 0;      // Strength? / category
-  std::int16_t crew = 0;                // Crew
-  std::int16_t strength = 0;            // Strength
+  std::int16_t crew = 0; // Crew (Ghidra ShipClassDef.capture_power +0x9f2:
+                         // ships with 0 crew cannot be boarded nor capture;
+                         // the AI boarding selector reads it as capture_power)
+  std::int16_t strength = 0; // Strength
 
   std::int16_t inherent_combat_govt = -1;     // InherentGovt (combat)
   std::int16_t inherent_attributes_govt = -1; // InherentGovt (attributes)
@@ -635,6 +637,11 @@ struct Weapon {
                                       // max_ammo)
   std::int16_t burst_reset_cooldown = 0;
   std::int16_t retarget_interval_ticks = 0;
+  // Bible MaxAmmo (resource +0x6c -> WeaponDef +0x1e, loader 0x004bd3c0):
+  // max ammo per weapon instance; 0/-1 defers to the outfit Max field. Read
+  // by ShipClass_CanPlayerCaptureShipClass (0x004694a0) as a fighter bay's
+  // per-mounted-unit capacity.
+  std::int16_t max_ammo = -1;
 
   // Resource +0x3e/+0x40/+0x44 feed the original loader's post-pass range
   // calculation. A valid link adds that weapon's travel distance; the final

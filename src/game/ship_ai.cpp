@@ -2025,6 +2025,66 @@ void NovaAi_UpdateShipState(GameState &state,
   }
 }
 
+// Ghidra 0x00412330 Ship_SelectNearestDisabledShipForBoarding: find the
+// nearest boardable ship and lock it in as the primary target with AI state
+// 0x0d. Candidate gates, in original order: not self, not one of this ship's
+// own carried fighters (squad leader == this ship's instance), active,
+// boarded-target latch clear, disabled, not a mission-fleet ship, and one of
+// -- is the player, has a non-negative post-hit mode hint, has low AI
+// behavior (< 3), its class has low default AI (< 3), or this ship still has
+// a fireable non-secondary weapon (Weapon_HasAnyFireableNonSecondaryWeapon
+// 0x00415c10, sampled once at entry). Then the candidate class must have
+// capture_power > 0 (Bible Crew: 0 crew = cannot be boarded nor capture),
+// and candidates whose squad leader is not the player skip allied govts.
+// Distance is the truncated squared distance (the original's FISTP +
+// sign-correction idiom nets to truncation toward zero).
+void NovaAi_SelectNearestDisabledShipForBoarding(GameState &state, Ship &ship) {
+  const bool has_fireable_weapon =
+      NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship);
+  std::int16_t best_slot = -1;
+  int best_distance = 0;
+  for (std::size_t i = 0; i < GameState::kMaxShips; ++i) {
+    const std::int16_t slot = static_cast<std::int16_t>(i);
+    const Ship &candidate = state.ShipAt(i);
+    if (slot == ship.ship_instance_id ||
+        ship.ship_instance_id == candidate.squad_leader_ship_slot ||
+        !candidate.is_active || candidate.boarded_target_latch != 0 ||
+        !NovaAiShip_IsDisabled(state, candidate) ||
+        candidate.mission_fleet_slot != -1) {
+      continue;
+    }
+    const ShipClass *candidate_cls = state.scenario.Ship(
+        static_cast<std::int16_t>(candidate.ship_class_id + 0x80));
+    const bool low_ai =
+        candidate.ai_behavior_code < 3 ||
+        (candidate_cls != nullptr && candidate_cls->default_ai_behavior < 3);
+    if (!(slot == 0 || candidate.post_hit_mode_hint >= 0 || low_ai ||
+          has_fireable_weapon)) {
+      continue;
+    }
+    if (candidate_cls == nullptr || candidate_cls->crew <= 0) {
+      continue;
+    }
+    if (candidate.squad_leader_ship_slot != 0 &&
+        NovaGovernment_AreGovtsAllied(state.scenario,
+                                      ship.faction_or_government_id,
+                                      candidate.faction_or_government_id)) {
+      continue;
+    }
+    const int distance = static_cast<int>(SquaredDistance(
+        ship.pos_x, ship.pos_y, candidate.pos_x, candidate.pos_y));
+    if (best_slot == -1 || distance < best_distance) {
+      best_slot = slot;
+      best_distance = distance;
+    }
+  }
+  if (best_slot != -1) {
+    ship.primary_target_ship_slot = best_slot;
+    ship.ai_state_code = 0x0d;
+    ship.ai_control_mode = 0;
+  }
+}
+
 // ---- Ghidra 0x00408150 Ship_ApplyShipAiControls : the movement bridge. ----
 // Converts ship.ai_control_mode (written by the state machine each frame) into
 // the concrete fields the integrator consumes: ai_desired_heading_deg (the
@@ -2761,18 +2821,21 @@ void NovaAi_ApplyControls(GameState &state,
       }
       ship.ai_desired_speed -= step;
     } else {
-      // Inside the escort half-span: dock arrival. Non-player fighters are
-      // absorbed back into the carrier's bay (Ship_LaunchCarriedShipFromBay
-      // 0x00415ea0). For the player's slot the original first gates on
-      // ShipClass_CanPlayerCaptureShipClass (0x004694a0, not yet
-      // reimplemented): capturable classes dock the same way, non-capturable
-      // ones clear the escort -- we only model the clear arm.
-      // TODO(decomp(0x004694a0)) skipped: player capture-capability gate.
+      // Inside the escort half-span: dock arrival. The original docks the
+      // fighter into the carrier's bay (Ship_LaunchCarriedShipFromBay
+      // 0x00415ea0) when the player can capture/retain that class
+      // (ShipClass_CanPlayerCaptureShipClass 0x004694a0); otherwise it
+      // clears the escort handoff.
       if (ship.ship_instance_id == 0) {
-        ship.ai_state_code = 0xc;
-        ship.ai_control_mode = 0;
-        ship.primary_target_ship_slot = -1;
-        ship.ai_secondary_target_slot = -1;
+        if (NovaShipClass_CanPlayerCaptureShipClass(state,
+                                                    ship.ship_class_id)) {
+          NovaShip_RecoverCarriedShipToBay(state, ship);
+        } else {
+          ship.ai_state_code = 0xc;
+          ship.ai_control_mode = 0;
+          ship.primary_target_ship_slot = -1;
+          ship.ai_secondary_target_slot = -1;
+        }
       } else {
         NovaShip_RecoverCarriedShipToBay(state, ship);
       }

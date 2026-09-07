@@ -346,6 +346,9 @@ namespace {
   w.flags_tertiary = ReadBe16(bytes, 0x66);
   w.beam_length_px = ReadBeI16(bytes, 0x30);
   w.shot_anim_frame_dwell = ReadBeI16(bytes, 0x32);
+  // Bible MaxAmmo (payload +0x6c -> WeaponDef +0x1e, loader line 0x004c4bxx):
+  // per-instance ammo/bay capacity, 0/-1 = defer to the outfit Max field.
+  w.max_ammo = ReadBeI16(bytes, 0x6c);
   // Beam render fields (Bible Falloff/BeamColor/CoronaColor/LiDensity/
   // LiAmplitude), with the loader's post-read normalization from 0x004bd3c0:
   // beams without an explicit falloff default to 0x10; lightning beams clamp
@@ -483,7 +486,12 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   s.length_meters = ReadBeI16(bytes, 0x40);
   s.default_ai_behavior = ReadBeI16(bytes, 0x42);
   s.timed_action_counter_init = ReadBeI16(bytes, 0x4c);
-  s.crew = ReadBeI16(bytes, 0x44);
+  s.crew = ReadBeI16(bytes, 0x44); // == Ghidra ShipClassDef.capture_power
+  // The loader clamps negatives to 0 (0x004bd3c0): a negative crew count
+  // would otherwise read as boardable/capturing.
+  if (s.crew < 0) {
+    s.crew = 0;
+  }
   s.strength = ReadBeI16(bytes, 0x46);
   s.inherent_combat_govt = ReadBeI16(bytes, 0x48);
   s.inherent_attributes_govt = s.inherent_combat_govt;

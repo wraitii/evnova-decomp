@@ -333,4 +333,20 @@ bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher);
 // (TODO(decomp)).
 void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter);
 
+// Ghidra 0x004694a0 ShipClass_CanPlayerCaptureShipClass: whether the player
+// can capture/retain another ship of the given (zero-based) class. With both
+// outfit_slot and weapon_bank == -1 the holding is resolved: the first armed
+// mode-99 bank whose class (or escort_type clone family) matches the class,
+// then the ModType-3 fighter-bay outfit bound to that bank; no bay/outfit ->
+// false. Occupancy = the bay's loaded secondary count (or the outfit's owned
+// count when both slots are explicit); capacity = weapon MaxAmmo x mounted
+// count, or the outfit Max field when MaxAmmo is 0/-1. Also counts active
+// behavior-5 fighters of this class with squad leader 0 and no mission fleet.
+// Returns occupancy_count < capacity.
+[[nodiscard]] bool
+NovaShipClass_CanPlayerCaptureShipClass(GameState &state,
+                                        std::int16_t ship_class_id,
+                                        std::int16_t outfit_slot = -1,
+                                        std::int16_t weapon_bank = -1);
+
 } // namespace game
