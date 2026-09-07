@@ -76,7 +76,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00412550	Outfit_BoardShipAndTransferCargo		0%	
 0x004133F0	Ship_UpdateShipCombatOddsScore		0%	Ghidra clarified: computes hostile/allied strength ratio into ai_odds_score, with player combat rating contribution when acquirable; not disable pressure or aggression tolerance
 0x00413610	Government_TryTriggerGovtAssistanceEncounter		0%	
-0x00413810	Weapon_InitShipWeaponBursts		0%	
+0x00413810	Weapon_InitShipWeaponBursts	src/game/weapon.cpp	100%	Burst-counter preload slice runs inside NovaWeapon_EnsureNpcWeaponBanks (per-bank zeroed burst counter + cooldown preloaded to burst_reset_cooldown for configured burst weapons); the stock-loadout copy is the port collapsed shared prefix (see EnsureNpcWeaponBanks).
 0x004138A0	Weapon_ClassifyShipWeaponAmmoReadiness	src/game/weapon.cpp	100%	NovaWeapon_ClassifyAmmoReadiness: armed/usable/depleted buckets over the ship's npc_weapon_bank rows vs WeaponDef ammo_type; free-energy [-1000,-1] never depleted, fuel weapons need fuel STRICTLY > |cost|-1000 (FCOMP equality = depleted). Wired into the assist supervisor's ammo downgrade (0x004048a0).
 0x00413990	Ship_UpdateEscortFormations	src/game/escort_formation.cpp	70%	NovaEscort_UpdateFormations: max-participant span*0.7 radius clamp 24..60, slot-ordered wedge assignment via SetEscortLaunchOffsetVelocity, snap arm skips state-0x15; wired per-frame (snap=0, AI + player core 0x00451003) and at system entry (snap=1). Escort sprite span uses the class own shan BaseXSize (divergence vs escort_type clone-source resolve for non-clone classes, TODO(decomp)).
 0x00413B60	Ship_SetEscortLaunchOffsetVelocity	src/game/escort_formation.cpp	90%	NovaEscort SetEscortLaunchOffsetVelocity: both even/odd-count wedge tables (slots 2..0x15) ported verbatim, polar offsets in the leader heading frame, writes formation_offset (+0x28/0x2c, renamed in Ghidra) + leader position.
@@ -364,7 +364,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00464520	Weapon_HasLaunchBayWeapon		0%	
 0x00464590	ShipClass_FindLaunchBayShipClassId		0%	
 0x00464600	Weapon_FindLaunchBayWeaponBank		0%	
-0x00464670	Weapon_HasLoadedLaunchBayAmmo		0%	
+0x00464670	Weapon_HasLoadedLaunchBayAmmo	src/game/weapon.cpp	100%	NovaWeapon_HasLoadedLaunchBayAmmo: faithful port; KeyCarried gate (ShipClass.key_carried_ship_class, loader-rebased) + mode-99 bank scan with mounted ammo>0, loaded secondary>0, ammo_type-0x80 == KeyCarried. Player/NPC counter storage split mirrors CanFire.
 0x00464700	Outfit_HasPlayerOwnedOutfitType0x14		0%	
 0x00464760	Outfit_HasPlayerOwnedOutfitType0x0F_Cached		0%	
 0x00464810	Ship_GetShipJammingScore	src/game/ship_ai.cpp	90%	NovaAi_GetShipJammingScore: full port - fire-restricted early-out, govt InhJam base (InherentGovt), outfit ModType 0x21..0x24 ModVal additions (player scans all owned outfits, NPC scans class stock outfits once each), NPC govt flags_primary 0x80 halving, clamp 0..100, per-ship cache (Ship.jamming_score). Divergence: port also invalidates the persistent player cache on outfit change (OutfitMarkStatsDirty) and system transitions; original only reseeds at ship-slot allocation.
@@ -422,7 +422,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004687B0	Ship_IsShipDisabled	src/game/ship_ai.cpp	85%	RENAMED from Ship_IsShipFireRestricted 2026: the predicate doubles as the disabled check everywhere (weapons, jump engage 0x0044c1a3, collapse gate 0x0044b037, targeting scans). Ported as NovaAiShip_IsDisabled: derelict-govt 0x800 (Bible: 'ships of this govt start out disabled (derelicts)' -- applied as a standing source) and the armor gate (armor*100 kFireRestrictArmorPctScale 0x575800 < max*(33.33 @0x575808 / 10.0 @0x5757f8 with capability 0x10), exactly Bible 33%/10%) are faithful. CORRECTED 2026: non-player ships with a stellar target are EXEMPT -- the original returns not-disabled without reaching the armor check (XOR AL,AL at 0x00468856); the port previously returned true for them. Remaining TODO(decomp): mission spawn_behavior-5 special-ship arm (needs the special_ship_attacking runtime flag).
 0x004688E0	Ship_IsShipDestroyed	src/game/ship_ai.cpp	100%	NovaAiShip_IsDestroyed: death-timer-active or armor<=0
 0x00468920	Ship_CanPlayerHaveMoreEscorts	src/game/boarding_plunder.cpp	100%	Faithful: behavior-6 escort count (ai_target==0, no mission fleet) < 6.
-0x00468990	Weapon_CanFireWeaponBank	src/game/weapon.cpp	50%	ammo/energy sufficiency gate now distinguishes energy weapons (ammo_type == -1), ammo-backed weapons, and carrier-bay mode 99 for both player and NPC bank storage; cloak-visibility / launch-bay-dependency gates not reproduced
+0x00468990	Weapon_CanFireWeaponBank	src/game/weapon.cpp	100%	Full port: player/NPC cost-bank index branch, NPC-only flags_secondary 0x100 mount gate, cloak-visibility threshold gate (0x4000 = fire-while-cloaked), launch-bay dependency (0x80 via 0x00464670), mode-99 loaded counter, ammo [0,0xff], fuel-drawn <= -1000 at (|cost|-1000)*0.1 (DAT_00575810; 0x004138a0 classifier is UNSCALED -- original inconsistency kept). Return is a plain bool in AL (the old "bitfield code" plate reading was FNSTSW AH residue).
 0x00468AF0	System_HasUsableTravelDestination	src/game/travel.cpp	90%	NovaSystem_HasUsableTravelDestination: scans nav_defs[0..3] for a stellar with travel_flags 0x20 clear and availability_flags 0x3000 clear
 0x00468B50	Stellar_IsStellarReachableForTravel		0%	
 0x00468D90	NovaUi_DrawSystemFactionConflictStatus	src/nova_app.cpp	92%	Two ports: MenuSystemLegalStatusText (nova_app.cpp, menu pilot screen) and LegalStatusText (starmap.cpp, side panel). The starmap port scans the first THREE nav defs per the binary (0x00468ea0 loop bound < 3) - the menu port's four-deep scan is a small divergence to reconcile. Signed-overflow guards reduced to plain comparisons (shipped tolerances positive).
@@ -490,7 +490,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046CCA0	Mission_AccumulatePlayerContributeMask	src/game/outfit.cpp	85%	Ported as NovaOutfit_AccumulatePlayerContributeMask (outfit.cpp): ship-class baseline + owned outfits + active crön events (present
 0x0046CD80	Outfit_EvaluateRequireMask		0%	Require-mask satisfaction now routed through the ship-class-seeded ContributeMask (landed_store MeetsRequire)
 0x0046CDD0	Stellar_ComputeShipJumpDepth		0%	
-0x0046CEC0	Weapon_GetShipMaxWeaponRange		0%	
+0x0046CEC0	Weapon_GetShipMaxWeaponRange	src/game/weapon.cpp	100%	NovaWeapon_GetShipMaxWeaponRange: armed(ammo>0)+CanFire gate over 0x100 banks; reach = beam_length_px (modes 0/3), floor(range_scalar) via FISTP+backoff (modes -1/4/7 -- original case list tests 7 twice, mode 8 contributes 0, quirk kept), *0.85 mode 1 (DAT_00575850), *0.5 mode 6 (DAT_005757c8); clamp 0x7fff. Caller 0x00405590 (state-3 engage envelope, 0.85 scale) wiring deferred with the state-machine slice.
 0x0046D080	Ship_CheckSpecialLoadoutCapability		0%	
 0x0046D190	Ship_ShipsShareSquadRoot		70%	Implemented as SharesSquadRoot in src/game/collision.cpp: walks both squad-leader chains to roots and compares. Divergence: bounded walk tolerating malformed cycles (original is unbounded).
 0x0046D250	PascalString_ToCStringInPlace		0%	

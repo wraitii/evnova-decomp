@@ -508,6 +508,16 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   // ionization capacity from ShipClassDef.ionization_capacity at payload
   // +0x36c. It is distinct from the nearby default-outfit count block.
   s.ionization_capacity = ReadBeI16(bytes, 0x36c);
+  // Bible KeyCarried (payload +0x36e -> ShipClassDef +0xa04). Loader
+  // 0x004c1967..0x004c19be: raw BE copy, then values >= 0x80 are rebased to
+  // the zero-based class id; anything below stores -1 (unset). Runs even
+  // when ionization capacity clamps to 0 (LAB_004c42b0 jumps back in).
+  if (bytes.size() >= 0x370) {
+    const std::int16_t key = ReadBeI16(bytes, 0x36e);
+    s.key_carried_ship_class = key >= 0x80
+                                   ? static_cast<std::int16_t>(key - 0x80)
+                                   : static_cast<std::int16_t>(-1);
+  }
   s.ionization_decay_rate =
       std::max(1.0F, static_cast<float>(ReadBeI16(bytes, 0x36a)) * 0.01F);
   s.flags_secondary = ReadBe16(bytes, 0x62);
