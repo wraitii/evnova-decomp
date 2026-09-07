@@ -299,4 +299,38 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
 // time-varying set of ships/positions instead of the deterministic pause.
 void NovaGame_ReseedRandom(GameState &state);
 
+// Ghidra 0x0041e640 Weapon_SpawnShipFromCarrierBayWeapon: allocate and
+// populate one carried fighter launched from `launcher`'s carrier-bay weapon
+// bank. The fighter is a behavior-5 ship attached to the carrier via
+// squad_leader_ship_slot, spawned at the carrier's position/heading/velocity,
+// class = bay weapon ammo_type - 0x80, with launch spread (weapon
+// Inaccuracy10) and launch velocity (weapon Speed_a/100 clamped per-axis to
+// the fighter's effective max speed). Mirrors the sibling escort-command and
+// squad bookkeeping, then seeds the stock 8-bank loadout. Returns the new
+// ship slot, or -1 on a bad bank / no free slot.
+[[nodiscard]] int NovaWeapon_SpawnShipFromCarrierBayWeapon(
+    GameState &state, const Ship &launcher, std::int16_t weapon_bank);
+
+// Ghidra 0x0040d9a0 Ship_LaunchShipFromCarrierBay: per-frame launch driver.
+// Requires an active primary target in-system, then scans the banks for the
+// first loaded mode-99 bay weapon (mounted ammo > 0, loaded secondary > 0,
+// NPC-mount gate Flags2 0x100 clear) whose cooldown has expired, makes it the
+// active bank, spawns the fighter, queues the fire sound, sets the bank
+// cooldown to reload / MOUNTED ammo (original quirk -- the divisor is the
+// mounted count, not the loaded secondary), decrements the secondary, and
+// applies the shared-cooldown arm (Flags3 0x20: every other bank's cooldown
+// rises to new_cooldown + 2.0 (DAT_00575040) when smaller). Returns true when
+// a fighter launched.
+bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher);
+
+// Ghidra 0x00415ea0 Ship_LaunchCarriedShipFromBay (bay-RECOVERY arm; called
+// when a carried fighter reaches its carrier in AI control mode 8): finds the
+// carrier's mode-99 bay weapon matching the fighter's class id (fallback:
+// the class's escort_type clone-source id), tops the bay back up (+1 loaded
+// secondary, priming the bank cooldown to reload when it was empty), and
+// deactivates the fighter with its squad/AI linkage cleared. The original's
+// g_shipAvailabilityCachesDirty set on a player carrier stays deferred
+// (TODO(decomp)).
+void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter);
+
 } // namespace game

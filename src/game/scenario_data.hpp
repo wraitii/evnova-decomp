@@ -362,6 +362,18 @@ struct ShipClass {
   // (0x00464670) matches a loaded mode-99 bay weapon whose ammo_type - 0x80
   // equals this id; -1 disables the launch-bay fire gate.
   std::int16_t key_carried_ship_class = -1;
+  // Ghidra ShipClassDef +0x9fe <- sh\x8an AnimDelay +0x30 (loader
+  // ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0). Combat/sprite
+  // animation cadence seed drawn by the ship spawn paths
+  // (Ship_AllocateShipSlotInSystem 0x004254b0,
+  // Weapon_SpawnShipFromCarrierBayWeapon 0x0041e640).
+  std::int16_t combat_state_init_range = 0;
+  // Ghidra ShipClassDef +0xa08: zero-based id of the class whose base sprite
+  // this class cloned (0x004b4ee0 clone arm: the first EARLIER class in load
+  // order whose sh\x8an BaseImageID matches; -1 when the class builds its own
+  // sprite). Read by Ship_LaunchCarriedShipFromBay 0x00415ea0's bay-weapon
+  // fallback, mapping a fighter variant back to its carrier's bay weapon.
+  std::int16_t escort_type = -1;
   // Ghidra ShipClassDef +0xa06 (sh\x8an +0x34 FramesPer, 36 when 0): the
   // rotation-grid frame count. The turret muzzle bearing is the displayed
   // rotation frame scaled back to degrees (Weapon_SelectTurretQuadrant

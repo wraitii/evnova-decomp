@@ -5,6 +5,7 @@
 #include "mission.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
+#include "spaceflight.hpp"
 #include "weapon.hpp"
 
 #include <array>
@@ -232,7 +233,22 @@ int NovaShip_AllocateShipSlot(GameState &state,
   ship.credits = 0;
   ship.target_stellar_object_id = -1;
 
-  // Position scatter: NovaRandom_Range(0x5dc) - 0x2ee -> [-750, 750).
+  // The original's allocator draws the sprite-animation cadence seeds from
+  // the ship class AS RESET (class 0), before any spawner rewrites the class
+  // id and before the position scatter; spawners that care redraw from their
+  // own class.
+  if (const ShipClass *class0 = state.scenario.Ship(0x80); class0 != nullptr) {
+    if (class0->skill_variance_percent > 0) {
+      ship.sprite_animation_cycle_index =
+          RandomBelow(state, class0->skill_variance_percent);
+    }
+    if (class0->combat_state_init_range > 0) {
+      ship.sprite_animation_timer = static_cast<float>(
+          RandomBelow(state, class0->combat_state_init_range));
+    }
+  }
+
+  // Position scatter: NovaRandom_Range(0x5dc) - 0x2ee -> [-750,750).
   ship.pos_x = static_cast<float>(RandomBelow(state, 0x5dc) - 0x2ee);
   ship.pos_y = static_cast<float>(RandomBelow(state, 0x5dc) - 0x2ee);
 
@@ -1642,6 +1658,365 @@ void NovaGame_ReseedRandom(GameState &state) {
   state.rng.seed(seq);
   NovaLog::Debug("game random reseeded with entropy; ship/fleet spawns will "
                  "vary across sessions");
+}
+
+int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
+                                             const Ship &launcher,
+                                             std::int16_t weapon_bank) {
+  if (weapon_bank < 0 || weapon_bank >= 0x100) {
+    return -1;
+  }
+  const Weapon *bay_weapon =
+      state.scenario.Weapon(static_cast<std::int16_t>(weapon_bank + 0x80));
+  if (bay_weapon == nullptr) {
+    return -1;
+  }
+  const int slot =
+      NovaShip_AllocateShipSlot(state, launcher.current_system_id, 8);
+  if (slot < 0) {
+    return -1;
+  }
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  const ShipClass *cls = state.scenario.Ship(bay_weapon->ammo_type);
+
+  ship.current_system_id = launcher.current_system_id;
+  ship.pos_x = launcher.pos_x;
+  ship.pos_y = launcher.pos_y;
+  ship.vel_x = launcher.vel_x;
+  ship.vel_y = launcher.vel_y;
+  ship.speed = launcher.speed;
+  ship.ship_class_id = static_cast<std::int16_t>(bay_weapon->ammo_type - 0x80);
+  ship.target_stellar_object_id = -1;
+  ship.velocity_match_target_ship_slot = -1;
+  ship.mission_hail_latch = 0;
+  ship.afterburner_latch = NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;
+  ship.mining_scoop_active = NovaOutfit_HasMiningScoopOutfit(state, ship);
+  ship.escort_origin_mark = 0; // ShipState +0xbb
+  ship.mission_owner_slot = -1;
+  ship.ai_behavior_code = 5;
+  ship.faction_or_government_id = launcher.faction_or_government_id;
+  ship.travel_transfer_mode = -1;
+  ship.ai_station_hold_timer = 0.0F;
+  ship.ai_state_code = 0;
+  ship.ai_control_mode = 0;
+  ship.boarded_target_latch = 0;
+  ship.post_hit_mode_hint = -1;
+  ship.cloak_transition_latch = 0;
+  ship.cloak_fade_progress = 0.0F;
+  ship.ai_hostility_accumulator = 0;
+  ship.jump_destination_stellar_id = -2;
+  ship.jump_destination_system_id = -2;
+  // The original calls Ship_ComputeShipMaxShieldPoints / MaxArmor
+  // (0x00463550/0x004637a0); for a freshly spawned, outfit-less fighter those
+  // equal the class base.
+  ship.shield_points =
+      static_cast<float>(cls != nullptr ? cls->base_shield : 0);
+  ship.armor_points = static_cast<float>(cls != nullptr ? cls->base_armor : 0);
+  ship.ai_maneuver_timer_ms = static_cast<float>(bay_weapon->lifetime_ticks);
+  ship.squad_leader_ship_slot = launcher.ship_instance_id;
+  ship.heading = launcher.heading;
+  ship.pers_def_slot = -1;
+  ship.dude_class_id = -1;
+  ship.mission_fleet_slot = -1;
+  ship.ionization_points = 0.0F;
+  ship.ionization_color = 0; // ShipState field_0xb0
+  ship.sprite_animation_cycle_index = 0;
+  ship.timed_action_counter =
+      cls != nullptr ? cls->timed_action_counter_init : -1;
+  ship.waypoint_arrival_marker_b = static_cast<std::int16_t>(
+      (cls != nullptr ? cls->skill_variance_percent : 0) - 1);
+  ship.waypoint_arrival_marker_a = 0;
+  ship.turn_bank_animation_phase = 0.0F;
+  ship.hit_reaction_timer = 0.0F;
+  ship.player_aggro_accumulator = 0.0F;
+  ship.ai_turn_bias_dir = 0;
+  ship.sprite_animation_timer = 0.0F;
+  ship.cloak_scanner_reveal_screen = -1;
+  ship.cloak_scanner_reveal_radar = -1;
+  ship.cloak_damage_deactivate_latch = -1;
+  ship.escort_command_code = -1;
+  ship.escort_command_pending = 0;
+  // TODO(decomp): the original also zeroes ShipState fields not yet on the
+  // clean-room Ship struct: field_0x60, weapon_exit_animation_phase,
+  // alternate_sprite_cycle_index, weapon_sprite_flash_level,
+  // escort_released_mark/escort_upgrade_mark, and the field_0xc924 short
+  // (0xffff).
+  ship.voice_type_mode = RandomBelow(state, 2);
+  if (cls != nullptr && cls->inherent_attributes_govt != -1) {
+    if (const Government *govt =
+            state.scenario.Government(cls->inherent_attributes_govt);
+        govt != nullptr && govt->voice_type_mode != -1) {
+      ship.voice_type_mode = govt->voice_type_mode;
+    }
+  }
+  ship.jamming_score = {-1, -1, -1, -1};
+  if (cls != nullptr && cls->skill_variance_percent > 0) {
+    ship.sprite_animation_cycle_index =
+        RandomBelow(state, cls->skill_variance_percent);
+  }
+  if (cls != nullptr && cls->combat_state_init_range > 0) {
+    ship.sprite_animation_timer =
+        static_cast<float>(RandomBelow(state, cls->combat_state_init_range));
+  }
+
+  // Squad/category bookkeeping. Player-carried category-0 (light) fighters
+  // with no sibling clear the player's per-category command when it targets
+  // category 3; otherwise the fighter inherits a same-squad, same-category
+  // sibling's escort command.
+  const std::int16_t leader_slot = ship.squad_leader_ship_slot;
+  if (leader_slot == 0 && cls != nullptr && cls->class_category == 0) {
+    bool has_sibling = false;
+    for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+      if (static_cast<std::int16_t>(i) == slot) {
+        continue;
+      }
+      const Ship &other = state.ShipAt(static_cast<std::size_t>(i));
+      if (other.is_active && other.squad_leader_ship_slot == 0) {
+        has_sibling = true;
+        break;
+      }
+    }
+    if (!has_sibling && state.target_category_command[0] == 3) {
+      state.target_category_command[0] = -1;
+    }
+  } else if (cls != nullptr) {
+    for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+      if (static_cast<std::int16_t>(i) == slot) {
+        continue;
+      }
+      const Ship &other = state.ShipAt(static_cast<std::size_t>(i));
+      if (!other.is_active || other.squad_leader_ship_slot != leader_slot) {
+        continue;
+      }
+      const ShipClass *other_cls = state.scenario.Ship(
+          static_cast<std::int16_t>(other.ship_class_id + 0x80));
+      if (other_cls != nullptr &&
+          other_cls->class_category == cls->class_category &&
+          other.escort_command_code != -1) {
+        ship.escort_command_code = other.escort_command_code;
+        break;
+      }
+    }
+  }
+
+  ship.primary_target_ship_slot =
+      launcher.ship_instance_id == 0 ? -1 : launcher.primary_target_ship_slot;
+
+  // Launch spread (weapon Inaccuracy10): heading += rand(2*spread) - spread.
+  if (bay_weapon->inaccuracy > 0) {
+    ship.heading =
+        static_cast<float>(
+            RandomBelow(state,
+                        static_cast<std::int32_t>(bay_weapon->inaccuracy) * 2) -
+            bay_weapon->inaccuracy) +
+        ship.heading;
+  }
+
+  // Launch velocity: Math_AddPolarVelocityWithClamp (0x0043b4e0) at the
+  // truncated heading (the original's FISTP + sign-correction idiom nets to
+  // truncation toward zero), weapon Speed_a/100, clamped per-axis to the
+  // fighter's effective max speed.
+  const float max_speed =
+      cls != nullptr ? NovaShip_ComputeEffectiveStats(state, ship, *cls)
+                           .max_speed_px_per_tick
+                     : 0.0F;
+  const float bearing_rad = static_cast<float>(static_cast<int>(ship.heading)) *
+                            (3.14159265358979323846F / 180.0F);
+  NovaPlayer_AddPolarVelocityClamped(bearing_rad,
+                                     bay_weapon->projectile_speed / 100.0F,
+                                     max_speed,
+                                     ship.vel_x,
+                                     ship.vel_y);
+
+  // Stock loadout: the original copies all 0x100 bank ammo/secondary rows
+  // from the class's eight default-weapon tables; the clean-room builds the
+  // same loadout eagerly via the shared NPC bank initializer.
+  NovaWeapon_EnsureNpcWeaponBanks(state, ship);
+
+  // Clear a primary target that is the squad leader or a same-squad sibling.
+  if (ship.primary_target_ship_slot != -1) {
+    const Ship &target =
+        state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
+    if (leader_slot == ship.primary_target_ship_slot ||
+        (leader_slot == target.squad_leader_ship_slot && leader_slot != -1)) {
+      ship.primary_target_ship_slot = -1;
+    }
+  }
+
+  NovaShip_ResetAiBehaviorRuntimeFields(ship);
+  return slot;
+}
+
+bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher) {
+  if (launcher.primary_target_ship_slot == -1) {
+    return false;
+  }
+  const Ship &target =
+      state.ShipAt(static_cast<std::size_t>(launcher.primary_target_ship_slot));
+  if (target.current_system_id != launcher.current_system_id ||
+      !target.is_active) {
+    return false;
+  }
+
+  // First loaded mode-99 bay bank: mounted ammo > 0, loaded secondary > 0,
+  // NPC-mount gate (Flags2 0x100) clear.
+  std::int16_t bay_bank = -1;
+  const bool is_player = launcher.ship_instance_id == 0;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *def =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (def == nullptr || def->weapon_mode_code != 99 ||
+        (def->flags_secondary & 0x100) != 0) {
+      continue;
+    }
+    const std::int16_t mounted =
+        is_player
+            ? state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100]
+            : launcher.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+    const std::int16_t loaded =
+        is_player
+            ? state.weapon_bank_secondary[static_cast<std::size_t>(bank) * 100]
+            : launcher
+                  .npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+    if (mounted < 1 || loaded < 1) {
+      continue;
+    }
+    bay_bank = bank;
+    break;
+  }
+  if (bay_bank == -1) {
+    return false;
+  }
+  const Weapon *def =
+      state.scenario.Weapon(static_cast<std::int16_t>(bay_bank + 0x80));
+
+  auto bank_cooldown = [&](std::int16_t bank) -> float & {
+    return is_player
+               ? state.weapon_bank_cooldown[static_cast<std::size_t>(bank)]
+               : launcher
+                     .npc_weapon_bank_cooldown[static_cast<std::size_t>(bank)];
+  };
+  if (bank_cooldown(bay_bank) > 0.0F) {
+    // FCOMPP against 0.0: NaN and positive cooldowns fail; zero/negative pass.
+    return false;
+  }
+
+  launcher.active_weapon_bank_slot = bay_bank;
+  if (NovaWeapon_SpawnShipFromCarrierBayWeapon(state, launcher, bay_bank) < 0) {
+    return false;
+  }
+
+  // Launch sound: the queued path plays def.fire_sound relative to the
+  // launcher (original: NovaAudio_PlaySpatialByDistance, volume 5).
+  if (def != nullptr && def->fire_sound >= 0) {
+    state.pending_fire_sounds.push_back(
+        {def->fire_sound, launcher.pos_x, launcher.pos_y, false});
+  }
+
+  // Original quirk: the cooldown divisor is the bank's MOUNTED count, not
+  // the loaded secondary.
+  const std::int16_t mounted =
+      is_player
+          ? state.weapon_bank_ammo[static_cast<std::size_t>(bay_bank) * 100]
+          : launcher.npc_weapon_bank_ammo[static_cast<std::size_t>(bay_bank)];
+  const float new_cooldown =
+      def != nullptr
+          ? static_cast<float>(def->reload_ticks) / static_cast<float>(mounted)
+          : 0.0F;
+  bank_cooldown(bay_bank) = new_cooldown;
+  auto bank_loaded = [&](std::int16_t bank) -> std::int16_t & {
+    return is_player
+               ? state.weapon_bank_secondary[static_cast<std::size_t>(bank) *
+                                             100]
+               : launcher
+                     .npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+  };
+  --bank_loaded(bay_bank);
+
+  // Shared cooldown (Flags3 0x20): every other bank's cooldown rises to
+  // new_cooldown + 2.0 (DAT_00575040) when smaller.
+  if (def != nullptr && (def->flags_tertiary & 0x20) != 0) {
+    for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+      if (bank != bay_bank && bank_cooldown(bank) < new_cooldown + 2.0F) {
+        bank_cooldown(bank) = new_cooldown + 2.0F;
+      }
+    }
+  }
+  return true;
+}
+
+void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
+  const std::int16_t carrier_slot = fighter.squad_leader_ship_slot;
+  if (carrier_slot < 0 ||
+      static_cast<std::size_t>(carrier_slot) >= GameState::kMaxShips) {
+    return;
+  }
+  Ship &carrier = state.ShipAt(static_cast<std::size_t>(carrier_slot));
+  const bool carrier_is_player = carrier_slot == 0;
+
+  // The carrier's mode-99 bay weapon matching the fighter's class (fallback:
+  // the class's escort_type clone-source id), with mounted ammo remaining.
+  const auto find_bay_bank = [&](std::int16_t class_id) -> std::int16_t {
+    if (class_id < 0) {
+      return -1;
+    }
+    for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+      const Weapon *def =
+          state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+      if (def == nullptr || def->weapon_mode_code != 99 ||
+          def->ammo_type != class_id) {
+        continue;
+      }
+      const std::int16_t mounted =
+          carrier_is_player
+              ? state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100]
+              : carrier.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+      if (mounted > 0) {
+        return bank;
+      }
+    }
+    return -1;
+  };
+  const std::int16_t fighter_class_resource =
+      static_cast<std::int16_t>(fighter.ship_class_id + 0x80);
+  std::int16_t bay_bank = find_bay_bank(fighter_class_resource);
+  if (bay_bank == -1) {
+    if (const ShipClass *cls = state.scenario.Ship(fighter_class_resource);
+        cls != nullptr) {
+      bay_bank =
+          find_bay_bank(static_cast<std::int16_t>(cls->escort_type + 0x80));
+    }
+  }
+  if (bay_bank == -1) {
+    return;
+  }
+  const Weapon *def =
+      state.scenario.Weapon(static_cast<std::int16_t>(bay_bank + 0x80));
+
+  auto bank_loaded = [&](std::int16_t bank) -> std::int16_t & {
+    return carrier_is_player
+               ? state.weapon_bank_secondary[static_cast<std::size_t>(bank) *
+                                             100]
+               : carrier
+                     .npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+  };
+  auto bank_cooldown = [&](std::int16_t bank) -> float & {
+    return carrier_is_player
+               ? state.weapon_bank_cooldown[static_cast<std::size_t>(bank)]
+               : carrier
+                     .npc_weapon_bank_cooldown[static_cast<std::size_t>(bank)];
+  };
+  // An empty bay re-arms the weapon's reload before the unit is restored.
+  if (bank_loaded(bay_bank) == 0 && def != nullptr &&
+      bank_cooldown(bay_bank) < static_cast<float>(def->reload_ticks)) {
+    bank_cooldown(bay_bank) = static_cast<float>(def->reload_ticks);
+  }
+  ++bank_loaded(bay_bank);
+  // g_shipAvailabilityCachesDirty = 1 on a player carrier (TODO(decomp)).
+
+  fighter.is_active = false;
+  fighter.squad_leader_ship_slot = -1;
+  fighter.ai_behavior_code = -1;
 }
 
 } // namespace game
