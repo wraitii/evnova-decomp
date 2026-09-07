@@ -551,10 +551,10 @@ struct PilotControlState {
   bool male = true;
 
   // One-shot outfit-effect latches (Ghidra DAT_007d4c08 / DAT_007d4c09). The
-  // outfitter clears both on entry (NovaUi_RunTravelOutfitInteractionLoop
+  // outfitter clears both on entry (NovaUi_RunOutfitterInteractionLoop
   // 0x0048ea70); Outfit_GrantOutfitToPlayer (0x00427770) sets the map latch
   // whenever a ModType-16 map outfit is granted and the record latch when a
-  // ModType-21 record-clear actually runs; NovaUi_IsTravelOutfitPurchaseAllowed
+  // ModType-21 record-clear actually runs; NovaUi_IsOutfitterPurchaseAllowed
   // (0x00491950) refuses to sell a map outfit while the map latch is set (or a
   // record-clean outfit while the record latch is set). Net effect: one map
   // purchase (and one record clean) per outfitter visit. UI latches, not

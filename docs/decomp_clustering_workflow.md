@@ -130,7 +130,7 @@ Examples:
 - `PNG_`
 - `NetQuery_`
 - `MemOrStream_`
-- `TravelOutfitMenu_`
+- `OutfitterMenu_`
 
 2. Sample a few unnamed functions from the cluster.
 

@@ -639,7 +639,7 @@ struct Weapon {
   std::int16_t retarget_interval_ticks = 0;
   // Bible MaxAmmo (resource +0x6c -> WeaponDef +0x1e, loader 0x004bd3c0):
   // max ammo per weapon instance; 0/-1 defers to the outfit Max field. Read
-  // by ShipClass_CanPlayerCaptureShipClass (0x004694a0) as a fighter bay's
+  // by ShipClass_HasPlayerBayCapacityFor (0x004694a0) as a fighter bay's
   // per-mounted-unit capacity.
   std::int16_t max_ammo = -1;
 

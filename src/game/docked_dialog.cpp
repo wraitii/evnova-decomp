@@ -814,7 +814,7 @@ void DrawStoreBase(SdlPlatform &platform,
       SDL_RenderTexture(renderer, backdrop, nullptr, &dst);
     }
   }
-  // Ghidra's NovaUi_RedrawTravelOutfitMenu (0x00490c70) and the analogous
+  // Ghidra's NovaUi_RedrawOutfitterMenu (0x00490c70) and the analogous
   // shipyard redraw fill and draw their modal window surface, then composite
   // it over the existing travel scene. There is no full-screen dim/scrim.
   if (frame != nullptr) {
@@ -968,7 +968,7 @@ void DrawStoreContents(SdlPlatform &platform,
         outfit_store ? std::string_view{state.scenario.Outfit(id)->short_name}
                      : std::string_view{state.scenario.Ship(id)->short_name};
     const StoreLabelLines label = SplitStoreLabel(name);
-    // NovaUi_RedrawTravelOutfitMenu (0x00490c70) and
+    // NovaUi_RedrawOutfitterMenu (0x00490c70) and
     // NovaUi_DrawShipyardShipList (0x004948b0) place a single line at
     // bottom-6, or split labels at bottom-14 and bottom-3.
     const float first_baseline =
@@ -1798,13 +1798,13 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
   }
 }
 
-// Ghidra 0x0048ea70 NovaUi_RunTravelOutfitInteractionLoop and
+// Ghidra 0x0048ea70 NovaUi_RunOutfitterInteractionLoop and
 // 0x00492f30 NovaUi_RunShipyardPurchaseLoop: one generic store loop replaces
 // both (service is a parameter). The 0x00493fc0 NovaUi_ShipyardHandleSelection
 // Input / 0x0049f3f0 HitTestAndTrackShipyardActionButtons /
 // 0x0049f6f0 DrawShipyardActionButtons / 0x0049f8f0
-// HitTestAndTrackTravelOutfitActionButtons / 0x0049fbb0
-// DrawTravelOutfitActionButtons and the 0x00497b70 BlitPictThumbnailCached
+// HitTestAndTrackOutfitterActionButtons / 0x0049fbb0
+// DrawOutfitterActionButtons and the 0x00497b70 BlitPictThumbnailCached
 // cache all run inline within this function and the DrawStore* helpers below;
 // the 0x004956a0/0x00495c80 detail window runs in RunShipyardInfoDialog above
 // (opened by the Info action button).
@@ -1854,7 +1854,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       if (session.selected_id >= 0x80) {
         // The selection-desc resource is keyed at the zero-based item index
         // plus the family base: outfits (DLOG 0x3ea) at +3000 (Ghidra
-        // NovaUi_HandleTravelOutfitMenuInput 0x004903c0), ship classes at
+        // NovaUi_HandleOutfitterMenuInput 0x004903c0), ship classes at
         // +13000 (NovaUi_ShipyardHandleSelectionInput 0x00493fc0). The port's
         // selected_id is the raw 0x80+ resource id, so subtract 0x80 first.
         const auto desc_id = static_cast<std::uint16_t>(
@@ -2835,7 +2835,7 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   // Shared read-only text view (NovaTextView 0x004bcd90) over DITL entry 3.
   NovaTextScrollView view(font_cache, text, text_rect);
   // One window frame over the docked backing store. The original's draw
-  // callback (NovaUi_DrawTravelOutfitMenu 0x00447680) fills the window, blits
+  // callback (NovaUi_DrawOutfitterMenu 0x00447680) fills the window, blits
   // the main art top-anchored (clipped), then the top and bottom strips.
   auto draw_frame = [&]() {
     platform.SetFullscreenPlayfield();
