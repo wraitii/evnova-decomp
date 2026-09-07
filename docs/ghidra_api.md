@@ -185,6 +185,9 @@ Parameters:
   `output_candidates` to force that storage as the return value
 - `output_type` - optional type name overriding the inferred return type
 - `exits` - optional `auto` (default), `on` or `off`; see multi-exit regions below
+- `trace` - optional Boolean, default `false`; reports how each op of the region
+  paired up with the parent's, for diagnosing a type or name that did not carry
+  over
 - `force_infer` - deprecated alias for `"names":"full"`
 
 The reply reports `inputs` and `output_candidates` alongside the C, so you can
