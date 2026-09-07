@@ -2019,7 +2019,7 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
   fighter.ai_behavior_code = -1;
 }
 
-bool NovaShipClass_CanPlayerCaptureShipClass(GameState &state,
+bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
                                              std::int16_t ship_class_id,
                                              std::int16_t outfit_slot,
                                              std::int16_t weapon_bank) {

@@ -345,11 +345,11 @@ LandedStoreSession NovaLanded_OpenOutfitterSession(GameState &state,
   LandedStoreSession session;
   session.kind = LandedStoreKind::kOutfitter;
   // The outfitter clears both one-shot effect latches on entry
-  // (NovaUi_RunTravelOutfitInteractionLoop 0x0048ea70): one map purchase and
+  // (NovaUi_RunOutfitterInteractionLoop 0x0048ea70): one map purchase and
   // one record-clean per visit.
   state.control.map_grant_latch = false;
   state.control.record_grant_latch = false;
-  // Ghidra NovaUi_RunTravelOutfitInteractionLoop (0x0048ea70) runs
+  // Ghidra NovaUi_RunOutfitterInteractionLoop (0x0048ea70) runs
   // Weapon_ReconcileOutfitPoolWithWeaponBanks at modal entry, before
   // Outfit_RebuildAvailableOutfitListForTravelStellar builds the listing, so
   // any stock-bank weapon not yet registered as an owned outfit (e.g. a
@@ -430,7 +430,7 @@ std::int32_t NovaLanded_FreeMass(const GameState &state) {
   return free_mass;
 }
 
-// Ghidra 0x00491950 NovaUi_IsTravelOutfitPurchaseAllowed (partial port of the
+// Ghidra 0x00491950 NovaUi_IsOutfitterPurchaseAllowed (partial port of the
 // tech/require/availability gate).
 bool NovaLanded_CanBuyOutfit(const GameState &state,
                              std::int16_t stellar_id,
