@@ -205,6 +205,9 @@ void NovaAi_SelectGeneralWeaponBank(GameState &state, Ship &ship);
 // gate chain.
 void NovaAi_SelectNearestDisabledShipForBoarding(GameState &state, Ship &ship);
 
+// Ghidra 0x004133F0 Ship_UpdateShipCombatOddsScore.
+void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship);
+
 // Ghidra 0x0040d7e0 Weapon_SelectUnguidedWeaponBank. Fallback that arms the
 // highest-damage unguided bank (modes -1/0/6, or mode-7 with no primary
 // target). Used by the scripted mode 0x14 merge gate.

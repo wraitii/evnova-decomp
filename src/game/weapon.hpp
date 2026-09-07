@@ -193,7 +193,8 @@ std::int16_t NovaWeapon_SelectTurretQuadrant(GameState &state,
 void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                                      std::int16_t weapon_bank);
 
-// PlayerTick_WeaponCommands (0x0044BEB0) + PlayerTick_WeaponCycleContinuation
+// PlayerTick_WeaponCommands (synthetic entry 0x0044BEB7) +
+// PlayerTick_WeaponCycleContinuation
 // (0x0044EAB4) of Ship_HandlePlayerShipCore (0x0044aa70): the player's weapon
 // command inputs, edge/hold-resolved by the spaceflight loop (the original
 // reads g_player_key_bindings through NovaInput_IsCommandActiveWithGameplay-

@@ -885,7 +885,7 @@ void NovaSystem_OnSystemEntered(GameState &state,
 
 // ---------------------------------------------------------------------------
 // Destination-system cycling (key binding 13; Ghidra 0x0044b8b9..0x0044def6 in
-// PlayerTick_TargetAndTravelCommands, g_playerCycleTravelTargetCommandLatch).
+// PlayerTick_TravelSelectionCommands, g_playerCycleTravelTargetCommandLatch).
 // ---------------------------------------------------------------------------
 // Mirrors the original: a candidate slot is one whose linked destination
 // resolves to a visible system through the visibility chain
@@ -967,8 +967,10 @@ std::int16_t NovaTravel_CycleDestinationSystem(GameState &state, bool forward) {
 // Cross-system jump state machine.
 // ---------------------------------------------------------------------------
 // Ghidra Ship_HandlePlayerShipCore 0x0044AA70, composed from disjoint internal
-// CFGs: engage 0x0044C18A, tunnel 0x0044CCAF -> 0x0044CFFE, fire/arrival
-// 0x0044F3D0 and 0x0044F660, turnaround 0x0044FFF0, and flight-tail range cue
+// CFGs: engage 0x0044C18A; status-overlay clear 0x0044C310 -> 0x0044C31D;
+// escort jump warning 0x0044C31D -> 0x0044C4DA; completion audio
+// 0x0044C75C -> 0x0044C84D; tunnel 0x0044CCAF -> 0x0044CFFE; fire/arrival
+// 0x0044F3D0 and 0x0044F660; turnaround 0x0044FFF0; and flight-tail range cue
 // 0x0044D0C3 -> 0x00450717. These remain one coupled travel state machine.
 void NovaTravel_Tick(GameState &state,
                      bool travel_input,

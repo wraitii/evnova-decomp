@@ -1007,9 +1007,14 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   // Asteroid_Spawn (0x00421830) tests it via
   // (1 << (wander_type & 0x1f)) & ast_types.
   s.ast_types = static_cast<std::uint16_t>(ReadBeI16(bytes, 0x94));
-  s.reinf_fleet = ReadBeI16(bytes, 0x196);
+  const std::int16_t reinf_fleet = ReadBeI16(bytes, 0x196);
+  s.reinf_fleet =
+      reinf_fleet < 0x80 ? -1 : static_cast<std::int16_t>(reinf_fleet - 0x80);
   s.reinf_time = ReadBeI16(bytes, 0x198);
   s.reinf_interval = ReadBeI16(bytes, 0x19a);
+  if (s.reinf_fleet != -1 && s.reinf_interval < 1) {
+    s.reinf_interval = 1;
+  }
   s.visibility_expr = ReadCString(bytes, 0x96);
   return s;
 }

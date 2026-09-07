@@ -256,7 +256,7 @@ bool NovaTravel_PlotStarmapDestination(GameState &state,
 
 // Cycles the player's next-jump destination SYSTEM through the systems
 // directly linked to the current system, in slot order. Mirrors the original's
-// key-binding-13 block in PlayerTick_TargetAndTravelCommands (0x0044b8b9..
+// key-binding-13 block in PlayerTick_TravelSelectionCommands (0x0044b8b9..
 // 0x0044def6, g_playerCycleTravelTargetCommandLatch / travel_transfer_mode ==
 // 3 / ai_secondary_target_slot++): a destination is only offered when its link
 // slot resolves to a visible system through the twin chain. Each press

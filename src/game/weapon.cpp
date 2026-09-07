@@ -1711,10 +1711,13 @@ namespace {
 
 } // namespace
 
-// Ghidra 0x0044BEB0 PlayerTick_WeaponCommands, internal label of
-// Ship_HandlePlayerShipCore 0x0044AA70. Synthetic CFG: 0x0044BEB0 ->
-// 0x0044C0B1; includes PlayerTick_WeaponCycleContinuation at 0x0044EAB4 but
-// excludes the face-target command. Dispatch order matches the decompile:
+// Ghidra PlayerTick_WeaponCommands, internal region of
+// Ship_HandlePlayerShipCore 0x0044AA70. Synthetic CFG: 0x0044BEB7 ->
+// 0x0044C0B1. Starting at the 0x0044BEB0 label is invalid because 0x0044BEB7
+// is also entered from 0x0044BE2B; the preceding 0x0044BE15 -> 0x0044BEB7
+// region is the separate nearest-target command. The weapon region includes
+// PlayerTick_WeaponCycleContinuation at 0x0044EAB4 but excludes the face-target
+// command. Dispatch order matches the decompile:
 // primary fire, selected-secondary fire, unfirable-bank auto-clear, the
 // secondary-bank cycle, and the clear-selection arm. The cooldown-decay tail
 // runs unconditionally in NovaWeapon_TickPlayerWeaponBankCooldowns.

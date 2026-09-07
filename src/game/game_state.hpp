@@ -216,6 +216,9 @@ struct Ship {
   // ShipClass_ComputeShipClassSkillVarianceScale (0x004254b0 / 0x0046b870).
   // Player ships leave this at the neutral value.
   float skill_variance_scale = 1.0F;
+  // Ghidra ShipState +0xC914. Hostile combat strength divided by allied
+  // strength, recomputed by Ship_UpdateShipCombatOddsScore (0x004133F0).
+  float ai_odds_score = 0.0F;
 
   // Clean-room collision envelope used until the original SpriteLayer pixel
   // masks are represented by the simulation. The original derives this from
@@ -1152,6 +1155,12 @@ struct GameState {
   // TODO(decomp) in negotiation_dialog.cpp; this field models the reputation
   // data those hooks read/write.
   SystemReputation system_reputation;
+
+  // Mutable SystemDef +0xC4/+0xC8 reinforcement state. The scenario System
+  // retains the immutable ReinfFleet/ReinfTime/ReinfIntrval resource fields.
+  static constexpr std::size_t kMaxSystems = 0x800;
+  std::array<std::int16_t, kMaxSystems> reinforcement_retrigger_delay{};
+  std::array<float, kMaxSystems> reinforcement_countdown{};
 
   // The player's owned outfits, cargo and junk. The new-game flow zeroes it
   // then seeds the outfit counts from the starting ship class's default item
