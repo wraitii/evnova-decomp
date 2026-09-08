@@ -29,12 +29,12 @@ struct UiDialogWindow {
   // One control's runtime state (the original's 0x28-byte control record:
   // type, value, selection range, payload pointer).
   struct ItemState {
-    std::string text;                         // edit/static text content
-    std::int32_t value = 0;                   // checkbox 0/1, popup 1-based selection
-    std::int32_t selection_start = 0;         // edit-text selection (chars)
+    std::string text;                 // edit/static text content
+    std::int32_t value = 0;           // checkbox 0/1, popup 1-based selection
+    std::int32_t selection_start = 0; // edit-text selection (chars)
     std::int32_t selection_end = 0;
-    std::string popup_title;                  // popup header (MENU title or runtime)
-    std::vector<std::string> popup_entries;   // popup entries (MENU or runtime)
+    std::string popup_title; // popup header (MENU title or runtime)
+    std::vector<std::string> popup_entries; // popup entries (MENU or runtime)
     bool popup_expanded = false;
     // Type-0x40 image payload decoded lazily from the item's refcon PICT on
     // first draw.
@@ -44,7 +44,7 @@ struct UiDialogWindow {
   NovaDialogDefinition definition;
   std::vector<NovaDialogItem> items;
   std::vector<ItemState> state;
-  SDL_FRect window_rect{}; // centred on the 640x480 logical playfield
+  SDL_FRect window_rect{};     // centred on the 640x480 logical playfield
   std::size_t focused_row = 0; // 1-based row with keyboard focus (edit texts)
 
   [[nodiscard]] ItemState *Entry(std::size_t row_1based);
@@ -65,15 +65,16 @@ UiWindow_CreateFromDialogResource(SdlPlatform &platform,
 void UiControl_SetValue(UiDialogWindow &window,
                         std::size_t row_1based,
                         std::int32_t value);
-[[nodiscard]] std::int32_t
-UiControl_GetValue(const UiDialogWindow &window, std::size_t row_1based);
+[[nodiscard]] std::int32_t UiControl_GetValue(const UiDialogWindow &window,
+                                              std::size_t row_1based);
 
 // Ghidra UiPanel_SetEntryTextPascal / UiPanel_GetEntryTextPascal.
 void UiPanel_SetEntryTextPascal(UiDialogWindow &window,
                                 std::size_t row_1based,
                                 std::string_view text);
 [[nodiscard]] std::string
-UiPanel_GetEntryTextPascal(const UiDialogWindow &window, std::size_t row_1based);
+UiPanel_GetEntryTextPascal(const UiDialogWindow &window,
+                           std::size_t row_1based);
 
 // Ghidra UiPanel_GetEntryTextPascalIndexed: the popup entry at the given
 // 1-based control value. nullopt when the row is not a popup or the index is

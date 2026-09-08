@@ -62,14 +62,10 @@ void DrawBevel(SDL_Renderer *renderer,
                const SDL_Color &fill,
                const SDL_Color &highlight,
                const SDL_Color &shadow) {
-  SDL_SetRenderDrawColor(
-      renderer, fill.r, fill.g, fill.b, SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &box);
-  SDL_SetRenderDrawColor(renderer,
-                         highlight.r,
-                         highlight.g,
-                         highlight.b,
-                         SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(
+      renderer, highlight.r, highlight.g, highlight.b, SDL_ALPHA_OPAQUE);
   SDL_RenderLine(
       renderer, box.x + 1.0F, box.y + 1.0F, box.x + box.w - 1.0F, box.y + 1.0F);
   SDL_RenderLine(
@@ -108,11 +104,10 @@ void DrawFocusRing(SDL_Renderer *renderer, const SDL_FRect &box) {
 // FUN_004bcb00: string width in logical pixels, used for caret/selection
 // placement and popup label alignment (measured with the same face the draw
 // path uses).
-[[nodiscard]] float TextWidth(NovaFontCache &font_cache, std::string_view text) {
-  return static_cast<float>(font_cache.TextWidth(NovaFontFamily::kGeneva,
-                                                 kDialogFontSize,
-                                                 kNovaFontStyleRegular,
-                                                 text));
+[[nodiscard]] float TextWidth(NovaFontCache &font_cache,
+                              std::string_view text) {
+  return static_cast<float>(font_cache.TextWidth(
+      NovaFontFamily::kGeneva, kDialogFontSize, kNovaFontStyleRegular, text));
 }
 
 } // namespace
@@ -178,8 +173,8 @@ UiWindow_CreateFromDialogResource(SdlPlatform &platform,
   // window points).
   const float win_w = static_cast<float>(definition->right - definition->left);
   const float win_h = static_cast<float>(definition->bottom - definition->top);
-  window.window_rect = CenterDialogInPlayfield(platform.playfield_window_rect(),
-                                               win_w, win_h);
+  window.window_rect =
+      CenterDialogInPlayfield(platform.playfield_window_rect(), win_w, win_h);
 
   // Type-7 popups seed their entries from the MENU resource named in the DITL
   // tail; runtime-filled popups (e.g. MENU 0x1f5 "Character") arrive empty and
@@ -273,11 +268,8 @@ void UiWindow_Draw(SdlPlatform &platform,
   SDL_Renderer *renderer = platform.renderer();
 
   // Window surface: current fill colour + current RGB frame (white / black).
-  SDL_SetRenderDrawColor(renderer,
-                         kWindowFill.r,
-                         kWindowFill.g,
-                         kWindowFill.b,
-                         SDL_ALPHA_OPAQUE);
+  SDL_SetRenderDrawColor(
+      renderer, kWindowFill.r, kWindowFill.g, kWindowFill.b, SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &window.window_rect);
   FrameRect(renderer, window.window_rect);
 
@@ -376,11 +368,7 @@ void UiWindow_Draw(SdlPlatform &platform,
     }
     case 0x10: { // Edit text
       SDL_FRect inset{box.x - 1.0F, box.y - 1.0F, box.w + 2.0F, box.h + 2.0F};
-      DrawBevel(renderer,
-                inset,
-                kWindowFill,
-                kBevelHighlight,
-                kWindowFill);
+      DrawBevel(renderer, inset, kWindowFill, kBevelHighlight, kWindowFill);
       FrameRect(renderer, box);
       const float text_left = box.x + 3.0F;
       const float baseline = box.y + box.h - 3.0F;
@@ -402,7 +390,8 @@ void UiWindow_Draw(SdlPlatform &platform,
                                kControlText.g,
                                kControlText.b,
                                SDL_ALPHA_OPAQUE);
-        const SDL_FRect sel{x0, box.y + 1.0F, std::max(1.0F, x1 - x0), box.h - 2.0F};
+        const SDL_FRect sel{
+            x0, box.y + 1.0F, std::max(1.0F, x1 - x0), box.h - 2.0F};
         SDL_RenderFillRect(renderer, &sel);
         const auto draw_span = [&](std::size_t from,
                                    std::size_t to,
@@ -437,19 +426,18 @@ void UiWindow_Draw(SdlPlatform &platform,
           // Blinking caret line (the original toggles its latch every 15 ms).
           const float caret_x =
               text_left +
-              TextWidth(font_cache, entry.text.substr(
-                  0, static_cast<std::size_t>(entry.selection_start)));
+              TextWidth(
+                  font_cache,
+                  entry.text.substr(
+                      0, static_cast<std::size_t>(entry.selection_start)));
           if ((SDL_GetTicks() / 530U) % 2U == 0U) {
             SDL_SetRenderDrawColor(renderer,
                                    kControlText.r,
                                    kControlText.g,
                                    kControlText.b,
                                    SDL_ALPHA_OPAQUE);
-            SDL_RenderLine(renderer,
-                           caret_x,
-                           box.y + 3.0F,
-                           caret_x,
-                           box.y + box.h - 3.0F);
+            SDL_RenderLine(
+                renderer, caret_x, box.y + 3.0F, caret_x, box.y + box.h - 3.0F);
           }
         }
       }
@@ -473,7 +461,8 @@ void UiWindow_Draw(SdlPlatform &platform,
       std::string selected;
       if (entry.value >= 1 &&
           static_cast<std::size_t>(entry.value) <= entry.popup_entries.size()) {
-        selected = entry.popup_entries[static_cast<std::size_t>(entry.value) - 1];
+        selected =
+            entry.popup_entries[static_cast<std::size_t>(entry.value) - 1];
       }
       const float arrow_w = 10.0F;
       if (!selected.empty()) {
@@ -503,8 +492,11 @@ void UiWindow_Draw(SdlPlatform &platform,
       if (entry.popup_expanded && !entry.popup_entries.empty()) {
         // Dropdown below the control: one kPopupRowHeight row per entry,
         // selected row inverted.
-        SDL_FRect list{box.x, box.y + box.h, box.w,
-                       kPopupRowHeight * static_cast<float>(entry.popup_entries.size())};
+        SDL_FRect list{box.x,
+                       box.y + box.h,
+                       box.w,
+                       kPopupRowHeight *
+                           static_cast<float>(entry.popup_entries.size())};
         SDL_SetRenderDrawColor(renderer,
                                kWindowFill.r,
                                kWindowFill.g,
@@ -513,8 +505,10 @@ void UiWindow_Draw(SdlPlatform &platform,
         SDL_RenderFillRect(renderer, &list);
         FrameRect(renderer, list);
         for (std::size_t i = 0; i < entry.popup_entries.size(); ++i) {
-          SDL_FRect row_rect{list.x, list.y + kPopupRowHeight * static_cast<float>(i),
-                             list.w, kPopupRowHeight};
+          SDL_FRect row_rect{list.x,
+                             list.y + kPopupRowHeight * static_cast<float>(i),
+                             list.w,
+                             kPopupRowHeight};
           if (static_cast<std::int32_t>(i) + 1 == entry.value) {
             SDL_SetRenderDrawColor(renderer,
                                    kControlText.r,
@@ -560,10 +554,7 @@ void UiWindow_Draw(SdlPlatform &platform,
         }
       }
       if (entry.image) {
-        SDL_RenderTexture(renderer,
-                          entry.image->get(),
-                          nullptr,
-                          &box);
+        SDL_RenderTexture(renderer, entry.image->get(), nullptr, &box);
       } else {
         SDL_SetRenderDrawColor(renderer,
                                kBevelHighlight.r,
@@ -636,7 +627,8 @@ void UiWindow_RunInteractionLoop(
                                ItemRect(item, window.window_rect));
     }
     platform.PublishProbeUi(
-        "ui_dialog_ditl_" + std::to_string(window.definition.dialog_item_list_id),
+        "ui_dialog_ditl_" +
+            std::to_string(window.definition.dialog_item_list_id),
         std::move(named_rects));
   }
   ProbeUiAutoClear probe_ui_guard(platform);
@@ -647,9 +639,7 @@ void UiWindow_RunInteractionLoop(
   // frame's cursor. Required for the external probe harness
   // (docs/probe_harness.md), whose injected clicks always land mid-frame.
   const SDL_FPoint mouse = platform.mouse_window_point();
-  auto activate = [&](std::size_t row) {
-    *code_out = static_cast<short>(row);
-  };
+  auto activate = [&](std::size_t row) { *code_out = static_cast<short>(row); };
 
   // A click outside an expanded popup collapses it without activating.
   auto expanded_row = [&]() -> std::size_t {
@@ -679,7 +669,9 @@ void UiWindow_RunInteractionLoop(
         const SDL_FRect box =
             ItemRect(*window.Item(expanding), window.window_rect);
         const SDL_FRect list{
-            box.x, box.y + box.h, box.w,
+            box.x,
+            box.y + box.h,
+            box.w,
             kPopupRowHeight * static_cast<float>(entry.popup_entries.size())};
         if (Contains(list, click.x, click.y)) {
           entry.value = std::clamp(
@@ -736,8 +728,8 @@ void UiWindow_RunInteractionLoop(
       if (in->key == TextKey::backspace) {
         if (entry->selection_start == entry->selection_end &&
             entry->selection_start > 0) {
-          entry->text.erase(static_cast<std::size_t>(entry->selection_start) - 1U,
-                            1);
+          entry->text.erase(
+              static_cast<std::size_t>(entry->selection_start) - 1U, 1);
           entry->selection_start = entry->selection_end =
               entry->selection_start - 1;
         } else if (entry->selection_start < entry->selection_end) {
@@ -755,7 +747,8 @@ void UiWindow_RunInteractionLoop(
         }
         entry->text.insert(
             static_cast<std::size_t>(entry->selection_start), 1, in->character);
-        entry->selection_start = entry->selection_end = entry->selection_start + 1;
+        entry->selection_start = entry->selection_end =
+            entry->selection_start + 1;
       }
       break;
     }

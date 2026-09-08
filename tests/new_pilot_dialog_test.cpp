@@ -9,9 +9,7 @@
 
 namespace {
 
-bool ArchivesPresent() {
-  return std::filesystem::exists("EV Nova/Nova.rez");
-}
+bool ArchivesPresent() { return std::filesystem::exists("EV Nova/Nova.rez"); }
 
 } // namespace
 
@@ -64,11 +62,12 @@ TEST_CASE("PICT 0x81/0x82/0x8b decode (PackBitsRect + PackBitsRgn)",
   }
   // PICT 129 "Strict Play" note art: 0x98 PackBitsRect, 8-bit indexed,
   // rowBytes 0x80b8, 256-entry ColorTable with sequential ctFlags 0x8000.
-  const auto strict_play = Resource_LoadPictAsImage(*NovaResource_LoadPictData(0x81));
+  const auto strict_play =
+      Resource_LoadPictAsImage(*NovaResource_LoadPictData(0x81));
   REQUIRE(strict_play.has_value());
   CHECK(strict_play->width == 182);
   CHECK(strict_play->height == 22);
-  CHECK(strict_play->rgba_pixels[0] == 255);       // palette[0] white
+  CHECK(strict_play->rgba_pixels[0] == 255); // palette[0] white
   CHECK(strict_play->rgba_pixels[1] == 255);
   CHECK(strict_play->rgba_pixels[2] == 255);
   CHECK(strict_play->rgba_pixels[3] == 255);
@@ -85,7 +84,8 @@ TEST_CASE("PICT 0x81/0x82/0x8b decode (PackBitsRect + PackBitsRgn)",
 
   // PICT 0x8b Key Settings backdrop: 0x99 PackBitsRgn, 1-bit, 2-entry color
   // table, 1-byte row prefixes (masked rowBytes 74), 10-byte region skip.
-  const auto backdrop = Resource_LoadPictAsImage(*NovaResource_LoadPictData(0x8b));
+  const auto backdrop =
+      Resource_LoadPictAsImage(*NovaResource_LoadPictData(0x8b));
   REQUIRE(backdrop.has_value());
   CHECK(backdrop->width == 582);
   CHECK(backdrop->height == 307);

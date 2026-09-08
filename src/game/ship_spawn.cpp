@@ -2061,9 +2061,9 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
 }
 
 bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
-                                             std::int16_t ship_class_id,
-                                             std::int16_t outfit_slot,
-                                             std::int16_t weapon_bank) {
+                                           std::int16_t ship_class_id,
+                                           std::int16_t outfit_slot,
+                                           std::int16_t weapon_bank) {
   // Occupancy starts from the resolved holding: the bay's loaded fighter
   // count, or the outfit's owned count when both slots are given.
   std::int16_t resolved_outfit = outfit_slot;

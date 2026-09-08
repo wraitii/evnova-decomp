@@ -356,8 +356,8 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter);
 // Returns occupancy_count < capacity.
 [[nodiscard]] bool
 NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
-                                        std::int16_t ship_class_id,
-                                        std::int16_t outfit_slot = -1,
-                                        std::int16_t weapon_bank = -1);
+                                      std::int16_t ship_class_id,
+                                      std::int16_t outfit_slot = -1,
+                                      std::int16_t weapon_bank = -1);
 
 } // namespace game

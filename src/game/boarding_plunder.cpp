@@ -1671,7 +1671,6 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
         SelfDestructTarget(state);
         PlayTransitionCue(audio, state, 2);
         result.target_self_destructed = true;
-        close = true;
         close_reason = "self-destruct (panic re-roll)";
         break;
       }

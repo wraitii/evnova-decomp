@@ -171,7 +171,8 @@ std::vector<std::uint8_t> LoadFontFileStrippedOfBitmapStrikes(
   std::vector<const std::uint8_t *> kept;
   bool has_bitmap_tables = false;
   for (std::uint16_t i = 0; i < num_tables; ++i) {
-    const std::uint8_t *entry = bytes.data() + 12 + static_cast<size_t>(i) * 16U;
+    const std::uint8_t *entry =
+        bytes.data() + 12 + static_cast<size_t>(i) * 16U;
     const std::uint32_t tag = ReadU32(entry);
     if (std::find(kBitmapTags.begin(), kBitmapTags.end(), tag) !=
         kBitmapTags.end()) {
@@ -201,8 +202,8 @@ std::vector<std::uint8_t> LoadFontFileStrippedOfBitmapStrikes(
     std::memcpy(out_entry, entry, 16);
     WriteU32(out_entry + 8, static_cast<std::uint32_t>(write_offset));
     const std::uint32_t length = ReadU32(entry + 12);
-    std::memcpy(out.data() + write_offset, bytes.data() + ReadU32(entry + 8),
-                length);
+    std::memcpy(
+        out.data() + write_offset, bytes.data() + ReadU32(entry + 8), length);
     write_offset = (write_offset + length + 3U) & ~3U;
   }
   stripped = true;
@@ -302,8 +303,8 @@ TTF_Font *NovaFontCache::Font(NovaFontFamily family,
   } else {
     // Only the bundled CE faces are sanitized: their FontForge-converted
     // embedded strikes are corrupt (see LoadFontFileStrippedOfBitmapStrikes).
-    const bool bundled_ce_face = family == NovaFontFamily::kChicago ||
-                                 family == NovaFontFamily::kGeneva;
+    const bool bundled_ce_face =
+        family == NovaFontFamily::kChicago || family == NovaFontFamily::kGeneva;
     bool stripped = false;
     image = std::make_shared<std::vector<std::uint8_t>>(
         LoadFontFileStrippedOfBitmapStrikes(file, bundled_ce_face, stripped));

@@ -70,7 +70,8 @@ void RouteMap_Tick(GameState &state, const RouteMapZoomInput &input) {
     return;
   }
   const bool zoom_latch = input.zoom_in_held || input.zoom_out_held;
-  if (input.zoom_in_held && !rm.zoom_command_latch && rm.zoom_scale < kZoomMax) {
+  if (input.zoom_in_held && !rm.zoom_command_latch &&
+      rm.zoom_scale < kZoomMax) {
     rm.zoom_scale *= kZoomInStep;
     rm.interaction_tick_60hz = state.tick_60hz;
     state.pending_ui_sounds.push_back({0, 1});
@@ -84,7 +85,8 @@ void RouteMap_Tick(GameState &state, const RouteMapZoomInput &input) {
 }
 
 RouteMapClickResult RouteMap_HandleClick(GameState &state,
-                                         SdlPlatform &platform, float click_x,
+                                         SdlPlatform &platform,
+                                         float click_x,
                                          float click_y) {
   auto &rm = state.route_map;
   // 0x0044e027 gate: overlay up and the player not station-held (the x87
@@ -136,21 +138,20 @@ RouteMapClickResult RouteMap_HandleClick(GameState &state,
     if (link < 0x80) {
       continue;
     }
-    const std::int16_t dest =
-        NovaSystem_ResolveVisibleForTravel(state, static_cast<std::int16_t>(link - 0x80));
-    if (dest < 0 || static_cast<std::size_t>(dest) >=
-                        state.scenario.systems.size()) {
+    const std::int16_t dest = NovaSystem_ResolveVisibleForTravel(
+        state, static_cast<std::int16_t>(link - 0x80));
+    if (dest < 0 ||
+        static_cast<std::size_t>(dest) >= state.scenario.systems.size()) {
       continue;
     }
-    const System &target = state.scenario.systems[static_cast<std::size_t>(dest)];
-    const float sx = std::trunc(centre_x +
-                                (static_cast<float>(target.pos_x) -
-                                 static_cast<float>(sys->pos_x)) /
-                                    rm.zoom_scale);
-    const float sy = std::trunc(centre_y +
-                                (static_cast<float>(target.pos_y) -
-                                 static_cast<float>(sys->pos_y)) /
-                                    rm.zoom_scale);
+    const System &target =
+        state.scenario.systems[static_cast<std::size_t>(dest)];
+    const float sx = std::trunc(centre_x + (static_cast<float>(target.pos_x) -
+                                            static_cast<float>(sys->pos_x)) /
+                                               rm.zoom_scale);
+    const float sy = std::trunc(centre_y + (static_cast<float>(target.pos_y) -
+                                            static_cast<float>(sys->pos_y)) /
+                                               rm.zoom_scale);
     if (click_x < sx - half || click_x > sx + half || click_y < sy - half ||
         click_y > sy + half) {
       continue;
@@ -231,8 +232,8 @@ void RouteMapView::Draw(SdlPlatform &platform, const GameState &state) {
         sys->links[static_cast<std::size_t>(slot)] >= 0x80) {
       selected = NovaSystem_ResolveVisibleForTravel(
           state,
-          static_cast<std::int16_t>(
-              sys->links[static_cast<std::size_t>(slot)] - 0x80));
+          static_cast<std::int16_t>(sys->links[static_cast<std::size_t>(slot)] -
+                                    0x80));
     }
   }
   NovaStarmap_DrawRouteMapChart(platform,

@@ -61,9 +61,8 @@ void ApplyCapMask(std::uint16_t art_base,
     NovaLog::Todo("button cap mask 0x{:04x} missing or mismatched", mask_id);
     return;
   }
-  for (std::size_t i = 0;
-       i < static_cast<std::size_t>(cap.width) *
-               static_cast<std::size_t>(cap.height);
+  for (std::size_t i = 0; i < static_cast<std::size_t>(cap.width) *
+                                  static_cast<std::size_t>(cap.height);
        ++i) {
     // Mask PICTs are 1-bit black/white; white marks the transparent corner
     // cutouts.
@@ -90,10 +89,8 @@ void LoadStripImpl(SdlPlatform &platform,
         if (piece != 1) {
           ApplyCapMask(base, piece, *pict, rgba);
         }
-        slot = SdlTexture::Create(platform.renderer(),
-                                  pict->width,
-                                  pict->height,
-                                  rgba);
+        slot = SdlTexture::Create(
+            platform.renderer(), pict->width, pict->height, rgba);
         if (slot) {
           any_loaded = true;
           continue;
@@ -164,19 +161,24 @@ void ServicesButtonArt::Draw(SdlPlatform &platform,
   const float mid_w = std::max(0.0F, rect.w - left_w - right_w);
 
   // Left cap.
-  DrawPiece(renderer, strip->left ? strip->left->get() : nullptr, kBackdrop,
+  DrawPiece(renderer,
+            strip->left ? strip->left->get() : nullptr,
+            kBackdrop,
             {rect.x, rect.y, left_w, rect.h});
   // Stretched middle tile.
-  DrawPiece(renderer, strip->middle ? strip->middle->get() : nullptr, kBackdrop,
+  DrawPiece(renderer,
+            strip->middle ? strip->middle->get() : nullptr,
+            kBackdrop,
             {mid_x, rect.y, mid_w, rect.h});
   // Right cap.
-  DrawPiece(renderer, strip->right ? strip->right->get() : nullptr, kBackdrop,
+  DrawPiece(renderer,
+            strip->right ? strip->right->get() : nullptr,
+            kBackdrop,
             {rect.x + rect.w - right_w, rect.y, right_w, rect.h});
 }
 
-std::optional<std::uint8_t> ServiceButtonAt(
-    const std::vector<ServiceButton> &buttons,
-    SDL_FPoint point) {
+std::optional<std::uint8_t>
+ServiceButtonAt(const std::vector<ServiceButton> &buttons, SDL_FPoint point) {
   for (const auto &b : buttons) {
     if (point.x >= b.rect.x && point.x <= b.rect.x + b.rect.w &&
         point.y >= b.rect.y && point.y <= b.rect.y + b.rect.h) {
