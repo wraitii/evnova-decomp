@@ -19,6 +19,7 @@
 #include "mission_script.hpp"
 #include "negotiation_dialog.hpp"
 #include "outfit.hpp"
+#include "player_info_window.hpp"
 #include "radar_panel.hpp"
 #include "route_map.hpp"
 #include "ship_ai.hpp"
@@ -426,10 +427,11 @@ void NovaFrame_TickSystems(GameState &state,
 //   afterburner speed/fuel tail  0x00451630 -> 0x004518EF
 //   self-destruct state machine 0x00451954 -> 0x00451B91 (ported:
 //                               NovaPlayer_TickSelfDestructCommand)
-//   special-interaction window  0x00451B91 -> 0x00451C4F (command block
-//                               TODO(decomp):
-//                               NovaUi_RunPlayerSpecialInteraction- Window
-//                               0x004A1AE0 unported)
+//   special-interaction window  0x00451B91 -> 0x00451C4F (ported:
+//                               the P-key Player Info modal, see
+//                               docs/player_info_window.md and
+//                               src/game/player_info_window.cpp;
+//                               jettison execution 0x0041F330 still TODO)
 //   mission-computer window     0x00451C87 -> 0x00451DB0 (ported in the loop's
 //                               mission_info block)
 //   cloak-toggle command        0x00451DB0 -> 0x00451E60 (ported:
@@ -1675,6 +1677,17 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                          arm_modifier_held &&
                                              held(binding_key[0x12]),
                                          frame_time_ms / kOriginalTickMs);
+      // Player Info window (Ghidra 0x00451b91 -> 0x00451c4f, binding slot
+      // 0x19 = the manual's P-key dialog). The original hides the travel-
+      // selection sprite, redraws viewport+radar and resets the average
+      // frame-time accumulator after the modal closes; the port's modal
+      // runs synchronously and the next frame's draw covers the refresh.
+      // The mission-computer window (0x00451c87 -> 0x00451db0) that follows
+      // this block is TODO(decomp).
+      if (held(binding_key[0x19])) {
+        (void)NovaPlayerInfo_RunWindow(platform, state, view, hud);
+        resync_frame_clock();
+      }
       NovaPlayer_TickCloakCommand(
           state, held(binding_key[0x29]), frame_time_ms / kOriginalTickMs);
     }

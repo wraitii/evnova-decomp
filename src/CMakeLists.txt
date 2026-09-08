@@ -39,6 +39,7 @@ add_library(evnova_runtime
     game/nova_font.cpp
     game/outfit.cpp
     game/pilot_file.cpp
+    game/player_info_window.cpp
     game/radar_panel.cpp
     game/preferences.cpp
     game/route_map.cpp
