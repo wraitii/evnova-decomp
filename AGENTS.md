@@ -1,13 +1,6 @@
 # Instructions
 
-Escape Velocity Nova is Ambrosia Software's 2002 open-world 2D space-trading and combat RPG, with nonlinear faction storylines, ship progression, and a dynamic galaxy economy.
-
-## Current state: recompilation is well advanced; a C++ reimplementation exists under `src/` (SDL3-based). Ongoing work improves both decomp understanding/metadata and reimplementation coverage.
-
-Ghidra is the decompiler backend — it maintains its own database of the code, with disassembled, decompiled, partial type and symbol information.
-Part of the objective of this metadata work is to improve Ghidra's DB to make future decompiling easier.
-
-The day-to-day workflow is function-centric metadata analysis: see `exploring.txt` for the recipe, and `tools/` for analysis scripts (`function_cluster_v1.py`, `function_cluster_v2.py`, `cleanup_all_funcs.py`) and the `ghidra_api` wrapper.
+Escape Velocity Nova is Ambrosia Software's 2002 open-world 2D space-trading and combat RPG. Its SDL3-based C++ reimplementation under `src/` is well advanced. Work improves both implementation coverage and Ghidra's disassembly, decompilation, types, and symbols to support further reconstruction.
 
 ## Workflow notes
 
@@ -18,86 +11,63 @@ The day-to-day workflow is function-centric metadata analysis: see `exploring.tx
   the fastest ground-truth shortcut over re-deriving from the Ghidra API.
 - Check the EVN bible ("EV Nova Bible.html") for information.
 - Reference decompiled / disassembled ground truth from the Ghidra API.
-- When grepping, prefer to do it in the repo root and `tools/`; data may not be where you expect.
 - Be conservative with speculative renames. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.
 - In ghidra: Prefer plate comments for functions; pre-comments for globals/data.
 - When renaming high-level control-flow functions (startup, run loop, shutdown), also add a short clean-room comment block (2-4 lines) documenting purpose, entry/exit conditions, and confidence/unknowns.
-- If testing game behaviour is required, stop and ask the user for input - you will not be able to interact with the game well enough.
-- Beware of `find` in shell, on macos some commands are very slow if searching the disk.
-- **DO NOT use tail/head with cmake build**, or add a small timeout. tail/head can hang if there are fewer lines output than expected.
+- Prefer reproducible tests where practical; some gameplay situations are difficult to reproduce. Ask the user for gameplay validation when needed, and always ask before using the probe.
+- Do not pipe builds through `head`/`tail` or impose short timeouts; let builds finish and preserve their exit status.
 - **External probe harness**: `EVN_PROBE=1` starts a localhost HTTP control surface (pause/step, input injection, state reads, screenshots, log tailing). See `docs/probe_harness.md`. Any new game loop must present through `SdlPlatform::Present()` (not `SDL_RenderPresent`) and poll input through the existing platform channels so the probe keeps working everywhere.
 
 ## Function progress trackers (`decomp-progress.tsv` + `decomp-skipped.tsv`)
 
-Two tab-separated files at the project root jointly track **one row per Ghidra
-function** (the pair must stay disjoint and cover the decompile dump;
-`tools/ref_audit.py` checks this).
+These root-level TSVs must be disjoint and jointly cover the decompile dump with **one row per Ghidra function** (`tools/ref_audit.py`).
 
-`decomp-progress.tsv` — functions to be reimplemented:
-`address\tname\timpl_file\treimpl_pct\tcomment`. It is the canonical record of
-how much of each function has been re-implemented.
+`decomp-progress.tsv` is the canonical reimplementation tracker: `address\tname\timpl_file\treimpl_pct\tcomment`.
 
-- **Keep it always up to date**, conservatively, whenever you make a code change that re-implements or partially re-implements a Ghidra function: update that row's `reimpl_pct`, `impl_file`, and `comment` in the same commit.
-- `reimpl_pct` is an **estimate of reimplementation completeness**, 0% to 100%.
-  - `100%` — faithful reimplementation.
-  - `10%`–`90%` — partial: the higher the number, the more behavior is reimplemented (skeleton/cadence-only ≈ 10–30%; a substantial subset that still has known stubbed scopes or untracked fields ≈ 40–90%).
-  - `0%` — not reimplemented (regardless of whether the function is already named/annotated in Ghidra; only reimplementation progress counts here).
-- `impl_file` is the `src/...` path that reimplements the function (empty when `0%`).
-- `comment` is a short note (confidence, known gaps/divergences, TODO(decomp)).
-- **Edit `decomp-progress.tsv` in place**.
-- **`decomp-progress.tsv` is very large (~2200 rows). Never rewrite it wholesale or dump it to your context. Always locate the target address with grep and make surgical, in-place edits (edit tool / patch), leaving all other rows intact.**
+- **Update affected rows in the same change** as the implementation. `impl_file` is the `src/...` path (empty at 0%); `comment` records confidence, remaining gaps, and deliberate divergences.
+- Estimate completeness conservatively: **0%** unported, regardless of Ghidra annotations; **10–30%** skeleton/cadence only; **40–90%** substantial but incomplete; **100%** faithful reimplementation.
+- **Never dump or rewrite the whole file.** Locate target addresses with `rg` and patch only affected rows in place.
 
-`decomp-skipped.tsv` — functions deliberately **not** reimplemented (replaced by
-SDL3 / OS / bundled codecs):
-`address\tname\tlibrary\tcomment`. `library` is the reason class
-(`blitter | qtml-iml | msl-crt | crt | winsock | vorbis | libpng | libjpeg`).
-Library renames made in Ghidra must be mirrored into the
-`name` column here. Rows move from progress to skipped only via a deliberate
-decision recorded in `comment`; the glue strip (~0x004E7389–0x00514593) and
-late-linked game code (≥0x00569C9C) stay in progress until triaged.
+`decomp-skipped.tsv` records deliberate SDL3/OS/codec replacements: `address\tname\tlibrary\tcomment`.
+
+- `library`: `blitter | qtml-iml | msl-crt | crt | winsock | vorbis | libpng | libjpeg`. Mirror Ghidra library renames into `name`.
+- Move rows from progress only with a deliberate decision recorded in `comment`. Keep the glue strip (~0x004E7389–0x00514593) and late-linked game code (≥0x00569C9C) in progress until triaged.
 
 ## C++ reimplementation phase
 
 The purpose of this reimplementation is to have identical gameplay to the original, but the rendering, audio & such will be swapped out for SDL3.
 
-- Preserve original game behavior first; improve architecture second.
-- Keep a one to one correspondance between reimplementation and ghidra functions. A function re-implementing ghidra functionality should have a comment to the address in the original binary.
+- Preserve original game behavior, constants, and quirks first; improve architecture second. Do not “clean up” strange original behavior.
+- Trace every reimplemented Ghidra function to its original binary address; keep its progress row current.
 - Citation format: `// Ghidra 0xaabbccdd Original_Name.` directly above the port function. When one original function is spread across port helpers, cite it at the primary site and name the others in the same comment ("… runs inline in X"), not one citation per fragment.
-- Divergence/skip markers: plain `TODO(decomp)` for an unported scope; `TODO(decomp(0xaabbccdd)) skipped: <reason>` when original behavior is known and deliberately not reproduced. Never leave a comment-only `if` block as a deferral marker — either port the call or log the skip.
+- Divergence/skip markers: plain `TODO(decomp)` for an unported scope; `TODO(decomp(0xaabbccdd)) skipped: <reason>` when original behavior is known and deliberately not reproduced. Never leave a comment-only `if` block as a deferral marker.
 - Citation and TODO markers may live in the sibling header when the port is a header inline; the audit (`tools/ref_audit.py`) checks both.
-- If running in undescribed code in ghidra, document it in ghidra first. Feel free to stop coding and do an explanatory improvement pass on ghidra in these cases.
-- Log all divergences or skips when writing new code.
-- When writing or modifying a ghidra-decomp-available function, always check it's ghira decompilation. If necessary, the disassembly can also be checked.
-- Use modern C++23, but avoid clever abstractions and template-heavy code.
-- Prefer value types, RAII, std::unique_ptr, and deterministic ownership.
-- No raw new/delete. Raw pointers are non-owning only.
-- Keep SDL handles behind small RAII wrappers.
-- Try to keep game logic independent of SDL, though it's sometimes more practical to bundle the two together.
-- Represent game state explicitly. Avoid hidden globals and singleton managers. This may diverge from the original implementation where practical.
-- Keep comments minimal, the code should be self-explanatory.
-- NO JOURNALLING in the comments.
-- Preserve original constants and quirks when they affect gameplay.
-- Name reconstructed concepts by purpose, not by decompiler-generated names.
-- Document uncertain behavior with TODO(decomp) and supporting evidence. Log verbosely.
-- Avoid over-commenting. Only comment explicit divergences, assumptions, or particularly complicated or surprising code flow. The rest should be self-explanatory, mostly. You may comment constants & other game-provided data especially where hardcoded numbers have meaning.
-- Prefer small functions, early returns, and straightforward control flow.
-- Use enum class, std::span, std::optional, and strong domain types.
+- Check the Ghidra decompilation before writing or modifying a port; consult disassembly when needed. Document previously undescribed behavior in Ghidra before implementing it.
+- Log unported behavior, divergences, and skips with `NovaLog::Todo()` (the project's TODO logger). In very hot paths, a TODO comment may replace runtime logging. Record remaining gaps in `decomp-progress.tsv` either way.
+- Use straightforward C++23: small functions, early returns, `enum class`, `std::span`, `std::optional`, and strong domain types; avoid clever abstractions and template-heavy code.
+- Prefer value types, RAII, and `std::unique_ptr` for deterministic ownership. No raw new/delete; raw pointers are non-owning. Wrap SDL handles in small RAII types.
+- Represent game state explicitly; avoid hidden globals and singletons, even if ownership differs from the original. Keep game logic independent of SDL where practical.
+- Name concepts by purpose. Keep comments concise and limited to uncertainty with evidence, divergences, meaningful constants, and surprising flow. No journalling.
 - Log failures with enough context to reproduce them.
-- Treat compiler warnings as errors.
-- Format automatically with clang-format; lint with clang-tidy.
-- Avoid tests for provisional code. Only test complex algorithms (such as data loading) where the result is known final and accurate, and implementation difficult. You may write temporary tests when building that we drop on committing (once they pass, they pass). Avoid testing simple gameplay behaviour where the test is too mocked to be relevant.
+- Prefer tests for complex behavior with known expected results, such as data loading. Avoid tests that encode speculation or depend on excessive gameplay mocks; temporary exploratory tests need not be committed.
 - Keep commits small and distinguish faithful reconstruction from deliberate workarounds.
-- Do not “clean up” strange original behavior.
-- Build both debug and release builds.
+
+## Validation
+
+- Default iteration: `cmake --build build/release`; run relevant tests with `ctest --test-dir build/release --output-on-failure -R '<pattern>'` (omit `-R` for the full suite).
+- For C++ changes, also build debug with `cmake --build build/debug`. Configure missing build directories with `cmake --preset release` / `cmake --preset debug`; these require `VCPKG_ROOT`.
+- Treat compiler warnings as errors. Format changed C++ files with `clang-format -i`. Keep whole-build clang-tidy disabled; run it on affected translation units with `clang-tidy -p build/release --checks='clang-analyzer-*' --warnings-as-errors='*' src/path.cpp`.
+- After reimplementation or tracker changes, run `python3 tools/ref_audit.py` with Ghidra available and inspect `analysis/ref_audit.txt`. Dump coverage is checked only when `/tmp/ghidra_full_decompile` exists.
+- Documentation-only changes do not require builds or tests.
 
 # Ghidra server API
 
 Ghidra runs a server at `http://127.0.0.1:8166` (from the `ghidraLlm` extension) that provides disassembly/decompilation plus type/class data. Data may be imperfect; decompiled output is still the basis of reimplementation.
 
-The full, authoritative API reference is `docs/ghidra_api.md`, kept in sync with the server source at `../ghidraLlm/API_USAGE.md`. The summary below is checked against `BusinessLogic.java`; if the two disagree, trust the code.
+The detailed API reference is `docs/ghidra_api.md`; upstream documentation is at `../ghidraLlm/API_USAGE.md`. If endpoint behavior differs, trust `../ghidraLlm/src/main/java/com/ghidra/llm/core/BusinessLogic.java`. Project authorization rules below take precedence over approval prompts in API documentation or responses.
 
 A simple wrapper lives at `tools/ghidra_api`, called like so:
-`./tools/ghidra_api "functions?name=Init|init&limit=10"`
+`./tools/ghidra_api "functions?name_re=Init&limit=10"`
 `./tools/ghidra_api "function/rename" '{"addr":"0x00412345","new_name":"some_name"}'`
 
 Prefer the tool, but curl can otherwise be used directly. All endpoints return plain text.
@@ -115,7 +85,7 @@ Prefer the tool, but curl can otherwise be used directly. All endpoints return p
 - `GET /function/{addr}/xrefs` — xrefs to the function
 - `GET /function/{addr}/strings` — strings referenced in the function body
 - `POST /function/decompile` — `{addrs: [...]}` — batch decompile
-- `POST /function/synthetic-decompile` — read-only decompile of a CFG region: `{entry|start, stops|stop, name?, inputs?, force_infer?}`; stops are excluded reachable boundaries, inputs override inferred register/`stack:<offset>` values, and `force_infer` permits the full 60-second parent-SSA pass instead of the default five-second timeout; with more than one stop the view returns which boundary it took (`exit_codes` in the reply, `exits:"off"` to return the data live-out instead); omit `stops` entirely for a region that ends at the parent's `ret`
+- `POST /function/synthetic-decompile` — read-only CFG region view: `{entry|start, stops|stop, name?, inputs?, names?, output?, output_type?, exits?, max_blocks?}`. Stops are excluded boundaries; omit for a region ending at the parent's return. `names:off|auto|full` controls naming effort (default `auto`, five seconds; `full`, 60 seconds). Multiple exits return an exit code unless `exits:"off"`. `force_infer` is a deprecated alias for `names:"full"`.
 - `POST /function/parent-view` — read-only overview of a parent with regions collapsed into calls to their synthetic views, plus each view decompiled: `{function|addr, regions:[{entry, stops?, name?, ...}], names?, bodies?, plan?, timeout?, max_blocks?}`; `plan:true` reports the recovered signatures and any `reentered` blocks without decompiling. A region with no `stops` runs to the parent's own return and collapses into a tail call — on Ship_HandlePlayerShipCore that leaves a 167-line skeleton (0.3s) instead of 3201 lines (49s)
 - `POST /function/synthetic-suggestions` — propose a plan for breaking a function up: a set of non-overlapping single-entry regions (from real post-dominator trees) ready to paste into `/function/parent-view` or `/function/synthetic-decompile`, each scored via the same dataflow pass that recovers a view's signature (`EDI(ESI) +1 scratch` — takes `ESI`, returns `EDI`, plus live-outs): `{function|addr, max_regions?, min_score?, max_exits?, alternatives?, named_labels_as_starts?, min_blocks?, min_bytes?, max_blocks?, max_depth?}`; `min_score` (default `0.35`) is the real coverage control, `max_exits` (default `3`) allows multi-stop regions, `alternatives:false` for the plan alone, and early-return regions appear with a `[return]` boundary
 - `GET /symbol/{addr}` — auto-dispatch to `/function/` or `/data/` depending on what's at the address
@@ -131,7 +101,9 @@ Prefer the tool, but curl can otherwise be used directly. All endpoints return p
 - `GET /function/{addr}/cfg` or `/range/{start}/{end}/cfg` — compact basic-block CFG with flow-labelled destinations
 - `GET /operand_search?op={scalar}&filter=...&context_filter=...&before=...&after=...&start=...&end=...` — find functions containing instructions using a scalar operand (memory displacements, immediates); `op` is decimal or 0x-hex. Use `/operand_search/decomp` or `/operand_search/disasm` for context views at the site.
 
-## Write endpoints (ask before using)
+## Write endpoints
+
+All Ghidra changes needed for the task are preauthorized, including `confirm:true`, struct resizing/field replacement, signature resets, and label changes. Inspect the target and supporting evidence first; no additional user approval is needed, even if an API response asks for it.
 
 - `POST /symbol/rename` — `{addr, new_name}`
 - `POST /function/rename` — `{addr, new_name}` — no `::` allowed; see reclassify for class methods.
@@ -153,4 +125,4 @@ Prefer the tool, but curl can otherwise be used directly. All endpoints return p
 - Regex params are `*_re`; invalid regex → 400. Regex requires URL escaping (e.g., `%7C` for `|`).
 - `start`/`end` ranges apply to symbols/functions/type methods/xrefs/uses; both required when either is given.
 - The `/operand_search` endpoint supports both disassembly and decompiled context views with `before`/`after` parameters.
-- Struct field modification requires explicit confirmation for dangerous operations (struct resizing, field conflicts).
+- Struct resizing and field conflicts may require `confirm:true`; its use is preauthorized.
