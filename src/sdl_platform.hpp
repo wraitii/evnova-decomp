@@ -50,8 +50,7 @@ struct FlightInput {
   bool thrust = false;     // up / 'w' (accelerate toward heading)
   bool reverse = false;    // down / 's' (turn ship to fly backward)
   // Held afterburner command, Z (the original's binding slot 0x18 default,
-  // DIK 0x2c). Previously on Ctrl; moved back to the original default when
-  // secondary fire took Ctrl (binding slot 3).
+  // DIK 0x2c).
   bool afterburner = false;
   // Primary fire: space (hold to keep firing all primary banks). Mirrors the
   // original's primary-fire command (binding slot 2, default DIK 0x39 =
@@ -59,9 +58,7 @@ struct FlightInput {
   bool fire = false;
   // Secondary fire (hold): Left Ctrl, the original's binding slot 3 default
   // (DIK 0x1d). Fires the currently selected secondary bank
-  // (active_weapon_bank_slot). Documented divergence: the clean-room build
-  // previously held afterburner on Ctrl; afterburner has moved to Z (the
-  // original's slot 0x18 default, DIK 0x2c) to free the original binding.
+  // (active_weapon_bank_slot).
   bool fire_secondary = false;
   // Cycle the selected secondary weapon: X (next), Shift+X (previous). The
   // original binds slot 0 to DIK 0x11 = W with its 0x38/0x6f Shift pair as

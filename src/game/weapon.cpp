@@ -137,8 +137,8 @@ namespace {
 // 0x00411773..0x00411800): the reach envelope is
 //   floor(|dx|)^2 + floor(|dy|)^2 <= reach^2
 // with reach = beam_length_px + 32 for weapon modes 0 and 3 (exact integer
-// add), and floor(range_scalar + 32.0f) for every other mode. Mode 10 is NOT
-// a beam here despite the original's stale plate comment (corrected 2026).
+// add), and floor(range_scalar + 32.0f) for every other mode. Disassembly shows
+// that mode 10 follows the non-beam range_scalar path.
 // weapon_slot >= 0 checks that bank; -1 scans the class's stock-armed banks
 // (default ammo > 0, weapon_mode_code < 9) and accepts on the first hit.
 bool NovaWeapon_ShipWithinWeaponRangeOfTarget(const GameState &state,

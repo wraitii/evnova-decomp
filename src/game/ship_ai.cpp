@@ -1733,7 +1733,7 @@ void NovaAi_UpdateShipState(GameState &state,
       }
       // Escort propagation (Ship_UpdateShipAiState state 0x14 successor loop):
       // any active ship whose squad_leader_ship_slot == this ship is ordered to
-      // jump with it. Provisionally wired here (Phase 7).
+      // jump with it. TODO(decomp): confirm formation-offset propagation.
       for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
         Ship &other = state.ShipAt(slot);
         if (!other.is_active ||
@@ -2472,8 +2472,9 @@ void NovaAi_ApplyControls(GameState &state,
     // Jump-in positioning: the original scans the 64 freeflight anchors for
     // the nearest, steers at it (thrust on align, else 1.75x-thrust damp), and
     // drops to control mode 0 when no anchor exists. No freeflight anchors are
-    // modelled, so the original's no-anchor outcome (mode 0) holds; real jump
-    // positioning awaits Phase 7. Like the original, this mode never writes
+    // modelled, so the original's no-anchor outcome (mode 0) holds.
+    // TODO(decomp): reconstruct freeflight-anchor positioning. Like the
+    // original, this mode never writes
     // ai_desired_speed (it transitions to mode 0, which preserves a seed).
     ship.ai_control_mode = 0;
     break;
@@ -2674,9 +2675,9 @@ void NovaAi_ApplyControls(GameState &state,
     break;
 
   case 0xd: {
-    // Formation hold with leader release (Ship_MoveShipTowardFormationOffset
-    // 0x00414390 remains Phase 8). squad_leader_ship_slot is the followed
-    // leader. While the leader's station-hold timer runs (>1.0) the ship
+    // Formation hold with leader release; squad_leader_ship_slot identifies
+    // the followed leader. While the leader's station-hold timer runs (>1.0)
+    // the ship
     // matches the leader's spin-up: damp to a standstill (0.95, desired -4.0,
     // timer +1) once the leader is within 11 deg of its own desired heading;
     // once the ship's own hold timer passes 30 and the leader is not the
@@ -2929,7 +2930,7 @@ void NovaAi_ApplyControls(GameState &state,
     // Boost to target: over-speed cruise (2.75x thrust, 1.8x max speed) on
     // the straight bearing, weapon selection at alignment, and a
     // return to combat pursuit (6) inside 165 px (or a 1-in-100 roll further
-    // out). Formation-offset mirroring is deferred (Phase 8).
+    // out). TODO(decomp): formation-offset mirroring.
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
       break;
     }
@@ -2981,7 +2982,7 @@ void NovaAi_ApplyControls(GameState &state,
     // the turn*3 gate and a guided bank at the turn*4 thrust gate, then break
     // off to a boost (0x11)
     // beyond 82 px/axis when the 0xBD latch is set and the target bearing is
-    // within 31 deg. Formation-offset mirroring is deferred (Phase 8).
+    // within 31 deg. TODO(decomp): formation-offset mirroring.
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
       break;
     }
@@ -3035,7 +3036,7 @@ void NovaAi_ApplyControls(GameState &state,
     // and thrust within turn+1 deg. Outside the class escort half-span the
     // ship creeps its position toward squad_leader_ship_slot at 10x thrust per
     // frame and drops desired speed by the same step; inside, the original
-    // launches/hands off the escort (deferred, Phase 8) or clears the escort
+    // launches/hands off the escort (TODO(decomp)) or clears the escort
     // for a non-capturable player escort. A destroyed/disabled ship or
     // a missing secondary target falls back to idle (state/control 0).
     const std::int16_t target_slot = ship.ai_secondary_target_slot;
@@ -3158,7 +3159,7 @@ void NovaAi_ApplyControls(GameState &state,
   case 0xb: {
     // Formation hold: like mode 9 but the arrival throttle is 0.5x max speed
     // within 100 px/axis (not 0), and the formation-leader glow/offset mirror
-    // runs first (offset deferred, Phase 8).
+    // runs first. TODO(decomp): formation-offset mirroring.
     if (fire_restricted) {
       break;
     }
@@ -3221,7 +3222,7 @@ void NovaAi_ApplyControls(GameState &state,
     // 135-deg offset anchor at 10x thrust). While the relative velocity is
     // above 0.525 px/tick the ship instead brakes on the relative velocity at
     // 0.66x thrust, damping it by 0.94 once slow. Formation-offset mirroring
-    // is deferred (Phase 8).
+    // is deferred (TODO(decomp)).
     if (fire_restricted || ship.ai_secondary_target_slot == -1) {
       break;
     }
@@ -3624,8 +3625,8 @@ void NovaAi_UpdateShipAI(GameState &state,
       if (ship.faction_or_government_id != -1) {
         // Ship.faction_or_government_id is a zero-based def index (the
         // original reads g_government_defs[faction] directly); the 0x80-based
-        // Government() lookup here previously made the capture variant
-        // unreachable for every ship.
+        // Government() expects a resource id; this field is already a
+        // zero-based definition index, so use GovernmentByIndex directly.
         if (const Government *govt =
                 state.scenario.GovernmentByIndex(ship.faction_or_government_id);
             govt != nullptr && (govt->flags_primary & 0x1000U) != 0U) {

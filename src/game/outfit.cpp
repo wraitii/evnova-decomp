@@ -459,11 +459,11 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
   //
   // TODO(decomp): the original caps this via the weapon bank / ammo system
   // (Weapon_CanFireWeaponBank gating on weapon_bank_secondary counters), not
-  // a per-weapon "max ammo" payload field. Earlier clean-room code fabricated
-  // a max_ammo from payload +0x5a, which is actually burst_cycle_ticks (see
-  // the weapon-decode audit). Until the real ammo system is reconstructed we
-  // leave the capacity cap out; the plain owned-count handling below still
-  // bounds it correctly for non-ammo outfits.
+  // a per-weapon "max ammo" payload field. Payload +0x5a is
+  // burst_cycle_ticks, not an ammo capacity (see the weapon-decode audit).
+  // Until the real ammo system is reconstructed we leave the capacity cap
+  // out; the plain owned-count handling below still bounds it correctly for
+  // non-ammo outfits.
   if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo)) {
     // Held ammo is not yet a separate concept in this build; skip the
     // capacity cap (TODO(decomp) above).

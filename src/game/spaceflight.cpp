@@ -1494,8 +1494,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // is an EMA whose steady state is delta_ms * 0.03 (0x00432f76..8a:
     // avg = (avg*3 + delta*0.03) * 0.25), so the faithful rate is
     // delta_ms * 0.03 * 60 = delta_ms * 1.8: at 60fps that is ~30px/frame,
-    // settling the 256px grow-out in ~0.15s. (Earlier builds used 0.06/ms,
-    // a 30x-too-slow ~4.3s settle.)
+    // settling the 256px grow-out in ~0.15s.
     state.ship_reticle_pulse =
         std::max(0.0F, state.ship_reticle_pulse - frame_time_ms * 1.8F);
     state.travel_reticle_pulse =

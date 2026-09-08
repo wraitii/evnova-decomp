@@ -16,13 +16,11 @@
 //  0x1d4c..0x1d54 and the mask set 0x1db0.. come straight from Nova Graphics
 //  3.rez and the nine consecutive PICT loads in NovaUi_InitThreeStateButtonArt
 //  (0x1d4c + 0..8). The down/disabled variant ids are *not* vertical slices of
-//  one button: the earlier reconstruction misread 0x1d4f ("click left") and
-//  0x1d52 ("grey left") as the middle/bottom of a 3-row edge column, which
-//  tiled parts of three different states into a single button. The game instead
-//  selects one whole strip via NovaUi_DrawThreeStateButton's state index
-//  (param_4/param_5: 0,0 -> normal; 0,!0 -> pressed; !0 -> grey) and stretches
-//  that state's 2px middle across the body. Each cap is composited through its
-//  1-bit mask PICT (white = transparent), so the outside of the rounded corners
+//  one button: 0x1d4f ("click left") and 0x1d52 ("grey left") begin separate
+//  state strips. NovaUi_DrawThreeStateButton selects one whole strip by state
+//  index (param_4/param_5: 0,0 -> normal; 0,!0 -> pressed; !0 -> grey) and
+//  stretches that state's 2px middle across the body. Each cap uses its 1-bit
+//  mask PICT (white = transparent), so the outside of the rounded corners
 //  is fully transparent; the middle tile is unmasked/opaque. This module loads
 //  the real strips, draws the body by left cap + stretched middle + right cap,
 //  applies the cap masks, and leaves the label glyph to the caller. Missing
