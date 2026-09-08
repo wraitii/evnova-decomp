@@ -234,4 +234,43 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
   ship.squad_leader_ship_slot = -1;
 }
 
+// Ghidra 0x00428340 Ship_UpdateVisualState, cloak-fade slice. See the header
+// for scope notes. Constants decoded from data: g_cloak_fade_rate_default
+// (0x00575308) = 1.5, g_cloak_fade_rate_flags2_swarming (0x0057530c) = 0.75,
+// g_cloak_fade_progress_max (0x00575314) = 32.0, g_cloak_fade_passive_decay
+// (0x00575318) = 1.0. The original indexes g_ship_class_defs directly; the
+// port's defensive class lookup only changes behavior for hulls the
+// Ship_HandleShip prologue would already have deactivated.
+void NovaShip_TickCloakFadeState(GameState &state,
+                                 Ship &ship,
+                                 float elapsed_ticks) {
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship.cloak_transition_latch == 0) {
+    // Passive decay: an interrupted fade bleeds back toward fully visible at
+    // one tick per frame (no frame-scale on this arm in the original).
+    if (ship.cloak_fade_progress > 0.0F && ship.cloak_fade_progress < 32.0F) {
+      ship.cloak_fade_progress -= 1.0F;
+    }
+  } else {
+    const float fade_rate =
+        (cls != nullptr && (cls->flags_secondary & 0x1U) != 0U) ? 1.5F : 0.75F;
+    ship.cloak_fade_progress +=
+        static_cast<float>(ship.cloak_transition_latch) * fade_rate *
+        elapsed_ticks;
+    if (ship.cloak_fade_progress <= 0.0F && ship.cloak_transition_latch < 0) {
+      ship.cloak_fade_progress = 0.0F;
+      ship.cloak_transition_latch = 0;
+    }
+    if (ship.cloak_fade_progress >= 32.0F && ship.cloak_transition_latch > 0) {
+      ship.cloak_fade_progress = 32.0F;
+      ship.cloak_transition_latch = 0;
+    }
+  }
+  // A wreck whose fade is still running clears through the lower threshold.
+  if (ship.cloak_fade_progress > 0.0F && NovaAiShip_IsDestroyed(ship)) {
+    ship.cloak_transition_latch = -2;
+  }
+}
+
 } // namespace game

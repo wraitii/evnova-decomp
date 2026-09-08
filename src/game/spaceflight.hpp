@@ -45,6 +45,32 @@ struct PlayerMovementStats {
   float turn_rate_deg_per_tick = 0.0F;
   float max_speed_px_per_tick = 0.0F;
   float thrust_px_per_tick2 = 0.0F;
+  // Signed rotation applied this frame (-1 left / +1 right / 0 none), the
+  // original's sVar8 in the manual-flight turn block. Feeds the turn-bank
+  // animation for keyboard steering AND the auto-turn continuations (reverse,
+  // face-target, jump alignment all bank in the original).
+  int turn_dir = 0;
+};
+
+// Optional movement context threaded from NovaPlayer_UpdateFromInput
+// (Ghidra 0x0044aa70 manual-flight region). speed_cap_* < 0 falls back to the
+// class max speed so bare integrator calls keep the plain clamp.
+struct PlayerMovementOptions {
+  // Face-target auto-turn arm (0x0044c0b1 command); suppresses keyboard
+  // steering and turns one step per frame toward ai_desired_heading_deg.
+  bool face_target_armed = false;
+  // Gravity-shield movement model (Outfit_ShipHasGravityShieldOutfit
+  // 0x0046df70 player branch): thrust accumulates the scalar speed, which the
+  // steering block converts into velocity via
+  // NovaShip_SteerVelocityTowardShipHeading; ship.speed stays a scalar.
+  bool gravity_shield = false;
+  // Fire-restricted flag (the port's NovaAiShip_IsDisabled approximation of
+  // the parent's local fire-restriction latch); drives the shield speed decay.
+  bool fire_restricted = false;
+  // Per-axis velocity clamp targets (g_player_speed_cap_x/y). Always >= the
+  // effective max speed while maintained by the afterburner tail.
+  float speed_cap_x = -1.0F;
+  float speed_cap_y = -1.0F;
 };
 
 // Pure free-flight physics integrator (unit-testable; no SDL). Derives stats
@@ -63,15 +89,32 @@ struct PlayerMovementStats {
 NovaPlayer_IntegrateMovement(PlayerShip &ship,
                              const FlightInput &input,
                              const ShipClass &ship_class,
-                             float elapsed_ticks);
+                             float elapsed_ticks,
+                             const PlayerMovementOptions &opts = {});
 
 // Applies the live flight controls to the player ship: integrates the heading/
 // throttle from an already-polled flight-input snapshot into GameState.player
 // so the ship flies during flight. The caller supplies the snapshot so it can
 // also feed the travel/other channels without polling the keyboard twice.
+// face_target_armed is the manual-flight auto-turn arm set by
+// NovaPlayer_TickFaceTargetCommand (Ghidra 0x0044c0b1 face-target command):
+// while armed, keyboard steering is suppressed and the hull turns one step per
+// frame toward the stored ai_desired_heading_deg.
 extern void NovaPlayer_UpdateFromInput(GameState &state,
                                        const FlightInput &input,
-                                       float elapsed_ticks);
+                                       float elapsed_ticks,
+                                       bool face_target_armed = false);
+
+// Ghidra 0x0044aa70 face-target command (0x0044c0b1 -> 0x0044c18a, binding
+// slot 7; the port binds R -- see FlightInput::face_target in
+// sdl_platform.hpp). While held with the station-hold timer idle, stores the
+// integer heading to face in player.ai_desired_heading_deg and returns true
+// to arm the manual-flight auto-turn: the primary ship target wins unless the
+// 0x38/0x6f arm modifier is held, which -- like having no ship target --
+// faces the selected travel stellar instead.
+extern bool NovaPlayer_TickFaceTargetCommand(GameState &state,
+                                             const FlightInput &input,
+                                             bool arm_modifier_held);
 
 // Per-frame player status/outfit maintenance from Ship_HandlePlayerShipCore
 // 0x0044aa70 (internal label PlayerTick_StatusAndOutfitEvents): fire-restricted

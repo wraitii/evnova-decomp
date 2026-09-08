@@ -142,6 +142,13 @@ struct FlightInput {
   // 0x38/0x6f modifiers select Ship_SelectNearestEngagedTarget.
   bool select_nearest_hostile = false;
   bool select_nearest_engaged = false;
+  // Face-target command (held): 'r'. The original's binding slot 7 default is
+  // DIK 0x1e = A, which the port already uses for turn-left; R is the
+  // documented clean-room stand-in. While held (with the ship not disabled)
+  // the ship auto-steers toward the primary ship target, or toward the
+  // selected travel stellar when no ship is targeted or the Alt arm modifier
+  // is held, until aligned.
+  bool face_target = false;
   // Edge latches from drained SDL events the loop otherwise could not see
   // (PollFlightInput owns the event drain). escape_pressed latches Escape or
   // 'q' keydown; primary_clicked latches a left mouse press with the current

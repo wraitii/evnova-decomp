@@ -372,6 +372,11 @@ void FireJump(GameState &state) {
   // unconditionally; the helper stops at the definition count, which is all
   // the consumers read).
   Mission_RerollOfferingRolls(state);
+  // Arrival command grace: the Stellar_ProcessTravelAndLanding rebuild
+  // epilogue (0x004586a6) latches the spaceflight frame counter to -15, so
+  // the special-interaction / mission-computer commands ignore input for 15
+  // frames after arriving (held keys from the map do not trigger windows).
+  state.arrival_command_grace_frames = 15;
   // Arrival closes the Escort Commands overlay (0x0044fe0b writes 0 to
   // g_target_category_panel_timer).
   state.escort.panel_timer = 0;

@@ -1219,6 +1219,32 @@ struct GameState {
   // phases its zig-zag off `counter % 300 < 150`; the original's shareware
   // license-check duties for this counter are not reproduced.
   std::uint32_t spaceflight_frame_counter = 0;
+  // Player self-destruct countdown (Ghidra _g_playerSelfDestructCountdown):
+  // -1.0 disarmed. The self-destruct command arms 150.0; it decays by the
+  // frame tick scale and detonates the player ship at <= 1.0
+  // (Ship_HandlePlayerShipCore self-destruct block 0x00451954..0x00451b91).
+  float player_self_destruct_countdown = -1.0F;
+  // Cloak toggle command latch (Ghidra g_playerDisableSurrenderCommandLatch,
+  // the binding-0x29 command in the PlayerTick_InteractionCloakAndStatus
+  // region): set on the first held frame with the toggle gates passing,
+  // cleared on release or while a gate rejects the command.
+  std::int8_t cloak_command_latch = 0;
+  // Arrival command grace. The original latches g_license_check_frame_counter
+  // to -15 in the Stellar_ProcessTravelAndLanding rebuild epilogue
+  // (0x004586a6), and the interaction command blocks (special interaction
+  // 0x00451bf0, mission computer 0x00451cf6) skip while it is negative. The
+  // port counts a separate signed budget down to zero instead (its own frame
+  // counter is unsigned and shared with cadence consumers).
+  std::int16_t arrival_command_grace_frames = 0;
+  // Player per-axis speed caps (Ghidra g_player_speed_cap_x 0x005997bc /
+  // g_player_speed_cap_y 0x005997c0): the per-frame velocity clamp targets of
+  // the manual-flight block. While the afterburner runs outside a stellar
+  // gravity pull both caps jump to 1.8x the effective max speed
+  // (g_afterburner_overspeed_factor 0x00575610); otherwise they decay by
+  // effective thrust * 0.4 (DAT_00575680) per frame and are clamped up to the
+  // effective max speed, so they are always >= max speed.
+  float player_speed_cap_x = 0.0F;
+  float player_speed_cap_y = 0.0F;
   // Port stand-in for g_frame_tick_count_60hz (0x00865858, NovaTime_
   // GetTickCount60Hz 0x004d5e10): wall-clock 1/60 s ticks. The original bumps
   // the global from the input-helper thread once per 16.664 ms; the port

@@ -558,6 +558,9 @@ FlightInput SdlPlatform::PollFlightInput() {
   input.starmap = pressed(SDL_SCANCODE_M);
   // Gameplay command 0x28 (default DIK 0x17 = I): the active-missions window.
   input.mission_info = pressed(SDL_SCANCODE_I);
+  // Face-target command (the original's binding 7, DIK 0x1e = A, is taken by
+  // turn-left here; see FlightInput::face_target).
+  input.face_target = pressed(SDL_SCANCODE_R);
   input.land = pressed(SDL_SCANCODE_RETURN) || pressed(SDL_SCANCODE_KP_ENTER);
   input.target_action = pressed(SDL_SCANCODE_E);
   input.board = pressed(SDL_SCANCODE_B);
