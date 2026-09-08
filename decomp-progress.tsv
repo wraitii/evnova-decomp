@@ -297,7 +297,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0044FFF0	PlayerTick_JumpTurnaroundContinuation	src/game/travel.cpp	75%	INTERNAL LABEL of 0x0044AA70; not a function. Reverse-velocity heading (Bearing(0,vel*100)+180), per-tick g_jump_turnaround_velocity_damp (0x5755f0, 0.99204) damping, facing window max(class turn+1, 20 deg), thrust-back, engine-glow ramp, and the |round(vel)|<2 stop handoff (which pre-stages the 'Warp up' cue) are reconstructed in the jump brake phase. Gravity-shield speed decay variant and fast-jump ships remain TODO(decomp).
 0x00450710	PlayerTick_AuxiliaryCommands	src/game/spaceflight.cpp	45%	INTERNAL LABEL of 0x0044AA70; not a function. Decomposed 2026 (pre-comments at each block head); 0x00450710 itself is unreachable dead code (live entry 0x00450717). PORTED 2026 (src/game/escort_commands.cpp): the escort-command blocks -- E-key toggle (binding slot 0x2a, 0x00450b4e + arms 0x00452820/0x0045293b/0x004529a8/0x00452960, STR# 0x7d2 0x33 no-escorts denial, attached-count cache DAT_007cab56, held-decay 0x00452990), selection rows 1-5 (0x00450c24.., panel-suppressed command list = key codes {2,3,4,5,6}), order keys F/D/V/C (slots 0x30..0x33 -> Attack/Defend/Hold/Formation, arm-modifier + Formation = Return to Hangar), Ship_CommandPlayerEscortGroup 0x0045c880 (behavior-5 vs fleet-escort command asymmetry, attack target propagation, order overlay STR# 0x7d2 0x86..0x8b/0x96..0x9f), auto-cancel arms (0x00450ddb..0x00450f67), and the overlay renderer (Ui_DrawTargetCategoryPanel 0x0049e430). NOT ported from this region: the binding-6 (Enter) message-dismiss/panel-close arm (0x00450ae7), fuel-scoop tail (credited to 0x0044C8D0), Mission_TickReactionInputTrigger (0x004507b6), map-wipe cheat (0x00450801), binding-35 cheat (0x004509aa), cheat target command (0x00450a62), FPS toggle (0x00450f6d) + far cheat arms 0x00453830..0x004549xx, eject command (0x004510a1); afterburner/speed-cap tail belongs to 0x0044C8D0. ShipState +0xC4 gate approximated by plain attached presence (TODO logged).
 0x00450717	PlayerTick_IonizationAndFuelRegeneration	src/game/spaceflight.cpp	90%	INTERNAL LABEL of 0x0044AA70; synthetic CFG 0x00450717 -> 0x004507B4. Ported one-to-one as NovaPlayer_TickIonizationAndFuelRegeneration: ionization decay/velocity damping and fuel-scoop recharge with capacity clamp.
-0x00451940	PlayerTick_InteractionCloakAndStatus	src/game/spaceflight.cpp	45%	INTERNAL LABEL of 0x0044AA70; not a function. 2026: self-destruct state machine (0x00451954) ported as NovaPlayer_TickSelfDestructCommand (arm 150.0 on modifier+binding-0x12, release-abort, 30-tick warning beeps at <=120, detonation at <=1.0 with shield 0/armor -1/target clear and the control-mode-0xf docked-fighter armor -1 sweep) and cloak toggle + active-cloak upkeep (0x00451db0) as NovaPlayer_TickCloakCommand (destroyed/disabled/fire-restricted latch gates, CanMaintainCloakState denial cue, fade flip via OnCloakStateEntered/Cleared, per-frame fuel/shield drain at DAT_00575690 scale with shield-drop outfit); mission-computer gates aligned to 0x00451c87 (hold/timed-action/destroyed/15-frame arrival grace). Arrival grace field set at the FireJump arrival tail. Remaining: special-interaction command + window (0x00451b91, NovaUi_RunPlayerSpecialInteractionWindow 0x004a1ae0 unported), the 250-frame junk stock regen/decay (0x00451e6f, junk resource defs unmodelled).
+0x00451940	PlayerTick_InteractionCloakAndStatus	src/game/spaceflight.cpp	45%	INTERNAL LABEL of 0x0044AA70; not a function. 2026: self-destruct state machine (0x00451954) ported as NovaPlayer_TickSelfDestructCommand (arm 150.0 on modifier+binding-0x12, release-abort, 30-tick warning beeps at <=120, detonation at <=1.0 with shield 0/armor -1/target clear and the control-mode-0xf docked-fighter armor -1 sweep) and cloak toggle + active-cloak upkeep (0x00451db0) as NovaPlayer_TickCloakCommand (destroyed/disabled/fire-restricted latch gates, CanMaintainCloakState denial cue, fade flip via OnCloakStateEntered/Cleared, per-frame fuel/shield drain at DAT_00575690 scale with shield-drop outfit); special-interaction command 0x00451b91 ported (opens NovaPlayerInfo_RunWindow; see player_info_window.cpp); mission-computer gates aligned to 0x00451c87 (hold/timed-action/destroyed/15-frame arrival grace). Arrival grace field set at the FireJump arrival tail. Remaining: the 250-frame junk stock regen/decay (0x00451e6f, junk resource defs unmodelled).
 0x00454910	Ship_HandlePlayerTargetActionCommand	src/game/spaceflight.cpp	35%	stellar target-action eligibility + destination-interaction (0x3f1) + ship-comm branch: player disabled/destroyed and hyperspace-latch gates with STR# 0x7d2 overlays, bVar1 hail-eligibility gate, NovaShipComm_RunShipDialog handoff. Mission-ship interaction branch (mission defs) remains TODO(decomp)
 0x00455150	Weapon_FirePlayerWeaponBank	src/game/weapon.cpp	85%	Full mode dispatch ported: straight projectiles (-1/1/5/6) via NovaWeapon_SpawnProjectile; mode-0 fixed beams queued along the firing heading (bearing fallback endpoint, BeamLength+32 reach); turreted beam/projectile (3/4) gated by NovaWeapon_IsTargetBearingInTurretBlindSpot; guided 7/8 launch gate (46 deg off nose/tail, mode-7 dumb-fire fallback); burst attempts via NovaWeapon_GetWeaponBurstAttempts incl. fuel-capped bursts; per-shot fuel ((|cost|-1000)*0.1) and cost-bank ammo spend; kickback (rear polar impulse / hull mass, per-axis clamp); volley-scaled or flags-0x40 fixed cooldown; flags_tertiary-0x20 linked-cooldown (+2.0) sweep; burst-cycle counter with wrap pay and burst_reset_cooldown; cloak gate (flags_secondary 0x4000 exemption). Deferred: launch-bay ship spawn (mode 99), muzzle sprite flash (flags_secondary 0x200), waypoint-marker arm, beam-mode immediate-priority audio nuance.
 0x00455E10	Stellar_TravelToSystem	src/game/landed_window.cpp	65%	Arrival subset in NovaLanding_EnterDocked (fee gate/deduction, auto-refueller refuel 0x004250f0, outfit-pool reconcile) + launch tail in NovaLanding_LaunchFromStellar (vel/pos reset at stellar centre, shield/armor refill, the cycle's ONE daily world tick 0x00456033 -- after the window, so the Spaceport mission gate sees the pre-landing date, stat-modifier jitter/reroll, rand(0x168) launch heading, travel-selection reset, shot wipe). TODO(decomp): pilot autosave (0x00456103, no .plt wiring in the flow) and the DAT_00597974 cursor travel-selection sprite re-anchor (0x00439280 not reconstructed).
@@ -446,7 +446,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00469E90	NovaUi_RebuildShipyardAvailabilityList	src/game/landed_store.cpp	90%	Partial clean-room availability list: decoded stellar base/special tech gates
 0x0046A220	Outfit_RebuildAvailableOutfitListForTravelStellar	src/game/landed_store.cpp	60%	Partial clean-room availability list: decoded stellar base/special tech gates
 0x0046A5D0	Outfit_ComputePlayerCargoAndJunkTotal		0%	
-0x0046A680	Outfit_HasAnyOwnedItem		0%	
+0x0046A680	Outfit_HasAnyCargoMissionOrJunk		0%	Renamed: old name said "owned item" but it checks cargo bins/mission cargo/junk only (see plate). 0% unported.
 0x0046A730	Ship_ComputeShipTotalMass	src/game/outfit.cpp	100%	Clean-room port as Outfit_ComputePlayerTotalMass: class base mass + owned outfits' PurchaseMass (load-type-2 mass
 0x0046A7C0	Outfit_ComputeRemainingCargoSpace		0%	
 0x0046A870	NovaUi_RedrawGameplayViewportAndRadar		0%	
@@ -527,7 +527,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046EFB0	Stellar_GetJumpSequenceDurationMs		0%	
 0x0046EFD0	Stellar_AreStellarsEquivalent	src/game/mission.cpp	100%	Clean-room port as NovaStellar_AreStellarsEquivalent: id equality or same pos+display-name twins; [0
 0x0046F100	Government_IsReputationTrackingGovernment		0%	
-0x0046F140	Ship_HasAnyCargoLootOrActiveMission	src/game/mission.cpp	100%	Ported: player cargo bins + junk counts + active-mission slot scan. Consumers (player special-interaction window 0x00499c10 / tab strip 0x004a1c40) not ported yet.
+0x0046F140	Ship_HasAnyCargoLootOrActiveMission	src/game/mission.cpp	100%	Ported: player cargo bins + junk counts + active-mission slot scan. Consumers ported (player-info window 0x00499c10 / tab strip 0x004a1c40, src/game/player_info_window.cpp).
 0x0046F1E0	Frame_AddCombatRatingPoints		0%	
 0x0046F270	Weapon_GetWeaponFireIntervalTicks	src/game/weapon.cpp	90%	flags-0x40 weapons wrap at burst_cycle_ticks, others at mount*burst_cycle_ticks; implemented inline in NovaWeapon_FirePlayerWeaponBank (player) and NovaWeapon_FireNpcWeaponBank (NPC) burst-reset arms.ire rate; exact burst-count side-effects and flags-0x40 branch still not replicated
 0x0046F2C0	Weapon_GetWeaponBurstAttempts	src/game/weapon.cpp	90%	NovaWeapon_GetWeaponBurstAttempts (player banks in GameState arrays): non-burst = 1; burst banks start from mounted ammo capped by cost-bank secondary (mode-99: own counter) or fuel_points / ((|cost|-1000)*0.1) for fuel-drawn codes. NPC path keeps its inline copy in NovaWeapon_FireNpcWeaponBank with fuel capping deferred.
@@ -798,9 +798,9 @@ address	name	impl_file	reimpl_pct	comment
 0x00499150	thunk_FUN_008745b6		0%	
 0x00499270	FUN_00499270		0%	
 0x00499870	FUN_00499870		0%	
-0x00499C10	NovaUi_RunPlayerSpecialInteractionWindow		0%	
-0x0049A540	NovaUi_DrawPlayerSpecialInteractionWindow		0%	
-0x0049C050	NovaUi_BuildPlayerSpecialInteractionStrings		0%	
+0x00499C10	NovaUi_RunPlayerSpecialInteractionWindow	src/game/player_info_window.cpp	65%	NovaPlayerInfo_RunWindow: guards (hold-timer/death-timer; the BOOL_007354a8 modal latch has no port counterpart), DLOG 0x3f9 geometry, auto-grow math (delta+4, 0.5 shift), Tab/shift-Tab cycle 1..4, Esc/Enter/P close, tab dispatch 0/1-4/5, jettison confirm via DLOG 0xbba port of 0x004977d0. Gaps: Weapon_ReconcileOutfitPoolWithWeaponBanks 0x00462ec0 pre-open ledger refresh, mission-cargo arm of the any-cargo gates, jettison execution 0x0041f330 (result flag only), P-binding read uses default slot value.
+0x0049A540	NovaUi_DrawPlayerSpecialInteractionWindow	src/game/player_info_window.cpp	45%	Backdrop slices 0x2146-0x2148 top/middle-stretch/bottom, page switch, tab strip redraw. Page 1 grid: pilot/date/system/class/turn/thrust/speed with the .data scales (30/2500/100, 2/3 non-strict), combat rank 0x00469030 thresholds, credits, shield/armor/fuel rows. Gaps: legal-status value arm (0x00468d90 in starmap not exported), key-settings hint glyph row, fleet-value/tribute tail (DAT_00575948 0.01 sum), row labels provisional (DAT_0072d*cc pools).
+0x0049C050	NovaUi_BuildPlayerSpecialInteractionStrings	src/game/player_info_window.cpp	35%	Extras/honors text builders: count words (a/an vowel test, digits), 0x2000 ranks split. Gaps: cargo text entirely (commodity/junk defs unmodelled), similar_to grouping + cost ordering (Outfit lacks similar_to), resale footer, honors badge arm (system_cue name strings unmodelled).
 0x0049D630	FUN_0049d630		0%	
 0x0049D640	Outfit_ComputeScaledPurchasePrice	src/game/landed_store.cpp	100%	Faithful clean-room price scaling: tech discount nearest-unit rounding and threshold quantization.
 0x0049D7A0	NoSys_NoOp_0049d7a0		0%	
@@ -838,8 +838,8 @@ address	name	impl_file	reimpl_pct	comment
 0x004A1520	OutfitterMenu_FUN_004a1520	src/game/docked_dialog.cpp	40%	Button-strip draw ported inline in NovaMission_RunMissionInfoWindow (ServicesButtonArt strips + STR# 0x96 captions instead of the baked-caption three-state bitmaps - documented divergence); art-index table DAT_007d82fe = {4, 0x22} is the Done/Abort pair.
 0x004A1670	OutfitterMenu_FUN_004a1670		0%	
 0x004A1820	OutfitterMenu_FUN_004a1820		0%	
-0x004A1AE0	NovaUi_HandlePlayerSpecialInteractionTabs		0%	
-0x004A1C40	NovaUi_DrawPlayerSpecialInteractionTabs		0%	
+0x004A1AE0	NovaUi_HandlePlayerSpecialInteractionTabs	src/game/player_info_window.cpp	85%	HandleTabStrip: faithful hit-test of entries 1-5+7, press loop with the change guard clamping to -1, release index returned. Port pumps PollTextEvent instead of the DAT_008701a0 pending flag; redraw is a full-window lambda instead of draw+blit.
+0x004A1C40	NovaUi_DrawPlayerSpecialInteractionTabs	src/game/player_info_window.cpp	80%	DrawTabStrip: 6 strip buttons from STR# 0x96 0-based indices {4,0x23,0x24,0x25,0x26,0x3c}, pressed = index or page, jettison gate page==2 + Ship_HasAnyCargoLootOrActiveMission. Divergence: original labels are vector-glyph pstrings via 0x004a3340; port draws text labels on ServicesButtonArt.
 0x004A1D90	NovaUi_HandleEscortShipManagementButtons		0%	
 0x004A1ED0	NovaUi_DrawEscortShipManagementButtons		0%	
 0x004A2090	NovaUi_HandleTravelDestinationPaymentButtons		0%	
@@ -920,7 +920,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004B68A0	Mouse_GetPositionShortPair		0%	
 0x004B68D0	NovaInputQueue_FlushAllCommands		0%	
 0x004B68E0	NovaPlatform_PumpInputAndReadyState		0%	
-0x004B68F0	FUN_004b68f0		0%	
+0x004B68F0	NovaInput_PumpAndHasPendingEvents		0%	Renamed only (pump + return DAT_008701a0 pending flag). 0% unported.
 0x004B6900	DrawContext_SetFontId	src/game/nova_font.cpp	40%	active family id selected per draw via the NovaFontFamily enum passed to NovaText_Draw/NovaText_DrawCentered
 0x004B6920	DrawContext_StoreScaledValue	src/game/nova_font.cpp	45%	NovaText draw path scales the logical point size by the active presentation/backing-pixel factor before obtaining a font handle; original fixed-point scale storage and non-text uses remain TODO(decomp)
 0x004B6940	FUN_004b6940		0%	
@@ -1111,11 +1111,11 @@ address	name	impl_file	reimpl_pct	comment
 0x004D0B70	FUN_004d0b70		0%	
 0x004D0BD0	FUN_004d0bd0		0%	
 0x004D0D00	UiWindow_Draw	src/game/ui_dialog.cpp	65%	Ported control drawer: bevel triples
-0x004D16F0	FUN_004d16f0		0%	
+0x004D16F0	NovaUi_BlitDirtyWindowSurfaces		0%	Renamed only (blits dirty window surfaces to the render context). 0% unported.
 0x004D17A0	DrawContext_SaveAndSetOwnerContext		0%	
 0x004D17B0	NovaRender_GetMainWindowOwner		0%	
-0x004D17C0	FUN_004d17c0		0%	
-0x004D17E0	FUN_004d17e0		0%	
+0x004D17C0	UiWindow_GetDrawContextHandle		0%	Renamed only (window record -> draw context handle). 0% unported.
+0x004D17E0	NovaMouse_GetWindowRelativePosition		0%	Renamed only (mouse minus current window record origin). 0% unported.
 0x004D1810	FUN_004d1810		0%	
 0x004D1890	FUN_004d1890		0%	
 0x004D18B0	FUN_004d18b0		0%	

@@ -608,9 +608,12 @@ FlightInput SdlPlatform::PollFlightInput() {
 
 bool SdlPlatform::IsOriginalKeyCodeHeld(std::uint16_t key_code) {
   // Reverse of the OriginalKeyCode mapping for the codes the binding-table
-  // consumers currently need (escort-command slots 0x2a/0x2b..0x33 and the
-  // 0x38 arm modifier; the 0x6f half has no clean-room scancode mapping --
-  // TODO(decomp): identify the physical key behind DIK-style code 0x6f).
+  // consumers currently need (escort-command slots 0x2a/0x2b..0x33, the 0x38
+  // arm modifier, the cloak 0x29 -> 0x16 and Player Info 0x19 -> 0x19
+  // bindings, and both shifts for the Player Info reverse-Tab arm). Keep in
+  // sync when new binding slots are consumed; the 0x6f half has no clean-room
+  // scancode mapping -- TODO(decomp): identify the physical key behind
+  // DIK-style code 0x6f).
   SDL_Scancode scancode;
   switch (key_code) {
   case 0x02:
@@ -631,6 +634,12 @@ bool SdlPlatform::IsOriginalKeyCodeHeld(std::uint16_t key_code) {
   case 0x12:
     scancode = SDL_SCANCODE_E;
     break;
+  case 0x16:
+    scancode = SDL_SCANCODE_U;
+    break;
+  case 0x19:
+    scancode = SDL_SCANCODE_P;
+    break;
   case 0x20:
     scancode = SDL_SCANCODE_D;
     break;
@@ -645,6 +654,12 @@ bool SdlPlatform::IsOriginalKeyCodeHeld(std::uint16_t key_code) {
     break;
   case 0x38:
     scancode = SDL_SCANCODE_LALT;
+    break;
+  case 0x2a:
+    scancode = SDL_SCANCODE_LSHIFT;
+    break;
+  case 0x36:
+    scancode = SDL_SCANCODE_RSHIFT;
     break;
   default:
     return false;
