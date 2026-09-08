@@ -330,12 +330,15 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
   // Ship_UpdateVisualState (0x00428340) destruction pass: runs after every
   // Ship_HandleShip integration (Frame_TickSystems scope order), finishing
   // the death presentation of destroyed hulls and applying the blast/mission
-  // bookkeeping exactly once as each wreck expires.
+  // bookkeeping exactly once as each wreck expires. The cloak-fade slice of
+  // the same updater ticks for every active hull (the player's fade runs in
+  // NovaPlayer_TickCloakCommand).
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
     if (!ship.is_active || ship.current_system_id != current_system) {
       continue;
     }
+    NovaShip_TickCloakFadeState(state, ship, elapsed_ticks);
     if (!NovaAiShip_IsDestroyed(ship)) {
       continue;
     }
@@ -399,7 +402,9 @@ void NovaFrame_TickSystems(GameState &state,
 //   travel-selection commands   0x0044B7C4 -> 0x0044BAFE
 //   nearest-target command      0x0044BE15 -> 0x0044BEB7
 //   weapon commands             0x0044BEB7 -> 0x0044C0B1
-//   face-target command         0x0044C0B1 -> 0x0044C18A
+//   face-target command         0x0044C0B1 -> 0x0044C18A (ported:
+//                               NovaPlayer_TickFaceTargetCommand + the
+//                               IntegrateMovement auto-turn branch)
 //   clear jump-status overlay   0x0044C310 -> 0x0044C31D
 //   escort jump warning         0x0044C31D -> 0x0044C4DA
 //   hyperspace completion audio 0x0044C75C -> 0x0044C84D
@@ -419,11 +424,20 @@ void NovaFrame_TickSystems(GameState &state,
 //   cheat commands               0x00450FD9 -> 0x00450FE6
 //   eject/escape-pod transition  0x00451024 -> 0x00451630
 //   afterburner speed/fuel tail  0x00451630 -> 0x004518EF
-//   self-destruct state machine 0x00451954 -> 0x00451B91
-//   special-interaction window  0x00451B91 -> 0x00451C4F
-//   mission-computer window     0x00451C87 -> 0x00451DB0
-//   cloak-toggle command        0x00451DB0 -> 0x00451E60
-//   active-cloak upkeep         0x00451E60 -> 0x00451E6F
+//   self-destruct state machine 0x00451954 -> 0x00451B91 (ported:
+//                               NovaPlayer_TickSelfDestructCommand)
+//   special-interaction window  0x00451B91 -> 0x00451C4F (command block
+//                               TODO(decomp):
+//                               NovaUi_RunPlayerSpecialInteraction- Window
+//                               0x004A1AE0 unported)
+//   mission-computer window     0x00451C87 -> 0x00451DB0 (ported in the loop's
+//                               mission_info block)
+//   cloak-toggle command        0x00451DB0 -> 0x00451E60 (ported:
+//                               NovaPlayer_TickCloakCommand)
+//   active-cloak upkeep         0x00451E60 -> 0x00451E6F (ported:
+//                               NovaPlayer_TickCloakCommand; the junk-market
+//                               regeneration 0x00451E6F -> 0x00451F8F is
+//                               TODO(decomp): junk resource defs unmodelled)
 //   land-command dispatch       0x00451F8F -> 0x004520EA
 //   route-map zoom commands     0x0045216E -> 0x004548A7
 // PlayerTick_TravelSelectionCommands at 0x0044B7C4 names the clean travel-
@@ -752,6 +766,179 @@ LandCommandResult NovaPlayer_TickLandCommand(SdlPlatform &platform,
   return LandCommandResult::kContinue;
 }
 
+// Ghidra 0x0044aa70 self-destruct block (0x00451954 -> 0x00451b91, internal
+// label of the PlayerTick_InteractionCloakAndStatus umbrella). The command is
+// the 0x38/0x6f arm-modifier pair (the port reads both Alt scancodes, as the
+// board/eject commands do) plus key binding 0x12 (default DIK 0x0c, minus).
+// Arm, while disarmed (< 0) and not destroyed: 150.0 countdown, the "Self
+// destruct armed." overlay (STR# 0x7d2 0x181 + 0x182, 0x28 ticks) and the
+// transition-table 3 cue. While armed, releasing the command aborts (0x181 +
+// 0x183 overlay, table 1 cue); holding it decrements the countdown by the
+// frame tick scale, and on every 30th-tick boundary at or below 120.0
+// (DAT_00575688) beeps (table 2) and posts the remaining whole seconds
+// (round(countdown / 30.0), STR# 0x7d2 0x181 + 0x18b + 0x185 + ".", 0x46
+// ticks). At countdown <= 1.0 (g_jump_turnaround_turn_rate_addend
+// 0x0057555c) with the command still held the ship detonates: shields 0,
+// armor -1 (the death/respawn path takes over), primary target cleared, and
+// every hull docked to the player in control mode 0xf
+// (Ship_IsShipDockedWithTargetInControlMode0x0F 0x00415b00: targeting the
+// player, |dx|/|dy| <= 16.0, DAT_00575090) gets armor -1.0 as well.
+// The armor-panel dirty flags the original sets on the 10-frame cadence are
+// implied by the port's immediate-mode HUD.
+void NovaPlayer_TickSelfDestructCommand(GameState &state,
+                                        bool self_destruct_held,
+                                        float elapsed_ticks) {
+  Ship &p = state.player;
+  float &countdown = state.player_self_destruct_countdown;
+  if (self_destruct_held && countdown < 0.0F && !NovaAiShip_IsDestroyed(p)) {
+    state.pending_ui_sounds.push_back({3, 0xf});
+    std::string text =
+        NovaHud_LoadStringEntry(0x7d2, 0x181).value_or("Self destruct");
+    text += " ";
+    text += NovaHud_LoadStringEntry(0x7d2, 0x182).value_or("armed.");
+    NovaHud_ShowOverlayMessage(state, text, static_cast<std::uint64_t>(0x28));
+    countdown = 150.0F;
+  }
+  // Armed countdown: abort on release, decay + warn while held. The 30-tick
+  // boundary message runs on the rounded tick counter, exactly like the
+  // original's (int)ROUND(countdown) % 30 == 0 check.
+  bool command_block_ran = false;
+  if (countdown > 0.0F) {
+    command_block_ran = true;
+    if (!self_destruct_held) {
+      state.pending_ui_sounds.push_back({1, 0xf});
+      std::string text =
+          NovaHud_LoadStringEntry(0x7d2, 0x181).value_or("Self destruct");
+      text += " ";
+      text += NovaHud_LoadStringEntry(0x7d2, 0x183).value_or("aborted.");
+      NovaHud_ShowOverlayMessage(state, text, static_cast<std::uint64_t>(0x28));
+      countdown = -1.0F;
+    } else {
+      // g_armor_state_addend (0x00575580, 0.0) <= countdown: always true
+      // while armed, so the decay runs every held frame.
+      countdown -= elapsed_ticks;
+      const auto whole_ticks = static_cast<int>(std::round(countdown));
+      if (countdown <= 120.0F && whole_ticks % 30 == 0) {
+        const float seconds =
+            countdown / 30.0F; // g_hyperspace_engage_hold_30hz
+        const auto whole_seconds = static_cast<int>(std::round(seconds));
+        std::string text =
+            NovaHud_LoadStringEntry(0x7d2, 0x181).value_or("Self destruct");
+        text += " ";
+        text += NovaHud_LoadStringEntry(0x7d2, 0x18b).value_or("in");
+        text += " ";
+        text += std::to_string(whole_seconds);
+        text += " ";
+        text += NovaHud_LoadStringEntry(0x7d2, 0x185).value_or("seconds");
+        text += ".";
+        state.pending_ui_sounds.push_back({2, 0xf});
+        NovaHud_ShowOverlayMessage(
+            state, text, static_cast<std::uint64_t>(0x46));
+      }
+    }
+  }
+  // Detonation: countdown reached 1.0 (g_jump_turnaround_turn_rate_addend)
+  // on a frame the command block ran with the command still held.
+  if (countdown <= 1.0F && command_block_ran && self_destruct_held) {
+    state.pending_ui_sounds.push_back({1, 0xf});
+    const auto text = NovaHud_LoadStringEntry(0x7d2, 0x186);
+    NovaHud_ShowOverlayMessage(state,
+                               text.value_or("Self destruct activated."),
+                               static_cast<std::uint64_t>(0x28));
+    p.shield_points = 0.0F;
+    p.armor_points = -1.0F;
+    p.primary_target_ship_slot = -1;
+    // g_shipAvailabilityCachesDirty = 1: the port recomputes availability
+    // per query (no cache), so only the docked-fighter sweep matters.
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      Ship &ship = state.ShipAt(slot);
+      if (!ship.is_active || ship.ai_control_mode != 0xf) {
+        continue;
+      }
+      const bool targets_player =
+          ship.primary_target_ship_slot == p.ship_instance_id ||
+          ship.ai_secondary_target_slot == p.ship_instance_id;
+      constexpr float kDockedRange = 16.0F; // DAT_00575090
+      if (targets_player && std::abs(ship.pos_x - p.pos_x) <= kDockedRange &&
+          std::abs(ship.pos_y - p.pos_y) <= kDockedRange) {
+        ship.armor_points = -1.0F;
+      }
+    }
+    countdown = -1.0F;
+  }
+}
+
+// Ghidra 0x0044aa70 cloak command + active-cloak upkeep (0x00451db0 ->
+// 0x00451e6f, internal label of the PlayerTick_InteractionCloakAndStatus
+// umbrella). Command (binding 0x29, default DIK 0x16 = U, edge-latched through
+// g_playerDisableSurrenderCommandLatch): suppressed (latch cleared) while the
+// player is destroyed (death_timer_active > 0), disabled
+// (ai_station_hold_timer > 0) or fire-restricted (the port's established
+// NovaAiShip_IsDisabled approximation of the parent's local fire-restriction
+// flag); on the first accepted frame, Ship_CanMaintainCloakState failing
+// plays the denied cue (table 3), otherwise the fade flips via
+// Ship_OnShipCloakStateEntered/Cleared (cleared when a fade is already
+// running toward or sitting in cloak).
+// The per-frame upkeep then runs for every active cloak: the visual fade
+// slice (NovaShip_TickCloakFadeState), the force-clear when the cloak can no
+// longer be maintained, and while the ship sits past the visibility threshold
+// the outfit-driven fuel drain (both paths clamp at 0.0) and the shield drop
+// (Flags 0x0004 outfit) or per-tick shield drain. Drain scale DAT_00575690 =
+// 2.9045e-5 per drain-unit and tick (decoded 0x37f38c54); the panel-dirty
+// flags on the 10-frame cadence are implied by the immediate-mode HUD. The
+// player's Ship_UpdateVisualState cloak slice is co-located here because the
+// port has no per-frame player visual pass.
+void NovaPlayer_TickCloakCommand(GameState &state,
+                                 bool cloak_command_held,
+                                 float elapsed_ticks) {
+  Ship &p = state.player;
+  const bool destroyed = p.death_timer_active > 0.0F;
+  const bool disabled = p.ai_station_hold_timer > 0.0F;
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, p);
+  if (!cloak_command_held || destroyed || disabled || fire_restricted) {
+    state.cloak_command_latch = 0;
+  } else if (state.cloak_command_latch == 0) {
+    state.cloak_command_latch = 1;
+    if (!NovaAiShip_CanMaintainCloakState(state, p)) {
+      state.pending_ui_sounds.push_back({3, 1});
+    } else if (p.cloak_fade_progress > 0.0F || p.cloak_transition_latch > 0) {
+      NovaAi_OnShipCloakStateCleared(p);
+    } else {
+      NovaAi_OnShipCloakStateEntered(state, p);
+    }
+  }
+  // Active-cloak upkeep.
+  NovaShip_TickCloakFadeState(state, p, elapsed_ticks);
+  if (NovaTargeting_ShipAtCloakVisibilityThreshold(p)) {
+    if (!NovaAiShip_CanMaintainCloakState(state, p) || fire_restricted) {
+      NovaAi_OnShipCloakStateCleared(p);
+    }
+    constexpr float kCloakDrainPerTick = 2.9045e-5F; // DAT_00575690
+    const std::int16_t fuel_drain = NovaOutfit_GetCloakFuelDrainFlags(state, p);
+    if (fuel_drain > 0) {
+      p.fuel_points -=
+          static_cast<float>(fuel_drain) * kCloakDrainPerTick * elapsed_ticks;
+      if (p.fuel_points <= 0.0F) {
+        p.fuel_points = 0.0F;
+      }
+    }
+    if (NovaOutfit_HasCloakShieldDropOnActivation(state, p)) {
+      p.shield_points = 0.0F;
+    } else {
+      const std::int16_t shield_drain =
+          NovaOutfit_GetCloakShieldDrainFlags(state, p);
+      if (shield_drain > 0 &&
+          static_cast<float>(shield_drain) <= p.shield_points) {
+        p.shield_points -= static_cast<float>(shield_drain) *
+                           kCloakDrainPerTick * elapsed_ticks;
+        if (p.shield_points <= 0.0F) {
+          p.shield_points = 0.0F;
+        }
+      }
+    }
+  }
+}
+
 // Ghidra 0x00417600 Frame_SpaceflightLoop main loop. Reconstructs the outer
 // phase skeleton (setup + full first tick, then per-frame pre-draw/sim,
 // drawing, post-draw) and the run_full_tick freeze gate. Simulation is still
@@ -887,6 +1074,13 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Port stand-in for NovaTime_GetTickCount60Hz's g_frame_tick_count_60hz
     // (see GameState::tick_60hz): re-derived from the wall clock each frame.
     state.tick_60hz = static_cast<std::uint32_t>(now_ms * 60ULL / 1000ULL);
+    // Arrival command grace (Ghidra latches g_license_check_frame_counter to
+    // -15 in the Stellar_ProcessTravelAndLanding rebuild epilogue, 0x004586a6):
+    // counts down each frame; the gated interaction command blocks skip while
+    // it is positive.
+    if (state.arrival_command_grace_frames > 0) {
+      --state.arrival_command_grace_frames;
+    }
     // Player control (heading/throttle) is read here once so the ship flies
     // while the simulation stubs do not, and the same snapshot feeds the
     // travel/jump channel. Movement integrates into PlayerShip.
@@ -1053,6 +1247,18 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
            .arm_modifier_held = escort_held(0x38)},
           SDL_GetTicks() * 60 / 1000);
     }
+    // Face-target command (Ghidra 0x0044aa70 block 0x0044c0b1 -> 0x0044c18a,
+    // binding slot 7; the port binds R -- see FlightInput::face_target):
+    // while held, stores the heading to face and arms the manual-flight
+    // auto-turn that NovaPlayer_UpdateFromInput consumes this frame. The
+    // original dispatches this directly after the weapon commands.
+    bool face_target_armed = false;
+    if (!player_tick_consumed && !state.travel.engaging) {
+      const bool face_arm_modifier = platform.IsOriginalKeyCodeHeld(0x38) ||
+                                     platform.IsOriginalKeyCodeHeld(0x6f);
+      face_target_armed =
+          NovaPlayer_TickFaceTargetCommand(state, input, face_arm_modifier);
+    }
     // Ghidra 0x00450710 PlayerTick_AuxiliaryCommands coverage map: the port
     // reconstructs the fuel-scoop tail
     // (NovaPlayer_TickIonizationAndFuelRegeneration), the
@@ -1172,7 +1378,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // region. A newly engaged jump therefore owns this frame immediately;
     // normal steering must not contribute one final integration step.
     if (!player_tick_consumed && !state.travel.engaging) {
-      NovaPlayer_UpdateFromInput(state, input, frame_time_ms / kOriginalTickMs);
+      NovaPlayer_UpdateFromInput(
+          state, input, frame_time_ms / kOriginalTickMs, face_target_armed);
     }
     if (!player_tick_consumed) {
       NovaPlayer_TickShieldAndArmorRegeneration(state, frame_time_ms);
@@ -1261,10 +1468,18 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // missions and either plays the denied cue + "You have no active
     // missions." overlay (STR# 0x7d2 0x162, 0xf0 ticks) or opens the
     // mission-computer window (NovaUi_RunMissionComputerWindow 0x00446150).
-    // Gated while a jump is engaged like the other interaction windows.
+    // Gates mirrored from 0x00451c87: the command suppresses while the player
+    // is disabled (ai_station_hold_timer > 0), a timed action is armed
+    // (timed_action_counter > 0), destroyed (death_timer_active > 0) or within
+    // the 15-frame arrival grace -- the port's earlier travel.engaging gate
+    // (a jump's hold/zoom phases set the hold timer anyway) is subsumed by
+    // the disabled check.
     const bool mission_info_held = input.mission_info;
     if (!player_tick_consumed && mission_info_held && !mission_info_was_held &&
-        !state.travel.engaging) {
+        state.player.ai_station_hold_timer <= 0.0F &&
+        state.player.timed_action_counter <= 0 &&
+        state.player.death_timer_active <= 0.0F &&
+        state.arrival_command_grace_frames <= 0) {
       std::size_t visible_missions = 0;
       for (std::size_t slot = 0;
            slot < state.active_mission_runtime_flags.size();
@@ -1441,6 +1656,27 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       // The boarding/plunder modal blocked the loop; freeze gameplay time.
       resync_frame_clock();
+    }
+    // Self-destruct + cloak commands (Ghidra 0x0044aa70 PlayerTick_Interaction-
+    // CloakAndStatus blocks 0x00451954..0x00451b91 and 0x00451db0..0x00451e6f).
+    // Key bindings resolve through the table like the escort commands: the
+    // self-destruct needs the 0x38/0x6f arm-modifier pair (both Alt scancodes)
+    // plus binding slot 0x12; the cloak toggle is binding slot 0x29 (default
+    // DIK 0x16 = U). Both run every frame the player core reaches them; the
+    // countdown/toggle latches do their own gating.
+    if (!player_tick_consumed) {
+      const auto &binding_key = prefs.bindings.cmd_to_key;
+      const auto held = [&platform](std::uint16_t code) {
+        return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
+      };
+      const bool arm_modifier_held = platform.IsOriginalKeyCodeHeld(0x38) ||
+                                     platform.IsOriginalKeyCodeHeld(0x6f);
+      NovaPlayer_TickSelfDestructCommand(state,
+                                         arm_modifier_held &&
+                                             held(binding_key[0x12]),
+                                         frame_time_ms / kOriginalTickMs);
+      NovaPlayer_TickCloakCommand(
+          state, held(binding_key[0x29]), frame_time_ms / kOriginalTickMs);
     }
     // Late auxiliary regeneration region: ionization decay and velocity
     // damping, followed by fuel-scoop recharge.
@@ -1664,7 +1900,8 @@ static bool NovaPlayer_ApplyStellarGravity(GameState &state,
 NovaPlayer_IntegrateMovement(PlayerShip &ship,
                              const FlightInput &input,
                              const ShipClass &ship_class,
-                             float elapsed_ticks) {
+                             float elapsed_ticks,
+                             const PlayerMovementOptions &opts) {
   constexpr float kDegToRad = 3.14159265358979323846F / 180.0F;
   constexpr float kTwoPi = 6.283185307179586F;
 
@@ -1691,13 +1928,19 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
   ship.engine_thrust = input.thrust && !input.reverse;
 
   // Reverse uses the original's automatic turn-toward-velocity path instead
-  // of also applying manual steering in the same tick.
-  if (!input.reverse) {
-    if (input.turn_left) {
+  // of also applying manual steering in the same tick. The face-target arm
+  // likewise suppresses keyboard steering (the parent's local_265 latch gates
+  // PlayerTick_TurnInput); when reverse and face-target are held together the
+  // original's block ordering is unresolved (TODO(decomp)) and reverse wins
+  // here.
+  if (!input.reverse && !opts.face_target_armed) {
+    if (input.turn_left && !input.turn_right) {
       ship.heading -= turn_rad;
+      stats.turn_dir = -1;
     }
-    if (input.turn_right) {
+    if (input.turn_right && !input.turn_left) {
       ship.heading += turn_rad;
+      stats.turn_dir = 1;
     }
     ship.heading = std::fmod(ship.heading + kTwoPi, kTwoPi);
     if (ship.heading < 0.0F) {
@@ -1715,18 +1958,45 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
           std::atan2(ship.vel_x, -ship.vel_y) + 3.14159265358979323846F;
       const float desired = std::fmod(reverse_heading + kTwoPi, kTwoPi);
       float delta = std::remainder(desired - ship.heading, kTwoPi);
+      stats.turn_dir = delta > 0.0F ? 1 : -1;
       delta = std::clamp(delta, -turn_rad, turn_rad);
       ship.heading = std::fmod(ship.heading + delta + kTwoPi, kTwoPi);
     }
+  } else if (opts.face_target_armed) {
+    // Ghidra 0x0044aa70 manual-flight auto-turn continuation: with the
+    // face-target arm latched, one turn step per frame toward the stored
+    // integer heading, stopping (without snapping) once the shortest delta is
+    // within a single step -- the original's |delta| <= step exit rejoins the
+    // keyboard path for the frame (with sVar8 = 0, i.e. no bank this frame).
+    const float desired_rad =
+        static_cast<float>(ship.ai_desired_heading_deg) * kDegToRad;
+    const float delta = std::remainder(desired_rad - ship.heading, kTwoPi);
+    if (std::abs(delta) > turn_rad) {
+      ship.heading = std::fmod(
+          ship.heading + std::copysign(turn_rad, delta) + kTwoPi, kTwoPi);
+      stats.turn_dir = delta > 0.0F ? 1 : -1;
+    }
   } else if (input.thrust) {
-    // Forward thrust: polar step toward the heading, per-axis clamped to the
-    // class top speed projection (Math_AddPolarVelocityWithClamp semantics).
-    NovaPlayer_AddPolarVelocityClamped(ship.heading,
-                                       stats.thrust_px_per_tick2 *
-                                           elapsed_ticks,
-                                       stats.max_speed_px_per_tick,
-                                       ship.vel_x,
-                                       ship.vel_y);
+    if (opts.gravity_shield) {
+      // Ghidra 0x0044c9ab thrust arm, gravity-shield variant: thrust
+      // accumulates the scalar speed (+0x48), clamped to the effective max
+      // speed; the steering block below converts it into velocity.
+      ship.speed =
+          std::min(ship.speed + stats.thrust_px_per_tick2 * elapsed_ticks,
+                   stats.max_speed_px_per_tick);
+    } else {
+      // Forward thrust: polar step toward the heading, per-axis clamped to
+      // the class top speed projection (Math_AddPolarVelocityWithClamp
+      // semantics; the original clamps to effective max speed here and to
+      // max * 1.8 while the afterburner runs -- see the cap tail in
+      // NovaPlayer_UpdateFromInput for the overspeed mechanics).
+      NovaPlayer_AddPolarVelocityClamped(ship.heading,
+                                         stats.thrust_px_per_tick2 *
+                                             elapsed_ticks,
+                                         stats.max_speed_px_per_tick,
+                                         ship.vel_x,
+                                         ship.vel_y);
+    }
   }
 
   // Inertia-less ships (base_accel == 0 && base_speed == 0) are stationary: the
@@ -1739,20 +2009,47 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
     return stats;
   }
 
-  // Max-speed hard cap. Beyond the per-axis clamp applied *during* thrust
+  if (opts.gravity_shield) {
+    // Ghidra 0x0044cffe gravity-shield steering block
+    // (PlayerTick_GravityShield- Steering). The scalar speed is clamped to the
+    // cap global, decays by 33/34 (DAT_005755e0, a double) while
+    // fire-restricted, and the velocity rotates toward heading * speed at the
+    // thrust-scaled rate. The block's engine-glow ramp toward round(speed * 32
+    // * 0.75 / max) capped 24 is owned by the port's glow drive (TODO(decomp)).
+    const float scalar_cap = opts.speed_cap_x >= 0.0F
+                                 ? opts.speed_cap_x
+                                 : stats.max_speed_px_per_tick;
+    if (ship.speed > scalar_cap) {
+      ship.speed = scalar_cap;
+    }
+    if (opts.fire_restricted) {
+      constexpr float kShieldFireRestrictedSpeedDamp = 33.0F / 34.0F;
+      ship.speed *= kShieldFireRestrictedSpeedDamp;
+    }
+    NovaShip_SteerVelocityTowardShipHeading(
+        ship, stats.thrust_px_per_tick2, elapsed_ticks);
+  }
+
+  // Per-axis velocity cap. Beyond the per-axis clamp applied *during* thrust
   // (NovaPlayer_AddPolarVelocityClamped), the original player path
-  // (Ship_HandlePlayerShipControl 0x0044e019) clamps the resulting velocity
-  // vector to +/-the effective max speed component every frame (DAT_005997bc /
-  // DAT_005997c0) before integrating position. This pulls back any excess
-  // component (drift-built, recoil/knockback, gravity) that exceeds max speed.
-  ship.vel_x = std::clamp(
-      ship.vel_x, -stats.max_speed_px_per_tick, stats.max_speed_px_per_tick);
-  ship.vel_y = std::clamp(
-      ship.vel_y, -stats.max_speed_px_per_tick, stats.max_speed_px_per_tick);
+  // (velocity-cap block 0x0044d05b) clamps the resulting velocity vector to
+  // +/-g_player_speed_cap_x/y every frame before integrating position. The
+  // caps are always >= the effective max speed (see the afterburner tail in
+  // NovaPlayer_UpdateFromInput); bare integrator calls fall back to it.
+  const float cap_x =
+      opts.speed_cap_x >= 0.0F ? opts.speed_cap_x : stats.max_speed_px_per_tick;
+  const float cap_y =
+      opts.speed_cap_y >= 0.0F ? opts.speed_cap_y : stats.max_speed_px_per_tick;
+  ship.vel_x = std::clamp(ship.vel_x, -cap_x, cap_x);
+  ship.vel_y = std::clamp(ship.vel_y, -cap_y, cap_y);
 
   ship.pos_x += ship.vel_x * elapsed_ticks;
   ship.pos_y += ship.vel_y * elapsed_ticks;
-  ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+  // Gravity-shield ships keep the scalar speed (+0x48) the thrust/steering
+  // blocks maintained; the velocity is derived from it, not the reverse.
+  if (!opts.gravity_shield) {
+    ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
+  }
   return stats;
 }
 
@@ -3328,7 +3625,7 @@ bool NovaPlayer_TickTimedActionTransition(GameState &state,
 // Ghidra 0x0044CA6B PlayerTick_TurnBankAnimation, internal label of
 // Ship_HandlePlayerShipCore. Synthetic CFG: 0x0044CA6B -> 0x0044CB99.
 static void TickPlayerTurnBankAnimation(GameState &state,
-                                        const FlightInput &input,
+                                        int turn_dir,
                                         float elapsed_ticks) {
   PlayerShip &p = state.player;
   // Banking classes (sh\x8an Flags & 1) accumulate
@@ -3338,15 +3635,11 @@ static void TickPlayerTurnBankAnimation(GameState &state,
   // the phase passes the +6/-6 hysteresis thresholds (DAT_005755c8 = 6,
   // DAT_00575620 = -6). The sprite layer maps the bias to the bank-left /
   // bank-right alt rows (Ship_UpdateVisualState 0x00428340).
-  // TODO(decomp): the jump-turnaround alignment continuation also feeds the
-  // turn direction into this block (local_265 arm at LAB_0044c92e).
+  // turn_dir is the original's sVar8: set by the keyboard steering branch AND
+  // by the auto-turn continuation (reverse command, face-target command, jump
+  // alignment) whenever a rotation step was applied this frame, so auto-turns
+  // bank exactly like keyboard turns.
   p.ai_turn_bias_dir = 0;
-  int turn_dir = 0;
-  if (input.turn_left && !input.turn_right) {
-    turn_dir = -1;
-  } else if (input.turn_right && !input.turn_left) {
-    turn_dir = 1;
-  }
   const ShipClass *player_cls =
       state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
   if (player_cls != nullptr && (player_cls->sprite_behavior_flags & 1U) != 0U) {
@@ -3388,6 +3681,66 @@ static void TickPlayerTurnBankAnimation(GameState &state,
   }
 }
 
+// Ghidra 0x0044aa70 face-target command (0x0044c0b1 -> 0x0044c18a, with the
+// out-of-line bearing tails at 0x0044ec90/0x0044ecb7), part of the
+// PlayerTick_WeaponCommands region. While held with the station-hold timer
+// idle the command stores the integer heading to face (Math_BearingFromPoint-
+// ToPoint from the player position, written to ai_desired_heading_deg +0x68)
+// and arms the manual-flight auto-turn (the parent's local_265 latch): the
+// primary ship target wins unless the 0x38/0x6f arm modifier is held, which
+// -- like having no ship target -- faces the selected travel stellar instead
+// (the original reads the player's +0x6c slot; the port keeps that selection
+// in travel.selected_stellar_id because its travel commands never populate
+// the player ship field). With neither targeted the command is inert.
+// Returns true when armed: NovaPlayer_IntegrateMovement then suppresses
+// keyboard steering and turns one step per frame toward the stored heading
+// until within one step (no snap -- the |delta| <= step exit rejoins the
+// keyboard path, so the final step-short alignment is kept).
+bool NovaPlayer_TickFaceTargetCommand(GameState &state,
+                                      const FlightInput &input,
+                                      bool arm_modifier_held) {
+  PlayerShip &p = state.player;
+  if (!input.face_target || p.ai_station_hold_timer > 0.0F) {
+    return false;
+  }
+  const std::int16_t ship_target = p.primary_target_ship_slot;
+  const std::int16_t stellar_target = state.travel.selected_stellar_id;
+  bool face_stellar = false;
+  const Ship *target_ship = nullptr;
+  const Stellar *target_stellar = nullptr;
+  if (ship_target >= 0 &&
+      state.SlotInRange(static_cast<std::size_t>(ship_target))) {
+    if (arm_modifier_held && stellar_target >= 0) {
+      face_stellar = true;
+    } else {
+      target_ship = &state.ShipAt(static_cast<std::size_t>(ship_target));
+    }
+  } else if (stellar_target >= 0) {
+    face_stellar = true;
+  } else {
+    return false;
+  }
+  if (face_stellar) {
+    target_stellar = state.scenario.Stellar(stellar_target);
+    if (target_stellar == nullptr) {
+      return false;
+    }
+  }
+  // Math_BearingFromPointToPoint: integer degrees, 0 = up, clockwise.
+  const float dx = face_stellar
+                       ? static_cast<float>(target_stellar->pos_x) - p.pos_x
+                       : target_ship->pos_x - p.pos_x;
+  const float dy = face_stellar
+                       ? static_cast<float>(target_stellar->pos_y) - p.pos_y
+                       : target_ship->pos_y - p.pos_y;
+  const float bearing_deg =
+      std::atan2(dx, -dy) * (180.0F / 3.14159265358979323846F);
+  int heading_deg = static_cast<int>(std::lround(bearing_deg));
+  heading_deg = ((heading_deg % 360) + 360) % 360;
+  p.ai_desired_heading_deg = static_cast<std::int16_t>(heading_deg);
+  return true;
+}
+
 // Ghidra 0x0044C8D0 PlayerTick_ManualFlightAndRegeneration, internal umbrella
 // of Ship_HandlePlayerShipCore. Relevant synthetic CFGs: turn input
 // 0x0044C92E -> 0x0044C980; joined afterburner/thrust/glow
@@ -3395,7 +3748,8 @@ static void TickPlayerTurnBankAnimation(GameState &state,
 // afterburner speed-cap/fuel/glow tail 0x00451630 -> 0x004518EF.
 void NovaPlayer_UpdateFromInput(GameState &state,
                                 const FlightInput &input,
-                                float elapsed_ticks) {
+                                float elapsed_ticks,
+                                bool face_target_armed) {
   PlayerShip &p = state.player;
   if (!state.stat_cache_valid) {
     state.cached_stats = Outfit_ComputePlayerEffectiveStats(state);
@@ -3436,12 +3790,59 @@ void NovaPlayer_UpdateFromInput(GameState &state,
   if (afterburner_active && !gravity_present) {
     effective_class.speed *= 1.8F;
   }
-  (void)NovaPlayer_IntegrateMovement(p, input, effective_class, elapsed_ticks);
+  // Per-axis velocity caps (Ghidra LAB_00451630 afterburner speed-cap tail,
+  // 0x00451630 -> 0x004518ef; g_player_speed_cap_x/y maintained on GameState):
+  // while afterburning outside a stellar gravity pull both caps jump to 1.8x
+  // the effective max speed (g_afterburner_overspeed_factor 0x00575610);
+  // otherwise they decay by effective thrust * 0.4 (DAT_00575680) per frame
+  // and are clamped up to the effective max speed. Maintained ahead of the
+  // integration so the velocity clamp sees current-frame caps (the original
+  // updates them at the frame tail; one-frame lag is not observable). The
+  // tail's engine-glow > 24 decay is owned by the port's glow drive.
+  {
+    const float eff_max_speed = effective_class.speed / 100.0F;
+    if (afterburner_active && !gravity_present) {
+      constexpr float kAfterburnerOverspeedFactor = 1.8F; // 0x00575610
+      state.player_speed_cap_x = eff_max_speed * kAfterburnerOverspeedFactor;
+      state.player_speed_cap_y = eff_max_speed * kAfterburnerOverspeedFactor;
+    } else {
+      const float cap_decay = effective_class.accel / 10000.0F * 2.0F * 0.4F;
+      if (eff_max_speed < state.player_speed_cap_x) {
+        state.player_speed_cap_x -= cap_decay;
+      }
+      if (eff_max_speed < state.player_speed_cap_y) {
+        state.player_speed_cap_y -= cap_decay;
+      }
+      if (state.player_speed_cap_x < eff_max_speed) {
+        state.player_speed_cap_x = eff_max_speed;
+      }
+      if (state.player_speed_cap_y < eff_max_speed) {
+        state.player_speed_cap_y = eff_max_speed;
+      }
+    }
+  }
+  // Gravity-shield movement model (Outfit_ShipHasGravityShieldOutfit 0x0046df70
+  // player branch: class flags_secondary 0x40 or an owned inertial dampener).
+  PlayerMovementOptions movement_opts;
+  movement_opts.face_target_armed = face_target_armed;
+  const ShipClass *player_class =
+      state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+  movement_opts.gravity_shield =
+      (player_class != nullptr &&
+       (player_class->flags_secondary & 0x40U) != 0U) ||
+      Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener);
+  movement_opts.fire_restricted = NovaAiShip_IsDisabled(state, p);
+  movement_opts.speed_cap_x = state.player_speed_cap_x;
+  movement_opts.speed_cap_y = state.player_speed_cap_y;
+  // Capture the applied turn direction (keyboard OR auto-turn) for the bank
+  // animation.
+  const PlayerMovementStats movement_stats = NovaPlayer_IntegrateMovement(
+      p, input, effective_class, elapsed_ticks, movement_opts);
   if (afterburner_active) {
     p.fuel_points = std::max(0.0F, p.fuel_points - fuel_burn * elapsed_ticks);
   }
 
-  TickPlayerTurnBankAnimation(state, input, elapsed_ticks);
+  TickPlayerTurnBankAnimation(state, movement_stats.turn_dir, elapsed_ticks);
   const ShipClass *player_cls =
       state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
   // ShipState +0xc8d4 is an integer engine/glow control, not a free-running
