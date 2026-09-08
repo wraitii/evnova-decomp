@@ -72,11 +72,10 @@ struct ShipVisualDescriptor {
   std::uint16_t engine_glow_x_size = 0;  // GlowXSize (+0x1a)
   std::uint16_t engine_glow_y_size = 0;  // GlowYSize (+0x1c)
 
-  // NOTE: the per-turret-group weapon-exit (muzzle) geometry decoded here
-  // previously lived on the descriptor with wrong strides; it now decodes
-  // once per class into ShipClass (scenario_data.hpp, muzzle_* fields) with
-  // the loader-verified strides (0x004b4ee0 copy map + barrel indexing of
-  // Weapon_ApplyTurretSpreadVelocity 0x0046c5c0).
+  // Per-turret-group weapon-exit geometry decodes once per class into
+  // ShipClass (scenario_data.hpp, muzzle_* fields), using the loader-verified
+  // strides from the 0x004b4ee0 copy map and the barrel indexing in
+  // Weapon_ApplyTurretSpreadVelocity 0x0046c5c0.
 };
 
 // Decodes one sh\x8an descriptor payload (Ghidra ShipClass_LoadShipClass-

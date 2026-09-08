@@ -903,10 +903,10 @@ LandedExit DispatchService(SdlPlatform &platform,
   case LandedService::kShipyard:
   case LandedService::kBar:
   case LandedService::kMissionBoard: {
-    // Render the sub-window as a real on-screen dialog over the docked scene
-    // (frame PICT + heading + Leave), instead of the previous TODO mock. The
-    // service content (buy/sell tables, outfit list, shipyard purchases, bar
-    // holovid/gamble, map navigation) is still out of scope behind the frame.
+    // Render the sub-window as an on-screen dialog over the docked scene
+    // (frame PICT + heading + Leave). TODO(decomp): implement the service
+    // content behind the frame: buy/sell tables, outfit list, shipyard
+    // purchases, bar holovid/gamble, and map navigation.
     const LandedExit dialog_exit = NovaLanded_RunSubWindowDialog(
         platform, state, ctx.selection, ctx.stellar_id, render_background);
     if (dialog_exit == LandedExit::kQuit) {

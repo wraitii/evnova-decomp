@@ -4,6 +4,7 @@ EV Nova/
 /out/
 /cmake-build-*/
 /vcpkg_installed/
+/tools/.venv/
 
 # Editor and OS state
 .DS_Store

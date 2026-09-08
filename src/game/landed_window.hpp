@@ -19,9 +19,9 @@
 // service grid -- driven by the same input channel, where each service is an
 // entry point into a (mocked where out of scope) sub-screen.
 //
-// OUT OF SCOPE for the MVP (each is a loud NovaLog::Todo stub): cargo buy/sell,
-// outfitting, shipyard purchasing, the bar mini-game, starmap, mission
-// computer, and the landing/launch cinematic transitions. The arrival-side
+// TODO(decomp): cargo buy/sell, outfitting, shipyard purchasing, the bar
+// mini-game, starmap, mission computer, and the landing/launch cinematic
+// transitions. The arrival-side
 // accounting that the original always performs (fee deduction, auto-refuel-
 // ler refuel) is real; shield/armor refill and the calendar tick happen at
 // LAUNCH (Stellar_TravelToSystem's post-loop tail), not at arrival.
@@ -46,7 +46,7 @@ namespace game {
 // travel-destination services.  The Spaceport has exactly seven actions;
 // their visual placement comes from the DITL item indices, not a synthetic
 // two-column service grid.
-// The shipyard/buy-sell/bar stubs where out of scope are (mocked) in the MVP.
+// TODO(decomp): shipyard, buy/sell, and bar service content is not implemented.
 enum class LandedService : std::uint8_t {
   // Leave the dock and resume free flight over the stellar (the "Leave"
   // button at the bottom-right of the docked panel).

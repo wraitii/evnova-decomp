@@ -1062,11 +1062,9 @@ struct System {
   // clears them during startup, before the loader runs).
   // EvaluateAvailability re-filters is_visible through the system's
   // Visibility NCB. The per-system FOG state is discovery_state below.
-  // NOTE: an earlier clean-room revision kept these two as a per-visit fog
-  // record; that diverged from the binary and left every far system's
-  // stellars unavailable (grey starmap rings for map reveals), so the loader
-  // semantics were restored - the fog consumers read discovery_state /
-  // discovered_this_rebuild / control.explored_systems instead.
+  // Fog consumers read discovery_state / discovered_this_rebuild /
+  // control.explored_systems instead; treating these loader flags as fog
+  // state makes far-system stellars unavailable after a map reveal.
   bool is_visible = false;
   bool has_explored_flag = false;
 

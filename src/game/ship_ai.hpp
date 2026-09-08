@@ -231,7 +231,7 @@ void NovaAi_UpdateShipState(GameState &state,
 // movement fields the integrator consumes: ai_desired_heading_deg,
 // ai_desired_speed, ai_forward_thrust_cmd. This is the bridge that makes the
 // AI state machine actually move ships. Also latches ai_fire_trigger_latch for
-// the firing path (deferred to Phase 5). `elapsed_ticks` is the normalized
+// the firing path. `elapsed_ticks` is the normalized
 // cadence used by the position/velocity creeps (the original's misleadingly
 // named _g_avg_frame_time_ms is elapsed milliseconds * 0.03); `now_ms` backs
 // the mode-4/0xd wall-clock bookkeeping.
