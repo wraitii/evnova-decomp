@@ -158,7 +158,8 @@ private:
                        const GameState &state,
                        const SDL_Color &value_color,
                        const SDL_Color &label_color);
-  void DrawCargoPanel(SdlPlatform &platform,                      const GameState &state,
+  void DrawCargoPanel(SdlPlatform &platform,
+                      const GameState &state,
                       const SDL_Color &value_color,
                       const SDL_Color &label_color);
 };

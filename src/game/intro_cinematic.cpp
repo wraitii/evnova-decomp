@@ -25,12 +25,12 @@ namespace {
 constexpr std::uint64_t kMsPer60Tick = 60;
 // Ghidra IntroCinematic_Run plays snd 0x7533 alongside each arted frame
 // (loaded via NovaSound_LoadDecodedById 0x004bc2a0, which loads the `snd `
-// resource and decodes it; NovaAudio_QueueCenteredSound -> Audio_AllocateVoiceSlot queues it with
-// a stereo-width of 10 and a centered pan pair DAT_007353f2/DAT_007353f2, and
-// the decoded payload is freed after the frame's wait). Stock Nova ships no
-// snd 0x7533, so the intro is silent there; a scenario that provides it gets
-// it back. Stereo width/pan are not modelled by SdlAudio::Play, so the cue
-// plays at unity gain.
+// resource and decodes it; NovaAudio_QueueCenteredSound ->
+// Audio_AllocateVoiceSlot queues it with a stereo-width of 10 and a centered
+// pan pair DAT_007353f2/DAT_007353f2, and the decoded payload is freed after
+// the frame's wait). Stock Nova ships no snd 0x7533, so the intro is silent
+// there; a scenario that provides it gets it back. Stereo width/pan are not
+// modelled by SdlAudio::Play, so the cue plays at unity gain.
 constexpr std::uint16_t kIntroSoundId = 0x7533;
 
 // Mirrors the splash presentation path in nova_app.cpp: the original centers

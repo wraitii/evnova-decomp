@@ -73,8 +73,7 @@ public:
   // the same space /probe/click consumes) so the harness can click by intent
   // instead of hand-measured coordinates. Written by the main thread, read by
   // the server thread; a no-op when the harness is not running.
-  void PublishUi(std::string window_name,
-                 std::vector<ProbeNamedRect> rects);
+  void PublishUi(std::string window_name, std::vector<ProbeNamedRect> rects);
   void ClearUi();
   // Main-thread cached window geometry (window points + the 640x480 canvas
   // rect) so the harness can convert backing-store screenshots to window
@@ -83,8 +82,7 @@ public:
   [[nodiscard]] bool UiActive() const;
   [[nodiscard]] std::optional<SDL_FRect>
   UiElementRect(const std::string &element) const;
-  [[nodiscard]] std::optional<std::string>
-  UiElementAt(SDL_FPoint point) const;
+  [[nodiscard]] std::optional<std::string> UiElementAt(SDL_FPoint point) const;
   [[nodiscard]] std::string UiJson() const;
 
 private:

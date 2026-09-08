@@ -197,8 +197,12 @@ LoadPictSpriteFrames(SDL_Renderer *renderer,
 // the hover hit-test's gating. No effect on game behaviour.
 void PublishMainMenuProbeUi(NovaRuntime &runtime) {
   static constexpr std::array<std::string_view, kMenuEntries.size()> kNames{
-      "new_pilot", "open_pilot", "quit_nova",
-      "enter_ship", "set_prefs", "about_nova"};
+      "new_pilot",
+      "open_pilot",
+      "quit_nova",
+      "enter_ship",
+      "set_prefs",
+      "about_nova"};
   const SDL_FRect playfield = runtime.platform.playfield_window_rect();
   const float sx = playfield.w / 640.0F;
   const float sy = playfield.h / 480.0F;
@@ -208,10 +212,11 @@ void PublishMainMenuProbeUi(NovaRuntime &runtime) {
       continue;
     }
     const SDL_FRect rect = MenuRect(runtime, index);
-    named.emplace_back(
-        std::string(kNames[index]),
-        SDL_FRect{playfield.x + rect.x * sx, playfield.y + rect.y * sy,
-                  rect.w * sx, rect.h * sy});
+    named.emplace_back(std::string(kNames[index]),
+                       SDL_FRect{playfield.x + rect.x * sx,
+                                 playfield.y + rect.y * sy,
+                                 rect.w * sx,
+                                 rect.h * sy});
   }
   runtime.platform.PublishProbeUi("main_menu", std::move(named));
 }
@@ -483,13 +488,14 @@ void UpdateMenuCenterPreview(NovaRuntime &runtime, std::uint64_t now_ms) {
   // (BlitTintedRgb15), which a texture-alpha fade reproduces.
   const auto step = static_cast<int>(elapsed_ms) * 4;
   if (runtime.menu_center_preview_frame == desired_frame) {
-    runtime.menu_center_preview_intensity = static_cast<std::uint8_t>(
-        std::min<int>(32, runtime.menu_center_preview_intensity +
-                              std::max<int>(1, step)));
+    runtime.menu_center_preview_intensity =
+        static_cast<std::uint8_t>(std::min<int>(
+            32,
+            runtime.menu_center_preview_intensity + std::max<int>(1, step)));
   } else if (runtime.menu_center_preview_intensity > 0) {
-    runtime.menu_center_preview_intensity = static_cast<std::uint8_t>(
-        std::max<int>(0, runtime.menu_center_preview_intensity -
-                             std::max<int>(1, step)));
+    runtime.menu_center_preview_intensity =
+        static_cast<std::uint8_t>(std::max<int>(
+            0, runtime.menu_center_preview_intensity - std::max<int>(1, step)));
   } else {
     runtime.menu_center_preview_frame = desired_frame;
   }
@@ -898,8 +904,8 @@ void UpdateCenterPreviewCompositedTexture(NovaRuntime &runtime) {
       runtime.main_menu_backdrop_rgba.empty()) {
     return;
   }
-  const auto frame = std::min(runtime.menu_center_preview_frame,
-                              asset->textures.size() - 1);
+  const auto frame =
+      std::min(runtime.menu_center_preview_frame, asset->textures.size() - 1);
   if (runtime.main_menu_center_preview_composited_valid &&
       runtime.main_menu_center_preview_composited_frame == frame &&
       runtime.main_menu_center_preview_composited) {
@@ -923,10 +929,10 @@ void UpdateCenterPreviewCompositedTexture(NovaRuntime &runtime) {
         continue;
       }
       const auto destination = (static_cast<std::size_t>(y) * width + x) * 4;
-      const auto source =
-          (static_cast<std::size_t>(backdrop_y) *
-               runtime.main_menu_backdrop_width +
-           backdrop_x) * 4;
+      const auto source = (static_cast<std::size_t>(backdrop_y) *
+                               runtime.main_menu_backdrop_width +
+                           backdrop_x) *
+                          4;
       if (frame_pixels[destination + 3] == 0) {
         // RLE skip opcode: the destination pixel is kept.
         for (int c = 0; c < 3; ++c) {
@@ -975,9 +981,10 @@ int NovaApp_Run(NovaRuntime &runtime) {
   }
   // External probe harness (docs/probe_harness.md): the state reader runs on
   // the main thread at the pump, so it can safely walk the live GameState.
-  runtime.platform.probe().SetStateProvider([&runtime](const std::string &query) {
-    return ProbeState_Snapshot(runtime.game, query);
-  });
+  runtime.platform.probe().SetStateProvider(
+      [&runtime](const std::string &query) {
+        return ProbeState_Snapshot(runtime.game, query);
+      });
   NovaGameSession_Run(runtime);
   return 0;
 }
@@ -1531,8 +1538,8 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // Ship_RunSpaceflightMode being called inline from the dispatcher.
     const bool resume_menu_music = runtime.prefs.intro_music;
     runtime.music.Stop();
-    game::NovaSpaceflight_Run(runtime.platform, runtime.audio, runtime.game,
-                              runtime.prefs);
+    game::NovaSpaceflight_Run(
+        runtime.platform, runtime.audio, runtime.game, runtime.prefs);
     if (resume_menu_music) {
       runtime.music.Play();
     }

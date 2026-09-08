@@ -32,6 +32,7 @@
 #include "boarding_plunder.hpp"
 #include "escort_formation.hpp"
 #include "government.hpp"
+#include "log.hpp"
 #include "mission.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
@@ -3094,8 +3095,7 @@ void NovaAi_ApplyControls(GameState &state,
       // (ShipClass_HasPlayerBayCapacityFor 0x004694a0); otherwise it
       // clears the escort handoff.
       if (ship.ship_instance_id == 0) {
-        if (NovaShipClass_HasPlayerBayCapacityFor(state,
-                                                  ship.ship_class_id)) {
+        if (NovaShipClass_HasPlayerBayCapacityFor(state, ship.ship_class_id)) {
           NovaShip_RecoverCarriedShipToBay(state, ship);
         } else {
           ship.ai_state_code = 0xc;
@@ -4859,7 +4859,15 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
     return;
   }
   const ShipClass *target_class = ShipClassFor(state, target);
-  if (target_class != nullptr && (target_class->flags_secondary & 4U) != 0U &&
+  if (target_class == nullptr) {
+    NovaLog::Todo(
+        "guided weapon selection (0x0040d220): skipped target slot {} "
+        "with missing ship class {}",
+        target_slot,
+        target.ship_class_id);
+    return;
+  }
+  if ((target_class->flags_secondary & 4U) != 0U &&
       !NovaAi_OutfitHasCloakScannerCapability(state, ship, 0x04U)) {
     return; // class-untargetable and no targeting-scanner outfit
   }

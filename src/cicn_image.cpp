@@ -12,21 +12,21 @@ namespace {
 // Payload offsets (byte offsets from the start of the cicn resource), taken
 // from FUN_004d2bd0's extended color-icon branch.
 constexpr std::size_t kMaskRowBytesOffset = 0x04; // BE16; & 0xe000 == 0x8000
-constexpr std::size_t kMaskStride = 0x8000;       // bit marking the extended form
-constexpr std::size_t kReserved2Offset = 0x0e;    // must be 0 for extended form
-constexpr std::size_t kReserved3Offset = 0x10;    // must be 0 for extended form
+constexpr std::size_t kMaskStride = 0x8000;    // bit marking the extended form
+constexpr std::size_t kReserved2Offset = 0x0e; // must be 0 for extended form
+constexpr std::size_t kReserved3Offset = 0x10; // must be 0 for extended form
 constexpr std::size_t kBitsPerPixelOffset = 0x20; // BE16: 1, 2, 4 or 8
-constexpr std::size_t kMaskRowBytesField = 0x36;  // BE16 mask rowBytes (per row)
-constexpr std::size_t kCompRowBytesField = 0x44;  // BE16 complementary rowBytes
-constexpr std::size_t kMaskDataOffset = 0x52;     // start of the 1-bit mask bitmap
+constexpr std::size_t kMaskRowBytesField = 0x36; // BE16 mask rowBytes (per row)
+constexpr std::size_t kCompRowBytesField = 0x44; // BE16 complementary rowBytes
+constexpr std::size_t kMaskDataOffset = 0x52; // start of the 1-bit mask bitmap
 
 [[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
                                      std::size_t offset) {
   if (offset + 2 > bytes.size()) {
     return 0;
   }
-  return static_cast<std::uint16_t>(
-             std::to_integer<std::uint8_t>(bytes[offset]) << 8U) |
+  return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset])
+                                    << 8U) |
          static_cast<std::uint16_t>(
              std::to_integer<std::uint8_t>(bytes[offset + 1]));
 }
@@ -77,10 +77,12 @@ Resource_LoadCicnAsImage(std::span<const std::byte> cicn_data) {
   const std::size_t i_var5 =
       static_cast<std::size_t>(ReadBe16(cicn_data, kCompRowBytesField)) *
           static_cast<std::size_t>(height) +
-      static_cast<std::size_t>(mask_row_bytes) * static_cast<std::size_t>(height);
+      static_cast<std::size_t>(mask_row_bytes) *
+          static_cast<std::size_t>(height);
   const std::size_t palette_header = kMaskDataOffset + i_var5;
   if (palette_header + 8 > cicn_data.size()) {
-    NovaLog::Warn("cicn: palette header out of range (offset {})", palette_header);
+    NovaLog::Warn("cicn: palette header out of range (offset {})",
+                  palette_header);
     return std::nullopt;
   }
 
@@ -90,7 +92,7 @@ Resource_LoadCicnAsImage(std::span<const std::byte> cicn_data) {
   const std::size_t palette_start = palette_header + 8;
   std::array<std::uint8_t, 3> colors[256]{};
   std::array<bool, 256> have_color{};
-  have_color[0] = true;              // index 0 -> opaque white
+  have_color[0] = true; // index 0 -> opaque white
   colors[0] = {255, 255, 255};
   std::size_t palette_end = palette_start;
   bool valid = true;
@@ -133,7 +135,7 @@ Resource_LoadCicnAsImage(std::span<const std::byte> cicn_data) {
     const std::size_t src =
         palette_end + static_cast<std::size_t>(row) * pixel_stride;
     auto *dst = &out.rgba_pixels[static_cast<std::size_t>(row) *
-                                  static_cast<std::size_t>(width) * 4U];
+                                 static_cast<std::size_t>(width) * 4U];
     int bit = 0; // bit index (MSB-first) within the row's bytes
     for (int col = 0; col < width; ++col) {
       const std::uint8_t byte = std::to_integer<std::uint8_t>(
@@ -174,8 +176,7 @@ Resource_LoadCicnAsImage(std::span<const std::byte> cicn_data) {
     const std::size_t dst =
         static_cast<std::size_t>(row) * static_cast<std::size_t>(width) * 4U;
     for (int x = 0; x < width; ++x) {
-      const std::uint8_t bit =
-          1U << (7U - static_cast<std::uint8_t>(x % 8));
+      const std::uint8_t bit = 1U << (7U - static_cast<std::uint8_t>(x % 8));
       const bool set =
           (std::to_integer<std::uint8_t>(cicn_data[src + x / 8]) & bit) != 0;
       auto *px = &out.rgba_pixels[dst + static_cast<std::size_t>(x) * 4U];

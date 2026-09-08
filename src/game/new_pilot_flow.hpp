@@ -28,9 +28,8 @@ namespace game {
 // up. Mirrors Menu_RunNewGameFlow's early returns on dialog cancel.
 // `render_background` is invoked once per dialog frame to keep the menu
 // rendering behind the modal windows (see ui_dialog.hpp).
-bool NovaNewPilotFlow_Run(
-    SdlPlatform &platform,
-    GameState &state,
-    const std::function<void()> &render_background = {});
+bool NovaNewPilotFlow_Run(SdlPlatform &platform,
+                          GameState &state,
+                          const std::function<void()> &render_background = {});
 
 } // namespace game

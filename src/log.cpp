@@ -38,8 +38,7 @@ void NovaLog::Write(Level level, std::string_view message) {
   const std::lock_guard lock{g_log_mutex};
   fmt::print(stderr, "[{}] {}\n", LevelName(level), message);
   std::fflush(stderr);
-  g_log_buffer.push_back(
-      {++g_log_seq, level, std::string{message}});
+  g_log_buffer.push_back({++g_log_seq, level, std::string{message}});
   while (g_log_buffer.size() > kLogBufferLines) {
     g_log_buffer.pop_front();
   }

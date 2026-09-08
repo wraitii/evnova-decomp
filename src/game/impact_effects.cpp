@@ -68,11 +68,17 @@ void NovaEffects_SpawnShipDestructionBurst(GameState &state,
   }
   for (int i = 1; i < 6; ++i) {
     const float extent = 7.0F + static_cast<float>(i * 3);
-    const float dx = static_cast<float>(RandomRange(state, 2 * static_cast<int>(extent) + 1)) - extent;
-    const float dy = static_cast<float>(RandomRange(state, 2 * static_cast<int>(extent) + 1)) - extent;
-    NovaEffects_SpawnImpactEffect(
-        state, x + dx, y + dy, static_cast<std::int16_t>(i % 2),
-        static_cast<std::int16_t>(i * 5));
+    const float dx = static_cast<float>(
+                         RandomRange(state, 2 * static_cast<int>(extent) + 1)) -
+                     extent;
+    const float dy = static_cast<float>(
+                         RandomRange(state, 2 * static_cast<int>(extent) + 1)) -
+                     extent;
+    NovaEffects_SpawnImpactEffect(state,
+                                  x + dx,
+                                  y + dy,
+                                  static_cast<std::int16_t>(i % 2),
+                                  static_cast<std::int16_t>(i * 5));
   }
 
   for (FadingEffectInstance &fragment : state.fading_effect_instances) {
@@ -83,8 +89,7 @@ void NovaEffects_SpawnShipDestructionBurst(GameState &state,
     fragment.pos_y = y;
     fragment.vel_x = ship.vel_x;
     fragment.vel_y = ship.vel_y;
-    fragment.lifetime_ticks =
-        static_cast<float>(150 + RandomRange(state, 100));
+    fragment.lifetime_ticks = static_cast<float>(150 + RandomRange(state, 100));
     const float angle =
         static_cast<float>(RandomRange(state, 360)) * 0.01745329252F;
     const float speed = static_cast<float>(10 + RandomRange(state, 10));
@@ -109,13 +114,15 @@ void NovaEffects_SpawnShipDestructionFinale(GameState &state,
   if (final_effect_id < 0) {
     return;
   }
-  const ShipClass *ship_class = state.scenario.Ship(
-      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   const std::int16_t mass = ship_class != nullptr ? ship_class->mass_tons : 0;
-  NovaEffects_SpawnAreaImpact(
-      state, ship.pos_x, ship.pos_y, final_effect_id,
-      final_effect_id >= kLargeEffectBase ? mass : 0,
-      true);
+  NovaEffects_SpawnAreaImpact(state,
+                              ship.pos_x,
+                              ship.pos_y,
+                              final_effect_id,
+                              final_effect_id >= kLargeEffectBase ? mass : 0,
+                              true);
 }
 
 // Ghidra 0x0043b170 Frame_UpdateFadingEffectSprites.

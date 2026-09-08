@@ -3466,10 +3466,8 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
           if (done()) {
             exit_requested = true;
           }
-          handled = true;
         } else if (!handled && contains(layout->done_button, point)) {
           exit_requested = true;
-          handled = true;
         }
         continue;
       }

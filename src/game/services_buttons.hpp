@@ -80,9 +80,8 @@ public:
   // left cap, the 2px middle tile stretched across the remaining width, and
   // the right cap (native 25px corner height). The label is drawn by the
   // caller afterwards via the screen-font text engine.
-  void Draw(SdlPlatform &platform,
-            const SDL_FRect &rect,
-            ButtonState state) const;
+  void
+  Draw(SdlPlatform &platform, const SDL_FRect &rect, ButtonState state) const;
 
   [[nodiscard]] bool usable() const { return usable_; }
 
@@ -111,7 +110,7 @@ struct ServiceButton {
 
 // Returns the service button whose rect contains the logical point, or
 // std::nullopt. Mirrors the original hit-testing a clicked service button.
-std::optional<std::uint8_t> ServiceButtonAt(const std::vector<ServiceButton> &buttons,
-                                            SDL_FPoint point);
+std::optional<std::uint8_t>
+ServiceButtonAt(const std::vector<ServiceButton> &buttons, SDL_FPoint point);
 
 } // namespace game

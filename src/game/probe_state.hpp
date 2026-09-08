@@ -10,7 +10,7 @@ struct GameState;
 // of `state` for the given query; runs on the main thread via the probe pump.
 // Queries: "" / "summary", "player", "missions", "ships", "travel", "system".
 // Unknown queries return {"error": "..."}.
-[[nodiscard]] std::string
-ProbeState_Snapshot(const GameState &state, const std::string &query);
+[[nodiscard]] std::string ProbeState_Snapshot(const GameState &state,
+                                              const std::string &query);
 
 } // namespace game

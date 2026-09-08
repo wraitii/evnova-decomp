@@ -53,10 +53,8 @@ struct AboutLayout {
         static_cast<float>(definition->right - definition->left);
     const float win_h =
         static_cast<float>(definition->bottom - definition->top);
-    layout.window = SDL_FRect{(640.0F - win_w) / 2.0F,
-                              (480.0F - win_h) / 2.0F,
-                              win_w,
-                              win_h};
+    layout.window = SDL_FRect{
+        (640.0F - win_w) / 2.0F, (480.0F - win_h) / 2.0F, win_w, win_h};
     const auto rect = [&](std::size_t row_1based, SDL_FRect fallback) {
       if (row_1based == 0 || row_1based > items->size()) {
         return fallback;
@@ -182,8 +180,8 @@ void NovaMenu_RunAboutDialog(SdlPlatform &platform,
     SDL_RenderRect(renderer, &layout.window);
 
     // Scrolling text region. TODO(decomp): the original's read-only text view
-    // (NovaTextView_Create 0x004bcd90) styles/wraps this region; the port draws the d\x91sc
-    // lines verbatim and clips to the DITL rect.
+    // (NovaTextView_Create 0x004bcd90) styles/wraps this region; the port draws
+    // the d\x91sc lines verbatim and clips to the DITL rect.
     for (std::size_t i = 0; i < lines.size(); ++i) {
       const float line_top = layout.text_area.y +
                              static_cast<float>(i) * kAboutLineHeight -

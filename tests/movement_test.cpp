@@ -410,17 +410,19 @@ TEST_CASE(
   ship.faction_or_government_id = 0x100; // > 0xff
   ship.dude_class_id = 0x200;            // > 0x1ff
   ship.pers_def_slot = 0x400;            // > 0x3ff
-  ship.squad_leader_ship_slot = 0x40;       // > 0x3f
-  ship.target_stellar_object_id = 0x800; // > 0x7ff (resets squad_leader_ship_slot)
-  ship.mission_fleet_slot = 0x10;        // > 0xf
-  ship.primary_target_ship_slot = 0x40;  // > 0x3f
+  ship.squad_leader_ship_slot = 0x40;    // > 0x3f
+  ship.target_stellar_object_id =
+      0x800;                      // > 0x7ff (resets squad_leader_ship_slot)
+  ship.mission_fleet_slot = 0x10; // > 0xf
+  ship.primary_target_ship_slot = 0x40; // > 0x3f
 
   game::NovaShip_TickNpcShips(state, 1.0F);
   CHECK(ship.is_active); // valid class: not deactivated
   CHECK(ship.faction_or_government_id == -1);
   CHECK(ship.dude_class_id == -1);
   CHECK(ship.pers_def_slot == -1);
-  CHECK(ship.squad_leader_ship_slot == -1); // reset by both direct check + quirk
+  CHECK(ship.squad_leader_ship_slot ==
+        -1); // reset by both direct check + quirk
   CHECK(ship.mission_fleet_slot == -1);
   CHECK(ship.primary_target_ship_slot == -1);
 }

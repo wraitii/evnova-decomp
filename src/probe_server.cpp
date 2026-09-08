@@ -36,13 +36,16 @@ std::string UrlDecode(const std::string &in) {
   std::string out;
   out.reserve(in.size());
   for (std::size_t i = 0; i < in.size(); ++i) {
-    if (in[i] == '+' ) {
+    if (in[i] == '+') {
       out += ' ';
     } else if (in[i] == '%' && i + 2 < in.size()) {
       const auto hex = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        if (c >= '0' && c <= '9')
+          return c - '0';
+        if (c >= 'a' && c <= 'f')
+          return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+          return c - 'A' + 10;
         return -1;
       };
       const int hi = hex(in[i + 1]);
@@ -215,7 +218,8 @@ void ProbeServer::Stop() {
       address.sin_family = AF_INET;
       address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
       address.sin_port = htons(static_cast<std::uint16_t>(port_.load()));
-      (void)::connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address));
+      (void)::connect(
+          fd, reinterpret_cast<sockaddr *>(&address), sizeof(address));
       ::close(fd);
     }
   }
@@ -258,7 +262,9 @@ void ProbeServer::AcceptLoop(int port) {
     // Read until the end of the headers, then Content-Length body bytes.
     std::string raw;
     char buffer[4096];
-    const auto header_end = [&raw] { return raw.find("\r\n\r\n") != std::string::npos; };
+    const auto header_end = [&raw] {
+      return raw.find("\r\n\r\n") != std::string::npos;
+    };
     while (!header_end() && raw.size() < 64 * 1024) {
       const ssize_t n = ::recv(conn, buffer, sizeof(buffer), 0);
       if (n <= 0) {
@@ -277,9 +283,10 @@ void ProbeServer::AcceptLoop(int port) {
       const auto sp1 = head.find(' ');
       const auto sp2 = head.find(' ', sp1 + 1);
       std::string method = sp1 == std::string::npos ? "" : head.substr(0, sp1);
-      std::string target = (sp1 == std::string::npos || sp2 == std::string::npos)
-                               ? ""
-                               : head.substr(sp1 + 1, sp2 - sp1 - 1);
+      std::string target =
+          (sp1 == std::string::npos || sp2 == std::string::npos)
+              ? ""
+              : head.substr(sp1 + 1, sp2 - sp1 - 1);
       // Body: Content-Length header.
       std::size_t content_length = 0;
       std::size_t pos = head.find("Content-Length:");
@@ -327,13 +334,13 @@ void ProbeServer::HandleRequest(const std::string &method,
                                 std::string &content_type,
                                 std::string &body_out) {
   content_type = "text/plain";
-  const auto query_value = [&](const std::string &name) -> std::optional<std::string> {
+  const auto query_value =
+      [&](const std::string &name) -> std::optional<std::string> {
     std::size_t pos = 0;
     while (pos <= query.size()) {
       const auto amp = query.find('&', pos);
-      const std::string pair =
-          query.substr(pos, amp == std::string::npos ? std::string::npos
-                                                     : amp - pos);
+      const std::string pair = query.substr(
+          pos, amp == std::string::npos ? std::string::npos : amp - pos);
       const auto eq = pair.find('=');
       if (eq != std::string::npos && pair.substr(0, eq) == name) {
         return UrlDecode(pair.substr(eq + 1));
@@ -385,7 +392,8 @@ void ProbeServer::HandleRequest(const std::string &method,
     want_capture_.store(true);
     std::unique_lock lock(frame_mutex_);
     // While paused no new Present happens; fall back to the last frame.
-    frame_cv_.wait_for(lock, kFrameWait, [&] { return frame_seq_ > known_seq; });
+    frame_cv_.wait_for(
+        lock, kFrameWait, [&] { return frame_seq_ > known_seq; });
     if (frame_bytes_.empty()) {
       status = "503 Service Unavailable";
       body_out = "probe: no frame captured yet";
@@ -405,17 +413,17 @@ void ProbeServer::HandleRequest(const std::string &method,
       since = std::strtoull(value->c_str(), nullptr, 10);
     }
     const auto lines = NovaLog::ReadLogSince(since);
-    body_out = "{\"tail\":" + std::to_string(NovaLog::LogTailSeq()) +
-               ",\"lines\":[";
+    body_out =
+        "{\"tail\":" + std::to_string(NovaLog::LogTailSeq()) + ",\"lines\":[";
     bool first = true;
     for (const auto &line : lines) {
       if (!first) {
         body_out += ",";
       }
       first = false;
-      body_out += "{\"seq\":" + std::to_string(line.seq) +
-                  ",\"level\":\"" + std::string{LevelName(line.level)} +
-                  "\",\"message\":\"" + JsonEscape(line.text) + "\"}";
+      body_out += "{\"seq\":" + std::to_string(line.seq) + ",\"level\":\"" +
+                  std::string{LevelName(line.level)} + "\",\"message\":\"" +
+                  JsonEscape(line.text) + "\"}";
     }
     body_out += "]}";
     status = "200 OK";
@@ -597,8 +605,8 @@ void ProbeServer::HandleRequest(const std::string &method,
       if (end == std::string::npos || end > array_end) {
         break;
       }
-      if (const auto scancode = ScancodeFromName(body.substr(quote + 1,
-                                                             end - quote - 1))) {
+      if (const auto scancode =
+              ScancodeFromName(body.substr(quote + 1, end - quote - 1))) {
         if (down != 0) {
           virtual_keys_.insert(*scancode);
         } else {
@@ -792,15 +800,16 @@ std::optional<std::string> ProbeServer::UiElementAt(SDL_FPoint point) const {
 std::string ProbeServer::UiJson() const {
   const std::lock_guard lock(ui_mutex_);
   char geom[160];
-  std::snprintf(geom,
-                sizeof(geom),
-                "\"window_size\":[%.1f,%.1f],\"playfield\":[%.1f,%.1f,%.1f,%.1f],",
-                geom_window_points_.x,
-                geom_window_points_.y,
-                geom_playfield_.x,
-                geom_playfield_.y,
-                geom_playfield_.w,
-                geom_playfield_.h);
+  std::snprintf(
+      geom,
+      sizeof(geom),
+      "\"window_size\":[%.1f,%.1f],\"playfield\":[%.1f,%.1f,%.1f,%.1f],",
+      geom_window_points_.x,
+      geom_window_points_.y,
+      geom_playfield_.x,
+      geom_playfield_.y,
+      geom_playfield_.w,
+      geom_playfield_.h);
   std::string out = "{" + std::string(geom);
   out += "\"window\":\"" + JsonEscape(ui_window_) + "\",";
   out += "\"rects\":{";

@@ -166,7 +166,8 @@ TEST_CASE("system entry populates scattered ambient ships immediately") {
 
 // Ship_DeactivateVacantShipsAndTally (0x0041ad50): the vacancy predicate
 // spares ONLY non-fire-restricted ships actively engaging the player
-// (behavior > 4, squad_leader_ship_slot == 0, not docked, no mission fleet, flag
+// (behavior > 4, squad_leader_ship_slot == 0, not docked, no mission fleet,
+// flag
 // == 0). Idle wanderers/dudes, parked ships and fire-restricted ships are all
 // deactivated; parked ships are tallied into their stellar's present_ship_count
 // (capped at max_ship_count) before the slot is cleared.

@@ -668,10 +668,16 @@ void DrawRule(SDL_Renderer *renderer, float x0, float x1, float y) {
 // draws eight independent SetCursorPos/DrawLineTo pairs, so the result is a
 // partial square (corner brackets with gaps at the edge midpoints), never a
 // cross inside.
-void DrawReticle(SDL_Renderer *renderer, float cx, float cy, float half,
+void DrawReticle(SDL_Renderer *renderer,
+                 float cx,
+                 float cy,
+                 float half,
                  float alpha = 1.0F) {
   SDL_SetRenderDrawColor(
-      renderer, kRouteGreen.r, kRouteGreen.g, kRouteGreen.b,
+      renderer,
+      kRouteGreen.r,
+      kRouteGreen.g,
+      kRouteGreen.b,
       static_cast<std::uint8_t>(static_cast<float>(SDL_ALPHA_OPAQUE) * alpha));
   const float l = cx - half;
   const float r = cx + half;
@@ -1489,7 +1495,6 @@ void DrawTextAt(SdlPlatform &platform,
 
 } // namespace
 
-
 // The right-hand detail column (DITL item 5 / entry 6) and the bottom status
 // bar (DITL item 1 / entry 2), reproducing NovaUi_RedrawStarmapWindow's
 // 0x004a6219..0x004a6d40 text layout (offsets are DITL authoring pixels,
@@ -2018,8 +2023,10 @@ void NovaStarmap_DrawRouteMapChart(SdlPlatform &platform,
       static_cast<std::size_t>(current_id) >= state.scenario.systems.size()) {
     return;
   }
-  const System &current = state.scenario.systems[static_cast<std::size_t>(current_id)];
-  const MapView view{zoom, static_cast<float>(current.pos_x),
+  const System &current =
+      state.scenario.systems[static_cast<std::size_t>(current_id)];
+  const MapView view{zoom,
+                     static_cast<float>(current.pos_x),
                      static_cast<float>(current.pos_y)};
   StarmapGeometry geometry{};
   geometry.map = rect;
