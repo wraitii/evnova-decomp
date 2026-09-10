@@ -57,6 +57,14 @@ constexpr float kRecentlyHitRegenCutoff = 0.0F;
 constexpr float kJumpTurnaroundTurnRateAddend = 1.0F;
 // DAT_00575538: shared zero sentinel for the death-timer / bomb-timer floors.
 constexpr float kDeathTimerExpireFloor = 0.0F;
+// DAT_00575558 (0x00575558, read as a float; bytes 00 00 70 c3 = -240.0): the
+// inactive-player death-timer floor. After Ship_UpdateVisualState's finale
+// deactivates the hull the timer keeps draining from ~2.0 down to -240 at
+// g_jump_turnaround_turn_rate_addend (1.0) per frame before the core latches
+// DAT_00596d38 -- the post-explosion window in which the player watches the
+// wreck's effect pool finish. Ghidra types this as a byte; the FCOMP at
+// 0x0044af17 reads the 4-byte float.
+constexpr float kPlayerDeathInactiveTimerFloor = -240.0F;
 // Disabled auto-repair armor restore: max_armor * fraction + addend.
 // g_auto_repair_armor_fraction (DAT_00575588, double 1/3) is the standard
 // rate, g_auto_repair_armor_fraction_0x10 (DAT_00575578, double 0.1) the Ship
@@ -303,13 +311,17 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       ship.ai_control_mode = 0;
       ship.ai_forward_thrust_cmd = 0.0F;
       ship.ai_desired_speed = 0.0F;
-      ship.vel_x = 0.0F;
-      ship.vel_y = 0.0F;
       ship.engine_glow_level = 0;
       ship.engine_glow_intensity = 0.0F;
       if (ship.death_timer_active > 0.0F) {
         ship.death_timer_active -= elapsed_ticks;
       }
+      // The original integrates a wreck's velocity even after destruction
+      // (Ship_HandleShip's position block runs past the destroyed guard), so a
+      // dead NPC coasts instead of stopping dead. AI state 0x16 makes the
+      // integrator hold course; the disabled damping (0.94) still applies.
+      NovaShip_IntegrateNpcMovement(
+          state, ship, *cls, elapsed_ticks, SDL_GetTicks());
       continue;
     }
 
@@ -368,6 +380,13 @@ void NovaFrame_TickSystems(GameState &state,
   state.player_disable_message_shown = false;
   // scope 10 "player": always runs.
   Stub_PlayerCore(state);
+  // Ship_UpdateVisualState (0x00428340) runs on the player immediately after
+  // the core in Frame_TickSystems scope 10. For the player this seeds the
+  // death presentation (x3, g_player_death_timer_scale 0x00575378), drives the
+  // Explode1 debris cascade, and runs the Explode2 finale/boom that deactivates
+  // the hull. The live player core runs in the spaceflight loop ahead of this
+  // call, so the scope-10 ordering is preserved.
+  NovaShip_TickDestroyedShipVisualState(state, state.player, elapsed_ticks);
   // scope 9 "collisions": always runs.
   Stub_Collisions(state);
 
@@ -1110,8 +1129,12 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (NovaPlayer_TickStatusAndOutfitEvents(
             state, frame_time_ms / (1000.0F / 30.0F), input.eject)) {
       if (state.game_over_pending) {
+        // The original latches DAT_00596d38 during the tick and only exits at
+        // the top of the next loop iteration, so the frame that latches
+        // game-over is still presented (the wreck's Explode2 gets its final
+        // frames before the menu). Do not break here; the loop condition ends
+        // the run after this frame is drawn.
         returning_to_menu = true;
-        break;
       }
       player_status_consumed = true;
     }
@@ -1384,6 +1407,18 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (!player_tick_consumed && !state.travel.engaging) {
       NovaPlayer_UpdateFromInput(
           state, input, frame_time_ms / kOriginalTickMs, face_target_armed);
+    } else if (!timed_action_active && state.player.is_active &&
+               NovaAiShip_IsDestroyed(state.player)) {
+      // Destroyed hull coast (Ship_HandlePlayerShipCore 0x0044aa70): the
+      // original still applies stellar gravity, the per-axis speed caps and
+      // position integration while its input-driven thrust/steering blocks are
+      // gated off by the fire-restricted flag. Feed a neutral input so the
+      // wreck keeps its inertia through the death presentation instead of
+      // stopping dead.
+      NovaPlayer_UpdateFromInput(state,
+                                 FlightInput{},
+                                 frame_time_ms / kOriginalTickMs,
+                                 /*face_target_armed=*/false);
     }
     if (!player_tick_consumed) {
       NovaPlayer_TickShieldAndArmorRegeneration(state, frame_time_ms);
@@ -3362,10 +3397,21 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
   PlayerShip &p = state.player;
 
   // --- Player-death bookkeeping (Ship_HandlePlayerShipCore prologue) ------
-  // Ship_UpdateVisualState (0x00428340) deactivates any destroyed ship once
-  // its death-timer presentation finishes; that pass is not reconstructed for
-  // the player yet, so the player-side slice is bridged here.
-  if (p.is_active && p.death_timer_active > kDeathTimerExpireFloor) {
+  // Ship_IsShipDestroyed (0x004688e0: armor <= 0 OR timer running) gates the
+  // eject arm, matching the original's check at 0x0045392e -- so armor-only
+  // destruction (self-destruct, script kills, collision blasts) enters the
+  // sequence too. The presentation itself is owned by Ship_UpdateVisualState
+  // (0x00428340), which Frame_TickSystems scope 10 calls on the player right
+  // after this core: it seeds the timer (x3 for the player,
+  // g_player_death_timer_scale 0x00575378), drives the Explode1 debris cascade
+  // while the timer is above 2.0, and runs the Explode2 finale/boom at 2.0.
+  // This core only ticks the timer, exactly like the original at 0x0044b386.
+  if (p.is_active && NovaAiShip_IsDestroyed(p)) {
+    // Fire-restricted damping (0x0044b240, before the eject arm): a destroyed
+    // hull is fire-restricted, so the original bleeds 0.5% of each velocity
+    // component per frame here. The coast integration runs later in the loop.
+    p.vel_x *= kPlayerFireRestrictedVelocityDamp;
+    p.vel_y *= kPlayerFireRestrictedVelocityDamp;
     // PlayerTick eject block (0x004510b9..0x00453910): while the death
     // presentation runs, the eject command (0x38/0x6f arm pair + binding
     // slot 0x11) with an owned auto-eject outfit transforms the player into
@@ -3385,25 +3431,22 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
     }
     // Death presentation running: tick the timer down; the original skips the
     // whole status/outfit block for the dying ship (inactive-branch return).
-    p.death_timer_active -= elapsed_ticks;
-    if (p.death_timer_active <= kDeathTimerExpireFloor) {
-      // Presentation finished: run the Ship_UpdateVisualState (0x00428340)
-      // destruction finale (blast damage to nearby hulls; the mission arm is
-      // player-exempt), which deactivates the hull and clears its target.
-      NovaShip_RunShipDestructionFinale(state, p);
+    if (p.death_timer_active > kDeathTimerExpireFloor) {
+      p.death_timer_active -= elapsed_ticks;
     }
     return true;
   }
 
-  // --- Inactive branch (0x0044aa70 prologue) -------------------------------
+  // --- Inactive branch (0x0044aa70 prologue at 0x0044af14) -----------------
   if (!p.is_active) {
-    if (p.death_timer_active > kDeathTimerExpireFloor) {
-      // Ghidra _g_jump_turnaround_turn_rate_addend decrement; floor sentinel
-      // is DAT_00575538.
+    // While the timer is above DAT_00575558 (-240.0) the hull is gone but the
+    // spaceflight loop keeps presenting: the Explode2 area effect spawned by
+    // the finale (and the fading debris pool) finish playing before the core
+    // latches DAT_00596d38. Only once the timer reaches the floor does the
+    // inactive branch fall through to the escape-pod scan / game-over latch.
+    if (p.death_timer_active > kPlayerDeathInactiveTimerFloor) {
       p.death_timer_active -= kJumpTurnaroundTurnRateAddend;
-      if (p.death_timer_active > kDeathTimerExpireFloor) {
-        return true;
-      }
+      return true;
     }
     if (state.bomb_outfit_class != 0) {
       RunDeathEscapePodScan(state);

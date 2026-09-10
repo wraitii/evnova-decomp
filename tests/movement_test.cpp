@@ -427,8 +427,31 @@ TEST_CASE(
   CHECK(ship.primary_target_ship_slot == -1);
 }
 
-// --- Turn-rate floor (Ship_ComputeShipMaxTurnRateDeg NPC branch) ---
+TEST_CASE("destroyed npc coasts with its inertia instead of stopping") {
+  game::GameState state;
+  state.scenario.ships.emplace_back(TestShipClass());
+  state.scenario.ships[0].base_armor = 100;
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.current_system_id = 0;
+  ship.ship_class_id = 0;
+  ship.armor_points = -1.0F; // destroyed
+  ship.death_timer_active = 5.0F;
+  ship.vel_x = 10.0F;
+  ship.vel_y = 0.0F;
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
 
+  game::NovaShip_TickNpcShips(state, 1.0F);
+
+  // Ship_HandleShip applies the disabled 0.94 damp then integrates one tick;
+  // the wreck must not be pinned at its destruction point.
+  CHECK(ship.vel_x == Catch::Approx(9.4F));
+  CHECK(ship.pos_x == Catch::Approx(9.4F));
+  CHECK(ship.death_timer_active == Catch::Approx(4.0F));
+}
+
+// --- Turn-rate floor (Ship_ComputeShipMaxTurnRateDeg NPC branch) ---
 TEST_CASE("npc turn-rate floor is a no-op for a clean ship (computed==base)") {
   game::GameState state;
   game::Ship ship;

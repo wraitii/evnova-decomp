@@ -3,10 +3,12 @@
 #include "collision.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
+#include "impact_effects.hpp"
 #include "mission.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -30,6 +32,17 @@ namespace {
 }
 
 constexpr std::size_t kMinDescriptorSize = 0x36;
+
+// Mirrors the original's NovaRandom_Range(n) -> integer in [0, n). The
+// destruction visuals roll from the same GameState.rng as every other
+// clean-room roll site.
+[[nodiscard]] std::int16_t RollRandom(GameState &state, std::int32_t n) {
+  if (n <= 0) {
+    return 0;
+  }
+  return static_cast<std::int16_t>(
+      std::uniform_int_distribution<std::int32_t>{0, n - 1}(state.rng));
+}
 
 } // namespace
 
@@ -71,6 +84,58 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
   return d;
 }
 
+// Ghidra 0x00428340 Ship_UpdateVisualState, debris-puff window (the
+// Shot_SpawnAreaImpactEffects call at 0x00428d6a). While the
+// death timer is above the finale threshold the original rolls 1-in-1/2/4/8
+// by the 20/40/60-tick bands and, on a hit, spawns an Explode1 area impact at
+// a small random hull offset (randomly silent). The clean-room reads the ship
+// collision radius in place of the original's sprite shot half-span
+// (collision.cpp's established stand-in).
+void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
+  // g_destroyed_finale_threshold (0x0057531c) = 2.0: at or below it the
+  // finale owns the frame.
+  if (ship.death_timer_active <= 2.0F) {
+    return;
+  }
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return;
+  }
+  // Bands: below 20 always, below 40 1-in-2, below 60 1-in-4, else 1-in-8.
+  std::int32_t roll_bound = 8;
+  if (ship.death_timer_active < 20.0F) {
+    roll_bound = 1;
+  } else if (ship.death_timer_active < 40.0F) {
+    roll_bound = 2;
+  } else if (ship.death_timer_active < 60.0F) {
+    roll_bound = 4;
+  }
+  if (RollRandom(state, roll_bound) != 0) {
+    return;
+  }
+  int extent = static_cast<int>(
+      std::lround(std::max(0.0F, ship.collision_radius_px) * 0.25F));
+  if (extent < 1) {
+    extent = 1;
+  }
+  const float offset_x = static_cast<float>(RollRandom(state, extent * 2)) -
+                         static_cast<float>(extent);
+  const float offset_y = static_cast<float>(RollRandom(state, extent * 2)) -
+                         static_cast<float>(extent);
+  // The original discards one draw for long, early-band presentations.
+  if (roll_bound < 3 && cls->death_delay_frames > 0x3b) {
+    (void)RollRandom(state, 2);
+  }
+  const bool play_sound = RollRandom(state, 4) == 0;
+  NovaEffects_SpawnAreaImpact(state,
+                              ship.pos_x + offset_x,
+                              ship.pos_y + offset_y,
+                              cls->destruction_effect_while_breaking,
+                              /*radius=*/0,
+                              play_sound);
+}
+
 // Ghidra 0x00428340 Ship_UpdateVisualState, destruction slice. See the header
 // for scope notes. Constants decoded from data: g_cloak_fade_passive_decay
 // (0x00575318) = 1.0 tick, destroyed-finale threshold DAT_0057531c = 2.0,
@@ -109,8 +174,9 @@ void NovaShip_TickDestroyedShipVisualState(GameState &state,
     return;
   }
   if (ship.death_timer_active > 2.0F) {
-    // Debris-puff window (2.0 < timer, roll 1-in-1/2/4/8 by the 20/40/60
-    // frame thresholds): visual-only, owned by the SDL view.
+    // Debris-puff window: roll and spawn the Explode1 cadence. The original's
+    // repeated explosions are driven from here.
+    NovaShip_TickDestroyedDebrisPuffs(state, ship);
     return;
   }
   NovaShip_RunShipDestructionFinale(state, ship);
@@ -121,54 +187,56 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   const std::int16_t self_slot = ship.ship_instance_id;
 
-  // Hull blast: hull mass drives the splash radius and damage; capability
-  // flags 0x400 hulls (mass-less/damped) do not blast. Ships within the
-  // per-axis radius take the damage as a disable restriction-checking hit (no
-  // aggro; the original passes force_armor_only 1, transition check 1). The
-  // original has no same-system gate here - quirk preserved, matching the
-  // weapon splash path.
-  if (cls != nullptr && (cls->capability_flags & 0x0400U) == 0U &&
-      ship.pers_def_slot != 0x3ff) {
+  // Hull blast geometry: hull mass drives the splash radius and damage;
+  // capability flags 0x400 hulls (mass-less/damped) do not blast. The radius
+  // also feeds the finale explosion below.
+  std::int16_t blast_radius = 0;
+  std::int16_t blast_damage = 0;
+  if (cls != nullptr && (cls->capability_flags & 0x0400U) == 0U) {
     const std::int16_t mass = cls->mass_tons;
-    std::int16_t blast_radius = 0;
-    std::int16_t blast_damage = 0;
     if (mass >= 100) {
       blast_radius = static_cast<std::int16_t>(
           std::llround(static_cast<float>(mass) * 1.4F + 3.125F));
       blast_damage = static_cast<std::int16_t>(
           std::llround(static_cast<float>(mass) * 1.275F + 2.875F));
     }
-    if (blast_radius > 0) {
-      for (std::int16_t slot = 0;
-           slot < static_cast<std::int16_t>(GameState::kMaxShips);
-           ++slot) {
-        if (slot == self_slot) {
-          continue;
-        }
-        Ship &victim = state.ShipAt(static_cast<std::size_t>(slot));
-        if (!victim.is_active) {
-          continue;
-        }
-        if (std::fabs(victim.pos_x - ship.pos_x) > blast_radius ||
-            std::fabs(victim.pos_y - ship.pos_y) > blast_radius) {
-          continue;
-        }
-        ResolveShipHitFromWeapon(state,
-                                 slot,
-                                 victim,
-                                 ship.pos_x,
-                                 ship.pos_y,
-                                 /*impact_impulse=*/0,
-                                 blast_damage,
-                                 blast_damage,
-                                 /*attacker_ship_slot=*/self_slot,
-                                 /*allow_aggro_updates=*/false,
-                                 /*suppress_retarget_logic=*/false,
-                                 /*force_armor_only=*/true,
-                                 /*bypass_shields=*/false,
-                                 /*player_aggro_delta=*/0,
-                                 /*check_fire_restriction_transition=*/true);
+  }
+
+  // Ships within the per-axis radius take the damage as a disable
+  // restriction-checking hit (no aggro; the original passes force_armor_only
+  // 1, transition check 1). The original has no same-system gate here - quirk
+  // preserved, matching the weapon splash path. The 0x3ff personality
+  // sentinel is exempt.
+  if (cls != nullptr && blast_radius > 0 && ship.pers_def_slot != 0x3ff) {
+    for (std::int16_t slot = 0;
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
+      if (slot == self_slot) {
+        continue;
       }
+      Ship &victim = state.ShipAt(static_cast<std::size_t>(slot));
+      if (!victim.is_active) {
+        continue;
+      }
+      if (std::fabs(victim.pos_x - ship.pos_x) > blast_radius ||
+          std::fabs(victim.pos_y - ship.pos_y) > blast_radius) {
+        continue;
+      }
+      ResolveShipHitFromWeapon(state,
+                               slot,
+                               victim,
+                               ship.pos_x,
+                               ship.pos_y,
+                               /*impact_impulse=*/0,
+                               blast_damage,
+                               blast_damage,
+                               /*attacker_ship_slot=*/self_slot,
+                               /*allow_aggro_updates=*/false,
+                               /*suppress_retarget_logic=*/false,
+                               /*force_armor_only=*/true,
+                               /*bypass_shields=*/false,
+                               /*player_aggro_delta=*/0,
+                               /*check_fire_restriction_transition=*/true);
     }
   }
 
@@ -226,8 +294,20 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
     }
   }
 
-  // TODO(decomp) skipped: Shot_SpawnAreaImpactEffects for the finale effect
-  // (sh¥8an Explode2); the SDL view spawns it from the destruction timer.
+  // Ghidra tail at 0x0042c041: Shot_SpawnAreaImpactEffects(pos, Explode2
+  // (field_0xa1e), blast radius, play_sound=1) then hide + deactivate the
+  // hull. This is the "boom" that fires for player and NPC wrecks alike. The
+  // SDL view and the zero-DeathDelay hit path no longer spawn duplicates;
+  // destruction_finale_triggered keeps the once-only contract.
+  if (cls != nullptr && !ship.destruction_finale_triggered) {
+    NovaEffects_SpawnAreaImpact(state,
+                                ship.pos_x,
+                                ship.pos_y,
+                                cls->destruction_effect_final,
+                                blast_radius,
+                                /*play_sound=*/true);
+    ship.destruction_finale_triggered = true;
+  }
 
   // Ship_UpdateVisualState tail: the hull deactivates with its target cleared.
   ship.is_active = false;

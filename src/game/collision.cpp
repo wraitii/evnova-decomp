@@ -445,8 +445,13 @@ void ResolveShipHitFromWeapon(GameState &state,
             ? 0
             : std::max<std::int16_t>(0, target_class->death_delay_frames);
     // Unit/test states without loaded ship tables retain the old armor-only
-    // sentinel; real scenario ships use the Bible DeathDelay timer.
-    if (target_class != nullptr && death_delay > 0) {
+    // sentinel; real scenario ships use the Bible DeathDelay timer. The timer
+    // itself is seeded by Ship_UpdateVisualState (0x00428340): x1 for NPCs and
+    // x3 for the player (g_player_death_timer_scale 0x00575378). NPCs run
+    // through the port's Ship_UpdateVisualState pass; the player's is bridged
+    // in NovaPlayer_TickStatusAndOutfitEvents, which owns the 3x scale, so
+    // leave the player's timer untouched here.
+    if (target_class != nullptr && death_delay > 0 && target_slot != 0) {
       target.death_timer_active = static_cast<float>(death_delay);
     }
     target.destruction_visual_timer_ms =

@@ -874,14 +874,10 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
       ship.destruction_visual_timer_ms =
           std::max(0.0F, ship.destruction_visual_timer_ms - frame_time_ms);
     }
-    if (was_visible && ship.destruction_visual_timer_ms <= 0.0F &&
-        !ship.destruction_finale_triggered) {
-      const ShipClass *ship_class = state.scenario.Ship(
-          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-      if (ship_class != nullptr && ship_class->destruction_effect_final >= 0) {
-        NovaEffects_SpawnShipDestructionFinale(
-            state, ship, ship_class->destruction_effect_final);
-      }
+    if (was_visible && ship.destruction_visual_timer_ms <= 0.0F) {
+      // The Explode2 finale explosion is spawned by Ship_UpdateVisualState
+      // (NovaShip_RunShipDestructionFinale), which now runs for the player too;
+      // this pass only tracks the sprite fade-out and must not duplicate it.
       ship.destruction_finale_triggered = true;
     }
   }
@@ -1394,8 +1390,11 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
 
   // Player ship at the play-area centre, frame selected by heading. Because
   // the camera is centred on the player, drawing at the ship's own world
-  // position lands it at the viewport centre (world==camera -> centre).
-  if (!ship_.frames.empty() && ship_frames_per_rotation_ > 0) {
+  // position lands it at the viewport centre (world==camera -> centre). The
+  // hull is hidden once Ship_UpdateVisualState deactivates it (the original's
+  // inactive branch runs Sprite_SetVisible(ship, 0)).
+  if (state.player.is_active && !ship_.frames.empty() &&
+      ship_frames_per_rotation_ > 0) {
     const Viewport vp = CurrentViewport(platform);
     const int frame = ComposeShipFrameIndex(state.player,
                                             ship_sprite_behavior_flags_,
