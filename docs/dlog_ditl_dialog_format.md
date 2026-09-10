@@ -304,7 +304,7 @@ inventory state:
 * **Direct navigation keys.** `NovaUi_HandleOutfitterMenuInput` (0x004903c0)
   reaches its actions through the command map and DIK arrow keys; only `b`
   (0x62 -> buy, action 7) and `s` (0x73 -> sell, action 4) are direct letter
-  keys, plus Escape/Return. `RunStoreDialog` (`docked_dialog.cpp`) additionally
+  keys, plus Escape/Return. `RunStoreDialog` (`docked_store_dialog.cpp`) additionally
   accepts `l` (leave), `p`/`n` (page) and `i` (shipyard info) as convenience
   keys. The original command-map/arrow navigation is still TODO(decomp), so
   these stand in for it rather than replacing it.

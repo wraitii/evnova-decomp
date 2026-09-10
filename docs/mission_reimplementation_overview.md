@@ -157,7 +157,7 @@ The mission-list pipeline is implemented in `src/game/mission.cpp`:
   wiring (0x00491F30's `g_misn_list_page_group = 3` + context-3 call on
   landing) runs in `NovaLanded_RunWindow` over a dock snapshot.
 - `0x00442510` `NovaUi_RunMissionShipInteractionWindow` — partial (35%) as
-  `NovaMission_RunOfferWindow` (docked_dialog.cpp): the text-offer arm over
+  `NovaMission_RunOfferWindow` (docked_mission_dialog.cpp): the text-offer arm over
   DLOG 0x3f8/DITL 1016 with the STR# 0x96 button defaults, the +0x18-&4
   empty-text auto-accept arm, and accept via `Mission_ActivateAtSlot`.
   TODO(decomp): mission-ship/hail branches, the variant ≥ 0x80 DLOG 0x3fc
@@ -171,7 +171,7 @@ The mission-list pipeline is implemented in `src/game/mission.cpp`:
 
 This layer determines which missions appear, sorts them, checks availability expressions, resolves destinations, and accepts a mission into one of 16 active slots.
 
-The Mission BBS UI is a functional port in `src/game/docked_dialog.cpp`
+The Mission BBS UI is a functional port in `src/game/docked_mission_dialog.cpp`
 (evaluates available missions, DLOG/DITL 0x3ee layout, selection, accept via
 `Mission_ActivateAtSlot`), though desc/briefing dialogs are still logged
 TODOs. Ghidra distinguishes this from the active-mission computer and from
@@ -204,17 +204,17 @@ landed Mission BBS button
   -> return to the landed window
 ```
 
-The existing `0x2139` frame in `src/game/docked_dialog.cpp` is the correct BBS
+The existing `0x2139` frame in `src/game/docked_mission_dialog.cpp` is the correct BBS
 artwork, but its content should become this available-mission list rather than
 the generic placeholder.
 
 Remaining dialog entrypoints:
 
 - `0x00440C90` `NovaUi_PollMissionBbsWindow` polling — ported inline (35%) in
-  `RunMissionBbsWindow` (`docked_dialog.cpp`); remaining action codes and the
+  `RunMissionBbsWindow` (`docked_mission_dialog.cpp`); remaining action codes and the
   native scrollbar are TODO(decomp)
 - `0x00446150` mission-computer window — DONE (75%) as
-  `NovaMission_RunMissionInfoWindow` (`docked_dialog.cpp`): the in-flight
+  `NovaMission_RunMissionInfoWindow` (`docked_mission_dialog.cpp`): the in-flight
   active-missions modal (gameplay command 0x28, default key I; the caller in
   `spaceflight.cpp` counts visible missions first and plays the denied cue +
   STR# 0x7d2 0x162 overlay when there are none). DLOG/DITL 0x3f4 + PICT
@@ -236,7 +236,7 @@ Remaining dialog entrypoints:
   live flight view beneath itself — like every modal in the port, per the
   layering divergence documented in docs/dlog_ditl_dialog_format.md §7.1
   (the docked-layer snapshot plumbing was removed in the same pass).
-- `0x0043C470` available Mission BBS — ported in `docked_dialog.cpp`
+- `0x0043C470` available Mission BBS — ported in `docked_mission_dialog.cpp`
   (`RunMissionBbsWindow`); 2025 fidelity pass: Geneva-9 screen font and
   fixed 12px native list row pitch, selected-title panel in white Times 18
   with a black no-selection fill, description panel as the fill+InvertRect

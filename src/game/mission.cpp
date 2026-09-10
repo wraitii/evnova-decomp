@@ -1122,7 +1122,8 @@ bool Mission_ActivateAtSlot(GameState &state,
   }
   // Bible PickupMode 0: the mission cargo is aboard from mission start. The
   // LoadCargText desc dialog (payload +0x38) is UI-owned and runs in
-  // NovaMission_RunAcceptanceDialogs (docked_dialog.cpp) after activation.
+  // NovaMission_RunAcceptanceDialogs (docked_mission_dialog.cpp) after
+  // activation.
   if (active.pickup_mode == 0) {
     active.carrying_resources = true;
   }

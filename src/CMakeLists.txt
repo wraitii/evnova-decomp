@@ -30,7 +30,11 @@ add_library(evnova_runtime
     game/boarding_plunder.cpp
     game/about_dialog.cpp
     game/collision.cpp
+    game/docked_bar_dialog.cpp
     game/docked_dialog.cpp
+    game/docked_mission_dialog.cpp
+    game/docked_store_dialog.cpp
+    game/docked_trade_dialog.cpp
     game/escort_commands.cpp
     game/escort_formation.cpp
     game/negotiation_dialog.cpp

@@ -149,9 +149,9 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
 // boarding/comm-dialog pattern). Supports the starmap action (with the
 // selected mission's destination preselect) and
 // aborting missions whose CanAbort latch is set (flags 0x40 apply the -5x
-// CompReward reputation reversal). See docked_dialog.cpp for the ported
-// helper sites and skips. Opening with zero visible missions is refused by
-// the caller (Ship_HandlePlayerShipCore plays the denied cue and the STR#
+// CompReward reputation reversal). See docked_mission_dialog.cpp for the
+// ported helper sites and skips. Opening with zero visible missions is refused
+// by the caller (Ship_HandlePlayerShipCore plays the denied cue and the STR#
 // 0x7d2 0x162 overlay instead).
 void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
                                       SdlAudio &audio,
