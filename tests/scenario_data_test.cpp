@@ -883,6 +883,51 @@ TEST_CASE("ship classes derive the sprite clone source", "[scenario][data]") {
   CHECK(clone_of(0xe0) + 3000 == 3016);
 }
 
+TEST_CASE("disaster (oops) rows decode from the payload",
+          "[scenario][disaster]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // öops family (Nova Data 2): 0x100 slots, 19 present (ids 0x80..0x92).
+  REQUIRE(data.disaster_defs.size() == 0x100);
+  const auto present_count = static_cast<int>(
+      std::count_if(data.disaster_defs.begin(),
+                    data.disaster_defs.end(),
+                    [](const DisasterDef &d) { return d.present; }));
+  CHECK(present_count == 19);
+
+  // "An enormous food surplus" (0x80): payload words (137, 0, -15, 30, 35),
+  // no ActivateOn expression. Stellar 137 = 0x89 is a 0x80-based resource id.
+  const DisasterDef &food = data.disaster_defs[0x80 - 0x80];
+  REQUIRE(food.present);
+  CHECK(food.target_stellar == 137);
+  CHECK(food.commodity == 0);
+  CHECK(food.price_delta == -15);
+  CHECK(food.duration_days == 30);
+  CHECK(food.start_chance_percent == 35);
+  CHECK(food.activation_expression.empty());
+  CHECK(food.display_name == "An enormous food surplus");
+  // Runtime slots start idle.
+  CHECK(food.active_stellar == -1);
+  CHECK(food.days_remaining == -1);
+  CHECK_FALSE(food.started_once);
+
+  // "A shortage in supply" (0x91): the one record with an ActivateOn gate
+  // ("!b80"), commodity 1, delta +70, duration 15, freq 70.
+  const DisasterDef &supply = data.disaster_defs[0x91 - 0x80];
+  REQUIRE(supply.present);
+  CHECK(supply.target_stellar == 360);
+  CHECK(supply.commodity == 1);
+  CHECK(supply.price_delta == 70);
+  CHECK(supply.duration_days == 15);
+  CHECK(supply.start_chance_percent == 70);
+  CHECK(supply.activation_expression == "!b80");
+  CHECK(supply.display_name == "A shortage in supply");
+
+  // Slots past the last shipped record stay absent.
+  CHECK_FALSE(data.disaster_defs[0x93 - 0x80].present);
+}
+
 } // namespace game
 
 // TEMP probe: dump decoded personalities for cross-checking (drop after pass).

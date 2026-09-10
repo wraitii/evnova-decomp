@@ -2755,6 +2755,75 @@ void Stellar_CollectDailyTributeIncome(GameState &state) {
   }
 }
 
+// Ghidra 0x00424f90 System_UpdateDisasterStates (per-game-day sweep of the
+// 0x100 öops slots; runs from the daily world-update driver).
+void System_UpdateDisasterStates(GameState &state) {
+  for (auto &def : state.scenario.disaster_defs) {
+    if (!def.present) {
+      // Undefined slot: reset to the idle sentinels the loader leaves.
+      def.active_stellar = -1;
+      def.days_remaining = -1;
+      def.started_once = false;
+      continue;
+    }
+    if (def.days_remaining >= 1) {
+      // Active: burn one day off the remaining duration.
+      --def.days_remaining;
+      continue;
+    }
+    if (def.started_once) {
+      // Dead arm in the shipped code (started_once is never set), kept for
+      // parity: a once-started disaster with a negative duration repeats
+      // for two days.
+      if (def.duration_days < 0) {
+        def.days_remaining = 2;
+      }
+      continue;
+    }
+    // Idle and never started: roll the per-day chance, then gate on the
+    // ActivateOn expression.
+    const std::int16_t roll = RandomBelow(state, 100);
+    if (roll + 1 > def.start_chance_percent) {
+      continue;
+    }
+    if (!Mission_CheckReactionConditionSatisfied(state,
+                                                 def.activation_expression)) {
+      continue;
+    }
+    if (def.target_stellar < static_cast<std::int16_t>(kResourceIdBase)) {
+      if (def.target_stellar != -1) {
+        // Other sub-0x80 codes are inert (the original's empty inner arm).
+        continue;
+      }
+      // "Any": pick a random available stellar that is not a travel-only
+      // (flags 0x20) lane. The original rejects samples over the full 0x800
+      // g_stellar_defs table; the clean-room table is shorter, so build the
+      // eligible set explicitly (equivalent while the unmodelled tail slots
+      // stay unavailable).
+      std::vector<std::size_t> candidates;
+      for (std::size_t i = 0; i < state.scenario.stellars.size(); ++i) {
+        const auto &stellar = state.scenario.stellars[i];
+        if (stellar.is_available && (stellar.flags & 0x20U) == 0U) {
+          candidates.push_back(i);
+        }
+      }
+      if (candidates.empty()) {
+        continue;
+      }
+      std::uniform_int_distribution<std::size_t> pick(0, candidates.size() - 1);
+      def.active_stellar =
+          static_cast<std::int16_t>(candidates[pick(state.rng)]);
+      def.days_remaining = def.duration_days;
+      continue;
+    }
+    // Bound stellar: rebase the 0x80-based resource id to the 0-based index
+    // the exchange compares against.
+    def.active_stellar =
+        static_cast<std::int16_t>(def.target_stellar - kResourceIdBase);
+    def.days_remaining = def.duration_days;
+  }
+}
+
 // Ghidra 0x00466cb0 ShipClass_RerollShipClassAvailabilityChances (daily
 // world-update driver; see mission.hpp for the remaining skipped slices).
 void Mission_TickDailyWorldUpdate(GameState &state) {
@@ -2769,6 +2838,7 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
     }
   }
   Stellar_CollectDailyTributeIncome(state);
+  System_UpdateDisasterStates(state);
   const std::size_t system_count =
       std::min(state.scenario.systems.size(), GameState::kMaxSystems);
   for (std::size_t i = 0; i < system_count; ++i) {
@@ -2780,8 +2850,7 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
   // Per-stellar daily schedule + garrison resupply (0x800 x 0x498 loop):
   // available stellars only. TODO(decomp) skipped inside this loop: the two
   // daily-zeroed scratch fields (StellarDef +0x2e/+0x494) have no modelled
-  // consumer, and System_UpdateDisasterStates (0x00424f90) needs the
-  // dïsaster resource family.
+  // consumer.
   const std::size_t stellar_count =
       std::min(state.scenario.stellars.size(), static_cast<std::size_t>(0x800));
   for (std::size_t i = 0; i < stellar_count; ++i) {

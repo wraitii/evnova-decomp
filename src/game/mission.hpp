@@ -295,15 +295,24 @@ void Mission_TickDailyCronEvents(GameState &state);
 // stellars carrying the +0x46 marker. Called by Mission_TickDailyWorldUpdate.
 void Stellar_CollectDailyTributeIncome(GameState &state);
 
+// Ghidra 0x00424f90 System_UpdateDisasterStates. Per-game-day sweep of the
+// 0x100 öops slots (g_disaster_defs, DisasterDef stride 0x210). Undefined
+// slots reset to the idle sentinels (-1 active/days, started_once 0); a
+// defined idle slot rolls start_chance_percent and, when its ActivateOn
+// expression passes, activates on the bound stellar (or a random available,
+// non-travel-flagged one when target_stellar is -1) for duration_days; an
+// active slot counts its remaining days down. Called from
+// Mission_TickDailyWorldUpdate after the tribute pass.
+void System_UpdateDisasterStates(GameState &state);
+
 // Ghidra 0x00466cb0 ShipClass_RerollShipClassAvailabilityChances (the daily
 // world-update driver; runs once per elapsed game-day). Advances the
 // calendar, ticks the crön events, counts down every active mission's
-// deadline, collects tribute income, runs the per-stellar garrison resupply
-// + schedule countdown, and rerolls ship/outfit availability. TODO(decomp)
-// skipped slices: System_UpdateDisasterStates (0x00424f90; dïsaster resource
-// family not decoded), the per-system dude_prob +0x1c suppression countdown,
-// and the system-cue (rank) daily credits -- none of those tables are
-// modelled.
+// deadline, collects tribute income, updates the disaster states, runs the
+// per-stellar garrison resupply + schedule countdown, and rerolls ship/outfit
+// availability. TODO(decomp) skipped slices: the per-system dude_prob +0x1c
+// suppression countdown and the system-cue (rank) daily credits -- neither
+// table is modelled.
 void Mission_TickDailyWorldUpdate(GameState &state);
 
 // Ghidra 0x00468450 NovaText_FormatDateString / 0x00468600

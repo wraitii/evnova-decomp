@@ -9,6 +9,7 @@ Escape Velocity Nova is Ambrosia Software's 2002 open-world 2D space-trading and
   note already exists for it (e.g. `dlog_ditl_dialog_format.md` for dialog
   resources, `scenario_data_loading.md`, `menu_graphics_structure.md`). Docs are
   the fastest ground-truth shortcut over re-deriving from the Ghidra API.
+- Always improve ghidra when possible.
 - Check the EVN bible ("EV Nova Bible.html") for information.
 - Reference decompiled / disassembled ground truth from the Ghidra API.
 - Be conservative with speculative renames. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.

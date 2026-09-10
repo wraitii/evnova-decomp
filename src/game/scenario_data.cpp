@@ -775,6 +775,38 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 }
 
 // ---------------------------------------------------------------------------
+// öops (disaster / commodity price-shock) decode
+// ---------------------------------------------------------------------------
+// Field map verified against Nova Data 2's öops payloads (ids 0x80..0x92) and
+// the loader's disaster pass (0x004bd3c0): payload word[0] is the 0x80-based
+// target stellar (or -1 for any), word[1] the commodity index (clamped to
+// 0..5, negative -> -1), word[2] the signed price delta, word[3] the duration
+// in days and word[4] the per-day start chance. The C-string at payload +0x0a
+// is the ActivateOn expression; the record name is the display label.
+[[nodiscard]] DisasterDef DecodeDisaster(std::span<const std::byte> bytes) {
+  DisasterDef def;
+  def.present = true;
+  def.target_stellar = ReadBeI16(bytes, 0x00);
+  std::int16_t commodity = ReadBeI16(bytes, 0x02);
+  if (commodity > 5) {
+    commodity = 5;
+  } else if (commodity < 0) {
+    commodity = -1;
+  }
+  def.commodity = commodity;
+  def.price_delta = ReadBeI16(bytes, 0x04);
+  def.duration_days = ReadBeI16(bytes, 0x06);
+  def.start_chance_percent = ReadBeI16(bytes, 0x08);
+  def.activation_expression = ReadCStringBounded(bytes, 0x0a, 0xff);
+  // Loader initialises the runtime trio to the idle sentinels (+0x02/+0x0c =
+  // -1, +0x20d = 0) before adding a live record.
+  def.active_stellar = -1;
+  def.days_remaining = -1;
+  def.started_once = false;
+  return def;
+}
+
+// ---------------------------------------------------------------------------
 // g\x9avt (Government / govmnt) decode
 // ---------------------------------------------------------------------------
 // Field offsets verified against Nova Data 1's government payloads and the
@@ -1299,6 +1331,8 @@ bool ScenarioData::LoadFromArchives() {
   // crön events: 0x200 slots, resource ids 0x80..0x27f. Absent ids keep
   // !present rows, matching the loader's 0xffff duration sentinel.
   cron_events.assign(0x200, {});
+  // öops disaster table: 0x100 slots, slot i = resource id 0x80 + i.
+  disaster_defs.assign(0x100, {});
   // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
   asteroid_defs.assign(0x80, {});
 
@@ -1662,6 +1696,18 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_crons;
     }
   }
+  // öops disasters (loader disaster pass after the crön events). 0x100 slots,
+  // slot i = resource id 0x80 + i; absent resources stay !present.
+  std::size_t loaded_disasters = 0;
+  for (std::int32_t id = 0x80; id < 0x80 + 0x100; ++id) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kDisasterResourceType, static_cast<std::uint16_t>(id))) {
+      DisasterDef def = DecodeDisaster(res->bytes);
+      def.display_name = StripSubtitleSuffix(res->name);
+      disaster_defs[static_cast<std::size_t>(id) - 0x80] = std::move(def);
+      ++loaded_disasters;
+    }
+  }
   // Display-name id post-pass (0x004c3e20): every slot starts with its own
   // index at +0x78a, then same-named slots adopt the first slot's id. The
   // original compares +0x625 name tails with a first-byte bound; exact-name
@@ -1718,7 +1764,7 @@ bool ScenarioData::LoadFromArchives() {
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} nebulae, {} governments, {} fleet defs, {} dude defs, "
       "{} asteroid types, {} impact effects, {} missions, {} personalities, "
-      "{} cron events",
+      "{} cron events, {} disasters",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
@@ -1732,7 +1778,8 @@ bool ScenarioData::LoadFromArchives() {
       loaded_impact_effects,
       loaded_missions,
       loaded_pers,
-      loaded_crons);
+      loaded_crons,
+      loaded_disasters);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

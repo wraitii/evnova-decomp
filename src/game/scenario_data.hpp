@@ -77,6 +77,14 @@ constexpr std::uint32_t kImpactEffectResourceType = 0x629a9a6d;
 // g_cron_event_states blocks (stride 0x350) in the cron pass of
 // NovaData_LoadScenarioResourceTables (0x004bd3c0). See CronEventDef.
 constexpr std::uint32_t kCronResourceType = 0x63729a6e;
+// öops (0x9a6f7073) — planetary disaster / commodity price-shock definitions.
+// The original loads up to 0x100 slots (resource id 0x80 + i, g_disaster_defs,
+// stride 0x210) in the disaster pass of NovaData_LoadScenarioResourceTables
+// (0x004bd3c0); 19 are present in the shipped data (ids 0x80..0x92, Nova Data
+// 2). System_UpdateDisasterStates (0x00424f90) rolls them once per game-day
+// and NovaUi_HandleTravelDestinationInteractionLoop (0x0048c730) applies the
+// price delta to the commodity exchange. See DisasterDef.
+constexpr std::uint32_t kDisasterResourceType = 0x9a6f7073;
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -837,6 +845,53 @@ struct CronEventDef {
   std::array<std::int16_t, 4> govt_news_strs{-1, -1, -1, -1}; // payload +0x32e
 };
 
+// Ghidra DisasterDef (g_disaster_defs, 0x100 slots indexed by resource id
+// minus 0x80, stride 0x210). An öops record describes a temporary commodity
+// price shock at a single stellar (the Bible's "disaster"): while the roll is
+// active, the commodity exchange adds price_delta to that commodity's price.
+// The static fields below are the resource payload (the Bible's Stellar /
+// Commodity / PriceDelta / Duration / Freq / ActivateOn fields), the runtime
+// trio is state the original keeps in the same table and persists in the .plt
+// block2 (+0x3088/+0x3288).
+struct DisasterDef {
+  bool present = false; // loader: resource exists (g_disaster_defs +0x20e)
+
+  // Bible "Stellar": 0x80-based stellar resource id this disaster is bound
+  // to, or -1 for "any" (a random available, non-travel-flagged stellar is
+  // chosen at activation). Loader stores payload word[0] verbatim at +0x00
+  // (absent slots hold the 0x8001 sentinel).
+  std::int16_t target_stellar = -1;
+  // Bible "Commodity": 0 = food, 1 = industrial, ... Loader stores payload
+  // word[1] at +0x04, clamping > 5 to 5 and < 0 to -1 (no commodity).
+  std::int16_t commodity = -1;
+  // Bible "PriceDelta": signed amount added to the commodity price while
+  // active (negative lowers it). Loader payload word[2] -> +0x06.
+  std::int16_t price_delta = 0;
+  // Bible "Duration": days the disaster lasts. Loader payload word[3] ->
+  // +0x08.
+  std::int16_t duration_days = -1;
+  // Bible "Freq": percent chance per eligible day to start. Loader payload
+  // word[4] -> +0x0a.
+  std::int16_t start_chance_percent = -1;
+  // Bible "ActivateOn": control-bit test expression; blank means always
+  // eligible. Loader C string at payload +0x0a -> +0x0e.
+  std::string activation_expression;
+  // Record name with the ';'-subtitle stripped (ResourceData_ReadEntryMetadata
+  // + NameString_StripSubtitleSuffix), used by the travel-news report.
+  std::string display_name;
+
+  // ---- Runtime state (persisted in the pilot file, not in the resource) ----
+  // Active stellar (0-based g_stellar_defs index) or -1 when idle
+  // (+0x02 active_system_id_runtime).
+  std::int16_t active_stellar = -1;
+  // Remaining active days; -1 when idle (+0x0c days_remaining_runtime).
+  std::int16_t days_remaining = -1;
+  // +0x20d started_once_runtime. Only ever cleared by the daily update in the
+  // shipped code, so this stays false and the negative-duration repeat arm is
+  // dead; kept for parity and pilot-load.
+  bool started_once = false;
+};
+
 // Ghidra GovtDef (g_government_defs, up to 0x100 entries indexed by government
 // id minus 0x80). A government defines a faction: its class/alliance/enemy
 // relations, reputation penalties, AI/pilot skill, intel scan mask, theme
@@ -1305,6 +1360,10 @@ struct ScenarioData {
   // slots, slot i = resource id 0x80 + i; absent resources stay !present.
   // See CronEventDef and Mission_TickDailyCronEvents (0x00439500).
   std::vector<CronEventDef> cron_events; // indexed by crön id - 0x80
+  // öops disaster / commodity-shock table (g_disaster_defs): 0x100 slots,
+  // slot i = resource id 0x80 + i; absent resources stay !present. See
+  // DisasterDef and System_UpdateDisasterStates (0x00424f90).
+  std::vector<DisasterDef> disaster_defs; // indexed by disaster id - 0x80
   // Asteroid/drift class table (r\x9aid family, one row per resource id
   // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
   // the DAT_005912dc / DAT_005912f0 pair.
