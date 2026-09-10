@@ -120,7 +120,10 @@ NovaDialog_DockedServiceForDitlItem(std::size_t ditl_index);
 // a candidate line and must be consistent with the font actually drawn (the
 // caller supplies the same NovaFontCache::TextWidth used for rendering). Words
 // are never split; a single word wider than the row is emitted on its own line
-// (the renderer may clip it). Pure text math; testable without a renderer.
+// (the renderer may clip it). An explicit '\r'/`\n` terminates the line; a run
+// of two (the "...\r\rRequires: ..." desc form) leaves an empty line, matching
+// the original DrawTextW(DT_WORDBREAK) layout. Pure text math; testable without
+// a renderer.
 [[nodiscard]] std::vector<std::string>
 WrapDescriptionLines(std::string_view text,
                      int max_width,
