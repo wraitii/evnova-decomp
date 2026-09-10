@@ -157,6 +157,13 @@ struct NovaMenuPoint {
 struct NovaMainMenuStyle {
   NovaRgbColor menu_bright;
   NovaRgbColor menu_dim;
+  // Ghidra: c\x9alr +0x56 -> DAT_007d827c and +0x5a -> DAT_007d8282, the two
+  // colors the store grid uses (Bible GridBright = selection square,
+  // GridDim = grid color). NovaUi_RedrawOutfitterMenu (0x00490c70) and
+  // NovaUi_DrawShipyardShipList (0x004948b0) frame every page cell with
+  // grid_dim and re-frame the selected cell with grid_bright.
+  NovaRgbColor grid_bright;
+  NovaRgbColor grid_dim;
   std::uint16_t menu_font_size = 0;
   std::array<NovaMenuPoint, 6> button_origins{};
   // Ghidra: DAT_007d2524/26 loaded from c\x9alr +0xe0; the main-screen logo
@@ -168,6 +175,15 @@ struct NovaMainMenuStyle {
   // Ghidra: c\x9alr +0xe8/+0xec/+0xf0; sp\x95n 608-610 are the three
   // pre-rendered horizontal reveal strips behind the two button columns.
   std::array<NovaMenuPoint, 3> row_reveal_origins{};
+  // The list/map palette the interface reads from the same c\x9alr
+  // (DAT_00735658/5e/64/6a/70). NovaUi_DrawListRowCallback (0x00448a30)
+  // fills rows with list_background/list_hilite and draws list_text; the
+  // target category panel uses escort_hilite and the route map floating_map.
+  NovaRgbColor floating_map;    // +0x8a
+  NovaRgbColor list_text;       // +0x8e
+  NovaRgbColor list_background; // +0x92
+  NovaRgbColor list_hilite;     // +0x96
+  NovaRgbColor escort_hilite;   // +0x9a
 };
 
 [[nodiscard]] std::optional<NovaSpriteDefinition>
