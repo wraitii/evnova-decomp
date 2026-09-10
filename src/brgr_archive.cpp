@@ -503,6 +503,11 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data) {
   constexpr std::size_t kListHiliteOffset = 0x96;
   constexpr std::size_t kEscortHiliteOffset = 0x9a;
   constexpr std::size_t kPaletteEnd = kEscortHiliteOffset + 4;
+  constexpr std::size_t kProgressBarOffset = 0x5e;
+  constexpr std::size_t kProgressFillOffset = 0x66;
+  constexpr std::size_t kProgressInnerOffset = 0x6a;
+  constexpr std::size_t kProgressOuterOffset = 0x6e;
+  constexpr std::size_t kProgressEnd = kProgressOuterOffset + 4;
   constexpr std::size_t kButtonOriginsOffset = 0x72;
   constexpr std::size_t kButtonOriginSize = 4;
   constexpr std::size_t kRequiredSize =
@@ -556,6 +561,17 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data) {
     style.list_background = ReadRgb(resource_data, kListBackgroundOffset);
     style.list_hilite = ReadRgb(resource_data, kListHiliteOffset);
     style.escort_hilite = ReadRgb(resource_data, kEscortHiliteOffset);
+  }
+  // Loading progress bar (guarded; the shipped Colors record is 244 bytes).
+  if (resource_data.size() >= kProgressEnd) {
+    style.progress_bar_top = ReadBeI16(resource_data, kProgressBarOffset);
+    style.progress_bar_left = ReadBeI16(resource_data, kProgressBarOffset + 2);
+    style.progress_bar_bottom =
+        ReadBeI16(resource_data, kProgressBarOffset + 4);
+    style.progress_bar_right = ReadBeI16(resource_data, kProgressBarOffset + 6);
+    style.progress_fill = ReadRgb(resource_data, kProgressFillOffset);
+    style.progress_inner = ReadRgb(resource_data, kProgressInnerOffset);
+    style.progress_outer = ReadRgb(resource_data, kProgressOuterOffset);
   }
   return style;
 }

@@ -16,7 +16,21 @@ NovaProgramEntry
 
 The session now reproduces the original ordering of `NovaUi_PresentLoadingSplashFrame` (0x004ab070), `NovaUi_PresentStartupSplashFrame` (0x004aaf60), then the persistent main-menu loop. `Resource_LoadPictAsImage` now decodes the observed PICT v2 `DirectBitsRect` format (PackBits-compressed 16-bit RGB555) in C++ and displays the exact loading-splash resource, PICT `0x1fa4`, from `Nova Titles 1.rez` during the loading-splash phase.
 
-`NovaUi_PresentStartupSplashFrame` deliberately uses a clean SDL Ambrosia screen instead of its original `PICT 0x83`. That exact resource is absent from the supplied Windows archive set; the comparable `PICT 900` Ambrosia asset is an indexed/QuickTime-flavoured PICT not yet supported by the narrow decoder. The temporary SDL replacement preserves the original routine's clear-then-image presentation and intentionally has no fictional progress indicator.
+`NovaUi_PresentStartupSplashFrame` uses PICT `0x83` (the Escape Velocity Nova
+title art) from `Nova Titles 1.rez`, shown after the Ambrosia logo loading splash
+(PICT `0x1fa4`). The `StartupPhase::startup_splash` phase shows the real
+`cölr`-styled loading progress bar (Ghidra `NovaUi_RunProgressBarReveal`
+0x004ab1b0 / `NovaUi_RedrawProgressBar` 0x004ab3d0). The bar is revealed on the
+first startup-splash frame and fills while the port's startup asset loads (menu
+sprites, backdrop, logo, rollover strips, menu sounds) run one per
+`kStartupLoadStepDwellMs`. The displayed fill chases the completed loads at a
+constant rate (`kStartupProgressFillMs`) so it sweeps smoothly like the
+original's per-ship increments instead of jumping; the splash and completed bar
+hold until `kStartupSplashDurationMs`. The progress denominator is the number of
+staged loads, not the original's `ship` resource count, until the per-class
+visual preload (`NovaData_LoadAllShipClassVisualAndLaunchData`) is
+reconstructed. The original shows the title art alone first only because of the
+`ResourceData_VerifyCatalogChecksum` catalog check, which the port skips.
 
 `NovaRender_RedrawAndPresentFrame` uses a fixed 640×480 letterboxed SDL composition as an interim equivalent of the original shared offscreen surface. It has the title/menu layout, star/planet backdrop, HUD frame, pulsing prompt, and hover focus regions. The BRGR adapter maps PICT `0x1fa4` to its actual title-archive region. The next fidelity step is mapping PICT `0x83` and decoding the six RLE menu focus sprites (resource ids 600–605). It exposes the original menu action mappings: New Game, Open Pilot, Quit, Preferences, and Star Map. The non-Quit action flows deliberately report that they remain unreconstructed.
 

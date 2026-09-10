@@ -115,6 +115,25 @@ TEST_CASE("color-resource colors are read as big-endian RGB") {
   data[0x9b] = std::byte{0x0d};
   data[0x9c] = std::byte{0x0e};
   data[0x9d] = std::byte{0x0f};
+  // Loading progress bar outline +0x5e..+0x64 (QuickDraw top,left,bottom,
+  // right) and colors +0x66/+0x6a/+0x6e (big-endian 0x00RRGGBB at +1/+2/+3).
+  data[0x5e] = std::byte{0x01};
+  data[0x5f] = std::byte{0x18}; // top 280
+  data[0x60] = std::byte{0xff};
+  data[0x61] = std::byte{0x9c}; // left -100
+  data[0x62] = std::byte{0x01};
+  data[0x63] = std::byte{0x22}; // bottom 290
+  data[0x64] = std::byte{0x00};
+  data[0x65] = std::byte{0x64}; // right 100
+  data[0x67] = std::byte{0xff}; // progress_fill red
+  data[0x68] = std::byte{0x00};
+  data[0x69] = std::byte{0x00};
+  data[0x6b] = std::byte{0x80}; // progress_inner red
+  data[0x6c] = std::byte{0x00};
+  data[0x6d] = std::byte{0x00};
+  data[0x6f] = std::byte{0x40}; // progress_outer gray
+  data[0x70] = std::byte{0x40};
+  data[0x71] = std::byte{0x40};
 
   const auto style = NovaMainMenuStyle_Parse(data);
   REQUIRE(style);
@@ -142,4 +161,17 @@ TEST_CASE("color-resource colors are read as big-endian RGB") {
   CHECK(style->escort_hilite.red == 0x0d);
   CHECK(style->escort_hilite.green == 0x0e);
   CHECK(style->escort_hilite.blue == 0x0f);
+  CHECK(style->progress_bar_top == 280);
+  CHECK(style->progress_bar_left == -100);
+  CHECK(style->progress_bar_bottom == 290);
+  CHECK(style->progress_bar_right == 100);
+  CHECK(style->progress_fill.red == 0xff);
+  CHECK(style->progress_fill.green == 0x00);
+  CHECK(style->progress_fill.blue == 0x00);
+  CHECK(style->progress_inner.red == 0x80);
+  CHECK(style->progress_inner.green == 0x00);
+  CHECK(style->progress_inner.blue == 0x00);
+  CHECK(style->progress_outer.red == 0x40);
+  CHECK(style->progress_outer.green == 0x40);
+  CHECK(style->progress_outer.blue == 0x40);
 }

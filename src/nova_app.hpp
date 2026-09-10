@@ -30,6 +30,8 @@ enum class GameModeAction : std::uint8_t {
 
 enum class StartupPhase : std::uint8_t {
   loading_splash,
+  // Startup splash (PICT 0x83) with the loading progress bar revealed on top
+  // (Ghidra NovaUi_RunProgressBarReveal 0x004ab1b0) while assets load.
   startup_splash,
   main_menu,
 };
@@ -99,6 +101,20 @@ struct NovaRuntime {
   std::optional<GameModeAction> previous_hovered_action;
   std::optional<GameModeAction> requested_action;
   std::uint64_t startup_phase_started_ms = 0;
+  // Startup progress-bar state (Ghidra 0x004ab1b0/0x004ab3b0/0x004ab3d0).
+  // Once the reveal starts, startup_load_step advances one staged asset load at
+  // a time while the bar fills; startup_load_step_started_ms paces the steps.
+  bool startup_progress_started = false;
+  std::uint64_t startup_load_step_started_ms = 0;
+  double loading_progress_value = 0.0;
+  double loading_progress_total = 0.0;
+  // Smoothed value actually drawn: chases loading_progress_value at a constant
+  // rate so the six staged loads sweep instead of jumping (the original adds
+  // one increment per ship class, ~0.7 reference px each).
+  double loading_progress_displayed = 0.0;
+  std::uint64_t loading_progress_last_ms = 0;
+  int loading_progress_reveal_inset = 0;
+  std::uint8_t startup_load_step = 0;
   std::uint64_t next_menu_top_animation_ms = 0;
   std::uint64_t next_menu_reveal_frame_ms = 0;
   std::uint64_t menu_center_preview_last_update_ms = 0;
@@ -132,6 +148,14 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode);
 void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action);
 void NovaUi_PresentLoadingSplashFrame(NovaRuntime &runtime);
 void NovaUi_PresentStartupSplashFrame(NovaRuntime &runtime);
+// Ghidra: 0x004ab3a0 NovaUi_ProgressCallbackNoOp.
+void NovaUi_ProgressCallbackNoOp();
+// Ghidra: 0x004ab1b0 NovaUi_RunProgressBarReveal.
+void NovaUi_RunProgressBarReveal(NovaRuntime &runtime);
+// Ghidra: 0x004ab3b0 NovaUi_AddProgressAndRedraw.
+void NovaUi_AddProgressAndRedraw(NovaRuntime &runtime, double delta);
+// Ghidra: 0x004ab3d0 NovaUi_RedrawProgressBar.
+void NovaUi_RedrawProgressBar(NovaRuntime &runtime);
 
 [[nodiscard]] std::optional<GameModeAction>
 NovaCommand_TranslateByInputMap(char command);

@@ -15,6 +15,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <string_view>
@@ -51,11 +52,29 @@ constexpr std::array<NovaMenuPoint, 3> kFallbackRowRevealOrigins{
 };
 constexpr std::uint64_t kLoadingSplashDurationMs = 850;
 constexpr std::uint64_t kStartupSplashDurationMs = 1'850;
+// The port paces its staged startup asset loads to match the original's
+// frame-yield cadence (NovaMainLoop_PumpAndYieldFrames(10)) so the bar fills
+// visibly instead of jumping to full.
+constexpr std::uint64_t kStartupLoadStepDwellMs = 160;
+// Time for the smoothed display value to sweep the full bar; the original's
+// per-ship increments make it fill over the whole visual load.
+constexpr std::uint64_t kStartupProgressFillMs = 1'200;
 // These are authored animation timers, not render-loop delays. The original
 // title fire changes visibly slower than the 60 Hz frame cadence; tying it to
 // every host frame made the flame flicker far too quickly in SDL.
 constexpr std::uint64_t kMenuTitleFrameDurationMs = 40;
 constexpr std::uint64_t kMenuRevealFrameDurationMs = 16;
+// Startup loading progress bar (Ghidra 0x004ab1b0/0x004ab3b0/0x004ab3d0). The
+// bar outline comes from c\x9alr in 1024x768 reference coordinates relative to
+// the window center; DAT_00575a58 = 198.0 is the fill span in those pixels.
+constexpr int kProgressBarCenterX = 1024 / 2;
+constexpr int kProgressBarCenterY = 768 / 2;
+constexpr double kProgressBarFillSpan = 198.0;
+// Number of staged startup asset loads that drive the bar. The original's
+// denominator is the 'ship' resource count (NovaData_LoadAllShipClass
+// VisualAndLaunchData 0x004aeda0); the port's startup loads a different set, so
+// the total here counts the steps below (see NovaGameSession_Run).
+constexpr std::uint8_t kStartupLoadStepCount = 6;
 
 // The original draws menu text with g_main_menu_font_id 3 (Geneva) size 9 in
 // the 1024x768 backdrop space (Ghidra 0x004b32aa NovaData_LoadScenarioResource
@@ -402,6 +421,206 @@ void PresentSplashTexture(SDL_Renderer *renderer, SDL_Texture *texture) {
                               width * scale,
                               height * scale};
   SDL_RenderTexture(renderer, texture, nullptr, &destination);
+}
+
+// Reference-space (1024x768) progress-bar rectangle in native QuickDraw field
+// order. Ghidra copies c\x9alr +0x5e..+0x64 straight into DAT_0085d099 and
+// centers it on the render owner (NovaUi_RunProgressBarReveal 0x004ab1b0).
+struct ProgressBarReferenceRect {
+  int top = 0;
+  int left = 0;
+  int bottom = 0;
+  int right = 0;
+
+  void inscribe(int dh, int dv) {
+    top += dv;
+    left += dh;
+    bottom -= dv;
+    right -= dh;
+  }
+};
+
+[[nodiscard]] ProgressBarReferenceRect
+ProgressBarOutline(const NovaRuntime &runtime) {
+  // Shipped c\x9alr (Nova Graphics 3, Colors record) fallback: a 200x10 bar.
+  std::int16_t top = 280;
+  std::int16_t left = -100;
+  std::int16_t bottom = 290;
+  std::int16_t right = 100;
+  if (runtime.main_menu_style) {
+    top = runtime.main_menu_style->progress_bar_top;
+    left = runtime.main_menu_style->progress_bar_left;
+    bottom = runtime.main_menu_style->progress_bar_bottom;
+    right = runtime.main_menu_style->progress_bar_right;
+  }
+  return ProgressBarReferenceRect{kProgressBarCenterY + top,
+                                  kProgressBarCenterX + left,
+                                  kProgressBarCenterY + bottom,
+                                  kProgressBarCenterX + right};
+}
+
+struct ProgressBarPalette {
+  SDL_Color fill;
+  SDL_Color inner;
+  SDL_Color outer;
+};
+
+[[nodiscard]] SDL_Color ToSdlColor(const NovaRgbColor &color) {
+  return SDL_Color{color.red, color.green, color.blue, SDL_ALPHA_OPAQUE};
+}
+
+[[nodiscard]] ProgressBarPalette ProgressBarColors(const NovaRuntime &runtime) {
+  if (runtime.main_menu_style) {
+    return ProgressBarPalette{
+        ToSdlColor(runtime.main_menu_style->progress_fill),
+        ToSdlColor(runtime.main_menu_style->progress_inner),
+        ToSdlColor(runtime.main_menu_style->progress_outer)};
+  }
+  return ProgressBarPalette{SDL_Color{255, 0, 0, SDL_ALPHA_OPAQUE},
+                            SDL_Color{128, 0, 0, SDL_ALPHA_OPAQUE},
+                            SDL_Color{64, 64, 64, SDL_ALPHA_OPAQUE}};
+}
+
+[[nodiscard]] SDL_FRect
+ProgressBarLogicalRect(const ProgressBarReferenceRect &rect) {
+  return SDL_FRect{
+      static_cast<float>(rect.left) * kMenuCoordinateScale,
+      static_cast<float>(rect.top) * kMenuCoordinateScale,
+      static_cast<float>(rect.right - rect.left) * kMenuCoordinateScale,
+      static_cast<float>(rect.bottom - rect.top) * kMenuCoordinateScale};
+}
+
+// Staged startup asset loads executed while the progress bar is visible.
+// Order follows NovaGameSession_Run (Ghidra 0x00416100).
+enum class StartupLoadStep : std::uint8_t {
+  menu_sprites,
+  backdrop,
+  logo,
+  center_preview,
+  row_reveals,
+  menu_sounds,
+  count,
+};
+
+[[nodiscard]] std::optional<NovaSoundData>
+LoadMenuSound(std::uint16_t sound_id) {
+  if (const auto resource = NovaResource_LoadSndData(sound_id)) {
+    if (auto decoded = NovaSound_Decode(*resource)) {
+      return decoded;
+    }
+    NovaLog::Todo("menu snd \x20resource {} could not be decoded", sound_id);
+  } else {
+    NovaLog::Todo("menu snd \x20resource {} could not be located", sound_id);
+  }
+  return std::optional<NovaSoundData>{};
+}
+
+// One unit of deferred startup asset loading, run from the main loop while the
+// progress bar is visible. The original performs the equivalent work in
+// NovaGameSession_Run (Ghidra 0x00416100): FUN_004ad960 loads the menu sprites,
+// then the backdrop/rollover art. The clean-room port counts each step as one
+// progress unit instead of one 'ship' resource.
+void RunStartupLoadStep(NovaRuntime &runtime, std::uint8_t step) {
+  switch (static_cast<StartupLoadStep>(step)) {
+  case StartupLoadStep::menu_sprites:
+    for (std::size_t index = 0;
+         index < runtime.main_menu_sprite_definitions.size();
+         ++index) {
+      const auto sprite_id = static_cast<std::uint16_t>(600 + index);
+      runtime.main_menu_sprite_definitions[index] =
+          NovaResource_LoadMainMenuSpriteDefinition(sprite_id);
+      if (const auto &definition =
+              runtime.main_menu_sprite_definitions[index]) {
+        NovaLog::Info(
+            "loaded sp\\x95n {}: image resource 0x{:04x}, mask resource "
+            "0x{:04x}, "
+            "{}x{} tiles ({}x{})",
+            sprite_id,
+            definition->sprites_resource_id,
+            definition->mask_resource_id,
+            definition->tile_width,
+            definition->tile_height,
+            definition->tiles_x,
+            definition->tiles_y);
+        runtime.main_menu_sprite_assets[index] =
+            LoadMenuSpriteAsset(runtime.platform.renderer(), *definition);
+        if (!runtime.main_menu_sprite_assets[index]) {
+          NovaLog::Todo("main-menu rl\\x91D resource 0x{:04x} failed to decode",
+                        definition->sprites_resource_id);
+        }
+      } else {
+        NovaLog::Todo("main-menu sp\\x95n {} could not be loaded", sprite_id);
+      }
+    }
+    break;
+  case StartupLoadStep::backdrop:
+    if (const auto backdrop_data = NovaResource_LoadMainMenuBackdropData()) {
+      if (const auto pict = Resource_LoadPictAsImage(*backdrop_data)) {
+        runtime.main_menu_backdrop_texture =
+            SdlTexture::Create(runtime.platform.renderer(),
+                               pict->width,
+                               pict->height,
+                               pict->rgba_pixels);
+        if (!runtime.main_menu_backdrop_texture) {
+          NovaLog::Error("main-menu backdrop PICT 0x1f40 decoded but SDL "
+                         "texture upload failed");
+        }
+        // Kept for the OR-composited rollover preview (see NovaRuntime).
+        runtime.main_menu_backdrop_rgba = pict->rgba_pixels;
+        runtime.main_menu_backdrop_width = pict->width;
+        runtime.main_menu_backdrop_height = pict->height;
+      } else {
+        NovaLog::Todo("main-menu backdrop PICT 0x1f40 failed to decode");
+      }
+    }
+    break;
+  case StartupLoadStep::logo:
+    if (const auto definition =
+            NovaResource_LoadMainMenuSpriteDefinition(606)) {
+      runtime.main_menu_logo_textures =
+          LoadPictSpriteFrames(runtime.platform.renderer(), *definition);
+      if (runtime.main_menu_logo_textures.empty()) {
+        NovaLog::Todo("main-menu top animation sp\\x95n 606 failed to load");
+      }
+    }
+    break;
+  case StartupLoadStep::center_preview:
+    if (const auto definition =
+            NovaResource_LoadMainMenuSpriteDefinition(607)) {
+      runtime.main_menu_center_preview_asset =
+          LoadMenuSpriteAsset(runtime.platform.renderer(), *definition);
+      if (!runtime.main_menu_center_preview_asset) {
+        NovaLog::Todo("main-menu center preview sp\\x95n 607 failed to load");
+      }
+    }
+    break;
+  case StartupLoadStep::row_reveals:
+    for (std::size_t row = 0;
+         row < runtime.main_menu_row_reveal_textures.size();
+         ++row) {
+      const auto sprite_id = static_cast<std::uint16_t>(608 + row);
+      if (const auto definition =
+              NovaResource_LoadMainMenuSpriteDefinition(sprite_id)) {
+        runtime.main_menu_row_reveal_textures[row] =
+            LoadPictSpriteFrames(runtime.platform.renderer(), *definition);
+        if (runtime.main_menu_row_reveal_textures[row].empty()) {
+          NovaLog::Todo("main-menu row reveal sp\\x95n {} failed to load",
+                        sprite_id);
+        }
+      }
+    }
+    break;
+  case StartupLoadStep::menu_sounds:
+    // Ghidra NovaAudio_PreloadTransitionEffects: 600/601 mark focus
+    // entry/exit, 602 starts a row reveal, 603 finishes it.
+    runtime.menu_focus_enter_sound = LoadMenuSound(600);
+    runtime.menu_focus_exit_sound = LoadMenuSound(601);
+    runtime.menu_reveal_start_sound = LoadMenuSound(602);
+    runtime.menu_reveal_finish_sound = LoadMenuSound(603);
+    break;
+  case StartupLoadStep::count:
+    break;
+  }
 }
 
 void InitializeMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
@@ -1001,35 +1220,9 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   // (Ghidra 0x004873b0).
   runtime.startup_phase = StartupPhase::loading_splash;
   runtime.startup_phase_started_ms = runtime.platform.ticks_ms();
-  // Ghidra: FUN_004ad960, which loads sp\x95n 600-605 into DAT_00596cb8.
-  for (std::size_t index = 0;
-       index < runtime.main_menu_sprite_definitions.size();
-       ++index) {
-    const auto sprite_id = static_cast<std::uint16_t>(600 + index);
-    runtime.main_menu_sprite_definitions[index] =
-        NovaResource_LoadMainMenuSpriteDefinition(sprite_id);
-    if (const auto &definition = runtime.main_menu_sprite_definitions[index]) {
-      NovaLog::Info(
-          "loaded sp\\x95n {}: image resource 0x{:04x}, mask resource "
-          "0x{:04x}, "
-          "{}x{} tiles ({}x{})",
-          sprite_id,
-          definition->sprites_resource_id,
-          definition->mask_resource_id,
-          definition->tile_width,
-          definition->tile_height,
-          definition->tiles_x,
-          definition->tiles_y);
-      runtime.main_menu_sprite_assets[index] =
-          LoadMenuSpriteAsset(runtime.platform.renderer(), *definition);
-      if (!runtime.main_menu_sprite_assets[index]) {
-        NovaLog::Todo("main-menu rl\\x91D resource 0x{:04x} failed to decode",
-                      definition->sprites_resource_id);
-      }
-    } else {
-      NovaLog::Todo("main-menu sp\\x95n {} could not be loaded", sprite_id);
-    }
-  }
+  // Ghidra: FUN_004ad960 loads sp\x95n 600-605 into DAT_00596cb8; the port
+  // defers it (and the other menu assets) into the startup_splash phase so
+  // the progress bar reflects real work. See RunStartupLoadStep.
   runtime.main_menu_style = NovaResource_LoadMainMenuStyle();
   if (runtime.main_menu_style) {
     NovaLog::Info(
@@ -1047,8 +1240,9 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
                   "provisional layout");
   }
   // Ghidra: 0x004b9050 Resource_LoadPictAsImage. The loading splash is PICT
-  // 0x1fa4 ("Atmos/ambrosia", portrait); the startup splash is PICT 0x83
-  // (the Ambrosia logo, 832x624). Both are plain 16-bit DirectBitsRect PICTs.
+  // 0x1fa4 (369x558 Ambrosia Software logo card); the startup splash is PICT
+  // 0x83 (832x624 Escape Velocity Nova title art). Both are plain 16-bit
+  // DirectBitsRect PICTs.
   const auto load_splash_texture = [&runtime](std::uint16_t resource_id) {
     if (const auto pict_data = NovaResource_LoadPictData(resource_id)) {
       if (const auto pict = Resource_LoadPictAsImage(*pict_data)) {
@@ -1069,70 +1263,13 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   };
   runtime.loading_splash_texture = load_splash_texture(0x1fa4);
   runtime.startup_splash_texture = load_splash_texture(0x83);
-  if (const auto backdrop_data = NovaResource_LoadMainMenuBackdropData()) {
-    if (const auto pict = Resource_LoadPictAsImage(*backdrop_data)) {
-      runtime.main_menu_backdrop_texture =
-          SdlTexture::Create(runtime.platform.renderer(),
-                             pict->width,
-                             pict->height,
-                             pict->rgba_pixels);
-      if (!runtime.main_menu_backdrop_texture) {
-        NovaLog::Error("main-menu backdrop PICT 0x1f40 decoded but SDL "
-                       "texture upload failed");
-      }
-      // Kept for the OR-composited rollover preview (see NovaRuntime).
-      runtime.main_menu_backdrop_rgba = pict->rgba_pixels;
-      runtime.main_menu_backdrop_width = pict->width;
-      runtime.main_menu_backdrop_height = pict->height;
-    } else {
-      NovaLog::Todo("main-menu backdrop PICT 0x1f40 failed to decode");
-    }
-  }
-  if (const auto definition = NovaResource_LoadMainMenuSpriteDefinition(606)) {
-    runtime.main_menu_logo_textures =
-        LoadPictSpriteFrames(runtime.platform.renderer(), *definition);
-    if (runtime.main_menu_logo_textures.empty()) {
-      NovaLog::Todo("main-menu top animation sp\x95n 606 failed to load");
-    }
-  }
-  if (const auto definition = NovaResource_LoadMainMenuSpriteDefinition(607)) {
-    runtime.main_menu_center_preview_asset =
-        LoadMenuSpriteAsset(runtime.platform.renderer(), *definition);
-    if (!runtime.main_menu_center_preview_asset) {
-      NovaLog::Todo("main-menu center preview sp\x95n 607 failed to load");
-    }
-  }
-  for (std::size_t row = 0; row < runtime.main_menu_row_reveal_textures.size();
-       ++row) {
-    const auto sprite_id = static_cast<std::uint16_t>(608 + row);
-    if (const auto definition =
-            NovaResource_LoadMainMenuSpriteDefinition(sprite_id)) {
-      runtime.main_menu_row_reveal_textures[row] =
-          LoadPictSpriteFrames(runtime.platform.renderer(), *definition);
-      if (runtime.main_menu_row_reveal_textures[row].empty()) {
-        NovaLog::Todo("main-menu row reveal sp\x95n {} failed to load",
-                      sprite_id);
-      }
-    }
-  }
-  // Audio: open the SDL output device and preload the main-menu feedback
-  // effects. 600/601 mark focus entry/exit. Frame_TickTimerDecayAndEffects
-  // queues 602 when each row reveal starts and 603 when it completes.
-  const auto load_menu_sound = [](std::uint16_t sound_id) {
-    if (const auto resource = NovaResource_LoadSndData(sound_id)) {
-      if (auto decoded = NovaSound_Decode(*resource)) {
-        return decoded;
-      }
-      NovaLog::Todo("menu snd \x20resource {} could not be decoded", sound_id);
-    } else {
-      NovaLog::Todo("menu snd \x20resource {} could not be located", sound_id);
-    }
-    return std::optional<NovaSoundData>{};
-  };
-  runtime.menu_focus_enter_sound = load_menu_sound(600);
-  runtime.menu_focus_exit_sound = load_menu_sound(601);
-  runtime.menu_reveal_start_sound = load_menu_sound(602);
-  runtime.menu_reveal_finish_sound = load_menu_sound(603);
+  // The staged assets below are loaded while the startup progress bar is
+  // visible (Ghidra NovaUi_RunProgressBarReveal -> asset loads). Total is the
+  // number of steps; the original's denominator is the 'ship' resource count
+  // (see NovaUi_RunProgressBarReveal).
+  runtime.loading_progress_total = static_cast<double>(kStartupLoadStepCount);
+  runtime.loading_progress_value = 0.0;
+  runtime.startup_load_step = 0;
   if (!runtime.audio.Initialize()) {
     NovaLog::Warn("continuing without audio (menu sounds are silent)");
   } else {
@@ -1194,16 +1331,55 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
       now_ms - runtime.startup_phase_started_ms >= kLoadingSplashDurationMs) {
     runtime.startup_phase = StartupPhase::startup_splash;
     runtime.startup_phase_started_ms = now_ms;
-  } else if (runtime.startup_phase == StartupPhase::startup_splash &&
-             now_ms - runtime.startup_phase_started_ms >=
-                 kStartupSplashDurationMs) {
-    runtime.startup_phase = StartupPhase::main_menu;
-    runtime.startup_phase_started_ms = now_ms;
-    InitializeMenuEntrance(runtime, now_ms);
+  } else if (runtime.startup_phase == StartupPhase::startup_splash) {
+    const auto phase_elapsed_ms = now_ms - runtime.startup_phase_started_ms;
+    // The original shows the startup splash by itself only while it runs the
+    // full-catalog resource checksum pass (FUN_004cd7e0,
+    // ResourceData_VerifyCatalogChecksum, deliberately skipped here), then
+    // reveals the bar over the same splash (NovaUi_RunProgressBarReveal
+    // 0x004ab1b0). With no checksum pass there is nothing to hold for, so the
+    // bar is revealed on the first startup-splash frame.
+    if (!runtime.startup_progress_started) {
+      runtime.startup_progress_started = true;
+      runtime.startup_load_step_started_ms = now_ms;
+      runtime.loading_progress_last_ms = now_ms;
+      NovaUi_RunProgressBarReveal(runtime);
+    }
+    // Advance the expand-in wipe first, then run one deferred asset load per
+    // step. The bar's displayed value chases the real completed work at a
+    // constant rate so it sweeps instead of jumping between the six loads.
+    if (runtime.loading_progress_reveal_inset > 0) {
+      --runtime.loading_progress_reveal_inset;
+    } else if (runtime.startup_load_step < kStartupLoadStepCount &&
+               now_ms - runtime.startup_load_step_started_ms >=
+                   kStartupLoadStepDwellMs) {
+      RunStartupLoadStep(runtime, runtime.startup_load_step);
+      ++runtime.startup_load_step;
+      NovaUi_AddProgressAndRedraw(runtime, 1.0);
+      runtime.startup_load_step_started_ms = now_ms;
+    }
+    const auto display_dt_ms = now_ms - runtime.loading_progress_last_ms;
+    runtime.loading_progress_last_ms = now_ms;
+    const double display_rate = static_cast<double>(kStartupLoadStepCount) /
+                                static_cast<double>(kStartupProgressFillMs);
+    runtime.loading_progress_displayed =
+        std::min(runtime.loading_progress_value,
+                 runtime.loading_progress_displayed +
+                     display_rate * static_cast<double>(display_dt_ms));
+    // Keep the splash (and the completed bar) up until the minimum has
+    // elapsed and the smoothed fill has caught up to the real progress.
+    if (runtime.startup_load_step >= kStartupLoadStepCount &&
+        runtime.loading_progress_displayed >= runtime.loading_progress_value &&
+        phase_elapsed_ms >= kStartupSplashDurationMs) {
+      runtime.startup_phase = StartupPhase::main_menu;
+      runtime.startup_phase_started_ms = now_ms;
+      InitializeMenuEntrance(runtime, now_ms);
+    }
   }
 
-  // The menu bass begins with the second (Ambrosia) splash and is deliberately
-  // not restarted at main-menu entry, so playback carries across the boundary.
+  // The menu bass begins with the second (Nova title) splash and is
+  // deliberately not restarted at main-menu entry, so playback carries across
+  // the boundary.
   if (runtime.startup_phase != StartupPhase::loading_splash &&
       !runtime.menu_music_started) {
     runtime.menu_music_started = true;
@@ -1256,6 +1432,12 @@ void NovaRender_RedrawAndPresentFrame(NovaRuntime &runtime, short mode) {
   }
   if (runtime.startup_phase == StartupPhase::startup_splash) {
     NovaUi_PresentStartupSplashFrame(runtime);
+    // Draw the bar over the splash once the reveal has started; the redraw
+    // itself applies the expand-in wipe inset (NovaUi_RedrawProgressBar
+    // 0x004ab3d0). Before that the splash is shown alone.
+    if (runtime.startup_progress_started) {
+      NovaUi_RedrawProgressBar(runtime);
+    }
     runtime.platform.Present();
     return;
   }
@@ -1486,6 +1668,105 @@ void NovaUi_PresentStartupSplashFrame(NovaRuntime &runtime) {
     return;
   }
   DrawAmbrosiaStartupSplash(runtime.platform.renderer());
+}
+
+// Ghidra: 0x004ab3a0 NovaUi_ProgressCallbackNoOp. The startup path passes this
+// as a progress sink where no redraw is wanted; kept as the faithful no-op.
+void NovaUi_ProgressCallbackNoOp() {}
+
+// Ghidra: 0x004ab1b0 NovaUi_RunProgressBarReveal
+void NovaUi_RunProgressBarReveal(NovaRuntime &runtime) {
+  // The original resets value to 0 and seeds total from the 'ship' resource
+  // count (ResourceData_CountEntries 0x73689570). The port instead sets total
+  // from its staged startup loads in NovaGameSession_Run (documented
+  // divergence: the ship-class visual tables are not preloaded at startup yet).
+  runtime.loading_progress_value = 0.0;
+  runtime.loading_progress_displayed = 0.0;
+  // The original runs the expand-in wipe synchronously with MarkTickAndWait(2),
+  // starting from a rect inset by half its height. The SDL main loop advances
+  // one reference pixel per frame via loading_progress_reveal_inset.
+  const auto outline = ProgressBarOutline(runtime);
+  runtime.loading_progress_reveal_inset =
+      (outline.bottom - outline.top + 1) / 2;
+}
+
+// Ghidra: 0x004ab3b0 NovaUi_AddProgressAndRedraw
+void NovaUi_AddProgressAndRedraw(NovaRuntime &runtime, double delta) {
+  runtime.loading_progress_value += delta;
+  NovaUi_RedrawProgressBar(runtime);
+}
+
+// Ghidra: 0x004ab3d0 NovaUi_RedrawProgressBar
+void NovaUi_RedrawProgressBar(NovaRuntime &runtime) {
+  const ProgressBarPalette colors = ProgressBarColors(runtime);
+  ProgressBarReferenceRect outer = ProgressBarOutline(runtime);
+  outer.top += runtime.loading_progress_reveal_inset;
+  outer.bottom -= runtime.loading_progress_reveal_inset;
+  if (outer.bottom <= outer.top || outer.right <= outer.left) {
+    return;
+  }
+  SDL_Renderer *const renderer = runtime.platform.renderer();
+
+  // Outer 1px outline (Ghidra: FrameRect in the ProgOutline colour).
+  SDL_SetRenderDrawColor(renderer,
+                         colors.outer.r,
+                         colors.outer.g,
+                         colors.outer.b,
+                         SDL_ALPHA_OPAQUE);
+  const SDL_FRect outline_rect = ProgressBarLogicalRect(outer);
+  SDL_RenderRect(renderer, &outline_rect);
+
+  const double ratio = runtime.loading_progress_total > 0.0
+                           ? std::clamp(runtime.loading_progress_displayed /
+                                            runtime.loading_progress_total,
+                                        0.0,
+                                        1.0)
+                           : 0.0;
+
+  ProgressBarReferenceRect inner = outer;
+  inner.inscribe(1, 1);
+  int fill_right = static_cast<int>(std::lround(
+      static_cast<double>(inner.left) + ratio * kProgressBarFillSpan));
+  if (fill_right >= outer.right) {
+    fill_right = outer.right - 1;
+  }
+
+  // ProgBright fill (Ghidra: FillRect after a second 1px inset).
+  ProgressBarReferenceRect fill = outer;
+  fill.inscribe(2, 2);
+  fill.right = fill_right - 1;
+  if (fill.right > fill.left) {
+    SDL_SetRenderDrawColor(renderer,
+                           colors.fill.r,
+                           colors.fill.g,
+                           colors.fill.b,
+                           SDL_ALPHA_OPAQUE);
+    const SDL_FRect fill_rect = ProgressBarLogicalRect(fill);
+    SDL_RenderFillRect(renderer, &fill_rect);
+  }
+
+  // ProgDim outline around the filled extent (Ghidra: FrameRect restored to the
+  // first inset and extended to the fill edge).
+  ProgressBarReferenceRect fill_frame = fill;
+  fill_frame.inscribe(-1, -1);
+  fill_frame.right = fill_right;
+  SDL_SetRenderDrawColor(renderer,
+                         colors.inner.r,
+                         colors.inner.g,
+                         colors.inner.b,
+                         SDL_ALPHA_OPAQUE);
+  const SDL_FRect fill_frame_rect = ProgressBarLogicalRect(fill_frame);
+  SDL_RenderRect(renderer, &fill_frame_rect);
+
+  // Remaining trough (Ghidra: FillRect with PTR_DAT_00575acc).
+  ProgressBarReferenceRect trough = inner;
+  trough.left = fill_right;
+  trough.right = outer.right - 1;
+  if (trough.right > trough.left) {
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    const SDL_FRect trough_rect = ProgressBarLogicalRect(trough);
+    SDL_RenderFillRect(renderer, &trough_rect);
+  }
 }
 
 // Ghidra: 0x00486ed0 NovaGameMode_DispatchAction
