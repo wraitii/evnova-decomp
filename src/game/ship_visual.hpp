@@ -84,20 +84,28 @@ struct ShipVisualDescriptor {
 [[nodiscard]] std::optional<ShipVisualDescriptor>
 DecodeShipVisualDescriptor(std::span<const std::byte> resource_data);
 
-// Ghidra 0x00428340 Ship_UpdateVisualState, destruction slice (NPC hulls).
-// Advances one destroyed ship's death presentation and runs the once-only
-// destruction finale when the timer enters the (0, 2] tick window: blast
-// damage to nearby hulls, the mission DESTRUCTION bookkeeping (quick-fail
-// arm + goal_counter_a++ + target_ship_count--), the personality
-// deactivation, and the hull deactivation. Reseeding when the timer has run
-// out (DeathDelay) matches the original; hulls with DeathDelay 0 destruct
-// immediately in the port (the original would linger forever - the port
-// already spawns finale visuals immediately for those at the hit site).
-// The debris-puff window (timer > 2) and audio are visual-only and owned by
-// the SDL view (divergence logged in collision.cpp at the hit transition).
+// Ghidra 0x00428340 Ship_UpdateVisualState, destruction slice (all hulls,
+// including the player). Advances one destroyed ship's death presentation and
+// runs the once-only destruction finale when the timer enters the (0, 2]
+// tick window: blast damage to nearby hulls, the mission DESTRUCTION
+// bookkeeping (quick-fail arm + goal_counter_a++ + target_ship_count--), the
+// personality deactivation, the Explode2 finale explosion, and the hull
+// deactivation. Reseeding when the timer has run out (DeathDelay) matches the
+// original; the player's seed is tripled by g_player_death_timer_scale
+// (0x00575378). Hulls with DeathDelay 0 destruct immediately in the port (the
+// original would linger forever - the port already spawns finale visuals
+// immediately for those at the hit site).
 void NovaShip_TickDestroyedShipVisualState(GameState &state,
                                            Ship &ship,
                                            float elapsed_ticks);
+
+// Ghidra 0x00428340 Ship_UpdateVisualState, debris-puff window. While the
+// death timer is above the finale threshold (2.0) the original rolls
+// 1-in-1/2/4/8 by the 20/40/60-tick bands and, on a hit, spawns an Explode1
+// area impact at a small random hull offset (randomly silent). This is the
+// repeated-explosion cadence of the death presentation; it runs for both NPCs
+// (via NovaShip_TickDestroyedShipVisualState) and the player.
+void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship);
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, destruction finale arm only.
 // Runs the once-per-wreck bookkeeping and deactivates the hull; exported for

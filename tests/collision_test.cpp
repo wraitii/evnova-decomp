@@ -3,6 +3,9 @@
 
 #include "game/collision.hpp"
 #include "game/game_state.hpp"
+#include "game/ship_ai.hpp"
+#include "game/ship_visual.hpp"
+#include "game/spaceflight.hpp"
 #include "game/weapon.hpp"
 
 namespace game {
@@ -300,6 +303,158 @@ TEST_CASE("blast weapon strips asteroid integrity, splashes owner, and breaks",
     }
   }
   CHECK(children >= 1);
+}
+
+TEST_CASE("NPC destruction seeds the class DeathDelay timer once",
+          "[collision][ship_visual]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.ships[0].death_delay_frames = 10;
+  state.ShipAt(1).armor_points = 1.0F;
+  state.ShipAt(1).shield_points = 0.0F;
+
+  // Shot_ResolveShipHitFromWeapon seeds NPC timers (the x1 case); the player's
+  // timer is seeded by Ship_UpdateVisualState instead.
+  ResolveShipHitFromWeapon(state,
+                           /*target_slot=*/1,
+                           state.ShipAt(1),
+                           state.ShipAt(1).pos_x,
+                           state.ShipAt(1).pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/25,
+                           /*shield_damage=*/0,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/false,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0,
+                           /*check_fire_restriction_transition=*/true);
+  CHECK(NovaAiShip_IsDestroyed(state.ShipAt(1)));
+  CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(10.0F));
+}
+
+TEST_CASE("player destruction seeds a tripled death presentation timer",
+          "[collision][ship_visual]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.ships[0].death_delay_frames = 10;
+  state.player.armor_points = 1.0F;
+  state.player.shield_points = 0.0F;
+
+  ResolveShipHitFromWeapon(state,
+                           /*target_slot=*/0,
+                           state.player,
+                           state.player.pos_x,
+                           state.player.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/25,
+                           /*shield_damage=*/0,
+                           /*attacker_ship_slot=*/1,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/false,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0,
+                           /*check_fire_restriction_transition=*/true);
+  REQUIRE(NovaAiShip_IsDestroyed(state.player));
+  // The collision path leaves the player's presentation timer alone so
+  // Ship_UpdateVisualState (called from Frame_TickSystems scope 10) owns the
+  // 3x scale.
+  CHECK(state.player.death_timer_active <= 0.0F);
+
+  NovaShip_TickDestroyedShipVisualState(
+      state, state.player, /*elapsed_ticks=*/1.0F);
+  // g_player_death_timer_scale (3.0) * DeathDelay (10).
+  CHECK(state.player.death_timer_active == Catch::Approx(30.0F));
+}
+
+TEST_CASE("armor-only destruction starts the player death sequence",
+          "[collision][ship_visual]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.ships[0].death_delay_frames = 8;
+  // Self-destruct (and script kills) drop armor without a weapon hit, so no
+  // collision path seeds the presentation.
+  state.player.armor_points = -1.0F;
+  state.player.vel_x = 10.0F;
+  REQUIRE(state.player.death_timer_active <= 0.0F);
+
+  // The player core consumes the destroyed frame but does not seed the timer.
+  // It does apply the fire-restricted 0.995 per-frame velocity damp.
+  CHECK(NovaPlayer_TickStatusAndOutfitEvents(state,
+                                             /*elapsed_ticks=*/1.0F,
+                                             /*eject_command=*/false));
+  CHECK(state.player.vel_x == Catch::Approx(9.95F));
+  CHECK(state.player.death_timer_active <= 0.0F);
+  // Ship_UpdateVisualState (scope 10, right after the core) seeds it.
+  NovaShip_TickDestroyedShipVisualState(
+      state, state.player, /*elapsed_ticks=*/1.0F);
+  CHECK(state.player.death_timer_active == Catch::Approx(24.0F));
+}
+
+TEST_CASE("player wreck sheds Explode1 puffs then runs the Explode2 finale",
+          "[collision][ship_visual]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.ships[0].death_delay_frames = 30;
+  state.scenario.ships[0].destruction_effect_while_breaking = 1;
+  state.scenario.ships[0].destruction_effect_final = 2;
+  state.player.armor_points = -1.0F;
+
+  const auto active_effects = [](const GameState &s) {
+    std::size_t count = 0;
+    for (const ImpactEffectInstance &effect : s.impact_effect_instances) {
+      if (effect.anim_time >= 0.0F) {
+        ++count;
+      }
+    }
+    return count;
+  };
+
+  // Seed the 3x presentation (90 ticks).
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  REQUIRE(state.player.death_timer_active == Catch::Approx(90.0F));
+
+  // Below 20 the Explode1 roll is 1-in-1, so one puff must spawn.
+  state.player.death_timer_active = 19.0F;
+  const std::size_t puffs_before = active_effects(state);
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  CHECK(active_effects(state) == puffs_before + 1);
+  CHECK(state.player.is_active);
+
+  // Crossing the finale threshold spawns the Explode2 boom and deactivates.
+  state.player.death_timer_active = 1.0F;
+  const std::size_t finale_before = active_effects(state);
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  CHECK(active_effects(state) == finale_before + 1);
+  CHECK(!state.player.is_active);
+}
+
+TEST_CASE("inactive wreck holds the death screen until the -240 timer floor",
+          "[collision][spaceflight]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  // State after the finale deactivated the hull with the presentation timer
+  // still just above zero.
+  state.player.is_active = false;
+  state.player.death_timer_active = 2.0F;
+
+  // The inactive prologue drains one addend per frame (0x0044af14) and keeps
+  // the frame consumed without latching game-over.
+  CHECK(NovaPlayer_TickStatusAndOutfitEvents(state, 1.0F, false));
+  CHECK(state.player.death_timer_active == Catch::Approx(1.0F));
+  CHECK_FALSE(state.game_over_pending);
+
+  state.player.death_timer_active = -239.0F;
+  CHECK(NovaPlayer_TickStatusAndOutfitEvents(state, 1.0F, false));
+  CHECK(state.player.death_timer_active == Catch::Approx(-240.0F));
+  CHECK_FALSE(state.game_over_pending);
+
+  // At the floor the branch falls through to the game-over latch.
+  CHECK(NovaPlayer_TickStatusAndOutfitEvents(state, 1.0F, false));
+  CHECK(state.game_over_pending);
+  CHECK(state.player.death_timer_active == Catch::Approx(-240.0F));
 }
 
 } // namespace game

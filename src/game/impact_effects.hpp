@@ -21,7 +21,9 @@ void NovaEffects_SpawnShipDestructionBurst(GameState &state,
                                            const Ship &ship,
                                            std::int16_t breaking_effect_id);
 
-// Bible Explode2: the terminal fireball, with mass-scaled radius for 1000+.
+// Bible Explode2 terminal fireball helper used by the zero-DeathDelay hit
+// site (the normal wreck path spawns Explode2 with the blast radius from
+// NovaShip_RunShipDestructionFinale). Mass-scaled radius for 1000+.
 void NovaEffects_SpawnShipDestructionFinale(GameState &state,
                                             const Ship &ship,
                                             std::int16_t final_effect_id);
