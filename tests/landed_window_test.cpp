@@ -88,6 +88,27 @@ TEST_CASE("landing description word-wrap produces distinct lines",
   CHECK(long_word[0] == "supercalifragilistic");
 }
 
+// Desc resources separate the "Requires: ..." paragraph with a double Mac
+// return; the original DrawTextW(DT_WORDBREAK) renders that as a blank line and
+// the port must not collapse it. A single return still just ends the line.
+TEST_CASE("description wrap preserves explicit blank lines",
+          "[landed_window]") {
+  using game::WrapDescriptionLines;
+  auto width = [](std::string_view s) { return static_cast<int>(s.size()); };
+
+  const auto lines = WrapDescriptionLines(
+      "The drive hums.\r\rRequires: Heavy Weapons License", 200, width);
+  REQUIRE(lines.size() == 3);
+  CHECK(lines[0] == "The drive hums.");
+  CHECK(lines[1].empty());
+  CHECK(lines[2] == "Requires: Heavy Weapons License");
+
+  const auto single = WrapDescriptionLines("one\rtwo", 200, width);
+  REQUIRE(single.size() == 2);
+  CHECK(single[0] == "one");
+  CHECK(single[1] == "two");
+}
+
 TEST_CASE("normal landing arrival charges once; launch restores the ship",
           "[landed_window]") {
   // SDL-free core of Stellar_TravelToSystem's normal-arrival bookkeeping.

@@ -503,11 +503,16 @@ WrapDescriptionLines(std::string_view text,
   std::size_t i = 0;
   while (i < text.size()) {
     // Skip inter-word whitespace; a newline (desc resources use the Mac '\r')
-    // forces an explicit line break.
+    // forces an explicit line break. Each return terminates the current line,
+    // so a run of two (the "...\r\rRequires: ..." desc form) yields a blank
+    // line -- matching DrawTextW's DT_WORDBREAK behavior. The empty-line push
+    // is skipped for the trailing return.
     while (i < text.size() && (text[i] == ' ' || text[i] == '\n' ||
                                text[i] == '\r' || text[i] == '\t')) {
-      if ((text[i] == '\n' || text[i] == '\r') && !line.empty()) {
-        lines.push_back(line);
+      if (text[i] == '\n' || text[i] == '\r') {
+        if (!lines.empty() || !line.empty()) {
+          lines.push_back(line);
+        }
         line.clear();
       }
       ++i;
