@@ -47,12 +47,18 @@ namespace {
   return static_cast<std::int16_t>(ReadBe16(bytes, offset));
 }
 
+// c\x9alr (and the other color-table resources) store each color as a
+// big-endian 32-bit 0x00RRGGBB long, so the leading byte at `offset` is the
+// unused high byte and the channels are offset+1/+2/+3. Reading
+// offset/offset+1/offset+2 (the raw little-endian byte window) byte-shifts
+// every non-symmetric color; the store grid colors below make that visible
+// (gray/red become olive/green).
 [[nodiscard]] NovaRgbColor ReadRgb(std::span<const std::byte> bytes,
                                    std::size_t offset) {
   return NovaRgbColor{
-      .red = std::to_integer<std::uint8_t>(bytes[offset]),
-      .green = std::to_integer<std::uint8_t>(bytes[offset + 1]),
-      .blue = std::to_integer<std::uint8_t>(bytes[offset + 2]),
+      .red = std::to_integer<std::uint8_t>(bytes[offset + 1]),
+      .green = std::to_integer<std::uint8_t>(bytes[offset + 2]),
+      .blue = std::to_integer<std::uint8_t>(bytes[offset + 3]),
   };
 }
 
@@ -489,6 +495,14 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data) {
   constexpr std::size_t kMenuFontSizeOffset = 0x4c;
   constexpr std::size_t kMenuBrightOffset = 0x4e;
   constexpr std::size_t kMenuDimOffset = 0x52;
+  constexpr std::size_t kGridBrightOffset = 0x56; // selection square
+  constexpr std::size_t kGridDimOffset = 0x5a;    // normal grid frame
+  constexpr std::size_t kFloatingMapOffset = 0x8a;
+  constexpr std::size_t kListTextOffset = 0x8e;
+  constexpr std::size_t kListBackgroundOffset = 0x92;
+  constexpr std::size_t kListHiliteOffset = 0x96;
+  constexpr std::size_t kEscortHiliteOffset = 0x9a;
+  constexpr std::size_t kPaletteEnd = kEscortHiliteOffset + 4;
   constexpr std::size_t kButtonOriginsOffset = 0x72;
   constexpr std::size_t kButtonOriginSize = 4;
   constexpr std::size_t kRequiredSize =
@@ -500,6 +514,8 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data) {
   NovaMainMenuStyle style{
       .menu_bright = ReadRgb(resource_data, kMenuBrightOffset),
       .menu_dim = ReadRgb(resource_data, kMenuDimOffset),
+      .grid_bright = ReadRgb(resource_data, kGridBrightOffset),
+      .grid_dim = ReadRgb(resource_data, kGridDimOffset),
       .menu_font_size = ReadBe16(resource_data, kMenuFontSizeOffset),
   };
   for (std::size_t index = 0; index < style.button_origins.size(); ++index) {
@@ -532,6 +548,14 @@ NovaMainMenuStyle_Parse(std::span<const std::byte> resource_data) {
           .y = ReadBeI16(resource_data, offset + 2),
       };
     }
+  }
+  // List/map palette (guarded: a truncated c\x9alr keeps the black defaults).
+  if (resource_data.size() >= kPaletteEnd) {
+    style.floating_map = ReadRgb(resource_data, kFloatingMapOffset);
+    style.list_text = ReadRgb(resource_data, kListTextOffset);
+    style.list_background = ReadRgb(resource_data, kListBackgroundOffset);
+    style.list_hilite = ReadRgb(resource_data, kListHiliteOffset);
+    style.escort_hilite = ReadRgb(resource_data, kEscortHiliteOffset);
   }
   return style;
 }
