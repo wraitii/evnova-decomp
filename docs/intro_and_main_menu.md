@@ -43,7 +43,7 @@ WinMain (0x00871450)
                     - action 3  Ship_RunSpaceflightMode        (enter spaceflight)
                        -> IntroCinematic_Run        // play INTRO CINEMATIC (new pilot only)
                     - action 4  Menu_RunSettingsDialog        (preferences)
-                    - action 5/6 Menu_OpenGalaxyMapDialog     (About Nova; misnomer, d£sc 0x7fff)
+                    - action 5/6 Menu_RunAboutNovaDialog     (About Nova, d£sc 0x7fff)
         -> QuickTime_Terminate
 ```
 
@@ -105,7 +105,7 @@ depending on the game-active flag:
 | `q`   | 2      | Quit (sets `DAT_00596d39`) |
 | `e`   | 3      | Enter Spaceflight (`Ship_RunSpaceflightMode`) |
 | `p`   | 4      | Preferences (`Menu_RunSettingsDialog`, dialog `0xfa3`) |
-| `a`   | 5/6    | About Nova (`Menu_OpenGalaxyMapDialog` 0x00486120 — misnomer; loads dësc 0x7fff "About text" into the selection dialog, DLOG `0xbbb`; the spœn 605 button is labelled ABOUT NOVA) |
+| `a`   | 5/6    | About Nova (`Menu_RunAboutNovaDialog` 0x00486120; loads dësc 0x7fff "About text" into the selection dialog, DLOG `0xbbb`; the spœn 605 button is labelled ABOUT NOVA) |
 | `x`   | —      | Immediate travel-selection dialog |
 
 - `Menu_OpenPilotFileDialog` (0x004c9e90, formerly `FUN_004c9e90`) — GetOpenFileNameA pilot selector; on selection
@@ -115,7 +115,7 @@ depending on the game-active flag:
   renders.
 - `Menu_RunPilotSelectionDialog` (0x0048a7e0) — pilot choose/name dialog (variant 0xc1d/0xc1e).
 - `Menu_RunSettingsDialog` (0x00488650) — preferences dialog (0xfa3).
-- `Menu_OpenGalaxyMapDialog` (0x00486120) — travel-selection/galaxy dialog.
+- `Menu_RunAboutNovaDialog` (0x00486120) — About Nova dialog.
 
 ## Intro cinematic — NOT the splash, plays only on new-game flight entry
 

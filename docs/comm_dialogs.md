@@ -12,17 +12,14 @@ have to re-derive them from the decompiler.
 - Ship window: `src/game/ship_comm_dialog.cpp` / `NovaShipComm_RunShipDialog`
   (runner `0x0047e470` NovaUi_RunTargetShipCommWindow).
 
-## The ship-comm draw function was misnamed in Ghidra
+## The ship-comm draw function
 
 `NovaUi_DrawTargetShipCommWindow` (**0x0047fb70**) draws the ship-comm
 window, not the DLOG 0x3f0 payment window. It is the shared **ship-comm
 window renderer** (backdrop PICT 0x213f, context buttons, ship portrait,
 info block, prompt panel), called from
 `NovaUi_RunTargetShipCommWindow 0x0047e470` on every poll tick and re-invoked
-after each comm state change. It was long mislabelled
-"NovaUi_DrawTravelDestinationBribeWindow" -- a historical decompiler artefact
-corrected by a 2024 rename (plate comment records the old name). The actual
-payment modal draw is `NovaUi_DrawTravelDestinationPaymentWindow`
+after each comm state change. The actual payment modal draw is `NovaUi_DrawTravelDestinationPaymentWindow`
 (0x004826a0). Keep citations pointing at 0x0047fb70 for the ship-comm draw.
 
 ## DITL entry <-> item mapping (UiPanel_GetEntryInfo)

@@ -8,10 +8,9 @@ namespace game {
 
 class NovaFontCache;
 
-// Runs the main-menu ABOUT NOVA modal (Ghidra 0x00486120, named
-// Menu_OpenGalaxyMapDialog there; the sp\n95n 605 button is labelled ABOUT
-// NOVA and the dialog loads d\x91sc 0x7fff "About text", so the Galaxy/Starmap
-// role in the Ghidra plate is a misnomer). The original builds it on
+// Runs the main-menu ABOUT NOVA modal (Ghidra 0x00486120
+// Menu_RunAboutNovaDialog; the sp\n95n 605 button is labelled ABOUT NOVA and
+// the dialog loads d\x91sc 0x7fff "About text"). The original builds it on
 // Ui_LoadSelectionDialogResource + Ui_RunTravelSelectionDialog over DLOG
 // 0xbbb; this port keeps the DLOG geometry (window 441x313, text area, OK
 // button, scroll arrows) but draws the scrolling text region itself.
