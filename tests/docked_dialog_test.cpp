@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -177,6 +178,80 @@ TEST_CASE("news window DLOG exists while its DITL is a placeholder",
           "[docked][news]") {
   REQUIRE(NovaResource_LoadDialogDefinition(0x3f6).has_value());
   CHECK_FALSE(NovaResource_LoadDialogItems(0x3f6).has_value());
+}
+
+// The Holovid background is the landed stellar's government NewsPic, else the
+// generic PICT 9000 (NovaUi_RunTravelNewsWindow 0x0047d180). Stellar government
+// ids are zero-based, so the lookup must not re-subtract 0x80: Federation
+// planets were showing the generic ICN art (9000) instead of PICT 9001.
+TEST_CASE("news window background resolves the stellar government NewsPic",
+          "[docked][news]") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  CHECK(NovaBar_NewsPictId(state, 0x80) == 9001); // Earth -> Federation
+  CHECK(NovaBar_NewsPictId(state, 0x81) == 9000); // Reflex-ion -> ungoverned
+
+  // Guard the exact regression: the 0x80-based resource-id lookup misses a
+  // zero-based stellar government (returns null) and so fell back to 9000.
+  const Stellar *earth = state.scenario.Stellar(0x80);
+  REQUIRE(earth != nullptr);
+  CHECK(state.scenario.Government(earth->government_id) == nullptr);
+  CHECK(state.scenario.Government(earth->government_id + 0x80) != nullptr);
+}
+
+// The crön-news arm (NovaUi_ComposeTravelNewsTexts 0x0047d600) picks the
+// news STR# for an active, past-holdoff event: an allied NewsGovt/GovtNewsStr
+// pair's string when one matches, else IndNewsStr, with local news winning.
+// The per-slot string is the LAST allied pair (the original overwrites it in
+// place), and an allied pair with a non-positive string id suppresses the
+// independent fallback (slot_str < -1 is required to arm it).
+TEST_CASE("cron news selection obeys local/independent precedence",
+          "[docked][news][cron]") {
+  GameState state;
+  state.scenario.governments.assign(2, {});
+  state.scenario.governments[0].present = true;
+  state.scenario.governments[1].present = true;
+  state.scenario.stellars.assign(1, {});
+  state.scenario.stellars[0].government_id = 0; // landed stellar's govt
+  state.scenario.cron_events.assign(1, {});
+  CronEventDef &cron = state.scenario.cron_events[0];
+  cron.present = true;
+  cron.news_govts = {0, -1, -1, -1};
+  cron.govt_news_strs = {15000, -1, -1, -1};
+  cron.independent_news_str = 15007;
+  GameState::CronEventState &runtime = state.cron_event_states[0];
+  runtime.is_active = true;
+  runtime.holdoff_counter = 0;
+
+  // Allied local news beats the independent pool.
+  CHECK(Bar_SelectCronNewsStr(state, 0x80) == 15000);
+
+  // Pre-holdoff (and inactive / absent) events do not contribute.
+  runtime.holdoff_counter = 2;
+  CHECK_FALSE(Bar_SelectCronNewsStr(state, 0x80).has_value());
+  runtime.holdoff_counter = 0;
+  runtime.is_active = false;
+  CHECK_FALSE(Bar_SelectCronNewsStr(state, 0x80).has_value());
+  runtime.is_active = true;
+  cron.present = false;
+  CHECK_FALSE(Bar_SelectCronNewsStr(state, 0x80).has_value());
+  cron.present = true;
+
+  // An allied pair whose GovtNewsStr is unset does NOT arm the independent
+  // fallback: the original arms it only while no pair matched at all.
+  cron.govt_news_strs = {-1, -1, -1, -1};
+  CHECK_FALSE(Bar_SelectCronNewsStr(state, 0x80).has_value());
+
+  // With no allied government, IndNewsStr supplies the news.
+  cron.news_govts = {1, -1, -1, -1};
+  cron.govt_news_strs = {15000, -1, -1, -1};
+  CHECK(Bar_SelectCronNewsStr(state, 0x80) == 15007);
+
+  // The last allied pair wins when several match.
+  cron.news_govts = {0, 0, -1, -1};
+  cron.govt_news_strs = {15000, 15001, -1, -1};
+  CHECK(Bar_SelectCronNewsStr(state, 0x80) == 15001);
 }
 
 // The Holovid text panels are window-relative (NovaUi_DrawTravelNewsWindow

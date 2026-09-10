@@ -685,12 +685,13 @@ int NovaAi_GetShipJammingScore(const GameState &state,
   int score = 0;
   // Base: the ship class's inherent-attributes government InhJam value.
   const ShipClass *cls = ShipClassFor(state, ship);
+  // InherentGovt is normalized to a zero-based def index at load.
   const std::int16_t inherent_govt =
       cls != nullptr ? cls->inherent_attributes_govt : -1;
-  if (inherent_govt < 0 || inherent_govt > 0xff) {
+  if (inherent_govt < 0) {
     score = 0;
   } else if (const Government *govt =
-                 state.scenario.Government(inherent_govt + 0x80);
+                 state.scenario.GovernmentByIndex(inherent_govt);
              govt != nullptr) {
     score = govt->inherent_jam[static_cast<std::size_t>(seek_channel)];
   }
@@ -1022,13 +1023,11 @@ std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
     if (st->pos_x >= 1000 || st->pos_y >= 1000) {
       continue;
     }
-    // Hostile neighbouring government is skipped. Stellar government_id is a
-    // resource id (>= 0x80); the relation helper wants zero-based ids.
-    if (ship.faction_or_government_id >= 0 && st->government_id >= 0x80 &&
+    // Hostile neighbouring government is skipped. Both ids are zero-based
+    // faction indexes (Stellar::government_id is rebased by the loader).
+    if (ship.faction_or_government_id >= 0 && st->government_id >= 0 &&
         NovaGovernment_AreGovtsHostileOrXenophobic(
-            state.scenario,
-            ship.faction_or_government_id,
-            static_cast<std::int16_t>(st->government_id - 0x80))) {
+            state.scenario, ship.faction_or_government_id, st->government_id)) {
       continue;
     }
     candidates.push_back(nav);

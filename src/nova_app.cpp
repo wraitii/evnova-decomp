@@ -553,7 +553,8 @@ MenuSystemLegalStatusText(const game::GameState &state,
 
   int tolerance = 0;
   if (system->government_id >= 0) {
-    if (const auto *gov = state.scenario.Government(system->government_id)) {
+    if (const auto *gov =
+            state.scenario.GovernmentByIndex(system->government_id)) {
       tolerance = gov->flee_shield_threshold;
     }
   }
@@ -631,7 +632,8 @@ MenuSystemLegalStatusText(const game::GameState &state,
     status = normal_destinations < 1 ? 17 : 16;
   }
   if (system->government_id >= 0) {
-    if (const auto *gov = state.scenario.Government(system->government_id);
+    if (const auto *gov =
+            state.scenario.GovernmentByIndex(system->government_id);
         gov != nullptr && (gov->flags_primary & 1) != 0) {
       status = 0;
     }
