@@ -1034,6 +1034,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                 "per-tick sprite display state still not reconstructed");
   const bool ship_ready = view.EnsureShipSprite(platform, state);
   (void)ship_ready;
+  // Publish the live viewport half-size before any asteroid spawn (the
+  // original's g_viewport_center_x/y are set by the interface layout pass).
+  view.SyncGameplayViewport(platform, state);
   // Restore the current system's asteroid / drift-debris population on entry
   // (Asteroid_InitSystem 0x004216B0): spawns the asteroid record quota and
   // pre-warms all 16 asteroid-pool slots with wander targets around the
@@ -1097,6 +1100,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Port stand-in for NovaTime_GetTickCount60Hz's g_frame_tick_count_60hz
     // (see GameState::tick_60hz): re-derived from the wall clock each frame.
     state.tick_60hz = static_cast<std::uint32_t>(now_ms * 60ULL / 1000ULL);
+    // Keep the gameplay viewport half-size current (g_viewport_center_x/y);
+    // asteroid spawn scatters over it.
+    view.SyncGameplayViewport(platform, state);
     // Arrival command grace (Ghidra latches g_license_check_frame_counter to
     // -15 in the Stellar_ProcessTravelAndLanding rebuild epilogue, 0x004586a6):
     // counts down each frame; the gated interaction command blocks skip while

@@ -200,6 +200,13 @@ void FireJump(GameState &state) {
   TravelState &t = state.travel;
   PlayerShip &player = state.player;
 
+  // Departure raises the no-asteroids latch (Ghidra DAT_00596d2c = 1 in the
+  // jump/landing transitions), so the departing system's drift records are
+  // hidden and cleared while the hyperspace tunnel plays. The arrival path
+  // calls NovaAsteroid_InitSystem, which clears the latch and rebuilds the
+  // new system's field.
+  state.no_asteroids_latch = true;
+
   // Full-screen white flash (the original's centered effect 0x32, the 'boom'
   // white frame) and the 'Warp out' sound (snd 130), latched for the
   // spaceflight loop (which owns SdlAudio) -- the flash and the boom land on

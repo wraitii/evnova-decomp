@@ -1319,8 +1319,8 @@ struct DudeDef {
 //   +0x08 field(+0x0c), +0x0a RGB bytes (565 -> 15-bit), +0x0e..+0x12 the
 //   3-element direction sub-array, +0x14 field(+0x10), +0x16 lifetime.
 struct AsteroidDef {
-  // Lowest row field; stored into a spawned AsteroidState's
-  // wander_table_value (+0x1c), which doubles as the asteroid's INTEGRITY
+  // Lowest row field; seeds a spawned AsteroidState's integrity (+0x1c),
+  // which doubles as the asteroid's INTEGRITY
   // COUNTER: NovaUi_ResolveWeaponSplashImpact (0x00436ff0) decrements it by
   // the hitting weapon's shield damage (x10 for flags_secondary 0x8000) and
   // runs the destruction package below zero. Ghidra DAT_005912dc[mode]

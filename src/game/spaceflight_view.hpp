@@ -52,6 +52,13 @@ public:
   // ship) into the current renderer.
   void Draw(SdlPlatform &platform, const GameState &state);
 
+  // Keeps GameState.viewport_center_x/y in sync with the live play area (the
+  // original's g_viewport_center_x/y globals, set at interface setup by
+  // Ship_InitializeMainInterface 0x004ac380). Asteroid_Spawn scatters new
+  // records over this half-size, so it must be current before any spawn on
+  // entry, arrival or launch.
+  void SyncGameplayViewport(SdlPlatform &platform, GameState &state);
+
   // Draws one full in-game frame: the extending world via Draw, then the HUD
   // (cockpit PICT, bars, readouts, overlay message) over it, then the
   // hyperspace fire flash. The body of spaceflight.cpp's former
@@ -182,6 +189,15 @@ private:
                                GameState &state,
                                float frame_time_ms);
 
+  // Ghidra 0x00436910 Asteroid_UpdateSprites: draws the 16-slot asteroid /
+  // drift-debris pool. Each active record's wander_type selects spin resource
+  // id 800+type (the Metal/Ice/Silicates/Metal-rich x size-tier asteroid sets,
+  // all 50x50 36-frame tumble sheets); the displayed frame is the record's
+  // wander accumulator rounded into the set's frame count. Sits above the
+  // freeflight objects and below the reticles/beams, per the original scope-8
+  // order (Frame_UpdateViewportWrapBackgroundSprites -> ... -> asteroids).
+  void DrawAsteroids(SdlPlatform &platform, const GameState &state);
+
   // One ambient background star particle (Ghidra AmbientStarParticle pool at
   // g_ambient_star_particles, stride 0x14 = 20 bytes; offsets match the way we
   // index the original fields).
@@ -306,6 +322,14 @@ private:
   // Draws the current system's stellar bodies (planets/stations) at their
   // world positions relative to the player camera.
   void DrawStellarBodies(SdlPlatform &platform, const GameState &state);
+
+  // Ghidra 0x00436910 Asteroid_UpdateSprites (viewport-wrap half): repositions
+  // an active asteroid that has drifted past the viewport edge back to the
+  // opposite side. The original checks the placed sprite's frame edge against
+  // the viewport +32px; the span is the largest loaded asteroid frame (all
+  // shipped types are 50x50) because this port does not keep per-record Sprite
+  // handles. Called from AdvanceAnimations after the pure drift tick.
+  void WrapAsteroids(SdlPlatform &platform, GameState &state);
 
   // Draws the player's in-flight active shots (GameState.active_shots) at
   // their world positions relative to the ship, using the same camera

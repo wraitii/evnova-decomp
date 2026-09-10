@@ -922,14 +922,14 @@ void ResolveAsteroidSplashImpact(GameState &state,
 
   // Integrity counter: flags_secondary 0x8000 weapons strip 10x.
   if ((weapon->flags_secondary & 0x8000U) == 0U) {
-    asteroid.wander_table_value = static_cast<std::int16_t>(
-        asteroid.wander_table_value - weapon->energy_damage);
+    asteroid.integrity =
+        static_cast<std::int16_t>(asteroid.integrity - weapon->energy_damage);
   } else {
-    asteroid.wander_table_value = static_cast<std::int16_t>(
-        asteroid.wander_table_value + weapon->energy_damage * -10);
+    asteroid.integrity = static_cast<std::int16_t>(asteroid.integrity +
+                                                   weapon->energy_damage * -10);
   }
 
-  if (asteroid.wander_table_value < 0) {
+  if (asteroid.integrity < 0) {
     ResolveAsteroidDestructionPackage(state, asteroid);
   } else if (weapon->impact_impulse != 0) {
     // Surviving asteroids are nudged along the impact direction. The original
