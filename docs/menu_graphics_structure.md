@@ -129,6 +129,10 @@ both menu and in-game HUD. Menu path:
 | `0x0048c3c0` `NovaHud_RenderOverlays` | HUD overlay compositor |
 | `0x004aaf60` `NovaUi_PresentStartupSplashFrame` | startup splash (PICT 0x83) |
 | `0x004ab070` `NovaUi_PresentLoadingSplashFrame` | loading splash (PICT 0x1fa4) |
+| `0x004ab1b0` `NovaUi_RunProgressBarReveal` | seed + expand-in reveal of the startup loading bar |
+| `0x004ab3a0` `NovaUi_ProgressCallbackNoOp` | no-op progress sink |
+| `0x004ab3b0` `NovaUi_AddProgressAndRedraw` | add to the progress scalar and redraw |
+| `0x004ab3d0` `NovaUi_RedrawProgressBar` | draw the c\xf6lr-styled bar onto the shared surface |
 | `0x0048adc0` `IntroCinematic_Run` | new-game intro cinematic player via `DAT_00597950` |
 | `0x004ac950` / `0x0046f740` | offscreen surface (`DAT_00597950`) allocation |
 | `0x004ad960` | sprite table loader (menu focus 600–605, weapon 3000+, ship 400+) |

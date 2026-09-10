@@ -222,6 +222,21 @@ TEST_CASE("trade center row palette is the scenario list colors",
   CHECK(style->list_text.red == 0xff);
   CHECK(style->list_text.green == 0xff);
   CHECK(style->list_text.blue == 0xff);
+  // Shipped startup loading-bar geometry and ProgBright/Dim/Outline colors
+  // (c\xf6lr +0x5e..+0x64 and +0x66/+0x6a/+0x6e).
+  CHECK(style->progress_bar_top == 280);
+  CHECK(style->progress_bar_left == -100);
+  CHECK(style->progress_bar_bottom == 290);
+  CHECK(style->progress_bar_right == 100);
+  CHECK(style->progress_fill.red == 0xff);
+  CHECK(style->progress_fill.green == 0x00);
+  CHECK(style->progress_fill.blue == 0x00);
+  CHECK(style->progress_inner.red == 0x80);
+  CHECK(style->progress_inner.green == 0x00);
+  CHECK(style->progress_inner.blue == 0x00);
+  CHECK(style->progress_outer.red == 0x40);
+  CHECK(style->progress_outer.green == 0x40);
+  CHECK(style->progress_outer.blue == 0x40);
 }
 
 // The Outfitter/Shipyard buttons now resolve their captions from the shared

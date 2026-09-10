@@ -30,6 +30,7 @@ WinMain (0x00871450)
            -> NovaUi_PresentLoadingSplashFrame     // loading splash (PICT 0x1fa4)
            -> ... subsystem + data-table init ...
            -> NovaUi_PresentStartupSplashFrame     // startup splash (PICT 0x83)
+           -> ResourceData_VerifyCatalogChecksum   // full-catalog checksum (skipped in port)
            -> NovaUi_RunProgressBarReveal          // startup progress bar
            -> NovaMainLoop_Run                     // persistent main loop (menu → game)
               -> NovaMainLoop_UpdateFrame
@@ -66,6 +67,32 @@ All splash/intro/panel compositing shares one offscreen surface:
   follows the data-table loads).
 - Loads PICT resource `0x83`, centers/blits to the shared surface, then blits the surface to the
   render-owner rect and commits the frame.
+
+### Startup progress bar
+
+Immediately after the startup splash, `NovaGameSession_Run` runs the loading progress bar over
+that same splash while `NovaData_LoadAllShipClassVisualAndLaunchData` preloads the per-class ship
+visuals. (In the original the startup splash is first shown alone while `ResourceData_VerifyCatalogChecksum`
+0x004cd7e0 walks every resource type; the port skips that check and reveals the bar at once.)
+
+| addr | function | role |
+|------|----------|------|
+| `0x004ab1b0` | `NovaUi_RunProgressBarReveal` | Seeds total = `ResourceData_CountEntries(0x73689570)` ('ship'), resets value, then expands the bar outline in from a flat line (`MarkTickAndWait(2)` per step) and calls the redraw. |
+| `0x004ab3a0` | `NovaUi_ProgressCallbackNoOp` | No-op progress sink. |
+| `0x004ab3b0` | `NovaUi_AddProgressAndRedraw` | Adds to `g_loading_progress_value` (0x0085d140) and redraws. |
+| `0x004ab3d0` | `NovaUi_RedrawProgressBar` | Draws the bar onto `DAT_00597950` and blits to the owner. |
+
+Data source (Bible `cölr`, loaded at `0x004c69ab`):
+
+- Bar outline `+0x5e..+0x64`, native QuickDraw order (top,left,bottom,right), relative to the
+  window center. Shipped Colors record: top `280`, left `-100`, bottom `290`, right `100`
+  (a 200x10 reference bar near the bottom of a 1024x768 window).
+- `ProgBright` `+0x66` = bright fill, `ProgDim` `+0x6a` = fill outline, `ProgOutline` `+0x6e` =
+  bar outline (shipped: red 255/128 and gray 64).
+- Fill span `DAT_00575a58 = 198.0` reference px.
+
+The only progress producer is `NovaData_LoadAllShipClassVisualAndLaunchData` (0x004aeda0), which
+calls `NovaUi_AddProgressAndRedraw(1.0)` once per successfully loaded ship class.
 
 ## Main menu renderer
 

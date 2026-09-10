@@ -881,10 +881,10 @@ address	name	impl_file	reimpl_pct	comment
 0x004AAF60	NovaUi_PresentStartupSplashFrame	src/nova_app.cpp	100%	NovaUi_PresentStartupSplashFrame
 0x004AB070	NovaUi_PresentLoadingSplashFrame	src/nova_app.cpp	100%	NovaUi_PresentLoadingSplashFrame
 0x004AB180	NovaUi_ClearMainWindowAndHoldFrame		0%	
-0x004AB1B0	NovaUi_RunProgressBarReveal		0%	
-0x004AB3A0	NovaUi_ProgressCallbackNoOp		0%	
-0x004AB3B0	NovaUi_AddProgressAndRedraw		0%	
-0x004AB3D0	NovaUi_RedrawProgressBar		0%	
+0x004AB1B0	NovaUi_RunProgressBarReveal	src/nova_app.cpp	80%	Resets g_loading_progress_value and starts the expand-in wipe: reveal_inset = half the c\x9alr outline height, advanced one reference pixel per main-loop frame (original runs it synchronously with MarkTickAndWait(2), drawing the growing outline + black fill). Total is seeded from the port's staged startup load count instead of ResourceData_CountEntries('ship'), because NovaData_LoadAllShipClassVisualAndLaunchData is not preloaded at startup yet; recorded as a divergence.
+0x004AB3A0	NovaUi_ProgressCallbackNoOp	src/nova_app.cpp	100%	Faithful no-op progress sink.
+0x004AB3B0	NovaUi_AddProgressAndRedraw	src/nova_app.cpp	100%	Adds delta to loading_progress_value then calls NovaUi_RedrawProgressBar.
+0x004AB3D0	NovaUi_RedrawProgressBar	src/nova_app.cpp	85%	Draws the c\x9alr bar over the startup-splash surface: ProgOutline 1px frame, bright fill from value/total over DAT_00575a58=198 reference px, ProgDim fill outline, black trough. Geometry/colors parsed from c\x9alr (NovaMainMenuStyle progress_*). Divergence: SDL 8-bit primitives on the 640x480 logical playfield instead of 16-bit DrawContext on the shared offscreen surface; the 1px reference insets are scaled by 0.625.
 0x004AB5D0	FUN_004ab5d0		0%	
 0x004AB820	FUN_004ab820		0%	
 0x004AB8D0	NovaPlatform_PumpWindowEventsThrottled		0%	
@@ -1058,7 +1058,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004CD350	PilotData_ResolveStartType	src/game/new_pilot_flow.cpp	70%	ResolveStartTypeFromTemplate: ch r block+4 minus 0x80 with <0x80 -> 0 fallback; block grow/release and by-key access semantics not reproduced
 0x004CD3B0	IntroCinematic_SetupFrames	src/game/intro_cinematic.cpp	95%	Faithful NovaIntroCinematic_SetupFrames: keyed block lookup by character-template name (ResourceData_AccessByKey via NovaResource_AccessCharacterBlockByKey)
 0x004CD4B0	PilotData_InitializePlayerState	src/game/pilot_file.cpp	100%	PilotData_InitializePlayerState absent-block seed (in-memory; no .plt writer)
-0x004CD7E0	FUN_004cd7e0		0%	
+0x004CD7E0	ResourceData_VerifyCatalogChecksum		0%	Full-catalog resource integrity check: sums FUN_004fe285 over 0x17 resource types and compares to the stored checksum in resource type 0x63739f6d, showing STR# 0x8c entry 7 on mismatch. Called between the startup splash and the progress-bar reveal. Deliberately not ported (licence/tamper checks out of scope); the loading bar therefore appears immediately on the startup splash instead of after this pass.
 0x004CDA50	Ui_InstallGameplayInterfaceLayout	src/game/gameplay_interface.cpp	30%	layout record decode + panel rect/color/font/bg fill implemented; govt-resolution + bg PICT draw + radar rebuild not yet wired
 0x004CDFA0	FUN_004cdfa0		0%	
 0x004CE030	ResourceData_GetSlotByIndex		0%	

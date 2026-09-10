@@ -184,6 +184,21 @@ struct NovaMainMenuStyle {
   NovaRgbColor list_background; // +0x92
   NovaRgbColor list_hilite;     // +0x96
   NovaRgbColor escort_hilite;   // +0x9a
+  // Ghidra: c\x9alr +0x5e..+0x64, the startup loading-progress-bar outline in
+  // native QuickDraw (top,left,bottom,right) order and relative to the window
+  // center (Bible c\x9alr ProgressBar). NovaUi_RunProgressBarReveal
+  // (0x004ab1b0) offsets it by the render-owner center (0x004c69ab seeds it)
+  // and NovaUi_RedrawProgressBar (0x004ab3d0) fills it from
+  // g_loading_progress_value/total over DAT_00575a58 = 198.0 reference px.
+  std::int16_t progress_bar_top = 280;
+  std::int16_t progress_bar_left = -100;
+  std::int16_t progress_bar_bottom = 290;
+  std::int16_t progress_bar_right = 100;
+  // Bible c\x9alr ProgBright/ProgDim/ProgOutline. Ghidra 0x004c6625/
+  // 0x004c6667/0x004c66a9 copy them into the bar colour globals.
+  NovaRgbColor progress_fill;  // +0x66 (bright fill)
+  NovaRgbColor progress_inner; // +0x6a (fill outline)
+  NovaRgbColor progress_outer; // +0x6e (bar outline)
 };
 
 [[nodiscard]] std::optional<NovaSpriteDefinition>
