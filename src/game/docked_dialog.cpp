@@ -949,6 +949,9 @@ void DrawStoreContents(SdlPlatform &platform,
                        std::string_view selected_description) {
   constexpr SDL_Color kText{255, 255, 255, 255};
   constexpr SDL_Color kMuted{192, 192, 192, 255};
+  // 20000,20000,20000 (16-bit) -- the grey tinted over two-line grid names
+  // whose line starts with a non-alphanumeric char (DAT_00733b62).
+  constexpr SDL_Color kUnlicensedTint{78, 78, 78, 255};
   const bool outfit_store = session.kind == LandedStoreKind::kOutfitter;
   SDL_Renderer *renderer = platform.renderer();
   for (std::size_t slot = 0; slot < LandedStoreSession::kPageSlots; ++slot) {
@@ -979,23 +982,35 @@ void DrawStoreContents(SdlPlatform &platform,
     // bottom-6, or split labels at bottom-14 and bottom-3.
     const float first_baseline =
         rect.y + (label.second.empty() ? 49.0F : 41.0F);
+    // Grid labels use the shared 9-pt Geneva screen font (DAT_00735684 /
+    // DAT_00735686 = "Geneva", 9), same as the detail rows and description.
+    // In the two-line arm the original tints a line grey (DAT_00733b62) when
+    // its first character is neither alphabetic nor a digit -- MSL ctype bits
+    // 0x0001/0x0008 (0x00490c70). This is what dims the "- used -" /
+    // "- illegal -" qualifiers. Single-line names stay white.
+    const auto line_color = [&](std::string_view line) {
+      const auto first =
+          line.empty() ? 0U : static_cast<unsigned char>(line.front());
+      return std::isalnum(first) != 0 ? kText : kUnlicensedTint;
+    };
+    const bool two_line = !label.second.empty();
     NovaText_DrawCentered(platform,
                           font_cache,
                           NovaFontFamily::kGeneva,
-                          10.0F,
+                          9.0F,
                           kNovaFontStyleRegular,
-                          kText,
+                          two_line ? line_color(label.first) : kText,
                           rect.x + 2.0F,
                           rect.x + rect.w - 2.0F,
                           first_baseline,
                           label.first);
-    if (!label.second.empty()) {
+    if (two_line) {
       NovaText_DrawCentered(platform,
                             font_cache,
                             NovaFontFamily::kGeneva,
-                            10.0F,
+                            9.0F,
                             kNovaFontStyleRegular,
-                            kText,
+                            line_color(label.second),
                             rect.x + 2.0F,
                             rect.x + rect.w - 2.0F,
                             rect.y + 52.0F,
@@ -1066,9 +1081,6 @@ void DrawStoreContents(SdlPlatform &platform,
                           label);
   }
   if (session.selected_id >= 0) {
-    const std::string title =
-        outfit_store ? state.scenario.Outfit(session.selected_id)->name
-                     : state.scenario.Ship(session.selected_id)->display_name;
     const std::int32_t price =
         outfit_store
             ? NovaLanded_OutfitPrice(state, stellar_id, session.selected_id)
@@ -1104,16 +1116,37 @@ void DrawStoreContents(SdlPlatform &platform,
                             mid + 6.0F,
                             InfoString(0xd5));
     }
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          NovaFontFamily::kGeneva,
-                          12.0F,
-                          kNovaFontStyleBold,
-                          kText,
-                          layout.description.x + 4.0F,
-                          layout.description.x + layout.description.w - 4.0F,
-                          layout.description.y + 18.0F,
-                          title);
+    // DITL entry 6 (both store redraws) is the desc alone: left-aligned at the
+    // panel edge, word-wrapped to its full width, drawn white (the original
+    // fills + InvertRects the panel; the frame already supplies the black).
+    const auto draw_description = [&]() {
+      constexpr float kSize = 9.0F;
+      const auto lines = WrapDescriptionLines(
+          selected_description,
+          static_cast<int>(std::max(1.0F, layout.description.w)),
+          [&](std::string_view line) {
+            return font_cache.TextWidth(
+                NovaFontFamily::kGeneva, kSize, kNovaFontStyleRegular, line);
+          });
+      const float pitch = static_cast<float>(
+          font_cache.LineHeight(NovaFontFamily::kGeneva, kSize));
+      float y = layout.description.y + kSize;
+      for (const std::string &line : lines) {
+        if (y > layout.description.y + layout.description.h) {
+          break;
+        }
+        NovaText_Draw(platform,
+                      font_cache,
+                      NovaFontFamily::kGeneva,
+                      kSize,
+                      kNovaFontStyleRegular,
+                      kText,
+                      layout.description.x,
+                      y,
+                      line);
+        y += pitch;
+      }
+    };
     if (outfit_store) {
       const Outfit *outfit = state.scenario.Outfit(session.selected_id);
       const ShipClass *player_ship = state.scenario.Ship(
@@ -1188,87 +1221,52 @@ void DrawStoreContents(SdlPlatform &platform,
                       layout.details.y + 93.0F,
                       status);
       }
-      const auto lines = WrapDescriptionLines(
-          selected_description, 28, [](std::string_view text) {
-            return static_cast<int>(text.size());
-          });
-      for (std::size_t i = 0; i < std::min<std::size_t>(lines.size(), 16);
-           ++i) {
-        NovaText_DrawCentered(
-            platform,
-            font_cache,
-            NovaFontFamily::kGeneva,
-            9.0F,
-            kNovaFontStyleRegular,
-            kMuted,
-            layout.description.x + 5.0F,
-            layout.description.x + layout.description.w - 5.0F,
-            layout.description.y + 39.0F + static_cast<float>(i) * 13.0F,
-            lines[i]);
-      }
+      draw_description();
     } else {
       // Ghidra NovaUi_DrawShipyardShipList 0x004948b0: the right-hand panels
       // show the desc text (DITL entry 6) and the Ship Price / Trade-In /
       // Final Price / You Have block (entry 9, values left-aligned at +0x46);
       // the full stat block lives in the Info sub-modal (0x00495c80).
-      const ShipClass *ship = state.scenario.Ship(session.selected_id);
       const std::int32_t trade_in =
           session.hire_mode ? 0
                             : NovaLanded_ShipTradeInValue(state, stellar_id);
       const std::int16_t player_class =
           static_cast<std::int16_t>(state.player.ship_class_id + 0x80);
+      // Ghidra NovaUi_DrawShipyardShipList (0x004948b0) entry 9: label and
+      // value share the small system font (DAT_00735684) and PTR_DAT_00575ad8
+      // (white); labels sit at the panel's left edge and values at +0x46
+      // (70px), matching the outfitter's entry 9 exactly.
+      const auto price_row =
+          [&](float dy, std::uint16_t label, std::int32_t value) {
+            NovaText_Draw(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          9.0F,
+                          kNovaFontStyleRegular,
+                          kText,
+                          layout.details.x,
+                          layout.details.y + dy,
+                          InfoString(label));
+            NovaText_Draw(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          9.0F,
+                          kNovaFontStyleRegular,
+                          kText,
+                          layout.details.x + 70.0F,
+                          layout.details.y + dy,
+                          GroupedUInt(value) + " " + InfoString(0x21));
+          };
       if (session.hire_mode) {
         // Ghidra NovaUi_DrawShipyardShipList 0x004948b0 hire-mode arm: the
         // price block shows the Hire Escort line (10% of the scaled purchase
         // price, DAT_00575950) instead of the trade-in ladder.
-        const auto price_row =
-            [&](float dy, std::uint16_t label, std::int32_t value) {
-              NovaText_Draw(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            10.0F,
-                            kNovaFontStyleRegular,
-                            kMuted,
-                            layout.details.x + 2.0F,
-                            layout.details.y + dy,
-                            InfoString(label));
-              NovaText_Draw(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            10.0F,
-                            kNovaFontStyleRegular,
-                            kText,
-                            layout.details.x + 72.0F,
-                            layout.details.y + dy,
-                            GroupedUInt(value) + " " + InfoString(0x21));
-            };
         price_row(
             12.0F,
             0xe3,
             NovaLanded_ShipHirePrice(state, stellar_id, session.selected_id));
         price_row(36.0F, 0xd8, state.player.credits); // You Have:
       } else if (session.selected_id != player_class) {
-        const auto price_row =
-            [&](float dy, std::uint16_t label, std::int32_t value) {
-              NovaText_Draw(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            10.0F,
-                            kNovaFontStyleRegular,
-                            kMuted,
-                            layout.details.x + 2.0F,
-                            layout.details.y + dy,
-                            InfoString(label));
-              NovaText_Draw(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            10.0F,
-                            kNovaFontStyleRegular,
-                            kText,
-                            layout.details.x + 72.0F,
-                            layout.details.y + dy,
-                            GroupedUInt(value) + " " + InfoString(0x21));
-            };
         price_row(12.0F, 0xe0, ship_price); // Ship Price:
         price_row(24.0F, 0xe1, trade_in);   // Trade-In:
         price_row(
@@ -1277,48 +1275,9 @@ void DrawStoreContents(SdlPlatform &platform,
             std::max<std::int32_t>(0, ship_price - trade_in)); // Final Price:
         price_row(72.0F, 0xd8, state.player.credits);          // You Have:
       }
-      const std::string title_text =
-          ship == nullptr ? std::string{} : ship->display_name;
-      NovaText_DrawCentered(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            12.0F,
-                            kNovaFontStyleBold,
-                            kText,
-                            layout.description.x + 4.0F,
-                            layout.description.x + layout.description.w - 4.0F,
-                            layout.description.y + 18.0F,
-                            title_text);
-      const auto lines = WrapDescriptionLines(
-          selected_description, 28, [](std::string_view text) {
-            return static_cast<int>(text.size());
-          });
-      for (std::size_t i = 0; i < std::min<std::size_t>(lines.size(), 16);
-           ++i) {
-        NovaText_DrawCentered(
-            platform,
-            font_cache,
-            NovaFontFamily::kGeneva,
-            9.0F,
-            kNovaFontStyleRegular,
-            kMuted,
-            layout.description.x + 5.0F,
-            layout.description.x + layout.description.w - 5.0F,
-            layout.description.y + 39.0F + static_cast<float>(i) * 13.0F,
-            lines[i]);
-      }
+      draw_description();
     }
   }
-  NovaText_DrawCentered(platform,
-                        font_cache,
-                        NovaFontFamily::kGeneva,
-                        10.0F,
-                        kNovaFontStyleRegular,
-                        kMuted,
-                        layout.description.x + 5.0F,
-                        layout.description.x + layout.description.w - 5.0F,
-                        layout.description.y + layout.description.h - 9.0F,
-                        "Credits: " + std::to_string(state.player.credits));
 }
 
 // ---------------------------------------------------------------------------
@@ -1790,11 +1749,12 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
   bool custom = false;
   std::uint16_t backdrop_pict = 0x213a;
   if (session.selected_id >= 0x80) {
-    // The desc key is the zero-based ship class + 13000 (the original's
-    // g_shipyard_selected_ship_class_id is the 0-based defs index; the port's
-    // selected_id is the raw 0x80-based resource id).
+    // The desc key is the zero-based ship class + 13000 (purchase) or +14000
+    // (hire) (the original's g_shipyard_selected_ship_class_id is the 0-based
+    // defs index; the port's selected_id is the raw 0x80-based resource id).
     if (const auto desc = NovaResource_LoadDescription(
-            static_cast<std::uint16_t>(session.selected_id - 0x80 + 13000));
+            static_cast<std::uint16_t>(session.selected_id - 0x80 +
+                                       (session.hire_mode ? 14000 : 13000)));
         desc && desc->dialog_variant >= 0x80) {
       custom_picture = LoadPictTexture(platform, desc->dialog_variant);
       if (custom_picture) {
@@ -2053,12 +2013,19 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         // The selection-desc resource is keyed at the zero-based item index
         // plus the family base: outfits (DLOG 0x3ea) at +3000 (Ghidra
         // NovaUi_HandleOutfitterMenuInput 0x004903c0), ship classes at
-        // +13000 (NovaUi_ShipyardHandleSelectionInput 0x00493fc0). The port's
-        // selected_id is the raw 0x80+ resource id, so subtract 0x80 first.
+        // +13000 for purchase and +14000 for hire (NovaUi_ShipyardHandle
+        // SelectionInput 0x00493fc0). The port's selected_id is the raw
+        // 0x80+ resource id, so subtract 0x80 first.
         const auto desc_id = static_cast<std::uint16_t>(
-            (outfit_store ? 3000 : 13000) + (session.selected_id - 0x80));
+            (outfit_store ? 3000 : (session.hire_mode ? 14000 : 13000)) +
+            (session.selected_id - 0x80));
         if (const auto description = NovaResource_LoadDescription(desc_id)) {
           selected_description = description->text;
+          // The original loads every selection desc through
+          // Ui_LoadSelectionDialogResource (0x004c6d50), which runs the
+          // {g}/{p}/{b} placeholder pass. These descs carry no mission
+          // wildcards, so only the placeholder pass applies.
+          Mission_ExpandStringPlaceholders(state, selected_description);
         }
       }
       selected_description_id = session.selected_id;

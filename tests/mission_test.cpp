@@ -288,6 +288,39 @@ TEST_CASE("string placeholder expansion handles gender blocks and quirks") {
   CHECK(swallowed == "keep ");
 }
 
+TEST_CASE("string placeholder expansion tests registration and control bits") {
+  GameState state; // registered by default (the port models a licensed game)
+
+  // {P30}: the registration conditional. Registered -> first arm; the trailing
+  // day count is only consulted while unregistered (ncb Pxxx semantics).
+  std::string registered =
+      R"({P30"License" "License, REQUIRES YOU TO REGISTER"})";
+  Mission_ExpandStringPlaceholders(state, registered);
+  CHECK(registered == "License");
+
+  state.control.registered = false;
+  std::string unregistered =
+      R"({P30"License" "License, REQUIRES YOU TO REGISTER"})";
+  Mission_ExpandStringPlaceholders(state, unregistered);
+  CHECK(unregistered == "License, REQUIRES YOU TO REGISTER");
+  state.control.registered = true;
+
+  // {bN}: the Nova control bit test reads control.bits[N]; a clear bit takes
+  // the second arm, and an unknown/out-of-range bit is false.
+  state.control.bits.set(424);
+  std::string set_bit = R"({b424"on" "off"})";
+  Mission_ExpandStringPlaceholders(state, set_bit);
+  CHECK(set_bit == "on");
+
+  std::string clear_bit = R"({b425"on" "off"})";
+  Mission_ExpandStringPlaceholders(state, clear_bit);
+  CHECK(clear_bit == "off");
+
+  std::string negated_bit = R"({!b424"on" "off"})";
+  Mission_ExpandStringPlaceholders(state, negated_bit);
+  CHECK(negated_bit == "off");
+}
+
 // Regression test for the Sol tutorial (mïsn resource 251, "Head to Sol;
 // Tutorial 001"): the on-accept payload (b8339 X130) must reveal Sol, and
 // landing on Earth (spob 128) must resolve the mission through the debrief
