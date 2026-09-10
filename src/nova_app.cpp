@@ -1563,10 +1563,9 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     break;
   }
   case GameModeAction::about_nova: {
-    // Ghidra: param_1 == 5 -> 0x00486120 (named Menu_OpenGalaxyMapDialog in
-    // Ghidra; the sp\x95n 605 button is labelled ABOUT NOVA, the shortcut is
-    // 'a', and the dialog loads the d\x91sc 0x7fff "About text" resource, so
-    // the Galaxy/Starmap role in the plate comment is a misnomer).
+    // Ghidra: param_1 == 5 -> 0x00486120 Menu_RunAboutNovaDialog (sp\x95n 605
+    // button labelled ABOUT NOVA, shortcut 'a', loads the d\x91sc 0x7fff
+    // "About text" resource).
     // The modal keeps re-rendering the menu behind itself each frame.
     NovaRender_RedrawAndPresentFrame(runtime, 0);
     game::NovaMenu_RunAboutDialog(
