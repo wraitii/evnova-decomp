@@ -150,3 +150,56 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   // 0x00456158: the travel selection resets on launch.
   CHECK(state.travel.selected_stellar_id == -1);
 }
+
+// NovaUi_RunOutfitterInteractionLoop (0x0048ea70) clears the active weapon
+// bank when the last unit of a mounted weapon outfit is sold, so a stale bank
+// index can't point at an outfit the player no longer owns.
+TEST_CASE("Outfitter sale clears the active weapon bank on the last unit",
+          "[landed_store][outfitter]") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.ship_class_id = 0; // the starter Shuttle
+  state.player.credits = 100'000;
+
+  const game::Outfit *blaster = state.scenario.Outfit(0x80);
+  REQUIRE(blaster != nullptr);
+  REQUIRE(blaster->mod_type == 1); // a weapon outfit
+
+  game::LandedStoreSession session =
+      game::NovaLanded_OpenOutfitterSession(state, 0x80);
+  REQUIRE(game::NovaLanded_BuyOutfit(state, 0x80, 0x80, 1) == 1);
+  CHECK(state.inventory.outfit_owned_count[0] == 1);
+
+  state.player.active_weapon_bank_slot = blaster->mod_val;
+  const game::OutfitSaleResult sale =
+      game::NovaLanded_SellOutfit(state, session, 0x80, 0x80, 1);
+  CHECK(sale.sold == 1);
+  CHECK(sale.block == game::OutfitSaleBlock::kNone);
+  CHECK(state.inventory.outfit_owned_count[0] == 0);
+  CHECK(state.player.active_weapon_bank_slot == -1);
+}
+
+// DAT_007d4c0d (0x0048ea70): a stellar with a zero TechLevel and no positive
+// SpecialTech has nothing to sell, which disables the Buy button.
+TEST_CASE("stellar outfit availability follows tech level",
+          "[landed_store][outfitter]") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  int checked = 0;
+  for (std::int16_t id = 0x80; id < 0x100; ++id) {
+    const game::Stellar *stellar = state.scenario.Stellar(id);
+    if (stellar == nullptr)
+      continue;
+    ++checked;
+    bool expected = stellar->tech_level != 0;
+    for (const std::int16_t tech : stellar->special_tech) {
+      if (tech > 0) {
+        expected = true;
+        break;
+      }
+    }
+    CHECK(game::NovaLanded_StellarSellsOutfits(state, id) == expected);
+  }
+  CHECK(checked > 0);
+}

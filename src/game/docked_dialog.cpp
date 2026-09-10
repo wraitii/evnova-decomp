@@ -13,6 +13,7 @@
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "nova_font.hpp"
+#include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "selection_text_dialog.hpp"
 #include "services_buttons.hpp"
@@ -22,6 +23,7 @@
 #include "sprite_world.hpp"
 #include "starmap.hpp"
 #include "travel.hpp"
+#include "ui_dialog.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -1020,8 +1022,13 @@ void DrawStoreContents(SdlPlatform &platform,
       }
     }
   }
+  // 0x0048ea70: the outfitter's Buy button is also gated by DAT_007d4c0d, a
+  // stellar-wide "sells outfits at all" flag (a TechLevel of 0 with no
+  // positive SpecialTech disables it regardless of the selection).
+  const bool store_offers_outfits =
+      !outfit_store || NovaLanded_StellarSellsOutfits(state, stellar_id);
   const bool buy_allowed =
-      session.selected_id >= 0 &&
+      session.selected_id >= 0 && store_offers_outfits &&
       (outfit_store
            ? NovaLanded_CanBuyOutfit(state, stellar_id, session.selected_id)
        : session.hire_mode
@@ -1111,40 +1118,76 @@ void DrawStoreContents(SdlPlatform &platform,
       const Outfit *outfit = state.scenario.Outfit(session.selected_id);
       const ShipClass *player_ship = state.scenario.Ship(
           static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
-      const std::int32_t mass =
+      const std::int32_t item_mass =
           player_ship == nullptr ? 0
                                  : outfit->PurchaseMass(player_ship->mass_tons);
-      NovaText_DrawCentered(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            10.0F,
-                            kNovaFontStyleRegular,
-                            kMuted,
-                            layout.details.x + 2.0F,
-                            layout.details.x + layout.details.w - 2.0F,
-                            layout.details.y + 15.0F,
-                            "Price: " + std::to_string(price));
-      NovaText_DrawCentered(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            9.0F,
-                            kNovaFontStyleRegular,
-                            kMuted,
-                            layout.details.x + 2.0F,
-                            layout.details.x + layout.details.w - 2.0F,
-                            layout.details.y + 30.0F,
-                            "Mass: " + std::to_string(mass));
-      NovaText_DrawCentered(
-          platform,
-          font_cache,
-          NovaFontFamily::kGeneva,
-          9.0F,
-          kNovaFontStyleRegular,
-          kMuted,
-          layout.details.x + 2.0F,
-          layout.details.x + layout.details.w - 2.0F,
-          layout.details.y + 45.0F,
-          "Free: " + std::to_string(std::max(0, NovaLanded_FreeMass(state))));
+      const std::int32_t free_mass = NovaLanded_FreeMass(state);
+      // Ghidra NovaUi_RedrawOutfitterMenu (0x00490c70) detail panel (DITL
+      // entry 9): labels at the panel's left edge and values at +0x46 (70px),
+      // all in PTR_DAT_00575ad8 (white). Item Price sits at +0xc and You Have
+      // at +0x18; Item Mass (+0x30) and Available (+0x3c) appear only when the
+      // item carries positive mass; the status line is at +0x5d.
+      const auto detail_row =
+          [&](float dy, std::uint16_t label, std::string value) {
+            NovaText_Draw(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          9.0F,
+                          kNovaFontStyleRegular,
+                          kText,
+                          layout.details.x,
+                          layout.details.y + dy,
+                          InfoString(label));
+            NovaText_Draw(platform,
+                          font_cache,
+                          NovaFontFamily::kGeneva,
+                          9.0F,
+                          kNovaFontStyleRegular,
+                          kText,
+                          layout.details.x + 70.0F,
+                          layout.details.y + dy,
+                          value);
+          };
+      detail_row(12.0F, 0xd6, GroupedUInt(price) + " " + InfoString(0x21));
+      detail_row(24.0F,
+                 0xd8,
+                 GroupedUInt(state.player.credits) + " " + InfoString(0x21));
+      if (outfit->mass_tons > 0) {
+        detail_row(48.0F,
+                   0xd7,
+                   GroupedUInt(item_mass) + " " +
+                       (item_mass == 1 ? InfoString(0) : InfoString(1)));
+        const std::int32_t available = std::max(0, free_mass);
+        detail_row(60.0F,
+                   0xd9,
+                   GroupedUInt(available) + " " +
+                       (available == 1 ? InfoString(0) : InfoString(1)));
+      }
+      // Outfit_ClampOutfitOwnedCountToCurrentLimits (0x004656a0) returning an
+      // at-cap count picks the ownership messages (0xdb owned / 0xdc none); an
+      // item that still has room but will not fit the remaining free mass
+      // picks the hold messages (0xdd owned / 0xde none).
+      const std::int16_t owned =
+          state.inventory.outfit_owned_count[session.selected_id - 0x80];
+      const OutfitOwnership ownership = Outfit_ClampOwnedCountToLimits(
+          state, static_cast<std::int16_t>(session.selected_id - 0x80));
+      std::string status;
+      if (ownership.effective_owned >= ownership.max_allowed) {
+        status = InfoString(owned < 1 ? 0xdb : 0xda);
+      } else if (item_mass > 0 && free_mass < item_mass) {
+        status = InfoString(owned < 1 ? 0xdd : 0xdc);
+      }
+      if (!status.empty()) {
+        NovaText_Draw(platform,
+                      font_cache,
+                      NovaFontFamily::kGeneva,
+                      9.0F,
+                      kNovaFontStyleRegular,
+                      kText,
+                      layout.details.x,
+                      layout.details.y + 93.0F,
+                      status);
+      }
       const auto lines = WrapDescriptionLines(
           selected_description, 28, [](std::string_view text) {
             return static_cast<int>(text.size());
@@ -1809,6 +1852,112 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
   }
 }
 
+// Composes and shows the STR# 0x7d2 message for a blocked outfit sale
+// (NovaUi_RunOutfitterInteractionLoop 0x0048ea70). `item_id` is the selected
+// item's resource id; the blocker is named from the dependent/ammo outfit's
+// LCName/LCPlural (falling back to the generic "unit(s) of ammunition" form
+// for a carrier-bay weapon with no ammo outfit).
+void ShowStoreSaleBlock(SdlPlatform &platform,
+                        GameState &state,
+                        std::int16_t item_id,
+                        const OutfitSaleResult &sale,
+                        const std::function<void()> &render_background) {
+  if (sale.block == OutfitSaleBlock::kNone)
+    return;
+  std::string text;
+  if (sale.block == OutfitSaleBlock::kNegativeMass) {
+    text = InfoString(0xce); // entry 0xcf
+  } else {
+    // Ship_FormatLocalizedCountWord (0x00465d90): 1..10 load the number word,
+    // everything else is decimal.
+    const auto count_word = [](std::int16_t count) -> std::string {
+      if (count < 1 || 10 < count)
+        return std::to_string(count);
+      if (const auto word = NovaHud_LoadStringEntry(
+              0x89, static_cast<std::uint16_t>(count + 0x1c))) {
+        return *word;
+      }
+      return std::to_string(count);
+    };
+    const Outfit *item = state.scenario.Outfit(item_id);
+    const std::string item_name =
+        item == nullptr ? std::string{}
+                        : (sale.item_plural ? item->lc_plural : item->lc_name);
+    std::string blocker_name;
+    if (sale.blocker_id >= 0) {
+      const Outfit *blocker = state.scenario.Outfit(sale.blocker_id);
+      blocker_name =
+          blocker == nullptr
+              ? std::string{}
+              : (sale.blocker_plural ? blocker->lc_plural : blocker->lc_name);
+    } else {
+      blocker_name = InfoString(sale.blocker_plural ? 0xd1 : 0xd0) + " " +
+                     InfoString(0xd2);
+    }
+    text = InfoString(0xcf) + " " + count_word(sale.excess) + " " +
+           blocker_name + " " + InfoString(0xd3) + " " + item_name + ".";
+  }
+  if (!text.empty()) {
+    NovaUi_RunTextReaderDialog(platform, state, text, false, render_background);
+  }
+}
+
+// Ghidra 0x0049e8e0 FUN_0049e8e0: the landed-store quantity prompt (DLOG
+// 0x3eb). Entry 2 carries the "Enter quantity:" label (STR# 0x7d2 0x173) and
+// entry 3 the editable amount, pre-filled with the maximum. Returns the
+// entered amount clamped to [0, max], or 0 on cancel (ordinal 4). Invalid
+// input resets the field and keeps the prompt open, matching the original.
+std::int16_t
+RunStoreQuantityPrompt(SdlPlatform &platform,
+                       std::int16_t max_quantity,
+                       const std::function<void()> &render_background) {
+  auto loaded = UiWindow_CreateFromDialogResource(platform, 0x3eb);
+  if (!loaded)
+    return 0;
+  UiDialogWindow window = std::move(*loaded);
+  NovaFontCache font_cache;
+  UiPanel_SetEntryTextPascal(window, 2, InfoString(0x172));
+  UiPanel_SetEntryTextPascal(window, 3, std::to_string(max_quantity));
+  UiPanel_SetTextEntrySelectionRange(window, 3, 0, 0xfe);
+  while (!platform.quit_requested()) {
+    short code = -1;
+    UiWindow_RunInteractionLoop(
+        platform, font_cache, window, &code, render_background);
+    if (code == 4)
+      return 0;
+    if (code != 1)
+      continue;
+    const std::string text = UiPanel_GetEntryTextPascal(window, 3);
+    if (text.empty()) {
+      UiPanel_SetEntryTextPascal(window, 3, "0");
+      UiPanel_SetTextEntrySelectionRange(window, 3, 0, 0xfe);
+      continue;
+    }
+    std::int32_t value = 0;
+    bool numeric = true;
+    for (const char c : text) {
+      if (c < '0' || c > '9') {
+        numeric = false;
+        break;
+      }
+      value = value * 10 + (c - '0');
+      if (value > 1000000) {
+        numeric = false;
+        break;
+      }
+    }
+    if (!numeric)
+      continue;
+    if (value < 0 || value > max_quantity) {
+      UiPanel_SetEntryTextPascal(window, 3, std::to_string(max_quantity));
+      UiPanel_SetTextEntrySelectionRange(window, 3, 0, 0xfe);
+      continue;
+    }
+    return static_cast<std::int16_t>(value);
+  }
+  return 0;
+}
+
 // Ghidra 0x0048ea70 NovaUi_RunOutfitterInteractionLoop and
 // 0x00492f30 NovaUi_RunShipyardPurchaseLoop: one generic store loop replaces
 // both (service is a parameter). The 0x00493fc0 NovaUi_ShipyardHandleSelection
@@ -1850,6 +1999,44 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
+  // Ghidra 0x0048ea70 quantity arms (local_652 & 0x800): a shift-modified
+  // buy/sell first computes the affordable/owned maximum and prompts DLOG
+  // 0x3eb (FUN_0049e8e0). Plain actions buy/sell one unit. Returns 1 when the
+  // maximum is 1 (nothing to choose) and 0 when the prompt is cancelled.
+  const auto prompt_buy_quantity = [&]() -> std::int16_t {
+    if (!outfit_store || session.selected_id < 0)
+      return 1;
+    const std::int32_t price =
+        NovaLanded_OutfitPrice(state, stellar_id, session.selected_id);
+    std::int32_t max = price >= 1 ? state.player.credits / price : 32000;
+    max = std::min<std::int32_t>(max, 32000);
+    const Outfit *outfit = state.scenario.Outfit(session.selected_id);
+    const std::int16_t owned =
+        state.inventory.outfit_owned_count[session.selected_id - 0x80];
+    if (outfit != nullptr && owned < outfit->max_count) {
+      max = std::min<std::int32_t>(max, outfit->max_count - owned);
+    }
+    const OutfitOwnership own =
+        Outfit_ClampOwnedCountToLimits(state, session.selected_id - 0x80);
+    if (own.max_allowed < max)
+      max = own.max_allowed;
+    if (own.max_allowed - owned < max)
+      max = own.max_allowed - owned;
+    if (max <= 1)
+      return 1;
+    return RunStoreQuantityPrompt(
+        platform, static_cast<std::int16_t>(max), render_background);
+  };
+  const auto prompt_sell_quantity = [&]() -> std::int16_t {
+    if (!outfit_store || session.selected_id < 0)
+      return 1;
+    const std::int16_t owned =
+        state.inventory.outfit_owned_count[session.selected_id - 0x80];
+    const std::int16_t max = std::min<std::int16_t>(owned, 32000);
+    if (max <= 1)
+      return 1;
+    return RunStoreQuantityPrompt(platform, max, render_background);
+  };
   ProbeUiAutoClear probe_ui_guard(platform);
   while (!platform.quit_requested()) {
     const StoreLayout layout = LayoutStore(platform, outfit_store);
@@ -1918,9 +2105,13 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         }
         if (key == 'b' && session.selected_id >= 0) {
           if (outfit_store) {
-            (void)NovaLanded_BuyOutfit(
-                state, stellar_id, session.selected_id, 1);
-            NovaLanded_RefreshStoreSession(state, session, stellar_id);
+            const std::int16_t quantity =
+                input->shift ? prompt_buy_quantity() : 1;
+            if (quantity > 0) {
+              (void)NovaLanded_BuyOutfit(
+                  state, stellar_id, session.selected_id, quantity);
+              NovaLanded_RefreshStoreSession(state, session, stellar_id);
+            }
           } else if (session.hire_mode) {
             // Ghidra 0x00492f30 hire arm (the g_shipyard_purchase_mode==1
             // branch of the confirm action): charge + spawn + daily reroll.
@@ -1941,9 +2132,16 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           continue;
         }
         if (key == 's' && outfit_store && session.selected_id >= 0) {
-          (void)NovaLanded_SellOutfit(
-              state, session, stellar_id, session.selected_id, 1);
-          NovaLanded_RefreshStoreSession(state, session, stellar_id);
+          const std::int16_t sold_id = session.selected_id;
+          const std::int16_t quantity =
+              input->shift ? prompt_sell_quantity() : 1;
+          if (quantity > 0) {
+            const OutfitSaleResult sale = NovaLanded_SellOutfit(
+                state, session, stellar_id, sold_id, quantity);
+            ShowStoreSaleBlock(
+                platform, state, sold_id, sale, render_background);
+            NovaLanded_RefreshStoreSession(state, session, stellar_id);
+          }
           continue;
         }
         if (key == 'i' && !outfit_store && session.selected_id >= 0) {
@@ -1989,8 +2187,13 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       }
       if (Contains(layout.buy, point) && session.selected_id >= 0) {
         if (outfit_store) {
-          (void)NovaLanded_BuyOutfit(state, stellar_id, session.selected_id, 1);
-          NovaLanded_RefreshStoreSession(state, session, stellar_id);
+          const std::int16_t quantity =
+              input->shift ? prompt_buy_quantity() : 1;
+          if (quantity > 0) {
+            (void)NovaLanded_BuyOutfit(
+                state, stellar_id, session.selected_id, quantity);
+            NovaLanded_RefreshStoreSession(state, session, stellar_id);
+          }
         } else if (session.hire_mode) {
           if (NovaLanded_HireShip(state, stellar_id, session.selected_id) !=
               -1) {
@@ -2009,9 +2212,16 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
       }
       if (Contains(layout.sell_or_info, point) && session.selected_id >= 0) {
         if (outfit_store) {
-          (void)NovaLanded_SellOutfit(
-              state, session, stellar_id, session.selected_id, 1);
-          NovaLanded_RefreshStoreSession(state, session, stellar_id);
+          const std::int16_t sold_id = session.selected_id;
+          const std::int16_t quantity =
+              input->shift ? prompt_sell_quantity() : 1;
+          if (quantity > 0) {
+            const OutfitSaleResult sale = NovaLanded_SellOutfit(
+                state, session, stellar_id, sold_id, quantity);
+            ShowStoreSaleBlock(
+                platform, state, sold_id, sale, render_background);
+            NovaLanded_RefreshStoreSession(state, session, stellar_id);
+          }
         } else {
           // The shipyard's third action button is Info
           // (0x0049f3f0 HitTestAndTrackShipyardActionButtons index 2), which
