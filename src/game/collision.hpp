@@ -14,8 +14,14 @@
 // Both passes funnel into Shot_ResolveShotCollisionHit -> Shot_ResolveShip-
 // HitFromWeapon (0x004192d0) for damage, impulse, and aggro.
 //
-// Deferred scope: stellar/asteroid contact branches, sprite pixel masks (the
-// clean-room uses explicit circle envelopes on Ship/ActiveShot), impact
+//   - Asteroid_HandleSpritePairCollision (0x00436f70) is the parallel sprite
+//     callback on g_asteroid_sprite_layer: the same shot containers are tested
+//     against the 16 asteroid sprites, weapons with flags_quaternary 0x0001
+//     (Seeker "passes over asteroids") are rejected, and a pixel-mask overlap
+//     funnels through NovaUi_ResolveWeaponSplashImpact (0x00436ff0).
+//
+// Deferred scope: stellar contact branch, sprite pixel masks (the clean-room
+// uses explicit circle envelopes on Ship/AsteroidState/ActiveShot), impact
 // particle bursts, linked shots, kill chatter, and the mission disable
 // bookkeeping inside the ship-hit path.
 
@@ -71,13 +77,16 @@ void NovaCollision_ResolveShipHitFromWeaponSlot(
 // Ghidra Ship_HandleSpritePairCollision (0x004374f0) plus its sprite-layer
 // driver: resolves direct shot-vs-ship contacts (circle overlap stand-in for
 // the original's bounding-circle/pixel-mask tests) and dispatches
-// Shot_ResolveShotCollisionHit with linked shots disallowed.
+// Shot_ResolveShotCollisionHit with linked shots disallowed. Also runs the
+// Asteroid_HandleSpritePairCollision (0x00436f70) contact for each shot that
+// did not hit a ship.
 void NovaWeapon_ResolveDirectShotCollisions(GameState &state);
 
 // Ghidra Shot_ResolveCollisions (0x00437e20): the blast-proximity pass over
 // live shots. Resolves at most one proximity ship hit per shot when the
-// weapon has a blast radius; the stellar and asteroid contact branches remain
-// deferred (TODO(decomp)).
+// weapon has a blast radius, then scans the asteroid pool (weapons with
+// flags_quaternary bit 0 clear) into NovaUi_ResolveWeaponSplashImpact; the
+// stellar contact branch remains deferred (TODO(decomp)).
 void NovaWeapon_ResolveProjectileCollisions(GameState &state);
 
 // Ghidra Shot_QueueBeamHit / Shot_UpdateBeamHitQueue (0x00427a90/0x0042f270)

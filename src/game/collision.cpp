@@ -1122,11 +1122,45 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   return true;
 }
 
+// Ghidra Asteroid_HandleSpritePairCollision (0x00436f70): the sprite-layer
+// callback installed on the 16 asteroid sprites. Ship_TestSpriteLayerOverlaps
+// invokes it for every (asteroid sprite, shot sprite) overlap. It resolves the
+// shot and asteroid records from the sprites' presented_object_id (+0xC8),
+// rejects weapons whose flags_quaternary bit 0x0001 is set (Seeker 1 "passes
+// over asteroids"), does a pixel-mask overlap test, then funnels the contact
+// through NovaUi_ResolveWeaponSplashImpact. Unlike the ship callback there is
+// no late-collision-window gate. The clean-room substitutes the explicit
+// circle envelope because sprite masks are not carried in the sim layer.
+void ResolveDirectAsteroidContact(GameState &state,
+                                  ActiveShot &shot,
+                                  const Weapon &weapon) {
+  if ((weapon.flags_quaternary & 0x0001U) != 0U) {
+    return;
+  }
+  for (AsteroidState &asteroid : state.asteroid_pool) {
+    if (!asteroid.active) {
+      continue;
+    }
+    const float dx = asteroid.target_pos_x - shot.pos_x;
+    const float dy = asteroid.target_pos_y - shot.pos_y;
+    const float radius = std::max(0.0F, asteroid.collision_radius_px) +
+                         std::max(0.0F, shot.collision_radius_px);
+    if (dx * dx + dy * dy > radius * radius) {
+      continue;
+    }
+    ResolveAsteroidSplashImpact(state, shot, asteroid);
+    return;
+  }
+}
+
 // Ghidra Ship_HandleSpritePairCollision (0x004374f0) with its sprite-layer
 // driver inlined: the original is invoked per overlapping (ship sprite, shot
 // sprite) pair by TestSpriteLayerOverlaps and picks the bounding-circle or
 // pixel-mask test by frame-time budget (circle when avg frame time >= 2.0ms
-// or half-span <= 0x20).
+// or half-span <= 0x20). Asteroid_HandleSpritePairCollision (0x00436f70) runs
+// over the same shot containers against g_asteroid_sprite_layer; the
+// reimplementation evaluates ships first, then asteroids for a shot that did
+// not already connect.
 void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
   for (ActiveShot &shot : state.active_shots) {
     if (shot.life_ticks_remaining <= 0.0F && shot.life_frames > 0) {
@@ -1172,6 +1206,13 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
                               slot,
                               /*allow_linked_shots=*/false);
       break;
+    }
+
+    // Asteroid contact pass. The original's late-collision window only gates
+    // the ship callback, so a shot in its fuse window may still strike an
+    // asteroid directly (Ship_HandleSpritePairCollision vs 0x00436f70).
+    if (!shot.consumed) {
+      ResolveDirectAsteroidContact(state, shot, *weapon);
     }
   }
   RemoveConsumedShots(state);

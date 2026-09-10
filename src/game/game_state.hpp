@@ -967,7 +967,15 @@ struct AsteroidState {
   // record in Asteroid_UpdateSprites.
   std::int16_t integrity = 0;   // +0x1c
   std::int16_t wander_type = 0; // +0x1e (index into the asteroid-type table)
-  bool active = false;          // +0x20
+
+  // Clean-room circle envelope stand-in for the original's per-frame
+  // pixel-mask overlap (Sprite_TestPixelMaskOverlap) used by the asteroid
+  // sprite-pair callback (Asteroid_HandleSpritePairCollision 0x00436f70) and
+  // the shot blast-proximity asteroid scan. All shipped asteroid spin sets
+  // (800..815) are 50x50, so the half-span is 25.
+  float collision_radius_px = 25.0F;
+
+  bool active = false; // +0x20
 
   // Pool size for the 16-slot AsteroidState table.
   static constexpr std::size_t kPoolSize = 16;
@@ -1364,11 +1372,11 @@ struct GameState {
 
   // Half the logical flight play area, in pixels (Ghidra g_viewport_center_x
   // 0x005997b8 / g_viewport_center_y 0x005997ba, set by
-  // Ship_InitializeMainInterface 0x004ac380 from the render owner rect). The spaceflight view keeps
-  // this in sync with the live viewport each frame; Asteroid_Spawn scatters new
-  // records within `viewport_center_x + 0x80` (x) / `viewport_center_y` (y) of
-  // the player, so a wrong/stale value makes the whole field bunch on the
-  // player.
+  // Ship_InitializeMainInterface 0x004ac380 from the render owner rect). The
+  // spaceflight view keeps this in sync with the live viewport each frame;
+  // Asteroid_Spawn scatters new records within `viewport_center_x + 0x80` (x) /
+  // `viewport_center_y` (y) of the player, so a wrong/stale value makes the
+  // whole field bunch on the player.
   int viewport_center_x = 320;
   int viewport_center_y = 200;
 

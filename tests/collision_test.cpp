@@ -305,6 +305,81 @@ TEST_CASE("blast weapon strips asteroid integrity, splashes owner, and breaks",
   CHECK(children >= 1);
 }
 
+TEST_CASE("direct projectile strips asteroid integrity without a blast",
+          "[collision][asteroid]") {
+  GameState state;
+  SeedCollisionScenario(state);
+
+  // One asteroid type with integrity 100 so a 10-point hit does not break it.
+  state.scenario.asteroid_defs.resize(1);
+  state.scenario.asteroid_defs[0].wander_table_value = 100;
+  state.ShipAt(1).is_active = false; // keep the ship pass out of the way
+
+  AsteroidState &asteroid = state.asteroid_pool[0];
+  asteroid.active = true;
+  asteroid.wander_type = 0;
+  asteroid.integrity = 100;
+  asteroid.target_pos_x = 0.0F;
+  asteroid.target_pos_y = 0.0F;
+
+  SpawnTestShot(state);
+  REQUIRE(state.scenario.weapons[0].blast_radius == 0);
+  NovaWeapon_ResolveDirectShotCollisions(state);
+
+  CHECK(state.active_shots.empty());
+  CHECK(asteroid.integrity == 90); // 100 - energy_damage(10)
+  CHECK(asteroid.active);
+  // No splash_radius on the weapon, so the player is untouched.
+  CHECK(state.player.shield_points == Catch::Approx(100.0F));
+}
+
+TEST_CASE("a fusing direct shot still strikes an asteroid",
+          "[collision][asteroid]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.asteroid_defs.resize(1);
+  state.scenario.weapons[0].late_collision_window_ticks = 3;
+  state.ShipAt(1).is_active = false;
+
+  AsteroidState &asteroid = state.asteroid_pool[0];
+  asteroid.active = true;
+  asteroid.wander_type = 0;
+  asteroid.integrity = 100;
+  asteroid.target_pos_x = 0.0F;
+  asteroid.target_pos_y = 0.0F;
+
+  SpawnTestShot(state);
+  // Inside the late window: the ship callback would reject this contact, but
+  // the asteroid callback (0x00436f70) has no late-window gate.
+  state.active_shots[0].life_ticks_remaining = 2.0F;
+  NovaWeapon_ResolveDirectShotCollisions(state);
+
+  CHECK(state.active_shots.empty());
+  CHECK(asteroid.integrity == 90);
+}
+
+TEST_CASE("passes-over-asteroids weapons skip direct asteroid contact",
+          "[collision][asteroid]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.asteroid_defs.resize(1);
+  state.scenario.weapons[0].flags_quaternary = 0x0001U; // Seeker "passes over"
+  state.ShipAt(1).is_active = false;
+
+  AsteroidState &asteroid = state.asteroid_pool[0];
+  asteroid.active = true;
+  asteroid.wander_type = 0;
+  asteroid.integrity = 100;
+  asteroid.target_pos_x = 0.0F;
+  asteroid.target_pos_y = 0.0F;
+
+  SpawnTestShot(state);
+  NovaWeapon_ResolveDirectShotCollisions(state);
+
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(asteroid.integrity == 100);
+}
+
 TEST_CASE("NPC destruction seeds the class DeathDelay timer once",
           "[collision][ship_visual]") {
   GameState state;
