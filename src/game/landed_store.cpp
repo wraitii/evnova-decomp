@@ -461,50 +461,84 @@ std::int32_t NovaLanded_FreeMass(const GameState &state) {
 
 // Ghidra 0x00491950 NovaUi_IsOutfitterPurchaseAllowed (partial port of the
 // tech/require/availability gate).
-bool NovaLanded_CanBuyOutfit(const GameState &state,
+bool NovaLanded_CanBuyOutfit(GameState &state,
                              std::int16_t stellar_id,
                              std::int16_t outfit_id) {
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   const Outfit *outfit = state.scenario.Outfit(outfit_id);
   if (stellar == nullptr || outfit == nullptr ||
-      !HasTech(*stellar, outfit->tech_level) ||
-      !MeetsRequire(state, outfit->require_lo, outfit->require_hi) ||
-      !NovaControlExpression_Evaluate(outfit->availability_expr,
-                                      NovaLanded_ControlExpressionState(state)))
-    return false;
-  // One-shot effect latches (0x00491950's mod-slot scan): a ModType-16 map
-  // outfit is unpurchasable once a map grant ran this outfitter visit, and a
-  // ModType-21 record-clean once a record grant ran. A map slot wins when
-  // both are present, as in the original's if-chain.
-  bool has_map = false;
-  bool has_record = false;
-  const auto mod_slots = {
-      std::pair{outfit->mod_type, outfit->mod_val},
-      std::pair{outfit->alt_mod_types[0], outfit->alt_mod_vals[0]},
-      std::pair{outfit->alt_mod_types[1], outfit->alt_mod_vals[1]},
-      std::pair{outfit->alt_mod_types[2], outfit->alt_mod_vals[2]}};
-  for (const auto &slot : mod_slots) {
-    if (slot.first == static_cast<std::int16_t>(OutfitEffect::kMap)) {
-      has_map = true;
-    } else if (slot.first ==
-               static_cast<std::int16_t>(OutfitEffect::kCleanRecord)) {
-      has_record = true;
-    }
-  }
-  if (has_map && state.control.map_grant_latch)
-    return false;
-  if (!has_map && has_record && state.control.record_grant_latch)
+      !HasTech(*stellar, outfit->tech_level))
     return false;
   const ShipClass *ship = state.scenario.Ship(
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
-  if (ship == nullptr ||
-      outfit->PurchaseMass(ship->mass_tons) > NovaLanded_FreeMass(state))
+  if (ship == nullptr)
+    return false;
+  // Original: continue when the purchase mass fits the free mass OR the item
+  // is massless/negative-mass (Outfit_ComputeOutfitPurchaseMass < 1); only a
+  // positive item that exceeds the free allowance is rejected.
+  const std::int32_t purchase_mass = outfit->PurchaseMass(ship->mass_tons);
+  if (purchase_mass > NovaLanded_FreeMass(state) && purchase_mass >= 1)
     return false;
   const OutfitOwnership ownership = Outfit_ClampOwnedCountToLimits(
       state, static_cast<std::int16_t>(outfit_id - 0x80));
-  return ownership.effective_owned < ownership.max_allowed &&
-         state.player.credits >=
-             NovaLanded_OutfitPrice(state, stellar_id, outfit_id);
+  if (ownership.effective_owned >= ownership.max_allowed)
+    return false;
+
+  // Mod-slot specializations in the original's precedence (0x00491950): a
+  // primary ModType-3 (ammo/launcher) slot is tested first for a mode-99
+  // fighter bay; otherwise the first applicable cargo/map/record arm runs.
+  bool has_cargo = false;
+  std::int16_t cargo_mod = 0;
+  bool has_map = false;
+  bool has_record = false;
+  for (const auto &[type, value] : OutfitModSlots(*outfit)) {
+    if (type == static_cast<std::int16_t>(OutfitEffect::kCargoSpace)) {
+      has_cargo = true;
+      cargo_mod = value;
+    } else if (type == static_cast<std::int16_t>(OutfitEffect::kMap)) {
+      has_map = true;
+    } else if (type == static_cast<std::int16_t>(OutfitEffect::kCleanRecord)) {
+      has_record = true;
+    }
+  }
+  if (outfit->mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo)) {
+    // Fighter-bay launcher: the player must own a bay that can hold one more
+    // craft of the class encoded in the weapon's ammo/cost code.
+    const std::int16_t weapon_bank = outfit->mod_val;
+    if (weapon_bank >= 0) {
+      const Weapon *weapon =
+          state.scenario.Weapon(static_cast<std::int16_t>(weapon_bank + 0x80));
+      if (weapon != nullptr && weapon->weapon_mode_code == 99 &&
+          !NovaShipClass_HasPlayerBayCapacityFor(
+              state,
+              static_cast<std::int16_t>(weapon->ammo_type - 0x80),
+              static_cast<std::int16_t>(outfit_id - 0x80),
+              weapon_bank))
+        return false;
+    }
+  } else if (has_cargo) {
+    // A negative cargo-space mod (0x00491950) needs the ship class's +0xa40
+    // capability and total mass over the current cargo/junk load.
+    // TODO(decomp): ShipClassDef +0xa40 is not decoded in the port, so the
+    // reduction is currently ungated.
+    (void)cargo_mod;
+  } else if (has_map) {
+    if (state.control.map_grant_latch)
+      return false;
+  } else if (has_record) {
+    if (state.control.record_grant_latch)
+      return false;
+  }
+
+  if (!MeetsRequire(state, outfit->require_lo, outfit->require_hi) ||
+      !NovaControlExpression_Evaluate(outfit->availability_expr,
+                                      NovaLanded_ControlExpressionState(state)))
+    return false;
+  // QUIRK (0x00491950): the original's tail price check reads the
+  // g_outfitter_selected_id global rather than its param_1 argument. Every
+  // caller passes that same global, so testing `outfit_id` here is equivalent.
+  return state.player.credits >=
+         NovaLanded_OutfitPrice(state, stellar_id, outfit_id);
 }
 
 std::int16_t NovaLanded_BuyOutfit(GameState &state,

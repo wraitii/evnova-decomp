@@ -940,7 +940,7 @@ struct StoreTextureCache {
 void DrawStoreContents(SdlPlatform &platform,
                        NovaFontCache &font_cache,
                        const ServicesButtonArt &button_art,
-                       const GameState &state,
+                       GameState &state,
                        const LandedStoreSession &session,
                        std::int16_t stellar_id,
                        const StoreLayout &layout,

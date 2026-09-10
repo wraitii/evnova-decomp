@@ -3,6 +3,8 @@
 #include "game/game_state.hpp"
 #include "game/landed_store.hpp"
 #include "game/landed_window.hpp"
+#include "game/outfit.hpp"
+#include "game/weapon.hpp"
 
 #include <string>
 #include <string_view>
@@ -202,4 +204,44 @@ TEST_CASE("stellar outfit availability follows tech level",
     CHECK(game::NovaLanded_StellarSellsOutfits(state, id) == expected);
   }
   CHECK(checked > 0);
+}
+
+// NovaUi_IsOutfitterPurchaseAllowed (0x00491950) mode-99 bay arm: buying a
+// carried-ship outfit requires a mounted bay with room for one more craft.
+// The Viper (0x9e) is bound to weapon bank 21; its bay weapon is "Viper Bay"
+// (0x9d, MaxAmmo 4) and its Require needs the Fighter Bay License (0x103).
+TEST_CASE("Outfitter gate enforces fighter-bay capacity",
+          "[landed_store][outfitter]") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.ship_class_id = 0; // the starter Shuttle
+  state.player.credits = 5'000'000;
+
+  const game::Outfit *viper = state.scenario.Outfit(0x9e);
+  REQUIRE(viper != nullptr);
+  REQUIRE(viper->mod_type ==
+          static_cast<std::int16_t>(game::OutfitEffect::kAmmo));
+  REQUIRE(viper->mod_val == 21);
+  // The stock Viper carries a system/planet Availability expression; clear it
+  // to isolate the bay-capacity gate under test.
+  auto *mutable_viper = const_cast<game::Outfit *>(viper);
+  const std::string saved_availability = mutable_viper->availability_expr;
+  mutable_viper->availability_expr.clear();
+
+  // Without the bay weapon mounted there is no holding capacity.
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x9e));
+
+  // Grant the Fighter Bay License (require_lo bit 2) and mount the Viper Bay
+  // directly, bypassing the ownership clamps (the license is a fixed grant).
+  state.inventory.outfit_owned_count[0x103 - 0x80] = 1;
+  state.inventory.outfit_owned_count[0x9d - 0x80] = 1;
+  game::NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+  state.inventory.outfit_owned_count[0x9e - 0x80] = 0;
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x9e));
+
+  // With the bay full (one mount x MaxAmmo 4) the gate closes.
+  state.inventory.outfit_owned_count[0x9e - 0x80] = 4;
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x9e));
+
+  mutable_viper->availability_expr = saved_availability;
 }
