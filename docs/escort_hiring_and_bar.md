@@ -10,7 +10,9 @@ Ghidra (2026 pass). The clean-room counterparts live in
 ## The Bar modal (`NovaUi_RunTravelDestinationServicesWindow` 0x0047c8e0)
 
 - Window `DAT_007d0690` built from **DLOG 0x3f5**, or **0x3fd** when the
-  destination desc (stellar resource id + 10000) carries a
+  destination desc (**0-based stellar index + 10000**, i.e. the same desc
+  family as Earth 10000 / Port Kane 10009; not the raw-id landing description)
+  carries a
   `dialog_variant >= 0x80`; the variant is the art PICT, blitted into DITL
   entry 8. Backdrop PICT **0x2137** (plain) / **0x2138** (with art). Entry 7
   is the prompt panel; its text is the desc main text run through
@@ -49,7 +51,9 @@ Ghidra (2026 pass). The clean-room counterparts live in
 
 - DLOG 0x3f6; news PICT = the destination government's `news_pic_id`
   (GovtDef +0x44), else PICT **9000** (fallback if the govt PICT fails to
-  load).
+  load). DITL 0x3f6 is the 2-byte `0xffff` placeholder in `Nova.rez`, so the
+  window draws from the DLOG bounds plus the hardcoded panels below, not from
+  DITL items.
 - `NovaUi_ComposeTravelNewsTexts` (0x0047d600, formerly `NovaUi_RedrawTravelNewsHeader`) composes two texts, called at
   bar entry: **headline** = random STR# 0x1fa4 (Commercials) entry, else
   STR# 0x7d2 0xbe ("No news is good news"); **body** = disaster-report text

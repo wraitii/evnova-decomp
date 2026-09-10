@@ -2115,11 +2115,9 @@ void NovaBar_ComposeNewsTexts(GameState &state,
 void RunBarNewsWindow(SdlPlatform &platform,
                       GameState &state,
                       std::int16_t stellar_id,
+                      const std::string &headline,
+                      const std::string &body,
                       const std::function<void()> &render_background) {
-  std::string headline;
-  std::string body;
-  NovaBar_ComposeNewsTexts(state, stellar_id, headline, body);
-
   // Government news PICT with the 9000 fallback (0x0047d180 prologue).
   std::int16_t news_pict = kNewsDefaultPict;
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
@@ -2136,14 +2134,13 @@ void RunBarNewsWindow(SdlPlatform &platform,
   }
 
   const auto dlog = NovaResource_LoadDialogDefinition(kNewsDialogId);
-  const auto items =
-      dlog ? NovaResource_LoadDialogItems(dlog->dialog_item_list_id)
-           : std::nullopt;
-  if (!dlog || !items) {
-    NovaLog::Todo("news DLOG/DITL 0x3f6 unavailable; skipping the Holovid "
-                  "window");
+  if (!dlog) {
+    NovaLog::Todo("news DLOG 0x3f6 unavailable; skipping the Holovid window");
     return;
   }
+  // DITL 0x3f6 is the 2-byte 0xffff placeholder in Nova.rez (the news text
+  // is drawn from the DLOG bounds plus two hardcoded panels by
+  // NovaUi_DrawTravelNewsWindow 0x0047d370); no DITL items are required.
   const float win_w = static_cast<float>(dlog->right - dlog->left);
   const float win_h = static_cast<float>(dlog->bottom - dlog->top);
   const SDL_FPoint output = platform.logical_playfield_size();
@@ -2247,17 +2244,32 @@ LandedExit RunBarDialog(SdlPlatform &platform,
                         GameState &state,
                         std::int16_t stellar_id,
                         const std::function<void()> &render_background) {
-  // Prompt text: the destination desc (stellar id + 10000) run through the
-  // placeholder pass (Ui_LoadSelectionDialogResource 0x004c6d50). A variant
-  // >= 0x80 is the art PICT and selects the DLOG 0x3fd / PICT 0x2138 pair.
+  // The original composes the news texts once at bar entry
+  // (NovaUi_ComposeTravelNewsTexts 0x0047d600, before the selection-dialog
+  // load); the Holovid window (0x0047d180) only displays the stored strings,
+  // so repeated Holovid opens show the same text. Keep the same split here.
+  std::string news_headline;
+  std::string news_body;
+  NovaBar_ComposeNewsTexts(state, stellar_id, news_headline, news_body);
+
+  // Prompt text: the bar/destination desc is the `dësc` at (0-based stellar
+  // index + 10000), e.g. Earth -> 10000 "Bars: Earth", Port Kane (0x89) ->
+  // 10009 "The Hypergate". The original passes
+  // g_ship_states->ai_secondary_target_slot + 10000 and that slot is the
+  // 0-based g_stellar_defs index -- NOT the raw stellar id, which is a
+  // different desc family (the landing description loaded by
+  // NovaResource_LoadStellarDescription). Run through the placeholder pass
+  // (Ui_LoadSelectionDialogResource 0x004c6d50). A variant >= 0x80 is the art
+  // PICT and selects the DLOG 0x3fd / PICT 0x2138 pair.
   std::string prompt_text;
   std::uint16_t art_pict = 0;
-  if (const auto desc = NovaResource_LoadDescription(static_cast<std::uint16_t>(
-          static_cast<std::uint16_t>(stellar_id) + 10000U))) {
-    prompt_text = desc->text;
-    Mission_ExpandStringPlaceholders(state, prompt_text);
-    if (desc->dialog_variant >= 0x80) {
-      art_pict = static_cast<std::uint16_t>(desc->dialog_variant);
+  if (const auto desc_id = NovaDocked_BarDescriptionId(stellar_id)) {
+    if (const auto desc = NovaResource_LoadDescription(*desc_id)) {
+      prompt_text = desc->text;
+      Mission_ExpandStringPlaceholders(state, prompt_text);
+      if (desc->dialog_variant >= 0x80) {
+        art_pict = static_cast<std::uint16_t>(desc->dialog_variant);
+      }
     }
   }
   const bool has_art = art_pict != 0;
@@ -2452,7 +2464,12 @@ LandedExit RunBarDialog(SdlPlatform &platform,
     }
     case 3:
       // Holovid / news window (NovaUi_RunTravelNewsWindow 0x0047d180).
-      RunBarNewsWindow(platform, state, stellar_id, render_background);
+      RunBarNewsWindow(platform,
+                       state,
+                       stellar_id,
+                       news_headline,
+                       news_body,
+                       render_background);
       break;
     case 5:
       // Hire Escort: capacity gate + the shipyard purchase loop in hire mode
@@ -2533,6 +2550,15 @@ LandedExit RunBarDialog(SdlPlatform &platform,
 }
 
 } // namespace
+
+// Ghidra 0x0047c8e0 NovaUi_RunTravelDestinationServicesWindow prompt id.
+std::optional<std::uint16_t>
+NovaDocked_BarDescriptionId(std::int16_t stellar_id) {
+  if (stellar_id < kResourceIdBase) {
+    return std::nullopt;
+  }
+  return static_cast<std::uint16_t>((stellar_id - kResourceIdBase) + 10000);
+}
 
 // Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts, disaster-report arm. The
 // original counts defined records with more than one remaining active day,

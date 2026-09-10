@@ -1,10 +1,13 @@
 #include "game/docked_dialog.hpp"
 #include "game/game_state.hpp"
 
+#include "brgr_archive.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -141,6 +144,39 @@ TEST_CASE("disaster report only covers records with more than one day left",
   // No present records at all -> nullopt (the caller uses generic news).
   state.scenario.disaster_defs.assign(0x100, {});
   CHECK_FALSE(Bar_ComposeDisasterReport(state, 0x89).has_value());
+}
+
+// The bar's prompt panel is the destination desc at (0-based stellar index +
+// 10000), not the raw-id landing description. The original passes
+// g_ship_states->ai_secondary_target_slot + 10000 in
+// NovaUi_RunTravelDestinationServicesWindow 0x0047c8e0, and that slot is the
+// 0-based g_stellar_defs index.
+TEST_CASE("bar prompt resolves the destination desc family",
+          "[docked][bar][disaster]") {
+  CHECK(NovaDocked_BarDescriptionId(0x80) ==
+        std::optional<std::uint16_t>{10000}); // Earth
+  CHECK(NovaDocked_BarDescriptionId(0x89) ==
+        std::optional<std::uint16_t>{10009}); // Port Kane
+  CHECK_FALSE(NovaDocked_BarDescriptionId(0x7f).has_value());
+
+  const auto bar_desc = NovaResource_LoadDescription(10009);
+  REQUIRE(bar_desc.has_value());
+  CHECK(bar_desc->text.find("Hypergate") != std::string::npos);
+
+  // The raw-id landing description is a different resource/text.
+  const auto landing = NovaResource_LoadStellarDescription(0x89);
+  REQUIRE(landing.has_value());
+  CHECK(landing->text != bar_desc->text);
+}
+
+// The Holovid window renders from the DLOG 0x3f6 bounds plus hardcoded text
+// panels (NovaUi_DrawTravelNewsWindow 0x0047d370). Its DITL is the 2-byte
+// 0xffff placeholder in Nova.rez, so the window must not require a parseable
+// item list.
+TEST_CASE("news window DLOG exists while its DITL is a placeholder",
+          "[docked][news]") {
+  REQUIRE(NovaResource_LoadDialogDefinition(0x3f6).has_value());
+  CHECK_FALSE(NovaResource_LoadDialogItems(0x3f6).has_value());
 }
 
 } // namespace game
