@@ -61,6 +61,16 @@ NovaDocked_SubWindowFramePict(LandedService service);
 [[nodiscard]] std::optional<std::string>
 Bar_ComposeDisasterReport(GameState &state, std::int16_t landed_stellar_id);
 
+// The `dësc` resource id backing the Bar/destination prompt for a landed
+// stellar. Ghidra 0x0047c8e0 passes g_ship_states->ai_secondary_target_slot +
+// 10000, where that slot is the 0-based g_stellar_defs index -- so this is
+// (stellar_id - 0x80) + 10000, e.g. Earth (0x80) -> 10000 "Bars: Earth" and
+// Port Kane (0x89) -> 10009 "The Hypergate". Distinct from the landing
+// description (NovaResource_LoadStellarDescription), which is keyed by raw
+// stellar id. Returns nullopt for a non-0x80-based stellar id.
+[[nodiscard]] std::optional<std::uint16_t>
+NovaDocked_BarDescriptionId(std::int16_t stellar_id);
+
 // Runs one sub-window dialog modal over the docked screen for `service`.
 // `render_background` re-renders the docked menu each frame; the dialog adds
 // a dim scrim, then the service's frame PICT (NovaDocked_SubWindowFramePict)
