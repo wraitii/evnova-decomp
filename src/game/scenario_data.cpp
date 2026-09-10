@@ -830,6 +830,38 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 }
 
 // ---------------------------------------------------------------------------
+// j\x9fnk (specialized trade commodity) decode
+// ---------------------------------------------------------------------------
+// Field map verified against the loader's junk pass (0x004bd3c0) and the
+// Bible's j\xf6nk resource: SoldAt1-8 (+0x00) and BoughtAt1-8 (+0x10) are
+// 8 x u16 0x80-based stellar ids rebased to 0-based (<0x80 -> -1); BasePrice
+// (+0x20, negative clamped to 0), Flags (+0x22) and ScanMask (+0x24); then the
+// LCName (+0x26), Abbrev (+0x66), BuyOn (+0xa6) and SellOn (+0x1a5) C strings.
+// The record name is supplied separately (metadata) by the loader.
+[[nodiscard]] JunkDef DecodeJunk(std::span<const std::byte> bytes) {
+  JunkDef def;
+  def.present = true;
+  for (std::size_t i = 0; i < 8; ++i) {
+    const auto rebase = [](std::int16_t stellar) -> std::int16_t {
+      return stellar < 0x80 ? -1 : static_cast<std::int16_t>(stellar - 0x80);
+    };
+    def.sold_at[i] = rebase(ReadBeI16(bytes, 0x00 + i * 2));
+    def.bought_at[i] = rebase(ReadBeI16(bytes, 0x10 + i * 2));
+  }
+  def.base_price = ReadBeI16(bytes, 0x20);
+  if (def.base_price < 0) {
+    def.base_price = 0;
+  }
+  def.flags = ReadBe16(bytes, 0x22);
+  def.scan_mask = ReadBe16(bytes, 0x24);
+  def.lc_name = ReadCStringBounded(bytes, 0x26, 0xff);
+  def.abbrev = ReadCStringBounded(bytes, 0x66, 0xff);
+  def.buy_on = ReadCStringBounded(bytes, 0xa6, 0xff);
+  def.sell_on = ReadCStringBounded(bytes, 0x1a5, 0xff);
+  return def;
+}
+
+// ---------------------------------------------------------------------------
 // g\x9avt (Government / govmnt) decode
 // ---------------------------------------------------------------------------
 // Field offsets verified against Nova Data 1's government payloads and the
@@ -1304,6 +1336,14 @@ const PersDef *ScenarioData::Pers(std::int16_t resource_id) const {
   return &pers_defs[static_cast<std::size_t>(index)];
 }
 
+const JunkDef *ScenarioData::Junk(std::int16_t resource_id) const {
+  const auto index = static_cast<std::int32_t>(resource_id) - 0x80;
+  if (index < 0 || index >= static_cast<std::int32_t>(junk_defs.size())) {
+    return nullptr;
+  }
+  return &junk_defs[static_cast<std::size_t>(index)];
+}
+
 const AsteroidDef *ScenarioData::AsteroidType(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < asteroid_defs.size() ? &asteroid_defs[index] : nullptr;
@@ -1356,6 +1396,9 @@ bool ScenarioData::LoadFromArchives() {
   cron_events.assign(0x200, {});
   // öops disaster table: 0x100 slots, slot i = resource id 0x80 + i.
   disaster_defs.assign(0x100, {});
+  // j\x9fnk specialized-commodity table: 0x80 slots, slot i = resource id
+  // 0x80 + i.
+  junk_defs.assign(0x80, {});
   // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
   asteroid_defs.assign(0x80, {});
 
@@ -1731,6 +1774,19 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_disasters;
     }
   }
+  // j\x9fnk specialized-commodity pass (loader junk pass, after the cr\xf6n
+  // events). 0x80 slots, slot i = resource id 0x80 + i; absent resources stay
+  // !present. The record name is the metadata name.
+  std::size_t loaded_junk = 0;
+  for (std::int32_t id = 0x80; id < 0x80 + 0x80; ++id) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kJunkResourceType, static_cast<std::uint16_t>(id))) {
+      JunkDef def = DecodeJunk(res->bytes);
+      def.display_name = StripSubtitleSuffix(res->name);
+      junk_defs[static_cast<std::size_t>(id) - 0x80] = std::move(def);
+      ++loaded_junk;
+    }
+  }
   // Display-name id post-pass (0x004c3e20): every slot starts with its own
   // index at +0x78a, then same-named slots adopt the first slot's id. The
   // original compares +0x625 name tails with a first-byte bound; exact-name
@@ -1787,7 +1843,7 @@ bool ScenarioData::LoadFromArchives() {
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} nebulae, {} governments, {} fleet defs, {} dude defs, "
       "{} asteroid types, {} impact effects, {} missions, {} personalities, "
-      "{} cron events, {} disasters",
+      "{} cron events, {} disasters, {} junk defs",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
@@ -1802,7 +1858,8 @@ bool ScenarioData::LoadFromArchives() {
       loaded_missions,
       loaded_pers,
       loaded_crons,
-      loaded_disasters);
+      loaded_disasters,
+      loaded_junk);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 

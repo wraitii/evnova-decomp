@@ -1,5 +1,6 @@
 #include "game/docked_dialog.hpp"
 #include "game/game_state.hpp"
+#include "game/hud_overlay.hpp"
 
 #include "brgr_archive.hpp"
 
@@ -178,6 +179,63 @@ TEST_CASE("news window DLOG exists while its DITL is a placeholder",
           "[docked][news]") {
   REQUIRE(NovaResource_LoadDialogDefinition(0x3f6).has_value());
   CHECK_FALSE(NovaResource_LoadDialogItems(0x3f6).has_value());
+}
+
+// The trade center reads its geometry from DLOG/DITL 0x3e9 instead of a
+// hardcoded table. Lock the ordinal -> rect mapping the redraw depends on:
+// UiPanel entry N is DITL item N-1, so the header is item 2, rows 3..10, the
+// summary item 11, the banner item 14 and the Leave/Buy/Sell buttons 0/12/13.
+TEST_CASE("trade center DITL 0x3e9 exposes the expected control rects",
+          "[docked][trade]") {
+  const auto definition = NovaResource_LoadDialogDefinition(0x3e9);
+  REQUIRE(definition.has_value());
+  CHECK(definition->right - definition->left == 426);
+  CHECK(definition->bottom - definition->top == 252);
+  const auto items =
+      NovaResource_LoadDialogItems(definition->dialog_item_list_id);
+  REQUIRE(items.has_value());
+  REQUIRE(items->size() >= 15);
+  CHECK((*items)[2].top == 9);
+  CHECK((*items)[2].left == 38);
+  CHECK((*items)[3].top == 25);
+  CHECK((*items)[10].bottom == 125);
+  CHECK((*items)[11].top == 124);
+  CHECK((*items)[14].top == 190);
+  CHECK((*items)[0].left == 272);
+  CHECK((*items)[12].left == 60);
+  CHECK((*items)[13].left == 166);
+}
+
+// The trade center rows are filled from the c\x9alr list palette, not the
+// store grid colors: the shipped resource has a black list_background and a
+// dark-red list_hilite, which is what the selected row must use.
+TEST_CASE("trade center row palette is the scenario list colors",
+          "[docked][trade]") {
+  const auto style = NovaResource_LoadMainMenuStyle();
+  REQUIRE(style.has_value());
+  CHECK(style->list_background.red == 0x00);
+  CHECK(style->list_background.green == 0x00);
+  CHECK(style->list_background.blue == 0x00);
+  CHECK(style->list_hilite.red == 0x80);
+  CHECK(style->list_hilite.green == 0x00);
+  CHECK(style->list_hilite.blue == 0x00);
+  CHECK(style->list_text.red == 0xff);
+  CHECK(style->list_text.green == 0xff);
+  CHECK(style->list_text.blue == 0xff);
+}
+
+// The Outfitter/Shipyard buttons now resolve their captions from the shared
+// three-state label table (STR# 0x96, table index n -> entry n+1) instead of
+// hardcoded all-caps strings. Lock the entries the store uses.
+TEST_CASE("store button captions resolve from STR# 0x96", "[docked][store]") {
+  CHECK(NovaHud_LoadStringEntry(0x96, 5).value_or("") == "Done");
+  CHECK(NovaHud_LoadStringEntry(0x96, 2).value_or("") == "Buy");
+  CHECK(NovaHud_LoadStringEntry(0x96, 3).value_or("") == "Sell");
+  CHECK(NovaHud_LoadStringEntry(0x96, 4).value_or("") == "Buy Ship");
+  CHECK(NovaHud_LoadStringEntry(0x96, 13).value_or("") == "Hire Escort");
+  CHECK(NovaHud_LoadStringEntry(0x96, 48).value_or("") == "Info");
+  CHECK(NovaHud_LoadStringEntry(0x96, 19).value_or("") == "^");
+  CHECK(NovaHud_LoadStringEntry(0x96, 20).value_or("") == "&");
 }
 
 // The Holovid background is the landed stellar's government NewsPic, else the
