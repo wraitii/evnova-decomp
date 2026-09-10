@@ -1,4 +1,6 @@
 address	name	library	comment
+0x004D61A0	MWRuntime_FUN_004d61a0	msl-crt	MSL ctype alpha-bit test (table bit 0x0001); the store name tint uses std::isalnum instead (0x00490C70 / 0x004948B0).
+0x004D61D0	MWRuntime_FUN_004d61d0	msl-crt	MSL ctype digit-bit test (table bit 0x0008); the store name tint uses std::isalnum instead (0x00490C70 / 0x004948B0).
 0x004DD37E	FUN_004dd37e	blitter	
 0x004DD489	FUN_004dd489	blitter	
 0x004DD594	FUN_004dd594	blitter	

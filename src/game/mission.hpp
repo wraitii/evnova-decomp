@@ -27,16 +27,17 @@ void Mission_ResolveMissionStellarLocators(GameState &state);
 // (0x004c6d50) on every desc load:
 //   {g"a" "b"} / {G"a" "b"}  gender-conditional text (a = male arm, b =
 //                            female arm; the player's 'm' latch chooses)
-//   {pN"a" "b"}              player-ship-count conditional (N)
-//   {bN"a" "b"}              base-ship-count conditional (N)
+//   {pN"a" "b"}              registration conditional (the licensed game takes
+//                            the first arm; unregistered compares the shareware
+//                            day counter against N, ncb Pxxx semantics)
+//   {bN"a" "b"}              Nova control bit N (DAT_005914cc)
 //   !                         leading negator inside a block
 // with backslash escapes inside the quoted strings. Unmatched '{' content is
 // swallowed (the original's state 1 has no terminator branch -- quirk kept),
 // and the negator latch persists across blocks (also kept).
-// TODO(decomp): the {p}/{b} condition bodies (licensed/shareware day counter
-// and the ship-count byte table at DAT_005914cc) are unresolved; the port
-// currently evaluates both as true (the licensed-game {p} arm) and logs. The
-// trailing <PSRK>/<SSRK> ship-class cache pass has no port consumer yet.
+// The port models a registered game, so {pN} keys on control.registered and
+// {bN} reads control.bits. The trailing <PSRK>/<SSRK> ship-class cache pass has
+// no port consumer yet.
 void Mission_ExpandStringPlaceholders(const GameState &state,
                                       std::string &text);
 

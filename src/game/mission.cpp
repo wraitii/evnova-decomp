@@ -1753,6 +1753,7 @@ void Mission_ExpandStringPlaceholders(const GameState &state,
   bool negate = false; // '!' seen in the current header (never reset: quirk)
   bool escaped = false;
   int count = 0;
+  char condition = 'P'; // 'P' = {pN} registration, 'B' = {bN} control bit
   for (const char ch : text) {
     switch (machine) {
     case 1:
@@ -1762,9 +1763,11 @@ void Mission_ExpandStringPlaceholders(const GameState &state,
         machine = male ? 3 : 5;
       } else if (ch == 'p' || ch == 'P') {
         count = 0;
+        condition = 'P';
         machine = 2;
       } else if (ch == 'b' || ch == 'B') {
         count = 0;
+        condition = 'B';
         machine = 2;
       } else if (ch == '!') {
         negate = true;
@@ -1777,18 +1780,25 @@ void Mission_ExpandStringPlaceholders(const GameState &state,
         count = count * 10 + (ch - '0');
         break;
       }
-      // Condition bodies. {pN}: licensed game passes unconditionally; the
-      // shareware day-counter arm is not modeled. {bN}: the original reads a
-      // byte table at DAT_005914cc + N whose meaning is unresolved.
-      // TODO(decomp) skipped: {p} shareware arm and the {b} byte table; both
-      // evaluate as true here (fleet/announcement texts only). `count` carries
-      // the parsed N for when those arms are reconstructed.
-      (void)count;
-      bool pass = true;
+      // Condition bodies (Bible dësc grammar):
+      //   {pN}/{PN}: registration test. The original refuses the first arm
+      //     only when the current expression ship class is unlicensed
+      //     (is_licensed_runtime == 0) and the shareware day counter has
+      //     reached N (ncb Pxxx semantics); the licensed game always passes.
+      //     The port models a registered game, so it keys on
+      //     control.registered and treats an unregistered run as false.
+      //   {bN}/{BN}: Nova control bit N. The original reads DAT_005914cc[N],
+      //     the 10,000-entry control-bit array mirrored by control.bits.
+      const bool pass =
+          condition == 'P'
+              ? state.control.registered
+              : (count >= 0 &&
+                 state.control.ControlBit(static_cast<std::uint32_t>(count)));
+      bool take_first_arm = pass;
       if (negate) {
-        pass = !pass;
+        take_first_arm = !take_first_arm;
       }
-      if (pass) {
+      if (take_first_arm) {
         machine = ch == '"' ? 4 : 3;
       } else {
         machine = ch == '"' ? 6 : 5;
