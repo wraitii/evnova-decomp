@@ -882,6 +882,38 @@ struct FadingEffectInstance {
   float heading_radians = 0.0F;
 };
 
+// Ghidra FreeflightObjectState (g_freeflight_objects_ptr, 0x005914a8),
+// 64 entries at a 0x28-byte stride. Generic in-flight cosmetic objects:
+// the cargo/junk pods spawned by Outfit_RedistributeFleetCargoOverflow's
+// jettison pass (Ship_SpawnFreeflightObjectForShip 0x0041f800), plus the
+// beam-hit / effect-package / launched-drone variants spawned by
+// Ship_SpawnFreeflightObjectAtPosition (0x0041fb50). Positions and lifetimes
+// use the original normalized 30 Hz frame-time units; `lifetime_ticks < 0`
+// is the inactive sentinel.
+struct FreeflightObjectState {
+  float pos_x = 0.0F;           // +0x04
+  float pos_y = 0.0F;           // +0x08
+  float vel_x = 0.0F;           // +0x0c
+  float vel_y = 0.0F;           // +0x10
+  float lifetime_ticks = -1.0F; // +0x14
+  // Animation frame accumulator (advanced by spin_rate each tick and wrapped
+  // in [0, kFreeflightSpinFrames) by the tick).
+  float frame_counter = 0.0F;  // +0x18
+  std::int16_t system_id = -1; // +0x1c
+  // Sprite-set index into the 500+index spin table (0 = the stock cargo/junk
+  // spin set for the jettison variant).
+  std::int16_t sprite_set_index = 0; // +0x1e
+  // Frame advance per tick: one of -1, 0 or +1 (Ghidra draw-mode).
+  std::int16_t spin_rate = 0; // +0x20
+  std::int16_t extra = 0;     // +0x22 (SpawnAtPosition payload id)
+  // Persistent latch: set by the at-position variant (launched drones /
+  // shuttles, 0x0041fb50) and clear for the jettison pods.
+  bool persistent = false; // +0x24
+
+  // Pool size for the 64-slot FreeflightObjectState table.
+  static constexpr std::size_t kPoolSize = 0x40;
+};
+
 // Transient on-screen HUD overlay message state, mirroring the original's
 // g_hud_overlay_msg_buffer / g_hud_overlay_msg_color pair written by
 // NovaHud_ShowOverlayMessage (0x0047e2d0) and replayable by
@@ -1311,6 +1343,8 @@ struct GameState {
   std::array<BeamHit, 0x40> beam_hit_queue{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};
   std::array<FadingEffectInstance, 0x20> fading_effect_instances{};
+  std::array<FreeflightObjectState, FreeflightObjectState::kPoolSize>
+      freeflight_objects{};
 
   // Ghidra g_pending_combat_chatter_{kind,government_id,variant}
   // (0x007353fe/0x00735400/0x00735402). Written by Frame_QueueCombatChatter

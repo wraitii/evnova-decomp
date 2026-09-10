@@ -5,6 +5,9 @@
 #include <cmath>
 #include <cstdint>
 
+#include "freeflight_objects.hpp"
+#include "hud_overlay.hpp"
+#include "mission.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
 
@@ -764,11 +767,21 @@ bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
 // ---------------------------------------------------------------------------
 // The player ship's total cargo + junk. Mirrors
 // Outfit_ComputePlayerCargoAndJunkTotal (0x0046a5d0): the 6 cargo bins plus
-// junk quantities (no mission-cargo in this build).
+// every active mission's carried cargo (carrying_resources and
+// cargo_qty_tons >= 0) plus junk quantities.
 std::int16_t Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state) {
   std::int32_t total = 0;
   for (const std::int16_t bin : state.inventory.cargo_bins) {
     total += bin;
+  }
+  for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
+    }
+    const ActiveMission &mission = state.active_missions[slot];
+    if (mission.carrying_resources && mission.cargo_qty_tons >= 0) {
+      total += mission.cargo_qty_tons;
+    }
   }
   for (const std::int16_t junk : state.inventory.junk_counts) {
     if (junk > 0) {
@@ -815,6 +828,137 @@ std::int16_t Outfit_ComputeRemainingCargoSpace(const GameState &state) {
   const std::int32_t capacity = Outfit_ComputePlayerFleetCargoCapacity(state);
   const std::int32_t used = Outfit_ComputePlayerCargoAndJunkTotal(state);
   return static_cast<std::int16_t>(std::max<std::int32_t>(0, capacity - used));
+}
+
+// Ghidra 0x0041f330 Outfit_RedistributeFleetCargoOverflow. See the header.
+void NovaOutfit_RedistributeFleetCargoOverflow(GameState &state,
+                                               bool jettison_all,
+                                               std::uint32_t now_ms) {
+  // 1. Player cargo bins + junk. The original accumulates in 32-bit
+  //    registers and adds each bin as an unsigned 16-bit value, so a
+  //    negative bin would wrap; mirror that with the uint32 accumulator.
+  std::uint32_t total = 0;
+  for (const std::int16_t bin : state.inventory.cargo_bins) {
+    total += static_cast<std::uint16_t>(bin);
+  }
+  for (std::int16_t &junk : state.inventory.junk_counts) {
+    if (junk > 0) {
+      total += static_cast<std::uint16_t>(junk);
+      junk = 0;
+    }
+  }
+  bool mission_overlay_shown = false;
+  // The original freezes a copy of the pre-mission cargo+junk total here for
+  // the escort pod-share divisor (mission cargo is added to the running total
+  // below but not to this snapshot).
+  const std::uint32_t pre_mission_total = total;
+
+  // 2. jettison_all: drain abortable missions' carried cargo and fail them.
+  //    The original requires carrying_resources (MisnActive +0x33),
+  //    cargo_type_id != -1, cargo_qty_tons >= 0 and can_abort (+0x32).
+  //
+  // TODO(decomp(0x0041f330)): figure out whether the zero-cargo match below
+  // is a known original oddity. Tutorial 001 (mïsn 251) has pickup_mode 0
+  // (so Mission_ActivateMissionAtSlot sets carrying_resources at activation),
+  // CargoType 73 and CargoQty 0: it satisfies `cargo_qty_tons >= 0` and is
+  // failed with the "Mission failed." overlay even though it carries no
+  // tonnage. The decompiled gate really is `>= 0`, and
+  // Mission_ResolveMissionStellarTargets routes CargoType through
+  // Mission_ResolveMissionSpecialShipSystem, so this looks faithful; confirm
+  // against the original (or a read of the mïsn ShipSyst/CargoType aliasing)
+  // before deciding to diverge.
+  if (jettison_all) {
+    for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+      if (!state.active_mission_runtime_flags[slot].is_active) {
+        continue;
+      }
+      ActiveMission &mission = state.active_missions[slot];
+      if (!mission.carrying_resources || mission.cargo_type_id == -1 ||
+          mission.cargo_qty_tons < 0 || !mission.can_abort) {
+        continue;
+      }
+      total += static_cast<std::uint16_t>(mission.cargo_qty_tons);
+      mission.carrying_resources = false;
+      if ((mission.flags_primary & 0x400U) == 0U && !state.travel.engaging) {
+        if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11c)) {
+          NovaHud_ShowOverlayMessage(
+              state, *text, /*duration_frames=*/std::uint64_t{0xf0});
+        }
+        mission_overlay_shown = true;
+      }
+      Mission_FailMissionSlotQuick(
+          state, static_cast<std::int16_t>(slot), now_ms);
+      if (static_cast<std::int16_t>(total) == 0) {
+        total = 1;
+      }
+    }
+  }
+
+  // 3. Spawn the jettisoned-cargo freeflight objects. The original walks the
+  //    player slot and every behavior-6, no-mission-fleet escort, computes
+  //    each hull's share of the fleet cargo, and calls
+  //    Ship_SpawnFreeflightObjectForShip once per ROUND(share / 5.0) tons
+  //    (clamped [1, 12]).
+  const std::int32_t fleet_capacity =
+      Outfit_ComputePlayerFleetCargoCapacity(state);
+  for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    const ShipClass *ship_class = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    bool eligible = slot == 0;
+    if (!eligible && ship.is_active && ship.squad_leader_ship_slot == 0 &&
+        ship.ai_behavior_code == 6 && ship.mission_fleet_slot == -1 &&
+        ship_class != nullptr && ship_class->default_ai_behavior < 3) {
+      eligible = true;
+    }
+    if (!eligible) {
+      continue;
+    }
+    const std::int32_t ship_capacity =
+        slot == 0 ? Outfit_ComputePlayerTotalMass(state)
+                  : (ship_class != nullptr ? ship_class->cargo_holds : 0);
+    float stored = 0.0F;
+    if (slot == 0) {
+      stored = static_cast<float>(static_cast<std::int16_t>(total));
+    } else if (fleet_capacity > 0) {
+      stored =
+          static_cast<float>(static_cast<std::int16_t>(pre_mission_total)) *
+          (static_cast<float>(ship_capacity) /
+           static_cast<float>(fleet_capacity));
+    }
+    if (stored <= 0.0F) {
+      continue;
+    }
+    if (!state.travel.engaging) {
+      const int pods =
+          std::clamp(static_cast<int>(std::lround(stored / 5.0F)), 1, 12);
+      for (int i = 0; i < pods; ++i) {
+        NovaFreeflight_SpawnForShip(state, ship);
+      }
+    }
+    // g_playerInventoryAndLoadoutDirty.
+    state.stat_cache_valid = false;
+  }
+
+  // 4. Clear the player's standard bins (the junk pass above already
+  //    zeroed every positive count).
+  state.inventory.cargo_bins.fill(0);
+
+  // 5. Feedback: the jettison cue plus the cargo-jettisoned overlay unless the
+  //    mission-failed overlay already fired.
+  if (static_cast<std::int16_t>(total) > 0 && !state.travel.engaging) {
+    state.pending_ui_sounds.push_back(GameState::PendingUiSound{4, 1});
+    if (!mission_overlay_shown) {
+      const std::uint16_t entry = jettison_all ? 0x121 : 0x122;
+      if (auto text = NovaHud_LoadStringEntry(0x7d2, entry)) {
+        NovaHud_ShowOverlayMessage(
+            state, *text, /*duration_frames=*/std::uint64_t{0xf0});
+      }
+    }
+  }
+
+  // Outfit_RecomputeOutfitDerivedState (0x0046d4b0) is modelled lazily.
+  state.stat_cache_valid = false;
 }
 
 // Ghidra 0x0046cb90 Outfit_HasMiningScoopOutfit. ModType 0x1F in any of the

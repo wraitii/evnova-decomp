@@ -171,6 +171,21 @@ Outfit_ComputePlayerTotalMass(const GameState &state);
 [[nodiscard]] std::int16_t
 Outfit_ComputeRemainingCargoSpace(const GameState &state);
 
+// Ghidra 0x0041f330 Outfit_RedistributeFleetCargoOverflow. The fleet cargo
+// overflow / jettison pass. Called with `jettison_all` true by the Player Info
+// Cargo page's Jettison action (0x00499c10) and with either value by the
+// in-flight dump-cargo command (0x0044aa70). Clears the player's six cargo
+// bins and every junk count; `jettison_all` additionally drains the cargo of
+// abortable active missions and fails them (STR# 0x7d2 0x11c "Mission
+// failed."). Plays the jettison cue and shows STR# 0x7d2 0x121/0x122.
+// Spawns the visible jettisoned-cargo pods through the FreeflightObjectState
+// pool (Ship_SpawnFreeflightObjectForShip 0x0041f800), ROUND(share/5) clamped
+// [1,12] per eligible player/escort hull. `now_ms` is the sim clock used by
+// the mission-failure teardown helpers.
+void NovaOutfit_RedistributeFleetCargoOverflow(GameState &state,
+                                               bool jettison_all,
+                                               std::uint32_t now_ms);
+
 // Whether the player owns at least one outfit whose any mod type equals
 // `effect` (a cheap whole-inventory probe). The heavier per-slot helpers use
 // this as a fast gate.

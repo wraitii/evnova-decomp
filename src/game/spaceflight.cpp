@@ -431,7 +431,9 @@ void NovaFrame_TickSystems(GameState &state,
 //                               the P-key Player Info modal, see
 //                               docs/player_info_window.md and
 //                               src/game/player_info_window.cpp;
-//                               jettison execution 0x0041F330 still TODO)
+//                               jettison execution 0x0041F330 is wired
+//                               through the modal's confirmed flag and the
+//                               in-flight Alt+cmd dump channel 0x00451907)
 //   mission-computer window     0x00451C87 -> 0x00451DB0 (ported in the loop's
 //                               mission_info block)
 //   cloak-toggle command        0x00451DB0 -> 0x00451E60 (ported:
@@ -1677,6 +1679,19 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                                          arm_modifier_held &&
                                              held(binding_key[0x12]),
                                          frame_time_ms / kOriginalTickMs);
+      // In-flight cargo dump (Ghidra 0x0044aa70 block 0x00451907): the
+      // arm-modifier pair (0x38/0x6f) plus binding slot 0x0f dumps the fleet
+      // cargo. Shift held selects the non-mission-only variant (cVar6 = 0);
+      // without Shift everything, mission cargo included, is jettisoned
+      // (cVar6 = 1). The original calls Outfit_RedistributeFleetCargoOverflow
+      // while the command is held; the pass is idempotent after the first
+      // frame because the cargo is already empty.
+      if (arm_modifier_held && held(binding_key[0x0f])) {
+        const bool shift_held = platform.IsOriginalKeyCodeHeld(0x2a) ||
+                                platform.IsOriginalKeyCodeHeld(0x36);
+        NovaOutfit_RedistributeFleetCargoOverflow(
+            state, /*jettison_all=*/!shift_held, now_ms);
+      }
       // Player Info window (Ghidra 0x00451b91 -> 0x00451c4f, binding slot
       // 0x19 = the manual's P-key dialog). The original hides the travel-
       // selection sprite, redraws viewport+radar and resets the average
@@ -1685,7 +1700,16 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // The mission-computer window (0x00451c87 -> 0x00451db0) that follows
       // this block is TODO(decomp).
       if (held(binding_key[0x19])) {
-        (void)NovaPlayerInfo_RunWindow(platform, state, view, hud);
+        const PlayerInfoWindowResult info_result =
+            NovaPlayerInfo_RunWindow(platform, state, view, hud);
+        // The original runs Outfit_RedistributeFleetCargoOverflow(1) inside
+        // the window loop when the Cargo page's Jettison action is confirmed
+        // (0x00499c10); the port surfaces the confirmation and applies it
+        // here, where the sim clock is in scope for the mission teardown.
+        if (info_result.jettison_confirmed) {
+          NovaOutfit_RedistributeFleetCargoOverflow(
+              state, /*jettison_all=*/true, now_ms);
+        }
         resync_frame_clock();
       }
       NovaPlayer_TickCloakCommand(

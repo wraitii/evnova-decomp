@@ -634,7 +634,8 @@ void DrawTextPage(SdlPlatform &platform,
 // ---------------------------------------------------------------------------
 
 bool RunJettisonConfirmDialog(SdlPlatform &platform,
-                              NovaFontCache &font_cache) {
+                              NovaFontCache &font_cache,
+                              const std::function<void()> &render_background) {
   auto definition = NovaResource_LoadDialogDefinition(0xbba);
   if (!definition) {
     NovaLog::Todo("player-info: confirm dialog DLOG 0xbba unavailable; "
@@ -650,7 +651,8 @@ bool RunJettisonConfirmDialog(SdlPlatform &platform,
   UiPanel_SetEntryTextPascal(*window, 3, MiscString(kStrJettisonConfirm, ""));
   short code = -1;
   while (!platform.quit_requested() && code != 1 && code != 5) {
-    UiWindow_RunInteractionLoop(platform, font_cache, *window, &code, {});
+    UiWindow_RunInteractionLoop(
+        platform, font_cache, *window, &code, render_background);
   }
   return code == 1;
 }
@@ -1037,12 +1039,11 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
           platform.Present();
         } else if (released == kTabJettison) {
           if (page == 2 && any_cargo &&
-              RunJettisonConfirmDialog(platform, font_cache)) {
-            // Outfit_RedistributeFleetCargoOverflow(true) 0x0041f330 is
-            // not ported; the confirm result is surfaced to the caller.
-            NovaLog::Todo("player-info: jettison execution "
-                          "(Outfit_RedistributeFleetCargoOverflow "
-                          "0x0041f330) not ported");
+              RunJettisonConfirmDialog(
+                  platform, font_cache, [&]() { redraw(-1); })) {
+            // The original runs Outfit_RedistributeFleetCargoOverflow(true)
+            // (0x0041f330) here and closes; the port surfaces the confirmed
+            // flag so the caller can apply it with the sim clock in scope.
             result.jettison_confirmed = true;
             close = true;
           }

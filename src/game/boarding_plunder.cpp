@@ -2139,14 +2139,58 @@ void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
   }
 
   // ---- Random-bin cargo transfer ------------------------------------------
-  // TODO(decomp) skipped: the original moves cargo bin-by-bin from the
-  // victim's ShipState.field_0x7a..0x84 bins into the boarder's, capped by
-  // the boarder's free Holds and the victim's capacity (Ship_ComputeShip-
-  // TotalMass for a player victim). The port models cargo bins only on the
-  // player's PlayerInventory, not per Ship, and an AI boarder has nowhere to
-  // carry plundered bins, so no transfer can be represented. The loot
-  // overlay therefore only ever reports the credits share below.
-  const std::int32_t transferred = 0;
+  // The original walks random bins from the victim's ShipState.field_0x7a..0x84
+  // cargo into the boarder's bins, capped by the boarder's free Holds (class
+  // cargo_holds minus its current bins) and by the victim's capacity
+  // (Ship_ComputeShipTotalMass for the player, class cargo_holds for NPCs).
+  // The port models the player's bins on PlayerInventory; NPC hulls have no
+  // cargo model and Ship_AllocateShipSlotInSystem leaves their bins zero, so
+  // only a player victim can contribute. The boarder is an NPC (the player
+  // boards through the plunder window), so its own bins are unmodelled and
+  // only its free-holds budget matters here.
+  std::int32_t transferred = 0;
+  if (boarded.ship_instance_id == 0) {
+    const std::int32_t boarder_holds =
+        boarder_class != nullptr ? boarder_class->cargo_holds : 0;
+    std::int32_t boarder_free = boarder_holds;
+    const std::int32_t victim_capacity = Outfit_ComputePlayerTotalMass(state);
+    std::int32_t victim_total = 0;
+    for (const std::int16_t bin : state.inventory.cargo_bins) {
+      if (bin > 0) {
+        victim_total += bin;
+      }
+    }
+    if (victim_total > victim_capacity) {
+      victim_total = victim_capacity;
+    }
+    while (boarder_free > 0 && victim_total > 0) {
+      const int bin = NovaRandomRange(state.rng, 6);
+      const std::int16_t victim_bin =
+          state.inventory.cargo_bins[static_cast<std::size_t>(bin)];
+      if (victim_bin <= 0) {
+        continue; // empty bin: the original retries
+      }
+      std::int32_t qty = victim_bin;
+      if (boarder_free < qty) {
+        qty = boarder_free;
+      }
+      if (victim_capacity < qty + transferred) {
+        qty = victim_capacity - transferred;
+      }
+      if (qty < 0) {
+        qty = 0;
+      }
+      state.inventory.cargo_bins[static_cast<std::size_t>(bin)] =
+          static_cast<std::int16_t>(victim_bin - qty);
+      boarder_free -= qty;
+      victim_total -= qty;
+      transferred += qty;
+    }
+    if (transferred > 0) {
+      // g_playerInventoryAndLoadoutDirty.
+      state.stat_cache_valid = false;
+    }
+  }
 
   // ---- Credits share (only when the victim is the player) -----------------
   // transfer = credits * odds * 29 * 0.0001 (disasm 0x00412d6a: odds*29 then
