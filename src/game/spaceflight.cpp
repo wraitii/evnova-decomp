@@ -121,10 +121,12 @@ namespace {
 void Stub_PlayerCore(GameState &state) { (void)state; }
 
 // Ghidra scope 9 of Frame_TickSystems (0x004186b0). The original splits
-// weapon contact into the sprite-overlap callback Ship_HandleSpritePair-
-// Collision (0x004374f0), which runs during sprite-layer processing, and the
-// blast-proximity pass Shot_ResolveCollisions (0x00437e20) in this scope.
-// Stellar and asteroid contact branches remain deferred.
+// weapon contact into the sprite-overlap callbacks Ship_HandleSpritePair-
+// Collision (0x004374f0) and Asteroid_HandleSpritePairCollision (0x00436f70),
+// which run during sprite-layer processing, plus the blast-proximity pass
+// Shot_ResolveCollisions (0x00437e20) in this scope. The stellar contact
+// branch and the beam-vs-asteroid arm of Shot_UpdateBeamHitQueue remain
+// deferred.
 void Stub_Collisions(GameState &state) {
   NovaWeapon_ResolveDirectShotCollisions(state);
   NovaWeapon_ResolveProjectileCollisions(state);
