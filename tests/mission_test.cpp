@@ -429,3 +429,89 @@ TEST_CASE("crön date window and post-holdoff gate the daily tick") {
   Mission_TickDailyCronEvents(state);
   CHECK_FALSE(state.cron_event_states[1].is_active);
 }
+
+TEST_CASE("disaster slots roll their per-day chance and count down",
+          "[scenario][disaster]") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(state.scenario.disaster_defs.size() == 0x100);
+
+  // Synthetic record bound to stellar 0x89, guaranteed to activate.
+  auto &def = state.scenario.disaster_defs[0];
+  def = {};
+  def.present = true;
+  def.target_stellar = 0x89;
+  def.duration_days = 30;
+  def.start_chance_percent = 100; // roll+1 <= 100 always holds
+
+  System_UpdateDisasterStates(state);
+  CHECK(def.active_stellar == 0x89 - 0x80); // rebased to the 0-based index
+  CHECK(def.days_remaining == 30);
+
+  // Active: the slot is now past the roll branch and burns one day per sweep,
+  // keeping the originally chosen stellar.
+  System_UpdateDisasterStates(state);
+  CHECK(def.days_remaining == 29);
+  CHECK(def.active_stellar == 0x09);
+
+  // Zero chance never activates.
+  auto &never = state.scenario.disaster_defs[1];
+  never = {};
+  never.present = true;
+  never.target_stellar = 0x89;
+  never.duration_days = 5;
+  never.start_chance_percent = 0;
+  System_UpdateDisasterStates(state);
+  CHECK(never.active_stellar == -1);
+  CHECK(never.days_remaining == -1);
+
+  // The ActivateOn expression gates the activation; "b300" is false until the
+  // control bit is set. Because the failed roll leaves the slot idle and
+  // not-started, a later sweep retries it.
+  auto &gated = state.scenario.disaster_defs[2];
+  gated = {};
+  gated.present = true;
+  gated.target_stellar = 0x89;
+  gated.duration_days = 5;
+  gated.start_chance_percent = 100;
+  gated.activation_expression = "b300";
+  System_UpdateDisasterStates(state);
+  CHECK(gated.active_stellar == -1);
+  state.control.SetControlBit(300, true);
+  System_UpdateDisasterStates(state);
+  CHECK(gated.active_stellar == 0x09);
+  CHECK(gated.days_remaining == 5);
+
+  // Undefined slots are reset to the idle sentinels.
+  for (auto &slot : state.scenario.disaster_defs) {
+    slot.present = false;
+  }
+  System_UpdateDisasterStates(state);
+  CHECK(def.active_stellar == -1);
+  CHECK(def.days_remaining == -1);
+  CHECK_FALSE(def.started_once);
+}
+
+TEST_CASE("an Any-target disaster picks an available non-travel stellar",
+          "[scenario][disaster]") {
+  GameState state;
+  state.scenario.stellars.resize(4);
+  state.scenario.stellars[0].is_available = true;
+  state.scenario.stellars[1].is_available = false;
+  state.scenario.stellars[2].is_available = true;
+  state.scenario.stellars[2].flags = 0x20U; // travel-only lane: not eligible
+  state.scenario.stellars[3].is_available = true;
+
+  state.scenario.disaster_defs.assign(1, {});
+  auto &def = state.scenario.disaster_defs[0];
+  def.present = true;
+  def.target_stellar = -1; // "any"
+  def.duration_days = 7;
+  def.start_chance_percent = 100;
+
+  System_UpdateDisasterStates(state);
+  REQUIRE(def.days_remaining == 7);
+  // Only slots 0 and 3 are available and non-travel; the original rejects
+  // samples over the full table.
+  CHECK((def.active_stellar == 0 || def.active_stellar == 3));
+}

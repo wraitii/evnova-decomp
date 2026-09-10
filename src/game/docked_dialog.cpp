@@ -34,6 +34,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 
 namespace game {
 namespace {
@@ -2041,21 +2042,39 @@ constexpr std::uint16_t kNewsDefaultPict = 9000;
 constexpr std::array<std::uint16_t, 6> kBarButtonLabels{
     0, 10, 0x0b, 0xffff, 0x0c, 0xffff};
 
-// Ghidra 0x0047d600 NovaUi_RedrawTravelNewsHeader: composes the news-window
+// Stellar / disaster resource ids are 0x80-based; the runtime tables are
+// indexed from zero.
+constexpr std::int16_t kResourceIdBase = 0x80;
+
+// Commodity name for the disaster report (g_disaster_defs +4 indexes the
+// 0x100-stride DAT_0069d2cc Pascal-string table; NovaData_LoadDisplayName-
+// PstringTables 0x004c7040 fills entry n from STR# 0xfa1 n+1, falling back to
+// FUN_004c73b0(id+0x238c)). The original clamps a negative commodity to -1 and
+// would read the preceding table slot; only 0..5 are shipped, so guard here.
+std::string BarCommodityName(std::int16_t commodity) {
+  if (commodity < 0 || commodity > 5) {
+    return "?";
+  }
+  return NovaHud_LoadStringEntry(0xfa1,
+                                 static_cast<std::uint16_t>(commodity + 1))
+      .value_or("?");
+}
+
+// Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts: composes the news-window
 // texts shown by the Bar's Holovid button. Headline: a random STR# 0x1fa4
 // (Commercials) entry, falling back to STR# 0x7d2 0xbe when the pool is
-// missing. Body: a random STR# 0x1fa5 (Generic News) entry, falling back to
-// 0x7d2 0xbf.
-// TODO(decomp): the two higher-precedence arms -- the disaster-report text
-// (g_disaster_defs scan; the dïsaster family is not modelled,
-// System_UpdateDisasterStates 0x00424f90 is 0%) and the crön-news arm (active
-// crön events carry allied-government news STR# ids at block +0x2a/+0x32 and
-// a plain text id at +0x3a; the clean-room CronEventState does not model
-// those fields yet).
+// missing. Body, in precedence order: (1) the disaster report for an active
+// öops record (preferring one at the current stellar, or a target -2 record,
+// else any active one) composed from the STR# 0x7d2 fragments and the STR#
+// 0xfa1 commodity name; (2) TODO(decomp) the crön-news arm (active crön events
+// carry allied-government news STR# ids at block +0x2a/+0x32 and a plain text
+// id at +0x3a; CronEventState does not model those fields yet); (3) a random
+// STR# 0x1fa5 (Generic News) entry, falling back to 0x7d2 0xbf. Only the body
+// is disaster-specific; the headline is unaffected.
 void NovaBar_ComposeNewsTexts(GameState &state,
+                              std::int16_t landed_stellar_id,
                               std::string &headline,
                               std::string &body) {
-  (void)state;
   headline.clear();
   body.clear();
   const auto roll_entry =
@@ -2070,8 +2089,16 @@ void NovaBar_ComposeNewsTexts(GameState &state,
   };
   headline = roll_entry(0x1fa4).value_or(
       NovaHud_LoadStringEntry(0x7d2, 0xbe).value_or("No news is good news"));
-  body = roll_entry(0x1fa5).value_or(
-      NovaHud_LoadStringEntry(0x7d2, 0xbf).value_or(""));
+
+  if (const auto disaster_body =
+          Bar_ComposeDisasterReport(state, landed_stellar_id)) {
+    body = *disaster_body;
+  }
+
+  if (body.empty()) {
+    body = roll_entry(0x1fa5).value_or(
+        NovaHud_LoadStringEntry(0x7d2, 0xbf).value_or(""));
+  }
 }
 
 // Ghidra 0x0047d180 NovaUi_RunTravelNewsWindow + 0x0047d370
@@ -2080,15 +2107,18 @@ void NovaBar_ComposeNewsTexts(GameState &state,
 // PICT 9000; the headline band sits at (left+10, top+140, right-10,
 // bottom-180) and the body panel at (left+10, top+170, right-4, bottom-10);
 // both are the original's filled+inverted rects, i.e. a black panel with
-// white wrapped Geneva-12 text. Esc/Return or a click inside the window
-// closes it.
+// white wrapped Geneva-12 text. The input handler
+// (NovaUi_HandleTravelNewsWindowInput 0x0047d560) runs inline in the modal loop
+// below: Esc/Return (key codes 0xd/0x1b) close with action 1, a primary click
+// inside the window rect closes, and the per-frame draw covers its action-6
+// redraw request.
 void RunBarNewsWindow(SdlPlatform &platform,
                       GameState &state,
                       std::int16_t stellar_id,
                       const std::function<void()> &render_background) {
   std::string headline;
   std::string body;
-  NovaBar_ComposeNewsTexts(state, headline, body);
+  NovaBar_ComposeNewsTexts(state, stellar_id, headline, body);
 
   // Government news PICT with the 9000 fallback (0x0047d180 prologue).
   std::int16_t news_pict = kNewsDefaultPict;
@@ -2503,6 +2533,71 @@ LandedExit RunBarDialog(SdlPlatform &platform,
 }
 
 } // namespace
+
+// Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts, disaster-report arm. The
+// original counts defined records with more than one remaining active day,
+// tracking separately those bound to the current stellar (active_stellar ==
+// the selected stellar, or target_stellar == -2 "everywhere"), then
+// reject-samples the relevant subset; the clean-room table is shorter, so the
+// candidate set is built explicitly. Returns the composed body when the drawn
+// record is active and named, else nullopt so the caller falls through to the
+// generic-news pool. Exposed for tests (see tests/docked_dialog_test.cpp).
+std::optional<std::string>
+Bar_ComposeDisasterReport(GameState &state, std::int16_t landed_stellar_id) {
+  const std::int16_t stellar_index =
+      landed_stellar_id >= kResourceIdBase
+          ? static_cast<std::int16_t>(landed_stellar_id - kResourceIdBase)
+          : static_cast<std::int16_t>(-1);
+  std::vector<std::size_t> active_anywhere;
+  std::vector<std::size_t> active_here;
+  for (std::size_t i = 0; i < state.scenario.disaster_defs.size(); ++i) {
+    const DisasterDef &disaster = state.scenario.disaster_defs[i];
+    if (!disaster.present || disaster.days_remaining <= 1) {
+      continue;
+    }
+    active_anywhere.push_back(i);
+    if (disaster.active_stellar == stellar_index ||
+        disaster.target_stellar == -2) {
+      active_here.push_back(i);
+    }
+  }
+  if (active_anywhere.empty()) {
+    return std::nullopt;
+  }
+  const auto &candidates = active_here.empty() ? active_anywhere : active_here;
+  std::uniform_int_distribution<std::size_t> pick(0, candidates.size() - 1);
+  const DisasterDef &disaster =
+      state.scenario.disaster_defs[candidates[pick(state.rng)]];
+  if (disaster.active_stellar == -1 || disaster.display_name.empty()) {
+    return std::nullopt;
+  }
+  const Stellar *stellar = state.scenario.Stellar(
+      static_cast<std::int16_t>(disaster.active_stellar + kResourceIdBase));
+  const auto misc = [](std::uint16_t entry) {
+    return NovaHud_LoadStringEntry(0x7d2, entry).value_or("");
+  };
+  // "Today's top news: <disaster> has raised/lowered the price of <commodity>
+  // on <stellar>." (price_delta < 1 -> lowered).
+  std::string text = misc(0xbe);
+  text += " ";
+  text += disaster.display_name;
+  text += " ";
+  text += misc(0xc0); // has
+  text += " ";
+  text += misc(disaster.price_delta < 1 ? 0xc2 : 0xc1);
+  text += " ";
+  text += misc(0xb5); // the price of
+  text += " ";
+  text += BarCommodityName(disaster.commodity);
+  text += " ";
+  text += misc(0x3c); // on
+  text += " ";
+  if (stellar != nullptr) {
+    text += stellar->name;
+  }
+  text += ".";
+  return text;
+}
 
 std::uint16_t NovaDocked_SubWindowFramePict(LandedService service) {
   switch (service) {

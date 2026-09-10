@@ -23,6 +23,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "landed_window.hpp"
 #include "mission.hpp"
@@ -47,6 +49,17 @@ class SpaceflightView;
 // (Launch/Refuel/Repair are not sub-windows; they dispatch inline).
 [[nodiscard]] std::uint16_t
 NovaDocked_SubWindowFramePict(LandedService service);
+
+// Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts (disaster-report arm).
+// Builds the Holovid news body for an active öops disaster: it prefers a
+// record on `landed_stellar_id` (0x80-based) or a target -2 "everywhere"
+// record, else any active one, and folds its name, price direction, commodity
+// and host stellar into the STR# 0x7d2 template fragments. Returns nullopt
+// when no eligible named record is active (the caller then uses the generic
+// STR# 0x1fa5 news fallback). Extracted from NovaBar_ComposeNewsTexts so the
+// composition can be pinned by tests. Consulted from the Bar Holovid window.
+[[nodiscard]] std::optional<std::string>
+Bar_ComposeDisasterReport(GameState &state, std::int16_t landed_stellar_id);
 
 // Runs one sub-window dialog modal over the docked screen for `service`.
 // `render_background` re-renders the docked menu each frame; the dialog adds

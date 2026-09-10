@@ -10,9 +10,27 @@ credit/reputation opcode. The daily driver is now ported (2025 dates pass): Miss
 clock with year+250 at new game, round-tripped in the .plt block1 +0x14/16/18),
 counts down mission deadlines, and runs on hyperspace arrival (1/2/3 days by
 hull mass), landing (1 day) and launch (15..44 docked days); DatePostInc
-re-runs it per count. Still open in the driver: cron events, stellar income,
-disaster states, per-stellar schedules, availability rerolls. See the progress tracker for
-per-function percentages.
+re-runs it per count. The driver now also ticks crön events, stellar tribute
+income, the per-stellar garrison/schedule countdown, ship/outfit availability
+rerolls, and the öops disaster states (System_UpdateDisasterStates 0x00424F90).
+Still open in the driver: the per-system dude_prob suppression countdown and
+the system-cue daily credits (neither table is modelled). See the progress
+tracker for per-function percentages.
+
+## Disasters (öops)
+
+`ScenarioData::disaster_defs` holds the 0x100 öops slots (id 0x80 + i,
+stride 0x210) decoded by `DecodeDisaster`; the payload is five big-endian
+words (target stellar, commodity, signed price delta, duration days, per-day
+start chance) plus the ActivateOn C string, and the record name is the display
+label. `System_UpdateDisasterStates` runs each game-day from the driver: a
+defined idle slot rolls the chance, tests ActivateOn, then activates on its
+bound stellar (or a random available, non-travel-flagged stellar for target
+-1) for the duration; active slots count down. The Bar/travel-news report
+now renders active disasters (`Bar_ComposeDisasterReport` in docked_dialog).
+The remaining consumer is the commodity-exchange price delta
+(NovaUi_HandleTravelDestinationInteractionLoop 0x0048c730, not ported); the
+.plt block2 +0x3088/+0x3288 runtime persistence is also untracked.
 
 ## Verified m\xefsn payload map (offsets ground-truthed against the loader
 0x0043BBB0, populate 0x0043F8C0, and the EVN Bible; CORRECTED 2025-08: the

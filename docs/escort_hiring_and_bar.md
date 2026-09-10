@@ -50,12 +50,16 @@ Ghidra (2026 pass). The clean-room counterparts live in
 - DLOG 0x3f6; news PICT = the destination government's `news_pic_id`
   (GovtDef +0x44), else PICT **9000** (fallback if the govt PICT fails to
   load).
-- `NovaUi_RedrawTravelNewsHeader` (0x0047d600) composes two texts, called at
+- `NovaUi_ComposeTravelNewsTexts` (0x0047d600, formerly `NovaUi_RedrawTravelNewsHeader`) composes two texts, called at
   bar entry: **headline** = random STR# 0x1fa4 (Commercials) entry, else
   STR# 0x7d2 0xbe ("No news is good news"); **body** = disaster-report text
-  (dïsaster table scan) or crön-event news (allied-govt STR# id at block
-  +0x2a/+0x32, plain text id at +0x3a), else random STR# 0x1fa5 (Generic
-  News), else STR# 0x7d2 0xbf.
+  (defined öops record with >1 remaining day, preferring one at the current
+  stellar or a `target_stellar_id` of -2; composed from STR# 0x7d2
+  0xbe/0xc0/0xc1/0xc2/0xb5/0x3c + STR# 0xfa1 commodity name + host stellar
+  name — ported as `Bar_ComposeDisasterReport`) or crön-event news
+  (allied-govt STR# id at block +0x2a/+0x32, plain text id at +0x3a;
+  **not reconstructed yet**), else random STR# 0x1fa5 (Generic News), else
+  STR# 0x7d2 0xbf.
 - Thumbnails: the shipyard list passes ShipClassDef +0xa0a
   `pict_fallback_sprite_resource_id` to `NovaUi_BlitPictThumbnailCached`
   (0x00497b70): PICT 5000+class when it exists, else the clone-source
