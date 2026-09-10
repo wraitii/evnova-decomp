@@ -2060,6 +2060,63 @@ std::string BarCommodityName(std::int16_t commodity) {
       .value_or("?");
 }
 
+// Shared filled-rect text draw, mirroring
+// DrawContext_DrawPascalStringInFilledRect (0x004bcd30) with the shared screen
+// font (Ship_InitGameplayDataTables 0x004b0c20 sets DAT_00735684 = Geneva and
+// DAT_00735686 = 9). The original fills the rect, then NovaText_DrawText
+// (0x004bc760) lays the text out word-wrapped *inside the rect from its top*
+// via DrawTextW's DT_WORDBREAK branch (the cursor it set is only used by the
+// measure branch); callers invert the rect, netting white-on-black. We
+// approximate the top-aligned first line with a baseline at
+// rect.top + font size and advance later lines by the font line height.
+constexpr float kDialogTextSize = 9.0F;
+constexpr float kDialogTextFirstBaseline = 9.0F;
+
+void DrawDialogFilledText(SdlPlatform &platform,
+                          NovaFontCache &font_cache,
+                          const SDL_FRect &rect,
+                          std::string_view text) {
+  if (rect.w <= 0.0F || rect.h <= 0.0F || text.empty()) {
+    return;
+  }
+  SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(platform.renderer(), &rect);
+  const auto lines = WrapDescriptionLines(
+      text,
+      static_cast<int>(std::max(1.0F, rect.w)),
+      [&](std::string_view line) {
+        return font_cache.TextWidth(NovaFontFamily::kGeneva,
+                                    kDialogTextSize,
+                                    kNovaFontStyleRegular,
+                                    line);
+      });
+  const SDL_Rect clip{static_cast<int>(rect.x),
+                      static_cast<int>(rect.y),
+                      static_cast<int>(rect.w),
+                      static_cast<int>(rect.h)};
+  SDL_SetRenderClipRect(platform.renderer(), &clip);
+  constexpr SDL_Color kWhite{255, 255, 255, 255};
+  const float line_height = static_cast<float>(
+      font_cache.LineHeight(NovaFontFamily::kGeneva, kDialogTextSize));
+  float y = rect.y + kDialogTextFirstBaseline;
+  for (const auto &line : lines) {
+    if (y > rect.y + rect.h) {
+      break;
+    }
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  kDialogTextSize,
+                  kNovaFontStyleRegular,
+                  kWhite,
+                  rect.x,
+                  y,
+                  line);
+    y += line_height;
+  }
+  SDL_SetRenderClipRect(platform.renderer(), nullptr);
+}
+
 // Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts: composes the news-window
 // texts shown by the Bar's Holovid button. Headline: a random STR# 0x1fa4
 // (Commercials) entry, falling back to STR# 0x7d2 0xbe when the pool is
@@ -2167,58 +2224,17 @@ void RunBarNewsWindow(SdlPlatform &platform,
     if (news_art != nullptr) {
       SDL_RenderTexture(platform.renderer(), news_art->get(), nullptr, &window);
     }
-    // The two filled+inverted text panels -> black panels, white text.
-    const auto draw_panel = [&](const SDL_FRect &rect,
-                                const std::string &text) {
-      if (rect.w <= 0.0F || rect.h <= 0.0F || text.empty()) {
-        return;
-      }
-      SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
-      SDL_RenderFillRect(platform.renderer(), &rect);
-      const auto lines = WrapDescriptionLines(
-          text,
-          static_cast<int>(std::max(1.0F, rect.w)),
-          [&](std::string_view line) {
-            return font_cache.TextWidth(
-                NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line);
-          });
-      const SDL_Rect clip{static_cast<int>(rect.x),
-                          static_cast<int>(rect.y),
-                          static_cast<int>(rect.w),
-                          static_cast<int>(rect.h)};
-      SDL_SetRenderClipRect(platform.renderer(), &clip);
-      constexpr SDL_Color kWhite{255, 255, 255, 255};
-      float y = rect.y + 12.0F;
-      for (const auto &line : lines) {
-        if (y > rect.y + rect.h) {
-          break;
-        }
-        NovaText_Draw(platform,
-                      font_cache,
-                      NovaFontFamily::kGeneva,
-                      12.0F,
-                      kNovaFontStyleRegular,
-                      kWhite,
-                      rect.x,
-                      y,
-                      line);
-        y += static_cast<float>(
-            font_cache.LineHeight(NovaFontFamily::kGeneva, 12.0F));
-      }
-      SDL_SetRenderClipRect(platform.renderer(), nullptr);
+    // The two filled+inverted text panels (NovaUi_DrawTravelNewsWindow
+    // 0x0047d370), window-relative as computed by NovaBar_NewsTextPanelRects;
+    // the body is drawn second and covers the 10px overlap.
+    const NewsTextPanels panels = NovaBar_NewsTextPanelRects(win_w, win_h);
+    const auto panel_rect = [&](const std::array<float, 4> &r) {
+      return SDL_FRect{
+          window.x + r[0], window.y + r[1], r[2] - r[0], r[3] - r[1]};
     };
-    // MacOS rects are left/top/right/bottom pairs; the original's panel
-    // rects translate to these offsets inside the window.
-    draw_panel({window.x + 10.0F,
-                window.y + 140.0F,
-                win_w - 20.0F,
-                std::max(0.0F, win_h - 180.0F - 140.0F)},
-               headline);
-    draw_panel({window.x + 10.0F,
-                window.y + 170.0F,
-                win_w - 14.0F,
-                std::max(0.0F, win_h - 10.0F - 170.0F)},
-               body);
+    DrawDialogFilledText(
+        platform, font_cache, panel_rect(panels.headline), headline);
+    DrawDialogFilledText(platform, font_cache, panel_rect(panels.body), body);
     platform.Present();
   };
 
@@ -2358,42 +2374,10 @@ LandedExit RunBarDialog(SdlPlatform &platform,
       SDL_RenderTexture(
           platform.renderer(), destination_art->get(), nullptr, &art_rect);
     }
-    // Prompt panel (entry 7): filled+inverted -> black panel, white text.
-    if (!prompt_text.empty()) {
-      SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
-      SDL_RenderFillRect(platform.renderer(), &prompt_rect);
-      const auto lines = WrapDescriptionLines(
-          prompt_text,
-          static_cast<int>(std::max(1.0F, prompt_rect.w)),
-          [&](std::string_view line) {
-            return font_cache.TextWidth(
-                NovaFontFamily::kGeneva, 12.0F, kNovaFontStyleRegular, line);
-          });
-      const SDL_Rect clip{static_cast<int>(prompt_rect.x),
-                          static_cast<int>(prompt_rect.y),
-                          static_cast<int>(prompt_rect.w),
-                          static_cast<int>(prompt_rect.h)};
-      SDL_SetRenderClipRect(platform.renderer(), &clip);
-      constexpr SDL_Color kWhite{255, 255, 255, 255};
-      float y = prompt_rect.y + 12.0F;
-      for (const auto &line : lines) {
-        if (y > prompt_rect.y + prompt_rect.h) {
-          break;
-        }
-        NovaText_Draw(platform,
-                      font_cache,
-                      NovaFontFamily::kGeneva,
-                      12.0F,
-                      kNovaFontStyleRegular,
-                      kWhite,
-                      prompt_rect.x,
-                      y,
-                      line);
-        y += static_cast<float>(
-            font_cache.LineHeight(NovaFontFamily::kGeneva, 12.0F));
-      }
-      SDL_SetRenderClipRect(platform.renderer(), nullptr);
-    }
+    // Prompt panel (entry 7): filled+inverted -> black panel, white text
+    // (DrawContext_DrawPascalStringInFilledRect 0x004bcd30 via the bar draw
+    // 0x0047cfe0).
+    DrawDialogFilledText(platform, font_cache, prompt_rect, prompt_text);
     // The six-button strip. Hover highlights a slot the way
     // 0x004a26e0's hit-test loop re-draws with the pressed art.
     const SDL_FPoint mouse = platform.mouse_position();
@@ -2558,6 +2542,14 @@ NovaDocked_BarDescriptionId(std::int16_t stellar_id) {
     return std::nullopt;
   }
   return static_cast<std::uint16_t>((stellar_id - kResourceIdBase) + 10000);
+}
+
+// Ghidra 0x0047d370 NovaUi_DrawTravelNewsWindow panel geometry.
+NewsTextPanels NovaBar_NewsTextPanelRects(float window_w, float window_h) {
+  return NewsTextPanels{
+      .headline = {10.0F, 140.0F, window_w - 10.0F, 180.0F},
+      .body = {10.0F, 170.0F, window_w - 10.0F, window_h - 4.0F},
+  };
 }
 
 // Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts, disaster-report arm. The

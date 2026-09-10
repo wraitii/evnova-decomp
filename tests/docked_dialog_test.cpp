@@ -179,4 +179,23 @@ TEST_CASE("news window DLOG exists while its DITL is a placeholder",
   CHECK_FALSE(NovaResource_LoadDialogItems(0x3f6).has_value());
 }
 
+// The Holovid text panels are window-relative (NovaUi_DrawTravelNewsWindow
+// 0x0047d370): headline (10,140)-(w-10,180), body (10,170)-(w-10,h-4). For the
+// shipped 300x230 DLOG 0x3f6 this is a 280x40 headline band and a 280x56 body;
+// the headline must have non-zero height (it used to be computed as h-180-140).
+TEST_CASE("news text panels use the original window-relative rects",
+          "[docked][news]") {
+  const NewsTextPanels panels = NovaBar_NewsTextPanelRects(300.0F, 230.0F);
+  CHECK(panels.headline[0] == 10.0F);
+  CHECK(panels.headline[1] == 140.0F);
+  CHECK(panels.headline[2] == 290.0F);
+  CHECK(panels.headline[3] == 180.0F);
+  CHECK(panels.headline[3] - panels.headline[1] == 40.0F); // non-zero band
+  CHECK(panels.body[0] == 10.0F);
+  CHECK(panels.body[1] == 170.0F);
+  CHECK(panels.body[2] == 290.0F);
+  CHECK(panels.body[3] == 226.0F);
+  CHECK(panels.body[3] - panels.body[1] == 56.0F);
+}
+
 } // namespace game

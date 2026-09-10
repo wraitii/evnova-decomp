@@ -70,10 +70,13 @@ Ghidra (2026 pass). The clean-room counterparts live in
   class's portrait (0x004aeda0) — never 5000+id blindly, or clone classes
   (Used Heavy Shuttle etc.) show the wrong hull; missing PICTs fill the
   atlas cell black.
-- Draw (0x0047d370): PICT over the window rect; headline panel
-  (left+10, top+140, right-10, bottom-180); body panel
-  (left+10, top+170, right-4, bottom-10) — both are the filled+inverted
-  rects, netting a black panel with white wrapped Geneva-12 text.
+- Draw (0x0047d370): PICT over the window rect; headline band
+  (left+10, top+140, right-10, **top+180**); body panel
+  (left+10, top+170, right-10, **bottom-4**) — both use
+  `DrawContext_DrawPascalStringInFilledRect` (0x004bcd30) with the shared
+  Geneva-9 screen font (DAT_00735684/86) and net a black panel with white
+  wrapped text; the body is drawn second and covers the 10px overlap. The
+  window has no DITL controls; close with Esc/Return or a click in the rect.
 
 ## Hiring
 

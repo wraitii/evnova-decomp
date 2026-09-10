@@ -20,6 +20,7 @@
 // out of scope; each dialog is a faithful window frame with a heading, not the
 // service internals.
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -70,6 +71,19 @@ Bar_ComposeDisasterReport(GameState &state, std::int16_t landed_stellar_id);
 // stellar id. Returns nullopt for a non-0x80-based stellar id.
 [[nodiscard]] std::optional<std::uint16_t>
 NovaDocked_BarDescriptionId(std::int16_t stellar_id);
+
+// Window-relative (left, top, right, bottom) rects for the Holovid news text
+// panels, from NovaUi_DrawTravelNewsWindow 0x0047d370: the headline band is
+// (10,140)-(w-10,180) and the body (10,170)-(w-10,h-4). The two overlap by
+// 10px; the body is drawn second and covers it. Exposed so the shipped
+// 300x230 geometry can be pinned by tests.
+struct NewsTextPanels {
+  std::array<float, 4> headline{};
+  std::array<float, 4> body{};
+};
+
+[[nodiscard]] NewsTextPanels NovaBar_NewsTextPanelRects(float window_w,
+                                                        float window_h);
 
 // Runs one sub-window dialog modal over the docked screen for `service`.
 // `render_background` re-renders the docked menu each frame; the dialog adds
