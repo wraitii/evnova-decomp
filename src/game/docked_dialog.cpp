@@ -883,6 +883,7 @@ struct StoreTextureCache {
   // ShipClass visual fallback for classes with no resolvable portrait: the
   // port's extra safety net (the original leaves the atlas cell black,
   // NovaUi_BlitPictThumbnailCached 0x00497b70).
+  // Deliberate divergence (docs/dlog_ditl_dialog_format.md section 7.2).
   const auto visual_data = NovaResource_Load(kShipVisualResourceType,
                                              static_cast<std::uint16_t>(id));
   if (!visual_data) {
@@ -999,17 +1000,24 @@ void DrawStoreContents(SdlPlatform &platform,
                             label.second);
     }
     if (outfit_store) {
+      // NovaUi_RedrawOutfitterMenu (0x00490c70): the owned count is drawn only
+      // when positive, right-aligned to rect.right - (width + 3) at
+      // rect.y + 0xc, in PTR_DAT_00575ad8 (white, DAT_00575ad0).
       const std::int16_t count = state.inventory.outfit_owned_count[id - 0x80];
-      NovaText_DrawCentered(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            9.0F,
-                            kNovaFontStyleRegular,
-                            kMuted,
-                            rect.x + 2.0F,
-                            rect.x + rect.w - 2.0F,
-                            rect.y + 12.0F,
-                            std::to_string(count));
+      if (count > 0) {
+        const std::string count_text = std::to_string(count);
+        const int count_width = font_cache.TextWidth(
+            NovaFontFamily::kGeneva, 9.0F, kNovaFontStyleRegular, count_text);
+        NovaText_Draw(platform,
+                      font_cache,
+                      NovaFontFamily::kGeneva,
+                      9.0F,
+                      kNovaFontStyleRegular,
+                      kText,
+                      rect.x + rect.w - static_cast<float>(count_width) - 3.0F,
+                      rect.y + 12.0F,
+                      count_text);
+      }
     }
   }
   const bool buy_allowed =
@@ -1887,6 +1895,12 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         return LandedExit::kServiceComplete;
       }
       if (input->key == TextKey::character) {
+        // Deliberate divergence (docs/dlog_ditl_dialog_format.md section 7.2):
+        // the original NovaUi_HandleOutfitterMenuInput (0x004903c0) navigates
+        // through the command-map menu actions and DIK arrow keys; only 'b'
+        // (buy) and 's' (sell) are direct letters. The port adds 'l' leave,
+        // 'p'/'n' page and 'i' info as conveniences while the original
+        // command-map navigation remains TODO(decomp).
         const char key = static_cast<char>(
             std::tolower(static_cast<unsigned char>(input->character)));
         if (key == 'l') {

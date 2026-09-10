@@ -295,6 +295,25 @@ mis-rendering and is being removed. If you add a new modal, take a
 `const std::function<void()> &render_background` (or `view`/`hud` refs in the
 flight layer) and re-render — do not capture frames.
 
+## 7.2 Landed store input/art conveniences (deliberate divergences)
+
+Two landed Outfitter/Shipyard behaviours differ from the original by choice.
+Both are convenience/cosmetic only and do not change prices, eligibility, or
+inventory state:
+
+* **Direct navigation keys.** `NovaUi_HandleOutfitterMenuInput` (0x004903c0)
+  reaches its actions through the command map and DIK arrow keys; only `b`
+  (0x62 -> buy, action 7) and `s` (0x73 -> sell, action 4) are direct letter
+  keys, plus Escape/Return. `RunStoreDialog` (`docked_dialog.cpp`) additionally
+  accepts `l` (leave), `p`/`n` (page) and `i` (shipyard info) as convenience
+  keys. The original command-map/arrow navigation is still TODO(decomp), so
+  these stand in for it rather than replacing it.
+* **Ship portrait fallback.** `StorePreviewTexture` falls back to the ship's
+  `shïp` visual descriptor when no thumbnail PICT resolves. The original leaves
+  the atlas cell black (`NovaUi_BlitPictThumbnailCached` 0x00497b70 returns
+  false and the grid draws nothing). This only affects an already-degenerate
+  case (a ship class with no usable portrait resource).
+
 ## 8. Quick recipe to read an unknown DLOG/DITL
 
 1. `python3 tools/rez_extract.py dlg` — list all DLOGs/DITLs and sizes.
