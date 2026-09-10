@@ -22,6 +22,7 @@ add_executable(evnova_tests
     smoke_test.cpp
     sprite_test.cpp
     travel_test.cpp
+    trade_center_test.cpp
     snd_probe_test.cpp
     desc_probe.cpp
     boarding_strings_test.cpp

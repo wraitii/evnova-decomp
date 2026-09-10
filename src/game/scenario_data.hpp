@@ -85,6 +85,13 @@ constexpr std::uint32_t kCronResourceType = 0x63729a6e;
 // and NovaUi_HandleTravelDestinationInteractionLoop (0x0048c730) applies the
 // price delta to the commodity exchange. See DisasterDef.
 constexpr std::uint32_t kDisasterResourceType = 0x9a6f7073;
+// j\x9fnk (0x6a9f6e6b) — specialized trade commodities (Bible "j\xf6nk
+// resource"). The original loads 0x80 slots (resource id 0x80 + i) into
+// g_junk_defs (stride 0x526) in the junk pass of
+// NovaData_LoadScenarioResourceTables (0x004bd3c0); the commodity exchange
+// (NovaUi_RunTradeCenterWindow 0x0048c730) presents up to two of them as
+// rows 6/7. See JunkDef.
+constexpr std::uint32_t kJunkResourceType = 0x6a9f6e6b;
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -900,6 +907,52 @@ struct DisasterDef {
   bool started_once = false;
 };
 
+// Ghidra g_junk_defs (0x005914bc, 0x80 slots indexed by resource id minus
+// 0x80, stride 0x526). A j\x9fnk record is a specialized trade commodity (the
+// Bible "j\xf6nk resource") that only appears at an explicit list of stellars.
+// The commodity exchange (NovaUi_RunTradeCenterWindow 0x0048c730) shows up to
+// two junk rows: the first record whose BoughtAt list contains the landed
+// stellar with BuyOn passing (row 6), and the first whose SoldAt list contains
+// it with SellOn passing (row 7). The runtime count is persisted at +0x22.
+struct JunkDef {
+  // Loader: resource exists (g_junk_defs +0x20 base_price stays valid).
+  bool present = false;
+
+  // Bible "SoldAt1-8": stellar resource ids where the commodity is sold,
+  // rebased to 0-based indices (payload +0x00..+0x0e; <0x80 -> -1).
+  std::array<std::int16_t, 8> sold_at{-1, -1, -1, -1, -1, -1, -1, -1};
+  // Bible "BoughtAt1-8": stellar resource ids where it is purchased (payload
+  // +0x10..+0x1e; <0x80 -> -1).
+  std::array<std::int16_t, 8> bought_at{-1, -1, -1, -1, -1, -1, -1, -1};
+  // Bible "BasePrice" (payload +0x20, g_junk_defs +0x20). Negative clamped to
+  // 0 by the loader.
+  std::int16_t base_price = 0;
+  // Bible "Flags" (payload +0x22, g_junk_defs +0x24): 0x0001 tribbles,
+  // 0x0002 perishable.
+  std::uint16_t flags = 0;
+  // Bible "ScanMask" (payload +0x24, g_junk_defs +0x26): a government whose
+  // govt ScanMask ANDs this nonzero is hostile to the cargo.
+  std::uint16_t scan_mask = 0;
+  // Record name with the ';'-subtitle stripped (g_junk_defs +0x28, 0x3f
+  // bytes); the trade-center row label / player-info group name.
+  std::string display_name;
+  // Bible "LCName" (payload +0x26, g_junk_defs +0x228): the lower-case name
+  // shown in the player-info dialog.
+  std::string lc_name;
+  // Bible "Abbrev" (payload +0x66, g_junk_defs +0x128): the short status-bar
+  // label.
+  std::string abbrev;
+  // Bible "BuyOn" (payload +0xa6, g_junk_defs +0x328): control-bit test
+  // expression; blank = always eligible.
+  std::string buy_on;
+  // Bible "SellOn" (payload +0x1a5, g_junk_defs +0x427): control-bit test
+  // expression; blank = always eligible.
+  std::string sell_on;
+
+  // ---- Runtime quantity (g_junk_defs +0x22, persisted in the pilot save) ----
+  std::int32_t count = 0;
+};
+
 // Ghidra GovtDef (g_government_defs, up to 0x100 entries indexed by government
 // id minus 0x80). A government defines a faction: its class/alliance/enemy
 // relations, reputation penalties, AI/pilot skill, intel scan mask, theme
@@ -1372,6 +1425,10 @@ struct ScenarioData {
   // slot i = resource id 0x80 + i; absent resources stay !present. See
   // DisasterDef and System_UpdateDisasterStates (0x00424f90).
   std::vector<DisasterDef> disaster_defs; // indexed by disaster id - 0x80
+  // j\x9fnk specialized-commodity table (g_junk_defs): 0x80 slots, slot i =
+  // resource id 0x80 + i; absent resources stay !present. See JunkDef and
+  // NovaUi_RunTradeCenterWindow (0x0048c730).
+  std::vector<JunkDef> junk_defs; // indexed by junk id - 0x80
   // Asteroid/drift class table (r\x9aid family, one row per resource id
   // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
   // the DAT_005912dc / DAT_005912f0 pair.
@@ -1410,6 +1467,9 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for a p\x91rs personality (g_pers_defs), or
   // nullptr when outside the loaded 0x400-entry table.
   [[nodiscard]] const PersDef *Pers(std::int16_t resource_id) const;
+  // gh.id 0x80.. lookup for a j\x9fnk commodity (g_junk_defs), or nullptr when
+  // outside the loaded 0x80-entry table.
+  [[nodiscard]] const JunkDef *Junk(std::int16_t resource_id) const;
   // gh.id 0x80.. lookup for an asteroid-type row, or nullptr when outside the
   // loaded range.
   [[nodiscard]] const AsteroidDef *AsteroidType(std::int16_t resource_id) const;

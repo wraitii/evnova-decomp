@@ -52,6 +52,7 @@ add_library(evnova_runtime
     game/ship_spawn.cpp
     game/ship_ai.cpp
     game/starmap.cpp
+    game/trade_center.cpp
     game/sprite_world.cpp
     game/targeting.cpp
     game/travel.cpp
