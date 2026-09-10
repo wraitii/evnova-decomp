@@ -141,14 +141,9 @@ constexpr std::uint16_t kKeyCodeEscape = 0x01;
 
 std::string MiscString(std::uint16_t entry_1based, std::string_view fallback) {
   if (auto s = NovaHud_LoadStringEntry(kMiscStr, entry_1based)) {
-    // The pools are MacRoman; remap the degree-sign byte (0xA1) used by the
-    // turn-rate fragment (STR# 0x7d2 0x102 "°/sec") to its UTF-8 form.
-    std::string out = *s;
-    for (auto pos = out.find(static_cast<char>(0xA1)); pos != std::string::npos;
-         pos = out.find(static_cast<char>(0xA1))) {
-      out.replace(pos, 1, "\xC2\xB0");
-    }
-    return out;
+    // The pool stays MacRoman here; the font layer converts to UTF-8 at draw
+    // time (including the 0xA1 degree sign in the turn-rate fragment).
+    return *s;
   }
   NovaLog::Todo("player-info: missing STR# 0x7d2 entry 0x{:x}", entry_1based);
   return std::string(fallback);
