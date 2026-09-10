@@ -38,6 +38,10 @@ struct TextInput {
   // legacy flight letters represented as ASCII by their preference defaults).
   // 0xffff means that this event has no bindable key code.
   std::uint16_t key_code = 0xffff;
+  // Shift state at the moment of the event. The original reads this from the
+  // per-poll modifier word (FUN_004cea20) to select the landed-store quantity
+  // prompt (0x0048ea70 local_652 & 0x800).
+  bool shift = false;
 };
 
 // Continuous flight-input snapshot polled once per frame from the live

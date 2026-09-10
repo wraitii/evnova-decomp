@@ -1,6 +1,7 @@
 #include "landed_store.hpp"
 
 #include "outfit.hpp"
+#include "ship_ai.hpp"
 #include "ship_spawn.hpp"
 #include "weapon.hpp"
 
@@ -77,6 +78,19 @@ MeetsRequire(const GameState &state, std::uint32_t lo, std::uint32_t hi) {
 
 [[nodiscard]] std::int32_t RoundNearest(float value) {
   return static_cast<std::int32_t>(std::round(value));
+}
+
+// The selected outfit's four (ModType, ModVal) slots: primary plus the three
+// alternates. Outfit mod values for weapon/ammo/bomb types are zero-based
+// bank slots (see Outfit::mod_val).
+using OutfitModSlot = std::pair<std::int16_t, std::int16_t>;
+
+[[nodiscard]] std::array<OutfitModSlot, 4>
+OutfitModSlots(const Outfit &outfit) {
+  return {{{outfit.mod_type, outfit.mod_val},
+           {outfit.alt_mod_types[0], outfit.alt_mod_vals[0]},
+           {outfit.alt_mod_types[1], outfit.alt_mod_vals[1]},
+           {outfit.alt_mod_types[2], outfit.alt_mod_vals[2]}}};
 }
 
 } // namespace
@@ -327,17 +341,20 @@ void NovaLanded_RefreshStoreSession(GameState &state,
     return;
   }
   session.available_ids = std::move(fresh);
-  // The list changed: drop a selection that is no longer offered, mirroring
-  // the original's reset when Outfit_RebuildAvailableOutfitListForTravelStellar
-  // reports a change (0x0048ea70).
-  if (session.selected_id >= 0 &&
-      std::find(session.available_ids.begin(),
-                session.available_ids.end(),
-                session.selected_id) == session.available_ids.end()) {
+  if (session.kind == LandedStoreKind::kOutfitter) {
+    // 0x0048ea70: when the rebuilt outfitter listing changes, the modal
+    // selects definition index 0 (resource id 0x80), clears the grid cursor
+    // and pages back to the top. The original does this unconditionally, even
+    // when the prior selection is still present.
+    session.selected_id = session.available_ids.empty() ? -1 : 0x80;
+  } else if (session.selected_id >= 0 &&
+             std::find(session.available_ids.begin(),
+                       session.available_ids.end(),
+                       session.selected_id) == session.available_ids.end()) {
     session.selected_id = -1;
-    session.cursor_slot = -1;
-    session.page_base = 0;
   }
+  session.cursor_slot = -1;
+  session.page_base = 0;
 }
 
 LandedStoreSession NovaLanded_OpenOutfitterSession(GameState &state,
@@ -378,6 +395,18 @@ LandedStoreSession NovaLanded_OpenShipyardSession(const GameState &state,
   session.available_ids =
       BuildShipyardIds(state, *stellar, expr, session.hire_mode);
   return session;
+}
+
+bool NovaLanded_StellarSellsOutfits(const GameState &state,
+                                    std::int16_t stellar_id) {
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr)
+    return false;
+  if (stellar->tech_level != 0)
+    return true;
+  return std::any_of(stellar->special_tech.begin(),
+                     stellar->special_tech.end(),
+                     [](std::int16_t tech) { return tech > 0; });
 }
 
 // Ghidra 0x0049d640 Outfit_ComputeScaledPurchasePrice (tech-discount rounding,
@@ -512,59 +541,156 @@ std::int16_t NovaLanded_BuyOutfit(GameState &state,
   return bought;
 }
 
-std::int16_t NovaLanded_SellOutfit(GameState &state,
-                                   LandedStoreSession &session,
-                                   std::int16_t stellar_id,
-                                   std::int16_t outfit_id,
-                                   std::int16_t requested) {
+OutfitSaleResult NovaLanded_SellOutfit(GameState &state,
+                                       LandedStoreSession &session,
+                                       std::int16_t stellar_id,
+                                       std::int16_t outfit_id,
+                                       std::int16_t requested) {
+  OutfitSaleResult result;
   if (requested <= 0 || !IsValidOutfit(state, outfit_id))
-    return 0;
+    return result;
   Outfit const *outfit = state.scenario.Outfit(outfit_id);
   if ((outfit->flags & 0x0008U) != 0U)
-    return 0; // original no-sell marker
+    return result; // original no-sell marker
   const std::size_t index = static_cast<std::size_t>(outfit_id - 0x80);
   const std::int16_t allowed =
       std::min(requested, state.inventory.outfit_owned_count[index]);
+  if (allowed <= 0)
+    return result;
   const ShipClass *ship = state.scenario.Ship(
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
   if (ship == nullptr)
-    return 0;
-  // 0x0048ea70 prices a sale off the scaled purchase price at this port, not
-  // the raw base cost: opening stock resells at ROUND(price * 0.5) (the
-  // double 0.5 at DAT_00575940), while items bought earlier this session are
-  // refunded at the full scaled price paid.
+    return result;
+  // 0x0048ea70 prices each sale off the scaled purchase price at this port,
+  // not the raw base cost: a unit held at or below the opening snapshot
+  // resells at ROUND(price * 0.5) (the double 0.5 at DAT_00575940), while a
+  // unit bought earlier this session is refunded at the full scaled price.
   const std::int32_t scaled_price =
       NovaLanded_OutfitPrice(state, stellar_id, outfit_id);
   const std::int32_t resale_value =
       RoundNearest(static_cast<float>(scaled_price) * 0.5F);
   const std::int32_t purchase_mass = outfit->PurchaseMass(ship->mass_tons);
-  std::int16_t removed = 0;
-  for (; removed < allowed; ++removed) {
-    // 0x0048ea70 rejects removal of a negative-mass outfit when that removal
-    // would leave the hull over its mass allowance. Check per unit so a
-    // modifier-assisted sale can still complete its valid prefix.
-    if (purchase_mass < 0 && NovaLanded_FreeMass(state) + purchase_mass < 0)
+  const auto mod_slots = OutfitModSlots(*outfit);
+  const std::int16_t opening = session.opening_outfit_counts[index];
+
+  for (std::int16_t unit = 0; unit < allowed; ++unit) {
+    // Negative free mass: a negative-mass item cannot be removed when it would
+    // push the remaining free mass below zero (0x0048ea70 -> entry 0xcf).
+    if (purchase_mass < 0 && NovaLanded_FreeMass(state) + purchase_mass < 0) {
+      result.block = OutfitSaleBlock::kNegativeMass;
       break;
+    }
+    const std::int16_t current_owned =
+        state.inventory.outfit_owned_count[index];
+    bool blocked = false;
+    // ModType-27 dependents: the item feeds another outfit; the kept units
+    // must be able to consume everything already owned (0xd0 + name + 0xd4).
+    for (const auto &[type, value] : mod_slots) {
+      if (type != 27 || value < 0x80 || value >= 0x280)
+        continue;
+      const std::size_t dep = static_cast<std::size_t>(value - 0x80);
+      if (dep >= state.scenario.outfits.size())
+        continue;
+      const std::int16_t excess = static_cast<std::int16_t>(
+          state.inventory.outfit_owned_count[dep] -
+          (current_owned - allowed) * state.scenario.outfits[dep].max_count);
+      if (excess > 0) {
+        result.block = OutfitSaleBlock::kDependentOutfit;
+        result.excess = excess;
+        result.blocker_id = value;
+        result.blocker_plural = excess >= 2;
+        result.item_plural = unit < allowed - 1;
+        blocked = true;
+        break;
+      }
+    }
+    if (blocked)
+      break;
+    // Weapon ammo protection: a mounted weapon keeps its loaded rounds, so the
+    // remaining weapon count must be able to carry them (0xd0 + ammunition +
+    // 0xd4).
+    std::int16_t weapon_index = -1;
+    for (const auto &[type, value] : mod_slots) {
+      if (type == 1) {
+        weapon_index = value;
+        break;
+      }
+    }
+    if (weapon_index >= 0) {
+      const Weapon *weapon =
+          state.scenario.Weapon(static_cast<std::int16_t>(weapon_index + 0x80));
+      if (weapon != nullptr && weapon->max_ammo > 0) {
+        const std::int16_t ammo_type = weapon->ammo_type;
+        const std::size_t bank = (ammo_type < 0 || ammo_type > 0xff ||
+                                  weapon->weapon_mode_code == 99)
+                                     ? static_cast<std::size_t>(weapon_index)
+                                     : static_cast<std::size_t>(ammo_type);
+        std::int32_t loaded = state.weapon_bank_secondary[bank * 100];
+        if (weapon->weapon_mode_code == 99) {
+          // Carrier-bay weapon: count active, non-disabled behavior-5
+          // fighters whose class matches the id encoded in ammo_type.
+          for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+            const Ship &fighter = state.ShipAt(i);
+            if (fighter.is_active && fighter.squad_leader_ship_slot == 0 &&
+                fighter.ai_behavior_code == 5 &&
+                fighter.ship_class_id ==
+                    static_cast<std::int16_t>(ammo_type - 0x80) &&
+                !NovaAiShip_IsDisabled(state, fighter)) {
+              ++loaded;
+            }
+          }
+        }
+        const std::int32_t remaining = current_owned - (unit + 1);
+        const std::int32_t excess = loaded - remaining * weapon->max_ammo;
+        if (excess > 0 && loaded > 0) {
+          result.block = OutfitSaleBlock::kWeaponAmmo;
+          result.excess = static_cast<std::int16_t>(excess);
+          result.blocker_plural = excess >= 2;
+          result.item_plural = unit < allowed - 1;
+          // Name the ammo outfit whose ModType-3 slot feeds this weapon.
+          for (std::size_t i = 0; i < state.scenario.outfits.size(); ++i) {
+            bool feeds = false;
+            for (const auto &[type, value] :
+                 OutfitModSlots(state.scenario.outfits[i])) {
+              if (type == 3 && value == weapon_index) {
+                feeds = true;
+                break;
+              }
+            }
+            if (feeds) {
+              result.blocker_id = static_cast<std::int16_t>(
+                  static_cast<std::int32_t>(i) + 0x80);
+              break;
+            }
+          }
+          blocked = true;
+        }
+      }
+    }
+    if (blocked)
+      break;
+
     state.inventory.outfit_owned_count[index]--;
     OutfitMarkStatsDirty(state);
-  }
-  if (removed > 0) {
-    // Pre-opening stock is paid at the normal resale rate; purchases made in
-    // this session are refunded at their paid cost (the original snapshot
-    // distinguishes these two cases).
-    const std::int16_t opening = session.opening_outfit_counts[index];
-    const std::int16_t before = static_cast<std::int16_t>(
-        state.inventory.outfit_owned_count[index] + removed);
-    const std::int16_t refund_count =
-        std::max<std::int16_t>(0, before - opening);
-    const std::int16_t resale_count =
-        static_cast<std::int16_t>(removed - std::min(removed, refund_count));
+    // Clear the active weapon bank when the last unit of a weapon outfit went
+    // away (0x0048ea70).
+    if (state.inventory.outfit_owned_count[index] < 1) {
+      for (const auto &[type, value] : mod_slots) {
+        if (type == 1 && state.player.active_weapon_bank_slot == value) {
+          state.player.active_weapon_bank_slot = -1;
+          state.stat_cache_valid = false;
+          break;
+        }
+      }
+    }
     state.player.credits +=
-        refund_count * scaled_price + resale_count * resale_value;
+        current_owned <= opening ? resale_value : scaled_price;
     NovaLanded_ExecuteControlSet(state, outfit->on_sell_expr);
-    NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+    ++result.sold;
   }
-  return removed;
+  if (result.sold > 0)
+    NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+  return result;
 }
 
 void NovaLanded_CloseOutfitterSession(GameState &state) {

@@ -72,11 +72,44 @@ NovaLanded_ScaledStorePrice(std::int32_t base_price,
                                                 std::int16_t stellar_id,
                                                 std::int16_t outfit_id,
                                                 std::int16_t requested);
-[[nodiscard]] std::int16_t NovaLanded_SellOutfit(GameState &state,
-                                                 LandedStoreSession &session,
-                                                 std::int16_t stellar_id,
-                                                 std::int16_t outfit_id,
-                                                 std::int16_t requested);
+// Ghidra 0x0048ea70: a stellar lists purchasable outfits when it has a
+// nonzero TechLevel or any positive SpecialTech entry. This gates the Buy
+// button globally (DAT_007d4c0d) independently of per-item eligibility.
+[[nodiscard]] bool NovaLanded_StellarSellsOutfits(const GameState &state,
+                                                  std::int16_t stellar_id);
+
+// Why a landed-Outfitter sale stopped (Ghidra 0x0048ea70 unit loop). The
+// original aborts the remaining units and shows an STR# 0x7d2 message when a
+// removal would strand dependent ammo or leave negative free mass.
+enum class OutfitSaleBlock : std::uint8_t {
+  kNone = 0,
+  kNegativeMass,    // entry 0xcf
+  kDependentOutfit, // 0xd0 + count + dependent name + 0xd4 + item name
+  kWeaponAmmo,      // 0xd0 + count + ammo outfit or unit(s) of ammunition + ...
+};
+
+struct OutfitSaleResult {
+  // Units actually removed by this call.
+  std::int16_t sold = 0;
+  OutfitSaleBlock block = OutfitSaleBlock::kNone;
+  // Units that must be sold first (kDependentOutfit / kWeaponAmmo).
+  std::int16_t excess = 0;
+  // Resource id the message names: the dependent outfit or the ammo outfit
+  // feeding the weapon. -1 selects the generic "unit(s) of ammunition" form.
+  std::int16_t blocker_id = -1;
+  // Plural form of the blocker name (original: excess >= 2).
+  bool blocker_plural = false;
+  // Plural form of the selected item name (original: the aborted unit is not
+  // the final requested one).
+  bool item_plural = false;
+};
+
+[[nodiscard]] OutfitSaleResult
+NovaLanded_SellOutfit(GameState &state,
+                      LandedStoreSession &session,
+                      std::int16_t stellar_id,
+                      std::int16_t outfit_id,
+                      std::int16_t requested);
 // Ghidra 0x0048ea70 (close path): applies the landed Outfitter's final
 // inventory cleanup before returning to the Spaceport. Temporary outfits (flag
 // 0x10) do not survive the modal, and damage/fuel are capped when installed

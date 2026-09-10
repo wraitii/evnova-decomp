@@ -435,6 +435,7 @@ void SdlPlatform::PumpProbe() {
 std::optional<TextInput> SdlPlatform::PollTextEvent() {
   PumpProbe();
   SDL_Event event;
+  const bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
   while (SDL_PollEvent(&event)) {
     if (event.type == SDL_EVENT_QUIT) {
       quit_requested_ = true;
@@ -470,7 +471,7 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
                                       event.button.y,
                                       &mouse_position_.x,
                                       &mouse_position_.y);
-      return TextInput{TextKey::primary};
+      return TextInput{TextKey::primary, '\0', 0xffff, shift};
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
       switch (event.key.key) {
@@ -494,7 +495,8 @@ std::optional<TextInput> SdlPlatform::PollTextEvent() {
       if (sym >= 32 && sym < 127) {
         return TextInput{TextKey::character,
                          static_cast<char>(sym),
-                         OriginalKeyCode(event.key.scancode)};
+                         OriginalKeyCode(event.key.scancode),
+                         shift};
       }
       if (const auto key_code = OriginalKeyCode(event.key.scancode);
           key_code != 0xffff) {
