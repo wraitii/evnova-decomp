@@ -946,25 +946,26 @@ struct HudOverlayState {
 // (0x00436910). Layout mirrors the Ghidra AsteroidState so a future
 // sprite/drift layer can port verbatim.
 struct AsteroidState {
-  // Sprite handle / state_code for this record; the drift renderer assigns a
-  // sprite set by wander_type and ticks/arm its frame counter from +0x54.
-  std::int32_t state_code = 0; // +0x00
-  float target_pos_x = 0.0F;   // +0x04
-  float target_pos_y = 0.0F;   // +0x08
-  float target_vel_x = 0.0F;   // +0x0c
-  float target_vel_y = 0.0F;   // +0x10
-  // Wander phase / lifetime accumulator. Spawned as a random value in
-  // [0, pertype lifetime) (Asteroid_SpawnRecord) and advanced by wander_speed
-  // each tick, wrapping via the sprite descriptor's frame count
-  // (Asteroid_UpdateSprites).
-  float wander_radius = 0.0F; // +0x14
-  float wander_speed = 0.0F;  // +0x18
-  // Integrity counter seeded from AsteroidDef.wander_table_value (+0x00).
+  // Placeholder for the Ghidra per-record `Sprite *` (+0x00) cloned from
+  // g_asteroid_sprite_sets[wander_type] (FUN_004af020). The clean-room keeps
+  // sprites in the view's SpriteStore cache, so this slot is unused.
+  std::int32_t sprite_handle = 0; // +0x00
+  float target_pos_x = 0.0F;      // +0x04
+  float target_pos_y = 0.0F;      // +0x08
+  float target_vel_x = 0.0F;      // +0x0c
+  float target_vel_y = 0.0F;      // +0x10
+  // Sprite animation phase. Seeded from the type sprite set's frame count
+  // (+0x54) at spawn and advanced by wander_speed each tick, wrapping via
+  // that frame count (Asteroid_UpdateSprites 0x00436910).
+  float wander_frame_accumulator = 0.0F; // +0x14
+  float wander_speed = 0.0F;             // +0x18
+  // Integrity counter seeded from the r\xf6id row (DAT_005912dc[type]).
   // Weapon splash decrements it by the weapon's shield damage (x10 when the
   // weapon has flags_secondary 0x8000); below zero the destruction package
   // runs (NovaUi_ResolveWeaponSplashImpact 0x00436ff0 ->
-  // Weapon_SpawnWeaponImpactEffectPackage 0x00462550).
-  std::int16_t wander_table_value = 0; // +0x1c
+  // Weapon_SpawnWeaponImpactEffectPackage 0x00462550); <= -32000 retires the
+  // record in Asteroid_UpdateSprites.
+  std::int16_t integrity = 0;   // +0x1c
   std::int16_t wander_type = 0; // +0x1e (index into the asteroid-type table)
   bool active = false;          // +0x20
 
@@ -1360,6 +1361,16 @@ struct GameState {
   // drift. The records are ASTEROID / drift-debris chars (r\xf6id family), not
   // NPC ships. Slots are found by scanning for `active == false`.
   std::array<AsteroidState, AsteroidState::kPoolSize> asteroid_pool{};
+
+  // Half the logical flight play area, in pixels (Ghidra g_viewport_center_x
+  // 0x005997b8 / g_viewport_center_y 0x005997ba, set by
+  // Ship_InitializeMainInterface 0x004ac380 from the render owner rect). The spaceflight view keeps
+  // this in sync with the live viewport each frame; Asteroid_Spawn scatters new
+  // records within `viewport_center_x + 0x80` (x) / `viewport_center_y` (y) of
+  // the player, so a wrong/stale value makes the whole field bunch on the
+  // player.
+  int viewport_center_x = 320;
+  int viewport_center_y = 200;
 
   // "no asteroids" latch set by Asteroid_InitSystem (0x004216B0) when the
   // current system declares asteroid_count < 1. The original writes a 1 byte

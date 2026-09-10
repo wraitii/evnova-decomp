@@ -5,6 +5,7 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "asteroid.hpp"
 #include "docked_dialog.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
@@ -166,6 +167,10 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
 
   ctx.stellar_id = stellar_id;
   ctx.landed = true;
+  // The landing transition raises the no-asteroids latch
+  // (Stellar_ProcessTravelAndLanding 0x00457580 sets DAT_00596d2c = 1), so the
+  // docked view hides the drifting field; the launch tail re-initialises it.
+  state.no_asteroids_latch = true;
   ctx.selection = LandedService::kLaunch;
   state.travel.landed_this_frame = true;
   NovaLog::Info("landed at stellar {} ({}); {} credits remain",
@@ -241,6 +246,12 @@ void NovaLanding_LaunchFromStellar(GameState &state, std::int16_t stellar_id) {
   // 0x00456256: DAT_00597974 = tick60 - 60 re-arms the cursor-anchored
   // travel-selection sprite. TODO(decomp(0x00439280)) skipped: that sprite
   // channel is not reconstructed.
+  // The launch clears the no-asteroids latch set on landing (the original does
+  // this through the spaceflight loop's transition reconciliation plus the
+  // every-tick Asteroid_Spawn('\x01') ring, which is not yet ported) and
+  // rebuilds the current system's drifting field around the repositioned
+  // player.
+  NovaAsteroid_InitSystem(state);
 }
 
 // ---------------------------------------------------------------------------

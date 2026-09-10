@@ -281,7 +281,7 @@ TEST_CASE("blast weapon strips asteroid integrity, splashes owner, and breaks",
   AsteroidState &asteroid = state.asteroid_pool[0];
   asteroid.active = true;
   asteroid.wander_type = 0;
-  asteroid.wander_table_value = 5; // normally seeded by Asteroid_SpawnRecord
+  asteroid.integrity = 5; // normally seeded by Asteroid_SpawnRecord
   asteroid.target_pos_x = 0.0F;
   asteroid.target_pos_y = 0.0F;
 
@@ -292,7 +292,7 @@ TEST_CASE("blast weapon strips asteroid integrity, splashes owner, and breaks",
   NovaWeapon_ResolveProjectileCollisions(state);
   REQUIRE(state.active_shots.empty());
   CHECK(state.player.shield_points == Catch::Approx(90.0F));
-  CHECK(asteroid.wander_table_value == -5); // 5 - energy_damage(10)
+  CHECK(asteroid.integrity == -5); // 5 - energy_damage(10)
   CHECK(!asteroid.active);
   // The break spawns 1..2 type-0 children in other pool slots.
   int children = 0;

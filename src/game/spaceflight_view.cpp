@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../rle_sprite_sheet.hpp"
 #include "../sdl_platform.hpp"
+#include "asteroid.hpp"
 #include "freeflight_objects.hpp"
 #include "game_state.hpp"
 #include "hud_renderer.hpp"
@@ -845,6 +846,13 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   }
 }
 
+void SpaceflightView::SyncGameplayViewport(SdlPlatform &platform,
+                                           GameState &state) {
+  const Viewport vp = CurrentViewport(platform);
+  state.viewport_center_x = vp.w / 2;
+  state.viewport_center_y = vp.h / 2;
+}
+
 // Unified per-frame world animation pass (see the header). One call advances
 // every animated in-flight entity's cadence so the timing basis is centralised
 // here (Mirror of SpriteWorld_UpdateAnimatedSprites 0x004781f0 at the world
@@ -867,6 +875,13 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
   NovaEffects_TickImpactEffects(state, elapsed_ticks);
   NovaEffects_TickFadingEffects(state, elapsed_ticks);
   NovaFreeflight_Tick(state, elapsed_ticks);
+  // Asteroid / drift-debris integration (Asteroid_UpdateSprites 0x00436910
+  // simulation half) plus its viewport wrap. The original runs the whole
+  // function in Frame_TickSystems scope 8; this port keeps the pure state
+  // advance in GameState and the SDL-dependent sprite bind/frame/wrap on the
+  // view.
+  NovaAsteroid_UpdateSprites(state, elapsed_ticks);
+  WrapAsteroids(platform, state);
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
     const bool was_visible = ship.destruction_visual_timer_ms > 0.0F;
@@ -981,6 +996,113 @@ void SpaceflightView::DrawFreeflightObjects(SdlPlatform &platform,
                vp.w,
                vp.h,
                options);
+  }
+}
+
+// Ghidra 0x00436910 Asteroid_UpdateSprites (draw half). Each live asteroid /
+// drift-debris record draws its type's spin sprite set (id 800 + wander_type).
+// The original binds the set with Sprite_AssignSpriteSet and then cycles the
+// current frame from the record's wander accumulator (+0x14) wrapped by the
+// set's frame count; all shipped asteroid sets are 50x50 with 36 frames. The
+// distance-intensity tint and the off-screen wrap are handled next to this
+// (WrapAsteroids) / documented as a divergence (no ship-centric fog in this
+// port yet).
+void SpaceflightView::DrawAsteroids(SdlPlatform &platform,
+                                    const GameState &state) {
+  if (state.no_asteroids_latch) {
+    return;
+  }
+  const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
+  for (const AsteroidState &m : state.asteroid_pool) {
+    if (!m.active) {
+      continue;
+    }
+    // wandering type 0..15 selects the Metal/Ice/Silicates/Metal-rich x
+    // size-tier set loaded from spin resource 800+type (DAT_00596c00).
+    const std::uint16_t spin_id =
+        static_cast<std::uint16_t>(kAsteroidSpinBase + (m.wander_type & 0x0f));
+    const SpriteAsset *set = sprite_store_.Spin(platform.renderer(), spin_id);
+    if (set == nullptr || set->frames.empty()) {
+      continue;
+    }
+    // Sprite_SetCurrentFrame(ROUND(wander_frame_accumulator)) wrapped by the
+    // set's frame
+    // count. Wrap the accumulator into [0, frame_count) first so a negative
+    // drift matches the original's add-frame-count loop.
+    const int frame_count = set->frame_count;
+    float wander = m.wander_frame_accumulator;
+    if (frame_count > 0) {
+      while (wander < 0.0F) {
+        wander += static_cast<float>(frame_count);
+      }
+      while (wander >= static_cast<float>(frame_count)) {
+        wander -= static_cast<float>(frame_count);
+      }
+    }
+    int frame = static_cast<int>(std::lround(wander));
+    frame = std::clamp(frame, 0, std::max(0, frame_count - 1));
+    DrawSprite(platform.renderer(),
+               *set,
+               frame,
+               m.target_pos_x,
+               m.target_pos_y,
+               camera_x,
+               camera_y,
+               vp.w,
+               vp.h);
+  }
+}
+
+// Ghidra 0x00436910 Asteroid_UpdateSprites (viewport-wrap half). The original
+// positions each record's Sprite via Sprite_SetPositionFromCurrentFrameAnchor,
+// then compares the placed sprite's frame edge (+0x1c/+0x1a) against the
+// viewport plus 32px and teleports a record that has left the screen to the
+// opposite side (2x the largest frame span inside the edge). This port has no
+// per-record Sprite handle, so it reproduces the same world-space test using
+// the largest loaded asteroid frame (the shipped 50x50 tile) and the same
+// thresholds: the anchor sits at dx + half_viewport - frame_width, so the wrap
+// fires at +/- (half_viewport + frame_width + 32) and lands at
+// -/+ (half_viewport + 2*frame_width).
+void SpaceflightView::WrapAsteroids(SdlPlatform &platform, GameState &state) {
+  const Viewport vp = CurrentViewport(platform);
+  const float center_x = static_cast<float>(vp.w) / 2.0F;
+  const float center_y = static_cast<float>(vp.h) / 2.0F;
+  // Sprite_GetShotHalfSpan / Sprite_GetFrameVerticalHalfSpan return the full
+  // frame span; the original scans every loaded asteroid set for the maximum.
+  int max_span_x = 1;
+  int max_span_y = 1;
+  for (int type = 0; type < 16; ++type) {
+    const SpriteAsset *set = sprite_store_.Spin(
+        platform.renderer(),
+        static_cast<std::uint16_t>(kAsteroidSpinBase + type));
+    if (set != nullptr && !set->frames.empty()) {
+      max_span_x = std::max(max_span_x, set->tile_width);
+      max_span_y = std::max(max_span_y, set->tile_height);
+    }
+  }
+  for (AsteroidState &m : state.asteroid_pool) {
+    if (!m.active) {
+      continue;
+    }
+    const float edge_x = center_x + static_cast<float>(max_span_x) + 32.0F;
+    const float edge_y = center_y + static_cast<float>(max_span_y) + 32.0F;
+    const float dx = m.target_pos_x - state.player.pos_x;
+    const float dy = m.target_pos_y - state.player.pos_y;
+    if (dx > edge_x) {
+      m.target_pos_x =
+          state.player.pos_x - center_x - static_cast<float>(max_span_x) * 2.0F;
+    } else if (dx < -edge_x) {
+      m.target_pos_x =
+          state.player.pos_x + center_x + static_cast<float>(max_span_x) * 2.0F;
+    }
+    if (dy > edge_y) {
+      m.target_pos_y =
+          state.player.pos_y - center_y - static_cast<float>(max_span_y) * 2.0F;
+    } else if (dy < -edge_y) {
+      m.target_pos_y =
+          state.player.pos_y + center_y + static_cast<float>(max_span_y) * 2.0F;
+    }
   }
 }
 
@@ -1363,7 +1485,6 @@ void SpaceflightView::DrawBeamsOverShips(SdlPlatform &platform,
 //   NPC ships (active ships in the current system) -- DrawNpcShips
 //   player ship + engine-glow                     -- (below)
 //   over-ships beams (all other beams)             -- DrawBeamsOverShips
-//
 // That is: the player's hull and glow composite over everything else in the
 // scene (front-most), NPC ships and shots pass between the ship and the
 // stellar/backdrop layers, and beam weapons render in two of the original's
@@ -1384,6 +1505,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawImpactEffects(platform, state); // destruction/impact effects over ships
   DrawFadingEffects(platform, state); // directional destruction fragments
   DrawFreeflightObjects(platform, state);   // jettisoned pods / launched drones
+  DrawAsteroids(platform, state);           // drifting asteroid field
   DrawShipTargetReticle(platform, state);   // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target
   DrawBeamsOverShips(platform, state);      // topmost layer: normal beams
