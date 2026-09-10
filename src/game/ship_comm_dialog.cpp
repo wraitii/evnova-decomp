@@ -1249,7 +1249,7 @@ bool NovaShipComm_TargetEligibleForHail(const GameState &state,
     // carries the 0x400 busy flag cannot be hailed.
     if (target.faction_or_government_id != -1) {
       const Government *g =
-          state.scenario.Government(target.faction_or_government_id);
+          state.scenario.GovernmentByIndex(target.faction_or_government_id);
       if (g != nullptr && (g->flags_primary & 0x400U) != 0) {
         eligible = false;
       }
@@ -1258,7 +1258,7 @@ bool NovaShipComm_TargetEligibleForHail(const GameState &state,
         static_cast<std::int16_t>(target.ship_class_id + 0x80));
     if (cls != nullptr && cls->inherent_attributes_govt != -1) {
       const Government *g =
-          state.scenario.Government(cls->inherent_attributes_govt);
+          state.scenario.GovernmentByIndex(cls->inherent_attributes_govt);
       if (g != nullptr && (g->flags_primary & 0x400U) != 0) {
         eligible = false;
       }

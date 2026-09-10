@@ -62,6 +62,26 @@ NovaDocked_SubWindowFramePict(LandedService service);
 [[nodiscard]] std::optional<std::string>
 Bar_ComposeDisasterReport(GameState &state, std::int16_t landed_stellar_id);
 
+// Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts (crön-news arm): selects the
+// active crön event's news STR# id for the landed stellar. An event past its
+// holdoff contributes local news when one of its NewsGovt ids is allied with
+// the stellar's government (using that entry's GovtNewsStr, last match wins),
+// else independent news when IndNewsStr is set. Local wins over independent;
+// the id is drawn uniformly across the contributing slots. Returns nullopt
+// when no active event contributes. Exposed for tests; deterministic given
+// the caller's RNG state.
+[[nodiscard]] std::optional<std::int16_t>
+Bar_SelectCronNewsStr(GameState &state, std::int16_t landed_stellar_id);
+
+// Ghidra 0x0047d180 NovaUi_RunTravelNewsWindow (prologue): resolves the
+// background PICT id for the Bar Holovid window at `stellar_id`: the stellar
+// government's news_pic_id when set, else the generic PICT 9000. Stellar
+// government ids are zero-based (the loader rebases them -0x80), so this goes
+// through the index lookup, not the 0x80-based resource-id Government().
+// Exposed so the Federation/ICN regression can be pinned by tests.
+[[nodiscard]] std::uint16_t NovaBar_NewsPictId(const GameState &state,
+                                               std::int16_t stellar_id);
+
 // The `dësc` resource id backing the Bar/destination prompt for a landed
 // stellar. Ghidra 0x0047c8e0 passes g_ship_states->ai_secondary_target_slot +
 // 10000, where that slot is the 0-based g_stellar_defs index -- so this is

@@ -274,6 +274,39 @@ TEST_CASE("government table loads and decodes the Federation class",
   CHECK(f->news_pic_id == 9001);
 }
 
+TEST_CASE("ship-class InherentGovt normalizes to zero-based indexes",
+          "[scenario][shipclass]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // Loader 0x004c149b.. has three encodings; it folds them into two zero-based
+  // g_government_defs indexes so consumers can use GovernmentByIndex:
+  //   [0x80,0x180)  both govts = id - 0x80
+  //   [0x468,0x568) attributes = id - 0x468, no combat govt
+  //   [0x850,0x950) combat = id - 0x850, no attributes govt
+
+  // Fed Destroyer (0x8d) payload +0x48 = 0x80 -> Federation (index 0) for both.
+  const ShipClass *destroyer = data.Ship(0x8d);
+  REQUIRE(destroyer != nullptr);
+  CHECK(destroyer->inherent_combat_govt == 0);
+  CHECK(destroyer->inherent_attributes_govt == 0);
+  CHECK(data.GovernmentByIndex(destroyer->inherent_attributes_govt) != nullptr);
+
+  // Fed Patrol Boat (0x8e) payload +0x48 = 0x468 -> attributes only (0), no
+  // combat govt.
+  const ShipClass *patrol = data.Ship(0x8e);
+  REQUIRE(patrol != nullptr);
+  CHECK(patrol->inherent_combat_govt == -1);
+  CHECK(patrol->inherent_attributes_govt == 0);
+
+  // Manticore (0x92) payload +0x48 = 0x471 -> attributes index 9 (Pirate).
+  const ShipClass *manticore = data.Ship(0x92);
+  REQUIRE(manticore != nullptr);
+  CHECK(manticore->inherent_combat_govt == -1);
+  CHECK(manticore->inherent_attributes_govt == 9);
+  CHECK(data.GovernmentByIndex(manticore->inherent_attributes_govt) != nullptr);
+}
+
 TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships",
           "[scenario][ships][brgr]") {
   // The starter Shuttle is ship class id 0x80; its sh\x8an descriptor and the
@@ -926,6 +959,25 @@ TEST_CASE("disaster (oops) rows decode from the payload",
 
   // Slots past the last shipped record stay absent.
   CHECK_FALSE(data.disaster_defs[0x93 - 0x80].present);
+}
+
+TEST_CASE("cron independent-news field decodes from payload +0x14",
+          "[scenario][cron][news]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  // crön 0xa1 "Common Aur/Fed Syst Change 1 Neirt" has NewsGovt1-4 all unset
+  // but IndNewsStr = STR# 15007 (verified against the raw +0x14 word). The
+  // loader reads it there -- immediately after PostHoldoff, not after the
+  // GovtNewsStr block the Bible lists it under.
+  const CronEventDef &nea = data.cron_events[0xa1 - 0x80];
+  REQUIRE(nea.present);
+  CHECK(nea.independent_news_str == 15007);
+  CHECK(nea.news_govts == std::array<std::int16_t, 4>{-1, -1, -1, -1});
+
+  // A crön with a local news pool and no IndNewsStr copies the raw 0 through
+  // (the news arm only treats values > 0 as independent news).
+  CHECK(data.cron_events[0x9d - 0x80].independent_news_str == 0);
 }
 
 } // namespace game

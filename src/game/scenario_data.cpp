@@ -493,8 +493,28 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
     s.crew = 0;
   }
   s.strength = ReadBeI16(bytes, 0x46);
-  s.inherent_combat_govt = ReadBeI16(bytes, 0x48);
-  s.inherent_attributes_govt = s.inherent_combat_govt;
+  // Bible InherentGovt has three encodings; the loader (0x004c149b..) folds
+  // them into two zero-based g_government_defs indexes here, so every consumer
+  // can use GovernmentByIndex directly:
+  //   0x80..0x17f  -> both combat and attributes govt = id - 0x80
+  //   0x468..0x567 -> attributes govt = id - 0x468, no combat govt
+  //   0x850..0x94f -> combat govt = id - 0x850, no attributes govt
+  //   anything else -> neither (-1/-1)
+  const std::int16_t inherent_govt = ReadBeI16(bytes, 0x48);
+  if (inherent_govt >= 0x80 && inherent_govt < 0x180) {
+    s.inherent_combat_govt = static_cast<std::int16_t>(inherent_govt - 0x80);
+    s.inherent_attributes_govt = s.inherent_combat_govt;
+  } else if (inherent_govt >= 0x468 && inherent_govt < 0x568) {
+    s.inherent_combat_govt = -1;
+    s.inherent_attributes_govt =
+        static_cast<std::int16_t>(inherent_govt - 0x468);
+  } else if (inherent_govt >= 0x850 && inherent_govt < 0x950) {
+    s.inherent_combat_govt = static_cast<std::int16_t>(inherent_govt - 0x850);
+    s.inherent_attributes_govt = -1;
+  } else {
+    s.inherent_combat_govt = -1;
+    s.inherent_attributes_govt = -1;
+  }
   s.capability_flags = ReadBe16(bytes, 0x4a);
 
   for (std::size_t i = 0; i < 4; ++i) {
@@ -754,6 +774,9 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   def.duration = ReadBeI16(bytes, 0x0e);
   def.pre_holdoff = ReadBeI16(bytes, 0x10);
   def.post_holdoff = ReadBeI16(bytes, 0x12);
+  // Bible IndNewsStr; the loader reads payload +0x14 into cron block +0x3a
+  // (0x004c5ec0). MOVZX stores the raw word, so 0xffff reads back as -1 here.
+  def.independent_news_str = ReadBeI16(bytes, 0x14);
   def.flags = ReadBe16(bytes, 0x16);
   def.enable_on = ReadCStringBounded(bytes, 0x18, 0xff);
   def.on_start = ReadCStringBounded(bytes, 0x117, 0xff);

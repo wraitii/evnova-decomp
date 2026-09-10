@@ -1093,9 +1093,10 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
     // Pick an 8-bit tint: the stellar's government (decoded) if present,
     // else the system government.
     std::uint8_t r = 170, g = 170, b = 200;
-    const auto *gov = st->government_id >= 0x80
-                          ? state.scenario.Government(st->government_id)
-                          : state.scenario.Government(sys->government_id);
+    const auto *gov =
+        st->government_id >= 0
+            ? state.scenario.GovernmentByIndex(st->government_id)
+            : state.scenario.GovernmentByIndex(sys->government_id);
     if (gov && gov->present) {
       r = gov->theme_red;
       g = gov->theme_green;

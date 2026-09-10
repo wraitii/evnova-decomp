@@ -833,7 +833,8 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
         ok = true;
       }
       if (ok && exclude_derelict_govts && def.government_id > -1) {
-        const Government *govt = state.scenario.Government(def.government_id);
+        const Government *govt =
+            state.scenario.GovernmentByIndex(def.government_id);
         if (govt != nullptr && (govt->flags_primary & 0x0800U) != 0U) {
           ok = false;
         }
@@ -965,7 +966,7 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
   bool is_derelict = false;
   if (ship.faction_or_government_id != -1) {
     const Government *govt =
-        state.scenario.Government(ship.faction_or_government_id);
+        state.scenario.GovernmentByIndex(ship.faction_or_government_id);
     is_derelict = govt != nullptr && (govt->flags_primary & 0x0800U) != 0U;
   }
   if (is_derelict && cls != nullptr) {
@@ -1381,7 +1382,7 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
       if (pers_slot >= 0) {
         Ship &pers = state.ShipAt(static_cast<std::size_t>(pers_slot));
         const Government *govt =
-            state.scenario.Government(pers.faction_or_government_id);
+            state.scenario.GovernmentByIndex(pers.faction_or_government_id);
         if (govt != nullptr && (govt->flags_primary & 0x0800U) != 0U) {
           pers.vel_x = 0.0F;
           pers.vel_y = 0.0F;
@@ -1785,7 +1786,7 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.voice_type_mode = RandomBelow(state, 2);
   if (cls != nullptr && cls->inherent_attributes_govt != -1) {
     if (const Government *govt =
-            state.scenario.Government(cls->inherent_attributes_govt);
+            state.scenario.GovernmentByIndex(cls->inherent_attributes_govt);
         govt != nullptr && govt->voice_type_mode != -1) {
       ship.voice_type_mode = govt->voice_type_mode;
     }

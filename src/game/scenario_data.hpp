@@ -337,6 +337,8 @@ struct ShipClass {
                          // the AI boarding selector reads it as capture_power)
   std::int16_t strength = 0; // Strength
 
+  // Bible InherentGovt, normalized by the loader (0x004c149b..) into two
+  // zero-based g_government_defs indexes (-1 = none). Use GovernmentByIndex.
   std::int16_t inherent_combat_govt = -1;     // InherentGovt (combat)
   std::int16_t inherent_attributes_govt = -1; // InherentGovt (attributes)
   std::uint16_t capability_flags = 0;         // Flags
@@ -843,6 +845,12 @@ struct CronEventDef {
   // govts; < -1 -> -1 for the STR ids.
   std::array<std::int16_t, 4> news_govts{-1, -1, -1, -1};     // payload +0x326
   std::array<std::int16_t, 4> govt_news_strs{-1, -1, -1, -1}; // payload +0x32e
+  // Independent news (Bible IndNewsStr): when no allied NewsGovt matches, a
+  // string is drawn from STR# independent_news_str. The loader reads it at
+  // payload +0x14 -- right after PostHoldoff, NOT after GovtNewsStr as the
+  // Bible's field list implies -- and copies it to cron block +0x3a. <= 0 means
+  // none.
+  std::int16_t independent_news_str = -1; // payload +0x14 -> block +0x3a
 };
 
 // Ghidra DisasterDef (g_disaster_defs, 0x100 slots indexed by resource id

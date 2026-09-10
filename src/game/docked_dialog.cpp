@@ -6,6 +6,7 @@
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
 #include "boarding_plunder.hpp"
+#include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "landed_store.hpp"
@@ -2123,11 +2124,11 @@ void DrawDialogFilledText(SdlPlatform &platform,
 // missing. Body, in precedence order: (1) the disaster report for an active
 // öops record (preferring one at the current stellar, or a target -2 record,
 // else any active one) composed from the STR# 0x7d2 fragments and the STR#
-// 0xfa1 commodity name; (2) TODO(decomp) the crön-news arm (active crön events
-// carry allied-government news STR# ids at block +0x2a/+0x32 and a plain text
-// id at +0x3a; CronEventState does not model those fields yet); (3) a random
-// STR# 0x1fa5 (Generic News) entry, falling back to 0x7d2 0xbf. Only the body
-// is disaster-specific; the headline is unaffected.
+// 0xfa1 commodity name; (2) the crön-news arm (Bar_SelectCronNewsStr), which
+// overwrites the body -- local allied-government news wins over independent
+// news, and either over the disaster report; (3) a random STR# 0x1fa5
+// (Generic News) entry, falling back to 0x7d2 0xbf. Only the body is
+// disaster/crön-specific; the headline is unaffected.
 void NovaBar_ComposeNewsTexts(GameState &state,
                               std::int16_t landed_stellar_id,
                               std::string &headline,
@@ -2150,6 +2151,13 @@ void NovaBar_ComposeNewsTexts(GameState &state,
   if (const auto disaster_body =
           Bar_ComposeDisasterReport(state, landed_stellar_id)) {
     body = *disaster_body;
+  }
+
+  // The crön arm replaces the body in place (0x0047d600 overwrites
+  // DAT_007d0e9c), so active crön news takes precedence over the disaster
+  // report.
+  if (const auto cron_str = Bar_SelectCronNewsStr(state, landed_stellar_id)) {
+    body = roll_entry(static_cast<std::uint16_t>(*cron_str)).value_or("");
   }
 
   if (body.empty()) {
@@ -2176,14 +2184,8 @@ void RunBarNewsWindow(SdlPlatform &platform,
                       const std::string &body,
                       const std::function<void()> &render_background) {
   // Government news PICT with the 9000 fallback (0x0047d180 prologue).
-  std::int16_t news_pict = kNewsDefaultPict;
-  const Stellar *stellar = state.scenario.Stellar(stellar_id);
-  if (stellar != nullptr && stellar->government_id != -1) {
-    const Government *govt = state.scenario.Government(stellar->government_id);
-    if (govt != nullptr && govt->news_pic_id != -1) {
-      news_pict = govt->news_pic_id;
-    }
-  }
+  const std::int16_t news_pict =
+      static_cast<std::int16_t>(NovaBar_NewsPictId(state, stellar_id));
   auto news_art =
       LoadPictTexture(platform, static_cast<std::uint16_t>(news_pict));
   if (news_art == nullptr && news_pict != kNewsDefaultPict) {
@@ -2550,6 +2552,72 @@ NewsTextPanels NovaBar_NewsTextPanelRects(float window_w, float window_h) {
       .headline = {10.0F, 140.0F, window_w - 10.0F, 180.0F},
       .body = {10.0F, 170.0F, window_w - 10.0F, window_h - 4.0F},
   };
+}
+
+// Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts, crön-news arm. The original
+// scans all 0x200 cron blocks for active, past-holdoff events; each allied
+// NewsGovt/GovtNewsStr pair leaves its (last matching) string id as the slot's
+// local candidate, and IndNewsStr arms the slot for independent news only when
+// no allied pair matched. Local candidates always win; the chosen id is drawn
+// uniformly over the contributing slots (the original's rejection sampling over
+// 0x200 slots is equivalent).
+std::optional<std::int16_t>
+Bar_SelectCronNewsStr(GameState &state, std::int16_t landed_stellar_id) {
+  const Stellar *stellar = state.scenario.Stellar(landed_stellar_id);
+  const std::int16_t stellar_govt =
+      stellar != nullptr ? stellar->government_id : -1;
+  std::vector<std::int16_t> local;
+  std::vector<std::int16_t> independent;
+  const std::size_t count = std::min(state.scenario.cron_events.size(),
+                                     state.cron_event_states.size());
+  for (std::size_t i = 0; i < count; ++i) {
+    const CronEventDef &def = state.scenario.cron_events[i];
+    const GameState::CronEventState &runtime = state.cron_event_states[i];
+    if (!def.present || !runtime.is_active || runtime.holdoff_counter >= 1) {
+      continue;
+    }
+    std::int16_t slot_str = -2; // no allied NewsGovt matched
+    for (std::size_t k = 0; k < def.news_govts.size(); ++k) {
+      if (def.news_govts[k] == -1) {
+        continue;
+      }
+      if (NovaGovernment_AreGovtsAllied(
+              state.scenario, def.news_govts[k], stellar_govt)) {
+        slot_str = def.govt_news_strs[k];
+      }
+    }
+    if (slot_str > 0) {
+      local.push_back(slot_str);
+    } else if (slot_str < -1 && def.independent_news_str > 0) {
+      independent.push_back(def.independent_news_str);
+    }
+  }
+  const std::vector<std::int16_t> &pool = !local.empty() ? local : independent;
+  if (pool.empty()) {
+    return std::nullopt;
+  }
+  std::uniform_int_distribution<std::size_t> pick(0, pool.size() - 1);
+  return pool[pick(state.rng)];
+}
+
+// Ghidra 0x0047d180 NovaUi_RunTravelNewsWindow (prologue): the news PICT is
+// the landed stellar's government news_pic_id, else the generic PICT 9000.
+// Stellar::government_id is the loader's rebased zero-based faction index, so
+// the lookup must use GovernmentByIndex; the 0x80-based Government() would
+// subtract 0x80 again, return null for every stellar, and always fall back to
+// 9000 (the generic ICN art).
+std::uint16_t NovaBar_NewsPictId(const GameState &state,
+                                 std::int16_t stellar_id) {
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr || stellar->government_id == -1) {
+    return kNewsDefaultPict;
+  }
+  const Government *govt =
+      state.scenario.GovernmentByIndex(stellar->government_id);
+  if (govt == nullptr || govt->news_pic_id == -1) {
+    return kNewsDefaultPict;
+  }
+  return static_cast<std::uint16_t>(govt->news_pic_id);
 }
 
 // Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts, disaster-report arm. The
