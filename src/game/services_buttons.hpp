@@ -50,6 +50,17 @@ inline constexpr float kThreeStateButtonFontSize = 12.0F;
 // integer vertical midpoint of the button rect plus five logical pixels.
 [[nodiscard]] float ThreeStateButtonLabelBaseline(const SDL_FRect &rect);
 
+// Draws a three-state button's caption exactly as NovaUi_DrawThreeStateButton
+// (0x004a3340) does: a leading '^', '&', '+' or '-' selects a 2px vector icon
+// (down chevron, up chevron, plus, minus); anything else draws the whole
+// string centred on the baseline. The string is the resolved STR# 0x96
+// caption, so callers should not special-case those bytes themselves.
+void DrawThreeStateButtonLabel(SdlPlatform &platform,
+                               NovaFontCache &font_cache,
+                               const SDL_FRect &rect,
+                               std::string_view label,
+                               const SDL_Color &color);
+
 // A three-state button body. States follow the game's DrawThreeStateButton
 // param_4/param_5 conventions: kNormal (idle), kHover (mouse over / focused;
 // uses the "click"/pressed art), kDisabled (uses the "grey" art).

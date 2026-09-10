@@ -19,6 +19,73 @@ float ThreeStateButtonLabelBaseline(const SDL_FRect &rect) {
   return std::floor(rect.y + rect.h / 2.0F) + 5.0F;
 }
 
+void DrawThreeStateButtonLabel(SdlPlatform &platform,
+                               NovaFontCache &font_cache,
+                               const SDL_FRect &rect,
+                               std::string_view label,
+                               const SDL_Color &color) {
+  if (label.empty()) {
+    return;
+  }
+  const float left = rect.x;
+  const float top = rect.y;
+  const float right = rect.x + rect.w;
+  const float bottom = rect.y + rect.h;
+  const float center_x = (left + right) / 2.0F;
+  const float center_y = (top + bottom) / 2.0F;
+  SDL_Renderer *renderer = platform.renderer();
+  // The original sets a 2x2 pen (FUN_004ba320(2,2)) for the icon strokes and
+  // resets it to 1x1 afterwards; SDL has no pen size, so draw each segment
+  // twice with a one-pixel diagonal offset to approximate it.
+  const auto stroke = [&](float x1, float y1, float x2, float y2) {
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    SDL_RenderLine(
+        renderer, center_x + x1, center_y + y1, center_x + x2, center_y + y2);
+    SDL_RenderLine(renderer,
+                   center_x + x1 + 1.0F,
+                   center_y + y1 + 1.0F,
+                   center_x + x2 + 1.0F,
+                   center_y + y2 + 1.0F);
+  };
+  switch (label.front()) {
+  case '^': { // down chevron: apex at (0,-s), arms to (+/-2s,+s)
+    const float s = (bottom - top) / 10.0F;
+    stroke(0.0F, -s, -2.0F * s, s);
+    stroke(0.0F, -s, 2.0F * s, s);
+    return;
+  }
+  case '&': { // up chevron: apex at (0,+s), arms to (+/-2s,-s)
+    const float s = (bottom - top) / 10.0F;
+    stroke(0.0F, s, -2.0F * s, -s);
+    stroke(0.0F, s, 2.0F * s, -s);
+    return;
+  }
+  case '+': {
+    const float s = (right - left) / 8.0F;
+    stroke(-s, 0.0F, s, 0.0F);
+    stroke(0.0F, -s, 0.0F, s);
+    return;
+  }
+  case '-': {
+    const float s = (right - left) / 9.0F;
+    stroke(-s, 0.0F, s, 0.0F);
+    return;
+  }
+  default:
+    break;
+  }
+  NovaText_DrawCentered(platform,
+                        font_cache,
+                        kThreeStateButtonFontFamily,
+                        kThreeStateButtonFontSize,
+                        kNovaFontStyleRegular,
+                        color,
+                        left,
+                        right,
+                        ThreeStateButtonLabelBaseline(rect),
+                        label);
+}
+
 namespace {
 
 // The three button strips, in the same order NovaUi_InitThreeStateButtonArt
