@@ -2,7 +2,7 @@
 
 Ground truth for the Bar modal and the escort-hire flow, reconstructed from
 Ghidra (2026 pass). The clean-room counterparts live in
-`src/game/docked_dialog.cpp` (`RunBarDialog`, `RunBarNewsWindow`), 
+`src/game/docked_bar_dialog.cpp` (`RunBarDialog`, `RunBarNewsWindow`), 
 `src/game/landed_store.cpp` (hire lane), `src/game/ship_spawn.cpp`
 (`NovaShipClass_SpawnEscortShipFromClass`), and `src/game/ship_ai.cpp`
 (`NovaShip_EnterSquadReturnState`).
