@@ -151,6 +151,14 @@ private:
   bool ttf_initialized_ = false;
 };
 
+// Decodes the classic Mac OS "MacRoman" text that every game resource string
+// (STR# pools, resource names, descriptions) is encoded in, into UTF-8 for
+// SDL3_ttf. ASCII passes through unchanged; 0x80..0xFF map through Apple's
+// standard MacRoman table (0xAA -> U+2122 trade mark, 0xA1 -> U+00B0 degree).
+// The game deliberately keeps MacRoman as its internal representation, so this
+// conversion belongs at the font boundary and nowhere else.
+[[nodiscard]] std::string NovaText_MacRomanToUtf8(std::string_view text);
+
 // Draws `text` with family/size/style at the given logical coordinates with
 // `color`, treating (x, y) as the *baseline* exactly as the original's cursor
 // does (FUN_004bc760 places the glyph rect top at baseline - fontsize and the
