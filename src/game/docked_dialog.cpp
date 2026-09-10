@@ -69,7 +69,7 @@ std::string_view SubWindowHeading(LandedService service) {
     return "Shipyard";
   case LandedService::kBar:
     return "Bar";
-  case LandedService::kMissionBoard:
+  case LandedService::kMissionBbs:
     return "Mission BBS";
   default:
     return "Services";
@@ -220,7 +220,7 @@ void DrawSubWindowDialog(SdlPlatform &platform,
                         "Esc / Enter / click to close");
 }
 
-struct MissionBoardLayout {
+struct MissionBbsLayout {
   SDL_FRect frame{};
   SDL_FRect list{};
   SDL_FRect selected_title{};
@@ -243,8 +243,8 @@ constexpr float kMissionListFontSize = 9.0F;
 // independent of the DITL rect height.
 constexpr float kMissionListRowPitch = 12.0F;
 
-[[nodiscard]] std::optional<MissionBoardLayout>
-LayoutMissionBoard(const SdlPlatform &platform) {
+[[nodiscard]] std::optional<MissionBbsLayout>
+LayoutMissionBbs(const SdlPlatform &platform) {
   const auto definition = NovaResource_LoadDialogDefinition(0x3ee);
   const auto items =
       definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
@@ -260,7 +260,7 @@ LayoutMissionBoard(const SdlPlatform &platform) {
   const SDL_FPoint output = platform.logical_playfield_size();
   const SDL_FPoint origin{(output.x - width) / 2.0F,
                           (output.y - height) / 2.0F};
-  MissionBoardLayout layout;
+  MissionBbsLayout layout;
   layout.frame = {origin.x, origin.y, width, height};
   const auto item_rect = [origin](const NovaDialogItem &item) {
     return SDL_FRect{origin.x + static_cast<float>(item.left),
@@ -306,14 +306,14 @@ LayoutMissionBoard(const SdlPlatform &platform) {
   return layout;
 }
 
-void DrawMissionBoardContents(SdlPlatform &platform,
-                              NovaFontCache &font_cache,
-                              const ServicesButtonArt &button_art,
-                              const GameState &state,
-                              const MissionBoardLayout &layout,
-                              const MissionListEvaluation &missions,
-                              std::size_t selected,
-                              std::string_view status) {
+void DrawMissionBbsContents(SdlPlatform &platform,
+                            NovaFontCache &font_cache,
+                            const ServicesButtonArt &button_art,
+                            const GameState &state,
+                            const MissionBbsLayout &layout,
+                            const MissionListEvaluation &missions,
+                            std::size_t selected,
+                            std::string_view status) {
   SDL_Renderer *renderer = platform.renderer();
   constexpr SDL_Color kText{255, 255, 255, 255};
   constexpr SDL_Color kMissionDim{192, 192, 192, 255};
@@ -322,7 +322,7 @@ void DrawMissionBoardContents(SdlPlatform &platform,
   constexpr SDL_Color kRowNormal{0, 0, 0, 255};
   constexpr SDL_Color kRowSelected{128, 0, 0, 255};
   // Window furniture colours (Settings_InitTimingPresets 0x004ad7c0, triples
-  // consumed by NovaUi_DrawTravelDestinationWindow 0x00441620): the heading
+  // consumed by NovaUi_DrawMissionBbsWindow 0x00441620): the heading
   // band uses the 0xc000 grey DAT_00733b50, the date the 0x4000 grey
   // DAT_00733b5c, and the selected title white PTR_DAT_00575ad8.
   constexpr SDL_Color kHeadingGrey{192, 192, 192, 255};
@@ -478,7 +478,7 @@ void DrawMissionBoardContents(SdlPlatform &platform,
           description && !description->text.empty()) {
         // The original loads the desc into the shared scratch (running the
         // placeholder pass at load, 0x004c6d50) and runs the same wildcard
-        // pass as the list rows (NovaUi_RunTravelDestinationMainWindow
+        // pass as the list rows (NovaUi_RunMissionBbsWindow
         // 0x0043c470 -> Stellar_BuildTravelDestinationDescription).
         std::string loaded_text = description->text;
         Mission_ExpandStringPlaceholders(state, loaded_text);
@@ -522,11 +522,11 @@ void DrawMissionBoardContents(SdlPlatform &platform,
   }
 }
 
-void DrawMissionBoardBase(SdlPlatform &platform,
-                          const std::function<void()> &render_background,
-                          SDL_Texture *backdrop,
-                          SDL_Texture *frame,
-                          const MissionBoardLayout &layout) {
+void DrawMissionBbsBase(SdlPlatform &platform,
+                        const std::function<void()> &render_background,
+                        SDL_Texture *backdrop,
+                        SDL_Texture *frame,
+                        const MissionBbsLayout &layout) {
   SDL_Renderer *renderer = platform.renderer();
   if (render_background) {
     // Re-render the preserved docked menu and layer the BBS window on top
@@ -567,13 +567,14 @@ void NovaMission_RunAcceptanceDialogs(
     std::int16_t mission_def,
     const std::function<void()> &render_background);
 
-// Ghidra 0x0043c470 NovaUi_RunTravelDestinationMainWindow (partial port of the
-// landed Mission BBS: layout, list/description rendering, selection, accept).
-LandedExit
-RunMissionBoardDialog(SdlPlatform &platform,
-                      GameState &state,
-                      std::int16_t stellar_id,
-                      const std::function<void()> &render_background) {
+// Ghidra 0x0043c470 NovaUi_RunMissionBbsWindow (partial port of the landed
+// Mission BBS: layout, list/description rendering, selection, accept). The
+// 0x00440c90 NovaUi_PollMissionBbsWindow selection/navigation slice runs
+// inline in the input loop below.
+LandedExit RunMissionBbsWindow(SdlPlatform &platform,
+                               GameState &state,
+                               std::int16_t stellar_id,
+                               const std::function<void()> &render_background) {
   (void)stellar_id;
   const auto contains = [](const SDL_FRect &rect, SDL_FPoint point) {
     return point.x >= rect.x && point.x < rect.x + rect.w &&
@@ -584,7 +585,7 @@ RunMissionBoardDialog(SdlPlatform &platform,
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
-  const auto layout = LayoutMissionBoard(platform);
+  const auto layout = LayoutMissionBbs(platform);
   if (!layout) {
     return LandedExit::kServiceComplete;
   }
@@ -607,19 +608,19 @@ RunMissionBoardDialog(SdlPlatform &platform,
           : static_cast<int>(missions.page_zero.front()));
 
   while (!platform.quit_requested()) {
-    DrawMissionBoardBase(platform,
-                         render_background,
-                         backdrop ? backdrop->get() : nullptr,
-                         frame ? frame->get() : nullptr,
-                         *layout);
-    DrawMissionBoardContents(platform,
-                             font_cache,
-                             button_art,
-                             state,
-                             *layout,
-                             missions,
-                             selected,
-                             status);
+    DrawMissionBbsBase(platform,
+                       render_background,
+                       backdrop ? backdrop->get() : nullptr,
+                       frame ? frame->get() : nullptr,
+                       *layout);
+    DrawMissionBbsContents(platform,
+                           font_cache,
+                           button_art,
+                           state,
+                           *layout,
+                           missions,
+                           selected,
+                           status);
     platform.Present();
 
     auto accept = [&]() {
@@ -2693,7 +2694,7 @@ std::uint16_t NovaDocked_SubWindowFramePict(LandedService service) {
     return 0x2136;
   case LandedService::kBar:
     return 0x2137;
-  case LandedService::kMissionBoard:
+  case LandedService::kMissionBbs:
     return 0x2139;
   case LandedService::kBuySellCargo:
     return 0x213e;
@@ -2709,9 +2710,8 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                               LandedService service,
                               std::int16_t stellar_id,
                               const std::function<void()> &render_background) {
-  if (service == LandedService::kMissionBoard) {
-    return RunMissionBoardDialog(
-        platform, state, stellar_id, render_background);
+  if (service == LandedService::kMissionBbs) {
+    return RunMissionBbsWindow(platform, state, stellar_id, render_background);
   }
   if (service == LandedService::kBar) {
     return RunBarDialog(platform, state, stellar_id, render_background);
@@ -2789,12 +2789,15 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
 
 // ---------------------------------------------------------------------------
 // Ghidra 0x00442510 NovaUi_RunMissionShipInteractionWindow (partial port: the
-// text-offer arm). Window DLOG 0x3f8 (DITL 1016: entry 1 = accept button,
-// entry 2 = decline button, entry 3 = read-only text view); background =
-// PICT 0x214a (main art, top-anchored) with strips 0x2149 (top) and 0x214b
-// (bottom). Button captions come from the mïsn payload +0x75f/+0x77f, which
-// the original truncates at the first non-lowercase byte and replaces with
-// STR# 0x96 entries 0x32/0x1b (accept) and 0x33 (decline) when empty.
+// text-offer arm). The 0x00447170 NovaUi_PollMissionShipInteractionWindow input
+// slice and 0x00447680 NovaUi_DrawMissionShipInteractionWindow draw slice run
+// inline in this function and its draw_frame lambda below. Window DLOG 0x3f8
+// (DITL 1016: entry 1 = accept button, entry 2 = decline button, entry 3 =
+// read-only text view); background = PICT 0x214a (main art, top-anchored) with
+// strips 0x2149 (top) and 0x214b (bottom). Button captions come from the mïsn
+// payload +0x75f/+0x77f, which the original truncates at the first
+// non-lowercase byte and replaces with STR# 0x96 entries 0x32/0x1b (accept) and
+// 0x33 (decline) when empty.
 namespace {
 
 // Fills the reader text the way the original's callers fill
@@ -3016,8 +3019,9 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   // Shared read-only text view (NovaTextView 0x004bcd90) over DITL entry 3.
   NovaTextScrollView view(font_cache, text, text_rect);
   // One window frame over the docked backing store. The original's draw
-  // callback (NovaUi_DrawOutfitterMenu 0x00447680) fills the window, blits
-  // the main art top-anchored (clipped), then the top and bottom strips.
+  // callback (NovaUi_DrawMissionShipInteractionWindow 0x00447680) fills the
+  // window, blits the main art top-anchored (clipped), then the top and
+  // bottom strips.
   auto draw_frame = [&]() {
     platform.SetFullscreenPlayfield();
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
