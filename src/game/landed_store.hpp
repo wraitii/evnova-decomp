@@ -65,7 +65,7 @@ NovaLanded_ScaledStorePrice(std::int32_t base_price,
 // Ghidra 0x00491950 Ship_ComputeShipCurrentMass: remaining outfit mass after
 // the class FreeMass allowance and all installed purchase masses are applied.
 [[nodiscard]] std::int32_t NovaLanded_FreeMass(const GameState &state);
-[[nodiscard]] bool NovaLanded_CanBuyOutfit(const GameState &state,
+[[nodiscard]] bool NovaLanded_CanBuyOutfit(GameState &state,
                                            std::int16_t stellar_id,
                                            std::int16_t outfit_id);
 [[nodiscard]] std::int16_t NovaLanded_BuyOutfit(GameState &state,
