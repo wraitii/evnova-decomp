@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../rle_sprite_sheet.hpp"
 #include "../sdl_platform.hpp"
+#include "freeflight_objects.hpp"
 #include "game_state.hpp"
 #include "hud_renderer.hpp"
 #include "impact_effects.hpp"
@@ -865,6 +866,7 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
   const float elapsed_ticks = frame_time_ms / kOriginalTickMs;
   NovaEffects_TickImpactEffects(state, elapsed_ticks);
   NovaEffects_TickFadingEffects(state, elapsed_ticks);
+  NovaFreeflight_Tick(state, elapsed_ticks);
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &ship = state.ShipAt(slot);
     const bool was_visible = ship.destruction_visual_timer_ms > 0.0F;
@@ -936,6 +938,48 @@ void SpaceflightView::DrawFadingEffects(SdlPlatform &platform,
                frame,
                fragment.pos_x,
                fragment.pos_y,
+               camera_x,
+               camera_y,
+               vp.w,
+               vp.h,
+               options);
+  }
+}
+
+// FreeflightObjectState draw half of Frame_UpdateFreeflightObjectSprites
+// (0x0042c1b0): each live object draws its 500+index spin set at its world
+// position, frame-selected by the tick's frame accumulator and alpha-faded
+// over the final 32 ticks. The simulation half (position, lifetime, frame
+// counter) lives in NovaFreeflight_Tick. Objects from another system are
+// skipped; the original instead clears the whole pool via DAT_00596d2a on
+// transitions.
+void SpaceflightView::DrawFreeflightObjects(SdlPlatform &platform,
+                                            const GameState &state) {
+  const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
+  for (const FreeflightObjectState &object : state.freeflight_objects) {
+    if (object.lifetime_ticks < 0.0F ||
+        object.system_id != state.player.current_system_id) {
+      continue;
+    }
+    const SpriteAsset *set =
+        sprite_store_.Spin(platform.renderer(),
+                           NovaFreeflightSpriteSetId(object.sprite_set_index));
+    if (set == nullptr || set->frames.empty()) {
+      continue;
+    }
+    int frame = static_cast<int>(std::lround(object.frame_counter));
+    frame %= set->frame_count;
+    if (frame < 0) {
+      frame += set->frame_count;
+    }
+    SpriteDrawOptions options;
+    options.alpha_mod = std::clamp(object.lifetime_ticks / 32.0F, 0.0F, 1.0F);
+    DrawSprite(platform.renderer(),
+               *set,
+               frame,
+               object.pos_x,
+               object.pos_y,
                camera_x,
                camera_y,
                vp.w,
@@ -1343,6 +1387,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
   DrawImpactEffects(platform, state); // destruction/impact effects over ships
   DrawFadingEffects(platform, state); // directional destruction fragments
+  DrawFreeflightObjects(platform, state);   // jettisoned pods / launched drones
   DrawShipTargetReticle(platform, state);   // target brackets over the ships
   DrawTravelTargetReticle(platform, state); // brackets over the travel target
   DrawBeamsOverShips(platform, state);      // topmost layer: normal beams

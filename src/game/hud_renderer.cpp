@@ -964,8 +964,6 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
 //     short name (STR# 0xfa2), a junk-def name when exactly one junk type is
 //     held, or "Multiple" (value x+87, top+46);
 //   * "Cr:" (x+77, top+66) with the grouped credits value (x+87, top+82).
-// TODO(decomp): junk-def names (g_junk_defs +0x128) are not decoded yet, so
-// the single-junk-type branch logs and leaves the value empty.
 // ---------------------------------------------------------------------------
 void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
                                  const GameState &state,
@@ -1001,8 +999,14 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
                     value_color);
   }
 
-  // Free fleet cargo space (Outfit_ComputeFleetCargoCapacity - holdings,
-  // clamped at zero).
+  // Free fleet cargo space: capacity - carried (the original 0x004612c0
+  // computes this inline, NOT via Outfit_ComputeRemainingCargoSpace, which
+  // has the separate mass-bounded mission-reward semantics).
+  const std::int32_t free_space = std::max<std::int32_t>(
+      0,
+      static_cast<std::int32_t>(Outfit_ComputePlayerFleetCargoCapacity(state)) -
+          static_cast<std::int32_t>(
+              Outfit_ComputePlayerCargoAndJunkTotal(state)));
   DrawPanelTextAt(platform,
                   font,
                   font_size,
@@ -1015,7 +1019,7 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
                   font_size,
                   left + 110.0F,
                   top + 12.0F,
-                  std::to_string(Outfit_ComputeRemainingCargoSpace(state)),
+                  std::to_string(free_space),
                   value_color);
 
   // "Special:" row: carried mission cargo / junk summary.
@@ -1033,8 +1037,12 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
     }
   }
   std::int16_t junk_types = 0;
-  for (const std::int16_t held : state.inventory.junk_counts) {
-    if (held > 0) {
+  std::int16_t first_junk_index = -1;
+  for (std::size_t i = 0; i < state.inventory.junk_counts.size(); ++i) {
+    if (state.inventory.junk_counts[i] > 0) {
+      if (junk_types == 0) {
+        first_junk_index = static_cast<std::int16_t>(i);
+      }
       ++junk_types;
     }
   }
@@ -1052,13 +1060,12 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
                          static_cast<std::uint16_t>(first_cargo_type + 1),
                          "cargo");
     } else if (junk_types == 1) {
-      // TODO(decomp): g_junk_defs display names (+0x128, 0x526 stride) are
-      // not decoded yet; the original draws the junk def name here.
-      static bool junk_name_logged = false;
-      if (!junk_name_logged) {
-        NovaLog::Warn("cargo panel: junk def names not decoded; "
-                      "special row left blank");
-        junk_name_logged = true;
+      // The single held junk type's short status-bar label (STR# 0xfa3-style
+      // g_junk_defs +0x128 "Abbrev" field; the scenario decoder exposes it as
+      // JunkDef::abbrev).
+      if (const JunkDef *junk = state.scenario.Junk(
+              static_cast<std::int16_t>(0x80 + first_junk_index))) {
+        value = junk->abbrev;
       }
     } else {
       value = MiscString(kMiscMultiple);

@@ -38,9 +38,9 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state);
 // Outcome of one Player Info session. The original latches the jettison arm
 // as a local flag in the run loop before closing.
 struct PlayerInfoWindowResult {
-  // The player confirmed the jettison prompt on the Cargo page. The actual
-  // fleet-cargo jettison (Outfit_RedistributeFleetCargoOverflow 0x0041f330)
-  // is TODO(decomp) — the caller applies nothing on this flag yet.
+  // The player confirmed the jettison prompt on the Cargo page. The caller
+  // applies the fleet-cargo jettison (Outfit_RedistributeFleetCargoOverflow
+  // 0x0041f330) with the sim clock in scope; see NovaPlayerInfo_RunWindow.
   bool jettison_confirmed = false;
 };
 

@@ -1,5 +1,6 @@
 add_executable(evnova_tests
     asteroid_test.cpp
+    cargo_test.cpp
     cicn_test.cpp
     collision_test.cpp
     docked_dialog_test.cpp

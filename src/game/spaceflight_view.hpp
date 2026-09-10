@@ -88,6 +88,11 @@ public:
   // fragments emitted by Ship_SpawnShipDestructionDebrisPuff.
   void DrawFadingEffects(SdlPlatform &platform, const GameState &state);
 
+  // FreeflightObjectState pool (jettisoned cargo/junk pods, launched drones
+  // and effect-package sprites). Simulation half is NovaFreeflight_Tick;
+  // this draws the live objects' 500+index spin sets.
+  void DrawFreeflightObjects(SdlPlatform &platform, const GameState &state);
+
   // Clean-room click-to-target ship picking: returns the slot of the active
   // NPC ship in the player's system whose sprite bounding span contains the
   // render-coordinate point (rx, ry), nearest first, or -1. Mirrors the

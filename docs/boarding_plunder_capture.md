@@ -317,10 +317,10 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
      Ghidra updates: full plate comment on 0x00412550, and the shared
      constants 00575020/005751a0 retyped double + renamed
      CONST_0_01_f64 / CONST_2_0_f64.
-     Divergence: TODO(decomp) skipped — the bin-to-bin cargo plunder needs
-     per-Ship cargo bins (port models bins only on PlayerInventory, and an
-     AI boarder has nowhere to carry plunder), so the loot overlay only
-     reports the credits share.
+     Divergence: the bin-to-bin cargo plunder's NPC-victim/boarder bins
+     remain unmodelled (port models bins only on PlayerInventory), so the
+     loot overlay reports only the credits share plus any cargo plundered
+     from a player victim; see iteration 9.
    - `NovaAi_UpdateBehavior0x03CaptureVariant` (ship_ai.cpp) ports the
      supervisor end to end (0x16 guard, disabled-ship scan via
      NovaAi_SelectNearestDisabledShipForBoarding, acquire/travel ladder,
@@ -336,8 +336,48 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
      (NovaAi_UpdateShipState / ApplyControls); until that slice lands the
      handoff may not trigger end-to-end in-game. Needs probe verification.
 
-### In-game verification (iterations 1-2)
+9. **Cargo plunder + profile jettison** — DONE:
+   - `NovaBoarding_BoardShipAndTransferCargo` (0x00412550) now ports the
+     random-bin cargo plunder for a player victim: the boarder's free holds
+     are its class `cargo_holds` (its own bins are unmodelled), the victim's
+     capacity is `Outfit_ComputePlayerTotalMass` (the original's
+     `Ship_ComputeShipTotalMass`), and bins transfer one at a time into the
+     free-holds budget. NPC victim bins stay zero (matching
+     `Ship_AllocateShipSlotInSystem`). The loot overlay now reports the
+     stolen tonnage. `tests/cargo_test.cpp`.
+   - `NovaOutfit_RedistributeFleetCargoOverflow` (0x0041f330) is ported in
+     `src/game/outfit.cpp`: clears the six player cargo bins and every
+     positive junk count; `jettison_all` also drains abortable active
+     missions' cargo and fails them with STR# 0x7d2 0x11c "Mission failed.",
+     then shows entry 0x121/0x122 ("Cargo jettisoned." /
+     "Non-mission cargo jettisoned.") and queues transition-sound 4. The
+     Player Info Cargo-page Jettison confirmation applies it through the
+     flight loop (0x00499c10's call); the in-flight arm-modifier + slot 0x0f
+     channel (0x0044aa70 block 0x00451907, Shift = non-mission only) is wired
+     too. It then spawns the visible jettisoned-cargo pods through the new
+     `FreeflightObjectState` pool (see iteration 10).
+   - HUD `DrawCargoPanel` (0x004612c0) now names the single held junk type
+     from `JunkDef::abbrev` (the g_junk_defs +0x128 field) instead of
+     leaving the "Special:" value blank.
 
+10. **Visible jettisoned cargo pods** — DONE:
+   - New `src/game/freeflight_objects.{hpp,cpp}` ports the 64-slot
+     `FreeflightObjectState` pool: `Ship_SpawnFreeflightObjectForShip`
+     (0x0041f800), `Ship_SpawnFreeflightObjectAtPosition` (0x0041fb50, no
+     callers yet) and the simulation half of `Frame_UpdateFreeflightObject-
+     Sprites` (0x0042c1b0) as `NovaFreeflight_Tick`. The jettison pass spawns
+     ROUND(share/5) clamped [1,12] pods per eligible hull through the
+     player's and escorts' backward launch scatter.
+   - `SpaceflightView::DrawFreeflightObjects` draws each live object's
+     `500+index` spin set (index 0 = the stock cargo/junk set; pinned as a
+     36-frame sheet by `tests/cargo_test.cpp`), frame from the tick's
+     accumulator and alpha faded over the final 32 ticks, filtered to the
+     current system.
+   - TODO(decomp): the original's `DAT_00596d2a` clear-transient-sprites
+     latch and `Frame_UpdateSpriteDistanceIntensity` distance dimming are
+     not modelled.
+
+### In-game verification (iterations 1-2)
 To exercise this today: fly, target a disabled hostile ('`' to cycle), slow
 to < 0.5 px/frame relative velocity, align heading within 30°, close to half
 the target's sprite frame, press **b**.

@@ -1,0 +1,228 @@
+// Cargo bookkeeping tests: the Player Info Jettison pass
+// (Outfit_RedistributeFleetCargoOverflow 0x0041f330) and the AI boarding
+// bin-to-bin plunder stage of Outfit_BoardShipAndTransferCargo (0x00412550).
+
+#include "game/boarding_plunder.hpp"
+#include "game/freeflight_objects.hpp"
+#include "game/game_state.hpp"
+#include "game/outfit.hpp"
+#include "game/scenario_data.hpp"
+
+#include "brgr_archive.hpp"
+#include "rle_sprite_sheet.hpp"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+
+namespace game {
+
+TEST_CASE("jettison clears the player cargo bins and junk counts",
+          "[cargo][jettison]") {
+  GameState state;
+  state.inventory.cargo_bins = {3, 0, 5, 0, 0, 7};
+  state.inventory.junk_counts.fill(0);
+  state.inventory.junk_counts[2] = 7;
+  state.inventory.junk_counts[9] = 4;
+
+  // jettison_all = false (the in-flight non-mission dump / overflow path):
+  // only the standard bins and junk are cleared.
+  NovaOutfit_RedistributeFleetCargoOverflow(state,
+                                            /*jettison_all=*/false,
+                                            /*now_ms=*/1000);
+
+  for (const std::int16_t bin : state.inventory.cargo_bins) {
+    CHECK(bin == 0);
+  }
+  for (const std::int16_t junk : state.inventory.junk_counts) {
+    CHECK(junk == 0);
+  }
+  CHECK_FALSE(state.stat_cache_valid);
+
+  // 26 tons of cargo+junk -> ROUND(26 / 5) = 5 jettisoned cargo pods.
+  std::size_t pods = 0;
+  for (const FreeflightObjectState &object : state.freeflight_objects) {
+    if (object.lifetime_ticks >= 0.0F) {
+      ++pods;
+      CHECK(object.sprite_set_index == 0);
+      CHECK(object.lifetime_ticks >= 180.0F);
+      CHECK(object.lifetime_ticks <= 269.0F);
+      CHECK(object.spin_rate >= -1);
+      CHECK(object.spin_rate <= 1);
+    }
+  }
+  CHECK(pods == 5);
+}
+
+TEST_CASE("cargo total counts carried mission cargo", "[cargo]") {
+  GameState state;
+  state.inventory.cargo_bins = {2, 0, 0, 0, 0, 3};
+  state.inventory.junk_counts.fill(0);
+  state.inventory.junk_counts[1] = 4;
+
+  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 9);
+
+  constexpr std::size_t kSlot = 2;
+  state.active_mission_runtime_flags[kSlot].is_active = true;
+  ActiveMission &mission = state.active_missions[kSlot];
+  mission.carrying_resources = true;
+  mission.cargo_qty_tons = 7;
+  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 16);
+
+  // Inactive missions and non-carried cargo do not count.
+  state.active_mission_runtime_flags[kSlot].is_active = false;
+  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 9);
+  state.active_mission_runtime_flags[kSlot].is_active = true;
+  mission.carrying_resources = false;
+  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 9);
+}
+
+TEST_CASE("jettison_all drains abortable mission cargo and fails the mission",
+          "[cargo][jettison]") {
+  GameState state;
+  state.inventory.cargo_bins = {2, 0, 0, 0, 0, 0};
+  state.inventory.junk_counts.fill(0);
+
+  constexpr std::size_t kSlot = 3;
+  state.active_mission_runtime_flags[kSlot].is_active = true;
+  ActiveMission &mission = state.active_missions[kSlot];
+  mission.carrying_resources = true;
+  mission.cargo_type_id = 1;
+  mission.cargo_qty_tons = 4;
+  mission.can_abort = true;
+  mission.flags_primary = 0;
+
+  NovaOutfit_RedistributeFleetCargoOverflow(state,
+                                            /*jettison_all=*/true,
+                                            /*now_ms=*/2000);
+
+  CHECK_FALSE(mission.carrying_resources);
+  CHECK(state.active_mission_runtime_flags[kSlot].is_failed);
+  for (const std::int16_t bin : state.inventory.cargo_bins) {
+    CHECK(bin == 0);
+  }
+}
+
+namespace {
+// A boardable boarder hull: active, nonzero instance id, armed with cargo
+// holds. Returns its zero-based class index.
+int FindBoarderClass(const ScenarioData &data) {
+  for (std::size_t i = 0; i < data.ships.size(); ++i) {
+    if (data.ships[i].cargo_holds > 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+} // namespace
+
+TEST_CASE("AI boarding plunders the player's cargo into the boarder holds",
+          "[cargo][boarding]") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int boarder_class = FindBoarderClass(state.scenario);
+  REQUIRE(boarder_class >= 0);
+  const int boarder_holds =
+      state.scenario.ships[static_cast<std::size_t>(boarder_class)].cargo_holds;
+
+  // A boarder hull (NPC) and the player victim. The player is
+  // ship_instance_id 0, so Outfit_BoardShipAndTransferCargo reads the
+  // PlayerInventory bins.
+  Ship &boarder = state.ShipAt(1);
+  boarder.is_active = true;
+  boarder.ship_instance_id = 1;
+  boarder.ship_class_id = static_cast<std::int16_t>(boarder_class);
+  boarder.armor_points = 100.0F;
+
+  Ship &player = state.player;
+  player.is_active = true;
+  player.ship_instance_id = 0;
+  player.armor_points = 100.0F;
+  // Pick any loaded class for the victim capacity (total mass).
+  REQUIRE_FALSE(state.scenario.ships.empty());
+  player.ship_class_id = 0;
+  const std::int32_t capacity = Outfit_ComputePlayerTotalMass(state);
+
+  state.inventory.cargo_bins = {0, 0, 0, 0, 0, 0};
+  state.inventory.cargo_bins[0] = 100; // more than any stock freighter's holds
+  state.inventory.junk_counts.fill(0);
+  state.player.credits = 10000;
+  state.stat_cache_valid = true;
+
+  NovaBoarding_BoardShipAndTransferCargo(
+      state, boarder, player, /*now_ms=*/3000);
+
+  std::int32_t remaining = 0;
+  for (const std::int16_t bin : state.inventory.cargo_bins) {
+    remaining += bin;
+  }
+  const std::int32_t expected_taken =
+      std::min<std::int32_t>(std::min(100, boarder_holds), capacity);
+  CHECK(remaining == 100 - expected_taken);
+  CHECK_FALSE(state.stat_cache_valid);
+}
+
+// The jettison pods render through spin 500 (the 500+index table); pin that
+// the shipped resource exists and decodes to the 36-frame tile grid the tick
+// assumes (DAT_005753a0 = 36.0).
+TEST_CASE("freeflight jettison sprite set 500 is a 36-frame spin",
+          "[cargo][jettison][sprite]") {
+  if (!std::filesystem::exists("EV Nova/Nova Files/Nova Graphics 1.rez") &&
+      !std::filesystem::exists(
+          "../../../EV Nova/Nova Files/Nova Graphics 1.rez")) {
+    SKIP("Nova .rez archives not present");
+  }
+  const auto descriptor = NovaResource_Load(kResourceTypeSprites, 500);
+  REQUIRE(descriptor);
+  const auto def = NovaSpriteDefinition_Parse(*descriptor);
+  REQUIRE(def);
+  const auto sheet =
+      NovaResource_Load(kResourceTypeRleSheet16, def->sprites_resource_id);
+  REQUIRE(sheet);
+  const auto decoded = RleSpriteSheet_Decode16(*sheet);
+  REQUIRE(decoded);
+  CHECK(decoded->width == def->tile_width);
+  CHECK(decoded->height == def->tile_height);
+  CHECK(decoded->frames.size() == 36);
+}
+
+TEST_CASE("freeflight objects integrate and expire", "[cargo][freeflight]") {
+  GameState state;
+  state.player.current_system_id = 3;
+
+  Ship ship;
+  ship.pos_x = 10.0F;
+  ship.pos_y = 20.0F;
+  ship.vel_x = 1.0F;
+  ship.vel_y = -2.0F;
+  ship.current_system_id = 3;
+  ship.heading = 0.0F; // facing up; pods scatter backwards
+
+  NovaFreeflight_SpawnForShip(state, ship);
+  const FreeflightObjectState *live = nullptr;
+  for (const FreeflightObjectState &object : state.freeflight_objects) {
+    if (object.lifetime_ticks >= 0.0F) {
+      live = &object;
+    }
+  }
+  REQUIRE(live != nullptr);
+  CHECK(live->system_id == 3);
+
+  const float start_x = live->pos_x;
+  const float start_y = live->pos_y;
+  const float lifetime = live->lifetime_ticks;
+  NovaFreeflight_Tick(state, 1.0F);
+  // Position integrates the object's velocity each tick.
+  CHECK(live->pos_x == start_x + live->vel_x);
+  CHECK(live->pos_y == start_y + live->vel_y);
+  CHECK(live->lifetime_ticks == lifetime - 1.0F);
+
+  // Advance past the lifetime: the slot is retired.
+  NovaFreeflight_Tick(state, lifetime + 1.0F);
+  CHECK(live->lifetime_ticks < 0.0F);
+}
+
+} // namespace game

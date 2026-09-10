@@ -218,3 +218,13 @@ Ported in `src/game/player_info_window.cpp` (see module comments; the
 marked with `TODO(decomp)`/`NovaLog::Todo` at the port sites and tracked in
 `decomp-progress.tsv` rows 0x00499c10 / 0x0049a540 / 0x0049c050 /
 0x004a1ae0 / 0x004a1c40.
+
+The Cargo-page Jettison execution (`Outfit_RedistributeFleetCargoOverflow`
+0x0041f330) is ported in `src/game/outfit.cpp`. The window returns
+`PlayerInfoWindowResult::jettison_confirmed`; the flight loop applies it with
+the sim clock in scope (the original runs it inside the window loop). The
+in-flight cargo-dump channel (`Outfit_RedistributeFleetCargoOverflow` from
+`0x0044aa70` block 0x00451907) is wired to the arm-modifier + slot 0x0f
+binding. The visible jettisoned-cargo pods are spawned through the
+`FreeflightObjectState` pool (`src/game/freeflight_objects.cpp`,
+`Ship_SpawnFreeflightObjectForShip` 0x0041f800).
