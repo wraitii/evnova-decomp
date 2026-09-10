@@ -177,7 +177,7 @@ The Mission BBS UI is a functional port in `src/game/docked_dialog.cpp`
 TODOs. Ghidra distinguishes this from the active-mission computer and from
 the galaxy map:
 
-- `0x0043C470` `NovaUi_RunTravelDestinationMainWindow` is the available-mission
+- `0x0043C470` `NovaUi_RunMissionBbsWindow` is the available-mission
   BBS. It opens DLOG `0x3EE`, loads PICT `0x2139`, rebuilds the available mission
   rows, shows the selected mission description (`mission_id + 4000`), and calls
   `Mission_ActivateMissionAtSlot` when the player accepts a row.
@@ -210,8 +210,9 @@ the generic placeholder.
 
 Remaining dialog entrypoints:
 
-- `0x00440C90` mission-computer polling — open (this is the BBS/destination
-  window poller, not the I-key window)
+- `0x00440C90` `NovaUi_PollMissionBbsWindow` polling — ported inline (35%) in
+  `RunMissionBbsWindow` (`docked_dialog.cpp`); remaining action codes and the
+  native scrollbar are TODO(decomp)
 - `0x00446150` mission-computer window — DONE (75%) as
   `NovaMission_RunMissionInfoWindow` (`docked_dialog.cpp`): the in-flight
   active-missions modal (gameplay command 0x28, default key I; the caller in
@@ -236,10 +237,11 @@ Remaining dialog entrypoints:
   layering divergence documented in docs/dlog_ditl_dialog_format.md §7.1
   (the docked-layer snapshot plumbing was removed in the same pass).
 - `0x0043C470` available Mission BBS — ported in `docked_dialog.cpp`
-  (`RunMissionBoardDialog`); 2025 fidelity pass: Geneva-9 screen font and
+  (`RunMissionBbsWindow`); 2025 fidelity pass: Geneva-9 screen font and
   fixed 12px native list row pitch, selected-title panel in white Times 18
   with a black no-selection fill, description panel as the fill+InvertRect
-  black/white pattern of the draw 0x00441620, heading/date greys
+  black/white pattern of the draw `NovaUi_DrawMissionBbsWindow` 0x00441620,
+  heading/date greys
   (DAT_00733b50/5c), and mission display names strip the ';'-subtitle per
   the 0x0043bbb0 loader (NameString_StripSubtitleSuffix 0x004cd230).
 

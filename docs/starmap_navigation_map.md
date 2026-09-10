@@ -34,7 +34,7 @@ Opened from:
 
 - `0x0044b120` `Ship_HandlePlayerShip` — while an in-flight map command is
   active and the ship is not landing / hyperspacing / dead.
-- `0x0043c470` `NovaUi_RunTravelDestinationMainWindow` — destination window's
+- `0x0043c470` `NovaUi_RunMissionBbsWindow` — destination window's
   starmap sub-flow.
 - `0x00456480` `Stellar_SelectLinkedDestinationViaStarmap` — linked-destination
   (hypergate/wormhole) travel through the map.

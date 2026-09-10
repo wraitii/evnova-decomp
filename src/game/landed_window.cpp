@@ -478,7 +478,7 @@ NovaDialog_DockedServiceForDitlItem(std::size_t ditl_index) {
   case 8:
     return LandedService::kShipyard;
   case 9:
-    return LandedService::kMissionBoard;
+    return LandedService::kMissionBbs;
   case 10:
     return LandedService::kBar;
   default:
@@ -591,7 +591,7 @@ const char *ServiceLabel(LandedService t) {
     return "Shipyard";
   case LandedService::kBar:
     return "Bar";
-  case LandedService::kMissionBoard:
+  case LandedService::kMissionBbs:
     return "Mission BBS";
   case LandedService::kCount:
     break;
@@ -633,7 +633,7 @@ bool ServiceAvailable(const GameState &state,
     return (flags & 0x8U) != 0U;
   case LandedService::kBar:
     return (flags & 0x40U) != 0U;
-  case LandedService::kMissionBoard:
+  case LandedService::kMissionBbs:
     return allows_services;
   case LandedService::kCount:
     break;
@@ -902,7 +902,7 @@ LandedExit DispatchService(SdlPlatform &platform,
   case LandedService::kOutfit:
   case LandedService::kShipyard:
   case LandedService::kBar:
-  case LandedService::kMissionBoard: {
+  case LandedService::kMissionBbs: {
     // Render the sub-window as an on-screen dialog over the docked scene
     // (frame PICT + heading + Leave). TODO(decomp): implement the service
     // content behind the frame: buy/sell tables, outfit list, shipyard
@@ -1244,7 +1244,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
           ctx.selection = LandedService::kShipyard;
           break;
         case 'n':
-          ctx.selection = LandedService::kMissionBoard;
+          ctx.selection = LandedService::kMissionBbs;
           break;
         case 'b':
           ctx.selection = LandedService::kBar;

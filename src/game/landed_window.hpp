@@ -55,7 +55,7 @@ enum class LandedService : std::uint8_t {
   kBuySellCargo,
   kOutfit,
   kShipyard,
-  kMissionBoard,
+  kMissionBbs,
   kBar,
   kCount,
 };
