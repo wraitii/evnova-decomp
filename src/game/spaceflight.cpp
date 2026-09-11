@@ -130,6 +130,9 @@ void Stub_PlayerCore(GameState &state) { (void)state; }
 void Stub_Collisions(GameState &state) {
   NovaWeapon_ResolveDirectShotCollisions(state);
   NovaWeapon_ResolveProjectileCollisions(state);
+  // The original's sprite layer also pairs ships against the freeflight-object
+  // layer during the same overlap pass (mining-scoop collection).
+  NovaWeapon_ResolveFreeflightScoop(state);
 }
 
 // Ghidra scope 0xc of Frame_TickSystems: the per-tick status/scan pass. Its

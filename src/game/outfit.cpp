@@ -159,6 +159,9 @@ void OutfitMarkStatsDirty(GameState &state) {
   // slot is allocated; the port also resets it here and at system transitions
   // (NovaWeapon_ClearTransientCombatState) so purchases apply immediately.
   state.player.jamming_score.fill(-1);
+  // The original's dirty-flag recompute (Outfit_RecomputeOutfitDerivedState)
+  // also re-derives the mining-scoop latch and its cargo-capacity gate.
+  NovaOutfit_RefreshPlayerMiningScoopActive(state);
 }
 
 // Ghidra 0x00464b50 Outfit_HasCloakingDevice.
@@ -999,6 +1002,22 @@ bool NovaOutfit_HasMiningScoopOutfit(const GameState &state, const Ship &ship) {
     }
   }
   return false;
+}
+
+// Ghidra Outfit_RecomputeOutfitDerivedState (0x0046d4b0) mining-scoop arm.
+// `g_ship_states->mining_scoop_active` is set when the player owns a ModType
+// 0x1f outfit, then cleared again while cargo+junk is at or over the fleet
+// capacity (the original tests capacity == total || capacity - total < 0).
+void NovaOutfit_RefreshPlayerMiningScoopActive(GameState &state) {
+  bool active = NovaOutfit_HasMiningScoopOutfit(state, state.player);
+  if (active) {
+    const std::int16_t capacity = Outfit_ComputePlayerFleetCargoCapacity(state);
+    const std::int16_t total = Outfit_ComputePlayerCargoAndJunkTotal(state);
+    if (total >= capacity) {
+      active = false;
+    }
+  }
+  state.player.mining_scoop_active = active;
 }
 
 void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,

@@ -839,16 +839,19 @@ TEST_CASE("asteroid-type rows decode from the payload",
   CHECK(std::fabs(small->wander_speed_multiplier - 1.0F) < 1e-4F);
   CHECK(small->lifetime == 150);
   // Metal Small is the lightest debris: small speed-scale, neutrals tint.
-  CHECK(small->field_0x04 == 4);
-  CHECK(small->field_0x02 == 4);
+  // YieldType/YieldQty (Bible r\xf6id names).
+  CHECK(small->yield_type == 4);
+  CHECK(small->yield_qty == 4);
   CHECK(small->field_0x0c == 20);
 
   // The same 0x1c runtime row is consumed as impact-package data by
-  // Weapon_SpawnWeaponImpactEffectPackage (0x00462550).
+  // Weapon_SpawnWeaponImpactEffectPackage (0x00462550). Its resource-box
+  // count/type are the canonical YieldQty/YieldType fields; the child
+  // fragment fields are directions.
   const AsteroidDef *package = data.ImpactPackageAt(0);
   REQUIRE(package == small);
-  CHECK(package->ImpactFragmentCount() == 4);
-  CHECK(package->ImpactFragmentType() == 4);
+  CHECK(package->yield_qty == 4);
+  CHECK(package->yield_type == 4);
   CHECK(package->ImpactParticleCount() == 20);
   CHECK(package->ImpactSecondaryEffectId(0) == small->directions[0]);
   CHECK(package->ImpactAreaEffectId() == small->field_0x10);

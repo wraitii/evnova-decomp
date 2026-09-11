@@ -1371,14 +1371,18 @@ struct AsteroidDef {
   // yields a state's wander_speed (+0x18). Ghidra DAT_005912f0[mode]
   // (+0x14). Payload word[0x2] * 0.01 (0x64..0x12c => 0.5..3.0 shipped).
   float wander_speed_multiplier = 1.0F;
-  // +0x02; DECODED (Weapon_SpawnWeaponImpactEffectPackage 0x00462550): the
-  // number of junk freeflight objects spawned when the asteroid breaks
-  // (object type from +0x04). Loader validates payload word[0x6] >= 0.
-  std::int16_t field_0x02 = 0;
-  // +0x04; DECODED: the freeflight-junk type id spawned on destruction
-  // (freeflight objects are TODO(decomp) in the clean-room). Loader accepts
-  // [-6,6] or [0x3e8,0x468).
-  std::int16_t field_0x04 = 0;
+  // +0x02; DECODED (Weapon_SpawnWeaponImpactEffectPackage 0x00462550, and
+  // Bible r\xf6id "YieldQty"): the average number of resource-box freeflight
+  // objects ejected when the asteroid breaks. Each break spawns
+  // round((rand(0x65)+0x32) * yield_qty * 0.01) boxes (YieldQty +/- 50%). The
+  // object's cargo/junk type comes from yield_type. Loader validates payload
+  // word[0x6] >= 0.
+  std::int16_t yield_qty = 0;
+  // +0x04; DECODED (Bible r\xf6id "YieldType"): the resource-box payload type
+  // spawned on destruction. 0..5 is a standard cargo commodity; 1000..1127 is
+  // a j\xfcnk id (the scoop banks extra-1000). Other values are ignored by the
+  // scoop. Loader accepts [-6,6] or [0x3e8,0x468).
+  std::int16_t yield_type = 0;
   // +0x0c; DECODED: the debris SWParticle burst count emitted by the
   // destruction package. Loader validates payload word[0x8] >= 0.
   std::int16_t field_0x0c = 0;
@@ -1408,11 +1412,10 @@ struct AsteroidDef {
   // The original reuses this 0x1c row as an impact-package definition in
   // Weapon_SpawnWeaponImpactEffectPackage (0x00462550). These aliases expose
   // that second interpretation without duplicating or reshaping the loaded
-  // table. The package index is the row index 0..15, not a resource id.
-  [[nodiscard]] std::int16_t ImpactFragmentCount() const { return field_0x02; }
-
-  [[nodiscard]] std::int16_t ImpactFragmentType() const { return field_0x04; }
-
+  // table. The package index is the row index 0..15, not a resource id. The
+  // package's freeflight resource-box count/type share the canonical
+  // yield_qty/yield_type fields; the child-asteroid fragment types/count live
+  // in directions[0..2].
   [[nodiscard]] std::int16_t ImpactParticleCount() const { return field_0x0c; }
 
   [[nodiscard]] std::int16_t ImpactAreaEffectId() const { return field_0x10; }
