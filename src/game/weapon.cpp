@@ -2473,7 +2473,14 @@ void NovaWeapon_TickShots(GameState &state,
   const float tick_scale = std::max(0.0F, elapsed_ticks);
   state.last_frame_tick_scale = tick_scale;
   ++state.spaceflight_frame_counter;
-  for (auto &shot : shots) {
+  // Linked submunitions append to `shots` when their parent expires. Process
+  // only the frame's original shots; the original's fixed pool could revisit a
+  // newly allocated earlier slot, while this compacted vector lets children
+  // begin on the next tick.
+  const std::size_t initial_shot_count = shots.size();
+  for (std::size_t shot_index = 0; shot_index < initial_shot_count;
+       ++shot_index) {
+    ActiveShot &shot = shots[shot_index];
     if (shot.consumed) {
       continue;
     }
@@ -2513,14 +2520,23 @@ void NovaWeapon_TickShots(GameState &state,
       // impact for shots in the player's system (gated in the original by
       // life > k_shot_expiry_min_life -63000, which a -1 expiry satisfies).
       if (shot.system_id == state.player.current_system_id) {
+        // The expiry path launches linked submunitions unless Flags2 0x20
+        // explicitly suppresses that behavior. Snapshot first because the
+        // spawner appends to active_shots and may invalidate this reference.
+        if (weapon->range_link_gate > 0 &&
+            (weapon->flags_secondary & 0x0020U) == 0U) {
+          const ActiveShot expiring_shot = shots[shot_index];
+          NovaWeapon_SpawnLinkedShotsOnImpact(
+              state, expiring_shot, expiring_shot.target_ship_slot);
+        }
         NovaEffects_SpawnAreaImpact(state,
-                                    shot.pos_x,
-                                    shot.pos_y,
+                                    shots[shot_index].pos_x,
+                                    shots[shot_index].pos_y,
                                     weapon->impact_effect_id,
                                     weapon->splash_radius,
                                     true);
       }
-      shot.consumed = true;
+      shots[shot_index].consumed = true;
       continue;
     }
     // Guidance runs before movement: a homing shot turns and rebuilds its
