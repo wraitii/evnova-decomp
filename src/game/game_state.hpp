@@ -903,6 +903,26 @@ struct FadingEffectInstance {
   float heading_radians = 0.0F;
 };
 
+// Ghidra SWParticle (g_swparticles_entries, 0x2c-byte stride). A single-pixel
+// soft particle emitted by weapon impact bursts and asteroid-debris packages.
+// Positions and velocities are 8.8 fixed-point: the original stores world
+// coordinates shifted left 8 and integrates velocity directly per 30 Hz tick
+// (the whole pool is allocated with gravity 0 at 0x004abd8d's
+// SWParticles_AllocatePool(100000, 0)). `life_ticks` counts down and the slot
+// frees at zero; `blend_mode` is the original's surface blend selector (0x20
+// from every weapon callsite). The clean-room uses a growable vector instead
+// of the 100000-
+// entry fixed pool, so slot recycling order does not matter.
+struct SwParticle {
+  std::int16_t life_ticks = 0;    // +0x00 remaining ticks; <= 0 inactive
+  std::int32_t pos_x = 0;         // +0x04 8.8 fixed world x
+  std::int32_t pos_y = 0;         // +0x08 8.8 fixed world y
+  std::int32_t vel_x = 0;         // +0x14 8.8 fixed x velocity per tick
+  std::int32_t vel_y = 0;         // +0x18 8.8 fixed y velocity per tick
+  std::int16_t blend_mode = 0x20; // +0x24 surface blend selector
+  std::uint32_t color = 0;        // +0x28 0x00RRGGBB
+};
+
 // Ghidra FreeflightObjectState (g_freeflight_objects_ptr, 0x005914a8),
 // 64 entries at a 0x28-byte stride. Generic in-flight cosmetic objects:
 // the cargo/junk pods spawned by Outfit_RedistributeFleetCargoOverflow's
@@ -1393,6 +1413,12 @@ struct GameState {
   std::array<FadingEffectInstance, 0x20> fading_effect_instances{};
   std::array<FreeflightObjectState, FreeflightObjectState::kPoolSize>
       freeflight_objects{};
+  // Ghidra SWParticle pool (g_swparticles_entries). The original integrates
+  // particles once per 30 Hz tick; this port's frame loop runs at display
+  // cadence, so the fractional elapsed_ticks are banked here and whole ticks
+  // are stepped (see NovaEffects_TickSwParticles).
+  std::vector<SwParticle> sw_particles;
+  float sw_particle_tick_accumulator = 0.0F;
 
   // Ghidra g_pending_combat_chatter_{kind,government_id,variant}
   // (0x007353fe/0x00735400/0x00735402). Written by Frame_QueueCombatChatter

@@ -100,6 +100,45 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(data.Outfit(0x80)->mod_val == 0); // zero-based weapon id (0x80 -> 0)
 }
 
+TEST_CASE("weapon hit-particle fields decode from the wap payload",
+          "[scenario][data]") {
+  // The Light Blaster's payload is the ground truth for the new
+  // HitParticles/HitPartLife/HitPartVel/HitPartColor mapping: compare the
+  // decoder against the raw big-endian bytes rather than hard-coding values.
+  const auto payload = NovaResource_Load(0x77916170U, 0x80);
+  REQUIRE(payload.has_value());
+  const auto &bytes = *payload;
+  REQUIRE(bytes.size() >= 0x56);
+  const auto read_be_i16 = [&](std::size_t off) {
+    const auto hi = std::to_integer<std::uint8_t>(bytes[off]);
+    const auto lo = std::to_integer<std::uint8_t>(bytes[off + 1]);
+    return static_cast<std::int16_t>((static_cast<std::uint16_t>(hi) << 8U) |
+                                     static_cast<std::uint16_t>(lo));
+  };
+  const auto read_be_u32 = [&](std::size_t off) {
+    return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[off]))
+               << 24U |
+           static_cast<std::uint32_t>(
+               std::to_integer<std::uint8_t>(bytes[off + 1]))
+               << 16U |
+           static_cast<std::uint32_t>(
+               std::to_integer<std::uint8_t>(bytes[off + 2]))
+               << 8U |
+           static_cast<std::uint32_t>(
+               std::to_integer<std::uint8_t>(bytes[off + 3]));
+  };
+
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const Weapon *w = data.Weapon(0x80);
+  REQUIRE(w != nullptr);
+  CHECK(w->impact_particle_count == read_be_i16(0x4c));
+  CHECK(w->impact_particle_frame_base == read_be_i16(0x4e));
+  CHECK(std::fabs(w->impact_particle_speed -
+                  static_cast<float>(read_be_i16(0x50)) * 0.01F) < 1e-5F);
+  CHECK(w->impact_particle_color == (read_be_u32(0x52) & 0x00ffffffU));
+}
+
 TEST_CASE("scenario resource families resolve through the BRGR adapter",
           "[scenario][brgr]") {
   // The five scenario families live across the Nova Data archives; the adapter

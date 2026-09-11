@@ -337,6 +337,14 @@ namespace {
   w.blast_radius = ReadBeI16(bytes, 0x18);
   w.splash_radius = ReadBeI16(bytes, 0x1a);
   w.fuse_ticks = ReadBeI16(bytes, 0x22);
+  // HitParticles / HitPartLife / HitPartVel / HitPartColor (+0x4c..+0x52).
+  // The loader normalizes HitPartVel by the 0.01 double DAT_00575e60 and
+  // converts HitPartColor to the surface pixel format; this port keeps 24-bit
+  // RGB (SDL blends in 8-bit channels), matching the beam color handling.
+  w.impact_particle_count = ReadBeI16(bytes, 0x4c);
+  w.impact_particle_frame_base = ReadBeI16(bytes, 0x4e);
+  w.impact_particle_speed = static_cast<float>(ReadBeI16(bytes, 0x50)) * 0.01F;
+  w.impact_particle_color = ReadBe32(bytes, 0x52) & 0x00ffffffU;
   w.late_collision_window_ticks = ReadBeI16(bytes, 0x46);
   w.ionization_points = ReadBeI16(bytes, 0x4a);
   w.ionization_color = ReadBe32(bytes, 0x72) & 0x00ffffffU;

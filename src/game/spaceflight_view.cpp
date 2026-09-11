@@ -874,6 +874,7 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
   const float elapsed_ticks = frame_time_ms / kOriginalTickMs;
   NovaEffects_TickImpactEffects(state, elapsed_ticks);
   NovaEffects_TickFadingEffects(state, elapsed_ticks);
+  NovaEffects_TickSwParticles(state, elapsed_ticks);
   NovaFreeflight_Tick(state, elapsed_ticks);
   // Asteroid / drift-debris integration (Asteroid_UpdateSprites 0x00436910
   // simulation half) plus its viewport wrap. The original runs the whole
@@ -1444,6 +1445,48 @@ void SpaceflightView::DrawImpactEffects(SdlPlatform &platform,
   }
 }
 
+// Ghidra SWParticles_DrawParticles (0x0047bdd0): the post-render single-pixel
+// particle pass. The original projects each particle from its 8.8 fixed world
+// position onto the gameplay surface and writes one pixel per particle. This
+// port draws a 1x1 logical-pixel SDL point (SDL scales it by the display
+// density, so retina gets a 2x2 backing block like every other 1:1 sprite).
+// The particle color is written opaque, matching the original's 24-bit branch;
+// only its 8/16-bit branches did the life-weighted surface blend, which would
+// make the short-lived (life ~9) weapon sparks nearly invisible on a 32-bit
+// target.
+void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
+                                      const GameState &state) {
+  if (state.sw_particles.empty()) {
+    return;
+  }
+  SDL_Renderer *renderer = platform.renderer();
+  const Viewport vp = CurrentViewport(platform);
+  const auto [camera_x, camera_y] = WorldCameraPosition(state);
+  const float half_w = static_cast<float>(vp.w) / 2.0F;
+  const float half_h = static_cast<float>(vp.h) / 2.0F;
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+  for (const SwParticle &particle : state.sw_particles) {
+    // The original draw skips entries with life <= 1.
+    if (particle.life_ticks <= 1) {
+      continue;
+    }
+    const float screen_x =
+        static_cast<float>(particle.pos_x) / 256.0F - camera_x + half_w;
+    const float screen_y =
+        static_cast<float>(particle.pos_y) / 256.0F - camera_y + half_h;
+    if (screen_x < 0.0F || screen_x >= static_cast<float>(vp.w) ||
+        screen_y < 0.0F || screen_y >= static_cast<float>(vp.h)) {
+      continue;
+    }
+    const std::uint8_t red = static_cast<std::uint8_t>(particle.color >> 16U);
+    const std::uint8_t green = static_cast<std::uint8_t>(particle.color >> 8U);
+    const std::uint8_t blue = static_cast<std::uint8_t>(particle.color);
+    SDL_SetRenderDrawColor(renderer, red, green, blue, SDL_ALPHA_OPAQUE);
+    SDL_RenderPoint(renderer, screen_x, screen_y);
+  }
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
 // Ghidra 0x00438c40 (unnamed under-ships beam pass): draw proc of the second
 // gameplay sprite-world layer, below shots and ships. Draws only beams whose
 // weapon sets flags_secondary 0x2000 (Bible "display the beam underneath
@@ -1588,6 +1631,10 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
       glow_last_drawn_ = false;
     }
   }
+
+  // Post-render particle pass (Ghidra Frame_PresentViewportAndParticles draws
+  // SWParticles after the sprite world, so they composite over the ships).
+  DrawSwParticles(platform, state);
 }
 
 // Ghidra NovaUi_UpdateShipTargetReticle (0x0042ede0). The original positions

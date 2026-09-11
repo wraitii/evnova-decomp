@@ -349,6 +349,8 @@ void NovaWeapon_ClearTransientCombatState(GameState &state) {
   for (ImpactEffectInstance &effect : state.impact_effect_instances) {
     effect = ImpactEffectInstance{};
   }
+  state.sw_particles.clear();
+  state.sw_particle_tick_accumulator = 0.0F;
   state.pending_fire_sounds.clear();
   state.pending_impact_sounds.clear();
 }
