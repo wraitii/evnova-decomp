@@ -225,6 +225,43 @@ TEST_CASE("collision eligibility rejects friendly and scripted targets",
   CHECK(!NovaWeapon_CanProjectileHitShip(state, npc_shot, 1));
 }
 
+TEST_CASE("player fire preserves state-9 hit-reset ordering",
+          "[collision][ai]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  SpawnTestShot(state);
+  Ship &target = state.ShipAt(1);
+  target.ai_state_code = 9;
+  target.ai_control_mode = 0x0B;
+  target.primary_target_ship_slot = 2;
+  target.ai_secondary_target_slot = 3;
+  target.ai_maneuver_timer_ms = 99.0F;
+  target.target_stellar_object_id = -1;
+
+  NovaWeapon_ResolveDirectShotCollisions(state);
+
+  // Ghidra calls Ship_SetShipHostileToPlayer before 0x004115c0. The setter
+  // turns state 9 into 4, so the helper's state-9/0xF predicate is false.
+  CHECK(target.ai_state_code == 4);
+  CHECK(target.ai_control_mode == 0x0B);
+  CHECK(target.primary_target_ship_slot == 0);
+  CHECK(target.ai_secondary_target_slot == -1);
+  CHECK(target.ai_maneuver_timer_ms == Catch::Approx(20.0F));
+}
+
+TEST_CASE("scripted manoeuvre targets ignore queued beam impacts",
+          "[collision][weapon]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Ship &target = state.ShipAt(1);
+  target.ai_state_code = 0x10;
+
+  NovaWeapon_ResolveDirectWeaponHit(state, 0, 1, 0);
+
+  CHECK(target.shield_points == Catch::Approx(20.0F));
+  CHECK(target.armor_points == Catch::Approx(100.0F));
+}
+
 TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
           "[collision]") {
   GameState state;

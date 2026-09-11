@@ -2323,6 +2323,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // also gates off ships whose class is the 0x2ff sentinel; those fall through
   // to the inactive-guard at the top of Ship_HandleShip in practice.
   const bool coasting = ship.ai_maneuver_timer_ms > 0.0F;
+  // Ghidra 0x00416070 Ship_IsShipInAiState0x16 runs inline here.
   const bool holds_course = coasting || ship.ai_state_code == 0x16;
   const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
 
