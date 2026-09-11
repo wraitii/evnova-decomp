@@ -5,6 +5,7 @@
 #include "hud_overlay.hpp"
 #include "impact_effects.hpp"
 #include "mission.hpp"
+#include "mission_script.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight.hpp"
@@ -106,6 +107,45 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
   }
   return state.scenario.Dude(
       static_cast<std::int16_t>(ship.dude_class_id + 0x80));
+}
+
+// Ghidra Stellar_ShipImmuneToStellarCrash (0x0046e210). A ship survives flying
+// into a fatal stellar (availability_flags 0x100) when its class carries ship
+// availability_flags 0x20, or -- for the player only -- when the player owns
+// any outfit whose mod slots include ModType 0x2a. Deliberately distinct from
+// Stellar_ShipHasGravityShielding (0x0046e120): the NPC flags_secondary 0x40
+// gate and the ModType 0x26/0x29 gravity-shield outfits do NOT grant crash
+// immunity. The original caches the player-outfit roll in DAT_007356c6; the
+// clean-room recomputes it (identical while the inventory is unchanged).
+[[nodiscard]] bool Stellar_ShipImmuneToStellarCrash(const GameState &state,
+                                                    const Ship &ship) {
+  const ShipClass *ship_class = ShipClassFor(state, ship);
+  if (ship_class != nullptr && (ship_class->availability_flags & 0x20U) != 0U) {
+    return true;
+  }
+  // The outfit scan is player-only: NPC ships (ship_instance_id != 0) return
+  // not-immune before it runs.
+  if (ship.ship_instance_id != 0) {
+    return false;
+  }
+  for (std::size_t id = 0; id < state.inventory.outfit_owned_count.size();
+       ++id) {
+    if (state.inventory.outfit_owned_count[id] <= 0) {
+      continue;
+    }
+    const Outfit *outfit =
+        state.scenario.Outfit(static_cast<std::int16_t>(id + 0x80));
+    if (outfit == nullptr) {
+      continue;
+    }
+    if (outfit->mod_type == 0x2a ||
+        std::any_of(outfit->alt_mod_types.begin(),
+                    outfit->alt_mod_types.end(),
+                    [](std::int16_t type) { return type == 0x2a; })) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Ghidra Ship_ShipsShareSquadRoot (0x0046d190) walks each ship's
@@ -359,6 +399,42 @@ void RefreshCollisionMasks(GameState &state) {
                    store.Spin(spin_id, frame),
                    frame,
                    /*swapped_axes=*/true);
+  }
+
+  // Stellar ambient sprites: Ghidra Stellar_UpdateStellarSprites (0x0042cd10)
+  // assigns the zone sprite set (link_a when the body is not active, link_b
+  // when it is, the 0x80 availability bit inverting the zone) and places it at
+  // map_x/map_y with the same pre-subtracted (ceil(height/2), ceil(width/2))
+  // anchor as ships/asteroids. Only the current system's 16 nav stellars are
+  // ever tested (Stellar_HandleShipStellarCrash 0x0043aed0 and the
+  // flags_secondary 0x400 arm of Shot_ResolveCollisions 0x00437e20).
+  const System *const sys =
+      state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
+  if (sys != nullptr) {
+    for (const std::int16_t nav : sys->nav_defs) {
+      if (nav < 0x80) {
+        continue;
+      }
+      Stellar *stellar = state.scenario.StellarMutable(nav);
+      if (stellar == nullptr || stellar->name.empty()) {
+        continue;
+      }
+      const std::int16_t link = NovaTargeting_StellarSpriteLinkId(*stellar);
+      if (link < 0) {
+        continue;
+      }
+      const auto spin_id = static_cast<std::uint16_t>(link + 1000);
+      const int frame_count = store.SpinFrameCount(spin_id);
+      if (frame_count <= 0) {
+        continue;
+      }
+      const int frame = std::clamp(
+          static_cast<int>(stellar->sprite_current_frame), 0, frame_count - 1);
+      BindEntityMask(stellar->collision_mask,
+                     store.Spin(spin_id, frame),
+                     frame,
+                     /*swapped_axes=*/true);
+    }
   }
 }
 
@@ -1173,6 +1249,84 @@ void NovaCollision_RefreshCollisionMasks(GameState &state) {
   RefreshCollisionMasks(state);
 }
 
+// Ghidra Stellar_HandleShipStellarCrash (0x0043aed0). Physical collision pass
+// running in Frame_TickSystems scope 8, immediately after
+// Stellar_TickStellarGravityPull (0x0043adb0). For each fatal stellar
+// (availability_flags 0x100) of the current system whose ambient sprite is
+// loaded, every active, non-destroyed, non-immune ship is tested with the
+// shared opaque pixel-mask overlap Sprite_TestPixelMaskOverlap (0x00475c80). A
+// contact is an instant, animation-free kill: the hull is deactivated, armor is
+// forced to -1000.0f (0xc47a0000), the death timer is zeroed, the player's
+// primary target is cleared when it was the victim, and the class's final
+// explosion effect (Explode2, ShipClassDef +0xa1e) is spawned at the ship. The
+// ship scan does not stop after a kill, and a deactivated hull is skipped by
+// the remaining stellars.
+void NovaStellar_HandleShipStellarCrash(GameState &state) {
+  const System *const sys = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (sys == nullptr) {
+    return;
+  }
+  for (const std::int16_t nav : sys->nav_defs) {
+    if (nav < 0x80) {
+      continue;
+    }
+    const Stellar *const stellar = state.scenario.Stellar(nav);
+    if (stellar == nullptr || (stellar->availability_flags & 0x100U) == 0U) {
+      continue;
+    }
+    // `StellarDef +0` is the live ambient Sprite*; the clean-room gate is the
+    // resolved mask (a failed spin load leaves no collision body).
+    if (!stellar->collision_mask.HasMask()) {
+      continue;
+    }
+    for (std::int16_t slot = 0;
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
+      Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+      if (!ship.is_active || IsDestroyed(ship)) {
+        continue;
+      }
+      if (Stellar_ShipImmuneToStellarCrash(state, ship)) {
+        continue;
+      }
+      if (!ship.collision_mask.HasMask()) {
+        continue;
+      }
+      if (!SpriteMask_TestOverlap(*stellar->collision_mask.mask,
+                                  static_cast<float>(stellar->pos_x),
+                                  static_cast<float>(stellar->pos_y),
+                                  stellar->collision_mask.anchor_x,
+                                  stellar->collision_mask.anchor_y,
+                                  *ship.collision_mask.mask,
+                                  ship.pos_x,
+                                  ship.pos_y,
+                                  ship.collision_mask.anchor_x,
+                                  ship.collision_mask.anchor_y)) {
+        continue;
+      }
+
+      // Instant kill: deactivate instead of entering the death presentation.
+      ship.is_active = false;
+      ship.armor_points = -1000.0F;
+      ship.death_timer_active = 0.0F;
+      if (state.player.primary_target_ship_slot == slot) {
+        state.player.primary_target_ship_slot = -1;
+        // g_playerShipPresentationDirty is implicit in the clean-room's
+        // immediate-mode HUD/status redraw.
+      }
+      const ShipClass *const ship_class = ShipClassFor(state, ship);
+      NovaEffects_SpawnAreaImpact(
+          state,
+          ship.pos_x,
+          ship.pos_y,
+          ship_class == nullptr ? -1 : ship_class->destruction_effect_final,
+          0,
+          true);
+    }
+  }
+}
+
 bool NovaWeapon_CanProjectileHitShip(const GameState &state,
                                      const ActiveShot &shot,
                                      std::int16_t target_slot) {
@@ -1414,9 +1568,99 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
   RemoveConsumedShots(state);
 }
 
+// Ghidra Shot_ResolveCollisions (0x00437e20) stellar arm. Planet-type weapons
+// (flags_secondary 0x400) test their current-frame pixel mask against the
+// current system's 16 nav stellar sprites. A body is eligible when its live
+// ambient sprite is loaded (mask resolved) and it is neither destroyed nor
+// engaged (Stellar_IsStellarActive 0x0046e3c0). A contact subtracts combined
+// energy+mass damage from the body's live Strength (+0x3c), spawns the
+// weapon's area impact, and kills the shot. When Strength goes negative the
+// body explodes with its ExplodType (+0x46e), runs its OnDestroy script
+// (+0x266), re-arms its regeneration countdown (+0x47c = schedule seed +0x47a)
+// and -- for a player-owned shot -- fires 10 faction-combat events. The scan
+// stops at the first overlapping nav entry. Returns true when the shot dies.
+bool ResolveShotStellarContact(GameState &state,
+                               ActiveShot &shot,
+                               const Weapon &weapon) {
+  const System *const sys = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (sys == nullptr) {
+    return false;
+  }
+  for (const std::int16_t nav : sys->nav_defs) {
+    if (nav < 0x80) {
+      continue;
+    }
+    Stellar *const stellar = state.scenario.StellarMutable(nav);
+    if (stellar == nullptr || stellar->strength_capacity <= 0 ||
+        NovaTargeting_IsStellarActive(*stellar)) {
+      continue;
+    }
+    // The original pixel test requires both prepared frames; the clean-room
+    // equivalent is a resolved mask. Unlike ship/asteroid contact there is no
+    // bounding-circle fallback on this arm.
+    if (!shot.collision_mask.HasMask() || !stellar->collision_mask.HasMask()) {
+      continue;
+    }
+    if (!SpriteMask_TestOverlap(*shot.collision_mask.mask,
+                                shot.pos_x,
+                                shot.pos_y,
+                                shot.collision_mask.anchor_x,
+                                shot.collision_mask.anchor_y,
+                                *stellar->collision_mask.mask,
+                                static_cast<float>(stellar->pos_x),
+                                static_cast<float>(stellar->pos_y),
+                                stellar->collision_mask.anchor_x,
+                                stellar->collision_mask.anchor_y)) {
+      continue;
+    }
+
+    // Strength takes the combined mass+energy damage (Bible "Strength").
+    stellar->strength -= static_cast<std::int32_t>(weapon.energy_damage) +
+                         static_cast<std::int32_t>(weapon.mass_damage);
+    NovaEffects_SpawnAreaImpact(state,
+                                shot.pos_x,
+                                shot.pos_y,
+                                weapon.impact_effect_id,
+                                weapon.splash_radius,
+                                true);
+    // TODO(decomp) skipped: Weapon_SpawnWeaponImpactParticleBurst
+    // (impact_particle_count > 0).
+    shot.life_ticks_remaining = -1.0F;
+    shot.consumed = true;
+
+    if (NovaTargeting_IsStellarActive(*stellar)) {
+      if (stellar->explosion_type != -1) {
+        NovaEffects_SpawnAreaImpact(state,
+                                    static_cast<float>(stellar->pos_x),
+                                    static_cast<float>(stellar->pos_y),
+                                    stellar->explosion_type,
+                                    0,
+                                    true);
+      }
+      // The original logs the display name + OnDestroy string first, then runs
+      // the reaction script. The log is diagnostic only.
+      (void)Mission_ExecuteReactionScript(state, stellar->on_destroy_script);
+      stellar->strength = -1;
+      stellar->engage_access = stellar->schedule_days;
+      if (shot.owner_ship_slot == 0) {
+        // TODO(decomp) skipped: Government_ProcessFactionCombatEvent(system,
+        // stellar government, event 3) x10; the clean-room faction-event
+        // reaction model is not implemented (see boarding_plunder.cpp).
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 // Ghidra Shot_ResolveCollisions (0x00437e20): the blast-proximity pass. It
 // runs after the direct-contact pass, so a shot that already connected skips.
 void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
+  // The original reads the ambient sprites prepared by the sprite tick; the
+  // clean-room resolves the same current-frame masks here so the stellar arm
+  // works even when this pass runs without the direct pass (tests).
+  RefreshCollisionMasks(state);
   for (ActiveShot &shot : state.active_shots) {
     if (shot.life_ticks_remaining <= 0.0F && shot.life_frames > 0) {
       shot.life_ticks_remaining = static_cast<float>(shot.life_frames);
@@ -1439,11 +1683,15 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
       continue;
     }
 
-    // TODO(decomp) skipped: the stellar-contact branch (weapons with
-    // flags_secondary 0x400 pixel-mask against the system's stellar sprites,
-    // damaging StellarDef +0x3c and re-arming destroyed bodies) - it needs
-    // sprite masks and the stellar health model.
-    if (weapon->blast_radius > 0) {
+    // Planet-type weapon arm (flags_secondary 0x400): test the shot against
+    // the current system's stellar sprites before the blast/ship/asteroid
+    // proximity arms. The original re-checks `life >= 0` before those arms, so
+    // a stellar contact consumes the shot and skips them.
+    if ((weapon->flags_secondary & 0x0400U) != 0U) {
+      (void)ResolveShotStellarContact(state, shot, *weapon);
+    }
+    if (!shot.consumed && shot.life_ticks_remaining >= 0.0F &&
+        weapon->blast_radius > 0) {
       bool ship_hit = false;
       for (std::int16_t slot = 0;
            slot < static_cast<std::int16_t>(GameState::kMaxShips);

@@ -113,11 +113,12 @@ public:
   // Clean-room click-to-target stellar picking (the stellar arm of the
   // original's mouse-target pass, PlayerTick_MouseTargetAndControlCommands
   // 0x0044e019): returns the resource id of the current system's available
-  // stellar whose ambient sprite (spin set link_a_id + 1000) contains the
-  // render-coordinate point, or -1. The original hit-tests the ambient
-  // sprite's current-frame rect, expanded 16px per side when shorter than
-  // 0x30, and only considers sprites that are alive (sprite_handle_active);
-  // approximated here with the loaded spin set's tile extent (TODO(decomp)).
+  // stellar whose ambient sprite (spin set NovaTargeting_StellarSpriteLinkId
+  // + 1000) contains the render-coordinate point, or -1. The original
+  // hit-tests the ambient sprite's current-frame rect, expanded 16px per side
+  // when shorter than 0x30, and only considers sprites whose Strength state is
+  // alive; approximated here with the loaded spin set's tile extent
+  // (TODO(decomp)).
   std::int16_t PickStellarAt(SdlPlatform &platform,
                              const GameState &state,
                              float rx,

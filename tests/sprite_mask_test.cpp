@@ -4,7 +4,10 @@
 #include "brgr_archive.hpp"
 #include "game/collision.hpp"
 #include "game/game_state.hpp"
+#include "game/mission.hpp"
+#include "game/new_pilot_flow.hpp"
 #include "game/sprite_mask.hpp"
+#include "game/targeting.hpp"
 #include "game/weapon.hpp"
 
 #include <algorithm>
@@ -89,6 +92,66 @@ void SeedCollisionScenario(GameState &state) {
   target.pos_y = 0.0F;
   target.collision_radius_px = 10.0F;
 }
+
+// Stellar contact scenarios: one system with nav_defs[0] = stellar 0x80, one
+// planet-type-capable weapon (0x80), and one ship class. Masks are injected, so
+// the live refresh is disabled unless a test opts back in.
+void SeedStellarScenario(GameState &state) {
+  state.collision_masks_enabled = false;
+  state.scenario.weapons.resize(1);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.weapon_mode_code = -1;
+  weapon.projectile_speed = 0.0F;
+  weapon.lifetime_ticks = 10;
+  weapon.mass_damage = 20;
+  weapon.energy_damage = 30;
+  weapon.flags_secondary = 0x0400; // planet-type weapon
+  weapon.impact_effect_id = -1;
+  weapon.splash_radius = 0;
+  weapon.blast_radius = 0;
+
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs.fill(-1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.name = "Test Stellar";
+  stellar.pos_x = 0;
+  stellar.pos_y = 0;
+  stellar.strength_capacity = 100; // Strength capacity > 0
+  stellar.strength = 100;
+  stellar.availability_flags = 0x100; // fatal collision body
+  stellar.explosion_type = -1;
+  stellar.engage_access = 0;
+  stellar.schedule_days = 0;
+
+  state.scenario.ships.resize(1);
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.current_system_id = 0;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.player.armor_points = 100.0F;
+  state.player.primary_target_ship_slot = -1;
+}
+
+void SeedCrashNpc(GameState &state) {
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.ship_class_id = 0;
+  target.current_system_id = 0;
+  target.armor_points = 100.0F;
+  target.death_timer_active = 0.0F;
+  target.pos_x = 0.0F;
+  target.pos_y = 0.0F;
+}
+
+// 3x3 single-opaque-centre mask; world positions 2px apart overlap only in
+// transparent corners.
+const SpriteMask kStellarDot = MakeMask({"...", ".#.", "..."});
 
 } // namespace
 
@@ -367,6 +430,322 @@ TEST_CASE("sprite mask store decodes shipped frames and refresh binds them",
   CHECK(state.player.collision_mask.frame == 0); // heading 0 = frame 0
   REQUIRE(asteroid.collision_mask.HasMask());
   CHECK(asteroid.collision_mask.mask->width == asteroid_mask->width);
+}
+
+TEST_CASE("planet-type weapon pixel-mask contact uses opaque overlap",
+          "[collision][stellar]") {
+  GameState state;
+  SeedStellarScenario(state);
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.collision_mask.mask = &kStellarDot;
+  stellar.collision_mask.anchor_x = 1.5F;
+  stellar.collision_mask.anchor_y = 1.5F;
+
+  // Transparent AABB overlap: 2px apart, centres never coincide -> miss.
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  ActiveShot &shot = state.active_shots[0];
+  shot.pos_x = 0.0F;
+  shot.pos_y = 0.0F;
+  shot.collision_mask = stellar.collision_mask;
+  stellar.pos_x = 2;
+  NovaWeapon_ResolveProjectileCollisions(state);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(stellar.strength == 100);
+
+  // Opaque hit at the same position: 50 combined damage, shot consumed.
+  stellar.pos_x = 0;
+  state.active_shots[0].pos_x = 0.0F;
+  state.active_shots[0].pos_y = 0.0F;
+  NovaWeapon_ResolveProjectileCollisions(state);
+  CHECK(state.active_shots.empty());
+  CHECK(stellar.strength == 50);
+}
+
+TEST_CASE("non-planet-type weapons pass through stellars",
+          "[collision][stellar]") {
+  GameState state;
+  SeedStellarScenario(state);
+  state.scenario.weapons[0].flags_secondary = 0; // not 0x400
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.collision_mask.mask = &kStellarDot;
+  stellar.collision_mask.anchor_x = 1.5F;
+  stellar.collision_mask.anchor_y = 1.5F;
+
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  state.active_shots[0].collision_mask = stellar.collision_mask;
+  NovaWeapon_ResolveProjectileCollisions(state);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(stellar.strength == 100);
+}
+
+TEST_CASE("stellar destruction re-arms the regeneration countdown",
+          "[collision][stellar]") {
+  GameState state;
+  SeedStellarScenario(state);
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.strength = 10; // below the 50 combined damage
+  stellar.schedule_days = 7;
+  stellar.collision_mask.mask = &kStellarDot;
+  stellar.collision_mask.anchor_x = 1.5F;
+  stellar.collision_mask.anchor_y = 1.5F;
+
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  state.active_shots[0].collision_mask = stellar.collision_mask;
+  NovaWeapon_ResolveProjectileCollisions(state);
+  CHECK(state.active_shots.empty());
+  // The destruction package clamps Strength to -1 and seeds engage_access from
+  // the schedule day field (Ghidra +0x3c = -1, +0x47c = +0x47a).
+  CHECK(stellar.strength == -1);
+  CHECK(stellar.engage_access == 7);
+
+  // A destroyed (now "active") stellar no longer accepts planet-type fire.
+  REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
+  state.active_shots[0].collision_mask = stellar.collision_mask;
+  NovaWeapon_ResolveProjectileCollisions(state);
+  REQUIRE(state.active_shots.size() == 1);
+}
+
+TEST_CASE("fatal stellar crash instant-kills a non-immune ship",
+          "[collision][stellar]") {
+  GameState state;
+  SeedStellarScenario(state);
+  SeedCrashNpc(state);
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.collision_mask.mask = &kStellarDot;
+  stellar.collision_mask.anchor_x = 1.5F;
+  stellar.collision_mask.anchor_y = 1.5F;
+  Ship &target = state.ShipAt(1);
+  target.collision_mask.mask = &kStellarDot;
+  target.collision_mask.anchor_x = 1.5F;
+  target.collision_mask.anchor_y = 1.5F;
+  state.player.primary_target_ship_slot = 1;
+
+  NovaStellar_HandleShipStellarCrash(state);
+  CHECK_FALSE(target.is_active);
+  CHECK(target.armor_points == Catch::Approx(-1000.0F));
+  CHECK(target.death_timer_active == Catch::Approx(0.0F));
+  CHECK(state.player.primary_target_ship_slot == -1);
+}
+
+TEST_CASE("fatal stellar crash gates on flags, transparency, and immunity",
+          "[collision][stellar]") {
+  const auto run_crash =
+      [](bool fatal, bool overlap, bool npc, std::uint16_t class_flags) {
+        GameState state;
+        SeedStellarScenario(state);
+        SeedCrashNpc(state);
+        Stellar &stellar = state.scenario.stellars[0];
+        stellar.availability_flags = fatal ? 0x100 : 0x0000;
+        stellar.collision_mask.mask = &kStellarDot;
+        stellar.collision_mask.anchor_x = 1.5F;
+        stellar.collision_mask.anchor_y = 1.5F;
+        stellar.pos_x = overlap ? 0 : 100;
+        state.scenario.ships[0].availability_flags = class_flags;
+        Ship &target = state.ShipAt(1);
+        target.ship_instance_id = npc ? 1 : 0;
+        target.collision_mask.mask = &kStellarDot;
+        target.collision_mask.anchor_x = 1.5F;
+        target.collision_mask.anchor_y = 1.5F;
+        NovaStellar_HandleShipStellarCrash(state);
+        return target.is_active;
+      };
+
+  CHECK_FALSE(run_crash(/*fatal=*/true, /*overlap=*/true, /*npc=*/true, 0));
+  CHECK(run_crash(/*fatal=*/false, /*overlap=*/true, /*npc=*/true, 0));
+  CHECK(run_crash(/*fatal=*/true, /*overlap=*/false, /*npc=*/true, 0));
+  // Ship-class availability_flags 0x20 grants crash immunity (0x0046e210).
+  CHECK(run_crash(/*fatal=*/true, /*overlap=*/true, /*npc=*/true, 0x20));
+}
+
+TEST_CASE("player outfit ModType 0x2a grants crash immunity",
+          "[collision][stellar]") {
+  GameState state;
+  SeedStellarScenario(state);
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.collision_mask.mask = &kStellarDot;
+  stellar.collision_mask.anchor_x = 1.5F;
+  stellar.collision_mask.anchor_y = 1.5F;
+  // The player ship is the victim; without an outfit it dies.
+  Ship &player = state.player;
+  player.collision_mask.mask = &kStellarDot;
+  player.collision_mask.anchor_x = 1.5F;
+  player.collision_mask.anchor_y = 1.5F;
+
+  NovaStellar_HandleShipStellarCrash(state);
+  CHECK_FALSE(player.is_active);
+
+  // Re-run with an owned ModType-0x2a outfit: the player survives.
+  player.is_active = true;
+  player.armor_points = 100.0F;
+  state.scenario.outfits.resize(1);
+  state.scenario.outfits[0].mod_type = 0x2a;
+  state.inventory.outfit_owned_count[0] = 1;
+  NovaStellar_HandleShipStellarCrash(state);
+  CHECK(player.is_active);
+}
+
+TEST_CASE("stellar mask refresh binds the shipped ambient frame",
+          "[collision][stellar][data]") {
+  const auto keys = NovaResource_AllKeys();
+  SpriteMaskStore store;
+  std::uint16_t spin_id = 0;
+  int frame_count = 0;
+  for (const auto &key : keys) {
+    if (key.first != kResourceTypeSprites || key.second < 1000 ||
+        key.second > 1255) {
+      continue;
+    }
+    const int count = store.SpinFrameCount(key.second);
+    if (count > 1) {
+      spin_id = key.second;
+      frame_count = count;
+      break;
+    }
+  }
+  if (spin_id == 0) {
+    SKIP("Nova stellar spin archives unavailable");
+  }
+
+  REQUIRE(frame_count > 1);
+  REQUIRE(store.Spin(spin_id, 0) != nullptr);
+
+  GameState state;
+  SeedStellarScenario(state);
+  state.collision_masks_enabled = true;
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.link_a_id = static_cast<std::int16_t>(spin_id - 1000);
+  stellar.link_b_id = -1;
+  stellar.sprite_current_frame = 1;
+
+  NovaCollision_RefreshCollisionMasks(state);
+  REQUIRE(stellar.collision_mask.HasMask());
+  CHECK(stellar.collision_mask.frame == 1);
+  CHECK(stellar.collision_mask.mask->width > 0);
+}
+
+TEST_CASE("stellar active state and sprite link follow strength",
+          "[collision][stellar]") {
+  Stellar st;
+  st.link_a_id = 3;
+  st.link_b_id = 7;
+  st.strength_capacity = 100;
+  st.strength = 100;
+  CHECK_FALSE(NovaTargeting_IsStellarActive(st));
+  CHECK(NovaTargeting_StellarSpriteLinkId(st) == 3);
+
+  st.strength = -1; // destroyed -> active, alternate zone
+  CHECK(NovaTargeting_IsStellarActive(st));
+  CHECK(NovaTargeting_StellarSpriteLinkId(st) == 7);
+
+  st.link_b_id = -1; // no alternate zone -> fall back to link_a
+  CHECK(NovaTargeting_StellarSpriteLinkId(st) == 3);
+
+  st.strength = 100;
+  st.engage_access = 5; // engaged -> active
+  CHECK(NovaTargeting_IsStellarActive(st));
+  CHECK(NovaTargeting_StellarSpriteLinkId(st) == 3);
+
+  // Invincible capacity (Bible Strength 0/-1) is never active.
+  st.strength_capacity = 0;
+  CHECK_FALSE(NovaTargeting_IsStellarActive(st));
+}
+
+TEST_CASE("daily stellar regeneration restores live strength",
+          "[collision][stellar]") {
+  GameState state;
+  SeedStellarScenario(state);
+  Stellar &stellar = state.scenario.stellars[0];
+  stellar.is_available = true;
+  stellar.strength = -1;
+  stellar.engage_access = 1;
+  stellar.schedule_days = 3;
+  REQUIRE(NovaTargeting_IsStellarActive(stellar));
+
+  Mission_TickDailyWorldUpdate(state);
+  CHECK(stellar.strength == stellar.strength_capacity);
+  CHECK_FALSE(NovaTargeting_IsStellarActive(stellar));
+}
+
+TEST_CASE("starts-destroyed stellars initialize strength and countdown",
+          "[collision][stellar]") {
+  GameState state;
+  SeedStellarScenario(state);
+  state.scenario.stellars.resize(2);
+  Stellar &destroyed = state.scenario.stellars[0];
+  destroyed.availability_flags |= 0x40;
+  destroyed.strength_capacity = 50;
+  destroyed.strength = 50;
+  destroyed.schedule_days = 4;
+  Stellar &normal = state.scenario.stellars[1];
+  normal.availability_flags = 0;
+  normal.strength_capacity = 50;
+  normal.strength = 7;
+
+  NovaNewPilot_ResetStellarStrengthForNewGame(state);
+  CHECK(destroyed.strength == -1);
+  CHECK(destroyed.engage_access == 4);
+  CHECK(normal.strength == 50);
+  CHECK(normal.engage_access == 0);
+
+  // A negative schedule seed pins the regeneration countdown at 1.
+  destroyed.schedule_days = -3;
+  NovaNewPilot_ResetStellarStrengthForNewGame(state);
+  CHECK(destroyed.strength == -1);
+  CHECK(destroyed.engage_access == 1);
+}
+
+TEST_CASE("crash deactivates immediately while weapon damage enters death",
+          "[collision][stellar]") {
+  // Standard lethal weapon damage leaves the hull active and arms the death
+  // timer, entering the Explode1/Explode2 death presentation.
+  {
+    GameState state;
+    SeedStellarScenario(state);
+    state.scenario.ships[0].death_delay_frames = 10;
+    Ship &target = state.ShipAt(1);
+    target.is_active = true;
+    target.ship_instance_id = 1;
+    target.ship_class_id = 0;
+    target.current_system_id = 0;
+    target.armor_points = 5.0F;
+    ResolveShipHitFromWeapon(state,
+                             /*target_slot=*/1,
+                             target,
+                             target.pos_x,
+                             target.pos_y,
+                             /*impact_impulse=*/0,
+                             /*armor_damage=*/100,
+                             /*shield_damage=*/0,
+                             /*attacker_ship_slot=*/0,
+                             /*allow_aggro_updates=*/false,
+                             /*suppress_retarget_logic=*/false,
+                             /*force_armor_only=*/false,
+                             /*bypass_shields=*/true,
+                             /*player_aggro_delta=*/0);
+    CHECK(target.is_active);
+    CHECK(target.death_timer_active == Catch::Approx(10.0F));
+  }
+  // Fatal-stellar contact is an instant kill: active cleared and the death
+  // timer forced to 0, so no death presentation runs afterwards.
+  {
+    GameState state;
+    SeedStellarScenario(state);
+    SeedCrashNpc(state);
+    state.scenario.ships[0].death_delay_frames = 10;
+    Stellar &stellar = state.scenario.stellars[0];
+    stellar.collision_mask.mask = &kStellarDot;
+    stellar.collision_mask.anchor_x = 1.5F;
+    stellar.collision_mask.anchor_y = 1.5F;
+    Ship &target = state.ShipAt(1);
+    target.collision_mask.mask = &kStellarDot;
+    target.collision_mask.anchor_x = 1.5F;
+    target.collision_mask.anchor_y = 1.5F;
+
+    NovaStellar_HandleShipStellarCrash(state);
+    CHECK_FALSE(target.is_active);
+    CHECK(target.death_timer_active == Catch::Approx(0.0F));
+    CHECK(target.armor_points == Catch::Approx(-1000.0F));
+  }
 }
 
 } // namespace game

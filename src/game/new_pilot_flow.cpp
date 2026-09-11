@@ -558,7 +558,34 @@ void SetNewGameDateAndStrings(GameState &state) {
   state.date.day = static_cast<std::int16_t>(local.tm_mday);
 }
 
+// Ghidra Game_ResetNewGameState (0x004b4690), 0x004b46bc..0x004b4760: for every
+// stellar slot the loader left behind, clear hazard_marker and seed Strength.
+// Bodies carrying availability_flags 0x40 (Bible "starts the game destroyed")
+// start at live strength -1 with the regeneration countdown pinned (1 when the
+// schedule seed is negative, otherwise the schedule seed); every other body
+// resets live strength to the loaded capacity with engage_access 0. Without
+// this the loader's capacity seed would leave starts-destroyed bodies intact.
+void ResetStellarStrengthForNewGame(GameState &state) {
+  for (Stellar &stellar : state.scenario.stellars) {
+    stellar.hazard_marker = false;
+    if ((stellar.availability_flags & 0x40U) != 0U) {
+      stellar.strength = -1;
+      stellar.engage_access =
+          stellar.schedule_days < 0 ? 1 : stellar.schedule_days;
+    } else {
+      stellar.strength = stellar.strength_capacity;
+      stellar.engage_access = 0;
+    }
+  }
+}
+
 } // namespace
+
+// Test/entry seam for the Ghidra Game_ResetNewGameState (0x004b4690) stellar
+// Strength/hazard reset, applied by the fresh-world flow.
+void NovaNewPilot_ResetStellarStrengthForNewGame(GameState &state) {
+  ResetStellarStrengthForNewGame(state);
+}
 
 bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                           GameState &state,
@@ -650,6 +677,9 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // systems) as part of the fresh world reset; the ship reset and inventory
   // seed below read class stats, so load the tables first.
   Stub_LoadScenarioResourceTables(state);
+  // Ghidra Game_ResetNewGameState applies the starts-destroyed/hazard reset to
+  // every stellar immediately after the tables load.
+  ResetStellarStrengthForNewGame(state);
   ResetPlayerShipForNewGame(state);
   Stub_ResetReputationAndWorldTables(state);
   Stub_SeedStartingInventory(state);

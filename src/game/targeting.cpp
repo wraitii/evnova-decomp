@@ -431,13 +431,21 @@ NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state) {
 // ---------------------------------------------------------------------------
 // Ghidra 0x0046E3C0 Stellar_IsStellarActive.
 // ---------------------------------------------------------------------------
-// The original reads the StellarDef's ambient-sprite population (+0x40), its
-// sprite handle (+0x3c, negative = active/reserved) and its engagement access
-// counter (+0x47c). Our Stellar carries the same state decoupled from SDL as
-// sprite_population / sprite_handle_active / engage_access (see scenario_data).
+// The original reads the StellarDef's strength capacity (+0x40), its live
+// strength (+0x3c, negative = destroyed) and its engagement access counter
+// (+0x47c). Our Stellar carries the same state as strength_capacity (the
+// +0x40 Bible Strength capacity) and strength (the live +0x3c value decremented
+// by planet-type weapons); see scenario_data.
 bool NovaTargeting_IsStellarActive(const Stellar &st) {
-  return st.sprite_population > 0 &&
-         (st.sprite_handle_active || st.engage_access > 0);
+  return st.strength_capacity > 0 && (st.strength < 0 || st.engage_access > 0);
+}
+
+// Ghidra Stellar_UpdateStellarSprites (0x0042cd10) zone selection.
+std::int16_t NovaTargeting_StellarSpriteLinkId(const Stellar &st) {
+  if (NovaTargeting_IsStellarActive(st) && st.link_b_id >= 0) {
+    return st.link_b_id;
+  }
+  return st.link_a_id;
 }
 
 // ---------------------------------------------------------------------------
