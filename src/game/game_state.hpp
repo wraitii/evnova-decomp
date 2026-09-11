@@ -266,9 +266,14 @@ struct Ship {
   std::int8_t ai_fire_trigger_latch = 0; // +0xBA
 
   // --- Vital stats ---
-  float shield_points = 0.0F;       // +0x54
-  float armor_points = 0.0F;        // +0x58
-  float ionization_points = 0.0F;   // +0x5C (ionization charge meter)
+  float shield_points = 0.0F;     // +0x54
+  float armor_points = 0.0F;      // +0x58
+  float ionization_points = 0.0F; // +0x5C (ionization charge meter)
+  // Ghidra ShipState +0x60. Running-lights brightness 0..32 driven each frame
+  // by Ship_UpdateVisualState (0x00428340) from the class BlinkMode program;
+  // 0 hides the light layer. The field is unnamed in the DB and sits between
+  // ionization_points and cloak_fade_progress.
+  float light_intensity = 0.0F;     // +0x60
   float fuel_points = 0.0F;         // +0x38
   float death_timer_active = -1.0F; // +0x3C
   // Port-side one-shot latch for the alive -> destroyed state transition at
@@ -362,6 +367,22 @@ struct Ship {
   // Ghidra ShipState +0xC8F6. Sprite animation cycle initialized from the
   // class skill-variance range.
   std::int16_t sprite_animation_cycle_index = 0; // +0xC8F6
+  // Ghidra ShipState +0xC8E8. Weapon-effects sprite flash level 0..32, raised
+  // to 32 at the fire site when the fired WeaponDef carries flags_secondary
+  // 0x200 and faded per tick by ShipClass.weapon_glow_decay_rate while
+  // positive (a below--1.0 overshoot clamps to -1.0). The original writes the
+  // level into the Sprite's RGB tint channels (Sprite.sprite_tint_*).
+  float weapon_sprite_flash_level = 0.0F; // +0xC8E8
+  // Ghidra ShipState +0xC8D6 (renamed from weapon_exit_animation_phase). The
+  // running-lights blink state machine's phase: for square-wave blink it
+  // counts blinks within the current group; for triangle pulse it selects the
+  // rise (0) or fall (1) leg. Unused by BlinkMode 0/-1/3.
+  std::int16_t light_blink_phase = 0; // +0xC8D6
+  // Ghidra ShipState +0xC8EC (renamed from weapon_exit_position_timer). The
+  // running-lights blink timer; counts down in normalized 30 Hz ticks. Shared
+  // by the square-wave (on/off/group dwell) and random-pulse (change delay)
+  // arms.
+  float light_blink_timer = 0.0F; // +0xC8EC
   // Travel-target transfer latch (Ghidra ShipState +0x2Aish): the AI sets this
   // to 2 when it assigns ai_secondary_target_slot a fresh travel stellar (the
   // signal System_UpdateSystemAndStellarDisplayState reads to auto-target the

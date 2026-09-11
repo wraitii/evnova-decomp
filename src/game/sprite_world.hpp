@@ -236,8 +236,14 @@ private:
 // Sprite_SetCurrentFrame / Sprite_SetPositionFromCurrentFrameAnchor).
 struct SpriteDrawOptions {
   float scale = 1.0F;     // native-frame scale (1 = 1:1)
-  float alpha_mod = 1.0F; // 0..1 multiplicative alpha (glow dimming)
-  bool wrap = false;      // one-exit wraparound for the extending viewport
+  float alpha_mod = 1.0F; // 0..1 multiplicative source intensity
+  // Additive compositing (dst = src*alpha + dst). The original's ship effect
+  // layers (engine glow, running lights, weapon effects) draw through
+  // BlitPixel_TintRgb15Span with brightness 0x20: dst + src*intensity/0x20, so
+  // alpha_mod carries intensity/0x20 here. Transparent source pixels stay
+  // transparent under SDL_BLENDMODE_ADD.
+  bool additive = false;
+  bool wrap = false; // one-exit wraparound for the extending viewport
   // Use the smooth (linear) filtering when the frame is drawn scaled, e.g. the
   // tiny 5x5px star tiles upscaled so they read as soft glows rather than
   // chunky squares (matches the original's smooth sprite scaling draw-proc).

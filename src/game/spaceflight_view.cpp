@@ -462,6 +462,86 @@ void DrawQueuedBeam(SdlPlatform &platform,
   return weapon != nullptr;
 }
 
+// Loads one optional sh\x8an sprite layer (engine glow / running lights /
+// weapon effects) into `asset`. The original's
+// Sprite_CreateFromSpriteSheetResources call gives every role the same
+// frames_per_rotation * base_set_count frame count as the hull, so the layer
+// shares the base heading rotation grid. A non-positive image id means the
+// class has no such layer; a load failure is logged and non-fatal.
+void LoadShipVisualLayer(SDL_Renderer *renderer,
+                         std::int16_t image_id,
+                         const char *role,
+                         const std::string &display_name,
+                         int base_frame_count,
+                         SpriteAsset &asset,
+                         bool &present) {
+  present = image_id > 0;
+  if (!present) {
+    return;
+  }
+  if (auto layer = SpriteAsset::LoadSheet(renderer,
+                                          static_cast<std::uint16_t>(image_id));
+      layer) {
+    asset = std::move(*layer);
+    // The original's Sprite_CreateFromSpriteSheetResources call gives every
+    // role the base rotation grid's frame count; keep that but never exceed
+    // the frames actually decoded (a short/malformed sheet must not make the
+    // renderer index past its frame vector).
+    asset.frame_count =
+        std::min(base_frame_count, static_cast<int>(asset.frames.size()));
+    NovaLog::Info("ship {} layer loaded for '{}': {}x{} x{} frames",
+                  role,
+                  display_name,
+                  asset.tile_width,
+                  asset.tile_height,
+                  asset.frame_count);
+  } else {
+    present = false;
+    NovaLog::Warn("ship sprite: no usable rl.x91D {} sheet {} for class '{}'; "
+                  "layer skipped",
+                  role,
+                  image_id,
+                  display_name);
+  }
+}
+
+// Draws one additive ship effect layer (running lights / weapon effects). The
+// original stores round(intensity) in the Sprite's tint channels with
+// brightness_level 32; SDL has no per-channel tint here, so the brightness
+// maps to a multiplicative alpha (level/32), matching the existing engine-glow
+// approximation. `visible_threshold` mirrors the original's hide test (the
+// light layer hides at <= 1.0, the weapon layer at <= 0).
+void DrawShipEffectLayer(SDL_Renderer *renderer,
+                         const SpriteAsset &layer,
+                         int frame,
+                         float world_x,
+                         float world_y,
+                         float camera_x,
+                         float camera_y,
+                         int viewport_w,
+                         int viewport_h,
+                         float intensity,
+                         float visible_threshold) {
+  if (layer.frames.empty() || intensity <= visible_threshold) {
+    return;
+  }
+  SpriteDrawOptions opts;
+  opts.alpha_mod = std::clamp(intensity / 32.0F, 0.0F, 1.0F);
+  // The original's light/weapon layers use the tinted draw proc at brightness
+  // 0x20, i.e. dst + src*intensity/0x20 (additive).
+  opts.additive = true;
+  DrawSprite(renderer,
+             layer,
+             frame,
+             world_x,
+             world_y,
+             camera_x,
+             camera_y,
+             viewport_w,
+             viewport_h,
+             opts);
+}
+
 } // namespace
 
 bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
@@ -514,30 +594,31 @@ bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
   ship_row_count_ = std::max(1, ship_.frame_count / ship_frames_per_rotation_);
 
   // Engine-glow layer (GlowImageID). The original loads it into the per-class
-  // glow sprite set sharing the base's rotation grid (same frame count, set by
-  // frames_per_rotation * base_set_count); it is drawn over the base with a
-  // thrust-driven alpha (see Draw). A missing/absent glow sheet just means the
-  // ship has no glow layer, which is not fatal.
-  has_glow_ = visual->engine_glow_image_id > 0;
-  if (has_glow_) {
-    if (auto glow = SpriteAsset::LoadSheet(
-            renderer, static_cast<std::uint16_t>(visual->engine_glow_image_id));
-        glow) {
-      glow_ = std::move(*glow);
-      glow_.frame_count = ship_.frame_count; // shares the base rotation grid
-      NovaLog::Info("ship engine glow loaded for '{}': {}x{} x{} frames",
-                    ship_class->display_name,
-                    glow_.tile_width,
-                    glow_.tile_height,
-                    glow_.frame_count);
-    } else {
-      has_glow_ = false;
-      NovaLog::Warn("ship sprite: no usable rl.x91D glow sheet {} for class "
-                    "'{}'; engine glow skipped",
-                    visual->engine_glow_image_id,
-                    ship_class->display_name);
-    }
-  }
+  // glow sprite set sharing the base's rotation grid; it is drawn over the
+  // base with a thrust-driven alpha (see Draw). Running-lights (LightImageID)
+  // and weapon-effects (WeapImageID) layers share the same grid and are driven
+  // by Ship.light_intensity / Ship.weapon_sprite_flash_level.
+  LoadShipVisualLayer(renderer,
+                      visual->engine_glow_image_id,
+                      "engine glow",
+                      ship_class->display_name,
+                      ship_.frame_count,
+                      glow_,
+                      has_glow_);
+  LoadShipVisualLayer(renderer,
+                      visual->light_image_id,
+                      "running lights",
+                      ship_class->display_name,
+                      ship_.frame_count,
+                      light_,
+                      has_light_);
+  LoadShipVisualLayer(renderer,
+                      visual->weapon_image_id,
+                      "weapon effects",
+                      ship_class->display_name,
+                      ship_.frame_count,
+                      weapon_,
+                      has_weapon_);
 
   NovaLog::Info("ship sprite loaded for '{}': {}x{} x{} frames ({} set(s))",
                 ship_class->display_name,
@@ -585,33 +666,44 @@ SpaceflightView::ShipClassSprite(SdlPlatform &platform,
   // EnsureShipSprite); no alt-sheet append.
   entry.row_count =
       std::max(1, entry.base.frame_count / entry.frames_per_rotation);
-  // Engine-glow layer (GlowImageID), sharing the base's rotation grid. An
-  // absent glow image id, or a glow sheet that fails to load, just means the
-  // NPC has no glow layer (not fatal).
-  if (visual->engine_glow_image_id > 0) {
-    if (auto glow = SpriteAsset::LoadSheet(
-            platform.renderer(),
-            static_cast<std::uint16_t>(visual->engine_glow_image_id));
-        glow) {
-      entry.glow = std::move(*glow);
-      entry.glow.frame_count = entry.base.frame_count;
-      entry.has_glow = true;
-    } else {
-      NovaLog::Warn("npc ship sprite: no usable glow sheet {} for class "
-                    "{:#x}; engine glow skipped",
-                    static_cast<unsigned>(visual->engine_glow_image_id),
-                    static_cast<unsigned>(ship_class_id));
-    }
-  }
+  // Engine-glow, running-lights and weapon-effects layers, all sharing the
+  // base's rotation grid. A non-positive image id, or a sheet that fails to
+  // load, just means the NPC lacks that layer (not fatal).
+  const std::string class_label =
+      "class " + std::to_string(static_cast<unsigned>(ship_class_id));
+  LoadShipVisualLayer(platform.renderer(),
+                      visual->engine_glow_image_id,
+                      "engine glow",
+                      class_label,
+                      entry.base.frame_count,
+                      entry.glow,
+                      entry.has_glow);
+  LoadShipVisualLayer(platform.renderer(),
+                      visual->light_image_id,
+                      "running lights",
+                      class_label,
+                      entry.base.frame_count,
+                      entry.light,
+                      entry.has_light);
+  LoadShipVisualLayer(platform.renderer(),
+                      visual->weapon_image_id,
+                      "weapon effects",
+                      class_label,
+                      entry.base.frame_count,
+                      entry.weapon,
+                      entry.has_weapon);
   auto [it, inserted] =
       npc_ship_sprites_.emplace(ship_class_id, std::move(entry));
   (void)inserted;
-  NovaLog::Info("npc ship sprite loaded for class {:#x}: {}x{} x{} frames{}",
-                static_cast<unsigned>(ship_class_id),
-                it->second.base.tile_width,
-                it->second.base.tile_height,
-                it->second.base.frame_count,
-                it->second.has_glow ? " + engine glow" : "");
+  NovaLog::Info(
+      "npc ship sprite loaded for class {:#x}: {}x{} x{} frames{}{}{}",
+      static_cast<unsigned>(ship_class_id),
+      it->second.base.tile_width,
+      it->second.base.tile_height,
+      it->second.base.frame_count,
+      it->second.has_glow ? " + engine glow" : "",
+      it->second.has_light ? " + running lights" : "",
+      it->second.has_weapon ? " + weapon effects" : "");
   return &it->second;
 }
 
@@ -651,14 +743,15 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                vp.h);
 
     // Engine-glow layer, drawn over the hull with the same heading-selected
-    // frame and a thrust-driven alpha. engine_glow_level is driven in
-    // NovaShip_IntegrateNpcMovement (Ship_HandleShip field_0xc8d4); level/24
+    // frame and a thrust-driven additive intensity. engine_glow_level is driven
+    // in NovaShip_IntegrateNpcMovement (Ship_HandleShip field_0xc8d4); level/24
     // clamped to [0,1] is the exhaust intensity, matching the player's glow. A
     // class with no glow layer or a currently-dark exhaust just skips this.
     if (sprite->has_glow && !sprite->glow.frames.empty() &&
         ship.engine_glow_intensity > 0.0F) {
       SpriteDrawOptions opts;
       opts.alpha_mod = ship.engine_glow_intensity;
+      opts.additive = true;
       DrawSprite(platform.renderer(),
                  sprite->glow,
                  frame,
@@ -669,6 +762,35 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                  vp.w,
                  vp.h,
                  opts);
+    }
+    // Running lights and weapon-effects layers over the hull. light_intensity
+    // and weapon_sprite_flash_level are driven in
+    // NovaShip_TickWeaponSpriteAndRunningLights.
+    if (sprite->has_light) {
+      DrawShipEffectLayer(platform.renderer(),
+                          sprite->light,
+                          frame,
+                          ship.pos_x,
+                          ship.pos_y,
+                          camera_x,
+                          camera_y,
+                          vp.w,
+                          vp.h,
+                          ship.light_intensity,
+                          /*visible_threshold=*/1.0F);
+    }
+    if (sprite->has_weapon) {
+      DrawShipEffectLayer(platform.renderer(),
+                          sprite->weapon,
+                          frame,
+                          ship.pos_x,
+                          ship.pos_y,
+                          camera_x,
+                          camera_y,
+                          vp.w,
+                          vp.h,
+                          ship.weapon_sprite_flash_level,
+                          /*visible_threshold=*/0.0F);
     }
   }
 }
@@ -1567,13 +1689,15 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
                vp.h);
 
     // Engine-glow layer: drawn over the base with the same heading-selected
-    // frame and a thrust-driven alpha. The original binds the glow as a second
-    // sprite layer on top of the base set to the same frame index (Ghidra
-    // NovaUi_UpdateShipClassLaunchProgress sets both to sVar10). The glow
-    // sheet is larger than the base (exhaust jets extend beyond the hull), so
-    // it is drawn centred on the ship at its native size. Alpha = the ramped
-    // thrust intensity, so the exhaust fades in while accelerating and out when
-    // coasting (clean-room approximation of the original dimming the glow with
+    // frame and a thrust-driven additive intensity. The original binds the glow
+    // as a second sprite layer on top of the base set to the same frame index
+    // (Ghidra NovaUi_UpdateShipClassLaunchProgress sets both to sVar10). The
+    // glow sheet is larger than the base (exhaust jets extend beyond the hull),
+    // so it is drawn centred on the ship at its native size. The original draws
+    // it through BlitPixel_TintRgb15Span at brightness 0x20 (dst +
+    // src*intensity); the port maps the ramped thrust level to src intensity.
+    // This fades the exhaust in while accelerating and out when coasting
+    // (clean-room approximation of the original dimming the glow with
     // throttle).
     if (has_glow_ && state.player.engine_glow_intensity > 0.0F &&
         !glow_.frames.empty()) {
@@ -1589,6 +1713,7 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
           std::min(frame, std::max(0, glow_.frame_count - 1));
       SpriteDrawOptions opts;
       opts.alpha_mod = state.player.engine_glow_intensity;
+      opts.additive = true;
       DrawSprite(platform.renderer(),
                  glow_,
                  glow_frame,
@@ -1606,6 +1731,36 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
                     state.player.engine_glow_intensity,
                     glow_.frame_count);
       glow_last_drawn_ = false;
+    }
+
+    // Running lights and weapon-effects layers, over the hull and glow.
+    // Driven by NovaShip_TickWeaponSpriteAndRunningLights; the flash is
+    // raised at the player fire site.
+    if (has_light_) {
+      DrawShipEffectLayer(platform.renderer(),
+                          light_,
+                          frame,
+                          state.player.pos_x,
+                          state.player.pos_y,
+                          state.player.pos_x,
+                          state.player.pos_y,
+                          vp.w,
+                          vp.h,
+                          state.player.light_intensity,
+                          /*visible_threshold=*/1.0F);
+    }
+    if (has_weapon_) {
+      DrawShipEffectLayer(platform.renderer(),
+                          weapon_,
+                          frame,
+                          state.player.pos_x,
+                          state.player.pos_y,
+                          state.player.pos_x,
+                          state.player.pos_y,
+                          vp.w,
+                          vp.h,
+                          state.player.weapon_sprite_flash_level,
+                          /*visible_threshold=*/0.0F);
     }
   }
 

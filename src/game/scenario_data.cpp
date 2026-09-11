@@ -1531,6 +1531,24 @@ bool ScenarioData::LoadFromArchives() {
         // Combat/sprite animation cadence seed (ShipClassDef +0x9fe <- sh\x8an
         // +0x30, loader 0x004b4ee0); drawn by the spawn paths.
         cls.combat_state_init_range = ReadBeI16(*shan, 0x30);
+        // Weapon-effects fade rate and running-lights blink program. The
+        // loader scales WeapDecay (+0x32) by g_ship_weapon_glow_decay_scale
+        // (0x00575ab8 = 0.003484) and copies the Blink fields at +0x36..+0x3e
+        // (see scenario_data.hpp for the field-name caveat).
+        cls.weapon_glow_decay_rate =
+            static_cast<float>(ReadBeI16(*shan, 0x32)) * 0.003484F;
+        cls.blink_mode = ReadBeI16(*shan, 0x36);
+        cls.blink_val_a = ReadBeI16(*shan, 0x38);
+        cls.blink_val_b = ReadBeI16(*shan, 0x3a);
+        cls.blink_val_c = ReadBeI16(*shan, 0x3c);
+        cls.blink_val_d = ReadBeI16(*shan, 0x3e);
+        cls.light_image_id = ReadBeI16(*shan, 0x1e);
+        if (cls.blink_mode == 2 && cls.blink_val_c > 0x1f) {
+          cls.blink_val_c = 0x1f;
+        }
+        if (cls.blink_mode == 3 && cls.blink_val_b > 0x1f) {
+          cls.blink_val_b = 0x1f;
+        }
         if (const auto found = first_class_by_base_image.find(base_image);
             found != first_class_by_base_image.end()) {
           cls.clone_source_ship_class = found->second;

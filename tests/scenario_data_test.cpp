@@ -410,6 +410,19 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships",
   CHECK(d->engine_glow_x_size == 48);
   CHECK(d->engine_glow_y_size == 48);
 
+  // Running-lights layer (LightImageID +0x1e). The shuttle's lights are a
+  // BlinkMode-1 square wave: BlinkValA 4 (off-time), BlinkValB 1 (on-time),
+  // BlinkValC 2 (blinks per group), BlinkValD 20 (group delay).
+  CHECK(d->light_image_id == 1600);
+  CHECK(d->light_mask_id == 1601);
+  CHECK(d->blink_mode == 1);
+  CHECK(d->blink_val_a == 4);
+  CHECK(d->blink_val_b == 1);
+  CHECK(d->blink_val_c == 2);
+  CHECK(d->blink_val_d == 20);
+  // The shuttle has no weapon-effects layer (WeapImageID <= 0).
+  CHECK(d->weapon_image_id == -1);
+
   // The referenced 16-bit sheet must be decodable and hold base_set_count *
   // frames_per_rotation frames (3 * 36 = 108) at the descriptor's dimensions.
   const auto sheet =
@@ -431,6 +444,39 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships",
   CHECK(glow_decoded->width == 48);
   CHECK(glow_decoded->height == 48);
   CHECK(glow_decoded->frames.size() == 108);
+
+  // The running-lights sheet (LightImageID) is a bare rl\x91D sheet sharing
+  // the same rotation grid as the hull.
+  const auto light_sheet = NovaResource_Load(
+      kResourceTypeRleSheet16, static_cast<std::uint16_t>(d->light_image_id));
+  REQUIRE(light_sheet.has_value());
+  const auto light_decoded = RleSpriteSheet_Decode16(*light_sheet);
+  REQUIRE(light_decoded.has_value());
+  CHECK(light_decoded->frames.size() == 108);
+}
+
+// A class with the weapon-effects layer: the Fed Destroyer (ship class 0x8d)
+// names WeapImageID 1826 with WeapDecay 5, so the decoded fade rate is
+// 5 * 0.003484 = 0.01742 per normalized tick. It has no running lights.
+TEST_CASE("ship weapon-effects descriptor and fade rate decode",
+          "[scenario][ships]") {
+  const auto payload = NovaResource_Load(kShipVisualResourceType,
+                                         static_cast<std::uint16_t>(0x8d));
+  REQUIRE(payload.has_value());
+  const auto d = DecodeShipVisualDescriptor(*payload);
+  REQUIRE(d.has_value());
+  CHECK(d->weapon_image_id == 1826);
+  CHECK(d->weapon_mask_id == 1827);
+  CHECK(d->weapon_decay == 5);
+  CHECK(d->light_image_id <= 0);
+
+  // The scenario loader folds WeapDecay into the class's per-tick fade rate.
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const ShipClass *cls = data.Ship(0x8d);
+  REQUIRE(cls != nullptr);
+  CHECK(cls->weapon_glow_decay_rate > 0.0F);
+  CHECK(cls->weapon_glow_decay_rate < 0.02F);
 }
 
 // VERIFY the stellar (planet) graphic path end to end on the Kania system:

@@ -458,6 +458,9 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       continue;
     }
     NovaShip_TickCloakFadeState(state, ship, elapsed_ticks);
+    // Ship_UpdateVisualState's weapon-flash fade + running-lights blink run
+    // for every active hull each frame (the same per-ship pass).
+    NovaShip_TickWeaponSpriteAndRunningLights(state, ship, elapsed_ticks);
     if (!NovaAiShip_IsDestroyed(ship)) {
       continue;
     }
@@ -513,6 +516,12 @@ void NovaFrame_TickSystems(GameState &state,
   // the hull. The live player core runs in the spaceflight loop ahead of this
   // call, so the scope-10 ordering is preserved.
   NovaShip_TickDestroyedShipVisualState(state, state.player, elapsed_ticks);
+  // The player's Ship_UpdateVisualState weapon-flash fade and running-lights
+  // blink (scope 10).
+  if (state.player.is_active) {
+    NovaShip_TickWeaponSpriteAndRunningLights(
+        state, state.player, elapsed_ticks);
+  }
   // scope 9 "collisions": always runs.
   Stub_Collisions(state);
 

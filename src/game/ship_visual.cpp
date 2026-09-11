@@ -77,7 +77,27 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
   d.engine_glow_mask_id = ReadBeI16(resource_data, 0x18);  // GlowMaskID
   d.engine_glow_x_size = ReadBe16(resource_data, 0x1a);    // GlowXSize
   d.engine_glow_y_size = ReadBe16(resource_data, 0x1c);    // GlowYSize
-  d.frames_per_rotation = ReadBeI16(resource_data, 0x34);  // FramesPer
+  // Running-lights layer (+0x1e) and weapon-effects layer (+0x26). The loader
+  // reads the same image/mask/x/y quadruple per role and builds a per-class
+  // sprite set for each; non-positive ids mean the role is absent.
+  d.light_image_id = ReadBeI16(resource_data, 0x1e);  // LightImageID
+  d.light_mask_id = ReadBeI16(resource_data, 0x20);   // LightMaskID
+  d.light_x_size = ReadBe16(resource_data, 0x22);     // LightXSize
+  d.light_y_size = ReadBe16(resource_data, 0x24);     // LightYSize
+  d.weapon_image_id = ReadBeI16(resource_data, 0x26); // WeapImageID
+  d.weapon_mask_id = ReadBeI16(resource_data, 0x28);  // WeapMaskID
+  d.weapon_x_size = ReadBe16(resource_data, 0x2a);    // WeapXSize
+  d.weapon_y_size = ReadBe16(resource_data, 0x2c);    // WeapYSize
+  // Running-lights blink program (Bible BlinkMode + BlinkValA..D). The Ghidra
+  // loader labels these gun/turret/guided exit positions, but the only
+  // consumer is the blink state machine below and the loader clamps BlinkMode
+  // 2/3 values to the 0x1f intensity ceiling, so this is the Bible layout.
+  d.blink_mode = ReadBeI16(resource_data, 0x36);          // BlinkMode
+  d.blink_val_a = ReadBeI16(resource_data, 0x38);         // BlinkValA
+  d.blink_val_b = ReadBeI16(resource_data, 0x3a);         // BlinkValB
+  d.blink_val_c = ReadBeI16(resource_data, 0x3c);         // BlinkValC
+  d.blink_val_d = ReadBeI16(resource_data, 0x3e);         // BlinkValD
+  d.frames_per_rotation = ReadBeI16(resource_data, 0x34); // FramesPer
   if (d.frames_per_rotation == 0) {
     d.frames_per_rotation = 36;
   }
@@ -333,6 +353,119 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
   // Ship_UpdateVisualState tail: the hull deactivates with its target cleared.
   ship.is_active = false;
   ship.squad_leader_ship_slot = -1;
+}
+
+// Ghidra 0x00428340 Ship_UpdateVisualState, weapon-effects + running-lights
+// slice. See the header for scope notes. Constants decoded from data: the
+// weapon flash ceiling is 32.0 (0x42000000), the decay scale is
+// g_ship_weapon_glow_decay_scale (0x00575ab8) = 0.003484, and the fully-off
+// latch is k_jammed_turn_sign_f32 (-1.0, 0xbf800000). The blink triangle/random
+// rates use k_one_percent_f64 = 0.01.
+void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
+                                               Ship &ship,
+                                               float elapsed_ticks) {
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return;
+  }
+  const float scale = std::max(0.0F, elapsed_ticks);
+
+  // Weapon-effects sprite flash. Weapon_FirePlayerWeaponBank /
+  // Weapon_FireShipWeapons raise this to 32 when the fired weapon carries
+  // flags_secondary 0x200; here it fades at weapon_glow_decay_rate per tick
+  // (after the visible brightness is sampled by the renderer) and latches to
+  // -1 once it crosses zero.
+  if (ship.weapon_sprite_flash_level > 0.0F) {
+    if (ship.weapon_sprite_flash_level > 32.0F) {
+      ship.weapon_sprite_flash_level = 32.0F;
+    }
+    ship.weapon_sprite_flash_level -= cls->weapon_glow_decay_rate * scale;
+    // The original clamps an overshoot below -1.0 (k_jammed_turn_sign_f32
+    // 0x00575350) back to -1.0; a small negative value simply hides the layer
+    // and stops further decay on the next tick (the decay only runs while
+    // flash > 0).
+    if (ship.weapon_sprite_flash_level < -1.0F) {
+      ship.weapon_sprite_flash_level = -1.0F;
+    }
+  }
+
+  // Running lights: only classes with a light layer run the blink state
+  // machine (the original gates the whole block on g_ship_sprite_light[class]
+  // being bound). BlinkMode 0/-1 leaves the lights at full brightness; 1 is the
+  // Bible square wave, 2 the triangle pulse and 3 the random pulse.
+  if (cls->light_image_id <= 0) {
+    ship.light_intensity = 0.0F;
+    return;
+  }
+  const std::int16_t mode = cls->blink_mode;
+  if (mode == 1) {
+    // Square wave. BlinkValA = off-time between blinks, BlinkValB = on-time,
+    // BlinkValC = blinks per group, BlinkValD = delay between groups. The
+    // timer is clamped to max(on-time, group-delay) before use.
+    const std::int16_t max_timer = std::max(cls->blink_val_b, cls->blink_val_d);
+    if (static_cast<float>(max_timer) < ship.light_blink_timer) {
+      ship.light_blink_timer = static_cast<float>(max_timer);
+    }
+    if (ship.light_blink_phase < cls->blink_val_c) {
+      if (ship.light_blink_timer <= 0.0F) {
+        if (ship.light_intensity <= 0.0F) {
+          ship.light_intensity = 32.0F;
+          ship.light_blink_timer = static_cast<float>(cls->blink_val_b);
+        } else {
+          ship.light_intensity = 0.0F;
+          ship.light_blink_phase =
+              static_cast<std::int16_t>(ship.light_blink_phase + 1);
+          ship.light_blink_timer = static_cast<float>(cls->blink_val_a);
+        }
+      } else {
+        ship.light_blink_timer -= scale;
+      }
+    } else if (ship.light_blink_timer <= 0.0F) {
+      ship.light_blink_phase = 0;
+      ship.light_intensity = 0.0F;
+      ship.light_blink_timer = static_cast<float>(cls->blink_val_d);
+    } else {
+      ship.light_blink_timer -= scale;
+    }
+  } else if (mode == 2) {
+    // Triangle pulse. BlinkValA = minimum intensity, BlinkValB = rise per
+    // frame x100, BlinkValC = maximum intensity, BlinkValD = fall per frame
+    // x100. Animation phase 0 ramps up, 1 ramps down.
+    if (ship.light_blink_phase == 0) {
+      if (ship.light_intensity < static_cast<float>(cls->blink_val_c)) {
+        ship.light_intensity +=
+            static_cast<float>(cls->blink_val_b) * 0.01F * scale;
+      } else {
+        ship.light_intensity = static_cast<float>(cls->blink_val_c);
+        ship.light_blink_phase = 1;
+      }
+    } else if (static_cast<float>(cls->blink_val_a) < ship.light_intensity) {
+      ship.light_intensity -=
+          static_cast<float>(cls->blink_val_d) * 0.01F * scale;
+    } else {
+      ship.light_intensity = static_cast<float>(cls->blink_val_a);
+      ship.light_blink_phase = 0;
+    }
+  } else if (mode == 3) {
+    // Random pulse. BlinkValA/B = min/max intensity, BlinkValC = delay between
+    // changes, BlinkValD ignored.
+    if (ship.light_blink_timer > 0.0F) {
+      ship.light_blink_timer -= scale;
+      if (static_cast<float>(cls->blink_val_c) < ship.light_blink_timer) {
+        ship.light_blink_timer = static_cast<float>(cls->blink_val_c);
+      }
+    } else {
+      const std::int32_t span =
+          static_cast<std::int32_t>(cls->blink_val_b) + 1 - cls->blink_val_a;
+      ship.light_intensity =
+          static_cast<float>(RollRandom(state, span) + cls->blink_val_a);
+      ship.light_blink_timer = static_cast<float>(cls->blink_val_c);
+    }
+  } else {
+    // 0 / -1: always on at full brightness.
+    ship.light_intensity = 32.0F;
+  }
 }
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, cloak-fade slice. See the header
