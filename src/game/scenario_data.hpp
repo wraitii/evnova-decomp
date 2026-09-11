@@ -667,11 +667,19 @@ struct Weapon {
   // per-mounted-unit capacity.
   std::int16_t max_ammo = -1;
 
-  // Resource +0x3e/+0x40/+0x44 feed the original loader's post-pass range
-  // calculation. A valid link adds that weapon's travel distance; the final
-  // count is used only for the self-link special case.
-  std::int16_t range_link_gate = 0;
-  std::int16_t range_link_weapon_id = -1; // zero-based, -1 when absent
+  // Bible submunition linkage (SubCount +0x3e, SubType +0x40, SubTheta +0x42,
+  // SubLimit +0x44). The original loader's post-pass adds the linked weapon's
+  // travel distance to this weapon's range_scalar; SubLimit is otherwise only
+  // consumed by Shot_SpawnLinkedShotsOnImpact's recursion guard.
+  std::int16_t range_link_gate = 0;       // SubCount: linked shots per impact
+  std::int16_t range_link_weapon_id = -1; // SubType: zero-based, -1 absent
+  // Bible SubTheta (Ghidra WeaponDef.field_0x7e, default 0 when the resource
+  // holds -1). Degree spread of the linked shots: > 0 randomizes each heading
+  // within +/-SubTheta; < 0 fans them deterministically across
+  // abs(SubTheta) * (SubCount-1) degrees centred on the parent heading.
+  std::int16_t range_link_spread = 0;
+  // Bible SubLimit: 0 = unlimited recursion; N stops a recursively-
+  // submunitioning chain once the parent generation reaches N.
   std::int16_t range_link_extra_count = 0;
 
   std::array<std::int16_t, 4> jam_vuln{}; // JamVuln1-4 (resource +0x5e..)

@@ -387,6 +387,12 @@ namespace {
       range_link_resource_id >= 0x80
           ? static_cast<std::int16_t>(range_link_resource_id - 0x80)
           : -1;
+  // Bible SubTheta (+0x42): the loader turns its -1 sentinel into 0 so an
+  // unset spread neither randomizes nor starbursts (0x004bd3c0).
+  w.range_link_spread = ReadBeI16(bytes, 0x42);
+  if (w.range_link_spread == -1) {
+    w.range_link_spread = 0;
+  }
   w.range_link_extra_count = ReadBeI16(bytes, 0x44);
   for (std::size_t i = 0; i < 4; ++i) {
     w.jam_vuln[i] = ReadBeI16(bytes, 0x5e + i * 2);

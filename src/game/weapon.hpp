@@ -179,6 +179,17 @@ std::int16_t NovaWeapon_SelectTurretQuadrant(GameState &state,
                                              bool spawn_without_owner = false,
                                              bool apply_random_spread = true);
 
+// Ghidra Shot_SpawnLinkedShotsOnImpact (0x00420D30): spawn the impacting
+// weapon's linked submunitions (Bible SubCount/SubType/SubTheta/SubLimit) at
+// the impact position. Owner/target context and heading/velocity are inherited
+// from `impacting_shot`; each child's linked_shot_generation is parent + 1.
+// `impacting_shot` is read by value before any child is appended, so callers
+// may pass a reference into GameState::active_shots.
+void NovaWeapon_SpawnLinkedShotsOnImpact(
+    GameState &state,
+    const ActiveShot &impacting_shot,
+    std::int16_t fallback_target_ship_slot);
+
 // Ghidra Weapon_FirePlayerWeaponBank (0x00455150): fires one player weapon
 // bank for the current frame. Reconstructed for the unguided-projectile mode:
 // consumes ammo/energy as the weapon requires, spawns one shot toward the
