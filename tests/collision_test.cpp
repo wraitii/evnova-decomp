@@ -260,6 +260,55 @@ TEST_CASE("collision eligibility rejects friendly and scripted targets",
   CHECK(!NovaWeapon_CanProjectileHitShip(state, npc_shot, 1));
 }
 
+TEST_CASE("ownerless shots hit only their recorded target slot",
+          "[collision][stellar-defense]") {
+  GameState state;
+  SeedCollisionScenario(state);
+
+  // A stellar defense battery shot: owner_ship_slot -1, weapon bank 0. The
+  // original Weapon_CanWeaponHitTarget (0x00426ef0) routes ownerless shots
+  // through the 0x00427435 branch, which accepts only the recorded target slot
+  // (or a ship whose target_stellar_object_id matches it) before joining the
+  // common capability/aggro tail.
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.owner_ship_slot = -1;
+  shot.target_ship_slot = 1;
+  shot.system_id = 0;
+  shot.life_ticks_remaining = 10.0F;
+
+  CHECK(NovaWeapon_CanProjectileHitShip(state, shot, 1));
+
+  Ship &second = state.ShipAt(2);
+  second.is_active = true;
+  second.ship_instance_id = 2;
+  second.ship_class_id = 0;
+  second.current_system_id = 0;
+  second.armor_points = 100.0F;
+  second.shield_points = 20.0F;
+  second.ai_behavior_code = 5;
+  CHECK(!NovaWeapon_CanProjectileHitShip(state, shot, 2));
+
+  // Ghidra compares the recorded slot against both the candidate's
+  // ship_instance_id and its target_stellar_object_id.
+  second.target_stellar_object_id = 1;
+  CHECK(NovaWeapon_CanProjectileHitShip(state, shot, 2));
+
+  // An invalid recorded slot leaves the ownerless shot free to hit any ship.
+  shot.target_ship_slot = -1;
+  CHECK(NovaWeapon_CanProjectileHitShip(state, shot, 2));
+
+  // Drive the direct pass: the ownerless shot connects with the recorded
+  // target and consumes itself.
+  state.active_shots.push_back(shot);
+  state.active_shots[0].target_ship_slot = 1;
+  state.active_shots[0].pos_x = 0.0F;
+  state.active_shots[0].pos_y = 0.0F;
+  NovaWeapon_ResolveDirectShotCollisions(state);
+  CHECK(state.active_shots.empty());
+  CHECK(state.ShipAt(1).shield_points == Catch::Approx(10.0F));
+}
+
 TEST_CASE("player fire preserves state-9 hit-reset ordering",
           "[collision][ai]") {
   GameState state;

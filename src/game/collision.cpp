@@ -1522,24 +1522,18 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   if (weapon == nullptr || !ValidShipSlot(target_slot) || shot.consumed) {
     return false;
   }
-  if (!ValidShipSlot(shot.owner_ship_slot) ||
-      shot.owner_ship_slot == target_slot) {
-    // TODO(decomp): unowned shots (e.g. stellar defense batteries) accept
-    // only the recorded target slot; the clean-room has no ownerless shots.
+  const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  // Original self-hit gate: owner_ship_slot == target_ship->ship_instance_id,
+  // and ship_instance_id is the target's own slot (identity == slot).
+  if (shot.owner_ship_slot == target_slot) {
     return false;
   }
-  const std::int16_t owner_slot = shot.owner_ship_slot;
-  const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_slot));
-  const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-
+  // Ghidra 0x00426f6f: the 998 "target lost" latch makes the shot inert.
+  if (shot.retarget_cooldown == 998) {
+    return false;
+  }
   if (!target.is_active || target.current_system_id != shot.system_id ||
       IsDestroyed(target)) {
-    return false;
-  }
-  // Clean-room guard: the original relies on shot lifetime to drop dead or
-  // departed owners; the explicit checks keep stale shots from damaging
-  // across systems in this simplified model.
-  if (owner.current_system_id != shot.system_id || IsDestroyed(owner)) {
     return false;
   }
   if (target.pers_def_slot == 0x3ff) {
@@ -1558,67 +1552,93 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     return false;
   }
 
-  if (owner.squad_leader_ship_slot != -1 &&
-      target.squad_leader_ship_slot != -1 &&
-      target.squad_leader_ship_slot == owner.squad_leader_ship_slot) {
-    return false;
-  }
-  if (owner.faction_or_government_id >= 0 &&
-      owner.faction_or_government_id < 0x100 &&
-      target.faction_or_government_id == owner.faction_or_government_id) {
-    return false;
-  }
-  if (owner.target_stellar_object_id != -1 &&
-      target.target_stellar_object_id == owner.target_stellar_object_id) {
-    return false;
-  }
-  // TODO(decomp) skipped: the disabled range gate comparing
-  // ShipClassDef +0xa10 against ShotState +0x42 (per-shot scatter range,
-  // 0xffff for non-turret modes) - the field semantics are still provisional.
+  const bool owner_valid = ValidShipSlot(shot.owner_ship_slot);
+  if (!owner_valid) {
+    // Ownerless shots (stellar defense batteries, owner_ship_slot -1). Ghidra
+    // 0x00427435: with a valid recorded target slot the shot hits only the ship
+    // occupying that slot, or a ship whose target_stellar_object_id matches it;
+    // an invalid recorded slot accepts any target. The owner-based gates are
+    // skipped and control joins the original's common tail below.
+    const std::int16_t recorded_target = shot.target_ship_slot;
+    if (recorded_target >= 0 && recorded_target < 0x40 &&
+        target_slot != recorded_target &&
+        target.target_stellar_object_id != recorded_target) {
+      return false;
+    }
+  } else {
+    const std::int16_t owner_slot = shot.owner_ship_slot;
+    const Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_slot));
+    // Clean-room guard: the original relies on shot lifetime to drop dead or
+    // departed owners; the explicit checks keep stale shots from damaging
+    // across systems in this simplified model.
+    if (owner.current_system_id != shot.system_id || IsDestroyed(owner)) {
+      return false;
+    }
+    if (owner.squad_leader_ship_slot != -1 &&
+        target.squad_leader_ship_slot != -1 &&
+        target.squad_leader_ship_slot == owner.squad_leader_ship_slot) {
+      return false;
+    }
+    if (owner.faction_or_government_id >= 0 &&
+        owner.faction_or_government_id < 0x100 &&
+        target.faction_or_government_id == owner.faction_or_government_id) {
+      return false;
+    }
+    if (owner.target_stellar_object_id != -1 &&
+        target.target_stellar_object_id == owner.target_stellar_object_id) {
+      return false;
+    }
+    // TODO(decomp) skipped: the disabled range gate comparing
+    // ShipClassDef +0xa10 against ShotState +0x42 (per-shot scatter range,
+    // 0xffff for non-turret modes) - the field semantics are still provisional.
 
-  const bool owner_chain_to_player = OwnerChainReachesPlayer(state, owner_slot);
-  if (owner_chain_to_player) {
-    // Player-aligned fire never hits the player's own escort chain,
-    // xenophobic (0x40) owner governments, immaterial (0x08) target
-    // governments, or booty-flagged (0x100) dude targets.
-    const std::int16_t target_leader = target.squad_leader_ship_slot;
-    const bool target_is_player_escort =
-        target_slot != 0 && ValidShipSlot(target_leader) &&
-        state.ShipAt(static_cast<std::size_t>(target_leader))
-                .squad_leader_ship_slot == 0;
-    if (target_is_player_escort) {
+    const bool owner_chain_to_player =
+        OwnerChainReachesPlayer(state, owner_slot);
+    if (owner_chain_to_player) {
+      // Player-aligned fire never hits the player's own escort chain,
+      // xenophobic (0x40) owner governments, immaterial (0x08) target
+      // governments, or booty-flagged (0x100) dude targets.
+      const std::int16_t target_leader = target.squad_leader_ship_slot;
+      const bool target_is_player_escort =
+          target_slot != 0 && ValidShipSlot(target_leader) &&
+          state.ShipAt(static_cast<std::size_t>(target_leader))
+                  .squad_leader_ship_slot == 0;
+      if (target_is_player_escort) {
+        return false;
+      }
+      if (HasGovernmentFlag(state, owner, 0x0040U)) {
+        return false;
+      }
+      if (HasGovernmentFlag(state, target, 0x0008U)) {
+        return false;
+      }
+      const DudeDef *target_dude = DudeFor(state, target);
+      if (target_dude != nullptr &&
+          (target_dude->booty_flags & 0x0100U) != 0U) {
+        return false;
+      }
+      // Owner-side booty gate: when the owner has no valid dude record, the
+      // owner's squad leader's dude record is consulted instead.
+      const DudeDef *owner_dude = DudeFor(state, owner);
+      if (owner_dude == nullptr &&
+          ValidShipSlot(owner.squad_leader_ship_slot)) {
+        owner_dude = DudeFor(state,
+                             state.ShipAt(static_cast<std::size_t>(
+                                 owner.squad_leader_ship_slot)));
+      }
+      if (owner_dude != nullptr && (owner_dude->booty_flags & 0x0100U) != 0U) {
+        return false;
+      }
+    }
+    // Ghidra 0x00415e60 Ship_IsShipInAiState0x10 runs inline here and in the
+    // beam-impact guard below.
+    if (owner_slot > 0 && owner.ai_state_code == 0x10) {
       return false;
     }
-    if (HasGovernmentFlag(state, owner, 0x0040U)) {
-      return false;
-    }
-    if (HasGovernmentFlag(state, target, 0x0008U)) {
-      return false;
-    }
-    const DudeDef *target_dude = DudeFor(state, target);
-    if (target_dude != nullptr && (target_dude->booty_flags & 0x0100U) != 0U) {
-      return false;
-    }
-    // Owner-side booty gate: when the owner has no valid dude record, the
-    // owner's squad leader's dude record is consulted instead.
-    const DudeDef *owner_dude = DudeFor(state, owner);
-    if (owner_dude == nullptr && ValidShipSlot(owner.squad_leader_ship_slot)) {
-      owner_dude = DudeFor(
-          state,
-          state.ShipAt(static_cast<std::size_t>(owner.squad_leader_ship_slot)));
-    }
-    if (owner_dude != nullptr && (owner_dude->booty_flags & 0x0100U) != 0U) {
-      return false;
-    }
-  }
-  // Ghidra 0x00415e60 Ship_IsShipInAiState0x10 runs inline here and in the
-  // beam-impact guard below.
-  if (owner_slot > 0 && owner.ai_state_code == 0x10) {
-    return false;
   }
 
-  // The target's planet-type capability bit must agree with weapon
-  // flags_secondary bit 0x400.
+  // Common tail reached by owned and ownerless shots: the target's planet-type
+  // capability bit must agree with weapon flags_secondary bit 0x400.
   const ShipClass *target_class = ShipClassFor(state, target);
   if (target_class == nullptr ||
       ((target_class->capability_flags ^ weapon->flags_secondary) & 0x0400U) !=
@@ -1626,13 +1646,21 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     return false;
   }
   // Government aggro flag (0x40): NPC targets carrying it are only hittable
-  // by owners that are neither the player nor player escorts.
-  if (target_slot != 0 && HasGovernmentFlag(state, target, 0x0040U) &&
-      (owner_slot == 0 || (ValidShipSlot(owner.squad_leader_ship_slot) &&
-                           owner.squad_leader_ship_slot == 0))) {
-    return false;
+  // by owners that are neither the player nor player escorts. An ownerless
+  // shot (owner_ship_slot -1) falls through this gate in the original.
+  if (target_slot != 0 && HasGovernmentFlag(state, target, 0x0040U)) {
+    const std::int16_t owner_slot = shot.owner_ship_slot;
+    if (owner_slot == 0) {
+      return false;
+    }
+    if (ValidShipSlot(owner_slot) && owner_slot > 0 &&
+        state.ShipAt(static_cast<std::size_t>(owner_slot))
+                .squad_leader_ship_slot == 0) {
+      return false;
+    }
   }
-  if (SharesSquadRoot(state, target_slot, owner_slot)) {
+  if (owner_valid &&
+      SharesSquadRoot(state, target_slot, shot.owner_ship_slot)) {
     return false;
   }
   return true;
