@@ -1,4 +1,5 @@
 add_executable(evnova_tests
+    asteroid_scoop_test.cpp
     asteroid_test.cpp
     cargo_test.cpp
     cicn_test.cpp

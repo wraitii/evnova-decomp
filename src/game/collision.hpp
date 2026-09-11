@@ -88,6 +88,14 @@ void NovaCollision_ResolveShipHitFromWeaponSlot(
 // (0x00436f70) contact for each shot that did not hit a ship.
 void NovaWeapon_ResolveDirectShotCollisions(GameState &state);
 
+// Ghidra Ship_HandleSpritePairCollision (0x004374f0), freeflight-object arm:
+// the mining-scoop collection pass. Every ship pixel-mask-overlaps the
+// persistent freeflight resource-boxes; the player (mining_scoop_active) or an
+// NPC in AI state 0x11 collects one unit of the object's cargo (extra 0..5) or
+// junk (extra 1000..1127, player only) payload, retiring the object. The
+// player pickup re-derives the scoop latch through the cargo-capacity gate.
+void NovaWeapon_ResolveFreeflightScoop(GameState &state);
+
 // Public test seam the direct-contact pass uses: resolves each live entity's
 // current-frame pixel mask from the non-SDL SpriteMaskStore (ships via the
 // class sh\x8an base sheet, shots via weapon sprite+3000, asteroids via

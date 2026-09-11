@@ -1245,8 +1245,8 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   // DAT_00575e60).
   t.wander_speed_multiplier =
       static_cast<float>(ReadBeI16(bytes, 0x02)) * 0.01F;
-  t.field_0x04 = ReadBeI16(bytes, 0x04);
-  t.field_0x02 = ReadBeI16(bytes, 0x06);
+  t.yield_type = ReadBeI16(bytes, 0x04);
+  t.yield_qty = ReadBeI16(bytes, 0x06);
   t.field_0x0c = ReadBeI16(bytes, 0x08);
   // Colour: the loader squashes the three RGB565-ish bytes at +0x0a to a
   // 15-bit tint: red=byte[0xc]>>3, green=byte[0xb]>>3, blue=byte[0xa]>>3

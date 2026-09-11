@@ -1,11 +1,13 @@
 #include "collision.hpp"
 
 #include "asteroid.hpp"
+#include "freeflight_objects.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "impact_effects.hpp"
 #include "mission.hpp"
 #include "mission_script.hpp"
+#include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight.hpp"
@@ -32,6 +34,10 @@ constexpr float kPlayerAggroPerHitScale = 1.5F; // DAT_00575240
 constexpr float kProximitySpanFraction =
     0.333005F; // DAT_00575338: blast + ship half-span * ~1/3
 constexpr std::int16_t kShipClassInvalidSentinel = 0x2ff;
+// Clean-room circle radius for a freeflight resource-box when no sprite mask
+// is available (the original scoop arm always uses the opaque-pixel test).
+// Only used when the spin set cannot be decoded (e.g. archive-free tests).
+constexpr int kFreeflightScoopCircleRadiusPx = 16;
 // Disable-transition armor pin (Shot_ResolveShipHitFromWeapon 0x0041a4b0):
 // _DAT_00575238 = 1/3 and _DAT_00575208 = 0.1 for capability-flags 0x10 hulls,
 // both +1.0 (_DAT_00575230).
@@ -396,6 +402,31 @@ void RefreshCollisionMasks(GameState &state) {
     const int frame =
         std::clamp(static_cast<int>(std::lround(wander)), 0, frame_count - 1);
     BindEntityMask(asteroid.collision_mask,
+                   store.Spin(spin_id, frame),
+                   frame,
+                   /*swapped_axes=*/true);
+  }
+
+  // Freeflight objects: the mining-scoop arm of Ship_HandleSpritePairCollision
+  // (0x004374f0) tests each object's current spin frame against the ship. The
+  // renderer selects `round(frame_counter) % frame_count` from the 500+index
+  // spin set, so bind the same frame here.
+  for (FreeflightObjectState &object : state.freeflight_objects) {
+    if (object.lifetime_ticks < 0.0F || object.system_id != system_id) {
+      continue;
+    }
+    const std::uint16_t spin_id =
+        NovaFreeflightSpriteSetId(object.sprite_set_index);
+    const int frame_count = store.SpinFrameCount(spin_id);
+    if (frame_count <= 0) {
+      continue;
+    }
+    int frame = static_cast<int>(std::lround(object.frame_counter));
+    frame %= frame_count;
+    if (frame < 0) {
+      frame += frame_count;
+    }
+    BindEntityMask(object.collision_mask,
                    store.Spin(spin_id, frame),
                    frame,
                    /*swapped_axes=*/true);
@@ -1045,11 +1076,19 @@ void ResolveShotCollisionHit(GameState &state,
 }
 
 // Ghidra Weapon_SpawnWeaponImpactEffectPackage (0x00462550), asteroid arm:
-// a broken asteroid spawns junk freeflight objects, a debris particle burst,
-// its destruction area effect, and splits into child asteroids from its def
-// row (child types +0x06/+0x08, count derived from +0x0a), then deactivates.
-// TODO(decomp) skipped: junk freeflight objects (row +0x02 count, +0x04 type;
-// no freeflight pool yet) and the debris SWParticle burst (row +0x0c).
+// a broken asteroid spawns YieldQty resource-box freeflight objects, a debris
+// particle burst, its destruction area effect, and splits into child asteroids
+// from its def row (child types +0x06/+0x08, count derived from +0x0a), then
+// deactivates. TODO(decomp) skipped: the debris SWParticle burst (row +0x0c);
+// because that burst is skipped the child/yield RNG sequence diverges from the
+// original even though the distributions match.
+//
+// Resource-boxes: when YieldQty (row +0x02) > 0 the original rolls
+// `(NovaRandom_Range(0x65) + 0x32) * YieldQty * 0.01`, rounds it, and spawns
+// that many persistent freeflight objects at the asteroid position carrying
+// YieldType (row +0x04) with spin set `(wander_type >> 2) + 1` (501..504, one
+// per asteroid material). YieldType 0..5 is standard cargo and 1000..1127 is a
+// j\xfcnk id; Ship_HandleSpritePairCollision's scoop arm grants one unit of it.
 void ResolveAsteroidDestructionPackage(GameState &state,
                                        AsteroidState &asteroid) {
   const AsteroidDef *def = state.scenario.AsteroidType(
@@ -1057,6 +1096,22 @@ void ResolveAsteroidDestructionPackage(GameState &state,
   if (def == nullptr) {
     asteroid.active = false;
     return;
+  }
+  // Resource-boxes first, matching the original's field order before the
+  // area effect and the child-asteroid split.
+  if (def->yield_qty > 0) {
+    const int roll = std::uniform_int_distribution<int>{0, 0x64}(state.rng);
+    const int yield_boxes = static_cast<int>(
+        std::lround(static_cast<float>(roll + 0x32) *
+                    static_cast<float>(def->yield_qty) * 0.01F));
+    for (int i = 0; i < yield_boxes; ++i) {
+      NovaFreeflight_SpawnAtPosition(
+          state,
+          asteroid.target_pos_x,
+          asteroid.target_pos_y,
+          def->yield_type,
+          static_cast<std::int16_t>((asteroid.wander_type >> 2) + 1));
+    }
   }
   if (def->field_0x10 != -1) {
     NovaEffects_SpawnAreaImpact(state,
@@ -1566,6 +1621,81 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
     }
   }
   RemoveConsumedShots(state);
+}
+
+// Ghidra Ship_HandleSpritePairCollision (0x004374f0), freeflight-object arm:
+// the sprite layer pairs every ship with every freeflight object; an eligible
+// ship that opaque-pixel-overlaps a *persistent* object collects it. A ship is
+// eligible when it is the player with the mining_scoop_active latch set or an
+// NPC in AI state 0x11. Collection retires the object (lifetime -1, sprite
+// hidden) and grants one unit of its payload: `extra` 0..5 adds to that
+// commodity bin, and (player only) 1000..1127 adds to the matching j\xfcnk
+// count. The original then sets g_playerInventoryAndLoadoutDirty and calls
+// Outfit_RecomputeOutfitDerivedState, whose mining-scoop arm clears the latch
+// once cargo+junk reaches fleet capacity; the port routes that through
+// OutfitMarkStatsDirty. Unlike the shot arm there is no bounding-circle
+// fallback: the original always runs Sprite_TestPixelMaskOverlap. The clean
+// room still falls back to the circle only when a mask cannot be decoded.
+void NovaWeapon_ResolveFreeflightScoop(GameState &state) {
+  RefreshCollisionMasks(state);
+  const std::int16_t system_id = state.player.current_system_id;
+  for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.current_system_id != system_id) {
+      continue;
+    }
+    const bool player_ship = ship.ship_instance_id == 0;
+    for (FreeflightObjectState &object : state.freeflight_objects) {
+      if (object.lifetime_ticks < 0.0F || !object.persistent ||
+          object.system_id != system_id) {
+        continue;
+      }
+      // Re-read the latch per object: the original re-runs the outfit
+      // recompute after every pickup, so a full hold stops mid-pass.
+      const bool eligible = player_ship ? state.player.mining_scoop_active
+                                        : ship.ai_state_code == 0x11;
+      if (!eligible) {
+        break;
+      }
+      if (!CollisionMask_TestContact(ship.collision_mask,
+                                     ship.pos_x,
+                                     ship.pos_y,
+                                     static_cast<int>(std::lround(std::max(
+                                         0.0F, ship.collision_radius_px))),
+                                     object.collision_mask,
+                                     object.pos_x,
+                                     object.pos_y,
+                                     kFreeflightScoopCircleRadiusPx,
+                                     /*allow_pixel_mask=*/true)) {
+        continue;
+      }
+      object.lifetime_ticks = -1.0F;
+      const std::int16_t payload = object.extra;
+      if (payload >= 0 && payload <= 5) {
+        if (player_ship) {
+          state.inventory.cargo_bins[static_cast<std::size_t>(payload)] =
+              static_cast<std::int16_t>(
+                  state.inventory
+                      .cargo_bins[static_cast<std::size_t>(payload)] +
+                  1);
+        }
+        // TODO(decomp): NPC cargo bins live on the original ShipState
+        // (+0x7a) but the clean-room does not model NPC holds; the NPC arm is
+        // also gated by AI state 0x11, which is not reconstructed yet.
+      } else if (player_ship && payload >= 1000 && payload < 0x468) {
+        const std::size_t index = static_cast<std::size_t>(payload - 1000);
+        if (index < state.inventory.junk_counts.size()) {
+          state.inventory.junk_counts[index] =
+              static_cast<std::int16_t>(state.inventory.junk_counts[index] + 1);
+        }
+      }
+      if (player_ship) {
+        // g_playerInventoryAndLoadoutDirty + Outfit_RecomputeOutfitDerivedState
+        // (0x0046d4b0), including the cargo-capacity mining-scoop gate.
+        OutfitMarkStatsDirty(state);
+      }
+    }
+  }
 }
 
 // Ghidra Shot_ResolveCollisions (0x00437e20) stellar arm. Planet-type weapons

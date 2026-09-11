@@ -916,8 +916,15 @@ struct FreeflightObjectState {
   std::int16_t spin_rate = 0; // +0x20
   std::int16_t extra = 0;     // +0x22 (SpawnAtPosition payload id)
   // Persistent latch: set by the at-position variant (launched drones /
-  // shuttles, 0x0041fb50) and clear for the jettison pods.
+  // shuttles, 0x0041fb50) and clear for the jettison pods. The freeflight
+  // scoop arm of Ship_HandleSpritePairCollision (0x004374f0) only collects
+  // objects with this set, so asteroid YieldType resource-boxes are scoopable
+  // while jettisoned cargo pods are not.
   bool persistent = false; // +0x24
+
+  // Per-frame opaque-pixel mask for the object's current spin frame, resolved
+  // by RefreshCollisionMasks (collision.cpp) for the mining-scoop overlap.
+  CollisionMaskBinding collision_mask;
 
   // Pool size for the 64-slot FreeflightObjectState table.
   static constexpr std::size_t kPoolSize = 0x40;

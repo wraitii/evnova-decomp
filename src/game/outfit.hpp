@@ -238,6 +238,14 @@ NovaOutfit_ComputeIonizationDecayRate(const GameState &state, const Ship &ship);
 [[nodiscard]] bool NovaOutfit_HasMiningScoopOutfit(const GameState &state,
                                                    const Ship &ship);
 
+// Ghidra Outfit_RecomputeOutfitDerivedState (0x0046d4b0) mining-scoop arm:
+// re-derive the player's mining_scoop_active latch from the owned scoop outfit
+// and the fleet cargo capacity. The original clears the latch when cargo+junk
+// reaches or exceeds capacity, so a full hold stops collecting freeflight
+// resource-boxes; the latch is re-armed once space frees up. Called from the
+// inventory dirty hook and immediately after a scoop pickup.
+void NovaOutfit_RefreshPlayerMiningScoopActive(GameState &state);
+
 // Marks the effective-stats cache dirty. Called by the inventory mutation
 // helpers; the spaceflight loop reads cached stats to avoid re-scanning the
 // 0x200-entry outfit table every frame.
