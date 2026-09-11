@@ -89,6 +89,36 @@ struct ShipVisualDescriptor {
   std::uint16_t engine_glow_x_size = 0;  // GlowXSize (+0x1a)
   std::uint16_t engine_glow_y_size = 0;  // GlowYSize (+0x1c)
 
+  // Running-lights layer (Bible LightImageID). Loader 0x004b4ee0 reads
+  // image/mask/x/y at +0x1e/+0x20/+0x22/+0x24 and binds it to the per-class
+  // light sprite set; Ship_UpdateVisualState (0x00428340) drives its
+  // brightness with the BlinkMode fields below. A non-positive image id means
+  // the class has no running lights.
+  std::int16_t light_image_id = 0; // LightImageID (+0x1e)
+  std::int16_t light_mask_id = 0;  // LightMaskID (+0x20)
+  std::uint16_t light_x_size = 0;  // LightXSize (+0x22)
+  std::uint16_t light_y_size = 0;  // LightYSize (+0x24)
+  // Weapon-effects layer (Bible WeapImageID). Loader +0x26/+0x28/+0x2a/+0x2c;
+  // flashed to full brightness by Weapon_FirePlayerWeaponBank /
+  // Weapon_FireShipWeapons when the fired weapon carries flags_secondary 0x200,
+  // then faded by Ship_UpdateVisualState at weapon_glow_decay_rate.
+  std::int16_t weapon_image_id = 0; // WeapImageID (+0x26)
+  std::int16_t weapon_mask_id = 0;  // WeapMaskID (+0x28)
+  std::uint16_t weapon_x_size = 0;  // WeapXSize (+0x2a)
+  std::uint16_t weapon_y_size = 0;  // WeapYSize (+0x2c)
+
+  // Running-lights blink program. Ghidra's loader names sh\x8an +0x36..+0x3e
+  // gun/turret/guided exit positions, but every consumer is the light blink
+  // state machine in Ship_UpdateVisualState (0x00428340) and the loader clamps
+  // them exactly like Bible BlinkMode 2/3 intensities (0x1f), so the real
+  // fields are BlinkMode + BlinkValA..D (Bible order). The gun/turret/guided
+  // exit geometry actually begins at +0x48 (decoded as ShipClass.muzzle_*).
+  std::int16_t blink_mode = 0;  // BlinkMode (+0x36)
+  std::int16_t blink_val_a = 0; // BlinkValA (+0x38), min intensity / off-time
+  std::int16_t blink_val_b = 0; // BlinkValB (+0x3a), max intensity / on-time
+  std::int16_t blink_val_c = 0; // BlinkValC (+0x3c), blinks per group / delay
+  std::int16_t blink_val_d = 0; // BlinkValD (+0x3e), group delay / decay rate
+
   // Per-turret-group weapon-exit geometry decodes once per class into
   // ShipClass (scenario_data.hpp, muzzle_* fields), using the loader-verified
   // strides from the 0x004b4ee0 copy map and the barrel indexing in
@@ -128,6 +158,18 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship);
 // Runs the once-per-wreck bookkeeping and deactivates the hull; exported for
 // the player-ship death path, which ticks its own presentation timer.
 void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship);
+
+// Ghidra 0x00428340 Ship_UpdateVisualState, weapon-effects + running-lights
+// slice (all hulls). Decays the weapon-effects sprite flash level set at the
+// fire site (Weapon_FirePlayerWeaponBank / Weapon_FireShipWeapons, gated on
+// the WeaponDef flags_secondary 0x200 muzzle-flash bit) by the class's
+// weapon_glow_decay_rate (WeapDecay * 0.003484), and advances the running-light
+// blink state machine from the class's BlinkMode / BlinkValA..D. The results
+// (Ship.weapon_sprite_flash_level, Ship.light_intensity, both 0..32) feed the
+// weapon-effects and light sprite layers in the renderer.
+void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
+                                               Ship &ship,
+                                               float elapsed_ticks);
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, cloak-fade slice (all hulls,
 // including the player). Advances the fade presentation state the gameplay

@@ -189,3 +189,60 @@ alternate sheet used by the Flags 0x0002 set-cycling animation (Ghidra
 appended to the base rows. The clean-room renderer mirrors this in
 `ComposeShipFrameIndex` (spaceflight_view.cpp); `ShipClass.sprite_behavior_
 flags` is decoded in scenario_data.cpp from sh\x8an +0x2e.
+
+## Running lights + weapon effects (ported 2026)
+
+Two more per-class layers from the sh\x8an descriptor are now rendered over the
+hull in `SpaceflightView` (player and NPCs alike):
+
+| role | sh\x8an fields | ShipClass / Ship state | driver |
+|------|----------------|------------------------|--------|
+| running lights | LightImageID/mask/x/y +0x1e/+0x20/+0x22/+0x24 | `ShipClass.light_image_id`, `blink_mode`, `blink_val_a..d`; `Ship.light_intensity` (+0x60), `light_blink_phase` (+0xC8D6), `light_blink_timer` (+0xC8EC) | `NovaShip_TickWeaponSpriteAndRunningLights` |
+| weapon effects | WeapImageID/mask/x/y +0x26/+0x28/+0x2a/+0x2c, WeapDecay +0x32 | `ShipClass.weapon_glow_decay_rate` (WeapDecay * 0.003484), `Ship.weapon_sprite_flash_level` (+0xC8E8) | same tick + fire sites |
+
+The loader's names for sh\x8an +0x36..+0x3e are wrong: they are Bible
+BlinkMode/BlinkValA..D, not gun/turret/guided exit positions. Ground truth is
+the only consumer, the blink machine in `Ship_UpdateVisualState` (0x00428340),
+plus the loader's 0x1f intensity clamps for BlinkMode 2/3. The real exit
+geometry begins at +0x48 (already decoded as `ShipClass.muzzle_*`).
+
+* `Ship.weapon_sprite_flash_level` is raised to 32 at the fire site when the
+  fired WeaponDef carries `flags_secondary` 0x200
+  (`Weapon_FirePlayerWeaponBank` 0x00455150 / `Weapon_FireShipWeapons`
+  0x00414550) and decays by `weapon_glow_decay_rate` per normalized 30 Hz tick
+  while positive; an overshoot below -1.0 clamps to -1.0. It is independent of
+  WeapDecay 0 (which never decays, matching the original).
+* `Ship.light_intensity` (the original's unnamed float at ShipState +0x60) is
+  driven by the Bible `BlinkMode` program: 0/-1 steady full, 1 square wave
+  (BlinkValA off, B on, C blinks/group, D group delay), 2 triangle pulse
+  (A min, B rise x100, C max, D fall x100), 3 random pulse (A/B min/max, C
+  delay). It is only run for classes with a light layer.
+* Both tick for every active current-system hull: `NovaShip_TickWeaponSpriteAnd
+  RunningLights` is called beside the cloak-fade slice in `Stub_HandleShips`
+  (NPCs) and after the player's destruction slice in Frame_TickSystems scope 10.
+
+Rendering: the light/weapon sheets share the base rotation grid
+(`frames_per_rotation * base_set_count`) and are drawn over the hull/glow at
+the same composed frame index. The original writes `round(intensity)` into the
+Sprite's RGB tint channels at brightness 32 and draws them through
+`BlitPixel_TintRgb15Span` (0x004736c0), whose brightness-32 branch computes
+`dst + src*intensity/32` — i.e. additive. The port passes
+`SpriteDrawOptions.additive` (SDL_BLENDMODE_ADD) with `alpha_mod =
+intensity/32` for the engine glow, running lights and weapon effects alike.
+Visibility gates match the original: the light layer hides at intensity <= 1.0,
+the weapon layer at <= 0.
+
+One original nuance is not reproduced: `BlitPixie_BlitRectRawCopy` (0x004711e0)
+fast-paths the case `tint==0x20 && brightness==0x20 && distance_brightness==0`
+to a plain opaque copy instead of the additive formula. That is exactly a
+full-intensity (32) effect layer in a no-murk system, so the original draws
+those as a normal overlay while the port always adds. The base hull is not
+affected: it uses `brightness = ShipClassDef.base_transparency` and
+`tint = Ship_ResolveShipTintColor() - 0x20`, so an opaque hull
+(brightness 0) is an ordinary tinted copy.
+
+Not yet honored: the class-level load gates `g_pref_running_lights` /
+`g_pref_weapon_effects` (the preferences are not on `GameState`, so both layers
+load unconditionally; the same divergence already applies to `g_pref_engine_
+glows`). The per-ship distance-brightness/space-color tint the original applies
+to these layers is likewise not modelled (murk fog is a system-level TODO).

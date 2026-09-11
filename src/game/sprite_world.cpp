@@ -344,11 +344,16 @@ void BlitFrame(SDL_Renderer *renderer,
     SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR);
   }
 
+  // Effect layers (glow / lights / weapon flash) composite additively like the
+  // original's BlitPixel_TintRgb15Span (dst + src*intensity); everything else
+  // stays ordinary alpha. Select the mode for this draw only so shared
+  // textures are not left additively blended.
+  const SDL_BlendMode blend =
+      opts.additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND;
+  SDL_SetTextureBlendMode(texture.get(), blend);
   if (opts.alpha_mod < 1.0F) {
-    // Blend mode gate mirrors the glow layer: dim the texture by the requested
-    // intensity, restore opaque after (kept per-draw so shared textures are not
-    // left alpha-modded). Ghidra: the sprite effect color / alpha blending the
-    // original applies to the glow layer.
+    // Multiply the source by the requested intensity; restore after (kept
+    // per-draw so shared textures are not left alpha-modded).
     const std::uint8_t alpha = static_cast<std::uint8_t>(
         std::clamp(opts.alpha_mod, 0.0F, 1.0F) * 255.0F);
     SDL_SetTextureAlphaMod(texture.get(), alpha);
@@ -357,6 +362,7 @@ void BlitFrame(SDL_Renderer *renderer,
   } else {
     SDL_RenderTexture(renderer, texture.get(), nullptr, &dest);
   }
+  SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
 }
 
 // Resolves a frame image's SDL texture + native size: asset-backed images use

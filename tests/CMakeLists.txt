@@ -21,6 +21,7 @@ add_executable(evnova_tests
     scenario_data_test.cpp
     ship_ai_test.cpp
     ship_spawn_test.cpp
+    ship_visual_test.cpp
     smoke_test.cpp
     sprite_test.cpp
     sprite_mask_test.cpp

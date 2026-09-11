@@ -389,6 +389,26 @@ struct ShipClass {
   // (Ship_AllocateShipSlotInSystem 0x004254b0,
   // Weapon_SpawnShipFromCarrierBayWeapon 0x0041e640).
   std::int16_t combat_state_init_range = 0;
+  // Ghidra ShipClassDef.weapon_glow_decay_rate <- sh\x8an WeapDecay +0x32
+  // times g_ship_weapon_glow_decay_scale (0x00575ab8 = 0.003484), the per-tick
+  // fade rate of the weapon-effects sprite flash (Ship_UpdateVisualState
+  // 0x00428340). 0 for a class without the weapon-effects layer.
+  float weapon_glow_decay_rate = 0.0F;
+  // Ghidra ShipClassDef BlinkMode/BlinkValA..D <- sh\x8an +0x36..+0x3e. The
+  // running-lights blink program consumed by Ship_UpdateVisualState
+  // 0x00428340 (Bible BlinkMode: 0/-1 steady, 1 square, 2 triangle,
+  // 3 random). The DB names these gun/turret/guided exit positions, but the
+  // only consumers are the blink machine and the loader's 0x1f intensity
+  // clamps; the real exit geometry starts at +0x48 (muzzle_* below).
+  std::int16_t blink_mode = 0;
+  std::int16_t blink_val_a = 0;
+  std::int16_t blink_val_b = 0;
+  std::int16_t blink_val_c = 0;
+  std::int16_t blink_val_d = 0;
+  // Ghidra ShipClassDef light-sprite resource id <- sh\x8an LightImageID
+  // (+0x1e). Non-positive means the class has no running-lights layer and
+  // Ship_UpdateVisualState skips the blink machine.
+  std::int16_t light_image_id = 0;
   // Ghidra ShipClassDef +0xa08: zero-based id of the class whose base sprite
   // this class cloned (0x004b4ee0 clone arm: the first EARLIER class in load
   // order whose sh\x8an BaseImageID matches; -1 when the class builds its own

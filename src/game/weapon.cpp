@@ -1838,9 +1838,13 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
       continue;
     }
     ++volley_fired;
-    // flags_secondary 0x200: muzzle sprite flash to level 32. The port does
-    // not model the player weapon-sprite flash overlay yet.
-    // TODO(decomp(0x00455150)) skipped: weapon_sprite_flash_level.
+    // flags_secondary 0x200: muzzle sprite flash to level 32. The renderer
+    // draws the weapon-effects layer at this brightness and
+    // NovaShip_TickWeaponSpriteAndRunningLights fades it (Ghidra
+    // Weapon_FirePlayerWeaponBank 0x00455150).
+    if ((w->flags_secondary & 0x200U) != 0U) {
+      player.weapon_sprite_flash_level = 32.0F;
+    }
 
     // Per-shot cost (skipped for burst-counted weapons, flags_tertiary 0x1;
     // they pay once per burst-cycle wrap below). Energy weapons (cost -1) are
@@ -2500,6 +2504,11 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
 
   if (shots_fired < 1) {
     return;
+  }
+  // flags_secondary 0x200: muzzle sprite flash to level 32 (Ghidra
+  // Weapon_FireShipWeapons 0x00414550, once per volley after the burst loop).
+  if ((weapon->flags_secondary & 0x200U) != 0U) {
+    ship.weapon_sprite_flash_level = 32.0F;
   }
   // A volley fired (sVar9 >= 1 in Weapon_FireShipWeapons): queue the fire
   // sound, sourced at this ship, for the spaceflight loop. The original plays

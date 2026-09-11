@@ -259,6 +259,10 @@ private:
   // rotation grid. Empty when the class has none.
   SpriteAsset ship_;
   SpriteAsset glow_;
+  // Running-lights (sh\x8an LightImageID) and weapon-effects (WeapImageID)
+  // layers, sharing the base rotation grid. Empty when the class has none.
+  SpriteAsset light_;
+  SpriteAsset weapon_;
   // Rotation frames for one full revolution (sh\x8an FramesPer, default 36);
   // frame count = base_set_count * frames_per_rotation.
   int ship_frames_per_rotation_ = 36;
@@ -270,6 +274,9 @@ private:
   // Whether this class's sh\x8an descriptor named a glow layer at all (so
   // EnsureShipSprite does not retry a missing sheet every frame).
   bool has_glow_ = false;
+  // Likewise for the light/weapon-effects layers.
+  bool has_light_ = false;
+  bool has_weapon_ = false;
   // Last glow-draw gate result, so transitions (on/off) can be logged once per
   // change rather than per frame (diagnostic for the flight render).
   bool glow_last_drawn_ = false;
@@ -277,14 +284,18 @@ private:
   // One loaded NPC ship's heading-rotation sprite data: the base hull sheet and
   // (when the class's sh\x8an descriptor names one) the engine-glow layer,
   // sharing the same rotation grid. The glow is drawn over the base with a
-  // thrust-driven alpha read from the ship's engine_glow_level (driven in
-  // NovaShip_IntegrateNpcMovement); a class without a glow sheet just draws
-  // base-only. Cached per ship-class resource id so each distinct class in the
-  // current system is decoded/uploaded once per session.
+  // thrust-driven additive intensity read from the ship's engine_glow_level
+  // (driven in NovaShip_IntegrateNpcMovement); a class without a glow sheet
+  // just draws base-only. Cached per ship-class resource id so each distinct
+  // class in the current system is decoded/uploaded once per session.
   struct NpcShipSprite {
     SpriteAsset base;
     SpriteAsset glow;      // engine-glow layer (empty when the class has none)
+    SpriteAsset light;     // running-lights layer (empty when absent)
+    SpriteAsset weapon;    // weapon-effects layer (empty when absent)
     bool has_glow = false; // whether a glow layer is present/loaded
+    bool has_light = false;
+    bool has_weapon = false;
     int frames_per_rotation = 36;
     // Sprite rows after the alt-sheet append + the class's sh\x8an Flags
     // (row 1/2 = bank left/right when Flags & 1).
