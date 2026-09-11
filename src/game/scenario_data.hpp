@@ -405,6 +405,13 @@ struct ShipClass {
   // (`RefreshCollisionMasks`, src/game/collision.cpp) so the collision layer
   // does not need to re-parse the descriptor every frame. 0 = not decoded.
   std::uint16_t base_image_id = 0;
+  // Ghidra sh\x8an +0x06/+0x08 (BaseXSize/BaseYSize): one hull frame's pixel
+  // dimensions. Ship_UpdateVisualState (0x00428340) reads the live
+  // Sprite_GetFrameFullHeight for the death debris-puff scatter, so the port
+  // keeps the decoded frame height here (the collision mask exists only while
+  // a frame is bound).
+  std::uint16_t base_x_size = 0;
+  std::uint16_t base_y_size = 0;
   // Weapon-exit (muzzle) geometry, decoded from the sh\x8an by the scenario
   // loader (mirrors the ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0
   // copy into ShipClassDef +0xa42..+0xab0). EVN ships have up to four turret

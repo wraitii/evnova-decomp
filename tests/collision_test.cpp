@@ -362,8 +362,10 @@ TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
   CHECK(state.ShipAt(1).armor_points == Catch::Approx(-15.0F));
   CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(-1.0F));
   CHECK(state.ShipAt(1).destruction_visual_triggered);
-  REQUIRE(state.impact_effect_instances[0].effect_id == 0);
-  CHECK(state.impact_effect_instances[0].anim_time == Catch::Approx(0.0F));
+  // The original hit path only records the armor transition: the debris puff
+  // belongs to Ship_HandleShip and the Explode1/Explode2 impacts belong to
+  // Ship_UpdateVisualState, so no effect is queued at the hit site.
+  CHECK(state.impact_effect_instances[0].effect_id == -1);
   CHECK(!NovaWeapon_CanProjectileHitShip(state, ActiveShot{}, 1));
 }
 
@@ -513,8 +515,8 @@ TEST_CASE("NPC destruction seeds the class DeathDelay timer once",
   state.ShipAt(1).armor_points = 1.0F;
   state.ShipAt(1).shield_points = 0.0F;
 
-  // Shot_ResolveShipHitFromWeapon seeds NPC timers (the x1 case); the player's
-  // timer is seeded by Ship_UpdateVisualState instead.
+  // Shot_ResolveShipHitFromWeapon leaves destruction as an armor state; the
+  // NPC timer (x1) is seeded by Ship_UpdateVisualState, not the hit site.
   ResolveShipHitFromWeapon(state,
                            /*target_slot=*/1,
                            state.ShipAt(1),
@@ -531,6 +533,8 @@ TEST_CASE("NPC destruction seeds the class DeathDelay timer once",
                            /*player_aggro_delta=*/0,
                            /*check_fire_restriction_transition=*/true);
   CHECK(NovaAiShip_IsDestroyed(state.ShipAt(1)));
+  CHECK(state.ShipAt(1).death_timer_active <= 0.0F);
+  NovaShip_TickDestroyedShipVisualState(state, state.ShipAt(1), 1.0F);
   CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(10.0F));
 }
 
@@ -591,6 +595,7 @@ TEST_CASE("armor-only destruction starts the player death sequence",
   NovaShip_TickDestroyedShipVisualState(
       state, state.player, /*elapsed_ticks=*/1.0F);
   CHECK(state.player.death_timer_active == Catch::Approx(24.0F));
+  CHECK(state.player.death_timer_seeded);
 }
 
 TEST_CASE("player wreck sheds Explode1 puffs then runs the Explode2 finale",
@@ -629,6 +634,30 @@ TEST_CASE("player wreck sheds Explode1 puffs then runs the Explode2 finale",
   NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
   CHECK(active_effects(state) == finale_before + 1);
   CHECK(!state.player.is_active);
+}
+
+TEST_CASE("death seed latch still runs the finale after a zero overshoot",
+          "[collision][ship_visual]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.ships[0].death_delay_frames = 30;
+  state.scenario.ships[0].destruction_effect_final = 2;
+  state.player.armor_points = -1.0F;
+
+  // Seed the 3x presentation once; the latch now owns the presentation.
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  REQUIRE(state.player.death_timer_active == Catch::Approx(90.0F));
+  REQUIRE(state.player.is_active);
+  REQUIRE(state.player.death_timer_seeded);
+
+  // A long frame on the normalized 30 Hz basis can step the timer from above
+  // the finale window to below zero. The original's constant 1.0 step never
+  // crosses zero, so it always hits 0<timer<=2.0; the latch must preserve that
+  // by running the finale instead of re-seeding a fresh 90-tick presentation.
+  state.player.death_timer_active = -0.5F;
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  CHECK(!state.player.is_active);
+  CHECK(state.player.destruction_finale_triggered);
 }
 
 TEST_CASE("inactive wreck holds the death screen until the -240 timer floor",

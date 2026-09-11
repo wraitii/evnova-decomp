@@ -88,9 +88,9 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data) {
 // Shot_SpawnAreaImpactEffects call at 0x00428d6a). While the
 // death timer is above the finale threshold the original rolls 1-in-1/2/4/8
 // by the 20/40/60-tick bands and, on a hit, spawns an Explode1 area impact at
-// a small random hull offset (randomly silent). The clean-room reads the ship
-// collision radius in place of the original's sprite shot half-span
-// (collision.cpp's established stand-in).
+// a small random hull offset (randomly silent). The scatter extent is the
+// class's decoded sh\x8an BaseYSize (the runtime sprite frame height) times
+// g_death_puff_offset_scale_f64 (0.25).
 void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
   // g_destroyed_finale_threshold (0x0057531c) = 2.0: at or below it the
   // finale owns the frame.
@@ -114,8 +114,17 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
   if (RollRandom(state, roll_bound) != 0) {
     return;
   }
-  int extent = static_cast<int>(
-      std::lround(std::max(0.0F, ship.collision_radius_px) * 0.25F));
+  // Original: round(Sprite_GetFrameFullHeight(ship) *
+  // g_death_puff_offset_scale_f64 (0.25, 0x00575330)). Use the decoded sh\x8an
+  // BaseYSize for the class; fall back to the collision envelope only for
+  // unit/test states whose ship table has no sprite descriptor.
+  const int sprite_height =
+      cls->base_y_size > 0
+          ? static_cast<int>(cls->base_y_size)
+          : static_cast<int>(
+                std::lround(std::max(0.0F, ship.collision_radius_px) * 2.0F));
+  int extent =
+      static_cast<int>(std::lround(static_cast<float>(sprite_height) * 0.25F));
   if (extent < 1) {
     extent = 1;
   }
@@ -159,19 +168,28 @@ void NovaShip_TickDestroyedShipVisualState(GameState &state,
   if (!NovaAiShip_IsDestroyed(ship)) {
     return;
   }
-  if (ship.death_timer_active <= 0.0F) {
-    float reseed = static_cast<float>(cls->death_delay_frames);
-    if (ship.ship_instance_id == 0) {
-      reseed *= 3.0F;
+  // The original seeds the presentation the first time it observes the
+  // destroyed state and then relies on its constant 1.0/frame countdown always
+  // landing inside the 0<timer<=2.0 finale window. The port advances the timer
+  // on the normalized 30 Hz basis (elapsed_ticks), where a long frame can step
+  // it below zero; the latch keeps that overshoot from re-seeding a fresh
+  // presentation and swallowing the Explode2 finale.
+  if (!ship.death_timer_seeded) {
+    ship.death_timer_seeded = true;
+    if (ship.death_timer_active <= 0.0F) {
+      float reseed = static_cast<float>(cls->death_delay_frames);
+      if (ship.ship_instance_id == 0) {
+        reseed *= kPlayerDeathTimerScale;
+      }
+      ship.death_timer_active = reseed;
+      if (reseed <= 0.0F) {
+        // Port divergence: a zero DeathDelay hull would linger forever in the
+        // original (reseed to 0 keeps the finale from ever firing); the port
+        // treats those as immediate destructions.
+        NovaShip_RunShipDestructionFinale(state, ship);
+      }
+      return;
     }
-    ship.death_timer_active = reseed;
-    if (reseed <= 0.0F) {
-      // Port divergence: a zero DeathDelay hull would linger forever in the
-      // original (reseed to 0 keeps the finale from ever firing); the port's
-      // hit path already treats those as immediate destructions.
-      NovaShip_RunShipDestructionFinale(state, ship);
-    }
-    return;
   }
   if (ship.death_timer_active > 2.0F) {
     // Debris-puff window: roll and spawn the Explode1 cadence. The original's

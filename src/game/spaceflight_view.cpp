@@ -626,8 +626,6 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     const Ship &ship = state.ShipAt(slot);
     if (!ship.is_active ||
-        (NovaAiShip_IsDestroyed(ship) &&
-         ship.destruction_visual_timer_ms <= 0.0F) ||
         ship.current_system_id != state.player.current_system_id) {
       continue;
     }
@@ -642,12 +640,6 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                                             sprite->sprite_behavior_flags,
                                             sprite->frames_per_rotation,
                                             sprite->row_count);
-    SpriteDrawOptions hull_options;
-    if (NovaAiShip_IsDestroyed(ship)) {
-      hull_options.alpha_mod =
-          std::clamp(ship.destruction_visual_timer_ms / 900.0F, 0.0F, 1.0F) *
-          0.55F;
-    }
     DrawSprite(platform.renderer(),
                sprite->base,
                frame,
@@ -656,8 +648,7 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                camera_x,
                camera_y,
                vp.w,
-               vp.h,
-               hull_options);
+               vp.h);
 
     // Engine-glow layer, drawn over the hull with the same heading-selected
     // frame and a thrust-driven alpha. engine_glow_level is driven in
@@ -883,20 +874,10 @@ void SpaceflightView::AdvanceAnimations(SdlPlatform &platform,
   // view.
   NovaAsteroid_UpdateSprites(state, elapsed_ticks);
   WrapAsteroids(platform, state);
-  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
-    Ship &ship = state.ShipAt(slot);
-    const bool was_visible = ship.destruction_visual_timer_ms > 0.0F;
-    if (ship.destruction_visual_timer_ms > 0.0F) {
-      ship.destruction_visual_timer_ms =
-          std::max(0.0F, ship.destruction_visual_timer_ms - frame_time_ms);
-    }
-    if (was_visible && ship.destruction_visual_timer_ms <= 0.0F) {
-      // The Explode2 finale explosion is spawned by Ship_UpdateVisualState
-      // (NovaShip_RunShipDestructionFinale), which now runs for the player too;
-      // this pass only tracks the sprite fade-out and must not duplicate it.
-      ship.destruction_finale_triggered = true;
-    }
-  }
+  // The original hull has no destruction opacity fade: Ship_UpdateVisualState
+  // keeps the sprite visible until the Explode2 finale calls
+  // Sprite_SetVisible(ship, 0). The port therefore draws the wreck at full
+  // opacity until NovaShip_RunShipDestructionFinale deactivates it.
   // The original impact updater reads each live Sprite's frame count when it
   // decides that an animation has ended. Resolve that SDL-side fact here,
   // after the simulation timer has advanced, so the GameState pool remains
@@ -1539,19 +1520,19 @@ void SpaceflightView::DrawBeamsOverShips(SdlPlatform &platform,
 //   under-ships beams (flags_secondary 0x2000)     -- DrawBeamsUnderShips
 //   stellar bodies (planets / stations)            -- DrawStellarBodies
 //   shots / projectiles                           -- DrawShots
-//   NPC ships (active ships in the current system) -- DrawNpcShips
-//   player ship + engine-glow                     -- (below)
+//   ships (NPCs + player at the camera centre)     -- DrawNpcShips + player
+//   destruction / impact effects                   -- DrawImpactEffects
+//   directional destruction fragments              -- DrawFadingEffects
 //   over-ships beams (all other beams)             -- DrawBeamsOverShips
-// That is: the player's hull and glow composite over everything else in the
-// scene (front-most), NPC ships and shots pass between the ship and the
-// stellar/backdrop layers, and beam weapons render in two of the original's
-// sprite-world layers: 0x2000-flagged beams sit on the second layer (above
-// the backdrop only, Ghidra 0x00438c40) while every other beam sits on the
-// topmost layer above ships and effects (Ghidra Shot_DrawBeamHitQueueFor-
-// Surface 0x00438810). Keeping the order
-// explicit here (rather than spread across the per-subsystem drawers) makes the
-// composed precedence auditable and lets a future layer-table refactor replace
-// the fixed sequence wholesale.
+// That is: every ship sprite (player and NPC alike) shares the ship layer and
+// composites below the impact/destruction-effect layer, so a dying hull's
+// explosions are drawn over the wreck. Beam weapons render in two of the
+// original's sprite-world layers: 0x2000-flagged beams sit on the second layer
+// (above the backdrop only, Ghidra 0x00438c40) while every other beam sits on
+// the topmost layer above ships and effects (Ghidra Shot_DrawBeamHitQueueFor-
+// Surface 0x00438810). Keeping the order explicit here (rather than spread
+// across the per-subsystem drawers) makes the composed precedence auditable
+// and lets a future layer-table refactor replace the fixed sequence wholesale.
 void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawBackground(platform, state); // backmost: tint + ambient stars
   DrawBeamsUnderShips(platform,
@@ -1559,19 +1540,15 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
   DrawStellarBodies(platform, state); // stellar planets / stations
   DrawShots(platform, state);         // projectiles above stellars
   DrawNpcShips(platform, state);      // NPC ships above the backdrop/shots
-  DrawImpactEffects(platform, state); // destruction/impact effects over ships
-  DrawFadingEffects(platform, state); // directional destruction fragments
-  DrawFreeflightObjects(platform, state);   // jettisoned pods / launched drones
-  DrawAsteroids(platform, state);           // drifting asteroid field
-  DrawShipTargetReticle(platform, state);   // target brackets over the ships
-  DrawTravelTargetReticle(platform, state); // brackets over the travel target
-  DrawBeamsOverShips(platform, state);      // topmost layer: normal beams
 
   // Player ship at the play-area centre, frame selected by heading. Because
   // the camera is centred on the player, drawing at the ship's own world
   // position lands it at the viewport centre (world==camera -> centre). The
   // hull is hidden once Ship_UpdateVisualState deactivates it (the original's
-  // inactive branch runs Sprite_SetVisible(ship, 0)).
+  // inactive branch runs Sprite_SetVisible(ship, 0)). It shares the NPC ship
+  // layer: the original's ship sprites (player slot 0 and NPCs alike) sit
+  // below the impact-effect layer, so the death explosions must composite over
+  // the wreck rather than being hidden behind a front-most player hull.
   if (state.player.is_active && !ship_.frames.empty() &&
       ship_frames_per_rotation_ > 0) {
     const Viewport vp = CurrentViewport(platform);
@@ -1631,6 +1608,14 @@ void SpaceflightView::Draw(SdlPlatform &platform, const GameState &state) {
       glow_last_drawn_ = false;
     }
   }
+
+  DrawImpactEffects(platform, state); // destruction/impact effects over ships
+  DrawFadingEffects(platform, state); // directional destruction fragments
+  DrawFreeflightObjects(platform, state);   // jettisoned pods / launched drones
+  DrawAsteroids(platform, state);           // drifting asteroid field
+  DrawShipTargetReticle(platform, state);   // target brackets over the ships
+  DrawTravelTargetReticle(platform, state); // brackets over the travel target
+  DrawBeamsOverShips(platform, state);      // topmost layer: normal beams
 
   // Post-render particle pass (Ghidra Frame_PresentViewportAndParticles draws
   // SWParticles after the sprite world, so they composite over the ships).

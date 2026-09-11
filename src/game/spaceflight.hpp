@@ -260,4 +260,9 @@ extern void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
 // NovaShip_IntegrateNpcMovement.
 void NovaShip_TickNpcShips(GameState &state, float elapsed_ticks);
 
+// External test seam into the per-ship AI decision pass (Ghidra scope 6 of
+// Frame_TickSystems 0x004186b0 -> Ship_UpdateShipAI 0x00401000). Mirrors
+// NovaShip_TickNpcShips so tests can model the live AI-then-movement order.
+void NovaShip_TickNpcAi(GameState &state, float elapsed_ticks);
+
 } // namespace game

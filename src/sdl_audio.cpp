@@ -59,12 +59,15 @@ void SdlAudio::Play(const NovaSoundData &sound,
     return;
   }
 
-  // Grow the voice pool on demand; the menu references at most a few sound
-  // effects at once.
+  // Grow the voice pool toward the original's 16-slot AudioVoiceSlot table
+  // (Audio_AllocateVoiceSlot 0x004d6550). The pool previously stopped at 8 and
+  // reused the least-recently-used voice, which cut off long effects such as
+  // the player's Explode2 when a busier explosion started later.
+  constexpr std::size_t kMaxVoices = 16;
   if (voices_.empty()) {
-    voices_.reserve(8);
+    voices_.reserve(kMaxVoices);
   }
-  if (voices_.size() < 8) {
+  if (voices_.size() < kMaxVoices) {
     Voice voice{std::unique_ptr<SDL_AudioStream, StreamDeleter>{
                     SDL_CreateAudioStream(nullptr, nullptr)},
                 -1};
@@ -78,11 +81,10 @@ void SdlAudio::Play(const NovaSoundData &sound,
     voices_.push_back(std::move(voice));
   }
 
-  // Find a free voice (one that has drained its previous effect). If every
-  // voice is still busy, fall back to the least-recently-used voice, replacing
-  // the tail of an older effect -- the same way the original's small voice pool
-  // reuses slots.
-  Voice *voice = &voices_[next_voice_];
+  // Find a voice that has drained its previous effect. If every voice is still
+  // busy, the original allocator returns 0 and the new cue is dropped rather
+  // than truncating an effect that is already playing.
+  Voice *voice = nullptr;
   for (std::size_t attempt = 0; attempt < voices_.size(); ++attempt) {
     Voice &candidate = voices_[(next_voice_ + attempt) % voices_.size()];
     if (!StreamActive(candidate.stream.get())) {
@@ -90,7 +92,11 @@ void SdlAudio::Play(const NovaSoundData &sound,
       break;
     }
   }
-  next_voice_ = (next_voice_ + 1) % voices_.size();
+  if (voice == nullptr) {
+    return;
+  }
+  next_voice_ =
+      (static_cast<std::size_t>(voice - voices_.data()) + 1) % voices_.size();
   voice->key = sound_key;
 
   const int playback_sample_rate =

@@ -47,20 +47,16 @@ void NovaEffects_SpawnImpactEffect(GameState &state,
                                    std::int16_t effect_id,
                                    std::int16_t variant = 0);
 
-// Ship_HandleShip / Shot_SpawnShipDestructionDebrisPuff (0x00433050 ->
-// 0x00428090): start the stock explosion cadence and emit the first
-// directional debris fragment. Later fragments are emitted by the same
-// destruction sequence rather than all being collapsed into one burst.
-void NovaEffects_SpawnShipDestructionBurst(GameState &state,
-                                           const Ship &ship,
-                                           std::int16_t breaking_effect_id);
-
-// Bible Explode2 terminal fireball helper used by the zero-DeathDelay hit
-// site (the normal wreck path spawns Explode2 with the blast radius from
-// NovaShip_RunShipDestructionFinale). Mass-scaled radius for 1000+.
-void NovaEffects_SpawnShipDestructionFinale(GameState &state,
-                                            const Ship &ship,
-                                            std::int16_t final_effect_id);
+// Ghidra Shot_SpawnShipDestructionDebrisPuff (0x00428090), called from
+// Ship_HandleShip (0x00433050) at the death-timer halfway point and by the
+// timed-action cascade: claim the first free fading-effect slot, seed it at the
+// ship position with the ship's velocity plus a randomized scatter vector
+// ((10 + rand(10)) * 0.1), orient it by the resulting velocity bearing, give it
+// a 150..249-frame lifetime, and queue the spatial destruction sound. This is
+// the directional wreck debris fragment, distinct from the Explode1/Explode2
+// area impacts that Ship_UpdateVisualState spawns.
+void NovaEffects_SpawnShipDestructionDebrisPuff(GameState &state,
+                                                const Ship &ship);
 
 // Advances the 32-slot directional destruction-fragment pool in normalized
 // original frame-time units. The SDL view supplies the matching special ship
