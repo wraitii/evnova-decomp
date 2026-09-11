@@ -1039,29 +1039,232 @@ std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
   return candidates[pick(state.rng)];
 }
 
-// Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. The original has
-// mission/scripted target arms and several combat-strength filters. Those data
-// sources are not reconstructed here, so this clean-room slice keeps the
-// executable core: same-system active contacts, hostile governments or
-// player-directed combat contacts, nearest-first selection, and the player as
-// a valid target when hostility has already been established.
+namespace {
+
+// Squared-distance metric used by Ship_AcquirePrimaryTargetForShip
+// (0x0040e020, x sequence 0x0040f4a7, y sequence 0x0040f50e). The original
+// takes FABS of each axis, stores it with FIST, then runs a residual/sign
+// correction (0x0040f4b7..0x0040f4f6 and the analogous y sequence) that turns
+// the round-to-nearest FIST into a truncation toward zero. Because the axis is
+// already absolute, the net result is floor(|axis|); it is not round-to-nearest
+// and must not be approximated with std::lround.
+[[nodiscard]] std::int32_t
+RoundedAxisDistanceSquared(float x1, float y1, float x2, float y2) {
+  const std::int32_t dx = static_cast<std::int32_t>(std::fabs(x1 - x2));
+  const std::int32_t dy = static_cast<std::int32_t>(std::fabs(y1 - y2));
+  return dx * dx + dy * dy;
+}
+
+} // namespace
+
+// Ghidra 0x00411800 Ship_ComputePerceivedCombatStrengthAgainstShip.
+int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
+                                              const Ship &ship) {
+  // Mirrors Ship_ComputeShipMaxShieldPoints (0x00463550): the player uses the
+  // cached outfit-derived value, NPCs the class base scaled by the personality
+  // shield/armor scale (when positive) and the behavior-5 difficulty factor.
+  const auto max_shield_for = [&state](const Ship &subject) -> float {
+    if (subject.ship_instance_id == 0) {
+      return Outfit_ComputePlayerEffectiveStats(state).max_shield_points;
+    }
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(subject.ship_class_id + 0x80));
+    float value = cls != nullptr ? static_cast<float>(cls->base_shield) : 0.0F;
+    if (subject.pers_def_slot != -1 &&
+        static_cast<std::size_t>(subject.pers_def_slot) <
+            state.scenario.pers_defs.size()) {
+      const float scale =
+          state.scenario
+              .pers_defs[static_cast<std::size_t>(subject.pers_def_slot)]
+              .shield_armor_scale;
+      if (scale > 0.0F) {
+        value *= scale;
+      }
+    }
+    if (subject.ai_behavior_code == 5) {
+      value *= 1.333F; // k_behavior5_difficulty_mult_f64 (0x00575760)
+    }
+    return value;
+  };
+  // FIST at 0x0041187f and 0x00411a35 is followed by a residual/sign
+  // correction (0x00411891..0x004118b7, 0x00411a41..0x00411a69) that turns
+  // the round-to-nearest store into a truncation toward zero. Every ratio here
+  // is non-negative, so the net effect is floor().
+  const auto trunc_to_int = [](float value) -> int {
+    return static_cast<int>(value);
+  };
+  const auto clamp_ratio = [](float ratio) -> float {
+    if (ratio > 1.0F) {
+      ratio = 1.0F;
+    }
+    if (ratio < 0.25F) {
+      ratio = 0.25F;
+    }
+    return ratio;
+  };
+
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  // 0x00411a90: a non-positive max shield seeds the initial ratio with the
+  // subject's raw shield points (then the same [0.25, 1.0] clamp), not 0.25.
+  const float ship_max_shield = max_shield_for(ship);
+  float shield_ratio =
+      clamp_ratio(ship_max_shield > 0.0F ? ship.shield_points / ship_max_shield
+                                         : ship.shield_points);
+  int total = trunc_to_int(
+      static_cast<float>(ship_class != nullptr ? ship_class->strength : 0) *
+      shield_ratio);
+
+  float candidate_ratio = shield_ratio;
+  for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+    const Ship &candidate = state.ShipAt(slot);
+    if (static_cast<std::int16_t>(slot) == ship.ship_instance_id ||
+        !candidate.is_active || NovaAiShip_IsDestroyed(candidate)) {
+      continue;
+    }
+    const ShipClass *candidate_class = state.scenario.Ship(
+        static_cast<std::int16_t>(candidate.ship_class_id + 0x80));
+    const int candidate_strength =
+        candidate_class != nullptr ? candidate_class->strength : 0;
+    int support = 0;
+    if (candidate.squad_leader_ship_slot == ship.ship_instance_id) {
+      support = candidate_strength;
+    } else if (ship.ship_instance_id == 0) {
+      if (ship_class != nullptr &&
+          NovaGovernment_AreGovtsAllied(state.scenario,
+                                        ship_class->inherent_combat_govt,
+                                        candidate.faction_or_government_id)) {
+        support = candidate_strength;
+      }
+    } else if (NovaGovernment_AreGovtsAllied(
+                   state.scenario,
+                   ship.faction_or_government_id,
+                   candidate.faction_or_government_id)) {
+      support = candidate_strength;
+    }
+    // The original reuses one scratch across the base and candidate ratios; a
+    // candidate with a non-positive max shield keeps the previous scratch.
+    const float candidate_max_shield = max_shield_for(candidate);
+    if (candidate_max_shield > 0.0F) {
+      candidate_ratio = candidate.shield_points / candidate_max_shield;
+    }
+    candidate_ratio = clamp_ratio(candidate_ratio);
+    if (support > 0 &&
+        NovaAiShip_HasIncomingDistressSupport(state, candidate, ship)) {
+      // The original doubles support in a 16-bit short (ADD EDI,EDI then
+      // MOVSX at 0x00411a25) and sign-extends the running total's low 16 bits
+      // before each add (MOVSX EAX,DI at 0x00411a1a).
+      support = static_cast<std::int16_t>(support * 2);
+    }
+    const auto total_short = static_cast<std::int16_t>(total);
+    total = trunc_to_int(static_cast<float>(total_short) +
+                         static_cast<float>(support) * candidate_ratio);
+  }
+  return total;
+}
+
+// Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. PARTIAL reconstruction:
+// the early retention gate, the active mission-fleet goal 0/1 arms, the
+// weapon-readiness early return, the IFF-scrambler/policy player shield, and
+// the behavior-6 escort re-selection. NOT implemented: the license/anti-tamper
+// check, the pers_def personality arms, and every government target pass
+// (ally-support 0x0040e3c0, flags_primary&1 aggressive 0x0040e710, near-player
+// reputation/odds 0x0040ece3, inherent-combat roll 0x0040e57f, distress-
+// responder rescans/common tail 0x0040eea0) with their perceived-combat-
+// strength filtering, so the middle of the routine keeps the previous
+// clean-room nearest-hostile slice. The iff_scrambler_active term below is
+// inert until its writer is ported (see scenario_data.hpp).
 void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
+  // TODO(decomp(0x0040e020)) skipped: the leading five-pair license-seed
+  // integrity check on g_ship_states[5].license_seed. The original calls
+  // Ship_SetShipHostileToPlayer when any stored pair-comparison boolean is
+  // FALSE (a matching pair), not on an arbitrary mismatch; the purpose is
+  // provisional. The clean-room model has no license-seed field.
+  //
+  // TODO(decomp(0x0040e020)) skipped: the pers_def_slot arms -- slot 0x3fe
+  // forces hostility, and (pers.flags_primary & 1) with the pers +0x621 grudge
+  // latch and the cloak rules forces hostility. PersDef has no grudge-latch
+  // field and its writer (Shot_ResolveShipHitFromWeapon 0x0041a2cb) is
+  // unported.
+
+  // 0x0040e149 early retention: keep an existing primary target while the ship
+  // is in an attack state (3/4) and the target slot is still active. The
+  // original has NO same-system and NO destroyed check in this gate.
   if (ship.primary_target_ship_slot >= 0 &&
       state.SlotInRange(
-          static_cast<std::size_t>(ship.primary_target_ship_slot))) {
-    const Ship &current =
-        state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot));
-    if (current.is_active && !NovaAiShip_IsDestroyed(current) &&
-        current.current_system_id == ship.current_system_id) {
+          static_cast<std::size_t>(ship.primary_target_ship_slot)) &&
+      (ship.ai_state_code == 3 || ship.ai_state_code == 4) &&
+      state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot))
+          .is_active) {
+    return;
+  }
+
+  // 0x0040e202 active mission-fleet arms. Goal 0 forces hostility to the
+  // player (when the player is engageable under the cloak rules); goal 1 drops
+  // a player primary, hands off to the random-combat-candidate selector, and
+  // otherwise parks in state 0x0c with the player as secondary.
+  if (ship.mission_fleet_slot != -1 &&
+      static_cast<std::size_t>(ship.mission_fleet_slot) <
+          state.active_missions.size() &&
+      state
+          .active_mission_runtime_flags[static_cast<std::size_t>(
+              ship.mission_fleet_slot)]
+          .is_active) {
+    const ActiveMission &mission =
+        state
+            .active_missions[static_cast<std::size_t>(ship.mission_fleet_slot)];
+    if (mission.fleet_spawn_goal == 0 &&
+        NovaAiShip_CanEngageTargetUnderCloakRules(state, state.player, ship)) {
+      NovaAi_SetShipHostileToPlayer(state, ship);
+      return;
+    }
+    if (mission.fleet_spawn_goal == 1) {
+      if (ship.primary_target_ship_slot == 0) {
+        ship.primary_target_ship_slot = -1;
+      }
+      if (ship.primary_target_ship_slot == -1) {
+        NovaAi_EnterState4TargetRandomCombatCandidate(state, ship);
+        if (ship.primary_target_ship_slot == -1) {
+          ship.ai_state_code = 0xc;
+          ship.ai_secondary_target_slot = 0;
+        }
+      }
       return;
     }
   }
+
+  // 0x0040e2c0: a ship with no ready weapon (readiness bucket 2) never
+  // acquires a target.
+  if (NovaWeapon_ClassifyAmmoReadiness(state, ship) == 2) {
+    return;
+  }
+
+  // TODO(decomp(0x0040e020)) skipped: the original's government
+  // target passes (0x0040e3c0/0x0040e710 ally-support scan, flags_primary&1
+  // aggressive scan, the 0x0040ece3 near-player reputation/odds gate, the
+  // 0x0040e57f inherent-combat-government roll, and the 0x0040eea0 distress-
+  // responder rescans) with their perceived-combat-strength filters are not
+  // yet reconstructed. NovaAiShip_ComputePerceivedCombatStrength is ported but
+  // unintegrated (no gameplay caller), so it filters nothing here. The region
+  // below keeps the previous clean-room nearest-hostile selection, now
+  // respecting the IFF-scrambler/policy player shield, followed by the
+  // faithful behavior-6 escort re-selection.
+  const Government *ship_govt =
+      ship.faction_or_government_id >= 0
+          ? state.scenario.GovernmentByIndex(ship.faction_or_government_id)
+          : nullptr;
+  const bool player_shielded =
+      ship_govt != nullptr &&
+      (ship_govt->iff_scrambler_active ||
+       NovaGovernment_GetPolicyFlag(
+           state.scenario, ship.faction_or_government_id, 0));
 
   std::int16_t best_slot = -1;
   bool best_is_engaged = false;
   float best_distance_sq = 0.0F;
   for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
-    if (slot == static_cast<std::size_t>(ship.ship_instance_id)) {
+    if (slot == static_cast<std::size_t>(ship.ship_instance_id) ||
+        (slot == 0 && player_shielded)) {
       continue;
     }
     const Ship &candidate = state.ShipAt(slot);
@@ -1119,6 +1322,51 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
     if (best_slot == 0) {
       ship.ai_hostility_accumulator = std::max<std::int16_t>(
           ship.ai_hostility_accumulator, static_cast<std::int16_t>(1));
+    }
+  }
+
+  // 0x0040f293 behavior-6 escort re-selection: with no primary target, pick
+  // the nearest same-system ship that is acquirable as a target, excluding
+  // self and the squad leader. The predicate call keeps the original's order
+  // Ship_IsShipAcquirableAsTarget(ship, candidate): its first parameter is the
+  // candidate-to-be-acquired, so `ship` is the candidate here and the scanned
+  // slot is the acquirer. The original's final loop reads the distance array
+  // for every slot although only scanned candidates populate it (an
+  // uninitialised-stack quirk); the port selects among scanned candidates.
+  // The port also bounds-checks squad_leader_ship_slot where the original
+  // indexes g_ship_states[-1] when the leader is unset.
+  if (ship.ai_behavior_code == 6 && ship.primary_target_ship_slot == -1) {
+    std::int16_t escort_best = -1;
+    std::int32_t escort_best_dist = -1;
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      const Ship &candidate = state.ShipAt(slot);
+      if (!candidate.is_active ||
+          static_cast<std::int16_t>(slot) == ship.ship_instance_id) {
+        continue;
+      }
+      if (ship.squad_leader_ship_slot >= 0 &&
+          state.SlotInRange(
+              static_cast<std::size_t>(ship.squad_leader_ship_slot)) &&
+          candidate.ship_instance_id ==
+              state
+                  .ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot))
+                  .ship_instance_id) {
+        continue;
+      }
+      if (!NovaTargeting_IsShipAcquirableAsTarget(state, ship, candidate) ||
+          ship.current_system_id != candidate.current_system_id) {
+        continue;
+      }
+      const std::int32_t distance_sq = RoundedAxisDistanceSquared(
+          ship.pos_x, ship.pos_y, candidate.pos_x, candidate.pos_y);
+      if (escort_best_dist < 0 || distance_sq < escort_best_dist) {
+        escort_best_dist = distance_sq;
+        escort_best = static_cast<std::int16_t>(slot);
+      }
+    }
+    if (escort_best != -1) {
+      ship.primary_target_ship_slot = escort_best;
+      ship.ai_state_code = 4;
     }
   }
 }

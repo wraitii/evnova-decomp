@@ -8,6 +8,7 @@
 #include "game/spaceflight.hpp"
 #include "game/targeting.hpp"
 #include "game/travel.hpp"
+#include "game/weapon.hpp"
 
 #include <algorithm>
 #include <iterator>
@@ -1230,4 +1231,279 @@ TEST_CASE("hailed helper repairs a disabled player via assist state 0xf",
   CHECK(player.armor_points >= player_max_armor / 3.0F);
   CHECK(player.boarded_target_latch == 0);
   CHECK(helper.primary_target_ship_slot == -1);
+}
+
+// Ship_AcquirePrimaryTargetForShip (0x0040e020) regression slice: the early
+// retention gate keeps a state-3/4 primary target purely on activity (no
+// same-system check), while the weapon-readiness gate and the mission-fleet
+// goal-0 arm are the faithful gates reconstructed in this session.
+TEST_CASE(
+    "acquire retention gate keeps an active state-4 target cross-system") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  const std::int16_t other_sys =
+      static_cast<std::int16_t>(sys_idx == 0 ? 1 : 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.is_active = true;
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 4;
+  ship.ai_hostility_accumulator = 0;
+  // Arm the hull so the weapon-readiness gate is not the reason the second
+  // call stops early.
+  game::NovaWeapon_EnsureNpcWeaponBanks(state, ship);
+
+  const int target_slot =
+      NovaShip_AllocateShipSlot(state, other_sys, /*reserved_tail=*/8);
+  REQUIRE(target_slot > 0);
+  game::Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  target.is_active = true;
+  target.current_system_id = other_sys;
+  ship.primary_target_ship_slot = static_cast<std::int16_t>(target_slot);
+
+  game::NovaAi_AcquirePrimaryTarget(state, ship);
+  // Retained despite the target living in another system (the original gate
+  // only tests slot activity).
+  CHECK(ship.primary_target_ship_slot == target_slot);
+
+  // Outside state 3/4 the gate does not fire and the interim hostile slice
+  // finds no contact, so the target is dropped.
+  ship.ai_state_code = 0;
+  target.is_active = false;
+  game::NovaAi_AcquirePrimaryTarget(state, ship);
+  // The gate no longer retains the inactive target; whatever the interim
+  // hostile slice picks, it is not the retired slot.
+  CHECK(ship.primary_target_ship_slot != target_slot);
+}
+
+TEST_CASE("acquire refuses a ship with no ready weapons") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.armor_points = 30.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 0;
+  ship.ai_hostility_accumulator = 1; // would otherwise target the player
+  ship.primary_target_ship_slot = -1;
+  ship.npc_weapon_bank_ammo.fill(0); // readiness bucket 2
+
+  game::NovaAi_AcquirePrimaryTarget(state, ship);
+  CHECK(ship.primary_target_ship_slot == -1);
+}
+
+TEST_CASE("mission-fleet goal 0 forces hostility to the player") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.armor_points = 30.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 0;
+  ship.primary_target_ship_slot = -1;
+  ship.mission_fleet_slot = 0;
+  state.active_missions[0].fleet_spawn_goal = 0;
+  state.active_mission_runtime_flags[0].is_active = true;
+
+  game::NovaAi_AcquirePrimaryTarget(state, ship);
+  CHECK(ship.primary_target_ship_slot == 0);
+  CHECK(ship.ai_state_code == 4);
+}
+
+TEST_CASE("perceived combat strength counts allied support") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+
+  const game::ShipClass *cls = state.scenario.Ship(0x80);
+  REQUIRE(cls != nullptr);
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.faction_or_government_id = -1;
+  ship.pers_def_slot = -1;
+  ship.ai_behavior_code = 0;
+  ship.shield_points = static_cast<float>(cls->base_shield);
+
+  const int solo = game::NovaAiShip_ComputePerceivedCombatStrength(state, ship);
+  CHECK(solo == cls->strength); // full shields, no followers/allies
+
+  const int ally_slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(ally_slot > 0);
+  game::Ship &ally = state.ShipAt(static_cast<std::size_t>(ally_slot));
+  ally.ship_class_id = 0;
+  ally.ship_instance_id = static_cast<std::int16_t>(ally_slot);
+  ally.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ally.is_active = true;
+  ally.faction_or_government_id = -1; // allied with `ship` (equal ids)
+  ally.pers_def_slot = -1;
+  ally.ai_behavior_code = 0;
+  ally.shield_points = static_cast<float>(cls->base_shield);
+  ally.armor_points = static_cast<float>(cls->base_armor);
+
+  const int with_ally =
+      game::NovaAiShip_ComputePerceivedCombatStrength(state, ship);
+  CHECK(with_ally > solo);
+}
+
+// 0x00411800 FIST + residual/sign correction (0x0041187f..0x004118b7) truncates
+// each shield-scaled strength toward zero; it is not std::lround.  A 5-strength
+// hull at a 0.5 shield ratio yields 2.5, and the non-positive-max arm seeds the
+// ratio from raw shield points (0x00411a90) rather than a fixed 0.25.
+TEST_CASE("perceived combat strength truncates fractional shield-scaled "
+          "strength") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(!state.scenario.ships.empty());
+
+  state.scenario.ships[0].strength = 5;
+  state.scenario.ships[0].base_shield = 100;
+  state.player.is_active = false;
+
+  game::Ship &ship = state.ShipAt(1);
+  ship = game::Ship{};
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1;
+  ship.is_active = true;
+  ship.faction_or_government_id = -1;
+  ship.pers_def_slot = -1;
+  ship.ai_behavior_code = 0;
+  ship.shield_points = 50.0F; // ratio 0.5 -> 5 * 0.5 = 2.5 -> trunc 2
+  CHECK(game::NovaAiShip_ComputePerceivedCombatStrength(state, ship) == 2);
+
+  state.scenario.ships[0].base_shield = 0; // non-positive max
+  ship.shield_points = 0.5F; // raw ratio 0.5 after clamp -> 2.5 -> trunc 2
+  CHECK(game::NovaAiShip_ComputePerceivedCombatStrength(state, ship) == 2);
+}
+
+// 0x00411a1a re-reads the running total through its low 16 bits before each
+// add (MOVSX EAX,DI).  base 5 + ally 32767 = 32772, then the next candidate's
+// (empty) contribution re-reads it as (int16_t)32772 = -32764.
+TEST_CASE("perceived combat strength wraps the running total at 16 bits") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(state.scenario.ships.size() >= 3);
+
+  state.scenario.ships[0].strength = 5;
+  state.scenario.ships[0].base_shield = 100;
+  state.scenario.ships[1].strength = 32767;
+  state.scenario.ships[1].base_shield = 100;
+  state.scenario.ships[2].strength = 0;
+  state.scenario.ships[2].base_shield = 100;
+  state.player.is_active = false;
+
+  game::Ship &ship = state.ShipAt(1);
+  ship = game::Ship{};
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1;
+  ship.is_active = true;
+  ship.faction_or_government_id = -1;
+  ship.pers_def_slot = -1;
+  ship.ai_behavior_code = 0;
+  ship.shield_points = 100.0F;
+
+  game::Ship &ally = state.ShipAt(2);
+  ally = game::Ship{};
+  ally.ship_class_id = 1;
+  ally.ship_instance_id = 2;
+  ally.is_active = true;
+  ally.faction_or_government_id = -1;
+  ally.pers_def_slot = -1;
+  ally.ai_behavior_code = 0;
+  ally.shield_points = 100.0F;
+  ally.armor_points = 100.0F;
+
+  game::Ship &zero = state.ShipAt(3);
+  zero = game::Ship{};
+  zero.ship_class_id = 2;
+  zero.ship_instance_id = 3;
+  zero.is_active = true;
+  zero.faction_or_government_id = -1;
+  zero.pers_def_slot = -1;
+  zero.ai_behavior_code = 0;
+  zero.shield_points = 100.0F;
+  zero.armor_points = 100.0F;
+
+  CHECK(game::NovaAiShip_ComputePerceivedCombatStrength(state, ship) == -32764);
+}
+
+// 0x0040e202 mission-fleet goal 1: drop a player primary, then, with no random
+// combat candidate available, park in state 0x0c with secondary 0.
+TEST_CASE("mission-fleet goal 1 parks with no random candidate") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.armor_points = 30.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 0;
+  ship.primary_target_ship_slot = 0; // player primary to drop
+  ship.mission_fleet_slot = 0;
+  state.active_missions[0].fleet_spawn_goal = 1;
+  state.active_mission_runtime_flags[0].is_active = true;
+
+  game::NovaAi_AcquirePrimaryTarget(state, ship);
+  CHECK(ship.primary_target_ship_slot == -1);
+  CHECK(ship.ai_state_code == 0xc);
+  CHECK(ship.ai_secondary_target_slot == 0);
 }
