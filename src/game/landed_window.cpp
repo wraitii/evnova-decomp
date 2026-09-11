@@ -35,9 +35,29 @@
 namespace game {
 
 // ---------------------------------------------------------------------------
+// Stellar_ProcessTravelAndLanding (0x00457580) normal-arrival gate.
+// ---------------------------------------------------------------------------
+// Ghidra 0x00462410 System_GetCurrentSystemLinkHalfSpan.
+// Arrival-gate use at 0x00457f89 / 0x004587a3: no prepared sprite selects the
+// original 0x4b fallback; otherwise the envelope is round(half_span *
+// DAT_005756a0) with DAT_005756a0 = 1.75. nearbyint mirrors the original's FIST
+// (round half to even, the default FPU mode).
+float NovaLanding_ArrivalAxisRange(std::int16_t target_sprite_full_height) {
+  constexpr float kNoSpriteAxisRange = 0x4b; // 75
+  constexpr double kSpriteRangeScale = 1.75; // DAT_005756a0
+  if (target_sprite_full_height <= 0) {
+    return kNoSpriteAxisRange;
+  }
+  return static_cast<float>(std::nearbyint(
+      static_cast<double>(target_sprite_full_height) * kSpriteRangeScale));
+}
+
+// ---------------------------------------------------------------------------
 // Stellar_TravelToSystem (0x00455e10): normal arrival subset.
 // ---------------------------------------------------------------------------
-bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
+bool NovaLanding_EnterDocked(GameState &state,
+                             LandedContext &ctx,
+                             std::int16_t target_sprite_full_height) {
   ctx.landed = false;
   ctx.denial = LandedDenial::kNone;
   const std::int16_t stellar_id = state.travel.selected_stellar_id;
@@ -50,14 +70,29 @@ bool NovaLanding_EnterDocked(GameState &state, LandedContext &ctx) {
     ctx.denial = LandedDenial::kUnavailable;
     return false;
   }
-  // The final normal-arrival branch in Stellar_ProcessTravelAndLanding only
-  // accepts the dock once both axis deltas are strictly below 0xfa.
-  constexpr float kArrivalAxisRange = 250.0F;
-  if (std::abs(state.player.pos_x - static_cast<float>(stellar->pos_x)) >=
-          kArrivalAxisRange ||
-      std::abs(state.player.pos_y - static_cast<float>(stellar->pos_y)) >=
-          kArrivalAxisRange) {
+  // Stellar_ProcessTravelAndLanding normal-arrival gate. The original runs a
+  // single failure branch (0x00458de0) and picks the feedback from whether the
+  // ship was inside the envelope with the approach armed:
+  //  - engage timer < 0x2ee (NovaUi_UpdateTravelEngagementProgress has not yet
+  //    armed the request) or out of the sprite-derived envelope -> too far;
+  //  - otherwise, still moving (|vel| > 0.75 on either axis) or with an
+  //    unexpired maneuver timer -> too fast.
+  constexpr float kApproachVelocityLimit = 0.75F; // g_lit_0p75
+  const float arrival_axis_range =
+      NovaLanding_ArrivalAxisRange(target_sprite_full_height);
+  const bool within_envelope =
+      std::abs(state.player.pos_x - static_cast<float>(stellar->pos_x)) <
+          arrival_axis_range &&
+      std::abs(state.player.pos_y - static_cast<float>(stellar->pos_y)) <
+          arrival_axis_range;
+  if (!within_envelope || state.travel.engage_timer < 0x2ee) {
     ctx.denial = LandedDenial::kTooFar;
+    return false;
+  }
+  if (std::abs(state.player.vel_x) > kApproachVelocityLimit ||
+      std::abs(state.player.vel_y) > kApproachVelocityLimit ||
+      state.player.ai_maneuver_timer_ms > 0.0F) {
+    ctx.denial = LandedDenial::kTooFast;
     return false;
   }
 
@@ -240,6 +275,7 @@ void NovaLanding_LaunchFromStellar(GameState &state, std::int16_t stellar_id) {
   // 0x00456158: travel-selection and engage-timer reset.
   state.travel.selected_stellar_id = -1;
   state.travel.selected_stellar_is_manual = false;
+  state.travel.engage_timer = -1; // 0x00456161
   // 0x00456195..0x00456250: wipe the transient shot pool (every ShotState
   // fuse reset to -2.0).
   NovaWeapon_ClearTransientCombatState(state);

@@ -1,6 +1,7 @@
 #include "travel.hpp"
 
 #include "../log.hpp"
+#include "government.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "ship_ai.hpp"
@@ -359,8 +360,10 @@ void FireJump(GameState &state) {
   // system when it observes just_completed.
   t.travel_slot = -1;
   // Arrival clears the travel/landing stellar selection (g_travel_selected_
-  // stellar_id = 0xffff at 0x0044f7fa).
+  // stellar_id = 0xffff at 0x0044f7fa) and the approach timer
+  // (g_travel_engage_timer = 0xffff at 0x0044f803).
   t.selected_stellar_id = -1;
+  t.engage_timer = -1;
   // Arrival re-latches the flight-hint state to 0x7fff (PlayerTick_System-
   // TransitionAndArrival 0x0044f83f), keeping the launch departure message
   // armed for the system's landings.
@@ -388,8 +391,8 @@ void FireJump(GameState &state) {
   // g_target_category_panel_timer).
   state.escort.panel_timer = 0;
   // TODO(decomp(0x0044f803)) skipped: the remaining arrival resets target
-  // globals the port does not model -- g_travel_engage_timer (0xffff),
-  // g_last_system_for_ambient_rolls (0xffff), the interaction bribe latch
+  // globals the port does not model -- g_last_system_for_ambient_rolls
+  // (0xffff), the interaction bribe latch
   // (-1) and action index (rand 0x800), DAT_00596d30/31 (0), the ambient
   // mission-spawn re-arm DAT_007353f4 = rand(30)+30 (its consumer
   // Mission_SpawnAmbientMissionShip is unported), g_travel_countdown (0),
@@ -1553,6 +1556,157 @@ void NovaStarmap_ClearRoute(GameState &state) {
   // the current system (0x004a3aa0 action-8 branch).
   state.travel.travel_slot = -1;
   state.travel.starmap_destination_system_id = -1;
+}
+
+// Ghidra 0x00459950 NovaUi_UpdateTravelEngagementProgress.
+void NovaTravel_UpdateEngagementProgress(GameState &state) {
+  constexpr std::int16_t kArmedTimer = 0x2ee;
+  constexpr std::int16_t kRequestAxisRange = 0xfa; // 250
+  const std::int16_t selected = state.travel.selected_stellar_id;
+  const Stellar *stellar = state.scenario.Stellar(selected);
+  // Left the current system (or the selection was cleared): wipe the approach.
+  if (stellar == nullptr ||
+      stellar->system_id != state.player.current_system_id) {
+    state.travel.selected_stellar_id = -1;
+    state.travel.engage_timer = -1;
+    return;
+  }
+  if (state.travel.engage_timer < 0) {
+    // The original arms the timer from the first land command for a newly
+    // selected stellar (0x0045937c/0x004593d1 set it to 0 or 0x2ed); the port
+    // initialises it on the first tick the selection is seen so the approach
+    // can arm without an initially rejected press.
+    state.travel.engage_timer = 0;
+  }
+
+  // Eligibility (Ghidra bVar5): a faction-less stellar, one whose reputation
+  // threshold the player meets, a hazard/derelict, a stellar already being
+  // approached (timer past the arm), an active mission's Visit/Return target,
+  // or a government whose policy bit 1 clears the denial.
+  bool eligible = false;
+  if (stellar->government_id == -1) {
+    eligible = true;
+  } else {
+    const std::int16_t sys_rep =
+        state.player.current_system_id >= 0 &&
+                state.player.current_system_id <
+                    static_cast<std::int16_t>(state.system_reputation.size())
+            ? state.system_reputation[static_cast<std::size_t>(
+                  state.player.current_system_id)]
+            : 0;
+    const std::int16_t threshold = stellar->min_status;
+    if (((threshold <= sys_rep) || (threshold == -0x7fff)) &&
+        threshold != 0x7fff) {
+      eligible = true;
+    }
+  }
+  if (stellar->hazard_marker) {
+    eligible = true;
+  }
+  if (state.travel.engage_timer > 0x2ed) {
+    eligible = true;
+  }
+  if (!eligible) {
+    for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+      if (!state.active_mission_runtime_flags[slot].is_active) {
+        continue;
+      }
+      // Ghidra compares the travel slot against the active mission's two
+      // stellar fields (misn -0x6d / -0x69, the Visit/Return ids).
+      const ActiveMission &mission = state.active_missions[slot];
+      if (mission.travel_stellar_id == selected ||
+          mission.return_stellar_id == selected) {
+        eligible = true;
+        break;
+      }
+    }
+  }
+  if (!eligible && stellar->government_id != -1 &&
+      NovaGovernment_GetPolicyFlag(state.scenario, stellar->government_id, 1)) {
+    eligible = true;
+  }
+
+  if ((stellar->flags & 0x20U) == 0U && eligible) {
+    if (state.travel.engage_timer > 0x2ec) {
+      ++state.travel.engage_timer;
+    }
+    const float dx = state.player.pos_x - static_cast<float>(stellar->pos_x);
+    const float dy = state.player.pos_y - static_cast<float>(stellar->pos_y);
+    if (std::abs(dx) < kRequestAxisRange && std::abs(dy) < kRequestAxisRange &&
+        state.travel.engage_timer < kArmedTimer) {
+      state.travel.engage_timer = kArmedTimer;
+    }
+    if (state.travel.engage_timer == kArmedTimer) {
+      // "Cleared to dock/land" overlay (STR# 0x7d2), composing the randomly
+      // rolled lead/connector/tail variants the original builds.
+      const bool is_station = (stellar->flags & 0x10U) != 0U;
+      const std::string system_name = [&]() -> std::string {
+        const System *sys = state.scenario.System(
+            static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+        return sys != nullptr ? sys->name : std::string();
+      }();
+      auto text = [](std::uint16_t entry, const char *fallback) {
+        return NovaHud_LoadStringEntry(0x7d2, entry).value_or(fallback);
+      };
+      std::string message;
+      const int lead = std::uniform_int_distribution<int>{0, 2}(state.rng);
+      if (is_station) {
+        if (lead == 0) {
+          message = text(0x5e, "Cleared to dock");
+          message += ", " + system_name + ". ";
+        } else if (lead == 1) {
+          message =
+              system_name + ", " + text(0x5f, "you're cleared to dock.") + " ";
+        } else {
+          message = text(0x60, "You are cleared to dock.") + " ";
+        }
+      } else {
+        if (lead == 0) {
+          message = text(0x61, "Cleared to land");
+          message += ", " + system_name + ". ";
+        } else if (lead == 1) {
+          message =
+              system_name + ", " + text(0x62, "you're cleared to land.") + " ";
+        } else {
+          message = text(0x63, "You are cleared to land.") + " ";
+        }
+      }
+      if (std::uniform_int_distribution<int>{0, 1}(state.rng) == 0) {
+        message += text(0x64, "Commence final approach.");
+      } else {
+        message += text(0x65, "Welcome to") + " " + stellar->name + ". ";
+      }
+      if (stellar->service_cost > 0 && !stellar->hazard_marker) {
+        message += "  ";
+        message += text(is_station ? 0x67 : 0x68,
+                        is_station ? "[Docking fee is" : "[Landing fee is");
+        message += " " + std::to_string(stellar->service_cost) + " credits";
+        message += text(0x69, ".]");
+      }
+      NovaHud_ShowOverlayMessage(state, message, 0xe0, 0xe0, 0xe0, 0xfaU);
+    }
+  } else {
+    if (!eligible) {
+      return;
+    }
+    // travel_flags 0x20 (cannot-land) but otherwise eligible: the original
+    // still arms the timer and (when the land-command latch is set) shows STR
+    // 0x35. The port's docking gate rejects 0x20 targets, so only the timer
+    // arming/expiry is reproduced here; the overlay is TODO(decomp).
+    if (state.travel.engage_timer > 0x2ec) {
+      ++state.travel.engage_timer;
+    }
+    const float dx = state.player.pos_x - static_cast<float>(stellar->pos_x);
+    const float dy = state.player.pos_y - static_cast<float>(stellar->pos_y);
+    if (std::abs(dx) < kRequestAxisRange && std::abs(dy) < kRequestAxisRange &&
+        state.travel.engage_timer < kArmedTimer) {
+      state.travel.engage_timer = kArmedTimer;
+    }
+  }
+  if (state.travel.engage_timer > 0x7ff) {
+    state.travel.engage_timer = -1;
+    state.travel.selected_stellar_id = -1;
+  }
 }
 
 } // namespace game

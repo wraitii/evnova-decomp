@@ -743,6 +743,8 @@ void NovaPlayer_TickJumpArrival(SdlPlatform &platform,
   NovaTargeting_UpdateStellarAvailability(state);
   state.travel.selected_stellar_id = -1;
   state.travel.selected_stellar_is_manual = false;
+  // Arrival reset (0x0044f803): the landing/docking approach timer is wiped.
+  state.travel.engage_timer = -1;
 }
 
 // Loop-exit result of NovaPlayer_TickLandCommand: the Spaceport modal can
@@ -753,6 +755,32 @@ enum class LandCommandResult {
   kBlockedFrame,
 };
 
+// Ghidra 0x00462410 System_GetCurrentSystemLinkHalfSpan (landing use): the
+// landing envelope reads Sprite_GetShotHalfSpan (0x00462390) on the target's
+// link_a spin set, i.e. the full frame height (bottom - top). The original
+// caches the loaded set in g_spin_sprite_sets; the port resolves it lazily
+// through the view's SpriteStore. Returns 0 when no prepared sprite is
+// available, which selects the gate's 0x4b fallback. Skipped/already-covered:
+// the current-system and link_a_id bounds guards are implied by the arrival
+// gate's own checks.
+std::int16_t StellarArrivalSpriteFullHeight(SdlPlatform &platform,
+                                            SpaceflightView &view,
+                                            const GameState &state,
+                                            std::int16_t stellar_id) {
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr || stellar->link_a_id < 0 ||
+      stellar->link_a_id > 0xff) {
+    return 0;
+  }
+  const SpriteAsset *spin = view.sprite_store().Spin(
+      platform.renderer(),
+      static_cast<std::uint16_t>(stellar->link_a_id + 1000));
+  if (spin == nullptr || spin->frames.empty() || spin->tile_height <= 0) {
+    return 0;
+  }
+  return static_cast<std::int16_t>(spin->tile_height);
+}
+
 // Ghidra 0x0044aa70 PlayerTick_LandCommandDispatch (0x00451f8f ->
 // [0x004520ea], synthetic plan score 0.98): the land command (binding 5) with
 // its nearest-available-stellar auto-pick and the arrival checks opening the
@@ -761,6 +789,7 @@ enum class LandCommandResult {
 // (DAT_007cab1c < 2, g_license_check_frame_counter gate in the decompile);
 // the port auto-picks only once per press when nothing is targeted.
 LandCommandResult NovaPlayer_TickLandCommand(SdlPlatform &platform,
+                                             SpaceflightView &view,
                                              GameState &state) {
   // The original's land command (binding 5 in Ship_HandlePlayerShipCore
   // 0x0044aa70) auto-picks the nearest available travel stellar when no
@@ -774,8 +803,18 @@ LandCommandResult NovaPlayer_TickLandCommand(SdlPlatform &platform,
       state.travel_reticle_pulse = 256.0F;
     }
   }
+  const std::int16_t target_sprite_full_height = StellarArrivalSpriteFullHeight(
+      platform, view, state, state.travel.selected_stellar_id);
+  // A freshly selected stellar has not been approached yet. The original's
+  // travel-arm branch (0x00459160) initialises g_travel_engage_timer and
+  // returns without running the arrival gate; NovaUi_UpdateTravelEngagement-
+  // Progress arms it on the next tick. Avoid a misleading "too far" denial.
+  if (state.travel.engage_timer < 0) {
+    state.travel.engage_timer = 0;
+    return LandCommandResult::kContinue;
+  }
   LandedContext ctx;
-  if (NovaLanding_EnterDocked(state, ctx)) {
+  if (NovaLanding_EnterDocked(state, ctx, target_sprite_full_height)) {
     NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
                   ctx.stellar_id);
     // Mission resolution (Mission_TickReactionSlotsForTravelInteraction
@@ -1588,6 +1627,10 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         state.travel.selected_stellar_id !=
             travel_selection_latches.prev_travel_stellar) {
       state.travel_reticle_pulse = 256.0F;
+      // A fresh selection restarts the landing/docking approach
+      // (Stellar_ProcessTravelAndLanding 0x0045937c re-arms the timer for the
+      // new ai_secondary_target_slot).
+      state.travel.engage_timer = -1;
       travel_selection_latches.prev_travel_stellar =
           state.travel.selected_stellar_id;
     }
@@ -1599,7 +1642,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // jump is engaged (disabled through brake + hold + zoom).
     if (!player_tick_consumed && land_pressed && !state.travel.engaging) {
       const LandCommandResult landed =
-          NovaPlayer_TickLandCommand(platform, state);
+          NovaPlayer_TickLandCommand(platform, view, state);
       if (landed == LandCommandResult::kQuit) {
         returning_to_menu = true;
         break;
@@ -1607,6 +1650,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       if (landed == LandCommandResult::kBlockedFrame) {
         resync_frame_clock();
       }
+    }
+    // Landing/docking approach progress (NovaUi_UpdateTravelEngagementProgress
+    // 0x00459950): runs once per player frame, arms state.travel.engage_timer
+    // to 0x2ee while the selected stellar is within 250 px, shows the
+    // "cleared to dock/land" overlay, and expires the request back to -1.
+    // Gated while a jump is engaged, mirroring the player tick.
+    if (!player_tick_consumed && !state.travel.engaging) {
+      NovaTravel_UpdateEngagementProgress(state);
     }
     // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
     // interaction pathway. It is intentionally not substituted for landing.
@@ -1668,19 +1719,28 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         if (exit == NegotiationExit::kProceedToLand) {
           // The player paid an accepted bribe in the interaction window (the
           // only path out of that window that docks; landing itself stays on
-          // the normal second-E request flow). The original's bribe handoff
-          // sets g_travel_selected_stellar_id + g_travel_engage_timer (the
-          // travel-to-system warp) rather than requiring the 250-unit arrival
-          // envelope, so co-locate the ship at the destination before the
-          // normal dock gate.
+          // the normal second-E request flow). The original's bribe handoff is
+          // a granted landing (it arms g_travel_engage_timer and warps the ship
+          // to the destination), so co-locate the ship, arm the approach timer
+          // and settle the ship before the normal dock gate.
           const auto *st =
               state.scenario.Stellar(state.travel.selected_stellar_id);
           if (st != nullptr) {
             state.player.pos_x = static_cast<float>(st->pos_x);
             state.player.pos_y = static_cast<float>(st->pos_y);
           }
+          state.travel.engage_timer = 0x2ee;
+          state.player.vel_x = 0.0F;
+          state.player.vel_y = 0.0F;
+          state.player.ai_maneuver_timer_ms = 0.0F;
           LandedContext ctx;
-          if (NovaLanding_EnterDocked(state, ctx)) {
+          if (NovaLanding_EnterDocked(state,
+                                      ctx,
+                                      StellarArrivalSpriteFullHeight(
+                                          platform,
+                                          view,
+                                          state,
+                                          state.travel.selected_stellar_id))) {
             NovaLog::Info("destination-interaction dialog granted landing at "
                           "stellar {}; opening Spaceport",
                           ctx.stellar_id);
@@ -3140,10 +3200,11 @@ void RespawnResetPlayerShipState(GameState &state) {
   state.inventory.junk_counts.fill(0);
 
   // TODO(decomp(0x004b3350)) skipped: DAT_007353f4, g_last_system_for_ambient_
-  // rolls, _g_playerSelfDestructCountdown, g_travel_engage_timer,
+  // rolls, _g_playerSelfDestructCountdown,
   // g_travel_interaction_action_index_b / bribe_random_latch, DAT_00596d32/33
   // and g_travel_countdown - not modelled yet.
   state.travel.selected_stellar_id = -1;
+  state.travel.engage_timer = -1;
   state.travel.travel_hint_state = 0x7fff; // hint latch (0x004b3a3b)
   state.distress_cue_active = false;
   state.distress_cue_active_prev = false;

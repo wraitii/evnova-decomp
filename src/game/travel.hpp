@@ -317,4 +317,16 @@ void NovaTravel_Tick(GameState &state,
                      float frame_time_ms,
                      bool warp_up_sound_active = false);
 
+// Ghidra 0x00459950 NovaUi_UpdateTravelEngagementProgress: once per player
+// tick while a travel stellar is selected, advances the landing/docking
+// approach. When the selected stellar is in the current system and the
+// player's reputation/hazard/mission/government state admits it, the engage
+// timer (state.travel.engage_timer) is incremented and armed to 0x2ee the
+// first tick the ship is within 250 px on both axes, showing the
+// "cleared to dock/land" overlay; it expires (> 0x7ff) back to -1, clearing
+// the selection. Hypergate/wormhole (availability 0x1000/0x2000) and
+// cannot-land (travel_flags 0x20) arms are deferred (the port's docking gate
+// rejects those targets anyway).
+void NovaTravel_UpdateEngagementProgress(GameState &state);
+
 } // namespace game

@@ -139,8 +139,8 @@ WrapDescriptionLines(std::string_view text,
 enum class LandedDenial : std::uint8_t {
   kNone,         // the landing was accepted (ctx.landed == true)
   kUnavailable,  // no selected/valid ordinary stellar at all
-  kTooFar,       // selected stellar is outside the 250-unit arrival envelope
-  kTooFast,      // ship is moving too fast to dock (decomp constraint)
+  kTooFar,       // outside the envelope or the approach request is unarmed
+  kTooFast,      // within range but still moving / maneuvering
   kTooExpensive, // service_cost exceeds credits
 };
 
@@ -162,19 +162,37 @@ struct LandedContext {
   LandedService selection = LandedService::kLaunch;
 };
 
+// Stellar_ProcessTravelAndLanding (0x00457580) normal-arrival gate: the
+// selected stellar must be an ordinary active destination inside its per-axis
+// arrival envelope, with the approach armed and the ship nearly stationary.
+// The envelope is the stellar's spin-sprite span
+// (System_GetCurrentSystemLinkHalfSpan 0x00462410) scaled by 1.75
+// (DAT_005756a0), i.e. round(Sprite_GetShotHalfSpan * 1.75); a stellar with no
+// prepared sprite uses the original 0x4b (75) fallback. The
+// `target_sprite_full_height` argument is Sprite_GetShotHalfSpan on the link_a
+// spin set (full frame height, 0 when unavailable). The 250/0xfa check in the
+// original belongs to the starmap travel-arm branch (0x00459369), not this
+// normal dock gate; the 250 here is the request-arming radius owned by
+// NovaTravel_UpdateEngagementProgress.
+[[nodiscard]] float
+NovaLanding_ArrivalAxisRange(std::int16_t target_sprite_full_height);
+
 // Applies the normal-arrival subset of Stellar_ProcessTravelAndLanding
-// (0x00457580) / Stellar_TravelToSystem (0x00455e10): the selected stellar
-// must be an ordinary active destination and within the original's 250-unit
-// per-axis arrival envelope. Then verifies its fee, runs the arrival-side
+// (0x00457580) / Stellar_TravelToSystem (0x00455e10): after the
+// arrival-envelope
+// + approach gate above (engage timer >= 0x2ee, |vel| <= 0.75 per axis,
+// ai_maneuver_timer_ms <= 0), verifies its fee, runs the arrival-side
 // auto-refueller refuel (Outfit_RefuelShipWithCredits 0x004250f0), reconciles
 // the outfit pool and prepares the Spaceport context. This keeps the modal UI
 // out of the transition so its accounting is testable. Returns false without
-// mutating the player when arrival cannot proceed. Ship meters and the
-// calendar are NOT touched here: the original restores/refills them in the
-// LAUNCH tail (0x00455f99..0x00456268), after the interaction loop returns --
-// see NovaLanding_LaunchFromStellar.
-[[nodiscard]] bool NovaLanding_EnterDocked(GameState &state,
-                                           LandedContext &ctx);
+// mutating the player when arrival cannot proceed. Ship meters and the calendar
+// are NOT touched here: the original restores/refills them in the LAUNCH tail
+// (0x00455f99..0x00456268), after the interaction loop returns -- see
+// NovaLanding_LaunchFromStellar.
+[[nodiscard]] bool
+NovaLanding_EnterDocked(GameState &state,
+                        LandedContext &ctx,
+                        std::int16_t target_sprite_full_height = 0);
 
 // Ghidra 0x00455e10 Stellar_TravelToSystem, launch tail (0x00455f99..
 // 0x00456268): runs when the destination-interaction loop returns, i.e. on

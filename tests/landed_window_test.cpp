@@ -4,6 +4,7 @@
 #include "game/landed_store.hpp"
 #include "game/landed_window.hpp"
 #include "game/outfit.hpp"
+#include "game/travel.hpp"
 #include "game/weapon.hpp"
 
 #include <string>
@@ -109,6 +110,110 @@ TEST_CASE("description wrap preserves explicit blank lines",
   CHECK(single[1] == "two");
 }
 
+// Stellar_ProcessTravelAndLanding's normal-arrival envelope is not the
+// starmap travel-arm 250 (0x00459369); it is the target's spin-sprite span
+// scaled by 1.75 (0x004587a3), with a 0x4b fallback when no sprite is prepared
+// (0x00457f89).
+TEST_CASE("landing arrival envelope follows the sprite span",
+          "[landed_window]") {
+  // No prepared sprite -> the original 0x4b fallback.
+  CHECK(game::NovaLanding_ArrivalAxisRange(0) == 75.0F);
+  // round(height * 1.75), FIST/round-half-to-even semantics.
+  CHECK(game::NovaLanding_ArrivalAxisRange(32) == 56.0F);
+  CHECK(game::NovaLanding_ArrivalAxisRange(96) == 168.0F);
+  CHECK(game::NovaLanding_ArrivalAxisRange(150) == 262.0F);
+}
+
+// Regression: the gate must reject a target in the gap between the original
+// 0x4b fallback and the old hardcoded 250 envelope when no sprite is prepared.
+TEST_CASE("landing rejects a stellar outside the no-sprite envelope",
+          "[landed_window]") {
+  game::GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  game::Stellar &stellar = state.scenario.stellars[0];
+  stellar.name = "Testport";
+  stellar.pos_x = 0;
+  stellar.pos_y = 0;
+  stellar.flags = 0x1;
+  stellar.is_available = true;
+  stellar.system_id = 0;
+  state.player.current_system_id = 0;
+  state.player.pos_x = 120.0F; // > 75 (no-sprite), < 250 (old port limit)
+  state.player.pos_y = 0.0F;
+  state.travel.selected_stellar_id = 0x80;
+  state.travel.engage_timer = 0x2ee; // approach armed
+
+  game::LandedContext ctx;
+  CHECK_FALSE(game::NovaLanding_EnterDocked(state, ctx, 0));
+  CHECK(ctx.denial == game::LandedDenial::kTooFar);
+  // A prepared sprite whose depth spans the ship keeps the arrival in range.
+  CHECK(game::NovaLanding_EnterDocked(state, ctx, 96));
+}
+
+TEST_CASE("landing rejects a moving ship within range", "[landed_window]") {
+  game::GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  game::Stellar &stellar = state.scenario.stellars[0];
+  stellar.name = "Testport";
+  stellar.pos_x = 0;
+  stellar.pos_y = 0;
+  stellar.flags = 0x1;
+  stellar.is_available = true;
+  stellar.system_id = 0;
+  state.player.current_system_id = 0;
+  state.player.pos_x = 0.0F;
+  state.player.pos_y = 0.0F;
+  state.player.vel_x = 2.0F; // > 0.75, outside the docking envelope
+  state.travel.selected_stellar_id = 0x80;
+  state.travel.engage_timer = 0x2ee;
+
+  game::LandedContext ctx;
+  CHECK_FALSE(game::NovaLanding_EnterDocked(state, ctx, 96));
+  CHECK(ctx.denial == game::LandedDenial::kTooFast);
+
+  // Stopping the ship clears the last gate.
+  state.player.vel_x = 0.0F;
+  CHECK(game::NovaLanding_EnterDocked(state, ctx, 96));
+}
+
+TEST_CASE("landing approach timer arms within 250 and expires", "[travel]") {
+  game::GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  game::Stellar &stellar = state.scenario.stellars[0];
+  stellar.name = "Testport";
+  stellar.pos_x = 0;
+  stellar.pos_y = 0;
+  stellar.flags = 0x1;
+  stellar.is_available = true;
+  stellar.system_id = 0;
+  state.player.current_system_id = 0;
+  state.travel.selected_stellar_id = 0x80;
+  state.travel.engage_timer = -1;
+
+  // Far away: initialises the timer but does not arm it (the original's
+  // request radius is 0xfa on both axes).
+  state.player.pos_x = 400.0F;
+  game::NovaTravel_UpdateEngagementProgress(state);
+  CHECK(state.travel.engage_timer == 0);
+
+  // Within 250 on both axes: arms the request.
+  state.player.pos_x = 100.0F;
+  game::NovaTravel_UpdateEngagementProgress(state);
+  CHECK(state.travel.engage_timer == 0x2ee);
+
+  // Past 0x7ff the request expires and the selection clears.
+  state.travel.engage_timer = 0x800;
+  game::NovaTravel_UpdateEngagementProgress(state);
+  CHECK(state.travel.engage_timer == -1);
+  CHECK(state.travel.selected_stellar_id == -1);
+}
+
 TEST_CASE("normal landing arrival charges once; launch restores the ship",
           "[landed_window]") {
   // SDL-free core of Stellar_TravelToSystem's normal-arrival bookkeeping.
@@ -136,15 +241,16 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   state.player.credits = 100;
   state.player.pos_x = 3.0F;
   state.player.pos_y = -300.0F;
-  state.player.vel_x = 2.0F;
-  state.player.vel_y = -1.0F;
+  state.player.vel_x = 0.5F;
+  state.player.vel_y = -0.5F;
   state.player.speed = 4.0F;
   state.player.shield_points = 1.0F;
   state.player.armor_points = 2.0F;
   state.travel.selected_stellar_id = 0x80;
+  state.travel.engage_timer = 0x2ee; // approach armed
 
   game::LandedContext ctx;
-  REQUIRE(game::NovaLanding_EnterDocked(state, ctx));
+  REQUIRE(game::NovaLanding_EnterDocked(state, ctx, 96));
   CHECK(ctx.landed);
   CHECK(ctx.stellar_id == 0x80);
   CHECK(state.travel.landed_this_frame);

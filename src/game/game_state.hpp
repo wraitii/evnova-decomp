@@ -656,6 +656,13 @@ struct TravelState {
   // an auto-pick. Vestigial since the per-frame nearest-stellar auto-seed was
   // removed (the original has none); kept for the starmap-plot path.
   bool selected_stellar_is_manual = false;
+  // Ghidra g_travel_engage_timer (0x00597a0e). Landing/docking approach
+  // progress: -1 disarmed; NovaUi_UpdateTravelEngagementProgress arms it to
+  // 0x2ee when the selected stellar is within 250 px on both axes, increments
+  // it past 0x2ec, and expires it (> 0x7ff) back to -1 clearing the selection.
+  // The normal-arrival gate (Stellar_ProcessTravelAndLanding 0x00457e05)
+  // requires >= 0x2ee before it will dock.
+  std::int16_t engage_timer = -1;
   // Legacy latch retained for future arrival/docked reconstruction. Target
   // selection and target action do not set it: they only select a travel
   // stellar and open its destination-interaction window.
