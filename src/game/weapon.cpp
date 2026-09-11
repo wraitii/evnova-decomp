@@ -978,7 +978,11 @@ int NovaWeapon_SpawnProjectile(GameState &state,
 
   ActiveShot shot;
   shot.weapon_id = weapon_id;
-  shot.owner_ship_slot = spawn_without_owner ? -1 : owner_ship_slot;
+  // Shot_SpawnShotFromWeapon stores the owner slot even for ownerless
+  // (submunition) spawns; spawn_without_owner only suppresses the
+  // owner-relative position/velocity/heading/muzzle/turret setup below, which
+  // Shot_SpawnLinkedShotsOnImpact overwrites with the impact context.
+  shot.owner_ship_slot = owner_ship_slot;
   shot.target_ship_slot = target_ship_slot;
   shot.system_id = owner_in_range
                        ? state.ShipAt(static_cast<std::size_t>(owner_ship_slot))
@@ -1004,7 +1008,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   // Weapon_SelectTurretQuadrant result (-1 when the weapon has no turret
   // group or no owner context).
   int turret_quadrant = -1;
-  if (owner_in_range) {
+  if (owner_in_range && !spawn_without_owner) {
     Ship &owner = state.ShipAt(static_cast<std::size_t>(owner_ship_slot));
     shot.pos_x = owner.pos_x;
     shot.pos_y = owner.pos_y;
@@ -1177,6 +1181,158 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   }
   state.active_shots.push_back(shot);
   return static_cast<int>(state.active_shots.size() - 1);
+}
+
+// Ghidra 0x0046BA30 Ship_FindNearestHittableWeaponTarget. Returns the slot of
+// the nearest active ship in the player's system that this shot's weapon can
+// hit (Weapon_CanWeaponHitTarget 0x00426ef0 ->
+// NovaWeapon_CanProjectileHitShip), minimizing the integer-rounded squared
+// distance from the shot position. -1 when no candidate qualifies. Used by
+// Shot_SpawnLinkedShotsOnImpact for the Bible Flags2 0x0010 "submunitions fire
+// toward nearest valid target" arm.
+[[nodiscard]] std::int16_t
+FindNearestHittableWeaponTarget(const GameState &state,
+                                const ActiveShot &shot) {
+  std::int16_t best_slot = -1;
+  std::int16_t best_dist_sq = 0;
+  for (std::int16_t slot = 0;
+       slot < static_cast<std::int16_t>(GameState::kMaxShips);
+       ++slot) {
+    const Ship &candidate = state.ShipAt(static_cast<std::size_t>(slot));
+    if (!candidate.is_active ||
+        candidate.current_system_id != state.player.current_system_id) {
+      continue;
+    }
+    if (!NovaWeapon_CanProjectileHitShip(state, shot, slot)) {
+      continue;
+    }
+    // The original narrows each axis to a short before squaring, so the sum
+    // wraps at 16 bits; preserve that squared-distance comparison exactly.
+    const auto dx = static_cast<std::int16_t>(
+        std::abs(static_cast<int>(std::lround(candidate.pos_x)) -
+                 static_cast<int>(std::lround(shot.pos_x))));
+    const auto dy = static_cast<std::int16_t>(
+        std::abs(static_cast<int>(std::lround(candidate.pos_y)) -
+                 static_cast<int>(std::lround(shot.pos_y))));
+    const auto dist_sq = static_cast<std::int16_t>(dx * dx + dy * dy);
+    if (best_slot == -1 || dist_sq < best_dist_sq) {
+      best_slot = slot;
+      best_dist_sq = dist_sq;
+    }
+  }
+  return best_slot;
+}
+
+// Ghidra 0x00420D30 Shot_SpawnLinkedShotsOnImpact. Spawns the impacting
+// weapon's submunitions (Bible SubCount/SubType/SubTheta/SubLimit) at the
+// impact position, inheriting owner/target context and incrementing the
+// recursion generation for the SubLimit guard. Called by
+// Shot_ResolveShotCollisionHit (0x00437780) with allow_linked=1 on the
+// blast-proximity path. `impacting_shot` is read only before the first child is
+// appended, so a reference into GameState::active_shots is safe here.
+void NovaWeapon_SpawnLinkedShotsOnImpact(
+    GameState &state,
+    const ActiveShot &impacting_shot,
+    std::int16_t fallback_target_ship_slot) {
+  const Weapon *impacting_weapon = WeaponAt(state, impacting_shot.weapon_id);
+  if (impacting_weapon == nullptr) {
+    return;
+  }
+  const std::int16_t linked_weapon_id = impacting_weapon->range_link_weapon_id;
+  if (linked_weapon_id == -1 || impacting_weapon->range_link_gate < 1) {
+    return;
+  }
+  if (impacting_weapon->range_link_extra_count > 0 &&
+      impacting_weapon->range_link_extra_count <=
+          impacting_shot.linked_shot_generation) {
+    return;
+  }
+
+  // The original resolves the linked weapon's preloaded fire-sound handle and
+  // plays it spatialized at the impact against the player as listener. The
+  // clean-room queues it for the spaceflight loop, which owns SDL audio; its
+  // consumer applies the flags_primary 0x10 "don't retrigger while active"
+  // gate.
+  const Weapon *linked_weapon = WeaponAt(state, linked_weapon_id);
+  if (linked_weapon != nullptr && linked_weapon->fire_sound >= 0 &&
+      linked_weapon->fire_sound < 0x100) {
+    state.pending_fire_sounds.push_back(
+        {linked_weapon->fire_sound,
+         impacting_shot.pos_x,
+         impacting_shot.pos_y,
+         (linked_weapon->flags & 0x0010U) != 0U});
+  }
+
+  for (std::int16_t index = 0; index < impacting_weapon->range_link_gate;
+       ++index) {
+    const int spawned =
+        NovaWeapon_SpawnProjectile(state,
+                                   impacting_shot.owner_ship_slot,
+                                   fallback_target_ship_slot,
+                                   linked_weapon_id,
+                                   /*spawn_without_owner=*/true,
+                                   /*apply_random_spread=*/true);
+    if (spawned < 0) {
+      return;
+    }
+    ActiveShot &child = state.active_shots[static_cast<std::size_t>(spawned)];
+    child.pos_x = impacting_shot.pos_x;
+    child.pos_y = impacting_shot.pos_y;
+    child.vel_x = 0.0F;
+    child.vel_y = 0.0F;
+    child.linked_shot_generation = impacting_shot.linked_shot_generation + 1;
+    child.heading_deg = impacting_shot.heading_deg;
+    if (impacting_weapon->weapon_mode_code == 9) {
+      child.target_ship_slot = impacting_shot.target_ship_slot;
+    } else if ((impacting_weapon->flags_secondary & 0x0010U) != 0U) {
+      child.target_ship_slot = -1;
+      child.target_ship_slot = FindNearestHittableWeaponTarget(state, child);
+      if (child.target_ship_slot == -1) {
+        child.target_ship_slot = fallback_target_ship_slot;
+      }
+      if (child.target_ship_slot == -1) {
+        child.heading_deg = impacting_shot.heading_deg;
+      } else {
+        const Ship &target =
+            state.ShipAt(static_cast<std::size_t>(child.target_ship_slot));
+        child.heading_deg = BearingDeg(impacting_shot.pos_x,
+                                       impacting_shot.pos_y,
+                                       target.pos_x,
+                                       target.pos_y);
+      }
+    }
+    // Bible SubTheta: positive randomizes each heading within +/-spread;
+    // negative fans the rounds deterministically across
+    // abs(spread) * (SubCount-1) degrees centred on the parent heading.
+    const std::int16_t spread = impacting_weapon->range_link_spread;
+    if (spread < 0) {
+      const int step = std::abs(static_cast<int>(spread));
+      const int total = step * (impacting_weapon->range_link_gate - 1);
+      child.heading_deg -= static_cast<float>(total / 2);
+      child.heading_deg += static_cast<float>(step * index);
+    } else if (spread > 0) {
+      const int roll = RandomBelow(state, spread * 2 + 1);
+      child.heading_deg += static_cast<float>(spread - roll);
+    }
+    if (child.heading_deg < 0.0F) {
+      child.heading_deg += 360.0F;
+    }
+    if (child.heading_deg >= 360.0F) {
+      child.heading_deg -= 360.0F;
+    }
+    // Mode 6 keeps the parent's velocity and accelerates under guidance; every
+    // other mode rebuilds from the (spread) heading at the linked weapon speed.
+    const Weapon *child_weapon = WeaponAt(state, child.weapon_id);
+    if (child_weapon != nullptr && child_weapon->weapon_mode_code == 6) {
+      child.vel_x = impacting_shot.vel_x;
+      child.vel_y = impacting_shot.vel_y;
+    } else if (child_weapon != nullptr) {
+      AddPolarVelocity(static_cast<float>(RoundHeadingDeg(child.heading_deg)),
+                       child_weapon->projectile_speed / 100.0F,
+                       child.vel_x,
+                       child.vel_y);
+    }
+  }
 }
 
 // Ghidra Shot_UpdateShotGuidance (0x00431530): per-frame projectile guidance,

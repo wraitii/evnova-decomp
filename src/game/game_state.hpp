@@ -809,6 +809,11 @@ struct ActiveShot {
   // Ghidra ShotState +0x1e: optional impact-package row selected by the
   // chained-impact resolver. -1 means this round has no package dispatch.
   std::int16_t impact_package_id = -1;
+  // Ghidra ShotState.linked_shot_generation (+0x36), zeroed by
+  // Shot_SpawnShotFromWeapon and set to (parent + 1) by
+  // Shot_SpawnLinkedShotsOnImpact. Compared against the weapon's
+  // range_link_extra_count (Bible SubLimit) to stop recursive submunitions.
+  std::int16_t linked_shot_generation = 0;
   // Time-animated shot-frame stepping (Ghidra ShotState.frame_cycle_index / +
   // anim_elapsed). For a weapon whose flags_primary bit 0 is SET the shot uses
   // Shot_HandleShot's animated branch: anim_elapsed accumulates frame time and

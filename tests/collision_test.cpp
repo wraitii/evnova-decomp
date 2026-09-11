@@ -57,6 +57,41 @@ int SpawnTestShot(GameState &state) {
   return shot;
 }
 
+void ActivateHostileShip(GameState &state,
+                         std::int16_t slot,
+                         float x,
+                         float y) {
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.is_active = true;
+  ship.ship_instance_id = slot;
+  ship.ship_class_id = 0;
+  ship.current_system_id = 0;
+  ship.armor_points = 100.0F;
+  ship.shield_points = 100.0F;
+  ship.ai_behavior_code = 5;
+  ship.pos_x = x;
+  ship.pos_y = y;
+  ship.collision_radius_px = 10.0F;
+}
+
+// weapon[0] is the blast weapon that reaches weapon[1] as its submunition
+// (Bible SubCount/SubType).
+void SeedLinkedShotScenario(GameState &state) {
+  SeedCollisionScenario(state);
+  state.scenario.weapons.resize(2);
+  Weapon &parent = state.scenario.weapons[0];
+  parent.blast_radius = 50;
+  parent.projectile_speed = 100.0F; // 1 px/frame
+  parent.range_link_gate = 2;
+  parent.range_link_weapon_id = 1;
+  parent.range_link_spread = 0;
+
+  Weapon &child = state.scenario.weapons[1];
+  child.weapon_mode_code = -1;
+  child.projectile_speed = 200.0F; // 2 px/frame
+  child.lifetime_ticks = 20;
+}
+
 } // namespace
 
 TEST_CASE("basic projectile carries owner and lifetime state", "[collision]") {
@@ -571,6 +606,111 @@ TEST_CASE("inactive wreck holds the death screen until the -240 timer floor",
   CHECK(NovaPlayer_TickStatusAndOutfitEvents(state, 1.0F, false));
   CHECK(state.game_over_pending);
   CHECK(state.player.death_timer_active == Catch::Approx(-240.0F));
+}
+
+TEST_CASE("proximity blast spawns linked submunitions with inherited context",
+          "[collision][linked]") {
+  GameState state;
+  SeedLinkedShotScenario(state);
+  SpawnTestShot(state);
+  const float impact_x = state.active_shots[0].pos_x;
+  const float impact_y = state.active_shots[0].pos_y;
+
+  NovaWeapon_ResolveProjectileCollisions(state);
+
+  REQUIRE(state.active_shots.size() == 2);
+  for (const ActiveShot &child : state.active_shots) {
+    CHECK(child.weapon_id == 1);
+    CHECK(child.owner_ship_slot == 0);        // inherited owner
+    CHECK(child.target_ship_slot == 1);       // proximity fallback target
+    CHECK(child.linked_shot_generation == 1); // parent generation + 1
+    CHECK(child.pos_x == Catch::Approx(impact_x));
+    CHECK(child.pos_y == Catch::Approx(impact_y));
+    CHECK(child.vel_x == Catch::Approx(0.0F));
+    CHECK(child.vel_y == Catch::Approx(-2.0F)); // heading 0, 2 px/frame
+  }
+}
+
+TEST_CASE("negative SubTheta fans linked shots deterministically",
+          "[collision][linked]") {
+  GameState state;
+  SeedLinkedShotScenario(state);
+  state.scenario.weapons[0].range_link_gate = 3;
+  state.scenario.weapons[0].range_link_spread = -10;
+  SpawnTestShot(state);
+
+  NovaWeapon_ResolveProjectileCollisions(state);
+
+  REQUIRE(state.active_shots.size() == 3);
+  CHECK(state.active_shots[0].heading_deg == Catch::Approx(350.0F));
+  CHECK(state.active_shots[1].heading_deg == Catch::Approx(0.0F));
+  CHECK(state.active_shots[2].heading_deg == Catch::Approx(10.0F));
+}
+
+TEST_CASE("direct contact never spawns linked submunitions",
+          "[collision][linked]") {
+  GameState state;
+  SeedLinkedShotScenario(state);
+  SpawnTestShot(state);
+
+  // The direct sprite-contact pass passes allow_linked=0, so even a weapon
+  // with a valid linkage spawns nothing here.
+  NovaWeapon_ResolveDirectShotCollisions(state);
+  CHECK(state.active_shots.empty());
+  CHECK(state.ShipAt(1).shield_points == Catch::Approx(10.0F));
+}
+
+TEST_CASE("linked spawn requires a valid gate and linked weapon",
+          "[collision][linked]") {
+  GameState state;
+  SeedLinkedShotScenario(state);
+  ActiveShot parent;
+  parent.weapon_id = 0;
+  parent.owner_ship_slot = 0;
+
+  state.scenario.weapons[0].range_link_weapon_id = -1;
+  NovaWeapon_SpawnLinkedShotsOnImpact(state, parent, -1);
+  CHECK(state.active_shots.empty());
+
+  state.scenario.weapons[0].range_link_weapon_id = 1;
+  state.scenario.weapons[0].range_link_gate = 0;
+  NovaWeapon_SpawnLinkedShotsOnImpact(state, parent, -1);
+  CHECK(state.active_shots.empty());
+}
+
+TEST_CASE("SubLimit stops recursive linked submunitions",
+          "[collision][linked]") {
+  GameState state;
+  SeedLinkedShotScenario(state);
+  state.scenario.weapons[0].range_link_extra_count = 1;
+
+  ActiveShot parent;
+  parent.weapon_id = 0;
+  parent.owner_ship_slot = 0;
+  parent.linked_shot_generation = 1; // already at the SubLimit
+  NovaWeapon_SpawnLinkedShotsOnImpact(state, parent, -1);
+  CHECK(state.active_shots.empty());
+
+  parent.linked_shot_generation = 0;
+  NovaWeapon_SpawnLinkedShotsOnImpact(state, parent, -1);
+  CHECK(state.active_shots.size() == 2);
+}
+
+TEST_CASE("Flags2 0x0010 linked shots acquire the nearest hittable target",
+          "[collision][linked]") {
+  GameState state;
+  SeedLinkedShotScenario(state);
+  state.scenario.weapons[0].flags_secondary = 0x0010;
+  ActivateHostileShip(state, 2, 5.0F, 0.0F); // nearer than ship 1 at (10,0)
+  SpawnTestShot(state);
+
+  NovaWeapon_ResolveProjectileCollisions(state);
+
+  // The blast scan claims ship 1 first, but each child retargets to ship 2.
+  REQUIRE(state.active_shots.size() == 2);
+  for (const ActiveShot &child : state.active_shots) {
+    CHECK(child.target_ship_slot == 2);
+  }
 }
 
 } // namespace game

@@ -86,6 +86,23 @@ Point-defense (mode 9) shots are targetless and fly straight — `Shot_UpdateSho
 the lead was applied at fire time (mode-9 PD target selection, Weapon_SelectTurretTargetWithinArc 0x0043a310, remains
 unported).
 
+## Linked submunitions (Bible SubCount/SubType/SubTheta/SubLimit)
+
+`Shot_SpawnLinkedShotsOnImpact` (0x00420d30) is the only consumer of the `wëap` linkage fields. Resource mapping
+(loader 0x004bd3c0): `SubCount` +0x3e → `WeaponDef.range_link_gate`, `SubType` +0x40 → `range_link_weapon_id`
+(zero-based after the loader subtracts 0x80; out-of-range becomes -1), `SubTheta` +0x42 → `range_link_spread`
+(previously Ghidra `field_0x7e`; resource -1 is normalized to 0), `SubLimit` +0x44 → `range_link_extra_count`.
+
+The spawner runs on a **collision impact only when the blast-proximity pass (Shot_ResolveCollisions 0x00437e20) calls
+`Shot_ResolveShotCollisionHit` (0x00437780) with its trailing flag = 1; the direct sprite-contact pass
+(`Ship_HandleSpritePairCollision` 0x004374f0) passes 0**. It also runs from the lifespan-expiry arm of `Shot_HandleShot`
+(0x00435830), gated on `range_link_gate > 0` and `flags_secondary 0x20` (Flags2 "don't launch submunitions when the shot
+expires") clear; that callsite remains unported. Each child is spawned through `Shot_SpawnShotFromWeapon` with
+`spawn_without_owner = 1` (owner slot is still stored, only the owner-relative kinematics are suppressed) and then has
+its position/velocity/heading taken from the parent. `SubTheta < 0` fans the children deterministically; `SubTheta > 0`
+randomizes; `SubLimit` caps recursion via `ShotState.linked_shot_generation` (+0x36). See `src/game/weapon.cpp`
+`NovaWeapon_SpawnLinkedShotsOnImpact` and `tests/collision_test.cpp` `[linked]`.
+
 ## Notes for future RE
 
 - Treat wiki semantics as naming guidance, not absolute truth.

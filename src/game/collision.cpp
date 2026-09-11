@@ -13,6 +13,7 @@
 #include "spaceflight.hpp"
 #include "sprite_mask.hpp"
 #include "targeting.hpp"
+#include "weapon.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -960,16 +961,19 @@ void ResolveShipHitFromWeapon(GameState &state,
 // aligned splash to every other eligible ship.
 //
 // TODO(decomp) skipped: Weapon_SpawnWeaponImpactParticleBurst (the SWParticle
-// impact flurries; gated on WeaponDef.impact_particle_count > 0), and
-// Shot_SpawnLinkedShotsOnImpact (0x00420d30, gated on range_link_gate > 0 and
-// the allow_linked_shots flag). ShotState +0x32 damage_reduction is not
-// carried on ActiveShot; the original zero-initializes it and no writer was
-// found, so the subtraction is a no-op.
+// impact flurries; gated on WeaponDef.impact_particle_count > 0). ShotState
+// +0x32 damage_reduction is not carried on ActiveShot; the original zero-
+// initializes it and no writer was found, so the subtraction is a no-op.
+//
+// `shot_index` is used instead of a reference because the linked-shot spawner
+// appends to GameState::active_shots and may reallocate it; the shot is only
+// re-accessed through the index after the spawn.
 void ResolveShotCollisionHit(GameState &state,
-                             ActiveShot &shot,
+                             std::size_t shot_index,
                              Ship &target,
                              std::int16_t target_slot,
                              bool allow_linked_shots) {
+  ActiveShot &shot = state.active_shots[shot_index];
   if (target.ship_class_id < 0 ||
       target.ship_class_id == kShipClassInvalidSentinel) {
     return;
@@ -1091,9 +1095,16 @@ void ResolveShotCollisionHit(GameState &state,
                                    witness.voice_type_mode);
     }
   }
-  (void)allow_linked_shots; // linked-shot spawner deferred (see TODO above)
+  // Ghidra Shot_SpawnLinkedShotsOnImpact (0x00420d30) is reached only from
+  // the proximity/blast pass (flag != 0); the direct sprite-contact pass
+  // passes 0. Snapshot the impacting shot before the spawner can reallocate
+  // GameState::active_shots.
+  if (allow_linked_shots && weapon->range_link_gate > 0) {
+    const ActiveShot impacting_shot = state.active_shots[shot_index];
+    NovaWeapon_SpawnLinkedShotsOnImpact(state, impacting_shot, target_slot);
+  }
 
-  shot.consumed = true;
+  state.active_shots[shot_index].consumed = true;
 }
 
 // Ghidra Weapon_SpawnWeaponImpactEffectPackage (0x00462550), asteroid arm:
@@ -1581,7 +1592,9 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
   // Resolve the per-frame sprite masks the original's sprite layer would have
   // carried into the two pair-collision callbacks before testing contacts.
   RefreshCollisionMasks(state);
-  for (ActiveShot &shot : state.active_shots) {
+  for (std::size_t shot_index = 0; shot_index < state.active_shots.size();
+       ++shot_index) {
+    ActiveShot &shot = state.active_shots[shot_index];
     if (shot.life_ticks_remaining <= 0.0F && shot.life_frames > 0) {
       // Compatibility for records created by older callers/tests that only
       // populated the original integer lifetime view.
@@ -1629,7 +1642,7 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
         break;
       }
       ResolveShotCollisionHit(state,
-                              shot,
+                              shot_index,
                               state.ShipAt(static_cast<std::size_t>(slot)),
                               slot,
                               /*allow_linked_shots=*/false);
@@ -1815,7 +1828,14 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
   // clean-room resolves the same current-frame masks here so the stellar arm
   // works even when this pass runs without the direct pass (tests).
   RefreshCollisionMasks(state);
-  for (ActiveShot &shot : state.active_shots) {
+  // Process only the shots that exist when the pass begins. The original's
+  // fixed 0x80-slot pool could revisit a submunition appended into a free slot
+  // ahead of the cursor; this compacted vector always appends at the end, so
+  // new children first act on the next frame.
+  const std::size_t proximity_shot_count = state.active_shots.size();
+  for (std::size_t shot_index = 0; shot_index < proximity_shot_count;
+       ++shot_index) {
+    ActiveShot &shot = state.active_shots[shot_index];
     if (shot.life_ticks_remaining <= 0.0F && shot.life_frames > 0) {
       shot.life_ticks_remaining = static_cast<float>(shot.life_frames);
     }
@@ -1869,7 +1889,7 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
         if (dx * dx + dy * dy <=
             static_cast<int>(radius) * static_cast<int>(radius)) {
           ResolveShotCollisionHit(state,
-                                  shot,
+                                  shot_index,
                                   state.ShipAt(static_cast<std::size_t>(slot)),
                                   slot,
                                   /*allow_linked_shots=*/true);

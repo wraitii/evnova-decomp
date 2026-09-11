@@ -25,8 +25,9 @@
 //     and instant-kill non-immune hulls (see
 //     NovaStellar_HandleShipStellarCrash).
 //
-// Deferred scope: impact particle bursts, linked shots, kill chatter, the
-// player-owned stellar faction-combat events, and the mission disable
+// Deferred scope: impact particle bursts, the linked-shot expiry callsite in
+// Shot_HandleShot (the impact-linked spawner itself is ported), kill chatter,
+// the player-owned stellar faction-combat events, and the mission disable
 // bookkeeping inside the ship-hit path. Direct shot-vs-ship, shot-vs-asteroid
 // and shot/ship-vs-stellar contacts test the decoded sprite pixel masks
 // (Sprite_TestPixelMaskOverlap 0x00475c80) with the original bounding-circle
