@@ -45,6 +45,29 @@ constexpr int kFreeflightScoopCircleRadiusPx = 16;
 constexpr float kDisableArmorPinFraction = 1.0F / 3.0F;
 constexpr float kDisableArmorPinFractionCap0x10 = 0.1F;
 
+// Asteroid debris particle constants from Weapon_SpawnWeaponImpactEffectPackage
+// (0x00462550): speed DAT_00575740 = 0.2 px/tick, speed scatter 0x28, lifetime
+// [0xf0, 0x1e0], and position scatter = sprite frame height / 3. Every shipped
+// asteroid spin set (800..815) is 50x50, so the original's
+// Sprite_GetFrameFullHeight(*asteroid)/3 reduces to 16
+// (AsteroidState.collision_radius_px records the 25 px half-span).
+constexpr float kAsteroidDebrisParticleSpeed = 0.2F;
+constexpr std::int16_t kAsteroidDebrisParticleScatter = 0x28;
+constexpr std::int16_t kAsteroidDebrisLifeBase = 0xf0;
+constexpr std::int16_t kAsteroidDebrisLifeMax = 0x1e0;
+constexpr std::int16_t kAsteroidDebrisPositionScatter = 16;
+
+// The asteroid row stores a packed 15-bit tint; the original converts it to
+// the surface pixel format at load. Expand 5-bit channels to 8-bit for the
+// 24-bit SDL particle color (the standard (v << 3) | (v >> 2) expansion).
+[[nodiscard]] std::uint32_t ExpandAsteroidParticleColor(std::uint32_t rgb555) {
+  const std::uint32_t r = (rgb555 >> 10U) & 0x1fU;
+  const std::uint32_t g = (rgb555 >> 5U) & 0x1fU;
+  const std::uint32_t b = rgb555 & 0x1fU;
+  return ((r << 3U) | (r >> 2U)) << 16U | ((g << 3U) | (g >> 2U)) << 8U |
+         ((b << 3U) | (b >> 2U));
+}
+
 // Ghidra 0x004115c0 Ship_ClearShipState0x09Or0x0FToIdle.
 // The sole hit-resolution callsite invokes this after Ship_SetShipHostileTo-
 // Player has changed the state to 4, making the check normally inert. Keep
@@ -989,6 +1012,8 @@ void ResolveShotCollisionHit(GameState &state,
                               weapon->impact_effect_id,
                               weapon->splash_radius,
                               true);
+  NovaEffects_SpawnWeaponImpactBurstForWeapon(
+      state, shot.pos_x, shot.pos_y, *weapon, /*scatter=*/0x14);
 
   const int armor_damage = weapon->mass_damage;
   const int shield_damage = weapon->energy_damage;
@@ -1111,9 +1136,8 @@ void ResolveShotCollisionHit(GameState &state,
 // a broken asteroid spawns YieldQty resource-box freeflight objects, a debris
 // particle burst, its destruction area effect, and splits into child asteroids
 // from its def row (child types +0x06/+0x08, count derived from +0x0a), then
-// deactivates. TODO(decomp) skipped: the debris SWParticle burst (row +0x0c);
-// because that burst is skipped the child/yield RNG sequence diverges from the
-// original even though the distributions match.
+// deactivates. The debris burst runs between the resource boxes and the area
+// effect, matching the original RNG sequence.
 //
 // Resource-boxes: when YieldQty (row +0x02) > 0 the original rolls
 // `(NovaRandom_Range(0x65) + 0x32) * YieldQty * 0.01`, rounds it, and spawns
@@ -1145,6 +1169,19 @@ void ResolveAsteroidDestructionPackage(GameState &state,
           static_cast<std::int16_t>((asteroid.wander_type >> 2) + 1));
     }
   }
+  // Debris SWParticle burst (row +0x0c count, +0x18 color).
+  NovaEffects_SpawnWeaponImpactParticleBurst(
+      state,
+      asteroid.target_pos_x,
+      asteroid.target_pos_y,
+      kAsteroidDebrisParticleSpeed,
+      kAsteroidDebrisParticleScatter,
+      kAsteroidDebrisLifeBase,
+      kAsteroidDebrisLifeMax,
+      ExpandAsteroidParticleColor(def->color),
+      /*blend_mode=*/0x20,
+      def->field_0x0c,
+      kAsteroidDebrisPositionScatter);
   if (def->field_0x10 != -1) {
     NovaEffects_SpawnAreaImpact(state,
                                 asteroid.target_pos_x,
@@ -1198,8 +1235,8 @@ void ResolveAsteroidSplashImpact(GameState &state,
                               weapon->impact_effect_id,
                               weapon->splash_radius,
                               true);
-  // TODO(decomp) skipped: Weapon_SpawnWeaponImpactParticleBurst
-  // (impact_particle_count > 0).
+  NovaEffects_SpawnWeaponImpactBurstForWeapon(
+      state, shot.pos_x, shot.pos_y, *weapon, /*scatter=*/0x14);
 
   // Ship splash: only player-owned shots splash from asteroid hits, and
   // unlike the shot-vs-ship splash this arm does exclude immaterial
@@ -1919,8 +1956,8 @@ bool ResolveShotStellarContact(GameState &state,
                                 weapon.impact_effect_id,
                                 weapon.splash_radius,
                                 true);
-    // TODO(decomp) skipped: Weapon_SpawnWeaponImpactParticleBurst
-    // (impact_particle_count > 0).
+    NovaEffects_SpawnWeaponImpactBurstForWeapon(
+        state, shot.pos_x, shot.pos_y, weapon, /*scatter=*/0x14);
     shot.life_ticks_remaining = -1.0F;
     shot.consumed = true;
 
@@ -2090,6 +2127,10 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                                 weapon->impact_effect_id,
                                 weapon->splash_radius,
                                 true);
+    // Beam hits use scatter 0x19 (Shot_UpdateBeamHitQueue 0x0042f270); the
+    // projectile contact paths use 0x14.
+    NovaEffects_SpawnWeaponImpactBurstForWeapon(
+        state, shot.pos_x, shot.pos_y, *weapon, /*scatter=*/0x19);
     NovaEffects_SpawnImpactEffectPackage(
         state, shot.pos_x, shot.pos_y, shot.impact_package_id, false);
     ResolveShipHitFromWeapon(state,

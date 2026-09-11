@@ -589,6 +589,20 @@ struct Weapon {
   std::int16_t blast_radius = 0;      // ProxRadius18
   std::int16_t splash_radius = 0;     // BlastRadius1a
 
+  // Bible HitParticles +0x4c / HitPartLife +0x4e / HitPartVel +0x50 /
+  // HitPartColor +0x52, copied by the loader (0x004bd3c0) into
+  // WeaponDef.impact_particle_count / frame_base (+0x66/+0x68),
+  // impact_particle_speed (+0x54, raw * 0.01) and impact_particle_color
+  // (+0xac). These drive Weapon_SpawnWeaponImpactParticleBurst (0x004274d0):
+  // count single-pixel SWParticles with a randomized speed around
+  // impact_particle_speed and a lifetime in [frame_base, frame_base * 1.25].
+  // `impact_particle_frame_base` is misnamed upstream (Ghidra) -- it is the
+  // particle lifetime, not a sprite frame.
+  std::int16_t impact_particle_count = 0;
+  std::int16_t impact_particle_frame_base = 0;
+  float impact_particle_speed = 0.0F;      // normalized px/frame (raw * 0.01)
+  std::uint32_t impact_particle_color = 0; // 0x00RRGGBB
+
   // Fuse (resource +0x22; Ghidra WeaponDef.fuse_ticks). A positive value
   // advances the shot's fuse_elapsed timer in Shot_HandleShot.
   std::int16_t fuse_ticks = 0;

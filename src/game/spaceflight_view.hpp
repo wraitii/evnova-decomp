@@ -342,6 +342,10 @@ private:
   // Ghidra Shot_UpdateImpactEffectSprites (0x0042e160): draws the 32-slot
   // impact animation pool above shots and beams but below ship sprites.
   void DrawImpactEffects(SdlPlatform &platform, const GameState &state);
+  // Ghidra SWParticles_DrawParticles (0x0047bdd0): draws the single-pixel
+  // weapon-impact / asteroid-debris particles over the ships and impact
+  // sprites (the original's post-render particle pass).
+  void DrawSwParticles(SdlPlatform &platform, const GameState &state);
   // Ghidra 0x00438c40 (unnamed under-ships beam pass, draw proc of the second
   // gameplay sprite-world layer): draws queued beams whose weapon sets
   // flags_secondary 0x2000 (Bible "display the beam underneath ships").

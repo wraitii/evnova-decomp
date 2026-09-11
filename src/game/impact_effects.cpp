@@ -12,6 +12,14 @@ namespace {
 constexpr std::int16_t kFirstImpactEffect = 0;
 constexpr std::int16_t kLastImpactEffect = 63;
 constexpr std::int16_t kLargeEffectBase = 1000;
+// The original converts a pixel/frame quantity to the SWParticle pool's
+// 8.8 fixed-point representation by multiplying by 256.0f (DAT_00575270).
+constexpr float kParticleFixedScale = 256.0F;
+constexpr float kGameDegreesToRadians = 0.017453292519943295F;
+
+[[nodiscard]] std::int32_t ParticleFixed(float pixels) {
+  return static_cast<std::int32_t>(std::lround(pixels * kParticleFixedScale));
+}
 
 std::int16_t RandomRange(GameState &state, int bound) {
   if (bound <= 1) {
@@ -222,6 +230,102 @@ void NovaEffects_SpawnImpactEffectPackage(GameState &state,
   NovaEffects_SpawnAreaImpact(state, x, y, area_effect_id, 0, play_sound);
 }
 
+// Ghidra Weapon_SpawnWeaponImpactParticleBurst (0x004274d0).
+void NovaEffects_SpawnWeaponImpactParticleBurst(GameState &state,
+                                                float x,
+                                                float y,
+                                                float speed,
+                                                std::int16_t scatter,
+                                                std::int16_t life_base,
+                                                std::int16_t life_max,
+                                                std::uint32_t color,
+                                                std::int16_t blend_mode,
+                                                std::int16_t count,
+                                                std::int16_t position_scatter) {
+  if (count <= 0) {
+    return;
+  }
+  const int scatter_span = static_cast<int>(scatter) * 2 + 1;
+  const int scatter_floor = 100 - static_cast<int>(scatter);
+  const bool scale_speed = scatter > 0 && scatter < 100;
+  const int life_span =
+      static_cast<int>(life_max) - static_cast<int>(life_base) + 1;
+  const int position_span = static_cast<int>(position_scatter) * 100;
+
+  for (int i = 0; i < count; ++i) {
+    // Original order: scale RNG, heading RNG, then (for a scattered position)
+    // the offset-magnitude and offset-heading RNGs. Preserving the order keeps
+    // the shared game RNG stream aligned with the disassembly.
+    float particle_speed = speed;
+    if (scale_speed) {
+      particle_speed =
+          static_cast<float>(scatter_floor + RandomRange(state, scatter_span)) *
+          0.01F * particle_speed;
+    }
+    // Math_AddPolarVelocity: bearing 0 = up, increasing clockwise.
+    const float angle =
+        static_cast<float>(RandomRange(state, 0x168)) * kGameDegreesToRadians;
+    const float vel_x = std::sin(angle) * particle_speed;
+    const float vel_y = -std::cos(angle) * particle_speed;
+
+    std::int16_t life = life_base;
+    if (life_base < life_max) {
+      life =
+          static_cast<std::int16_t>(life_base + RandomRange(state, life_span));
+    }
+
+    float pos_x = x;
+    float pos_y = y;
+    if (position_scatter > 0) {
+      const float magnitude =
+          static_cast<float>(RandomRange(state, position_span)) * 0.01F;
+      const float offset_angle =
+          static_cast<float>(RandomRange(state, 0x168)) * kGameDegreesToRadians;
+      pos_x += std::sin(offset_angle) * magnitude;
+      pos_y += -std::cos(offset_angle) * magnitude;
+    }
+
+    // Ghidra 0x0047b960 SWParticles_SpawnParticle: the original free-head
+    // allocator writes the same 8.8 fixed state; the clean-room appends to a
+    // growable vector because the shipped 100000-slot pool is never full.
+    SwParticle particle;
+    particle.life_ticks = life;
+    particle.pos_x = ParticleFixed(pos_x);
+    particle.pos_y = ParticleFixed(pos_y);
+    particle.vel_x = ParticleFixed(vel_x);
+    particle.vel_y = ParticleFixed(vel_y);
+    particle.blend_mode = blend_mode;
+    particle.color = color;
+    state.sw_particles.push_back(particle);
+  }
+}
+
+// Convenience wrapper for the four weapon-impact callsites.
+void NovaEffects_SpawnWeaponImpactBurstForWeapon(GameState &state,
+                                                 float x,
+                                                 float y,
+                                                 const Weapon &weapon,
+                                                 std::int16_t scatter) {
+  if (weapon.impact_particle_count <= 0) {
+    return;
+  }
+  // Shot_ResolveShotCollisionHit computes round(frame_base * 1.25) as the
+  // lifetime upper bound (double DAT_005753e0 = 1.25).
+  const auto life_max = static_cast<std::int16_t>(std::lround(
+      static_cast<float>(weapon.impact_particle_frame_base) * 1.25F));
+  NovaEffects_SpawnWeaponImpactParticleBurst(state,
+                                             x,
+                                             y,
+                                             weapon.impact_particle_speed,
+                                             scatter,
+                                             weapon.impact_particle_frame_base,
+                                             life_max,
+                                             weapon.impact_particle_color,
+                                             /*blend_mode=*/0x20,
+                                             weapon.impact_particle_count,
+                                             /*position_scatter=*/0);
+}
+
 // Ghidra 0x0042e160 Shot_UpdateImpactEffectSprites.
 void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
   const float delta = std::max(0.0F, elapsed_ticks);
@@ -242,6 +346,41 @@ void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
     }
     instance.anim_time += definition->frame_rate_scale * delta;
   }
+}
+
+// The original's SWParticles_Update (0x0047c800) runs once per rendered frame
+// from the present hook (Frame_PresentViewportAndParticles 0x00439d40) and the
+// shipped sprite world has no FPS cap (SpriteWorld_SetTargetFps(surface, 0)),
+// so its lifetime and motion are frame-rate dependent. This port pins that
+// update cadence to a fixed 60/s (two updates per 30 Hz simulation tick) so
+// particle behavior is identical at any display refresh and matches the
+// original on a 60 Hz display. Asteroid debris (240-480 ticks) therefore
+// lives ~4-8s instead of the ~8-16s a 30 Hz tick would produce, and the
+// weapon impact sparks (life ~9-11) fade in a few frames.
+constexpr float kSwParticleUpdatesPerSimTick = 2.0F;
+
+// Ghidra SWParticles_Update (0x0047c800).
+void NovaEffects_TickSwParticles(GameState &state, float elapsed_ticks) {
+  state.sw_particle_tick_accumulator +=
+      std::max(0.0F, elapsed_ticks) * kSwParticleUpdatesPerSimTick;
+  while (state.sw_particle_tick_accumulator >= 1.0F) {
+    state.sw_particle_tick_accumulator -= 1.0F;
+    for (SwParticle &particle : state.sw_particles) {
+      if (particle.life_ticks <= 0) {
+        continue;
+      }
+      particle.life_ticks = static_cast<std::int16_t>(particle.life_ticks - 1);
+      if (particle.life_ticks > 0) {
+        particle.pos_x += particle.vel_x;
+        particle.pos_y += particle.vel_y;
+        // The shipped pool is allocated with gravity 0
+        // (SWParticles_AllocatePool(100000, 0)), so vel_y is not advanced.
+      }
+    }
+  }
+  std::erase_if(state.sw_particles, [](const SwParticle &particle) {
+    return particle.life_ticks <= 0;
+  });
 }
 
 } // namespace game
