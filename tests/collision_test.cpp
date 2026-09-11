@@ -696,6 +696,35 @@ TEST_CASE("SubLimit stops recursive linked submunitions",
   CHECK(state.active_shots.size() == 2);
 }
 
+TEST_CASE("expiry launches linked shots unless Flags2 0x20 suppresses it",
+          "[collision][linked]") {
+  GameState state;
+  SeedLinkedShotScenario(state);
+  SpawnTestShot(state);
+  state.active_shots[0].target_ship_slot = 1;
+  state.active_shots[0].life_ticks_remaining = 1.0F;
+
+  NovaWeapon_TickShots(state, 16.0F, 1.0F);
+
+  REQUIRE(state.active_shots.size() == 2);
+  for (const ActiveShot &child : state.active_shots) {
+    CHECK(child.weapon_id == 1);
+    CHECK(child.owner_ship_slot == 0);
+    CHECK(child.target_ship_slot == 1);
+    CHECK(child.linked_shot_generation == 1);
+  }
+
+  GameState suppressed_state;
+  SeedLinkedShotScenario(suppressed_state);
+  suppressed_state.scenario.weapons[0].flags_secondary = 0x0020U;
+  SpawnTestShot(suppressed_state);
+  suppressed_state.active_shots[0].life_ticks_remaining = 1.0F;
+
+  NovaWeapon_TickShots(suppressed_state, 16.0F, 1.0F);
+
+  CHECK(suppressed_state.active_shots.empty());
+}
+
 TEST_CASE("Flags2 0x0010 linked shots acquire the nearest hittable target",
           "[collision][linked]") {
   GameState state;
