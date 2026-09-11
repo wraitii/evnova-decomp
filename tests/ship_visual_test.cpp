@@ -141,6 +141,47 @@ TEST_CASE("running lights random pulse draws within the min/max band",
   CHECK(ship.light_blink_timer == 1.0F);
 }
 
+TEST_CASE("engine glow brightness tracks level with a random flicker",
+          "[ship][visual]") {
+  GameState state;
+  state.rng.seed(0x5eedU);
+  ShipClass cls;
+  cls.engine_glow_image_id = 1; // GlowImageID present
+  SetShipClass(state, cls);
+  Ship ship;
+  ship.ship_class_id = 0;
+
+  // Full level: level + rand(0..5) - 4 spans 28..33, so the post-clamp level
+  // is 28..32 and alpha lies in [28/32, 1.0].
+  ship.engine_glow_level = 32;
+  for (int i = 0; i < 16; ++i) {
+    NovaShip_TickWeaponSpriteAndRunningLights(state, ship, 1.0F);
+    CHECK(ship.engine_glow_intensity >= 28.0F / 32.0F);
+    CHECK(ship.engine_glow_intensity <= 1.0F);
+  }
+
+  // Dark level: level + rand(0..5) - 4 is always < 2 -> hidden (alpha 0).
+  ship.engine_glow_level = 0;
+  NovaShip_TickWeaponSpriteAndRunningLights(state, ship, 1.0F);
+  CHECK(ship.engine_glow_intensity == 0.0F);
+
+  // Cruise level 24: level + rand(0..5) - 4 spans 20..25, so alpha lies in
+  // [20/32, 25/32]. This is the original 0x0042a383 formula, not level/24.
+  ship.engine_glow_level = 24;
+  for (int i = 0; i < 16; ++i) {
+    NovaShip_TickWeaponSpriteAndRunningLights(state, ship, 1.0F);
+    CHECK(ship.engine_glow_intensity >= 20.0F / 32.0F);
+    CHECK(ship.engine_glow_intensity <= 25.0F / 32.0F);
+  }
+
+  // A class with no GlowImageID never lights the layer.
+  ShipClass no_glow;
+  SetShipClass(state, no_glow);
+  ship.engine_glow_level = 32;
+  NovaShip_TickWeaponSpriteAndRunningLights(state, ship, 1.0F);
+  CHECK(ship.engine_glow_intensity == 0.0F);
+}
+
 TEST_CASE("weapon-effects flash decays at the class rate and latches off",
           "[ship][visual]") {
   GameState state;

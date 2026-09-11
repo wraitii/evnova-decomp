@@ -390,6 +390,34 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
     }
   }
 
+  // Engine-glow sprite brightness (Ship_UpdateVisualState 0x00428340). When
+  // the class has a GlowImageID layer, the original computes
+  //   level = engine_glow_level + NovaRandom_Range(6) - 4
+  // and hides the glow when level < 2 (0x0042a391), else clamps level to 32
+  // (0x0042a3a4) and writes it into the sprite's RGB tint channels at
+  // brightness 32 (0x0042a4ca), i.e. additive contribution src * level/32.
+  // The port stores that fraction in engine_glow_intensity for the renderer.
+  // The original also folds the per-ship distance-brightness fog into NPC
+  // glow (level = min(level, 32 - distance_brightness*1.5), 0x00575340/
+  // 0x00575348); the port does not track the murk fog yet, so that reduction
+  // is not applied (TODO(decomp)).
+  if (cls->engine_glow_image_id > 0) {
+    const std::int16_t flicker =
+        static_cast<std::int16_t>(RollRandom(state, 6));
+    std::int16_t level =
+        static_cast<std::int16_t>(ship.engine_glow_level + flicker - 4);
+    if (level < 2) {
+      ship.engine_glow_intensity = 0.0F;
+    } else {
+      if (level > 0x20) {
+        level = 0x20;
+      }
+      ship.engine_glow_intensity = static_cast<float>(level) / 32.0F;
+    }
+  } else {
+    ship.engine_glow_intensity = 0.0F;
+  }
+
   // Running lights: only classes with a light layer run the blink state
   // machine (the original gates the whole block on g_ship_sprite_light[class]
   // being bound). BlinkMode 0/-1 leaves the lights at full brightness; 1 is the

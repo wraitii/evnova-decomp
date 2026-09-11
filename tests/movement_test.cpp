@@ -187,6 +187,28 @@ TEST_CASE("disabled and destroyed NPCs do not regenerate") {
   CHECK(destroyed.armor_points == Catch::Approx(0.0F));
 }
 
+TEST_CASE("disabled NPCs hold their heading instead of turning") {
+  game::GameState state;
+  game::ShipClass cls = TestShipClass();
+  cls.base_armor = 100;
+  cls.turn_rate = 40.0F; // 4 deg/tick if the turn arm ran
+  state.scenario.ships.push_back(cls);
+
+  game::Ship ship;
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = 1;
+  ship.armor_points = 20.0F; // below max/3 -> disabled
+  ship.ai_desired_heading_deg = 90;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+
+  // Ghidra gates the turn/regen block on !Ship_IsShipDisabled; a disabled
+  // hull keeps its current heading (and ai_turn_bias_dir stays 0).
+  CHECK(game::NovaAiShip_IsDisabled(state, ship));
+  CHECK(ship.heading == Catch::Approx(0.0F));
+  CHECK(ship.ai_turn_bias_dir == 0);
+}
+
 TEST_CASE("npc negative speed uses the physics override") {
   game::GameState state;
   game::Ship ship;
@@ -364,6 +386,41 @@ TEST_CASE("npc maneuver timer fades glow only once per frame") {
   // Ghidra's glow block takes the single fade label when the maneuver timer
   // suppresses thrust. It does not apply a second timer-specific decrement.
   CHECK(ship.engine_glow_level == 9);
+}
+
+TEST_CASE("npc in AI state 0x16 keeps the glow drive instead of fading") {
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass(); // eff_thrust 0.1
+  ship.engine_glow_level = 10;
+  ship.ai_state_code = 0x16; // yielding: timer active but the gate still opens
+  ship.ai_forward_thrust_cmd = 0.5F;
+  ship.ai_maneuver_timer_ms = 10.0F;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.0F);
+
+  // Ghidra 0x00433050 opens the movement/glow block for state 0x16, and the
+  // inner fade test requires `timer > 0 && !state0x16`. Full burn adds 1.
+  CHECK(ship.engine_glow_level == 11);
+}
+
+TEST_CASE("npc bank glow boost adds two with no 0x18 clamp") {
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  cls.sprite_behavior_flags = 0x3; // banking (bit 0) + engine-glow (bit 2)
+  cls.turn_rate = 10.0F;           // 1 deg/tick, so the target is far away
+  ship.engine_glow_level = 23;
+  ship.ai_desired_heading_deg = 90;
+  ship.ai_forward_thrust_cmd = 0.5F; // full burn (>= 2x eff_thrust 0.2)
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+
+  // The turn sets ai_turn_bias_dir; the bank boost adds 2 (23 -> 25, past the
+  // 0x18 cruise level) and the full-burn arm then adds 1 -> 26. The original
+  // 0x004350ee has no upper clamp.
+  CHECK(ship.ai_turn_bias_dir != 0);
+  CHECK(ship.engine_glow_level == 26);
 }
 
 TEST_CASE("state 2 mode 4 ramps engine glow with its departure step") {
