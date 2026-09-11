@@ -44,6 +44,22 @@ constexpr int kFreeflightScoopCircleRadiusPx = 16;
 constexpr float kDisableArmorPinFraction = 1.0F / 3.0F;
 constexpr float kDisableArmorPinFractionCap0x10 = 0.1F;
 
+// Ghidra 0x004115c0 Ship_ClearShipState0x09Or0x0FToIdle.
+// The sole hit-resolution callsite invokes this after Ship_SetShipHostileTo-
+// Player has changed the state to 4, making the check normally inert. Keep
+// that original ordering; this helper intentionally does not touch squad
+// attachment.
+void ClearState9OrFToIdle(Ship &ship) {
+  if (ship.ai_state_code != 9 && ship.ai_state_code != 0x0F) {
+    return;
+  }
+  ship.ai_secondary_target_slot = -1;
+  ship.primary_target_ship_slot = -1;
+  ship.ai_maneuver_timer_ms = 0.0F;
+  ship.ai_state_code = 0;
+  ship.ai_control_mode = 0;
+}
+
 // Ghidra Shot_ResolveShipHitFromWeapon player arms: quick-fail the first
 // active, unfailed mission with flags 0x0004 (fail when the player is
 // disabled/destroyed), with the STR# 0x7d2 0x11c overlay.
@@ -646,6 +662,7 @@ void ResolveShipHitFromWeapon(GameState &state,
   }
   const bool attacker_valid = ValidShipSlot(attacker_ship_slot);
 
+  // Ghidra 0x00415e80 Ship_IsShipInAiState0x0D runs inline here.
   // Disable-mode attackers (AI state 0x0D) and their leaders force the
   // leave-one-armor variant so their fire disables rather than destroys the
   // target they are locked on.
@@ -917,6 +934,10 @@ void ResolveShipHitFromWeapon(GameState &state,
       NovaAi_SetShipHostileToPlayer(state, target);
       if (target.ai_maneuver_timer_ms > kMaxManeuverTimerOnHit) {
         target.ai_maneuver_timer_ms = kMaxManeuverTimerOnHit;
+      }
+      if (target_slot != 0 && target.target_stellar_object_id == -1) {
+        ClearState9OrFToIdle(target);
+        target.primary_target_ship_slot = 0;
       }
     }
     if (suppress_retarget_logic && attacker_ship_slot == 0) {
@@ -1479,6 +1500,8 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
       return false;
     }
   }
+  // Ghidra 0x00415e60 Ship_IsShipInAiState0x10 runs inline here and in the
+  // beam-impact guard below.
   if (owner_slot > 0 && owner.ai_state_code == 0x10) {
     return false;
   }
@@ -1652,6 +1675,7 @@ void NovaWeapon_ResolveFreeflightScoop(GameState &state) {
       }
       // Re-read the latch per object: the original re-runs the outfit
       // recompute after every pickup, so a full hold stops mid-pass.
+      // Ghidra 0x00414530 Ship_IsShipInAiState0x11 runs inline here.
       const bool eligible = player_ship ? state.player.mining_scoop_active
                                         : ship.ai_state_code == 0x11;
       if (!eligible) {
@@ -1893,6 +1917,11 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
   if (!owner.is_active || !target.is_active ||
       owner.current_system_id != target.current_system_id ||
       owner.current_system_id != state.player.current_system_id) {
+    return;
+  }
+  // Ghidra 0x0042f270 Shot_UpdateBeamHitQueue rejects a queued beam's
+  // non-player target when it is in the scripted/invulnerable manoeuvre.
+  if (target_ship_slot > 0 && target.ai_state_code == 0x10) {
     return;
   }
   ActiveShot shot;

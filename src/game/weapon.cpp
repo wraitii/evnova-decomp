@@ -1150,6 +1150,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   // one armor point for that variant.
   shot.impact_variant =
       (w->flags_secondary & 0x1000U) != 0U ? static_cast<std::int8_t>(1) : 0;
+  // Ghidra 0x004115a0 Ship_IsShipInAiState0x0D runs inline here.
   // Shot_SpawnShotFromWeapon (0x0041fd30): owners in disable mode (AI state
   // 0x0D) also mark their shots to leave the target at 1 armor. The original
   // additionally marks shots from owners locked on a disabled target
