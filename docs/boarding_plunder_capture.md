@@ -278,8 +278,8 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    DrawOverlayMessage`) as the original's message rect does. Boarding range
    gate fixed: the sh\x8an descriptor is loaded at `ship_class_id + 0x80`
    (the renderer's id convention; the old code silently fell back to the
-   collision radius), and `Sprite_GetShotHalfSpan` /
-   `Sprite_GetFrameVerticalHalfSpan` return the FULL frame spans (bounds
+   collision radius), and `Sprite_GetFrameFullHeight` /
+   `Sprite_GetFrameFullWidth` return the FULL frame spans (bounds
    subtraction, default 0x20), so the gate is half the full frame per axis,
    not half of the half-frame (was 2× too strict).
 5. **Capture arm** — escort conversion + reset-after-boarding. DONE: the

@@ -77,7 +77,7 @@ net result directly; there is no separate invert step in SDL.
 (stellar id) matches the secondary target, then blits the sprite's **current
 animation frame** centred in the item-4 entry rect at **native size** (the
 rect is collapsed to the entry centre and expanded by
-`Sprite_GetShotHalfSpan` / `Sprite_GetFrameVerticalHalfSpan`; clipping is to
+`Sprite_GetFrameFullHeight` / `Sprite_GetFrameFullWidth`; clipping is to
 the window surface, so oversized sprites overflow the entry rect).
 
 The port resolves the same frame via `SpaceflightView::sprite_store().Spin(`

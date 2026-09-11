@@ -755,28 +755,60 @@ enum class LandCommandResult {
   kBlockedFrame,
 };
 
-// Ghidra 0x00462410 System_GetCurrentSystemLinkHalfSpan (landing use): the
-// landing envelope reads Sprite_GetShotHalfSpan (0x00462390) on the target's
-// link_a spin set, i.e. the full frame height (bottom - top). The original
-// caches the loaded set in g_spin_sprite_sets; the port resolves it lazily
-// through the view's SpriteStore. Returns 0 when no prepared sprite is
-// available, which selects the gate's 0x4b fallback. Skipped/already-covered:
-// the current-system and link_a_id bounds guards are implied by the arrival
-// gate's own checks.
+// Ghidra 0x00462410 System_GetCurrentSystemLinkSpriteHeight (landing use): the
+// landing envelope reads Sprite_GetFrameFullHeight (0x00462390) on the target's
+// link_a spin set, i.e. the full frame height (bottom - top of the sprite's
+// placed bounds +0x20/-+0x1c). The gate (Stellar_ProcessTravelAndLanding
+// 0x00458e33/0x00458f7d) applies a two-tier fallback before this runs:
+//   - the stellar's ambient sprite (StellarDef+0x0) not prepared -> the gate
+//     uses 0x4b (75) directly, without calling this;
+//   - otherwise this runs and, when the link_a spin set is missing/unprepared
+//     (an active stellar can be displaying its link_b set) or the stellar is
+//     not in the current system, logs and returns 0x96 (150).
+// The port approximates "ambient sprite prepared" as "the stellar's displayed
+// spin set resolves" (link_b when active, else link_a). Returns 0 only for
+// the first tier; the 0x96 tier returns 150 so the envelope becomes
+// round(150 * 1.75) = 262 as in the original.
 std::int16_t StellarArrivalSpriteFullHeight(SdlPlatform &platform,
                                             SpaceflightView &view,
                                             const GameState &state,
                                             std::int16_t stellar_id) {
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
-  if (stellar == nullptr || stellar->link_a_id < 0 ||
-      stellar->link_a_id > 0xff) {
+  if (stellar == nullptr) {
     return 0;
+  }
+  // Tier 1: no prepared ambient sprite -> the gate's own 0x4b fallback.
+  const std::int16_t displayed_link =
+      NovaTargeting_StellarSpriteLinkId(*stellar);
+  if (displayed_link < 0 || displayed_link > 0xff) {
+    return 0;
+  }
+  const SpriteAsset *displayed = view.sprite_store().Spin(
+      platform.renderer(), static_cast<std::uint16_t>(displayed_link + 1000));
+  if (displayed == nullptr || displayed->frames.empty() ||
+      displayed->tile_height <= 0) {
+    return 0;
+  }
+  // Tier 2: System_GetCurrentSystemLinkSpriteHeight on link_a.
+  if (stellar->link_a_id < 0 || stellar->link_a_id > 0xff ||
+      stellar->system_id != state.player.current_system_id) {
+    NovaLog::Info("stellar {} link half-span fallback 0x96: link_a_id={}, "
+                  "system {} vs current {}",
+                  stellar_id,
+                  stellar->link_a_id,
+                  stellar->system_id,
+                  state.player.current_system_id);
+    return 0x96;
   }
   const SpriteAsset *spin = view.sprite_store().Spin(
       platform.renderer(),
       static_cast<std::uint16_t>(stellar->link_a_id + 1000));
   if (spin == nullptr || spin->frames.empty() || spin->tile_height <= 0) {
-    return 0;
+    NovaLog::Info("stellar {} link_a spin set {} unavailable; half-span "
+                  "fallback 0x96",
+                  stellar_id,
+                  stellar->link_a_id + 1000);
+    return 0x96;
   }
   return static_cast<std::int16_t>(spin->tile_height);
 }
@@ -1048,7 +1080,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   HudRenderer hud;
   hud.Install(platform, state);
   // The radar resolves stellar blip sizes through the view's sprite store
-  // (Sprite_GetShotHalfSpan on each loaded spin set).
+  // (Sprite_GetFrameFullHeight on each loaded spin set).
   hud.AttachSpriteStore(&view.sprite_store());
 
   // Preload the complete gameplay sound handle table before the first frame.

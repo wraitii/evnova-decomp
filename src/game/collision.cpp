@@ -307,12 +307,12 @@ void BindEntityMask(CollisionMaskBinding &binding,
 }
 
 // k_pixel_collision_frame_scale_threshold_f64 (0x005754c8) and the
-// Sprite_GetShotHalfSpan (0x00462390) boundary. Ship_HandleSpritePairCollision
-// (0x004374f0) uses the opaque mask only when `g_avg_frame_tick_scale < 2.0`
-// AND the target ship sprite's full frame height is > 0x20; otherwise it
-// deliberately uses the bounding circle. `g_avg_frame_tick_scale` is the
-// normalized 30 Hz simulation scale; the port's equivalent is
-// GameState::last_frame_tick_scale.
+// Sprite_GetFrameFullHeight (0x00462390) boundary.
+// Ship_HandleSpritePairCollision (0x004374f0) uses the opaque mask only when
+// `g_avg_frame_tick_scale < 2.0` AND the target ship sprite's full frame height
+// is > 0x20; otherwise it deliberately uses the bounding circle.
+// `g_avg_frame_tick_scale` is the normalized 30 Hz simulation scale; the port's
+// equivalent is GameState::last_frame_tick_scale.
 constexpr float kPixelMaskFrameScaleThreshold = 2.0F; // 0x005754c8
 constexpr int kPixelMaskFrameHeightThreshold = 0x20;
 

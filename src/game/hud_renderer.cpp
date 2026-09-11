@@ -1456,7 +1456,7 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
                             (st->availability_flags & 0x3000U) == 0U;
         if (planet) {
           // Disc radius tier from the spin sprite half-span
-          // (Sprite_GetShotHalfSpan 0x00462390, default 0x20).
+          // (Sprite_GetFrameFullHeight 0x00462390, default 0x20).
           std::int16_t half_span = kRadarDefaultHalfSpan;
           if (sprite_store_ != nullptr) {
             const SpriteAsset *set = sprite_store_->Spin(

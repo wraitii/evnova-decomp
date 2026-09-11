@@ -71,7 +71,7 @@ public:
 
   // Non-owning pointer to the spaceflight view's sprite store, used to
   // resolve each stellar body's spin sprite half-span for the radar blip
-  // size tiers (Sprite_GetShotHalfSpan 0x00462390 on the loaded spin set).
+  // size tiers (Sprite_GetFrameFullHeight 0x00462390 on the loaded spin set).
   void AttachSpriteStore(const SpriteStore *store) { sprite_store_ = store; }
 
   [[nodiscard]] bool installed() const { return installed_; }
