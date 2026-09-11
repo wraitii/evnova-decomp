@@ -57,6 +57,8 @@ and wrap up. Do not use compaction to reset these limits. Respect budget reminde
 if usage or cost measurements are unavailable, do not invent them.
 
 Complete the repository's required validation and the task-specific cases above.
+Run validation from the repository root. For resource-backed tests, report
+whether they executed against the archives or skipped.
 Mark unfinished checks as pending. If blocked, explain the evidence and smallest
 missing decision; continue useful in-scope work that does not depend on it.
 
@@ -65,6 +67,9 @@ the current milestone. Store long decompiles and diagnostics in files and read
 targeted portions. Preserve complete build logs and exit statuses without piping
 builds through `head`/`tail`. Patch only affected tracker rows. Ensure newly
 documented Ghidra behavior, tracker claims, and actual code agree before wrapping up.
+If evidence changes a field's meaning, audit every reader/writer and remove stale
+names. For cross-layer work, verify resource, frame, anchor, and reset state agree,
+then search changed docs and TODOs for superseded claims.
 
 ## Result and continuation note
 

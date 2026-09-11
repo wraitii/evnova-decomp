@@ -5,6 +5,9 @@ It runs Pi over RPC, stores detailed output on disk, reports compact status, and
 keeps completed sessions open for review and follow-ups. Requires Node and Pi.
 Only one session should edit the checkout at a time.
 
+Each fresh external-provider session may require explicit user approval because
+relevant repository contents can be sent to the configured model provider.
+
 ## Prepare and launch
 
 ```sh
@@ -63,6 +66,13 @@ Review `git status --short`, `git diff`, and `git diff --cached`, comparing with
 the saved baseline. Include untracked files and any authorized commits since
 the starting commit. Check the result's evidence and validation, then choose the
 next step; don't automatically repeat successful checks on unchanged code.
+Run builds and tests from the repository root; resource-backed tests may locate
+the shipped archives relative to it. Report whether those tests ran or skipped.
+
+For cross-layer changes, verify resource selection, frames, anchors, and reset
+state agree between simulation and rendering. If a field's meaning changes,
+audit every reader and writer. Search changed docs, trackers, and TODOs for stale
+names or "unported" claims before handoff.
 
 For a focused follow-up with enough context and budget, write a short task file:
 
@@ -74,6 +84,8 @@ Use `steer` instead of `prompt` to correct ongoing work. Commands are queued;
 check the managed process output/status for acceptance. At a context boundary,
 close the idle session and start a fresh directory with the continuation note
 and review findings as the brief. Do not carry the raw transcript forward.
+A single narrow correction pass may continue to about 25% context; after that,
+finish review locally or start a fresh session.
 
 ```sh
 node tools/pi_session.mjs close --run /absolute/run/dir
