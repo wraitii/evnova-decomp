@@ -19,6 +19,12 @@
 
 namespace game {
 
+// Ghidra g_player_death_timer_scale (0x00575378): the player's death
+// presentation timer is seeded at 3x the class DeathDelay. Shared by the
+// Ship_UpdateVisualState reseed (NovaShip_TickDestroyedShipVisualState) and
+// the hit-site wreck fade timer in collision.cpp.
+inline constexpr float kPlayerDeathTimerScale = 3.0F;
+
 // Resource four-byte type code for the ship-animation descriptor (sh\x8an).
 constexpr std::uint32_t kShipVisualResourceType = 0x73688a6e;
 

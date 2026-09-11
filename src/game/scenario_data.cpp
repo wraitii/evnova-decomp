@@ -1477,6 +1477,10 @@ bool ScenarioData::LoadFromArchives() {
         // Persist the hull sheet id so the collision mask refresh can resolve
         // the class's rotation frames without re-reading sh\x8an each frame.
         cls.base_image_id = base_image;
+        // Hull frame dimensions (BaseXSize/BaseYSize), used by the
+        // Ship_UpdateVisualState death-puff scatter.
+        cls.base_x_size = ReadBe16(*shan, 0x06);
+        cls.base_y_size = ReadBe16(*shan, 0x08);
         // Ghidra ShipClass_LoadShipClassVisualAndLaunchData (0x004b4ee0)
         // copies sh\x8an +0x2e into ShipClassDef +0xa24. Bible Flags 0x0001:
         // "extra frames in base image are used to display banking. The first

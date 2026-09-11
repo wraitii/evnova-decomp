@@ -172,10 +172,11 @@ TEST_CASE("disabled and destroyed NPCs do not regenerate") {
   CHECK(game::NovaAiShip_IsDisabled(state, disabled));
   CHECK(disabled.shield_points == Catch::Approx(10.0F));
   CHECK(disabled.armor_points == Catch::Approx(20.0F));
-  // Ship_HandleShip's DAT_00575448 damping is gradual, not an immediate stop.
-  CHECK(disabled.vel_y == Catch::Approx(-9.4F));
-  CHECK(disabled.pos_y == Catch::Approx(-9.4F));
-  CHECK(disabled.speed == Catch::Approx(9.4F));
+  // Ship_HandleShip's g_fire_restricted_ship_velocity_damp (0x00575448) is
+  // 0.995: a disabled ship drifts to a stop gradually, not immediately.
+  CHECK(disabled.vel_y == Catch::Approx(-9.95F));
+  CHECK(disabled.pos_y == Catch::Approx(-9.95F));
+  CHECK(disabled.speed == Catch::Approx(9.95F));
 
   game::Ship destroyed = disabled;
   destroyed.shield_points = 10.0F;
@@ -444,11 +445,35 @@ TEST_CASE("destroyed npc coasts with its inertia instead of stopping") {
 
   game::NovaShip_TickNpcShips(state, 1.0F);
 
-  // Ship_HandleShip applies the disabled 0.94 damp then integrates one tick;
+  // Ship_HandleShip applies the disabled 0.995 damp then integrates one tick;
   // the wreck must not be pinned at its destruction point.
-  CHECK(ship.vel_x == Catch::Approx(9.4F));
-  CHECK(ship.pos_x == Catch::Approx(9.4F));
+  CHECK(ship.vel_x == Catch::Approx(9.95F));
+  CHECK(ship.pos_x == Catch::Approx(9.95F));
   CHECK(ship.death_timer_active == Catch::Approx(4.0F));
+}
+
+TEST_CASE("destroyed npc keeps its velocity through the AI decision pass") {
+  game::GameState state;
+  state.scenario.ships.emplace_back(TestShipClass());
+  state.scenario.ships[0].base_armor = 100;
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.current_system_id = 0;
+  ship.ship_class_id = 0;
+  ship.ai_behavior_code = 3;
+  ship.armor_points = -1.0F; // destroyed
+  ship.death_timer_active = 5.0F;
+  ship.vel_x = 10.0F;
+  ship.pos_x = 0.0F;
+
+  // Model the live frame order: the scope-6 AI pass runs before the scope-4/5
+  // ship pass (NovaFrame_TickSystems). The AI pass used to zero vel_x/vel_y for
+  // destroyed hulls, which pinned every wreck before the integrator ran.
+  game::NovaShip_TickNpcAi(state, 1.0F);
+  CHECK(ship.vel_x == Catch::Approx(10.0F)); // AI pass must not clear inertia
+  game::NovaShip_TickNpcShips(state, 1.0F);
+  CHECK(ship.vel_x == Catch::Approx(9.95F));
+  CHECK(ship.pos_x == Catch::Approx(9.95F));
 }
 
 // --- Turn-rate floor (Ship_ComputeShipMaxTurnRateDeg NPC branch) ---

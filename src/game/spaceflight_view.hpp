@@ -92,7 +92,7 @@ public:
   void DrawTravelTargetReticle(SdlPlatform &platform, const GameState &state);
 
   // Ghidra Frame_UpdateFadingEffectSprites (0x0043b170): directional debris
-  // fragments emitted by Ship_SpawnShipDestructionDebrisPuff.
+  // fragments emitted by Shot_SpawnShipDestructionDebrisPuff (0x00428090).
   void DrawFadingEffects(SdlPlatform &platform, const GameState &state);
 
   // FreeflightObjectState pool (jettisoned cargo/junk pods, launched drones

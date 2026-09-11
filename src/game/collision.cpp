@@ -748,41 +748,17 @@ void ResolveShipHitFromWeapon(GameState &state,
     ApplyArmorDamage(target, armor_damage, force_armor_only);
   }
 
-  // Shot_ResolveShipHitFromWeapon leaves destruction as an armor-state. The
-  // later Ship_HandleShip path owns the original fading debris pool; queue the
-  // first visible equivalent at the exact alive -> destroyed transition so a
-  // lethal NPC hit cannot leave its hull silently on screen.
+  // Shot_ResolveShipHitFromWeapon leaves destruction as an armor-state: the
+  // hit site only records the alive -> destroyed transition and clears the
+  // slot's targeting references. Ship_HandleShip (0x00433050) seeds and runs
+  // the NPC death presentation, and Ship_UpdateVisualState (0x00428340) seeds
+  // the timer for NPCs and the player (DeathDelay, x3 for the player via
+  // g_player_death_timer_scale 0x00575378), drives the Explode1 debris cadence
+  // and spawns the Explode2 finale. No explosion or timer is spawned here.
   if (!was_destroyed && IsDestroyed(target) &&
       !target.destruction_visual_triggered) {
     target.destruction_visual_triggered = true;
-    const std::int16_t death_delay =
-        target_class == nullptr
-            ? 0
-            : std::max<std::int16_t>(0, target_class->death_delay_frames);
-    // Unit/test states without loaded ship tables retain the old armor-only
-    // sentinel; real scenario ships use the Bible DeathDelay timer. The timer
-    // itself is seeded by Ship_UpdateVisualState (0x00428340): x1 for NPCs and
-    // x3 for the player (g_player_death_timer_scale 0x00575378). NPCs run
-    // through the port's Ship_UpdateVisualState pass; the player's is bridged
-    // in NovaPlayer_TickStatusAndOutfitEvents, which owns the 3x scale, so
-    // leave the player's timer untouched here.
-    if (target_class != nullptr && death_delay > 0 && target_slot != 0) {
-      target.death_timer_active = static_cast<float>(death_delay);
-    }
-    target.destruction_visual_timer_ms =
-        static_cast<float>(death_delay) * (1000.0F / 30.0F);
     NovaTargeting_ClearDestroyedShipReferences(state, target_slot);
-    NovaEffects_SpawnShipDestructionBurst(
-        state,
-        target,
-        target_class == nullptr
-            ? 0
-            : target_class->destruction_effect_while_breaking);
-    if (target.destruction_visual_timer_ms <= 0.0F && target_class != nullptr) {
-      NovaEffects_SpawnShipDestructionFinale(
-          state, target, target_class->destruction_effect_final);
-      target.destruction_finale_triggered = true;
-    }
     // TODO(decomp) skipped: kill-side Government_ProcessFactionCombatEvent
     // (event 3) plus Frame_AddCombatRatingPoints when the victim's government
     // tracks reputation.

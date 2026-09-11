@@ -51,6 +51,10 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   // sh\x8an carries Flags 0x0041: bit 0 = banking (base sheet rows: level /
   // bank left / bank right, Bible Flags 0x0001), bit 6 = 0x40.
   CHECK(ship->sprite_behavior_flags == 0x0041);
+  // Hull frame dimensions are decoded from sh\x8an +0x06/+0x08 (the Shuttle
+  // sheet is 24x24) for the death debris-puff scatter.
+  CHECK(ship->base_x_size == 24);
+  CHECK(ship->base_y_size == 24);
 
   // Weapon id 0x80 (a projectile): values verified from its payload.
   const Weapon *w = data.Weapon(0x80);

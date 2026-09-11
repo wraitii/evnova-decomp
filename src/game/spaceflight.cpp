@@ -53,7 +53,11 @@ constexpr float kPlayerFireRestrictedVelocityDamp = 0.995F;
 // window expires.
 constexpr float kRecentlyHitRegenCutoff = 0.0F;
 // g_jump_turnaround_turn_rate_addend (0x0057555c, float): death-timer
-// countdown step per 30 Hz tick.
+// countdown step per reference frame. The NPC arm of Ship_HandleShip
+// (0x00433050) uses the equal-valued g_cloak_fade_passive_decay (0x00575318)
+// for the same step. Both are constants in the original, so the port advances
+// the timer on the normalized 30 Hz basis (elapsed_ticks), which is the same
+// one whole tick per 30 Hz reference frame.
 constexpr float kJumpTurnaroundTurnRateAddend = 1.0F;
 // DAT_00575538: shared zero sentinel for the death-timer / bomb-timer floors.
 constexpr float kDeathTimerExpireFloor = 0.0F;
@@ -171,10 +175,13 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
       ship.ai_control_mode = 0;
       ship.ai_forward_thrust_cmd = 0.0F;
       ship.ai_desired_speed = 0.0F;
-      ship.vel_x = 0.0F;
-      ship.vel_y = 0.0F;
       ship.engine_glow_level = 0;
       ship.engine_glow_intensity = 0.0F;
+      // Do NOT clear vel_x/vel_y here. Ship_HandleShip (0x00433050) integrates
+      // a wreck's position from its residual velocity and only applies the
+      // 0.995 fire-restricted damp, so destroyed hulls coast out instead of
+      // stopping dead. The ship pass (Stub_HandleShips) runs after this pass
+      // and performs that integration.
       continue;
     }
     // Frame_TickSystems skips AI entirely for behavior 0. This is important
@@ -229,6 +236,94 @@ void Stub_CalcAiOdds(GameState &state) {
 void Stub_HandleShots(GameState &state, float elapsed_ticks) {
   constexpr float kOriginalTickMs = 1000.0F / 30.0F;
   NovaWeapon_TickShots(state, elapsed_ticks * kOriginalTickMs, elapsed_ticks);
+}
+
+// Ghidra Ship_HandleShip (0x00433050) destruction debris-puff arm. Once the
+// death timer is running, the wreck emits a directional debris fragment at the
+// exact death-timer halfway point (gated by the personality Flags 0x2 /
+// government Flags 0x100 rule) and then through the class timed-action cascade
+// during the second half. This is separate from the Ship_UpdateVisualState
+// (0x00428340) Explode1/Explode2 area impacts owned by ship_visual.cpp. Runs
+// for NPCs only: Ship_HandlePlayerShipCore (0x0044aa70) has no such arm.
+// `ship.death_timer_active` has already been decremented by elapsed_ticks for
+// this frame by the caller and was > 0 before the decrement.
+void TickShipHandleDestructionDebrisPuffs(GameState &state,
+                                          Ship &ship,
+                                          float elapsed_ticks) {
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls == nullptr) {
+    return;
+  }
+  const float half_death_delay =
+      static_cast<float>(cls->death_delay_frames) * 0.5F;
+
+  // Halfway puff. The original compares the decremented float timer to
+  // field_0x10 * g_death_delay_half_fraction_f64 (0.5) directly, which is exact
+  // because it steps by a constant 1.0: the integer timer only lands on the
+  // half when DeathDelay is even (an odd DeathDelay gives an x.5 target the
+  // integer sequence never hits). The port steps by the normalized
+  // elapsed_ticks, so it tests the crossing instead of equality; the parity
+  // guard keeps the original even-only behaviour.
+  const float previous_timer = ship.death_timer_active + elapsed_ticks;
+  const bool half_landing = (cls->death_delay_frames % 2) == 0;
+  if (ship.pers_def_slot != -1 && half_landing &&
+      ship.death_timer_active <= half_death_delay &&
+      previous_timer > half_death_delay) {
+    bool spawn_puff = false;
+    if (ship.pers_def_slot >= 0 &&
+        ship.pers_def_slot <
+            static_cast<std::int16_t>(state.scenario.pers_defs.size())) {
+      const PersDef &pers =
+          state.scenario
+              .pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
+      if ((pers.flags_primary & 0x0002U) != 0U) {
+        if (ship.faction_or_government_id == -1) {
+          spawn_puff = true;
+        } else {
+          const Government *govt =
+              state.scenario.GovernmentByIndex(ship.faction_or_government_id);
+          spawn_puff = govt != nullptr && (govt->flags_primary & 0x0100U) == 0U;
+        }
+      }
+    }
+    if (spawn_puff) {
+      NovaEffects_SpawnShipDestructionDebrisPuff(state, ship);
+    }
+  }
+
+  // Timed-action cascade. interval = max(10, round((DeathDelay /
+  // TimedActionInit) * 0.4)) (DAT_005754a0), divided by the frame tick scale
+  // when it is positive (_DAT_005753b0 = 0.0). Fires while the timer is in the
+  // second half, decrementing the counter so the class emits exactly its
+  // initial counter worth of fragments.
+  if (ship.timed_action_counter > 0 && cls->timed_action_counter_init > 0 &&
+      ship.death_timer_active <= half_death_delay) {
+    // The original casts both operands to int first, so this is integer
+    // division before the 0.4 (DAT_005754a0) scale.
+    const int death_delay = static_cast<int>(cls->death_delay_frames);
+    const int init = static_cast<int>(cls->timed_action_counter_init);
+    int interval = static_cast<int>(
+        std::lround(static_cast<float>(death_delay / init) * 0.4F));
+    if (interval < 10) {
+      interval = 10;
+    }
+    if (state.last_frame_tick_scale > 0.0F) {
+      interval = static_cast<int>(std::lround(static_cast<float>(interval) /
+                                              state.last_frame_tick_scale));
+      if (interval < 1) {
+        interval = 1;
+      }
+    }
+    if (state.spaceflight_frame_counter %
+                static_cast<std::uint32_t>(interval) ==
+            0U ||
+        ship.timed_action_counter == cls->timed_action_counter_init) {
+      ship.timed_action_counter =
+          static_cast<std::int16_t>(ship.timed_action_counter - 1);
+      NovaEffects_SpawnShipDestructionDebrisPuff(state, ship);
+    }
+  }
 }
 
 // Ship_HandleShip (0x00433050) ionization decay tail + Ship_ComputeIonization-
@@ -319,12 +414,18 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       ship.engine_glow_level = 0;
       ship.engine_glow_intensity = 0.0F;
       if (ship.death_timer_active > 0.0F) {
+        // Ship_HandleShip (0x00433050) steps by g_cloak_fade_passive_decay
+        // (1.0) per reference frame; elapsed_ticks is that step on the port's
+        // normalized 30 Hz basis.
         ship.death_timer_active -= elapsed_ticks;
+        // Ship_HandleShip's debris-puff arm (halfway + timed-action cascade).
+        TickShipHandleDestructionDebrisPuffs(state, ship, elapsed_ticks);
       }
       // The original integrates a wreck's velocity even after destruction
       // (Ship_HandleShip's position block runs past the destroyed guard), so a
       // dead NPC coasts instead of stopping dead. AI state 0x16 makes the
-      // integrator hold course; the disabled damping (0.94) still applies.
+      // integrator hold course; the disabled damping (0.995,
+      // g_fire_restricted_ship_velocity_damp 0x00575448) still applies.
       NovaShip_IntegrateNpcMovement(
           state, ship, *cls, elapsed_ticks, SDL_GetTicks());
       continue;
@@ -1949,6 +2050,14 @@ void NovaShip_TickNpcShips(GameState &state, float elapsed_ticks) {
   Stub_HandleShips(state, elapsed_ticks);
 }
 
+// External test seam into the per-ship AI decision pass (Ghidra scope 6 of
+// Frame_TickSystems 0x004186b0 -> Ship_UpdateShipAI 0x00401000). Mirrors
+// NovaShip_TickNpcShips so tests can model the live AI-then-movement order
+// (Stub_AiRoutines runs before Stub_HandleShips in NovaFrame_TickSystems).
+void NovaShip_TickNpcAi(GameState &state, float elapsed_ticks) {
+  Stub_AiRoutines(state, elapsed_ticks);
+}
+
 // ---------------------------------------------------------------------------
 // Player ship movement (free flight)
 // ---------------------------------------------------------------------------
@@ -2428,15 +2537,18 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
 
   // Ship_HandleShip (0x00433050) applies the disabled/derelict damping before
-  // integrating position. DAT_00575448 is the float 0.94: disabled
-  // ships keep drifting, but lose 6% of each velocity component per frame.
-  // This is deliberately separate from AI suppression; it also applies while
-  // the ship is coasting and to the gravity-shield scalar speed.
+  // integrating position. g_fire_restricted_ship_velocity_damp (0x00575448) is
+  // the double 0.995 (NOT the 0.94 mode-1 brake damp at 0x5750f8): a disabled
+  // ship keeps almost all of its velocity and drifts to a stop slowly. The
+  // original applies it once per reference frame; exponentiate by the
+  // normalized elapsed_ticks so the stop is frame-rate independent. It also
+  // covers the gravity-shield scalar speed.
   if (fire_restricted) {
-    constexpr float kFireRestrictedVelocityDamp = 0.94F; // DAT_00575448
-    ship.vel_x *= kFireRestrictedVelocityDamp;
-    ship.vel_y *= kFireRestrictedVelocityDamp;
-    ship.speed *= kFireRestrictedVelocityDamp;
+    constexpr float kFireRestrictedVelocityDamp = 0.995F; // 0x00575448
+    const float damp = std::pow(kFireRestrictedVelocityDamp, elapsed_ticks);
+    ship.vel_x *= damp;
+    ship.vel_y *= damp;
+    ship.speed *= damp;
   }
 
   // --- Turn toward the desired heading (continuous AI turn rate). ---
@@ -3534,9 +3646,13 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
   if (p.is_active && NovaAiShip_IsDestroyed(p)) {
     // Fire-restricted damping (0x0044b240, before the eject arm): a destroyed
     // hull is fire-restricted, so the original bleeds 0.5% of each velocity
-    // component per frame here. The coast integration runs later in the loop.
-    p.vel_x *= kPlayerFireRestrictedVelocityDamp;
-    p.vel_y *= kPlayerFireRestrictedVelocityDamp;
+    // component per reference frame here. Exponentiate by elapsed_ticks so the
+    // port's 30 Hz-normalized cadence matches at any refresh rate. The coast
+    // integration runs later in the loop.
+    const float restricted_damp =
+        std::pow(kPlayerFireRestrictedVelocityDamp, elapsed_ticks);
+    p.vel_x *= restricted_damp;
+    p.vel_y *= restricted_damp;
     // PlayerTick eject block (0x004510b9..0x00453910): while the death
     // presentation runs, the eject command (0x38/0x6f arm pair + binding
     // slot 0x11) with an owned auto-eject outfit transforms the player into
@@ -3557,6 +3673,9 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
     // Death presentation running: tick the timer down; the original skips the
     // whole status/outfit block for the dying ship (inactive-branch return).
     if (p.death_timer_active > kDeathTimerExpireFloor) {
+      // Ship_HandlePlayerShipCore 0x00454941 steps by
+      // g_jump_turnaround_turn_rate_addend (1.0) per reference frame;
+      // elapsed_ticks is that step on the normalized 30 Hz basis.
       p.death_timer_active -= elapsed_ticks;
     }
     return true;
@@ -3589,8 +3708,10 @@ bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
   // --- Fire-restricted damping (0x0044b240) --------------------------------
   const bool fire_restricted = NovaAiShip_IsDisabled(state, p);
   if (fire_restricted) {
-    p.vel_x *= kPlayerFireRestrictedVelocityDamp;
-    p.vel_y *= kPlayerFireRestrictedVelocityDamp;
+    const float restricted_damp =
+        std::pow(kPlayerFireRestrictedVelocityDamp, elapsed_ticks);
+    p.vel_x *= restricted_damp;
+    p.vel_y *= restricted_damp;
   } else {
     p.boarded_target_latch = 0;
   }

@@ -6,6 +6,7 @@
 #include "game/game_state.hpp"
 #include "game/mission.hpp"
 #include "game/new_pilot_flow.hpp"
+#include "game/ship_visual.hpp"
 #include "game/sprite_mask.hpp"
 #include "game/targeting.hpp"
 #include "game/weapon.hpp"
@@ -723,6 +724,10 @@ TEST_CASE("crash deactivates immediately while weapon damage enters death",
                              /*bypass_shields=*/true,
                              /*player_aggro_delta=*/0);
     CHECK(target.is_active);
+    // The hit site leaves destruction as an armor state; Ship_UpdateVisualState
+    // seeds the class DeathDelay timer.
+    CHECK(target.death_timer_active <= 0.0F);
+    NovaShip_TickDestroyedShipVisualState(state, target, 1.0F);
     CHECK(target.death_timer_active == Catch::Approx(10.0F));
   }
   // Fatal-stellar contact is an instant kill: active cleared and the death

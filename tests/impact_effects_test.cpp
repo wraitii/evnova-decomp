@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace game {
 
@@ -134,6 +135,41 @@ TEST_CASE("SWParticles advance at a fixed 60 Hz and expire",
   // One 30 Hz tick is two 60 Hz updates: life 2 -> 1 (moves), 1 -> 0 (freed).
   NovaEffects_TickSwParticles(state, 1.0F);
   CHECK(state.sw_particles.empty());
+}
+
+TEST_CASE("ship destruction debris puffs seed one directional fragment each",
+          "[impact][ship_visual]") {
+  GameState state;
+  state.rng.seed(0x5eedU);
+  Ship ship;
+  ship.pos_x = 10.0F;
+  ship.pos_y = 20.0F;
+  ship.vel_x = 3.0F;
+  ship.vel_y = -4.0F;
+
+  NovaEffects_SpawnShipDestructionDebrisPuff(state, ship);
+
+  REQUIRE(state.fading_effect_instances[0].lifetime_ticks >= 150.0F);
+  CHECK(state.fading_effect_instances[0].lifetime_ticks <= 249.0F);
+  CHECK(state.fading_effect_instances[0].pos_x == 10.0F);
+  CHECK(state.fading_effect_instances[0].pos_y == 20.0F);
+  // Velocity = ship velocity + a scatter of magnitude (10 + rand(10)) * 0.1
+  // = 1.0..1.9 (DAT_00575208).
+  const float scatter_x = state.fading_effect_instances[0].vel_x - ship.vel_x;
+  const float scatter_y = state.fading_effect_instances[0].vel_y - ship.vel_y;
+  const float scatter =
+      std::sqrt(scatter_x * scatter_x + scatter_y * scatter_y);
+  CHECK(scatter >= 1.0F);
+  CHECK(scatter <= 1.9F);
+  REQUIRE(state.pending_destruction_sounds.size() == 1);
+  CHECK(state.pending_destruction_sounds[0].src_x == 10.0F);
+  CHECK(state.pending_destruction_sounds[0].src_y == 20.0F);
+
+  // A second puff claims the next free slot rather than overwriting the first.
+  NovaEffects_SpawnShipDestructionDebrisPuff(state, ship);
+  CHECK(state.fading_effect_instances[0].lifetime_ticks >= 150.0F);
+  CHECK(state.fading_effect_instances[1].lifetime_ticks >= 150.0F);
+  CHECK(state.pending_destruction_sounds.size() == 2);
 }
 
 TEST_CASE("impact packages dispatch their configured area effect", "[impact]") {

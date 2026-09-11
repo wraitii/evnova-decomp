@@ -271,14 +271,20 @@ struct Ship {
   float ionization_points = 0.0F;   // +0x5C (ionization charge meter)
   float fuel_points = 0.0F;         // +0x38
   float death_timer_active = -1.0F; // +0x3C
-  // Port-side one-shot latch for the first destruction-presentation slice.
-  // The original drives this through Ship_HandleShip's fading-effect pool
-  // (0x00428090 / 0x0043b170); the exact class-specific debris sprite is not
-  // represented yet, so the shared impact animation is queued once instead.
+  // Port-side one-shot latch for the alive -> destroyed state transition at
+  // the weapon-hit site. The original leaves destruction as an armor state
+  // (IsShipDestroyed); the latch only records that NovaTargeting has already
+  // cleared the slot's references.
   bool destruction_visual_triggered = false;
-  // Briefly keeps the destroyed hull as a dim wreck while its burst plays.
-  float destruction_visual_timer_ms = 0.0F;
   bool destruction_finale_triggered = false;
+  // Port-only: latches the first Ship_UpdateVisualState seed of the death
+  // presentation. The original reseeds whenever death_timer_active <= 0, but
+  // because it steps by a constant 1.0 per frame an integer DeathDelay seed can
+  // never cross zero before the 0<timer<=2.0 finale window. The port advances
+  // on the normalized 30 Hz basis, where a long frame can step the timer below
+  // zero; this latch keeps that overshoot from re-seeding a fresh presentation
+  // and swallowing the Explode2 finale.
+  bool death_timer_seeded = false;
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
   // timer consumer is still deferred, so the field remains provisional.
   float hit_reaction_timer = 0.0F;
