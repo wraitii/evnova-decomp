@@ -374,8 +374,8 @@ The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`, a
   `NovaShip_RunShipDestructionFinale` (`src/game/ship_visual.cpp`); the NPC
   pass runs after `Ship_HandleShip` in `Stub_HandleShips` (death-timer
   decrement in the destroyed branch, finale when 0 < timer <= 2.0,
-  DAT_0057531c). Ported: the hull blast (radius `mass*1.4+3.125`, damage
-  `mass*1.275+2.875`, capability-flags 0x400 and pers-0x3ff hulls exempt,
+  DAT_0057531c). Ported: the hull blast (radius `mass*0.075+50`, damage
+  `mass*0.0375+25`, capability-flags 0x400 and pers-0x3ff hulls exempt,
   force-armor-only hits with the transition check armed), the quick-fail gate
   (mission active, not failed, `goal_counter_a == 0`, spawn_behavior 1/3, or
   2/5 with the +0xB9 boarded latch clear, runtime flags 0x0400 clear) → snd +
@@ -445,7 +445,10 @@ Ghidra DB annotations added: plate comments on the three writer sites and
 renamed and retyped: `g_destroyed_finale_threshold_f32` (0x0057531c, 2.0),
 the puff-roll thresholds 20/40/60 (0x00575320/24/28), the 0.25 puff offset
 scale (0x00575330), the player ×3 death-timer scale (0x00575378), the hull
-blast radius/damage scales + addends (0x00575380..0x00575398), the
+blast radius/damage scales + addends (0x00575380..0x00575398; retyped from
+`float` to `double` and renamed `_f64` — the original uses `FMUL/FADD double
+ptr`, so the earlier `_f32` float values 1.4/3.125 and 1.275/2.875 were
+misaligned aliases of the true 0.075/50.0 and 0.0375/25.0), the
 DeathDelay-half fraction (0x005753f8, 0.5), and the armor-pin fraction/addend
 (0x00575238/0x00575230, 1/3 and 1.0).
 

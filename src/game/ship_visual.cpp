@@ -148,9 +148,10 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
 // Ghidra 0x00428340 Ship_UpdateVisualState, destruction slice. See the header
 // for scope notes. Constants decoded from data: g_cloak_fade_passive_decay
 // (0x00575318) = 1.0 tick, destroyed-finale threshold DAT_0057531c = 2.0,
-// player death-timer scale _DAT_00575378 = 3.0, blast radius scale
-// _DAT_00575380/_DAT_00575388 = 1.4/3.125, blast damage scale
-// _DAT_00575390/_DAT_00575398 = 1.275/2.875.
+// player death-timer scale _DAT_00575378 = 3.0, blast radius scale/addend
+// g_hull_blast_radius_scale_f64/_addend_f64 (0x00575380/88) = 0.075/50.0,
+// blast damage scale/addend g_hull_blast_damage_scale_f64/_addend_f64
+// (0x00575390/98) = 0.0375/25.0 (all four are doubles; FMUL/FADD double ptr).
 void NovaShip_TickDestroyedShipVisualState(GameState &state,
                                            Ship &ship,
                                            float elapsed_ticks) {
@@ -214,9 +215,11 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
     const std::int16_t mass = cls->mass_tons;
     if (mass >= 100) {
       blast_radius = static_cast<std::int16_t>(
-          std::llround(static_cast<float>(mass) * 1.4F + 3.125F));
+          std::llround(static_cast<double>(mass) * kHullBlastRadiusScale +
+                       kHullBlastRadiusAddend));
       blast_damage = static_cast<std::int16_t>(
-          std::llround(static_cast<float>(mass) * 1.275F + 2.875F));
+          std::llround(static_cast<double>(mass) * kHullBlastDamageScale +
+                       kHullBlastDamageAddend));
     }
   }
 

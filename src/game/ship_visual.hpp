@@ -25,6 +25,17 @@ namespace game {
 // the hit-site wreck fade timer in collision.cpp.
 inline constexpr float kPlayerDeathTimerScale = 3.0F;
 
+// Ghidra g_hull_blast_radius_scale_f64 (0x00575380) / _addend_f64
+// (0x00575388) and g_hull_blast_damage_scale_f64 (0x00575390) /
+// _addend_f64 (0x00575398). A destroyed hull with Mass >= 100 tons blasts a
+// per-axis radius round(Mass*0.075 + 50) and damage round(Mass*0.0375 + 25).
+// These are 8-byte doubles in the original (FMUL/FADD double ptr); reading
+// them as floats aliases the wrong bytes.
+inline constexpr double kHullBlastRadiusScale = 0.075;
+inline constexpr double kHullBlastRadiusAddend = 50.0;
+inline constexpr double kHullBlastDamageScale = 0.0375;
+inline constexpr double kHullBlastDamageAddend = 25.0;
+
 // Resource four-byte type code for the ship-animation descriptor (sh\x8an).
 constexpr std::uint32_t kShipVisualResourceType = 0x73688a6e;
 
