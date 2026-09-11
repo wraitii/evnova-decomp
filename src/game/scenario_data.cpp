@@ -1443,6 +1443,9 @@ bool ScenarioData::LoadFromArchives() {
                                           static_cast<std::uint16_t>(id));
       if (shan && shan->size() >= 2) {
         const std::uint16_t base_image = ReadBe16(*shan, 0x00);
+        // Persist the hull sheet id so the collision mask refresh can resolve
+        // the class's rotation frames without re-reading sh\x8an each frame.
+        cls.base_image_id = base_image;
         // Ghidra ShipClass_LoadShipClassVisualAndLaunchData (0x004b4ee0)
         // copies sh\x8an +0x2e into ShipClassDef +0xa24. Bible Flags 0x0001:
         // "extra frames in base image are used to display banking. The first

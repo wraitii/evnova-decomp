@@ -376,6 +376,12 @@ void Stub_BeamHitQueue(GameState &state, float elapsed_ticks) {
 void NovaFrame_TickSystems(GameState &state,
                            bool run_full_tick,
                            float elapsed_ticks) {
+  // g_avg_frame_tick_scale for this tick: the normalized 30 Hz scale the
+  // collision mask-vs-circle decision (Ship_HandleSpritePairCollision
+  // 0x004374f0) and other cadence consumers read. NovaWeapon_TickShots (scope
+  // 7) re-asserts the same value; this earlier write lets scope 9 collisions
+  // see the current tick rather than the previous one.
+  state.last_frame_tick_scale = elapsed_ticks > 0.0F ? elapsed_ticks : 0.0F;
   // g_player_disable_message_shown reset site (Ghidra 0x00417669 in the
   // spaceflight frame loop): the latch suppresses the duplicate destruction
   // overlay within one frame only.

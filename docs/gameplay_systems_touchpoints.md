@@ -108,7 +108,7 @@ Observed responsibilities:
 ## Simulation-tick misc-handler subsystems mapped (scope 8 / 9 / 0xb / 0xc)
 
 Broad-phase collision (scope 9):
-- `0x004772d0` `NovaGameplay_TestSpriteLayerOverlaps` — pairwise AABB overlap test between two SpriteLayers; on overlap invokes the per-entity collision callback (`+0x94`) with both entities + overlap rect. Sourced from SpriteLayer.c. TickSystems uses it to test shot containers and freeflight objects against each other and the sector.
+- `0x004772d0` `NovaGameplay_TestSpriteLayerOverlaps` — pairwise AABB overlap test between two SpriteLayers; on overlap invokes the per-entity collision callback (`+0x94`) with both entities + overlap rect. Sourced from SpriteLayer.c. TickSystems uses it to test shot containers and freeflight objects against each other and the sector. The callback's exact opaque-pixel test (`Sprite_TestPixelMaskOverlap`) and its clean-room port are documented in `docs/sprite_pixel_mask_collision.md`.
 
 Stellar environment (scope 8):
 - `0x0042d890` `NovaGameplay_TickStellarDefenseBatteries` — per-stellar defense-battery fire: ticks the engage countdown, scans nearest hostile target (squared-distance + `NovaGameplay_IsCandidateHostileToTargeter`), spawns charged ShotState entities. Skipped when time frozen.

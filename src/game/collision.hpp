@@ -20,10 +20,11 @@
 //     (Seeker "passes over asteroids") are rejected, and a pixel-mask overlap
 //     funnels through NovaUi_ResolveWeaponSplashImpact (0x00436ff0).
 //
-// Deferred scope: stellar contact branch, sprite pixel masks (the clean-room
-// uses explicit circle envelopes on Ship/AsteroidState/ActiveShot), impact
-// particle bursts, linked shots, kill chatter, and the mission disable
-// bookkeeping inside the ship-hit path.
+// Deferred scope: stellar contact branch, impact particle bursts, linked
+// shots, kill chatter, and the mission disable bookkeeping inside the ship-hit
+// path. Direct shot-vs-ship and shot-vs-asteroid contacts now test the decoded
+// sprite pixel masks (Sprite_TestPixelMaskOverlap 0x00475c80) with the original
+// bounding-circle fallback when a mask is unavailable.
 
 #include "game_state.hpp"
 
@@ -75,12 +76,17 @@ void NovaCollision_ResolveShipHitFromWeaponSlot(
     std::int16_t player_aggro_delta);
 
 // Ghidra Ship_HandleSpritePairCollision (0x004374f0) plus its sprite-layer
-// driver: resolves direct shot-vs-ship contacts (circle overlap stand-in for
-// the original's bounding-circle/pixel-mask tests) and dispatches
-// Shot_ResolveShotCollisionHit with linked shots disallowed. Also runs the
-// Asteroid_HandleSpritePairCollision (0x00436f70) contact for each shot that
-// did not hit a ship.
+// driver: resolves direct shot-vs-ship contacts with the original's bounding-
+// circle / pixel-mask overlap and dispatches Shot_ResolveShotCollisionHit with
+// linked shots disallowed. Also runs the Asteroid_HandleSpritePairCollision
+// (0x00436f70) contact for each shot that did not hit a ship.
 void NovaWeapon_ResolveDirectShotCollisions(GameState &state);
+
+// Public test seam the direct-contact pass uses: resolves each live entity's
+// current-frame pixel mask from the non-SDL SpriteMaskStore (ships via the
+// class sh\x8an base sheet, shots via weapon sprite+3000, asteroids via
+// kAsteroidSpinBase+type) using the same frame selection as the renderer.
+void NovaCollision_RefreshCollisionMasks(GameState &state);
 
 // Ghidra Shot_ResolveCollisions (0x00437e20): the blast-proximity pass over
 // live shots. Resolves at most one proximity ship hit per shot when the
