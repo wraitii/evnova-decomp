@@ -117,6 +117,18 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state);
 // current-frame mask overlaps the loaded stellar sprite.
 void NovaStellar_HandleShipStellarCrash(GameState &state);
 
+// Ghidra Stellar_TickStellarDefenseBatteries (0x0042D890): per-tick defense-
+// battery fire pass. For each of the current system's 16 nav stellars that is
+// available, owns a weapon (Stellar.weapon_id), and is not in its active
+// (destroyed/engaged) state, ticks defense_battery_cooldown down by the frame
+// tick scale. On expiry it scans the 64 ship slots for the nearest active
+// non-cloaked candidate that Government_IsCandidateHostileToTargeter accepts,
+// within the weapon's range, then spawns one battery shot and reloads (or
+// applies the burst wrap). The original has its own gameplay-frozen guard;
+// this port currently dispatches scope 8 only on full ticks because it has no
+// separate freeze latch (see Stub_MiscHandlers).
+void NovaStellar_TickStellarDefenseBatteries(GameState &state);
+
 // Ghidra Shot_QueueBeamHit / Shot_UpdateBeamHitQueue (0x00427a90/0x0042f270)
 // impact leg, exposed for the instantaneous beam queue. Applies one direct
 // weapon impact using the same shield/armor, ionization, impulse, and aggro

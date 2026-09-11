@@ -365,12 +365,20 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
 }
 
 void Stub_MiscHandlers(GameState &state, bool run_full_tick) {
-  // Ghidra Frame_TickSystems scope 8 runs the stellar ambient/presentation
-  // passes only on full ticks. The reimplemented member here is
+  // Ghidra Frame_TickSystems scope 8 itself runs on reduced ticks too; its
+  // individual members decide whether frozen gameplay advances. This port has
+  // no separate frozen-state latch, and its only reduced-tick caller is the
+  // frozen transition path, so run_full_tick is presently the scheduling
+  // surrogate. The reimplemented member here is
   // Stellar_HandleShipStellarCrash (0x0043aed0), immediately after the
   // gravity pull in the original ordering. Stellar animation itself lives in
   // the SDL view (AdvanceStellarAnimation).
   if (run_full_tick) {
+    // Scope 8 order around the stellar passes: Stellar_UpdateStellarSprites
+    // (renderer), Stellar_TickStellarDefenseBatteries (0x0042d890), then the
+    // gravity pull / fatal crash passes. The ambient sprite update is owned by
+    // the SDL view.
+    NovaStellar_TickStellarDefenseBatteries(state);
     NovaStellar_HandleShipStellarCrash(state);
   }
 }

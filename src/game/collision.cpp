@@ -1336,6 +1336,106 @@ void NovaCollision_RefreshCollisionMasks(GameState &state) {
   RefreshCollisionMasks(state);
 }
 
+// Ghidra Stellar_TickStellarDefenseBatteries (0x0042d890).
+//
+// Runs in Frame_TickSystems scope 8 before Stellar_TickStellarGravityPull /
+// Stellar_HandleShipStellarCrash. Walk the 16 nav stellars of the player's
+// current system; a battery fires only when the stellar is_available, carries a
+// weapon (StellarDef +0x2c), and is NOT in its "active" (destroyed/engaged)
+// state. The cooldown (StellarDef +0x494) counts down by the frame tick scale;
+// on expiry the nearest hostile ship within range(weapon)^2 is chosen and a
+// shot is spawned. The cooldown is reloaded only when a shot actually spawns;
+// NovaWeapon_SpawnStellarBatteryShot preserves the original 128-shot shared
+// pool limit, so a full pool retries next frame.
+//
+// The original reads g_weapon_defs[StellarDef.field_0x2c]. That field is a
+// weapon BANK slot, not the raw resource id: the loader (0x004bd3c0) reads the
+// raw spob Weapon word (+0x23a), maps values < 0x80 to -1 and subtracts 0x80
+// otherwise (Spacedock II 196 -> bank 68 = Enormous Blaster Turret). The port
+// keeps the raw resource id in Stellar.weapon_id and resolves it through
+// ScenarioData::Weapon (the same -0x80), so the intended weapon fires. The
+// disabled-target gate reproduces the original's bVar4: a weapon that is
+// disable-only (flags_secondary 0x1000) or has no mass damage skips
+// already-disabled hulls; a lethal weapon does not.
+void NovaStellar_TickStellarDefenseBatteries(GameState &state) {
+  const System *const system = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (system == nullptr) {
+    return;
+  }
+  const float tick_scale = state.last_frame_tick_scale;
+  for (const std::int16_t nav : system->nav_defs) {
+    if (nav == -1) {
+      continue;
+    }
+    Stellar *const stellar = state.scenario.StellarMutable(nav);
+    if (stellar == nullptr || !stellar->is_available ||
+        stellar->weapon_id == -1 || NovaTargeting_IsStellarActive(*stellar)) {
+      continue;
+    }
+    if (stellar->defense_battery_cooldown > 0.0F) {
+      stellar->defense_battery_cooldown -= tick_scale;
+      continue;
+    }
+    const Weapon *const weapon = state.scenario.Weapon(stellar->weapon_id);
+    if (weapon == nullptr) {
+      continue;
+    }
+    const float range_sq = weapon->range_scalar * weapon->range_scalar;
+    // bVar4 == true when the weapon cannot destroy (disable-only or no mass
+    // damage): such a battery does not target already-disabled hulls.
+    const bool skip_disabled_targets = !(
+        (weapon->flags_secondary & 0x1000U) == 0U && weapon->mass_damage != 0);
+    std::int16_t best_slot = -1;
+    float best_dist_sq = 0.0F;
+    for (std::int16_t slot = 0;
+         slot < static_cast<std::int16_t>(GameState::kMaxShips);
+         ++slot) {
+      const Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+      if (!ship.is_active ||
+          NovaTargeting_ShipAtCloakVisibilityThreshold(ship) ||
+          !NovaGovernment_IsCandidateHostileToTargeter(
+              state, ship, *stellar, nav)) {
+        continue;
+      }
+      const float dx = ship.pos_x - static_cast<float>(stellar->pos_x);
+      const float dy = ship.pos_y - static_cast<float>(stellar->pos_y);
+      const float dist_sq = dx * dx + dy * dy;
+      if (dist_sq > range_sq) {
+        continue;
+      }
+      if (skip_disabled_targets && NovaAiShip_IsDisabled(state, ship)) {
+        continue;
+      }
+      if (best_slot == -1 || dist_sq < best_dist_sq) {
+        best_dist_sq = dist_sq;
+        best_slot = slot;
+      }
+    }
+    if (best_slot == -1) {
+      continue;
+    }
+    if (NovaWeapon_SpawnStellarBatteryShot(
+            state, *stellar, best_slot, stellar->weapon_id) < 0) {
+      continue;
+    }
+    // Reload, applying the burst-cycle wrap: while the weapon fires a burst the
+    // counter advances and, when it reaches burst_cycle_ticks (the
+    // Weapon_GetWeaponFireIntervalTicks result for a single mount), the counter
+    // resets and the longer reset cooldown is used instead.
+    std::int16_t cooldown = weapon->reload_ticks;
+    if (weapon->burst_cycle_ticks > 0) {
+      stellar->burst_shot_count =
+          static_cast<std::int16_t>(stellar->burst_shot_count + 1);
+      if (weapon->burst_cycle_ticks <= stellar->burst_shot_count) {
+        stellar->burst_shot_count = 0;
+        cooldown = weapon->burst_reset_cooldown;
+      }
+    }
+    stellar->defense_battery_cooldown = static_cast<float>(cooldown);
+  }
+}
+
 // Ghidra Stellar_HandleShipStellarCrash (0x0043aed0). Physical collision pass
 // running in Frame_TickSystems scope 8, immediately after
 // Stellar_TickStellarGravityPull (0x0043adb0). For each fatal stellar

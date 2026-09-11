@@ -1183,6 +1183,137 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   return static_cast<int>(state.active_shots.size() - 1);
 }
 
+// Ghidra 0x0043BA30 Shot_AimStellarBatteryShot. The battery's muzzle is its
+// map_x/map_y; the intercept uses the target's absolute velocity (the battery
+// does not move). Mode 6 freeflight rockets reuse the same two-regime spool-up
+// model as Ship_AimWeaponPredictive. Shot speed is the port's
+// projectile_speed/100 (pixels/frame), matching the fired velocity.
+std::int16_t NovaWeapon_AimStellarBatteryShot(const GameState &state,
+                                              const Stellar &battery,
+                                              const Ship &target) {
+  constexpr float kMode6ThresholdFactor = 19.59F;
+  constexpr float kMode6NearSpeedFactor = 0.316F;
+  constexpr float kMode6FarTimeBonus = 2.06667F;
+  const float origin_x = static_cast<float>(battery.pos_x);
+  const float origin_y = static_cast<float>(battery.pos_y);
+  std::int16_t bearing = static_cast<std::int16_t>(
+      BearingDeg(origin_x, origin_y, target.pos_x, target.pos_y));
+  const Weapon *w = state.scenario.Weapon(battery.weapon_id);
+  if (w == nullptr) {
+    return bearing;
+  }
+  const float dx = target.pos_x - origin_x;
+  const float dy = target.pos_y - origin_y;
+  const float dist = std::sqrt(dx * dx + dy * dy);
+  const float shot_speed = w->projectile_speed / 100.0F;
+  if (shot_speed <= 0.0F) {
+    return bearing;
+  }
+  float time_to_intercept;
+  if (w->weapon_mode_code == 6) {
+    const float threshold = shot_speed * kMode6ThresholdFactor;
+    if (threshold < dist) {
+      time_to_intercept = (dist - threshold) / shot_speed + kMode6FarTimeBonus;
+    } else {
+      time_to_intercept = dist / (shot_speed * kMode6NearSpeedFactor);
+    }
+  } else {
+    time_to_intercept = dist / shot_speed;
+  }
+  const float intercept_x = target.pos_x + target.vel_x * time_to_intercept;
+  const float intercept_y = target.pos_y + target.vel_y * time_to_intercept;
+  return static_cast<std::int16_t>(
+      BearingDeg(origin_x, origin_y, intercept_x, intercept_y));
+}
+
+// Ghidra Stellar_TickStellarDefenseBatteries (0x0042D890) inline shot
+// construction. The original indexes g_weapon_defs[StellarDef.field_0x2c] with
+// the value the loader stored there, which is a weapon BANK slot, not the raw
+// resource id: the loader (0x004bd3c0) reads the raw spob Weapon word
+// (+0x23a), maps values < 0x80 to -1 and otherwise subtracts 0x80, so
+// field_0x2c == resource_id - 0x80 and the tick's g_weapon_defs index is
+// consistent with the bank-indexed table. The port keeps the raw resource id on
+// Stellar.weapon_id and resolves it through ScenarioData::Weapon (which
+// re-applies the same -0x80), then stores the resulting bank slot on the shot,
+// matching the original shot's weapon_id. ShotState +0x24 visibility, +0x32
+// damage_reduction and +0x40 retarget_timer are not modelled on ActiveShot
+// (unused by the port's simulation). The sound variant (5) is likewise not
+// carried by pending_fire_sounds.
+int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
+                                       const Stellar &battery,
+                                       std::int16_t target_ship_slot,
+                                       std::int16_t weapon_resource_id) {
+  // The original reserves one of the shared 128 ShotState records before
+  // initializing it. ActiveShot is a vector in the clean-room model, but this
+  // producer must still fail (and leave its battery cooldown unreloaded) when
+  // the original pool would be full.
+  if (state.active_shots.size() >= 0x80) {
+    return -1;
+  }
+  const Weapon *w = state.scenario.Weapon(weapon_resource_id);
+  if (w == nullptr) {
+    return -1;
+  }
+  ActiveShot shot;
+  shot.weapon_id = static_cast<std::int16_t>(weapon_resource_id - 0x80);
+  shot.owner_ship_slot = -1;
+  shot.target_ship_slot = target_ship_slot;
+  shot.system_id = state.player.current_system_id;
+  shot.pos_x = static_cast<float>(battery.pos_x);
+  shot.pos_y = static_cast<float>(battery.pos_y);
+  shot.vel_x = 0.0F;
+  shot.vel_y = 0.0F;
+  shot.impact_variant = (w->flags_secondary & 0x1000U) != 0U
+                            ? static_cast<std::int8_t>(1)
+                            : static_cast<std::int8_t>(0);
+  shot.life_ticks_remaining =
+      std::max(1.0F, static_cast<float>(w->lifetime_ticks));
+  shot.life_frames = static_cast<int>(std::ceil(shot.life_ticks_remaining));
+  shot.collision_radius_px = 2.0F;
+  shot.fuse_elapsed = w->fuse_ticks < 1 ? -1.0F : 0.0F;
+  shot.retarget_cooldown = 0;
+  shot.linked_shot_generation = 0;
+  // Original frame_cycle_index seed: Random(0x24) unless flags_primary 0x4
+  // (a fixed/heading sprite set) is set.
+  shot.frame_cycle_index =
+      (w->flags & 0x0004U) != 0U ? 0 : RandomBelow(state, 0x24);
+  shot.anim_elapsed = 0.0F;
+  const Ship *target = nullptr;
+  if (target_ship_slot >= 0 &&
+      target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips)) {
+    target = &state.ShipAt(static_cast<std::size_t>(target_ship_slot));
+  }
+  if (target == nullptr) {
+    return -1;
+  }
+  float heading = static_cast<float>(
+      NovaWeapon_AimStellarBatteryShot(state, battery, *target));
+  if (w->inaccuracy > 0) {
+    heading = static_cast<float>(
+        static_cast<int>(heading) +
+        RandomBelow(state, static_cast<int>(w->inaccuracy) * 2) -
+        w->inaccuracy);
+    heading = std::fmod(std::fmod(heading, 360.0F) + 360.0F, 360.0F);
+  }
+  shot.heading_deg = heading;
+  const float speed = w->projectile_speed / 100.0F;
+  AddPolarVelocity(static_cast<float>(RoundHeadingDeg(shot.heading_deg)),
+                   speed,
+                   shot.vel_x,
+                   shot.vel_y);
+  for (std::size_t channel = 0; channel < shot.lock_quality.size(); ++channel) {
+    const std::int16_t vuln = w->jam_vuln[channel];
+    shot.lock_quality[channel] =
+        vuln < 1 ? 0 : static_cast<std::int16_t>(RandomBelow(state, vuln + 1));
+  }
+  if (w->fire_sound >= 0) {
+    state.pending_fire_sounds.push_back(
+        {w->fire_sound, shot.pos_x, shot.pos_y, (w->flags & 0x0010U) != 0U});
+  }
+  state.active_shots.push_back(shot);
+  return static_cast<int>(state.active_shots.size() - 1);
+}
+
 // Ghidra 0x0046BA30 Ship_FindNearestHittableWeaponTarget. Returns the slot of
 // the nearest active ship in the player's system that this shot's weapon can
 // hit (Weapon_CanWeaponHitTarget 0x00426ef0 ->
