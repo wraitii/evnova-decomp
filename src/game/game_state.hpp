@@ -11,6 +11,7 @@
 #include <array>
 #include <bitset>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
 #include <string>
@@ -18,6 +19,7 @@
 
 #include "scenario_data.hpp"
 #include "sdl_audio.hpp"
+#include "sprite_mask.hpp"
 
 namespace game {
 
@@ -220,12 +222,15 @@ struct Ship {
   // strength, recomputed by Ship_UpdateShipCombatOddsScore (0x004133F0).
   float ai_odds_score = 0.0F;
 
-  // Clean-room collision envelope used until the original SpriteLayer pixel
-  // masks are represented by the simulation. The original derives this from
-  // the current ship sprite's half-span; keeping it explicit lets collision
-  // tests and future sprite loading replace the provisional 16px default
-  // without changing combat code.
+  // Clean-room collision envelope used when no per-frame pixel mask has been
+  // resolved (the original always has a prepared sprite frame once its sprite
+  // layer is live). The mask binding below takes precedence; this radius stays
+  // as the bounding-circle fallback the original uses for the small-shot-span
+  // and high-frame-time cases.
   float collision_radius_px = 16.0F;
+  // Per-frame opaque-pixel mask for the ship's current hull sprite, resolved
+  // from the class's sh\x8an base sheet by the collision refresh pass.
+  CollisionMaskBinding collision_mask;
 
   // --- AI movement state (drives Ship_HandleShip 0x00433050's integrator) ---
   // Whether the ship applies forward thrust this frame. Mirror GHIDRA
@@ -787,8 +792,12 @@ struct ActiveShot {
   // renderer and existing tests.
   float life_ticks_remaining = 0.0F;
   // Provisional circle envelope replacing the original shot sprite half-span
-  // and pixel-mask test. Set by the common spawn path.
+  // and pixel-mask test when the shot sprite mask has not been resolved by the
+  // collision refresh pass.
   float collision_radius_px = 2.0F;
+  // Per-frame opaque-pixel mask for the shot's current weapon sprite frame
+  // (heading-selected or animation-cycled).
+  CollisionMaskBinding collision_mask;
   // Set by collision or expiry; the simulation removes these after the pass.
   bool consumed = false;
   // Ghidra ShotState.fuse_elapsed. Proximity-fuse behavior is deferred, but
@@ -968,12 +977,13 @@ struct AsteroidState {
   std::int16_t integrity = 0;   // +0x1c
   std::int16_t wander_type = 0; // +0x1e (index into the asteroid-type table)
 
-  // Clean-room circle envelope stand-in for the original's per-frame
-  // pixel-mask overlap (Sprite_TestPixelMaskOverlap) used by the asteroid
-  // sprite-pair callback (Asteroid_HandleSpritePairCollision 0x00436f70) and
-  // the shot blast-proximity asteroid scan. All shipped asteroid spin sets
-  // (800..815) are 50x50, so the half-span is 25.
+  // Clean-room circle fallback for the original's per-frame pixel-mask overlap
+  // (Sprite_TestPixelMaskOverlap) when no asteroid sprite mask has been
+  // resolved. All shipped asteroid spin sets (800..815) are 50x50, so the
+  // half-span is 25.
   float collision_radius_px = 25.0F;
+  // Per-frame opaque-pixel mask for the asteroid's current wander sprite.
+  CollisionMaskBinding collision_mask;
 
   bool active = false; // +0x20
 
@@ -1108,6 +1118,16 @@ struct GameState {
   // created (mirrors the original lazily loading scenario tables in
   // NovaData_LoadScenarioResourceTables on the new-game path).
   ScenarioData scenario;
+
+  // Non-SDL frame-mask cache for the collision refresh pass. Shared so a
+  // GameState copy keeps the same lazily-decoded masks without re-reading the
+  // archives; null until the first collision pass needs it.
+  std::shared_ptr<SpriteMaskStore> sprite_mask_store;
+  // When true (default) the direct-contact pass refreshes each entity's
+  // current-frame sprite mask before testing. Tests that exercise collision
+  // *logic* (damage, lifetime, splash) disable this so they stay independent of
+  // the shipped sprite geometry; mask-specific tests inject bindings directly.
+  bool collision_masks_enabled = true;
 
   // Mission runtime tables. The original stores 16 accepted missions and
   // their 20-byte runtime flag records in separate globals; keeping the same

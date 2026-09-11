@@ -12,6 +12,10 @@ namespace game {
 namespace {
 
 void SeedCollisionScenario(GameState &state) {
+  // Collision *logic* tests stay on the explicit circle envelope so they are
+  // independent of the shipped sprite masks; the pixel-mask path has its own
+  // tests in sprite_mask_test.cpp.
+  state.collision_masks_enabled = false;
   state.scenario.weapons.resize(1);
   Weapon &weapon = state.scenario.weapons[0];
   weapon.weapon_mode_code = -1;

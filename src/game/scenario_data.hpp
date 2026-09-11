@@ -398,6 +398,11 @@ struct ShipClass {
   // rotation frame scaled back to degrees (Weapon_SelectTurretQuadrant
   // 0x0046c320 reads it as (sprite_frame %% frames) * 360 / frames).
   std::int16_t frames_per_rotation = 36;
+  // Ghidra sh\x8an +0x00 (BaseImageID): the rl\x91D sheet this class's rotating
+  // hull frames are cut from. The renderer resolves ship masks through it
+  // (`RefreshCollisionMasks`, src/game/collision.cpp) so the collision layer
+  // does not need to re-parse the descriptor every frame. 0 = not decoded.
+  std::uint16_t base_image_id = 0;
   // Weapon-exit (muzzle) geometry, decoded from the sh\x8an by the scenario
   // loader (mirrors the ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0
   // copy into ShipClassDef +0xa42..+0xab0). EVN ships have up to four turret

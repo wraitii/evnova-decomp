@@ -8,12 +8,14 @@
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight.hpp"
+#include "sprite_mask.hpp"
 #include "targeting.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <random>
 #include <utility>
@@ -192,6 +194,171 @@ void ApplyWeaponOnHitEffects(
   if (points > 0) {
     target.ionization_points += static_cast<float>(points);
     target.ionization_color |= weapon.ionization_color;
+  }
+}
+
+// Ghidra Ship_UpdateVisualState (0x00428340) / Shot_HandleShot (0x00435830) /
+// Asteroid_UpdateSprites (0x00436910) frame selection, reused so the collision
+// mask matches the frame the renderer presents this tick. Copied from the
+// renderer's FrameForHeading (spaceflight_view.cpp) to keep the collision layer
+// free of view state.
+[[nodiscard]] int MaskFrameForHeading(float heading_radians,
+                                      int frames_per_rotation) {
+  if (frames_per_rotation <= 0) {
+    return 0;
+  }
+  constexpr float kTwoPi = 6.28318530717958647692F;
+  const float normalized = std::fmod(heading_radians + kTwoPi, kTwoPi);
+  const float sector =
+      (normalized / kTwoPi) * static_cast<float>(frames_per_rotation);
+  int frame = static_cast<int>(std::lround(sector)) % frames_per_rotation;
+  if (frame < 0) {
+    frame += frames_per_rotation;
+  }
+  return frame;
+}
+
+// The original pre-subtracts the sprite half-span from the world position
+// before Sprite_SetPositionFromCurrentFrameAnchor, whose stored frame anchor is
+// (0,0) for the multi-frame ship/asteroid sheets
+// (SpriteFrame_CreateFromRect 0x00476400 zeroes +0x2a/+0x2c). The effective
+// collision-frame top-left is therefore world - (half_a, half_b), where ship
+// and asteroid callers pass (ceil(height/2), ceil(width/2)) -- the two span
+// helpers are swapped in Ship_UpdateVisualState (0x00428340) and
+// Asteroid_UpdateSprites (0x00436910) -- and Shot_HandleShot (0x00435830)
+// passes ceil(height/2) on both axes. Square frames reduce to the frame centre.
+// `swapped_axes` selects the ship/asteroid (true) or shot (false) pair.
+void BindEntityMask(CollisionMaskBinding &binding,
+                    const SpriteMask *mask,
+                    int frame,
+                    bool swapped_axes) {
+  if (mask == nullptr || mask->Empty()) {
+    return;
+  }
+  const float half_height = static_cast<float>((mask->height + 1) / 2);
+  const float half_width = static_cast<float>((mask->width + 1) / 2);
+  binding.mask = mask;
+  binding.anchor_x = half_height;
+  binding.anchor_y = swapped_axes ? half_width : half_height;
+  binding.frame = frame;
+}
+
+// k_pixel_collision_frame_scale_threshold_f64 (0x005754c8) and the
+// Sprite_GetShotHalfSpan (0x00462390) boundary. Ship_HandleSpritePairCollision
+// (0x004374f0) uses the opaque mask only when `g_avg_frame_tick_scale < 2.0`
+// AND the target ship sprite's full frame height is > 0x20; otherwise it
+// deliberately uses the bounding circle. `g_avg_frame_tick_scale` is the
+// normalized 30 Hz simulation scale; the port's equivalent is
+// GameState::last_frame_tick_scale.
+constexpr float kPixelMaskFrameScaleThreshold = 2.0F; // 0x005754c8
+constexpr int kPixelMaskFrameHeightThreshold = 0x20;
+
+[[nodiscard]] bool ShipContactUsesPixelMask(const GameState &state,
+                                            const Ship &target) {
+  if (!(state.last_frame_tick_scale < kPixelMaskFrameScaleThreshold)) {
+    return false;
+  }
+  if (!target.collision_mask.HasMask()) {
+    return false;
+  }
+  return target.collision_mask.mask->height > kPixelMaskFrameHeightThreshold;
+}
+
+// Resolves each live entity's current-frame pixel mask from the non-SDL mask
+// store, mirroring the sprite-frame selection the renderer performs
+// (Ship_UpdateVisualState 0x00428340, Shot_HandleShot 0x00435830,
+// Asteroid_UpdateSprites 0x00436910). The original's sprite layer carries these
+// masks into Ship_HandleSpritePairCollision (0x004374f0) and
+// Asteroid_HandleSpritePairCollision (0x00436f70); the clean-room sim has no
+// sprite handles, so it refreshes the bindings from the same sheet/descriptor
+// ids immediately before the direct-contact pass.
+void RefreshCollisionMasks(GameState &state) {
+  if (!state.collision_masks_enabled) {
+    return;
+  }
+  if (!state.sprite_mask_store) {
+    state.sprite_mask_store = std::make_shared<SpriteMaskStore>();
+  }
+  SpriteMaskStore &store = *state.sprite_mask_store;
+  const std::int16_t system_id = state.player.current_system_id;
+
+  for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.current_system_id != system_id ||
+        ship.ship_class_id < 0) {
+      continue;
+    }
+    const ShipClass *ship_class = ShipClassFor(state, ship);
+    if (ship_class == nullptr || ship_class->base_image_id == 0 ||
+        ship_class->frames_per_rotation <= 0) {
+      continue;
+    }
+    int row = 0;
+    if ((ship_class->sprite_behavior_flags & 1U) != 0U) {
+      if (ship.ai_turn_bias_dir < 0) {
+        row = 1;
+      } else if (ship.ai_turn_bias_dir > 0) {
+        row = 2;
+      }
+    }
+    const int frame =
+        row * ship_class->frames_per_rotation +
+        MaskFrameForHeading(ship.heading, ship_class->frames_per_rotation);
+    BindEntityMask(ship.collision_mask,
+                   store.Sheet(ship_class->base_image_id, frame),
+                   frame,
+                   /*swapped_axes=*/true);
+  }
+
+  for (ActiveShot &shot : state.active_shots) {
+    if (shot.system_id != system_id) {
+      continue;
+    }
+    const Weapon *weapon = WeaponForShot(state, shot);
+    if (weapon == nullptr) {
+      continue;
+    }
+    const auto spin_id = static_cast<std::uint16_t>(weapon->sprite_id + 3000);
+    const int frame_count = store.SpinFrameCount(spin_id);
+    if (frame_count <= 0) {
+      continue;
+    }
+    int frame = 0;
+    if ((weapon->flags & 0x0001U) == 0) {
+      const float bearing = std::atan2(shot.vel_x, -shot.vel_y);
+      frame = MaskFrameForHeading(bearing, frame_count);
+    } else {
+      frame = std::clamp(shot.frame_cycle_index, 0, frame_count - 1);
+    }
+    BindEntityMask(shot.collision_mask,
+                   store.Spin(spin_id, frame),
+                   frame,
+                   /*swapped_axes=*/false);
+  }
+
+  for (AsteroidState &asteroid : state.asteroid_pool) {
+    if (!asteroid.active) {
+      continue;
+    }
+    const auto spin_id = static_cast<std::uint16_t>(
+        kAsteroidSpinBase + (asteroid.wander_type & 0x0f));
+    const int frame_count = store.SpinFrameCount(spin_id);
+    if (frame_count <= 0) {
+      continue;
+    }
+    float wander = asteroid.wander_frame_accumulator;
+    while (wander < 0.0F) {
+      wander += static_cast<float>(frame_count);
+    }
+    while (wander >= static_cast<float>(frame_count)) {
+      wander -= static_cast<float>(frame_count);
+    }
+    const int frame =
+        std::clamp(static_cast<int>(std::lround(wander)), 0, frame_count - 1);
+    BindEntityMask(asteroid.collision_mask,
+                   store.Spin(spin_id, frame),
+                   frame,
+                   /*swapped_axes=*/true);
   }
 }
 
@@ -1000,6 +1167,12 @@ void NovaCollision_ResolveShipHitFromWeaponSlot(
                            player_aggro_delta);
 }
 
+// Public test seam for the internal RefreshCollisionMasks pass (resolves each
+// live entity's current-frame sprite mask from the non-SDL store).
+void NovaCollision_RefreshCollisionMasks(GameState &state) {
+  RefreshCollisionMasks(state);
+}
+
 bool NovaWeapon_CanProjectileHitShip(const GameState &state,
                                      const ActiveShot &shot,
                                      std::int16_t target_slot) {
@@ -1127,10 +1300,12 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
 // invokes it for every (asteroid sprite, shot sprite) overlap. It resolves the
 // shot and asteroid records from the sprites' presented_object_id (+0xC8),
 // rejects weapons whose flags_quaternary bit 0x0001 is set (Seeker 1 "passes
-// over asteroids"), does a pixel-mask overlap test, then funnels the contact
-// through NovaUi_ResolveWeaponSplashImpact. Unlike the ship callback there is
-// no late-collision-window gate. The clean-room substitutes the explicit
-// circle envelope because sprite masks are not carried in the sim layer.
+// over asteroids"), does a pixel-mask overlap test
+// (Sprite_TestPixelMaskOverlap 0x00475c80), then funnels the contact through
+// NovaUi_ResolveWeaponSplashImpact. Unlike the ship callback there is no
+// late-collision-window gate. The clean-room resolves each asteroid's current
+// wander frame mask before the pass and falls back to the circle envelope only
+// when a mask is unavailable.
 void ResolveDirectAsteroidContact(GameState &state,
                                   ActiveShot &shot,
                                   const Weapon &weapon) {
@@ -1141,11 +1316,19 @@ void ResolveDirectAsteroidContact(GameState &state,
     if (!asteroid.active) {
       continue;
     }
-    const float dx = asteroid.target_pos_x - shot.pos_x;
-    const float dy = asteroid.target_pos_y - shot.pos_y;
-    const float radius = std::max(0.0F, asteroid.collision_radius_px) +
-                         std::max(0.0F, shot.collision_radius_px);
-    if (dx * dx + dy * dy > radius * radius) {
+    // Pixel-mask overlap, falling back to the circle when either side has no
+    // resolved sprite mask. The original's Asteroid_HandleSpritePairCollision
+    // (0x00436f70) always uses Sprite_TestPixelMaskOverlap.
+    if (!CollisionMask_TestContact(shot.collision_mask,
+                                   shot.pos_x,
+                                   shot.pos_y,
+                                   static_cast<int>(std::lround(std::max(
+                                       0.0F, shot.collision_radius_px))),
+                                   asteroid.collision_mask,
+                                   asteroid.target_pos_x,
+                                   asteroid.target_pos_y,
+                                   static_cast<int>(std::lround(std::max(
+                                       0.0F, asteroid.collision_radius_px))))) {
       continue;
     }
     ResolveAsteroidSplashImpact(state, shot, asteroid);
@@ -1160,8 +1343,12 @@ void ResolveDirectAsteroidContact(GameState &state,
 // or half-span <= 0x20). Asteroid_HandleSpritePairCollision (0x00436f70) runs
 // over the same shot containers against g_asteroid_sprite_layer; the
 // reimplementation evaluates ships first, then asteroids for a shot that did
-// not already connect.
+// not already connect. Both contacts test the decoded per-frame pixel masks
+// (Sprite_TestPixelMaskOverlap 0x00475c80) with the bounding-circle fallback.
 void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
+  // Resolve the per-frame sprite masks the original's sprite layer would have
+  // carried into the two pair-collision callbacks before testing contacts.
+  RefreshCollisionMasks(state);
   for (ActiveShot &shot : state.active_shots) {
     if (shot.life_ticks_remaining <= 0.0F && shot.life_frames > 0) {
       // Compatibility for records created by older callers/tests that only
@@ -1187,14 +1374,23 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
       if (!NovaWeapon_CanProjectileHitShip(state, shot, slot)) {
         continue;
       }
-      // TODO(decomp): pixel-mask overlap (Sprite_TestPixelMaskOverlap
-      // 0x00475c80) when sprites are available; the circle envelope stands in
-      // for Sprite_TestBoundingCircleOverlap.
-      const float dx = target.pos_x - shot.pos_x;
-      const float dy = target.pos_y - shot.pos_y;
-      const float radius = std::max(0.0F, target.collision_radius_px) +
-                           std::max(0.0F, shot.collision_radius_px);
-      if (dx * dx + dy * dy > radius * radius) {
+      // Pixel-mask overlap (Sprite_TestPixelMaskOverlap 0x00475c80), with the
+      // bounding-circle fallback (Sprite_TestBoundingCircleOverlap 0x00475be0).
+      // Ship_HandleSpritePairCollision (0x004374f0) selects the mask only when
+      // the frame scale is < 2.0 and the ship frame height > 0x20; otherwise it
+      // deliberately uses the circle.
+      if (!CollisionMask_TestContact(
+              shot.collision_mask,
+              shot.pos_x,
+              shot.pos_y,
+              static_cast<int>(
+                  std::lround(std::max(0.0F, shot.collision_radius_px))),
+              target.collision_mask,
+              target.pos_x,
+              target.pos_y,
+              static_cast<int>(
+                  std::lround(std::max(0.0F, target.collision_radius_px))),
+              /*allow_pixel_mask=*/ShipContactUsesPixelMask(state, target))) {
         continue;
       }
       if (ShotIsInLateCollisionWindow(shot, *weapon)) {

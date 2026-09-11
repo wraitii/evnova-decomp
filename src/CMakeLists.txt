@@ -59,6 +59,7 @@ add_library(evnova_runtime
     game/starmap.cpp
     game/trade_center.cpp
     game/sprite_world.cpp
+    game/sprite_mask.cpp
     game/targeting.cpp
     game/travel.cpp
     game/weapon.cpp
