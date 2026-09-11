@@ -660,6 +660,49 @@ TEST_CASE("death seed latch still runs the finale after a zero overshoot",
   CHECK(state.player.destruction_finale_triggered);
 }
 
+TEST_CASE("destroyed hull blast scales radius and damage by class mass",
+          "[collision][ship_visual]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  // The four hull-blast constants at 0x00575380..0x0057539C are doubles:
+  // radius round(Mass*0.075 + 50) and damage round(Mass*0.0375 + 25). At 150
+  // tons that is a per-axis radius of 61 and 31 blast damage. A misaligned
+  // float read of the same bytes yields 1.4/3.125 and 1.275/2.875, which
+  // ballooned the radius to 213 and damaged ships the original would spare.
+  state.scenario.ships[0].mass_tons = 150;
+  state.scenario.ships[0].destruction_effect_final = 2;
+  state.player.is_active = false;
+
+  Ship &wreck = state.ShipAt(1);
+  wreck.pos_x = 0.0F;
+  wreck.pos_y = 0.0F;
+  wreck.armor_points = 0.0F;
+  wreck.shield_points = 0.0F;
+
+  Ship &near = state.ShipAt(2);
+  near.is_active = true;
+  near.ship_instance_id = 2;
+  near.ship_class_id = 0;
+  near.armor_points = 1000.0F;
+  near.shield_points = 0.0F;
+  near.pos_x = 60.0F;
+  near.pos_y = 0.0F;
+
+  Ship &far = state.ShipAt(3);
+  far.is_active = true;
+  far.ship_instance_id = 3;
+  far.ship_class_id = 0;
+  far.armor_points = 1000.0F;
+  far.shield_points = 0.0F;
+  far.pos_x = 100.0F;
+  far.pos_y = 0.0F;
+
+  NovaShip_RunShipDestructionFinale(state, wreck);
+
+  CHECK(near.armor_points == Catch::Approx(969.0F));
+  CHECK(far.armor_points == Catch::Approx(1000.0F));
+}
+
 TEST_CASE("inactive wreck holds the death screen until the -240 timer floor",
           "[collision][spaceflight]") {
   GameState state;
