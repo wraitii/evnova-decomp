@@ -1543,6 +1543,10 @@ bool ScenarioData::LoadFromArchives() {
         cls.blink_val_c = ReadBeI16(*shan, 0x3c);
         cls.blink_val_d = ReadBeI16(*shan, 0x3e);
         cls.light_image_id = ReadBeI16(*shan, 0x1e);
+        // GlowImageID (+0x16): the engine-glow layer bound by the loader
+        // (gated on g_pref_engine_glows); the render-texture load in the
+        // SDL view reads the same descriptor field.
+        cls.engine_glow_image_id = ReadBeI16(*shan, 0x16);
         if (cls.blink_mode == 2 && cls.blink_val_c > 0x1f) {
           cls.blink_val_c = 0x1f;
         }

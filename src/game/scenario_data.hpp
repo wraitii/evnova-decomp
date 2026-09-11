@@ -409,6 +409,10 @@ struct ShipClass {
   // (+0x1e). Non-positive means the class has no running-lights layer and
   // Ship_UpdateVisualState skips the blink machine.
   std::int16_t light_image_id = 0;
+  // Ghidra sh\x8an GlowImageID (+0x16) <- the per-class engine-glow sprite.
+  // Non-positive means the class has no engine-glow layer, so
+  // Ship_UpdateVisualState (0x00428340) skips the glow brightness block.
+  std::int16_t engine_glow_image_id = 0;
   // Ghidra ShipClassDef +0xa08: zero-based id of the class whose base sprite
   // this class cloned (0x004b4ee0 clone arm: the first EARLIER class in load
   // order whose sh\x8an BaseImageID matches; -1 when the class builds its own

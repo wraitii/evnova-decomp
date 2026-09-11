@@ -232,6 +232,18 @@ intensity/32` for the engine glow, running lights and weapon effects alike.
 Visibility gates match the original: the light layer hides at intensity <= 1.0,
 the weapon layer at <= 0.
 
+The engine glow is special-cased: `Ship_UpdateVisualState` (0x0042a383) first
+forms `level = engine_glow_level + NovaRandom_Range(6) - 4`, hides the layer
+when `level < 2`, clamps it to 32, and writes that value into the RGB tint
+channels at brightness 32 (so alpha = `level/32`, not `engine_glow_level/24`).
+The port reproduces this in `NovaShip_TickWeaponSpriteAnd
+RunningLights` (the visual-state tick), storing the fraction in
+`Ship.engine_glow_intensity`; the movement functions' provisional `level/24`
+write is overwritten before the frame is drawn. The same original block folds
+the per-ship fog into NPC glow (`level = min(level, 32 -
+distance_brightness*1.5)`); the port does not track the murk fog yet, so that
+reduction is skipped (TODO(decomp)).
+
 One original nuance is not reproduced: `BlitPixie_BlitRectRawCopy` (0x004711e0)
 fast-paths the case `tint==0x20 && brightness==0x20 && distance_brightness==0`
 to a plain opaque copy instead of the additive formula. That is exactly a
@@ -242,7 +254,16 @@ affected: it uses `brightness = ShipClassDef.base_transparency` and
 (brightness 0) is an ordinary tinted copy.
 
 Not yet honored: the class-level load gates `g_pref_running_lights` /
-`g_pref_weapon_effects` (the preferences are not on `GameState`, so both layers
-load unconditionally; the same divergence already applies to `g_pref_engine_
-glows`). The per-ship distance-brightness/space-color tint the original applies
-to these layers is likewise not modelled (murk fog is a system-level TODO).
+`g_pref_weapon_effects` / `g_pref_engine_glows` (the preferences are not on
+`GameState`, so all three layers load unconditionally). The per-ship
+distance-brightness/space-color tint the original applies to these layers is
+likewise not modelled (murk fog is a system-level TODO).
+
+Player glow-level drive is a clean-room approximation: `NovaPlayer_UpdateFrom
+Input` steps the level toward 24 (thrust), 32 (afterburner) or 0 (coast),
+while the original `PlayerTick_ManualFlightAndRegeneration` adds +1/frame
+under thrust (<24), +2/frame while banking (no clamp), fades once while
+coasting and again under a maneuver/station hold, and ramps the afterburner
+level at up to +2/frame to 32; the gravity-shield arm ramps toward
+`round(speed*32*0.75/eff_max)` capped 24. The NPC `Ship_HandleShip` drive is
+faithful.

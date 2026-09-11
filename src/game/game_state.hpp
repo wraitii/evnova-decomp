@@ -539,7 +539,11 @@ struct Ship {
   // original integer control level to alpha because the original SpriteWorld
   // blend setup is not reconstructed yet.
   std::int16_t engine_glow_level = 0;
-  // Derived render value, always engine_glow_level / 24 clamped to [0,1].
+  // Render alpha for the engine-glow layer, recomputed each frame in
+  // NovaShip_TickWeaponSpriteAndRunningLights (Ship_UpdateVisualState):
+  // (engine_glow_level + rand(0..5) - 4)/32, or 0 when that is below 2.
+  // The movement code also writes a provisional level/24 here, but the visual
+  // tick overwrites it before the frame is drawn.
   float engine_glow_intensity = 0.0F;
 
   // Per-turret-group quadrant rotation state (next barrel to fire), -1 until

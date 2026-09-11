@@ -2536,13 +2536,15 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // through Ship_SteerVelocityTowardShipHeading instead of vector thrust.
   const bool gravity_shield = NovaShip_HasGravityShield(ship, ship_class);
 
-  // The movement blocks are gated off while the maneuver timer is active, and
-  // for the defunct AI state (0x16) the ship also holds course. The original
-  // also gates off ships whose class is the 0x2ff sentinel; those fall through
-  // to the inactive-guard at the top of Ship_HandleShip in practice.
+  // The movement blocks are gated off only while the maneuver timer is active
+  // AND the ship is not in AI state 0x16. Ghidra Ship_HandleShip 0x00433050
+  // opens the turn/thrust/bank block when
+  // `ai_maneuver_timer_ms <= 0 || Ship_IsShipInAiState0x16(ship)` (the
+  // class-0x2ff sentinel arm is handled by the caller's acceptance guard), so
+  // a yielding (0x16) ship keeps steering even with an active timer.
   const bool coasting = ship.ai_maneuver_timer_ms > 0.0F;
   // Ghidra 0x00416070 Ship_IsShipInAiState0x16 runs inline here.
-  const bool holds_course = coasting || ship.ai_state_code == 0x16;
+  const bool holds_course = coasting && ship.ai_state_code != 0x16;
   const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
 
   // Ship_HandleShip (0x00433050) applies the disabled/derelict damping before
@@ -2572,7 +2574,11 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // tilt anim: +1 while banking one way, -1 the other, 0 otherwise), which the
   // engine-glow block below consumes for its turn-bias +2 bump.
   ship.ai_turn_bias_dir = 0;
-  if (!holds_course) {
+  // Ghidra gates the whole turn/regen block on `!Ship_IsShipDisabled(ship) &&
+  // !g_gameplay_time_frozen` (uVar10, 0x00433050): a disabled NPC holds its
+  // current heading (no rotation) and does not regenerate. The inner arm then
+  // additionally needs `ai_maneuver_timer_ms <= 0 || Ship_IsShipInAiState0x16`.
+  if (!fire_restricted && !holds_course) {
     const float cur_deg = ship.heading / kDegToRad;
     // Shortest signed delta [-180, 180] degrees from current to desired.
     const float delta_deg = std::remainder(
@@ -2592,11 +2598,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       ship.heading += kTwoPi;
     }
 
-    // Ship_HandleShip regenerates only while the ship is not disabled.
-    // In particular, disabled NPCs must not restore shields and lethal hits
-    // must not resurrect a ship whose armor has reached zero. The original
-    // also leaves this whole movement/regen block disabled while coasting.
-    if (!fire_restricted && !NovaAiShip_IsDestroyed(ship)) {
+    // Regeneration shares the block's disabled gate; lethal hits must not
+    // resurrect a ship whose armor has reached zero.
+    if (!NovaAiShip_IsDestroyed(ship)) {
       const float max_shield = static_cast<float>(ship_class.base_shield);
       if (ship.shield_points < max_shield) {
         ship.shield_points = std::min(
@@ -2819,10 +2823,12 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // Mirrors Ship_HandleShip's glow drive: the level ramps toward 0x20 (32)
   // under a full burn, toward 0x18 (24) under low throttle (thrust command
   // below 2x the effective thrust, gh.data DAT_0057531c = 2.0), fades by one
-  // decrement while not thrusting (LAB_00435197) and again while reversing, and
-  // gets an extra +2 toward 0x18 while banking into a turn (ai_turn_bias_dir
-  // set and class sprite_behavior_flags bit 2). The renderer maps level/24
-  // clamped to [0,1] onto the engine-glow alpha, exactly as for the player.
+  // decrement while not thrusting (LAB_00435197) and while coasting through a
+  // reversal (the closed main gate and the tail decrement collapse to one),
+  // and gets an extra +2 while banking into a turn (ai_turn_bias_dir set and
+  // class sprite_behavior_flags bit 2), with no upper clamp. The renderer's
+  // per-frame random flicker/hide threshold lives in
+  // NovaShip_TickWeaponSpriteAndRunningLights (Ship_UpdateVisualState).
   {
     std::int16_t &glow = ship.engine_glow_level;
     auto fade_to_zero = [&]() { // LAB_00435197: single decrement toward 0.
@@ -2836,18 +2842,20 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     if (ship.ai_turn_bias_dir != 0 &&
         (ship_class.sprite_behavior_flags & 1U) != 0U &&
         (ship_class.sprite_behavior_flags & 2U) != 0U) {
+      // Ghidra adds +2 with no upper clamp (0x004350ee), so the level can
+      // overshoot 0x18; the normal thrust branch pulls it back one step on
+      // later frames.
       if (glow < 0x18) {
         glow = static_cast<std::int16_t>(glow + 2);
-        if (glow > 0x18) {
-          glow = 0x18;
-        }
       }
     }
     if (ship.ai_forward_thrust_cmd <= 0.0F) {
       fade_to_zero();
-    } else if (ship.ai_maneuver_timer_ms > 0.0F || ship.ai_state_code == 0x16) {
-      // Thrust command present but the ship is coasting through a reversal (or
-      // defunct): the original jumps to the fade label here too.
+    } else if (holds_course) {
+      // Thrust command present but the maneuver timer is coasting the ship
+      // through a reversal: Ghidra's inner check `timer > 0 && !state0x16`
+      // jumps to LAB_00435197, the same single decrement the closed main gate
+      // would otherwise take through the tail block.
       fade_to_zero();
     } else if (ship.ai_forward_thrust_cmd < eff_thrust * 2.0F) {
       // Low throttle: settle the glow at the 0x18 cruise level.
