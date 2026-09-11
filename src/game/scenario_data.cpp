@@ -731,6 +731,14 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (bytes.size() >= 0x23a) {
     st.gravity_shear = ReadBeI16(bytes, 0x238);
   }
+  // Weapon (StellarDef +0x2c <- payload +0x23a): the defense-battery weapon
+  // resource id. The loader rebases the raw word into a bank slot: values
+  // < 0x80 (including 0 and -1/0xffff) become -1, otherwise the word is stored
+  // as resource_id - 0x80. The clean-room model keeps the raw resource id here
+  // and re-applies the -0x80 in ScenarioData::Weapon.
+  if (bytes.size() >= 0x23c) {
+    st.weapon_id = ReadBeI16(bytes, 0x23a);
+  }
   // Tribute (StellarDef +0x46a <- payload +0x0a; the loader falls back to
   // 1000 x TechLevel for < 1, applied by the daily income pass 0x00423540).
   st.tribute = ReadBeI16(bytes, 0x0a);

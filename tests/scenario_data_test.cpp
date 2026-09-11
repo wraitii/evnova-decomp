@@ -145,6 +145,32 @@ TEST_CASE("stellar technology fields decode for landed stores",
         std::array<std::int16_t, 8>{14, 20, 55, 57, 80, 116, 0, 0});
 }
 
+TEST_CASE("stellar defense-battery weapon decodes and resolves by bank",
+          "[scenario][stellar][weapon]") {
+  // The spob Weapon word at payload +0x23a is a resource id. The original
+  // loader (0x004bd3c0) rebases it to a weapon bank slot (resource_id - 0x80,
+  // or -1 when < 0x80) before storing StellarDef +0x2c, which
+  // Stellar_TickStellarDefenseBatteries (0x0042d890) indexes into g_weapon_defs
+  // directly. The clean-room model keeps the raw id and resolves it through
+  // ScenarioData::Weapon, reaching the same bank. Spacedock II (spob 0x85)
+  // ships 0x00c4 = Enormous Blaster Turret, the same weapon as Earth.
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const Stellar *spacedock = data.Stellar(0x85);
+  REQUIRE(spacedock != nullptr);
+  CHECK(spacedock->name == "Spacedock II");
+  CHECK(spacedock->weapon_id == 0x00c4); // raw resource id 196
+  const Weapon *weapon = data.Weapon(spacedock->weapon_id);
+  REQUIRE(weapon != nullptr);
+  CHECK(weapon->name == "Enormous Blaster Turret");
+  // A stellar with no battery (payload 0xffff) decodes to the -1 sentinel and
+  // must not resolve to a weapon.
+  const Stellar *hg_kania = data.Stellar(0x57c);
+  REQUIRE(hg_kania != nullptr);
+  CHECK(hg_kania->weapon_id == -1);
+  CHECK(data.Weapon(hg_kania->weapon_id) == nullptr);
+}
+
 TEST_CASE("outfit tail fields decode at their real payload offsets",
           "[scenario][data]") {
   ScenarioData data;

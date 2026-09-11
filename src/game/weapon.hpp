@@ -179,6 +179,26 @@ std::int16_t NovaWeapon_SelectTurretQuadrant(GameState &state,
                                              bool spawn_without_owner = false,
                                              bool apply_random_spread = true);
 
+// Ghidra Shot_AimStellarBatteryShot (0x0043BA30): lead-aim a stellar defense
+// battery's shot. The battery/weapon are stationary, so the intercept is
+// target_pos + target_vel * flight_time (no shooter-velocity term, unlike
+// Ship_AimWeaponPredictive). Mode 6 (freeflight rocket) uses the two-regime
+// spool-up model. `battery` supplies the weapon id (StellarDef +0x2c) and the
+// muzzle at map_x/map_y; returns the game-degree bearing.
+[[nodiscard]] std::int16_t NovaWeapon_AimStellarBatteryShot(
+    const GameState &state, const Stellar &battery, const Ship &target);
+
+// Ghidra Stellar_TickStellarDefenseBatteries (0x0042D890) shot-construction
+// inline block: allocate one shot at the battery (map_x/map_y), aimed/lead at
+// `target_ship_slot` with the battery weapon `weapon_resource_id`, and queue
+// its fire sound. Returns the active-shot index or -1 when the weapon is not
+// resolvable. The caller owns the cooldown/burst bookkeeping.
+[[nodiscard]] int
+NovaWeapon_SpawnStellarBatteryShot(GameState &state,
+                                   const Stellar &battery,
+                                   std::int16_t target_ship_slot,
+                                   std::int16_t weapon_resource_id);
+
 // Ghidra Shot_SpawnLinkedShotsOnImpact (0x00420D30): spawn the impacting
 // weapon's linked submunitions (Bible SubCount/SubType/SubTheta/SubLimit) at
 // the impact position. Owner/target context and heading/velocity are inherited

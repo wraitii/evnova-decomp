@@ -54,6 +54,27 @@ namespace game {
                                                 std::int16_t govt_id,
                                                 int flag_index);
 
+// Ghidra 0x004629E0 Government_IsCandidateHostileToTargeter. Whether `ship` is
+// a hostile target for a stellar defense battery. `stellar` is the targeter and
+// `stellar_id` its raw resource id (Ghidra StellarDef +0x8). Branches:
+//  - a hazard-marked targeter (+0x46) or a non-player ship in AI state 8 is
+//    never a candidate;
+//  - ordinary stellars (availability_flags +0x34 without 0x200): the player or
+//    a squad leader uses the system-reputation / government-relation ladder
+//    (falling back to the system government when the stellar has none), while
+//    an ordinary NPC compares its own faction against the stellar government
+//    directly;
+//  - special (0x200) stellars admit the player/leader as a target only when the
+//    derelict sentinel (+0x47) is set.
+// A stellar currently selected as the travel destination is never hostile.
+// `government` is the ship class's inherent-combat government id used by the
+// ladder. Confidence: high (single caller, the defense-battery tick).
+[[nodiscard]] bool
+NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
+                                            const Ship &ship,
+                                            const Stellar &stellar,
+                                            std::int16_t stellar_id);
+
 // Ghidra 0x0040fd20 Government_IsShipEligibleForGovernmentAid. Whether the
 // ship's government would send it to help the player when hailed: false when
 // the ship keeps pressing its own target; true when it is idle with no AI

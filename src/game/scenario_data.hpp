@@ -750,8 +750,25 @@ struct Stellar {
   // Bible-name for this payload word is unverified -- TODO(decomp).
   std::int16_t gravity_shear = 0;
   // Gravity is a float in the original; stored as its encoded half/short here.
-  std::int16_t gravity = 0;    // Gravity
-  std::int16_t weapon_id = -1; // Weapon
+  std::int16_t gravity = 0; // Gravity
+  // Weapon (payload +0x23a -> Ghidra StellarDef +0x2c): a projectile/missile
+  // weapon resource id (Bible "Weapon", 128-383; 0/-1 = none). Fired by
+  // Stellar_TickStellarDefenseBatteries (0x0042d890). The original loader
+  // (0x004bd3c0) rebases the raw word into a weapon bank slot before storing it
+  // at StellarDef +0x2c: values < 0x80 (including 0 and -1/0xffff) become -1,
+  // otherwise the value becomes resource_id - 0x80. The tick indexes
+  // g_weapon_defs with that bank slot directly. The port keeps the raw resource
+  // id here and resolves it through ScenarioData::Weapon(weapon_id) (the same
+  // -0x80), so both reach the same weapon.
+  std::int16_t weapon_id = -1; // Weapon (raw resource id; -1 = none)
+  // Ghidra StellarDef +0x2e (adjacent runtime word, no payload field): the
+  // burst shot counter for a burst-cycle defense weapon. Incremented by the
+  // battery tick and reset when Weapon_GetWeaponFireIntervalTicks is reached.
+  std::int16_t burst_shot_count = 0; // Ghidra StellarDef +0x2e
+  // Ghidra StellarDef +0x494 (float): per-stellar defense-battery fire cooldown
+  // in reference-cadence ticks. Ticked down by g_avg_frame_tick_scale; set to
+  // the weapon reload (or burst reset cooldown) when a shot spawns.
+  float defense_battery_cooldown = 0.0F; // Ghidra StellarDef +0x494
   // Live Strength (Ghidra StellarDef +0x3c), the combined mass+energy damage
   // the stellar can absorb from planet-type weapons before it is destroyed
   // (Bible "Strength"). The loader seeds it from strength_capacity (+0x40); it

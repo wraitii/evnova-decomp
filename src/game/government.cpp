@@ -150,6 +150,86 @@ bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
              .policy_flags[static_cast<std::size_t>(flag_index)] != 0;
 }
 
+// Ghidra 0x004629E0 Government_IsCandidateHostileToTargeter. See the header for
+// the branch description; this is the single caller's (the stellar defense
+// battery tick) target filter. The original reaches the ship class's
+// inherent-combat government and the governing system through the globals; the
+// port resolves both through ScenarioData. The +0x8 targeter word compared
+// against g_travel_selected_stellar_id is the passed-in stellar resource id.
+bool NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
+                                                 const Ship &ship,
+                                                 const Stellar &stellar,
+                                                 std::int16_t stellar_id) {
+  if (stellar.hazard_marker) {
+    return false;
+  }
+  if (ship.ship_instance_id != 0 && NovaAiShip_IsShipInAiState8(ship)) {
+    return false;
+  }
+  const std::int16_t current_system = state.player.current_system_id;
+  if ((stellar.availability_flags & 0x200U) == 0U) {
+    if (ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0) {
+      // Player or squad-leader: the reputation / government-relation ladder.
+      std::int16_t targeter_govt = stellar.government_id;
+      if (targeter_govt == -1) {
+        const System *system = state.scenario.System(
+            static_cast<std::int16_t>(current_system + 0x80));
+        if (system != nullptr && system->government_id != -1) {
+          targeter_govt = system->government_id;
+        }
+      }
+      bool hostile = false;
+      if (targeter_govt != -1 && static_cast<std::size_t>(targeter_govt) <
+                                     state.scenario.governments.size()) {
+        const Government &govt =
+            state.scenario.governments[static_cast<std::size_t>(targeter_govt)];
+        const std::int16_t rep =
+            current_system >= 0 && static_cast<std::size_t>(current_system) <
+                                       state.system_reputation.size()
+                ? state.system_reputation[static_cast<std::size_t>(
+                      current_system)]
+                : 0;
+        // The original's SBORROW4 comparison is `rep + flee_threshold < 0`.
+        hostile = static_cast<int>(rep) +
+                      static_cast<int>(govt.flee_shield_threshold) <
+                  0;
+        if (!hostile) {
+          if ((govt.flags_primary & 0x0001U) == 0U) {
+            const ShipClass *cls = state.scenario.Ship(
+                static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+            const std::int16_t inherent =
+                cls != nullptr ? cls->inherent_combat_govt : -1;
+            hostile = NovaGovernment_AreGovtsHostileOrXenophobic(
+                state.scenario, inherent, stellar.government_id);
+          } else if (rep < 0) {
+            hostile = true;
+          }
+        }
+        if (hostile) {
+          if (NovaGovernment_GetPolicyFlag(
+                  state.scenario, stellar.government_id, 0)) {
+            hostile = false;
+          }
+          if (govt.iff_scrambler_active) {
+            hostile = false;
+          }
+        }
+      }
+      if (state.travel.selected_stellar_id == stellar_id) {
+        hostile = false;
+      }
+      return hostile;
+    }
+    // Ordinary NPC: compare its faction directly against the stellar govt.
+    return NovaGovernment_AreGovtsHostileOrXenophobic(
+        state.scenario, stellar.government_id, ship.faction_or_government_id);
+  }
+  // Special (availability 0x200) stellar: only a derelict/abandoned sentinel
+  // admits the player/leader as a hostile target.
+  return stellar.field_0x47 != 0 &&
+         (ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0);
+}
+
 // Ghidra 0x0040fd20 Government_IsShipEligibleForGovernmentAid. See the header
 // for the branch description. The mission-fleet branch (random-encounter
 // fleet defs) and the GovtDef +0x83 byte gate are deferred: the fleet defs
