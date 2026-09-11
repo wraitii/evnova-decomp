@@ -32,4 +32,10 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                           GameState &state,
                           const std::function<void()> &render_background = {});
 
+// Test seam for the Game_ResetNewGameState (0x004b4690) stellar Strength/hazard
+// reset: starts-destroyed bodies (availability_flags 0x40) go to live strength
+// -1 with the regeneration countdown pinned, all others reset to the loaded
+// strength capacity.
+void NovaNewPilot_ResetStellarStrengthForNewGame(GameState &state);
+
 } // namespace game

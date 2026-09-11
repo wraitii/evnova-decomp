@@ -1134,10 +1134,13 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
       continue;
     }
     // The original builds the active spin set from link_a (primary) when the
-    // stellar is not engaged/hand-over, link_b otherwise; every starting-system
-    // stellar has link_b == -1, so the primary link_a set is the one animated.
-    const SpriteAsset *set = sprite_store_.Spin(
-        platform.renderer(), static_cast<std::uint16_t>(st->link_a_id + 1000));
+    // stellar is not active, link_b otherwise (Stellar_UpdateStellarSprites
+    // 0x0042cd10). NovaTargeting_StellarSpriteLinkId centralises that choice so
+    // the animated/drawn set matches the collision mask binding.
+    const SpriteAsset *set =
+        sprite_store_.Spin(platform.renderer(),
+                           static_cast<std::uint16_t>(
+                               NovaTargeting_StellarSpriteLinkId(*st) + 1000));
     if (!set || set->frame_count < 2) {
       continue; // no animated set / single-frame body stays static
     }
@@ -1216,6 +1219,13 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
         }
       }
     }
+    // Publish the frame the view draws into the StellarDef-equivalent field
+    // (Ghidra StellarDef +0x476) so NovaCollision_RefreshCollisionMasks binds
+    // the matching collision mask for this and the next tick.
+    if (Stellar *const mutable_stellar = state.scenario.StellarMutable(nav)) {
+      mutable_stellar->sprite_current_frame =
+          static_cast<std::int16_t>(anim.current_frame);
+    }
   }
 }
 
@@ -1267,10 +1277,14 @@ void SpaceflightView::DrawStellarBodies(SdlPlatform &platform,
 
     // Prefer the real spin planet sprite; fall back to a tinted disc. Animated
     // stellars use the frame advanced by AdvanceStellarAnimation (keyed by the
-    // stellar id); single-frame bodies stay at frame 0. Stellar spin sets live
-    // at spin resource id link_a_id + 1000 in the shared sprite store.
-    const SpriteAsset *set = sprite_store_.Spin(
-        platform.renderer(), static_cast<std::uint16_t>(st->link_a_id + 1000));
+    // stellar id), which also publishes it to Stellar.sprite_current_frame for
+    // the collision refresh; the link_a/link_b set choice is shared with the
+    // collision refresh via NovaTargeting_StellarSpriteLinkId so the drawn art
+    // and the collision mask never disagree.
+    const SpriteAsset *set =
+        sprite_store_.Spin(platform.renderer(),
+                           static_cast<std::uint16_t>(
+                               NovaTargeting_StellarSpriteLinkId(*st) + 1000));
     if (set && !set->frames.empty()) {
       int frame_idx = 0;
       const auto anim_it = stellar_anims_.find(nav);
@@ -1794,9 +1808,10 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
   // Bracket offset sized by the destination stellar's spin sprite set; the
   // pulse term is rounded to whole pixels (original rounds it too).
   float full = 32.0F; // default Sprite_Get*HalfSpan fallback (0x20)
-  if (const auto *spin =
-          sprite_store_.Spin(platform.renderer(),
-                             static_cast<std::uint16_t>(st->link_a_id + 1000));
+  if (const auto *spin = sprite_store_.Spin(
+          platform.renderer(),
+          static_cast<std::uint16_t>(NovaTargeting_StellarSpriteLinkId(*st) +
+                                     1000));
       spin && !spin->frames.empty()) {
     full = std::max(static_cast<float>(spin->tile_width),
                     static_cast<float>(spin->tile_height));
@@ -1883,10 +1898,12 @@ std::int16_t SpaceflightView::PickStellarAt(SdlPlatform &platform,
         st->system_id != state.player.current_system_id) {
       continue;
     }
-    // The original hit-tests the live ambient sprite (sprite_handle_active);
-    // a stellar with no loaded spin set has no sprite to click.
-    const SpriteAsset *set = sprite_store_.Spin(
-        platform.renderer(), static_cast<std::uint16_t>(st->link_a_id + 1000));
+    // The original hit-tests the live ambient sprite; use the same paint set
+    // the renderer/collision selected (link_a, or link_b when active).
+    const SpriteAsset *set =
+        sprite_store_.Spin(platform.renderer(),
+                           static_cast<std::uint16_t>(
+                               NovaTargeting_StellarSpriteLinkId(*st) + 1000));
     if (set == nullptr || set->frames.empty()) {
       continue;
     }

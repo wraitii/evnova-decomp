@@ -362,8 +362,14 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
 }
 
 void Stub_MiscHandlers(GameState &state, bool run_full_tick) {
-  (void)state;
-  (void)run_full_tick;
+  // Ghidra Frame_TickSystems scope 8 runs the stellar ambient/presentation
+  // passes only on full ticks. The reimplemented member here is
+  // Stellar_HandleShipStellarCrash (0x0043aed0), immediately after the
+  // gravity pull in the original ordering. Stellar animation itself lives in
+  // the SDL view (AdvanceStellarAnimation).
+  if (run_full_tick) {
+    NovaStellar_HandleShipStellarCrash(state);
+  }
 }
 
 void Stub_BeamHitQueue(GameState &state, float elapsed_ticks) {

@@ -16,6 +16,8 @@
 // endian; sizes/permissions are validated defensively and out-of-range values
 // are clamped the same way the loader clamps them.
 
+#include "sprite_mask.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -740,12 +742,28 @@ struct Stellar {
   // Bible-name for this payload word is unverified -- TODO(decomp).
   std::int16_t gravity_shear = 0;
   // Gravity is a float in the original; stored as its encoded half/short here.
-  std::int16_t gravity = 0;         // Gravity
-  std::int16_t weapon_id = -1;      // Weapon
-  std::int32_t strength = 0;        // Strength (negative/total = invincible)
-  std::int16_t dead_type = 0;       // DeadType
-  std::int16_t dead_time = 0;       // DeadTime
-  std::int16_t explosion_type = -1; // ExplodType
+  std::int16_t gravity = 0;    // Gravity
+  std::int16_t weapon_id = -1; // Weapon
+  // Live Strength (Ghidra StellarDef +0x3c), the combined mass+energy damage
+  // the stellar can absorb from planet-type weapons before it is destroyed
+  // (Bible "Strength"). The loader seeds it from strength_capacity (+0x40); it
+  // goes negative on destruction and is reset to the capacity by daily
+  // regeneration (Mission_TickDailyWorldUpdate 0x00466f26).
+  // Stellar_IsStellarActive (0x0046e3c0) treats strength < 0 as the
+  // destroyed/active state.
+  std::int32_t strength = 0; // Strength (current; < 0 = destroyed)
+  // Strength capacity (Ghidra StellarDef +0x40): the loaded Bible Strength
+  // value from sp\x9ab payload +0x23c (the loader copies the same word to both
+  // +0x40 and +0x3c). A capacity > 0 makes the body destroyable and
+  // sprite/target active; 0 or negative is invincible (Stellar_IsStellarActive
+  // gates on > 0). availability_flags 0x40 (Bible "starts the game destroyed")
+  // initializes the live value to -1 in Game_ResetNewGameState (0x004b4690).
+  // NOTE: this word was called `sprite_population` before the collision port;
+  // the loader/disassembly evidence is Strength, not an ambient-sprite count.
+  std::int32_t strength_capacity = 0; // Strength (capacity; <= 0 = invincible)
+  std::int16_t dead_type = 0;         // DeadType
+  std::int16_t dead_time = 0;         // DeadTime
+  std::int16_t explosion_type = -1;   // ExplodType
 
   // ---- Runtime targeting / display state (decoded with, not from, the
   // payload). The original keeps these on StellarDef (+0x14/+0x44/+0x45/
@@ -763,15 +781,9 @@ struct Stellar {
   // its availability_flags carry the 0x20 hazard/derelict bit; colours the
   // stellar as a hazard on the radar/target display.
   bool hazard_marker = false;
-  // sprite_population (+0x40): count of ambient sprites currently spawned for
-  // this stellar. A population >0 combined with a live/engaged sprite handle is
-  // one half of Stellar_IsStellarActive's gate.
-  int sprite_population = 0;
-  // sprite_handle_active (+0x3c): whether the stellar's ambient sprite is
-  // presently loaded via a live handle (in the original a negative handle is
-  // the active sentinel). Read along with the engagement access counter by
-  // Stellar_IsStellarActive.
-  bool sprite_handle_active = false;
+  // Strength (Ghidra +0x3c/+0x40) is modelled as `strength` /
+  // `strength_capacity` above; the old `sprite_population` /
+  // `sprite_handle_active` projection was a misreading of the same words.
   // engage_access (+0x47c): the stellar's engagement-access counter, bumped by
   // the travel/targeting interaction when a ship engages this stellar. >0 keeps
   // the stellar "active" even while its ambient sprite is unloaded.
@@ -812,6 +824,20 @@ struct Stellar {
   // The original stores this across several unnamed StellarDef fields; this
   // explicit projection keeps the gameplay state testable.
   bool is_destroyed = false;
+
+  // Current ambient-sprite animation frame (Ghidra StellarDef +0x476,
+  // sprite_current_frame). The renderer's AdvanceStellarAnimation
+  // (Stellar_UpdateStellarSprites 0x0042cd10) publishes the frame here so the
+  // collision layer can bind the same frame's mask.
+  std::int16_t sprite_current_frame = 0;
+  // OnDestroy control-bit expression (Ghidra StellarDef +0x266, sp\x9ab
+  // payload +0x246). Run when a planet-type weapon destroys the body; the
+  // original also re-arms it through Mission_ExecuteReactionScript.
+  std::string on_destroy_script;
+  // Current-frame opaque-pixel mask bound by
+  // NovaCollision_RefreshCollisionMasks (collision.cpp). Non-owning: points
+  // into GameState's SpriteMaskStore.
+  CollisionMaskBinding collision_mask;
 };
 
 // Ghidra CronEventDef (the defined payload half of a g_cron_event_states
@@ -1469,6 +1495,8 @@ struct ScenarioData {
   [[nodiscard]] const Outfit *Outfit(std::int16_t resource_id) const;
   [[nodiscard]] const Weapon *Weapon(std::int16_t resource_id) const;
   [[nodiscard]] const Stellar *Stellar(std::int16_t resource_id) const;
+  // Mutable view for the collision pass to publish per-frame masks/frames.
+  [[nodiscard]] struct Stellar *StellarMutable(std::int16_t resource_id);
   [[nodiscard]] const System *System(std::int16_t resource_id) const;
   // gh.id 0x80.. lookup for a random-encounter fleet template, or nullptr when
   // outside the loaded range.

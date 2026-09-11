@@ -2892,11 +2892,10 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
         stellar.engage_access = 1;
       } else if (--stellar.engage_access < 1) {
         stellar.engage_access = -1;
-        stellar.sprite_handle_active = stellar.sprite_population < 0;
+        stellar.strength = stellar.strength_capacity;
         Mission_ExecuteReactionScript(state, stellar.schedule_script);
       }
     } else {
-      stellar.sprite_handle_active = stellar.sprite_population < 0;
       stellar.engage_access = -1;
     }
   }

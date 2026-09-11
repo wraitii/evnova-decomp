@@ -49,13 +49,21 @@
 namespace game {
 
 // Ghidra 0x0046E3C0 Stellar_IsStellarActive: true when the StellarDef is
-// "active" for rendering/targeting -- it has spawned at least one sprite (a
-// non-zero sprite population) and the sprite is either presently loaded via a
-// live handle or is engaged (its engagement access counter > 0). The original
-// reads the sprite handle as a negative "reserved" sentinel; our Stellar
-// records that state as `sprite_handle_active`. This drives sprite-set
+// "active" for rendering/targeting -- its Bible Strength capacity (+0x40) is
+// positive and either the live Strength (+0x3c) has gone negative (destroyed)
+// or the engagement-access counter (+0x47c) is positive. Our Stellar carries
+// these as `strength_capacity`, `strength` and `engage_access`; the +0x40/+0x3c
+// pair is Strength, not an ambient-sprite count. This drives sprite-set
 // (link_a/link_b) selection and defence/target passes.
 [[nodiscard]] bool NovaTargeting_IsStellarActive(const Stellar &st);
+
+// Ghidra Stellar_UpdateStellarSprites (0x0042cd10) ambient-sprite zone
+// selection: link_a_id is the normal-body graphic and link_b_id the alternate
+// (destroyed/engaged) graphic. Returns link_b_id when the body is active and
+// link_b is valid, otherwise link_a_id (-1 when neither is usable). The
+// renderer, collision refresh and hit-test share this so the drawn sprite and
+// the collision mask never disagree.
+[[nodiscard]] std::int16_t NovaTargeting_StellarSpriteLinkId(const Stellar &st);
 
 // Ghidra 0x0046E3F0 Stellar_StellarTargetsSpriteSetActive: true when a
 // StellarDef's sprite set matches its per-stellar targeting activity state.

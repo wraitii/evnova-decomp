@@ -733,10 +733,11 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   }
   // Schedule/garrison tail (loader 0x004bd3c0): garrison size (payload
   // +0x1e -> StellarDef +0x468) seeds the present-ship count with the
-  // loader's rescale branches; the ambient sprite population (+0x23c ->
-  // +0x40, the daily tick's activity gate) and the schedule countdown seed
-  // (+0x242 -> +0x47a) + fire script (+0x345 -> +0x365) drive the per-day
-  // schedule slice of Mission_TickDailyWorldUpdate.
+  // loader's rescale branches; Stellar Strength (payload +0x23c -> the
+  // +0x40 capacity and +0x3c live value) is the combined mass+energy damage
+  // budget (Bible "Strength"), and the schedule countdown seed (+0x242 ->
+  // +0x47a) + fire script (+0x345 -> +0x365) drive the per-day schedule slice
+  // of Mission_TickDailyWorldUpdate.
   if (bytes.size() >= 0x240) {
     st.max_ship_count = ReadBeI16(bytes, 0x1e);
     if (st.max_ship_count < 0x3e9) {
@@ -746,11 +747,14 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
     } else {
       st.present_ship_count = st.max_ship_count / 10 - 1000;
     }
-    st.sprite_population = ReadBeI32(bytes, 0x23c);
-    st.sprite_handle_active = st.sprite_population < 0;
+    st.strength_capacity = ReadBeI32(bytes, 0x23c);
+    st.strength = st.strength_capacity;
   }
   if (bytes.size() >= 0x346) {
     st.schedule_days = ReadBeI16(bytes, 0x242);
+  }
+  if (bytes.size() >= 0x246) {
+    st.on_destroy_script = ReadCStringBounded(bytes, 0x246, 0xff);
   }
   if (bytes.size() >= 0x445) {
     st.schedule_script = ReadCStringBounded(bytes, 0x345, 0xff);
@@ -1290,6 +1294,11 @@ const Weapon *ScenarioData::Weapon(std::int16_t resource_id) const {
 }
 
 const Stellar *ScenarioData::Stellar(std::int16_t resource_id) const {
+  const auto index = static_cast<std::size_t>(resource_id) - 0x80;
+  return index < stellars.size() ? &stellars[index] : nullptr;
+}
+
+Stellar *ScenarioData::StellarMutable(std::int16_t resource_id) {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < stellars.size() ? &stellars[index] : nullptr;
 }

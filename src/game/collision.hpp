@@ -20,11 +20,17 @@
 //     (Seeker "passes over asteroids") are rejected, and a pixel-mask overlap
 //     funnels through NovaUi_ResolveWeaponSplashImpact (0x00436ff0).
 //
-// Deferred scope: stellar contact branch, impact particle bursts, linked
-// shots, kill chatter, and the mission disable bookkeeping inside the ship-hit
-// path. Direct shot-vs-ship and shot-vs-asteroid contacts now test the decoded
-// sprite pixel masks (Sprite_TestPixelMaskOverlap 0x00475c80) with the original
-// bounding-circle fallback when a mask is unavailable.
+//   - Stellar_HandleShipStellarCrash (0x0043aed0) is the physical fatal-
+//     stellar pass: availability_flags 0x100 bodies pixel-mask-overlap ships
+//     and instant-kill non-immune hulls (see
+//     NovaStellar_HandleShipStellarCrash).
+//
+// Deferred scope: impact particle bursts, linked shots, kill chatter, the
+// player-owned stellar faction-combat events, and the mission disable
+// bookkeeping inside the ship-hit path. Direct shot-vs-ship, shot-vs-asteroid
+// and shot/ship-vs-stellar contacts test the decoded sprite pixel masks
+// (Sprite_TestPixelMaskOverlap 0x00475c80) with the original bounding-circle
+// fallback only where the original has one.
 
 #include "game_state.hpp"
 
@@ -89,11 +95,18 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state);
 void NovaCollision_RefreshCollisionMasks(GameState &state);
 
 // Ghidra Shot_ResolveCollisions (0x00437e20): the blast-proximity pass over
-// live shots. Resolves at most one proximity ship hit per shot when the
-// weapon has a blast radius, then scans the asteroid pool (weapons with
-// flags_quaternary bit 0 clear) into NovaUi_ResolveWeaponSplashImpact; the
-// stellar contact branch remains deferred (TODO(decomp)).
+// live shots. Runs the planet-type (flags_secondary 0x400) stellar contact arm
+// first (ResolveShotStellarContact), then resolves at most one proximity ship
+// hit per shot when the weapon has a blast radius, then scans the asteroid pool
+// (weapons with flags_quaternary bit 0 clear) into
+// NovaUi_ResolveWeaponSplashImpact.
 void NovaWeapon_ResolveProjectileCollisions(GameState &state);
+
+// Ghidra Stellar_HandleShipStellarCrash (0x0043aed0): fatal-stellar
+// (availability_flags 0x100) ship-crash pass. Runs in Frame_TickSystems scope
+// 8 after Stellar_TickStellarGravityPull. Instant-kills non-immune ships whose
+// current-frame mask overlaps the loaded stellar sprite.
+void NovaStellar_HandleShipStellarCrash(GameState &state);
 
 // Ghidra Shot_QueueBeamHit / Shot_UpdateBeamHitQueue (0x00427a90/0x0042f270)
 // impact leg, exposed for the instantaneous beam queue. Applies one direct

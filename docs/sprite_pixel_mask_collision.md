@@ -36,13 +36,13 @@ frames once their anchors are aligned?".
 | `Ship_HandleSpritePairCollision` (shot layer) | 0x004374f0 | ported (mask-first) |
 | `Ship_HandleSpritePairCollision` (freeflight scoop layer) | 0x004374f0 | TODO(decomp) |
 | `Asteroid_HandleSpritePairCollision` | 0x00436f70 (internal label) | ported (mask-first) |
-| `Stellar_HandleShipStellarCrash` | 0x0043aed0 | not ported (shares the helper) |
-| `Shot_ResolveCollisions` stellar branch (flags_secondary 0x400) | 0x00437e20 | not ported (shares the helper) |
+| `Stellar_HandleShipStellarCrash` | 0x0043aed0 | ported |
+| `Shot_ResolveCollisions` stellar branch (flags_secondary 0x400) | 0x00437e20 | ported |
 
 So the "other targets" that use the same sprite-mask path are **fatal
 stellars** (`availability_flags & 0x100`), the **freeflight-object mining
-scoop**, and the **flags_secondary 0x400 shot-vs-stellar** contact. Only the
-ship and asteroid arms are reimplemented so far.
+scoop**, and the **flags_secondary 0x400 shot-vs-stellar** contact. The two
+stellar arms are now reimplemented; only the freeflight-object scoop remains.
 
 ## Which test is used
 
@@ -148,6 +148,71 @@ mask dimensions, so the non-square case is represented too.
   above, not a class-defined centre of mass: the ship/asteroid sheet frames
   carry a zero anchor and the callers subtract `(height/2, width/2)`.
 - Ship masks cover the base hull only, not the engine-glow / weapon overlays.
+
+### Stellar callers (ported)
+
+`Stellar_HandleShipStellarCrash` (0x0043aed0) and the `flags_secondary 0x400`
+arm of `Shot_ResolveCollisions` (0x00437e20) are now ported to
+`NovaStellar_HandleShipStellarCrash` and `ResolveShotStellarContact`
+(`src/game/collision.cpp`). Both use the same decoded pixel masks via
+`SpriteMask_TestOverlap` with no bounding-circle fallback, because the original
+tests the prepared frames directly:
+
+- **Stellar ambient sprite source.** StellarDef+0 is the live ambient `Sprite*`
+  (set by the renderer); StellarDef+0x40 is the Strength *capacity* and +0x3c is
+  the *live* Strength (Bible "Strength", combined mass+energy damage). The
+  loader seeds both from `sp\x9ab` payload +0x23c. The clean-room maps these to
+  `Stellar.strength_capacity` and `Stellar.strength`; the earlier
+  `sprite_population` / `sprite_handle_active` names were a misreading of those
+  same words and have been removed. Masks bind from spin set
+  `NovaTargeting_StellarSpriteLinkId(st) + 1000`: `link_a_id` normally,
+  `link_b_id` when the body is active (destroyed/engaged) and link_b is set.
+  `Stellar.sprite_current_frame` (Ghidra +0x476) is published by
+  `SpaceflightView::AdvanceStellarAnimation`, which mirrors
+  `Stellar_UpdateStellarSprites` frame selection.
+- **Visible/collision coherence.** `NovaTargeting_StellarSpriteLinkId`
+  (targeting.cpp) centralises the link_a/link_b choice. The view's animation
+  advance, `DrawStellarBodies`, `PickStellarAt` and the collision refresh all
+  call it, so the sprite the player sees and the collision mask can never
+  select different zones. A single animation state drives both.
+- **Anchor.** Stellar placement pre-subtracts the same
+  `(ceil(height/2), ceil(width/2))` half-span as ships/asteroids (`swapped_axes`).
+
+#### Fatal stellar crash (0x0043aed0)
+
+Eligibility: `availability_flags & 0x100` (Bible "Stellar is deadly") *and* a
+resolved ambient mask. Ships are tested in slot order against each of the 16
+current-system nav stellars. Excluded: inactive, already destroyed
+(`death_timer_active > 0 || armor <= 0`) and crash-immune ships.
+
+`Stellar_ShipImmuneToStellarCrash` (0x0046e210, ported): class
+`availability_flags & 0x20`, or (player only) an owned outfit with ModType
+0x2a. Distinct from gravity shielding - the NPC `flags_secondary 0x40` gate and
+ModType 0x26/0x29 do *not* count.
+
+Consequences are an instant, animation-free kill: `is_active = 0`,
+`armor_points = -1000.0f` (0xc47a0000), `death_timer_active = 0`; the player's
+primary target is cleared when it was the victim; and the class's **final**
+explosion effect (`ShipClassDef+0xa1e`, i.e. `destruction_effect_final`) is
+spawned at the ship. The ship loop does not early-out.
+
+#### Planet-type weapon vs. stellar (0x00437e20)
+
+Gate: `weapon.flags_secondary & 0x0400` (Bible "planet-type weapon"). A body is
+eligible when `strength_capacity > 0` and `NovaTargeting_IsStellarActive` is
+false (i.e. not destroyed and not engaged). A hit subtracts
+`energy_damage + mass_damage` from `strength`, spawns the weapon area impact,
+and kills the shot. When strength goes negative the destruction package runs:
+ExplodType effect at the map position, the OnDestroy reaction script, then
+`strength = -1` and `engage_access = schedule_days`; player-owned shots also
+fire 10 `Government_ProcessFactionCombatEvent` events (still deferred in the
+clean-room). `NovaTargeting_IsStellarActive` reads `strength < 0 ||
+engage_access > 0` with `strength_capacity > 0`, matching 0x0046e3c0. Daily
+regeneration (`Mission_TickDailyWorldUpdate` 0x00466f26) restores `strength`
+from the capacity. `availability_flags 0x40` (Bible "starts the game
+Destroyed") is applied at new-game reset by
+`NovaNewPilot_ResetStellarStrengthForNewGame` (Ghidra `Game_ResetNewGameState`
+0x004b4690, 0x004b46bc..0x004b4760).
 
 ## Validation
 
