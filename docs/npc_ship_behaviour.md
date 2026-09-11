@@ -237,3 +237,70 @@ constants whose name clarifies an expression; update this document only when
 the relationship is useful across states or modes.  Mark inferred names and
 unimplemented side effects as **Provisional** / `TODO(decomp)` rather than
 turning this reference back into a roadmap.
+
+## Primary-target acquisition (`Ship_AcquirePrimaryTargetForShip` 0x0040e020)
+
+`src/game/ship_ai.cpp` `NovaAi_AcquirePrimaryTarget` is a partial reconstruction
+of the original's 5.6 KB routine.  Decoded structural order (disassembly
+verified):
+
+1. **License/anti-tamper check** — five XOR-pair tests on
+   `g_ship_states[5].license_seed`.  The branch calls
+   `Ship_SetShipHostileToPlayer` when any stored pair-comparison boolean is
+   **FALSE**, i.e. when a pair *matches* the expected constant; it is not an
+   arbitrary-mismatch path and its purpose beyond this mechanism is
+   **Provisional**.  Not reproduced (`TODO(decomp)`); the clean-room model has
+   no license-seed field.
+2. **Retention gate (0x0040e149)** — return when `primary_target_ship_slot !=
+   -1` **and** `ai_state_code` is 3 or 4 **and** the target slot is `is_active`.
+   There is deliberately no same-system and no destroyed check here; the prior
+   port's same-system/destroyed gate was wrong.
+3. **pers_def arms (0x0040e186)** — slot `0x3fe` forces hostility; otherwise
+   `pers.Flags & 1` (grudge) with the pers `+0x621` grudge latch and the cloak
+   engagement predicate also forces hostility.  The `+0x621` latch is set by
+   `Shot_ResolveShipHitFromWeapon` (0x0041a2cb) on a player hit; neither the
+   field nor the writer is ported, so this stage is **skipped**
+   (`TODO(decomp)`).
+4. **Mission-fleet arms (0x0040e202)** — with an active mission-fleet slot:
+   `fleet_spawn_goal == 0` forces hostility to the player (cloak gate);
+   `fleet_spawn_goal == 1` drops a player primary, calls
+   `Ship_EnterShipAiState0x04_TargetRandomCombatCandidate`, else parks in state
+   `0x0c` with secondary 0.
+5. **Weapon-readiness gate (0x0040e2c0)** — `Weapon_ClassifyShipWeaponAmmo-
+   Readiness == 2` (no armed/ready weapon) returns without acquiring.
+6. **Government target passes** — for a governmented ship: with `flags_primary`
+   bit 0 clear and behavior < 5, an ally-support scan joins an allied ship's
+   current fight when the target's perceived strength fits
+   `own_strength * pilot_skill_scale`; then a near-player reputation/odds gate
+   (within `random_ai_render_cadence * 600` on both axes) and an
+   inherent-combat-government 1-in-50 roll can flag the player; with bit 0 set
+   an aggressive scan runs over same-system contacts including the player.
+   The common tail clears the player flag for IFF-scrambler (`GovtDef +0x83`)
+   or policy-flag governments, rescans distress responders, and falls back to
+   the nearest acquirable ship via `Ship_IsShipAcquirableAsTarget`.
+   **Not reconstructed** — replaced by an interim clean-room nearest-hostile
+   slice (`TODO(decomp)`).
+7. **Behavior-6 re-selection (0x0040f293)** — with behavior 6 and no primary,
+   picks the nearest same-system acquirable target excluding self and the squad
+   leader (the predicate is called as `Ship_IsShipAcquirableAsTarget(ship,
+   candidate)`, so the first argument is the candidate and the second the
+   acquirer).  Its final selection loop reads the distance array for every slot
+   although only scanned candidates populate it (an uninitialised-distance
+   quirk); the port selects among scanned candidates only.
+8. **Distance metric** — the original takes FABS+FIST of each axis and applies
+   a residual/sign correction that truncates toward zero, then squares:
+   `int(trunc(|dx|))^2 + int(trunc(|dy|))^2` (equivalently `floor` of each
+   absolute axis), not `round(dx^2+dy^2)` and not round-to-nearest.
+
+`Ship_ComputePerceivedCombatStrengthAgainstShip` (0x00411800) is ported
+(`NovaAiShip_ComputePerceivedCombatStrength`) but **unintegrated**: the port has
+no C++ caller, so it does not filter acquisition yet.  In the original it is a
+dependency of the step-6 government passes (call sites 0x0040e995, 0x0040ea61,
+0x0040ec36, 0x0040ecd1, 0x0040ef37, 0x0040f03f).
+`Government::iff_scrambler_active` (`GovtDef +0x83`) is modelled but its writer
+`Outfit_RecomputeOutfitDerivedState` (0x0046d901) is deferred, so the field is
+inert (never set) and the acquisition IFF term has no live effect.
+
+Current port status: steps 2, 4, 5 and 7 (and the strength helper) are faithful;
+steps 1 and 3 are explicitly skipped; step 6 is an interim clean-room
+replacement, so the routine is tracked at 55% in `decomp-progress.tsv`.

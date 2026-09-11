@@ -1043,6 +1043,16 @@ struct Government {
   // current build (TODO(decomp)).
   std::array<std::uint8_t, 2> policy_flags{}; // GovtDef +0x84/+0x85
 
+  // GovtDef +0x83. Outfit_RecomputeOutfitDerivedState (0x0046d901) sets this
+  // when the player owns the IFF-scrambler outfit (Bible ModType 48) whose
+  // class value matches one of this government's Class1-4 values: the
+  // government then treats the player as friendly. Ship_AcquirePrimaryTarget-
+  // ForShip (0x0040e020) reads it to suppress player auto-acquisition. The
+  // writer is not reconstructed, so in the port this field is INERT (never
+  // set; always false) and the acquisition IFF term has no live effect until
+  // the outfit-derived-state arm is ported (TODO(decomp)).
+  bool iff_scrambler_active = false;
+
   bool present =
       false; // GovtDef 0x86 is_present (slots zero-filled when absent)
 };

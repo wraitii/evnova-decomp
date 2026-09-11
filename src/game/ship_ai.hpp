@@ -393,6 +393,32 @@ NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state);
 [[nodiscard]] bool NovaAiShip_HasIncomingDistressSupport(
     const GameState &state, const Ship &ship, const Ship &context_ship);
 
+// Ghidra 0x00411800 Ship_ComputePerceivedCombatStrengthAgainstShip. Combat
+// strength = class Strength * shield ratio (FIST truncated toward zero, then
+// clamped to [0.25, 1.0]), plus the class Strength * shield ratio of every
+// active, non-destroyed squad follower or (for a governmented ship) allied
+// ship, doubled when that ally has incoming distress support. A non-positive
+// max shield uses the subject's raw shield points for the initial ratio;
+// later such candidates keep the previous ratio scratch. The player compares
+// its class inherent-combat government instead of a faction. UNINTEGRATED in
+// the port: the original calls this from the not-yet-ported government target
+// passes of 0x0040e020 (0x0040e995/0x0040ea61/0x0040ec36/0x0040ecd1/
+// 0x0040ef37/0x0040f03f); C++ has no gameplay caller yet.
+[[nodiscard]] int
+NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
+                                          const Ship &ship);
+
+// Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. PARTIAL reconstruction:
+// the early retention gate for active engagements, the mission-fleet goal 0/1
+// arms, the weapon-readiness early return, the IFF-scrambler/policy player
+// shield, and the behavior-6 escort re-selection. NOT implemented: the license/
+// anti-tamper check, the pers_def personality arms, and every government target
+// pass (ally-support scan, flags_primary&1 aggressive scan, near-player
+// reputation/odds gate, inherent-combat roll, distress-responder rescans) with
+// its perceived-combat-strength filtering; the middle of the routine is an
+// interim clean-room nearest-hostile slice.
+void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship);
+
 // Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerForAssist. Enters AI
 // state 0x09 targeting the player, resets hostility/hold-timer/control, and
 // sets ai_maneuver_timer_ms to -1 (keeps the state machine live and arms the
