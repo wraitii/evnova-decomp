@@ -147,7 +147,7 @@ constexpr float kScriptAlignAddend = 10.0F;
 // reduce that override by 1.165 each tick (raw bits 0xC2480000 / 0xBF951EB8).
 constexpr float kMode10ReverseSpeed = -50.0F;
 constexpr float kMode10ReverseThrust = -1.165F;
-// Escort-follow half-span stand-in: Sprite_GetShipClassEscortShotHalfSpan
+// Escort-follow half-span stand-in: Sprite_GetShipClassEscortFrameHeight
 // (0x004624c0) returns the class escort sprite's shot half-span or its 0x4B =
 // 75 px debug fallback; the clean-room sprite tables are not modelled, so the
 // debug fallback stands in (TODO(decomp)).
@@ -1957,7 +1957,7 @@ void NovaAi_UpdateShipState(GameState &state,
     const System *sys = CurrentSystem(state);
     const std::int16_t half_span =
         sys ? static_cast<std::int16_t>(sys->pos_x > 0 ? 0x96 : 0x96)
-            : 0x96; // System_GetCurrentSystemLinkHalfSpan fallback
+            : 0x96; // System_GetCurrentSystemLinkSpriteHeight fallback
                     // (provisional)
     const std::int16_t span_q = static_cast<std::int16_t>(half_span / 4);
     const bool far = std::abs(dx) > span_q || std::abs(dy) > span_q;

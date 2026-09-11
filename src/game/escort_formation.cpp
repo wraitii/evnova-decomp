@@ -30,7 +30,7 @@ constexpr float kFormationRadiusMaxPx = 60.0F; // 0x3c
 constexpr std::int16_t kLeaderSpanFallback =
     0x40; // leader invalid-class default
 constexpr std::int16_t kFollowerSpanFallback =
-    0x4b; // Sprite_GetShipClassEscortShotHalfSpan
+    0x4b; // Sprite_GetShipClassEscortFrameHeight
 // System_RebuildInitialNpcAndMissionPopulation (0x0041af90) escort scatter.
 constexpr float kScatterDistanceStart = 45.0F;      // FLOAT_0057524c
 constexpr float kScatterDistanceStep = 1.165F;      // DOUBLE_00575250
@@ -55,7 +55,7 @@ int RoundHeadingDeg(const Ship &ship) {
   return ((deg % 360) + 360) % 360;
 }
 
-// Sprite_GetShipClassEscortShotHalfSpan (0x004624c0): the ship-class sprite
+// Sprite_GetShipClassEscortFrameHeight (0x004624c0): the ship-class sprite
 // span used to size wedge spacing. The original resolves
 // ShipClassDef.escort_type (+0xa08), which the sh\x8an loader writes to the
 // clone-source class; clone classes share the source sprite, so the port
@@ -63,7 +63,7 @@ int RoundHeadingDeg(const Ship &ship) {
 // non-clone classes read escort_type 0 (class 0's sprite) in the original
 // when the field defaults to zero; the port always uses the class's own
 // span. TODO(decomp) if a scenario shows spacing drift.
-// Like Sprite_GetShotHalfSpan, this returns the FULL frame width (see the
+// Like Sprite_GetFrameFullHeight, this returns the FULL frame width (see the
 // boarding reticle note in boarding_plunder.cpp), fallback 0x4b = 75.
 // Cached per class id: the scenario resource set is fixed for the process
 // lifetime, and this runs per follower per frame.

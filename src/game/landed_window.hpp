@@ -166,13 +166,14 @@ struct LandedContext {
 // selected stellar must be an ordinary active destination inside its per-axis
 // arrival envelope, with the approach armed and the ship nearly stationary.
 // The envelope is the stellar's spin-sprite span
-// (System_GetCurrentSystemLinkHalfSpan 0x00462410) scaled by 1.75
-// (DAT_005756a0), i.e. round(Sprite_GetShotHalfSpan * 1.75); a stellar with no
+// (System_GetCurrentSystemLinkSpriteHeight 0x00462410) scaled by 1.75
+// (k_stellar_arrival_envelope_scale_f64), i.e.
+// round(Sprite_GetFrameFullHeight * 1.75); a stellar with no
 // prepared sprite uses the original 0x4b (75) fallback. The
-// `target_sprite_full_height` argument is Sprite_GetShotHalfSpan on the link_a
-// spin set (full frame height, 0 when unavailable). The 250/0xfa check in the
-// original belongs to the starmap travel-arm branch (0x00459369), not this
-// normal dock gate; the 250 here is the request-arming radius owned by
+// `target_sprite_full_height` argument is Sprite_GetFrameFullHeight on the
+// link_a spin set (full frame height, 0 when unavailable). The 250/0xfa check
+// in the original belongs to the starmap travel-arm branch (0x00459369), not
+// this normal dock gate; the 250 here is the request-arming radius owned by
 // NovaTravel_UpdateEngagementProgress.
 [[nodiscard]] float
 NovaLanding_ArrivalAxisRange(std::int16_t target_sprite_full_height);

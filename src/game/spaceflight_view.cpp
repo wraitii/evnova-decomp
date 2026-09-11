@@ -1068,7 +1068,7 @@ void SpaceflightView::WrapAsteroids(SdlPlatform &platform, GameState &state) {
   const Viewport vp = CurrentViewport(platform);
   const float center_x = static_cast<float>(vp.w) / 2.0F;
   const float center_y = static_cast<float>(vp.h) / 2.0F;
-  // Sprite_GetShotHalfSpan / Sprite_GetFrameVerticalHalfSpan return the full
+  // Sprite_GetFrameFullHeight / Sprite_GetFrameFullWidth return the full
   // frame span; the original scans every loaded asteroid set for the maximum.
   int max_span_x = 1;
   int max_span_y = 1;
@@ -1686,7 +1686,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   }
 
   // Bracket offset: ceil(max(target frame height, width)/2) + the decaying
-  // pulse. Sprite_GetFrameVerticalHalfSpan / Sprite_GetShotHalfSpan return the
+  // pulse. Sprite_GetFrameFullWidth / Sprite_GetFrameFullHeight return the
   // target's full frame height/width, so `full` is max(h, w), then the game
   // halves it rounding up; the pulse term is rounded to whole pixels exactly
   // as the original does. The fallback uses the sheet's native tile size.

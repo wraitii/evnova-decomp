@@ -49,7 +49,7 @@ void AddPolar(float angle_rad, float speed, float &x, float &y) {
   y -= std::cos(angle_rad) * speed;
 }
 
-// Sprite_GetShotHalfSpan (0x00462390) for a ship: its current frame's full
+// Sprite_GetFrameFullHeight (0x00462390) for a ship: its current frame's full
 // width, defaulting to 0x20 when no descriptor is decoded. Mirrors
 // TargetFrameSpan (boarding_plunder.cpp), reading the sh\x8an base size at the
 // renderer's class-id convention.

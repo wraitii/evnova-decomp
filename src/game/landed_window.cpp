@@ -37,14 +37,20 @@ namespace game {
 // ---------------------------------------------------------------------------
 // Stellar_ProcessTravelAndLanding (0x00457580) normal-arrival gate.
 // ---------------------------------------------------------------------------
-// Ghidra 0x00462410 System_GetCurrentSystemLinkHalfSpan.
-// Arrival-gate use at 0x00457f89 / 0x004587a3: no prepared sprite selects the
-// original 0x4b fallback; otherwise the envelope is round(half_span *
-// DAT_005756a0) with DAT_005756a0 = 1.75. nearbyint mirrors the original's FIST
-// (round half to even, the default FPU mode).
+// Ghidra 0x00462410 System_GetCurrentSystemLinkSpriteHeight.
+// Arrival-gate use at 0x00457f89 / 0x004587a3: no prepared ambient sprite
+// selects the original 0x4b fallback (tier 1); when a sprite is prepared but
+// the link_a spin set is unavailable, System_GetCurrentSystemLinkSpriteHeight
+// itself returns 0x96 (150, see StellarArrivalSpriteFullHeight) so the
+// envelope becomes round(150 * 1.75) = 262 (tier 2). Otherwise the envelope
+// is round(full frame height * k_stellar_arrival_envelope_scale_f64), the
+// 1.75 double (0x3ffc000000000000) at 0x005756a0, FMUL at 0x004587a3.
+// nearbyint mirrors the original's FIST (round half to even, the default FPU
+// mode).
 float NovaLanding_ArrivalAxisRange(std::int16_t target_sprite_full_height) {
   constexpr float kNoSpriteAxisRange = 0x4b; // 75
-  constexpr double kSpriteRangeScale = 1.75; // DAT_005756a0
+  constexpr double kSpriteRangeScale =
+      1.75; // k_stellar_arrival_envelope_scale_f64
   if (target_sprite_full_height <= 0) {
     return kNoSpriteAxisRange;
   }

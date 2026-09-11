@@ -53,8 +53,8 @@ cheap bounding circle:
   frame centre = `(left + half, top + half)`, and a **strict** `<` on squared
   distance against `(halfA + halfB)^2`.
 - The circle is used when the average frame tick scale is at/above
-  `_DAT_005754c8` (2.0) **or** `Sprite_GetShotHalfSpan` returns `< 0x21`.
-- `Sprite_GetShotHalfSpan` (0x00462390) actually returns the **full** frame
+  `_DAT_005754c8` (2.0) **or** `Sprite_GetFrameFullHeight` returns `< 0x21`.
+- `Sprite_GetFrameFullHeight` (0x00462390) actually returns the **full** frame
   height (`bottom - top`), default `0x20`. It is also the blast span source in
   `Shot_ResolveCollisions` (`blast_radius + span * 0.333`).
 - The asteroid callback (0x00436f70) has no such threshold: it always uses the
@@ -138,9 +138,9 @@ mask dimensions, so the non-square case is represented too.
 
 - Circle fallback uses a strict `<`, so a contact exactly at the sum of the
   half-spans is a miss.
-- `Sprite_GetShotHalfSpan` returns the full frame height despite the name, and
+- `Sprite_GetFrameFullHeight` returns the full frame height despite the name, and
   ship/asteroid placement uses it on the x axis and
-  `Sprite_GetFrameVerticalHalfSpan` (full width) on the y axis.
+  `Sprite_GetFrameFullWidth` (full width) on the y axis.
 - The mask is chosen only when `g_avg_frame_tick_scale < 2.0` and the target
   ship's frame height is `> 0x20`; both boundaries are reproduced (tests in
   `tests/sprite_mask_test.cpp`).
