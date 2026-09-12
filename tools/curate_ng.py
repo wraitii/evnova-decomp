@@ -159,7 +159,7 @@ STELLAR = re.compile(
     r'StellarTargetsSpriteSet|GetStellar|UpdateStellarSprites|'
     r'TickStellarDefenseBatteries|TickStellarGravityPull|HandleShipStellarCrash|'
     r'ShipImmuneToStellarCrash|ShipHasGravityShield|ShipHasGravityShielding|'
-    r'GravityShield|FindNearestAdjacentTravelStellar|FindReachableEmergencyDestination|'
+    r'GravityShield|FindNearestAdjacentTravelStellar|FindValidRespawnStellar|'
     r'SetTravelDestination|RebuildTravelDestinationList|DrawTravelDestination'
     r'SelectRandomAdjacent|SelectRandomAdjacentDestination|CountValidLinkedStellar|'
     r'IsStellarActive|IsStellarValidRandomDestination|IsStellarUsable',

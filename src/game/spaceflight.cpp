@@ -3208,8 +3208,7 @@ void NovaFrame_RerollPlayerStatModifiers(GameState &state) {
 // Ghidra PlayerTick_TimedActionTransition support: the eject/escape-pod
 // transform arm (Ship_HandlePlayerShipCore 0x004510b9..0x00453910), the
 // Ship_ResetPlayerShipState (0x004b3350) respawn reset, and the
-// Stellar_FindReachableEmergencyDestinationStellar flood (0x00467710 /
-// 0x004677a0).
+// Stellar_FindValidRespawnStellar flood (0x00467710 / 0x004677a0).
 // ---------------------------------------------------------------------------
 namespace {
 
@@ -3427,15 +3426,15 @@ void RespawnResetPlayerShipState(GameState &state) {
   }
 }
 
-// Ghidra 0x00467710/0x004677a0 Stellar_FindReachableEmergencyDestination-
-// Stellar{,Recursive}: depth-first flood over visible, discovered neighbour
-// systems for an available, travel-usable, ship-selling (travel_flags & 8)
-// stellar whose reputation threshold the containing system meets. Returns the
-// stellar resource id, or -1 when no neighbour qualifies. The start system's
-// own stellars are never scanned (you always respawn elsewhere).
-std::int16_t
-Stellar_FindReachableEmergencyDestination(GameState &state,
-                                          std::int16_t origin_zero_based) {
+// Ghidra 0x00467710/0x004677a0 Stellar_FindValidRespawnStellar{,Recursive}:
+// the escape-pod respawn destination lookup. Depth-first flood over visible,
+// discovered neighbour systems for an available, travel-usable, ship-selling
+// (travel_flags & 8) stellar whose reputation threshold the containing system
+// meets. Returns the stellar resource id, or -1 when no neighbour qualifies.
+// The start system's own stellars are never scanned (you always respawn
+// elsewhere).
+std::int16_t Stellar_FindValidRespawnStellar(GameState &state,
+                                             std::int16_t origin_zero_based) {
   const auto &systems = state.scenario.systems;
   std::vector<char> visited(systems.size(), 0);
   if (origin_zero_based < 0 ||
@@ -3913,7 +3912,7 @@ bool NovaPlayer_TickTimedActionTransition(GameState &state,
   // Relocate to the nearest reachable emergency destination (a ship-selling,
   // reputation-acceptable stellar in a visible, discovered neighbour system).
   const std::int16_t dest_stellar =
-      Stellar_FindReachableEmergencyDestination(state, p.current_system_id);
+      Stellar_FindValidRespawnStellar(state, p.current_system_id);
   if (dest_stellar < 0x80) {
     p.current_system_id = 0;
   } else if (const Stellar *st = state.scenario.Stellar(dest_stellar);
