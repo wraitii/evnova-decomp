@@ -11,10 +11,9 @@
 // g_weapon_defs/WeaponDef). Field names here follow the EV Nova Bible; each
 // struct names the Ghidra global/struct it reconstructs.
 //
-// The reimplementation keeps these as value tables owned by GameState rather
-// than hidden globals (AGENTS.md). Decoders read the raw payload bytes big
-// endian; sizes/permissions are validated defensively and out-of-range values
-// are clamped the same way the loader clamps them.
+// Decoders read the raw payload bytes big endian; sizes and permissions are
+// validated and out-of-range values are clamped the same way the loader
+// clamps them.
 
 #include "sprite_mask.hpp"
 
@@ -634,8 +633,7 @@ struct Weapon {
   // (+0xac). These drive Weapon_SpawnWeaponImpactParticleBurst (0x004274d0):
   // count single-pixel SWParticles with a randomized speed around
   // impact_particle_speed and a lifetime in [frame_base, frame_base * 1.25].
-  // `impact_particle_frame_base` is misnamed upstream (Ghidra) -- it is the
-  // particle lifetime, not a sprite frame.
+  // `impact_particle_frame_base` is the particle lifetime, not a sprite frame.
   std::int16_t impact_particle_count = 0;
   std::int16_t impact_particle_frame_base = 0;
   float impact_particle_speed = 0.0F;      // normalized px/frame (raw * 0.01)
@@ -1312,8 +1310,7 @@ struct System {
   // Asteroid_Spawn (0x00421830) tests it via
   // (1 << (wander_type & 0x1f)) & this mask to reject a random asteroid type
   // the system does not host, and gives up entirely when it is 0. These are
-  // the r\xf6id (asteroid) types, not ship roles; renamed from a misname
-  // `roaming_direction_bitmap`.
+  // the r\xf6id (asteroid) types, not ship roles.
   std::uint16_t ast_types = 0;
   std::int16_t reinf_fleet = -1;   // ReinfFleet
   std::int16_t reinf_time = 0;     // ReinfTime

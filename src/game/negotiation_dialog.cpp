@@ -47,8 +47,8 @@ namespace {
 //   Mission_ExecuteReactionScript 0x00448020 on the stellar's reaction
 //     scripts (StellarDef field_0x68 / 0x167)
 //
-// All are called only from that branch, so no stub is emitted here (an unused
-// declaration would trip -Werror).
+// All are called only from that branch, so no stub declaration is emitted
+// here.
 
 // ---- Resource ids (EV Nova Graphics 3 / Nova Data) ------------------------
 // The destination-interaction window's backdrop PICT (DLOG 0x3f1) and the

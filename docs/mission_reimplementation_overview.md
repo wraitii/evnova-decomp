@@ -5,8 +5,8 @@ implemented end to end for non-special-ship missions. `src/game/mission.cpp`,
 `mission_script.cpp`, and the landing path in `spaceflight.cpp` now cover the
 data model, BBS evaluation/activation, the timer tick, per-tick objective
 evaluation, the landing gate, and success/failure resolution with the PayVal
-credit/reputation opcode. The daily driver is now ported (2025 dates pass): Mission_TickDailyWorldUpdate
-(0x00466CB0) advances the in-game calendar (GameDate, seeded from the local
+credit/reputation opcode. The daily driver, `Mission_TickDailyWorldUpdate`
+(0x00466CB0), advances the in-game calendar (GameDate, seeded from the local
 clock with year+250 at new game, round-tripped in the .plt block1 +0x14/16/18),
 counts down mission deadlines, and runs on hyperspace arrival (1/2/3 days by
 hull mass), landing (1 day) and launch (15..44 docked days); DatePostInc
@@ -33,10 +33,10 @@ The remaining consumer is the commodity-exchange price delta
 .plt block2 +0x3088/+0x3288 runtime persistence is also untracked.
 
 ## Verified m\xefsn payload map (offsets ground-truthed against the loader
-0x0043BBB0, populate 0x0043F8C0, and the EVN Bible; CORRECTED 2025-08: the
-loader skips payload +0x002, so the Bible's AvailLoc/Record/Rating/Random
+0x0043BBB0, populate 0x0043F8C0, and the EVN Bible; the loader skips payload
++0x002, so the Bible's AvailLoc/Record/Rating/Random
 sit at +0x004/+0x006/+0x008/+0x00a and TravelStel/ReturnStel at
-+0x00c/+0x00e — an earlier revision of this map listed them two bytes lower)
++0x00c/+0x00e)
 
 ```text
 +0x000 AvailStel      +0x004 AvailLoc       +0x006 AvailRecord
@@ -58,7 +58,7 @@ sit at +0x004/+0x006/+0x008/+0x00a and TravelStel/ReturnStel at
 MisnActive highlights: +0x00 TravelStel / +0x04 ReturnStel (resolved),
 +0x12/+0x14 resolved CargoType/CargoQty, +0x16/+0x18/+0x1a
 PickupMode/DropOffMode/ScanMask, +0x32 can_abort (the mïsn CanAbort flag,
-payload +0x42 — renamed from the earlier "has_been_visited" reading), +0x33
+payload +0x42), +0x33
 carrying latch, +0x35..+0x43 desc ids
 (+0x41 from payload +0x58, provisional; +0x43 ShipDone), +0x45 TimeLimit
 countdown (-32000 = none). The Ghidra struct comments carry the same map.
@@ -251,7 +251,7 @@ Remaining dialog entrypoints:
   +0x32 `can_abort`), the starmap action with the flags 0x100 destination
   preselect, and the abort arm (flags 0x40 → −5× CompReward over every
   system the CompGovt owns, then `Mission_ClearMisnSlotAssignments(slot,
-  1)`). Rendering fidelity (2025 pass): all window text uses the shared
+  1)`). Rendering: all window text uses the shared
   Geneva-9 screen font (DAT_00735684/86, set in 0x004b0c20); list rows sit
   on the fixed 12px native pitch (DAT_0088c01c 8 × 1.5 scale at
   0x005754f8) with matching click hit-testing (click past the last row
@@ -344,12 +344,12 @@ half (the `0x0041CF40` + dispatch pass):
   full locator decode incl. the 10000..31999 government codes.
 - `0x0041ad50` deactivation tally arm — DONE (aux respawn budget credit).
 
-Ghidra DB improvements from this pass: `g_active_misn` retyped as
+Ghidra DB: `g_active_misn` retyped as
 `MisnActive *`, `g_active_misn_runtime_flags` as `MisnRuntimeFlags *`, and
 ShipState +0x94 named `jump_destination_system_id` (system being jumped
 toward / last left; -1 none, -2 mission-spawn sentinel).
 
-Remaining gaps in this section: the goal-counter increment sites on ship
+Remaining gaps: the goal-counter increment sites on ship
 death/disable/board (0x00443c60 only evaluates the counters today), the
 hailed-escort respawn call site `0x00454910` (comm-dialog wiring), the ambient
 Shareware-Enforcer spawner `0x0046ac50`, the stellar-attack directive
@@ -363,8 +363,7 @@ spaceflight.cpp), and the Ship_HandleShip per-frame hail ladder is DONE
 throttle bypass, and the 1-in-0x8C roll + `+0xAC` re-hail window). The
 `0x452d5c` forced-pers-0x201 call site is a debug/cheat spawn key arm
 (0x00452b71) and is deliberately skipped. `0x004235c0`
-personality spawn — DONE (renamed from "spawn from a mission-ship
-definition": the përs table drives ambient personalities as well as
+personality spawn (the përs table drives ambient personalities as well as
 missions); its LinkMission target-block arm is a logged skip until
 `Mission_ResolveMissionStellarTargets` (0x0043d240) lands. Reinforcement fleets are a related
 but distinct path: combat arms `Government_TryTriggerGovtAssistanceEncounter`,
@@ -377,26 +376,27 @@ mission `ShipStart = 1` is a separate mission-special-ship arrival mode.
 
 ## 6. In-flight interactions
 
-The runtime interaction chain is now largely implemented:
+The runtime interaction chain:
 
-- `0x00441B40` mission-ship interaction eligibility — open
-- `0x00442510` mission-ship interaction dialog — open
-- `0x00443760` per-tick interaction reactions — DONE (driver wired in
-  TickSystems scope 0xb)
-- `0x00443780` reaction-slot travel interaction — DONE (landing gate, runs
-  once on Spaceport entry ahead of the AvailLoc-3 offer pass, debriefs
-  layered over the dock — the original's single call position in 0x00491f30)
-- `0x004438D0` reaction resource processing — DONE (cargo pickup/drop-off)
-- `0x00443C60` mission/surrender/boarding reaction handling — DONE for all
-  ShipGoal arms; skipped: cloaked-target sprite-rect visibility for observe
-  missions, g_travel_scene_ctx gate
-- `0x00445D70` mission-text placeholder replacement — open
+- `0x00441B40` mission-ship interaction eligibility
+- `0x00442510` mission-ship interaction dialog
+- `0x00443760` per-tick interaction reactions (driver wired in TickSystems
+  scope 0xb)
+- `0x00443780` reaction-slot travel interaction (landing gate, runs once on
+  Spaceport entry ahead of the AvailLoc-3 offer pass, debriefs layered over
+  the dock — the original's single call position in 0x00491f30)
+- `0x004438D0` reaction resource processing (cargo pickup/drop-off)
+- `0x00443C60` mission/surrender/boarding reaction handling for all ShipGoal
+  arms (TODO(decomp): cloaked-target sprite-rect visibility for observe
+  missions and the g_travel_scene_ctx gate)
+- `0x00445D70` mission-text placeholder replacement
 
-This covers destroy, disable, board, escort, rescue, observe, chase-off, and related objective families. The goal counters only move once mission-ship spawning lands.
+This covers destroy, disable, board, escort, rescue, observe, chase-off, and
+related objective families.
 
-### 6.1 Goal-counter producers (Ghidra pass + port, 2025-08)
+### 6.1 Goal-counter producers
 
-The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`, and all three live sites are now ported:
+The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`:
 
 - **Destroy — `Ship_UpdateVisualState` 0x00428340** (destruction arm):
   PORTED as `NovaShip_TickDestroyedShipVisualState` /
@@ -466,11 +466,11 @@ alive aux count, scan-mask random immediate re-arm), jumps out ShipBehav 0
 follow fleets via AI state 0x15, and calls `Mission_TrySpawnMissionShipAmbush`
 on landing.
 
-Ghidra DB annotations added: plate comments on the three writer sites and
+Ghidra DB annotations: plate comments on the three writer sites and
 0x00457580, field comments on MisnActive
 `target_ship_count`/`goal_counter_a/b/c`/`mission_fleet_metric_c`/
 `mission_ship_count_active`/`spawn_rearm_timer`, ShipState +0xB9 named
-`boarded_target_latch`, and (2025-08 pass) the destruction/disable constants
+`boarded_target_latch`, and the destruction/disable constants
 renamed and retyped: `g_destroyed_finale_threshold_f32` (0x0057531c, 2.0),
 the puff-roll thresholds 20/40/60 (0x00575320/24/28), the 0.25 puff offset
 scale (0x00575330), the player ×3 death-timer scale (0x00575378), the hull

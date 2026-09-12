@@ -1,9 +1,4 @@
-# x87 FIST truncation idiom - audit handoff
-
-Status: second pass complete. Every candidate in the first-pass list was
-checked against the Ghidra dump; the genuine truncation sites now match and
-the false positives are identified. The sweep also found additional idiom
-sites the original heuristic missed. See "Second pass" at the end.
+# x87 FIST truncation idiom
 
 ## The idiom
 
@@ -37,7 +32,7 @@ round-half-even.
    This is a heuristic: the citation may cover a large function and the
    specific conversion can still be a different pattern.
 
-## Fixed in commit f6abb9f
+## Confirmed sites
 
 - `Ship_ComputeTradeInValue` (0x00469100), `Outfit_ComputeScaledPurchasePrice`
   (0x0049d640), `Outfit_ComputeOutfitPurchaseMass` (0x0046e950).
@@ -53,61 +48,7 @@ round-half-even.
   guided turn rate (0x00431530).
 - Pilot shield/fuel u16 save (0x004c7dd0).
 
-## Remaining candidates (first pass, superseded by the second pass below)
-
-Automated heuristic (rounding call whose nearest citation uses the idiom),
-upper bound -- verify each against the dump before changing. `negotiation`
-L885 is a false positive (helper now truncates).
-
-Total: 32 sites across 7 files.
-
-### src/game/ship_ai.cpp
-- L2776 [00405590 Ship_UpdateShipAiState] `std::round((kScriptAlignAddend - base_turn) * kScriptTurnAddend)));`
-- L3163 [00408150 Ship_ApplyShipAiControls] `static_cast<std::int16_t>(WrapDeg(std::round(ship.heading / kDegToRad)));`
-- L3458 [00408150 Ship_ApplyShipAiControls] `static_cast<std::int16_t>(std::round(leader_heading_deg));`
-- L3475 [00408150 Ship_ApplyShipAiControls] `std::round(leader_heading_deg),`
-- L3636 [00408150 Ship_ApplyShipAiControls] `static_cast<int>(std::round(cur_deg) +`
-- L3640 [00408150 Ship_ApplyShipAiControls] `wrap_deg_int(static_cast<int>(std::round(cur_deg)));`
-- L4002 [00408150 Ship_ApplyShipAiControls] `std::remainder(std::round(target_heading_deg) - std::round(cur_deg),`
-- L4010 [00408150 Ship_ApplyShipAiControls] `static_cast<std::int16_t>(std::round(target_heading_deg));`
-- L4013 [00408150 Ship_ApplyShipAiControls] `std::remainder(std::round(target_heading_deg) - std::round(cur_deg),`
-- L4015 [00408150 Ship_ApplyShipAiControls] `std::int16_t desired = static_cast<std::int16_t>(std::round(cur_deg));`
-- L4100 [00408150 Ship_ApplyShipAiControls] `static_cast<std::int16_t>(std::round(target.heading / kDegToRad));`
-- L5571 [0040ce00 Weapon_SelectWeaponBankForCurrentTarget] `static_cast<std::int16_t>(std::lround(heading_deg_f));`
-- L5609 [0040ce00 Weapon_SelectWeaponBankForCurrentTarget] `std::lround(std::abs(static_cast<float>(bearing) - heading_deg_f));`
-
-### src/game/weapon.cpp
-- L1079 [0046c320 Weapon_SelectTurretQuadrant] `static_cast<int>(std::lround(`
-- L1787 [00455150 Weapon_FirePlayerWeaponBank] `static_cast<std::int16_t>(std::lround(heading_deg)));`
-- L1795 [00455150 Weapon_FirePlayerWeaponBank] `static_cast<std::int16_t>(std::lround(BearingDeg(`
-- L1801 [00455150 Weapon_FirePlayerWeaponBank] `static_cast<std::int16_t>(std::lround(`
-- L2446 [0042f270 Shot_UpdateBeamHitQueue] `std::lround(ship.heading * (180.0F / 3.14159265358979323846F))));`
-- L2464 [0042f270 Shot_UpdateBeamHitQueue] `static_cast<std::int16_t>(std::lround(tb)));`
-
-### src/game/spaceflight_view.cpp
-- L1147 [00436910 Asteroid_UpdateSprites] `int frame = static_cast<int>(std::lround(wander));`
-- L1528 [00436910 Asteroid_UpdateSprites] `std::clamp(static_cast<int>(std::lround(instance.anim_time)),`
-- L1887 [0042ede0 NovaUi_UpdateShipTargetReticle] `const float off = std::ceil(full * 0.5F) + std::round(pulse);`
-- L2006 [0042ede0 NovaUi_UpdateShipTargetReticle] `const float off = std::ceil(full * 0.5F) + std::round(pulse);`
-
-### src/game/spaceflight.cpp
-- L1048 [0044aa70 Ship_HandlePlayerShipCore] `const auto whole_ticks = static_cast<int>(std::round(countdown));`
-- L1052 [0044aa70 Ship_HandlePlayerShipCore] `const auto whole_seconds = static_cast<int>(std::round(seconds));`
-- L4117 [0044aa70 Ship_HandlePlayerShipCore] `int heading_deg = static_cast<int>(std::lround(bearing_deg));`
-
-### src/game/collision.cpp
-- L2102 [00437e20 Shot_ResolveCollisions] `std::lround(std::abs(asteroid.target_pos_x - shot.pos_x)));`
-- L2104 [00437e20 Shot_ResolveCollisions] `std::lround(std::abs(asteroid.target_pos_y - shot.pos_y)));`
-- L2176 [0042f270 Shot_UpdateBeamHitQueue] `static_cast<std::int16_t>(std::lround(`
-
-### src/game/boarding_plunder.cpp
-- L608 [0045a3d0 Ship_HandlePlayerBoardTargetCommand] `std::llround(radians * (180.0F / 3.14159265358979F)));`
-- L1836 [00482940 NovaUi_RunBoardingPlunderWindow] `int fill = static_cast<int>(std::llround(available));`
-
-### src/game/negotiation_dialog.cpp
-- L885 [00480030 NovaUi_RunTravelDestinationInteractionWindow] `RoundDouble(static_cast<double>(bribe_cost) * kGovtBribeCostMultiplier);`
-
-## Ghidra DB changes made this pass
+## Ghidra names
 
 - Renamed 0x00469100 -> `Ship_ComputeTradeInValue` (it includes the ship
   hull term) and corrected its plate comment.
@@ -119,53 +60,44 @@ Total: 32 sites across 7 files.
 - Corrected plate comments on 0x0049d640 and 0x0046e950 (truncation, not
   rounding).
 
-## Second pass (verification)
+## Verified sites
 
-Every first-pass candidate was checked against its dump. The first-pass
-`[address]` tags were the heuristic's nearest-citation guesses; several were
-wrong, so the correct original function is named here. The ports now truncate
-toward zero where the original does.
+Original functions confirmed to compile the conversion with the FIST
+truncation idiom:
 
-### Genuine (fixed)
+### Sites using the idiom
 
 - `ship_ai.cpp` `Ship_UpdateShipAiState` 0x00405590 (scripted-asteroid
-  threshold) and `Ship_ApplyShipAiControls` 0x00408150 (entry desired-heading
+  threshold); `Ship_ApplyShipAiControls` 0x00408150 (entry desired-heading
   sync, leader copy/delta, evasive +/-135, velocity-match mode 0xc, mode-0xf
-  copy) and `Weapon_SelectWeaponBankForCurrentTarget` 0x0040ce00 (mode-7/8
-  arc).
-- `ship_ai.cpp` `Ship_ScoreAssistTargetForShip` 0x00412090: helper renamed
-  `RoundedDistanceSquared` -> `TruncatedDistanceSquared`, and the score sum
-  truncates. Not in the first-pass list.
-- `weapon.cpp` `Shot_SpawnShotFromWeapon` 0x0041fd30 (interference roll; list
-  tagged 0x0046c320); `Weapon_FirePlayerWeaponBank` 0x00455150 (mode-0 heading,
-  blind-spot heading); `Weapon_FireShipWeapons` 0x00414550 (mode-0 heading;
-  tagged 0x0042f270); the shared `RoundHeadingDeg` helper (`Shot_HandleShot`
-  0x00435830 / `Shot_UpdateShotGuidance` 0x00431530); `TurnShotToward`'s
-  turn-rate floor. The helper and turn-rate sites were not in the list.
-- `spaceflight_view.cpp` `Asteroid_UpdateSprites` 0x00436910 and
-  `Shot_UpdateImpactEffectSprites` 0x0042e160 (tagged 0x00436910);
+  copy); `Weapon_SelectWeaponBankForCurrentTarget` 0x0040ce00 (mode-7/8 arc);
+  `Ship_ScoreAssistTargetForShip` 0x00412090 (helper renamed
+  `RoundedDistanceSquared` -> `TruncatedDistanceSquared`, score sum truncates).
+- `weapon.cpp` `Shot_SpawnShotFromWeapon` 0x0041fd30 (interference roll);
+  `Weapon_FirePlayerWeaponBank` 0x00455150 (mode-0 heading, blind-spot
+  heading); `Weapon_FireShipWeapons` 0x00414550 (mode-0 heading); the shared
+  `RoundHeadingDeg` helper (`Shot_HandleShot` 0x00435830 /
+  `Shot_UpdateShotGuidance` 0x00431530); `TurnShotToward`'s turn-rate floor.
+- `spaceflight_view.cpp` `Asteroid_UpdateSprites` 0x00436910;
+  `Shot_UpdateImpactEffectSprites` 0x0042e160;
   `Frame_UpdateFreeflightObjectSprites` 0x0042c1b0; the reticle pulses
   (`NovaUi_UpdateShipTargetReticle` 0x0042ede0 and
-  `NovaUi_UpdateTravelTargetReticle` 0x0042eac0). The freeflight and travel
-  reticle sites were not in the list.
+  `NovaUi_UpdateTravelTargetReticle` 0x0042eac0).
 - `spaceflight.cpp` `Ship_HandlePlayerShipCore` 0x0044aa70 (self-destruct tick
-  and seconds) and `Ship_HandleShip` 0x00433050 (debris timed-action interval;
-  not in the list).
+  and seconds) and `Ship_HandleShip` 0x00433050 (debris timed-action interval).
 - `collision.cpp` `Shot_ResolveCollisions` 0x00437e20 (asteroid dist^2);
   `Frame_AddCombatRatingPoints` 0x0046f1e0; `Shot_ResolveShipHitFromWeapon`
   0x004192d0 (disable-armor); `Weapon_ApplyWeaponOnHitEffects` 0x0046f3f0
   (ionization points); `Weapon_SpawnWeaponImpactEffectPackage` 0x00462550
-  (yield boxes; tagged 0x0042f270); and the collision-mask mirrors in the local
-  `RefreshCollisionMasks` (matching 0x00436910 / 0x0042c1b0). The
-  combat-rating, disable-armor, ionization, yield and mask sites were not in
-  the list.
+  (yield boxes); and the collision-mask mirrors in the local
+  `RefreshCollisionMasks` (matching 0x00436910 / 0x0042c1b0).
 - `boarding_plunder.cpp` `Ship_HandlePlayerBoardTargetCommand` 0x0045a3d0
   (heading gate) and `NovaUi_RunBoardingPlunderWindow` 0x00482940 (fuel fill).
 
-### False positives (left unchanged, comments bear this out)
+### False positives
 
 - `RoundDouble` in `negotiation_dialog.cpp` (0x00480030 bribe scale) already
-  truncates; the list's L885 is the helper itself.
+  truncates.
 - `lround(BearingDeg(...))` in `weapon.cpp` (0x00455150, 0x00414550): the
   original returns a short from `Math_BearingFromPointToPoint`; the conversion
   lives inside that helper, not at the call site.

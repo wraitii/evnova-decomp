@@ -882,8 +882,7 @@ std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state) {
   return std::max<std::int32_t>(0, free_mass);
 }
 
-// Ghidra 0x00469100 Ship_ComputeTradeInValue (renamed from
-// Outfit_ComputeOwnedOutfitResaleTotal). The original seeds with 25% of the
+// Ghidra 0x00469100 Ship_ComputeTradeInValue. The original seeds with 25% of the
 // current ship class's base cost, then adds 50% of each owned non-persistent
 // outfit's purchase price (mass-scaled against the current hull), truncating
 // the running total toward zero after every step and clamping at 0.

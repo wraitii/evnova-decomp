@@ -310,13 +310,13 @@ The same function also consumes **ModType 43** (paint: 15-bit ModVal decoded to
 system, otherwise the government id in ModVal). Any other mod combination just
 stacks the outfit in the owned inventory.
 
-Clean-room: `NovaOutfit_GrantOutfitToPlayer` (outfit.cpp) ports all four paths;
+`NovaOutfit_GrantOutfitToPlayer` (outfit.cpp) implements all four paths;
 wired at the outfitter buy (`NovaLanded_BuyOutfit` — a consumed item returns
 after one unit instead of stacking) and the mission script 'G' grant opcode.
-The `DAT_007d4c08/09` dirty latches (map/record UI refresh) have no clean-room
-consumer and are skipped.
+The `DAT_007d4c08/09` dirty latches (map/record UI refresh) have no consumer
+and are skipped.
 
-## Divergences / deferred (TODO)
+## Divergences
 
 - The starmap renders the real dialog resources: the 601x513 window frame
   (DLOG 0x7d0) with the PICT 0x213d "Map" starfield backdrop blitted as the

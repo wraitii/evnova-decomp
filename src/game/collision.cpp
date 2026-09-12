@@ -780,8 +780,7 @@ void ResolveShipHitFromWeapon(GameState &state,
     // government takes a kill-event reputation pulse and the player gains the
     // class's combat value. Skipped for the Shareware Enforcer personalities
     // (pers_def_slot >= 0x3ff, the 0x004196e3 gate) and for derelict
-    // governments (Government_IsShipGovernmentDerelict, renamed from the
-    // inverted Government_IsReputationTrackingGovernment).
+    // governments (Government_IsShipGovernmentDerelict).
     if (target.pers_def_slot < 0x3ff &&
         !NovaGovernment_IsGovernmentDerelict(state.scenario,
                                              target.faction_or_government_id)) {

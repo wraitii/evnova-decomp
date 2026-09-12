@@ -5,9 +5,8 @@ Settings modal, and the command-keybinding model that feeds gameplay input.
 All addresses are Ghidra DB addresses. Companion to `intro_and_main_menu.md`
 (action code 4 = Preferences) and `dlog_ditl_dialog_format.md` (DLOG/DITL).
 
-Updated during the preferences pass. Ground truth: decomp + DITL item xrefs +
-the `Ship_HandlePlayerShipControl` decomp (0x0044e019 — very slow to decompile,
-be patient; it can take tens of seconds / a retry).
+Ground truth: decompilation, DITL item xrefs, and the
+`Ship_HandlePlayerShipControl` decomp (0x0044e019).
 
 ## Two dialogs — do not conflate
 
@@ -19,8 +18,7 @@ be patient; it can take tens of seconds / a retry).
    The shared surface is white with a black frame; its controls use the
    grayscale bevel RGBColor triples at `0x0056f118`..`0x0056f12a`, not Nova's
    blue gameplay-panel palette.
-2. **Key Settings** = `Menu_RunKeySettingsDialog` (0x0048b280, renamed from
-   FUN_0048b280), DLOG `0xfa2` (37 items) over backdrop PICT `0x8b`. A dedicated
+2. **Key Settings** = `Menu_RunKeySettingsDialog` (0x0048b280), DLOG `0xfa2` (37 items) over backdrop PICT `0x8b`. A dedicated
    modal for rebinding the 34 gameplay commands.
    - `Menu_RunKeySettingsDialog` is entered from the Preferences dialog
      (ordinal 0x10) or, in-game, from `Ship_HandlePlayerShip`? — actually via

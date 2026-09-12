@@ -378,9 +378,9 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // a near-full-screen 640x480 panel whose backdrop is destination-art PICT
 // 0x2134 (Ghidra FUN_0048e970 sets g_travel_overlay_sprite_handle =
 // Resource_LoadPictAsImage(0x2134), drawn across the whole window rect). The
-// earlier 263x185 PICT 0x2137 is a *sub*-window decoration (the travel-services
-// modal DLOG 0x3f5), not the docked backdrop, so presenting it as the full
-// screenspace backdrop was wrong. Service controls live in two ~145px-wide
+// 263x185 PICT 0x2137 is a *sub*-window decoration (the travel-services
+// modal DLOG 0x3f5), not the docked backdrop. Service controls live in two
+// ~145px-wide
 // columns down the left and right edges (DITL 0x3e8 entries 3,6,7,8,9,10,11,
 // 12), mirroring the real docked buttons.
 //

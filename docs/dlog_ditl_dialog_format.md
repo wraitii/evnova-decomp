@@ -289,11 +289,9 @@ layers its DLOG window on top.**
   landing and boarding — so the wall-clock gap is never integrated as one
   giant flight frame on resume.
 
-Earlier revisions captured the presented frame (`SDL_RenderReadPixels`) and
-replayed it as a backdrop texture; that path caused stretched/letterboxed
-mis-rendering and is being removed. If you add a new modal, take a
-`const std::function<void()> &render_background` (or `view`/`hud` refs in the
-flight layer) and re-render — do not capture frames.
+If you add a new modal, take a `const std::function<void()> &render_background`
+(or `view`/`hud` refs in the flight layer) and re-render — do not capture the
+presented frame (`SDL_RenderReadPixels`); that path letterboxes.
 
 ## 7.2 Landed store input/art conveniences (deliberate divergences)
 

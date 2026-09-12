@@ -1,7 +1,7 @@
 # Spaceport Bar & Escort Hiring
 
 Ground truth for the Bar modal and the escort-hire flow, reconstructed from
-Ghidra (2026 pass). The clean-room counterparts live in
+Ghidra. The clean-room counterparts live in
 `src/game/docked_bar_dialog.cpp` (`RunBarDialog`, `RunBarNewsWindow`), 
 `src/game/landed_store.cpp` (hire lane), `src/game/ship_spawn.cpp`
 (`NovaShipClass_SpawnEscortShipFromClass`), and `src/game/ship_ai.cpp`
@@ -54,7 +54,7 @@ Ghidra (2026 pass). The clean-room counterparts live in
   load). DITL 0x3f6 is the 2-byte `0xffff` placeholder in `Nova.rez`, so the
   window draws from the DLOG bounds plus the hardcoded panels below, not from
   DITL items.
-- `NovaUi_ComposeTravelNewsTexts` (0x0047d600, formerly `NovaUi_RedrawTravelNewsHeader`) composes two texts, called at
+- `NovaUi_ComposeTravelNewsTexts` (0x0047d600) composes two texts, called at
   bar entry: **headline** = random STR# 0x1fa4 (Commercials) entry, else
   STR# 0x7d2 0xbe ("No news is good news"); **body** = disaster-report text
   (defined öops record with >1 remaining day, preferring one at the current
@@ -120,7 +120,7 @@ Ghidra (2026 pass). The clean-room counterparts live in
   secondary target mirroring the attach slot; behavior-5 followers of this
   ship re-enter state 0x05 (0x00410cb0 inline).
 
-## Ghidra annotations (2026 pass)
+## Ghidra annotations
 
 - `DAT_00575950` → **g_escort_hire_price_multiplier** (retyped `double`, =
   0.1) with a pre-comment listing the three consumers.

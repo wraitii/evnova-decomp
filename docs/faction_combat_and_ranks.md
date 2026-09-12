@@ -129,16 +129,15 @@ a lone `<PRK128>` expands to the "captain" fallback and the shipped Federation
 mission text breaks. The port uses the Bible semantics (ConvName for
 `<PRKnnn>`, ShortName for `<SRKnnn>`, each on its own government).
 
-Not yet reconstructed:
+### Demand-tribute middle-button branch (0x00480030)
 
-- The demand-tribute middle-button branch of
-  `NovaUi_RunTravelDestinationInteractionWindow` (`0x00480030`) is
-  unconstructed. Per pulse it fires event 3, spawns defense-fleet ships up to
-  the stellar max/present bookkeeping, latches domination (`hazard_marker` 1,
-  tribute STR# 0xbba 25/26; release mirrors it with 35/36 and clears
-  `hazard_marker`), and runs the stellar reaction scripts.
-- Pilot save/load does not persist the `g_rank_defs` active flags (FleetState
-  +0x5dde, one word per slot).
+Per pulse it fires event 3, spawns defense-fleet ships up to the stellar
+max/present bookkeeping, latches domination (`hazard_marker` 1, tribute STR#
+0xbba 25/26; release mirrors it with 35/36 and clears `hazard_marker`), and
+runs the stellar reaction scripts. TODO(decomp): the branch is not ported.
+
+Pilot save/load does not persist the `g_rank_defs` active flags (FleetState
++0x5dde, one word per slot).
 
 Gameplay validation still needed: an event 3 should move `system_reputation`
 and revoke crime-sensitive allied ranks. Ask before using the probe.

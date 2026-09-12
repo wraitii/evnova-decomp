@@ -46,11 +46,9 @@ namespace game {
 
 namespace {
 
-// --- Decoded movement constants (Ghidra _DAT_00575xxx). The original reads
-// these from byte-mislabeled globals at 0x00575000..0x00575200; the values
-// below were decoded from the raw bytes (float vs double from the actual
-// instruction widths) on 2025-08-09 and are typed + pre-commented in the
-// Ghidra DB. See docs/npc_ship_behaviour.md "Decoded constants" section. ---
+// --- Movement constants the original reads from _DAT_00575xxx globals at
+// 0x00575000..0x00575200 (float vs double chosen by instruction width). See
+// docs/npc_ship_behaviour.md "Decoded constants". ---
 // "Moving" / arrival-stopped velocity threshold, px/tick (0x575080, double).
 constexpr float kVerySlowSpeed = 0.35F;
 // State-1 travel arrival velocity damp (0x575088, double).
@@ -2492,8 +2490,9 @@ void NovaAi_UpdateShipState(GameState &state,
       }
       // Gameplay-visible NPC gate/wormhole transfer. Mode 0x17 is only the
       // handoff marker in the AI/control switch; the original continues
-      // through a surrounding presentation/transfer path. This reconstruction
-      // completes that path here once state 0x14 reaches the entry point.
+      // through a surrounding presentation/transfer path, and the
+      // gameplay-visible transfer completes once state 0x14 reaches the entry
+      // point.
       (void)NovaAi_CompleteNpcJump(state, ship);
     }
     return;
@@ -5531,9 +5530,8 @@ bool NovaAi_OutfitHasCloakScannerCapability(const GameState &state,
 
 } // namespace
 
-// Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot (formerly the
-// misnamed Weapon_IsWeaponArcAllowed): whether the bearing lies in one of the
-// weapon's turret blind-spot sectors. Front (<46 deg), side (<136 deg), rear;
+// Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot: whether the
+// bearing lies in one of the weapon's turret blind-spot sectors. Front (<46 deg), side (<136 deg), rear;
 // a sector is BLIND when the weapon's flags_primary 0x1000/0x2000/0x4000 is
 // set, force-overridden ON by the matching ShipClass capability flags (Bible:
 // "Turreted weapon has a blind spot to the front/sides/rear"). Callers reject

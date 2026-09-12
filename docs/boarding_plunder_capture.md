@@ -207,7 +207,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
     tracking mirroring 0x004a22e0, transfers applied to GameState, HUD
     overlays via NovaHud_ShowOverlayMessage.
   - `NovaBoarding_HandleBoardTargetCommand(platform, state)` → gates +
-    dispatch; plunder window only in this pass, mission arms TODO.
+    dispatch; plunder window only, mission arms TODO(decomp).
   - `NovaShip_CanPlayerHaveMoreEscorts(state)`.
   - minimal `Ship_ResetShipAndAttackersAfterBoarding` port (targeting
     clears; voice_type_mode only when that field exists in the port).

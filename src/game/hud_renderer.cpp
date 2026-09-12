@@ -1137,8 +1137,7 @@ constexpr int kRadarStaticTileSize = 64;
   return value > static_cast<float>(truncated) ? truncated + 1 : truncated;
 }
 
-// Rect_Intersect (0x004b8df0, formerly misnamed Rect_Union in the DB) is a
-// QD SectRect: it clips `blip` to
+// Rect_Intersect (0x004b8df0) is a QD SectRect: it clips `blip` to
 // `radar` and reports whether any area survives (empty when edges touch).
 [[nodiscard]] bool IntersectRadarRect(HudPanelRect &blip,
                                       const HudPanelRect &radar) {

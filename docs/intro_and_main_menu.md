@@ -135,7 +135,7 @@ depending on the game-active flag:
 | `a`   | 5/6    | About Nova (`Menu_RunAboutNovaDialog` 0x00486120; loads dësc 0x7fff "About text" into the selection dialog, DLOG `0xbbb`; the spœn 605 button is labelled ABOUT NOVA) |
 | `x`   | —      | Immediate travel-selection dialog |
 
-- `Menu_OpenPilotFileDialog` (0x004c9e90, formerly `FUN_004c9e90`) — GetOpenFileNameA pilot selector; on selection
+- `Menu_OpenPilotFileDialog` (0x004c9e90) — GetOpenFileNameA pilot selector; on selection
   resets ship state and loads the save via `PilotFile_LoadSave` (0x004cb260).
 - `Menu_RunNewGameFlow` (0x00489d70) — full new-game init: pilot selection dialog, player reset,
   scenario tables, starting destination, `IntroCinematic_SetupFrames`, sets `DAT_00596d28=1`,
@@ -146,7 +146,7 @@ depending on the game-active flag:
 
 ## Intro cinematic — NOT the splash, plays only on new-game flight entry
 
-`IntroCinematic_Run` (0x0048adc0, formerly `Ship_RunStartupSequence`) plays the intro cinematic
+`IntroCinematic_Run` (0x0048adc0) plays the intro cinematic
 when a pilot first enters spaceflight (gated on `DAT_00596d35`). This is distinct from the
 boot-phase splash above; it is a timed scripted sequence tied to a starting a run.
 
@@ -166,10 +166,9 @@ boot-phase splash above; it is a timed scripted sequence tied to a starting a ru
   reachable when a full press+release lands inside one poll interval, so in practice a click
   skips the whole intro.
 - Each arted frame also plays **snd 0x7533** (loaded via `NovaSound_LoadDecodedById`
-  0x004bc2a0, formerly misnamed `LoadStringResourceCopyById`; `NovaAudio_QueueCenteredSound` →
+  0x004bc2a0; `NovaAudio_QueueCenteredSound` →
   `Audio_AllocateVoiceSlot` queues it centered). Stock Nova ships no snd 0x7533, so the intro
-  is silent there. There is **no** on-screen hint text in the original (an earlier reading
-  treated the sound id as a string resource — that was wrong).
+  is silent there. There is **no** on-screen hint text in the original.
 - After the sequence, if not skipped and a post-intro travel destination is set
   (g_intro_cinematic.post_intro_dest_id != -1) it opens the intro travel-selection dialog
   (`Ui_LoadSelectionDialogResource` + `Stellar_BuildTravelDestinationDescription` +
@@ -189,7 +188,7 @@ struct IntroCinematicData {
 extern IntroCinematicData g_intro_cinematic;   // resolves from 0x007d1f42
 ```
 
-`IntroCinematic_SetupFrames` (0x004cd3b0, formerly `FUN_004cd3b0`)
+`IntroCinematic_SetupFrames` (0x004cd3b0)
 - Resolves the pilot block via `ResourceData_AccessByKey(0x63688a72, key)` where key is the
   **selected character template's registered name** (`DAT_007d22b7`, filled from the pilot
   dialog; `Menu_RunNewGameFlow` falls back to family entry 1 when the 0xc1e variant leaves it

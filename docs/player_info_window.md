@@ -1,6 +1,6 @@
 # The in-flight Player Info window ("special interaction" family)
 
-Ground truth for the family formerly named `PlayerSpecialInteraction` in the
+Ground truth for the special-interaction family in the
 Ghidra DB. Despite the names, this is the **Player Info modal** the manual
 describes under "Player Info — press the P key": four screens (General /
 Cargo / Extras / Honors) plus a Jettison Cargo action on the Cargo page.

@@ -399,7 +399,7 @@ BoardingPlunderOptions NovaBoarding_BuildOptions(GameState &state) {
 }
 
 // ---------------------------------------------------------------------------
-// Board command + capture reset (iterations 2/4 of the boarding work)
+// Board command + capture reset
 // ---------------------------------------------------------------------------
 
 // Lazily decodes snd 150 + i into GameState.transition_sounds, mirroring

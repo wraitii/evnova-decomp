@@ -198,18 +198,16 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 // Ghidra scope 0xb of Frame_TickSystems (0x004186b0): the per-tick in-system
 // NPC/reactivity pass. The original runs: Mission_TickShipInteractionReactions,
 // Frame_UpdateCombatChatter, Frame_UpdateScreenFlashTimers,
-// Ship_TallyInboundWeaponThreat, then -- the fleet/dude spawn maintenance this
-// reimplementation is building toward -- System_TickNpcSpawnMaintenance
+// Ship_TallyInboundWeaponThreat, then System_TickNpcSpawnMaintenance
 // (encounter fleets + random dude ships up to the system's avg_ships cap) and
 // Asteroid_Spawn('\x01') (the asteroid ring), before clearing the
 // g_ai_misc_event_flag / g_ai_target_refresh_needed latches.
 //
-// Reconstructed: the mission interaction-reaction pass (0x00443760) and the
-// NPC-population slice (NovaSystem_TickNpcSpawnMaintenance, which spawns
+// This pass performs the mission interaction-reaction slice (0x00443760) and
+// the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance, which spawns
 // encounter-fleet leads / random dude ships toward avg_ships).
-// Deferred: the combat-chatter/screen-flash/threat reaction helpers,
-// the asteroid ring and the interaction flags (combat systems not yet
-// reconstructed).
+// TODO(decomp): the combat-chatter/screen-flash/threat reaction helpers, the
+// asteroid ring and the interaction flags are still absent.
 void Stub_TickReactionsAndNpcSpawns(GameState &state, float elapsed_ticks) {
   // The original's AI mode timers use a global millisecond tick source.
   const std::uint32_t now_ms = SDL_GetTicks();
