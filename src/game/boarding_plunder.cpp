@@ -698,13 +698,29 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   player.vel_x = target.vel_x;
   player.vel_y = target.vel_y;
 
-  // Faction reaction to a plain boarding: Government_ProcessFactionCombatEvent
-  // (0x00466fc0) with the "boarded" event code 2. The port does not model the
-  // faction-combat reaction yet (the negotiation dialog logged the same skip).
-  // Government_PropagateHostilityFromAttack (0x00467xxx) in the
-  // post-hit arms is likewise deferred.
-  NovaLog::Todo("board: Government_ProcessFactionCombatEvent "
-                "(0x00466fc0) not reconstructed");
+  // Faction reaction to a boarding (Ghidra 0x0045a85f): event 2 for a plain
+  // (unassigned) target or a target whose mission slot is active and failed;
+  // the Shareware Enforcer personalities 0x3ff/0x3fe are exempt. The event
+  // receives the target's own mission_fleet_slot, so a live mission ship skips
+  // the reputation flood (the ProcessFactionCombatEvent != -1 arm).
+  if (target.pers_def_slot != 0x3ff && target.pers_def_slot != 0x3fe) {
+    bool react = target.mission_fleet_slot == -1;
+    if (!react && target.mission_fleet_slot >= 0 &&
+        target.mission_fleet_slot <
+            static_cast<std::int16_t>(GameState::kMaxActiveMissions)) {
+      const MissionRuntimeFlags &runtime =
+          state.active_mission_runtime_flags[static_cast<std::size_t>(
+              target.mission_fleet_slot)];
+      react = runtime.is_active && runtime.is_failed;
+    }
+    if (react) {
+      NovaGovernment_ProcessFactionCombatEvent(state,
+                                               state.player.current_system_id,
+                                               target.faction_or_government_id,
+                                               2,
+                                               target.mission_fleet_slot);
+    }
+  }
 
   // Post-hit arms (post_hit_mode_hint 0/-1 => "Fighter captured." carrier-bay
   // conversion; hint >= 1 with escort capacity => direct escort conversion)

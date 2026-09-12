@@ -18,6 +18,7 @@ add_executable(evnova_tests
     nova_font_test.cpp
     pilot_file_test.cpp
     preferences_test.cpp
+    rank_test.cpp
     scenario_data_test.cpp
     ship_ai_test.cpp
     ship_spawn_test.cpp

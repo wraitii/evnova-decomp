@@ -112,6 +112,13 @@ void NovaCollision_RefreshCollisionMasks(GameState &state);
 // NovaUi_ResolveWeaponSplashImpact.
 void NovaWeapon_ResolveProjectileCollisions(GameState &state);
 
+// Ghidra 0x0046f1e0 Frame_AddCombatRatingPoints. Adds one kill's combat value
+// (ShipClass.strength) to the player's aggregate rating: sub-5 values add a
+// single point, larger values add round(points * 0.2), and the total is capped
+// at 10,000,000. Called from the destruction arm of Shot_ResolveShipHitFrom-
+// Weapon (0x004192d0); Ship_HandlePlayerShipCore has a second caller.
+void NovaFrame_AddCombatRatingPoints(GameState &state, float points);
+
 // Ghidra Stellar_HandleShipStellarCrash (0x0043aed0): fatal-stellar
 // (availability_flags 0x100) ship-crash pass. Runs in Frame_TickSystems scope
 // 8 after Stellar_TickStellarGravityPull. Instant-kills non-immune ships whose

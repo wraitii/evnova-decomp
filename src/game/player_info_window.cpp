@@ -731,10 +731,10 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
   }
 
   // Honors text: rank badges (rank-def name strings, u16 Weight sort key at
-  // g_rank_defs+0x04) are not modelled (GameState.rank_active_flags carries
-  // only the saved active flags). The 0x2000-flag "ranks" outfits are listed
-  // with the same count machinery. TODO(decomp(0x0049c050)): badge names once
-  // the rank records land.
+  // g_rank_defs+0x04) are not yet built here even though the RankDef table is
+  // now modelled (GameState.scenario.ranks); only the 0x2000-flag "ranks"
+  // outfits are listed with the same count machinery. TODO(decomp(0x0049c050)):
+  // badge names from the active rank records.
   {
     std::string honors;
     int total = 0;

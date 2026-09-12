@@ -1,12 +1,16 @@
 #include "government.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <span>
 
 #include "log.hpp"
 #include "outfit.hpp"
+#include "rank.hpp"
 #include "ship_ai.hpp"
+#include "travel.hpp"
 
 namespace game {
 namespace {
@@ -486,6 +490,225 @@ void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
                                 static_cast<double>(percent) * 0.01;
     state.player.credits = static_cast<std::int32_t>(std::lrint(adjusted));
     return;
+  }
+}
+
+// Ghidra 0x0046f100 Government_IsShipGovernmentDerelict.
+bool NovaGovernment_IsGovernmentDerelict(const ScenarioData &scenario,
+                                         std::int16_t government_id) {
+  const Government *government = scenario.GovernmentByIndex(government_id);
+  return government != nullptr && (government->flags_primary & 0x0800U) != 0;
+}
+
+// Ghidra: the runtime GovtDef +0x48..+0x50 crime-penalty words, indexed by
+// event code. The loader writes the payload +0x0a..+0x12 block into these
+// fields in order (smug/disab/board/kill/shoot).
+std::int16_t NovaGovernment_CrimePenalty(const Government &government,
+                                         std::int16_t event_code) {
+  switch (event_code) {
+  case 0:
+    return government.smug_penalty;
+  case 1:
+    return government.disab_penalty;
+  case 2:
+    return government.board_penalty;
+  case 3:
+    return government.kill_penalty;
+  case 4:
+    return government.shoot_penalty;
+  default:
+    return 0;
+  }
+}
+
+namespace {
+
+// P[govt][event] for a 0-based government index; the loader clamps missing
+// governments to -1 and the penalty words then read 0.
+[[nodiscard]] std::int16_t CombatPenalty(const ScenarioData &scenario,
+                                         std::int16_t government_id,
+                                         std::int16_t event_code) {
+  const Government *government = scenario.GovernmentByIndex(government_id);
+  return government != nullptr
+             ? NovaGovernment_CrimePenalty(*government, event_code)
+             : static_cast<std::int16_t>(0);
+}
+
+[[nodiscard]] bool GovernmentFlagBit(const ScenarioData &scenario,
+                                     std::int16_t government_id,
+                                     std::uint16_t bit) {
+  const Government *government = scenario.GovernmentByIndex(government_id);
+  return government != nullptr && (government->flags_primary & bit) != 0;
+}
+
+} // namespace
+
+// Ghidra 0x00467140 Government_PropagateFactionCombatInfluenceToNearbySystems.
+// See the header for the contract. Faithful to the original branch ladder:
+//  - visit-mask re-entry guard on the 0x800-entry system table;
+//  - the input system's visibility root is the chain head (its twins follow
+//    visible_parent_system_id), and only is_visible systems contribute;
+//  - the delta per system is selected from the system government's or the
+//    event faction's crime-penalty word, halved/quartered by relation, then
+//    scaled by `scale`;
+//  - a delta whose magnitude rounds below 1.0 is ignored (reputation is an
+//    integer) and does not arm the adjacency recursion;
+//  - when anything changed, every non-empty adjacency link is resolved to its
+//    discovery slot and re-flooded with scale * 0.65.
+void NovaGovernment_PropagateFactionCombatInfluence(
+    GameState &state,
+    std::int16_t system_id,
+    std::int16_t faction_or_government_id,
+    std::int16_t event_code,
+    double scale,
+    std::span<bool> visit_mask) {
+  auto &systems = state.scenario.systems;
+  if (system_id < 0 || system_id >= 0x800 ||
+      static_cast<std::size_t>(system_id) >= systems.size()) {
+    return;
+  }
+  const auto sys_index = static_cast<std::size_t>(system_id);
+  if (visit_mask[sys_index]) {
+    return;
+  }
+  visit_mask[sys_index] = true;
+
+  const bool faction_xenophobic =
+      faction_or_government_id != -1 &&
+      GovernmentFlagBit(state.scenario, faction_or_government_id, 0x0001U);
+
+  bool changed = false;
+  std::int16_t chain = systems[sys_index].visibility_root_system_id != -1
+                           ? systems[sys_index].visibility_root_system_id
+                           : system_id;
+  while (chain != -1 && static_cast<std::size_t>(chain) < systems.size()) {
+    visit_mask[static_cast<std::size_t>(chain)] = true;
+    System &sys = systems[static_cast<std::size_t>(chain)];
+    if (sys.is_visible) {
+      const std::int16_t sysgov = sys.government_id;
+      float delta = 0.0F;
+      if (sysgov == -1) {
+        if (faction_or_government_id == -1) {
+          delta =
+              static_cast<float>(CombatPenalty(state.scenario, 0, event_code)) *
+              0.5F;
+        } else if (faction_xenophobic) {
+          delta = -static_cast<float>(CombatPenalty(
+                      state.scenario, faction_or_government_id, event_code)) *
+                  0.5F;
+        } else {
+          delta = static_cast<float>(CombatPenalty(
+                      state.scenario, faction_or_government_id, event_code)) *
+                  0.25F;
+        }
+      } else if (faction_or_government_id == sysgov) {
+        delta = static_cast<float>(CombatPenalty(
+            state.scenario, faction_or_government_id, event_code));
+      } else if (faction_or_government_id == -1) {
+        if (GovernmentFlagBit(state.scenario, sysgov, 0x0001U)) {
+          delta = -static_cast<float>(
+                      CombatPenalty(state.scenario, sysgov, event_code)) *
+                  0.5F;
+        } else if (GovernmentFlagBit(state.scenario, sysgov, 0x0002U)) {
+          delta = static_cast<float>(
+                      CombatPenalty(state.scenario, sysgov, event_code)) *
+                  0.5F;
+        }
+      } else if (!NovaGovernment_AreGovtsAllied(
+                     state.scenario, faction_or_government_id, sysgov)) {
+        delta = -static_cast<float>(
+                    CombatPenalty(state.scenario, sysgov, event_code)) *
+                0.5F;
+      } else if (NovaGovernment_AreGovtsHostileOrXenophobic(
+                     state.scenario, faction_or_government_id, sysgov)) {
+        delta = -static_cast<float>(
+                    CombatPenalty(state.scenario, sysgov, event_code)) *
+                0.5F;
+      } else if (NovaGovernment_AreGovtsAllied(
+                     state.scenario, faction_or_government_id, sysgov)) {
+        delta = static_cast<float>(CombatPenalty(
+            state.scenario, faction_or_government_id, event_code));
+      } else {
+        delta = static_cast<float>(CombatPenalty(
+                    state.scenario, faction_or_government_id, event_code)) *
+                0.5F;
+      }
+      delta *= static_cast<float>(scale);
+      if (std::fabs(delta) >= 1.0F &&
+          static_cast<std::size_t>(chain) < state.system_reputation.size()) {
+        changed = true;
+        const std::int16_t rep =
+            state.system_reputation[static_cast<std::size_t>(chain)];
+        long updated = std::lround(static_cast<double>(rep) - delta);
+        updated = std::clamp(updated, -32000L, 32000L);
+        state.system_reputation[static_cast<std::size_t>(chain)] =
+            static_cast<std::int16_t>(updated);
+      }
+    }
+    chain = sys.visible_parent_system_id;
+  }
+
+  if (!changed) {
+    return;
+  }
+  const System &origin = systems[sys_index];
+  for (const std::int16_t link : origin.links) {
+    if (link < 0x80) {
+      continue;
+    }
+    const std::int16_t resolved = NovaSystem_ResolveDiscoverySlot(
+        state, static_cast<std::int16_t>(link - 0x80));
+    NovaGovernment_PropagateFactionCombatInfluence(state,
+                                                   resolved,
+                                                   faction_or_government_id,
+                                                   event_code,
+                                                   scale * 0.65,
+                                                   visit_mask);
+  }
+}
+
+// Ghidra 0x00466fc0 Government_ProcessFactionCombatEvent. See the header.
+void NovaGovernment_ProcessFactionCombatEvent(
+    GameState &state,
+    std::int16_t system_id,
+    std::int16_t faction_or_government_id,
+    std::int16_t event_code,
+    std::int16_t mission_fleet_slot) {
+  // Derelict (Flags 0x0800) governments never track reputation.
+  if (faction_or_government_id != -1 &&
+      GovernmentFlagBit(state.scenario, faction_or_government_id, 0x0800U)) {
+    return;
+  }
+  std::array<bool, 0x800> visit_mask{};
+  if (mission_fleet_slot != -1) {
+    // The shipped mission-fleet script always passes -1; the original's
+    // non-(-1) arm skips both the flood and the rank revocation.
+    return;
+  }
+  NovaGovernment_PropagateFactionCombatInfluence(
+      state, system_id, faction_or_government_id, event_code, 1.0, visit_mask);
+  // Crime revocation: deactivate every active, defined, non-permanent rank
+  // credited to a government allied to the event faction whose status flags
+  // mark it crime-sensitive (0x0040 any crime, or 0x0004 for disable/kill).
+  auto &ranks = state.scenario.ranks;
+  for (std::size_t i = 0; i < ranks.size(); ++i) {
+    const RankDef &rank = ranks[i];
+    if (!rank.active || !rank.defined) {
+      continue;
+    }
+    if ((rank.flags & 0x0008U) != 0) {
+      continue; // permanent
+    }
+    if (!NovaGovernment_AreGovtsAllied(
+            state.scenario, faction_or_government_id, rank.government_id)) {
+      continue;
+    }
+    const bool crime_sensitive =
+        (rank.flags & 0x0040U) != 0 ||
+        ((rank.flags & 0x0004U) != 0 && (event_code == 1 || event_code == 3));
+    if (crime_sensitive) {
+      Rank_Deactivate(state, static_cast<std::int16_t>(i));
+    }
   }
 }
 

@@ -94,6 +94,13 @@ constexpr std::uint32_t kDisasterResourceType = 0x9a6f7073;
 // (NovaUi_RunTradeCenterWindow 0x0048c730) presents up to two of them as
 // rows 6/7. See JunkDef.
 constexpr std::uint32_t kJunkResourceType = 0x6a9f6e6b;
+// r\x8ank (0x728a6e6b) — rank / honor definitions (Bible "r\xe4nk"). The
+// original loads 0x80 slots (resource id 0x80 + i) into g_rank_defs (stride
+// 0x120) in the rank pass of NovaData_LoadScenarioResourceTables (0x004bd3c0);
+// 31 are present in the shipped data (ids 0x80..0x9e, Nova Data 2). The slot
+// index is written into +0x02 by Ship_InitGameplayDataTables (0x004b0c20) and
+// is what <RRK> expands through. See RankDef.
+constexpr std::uint32_t kRankResourceType = 0x728a6e6b; // r\x8ank
 } // namespace scenario
 
 // --------------------------------------------------------------------------
@@ -1064,6 +1071,47 @@ struct JunkDef {
   std::int32_t count = 0;
 };
 
+// Ghidra g_rank_defs (0x005914c4, a pointer to the 0x80 x 0x120 table): the
+// r\x8ank rank/honor definition table. Slot i = resource id 0x80 + i. Field
+// offsets and the decode are pinned against the loader's rank pass
+// (NovaData_LoadScenarioResourceTables 0x004bd3c0) and the initializer
+// (Ship_InitGameplayDataTables 0x004b0c20).
+struct RankDef {
+  // +0x00 runtime active latch; set/cleared by Rank_Activate / Rank_Deactivate.
+  bool active = false;
+  // +0x01 defined/loaded (resource existed at load time).
+  bool defined = false;
+  // +0x02 slot index (0..0x7f), assigned by Ship_InitGameplayDataTables; the
+  // <RRK> recently-activated key and the sibling-match key.
+  std::int16_t id = 0;
+  // +0x04 Weight (payload +0x00). Higher-weight active ranks win the <PRK>/
+  // <SRK> name scans.
+  std::int16_t weight = 0;
+  // +0x06 affiliated government, rebased to the 0-based g_government_defs
+  // index (payload +0x02; < 0x80 -> -1 = no government).
+  std::int16_t government_id = -1;
+  // +0x08 PriceMod (payload +0x04); the loader floors it at 100.
+  std::int16_t price_mod = 100;
+  // +0x0c/+0x10 Bible Contribute 64-bit mask (payload +0x06/+0x0a).
+  std::uint32_t contribute_lo = 0;
+  std::uint32_t contribute_hi = 0;
+  // +0x14/+0x18 Bible Salary / SalaryCap (payload +0x0e/+0x12).
+  std::uint32_t salary = 0;
+  std::uint32_t salary_cap = 0;
+  // +0x1c Bible status flags: 0x0001 deactivate same-govt on activate, 0x0002
+  // same-govt on deactivate, 0x0004 destroy/disable revokes, 0x0008 permanent,
+  // 0x0010 lower-weight on activate, 0x0020 lower-weight on deactivate, 0x0040
+  // any crime, 0x0100 no auto-attack, 0x0200 always land, 0x0400 battle
+  // assistance, 0x0800 allied repair/refuel.
+  std::uint16_t flags = 0;
+  // +0x1e full name (record name, ';' subtitle stripped); <RRK> expands it.
+  std::string full_name;
+  // +0x9e Bible ConvName (payload +0x18); <PRK> expands it.
+  std::string conv_name;
+  // +0xde Bible ShortName (payload +0x58); <SRK> expands it.
+  std::string short_name;
+};
+
 // Ghidra GovtDef (g_government_defs, up to 0x100 entries indexed by government
 // id minus 0x80). A government defines a faction: its class/alliance/enemy
 // relations, reputation penalties, AI/pilot skill, intel scan mask, theme
@@ -1558,6 +1606,10 @@ struct ScenarioData {
   // resource id 0x80 + i; absent resources stay !present. See JunkDef and
   // NovaUi_RunTradeCenterWindow (0x0048c730).
   std::vector<JunkDef> junk_defs; // indexed by junk id - 0x80
+  // r\x8ank rank/honor table (g_rank_defs): 0x80 slots, slot i = resource id
+  // 0x80 + i; absent resources keep defined == false. The active flag is the
+  // runtime state toggled by Rank_Activate / Rank_Deactivate. See RankDef.
+  std::vector<RankDef> ranks; // indexed by rank id - 0x80
   // Asteroid/drift class table (r\x9aid family, one row per resource id
   // 0x80..0x8f). Ghidra g_asteroid_states's per-type params read via
   // the DAT_005912dc / DAT_005912f0 pair.
@@ -1601,6 +1653,9 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for a j\x9fnk commodity (g_junk_defs), or nullptr when
   // outside the loaded 0x80-entry table.
   [[nodiscard]] const JunkDef *Junk(std::int16_t resource_id) const;
+  // gh.id 0x80.. lookup for a r\x8ank rank definition (g_rank_defs), or
+  // nullptr when outside the loaded 0x80-entry table.
+  [[nodiscard]] const RankDef *Rank(std::int16_t resource_id) const;
   // gh.id 0x80.. lookup for an asteroid-type row, or nullptr when outside the
   // loaded range.
   [[nodiscard]] const AsteroidDef *AsteroidType(std::int16_t resource_id) const;

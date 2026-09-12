@@ -900,6 +900,39 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 }
 
 // ---------------------------------------------------------------------------
+// r\x8ank (rank / honor) decode
+// ---------------------------------------------------------------------------
+// Field map verified against Nova Data 2's r\x8ank payloads (ids 0x80..0x9e)
+// and the loader's rank pass (NovaData_LoadScenarioResourceTables 0x004bd3c0):
+// weight (i16 +0x00), affiliated government (i16 +0x02; <0x80 -> -1, else
+// rebased -0x80), PriceMod (i16 +0x04, floored at 100), Contribute 64-bit
+// (u32 +0x06 / +0x0a), Salary / SalaryCap (u32 +0x0e / +0x12), status flags
+// (u16 +0x16), then the ConvName (+0x18) and ShortName (+0x58) C strings. The
+// record name (metadata) is the full name; the loader strips its ';' subtitle
+// suffix. The slot index (RankDef::id) is assigned by the loader table
+// initializer, not carried in the payload.
+[[nodiscard]] RankDef DecodeRank(std::span<const std::byte> bytes) {
+  RankDef def;
+  def.defined = true;
+  def.weight = ReadBeI16(bytes, 0x00);
+  const std::int16_t govt = ReadBeI16(bytes, 0x02);
+  def.government_id = govt < 0x80 ? static_cast<std::int16_t>(-1)
+                                  : static_cast<std::int16_t>(govt - 0x80);
+  def.price_mod = ReadBeI16(bytes, 0x04);
+  if (def.price_mod < 1) {
+    def.price_mod = 100;
+  }
+  def.contribute_lo = ReadBe32(bytes, 0x06);
+  def.contribute_hi = ReadBe32(bytes, 0x0a);
+  def.salary = ReadBe32(bytes, 0x0e);
+  def.salary_cap = ReadBe32(bytes, 0x12);
+  def.flags = ReadBe16(bytes, 0x16);
+  def.conv_name = ReadCStringBounded(bytes, 0x18, 0x40);
+  def.short_name = ReadCStringBounded(bytes, 0x58, 0x40);
+  return def;
+}
+
+// ---------------------------------------------------------------------------
 // g\x9avt (Government / govmnt) decode
 // ---------------------------------------------------------------------------
 // Field offsets verified against Nova Data 1's government payloads and the
@@ -1388,6 +1421,14 @@ const JunkDef *ScenarioData::Junk(std::int16_t resource_id) const {
   return &junk_defs[static_cast<std::size_t>(index)];
 }
 
+const RankDef *ScenarioData::Rank(std::int16_t resource_id) const {
+  const auto index = static_cast<std::int32_t>(resource_id) - 0x80;
+  if (index < 0 || index >= static_cast<std::int32_t>(ranks.size())) {
+    return nullptr;
+  }
+  return &ranks[static_cast<std::size_t>(index)];
+}
+
 const AsteroidDef *ScenarioData::AsteroidType(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < asteroid_defs.size() ? &asteroid_defs[index] : nullptr;
@@ -1443,6 +1484,13 @@ bool ScenarioData::LoadFromArchives() {
   // j\x9fnk specialized-commodity table: 0x80 slots, slot i = resource id
   // 0x80 + i.
   junk_defs.assign(0x80, {});
+  // r\x8ank rank/honor table: 0x80 slots, slot i = resource id 0x80 + i. The
+  // slot index is assigned here (Ship_InitGameplayDataTables 0x004b0c20 does
+  // the same to the runtime table) and the loader pass fills present slots.
+  ranks.assign(0x80, {});
+  for (std::size_t i = 0; i < ranks.size(); ++i) {
+    ranks[i].id = static_cast<std::int16_t>(i);
+  }
   // Asteroid-type (asteroid-drift) table: 16 rows, resource ids 0x80..0x8f.
   asteroid_defs.assign(0x80, {});
 
@@ -1879,6 +1927,19 @@ bool ScenarioData::LoadFromArchives() {
       ++loaded_junk;
     }
   }
+  // r\x8ank rank/honor pass (loader rank pass, after the junk pass). 0x80
+  // slots, slot i = resource id 0x80 + i. The record name is the full name
+  // (subtitle stripped); the payload carries the ConvName/ShortName.
+  std::size_t loaded_ranks = 0;
+  for (std::int32_t id = 0x80; id < 0x80 + 0x80; ++id) {
+    if (const auto res = NovaResource_LoadNamed(
+            scenario::kRankResourceType, static_cast<std::uint16_t>(id))) {
+      RankDef def = DecodeRank(res->bytes);
+      def.full_name = StripSubtitleSuffix(res->name);
+      ranks[static_cast<std::size_t>(id) - 0x80] = std::move(def);
+      ++loaded_ranks;
+    }
+  }
   // Display-name id post-pass (0x004c3e20): every slot starts with its own
   // index at +0x78a, then same-named slots adopt the first slot's id. The
   // original compares +0x625 name tails with a first-byte bound; exact-name
@@ -1934,8 +1995,8 @@ bool ScenarioData::LoadFromArchives() {
   NovaLog::Info(
       "scenario tables loaded: {} ships, {} outfits, {} weapons, {} stellars, "
       "{} systems, {} nebulae, {} governments, {} fleet defs, {} dude defs, "
-      "{} asteroid types, {} impact effects, {} missions, {} personalities, "
-      "{} cron events, {} disasters, {} junk defs",
+      "{} asteroids types, {} impact effects, {} missions, {} personalities, "
+      "{} cron events, {} disasters, {} junk defs, {} ranks",
       loaded_ships,
       loaded_outfits,
       loaded_weapons,
@@ -1951,7 +2012,8 @@ bool ScenarioData::LoadFromArchives() {
       loaded_pers,
       loaded_crons,
       loaded_disasters,
-      loaded_junk);
+      loaded_junk,
+      loaded_ranks);
   return loaded_ships > 0 && loaded_weapons > 0;
 }
 
