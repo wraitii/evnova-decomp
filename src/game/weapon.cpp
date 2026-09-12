@@ -1156,13 +1156,23 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   // one armor point for that variant.
   shot.impact_variant =
       (w->flags_secondary & 0x1000U) != 0U ? static_cast<std::int8_t>(1) : 0;
-  // Ghidra 0x004115a0 Ship_IsShipInAiState0x0D runs inline here.
-  // Shot_SpawnShotFromWeapon (0x0041fd30): owners in disable mode (AI state
-  // 0x0D) also mark their shots to leave the target at 1 armor. The original
-  // additionally marks shots from owners locked on a disabled target
-  // (Ship_IsShipLockedOnTarget); that check is deferred TODO(decomp).
-  if (shot.impact_variant == 0 && owner_ship_slot > 0 &&
-      owner_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips) &&
+  // Shot_SpawnShotFromWeapon (0x0041fd30) marks two non-lethal (leave-one-
+  // armor) cases: the owner is locked on a live target (Ship_IsShipLockedOn
+  // Target 0x004124f0, target not disabled), or the owner itself is in AI
+  // state 0x0D (Ship_IsShipInAiState0x0D 0x004115a0). The locked-on branch
+  // applies only to an unvarianted weapon with a real, non-disabled target;
+  // the state-0x0D branch is unconditional.
+  if (shot.impact_variant == 0 && owner_ship_slot > 0 && owner_in_range &&
+      target_ship_slot >= 0 &&
+      target_ship_slot < static_cast<std::int16_t>(GameState::kMaxShips) &&
+      !NovaAiShip_IsDisabled(
+          state, state.ShipAt(static_cast<std::size_t>(target_ship_slot))) &&
+      NovaAiShip_IsShipLockedOnTarget(
+          state.ShipAt(static_cast<std::size_t>(owner_ship_slot)),
+          state.ShipAt(static_cast<std::size_t>(target_ship_slot)))) {
+    shot.impact_variant = 1;
+  }
+  if (owner_ship_slot > 0 && owner_in_range &&
       state.ShipAt(static_cast<std::size_t>(owner_ship_slot)).ai_state_code ==
           0x0D) {
     shot.impact_variant = 1;
@@ -2239,6 +2249,18 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
     beam.turret_quadrant = -1;
     beam.turret_group_id = weapon->turret_group_id;
     beam.impact_variant = (weapon->flags_secondary & 0x1000U) != 0U ? 1 : 0;
+    // Shot_QueueBeamHit (0x00427a90) also marks locked-on non-player beams
+    // non-lethal (leave one armor): owner is a ship, the caller did not force
+    // targeting, a live (non-disabled) target exists, and the owner is locked
+    // on it (Ship_IsShipLockedOnTarget 0x004124f0).
+    if (beam.impact_variant == 0 && owner_ship_slot > 0 &&
+        forced_targeting != 1 && aimed_at_target &&
+        !NovaAiShip_IsDisabled(
+            state, state.ShipAt(static_cast<std::size_t>(target_ship_slot))) &&
+        NovaAiShip_IsShipLockedOnTarget(
+            owner, state.ShipAt(static_cast<std::size_t>(target_ship_slot)))) {
+      beam.impact_variant = 1;
+    }
     beam.impact_resolved = false;
     return true;
   }

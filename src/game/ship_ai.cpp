@@ -4516,6 +4516,13 @@ bool NovaAiShip_IsShipLockedOnAttackerInState4(const Ship &ship,
          ship.ai_state_code == 4;
 }
 
+// Ghidra 0x004124f0 Ship_IsShipLockedOnTarget.
+bool NovaAiShip_IsShipLockedOnTarget(const Ship &ship, const Ship &target) {
+  const std::int16_t state = ship.ai_state_code;
+  return (state == 0x0D || (state == 4 && ship.ai_control_mode == 0x0F)) &&
+         ship.primary_target_ship_slot == target.ship_instance_id;
+}
+
 // Ghidra 0x00410ce0 Ship_IsShipInAiBehavior5State0x05.
 bool NovaAiShip_IsShipInAiBehavior5State5(const Ship &ship) {
   return ship.ai_behavior_code == 5 && ship.ai_state_code == 5;
