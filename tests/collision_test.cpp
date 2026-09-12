@@ -268,7 +268,7 @@ TEST_CASE("ownerless shots hit only their recorded target slot",
   // A stellar defense battery shot: owner_ship_slot -1, weapon bank 0. The
   // original Weapon_CanWeaponHitTarget (0x00426ef0) routes ownerless shots
   // through the 0x00427435 branch, which accepts only the recorded target slot
-  // (or a ship whose target_stellar_object_id matches it) before joining the
+  // (or a ship whose defense_fleet_home_stellar_id matches it) before joining the
   // common capability/aggro tail.
   ActiveShot shot;
   shot.weapon_id = 0;
@@ -290,8 +290,8 @@ TEST_CASE("ownerless shots hit only their recorded target slot",
   CHECK(!NovaWeapon_CanProjectileHitShip(state, shot, 2));
 
   // Ghidra compares the recorded slot against both the candidate's
-  // ship_instance_id and its target_stellar_object_id.
-  second.target_stellar_object_id = 1;
+  // ship_instance_id and its defense_fleet_home_stellar_id.
+  second.defense_fleet_home_stellar_id = 1;
   CHECK(NovaWeapon_CanProjectileHitShip(state, shot, 2));
 
   // An invalid recorded slot leaves the ownerless shot free to hit any ship.
@@ -320,7 +320,7 @@ TEST_CASE("player fire preserves state-9 hit-reset ordering",
   target.primary_target_ship_slot = 2;
   target.ai_secondary_target_slot = 3;
   target.ai_maneuver_timer_ms = 99.0F;
-  target.target_stellar_object_id = -1;
+  target.defense_fleet_home_stellar_id = -1;
 
   NovaWeapon_ResolveDirectShotCollisions(state);
 

@@ -33,7 +33,7 @@
 // window, boarding-plunder style) and the bribe-success landing handoff are
 // reconstructed. The Demand Tribute / Release branch (reputation decrement,
 // Government_ProcessFactionCombatEvent, defense-fleet spawns via
-// Stellar_SpawnHostileShipForStellar, domination latches and
+// Stellar_SpawnDefenseFleetShip, domination latches and
 // Mission_ExecuteReactionScript) is deferred with a loud Todo(decomp).
 
 #include <cstdint>

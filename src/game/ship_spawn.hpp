@@ -206,10 +206,15 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
 //     (NovaEncounter_SelectFleetDefWeighted) and spawn its lead
 //     (NovaEncounter_SpawnFleetLeadShip), otherwise spawn a random
 //     system-bound dude ship (NovaDude_SpawnRandomDudeShipInSystem).
+//  3. Stellar defense-fleet trickle: scan the 16 nav stellars for the first
+//     with field_0x47 set and a positive present_ship_count whose live
+//     defenders number below max_ship_count % 10; spawn one
+//     (NovaStellar_SpawnDefenseFleetShip) and decrement the budget. At most
+//     one defense spawn per tick.
 //
-// Deferred (TODO(decomp), see ship_spawn.cpp): the stellar-defense ship
-// spawns, the roaming-NPC population cap, the <200-traffic ambient-fleet
-// escalation and the ambient-mission-ship respawn latch.
+// Deferred (TODO(decomp), see ship_spawn.cpp): the roaming-NPC population cap,
+// the <200-traffic ambient-fleet escalation and the ambient-mission-ship
+// respawn latch.
 void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
                                         std::int16_t system_id,
                                         std::uint32_t now_ms);
@@ -242,6 +247,18 @@ NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
                                       std::int16_t system_id,
                                       std::int16_t slot_pool,
                                       bool ignore_ship_availability);
+
+// Ghidra 0x00421fd0 Stellar_SpawnDefenseFleetShip. Spawns one ship for a
+// stellar's Bible defense fleet (spöb DefenseDude): allocates via
+// NovaDude_SpawnShipFromDudeDefInSystem (slot pool 2), stamps it as the
+// stellar's defender (Ship.defense_fleet_home_stellar_id), forces behavior-3
+// warship, seeds it at the stellar's map position with a random heading and an
+// initial velocity at the effective max speed, makes it hostile to the player,
+// and latches the stellar's field_0x47 so the per-tick defense trickle in
+// NovaSystem_TickNpcSpawnMaintenance can replace losses. `stellar_id` is the
+// stellar resource id; returns the slot or -1.
+[[nodiscard]] int NovaStellar_SpawnDefenseFleetShip(GameState &state,
+                                                    std::int16_t stellar_id);
 
 // Ghidra 0x0041cf40 Mission_SpawnMissionShipFromDudeDef. Spawns one mission-
 // fleet ship for active-mission slot mission_fleet_slot from its dude def:
@@ -278,7 +295,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
 // tallying them into their spawn-quota bucket first. A slot is SPARED only when
 // it is actively engaging the player -- ai_behavior_code > 4,
 // squad_leader_ship_slot
-// == 0, not docked at a stellar (target_stellar_object_id == -1), not in a
+// == 0, not docked at a stellar (defense_fleet_home_stellar_id == -1), not in a
 // mission fleet -- AND is not disabled AND `keep_player_engaged` is
 // false (the original's flag==0). Everything else (idle wanderers/dudes,
 // parked-at-stellar ships, mission ships, disabled ships) is

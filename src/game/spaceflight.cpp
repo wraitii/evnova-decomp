@@ -385,10 +385,10 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
         ship.squad_leader_ship_slot > 0x3f) {
       ship.squad_leader_ship_slot = -1;
     }
-    if (ship.target_stellar_object_id < -1 ||
-        ship.target_stellar_object_id > 0x7ff) {
+    if (ship.defense_fleet_home_stellar_id < -1 ||
+        ship.defense_fleet_home_stellar_id > 0x7ff) {
       // Ghidra quirk: this range check resets squad_leader_ship_slot, not
-      // target_stellar_object_id.
+      // defense_fleet_home_stellar_id.
       ship.squad_leader_ship_slot = -1;
     }
     if (ship.mission_fleet_slot < -1 || ship.mission_fleet_slot > 0xf) {

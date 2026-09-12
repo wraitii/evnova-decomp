@@ -469,7 +469,7 @@ TEST_CASE(
   ship.dude_class_id = 0x200;            // > 0x1ff
   ship.pers_def_slot = 0x400;            // > 0x3ff
   ship.squad_leader_ship_slot = 0x40;    // > 0x3f
-  ship.target_stellar_object_id =
+  ship.defense_fleet_home_stellar_id =
       0x800;                      // > 0x7ff (resets squad_leader_ship_slot)
   ship.mission_fleet_slot = 0x10; // > 0xf
   ship.primary_target_ship_slot = 0x40; // > 0x3f

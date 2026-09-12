@@ -77,7 +77,7 @@ SDL_Color Ship_RadarDisplayColor(const GameState &state, const Ship &ship) {
     return kIffStellarHostile;
   }
   const std::int16_t squad_leader = ship.squad_leader_ship_slot;
-  if (squad_leader == 0 && ship.target_stellar_object_id == -1) {
+  if (squad_leader == 0 && ship.defense_fleet_home_stellar_id == -1) {
     return kIffShipAttackingWithPlayer;
   }
   if (squad_leader == -1) {

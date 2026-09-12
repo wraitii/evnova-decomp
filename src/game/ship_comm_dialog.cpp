@@ -968,7 +968,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       // Keep-pressing ship: the mission-fleet bribe/hostility branch (prompts
       // 0x13 refusal, 0x17/0x12/0x18 mood ladder, outcomes 0x14 re-hired / 0x1e
       // hostile / 0xc can't-afford).
-      if (target.target_stellar_object_id == -1 && bribe_offered) {
+      if (target.defense_fleet_home_stellar_id == -1 && bribe_offered) {
         status =
             LoadMoodPromptPayFirst(random_index, personality).value_or(status);
         const BribeOutcome outcome =
