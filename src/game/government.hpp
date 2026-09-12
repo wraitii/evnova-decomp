@@ -96,8 +96,7 @@ NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
 [[nodiscard]] bool NovaGovernment_TryTriggerAssistanceEncounter(
     GameState &state, const Ship &ship, bool force);
 
-// Ghidra 0x0046f100 Government_IsShipGovernmentDerelict (renamed from the
-// misleading Government_IsReputationTrackingGovernment): true when the ship's
+// Ghidra 0x0046f100 Government_IsShipGovernmentDerelict: true when the ship's
 // faction is a valid 0-based government carrying the derelict bit
 // (flags_primary 0x0800). Callers use the true result to SKIP the kill-side
 // reputation event (derelict/story hulks do not cost standing).

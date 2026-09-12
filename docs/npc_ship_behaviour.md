@@ -34,18 +34,12 @@ per-frame formation passes: `Ship_UpdateShipAI` calls
 `Ship_UpdateEscortFormations(ship, 0)` for flagged NPC squad leaders, and the
 player core does the same at 0x00451003.
 
-Terminology (2026 rename): `squad_leader_ship_slot` (+0x9A, formerly
-`ai_target_ship_slot`) is the ship a behavior-5 fighter, behavior-6 escort, or
-behavior>4 assist ship is attached to -- its squad leader, not a hostile
-target. The carrier for fighters, the player for hired escorts, the assist
+Terminology: `squad_leader_ship_slot` (+0x9A) is the ship a behavior-5
+fighter, behavior-6 escort, or behavior>4 assist ship is attached to -- its
+squad leader, not a hostile target.
+The carrier for fighters, the player for hired escorts, the assist
 target otherwise. Leadership succession (0x004156a0) passes the squad to the
 heaviest squadmate when the leader is lost.
-
-The reconstruction ticks active non-player ships in the current system by the
-same frame cadence.  The core movement, wander/travel, combat pursuit, NPC
-weapons, vacant-ship cleanup, and an initial NPC system-transfer slice are
-present.  Mission/fleet policy, full formation handling, specialized weapon
-guidance, and full jump presentation remain incomplete.
 
 Fire-restricted/disabled ships are not frozen in place. `Ship_HandleShip`
 (0x00433050) multiplies `vel_x`, `vel_y`, and scalar `speed` by `0.94`
@@ -145,9 +139,8 @@ the plain pool in strict mode) are reconstructed in
 
 ## Movement controls (`ai_control_mode`)
 
-These are low-level commands issued by the state machine.  Modes marked
-“partial” have their motion arm reconstructed, while a related weapon,
-formation, bay-launch, or script side effect is still absent.
+These are low-level commands issued by the state machine. Some entries note
+related side effects owned by another subsystem.
 
 | Mode | Name | Movement behaviour |
 |---:|---|---|
@@ -194,7 +187,7 @@ field definitions and uncertainties.
 | `+0x70` | `primary_target_ship_slot` | Principal combat target. |
 | `+0x8e` | `ai_evasive_heading_deg` | Stored `±135°` escape heading for mode `0x10`; name remains provisional. |
 | `+0x92` | `jump_destination_stellar_id` | Stellar reached/selected for a possible jump. |
-| `+0x9a` | `squad_leader_ship_slot` | Squad leader / attachment anchor (renamed from `ai_target_ship_slot` 2026): carrier for behavior-5 fighters, protected ship (usually the player) for behavior-6 escorts, assist target for behavior >4. Not a hostile target; roots the friendly-fire squad chain and drives leadership succession (0x004156a0). |
+| `+0x9a` | `squad_leader_ship_slot` | Squad leader / attachment anchor: carrier for behavior-5 fighters, protected ship (usually the player) for behavior-6 escorts, assist target for behavior >4. Not a hostile target; roots the friendly-fire squad chain and drives leadership succession (0x004156a0). |
 | `+0xa4` | `ai_mode_start_time_ms` | Wall-clock timestamp used by jump/formation timing. |
 | `+0xba` | `ai_fire_trigger_latch` | Requests a fire of the selected weapon bank. |
 | `+0xbd` | `ai_brake_to_boost_latch` | Unidentified producer; gates several close-range mode-`0x11` boosts. Provisional. |
@@ -309,8 +302,7 @@ verified):
    no license-seed field.
 2. **Retention gate (0x0040e149)** — return when `primary_target_ship_slot !=
    -1` **and** `ai_state_code` is 3 or 4 **and** the target slot is `is_active`.
-   There is deliberately no same-system and no destroyed check here; the prior
-   port's same-system/destroyed gate was wrong.
+   There is deliberately no same-system and no destroyed check here.
 3. **pers_def arms (0x0040e186)** — slot `0x3fe` forces hostility; otherwise
    `pers.Flags & 1` (grudge) with the pers `+0x621` grudge latch and the cloak
    engagement predicate also forces hostility.  The `+0x621` latch is set by

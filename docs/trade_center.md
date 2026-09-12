@@ -1,7 +1,6 @@
 # Trade Center (commodity exchange)
 
-Ghidra driver: `NovaUi_RunTradeCenterWindow` **0x0048c730** (renamed from
-`NovaUi_HandleTravelDestinationInteractionLoop`), dispatched from the Spaceport
+Ghidra driver: `NovaUi_RunTradeCenterWindow` **0x0048c730**, dispatched from the Spaceport
 loop `0x00491f30` action `7` when `Stellar.travel_flags & 0x2`.
 
 Supporting functions: input `0x0048d190` `NovaUi_HandleTradeCenterInput`,

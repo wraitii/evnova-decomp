@@ -103,7 +103,7 @@ struct ActiveMission {
   // The misn CanAbort flag (payload +0x42, copied at accept by
   // Mission_PopulateMissionSlotFromDef 0x0043f8c0). Gates the player-abort arm
   // of the mission-info window (0x00446150 action 5) and the quick-fail fleet
-  // release (0x00440bf0). (Was misnamed has_been_visited.)
+  // release (0x00440bf0).
   bool can_abort = false; // +0x32
   // Carrying-the-mission-cargo latch: set at acceptance for PickupMode 0,
   // set/cleared by the landing interaction pass.
@@ -379,12 +379,12 @@ struct Ship {
   // positive (a below--1.0 overshoot clamps to -1.0). The original writes the
   // level into the Sprite's RGB tint channels (Sprite.sprite_tint_*).
   float weapon_sprite_flash_level = 0.0F; // +0xC8E8
-  // Ghidra ShipState +0xC8D6 (renamed from weapon_exit_animation_phase). The
+  // Ghidra ShipState +0xC8D6. The
   // running-lights blink state machine's phase: for square-wave blink it
   // counts blinks within the current group; for triangle pulse it selects the
   // rise (0) or fall (1) leg. Unused by BlinkMode 0/-1/3.
   std::int16_t light_blink_phase = 0; // +0xC8D6
-  // Ghidra ShipState +0xC8EC (renamed from weapon_exit_position_timer). The
+  // Ghidra ShipState +0xC8EC. The
   // running-lights blink timer; counts down in normalized 30 Hz ticks. Shared
   // by the square-wave (on/off/group dwell) and random-pulse (change delay)
   // arms.
@@ -398,7 +398,7 @@ struct Ship {
   std::int16_t ai_secondary_target_slot =
       -1; // +0x6C (also a travel/stellar slot)
   // Squad leader / behavior anchor (Ghidra ShipState +0x9A
-  // squad_leader_ship_slot, renamed from ai_target_ship_slot 2026): the ship
+  // squad_leader_ship_slot): the ship
   // this NPC is attached to -- the carrier for behavior-5 fighters, the
   // protected ship (usually the player) for behavior-6 escorts, the assist
   // target for behavior >4 otherwise. -1 = no squad. It is an attachment, NOT
@@ -406,7 +406,7 @@ struct Ship {
   // passes depend on that.
   std::int16_t squad_leader_ship_slot = -1; // +0x9A
   // Stellar this ship is garrisoned at / belongs to (Ghidra ShipState +0x8C
-  // defense_fleet_home_stellar_id, renamed from target_stellar_object_id 2026).
+  // defense_fleet_home_stellar_id).
   // Set to a real stellar only by the defense-fleet spawner
   // (NovaStellar_SpawnDefenseFleetShip, Ghidra Stellar_SpawnDefenseFleetShip
   // 0x00421fd0); -1 for every other ship. Two ships sharing this value are
@@ -435,8 +435,8 @@ struct Ship {
   float formation_offset_y = 0.0F; // +0x2C
   // Squad/bookkeeping flag bytes (ShipState +0xC0/+0xC1/+0xC2), refreshed
   // every full tick by the Frame_TickSystems (0x004186b0) scope-6 pass:
-  // +0xC0 some active ship holds this ship as its squad leader (renamed from
-  // ai_targeted_by_any_ship 2026; NOT combat targeting), +0xC1 some ship's
+  // +0xC0 some active ship holds this ship as its squad leader (NOT combat
+  // targeting), +0xC1 some ship's
   // formation_leader_ship_slot is this slot, and +0xC2 some ship's
   // resolved_squad_leader_ship_slot is this slot -- the byte
   // Ship_UpdateShipAI (0x00401000) and the player core (0x00451003) gate

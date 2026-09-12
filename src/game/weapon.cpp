@@ -2392,8 +2392,8 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     return;
   }
 
-  // Weapon_IsTargetBearingInTurretBlindSpot (0x0046b360, formerly the
-  // misnamed Weapon_IsWeaponArcAllowed): fixed forward/side/rear sector test.
+  // Weapon_IsTargetBearingInTurretBlindSpot (0x0046b360): fixed
+  // forward/side/rear sector test.
   // Front <46 deg, side <136 deg, else rear; each sector is BLIND when the
   // weapon's flags_primary bit 0x1000/0x2000/0x4000 (or the ship class
   // capability flags) is set. Turret weapons usually clear all three bits, so

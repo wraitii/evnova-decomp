@@ -135,9 +135,9 @@ void NovaAi_EnterState15JumpOutToSystem(GameState &state,
                                         Ship &ship,
                                         std::int16_t stellar_id);
 
-// Clean-room cross-system completion for an NPC already in state 0x14. The
-// original's larger hyperspace presentation path is not shared with this
-// per-ship AI tick; this helper performs its gameplay-visible system transfer.
+// Completes a cross-system jump for an NPC already in state 0x14: performs
+// the gameplay-visible system transfer. The original's larger hyperspace
+// presentation path is not shared with this per-ship AI tick.
 bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship);
 
 // Ghidra 0x004687b0 Ship_IsShipDisabled. True when the ship must not
@@ -152,10 +152,9 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship);
 // Shared with the spawn-maintenance cleanup
 // (NovaShip_DeactivateVacantShipsAndTally 0x0041ad50), which spares
 // non-disabled ships actively engaging the player.
-[[nodiscard]] // Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot
-              // (formerly the
-              // misnamed Weapon_IsWeaponArcAllowed): whether the bearing lies
-              // in one of the weapon's turret blind-spot sectors (front <46 deg
+[[nodiscard]] // Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot:
+              // whether the bearing lies in one of the weapon's turret
+              // blind-spot sectors (front <46 deg
               // / side <136 deg / rear; weapon flags_primary
               // 0x1000/0x2000/0x4000, force-overridden by the matching
               // ShipClass capability flags). Turreted fire/selection paths

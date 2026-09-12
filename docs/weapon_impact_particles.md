@@ -100,7 +100,7 @@ world. Because spaceflight extends the world 1:1 rather than upscaling the
 1024x768 canvas, a large retina window shows more system and leaves the
 particle small relative to the screen (the same applies to all 1:1 art).
 
-## Not yet ported
+## Smoke trails
 
 `Shot_HandleShot` 0x00435830 smoke trails (`_DAT_...` weapon fields
 `field_0x60`/`0x62`/`0x64` + the 8-entry color table at +0x8c, gated by the

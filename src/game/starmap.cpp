@@ -987,8 +987,7 @@ void DrawChrome(SdlPlatform &platform,
   // Deliberate divergence for this fallback path only: the viewport is filled
   // opaque so the map reads over a plain backdrop. When the map opens from
   // spaceflight, DrawLiveChrome keeps the flight view visible instead (the
-  // original's modal window composites over the live frame; the earlier
-  // "viewport fill 0x004a5480" citation was wrong - that site is font setup).
+  // original's modal window composites over the live frame).
   SDL_SetRenderDrawColor(
       renderer, kColorBlack.r, kColorBlack.g, kColorBlack.b, SDL_ALPHA_OPAQUE);
   SDL_RenderFillRect(renderer, &geometry.map);

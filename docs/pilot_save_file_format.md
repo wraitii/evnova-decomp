@@ -161,9 +161,9 @@ There is no mid-game reload path.
   cadence/condition not yet isolated (decompile of that routine is too large;
   check the jump/hyperspace anchors).
 
-## Reimplementation status
+## Serializer and entry points
 
-`src/game/pilot_file.{hpp,cpp}` now carries:
+`src/game/pilot_file.{hpp,cpp}` carries:
 
 - `PilotFileSerialize` / `PilotFileDeserialize` — pure byte transforms of the
   tracked subset with the exact block offsets/framing above (untracked regions

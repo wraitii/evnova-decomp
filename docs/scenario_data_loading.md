@@ -67,7 +67,7 @@ globals (AGENTS.md).
   AvgShips64, Govt66 (rebased to 0.. space; <0x80 / >0x17f -> -1), Message68,
   Asteroids6a, Interference6c, DudeTypes at `0x6e` (rebased -0x80; <0x80 />0x47e
   -> -1) with % Prob at `0x7e` (clamped 0..100), BkgndColor+0x8e, Murk+0x92,
-  ReinfFleet/Time/Interval +0x196..+0x19a. SystemDef runtime +0x96 is Interference (payload +0x6c; the loader writes it to dude_types-2), consumed by the guided-shot confusion roll in Shot_SpawnShotFromWeapon 0x0041fd30 — an earlier revision of this note mislabeled +0x96 'Visibility'. Verified against
+  ReinfFleet/Time/Interval +0x196..+0x19a. SystemDef runtime +0x96 is Interference (payload +0x6c; the loader writes it to dude_types-2), consumed by the guided-shot confusion roll in Shot_SpawnShotFromWeapon 0x0041fd30. Verified against
   system 0x80 (links 199/200/202/129/135, avg 4, govt 128->0, message -1,
   asteroids 3, dude types 510/155/156/128, probs 50/1/1/10). Dude1-8 at +0x44
   and their weights at +0x54 are split by the loader: ordinary 0x80..0x27f ids
@@ -103,7 +103,7 @@ globals (AGENTS.md).
   (e.g. fleet 0x80 lead 13, govt 0, filter 10000, escorts 95/96; fleet 0x82
   filter -1 spawns anywhere).
 
-### Provisional (not yet fully verified)
+### Provisional fields
 
 `o\x9ftf` (outfit) and `sp\x9ab` (stellars) decoders fill the positively-identified
 header fields but not every offset; they are marked provisional in
@@ -115,12 +115,9 @@ record name / later string blocks rather than the numeric header.
 
 ## New-game flow integration
 
-`new_pilot_flow.cpp` now:
+`new_pilot_flow.cpp`:
 - loads the scenario tables once (Step 4) before the ship reset;
 - resets the player ship from the real default class stats (id 0x80);
 - seeds the starting inventory from the class DefaultItems;
 - resolves the initial travel destination from the starting system's first
-  outward link (system adjacency now readable).
-
-`decomp-progress.tsv` row for `0x004BD3C0` was raised to 30% to reflect the
-resource-family decoding slice.
+  outward link (system adjacency readable).
