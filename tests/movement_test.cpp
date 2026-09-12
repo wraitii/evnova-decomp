@@ -610,8 +610,12 @@ TEST_CASE("npc effective stats port the high-confidence modifier branches") {
             .thrust_px_per_tick2 == Catch::Approx(0.0F));
   CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls)
             .max_speed_px_per_tick == Catch::Approx(0.0F));
+  // The 0x400 planet-type zeroing lives only in Ship_ComputeShipEffectiveThrust
+  // (0x004640a0) and Ship_ComputeShipEffectiveMaxSpeed (0x004642e0). The
+  // turn-rate helper (0x00463e70) has no capability check, so the rate stays at
+  // base*0.1 = 4.0 deg/tick.
   CHECK(game::NovaShip_ComputeEffectiveStats(state, ship, cls)
-            .turn_rate_deg_per_tick == Catch::Approx(0.0F));
+            .turn_rate_deg_per_tick == Catch::Approx(4.0F));
 
   cls.capability_flags = 0;
   ship.ship_instance_id = 3;
