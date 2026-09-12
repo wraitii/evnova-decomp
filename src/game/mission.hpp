@@ -22,6 +22,18 @@ struct MissionListEvaluation {
 // Mission_ResolveMissionStellarTargets (0x0043d240).
 void Mission_ResolveMissionStellarLocators(GameState &state);
 
+// Ghidra 0x00468b50 Mission_IsStellarValidRandomDestination. Bible rule for a
+// randomly selected mission destination: it must be far enough from the
+// offering system and guaranteed to exist for the whole game despite system
+// swapping. Rejects a candidate in the reference stellar's system or a
+// directly adjacent system, then requires the candidate to be a nav default
+// in every system of its visibility-parent (same-coordinate twin) chain.
+// `candidate` and `reference` are 0-based stellar indices; a reference outside
+// the loaded table selects the chain-only arm (the offering/locator callers
+// pass -1).
+[[nodiscard]] bool Mission_IsStellarValidRandomDestination(
+    const GameState &state, std::int16_t candidate, std::int16_t reference);
+
 // Ghidra 0x0044a4d0 Ship_ExpandStringPlaceholders. Expands the desc/misn text
 // placeholder blocks the original runs inside Ui_LoadSelectionDialogResource
 // (0x004c6d50) on every desc load:

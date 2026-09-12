@@ -1620,6 +1620,7 @@ bool ScenarioData::LoadFromArchives() {
             scenario::kStellarResourceType, static_cast<std::uint16_t>(id))) {
       game::Stellar st = DecodeStellar(res->bytes);
       st.name = res->name;
+      st.is_defined = true;
       stellars[static_cast<std::size_t>(id) - 0x80] = std::move(st);
       ++loaded_stellars;
     }
@@ -1631,6 +1632,24 @@ bool ScenarioData::LoadFromArchives() {
       sys.name = res->name;
       systems[static_cast<std::size_t>(id) - 0x80] = std::move(sys);
       ++loaded_systems;
+    }
+  }
+
+  // Loader 0x004bd3c0 second stellar pass: is_defined is cleared for any
+  // stellar that no decoded system lists as a nav default. nav_defs hold
+  // 0x80-based resource ids, so the reference index is nav - 0x80.
+  {
+    std::vector<bool> referenced(stellars.size(), false);
+    for (const auto &sys : systems) {
+      for (const std::int16_t nav : sys.nav_defs) {
+        if (nav >= 0x80 &&
+            static_cast<std::size_t>(nav - 0x80) < stellars.size()) {
+          referenced[static_cast<std::size_t>(nav - 0x80)] = true;
+        }
+      }
+    }
+    for (std::size_t i = 0; i < stellars.size(); ++i) {
+      stellars[i].is_defined = stellars[i].is_defined && referenced[i];
     }
   }
 

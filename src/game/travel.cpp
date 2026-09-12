@@ -601,6 +601,16 @@ bool NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
          ship.fuel_points >= kJumpFuelCost;
 }
 
+// Ghidra 0x00447f00 System_IsSystemVisible.
+bool NovaSystem_IsSystemVisible(const GameState &state,
+                                std::int16_t system_id) {
+  if (system_id < 0 ||
+      static_cast<std::size_t>(system_id) >= state.scenario.systems.size()) {
+    return false;
+  }
+  return state.scenario.systems[static_cast<std::size_t>(system_id)].is_visible;
+}
+
 // Ghidra 0x0046b9b0 System_ResolveSystemDiscoverySlot.
 // ---------------------------------------------------------------------------
 // Galaxy discovery (fog of war). See travel.hpp for the model: the original's

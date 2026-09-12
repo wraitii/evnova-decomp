@@ -231,7 +231,11 @@ namespace {
 
 // Mission_SelectMissionStellarByLocator (0x0043d510) filters all stellars
 // against a locator family. The clean-room model has no separate travel graph
-// yet, so availability/system membership remain the verified gates.
+// yet, so availability/system membership remain the verified gates; the
+// owning-system visibility gate and the random-destination persistence rule
+// (Mission_IsStellarValidRandomDestination, 0x00468b50) are applied here. The
+// reference/current stellar (the original's param_2) is not plumbed through
+// this helper, so the persistence check runs the chain-only arm.
 [[nodiscard]] std::vector<std::int16_t> CollectStellarLocatorCandidates(
     const GameState &state, std::int16_t locator, std::int16_t excluded) {
   const auto same_government_class = [&state](std::int16_t lhs,
@@ -268,6 +272,12 @@ namespace {
     const auto stellar_id =
         static_cast<std::int16_t>(&stellar - state.scenario.stellars.data());
     if (stellar_id == excluded) {
+      return false;
+    }
+    if (!NovaSystem_IsSystemVisible(state, stellar.system_id)) {
+      return false;
+    }
+    if (!Mission_IsStellarValidRandomDestination(state, stellar_id, -1)) {
       return false;
     }
     const auto govt = stellar.government_id;
@@ -773,7 +783,8 @@ ResolveMissionCurrentSystem(GameState &state,
     std::vector<std::int16_t> candidates;
     for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
       const auto &system = state.scenario.systems[i];
-      if (static_cast<std::int16_t>(i) != current && system.is_visible &&
+      if (static_cast<std::int16_t>(i) != current &&
+          NovaSystem_IsSystemVisible(state, static_cast<std::int16_t>(i)) &&
           system.has_explored_flag) {
         candidates.push_back(static_cast<std::int16_t>(i));
       }
@@ -795,7 +806,7 @@ ResolveMissionCurrentSystem(GameState &state,
           static_cast<std::int16_t>(linked_resource_id - kResourceIdBase);
       if (linked >= 0 &&
           linked < static_cast<std::int16_t>(state.scenario.systems.size()) &&
-          state.scenario.systems[static_cast<std::size_t>(linked)].is_visible) {
+          NovaSystem_IsSystemVisible(state, linked)) {
         candidates.push_back(linked);
       }
     }
@@ -820,8 +831,10 @@ ResolveMissionCurrentSystem(GameState &state,
     }
     return !require_same;
   };
-  const auto matches = [&](const System &system) {
-    if (!system.is_visible || system.government_id < 0) {
+  const auto matches = [&](std::int16_t index) {
+    const auto &system =
+        state.scenario.systems[static_cast<std::size_t>(index)];
+    if (!NovaSystem_IsSystemVisible(state, index) || system.government_id < 0) {
       return false;
     }
     const auto govt = system.government_id;
@@ -850,7 +863,7 @@ ResolveMissionCurrentSystem(GameState &state,
   std::vector<std::int16_t> candidates;
   for (std::size_t i = 0; i < state.scenario.systems.size(); ++i) {
     if (static_cast<std::int16_t>(i) != current &&
-        matches(state.scenario.systems[i])) {
+        matches(static_cast<std::int16_t>(i))) {
       candidates.push_back(static_cast<std::int16_t>(i));
     }
   }
@@ -858,6 +871,99 @@ ResolveMissionCurrentSystem(GameState &state,
 }
 
 } // namespace
+
+// Ghidra 0x00468b50 Mission_IsStellarValidRandomDestination.
+bool Mission_IsStellarValidRandomDestination(const GameState &state,
+                                             std::int16_t candidate,
+                                             std::int16_t reference) {
+  const auto &stellars = state.scenario.stellars;
+  const auto &systems = state.scenario.systems;
+  const auto stellar_in_range = [&stellars](std::int16_t id) {
+    return id >= 0 && static_cast<std::size_t>(id) < stellars.size();
+  };
+  const auto system_in_range = [&systems](std::int16_t id) {
+    return id >= 0 && static_cast<std::size_t>(id) < systems.size();
+  };
+  const auto system_of = [&stellars](std::int16_t stellar) {
+    return stellars[static_cast<std::size_t>(stellar)].system_id;
+  };
+
+  if (!stellar_in_range(candidate)) {
+    // The original returns true for a candidate outside g_stellar_defs.
+    return true;
+  }
+  if (!stellars[static_cast<std::size_t>(candidate)].is_defined) {
+    return false;
+  }
+
+  // Requires the candidate to be a nav default in every system of the
+  // candidate system's visibility-parent (same-coordinate twin) chain.
+  const auto chain_is_persistent = [&](std::int16_t start_system) {
+    std::int16_t current = NovaSystem_ResolveDiscoverySlot(state, start_system);
+    if (current < 0) {
+      current = start_system;
+    }
+    std::int16_t visited = 0;
+    std::int16_t present = 0;
+    while (system_in_range(current)) {
+      ++visited;
+      const auto &nav_defs =
+          systems[static_cast<std::size_t>(current)].nav_defs;
+      if (std::find(nav_defs.begin(),
+                    nav_defs.end(),
+                    static_cast<std::int16_t>(candidate + 0x80)) !=
+          nav_defs.end()) {
+        ++present;
+      }
+      const std::int16_t parent =
+          systems[static_cast<std::size_t>(current)].visible_parent_system_id;
+      if (parent == -1) {
+        break;
+      }
+      current = parent;
+    }
+    return visited > 0 && present == visited;
+  };
+
+  const std::int16_t candidate_system = system_of(candidate);
+  if (!stellar_in_range(reference)) {
+    return system_in_range(candidate_system) &&
+           chain_is_persistent(candidate_system);
+  }
+
+  const std::int16_t reference_system = system_of(reference);
+  if (!system_in_range(candidate_system) ||
+      !system_in_range(reference_system)) {
+    return false;
+  }
+  if (candidate_system == reference_system) {
+    return false;
+  }
+  const std::int16_t candidate_slot =
+      NovaSystem_ResolveDiscoverySlot(state, candidate_system);
+  const std::int16_t reference_slot =
+      NovaSystem_ResolveDiscoverySlot(state, reference_system);
+  if (candidate_slot == reference_slot) {
+    return false;
+  }
+  const auto &candidate_links = systems[candidate_system].links;
+  const auto &reference_links = systems[reference_system].links;
+  for (std::size_t j = 0; j < candidate_links.size(); ++j) {
+    if (candidate_links[j] >= 0x80 &&
+        NovaSystem_ResolveDiscoverySlot(
+            state, static_cast<std::int16_t>(candidate_links[j] - 0x80)) ==
+            reference_slot) {
+      return false;
+    }
+    if (reference_links[j] >= 0x80 &&
+        NovaSystem_ResolveDiscoverySlot(
+            state, static_cast<std::int16_t>(reference_links[j] - 0x80)) ==
+            candidate_slot) {
+      return false;
+    }
+  }
+  return chain_is_persistent(candidate_system);
+}
 
 // Ghidra 0x0043c3e0 Misn_ResolveMissionStellarLocators.
 void Mission_ResolveMissionStellarLocators(GameState &state) {

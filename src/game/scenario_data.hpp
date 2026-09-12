@@ -847,6 +847,13 @@ struct Stellar {
   // with (its system is visible and it is reachable). Set by the display-state
   // refresh.
   bool is_available = false;
+  // is_defined (+0x45): whether the stellar resource was decoded AND is
+  // referenced by at least one system's nav list. The loader marks loaded
+  // stellars defined, then clears the flag for any stellar no system
+  // references (0x004bd3c0 second stellar pass). Read by
+  // Mission_IsStellarValidRandomDestination (0x00468b50) so random mission
+  // destinations cannot be a stellar that no system actually hosts.
+  bool is_defined = false;
   // hazard_marker (field_0x46): set when the stellar's system is visible and
   // its availability_flags carry the 0x20 hazard/derelict bit; colours the
   // stellar as a hazard on the radar/target display.
