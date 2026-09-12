@@ -2269,6 +2269,12 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
 }
 
 // Ghidra 0x0042f270 Shot_UpdateBeamHitQueue.
+//
+// TODO(decomp): the original's per-ship beam-contact pass -- the friendly-fire
+// filter that walks every ship slot and rejects contacts whose shooter and
+// target are both player-squad ships (Ship_IsInPlayerSquad 0x0046b8d0, called
+// at 0x0042fbd8/0x0042fbfa/0x004302f8) -- is not reconstructed; this port
+// resolves only each beam's recorded direct target.
 void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
   const float ticks = std::max(0.0F, elapsed_ticks);
   for (BeamHit &beam : state.beam_hit_queue) {

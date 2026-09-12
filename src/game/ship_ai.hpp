@@ -395,6 +395,16 @@ NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiState4(const Ship &ship);
 [[nodiscard]] bool NovaAiShip_IsShipInAiState2(const Ship &ship);
 
+// Ghidra Ship_IsInPlayerSquad (0x0046b8d0). Player-squad membership predicate:
+// true for the player (ship_instance_id 0), a ship attached directly to the
+// player (squad_leader_ship_slot 0), or a ship attached to a ship that is
+// itself attached to the player. Any other leader returns false. Deliberately
+// player-specific -- the inner slot is compared to 0 (the player), not to a
+// generic root -- so this is not the squad-root walk of
+// Ship_ShipsShareSquadRoot (0x0046d190).
+[[nodiscard]] bool NovaShip_IsInPlayerSquad(const GameState &state,
+                                            const Ship &ship);
+
 // Ghidra 0x00411270 Ship_IsShipInNonIdleAiState. True when the ship's
 // ai_state_code is not one of the idle/non-combat states {0 (track-parked), 1
 // (docked), 2 (idle-template), 7 (escort-arrive), 0x14 (jump/travel)}.
