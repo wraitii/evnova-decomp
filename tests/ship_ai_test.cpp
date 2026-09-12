@@ -97,14 +97,21 @@ TEST_CASE("behavior-0x01 spawn wanders to a travel stellar when idle") {
 
   NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
 
-  // The wander supervisor must take the ship out of idle into a defined state.
-  const bool took_route = (ship.ai_state_code == 1 || ship.ai_state_code == 2 ||
-                           ship.ai_state_code == 6);
+  // The wander supervisor must take the ship out of idle into a defined
+  // state. The faithful selector can also pick a restricted hypergate/wormhole
+  // point (a legitimate wander target), which the state machine turns into
+  // state 0x14 (jump entry), so accept that route too.
+  const bool took_route =
+      (ship.ai_state_code == 1 || ship.ai_state_code == 0x14 ||
+       ship.ai_state_code == 2 || ship.ai_state_code == 6);
   CHECK(took_route);
+  if (ship.ai_state_code == 1 || ship.ai_state_code == 0x14) {
+    // Traveling: must have selected a real stellar resource id.
+    REQUIRE(ship.ai_secondary_target_slot >= 0x80);
+  }
   if (ship.ai_state_code == 1) {
     // Traveling: must have selected a real stellar resource id and armed the
     // controls bridge to steer toward it.
-    REQUIRE(ship.ai_secondary_target_slot >= 0x80);
     CHECK(ship.ai_control_mode == 2);
     // The controls bridge wrote a concrete heading. Forward thrust is gated on
     // the original's alignment check (thrust only within turn_rate + 5 deg of

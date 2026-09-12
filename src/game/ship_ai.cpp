@@ -1011,45 +1011,201 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
 }
 
 // Ghidra 0x0040c790 Stellar_SelectRandomAdjacentTravelStellar. Selects a
-// random adjacent travel stellar in the ship's current system, applying the
-// government scan-mask/hostility filters; returns the stellar *resource id*
-// (>= 0x80) or -1 when none qualifies. Provisional: the original builds
-// weighted candidate pools from several scan-mask bits; we reconstruct the
-// deterministic eligibility (adjacent + sprite-active + travel-usable + govt
-// not hostile) and pick uniformly from the survivors.
+// random adjacent travel stellar in the ship's current system and returns the
+// stellar *resource id* (>= 0x80) or -1. One pass builds five 16-slot per-nav
+// masks:
+//   sprite_active: nav slot valid AND NovaTargeting_StellarTargetsSpriteSet-
+//                  Active(st) AND map pos < 1000 on both axes.
+//   travel_usable: (travel_flags & 0x20) != 0 AND availability_flags & 0x3000
+//                  == 0 (a restricted-range travel point).
+//   hostile:       ship and stellar both have a government and
+//                  NovaGovernment_AreGovtsHostileOrXenophobic is true.
+//   avail_1000 / avail_2000: availability_flags bit 0x1000 / 0x2000.
+// A second phase selects among ScanMask-gated pools (GovtDef +0x22 = Bible
+// ScanMask, payload +0x04): bit 0x80 prefers avail_2000, 0x40 prefers
+// avail_1000, and 0x20 forces the plain pool in strict mode. `strict_mode`
+// (the 1-in-3 roll from Stellar_SelectRandomAdjacentDestination) restricts
+// selection to the plain pool unless ScanMask 0x20 applies; `unrestricted_only`
+// (always false at the known call sites) selects only the plain pool.
 std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
-                                                      const Ship &ship) {
-  const System *sys = CurrentSystem(state);
-  if (!sys) {
+                                                      const Ship &ship,
+                                                      bool strict_mode,
+                                                      bool unrestricted_only) {
+  const System *sys = state.scenario.System(
+      static_cast<std::int16_t>(ship.current_system_id + 0x80));
+  if (sys == nullptr) {
     return -1;
   }
-  std::vector<std::int16_t> candidates;
-  for (const auto nav : sys->nav_defs) {
-    if (nav < 0x80) {
-      continue; // empty nav slot
+
+  std::array<bool, 16> sprite_active{};
+  std::array<bool, 16> travel_usable{};
+  std::array<bool, 16> hostile{};
+  std::array<bool, 16> avail_1000{};
+  std::array<bool, 16> avail_2000{};
+  int eligible_count = 0; // original local_1c
+  int plain_count = 0;    // original local_20
+  int count_1000 = 0;     // original local_14
+  int count_2000 = 0;     // original local_98
+
+  for (std::size_t i = 0; i < sys->nav_defs.size(); ++i) {
+    const std::int16_t nav = sys->nav_defs[i];
+    if (nav < 0) {
+      continue; // empty nav slot (original tests nav_stellar_ids[i] != -1)
     }
     const Stellar *st = StellarByResourceId(state, nav);
-    if (!st || !st->is_available || (st->flags & 1U) == 0U) {
+    if (st == nullptr) {
       continue;
     }
-    // Original culls stella with map coords >= 1000 (off the usable playfield).
-    if (st->pos_x >= 1000 || st->pos_y >= 1000) {
+    sprite_active[i] = NovaTargeting_StellarTargetsSpriteSetActive(*st) &&
+                       st->pos_x < 1000 && st->pos_y < 1000;
+    travel_usable[i] =
+        (st->flags & 0x20U) != 0U && (st->availability_flags & 0x3000U) == 0U;
+    hostile[i] =
+        ship.faction_or_government_id >= 0 && st->government_id >= 0 &&
+        NovaGovernment_AreGovtsHostileOrXenophobic(
+            state.scenario, ship.faction_or_government_id, st->government_id);
+    if ((st->availability_flags & 0x1000U) != 0U) {
+      avail_1000[i] = true;
+      if (sprite_active[i] && !hostile[i]) {
+        ++count_1000;
+      }
+    }
+    if ((st->availability_flags & 0x2000U) != 0U) {
+      avail_2000[i] = true;
+      if (sprite_active[i] && !hostile[i]) {
+        ++count_2000;
+      }
+    }
+    if (sprite_active[i] && !travel_usable[i] && !hostile[i]) {
+      ++eligible_count;
+      if (!avail_1000[i] && !avail_2000[i]) {
+        ++plain_count;
+      }
+    }
+  }
+
+  bool mask20 = false;
+  bool prefer_1000 = false;
+  bool prefer_2000 = false;
+  if (ship.faction_or_government_id >= 0) {
+    if (const Government *govt =
+            state.scenario.GovernmentByIndex(ship.faction_or_government_id);
+        govt != nullptr) {
+      mask20 = (govt->scan_mask_short & 0x20U) != 0U;
+      prefer_1000 = (govt->scan_mask_short & 0x40U) != 0U;
+      prefer_2000 = (govt->scan_mask_short & 0x80U) != 0U;
+    }
+  }
+
+  // Rejection sampling over the 16 slots, exactly as the original. The bound
+  // plus deterministic fallback guards against the original's latent infinite
+  // loop on contradictory availability/ScanMask data; the first 256 draws keep
+  // the original RNG cadence in every reachable case.
+  const auto pick_from = [&sys, &state](const auto &accept) -> std::int16_t {
+    for (int attempt = 0; attempt < 0x100; ++attempt) {
+      const std::size_t slot = static_cast<std::size_t>(
+          std::uniform_int_distribution<int>(0, 15)(state.rng));
+      if (accept(slot)) {
+        return static_cast<std::int16_t>(slot);
+      }
+    }
+    for (std::size_t slot = 0; slot < sys->nav_defs.size(); ++slot) {
+      if (accept(slot)) {
+        return static_cast<std::int16_t>(slot);
+      }
+    }
+    return -1;
+  };
+
+  std::int16_t picked = -1;
+  if (unrestricted_only) {
+    if (plain_count < 1) {
+      return -1;
+    }
+    picked = pick_from([&](std::size_t s) {
+      return sprite_active[s] && !avail_1000[s] && !avail_2000[s] &&
+             !hostile[s];
+    });
+  } else if (prefer_2000 && count_2000 > 0) {
+    picked = pick_from([&](std::size_t s) {
+      return sprite_active[s] && avail_2000[s] && !hostile[s];
+    });
+  } else if (prefer_1000 && count_1000 > 0) {
+    picked = pick_from([&](std::size_t s) {
+      return sprite_active[s] && avail_1000[s] && !hostile[s];
+    });
+  } else if (eligible_count < 1 || !strict_mode || mask20 ||
+             (plain_count < 1 && count_1000 < 1)) {
+    // Preference-respecting fallback pool.
+    if (eligible_count < 1 || (plain_count < 1 && (count_1000 < 1 || mask20))) {
+      return -1;
+    }
+    picked = pick_from([&](std::size_t s) {
+      return sprite_active[s] && !travel_usable[s] && !hostile[s] &&
+             (!avail_2000[s] || !prefer_2000) && (!avail_1000[s] || !mask20);
+    });
+  } else {
+    // Strict-mode pool: eligible candidates without the avail_2000 bit.
+    picked = pick_from([&](std::size_t s) {
+      return sprite_active[s] && !travel_usable[s] && !hostile[s] &&
+             !avail_2000[s];
+    });
+  }
+
+  if (picked < 0) {
+    return -1;
+  }
+  return sys->nav_defs[static_cast<std::size_t>(picked)];
+}
+
+// Ghidra 0x0040cc10 Stellar_FindNearestAdjacentTravelStellar. Returns the
+// nearest adjacent travel stellar to `ship` in its current system, or -1.
+// Scans the 16 nav slots and skips empty slots, restricted travel points
+// (availability_flags & 0x3000), stellars hostile to the ship's government
+// (when both governments are valid), and `excluded_stellar_id` (its sole
+// caller passes jump_destination_stellar_id). Unlike the random selector it
+// ignores travel_flags and ScanMask preferences and minimises the plain
+// squared distance between the ship and the stellar map position.
+std::int16_t
+NovaAi_FindNearestAdjacentTravelStellar(const GameState &state,
+                                        const Ship &ship,
+                                        std::int16_t excluded_stellar_id) {
+  const System *sys = state.scenario.System(
+      static_cast<std::int16_t>(ship.current_system_id + 0x80));
+  if (sys == nullptr) {
+    return -1;
+  }
+  std::int16_t best = -1;
+  float best_distance_sq = 0.0F;
+  for (const std::int16_t nav : sys->nav_defs) {
+    if (nav < 0) {
       continue;
     }
-    // Hostile neighbouring government is skipped. Both ids are zero-based
-    // faction indexes (Stellar::government_id is rebased by the loader).
+    const Stellar *st = StellarByResourceId(state, nav);
+    if (st == nullptr) {
+      continue;
+    }
+    if ((st->availability_flags & 0x3000U) != 0U) {
+      continue; // restricted travel point
+    }
     if (ship.faction_or_government_id >= 0 && st->government_id >= 0 &&
         NovaGovernment_AreGovtsHostileOrXenophobic(
             state.scenario, ship.faction_or_government_id, st->government_id)) {
       continue;
     }
-    candidates.push_back(nav);
+    if (excluded_stellar_id == nav) {
+      continue;
+    }
+    const float distance_sq = SquaredDistance(ship.pos_x,
+                                              ship.pos_y,
+                                              static_cast<float>(st->pos_x),
+                                              static_cast<float>(st->pos_y));
+    if (best < 0 || distance_sq < best_distance_sq) {
+      best = nav;
+      best_distance_sq = distance_sq;
+    }
   }
-  if (candidates.empty()) {
-    return -1;
-  }
-  std::uniform_int_distribution<std::size_t> pick(0, candidates.size() - 1);
-  return candidates[pick(state.rng)];
+  return best;
 }
 
 namespace {
@@ -1396,8 +1552,8 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state,
                                   *sys, ship.jump_destination_stellar_id);
   if (!still_at_point) {
     ship.ai_secondary_target_slot = -1;
-    ship.ai_secondary_target_slot =
-        NovaAi_SelectRandomAdjacentTravelStellar(state, ship);
+    ship.ai_secondary_target_slot = NovaAi_SelectRandomAdjacentTravelStellar(
+        state, ship, /*strict_mode=*/false, /*unrestricted_only=*/false);
   }
   if (ship.ai_secondary_target_slot == -1) {
     if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
@@ -1415,12 +1571,13 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state,
   }
 }
 
-// Ghidra 0x00402860 Ship_UpdateShipAiBehavior0x01. The "normal travel / wander"
-// supervisor. Reacquires a travel stellar when idle (state 0) -- picking a
-// random adjacent travel stellar and entering state 1 (travel to it), else
-// falling back to state 2 via NovaAi_EnterState2ClearPrimaryTarget (or state 6
-// when no jump route exists). Escalates into hostile attack (state 3, or state
-// 10 against the player) once a hostility accumulator + primary target exist.
+// Ghidra 0x00402860 Ship_UpdateShipAiBehavior0x01_WimpyTrader. The "normal
+// travel / wander" supervisor. Reacquires a travel stellar when idle (state 0)
+// -- picking a random adjacent travel stellar and entering state 1 (travel to
+// it), else falling back to state 2 via NovaAi_EnterState2ClearPrimaryTarget
+// (or state 6 when no jump route exists). Escalates into hostile attack (state
+// 3, or state 10 against the player) once a hostility accumulator + primary
+// target exist.
 void NovaAi_UpdateBehavior0x01(GameState &state,
                                Ship &ship,
                                std::uint32_t now_ms) {
@@ -1455,8 +1612,8 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
     } else {
       // Pick a fresh travel destination to wander toward.
       ship.ai_secondary_target_slot = -1;
-      const std::int16_t travel =
-          NovaAi_SelectRandomAdjacentTravelStellar(state, ship);
+      const std::int16_t travel = NovaAi_SelectRandomAdjacentTravelStellar(
+          state, ship, /*strict_mode=*/false, /*unrestricted_only=*/false);
       ship.ai_secondary_target_slot = travel;
       if (ship.ai_secondary_target_slot == -1) {
         // No route remains: try to jump, else settle into idle-template.
@@ -1486,11 +1643,129 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
   (void)now_ms;
 }
 
-// Ghidra 0x00402bd0 Ship_UpdateShipAiBehavior0x02. Local/dude behavior shares
-// the travel fallback with behavior 0x01, but promotes an established hostile
-// contact once it is within the original 0x4e3-pixel per-axis gate. The
-// player-target arm enters state 10 (assist/response); other contacts enter
-// state 3. Government chatter and assistance encounter side effects remain
+namespace {
+
+// g_has_active_freeflight_objects: true while any freeflight pool slot is live
+// (lifetime_ticks >= 0; < 0 is the inactive sentinel). Consumed by the mining
+// supervisor's debris-scoop decision.
+[[nodiscard]] bool HasActiveFreeflightObjects(const GameState &state) {
+  for (const FreeflightObjectState &object : state.freeflight_objects) {
+    if (object.lifetime_ticks >= 0.0F) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+// Ghidra 0x00402980 Ship_UpdateShipAiAvailabilityBehavior. Supervisor for
+// ships whose class Flags3 has bit 0x1 (Bible "ship destroys asteroids") or
+// 0x2 ("ship scoops asteroid debris"). The dispatcher runs it in preference
+// to the normal ai_behavior_code branch when availability_flags & 3 and the
+// ship has no squad leader. Arms the scripted asteroid manoeuvre (state 0x10),
+// the freeflight-anchor cargo pick-up (state 0x11), or the nearest-adjacent-
+// travel-stellar wander ladder; a hostile contact escalates to state 3.
+void NovaAi_UpdateAvailabilityBehavior(GameState &state,
+                                       Ship &ship,
+                                       std::uint32_t now_ms) {
+  if (NovaAiShip_IsDisabled(state, ship)) {
+    ship.ai_state_code = 0;
+    ship.ai_control_mode = 0;
+    ship.ai_secondary_target_slot = -1;
+    ship.primary_target_ship_slot = -1;
+    return;
+  }
+  if (ship.ai_state_code == 0x16) {
+    return;
+  }
+
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  const bool destroys_asteroids =
+      cls != nullptr && (cls->availability_flags & 1U) != 0U;
+  const bool scoops_debris =
+      cls != nullptr && (cls->availability_flags & 2U) != 0U;
+
+  if (ship.ai_hostility_accumulator < 1 ||
+      ship.primary_target_ship_slot == -1) {
+    bool wander = false;
+    if (!destroys_asteroids && !scoops_debris) {
+      wander = true;
+    }
+    if (destroys_asteroids && ship.ai_state_code != 2) {
+      if (state.asteroid_pool[0].active) {
+        ship.ai_state_code = 0x10;
+      } else {
+        ship.primary_target_ship_slot = -1;
+        ship.ai_secondary_target_slot = -1;
+        ship.ai_state_code = 6;
+      }
+    }
+    if (scoops_debris) {
+      if (!ship.mining_scoop_active) {
+        wander = true;
+      } else {
+        // Original sums the ship's own 6 cargo bins (the player branch's
+        // mission/junk terms are skipped for instance != 0). The clean-room
+        // Ship has no per-NPC cargo model, so this is 0 and a newly spawned
+        // miner always passes. TODO(decomp): model per-NPC cargo so a full
+        // miner stops scooping.
+        const int cargo_total = 0;
+        const int cargo_capacity = cls != nullptr ? cls->cargo_holds : 0;
+        if (cargo_total < cargo_capacity) {
+          if (!HasActiveFreeflightObjects(state)) {
+            if (destroys_asteroids) {
+              ship.ai_state_code = 0x10;
+            } else {
+              wander = true;
+            }
+          } else {
+            ship.ai_state_code = 0x11;
+          }
+        } else {
+          NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+        }
+      }
+    }
+    if (wander) {
+      if (ship.ai_maneuver_timer_ms > 0.0F) {
+        ship.ai_secondary_target_slot = -1;
+        ship.ai_state_code = 0;
+      } else {
+        if (ship.ai_secondary_target_slot == -1) {
+          ship.ai_secondary_target_slot =
+              NovaAi_FindNearestAdjacentTravelStellar(
+                  state, ship, ship.jump_destination_stellar_id);
+        }
+        if (ship.ai_secondary_target_slot == -1 || ship.ai_state_code == 2 ||
+            ship.ai_state_code == 3) {
+          if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
+            NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
+          } else {
+            ship.ai_state_code = 6;
+          }
+        } else {
+          ship.ai_state_code = 1;
+          ship.jump_destination_stellar_id = ship.ai_secondary_target_slot;
+        }
+      }
+    }
+  } else {
+    ship.ai_state_code = 3;
+  }
+
+  // Ship_ShowPlayerInterceptTauntIfEligible (called when ai_state_code == 3)
+  // is HUD/mission chatter, the same no-op as in NovaAi_UpdateBehavior0x01.
+  // TODO(decomp): port the taunt.
+}
+
+// Ghidra 0x00402bd0 Ship_UpdateShipAiBehavior0x02_BraveTrader. Local/dude
+// behavior shares the travel fallback with behavior 0x01, but promotes an
+// established hostile contact once it is within the original 0x4e3-pixel
+// per-axis gate. The player-target arm enters state 10 (assist/response); other
+// contacts enter state 3. Government chatter and assistance encounter side
+// effects remain
 // TODO(decomp).
 void NovaAi_UpdateBehavior0x02(GameState &state,
                                Ship &ship,
@@ -1530,9 +1805,9 @@ void NovaAi_UpdateBehavior0x02(GameState &state,
   }
 }
 
-// Ghidra 0x00402e50 Ship_UpdateShipAiBehavior0x03. Hostile behavior acquires
-// a nearby contact when idle, preserves an active primary target, and falls
-// back to the normal travel/jump ladder when combat has no target. The
+// Ghidra 0x00402e50 Ship_UpdateShipAiBehavior0x03_Warship. Hostile behavior
+// acquires a nearby contact when idle, preserves an active primary target, and
+// falls back to the normal travel/jump ladder when combat has no target. The
 // government flee, weapon-readiness, mission-fleet, and capture-variant arms
 // depend on data not represented by the current clean-room Ship model.
 void NovaAi_UpdateBehavior0x03(GameState &state,
@@ -1583,7 +1858,7 @@ void NovaAi_UpdateBehavior0x03(GameState &state,
   }
 }
 
-// Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03CaptureVariant. The
+// Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03_WarshipCapture. The
 // plunder-flavored variant of hostile behavior 0x03, selected by the
 // dispatcher when the ship's faction has government flags_primary 0x1000
 // (Bible: "warships will plunder non-mission, trader-type enemies"). Instead
@@ -1633,7 +1908,11 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
       if (!at_stellar) {
         if (ship.ai_secondary_target_slot == -1) {
           ship.ai_secondary_target_slot =
-              NovaAi_SelectRandomAdjacentTravelStellar(state, ship);
+              NovaAi_SelectRandomAdjacentTravelStellar(
+                  state,
+                  ship,
+                  /*strict_mode=*/false,
+                  /*unrestricted_only=*/false);
           if (ship.ai_secondary_target_slot == -1) {
             if (NovaTravel_CanShipInitiateJumpSequence(state, ship)) {
               NovaAi_EnterState2ClearPrimaryTarget(ship, now_ms);
@@ -3621,7 +3900,7 @@ void NovaAi_ApplyControls(GameState &state,
         // maneuver timer spent and the ship not in the post-board drift (state
         // 0xe), latch the victim as a boarding target and arm the 100..179-tick
         // pause (random 0x50 + 100) that the capture supervisor's handoff
-        // (Ship_UpdateShipAiBehavior0x03CaptureVariant 0x004038b0) waits on
+        // (Ship_UpdateShipAiBehavior0x03_WarshipCapture 0x004038b0) waits on
         // before Outfit_BoardShipAndTransferCargo. While the pause counts down
         // inside (0,100] in assist state 0xf (comm-window Request Assistance),
         // the arm instead clears the latch and repairs the victim back above
@@ -3900,9 +4179,24 @@ void NovaAi_UpdateShipAI(GameState &state,
   // frame, keeping behavior supervisors from stealing the arrival until the
   // negative-speed integrator completes it.
   if (run_heavy && !restricted && !arrival_slowdown_sentinel) {
-    // Dispatch on behavior code.
+    // Dispatch on behavior code. Availability-driven hulls (class Flags3 bit
+    // 0x1/0x2) with no squad leader run the mining/destroyer supervisor
+    // instead of the ai_behavior_code branch. The original checks a stellar
+    // target first and would run Ship_ShouldShipPrioritizePlayerThreat
+    // (0x00405120, still deferred); those ships stay on the behavior path for
+    // now, so this gate requires target_stellar_object_id == -1 too.
     const std::int16_t behavior = ship.ai_behavior_code;
-    if (behavior == 1) {
+    const ShipClass *dispatch_class = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    const bool availability_driven =
+        dispatch_class != nullptr &&
+        (dispatch_class->availability_flags & 3U) != 0U &&
+        ship.squad_leader_ship_slot == -1 &&
+        ship.target_stellar_object_id == -1;
+    if (availability_driven) {
+      // Ghidra 0x00402980 Ship_UpdateShipAiAvailabilityBehavior.
+      NovaAi_UpdateAvailabilityBehavior(state, ship, now_ms);
+    } else if (behavior == 1) {
       NovaAi_UpdateBehavior0x01(state, ship, now_ms);
     } else if (behavior == 2) {
       NovaAi_UpdateBehavior0x02(state, ship, now_ms);
@@ -3926,13 +4220,14 @@ void NovaAi_UpdateShipAI(GameState &state,
       if (capture_variant) {
         NovaAi_UpdateBehavior0x03CaptureVariant(state, ship, now_ms);
       } else {
-        // Ship_UpdateShipAiBehavior0x03 (0x00402e50) has the hostile target
-        // acquisition/travel fallback.
+        // Ship_UpdateShipAiBehavior0x03_Warship (0x00402e50) has the hostile
+        // target acquisition/travel fallback.
         NovaAi_UpdateBehavior0x03(state, ship, now_ms);
       }
     } else if (behavior == 4) {
-      // Ship_UpdateShipAiCombatState (0x00403de0): reuse the reconstructed
-      // hostile path so an existing target is also promoted into state 4.
+      // Ship_UpdateShipAiBehavior0x04_Interceptor (0x00403de0): reuse the
+      // reconstructed hostile path so an existing target is also promoted into
+      // state 4.
       NovaAi_UpdateBehavior0x03(state, ship, now_ms);
     } else if (behavior > 4) {
       // Ship_UpdateShipAssistResponseBehavior (0x004048a0), now ported as
@@ -3942,10 +4237,6 @@ void NovaAi_UpdateShipAI(GameState &state,
       // original. A valid state-8 arrival never reaches this branch because
       // its -999 station-hold sentinel takes the dispatcher arm above.
       NovaAi_UpdateAssistResponseBehavior(state, ship, now_ms);
-    } else if (behavior > 0) {
-      // Ship_UpdateShipAiAvailabilityBehavior (0x00402980): availability
-      // driven cargo/scripted branches remain deferred.
-      NovaAi_UpdateBehavior0x01(state, ship, now_ms);
     }
   }
 
