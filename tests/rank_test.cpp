@@ -131,9 +131,11 @@ TEST_CASE("rank name scans pick the highest weight and follow recent",
   // Per-government scan: slot 0 is government 0, slot 1 government 3.
   ranks[0].government_id = 0;
   ranks[1].government_id = 3;
-  CHECK(Rank_HighestWeightedActiveSlotForGovernment(state, 0) == 0);
-  CHECK(Rank_HighestWeightedActiveSlotForGovernment(state, 3) == 1);
-  CHECK(Rank_HighestWeightedActiveSlotForGovernment(state, 7) == -1);
+  CHECK(Rank_HighestWeightedActiveSlotForGovernment(state, 0, false) == 0);
+  CHECK(Rank_HighestWeightedActiveSlotForGovernment(state, 3, false) == 1);
+  CHECK(Rank_HighestWeightedActiveSlotForGovernment(state, 0, true) == 0);
+  CHECK(Rank_HighestWeightedActiveSlotForGovernment(state, 3, true) == 1);
+  CHECK(Rank_HighestWeightedActiveSlotForGovernment(state, 7, false) == -1);
 }
 
 // Crime revocation loop in Government_ProcessFactionCombatEvent: allied ranks

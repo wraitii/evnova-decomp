@@ -115,13 +115,22 @@ compares `0x60` (MaxOdds) against `ai_odds_score`.
 
 ## Working doc
 
+`<PRKnnn>` / `<SRKnnn>` per-government rank names are reconstructed. The
+original splits this across a pre-scan (`Ship_ExpandStringPlaceholders`
+`0x0044a4d0` latches the government id in `g_expanded_psrk_ship_class` /
+`_ssrk`) and the later substitution (`Stellar_BuildTravelDestinationDescription`
+`0x004444f0`, which writes `<PRK` + `(government + 0x80)` + `>`). The port
+parses each token directly in `Mission_ExpandMissionWildcards` and calls
+`Rank_HighestWeightedActiveSlotForGovernment`.
+Deliberate divergence: the original's two per-government buffers are crossed
+and both use ShortName (byte-verified: `<PRKnnn>` reads the ssrk-gated frame at
+`+0x384`, `<SRKnnn>` reads the psrk-gated frame at `+0x344`, both `+0xde`), so
+a lone `<PRK128>` expands to the "captain" fallback and the shipped Federation
+mission text breaks. The port uses the Bible semantics (ConvName for
+`<PRKnnn>`, ShortName for `<SRKnnn>`, each on its own government).
+
 Not yet reconstructed:
 
-- `<PRK%i>` / `<SRK%i>`: per-government rank names. A mission-text pre-scan
-  latches the government id in `g_expanded_psrk_ship_class` / `_ssrk`; the
-  expansion writes `<PRK` + `(government + 0x80)` + `>` and replaces it with
-  that government's highest-weight active rank
-  (`Rank_HighestWeightedActiveSlotForGovernment` provides the lookup).
 - The demand-tribute middle-button branch of
   `NovaUi_RunTravelDestinationInteractionWindow` (`0x00480030`) is
   unconstructed. Per pulse it fires event 3, spawns defense-fleet ships up to

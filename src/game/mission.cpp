@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <random>
 #include <string>
@@ -1964,9 +1965,11 @@ void Mission_ExpandStringPlaceholders(const GameState &state,
       break;
     }
   }
-  // TODO(decomp) skipped: the original's trailing <PSRK...>/<SSRK...> scan
-  // caches referenced ship-class ids for later name resolution; the port has
-  // no consumer for that cache yet.
+  // The original's trailing <PSRK...>/<SSRK...> scan latched the government id
+  // in g_expanded_psrk_ship_class / _ssrk for a later substitution pass. The
+  // port parses each <PRKnnn>/<SRKnnn> token directly in
+  // Mission_ExpandMissionWildcards instead (see
+  // ReplacePerGovernmentRankTokens).
   text = std::move(out);
 }
 
@@ -2089,11 +2092,59 @@ void ReplaceMissionToken(std::string &text,
   return *name;
 }
 
-// <PRK>/<SRK>/<RRK>: the highest-weighted active rank names scan the rank
-// table (g_rank_defs), which is not reconstructed yet; the original falls back
-// to STR# 0x7d2 entry 0x155 ("captain") when no rank applies.
+// STR# 0x7d2 entry 0x155 ("captain"): the original's fallback when no rank
+// applies to <PRK>/<SRK>/<RRK> or a per-government <PRKnnn>/<SRKnnn>.
 [[nodiscard]] std::string MissionRankFallback() {
   return NovaHud_LoadStringEntry(0x7d2, 0x155).value_or("captain");
+}
+
+// <PRKnnn>/<SRKnnn> per-government rank names (Bible 1796-1799). `nnn` is the
+// government resource id (0x80-based), so the government index is nnn - 0x80;
+// a well-formed token with an out-of-range id is left untouched (the original
+// pre-scan stores -1 and skips it). DIVERGENCE: the original pre-scanned
+// <PRK...>/<SRK...> into g_expanded_psrk_ship_class / _ssrk and substituted
+// from crossed buffers in Stellar_BuildTravelDestinationDescription
+// (0x004444f0, byte verified: <PRKnnn> read the ssrk-gated frame and both
+// per-government loops used ShortName +0xde). That broke shipped text (the
+// Federation <PRK128> briefing would read "captain" with no <SRK...> present),
+// so each token is parsed directly here and uses the Bible field (ConvName for
+// PRK, ShortName for SRK).
+void ReplacePerGovernmentRankTokens(const GameState &state,
+                                    std::string &text,
+                                    std::string_view prefix,
+                                    bool use_short_name) {
+  std::size_t pos = 0;
+  while ((pos = text.find(prefix, pos)) != std::string::npos) {
+    std::size_t i = pos + prefix.size();
+    const std::size_t digits_begin = i;
+    std::uint32_t id = 0;
+    while (i < text.size() && text[i] >= '0' && text[i] <= '9') {
+      if (id <= 0x17fU) {
+        id = id * 10U + static_cast<std::uint32_t>(text[i] - '0');
+      }
+      ++i;
+    }
+    // The original requires digits and a closing '>' before it substitutes.
+    if (i == digits_begin || i >= text.size() || text[i] != '>') {
+      pos += prefix.size();
+      continue;
+    }
+    if (id < 0x80U || id > 0x17fU) {
+      pos = i + 1;
+      continue;
+    }
+    const std::int16_t slot = Rank_HighestWeightedActiveSlotForGovernment(
+        state, static_cast<std::int16_t>(id - 0x80U), use_short_name);
+    std::string replacement = MissionRankFallback();
+    if (slot >= 0 &&
+        static_cast<std::size_t>(slot) < state.scenario.ranks.size()) {
+      const RankDef &rank =
+          state.scenario.ranks[static_cast<std::size_t>(slot)];
+      replacement = use_short_name ? rank.short_name : rank.conv_name;
+    }
+    text.replace(pos, i + 1 - pos, replacement);
+    pos += replacement.size();
+  }
 }
 
 } // namespace
@@ -2305,12 +2356,15 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
   // FUN_004d45a0: the registration name, or the shared "EV Nova Community"
   // string when no name is registered. The port has no registration system.
   ReplaceMissionToken(result, "<REG>", "EV Nova Community");
-  // TODO(decomp(0x004444f0)) skipped: the <PRK%i>/<SRK%i> per-government rank
-  // variants need their government id from g_expanded_psrk_ship_class / ssrk,
-  // which a separate mission-text pre-scan seeds; that pre-scan is not
-  // reconstructed. The name scan itself is available as
-  // Rank_HighestWeightedActiveSlotForGovernment. The unregistered letter-
-  // scramble block (DAT_007354a4) still needs the shareware model.
+  // <PRKnnn>/<SRKnnn> per-government rank names (Bible 1796-1799). The
+  // original pre-scanned the id into g_expanded_psrk_ship_class / _ssrk and
+  // substituted from crossed buffers; see ReplacePerGovernmentRankTokens for
+  // the divergence. The unregistered letter-scramble block (DAT_007354a4)
+  // still needs the shareware model.
+  ReplacePerGovernmentRankTokens(
+      state, result, "<PRK", /*use_short_name=*/false);
+  ReplacePerGovernmentRankTokens(
+      state, result, "<SRK", /*use_short_name=*/true);
   return result;
 }
 

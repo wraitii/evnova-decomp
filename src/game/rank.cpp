@@ -115,11 +115,13 @@ std::int16_t Rank_HighestWeightedActiveSlot(const GameState &state,
   return best;
 }
 
-// Stellar_BuildTravelDestinationDescription (0x004444f0) <PSRK>/<SSRK> scan:
-// same as the <SRK> scan but restricted to ranks credited to one government.
-std::int16_t
-Rank_HighestWeightedActiveSlotForGovernment(const GameState &state,
-                                            std::int16_t government_id) {
+// Per-government rank scan for the <PRKnnn>/<SRKnnn> tokens, restricted to
+// ranks credited to `government_id`. The original's equivalent scan in
+// Stellar_BuildTravelDestinationDescription (0x004444f0) read a crossed buffer
+// and always used ShortName; the token expansion calls this with the Bible
+// field instead.
+std::int16_t Rank_HighestWeightedActiveSlotForGovernment(
+    const GameState &state, std::int16_t government_id, bool use_short_name) {
   std::int16_t best = -1;
   std::int16_t best_weight = 0;
   const auto &table = state.scenario.ranks;
@@ -128,7 +130,8 @@ Rank_HighestWeightedActiveSlotForGovernment(const GameState &state,
     if (!rank.active || !rank.defined) {
       continue;
     }
-    if (rank.government_id != government_id || rank.short_name.empty()) {
+    const std::string &name = use_short_name ? rank.short_name : rank.conv_name;
+    if (rank.government_id != government_id || name.empty()) {
       continue;
     }
     if (best_weight < rank.weight || best == -1) {
