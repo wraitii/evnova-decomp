@@ -254,12 +254,13 @@ int ShortestAngleDeltaDeg(int from, int to) {
   return delta;
 }
 
-// The original's ROUND-then-wrap heading quantization: round to nearest
-// integer degree, then a single-step wrap into [0,360) (k_wrap_360_f32
-// 0x005753b8). The per-frame turn is far smaller than 360 deg, so one
-// subtraction matches the original's do-while.
+// The original's truncate-then-wrap heading quantization: truncate toward
+// zero to an integer degree (x87 FIST + residual/sign correction), then a
+// single-step wrap into [0,360) (k_wrap_360_f32 0x005753b8). The per-frame
+// turn is far smaller than 360 deg, so one subtraction matches the original's
+// do-while.
 int RoundHeadingDeg(float deg) {
-  const int rounded = static_cast<int>(std::lround(deg));
+  const int rounded = static_cast<int>(deg);
   return (rounded % 360 + 360) % 360;
 }
 
@@ -310,7 +311,7 @@ void TurnShotToward(ActiveShot &shot,
                     float frame_scale) {
   const int heading = RoundHeadingDeg(shot.heading_deg);
   const int delta = ShortestAngleDeltaDeg(bearing, heading);
-  if (static_cast<int>(std::lround(std::abs(turn_rate))) >= delta) {
+  if (static_cast<int>(std::abs(turn_rate)) >= delta) {
     return; // within one tick's turn of the bearing; hold
   }
   int forward = bearing - heading;
@@ -1074,10 +1075,12 @@ int NovaWeapon_SpawnProjectile(GameState &state,
     const System *system =
         state.scenario.System(static_cast<std::int16_t>(shot.system_id + 0x80));
     if (system != nullptr && system->interference > 0) {
+      // 0x0041fd30 truncates 100/frame_scale toward zero (x87 FIST +
+      // residual/sign correction), then floors the result at 1.
       const int roll_range =
           std::max(1,
-                   static_cast<int>(std::lround(
-                       100.0F / std::max(0.01F, state.last_frame_tick_scale))));
+                   static_cast<int>(
+                       100.0F / std::max(0.01F, state.last_frame_tick_scale)));
       if (RandomBelow(state, roll_range) + 1 <= system->interference) {
         shot.retarget_cooldown = 999;
       }
@@ -1778,13 +1781,12 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
     } else if (mode == 0) {
       // Fixed beam along the current heading (the original queues the record
       // with the live target slot; the endpoint stays heading-driven).
-      fired = NovaWeapon_QueueBeamHit(
-          state,
-          0,
-          target_slot,
-          weapon_bank,
-          /*forced_targeting=*/-1,
-          static_cast<std::int16_t>(std::lround(heading_deg)));
+      fired = NovaWeapon_QueueBeamHit(state,
+                                      0,
+                                      target_slot,
+                                      weapon_bank,
+                                      /*forced_targeting=*/-1,
+                                      static_cast<std::int16_t>(heading_deg));
     } else if (mode == 3 || mode == 4) {
       // Turreted beam (3) / turreted projectile (4): fire only while the
       // target is NOT inside a turret blind-spot sector.
@@ -1798,8 +1800,7 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
                 *state.scenario.Ship(
                     static_cast<std::int16_t>(player.ship_class_id + 0x80)),
                 *w,
-                static_cast<std::int16_t>(std::lround(
-                    player.heading * (180.0F / 3.14159265358979323846F))),
+                static_cast<std::int16_t>(heading_deg),
                 bearing)) {
           if (mode == 3) {
             fired = NovaWeapon_QueueBeamHit(state,
@@ -2442,8 +2443,8 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
           ship.primary_target_ship_slot,
           bank,
           -1,
-          static_cast<std::int16_t>(
-              std::lround(ship.heading * (180.0F / 3.14159265358979323846F))));
+          static_cast<std::int16_t>(ship.heading *
+                                    (180.0F / 3.14159265358979323846F)));
     } else if (mode == 3 || mode == 4) {
       // Turreted beam (3) / turreted unguided (4): fire only when the target
       // is NOT in the fixed arc (the turret's relief role) but within reach.

@@ -273,8 +273,8 @@ void ApplyWeaponOnHitEffects(
     if (distance_sq > radius_sq) {
       points = 0;
     } else if (distance_sq > 0.0F) {
-      points = static_cast<int>(std::lround(static_cast<float>(points) *
-                                            (1.0F - distance_sq / radius_sq)));
+      points = static_cast<int>(static_cast<float>(points) *
+                                (1.0F - distance_sq / radius_sq));
     }
   }
   if (points > 0) {
@@ -439,8 +439,7 @@ void RefreshCollisionMasks(GameState &state) {
     while (wander >= static_cast<float>(frame_count)) {
       wander -= static_cast<float>(frame_count);
     }
-    const int frame =
-        std::clamp(static_cast<int>(std::lround(wander)), 0, frame_count - 1);
+    const int frame = std::clamp(static_cast<int>(wander), 0, frame_count - 1);
     BindEntityMask(asteroid.collision_mask,
                    store.Spin(spin_id, frame),
                    frame,
@@ -449,7 +448,7 @@ void RefreshCollisionMasks(GameState &state) {
 
   // Freeflight objects: the mining-scoop arm of Ship_HandleSpritePairCollision
   // (0x004374f0) tests each object's current spin frame against the ship. The
-  // renderer selects `round(frame_counter) % frame_count` from the 500+index
+  // renderer selects `trunc(frame_counter) % frame_count` from the 500+index
   // spin set, so bind the same frame here.
   for (FreeflightObjectState &object : state.freeflight_objects) {
     if (object.lifetime_ticks < 0.0F || object.system_id != system_id) {
@@ -461,7 +460,7 @@ void RefreshCollisionMasks(GameState &state) {
     if (frame_count <= 0) {
       continue;
     }
-    int frame = static_cast<int>(std::lround(object.frame_counter));
+    int frame = static_cast<int>(object.frame_counter);
     frame %= frame_count;
     if (frame < 0) {
       frame += frame_count;
@@ -672,15 +671,14 @@ void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
     return;
   }
   // The original truncates the points for the sub-5 test and otherwise adds
-  // round(points * 0.2) (DAT_00575870 = 0.2).
+  // trunc(points * 0.2) (DAT_00575870 = 0.2).
   if (static_cast<int>(points) < 5) {
     state.player_combat_rating_points += 1;
     return;
   }
   const double scaled = static_cast<double>(state.player_combat_rating_points) +
                         static_cast<double>(points) * 0.2;
-  state.player_combat_rating_points =
-      static_cast<std::int32_t>(std::lround(scaled));
+  state.player_combat_rating_points = static_cast<std::int32_t>(scaled);
 }
 
 void ResolveShipHitFromWeapon(GameState &state,
@@ -871,7 +869,7 @@ void ResolveShipHitFromWeapon(GameState &state,
                                     : target.ai_behavior_code;
     }
     // Player disable arm (transition): "ship disabled" overlay, rearm the
-    // recent-hit regen latch, round armor to whole points (original quirk),
+    // recent-hit regen latch, truncate armor to whole points (original quirk),
     // and quick-fail every mission flagged 0x0004 (fail on player disable).
     if (target_slot == 0 && !was_fire_restricted) {
       state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
@@ -880,8 +878,8 @@ void ResolveShipHitFromWeapon(GameState &state,
             state, *text, /*duration_frames=*/std::uint64_t{0xf0});
       }
       state.recently_hit_timer = 300.0F;
-      target.armor_points = static_cast<float>(
-          static_cast<int>(std::llround(target.armor_points)));
+      target.armor_points =
+          static_cast<float>(static_cast<int>(target.armor_points));
       QuickFailPlayerDependencyMissions(state);
     }
   }
@@ -1160,7 +1158,7 @@ void ResolveShotCollisionHit(GameState &state,
 // effect, matching the original RNG sequence.
 //
 // Resource-boxes: when YieldQty (row +0x02) > 0 the original rolls
-// `(NovaRandom_Range(0x65) + 0x32) * YieldQty * 0.01`, rounds it, and spawns
+// `(NovaRandom_Range(0x65) + 0x32) * YieldQty * 0.01`, truncates it, and spawns
 // that many persistent freeflight objects at the asteroid position carrying
 // YieldType (row +0x04) with spin set `(wander_type >> 2) + 1` (501..504, one
 // per asteroid material). YieldType 0..5 is standard cargo and 1000..1127 is a
@@ -1177,9 +1175,9 @@ void ResolveAsteroidDestructionPackage(GameState &state,
   // area effect and the child-asteroid split.
   if (def->yield_qty > 0) {
     const int roll = std::uniform_int_distribution<int>{0, 0x64}(state.rng);
-    const int yield_boxes = static_cast<int>(
-        std::lround(static_cast<float>(roll + 0x32) *
-                    static_cast<float>(def->yield_qty) * 0.01F));
+    const int yield_boxes =
+        static_cast<int>(static_cast<float>(roll + 0x32) *
+                         static_cast<float>(def->yield_qty) * 0.01F);
     for (int i = 0; i < yield_boxes; ++i) {
       NovaFreeflight_SpawnAtPosition(
           state,
@@ -2090,7 +2088,7 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
       }
       // Asteroid branch: when no ship was hit and flags_quaternary bit 0 is
       // clear, the 16 asteroid records are scanned (integer dist^2 <=
-      // blast_radius^2, round-half-away positions) and the first contact
+      // blast_radius^2, trunc-toward-zero positions) and the first contact
       // runs NovaUi_ResolveWeaponSplashImpact.
       if (!ship_hit && (weapon->flags_quaternary & 0x0001U) == 0U) {
         const auto blast = static_cast<int>(weapon->blast_radius);
@@ -2098,10 +2096,10 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
           if (!asteroid.active) {
             continue;
           }
-          const auto dx = static_cast<int>(
-              std::lround(std::abs(asteroid.target_pos_x - shot.pos_x)));
-          const auto dy = static_cast<int>(
-              std::lround(std::abs(asteroid.target_pos_y - shot.pos_y)));
+          const auto dx =
+              static_cast<int>(std::abs(asteroid.target_pos_x - shot.pos_x));
+          const auto dy =
+              static_cast<int>(std::abs(asteroid.target_pos_y - shot.pos_y));
           if (dx * dx + dy * dy <= blast * blast) {
             ResolveAsteroidSplashImpact(state, shot, asteroid);
             break;

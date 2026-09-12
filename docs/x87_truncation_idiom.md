@@ -1,7 +1,9 @@
 # x87 FIST truncation idiom - audit handoff
 
-Status: first pass complete. This note records the idiom, the
-confirmed fixes, and the remaining candidates so the sweep can resume.
+Status: second pass complete. Every candidate in the first-pass list was
+checked against the Ghidra dump; the genuine truncation sites now match and
+the false positives are identified. The sweep also found additional idiom
+sites the original heuristic missed. See "Second pass" at the end.
 
 ## The idiom
 
@@ -51,7 +53,7 @@ round-half-even.
   guided turn rate (0x00431530).
 - Pilot shield/fuel u16 save (0x004c7dd0).
 
-## Remaining candidates
+## Remaining candidates (first pass, superseded by the second pass below)
 
 Automated heuristic (rounding call whose nearest citation uses the idiom),
 upper bound -- verify each against the dump before changing. `negotiation`
@@ -116,3 +118,71 @@ Total: 32 sites across 7 files.
   `g_dbl_shared_0p5`, retyped `double`, added use-list pre-comments.
 - Corrected plate comments on 0x0049d640 and 0x0046e950 (truncation, not
   rounding).
+
+## Second pass (verification)
+
+Every first-pass candidate was checked against its dump. The first-pass
+`[address]` tags were the heuristic's nearest-citation guesses; several were
+wrong, so the correct original function is named here. The ports now truncate
+toward zero where the original does.
+
+### Genuine (fixed)
+
+- `ship_ai.cpp` `Ship_UpdateShipAiState` 0x00405590 (scripted-asteroid
+  threshold) and `Ship_ApplyShipAiControls` 0x00408150 (entry desired-heading
+  sync, leader copy/delta, evasive +/-135, velocity-match mode 0xc, mode-0xf
+  copy) and `Weapon_SelectWeaponBankForCurrentTarget` 0x0040ce00 (mode-7/8
+  arc).
+- `ship_ai.cpp` `Ship_ScoreAssistTargetForShip` 0x00412090: helper renamed
+  `RoundedDistanceSquared` -> `TruncatedDistanceSquared`, and the score sum
+  truncates. Not in the first-pass list.
+- `weapon.cpp` `Shot_SpawnShotFromWeapon` 0x0041fd30 (interference roll; list
+  tagged 0x0046c320); `Weapon_FirePlayerWeaponBank` 0x00455150 (mode-0 heading,
+  blind-spot heading); `Weapon_FireShipWeapons` 0x00414550 (mode-0 heading;
+  tagged 0x0042f270); the shared `RoundHeadingDeg` helper (`Shot_HandleShot`
+  0x00435830 / `Shot_UpdateShotGuidance` 0x00431530); `TurnShotToward`'s
+  turn-rate floor. The helper and turn-rate sites were not in the list.
+- `spaceflight_view.cpp` `Asteroid_UpdateSprites` 0x00436910 and
+  `Shot_UpdateImpactEffectSprites` 0x0042e160 (tagged 0x00436910);
+  `Frame_UpdateFreeflightObjectSprites` 0x0042c1b0; the reticle pulses
+  (`NovaUi_UpdateShipTargetReticle` 0x0042ede0 and
+  `NovaUi_UpdateTravelTargetReticle` 0x0042eac0). The freeflight and travel
+  reticle sites were not in the list.
+- `spaceflight.cpp` `Ship_HandlePlayerShipCore` 0x0044aa70 (self-destruct tick
+  and seconds) and `Ship_HandleShip` 0x00433050 (debris timed-action interval;
+  not in the list).
+- `collision.cpp` `Shot_ResolveCollisions` 0x00437e20 (asteroid dist^2);
+  `Frame_AddCombatRatingPoints` 0x0046f1e0; `Shot_ResolveShipHitFromWeapon`
+  0x004192d0 (disable-armor); `Weapon_ApplyWeaponOnHitEffects` 0x0046f3f0
+  (ionization points); `Weapon_SpawnWeaponImpactEffectPackage` 0x00462550
+  (yield boxes; tagged 0x0042f270); and the collision-mask mirrors in the local
+  `RefreshCollisionMasks` (matching 0x00436910 / 0x0042c1b0). The
+  combat-rating, disable-armor, ionization, yield and mask sites were not in
+  the list.
+- `boarding_plunder.cpp` `Ship_HandlePlayerBoardTargetCommand` 0x0045a3d0
+  (heading gate) and `NovaUi_RunBoardingPlunderWindow` 0x00482940 (fuel fill).
+
+### False positives (left unchanged, comments bear this out)
+
+- `RoundDouble` in `negotiation_dialog.cpp` (0x00480030 bribe scale) already
+  truncates; the list's L885 is the helper itself.
+- `lround(BearingDeg(...))` in `weapon.cpp` (0x00455150, 0x00414550): the
+  original returns a short from `Math_BearingFromPointToPoint`; the conversion
+  lives inside that helper, not at the call site.
+- `spaceflight.cpp` face-target bearing inlines `Math_BearingFromPointToPoint`
+  likewise; `weapon.cpp` `RotationFrameForShip` and `spaceflight_view.cpp`
+  `FrameForHeading` derive a sprite frame the original reads from the sprite's
+  integer rotation counter.
+- `std::lround(reload_ticks)` in `collision.cpp` (and the `weapon.cpp` /
+  `collision.cpp` equivalents) is an identity no-op on an integer field.
+- `spaceflight.cpp` `NovaPlayer_IntegrateMovement`'s turn-rate floor and the
+  `spaceflight_view.cpp` world-to-screen / starfield helpers are port-local
+  render approximations, not call-site FIST conversions.
+
+### Detection caveat
+
+The full-dump grep plus nearest-citation heuristic misses sites whose function
+header names the original without the literal `Ghidra 0x` prefix, and it
+mis-tags functions whose nearest citation differs from the code being ported.
+Verify against the specific expression in the dump, not just the enclosing
+function.
