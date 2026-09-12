@@ -1078,6 +1078,12 @@ struct AsteroidState {
 // Everything about the running pilot's world. Replaces the Game_Reset* set of
 // globals for the transient not-yet-reconstructed subsystems with explicit
 // flags so we can log exactly what is and is not preserved.
+//
+// Accepted padding (clang-analyzer-optin.performance.Padding): the checker's
+// optimal order puts the `player` reference before the `ships_` array it binds
+// to, which would be a use-before-construction; the fields stay grouped by
+// subsystem instead.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct GameState {
   // Size of the original global ship array `g_ship_states` (0x40 slots).
   // Index 0 is the player; the remaining slots hold NPC ships.
