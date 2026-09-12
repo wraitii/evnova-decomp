@@ -1803,3 +1803,53 @@ TEST_CASE("AimWeaponLeadVelocity shares the predictive lead but skips mode 6") {
   CHECK(rocket_straight == 0);
   CHECK(game::NovaAi_AimWeaponPredictive(state, ship, target, kBank) != 0);
 }
+
+TEST_CASE("player-squad predicate matches Ship_IsInPlayerSquad 0x0046b8d0") {
+  // The original reads only ship_instance_id (+0x86), squad_leader_ship_slot
+  // (+0x9A), and the leader's own +0x9A; no scenario data or liveness is used.
+  GameState state;
+
+  // Slot 0, instance id 0: the player is always in its own squad.
+  game::Ship &player = state.ShipAt(0);
+  player.ship_instance_id = 0;
+  player.squad_leader_ship_slot = -1;
+  CHECK(game::NovaShip_IsInPlayerSquad(state, player));
+
+  // Attached directly to the player (leader slot 0).
+  game::Ship &escort = state.ShipAt(1);
+  escort.ship_instance_id = 1;
+  escort.squad_leader_ship_slot = 0;
+  CHECK(game::NovaShip_IsInPlayerSquad(state, escort));
+
+  // Attached to a player-attached ship: two hops to the player.
+  game::Ship &wingman = state.ShipAt(2);
+  wingman.ship_instance_id = 2;
+  wingman.squad_leader_ship_slot = 1;
+  CHECK(game::NovaShip_IsInPlayerSquad(state, wingman));
+
+  // A leader that is itself subgrouped (three hops) is not player squad.
+  game::Ship &deep = state.ShipAt(3);
+  deep.ship_instance_id = 3;
+  deep.squad_leader_ship_slot = 2;
+  CHECK_FALSE(game::NovaShip_IsInPlayerSquad(state, deep));
+
+  // Leader slot 0x3F is the last valid slot; only its own leader decides.
+  game::Ship &edge = state.ShipAt(0x3F);
+  edge.ship_instance_id = 0x3F;
+  edge.squad_leader_ship_slot = 0x3F;
+  CHECK_FALSE(game::NovaShip_IsInPlayerSquad(state, edge));
+  edge.squad_leader_ship_slot = 0;
+  CHECK(game::NovaShip_IsInPlayerSquad(state, edge));
+
+  // Unattached and out-of-range leaders are not player squad.
+  game::Ship &lone = state.ShipAt(4);
+  lone.ship_instance_id = 4;
+  lone.squad_leader_ship_slot = -1;
+  CHECK_FALSE(game::NovaShip_IsInPlayerSquad(state, lone));
+  lone.squad_leader_ship_slot = 0x40;
+  CHECK_FALSE(game::NovaShip_IsInPlayerSquad(state, lone));
+
+  // A zero instance id short-circuits even with a poisoned leader slot.
+  lone.ship_instance_id = 0;
+  CHECK(game::NovaShip_IsInPlayerSquad(state, lone));
+}

@@ -324,21 +324,25 @@ bool NovaEscort_CommandPlayerEscortGroup(GameState &state,
         accepted = true;
       }
     }
-    // Attack propagates the player's primary target to the group.
+    // Attack propagates the player's primary target to the group, but only
+    // when that target is not itself a player-squad ship
+    // (Ship_IsInPlayerSquad 0x0046b8d0, called at 0x0045c963). The clean-room
+    // keeps a slot-range guard so the lookup stays in bounds.
     if (ship.escort_command_code == 2) {
       const std::int16_t player_target = state.player.primary_target_ship_slot;
       if (player_target != -1 &&
           player_target != ship.primary_target_ship_slot &&
           state.SlotInRange(static_cast<std::size_t>(player_target)) &&
-          state.ShipAt(static_cast<std::size_t>(player_target)).is_active) {
+          !NovaShip_IsInPlayerSquad(
+              state, state.ShipAt(static_cast<std::size_t>(player_target)))) {
         ship.primary_target_ship_slot = player_target;
         accepted = true;
       }
     }
     // TODO(decomp): the original also clears pursuit targets for behavior-5
-    // ships in AI state 5 and rolls escort comm-chatter voices
-    // (Ship_HasValidAiTargetShip / inherent_attributes_govt pick at
-    // 0x0045cbxx); the chatter path is not reconstructed.
+    // ships in AI state 5 (Ship_IsShipInAiBehavior5State5) and rolls escort
+    // comm-chatter voices from the ship class inherent_attributes_govt pick at
+    // 0x0045cbxx; the chatter path is not reconstructed.
   }
   if (!accepted) {
     return false;

@@ -658,9 +658,10 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
 // DISABLE bookkeeping (escort-goal quick-fail + goal_counter_c++, STR# 0x7d2
 // 0x11c) and the player "disabled" overlay (STR# 0x7d2 0x11f). The full
 // retarget gate chain (system reputation, government max-odds roll, cloak
-// re-entry, escort-command exclusions) is approximated by the conservative
-// subset below. The stellar-target redirect branch (damage x30 toward
-// attackers closer than the stellar under attack) is also deferred.
+// re-entry, escort-command exclusions, and the attacker-side
+// Ship_IsInPlayerSquad gate at 0x0041AB03) is approximated by the
+// conservative subset below. The stellar-target redirect branch (damage x30
+// toward attackers closer than the stellar under attack) is also deferred.
 } // namespace
 
 // Ghidra 0x0046f1e0 Frame_AddCombatRatingPoints.
@@ -1651,15 +1652,22 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     const bool owner_chain_to_player =
         OwnerChainReachesPlayer(state, owner_slot);
     if (owner_chain_to_player) {
-      // Player-aligned fire never hits the player's own escort chain,
+      // Player-aligned fire never hits the player's own squad,
       // xenophobic (0x40) owner governments, immaterial (0x08) target
       // governments, or booty-flagged (0x100) dude targets.
+      //
+      // Ghidra 0x004272C7: the original ANDs Ship_IsInPlayerSquad (0x0046b8d0)
+      // with an explicit leader clause (target_leader in [0,0x40) whose own
+      // leader is the player). The first term is implied by the second, so
+      // this keeps the original's structure.
       const std::int16_t target_leader = target.squad_leader_ship_slot;
-      const bool target_is_player_escort =
-          target_slot != 0 && ValidShipSlot(target_leader) &&
+      const bool target_leader_attached_to_player =
+          target_leader >= 0 &&
+          target_leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
           state.ShipAt(static_cast<std::size_t>(target_leader))
                   .squad_leader_ship_slot == 0;
-      if (target_is_player_escort) {
+      if (NovaShip_IsInPlayerSquad(state, target) &&
+          target_leader_attached_to_player) {
         return false;
       }
       if (HasGovernmentFlag(state, owner, 0x0040U)) {

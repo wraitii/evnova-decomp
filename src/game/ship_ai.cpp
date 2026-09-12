@@ -5073,6 +5073,27 @@ bool NovaAiShip_IsShipInAiState4(const Ship &ship) {
   return ship.ai_state_code == 4;
 }
 
+// Ghidra Ship_IsInPlayerSquad (0x0046b8d0). Returns true when ship is the
+// player (ship_instance_id 0), is attached directly to the player
+// (squad_leader_ship_slot 0), or is attached to a ship that is itself attached
+// to the player. Deliberately player-specific: the inner slot is compared to 0
+// (the player), not to a generic root, so this is not the squad-root walk of
+// Ship_ShipsShareSquadRoot (0x0046d190). The ship's own active flag is not
+// consulted; callers that care about liveness check it separately.
+bool NovaShip_IsInPlayerSquad(const GameState &state, const Ship &ship) {
+  if (ship.ship_instance_id == 0) {
+    return true;
+  }
+  const std::int16_t leader = ship.squad_leader_ship_slot;
+  if (leader == 0) {
+    return true;
+  }
+  return leader > 0 &&
+         leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
+         state.ShipAt(static_cast<std::size_t>(leader))
+                 .squad_leader_ship_slot == 0;
+}
+
 // Ghidra 0x004112a0 Ship_IsShipInAiState0x02.
 bool NovaAiShip_IsShipInAiState2(const Ship &ship) {
   return ship.ai_state_code == 2;
