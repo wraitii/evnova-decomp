@@ -143,6 +143,9 @@ constexpr float kFormationOffsetRadiusPx = 48.0F;
 constexpr float kScriptPosXSpan = 150.0F;
 constexpr float kScriptPosYSpan = 80.0F;
 constexpr float kScriptAlignAddend = 10.0F;
+// Scripted-manoeuvre turn addend (0x5750d4 = 15.0): the mode-0x13 alignment
+// window and the class-turn distance scale in the state-0x10 0x13/0x14 gate.
+constexpr float kScriptTurnAddend = 15.0F;
 // Control-mode 10 arrival slowdown: start at 50 px/tick along the heading and
 // reduce that override by 1.165 each tick (raw bits 0xC2480000 / 0xBF951EB8).
 constexpr float kMode10ReverseSpeed = -50.0F;
@@ -622,6 +625,70 @@ constexpr float kMode6LeadThresholdFactor = 19.59F;
 constexpr float kMode6LeadNearSpeedFactor = 0.316F;
 constexpr float kMode6LeadFarTimeBonus = 2.06667F;
 
+namespace {
+
+// Shared lead-intercept core for Ship_AimWeaponPredictive (0x0043b740) and
+// Ship_AimWeaponLeadVelocity (0x0043b8c0). Both compute the straight bearing
+// first and only replace it with an intercept when the weapon mode is
+// lead-capable; they differ solely in that gate. `include_mode6` selects the
+// predictive gate {-1, 4, 6..9}; the LeadVelocity gate is {-1, 4, 7..9}, so
+// the mode-6 branch below is unreachable for that caller (the original's
+// copied mode-6 branch is likewise dead code).
+std::int16_t AimWeaponInterceptBearing(const GameState &state,
+                                       float ship_vel_x,
+                                       float ship_vel_y,
+                                       float target_pos_x,
+                                       float target_pos_y,
+                                       float target_vel_x,
+                                       float target_vel_y,
+                                       float origin_x,
+                                       float origin_y,
+                                       std::int16_t weapon_id,
+                                       bool include_mode6) {
+  // Straight bearing fallback (Math_BearingFromPointToPoint(origin, target)).
+  std::int16_t bearing = static_cast<std::int16_t>(
+      BearingDeg(origin_x, origin_y, target_pos_x, target_pos_y));
+  if (weapon_id < 0 || weapon_id >= 0x100) {
+    return bearing;
+  }
+  const Weapon *w =
+      state.scenario.Weapon(static_cast<std::int16_t>(weapon_id + 0x80));
+  if (w == nullptr) {
+    return bearing;
+  }
+  const int mode = w->weapon_mode_code;
+  const int min_lead_mode = include_mode6 ? 6 : 7;
+  const bool lead_capable =
+      mode == -1 || mode == 4 || (mode >= min_lead_mode && mode <= 9);
+  if (!lead_capable) {
+    return bearing;
+  }
+  const float dx = target_pos_x - origin_x;
+  const float dy = target_pos_y - origin_y;
+  const float dist = std::sqrt(dx * dx + dy * dy);
+  const float shot_speed = w->projectile_speed / 100.0F;
+  if (shot_speed <= 0.0F) {
+    return bearing;
+  }
+  float t; // flight time (ticks) to the intercept
+  if (mode == 6) {
+    const float threshold = shot_speed * kMode6LeadThresholdFactor;
+    if (threshold < dist) {
+      t = (dist - threshold) / shot_speed + kMode6LeadFarTimeBonus;
+    } else {
+      t = dist / (shot_speed * kMode6LeadNearSpeedFactor);
+    }
+  } else {
+    t = dist / shot_speed;
+  }
+  const float intercept_x = target_pos_x + (target_vel_x - ship_vel_x) * t;
+  const float intercept_y = target_pos_y + (target_vel_y - ship_vel_y) * t;
+  return static_cast<std::int16_t>(
+      BearingDeg(origin_x, origin_y, intercept_x, intercept_y));
+}
+
+} // namespace
+
 // Ghidra 0x0043b740 Ship_AimWeaponPredictive. See ship_ai.hpp for the
 // algorithm. Returns the leading intercept bearing when the given weapon is a
 // lead-capable mode, else the straight bearing to the target.
@@ -641,44 +708,45 @@ std::int16_t NovaAi_AimWeaponPredictiveFrom(const GameState &state,
                                             std::int16_t weapon_id,
                                             float origin_x,
                                             float origin_y) {
-  // Straight bearing fallback (Math_BearingFromPointToPoint(origin, target)).
-  std::int16_t bearing = static_cast<std::int16_t>(
-      BearingDeg(origin_x, origin_y, target.pos_x, target.pos_y));
-  if (weapon_id < 0 || weapon_id >= 0x100) {
-    return bearing;
-  }
-  const Weapon *w =
-      state.scenario.Weapon(static_cast<std::int16_t>(weapon_id + 0x80));
-  if (w == nullptr) {
-    return bearing;
-  }
-  const int mode = w->weapon_mode_code;
-  const bool lead_capable = mode == -1 || mode == 4 || (mode >= 6 && mode <= 9);
-  if (!lead_capable) {
-    return bearing;
-  }
-  const float dx = target.pos_x - origin_x;
-  const float dy = target.pos_y - origin_y;
-  const float dist = std::sqrt(dx * dx + dy * dy);
-  const float shot_speed = w->projectile_speed / 100.0F;
-  if (shot_speed <= 0.0F) {
-    return bearing;
-  }
-  float t; // flight time (ticks) to the intercept
-  if (mode == 6) {
-    const float threshold = shot_speed * kMode6LeadThresholdFactor;
-    if (threshold < dist) {
-      t = (dist - threshold) / shot_speed + kMode6LeadFarTimeBonus;
-    } else {
-      t = dist / (shot_speed * kMode6LeadNearSpeedFactor);
-    }
-  } else {
-    t = dist / shot_speed;
-  }
-  const float intercept_x = target.pos_x + (target.vel_x - ship.vel_x) * t;
-  const float intercept_y = target.pos_y + (target.vel_y - ship.vel_y) * t;
-  return static_cast<std::int16_t>(
-      BearingDeg(origin_x, origin_y, intercept_x, intercept_y));
+  return AimWeaponInterceptBearing(state,
+                                   ship.vel_x,
+                                   ship.vel_y,
+                                   target.pos_x,
+                                   target.pos_y,
+                                   target.vel_x,
+                                   target.vel_y,
+                                   origin_x,
+                                   origin_y,
+                                   weapon_id,
+                                   /*include_mode6=*/true);
+}
+
+// Ghidra 0x0043b8c0 Ship_AimWeaponLeadVelocity. Same intercept math as
+// Ship_AimWeaponPredictive, but the target arrives as explicit
+// position/velocity pointers so it can lead a non-Ship object (the scripted
+// asteroid / station target); the firing hull's own velocity still comes from
+// `ship`. Degree bearing. Mode 6 is excluded from the gate, so a rocket on
+// this path falls back to the straight bearing.
+std::int16_t NovaAi_AimWeaponLeadVelocity(const GameState &state,
+                                          const Ship &ship,
+                                          float target_pos_x,
+                                          float target_pos_y,
+                                          float target_vel_x,
+                                          float target_vel_y,
+                                          std::int16_t weapon_id,
+                                          float origin_x,
+                                          float origin_y) {
+  return AimWeaponInterceptBearing(state,
+                                   ship.vel_x,
+                                   ship.vel_y,
+                                   target_pos_x,
+                                   target_pos_y,
+                                   target_vel_x,
+                                   target_vel_y,
+                                   origin_x,
+                                   origin_y,
+                                   weapon_id,
+                                   /*include_mode6=*/false);
 }
 
 int NovaAi_GetShipJammingScore(const GameState &state,
@@ -2672,11 +2740,30 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Scripted/invulnerable maneuver (state 0x10) and static hold (0x11)
-  // reference the asteroid/scripted targets; without those systems we keep
-  // them static as control modes 0x13/0x14 (unhittable drift). ----
+  // ---- Scripted asteroid manoeuvre (state 0x10): the far approach (0x13)
+  // or the close merge (0x14), picked by the class-turn-scaled distance gate
+  // (Ghidra 0x00405590). Static hold (state 0x11) drives the anchor pick-up.
+  // ----
   if (ship.ai_state_code == 0x10) {
-    ship.ai_control_mode = 0x13;
+    const AsteroidState &target = state.asteroid_pool[0];
+    if (!target.active) {
+      ship.ai_control_mode = 1;
+    } else {
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      // ShipClassDef +0x38 is stored 10x in this port (see
+      // NovaShip_ComputeEffectiveStats), so scale to degrees/tick.
+      const float base_turn = cls != nullptr ? cls->turn_rate * 0.1F : 0.0F;
+      // threshold = round((10.0 - base_turn) * 15.0); outside it is 0x13.
+      const float threshold = static_cast<float>(static_cast<int>(
+          std::round((kScriptAlignAddend - base_turn) * kScriptTurnAddend)));
+      if (threshold < std::abs(ship.pos_x - target.target_pos_x) ||
+          threshold < std::abs(ship.pos_y - target.target_pos_y)) {
+        ship.ai_control_mode = 0x13;
+      } else {
+        ship.ai_control_mode = 0x14;
+      }
+    }
     return;
   }
   if (ship.ai_state_code == 0x11) {
@@ -4098,7 +4185,7 @@ void NovaAi_ApplyControls(GameState &state,
       const AsteroidState &target = state.asteroid_pool[0];
       ship.ai_desired_heading_deg = static_cast<std::int16_t>(BearingDeg(
           ship.pos_x, ship.pos_y, target.target_pos_x, target.target_pos_y));
-      if (std::abs(heading_delta_deg()) < eff_turn_deg + 15.0F) {
+      if (std::abs(heading_delta_deg()) < eff_turn_deg + kScriptTurnAddend) {
         ship.ai_forward_thrust_cmd = eff_thrust;
       }
     }
@@ -4108,9 +4195,8 @@ void NovaAi_ApplyControls(GameState &state,
     // Scripted velocity-match: ramp velocity toward the asteroid-pool slot-0
     // target velocity at 1.5x thrust per frame-time unit, then creep position
     // within the 150/80 px/axis windows (the original's banded weave). The
-    // unguided weapon is armed at the alignment gate; the lead-velocity aim
-    // (Ship_AimWeaponLeadVelocity) remains deferred, so the straight bearing
-    // at the target stands in for the merge gate.
+    // heading is the lead-velocity intercept (Ship_AimWeaponLeadVelocity) and
+    // the unguided weapon is armed at the alignment gate.
     if (!fire_restricted) {
       const AsteroidState &target = state.asteroid_pool[0];
       const float step = eff_thrust * kEvasiveThrustFactor * elapsed_ticks;
@@ -4155,8 +4241,18 @@ void NovaAi_ApplyControls(GameState &state,
       } else {
         ship.pos_y += step;
       }
-      ship.ai_desired_heading_deg = static_cast<std::int16_t>(BearingDeg(
-          ship.pos_x, ship.pos_y, target.target_pos_x, target.target_pos_y));
+      // Ghidra 0x00408150 mode 0x14: lead-aim at the scripted asteroid with
+      // the active weapon bank (Ship_AimWeaponLeadVelocity 0x0043b8c0).
+      ship.ai_desired_heading_deg =
+          NovaAi_AimWeaponLeadVelocity(state,
+                                       ship,
+                                       target.target_pos_x,
+                                       target.target_pos_y,
+                                       target.target_vel_x,
+                                       target.target_vel_y,
+                                       ship.active_weapon_bank_slot,
+                                       ship.pos_x,
+                                       ship.pos_y);
       if (std::abs(heading_delta_deg()) < eff_turn_deg + kScriptAlignAddend) {
         ship.primary_target_ship_slot = -1;
         // Ghidra 0x00408150 mode 0x14 clears the primary target and arms an
@@ -4259,6 +4355,9 @@ void NovaAi_UpdateShipAI(GameState &state,
     ship.ai_hostility_accumulator = 0;
     ship.ai_state_code = 0;
     ship.ai_control_mode = 0;
+    // TODO(decomp): the original also clears defense_fleet_home_stellar_id
+    // here (Ship_UpdateShipAI 0x00401000); the port leaves it set. Investigate
+    // whether dropping it is a deliberate divergence or a gap.
     // Fall through to the state machine so it (re)parks the ship.
   }
 

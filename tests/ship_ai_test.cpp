@@ -1731,3 +1731,75 @@ TEST_CASE("mission-fleet goal 1 parks with no random candidate") {
   CHECK(ship.ai_state_code == 0xc);
   CHECK(ship.ai_secondary_target_slot == 0);
 }
+
+// Ship_AimWeaponLeadVelocity (0x0043b8c0) shares its intercept core with
+// Ship_AimWeaponPredictive (0x0043b740) but excludes mode 6 from the lead
+// gate, so a rocket falls back to the straight bearing while the ship-target
+// path still leads it. Build a synthetic weapon to pin both behaviours.
+TEST_CASE("AimWeaponLeadVelocity shares the predictive lead but skips mode 6") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(!state.scenario.weapons.empty());
+
+  game::Weapon &weapon = state.scenario.weapons[0];
+  weapon.projectile_speed = 100.0F; // shot_speed = 1 px/tick in port units
+
+  // Shooter at the origin, stationary; target due north (-y), moving east.
+  game::Ship ship;
+  ship.pos_x = 0.0F;
+  ship.pos_y = 0.0F;
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  game::Ship target;
+  target.pos_x = 0.0F;
+  target.pos_y = -100.0F;
+  target.vel_x = 100.0F;
+  target.vel_y = 0.0F;
+
+  constexpr std::int16_t kBank = 0; // resolves to weapons[0]
+
+  // Straight projectile (-1): both entry points lead and must agree.
+  weapon.weapon_mode_code = -1;
+  const std::int16_t straight_shot =
+      game::NovaAi_AimWeaponLeadVelocity(state,
+                                         ship,
+                                         target.pos_x,
+                                         target.pos_y,
+                                         target.vel_x,
+                                         target.vel_y,
+                                         kBank,
+                                         ship.pos_x,
+                                         ship.pos_y);
+  CHECK(straight_shot ==
+        game::NovaAi_AimWeaponPredictive(state, ship, target, kBank));
+  CHECK(straight_shot != 0); // led away from the due-north bearing
+
+  // Front-quadrant turret (7) is also led by both.
+  weapon.weapon_mode_code = 7;
+  CHECK(game::NovaAi_AimWeaponLeadVelocity(state,
+                                           ship,
+                                           target.pos_x,
+                                           target.pos_y,
+                                           target.vel_x,
+                                           target.vel_y,
+                                           kBank,
+                                           ship.pos_x,
+                                           ship.pos_y) ==
+        game::NovaAi_AimWeaponPredictive(state, ship, target, kBank));
+
+  // Freeflight rocket (6): only the ship-target function leads; LeadVelocity
+  // rejects mode 6 and returns the straight due-north bearing.
+  weapon.weapon_mode_code = 6;
+  const std::int16_t rocket_straight =
+      game::NovaAi_AimWeaponLeadVelocity(state,
+                                         ship,
+                                         target.pos_x,
+                                         target.pos_y,
+                                         target.vel_x,
+                                         target.vel_y,
+                                         kBank,
+                                         ship.pos_x,
+                                         ship.pos_y);
+  CHECK(rocket_straight == 0);
+  CHECK(game::NovaAi_AimWeaponPredictive(state, ship, target, kBank) != 0);
+}
