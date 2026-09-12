@@ -266,9 +266,9 @@ void OutfitMarkStatsDirty(GameState &state);
 
 // Ghidra Mission_AccumulatePlayerContributeMask (0x0046cca0): aggregates the
 // 64-bit Contribute mask from the player's ship class and owned outfits.
-// TODO(decomp) skipped: the active-mission cue arms (g_system_cues 0x120-
-// stride contribute pairs) and the cron-event contributes, which the port's
-// provisional cue model does not carry yet.
+// TODO(decomp) skipped: the active-rank Contribute arms (g_rank_defs 0x120-
+// stride Contribute pairs) and the cron-event contributes, which the port's
+// provisional rank model does not carry yet.
 void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,
                                                std::uint32_t &contribute_lo,
                                                std::uint32_t &contribute_hi);

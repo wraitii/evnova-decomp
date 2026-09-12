@@ -529,7 +529,7 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       out.nickname.push_back(c);
     }
     // +0x3086 seen-intro (done), +0x3088/0x3288 disasters, +0x3590/0x3990 cron,
-    // +0x3d90/0x4d90 availability rolls, +0x5dde system cues: untracked.
+    // +0x3d90/0x4d90 availability rolls, +0x5dde rank active flags: untracked.
     // TODO(decomp).
   }
 
