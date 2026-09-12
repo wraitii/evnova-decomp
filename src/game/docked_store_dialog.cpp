@@ -451,10 +451,12 @@ void DrawStoreContents(SdlPlatform &platform,
         outfit_store
             ? NovaLanded_OutfitPrice(state, stellar_id, session.selected_id)
             : 0; // Ship price rows render in the details-panel block below.
+    // The details block's "Ship Price" row is the selected ship's scaled
+    // list price; the "Final Price" row subtracts the trade-in credit below.
     const std::int32_t ship_price =
-        outfit_store ? 0
-                     : NovaLanded_ShipPurchasePrice(
-                           state, stellar_id, session.selected_id);
+        outfit_store
+            ? 0
+            : NovaLanded_ShipPrice(state, stellar_id, session.selected_id);
     if (selected_image != nullptr) {
       SDL_RenderTexture(renderer, selected_image, nullptr, &layout.preview);
     } else {

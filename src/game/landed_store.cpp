@@ -76,10 +76,6 @@ MeetsRequire(const GameState &state, std::uint32_t lo, std::uint32_t hi) {
          static_cast<std::size_t>(id - 0x80) < state.scenario.ships.size();
 }
 
-[[nodiscard]] std::int32_t RoundNearest(float value) {
-  return static_cast<std::int32_t>(std::round(value));
-}
-
 // The selected outfit's four (ModType, ModVal) slots: primary plus the three
 // alternates. Outfit mod values for weapon/ammo/bomb types are zero-based
 // bank slots (see Outfit::mod_val).
@@ -409,8 +405,10 @@ bool NovaLanded_StellarSellsOutfits(const GameState &state,
                      [](std::int16_t tech) { return tech > 0; });
 }
 
-// Ghidra 0x0049d640 Outfit_ComputeScaledPurchasePrice (tech-discount rounding,
-// threshold quanta).
+// Ghidra 0x0049d640 Outfit_ComputeScaledPurchasePrice (tech-discount
+// truncation, threshold quanta). Both float-to-int conversions end with the
+// x87 FIST + residual/sign correction (ADD 0x7fffffff / SBB) that truncates
+// toward zero, not round-to-nearest (cf. ship_ai.cpp).
 std::int32_t NovaLanded_ScaledStorePrice(std::int32_t base_price,
                                          std::int16_t item_tech,
                                          std::int16_t stellar_tech,
@@ -418,13 +416,17 @@ std::int32_t NovaLanded_ScaledStorePrice(std::int32_t base_price,
   if (base_price <= 0)
     return 0;
   std::int32_t value = base_price;
-  if (item_tech >= 0 && stellar_tech >= 0 && item_tech < 6 &&
-      stellar_tech < 6 && item_tech < stellar_tech && base_price > 99) {
-    value = RoundNearest(
+  // The original only guards the upper bound (signed item/stellar tech < 6)
+  // and item_tech < stellar_tech; there is no lower-bound test, so a negative
+  // item tech still takes the discount/surcharge path.
+  if (item_tech < 6 && stellar_tech < 6 && item_tech < stellar_tech &&
+      base_price > 99) {
+    value = static_cast<std::int32_t>(
         static_cast<float>(base_price) *
         static_cast<float>(100 - (stellar_tech - item_tech) * 3) * 0.01F);
   }
-  value = std::max(1, RoundNearest(static_cast<float>(value) * scale));
+  value =
+      std::max(1, static_cast<std::int32_t>(static_cast<float>(value) * scale));
   const int quantum = value <= 10000 ? 10 : value <= 100000 ? 100 : 1000;
   return value > 100 ? value / quantum * quantum : value;
 }
@@ -581,12 +583,13 @@ OutfitSaleResult NovaLanded_SellOutfit(GameState &state,
     return result;
   // 0x0048ea70 prices each sale off the scaled purchase price at this port,
   // not the raw base cost: a unit held at or below the opening snapshot
-  // resells at ROUND(price * 0.5) (the double 0.5 at DAT_00575940), while a
-  // unit bought earlier this session is refunded at the full scaled price.
+  // resells at trunc(price * 0.5) (the double 0.5 at DAT_00575940, x87
+  // FIST + residual/sign correction), while a unit bought earlier this session
+  // is refunded at the full scaled price.
   const std::int32_t scaled_price =
       NovaLanded_OutfitPrice(state, stellar_id, outfit_id);
   const std::int32_t resale_value =
-      RoundNearest(static_cast<float>(scaled_price) * 0.5F);
+      static_cast<std::int32_t>(static_cast<float>(scaled_price) * 0.5F);
   const std::int32_t purchase_mass = outfit->PurchaseMass(ship->mass_tons);
   const auto mod_slots = OutfitModSlots(*outfit);
   const std::int16_t opening = session.opening_outfit_counts[index];
@@ -734,6 +737,18 @@ void NovaLanded_CloseOutfitterSession(GameState &state) {
       std::min(state.player.armor_points, stats.max_armor_points);
 }
 
+// Ghidra DAT_007d4bbc / DAT_007d4bc0: rank-derived price scales, both set to
+// 1.0 at 0x00491f9c and folded multiplicatively by each active rank's modifier
+// (rank record +0x08 * 0.01). Rank price modifiers are not modelled yet, so
+// both stay 1.0. DAT_007d4bbc scales the first trade-in stage; DAT_007d4bc0
+// scales the second trade-in stage and the new ship's list price.
+// TODO(decomp): model the rank price scales.
+constexpr float kRankResaleScale = 1.0F;   // DAT_007d4bbc
+constexpr float kRankPurchaseScale = 1.0F; // DAT_007d4bc0
+
+// Ghidra 0x00498dc0 / 0x004948b0 / 0x00492f30: the base trade-in from
+// Ship_ComputeTradeInValue scaled through two identical tech-discount stages,
+// both using the current ship's tech level and the destination stellar's.
 std::int32_t NovaLanded_ShipTradeInValue(const GameState &state,
                                          std::int16_t stellar_id) {
   const ShipClass *ship = state.scenario.Ship(
@@ -741,25 +756,33 @@ std::int32_t NovaLanded_ShipTradeInValue(const GameState &state,
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   if (ship == nullptr || stellar == nullptr)
     return 0;
-  std::int64_t total = NovaLanded_ScaledStorePrice(
-      ship->cost, ship->tech_level, stellar->tech_level);
-  for (std::size_t i = 0; i < state.scenario.outfits.size() && i < 0x200; ++i)
-    total += static_cast<std::int64_t>(state.inventory.outfit_owned_count[i]) *
-             state.scenario.outfits[i].cost / 2;
-  return static_cast<std::int32_t>(
-      std::min<std::int64_t>(total, std::numeric_limits<std::int32_t>::max()));
+  const std::int32_t value =
+      NovaLanded_ScaledStorePrice(Ship_ComputeTradeInValue(state),
+                                  ship->tech_level,
+                                  stellar->tech_level,
+                                  kRankResaleScale);
+  return NovaLanded_ScaledStorePrice(
+      value, ship->tech_level, stellar->tech_level, kRankPurchaseScale);
+}
+
+// Ghidra 0x00498dc0 / 0x004948b0: the selected ship's scaled list price before
+// any trade-in credit (the shipyard's "Ship Price" row).
+std::int32_t NovaLanded_ShipPrice(const GameState &state,
+                                  std::int16_t stellar_id,
+                                  std::int16_t ship_id) {
+  const ShipClass *ship = state.scenario.Ship(ship_id);
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (ship == nullptr || stellar == nullptr)
+    return 0;
+  return NovaLanded_ScaledStorePrice(
+      ship->cost, ship->tech_level, stellar->tech_level, kRankPurchaseScale);
 }
 
 std::int32_t NovaLanded_ShipPurchasePrice(const GameState &state,
                                           std::int16_t stellar_id,
                                           std::int16_t ship_id) {
-  const ShipClass *ship = state.scenario.Ship(ship_id);
-  const Stellar *stellar = state.scenario.Stellar(stellar_id);
-  if (ship == nullptr || stellar == nullptr)
-    return 0;
   return std::max(0,
-                  NovaLanded_ScaledStorePrice(
-                      ship->cost, ship->tech_level, stellar->tech_level) -
+                  NovaLanded_ShipPrice(state, stellar_id, ship_id) -
                       NovaLanded_ShipTradeInValue(state, stellar_id));
 }
 
@@ -776,7 +799,8 @@ bool NovaLanded_CanBuyShip(const GameState &state,
 }
 
 // Ghidra 0x00498dc0's escort-hire arm. The multiplier is DAT_00575950,
-// the double 0.1; the original's FISTP dance resolves to round-to-nearest.
+// the double 0.1; the original's FIST/residual correction truncates toward
+// zero, not round-to-nearest.
 std::int32_t NovaLanded_ShipHirePrice(const GameState &state,
                                       std::int16_t stellar_id,
                                       std::int16_t ship_id) {
@@ -786,7 +810,8 @@ std::int32_t NovaLanded_ShipHirePrice(const GameState &state,
     return 0;
   const std::int32_t scaled = NovaLanded_ScaledStorePrice(
       ship->cost, ship->tech_level, stellar->tech_level);
-  return std::max(0, RoundNearest(static_cast<float>(scaled) * 0.1F));
+  return std::max(0,
+                  static_cast<std::int32_t>(static_cast<float>(scaled) * 0.1F));
 }
 
 // Ghidra 0x00498dc0 (hire arm): affordability against the hire price only --

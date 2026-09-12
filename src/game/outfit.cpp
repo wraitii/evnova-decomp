@@ -882,6 +882,48 @@ std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state) {
   return std::max<std::int32_t>(0, free_mass);
 }
 
+// Ghidra 0x00469100 Ship_ComputeTradeInValue (renamed from
+// Outfit_ComputeOwnedOutfitResaleTotal). The original seeds with 25% of the
+// current ship class's base cost, then adds 50% of each owned non-persistent
+// outfit's purchase price (mass-scaled against the current hull), truncating
+// the running total toward zero after every step and clamping at 0.
+std::int32_t Ship_ComputeTradeInValue(const GameState &state) {
+  if (state.player.ship_class_id < 0) {
+    return 0;
+  }
+  const auto *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    return 0;
+  }
+  // The original ends each step with the x87 FIST + residual/sign correction
+  // (ADD 0x7fffffff / SBB) that truncates toward zero -- not round-to-nearest;
+  // the same idiom is documented in ship_ai.cpp. All terms here are
+  // non-negative, so the net is floor.
+  const auto trunc_to_int = [](double value) {
+    return static_cast<std::int32_t>(value);
+  };
+  std::int32_t total =
+      trunc_to_int(static_cast<double>(ship_class->cost) * 0.25);
+  for (std::size_t outfit_id = 0;
+       outfit_id < state.inventory.outfit_owned_count.size() &&
+       outfit_id < state.scenario.outfits.size();
+       ++outfit_id) {
+    const std::int16_t owned = state.inventory.outfit_owned_count[outfit_id];
+    if (owned <= 0) {
+      continue;
+    }
+    const Outfit &outfit = state.scenario.outfits[outfit_id];
+    if (outfit.persistent_on_ship_swap) {
+      continue;
+    }
+    const std::int32_t price = outfit.PurchasePrice(ship_class->mass_tons);
+    total = trunc_to_int(static_cast<double>(total) +
+                         static_cast<double>(owned) * price * 0.5);
+  }
+  return std::max<std::int32_t>(0, total);
+}
+
 // Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace. "Remaining" is the
 // player ship's own free holds after mission cargo and the bins/junk overflow
 // beyond the escort freighters' extra capacity. When the fleet has no extra
@@ -1015,8 +1057,9 @@ void NovaOutfit_RedistributeFleetCargoOverflow(GameState &state,
       continue;
     }
     if (!state.travel.engaging) {
-      const int pods =
-          std::clamp(static_cast<int>(std::lround(stored / 5.0F)), 1, 12);
+      // 0x0041f330 truncates trunc(share/5) toward zero for the visible pod
+      // count, clamped [1,12].
+      const int pods = std::clamp(static_cast<int>(stored / 5.0F), 1, 12);
       for (int i = 0; i < pods; ++i) {
         NovaFreeflight_SpawnForShip(state, ship);
       }

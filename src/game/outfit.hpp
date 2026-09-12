@@ -175,6 +175,18 @@ Outfit_ComputePlayerFleetCargoCapacity(const GameState &state);
 // (Outfit_ComputeOutfitPurchaseMass 0x0046e950). Clamped at zero. Player-only.
 [[nodiscard]] std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state);
 
+// Ghidra 0x00469100 Ship_ComputeTradeInValue (renamed from
+// Outfit_ComputeOwnedOutfitResaleTotal). Base trade-in credit for the current
+// player ship before store/tech/rank scaling: 25% of the ship class's base
+// cost (ShipClassDef +0x58) plus 50% of the purchase price of every owned
+// outfit that is not persistent across a ship swap (Bible outfit flag 0x0004,
+// cached by the loader at OutfitDef +0x378; rank outfits 0x2000 still count).
+// The running total truncates toward zero after each step (the original's
+// x87 FIST + residual/sign correction, not round-to-nearest) and the result is
+// clamped at 0. Player-only; callers apply the store scaling via
+// Outfit_ComputeScaledPurchasePrice (0x0049d640).
+[[nodiscard]] std::int32_t Ship_ComputeTradeInValue(const GameState &state);
+
 // Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace. Free holds on the
 // player ship: ship capacity minus carried cargo/junk, with escort-freighter
 // space absorbing the ordinary bins/junk overflow before mission cargo and

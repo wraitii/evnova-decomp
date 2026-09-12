@@ -2067,18 +2067,16 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
           continue;
         }
         const Ship &target = state.ShipAt(static_cast<std::size_t>(slot));
-        // Ghidra: radius = ROUND(blast_radius + ship half-span * 0.333)
-        // (DAT_00575338); positions and distances are compared in integer
-        // space. The clean-room's collision_radius_px stands in for the
-        // sprite half-span.
+        // Ghidra 0x00437e20: radius = trunc(blast_radius + ship half-span *
+        // 0.333) (DAT_00575338); positions and distances are compared in
+        // integer space. The clean-room's collision_radius_px stands in for
+        // the sprite half-span.
         const auto radius = static_cast<float>(
-            std::lround(static_cast<float>(weapon->blast_radius) +
-                        std::max(0.0F, target.collision_radius_px) *
-                            kProximitySpanFraction));
-        const auto dx =
-            static_cast<int>(std::lround(target.pos_x - shot.pos_x));
-        const auto dy =
-            static_cast<int>(std::lround(target.pos_y - shot.pos_y));
+            static_cast<int>(static_cast<float>(weapon->blast_radius) +
+                             std::max(0.0F, target.collision_radius_px) *
+                                 kProximitySpanFraction));
+        const auto dx = static_cast<int>(target.pos_x - shot.pos_x);
+        const auto dy = static_cast<int>(target.pos_y - shot.pos_y);
         if (dx * dx + dy * dy <=
             static_cast<int>(radius) * static_cast<int>(radius)) {
           ResolveShotCollisionHit(state,

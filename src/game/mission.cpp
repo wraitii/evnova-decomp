@@ -1591,12 +1591,14 @@ void Mission_ResolveMissionSuccess(GameState &state,
       } else if (system_govt != -1) {
         if (NovaGovernment_AreGovtsHostileOrXenophobic(
                 state.scenario, system_govt, govt)) {
-          rep = static_cast<std::int16_t>(std::lrint(
-              static_cast<float>(rep) - static_cast<float>(delta) * 0.5F));
+          // 0x00440410 truncates toward zero (x87 FIST + residual/sign
+          // correction), not round-to-nearest.
+          rep = static_cast<std::int16_t>(static_cast<float>(rep) -
+                                          static_cast<float>(delta) * 0.5F);
         } else if (NovaGovernment_AreGovtsAllied(
                        state.scenario, system_govt, govt)) {
-          rep = static_cast<std::int16_t>(std::lrint(
-              static_cast<float>(rep) + static_cast<float>(delta) * 0.5F));
+          rep = static_cast<std::int16_t>(static_cast<float>(rep) +
+                                          static_cast<float>(delta) * 0.5F);
         }
       }
     }

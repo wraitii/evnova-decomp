@@ -1351,12 +1351,11 @@ FindNearestHittableWeaponTarget(const GameState &state,
     }
     // The original narrows each axis to a short before squaring, so the sum
     // wraps at 16 bits; preserve that squared-distance comparison exactly.
-    const auto dx = static_cast<std::int16_t>(
-        std::abs(static_cast<int>(std::lround(candidate.pos_x)) -
-                 static_cast<int>(std::lround(shot.pos_x))));
-    const auto dy = static_cast<std::int16_t>(
-        std::abs(static_cast<int>(std::lround(candidate.pos_y)) -
-                 static_cast<int>(std::lround(shot.pos_y))));
+    // 0x0046ba30 truncates positions toward zero (x87 FIST + residual/sign).
+    const auto dx = static_cast<std::int16_t>(std::abs(
+        static_cast<int>(candidate.pos_x) - static_cast<int>(shot.pos_x)));
+    const auto dy = static_cast<std::int16_t>(std::abs(
+        static_cast<int>(candidate.pos_y) - static_cast<int>(shot.pos_y)));
     const auto dist_sq = static_cast<std::int16_t>(dx * dx + dy * dy);
     if (best_slot == -1 || dist_sq < best_dist_sq) {
       best_slot = slot;
@@ -1627,8 +1626,9 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
     const float remaining =
         static_cast<float>(w->lifetime_ticks) - shot.life_ticks_remaining;
     if (kGuidanceLifeGateLooseF64 < remaining) {
-      const int effective_turn =
-          static_cast<int>(std::lround(w->guided_turn_rate));
+      // 0x00431530 truncates the guided turn rate toward zero (x87 FIST +
+      // residual/sign correction), not round-to-nearest.
+      const int effective_turn = static_cast<int>(w->guided_turn_rate);
       if (state.spaceflight_frame_counter % 300 < 150) {
         shot.heading_deg -= static_cast<float>(effective_turn);
       } else {

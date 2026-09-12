@@ -689,13 +689,13 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
     }
   }
 
-  // Extras text: owned non-0x2000 outfits, count words + plural names. The
-  // original groups entries by the similar_to chain (OutfitDef +(-10)) and
-  // orders groups by cost descending; the scenario model carries neither
-  // similar_to nor a stable display order, so each owned outfit lists itself
-  // (a group of one renders identically) in id order.
-  // TODO(decomp(0x0049c050)): similar_to grouping + cost ordering + resale
-  // footer (Outfit_ComputeOwnedOutfitResaleTotal unported).
+  // Extras text: owned non-0x2000 outfits, count words + plural names, then
+  // the ship trade-in footer. The original groups entries by the similar_to
+  // chain (OutfitDef +(-10)) and orders groups by cost descending; the
+  // scenario model carries neither similar_to nor a stable display order, so
+  // each owned outfit lists itself (a group of one renders identically) in id
+  // order.
+  // TODO(decomp(0x0049c050)): similar_to grouping + cost ordering.
   {
     std::string extras;
     int total = 0;
@@ -726,6 +726,17 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
       total++;
     }
     if (total > 0) {
+      // Ghidra 0x0049c050: the list ends with ".\r\r" and, when the ship's
+      // trade-in is positive, the STR# 0x7d2 0x111 label + grouped quantity +
+      // "credits" word (base trade-in, before store scaling).
+      extras += ".";
+      const std::int32_t trade_in = Ship_ComputeTradeInValue(state);
+      if (trade_in > 0) {
+        extras += "\r\r" +
+                  MiscString(kStrTradeInValue, "Ship trade-in value:") + " " +
+                  GroupedUInt(trade_in) + " " +
+                  MiscString(kStrCreditsWord, "credits") + "\r";
+      }
       texts.extras = MiscString(kStrExtrasHeader, "") + "\r\r" + extras;
     }
   }

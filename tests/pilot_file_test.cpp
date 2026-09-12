@@ -79,7 +79,7 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.jump_dest_stellar == 0x123);
   CHECK(out.credits == 123456);
   CHECK(out.ship_class_id == 3);
-  CHECK(out.fuel_points == 78.0F); // 77.6 rounded to nearest u16, stored as int
+  CHECK(out.fuel_points == 77.0F); // 77.6 truncated toward zero, stored as u16
   CHECK(out.intro_played);
   CHECK(out.cargo_bins == p.cargo_bins);
   CHECK(out.outfit_owned_count[0] == 1);
@@ -131,8 +131,8 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   CHECK(loaded_state.pilot.last_name == "Maclean");
   CHECK(loaded_state.player.credits == p.credits);
   CHECK(loaded_state.player.ship_class_id == p.ship_class_id);
-  // Fuel is stored as a rounded u16 in the file (block1+0x12).
-  CHECK(loaded_state.player.fuel_points == 78.0F);
+  // Fuel is stored as a truncated u16 in the file (block1+0x12).
+  CHECK(loaded_state.player.fuel_points == 77.0F);
   CHECK(loaded_state.inventory.outfit_owned_count[0] == 1);
   CHECK(loaded_state.weapon_bank_ammo[5 * 100] == 7);
 
