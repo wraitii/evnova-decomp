@@ -443,22 +443,6 @@ std::int32_t NovaLanded_OutfitPrice(const GameState &state,
                                      stellar->tech_level);
 }
 
-std::int32_t NovaLanded_FreeMass(const GameState &state) {
-  const ShipClass *ship = state.scenario.Ship(
-      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
-  if (ship == nullptr)
-    return 0;
-  std::int32_t free_mass = ship->free_mass;
-  for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
-                          i < state.scenario.outfits.size();
-       ++i) {
-    free_mass -=
-        static_cast<std::int32_t>(state.inventory.outfit_owned_count[i]) *
-        state.scenario.outfits[i].PurchaseMass(ship->mass_tons);
-  }
-  return free_mass;
-}
-
 // Ghidra 0x00491950 NovaUi_IsOutfitterPurchaseAllowed (partial port of the
 // tech/require/availability gate).
 bool NovaLanded_CanBuyOutfit(GameState &state,
@@ -477,7 +461,7 @@ bool NovaLanded_CanBuyOutfit(GameState &state,
   // is massless/negative-mass (Outfit_ComputeOutfitPurchaseMass < 1); only a
   // positive item that exceeds the free allowance is rejected.
   const std::int32_t purchase_mass = outfit->PurchaseMass(ship->mass_tons);
-  if (purchase_mass > NovaLanded_FreeMass(state) && purchase_mass >= 1)
+  if (purchase_mass > Outfit_ComputePlayerFreeMass(state) && purchase_mass >= 1)
     return false;
   const OutfitOwnership ownership = Outfit_ClampOwnedCountToLimits(
       state, static_cast<std::int16_t>(outfit_id - 0x80));
@@ -610,7 +594,8 @@ OutfitSaleResult NovaLanded_SellOutfit(GameState &state,
   for (std::int16_t unit = 0; unit < allowed; ++unit) {
     // Negative free mass: a negative-mass item cannot be removed when it would
     // push the remaining free mass below zero (0x0048ea70 -> entry 0xcf).
-    if (purchase_mass < 0 && NovaLanded_FreeMass(state) + purchase_mass < 0) {
+    if (purchase_mass < 0 &&
+        Outfit_ComputePlayerFreeMass(state) + purchase_mass < 0) {
       result.block = OutfitSaleBlock::kNegativeMass;
       break;
     }

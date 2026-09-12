@@ -141,10 +141,10 @@ TEST_CASE("AI boarding plunders the player's cargo into the boarder holds",
   player.is_active = true;
   player.ship_instance_id = 0;
   player.armor_points = 100.0F;
-  // Pick any loaded class for the victim capacity (total mass).
+  // Pick any loaded class for the victim's total cargo capacity.
   REQUIRE_FALSE(state.scenario.ships.empty());
   player.ship_class_id = 0;
-  const std::int32_t capacity = Outfit_ComputePlayerTotalMass(state);
+  const std::int32_t capacity = Outfit_ComputePlayerTotalCargoCapacity(state);
 
   state.inventory.cargo_bins = {0, 0, 0, 0, 0, 0};
   state.inventory.cargo_bins[0] = 100; // more than any stock freighter's holds
@@ -223,6 +223,80 @@ TEST_CASE("freeflight objects integrate and expire", "[cargo][freeflight]") {
   // Advance past the lifetime: the slot is retired.
   NovaFreeflight_Tick(state, lifetime + 1.0F);
   CHECK(live->lifetime_ticks < 0.0F);
+}
+
+// Ghidra 0x0046a730 Ship_ComputeShipTotalCargoCapacity and 0x00463470
+// Ship_ComputeShipFreeMass: the two player-ship outfit aggregates the cargo
+// and outfit flows depend on. Neither is a mass - the first is total cargo
+// capacity (Holds + ModType-2 outfits), the second is the remaining FreeMass.
+TEST_CASE("player total cargo capacity and free mass aggregates",
+          "[cargo][outfit]") {
+  GameState state;
+  state.scenario.ships.assign(1, {});
+  state.scenario.ships[0].cargo_holds = 10;
+  state.scenario.ships[0].free_mass = 20;
+  state.scenario.ships[0].mass_tons = 100; // hull Mass, scales flagged outfits
+  state.player.ship_class_id = 0;
+
+  state.scenario.outfits.assign(3, {});
+  state.scenario.outfits[0].mod_type = 2; // kCargoSpace
+  state.scenario.outfits[0].mod_val = 3;
+  state.scenario.outfits[0].mass_tons = 4;
+  state.scenario.outfits[1].alt_mod_types[1] = 2; // cargo space in an alt slot
+  state.scenario.outfits[1].alt_mod_vals[1] = 2;
+  state.scenario.outfits[1].mass_tons = 1;
+  state.scenario.outfits[2].mod_type = 4; // shields: not cargo
+  state.scenario.outfits[2].mass_tons = 7;
+
+  state.inventory.outfit_owned_count.fill(0);
+  state.inventory.outfit_owned_count[0] = 2; // 2 * 3 tons of cargo space
+  state.inventory.outfit_owned_count[1] = 1; // 1 * 2 tons of cargo space
+
+  // Holds 10 + 2*3 + 1*2 = 18; the unowned shield outfit contributes nothing.
+  CHECK(Outfit_ComputePlayerTotalCargoCapacity(state) == 18);
+  CHECK(Outfit_ComputePlayerFleetCargoCapacity(state) == 18);
+
+  // FreeMass 20 minus every owned unit's purchase mass (2*4 + 1*1) = 11.
+  CHECK(Outfit_ComputePlayerFreeMass(state) == 11);
+
+  // The original clamps the free-mass result at zero.
+  state.scenario.ships[0].free_mass = 5;
+  CHECK(Outfit_ComputePlayerFreeMass(state) == 0);
+}
+
+// Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace: player ship free holds
+// = capacity - carried, where carried = the cargo bins + every active
+// mission's CargoQty (+0x14, when +0x33 carrying and >= 0) + positive junk.
+// The single-ship branch is NOT clamped; callers clamp it themselves.
+TEST_CASE("remaining cargo space subtracts bins, mission cargo and junk",
+          "[cargo][outfit]") {
+  GameState state;
+  state.scenario.ships.assign(1, {});
+  state.scenario.ships[0].cargo_holds = 10;
+  state.player.ship_class_id = 0;
+  state.scenario.outfits.clear();
+  state.inventory.cargo_bins = {1, 2, 0, 0, 0, 0};
+  state.inventory.junk_counts.fill(0);
+
+  // 10 - (1 + 2) = 7.
+  CHECK(Outfit_ComputeRemainingCargoSpace(state) == 7);
+
+  // Mission cargo joins the carried total (MisnActive +0x33/+0x14).
+  state.active_mission_runtime_flags[1].is_active = true;
+  state.active_missions[1].carrying_resources = true;
+  state.active_missions[1].cargo_qty_tons = 4;
+  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 7);
+  CHECK(Outfit_ComputeRemainingCargoSpace(state) == 3);
+
+  // Junk counts as carried, and an overloaded ship reports a negative value
+  // rather than being clamped at zero.
+  state.inventory.junk_counts[2] = 5;
+  CHECK(Outfit_ComputeRemainingCargoSpace(state) == -2);
+
+  // A negative mission CargoQty is ignored by the +0x14 sign gate.
+  state.active_missions[1].cargo_qty_tons = -3;
+  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 8);
+  CHECK(Outfit_ComputeRemainingCargoSpace(state) == 2);
 }
 
 } // namespace game

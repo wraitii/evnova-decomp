@@ -520,7 +520,7 @@ void DrawStoreContents(SdlPlatform &platform,
       const std::int32_t item_mass =
           player_ship == nullptr ? 0
                                  : outfit->PurchaseMass(player_ship->mass_tons);
-      const std::int32_t free_mass = NovaLanded_FreeMass(state);
+      const std::int32_t free_mass = Outfit_ComputePlayerFreeMass(state);
       // Ghidra NovaUi_RedrawOutfitterMenu (0x00490c70) detail panel (DITL
       // entry 9): labels at the panel's left edge and values at +0x46 (70px),
       // all in PTR_DAT_00575ad8 (white). Item Price sits at +0xc and You Have

@@ -289,7 +289,7 @@ void NovaEscort_ReacquireSquadLeader(GameState &state, Ship &ship) {
   // Replacement search: the heaviest active, non-disabled hull in the system
   // whose per-tick snapshot target is the same stale leader (a sibling
   // follower is promoted). Hull mass uses the class Mass field
-  // (ShipClassDef.hull_mass_tons +0x9ee; the port stores it as mass_tons).
+  // (ShipClassDef.mass_tons +0x9ee).
   std::int16_t replacement = -1;
   int replacement_mass = 0;
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {

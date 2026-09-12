@@ -157,17 +157,30 @@ NovaOutfit_GrantOutfitToPlayer(GameState &state,
 // outfit-derived cargo capacity.
 [[nodiscard]] std::int16_t
 Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state);
+
+// Ghidra 0x0046a730 Ship_ComputeShipTotalCargoCapacity. The player ship's
+// total cargo capacity: ship-class Holds (cargo_holds) plus, for every owned
+// outfit, owned_count * ModVal for each of its slots whose ModType is 2
+// (cargo space). This is the player baseline the fleet-capacity helper builds
+// on, not a mass.
+[[nodiscard]] std::int32_t
+Outfit_ComputePlayerTotalCargoCapacity(const GameState &state);
+
 [[nodiscard]] std::int16_t
 Outfit_ComputePlayerFleetCargoCapacity(const GameState &state);
-// Ghidra 0x0046a730 Ship_ComputeShipTotalMass. The player ship's total
-// tonnage: ship-class base mass plus, for each owned outfit, owned_count *
-// its mass contribution (mod type 2, hull-proportional via the load-time
-// derived PurchaseMass).
-[[nodiscard]] std::int32_t
-Outfit_ComputePlayerTotalMass(const GameState &state);
 
-// Remaining free cargo space, clamped >= 0. This build has no mission-fleet
-// objects, so no mission cargo is committed here.
+// Ghidra 0x00463470 Ship_ComputeShipFreeMass. Remaining free mass allowance:
+// ship-class FreeMass (ShipClassDef.free_mass, +0x4 / shp payload +0x0c) minus,
+// for every owned outfit, owned_count * Outfit::PurchaseMass
+// (Outfit_ComputeOutfitPurchaseMass 0x0046e950). Clamped at zero. Player-only.
+[[nodiscard]] std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state);
+
+// Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace. Free holds on the
+// player ship: ship capacity minus carried cargo/junk, with escort-freighter
+// space absorbing the ordinary bins/junk overflow before mission cargo and
+// any remainder are charged to the ship. Not clamped (negative when
+// overloaded); callers that need a floor clamp it themselves. This build does
+// not yet model escort freighters, so the ship-only branch is the live one.
 [[nodiscard]] std::int16_t
 Outfit_ComputeRemainingCargoSpace(const GameState &state);
 

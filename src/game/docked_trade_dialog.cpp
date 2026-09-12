@@ -201,7 +201,7 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
   SDL_SetRenderDrawColor(
       renderer, kGridLine.r, kGridLine.g, kGridLine.b, SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &layout.header);
-  const bool in_fleet = Outfit_ComputePlayerTotalMass(state) <
+  const bool in_fleet = Outfit_ComputePlayerTotalCargoCapacity(state) <
                         Outfit_ComputePlayerFleetCargoCapacity(state);
   const float header_right = layout.header.x + layout.header.w;
   NovaText_Draw(platform,
@@ -333,7 +333,7 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
   const std::int32_t free_space =
       Outfit_ComputePlayerFleetCargoCapacity(state) -
       Outfit_ComputePlayerCargoAndJunkTotal(state);
-  const bool summary_in_ship = Outfit_ComputePlayerTotalMass(state) <
+  const bool summary_in_ship = Outfit_ComputePlayerTotalCargoCapacity(state) <
                                Outfit_ComputePlayerFleetCargoCapacity(state);
   std::string summary = InfoString(0x16b);
   summary += " ";
