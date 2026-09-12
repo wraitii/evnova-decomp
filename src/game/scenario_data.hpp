@@ -1115,25 +1115,30 @@ struct Government {
   std::int16_t interface_id = -1; // GovtDef 0x42 (payload +0xac; <0x80 -> -1)
   std::int16_t news_pic_id = -1;  // GovtDef 0x44 (payload +0xae; <0x80 -> -1)
 
-  std::int16_t flee_shield_threshold = 0; // GovtDef 0x46 (payload +0x08)
-  std::int16_t disable_penalty = 0;       // GovtDef 0x48 (payload +0x0a)
-  std::int16_t board_penalty = 0;         // GovtDef 0x4a (payload +0x0c)
-  std::int16_t kill_penalty = 0;          // GovtDef 0x4c (payload +0x0e)
-  std::int16_t shoot_penalty = 0;         // GovtDef 0x4e (payload +0x10)
-  std::int16_t max_odds = 0;              // GovtDef 0x50 (payload +0x12)
-  std::int16_t bribe_cost_percent = 0;    // GovtDef 0x52 (payload +0x14)
+  // Reputation / legal fields, named per the Nova Bible's govt list. Note the
+  // shipped payload order puts ScanFine (+0x06) before CrimeTol (+0x08); the
+  // penalty block then runs Smug/Disab/Board/Kill/Shoot before InitialRec.
+  std::int16_t scan_fine = 0;     // GovtDef 0x54 (payload +0x06)
+  std::int16_t crime_tol = 0;     // GovtDef 0x46 (payload +0x08)
+  std::int16_t smug_penalty = 0;  // GovtDef 0x48 (payload +0x0a)
+  std::int16_t disab_penalty = 0; // GovtDef 0x4a (payload +0x0c)
+  std::int16_t board_penalty = 0; // GovtDef 0x4c (payload +0x0e)
+  std::int16_t kill_penalty = 0;  // GovtDef 0x4e (payload +0x10)
+  std::int16_t shoot_penalty = 0; // GovtDef 0x50 (payload +0x12)
+  std::int16_t initial_rec = 0;   // GovtDef 0x52 (payload +0x14)
 
-  // Inherent electronic-warfare jamming values (GovtDef 0x54..0x5a). jam[0]
-  // comes from payload +0x06; jam[1..3] from payload +0x5c..0x62, each clamped
-  // to [0,100] by the loader.
+  // Inherent electronic-warfare jamming values (GovtDef 0x56..0x5c, payload
+  // +0x5c/+0x5e/+0x60/+0x62), each clamped to [0,100] by the loader. GovtDef
+  // 0x54 is ScanFine, not a jam value.
   std::array<std::int16_t, 4> inherent_jam{};
 
-  // GovtDef 0x60/0x64: pilot/combat skill as fractions. The loader scales the
-  // payload int16 values by 0.01 (DAT_00575e60) and applies the defaults 1.0
-  // (pilot) / 0.01 (combat) to degenerate inputs: pilot source < 1 -> 1.0,
-  // combat result < 0.01 -> 0.01.
-  float pilot_skill_scale = 1.0F;    // GovtDef 0x64 (payload +0x30)
-  float combat_rating_scale = 0.01F; // GovtDef 0x60 (payload +0x16)
+  // GovtDef 0x60/0x64: MaxOdds and SkillMult as fractions. The loader scales
+  // the payload int16 values by 0.01 (DAT_00575e60) and applies the defaults
+  // 0.01 (MaxOdds, payload +0x16) / 1.0 (SkillMult, payload +0x30) to
+  // degenerate inputs: MaxOdds result < 0.01 -> 0.01, SkillMult source < 1 ->
+  // 1.0. MaxOdds gates combat engagement; SkillMult scales ship speed/accel.
+  float max_odds = 0.01F;  // GovtDef 0x60 (payload +0x16)
+  float skill_mult = 1.0F; // GovtDef 0x64 (payload +0x30)
 
   std::uint32_t scan_mask_lo = 0; // GovtDef 0x68 (payload +0x54)
   std::uint32_t scan_mask_hi = 0; // GovtDef 0x6c (payload +0x58)

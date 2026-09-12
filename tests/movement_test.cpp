@@ -560,17 +560,17 @@ TEST_CASE("npc turn-rate floor is a no-op for a clean ship (computed==base)") {
         Catch::Approx(0.5F * std::numbers::pi_v<float> / 180.0F));
 }
 
-// Government combat_rating_scale applies to NPC thrust and max speed (but NOT
-// turn rate), mirroring the NPC branch of Ship_ComputeShipEffectiveThrust /
+// Government SkillMult applies to NPC thrust and max speed (but NOT turn rate),
+// mirroring the NPC branch of Ship_ComputeShipEffectiveThrust /
 // Ship_ComputeShipEffectiveMaxSpeed (0x004640a0 / 0x004642e0). Ships with no
 // faction keep the class base values.
-TEST_CASE("npc effective stats apply the government combat rating scale") {
+TEST_CASE("npc effective stats apply the government skill multiplier") {
   game::GameState state;
   // Hand-built government at zero-based index 0 (faction ids are zero-based in
   // the clean-room; the ScenarioData accessor adds 0x80).
   state.scenario.governments.clear();
   game::Government g;
-  g.combat_rating_scale = 0.5F;
+  g.skill_mult = 0.5F;
   state.scenario.governments.push_back(g);
 
   game::Ship ship; // faction_or_government_id defaults to -1

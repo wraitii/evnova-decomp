@@ -126,7 +126,7 @@ TEST_CASE("stellar defense battery fires, reloads, and respects the shot pool",
   state.system_reputation.assign(1, 0);
 
   Government govt;
-  govt.flee_shield_threshold = -1;
+  govt.crime_tol = -1;
   state.scenario.governments = {govt};
   game::System system;
   system.nav_defs[0] = 0x80;

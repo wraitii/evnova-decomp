@@ -2408,17 +2408,18 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
     stats.thrust_px_per_tick2 = 0.0F;
   }
 
-  // Government combat_rating_scale applies to thrust and max speed when the
-  // ship belongs to a government. Turn rate is not government-scaled. The
-  // skill-variance scale precedes the government scale in the original.
+  // Government SkillMult applies to thrust and max speed when the ship belongs
+  // to a government. Turn rate is not government-scaled. The skill-variance
+  // scale precedes the government scale in the original (0x004640a0 /
+  // 0x004642e0 multiply the GovtDef 0x64 SkillMult field).
   stats.max_speed_px_per_tick *= ship.skill_variance_scale;
   stats.thrust_px_per_tick2 *= ship.skill_variance_scale;
   if (ship.faction_or_government_id >= 0) {
     const Government *g = state.scenario.Government(
         static_cast<std::int16_t>(ship.faction_or_government_id + 0x80));
     if (g != nullptr) {
-      stats.max_speed_px_per_tick *= g->combat_rating_scale;
-      stats.thrust_px_per_tick2 *= g->combat_rating_scale;
+      stats.max_speed_px_per_tick *= g->skill_mult;
+      stats.thrust_px_per_tick2 *= g->skill_mult;
     }
   }
 
@@ -2495,8 +2496,8 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
 //
 // Stats come from NovaShip_ComputeEffectiveStats (Ship_ComputeShipEffective-
 // Thrust / EffectiveMaxSpeed NPC branch): turn = raw_maneuver*0.1 deg/tick,
-// max speed = raw_speed/100 px/tick * government combat_rating_scale,
-// thrust = raw_accel/10000*2 px/tick^2 * government combat_rating_scale. NPC
+// max speed = raw_speed/100 px/tick * government SkillMult,
+// thrust = raw_accel/10000*2 px/tick^2 * government SkillMult. NPC
 // ships carry no outfit inventory; ionization capacity comes from the class.
 // TODO(decomp): opcode 7/8/9 outfit bonuses, the per-ship skill_variance_scale
 // (+0x40) factor and disable/ionization damping when the NPC outfit/combat
@@ -3976,8 +3977,9 @@ bool NovaPlayer_TickTimedActionTransition(GameState &state,
   // TODO(decomp(0x0044d91e)) skipped: the viewport/radar redraw and the
   // per-panel dirty flags (the clean-room re-renders every frame).
 
-  // Rebuild the per-system reputations from each system government's bribe
-  // percentage (g_system_reputation over all 0x800 systems).
+  // Rebuild the per-system reputations from each system government's InitialRec
+  // (GovtDef 0x52, payload +0x14) over all 0x800 systems, matching
+  // Game_ResetNewGameReputation (0x004b4220).
   const std::size_t system_count =
       std::min(state.scenario.systems.size(), state.system_reputation.size());
   for (std::size_t i = 0; i < system_count; ++i) {
@@ -3986,8 +3988,7 @@ bool NovaPlayer_TickTimedActionTransition(GameState &state,
         govt >= 0
             ? state.scenario.Government(static_cast<std::int16_t>(govt + 0x80))
             : nullptr;
-    state.system_reputation[i] =
-        gov_def != nullptr ? gov_def->bribe_cost_percent : 0;
+    state.system_reputation[i] = gov_def != nullptr ? gov_def->initial_rec : 0;
   }
 
   // Conditional post-respawn auto-save (DAT_00596d2f: save at the first nav

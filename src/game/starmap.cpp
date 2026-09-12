@@ -1334,14 +1334,13 @@ void DrawGalaxy(SdlPlatform &platform,
     gov = state.scenario.Government(
         static_cast<std::int16_t>(sys.government_id + 0x80));
   }
-  // The original falls back to the first government table entry's threshold
-  // when the system has no (or an out-of-range) government.
+  // The original falls back to the first government table entry's CrimeTol
+  // (GovtDef 0x46, payload +0x08) when the system has no government.
   const std::int16_t t =
-      gov != nullptr
-          ? gov->flee_shield_threshold
-          : (!state.scenario.governments.empty()
-                 ? state.scenario.governments.front().flee_shield_threshold
-                 : 0);
+      gov != nullptr ? gov->crime_tol
+                     : (!state.scenario.governments.empty()
+                            ? state.scenario.governments.front().crime_tol
+                            : 0);
   const std::int32_t ti = t;
   int level = 0;
   const auto rep32 = static_cast<std::int32_t>(rep);
