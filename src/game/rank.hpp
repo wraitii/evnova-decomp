@@ -36,10 +36,10 @@ void Rank_Deactivate(GameState &state, std::int16_t rank_slot);
 Rank_HighestWeightedActiveSlot(const GameState &state, bool use_short_name);
 
 // Highest-weighted active + defined rank whose government_id matches
-// `government_id` and whose ShortName is non-empty; -1 when none. This is the
-// per-government <PSRK>/<SSRK> scan from the same function.
-[[nodiscard]] std::int16_t
-Rank_HighestWeightedActiveSlotForGovernment(const GameState &state,
-                                            std::int16_t government_id);
+// `government_id` and whose ConvName (`use_short_name` false) or ShortName
+// (true) is non-empty; -1 when none. This is the per-government scan from the
+// same function, used by the <PRKnnn>/<SRKnnn> mission-text tokens.
+[[nodiscard]] std::int16_t Rank_HighestWeightedActiveSlotForGovernment(
+    const GameState &state, std::int16_t government_id, bool use_short_name);
 
 } // namespace game

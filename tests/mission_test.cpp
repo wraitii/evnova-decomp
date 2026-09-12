@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
 #include <string>
+#include <string_view>
 
 using namespace game;
 
@@ -212,6 +213,46 @@ TEST_CASE("mission wildcard expansion resolves destinations and identity") {
   // <PST> comes from the ship class display name.
   INFO("expanded: " << expanded);
   CHECK(expanded.find("(<") == std::string::npos);
+}
+
+TEST_CASE("per-government rank tokens resolve by government id") {
+  GameState state;
+  state.scenario.ranks.assign(0x80, {});
+  auto &ranks = state.scenario.ranks;
+  ranks[0].defined = true;
+  ranks[0].active = true;
+  ranks[0].government_id = 0;
+  ranks[0].weight = 1;
+  ranks[0].conv_name = "Commander";
+  ranks[0].short_name = "Cdr";
+  ranks[1].defined = true;
+  ranks[1].active = true;
+  ranks[1].government_id = 3;
+  ranks[1].weight = 5;
+  ranks[1].conv_name = "Ambassador";
+  ranks[1].short_name = "Amb";
+
+  const auto expand = [&state](std::string_view text) {
+    return Mission_ExpandMissionWildcards(state, text, false, -1);
+  };
+  // nnn is the 0x80-based government resource id (128 -> government 0).
+  CHECK(expand("<PRK128>") == "Commander");
+  CHECK(expand("<SRK128>") == "Cdr");
+  CHECK(expand("<PRK131>") == "Ambassador");
+  CHECK(expand("<SRK131>") == "Amb");
+  // Not crossed: each token uses its own government.
+  CHECK(expand("<PRK128> and <SRK131>") == "Commander and Amb");
+  // Shipped-text shape: the Federation <PRK128> briefing must read the real
+  // rank name, not the "captain" fallback.
+  const std::string briefing =
+      expand("given the diplomatic rank of '<PRK128>', with all ...");
+  CHECK(briefing.find("'Commander'") != std::string::npos);
+  // Valid id with no matching rank -> the STR# 0x7d2 0x155 "captain" entry.
+  CHECK(expand("<PRK135>") == "captain");
+  // Out-of-range ids and malformed tokens are left untouched.
+  CHECK(expand("<PRK999>") == "<PRK999>");
+  CHECK(expand("<PRK5>") == "<PRK5>");
+  CHECK(expand("<PRK>") == "Ambassador");
 }
 
 TEST_CASE("mission pay wildcard handles the cost and percentage encodings") {
