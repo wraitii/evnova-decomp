@@ -175,7 +175,7 @@ extern bool NovaPlayer_TickTimedActionTransition(GameState &state,
 //   max_speed_px_per_tick = base_speed * govt_scale       (base = speed/100)
 //   turn_rate_deg_per_tick = base_turn * 0.1              (NOT govt-scaled;
 //                              Ship_ComputeShipMaxTurnRateDeg 0x00463e70)
-// Government combat_rating_scale applies only when the ship has a faction
+// Government SkillMult (GovtDef 0x64) applies only when the ship has a faction
 // (faction_or_government_id != -1). The per-ship skill_variance_scale (+0x40)
 // NPC acceleration and speed also include the per-ship skill_variance_scale
 // (+0x40), seeded by ShipClass_ComputeShipClassSkillVarianceScale (0x0046b870);

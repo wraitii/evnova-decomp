@@ -189,10 +189,8 @@ bool NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
                 ? state.system_reputation[static_cast<std::size_t>(
                       current_system)]
                 : 0;
-        // The original's SBORROW4 comparison is `rep + flee_threshold < 0`.
-        hostile = static_cast<int>(rep) +
-                      static_cast<int>(govt.flee_shield_threshold) <
-                  0;
+        // The original's SBORROW4 comparison is `rep + crime_tol < 0`.
+        hostile = static_cast<int>(rep) + static_cast<int>(govt.crime_tol) < 0;
         if (!hostile) {
           if ((govt.flags_primary & 0x0001U) == 0U) {
             const ShipClass *cls = state.scenario.Ship(
@@ -274,55 +272,55 @@ bool NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
           ? state.system_reputation[static_cast<std::size_t>(sys_id)]
           : 0;
 
-  const auto flee_threshold = [&](std::int16_t govt_id) -> std::int16_t {
+  const auto crime_tolerance = [&](std::int16_t govt_id) -> std::int16_t {
     if (govt_id < 0 || static_cast<std::size_t>(govt_id) >=
                            state.scenario.governments.size()) {
       return 0;
     }
     return state.scenario.governments[static_cast<std::size_t>(govt_id)]
-        .flee_shield_threshold;
+        .crime_tol;
   };
 
   // Xenophobic ship faction (flags_primary & 1): aid is admitted when the
-  // system reputation clears the flee threshold of the system government
+  // system reputation clears the crime tolerance of the system government
   // (or of government entry 0 when the system has no government).
   if ((govt.flags_primary & 0x0001U) != 0) {
     if (sys_govt == ship.faction_or_government_id) {
-      if (flee_threshold(sys_govt) < rep) {
+      if (crime_tolerance(sys_govt) < rep) {
         return true;
       }
     } else if (sys_govt < 0) {
-      if (flee_threshold(0) < rep) {
+      if (crime_tolerance(0) < rep) {
         return true;
       }
-    } else if (flee_threshold(sys_govt) < rep) {
+    } else if (crime_tolerance(sys_govt) < rep) {
       return true;
     }
   }
 
   // The 0x0002 flag and the allied/hostile ladders all admit aid when
-  // reputation + the relevant flee threshold stays negative (the original's
-  // SBORROW4 comparison, i.e. rep + threshold < 0).
+  // reputation + the relevant crime tolerance stays negative (the original's
+  // SBORROW4 comparison, i.e. rep + crime_tol < 0).
   if (sys_govt < 0) {
     if ((govt.flags_primary & 0x0002U) == 0) {
       return true;
     }
-    if (rep + flee_threshold(static_cast<std::int16_t>(faction)) < 0) {
+    if (rep + crime_tolerance(static_cast<std::int16_t>(faction)) < 0) {
       return true;
     }
   } else if (NovaGovernment_AreGovtsAllied(
                  state.scenario, sys_govt, ship.faction_or_government_id)) {
-    if (rep + flee_threshold(sys_govt) < 0) {
+    if (rep + crime_tolerance(sys_govt) < 0) {
       return true;
     }
   } else if (NovaGovernment_AreGovtsHostileOrXenophobic(
                  state.scenario, sys_govt, ship.faction_or_government_id)) {
-    if (rep + flee_threshold(sys_govt) < 0) {
+    if (rep + crime_tolerance(sys_govt) < 0) {
       return true;
     }
   } else if ((govt.flags_primary & 0x0002U) == 0) {
     return true;
-  } else if (rep + flee_threshold(sys_govt) < 0) {
+  } else if (rep + crime_tolerance(sys_govt) < 0) {
     return true;
   }
 
@@ -362,9 +360,10 @@ bool NovaGovernment_TryTriggerAssistanceEncounter(GameState &state,
   }
   const Government *reinforcement_govt =
       state.scenario.GovernmentByIndex(fleet->government_id);
+  // The original compares the reinforcement government's MaxOdds (GovtDef 0x60,
+  // payload +0x16) against the ship's combat odds score, not SkillMult.
   if (reinforcement_govt == nullptr ||
-      (!force &&
-       reinforcement_govt->pilot_skill_scale * 0.5F >= ship.ai_odds_score)) {
+      (!force && reinforcement_govt->max_odds * 0.5F >= ship.ai_odds_score)) {
     return false;
   }
 

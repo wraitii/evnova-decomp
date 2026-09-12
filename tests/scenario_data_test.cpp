@@ -323,17 +323,21 @@ TEST_CASE("government table loads and decodes the Federation class",
   CHECK(f->classes[1] == -1);
   CHECK(f->ally_classes == std::array<std::int16_t, 4>{0, 1, 12, 13});
   CHECK(f->enemy_classes == std::array<std::int16_t, 4>{2, 10, 16, 9});
-  // Reputation penalties (payload +0x0a..+0x12).
-  CHECK(f->disable_penalty == 1);
-  CHECK(f->board_penalty == 1);
-  CHECK(f->kill_penalty == 2);
+  // ScanFine/CrimeTol (payload +0x06/+0x08) and the reputation penalty block
+  // (payload +0x0a..+0x14).
+  CHECK(f->scan_fine == 0);
+  CHECK(f->crime_tol == 6);
+  CHECK(f->smug_penalty == 1);
+  CHECK(f->disab_penalty == 1);
+  CHECK(f->board_penalty == 2);
+  CHECK(f->kill_penalty == 5);
   CHECK(f->shoot_penalty == 5);
-  CHECK(f->max_odds == 5);
-  // Skill fractions: pilot src 100 -> 1.0, combat src 200 -> 2.0.
-  CHECK(f->pilot_skill_scale == 1.0F);
-  CHECK(f->combat_rating_scale == 2.0F);
-  // Inherent jamming: jam[0] payload +0x06 = 0; jam[1..3] from +0x5c = 7/5/0.
-  CHECK(f->inherent_jam == std::array<std::int16_t, 4>{0, 7, 5, 0});
+  CHECK(f->initial_rec == 0);
+  // Skill fractions: MaxOdds src 200 -> 2.0, SkillMult src 100 -> 1.0.
+  CHECK(f->max_odds == 2.0F);
+  CHECK(f->skill_mult == 1.0F);
+  // Inherent jamming: InhJam1..4 payload +0x5c..0x62 = 7/5/0/0.
+  CHECK(f->inherent_jam == std::array<std::int16_t, 4>{7, 5, 0, 0});
   // Theme color from packed RGB24 at payload +0xa4 = 0x002c2caf.
   CHECK(f->theme_red == 0x2c);
   CHECK(f->theme_green == 0x2c);

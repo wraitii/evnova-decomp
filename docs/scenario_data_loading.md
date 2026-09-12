@@ -81,15 +81,17 @@ globals (AGENTS.md).
   flet spawner with AI behavior 4, so reinforcement fleets share the
   state-0x15 restricted-stellar jump-in / state-0x08 slowdown arrival choice.
 - **g\x9avt (government)**: header +00 voice, +02 flags_primary, +04
-  scan_mask_short, +06 jam1, +08 flee, +0a disable_pen / +0c board / +0e kill /
-  +10 shoot penalties, +12 max_odds, +14 bribe %, +16 combat_rating_src, +18
-  class1-4, +20 ally1-4, +28 enemy1-4, +30 pilot_skill_src, +32 ai_skill,
-  +34 comm name, +44 name-table name, +54 scan_lo, +58 scan_hi, +5c..+62
-  jam2-4, +64 medium name, +a4 theme-color RGB24, +a8 ship-color RGB24, +ac
-  interface_id, +ae news_pic_id. The loader recodes the voice code by range
-  (raw 0..7 / +1000 / +2000 -> mode -1/1/0) and scales the skill shorts by
-  0.01f (`DAT_00575e60`). Verified against the Federation (0x80): flags 0xe2b0,
-  enemies 2/10/16/9, theme 0x2c2caf, interface 0x82.
+  scan_mask_short, +06 ScanFine, +08 CrimeTol, +0a SmugPenalty / +0c
+  DisabPenalty / +0e BoardPenalty / +10 KillPenalty / +12 ShootPenalty,
+  +14 InitialRec, +16 MaxOdds, +18 class1-4, +20 ally1-4, +28 enemy1-4,
+  +30 SkillMult, +32 ai_skill, +34 comm name, +44 name-table name, +54 scan_lo,
+  +58 scan_hi, +5c..+62 InhJam1-4, +64 medium name, +a4 theme-color RGB24, +a8
+  ship-color RGB24, +ac interface_id, +ae news_pic_id. The loader recodes the
+  voice code by range (raw 0..7 / +1000 / +2000 -> mode -1/1/0) and scales the
+  MaxOdds/SkillMult shorts by 0.01f (`DAT_00575e60`). Verified against the
+  Federation (0x80): flags 0xe2b0, enemies 2/10/16/9, theme 0x2c2caf, interface
+  0x82, ScanFine 0, CrimeTol 6, penalties 1/1/2/5/5, InitialRec 0, MaxOdds 2.0,
+  SkillMult 1.0, InhJam 7/5/0/0.
 - **fl\x91t (random-encounter fleet def)**: lead_ship_class +00, escort_ship_class_ids
   [4] +02, escort_min_count [4] +0a, escort_max_count [4] +12, government_id +1a,
   spawn_system_filter +1c, availability_expr +1e, arrival_message_id +11e,

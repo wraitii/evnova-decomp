@@ -739,8 +739,8 @@ void UpdateMenuCenterPreview(NovaRuntime &runtime, std::uint64_t now_ms) {
 
 // Ghidra 0x00468d90 NovaUi_DrawSystemFactionConflictStatus (with the
 // System_HasUsableTravelDestination 0x00468af0 gate the caller applies first).
-// Maps the system reputation against the owning government's crime tolerance
-// (GovtDef flee_shield_threshold) onto the STR# 0x86 "Legal Status" ladder;
+// Maps the system reputation against the owning government's CrimeTol (GovtDef
+// 0x46, payload +0x08) onto the STR# 0x86 "Legal Status" ladder;
 // hazard-bearing destinations report the Military Dictator/Governor rows and
 // xenophobic governments (flags_primary bit 0) report nothing (index 0 ->
 // STR# 0x7d2 0x18c "N/A"). The original's signed-overflow ladder reduces to
@@ -774,7 +774,7 @@ MenuSystemLegalStatusText(const game::GameState &state,
   if (system->government_id >= 0) {
     if (const auto *gov =
             state.scenario.GovernmentByIndex(system->government_id)) {
-      tolerance = gov->flee_shield_threshold;
+      tolerance = gov->crime_tol;
     }
   }
   const int reputation =

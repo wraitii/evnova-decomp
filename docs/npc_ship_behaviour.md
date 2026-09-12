@@ -327,7 +327,8 @@ verified):
 6. **Government target passes** — for a governmented ship: with `flags_primary`
    bit 0 clear and behavior < 5, an ally-support scan joins an allied ship's
    current fight when the target's perceived strength fits
-   `own_strength * pilot_skill_scale`; then a near-player reputation/odds gate
+   `own_strength * max_odds` (GovtDef 0x60, payload +0x16); then a near-player
+   reputation/odds gate
    (within `random_ai_render_cadence * 600` on both axes) and an
    inherent-combat-government 1-in-50 roll can flag the player; with bit 0 set
    an aggressive scan runs over same-system contacts including the player.

@@ -906,11 +906,12 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 // loader's government section (0x004bd3c0; loop reads the payload big-endian
 // and derives voice_type_mode, the fly-scaled skill fractions and the 8-bit
 // theme colors). Payload layout (payload offsets in parentheses):
-//   voice_type_code +0, flags_primary +2, scan_mask_short +4, jam1 +6,
-//   flee +8, disable_penalty +10, board +12, kill +14, shoot +16, max_odds
-//   +18, bribe +20, combat_rating_src +22, class1-4 +0x18, ally1-4 +0x20,
-//   enemy1-4 +0x28, pilot_skill_src +0x30, ai_skill +0x32, comm_name +0x34,
-//   target_code +0x44, scan_lo +0x54, scan_hi +0x58, jam2-4 +0x5c..+0x62,
+//   voice_type_code +0, flags_primary +2, scan_mask_short +4, scan_fine +6,
+//   crime_tol +8, smug_penalty +10, disab_penalty +12, board_penalty +14,
+//   kill_penalty +16, shoot_penalty +18, initial_rec +20, max_odds_src +22,
+//   class1-4 +0x18, ally1-4 +0x20, enemy1-4 +0x28, skill_mult_src +0x30,
+//   ai_skill +0x32, comm_name +0x34,
+//   target_code +0x44, scan_lo +0x54, scan_hi +0x58, inh_jam1-4 +0x5c..+0x62,
 //   medium_name +0x64, theme_color RGB24 +0xa4, ship_color RGB24 +0xa8,
 //   interface_id +0xac, news_pic_id +0xae. The record name (resource.map, via
 //   ResourceData_ReadEntryMetadata + StripSubtitleSuffix) is the display name.
@@ -942,19 +943,19 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 
   g.flags_primary = ReadBe16(bytes, 0x02);
   g.scan_mask_short = ReadBe16(bytes, 0x04);
-  g.inherent_jam[0] = ReadBeI16(bytes, 0x06);
-  g.flee_shield_threshold = ReadBeI16(bytes, 0x08);
-  g.disable_penalty = ReadBeI16(bytes, 0x0a);
-  g.board_penalty = ReadBeI16(bytes, 0x0c);
-  g.kill_penalty = ReadBeI16(bytes, 0x0e);
-  g.shoot_penalty = ReadBeI16(bytes, 0x10);
-  g.max_odds = ReadBeI16(bytes, 0x12);
-  g.bribe_cost_percent = ReadBeI16(bytes, 0x14);
+  g.scan_fine = ReadBeI16(bytes, 0x06);
+  g.crime_tol = ReadBeI16(bytes, 0x08);
+  g.smug_penalty = ReadBeI16(bytes, 0x0a);
+  g.disab_penalty = ReadBeI16(bytes, 0x0c);
+  g.board_penalty = ReadBeI16(bytes, 0x0e);
+  g.kill_penalty = ReadBeI16(bytes, 0x10);
+  g.shoot_penalty = ReadBeI16(bytes, 0x12);
+  g.initial_rec = ReadBeI16(bytes, 0x14);
 
-  // combat_rating_scale = int16(payload +0x16) * 0.01; degenerate -> 0.01.
-  g.combat_rating_scale = static_cast<float>(ReadBeI16(bytes, 0x16)) * 0.01F;
-  if (g.combat_rating_scale < 0.01F) {
-    g.combat_rating_scale = 0.01F;
+  // max_odds = int16(payload +0x16) * 0.01; degenerate -> 0.01.
+  g.max_odds = static_cast<float>(ReadBeI16(bytes, 0x16)) * 0.01F;
+  if (g.max_odds < 0.01F) {
+    g.max_odds = 0.01F;
   }
 
   for (std::size_t i = 0; i < 4; ++i) {
@@ -963,11 +964,11 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
     g.enemy_classes[i] = ReadBeI16(bytes, 0x28 + i * 2);
   }
 
-  // pilot_skill_scale = int16(payload +0x30) * 0.01; source < 1 -> 1.0.
-  const std::int16_t pilot_src = ReadBeI16(bytes, 0x30);
-  g.pilot_skill_scale = static_cast<float>(pilot_src) * 0.01F;
-  if (pilot_src < 1) {
-    g.pilot_skill_scale = 1.0F;
+  // skill_mult = int16(payload +0x30) * 0.01; source < 1 -> 1.0.
+  const std::int16_t skill_src = ReadBeI16(bytes, 0x30);
+  g.skill_mult = static_cast<float>(skill_src) * 0.01F;
+  if (skill_src < 1) {
+    g.skill_mult = 1.0F;
   }
   g.ai_skill_percent = ReadBeI16(bytes, 0x32);
 
@@ -979,9 +980,9 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 
   g.scan_mask_lo = ReadBe32(bytes, 0x54);
   g.scan_mask_hi = ReadBe32(bytes, 0x58);
-  // jam[1..3] from +0x5c, each clamped to [0,100].
-  for (std::size_t i = 1; i < 4; ++i) {
-    g.inherent_jam[i] = ReadBeI16(bytes, 0x5c + (i - 1) * 2);
+  // InhJam1..4 from +0x5c, each clamped to [0,100].
+  for (std::size_t i = 0; i < 4; ++i) {
+    g.inherent_jam[i] = ReadBeI16(bytes, 0x5c + i * 2);
     if (g.inherent_jam[i] > 100) {
       g.inherent_jam[i] = 100;
     } else if (g.inherent_jam[i] < 0) {

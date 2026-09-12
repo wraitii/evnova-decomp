@@ -3132,8 +3132,8 @@ void NovaAi_ApplyControls(GameState &state,
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   // Effective stats via the shared helper (NPC branch of
   // Ship_ComputeShipEffectiveThrust / Ship_ComputeShipEffectiveMaxSpeed /
-  // Ship_ComputeShipMaxTurnRateDeg): class base values, government
-  // combat_rating_scale applied to speed/thrust, no outfit/status yet. Same
+  // Ship_ComputeShipMaxTurnRateDeg): class base values, government SkillMult
+  // applied to speed/thrust, no outfit/status yet. Same
   // derivation as NovaShip_IntegrateNpcMovement.
   const NpcEffectiveStats eff =
       cls ? NovaShip_ComputeEffectiveStats(state, ship, *cls)
