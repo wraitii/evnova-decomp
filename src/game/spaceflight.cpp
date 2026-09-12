@@ -2400,9 +2400,12 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
       static_cast<float>(ship_class.accel) / 10000.0F * 2.0F;
   // Ship_ComputeShipEffectiveThrust (0x004640a0) and
   // Ship_ComputeShipEffectiveMaxSpeed (0x004642e0) return zero for the NPC
-  // capability flag 0x400 before applying any other modifier.
+  // capability flag 0x400 before applying any other modifier. The turn-rate
+  // helper (0x00463e70) has no such check (disasm-verified), so only speed and
+  // thrust are zeroed here; the turn rate still runs the full NPC branch below.
   if ((ship_class.capability_flags & 0x0400U) != 0U) {
-    return {};
+    stats.max_speed_px_per_tick = 0.0F;
+    stats.thrust_px_per_tick2 = 0.0F;
   }
 
   // Government combat_rating_scale applies to thrust and max speed when the

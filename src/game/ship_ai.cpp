@@ -594,14 +594,27 @@ WeaponBankCanFire(const GameState &state, const Ship &ship, std::int16_t bank) {
   return true;
 }
 
-[[nodiscard]] bool WeaponCanTrackTarget(const ShipClass &ship_class,
+// Guided-turn threshold (Ghidra DAT_00575780 = 2.0f deg/tick).
+constexpr float kGuidedTrackMinTurnRate = 2.0F;
+
+// Ghidra 0x00463dc0 Weapon_WeaponCanTrackTarget. `turn_rate_deg_per_tick` is
+// the firing ship's Ship_ComputeShipMaxTurnRateDeg result (passed in so the
+// bank walks can hoist it; the original recomputes it per call with no side
+// effects). Once the ship turns harder than 3 deg/tick, a flags_primary 0x0008
+// weapon is rejected outright, and any weapon whose guided_turn_rate is at or
+// below 2.0 deg/tick (DAT_00575780) is rejected. Slower ships pass the gate
+// without consulting either field. The original int-converts the rate with C
+// truncation toward zero; an unordered (NaN) guided_turn_rate counts as
+// trackable (the FCOMP unordered path returns true).
+[[nodiscard]] bool WeaponCanTrackTarget(float turn_rate_deg_per_tick,
                                         const Weapon &weapon) {
-  // Weapon_WeaponCanTrackTarget rejects flagged tracking weapons when the
-  // caller's maximum turn rate exceeds three degrees. The remaining
-  // field_0x58 threshold is not yet represented in the clean Weapon record;
-  // unflagged weapons pass this gate exactly as in the original.
-  return (weapon.flags & 0x0008U) == 0 ||
-         static_cast<float>(ship_class.turn_rate) * 0.1F <= 3.0F;
+  if (static_cast<int>(turn_rate_deg_per_tick) <= 3) {
+    return true;
+  }
+  if ((weapon.flags & 0x0008U) != 0U) {
+    return false;
+  }
+  return !(weapon.guided_turn_rate <= kGuidedTrackMinTurnRate);
 }
 
 [[nodiscard]] bool IsWeaponInTargetRange(const Weapon &weapon,
@@ -876,12 +889,16 @@ bool NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
   // strict speed comparison.
   const float distance_sq =
       SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+  // Ship_ComputeShipMaxTurnRateDeg (0x00463e70), hoisted out of the bank walk.
+  const float turn_rate_deg_per_tick =
+      NovaShip_ComputeEffectiveStats(state, ship, *ship_class)
+          .turn_rate_deg_per_tick;
   bool has_intercept_bank = false;
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
     const Weapon *weapon = state.scenario.Weapon(bank + 0x80);
     if (weapon == nullptr || weapon->weapon_mode_code != 1 ||
         !WeaponBankCanFire(state, ship, bank) ||
-        !WeaponCanTrackTarget(*ship_class, *weapon) ||
+        !WeaponCanTrackTarget(turn_rate_deg_per_tick, *weapon) ||
         !IsWeaponInTargetRange(*weapon, distance_sq)) {
       continue;
     }
@@ -5676,6 +5693,12 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
   const ShipClass *ship_class = ShipClassFor(state, ship);
   const float distance_sq =
       SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
+  // Ship_ComputeShipMaxTurnRateDeg (0x00463e70), hoisted out of the bank walk.
+  const float turn_rate_deg_per_tick =
+      ship_class != nullptr
+          ? NovaShip_ComputeEffectiveStats(state, ship, *ship_class)
+                .turn_rate_deg_per_tick
+          : 0.0F;
 
   std::int16_t chosen = -1;
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
@@ -5685,8 +5708,8 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
     if (weapon == nullptr || bs.ammo <= 0) {
       continue;
     }
-    const bool track_ok =
-        ship_class != nullptr && WeaponCanTrackTarget(*ship_class, *weapon);
+    const bool track_ok = ship_class != nullptr &&
+                          WeaponCanTrackTarget(turn_rate_deg_per_tick, *weapon);
     if (weapon->weapon_mode_code != 1 || !track_ok) {
       continue;
     }
