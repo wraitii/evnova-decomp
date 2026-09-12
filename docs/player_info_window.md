@@ -187,7 +187,7 @@ counts pluralise through the "ton"/"tons" pool `DAT_0072d3cc/.4cc` and
 translated through `NovaCommand_TranslateByInputMap`.
 
 - **Cargo text** (0x7d5278): header STR# 0x16a "Other cargo:" + mass check
-  (`Ship_ComputeShipTotalMass` vs `Outfit_ComputeFleetCargoCapacity` → 0x16e
+  (`Ship_ComputeShipTotalCargoCapacity` vs `Outfit_ComputeFleetCargoCapacity` → 0x16e
   "free space"/0x16d) + ":": one entry per commodity (0x100-stride name
   table `DAT_0069d2cc`, `*` marks hidden) with summed bins — the 6 player
   cargo bins plus every active mission's cargo (mission cargo type/quantity

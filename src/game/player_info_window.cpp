@@ -963,9 +963,10 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
       // Outfit_HasAnyCargoMissionOrJunk (0x0046a680) passes (the port's
       // builder is TODO(decomp), so texts.cargo stays empty and the page
       // shows the empty-hold fallback, selected by the decompile's
-      // mass-vs-capacity branch 0x10c/0x10d).
-      const bool under_capacity = Outfit_ComputePlayerTotalMass(state) <
-                                  Outfit_ComputePlayerFleetCargoCapacity(state);
+      // capacity-vs-fleet-capacity branch 0x10c/0x10d).
+      const bool under_capacity =
+          Outfit_ComputePlayerTotalCargoCapacity(state) <
+          Outfit_ComputePlayerFleetCargoCapacity(state);
       DrawTextPage(platform,
                    font_cache,
                    texts.cargo,

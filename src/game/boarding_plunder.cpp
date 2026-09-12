@@ -1768,7 +1768,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
             static_cast<std::int16_t>(0x80 + outfit_index);
         int transferred = 0;
         // Transfer up to the offer while the ownership maximum allows (the
-        // original's mass gate Ship_ComputeShipCurrentMass is approximated by
+        // original's free-mass gate Ship_ComputeShipFreeMass is approximated by
         // the ownership clamp; TODO(decomp): free-mass accounting).
         while (transferred < options.ammo_quantity) {
           const OutfitOwnership own =
@@ -2142,7 +2142,8 @@ void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
   // The original walks random bins from the victim's ShipState.field_0x7a..0x84
   // cargo into the boarder's bins, capped by the boarder's free Holds (class
   // cargo_holds minus its current bins) and by the victim's capacity
-  // (Ship_ComputeShipTotalMass for the player, class cargo_holds for NPCs).
+  // (Ship_ComputeShipTotalCargoCapacity for the player, class cargo_holds for
+  // NPCs).
   // The port models the player's bins on PlayerInventory; NPC hulls have no
   // cargo model and Ship_AllocateShipSlotInSystem leaves their bins zero, so
   // only a player victim can contribute. The boarder is an NPC (the player
@@ -2153,7 +2154,8 @@ void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
     const std::int32_t boarder_holds =
         boarder_class != nullptr ? boarder_class->cargo_holds : 0;
     std::int32_t boarder_free = boarder_holds;
-    const std::int32_t victim_capacity = Outfit_ComputePlayerTotalMass(state);
+    const std::int32_t victim_capacity =
+        Outfit_ComputePlayerTotalCargoCapacity(state);
     std::int32_t victim_total = 0;
     for (const std::int16_t bin : state.inventory.cargo_bins) {
       if (bin > 0) {

@@ -105,11 +105,12 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
     const auto *ship_class = state.scenario.Ship(static_cast<std::int16_t>(
         state.player.ship_class_id + kResourceIdBase));
     if (ship_class != nullptr) {
-      // Mission_ActivateMissionAtSlot checks both cargo and hull mass before
-      // opening its original error dialog. Outfit purchase mass is already
-      // normalized for hull-proportional outfits by ScenarioData.
-      const std::int32_t total_mass = Outfit_ComputePlayerTotalMass(state);
-      if (total_mass < definition.cargo_qty_tons ||
+      // Mission_ActivateMissionAtSlot checks both the ship's total cargo
+      // capacity and its remaining free cargo space before opening its
+      // original error dialog.
+      const std::int32_t total_capacity =
+          Outfit_ComputePlayerTotalCargoCapacity(state);
+      if (total_capacity < definition.cargo_qty_tons ||
           Outfit_ComputeRemainingCargoSpace(state) <
               definition.cargo_qty_tons) {
         return false;
@@ -1699,10 +1700,10 @@ bool NovaStellar_AreStellarsEquivalent(const GameState &state,
 bool Mission_TryConsumeMissionInteractionResources(GameState &state,
                                                    std::int16_t count) {
   if (count > 0) {
-    if (Outfit_ComputePlayerTotalMass(state) < count) {
-      // The original shows the STR# 0x7d2 0x165 "not enough cargo mass"
+    if (Outfit_ComputePlayerTotalCargoCapacity(state) < count) {
+      // The original shows the STR# 0x7d2 0x165 "not enough cargo space"
       // selection dialog. UI-owned; not reconstructed (TODO(decomp)).
-      NovaLog::Todo("mission interaction denied: total mass below {} tons",
+      NovaLog::Todo("mission interaction denied: cargo capacity below {} tons",
                     count);
       return false;
     }

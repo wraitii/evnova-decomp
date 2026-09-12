@@ -768,15 +768,14 @@ bool NovaOutfit_GrantOutfitToPlayer(GameState &state,
 // ---------------------------------------------------------------------------
 // Cargo bookkeeping
 // ---------------------------------------------------------------------------
-// The player ship's total cargo + junk. Mirrors
-// Outfit_ComputePlayerCargoAndJunkTotal (0x0046a5d0): the 6 cargo bins plus
-// every active mission's carried cargo (carrying_resources and
-// cargo_qty_tons >= 0) plus junk quantities.
-std::int16_t Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state) {
+namespace {
+
+// Tonnage carried by active missions (MisnActive runtime record +0x33 carrying
+// flag and +0x14 CargoQty, excluding negative quantities). This is the shared
+// mission-cargo term read by both the cargo total (0x0046a5d0) and the
+// remaining-space formula (0x0046a7c0).
+std::int32_t SumActiveMissionCargoTons(const GameState &state) {
   std::int32_t total = 0;
-  for (const std::int16_t bin : state.inventory.cargo_bins) {
-    total += bin;
-  }
   for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
     if (!state.active_mission_runtime_flags[slot].is_active) {
       continue;
@@ -786,6 +785,24 @@ std::int16_t Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state) {
       total += mission.cargo_qty_tons;
     }
   }
+  return total;
+}
+
+} // namespace
+
+// The player ship's total cargo + junk. Mirrors
+// Outfit_ComputePlayerCargoAndJunkTotal (0x0046a5d0): the 6 cargo bins plus
+// every active mission's carried cargo (carrying_resources and
+// cargo_qty_tons >= 0) plus junk quantities. The original sums the bins in a
+// 16-bit accumulator then adds mission cargo and junk in 32 bits; the caller
+// observes only the low 16 bits (all call sites narrow to short), which the
+// final cast reproduces.
+std::int16_t Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state) {
+  std::int32_t total = 0;
+  for (const std::int16_t bin : state.inventory.cargo_bins) {
+    total += bin;
+  }
+  total += SumActiveMissionCargoTons(state);
   for (const std::int16_t junk : state.inventory.junk_counts) {
     if (junk > 0) {
       total += junk;
@@ -794,15 +811,11 @@ std::int16_t Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state) {
   return static_cast<std::int16_t>(total);
 }
 
-// Ghidra 0x00469760 Outfit_ComputeFleetCargoCapacity. Player fleet cargo
-// capacity = the player's own outfit-derived capacity (no NPC escorts yet).
-std::int16_t Outfit_ComputePlayerFleetCargoCapacity(const GameState &state) {
-  return static_cast<std::int16_t>(
-      Outfit_ComputePlayerEffectiveStats(state).cargo_capacity);
-}
-
-// Ghidra 0x0046a730 Ship_ComputeShipTotalMass.
-std::int32_t Outfit_ComputePlayerTotalMass(const GameState &state) {
+// Ghidra 0x0046a730 Ship_ComputeShipTotalCargoCapacity. The player's total
+// cargo capacity: class Holds plus ModType-2 (cargo space) outfit mods
+// weighted by owned count. The original multiplies each (owned * ModVal) in
+// 16 bits, so mirror that truncation.
+std::int32_t Outfit_ComputePlayerTotalCargoCapacity(const GameState &state) {
   if (state.player.ship_class_id < 0) {
     return 0;
   }
@@ -811,26 +824,95 @@ std::int32_t Outfit_ComputePlayerTotalMass(const GameState &state) {
   if (ship_class == nullptr) {
     return 0;
   }
-  std::int32_t total_mass = ship_class->mass_tons;
+  std::int32_t capacity = ship_class->cargo_holds;
   for (std::size_t outfit_id = 0;
-       outfit_id < state.inventory.outfit_owned_count.size();
+       outfit_id < state.inventory.outfit_owned_count.size() &&
+       outfit_id < state.scenario.outfits.size();
        ++outfit_id) {
     const auto owned = state.inventory.outfit_owned_count[outfit_id];
-    if (owned <= 0 || outfit_id >= state.scenario.outfits.size()) {
+    if (owned <= 0) {
       continue;
     }
-    total_mass +=
+    for (const Effect &effect :
+         OutfitEffects(state.scenario.outfits[outfit_id])) {
+      if (effect.type == static_cast<std::int16_t>(OutfitEffect::kCargoSpace)) {
+        capacity += static_cast<std::uint16_t>(
+            static_cast<std::int32_t>(owned) * effect.val);
+      }
+    }
+  }
+  return capacity;
+}
+
+// Ghidra 0x00469760 Outfit_ComputeFleetCargoCapacity. Player fleet cargo
+// capacity starts from the player ship's total cargo capacity and adds
+// eligible escort freighters' holds. TODO(decomp): escort hulls (behavior-6
+// followers with no mission-fleet slot) are not modelled yet.
+std::int16_t Outfit_ComputePlayerFleetCargoCapacity(const GameState &state) {
+  std::int32_t capacity =
+      static_cast<std::int16_t>(Outfit_ComputePlayerTotalCargoCapacity(state));
+  return static_cast<std::int16_t>(std::min<std::int32_t>(capacity, 32000));
+}
+
+// Ghidra 0x00463470 Ship_ComputeShipFreeMass.
+std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state) {
+  if (state.player.ship_class_id < 0) {
+    return 0;
+  }
+  const auto *ship_class = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  if (ship_class == nullptr) {
+    return 0;
+  }
+  // Ghidra reads ShipClassDef.free_mass (+0x4), the Bible FreeMass allowance
+  // (shp payload +0x0c), NOT mass_tons (+0x9ee).
+  std::int32_t free_mass = ship_class->free_mass;
+  for (std::size_t outfit_id = 0;
+       outfit_id < state.inventory.outfit_owned_count.size() &&
+       outfit_id < state.scenario.outfits.size();
+       ++outfit_id) {
+    const auto owned = state.inventory.outfit_owned_count[outfit_id];
+    if (owned <= 0) {
+      continue;
+    }
+    free_mass -=
         static_cast<std::int32_t>(owned) *
         state.scenario.outfits[outfit_id].PurchaseMass(ship_class->mass_tons);
   }
-  return total_mass;
+  return std::max<std::int32_t>(0, free_mass);
 }
 
-// Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace.
+// Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace. "Remaining" is the
+// player ship's own free holds after mission cargo and the bins/junk overflow
+// beyond the escort freighters' extra capacity. When the fleet has no extra
+// holds (single ship, the only case this build models today) the result is
+// simply ship_capacity - carried and is NOT clamped: callers that need a
+// non-negative value clamp it themselves (e.g. 0x0049c050).
 std::int16_t Outfit_ComputeRemainingCargoSpace(const GameState &state) {
-  const std::int32_t capacity = Outfit_ComputePlayerFleetCargoCapacity(state);
-  const std::int32_t used = Outfit_ComputePlayerCargoAndJunkTotal(state);
-  return static_cast<std::int16_t>(std::max<std::int32_t>(0, capacity - used));
+  const std::int32_t ship_capacity =
+      Outfit_ComputePlayerTotalCargoCapacity(state);
+  const std::int32_t fleet_capacity =
+      Outfit_ComputePlayerFleetCargoCapacity(state);
+  const std::int32_t carried = Outfit_ComputePlayerCargoAndJunkTotal(state);
+  const std::int32_t mission_cargo = SumActiveMissionCargoTons(state);
+
+  const auto ship_capacity_16 = static_cast<std::int16_t>(ship_capacity);
+  const auto fleet_capacity_16 = static_cast<std::int16_t>(fleet_capacity);
+  if (ship_capacity_16 < fleet_capacity_16) {
+    // Escort freighters add holds. Ordinary bins/junk fill that extra space
+    // first; only the overflow above it, plus all mission cargo, is charged
+    // against the player ship's own holds.
+    std::int32_t overflow = (static_cast<std::int16_t>(carried) -
+                             static_cast<std::int16_t>(mission_cargo)) -
+                            (static_cast<std::int32_t>(fleet_capacity_16) -
+                             static_cast<std::int32_t>(ship_capacity_16));
+    if (static_cast<std::int16_t>(overflow) < 0) {
+      overflow = 0;
+    }
+    return static_cast<std::int16_t>(ship_capacity_16 -
+                                     (overflow + mission_cargo));
+  }
+  return static_cast<std::int16_t>(ship_capacity - carried);
 }
 
 // Ghidra 0x0041f330 Outfit_RedistributeFleetCargoOverflow. See the header.
@@ -918,7 +1000,7 @@ void NovaOutfit_RedistributeFleetCargoOverflow(GameState &state,
       continue;
     }
     const std::int32_t ship_capacity =
-        slot == 0 ? Outfit_ComputePlayerTotalMass(state)
+        slot == 0 ? Outfit_ComputePlayerTotalCargoCapacity(state)
                   : (ship_class != nullptr ? ship_class->cargo_holds : 0);
     float stored = 0.0F;
     if (slot == 0) {

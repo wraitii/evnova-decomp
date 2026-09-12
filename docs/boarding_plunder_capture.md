@@ -340,8 +340,8 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    - `NovaBoarding_BoardShipAndTransferCargo` (0x00412550) now ports the
      random-bin cargo plunder for a player victim: the boarder's free holds
      are its class `cargo_holds` (its own bins are unmodelled), the victim's
-     capacity is `Outfit_ComputePlayerTotalMass` (the original's
-     `Ship_ComputeShipTotalMass`), and bins transfer one at a time into the
+     capacity is `Outfit_ComputePlayerTotalCargoCapacity` (the original's
+     `Ship_ComputeShipTotalCargoCapacity`), and bins transfer one at a time into the
      free-holds budget. NPC victim bins stay zero (matching
      `Ship_AllocateShipSlotInSystem`). The loot overlay now reports the
      stolen tonnage. `tests/cargo_test.cpp`.
