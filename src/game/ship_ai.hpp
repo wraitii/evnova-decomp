@@ -343,6 +343,15 @@ NovaAiShip_IsShipAssistingPlayerState0xF(const GameState &state,
 NovaAiShip_IsShipLockedOnAttackerInState4(const Ship &ship,
                                           const Ship &attacker);
 
+// Ghidra 0x004124f0 Ship_IsShipLockedOnTarget. True when the ship is in a
+// boarding/capture lock (AI state 0x0D, or state 4 with control mode 0x0F) and
+// holds `target`'s instance id as its primary target. Shot_SpawnShotFromWeapon
+// and Shot_QueueBeamHit use it to mark locked-on shots non-lethal (leave one
+// armor point). Confidence: high (57-byte predicate; state/control/offset
+// fields verified in disassembly).
+[[nodiscard]] bool NovaAiShip_IsShipLockedOnTarget(const Ship &ship,
+                                                   const Ship &target);
+
 // Ghidra 0x00410ce0 / 0x00410e80 / 0x00410ec0 / 0x00410ee0 / 0x00410f00 /
 // 0x004112a0. Small AI state/control-mode predicates used by the supervisors,
 // the escort command dispatch, and the disable-outfit logic:
