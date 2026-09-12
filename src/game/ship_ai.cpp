@@ -3200,11 +3200,16 @@ void NovaAi_ApplyControls(GameState &state,
   // mode for disabled ships (they fall through with thrust 0).
   const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
 
-  // The mode-0x6 evasive-break player gate (NovaAi_PlayerCombatRatingGate
-  // 0x0046b330: a 1-in-0x540 roll beaten by the player's combat-rating
-  // points). The clean-room does not track the player's combat rating, so the
-  // gate conservatively fails (TODO(decomp): g_player_combat_rating_points).
-  auto player_combat_rating_gate = [&]() { return false; };
+  // Ghidra 0x0046b330 NovaAi_PlayerCombatRatingGate. Rolls
+  // NovaRandom_Range(0x540) and succeeds when the player's combat-rating
+  // points reach roll + 0x100: the pass chance rises from 0 at <= 0x100
+  // (256) points to 1 at >= 0x63f (1599). The original shares the global LCG;
+  // the clean-room draws from GameState.rng like the other ports.
+  auto player_combat_rating_gate = [&]() {
+    const int roll = static_cast<int>(
+        std::uniform_int_distribution<int>{0, 0x53f}(state.rng));
+    return roll + 0x100 <= state.player_combat_rating_points;
+  };
 
   // Wrap a heading into [0, 360) using the original's 0x168-degree arithmetic.
   auto wrap_deg_int = [](int deg) {
@@ -3564,8 +3569,8 @@ void NovaAi_ApplyControls(GameState &state,
     // arms a direct-fire bank and, for gravity-shield ships
     // within 100 px, throttles the cruise down to the target's scalar speed.
     // Break-off: at/inside 165 px (or any distance for non-shield ships) the
-    // evasive-break order fires -- a player target must beat the (unmodelled)
-    // combat-rating gate, non-player targets skip it half the time -- when the
+    // evasive-break order fires -- a player target must beat the combat-rating
+    // gate, non-player targets skip it half the time -- when the
     // ship is a light fighter (class default behavior > 2, mass < 200 t)
     // closing on a lighter/earlier target within 123 px with both hulls facing
     // each other within 31 deg; the evasive heading is current +/-135 deg by
@@ -3605,16 +3610,16 @@ void NovaAi_ApplyControls(GameState &state,
     const bool gravity_shield =
         cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
     if (dx < kCombatCloseRange || dy < kCombatCloseRange || !gravity_shield) {
+      // Ghidra 0x00408150 mode 6: the primary target slot 0 (player) must
+      // pass the rating gate; any other target rolls NovaRandom_Range(2) and
+      // bypasses the gate on 0, otherwise requires the gate to pass.
       bool allowed = false;
       if (target_slot == 0) {
         allowed = player_combat_rating_gate();
+      } else if (std::uniform_int_distribution<int>{0, 1}(state.rng) == 0) {
+        allowed = true;
       } else {
-        std::uniform_int_distribution<int> coin(0, 1);
-        if (coin(state.rng) == 0) {
-          allowed = player_combat_rating_gate();
-        } else {
-          allowed = true;
-        }
+        allowed = player_combat_rating_gate();
       }
       if (allowed && cls != nullptr && cls->default_ai_behavior > 2 &&
           cls->mass_tons < 200 && dx < kEvasiveOrderGatePx &&

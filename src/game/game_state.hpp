@@ -1125,10 +1125,12 @@ struct GameState {
   // selection. The original uses a global NovaRandom; this is kept local to
   // the state so runs are reproducible when seeded identically.
   std::mt19937 rng{42};
-  // Ghidra g_player_combat_rating_points: aggregate combat-rating score the
-  // afterburner eligibility roll (Ship_CanShipUseAfterburner 0x0046b260)
-  // divides by the ship class's Strength. Producers (kill/rating accrual)
-  // are not yet reconstructed, so it stays 0 (TODO(decomp)).
+  // Ghidra g_player_combat_rating_points: aggregate combat-rating score.
+  // Produced by Frame_AddCombatRatingPoints (0x0046f1e0, ported in
+  // collision.cpp) on player kills; consumed by the afterburner eligibility
+  // roll (Ship_CanShipUseAfterburner 0x0046b260), the combat-odds score
+  // (Ship_UpdateShipCombatOddsScore 0x004133f0), and the mode-6 evasive-break
+  // gate (NovaAi_PlayerCombatRatingGate 0x0046b330).
   std::int32_t player_combat_rating_points = 0;
   // Ghidra DAT_007353f6..0x7353fd: four persisted player stat modifiers held
   // as percentages. [0]/[1] random-walk +-1 with 2-in-3 probability, clamped
