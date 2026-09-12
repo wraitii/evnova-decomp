@@ -137,14 +137,13 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
   // Original: round(Sprite_GetFrameFullHeight(ship) *
   // g_death_puff_offset_scale_f64 (0.25, 0x00575330)). Use the decoded sh\x8an
   // BaseYSize for the class; fall back to the collision envelope only for
-  // unit/test states whose ship table has no sprite descriptor.
+  // unit/test states whose ship table has no sprite descriptor. 0x00428340
+  // truncates both spans toward zero (x87 FIST + residual/sign correction).
   const int sprite_height =
       cls->base_y_size > 0
           ? static_cast<int>(cls->base_y_size)
-          : static_cast<int>(
-                std::lround(std::max(0.0F, ship.collision_radius_px) * 2.0F));
-  int extent =
-      static_cast<int>(std::lround(static_cast<float>(sprite_height) * 0.25F));
+          : static_cast<int>(std::max(0.0F, ship.collision_radius_px) * 2.0F);
+  int extent = static_cast<int>(static_cast<float>(sprite_height) * 0.25F);
   if (extent < 1) {
     extent = 1;
   }
@@ -234,12 +233,14 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
   if (cls != nullptr && (cls->capability_flags & 0x0400U) == 0U) {
     const std::int16_t mass = cls->mass_tons;
     if (mass >= 100) {
-      blast_radius = static_cast<std::int16_t>(
-          std::llround(static_cast<double>(mass) * kHullBlastRadiusScale +
-                       kHullBlastRadiusAddend));
-      blast_damage = static_cast<std::int16_t>(
-          std::llround(static_cast<double>(mass) * kHullBlastDamageScale +
-                       kHullBlastDamageAddend));
+      // 0x00428340 truncates both hull-blast values toward zero (x87 FIST +
+      // residual/sign correction), not round-to-nearest.
+      blast_radius = static_cast<std::int16_t>(static_cast<double>(mass) *
+                                                   kHullBlastRadiusScale +
+                                               kHullBlastRadiusAddend);
+      blast_damage = static_cast<std::int16_t>(static_cast<double>(mass) *
+                                                   kHullBlastDamageScale +
+                                               kHullBlastDamageAddend);
     }
   }
 

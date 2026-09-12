@@ -198,8 +198,8 @@ TEST_CASE("faction combat event floods reputation through adjacency",
 
   game::NovaGovernment_ProcessFactionCombatEvent(state, 0, 0, 3, -1);
   CHECK(state.system_reputation[0] == -7);
-  // 7 * 0.65 = 4.55, rounded away from zero.
-  CHECK(state.system_reputation[1] == -5);
+  // 7 * 0.65 = 4.55, truncated toward zero (x87 FIST + residual correction).
+  CHECK(state.system_reputation[1] == -4);
 }
 
 } // namespace

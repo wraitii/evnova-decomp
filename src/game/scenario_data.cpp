@@ -1108,8 +1108,9 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (dude_weight_total != 0 && dude_weight_total != 100) {
     const float scale = 100.0F / static_cast<float>(dude_weight_total);
     for (std::uint16_t &weight : s.dude_class_weights) {
-      weight = static_cast<std::uint16_t>(
-          std::lround(static_cast<float>(weight) * scale));
+      // 0x004bd3c0 truncates the normalized weight toward zero (x87 FIST +
+      // residual/sign correction), not round-to-nearest.
+      weight = static_cast<std::uint16_t>(static_cast<float>(weight) * scale);
     }
   }
   // AvgShips/Govt/Message/Asteroids/Interference block (payload +0x64..+0x6c),
@@ -2047,12 +2048,11 @@ std::int32_t Outfit::PurchaseMass(std::int16_t ship_hull_mass) const {
   std::int32_t scaled = mass_tons;
   if ((flags & 0x0400U) != 0) {
     // ship Mass * hull Mass / 100 (the Bible); Ghidra uses a 0.01 float scale
-    // (_DAT_00575738) and EVN-style round-half-away-from-zero.
+    // (_DAT_00575738) and the x87 FIST + residual/sign correction that
+    // truncates toward zero (not round-half-away). mass_tons > 0 here, so the
+    // net is floor.
     const float raw = static_cast<float>(mass_tons) * ship_hull_mass * 0.01F;
-    scaled = static_cast<std::int32_t>(std::floor(raw + 0.5F));
-    if (raw < 0) {
-      scaled = static_cast<std::int32_t>(std::ceil(raw - 0.5F));
-    }
+    scaled = static_cast<std::int32_t>(raw);
     if (scaled < mass_tons) {
       scaled = mass_tons;
     }

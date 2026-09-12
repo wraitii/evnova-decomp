@@ -103,7 +103,7 @@ void NovaFreeflight_SpawnForShip(GameState &state, const Ship &ship) {
     const float back = ship.heading + kPi;
     const float span = ShipFrameWidthSpan(ship);
     AddPolar(
-        back, std::round(span * kLaunchSpanShare), object.pos_x, object.pos_y);
+        back, std::trunc(span * kLaunchSpanShare), object.pos_x, object.pos_y);
     const float scatter =
         (static_cast<float>(RandomRange(state, 0x28)) + 0x1e) /
         kInterferenceScale;

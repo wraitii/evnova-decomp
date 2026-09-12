@@ -485,10 +485,12 @@ void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
   }
   if (delta > -40100) {
     const auto percent = -delta - 40000;
-    const double adjusted = static_cast<double>(state.player.credits) -
-                            static_cast<double>(state.player.credits) *
-                                static_cast<double>(percent) * 0.01;
-    state.player.credits = static_cast<std::int32_t>(std::lrint(adjusted));
+    // 0x00440750 computes in 32-bit float and truncates toward zero (x87
+    // FIST + residual/sign correction), not round-to-nearest.
+    const float adjusted = static_cast<float>(state.player.credits) -
+                           static_cast<float>(state.player.credits) *
+                               static_cast<float>(percent) * 0.01F;
+    state.player.credits = static_cast<std::int32_t>(adjusted);
     return;
   }
 }
@@ -639,7 +641,9 @@ void NovaGovernment_PropagateFactionCombatInfluence(
         changed = true;
         const std::int16_t rep =
             state.system_reputation[static_cast<std::size_t>(chain)];
-        long updated = std::lround(static_cast<double>(rep) - delta);
+        // 0x00467140 truncates the new reputation toward zero (x87 FIST +
+        // residual/sign correction), not round-to-nearest.
+        long updated = static_cast<long>(static_cast<float>(rep) - delta);
         updated = std::clamp(updated, -32000L, 32000L);
         state.system_reputation[static_cast<std::size_t>(chain)] =
             static_cast<std::int16_t>(updated);

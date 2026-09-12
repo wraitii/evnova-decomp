@@ -36,10 +36,10 @@ constexpr std::int16_t kResourceIdBase = 0x80;
       value, 0, std::numeric_limits<std::int16_t>::max()));
 }
 
-// The original rounds each scaled price with the CRT round() (half away from
-// zero) computed in 32-bit float.
+// The original truncates each scaled price toward zero via the x87 FIST +
+// residual/sign correction (0x0048c730), not CRT round().
 [[nodiscard]] std::int16_t RoundPrice(float value) {
-  return static_cast<std::int16_t>(std::lround(value));
+  return static_cast<std::int16_t>(value);
 }
 
 [[nodiscard]] bool ContainsStellar(const std::array<std::int16_t, 8> &list,

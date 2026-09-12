@@ -388,9 +388,11 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
       std::uniform_int_distribution<int>{0, bound - 1}(rng));
 }
 
-// Round-half-up integer form of Ghidra's double-to-int ROUND().
+// Truncate toward zero, matching the original's x87 FIST + residual/sign
+// correction (0x00480030 and the other travel-destination windows), not
+// round-half-up.
 [[nodiscard]] std::int32_t RoundDouble(double v) {
-  return static_cast<std::int32_t>(std::llround(v));
+  return static_cast<std::int32_t>(v);
 }
 
 // ---- Drawing --------------------------------------------------------------

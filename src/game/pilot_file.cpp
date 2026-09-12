@@ -23,10 +23,10 @@ constexpr std::int16_t kFleetBlockVersion = 300;
 // "wrong file type").
 constexpr std::int16_t kPrefsFileSignature = 0x6b;
 
-// Round a float to the nearest integer the way the original's ROUND()
-// helper does for the u16 shield/fuel fields.
+// Truncate toward zero, matching the original's x87 FIST + residual/sign
+// correction (0x004c7dd0 PilotFile_SaveGameCore), not round-to-nearest.
 [[nodiscard]] std::int16_t RoundToInt16(float value) {
-  return static_cast<std::int16_t>(std::lrintf(value));
+  return static_cast<std::int16_t>(value);
 }
 
 [[nodiscard]] std::uint16_t ReadU16(std::span<const std::byte> bytes,

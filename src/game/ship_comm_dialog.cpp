@@ -278,9 +278,10 @@ constexpr SDL_Color kHostileRed{255, 0, 0, 255};
       std::uniform_int_distribution<int>{0, bound - 1}(rng));
 }
 
-// Round-half-up integer form of Ghidra's double-to-int ROUND().
+// Truncate toward zero, matching the original's x87 FIST + residual/sign
+// correction (0x00482280 payment window), not round-half-up.
 [[nodiscard]] std::int32_t RoundDouble(double v) {
-  return static_cast<std::int32_t>(std::llround(v));
+  return static_cast<std::int32_t>(v);
 }
 
 // Loads one flavour variant of a ship-comm prompt (STR# 0xbb8 for

@@ -203,8 +203,9 @@ translated through `NovaCommand_TranslateByInputMap`.
   first letter vowel test `MWRuntime_FUN_004d6230`, "two"/"three" STR# 0x89
   0x1e/0x1f, digits above) + name (singular/plural pstrings at
   def +(-0x10) family), comma/"and" glue; footer with
-  `Outfit_ComputeOwnedOutfitResaleTotal` credits (STR# 0x111 + grouped
-  quantity + credits word).
+  `Ship_ComputeTradeInValue` (0x00469100; 25% of ship base cost + 50% of
+  non-persistent owned outfits) credits (STR# 0x111 + grouped quantity +
+  credits word).
 - **Honors text** (0x7d7278): header STR# 0x112 + "\r\r" (built only when
   something exists); the rank badges (active bytes set, name at rank+0x1e,
   ordered by the u16 Weight at rank+0x04, smallest first, each printed once)

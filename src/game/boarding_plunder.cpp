@@ -67,10 +67,11 @@ constexpr std::size_t kEscortCap = 6; // Ship_CanPlayerHaveMoreEscorts soft cap
       std::uniform_int_distribution<int>{0, bound - 1}(rng));
 }
 
-// The original's ROUND(f) + (0 < frac) ladder: round-half-up for positive
-// values (all values here are counts/shares and positive).
-[[nodiscard]] std::int32_t RoundHalfUp(float v) {
-  return static_cast<std::int32_t>(std::llround(static_cast<double>(v)));
+// The original's float-to-int conversions in the boarding/plunder paths use
+// the x87 FIST + residual/sign correction (0x00484230, 0x00482940,
+// 0x00412550), which truncates toward zero -- not round-half-up.
+[[nodiscard]] std::int32_t TruncToInt(double v) {
+  return static_cast<std::int32_t>(v);
 }
 
 // Ghidra 0x00469230 Weapon_HasMatchingWeaponAmmoCarried: scans the PLAYER
@@ -128,9 +129,9 @@ struct OutfitModPair {
     const int bound = static_cast<int>(std::ceil(v));
     const int roll = NovaRandomRange(state.rng, bound);
     const double raw = (static_cast<double>(roll) + v) * kCreditScale;
-    return RoundHalfUp(static_cast<float>(raw));
+    return TruncToInt(static_cast<float>(raw));
   }
-  return RoundHalfUp(static_cast<float>(v * kCreditScale));
+  return TruncToInt(static_cast<float>(v * kCreditScale));
 }
 
 } // namespace
@@ -312,9 +313,9 @@ BoardingPlunderOptions NovaBoarding_BuildOptions(GameState &state) {
       continue; // the odds accumulation ignores fighter-class escorts
     }
     strength_acc = static_cast<float>(
-        RoundHalfUp(strength_acc + static_cast<float>(escort_class->strength) *
-                                       kEscortStatShare));
-    crew_acc = static_cast<float>(RoundHalfUp(
+        TruncToInt(strength_acc + static_cast<float>(escort_class->strength) *
+                                      kEscortStatShare));
+    crew_acc = static_cast<float>(TruncToInt(
         crew_acc + static_cast<float>(escort_class->crew) * kEscortStatShare));
   }
 
@@ -337,9 +338,9 @@ BoardingPlunderOptions NovaBoarding_BuildOptions(GameState &state) {
   // cannot happen through the board command's crew >= 1 gate; the float
   // division would saturate and the clamp below bounds the result either way.
   float odds = static_cast<float>(
-      RoundHalfUp((crew_acc / (static_cast<float>(target_class->crew) *
-                               kCaptureOddsDenom)) *
-                  kCaptureOddsScale));
+      TruncToInt((crew_acc / (static_cast<float>(target_class->crew) *
+                              kCaptureOddsDenom)) *
+                 kCaptureOddsScale));
 
   // Marines with negative ModVal directly add capture-odds percent.
   for (std::size_t index = 0; index < state.scenario.outfits.size(); ++index) {
@@ -1743,7 +1744,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
           options.cargo_type = -1;
           NovaLog::Info("board: cargo transferred; panic now {}", panic);
         }
-        panic = RoundHalfUp(static_cast<double>(panic) * kPanicCargo);
+        panic = TruncToInt(static_cast<double>(panic) * kPanicCargo);
         panic_armed = true;
       }
     }
@@ -1765,9 +1766,9 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
         state.player.credits += options.credits;
         NovaLog::Info("board: stole {} credits; panic now {}",
                       options.credits,
-                      RoundHalfUp(static_cast<double>(panic) * kPanicCredits));
+                      TruncToInt(static_cast<double>(panic) * kPanicCredits));
         options.credits = 0;
-        panic = RoundHalfUp(static_cast<double>(panic) * kPanicCredits);
+        panic = TruncToInt(static_cast<double>(panic) * kPanicCredits);
         panic_armed = true;
       }
     }
@@ -1816,8 +1817,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
         NovaLog::Info("board: ammo transferred {} of {}; panic now {}",
                       transferred,
                       offered,
-                      RoundHalfUp(static_cast<double>(panic) * kPanicAmmo));
-        panic = RoundHalfUp(static_cast<double>(panic) * kPanicAmmo);
+                      TruncToInt(static_cast<double>(panic) * kPanicAmmo));
+        panic = TruncToInt(static_cast<double>(panic) * kPanicAmmo);
         panic_armed = true;
       }
     }
@@ -1852,8 +1853,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
         options.fuel_quantity = 0;
         NovaLog::Info("board: energy transferred {}; panic now {}",
                       fill,
-                      RoundHalfUp(static_cast<double>(panic) * kPanicEnergy));
-        panic = RoundHalfUp(static_cast<double>(panic) * kPanicEnergy);
+                      TruncToInt(static_cast<double>(panic) * kPanicEnergy));
+        panic = TruncToInt(static_cast<double>(panic) * kPanicEnergy);
         panic_armed = true;
       }
     }
@@ -2085,9 +2086,9 @@ void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
 
   // odds = boarder_crew * 100 / (boarded_crew * 2), rounded half away from
   // zero (the doubles: 00575010 = 100, 005751a0 = 2).
-  std::int32_t odds = RoundHalfUp(
-      static_cast<float>(static_cast<double>(boarder_crew) * 100.0 /
-                         (static_cast<double>(boarded_crew) * 2.0)));
+  std::int32_t odds =
+      TruncToInt(static_cast<float>(static_cast<double>(boarder_crew) * 100.0 /
+                                    (static_cast<double>(boarded_crew) * 2.0)));
 
   // Negative marines: the boarder's raise the odds, the victim's lower them.
   for (std::size_t slot = 0; boarder_class != nullptr &&
@@ -2218,7 +2219,7 @@ void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
     const float raw =
         static_cast<float>(static_cast<double>(29 * static_cast<int>(odds)) *
                            0.01 * static_cast<double>(boarded.credits) * 0.01);
-    credits_taken = RoundHalfUp(raw);
+    credits_taken = TruncToInt(raw);
     boarder.credits += credits_taken;
     boarded.credits -= credits_taken;
   } else {

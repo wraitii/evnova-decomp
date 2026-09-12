@@ -268,8 +268,8 @@ TEST_CASE("ownerless shots hit only their recorded target slot",
   // A stellar defense battery shot: owner_ship_slot -1, weapon bank 0. The
   // original Weapon_CanWeaponHitTarget (0x00426ef0) routes ownerless shots
   // through the 0x00427435 branch, which accepts only the recorded target slot
-  // (or a ship whose defense_fleet_home_stellar_id matches it) before joining the
-  // common capability/aggro tail.
+  // (or a ship whose defense_fleet_home_stellar_id matches it) before joining
+  // the common capability/aggro tail.
   ActiveShot shot;
   shot.weapon_id = 0;
   shot.owner_ship_slot = -1;
@@ -699,7 +699,7 @@ TEST_CASE("destroyed hull blast scales radius and damage by class mass",
 
   NovaShip_RunShipDestructionFinale(state, wreck);
 
-  CHECK(near.armor_points == Catch::Approx(969.0F));
+  CHECK(near.armor_points == Catch::Approx(970.0F));
   CHECK(far.armor_points == Catch::Approx(1000.0F));
 }
 

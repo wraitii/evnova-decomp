@@ -51,12 +51,12 @@ constexpr std::int32_t kAsteroidScatterPadX = 0x80;
 constexpr std::int32_t kAsteroidScatterPadY = 0x80;
 
 // Ring-direction spread used by the place_in_ring branch: the random offset
-// along the axis is drawn in [0, round(radius/2)). The original computes this
-// with a float round + sign fixup on `radius / _DAT_005751f8 (2.0)`. For a
-// whole-number radius (the payload short) this yields roughly radius/2;
-// TODO(decomp) pins the exact tie-handling once observed.
+// along the axis is drawn in [0, trunc(radius/2)). The original computes this
+// with the x87 FIST + residual/sign correction on `radius / _DAT_005751f8
+// (2.0)` at 0x00421830, i.e. truncation toward zero (floor for the positive
+// short radius), not round-to-nearest.
 constexpr std::int32_t RingSpread(std::int32_t radius) {
-  return std::max(1, static_cast<std::int32_t>(std::lround(radius / 2.0)));
+  return std::max(1, static_cast<std::int32_t>(radius / 2.0));
 }
 
 } // namespace

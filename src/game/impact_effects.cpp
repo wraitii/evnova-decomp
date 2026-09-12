@@ -129,10 +129,10 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
   const std::int16_t safe_radius = std::max<std::int16_t>(0, radius);
   if (large && safe_radius > 0) {
     // These constants are the original DAT_005752b8/.80/.c8/.c0 values:
-    // 0.04, 0.50, 0.25, and 0.16 respectively.
-    const int inner_count = static_cast<int>(std::lround(safe_radius * 0.04F));
-    const int inner_extent =
-        std::max(1, static_cast<int>(std::lround(safe_radius * 0.50F)));
+    // 0.04, 0.50, 0.25, and 0.16 respectively. 0x004211d0 truncates each
+    // count toward zero (x87 FIST + residual/sign), not round-to-nearest.
+    const int inner_count = static_cast<int>(safe_radius * 0.04F);
+    const int inner_extent = std::max(1, static_cast<int>(safe_radius * 0.50F));
     const float inner_bias = safe_radius * 0.25F;
     for (int i = 0; i < inner_count; ++i) {
       NovaEffects_SpawnImpactEffect(
@@ -143,7 +143,7 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
           static_cast<std::int16_t>(4 + RandomRange(state, 8)));
     }
 
-    const int outer_count = static_cast<int>(std::lround(safe_radius * 0.16F));
+    const int outer_count = static_cast<int>(safe_radius * 0.16F);
     const int outer_extent = std::max(1, static_cast<int>(safe_radius));
     const float outer_bias = safe_radius * 0.50F;
     for (int i = 0; i < outer_count; ++i) {
@@ -266,10 +266,11 @@ void NovaEffects_SpawnWeaponImpactBurstForWeapon(GameState &state,
   if (weapon.impact_particle_count <= 0) {
     return;
   }
-  // Shot_ResolveShotCollisionHit computes round(frame_base * 1.25) as the
-  // lifetime upper bound (double DAT_005753e0 = 1.25).
-  const auto life_max = static_cast<std::int16_t>(std::lround(
-      static_cast<float>(weapon.impact_particle_frame_base) * 1.25F));
+  // Shot_ResolveShotCollisionHit computes trunc(frame_base * 1.25) as the
+  // lifetime upper bound (double DAT_005753e0 = 1.25; x87 FIST +
+  // residual/sign correction, not round-to-nearest).
+  const auto life_max = static_cast<std::int16_t>(
+      static_cast<float>(weapon.impact_particle_frame_base) * 1.25F);
   NovaEffects_SpawnWeaponImpactParticleBurst(state,
                                              x,
                                              y,

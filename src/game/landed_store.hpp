@@ -113,8 +113,16 @@ NovaLanded_SellOutfit(GameState &state,
 // maxima were reduced.
 void NovaLanded_CloseOutfitterSession(GameState &state);
 
+// Ghidra 0x00498dc0 / 0x004948b0 / 0x00492f30: the current ship's trade-in
+// credit (Ship_ComputeTradeInValue) scaled through the two shipyard price
+// stages. Used by the shipyard price display, the buy gate, and the purchase.
 [[nodiscard]] std::int32_t NovaLanded_ShipTradeInValue(const GameState &state,
                                                        std::int16_t stellar_id);
+// Ghidra 0x00498dc0 / 0x004948b0: the selected ship's scaled list price before
+// the trade-in credit (shipyard "Ship Price" row).
+[[nodiscard]] std::int32_t NovaLanded_ShipPrice(const GameState &state,
+                                                std::int16_t stellar_id,
+                                                std::int16_t ship_id);
 [[nodiscard]] std::int32_t NovaLanded_ShipPurchasePrice(const GameState &state,
                                                         std::int16_t stellar_id,
                                                         std::int16_t ship_id);
