@@ -244,6 +244,14 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("shield", ship.shield_points);
       row.num("armor", ship.armor_points);
       row.num("ai_state_code", ship.ai_state_code);
+      row.num("ai_behavior_code", ship.ai_behavior_code);
+      row.num("ai_control_mode", ship.ai_control_mode);
+      row.num("ai_desired_speed", ship.ai_desired_speed);
+      row.num("ai_forward_thrust_cmd", ship.ai_forward_thrust_cmd);
+      row.num("ai_station_hold_timer", ship.ai_station_hold_timer);
+      row.num("ai_maneuver_timer", ship.ai_maneuver_timer_ms);
+      row.boolean("arrival_monitor_active", ship.arrival_monitor_active);
+      row.num("arrival_monitor_ticks", ship.arrival_monitor_elapsed_ticks);
       row.boolean("player_target",
                   state.player.primary_target_ship_slot ==
                       static_cast<std::int16_t>(slot));

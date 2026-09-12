@@ -342,6 +342,45 @@ TEST_CASE(
       state, subject_ship, other_ship));
 }
 
+TEST_CASE(
+    "follow and assist states use the original distance and cloak bands") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  game::Ship &ship = state.ShipAt(1);
+  game::Ship &leader = state.ShipAt(2);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = 0;
+  ship.squad_leader_ship_slot = 2;
+  ship.target_stellar_object_id = -1;
+  leader.is_active = true;
+  leader.ship_instance_id = 2;
+  leader.ship_class_id = 0;
+  leader.armor_points = 100.0F;
+
+  // State 10 uses velocity/formation approach from 300..600 px and the
+  // long-range pursuit outside 600 px.
+  ship.ai_state_code = 10;
+  leader.pos_x = 400.0F;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 0xb);
+  leader.pos_x = 700.0F;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 9);
+
+  // A cloaked leader that this follower cannot engage forces state 5 to
+  // brake, and state 10 switches to pursuit beyond the 300 px inner band.
+  leader.cloak_fade_progress = 17.0F;
+  leader.pos_x = 400.0F;
+  ship.ai_state_code = 5;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 1);
+  ship.ai_state_code = 10;
+  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_control_mode == 9);
+}
+
 TEST_CASE("hidden combat ship brakes with a finite engagement patience timer") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
@@ -548,13 +587,14 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   CHECK(ship.pos_x == Catch::Approx(0.0F));
   CHECK(ship.pos_y == Catch::Approx(0.0F));
 
-  // Simulate expiry of the 60-tick emergence hold. The first state pass changes
-  // 0x15 to state 8; the next selects mode 0x0a, which must preserve the
-  // already-negative -30 override instead of replacing it with -50.
+  // Simulate expiry of the 60-tick emergence hold. The original falls through
+  // to the state-8 arm in the same pass, immediately installing the -999
+  // sentinel and mode 0x0a. Mode 0x0a must preserve the already-negative -30
+  // override instead of replacing it with -50.
   ship.ai_maneuver_timer_ms = 0.0F;
   game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
   REQUIRE(ship.ai_state_code == 8);
-  game::NovaAi_UpdateShipState(state, ship, /*now_ms=*/0);
+  CHECK(ship.ai_station_hold_timer == Catch::Approx(-999.0F));
   REQUIRE(ship.ai_control_mode == 10);
   game::NovaAi_ApplyControls(state, ship, 1.0F, /*now_ms=*/0);
   CHECK(ship.ai_desired_speed == Catch::Approx(-30.0F));
@@ -1011,6 +1051,67 @@ TEST_CASE("state 0x08 drives visible high-speed NPC arrival") {
   CHECK(ship.ai_maneuver_timer_ms <= 58.0F);
   CHECK(ship.pos_y < -500.0F);
   CHECK(ship.engine_glow_level == 0);
+}
+
+TEST_CASE("state 0x08 without its arrival sentinel returns to idle") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.ship_class_id = 0;
+  ship.armor_points = 30.0F;
+  ship.ai_behavior_code = 0;
+  ship.ai_state_code = 8;
+  ship.ai_control_mode = 10;
+  ship.ai_station_hold_timer = 0.0F;
+
+  game::NovaAi_UpdateShipAI(state,
+                            ship,
+                            /*skip_heavy_ai=*/false,
+                            /*now_ms=*/0,
+                            /*elapsed_ticks=*/1.0F);
+
+  CHECK(ship.ai_state_code == 0);
+  CHECK(ship.ai_control_mode == 0);
+}
+
+// Mission-fleet jump-in placement leaves the ship in its existing state and
+// signals the arrival through station-hold timer -999. Frame_TickSystems must
+// call Ship_UpdateShipAI, whose <-900 prologue promotes the ship to state 8
+// and bypasses behavior dispatch until the slowdown finishes. Behavior 3 is
+// important here: without that bypass it immediately steals state 8 for its
+// travel/departure fallback and leaves the 50 px/tick velocity untouched.
+TEST_CASE("mission arrival sentinel keeps behavior NPC in slowdown") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.current_system_id = 0;
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.current_system_id = 0;
+  ship.ship_class_id = 0;
+  ship.armor_points = 30.0F;
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 0;
+  ship.ai_station_hold_timer = -999.0F;
+  ship.heading = 0.0F;
+  ship.vel_y = -50.0F;
+
+  game::NovaShip_TickNpcAi(state, 1.0F);
+
+  CHECK(ship.ai_state_code == 8);
+  CHECK(ship.ai_control_mode == 10);
+  CHECK(ship.ai_desired_speed == Catch::Approx(-50.0F));
+  CHECK(ship.ai_forward_thrust_cmd == Catch::Approx(-1.165F));
+
+  game::NovaShip_TickNpcShips(state, 1.0F);
+  game::NovaShip_TickNpcAi(state, 1.0F);
+  CHECK(ship.ai_state_code == 8);
+  CHECK(ship.ai_control_mode == 10);
+  CHECK(ship.ai_desired_speed < -40.0F);
 }
 
 TEST_CASE("state 2 special departure classes skip the outward brake") {

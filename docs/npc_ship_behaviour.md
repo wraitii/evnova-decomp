@@ -65,12 +65,12 @@ exclusive mapping.
 | `0x02` | Jump departure staging | `0x01`, `0x03`, `0x04` | This state does not seek the centre: while moving it brakes; inside the centre envelope mode `0x03` thrusts outward, otherwise stopped ships arm outward jump spin-up with mode `0x04`. |
 | `0x03` | Hold/approach with a primary target | varies | Station-hold timer and target validity determine the next combat or hold action. |
 | `0x04` | Attack engagement | `0x05`/`0x06` | Cloak-aware eligibility can brake/wait, clear the target, or fall back to travel. |
-| `0x05` | Pursue / follow a target | `0x0b`, `0x08` | Approaches target range, then follows/holds. |
+| `0x05` | Pursue / follow a target | `0x0b`, `0x08`, `0x01` | Approaches target range, then follows/holds; brakes when cloak rules prevent engaging the leader. |
 | `0x06` | Park / settle | `0x01` | Brakes to a stop. |
 | `0x07` | Escort / follow primary | `0x08`/`0x09` | Drops to idle if target becomes invalid; wedge offsets come from the per-frame formation pass. |
 | `0x08` | Arrival slowdown | `0x0a` | Applies the stepped high-speed slowdown command to a newly arriving NPC; the ordinary ship handler later resets it to state 0. |
 | `0x09` | Refuel / transfer service | `0x0b`, `0x01` | Approaches the primary target, stops, then transfers fuel while the target has capacity. |
-| `0x0a` | Assist response | `0x09`, `0x01`, `0x0c` | Long-range pursuit, approach, or velocity-match engagement. |
+| `0x0a` | Assist response | `0x09`, `0x0b`, `0x0c` | With an engageable leader: velocity-match inside 300 px/axis, formation approach through 600 px, then long-range pursuit. When cloak rules block engagement it brakes inside 300 px and pursues outside. |
 | `0x0b` | Station hold / follow target | `0x04`, `0x0d` | Holds near a player/leader; exits if leader's hold state ends. |
 | `0x0c` | Player-oriented assist / hold | `0x09`, `0x0b`, `0x0c` | Clears ordinary targets and selects distance/velocity matching around the player. |
 | `0x0d` | Cloak-engagement wait variant | `0x01` | Uses finite patience before abandoning an unengageable target. |
@@ -81,7 +81,7 @@ exclusive mapping.
 | `0x12` | Stellar approach/retreat staging | `0x02`, `0x03`, `0x01`, `0x16` | Uses a selected stellar and weapon range to approach, settle, or retreat. |
 | `0x13` | No dedicated handler | — | No state-specific arm was found in `Ship_UpdateShipAiState`; preserve this neutral label pending caller evidence. |
 | `0x14` | Hypergate/wormhole entry | `0x02`, `0x17` | Negotiates entry by approaching the selected restricted stellar/link. At the entry point it enters mode `0x17` and transfers/vanishes; there is no local mode-`0x04` hyperjump sequence. |
-| `0x15` | Hypergate/wormhole emergence | `0x00` | Spawn/arrival setup at the destination stellar: seeds emergence heading, a 60-tick hold (~2 s at 30 Hz), and a slower state-8 entry speed (30 px/tick normally; 15 when targeting the player). Random dudes and encounter-fleet leads use this path when an adjacent restricted stellar is selected. |
+| `0x15` | Hypergate/wormhole emergence | `0x00`, then `0x0a` | Spawn/arrival setup at the destination stellar: seeds emergence heading, a 60-tick hold (~2 s at 30 Hz), and a slower state-8 entry speed (30 px/tick normally; 15 when targeting the player). On expiry the state handler falls through to state `0x08` in the same pass, installing its `-999` sentinel and slowdown control before the next behavior-supervisor pass. Random dudes and encounter-fleet leads use this path when an adjacent restricted stellar is selected. |
 | `0x16` | Defunct cleanup | `0x01` | Clears targets/firing; returns idle after the manoeuvre timer. |
 
 State `0x13` is deliberately neutral: its lack of a state-specific arm is
@@ -228,6 +228,15 @@ labels.
   immediately
   seeds the scattered `AvgShips` population. Per-tick maintenance subsequently
   replaces losses through the polar/hypergate arrival paths.
+- State `0x08` is valid only with `ai_station_hold_timer < -900`. The top-level
+  dispatcher clears an orphaned state `0x08` to idle before behavior dispatch;
+  valid arrivals renew the exact `-999` sentinel in the state handler.
+- Mission-fleet respawns do not call the state-`0x08` entry helper directly.
+  `System_TickNpcSpawnMaintenance` seeds `ai_station_hold_timer = -999`, and
+  the `Ship_UpdateShipAI` prologue promotes any timer below `-900` into state
+  `0x08` / control `0x0a` on the next frame. That sentinel arm bypasses the
+  behavior supervisor; state `0x08` restores `-999` every frame, so ordinary
+  behavior cannot replace the arrival state before its speed decay completes.
 
 ## Documentation practice
 

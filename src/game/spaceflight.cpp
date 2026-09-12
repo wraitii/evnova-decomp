@@ -184,12 +184,11 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
       // and performs that integration.
       continue;
     }
-    // Frame_TickSystems skips AI entirely for behavior 0. This is important
-    // for state-8 arrivals: they retain their seeded 50-unit inward velocity
-    // until a behavior-bearing ship takes over the normal AI path.
-    if (ship.ai_behavior_code <= 0) {
-      continue;
-    }
+    // Frame_TickSystems calls Ship_UpdateShipAI for every active NPC in the
+    // current system. Behavior 0 merely skips the behavior-supervisor
+    // dispatch inside that function; the state/control tail must still run.
+    // In particular, state-8 arrivals need mode 0x0a armed every frame or
+    // their seeded 50-unit inward velocity never decays.
     // skip_heavy_ai=0: these spawned ships run the full (heavy) AI decision.
     NovaAi_UpdateShipAI(
         state, ship, /*skip_heavy_ai=*/false, now_ms, elapsed_ticks);
@@ -2546,6 +2545,40 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // Ghidra 0x00416070 Ship_IsShipInAiState0x16 runs inline here.
   const bool holds_course = coasting && ship.ai_state_code != 0x16;
   const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
+
+  if (ship.arrival_monitor_active) {
+    ship.arrival_monitor_elapsed_ticks += elapsed_ticks;
+    const float velocity = std::hypot(ship.vel_x, ship.vel_y);
+    const float settled_speed = std::max(10.0F, eff_max_speed + 1.0F);
+    const bool lost_slowdown_early =
+        ship.arrival_monitor_elapsed_ticks > 2.0F && ship.ai_state_code != 8 &&
+        velocity > settled_speed;
+    const bool remained_fast_too_long =
+        ship.arrival_monitor_elapsed_ticks > 60.0F && velocity > settled_speed;
+    if (!ship.arrival_monitor_warning_logged &&
+        (lost_slowdown_early || remained_fast_too_long)) {
+      NovaLog::Warn(
+          "NPC arrival anomaly: slot={} class={} behavior={} state={} "
+          "control={} velocity={:.2f} desired={:.2f} thrust={:.3f} "
+          "station_hold={:.2f} maneuver={:.2f} age={:.2f} disabled={}",
+          ship.ship_instance_id,
+          ship.ship_class_id,
+          ship.ai_behavior_code,
+          ship.ai_state_code,
+          ship.ai_control_mode,
+          velocity,
+          ship.ai_desired_speed,
+          ship.ai_forward_thrust_cmd,
+          ship.ai_station_hold_timer,
+          ship.ai_maneuver_timer_ms,
+          ship.arrival_monitor_elapsed_ticks,
+          fire_restricted);
+      ship.arrival_monitor_warning_logged = true;
+    }
+    if (velocity <= settled_speed) {
+      ship.arrival_monitor_active = false;
+    }
+  }
 
   // Ship_HandleShip (0x00433050) applies the disabled/derelict damping before
   // integrating position. g_fire_restricted_ship_velocity_damp (0x00575448) is

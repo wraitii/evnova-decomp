@@ -254,6 +254,12 @@ struct Ship {
   float ai_maneuver_timer_ms = 0.0F; // +0x4C
   // Station-hold timer driving the hold/approach state (ai_station_hold_timer).
   float ai_station_hold_timer = 0.0F; // +0x50
+  // Probe/debug-only lifecycle monitor for non-gate NPC arrivals. Spawn paths
+  // arm it alongside the original 50 px/tick inward velocity; it has no
+  // gameplay effect and lets rare state/control failures survive in the log.
+  float arrival_monitor_elapsed_ticks = 0.0F;
+  bool arrival_monitor_active = false;
+  bool arrival_monitor_warning_logged = false;
   // Wall-clock (SDL ticks) the current AI mode began; used by the jump-sequence
   // and formation positioning timing.
   std::uint32_t ai_mode_start_time_ms = 0; // +0xA4
