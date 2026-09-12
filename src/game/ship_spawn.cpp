@@ -124,6 +124,19 @@ void PlaceMissionFleetRespawn(GameState &state,
   ship.ai_station_hold_timer = -999.0F;
   ship.ai_mode_start_time_ms = now_ms;
   AddArrivalSlowdownVelocity(ship);
+  ship.arrival_monitor_elapsed_ticks = 0.0F;
+  ship.arrival_monitor_active = true;
+  ship.arrival_monitor_warning_logged = false;
+  NovaLog::Info(
+      "NPC mission arrival monitor armed: slot={} class={} behavior={} "
+      "state={} control={} speed={:.2f} station_hold={:.2f}",
+      ship.ship_instance_id,
+      ship.ship_class_id,
+      ship.ai_behavior_code,
+      ship.ai_state_code,
+      ship.ai_control_mode,
+      std::hypot(ship.vel_x, ship.vel_y),
+      ship.ai_station_hold_timer);
 }
 
 void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {

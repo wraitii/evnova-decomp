@@ -237,6 +237,19 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
   ship.waypoint_arrival_marker_b = 0;
   ship.turn_bank_animation_phase =
       -static_cast<float>(std::uniform_int_distribution<int>{0, 9}(state.rng));
+  ship.arrival_monitor_elapsed_ticks = 0.0F;
+  ship.arrival_monitor_active = true;
+  ship.arrival_monitor_warning_logged = false;
+  NovaLog::Info(
+      "NPC arrival monitor armed: slot={} class={} behavior={} state={} "
+      "control={} speed={:.2f} station_hold={:.2f}",
+      ship.ship_instance_id,
+      ship.ship_class_id,
+      ship.ai_behavior_code,
+      ship.ai_state_code,
+      ship.ai_control_mode,
+      std::hypot(ship.vel_x, ship.vel_y),
+      ship.ai_station_hold_timer);
   // ShipState +0xC8E8 (weapon-sprite flash) is not represented in the
   // clean-room Ship yet; allocation already supplies its zero default.
 }
@@ -2011,7 +2024,7 @@ void NovaAi_UpdateShipState(GameState &state,
     return;
   }
 
-  // ---- Disengage (0x15) -> stationary cleanup (8). ----
+  // ---- Gate emergence (0x15) -> arrival slowdown (8). ----
   if (ship.ai_state_code == 0x15) {
     ship.ai_control_mode = 0;
     ship.primary_target_ship_slot = -1;
@@ -2019,8 +2032,13 @@ void NovaAi_UpdateShipState(GameState &state,
       ship.ai_maneuver_timer_ms = -1.0F;
       ship.ai_state_code = 8;
       ship.ai_secondary_target_slot = -1;
+    } else {
+      return;
     }
-    return;
+    // Do not return after the transition. The original continues through the
+    // same state-machine invocation to the state-8 arm below, which writes
+    // the -999 arrival sentinel and selects control mode 0x0a. Delaying that
+    // work by a frame lets the next behavior-supervisor pass steal state 8.
   }
 
   // ---- Jump-departure staging (state 2). ----
@@ -2128,8 +2146,11 @@ void NovaAi_UpdateShipState(GameState &state,
     } else {
       ship.ai_control_mode = 8;
     }
-    // Cloak-engagement downgrade: without the cloak-aware predicate the ship
-    // boosts straight in (TODO: Ship_CanShipEngageTargetUnderCloakRules).
+    // A leader that cannot currently be engaged under the cloak rules always
+    // downgrades the follow command to braking, after the distance selection.
+    if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, tgt, ship)) {
+      ship.ai_control_mode = 1;
+    }
     return;
   }
 
@@ -2141,19 +2162,20 @@ void NovaAi_UpdateShipState(GameState &state,
         state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot));
     if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, tgt, ship)) {
       const bool far_from_target =
-          std::abs(ship.pos_x - tgt.pos_x) > kAssistFar ||
-          std::abs(ship.pos_y - tgt.pos_y) > kAssistFar;
+          std::abs(ship.pos_x - tgt.pos_x) > kAssistClose ||
+          std::abs(ship.pos_y - tgt.pos_y) > kAssistClose;
       ship.ai_control_mode = far_from_target ? 9 : 1;
       return;
     }
     const bool far = std::abs(ship.pos_x - tgt.pos_x) > kAssistFar ||
                      std::abs(ship.pos_y - tgt.pos_y) > kAssistFar;
-    const bool close = std::abs(ship.pos_x - tgt.pos_x) > kAssistClose ||
-                       std::abs(ship.pos_y - tgt.pos_y) > kAssistClose;
+    const bool outside_close =
+        std::abs(ship.pos_x - tgt.pos_x) > kAssistClose ||
+        std::abs(ship.pos_y - tgt.pos_y) > kAssistClose;
     if (far) {
       ship.ai_control_mode = 9; // pursue at long range
-    } else if (close) {
-      ship.ai_control_mode = 1; // approach
+    } else if (outside_close) {
+      ship.ai_control_mode = 0xb; // formation approach
     } else {
       ship.ai_control_mode = 0xc; // engage
     }
@@ -3796,6 +3818,23 @@ void NovaAi_UpdateShipAI(GameState &state,
     NovaEscort_UpdateFormations(state, ship, /*snap=*/false);
   }
 
+  // Ghidra 0x00401000 at 0x004011ca: mission-fleet jump-in placement does
+  // not call NovaAi_EnterState8Slowdown. It writes -999 to the station-hold
+  // timer instead, and this per-frame sentinel gate promotes the ship into
+  // the ordinary arrival slowdown before behavior dispatch. The threshold is
+  // FLOAT_00575004 (-900.0f), not the general negative-timer test.
+  const bool arrival_slowdown_sentinel = ship.ai_station_hold_timer < -900.0F;
+  if (arrival_slowdown_sentinel) {
+    ship.ai_state_code = 8;
+    ship.ai_control_mode = 10;
+  } else if (ship.ai_state_code == 8) {
+    // State 8 is valid only while its arrival sentinel is present. The
+    // original clears an orphaned state 8 before cadence/behavior dispatch;
+    // this is also the normal state observed immediately after the movement
+    // integrator completes the negative-speed slowdown reset.
+    ship.ai_state_code = 0;
+  }
+
   // Ghidra 0x00401000 slice (disasm 0x004012c0..0x00401340): while parked in
   // the formation control modes, state 0x0B (squad jump hold) exits when its
   // reason disappears -- the player leader went disabled, or an NPC leader
@@ -3826,7 +3865,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   // Auto-guard: a disabled ship ignores the whole AI selection and just
   // holds its current state/controls; mirrors the original clearing the target
   // slots and control to 0 first.
-  if (restricted) {
+  if (restricted && !arrival_slowdown_sentinel) {
     ship.squad_leader_ship_slot = -1;
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
@@ -3856,7 +3895,11 @@ void NovaAi_UpdateShipAI(GameState &state,
     }
   }
 
-  if (run_heavy && !restricted) {
+  // The original sentinel arm bypasses the entire behavior/disabled branch,
+  // then runs only the state and control tail. State 8 restores -999 each
+  // frame, keeping behavior supervisors from stealing the arrival until the
+  // negative-speed integrator completes it.
+  if (run_heavy && !restricted && !arrival_slowdown_sentinel) {
     // Dispatch on behavior code.
     const std::int16_t behavior = ship.ai_behavior_code;
     if (behavior == 1) {
@@ -3895,15 +3938,11 @@ void NovaAi_UpdateShipAI(GameState &state,
       // Ship_UpdateShipAssistResponseBehavior (0x004048a0), now ported as
       // NovaAi_UpdateAssistResponseBehavior (replaces the former force-state-10
       // divergence glue; see that function for the deferred slices). The
-      // original's dispatch gate (0x00401000) excludes the transient states 8
-      // (arrival slowdown), 9 (combat) and 0xf (capture) from the supervisor;
-      // state 9/0xf are re-excluded inside for non-player leaders, but state 8
-      // must skip here so the mode-0x0a decay completes unmolested.
-      if (ship.ai_state_code != 8 && ship.ai_state_code != 9 &&
-          ship.ai_state_code != 0xf) {
-        NovaAi_UpdateAssistResponseBehavior(state, ship, now_ms);
-      }
-    } else {
+      // State 9/0xf exclusions live inside the supervisor, matching the
+      // original. A valid state-8 arrival never reaches this branch because
+      // its -999 station-hold sentinel takes the dispatcher arm above.
+      NovaAi_UpdateAssistResponseBehavior(state, ship, now_ms);
+    } else if (behavior > 0) {
       // Ship_UpdateShipAiAvailabilityBehavior (0x00402980): availability
       // driven cargo/scripted branches remain deferred.
       NovaAi_UpdateBehavior0x01(state, ship, now_ms);
