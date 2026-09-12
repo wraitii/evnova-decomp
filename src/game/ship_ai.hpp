@@ -56,6 +56,22 @@ NovaAi_AimWeaponPredictiveFrom(const GameState &state,
                                float origin_x,
                                float origin_y);
 
+// Ghidra 0x0043b8c0 Ship_AimWeaponLeadVelocity. The same intercept lead as
+// Ship_AimWeaponPredictive, but the target is a raw position/velocity (a
+// scripted asteroid or station rather than a ShipState). Mode 6 (freeflight
+// rocket) is excluded from the lead gate, matching the original, so a rocket
+// falls back to the straight bearing; the original's own mode-6 branch is
+// unreachable dead code. The firing hull still supplies its own velocity.
+[[nodiscard]] std::int16_t NovaAi_AimWeaponLeadVelocity(const GameState &state,
+                                                        const Ship &ship,
+                                                        float target_pos_x,
+                                                        float target_pos_y,
+                                                        float target_vel_x,
+                                                        float target_vel_y,
+                                                        std::int16_t weapon_id,
+                                                        float origin_x,
+                                                        float origin_y);
+
 // Ghidra 0x00464810 Ship_GetShipJammingScore. Electronic-warfare jamming score
 // (0..100) of `ship` for one seek channel (0..3), lazily computed and cached in
 // Ship.jamming_score (the original's ShipState +0xC926). Base value is the
