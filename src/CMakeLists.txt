@@ -47,6 +47,7 @@ add_library(evnova_runtime
     game/player_info_window.cpp
     game/radar_panel.cpp
     game/preferences.cpp
+    game/rank.cpp
     game/route_map.cpp
     game/spaceflight.cpp
     game/spaceflight_view.cpp

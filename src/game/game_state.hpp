@@ -600,7 +600,6 @@ struct PilotControlState {
   static constexpr std::size_t kControlBitCount = 10000;
   std::bitset<kControlBitCount> bits;
   std::bitset<0x800> explored_systems;
-  std::bitset<0x100> active_ranks;
   bool registered = true;
   bool male = true;
 
@@ -1280,11 +1279,13 @@ struct GameState {
   // (NovaTime_GetTickCount60Hz + NovaRandom_Range(0x1e) + 0x1e). Only the
   // services windows consume it; the port stores it for the future consumers.
   std::int32_t mission_interaction_recheck_at_ms = 0;
-  // Per-rank active flags persisted in the pilot save (FleetState +0x5dde):
-  // the saver writes 1 when g_rank_defs[rank].active (+0x00) is set, else 0.
-  // The runtime rank-definition table itself (g_rank_defs, 0x80 slots of
-  // 0x120) is not modelled yet, so only these saved flags are carried.
-  std::array<std::uint16_t, 0x80> rank_active_flags{};
+  // Ghidra g_recently_activated_rank_id (0x007354b6): the slot index of the
+  // most recently activated rank, or -1. Rank_Activate writes it and
+  // Rank_Deactivate clears it when it names that rank; <RRK> expands the
+  // full name at this slot (Stellar_BuildTravelDestinationDescription
+  // 0x004444f0). Initialized to -1 by Ship_InitGameplayDataTables
+  // (0x004b0c20).
+  std::int16_t recently_activated_rank_id = -1;
 
   // Mission-script side effects that need to be consumed by UI/audio layers.
   // They are explicit latches rather than hidden globals, matching the

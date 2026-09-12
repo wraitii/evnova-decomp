@@ -1102,6 +1102,51 @@ TEST_CASE("cron independent-news field decodes from payload +0x14",
   CHECK(data.cron_events[0x9d - 0x80].independent_news_str == 0);
 }
 
+// The r\x8ank rank/honor table (Nova Data 2, 31 records at ids 0x80..0x9e)
+// decodes into ScenarioData.ranks. Values pinned against the shipped
+// "Federation Naval Rank of Commander" record (id 0x80) and the loader's rank
+// pass; +0x02 (id) is the slot index assigned by the table initializer.
+TEST_CASE("rank defs decode from the r.nk payload", "[scenario][rank]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  REQUIRE(data.ranks.size() == 0x80);
+  std::size_t present = 0;
+  for (const RankDef &r : data.ranks) {
+    present += r.defined ? 1U : 0U;
+  }
+  CHECK(present == 31);
+
+  const RankDef *commander = data.Rank(0x80);
+  REQUIRE(commander != nullptr);
+  REQUIRE(commander->defined);
+  CHECK_FALSE(commander->active);
+  CHECK(commander->id == 0);
+  CHECK(commander->weight == 1);
+  CHECK(commander->government_id == 0); // payload govt 0x80 rebased -0x80
+  CHECK(commander->price_mod == 85);
+  CHECK(commander->salary == 123);
+  CHECK(commander->salary_cap == 0);
+  CHECK(commander->flags == 0x0b08);
+  // The record name is the full name with the ';'-subtitle stripped.
+  CHECK(commander->full_name == "Federation Naval Rank of Commander");
+  CHECK(commander->conv_name == "Commander");
+  CHECK(commander->short_name == "Commander");
+
+  // A government-less record (payload 0xffff) rebases to -1.
+  const RankDef *cunjo = data.Rank(0x97); // id 0x97, "Cunjo Hunter"
+  REQUIRE(cunjo != nullptr);
+  REQUIRE(cunjo->defined);
+  CHECK(cunjo->government_id == -1);
+  CHECK(cunjo->flags == 0x0008); // permanent
+
+  // Absent slots keep defined == false and a valid slot index.
+  const RankDef *absent = data.Rank(0xa0);
+  REQUIRE(absent != nullptr);
+  CHECK_FALSE(absent->defined);
+  CHECK(absent->id == 0x20);
+}
+
 } // namespace game
 
 // TEMP probe: dump decoded personalities for cross-checking (drop after pass).

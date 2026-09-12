@@ -3,30 +3,29 @@
 Reverse-engineering + reimplementation notes for the crime → reputation →
 rank-revocation chain:
 
-| Address | Ghidra name | Port tracker |
-|---|---|---|
-| `0x00466FC0` | `Government_ProcessFactionCombatEvent` | 0% |
-| `0x00467140` | `Government_PropagateFactionCombatInfluenceToNearbySystems` | 0% |
-| `0x00427F40` | `Rank_Deactivate` | 0% |
-| `0x00427DF0` | `Rank_Activate` | 0% (needed for the K opcode / `<RRK>`) |
-| `0x0046F100` | `Government_IsReputationTrackingGovernment` | unported (name suspect) |
-
-The ränk (`r\x8ank` 0x728a6e6b) definition table `g_rank_defs` is not modelled
-at all yet; `GameState.rank_active_flags` (save only) and
-`PilotControlState.active_ranks` (K/L bitset) are ad-hoc stand-ins.
+| Address | Ghidra name |
+|---|---|
+| `0x00466FC0` | `Government_ProcessFactionCombatEvent` |
+| `0x00467140` | `Government_PropagateFactionCombatInfluenceToNearbySystems` |
+| `0x00427F40` | `Rank_Deactivate` |
+| `0x00427DF0` | `Rank_Activate` |
+| `0x0046F100` | `Government_IsShipGovernmentDerelict` |
 
 ## Call graph and event codes
 
 `Government_ProcessFactionCombatEvent(system_id, faction, event_code,
-mission_fleet_slot)` is the single entry point. Ten call sites, all passing
-`mission_fleet_slot == -1` (the `!= -1` arm is inert in the shipped data):
+mission_fleet_slot)` is the single entry point. Ten call sites:
 
-| code | meaning | call sites |
-|---|---|---|
-| 0 | smuggling detected (`Government_HandlePlayerFactionExtortion`) | `0x00401A1D`, `0x00402399` |
-| 1 | ship **disabled** (`Ship_IsShipDisabled`) | `0x00419721` |
-| 2 | **boarded** | `0x0045A85F` |
-| 3 | **killed** / stellar destroyed / attack-stellar | `0x0041976F`, `0x004381EF` (×10), `0x00453670`, `0x00480E4B`/`0x00480F9B`/`0x0048102B` (×5) |
+| code | meaning | call sites | `mission_fleet_slot` |
+|---|---|---|---|
+| 0 | smuggling detected (`Government_HandlePlayerFactionExtortion`) | `0x00401A1D`, `0x00402399` | `-1` |
+| 1 | ship **disabled** (`Ship_IsShipDisabled`) | `0x00419721` | victim's `+0xC8D2` |
+| 2 | **boarded** | `0x0045A85F` | victim's `+0xC8D2` |
+| 3 | **killed** / stellar destroyed / attack-stellar | `0x0041976F`, `0x004381EF` (×10), `0x00453670`, `0x00480E4B`/`0x00480F9B`/`0x0048102B` (×5) | kill victim's `+0xC8D2`; stellar/attack sites `-1` |
+
+Kill/disable/board pass the victim's own mission-fleet slot, so a live mission
+ship's event takes the `!= -1` arm (the flood and rank revocation are skipped).
+Only the smuggle and stellar/attack sites pass `-1` unconditionally.
 
 Kill/disable is the gate for rank flag `0x0004`; "any crime" is flag `0x0040`.
 The stellar-destruction arm fires event 3 ten times and the travel-window arm
@@ -41,7 +40,7 @@ SmugPenalty at runtime `+0x48`.
 ## ProcessFactionCombatEvent shape (decoded)
 
 1. Early-out when `faction != -1 && (govt.flags_primary & 0x0800)` — the Bible
-   "derelict" bit, the same test as `Government_IsReputationTrackingGovernment`.
+   "derelict" bit, the same test as `Government_IsShipGovernmentDerelict`.
 2. Clear `g_stellar_flood_visit_mask` (`0x007CC590`, `0x800` bytes).
 3. When `mission_fleet_slot == -1`:
    - `Government_PropagateFactionCombatInfluenceToNearbySystems(system,
@@ -116,48 +115,21 @@ compares `0x60` (MaxOdds) against `ai_odds_score`.
 
 ## Working doc
 
-Living checklist to drive all four functions to 100%. Grouped so each phase is
-independently testable and tracker rows can be updated in the same change.
+Not yet reconstructed:
 
-### Phase A — rank model + activate/deactivate
-- [ ] Add `RankDef` to `ScenarioData` (active/defined/id/weight/govt/flags/
-      salary/salary_cap/contribute/price_mod/full_name/conv_name/short_name)
-      and decode `r\x8ank` in the scenario loader (mirror the loader offsets
-      above; id = slot).
-- [ ] Port `Rank_Activate` (`0x00427DF0`) and `Rank_Deactivate`
-      (`0x00427F40`): sibling clearing on `0x0001/0x0002/0x0010/0x0020`,
-      permanent `0x0008` skip, and `g_recently_activated_rank_id` maintenance.
-- [ ] Replace the `PilotControlState.active_ranks` bitset with the real table
-      and reconcile `GameState.rank_active_flags` save/load with it.
-- [ ] Point the K/L mission-script opcodes at the new activate/deactivate.
-- [ ] Rows: `0x00427DF0`, `0x00427F40`.
+- `<PRK%i>` / `<SRK%i>`: per-government rank names. A mission-text pre-scan
+  latches the government id in `g_expanded_psrk_ship_class` / `_ssrk`; the
+  expansion writes `<PRK` + `(government + 0x80)` + `>` and replaces it with
+  that government's highest-weight active rank
+  (`Rank_HighestWeightedActiveSlotForGovernment` provides the lookup).
+- The demand-tribute middle-button branch of
+  `NovaUi_RunTravelDestinationInteractionWindow` (`0x00480030`) is
+  unconstructed. Per pulse it fires event 3, spawns defense-fleet ships up to
+  the stellar max/present bookkeeping, latches domination (`hazard_marker` 1,
+  tribute STR# 0xbba 25/26; release mirrors it with 35/36 and clears
+  `hazard_marker`), and runs the stellar reaction scripts.
+- Pilot save/load does not persist the `g_rank_defs` active flags (FleetState
+  +0x5dde, one word per slot).
 
-### Phase B — PropagateFactionCombatInfluenceToNearbySystems (`0x00467140`)
-- [ ] Port the visibility-chain walk, relation-dependent delta, 16-way
-      adjacency recursion (`×0.65`), and ±32000 clamp.
-- [ ] Use a per-call visited mask matching `g_stellar_flood_visit_mask`
-      semantics (clear at process entry, as in the original).
-- [ ] Row: `0x00467140`.
-
-### Phase C — Government_ProcessFactionCombatEvent (`0x00466FC0`)
-- [ ] Port the derelict early-out, mask clear, propagate call, and rank
-      revocation loop.
-- [ ] Give `mission_fleet_slot` real semantics (currently only `-1` is
-      reachable; document/branch the `!= -1` arm).
-- [ ] Wire the four port sites: `collision.cpp` kill + stellar-destroy,
-      `boarding_plunder.cpp` board, `negotiation_dialog.cpp` demand-tribute
-      branch.
-- [ ] Row: `0x00466FC0`.
-
-### Ghidra improvements (do alongside)
-- [ ] Set `0x00466FC0` and `0x00467140` return types to `void`.
-- [ ] Rename `Government_IsReputationTrackingGovernment` — it returns true on
-      `flags_primary & 0x0800` (derelict), and callers use it to *skip* the
-      kill event; the name is inverted. Add a plate comment.
-
-### Validation notes
-- Pure data/logic: add a scenario-data test for `r\x8ank` decode (Federation
-  Commander id `0x80`: weight 1, govt 0x80, PriceMod 85, flags 0xB08) and unit
-  tests for activate/deactivate flag semantics.
-- In-engine: triggering an event 3 and observing `system_reputation` deltas +
-  rank revocation needs gameplay validation (ask before using the probe).
+Gameplay validation still needed: an event 3 should move `system_reputation`
+and revoke crime-sensitive allied ranks. Ask before using the probe.

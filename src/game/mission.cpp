@@ -8,6 +8,7 @@
 #include "log.hpp"
 #include "mission_script.hpp"
 #include "outfit.hpp"
+#include "rank.hpp"
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
 #include "targeting.hpp"
@@ -2275,19 +2276,41 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
     }
   }
   ReplaceMissionToken(result, "<OSN>", speaker_name);
-  // TODO(decomp): rank names/weights live on the rank defs (g_rank_defs), not
-  // reconstructed; the fallback arm emits "captain".
-  const std::string rank_fallback = MissionRankFallback();
-  ReplaceMissionToken(result, "<PRK>", rank_fallback);
-  ReplaceMissionToken(result, "<SRK>", rank_fallback);
-  ReplaceMissionToken(result, "<RRK>", rank_fallback);
+  // <PRK>/<SRK>/<RRK>: the highest-weighted active rank's ConvName / ShortName
+  // (Stellar_BuildTravelDestinationDescription 0x004444f0), and the full name
+  // at GameState.recently_activated_rank_id for <RRK>. With no applicable rank
+  // the original falls back to STR# 0x7d2 entry 0x155 ("captain").
+  const std::int16_t prk_slot = Rank_HighestWeightedActiveSlot(state, false);
+  const std::int16_t srk_slot = Rank_HighestWeightedActiveSlot(state, true);
+  const std::int16_t rrk_slot = state.recently_activated_rank_id;
+  ReplaceMissionToken(
+      result,
+      "<PRK>",
+      prk_slot < 0
+          ? MissionRankFallback()
+          : state.scenario.ranks[static_cast<std::size_t>(prk_slot)].conv_name);
+  ReplaceMissionToken(
+      result,
+      "<SRK>",
+      srk_slot < 0 ? MissionRankFallback()
+                   : state.scenario.ranks[static_cast<std::size_t>(srk_slot)]
+                         .short_name);
+  ReplaceMissionToken(
+      result,
+      "<RRK>",
+      rrk_slot < 0
+          ? MissionRankFallback()
+          : state.scenario.ranks[static_cast<std::size_t>(rrk_slot)].full_name);
   ReplaceMissionToken(result, "<PAY>", MissionPayText(state, pay_val));
   // FUN_004d45a0: the registration name, or the shared "EV Nova Community"
   // string when no name is registered. The port has no registration system.
   ReplaceMissionToken(result, "<REG>", "EV Nova Community");
   // TODO(decomp(0x004444f0)) skipped: the <PRK%i>/<SRK%i> per-government rank
-  // variants and the unregistered letter-scramble block (DAT_007354a4) need
-  // the rank system / shareware model respectively.
+  // variants need their government id from g_expanded_psrk_ship_class / ssrk,
+  // which a separate mission-text pre-scan seeds; that pre-scan is not
+  // reconstructed. The name scan itself is available as
+  // Rank_HighestWeightedActiveSlotForGovernment. The unregistered letter-
+  // scramble block (DAT_007354a4) still needs the shareware model.
   return result;
 }
 

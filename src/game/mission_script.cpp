@@ -4,6 +4,7 @@
 #include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "outfit.hpp"
+#include "rank.hpp"
 #include "travel.hpp"
 #include "weapon.hpp"
 
@@ -333,9 +334,13 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
       case 'K':
       case 'L':
         if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x80) {
-          state.control.active_ranks.set(
-              static_cast<std::size_t>(operand - kResourceIdBase),
-              opcode == 'K');
+          const auto rank_slot =
+              static_cast<std::int16_t>(operand - kResourceIdBase);
+          if (opcode == 'K') {
+            Rank_Activate(state, rank_slot);
+          } else {
+            Rank_Deactivate(state, rank_slot);
+          }
           applied = true;
         }
         break;

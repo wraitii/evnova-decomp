@@ -17,6 +17,8 @@
 #include "game_state.hpp"
 #include "scenario_data.hpp"
 
+#include <span>
+
 namespace game {
 
 // Ghidra 0x0046bc90 Government_AreGovtsAllied. Two governments are allied when
@@ -94,11 +96,55 @@ NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
 [[nodiscard]] bool NovaGovernment_TryTriggerAssistanceEncounter(
     GameState &state, const Ship &ship, bool force);
 
+// Ghidra 0x0046f100 Government_IsShipGovernmentDerelict (renamed from the
+// misleading Government_IsReputationTrackingGovernment): true when the ship's
+// faction is a valid 0-based government carrying the derelict bit
+// (flags_primary 0x0800). Callers use the true result to SKIP the kill-side
+// reputation event (derelict/story hulks do not cost standing).
+[[nodiscard]] bool
+NovaGovernment_IsGovernmentDerelict(const ScenarioData &scenario,
+                                    std::int16_t government_id);
+
 // Ghidra 0x00440750 Government_ApplyReputationCreditDelta. Applies the
 // mission PayVal opcode: flat credit award (positive), per-government
 // negative-reputation clears (-10128/-20128/-30128 families), or a percentage
 // cash deduction (-40001..-40099). See government.cpp for the full range map.
 void NovaGovernment_ApplyReputationCreditDelta(GameState &state,
                                                std::int32_t delta);
+
+// Returns the government's combat penalty for one crime event code, i.e. the
+// runtime GovtDef +0x48 + event_code*2 word (0 = SmugPenalty, 1 = DisabPenalty,
+// 2 = BoardPenalty, 3 = KillPenalty, 4 = the unused ShootPenalty slot).
+// Out-of-range codes return 0 (the original indexes without a bound check, but
+// no caller uses a code outside 0..4).
+[[nodiscard]] std::int16_t
+NovaGovernment_CrimePenalty(const Government &government,
+                            std::int16_t event_code);
+
+// Ghidra 0x00467140 Government_PropagateFactionCombatInfluenceToNearbySystems.
+// Recursive reputation flood over the visibility-twin chain and the 16-way
+// system adjacency graph. `scale` starts at 1.0 and is multiplied by 0.65 on
+// each adjacency recursion; `visit_mask` is the caller-owned re-entry guard
+// (0x800 entries, cleared by ProcessFactionCombatEvent before the flood).
+void NovaGovernment_PropagateFactionCombatInfluence(
+    GameState &state,
+    std::int16_t system_id,
+    std::int16_t faction_or_government_id,
+    std::int16_t event_code,
+    double scale,
+    std::span<bool> visit_mask);
+
+// Ghidra 0x00466fc0 Government_ProcessFactionCombatEvent. Single entry point
+// for the crime -> reputation -> rank-revocation chain. event_code is 0
+// smuggle, 1 disable, 2 board, 3 kill. `mission_fleet_slot` is always -1 in
+// the shipped mission fleet script calls; the != -1 arm (which skips the flood
+// and revocation) is inert today. Derelict governments (flags_primary 0x0800)
+// short-circuit the whole event.
+void NovaGovernment_ProcessFactionCombatEvent(
+    GameState &state,
+    std::int16_t system_id,
+    std::int16_t faction_or_government_id,
+    std::int16_t event_code,
+    std::int16_t mission_fleet_slot);
 
 } // namespace game

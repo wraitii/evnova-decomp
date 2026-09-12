@@ -660,10 +660,28 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
 // 0x11c) and the player "disabled" overlay (STR# 0x7d2 0x11f). The full
 // retarget gate chain (system reputation, government max-odds roll, cloak
 // re-entry, escort-command exclusions) is approximated by the conservative
-// subset below, and the kill-side faction combat events plus combat-rating
-// award are deferred. The stellar-target redirect branch (damage x30 toward
+// subset below. The stellar-target redirect branch (damage x30 toward
 // attackers closer than the stellar under attack) is also deferred.
 } // namespace
+
+// Ghidra 0x0046f1e0 Frame_AddCombatRatingPoints.
+void NovaFrame_AddCombatRatingPoints(GameState &state, float points) {
+  constexpr std::int32_t kMaxCombatRating = 10'000'000;
+  if (state.player_combat_rating_points >= kMaxCombatRating) {
+    state.player_combat_rating_points = kMaxCombatRating;
+    return;
+  }
+  // The original truncates the points for the sub-5 test and otherwise adds
+  // round(points * 0.2) (DAT_00575870 = 0.2).
+  if (static_cast<int>(points) < 5) {
+    state.player_combat_rating_points += 1;
+    return;
+  }
+  const double scaled = static_cast<double>(state.player_combat_rating_points) +
+                        static_cast<double>(points) * 0.2;
+  state.player_combat_rating_points =
+      static_cast<std::int32_t>(std::lround(scaled));
+}
 
 void ResolveShipHitFromWeapon(GameState &state,
                               std::int16_t target_slot,
@@ -759,14 +777,40 @@ void ResolveShipHitFromWeapon(GameState &state,
       !target.destruction_visual_triggered) {
     target.destruction_visual_triggered = true;
     NovaTargeting_ClearDestroyedShipReferences(state, target_slot);
-    // TODO(decomp) skipped: kill-side Government_ProcessFactionCombatEvent
-    // (event 3) plus Frame_AddCombatRatingPoints when the victim's government
-    // tracks reputation.
+    // Kill-side faction event + combat rating (Ghidra 0x00419748): the victim's
+    // government takes a kill-event reputation pulse and the player gains the
+    // class's combat value. Skipped for the Shareware Enforcer personalities
+    // (pers_def_slot >= 0x3ff, the 0x004196e3 gate) and for derelict
+    // governments (Government_IsShipGovernmentDerelict, renamed from the
+    // inverted Government_IsReputationTrackingGovernment).
+    if (target.pers_def_slot < 0x3ff &&
+        !NovaGovernment_IsGovernmentDerelict(state.scenario,
+                                             target.faction_or_government_id)) {
+      NovaGovernment_ProcessFactionCombatEvent(state,
+                                               state.player.current_system_id,
+                                               target.faction_or_government_id,
+                                               3,
+                                               target.mission_fleet_slot);
+      if (target_class != nullptr) {
+        NovaFrame_AddCombatRatingPoints(
+            state, static_cast<float>(target_class->strength));
+      }
+    }
   }
 
   // ---- Fire-restriction (disable) transition arms (0x0041a4b0..) ---------
   const bool now_fire_restricted = NovaAiShip_IsDisabled(state, target);
   if (now_fire_restricted) {
+    // Disable-side faction event (Ghidra 0x00419721): the transition into the
+    // disabled state pulses event 1; the same pers_def_slot >= 0x3ff gate
+    // applies.
+    if (!was_fire_restricted && target.pers_def_slot < 0x3ff) {
+      NovaGovernment_ProcessFactionCombatEvent(state,
+                                               state.player.current_system_id,
+                                               target.faction_or_government_id,
+                                               1,
+                                               target.mission_fleet_slot);
+    }
     // Disable-transition armor pin: armor locks at 33% of max (+1 armor;
     // 10% for capability-flags 0x10 hulls), keeping the hull disabled
     // (Ship_HandleShip suppresses regeneration while restricted). Only the
@@ -1569,9 +1613,9 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   if (!owner_valid) {
     // Ownerless shots (stellar defense batteries, owner_ship_slot -1). Ghidra
     // 0x00427435: with a valid recorded target slot the shot hits only the ship
-    // occupying that slot, or a ship whose defense_fleet_home_stellar_id matches it;
-    // an invalid recorded slot accepts any target. The owner-based gates are
-    // skipped and control joins the original's common tail below.
+    // occupying that slot, or a ship whose defense_fleet_home_stellar_id
+    // matches it; an invalid recorded slot accepts any target. The owner-based
+    // gates are skipped and control joins the original's common tail below.
     const std::int16_t recorded_target = shot.target_ship_slot;
     if (recorded_target >= 0 && recorded_target < 0x40 &&
         target_slot != recorded_target &&
@@ -1598,7 +1642,8 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
       return false;
     }
     if (owner.defense_fleet_home_stellar_id != -1 &&
-        target.defense_fleet_home_stellar_id == owner.defense_fleet_home_stellar_id) {
+        target.defense_fleet_home_stellar_id ==
+            owner.defense_fleet_home_stellar_id) {
       return false;
     }
     // TODO(decomp) skipped: the disabled range gate comparing
@@ -1952,9 +1997,16 @@ bool ResolveShotStellarContact(GameState &state,
       stellar->strength = -1;
       stellar->engage_access = stellar->schedule_days;
       if (shot.owner_ship_slot == 0) {
-        // TODO(decomp) skipped: Government_ProcessFactionCombatEvent(system,
-        // stellar government, event 3) x10; the clean-room faction-event
-        // reaction model is not implemented (see boarding_plunder.cpp).
+        // Ghidra 0x004381d4..0x004381fe: a player shot that destroys the
+        // stellar pulses the stellar government's kill event ten times.
+        for (int pulse = 0; pulse < 10; ++pulse) {
+          NovaGovernment_ProcessFactionCombatEvent(
+              state,
+              state.player.current_system_id,
+              stellar->government_id,
+              3,
+              -1);
+        }
       }
     }
     return true;
