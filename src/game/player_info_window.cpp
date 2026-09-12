@@ -730,10 +730,11 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
     }
   }
 
-  // Honors text: system-cue badges (cue+0x1e name strings, u16 sort key at
-  // cue+4) are not modelled (GameState.system_cues carries the u16 keys
-  // only). The 0x2000-flag "ranks" outfits are listed with the same count
-  // machinery. TODO(decomp(0x0049c050)): badge names once cue records land.
+  // Honors text: rank badges (rank-def name strings, u16 Weight sort key at
+  // g_rank_defs+0x04) are not modelled (GameState.rank_active_flags carries
+  // only the saved active flags). The 0x2000-flag "ranks" outfits are listed
+  // with the same count machinery. TODO(decomp(0x0049c050)): badge names once
+  // the rank records land.
   {
     std::string honors;
     int total = 0;

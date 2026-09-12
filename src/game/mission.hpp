@@ -324,8 +324,8 @@ void System_UpdateDisasterStates(GameState &state);
 // deadline, collects tribute income, updates the disaster states, runs the
 // per-stellar garrison resupply + schedule countdown, and rerolls ship/outfit
 // availability. TODO(decomp) skipped slices: the per-system dude_prob +0x1c
-// suppression countdown and the system-cue (rank) daily credits -- neither
-// table is modelled.
+// suppression countdown and the active-rank daily salary (ränk Salary,
+// g_rank_defs +0x0c) -- neither table is modelled.
 void Mission_TickDailyWorldUpdate(GameState &state);
 
 // Ghidra 0x00468450 NovaText_FormatDateString / 0x00468600

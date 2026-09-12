@@ -2089,7 +2089,7 @@ void ReplaceMissionToken(std::string &text,
 }
 
 // <PRK>/<SRK>/<RRK>: the highest-weighted active rank names scan the rank
-// (system-cue) table, which is not reconstructed yet; the original falls back
+// table (g_rank_defs), which is not reconstructed yet; the original falls back
 // to STR# 0x7d2 entry 0x155 ("captain") when no rank applies.
 [[nodiscard]] std::string MissionRankFallback() {
   return NovaHud_LoadStringEntry(0x7d2, 0x155).value_or("captain");
@@ -2275,7 +2275,7 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
     }
   }
   ReplaceMissionToken(result, "<OSN>", speaker_name);
-  // TODO(decomp): rank names/weights live on the rank (system-cue) defs, not
+  // TODO(decomp): rank names/weights live on the rank defs (g_rank_defs), not
   // reconstructed; the fallback arm emits "captain".
   const std::string rank_fallback = MissionRankFallback();
   ReplaceMissionToken(result, "<PRK>", rank_fallback);
@@ -3010,7 +3010,7 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
   // gets fresh 1..100 licensed threshold/limit rolls, every outfit a fresh
   // 1..100 stock roll. TODO(decomp) skipped: the per-system dude_prob
   // +0x1c suppression countdown is handled above. TODO(decomp) skipped: the
-  // system-cue (rank) daily credits are not modelled.
+  // active-rank daily salary (ränk Salary) is not modelled.
   const std::size_t ship_count =
       std::min(state.scenario.ships.size(), static_cast<std::size_t>(0x300));
   for (std::size_t i = 0; i < ship_count; ++i) {

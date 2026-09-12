@@ -14,7 +14,7 @@ re-runs it per count. The driver now also ticks crön events, stellar tribute
 income, the per-stellar garrison/schedule countdown, ship/outfit availability
 rerolls, and the öops disaster states (System_UpdateDisasterStates 0x00424F90).
 Still open in the driver: the per-system dude_prob suppression countdown and
-the system-cue daily credits (neither table is modelled). See the progress
+the rank (ränk) daily salary (the rank table is not modelled). See the progress
 tracker for per-function percentages.
 
 ## Disasters (öops)
@@ -304,7 +304,10 @@ The scripting subsystem includes:
 - `0x00466C40` reaction schedule advancement — open
 - `0x00872040` reaction input trigger — open
 
-The interpreter can mutate ships, active missions, system cues, stellar state, outfits, weapon/ship availability, and mission lists. Its command grammar is only partially decoded, so it should follow the data-model and activation work.
+The interpreter can mutate ships, active missions, rank definitions
+(g_rank_defs), stellar state, outfits, weapon/ship availability, and mission
+lists. Its command grammar is only partially decoded, so it should follow the
+data-model and activation work.
 
 ## 5. Mission ships and fleets
 
@@ -481,7 +484,7 @@ DeathDelay-half fraction (0x005753f8, 0.5), and the armor-pin fraction/addend
 ## Recommended order
 
 1. ~~Decode mission resources and formalize mission-related types.~~ DONE.
-2. ~~Add mission globals/state for active missions, runtime flags, mission-ship definitions, system cues, and timers.~~ DONE (mission-ship definitions themselves still open).
+2. ~~Add mission globals/state for active missions, runtime flags, mission-ship definitions, ranks, and timers.~~ DONE (mission-ship definitions themselves still open).
 3. ~~Implement locator resolution and availability/list evaluation.~~ DONE.
 4. ~~Implement Mission BBS display and accept/decline flow in the landed
    current-pilot/travel context, keeping it separate from the galaxy map and

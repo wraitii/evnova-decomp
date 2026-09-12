@@ -1128,7 +1128,7 @@ void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,
   }
   // Active crön events contribute once past their pre-holdoff wait
   // (Mission_AccumulatePlayerContributeMask 0x0046cca0 cron arm). The
-  // original's rank (system-cue) arm is skipped there too -- ranks are not
+  // original's rank (g_rank_defs) arm is skipped there too -- ranks are not
   // modelled (TODO(decomp)).
   const std::size_t cron_count = std::min(state.scenario.cron_events.size(),
                                           state.cron_event_states.size());

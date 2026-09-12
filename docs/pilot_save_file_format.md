@@ -92,7 +92,7 @@ is written with `FUN_004f22e0` (C-string + NUL) and read with
 | 0x5d90 | u16[4] | escort command codes by class category (`DAT_007354c4..ca`) |
 | 0x5d98 | char[0x40] | pilot nickname C-string (`DAT_005999cc`) |
 | 0x5dd8 | 3 × u16 | `DAT_00733b4a/4c/4e` |
-| 0x5dde | u16[0x80] | system cue flags (`g_system_cues`) |
+| 0x5dde | u16[0x80] | rank active flags (`g_rank_defs` +0x00 per slot) |
 | 0x5ede | char[15] | persistent string A (`DAT_00733b0c`) |
 | 0x5eed | u8 | NUL |
 | 0x5eee | char[15] | persistent string B (`DAT_00733b1c`) |

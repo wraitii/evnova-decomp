@@ -172,8 +172,8 @@ at the window top, middle tile stretched to cover the text area, bottom at
   mass < capacity) at `view_y + 0x37`.
 - **Page 3 — Extras.** If any owned non-0x2000 outfit with a name: draw the
   prebuilt outfit text; else STR# 0x7d2 0x10e.
-- **Page 4 — Honors.** If any system-cue badge (both cue bytes set with a
-  name string at cue+0x1e) or any owned 0x2000-flag outfit: draw the prebuilt
+- **Page 4 — Honors.** If any rank badge (both active bytes set with a
+  name string at rank+0x1e) or any owned 0x2000-flag outfit: draw the prebuilt
   honors text; else STR# 0x7d2 0x10f.
 
 Tail: `NovaUi_DrawPlayerSpecialInteractionTabs(g_player_special_page, -1)`,
@@ -206,8 +206,8 @@ translated through `NovaCommand_TranslateByInputMap`.
   `Outfit_ComputeOwnedOutfitResaleTotal` credits (STR# 0x111 + grouped
   quantity + credits word).
 - **Honors text** (0x7d7278): header STR# 0x112 + "\r\r" (built only when
-  something exists); the system-cue badges (cue bytes set, name at cue+0x1e,
-  ordered by the u16 sort key at cue+4, smallest first, each printed once)
+  something exists); the rank badges (active bytes set, name at rank+0x1e,
+  ordered by the u16 Weight at rank+0x04, smallest first, each printed once)
   followed by the owned 0x2000-flag ("Ranks section") outfits with the same
   count-word machinery.
 
