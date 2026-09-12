@@ -37,7 +37,7 @@ namespace {
 //
 //   Government_ProcessFactionCombatEvent 0x00466fc0
 //     (system_id, government_id, 3, -1) per attack/demand pulse
-//   Stellar_SpawnHostileShipForStellar (defense-fleet spawns, capped by
+//   Stellar_SpawnDefenseFleetShip (defense-fleet spawns, capped by
 //     StellarDef max_ship_count/present_ship_count bookkeeping)
 //   the domination latch: StellarDef.hazard_marker = 1, tribute status
 //     (STR# 0xbba msg 25/26), present_ship_count reset, plus the release

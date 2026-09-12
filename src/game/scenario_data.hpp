@@ -860,16 +860,19 @@ struct Stellar {
   std::int16_t engage_access = 0;
 
   // ---- Hostile-ship deposit bookkeeping (Ghidra StellarDef +0x4e/+0x50 and
-  // the derelict sentinel +0x47). The original keeps a pool of patrol/defence
-  // ships staged at a stellar (max_ship_count = the mounted garrison size,
-  // present_ship_count = how many are currently spawned). The destination-
-  // interaction dialog's attack branch (NovaUi_RunTravelDestinationInter-
-  // actionWindow 0x00480030) scans these to decide whether to spawn a fresh
-  // hostile fleet for the stellar, and rescales present_ship_count after a
-  // confrontation. field_0x47 is a single-byte derelict / abandoned sentinel
-  // that suppresses the hostile re-spawn latching. TODO(decomp): the attack
-  // branch that reads them is deferred (see negotiation_dialog.cpp); these
-  // fields are modelled so the data is present.
+  // the field_0x47 latch). The original keeps a pool of defense-fleet ships
+  // staged at a stellar (spöb DefenseDude/DefCount; max_ship_count = the
+  // mounted garrison size, present_ship_count = how many are currently
+  // spawned). NovaStellar_SpawnDefenseFleetShip (0x00421fd0) sets field_0x47
+  // when the first defender is mounted; NovaSystem_TickNpcSpawnMaintenance
+  // (0x0041d6e0) then trickles replacements while present_ship_count > 0. The
+  // destination-interaction dialog's attack branch
+  // (NovaUi_RunTravelDestinationInteractionWindow 0x00480030) is the trigger
+  // that mounts the first wave and rescales present_ship_count after a
+  // confrontation. field_0x47 is also read by
+  // NovaGovernment_IsCandidateHostileToTargeter (0x004629e0) as the
+  // availability-0x200 stellar's hostility sentinel. TODO(decomp): the attack
+  // branch is deferred (see negotiation_dialog.cpp).
   int present_ship_count = 0; // StellarDef +0x50
   int max_ship_count = 0;     // StellarDef +0x4e (garrison size; >0x3e9/0x2711
                               //  rescale branches)

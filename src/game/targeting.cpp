@@ -209,7 +209,7 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
     return true; // directly targeting the player
   }
   const std::int16_t target = ship.squad_leader_ship_slot;
-  if (target == -1 || ship.target_stellar_object_id != -1 ||
+  if (target == -1 || ship.defense_fleet_home_stellar_id != -1 ||
       !state.SlotInRange(static_cast<std::size_t>(target))) {
     return false;
   }

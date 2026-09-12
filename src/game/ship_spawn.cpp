@@ -239,7 +239,7 @@ int NovaShip_AllocateShipSlot(GameState &state,
   }
   ship.mission_owner_slot = -1;
   ship.credits = 0;
-  ship.target_stellar_object_id = -1;
+  ship.defense_fleet_home_stellar_id = -1;
 
   // The original's allocator draws the sprite-animation cadence seeds from
   // the ship class AS RESET (class 0), before any spawner rewrites the class
@@ -769,7 +769,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     // outfit (Outfit_HasMiningScoopOutfit); the clean-room leaves it false (it
     // only affects mining AI, not yet reconstructed). TODO(decomp).
     ship.mining_scoop_active = false;
-    ship.target_stellar_object_id = -1;
+    ship.defense_fleet_home_stellar_id = -1;
     if (cls != nullptr) {
       ship.skill_variance_scale = SkillVarianceScale(state, cls);
       ship.shield_points = static_cast<float>(cls->base_shield);
@@ -1134,6 +1134,80 @@ int NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
     ship.shield_points = static_cast<float>(cls->base_shield);
     ship.armor_points = static_cast<float>(cls->base_armor);
   }
+  return slot;
+}
+
+// Ghidra 0x00421fd0 Stellar_SpawnDefenseFleetShip. Spawns one ship for a
+// stellar's Bible defense fleet (spöb DefenseDude): allocate via
+// Dude_SpawnShipFromDudeDefInSystem (slot pool 2, retried with ship
+// availability ignored), stamp it as the stellar's defender
+// (defense_fleet_home_stellar_id), force behavior-3 warship, seed it at the
+// stellar's map position with a random heading and an initial velocity at the
+// effective max speed along that heading, and finally make it hostile to the
+// player. Sets the stellar's field_0x47 latch so the per-tick
+// trickle (NovaSystem_TickNpcSpawnMaintenance) may replace losses. `stellar_id`
+// is the stellar resource id; returns the ship slot or -1.
+int NovaStellar_SpawnDefenseFleetShip(GameState &state,
+                                      std::int16_t stellar_id) {
+  if (stellar_id < 0x80 || static_cast<std::size_t>(stellar_id - 0x80) >=
+                               state.scenario.stellars.size()) {
+    return -1;
+  }
+  Stellar &stellar =
+      state.scenario.stellars[static_cast<std::size_t>(stellar_id - 0x80)];
+  if (stellar.defense_dude_id == -1) {
+    return -1;
+  }
+
+  int slot =
+      NovaDude_SpawnShipFromDudeDefInSystem(state,
+                                            stellar.defense_dude_id,
+                                            stellar.system_id,
+                                            /*slot_pool=*/2,
+                                            /*ignore_ship_availability=*/false);
+  if (slot < 0) {
+    slot = NovaDude_SpawnShipFromDudeDefInSystem(
+        state,
+        stellar.defense_dude_id,
+        stellar.system_id,
+        /*slot_pool=*/2,
+        /*ignore_ship_availability=*/true);
+  }
+  if (slot < 0) {
+    return -1;
+  }
+
+  Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.defense_fleet_home_stellar_id = stellar_id;
+  ship.boarded_target_latch = 1;
+  ship.cloak_transition_latch = 0;
+  ship.cloak_fade_progress = 0.0F;
+  ship.ai_maneuver_timer_ms = 0.0F;
+  ship.ai_behavior_code = 3;
+  ship.mission_fleet_slot = -1;
+  ship.squad_leader_ship_slot = -1;
+  ship.faction_or_government_id = stellar.government_id;
+  ship.pos_x = static_cast<float>(stellar.pos_x);
+  ship.pos_y = static_cast<float>(stellar.pos_y);
+  // Random integer heading in [0, 360) degrees; the clean-room heading field is
+  // stored in radians, so convert once. vel_x/vel_y/speed are then seeded by
+  // Math_AddPolarVelocity (0x0043b4a0) at the effective max speed (heading 0 =
+  // up: vel_x += sin, vel_y -= cos).
+  ship.heading = static_cast<float>(RandomBelow(state, 0x168)) *
+                 (3.14159265358979323846F / 180.0F);
+  ship.vel_x = 0.0F;
+  ship.vel_y = 0.0F;
+  ship.speed = 0.0F;
+  const ShipClass *cls =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (cls != nullptr) {
+    const NpcEffectiveStats stats =
+        NovaShip_ComputeEffectiveStats(state, ship, *cls);
+    ship.vel_x += std::sin(ship.heading) * stats.max_speed_px_per_tick;
+    ship.vel_y -= std::cos(ship.heading) * stats.max_speed_px_per_tick;
+  }
+  NovaAi_SetShipHostileToPlayer(state, ship);
+  stellar.field_0x47 = 1;
   return slot;
 }
 
@@ -1570,40 +1644,73 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
       ++ambient;
     }
   }
-  if (ambient >= sys->avg_ships) {
-    return;
-  }
-
-  // 1-in-500 encounter roll. The original draws NovaRandom_Range(500) and only
-  // proceeds when the draw is exactly 1.
-  if (RandomBelow(state, 500) == 1) {
-    const bool has_encounters =
-        sys->encounter_fleet_count >= 1 && sys->encounter_chance_percent > 0;
-    if (has_encounters) {
+  if (ambient < sys->avg_ships) {
+    // 1-in-500 encounter roll. The original draws NovaRandom_Range(500) and
+    // only proceeds when the draw is exactly 1.
+    bool ambient_spawned = false;
+    if (RandomBelow(state, 500) == 1) {
+      const bool has_encounters =
+          sys->encounter_fleet_count >= 1 && sys->encounter_chance_percent > 0;
       // Second gate: a uniform draw in [0, encounter_chance_percent).
-      if (RandomBelow(state, 100) < sys->encounter_chance_percent) {
+      if (has_encounters &&
+          RandomBelow(state, 100) < sys->encounter_chance_percent) {
         const int fleet = NovaEncounter_SelectFleetDefWeighted(
             *sys, state.scenario, state.rng);
         if (fleet >= 0) {
           // Original intercept: EncounterFleet_SpawnRandomEncounterFleet.
           (void)NovaEncounter_SpawnFleetLeadShip(
               state, system_id, static_cast<std::int16_t>(fleet));
-          return;
+          ambient_spawned = true;
         }
       }
     }
+
+    // Fall back to a random system dude ship when the encounter did not fire.
+    if (!ambient_spawned &&
+        NovaDude_SelectRandomSystemDudeClassIndex(*sys, state.rng) != -1) {
+      (void)NovaDude_SpawnRandomDudeShipInSystem(state, system_id);
+    }
   }
 
-  // Fall back to a random system dude ship when the encounter did not fire.
-  if (NovaDude_SelectRandomSystemDudeClassIndex(*sys, state.rng) != -1) {
-    (void)NovaDude_SpawnRandomDudeShipInSystem(state, system_id);
+  // Stellar defense-fleet trickle (Ghidra 0x0041d6e0 tail): scan the system's
+  // 16 nav stellars; for the first one whose field_0x47 latch is set and whose
+  // present_ship_count budget is positive but whose live defenders number below
+  // one wave (max_ship_count % 10), spawn one defender and decrement the
+  // budget. The original stops at the first satisfying stellar (at most one
+  // defense spawn per tick), then runs the ambient-mission tail.
+  for (const auto nav : sys->nav_defs) {
+    if (nav < 0x80 || static_cast<std::size_t>(nav - 0x80) >=
+                          state.scenario.stellars.size()) {
+      continue;
+    }
+    Stellar &stellar =
+        state.scenario.stellars[static_cast<std::size_t>(nav - 0x80)];
+    if (stellar.field_0x47 == 0 || stellar.present_ship_count <= 0) {
+      continue;
+    }
+    int present = 0;
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      const Ship &ship = state.ShipAt(slot);
+      if (ship.is_active && ship.defense_fleet_home_stellar_id == nav) {
+        ++present;
+      }
+    }
+    if (present < stellar.max_ship_count % 10) {
+      (void)NovaStellar_SpawnDefenseFleetShip(state, nav);
+      --stellar.present_ship_count;
+      break;
+    }
   }
+  // TODO(decomp): the original then runs Mission_SpawnAmbientMissionShip and
+  // the DAT_007353f4-latched ambient-traffic encounter escalation (<200
+  // ships -> fleet 0xff, >0x31 -> fleet 0xfe at mode 4).
 }
 
 // Ghidra 0x0041ad50 Ship_DeactivateVacantShipsAndTally. Scans every NPC ship
 // slot (1..kMaxShips-1) and deactivates the "vacant" ones, tallying them into
 // their spawn-quota bucket before the cleanup:
-//   * a parked ship (target_stellar_object_id != -1) increments that stellar's
+//   * a parked ship (defense_fleet_home_stellar_id != -1) increments that
+//   stellar's
 //     present_ship_count, capped at its max_ship_count (the mounted garrison
 //     size -- this is what feeds the hostile re-spawn bookkeeping);
 //   * a mission ship (mission_owner_slot != -1) increments its mission fleet's
@@ -1631,7 +1738,8 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
     // (with flag==0) not disabled.
     bool vacant = true;
     if (ship.ai_behavior_code > 4 && ship.squad_leader_ship_slot == 0 &&
-        ship.target_stellar_object_id == -1 && ship.mission_fleet_slot == -1) {
+        ship.defense_fleet_home_stellar_id == -1 &&
+        ship.mission_fleet_slot == -1) {
       if (!NovaAiShip_IsDisabled(state, ship) && !keep_player_engaged) {
         vacant = false;
       }
@@ -1645,13 +1753,13 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
     // go to their mission fleet's current-ship counter; everything else parks
     // at a stellar only when it is active and docked there.
     if (!ship.is_active || ship.mission_owner_slot == -1) {
-      if (ship.is_active && ship.target_stellar_object_id != -1) {
-        // target_stellar_object_id is a stellar resource id (>= 0x80); the
+      if (ship.is_active && ship.defense_fleet_home_stellar_id != -1) {
+        // defense_fleet_home_stellar_id is a stellar resource id (>= 0x80); the
         // clean-room stellars table is indexed by id - 0x80. The const
         // ScenarioData::Stellar() accessor cannot mutate the runtime count,
         // so index the vector directly (same pattern as the display-state
         // refresh in targeting.cpp).
-        const std::int16_t sid = ship.target_stellar_object_id;
+        const std::int16_t sid = ship.defense_fleet_home_stellar_id;
         if (sid >= 0x80 && static_cast<std::size_t>(sid - 0x80) <
                                state.scenario.stellars.size()) {
           Stellar &st =
@@ -1685,7 +1793,7 @@ void NovaShip_DeactivateVacantShipsAndTally(GameState &state,
     // the two byte flags are unmodelled AI latches, TODO(decomp)).
     ship.is_active = false;
     ship.mission_fleet_slot = -1;
-    ship.target_stellar_object_id = -1;
+    ship.defense_fleet_home_stellar_id = -1;
     ship.velocity_match_target_ship_slot = -1;
     ship.mission_owner_slot = -1;
     ship.current_system_id = -1;
@@ -1736,7 +1844,7 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.vel_y = launcher.vel_y;
   ship.speed = launcher.speed;
   ship.ship_class_id = static_cast<std::int16_t>(bay_weapon->ammo_type - 0x80);
-  ship.target_stellar_object_id = -1;
+  ship.defense_fleet_home_stellar_id = -1;
   ship.velocity_match_target_ship_slot = -1;
   ship.mission_hail_latch = 0;
   ship.afterburner_latch = NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;

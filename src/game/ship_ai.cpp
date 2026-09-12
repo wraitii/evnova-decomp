@@ -328,7 +328,7 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
   ship.primary_target_ship_slot = -1;
   ship.squad_leader_ship_slot = -1;
   ship.ai_hostility_accumulator = 0;
-  ship.target_stellar_object_id = -1;
+  ship.defense_fleet_home_stellar_id = -1;
   ship.vel_x = 0.0F;
   ship.vel_y = 0.0F;
   ship.speed = 0.0F;
@@ -376,7 +376,7 @@ bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship) {
   }
   // Ships attached to a stellar (landing/jump-out approach) are never
   // disabled, even when crippled; the armor gate below is skipped.
-  if (ship.ship_instance_id > 0 && ship.target_stellar_object_id != -1) {
+  if (ship.ship_instance_id > 0 && ship.defense_fleet_home_stellar_id != -1) {
     return false;
   }
   // Critically-damaged gate: armor below a fraction of max armor. The Bible
@@ -1440,7 +1440,7 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
     if (!candidate.is_active || NovaAiShip_IsDestroyed(candidate) ||
         candidate.current_system_id != ship.current_system_id ||
         candidate.ai_state_code == 0x15 ||
-        candidate.target_stellar_object_id != -1 ||
+        candidate.defense_fleet_home_stellar_id != -1 ||
         NovaAiShip_IsDisabled(state, candidate) ||
         NovaTargeting_ShipAtCloakVisibilityThreshold(candidate)) {
       continue;
@@ -1760,6 +1760,114 @@ void NovaAi_UpdateAvailabilityBehavior(GameState &state,
   // TODO(decomp): port the taunt.
 }
 
+// Ghidra 0x00405120 Ship_DefenseFleetPrioritizePlayerThreat. Per-frame
+// supervisor run by Ship_UpdateShipAI (0x00401000) INSTEAD of a behavior
+// supervisor when the ship holds a stellar assignment
+// (defense_fleet_home_stellar_id != -1). In the original that field is only
+// ever set to a real stellar by Stellar_SpawnDefenseFleetShip (0x00421fd0),
+// which garrisons a ship AT a stellar, gives it ai_behavior_code 3 and
+// Ship_SetShipHostileToPlayer -- the Bible's stellar defense fleet (spöb
+// DefenseDude / DefCount). So this is the defense fleet's player-threat
+// override, not something every NPC runs. It
+// searches for the nearest player-side ship -- slot 0 (the player) or an active
+// ship whose squad_leader_ship_slot == 0 (a player escort) -- that may be
+// engaged under the cloak rules, preferring candidates within a
+// squared-distance bound DAT_00575060 = 36,000,000 (= 6000^2) on the first pass
+// and falling back to the nearest anywhere on a second pass. If the ship
+// already holds a primary target the search result is ignored unless that
+// primary is an NPC attached to a non-player leader, in which case the best
+// player-side candidate replaces it. With no primary it either locks the best
+// candidate (AI state 4) or, when none exists, returns to its stellar
+// (AI state 1 with ai_secondary_target_slot = defense_fleet_home_stellar_id).
+// Search distance is Math_SquaredDistance (Euclidean squared) truncated toward
+// zero.
+void NovaAi_DefenseFleetPrioritizePlayerThreat(GameState &state, Ship &ship) {
+  if (NovaAiShip_IsDestroyed(ship) || ship.ai_state_code == 0x16) {
+    return;
+  }
+
+  // DAT_00575060 (0x00575060) = 36000000.0f = 6000^2.
+  constexpr float kPlayerThreatRangeSq = 36000000.0F;
+
+  std::int16_t best_slot = -1;
+  int best_distance = -1;
+  // Two passes: the first keeps only candidates within 6000 px (the original
+  // still rejects unordered/greater distances), the second accepts any.
+  for (int pass = 0; pass < 2 && best_slot == -1; ++pass) {
+    for (std::size_t i = 0; i < GameState::kMaxShips; ++i) {
+      const std::int16_t slot = static_cast<std::int16_t>(i);
+      const Ship &candidate = state.ShipAt(i);
+      if (!candidate.is_active) {
+        continue;
+      }
+      // Only the player (slot 0) or a ship attached to the player qualifies.
+      if (slot != 0 && candidate.squad_leader_ship_slot != 0) {
+        continue;
+      }
+      if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, candidate, ship)) {
+        continue;
+      }
+      const float distance_sq = SquaredDistance(
+          ship.pos_x, ship.pos_y, candidate.pos_x, candidate.pos_y);
+      if (pass == 0 && !(distance_sq <= kPlayerThreatRangeSq)) {
+        continue;
+      }
+      // Strictly closer wins; the first candidate wins ties. The negated
+      // comparison also rejects an unordered (NaN) distance, matching the
+      // original FCOMP flags.
+      if (best_slot != -1 &&
+          !(distance_sq < static_cast<float>(best_distance))) {
+        continue;
+      }
+      best_distance = static_cast<int>(distance_sq);
+      best_slot = slot;
+    }
+  }
+
+  ship.ai_maneuver_timer_ms = 0.0F;
+  ship.ai_secondary_target_slot = -1;
+
+  // The original indexes the candidate pool with the exhausted search-loop
+  // counter (index 0x40, one past the heap-allocated 64-ship array) in this
+  // revalidation -- an out-of-bounds read with no defined value. The port
+  // instead revalidates the ship's existing primary target, the evident
+  // intent (clear a primary that can no longer be engaged under cloak rules).
+  // TODO(decomp(0x00405120)) divergence: original reads ships[0x40] here.
+  if (ship.primary_target_ship_slot != -1) {
+    const std::size_t primary =
+        static_cast<std::size_t>(ship.primary_target_ship_slot);
+    if (!state.SlotInRange(primary) ||
+        !NovaAiShip_CanEngageTargetUnderCloakRules(
+            state, state.ShipAt(primary), ship)) {
+      ship.primary_target_ship_slot = -1;
+    }
+  }
+
+  if (ship.primary_target_ship_slot == -1) {
+    if (best_slot == -1) {
+      ship.ai_secondary_target_slot = ship.defense_fleet_home_stellar_id;
+      ship.ai_state_code = 1;
+    } else {
+      ship.primary_target_ship_slot = best_slot;
+      ship.ai_state_code = 4;
+    }
+  }
+
+  const std::int16_t primary = ship.primary_target_ship_slot;
+  if (primary != -1 && primary != 0 &&
+      state.SlotInRange(static_cast<std::size_t>(primary)) &&
+      state.ShipAt(static_cast<std::size_t>(primary)).squad_leader_ship_slot !=
+          0) {
+    if (best_slot == -1) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+    } else {
+      ship.primary_target_ship_slot = best_slot;
+    }
+  }
+}
+
 // Ghidra 0x00402bd0 Ship_UpdateShipAiBehavior0x02_BraveTrader. Local/dude
 // behavior shares the travel fallback with behavior 0x01, but promotes an
 // established hostile contact once it is within the original 0x4e3-pixel
@@ -2014,7 +2122,7 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
     ship.ai_maneuver_timer_ms = 100.0F;
     ship.ai_state_code = 0xe;
     ship.ai_control_mode = 0;
-    ship.target_stellar_object_id = -1;
+    ship.defense_fleet_home_stellar_id = -1;
     NovaBoarding_BoardShipAndTransferCargo(state, ship, victim, now_ms);
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
@@ -2287,7 +2395,7 @@ void NovaAi_UpdateShipState(GameState &state,
         if (other.ai_behavior_code > 3) {
           other.ai_behavior_code = 3;
         }
-        other.target_stellar_object_id = -1;
+        other.defense_fleet_home_stellar_id = -1;
         other.ai_hostility_accumulator = -1;
         other.primary_target_ship_slot = -1;
         other.ai_secondary_target_slot = ship.ai_secondary_target_slot;
@@ -2409,7 +2517,7 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Pursuit (state 5) toward squad_leader_ship_slot. ----
   if (ship.ai_state_code == 5 && ship.squad_leader_ship_slot != -1 &&
-      ship.target_stellar_object_id == -1) {
+      ship.defense_fleet_home_stellar_id == -1) {
     ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
     const auto *cls =
         scn->Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
@@ -2435,7 +2543,7 @@ void NovaAi_UpdateShipState(GameState &state,
 
   // ---- Assistance/response (state 10) toward squad_leader_ship_slot. ----
   if (ship.ai_state_code == 10 && ship.squad_leader_ship_slot != -1 &&
-      ship.target_stellar_object_id == -1) {
+      ship.defense_fleet_home_stellar_id == -1) {
     ship.ai_secondary_target_slot = ship.squad_leader_ship_slot;
     const Ship &tgt =
         state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot));
@@ -4179,21 +4287,22 @@ void NovaAi_UpdateShipAI(GameState &state,
   // frame, keeping behavior supervisors from stealing the arrival until the
   // negative-speed integrator completes it.
   if (run_heavy && !restricted && !arrival_slowdown_sentinel) {
-    // Dispatch on behavior code. Availability-driven hulls (class Flags3 bit
-    // 0x1/0x2) with no squad leader run the mining/destroyer supervisor
-    // instead of the ai_behavior_code branch. The original checks a stellar
-    // target first and would run Ship_ShouldShipPrioritizePlayerThreat
-    // (0x00405120, still deferred); those ships stay on the behavior path for
-    // now, so this gate requires target_stellar_object_id == -1 too.
+    // Dispatch precedence (Ship_UpdateShipAI 0x00401000): a ship holding a
+    // stellar assignment runs Ship_DefenseFleetPrioritizePlayerThreat and
+    // skips the behavior supervisors entirely. Otherwise availability-driven
+    // hulls (class Flags3 bit 0x1/0x2) with no squad leader run the
+    // mining/destroyer supervisor, and everything else dispatches on
+    // ai_behavior_code.
     const std::int16_t behavior = ship.ai_behavior_code;
     const ShipClass *dispatch_class = state.scenario.Ship(
         static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    const bool availability_driven =
+    const bool availability_hull =
         dispatch_class != nullptr &&
-        (dispatch_class->availability_flags & 3U) != 0U &&
-        ship.squad_leader_ship_slot == -1 &&
-        ship.target_stellar_object_id == -1;
-    if (availability_driven) {
+        (dispatch_class->availability_flags & 3U) != 0U;
+    if (ship.defense_fleet_home_stellar_id != -1) {
+      // Ghidra 0x00405120 Ship_DefenseFleetPrioritizePlayerThreat.
+      NovaAi_DefenseFleetPrioritizePlayerThreat(state, ship);
+    } else if (availability_hull && ship.squad_leader_ship_slot == -1) {
       // Ghidra 0x00402980 Ship_UpdateShipAiAvailabilityBehavior.
       NovaAi_UpdateAvailabilityBehavior(state, ship, now_ms);
     } else if (behavior == 1) {
@@ -4694,7 +4803,7 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
   if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, ship, state.player)) {
     return false;
   }
-  if (ship.target_stellar_object_id != -1) {
+  if (ship.defense_fleet_home_stellar_id != -1) {
     return true; // docked/landed against a stellar: keeps pressing
   }
   const std::int16_t target_slot = ship.primary_target_ship_slot;
@@ -5091,7 +5200,7 @@ void NovaAi_SyncJumpStateToSquad(GameState &state,
     Ship &follower = state.ShipAt(slot);
     if (!follower.is_active ||
         follower.squad_leader_ship_slot != leader.ship_instance_id ||
-        follower.target_stellar_object_id != -1) {
+        follower.defense_fleet_home_stellar_id != -1) {
       continue;
     }
     follower.ai_station_hold_timer = leader.ai_station_hold_timer;

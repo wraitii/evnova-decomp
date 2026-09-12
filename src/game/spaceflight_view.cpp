@@ -1855,7 +1855,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     frame_base = 0xc;
   } else {
     if (target.squad_leader_ship_slot == 0 &&
-        target.target_stellar_object_id == -1) {
+        target.defense_fleet_home_stellar_id == -1) {
       frame_base = 8; // directly targeting the player
     } else {
       frame_base =

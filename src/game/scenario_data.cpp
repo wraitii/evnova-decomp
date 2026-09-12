@@ -753,6 +753,18 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (st.tribute < 1) {
     st.tribute = static_cast<std::int16_t>(st.tech_level * 1000);
   }
+  // DefenseDude (payload +0x1c -> StellarDef +0x464): the dude resource whose
+  // weighted ship classes form the stellar's Bible defense fleet. The loader
+  // rebases resource ids below 0x80 to -1 (0x004bd99b), leaving a zero-based
+  // index that NovaDude_SpawnShipFromDudeDefInSystem re-adds 0x80 to.
+  if (bytes.size() >= 0x1e) {
+    st.defense_dude_id = ReadBeI16(bytes, 0x1c);
+    if (st.defense_dude_id < 0x80) {
+      st.defense_dude_id = -1;
+    } else {
+      st.defense_dude_id = static_cast<std::int16_t>(st.defense_dude_id - 0x80);
+    }
+  }
   // Schedule/garrison tail (loader 0x004bd3c0): garrison size (payload
   // +0x1e -> StellarDef +0x468) seeds the present-ship count with the
   // loader's rescale branches; Stellar Strength (payload +0x23c -> the

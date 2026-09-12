@@ -487,14 +487,14 @@ void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
     other.primary_target_ship_slot = -1;
     other.ai_secondary_target_slot = -1;
     other.ai_hostility_accumulator = 0;
-    other.target_stellar_object_id = -1;
+    other.defense_fleet_home_stellar_id = -1;
   }
   ship.ai_state_code = 0;
   ship.ai_control_mode = 0;
   ship.primary_target_ship_slot = -1;
   ship.ai_secondary_target_slot = -1;
   ship.ai_hostility_accumulator = 0;
-  ship.target_stellar_object_id = -1;
+  ship.defense_fleet_home_stellar_id = -1;
   ship.pers_def_slot = -1;
 }
 
@@ -1937,7 +1937,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
             target.boarded_target_latch = 1; // field_0xb9
             target.cloak_transition_latch = 0;
             target.cloak_fade_progress = 0.0F;
-            target.target_stellar_object_id = -1;
+            target.defense_fleet_home_stellar_id = -1;
             target.ai_hostility_accumulator = 0;
             // TODO(decomp): escort_released_mark / escort_upgrade_mark /
             // jamming_score_* fields are not modelled in the port.

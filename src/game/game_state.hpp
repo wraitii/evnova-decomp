@@ -404,8 +404,16 @@ struct Ship {
   // target for behavior >4 otherwise. -1 = no squad. It is an attachment, NOT
   // a hostile target; the friendly-fire squad-root chain and the formation
   // passes depend on that.
-  std::int16_t squad_leader_ship_slot = -1;   // +0x9A
-  std::int16_t target_stellar_object_id = -1; // +0x8C
+  std::int16_t squad_leader_ship_slot = -1; // +0x9A
+  // Stellar this ship is garrisoned at / belongs to (Ghidra ShipState +0x8C
+  // defense_fleet_home_stellar_id, renamed from target_stellar_object_id 2026).
+  // Set to a real stellar only by the defense-fleet spawner
+  // (NovaStellar_SpawnDefenseFleetShip, Ghidra Stellar_SpawnDefenseFleetShip
+  // 0x00421fd0); -1 for every other ship. Two ships sharing this value are
+  // squadmates of the same stellar defense fleet and do not shoot each other
+  // (Weapon_CanWeaponHitTarget 0x00426ef0 / collision.cpp), and the stellar's
+  // own battery shots only hit ships matching its recorded target.
+  std::int16_t defense_fleet_home_stellar_id = -1; // +0x8C
   // Escort command selected by the assist supervisor. The clean-room dialog
   // and mission models only use the neutral default so far, but the field is
   // needed to preserve the state-0x05+ branch shape.
@@ -454,10 +462,11 @@ struct Ship {
   // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810).
   std::int16_t resolved_squad_leader_ship_slot = -1; // +0xC92E
   // Stored evasive heading for control mode 0x10 (Ghidra ShipState raw short
-  // at +0x8E, between target_stellar_object_id and jump_destination_stellar_id;
-  // unnamed in the DB). Ship_ApplyShipAiControls writes current-heading +/-135
-  // deg (instance-id parity sign) when it orders the evasive-break, and mode
-  // 0x10 steers at this value until it aligns and drops back to mode 0x6.
+  // at +0x8E, between defense_fleet_home_stellar_id and
+  // jump_destination_stellar_id; unnamed in the DB). Ship_ApplyShipAiControls
+  // writes current-heading +/-135 deg (instance-id parity sign) when it orders
+  // the evasive-break, and mode 0x10 steers at this value until it aligns and
+  // drops back to mode 0x6.
   std::int16_t ai_evasive_heading_deg = 0; // +0x8E (Provisional)
   // Ghidra ShipState raw short at +0x90 (unnamed): the travel target cache
   // Ship_ResetShipAiBehaviorRuntimeFields (0x00402810) clears to -1.

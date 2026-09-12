@@ -53,6 +53,38 @@ using game::NovaTargeting_UpdateStellarAvailability;
   return -1;
 }
 
+// First nav stellar in the system that is available, travel-flagged, and not a
+// restricted hypergate/wormhole -- a target the state-1 travel arm accepts.
+[[nodiscard]] std::int16_t FindUsableTravelStellar(GameState &state,
+                                                   int sys_idx) {
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  NovaTargeting_UpdateStellarAvailability(state);
+  const auto *sys =
+      state.scenario.System(static_cast<std::int16_t>(sys_idx + 0x80));
+  if (!sys) {
+    return -1;
+  }
+  for (const auto nav : sys->nav_defs) {
+    if (nav < 0x80) {
+      continue;
+    }
+    const game::Stellar *st = state.scenario.Stellar(nav);
+    if (st && st->is_available && (st->flags & 1U) != 0U &&
+        (st->availability_flags & 0x3000) == 0U) {
+      return nav;
+    }
+  }
+  return -1;
+}
+
+// Deactivate every ship slot so a hand-built test owns the whole pool (the
+// scenario loader may have populated the player's system).
+void ClearAllShips(GameState &state) {
+  for (std::size_t i = 0; i < GameState::kMaxShips; ++i) {
+    state.ShipAt(i).is_active = false;
+  }
+}
+
 } // namespace
 
 // End-to-end wiring check for the Phase 3/4 wander milestone: a behavior-0x01
@@ -203,6 +235,90 @@ TEST_CASE("behavior-0x03 acquires a hostile player and pursues") {
   CHECK(ship.ai_state_code == 4);
   CHECK(ship.ai_control_mode == 6);
   CHECK(ship.ai_desired_heading_deg != 0);
+}
+
+// A ship holding a stellar target runs the dedicated player-threat supervisor
+// (Ship_DefenseFleetPrioritizePlayerThreat) instead of its behavior supervisor,
+// so a nearby player-side contact is locked as the primary target (state 4).
+TEST_CASE("stellar-target ship prioritizes a nearby player-side contact") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  const std::int16_t stellar_id = FindUsableTravelStellar(state, sys_idx);
+  REQUIRE(stellar_id >= 0x80);
+  ClearAllShips(state);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.pos_x = 50100.0F;
+  state.player.pos_y = 50000.0F;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.ai_behavior_code = 1;
+  ship.ai_state_code = 0;
+  ship.pos_x = 50000.0F;
+  ship.pos_y = 50000.0F;
+  ship.armor_points = 30.0F;
+  ship.shield_points = 30.0F;
+  ship.defense_fleet_home_stellar_id = stellar_id;
+  ship.primary_target_ship_slot = -1;
+  ship.ai_secondary_target_slot = -1;
+
+  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+
+  CHECK(ship.primary_target_ship_slot == 0);
+  CHECK(ship.ai_state_code == 4);
+}
+
+// With a stellar target and no player-side contact, the supervisor hands the
+// ship back to travel (state 1) with the stellar in the secondary slot.
+TEST_CASE("stellar-target ship returns to stellar travel with no contact") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  const std::int16_t stellar_id = FindUsableTravelStellar(state, sys_idx);
+  REQUIRE(stellar_id >= 0x80);
+  ClearAllShips(state);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  // No active player means no candidate qualifies (slot 0 is skipped).
+  state.player.is_active = false;
+
+  const int slot = NovaShip_AllocateShipSlot(
+      state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
+  REQUIRE(slot > 0);
+  game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  ship.ship_class_id = 0;
+  ship.ship_instance_id = static_cast<std::int16_t>(slot);
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.is_active = true;
+  ship.ai_behavior_code = 1;
+  ship.ai_state_code = 0;
+  ship.pos_x = 50000.0F;
+  ship.pos_y = 50000.0F;
+  ship.armor_points = 30.0F;
+  ship.shield_points = 30.0F;
+  ship.defense_fleet_home_stellar_id = stellar_id;
+  ship.primary_target_ship_slot = -1;
+  ship.ai_secondary_target_slot = -1;
+
+  NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
+
+  CHECK(ship.ai_state_code == 1);
+  CHECK(ship.ai_secondary_target_slot == stellar_id);
 }
 
 TEST_CASE(
@@ -360,7 +476,7 @@ TEST_CASE(
   ship.ship_instance_id = 1;
   ship.ship_class_id = 0;
   ship.squad_leader_ship_slot = 2;
-  ship.target_stellar_object_id = -1;
+  ship.defense_fleet_home_stellar_id = -1;
   leader.is_active = true;
   leader.ship_instance_id = 2;
   leader.ship_class_id = 0;
@@ -723,7 +839,7 @@ SpawnCombatTestShip(GameState &state, int sys_idx, std::int16_t class_id) {
   ship.primary_target_ship_slot = -1;
   ship.squad_leader_ship_slot = -1;
   ship.faction_or_government_id = -1;
-  ship.target_stellar_object_id = -1;
+  ship.defense_fleet_home_stellar_id = -1;
   return ship;
 }
 

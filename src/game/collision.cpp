@@ -790,7 +790,7 @@ void ResolveShipHitFromWeapon(GameState &state,
     const std::int16_t fleet_slot = target.mission_fleet_slot;
     if (!was_fire_restricted && fleet_slot >= 0 &&
         fleet_slot < static_cast<std::int16_t>(GameState::kMaxActiveMissions) &&
-        target.target_stellar_object_id == -1) {
+        target.defense_fleet_home_stellar_id == -1) {
       MissionRuntimeFlags &runtime =
           state.active_mission_runtime_flags[static_cast<std::size_t>(
               fleet_slot)];
@@ -902,7 +902,7 @@ void ResolveShipHitFromWeapon(GameState &state,
       if (leader > 0 &&
           leader < static_cast<std::int16_t>(GameState::kMaxShips) &&
           state.ShipAt(static_cast<std::size_t>(leader))
-                  .target_stellar_object_id == -1) {
+                  .defense_fleet_home_stellar_id == -1) {
         Ship &leader_ship = state.ShipAt(static_cast<std::size_t>(leader));
         if (armor_damage > 0) {
           leader_ship.ai_hostility_accumulator = static_cast<std::int16_t>(
@@ -935,7 +935,7 @@ void ResolveShipHitFromWeapon(GameState &state,
       if (target.ai_maneuver_timer_ms > kMaxManeuverTimerOnHit) {
         target.ai_maneuver_timer_ms = kMaxManeuverTimerOnHit;
       }
-      if (target_slot != 0 && target.target_stellar_object_id == -1) {
+      if (target_slot != 0 && target.defense_fleet_home_stellar_id == -1) {
         ClearState9OrFToIdle(target);
         target.primary_target_ship_slot = 0;
       }
@@ -1569,13 +1569,13 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
   if (!owner_valid) {
     // Ownerless shots (stellar defense batteries, owner_ship_slot -1). Ghidra
     // 0x00427435: with a valid recorded target slot the shot hits only the ship
-    // occupying that slot, or a ship whose target_stellar_object_id matches it;
+    // occupying that slot, or a ship whose defense_fleet_home_stellar_id matches it;
     // an invalid recorded slot accepts any target. The owner-based gates are
     // skipped and control joins the original's common tail below.
     const std::int16_t recorded_target = shot.target_ship_slot;
     if (recorded_target >= 0 && recorded_target < 0x40 &&
         target_slot != recorded_target &&
-        target.target_stellar_object_id != recorded_target) {
+        target.defense_fleet_home_stellar_id != recorded_target) {
       return false;
     }
   } else {
@@ -1597,8 +1597,8 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
         target.faction_or_government_id == owner.faction_or_government_id) {
       return false;
     }
-    if (owner.target_stellar_object_id != -1 &&
-        target.target_stellar_object_id == owner.target_stellar_object_id) {
+    if (owner.defense_fleet_home_stellar_id != -1 &&
+        target.defense_fleet_home_stellar_id == owner.defense_fleet_home_stellar_id) {
       return false;
     }
     // TODO(decomp) skipped: the disabled range gate comparing

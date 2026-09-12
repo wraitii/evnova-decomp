@@ -132,6 +132,75 @@ TEST_CASE("system maintenance populates Tichel toward avg_ships") {
   CHECK(spawned <= sys->avg_ships + 2);
 }
 
+// Stellar_SpawnDefenseFleetShip (0x00421fd0) + the
+// System_TickNpcSpawnMaintenance defense trickle: a stellar with a DefenseDude
+// spawns a behavior-3 hostile defender stamped with its home stellar, and the
+// tick mounts one replacement per tick while the present-ship budget holds and
+// the live defender count is below one wave (max_ship_count % 10).
+TEST_CASE("stellar defense fleet spawns and trickles replacements") {
+  using game::NovaStellar_SpawnDefenseFleetShip;
+  using game::NovaSystem_TickNpcSpawnMaintenance;
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  // Find a stellar reachable through some system's nav list that carries a
+  // loaded DefenseDude.
+  std::int16_t system_id = -1;
+  std::int16_t stellar_id = -1;
+  for (std::size_t s = 0; s < state.scenario.systems.size() && stellar_id < 0;
+       ++s) {
+    for (const auto nav : state.scenario.systems[s].nav_defs) {
+      if (nav >= 0x80 &&
+          static_cast<std::size_t>(nav - 0x80) <
+              state.scenario.stellars.size() &&
+          state.scenario.stellars[static_cast<std::size_t>(nav - 0x80)]
+                  .defense_dude_id != -1) {
+        system_id = static_cast<std::int16_t>(s);
+        stellar_id = nav;
+        break;
+      }
+    }
+  }
+  REQUIRE(stellar_id >= 0x80);
+
+  game::Stellar &stellar =
+      state.scenario.stellars[static_cast<std::size_t>(stellar_id - 0x80)];
+  stellar.system_id = system_id;
+  state.player.current_system_id = system_id;
+  stellar.field_0x47 = 0;
+  stellar.present_ship_count = 5;
+  stellar.max_ship_count = 2; // one wave = 2 defenders
+
+  const int slot = NovaStellar_SpawnDefenseFleetShip(state, stellar_id);
+  REQUIRE(slot > 0);
+  const game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+  CHECK(ship.is_active);
+  CHECK(ship.defense_fleet_home_stellar_id == stellar_id);
+  CHECK(ship.ai_behavior_code == 3);
+  CHECK(ship.faction_or_government_id == stellar.government_id);
+  CHECK(ship.squad_leader_ship_slot == -1);
+  CHECK(ship.mission_fleet_slot == -1);
+  CHECK(ship.pos_x == Catch::Approx(static_cast<float>(stellar.pos_x)));
+  CHECK(ship.pos_y == Catch::Approx(static_cast<float>(stellar.pos_y)));
+  CHECK(ship.heading >= 0.0F);
+  CHECK(ship.heading < 6.2831855F);
+  CHECK(stellar.field_0x47 == 1);
+
+  // One live defender < wave size 2, so the tick mounts a second and spends a
+  // unit of the present-ship budget.
+  const int budget_before = static_cast<int>(stellar.present_ship_count);
+  NovaSystem_TickNpcSpawnMaintenance(state, system_id, /*now_ms=*/0);
+  int defenders = 0;
+  for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+    const game::Ship &s = state.ShipAt(i);
+    if (s.is_active && s.defense_fleet_home_stellar_id == stellar_id) {
+      ++defenders;
+    }
+  }
+  CHECK(defenders == 2);
+  CHECK(stellar.present_ship_count == budget_before - 1);
+}
+
 TEST_CASE("system entry populates scattered ambient ships immediately") {
   using game::NovaSystem_PopulateInitialNpcShips;
   GameState state;
@@ -204,7 +273,7 @@ TEST_CASE("deactivate vacant ships spares only player-engaged non-restricted") {
   auto &parked = st.ShipAt(static_cast<std::size_t>(parked_slot));
   parked.ai_behavior_code = 5;
   parked.squad_leader_ship_slot = 0;
-  parked.target_stellar_object_id = 0x81; // some stellar resource id
+  parked.defense_fleet_home_stellar_id = 0x81; // some stellar resource id
   auto &stellar = st.scenario.stellars[0x81 - 0x80];
   stellar.max_ship_count = 3;
   stellar.present_ship_count = 2;
@@ -220,7 +289,7 @@ TEST_CASE("deactivate vacant ships spares only player-engaged non-restricted") {
   CHECK(stellar.present_ship_count == 3);
 
   // Cleared fields on the deactivated parked ship.
-  CHECK(parked.target_stellar_object_id == -1);
+  CHECK(parked.defense_fleet_home_stellar_id == -1);
   CHECK(parked.current_system_id == -1);
   CHECK(parked.squad_leader_ship_slot == -1);
   CHECK(parked.mission_fleet_slot == -1);
@@ -242,7 +311,7 @@ TEST_CASE("deactivate tally caps stellar present count at max") {
   const int slot = NovaShip_AllocateShipSlot(st, 3, 0);
   REQUIRE(slot != -1);
   auto &ship = st.ShipAt(static_cast<std::size_t>(slot));
-  ship.target_stellar_object_id = 0x80;
+  ship.defense_fleet_home_stellar_id = 0x80;
   auto &stellar = st.scenario.stellars[0x80 - 0x80];
   stellar.max_ship_count = 1;
   stellar.present_ship_count = 1;

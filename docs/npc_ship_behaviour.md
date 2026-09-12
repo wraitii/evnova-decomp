@@ -110,8 +110,27 @@ logic and is not the occasional jump-in branch.
 | 4 | `Ship_UpdateShipAiBehavior0x04_Interceptor` | seek/park, piracy police |
 | >4 | `Ship_UpdateShipAssistResponseBehavior` | escort / fighter / assist |
 
-A ship holding a stellar target runs `Ship_ShouldShipPrioritizePlayerThreat`
-instead. A hull whose class Flags3 has bit 0x1 ("destroys asteroids") or 0x2
+A ship holding a stellar assignment runs `Ship_DefenseFleetPrioritizePlayerThreat`. In the original
+`defense_fleet_home_stellar_id != -1` is set
+only by `Stellar_SpawnDefenseFleetShip` (0x00421fd0), which garrisons a ship
+at a stellar, makes it a behavior-3 warship of the stellar's government, and
+calls `Ship_SetShipHostileToPlayer`; these are the Bible's stellar **defense
+fleet** (spöb `DefenseDude` / `DefCount`), so this is the defense fleet's
+player-threat override, not a branch every NPC takes. It searches the active
+pool for the nearest *player-side* ship -- slot 0 or any ship whose
+`squad_leader_ship_slot == 0` -- that is engageable under the cloak rules,
+preferring candidates within a 6000 px squared-distance bound
+(DAT_00575060 = 36,000,000) and otherwise falling back to the nearest anywhere on
+a second pass. A retained primary target suppresses the search result unless it
+is an NPC attached to a non-player leader; with no primary it either locks the
+winner (state 4) or returns to its stellar (state 1, secondary =
+`defense_fleet_home_stellar_id`). Quirk: its existing-primary revalidation indexes
+`g_ship_states` with the exhausted search-loop counter (0x40), i.e. one
+`ShipState` past the 64-ship heap array; the clean-room port revalidates the
+existing primary slot instead. See
+`NovaAi_DefenseFleetPrioritizePlayerThreat` in `src/game/ship_ai.cpp`.
+
+A hull whose class Flags3 has bit 0x1 ("destroys asteroids") or 0x2
 ("scoops asteroid debris") with no squad leader runs
 `Ship_UpdateShipAiAvailabilityBehavior` (0x00402980) ahead of its behavior
 code: it arms the scripted asteroid manoeuvre (state 0x10), the
