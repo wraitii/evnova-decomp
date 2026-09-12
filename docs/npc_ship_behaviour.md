@@ -96,6 +96,34 @@ the state-0x08 slowdown entry after placing the ship on a random polar
 offset. State `0x0e` is a separate timed coast/break state selected by combat
 logic and is not the occasional jump-in branch.
 
+## Behaviour supervisors
+
+`Ship_UpdateShipAI` (0x00401000) dispatches one supervisor per frame.
+`ai_behavior_code` equals the Bible AI Type for 1-4; the spawners assign 5
+(carried fighter), 6 (player escort) and mission/assist codes above 4.
+
+| code | supervisor | role |
+|---:|---|---|
+| 1 | `Ship_UpdateShipAiBehavior0x01_WimpyTrader` | wander/visit, flee when attacked |
+| 2 | `Ship_UpdateShipAiBehavior0x02_BraveTrader` | wander, fight back once close |
+| 3 | `Ship_UpdateShipAiBehavior0x03_Warship` (or `…_WarshipCapture` when the govt has flags_primary 0x1000) | seek/attack, or plunder |
+| 4 | `Ship_UpdateShipAiBehavior0x04_Interceptor` | seek/park, piracy police |
+| >4 | `Ship_UpdateShipAssistResponseBehavior` | escort / fighter / assist |
+
+A ship holding a stellar target runs `Ship_ShouldShipPrioritizePlayerThreat`
+instead. A hull whose class Flags3 has bit 0x1 ("destroys asteroids") or 0x2
+("scoops asteroid debris") with no squad leader runs
+`Ship_UpdateShipAiAvailabilityBehavior` (0x00402980) ahead of its behavior
+code: it arms the scripted asteroid manoeuvre (state 0x10), the
+freeflight-anchor cargo pick-up (state 0x11), or a wander to the *nearest*
+adjacent travel stellar (`Stellar_FindNearestAdjacentTravelStellar`
+0x0040cc10). The trader behaviors instead pick a *random* travel stellar
+(`Stellar_SelectRandomAdjacentTravelStellar` 0x0040c790); its five-mask
+eligibility and government ScanMask preference pools (GovtDef +0x22 = Bible
+ScanMask: 0x80 prefers availability 0x2000, 0x40 prefers 0x1000, 0x20 forces
+the plain pool in strict mode) are reconstructed in
+`NovaAi_SelectRandomAdjacentTravelStellar`.
+
 ## Movement controls (`ai_control_mode`)
 
 These are low-level commands issued by the state machine.  Modes marked

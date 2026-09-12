@@ -74,10 +74,22 @@ NovaAi_AimWeaponPredictiveFrom(const GameState &state,
 [[nodiscard]] bool NovaAiShip_IsDestroyed(const Ship &ship);
 
 // Ghidra 0x0040c790 Stellar_SelectRandomAdjacentTravelStellar. Selects one
-// eligible travel stellar in the ship's current system, applying the currently
-// reconstructed availability and government-hostility filters.
+// eligible travel stellar in the ship's current system, applying the
+// government ScanMask preference pools and hostility filters. `strict_mode`
+// (the 1-in-3 roll from Stellar_SelectRandomAdjacentDestination) and
+// `unrestricted_only` (false at every known call site) match the original
+// selector's second and third arguments.
 [[nodiscard]] std::int16_t
-NovaAi_SelectRandomAdjacentTravelStellar(GameState &state, const Ship &ship);
+NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
+                                         const Ship &ship,
+                                         bool strict_mode,
+                                         bool unrestricted_only);
+
+// Ghidra 0x0040cc10 Stellar_FindNearestAdjacentTravelStellar. Returns the
+// nearest adjacent, non-restricted, non-hostile travel stellar to `ship` in
+// its current system, excluding `excluded_stellar_id`; -1 when none.
+[[nodiscard]] std::int16_t NovaAi_FindNearestAdjacentTravelStellar(
+    const GameState &state, const Ship &ship, std::int16_t excluded_stellar_id);
 
 // Ghidra 0x00410670 Ship_EnterShipAiState0x02_ClearPrimaryTarget. Enters AI
 // state 0x02 (local jump-departure staging), clears the current primary target,
@@ -256,7 +268,7 @@ void NovaAi_UpdateShipAI(GameState &state,
                          std::uint32_t now_ms,
                          float elapsed_ticks = 1.0F);
 
-// Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03CaptureVariant. The
+// Ghidra 0x004038b0 Ship_UpdateShipAiBehavior0x03_WarshipCapture. The
 // plunder-flavored hostile-behavior variant for factions whose government
 // flags_primary carries 0x1000: hunts disabled boardable victims, arbitrates
 // capture (0xd) versus attack (4), performs the AI boarding handoff from

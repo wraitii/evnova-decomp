@@ -50,21 +50,16 @@ constexpr float kSpeedLockedSpeed = 0.0F;
 [[nodiscard]] std::int16_t SelectSpawnEntryStellar(GameState &state,
                                                    const Ship &ship) {
   // Ghidra 0x0046e9e0 Stellar_SelectRandomAdjacentDestination does not make a
-  // 1-in-3 yes/no decision for the emergence path. The roll selects a mode for
-  // Stellar_SelectRandomAdjacentTravelStellar; that helper still chooses from
-  // all eligible travel points, and only afterwards does this wrapper accept a
-  // hypergate/wormhole. Treating the roll as a direct gate made every accepted
-  // attempt choose the first restricted stellar and greatly overrepresented
-  // state 0x15 in systems that also have ordinary jump points.
-  //
-  // NovaAi_SelectRandomAdjacentTravelStellar reconstructs the common eligible
-  // candidate pool but not the selector's scan-mask-specific strict flavor.
-  // Consume the original flavor roll to preserve RNG cadence, then validate
-  // the selected candidate exactly as this wrapper does. TODO(decomp): pass
-  // the strict flavor through once the scan-mask pools are fully reconstructed.
-  (void)RandomBelow(state, 3);
-  const std::int16_t stellar_id =
-      NovaAi_SelectRandomAdjacentTravelStellar(state, ship);
+  // 1-in-3 yes/no decision for the emergence path. The roll selects the
+  // strict_mode argument for Stellar_SelectRandomAdjacentTravelStellar, which
+  // now applies the government ScanMask preference pools; only afterwards
+  // does this wrapper accept a hypergate/wormhole. Treating the roll as a
+  // direct gate made every accepted attempt choose the first restricted
+  // stellar and greatly overrepresented state 0x15 in systems that also have
+  // ordinary jump points.
+  const bool strict_mode = RandomBelow(state, 3) == 0;
+  const std::int16_t stellar_id = NovaAi_SelectRandomAdjacentTravelStellar(
+      state, ship, strict_mode, /*unrestricted_only=*/false);
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   if (stellar == nullptr || (stellar->availability_flags & 0x3000) == 0) {
     return -1;
