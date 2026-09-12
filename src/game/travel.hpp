@@ -152,6 +152,15 @@ NovaTravel_CanShipInitiateJumpSequence(const GameState &state,
 // discovered_this_rebuild latch is set (visited systems plus their one-hop
 // link neighbours, recomputed by the rebuild pass).
 
+// Ghidra 0x00447f00 System_IsSystemVisible. Reads SystemDef.is_visible
+// (+0x1eb), the per-system visibility flag the scenario loader sets and
+// NovaResources_EvaluateAvailability (0x00448090) re-filters through the
+// system's Visibility NCB. The original indexes g_system_defs_ptr directly and
+// does not bounds-check; out-of-range ids return false here instead of reading
+// past the table.
+[[nodiscard]] bool NovaSystem_IsSystemVisible(const GameState &state,
+                                              std::int16_t system_id);
+
 // Ghidra 0x0046b9b0 System_ResolveSystemDiscoverySlot. Discovery state is
 // booked on a system's visibility root when the twin grouping has remapped it;
 // the clean-room keeps the root ids at -1 (grouping pass not reconstructed),

@@ -127,7 +127,7 @@ SYSTEM = re.compile(
     r'SystemVisibility|AdjacentSystem|SystemContaining|FindSystem|'
     r'FloodDiscover|ResolveSystemDiscovery|PlannedRoute|RegionTrigger|'
     r'SystemEvent|HasUsableTravelDestination|UpdateSystemAndStellarDisplay|'
-    r'ResolveVisibleSystemForTravel|GetSystemDefFlagByte|InitRoamingShips|'
+    r'ResolveVisibleSystemForTravel|IsSystemVisible|InitRoamingShips|'
     r'UpdateDisasterStates|DoesSystemMatchMissionLocator|ShowSystemEventMessage|'
     r'SetSystemFillColor|CurrentSystemLinkHalfSpan|UpdateRandomEncounterCountdown',
     re.I)
@@ -155,14 +155,14 @@ STELLAR = re.compile(
     r'TravelDays|JumpSequence|JumpDepth|SelectMissionStellar|'
     r'SelectMissionSystem|DoesSystemMatchMission|ResolveVisibleSystem|'
     r'ComputeTravelRangeSq|AdjacentTravelStellar|TravelFlagConnective|'
-    r'IsStellarAdjacent|IsStellarActive|IsStellarReachable|IsStellarUsable'
+    r'IsStellarAdjacent|IsStellarActive|IsStellarValidRandomDestination|IsStellarUsable'
     r'StellarTargetsSpriteSet|GetStellar|UpdateStellarSprites|'
     r'TickStellarDefenseBatteries|TickStellarGravityPull|HandleShipStellarCrash|'
     r'ShipImmuneToStellarCrash|ShipHasGravityShield|ShipHasGravityShielding|'
     r'GravityShield|FindNearestAdjacentTravelStellar|FindReachableEmergencyDestination|'
     r'SetTravelDestination|RebuildTravelDestinationList|DrawTravelDestination'
     r'SelectRandomAdjacent|SelectRandomAdjacentDestination|CountValidLinkedStellar|'
-    r'IsStellarActive|IsStellarReachable|IsStellarUsable',
+    r'IsStellarActive|IsStellarValidRandomDestination|IsStellarUsable',
     re.I)
 
 # Frame / simulation infra

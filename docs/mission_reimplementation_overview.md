@@ -96,6 +96,32 @@ mission APIs taking a landed stellar rebase at the boundary
 Comparing the two spaces directly silently broke tutorial-001 completion (the
 ReturnStel gate never matched).
 
+### 2.1 Random mission destination validity (0x00468b50)
+
+A randomly selected stellar destination must satisfy the EV Nova Bible rule
+(m\xefsn section): *the destination must be far enough from the system where
+the mission is offered and must be guaranteed to exist throughout the game,
+regardless of system swapping*. The gate for this is Ghidra `0x00468b50`,
+**renamed** from the misleading `Stellar_IsStellarReachableForTravel` to
+`Mission_IsStellarValidRandomDestination` (it is not physical travel
+reachability). It rejects a candidate in the reference stellar's system or a
+directly adjacent system, then walks the candidate system's
+visibility-parent (same-coordinate twin) chain and requires the candidate to
+be a nav default (`SystemDef.nav_stellar_ids`) in **every** system of the
+chain - so a stellar missing from any duplicate system is never chosen
+(`StellarDef.is_defined` also gates out stellars no system hosts). The port
+lives in `mission.cpp` (`Mission_IsStellarValidRandomDestination`) and is
+called from the stellar-locator candidate scan; the twin chain uses the
+already-ported `NovaSystem_ResolveDiscoverySlot` (`0x0046b9b0`). The original's
+reference/current stellar (the `param_2` anchor from
+`Mission_ResolveMissionStellarTargets` `0x0043d240`, `ai_secondary_target_slot`
+or the current system's first nav default) is not yet plumbed into the
+candidate helper, so the port currently runs the chain-only arm.
+
+Related rename: Ghidra `0x00447f00 System_GetSystemDefFlagByte` is exactly the
+`SystemDef.is_visible` (+0x1eb) predicate and was renamed
+`System_IsSystemVisible` (port `NovaSystem_IsSystemVisible`).
+
 The mission-list pipeline is implemented in `src/game/mission.cpp`:
 
 - `0x0043CF00` `Mission_EvaluateMissionLists` — DONE (85%): two offering
