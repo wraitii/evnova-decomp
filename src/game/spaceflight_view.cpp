@@ -1083,7 +1083,7 @@ void SpaceflightView::DrawFreeflightObjects(SdlPlatform &platform,
     if (set == nullptr || set->frames.empty()) {
       continue;
     }
-    int frame = static_cast<int>(std::lround(object.frame_counter));
+    int frame = static_cast<int>(object.frame_counter);
     frame %= set->frame_count;
     if (frame < 0) {
       frame += set->frame_count;
@@ -1144,7 +1144,7 @@ void SpaceflightView::DrawAsteroids(SdlPlatform &platform,
         wander -= static_cast<float>(frame_count);
       }
     }
-    int frame = static_cast<int>(std::lround(wander));
+    int frame = static_cast<int>(wander);
     frame = std::clamp(frame, 0, std::max(0, frame_count - 1));
     DrawSprite(platform.renderer(),
                *set,
@@ -1524,10 +1524,8 @@ void SpaceflightView::DrawImpactEffects(SdlPlatform &platform,
     if (set == nullptr || set->frames.empty()) {
       continue;
     }
-    const int frame =
-        std::clamp(static_cast<int>(std::lround(instance.anim_time)),
-                   0,
-                   set->frame_count - 1);
+    const int frame = std::clamp(
+        static_cast<int>(instance.anim_time), 0, set->frame_count - 1);
     SpriteDrawOptions opts;
     // Ghidra computes distance_intensity (+0xa2) as 32 - anim_time/frame_count
     // for impact sprites. The SDL renderer expresses that as normalized alpha.
@@ -1875,8 +1873,9 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
   // Bracket offset: ceil(max(target frame height, width)/2) + the decaying
   // pulse. Sprite_GetFrameFullWidth / Sprite_GetFrameFullHeight return the
   // target's full frame height/width, so `full` is max(h, w), then the game
-  // halves it rounding up; the pulse term is rounded to whole pixels exactly
-  // as the original does. The fallback uses the sheet's native tile size.
+  // halves it rounding up; the pulse term is truncated to whole pixels
+  // exactly as the original does. The fallback uses the sheet's native tile
+  // size.
   float full = 32.0F; // default Sprite_Get*HalfSpan for a missing sprite
   if (const NpcShipSprite *sprite = ShipClassSprite(
           platform, static_cast<std::int16_t>(target.ship_class_id + 0x80));
@@ -1884,7 +1883,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
     full = std::max(static_cast<float>(sprite->base.tile_width),
                     static_cast<float>(sprite->base.tile_height));
   }
-  const float off = std::ceil(full * 0.5F) + std::round(pulse);
+  const float off = std::ceil(full * 0.5F) + std::trunc(pulse);
 
   // The real corner brackets, when the cicn set is available. The frames'
   // anchors are their top-left corners (LoadCicnSet mirrors
@@ -1993,7 +1992,7 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
   const float wy = static_cast<float>(st->pos_y);
 
   // Bracket offset sized by the destination stellar's spin sprite set; the
-  // pulse term is rounded to whole pixels (original rounds it too).
+  // pulse term is truncated to whole pixels (original truncates it too).
   float full = 32.0F; // default Sprite_Get*HalfSpan fallback (0x20)
   if (const auto *spin = sprite_store_.Spin(
           platform.renderer(),
@@ -2003,7 +2002,7 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
     full = std::max(static_cast<float>(spin->tile_width),
                     static_cast<float>(spin->tile_height));
   }
-  const float off = std::ceil(full * 0.5F) + std::round(pulse);
+  const float off = std::ceil(full * 0.5F) + std::trunc(pulse);
 
   // Frame base by the destination's hazard marker (Ghidra StellarDef
   // hazard_marker +0x46 in NovaUi_UpdateTravelTargetReticle 0x0042eac0:

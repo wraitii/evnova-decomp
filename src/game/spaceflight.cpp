@@ -291,7 +291,7 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
     }
   }
 
-  // Timed-action cascade. interval = max(10, round((DeathDelay /
+  // Timed-action cascade. interval = max(10, trunc((DeathDelay /
   // TimedActionInit) * 0.4)) (DAT_005754a0), divided by the frame tick scale
   // when it is positive (_DAT_005753b0 = 0.0). Fires while the timer is in the
   // second half, decrementing the counter so the class emits exactly its
@@ -302,14 +302,14 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
     // division before the 0.4 (DAT_005754a0) scale.
     const int death_delay = static_cast<int>(cls->death_delay_frames);
     const int init = static_cast<int>(cls->timed_action_counter_init);
-    int interval = static_cast<int>(
-        std::lround(static_cast<float>(death_delay / init) * 0.4F));
+    int interval =
+        static_cast<int>(static_cast<float>(death_delay / init) * 0.4F);
     if (interval < 10) {
       interval = 10;
     }
     if (state.last_frame_tick_scale > 0.0F) {
-      interval = static_cast<int>(std::lround(static_cast<float>(interval) /
-                                              state.last_frame_tick_scale));
+      interval = static_cast<int>(static_cast<float>(interval) /
+                                  state.last_frame_tick_scale);
       if (interval < 1) {
         interval = 1;
       }
@@ -1028,8 +1028,8 @@ void NovaPlayer_TickSelfDestructCommand(GameState &state,
     countdown = 150.0F;
   }
   // Armed countdown: abort on release, decay + warn while held. The 30-tick
-  // boundary message runs on the rounded tick counter, exactly like the
-  // original's (int)ROUND(countdown) % 30 == 0 check.
+  // boundary message runs on the truncated tick counter, exactly like the
+  // original's trunc(countdown) % 30 == 0 check.
   bool command_block_ran = false;
   if (countdown > 0.0F) {
     command_block_ran = true;
@@ -1045,11 +1045,11 @@ void NovaPlayer_TickSelfDestructCommand(GameState &state,
       // g_armor_state_addend (0x00575580, 0.0) <= countdown: always true
       // while armed, so the decay runs every held frame.
       countdown -= elapsed_ticks;
-      const auto whole_ticks = static_cast<int>(std::round(countdown));
+      const auto whole_ticks = static_cast<int>(countdown);
       if (countdown <= 120.0F && whole_ticks % 30 == 0) {
         const float seconds =
             countdown / 30.0F; // g_hyperspace_engage_hold_30hz
-        const auto whole_seconds = static_cast<int>(std::round(seconds));
+        const auto whole_seconds = static_cast<int>(seconds);
         std::string text =
             NovaHud_LoadStringEntry(0x7d2, 0x181).value_or("Self destruct");
         text += " ";

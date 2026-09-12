@@ -600,12 +600,11 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   }
 
   // ---- Heading gate -------------------------------------------------------
-  // Original works on integer-rounded degrees (0 = up, clockwise): the
+  // Original works on integer-truncated degrees (0 = up, clockwise): the
   // heading delta must be within 30 deg, or the target aligned 180 deg
   // (docked nose-to-tail) within 30 deg. Silent return on failure.
   const auto heading_deg = [](float radians) {
-    return static_cast<int>(
-        std::llround(radians * (180.0F / 3.14159265358979F)));
+    return static_cast<int>(radians * (180.0F / 3.14159265358979F));
   };
   const auto shortest_delta = [](int a, int b) {
     int delta = (a - b) % 360;
@@ -1833,7 +1832,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
         const float capacity = state.cached_stats.fuel_capacity;
         const double available = static_cast<double>(capacity) -
                                  static_cast<double>(state.player.fuel_points);
-        int fill = static_cast<int>(std::llround(available));
+        int fill = static_cast<int>(available);
         if (fill > options.fuel_quantity) {
           fill = options.fuel_quantity;
         }

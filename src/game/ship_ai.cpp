@@ -545,9 +545,12 @@ constexpr float kInterceptDistanceScale = 0.8F; // DAT_00575190
       static_cast<std::int16_t>(ship.ship_class_id + 0x80));
 }
 
+// Squared distance between two points, truncated toward zero. Used by
+// Ship_ScoreAssistTargetForShip (0x00412090), whose x87 FIST + residual/sign
+// correction turns the round-to-nearest FIST into a truncation.
 [[nodiscard]] float
-RoundedDistanceSquared(float x1, float y1, float x2, float y2) {
-  return static_cast<float>(std::lround(SquaredDistance(x1, y1, x2, y2)));
+TruncatedDistanceSquared(float x1, float y1, float x2, float y2) {
+  return static_cast<float>(static_cast<int>(SquaredDistance(x1, y1, x2, y2)));
 }
 
 struct WeaponBankState {
@@ -949,7 +952,7 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
       continue;
     }
 
-    const float target_distance_sq = RoundedDistanceSquared(
+    const float target_distance_sq = TruncatedDistanceSquared(
         state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot))
             .pos_x,
         state.ShipAt(static_cast<std::size_t>(ship.squad_leader_ship_slot))
@@ -961,10 +964,10 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
       continue;
     }
 
-    std::int32_t score = static_cast<std::int32_t>(std::lround(
-        RoundedDistanceSquared(
+    std::int32_t score = static_cast<std::int32_t>(
+        TruncatedDistanceSquared(
             ship.pos_x, ship.pos_y, candidate.pos_x, candidate.pos_y) +
-        (score_flags > 0 ? target_distance_sq : 0.0F)));
+        (score_flags > 0 ? target_distance_sq : 0.0F));
     const ShipClass *candidate_class = ShipClassFor(state, candidate);
     const ShipClass *ship_class = ShipClassFor(state, ship);
     if (candidate_class != nullptr && ship_class != nullptr &&
@@ -2771,9 +2774,10 @@ void NovaAi_UpdateShipState(GameState &state,
       // ShipClassDef +0x38 is stored 10x in this port (see
       // NovaShip_ComputeEffectiveStats), so scale to degrees/tick.
       const float base_turn = cls != nullptr ? cls->turn_rate * 0.1F : 0.0F;
-      // threshold = round((10.0 - base_turn) * 15.0); outside it is 0x13.
+      // threshold = trunc((10.0 - base_turn) * 15.0) (x87 FIST + residual/sign
+      // correction); outside it is 0x13.
       const float threshold = static_cast<float>(static_cast<int>(
-          std::round((kScriptAlignAddend - base_turn) * kScriptTurnAddend)));
+          (kScriptAlignAddend - base_turn) * kScriptTurnAddend));
       if (threshold < std::abs(ship.pos_x - target.target_pos_x) ||
           threshold < std::abs(ship.pos_y - target.target_pos_y)) {
         ship.ai_control_mode = 0x13;
@@ -3073,8 +3077,8 @@ void NovaAi_UpdateShipCombatOddsScore(GameState &state, Ship &ship) {
               ? static_cast<float>(state.player_combat_rating_points / divisor)
               : 1.0F;
       rating_scale = std::clamp(rating_scale, 1.0F, 2.0F);
-      hostile_strength = static_cast<std::int16_t>(std::lround(
-          static_cast<float>(player_class->strength) * rating_scale));
+      hostile_strength = static_cast<std::int16_t>(
+          static_cast<float>(player_class->strength) * rating_scale);
     }
   }
 
@@ -3152,7 +3156,7 @@ void NovaAi_ApplyControls(GameState &state,
   }
 
   // Ship_ApplyShipAiControls entry (0x00408150) also syncs
-  // ai_desired_heading_deg to the rounded current heading every frame, before
+  // ai_desired_heading_deg to the truncated current heading every frame, before
   // the mode switch. Steering modes overwrite it immediately after; unsteered
   // modes (0 idle drift, 10 arrival slowdown) inherit "desired == current" and
   // therefore hold heading exactly -- this is what keeps the state-8 jump-in
@@ -3160,7 +3164,7 @@ void NovaAi_ApplyControls(GameState &state,
   // steering target. ShipState stores the field in degrees while the clean-room
   // heading is radians, so convert at this boundary.
   ship.ai_desired_heading_deg =
-      static_cast<std::int16_t>(WrapDeg(std::round(ship.heading / kDegToRad)));
+      static_cast<std::int16_t>(WrapDeg(ship.heading / kDegToRad));
 
   // Shortest signed angle (deg) from the current heading to the desired one.
   auto heading_delta_deg = [&]() {
@@ -3454,8 +3458,7 @@ void NovaAi_ApplyControls(GameState &state,
     }
     const Ship &leader = state.ShipAt(static_cast<std::size_t>(leader_slot));
     const float leader_heading_deg = leader.heading / kDegToRad;
-    ship.ai_desired_heading_deg =
-        static_cast<std::int16_t>(std::round(leader_heading_deg));
+    ship.ai_desired_heading_deg = static_cast<std::int16_t>(leader_heading_deg);
     if (leader.ai_station_hold_timer > 1.0F) {
       if (ship.ai_station_hold_timer > 1.0F &&
           now_ms < ship.ai_mode_start_time_ms) {
@@ -3472,7 +3475,7 @@ void NovaAi_ApplyControls(GameState &state,
       }
       const float leader_delta = std::abs(
           std::remainder(static_cast<float>(leader.ai_desired_heading_deg) -
-                             std::round(leader_heading_deg),
+                             std::trunc(leader_heading_deg),
                          kFullCircleDeg));
       if (leader_delta < 11.0F) {
         ship.ai_secondary_target_slot = leader.ai_secondary_target_slot;
@@ -3632,12 +3635,11 @@ void NovaAi_ApplyControls(GameState &state,
             ship.ai_control_mode = 0x10;
             const float cur_deg = ship.heading / kDegToRad;
             const bool even_instance = (ship.ship_instance_id & 1) == 0;
-            ship.ai_evasive_heading_deg = wrap_deg_int(
-                static_cast<int>(std::round(cur_deg) +
-                                 (even_instance ? kEvasiveHeadingOffsetDeg
-                                                : -kEvasiveHeadingOffsetDeg)));
+            ship.ai_evasive_heading_deg = wrap_deg_int(static_cast<int>(
+                cur_deg + (even_instance ? kEvasiveHeadingOffsetDeg
+                                         : -kEvasiveHeadingOffsetDeg)));
             ship.ai_desired_heading_deg =
-                wrap_deg_int(static_cast<int>(std::round(cur_deg)));
+                wrap_deg_int(static_cast<int>(cur_deg));
           }
         }
       }
@@ -3999,7 +4001,7 @@ void NovaAi_ApplyControls(GameState &state,
       const float target_heading_deg = target.heading / kDegToRad;
       const float cur_deg = ship.heading / kDegToRad;
       const float delta_deg = std::abs(
-          std::remainder(std::round(target_heading_deg) - std::round(cur_deg),
+          std::remainder(std::trunc(target_heading_deg) - std::trunc(cur_deg),
                          kFullCircleDeg));
       float window = 25.0F;
       if (ship.skill_variance_scale > 0.0F) {
@@ -4007,12 +4009,12 @@ void NovaAi_ApplyControls(GameState &state,
       }
       if (delta_deg < 1.0F || window <= delta_deg) {
         ship.ai_desired_heading_deg =
-            static_cast<std::int16_t>(std::round(target_heading_deg));
+            static_cast<std::int16_t>(target_heading_deg);
       } else {
         const float signed_delta =
-            std::remainder(std::round(target_heading_deg) - std::round(cur_deg),
+            std::remainder(std::trunc(target_heading_deg) - std::trunc(cur_deg),
                            kFullCircleDeg);
-        std::int16_t desired = static_cast<std::int16_t>(std::round(cur_deg));
+        std::int16_t desired = static_cast<std::int16_t>(cur_deg);
         desired =
             static_cast<std::int16_t>(desired + (signed_delta < 0.0F ? -1 : 1));
         ship.ai_desired_heading_deg = wrap_deg_int(desired);
@@ -4097,7 +4099,7 @@ void NovaAi_ApplyControls(GameState &state,
       }
     } else {
       ship.ai_desired_heading_deg =
-          static_cast<std::int16_t>(std::round(target.heading / kDegToRad));
+          static_cast<std::int16_t>(target.heading / kDegToRad);
       ship.vel_x = target.vel_x;
       ship.vel_y = target.vel_y;
       const float dx = std::abs(ship.pos_x - target.pos_x);
@@ -5567,8 +5569,7 @@ void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
   }
   const ShipClass *ship_class = ShipClassFor(state, ship);
   const float heading_deg_f = ship.heading / kDegToRad;
-  const std::int16_t heading_deg =
-      static_cast<std::int16_t>(std::lround(heading_deg_f));
+  const std::int16_t heading_deg = static_cast<std::int16_t>(heading_deg_f);
 
   std::int16_t best_mass_bank = -1;
   std::int16_t best_mass = 0;
@@ -5603,10 +5604,10 @@ void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
     if (mode == 7 || mode == 8) {
       int delta = 0;
       if (mode == 7) {
-        // Round the continuous |bearing - heading| difference before the
-        // mod-360 wrap, exactly as the original.
-        delta =
-            std::lround(std::abs(static_cast<float>(bearing) - heading_deg_f));
+        // Truncate the continuous |bearing - heading| difference toward zero
+        // (x87 FIST + residual/sign correction) before the mod-360 wrap.
+        delta = static_cast<int>(
+            std::abs(static_cast<float>(bearing) - heading_deg_f));
       } else { // mode 8: reject the bank behind the hull
         delta = std::abs(static_cast<int>(bearing) -
                          ((heading_deg + 0xb4) % 0x168));
