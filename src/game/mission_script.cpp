@@ -350,20 +350,30 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
         break;
       case 'P':
         if (operand >= 0 && operand <= 0xffff) {
-          state.pending_script_sounds.push_back(
-              static_cast<std::int16_t>(operand));
+          // Ghidra 0x00449370: g_pending_transient_sound_id = operand (a
+          // single slot, overwritten by any later P in the same script).
+          state.pending_transient_sound_id = static_cast<std::int16_t>(operand);
           applied = true;
         }
         break;
       case 'Q': {
         state.script_forced_leave_landing = true;
-        state.pending_script_message_string_list =
+        state.pending_script_message_string_id =
             operand >= 0 && operand <= 0x7fff
                 ? static_cast<std::int16_t>(operand)
                 : -1;
-        if (state.pending_script_message_string_list >= 0) {
+        if (state.pending_script_message_string_id >= 0) {
           if (auto message = LoadRandomStringListEntry(
-                  state.rng, state.pending_script_message_string_list)) {
+                  state.rng, state.pending_script_message_string_id)) {
+            // Ghidra 0x00449370 'Q': with a live payload context slot (0..15)
+            // the original runs Stellar_BuildTravelDestinationDescription(
+            // '\0', g_script_mission_context_slot) over the loaded message,
+            // expanding its mission text tags.
+            const std::int16_t context_slot = state.script_mission_context_slot;
+            if (context_slot >= 0 && context_slot < 0x10) {
+              *message = Mission_ExpandMissionWildcards(
+                  state, *message, false, context_slot);
+            }
             NovaHud_ShowOverlayMessage(state, std::move(*message));
           }
           // Missing STR# data is an asset-loading issue, not a script syntax
@@ -430,20 +440,37 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
 // Ghidra 0x00448020 Mission_ExecuteReactionScript.
 MissionScriptResult Mission_ExecuteReactionScript(GameState &state,
                                                   std::string_view script) {
-  return Mission_ExecuteScript(state, script);
+  // The original returns before touching any state for an empty script.
+  if (script.empty()) {
+    return {};
+  }
+  auto result = Mission_ExecuteScript(state, script);
+  // The reaction entrypoint also recomputes derived outfit state after the
+  // engine (Outfit_RecomputeOutfitDerivedState 0x0046d4b0).
+  NovaOutfit_RecomputeOutfitDerivedState(state);
+  return result;
 }
 
 // Ghidra 0x00448050 Mission_RunMisnScriptPayload.
 MissionScriptResult Mission_RunMisnScriptPayload(GameState &state,
                                                  std::string_view script,
-                                                 std::size_t mission_slot) {
-  if (mission_slot >= GameState::kMaxActiveMissions) {
-    MissionScriptResult result;
-    result.diagnostics.push_back(
-        {0, "mission payload context slot is out of range"});
-    return result;
+                                                 std::int16_t mission_slot) {
+  // The original returns before touching any state for an empty payload.
+  if (script.empty()) {
+    return {};
   }
-  return Mission_ExecuteScript(state, script);
+  // g_script_mission_context_slot is a real global in the original, so a
+  // nested payload (the engine's S opcode -> Mission_ActivateAtSlot) clobbers
+  // it and clears it again on return. Model it as state rather than a
+  // parameter so an outer Q after an S sees no context, exactly like the
+  // original. The original does no range validation on the slot; the engine's
+  // Q case only consults slots 0..15.
+  state.script_mission_context_slot = mission_slot;
+  auto result = Mission_ExecuteScript(state, script);
+  state.script_mission_context_slot = -1;
+  // Outfit_RecomputeOutfitDerivedState (0x0046d4b0) after the engine.
+  NovaOutfit_RecomputeOutfitDerivedState(state);
+  return result;
 }
 
 // Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine.

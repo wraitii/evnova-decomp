@@ -2,6 +2,7 @@
 
 #include "game/collision.hpp"
 #include "game/government.hpp"
+#include "game/outfit.hpp"
 #include "game/scenario_data.hpp"
 
 namespace {
@@ -175,6 +176,51 @@ TEST_CASE("government relation helpers agree with the Federation scenario data",
   // Self-allied, self never hostile.
   CHECK(NovaGovernment_AreGovtsAllied(data, 0, 0));
   CHECK(!NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 0));
+}
+
+TEST_CASE("outfit-derived state marks governments and rebuilds policy flags",
+          "[outfit][government]") {
+  GameState state;
+  state.scenario.governments = {Government{}, Government{}};
+  state.scenario.governments[0].classes = {5, -1, -1, -1};
+  state.scenario.outfits.resize(1);
+  state.inventory.outfit_owned_count[0] = 1;
+
+  // ModType 0x30 (IFF scrambler) with a class-matching ModVal fools that govt.
+  state.scenario.outfits[0].mod_type = 0x30;
+  state.scenario.outfits[0].mod_val = 5;
+  game::NovaOutfit_RecomputeOutfitDerivedState(state);
+  CHECK(state.scenario.governments[0].iff_scrambler_active);
+  CHECK_FALSE(state.scenario.governments[1].iff_scrambler_active);
+
+  // ModType 0x2c with ModVal -1 inhibits reinforcements player-wide.
+  state.scenario.outfits[0].mod_type = 0x2c;
+  state.scenario.outfits[0].mod_val = -1;
+  game::NovaOutfit_RecomputeOutfitDerivedState(state);
+  CHECK(state.reinforcement_inhibit_all);
+
+  // ModType 0x2c with a matching class marks that government.
+  state.scenario.outfits[0].mod_val = 5;
+  game::NovaOutfit_RecomputeOutfitDerivedState(state);
+  CHECK(state.scenario.governments[0].reinforcement_inhibited);
+  CHECK_FALSE(state.scenario.governments[1].reinforcement_inhibited);
+
+  // An active rank with flag 0x100 marks every allied government's flag 0.
+  state.scenario.governments[1].ally_classes = {5, -1, -1, -1};
+  state.scenario.ranks.assign(1, {});
+  state.scenario.ranks[0].defined = true;
+  state.scenario.ranks[0].active = true;
+  state.scenario.ranks[0].government_id = 0;
+  state.scenario.ranks[0].flags = 0x100;
+  game::NovaOutfit_RecomputeOutfitDerivedState(state);
+  CHECK(state.scenario.governments[0].policy_flags[0] == 1);
+  CHECK(state.scenario.governments[1].policy_flags[0] == 1);
+  CHECK(state.scenario.governments[1].policy_flags[1] == 0);
+
+  // Deactivating the rank clears the flags again.
+  state.scenario.ranks[0].active = false;
+  game::NovaOutfit_RecomputeOutfitDerivedState(state);
+  CHECK(state.scenario.governments[0].policy_flags[0] == 0);
 }
 
 } // namespace

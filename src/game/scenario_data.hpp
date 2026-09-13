@@ -1202,19 +1202,25 @@ struct Government {
   // Government_GetGovernmentPolicyFlag (0x0046e860) reads policy_flags[index]
   // for index 0/1; flag 0 gates player target acquisition
   // (Ship_IsShipAcquirableAsTarget 0x0040faa0: a candidate with flag 0 set is
-  // acquirable) and several aggro/relation decisions. The writer is not yet
-  // identified (mission/faction hostility system), so the flag stays 0 in the
-  // current build (TODO(decomp)).
+  // acquirable) and several aggro/relation decisions. The writer is
+  // Outfit_RecomputeOutfitDerivedState (0x0046d4b0): it clears both flags and
+  // sets them for every government allied with an active rank carrying the
+  // 0x100/0x200 rank flags.
   std::array<std::uint8_t, 2> policy_flags{}; // GovtDef +0x84/+0x85
 
-  // GovtDef +0x83. Outfit_RecomputeOutfitDerivedState (0x0046d901) sets this
-  // when the player owns the IFF-scrambler outfit (Bible ModType 48) whose
-  // class value matches one of this government's Class1-4 values: the
+  // GovtDef +0x82. Set by Outfit_RecomputeOutfitDerivedState (0x0046d4b0)
+  // when the player owns a ModType 0x2c outfit whose ModVal matches one of
+  // this government's Class1-4 values: this government's reinforcements are
+  // inhibited. The original never clears the latch (only policy_flags is
+  // rebuilt), so it stays sticky once set; kept as a quirk.
+  bool reinforcement_inhibited = false;
+
+  // GovtDef +0x83. Outfit_RecomputeOutfitDerivedState (0x0046d4b0) sets this
+  // when the player owns the IFF-scrambler outfit (Bible ModType 48 = 0x30)
+  // whose ModVal matches one of this government's Class1-4 values: the
   // government then treats the player as friendly. Ship_AcquirePrimaryTarget-
-  // ForShip (0x0040e020) reads it to suppress player auto-acquisition. The
-  // writer is not reconstructed, so in the port this field is INERT (never
-  // set; always false) and the acquisition IFF term has no live effect until
-  // the outfit-derived-state arm is ported (TODO(decomp)).
+  // ForShip (0x0040e020) reads it to suppress player auto-acquisition. Like
+  // +0x82 the latch is never cleared by the original.
   bool iff_scrambler_active = false;
 
   bool present =

@@ -692,7 +692,7 @@ OutfitSaleResult NovaLanded_SellOutfit(GameState &state,
       break;
 
     state.inventory.outfit_owned_count[index]--;
-    OutfitMarkStatsDirty(state);
+    NovaOutfit_RecomputeOutfitDerivedState(state);
     // Clear the active weapon bank when the last unit of a weapon outfit went
     // away (0x0048ea70).
     if (state.inventory.outfit_owned_count[index] < 1) {

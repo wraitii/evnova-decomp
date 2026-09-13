@@ -1305,9 +1305,21 @@ struct GameState {
   // Mission-script side effects that need to be consumed by UI/audio layers.
   // They are explicit latches rather than hidden globals, matching the
   // clean-room state ownership rule.
-  std::vector<std::int16_t> pending_script_sounds;
-  std::int16_t pending_script_message_string_list = -1;
+  // Ghidra g_pending_transient_sound_id (0x00734c1a): the most recent P-opcode
+  // sound id, or -1. The original overwrites a single slot, so this is scalar
+  // rather than a queue. TODO(decomp): no UI/audio consumer is wired yet.
+  std::int16_t pending_transient_sound_id = -1;
+  // Ghidra g_pending_overlay_message (0x007354d0) stages the composed overlay
+  // text; the port instead stores the Q opcode's STR# resource id and shows
+  // the picked entry immediately. TODO(decomp): model the staged buffer.
+  std::int16_t pending_script_message_string_id = -1;
   bool script_forced_leave_landing = false;
+  // Ghidra g_script_mission_context_slot (0x00776b00): the mission slot whose
+  // payload script is executing, or -1 when none. Mission_RunMisnScriptPayload
+  // sets it around the engine call and the engine's Q case expands mission
+  // text tags for slots 0..15; NovaResources_LoadMisnResourceDefs resets it to
+  // 0xffff on load.
+  std::int16_t script_mission_context_slot = -1;
 
   // Per-system faction reputation (Ghidra g_system_reputation 0x00733bc8).
   // Indexed by 0-based system resource id and sized to the systems table on
@@ -1436,7 +1448,13 @@ struct GameState {
   // when the player takes a hit (Shot_ResolveShipHitFromWeapon), decays one
   // tick per frame while at or above the cutoff; suppresses armor
   // regeneration and the disabled auto-repair pass until below the cutoff.
+  // Outfit_RecomputeOutfitDerivedState (0x0046d4b0) resets it to -1.0.
   float recently_hit_timer = 0.0F;
+  // g_player_reinforcement_inhibit_all: set by
+  // Outfit_RecomputeOutfitDerivedState when the player owns a ModType 0x2c
+  // outfit with ModVal -1 (Bible "no reinforcements"). The original only ever
+  // sets it, never clears it.
+  bool reinforcement_inhibit_all = false;
   // Ghidra DAT_00596d3a: cheat-mode latch. When set, the cheat-command suite
   // in Ship_HandlePlayerShipCore becomes live (free refits/rearm, target
   // destruction, etc., TODO(decomp): toggle commands not ported) and a few

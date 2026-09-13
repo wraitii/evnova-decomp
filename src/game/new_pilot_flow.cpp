@@ -395,7 +395,7 @@ void Stub_SeedStartingInventory(GameState &state) {
   NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
   // ResetPlayerShipForNewGame calculated capacities before this inventory was
   // seeded. Recompute so the new pilot starts with installed bonuses.
-  OutfitMarkStatsDirty(state);
+  NovaOutfit_RecomputeOutfitDerivedState(state);
   const PlayerEffectiveStats effective =
       Outfit_ComputePlayerEffectiveStats(state);
   state.player.shield_points = effective.max_shield_points;

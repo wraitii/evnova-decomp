@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "freeflight_objects.hpp"
+#include "government.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "ship_ai.hpp"
@@ -41,10 +42,10 @@ constexpr float kArmorRechargeScale = 0.001F;
 
 // The inventory mutation / cache helpers update this through GameState.
 // Outfit_ComputePlayerEffectiveStats runs a full 0x200-outfit scan; the
-// low-level Ship_ComputeShip* helpers in the original instead cache the player
-// result in _DAT_00735688/90/98 and invalidate on ownership changes. This
-// module exposes OutfitMarkStatsDirty and the spaceflight loop caches the
-// computed snapshot in GameState.cached_stats (stat_cache_valid).
+// low-level Ship_Compute* helpers in the original instead cache the player
+// result in _DAT_00735688/90/98 and recompute while it is negative. The port
+// mirrors that with GameState.stat_cache_valid / cached_stats, invalidated
+// through NovaOutfit_RecomputeOutfitDerivedState.
 constexpr float kFuelCapacityClamp = 32000.0F; // opcode 12 clamp [0,32000]
 
 constexpr std::int16_t kCloakingDeviceModType = 0x11;
@@ -148,21 +149,136 @@ constexpr std::uint16_t kAreaCloakModValFlag = 0x1000;
   return nullptr;
 }
 
-void MarkStatsDirty(GameState &state) { state.stat_cache_valid = false; }
+// Invalidate the lazily computed effective-stat snapshot. The original's
+// Ship_Compute* getters cache their result in sentinel globals
+// (_DAT_00735688/90/98...) and recompute only while the value is < 0; setting
+// stat_cache_valid = false is the clean-room equivalent of writing those
+// sentinels.
+void InvalidatePlayerStatCache(GameState &state) {
+  state.stat_cache_valid = false;
+}
 
 } // namespace
 
-void OutfitMarkStatsDirty(GameState &state) {
-  MarkStatsDirty(state);
+// Ghidra 0x0046d4b0 Outfit_RecomputeOutfitDerivedState. See
+// docs/outfit_derived_state.md for the two-mechanism model (eager
+// side-effecting recompute vs. the lazy Ship_Compute* sentinel caches) and the
+// caller map.
+//
+// Modelled arms: stat-cache invalidation, negative cargo/junk clamps, jamming
+// reset, cloak-latch reset, outfit-derived government latches (ModType
+// 0x2c/0x30), government policy_flags clear/rebuild from active ranks,
+// mining-scoop latch + cargo-capacity gate, and the recently-hit timer reset.
+// TODO(decomp): the remaining eager arms are not ported -- license clamp
+// (unlicensed -> max shield/armor 1.0), junk-derived flags, carried-bomb class
+// + detonation timer, cargo-overflow bin scaling, and the distance-intensity/
+// murk cache.
+void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
+  InvalidatePlayerStatCache(state);
+  // Ghidra 0x0046d4b0: clamp negative cargo bins (ShipState +0x7a, 6 shorts)
+  // and junk counts (g_junk_defs +0x22) to zero. The original also raises
+  // g_playerInventoryAndLoadoutDirty here; the port has no separate dirty
+  // latch. Runs after the cargo-overflow scaling in the original, but before
+  // any consumer reads a live bin.
+  for (std::int16_t &bin : state.inventory.cargo_bins) {
+    if (bin < 0) {
+      bin = 0;
+    }
+  }
+  for (std::int16_t &junk : state.inventory.junk_counts) {
+    if (junk < 0) {
+      junk = 0;
+    }
+  }
+  // Ghidra 0x0046d4b0 owned-outfit scan: mark the governments whose Class1-4
+  // list contains the outfit's ModVal. ModType 0x2c is the reinforcement
+  // inhibitor (ModVal -1 inhibits reinforcements player-wide), ModType 0x30
+  // the IFF scrambler. The original never clears these two latches, so they
+  // stay sticky across recomputes (only policy_flags is rebuilt below).
+  const auto mark_matching_governments = [&state](std::int16_t mod_val,
+                                                  auto &&mark) {
+    if (mod_val == -1) {
+      return;
+    }
+    for (Government &govt : state.scenario.governments) {
+      if (std::find(govt.classes.begin(), govt.classes.end(), mod_val) !=
+          govt.classes.end()) {
+        mark(govt);
+      }
+    }
+  };
+  for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
+                          i < state.scenario.outfits.size();
+       ++i) {
+    if (state.inventory.outfit_owned_count[i] <= 0) {
+      continue;
+    }
+    const Outfit &outfit = state.scenario.outfits[i];
+    for (int slot = 0; slot < 4; ++slot) {
+      const std::int16_t mod_type =
+          slot == 0 ? outfit.mod_type : outfit.alt_mod_types[slot - 1];
+      const std::int16_t mod_val =
+          slot == 0 ? outfit.mod_val : outfit.alt_mod_vals[slot - 1];
+      if (mod_type == 0x2c) {
+        if (mod_val == -1) {
+          state.reinforcement_inhibit_all = true;
+        } else {
+          mark_matching_governments(mod_val, [](Government &govt) {
+            govt.reinforcement_inhibited = true;
+          });
+        }
+      } else if (mod_type == 0x30) {
+        mark_matching_governments(mod_val, [](Government &govt) {
+          govt.iff_scrambler_active = true;
+        });
+      }
+    }
+  }
+  // Ghidra 0x0046d4b0: clear every government's two policy flags, then rebuild
+  // them from the active ranks. A rank with flags 0x100/0x200 and an
+  // affiliated government marks every allied government (0x100 ->
+  // policy_flags[0], 0x200 -> policy_flags[1]). This is the writer that the
+  // Government_GetPolicyFlag consumers (target acquisition, starmap) read.
+  for (Government &govt : state.scenario.governments) {
+    govt.policy_flags = {0, 0};
+  }
+  for (const RankDef &rank : state.scenario.ranks) {
+    if (!rank.active || !rank.defined || (rank.flags & 0x300U) == 0U ||
+        rank.government_id == -1) {
+      continue;
+    }
+    for (std::size_t g = 0; g < state.scenario.governments.size(); ++g) {
+      if (!NovaGovernment_AreGovtsAllied(state.scenario,
+                                         static_cast<std::int16_t>(g),
+                                         rank.government_id)) {
+        continue;
+      }
+      auto &flags = state.scenario.governments[g].policy_flags;
+      if ((rank.flags & 0x100U) != 0U) {
+        flags[0] = 1;
+      }
+      if ((rank.flags & 0x200U) != 0U) {
+        flags[1] = 1;
+      }
+    }
+  }
   // Ownership changes alter the outfit-derived jamming bonuses, so the
   // player's lazily cached Ship.jamming_score channels (Ghidra ShipState
   // +0xC926) must recompute. The original only reseeds the cache when a ship
   // slot is allocated; the port also resets it here and at system transitions
   // (NovaWeapon_ClearTransientCombatState) so purchases apply immediately.
   state.player.jamming_score.fill(-1);
-  // The original's dirty-flag recompute (Outfit_RecomputeOutfitDerivedState)
-  // also re-derives the mining-scoop latch and its cargo-capacity gate.
+  // Ghidra 0x0046d4b0: reset the player's cloak presentation latches
+  // (+0xC91C/+0xC91E/+0xC920) to the not-yet-computed sentinel. They are
+  // repopulated lazily by Ship_UpdateVisualState.
+  state.player.cloak_scanner_reveal_screen = -1;
+  state.player.cloak_scanner_reveal_radar = -1;
+  state.player.cloak_damage_deactivate_latch = -1;
+  // The original also re-derives the mining-scoop latch and its
+  // cargo-capacity gate.
   NovaOutfit_RefreshPlayerMiningScoopActive(state);
+  // Ghidra 0x0046dc96: reset the recently-hit regen-suppression timer.
+  state.recently_hit_timer = -1.0F;
 }
 
 // Ghidra 0x00464b50 Outfit_HasCloakingDevice.
@@ -612,7 +728,7 @@ std::int16_t Outfit_AddInstalledOutfit(GameState &state,
   if (applied > 0) {
     state.inventory.outfit_owned_count[idx] = static_cast<std::int16_t>(
         state.inventory.outfit_owned_count[idx] + applied);
-    OutfitMarkStatsDirty(state);
+    NovaOutfit_RecomputeOutfitDerivedState(state);
   }
   return applied;
 }
@@ -632,7 +748,7 @@ std::int16_t Outfit_RemoveOutfit(GameState &state,
       static_cast<std::int16_t>(std::min<int>(owned, count));
   owned = static_cast<std::int16_t>(owned - removed);
   if (removed > 0) {
-    OutfitMarkStatsDirty(state);
+    NovaOutfit_RecomputeOutfitDerivedState(state);
   }
   return removed;
 }

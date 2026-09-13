@@ -291,10 +291,16 @@ NovaOutfit_ComputeIonizationDecayRate(const GameState &state, const Ship &ship);
 // inventory dirty hook and immediately after a scoop pickup.
 void NovaOutfit_RefreshPlayerMiningScoopActive(GameState &state);
 
-// Marks the effective-stats cache dirty. Called by the inventory mutation
-// helpers; the spaceflight loop reads cached stats to avoid re-scanning the
-// 0x200-entry outfit table every frame.
-void OutfitMarkStatsDirty(GameState &state);
+// Ghidra Outfit_RecomputeOutfitDerivedState (0x0046d4b0): the inventory /
+// loadout recompute hook. The original invalidates the lazily computed
+// Ship_Compute* stat caches, then eagerly rebuilds the non-cache derived
+// latches (government policy flags, carried-bomb class + detonation timer,
+// mining scoop, cargo-overflow scaling/clamps, cloak latches, junk flags).
+// The port currently models the invalidation, the jamming-score reset and the
+// mining-scoop arm; the eager arms are TODO(decomp). The pure effective-stat
+// snapshot stays lazy (GameState.cached_stats / stat_cache_valid), mirroring
+// the original's own sentinel getters. See docs/outfit_derived_state.md.
+void NovaOutfit_RecomputeOutfitDerivedState(GameState &state);
 
 // Ghidra Mission_AccumulatePlayerContributeMask (0x0046cca0): aggregates the
 // 64-bit Contribute mask from the player's ship class and owned outfits.
