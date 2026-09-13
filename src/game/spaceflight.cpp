@@ -957,6 +957,76 @@ LandCommandResult NovaPlayer_TickLandCommand(SdlPlatform &platform,
     state.travel.engage_timer = 0;
     return LandCommandResult::kContinue;
   }
+  const Stellar *target =
+      state.scenario.Stellar(state.travel.selected_stellar_id);
+  if (target != nullptr && (target->availability_flags & 0x3000U) != 0U) {
+    const float arrival_axis_range =
+        NovaLanding_ArrivalAxisRange(target_sprite_full_height);
+    const bool within_envelope =
+        std::abs(state.player.pos_x - static_cast<float>(target->pos_x)) <
+            arrival_axis_range &&
+        std::abs(state.player.pos_y - static_cast<float>(target->pos_y)) <
+            arrival_axis_range;
+    if (!within_envelope || state.travel.engage_timer < 0x2ee) {
+      NovaHud_ShowLandingDenial(
+          state, LandedDenial::kTooFar, /*is_station=*/false);
+      return LandCommandResult::kContinue;
+    }
+    if (std::abs(state.player.vel_x) > 0.75F ||
+        std::abs(state.player.vel_y) > 0.75F ||
+        state.player.ai_maneuver_timer_ms > 0.0F) {
+      NovaHud_ShowLandingDenial(
+          state, LandedDenial::kTooFast, /*is_station=*/false);
+      return LandCommandResult::kContinue;
+    }
+
+    const std::int16_t source = state.travel.selected_stellar_id;
+    std::int16_t destination = -1;
+    RestrictedTravelKind kind = RestrictedTravelKind::kWormhole;
+    if ((target->availability_flags & 0x1000U) != 0U) {
+      // Ghidra 0x00456480 Stellar_TravelViaHypergate: the original opens the
+      // galaxy map in linked-destination mode, then accepts only a system
+      // reached by the source's HyperLink1-8 table.
+      kind = RestrictedTravelKind::kHypergate;
+      const StarmapResult map = NovaStarmap_RunWindow(
+          platform, state, state.player.current_system_id, &view, nullptr);
+      if (map.exit == StarmapExit::kQuit) {
+        return LandCommandResult::kQuit;
+      }
+      destination = NovaTravel_ResolveHypergateDestination(
+          state, source, map.destination_system_id);
+      if (destination < 0) {
+        NovaHud_ShowOverlayMessage(
+            state,
+            NovaHud_LoadStringEntry(0x7d2, 0x32)
+                .value_or("No hypergate destination selected."),
+            static_cast<std::uint64_t>(0xfaU));
+        return LandCommandResult::kBlockedFrame;
+      }
+    } else {
+      destination = NovaTravel_SelectWormholeDestination(state, source);
+      if (destination < 0) {
+        std::string message =
+            NovaHud_LoadStringEntry(0x7d2, 0x54).value_or("Unable");
+        message += " ";
+        message += NovaHud_LoadStringEntry(0x7d2, 0x56)
+                       .value_or("to use this wormhole.");
+        NovaHud_ShowOverlayMessage(
+            state, message, static_cast<std::uint64_t>(0xfaU));
+        state.pending_ui_sounds.push_back({3, 1});
+        return LandCommandResult::kContinue;
+      }
+    }
+    if (!NovaTravel_CompleteRestrictedTravel(state, destination, kind)) {
+      NovaLog::Warn("restricted travel from stellar {} selected invalid "
+                    "destination {}",
+                    source,
+                    destination);
+      return LandCommandResult::kContinue;
+    }
+    NovaPlayer_TickJumpArrival(platform, view, state, SDL_GetTicks());
+    return LandCommandResult::kBlockedFrame;
+  }
   LandedContext ctx;
   if (NovaLanding_EnterDocked(state, ctx, target_sprite_full_height)) {
     NovaLog::Info("arrival accepted at stellar {}; opening Spaceport",
