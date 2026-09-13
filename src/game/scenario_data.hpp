@@ -710,7 +710,9 @@ struct Weapon {
   std::int16_t burst_cycle_ticks = 0; // (resource +0x5a, was mislabeled
                                       // max_ammo)
   std::int16_t burst_reset_cooldown = 0;
-  std::int16_t retarget_interval_ticks = 0;
+  // Bible Durability (resource +0x68): number of point-defense damage points a
+  // guided shot absorbs before the following PD hit destroys it.
+  std::int16_t point_defense_durability = 0;
   // Bible MaxAmmo (resource +0x6c -> WeaponDef +0x1e, loader 0x004bd3c0):
   // max ammo per weapon instance; 0/-1 defers to the outfit Max field. Read
   // by ShipClass_HasPlayerBayCapacityFor (0x004694a0) as a fighter bay's

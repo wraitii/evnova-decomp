@@ -118,8 +118,8 @@ Stellar environment (scope 8):
 - `0x0046e2f0` `NovaGameplay_AccelerateShipTowardPoint(ship_pos,target_pos,max_accel,velocity_xy)` — steering/force application toward a point.
 
 AI inbound threat / evasion (scope 0xb):
-- `0x00422210` `NovaGameplay_TallyInboundWeaponThreat` — sums damage of shots targeting each ship into `ShipState.inbound_weapon_threat` (+0xC8CE), reset each full tick.
-- `0x004221d0` `NovaGameplay_IsInboundThreatExceedingDefenses` — gates AI reaction (evasion / guided-fire choice) based on the threat vs defensive budget.
+- `0x00422210` `NovaWeapon_TallyInboundWeaponThreat` — each full tick resets active ships and adds `trunc((MassDmg + EnergyDmg) * 0.5)` separately for each live, normal-lock shot targeting that ship. The signed-short tally wraps like the original.
+- `0x004221d0` `NovaAi_IsInboundThreatExceedingDefenses` — returns true when the signed tally is at least `(shield + armor) * 1.05` (including the original x87 precision boundary). Its sole caller conserves guided ammunition when a target is already expected to die from inbound ordnance.
 
 Scan detection / radar (scope 0xc):
 - `0x0045d030` `NovaGameplay_RollProximityScanDetection` — rolls detection odds from system scan-bonus minus player scanner strength; latches `g_proximity_scan_detected`.

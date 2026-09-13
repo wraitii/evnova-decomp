@@ -12,15 +12,48 @@
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
 
 namespace {
 
 using game::GameState;
 using game::NovaAi_FindBestAssistTargetForShip;
+using game::NovaAi_IsInboundThreatExceedingDefenses;
 using game::NovaAi_UpdateShipAI;
 using game::NovaAiShip_CanInterceptCurrentPrimaryTarget;
 using game::NovaShip_AllocateShipSlot;
 using game::NovaTargeting_UpdateStellarAvailability;
+
+TEST_CASE("inbound threat uses the original defensive-budget boundary") {
+  game::Ship ship;
+
+  ship.shield_points = 60.0F;
+  ship.armor_points = 40.0F;
+  ship.inbound_weapon_threat = 104;
+  CHECK_FALSE(NovaAi_IsInboundThreatExceedingDefenses(ship));
+
+  // The binary64 1.05 constant is slightly greater than decimal 1.05, and the
+  // original retains the product in an x87 register. Thus 105 is still below
+  // the budget for 100 points of current defenses.
+  ship.inbound_weapon_threat = 105;
+  CHECK_FALSE(NovaAi_IsInboundThreatExceedingDefenses(ship));
+  ship.inbound_weapon_threat = 106;
+  CHECK(NovaAi_IsInboundThreatExceedingDefenses(ship));
+
+  // Equality is accepted (FCOMPP's equality bit is not part of the rejection
+  // mask), while unordered comparisons reject the threat.
+  ship.shield_points = 0.0F;
+  ship.armor_points = 0.0F;
+  ship.inbound_weapon_threat = 0;
+  CHECK(NovaAi_IsInboundThreatExceedingDefenses(ship));
+  ship.shield_points = std::numeric_limits<float>::quiet_NaN();
+  CHECK_FALSE(NovaAi_IsInboundThreatExceedingDefenses(ship));
+
+  // The tally is a signed 16-bit field and the predicate does not clamp it.
+  ship.shield_points = 0.0F;
+  ship.inbound_weapon_threat = -1;
+  CHECK_FALSE(NovaAi_IsInboundThreatExceedingDefenses(ship));
+}
 
 // Find a zero-based system index whose nav list holds at least one stellar that
 // is available (after the availability refresh), map-visible (< 1000) and

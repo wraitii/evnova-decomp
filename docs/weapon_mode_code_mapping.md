@@ -82,9 +82,10 @@ blend velocity toward the heading each frame: `vel = (vel*94 + polar(heading,spe
 Mode-6 shots launched by the player keep pure inherited velocity at spawn (no polar add); NPC bays get the full polar
 vector. Player mode-5 bombs keep inherited velocity * 0.8.
 
-Point-defense (mode 9) shots are targetless and fly straight — `Shot_UpdateShotGuidance` returns immediately for mode 9;
-the lead was applied at fire time (mode-9 PD target selection, Weapon_SelectTurretTargetWithinArc 0x0043a310, remains
-unported).
+Point-defense mode 9 shots are targetless and fly straight — `Shot_UpdateShotGuidance` returns immediately for mode 9;
+`NovaWeapon_SelectTurretTargetWithinArc` (0x0043a310) chooses the nearest eligible inbound guided shot before considering
+PD-targetable attacking ships, and applies straight or predictive lead at fire time. Mode 10 applies beam PD damage to
+the guided shot's durability counter.
 
 ## Linked submunitions (Bible SubCount/SubType/SubTheta/SubLimit)
 

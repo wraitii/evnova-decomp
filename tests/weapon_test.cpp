@@ -548,4 +548,123 @@ TEST_CASE("queued beam hits expire at sub-tick frame rates", "[weapon][npc]") {
   CHECK(beam.lifetime_ticks == -2); // reset to the inactive sentinel
 }
 
+TEST_CASE("inbound weapon threat tallies only live normal-lock shots",
+          "[weapon][threat]") {
+  GameState state;
+  state.scenario.weapons.resize(2);
+  state.scenario.weapons[0].mass_damage = 3;
+  state.scenario.weapons[0].energy_damage = 2;
+  state.scenario.weapons[1].mass_damage = -3;
+
+  Ship &active = state.ShipAt(1);
+  active.is_active = true;
+  active.inbound_weapon_threat = 99;
+  Ship &inactive = state.ShipAt(2);
+  inactive.is_active = false;
+  inactive.inbound_weapon_threat = 77;
+
+  const auto add_shot = [&](std::int16_t weapon_id,
+                            std::int16_t target,
+                            float life,
+                            std::int16_t cooldown,
+                            bool consumed = false) {
+    ActiveShot shot;
+    shot.weapon_id = weapon_id;
+    shot.target_ship_slot = target;
+    shot.life_ticks_remaining = life;
+    shot.retarget_cooldown = cooldown;
+    shot.consumed = consumed;
+    state.active_shots.push_back(shot);
+  };
+  add_shot(0, 1, 1.0F, 0);       // +(3 + 2) / 2 = 2
+  add_shot(1, 1, 1.0F, 0);       // -3 / 2 = -1, toward zero
+  add_shot(0, 2, 1.0F, 0);       // inactive target is not reset/tallied
+  add_shot(0, 1, 0.0F, 0);       // inactive lifetime
+  add_shot(0, 1, -1.0F, 0);      // inactive lifetime
+  add_shot(0, 1, 1.0F, 998);     // inert/lost-lock shot
+  add_shot(0, 1, 1.0F, 1);       // asteroid-targeting shot
+  add_shot(0, 1, 1.0F, 0, true); // already consumed by collision
+
+  NovaWeapon_TallyInboundWeaponThreat(state);
+
+  CHECK(active.inbound_weapon_threat == 1);
+  CHECK(inactive.inbound_weapon_threat == 77);
+}
+
+TEST_CASE("inbound threat truncates each shot and honors the fixed pool",
+          "[weapon][threat]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  state.scenario.weapons[0].mass_damage = 1;
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+
+  // Each half-point is truncated separately, rather than summing to one.
+  for (int i = 0; i < 2; ++i) {
+    ActiveShot shot;
+    shot.weapon_id = 0;
+    shot.target_ship_slot = 1;
+    shot.life_ticks_remaining = 1.0F;
+    state.active_shots.push_back(shot);
+  }
+  NovaWeapon_TallyInboundWeaponThreat(state);
+  CHECK(target.inbound_weapon_threat == 0);
+
+  state.active_shots.clear();
+  state.active_shots.resize(0x81);
+  for (ActiveShot &shot : state.active_shots) {
+    shot.weapon_id = 0;
+    shot.target_ship_slot = -1;
+    shot.life_ticks_remaining = 1.0F;
+  }
+  state.active_shots[0x80].target_ship_slot = 1;
+  state.scenario.weapons[0].mass_damage = 20;
+  NovaWeapon_TallyInboundWeaponThreat(state);
+  CHECK(target.inbound_weapon_threat == 0);
+}
+
+TEST_CASE("point defense prioritizes and damages an inbound guided shot",
+          "[weapon][point-defense]") {
+  GameState state;
+  state.scenario.weapons.resize(2);
+  Weapon &pd = state.scenario.weapons[0];
+  pd.weapon_mode_code = 10;
+  pd.beam_length_px = 200;
+  pd.ammo_type = -1;
+  pd.mass_damage = 2;
+  pd.energy_damage = 3;
+  pd.lifetime_ticks = 2;
+  pd.reload_ticks = 10;
+  state.scenario.weapons[1].weapon_mode_code = 1;
+
+  state.scenario.ships.resize(1);
+  Ship &defender = state.player;
+  defender.is_active = true;
+  defender.ship_instance_id = 0;
+  defender.ship_class_id = 0;
+  defender.armor_points = 100.0F;
+  defender.pos_x = 0.0F;
+  defender.pos_y = 0.0F;
+  state.weapon_bank_ammo[0] = 2;
+
+  ActiveShot incoming;
+  incoming.weapon_id = 1;
+  incoming.target_ship_slot = 0;
+  incoming.life_ticks_remaining = 20.0F;
+  incoming.pos_x = 0.0F;
+  incoming.pos_y = -100.0F;
+  incoming.point_defense_durability = 4;
+  state.active_shots.push_back(incoming);
+
+  NovaWeapon_SelectTurretTargetWithinArc(state, defender);
+
+  REQUIRE(state.beam_hit_queue[0].forced_targeting == 1);
+  CHECK(state.beam_hit_queue[0].target_shot_slot == 0);
+  CHECK(state.weapon_bank_cooldown[0] == Catch::Approx(5.0F));
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(state.active_shots[0].point_defense_durability == 0);
+  NovaWeapon_TickBeamHitQueue(state, 1.0F);
+  CHECK(state.active_shots[0].consumed);
+}
+
 } // namespace game

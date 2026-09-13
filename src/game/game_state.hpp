@@ -883,6 +883,9 @@ struct ActiveShot {
   // normal homing, 1 = asteroid target (target_ship_slot indexes the asteroid
   // pool), 998 = inert (target lost), 999 = interference weave.
   std::int16_t retarget_cooldown = 0;
+  // Ghidra ShotState +0x40: guided-weapon durability against point-defense
+  // hits. A value below 1 makes the next PD hit destroy the shot immediately.
+  std::int16_t point_defense_durability = 0;
   // Ghidra ShotState.lock_quality_0..3 (+0x38): per-seek-channel jam
   // vulnerability rolls seeded from the weapon's jam_vuln at spawn
   // (Random(0..vuln)); compared against the target's jamming score in
@@ -915,6 +918,10 @@ struct BeamHit {
   std::int16_t weapon_id = -1;
   std::int16_t owner_ship_slot = -1;
   std::int16_t target_ship_slot = -1;
+  // Mode-10 point defense targets the fixed shot pool rather than a ship.
+  // Kept separate in the vector port so a shot index can never be mistaken
+  // for a ship slot by the direct-hit resolver.
+  std::int16_t target_shot_slot = -1;
   std::int16_t turret_quadrant = -1;
   std::int16_t turret_group_id = -1;
   std::int16_t forced_targeting = -1;

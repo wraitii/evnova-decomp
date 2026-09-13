@@ -212,6 +212,7 @@ void Stub_TickReactionsAndNpcSpawns(GameState &state, float elapsed_ticks) {
   // The original's AI mode timers use a global millisecond tick source.
   const std::uint32_t now_ms = SDL_GetTicks();
   Mission_TickShipInteractionReactions(state, now_ms);
+  NovaWeapon_TallyInboundWeaponThreat(state);
   NovaSystem_UpdateReinforcementCountdown(state, elapsed_ticks);
   NovaSystem_TickNpcSpawnMaintenance(
       state, state.player.current_system_id, now_ms);

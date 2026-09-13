@@ -11,6 +11,7 @@
 #include "targeting.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -35,6 +36,50 @@ inline constexpr float kBombNoseTurnRate = 1.0F;          // 0x00575318
 }
 
 } // namespace
+
+// Ghidra 0x00422210 Ship_TallyInboundWeaponThreat.
+void NovaWeapon_TallyInboundWeaponThreat(GameState &state) {
+  for (std::size_t ship_slot = 0; ship_slot < GameState::kMaxShips;
+       ++ship_slot) {
+    Ship &ship = state.ShipAt(ship_slot);
+    if (!ship.is_active) {
+      continue;
+    }
+    ship.inbound_weapon_threat = 0;
+
+    const std::size_t shot_count = std::min<std::size_t>(
+        state.active_shots.size(), static_cast<std::size_t>(0x80));
+    for (std::size_t shot_slot = 0; shot_slot < shot_count; ++shot_slot) {
+      const ActiveShot &shot = state.active_shots[shot_slot];
+      if (shot.consumed || !(shot.life_ticks_remaining > 0.0F) ||
+          shot.target_ship_slot != static_cast<std::int16_t>(ship_slot) ||
+          shot.retarget_cooldown != 0) {
+        continue;
+      }
+      const Weapon *weapon = state.scenario.Weapon(
+          static_cast<std::int16_t>(shot.weapon_id + 0x80));
+      if (weapon == nullptr) {
+        NovaLog::Todo(
+            "inbound threat tally (0x00422210): skipped shot slot {} with "
+            "invalid weapon bank {}",
+            shot_slot,
+            shot.weapon_id);
+        continue;
+      }
+
+      // The x87 sequence converts the running total after every shot, toward
+      // zero. Because the prior total is integral, this is integer division
+      // toward zero for each combined-damage contribution independently.
+      const int contribution = (static_cast<int>(weapon->mass_damage) +
+                                static_cast<int>(weapon->energy_damage)) /
+                               2;
+      const std::uint16_t wrapped = static_cast<std::uint16_t>(
+          static_cast<std::uint16_t>(ship.inbound_weapon_threat) +
+          static_cast<std::uint16_t>(contribution));
+      ship.inbound_weapon_threat = std::bit_cast<std::int16_t>(wrapped);
+    }
+  }
+}
 
 // Ghidra 0x00413810 Weapon_InitShipWeaponBursts (burst-counter preload slice)
 // plus the ship-class stock-loadout copy shared by the NPC spawn/AI paths
@@ -995,6 +1040,8 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   // does not tick fuses yet; the field is carried for that slice).
   shot.fuse_elapsed = w->fuse_ticks < 1 ? -1.0F : 0.0F;
   shot.retarget_cooldown = 0;
+  shot.point_defense_durability =
+      std::max<std::int16_t>(0, w->point_defense_durability);
 
   const int mode = w->weapon_mode_code;
   constexpr float kDegPerRad = 180.0F / 3.14159265358979323846F;
@@ -2030,6 +2077,7 @@ void NovaWeapon_TickPlayerWeaponCommands(GameState &state,
                                          const PlayerWeaponCommandInput &input,
                                          float /*elapsed_ticks*/) {
   Ship &player = state.player;
+  NovaWeapon_SelectTurretTargetWithinArc(state, player);
   // Fire arms require the station-hold and maneuver timers to be expired and
   // the ship not disabled (disabled / derelict-government gate).
   const bool controls_live = player.ai_station_hold_timer <= 0.0F;
@@ -2268,6 +2316,283 @@ bool NovaWeapon_QueueBeamHit(GameState &state,
   return false;
 }
 
+namespace {
+
+bool QueuePointDefenseBeamHit(GameState &state,
+                              std::int16_t owner_ship_slot,
+                              std::int16_t shot_slot,
+                              std::int16_t weapon_bank,
+                              std::int16_t bearing_deg) {
+  std::size_t free_slot = state.beam_hit_queue.size();
+  for (std::size_t i = 0; i < state.beam_hit_queue.size(); ++i) {
+    if (state.beam_hit_queue[i].lifetime_ticks < -1) {
+      free_slot = i;
+      break;
+    }
+  }
+  if (free_slot == state.beam_hit_queue.size() || shot_slot < 0 ||
+      static_cast<std::size_t>(shot_slot) >= state.active_shots.size() ||
+      !NovaWeapon_QueueBeamHit(state,
+                               owner_ship_slot,
+                               -1,
+                               weapon_bank,
+                               /*forced_targeting=*/1,
+                               bearing_deg)) {
+    return false;
+  }
+  BeamHit &beam = state.beam_hit_queue[free_slot];
+  const ActiveShot &shot =
+      state.active_shots[static_cast<std::size_t>(shot_slot)];
+  beam.target_shot_slot = shot_slot;
+  beam.target_x = shot.pos_x;
+  beam.target_y = shot.pos_y;
+  return true;
+}
+
+} // namespace
+
+// Ghidra 0x0043a310 Weapon_SelectTurretTargetWithinArc.
+void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
+  if (ship.ai_station_hold_timer > 0.0F) {
+    return;
+  }
+  const bool player = ship.ship_instance_id == 0;
+  auto ammo = [&](std::int16_t bank) -> std::int16_t {
+    return player ? BankAmmo(state, bank)
+                  : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+  };
+  auto secondary = [&](std::int16_t bank) -> std::int16_t & {
+    return player
+               ? BankSecondary(state, bank)
+               : ship.npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+  };
+  auto cooldown = [&](std::int16_t bank) -> float & {
+    return player
+               ? state.weapon_bank_cooldown[static_cast<std::size_t>(bank)]
+               : ship.npc_weapon_bank_cooldown[static_cast<std::size_t>(bank)];
+  };
+  auto burst_counter = [&](std::int16_t bank) -> std::int16_t & {
+    return player
+               ? state.weapon_bank_burst_counter[static_cast<std::size_t>(bank)]
+               : ship.npc_weapon_bank_burst_counter[static_cast<std::size_t>(
+                     bank)];
+  };
+
+  std::int16_t bank = -1;
+  const Weapon *weapon = nullptr;
+  for (std::int16_t candidate = 0; candidate < 0x100; ++candidate) {
+    const Weapon *w = WeaponAt(state, candidate);
+    if (w == nullptr ||
+        (w->weapon_mode_code != 9 && w->weapon_mode_code != 10) ||
+        ammo(candidate) <= 0 || cooldown(candidate) > 0.0F ||
+        !NovaWeapon_CanFireWeaponBank(state, ship, candidate)) {
+      continue;
+    }
+    bank = candidate;
+    weapon = w;
+    break;
+  }
+  if (bank < 0 || weapon == nullptr) {
+    return;
+  }
+
+  const int reach =
+      weapon->weapon_mode_code == 9
+          ? static_cast<int>(static_cast<int>(weapon->range_scalar) * 1.5)
+          : static_cast<int>(weapon->beam_length_px);
+  const int reach_sq = reach * reach;
+  const ShipClass *ship_class = ShipClassFor(state, ship);
+  if (ship_class == nullptr) {
+    return;
+  }
+  const std::int16_t ship_heading = static_cast<std::int16_t>(
+      ship.heading * (180.0F / 3.14159265358979323846F));
+  auto eligible_geometry =
+      [&](float x, float y, int &distance_sq, std::int16_t &bearing) {
+        const float dx = x - ship.pos_x;
+        const float dy = y - ship.pos_y;
+        distance_sq = static_cast<int>(dx * dx + dy * dy);
+        if (distance_sq > reach_sq) {
+          return false;
+        }
+        bearing =
+            static_cast<std::int16_t>(BearingDeg(ship.pos_x, ship.pos_y, x, y));
+        return !NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
+            *ship_class, *weapon, ship_heading, bearing);
+      };
+
+  std::int16_t target_slot = -1;
+  std::int16_t target_kind = -1; // 0 shot, 1 ship
+  std::int16_t target_bearing = 0;
+  int best_distance_sq = 0;
+  const std::size_t shot_count =
+      std::min<std::size_t>(state.active_shots.size(), 0x80);
+  for (std::size_t i = 0; i < shot_count; ++i) {
+    const ActiveShot &shot = state.active_shots[i];
+    const Weapon *shot_weapon = WeaponAt(state, shot.weapon_id);
+    const bool protects_leader =
+        ship.squad_leader_ship_slot != -1 &&
+        shot.target_ship_slot == ship.squad_leader_ship_slot;
+    if (shot.consumed || !(shot.life_ticks_remaining > 0.0F) ||
+        shot_weapon == nullptr || shot_weapon->weapon_mode_code != 1 ||
+        shot.retarget_cooldown != 0 || (shot_weapon->flags & 0x0080U) != 0U ||
+        (shot.target_ship_slot != ship.ship_instance_id && !protects_leader)) {
+      continue;
+    }
+    int distance_sq = 0;
+    std::int16_t bearing = 0;
+    if (eligible_geometry(shot.pos_x, shot.pos_y, distance_sq, bearing) &&
+        (target_slot == -1 || distance_sq < best_distance_sq)) {
+      target_slot = static_cast<std::int16_t>(i);
+      target_kind = 0;
+      target_bearing = bearing;
+      best_distance_sq = distance_sq;
+    }
+  }
+
+  if (target_slot == -1) {
+    for (std::size_t i = 0; i < GameState::kMaxShips; ++i) {
+      Ship &candidate = state.ShipAt(i);
+      const ShipClass *candidate_class = ShipClassFor(state, candidate);
+      if (!candidate.is_active ||
+          candidate.ship_instance_id == ship.ship_instance_id ||
+          candidate.ship_instance_id == ship.squad_leader_ship_slot ||
+          candidate_class == nullptr ||
+          (candidate_class->flags_secondary & 0x0008U) == 0U ||
+          NovaAiShip_IsDisabled(state, candidate) ||
+          !NovaAiShip_CanEngageTargetUnderCloakRules(state, candidate, ship)) {
+        continue;
+      }
+      bool pressing = false;
+      if (i == 0) {
+        pressing = NovaAiShip_ShouldKeepPressingTarget(state, ship);
+      } else {
+        pressing = NovaAiShip_IsShipLockedOnAttackerInState4(candidate, ship);
+        if (!pressing && ship.squad_leader_ship_slot >= 0 &&
+            state.SlotInRange(
+                static_cast<std::size_t>(ship.squad_leader_ship_slot))) {
+          pressing = NovaAiShip_IsShipLockedOnAttackerInState4(
+              candidate,
+              state.ShipAt(
+                  static_cast<std::size_t>(ship.squad_leader_ship_slot)));
+        }
+      }
+      int distance_sq = 0;
+      std::int16_t bearing = 0;
+      if (pressing &&
+          eligible_geometry(
+              candidate.pos_x, candidate.pos_y, distance_sq, bearing) &&
+          (target_slot == -1 || distance_sq < best_distance_sq)) {
+        target_slot = static_cast<std::int16_t>(i);
+        target_kind = 1;
+        target_bearing = bearing;
+        best_distance_sq = distance_sq;
+      }
+    }
+  }
+  if (target_slot == -1) {
+    return;
+  }
+
+  bool fired = false;
+  if (weapon->weapon_mode_code == 9) {
+    const int spawned = NovaWeapon_SpawnProjectile(
+        state, ship.ship_instance_id, -1, bank, false, false);
+    if (spawned >= 0) {
+      ActiveShot &pd = state.active_shots[static_cast<std::size_t>(spawned)];
+      const float target_x =
+          target_kind == 0
+              ? state.active_shots[static_cast<std::size_t>(target_slot)].pos_x
+              : state.ShipAt(static_cast<std::size_t>(target_slot)).pos_x;
+      const float target_y =
+          target_kind == 0
+              ? state.active_shots[static_cast<std::size_t>(target_slot)].pos_y
+              : state.ShipAt(static_cast<std::size_t>(target_slot)).pos_y;
+      pd.pos_x = ship.pos_x;
+      pd.pos_y = ship.pos_y;
+      pd.vel_x = ship.vel_x;
+      pd.vel_y = ship.vel_y;
+      const float target_pos[2]{target_x, target_y};
+      NovaWeapon_SelectTurretQuadrant(
+          state, ship, bank, pd.pos_x, pd.pos_y, target_pos);
+      float heading =
+          target_kind == 0
+              ? BearingDeg(pd.pos_x, pd.pos_y, target_x, target_y)
+              : static_cast<float>(NovaAi_AimWeaponPredictiveFrom(
+                    state,
+                    ship,
+                    state.ShipAt(static_cast<std::size_t>(target_slot)),
+                    bank,
+                    pd.pos_x,
+                    pd.pos_y));
+      if (weapon->inaccuracy > 0) {
+        heading += static_cast<float>(
+            RandomBelow(state, weapon->inaccuracy * 2) - weapon->inaccuracy);
+      }
+      pd.heading_deg = static_cast<float>(RoundHeadingDeg(heading));
+      AddPolarVelocity(pd.heading_deg,
+                       weapon->projectile_speed / 100.0F,
+                       pd.vel_x,
+                       pd.vel_y);
+      fired = true;
+    }
+  } else if (target_kind == 0) {
+    fired = QueuePointDefenseBeamHit(
+        state, ship.ship_instance_id, target_slot, bank, target_bearing);
+  } else {
+    fired = NovaWeapon_QueueBeamHit(state,
+                                    ship.ship_instance_id,
+                                    target_slot,
+                                    bank,
+                                    /*forced_targeting=*/-1,
+                                    target_bearing);
+  }
+  if (!fired) {
+    return;
+  }
+
+  cooldown(bank) +=
+      static_cast<float>(weapon->reload_ticks) / static_cast<float>(ammo(bank));
+  if (weapon->fire_sound >= 0) {
+    state.pending_fire_sounds.push_back({weapon->fire_sound,
+                                         ship.pos_x,
+                                         ship.pos_y,
+                                         (weapon->flags & 0x0010U) != 0U});
+  }
+  if (weapon->ammo_type < -999) {
+    ship.fuel_points =
+        std::max(0.0F,
+                 ship.fuel_points -
+                     static_cast<float>(-weapon->ammo_type - 1000) * 0.1F);
+  } else if (weapon->ammo_type >= 0 &&
+             (weapon->flags_secondary & 0x0001U) == 0U) {
+    const std::int16_t spend = player ? weapon->ammo_type : bank;
+    if (spend >= 0 && spend < 0x100) {
+      secondary(spend) = static_cast<std::int16_t>(
+          std::max(0, static_cast<int>(secondary(spend)) - 1));
+    }
+  }
+  if (weapon->burst_cycle_ticks > 0) {
+    std::int16_t &cycle = burst_counter(bank);
+    cycle = static_cast<std::int16_t>(cycle + 1);
+    const std::int16_t interval =
+        (weapon->flags & 0x0040U) != 0U
+            ? weapon->burst_cycle_ticks
+            : static_cast<std::int16_t>(ammo(bank) * weapon->burst_cycle_ticks);
+    if (cycle >= interval) {
+      cycle = 0;
+      cooldown(bank) = static_cast<float>(weapon->burst_reset_cooldown);
+      if ((weapon->flags_secondary & 0x0001U) != 0U) {
+        const std::int16_t spend = player ? weapon->ammo_type : bank;
+        if (spend >= 0 && spend < 0x100) {
+          secondary(spend) = static_cast<std::int16_t>(
+              std::max(0, static_cast<int>(secondary(spend)) - 1));
+        }
+      }
+    }
+  }
+}
+
 // Ghidra 0x0042f270 Shot_UpdateBeamHitQueue.
 //
 // TODO(decomp): the original's per-ship beam-contact pass -- the friendly-fire
@@ -2281,9 +2606,32 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
     if (beam.lifetime_ticks < -1) {
       continue;
     }
-    if (beam.target_ship_slot >= 0 &&
-        beam.target_ship_slot <
-            static_cast<std::int16_t>(GameState::kMaxShips)) {
+    if (beam.forced_targeting == 1 && beam.target_shot_slot >= 0) {
+      const auto shot_slot = static_cast<std::size_t>(beam.target_shot_slot);
+      if (shot_slot >= state.active_shots.size() ||
+          state.active_shots[shot_slot].consumed ||
+          !(state.active_shots[shot_slot].life_ticks_remaining >= 0.0F)) {
+        beam.lifetime_ticks = -1;
+        beam.target_shot_slot = -1;
+      } else {
+        ActiveShot &shot = state.active_shots[shot_slot];
+        beam.target_x = shot.pos_x;
+        beam.target_y = shot.pos_y;
+        const Weapon *pd_weapon = WeaponAt(state, beam.weapon_id);
+        if (shot.point_defense_durability < 1) {
+          shot.consumed = true;
+          shot.life_ticks_remaining = 0.0F;
+        } else if (pd_weapon != nullptr) {
+          const int damage =
+              static_cast<int>(pd_weapon->mass_damage) +
+              (static_cast<int>(pd_weapon->energy_damage) + 1) / 2;
+          shot.point_defense_durability =
+              static_cast<std::int16_t>(shot.point_defense_durability - damage);
+        }
+      }
+    } else if (beam.target_ship_slot >= 0 &&
+               beam.target_ship_slot <
+                   static_cast<std::int16_t>(GameState::kMaxShips)) {
       const Ship &target =
           state.ShipAt(static_cast<std::size_t>(beam.target_ship_slot));
       beam.target_x = target.pos_x;
