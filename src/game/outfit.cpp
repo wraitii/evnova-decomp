@@ -276,6 +276,9 @@ float Outfit_GetPlayerAfterburnerFuelBurnRate(const GameState &state) {
   return rate;
 }
 
+// Ghidra 0x00463680 Ship_ComputeShipShieldRegenRate and 0x004638E0
+// Ship_ComputeShipArmorRegenRate run inline in this aggregate stats pass; the
+// other folded Ship_ComputeShip* helpers are listed below.
 PlayerEffectiveStats
 Outfit_ComputePlayerEffectiveStats(const GameState &state) {
   const int16_t ship_class_id = state.player.ship_class_id;

@@ -4688,8 +4688,8 @@ void NovaAi_UpdateAssistResponseBehavior(GameState &state,
   // Chatter gate shared by the attack commands: only player-attached ships
   // with a fresh assist target, low class category, and a non-mute class
   // roll 1-in-3. The pending-latch sentinel test follows the original's
-  // g_pending_combat_chatter_kind == -1; the port's consumer pass (Frame_
-  // UpdateCombatChatter) is TODO(decomp) and never resets the latch, so this
+  // g_pending_combat_chatter_kind == -1; NovaFrame_UpdateCombatChatter resets
+  // the latch after consuming the queued request, so this
   // stays silent until that lands.
   auto queue_attack_chatter = [&]() {
     if (ship.squad_leader_ship_slot != 0 ||
@@ -5465,7 +5465,8 @@ void NovaAi_SetShipHostileToPlayer(GameState &state, Ship &ship) {
 
 namespace {
 
-// Math_ShortestAngleDeltaDeg (0x0046b210): the [0,180] magnitude of the
+// Ghidra 0x0046B210 Math_ShortestAngleDeltaDeg runs inline in this AI helper.
+// The [0,180] magnitude of the
 // shortest angular separation between two game bearings.
 std::int16_t ShortestAngleDeltaDeg(std::int16_t a, std::int16_t b) {
   int diff = static_cast<int>(a) - static_cast<int>(b);
@@ -5530,11 +5531,12 @@ bool NovaAi_OutfitHasCloakScannerCapability(const GameState &state,
 } // namespace
 
 // Ghidra 0x0046b360 Weapon_IsTargetBearingInTurretBlindSpot: whether the
-// bearing lies in one of the weapon's turret blind-spot sectors. Front (<46 deg), side (<136 deg), rear;
-// a sector is BLIND when the weapon's flags_primary 0x1000/0x2000/0x4000 is
-// set, force-overridden ON by the matching ShipClass capability flags (Bible:
-// "Turreted weapon has a blind spot to the front/sides/rear"). Callers reject
-// the bank while the target is in a blind spot.
+// bearing lies in one of the weapon's turret blind-spot sectors. Front (<46
+// deg), side (<136 deg), rear; a sector is BLIND when the weapon's
+// flags_primary 0x1000/0x2000/0x4000 is set, force-overridden ON by the
+// matching ShipClass capability flags (Bible: "Turreted weapon has a blind spot
+// to the front/sides/rear"). Callers reject the bank while the target is in a
+// blind spot.
 bool NovaAi_WeaponIsTargetBearingInTurretBlindSpot(
     const ShipClass &ship_class,
     const Weapon &weapon,

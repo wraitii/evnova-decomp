@@ -1083,7 +1083,8 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
   return false;
 }
 
-// Ghidra: 0x0048b280 Menu_RunKeySettingsDialog
+// Ghidra 0x0048b280 Menu_RunKeySettingsDialog.
+// Ghidra 0x0048b6d0 Menu_KeySettingsHandleInput runs inline in this modal.
 bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
                                    NovaFontCache &font_cache,
                                    NovaPreferences &prefs) {

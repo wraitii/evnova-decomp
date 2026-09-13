@@ -675,8 +675,9 @@ LoadMoodPromptPayFirst(std::int16_t random_index, double personality) {
 }
 
 // The hail-info text (DAT_007d190c) the Greetings button shows for
-// government-aid-eligible ships. The full assembly (NovaUi_BuildShipCommHail-
-// InfoText 0x004819d0 branch 0: stellar scan + commodity names) is deferred;
+// Ghidra 0x004819d0 NovaUi_BuildShipCommHailInfoText (partial port).
+// Used for government-aid-eligible ships. The full assembly (branch 0:
+// stellar scan + commodity names) is deferred;
 // this mirrors the default STR# 0x7d2 0xaf fragment the original shows when
 // the hail target carries no dude hail info (the common case).
 [[nodiscard]] std::string BuildHailInfoText(const Ship &target) {
