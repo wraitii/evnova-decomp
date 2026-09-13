@@ -21,11 +21,10 @@ constexpr int kMinimumWindowHeight = 768;
 constexpr int kDefaultProbePort = 8190;
 
 // Convert SDL's physical scancode to the DirectInput-style code stored in the
-// original g_player_key_bindings table. The Windows CE build used a small
-// mixture of these scan codes and ASCII letters; keeping the physical mapping
-// here gives the key-settings dialog one stable code path for both printable
-// and non-printable keys.
-[[nodiscard]] std::uint16_t OriginalKeyCode(SDL_Scancode scancode) {
+// original g_player_key_bindings table. Codes through 0x58 mostly retain the
+// PC set-1/DIK numbering; navigation and right-side modifiers use the game's
+// compact 0x60..0x6f normalized range from g_key_code_display_name_map.
+[[nodiscard]] constexpr std::uint16_t OriginalKeyCode(SDL_Scancode scancode) {
   switch (scancode) {
   case SDL_SCANCODE_ESCAPE:
     return 0x01;
@@ -82,10 +81,8 @@ constexpr int kDefaultProbePort = 8190;
   case SDL_SCANCODE_RIGHTBRACKET:
     return 0x1b;
   case SDL_SCANCODE_RETURN:
-  case SDL_SCANCODE_KP_ENTER:
     return 0x1c;
   case SDL_SCANCODE_LCTRL:
-  case SDL_SCANCODE_RCTRL:
     return 0x1d;
   case SDL_SCANCODE_A:
     return 0x1e;
@@ -140,7 +137,6 @@ constexpr int kDefaultProbePort = 8190;
   case SDL_SCANCODE_KP_MULTIPLY:
     return 0x37;
   case SDL_SCANCODE_LALT:
-  case SDL_SCANCODE_RALT:
     return 0x38;
   case SDL_SCANCODE_SPACE:
     return 0x39;
@@ -201,29 +197,49 @@ constexpr int kDefaultProbePort = 8190;
   case SDL_SCANCODE_F12:
     return 0x58;
   case SDL_SCANCODE_HOME:
-    return 0xc7;
+    return 0x60;
   case SDL_SCANCODE_UP:
-    return 0xc8;
+    return 0x61;
   case SDL_SCANCODE_PAGEUP:
-    return 0xc9;
+    return 0x62;
   case SDL_SCANCODE_LEFT:
-    return 0xcb;
+    return 0x63;
   case SDL_SCANCODE_RIGHT:
-    return 0xcd;
+    return 0x64;
   case SDL_SCANCODE_END:
-    return 0xcf;
+    return 0x65;
   case SDL_SCANCODE_DOWN:
-    return 0xd0;
+    return 0x66;
   case SDL_SCANCODE_PAGEDOWN:
-    return 0xd1;
+    return 0x67;
   case SDL_SCANCODE_INSERT:
-    return 0xd2;
+    return 0x68;
   case SDL_SCANCODE_DELETE:
-    return 0xd3;
+    return 0x69;
+  case SDL_SCANCODE_KP_ENTER:
+    return 0x6a;
+  case SDL_SCANCODE_RCTRL:
+    return 0x6b;
+  case SDL_SCANCODE_KP_DIVIDE:
+    return 0x6c;
+  case SDL_SCANCODE_PRINTSCREEN:
+    return 0x6d;
+  case SDL_SCANCODE_PAUSE:
+    return 0x6e;
+  case SDL_SCANCODE_RALT:
+    return 0x6f;
   default:
     return 0xffff;
   }
 }
+
+static_assert(OriginalKeyCode(SDL_SCANCODE_UP) == 0x61);
+static_assert(OriginalKeyCode(SDL_SCANCODE_LEFT) == 0x63);
+static_assert(OriginalKeyCode(SDL_SCANCODE_RIGHT) == 0x64);
+static_assert(OriginalKeyCode(SDL_SCANCODE_DOWN) == 0x66);
+static_assert(OriginalKeyCode(SDL_SCANCODE_KP_ENTER) == 0x6a);
+static_assert(OriginalKeyCode(SDL_SCANCODE_RCTRL) == 0x6b);
+static_assert(OriginalKeyCode(SDL_SCANCODE_RALT) == 0x6f);
 } // namespace
 
 void SdlTexture::Deleter::operator()(SDL_Texture *texture) const {
@@ -609,65 +625,18 @@ FlightInput SdlPlatform::PollFlightInput() {
 }
 
 bool SdlPlatform::IsOriginalKeyCodeHeld(std::uint16_t key_code) {
-  // Reverse of the OriginalKeyCode mapping for the codes the binding-table
-  // consumers currently need (escort-command slots 0x2a/0x2b..0x33, the 0x38
-  // arm modifier, the cloak 0x29 -> 0x16 and Player Info 0x19 -> 0x19
-  // bindings, and both shifts for the Player Info reverse-Tab arm). Keep in
-  // sync when new binding slots are consumed; the 0x6f half has no clean-room
-  // scancode mapping -- TODO(decomp): identify the physical key behind
-  // DIK-style code 0x6f).
-  SDL_Scancode scancode;
-  switch (key_code) {
-  case 0x02:
-    scancode = SDL_SCANCODE_1;
-    break;
-  case 0x03:
-    scancode = SDL_SCANCODE_2;
-    break;
-  case 0x04:
-    scancode = SDL_SCANCODE_3;
-    break;
-  case 0x05:
-    scancode = SDL_SCANCODE_4;
-    break;
-  case 0x06:
-    scancode = SDL_SCANCODE_5;
-    break;
-  case 0x12:
-    scancode = SDL_SCANCODE_E;
-    break;
-  case 0x16:
-    scancode = SDL_SCANCODE_U;
-    break;
-  case 0x19:
-    scancode = SDL_SCANCODE_P;
-    break;
-  case 0x20:
-    scancode = SDL_SCANCODE_D;
-    break;
-  case 0x21:
-    scancode = SDL_SCANCODE_F;
-    break;
-  case 0x2e:
-    scancode = SDL_SCANCODE_C;
-    break;
-  case 0x2f:
-    scancode = SDL_SCANCODE_V;
-    break;
-  case 0x38:
-    scancode = SDL_SCANCODE_LALT;
-    break;
-  case 0x2a:
-    scancode = SDL_SCANCODE_LSHIFT;
-    break;
-  case 0x36:
-    scancode = SDL_SCANCODE_RSHIFT;
-    break;
-  default:
-    return false;
-  }
   const bool *const keys = SDL_GetKeyboardState(nullptr);
-  return keys[scancode] != 0 || probe_.VirtualKey(scancode);
+  const auto held = [&](SDL_Scancode scancode) {
+    return keys[scancode] != 0 || probe_.VirtualKey(scancode);
+  };
+  for (int value = SDL_SCANCODE_UNKNOWN + 1; value < SDL_SCANCODE_COUNT;
+       ++value) {
+    const auto scancode = static_cast<SDL_Scancode>(value);
+    if (OriginalKeyCode(scancode) == key_code) {
+      return held(scancode);
+    }
+  }
+  return false;
 }
 
 void SdlPlatform::Present() {

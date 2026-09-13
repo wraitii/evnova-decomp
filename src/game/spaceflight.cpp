@@ -1392,7 +1392,33 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Player control (heading/throttle) is read here once so the ship flies
     // while the simulation stubs do not, and the same snapshot feeds the
     // travel/jump channel. Movement integrates into PlayerShip.
-    const FlightInput input = platform.PollFlightInput();
+    FlightInput input = platform.PollFlightInput();
+    const auto binding_held = [&](std::size_t command) {
+      const std::uint16_t key = prefs.bindings.cmd_to_key[command];
+      return key != 0xff && key != 0xffff &&
+             platform.IsOriginalKeyCodeHeld(key);
+    };
+    // Ship_HandlePlayerShipControl reads every action through
+    // g_player_key_bindings. PollFlightInput owns the SDL event pump; replace
+    // its convenience defaults with the persisted original command table.
+    input.turn_left = binding_held(0x13);
+    input.turn_right = binding_held(0x14);
+    input.thrust = binding_held(0x15);
+    input.reverse = binding_held(0x16);
+    input.afterburner = binding_held(0x18);
+    input.fire = binding_held(0x02);
+    input.fire_secondary = binding_held(0x03);
+    input.cycle_secondary = binding_held(0x00);
+    input.cycle_secondary_backwards =
+        input.cycle_secondary && (platform.IsOriginalKeyCodeHeld(0x2a) ||
+                                  platform.IsOriginalKeyCodeHeld(0x36));
+    input.clear_secondary = binding_held(0x01);
+    input.face_target = binding_held(0x07);
+    input.land = binding_held(0x06);
+    input.travel = binding_held(0x0e);
+    input.starmap = binding_held(0x09);
+    input.mission_info = binding_held(0x28);
+    input.board = binding_held(0x10);
     // Escape/'q' are latched by PollFlightInput (it owns the SDL event drain
     // the old PollTextEvent-based check relied on); return to the menu.
     if (input.escape_pressed) {

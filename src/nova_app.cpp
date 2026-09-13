@@ -1200,6 +1200,11 @@ int NovaApp_Run(NovaRuntime &runtime) {
   if (!runtime.platform.Initialize()) {
     return 1;
   }
+  if (!game::NovaPrefs_LoadFromSystemStore(runtime.prefs)) {
+    NovaLog::Info("preferences: using original defaults");
+  }
+  // The original normalizes the on-disk block once during startup too.
+  (void)game::NovaPrefs_SaveToSystemStore(runtime.prefs);
   // External probe harness (docs/probe_harness.md): the state reader runs on
   // the main thread at the pump, so it can safely walk the live GameState.
   runtime.platform.probe().SetStateProvider(
@@ -1837,7 +1842,11 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
                                                         runtime.audio,
                                                         runtime.music,
                                                         font_cache,
-                                                        runtime.prefs);
+                                                        runtime.prefs,
+                                                        [&runtime] {
+                                                          NovaRender_RedrawAndPresentFrame(
+                                                              runtime, 0);
+                                                        });
     NovaLog::Info("preferences {}", saved ? "saved" : "cancelled");
     // Force a redraw so the menu backdrop (and any brightness change) is seen.
     NovaRender_RedrawAndPresentFrame(runtime, 1);
@@ -1850,7 +1859,7 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // The modal keeps re-rendering the menu behind itself each frame.
     NovaRender_RedrawAndPresentFrame(runtime, 0);
     game::NovaMenu_RunAboutDialog(
-        runtime.platform, runtime.font_cache, [&runtime] {
+        runtime.platform, runtime.game, [&runtime] {
           NovaRender_RedrawAndPresentFrame(runtime, 0);
         });
     break;

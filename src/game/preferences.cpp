@@ -8,12 +8,16 @@
 #include "../sdl_platform.hpp"
 #include "nova_font.hpp"
 
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_render.h>
+#include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -52,6 +56,35 @@ constexpr std::array<std::uint8_t, 34> kKeySettingsCommandIds{
     0x02, 0x03, 0x00, 0x01, 0x0a, 0x0b, 0x2a, 0x30, 0x31, 0x32, 0x33, 0x17,
     0x06, 0x10, 0x0f, 0x11, 0x12, 0x29, 0x09, 0x19, 0x28, 0x34};
 
+constexpr std::size_t kPrefsFileSize = 0x8c;
+constexpr std::uint16_t kPrefsFileVersion = 0x69;
+constexpr std::string_view kPrefsFileName = "EV Nova Prefs.prf";
+
+void WriteLe16(std::array<std::uint8_t, kPrefsFileSize> &bytes,
+               std::size_t offset,
+               std::uint16_t value) {
+  bytes[offset] = static_cast<std::uint8_t>(value & 0xffU);
+  bytes[offset + 1] = static_cast<std::uint8_t>(value >> 8U);
+}
+
+[[nodiscard]] std::uint16_t
+ReadLe16(const std::array<std::uint8_t, kPrefsFileSize> &bytes,
+         std::size_t offset) {
+  return static_cast<std::uint16_t>(bytes[offset]) |
+         static_cast<std::uint16_t>(bytes[offset + 1]) << 8U;
+}
+
+[[nodiscard]] std::optional<std::filesystem::path> SystemPrefsPath() {
+  char *raw = SDL_GetPrefPath("Ambrosia Software", "EV Nova");
+  if (raw == nullptr) {
+    NovaLog::Error("preferences: SDL_GetPrefPath failed: {}", SDL_GetError());
+    return std::nullopt;
+  }
+  const std::filesystem::path directory{raw};
+  SDL_free(raw);
+  return directory / kPrefsFileName;
+}
+
 // The preferences DLOG has no full-window PICT:
 // UiWindow_CreateFromDialogResource allocates a plain surface, and
 // UiWindow_Draw fills it with the current fill colour then frames it with the
@@ -69,6 +102,21 @@ constexpr SDL_Color kControlSelectedText{255, 255, 255, 255};
 
 constexpr std::uint16_t kSoundArrowDownPict = 0x0087;
 constexpr std::uint16_t kSoundArrowUpPict = 0x0086;
+
+// DIVERGENCE: the original retains the owner surface and blits every modal
+// surface from bottom to top. The SDL port conveniently redraws the owner each
+// frame, then preserves the same bottom-to-top modal ordering. There is no
+// separate full-screen scrim pass in the original.
+void DrawOwningScreen(SdlPlatform &platform,
+                      const std::function<void()> &render_background) {
+  SDL_Renderer *const renderer = platform.renderer();
+  if (render_background) {
+    render_background();
+  } else {
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(renderer);
+  }
+}
 
 // Returns the STR# 0x88 sound-volume word for the given volume index, or the
 // original's fallback string DAT_0056cf0c (" ") when out of range. The value
@@ -424,16 +472,8 @@ HitTestKeySettingsRow(const KeySettingsLayout &layout, float x, float y) {
 }
 
 [[nodiscard]] std::string KeyCodeName(std::uint16_t key_code) {
-  if (key_code == 0xffff) {
+  if (key_code == 0xff || key_code == 0xffff) {
     return "none";
-  }
-  if (key_code >= static_cast<std::uint16_t>('a') &&
-      key_code <= static_cast<std::uint16_t>('z')) {
-    return std::string(1, static_cast<char>(key_code - 'a' + 'A'));
-  }
-  if (key_code >= static_cast<std::uint16_t>('0') &&
-      key_code <= static_cast<std::uint16_t>('9')) {
-    return std::string(1, static_cast<char>(key_code));
   }
   switch (key_code) {
   case 0x01:
@@ -458,6 +498,10 @@ HitTestKeySettingsRow(const KeySettingsLayout &layout, float x, float y) {
     return "9";
   case 0x0b:
     return "0";
+  case 0x0c:
+    return "-";
+  case 0x0d:
+    return "=";
   case 0x0e:
     return "Backspace";
   case 0x0f:
@@ -482,6 +526,10 @@ HitTestKeySettingsRow(const KeySettingsLayout &layout, float x, float y) {
     return "O";
   case 0x19:
     return "P";
+  case 0x1a:
+    return "[";
+  case 0x1b:
+    return "]";
   case 0x1e:
     return "A";
   case 0x1f:
@@ -500,6 +548,16 @@ HitTestKeySettingsRow(const KeySettingsLayout &layout, float x, float y) {
     return "K";
   case 0x26:
     return "L";
+  case 0x27:
+    return ";";
+  case 0x28:
+    return "'";
+  case 0x29:
+    return "`";
+  case 0x2a:
+    return "LShift";
+  case 0x2b:
+    return "\\";
   case 0x2c:
     return "Z";
   case 0x2d:
@@ -514,16 +572,22 @@ HitTestKeySettingsRow(const KeySettingsLayout &layout, float x, float y) {
     return "N";
   case 0x32:
     return "M";
+  case 0x33:
+    return ",";
+  case 0x34:
+    return ".";
+  case 0x35:
+    return "/";
+  case 0x36:
+    return "RShift";
+  case 0x37:
+    return "KPad*";
   case 0x1c:
     return "Return";
   case 0x1d:
     return "Ctrl";
-  case 0x2a:
-    return "LShift";
-  case 0x36:
-    return "RShift";
   case 0x38:
-    return "Alt";
+    return "LAlt";
   case 0x39:
     return "Space";
   case 0x3a:
@@ -548,30 +612,72 @@ HitTestKeySettingsRow(const KeySettingsLayout &layout, float x, float y) {
     return "F9";
   case 0x44:
     return "F10";
+  case 0x45:
+    return "NumLck";
+  case 0x46:
+    return "ScrLck";
+  case 0x47:
+    return "KPad7";
+  case 0x48:
+    return "KPad8";
+  case 0x49:
+    return "KPad9";
+  case 0x4a:
+    return "KPad-";
+  case 0x4b:
+    return "KPad4";
+  case 0x4c:
+    return "KPad5";
+  case 0x4d:
+    return "KPad6";
+  case 0x4e:
+    return "KPad+";
+  case 0x4f:
+    return "KPad1";
+  case 0x50:
+    return "KPad2";
+  case 0x51:
+    return "KPad3";
+  case 0x52:
+    return "KPad0";
+  case 0x53:
+    return "KPad.";
   case 0x57:
     return "F11";
   case 0x58:
     return "F12";
-  case 0xc7:
+  case 0x60:
     return "Home";
-  case 0xc8:
+  case 0x61:
     return "Up";
-  case 0xc9:
+  case 0x62:
     return "Page Up";
-  case 0xcb:
+  case 0x63:
     return "Left";
-  case 0xcd:
+  case 0x64:
     return "Right";
-  case 0xcf:
+  case 0x65:
     return "End";
-  case 0xd0:
+  case 0x66:
     return "Down";
-  case 0xd1:
+  case 0x67:
     return "Page Down";
-  case 0xd2:
+  case 0x68:
     return "Insert";
-  case 0xd3:
+  case 0x69:
     return "Delete";
+  case 0x6a:
+    return "KPadEnter";
+  case 0x6b:
+    return "RCtrl";
+  case 0x6c:
+    return "KPad/";
+  case 0x6d:
+    return "PrtScn";
+  case 0x6e:
+    return "Pause";
+  case 0x6f:
+    return "RAlt";
   default:
     return "Key " + std::to_string(key_code);
   }
@@ -580,9 +686,6 @@ HitTestKeySettingsRow(const KeySettingsLayout &layout, float x, float y) {
 [[nodiscard]] std::optional<std::size_t>
 FindKeyBindingConflict(const std::array<std::uint16_t, 34> &bindings) {
   for (std::size_t current = 0; current < bindings.size(); ++current) {
-    if (bindings[current] == 0xffff) {
-      continue;
-    }
     for (std::size_t previous = 0; previous < current; ++previous) {
       if (bindings[previous] == bindings[current]) {
         return current;
@@ -592,24 +695,31 @@ FindKeyBindingConflict(const std::array<std::uint16_t, 34> &bindings) {
   return std::nullopt;
 }
 
+// Ghidra 0x0048b860 Menu_KeySettingsDraw.
 void DrawKeySettingsDialog(SdlPlatform &platform,
                            NovaFontCache &font_cache,
                            const KeySettingsLayout &layout,
                            SDL_Texture *backdrop,
                            const std::array<std::uint16_t, 34> &bindings,
-                           std::size_t selected_row) {
+                           std::size_t selected_row,
+                           const std::function<void()> &render_background) {
   SDL_Renderer *const renderer = platform.renderer();
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(renderer);
+  DrawOwningScreen(platform, render_background);
   platform.SetCenteredPlayfield();
 
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-  const SDL_FRect full{0.0F, 0.0F, 640.0F, 480.0F};
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 150);
-  SDL_RenderFillRect(renderer, &full);
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-
   const auto &window = layout.window;
+  // UiWindow_Draw clears and frames the complete DLOG surface before calling
+  // Menu_KeySettingsDraw. PICT 0x8b covers only item 4.
+  SDL_SetRenderDrawColor(
+      renderer, kWindowFill.r, kWindowFill.g, kWindowFill.b, SDL_ALPHA_OPAQUE);
+  SDL_RenderFillRect(renderer, &window);
+  SDL_SetRenderDrawColor(renderer,
+                         kWindowFrame.r,
+                         kWindowFrame.g,
+                         kWindowFrame.b,
+                         SDL_ALPHA_OPAQUE);
+  SDL_RenderRect(renderer, &window);
+
   // Item 4 (zero-based item 3) is the native 582x307 PICT frame inset in the
   // wider 594x353 DLOG. The resource must not be stretched to the DLOG bounds.
   const SDL_FRect frame = ItemRect(layout.items[3], window);
@@ -702,8 +812,8 @@ void DrawKeySettingsDialog(SdlPlatform &platform,
 void KeyBindings::ResetToDefaults() {
   // Values exactly as NovaPrefs_ResetKeyBindings (0x004b4400) writes them.
   // Slot index == command id; value = bound key code (0xff unbound). See the
-  // module comment and docs/preferences_keybindings.md for the flight row
-  // (ASCII 'a' forward / 'c' turn-left / 'd' turn-right / 'f' reverse).
+  // module comment and docs/preferences_keybindings.md for the normalized
+  // navigation-key row (arrows occupy compact codes 0x61/0x63/0x64/0x66).
   cmd_to_key = {
       /* 0x00 */ 0x11, /*0x01*/ 0x1f, /*0x02*/ 0x39, /*0x03*/ 0x1d,
       /* 0x04 */ 0x15, /*0x05*/ 0x26, /*0x06*/ 0x1c, /*0x07*/ 0x1e,
@@ -740,6 +850,107 @@ void NovaPreferences::ResetToDefaults() {
   ambient_sounds = true;
   hyperspace_effects = false;
   check_for_updates = true;
+  starmap_show_borders = false;
+}
+
+// Ghidra 0x004c7400 NovaPrefs_LoadOrInit.
+bool NovaPrefs_LoadFromFile(const std::filesystem::path &path,
+                            NovaPreferences &prefs) {
+  std::array<std::uint8_t, kPrefsFileSize> bytes{};
+  std::ifstream stream(path, std::ios::binary);
+  if (!stream.read(reinterpret_cast<char *>(bytes.data()), bytes.size()) ||
+      stream.peek() != std::ifstream::traits_type::eof() ||
+      ReadLe16(bytes, 0x00) != kPrefsFileVersion) {
+    return false;
+  }
+
+  NovaPreferences loaded;
+  loaded.ResetToDefaults();
+  loaded.intro_music = ReadLe16(bytes, 0x02) != 0;
+  loaded.sound_volume = ReadLe16(bytes, 0x06);
+  for (std::size_t row = 0; row < kKeySettingsCommandIds.size(); ++row) {
+    loaded.bindings.cmd_to_key[kKeySettingsCommandIds[row]] =
+        ReadLe16(bytes, 0x08 + row * 2);
+  }
+  loaded.quicktime_movies = ReadLe16(bytes, 0x62) != 0;
+  loaded.share_processor_time = ReadLe16(bytes, 0x64) != 0;
+  loaded.smoke_trails = ReadLe16(bytes, 0x66) != 0;
+  // +0x68 is render suppression. The original deliberately forces it off
+  // after loading, so the port does not model or restore it.
+  loaded.ship_animations = ReadLe16(bytes, 0x6a) != 0;
+  loaded.engine_glows = ReadLe16(bytes, 0x6c) != 0;
+  loaded.weapon_effects = ReadLe16(bytes, 0x6e) != 0;
+  loaded.running_lights = ReadLe16(bytes, 0x70) != 0;
+  loaded.parallax_starfield = ReadLe16(bytes, 0x72) != 0;
+  loaded.ambient_sounds = ReadLe16(bytes, 0x74) != 0;
+  loaded.starmap_show_borders = ReadLe16(bytes, 0x76) != 0;
+  loaded.hyperspace_effects = ReadLe16(bytes, 0x78) != 0;
+  loaded.check_for_updates = ReadLe16(bytes, 0x7a) != 0;
+  loaded.brightness = ReadLe16(bytes, 0x7c);
+  if (loaded.brightness > 6) {
+    loaded.brightness = 3;
+  }
+  prefs = loaded;
+  return true;
+}
+
+// Ghidra 0x004c7820 NovaPrefs_SaveToDisk.
+bool NovaPrefs_SaveToFile(const std::filesystem::path &path,
+                          const NovaPreferences &prefs) {
+  // Zero initialization reproduces the original allocator and keeps legacy,
+  // sensitivity, the two unused control shorts, and +0x7e..+0x88 reserved.
+  std::array<std::uint8_t, kPrefsFileSize> bytes{};
+  WriteLe16(bytes, 0x00, kPrefsFileVersion);
+  WriteLe16(bytes, 0x02, prefs.intro_music);
+  WriteLe16(bytes, 0x06, static_cast<std::uint16_t>(prefs.sound_volume));
+  for (std::size_t row = 0; row < kKeySettingsCommandIds.size(); ++row) {
+    WriteLe16(bytes,
+              0x08 + row * 2,
+              prefs.bindings.cmd_to_key[kKeySettingsCommandIds[row]]);
+  }
+  WriteLe16(bytes, 0x62, prefs.quicktime_movies);
+  WriteLe16(bytes, 0x64, prefs.share_processor_time);
+  WriteLe16(bytes, 0x66, prefs.smoke_trails);
+  WriteLe16(bytes, 0x6a, prefs.ship_animations);
+  WriteLe16(bytes, 0x6c, prefs.engine_glows);
+  WriteLe16(bytes, 0x6e, prefs.weapon_effects);
+  WriteLe16(bytes, 0x70, prefs.running_lights);
+  WriteLe16(bytes, 0x72, prefs.parallax_starfield);
+  WriteLe16(bytes, 0x74, prefs.ambient_sounds);
+  WriteLe16(bytes, 0x76, prefs.starmap_show_borders);
+  WriteLe16(bytes, 0x78, prefs.hyperspace_effects);
+  WriteLe16(bytes, 0x7a, prefs.check_for_updates);
+  WriteLe16(bytes, 0x7c, static_cast<std::uint16_t>(prefs.brightness));
+
+  std::error_code error;
+  std::filesystem::create_directories(path.parent_path(), error);
+  if (error) {
+    NovaLog::Error("preferences: cannot create '{}': {}",
+                   path.parent_path().string(),
+                   error.message());
+    return false;
+  }
+  std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+  if (!stream.write(reinterpret_cast<const char *>(bytes.data()),
+                    bytes.size())) {
+    NovaLog::Error("preferences: failed writing '{}'", path.string());
+    return false;
+  }
+  return true;
+}
+
+bool NovaPrefs_LoadFromSystemStore(NovaPreferences &prefs) {
+  const auto path = SystemPrefsPath();
+  return path && NovaPrefs_LoadFromFile(*path, prefs);
+}
+
+bool NovaPrefs_SaveToSystemStore(const NovaPreferences &prefs) {
+  const auto path = SystemPrefsPath();
+  if (!path || !NovaPrefs_SaveToFile(*path, prefs)) {
+    return false;
+  }
+  NovaLog::Info("preferences: saved '{}'", path->string());
+  return true;
 }
 
 namespace {
@@ -852,29 +1063,22 @@ HitTestControl(const SettingsLayout &layout, float x, float y) {
   return std::nullopt;
 }
 
-// Draws one frame of the Settings dialog over the dimmed playfield.
+// Draws one frame of the Settings dialog over its owning screen.
 void DrawSettingsDialog(SdlPlatform &platform,
                         NovaFontCache &font_cache,
                         const SettingsLayout &layout,
                         const NovaPreferences &prefs,
                         const SettingsArtwork &artwork,
-                        std::optional<std::size_t> hover) {
+                        std::optional<std::size_t> hover,
+                        const std::function<void()> &render_background) {
   SDL_Renderer *renderer = platform.renderer();
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(renderer);
+  DrawOwningScreen(platform, render_background);
   platform.SetCenteredPlayfield();
   if (!layout.from_ditl) {
     return;
   }
 
   const auto &win = layout.window;
-  // Dim the title screen behind the modal so it reads as a popped window.
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-  const SDL_FRect full{0.0F, 0.0F, 640.0F, 480.0F};
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 130);
-  SDL_RenderFillRect(renderer, &full);
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-
   // UiWindow_Draw fills the entire DLOG surface white and draws one black
   // frame. It does not add the blue panel or inset frame used by the old
   // provisional renderer.
@@ -998,11 +1202,13 @@ void DrawSettingsDialog(SdlPlatform &platform,
 } // namespace
 
 // Ghidra: 0x00488650 Menu_RunSettingsDialog
-bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
-                                SdlAudio &audio,
-                                SdlMusic &music,
-                                NovaFontCache &font_cache,
-                                NovaPreferences &prefs) {
+bool NovaMenu_RunSettingsDialog(
+    SdlPlatform &platform,
+    SdlAudio &audio,
+    SdlMusic &music,
+    NovaFontCache &font_cache,
+    NovaPreferences &prefs,
+    const std::function<void()> &render_background) {
   (void)audio;
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   SettingsLayout layout = BuildSettingsLayout(panel);
@@ -1017,7 +1223,8 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
   while (!platform.quit_requested()) {
     const SDL_FPoint mouse = platform.mouse_position();
     const auto hover = HitTestControl(layout, mouse.x, mouse.y);
-    DrawSettingsDialog(platform, font_cache, layout, prefs, artwork, hover);
+    DrawSettingsDialog(
+        platform, font_cache, layout, prefs, artwork, hover, render_background);
     platform.Present();
 
     for (auto in = platform.PollTextEvent(); in;
@@ -1026,6 +1233,7 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
       case TextKey::escape:
         return false; // Cancel (discard changes).
       case TextKey::enter:
+        (void)NovaPrefs_SaveToSystemStore(prefs);
         return true; // Enter acts as OK.
       case TextKey::primary: {
         // Probe-harness support (docs/probe_harness.md): injected clicks land
@@ -1039,9 +1247,20 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
         }
         switch (*hit) {
         case 0: // OK
+          (void)NovaPrefs_SaveToSystemStore(prefs);
           return true;
         case 15: // Key Settings
-          (void)NovaMenu_RunKeySettingsDialog(platform, font_cache, prefs);
+          // Preserve the original bottom-to-top window-stack result. The SDL
+          // divergence redraws this parent instead of retaining its surface.
+          (void)NovaMenu_RunKeySettingsDialog(platform, font_cache, prefs, [&] {
+            DrawSettingsDialog(platform,
+                               font_cache,
+                               layout,
+                               prefs,
+                               artwork,
+                               std::nullopt,
+                               render_background);
+          });
           break;
         case 5: // sound down
           prefs.sound_volume =
@@ -1085,9 +1304,11 @@ bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
 
 // Ghidra 0x0048b280 Menu_RunKeySettingsDialog.
 // Ghidra 0x0048b6d0 Menu_KeySettingsHandleInput runs inline in this modal.
-bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
-                                   NovaFontCache &font_cache,
-                                   NovaPreferences &prefs) {
+bool NovaMenu_RunKeySettingsDialog(
+    SdlPlatform &platform,
+    NovaFontCache &font_cache,
+    NovaPreferences &prefs,
+    const std::function<void()> &render_background) {
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   const KeySettingsLayout layout = BuildKeySettingsLayout(panel);
   if (!layout.from_ditl ||
@@ -1112,7 +1333,8 @@ bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
                           layout,
                           backdrop ? backdrop->get() : nullptr,
                           working,
-                          selected_row);
+                          selected_row,
+                          render_background);
     platform.Present();
 
     for (auto in = platform.PollTextEvent(); in;
@@ -1121,11 +1343,14 @@ bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
         return false;
       }
       if (in->key == TextKey::enter) {
-        if (!FindKeyBindingConflict(working)) {
+        if (const auto conflict = FindKeyBindingConflict(working)) {
+          selected_row = *conflict;
+        } else {
           for (std::size_t row = 0; row < working.size(); ++row) {
             prefs.bindings.cmd_to_key[kKeySettingsCommandIds[row]] =
                 working[row];
           }
+          (void)NovaPrefs_SaveToSystemStore(prefs);
           return true;
         }
         continue;
@@ -1144,13 +1369,15 @@ bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
             continue;
           }
           if (button == 0) {
-            if (FindKeyBindingConflict(working)) {
+            if (const auto conflict = FindKeyBindingConflict(working)) {
+              selected_row = *conflict;
               continue;
             }
             for (std::size_t row = 0; row < working.size(); ++row) {
               prefs.bindings.cmd_to_key[kKeySettingsCommandIds[row]] =
                   working[row];
             }
+            (void)NovaPrefs_SaveToSystemStore(prefs);
             return true;
           }
           if (button == 1) {

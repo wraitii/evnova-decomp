@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 
 namespace {
@@ -152,9 +153,9 @@ TEST_CASE("Preferences defaults match NovaPrefs_ResetToDefaults") {
   CHECK(prefs.hyperspace_effects == false);
   CHECK(prefs.check_for_updates == true);
 
-  // Flight slots are the ASCII-lowercase row (confirmed by the player-control
-  // decomp): forward 'a' = 0x61, turn-left 'c' = 0x63, turn-right 'd' = 0x64,
-  // reverse 'f' = 0x66. Afterburner is DIK_Z = 0x2c.
+  // Flight slots use the normalized navigation row from the original key-name
+  // map: forward Up=0x61, turn-left Left=0x63, turn-right Right=0x64, and
+  // reverse Down=0x66. Afterburner is DIK_Z=0x2c.
   CHECK(prefs.bindings.cmd_to_key[0x15] == 0x61);
   CHECK(prefs.bindings.cmd_to_key[0x13] == 0x63);
   CHECK(prefs.bindings.cmd_to_key[0x14] == 0x64);
@@ -164,4 +165,49 @@ TEST_CASE("Preferences defaults match NovaPrefs_ResetToDefaults") {
   CHECK(prefs.bindings.cmd_to_key[0x21] == 0xff);
   CHECK(prefs.bindings.cmd_to_key[0x22] == 0xff);
   CHECK(prefs.bindings.cmd_to_key.size() == 0x52);
+}
+
+TEST_CASE("Original preference file round-trips modeled settings and keys") {
+  const auto path = std::filesystem::temp_directory_path() /
+                    "evnova_preferences_round_trip.prf";
+  std::filesystem::remove(path);
+
+  game::NovaPreferences written;
+  written.ResetToDefaults();
+  written.intro_music = false;
+  written.sound_volume = 8;
+  written.brightness = 6;
+  written.smoke_trails = true;
+  written.starmap_show_borders = true;
+  written.bindings.cmd_to_key[0x15] = 0x20;
+  REQUIRE(game::NovaPrefs_SaveToFile(path, written));
+  CHECK(std::filesystem::file_size(path) == 0x8c);
+
+  game::NovaPreferences loaded;
+  loaded.ResetToDefaults();
+  REQUIRE(game::NovaPrefs_LoadFromFile(path, loaded));
+  CHECK(loaded.intro_music == false);
+  CHECK(loaded.sound_volume == 8);
+  CHECK(loaded.brightness == 6);
+  CHECK(loaded.smoke_trails == true);
+  CHECK(loaded.starmap_show_borders == true);
+  CHECK(loaded.bindings.cmd_to_key[0x15] == 0x20);
+
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("Preference loader rejects versions other than 0x69") {
+  const auto path = std::filesystem::temp_directory_path() /
+                    "evnova_preferences_wrong_version.prf";
+  std::filesystem::remove(path);
+  {
+    std::array<char, 0x8c> bytes{};
+    bytes[0] = 0x68;
+    std::ofstream stream(path, std::ios::binary);
+    REQUIRE(stream.write(bytes.data(), bytes.size()));
+  }
+  game::NovaPreferences prefs;
+  prefs.ResetToDefaults();
+  CHECK_FALSE(game::NovaPrefs_LoadFromFile(path, prefs));
+  std::filesystem::remove(path);
 }

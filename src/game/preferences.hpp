@@ -13,6 +13,8 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 
 class SdlAudio;
 class SdlMusic;
@@ -26,9 +28,9 @@ class NovaFontCache;
 
 // The gameplay command -> key-code binding table. Slot index == command id
 // (confirmed by the Ship_HandlePlayerShipControl reads); the stored value is
-// the key code bound to that command (mostly DIK scan codes, but the four
-// flight slots store ASCII lowercase: turn-left 'c', turn-right 'd', forward
-// 'a', reverse 'f'). 0xff = unbound. Mirrors g_player_key_bindings
+// the game's normalized physical-key code. Most codes retain PC set-1/DIK
+// numbering; navigation/right-modifier keys occupy its compact 0x60..0x6f
+// range. 0xff = unbound. Mirrors g_player_key_bindings
 // (0x005914e6, short[0x52]) and NovaPrefs_ResetKeyBindings (0x004b4400).
 struct KeyBindings {
   static constexpr std::size_t kSlotCount = 0x52;
@@ -82,9 +84,23 @@ struct NovaPreferences {
   // Ghidra g_pref_check_for_updates (inverted flag: 0 = check for updates).
   bool check_for_updates = true;
 
+  // CE addition persisted at .prf +0x76. It is not exposed by DLOG 0xfa3,
+  // but retaining it lets the original fixed-size file round-trip the value.
+  bool starmap_show_borders = false;
+
   // Populates every field (and the key table) with the original defaults.
   void ResetToDefaults();
 };
+
+// Ghidra 0x004c7400 NovaPrefs_LoadOrInit / 0x004c7820
+// NovaPrefs_SaveToDisk. Path-taking forms expose the original 0x8c-byte,
+// version-0x69 format for tests. System forms use SDL_GetPrefPath.
+[[nodiscard]] bool NovaPrefs_LoadFromFile(const std::filesystem::path &path,
+                                          NovaPreferences &prefs);
+[[nodiscard]] bool NovaPrefs_SaveToFile(const std::filesystem::path &path,
+                                        const NovaPreferences &prefs);
+[[nodiscard]] bool NovaPrefs_LoadFromSystemStore(NovaPreferences &prefs);
+[[nodiscard]] bool NovaPrefs_SaveToSystemStore(const NovaPreferences &prefs);
 
 // Runs the main-menu Settings dialog (DLOG 0xfa3) as a blocking modal over the
 // playfield, editing `prefs` in place. Mirrors Menu_RunSettingsDialog
@@ -94,18 +110,22 @@ struct NovaPreferences {
 // stops/restarts `music` and windowed mode is applied to `platform` live, so
 // the prefs feel immediate like the original. Returns true when the player
 // pressed OK.
-bool NovaMenu_RunSettingsDialog(SdlPlatform &platform,
-                                SdlAudio &audio,
-                                SdlMusic &music,
-                                NovaFontCache &font_cache,
-                                NovaPreferences &prefs);
+bool NovaMenu_RunSettingsDialog(
+    SdlPlatform &platform,
+    SdlAudio &audio,
+    SdlMusic &music,
+    NovaFontCache &font_cache,
+    NovaPreferences &prefs,
+    const std::function<void()> &render_background = {});
 
 // Runs the separate Key Settings modal (Ghidra
 // Menu_RunKeySettingsDialog, 0x0048b280). The visible rows edit a shadow copy
 // of the 34 command bindings; Cancel discards it, Set Default resets it, and
 // OK copies it back only when no duplicate key is present.
-bool NovaMenu_RunKeySettingsDialog(SdlPlatform &platform,
-                                   NovaFontCache &font_cache,
-                                   NovaPreferences &prefs);
+bool NovaMenu_RunKeySettingsDialog(
+    SdlPlatform &platform,
+    NovaFontCache &font_cache,
+    NovaPreferences &prefs,
+    const std::function<void()> &render_background = {});
 
 } // namespace game

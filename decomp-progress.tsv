@@ -644,7 +644,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00477B50	SpriteWorld_RemoveLayerFromChain		0%	
 0x00477BA0	SpriteWorld_PrepareAllLayers		0%	
 0x00477C10	SpriteWorld_ClearSurface14		0%	
-0x00477C40	SpriteWorld_ClearSurface18		0%	
+0x00477C40	RenderOwner_PushSurfaceAsCurrentContext		0%
 0x00477C70	DrawContext_RestoreOwnerContext		0%	
 0x00477C90	SpriteWorld_SetRectCopyProc		0%	
 0x00477CE0	SpriteWorld_SetPreRenderHook		0%	
@@ -729,7 +729,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004860F0	Compiler_UninitializedReturn		0%	
 0x00486100	Profile_ExpressionTimestamp_860		0%	
 0x00486110	Compiler_ReturnZero		0%	
-0x00486120	Menu_RunAboutNovaDialog	src/game/about_dialog.cpp	50%	ABOUT NOVA dialog (d£sc 0x7fff via the selection-dialog path
+0x00486120	Menu_RunAboutNovaDialog	src/game/about_dialog.cpp	85%	Loads desc 0x7fff and delegates to the shared DLOG 0xbbb selection-text reader, matching the original call path; registration wildcard uses "Unregistered" until registration state exists
 0x004861B0	NovaHud_TrackFocusHoverIndex	src/nova_app.cpp	100%	NovaHud_TrackFocusHoverIndex menu hover tracking
 0x00486790	View_ResetCameraAndHover		0%	
 0x00486880	NovaMainLoop_Run	src/nova_app.cpp	100%	NovaMainLoop_Run
@@ -740,16 +740,16 @@ address	name	impl_file	reimpl_pct	comment
 0x00487FCD	NovaRender_RestoreClippedRegion		0%	
 0x00488080	NovaMainLoop_UpdateFrame	src/nova_app.cpp	100%	NovaMainLoop_UpdateFrame
 0x00488380	NovaView_UpdateGameplayViewport	src/game/gameplay_interface.cpp	45%	frame-centering + HUD origin/anchor arithmetic reimplemented as GameplayGeometry_FromSurface; viewport-rect source + surface fill/blit + render integration not yet wired
-0x00488650	Menu_RunSettingsDialog	src/game/preferences.cpp	75%	core modal: DLOG 0xfa3 geometry, toggles, sliders, OK/cancel, and Key Settings sub-dialog; .prf persistence and windowed-mode live toggle remain TODO
+0x00488650	Menu_RunSettingsDialog	src/game/preferences.cpp	90%	DLOG 0xfa3 modal with resource geometry/art, live toggles/sliders, owner-first window-stack redraw, Key Settings sub-dialog, and original OK save point; live window-mode switch and forced Share Processor gate remain TODO
 0x00489210	Ship_RunSpaceflightMode	src/game/spaceflight.cpp	10%	Ship_RunSpaceflightMode skeleton: faithful loop/cadence, gameplay scopes stubbed
 0x00489D70	Menu_RunNewGameFlow	src/game/new_pilot_flow.cpp	65%	Dialog chain ported on the dialog runtime (selection dialog 0x0048a7e0 + christening 0x00497900
 0x0048A7E0	Menu_RunPilotSelectionDialog	src/game/new_pilot_flow.cpp	75%	Ported on the SDL dialog runtime (ui_dialog.cpp) from real DLOG 0xc1d/0xc1e: variant census
 0x0048ADC0	IntroCinematic_Run	src/game/intro_cinematic.cpp	95%	Timed configured-frame playback; Enter (0x1c)/Space (0x39) advance one frame only
 0x0048B230	NovaRender_PresentBlockingTransitionFrame		0%	
 0x0048B250	NovaAudio_PreloadTransitionEffects		0%	NovaAudio_PreloadTransitionEffects into DAT_007d24b8
-0x0048B280	Menu_RunKeySettingsDialog	src/game/preferences.cpp	70%	DLOG 0xfa2 modal with native PICT 0x8b backdrop, 34-row shadow editing, capture, Set Default, duplicate validation, and Cancel/OK; persistence/input integration remain TODO(decomp)
-0x0048B6D0	Menu_KeySettingsHandleInput	src/game/preferences.cpp	70%	Runs inline in NovaMenu_RunKeySettingsDialog: 34-row mouse selection, physical-key capture into the shadow bindings, and modulo row advance. Original command-channel/key-release cadence is not reproduced one-to-one.
-0x0048B860	Menu_KeySettingsDraw		0%	
+0x0048B280	Menu_RunKeySettingsDialog	src/game/preferences.cpp	88%	DLOG 0xfa2 modal with generic full-window clear/frame before native PICT 0x8b, stacked over a freshly rendered parent Preferences window, 34-row shadow editing, capture, Set Default, conflict-row selection, Cancel, and original OK commit/save; command-channel cadence remains approximate
+0x0048B6D0	Menu_KeySettingsHandleInput	src/game/preferences.cpp	80%	Runs inline in NovaMenu_RunKeySettingsDialog: 34-row mouse selection, physical-key capture into the shadow bindings, modulo row advance, and conflict-row focus. Original command-channel/key-release cadence is not reproduced one-to-one.
+0x0048B860	Menu_KeySettingsDraw	src/game/preferences.cpp	85%	DrawKeySettingsDialog uses native PICT 0x8b, resource row geometry, original black/white selected-cell inversion, key names, and preserved menu background; exact native key-name table text/metrics remain incomplete
 0x0048BBB0	NovaHud_ReleaseTransientResources		0%	
 0x0048BC20	NovaAudio_PlayTransitionEffectsWait		0%	
 0x0048BC90	NovaHud_UpdateLayoutState		0%	
@@ -901,7 +901,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004B3350	Ship_ResetPlayerShipState	src/game/new_pilot_flow.cpp	34%	ResetPlayerShipForNewGame: track only fields the new-pilot flow / early loop meaningfully need
 0x004B4220	Game_ResetNewGameReputation		0%	
 0x004B42F0	FUN_004b42f0		0%	
-0x004B4320	NovaPrefs_ResetToDefaults	src/game/preferences.cpp	70%	NovaPreferences::ResetToDefaults sets every pref + key bindings; .prf load-override and gameplay consumption deferred
+0x004B4320	NovaPrefs_ResetToDefaults	src/game/preferences.cpp	85%	NovaPreferences::ResetToDefaults sets all modeled dialog preferences, CE starmap-border state, and key bindings; legacy/sensitivity globals remain unmodeled
 0x004B4400	NovaPrefs_ResetKeyBindings	src/game/preferences.cpp	90%	KeyBindings::ResetToDefaults writes the full short[0x52] defaults incl panel-suppressed aliases; flight ASCII row verified
 0x004B4690	Game_ResetNewGameState	src/game/new_pilot_flow.cpp	10%	Fresh-world reset entry (called from Menu_RunNewGameFlow 0x00489d70). Ported slices: SetNewGameDateAndStrings (the calendar seed via DrawContext_ReadRenderParams 0x004bbb10) and NovaNewPilot_ResetStellarStrengthForNewGame (0x004b46bc..0x004b4760: clear every stellar hazard_marker, seed live Strength -1 with the pinned countdown for availability_flags 0x40 starts-destroyed bodies, else reset live Strength to the capacity with engage_access 0). Remaining: faction reputation/mission-flag reset (Stub_ResetReputationAndWorldTables logs it), outfit/weapon-bank zeroing and the other tail scopes. Confidence: high on the ported slices.
 0x004B4CF0	Sprite_CompileFramesAndDiscardSourceData		0%	
@@ -1032,8 +1032,8 @@ address	name	impl_file	reimpl_pct	comment
 0x004C6D50	Ui_LoadSelectionDialogResource		0%	
 0x004C7040	FUN_004c7040		0%	
 0x004C73B0	FUN_004c73b0		0%	
-0x004C7400	NovaPrefs_LoadOrInit		0%	
-0x004C7820	FUN_004c7820		0%	
+0x004C7400	NovaPrefs_LoadOrInit	src/game/preferences.cpp	82%	Loads and validates the original little-endian 0x8c-byte version-0x69 payload from SDL_GetPrefPath, resets bindings before applying the 34 persisted display rows, and clamps brightness; legacy flags, sensitivity, and two opaque control shorts remain unmodeled; modern system path deliberately replaces @: volume-relative path
+0x004C7820	NovaPrefs_SaveToDisk	src/game/preferences.cpp	82%	Writes the original little-endian 0x8c-byte version-0x69 payload at startup and both dialog commit points using SDL_GetPrefPath; reserved/unsupported fields are zeroed like the original allocator, while sensitivity and two opaque control shorts remain unmodeled
 0x004C7D40	FUN_004c7d40		0%	
 0x004C7DB0	PilotFile_SaveGame	src/game/pilot_file.cpp	30%	PilotFile_SaveGame: entry -> PilotFileSaveGame(path build from pilot name + serialized tracked subset + write). License-seed check
 0x004C7DD0	PilotFile_SaveGameCore	src/game/pilot_file.cpp	45%	PilotFile_SaveGameCore: PilotFileSerialize covers the tracked block1/block2 offsets (cargo

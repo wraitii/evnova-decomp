@@ -29,6 +29,14 @@ Ground truth: decompilation, DITL item xrefs, and the
      normal cells are white/black, while the selected cell is black with a
      white frame and white key text.
 
+The original retains the owner and modal surfaces, then composites dirty modal
+windows from bottom to top; it does not run a separate full-screen dimming
+pass. The SDL path preserves that ordering but redraws the owning screen each
+frame as a deliberate convenience divergence. In particular, Key Settings
+redraws Preferences underneath it, clears and frames the complete DLOG 0xfa2
+window surface, then draws PICT 0x8b into item 4. The clear matters because
+that PICT does not cover the full 594x353 DLOG bounds.
+
 ## The command/binding model
 
 Gameplay input is *not* read directly from WASD/arrow scan codes anywhere in
@@ -71,13 +79,13 @@ several later hardware slots (0x30+). The usable rebind range covered by the
 Key Settings dialog is the 34 rows of the shadow block `DAT_00734bc8..` in
 `Shot_SnapshotControlInputState` order.
 
-`NovaPrefs_ResetKeyBindings` (0x004b4400, renamed) writes the PC-scan-code
-defaults. Values are mostly Microsoft "virtual-key" / DirectInput scan codes,
-but the four **flight** slots store ASCII lowercase letters instead (a porting
-quirk): **turn-left = 0x13 idx stores 0x63 `c`, turn-right = 0x14 idx stores
-0x64 `d`, forward = 0x15 idx stores 0x61 `a`, reverse = 0x16 idx stores 0x66
-`f`** — see *movement keys* below; they run through the table too, and are
-NOT the arrow/WASD keys.
+`NovaPrefs_ResetKeyBindings` (0x004b4400, renamed) writes the normalized
+physical-key defaults. Values mostly retain DirectInput/set-1 numbering. The
+original key-name map assigns its compact extended range as `0x60` Home,
+`0x61` Up, `0x62` Page Up, `0x63` Left, `0x64` Right, `0x65` End, `0x66`
+Down, `0x67` Page Down, `0x68` Insert, `0x69` Delete, then keypad Enter/right
+Ctrl/keypad slash/Print Screen/Pause/right Alt at `0x6a..0x6f`. Therefore the
+four flight defaults are arrow keys, not ASCII letters.
 
 ### The shadow control block and save block
 
@@ -172,27 +180,25 @@ checkbox/static labels come verbatim from each item's Pascal-string title.
 
 ## Movement / flight keys — confirmed via the table
 
-`Ship_HandlePlayerShipControl` (0x0044e019) proves the **big WASD/arrow keys are
-not hard-coded**: the forward/back/turn commands are read through
-`g_player_key_bindings[...]` exactly like every other command. The flight slots
-are all in the ASCII-lowercase row of the table (a porting quirk — unlike the
-DIK scan codes used elsewhere). Definitively, from the player-control decomp:
-- **turn left**  = `g_player_key_bindings[0x13]` (idx 19) = 0x63 = ASCII `c`
+`Ship_HandlePlayerShipControl` (0x0044e019) proves the arrows are not
+hard-coded: the forward/back/turn commands are read through
+`g_player_key_bindings[...]` exactly like every other command. Combining those
+slots with `g_key_code_display_name_map` at 0x005776dc gives:
+- **turn left**  = `g_player_key_bindings[0x13]` (idx 19) = 0x63 = Left
   (heading decreases; `unaff_ESI->heading -= turnrate*dt`)
-- **turn right** = `g_player_key_bindings[0x14]` (idx 20) = 0x64 = ASCII `d`
+- **turn right** = `g_player_key_bindings[0x14]` (idx 20) = 0x64 = Right
   (heading increases)
-- **forward thrust** = `g_player_key_bindings[0x15]` (idx 21) = 0x61 = ASCII `a`
+- **forward thrust** = `g_player_key_bindings[0x15]` (idx 21) = 0x61 = Up
   (the normal-acceleration branch: `Ship_ComputeShipEffectiveThrust` +
   `Math_AddPolarVelocityWithClamp` along current heading)
 - **reverse orientation** = `g_player_key_bindings[0x16]` (idx 22) = 0x66 =
-  ASCII `f` (turn-into-velocity / 180° turnaround mode: aligns the ship to
+  Down (turn-into-velocity / 180° turnaround mode: aligns the ship to
   its velocity direction, decelerating)
 - **afterburner** = `g_player_key_bindings[0x18]` (idx 24) = 0x2c = Z (gates
   `g_player_afterburner_active`)
 
-So the default clean-room flight keys are **A = forward, C = turn left,
-D = turn right, F = reverse** — an ASCII-letter row embedded in an otherwise
-DIK-scan-code table. Indices `[6]`/`[7]` are *not* flight/turn keys: from the
+So the default flight keys are **Up = forward, Left/Right = turn, Down =
+reverse**. Indices `[6]`/`[7]` are *not* flight/turn keys: from the
 reset table those are `0x1c`=DIK Return/land and `0x1e`=DIK A, and in the
 player control `[6]` (0x0044e019 line ~2045) toggles `DAT_007cab35` (a HUD
 message/dismiss command), `[7]` (line ~575) triggers target selection.
@@ -202,27 +208,34 @@ Index mapping recap (table base 0x5914e6, `short[0x52]`, index == command id):
 `[0x16]`=0x66 reverse, `[0x18]`=0x2c afterburner. Everything in the player
 core reads through `g_player_key_bindings[...]`, never a hard-coded scancode.
 
-CRITICAL reimplementation note: in the original, **WASD/arrow keys are NOT
-the flight keys**. The default table binds forward to ASCII `a` (A), turn
-left to `c` (C), turn right to `d` (D), and reverse to `f` (F) — all steered
-through the binding table, never hard-coded. The current clean-room
-`SdlPlatform::PollFlightInput()` hard-codes WASD + arrows; re-routing it
-through the binding table is the faithful path and also makes every key fully
-configurable (matching the "make all keys configurable" decision).
+The SDL port must translate physical SDL scancodes into this normalized code
+space before capture or polling. Treating `0x61/0x63/0x64/0x66` as ASCII
+produces the erroneous A/C/D/F mapping; the original display-name table proves
+they are Up/Left/Right/Down. Gameplay still resolves them through the binding
+table, so all four remain configurable.
 
-The global "arm/repeat modifier" pair 0x38/0x6f (Left Shift / the '`'-adjacent
-key) recurs everywhere; Left/Right Shift = 0x2a/0x36 are the modifier pair for
+The global "arm/repeat modifier" pair 0x38/0x6f (Left/Right Alt) recurs
+everywhere; Left/Right Shift = 0x2a/0x36 are the modifier pair for
 backwards cycling. `NovaInput_PeekActiveCommand` deliberately skips these
 modifier code ranges so any bound key can be captured.
 
 ## Persistence
 
-`.prf` file (per-resolution, name = `<render_width>EV Nova Prefs.prf`, from
-STR# 0x82/1 in EVNova.ini; full field map documented on the `NovaPrefs_LoadOrInit`
-plate comment). Version `0x69`. Reserved slots 0x7e..0x88 are zeroed on save
+`.prf` file (the recovered CE build constructs `@:EV Nova Prefs.prf`: `@:` is
+its current-volume-relative prefix and `EV Nova Prefs` comes from STR# 0x82/1;
+full field map is documented on the `NovaPrefs_LoadOrInit` plate comment).
+Version `0x69`. Reserved slots 0x7e..0x88 are zeroed on save
 (CE keybinding-extension space). The CE `Settings_LoadIniAndPrefs` reads
 `key_x2mode` from `[EV Nova]` in EVNova.ini and applies it via
 `Settings_PollKeyX2Mode` (poll of `g_key_x2mode`, default 0x14 = Caps Lock).
+
+The SDL3 port deliberately stores the same 0x8c-byte payload as
+`EV Nova Prefs.prf` under `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`.
+On macOS this is `~/Library/Application Support/EV Nova/`; SDL selects the
+corresponding per-user application-data directory on other platforms and
+creates it when necessary. Loading occurs after SDL platform initialization;
+the normalized block is written at startup and at the original Preferences
+and Key Settings commit points.
 
 ## EVNova.ini settings outside the `.prf` preferences
 
@@ -254,15 +267,15 @@ the executable.
 3. **Complete:** `Menu_RunKeySettingsDialog` now renders PICT 0x8b and its 34
    row cells; click-to-select, physical-key capture, duplicate validation,
    Set Default, and shadow-copy Cancel/OK behavior are implemented.
-4. **Represent preferences explicitly** (AGENTS.md: avoid hidden globals):
-   a `NovaPreferences` value struct on `NovaRuntime`/`GameState`, defaulting via
-   `NovaPrefs_ResetToDefaults`-equivalent, loaded/saved through a `.prf`
-   read/write, migrated across the current SDL build.
-5. **Wire flight input through the table**: rework `SdlPlatform::PollFlightInput`
-   (or a game-side abstraction) to derive `FlightInput.*` from the binding table
-   by command id, so WASD/arrows/afterburner/fire/travel/starmap/etc. are all
-   rebindable. Defaults mirror the original scan-code table; the CE x2mode key
-   (0x14) and hyperspace-effect gates are separate settings.
+4. **Complete for modeled fields:** `NovaPreferences` lives on `NovaRuntime`,
+   defaults through `NovaPrefs_ResetToDefaults`, and loads/saves the original
+   `.prf` layout in the SDL system preference directory. Legacy flags,
+   sensitivity, and two opaque trailing control shorts remain unmodeled.
+5. **Complete for reconstructed commands:** the spaceflight loop replaces
+   `PollFlightInput`'s event-pump defaults with `FlightInput` values resolved
+   from `KeyBindings` by command id, so movement, weapons, travel, starmap, and
+   other mapped actions use the persisted table. Remaining command ports should
+   likewise use `SdlPlatform::IsOriginalKeyCodeHeld` as they are reconstructed.
 6. **`g_hyperspace_effects`** reuse: decide whether the clean-room keeps the CE
    raw-input-lock behavior or treats it purely as the effect toggle (prefer the
    latter, documented divergence).
