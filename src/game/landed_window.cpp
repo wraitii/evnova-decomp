@@ -35,19 +35,25 @@
 namespace game {
 
 // ---------------------------------------------------------------------------
-// Stellar_ProcessTravelAndLanding (0x00457580) normal-arrival gate.
+// Stellar_HandleStellarEntryAndExit (0x00457580) normal-arrival gate.
 // ---------------------------------------------------------------------------
-// Ghidra 0x00462410 System_GetCurrentSystemLinkSpriteHeight.
-// Arrival-gate use at 0x00457f89 / 0x004587a3: no prepared ambient sprite
-// selects the original 0x4b fallback (tier 1); when a sprite is prepared but
-// the link_a spin set is unavailable, System_GetCurrentSystemLinkSpriteHeight
-// itself returns 0x96 (150, see StellarArrivalSpriteFullHeight) so the
-// envelope becomes round(150 * 1.75) = 262 (tier 2). Otherwise the envelope
-// is round(full frame height * k_stellar_arrival_envelope_scale_f64), the
-// 1.75 double (0x3ffc000000000000) at 0x005756a0, FMUL at 0x004587a3.
-// nearbyint mirrors the original's FIST (round half to even, the default FPU
-// mode).
-float NovaLanding_ArrivalAxisRange(std::int16_t target_sprite_full_height) {
+// Stellar_MaxLandingDistance: the per-axis landing approach envelope for a
+// target stellar. NOT a distinct binary function -- the arrival gate inlines
+// this computation at 0x00458786..0x004587a9, using
+// System_GetCurrentSystemLinkSpriteHeight (0x00462410) and the 1.75 double
+// k_stellar_arrival_envelope_scale_f64 (0x005756a0).
+//
+// Exact return value: a half-extent in pixels. The landing is in range only
+// when BOTH |player.pos_x - stellar.pos_x| AND |player.pos_y - stellar.pos_y|
+// are strictly less than this value (a square envelope, not a radius):
+//   - target_sprite_full_height <= 0 (no prepared ambient sprite): 75 (0x4b).
+//   - otherwise: round(target_sprite_full_height * 1.75), where the input is
+//     the link_a spin set's current-frame full height. If a sprite is prepared
+//     but the link_a set is unavailable,
+//     System_GetCurrentSystemLinkSpriteHeight itself returns 150 (0x96), giving
+//     round(150 * 1.75) = 262.
+// nearbyint mirrors the original x87 FIST (round half to even).
+float Stellar_MaxLandingDistance(std::int16_t target_sprite_full_height) {
   constexpr float kNoSpriteAxisRange = 0x4b; // 75
   constexpr double kSpriteRangeScale =
       1.75; // k_stellar_arrival_envelope_scale_f64
@@ -58,83 +64,16 @@ float NovaLanding_ArrivalAxisRange(std::int16_t target_sprite_full_height) {
       static_cast<double>(target_sprite_full_height) * kSpriteRangeScale));
 }
 
-// ---------------------------------------------------------------------------
-// Stellar_TravelToSystem (0x00455e10): normal arrival subset.
-// ---------------------------------------------------------------------------
-bool NovaLanding_EnterDocked(GameState &state,
-                             LandedContext &ctx,
-                             std::int16_t target_sprite_full_height) {
-  ctx.landed = false;
-  ctx.denial = LandedDenial::kNone;
+// Ghidra 0x004250f0 Player_RefuelShipWithCredits. Arrival auto-refuel for the
+// auto-refueller outfit (ModType 19). Runs once per landing at a landable
+// stellar (travel_flags 0x20 clear) from the Stellar_RunDockAndLaunchSequence
+// arrival subset, before the Spaceport interaction loop. When the player owns
+// any outfit with ModType 19, rounds fuel to the nearest unit and tops up to
+// the effective capacity at exactly 1 credit per unit, clamped to the available
+// credits. The EVN Bible marks ModType 19 "ignored", but the engine consumes
+// it here.
+void Player_RefuelShipWithCredits(GameState &state) {
   const std::int16_t stellar_id = state.travel.selected_stellar_id;
-  const auto *stellar = state.scenario.Stellar(stellar_id);
-  if (stellar == nullptr || !stellar->is_available ||
-      stellar->system_id != state.player.current_system_id ||
-      (stellar->availability_flags & 0x3000U) != 0U ||
-      (stellar->flags & 0x20U) != 0U ||
-      !NovaTargeting_StellarTargetsSpriteSetActive(*stellar)) {
-    ctx.denial = LandedDenial::kUnavailable;
-    return false;
-  }
-  // Stellar_ProcessTravelAndLanding normal-arrival gate. The original runs a
-  // single failure branch (0x00458de0) and picks the feedback from whether the
-  // ship was inside the envelope with the approach armed:
-  //  - engage timer < 0x2ee (NovaUi_UpdateTravelEngagementProgress has not yet
-  //    armed the request) or out of the sprite-derived envelope -> too far;
-  //  - otherwise, still moving (|vel| > 0.75 on either axis) or with an
-  //    unexpired maneuver timer -> too fast.
-  constexpr float kApproachVelocityLimit = 0.75F; // g_lit_0p75
-  const float arrival_axis_range =
-      NovaLanding_ArrivalAxisRange(target_sprite_full_height);
-  const bool within_envelope =
-      std::abs(state.player.pos_x - static_cast<float>(stellar->pos_x)) <
-          arrival_axis_range &&
-      std::abs(state.player.pos_y - static_cast<float>(stellar->pos_y)) <
-          arrival_axis_range;
-  if (!within_envelope || state.travel.engage_timer < 0x2ee) {
-    ctx.denial = LandedDenial::kTooFar;
-    return false;
-  }
-  if (std::abs(state.player.vel_x) > kApproachVelocityLimit ||
-      std::abs(state.player.vel_y) > kApproachVelocityLimit ||
-      state.player.ai_maneuver_timer_ms > 0.0F) {
-    ctx.denial = LandedDenial::kTooFast;
-    return false;
-  }
-
-  // Stellar_ProcessTravelAndLanding checks affordability before it begins the
-  // arrival transition, then deducts the full fee (unless the stellar is in
-  // its hostile/hazard state). Do the same before touching player state.
-  const bool fee_waived = stellar->hazard_marker;
-  if (stellar->service_cost > 0 && !fee_waived &&
-      state.player.credits < stellar->service_cost) {
-    NovaLog::Info("landing denied at stellar {}: service cost {} exceeds "
-                  "available credits {}",
-                  stellar_id,
-                  stellar->service_cost,
-                  state.player.credits);
-    ctx.denial = LandedDenial::kTooExpensive;
-    return false;
-  }
-
-  if (stellar->service_cost > 0 && !fee_waived) {
-    state.player.credits -= stellar->service_cost;
-  }
-  // Stellar_TravelToSystem (0x00455e37) runs Weapon_ReconcileOutfitPoolWith-
-  // WeaponBanks at the start of the travel transition, so any stock weapon
-  // bank acquired since the last reconcile (e.g. a ship bought at the
-  // shipyard with mounted stock guns) becomes a sellable owned outfit. Landed
-  // Offfitter session buys/sells use this same reconcile at modal entry.
-  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
-  // Stellar_TravelToSystem (0x00455e57): landing at a landable stellar
-  // (travel_flags 0x20 clear -- the only kind that passes the dock gate
-  // above) runs Outfit_RefuelShipWithCredits (0x004250f0): when the player
-  // owns any outfit with ModType 19 (auto-refueller; the Bible marks it
-  // "ignored" but the engine consumes it here), fuel is topped up to the
-  // effective capacity at 1 credit per unit, clamped to the wallet. The
-  // else-arm (travel_flags 0x20 set -> centered transition sound [1]) is
-  // unreachable through this dock gate, matching the original's flow where
-  // 0x20 targets arrive only via other transitions.
   for (std::size_t idx = 0; idx < state.scenario.outfits.size() &&
                             idx < state.inventory.outfit_owned_count.size();
        ++idx) {
@@ -176,19 +115,98 @@ bool NovaLanding_EnterDocked(GameState &state,
                   stellar_id);
     break;
   }
-  // Stellar_TravelToSystem (0x00455e37) runs Weapon_ReconcileOutfitPoolWith-
-  // WeaponBanks at the start of the travel transition, so any stock weapon
-  // bank acquired since the last reconcile (e.g. a ship bought at the
-  // shipyard with mounted stock guns) becomes a sellable owned outfit. Landed
-  // Offfitter session buys/sells use this same reconcile at modal entry.
+}
+
+// ---------------------------------------------------------------------------
+// Ghidra 0x00455e10 Stellar_RunDockAndLaunchSequence: arrival half.
+// The launch half is Stellar_Launch. The fee gate/deduction below is
+// Stellar_HandleStellarEntryAndExit (0x00457580) behavior folded in here.
+// ---------------------------------------------------------------------------
+bool Stellar_Dock(GameState &state,
+                  LandedContext &ctx,
+                  std::int16_t target_sprite_full_height) {
+  ctx.landed = false;
+  ctx.denial = LandedDenial::kNone;
+  const std::int16_t stellar_id = state.travel.selected_stellar_id;
+  const auto *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr || !stellar->is_available ||
+      stellar->system_id != state.player.current_system_id ||
+      (stellar->availability_flags & 0x3000U) != 0U ||
+      (stellar->flags & 0x20U) != 0U ||
+      !NovaTargeting_StellarTargetsSpriteSetActive(*stellar)) {
+    ctx.denial = LandedDenial::kUnavailable;
+    return false;
+  }
+  // Stellar_HandleStellarEntryAndExit normal-arrival gate. The original runs a
+  // single failure branch (0x00458de0) and picks the feedback from whether the
+  // ship was inside the envelope with the approach armed:
+  //  - engage timer < 0x2ee (NovaUi_UpdateTravelEngagementProgress has not yet
+  //    armed the request) or out of the sprite-derived envelope -> too far;
+  //  - otherwise, still moving (|vel| > 0.75 on either axis) or with an
+  //    unexpired maneuver timer -> too fast.
+  constexpr float kApproachVelocityLimit = 0.75F; // g_lit_0p75
+  const float arrival_axis_range =
+      Stellar_MaxLandingDistance(target_sprite_full_height);
+  const bool within_envelope =
+      std::abs(state.player.pos_x - static_cast<float>(stellar->pos_x)) <
+          arrival_axis_range &&
+      std::abs(state.player.pos_y - static_cast<float>(stellar->pos_y)) <
+          arrival_axis_range;
+  if (!within_envelope || state.travel.engage_timer < 0x2ee) {
+    ctx.denial = LandedDenial::kTooFar;
+    return false;
+  }
+  if (std::abs(state.player.vel_x) > kApproachVelocityLimit ||
+      std::abs(state.player.vel_y) > kApproachVelocityLimit ||
+      state.player.ai_maneuver_timer_ms > 0.0F) {
+    ctx.denial = LandedDenial::kTooFast;
+    return false;
+  }
+
+  // Stellar_HandleStellarEntryAndExit checks affordability before it begins the
+  // arrival transition, then deducts the full fee (unless the stellar is in
+  // its hostile/hazard state). Do the same before touching player state.
+  const bool fee_waived = stellar->hazard_marker;
+  if (stellar->service_cost > 0 && !fee_waived &&
+      state.player.credits < stellar->service_cost) {
+    NovaLog::Info("landing denied at stellar {}: service cost {} exceeds "
+                  "available credits {}",
+                  stellar_id,
+                  stellar->service_cost,
+                  state.player.credits);
+    ctx.denial = LandedDenial::kTooExpensive;
+    return false;
+  }
+
+  if (stellar->service_cost > 0 && !fee_waived) {
+    state.player.credits -= stellar->service_cost;
+  }
+  // Stellar_RunDockAndLaunchSequence (0x00455e37) runs
+  // Weapon_ReconcileOutfitPoolWith- WeaponBanks at the start of the travel
+  // transition, so any stock weapon bank acquired since the last reconcile
+  // (e.g. a ship bought at the shipyard with mounted stock guns) becomes a
+  // sellable owned outfit. Landed Offfitter session buys/sells use this same
+  // reconcile at modal entry.
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+  // Stellar_RunDockAndLaunchSequence (0x00455e57): landing at a landable
+  // stellar runs the auto-refueller arrival pass before the Spaceport
+  // interaction loop. The else-arm (travel_flags 0x20 set -> centered
+  // transition sound [1]) is unreachable through this dock gate.
+  Player_RefuelShipWithCredits(state);
+  // Stellar_RunDockAndLaunchSequence (0x00455e37) runs
+  // Weapon_ReconcileOutfitPoolWith- WeaponBanks at the start of the travel
+  // transition, so any stock weapon bank acquired since the last reconcile
+  // (e.g. a ship bought at the shipyard with mounted stock guns) becomes a
+  // sellable owned outfit. Landed Offfitter session buys/sells use this same
+  // reconcile at modal entry.
   NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
 
   // NOTE: the ship's meters (shield/armor), position/velocity and the
   // calendar are deliberately NOT touched here. The original restores all of
   // that in the launch tail, after the interaction loop returns -- see
-  // NovaLanding_LaunchFromStellar.
+  // Stellar_Launch.
 
-  // Stellar_ProcessTravelAndLanding (0x00457580) runs Ship_DeactivateVacant
+  // Stellar_HandleStellarEntryAndExit (0x00457580) runs Ship_DeactivateVacant
   // ShipsAndTally('\0') during the normal arrival, then Mission_SpawnSystemMisn
   // Ships immediately seeds System.avg_ships scattered ambient ships.
   // So a landing (and the subsequent launch) leaves the system with a fresh
@@ -201,7 +219,7 @@ bool NovaLanding_EnterDocked(GameState &state,
                                   state.player.current_system_id,
                                   /*copy_player_heading=*/false,
                                   SDL_GetTicks());
-  // Offering rolls redraw on landing too (Stellar_ProcessTravelAndLanding
+  // Offering rolls redraw on landing too (Stellar_HandleStellarEntryAndExit
   // 0x00458802 arm).
   Mission_RerollOfferingRolls(state);
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
@@ -209,8 +227,9 @@ bool NovaLanding_EnterDocked(GameState &state,
   ctx.stellar_id = stellar_id;
   ctx.landed = true;
   // The landing transition raises the no-asteroids latch
-  // (Stellar_ProcessTravelAndLanding 0x00457580 sets DAT_00596d2c = 1), so the
-  // docked view hides the drifting field; the launch tail re-initialises it.
+  // (Stellar_HandleStellarEntryAndExit 0x00457580 sets DAT_00596d2c = 1), so
+  // the docked view hides the drifting field; the launch tail re-initialises
+  // it.
   state.no_asteroids_latch = true;
   ctx.selection = LandedService::kLaunch;
   state.travel.landed_this_frame = true;
@@ -222,12 +241,13 @@ bool NovaLanding_EnterDocked(GameState &state,
 }
 
 // ---------------------------------------------------------------------------
-// Stellar_TravelToSystem (0x00455e10): launch tail, 0x00455f99..0x00456268.
-// Runs when the destination-interaction loop returns, i.e. on leaving the
-// dock. The caller then shows the departure overlay and resyncs its frame
-// clock (the original zeroes g_avg_frame_tick_scale at 0x00456174).
+// Stellar_RunDockAndLaunchSequence (0x00455e10): launch tail,
+// 0x00455f99..0x00456268. Runs when the destination-interaction loop returns,
+// i.e. on leaving the dock. The caller then shows the departure overlay and
+// resyncs its frame clock (the original zeroes g_avg_frame_tick_scale at
+// 0x00456174).
 // ---------------------------------------------------------------------------
-void NovaLanding_LaunchFromStellar(GameState &state, std::int16_t stellar_id) {
+void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
   // 0x00455f99/0x0045600b: velocity and speed kill. The original zeroes the
   // velocity once more after the reposition; one pass is equivalent.
   state.player.vel_x = 0.0F;

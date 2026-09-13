@@ -52,9 +52,10 @@ struct PlayerMovementStats {
   int turn_dir = 0;
 };
 
-// Optional movement context threaded from NovaPlayer_UpdateFromInput
-// (Ghidra 0x0044aa70 manual-flight region). speed_cap_* < 0 falls back to the
-// class max speed so bare integrator calls keep the plain clamp.
+// Optional movement context threaded from
+// PlayerTick_ManualFlightAndRegeneration (Ghidra 0x0044aa70 manual-flight
+// region). speed_cap_* < 0 falls back to the class max speed so bare integrator
+// calls keep the plain clamp.
 struct PlayerMovementOptions {
   // Face-target auto-turn arm (0x0044c0b1 command); suppresses keyboard
   // steering and turns one step per frame toward ai_desired_heading_deg.
@@ -97,10 +98,11 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 // so the ship flies during flight. The caller supplies the snapshot so it can
 // also feed the travel/other channels without polling the keyboard twice.
 // face_target_armed is the manual-flight auto-turn arm set by
-// NovaPlayer_TickFaceTargetCommand (Ghidra 0x0044c0b1 face-target command):
+// PlayerTick_FaceTargetCommand (Ghidra 0x0044c0b1 face-target command):
 // while armed, keyboard steering is suppressed and the hull turns one step per
 // frame toward the stored ai_desired_heading_deg.
-extern void NovaPlayer_UpdateFromInput(GameState &state,
+extern void
+PlayerTick_ManualFlightAndRegeneration(GameState &state,
                                        const FlightInput &input,
                                        float elapsed_ticks,
                                        bool face_target_armed = false);
@@ -112,9 +114,9 @@ extern void NovaPlayer_UpdateFromInput(GameState &state,
 // to arm the manual-flight auto-turn: the primary ship target wins unless the
 // 0x38/0x6f arm modifier is held, which -- like having no ship target --
 // faces the selected travel stellar instead.
-extern bool NovaPlayer_TickFaceTargetCommand(GameState &state,
-                                             const FlightInput &input,
-                                             bool arm_modifier_held);
+extern bool PlayerTick_FaceTargetCommand(GameState &state,
+                                         const FlightInput &input,
+                                         bool arm_modifier_held);
 
 // Per-frame player status/outfit maintenance from Ship_HandlePlayerShipCore
 // 0x0044aa70 (internal label PlayerTick_StatusAndOutfitEvents): fire-restricted
@@ -126,9 +128,9 @@ extern bool NovaPlayer_TickFaceTargetCommand(GameState &state,
 // (synthetic CFG 0x00451024 -> 0x00451630). Returns true when death/inactive
 // bookkeeping consumed the player tick; the caller must skip timed actions
 // and every later player-command region for that frame.
-extern bool NovaPlayer_TickStatusAndOutfitEvents(GameState &state,
-                                                 float elapsed_ticks,
-                                                 bool eject_command);
+extern bool PlayerTick_StatusAndOutfitEvents(GameState &state,
+                                             float elapsed_ticks,
+                                             bool eject_command);
 
 // Ghidra 0x00431480 Frame_JitterPlayerStatModifiers: random-walks the first
 // two persisted player stat modifiers (state.player_stat_modifier_pct[0]/[1],
@@ -144,13 +146,13 @@ extern void NovaFrame_RerollPlayerStatModifiers(GameState &state);
 
 // Ghidra Ship_HandlePlayerShipCore synthetic region
 // PlayerTick_ShieldAndArmorRegeneration 0x0044CB99 -> 0x0044CCAF.
-extern void NovaPlayer_TickShieldAndArmorRegeneration(GameState &state,
-                                                      float frame_time_ms);
+extern void PlayerTick_ShieldAndArmorRegeneration(GameState &state,
+                                                  float frame_time_ms);
 
 // Ghidra Ship_HandlePlayerShipCore synthetic region
 // PlayerTick_IonizationAndFuelRegeneration 0x00450717 -> 0x004507B4.
-extern void NovaPlayer_TickIonizationAndFuelRegeneration(GameState &state,
-                                                         float frame_time_ms);
+extern void PlayerTick_IonizationAndFuelRegeneration(GameState &state,
+                                                     float frame_time_ms);
 
 // Ghidra PlayerTick_TimedActionTransition (internal label of
 // Ship_HandlePlayerShipCore 0x0044aa70; block 0x0044d490..0x0044da70). While
@@ -164,8 +166,8 @@ extern void NovaPlayer_TickIonizationAndFuelRegeneration(GameState &state,
 // original returns from the player core while a timed action runs, so the
 // caller must skip the remaining player command blocks. Returns true when the
 // timed action was active this frame.
-extern bool NovaPlayer_TickTimedActionTransition(GameState &state,
-                                                 float elapsed_ticks);
+extern bool PlayerTick_TimedActionTransition(GameState &state,
+                                             float elapsed_ticks);
 
 // Effective NPC movement stats, ported from the NPC branch of Ghidra
 // Ship_ComputeShipEffectiveThrust (0x004640a0) /
@@ -198,11 +200,11 @@ struct NpcEffectiveStats {
 // projection of the per-frame thrust step (delta) and the current velocity,
 // exactly as decoded. Named NovaPlayer_* for continuity but used by the NPC
 // integrator (NovaShip_IntegrateNpcMovement) too.
-void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
-                                        float thrust_step,
-                                        float max_speed,
-                                        float &vel_x,
-                                        float &vel_y);
+void Math_AddPolarVelocityWithClamp(float heading_rad,
+                                    float thrust_step,
+                                    float max_speed,
+                                    float &vel_x,
+                                    float &vel_y);
 
 // Ghidra Frame_QueueCombatChatter (0x00426ce0): latches one pending combat
 // chatter request (kind, government voice, variant selector) onto GameState.

@@ -300,7 +300,7 @@ void NovaAi_UpdateShipAI(GameState &state,
 // plunder-flavored hostile-behavior variant for factions whose government
 // flags_primary carries 0x1000: hunts disabled boardable victims, arbitrates
 // capture (0xd) versus attack (4), performs the AI boarding handoff from
-// control mode 0xf via Outfit_BoardShipAndTransferCargo, and abandons
+// control mode 0xf via Boarding_BoardShipAndTransferCargo, and abandons
 // targets it cannot press (depleted ammo / no fireable weapon).
 void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
                                              Ship &ship,

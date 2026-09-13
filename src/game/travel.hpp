@@ -60,7 +60,7 @@ namespace game {
 
 enum class RestrictedTravelKind { kHypergate, kWormhole };
 
-// Ghidra 0x00456ca0 Stellar_TravelViaWormhole destination selection. Returns
+// Ghidra 0x00456ca0 Stellar_EnterWormhole destination selection. Returns
 // a destination stellar resource id, or -1 when none is reachable. A source
 // with defined HyperLink1-8 entries chooses uniformly among links whose
 // systems resolve visible. A source with no links chooses uniformly among
@@ -71,14 +71,14 @@ NovaTravel_SelectWormholeDestination(GameState &state,
 
 // Resolves one system selected by the hypergate starmap to a destination
 // stellar in the source's HyperLink1-8 list. Ghidra 0x00456480
-// Stellar_TravelViaHypergate. Returns -1 for cancel/unlinked/invisible picks.
+// Stellar_EnterHypergate. Returns -1 for cancel/unlinked/invisible picks.
 [[nodiscard]] std::int16_t
 NovaTravel_ResolveHypergateDestination(const GameState &state,
                                        std::int16_t source_stellar_id,
                                        std::int16_t selected_system_id);
 
-// Shared successful-transfer body of Stellar_TravelViaHypergate (0x00456480)
-// and Stellar_TravelViaWormhole (0x00456ca0). Moves the player to the
+// Shared successful-transfer body of Stellar_EnterHypergate (0x00456480)
+// and Stellar_EnterWormhole (0x00456ca0). Moves the player to the
 // destination stellar, applies its emergence angle and speed, marks discovery,
 // clears travel state, queues the transition cue/message, and raises
 // travel.just_completed for the caller's common system-entry rebuild.
@@ -215,7 +215,7 @@ NovaSystem_HasUsableTravelDestination(const GameState &state,
 // and mirrors into the persistent explored bitset. Ghidra: the discovery_state
 // writes of System_FloodDiscoverAdjacentSystems 0x00467ab0 plus the arrival
 // pre-latches (0x0044aa70 PlayerTick_SystemTransitionAndArrival / 0x00455e10
-// Stellar_TravelToSystem).
+// Stellar_RunDockAndLaunchSequence).
 void NovaSystem_MarkSystemVisited(GameState &state,
                                   std::int16_t zero_based_system_id,
                                   std::int16_t level);
@@ -265,7 +265,7 @@ void NovaSystem_RebuildDiscoveredLatch(GameState &state);
 // System-entry discovery: books the entered system (and its discovery slot)
 // as visited at `level`, then rebuilds the map reveal from it. `level` is 1
 // for an in-flight hyperspace arrival (0x0044aa70) and 2 for the landed
-// stellar-travel arrival (0x00455e10 Stellar_TravelToSystem) and for
+// stellar-travel arrival (0x00455e10 Stellar_RunDockAndLaunchSequence) and for
 // map-outfit reveals (Outfit_GrantOutfitToPlayer 0x00427770, which floods
 // deeper -- see NovaOutfit_ApplyMapReveal).
 void NovaSystem_OnSystemEntered(GameState &state,

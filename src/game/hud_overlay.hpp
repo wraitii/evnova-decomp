@@ -89,21 +89,22 @@ NovaHud_StringPoolEntryCount(std::uint16_t resource_id);
 NovaHud_DecodeStringEntry(std::span<const std::byte> pool, std::uint16_t entry);
 
 // Composes and shows the on-screen HUD overlay for a denied landing request,
-// mirroring the Stellar_ProcessTravelAndLanding feedback cases (STR# 0x7d2).
-// `denial` is the reason NovaLanding_EnterDocked reported; `is_station` picks
+// mirroring the Stellar_HandleStellarEntryAndExit feedback cases (STR# 0x7d2).
+// `denial` is the reason Stellar_Dock reported; `is_station` picks
 // the dock-vs-land phrasing (travel_flags & 0x10 on the target stellar).
 void NovaHud_ShowLandingDenial(GameState &state,
                                LandedDenial denial,
                                bool is_station);
 
 // Composes and shows the launch departure overlay shown when the player
-// leaves a stellar after landing (Stellar_TravelToSystem tail 0x00455e10,
-// block 0x00456323): a random lead variant (STR# 0x7d2 0x37..0x3b "Launching
-// from"/"Blasting off from"/"Taking off from"/"Leaving"/"Departing"), the
-// stellar display name, "on" (0x3c), the full-month-name date
-// (Stellar_FormatElapsedTravelTime shape), and ".". Only shown while the
-// flight-hint state is latched at 0x7fff (see TravelState::travel_hint_state);
-// a pre-first-jump landing (< 3) is silent and resets the state to -1.
+// leaves a stellar after landing (Stellar_RunDockAndLaunchSequence tail
+// 0x00455e10, block 0x00456323): a random lead variant (STR# 0x7d2 0x37..0x3b
+// "Launching from"/"Blasting off from"/"Taking off
+// from"/"Leaving"/"Departing"), the stellar display name, "on" (0x3c), the
+// full-month-name date (Stellar_FormatElapsedTravelTime shape), and ".". Only
+// shown while the flight-hint state is latched at 0x7fff (see
+// TravelState::travel_hint_state); a pre-first-jump landing (< 3) is silent and
+// resets the state to -1.
 void NovaHud_ShowLaunchDepartureMessage(GameState &state,
                                         std::int16_t stellar_id);
 

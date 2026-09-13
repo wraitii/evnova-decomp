@@ -1322,7 +1322,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   }
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
   auto frame =
-      LoadPictTexture(platform, NovaDocked_SubWindowFramePict(service));
+      LoadPictTexture(platform, NovaLanded_SubWindowFramePict(service));
   // c\x9alr GridDim/GridBright (Bible: store grid color / selection square).
   // The original copies them into DAT_007d8282/DAT_007d827c at startup and the
   // two redraw routines read those globals. The fallback only applies when the
@@ -1473,11 +1473,11 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
             }
           } else {
             const ShipClass *ship = state.scenario.Ship(session.selected_id);
-            (void)NovaLanded_ReplacePlayerShip(
-                state,
-                stellar_id,
-                session.selected_id,
-                ship == nullptr ? "" : ship->short_name);
+            (void)Player_SwapShipWithEscort(state,
+                                            stellar_id,
+                                            session.selected_id,
+                                            ship == nullptr ? ""
+                                                            : ship->short_name);
             session = NovaLanded_OpenShipyardSession(state, stellar_id);
           }
           continue;
@@ -1554,11 +1554,11 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           }
         } else {
           const ShipClass *ship = state.scenario.Ship(session.selected_id);
-          (void)NovaLanded_ReplacePlayerShip(
-              state,
-              stellar_id,
-              session.selected_id,
-              ship == nullptr ? "" : ship->short_name);
+          (void)Player_SwapShipWithEscort(state,
+                                          stellar_id,
+                                          session.selected_id,
+                                          ship == nullptr ? ""
+                                                          : ship->short_name);
           session = NovaLanded_OpenShipyardSession(state, stellar_id);
         }
         continue;

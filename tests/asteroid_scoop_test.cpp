@@ -289,7 +289,7 @@ TEST_CASE(
   NovaWeapon_ResolveFreeflightScoop(state);
 
   CHECK(state.inventory.cargo_bins[2] == 2);
-  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 2);
+  CHECK(Player_ComputeCargoAndJunkTotal(state) == 2);
   CHECK(state.freeflight_objects[0].lifetime_ticks < 0.0F);
   CHECK(state.freeflight_objects[1].lifetime_ticks < 0.0F);
   CHECK(state.freeflight_objects[2].lifetime_ticks >= 0.0F);

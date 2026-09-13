@@ -174,10 +174,10 @@ void SetEscortLaunchOffsetVelocity(GameState &state,
 } // namespace
 
 // Ghidra 0x00414390 Ship_MoveShipTowardFormationOffset.
-void NovaEscort_MoveTowardFormationOffset(GameState &state,
-                                          Ship &ship,
-                                          bool snap_to_offset,
-                                          float elapsed_ticks) {
+void Ship_MoveShipTowardFormationOffset(GameState &state,
+                                        Ship &ship,
+                                        bool snap_to_offset,
+                                        float elapsed_ticks) {
   // A ship holding station does not creep (the snap variant ignores the hold).
   if (!snap_to_offset && ship.ai_station_hold_timer > 0.0F) {
     return;
@@ -223,7 +223,7 @@ void NovaEscort_MoveTowardFormationOffset(GameState &state,
 }
 
 // Ghidra 0x00413990 Ship_UpdateEscortFormations.
-void NovaEscort_UpdateFormations(GameState &state, Ship &leader, bool snap) {
+void Ship_UpdateEscortFormations(GameState &state, Ship &leader, bool snap) {
   // Spacing radius: max participant sprite span * 0.7, clamped to 24..60 px.
   std::int16_t span = kLeaderSpanFallback;
   if (state.scenario.Ship(
@@ -266,18 +266,13 @@ void NovaEscort_UpdateFormations(GameState &state, Ship &leader, bool snap) {
                                   follower_count,
                                   static_cast<float>(radius));
     if (snap && follower->ai_state_code != 0x15) {
-      NovaEscort_MoveTowardFormationOffset(
-          state, *follower, /*snap=*/true, 0.0F);
+      Ship_MoveShipTowardFormationOffset(state, *follower, /*snap=*/true, 0.0F);
     }
   }
 }
 
-void NovaEscort_UpdateFormationsForPlayer(GameState &state) {
-  NovaEscort_UpdateFormations(state, state.player, /*snap=*/true);
-}
-
 // Ghidra 0x004156a0 Ship_ReacquireSquadLeader.
-void NovaEscort_ReacquireSquadLeader(GameState &state, Ship &ship) {
+void Ship_ReacquireSquadLeader(GameState &state, Ship &ship) {
   const std::int16_t stale = ship.squad_leader_ship_slot;
   if (stale < 0 || stale >= static_cast<std::int16_t>(GameState::kMaxShips)) {
     return;
@@ -365,7 +360,7 @@ void NovaEscort_ReacquireSquadLeader(GameState &state, Ship &ship) {
 
 // Ghidra 0x004186b0 Frame_TickSystems, scope-6 leader-flag pass
 // (disassembly 0x00418a04..0x00418db4).
-void NovaEscort_TickLeaderFlags(GameState &state) {
+void Ship_TickLeaderFlags(GameState &state) {
   for (std::size_t slot = 0; slot < GameState::kMaxShips; ++slot) {
     state.squad_leader_slot_snapshot[slot] =
         state.ShipAt(slot).squad_leader_ship_slot;
@@ -387,7 +382,7 @@ void NovaEscort_TickLeaderFlags(GameState &state) {
         state.player.is_any_ships_squad_leader = true;
       }
     } else {
-      NovaEscort_ReacquireSquadLeader(state, ship);
+      Ship_ReacquireSquadLeader(state, ship);
       const std::int16_t reacquired = ship.squad_leader_ship_slot;
       if (reacquired != -1 &&
           state.SlotInRange(static_cast<std::size_t>(reacquired))) {
@@ -499,7 +494,7 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
       if (ship.ai_behavior_code == 6 && ship.mission_fleet_slot == -1 &&
           cls != nullptr && cls->default_ai_behavior < 3) {
         // TODO(decomp(0x00469810)) skipped: the cargo/junk hand-back to the
-        // player (Outfit_TransferCargoAndJunkToEscortByRatio) runs before the
+        // player (Player_TransferCargoAndJunkToEscortByRatio) runs before the
         // deactivation; the port's escort cargo is not modelled yet.
         NovaLog::Info("escort adoption: disabled cargo escort deactivated "
                       "without cargo hand-back");
@@ -513,7 +508,7 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
       NovaShip_ResetToDefaultCombatState(state, ship, refill);
     }
   }
-  NovaEscort_UpdateFormationsForPlayer(state);
+  Ship_UpdateEscortFormations(state, state.player, /*snap=*/true);
   // Jump arrival: the player core sets its station-hold timer to -999 around
   // the rebuild (0x0044fa83 / 0x0044faa2), which arms this scatter -- escorts
   // stream in behind the player at full speed instead of sitting on the wedge.
@@ -538,7 +533,7 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
       // mode 0x0a, whose -50 override decays 1.165/tick): the sentinel pair
       // written above is exactly Ship_EnterShipAiState0x08_Slowdown
       // (0x00410e20), and the follow-player mission-fleet arrival slice
-      // (Stellar_ProcessTravelAndLanding 0x00457580) runs the same ladder for
+      // (Stellar_HandleStellarEntryAndExit 0x00457580) runs the same ladder for
       // attached ships. Without it the 50 px/tick fling is only shed by
       // mode-9 thrust, which takes tens of seconds for slow hulls (cargo
       // drones flew ~28000 px before stopping). TODO(decomp): the original
@@ -554,7 +549,7 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
   // The original's flag != 0 tail call re-snaps after the mission-fleet and
   // ambient spawn slices; call sites run those in between.
   if (refill) {
-    NovaEscort_UpdateFormationsForPlayer(state);
+    Ship_UpdateEscortFormations(state, state.player, /*snap=*/true);
   }
 }
 

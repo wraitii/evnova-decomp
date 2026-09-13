@@ -87,7 +87,7 @@ dispatch 0x0049a3a0, out action `local_2e`):
   `Ship_HasAnyCargoLootOrActiveMission`, confirm STR# 0x7d2 entry 0x123
   ("Are you sure you want to jettison your cargo?") via
   `Ui_ShowConfirmDialog` (0x004977d0, DLOG 0xbba); on OK run
-  `Outfit_RedistributeFleetCargoOverflow(true)` (0x0041f330 — jettisons all
+  `Player_RedistributeFleetCargoOverflow(true)` (0x0041f330 — jettisons all
   non-mission cargo/junk from the fleet) and close.
 - `DAT_00596d39` latches done (script-driven close).
 
@@ -189,15 +189,15 @@ counts pluralise through the "ton"/"tons" pool `DAT_0072d3cc/.4cc` and
 translated through `NovaCommand_TranslateByInputMap`.
 
 - **Cargo text** (0x7d5278): header STR# 0x16a "Other cargo:" + mass check
-  (`Ship_ComputeShipTotalCargoCapacity` vs `Outfit_ComputeFleetCargoCapacity` → 0x16e
+  (`Ship_ComputeShipTotalCargoCapacity` vs `Player_ComputeFleetCargoCapacity` → 0x16e
   "free space"/0x16d) + ":": one entry per commodity (0x100-stride name
   table `DAT_0069d2cc`, `*` marks hidden) with summed bins — the 6 player
   cargo bins plus every active mission's cargo (mission cargo type/quantity
   from the 0x14-stride active-mission runtime block) — then the junk
   entries (0x526-stride `g_junk_defs`, count at +0x22, name at +0x228) and
   the "and"/"a"/"of" list glue (0x187/0x188), terminated ".";
-  finally the free-space footer via `Outfit_ComputePlayerCargoAndJunkTotal`
-  and `Outfit_ComputeRemainingCargoSpace` (0x16c/0x16e/0x171, "full" note
+  finally the free-space footer via `Player_ComputeCargoAndJunkTotal`
+  and `Player_ComputeRemainingCargoSpace` (0x16c/0x16e/0x171, "full" note
   STR# 0x150).
 - **Extras text** (0x7d6278): header STR# 0x110 + "\r\r"; owned outfits
   grouped by `similar_to` (def +(-10) chain, self when invalid), ordered by
@@ -222,11 +222,11 @@ marked with `TODO(decomp)`/`NovaLog::Todo` at the port sites and tracked in
 `decomp-progress.tsv` rows 0x00499c10 / 0x0049a540 / 0x0049c050 /
 0x004a1ae0 / 0x004a1c40.
 
-The Cargo-page Jettison execution (`Outfit_RedistributeFleetCargoOverflow`
+The Cargo-page Jettison execution (`Player_RedistributeFleetCargoOverflow`
 0x0041f330) is ported in `src/game/outfit.cpp`. The window returns
 `PlayerInfoWindowResult::jettison_confirmed`; the flight loop applies it with
 the sim clock in scope (the original runs it inside the window loop). The
-in-flight cargo-dump channel (`Outfit_RedistributeFleetCargoOverflow` from
+in-flight cargo-dump channel (`Player_RedistributeFleetCargoOverflow` from
 `0x0044aa70` block 0x00451907) is wired to the arm-modifier + slot 0x0f
 binding. The visible jettisoned-cargo pods are spawned through the
 `FreeflightObjectState` pool (`src/game/freeflight_objects.cpp`,

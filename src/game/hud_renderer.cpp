@@ -1000,13 +1000,12 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
   }
 
   // Free fleet cargo space: capacity - carried (the original 0x004612c0
-  // computes this inline, NOT via Outfit_ComputeRemainingCargoSpace, which
+  // computes this inline, NOT via Player_ComputeRemainingCargoSpace, which
   // has the separate mass-bounded mission-reward semantics).
   const std::int32_t free_space = std::max<std::int32_t>(
       0,
-      static_cast<std::int32_t>(Outfit_ComputePlayerFleetCargoCapacity(state)) -
-          static_cast<std::int32_t>(
-              Outfit_ComputePlayerCargoAndJunkTotal(state)));
+      static_cast<std::int32_t>(Player_ComputeFleetCargoCapacity(state)) -
+          static_cast<std::int32_t>(Player_ComputeCargoAndJunkTotal(state)));
   DrawPanelTextAt(platform,
                   font,
                   font_size,
@@ -1296,7 +1295,7 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
     const auto &def = kRows[row];
     const bool selected = escort.selected_category == def.category;
     const bool present =
-        def.category < 0 || NovaEscort_GroupPresent(state, def.category);
+        def.category < 0 || Player_HasEscortGroup(state, def.category);
 
     if (selected) {
       const SDL_FRect highlight{left + 3.0F,

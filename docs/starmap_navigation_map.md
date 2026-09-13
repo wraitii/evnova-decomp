@@ -36,9 +36,9 @@ Opened from:
   active and the ship is not landing / hyperspacing / dead.
 - `0x0043c470` `NovaUi_RunMissionBbsWindow` — destination window's
   starmap sub-flow.
-- `0x00456480` `Stellar_TravelViaHypergate` — Bible Flags2 `0x1000` hypergate
+- `0x00456480` `Stellar_EnterHypergate` — Bible Flags2 `0x1000` hypergate
   travel: linked-destination choice through the map followed by transfer.
-- `0x00456ca0` `Stellar_TravelViaWormhole` — Bible Flags2 `0x2000` wormhole
+- `0x00456ca0` `Stellar_EnterWormhole` — Bible Flags2 `0x2000` wormhole
   travel: random linked destination, or another unlinked wormhole when every
   HyperLink field is unused.
 
@@ -265,7 +265,7 @@ explored. Clean-room wiring (travel.cpp):
 - `NovaSystem_OnSystemEntered(state, id, level)` — arrival helper: marks slot
   + current visited at `level` and rebuilds. Level 1 on hyperspace completion
   (`FireJump`) and new-game start; level 2 on landed stellar travel
-  (`NovaLanding_EnterDocked`), mirroring `Stellar_TravelToSystem` `0x00455e10`.
+  (`Stellar_Dock`), mirroring `Stellar_RunDockAndLaunchSequence` `0x00455e10`.
 - `NovaSystem_FloodDiscoverAdjacentSystems` — `0x00467ab0`; depth-gated
   recursion used by the rebuild and (with depth = ModVal) by map outfits;
   neighbours recurse through `NovaSystem_ResolveVisibleForTravel` (0x0046b920)

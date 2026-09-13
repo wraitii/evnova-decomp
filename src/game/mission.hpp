@@ -195,7 +195,7 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
 void Mission_TickShipInteractionReactions(GameState &state,
                                           std::uint32_t now_ms);
 
-// Ghidra 0x00458802 slice of Stellar_ProcessTravelAndLanding (and the game
+// Ghidra 0x00458802 slice of Stellar_HandleStellarEntryAndExit (and the game
 // -start init at Ship_InitGameplayDataTables): redraws the per-definition
 // offering roll (1..100) consumed by the AvailRandom gate of the mission
 // offering eligibility chain. Call on every system arrival and when a new
@@ -303,10 +303,10 @@ NovaStellar_ComputeHyperspaceTravelDays(const GameState &state,
 // Mission_TickDailyWorldUpdate right after the calendar advance.
 void Mission_TickDailyCronEvents(GameState &state);
 
-// Ghidra 0x00423540 Outfit_CollectStellarIncome (clean-room name:
-// Stellar_CollectDailyTributeIncome). Daily tribute pass over available
-// stellars carrying the +0x46 marker. Called by Mission_TickDailyWorldUpdate.
-void Stellar_CollectDailyTributeIncome(GameState &state);
+// Ghidra 0x00423540 Player_CollectStellarTribute. Daily tribute pass over
+// available stellars carrying the +0x46 marker. Called by
+// Mission_TickDailyWorldUpdate.
+void Player_CollectStellarTribute(GameState &state);
 
 // Ghidra 0x00424f90 System_UpdateDisasterStates. Per-game-day sweep of the
 // 0x100 öops slots (g_disaster_defs, DisasterDef stride 0x210). Undefined
@@ -357,7 +357,7 @@ void Mission_ShowMissionShipAnnouncement(GameState &state,
 // personality 0x3fe in the player's system, flips it hostile (whose pers
 // Flags 0x10 arm may hail first), then latches the speaker and plays the
 // personality's own hail announcement. Called from the system-arrival slice
-// of Stellar_ProcessTravelAndLanding (0x00457580).
+// of Stellar_HandleStellarEntryAndExit (0x00457580).
 void Mission_TrySpawnMissionShipAmbush(GameState &state);
 
 // Ghidra 0x00448660 Mission_ClearActiveReactionMission. Clears the

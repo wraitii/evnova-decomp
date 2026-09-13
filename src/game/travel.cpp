@@ -424,7 +424,7 @@ void FireJump(GameState &state) {
   // unconditionally; the helper stops at the definition count, which is all
   // the consumers read).
   Mission_RerollOfferingRolls(state);
-  // Arrival command grace: the Stellar_ProcessTravelAndLanding rebuild
+  // Arrival command grace: the Stellar_HandleStellarEntryAndExit rebuild
   // epilogue (0x004586a6) latches the spaceflight frame counter to -15, so
   // the special-interaction / mission-computer commands ignore input for 15
   // frames after arriving (held keys from the map do not trigger windows).
@@ -506,7 +506,7 @@ int FindLinkedTravelSlot(const GameState &state,
 
 } // namespace
 
-// Ghidra 0x00456ca0 Stellar_TravelViaWormhole.
+// Ghidra 0x00456ca0 Stellar_EnterWormhole.
 std::int16_t
 NovaTravel_SelectWormholeDestination(GameState &state,
                                      std::int16_t source_stellar_id) {
@@ -553,7 +553,7 @@ NovaTravel_SelectWormholeDestination(GameState &state,
       0, candidates.size() - 1}(state.rng)];
 }
 
-// Ghidra 0x00456480 Stellar_TravelViaHypergate; destination validation after
+// Ghidra 0x00456480 Stellar_EnterHypergate; destination validation after
 // NovaUi_RunStarmapWindow returns in its linked-destination mode.
 std::int16_t
 NovaTravel_ResolveHypergateDestination(const GameState &state,
@@ -574,8 +574,8 @@ NovaTravel_ResolveHypergateDestination(const GameState &state,
   return -1;
 }
 
-// Ghidra 0x00456480 Stellar_TravelViaHypergate and 0x00456ca0
-// Stellar_TravelViaWormhole share this system-entry body inline.
+// Ghidra 0x00456480 Stellar_EnterHypergate and 0x00456ca0
+// Stellar_EnterWormhole share this system-entry body inline.
 bool NovaTravel_CompleteRestrictedTravel(GameState &state,
                                          std::int16_t destination_stellar_id,
                                          RestrictedTravelKind kind) {
@@ -1069,7 +1069,7 @@ void NovaSystem_OnSystemEntered(GameState &state,
                                 std::int16_t level) {
   // Arrival pre-latch: the entered system and its discovery slot are booked as
   // visited even before the flood (0x0044aa70 writes level 1 for hyperspace
-  // arrivals, 0x00455e10 Stellar_TravelToSystem writes level 2).
+  // arrivals, 0x00455e10 Stellar_RunDockAndLaunchSequence writes level 2).
   NovaSystem_MarkSystemVisited(state, zero_based_system_id, level);
   NovaSystem_MarkSystemVisited(
       state,

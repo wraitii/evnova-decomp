@@ -1707,7 +1707,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 // ships are also vacant: they have no special exemption and are removed by this
 // same outer sweep. Every other ship (idle wanderers/dudes, parked, mission,
 // disabled) is vacant and deactivated. The original runs this on travel/landing
-// arrival (Stellar_ProcessTravelAndLanding 0x00457580) and on system entry
+// arrival (Stellar_HandleStellarEntryAndExit 0x00457580) and on system entry
 // (NovaMainLoop_Run 0x00486880) with flag==0, then
 // System_RebuildInitialNpcAndMissionPopulation immediately rebuilds the initial
 // scattered population; System_TickNpcSpawnMaintenance handles later attrition.
@@ -1962,11 +1962,11 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
                      : 0.0F;
   const float bearing_rad = static_cast<float>(static_cast<int>(ship.heading)) *
                             (3.14159265358979323846F / 180.0F);
-  NovaPlayer_AddPolarVelocityClamped(bearing_rad,
-                                     bay_weapon->projectile_speed / 100.0F,
-                                     max_speed,
-                                     ship.vel_x,
-                                     ship.vel_y);
+  Math_AddPolarVelocityWithClamp(bearing_rad,
+                                 bay_weapon->projectile_speed / 100.0F,
+                                 max_speed,
+                                 ship.vel_x,
+                                 ship.vel_y);
 
   // Stock loadout: the original copies all 0x100 bank ammo/secondary rows
   // from the class's eight default-weapon tables; the clean-room builds the

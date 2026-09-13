@@ -41,22 +41,22 @@ enum class OutfitEffect : std::int16_t {
   kSpeed = 8,          // speed to add (see sh\x8an)
   kTurn = 9,           // turn change (100 = 30 deg/sec)
   kUnused10 = 10,
-  kEscapePod = 11,       // ignored
-  kFuelCapacity = 12,    // extra fuel (100 = 1 jump)
-  kDensityScanner = 13,  // ignored (gameplay)
-  kIff = 14,             // colorized radar; ignored
-  kAfterburner = 15,     // fuel use (units/sec)
-  kMap = 16,             // starmap exploration range
-  kCloaking = 17,        // cloaking device behavior flags
-  kFuelScoop = 18,       // frames per 1 unit of fuel; negative = fuel suck (see
-                         // Ship_ComputeShipFuelRechargeRate 0x00463b30)
-  kAutoRefuel = 19,      // auto-refueller: tops fuel to capacity at 1
-                         // credit/unit on landing at a landable stellar
-                         // (Outfit_RefuelShipWithCredits 0x004250f0, run
-                         // from Stellar_TravelToSystem 0x00455e57; the
-                         // Bible's "ignored" note is wrong for the engine)
-  kAutoEject = 20,       // ignored (needs escape pod)
-  kCleanRecord = 21,     // govt id to clear legal record with
+  kEscapePod = 11,      // ignored
+  kFuelCapacity = 12,   // extra fuel (100 = 1 jump)
+  kDensityScanner = 13, // ignored (gameplay)
+  kIff = 14,            // colorized radar; ignored
+  kAfterburner = 15,    // fuel use (units/sec)
+  kMap = 16,            // starmap exploration range
+  kCloaking = 17,       // cloaking device behavior flags
+  kFuelScoop = 18,      // frames per 1 unit of fuel; negative = fuel suck (see
+                        // Ship_ComputeShipFuelRechargeRate 0x00463b30)
+  kAutoRefuel = 19,     // auto-refueller: tops fuel to capacity at 1
+                        // credit/unit on landing at a landable stellar
+                        // (Player_RefuelShipWithCredits 0x004250f0, run
+                        // from Stellar_RunDockAndLaunchSequence 0x00455e57; the
+                        // Bible's "ignored" note is wrong for the engine)
+  kAutoEject = 20,      // ignored (needs escape pod)
+  kCleanRecord = 21,    // govt id to clear legal record with
   kHyperspaceSpeed = 22, // +/- days hyperspace travel time
   kHyperspaceDist = 23,  // +/- no-jump zone radius
   kInterferenceMod = 24, // subtracts from system Interference for radar fuzz
@@ -151,18 +151,18 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
 NovaOutfit_GrantOutfitToPlayer(GameState &state,
                                std::int16_t outfit_resource_id);
 
-// Cargo bookkeeping (mirrors Outfit_ComputePlayerCargoAndJunkTotal /
+// Cargo bookkeeping (mirrors Player_ComputeCargoAndJunkTotal /
 // ComputeFleetCargoCapacity / ComputeRemainingCargoSpace). Single-ship player
 // capacity for now (no NPC fleet), so fleet capacity == the player's own
 // outfit-derived cargo capacity.
 [[nodiscard]] std::int16_t
-Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state);
+Player_ComputeCargoAndJunkTotal(const GameState &state);
 
-// Ghidra 0x0046a680 Outfit_HasAnyCargoMissionOrJunk. True when any standard
+// Ghidra 0x0046a680 Player_HasAnyCargoMissionOrJunk. True when any standard
 // cargo bin is positive, an active mission carries a valid non-negative cargo
 // quantity, or any junk quantity is positive. This is the Player Info cargo-
 // page content predicate; it deliberately does not inspect owned outfits.
-[[nodiscard]] bool Outfit_HasAnyCargoMissionOrJunk(const GameState &state);
+[[nodiscard]] bool Player_HasAnyCargoMissionOrJunk(const GameState &state);
 
 // Ghidra 0x0046ea40 Outfit_CountCarriedShipsForOutfit. For an outfit whose
 // ModType-3 slot names a mode-99 launch bay, count active, non-disabled
@@ -185,10 +185,10 @@ Outfit_PlayerHasOutfitForControlExpression(const GameState &state,
 // (cargo space). This is the player baseline the fleet-capacity helper builds
 // on, not a mass.
 [[nodiscard]] std::int32_t
-Outfit_ComputePlayerTotalCargoCapacity(const GameState &state);
+Ship_ComputeShipTotalCargoCapacity(const GameState &state);
 
 [[nodiscard]] std::int16_t
-Outfit_ComputePlayerFleetCargoCapacity(const GameState &state);
+Player_ComputeFleetCargoCapacity(const GameState &state);
 
 // Ghidra 0x00463470 Ship_ComputeShipFreeMass. Remaining free mass allowance:
 // ship-class FreeMass (ShipClassDef.free_mass, +0x4 / shp payload +0x0c) minus,
@@ -207,16 +207,16 @@ Outfit_ComputePlayerFleetCargoCapacity(const GameState &state);
 // Outfit_ComputeScaledPurchasePrice (0x0049d640).
 [[nodiscard]] std::int32_t Ship_ComputeTradeInValue(const GameState &state);
 
-// Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace. Free holds on the
+// Ghidra 0x0046a7c0 Player_ComputeRemainingCargoSpace. Free holds on the
 // player ship: ship capacity minus carried cargo/junk, with escort-freighter
 // space absorbing the ordinary bins/junk overflow before mission cargo and
 // any remainder are charged to the ship. Not clamped (negative when
 // overloaded); callers that need a floor clamp it themselves. This build does
 // not yet model escort freighters, so the ship-only branch is the live one.
 [[nodiscard]] std::int16_t
-Outfit_ComputeRemainingCargoSpace(const GameState &state);
+Player_ComputeRemainingCargoSpace(const GameState &state);
 
-// Ghidra 0x0041f330 Outfit_RedistributeFleetCargoOverflow. The fleet cargo
+// Ghidra 0x0041f330 Player_RedistributeFleetCargoOverflow. The fleet cargo
 // overflow / jettison pass. Called with `jettison_all` true by the Player Info
 // Cargo page's Jettison action (0x00499c10) and with either value by the
 // in-flight dump-cargo command (0x0044aa70). Clears the player's six cargo
@@ -227,9 +227,9 @@ Outfit_ComputeRemainingCargoSpace(const GameState &state);
 // pool (Ship_SpawnFreeflightObjectForShip 0x0041f800), ROUND(share/5) clamped
 // [1,12] per eligible player/escort hull. `now_ms` is the sim clock used by
 // the mission-failure teardown helpers.
-void NovaOutfit_RedistributeFleetCargoOverflow(GameState &state,
-                                               bool jettison_all,
-                                               std::uint32_t now_ms);
+void Player_RedistributeFleetCargoOverflow(GameState &state,
+                                           bool jettison_all,
+                                           std::uint32_t now_ms);
 
 // Whether the player owns at least one outfit whose any mod type equals
 // `effect` (a cheap whole-inventory probe). The heavier per-slot helpers use

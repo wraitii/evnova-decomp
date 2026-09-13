@@ -10,15 +10,15 @@ Ghidra functions covered (all currently 0% in `decomp-progress.tsv`):
 
 | Address | Ghidra name | Role |
 |---|---|---|
-| 0x0045a3d0 | Ship_HandlePlayerBoardTargetCommand | player 'b' command: eligibility gates + dispatch |
-| 0x00484230 | Ship_BuildBoardingPlunderOptions | pre-rolls the loot offers + capture odds |
+| 0x0045a3d0 | Player_HandleBoardTargetCommand | player 'b' command: eligibility gates + dispatch |
+| 0x00484230 | Boarding_BuildOptions | pre-rolls the loot offers + capture odds |
 | 0x00482940 | NovaUi_RunBoardingPlunderWindow | modal loop over DLOG 0x3f3; applies transfers |
 | 0x00484d30 | NovaUi_DrawBoardingPlunderWindow | window painter |
 | 0x004a22e0 | NovaUi_HandleBoardingPlunderOptionButtons | 6-button hit/hover tracking |
 | 0x004a24e0 | NovaUi_DrawBoardingPlunderOptionButtons | three-state button strip |
 | 0x00468920 | Ship_CanPlayerHaveMoreEscorts | behavior-6 escort count < 6 |
 | 0x00497eb0 | NovaUi_ShowCaptureDecisionDialog | DLOG 0x3fa: escort vs swap |
-| 0x00415cb0 | Ship_ResetShipAndAttackersAfterBoarding | clears targeting after capture |
+| 0x00415cb0 | Boarding_ResetShipAndAttackersAfterBoarding | clears targeting after capture |
 | 0x004694a0 | ShipClass_HasPlayerBayCapacityFor | fighter-bay/escort-capacity check |
 
 Port home: `src/game/boarding_plunder.hpp` (design exists) /
@@ -30,7 +30,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 
 ### 1.1 Command gates (0x0045a3d0)
 
-`Ship_HandlePlayerBoardTargetCommand` is the *board* command channel
+`Player_HandleBoardTargetCommand` is the *board* command channel
 (`g_playerBoardTargetCommandLatch`, one-shot per press). Order of checks:
 
 1. Already latched → no-op.
@@ -146,7 +146,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 - Button actions (NovaUi_PollTravelScriptAction result codes):
   - 1 = Abort: reset panic to -1, beep, close.
   - 2 = Cargo: beep if no offer; else clamp quantity to free fleet cargo
-    space (`Outfit_ComputeFleetCargoCapacity - cargo_and_junk_total`); if
+    space (`Player_ComputeFleetCargoCapacity - cargo_and_junk_total`); if
     nothing fits → "You couldn't store any of the cargo..." (0x71); else
     "You stole all the <qty> <tons|ton> of <commodity>" (0x73 + 0x187 + 0x6c),
     add to player bin, clear offer. Panic ×2.0, re-arm.
@@ -170,11 +170,11 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
       (`Mission_ExecuteReactionScript` of ShipClassDef.field_0x3e9),
       set ai_behavior_code 6 / ai_target 0, armor = `max_armor * 0.5`
       (005758a0), clear faction/mission links, reset AI runtime fields,
-      `Ship_ResetShipAndAttackersAfterBoarding`, "You assigned this ship to
+      `Boarding_ResetShipAndAttackersAfterBoarding`, "You assigned this ship to
       your fleet of escorts." (0x7a).
     - swap path: confirm-code dialog (rename, random 3 digits appended to
       class name; STR# 0x7d2 0x76/0x77), on confirm
-      `Outfit_SwapPlayerShipWithEscort` + gameplay layout reinstall.
+      `Player_SwapShipWithEscort` + gameplay layout reinstall.
 - After every action the window repaints and the loop continues until an
   action closes it. Loot actions set `local_223` (capture re-roll latch:
   next loop iteration rolls `rand(100) <= panic` → target self-destructs:
@@ -185,7 +185,7 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 - `Ship_CanPlayerHaveMoreEscorts` (0x00468920): count active ships with
   `ai_behavior_code == 6 && squad_leader_ship_slot == 0 &&
   mission_fleet_slot == -1`; cap 6.
-- `Ship_ResetShipAndAttackersAfterBoarding` (0x00415cb0): for every ship
+- `Boarding_ResetShipAndAttackersAfterBoarding` (0x00415cb0): for every ship
   whose primary target is the captured ship: reset ai_state/control, clear
   target slots, hostility, stellar target. Same reset on the ship itself +
   `pers_def_slot = -1`, `voice_type_mode = rand(2)` overridden by class
@@ -196,20 +196,20 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 ## 2. Port design
 
 - New TU `src/game/boarding_plunder.cpp` implementing:
-  - `NovaBoarding_BuildOptions(state)` → `BoardingPlunderOptions` (header
+  - `Boarding_BuildOptions(state)` → `BoardingPlunderOptions` (header
     exists). Uses `state.rng` via the shared `NovaRandomRange` pattern
     (uniform_int_distribution, negotiation_dialog style), `ScenarioData`
     lookups, `ShipClass::crew` as capture_power, `Outfit` mod pairs for
     marines/weapon attrs, `PlayerInventory`.
-  - `NovaBoarding_RunWindow(platform, audio, state)` → modal loop following
+  - `NovaUi_RunBoardingPlunderWindow(platform, audio, state)` → modal loop following
     the ship-comm dialog pattern: LoadPictTexture(0x2143) backdrop,
     ServicesButtonArt buttons at DITL rects, NovaFontCache text, hover/press
     tracking mirroring 0x004a22e0, transfers applied to GameState, HUD
     overlays via NovaHud_ShowOverlayMessage.
-  - `NovaBoarding_HandleBoardTargetCommand(platform, state)` → gates +
+  - `Player_HandleBoardTargetCommand(platform, state)` → gates +
     dispatch; plunder window only, mission arms TODO(decomp).
   - `NovaShip_CanPlayerHaveMoreEscorts(state)`.
-  - minimal `Ship_ResetShipAndAttackersAfterBoarding` port (targeting
+  - minimal `Boarding_ResetShipAndAttackersAfterBoarding` port (targeting
     clears; voice_type_mode only when that field exists in the port).
 - Input hook: `FlightInput.board` edge ('b', the original default binding),
   wired in the spaceflight loop next to target_action.
@@ -228,17 +228,17 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 
 ## 3. Iterations
 
-1. **DONE — Options + escort cap** — `NovaBoarding_BuildOptions`,
+1. **DONE — Options + escort cap** — `Boarding_BuildOptions`,
    `NovaShip_CanPlayerHaveMoreEscorts`, `Weapon_HasMatchingWeaponAmmoCarried`
    (0x00469230) quirk preserved. Divergence: `rand(0)` reseeds in the
    original and returns garbage; port returns 0 (fuel roll only).
-2. **DONE — Board command** — `NovaBoarding_HandleBoardTargetCommand`
+2. **DONE — Board command** — `Player_HandleBoardTargetCommand`
    (gates + velocity match + plain-ship dispatch + denial overlays + beeps),
-   `NovaBoarding_ResetShipAndAttackersAfterBoarding`, `FlightInput.board`
+   `Boarding_ResetShipAndAttackersAfterBoarding`, `FlightInput.board`
    ('b'), spaceflight hook, `pending_ui_sounds` queue + transition-sound
    cache (snd 150..155 = g_transition_sound_handle_table[0..5]).
 3. **DONE — Window** — modal loop, painter, loot transfers, panic odds.
-   `NovaBoarding_RunWindow` (0x00482940) now renders DLOG 0x3f3 (backdrop PICT
+   `NovaUi_RunBoardingPlunderWindow` (0x00482940) now renders DLOG 0x3f3 (backdrop PICT
    0x2143, six three-state buttons from DITL 0x3f3, the DITL item-4 text panel
    with the offer rows incl. the "self-destruct string as odds-row label" quirk),
    and applies the cargo/credits/ammo/fuel transfers plus the panic self-
@@ -293,13 +293,13 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
    transition-table [1]; shown only when the player class capture_power
    (crew) >= 1. Strings pinned by tests/boarding_strings_test.cpp. The
    "Use As My Ship" arm is TODO(decomp(0x00497eb0)) skipped — the rename-
-   confirm + Outfit_SwapPlayerShipWithEscort machinery (docked-loadout
+   confirm + Player_SwapShipWithEscort machinery (docked-loadout
    transfer + interface reinstall) is deferred; the escort conversion is the
    port's fallback for both choices (logged).
 7. **progress.csv + doc updates** — updated per iteration (1/2 landed).
 8. **AI boarding resolution (0x00412550) + capture-variant supervisor
    (0x004038b0)** — DONE, wired:
-   - `NovaBoarding_BoardShipAndTransferCargo` (boarding_plunder.cpp) ports
+   - `Boarding_BoardShipAndTransferCargo` (boarding_plunder.cpp) ports
      the AI boarding resolution: capture-odds model (NOTE: the AI version
      reads ShipClassDef.**strength** (+0xc) as the base crew on both sides —
      NOT capture_power/crew like the player window — plus marine outfits
@@ -337,15 +337,15 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
      handoff may not trigger end-to-end in-game. Needs probe verification.
 
 9. **Cargo plunder + profile jettison** — DONE:
-   - `NovaBoarding_BoardShipAndTransferCargo` (0x00412550) now ports the
+   - `Boarding_BoardShipAndTransferCargo` (0x00412550) now ports the
      random-bin cargo plunder for a player victim: the boarder's free holds
      are its class `cargo_holds` (its own bins are unmodelled), the victim's
-     capacity is `Outfit_ComputePlayerTotalCargoCapacity` (the original's
+     capacity is `Ship_ComputeShipTotalCargoCapacity` (the original's
      `Ship_ComputeShipTotalCargoCapacity`), and bins transfer one at a time into the
      free-holds budget. NPC victim bins stay zero (matching
      `Ship_AllocateShipSlotInSystem`). The loot overlay now reports the
      stolen tonnage. `tests/cargo_test.cpp`.
-   - `NovaOutfit_RedistributeFleetCargoOverflow` (0x0041f330) is ported in
+   - `Player_RedistributeFleetCargoOverflow` (0x0041f330) is ported in
      `src/game/outfit.cpp`: clears the six player cargo bins and every
      positive junk count; `jettison_all` also drains abortable active
      missions' cargo and fails them with STR# 0x7d2 0x11c "Mission failed.",
@@ -426,7 +426,7 @@ the target's sprite frame, press **b**.
   pool 3/4/5, and the board denials use pool 0x81/0x82/0x83 "You can't board
   this ship." / "You're not close enough to board this ship." / "You're moving
   too fast to board this ship." (entries 0x82/0x83/0x84; 0x84 confirmed at
-  Ship_HandlePlayerBoardTargetCommand 0x0045a3d0). Beware: some older Ghidra
+  Player_HandleBoardTargetCommand 0x0045a3d0). Beware: some older Ghidra
   plate comments list pool indices while claiming they are the 1-based call
   values — trust the decompile call sites. The shipped window layout is
   docs/reference/boarding.jpg.

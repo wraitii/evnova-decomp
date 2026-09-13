@@ -852,10 +852,10 @@ int NovaLanded_HireShip(GameState &state,
   return slot;
 }
 
-bool NovaLanded_ReplacePlayerShip(GameState &state,
-                                  std::int16_t stellar_id,
-                                  std::int16_t ship_id,
-                                  std::string_view player_ship_name) {
+bool Player_SwapShipWithEscort(GameState &state,
+                               std::int16_t stellar_id,
+                               std::int16_t ship_id,
+                               std::string_view player_ship_name) {
   if (!NovaLanded_CanBuyShip(state, stellar_id, ship_id))
     return false;
   const ShipClass *old_ship = state.scenario.Ship(
@@ -877,7 +877,7 @@ bool NovaLanded_ReplacePlayerShip(GameState &state,
       (void)Outfit_AddInstalledOutfit(
           state, id, new_ship->default_outfit_counts[i]);
   }
-  // Outfit_SwapPlayerShipWithEscort (0x00423fa0) seeds the new ship's weapon
+  // Player_SwapShipWithEscort (0x00423fa0) seeds the new ship's weapon
   // banks from its mounted stock weapons, then runs
   // Weapon_ReconcileOutfitPoolWithWeaponBanks so the stock guns become owned,
   // sellable outfits. Our ShipClass carries the stock as stock_weapons (the

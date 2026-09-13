@@ -108,9 +108,9 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
       // capacity and its remaining free cargo space before opening its
       // original error dialog.
       const std::int32_t total_capacity =
-          Outfit_ComputePlayerTotalCargoCapacity(state);
+          Ship_ComputeShipTotalCargoCapacity(state);
       if (total_capacity < definition.cargo_qty_tons ||
-          Outfit_ComputeRemainingCargoSpace(state) <
+          Player_ComputeRemainingCargoSpace(state) <
               definition.cargo_qty_tons) {
         return false;
       }
@@ -524,7 +524,7 @@ namespace {
   // always requires room for the cargo load.
   if (interaction_context ? def.cargo_qty_tons >= 1
                           : (def.flags_secondary & 0x0001U) != 0U) {
-    if (Outfit_ComputeRemainingCargoSpace(state) < def.cargo_qty_tons) {
+    if (Player_ComputeRemainingCargoSpace(state) < def.cargo_qty_tons) {
       return false;
     }
   }
@@ -1701,14 +1701,14 @@ bool NovaStellar_AreStellarsEquivalent(const GameState &state,
 bool Mission_TryConsumeMissionInteractionResources(GameState &state,
                                                    std::int16_t count) {
   if (count > 0) {
-    if (Outfit_ComputePlayerTotalCargoCapacity(state) < count) {
+    if (Ship_ComputeShipTotalCargoCapacity(state) < count) {
       // The original shows the STR# 0x7d2 0x165 "not enough cargo space"
       // selection dialog. UI-owned; not reconstructed (TODO(decomp)).
       NovaLog::Todo("mission interaction denied: cargo capacity below {} tons",
                     count);
       return false;
     }
-    if (Outfit_ComputeRemainingCargoSpace(state) < count) {
+    if (Player_ComputeRemainingCargoSpace(state) < count) {
       // STR# 0x7d2 0x166 "not enough free cargo space" dialog.
       NovaLog::Todo("mission interaction denied: free cargo space below {} "
                     "tons",
@@ -1768,7 +1768,7 @@ void Mission_ResolveMisnSlot(GameState &state,
   Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
 }
 
-// Ghidra 0x00458802 (inside Stellar_ProcessTravelAndLanding): draws the
+// Ghidra 0x00458802 (inside Stellar_HandleStellarEntryAndExit): draws the
 // per-definition offering roll (NovaRandom_Range(100) + 1, i.e. 1..100) for
 // every mission definition, then re-runs Mission_EvaluateMissionLists. Called
 // at game start and on every system arrival; the port evaluates lists on
@@ -2922,14 +2922,14 @@ void Mission_TickDailyCronEvents(GameState &state) {
   }
 }
 
-// Ghidra 0x00423540 Outfit_CollectStellarIncome. Daily tribute pass: every
+// Ghidra 0x00423540 Player_CollectStellarTribute. Daily tribute pass: every
 // available stellar carrying the +0x46 marker (its system visible + the 0x20
 // availability bit, set by the display-state refresh) pays its Tribute value
 // (payload +0x0a, default 1000 x TechLevel) and bumps its day counter
 // (StellarDef +0x2a) unless the currently docked stellar carries the same
 // 0x20 marker. TODO(decomp): the domination flow that grants a stellar the
 // +0x46 marker is not modelled, so the pass stays idle in practice.
-void Stellar_CollectDailyTributeIncome(GameState &state) {
+void Player_CollectStellarTribute(GameState &state) {
   const std::size_t count =
       std::min(state.scenario.stellars.size(), static_cast<std::size_t>(0x800));
   for (std::size_t i = 0; i < count; ++i) {
@@ -3031,7 +3031,7 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
           static_cast<std::int16_t>(mission.time_limit_days_remaining - 1);
     }
   }
-  Stellar_CollectDailyTributeIncome(state);
+  Player_CollectStellarTribute(state);
   System_UpdateDisasterStates(state);
   const std::size_t system_count =
       std::min(state.scenario.systems.size(), GameState::kMaxSystems);

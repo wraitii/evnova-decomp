@@ -1304,7 +1304,7 @@ namespace {
 } // namespace
 
 // End-to-end capture-approach drive (Ghidra 0x004038b0 supervisor -> 0x00405590
-// state 0xd -> 0x00408150 mode 0xf -> Outfit_BoardShipAndTransferCargo): a
+// state 0xd -> 0x00408150 mode 0xf -> Boarding_BoardShipAndTransferCargo): a
 // behavior-3 plunderer of a flags_primary 0x1000 government acquires a
 // disabled low-AI victim, latches it inside 3 px and arms the 100..179-tick
 // boarding pause, then hands off to the boarding resolution. The capture

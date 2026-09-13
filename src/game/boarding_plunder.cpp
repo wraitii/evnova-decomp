@@ -153,11 +153,11 @@ bool NovaShip_CanPlayerHaveMoreEscorts(const GameState &state) {
   return escorts < static_cast<std::int16_t>(kEscortCap);
 }
 
-// Ghidra 0x00484230 Ship_BuildBoardingPlunderOptions. Rolls the plunder
+// Ghidra 0x00484230 Boarding_BuildOptions. Rolls the plunder
 // offers and the capture odds for the player's primary target. Call with a
 // valid, boardable target (the board command and the window open path both
 // gate on that).
-BoardingPlunderOptions NovaBoarding_BuildOptions(GameState &state) {
+BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
   BoardingPlunderOptions options;
 
   const std::int16_t target_slot = state.player.primary_target_ship_slot;
@@ -468,13 +468,12 @@ struct BoardRangeSpan {
 
 } // namespace
 
-// Ghidra 0x00415cb0 Ship_ResetShipAndAttackersAfterBoarding. Ships targeting
-// the captured hull drop their combat state; the captured hull itself gets a
-// combat/mission reset. TODO(decomp): the original also rolls a random voice
-// type (ShipState.voice_type_mode) overridden by the class's
+// Ghidra 0x00415cb0 Boarding_ResetShipAndAttackersAfterBoarding. Ships
+// targeting the captured hull drop their combat state; the captured hull itself
+// gets a combat/mission reset. TODO(decomp): the original also rolls a random
+// voice type (ShipState.voice_type_mode) overridden by the class's
 // inherent_attributes_govt voice mode; the port has no voice model.
-void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
-                                                     Ship &ship) {
+void Boarding_ResetShipAndAttackersAfterBoarding(GameState &state, Ship &ship) {
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &other = state.ShipAt(slot);
     if (!other.is_active || other.ship_instance_id == ship.ship_instance_id) {
@@ -499,7 +498,7 @@ void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
   ship.pers_def_slot = -1;
 }
 
-// Ghidra 0x0045a3d0 Ship_HandlePlayerBoardTargetCommand.
+// Ghidra 0x0045a3d0 Player_HandleBoardTargetCommand.
 //
 // Clean-room summary (see docs/boarding_plunder_capture.md for the full map):
 // Validates the player's board command against the primary target (fire
@@ -510,11 +509,11 @@ void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
 // renders the live game view through `view`/`hud` while it is open. Exit:
 // returns with the target boarded or an STR# 0x7d2 denial overlay queued.
 // Confidence: high on gates, dispatch arms partially reconstructed.
-void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
-                                           SdlAudio &audio,
-                                           GameState &state,
-                                           SpaceflightView &view,
-                                           HudRenderer &hud) {
+void Player_HandleBoardTargetCommand(SdlPlatform &platform,
+                                     SdlAudio &audio,
+                                     GameState &state,
+                                     SpaceflightView &view,
+                                     HudRenderer &hud) {
   // The original latches DAT_007354a5 ("player acted") for the frame-timing
   // refresh in Frame_SpaceflightLoop; not modelled here.
   EnsureTransitionSounds(state);
@@ -626,7 +625,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
   }
 
   // ---- Boardability -------------------------------------------------------
-  // Mission arms (Ship_HandlePlayerBoardTargetCommand 0x0045a3d0): the
+  // Mission arms (Player_HandleBoardTargetCommand 0x0045a3d0): the
   // pickup_mode-2 cargo pickup and the spawn_behavior 2/5 + flags 0x0001
   // single-ship rescue arm write goal_counter_b, set the target's boarded
   // latch and clear other ships' targeting before falling through to the
@@ -736,7 +735,7 @@ void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
 
   QueueUiSound(state, 4, 8); // the "boarded" cue repeats 8x in the original
   const BoardingWindowResult result =
-      NovaBoarding_RunWindow(platform, audio, state, view, hud);
+      NovaUi_RunBoardingPlunderWindow(platform, audio, state, view, hud);
   (void)result;
 
   // After the interaction: latch + clear every ship targeting the boarded
@@ -1516,11 +1515,12 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
 // NovaUi_ShowCaptureDecisionDialog 0x00497eb0, is TODO(decomp)). The window
 // plays its one-shot cues directly through `audio` (the flight loop owns the
 // device).
-[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(SdlPlatform &platform,
-                                                          SdlAudio &audio,
-                                                          GameState &state,
-                                                          SpaceflightView &view,
-                                                          HudRenderer &hud) {
+[[nodiscard]] BoardingWindowResult
+NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
+                                SdlAudio &audio,
+                                GameState &state,
+                                SpaceflightView &view,
+                                HudRenderer &hud) {
   BoardingWindowResult result;
 
   const std::int16_t target_slot = state.player.primary_target_ship_slot;
@@ -1540,7 +1540,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
   // action (the original clears its latch each iteration).
   std::int32_t panic = NovaRandomRange(state.rng, 0x1a) + 0xf;
 
-  BoardingPlunderOptions options = NovaBoarding_BuildOptions(state);
+  BoardingPlunderOptions options = Boarding_BuildOptions(state);
   NovaLog::Info(
       "board: opening plunder window for slot {} ({}) — cargo({})={}x "
       "credits={} ammo({})={}x fuel={} capture_odds={}% panic={}",
@@ -1703,9 +1703,8 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
         PlayTransitionCue(audio, state, 3); // denial beep
       } else {
         // Clamp quantity to the free fleet cargo space.
-        const std::int16_t total = Outfit_ComputePlayerCargoAndJunkTotal(state);
-        const std::int16_t capacity =
-            Outfit_ComputePlayerFleetCargoCapacity(state);
+        const std::int16_t total = Player_ComputeCargoAndJunkTotal(state);
+        const std::int16_t capacity = Player_ComputeFleetCargoCapacity(state);
         if (capacity - total < options.cargo_quantity) {
           options.cargo_quantity = static_cast<std::int16_t>(capacity - total);
         }
@@ -1926,11 +1925,11 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
             if (take_ship) {
               // TODO(decomp(0x00497eb0)) skipped: the swap arm (rename-confirm
               // dialog with class name + 3 random digits, then
-              // Outfit_SwapPlayerShipWithEscort + gameplay layout reinstall)
+              // Player_SwapShipWithEscort + gameplay layout reinstall)
               // is not reconstructed; the escort conversion below is the
               // port's fallback for both choices.
               NovaLog::Todo("board: 'Use As My Ship' chosen, but "
-                            "Outfit_SwapPlayerShipWithEscort is not "
+                            "Player_SwapShipWithEscort is not "
                             "reconstructed; converting to escort instead");
             }
             close = true;
@@ -1960,7 +1959,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
             target.ai_state_code = 0;
             target.ai_control_mode = 0;
             target.ai_secondary_target_slot = -1;
-            NovaBoarding_ResetShipAndAttackersAfterBoarding(state, target);
+            Boarding_ResetShipAndAttackersAfterBoarding(state, target);
             BoardShowOverlay(
                 state,
                 kMiscAssignedEscort,
@@ -1986,7 +1985,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
   return result;
 }
 
-// Ghidra 0x00412550 Outfit_BoardShipAndTransferCargo. AI boarding
+// Ghidra 0x00412550 Boarding_BoardShipAndTransferCargo. AI boarding
 // resolution (the capture-variant supervisor calls it when its board approach
 // completes; it is also reachable against the player). Stages:
 //   1. cargo plunder: random-bin transfer up to the boarder's free hold space,
@@ -2003,10 +2002,10 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
 // negative ModVals on the victim lower them. The original's 16-bit unsigned
 // wrap arithmetic is congruent (mod 2^16, and every later use sign-extends
 // the low half) to the plain signed adds used here.
-void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
-                                            Ship &boarder,
-                                            Ship &boarded,
-                                            std::uint32_t now_ms) {
+void Boarding_BoardShipAndTransferCargo(GameState &state,
+                                        Ship &boarder,
+                                        Ship &boarded,
+                                        std::uint32_t now_ms) {
   if (NovaAiShip_IsDestroyed(boarded) || !boarded.is_active) {
     return;
   }
@@ -2171,7 +2170,7 @@ void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
         boarder_class != nullptr ? boarder_class->cargo_holds : 0;
     std::int32_t boarder_free = boarder_holds;
     const std::int32_t victim_capacity =
-        Outfit_ComputePlayerTotalCargoCapacity(state);
+        Ship_ComputeShipTotalCargoCapacity(state);
     std::int32_t victim_total = 0;
     for (const std::int16_t bin : state.inventory.cargo_bins) {
       if (bin > 0) {

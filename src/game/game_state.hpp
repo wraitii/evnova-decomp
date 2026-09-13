@@ -27,7 +27,7 @@ namespace game {
 // tracks the player's standing with each system. Negative values push factions
 // hostile; the destination-interaction dialog compares a target stellar's
 // reputation_threshold against the containing system's reputation to decide
-// whether landing is denied (Stellar_ProcessTravelAndLanding / NovaUi_Run-
+// whether landing is denied (Stellar_HandleStellarEntryAndExit / NovaUi_Run-
 // TravelDestinationInteractionWindow). Resized by ScenarioData load to match
 // the systems table; indexed by 0-based system resource id.
 using SystemReputation = std::vector<std::int16_t>;
@@ -545,8 +545,8 @@ struct Ship {
   // derived from the sh\x8an descriptor). ---
   // Engine-thrust latch: whether the player is currently applying forward
   // thrust this frame (mirrors Ghidra ShipState.ai_forward_thrust_cmd at +0x30
-  // being non-zero). Written by NovaPlayer_UpdateFromInput and read by the
-  // flight render to drive the engine-glow layer.
+  // being non-zero). Written by PlayerTick_ManualFlightAndRegeneration and read
+  // by the flight render to drive the engine-glow layer.
   bool engine_thrust = false;
   // ShipState +0xc8d4. The player-control path raises this one unit/frame
   // while thrusting and lowers it one unit/frame otherwise; normal thrust caps
@@ -705,7 +705,7 @@ struct TravelState {
   // progress: -1 disarmed; NovaUi_UpdateTravelEngagementProgress arms it to
   // 0x2ee when the selected stellar is within 250 px on both axes, increments
   // it past 0x2ec, and expires it (> 0x7ff) back to -1 clearing the selection.
-  // The normal-arrival gate (Stellar_ProcessTravelAndLanding 0x00457e05)
+  // The normal-arrival gate (Stellar_HandleStellarEntryAndExit 0x00457e05)
   // requires >= 0x2ee before it will dock.
   std::int16_t engage_timer = -1;
   // Legacy latch retained for future arrival/docked reconstruction. Target
@@ -746,10 +746,10 @@ struct TravelState {
   // 0x7fff latch set at the jump hold-begin (0x0044c561), hyperspace arrival
   // (0x0044f83f) and Ship_ResetPlayerShipState (0x004b3a3b; TODO(decomp) when
   // the death respawn is ported); while latched, landing shows the launch
-  // departure message (Stellar_TravelToSystem tail 0x00456323) instead of
-  // re-arming the hints. A landing taken below 3 resets to -1. A fresh pilot
-  // starts at -3 (0xfffd, new-game state reset 0x0048a600). The hint overlay
-  // texts themselves (the DAT_0072exxxcc queue) are TODO(decomp).
+  // departure message (Stellar_RunDockAndLaunchSequence tail 0x00456323)
+  // instead of re-arming the hints. A landing taken below 3 resets to -1. A
+  // fresh pilot starts at -3 (0xfffd, new-game state reset 0x0048a600). The
+  // hint overlay texts themselves (the DAT_0072exxxcc queue) are TODO(decomp).
   std::int16_t travel_hint_state = -3;
   // Hold-phase elapsed time in 30 Hz simulation ticks. The fire lands once the
   // hold passes g_hyperspace_engage_hold_30hz (0x5755a8, 30 ticks) AND the Warp
@@ -977,7 +977,7 @@ struct SwParticle {
 
 // Ghidra FreeflightObjectState (g_freeflight_objects_ptr, 0x005914a8),
 // 64 entries at a 0x28-byte stride. Generic in-flight cosmetic objects:
-// the cargo/junk pods spawned by Outfit_RedistributeFleetCargoOverflow's
+// the cargo/junk pods spawned by Player_RedistributeFleetCargoOverflow's
 // jettison pass (Ship_SpawnFreeflightObjectForShip 0x0041f800), plus the
 // beam-hit / effect-package / launched-drone variants spawned by
 // Ship_SpawnFreeflightObjectAtPosition (0x0041fb50). Positions and lifetimes
@@ -1237,7 +1237,7 @@ struct GameState {
       active_mission_runtime_flags{};
   std::array<MissionTargetResolution, 1000> mission_target_resolutions{};
   // Ghidra DAT_00734c20: per-definition offering roll, drawn 1..100 for every
-  // mission definition on system arrival (Stellar_ProcessTravelAndLanding
+  // mission definition on system arrival (Stellar_HandleStellarEntryAndExit
   // 0x00458802) and initialised at game start. Mission_EvaluateMissionLists
   // offers a definition only when roll <= AvailRandom (>=100 always offered);
   // Mission_ActivateMissionAtSlot's duplicate arm zeroes the roll (0x0043f5a5)
@@ -1406,7 +1406,7 @@ struct GameState {
   // cleared on release or while a gate rejects the command.
   std::int8_t cloak_command_latch = 0;
   // Arrival command grace. The original latches g_license_check_frame_counter
-  // to -15 in the Stellar_ProcessTravelAndLanding rebuild epilogue
+  // to -15 in the Stellar_HandleStellarEntryAndExit rebuild epilogue
   // (0x004586a6), and the interaction command blocks (special interaction
   // 0x00451bf0, mission computer 0x00451cf6) skip while it is negative. The
   // port counts a separate signed budget down to zero instead (its own frame
@@ -1487,7 +1487,7 @@ struct GameState {
   // 0x004510b9): the original's timed-action dispatch has already passed when
   // the eject transform arms the escape-pod countdown, so the pod does not
   // move until the next frame. The spaceflight loop consumes this to skip the
-  // NovaPlayer_TickTimedActionTransition call on the eject frame only.
+  // PlayerTick_TimedActionTransition call on the eject frame only.
   bool timed_action_suppress_this_frame = false;
 
   std::array<BeamHit, 0x40> beam_hit_queue{};

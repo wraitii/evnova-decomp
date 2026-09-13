@@ -857,7 +857,7 @@ void ResolveShipHitFromWeapon(GameState &state,
     // Post-hit behavior hint for surrendered escorts (squad_leader_ship_slot 0,
     // not a mission ship): stores how the boarding/escort-conversion flow
     // treats this hull. Cargo transfer for behavior-6 escorts is TODO(decomp)
-    // (Outfit_TransferCargoAndJunkToEscortByRatio 0x00469810).
+    // (Player_TransferCargoAndJunkToEscortByRatio 0x00469810).
     if (target.squad_leader_ship_slot == 0 && fleet_slot == -1) {
       target.post_hit_mode_hint =
           target.ai_behavior_code == 5

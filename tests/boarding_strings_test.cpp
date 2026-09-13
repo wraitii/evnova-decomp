@@ -51,7 +51,7 @@ TEST_CASE("STR# 0x7d2 boarding strings (1-based entries)") {
   REQUIRE(button(0x2e).value_or("") == "Use As Escort");
   REQUIRE(button(0x2f).value_or("") == "Use As My Ship");
 
-  // Board-command denial overlays (NovaBoarding_HandleBoardTargetCommand;
+  // Board-command denial overlays (Player_HandleBoardTargetCommand;
   // pool entries 0x81/0x82/0x83 are read through entries 0x82/0x83/0x84).
   REQUIRE(entry(0x82) == "You can't board this ship.");
   REQUIRE(entry(0x83) == "You're not close enough to board this ship.");

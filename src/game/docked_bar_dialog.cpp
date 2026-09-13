@@ -283,7 +283,7 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   // PICT and selects the DLOG 0x3fd / PICT 0x2138 pair.
   std::string prompt_text;
   std::uint16_t art_pict = 0;
-  if (const auto desc_id = NovaDocked_BarDescriptionId(stellar_id)) {
+  if (const auto desc_id = NovaLanded_BarDescriptionId(stellar_id)) {
     if (const auto desc = NovaResource_LoadDescription(*desc_id)) {
       prompt_text = desc->text;
       Mission_ExpandStringPlaceholders(state, prompt_text);
@@ -534,7 +534,7 @@ LandedExit RunBarDialog(SdlPlatform &platform,
 
 // Ghidra 0x0047c8e0 NovaUi_RunTravelDestinationServicesWindow prompt id.
 std::optional<std::uint16_t>
-NovaDocked_BarDescriptionId(std::int16_t stellar_id) {
+NovaLanded_BarDescriptionId(std::int16_t stellar_id) {
   if (stellar_id < kResourceIdBase) {
     return std::nullopt;
   }

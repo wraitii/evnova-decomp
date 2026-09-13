@@ -315,7 +315,7 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
 
   // TODO(decomp) skipped: the escort cargo-return arm (destroyed escort with
   // squad_leader_ship_slot 0 / behavior 6 / default AI < 3 runs
-  // Outfit_TransferCargoAndJunkToEscortByRatio 0x00469810 plus the weapon-bank
+  // Player_TransferCargoAndJunkToEscortByRatio 0x00469810 plus the weapon-bank
   // pool reconciliation), and the finale audio de-registrations.
 
   // Personality deactivation: the wreck's personality def leaves the ambient

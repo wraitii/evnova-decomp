@@ -110,18 +110,18 @@ TEST_CASE("description wrap preserves explicit blank lines",
   CHECK(single[1] == "two");
 }
 
-// Stellar_ProcessTravelAndLanding's normal-arrival envelope is not the
+// Stellar_HandleStellarEntryAndExit's normal-arrival envelope is not the
 // starmap travel-arm 250 (0x00459369); it is the target's spin-sprite span
 // scaled by 1.75 (0x004587a3), with a 0x4b fallback when no sprite is prepared
 // (0x00457f89).
 TEST_CASE("landing arrival envelope follows the sprite span",
           "[landed_window]") {
   // No prepared sprite -> the original 0x4b fallback.
-  CHECK(game::NovaLanding_ArrivalAxisRange(0) == 75.0F);
+  CHECK(game::Stellar_MaxLandingDistance(0) == 75.0F);
   // round(height * 1.75), FIST/round-half-to-even semantics.
-  CHECK(game::NovaLanding_ArrivalAxisRange(32) == 56.0F);
-  CHECK(game::NovaLanding_ArrivalAxisRange(96) == 168.0F);
-  CHECK(game::NovaLanding_ArrivalAxisRange(150) == 262.0F);
+  CHECK(game::Stellar_MaxLandingDistance(32) == 56.0F);
+  CHECK(game::Stellar_MaxLandingDistance(96) == 168.0F);
+  CHECK(game::Stellar_MaxLandingDistance(150) == 262.0F);
 }
 
 // Regression: the gate must reject a target in the gap between the original
@@ -146,10 +146,10 @@ TEST_CASE("landing rejects a stellar outside the no-sprite envelope",
   state.travel.engage_timer = 0x2ee; // approach armed
 
   game::LandedContext ctx;
-  CHECK_FALSE(game::NovaLanding_EnterDocked(state, ctx, 0));
+  CHECK_FALSE(game::Stellar_Dock(state, ctx, 0));
   CHECK(ctx.denial == game::LandedDenial::kTooFar);
   // A prepared sprite whose depth spans the ship keeps the arrival in range.
-  CHECK(game::NovaLanding_EnterDocked(state, ctx, 96));
+  CHECK(game::Stellar_Dock(state, ctx, 96));
 }
 
 TEST_CASE("landing rejects a moving ship within range", "[landed_window]") {
@@ -172,12 +172,12 @@ TEST_CASE("landing rejects a moving ship within range", "[landed_window]") {
   state.travel.engage_timer = 0x2ee;
 
   game::LandedContext ctx;
-  CHECK_FALSE(game::NovaLanding_EnterDocked(state, ctx, 96));
+  CHECK_FALSE(game::Stellar_Dock(state, ctx, 96));
   CHECK(ctx.denial == game::LandedDenial::kTooFast);
 
   // Stopping the ship clears the last gate.
   state.player.vel_x = 0.0F;
-  CHECK(game::NovaLanding_EnterDocked(state, ctx, 96));
+  CHECK(game::Stellar_Dock(state, ctx, 96));
 }
 
 TEST_CASE("landing approach timer arms within 250 and expires", "[travel]") {
@@ -216,10 +216,10 @@ TEST_CASE("landing approach timer arms within 250 and expires", "[travel]") {
 
 TEST_CASE("normal landing arrival charges once; launch restores the ship",
           "[landed_window]") {
-  // SDL-free core of Stellar_TravelToSystem's normal-arrival bookkeeping.
-  // The target is deliberately an inactive (not currently rendered) stellar:
-  // StellarTargetsSpriteSetActive accepts the matching inactive state unless
-  // the stellar's 0x80 engaged bit is set.
+  // SDL-free core of Stellar_RunDockAndLaunchSequence's normal-arrival
+  // bookkeeping. The target is deliberately an inactive (not currently
+  // rendered) stellar: StellarTargetsSpriteSetActive accepts the matching
+  // inactive state unless the stellar's 0x80 engaged bit is set.
   game::GameState state;
   state.scenario.systems.resize(1);
   state.scenario.systems[0].nav_defs[0] = 0x80;
@@ -250,14 +250,14 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
   state.travel.engage_timer = 0x2ee; // approach armed
 
   game::LandedContext ctx;
-  REQUIRE(game::NovaLanding_EnterDocked(state, ctx, 96));
+  REQUIRE(game::Stellar_Dock(state, ctx, 96));
   CHECK(ctx.landed);
   CHECK(ctx.stellar_id == 0x80);
   CHECK(state.travel.landed_this_frame);
   CHECK(state.player.credits == 25);
   // Arrival does NOT touch the ship's meters or kinematics: the original
   // leaves them to the launch tail, after the interaction loop returns
-  // (Stellar_TravelToSystem 0x00455f99..0x0045602f).
+  // (Stellar_RunDockAndLaunchSequence 0x00455f99..0x0045602f).
   CHECK(state.player.pos_x == 3.0F);
   CHECK(state.player.pos_y == -300.0F);
   CHECK(state.player.shield_points == 1.0F);
@@ -265,7 +265,7 @@ TEST_CASE("normal landing arrival charges once; launch restores the ship",
 
   // Launch tail (0x00455f99..0x00456268): reposition + velocity kill,
   // shield/armor refill to the effective maxima, daily world tick.
-  game::NovaLanding_LaunchFromStellar(state, ctx.stellar_id);
+  game::Stellar_Launch(state, ctx.stellar_id);
   CHECK(state.player.pos_x == 123.0F);
   CHECK(state.player.pos_y == -456.0F);
   CHECK(state.player.vel_x == 0.0F);

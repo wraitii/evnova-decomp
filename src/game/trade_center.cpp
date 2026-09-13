@@ -239,8 +239,8 @@ bool NovaTradeCenter_CanBuyRow(const GameState &state,
   if (state.player.credits < slot->price) {
     return false;
   }
-  const std::int32_t capacity = Outfit_ComputePlayerFleetCargoCapacity(state);
-  const std::int32_t used = Outfit_ComputePlayerCargoAndJunkTotal(state);
+  const std::int32_t capacity = Player_ComputeFleetCargoCapacity(state);
+  const std::int32_t used = Player_ComputeCargoAndJunkTotal(state);
   return capacity > used;
 }
 
@@ -257,8 +257,8 @@ std::int16_t NovaTradeCenter_BuyMax(const GameState &state,
   if (slot == nullptr || slot->price <= 0) {
     return 0;
   }
-  const std::int32_t capacity = Outfit_ComputePlayerFleetCargoCapacity(state);
-  const std::int32_t used = Outfit_ComputePlayerCargoAndJunkTotal(state);
+  const std::int32_t capacity = Player_ComputeFleetCargoCapacity(state);
+  const std::int32_t used = Player_ComputeCargoAndJunkTotal(state);
   const std::int32_t free_space = capacity - used;
   if (free_space <= 0) {
     return 0;
