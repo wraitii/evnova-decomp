@@ -37,7 +37,7 @@ MissionScriptResult Mission_ExecuteReactionScript(GameState &state,
                                                   std::string_view script);
 MissionScriptResult Mission_RunMisnScriptPayload(GameState &state,
                                                  std::string_view script,
-                                                 std::size_t mission_slot);
+                                                 std::int16_t mission_slot);
 MissionScriptResult Mission_ExecuteMisnScriptEngine(GameState &state,
                                                     std::string_view script);
 

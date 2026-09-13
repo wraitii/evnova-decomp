@@ -126,5 +126,26 @@ TEST_CASE("mission script entrypoints retain their Ghidra call boundaries") {
   CHECK(state.control.ControlBit(11));
   CHECK(state.control.ControlBit(12));
   CHECK(state.control.ControlBit(13));
-  CHECK_FALSE(Mission_RunMisnScriptPayload(state, "b14", 16).ok());
+  // The original does not validate the payload slot (a short global); an
+  // out-of-range value runs the script and only skips the Q text-tag context.
+  CHECK(Mission_RunMisnScriptPayload(state, "b14", 16).ok());
+  CHECK(state.control.ControlBit(14));
+}
+
+TEST_CASE("mission payload context expands Q message text tags") {
+  GameState state;
+  state.pilot.first_name = "Jane";
+  // Q7022 loads a random "Prodigal Son Replies" entry ("To: Captain <PN>...").
+  const auto result = Mission_RunMisnScriptPayload(state, "Q7022", 0);
+  REQUIRE(result.ok());
+  CHECK(state.hud_overlay.active);
+  CHECK(state.hud_overlay.message.find("<PN>") == std::string::npos);
+  CHECK(state.hud_overlay.message.find("Jane") != std::string::npos);
+
+  // Without a payload context (the original's 0xffff) the tag is left intact;
+  // only slots 0..15 run the travel-destination expansion pass.
+  GameState no_context;
+  no_context.pilot.first_name = "Jane";
+  REQUIRE(Mission_RunMisnScriptPayload(no_context, "Q7022", -1).ok());
+  CHECK(no_context.hud_overlay.message.find("<PN>") != std::string::npos);
 }

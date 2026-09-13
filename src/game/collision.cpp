@@ -1860,9 +1860,10 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
 // count. The original then sets g_playerInventoryAndLoadoutDirty and calls
 // Outfit_RecomputeOutfitDerivedState, whose mining-scoop arm clears the latch
 // once cargo+junk reaches fleet capacity; the port routes that through
-// OutfitMarkStatsDirty. Unlike the shot arm there is no bounding-circle
-// fallback: the original always runs Sprite_TestPixelMaskOverlap. The clean
-// room still falls back to the circle only when a mask cannot be decoded.
+// NovaOutfit_RecomputeOutfitDerivedState. Unlike the shot arm there is no
+// bounding-circle fallback: the original always runs
+// Sprite_TestPixelMaskOverlap. The clean room still falls back to the circle
+// only when a mask cannot be decoded.
 void NovaWeapon_ResolveFreeflightScoop(GameState &state) {
   RefreshCollisionMasks(state);
   const std::int16_t system_id = state.player.current_system_id;
@@ -1920,7 +1921,7 @@ void NovaWeapon_ResolveFreeflightScoop(GameState &state) {
       if (player_ship) {
         // g_playerInventoryAndLoadoutDirty + Outfit_RecomputeOutfitDerivedState
         // (0x0046d4b0), including the cargo-capacity mining-scoop gate.
-        OutfitMarkStatsDirty(state);
+        NovaOutfit_RecomputeOutfitDerivedState(state);
       }
     }
   }

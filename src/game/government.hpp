@@ -50,8 +50,10 @@ namespace game {
 // per-government boolean policy flags (Government.policy_flags, GovtDef
 // +0x84). flag_index must be 0 or 1; out-of-range government ids read 0.
 // Flag 0 gates player target acquisition (Ship_IsShipAcquirableAsTarget
-// 0x0040faa0) and several aggro/relation decisions. The writer is not yet
-// identified, so the flags stay 0 in the current build (TODO(decomp)).
+// 0x0040faa0) and several aggro/relation decisions. The writer is
+// Outfit_RecomputeOutfitDerivedState (0x0046d4b0), which clears both flags and
+// rebuilds them from active ranks (flag 0x100 -> flag 0, 0x200 -> flag 1) for
+// every government allied with the rank's affiliated government.
 [[nodiscard]] bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
                                                 std::int16_t govt_id,
                                                 int flag_index);

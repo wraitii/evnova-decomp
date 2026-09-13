@@ -386,7 +386,7 @@ void NovaWeapon_ClearTransientCombatState(GameState &state) {
   // marks all live beam records inactive during the landing transition.
   // Ship slots (including the player's) get their jamming-score cache reseeded
   // to -1 at allocation; the port resets the persistent player ship here and
-  // on outfit changes (OutfitMarkStatsDirty) instead.
+  // on outfit changes (NovaOutfit_RecomputeOutfitDerivedState) instead.
   state.player.jamming_score.fill(-1);
   state.active_shots.clear();
   for (BeamHit &beam : state.beam_hit_queue) {
@@ -560,7 +560,7 @@ void NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(GameState &state) {
   }
 
   if (materialized) {
-    OutfitMarkStatsDirty(state);
+    NovaOutfit_RecomputeOutfitDerivedState(state);
   }
 }
 

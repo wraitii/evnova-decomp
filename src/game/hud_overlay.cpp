@@ -212,8 +212,9 @@ inline constexpr std::uint16_t kLaunchOn = 0x3c;
 // message shows every launch and the state is left latched (the original's
 // JMP LAB_00456158 skips the reset).
 // TODO(decomp) skipped: the original shows the queued-message buffer
-// DAT_007354d0 instead (500 frames) when a pending system/event message was
-// staged at landing; the port does not model that queue yet.
+// g_pending_overlay_message (0x007354d0) instead (500 frames) when a pending
+// system/event message was staged at landing; the port does not model that
+// queue yet.
 void NovaHud_ShowLaunchDepartureMessage(GameState &state,
                                         std::int16_t stellar_id) {
   if (state.travel.travel_hint_state < 3) {

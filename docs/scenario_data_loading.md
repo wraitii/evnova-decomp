@@ -113,6 +113,11 @@ compilation for availability/purchase) are not reconstructed yet, and string
 fields (names, availability/on-purchase expressions) come from the resource
 record name / later string blocks rather than the numeric header.
 
+Runtime state derived from owned outfits (effective stats, government policy
+flags, cargo overflow, mining scoop, carried bomb) is rebuilt by
+`Outfit_RecomputeOutfitDerivedState` (0x0046d4b0); see
+`docs/outfit_derived_state.md`.
+
 ## New-game flow integration
 
 `new_pilot_flow.cpp`:
