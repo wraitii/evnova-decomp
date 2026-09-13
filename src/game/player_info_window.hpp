@@ -8,7 +8,7 @@
 //
 // The family:
 //   NovaUi_RunPlayerSpecialInteractionWindow  0x00499c10  (run + teardown)
-//   NovaUi_DrawPlayerSpecialInteractionWindow 0x0049a540  (per-frame paint)
+//   NovaUi_DrawPlayerInfoWindow               0x0049a540  (per-frame paint)
 //   (dispatch callback)                       0x0049a3a0  (keys + tab clicks)
 //   NovaUi_HandlePlayerSpecialInteractionTabs 0x004a1ae0  (press tracking)
 //   NovaUi_DrawPlayerSpecialInteractionTabs   0x004a1c40  (strip painter)

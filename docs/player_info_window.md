@@ -73,7 +73,9 @@ Body:
    (`FUN_004d18b0` resize + `FUN_004d1a30` y-shift by `-delta * DAT_00575940`),
    and entries 1, 6, 7 are offset down by `delta` (Rect_Offset +
    `UiPanel_SetEntryRect`).
-6. `Outfit_ComputeOutfitSalePrice` (0x0046e8b0) refresh; flush input; draw;
+6. Release the main render-owner handle through
+   `NovaRender_ReleaseMainWindowOwnerGuarded` (0x0046e8b0; a platform no-op
+   in this build), then flush input and draw;
    modal loop.
 
 Loop (`NovaUi_PollTravelScriptAction` 0x00492f10 over the window with
@@ -136,7 +138,7 @@ latches down); the rest draw normal. Each button gets its rect from the DITL
 window's draw context (`UiWindow_GetDrawContextHandle` 0x004d17c0) after
 `DrawContext_SetRgbColor(PTR_DAT_00575acc)`.
 
-## Draw — NovaUi_DrawPlayerSpecialInteractionWindow (0x0049a540)
+## Draw — NovaUi_DrawPlayerInfoWindow (0x0049a540)
 
 Fills the window with the panel colour, blits the three backdrop PICTs (top
 at the window top, middle tile stretched to cover the text area, bottom at

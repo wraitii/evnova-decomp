@@ -158,6 +158,27 @@ NovaOutfit_GrantOutfitToPlayer(GameState &state,
 [[nodiscard]] std::int16_t
 Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state);
 
+// Ghidra 0x0046a680 Outfit_HasAnyCargoMissionOrJunk. True when any standard
+// cargo bin is positive, an active mission carries a valid non-negative cargo
+// quantity, or any junk quantity is positive. This is the Player Info cargo-
+// page content predicate; it deliberately does not inspect owned outfits.
+[[nodiscard]] bool Outfit_HasAnyCargoMissionOrJunk(const GameState &state);
+
+// Ghidra 0x0046ea40 Outfit_CountCarriedShipsForOutfit. For an outfit whose
+// ModType-3 slot names a mode-99 launch bay, count active, non-disabled
+// behavior-5 craft attached to the player. If none are deployed, return the
+// matching live weapon bank's secondary counter. `outfit_resource_id` uses
+// the scenario's 0x80-based resource-id convention.
+[[nodiscard]] std::int16_t
+Outfit_CountCarriedShipsForOutfit(const GameState &state,
+                                  std::int16_t outfit_resource_id);
+
+// Original Oxxx NCB semantics: an outfit is present when it is owned in the
+// inventory or represented by deployed/stowed carried ships from its bay.
+[[nodiscard]] bool
+Outfit_PlayerHasOutfitForControlExpression(const GameState &state,
+                                           std::int16_t outfit_resource_id);
+
 // Ghidra 0x0046a730 Ship_ComputeShipTotalCargoCapacity. The player ship's
 // total cargo capacity: ship-class Holds (cargo_holds) plus, for every owned
 // outfit, owned_count * ModVal for each of its slots whose ModType is 2
@@ -175,9 +196,9 @@ Outfit_ComputePlayerFleetCargoCapacity(const GameState &state);
 // (Outfit_ComputeOutfitPurchaseMass 0x0046e950). Clamped at zero. Player-only.
 [[nodiscard]] std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state);
 
-// Ghidra 0x00469100 Ship_ComputeTradeInValue. Base trade-in credit for the current
-// player ship before store/tech/rank scaling: 25% of the ship class's base
-// cost (ShipClassDef +0x58) plus 50% of the purchase price of every owned
+// Ghidra 0x00469100 Ship_ComputeTradeInValue. Base trade-in credit for the
+// current player ship before store/tech/rank scaling: 25% of the ship class's
+// base cost (ShipClassDef +0x58) plus 50% of the purchase price of every owned
 // outfit that is not persistent across a ship swap (Bible outfit flag 0x0004,
 // cached by the loader at OutfitDef +0x378; rank outfits 0x2000 still count).
 // The running total truncates toward zero after each step (the original's
