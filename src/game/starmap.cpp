@@ -1964,8 +1964,8 @@ void DrawButtons(SdlPlatform &platform,
   }
 }
 
-// Builds the map's mission-target system list (Ghidra
-// Mission_RebuildMissionTargetSystemList filling
+// Ghidra 0x004aa980 Mission_RebuildMissionTargetSystemList.
+// Builds the map's mission-target system list, filling
 // g_starmap_mission_target_system_ids): the travel and return systems of
 // every active mission, deduplicated.
 std::vector<std::int16_t> BuildMissionTargetSystems(const GameState &state) {

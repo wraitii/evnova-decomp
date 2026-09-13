@@ -61,7 +61,8 @@ enum class AttachFilter {
   return CountAttached(state, AttachFilter::kAny, category) > 0;
 }
 
-// Ui_ShowTargetCategoryPanel 0x0049e8d0.
+// Ghidra 0x0049E8D0 Ui_ShowTargetCategoryPanel.
+// SDL defers the original's immediate draw to the next HUD refresh.
 void ShowEscortPanel(EscortCommandState &escort) {
   escort.panel_timer = kPanelShowTicks;
 }

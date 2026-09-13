@@ -1230,8 +1230,9 @@ void RadarPolarOffset(float bearing_deg, float distance, float &x, float &y) {
 
 } // namespace
 
-// Ghidra 0x0049e430 Ui_DrawTargetCategoryPanel: the in-flight "Escort
-// Commands" overlay (header STR# 0x7d2 0x85). Five rows numbered 1..5: All
+// Ghidra 0x0049E430 Ui_DrawTargetCategoryPanel.
+// The in-flight "Escort Commands" overlay (header STR# 0x7d2 0x85). Five rows
+// numbered 1..5: All
 // Ships (-1) then one per class_category group (0 Fighters .. 3 Freighters,
 // 0x8c..0x8f); rows whose group has no attached ships draw dimmed, the
 // selected row draws highlighted, and present groups show their current

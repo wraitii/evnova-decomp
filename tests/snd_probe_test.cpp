@@ -2,6 +2,8 @@
 
 #include "brgr_archive.hpp"
 #include "game/game_state.hpp"
+#include "game/spaceflight.hpp"
+#include "sdl_audio.hpp"
 
 // The hyperspace jump sounds. The original preloads the jump handles in
 // FUN_004b0740 via LoadStringResourceCopyById(0x80/0x81/0x82):
@@ -43,4 +45,43 @@ TEST_CASE("hyperspace jump sounds (snd 128/130) exist and decode") {
       NovaResource_LoadNamed(kResourceTypeSnd, static_cast<std::uint16_t>(129));
   REQUIRE(warp_up_x2.has_value());
   CHECK(warp_up_x2->name.find("Warp up.x2") != std::string::npos);
+}
+
+TEST_CASE("combat chatter resolves voice families and ship parity") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  SdlAudio audio;
+
+  SECTION("invalid government falls back to voice zero") {
+    game::NovaFrame_QueueCombatChatter(state, 0, -1, 0);
+    game::NovaFrame_UpdateCombatChatter(state, audio);
+    CHECK(state.pending_combat_chatter_kind == -1);
+    CHECK(state.active_combat_chatter_sound_id >= 1000);
+    CHECK(state.active_combat_chatter_sound_id <= 1006);
+  }
+
+  SECTION("even-sized voice family preserves the ship parity") {
+    state.scenario.governments.resize(1);
+    state.scenario.governments[0].voice_type_code = 4;
+    game::NovaFrame_QueueCombatChatter(state, 2, 0, 1);
+    game::NovaFrame_UpdateCombatChatter(state, audio);
+    CHECK(state.pending_combat_chatter_kind == -1);
+    CHECK(state.active_combat_chatter_sound_id >= 1420);
+    CHECK(state.active_combat_chatter_sound_id <= 1427);
+    CHECK((state.active_combat_chatter_sound_id - 1420) % 2 == 1);
+  }
+}
+
+TEST_CASE("combat chatter cancellation resets the original sentinels") {
+  game::GameState state;
+  SdlAudio audio;
+  CHECK(state.pending_combat_chatter_kind == -1);
+  CHECK(state.pending_combat_chatter_government_id == -1);
+  CHECK(state.pending_combat_chatter_variant == -1);
+
+  game::NovaFrame_QueueCombatChatter(state, 2, 17, 1);
+  game::NovaFrame_CancelCombatChatter(state, audio);
+  CHECK(state.pending_combat_chatter_kind == -1);
+  CHECK(state.pending_combat_chatter_government_id == -1);
+  CHECK(state.pending_combat_chatter_variant == -1);
 }

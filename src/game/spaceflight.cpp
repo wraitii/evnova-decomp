@@ -197,7 +197,7 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 
 // Ghidra scope 0xb of Frame_TickSystems (0x004186b0): the per-tick in-system
 // NPC/reactivity pass. The original runs: Mission_TickShipInteractionReactions,
-// Frame_UpdateCombatChatter, Frame_UpdateScreenFlashTimers,
+// NovaFrame_UpdateCombatChatter, Frame_UpdateScreenFlashTimers,
 // Ship_TallyInboundWeaponThreat, then System_TickNpcSpawnMaintenance
 // (encounter fleets + random dude ships up to the system's avg_ships cap) and
 // Asteroid_Spawn('\x01') (the asteroid ring), before clearing the
@@ -206,12 +206,15 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 // This pass performs the mission interaction-reaction slice (0x00443760) and
 // the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance, which spawns
 // encounter-fleet leads / random dude ships toward avg_ships).
-// TODO(decomp): the combat-chatter/screen-flash/threat reaction helpers, the
-// asteroid ring and the interaction flags are still absent.
-void Stub_TickReactionsAndNpcSpawns(GameState &state, float elapsed_ticks) {
+// TODO(decomp): the screen-flash helper, asteroid ring and interaction flags
+// are still absent.
+void Stub_TickReactionsAndNpcSpawns(GameState &state,
+                                    SdlAudio &audio,
+                                    float elapsed_ticks) {
   // The original's AI mode timers use a global millisecond tick source.
   const std::uint32_t now_ms = SDL_GetTicks();
   Mission_TickShipInteractionReactions(state, now_ms);
+  NovaFrame_UpdateCombatChatter(state, audio);
   NovaWeapon_TallyInboundWeaponThreat(state);
   NovaSystem_UpdateReinforcementCountdown(state, elapsed_ticks);
   NovaSystem_TickNpcSpawnMaintenance(
@@ -493,6 +496,7 @@ void Stub_BeamHitQueue(GameState &state, float elapsed_ticks) {
 // the scope ordering and the run_full_tick gate. Each scope is a loud stub
 // (see above). Called full before drawing and reduced during transitions.
 void NovaFrame_TickSystems(GameState &state,
+                           SdlAudio &audio,
                            bool run_full_tick,
                            float elapsed_ticks) {
   // g_avg_frame_tick_scale for this tick: the normalized 30 Hz scale the
@@ -524,8 +528,8 @@ void NovaFrame_TickSystems(GameState &state,
   Stub_Collisions(state);
 
   if (run_full_tick) {
-    Stub_DrawStatus(state);                               // scope 0xc
-    Stub_TickReactionsAndNpcSpawns(state, elapsed_ticks); // scope 0xb
+    Stub_DrawStatus(state);                                      // scope 0xc
+    Stub_TickReactionsAndNpcSpawns(state, audio, elapsed_ticks); // scope 0xb
     // The first original scope-6 pass only refreshes target
     // flags/reacquisition; the full clean-room AI update belongs here, once,
     // after spawning.
@@ -1252,6 +1256,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // advance it per frame below.
   view.SpawnAmbientStars(platform, state);
   NovaFrame_TickSystems(state,
+                        audio,
                         /*run_full_tick=*/true,
                         /*elapsed_ticks=*/1.0F);
   view.DrawGameFrame(platform, state, hud);
@@ -2010,7 +2015,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
     // cursor update.
     NovaFrame_TickSystems(
-        state, /*run_full_tick=*/true, frame_time_ms / kOriginalTickMs);
+        state, audio, /*run_full_tick=*/true, frame_time_ms / kOriginalTickMs);
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
@@ -4362,14 +4367,13 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   // Frame_SpaceflightLoop, then tears the mode back down to the menu shell.
   bool returning_to_menu = false;
   NovaFrame_SpaceflightLoop(platform, audio, state, returning_to_menu, prefs);
+  NovaFrame_CancelCombatChatter(state, audio);
 
   NovaLog::Info("leaving spaceflight mode to the main menu");
 }
 
 // Ghidra Frame_QueueCombatChatter (0x00426ce0). The original writes three
-// globals; the clean-room latches the same triple on GameState. The consumer
-// pass (Frame_UpdateCombatChatter, plays the STR# comm audio/visuals) remains
-// TODO(decomp).
+// globals; the clean-room latches the same triple on GameState.
 void NovaFrame_QueueCombatChatter(GameState &state,
                                   std::int16_t kind,
                                   std::int16_t government_id,
@@ -4377,6 +4381,94 @@ void NovaFrame_QueueCombatChatter(GameState &state,
   state.pending_combat_chatter_kind = kind;
   state.pending_combat_chatter_government_id = government_id;
   state.pending_combat_chatter_variant = variant;
+}
+
+// Ghidra 0x004311F0 Frame_UpdateCombatChatter.
+void NovaFrame_UpdateCombatChatter(GameState &state, SdlAudio &audio) {
+  if (state.active_combat_chatter_sound.has_value() &&
+      audio.CountActiveByKey(state.active_combat_chatter_sound_id) == 0) {
+    state.active_combat_chatter_sound.reset();
+    state.active_combat_chatter_sound_id = -1;
+  }
+
+  if (state.pending_combat_chatter_kind == -1) {
+    return;
+  }
+  // NovaAudio_UnregisterCallbacks does not stop an active voice. SDL voices
+  // have no completion callbacks to unregister, so retaining the keyed PCM is
+  // the equivalent state until a later tick observes that the stream drained.
+  if (state.active_combat_chatter_sound.has_value()) {
+    return;
+  }
+
+  const std::int16_t kind = state.pending_combat_chatter_kind;
+  state.pending_combat_chatter_kind = -1;
+  if (kind < 0 || kind >= 3) {
+    return;
+  }
+
+  std::int16_t voice_type = 0;
+  const std::int16_t government_id = state.pending_combat_chatter_government_id;
+  if (government_id >= 0 && government_id < 0x100 &&
+      static_cast<std::size_t>(government_id) <
+          state.scenario.governments.size()) {
+    voice_type =
+        state.scenario.governments[static_cast<std::size_t>(government_id)]
+            .voice_type_code;
+  }
+  if (voice_type < 0 || voice_type >= 8) {
+    return;
+  }
+
+  const std::int16_t base_id =
+      static_cast<std::int16_t>(1000 + voice_type * 100 + kind * 10);
+  std::int16_t count = 0;
+  while (count < 9 &&
+         NovaResource_LoadSndData(static_cast<std::uint16_t>(base_id + count))
+             .has_value()) {
+    ++count;
+  }
+  if (count <= 0) {
+    return;
+  }
+
+  const std::int16_t variant = state.pending_combat_chatter_variant;
+  std::int16_t selected = 0;
+  if (variant < 0 || variant > 1 || (count & 1) != 0) {
+    selected = RollRandom(state, count);
+  } else if (count == 2) {
+    selected = variant;
+  } else {
+    selected =
+        static_cast<std::int16_t>(RollRandom(state, count / 2) * 2 + variant);
+  }
+
+  const std::int16_t sound_id = static_cast<std::int16_t>(base_id + selected);
+  const auto resource =
+      NovaResource_LoadSndData(static_cast<std::uint16_t>(sound_id));
+  if (!resource.has_value()) {
+    return;
+  }
+  auto decoded = NovaSound_Decode(*resource);
+  if (!decoded.has_value()) {
+    NovaLog::Warn("combat chatter snd {} could not be decoded", sound_id);
+    return;
+  }
+  state.active_combat_chatter_sound = std::move(*decoded);
+  state.active_combat_chatter_sound_id = sound_id;
+  audio.Play(*state.active_combat_chatter_sound, 1.0F, 1.0F, sound_id);
+}
+
+// Ghidra 0x004313C0 Frame_CancelCombatChatter.
+void NovaFrame_CancelCombatChatter(GameState &state, SdlAudio &audio) {
+  if (state.active_combat_chatter_sound.has_value() &&
+      audio.CountActiveByKey(state.active_combat_chatter_sound_id) == 0) {
+    state.active_combat_chatter_sound.reset();
+    state.active_combat_chatter_sound_id = -1;
+  }
+  state.pending_combat_chatter_kind = -1;
+  state.pending_combat_chatter_government_id = -1;
+  state.pending_combat_chatter_variant = -1;
 }
 
 } // namespace game

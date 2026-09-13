@@ -1486,11 +1486,16 @@ struct GameState {
 
   // Ghidra g_pending_combat_chatter_{kind,government_id,variant}
   // (0x007353fe/0x00735400/0x00735402). Written by Frame_QueueCombatChatter
-  // (0x00426ce0) when a ship witnesses a kill; consumed by the deferred
-  // Frame_UpdateCombatChatter pass (TODO(decomp)).
-  std::int16_t pending_combat_chatter_kind = 0;
+  // (0x00426ce0) when a ship witnesses a kill; consumed by
+  // Frame_UpdateCombatChatter (0x004311f0). NovaAudio_PreloadGameplayData
+  // initializes all three request words to -1.
+  std::int16_t pending_combat_chatter_kind = -1;
   std::int16_t pending_combat_chatter_government_id = -1;
-  std::int16_t pending_combat_chatter_variant = 0;
+  std::int16_t pending_combat_chatter_variant = -1;
+  // SDL replacement for g_pending_combat_chatter_handle (0x00591a8c). The
+  // decoded PCM stays owned until its keyed SdlAudio voice has drained.
+  std::optional<NovaSoundData> active_combat_chatter_sound;
+  std::int16_t active_combat_chatter_sound_id = -1;
 
   // The 16-slot asteroid / drift-debris pool (mirrors the original
   // `g_asteroid_states`). Shared by Asteroid_SpawnRecord (spawn), the future

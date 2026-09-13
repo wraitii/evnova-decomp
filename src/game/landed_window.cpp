@@ -987,8 +987,9 @@ LandedExit DispatchService(SdlPlatform &platform,
 // ---------------------------------------------------------------------------
 // Landed window modal run loop.
 // ---------------------------------------------------------------------------
-// Ghidra 0x0047c8e0 NovaUi_RunTravelDestinationServicesWindow (partial port:
-// the landed services modal via this run loop; Spaceport backdrop PICT 0x2134).
+// Ghidra 0x00491f30 NovaUi_RunTravelDestinationInteractionLoop (partial port).
+// NovaUi_RunTravelDestinationServicesWindow 0x0047c8e0 runs inline here: the
+// landed services modal uses the Spaceport backdrop PICT 0x2134.
 LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                 GameState &state,
                                 LandedContext &ctx) {

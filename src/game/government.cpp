@@ -140,6 +140,7 @@ bool NovaGovernment_DoGovtsShareClass(const ScenarioData &scenario,
   return false;
 }
 
+// Ghidra 0x0046E860 Government_GetGovernmentPolicyFlag.
 bool NovaGovernment_GetPolicyFlag(const ScenarioData &scenario,
                                   std::int16_t govt_id,
                                   int flag_index) {

@@ -206,11 +206,19 @@ void NovaPlayer_AddPolarVelocityClamped(float heading_rad,
 
 // Ghidra Frame_QueueCombatChatter (0x00426ce0): latches one pending combat
 // chatter request (kind, government voice, variant selector) onto GameState.
-// Consumed by the deferred Frame_UpdateCombatChatter pass (TODO(decomp)).
+// Consumed by Frame_UpdateCombatChatter.
 void NovaFrame_QueueCombatChatter(GameState &state,
                                   std::int16_t kind,
                                   std::int16_t government_id,
                                   std::int16_t variant);
+
+// Ghidra 0x004311f0 Frame_UpdateCombatChatter. Retires a drained chatter
+// resource or starts the pending acknowledgement/targeting/victory line.
+void NovaFrame_UpdateCombatChatter(GameState &state, SdlAudio &audio);
+
+// Ghidra 0x004313c0 Frame_CancelCombatChatter. Clears the pending request but
+// deliberately lets an already-playing line finish.
+void NovaFrame_CancelCombatChatter(GameState &state, SdlAudio &audio);
 
 // NPC free-flight movement integrator, ported from the movement block of Ghidra
 // Ship_HandleShip (0x00433050). The AI writes the ship's ai_desired_heading_deg
