@@ -47,26 +47,6 @@ inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
 // EncounterFleet_SpawnRandomSystemDudeShip.
 constexpr float kSpeedLockedSpeed = 0.0F;
 
-[[nodiscard]] std::int16_t SelectSpawnEntryStellar(GameState &state,
-                                                   const Ship &ship) {
-  // Ghidra 0x0046e9e0 Stellar_SelectRandomAdjacentDestination does not make a
-  // 1-in-3 yes/no decision for the emergence path. The roll selects the
-  // strict_mode argument for Stellar_SelectRandomAdjacentTravelStellar, which
-  // now applies the government ScanMask preference pools; only afterwards
-  // does this wrapper accept a hypergate/wormhole. Treating the roll as a
-  // direct gate made every accepted attempt choose the first restricted
-  // stellar and greatly overrepresented state 0x15 in systems that also have
-  // ordinary jump points.
-  const bool strict_mode = RandomBelow(state, 3) == 0;
-  const std::int16_t stellar_id = NovaAi_SelectRandomAdjacentTravelStellar(
-      state, ship, strict_mode, /*unrestricted_only=*/false);
-  const Stellar *stellar = state.scenario.Stellar(stellar_id);
-  if (stellar == nullptr || (stellar->availability_flags & 0x3000) == 0) {
-    return -1;
-  }
-  return stellar_id;
-}
-
 // Ghidra DAT_0057522c: the initial polar velocity added to an NPC entering
 // state 0x08. The original value is a 50.0f literal. Ship.heading is stored in
 // radians in the clean-room state, while the original ShipState stores degrees.
@@ -407,7 +387,8 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
   ship.heading = 0.0F;
   ship.ai_state_code = 0;
 
-  const std::int16_t entry_stellar = SelectSpawnEntryStellar(state, ship);
+  const std::int16_t entry_stellar =
+      NovaAi_SelectRandomAdjacentDestination(state, ship);
   if (entry_stellar >= 0) {
     const Stellar *stellar = state.scenario.Stellar(entry_stellar);
     ship.pos_x = static_cast<float>(stellar->pos_x);
@@ -1079,7 +1060,8 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
   ship.speed = 0.0F;
   ship.jump_destination_stellar_id = -2;
   ship.ai_state_code = 0;
-  const std::int16_t entry_stellar = SelectSpawnEntryStellar(state, ship);
+  const std::int16_t entry_stellar =
+      NovaAi_SelectRandomAdjacentDestination(state, ship);
   if (entry_stellar >= 0) {
     const Stellar *stellar = state.scenario.Stellar(entry_stellar);
     ship.pos_x = static_cast<float>(stellar->pos_x);
