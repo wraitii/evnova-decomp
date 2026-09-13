@@ -1111,7 +1111,10 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
 // avail_1000, and 0x20 forces the plain pool in strict mode. `strict_mode`
 // (the 1-in-3 roll from Stellar_SelectRandomAdjacentDestination) restricts
 // selection to the plain pool unless ScanMask 0x20 applies; `unrestricted_only`
-// (always false at the known call sites) selects only the plain pool.
+// (passed true by the behavior-0x04 interceptor caller 0x00403de0) selects
+// only the plain pool. Rejection sampling mirrors the original draw-for-draw;
+// the original's unbounded loops are capped because malformed availability
+// data can make the strict pool empty (the original would spin forever).
 std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
                                                       const Ship &ship,
                                                       bool strict_mode,
@@ -1130,7 +1133,7 @@ std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
   int eligible_count = 0; // original local_1c
   int plain_count = 0;    // original local_20
   int count_1000 = 0;     // original local_14
-  int count_2000 = 0;     // original local_98
+  int count_2000 = 0;     // original sVar4
 
   for (std::size_t i = 0; i < sys->nav_defs.size(); ++i) {
     const std::int16_t nav = sys->nav_defs[i];
@@ -1227,7 +1230,7 @@ std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
     }
     picked = pick_from([&](std::size_t s) {
       return sprite_active[s] && !travel_usable[s] && !hostile[s] &&
-             (!avail_2000[s] || !prefer_2000) && (!avail_1000[s] || !mask20);
+             (!avail_2000[s] || prefer_2000) && (!avail_1000[s] || !mask20);
     });
   } else {
     // Strict-mode pool: eligible candidates without the avail_2000 bit.
@@ -1241,6 +1244,27 @@ std::int16_t NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
     return -1;
   }
   return sys->nav_defs[static_cast<std::size_t>(picked)];
+}
+
+// Ghidra 0x0046e9e0 Stellar_SelectRandomAdjacentDestination. Picks a random
+// adjacent travel stellar for an NPC spawn, but returns the id only when
+// availability_flags & 0x3000 marks it a hypergate/wormhole; otherwise -1.
+// The NovaRandom_Range(3) roll supplies the selector's strict_mode argument
+// (it is NOT a direct 1-in-3 emergence gate): it is 1 only when the roll is 0.
+std::int16_t NovaAi_SelectRandomAdjacentDestination(GameState &state,
+                                                    const Ship &ship) {
+  const bool strict_mode =
+      std::uniform_int_distribution<int>(0, 2)(state.rng) == 0;
+  const std::int16_t stellar_id = NovaAi_SelectRandomAdjacentTravelStellar(
+      state, ship, strict_mode, /*unrestricted_only=*/false);
+  if (stellar_id < 0 || stellar_id >= 0x800) {
+    return -1;
+  }
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr || (stellar->availability_flags & 0x3000U) == 0U) {
+    return -1;
+  }
+  return stellar_id;
 }
 
 // Ghidra 0x0040cc10 Stellar_FindNearestAdjacentTravelStellar. Returns the

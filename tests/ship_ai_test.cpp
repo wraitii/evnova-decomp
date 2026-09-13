@@ -1886,3 +1886,124 @@ TEST_CASE("player-squad predicate matches Ship_IsInPlayerSquad 0x0046b8d0") {
   lone.ship_instance_id = 0;
   CHECK(game::NovaShip_IsInPlayerSquad(state, lone));
 }
+
+namespace {
+
+// Hand-build a two-candidate system for the adjacency selector. Both slots are
+// eligible travel points (!travel_usable, sprite-active, non-hostile); slot 0
+// is plain and slot 1 carries availability 0x2000. Returns true when the
+// scenario tables are large enough to overwrite.
+bool BuildTwoSlotTravelSystem(GameState &state) {
+  if (state.scenario.systems.empty() || state.scenario.stellars.size() < 2 ||
+      state.scenario.governments.empty()) {
+    return false;
+  }
+  auto &sys = state.scenario.systems[0];
+  sys.nav_defs.fill(-1);
+  sys.nav_defs[0] = 0x80;
+  sys.nav_defs[1] = 0x81;
+
+  for (std::size_t i = 0; i < 2; ++i) {
+    game::Stellar &st = state.scenario.stellars[i];
+    st = game::Stellar{};
+    st.pos_x = static_cast<std::int16_t>(10 + 10 * i);
+    st.pos_y = static_cast<std::int16_t>(10 + 10 * i);
+    st.flags = 1; // control bit set; !travel_usable, !engaged
+    st.government_id = -1;
+    st.strength_capacity = 0; // IsStellarActive false => sprite-active
+  }
+  state.scenario.stellars[1].availability_flags = 0x2000;
+  state.scenario.governments[0].scan_mask_short = 0;
+  return true;
+}
+
+} // namespace
+
+// Ghidra 0x0040c790 fallback pool. With no ScanMask preference the eligible
+// plain slot must always win; the avail_2000 slot is rejected because the
+// predicate is (!avail_2000 || prefer_2000). The old inverse term would let
+// the RNG return the 0x2000 slot here.
+TEST_CASE("adjacency selector fallback rejects unpreferred avail_2000") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(BuildTwoSlotTravelSystem(state));
+
+  game::Ship ship;
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = 0;
+
+  for (int i = 0; i < 64; ++i) {
+    CHECK(game::NovaAi_SelectRandomAdjacentTravelStellar(
+              state,
+              ship,
+              /*strict_mode=*/false,
+              /*unrestricted_only=*/false) == 0x80);
+  }
+}
+
+// ScanMask 0x80 (prefer avail_2000) routes the same system to the 0x2000 slot
+// whenever one exists, regardless of the RNG draw.
+TEST_CASE("adjacency selector prefers avail_2000 when ScanMask says so") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(BuildTwoSlotTravelSystem(state));
+  state.scenario.governments[0].scan_mask_short = 0x0080;
+
+  game::Ship ship;
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = 0;
+
+  for (int i = 0; i < 64; ++i) {
+    CHECK(game::NovaAi_SelectRandomAdjacentTravelStellar(
+              state,
+              ship,
+              /*strict_mode=*/false,
+              /*unrestricted_only=*/false) == 0x81);
+  }
+}
+
+// unrestricted_only (the behavior-0x04 interceptor's flag=1) selects only the
+// plain pool even when the government prefers avail_2000.
+TEST_CASE("adjacency selector unrestricted_only takes the plain slot") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(BuildTwoSlotTravelSystem(state));
+  state.scenario.governments[0].scan_mask_short = 0x0080;
+
+  game::Ship ship;
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = 0;
+
+  for (int i = 0; i < 64; ++i) {
+    CHECK(game::NovaAi_SelectRandomAdjacentTravelStellar(
+              state,
+              ship,
+              /*strict_mode=*/false,
+              /*unrestricted_only=*/true) == 0x80);
+  }
+}
+
+// Ghidra 0x0046e9e0 wrapper: only restricted (availability & 0x3000) travel
+// points are returned; plain travel points always yield -1.
+TEST_CASE("spawn destination wrapper accepts only restricted travel points") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  REQUIRE(BuildTwoSlotTravelSystem(state));
+
+  game::Ship ship;
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = 0;
+
+  // No preference bits: the selector's pools keep the plain slot and the
+  // wrapper declines it every time.
+  for (int i = 0; i < 32; ++i) {
+    CHECK(game::NovaAi_SelectRandomAdjacentDestination(state, ship) == -1);
+  }
+
+  // With ScanMask 0x80 the selector routes to the 0x2000 slot, which the
+  // wrapper then accepts as a wormhole.
+  state.scenario.governments[0].scan_mask_short = 0x0080;
+  for (int i = 0; i < 64; ++i) {
+    CHECK(game::NovaAi_SelectRandomAdjacentDestination(state, ship) == 0x81);
+  }
+}

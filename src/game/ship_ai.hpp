@@ -93,13 +93,21 @@ NovaAi_AimWeaponPredictiveFrom(const GameState &state,
 // eligible travel stellar in the ship's current system, applying the
 // government ScanMask preference pools and hostility filters. `strict_mode`
 // (the 1-in-3 roll from Stellar_SelectRandomAdjacentDestination) and
-// `unrestricted_only` (false at every known call site) match the original
-// selector's second and third arguments.
+// `unrestricted_only` (true for the behavior-0x04 interceptor caller
+// 0x00403de0, false elsewhere) match the original selector's second and third
+// arguments. Returns the stellar resource id (>= 0x80) or -1.
 [[nodiscard]] std::int16_t
 NovaAi_SelectRandomAdjacentTravelStellar(GameState &state,
                                          const Ship &ship,
                                          bool strict_mode,
                                          bool unrestricted_only);
+
+// Ghidra 0x0046e9e0 Stellar_SelectRandomAdjacentDestination. Runs the
+// selector with a NovaRandom_Range(3) strict_mode roll and returns the
+// chosen id only when its availability_flags & 0x3000 marks a hypergate /
+// wormhole; ordinary travel points yield -1.
+[[nodiscard]] std::int16_t
+NovaAi_SelectRandomAdjacentDestination(GameState &state, const Ship &ship);
 
 // Ghidra 0x0040cc10 Stellar_FindNearestAdjacentTravelStellar. Returns the
 // nearest adjacent, non-restricted, non-hostile travel stellar to `ship` in
