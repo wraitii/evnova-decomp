@@ -313,7 +313,7 @@ namespace {
 // ExplodType16, ProxRadius18, BlastRadius1a, Flags1c, Seeker1e) and the
 // remaining fields match the loader's WeaponDef mapping (flags_secondary +0x48,
 // burst_cycle_ticks +0x5a / burst_reset_cooldown +0x5c, turret arc +0x30,
-// homing/turn +0x32, kickback +0x56, turret_group +0x58, retarget +0x68,
+// homing/turn +0x32, kickback +0x56, turret_group +0x58, durability +0x68,
 // jam_vuln +0x5e..+0x64). See the Weapon field comments in scenario_data.hpp.
 [[nodiscard]] Weapon DecodeWeapon(std::span<const std::byte> bytes) {
   Weapon w;
@@ -388,7 +388,7 @@ namespace {
   w.turret_group_id = ReadBeI16(bytes, 0x58);
   w.burst_cycle_ticks = ReadBeI16(bytes, 0x5a);
   w.burst_reset_cooldown = ReadBeI16(bytes, 0x5c);
-  w.retarget_interval_ticks = ReadBeI16(bytes, 0x68);
+  w.point_defense_durability = ReadBeI16(bytes, 0x68);
   w.range_link_gate = ReadBeI16(bytes, 0x3e);
   const auto range_link_resource_id = ReadBeI16(bytes, 0x40);
   w.range_link_weapon_id =

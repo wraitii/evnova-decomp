@@ -207,6 +207,11 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship);
 // arms the best one.
 void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship);
 
+// Ghidra 0x004221d0 Ship_IsInboundThreatExceedingDefenses. True when the
+// signed inbound damage tally is at least 105% of the ship's current shields
+// plus armor. The original comparison is unordered-false.
+[[nodiscard]] bool NovaAi_IsInboundThreatExceedingDefenses(const Ship &ship);
+
 // Ghidra 0x0040d220 Weapon_SelectGuidedWeaponBankForPrimaryTarget. Arms the
 // first guided (mode-1) bank that can track the primary target within range;
 // applies scanner-untargetable / cloaked-target capability gates.

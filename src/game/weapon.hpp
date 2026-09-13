@@ -28,6 +28,12 @@
 
 namespace game {
 
+// Ghidra 0x00422210 Ship_TallyInboundWeaponThreat. Resets the threat latch on
+// each active ship, then sums half of each live, normal-target-state shot's
+// mass + energy damage into the shot's recorded target. The original pool holds
+// 128 shots and truncates toward zero after every individual contribution.
+void NovaWeapon_TallyInboundWeaponThreat(GameState &state);
+
 // Ghidra Weapon_RebuildWeaponBankPoolsFromOwnedOutfits (0x00463260): rebuilds
 // the player's 0x100 weapon-bank ammo/secondary counters from the currently
 // owned outfits. Every owned outfit with ModType 1 (kWeapon) contributes its
@@ -269,6 +275,11 @@ void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
 // GameState.pending_fire_sounds, mirroring the original's sVar9 > 0 gate
 // around NovaAudio_PlaySpatialByDistance.
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship);
+
+// Ghidra 0x0043a310 Weapon_SelectTurretTargetWithinArc: automatically fires
+// the first ready point-defense bank at the nearest eligible inbound guided
+// shot, falling back to an eligible attacking ship only when no shot exists.
+void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship);
 
 // Ship_HandleShip (0x00433050): count down NPC-local bank cooldowns.
 void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks);

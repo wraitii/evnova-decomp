@@ -88,7 +88,7 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(w->kickback_impulse == 0);
   CHECK(w->burst_cycle_ticks == 0); // (the old mislabeled 'max_ammo' at +0x5a)
   CHECK(w->burst_reset_cooldown == 0);
-  CHECK(w->retarget_interval_ticks == 0);
+  CHECK(w->point_defense_durability == 0);
 
   const Weapon *pulse = data.Weapon(0xa2);
   REQUIRE(pulse != nullptr);

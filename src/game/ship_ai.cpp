@@ -14,9 +14,8 @@
 //    fuel-transfer chatter, carrier-bay launch) are documented no-ops until
 //    those systems land; combat-heavy branches that depend on the not-yet-
 //    reconstructed disable systems are conservatively gated. NPC weapon-bank
-//    selection is ported (the NovaAi_Select* helpers); point-defense
-//    auto-select, inbound-threat gating, and formation-offset mirroring remain
-//    TODO(decomp).
+//    selection and point-defense auto-fire are ported; formation-offset
+//    mirroring remains TODO(decomp).
 //  * "Wander": Behavior 0x01 + state 0/1 makes a ship pick a random adjacent
 //    travel stellar and steer toward it -- the visible "make them move around
 //    the system" baseline.
@@ -5571,10 +5570,7 @@ void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     return;
   }
-  // TODO(decomp(0x0043a310)) skipped: the head-of-function
-  // Weapon_SelectTurretTargetWithinArc point-defense auto-selection (which
-  // can fire a turret shot this frame and pick the target itself) is not
-  // reconstructed; turret banks still fire through the normal firing path.
+  NovaWeapon_SelectTurretTargetWithinArc(state, ship);
   const std::int16_t target_slot = ship.primary_target_ship_slot;
   if (target_slot < 0 ||
       !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
@@ -5678,6 +5674,28 @@ void NovaAi_SelectWeaponBankForCurrentTarget(GameState &state, Ship &ship) {
   }
 }
 
+// Ghidra 0x004221d0 Ship_IsInboundThreatExceedingDefenses.
+bool NovaAi_IsInboundThreatExceedingDefenses(const Ship &ship) {
+  // The original first rounds the defensive sum to float, then multiplies by
+  // a binary64 1.05 without storing the x87 result. FMA recovers the rounding
+  // residual when the binary64 product lands exactly on the integer threat,
+  // preserving that boundary even where long double is only binary64.
+  constexpr double kDefenseBudgetScale = 1.05;
+  const double defenses = ship.shield_points + ship.armor_points;
+  const double budget = defenses * kDefenseBudgetScale;
+  const double threat = ship.inbound_weapon_threat;
+  if (threat < budget) {
+    return false;
+  }
+  if (threat > budget) {
+    return true;
+  }
+  if (std::isnan(budget)) {
+    return false;
+  }
+  return std::fma(defenses, kDefenseBudgetScale, -budget) <= 0.0;
+}
+
 // Ghidra 0x0040d220 Weapon_SelectGuidedWeaponBankForPrimaryTarget. Arms the
 // first fireable guided (mode-1) bank that can track the primary target
 // within the (0.95-scaled) intercept range; applies the scanner-untargetable
@@ -5710,11 +5728,9 @@ void NovaAi_SelectGuidedWeaponBankForPrimaryTarget(GameState &state,
       !NovaAi_OutfitHasCloakScannerCapability(state, ship, 0x08U)) {
     return; // cloaked target, no cloak-scanner outfit
   }
-  // TODO(decomp(0x004221d0)) skipped: Ship_IsInboundThreatExceedingDefenses
-  // (decline guided selection when the target's inbound_weapon_threat exceeds
-  // its shield+armor*1.05 budget) is not modelled -- no inbound-threat field
-  // exists -- so the original's early-return under heavy incoming fire is not
-  // reproduced.
+  if (NovaAi_IsInboundThreatExceedingDefenses(target)) {
+    return;
+  }
   const ShipClass *ship_class = ShipClassFor(state, ship);
   const float distance_sq =
       SquaredDistance(ship.pos_x, ship.pos_y, target.pos_x, target.pos_y);
