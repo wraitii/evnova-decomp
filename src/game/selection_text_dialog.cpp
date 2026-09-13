@@ -416,9 +416,9 @@ void NovaUi_RunTextReaderDialog(
       if (input->key == TextKey::physical) {
         // Port convenience: DIK arrows scroll (the original scrolls only via
         // the arrow buttons).
-        if (input->key_code == 0xc8) { // DIK_UP
+        if (input->key_code == 0x61) { // normalized Up
           view.ScrollBy(-10.0F);
-        } else if (input->key_code == 0xd0) { // DIK_DOWN
+        } else if (input->key_code == 0x66) { // normalized Down
           view.ScrollBy(10.0F);
         }
       }

@@ -6,20 +6,19 @@
 
 namespace game {
 
-class NovaFontCache;
+struct GameState;
 
 // Runs the main-menu ABOUT NOVA modal (Ghidra 0x00486120
 // Menu_RunAboutNovaDialog; the sp\n95n 605 button is labelled ABOUT NOVA and
 // the dialog loads d\x91sc 0x7fff "About text"). The original builds it on
 // Ui_LoadSelectionDialogResource + Ui_RunTravelSelectionDialog over DLOG
-// 0xbbb; this port keeps the DLOG geometry (window 441x313, text area, OK
-// button, scroll arrows) but draws the scrolling text region itself.
+// 0xbbb; the port uses that shared reader too.
 //
 // render_background is invoked each frame before the dialog is drawn so the
 // menu stays visible behind the modal. Returns when the OK button is clicked
 // or Enter/Escape is pressed.
 void NovaMenu_RunAboutDialog(SdlPlatform &platform,
-                             NovaFontCache &font_cache,
+                             GameState &state,
                              const std::function<void()> &render_background);
 
 } // namespace game

@@ -34,8 +34,8 @@ enum class TextKey {
 struct TextInput {
   TextKey key = TextKey::none;
   char character = '\0'; // valid when key == TextKey::character
-  // Original EV Nova key code (DIK-style for physical keys, with the four
-  // legacy flight letters represented as ASCII by their preference defaults).
+  // Original EV Nova normalized physical-key code (mostly DIK-style, with
+  // navigation and right-side modifiers in the compact 0x60..0x6f range).
   // 0xffff means that this event has no bindable key code.
   std::uint16_t key_code = 0xffff;
   // Shift state at the moment of the event. The original reads this from the
