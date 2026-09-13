@@ -1,5 +1,7 @@
 #include "landed_store.hpp"
 
+#include "hud_overlay.hpp"
+#include "mission.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
@@ -896,6 +898,249 @@ bool Player_SwapShipWithEscort(GameState &state,
   state.player.vel_y = 0.0F;
   NovaLanded_ExecuteControlSet(state, new_ship->on_purchase_expr);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Escort fleet trade + payroll (Ghidra 0x004229d0 / 0x004232d0)
+// ---------------------------------------------------------------------------
+namespace {
+
+// Ghidra Ship_FormatLocalizedCountWord (0x00465d90): 1..10 load STR# 0x89
+// "Date/Numbers" entries 0x1d..0x26 ("one".."ten"); anything else is decimal
+// digits. The translate_first input-map highlight quirk is not modelled (see
+// the identical travel.cpp FormatArrivalCountWord).
+[[nodiscard]] std::string FormatLocalizedCountWord(int count) {
+  if (count < 1 || count > 10) {
+    return std::to_string(count);
+  }
+  if (auto word = NovaHud_LoadStringEntry(
+          0x89, static_cast<std::uint16_t>(count + 0x1c))) {
+    return *word;
+  }
+  return std::to_string(count);
+}
+
+// Ghidra CString_AppendFormattedQuantity (0x00465c10): plain digits below
+// 1000, comma grouping below one million, x.xxM above.
+[[nodiscard]] std::string FormattedQuantity(std::uint32_t value) {
+  if (value < 1000) {
+    return std::to_string(value);
+  }
+  if (value < 1000000) {
+    const auto thousands = value / 1000;
+    const auto remainder = value % 1000;
+    return std::to_string(thousands) + "," +
+           std::string(remainder < 100 ? 1 : 0, '0') +
+           std::string(remainder < 10 ? 1 : 0, '0') + std::to_string(remainder);
+  }
+  const auto millions = value / 1000000;
+  const auto fraction = (value % 1000000) / 10000;
+  return std::to_string(millions) + "." +
+         std::string(fraction < 10 ? 1 : 0, '0') + std::to_string(fraction) +
+         "M";
+}
+
+// One 1-based entry from the misc game-strings pool STR# 0x7d2.
+[[nodiscard]] std::string MiscString(std::uint16_t entry) {
+  return NovaHud_LoadStringEntry(0x7d2, entry).value_or(std::string{});
+}
+
+// The cached "credit"/"credits" pair (Ghidra DAT_0072f2cc / DAT_0072f2ec,
+// STR# 0x7d2 entries 0x20/0x21).
+[[nodiscard]] std::string CreditWord(std::uint32_t amount) {
+  return MiscString(amount < 2 ? 0x20 : 0x21);
+}
+
+// Reseeds the class-default weapon secondary ("carried ammo") counters for
+// every one of the 0x100 banks, leaving the loaded-ammo counters untouched —
+// the fleet pass's third phase. The clean-room ShipClass carries only the
+// eight stock banks, so non-stock slots reset to 0. Keep the NPC-bank init
+// cache in step so the stock ammo is not re-expanded after an upgrade zeroed
+// it (NovaWeapon_EnsureNpcWeaponBanks).
+void ReseedWeaponSecondary(Ship &ship, const ShipClass *cls) {
+  ship.npc_weapon_bank_secondary.fill(0);
+  if (cls != nullptr) {
+    for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
+      if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
+        continue;
+      }
+      ship.npc_weapon_bank_secondary[static_cast<std::size_t>(
+          stock.weapon_id - 0x80)] = stock.ammo_load;
+    }
+  }
+  ship.npc_weapon_banks_ship_class = ship.ship_class_id;
+}
+
+} // namespace
+
+// Ghidra 0x004229d0 Player_ProcessEscortFleetAtStellar.
+void Player_ProcessEscortFleetAtStellar(
+    GameState &state,
+    std::int16_t stellar_id,
+    const std::function<void(const std::string &)> &show_text) {
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar != nullptr && (stellar->flags & 0x8U) != 0U) {
+    int sold = 0;
+    int upgraded = 0;
+    std::uint32_t sold_value = 0;
+    std::uint32_t upgraded_cost = 0;
+
+    // (1) Sell every escort marked for release (ShipState +0xBE).
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      Ship &ship = state.ShipAt(slot);
+      if (!ship.is_active || ship.squad_leader_ship_slot != 0 ||
+          ship.ai_behavior_code != 6 || ship.escort_released_mark == 0 ||
+          ship.mission_fleet_slot != -1 || NovaAiShip_IsDisabled(state, ship)) {
+        continue;
+      }
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      const std::int32_t value = cls != nullptr ? cls->escort_sell_value : 0;
+      state.player.credits += value;
+      sold_value += static_cast<std::uint32_t>(value);
+      ship.is_active = false;
+      ship.squad_leader_ship_slot = -1;
+      state.stat_cache_valid = false;
+      ++sold;
+    }
+
+    // (2) Upgrade marked escorts (ShipState +0xBF), then (3) refill
+    // shield/armor and the weapon secondary for every slot 1..0x3f — the
+    // original runs the refill unconditionally inside the same loop.
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      Ship &ship = state.ShipAt(slot);
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      if (ship.is_active && ship.squad_leader_ship_slot == 0 &&
+          ship.ai_behavior_code == 6 && ship.escort_upgrade_mark != 0 &&
+          cls != nullptr && cls->upgrade_to_ship_class_id != -1 &&
+          ship.mission_fleet_slot == -1 &&
+          cls->escort_upgrade_cost <= state.player.credits) {
+        const std::int32_t cost = cls->escort_upgrade_cost;
+        ++upgraded;
+        upgraded_cost += static_cast<std::uint32_t>(cost);
+        state.player.credits -= cost;
+        state.stat_cache_valid = false;
+        ship.ship_class_id = cls->upgrade_to_ship_class_id;
+        ship.npc_weapon_bank_ammo.fill(0);
+        ship.npc_weapon_bank_secondary.fill(0);
+        ship.escort_upgrade_mark = 0;
+        cls = state.scenario.Ship(
+            static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      }
+      if (cls != nullptr) {
+        // The original reads ShipClassDef.base_shield_points (+0x5C) /
+        // base_armor_points (+0x60); the clean-room class carries the same
+        // Bible Shield/Armor values as base_shield/base_armor.
+        ship.shield_points = static_cast<float>(cls->base_shield);
+        ship.armor_points = static_cast<float>(cls->base_armor);
+      }
+      ReseedWeaponSecondary(ship, cls);
+    }
+
+    if (sold > 0 || upgraded > 0) {
+      std::string text;
+      if (sold > 0) {
+        text += FormatLocalizedCountWord(sold);
+        text += " ";
+        text += MiscString(sold == 1 ? 0x12a : 299);
+        text += " ";
+        text += MiscString(300);
+        text += " ";
+        text += FormattedQuantity(sold_value);
+        text += " ";
+        text += CreditWord(sold_value);
+        text += ".";
+        if (upgraded > 0) {
+          text += "\r\r";
+        }
+      }
+      if (upgraded > 0) {
+        text += FormatLocalizedCountWord(upgraded);
+        text += " ";
+        text += MiscString(upgraded == 1 ? 0x12a : 299);
+        text += " ";
+        text += MiscString(0x12d);
+        text += " ";
+        text += FormattedQuantity(upgraded_cost);
+        text += " ";
+        text += CreditWord(upgraded_cost);
+        text += ".";
+      }
+      if (show_text) {
+        show_text(text);
+      }
+      // The sale/upgrade booking takes (sold + upgraded) / 2 days. The
+      // original also emits a debug-only date trace before ticking.
+      const std::int16_t days =
+          static_cast<std::int16_t>((sold + upgraded) / 2);
+      for (std::int16_t i = 0; i < days; ++i) {
+        Mission_TickDailyWorldUpdate(state);
+      }
+    }
+  }
+  // Tail: unconditionally charge one payroll period (0x004232d0).
+  Player_ProcessEscortPayroll(state, 1, show_text);
+}
+
+// Ghidra 0x004232d0 Player_ProcessEscortPayroll.
+void Player_ProcessEscortPayroll(
+    GameState &state,
+    std::int16_t periods,
+    const std::function<void(const std::string &)> &show_text) {
+  int defected = 0;
+  for (std::int16_t period = 0; period < periods; ++period) {
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      Ship &ship = state.ShipAt(slot);
+      if (!ship.is_active || ship.squad_leader_ship_slot != 0 ||
+          ship.ai_behavior_code != 6 || NovaAiShip_IsDisabled(state, ship)) {
+        continue;
+      }
+      // A mission-fleet escort whose mission has spawned its fleet is exempt
+      // from upkeep (and cannot defect for non-payment).
+      const std::int16_t fleet_slot = ship.mission_fleet_slot;
+      bool mission_fleet_escort = false;
+      if (fleet_slot >= 0 && static_cast<std::size_t>(fleet_slot) <
+                                 GameState::kMaxActiveMissions) {
+        const auto index = static_cast<std::size_t>(fleet_slot);
+        mission_fleet_escort =
+            state.active_mission_runtime_flags[index].is_active &&
+            state.active_missions[index].fleet_spawn_goal == 1;
+      }
+      if (mission_fleet_escort || ship.escort_origin_mark == 0) {
+        continue;
+      }
+      const ShipClass *cls = state.scenario.Ship(
+          static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+      // Upkeep is trunc(base_cost * 0.01); the 0.01 is the shared double at
+      // 0x00575298 (x87 FIST truncation idiom at 0x004233bb).
+      const std::int32_t upkeep =
+          cls != nullptr
+              ? static_cast<std::int32_t>(static_cast<double>(cls->cost) * 0.01)
+              : 0;
+      if (state.player.credits < upkeep) {
+        ++defected;
+        if (ship.ai_behavior_code == 6 && fleet_slot == -1 && cls != nullptr &&
+            cls->default_ai_behavior < 3) {
+          // TODO(decomp(0x00469810)) skipped: the defecting escort takes its
+          // share of the player's cargo/junk
+          // (Player_TransferCargoAndJunkToEscortByRatio); per-escort cargo
+          // bins are not modelled yet (same skip as escort_formation.cpp and
+          // ship_visual.cpp).
+        }
+        state.stat_cache_valid = false;
+        ship.is_active = false;
+        ship.squad_leader_ship_slot = -1;
+        ship.ai_behavior_code = 1;
+      } else {
+        state.player.credits -= upkeep;
+        state.stat_cache_valid = false;
+      }
+    }
+  }
+  if (defected > 0 && show_text) {
+    show_text(MiscString(defected == 1 ? 0x12e : 0x12f));
+  }
 }
 
 } // namespace game

@@ -600,6 +600,26 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
     s.require_lo = ReadBe32(bytes, 0x380);
     s.require_hi = ReadBe32(bytes, 0x384);
   }
+  // Escort upgrade/sale trio (Bible UpgradeTo/EscUpgrdCost/EscSellValue;
+  // loader 0x004c15dd..0x004c41e9). UpgradeTo is rebased to a zero-based class
+  // id (below 0x80 -> -1), a negative upgrade cost clamps to 0, and a
+  // non-positive sell value defaults to trunc(0.10 * Cost) via the x87 FIST
+  // truncation idiom (0x004c4170).
+  if (bytes.size() >= 0x72e + 4) {
+    const std::int16_t upgrade = ReadBeI16(bytes, 0x728);
+    s.upgrade_to_ship_class_id = upgrade >= 0x80
+                                     ? static_cast<std::int16_t>(upgrade - 0x80)
+                                     : static_cast<std::int16_t>(-1);
+    s.escort_upgrade_cost = ReadBeI32(bytes, 0x72a);
+    if (s.escort_upgrade_cost < 0) {
+      s.escort_upgrade_cost = 0;
+    }
+    s.escort_sell_value = ReadBeI32(bytes, 0x72e);
+    if (s.escort_sell_value <= 0) {
+      s.escort_sell_value =
+          static_cast<std::int32_t>(static_cast<double>(s.cost) * 0.1);
+    }
+  }
   return s;
 }
 

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace game {
@@ -153,5 +154,29 @@ void NovaLanded_CloseOutfitterSession(GameState &state);
                                              std::int16_t stellar_id,
                                              std::int16_t ship_id,
                                              std::string_view player_ship_name);
+
+// Ghidra 0x004229d0 Player_ProcessEscortFleetAtStellar. Auto fleet-trade pass
+// run at the end of the Spaceport interaction loop: at a shipyard-capable
+// stellar (`travel_flags & 8`) it sells escorts marked for release, upgrades
+// escorts marked for upgrade (when UpgradeTo is set and affordable), refills
+// base shield/armor and weapon secondary for every ship slot, shows the
+// localized summary, then advances `(sold + upgraded) / 2` days. Always ends
+// by calling Player_ProcessEscortPayroll(1). `show_text` presents the summary
+// messages (the original's Ui_RunTravelSelectionDialog); pass an empty
+// callback to suppress the modal (tests).
+void Player_ProcessEscortFleetAtStellar(
+    GameState &state,
+    std::int16_t stellar_id,
+    const std::function<void(const std::string &)> &show_text);
+
+// Ghidra 0x004232d0 Player_ProcessEscortPayroll. Runs `periods` payroll passes
+// over the player's behavior-6 escorts attached to the player: each period
+// deducts trunc(class.base_cost * 0.01) from the player's credits; an escort
+// that cannot be paid defects (deactivated), and the localized STR# 0x7d2
+// 0x12e/0x12f message is shown once if any did. `show_text` as above.
+void Player_ProcessEscortPayroll(
+    GameState &state,
+    std::int16_t periods,
+    const std::function<void(const std::string &)> &show_text);
 
 } // namespace game

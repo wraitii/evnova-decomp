@@ -5,6 +5,7 @@ add_executable(evnova_tests
     cicn_test.cpp
     collision_test.cpp
     docked_dialog_test.cpp
+    escort_fleet_test.cpp
     gameplay_interface_test.cpp
     government_test.cpp
     hud_overlay_test.cpp

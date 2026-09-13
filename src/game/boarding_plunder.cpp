@@ -1944,7 +1944,9 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
             // before conversion.
             target.ai_behavior_code = 6;
             target.squad_leader_ship_slot = 0;
-            target.escort_origin_mark = 0; // field_0xbb
+            target.escort_origin_mark = 0;   // field_0xbb
+            target.escort_released_mark = 0; // field_0xbe
+            target.escort_upgrade_mark = 0;  // field_0xbf
             target.armor_points = max_armor * kCapturedArmorFraction;
             target.faction_or_government_id = -1;
             target.pers_def_slot = -1;
@@ -1954,8 +1956,8 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
             target.cloak_fade_progress = 0.0F;
             target.defense_fleet_home_stellar_id = -1;
             target.ai_hostility_accumulator = 0;
-            // TODO(decomp): escort_released_mark / escort_upgrade_mark /
-            // jamming_score_* fields are not modelled in the port.
+            // TODO(decomp): jamming_score_* is reset by the capture path but
+            // remains deferred with the electronic-warfare subsystem.
             target.ai_state_code = 0;
             target.ai_control_mode = 0;
             target.ai_secondary_target_slot = -1;

@@ -1831,7 +1831,9 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.mission_hail_latch = 0;
   ship.afterburner_latch = NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;
   ship.mining_scoop_active = NovaOutfit_HasMiningScoopOutfit(state, ship);
-  ship.escort_origin_mark = 0; // ShipState +0xbb
+  ship.escort_origin_mark = 0;   // ShipState +0xbb
+  ship.escort_released_mark = 0; // ShipState +0xbe
+  ship.escort_upgrade_mark = 0;  // ShipState +0xbf
   ship.mission_owner_slot = -1;
   ship.ai_behavior_code = 5;
   ship.faction_or_government_id = launcher.faction_or_government_id;
@@ -1878,9 +1880,8 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.escort_command_pending = 0;
   // TODO(decomp): the original also zeroes ShipState fields not yet on the
   // clean-room Ship struct: field_0x60, weapon_exit_animation_phase,
-  // alternate_sprite_cycle_index, weapon_sprite_flash_level,
-  // escort_released_mark/escort_upgrade_mark, and the field_0xc924 short
-  // (0xffff).
+  // alternate_sprite_cycle_index, weapon_sprite_flash_level, and the
+  // field_0xc924 short (0xffff).
   ship.voice_type_mode = RandomBelow(state, 2);
   if (cls != nullptr && cls->inherent_attributes_govt != -1) {
     if (const Government *govt =
