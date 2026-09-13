@@ -77,10 +77,7 @@ MissionControlExpressionState(const GameState &state) {
   };
   expression.is_male = [&state] { return state.control.male; };
   expression.owns_outfit = [&state](std::int16_t id) {
-    return id >= 0 &&
-           id < static_cast<std::int16_t>(
-                    state.inventory.outfit_owned_count.size()) &&
-           state.inventory.outfit_owned_count[static_cast<std::size_t>(id)] > 0;
+    return Outfit_PlayerHasOutfitForControlExpression(state, id);
   };
   expression.has_explored = [&state](std::int16_t id) {
     return id >= 0 && id < 0x800 &&

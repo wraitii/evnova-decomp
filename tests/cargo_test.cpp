@@ -79,6 +79,74 @@ TEST_CASE("cargo total counts carried mission cargo", "[cargo]") {
   CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 9);
 }
 
+TEST_CASE("cargo content predicate includes valid active mission cargo",
+          "[cargo]") {
+  GameState state;
+  CHECK_FALSE(Outfit_HasAnyCargoMissionOrJunk(state));
+
+  state.inventory.cargo_bins[2] = 1;
+  CHECK(Outfit_HasAnyCargoMissionOrJunk(state));
+  state.inventory.cargo_bins[2] = 0;
+
+  constexpr std::size_t kSlot = 4;
+  state.active_mission_runtime_flags[kSlot].is_active = true;
+  ActiveMission &mission = state.active_missions[kSlot];
+  mission.carrying_resources = true;
+  mission.cargo_type_id = 3;
+  mission.cargo_qty_tons = 0;
+  CHECK(Outfit_HasAnyCargoMissionOrJunk(state));
+
+  mission.cargo_type_id = -1;
+  CHECK_FALSE(Outfit_HasAnyCargoMissionOrJunk(state));
+  mission.cargo_type_id = 3;
+  mission.cargo_qty_tons = -1;
+  CHECK_FALSE(Outfit_HasAnyCargoMissionOrJunk(state));
+  state.active_mission_runtime_flags[kSlot].is_active = false;
+  state.inventory.junk_counts[0x7f] = 1;
+  CHECK(Outfit_HasAnyCargoMissionOrJunk(state));
+}
+
+TEST_CASE("carried-ship outfit count prefers deployed craft then bay ammo",
+          "[outfit][carrier]") {
+  GameState state;
+  state.scenario.outfits.resize(1);
+  state.scenario.weapons.resize(1);
+  state.scenario.ships.resize(1);
+
+  Outfit &fighter_outfit = state.scenario.outfits[0];
+  fighter_outfit.mod_type = static_cast<std::int16_t>(OutfitEffect::kAmmo);
+  fighter_outfit.mod_val = 0;
+  Weapon &bay = state.scenario.weapons[0];
+  bay.weapon_mode_code = 99;
+  bay.ammo_type = 0x80;
+
+  state.weapon_bank_ammo[0] = 1;
+  state.weapon_bank_secondary[0] = 3;
+  CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 3);
+  CHECK(Outfit_PlayerHasOutfitForControlExpression(state, 0x80));
+
+  Ship &first = state.ShipAt(1);
+  first.is_active = true;
+  first.ship_instance_id = 1;
+  first.squad_leader_ship_slot = 0;
+  first.ai_behavior_code = 5;
+  first.ship_class_id = 0;
+  Ship &second = state.ShipAt(2);
+  second = first;
+  second.ship_instance_id = 2;
+  CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 2);
+
+  first.ai_behavior_code = 6;
+  second.is_active = false;
+  CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 3);
+
+  state.weapon_bank_ammo[0] = 0;
+  CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 0);
+  CHECK_FALSE(Outfit_PlayerHasOutfitForControlExpression(state, 0x80));
+  state.inventory.outfit_owned_count[0] = 1;
+  CHECK(Outfit_PlayerHasOutfitForControlExpression(state, 0x80));
+}
+
 TEST_CASE("jettison_all drains abortable mission cargo and fails the mission",
           "[cargo][jettison]") {
   GameState state;

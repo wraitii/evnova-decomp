@@ -8,6 +8,7 @@
 #include "freeflight_objects.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
+#include "ship_ai.hpp"
 #include "targeting.hpp"
 #include "travel.hpp"
 
@@ -814,6 +815,92 @@ std::int16_t Outfit_ComputePlayerCargoAndJunkTotal(const GameState &state) {
   return static_cast<std::int16_t>(total);
 }
 
+// Ghidra 0x0046a680 Outfit_HasAnyCargoMissionOrJunk.
+bool Outfit_HasAnyCargoMissionOrJunk(const GameState &state) {
+  if (std::any_of(state.inventory.cargo_bins.begin(),
+                  state.inventory.cargo_bins.end(),
+                  [](std::int16_t quantity) { return quantity > 0; })) {
+    return true;
+  }
+  for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
+    if (!state.active_mission_runtime_flags[slot].is_active) {
+      continue;
+    }
+    const ActiveMission &mission = state.active_missions[slot];
+    if (mission.carrying_resources && mission.cargo_type_id >= 0 &&
+        mission.cargo_qty_tons >= 0) {
+      return true;
+    }
+  }
+  return std::any_of(state.inventory.junk_counts.begin(),
+                     state.inventory.junk_counts.end(),
+                     [](std::int16_t quantity) { return quantity > 0; });
+}
+
+// Ghidra 0x0046ea40 Outfit_CountCarriedShipsForOutfit.
+std::int16_t
+Outfit_CountCarriedShipsForOutfit(const GameState &state,
+                                  std::int16_t outfit_resource_id) {
+  const Outfit *outfit = state.scenario.Outfit(outfit_resource_id);
+  if (outfit == nullptr) {
+    return 0;
+  }
+
+  std::int16_t carried_ship_class = -1;
+  for (const Effect effect : OutfitEffects(*outfit)) {
+    if (effect.type != static_cast<std::int16_t>(OutfitEffect::kAmmo) ||
+        effect.val < 0 || effect.val >= 0x100) {
+      continue;
+    }
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(effect.val + 0x80));
+    if (weapon != nullptr && weapon->weapon_mode_code == 99) {
+      carried_ship_class = static_cast<std::int16_t>(weapon->ammo_type - 0x80);
+      break;
+    }
+  }
+  if (carried_ship_class < 0) {
+    return 0;
+  }
+
+  std::int16_t deployed = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (ship.is_active && ship.squad_leader_ship_slot == 0 &&
+        ship.ai_behavior_code == 5 &&
+        ship.ship_class_id == carried_ship_class &&
+        !NovaAiShip_IsDisabled(state, ship)) {
+      ++deployed;
+    }
+  }
+  if (deployed > 0) {
+    return deployed;
+  }
+
+  for (std::size_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    const std::size_t counter = bank * 100;
+    if (weapon != nullptr && weapon->weapon_mode_code == 99 &&
+        state.weapon_bank_ammo[counter] > 0 &&
+        weapon->ammo_type - 0x80 == carried_ship_class &&
+        state.weapon_bank_secondary[counter] > 0) {
+      return state.weapon_bank_secondary[counter];
+    }
+  }
+  return 0;
+}
+
+bool Outfit_PlayerHasOutfitForControlExpression(
+    const GameState &state, std::int16_t outfit_resource_id) {
+  if (outfit_resource_id < 0x80 || outfit_resource_id >= 0x280) {
+    return false;
+  }
+  const std::size_t index = static_cast<std::size_t>(outfit_resource_id - 0x80);
+  return state.inventory.outfit_owned_count[index] > 0 ||
+         Outfit_CountCarriedShipsForOutfit(state, outfit_resource_id) > 0;
+}
+
 // Ghidra 0x0046a730 Ship_ComputeShipTotalCargoCapacity. The player's total
 // cargo capacity: class Holds plus ModType-2 (cargo space) outfit mods
 // weighted by owned count. The original multiplies each (owned * ModVal) in
@@ -885,10 +972,11 @@ std::int32_t Outfit_ComputePlayerFreeMass(const GameState &state) {
   return std::max<std::int32_t>(0, free_mass);
 }
 
-// Ghidra 0x00469100 Ship_ComputeTradeInValue. The original seeds with 25% of the
-// current ship class's base cost, then adds 50% of each owned non-persistent
-// outfit's purchase price (mass-scaled against the current hull), truncating
-// the running total toward zero after every step and clamping at 0.
+// Ghidra 0x00469100 Ship_ComputeTradeInValue. The original seeds with 25% of
+// the current ship class's base cost, then adds 50% of each owned
+// non-persistent outfit's purchase price (mass-scaled against the current
+// hull), truncating the running total toward zero after every step and clamping
+// at 0.
 std::int32_t Ship_ComputeTradeInValue(const GameState &state) {
   if (state.player.ship_class_id < 0) {
     return 0;

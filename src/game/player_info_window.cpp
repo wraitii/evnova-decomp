@@ -675,14 +675,7 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
   // commodity/junk defs are modelled (tracker: junk resource defs
   // unmodelled).
   {
-    bool any_cargo = false;
-    for (std::int16_t bin : state.inventory.cargo_bins) {
-      any_cargo = any_cargo || bin > 0;
-    }
-    for (std::int16_t junk : state.inventory.junk_counts) {
-      any_cargo = any_cargo || junk > 0;
-    }
-    if (any_cargo) {
+    if (Outfit_HasAnyCargoMissionOrJunk(state)) {
       NovaLog::Todo("player-info: cargo summary text (commodity/junk names "
                     "unmodelled) — page falls back to the draw-side cargo "
                     "list");
@@ -794,9 +787,8 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
     return result;
   }
 
-  // Weapon_ReconcileOutfitPoolWithWeaponBanks (0x00462ec0) and
-  // Outfit_ComputeOutfitSalePrice (0x0046e8b0) refresh the outfit ledger
-  // before the window opens; the port keeps those ledgers warm elsewhere.
+  // Weapon_ReconcileOutfitPoolWithWeaponBanks (0x00462ec0) refreshes the
+  // outfit ledger before the window opens.
   // TODO(decomp(0x00462ec0)).
 
   auto definition = NovaResource_LoadDialogDefinition(kDialogId);

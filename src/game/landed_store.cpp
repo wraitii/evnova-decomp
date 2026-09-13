@@ -161,8 +161,7 @@ NovaLanded_ControlExpressionState(const GameState &state) {
       .is_male = [&state] { return state.control.male; },
       .owns_outfit =
           [&state](std::int16_t id) {
-            return IsValidOutfit(state, id) &&
-                   state.inventory.outfit_owned_count[id - 0x80] > 0;
+            return Outfit_PlayerHasOutfitForControlExpression(state, id);
           },
       .has_explored =
           [&state](std::int16_t id) {
