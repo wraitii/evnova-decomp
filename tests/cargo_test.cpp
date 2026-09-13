@@ -1,6 +1,6 @@
 // Cargo bookkeeping tests: the Player Info Jettison pass
-// (Outfit_RedistributeFleetCargoOverflow 0x0041f330) and the AI boarding
-// bin-to-bin plunder stage of Outfit_BoardShipAndTransferCargo (0x00412550).
+// (Player_RedistributeFleetCargoOverflow 0x0041f330) and the AI boarding
+// bin-to-bin plunder stage of Boarding_BoardShipAndTransferCargo (0x00412550).
 
 #include "game/boarding_plunder.hpp"
 #include "game/freeflight_objects.hpp"
@@ -29,9 +29,9 @@ TEST_CASE("jettison clears the player cargo bins and junk counts",
 
   // jettison_all = false (the in-flight non-mission dump / overflow path):
   // only the standard bins and junk are cleared.
-  NovaOutfit_RedistributeFleetCargoOverflow(state,
-                                            /*jettison_all=*/false,
-                                            /*now_ms=*/1000);
+  Player_RedistributeFleetCargoOverflow(state,
+                                        /*jettison_all=*/false,
+                                        /*now_ms=*/1000);
 
   for (const std::int16_t bin : state.inventory.cargo_bins) {
     CHECK(bin == 0);
@@ -62,30 +62,30 @@ TEST_CASE("cargo total counts carried mission cargo", "[cargo]") {
   state.inventory.junk_counts.fill(0);
   state.inventory.junk_counts[1] = 4;
 
-  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 9);
+  CHECK(Player_ComputeCargoAndJunkTotal(state) == 9);
 
   constexpr std::size_t kSlot = 2;
   state.active_mission_runtime_flags[kSlot].is_active = true;
   ActiveMission &mission = state.active_missions[kSlot];
   mission.carrying_resources = true;
   mission.cargo_qty_tons = 7;
-  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 16);
+  CHECK(Player_ComputeCargoAndJunkTotal(state) == 16);
 
   // Inactive missions and non-carried cargo do not count.
   state.active_mission_runtime_flags[kSlot].is_active = false;
-  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 9);
+  CHECK(Player_ComputeCargoAndJunkTotal(state) == 9);
   state.active_mission_runtime_flags[kSlot].is_active = true;
   mission.carrying_resources = false;
-  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 9);
+  CHECK(Player_ComputeCargoAndJunkTotal(state) == 9);
 }
 
 TEST_CASE("cargo content predicate includes valid active mission cargo",
           "[cargo]") {
   GameState state;
-  CHECK_FALSE(Outfit_HasAnyCargoMissionOrJunk(state));
+  CHECK_FALSE(Player_HasAnyCargoMissionOrJunk(state));
 
   state.inventory.cargo_bins[2] = 1;
-  CHECK(Outfit_HasAnyCargoMissionOrJunk(state));
+  CHECK(Player_HasAnyCargoMissionOrJunk(state));
   state.inventory.cargo_bins[2] = 0;
 
   constexpr std::size_t kSlot = 4;
@@ -94,16 +94,16 @@ TEST_CASE("cargo content predicate includes valid active mission cargo",
   mission.carrying_resources = true;
   mission.cargo_type_id = 3;
   mission.cargo_qty_tons = 0;
-  CHECK(Outfit_HasAnyCargoMissionOrJunk(state));
+  CHECK(Player_HasAnyCargoMissionOrJunk(state));
 
   mission.cargo_type_id = -1;
-  CHECK_FALSE(Outfit_HasAnyCargoMissionOrJunk(state));
+  CHECK_FALSE(Player_HasAnyCargoMissionOrJunk(state));
   mission.cargo_type_id = 3;
   mission.cargo_qty_tons = -1;
-  CHECK_FALSE(Outfit_HasAnyCargoMissionOrJunk(state));
+  CHECK_FALSE(Player_HasAnyCargoMissionOrJunk(state));
   state.active_mission_runtime_flags[kSlot].is_active = false;
   state.inventory.junk_counts[0x7f] = 1;
-  CHECK(Outfit_HasAnyCargoMissionOrJunk(state));
+  CHECK(Player_HasAnyCargoMissionOrJunk(state));
 }
 
 TEST_CASE("carried-ship outfit count prefers deployed craft then bay ammo",
@@ -162,9 +162,9 @@ TEST_CASE("jettison_all drains abortable mission cargo and fails the mission",
   mission.can_abort = true;
   mission.flags_primary = 0;
 
-  NovaOutfit_RedistributeFleetCargoOverflow(state,
-                                            /*jettison_all=*/true,
-                                            /*now_ms=*/2000);
+  Player_RedistributeFleetCargoOverflow(state,
+                                        /*jettison_all=*/true,
+                                        /*now_ms=*/2000);
 
   CHECK_FALSE(mission.carrying_resources);
   CHECK(state.active_mission_runtime_flags[kSlot].is_failed);
@@ -197,7 +197,7 @@ TEST_CASE("AI boarding plunders the player's cargo into the boarder holds",
       state.scenario.ships[static_cast<std::size_t>(boarder_class)].cargo_holds;
 
   // A boarder hull (NPC) and the player victim. The player is
-  // ship_instance_id 0, so Outfit_BoardShipAndTransferCargo reads the
+  // ship_instance_id 0, so Boarding_BoardShipAndTransferCargo reads the
   // PlayerInventory bins.
   Ship &boarder = state.ShipAt(1);
   boarder.is_active = true;
@@ -212,7 +212,7 @@ TEST_CASE("AI boarding plunders the player's cargo into the boarder holds",
   // Pick any loaded class for the victim's total cargo capacity.
   REQUIRE_FALSE(state.scenario.ships.empty());
   player.ship_class_id = 0;
-  const std::int32_t capacity = Outfit_ComputePlayerTotalCargoCapacity(state);
+  const std::int32_t capacity = Ship_ComputeShipTotalCargoCapacity(state);
 
   state.inventory.cargo_bins = {0, 0, 0, 0, 0, 0};
   state.inventory.cargo_bins[0] = 100; // more than any stock freighter's holds
@@ -220,8 +220,7 @@ TEST_CASE("AI boarding plunders the player's cargo into the boarder holds",
   state.player.credits = 10000;
   state.stat_cache_valid = true;
 
-  NovaBoarding_BoardShipAndTransferCargo(
-      state, boarder, player, /*now_ms=*/3000);
+  Boarding_BoardShipAndTransferCargo(state, boarder, player, /*now_ms=*/3000);
 
   std::int32_t remaining = 0;
   for (const std::int16_t bin : state.inventory.cargo_bins) {
@@ -321,8 +320,8 @@ TEST_CASE("player total cargo capacity and free mass aggregates",
   state.inventory.outfit_owned_count[1] = 1; // 1 * 2 tons of cargo space
 
   // Holds 10 + 2*3 + 1*2 = 18; the unowned shield outfit contributes nothing.
-  CHECK(Outfit_ComputePlayerTotalCargoCapacity(state) == 18);
-  CHECK(Outfit_ComputePlayerFleetCargoCapacity(state) == 18);
+  CHECK(Ship_ComputeShipTotalCargoCapacity(state) == 18);
+  CHECK(Player_ComputeFleetCargoCapacity(state) == 18);
 
   // FreeMass 20 minus every owned unit's purchase mass (2*4 + 1*1) = 11.
   CHECK(Outfit_ComputePlayerFreeMass(state) == 11);
@@ -332,7 +331,7 @@ TEST_CASE("player total cargo capacity and free mass aggregates",
   CHECK(Outfit_ComputePlayerFreeMass(state) == 0);
 }
 
-// Ghidra 0x0046a7c0 Outfit_ComputeRemainingCargoSpace: player ship free holds
+// Ghidra 0x0046a7c0 Player_ComputeRemainingCargoSpace: player ship free holds
 // = capacity - carried, where carried = the cargo bins + every active
 // mission's CargoQty (+0x14, when +0x33 carrying and >= 0) + positive junk.
 // The single-ship branch is NOT clamped; callers clamp it themselves.
@@ -347,24 +346,24 @@ TEST_CASE("remaining cargo space subtracts bins, mission cargo and junk",
   state.inventory.junk_counts.fill(0);
 
   // 10 - (1 + 2) = 7.
-  CHECK(Outfit_ComputeRemainingCargoSpace(state) == 7);
+  CHECK(Player_ComputeRemainingCargoSpace(state) == 7);
 
   // Mission cargo joins the carried total (MisnActive +0x33/+0x14).
   state.active_mission_runtime_flags[1].is_active = true;
   state.active_missions[1].carrying_resources = true;
   state.active_missions[1].cargo_qty_tons = 4;
-  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 7);
-  CHECK(Outfit_ComputeRemainingCargoSpace(state) == 3);
+  CHECK(Player_ComputeCargoAndJunkTotal(state) == 7);
+  CHECK(Player_ComputeRemainingCargoSpace(state) == 3);
 
   // Junk counts as carried, and an overloaded ship reports a negative value
   // rather than being clamped at zero.
   state.inventory.junk_counts[2] = 5;
-  CHECK(Outfit_ComputeRemainingCargoSpace(state) == -2);
+  CHECK(Player_ComputeRemainingCargoSpace(state) == -2);
 
   // A negative mission CargoQty is ignored by the +0x14 sign gate.
   state.active_missions[1].cargo_qty_tons = -3;
-  CHECK(Outfit_ComputePlayerCargoAndJunkTotal(state) == 8);
-  CHECK(Outfit_ComputeRemainingCargoSpace(state) == 2);
+  CHECK(Player_ComputeCargoAndJunkTotal(state) == 8);
+  CHECK(Player_ComputeRemainingCargoSpace(state) == 2);
 }
 
 } // namespace game

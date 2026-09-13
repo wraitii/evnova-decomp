@@ -23,22 +23,17 @@ namespace game {
 // offset fields) and, when snap is set, moves it directly onto that offset
 // (skipping state-0x15 arrivals). snap=1 callers: system-entry rebuild +
 // encounter-fleet spawning; snap=0 is the per-frame AI pass.
-void NovaEscort_UpdateFormations(GameState &state, Ship &leader, bool snap);
-
-// Convenience wrapper of NovaEscort_UpdateFormations for the player as the
-// formation leader (System_RebuildInitialNpcAndMissionPopulation calls it with
-// g_ship_states[0], snap=1).
-void NovaEscort_UpdateFormationsForPlayer(GameState &state);
+void Ship_UpdateEscortFormations(GameState &state, Ship &leader, bool snap);
 
 // Ship_MoveShipTowardFormationOffset (0x00414390). Moves the ship onto its
 // stored formation offset (game_state Ship::formation_offset_x/y): snap=true
 // teleports position onto the offset; snap=false creeps per axis at
 // effective thrust * 10 px/tick inside an 8 px deadzone, suppressed while
 // ai_station_hold_timer > 0. No-op when the resolved target slot is invalid.
-void NovaEscort_MoveTowardFormationOffset(GameState &state,
-                                          Ship &ship,
-                                          bool snap_to_offset,
-                                          float elapsed_ticks);
+void Ship_MoveShipTowardFormationOffset(GameState &state,
+                                        Ship &ship,
+                                        bool snap_to_offset,
+                                        float elapsed_ticks);
 
 // Frame_TickSystems (0x004186b0) scope-6 leader-flag slice. Snapshots every
 // ship's squad_leader_ship_slot, then for each active behavior>4 ship in the
@@ -46,7 +41,7 @@ void NovaEscort_MoveTowardFormationOffset(GameState &state,
 // +0xC0/+0xC1/+0xC2 leader bytes. Runs once per full tick before the per-ship
 // AI dispatch; Ship_UpdateShipAI gates its per-frame formation pass on the
 // +0xC2 byte this pass produces.
-void NovaEscort_TickLeaderFlags(GameState &state);
+void Ship_TickLeaderFlags(GameState &state);
 
 // Ship_ReacquireSquadLeader (0x004156a0). squad_leader_ship_slot must point at
 // a live, non-disabled ship; otherwise the heaviest hull in the current system
@@ -54,7 +49,7 @@ void NovaEscort_TickLeaderFlags(GameState &state);
 // candidate the ship reverts to its class default AI (state 0x13); when the
 // replacement is the ship itself it copies the old leader's combat state (or
 // reverts) and detaches.
-void NovaEscort_ReacquireSquadLeader(GameState &state, Ship &ship);
+void Ship_ReacquireSquadLeader(GameState &state, Ship &ship);
 
 // Ghidra 0x0041e240 Ship_ResetShipToDefaultCombatState. Guards on
 // squad_leader_ship_slot == 0 (attached to the player); refill mirrors the

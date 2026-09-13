@@ -182,7 +182,7 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
       platform.renderer(), img->width, img->height, img->rgba_pixels);
 }
 
-std::uint16_t NovaDocked_SubWindowFramePict(LandedService service) {
+std::uint16_t NovaLanded_SubWindowFramePict(LandedService service) {
   switch (service) {
   case LandedService::kShipyard:
     return 0x2135;
@@ -224,7 +224,7 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
                 SubWindowHeading(service),
                 static_cast<int>(stellar_id));
 
-  const std::uint16_t frame_id = NovaDocked_SubWindowFramePict(service);
+  const std::uint16_t frame_id = NovaLanded_SubWindowFramePict(service);
   if (frame_id == 0) {
     NovaLog::Todo("service '{}' has no sub-window frame art; returning to the "
                   "dock menu",

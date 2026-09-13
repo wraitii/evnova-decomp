@@ -149,10 +149,9 @@ void NovaLanded_CloseOutfitterSession(GameState &state);
 [[nodiscard]] bool NovaLanded_CanBuyShip(const GameState &state,
                                          std::int16_t stellar_id,
                                          std::int16_t ship_id);
-[[nodiscard]] bool
-NovaLanded_ReplacePlayerShip(GameState &state,
-                             std::int16_t stellar_id,
-                             std::int16_t ship_id,
-                             std::string_view player_ship_name);
+[[nodiscard]] bool Player_SwapShipWithEscort(GameState &state,
+                                             std::int16_t stellar_id,
+                                             std::int16_t ship_id,
+                                             std::string_view player_ship_name);
 
 } // namespace game

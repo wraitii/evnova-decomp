@@ -148,7 +148,7 @@ Ghidra. The clean-room counterparts live in
 - State 0x0c (`Ship_UpdateShipAiState` arm) is the hire default; the escort
   follow control mode is 0x08. Formation offsets
   (`Ship_UpdateEscortFormations` 0x00413990), escort payroll
-  (`Outfit_ProcessPlayerEscortPayroll` 0x004232d0), jump-sync/loss counting
+  (`Player_ProcessEscortPayroll` 0x004232d0), jump-sync/loss counting
   on hyperspace (0x0044aa70 region), and the escort management window
   (`NovaUi_RunEscortShipManagementWindow` 0x004853a0) are the remaining
   unported pieces.

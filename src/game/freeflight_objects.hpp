@@ -3,7 +3,7 @@
 // Clean-room model of Nova's 64-slot FreeflightObjectState pool
 // (g_freeflight_objects_ptr, 0x005914a8): the generic in-flight cosmetic
 // objects drawn through the 500+index spin-sprite table. The pool backs the
-// jettisoned cargo/junk pods spawned by Outfit_RedistributeFleetCargoOverflow
+// jettisoned cargo/junk pods spawned by Player_RedistributeFleetCargoOverflow
 // (0x0041f330) via Ship_SpawnFreeflightObjectForShip (0x0041f800), plus the
 // beam-hit / effect-package / launched-drone variants spawned at an explicit
 // position (0x0041fb50). The per-tick pass is Frame_UpdateFreeflightObject-

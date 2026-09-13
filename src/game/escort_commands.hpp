@@ -48,15 +48,15 @@ struct EscortCommandInput {
 // order dispatch (0x00450cf4.. + far arms 0x00452a52..0x00452af5) and the
 // per-category auto-cancel arms (0x00450ddb..0x00450f67). `now_60hz` is the
 // 60 Hz tick counter (NovaTime_GetTickCount60Hz).
-void NovaEscort_TickPlayerEscortCommands(GameState &state,
-                                         const EscortCommandInput &input,
-                                         std::int64_t now_60hz);
+void PlayerTick_EscortCommands(GameState &state,
+                               const EscortCommandInput &input,
+                               std::int64_t now_60hz);
 
 // True when at least one active ship is attached to the player (ai_target_
 // ship_slot == 0) whose class_category matches; used by the Escort Commands
 // overlay to dim absent groups (Ui_DrawTargetCategoryPanel 0x0049e430).
-[[nodiscard]] bool NovaEscort_GroupPresent(const GameState &state,
-                                           std::int16_t category);
+[[nodiscard]] bool Player_HasEscortGroup(const GameState &state,
+                                         std::int16_t category);
 
 // Ghidra 0x0045c880 Ship_CommandPlayerEscortGroup: applies `command` to every
 // active ship attached to the player (squad_leader_ship_slot == 0) whose class
@@ -66,9 +66,9 @@ void NovaEscort_TickPlayerEscortCommands(GameState &state,
 // propagates the player's primary target to accepted ships. Returns whether
 // any ship accepted; unless `suppress_message`, shows the
 // "New escort orders assigned: ..." overlay (STR# 0x7d2 0x86..0x8b + 0x96..).
-bool NovaEscort_CommandPlayerEscortGroup(GameState &state,
-                                         std::int16_t category,
-                                         std::int16_t command,
-                                         bool suppress_message);
+bool Ship_CommandPlayerEscortGroup(GameState &state,
+                                   std::int16_t category,
+                                   std::int16_t command,
+                                   bool suppress_message);
 
 } // namespace game

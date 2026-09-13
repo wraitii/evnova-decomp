@@ -155,11 +155,11 @@ TEST_CASE("disaster report only covers records with more than one day left",
 // 0-based g_stellar_defs index.
 TEST_CASE("bar prompt resolves the destination desc family",
           "[docked][bar][disaster]") {
-  CHECK(NovaDocked_BarDescriptionId(0x80) ==
+  CHECK(NovaLanded_BarDescriptionId(0x80) ==
         std::optional<std::uint16_t>{10000}); // Earth
-  CHECK(NovaDocked_BarDescriptionId(0x89) ==
+  CHECK(NovaLanded_BarDescriptionId(0x89) ==
         std::optional<std::uint16_t>{10009}); // Port Kane
-  CHECK_FALSE(NovaDocked_BarDescriptionId(0x7f).has_value());
+  CHECK_FALSE(NovaLanded_BarDescriptionId(0x7f).has_value());
 
   const auto bar_desc = NovaResource_LoadDescription(10009);
   REQUIRE(bar_desc.has_value());

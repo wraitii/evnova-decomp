@@ -104,7 +104,7 @@ is written with `FUN_004f22e0` (C-string + NUL) and read with
 
 | Addr | Name | Role |
 |---|---|---|
-| 0x004c7db0 | `PilotFile_SaveGame` (was `Stellar_SetTravelDestination`) | Trampoline: guards on `DAT_00863f09`, then calls the saver with the current jump/travel destination stellar id. This IS the pilot save entry point. Callers: `Menu_RunNewGameFlow` (initial save), `Stellar_TravelToSystem`, `Ship_HandlePlayerShipCore`. |
+| 0x004c7db0 | `PilotFile_SaveGame` (was `Stellar_SetTravelDestination`) | Trampoline: guards on `DAT_00863f09`, then calls the saver with the current jump/travel destination stellar id. This IS the pilot save entry point. Callers: `Menu_RunNewGameFlow` (initial save), `Stellar_RunDockAndLaunchSequence`, `Ship_HandlePlayerShipCore`. |
 | 0x004c7dd0 | `PilotFile_SaveGameCore` | Saver core: builds `<nova_files><pilot name>.plt`, allocates block1 (0xe952) + block2 (0x66fe), fills all fields, writes `[u32 sz][data]` twice + ship-name trailer, closes. Guards on `DAT_00863f0a`. |
 | 0x004cb260 | `PilotFile_LoadSave` | Loader (Open Pilot + startup auto-resume): reads `[u32 sz1][data1]` → restores PilotState; `[u32 sz2][data2]` → restores FleetState/world; then ship-name trailer. Derives the pilot name from the file path (after last ':', before '.'). Returns 0 ok; -0x2b missing/empty; -0x2a/-0x2d invalid block2; -0x2e repairs applied. |
 | 0x008725b0 | `PilotSave_ValidateBlock` | Block validator: if first u16 < 0x800 → 0 (valid, no checksum); else runs a 32-bit checksum helper (LAB_0046f960, partially inlined). Nonzero → caller skips restoring that block. Suspected community-fix. |
@@ -156,7 +156,7 @@ There is no mid-game reload path.
 
 - New game (`Menu_RunNewGameFlow`) — writes the initial save with the starting
   travel destination.
-- Travel to a system (`Stellar_TravelToSystem`).
+- Travel to a system (`Stellar_RunDockAndLaunchSequence`).
 - From the per-frame player-ship update (`Ship_HandlePlayerShipCore`) — exact
   cadence/condition not yet isolated (decompile of that routine is too large;
   check the jump/hyperspace anchors).

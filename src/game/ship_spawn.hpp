@@ -305,7 +305,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
 // then is_active and the targeting/mission/system slots are cleared.
 //
 // The original runs this with flag==0 on travel/landing arrival
-// (Stellar_ProcessTravelAndLanding 0x00457580) and system entry
+// (Stellar_HandleStellarEntryAndExit 0x00457580) and system entry
 // (NovaMainLoop_Run 0x00486880);
 // System_RebuildInitialNpcAndMissionPopulation then immediately makes
 // System.avg_ships spawn attempts through its scattered initial-population

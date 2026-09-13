@@ -2,11 +2,12 @@
 
 // Clean-room reconstruction of the sub-window dialogs the game opens over the
 // docked Spaceport screen during the stellar landing procedure. In the
-// original (Stellar_TravelToSystem 0x00455e10 -> NovaUi_RunTravelDestination-
-// ServicesWindow 0x0047c8e0 and siblings) each docked service (Bar, Mission
-// BBS, Trade center, Shipyard, Outfitter, Starmap, Communications) presents a
-// nested modal window over the still-visible docked backing store, backed by
-// one of the sub-window frame PICTs from Nova Graphics 3.rez:
+// original (Stellar_RunDockAndLaunchSequence 0x00455e10 ->
+// NovaUi_RunTravelDestination- ServicesWindow 0x0047c8e0 and siblings) each
+// docked service (Bar, Mission BBS, Trade center, Shipyard, Outfitter, Starmap,
+// Communications) presents a nested modal window over the still-visible docked
+// backing store, backed by one of the sub-window frame PICTs from Nova
+// Graphics 3.rez:
 //
 //   0x2135 Shipyard, 0x2136 Outfit, 0x2137 Bar, 0x2139 Mission BBS,
 //   0x213d Map, 0x213e Trade, 0x213f Communications
@@ -49,7 +50,7 @@ class SpaceflightView;
 // documented Nova Graphics 3 PICT id, or 0 when the service has no frame art
 // (Launch/Refuel/Repair are not sub-windows; they dispatch inline).
 [[nodiscard]] std::uint16_t
-NovaDocked_SubWindowFramePict(LandedService service);
+NovaLanded_SubWindowFramePict(LandedService service);
 
 // Ghidra 0x0047d600 NovaUi_ComposeTravelNewsTexts (disaster-report arm).
 // Builds the Holovid news body for an active öops disaster: it prefers a
@@ -90,7 +91,7 @@ Bar_SelectCronNewsStr(GameState &state, std::int16_t landed_stellar_id);
 // description (NovaResource_LoadStellarDescription), which is keyed by raw
 // stellar id. Returns nullopt for a non-0x80-based stellar id.
 [[nodiscard]] std::optional<std::uint16_t>
-NovaDocked_BarDescriptionId(std::int16_t stellar_id);
+NovaLanded_BarDescriptionId(std::int16_t stellar_id);
 
 // Window-relative (left, top, right, bottom) rects for the Holovid news text
 // panels, from NovaUi_DrawTravelNewsWindow 0x0047d370: the headline band is
@@ -107,7 +108,7 @@ struct NewsTextPanels {
 
 // Runs one sub-window dialog modal over the docked screen for `service`.
 // `render_background` re-renders the docked menu each frame; the dialog adds
-// a dim scrim, then the service's frame PICT (NovaDocked_SubWindowFramePict)
+// a dim scrim, then the service's frame PICT (NovaLanded_SubWindowFramePict)
 // centered at its natural size, with the service heading and a grey-backed
 // "Leave" button. Loops until the player closes the dialog (Esc, Enter, or a
 // click/primary press anywhere), the platform quits (returns kQuit), or an

@@ -259,9 +259,9 @@ Not yet honored: the class-level load gates `g_pref_running_lights` /
 distance-brightness/space-color tint the original applies to these layers is
 likewise not modelled (murk fog is a system-level TODO).
 
-Player glow-level drive is a clean-room approximation: `NovaPlayer_UpdateFrom
-Input` steps the level toward 24 (thrust), 32 (afterburner) or 0 (coast),
-while the original `PlayerTick_ManualFlightAndRegeneration` adds +1/frame
+Player glow-level drive is a clean-room approximation inside
+`PlayerTick_ManualFlightAndRegeneration`: it steps the level toward 24
+(thrust), 32 (afterburner) or 0 (coast), while the original adds +1/frame
 under thrust (<24), +2/frame while banking (no clamp), fades once while
 coasting and again under a maneuver/station hold, and ramps the afterburner
 level at up to +2/frame to 32; the gravity-shield arm ramps toward

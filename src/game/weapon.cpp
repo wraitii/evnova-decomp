@@ -382,11 +382,12 @@ int RandomBelow(GameState &state, int n) {
 } // namespace
 
 void NovaWeapon_ClearTransientCombatState(GameState &state) {
-  // The original retires every ShotState during Stellar_TravelToSystem and
-  // marks all live beam records inactive during the landing transition.
-  // Ship slots (including the player's) get their jamming-score cache reseeded
-  // to -1 at allocation; the port resets the persistent player ship here and
-  // on outfit changes (NovaOutfit_RecomputeOutfitDerivedState) instead.
+  // The original retires every ShotState during
+  // Stellar_RunDockAndLaunchSequence and marks all live beam records inactive
+  // during the landing transition. Ship slots (including the player's) get
+  // their jamming-score cache reseeded to -1 at allocation; the port resets the
+  // persistent player ship here and on outfit changes
+  // (NovaOutfit_RecomputeOutfitDerivedState) instead.
   state.player.jamming_score.fill(-1);
   state.active_shots.clear();
   for (BeamHit &beam : state.beam_hit_queue) {
@@ -409,7 +410,7 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
   // mounted-count goes into weapon_bank_ammo[weapon_id-0x80] and any carried
   // rounds (ammo_load, when > 0) into the matching secondary/ammo counter. The
   // original seeds the new ship's banks this way in Menu_RunNewGameFlow and
-  // Outfit_SwapPlayerShipWithEscort, then calls
+  // Player_SwapShipWithEscort, then calls
   // Weapon_ReconcileOutfitPoolWithWeaponBanks to register the mounted stock
   // guns as owned outfits.
   const ShipClass *ship =
@@ -1952,13 +1953,13 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
         static_cast<std::int16_t>(player.ship_class_id + 0x80));
     if (cls != nullptr && cls->mass_tons > 0) {
       const float rear_bearing = std::remainder(heading_deg + 180.0F, 360.0F);
-      NovaPlayer_AddPolarVelocityClamped(
-          rear_bearing * (3.14159265358979323846F / 180.0F),
-          static_cast<float>(w->kickback_impulse) /
-              static_cast<float>(cls->mass_tons),
-          cls->speed,
-          player.vel_x,
-          player.vel_y);
+      Math_AddPolarVelocityWithClamp(rear_bearing *
+                                         (3.14159265358979323846F / 180.0F),
+                                     static_cast<float>(w->kickback_impulse) /
+                                         static_cast<float>(cls->mass_tons),
+                                     cls->speed,
+                                     player.vel_x,
+                                     player.vel_y);
     }
   }
 

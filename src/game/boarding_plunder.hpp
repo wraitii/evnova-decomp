@@ -3,13 +3,13 @@
 // Clean-room reconstruction of EV Nova's boarding / plunder window system.
 //
 // The original flow is:
-//   Ship_HandlePlayerBoardTargetCommand (0x0045a3d0)  validates the player's
+//   Player_HandleBoardTargetCommand (0x0045a3d0)  validates the player's
 //     board command against the primary target (range, relative velocity,
 //     heading alignment, target boardability), dispatches mission or carrier
 //     arms, and otherwise opens:
 //   NovaUi_RunBoardingPlunderWindow   (0x00482940)  the modal window over
 //     DLOG 0x3f3 (309x198, DITL 0x3f3: 6 buttons + one text panel), fed by
-//   Ship_BuildBoardingPlunderOptions  (0x00484230)  which pre-rolls the
+//   Boarding_BuildOptions  (0x00484230)  which pre-rolls the
 //     randomized plunder offers (cargo, credits, ammo, fuel) and the capture
 //     odds into the boarding globals (DAT_007d17d0..e0,
 //     g_capture_odds_percent).
@@ -59,17 +59,16 @@ struct BoardingPlunderOptions {
   [[nodiscard]] bool capture_offer() const { return capture_odds_percent >= 1; }
 };
 
-// Ghidra 0x00484230 Ship_BuildBoardingPlunderOptions.
+// Ghidra 0x00484230 Boarding_BuildOptions.
 // Rolls the plunder offers for state.player's primary target. Must be called
 // with a valid, boardable primary target; values land in the returned
 // struct (and are NOT mirrored anywhere else — the original's globals were
 // consumed only by the boarding window and its draw callback).
-[[nodiscard]] BoardingPlunderOptions
-NovaBoarding_BuildOptions(GameState &state);
+[[nodiscard]] BoardingPlunderOptions Boarding_BuildOptions(GameState &state);
 
 // Outcome of one boarding-window session. The original latches these as
 // local flags inside NovaUi_RunBoardingPlunderWindow and as window-result
-// codes returned to Ship_HandlePlayerBoardTargetCommand.
+// codes returned to Player_HandleBoardTargetCommand.
 struct BoardingWindowResult {
   // The boarded target's shields/armor were dropped to zero (the 10% crew
   // panic roll or the "Oops! ... self-destruct" 1/10 capture roll); the
@@ -103,18 +102,19 @@ struct BoardingWindowResult {
 // the window over it — the original draws its DLOG over the unmodified
 // gameplay surface. The flight simulation itself is paused while the window
 // is open, as in the original.
-[[nodiscard]] BoardingWindowResult NovaBoarding_RunWindow(SdlPlatform &platform,
-                                                          SdlAudio &audio,
-                                                          GameState &state,
-                                                          SpaceflightView &view,
-                                                          HudRenderer &hud);
+[[nodiscard]] BoardingWindowResult
+NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
+                                SdlAudio &audio,
+                                GameState &state,
+                                SpaceflightView &view,
+                                HudRenderer &hud);
 
 // Lazily decodes snd 150 + i into GameState.transition_sounds (mirrors
 // NovaAudio_PreloadGameplayData 0x004b0740). Call before queueing a
 // transition-table cue so the first play doesn't hitch.
 void EnsureTransitionSounds(GameState &state);
 
-// Ghidra 0x0045a3d0 Ship_HandlePlayerBoardTargetCommand. The player's one-shot
+// Ghidra 0x0045a3d0 Player_HandleBoardTargetCommand. The player's one-shot
 // "board target" command (input.board edge in the port): validates range /
 // relative velocity / heading alignment / boardability of the primary target,
 // then dispatches the plunder window (plain ships) or the mission arms
@@ -122,19 +122,18 @@ void EnsureTransitionSounds(GameState &state);
 // error beep queued on GameState.pending_ui_sounds. The plain-ship dispatch
 // runs the modal synchronously (blocking the flight loop, as the original
 // blocks in its own loop).
-void NovaBoarding_HandleBoardTargetCommand(SdlPlatform &platform,
-                                           SdlAudio &audio,
-                                           GameState &state,
-                                           SpaceflightView &view,
-                                           HudRenderer &hud);
+void Player_HandleBoardTargetCommand(SdlPlatform &platform,
+                                     SdlAudio &audio,
+                                     GameState &state,
+                                     SpaceflightView &view,
+                                     HudRenderer &hud);
 
-// Ghidra 0x00415cb0 Ship_ResetShipAndAttackersAfterBoarding. Clears the
+// Ghidra 0x00415cb0 Boarding_ResetShipAndAttackersAfterBoarding. Clears the
 // targeting state of every active ship whose primary target is `ship`, then
 // resets most of `ship`'s own combat/mission state after a capture.
-void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
-                                                     Ship &ship);
+void Boarding_ResetShipAndAttackersAfterBoarding(GameState &state, Ship &ship);
 
-// Ghidra 0x00412550 Outfit_BoardShipAndTransferCargo. AI boarding resolution,
+// Ghidra 0x00412550 Boarding_BoardShipAndTransferCargo. AI boarding resolution,
 // called by the capture-variant AI supervisor when its board approach
 // completes (and reachable against the player). Moves as much cargo as fits
 // from `boarded` to `boarder`, takes a share of the player's credits when the
@@ -143,10 +142,10 @@ void NovaBoarding_ResetShipAndAttackersAfterBoarding(GameState &state,
 // a behavior-6 follower of the boarder with its faction converted. Mission
 // failures armed with flags_primary 0x8000 fire when the player is boarded.
 // `now_ms` is the port's sim clock for the mission teardown helpers.
-void NovaBoarding_BoardShipAndTransferCargo(GameState &state,
-                                            Ship &boarder,
-                                            Ship &boarded,
-                                            std::uint32_t now_ms);
+void Boarding_BoardShipAndTransferCargo(GameState &state,
+                                        Ship &boarder,
+                                        Ship &boarded,
+                                        std::uint32_t now_ms);
 
 // Ghidra 0x00468920 Ship_CanPlayerHaveMoreEscorts. True while the count of
 // active behavior-6 escorts (targeting the player, no mission fleet) is

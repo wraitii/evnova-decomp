@@ -137,7 +137,7 @@ std::uint16_t NovaHud_StringPoolEntryCount(std::uint16_t resource_id) {
 namespace {
 // STR# 0x7d2 (landing/docking feedback) entry numbers, exactly as the original
 // passes them to Resource_LoadStringEntry (1-based;
-// Stellar_ProcessTravelAndLanding 0x00457580). pool content: 0x3c "You don't
+// Stellar_HandleStellarEntryAndExit 0x00457580). pool content: 0x3c "You don't
 // have enough", 0x3e "to pay the docking fee.", 0x3f "to pay the landing fee.",
 // 0x42/0x43 too-far station/planet, 0x46/0x47 too-fast station/planet, 0x56
 // "dock at ", 0x57 "land on ".
@@ -192,11 +192,11 @@ void NovaHud_ShowLandingDenial(GameState &state,
     text = std::string("Unable to land here.");
   }
   // 0x168 frames, the original's recorded overlay duration for landing
-  // feedback (Stellar_ProcessTravelAndLanding).
+  // feedback (Stellar_HandleStellarEntryAndExit).
   NovaHud_ShowOverlayMessage(state, *text, 0xe0, 0xe0, 0xe0, 0x168U);
 }
 
-// Ghidra Stellar_TravelToSystem tail block (0x00455e10, 0x00456323):
+// Ghidra Stellar_RunDockAndLaunchSequence tail block (0x00455e10, 0x00456323):
 namespace {
 // STR# 0x7d2 launch-departure pool: 0x37..0x3b are the five "leaving" lead
 // variants, 0x3c is the "on" connector before the date.

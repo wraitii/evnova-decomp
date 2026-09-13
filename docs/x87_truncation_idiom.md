@@ -91,7 +91,7 @@ truncation idiom:
   (ionization points); `Weapon_SpawnWeaponImpactEffectPackage` 0x00462550
   (yield boxes); and the collision-mask mirrors in the local
   `RefreshCollisionMasks` (matching 0x00436910 / 0x0042c1b0).
-- `boarding_plunder.cpp` `Ship_HandlePlayerBoardTargetCommand` 0x0045a3d0
+- `boarding_plunder.cpp` `Player_HandleBoardTargetCommand` 0x0045a3d0
   (heading gate) and `NovaUi_RunBoardingPlunderWindow` 0x00482940 (fuel fill).
 
 ### False positives

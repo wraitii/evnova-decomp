@@ -201,8 +201,8 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
   SDL_SetRenderDrawColor(
       renderer, kGridLine.r, kGridLine.g, kGridLine.b, SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &layout.header);
-  const bool in_fleet = Outfit_ComputePlayerTotalCargoCapacity(state) <
-                        Outfit_ComputePlayerFleetCargoCapacity(state);
+  const bool in_fleet = Ship_ComputeShipTotalCargoCapacity(state) <
+                        Player_ComputeFleetCargoCapacity(state);
   const float header_right = layout.header.x + layout.header.w;
   NovaText_Draw(platform,
                 font_cache,
@@ -330,11 +330,10 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
   SDL_SetRenderDrawColor(
       renderer, kGridLine.r, kGridLine.g, kGridLine.b, SDL_ALPHA_OPAQUE);
   SDL_RenderRect(renderer, &layout.summary);
-  const std::int32_t free_space =
-      Outfit_ComputePlayerFleetCargoCapacity(state) -
-      Outfit_ComputePlayerCargoAndJunkTotal(state);
-  const bool summary_in_ship = Outfit_ComputePlayerTotalCargoCapacity(state) <
-                               Outfit_ComputePlayerFleetCargoCapacity(state);
+  const std::int32_t free_space = Player_ComputeFleetCargoCapacity(state) -
+                                  Player_ComputeCargoAndJunkTotal(state);
+  const bool summary_in_ship = Ship_ComputeShipTotalCargoCapacity(state) <
+                               Player_ComputeFleetCargoCapacity(state);
   std::string summary = InfoString(0x16b);
   summary += " ";
   summary += InfoString(summary_in_ship ? 0x16c : 0x16d);
@@ -421,7 +420,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
   TradeCenterSession session = NovaTradeCenter_OpenSession(state, stellar_id);
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
   auto frame = LoadPictTexture(
-      platform, NovaDocked_SubWindowFramePict(LandedService::kBuySellCargo));
+      platform, NovaLanded_SubWindowFramePict(LandedService::kBuySellCargo));
   // Row palette from c\x9alr (list_text/list_background/list_hilite, loaded
   // into DAT_00735664/6a/70 at startup). The fallback matches the shipped
   // colors only if the resource is missing entirely.

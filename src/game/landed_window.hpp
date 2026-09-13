@@ -1,9 +1,10 @@
 #pragma once
 
 // Clean-room reconstruction of the Spaceport-style destination window. The
-// original entry is confirmed as Stellar_TravelToSystem (0x00455e10) calling
-// NovaUi_RunTravelDestinationInteractionLoop (0x00491f30), which creates
-// DLOG 1000 (0x3e8). This SDL modal is still not wired to that travel path.
+// original entry is confirmed as Stellar_RunDockAndLaunchSequence (0x00455e10)
+// calling NovaUi_RunTravelDestinationInteractionLoop (0x00491f30), which
+// creates DLOG 1000 (0x3e8). This SDL modal is still not wired to that travel
+// path.
 //
 // SCOPE / ARCHITECTURE: the original is a full GVNO UiWindow docking screen
 // built from a dialog resource (DLOG 0x3e8 -> DITL 0x3e8), filling a near-
@@ -24,7 +25,7 @@
 // transitions. The arrival-side
 // accounting that the original always performs (fee deduction, auto-refuel-
 // ler refuel) is real; shield/armor refill and the calendar tick happen at
-// LAUNCH (Stellar_TravelToSystem's post-loop tail), not at arrival.
+// LAUNCH (Stellar_RunDockAndLaunchSequence's post-loop tail), not at arrival.
 
 #include <cstdint>
 #include <functional>
@@ -133,9 +134,9 @@ WrapDescriptionLines(std::string_view text,
 // A docked session captures the destination stellar and the derived
 // refuel/repair economics on a single landing. Kept off GameState so the modal
 // can be nested and the service bookkeeping unit-tested without touching SDL.
-// Why a landing request was not accepted (set by NovaLanding_EnterDocked).
+// Why a landing request was not accepted (set by Stellar_Dock).
 // Maps to the on-screen HUD feedback text (STR# 0x7d2) the spaceflight loop
-// shows; mirrors Stellar_ProcessTravelAndLanding's feedback cases.
+// shows; mirrors Stellar_HandleStellarEntryAndExit's feedback cases.
 enum class LandedDenial : std::uint8_t {
   kNone,         // the landing was accepted (ctx.landed == true)
   kUnavailable,  // no selected/valid ordinary stellar at all
@@ -152,7 +153,7 @@ struct LandedContext {
   // yet been confirmed, so callers must establish this state independently.
   bool landed = false;
   // Why a landing was denied (kNone when accepted). Set by
-  // NovaLanding_EnterDocked so the spaceflight loop can show the matching
+  // Stellar_Dock so the spaceflight loop can show the matching
   // STR# 0x7d2 HUD overlay instead of a bare log line.
   LandedDenial denial = LandedDenial::kNone;
   // The service most recently activated (by a mouse click or a letter
@@ -162,40 +163,45 @@ struct LandedContext {
   LandedService selection = LandedService::kLaunch;
 };
 
-// Stellar_ProcessTravelAndLanding (0x00457580) normal-arrival gate: the
-// selected stellar must be an ordinary active destination inside its per-axis
-// arrival envelope, with the approach armed and the ship nearly stationary.
-// The envelope is the stellar's spin-sprite span
-// (System_GetCurrentSystemLinkSpriteHeight 0x00462410) scaled by 1.75
-// (k_stellar_arrival_envelope_scale_f64), i.e.
-// round(Sprite_GetFrameFullHeight * 1.75); a stellar with no
-// prepared sprite uses the original 0x4b (75) fallback. The
-// `target_sprite_full_height` argument is Sprite_GetFrameFullHeight on the
-// link_a spin set (full frame height, 0 when unavailable). The 250/0xfa check
-// in the original belongs to the starmap travel-arm branch (0x00459369), not
-// this normal dock gate; the 250 here is the request-arming radius owned by
-// NovaTravel_UpdateEngagementProgress.
+// Stellar_MaxLandingDistance: per-axis half-extent of the normal-arrival
+// envelope for a target stellar (Stellar_HandleStellarEntryAndExit 0x00457580
+// gate, inlined at 0x00458786..0x004587a9). Returns 75 (0x4b) when
+// target_sprite_full_height <= 0 (no prepared sprite), else
+// round(target_sprite_full_height * 1.75) with the 1.75 double
+// k_stellar_arrival_envelope_scale_f64 (0x005756a0). The landing is in range
+// only when BOTH axis deltas are strictly less than this value (a square
+// envelope, not a radius). The input is Sprite_GetFrameFullHeight on the
+// link_a spin set (full frame height); the 250/0xfa check belongs to the
+// starmap travel-arm branch (0x00459369), not this normal dock gate.
 [[nodiscard]] float
-NovaLanding_ArrivalAxisRange(std::int16_t target_sprite_full_height);
+Stellar_MaxLandingDistance(std::int16_t target_sprite_full_height);
 
-// Applies the normal-arrival subset of Stellar_ProcessTravelAndLanding
-// (0x00457580) / Stellar_TravelToSystem (0x00455e10): after the
-// arrival-envelope
-// + approach gate above (engage timer >= 0x2ee, |vel| <= 0.75 per axis,
-// ai_maneuver_timer_ms <= 0), verifies its fee, runs the arrival-side
-// auto-refueller refuel (Outfit_RefuelShipWithCredits 0x004250f0), reconciles
-// the outfit pool and prepares the Spaceport context. This keeps the modal UI
-// out of the transition so its accounting is testable. Returns false without
+// Ghidra 0x004250f0 Player_RefuelShipWithCredits. Arrival auto-refuel for the
+// auto-refueller outfit (ModType 19): when the player owns one, rounds fuel
+// to the nearest unit and tops it up to the effective capacity at exactly
+// 1 credit per unit, clamped to the available credits. Runs from the
+// Stellar_RunDockAndLaunchSequence arrival subset before the Spaceport
+// interaction loop.
+void Player_RefuelShipWithCredits(GameState &state);
+
+// Ghidra 0x00455e10 Stellar_RunDockAndLaunchSequence, arrival half (the
+// clean-room split into Stellar_Dock + Stellar_Launch). After the arrival
+// envelope/approach gate above (engage timer >= 0x2ee, |vel| <= 0.75 per axis,
+// ai_maneuver_timer_ms <= 0), verifies and deducts the stellar fee, runs the
+// arrival-side auto-refueller refuel (Player_RefuelShipWithCredits 0x004250f0),
+// reconciles the outfit pool, and prepares the Spaceport context. This also
+// folds in the caller Stellar_HandleStellarEntryAndExit (0x00457580)'s
+// normal-arrival gate/fee, kept in place rather than extracted. Keeps the modal
+// UI out of the transition so its accounting is testable. Returns false without
 // mutating the player when arrival cannot proceed. Ship meters and the calendar
 // are NOT touched here: the original restores/refills them in the LAUNCH tail
 // (0x00455f99..0x00456268), after the interaction loop returns -- see
-// NovaLanding_LaunchFromStellar.
-[[nodiscard]] bool
-NovaLanding_EnterDocked(GameState &state,
-                        LandedContext &ctx,
-                        std::int16_t target_sprite_full_height = 0);
+// Stellar_Launch.
+[[nodiscard]] bool Stellar_Dock(GameState &state,
+                                LandedContext &ctx,
+                                std::int16_t target_sprite_full_height = 0);
 
-// Ghidra 0x00455e10 Stellar_TravelToSystem, launch tail (0x00455f99..
+// Ghidra 0x00455e10 Stellar_RunDockAndLaunchSequence, launch tail (0x00455f99..
 // 0x00456268): runs when the destination-interaction loop returns, i.e. on
 // leaving the dock. Zeroes velocity and repositions the ship at the stellar
 // centre, refills shields and armor to the effective maxima, runs the single
@@ -205,7 +211,7 @@ NovaLanding_EnterDocked(GameState &state,
 // wipes the transient shot pool. The caller then shows the departure overlay
 // (0x00456323, NovaHud_ShowLaunchDepartureMessage) and resyncs its frame
 // clock (the original zeroes g_avg_frame_tick_scale at 0x00456174).
-void NovaLanding_LaunchFromStellar(GameState &state, std::int16_t stellar_id);
+void Stellar_Launch(GameState &state, std::int16_t stellar_id);
 
 // Refuels the player ship toward its effective fuel capacity. Mirrors the
 // landed fuel service: the player pays a per-unit price for the fuel added,
@@ -215,9 +221,9 @@ std::int32_t NovaLanded_Refuel(GameState &state, std::int32_t price_per_unit);
 
 // Repairs armor (and shields) toward the effective maximums. NOTE: the original
 // has no billed docked Repair service -- shields and armor are auto-refilled
-// for free on landing by Stellar_TravelToSystem (0x00455e10). This helper
-// models the delta top-up for completeness / unit tests only; the docked menu
-// does not bill it. Returns the credits actually spent.
+// for free on landing by Stellar_RunDockAndLaunchSequence (0x00455e10). This
+// helper models the delta top-up for completeness / unit tests only; the docked
+// menu does not bill it. Returns the credits actually spent.
 std::int32_t NovaLanded_Repair(GameState &state,
                                std::int32_t price_per_armor_point);
 
@@ -241,11 +247,11 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // s shipyard, n mission, b bar; Enter/Esc leave) activate immediately. Returns
 // the exit code describing how the window closed (see LandedExit).
 // Normal in-range arrival reaches this DLOG 0x3e8 path through
-// Stellar_ProcessTravelAndLanding / Stellar_TravelToSystem. The separate
-// target-action DLOG 0x3f1 (bribe/hostility/script interaction) remains out
-// of scope. In resolution-extension mode the
-// playfield stays a fixed 640x480 centred with black borders; the F5 scale
-// toggle (documented divergence) scales it to fill the window.
+// Stellar_HandleStellarEntryAndExit / Stellar_RunDockAndLaunchSequence. The
+// separate target-action DLOG 0x3f1 (bribe/hostility/script interaction)
+// remains out of scope. In resolution-extension mode the playfield stays a
+// fixed 640x480 centred with black borders; the F5 scale toggle (documented
+// divergence) scales it to fill the window.
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                               GameState &state,
                                               LandedContext &ctx);

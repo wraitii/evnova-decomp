@@ -675,7 +675,7 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
   // commodity/junk defs are modelled (tracker: junk resource defs
   // unmodelled).
   {
-    if (Outfit_HasAnyCargoMissionOrJunk(state)) {
+    if (Player_HasAnyCargoMissionOrJunk(state)) {
       NovaLog::Todo("player-info: cargo summary text (commodity/junk names "
                     "unmodelled) — page falls back to the draw-side cargo "
                     "list");
@@ -964,13 +964,12 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
       DrawGeneralPage(platform, font_cache, state, view_rect);
     } else if (page == 2) {
       // Cargo page: the original draws the prebuilt cargo text when
-      // Outfit_HasAnyCargoMissionOrJunk (0x0046a680) passes (the port's
+      // Player_HasAnyCargoMissionOrJunk (0x0046a680) passes (the port's
       // builder is TODO(decomp), so texts.cargo stays empty and the page
       // shows the empty-hold fallback, selected by the decompile's
       // capacity-vs-fleet-capacity branch 0x10c/0x10d).
-      const bool under_capacity =
-          Outfit_ComputePlayerTotalCargoCapacity(state) <
-          Outfit_ComputePlayerFleetCargoCapacity(state);
+      const bool under_capacity = Ship_ComputeShipTotalCargoCapacity(state) <
+                                  Player_ComputeFleetCargoCapacity(state);
       DrawTextPage(platform,
                    font_cache,
                    texts.cargo,
@@ -1046,7 +1045,7 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
           if (page == 2 && any_cargo &&
               RunJettisonConfirmDialog(
                   platform, font_cache, [&]() { redraw(-1); })) {
-            // The original runs Outfit_RedistributeFleetCargoOverflow(true)
+            // The original runs Player_RedistributeFleetCargoOverflow(true)
             // (0x0041f330) here and closes; the port surfaces the confirmed
             // flag so the caller can apply it with the sim clock in scope.
             result.jettison_confirmed = true;

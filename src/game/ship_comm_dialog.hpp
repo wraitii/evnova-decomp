@@ -58,7 +58,7 @@
 // 0x004853a0), the mission-fleet escort-def branches (fleet defs not
 // modelled), the full hail-info text assembly beyond the default fragment
 // (NovaUi_BuildShipCommHailInfoText 0x004819d0 branch 0) and
-// Outfit_TransferCargoAndJunkToEscortByRatio (0x00469810).
+// Player_TransferCargoAndJunkToEscortByRatio (0x00469810).
 
 #include <cstdint>
 

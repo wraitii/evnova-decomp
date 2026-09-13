@@ -2082,7 +2082,7 @@ void NovaAi_UpdateBehavior0x03(GameState &state,
 // of only fighting, the ship scans for disabled boardable victims
 // (Ship_SelectNearestDisabledShipForBoarding), marks already-boarded targets
 // for the attack/yield decision, performs the actual boarding handoff
-// (Outfit_BoardShipAndTransferCargo) from AI control mode 0xf, and abandons
+// (Boarding_BoardShipAndTransferCargo) from AI control mode 0xf, and abandons
 // targets it cannot plausibly capture (no fireable weapons / depleted ammo).
 void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
                                              Ship &ship,
@@ -2232,7 +2232,7 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
     ship.ai_state_code = 0xe;
     ship.ai_control_mode = 0;
     ship.defense_fleet_home_stellar_id = -1;
-    NovaBoarding_BoardShipAndTransferCargo(state, ship, victim, now_ms);
+    Boarding_BoardShipAndTransferCargo(state, ship, victim, now_ms);
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
   }
@@ -3530,7 +3530,7 @@ void NovaAi_ApplyControls(GameState &state,
       if (ship.formation_leader_ship_slot > 0 &&
           state.SlotInRange(
               static_cast<std::size_t>(ship.formation_leader_ship_slot))) {
-        NovaEscort_MoveTowardFormationOffset(
+        Ship_MoveShipTowardFormationOffset(
             state, ship, /*snap=*/false, elapsed_ticks);
       }
       ship.engine_glow_level = leader.engine_glow_level;
@@ -3556,7 +3556,7 @@ void NovaAi_ApplyControls(GameState &state,
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
-      NovaEscort_MoveTowardFormationOffset(
+      Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
@@ -3734,7 +3734,7 @@ void NovaAi_ApplyControls(GameState &state,
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
-      NovaEscort_MoveTowardFormationOffset(
+      Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
@@ -3780,7 +3780,7 @@ void NovaAi_ApplyControls(GameState &state,
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
-      NovaEscort_MoveTowardFormationOffset(
+      Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
@@ -3957,7 +3957,7 @@ void NovaAi_ApplyControls(GameState &state,
             GameState::kMaxShips) {
       // Ship_MoveShipTowardFormationOffset (0x00408150 combat/hold mode
       // blocks) + glow copy: modes keep their wedge position while attacking.
-      NovaEscort_MoveTowardFormationOffset(
+      Ship_MoveShipTowardFormationOffset(
           state, ship, /*snap=*/false, elapsed_ticks);
       ship.engine_glow_level =
           state
@@ -4068,7 +4068,7 @@ void NovaAi_ApplyControls(GameState &state,
         // Ship_MoveShipTowardFormationOffset (0x00408150 mode-0xc else arm,
         // snap=0): with no state-7 anchor the ship still keeps its assigned
         // wedge offset.
-        NovaEscort_MoveTowardFormationOffset(
+        Ship_MoveShipTowardFormationOffset(
             state, ship, /*snap=*/false, elapsed_ticks);
       }
       ship.engine_glow_level = target.engine_glow_level;
@@ -4142,10 +4142,11 @@ void NovaAi_ApplyControls(GameState &state,
         // 0xe), latch the victim as a boarding target and arm the 100..179-tick
         // pause (random 0x50 + 100) that the capture supervisor's handoff
         // (Ship_UpdateShipAiBehavior0x03_WarshipCapture 0x004038b0) waits on
-        // before Outfit_BoardShipAndTransferCargo. While the pause counts down
-        // inside (0,100] in assist state 0xf (comm-window Request Assistance),
-        // the arm instead clears the latch and repairs the victim back above
-        // the disable threshold (+1.0 armor per tick, FLOAT_00575018).
+        // before Boarding_BoardShipAndTransferCargo. While the pause counts
+        // down inside (0,100] in assist state 0xf (comm-window Request
+        // Assistance), the arm instead clears the latch and repairs the victim
+        // back above the disable threshold (+1.0 armor per tick,
+        // FLOAT_00575018).
         if (ship.ai_maneuver_timer_ms <= 0.0F) {
           if (ship.ai_state_code != 0xe) {
             target.boarded_target_latch = 1;
@@ -4344,7 +4345,7 @@ void NovaAi_UpdateShipAI(GameState &state,
   // frame (smooth mode; the system-entry rebuild uses the snap variant). The
   // player's equivalent pass runs in the player core (0x00451003).
   if (ship.ai_selected_as_resolved_target) {
-    NovaEscort_UpdateFormations(state, ship, /*snap=*/false);
+    Ship_UpdateEscortFormations(state, ship, /*snap=*/false);
   }
 
   // Ghidra 0x00401000 at 0x004011ca: mission-fleet jump-in placement does

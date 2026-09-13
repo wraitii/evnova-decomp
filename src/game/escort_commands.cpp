@@ -136,9 +136,9 @@ void QueueTransitionSound(GameState &state, std::int16_t index) {
 // Ghidra Ship_HandlePlayerShipCore 0x0044AA70 auxiliary escort-command CFGs:
 // panel entry 0x00450B4E, selection/order arms 0x00450C24..0x00450F67, with
 // reordered continuations at 0x00452820..0x004529A8.
-void NovaEscort_TickPlayerEscortCommands(GameState &state,
-                                         const EscortCommandInput &input,
-                                         std::int64_t now_60hz) {
+void PlayerTick_EscortCommands(GameState &state,
+                               const EscortCommandInput &input,
+                               std::int64_t now_60hz) {
   EscortCommandState &escort = state.escort;
 
   // ---- Panel toggle (0x00450ae7, arms 0x00452820 / 0x0045293b / 0x004529a8)
@@ -251,14 +251,14 @@ void NovaEscort_TickPlayerEscortCommands(GameState &state,
       escort.group_command.fill(command);
     }
     if (escort.panel_timer > 0) {
-      if (NovaEscort_CommandPlayerEscortGroup(
+      if (Ship_CommandPlayerEscortGroup(
               state, escort.selected_category, command, false)) {
         ShowEscortPanel(escort);
         escort.key_time_60hz = now_60hz;
       }
     } else {
       // 0x00452ae0: panel closed -> the order always targets every ship.
-      NovaEscort_CommandPlayerEscortGroup(state, -1, command, false);
+      Ship_CommandPlayerEscortGroup(state, -1, command, false);
     }
   }
 
@@ -285,15 +285,15 @@ void NovaEscort_TickPlayerEscortCommands(GameState &state,
   }
 }
 
-[[nodiscard]] bool NovaEscort_GroupPresent(const GameState &state,
-                                           std::int16_t category) {
+[[nodiscard]] bool Player_HasEscortGroup(const GameState &state,
+                                         std::int16_t category) {
   return GroupPresent(state, category);
 }
 
-bool NovaEscort_CommandPlayerEscortGroup(GameState &state,
-                                         std::int16_t category,
-                                         std::int16_t command,
-                                         bool suppress_message) {
+bool Ship_CommandPlayerEscortGroup(GameState &state,
+                                   std::int16_t category,
+                                   std::int16_t command,
+                                   bool suppress_message) {
   // Ghidra 0x0045c880 Ship_CommandPlayerEscortGroup.
   bool accepted = false;
   std::int16_t message_command = command;

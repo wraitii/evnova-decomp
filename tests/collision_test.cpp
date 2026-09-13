@@ -586,9 +586,9 @@ TEST_CASE("armor-only destruction starts the player death sequence",
 
   // The player core consumes the destroyed frame but does not seed the timer.
   // It does apply the fire-restricted 0.995 per-frame velocity damp.
-  CHECK(NovaPlayer_TickStatusAndOutfitEvents(state,
-                                             /*elapsed_ticks=*/1.0F,
-                                             /*eject_command=*/false));
+  CHECK(PlayerTick_StatusAndOutfitEvents(state,
+                                         /*elapsed_ticks=*/1.0F,
+                                         /*eject_command=*/false));
   CHECK(state.player.vel_x == Catch::Approx(9.95F));
   CHECK(state.player.death_timer_active <= 0.0F);
   // Ship_UpdateVisualState (scope 10, right after the core) seeds it.
@@ -714,17 +714,17 @@ TEST_CASE("inactive wreck holds the death screen until the -240 timer floor",
 
   // The inactive prologue drains one addend per frame (0x0044af14) and keeps
   // the frame consumed without latching game-over.
-  CHECK(NovaPlayer_TickStatusAndOutfitEvents(state, 1.0F, false));
+  CHECK(PlayerTick_StatusAndOutfitEvents(state, 1.0F, false));
   CHECK(state.player.death_timer_active == Catch::Approx(1.0F));
   CHECK_FALSE(state.game_over_pending);
 
   state.player.death_timer_active = -239.0F;
-  CHECK(NovaPlayer_TickStatusAndOutfitEvents(state, 1.0F, false));
+  CHECK(PlayerTick_StatusAndOutfitEvents(state, 1.0F, false));
   CHECK(state.player.death_timer_active == Catch::Approx(-240.0F));
   CHECK_FALSE(state.game_over_pending);
 
   // At the floor the branch falls through to the game-over latch.
-  CHECK(NovaPlayer_TickStatusAndOutfitEvents(state, 1.0F, false));
+  CHECK(PlayerTick_StatusAndOutfitEvents(state, 1.0F, false));
   CHECK(state.game_over_pending);
   CHECK(state.player.death_timer_active == Catch::Approx(-240.0F));
 }

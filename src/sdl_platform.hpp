@@ -97,14 +97,14 @@ struct FlightInput {
   bool mission_info = false;
   // Edge-triggered normal arrival command: Return. When the currently selected
   // ordinary stellar is inside the 250-unit arrival envelope, this follows the
-  // ticker-text / Spaceport path in Stellar_ProcessTravelAndLanding instead of
+  // ticker-text / Spaceport path in Stellar_HandleStellarEntryAndExit instead of
   // opening the target-action interaction dialog.
   bool land = false;
   // Edge-triggered target-action command: 'e' opens the destination-
   // interaction window for the currently targeted stellar. It is separate
   // from both physical stellar collision and the later docked UI path.
   bool target_action = false;
-  // Edge-triggered board command: 'b' runs Ship_HandlePlayerBoardTargetCommand
+  // Edge-triggered board command: 'b' runs Player_HandleBoardTargetCommand
   // (0x0045a3d0) against the primary ship target — disabled-ship validation
   // (range / relative velocity / heading / crew) and the boarding-plunder
   // window. Mirrors the original's g_playerBoardTargetCommandLatch channel.

@@ -50,17 +50,17 @@ Direct calls (14):
 
 | Address | Function |
 |---|---|
-| `0x0041f330` | `Outfit_RedistributeFleetCargoOverflow` |
+| `0x0041f330` | `Player_RedistributeFleetCargoOverflow` |
 | `0x004374f0` | `Ship_HandleSpritePairCollision` (freeflight mining-scoop pickup) |
 | `0x00440370` | `Mission_TryConsumeMissionInteractionResources` |
 | `0x004438d0` | `Mission_ProcessInteractionReactionSlotResources` (dump-cargo dialog arm) |
 | `0x00448020` | `Mission_ExecuteReactionScript` |
 | `0x00448050` | `Mission_RunMisnScriptPayload` |
 | `0x0044aa70` | `Ship_HandlePlayerShipCore` |
-| `0x00457580` | `Stellar_ProcessTravelAndLanding` |
+| `0x00457580` | `Stellar_HandleStellarEntryAndExit` |
 | `0x00462ec0` | `Weapon_ReconcileOutfitPoolWithWeaponBanks` |
 | `0x00463260` | `Weapon_RebuildWeaponBankPoolsFromOwnedOutfits` |
-| `0x00469810` | `Outfit_TransferCargoAndJunkToEscortByRatio` |
+| `0x00469810` | `Player_TransferCargoAndJunkToEscortByRatio` |
 | `0x00482940` | `NovaUi_RunBoardingPlunderWindow` (window teardown) |
 | `0x00489210` | `Ship_RunSpaceflightMode` (after license-token evaluation) |
 | `0x004b3350` | `Ship_ResetPlayerShipState` |
@@ -69,7 +69,7 @@ Interior sites not visible as separate callers: `Ship_HandlePlayerShipCore`
 fires it **4×** (status-panel/outfit refresh; system-init/`Asteroid_InitSystem`;
 after `Rank_Activate` + `Weapon_RebuildWeaponBankPoolsFromOwnedOutfits`;
 after `Weapon_ReconcileOutfitPoolWithWeaponBanks` + UI-install on ship swap),
-and `Stellar_ProcessTravelAndLanding` once after
+and `Stellar_HandleStellarEntryAndExit` once after
 `Ship_DeactivateVacantShipsAndTally`.
 
 ## Port model and coverage
@@ -91,11 +91,11 @@ unconditionally).
 Sites that only set `stat_cache_valid = false` directly and should be unified
 onto the hook (each stands in for an original recompute call):
 `mission.cpp` (`Misn_TickActiveMissionTimers`, `Mission_RerollOfferingRolls`,
-`Stellar_CollectDailyTributeIncome`), `boarding_plunder.cpp`
+`Player_CollectStellarTribute`), `boarding_plunder.cpp`
 (`SelfDestructTarget` arms), `landed_store.cpp` (`NovaLanded_*` close paths),
 `spaceflight.cpp` (`DetonateCarriedBomb`, `RespawnResetPlayerShipState`,
 `RunPlayerEjectTransform`), `new_pilot_flow.cpp` (`RecomputePlayerMeters`),
-`outfit.cpp` (`Outfit_ComputeRemainingCargoSpace`). Unifying will start
+`outfit.cpp` (`Player_ComputeRemainingCargoSpace`). Unifying will start
 consuming the bomb-timer RNG at those sites — that is *more* faithful but is a
 deliberate behaviour change that needs test coverage.
 

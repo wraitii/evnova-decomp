@@ -422,7 +422,7 @@ The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`:
   0x0400 (goal 1 destroys-fail handled in 0x00443c60 evaluation); the armor
   pin and the player disable/destruction arms below are ported with the
   per-frame `g_player_disable_message_shown` latch (reset 0x00417669).
-- **Board/rescue — `Ship_HandlePlayerBoardTargetCommand` 0x0045a3d0**:
+- **Board/rescue — `Player_HandleBoardTargetCommand` 0x0045a3d0**:
   PORTED in `boarding_plunder.cpp`: `goal_counter_b++` on the target's fleet
   for both the board-cargo arm (pickup_mode 2, after
   `Mission_TryConsumeMissionInteractionResources`, carrying_resources latch,
@@ -460,7 +460,7 @@ Completion semantics in 0x00443c60 compare the counters against
 survivors with a/c == 0.
 
 Also decoded: the **arrival mission-fleet slice** of
-`Stellar_ProcessTravelAndLanding` 0x00457580 — seeds follow-player fleet
+`Stellar_HandleStellarEntryAndExit` 0x00457580 — seeds follow-player fleet
 rearm state (`spawn_rearm_timer` 0x7fff/−1, `goal_count_remaining` from the
 alive aux count, scan-mask random immediate re-arm), jumps out ShipBehav 0
 follow fleets via AI state 0x15, and calls `Mission_TrySpawnMissionShipAmbush`
