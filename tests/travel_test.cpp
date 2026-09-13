@@ -14,10 +14,14 @@ namespace {
 
 using game::GameState;
 using game::NovaSystem_OnSystemEntered;
+using game::NovaTravel_CompleteRestrictedTravel;
 using game::NovaTravel_CycleDestinationSystem;
 using game::NovaTravel_PlayerInJumpRange;
 using game::NovaTravel_PlotStarmapDestination;
+using game::NovaTravel_ResolveHypergateDestination;
+using game::NovaTravel_SelectWormholeDestination;
 using game::NovaTravel_Tick;
+using game::RestrictedTravelKind;
 
 // Returns whether zero-based `id` is visited (the per-system fog record):
 // discovery_state > 0 mirrored to the pilot's explored bitset. (SystemDef
@@ -47,6 +51,86 @@ bool IsRevealedOnly(const GameState &state, std::int16_t zero_based_id) {
 }
 
 } // namespace
+
+TEST_CASE("wormholes distinguish linked and random-unlinked destinations") {
+  GameState state;
+  state.scenario.systems.resize(3);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+  }
+  state.scenario.stellars.resize(3);
+  auto &source = state.scenario.stellars[0];
+  source.is_defined = true;
+  source.is_available = true;
+  source.system_id = 0;
+  source.availability_flags = 0x2000;
+  auto &linked = state.scenario.stellars[1];
+  linked.is_defined = true;
+  linked.is_available = true;
+  linked.system_id = 1;
+  linked.availability_flags = 0x2000;
+  source.hyperlinks[0] = 0x81;
+  auto &unlinked = state.scenario.stellars[2];
+  unlinked.is_defined = true;
+  unlinked.is_available = true;
+  unlinked.system_id = 2;
+  unlinked.availability_flags = 0x2000;
+  state.player.current_system_id = 0;
+
+  CHECK(NovaTravel_SelectWormholeDestination(state, 0x80) == 0x81);
+  source.hyperlinks.fill(-1);
+  linked.hyperlinks[0] = 0x80; // linked wormholes are excluded from fallback
+  CHECK(NovaTravel_SelectWormholeDestination(state, 0x80) == 0x82);
+}
+
+TEST_CASE("hypergate selection accepts only linked visible systems") {
+  GameState state;
+  state.scenario.systems.resize(3);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+  }
+  state.scenario.stellars.resize(2);
+  auto &source = state.scenario.stellars[0];
+  source.is_defined = true;
+  source.system_id = 0;
+  source.availability_flags = 0x1000;
+  source.hyperlinks[0] = 0x81;
+  auto &destination = state.scenario.stellars[1];
+  destination.is_defined = true;
+  destination.system_id = 1;
+
+  CHECK(NovaTravel_ResolveHypergateDestination(state, 0x80, 1) == 0x81);
+  CHECK(NovaTravel_ResolveHypergateDestination(state, 0x80, 2) == -1);
+  state.scenario.systems[1].is_visible = false;
+  CHECK(NovaTravel_ResolveHypergateDestination(state, 0x80, 1) == -1);
+}
+
+TEST_CASE("restricted stellar transfer uses the destination emergence angle") {
+  GameState state;
+  state.scenario.systems.resize(2);
+  state.scenario.systems[1].is_visible = true;
+  state.scenario.systems[1].name = "Destination";
+  state.scenario.stellars.resize(1);
+  auto &destination = state.scenario.stellars[0];
+  destination.is_defined = true;
+  destination.system_id = 1;
+  destination.pos_x = 120;
+  destination.pos_y = -40;
+  destination.emergence_angle_deg = 90;
+  state.player.current_system_id = 0;
+  state.cached_stats.speed_raw = 1000.0F;
+
+  REQUIRE(NovaTravel_CompleteRestrictedTravel(
+      state, 0x80, RestrictedTravelKind::kHypergate));
+  CHECK(state.player.current_system_id == 1);
+  CHECK(state.player.pos_x == 120.0F);
+  CHECK(state.player.pos_y == -40.0F);
+  CHECK(state.player.speed == Catch::Approx(5.0F));
+  CHECK(state.player.vel_x == Catch::Approx(5.0F));
+  CHECK(state.player.vel_y == Catch::Approx(0.0F).margin(0.0001F));
+  CHECK(state.travel.just_completed);
+  CHECK(state.travel.starmap_route[0] == 1);
+}
 
 // Gives the player a healthy hull (a launched pilot always has full armor;
 // a default-constructed ship's armor of 0 would read as disabled and the

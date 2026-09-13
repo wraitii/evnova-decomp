@@ -1,8 +1,8 @@
 #pragma once
 
-// Clean-room cross-system travel (the plain hyperspace jump between adjacent
-// systems). This does NOT cover hypergate/wormhole destination selection
-// (which needs the interaction dialog). It reconstructs the faithful,
+// Clean-room cross-system travel: plain hyperspace between adjacent systems,
+// plus the shared state-only portion of hypergate/wormhole transfer. It
+// reconstructs the faithful,
 // self-contained primitives and strings them into an explicit jump state
 // machine that the spaceflight loop ticks once a frame:
 //
@@ -57,6 +57,35 @@
 #include "game_state.hpp"
 
 namespace game {
+
+enum class RestrictedTravelKind { kHypergate, kWormhole };
+
+// Ghidra 0x00456ca0 Stellar_TravelViaWormhole destination selection. Returns
+// a destination stellar resource id, or -1 when none is reachable. A source
+// with defined HyperLink1-8 entries chooses uniformly among links whose
+// systems resolve visible. A source with no links chooses uniformly among
+// other available, unlinked 0x2000 wormholes outside the current system.
+[[nodiscard]] std::int16_t
+NovaTravel_SelectWormholeDestination(GameState &state,
+                                     std::int16_t source_stellar_id);
+
+// Resolves one system selected by the hypergate starmap to a destination
+// stellar in the source's HyperLink1-8 list. Ghidra 0x00456480
+// Stellar_TravelViaHypergate. Returns -1 for cancel/unlinked/invisible picks.
+[[nodiscard]] std::int16_t
+NovaTravel_ResolveHypergateDestination(const GameState &state,
+                                       std::int16_t source_stellar_id,
+                                       std::int16_t selected_system_id);
+
+// Shared successful-transfer body of Stellar_TravelViaHypergate (0x00456480)
+// and Stellar_TravelViaWormhole (0x00456ca0). Moves the player to the
+// destination stellar, applies its emergence angle and speed, marks discovery,
+// clears travel state, queues the transition cue/message, and raises
+// travel.just_completed for the caller's common system-entry rebuild.
+[[nodiscard]] bool
+NovaTravel_CompleteRestrictedTravel(GameState &state,
+                                    std::int16_t destination_stellar_id,
+                                    RestrictedTravelKind kind);
 
 // Number of fuel points a single jump burns. From the Bible "Fuel (100 = 1
 // jump)" and the diagnostic jump gate Stellar_CanShipInitiateJumpSequence

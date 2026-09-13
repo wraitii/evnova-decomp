@@ -11,9 +11,50 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
+#include <random>
 
 namespace game {
 namespace {
+
+std::int16_t StellarSystem(const GameState &state, std::int16_t stellar_id) {
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr) {
+    return -1;
+  }
+  if (stellar->system_id >= 0 && static_cast<std::size_t>(stellar->system_id) <
+                                     state.scenario.systems.size()) {
+    return stellar->system_id;
+  }
+  return NovaTargeting_FindSystemContainingStellar(state.scenario, stellar_id);
+}
+
+std::string RestrictedArrivalMessage(const GameState &state,
+                                     const System &system,
+                                     RestrictedTravelKind kind) {
+  const std::uint16_t lead =
+      kind == RestrictedTravelKind::kHypergate ? 0x2e : 0x2f;
+  std::string message =
+      NovaHud_LoadStringEntry(0x7d2, lead)
+          .value_or(kind == RestrictedTravelKind::kHypergate ? "Entering"
+                                                             : "Emerging in");
+  message += " ";
+  message += system.name;
+  message += " ";
+  message += NovaHud_LoadStringEntry(0x7d2, 0x30).value_or("system on");
+  message += " ";
+  message += NovaText_FormatDateString(state.date, false);
+  message += ".";
+  const bool has_nav = std::any_of(system.nav_defs.begin(),
+                                   system.nav_defs.end(),
+                                   [](std::int16_t id) { return id >= 0x80; });
+  if (!has_nav) {
+    message += " ";
+    message += NovaHud_LoadStringEntry(0x7d2, 0x31)
+                   .value_or("No stellar objects present.");
+  }
+  return message;
+}
 
 // Turn-around velocity damp per 30 Hz tick while the brake phase runs.
 // The original is g_jump_turnaround_velocity_damp 0x5755f0 = 0.99203847;
@@ -463,6 +504,137 @@ int FindLinkedTravelSlot(const GameState &state,
 }
 
 } // namespace
+
+// Ghidra 0x00456ca0 Stellar_TravelViaWormhole.
+std::int16_t
+NovaTravel_SelectWormholeDestination(GameState &state,
+                                     std::int16_t source_stellar_id) {
+  const Stellar *source = state.scenario.Stellar(source_stellar_id);
+  if (source == nullptr || (source->availability_flags & 0x2000U) == 0U) {
+    return -1;
+  }
+  std::vector<std::int16_t> candidates;
+  for (const std::int16_t link : source->hyperlinks) {
+    const std::int16_t system = StellarSystem(state, link);
+    if (system >= 0 && NovaSystem_ResolveVisibleForTravel(state, system) >= 0) {
+      candidates.push_back(link);
+    }
+  }
+  if (candidates.empty()) {
+    const bool source_has_links =
+        std::any_of(source->hyperlinks.begin(),
+                    source->hyperlinks.end(),
+                    [](std::int16_t link) { return link >= 0x80; });
+    if (source_has_links) {
+      return -1;
+    }
+    for (std::size_t i = 0; i < state.scenario.stellars.size(); ++i) {
+      const std::int16_t id = static_cast<std::int16_t>(i + 0x80);
+      const Stellar &candidate = state.scenario.stellars[i];
+      if (id == source_stellar_id || !candidate.is_available ||
+          (candidate.availability_flags & 0x2000U) == 0U ||
+          std::any_of(candidate.hyperlinks.begin(),
+                      candidate.hyperlinks.end(),
+                      [](std::int16_t link) { return link >= 0x80; })) {
+        continue;
+      }
+      const std::int16_t system = StellarSystem(state, id);
+      if (system >= 0 && system != state.player.current_system_id &&
+          NovaSystem_ResolveVisibleForTravel(state, system) >= 0) {
+        candidates.push_back(id);
+      }
+    }
+  }
+  if (candidates.empty()) {
+    return -1;
+  }
+  return candidates[std::uniform_int_distribution<std::size_t>{
+      0, candidates.size() - 1}(state.rng)];
+}
+
+// Ghidra 0x00456480 Stellar_TravelViaHypergate; destination validation after
+// NovaUi_RunStarmapWindow returns in its linked-destination mode.
+std::int16_t
+NovaTravel_ResolveHypergateDestination(const GameState &state,
+                                       std::int16_t source_stellar_id,
+                                       std::int16_t selected_system_id) {
+  const Stellar *source = state.scenario.Stellar(source_stellar_id);
+  if (source == nullptr || (source->availability_flags & 0x1000U) == 0U ||
+      selected_system_id < 0) {
+    return -1;
+  }
+  for (const std::int16_t link : source->hyperlinks) {
+    const std::int16_t system = StellarSystem(state, link);
+    if (system >= 0 && NovaSystem_ResolveVisibleForTravel(state, system) ==
+                           selected_system_id) {
+      return link;
+    }
+  }
+  return -1;
+}
+
+// Ghidra 0x00456480 Stellar_TravelViaHypergate and 0x00456ca0
+// Stellar_TravelViaWormhole share this system-entry body inline.
+bool NovaTravel_CompleteRestrictedTravel(GameState &state,
+                                         std::int16_t destination_stellar_id,
+                                         RestrictedTravelKind kind) {
+  const Stellar *destination = state.scenario.Stellar(destination_stellar_id);
+  const std::int16_t stored_system =
+      StellarSystem(state, destination_stellar_id);
+  const std::int16_t destination_system =
+      NovaSystem_ResolveVisibleForTravel(state, stored_system);
+  if (destination == nullptr || destination_system < 0) {
+    return false;
+  }
+  PlayerShip &player = state.player;
+  player.jump_destination_system_id = player.current_system_id;
+  player.current_system_id = destination_system;
+  NovaWeapon_ClearTransientCombatState(state);
+  NovaSystem_OnSystemEntered(state, destination_system, 1);
+  state.starmap_pan_x =
+      static_cast<float>(state.scenario.systems[destination_system].pos_x);
+  state.starmap_pan_y =
+      static_cast<float>(state.scenario.systems[destination_system].pos_y);
+  player.pos_x = static_cast<float>(destination->pos_x);
+  player.pos_y = static_cast<float>(destination->pos_y);
+  const std::int16_t heading_deg =
+      destination->emergence_angle_deg.has_value() &&
+              *destination->emergence_angle_deg >= 0 &&
+              *destination->emergence_angle_deg <= 359
+          ? *destination->emergence_angle_deg
+          : static_cast<std::int16_t>(
+                std::uniform_int_distribution<int>{0, 359}(state.rng));
+  player.heading =
+      static_cast<float>(heading_deg) * (std::numbers::pi_v<float> / 180.0F);
+  player.speed = PlayerMaxSpeed(state) * 0.5F;
+  player.vel_x = std::sin(player.heading) * player.speed;
+  player.vel_y = -std::cos(player.heading) * player.speed;
+  NovaHud_ShowOverlayMessage(
+      state,
+      RestrictedArrivalMessage(
+          state, state.scenario.systems[destination_system], kind),
+      static_cast<std::uint64_t>(
+          kind == RestrictedTravelKind::kHypergate ? 0x168U : 0xf0U));
+  state.warp_out_sound_pending = true;
+  state.no_asteroids_latch = true;
+  state.screen_flash_intensity = 1.0F;
+  state.travel.starmap_route.fill(-1);
+  state.travel.starmap_route[0] = destination_system;
+  state.travel.travel_slot = -1;
+  state.travel.starmap_destination_system_id = -1;
+  state.travel.destination_system_id = -1;
+  state.travel.selected_stellar_id = -1;
+  state.travel.engaged_stellar_id = -1;
+  state.travel.engage_timer = -1;
+  state.travel.hyperspace_mode = false;
+  state.travel.engaging = false;
+  state.travel.just_completed = true;
+  player.travel_transfer_mode = -1;
+  player.ai_secondary_target_slot = -1;
+  player.primary_target_ship_slot = -1;
+  state.arrival_command_grace_frames = 15;
+  return true;
+}
 
 bool NovaTravel_PlayerInJumpRange(const GameState &state) {
   const System *sys = state.scenario.System(CurrentSystemResource(state));

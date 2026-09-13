@@ -36,8 +36,11 @@ Opened from:
   active and the ship is not landing / hyperspacing / dead.
 - `0x0043c470` `NovaUi_RunMissionBbsWindow` — destination window's
   starmap sub-flow.
-- `0x00456480` `Stellar_SelectLinkedDestinationViaStarmap` — linked-destination
-  (hypergate/wormhole) travel through the map.
+- `0x00456480` `Stellar_TravelViaHypergate` — Bible Flags2 `0x1000` hypergate
+  travel: linked-destination choice through the map followed by transfer.
+- `0x00456ca0` `Stellar_TravelViaWormhole` — Bible Flags2 `0x2000` wormhole
+  travel: random linked destination, or another unlinked wormhole when every
+  HyperLink field is unused.
 
 ## Data model
 

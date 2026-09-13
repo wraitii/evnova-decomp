@@ -716,6 +716,16 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
     st.animation_dwell_time = ReadBeI16(bytes, 0x22);
     st.animation_frame_multiplier = ReadBeI16(bytes, 0x24);
   }
+  // Bible HyperLink1-8 (payload +0x26..+0x34, StellarDef +0x47e): raw spöb
+  // resource ids. Zero and -1 are unused; valid ids remain 0x80-based because
+  // ScenarioData::Stellar accepts resource ids and the original indexes the
+  // rebased g_stellar_defs table only after loading these words.
+  if (bytes.size() >= 0x36) {
+    for (std::size_t i = 0; i < st.hyperlinks.size(); ++i) {
+      const std::int16_t link = ReadBeI16(bytes, 0x26 + i * 2);
+      st.hyperlinks[i] = link >= 0x80 ? link : -1;
+    }
+  }
   if (bytes.size() >= 0x242) {
     st.link_b_id = ReadBeI16(bytes, 0x240); // link_b_id (alternate spin set)
     if (st.link_b_id < 0 || st.link_b_id > 0xff) {
