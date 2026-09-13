@@ -517,7 +517,8 @@ struct Ship {
   std::int16_t waypoint_arrival_marker_b = -1; // +0xC8FC (provisional offset)
 
   // Whether this ship is flagged as carrying a mining scoop outfit (ShipState
-  // +0xBE mining_scoop_active, derived by Outfit_HasMiningScoopOutfit).
+  // +0xC3 mining_scoop_active, derived by Outfit_HasMiningScoopOutfit). The
+  // earlier comment placed this at +0xBE, which is escort_released_mark.
   bool mining_scoop_active = false;
 
   // --- Ship-comm dialog latches (Provisional; see ship_comm_dialog.cpp) -----
@@ -531,6 +532,14 @@ struct Ship {
   // wider escort/fleet system.
   std::int8_t escort_origin_mark = 0;   // +0xBB (Provisional)
   std::int8_t comm_interacted_mark = 0; // +0xBC (Provisional)
+  // ShipState +0xBE/+0xBF: the escort-management marks consumed by the auto
+  // fleet trade pass Player_ProcessEscortFleetAtStellar (0x004229d0) — +0xBE
+  // requests the escort be sold/released at the next shipyard, +0xBF requests
+  // the class's UpgradeTo upgrade when affordable. Set by the (unported)
+  // escort management window 0x004853a0, cleared by the upgrade pass and on
+  // slot allocation / capture.
+  std::int8_t escort_released_mark = 0; // +0xBE
+  std::int8_t escort_upgrade_mark = 0;  // +0xBF
   // ShipState +0xC8DE post_hit_mode_hint: the AI's post-hit behavior hint
   // (written by the ship-comm escort release and post-hit state handling).
   std::int16_t post_hit_mode_hint = -1; // +0xC8DE

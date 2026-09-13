@@ -39,6 +39,19 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(ship->mass_tons == 15);
   // Cost is repacked as a 4-byte big-endian field at 0x30 (0x00002710 = 10000).
   CHECK(ship->cost == 10000);
+  // Escort upgrade/sale trio (shp +0x728/+0x72a/+0x72e). The Shuttle points
+  // at the upgraded hull 0xBC with a 5000-credit cost; its non-positive
+  // EscSellValue is defaulted by the loader to trunc(0.10 * Cost) = 1000.
+  CHECK(ship->upgrade_to_ship_class_id == 0xBC - 0x80);
+  CHECK(ship->escort_upgrade_cost == 5000);
+  CHECK(ship->escort_sell_value == 1000);
+
+  // The Heavy Shuttle (0x81) upgrades to 0xBD for 10000, sale default 1750.
+  const ShipClass *heavy = data.Ship(0x81);
+  REQUIRE(heavy != nullptr);
+  CHECK(heavy->upgrade_to_ship_class_id == 0xBD - 0x80);
+  CHECK(heavy->escort_upgrade_cost == 10000);
+  CHECK(heavy->escort_sell_value == 1750);
 
   // The starter ship's stock weapon banks: bank 0 has a single stock weapon of
   // weapon id 0x80 (the weapon defined at resource id 128).

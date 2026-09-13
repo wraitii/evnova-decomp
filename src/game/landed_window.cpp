@@ -7,6 +7,7 @@
 #include "../sdl_platform.hpp"
 #include "asteroid.hpp"
 #include "docked_dialog.hpp"
+#include "landed_store.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
@@ -1163,6 +1164,19 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                    std::nullopt);
   };
 
+  // Ghidra 0x00491f30: after the interaction loop exits (launch or quit), the
+  // escort fleet trade pass (Player_ProcessEscortFleetAtStellar 0x004229d0)
+  // runs before the window comes down. Its summary and the payroll defection
+  // message are text-reader modals layered over the still-live dock. Wrap every
+  // loop exit so the pass runs exactly once.
+  const auto show_text = [&](const std::string &text) {
+    NovaUi_RunTextReaderDialog(platform, state, text, false, render_background);
+  };
+  const auto finish = [&](LandedExit exit) {
+    Player_ProcessEscortFleetAtStellar(state, ctx.stellar_id, show_text);
+    return exit;
+  };
+
   // Activates the currently-selected service, leaving the dock when the player
   // picks Launch. On a mocked sub-screen (trade/outfit/shipyard/bar/...) the
   // modal stays open (DispatchService returns kServiceComplete). Guards against
@@ -1266,13 +1280,13 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
         if (entered_sub_screen) {
           entered_sub_screen = false;
         } else {
-          return LandedExit::kLaunched;
+          return finish(LandedExit::kLaunched);
         }
         continue;
       }
       if (in->key == TextKey::enter) {
         // Enter leaves the dock, matching the original's Enter/Esc exit code.
-        return LandedExit::kLaunched;
+        return finish(LandedExit::kLaunched);
       }
       if (in->key == TextKey::primary) {
         // Left-click a service button: activate the hovered (and only if
@@ -1285,7 +1299,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
               LandedExit exit =
                   DispatchService(platform, state, ctx, render_background);
               if (exit == LandedExit::kLaunched) {
-                return LandedExit::kLaunched;
+                return finish(LandedExit::kLaunched);
               }
               entered_sub_screen = false;
               // Do not dispatch another queued key against the just-closed
@@ -1330,12 +1344,12 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
           break;
         case 'l':
           // "Launch": a synonym for Enter/Esc (the docked Leave slot).
-          return LandedExit::kLaunched;
+          return finish(LandedExit::kLaunched);
         default:
           continue;
         }
         if (activate_selection()) {
-          return LandedExit::kLaunched;
+          return finish(LandedExit::kLaunched);
         }
         // A nested service may have changed the renderer presentation and
         // left its frame visible. Establish a redraw boundary before handling
@@ -1345,7 +1359,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     }
     SDL_Delay(16);
   }
-  return LandedExit::kQuit;
+  return finish(LandedExit::kQuit);
 }
 
 } // namespace game

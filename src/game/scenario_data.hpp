@@ -519,6 +519,15 @@ struct ShipClass {
   // (TODO(decomp): lane not modelled).
   std::int16_t buy_random = 0;
   std::int16_t hire_random = 0;
+  // Bible UpgradeTo / EscUpgrdCost / EscSellValue (shp payload +0x728/+0x72a/
+  // +0x72e -> ShipClassDef +0xa22/+0x64/+0x68), consumed by the auto fleet
+  // trade pass Player_ProcessEscortFleetAtStellar (0x004229d0) and the escort
+  // payroll (0x004232d0). The loader rebases UpgradeTo by -0x80 (anything
+  // below 0x80 becomes -1 = not upgradable), clamps a negative upgrade cost to
+  // 0, and defaults a non-positive sell value to trunc(0.10 * Cost).
+  std::int16_t upgrade_to_ship_class_id = -1; // +0xa22 (zero-based)
+  std::int32_t escort_upgrade_cost = 0;       // +0x64
+  std::int32_t escort_sell_value = 0;         // +0x68
 };
 
 // Ghidra OutfitDef (g_outfit_defs, 0x200 entries indexed by outfit id minus
