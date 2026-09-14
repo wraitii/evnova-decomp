@@ -92,9 +92,9 @@ void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks);
 // live particle loses one life tick; while it survives its 8.8 fixed position
 // is integrated by its velocity. The pool's gravity accumulator is 0 in the
 // shipped game (SWParticles_AllocatePool(100000, 0)), so vel_y is unchanged.
-// The original updates once per rendered frame (present hook) with no FPS cap;
-// this port pins that to 60 updates/s so behavior is frame-rate independent
-// and equal to the original at 60 Hz. `elapsed_ticks` is in 30 Hz simulation
+// The original updates once per rendered frame through the present hook, whose
+// enclosing flight loop is limited to one iteration per 21 ms. The port banks
+// equivalent whole 21 ms logical calls. `elapsed_ticks` is in 30 Hz simulation
 // ticks; fractional remainders are banked in GameState.
 void NovaEffects_TickSwParticles(GameState &state, float elapsed_ticks);
 

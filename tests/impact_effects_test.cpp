@@ -111,7 +111,7 @@ TEST_CASE("weapon impact bursts spread the spawn point when asked",
   CHECK(any_offset);
 }
 
-TEST_CASE("SWParticles advance at a fixed 60 Hz and expire",
+TEST_CASE("SWParticles advance at the original 21 ms flight cadence and expire",
           "[impact][particle]") {
   GameState state;
   SwParticle particle;
@@ -120,20 +120,20 @@ TEST_CASE("SWParticles advance at a fixed 60 Hz and expire",
   particle.vel_y = -256; // 1 px/update up
   state.sw_particles.push_back(particle);
 
-  // A quarter of a 30 Hz tick is half a 60 Hz update: banked, no step.
-  NovaEffects_TickSwParticles(state, 0.25F);
+  // Half of an original 0.63-normalized-tick flight call is banked.
+  NovaEffects_TickSwParticles(state, 0.315F);
   REQUIRE(state.sw_particles.size() == 1);
   CHECK(state.sw_particles[0].pos_x == 0);
 
-  // The second quarter completes the update.
-  NovaEffects_TickSwParticles(state, 0.25F);
+  // The second half completes one discrete update.
+  NovaEffects_TickSwParticles(state, 0.315F);
   REQUIRE(state.sw_particles.size() == 1);
   CHECK(state.sw_particles[0].life_ticks == 2);
   CHECK(state.sw_particles[0].pos_x == 256);
   CHECK(state.sw_particles[0].pos_y == -256);
 
-  // One 30 Hz tick is two 60 Hz updates: life 2 -> 1 (moves), 1 -> 0 (freed).
-  NovaEffects_TickSwParticles(state, 1.0F);
+  // Two further 21 ms calls: life 2 -> 1 (moves), 1 -> 0 (freed).
+  NovaEffects_TickSwParticles(state, 1.26F);
   CHECK(state.sw_particles.empty());
 }
 

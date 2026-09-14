@@ -8,6 +8,8 @@
 #include "game/spaceflight.hpp"
 #include "game/weapon.hpp"
 
+#include <algorithm>
+
 namespace game {
 namespace {
 
@@ -593,7 +595,7 @@ TEST_CASE("NPC destruction seeds the class DeathDelay timer once",
                            /*check_fire_restriction_transition=*/true);
   CHECK(NovaAiShip_IsDestroyed(state.ShipAt(1)));
   CHECK(state.ShipAt(1).death_timer_active <= 0.0F);
-  NovaShip_TickDestroyedShipVisualState(state, state.ShipAt(1), 1.0F);
+  NovaShip_TickDestroyedShipVisualState(state, state.ShipAt(1), 0.63F);
   CHECK(state.ShipAt(1).death_timer_active == Catch::Approx(10.0F));
 }
 
@@ -627,7 +629,7 @@ TEST_CASE("player destruction seeds a tripled death presentation timer",
   CHECK(state.player.death_timer_active <= 0.0F);
 
   NovaShip_TickDestroyedShipVisualState(
-      state, state.player, /*elapsed_ticks=*/1.0F);
+      state, state.player, /*elapsed_ticks=*/0.63F);
   // g_player_death_timer_scale (3.0) * DeathDelay (10).
   CHECK(state.player.death_timer_active == Catch::Approx(30.0F));
 }
@@ -646,14 +648,13 @@ TEST_CASE("armor-only destruction starts the player death sequence",
   // The player core consumes the destroyed frame but does not seed the timer.
   // It applies the fire-restricted 0.995 damp on the raw-call cadence.
   CHECK(PlayerTick_StatusAndOutfitEvents(state,
-                                         /*elapsed_ticks=*/1.0F,
+                                         /*elapsed_ticks=*/0.63F,
                                          /*eject_command=*/false));
-  CHECK(state.player.vel_x ==
-        Catch::Approx(10.0F * std::pow(0.995F, 1.0F / 0.63F)));
+  CHECK(state.player.vel_x == Catch::Approx(10.0F * 0.995F));
   CHECK(state.player.death_timer_active <= 0.0F);
   // Ship_UpdateVisualState (scope 10, right after the core) seeds it.
   NovaShip_TickDestroyedShipVisualState(
-      state, state.player, /*elapsed_ticks=*/1.0F);
+      state, state.player, /*elapsed_ticks=*/0.63F);
   CHECK(state.player.death_timer_active == Catch::Approx(24.0F));
   CHECK(state.player.death_timer_seeded);
 }
@@ -678,20 +679,20 @@ TEST_CASE("player wreck sheds Explode1 puffs then runs the Explode2 finale",
   };
 
   // Seed the 3x presentation (90 ticks).
-  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 0.63F);
   REQUIRE(state.player.death_timer_active == Catch::Approx(90.0F));
 
   // Below 20 the Explode1 roll is 1-in-1, so one puff must spawn.
   state.player.death_timer_active = 19.0F;
   const std::size_t puffs_before = active_effects(state);
-  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 0.63F);
   CHECK(active_effects(state) == puffs_before + 1);
   CHECK(state.player.is_active);
 
   // Crossing the finale threshold spawns the Explode2 boom and deactivates.
   state.player.death_timer_active = 1.0F;
   const std::size_t finale_before = active_effects(state);
-  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 0.63F);
   CHECK(active_effects(state) == finale_before + 1);
   CHECK(!state.player.is_active);
 }
@@ -705,7 +706,7 @@ TEST_CASE("death seed latch still runs the finale after a zero overshoot",
   state.player.armor_points = -1.0F;
 
   // Seed the 3x presentation once; the latch now owns the presentation.
-  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 0.63F);
   REQUIRE(state.player.death_timer_active == Catch::Approx(90.0F));
   REQUIRE(state.player.is_active);
   REQUIRE(state.player.death_timer_seeded);
@@ -715,7 +716,7 @@ TEST_CASE("death seed latch still runs the finale after a zero overshoot",
   // crosses zero, so it always hits 0<timer<=2.0; the latch must preserve that
   // by running the finale instead of re-seeding a fresh 90-tick presentation.
   state.player.death_timer_active = -0.5F;
-  NovaShip_TickDestroyedShipVisualState(state, state.player, 1.0F);
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 0.63F);
   CHECK(!state.player.is_active);
   CHECK(state.player.destruction_finale_triggered);
 }
@@ -798,7 +799,34 @@ TEST_CASE("active player death timer follows the original raw-call cadence",
   state.player.death_timer_active = 5.0F;
 
   CHECK(PlayerTick_StatusAndOutfitEvents(state, 0.63F, false));
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 0.63F);
   CHECK(state.player.death_timer_active == Catch::Approx(4.0F));
+}
+
+TEST_CASE("destroyed visual RNG banks partial raw calls",
+          "[collision][ship_visual][timing]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.ships[0].destruction_effect_while_breaking = 1;
+  state.player.armor_points = -1.0F;
+  state.player.death_timer_seeded = true;
+  state.player.death_timer_active = 19.0F; // Explode1 is guaranteed below 20
+
+  const auto active_effects = [](const GameState &s) {
+    return std::count_if(s.impact_effect_instances.begin(),
+                         s.impact_effect_instances.end(),
+                         [](const ImpactEffectInstance &effect) {
+                           return effect.anim_time >= 0.0F;
+                         });
+  };
+
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 0.315F);
+  CHECK(state.player.death_timer_active == Catch::Approx(19.0F));
+  CHECK(active_effects(state) == 0);
+
+  NovaShip_TickDestroyedShipVisualState(state, state.player, 0.315F);
+  CHECK(state.player.death_timer_active == Catch::Approx(18.0F));
+  CHECK(active_effects(state) == 1);
 }
 
 TEST_CASE("proximity blast spawns linked submunitions with inherited context",

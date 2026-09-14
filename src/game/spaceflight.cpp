@@ -67,8 +67,6 @@ constexpr float kRecentlyHitRegenCutoff = 0.0F;
 // for the same step. The port time-adjusts both against the original loop's
 // 21 ms minimum frame duration.
 constexpr float kJumpTurnaroundTurnRateAddend = 1.0F;
-// DAT_00575538: shared zero sentinel for the death-timer / bomb-timer floors.
-constexpr float kDeathTimerExpireFloor = 0.0F;
 // DAT_00575558 (0x00575558, read as a float; bytes 00 00 70 c3 = -240.0): the
 // inactive-player death-timer floor. After Ship_UpdateVisualState's finale
 // deactivates the hull the timer keeps draining from ~2.0 down to -240 at
@@ -268,7 +266,7 @@ void Stub_HandleShots(GameState &state, float elapsed_ticks) {
 // for this frame by the caller and was > 0 before the decrement.
 void TickShipHandleDestructionDebrisPuffs(GameState &state,
                                           Ship &ship,
-                                          float death_timer_step) {
+                                          std::int16_t raw_frame_counter) {
   const ShipClass *cls =
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   if (cls == nullptr) {
@@ -281,10 +279,10 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
   // field_0x10 * g_death_delay_half_fraction_f64 (0.5) directly, which is exact
   // because it steps by a constant 1.0: the integer timer only lands on the
   // half when DeathDelay is even (an odd DeathDelay gives an x.5 target the
-  // integer sequence never hits). The time-adjusted raw-call step can skip the
-  // exact value, so the port tests the crossing; the parity guard keeps the
-  // original even-only behaviour.
-  const float previous_timer = ship.death_timer_active + death_timer_step;
+  // integer sequence never hits). The clean-room logical-call scheduler steps
+  // by the same 1.0; the crossing form plus parity guard states that quirk
+  // directly and remains robust if this helper's caller changes.
+  const float previous_timer = ship.death_timer_active + 1.0F;
   const bool half_landing = (cls->death_delay_frames % 2) == 0;
   if (ship.pers_def_slot != -1 && half_landing &&
       ship.death_timer_active <= half_death_delay &&
@@ -327,16 +325,7 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
     if (interval < 10) {
       interval = 10;
     }
-    if (state.last_frame_tick_scale > 0.0F) {
-      interval = static_cast<int>(static_cast<float>(interval) /
-                                  state.last_frame_tick_scale);
-      if (interval < 1) {
-        interval = 1;
-      }
-    }
-    if (state.spaceflight_frame_counter %
-                static_cast<std::uint32_t>(interval) ==
-            0U ||
+    if (raw_frame_counter % interval == 0 ||
         ship.timed_action_counter == cls->timed_action_counter_init) {
       ship.timed_action_counter =
           static_cast<std::int16_t>(ship.timed_action_counter - 1);
@@ -433,21 +422,31 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       ship.ai_desired_speed = 0.0F;
       ship.engine_glow_level = 0;
       ship.engine_glow_intensity = 0.0F;
-      if (ship.death_timer_active > 0.0F) {
-        // Ship_HandleShip (0x00433050) steps by g_cloak_fade_passive_decay
-        // (1.0) per raw call. Time-adjust against the original 21 ms floor.
-        const float death_timer_step = RawSpaceflightCallTicks(elapsed_ticks);
-        ship.death_timer_active -= death_timer_step;
-        // Ship_HandleShip's debris-puff arm (halfway + timed-action cascade).
-        TickShipHandleDestructionDebrisPuffs(state, ship, death_timer_step);
-      }
-      // The original integrates a wreck's velocity even after destruction
-      // (Ship_HandleShip's position block runs past the destroyed guard), so a
-      // dead NPC coasts instead of stopping dead. AI state 0x16 makes the
-      // integrator hold course; the disabled damping (0.995,
-      // g_fire_restricted_ship_velocity_damp 0x00575448) still applies.
+      // Ship_HandleShip's position integration precedes Ship_UpdateVisualState
+      // in the containing scope. Keep the wreck's current-frame coast before
+      // any finale deactivates it.
       NovaShip_IntegrateNpcMovement(
           state, ship, *cls, elapsed_ticks, SDL_GetTicks());
+      ship.destruction_raw_tick_accumulator +=
+          std::max(0.0F, RawSpaceflightCallTicks(elapsed_ticks));
+      // Clean-room scheduler: the accumulator does not model an original
+      // ShipState field. It decouples the original discrete per-call body from
+      // SDL presentation frequency.
+      std::uint16_t raw_counter_bits =
+          std::bit_cast<std::uint16_t>(state.shot_guidance_frame_counter);
+      while (ship.is_active &&
+             ship.destruction_raw_tick_accumulator + 1.0e-6F >= 1.0F) {
+        ship.destruction_raw_tick_accumulator -= 1.0F;
+        ship.destruction_raw_tick_accumulator =
+            std::max(0.0F, ship.destruction_raw_tick_accumulator);
+        if (ship.death_timer_active > 0.0F) {
+          ship.death_timer_active -= 1.0F;
+          TickShipHandleDestructionDebrisPuffs(
+              state, ship, std::bit_cast<std::int16_t>(raw_counter_bits));
+        }
+        NovaShip_TickDestroyedShipVisualStateRawCall(state, ship);
+        raw_counter_bits = static_cast<std::uint16_t>(raw_counter_bits + 1U);
+      }
       continue;
     }
 
@@ -481,10 +480,8 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     // Ship_UpdateVisualState's weapon-flash fade + running-lights blink run
     // for every active hull each frame (the same per-ship pass).
     NovaShip_TickWeaponSpriteAndRunningLights(state, ship, elapsed_ticks);
-    if (!NovaAiShip_IsDestroyed(ship)) {
-      continue;
-    }
-    NovaShip_TickDestroyedShipVisualState(state, ship, elapsed_ticks);
+    // Destroyed NPCs run their visual slice inline with Ship_HandleShip above
+    // so each ship preserves the original handler -> visual ordering.
   }
 }
 
@@ -3559,6 +3556,10 @@ void RespawnResetPlayerShipState(GameState &state) {
   p.ai_control_mode = 0;
   p.ai_state_code = 0;
   p.death_timer_active = -999.0F;
+  p.death_timer_seeded = false;
+  p.destruction_finale_triggered = false;
+  p.destruction_visual_triggered = false;
+  p.destruction_raw_tick_accumulator = 0.0F;
   p.ionization_points = 0.0F;
   // TODO(decomp(0x004b3350)) skipped: field_0xb0/field_0x60 latch words,
   // weapon_exit_animation_phase, alternate_sprite_cycle_index and
@@ -3735,6 +3736,10 @@ void RunPlayerEjectTransform(GameState &state) {
   }
 
   p.death_timer_active = -1.0F;
+  p.death_timer_seeded = false;
+  p.destruction_finale_triggered = false;
+  p.destruction_visual_triggered = false;
+  p.destruction_raw_tick_accumulator = 0.0F;
   p.primary_target_ship_slot = -1;
   p.ai_secondary_target_slot = -1;
   p.active_weapon_bank_slot = -1;
@@ -3915,26 +3920,28 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
         return true;
       }
     }
-    // Death presentation running: tick the timer down; the original skips the
-    // whole status/outfit block for the dying ship (inactive-branch return).
-    if (p.death_timer_active > kDeathTimerExpireFloor) {
-      // Ship_HandlePlayerShipCore 0x004522f3 steps by k_one_f32 (1.0) per raw
-      // call. Time-adjust against the original 21 ms floor.
-      p.death_timer_active -= RawSpaceflightCallTicks(elapsed_ticks);
-    }
+    // Ship_UpdateVisualState, called immediately after the core, replays the
+    // raw-call timer decrement together with its discrete Explode1 RNG pass.
     return true;
   }
 
   // --- Inactive branch (0x0044aa70 prologue at 0x0044af14) -----------------
   if (!p.is_active) {
+    p.destruction_raw_tick_accumulator +=
+        std::max(0.0F, RawSpaceflightCallTicks(elapsed_ticks));
     // While the timer is above DAT_00575558 (-240.0) the hull is gone but the
     // spaceflight loop keeps presenting: the Explode2 area effect spawned by
     // the finale (and the fading debris pool) finish playing before the core
     // latches DAT_00596d38. Only once the timer reaches the floor does the
     // inactive branch fall through to the escape-pod scan / game-over latch.
     if (p.death_timer_active > kPlayerDeathInactiveTimerFloor) {
-      p.death_timer_active -= kJumpTurnaroundTurnRateAddend *
-                              RawSpaceflightCallTicks(elapsed_ticks);
+      while (p.destruction_raw_tick_accumulator + 1.0e-6F >= 1.0F &&
+             p.death_timer_active > kPlayerDeathInactiveTimerFloor) {
+        p.destruction_raw_tick_accumulator -= 1.0F;
+        p.death_timer_active -= kJumpTurnaroundTurnRateAddend;
+      }
+      p.destruction_raw_tick_accumulator =
+          std::max(0.0F, p.destruction_raw_tick_accumulator);
       return true;
     }
     if (state.bomb_outfit_class != 0) {

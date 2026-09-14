@@ -183,7 +183,25 @@ void NovaShip_TickDestroyedDebrisPuffs(GameState &state, Ship &ship) {
 void NovaShip_TickDestroyedShipVisualState(GameState &state,
                                            Ship &ship,
                                            float elapsed_ticks) {
-  (void)elapsed_ticks;
+  // Clean-room scheduler only. The original receives one invocation from each
+  // outer loop; SDL can present faster, so retain fractional time and invoke
+  // the recovered discrete body only for whole 21 ms logical calls.
+  ship.destruction_raw_tick_accumulator +=
+      std::max(0.0F, RawSpaceflightCallTicks(elapsed_ticks));
+  while (ship.is_active &&
+         ship.destruction_raw_tick_accumulator + 1.0e-6F >= 1.0F) {
+    ship.destruction_raw_tick_accumulator -= 1.0F;
+    ship.destruction_raw_tick_accumulator =
+        std::max(0.0F, ship.destruction_raw_tick_accumulator);
+    if (ship.death_timer_active > 0.0F) {
+      ship.death_timer_active -= 1.0F;
+    }
+    NovaShip_TickDestroyedShipVisualStateRawCall(state, ship);
+  }
+}
+
+void NovaShip_TickDestroyedShipVisualStateRawCall(GameState &state,
+                                                  Ship &ship) {
   if (!ship.is_active) {
     return;
   }
@@ -198,11 +216,9 @@ void NovaShip_TickDestroyedShipVisualState(GameState &state,
     return;
   }
   // The original seeds the presentation the first time it observes the
-  // destroyed state and then relies on its constant 1.0/call countdown always
-  // landing inside the 0<timer<=2.0 finale window. The port advances the timer
-  // with a time-adjusted raw-call step, where a long frame can cross below
-  // zero; the latch keeps that overshoot from re-seeding a fresh presentation
-  // and swallowing the Explode2 finale.
+  // destroyed state. The port-side latch also makes that ownership explicit
+  // across relaunches; the port scheduler above preserves the original
+  // integer countdown and therefore cannot skip the 0<timer<=2 finale window.
   if (!ship.death_timer_seeded) {
     ship.death_timer_seeded = true;
     if (ship.death_timer_active <= 0.0F) {

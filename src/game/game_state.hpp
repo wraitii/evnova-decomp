@@ -290,12 +290,15 @@ struct Ship {
   bool destruction_finale_triggered = false;
   // Port-only: latches the first Ship_UpdateVisualState seed of the death
   // presentation. The original reseeds whenever death_timer_active <= 0, but
-  // because it steps by a constant 1.0 per call an integer DeathDelay seed can
-  // never cross zero before the 0<timer<=2.0 finale window. The port uses a
-  // time-adjusted raw-call step, where a long frame can cross below zero; this
-  // latch keeps that overshoot from re-seeding a fresh presentation and
-  // swallowing the Explode2 finale.
+  // its integer 1.0-per-call countdown always reaches the finale window first.
+  // The port replays that discrete countdown and resets this ownership latch
+  // whenever the player is relaunched into a fresh hull.
   bool death_timer_seeded = false;
+  // Port-side remainder for destruction operations that the original runs
+  // once per outer spaceflight call. One whole call is 0.63 normalized ticks
+  // at the executable's 21 ms frame floor; banking it keeps the discrete RNG
+  // and timed-debris cadence independent of the SDL presentation rate.
+  float destruction_raw_tick_accumulator = 0.0F;
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
   // timer consumer is still deferred, so the field remains provisional.
   float hit_reaction_timer = 0.0F;
