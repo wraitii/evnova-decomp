@@ -384,7 +384,7 @@ TEST_CASE("npc glow fades to zero when thrust stops") {
   }
   CHECK(ship.engine_glow_level == 0x20);
 
-  // Stop thrusting: glow decays one unit/frame toward 0.
+  // Stop thrusting: glow decays one unit per 21 ms logical call toward 0.
   ship.ai_forward_thrust_cmd = 0.0F;
   for (int i = 0; i < 40; ++i) {
     game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
@@ -393,7 +393,7 @@ TEST_CASE("npc glow fades to zero when thrust stops") {
   CHECK(ship.engine_glow_intensity == Catch::Approx(0.0F));
 }
 
-TEST_CASE("npc maneuver timer fades glow only once per frame") {
+TEST_CASE("npc maneuver timer fades glow only once per logical call") {
   game::GameState state;
   game::Ship ship;
   game::ShipClass cls = TestShipClass();
@@ -417,11 +417,32 @@ TEST_CASE("npc in AI state 0x16 keeps the glow drive instead of fading") {
   ship.ai_forward_thrust_cmd = 0.5F;
   ship.ai_maneuver_timer_ms = 10.0F;
 
-  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.0F);
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.63F);
 
   // Ghidra 0x00433050 opens the movement/glow block for state 0x16, and the
   // inner fade test requires `timer > 0 && !state0x16`. Full burn adds 1.
   CHECK(ship.engine_glow_level == 11);
+}
+
+TEST_CASE("npc engine glow banks fractional time at the original cadence") {
+  game::GameState state;
+  game::Ship ship;
+  game::ShipClass cls = TestShipClass();
+  ship.ai_forward_thrust_cmd = 0.5F; // full burn
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.31F);
+  CHECK(ship.engine_glow_level == 0);
+  CHECK(ship.engine_glow_raw_tick_accumulator == Catch::Approx(0.31F));
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.32F);
+  CHECK(ship.engine_glow_level == 1);
+  CHECK(ship.engine_glow_raw_tick_accumulator ==
+        Catch::Approx(0.0F).margin(1e-6F));
+
+  // A slow rendered frame replays every whole original call, preserving the
+  // integer transition rather than applying one display-rate mutation.
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.26F);
+  CHECK(ship.engine_glow_level == 3);
 }
 
 TEST_CASE("npc bank glow boost adds two with no 0x18 clamp") {

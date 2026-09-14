@@ -2965,6 +2965,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
        ship.ai_state_code == 0xb) &&
       (ship.ai_control_mode == 4 || ship.ai_control_mode == 0xd) &&
       !fire_restricted;
+  bool jump_glow_active = false;
   if (jump_spinup_control) {
     constexpr float kJumpVelocityDamp = 0.8F;      // DAT_00575488
     constexpr float kJumpProgressSubtract = 35.0F; // DAT_00575490
@@ -3004,8 +3005,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         // acceleration curve.
         ship.pos_x += std::sin(ship.heading) * jump_progress * elapsed_ticks;
         ship.pos_y -= std::cos(ship.heading) * jump_progress * elapsed_ticks;
-        ship.engine_glow_level = static_cast<std::int16_t>(
-            std::min(0x20, static_cast<int>(ship.engine_glow_level) + 3));
+        jump_glow_active = true;
       }
     }
   }
@@ -3029,8 +3029,25 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // class sprite_behavior_flags bit 2), with no upper clamp. The renderer's
   // per-frame random flicker/hide threshold lives in
   // NovaShip_TickWeaponSpriteAndRunningLights (Ship_UpdateVisualState).
-  {
+  // These are integer mutations made once per raw Ship_HandleShip call. Bank
+  // fractional normalized time and replay the original ordered state machine
+  // at the loop's 21 ms maximum-rate cadence. In particular, the jump +3
+  // precedes the banking +2 and ordinary thrust/fade branch in each replay.
+  ship.engine_glow_raw_tick_accumulator += elapsed_ticks;
+  constexpr float kGlowCadenceEpsilon = 1e-6F;
+  const int glow_tick_count = static_cast<int>(
+      (ship.engine_glow_raw_tick_accumulator + kGlowCadenceEpsilon) /
+      kOriginalMaxRateFrameTicks);
+  ship.engine_glow_raw_tick_accumulator -=
+      static_cast<float>(glow_tick_count) * kOriginalMaxRateFrameTicks;
+  ship.engine_glow_raw_tick_accumulator =
+      std::max(0.0F, ship.engine_glow_raw_tick_accumulator);
+  for (int glow_tick = 0; glow_tick < glow_tick_count; ++glow_tick) {
     std::int16_t &glow = ship.engine_glow_level;
+    if (jump_glow_active) {
+      glow =
+          static_cast<std::int16_t>(std::min(0x20, static_cast<int>(glow) + 3));
+    }
     auto fade_to_zero = [&]() { // LAB_00435197: single decrement toward 0.
       if (glow > 0) {
         glow = static_cast<std::int16_t>(glow - 1);
@@ -3070,9 +3087,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         glow = static_cast<std::int16_t>(glow + 1);
       }
     }
-    ship.engine_glow_intensity =
-        std::clamp(static_cast<float>(glow) / 24.0F, 0.0F, 1.0F);
   }
+  ship.engine_glow_intensity = std::clamp(
+      static_cast<float>(ship.engine_glow_level) / 24.0F, 0.0F, 1.0F);
 }
 
 // Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020). Takes the
@@ -4388,6 +4405,13 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   TickPlayerTurnBankAnimation(state, movement_stats.turn_dir, elapsed_ticks);
   const ShipClass *player_cls =
       state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
+  // TODO(decomp(0x0044aa70)) skipped: the player engine-glow state machine is
+  // still a clean-room target interpolation. Reconstruct its distinct normal
+  // thrust, gravity-shield, afterburner, banking, turnaround, and hyperspace
+  // branches before changing its cadence. Those original integer mutations
+  // run once per raw spaceflight call and should eventually replay at the
+  // 21 ms cadence used by the NPC Ship_HandleShip path above; do not merely
+  // put this approximation behind that cadence.
   // ShipState +0xc8d4 is an integer engine/glow control, not a free-running
   // alpha ramp. Normal thrust approaches 24; afterburning extends it to 32;
   // coasting and reverse decrement by one renderer frame. This makes the
