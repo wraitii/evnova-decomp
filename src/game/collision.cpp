@@ -563,9 +563,9 @@ void ApplyArmorDamage(Ship &target, int armor_damage, bool force_armor_only) {
 
 // Ghidra Government_PropagateHostilityFromAttack (0x004102e0). A player hit
 // alerts eligible combat ships related to the victim; in particular, ships of
-// the victim's government join the response and target the player. The
-// mission/distress gates below preserve the original's conservative response
-// rules while keeping this clean-room pass limited to the represented fields.
+// the victim's government join the response and target the player. This keeps
+// the original's full government, policy, personality, distress, derelict,
+// nosy-victim, and squad-chain gate order.
 void PropagateHostilityFromPlayerAttack(GameState &state,
                                         const Ship &target,
                                         std::int16_t owner_ship_slot) {
@@ -573,12 +573,13 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
       state.player.pers_def_slot == 0x3fe) {
     return;
   }
+  if (HasGovernmentFlag(state, target, 0x0800U)) {
+    return;
+  }
 
   for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
     Ship &responder = state.ShipAt(slot);
-    if (!responder.is_active ||
-        responder.current_system_id != state.player.current_system_id ||
-        responder.ai_behavior_code < 3 || responder.ai_behavior_code > 4 ||
+    if (responder.ai_behavior_code < 3 || responder.ai_behavior_code > 4 ||
         responder.ai_state_code == 4 || responder.pers_def_slot == 0x3ff ||
         responder.faction_or_government_id < -1 ||
         responder.faction_or_government_id >= 0x100) {
@@ -623,8 +624,7 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
     } else if (responder_govt < 0 && target_govt >= 0) {
       eligible = !HasGovernmentFlag(state, target, 0x0001U);
     }
-    if (HasGovernmentFlag(state, target, 0x0800U) ||
-        HasGovernmentFlag(state, target, 0x0020U)) {
+    if (HasGovernmentFlag(state, target, 0x0020U)) {
       eligible = false;
     }
     if (!eligible) {
@@ -1029,7 +1029,7 @@ void ResolveShipHitFromWeapon(GameState &state,
         target.primary_target_ship_slot = 0;
       }
     }
-    if (should_retarget && suppress_retarget_logic && attacker_ship_slot == 0) {
+    if (suppress_retarget_logic && attacker_ship_slot == 0) {
       PropagateHostilityFromPlayerAttack(state, target, attacker_ship_slot);
     }
   }
@@ -2208,6 +2208,9 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
     // projectile contact paths use 0x14.
     NovaEffects_SpawnWeaponImpactBurstForWeapon(
         state, shot.pos_x, shot.pos_y, *weapon, /*scatter=*/0x19);
+    // This clean-room path resolves only the beam queue's recorded ship
+    // target. The original 0x0042f270 passes true for that intended contact;
+    // its still-deferred incidental beam-contact sweep passes false.
     ResolveShipHitFromWeapon(state,
                              target_ship_slot,
                              target,
@@ -2218,7 +2221,7 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
                              weapon->energy_damage,
                              owner_ship_slot,
                              /*allow_aggro_updates=*/true,
-                             /*suppress_retarget_logic=*/false,
+                             /*suppress_retarget_logic=*/true,
                              /*force_armor_only=*/impact_variant != 0,
                              /*bypass_shields=*/
                              (weapon->flags & 0x0020U) != 0U,
