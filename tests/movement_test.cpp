@@ -543,12 +543,15 @@ TEST_CASE("destroyed npc coasts with its inertia instead of stopping") {
 
   game::NovaShip_TickNpcShips(state, 1.0F);
 
-  // Ship_HandleShip applies the disabled 0.995 damp then integrates one tick;
-  // the wreck must not be pinned at its destruction point.
+  // Continuous movement consumes the full normalized tick, while the port's
+  // clean-room destruction scheduler consumes one whole 21 ms logical call
+  // and banks the remaining fraction.
   const float damped_velocity = 10.0F * std::pow(0.995F, 1.0F / 0.63F);
   CHECK(ship.vel_x == Catch::Approx(damped_velocity));
   CHECK(ship.pos_x == Catch::Approx(damped_velocity));
-  CHECK(ship.death_timer_active == Catch::Approx(5.0F - 1.0F / 0.63F));
+  CHECK(ship.death_timer_active == Catch::Approx(4.0F));
+  CHECK(ship.destruction_raw_tick_accumulator ==
+        Catch::Approx(1.0F / 0.63F - 1.0F));
 }
 
 TEST_CASE("destroyed npc keeps its velocity through the AI decision pass") {

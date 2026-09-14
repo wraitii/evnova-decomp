@@ -82,7 +82,7 @@ These use `g_avg_frame_tick_scale` in the original and should remain on
 | **DONE — mission reactions and NPC maintenance** (`0x00443760`, `0x0041d6e0`) | Scope 0xb banks normalized elapsed time and replays whole 21 ms original-rate calls | Preserves countdown, spawn, and RNG cadence at approximately 47.62 calls/s |
 | **DONE — mission spawn-state refresh** (`0x00448910`) | Removed from ordinary player updates; wired on jump arrival, stellar landing, and launch | This is event-triggered, not a cadence consumer. It arms Bible `ShipStart = 1` arrivals: 30 calls for friendly escort fleets (`ShipGoal = 3`, `ShipBehav = 1`), otherwise 100–199 |
 | **DONE — HUD overlay duration** in `Frame_TickHudOverlayAndRouteMapTimers` (`0x0042f1b0`; formerly misnamed `Frame_UpdateScreenFlashTimers`) | Port converts each raw-call countdown unit to 21 ms; cached overlays use the original Chicago 12 face instead of layout-sized Geneva | Matches the original maximum-rate duration and text settings; route-map deadlines using the 60 Hz clock remain wall-clock based. This function does not update the hyperspace screen flash. |
-| SWParticles (`0x0047c800`) | Deliberately fixed at 60 updates/s | Reconsider 47.62 updates/s; current sparks/debris run about 26% faster than the original maximum cadence |
+| **DONE — SWParticles** (`0x0047c800`) | Port banks and replays whole updates at the original 21 ms outer-loop cadence (47.62/s) | Preserves discrete lifetime/movement ordering without making particles follow the port's display refresh rate |
 
 ## Weapon-specific findings
 
@@ -120,13 +120,16 @@ There are also non-policy defects to keep distinct from cadence choices:
 - directional weapon effects, ship hit-reaction decay, and player-aggro decay
   are missing rather than merely using the wrong rate.
 
-The death-timer duration fix does not yet reproduce the discrete destruction
-effect cadence. `Ship_UpdateVisualState` still makes one Explode1 random roll
-per display call, and the NPC timed-action cascade still uses the display-rate
-frame counter. Preserving their RNG stream and modulo behavior requires
-replaying the ordered destruction passes on a logical 21 ms cadence;
-fractional timer stepping alone is intentionally not presented as that larger
-scheduling fix.
+**DONE — destruction cadence:** the port-side per-ship accumulator is
+clean-room scheduling machinery, not a recovered `ShipState` field. It banks
+normalized elapsed time and invokes the original discrete destruction body
+once per logical 21 ms outer-loop call. NPC calls preserve the
+`Ship_HandleShip` timer/timed-debris step followed by `Ship_UpdateVisualState`;
+the player uses the same visual-body scheduler after its player-core checks.
+Thus death timers, Explode1 RNG opportunities, the NPC timed-action modulo,
+and the Explode2 finale are no longer driven by SDL presentation frequency.
+Player respawn and eject paths clear the port-only accumulator and one-shot
+latches before the replacement hull can enter a later destruction sequence.
 
 ## Review checklist
 

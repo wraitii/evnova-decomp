@@ -307,20 +307,18 @@ void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
 }
 
 // The original's SWParticles_Update (0x0047c800) runs once per rendered frame
-// from the present hook (Frame_PresentViewportAndParticles 0x00439d40) and the
-// shipped sprite world has no FPS cap (SpriteWorld_SetTargetFps(surface, 0)),
-// so its lifetime and motion are frame-rate dependent. This port pins that
-// update cadence to a fixed 60/s (two updates per 30 Hz simulation tick) so
-// particle behavior is identical at any display refresh and matches the
-// original on a 60 Hz display. Asteroid debris (240-480 ticks) therefore
-// lives ~4-8s instead of the ~8-16s a 30 Hz tick would produce, and the
-// weapon impact sparks (life ~9-11) fade in a few frames.
-constexpr float kSwParticleUpdatesPerSimTick = 2.0F;
+// through SWParticles_UpdateDirtyPixels in the present hook
+// (Frame_PresentViewportAndParticles 0x00439d40). Although the sprite world
+// itself has no target-FPS cap, the enclosing flight loop admits at most one
+// iteration per 21 ms (Frame_MeasureFrameTiming 0x00432ea0). Bank whole
+// logical calls so the discrete lifetime/integration order remains faithful
+// while staying independent of the port's display refresh rate.
+constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
 
 // Ghidra SWParticles_Update (0x0047c800).
 void NovaEffects_TickSwParticles(GameState &state, float elapsed_ticks) {
   state.sw_particle_tick_accumulator +=
-      std::max(0.0F, elapsed_ticks) * kSwParticleUpdatesPerSimTick;
+      std::max(0.0F, elapsed_ticks) / kOriginalMaxRateFrameTicks;
   while (state.sw_particle_tick_accumulator >= 1.0F) {
     state.sw_particle_tick_accumulator -= 1.0F;
     for (SwParticle &particle : state.sw_particles) {

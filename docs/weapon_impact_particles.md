@@ -72,12 +72,14 @@ RNG order:
 
 * `src/game/impact_effects.cpp` — `NovaEffects_SpawnWeaponImpactParticleBurst`,
   `NovaEffects_SpawnWeaponImpactBurstForWeapon`, `NovaEffects_TickSwParticles`.
-  The original `SWParticles_Update` runs once per *rendered frame* from the
-  present hook (`Frame_PresentViewportAndParticles` 0x00439d40) with no FPS cap
-  (`SpriteWorld_SetTargetFps(surface, 0)`), so life/motion are frame-rate
-  dependent. The port pins this to a fixed 60 updates/s (two per 30 Hz sim
-  tick) so it is frame-rate independent and matches the original at 60 Hz:
-  asteroid debris (240-480 ticks) lives ~4-8s.
+  The original `SWParticles_Update` runs once per *rendered frame* through
+  `SWParticles_UpdateDirtyPixels` in the present hook
+  (`Frame_PresentViewportAndParticles` 0x00439d40). The sprite world has no
+  separate FPS cap (`SpriteWorld_SetTargetFps(surface, 0)`), but the enclosing
+  flight loop is limited to one iteration per 21 ms by
+  `Frame_MeasureFrameTiming` 0x00432ea0. The port therefore replays whole
+  logical updates at 47.62/s; asteroid debris (240-480 ticks) lives about
+  5.04-10.08s at the original maximum cadence.
 * `src/game/spaceflight_view.cpp` — `SpaceflightView::DrawSwParticles` (1x1
   logical-pixel SDL point; SDL expands it by the display density, so retina
   gets a 2x2 backing block). The color is written opaque, matching the
@@ -85,9 +87,9 @@ RNG order:
 * `GameState::sw_particles` + `sw_particle_tick_accumulator`; cleared by
   `NovaWeapon_ClearTransientCombatState`.
 
-Cadence divergence: the port pins the per-frame update to 60/s instead of
-following the actual refresh rate (the original at 120 Hz would age/move twice
-as fast).
+Cadence policy: whole updates are banked at the original loop's maximum
+47.62/s rate, keeping the discrete life/movement order while making particles
+independent of the port's display refresh rate.
 
 Divergences: the original's 8/16-bit branches blended the particle over the
 saved backdrop with a 0..0x20 life weight; the 24-bit branch (the analog of

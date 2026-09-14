@@ -132,7 +132,9 @@ struct ShipVisualDescriptor {
 DecodeShipVisualDescriptor(std::span<const std::byte> resource_data);
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, destruction slice (all hulls,
-// including the player). Advances one destroyed ship's death presentation and
+// including the player). The elapsed-time accumulator is port-only scheduling
+// machinery: it invokes the original discrete body once per logical 21 ms
+// outer-loop call. Advances one destroyed ship's death presentation and
 // runs the once-only destruction finale when the timer enters the (0, 2]
 // tick window: blast damage to nearby hulls, the mission DESTRUCTION
 // bookkeeping (quick-fail arm + goal_counter_a++ + target_ship_count--), the
@@ -145,6 +147,11 @@ DecodeShipVisualDescriptor(std::span<const std::byte> resource_data);
 void NovaShip_TickDestroyedShipVisualState(GameState &state,
                                            Ship &ship,
                                            float elapsed_ticks);
+
+// Port helper: runs exactly one original-call invocation of the destruction
+// slice after its owning ship handler has decremented death_timer_active. It
+// is not a recovered original function or an additional simulation pass.
+void NovaShip_TickDestroyedShipVisualStateRawCall(GameState &state, Ship &ship);
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, debris-puff window. While the
 // death timer is above the finale threshold (2.0) the original rolls
