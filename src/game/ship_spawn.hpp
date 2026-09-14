@@ -195,7 +195,7 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
 //       never drain their budget (indefinite respawns).
 //     * main-fleet arm: missions whose spawn system matches (or -6 follow)
 //       count down the spawn/rearm timer (+0x4b) and, when it expires,
-//       respawn the fleet toward its target count (special_ship_spawn_mode 1
+//       respawn the fleet toward its target count (Bible ShipStart 1
 //       keeps the alive count at target via goal_count_remaining). Ships
 //       arrive on a ±256 scatter around the shared ~2100-unit polar radius,
 //       oriented on the bearing toward the player's previous system.

@@ -337,7 +337,7 @@ half (the `0x0041CF40` + dispatch pass):
   - `0x0041af90` system-entry restore (`NovaSystem_RestoreMissionFleets`,
     wired at landing, new-game and jump-arrival call sites): locator/system
     match, escort pre-count for follow-player ShipBehav 1 fleets, placement
-    arms (spawn_behavior 3 center scatter, 5 derelict wreck with the
+    arms (`ship_goal` 3 center scatter, 5 derelict wreck with the
     33%/10% armor cut and the +0xB9 deadline latch, negative ShipStart
     nav-point arrival, ShipStart 2 cloak), escort behavior link, flags
     0x0001 auto-resolve.
@@ -413,7 +413,7 @@ The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`:
   DAT_0057531c). Ported: the hull blast (radius `mass*0.075+50`, damage
   `mass*0.0375+25`, capability-flags 0x400 and pers-0x3ff hulls exempt,
   force-armor-only hits with the transition check armed), the quick-fail gate
-  (mission active, not failed, `goal_counter_a == 0`, spawn_behavior 1/3, or
+  (mission active, not failed, `goal_counter_a == 0`, `ship_goal` 1/3, or
   2/5 with the +0xB9 boarded latch clear, runtime flags 0x0400 clear) → snd +
   STR# 0x7d2:0x11c + `Mission_FailMissionSlotQuick`, then `goal_counter_a++`,
   `target_ship_count--` (stops the system-entry restore respawning a wiped
@@ -425,7 +425,7 @@ The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`:
 - **Disable — `Shot_ResolveShipHitFromWeapon` 0x004192d0** (fire-restriction
   arm): PORTED in `collision.cpp` (transition-gated by the caller's
   `check_fire_restriction_transition`, set by the hull blast):
-  `goal_counter_c++`; spawn_behavior 3 (escort) quick-fails unless flags
+  `goal_counter_c++`; `ship_goal` 3 (escort) quick-fails unless flags
   0x0400 (goal 1 destroys-fail handled in 0x00443c60 evaluation); the armor
   pin and the player disable/destruction arms below are ported with the
   per-frame `g_player_disable_message_shown` latch (reset 0x00417669).
@@ -434,7 +434,7 @@ The counter writers are event-driven, keyed on `ShipState.mission_fleet_slot`:
   for both the board-cargo arm (pickup_mode 2, after
   `Mission_TryConsumeMissionInteractionResources`, carrying_resources latch,
   STR# 0x7d2 0x6a overlay without the CREC cargo name — TODO) and the rescue
-  special-ship arm (spawn_behavior 2/5 + flags 0x0001 + single-ship fleet;
+  special-ship arm (`ship_goal` 2/5 + flags 0x0001 + single-ship fleet;
   overlay 0x7e, ai_maneuver_timer 100); both set the target's +0xB9 boarded
   latch. The port's duplicate provisional +0xB9 field (`escort_rehired_mark`)
   was consolidated into `boarded_target_latch`.

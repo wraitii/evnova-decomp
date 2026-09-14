@@ -824,7 +824,7 @@ void ResolveShipHitFromWeapon(GameState &state,
               : max_armor * kDisableArmorPinFraction + 1.0F;
     }
     // Mission DISABLE bookkeeping: counts one disable per mission ship on the
-    // transition into disable restriction; an escort-goal (spawn_behavior 3)
+    // transition into disable restriction; an escort goal (Bible ShipGoal 3)
     // mission quick-fails on the first disable unless flags 0x0400 (invisible)
     // hid it.
     const std::int16_t fleet_slot = target.mission_fleet_slot;
@@ -838,8 +838,7 @@ void ResolveShipHitFromWeapon(GameState &state,
           state.active_missions[static_cast<std::size_t>(fleet_slot)];
       if (runtime.is_active) {
         if (!runtime.is_failed && mission.goal_counter_c == 0 &&
-            mission.spawn_behavior == 3 &&
-            (mission.flags_primary & 0x0400U) == 0U) {
+            mission.ship_goal == 3 && (mission.flags_primary & 0x0400U) == 0U) {
           state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
           if (auto text = NovaHud_LoadStringEntry(0x7d2, 0x11c)) {
             NovaHud_ShowOverlayMessage(

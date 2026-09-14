@@ -219,14 +219,24 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 void Stub_TickReactionsAndNpcSpawns(GameState &state,
                                     SdlAudio &audio,
                                     float elapsed_ticks) {
-  // The original's AI mode timers use a global millisecond tick source.
-  const std::uint32_t now_ms = SDL_GetTicks();
-  Mission_TickShipInteractionReactions(state, now_ms);
-  NovaFrame_UpdateCombatChatter(state, audio);
-  NovaWeapon_TallyInboundWeaponThreat(state);
-  NovaSystem_UpdateReinforcementCountdown(state, elapsed_ticks);
-  NovaSystem_TickNpcSpawnMaintenance(
-      state, state.player.current_system_id, now_ms);
+  // Frame_MeasureFrameTiming (0x00432ea0) admits one original spaceflight
+  // iteration per 21 ms. Scope 0xb contains discrete counters and RNG draws,
+  // so replay whole calls instead of tying them to the presentation rate.
+  state.npc_maintenance_raw_tick_accumulator +=
+      RawSpaceflightCallTicks(std::max(0.0F, elapsed_ticks));
+  while (state.npc_maintenance_raw_tick_accumulator >= 1.0F) {
+    state.npc_maintenance_raw_tick_accumulator -= 1.0F;
+    // The original's AI mode timers use a global millisecond tick source.
+    const std::uint32_t now_ms = SDL_GetTicks();
+    Mission_TickShipInteractionReactions(state, now_ms);
+    NovaFrame_UpdateCombatChatter(state, audio);
+    NovaWeapon_TallyInboundWeaponThreat(state);
+    // This countdown is normalized by g_avg_frame_tick_scale in the original;
+    // one replayed 21 ms call therefore contributes 0.63 normalized ticks.
+    NovaSystem_UpdateReinforcementCountdown(state, kOriginalMaxRateFrameTicks);
+    NovaSystem_TickNpcSpawnMaintenance(
+        state, state.player.current_system_id, now_ms);
+  }
 }
 
 void Stub_CalcAiOdds(GameState &state) {
@@ -824,6 +834,9 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   // attached ship is pushed ~892 px behind and flung forward at 50 px/tick
   // -- escorts stream in behind the jumping player.
   state.player.ai_station_hold_timer = -999.0F;
+  // Ghidra 0x0044fa1a: after the travel-day/stat refresh and before population
+  // restoration, arm ShipStart-1 mission fleets for their delayed jump-in.
+  Mission_RefreshActiveMissionSpawnState(state);
   NovaSystem_RestorePlayerEscorts(state, /*refill=*/false, now_ms);
   NovaSystem_RestoreMissionFleets(state,
                                   state.player.current_system_id,
@@ -833,18 +846,15 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   // AndLanding 0x00458802: roll 1..100 per definition, then re-evaluate
   // the mission lists).
   Mission_RerollOfferingRolls(state);
-  // TODO(decomp(0x0044fb39)): the jump-arrival slice also advances one
-  // daily world tick per escort travel day and runs Frame_JitterPlayerStat-
-  // Modifiers + Frame_RerollPlayerStatModifiers (0x0044fb2d/0x0044fb39)
-  // before Misn_TickActiveMissionTimers; not run here yet.
+  // TODO(decomp(0x0044fb39)): Frame_JitterPlayerStatModifiers and
+  // Frame_RerollPlayerStatModifiers remain unported. Travel-day world ticks
+  // run in FireJump before this arrival refresh.
   NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
   // Mission_TrySpawnMissionShipAmbush (0x00426dd0) runs at the tail of
   // Stellar_HandleStellarEntryAndExit's system-transition slice, after the
-  // population rebuild. TODO(decomp): the mission-fleet rearm/jump-in
-  // arms of that slice (Misn_TickActiveMissionTimers transition pass,
-  // per-mission spawn_rearm re-arm, follow-player ShipBehav 0 fleet
-  // jump-in) are not reconstructed yet; the ambush is position-faithful
-  // relative to the slices that exist.
+  // population rebuild. TODO(decomp): the follow-player ShipBehav 0 fleet
+  // jump-in arm of that slice is not reconstructed yet; the refresh/rearm
+  // pass above is live.
   Mission_TrySpawnMissionShipAmbush(state);
   // 0x0044faa2: the -999 hold-timer window closes right after the
   // rebuild returns.
@@ -4435,13 +4445,6 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
   }
   p.engine_glow_intensity =
       std::clamp(static_cast<float>(p.engine_glow_level) / 24.0F, 0.0F, 1.0F);
-
-  // Ghidra Ship_HandlePlayerShipCore (0x0044aa70) runs Misn_TickActiveMission-
-  // Timers (0x00448910) as part of the per-frame player maintenance. The
-  // original also re-ticks after mission script execution and in
-  // Stellar_HandleStellarEntryAndExit (0x004588b1); those clean-room call sites
-  // are not reconstructed yet (TODO(decomp)).
-  Misn_TickActiveMissionTimers(state);
 }
 
 // Ghidra Ship_HandlePlayerShipCore 0x0044AA70 synthetic CFG:

@@ -140,10 +140,10 @@ namespace {
   mission.target_ship_count = ReadBeI16(bytes, 0x20);
   mission.current_system_locator = ReadBeI16(bytes, 0x22);
   mission.special_ship_name_string_id = ReadBeI16(bytes, 0x2a);
-  mission.spawn_behavior = ReadBeI16(bytes, 0x26);
-  mission.fleet_spawn_goal = ReadBeI16(bytes, 0x28);
+  mission.ship_goal = ReadBeI16(bytes, 0x26);
+  mission.ship_behavior = ReadBeI16(bytes, 0x28);
   mission.random_text_string_id = ReadBeI16(bytes, 0x32);
-  mission.special_ship_spawn_mode = ReadBeI16(bytes, 0x2c);
+  mission.ship_start = ReadBeI16(bytes, 0x2c);
   mission.competing_government_id = ReadBeI16(bytes, 0x2e);
   mission.competing_reputation_delta = ReadBeI16(bytes, 0x30);
   mission.mission_ship_count_max = ReadBeI16(bytes, 0x48);

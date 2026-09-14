@@ -154,7 +154,7 @@ TEST_CASE("special-ship mission starts with zero remaining goals") {
   auto &definition = state.scenario.missions[0];
   definition.present = true;
   definition.target_ship_count = 7;
-  definition.special_ship_spawn_mode = 1;
+  definition.ship_start = 1;
 
   REQUIRE(Mission_PopulateActiveSlot(state, 0, 0));
 
@@ -162,6 +162,39 @@ TEST_CASE("special-ship mission starts with zero remaining goals") {
   CHECK(mission.target_ship_count == 7);
   CHECK(mission.mission_target_count == 7);
   CHECK(mission.goal_count_remaining == 0);
+}
+
+TEST_CASE("mission spawn refresh gives friendly escort arrivals short delay") {
+  GameState state;
+  state.player.current_system_id = 4;
+  auto &mission = state.active_missions[0];
+  state.active_mission_runtime_flags[0].is_active = true;
+  mission.current_system_id = -6; // Bible ShipSyst: follow the player.
+  mission.target_ship_count = 3;
+  mission.ship_start = 1;
+  mission.ship_goal = 3;     // Bible: escort them.
+  mission.ship_behavior = 1; // Bible: protect the player.
+  mission.goal_count_remaining = 2;
+  mission.flags_primary = 0x10;
+  mission.mission_ship_count_max = 5;
+  mission.mission_ship_count_active = 1;
+  mission.mission_fleet_metric_c = 4;
+
+  Mission_RefreshActiveMissionSpawnState(state);
+
+  CHECK(mission.spawn_rearm_timer == 30);
+  CHECK(mission.goal_count_remaining == 0);
+  CHECK(mission.mission_ship_count_active == 5);
+  CHECK(mission.rearm_roll_clock >= 70);
+  CHECK(mission.rearm_roll_clock <= 139);
+  CHECK(mission.mission_fleet_metric_c == 0);
+
+  // ShipBehav 0 is the hostile/pursuing case and retains the longer random
+  // hyperspace-arrival delay.
+  mission.ship_behavior = 0;
+  Mission_RefreshActiveMissionSpawnState(state);
+  CHECK(mission.spawn_rearm_timer >= 100);
+  CHECK(mission.spawn_rearm_timer <= 199);
 }
 
 TEST_CASE("random mission locator -2 selects ordinary travel stellars") {
@@ -331,7 +364,7 @@ TEST_CASE("accepted single-ship mission replaces hailed personality ship") {
   mission.mission_template_id = 0;
   mission.target_ship_count = 1;
   mission.dude_def_index = 0;
-  mission.spawn_behavior = 3;
+  mission.ship_goal = 3;
   state.active_mission_runtime_flags[0].is_active = true;
 
   REQUIRE(Mission_HandleAcceptedShipInteraction(state, 1, 1234));

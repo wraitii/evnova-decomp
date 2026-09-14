@@ -401,7 +401,7 @@ TEST_CASE("npc maneuver timer fades glow only once per logical call") {
   ship.ai_forward_thrust_cmd = 0.5F;
   ship.ai_maneuver_timer_ms = 10.0F;
 
-  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.0F);
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.63F);
 
   // Ghidra's glow block takes the single fade label when the maneuver timer
   // suppresses thrust. It does not apply a second timer-specific decrement.
@@ -571,8 +571,9 @@ TEST_CASE("destroyed npc keeps its velocity through the AI decision pass") {
   game::NovaShip_TickNpcAi(state, 1.0F);
   CHECK(ship.vel_x == Catch::Approx(10.0F)); // AI pass must not clear inertia
   game::NovaShip_TickNpcShips(state, 1.0F);
-  CHECK(ship.vel_x == Catch::Approx(9.95F));
-  CHECK(ship.pos_x == Catch::Approx(9.95F));
+  const float damped_velocity = 10.0F * std::pow(0.995F, 1.0F / 0.63F);
+  CHECK(ship.vel_x == Catch::Approx(damped_velocity));
+  CHECK(ship.pos_x == Catch::Approx(damped_velocity));
 }
 
 // --- Turn-rate floor (Ship_ComputeShipMaxTurnRateDeg NPC branch) ---

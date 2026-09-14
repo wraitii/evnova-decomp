@@ -106,13 +106,12 @@ Misn_ResolveVisibleSystemForTravel(const GameState &state,
 [[nodiscard]] bool Mission_DoesSystemMatchMissionLocator(
     const GameState &state, std::int16_t system_id, std::int16_t mission_slot);
 
-// Ghidra 0x00448910 Misn_TickActiveMissionTimers. Per-tick maintenance over
-// the 16 active-mission runtime slots: resolves each mission's destination
-// system, seeds the spawn/rearm timers and encounter odds from RNG, and
-// clears transient counters. The original also re-ticks after mission script
-// execution and in the landing flow; those call sites are not wired yet
-// (TODO(decomp)).
-void Misn_TickActiveMissionTimers(GameState &state);
+// Ghidra 0x00448910 Mission_RefreshActiveMissionSpawnState. Event-triggered
+// refresh over the 16 active missions: arms ShipStart-1 delayed arrivals,
+// resets their live-count latch, and refreshes auxiliary-fleet budgets/clocks.
+// Called on system/stellar entry and from two mission-script command branches;
+// it is not an ordinary per-frame tick.
+void Mission_RefreshActiveMissionSpawnState(GameState &state);
 
 // Ghidra 0x00448090 NovaResources_EvaluateAvailability (system slice):
 // re-evaluates every system's is_visible from its Visibility NCB, re-homes

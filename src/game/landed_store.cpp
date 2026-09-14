@@ -1105,7 +1105,7 @@ void Player_ProcessEscortPayroll(
         const auto index = static_cast<std::size_t>(fleet_slot);
         mission_fleet_escort =
             state.active_mission_runtime_flags[index].is_active &&
-            state.active_missions[index].fleet_spawn_goal == 1;
+            state.active_missions[index].ship_behavior == 1;
       }
       if (mission_fleet_escort || ship.escort_origin_mark == 0) {
         continue;

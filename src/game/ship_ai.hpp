@@ -151,7 +151,7 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship);
 // Ghidra 0x004687b0 Ship_IsShipDisabled. True when the ship must not
 // fire/act this frame. Sources: derelict government (flags_primary 0x800;
 // Bible: "ships of this govt start out disabled (derelicts)"), mission
-// spawn_behavior-5 special ships not yet attacking (TODO(decomp): the
+// ShipGoal-5 special ships not yet attacking (TODO(decomp): the
 // special_ship_attacking runtime flag is not modelled yet), or critically
 // damaged (armor below 1/3 of max, or 1/10 with Ship capability flags 0x10).
 // Non-player ships with a stellar target are exempt: the original returns

@@ -138,7 +138,7 @@ TEST_CASE("mission-fleet escorts are exempt from payroll",
   escort.escort_origin_mark = 1;
   escort.mission_fleet_slot = 0;
   state.active_mission_runtime_flags[0].is_active = true;
-  state.active_missions[0].fleet_spawn_goal = 1;
+  state.active_missions[0].ship_behavior = 1;
 
   state.player.credits = 0;
   bool messaged = false;

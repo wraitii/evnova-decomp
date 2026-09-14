@@ -90,7 +90,7 @@ unconditionally).
 
 Sites that only set `stat_cache_valid = false` directly and should be unified
 onto the hook (each stands in for an original recompute call):
-`mission.cpp` (`Misn_TickActiveMissionTimers`, `Mission_RerollOfferingRolls`,
+`mission.cpp` (`Mission_RefreshActiveMissionSpawnState`, `Mission_RerollOfferingRolls`,
 `Player_CollectStellarTribute`), `boarding_plunder.cpp`
 (`SelfDestructTarget` arms), `landed_store.cpp` (`NovaLanded_*` close paths),
 `spaceflight.cpp` (`DetonateCarriedBomb`, `RespawnResetPlayerShipState`,

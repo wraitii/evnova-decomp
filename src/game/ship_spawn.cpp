@@ -1295,7 +1295,7 @@ int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
     ship.sprite_animation_cycle_index =
         RandomBelow(state, cls->skill_variance_percent);
   }
-  if (mission.fleet_spawn_goal == 0) {
+  if (mission.ship_behavior == 0) {
     // ShipBehav 0: the fleet spawns hostile to the player.
     NovaAi_SetShipHostileToPlayer(state, ship);
   }
@@ -1331,7 +1331,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
     }
     // Follow-player escort fleets keep the ships already escorting across
     // system re-entry and only spawn the difference.
-    if (raw_system == -6 && mission.fleet_spawn_goal == 1) {
+    if (raw_system == -6 && mission.ship_behavior == 1) {
       for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
         const Ship &ship = state.ShipAt(i);
         if (ship.is_active && ship.mission_fleet_slot == slot) {
@@ -1357,11 +1357,11 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
         continue;
       }
       Ship &ship = state.ShipAt(static_cast<std::size_t>(spawned));
-      if (mission.spawn_behavior == 3) {
+      if (mission.ship_goal == 3) {
         ship.pos_x = static_cast<float>(RandomBelow(state, 0x200) - 0x100);
         ship.pos_y = static_cast<float>(RandomBelow(state, 0x200) - 0x100);
       }
-      if (mission.spawn_behavior == 5) {
+      if (mission.ship_goal == 5) {
         // Derelict wreck: dead in space, shields gone, armor cut to 33%
         // (10% for capability-flags 0x10 classes). Rescue missions with a
         // live (non -32000) deadline latch +0xB9 on the wreck.
@@ -1385,7 +1385,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
           ship.boarded_target_latch = 1;
         }
       }
-      const std::int16_t mode = mission.special_ship_spawn_mode;
+      const std::int16_t mode = mission.ship_start;
       if (mode <= -1 && mode >= -16 && sys != nullptr) {
         // Negative ShipStart: the fleet arrives at the Nth linked system's
         // nav point (jump-in from a neighbour).
@@ -1399,7 +1399,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
           }
         }
       }
-      if (mission.fleet_spawn_goal == 1) {
+      if (mission.ship_behavior == 1) {
         // ShipBehav 1: escort-formation link on the player.
         ship.ai_behavior_code = 6;
         ship.squad_leader_ship_slot = 0;
@@ -1410,7 +1410,7 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
         }
       }
       ship.jump_destination_stellar_id = -2;
-      if (mission.special_ship_spawn_mode == 2) {
+      if (mission.ship_start == 2) {
         NovaAi_OnShipCloakStateEntered(state, ship);
       }
     }
@@ -1483,7 +1483,8 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
 }
 
 // Ghidra 0x0041d6e0 System_TickNpcSpawnMaintenance (ambience slice). See the
-// header. The original counts the ambient active ships in the system whose
+// header. Scope 0xb replays this at the original 21 ms raw-call cadence. The
+// original counts the ambient active ships in the system whose
 // squad_leader_ship_slot != 0 (ships not actively engaged on the player), then
 // below the AvgShips cap rolls a 1-in-500 encounter pick (gated by
 // encounter_chance_percent) and otherwise spawns a random dude ship. Tichel and
@@ -1540,9 +1541,9 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
 
     // Main-fleet arm: missions whose spawn system matches (or -6 follow)
     // count down their spawn/rearm timer; when it expires, respawn the fleet
-    // toward its target count. special_ship_spawn_mode 1 keeps the alive
-    // count at target via goal_count_remaining; other modes fire once (the
-    // timer is only re-armed by Misn_TickActiveMissionTimers).
+    // toward its target count. Bible ShipStart 1 keeps the alive count at
+    // target via goal_count_remaining; other modes fire once (the timer is
+    // only re-armed by Mission_RefreshActiveMissionSpawnState).
     const std::int16_t raw_system = mission.current_system_id;
     const std::int16_t resolved =
         (raw_system < 0 || raw_system >= 0x800)
@@ -1550,7 +1551,7 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
             : Misn_ResolveVisibleSystemForTravel(state, raw_system);
     const bool in_mission_system = raw_system == -6 || resolved == system_id;
     std::int16_t needed = in_mission_system ? mission.target_ship_count : 0;
-    if (mission.special_ship_spawn_mode == 1) {
+    if (mission.ship_start == 1) {
       needed = static_cast<std::int16_t>(mission.target_ship_count -
                                          mission.goal_count_remaining);
       if (!in_mission_system && mission.goal_count_remaining < 1) {
