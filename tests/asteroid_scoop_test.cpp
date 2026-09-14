@@ -1,5 +1,5 @@
 // Asteroid mining/scooping: the YieldQty/YieldType resource-box producer in
-// Weapon_SpawnWeaponImpactEffectPackage (0x00462550, ported as
+// Asteroid_SpawnDestructionPackage (0x00462550, ported as
 // ResolveAsteroidDestructionPackage in collision.cpp) and the freeflight-object
 // scoop arm of Ship_HandleSpritePairCollision (0x004374f0, ported as
 // NovaWeapon_ResolveFreeflightScoop). See the EV Nova Bible r\xf6id section
@@ -78,11 +78,13 @@ AsteroidState &SeedBreakableAsteroid(GameState &state,
 
   state.scenario.asteroid_defs.resize(1);
   AsteroidDef &def = state.scenario.asteroid_defs[0];
-  def.wander_table_value = 5;
+  def.strength = 5;
   def.yield_qty = yield_qty;
   def.yield_type = yield_type;
-  def.field_0x10 = -1; // no explosion effect (keeps RNG/effect pools clean)
-  def.directions = fragments;
+  def.explode_type = -1; // no explosion effect (keeps RNG/effect pools clean)
+  def.frag_type1 = fragments[0];
+  def.frag_type2 = fragments[1];
+  def.frag_count = fragments[2];
 
   AsteroidState &asteroid = state.asteroid_pool[0];
   asteroid.active = true;

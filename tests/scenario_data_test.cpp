@@ -3,6 +3,7 @@
 #include "game/ship_spawn.hpp"
 #include "game/ship_visual.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -473,8 +474,8 @@ TEST_CASE("ship sh.x9an descriptor decodes from Nova Ships",
 }
 
 // A class with the weapon-effects layer: the Fed Destroyer (ship class 0x8d)
-// names WeapImageID 1826 with WeapDecay 5, so the decoded fade rate is
-// 5 * 0.003484 = 0.01742 per normalized tick. It has no running lights.
+// names WeapImageID 1826 with WeapDecay 5, producing a fade rate of
+// 5 * binary64 0.333 = 1.665 per normalized tick.
 TEST_CASE("ship weapon-effects descriptor and fade rate decode",
           "[scenario][ships]") {
   const auto payload = NovaResource_Load(kShipVisualResourceType,
@@ -492,8 +493,10 @@ TEST_CASE("ship weapon-effects descriptor and fade rate decode",
   REQUIRE(data.LoadFromArchives());
   const ShipClass *cls = data.Ship(0x8d);
   REQUIRE(cls != nullptr);
-  CHECK(cls->weapon_glow_decay_rate > 0.0F);
-  CHECK(cls->weapon_glow_decay_rate < 0.02F);
+  CHECK(cls->weapon_glow_decay_rate == Catch::Approx(1.665F));
+  // A full-strength level-32 Fed Destroyer weapon flash lasts about 19.2
+  // normalized ticks, i.e. 0.64 seconds rather than roughly one minute.
+  CHECK(32.0F / cls->weapon_glow_decay_rate == Catch::Approx(19.2192F));
 }
 
 // VERIFY the stellar (planet) graphic path end to end on the Kania system:
@@ -947,9 +950,9 @@ TEST_CASE("dude class weighted-select returns slots with valid weight",
 // decodes into ScenarioData.asteroid_defs. One row per resource id
 // 0x80..0x8f (Metal/Ice/Dust/Crystal x Small/Medium/Big/Huge). Values pinned
 // against the shipped rows (verified directly from the raw payload bytes):
-// wander_table_value = word[0x0], wander_speed_multiplier = word[0x2] * 0.01,
-// lifetime = word[0x16] (doubles per size tier), tint +0x18 packed from the
-// +0x0a RGB bytes. The speed/lifetime fields feed the AsteroidState spawn
+// strength = word[0x0], spin_rate = word[0x2] * 0.01, mass = word[0x16]
+// (doubles per size tier), part_color packed from the +0x0a RGB bytes. The
+// spin_rate/strength fields feed the AsteroidState spawn
 // (NovaAsteroid_SpawnRecord).
 TEST_CASE("asteroid-type rows decode from the payload",
           "[scenario][asteroid]") {
@@ -963,50 +966,36 @@ TEST_CASE("asteroid-type rows decode from the payload",
   }
   CHECK(present == 16);
 
-  // Metal Small (0x80): value 100, speed 100% (-> 1.0), lifetime 150.
+  // Metal Small (0x80): strength 100, spin 100% (-> 1.0), mass 150.
   const AsteroidDef *small = data.AsteroidType(0x80);
   REQUIRE(small != nullptr);
   REQUIRE(small->present);
-  CHECK(small->wander_table_value == 100);
-  CHECK(std::fabs(small->wander_speed_multiplier - 1.0F) < 1e-4F);
-  CHECK(small->lifetime == 150);
+  CHECK(small->strength == 100);
+  CHECK(std::fabs(small->spin_rate - 1.0F) < 1e-4F);
+  CHECK(small->mass == 150);
   // Metal Small is the lightest debris: small speed-scale, neutrals tint.
-  // YieldType/YieldQty (Bible r\xf6id names).
+  // YieldType/YieldQty/PartCount (Bible r\xf6id names).
   CHECK(small->yield_type == 4);
   CHECK(small->yield_qty == 4);
-  CHECK(small->field_0x0c == 20);
+  CHECK(small->part_count == 20);
 
-  // The same 0x1c runtime row is consumed as impact-package data by
-  // Weapon_SpawnWeaponImpactEffectPackage (0x00462550). Its resource-box
-  // count/type are the canonical YieldQty/YieldType fields; the child
-  // fragment fields are directions.
-  const AsteroidDef *package = data.ImpactPackageAt(0);
-  REQUIRE(package == small);
-  CHECK(package->yield_qty == 4);
-  CHECK(package->yield_type == 4);
-  CHECK(package->ImpactParticleCount() == 20);
-  CHECK(package->ImpactSecondaryEffectId(0) == small->directions[0]);
-  CHECK(package->ImpactAreaEffectId() == small->field_0x10);
-  CHECK(data.ImpactPackageAt(-1) == nullptr);
-  CHECK(data.ImpactPackageAt(0x10) == nullptr);
-
-  // Metal Huge (0x83): lifetime doubles with the size tier.
+  // Metal Huge (0x83): mass doubles with the size tier.
   const AsteroidDef *huge = data.AsteroidType(0x83);
   REQUIRE(huge != nullptr);
   REQUIRE(huge->present);
-  CHECK(huge->lifetime == 1200);
-  CHECK(huge->wander_table_value == 300);
+  CHECK(huge->mass == 1200);
+  CHECK(huge->strength == 300);
   // word[0x2] = 0x19 = 25 -> 0.25 speed multiple.
-  CHECK(std::fabs(huge->wander_speed_multiplier - 0.25F) < 1e-4F);
+  CHECK(std::fabs(huge->spin_rate - 0.25F) < 1e-4F);
 
-  // Direction sub-array: Metal Medium (0x81) refs 0x80->0 and 0x88->8 (the
-  // loader's -0x80 rebase for the 0x80..0x90 window).
+  // Fragment fields: Metal Medium (0x81) refs 0x80->0 and 0x88->8 (the
+  // loader's -0x80 rebase for the 0x80..0x90 window) with a count base of 2.
   const AsteroidDef *medium = data.AsteroidType(0x81);
   REQUIRE(medium != nullptr);
-  CHECK(medium->directions[0] == 0); // payload 0x80 rebased
-  CHECK(medium->directions[1] == 8); // payload 0x88 rebased
-  CHECK(medium->directions[2] == 2);
-  CHECK(medium->lifetime == 300);
+  CHECK(medium->frag_type1 == 0); // payload 0x80 rebased
+  CHECK(medium->frag_type2 == 8); // payload 0x88 rebased
+  CHECK(medium->frag_count == 2);
+  CHECK(medium->mass == 300);
 
   // A row absent from the range window stays default (present false). Only
   // ids 0x80..0x8f exist, so ids >= 0x100 fall outside the table and the

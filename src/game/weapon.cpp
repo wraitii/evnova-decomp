@@ -2682,6 +2682,10 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
 
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   const std::int16_t bank = ship.active_weapon_bank_slot;
+  auto consume_fire_request = [&]() {
+    ship.ai_fire_trigger_latch = 0;
+    ship.active_weapon_bank_slot = -1;
+  };
   // Ship_HandleShip (0x00433050) keeps destroyed slots around long enough for
   // their death/debris handling, but Weapon_FireShipWeapons must not launch a
   // bank that was latched before the disabling/lethal hit. The original AI
@@ -2694,8 +2698,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
       ship.death_timer_active > 0.0F || ship.armor_points <= 0.0F) {
     if (fire_restricted || ship.death_timer_active > 0.0F ||
         ship.armor_points <= 0.0F) {
-      ship.active_weapon_bank_slot = -1;
-      ship.ai_fire_trigger_latch = 0;
+      consume_fire_request();
     }
     return;
   }
@@ -2704,6 +2707,11 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
       state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
   if (weapon == nullptr || ship.npc_weapon_bank_ammo[index] <= 0 ||
       ship.npc_weapon_bank_cooldown[index] > 0.0F) {
+    // The AI latch is a one-frame request. Ghidra's selectors can leave the
+    // previous active bank in +0x72 and re-latch it even when their current
+    // scan found no candidate; consuming a failed clean-room handoff prevents
+    // an empty/cooling bank from remaining permanently armed.
+    consume_fire_request();
     return;
   }
   // Weapon_CanFireWeaponBank is the authoritative ammo/energy gate.  In
@@ -2711,6 +2719,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   // that counter is not an ammunition requirement for them.
   if (weapon->weapon_mode_code == 99 &&
       ship.npc_weapon_bank_secondary[index] < 1) {
+    consume_fire_request();
     return;
   }
   const std::int16_t mode = weapon->weapon_mode_code;
@@ -2888,6 +2897,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   }
 
   if (shots_fired < 1) {
+    consume_fire_request();
     return;
   }
   // flags_secondary 0x200: muzzle sprite flash to level 32 (Ghidra
@@ -2952,8 +2962,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     }
   }
   ship.npc_weapon_bank_cooldown[index] = fire_cooldown;
-  ship.ai_fire_trigger_latch = 0;
-  ship.active_weapon_bank_slot = -1;
+  consume_fire_request();
 }
 
 // Ghidra Shot_HandleShot (0x00435830) time-animated shot-frame branch: for a

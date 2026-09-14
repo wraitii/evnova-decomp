@@ -773,11 +773,11 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // Ghidra 0x004cd3b0 IntroCinematic_SetupFrames: reads the keyed pilot block
   // (selected character template; absent block -> the no-save default) and
   // fills g_intro_cinematic, clamping ids/durations. Stock data: block
-  // ".Trader" -> PICTs 0x2008/0x2009/0x200a for 45 ticks each, post-intro
-  // destination -1 (no dialog).
+  // ".Trader" -> PICTs 0x2008/0x2009/0x200a for 45 ticks each, intro text
+  // desc -1 (no dialog).
   NovaIntroCinematic_SetupFrames(state, state.pilot.character_template);
   NovaLog::Info("new-game intro configured: frames {} {} {} {} for {} {} {} {} "
-                "ticks each (pilot block '{}', post-intro destination {})",
+                "ticks each (pilot block '{}', intro text desc {})",
                 state.intro_cinematic.source_pict_ids[0],
                 state.intro_cinematic.source_pict_ids[1],
                 state.intro_cinematic.source_pict_ids[2],
@@ -787,7 +787,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                 state.intro_cinematic.duration_60h_ticks[2],
                 state.intro_cinematic.duration_60h_ticks[3],
                 state.pilot.character_template,
-                state.intro_cinematic.post_intro_dest_id);
+                state.intro_cinematic.intro_text_desc_id);
 
   // ---- Step 7: mark active ------------------------------------------------
   // Ghidra: DAT_00596d28 = 1 (game active), DAT_00596d2f = the dialog's

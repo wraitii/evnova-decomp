@@ -538,8 +538,10 @@ TEST_CASE("blast weapon strips asteroid integrity, splashes owner, and breaks",
   // One asteroid type: integrity 5, splits into type-0 children (count base
   // 2 -> 1..2 children per break).
   state.scenario.asteroid_defs.resize(1);
-  state.scenario.asteroid_defs[0].wander_table_value = 5;
-  state.scenario.asteroid_defs[0].directions = {0, -1, 2};
+  state.scenario.asteroid_defs[0].strength = 5;
+  state.scenario.asteroid_defs[0].frag_type1 = 0;
+  state.scenario.asteroid_defs[0].frag_type2 = -1;
+  state.scenario.asteroid_defs[0].frag_count = 2;
 
   // Remove the test target ship so the proximity ship pass cannot claim the
   // blast before the asteroid scan runs.
@@ -579,7 +581,7 @@ TEST_CASE("direct projectile strips asteroid integrity without a blast",
 
   // One asteroid type with integrity 100 so a 10-point hit does not break it.
   state.scenario.asteroid_defs.resize(1);
-  state.scenario.asteroid_defs[0].wander_table_value = 100;
+  state.scenario.asteroid_defs[0].strength = 100;
   state.ShipAt(1).is_active = false; // keep the ship pass out of the way
 
   AsteroidState &asteroid = state.asteroid_pool[0];

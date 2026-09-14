@@ -1001,7 +1001,13 @@ void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
   // disabled predicate.  A lethal hit leaves the ship slot
   // active during its destruction window, but it must not acquire a fresh
   // weapon bank in the post-state refresh.
-  if (ship.ai_behavior_code < 3 || NovaAiShip_IsDestroyed(ship)) {
+  // The original returns without touching the bank for behaviors below 5.
+  // Behaviors 1/2 arm their weapons in the combat control-mode branches, so
+  // clearing here would erase the bank before Ship_HandleShip can fire it.
+  if (ship.ai_behavior_code < 3) {
+    return;
+  }
+  if (NovaAiShip_IsDestroyed(ship)) {
     ship.active_weapon_bank_slot = -1;
     ship.ai_fire_trigger_latch = 0;
     return;
@@ -1569,8 +1575,8 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
     // escort attach marker as hostility: escorts carry government -1 and
     // only become targets through the hit/hostility-propagation paths).
     const bool candidate_is_engaged = candidate.primary_target_ship_slot == 0;
-    bool hostile_contact = candidate_is_engaged;
-    if (!hostile_contact && ship.faction_or_government_id >= 0 &&
+    bool hostile_contact = false;
+    if (ship.faction_or_government_id >= 0 &&
         candidate.faction_or_government_id >= 0) {
       hostile_contact = NovaGovernment_AreGovtsHostileOrXenophobic(
           state.scenario,

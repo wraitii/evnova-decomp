@@ -1606,6 +1606,44 @@ TEST_CASE("acquire refuses a ship with no ready weapons") {
   CHECK(ship.primary_target_ship_slot == -1);
 }
 
+TEST_CASE("warship does not acquire an allied ship attacking the player") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+
+  game::Ship &acquirer = state.ShipAt(1);
+  acquirer.is_active = true;
+  acquirer.ship_instance_id = 1;
+  acquirer.ship_class_id = 0x8d - 0x80;
+  acquirer.current_system_id = static_cast<std::int16_t>(sys_idx);
+  acquirer.faction_or_government_id = 0;
+  acquirer.ai_behavior_code = 3;
+  acquirer.ai_state_code = 0;
+  acquirer.primary_target_ship_slot = -1;
+  game::NovaWeapon_EnsureNpcWeaponBanks(state, acquirer);
+
+  game::Ship &ally = state.ShipAt(2);
+  ally.is_active = true;
+  ally.ship_instance_id = 2;
+  ally.ship_class_id = 0x8d - 0x80;
+  ally.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ally.faction_or_government_id = 0;
+  ally.ai_behavior_code = 3;
+  ally.ai_state_code = 4;
+  ally.primary_target_ship_slot = 0;
+
+  game::NovaAi_AcquirePrimaryTarget(state, acquirer);
+
+  // Ghidra 0x0040e3c0 redirects allied support onto the ally's target; it
+  // never marks the allied attacker itself as hostile.
+  CHECK(acquirer.primary_target_ship_slot != 2);
+}
+
 TEST_CASE("mission-fleet goal 0 forces hostility to the player") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());

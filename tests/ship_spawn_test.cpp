@@ -65,6 +65,9 @@ TEST_CASE("random system dude clears recycled movement state") {
   recycled.ai_forward_thrust_cmd = 12.0F;
   recycled.ai_desired_speed = -50.0F;
   recycled.arrival_monitor_active = true;
+  recycled.npc_weapon_bank_ammo.fill(123);
+  recycled.npc_weapon_bank_secondary.fill(456);
+  recycled.npc_weapon_banks_ship_class = 77;
 
   const int slot = NovaEncounter_SpawnRandomSystemDudeShip(state, kSystemId, 8);
   REQUIRE(slot == 1);
@@ -73,6 +76,23 @@ TEST_CASE("random system dude clears recycled movement state") {
   CHECK(spawned.ai_forward_thrust_cmd == Catch::Approx(0.0F));
   CHECK(spawned.ai_desired_speed == Catch::Approx(0.0F));
   CHECK_FALSE(spawned.arrival_monitor_active);
+
+  const game::ShipClass *cls = state.scenario.Ship(
+      static_cast<std::int16_t>(spawned.ship_class_id + 0x80));
+  REQUIRE(cls != nullptr);
+  CHECK(spawned.npc_weapon_banks_ship_class == spawned.ship_class_id);
+  std::array<std::int16_t, 0x100> expected_ammo{};
+  std::array<std::int16_t, 0x100> expected_secondary{};
+  for (const game::ShipDefaultWeaponBank &stock : cls->stock_weapons) {
+    if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
+      continue;
+    }
+    const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
+    expected_ammo[bank] = std::max<std::int16_t>(stock.count, 0);
+    expected_secondary[bank] = stock.ammo_load;
+  }
+  CHECK(spawned.npc_weapon_bank_ammo == expected_ammo);
+  CHECK(spawned.npc_weapon_bank_secondary == expected_secondary);
 }
 
 // The fleet lead-ship spawner lays a fleet def's lead onto an allocated slot.

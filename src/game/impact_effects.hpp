@@ -73,16 +73,6 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
                                  std::int16_t radius,
                                  bool play_sound = true);
 
-// Ghidra Weapon_SpawnWeaponImpactEffectPackage (0x00462550), area-effect
-// branch only. Secondary freeflight objects remain deferred; the asteroid
-// destruction package's SWParticle debris burst is emitted by
-// NovaEffects_SpawnWeaponImpactParticleBurst from the collision arm.
-void NovaEffects_SpawnImpactEffectPackage(GameState &state,
-                                          float x,
-                                          float y,
-                                          std::int16_t package_id,
-                                          bool play_sound = true);
-
 // Ghidra Shot_UpdateImpactEffectSprites (0x0042e160): advance animation and
 // delayed-start timers. Sprite-frame-count expiry is finalized by the SDL
 // view once the corresponding sp.n set has been resolved.

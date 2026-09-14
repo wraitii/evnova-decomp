@@ -168,25 +168,6 @@ void NovaEffects_SpawnAreaImpact(GameState &state,
   }
 }
 
-// Ghidra 0x00462550 Weapon_SpawnWeaponImpactEffectPackage.
-void NovaEffects_SpawnImpactEffectPackage(GameState &state,
-                                          float x,
-                                          float y,
-                                          std::int16_t package_id,
-                                          bool play_sound) {
-  const AsteroidDef *package = state.scenario.ImpactPackageAt(package_id);
-  if (package == nullptr || !package->present) {
-    return;
-  }
-  const std::int16_t area_effect_id = package->ImpactAreaEffectId();
-  if (area_effect_id < 0) {
-    return;
-  }
-  // The original package passes a zero radius: the package selects the
-  // effect, while weapon splash radius belongs to the preceding hit path.
-  NovaEffects_SpawnAreaImpact(state, x, y, area_effect_id, 0, play_sound);
-}
-
 // Ghidra Weapon_SpawnWeaponImpactParticleBurst (0x004274d0).
 void NovaEffects_SpawnWeaponImpactParticleBurst(GameState &state,
                                                 float x,

@@ -328,7 +328,7 @@ TEST_CASE("direct asteroid contact uses the injected pixel mask",
   GameState state;
   SeedCollisionScenario(state);
   state.scenario.asteroid_defs.resize(1);
-  state.scenario.asteroid_defs[0].wander_table_value = 100;
+  state.scenario.asteroid_defs[0].strength = 100;
   state.ShipAt(1).is_active = false;
 
   AsteroidState &asteroid = state.asteroid_pool[0];
@@ -358,7 +358,7 @@ TEST_CASE("asteroid mask transparent miss inside circle leaves it intact",
   GameState state;
   SeedCollisionScenario(state);
   state.scenario.asteroid_defs.resize(1);
-  state.scenario.asteroid_defs[0].wander_table_value = 100;
+  state.scenario.asteroid_defs[0].strength = 100;
   state.ShipAt(1).is_active = false;
 
   AsteroidState &asteroid = state.asteroid_pool[0];

@@ -89,15 +89,17 @@ int NovaAsteroid_SpawnRecord(GameState &state,
   m.target_vel_y = static_cast<float>(RandomBelow(state, 200) - 100) *
                    static_cast<float>(kAsteroidScale);
 
-  // Wander radius/lifetime. The original draws this from the per-type sprite
-  // descriptor's frame count (descriptor[mode]+0x54). Until the drift-sprite
-  // system lands (Step 3/4) the decoded per-type `lifetime` field stands in;
-  // see AsteroidDef.lifetime TODO(decomp).
+  // Wander frame seed. The original draws this from the per-type sprite
+  // descriptor's frame count (g_asteroid_sprite_sets[type]->num_frames). Until
+  // the drift-sprite system lands (Step 3/4) the decoded AsteroidDef.mass field
+  // stands in; this is a known divergence (mass is 150..1200, not a frame
+  // count). TODO(decomp)
   const AsteroidDef *row =
       state.scenario.AsteroidType(static_cast<std::int16_t>(type + 0x80));
-  const std::int32_t lifetime = row != nullptr ? row->lifetime : 0;
-  m.wander_frame_accumulator = static_cast<float>(RandomBelow(state, lifetime));
-  const float speed_mult = row != nullptr ? row->wander_speed_multiplier : 1.0F;
+  const std::int32_t frame_seed = row != nullptr ? row->mass : 0;
+  m.wander_frame_accumulator =
+      static_cast<float>(RandomBelow(state, frame_seed));
+  const float speed_mult = row != nullptr ? row->spin_rate : 1.0F;
   // wander_speed = (rand(0x29)+0x50) * speed_mult * 0.01 -> 0.8..1.2 scaled.
   m.wander_speed = static_cast<float>(RandomBelow(state, 0x29) + 0x50) *
                    speed_mult * static_cast<float>(kAsteroidScale);
@@ -106,13 +108,12 @@ int NovaAsteroid_SpawnRecord(GameState &state,
   if (RandomBelow(state, 2) == 0) {
     m.wander_speed = -m.wander_speed;
   }
-  m.integrity =
-      row != nullptr ? row->wander_table_value : static_cast<std::int16_t>(0);
+  m.integrity = row != nullptr ? row->strength : static_cast<std::int16_t>(0);
 
-  NovaLog::Debug("asteroid spawn slot {} type {} lifetime {} speed {}",
+  NovaLog::Debug("asteroid spawn slot {} type {} frame_seed {} speed {}",
                  slot,
                  type,
-                 lifetime,
+                 frame_seed,
                  m.wander_speed);
   return static_cast<int>(slot);
 }
@@ -230,16 +231,17 @@ int NovaAsteroid_Spawn(GameState &state, bool place_in_ring) {
 
   const AsteroidDef *row =
       state.scenario.AsteroidType(static_cast<std::int16_t>(dir + 0x80));
-  const std::int32_t lifetime = row != nullptr ? row->lifetime : 0;
-  m.wander_frame_accumulator = static_cast<float>(RandomBelow(state, lifetime));
-  const float speed_mult = row != nullptr ? row->wander_speed_multiplier : 1.0F;
+  // Same frame-seed stand-in divergence as NovaAsteroid_SpawnRecord above.
+  const std::int32_t frame_seed = row != nullptr ? row->mass : 0;
+  m.wander_frame_accumulator =
+      static_cast<float>(RandomBelow(state, frame_seed));
+  const float speed_mult = row != nullptr ? row->spin_rate : 1.0F;
   m.wander_speed = static_cast<float>(RandomBelow(state, 0x29) + 0x50) *
                    speed_mult * static_cast<float>(kAsteroidScale);
   if (RandomBelow(state, 2) == 0) {
     m.wander_speed = -m.wander_speed;
   }
-  m.integrity =
-      row != nullptr ? row->wander_table_value : static_cast<std::int16_t>(0);
+  m.integrity = row != nullptr ? row->strength : static_cast<std::int16_t>(0);
 
   NovaLog::Debug("asteroid spawn slot {} type {} ring={} radius {}",
                  slot,

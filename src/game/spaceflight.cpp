@@ -4561,8 +4561,8 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   // (Ghidra DAT_00596d35 == 0 in Ship_RunSpaceflightMode). We set the
   // intro_played latch *after* the intro returns, exactly as the original sets
   // DAT_00596d35 = 0x01 immediately after IntroCinematic_Run(). The intro's
-  // skip result already gates (a stub of) the post-intro travel-selection
-  // dialog internally, so its return value needs no action here.
+  // skip result already gates (a stub of) the intro text-reader dialog
+  // internally, so its return value needs no action here.
   if (!state.intro_played) {
     (void)NovaIntroCinematic_Run(platform, audio, state);
     // Ghidra: DAT_00596d35 = 0x01, the latch IntroCinematic_SetupFrames/

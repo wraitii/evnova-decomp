@@ -42,7 +42,7 @@ big-endian fields (offsets verified against the Shuttle class 0x80 payload):
 | +0x2e   | Flags        | -> `sprite_behavior_flags` (bank/unfold/carry bits) |
 | +0x30   | AnimDelay    | -> `combat_state_init_range` (cycle dwell)          |
 | +0x30   | AnimDelay    | -> `combat_state_init_range` |
-| +0x32   | WeapDecay    | -> `weapon_glow_decay_rate` = WeapDecay * 0.003484 |
+| +0x32   | WeapDecay    | -> `weapon_glow_decay_rate` = WeapDecay * binary64 0.333 |
 | +0x34   | FramesPer    | -> `frames_per_rotation` (default 36) |
 | +0x36..+0x3e | Gun/Turret/Guided exit pos | `gun_exit_pos_x/y`, `turret_exit_pos_x/y`, `guided_exit_pos_x` |
 | +0x40   | ShieldImageID | -> g_ship_sprite_shield (unconditional) |
@@ -221,7 +221,7 @@ hull in `SpaceflightView` (player and NPCs alike):
 | role | sh\x8an fields | ShipClass / Ship state | driver |
 |------|----------------|------------------------|--------|
 | running lights | LightImageID/mask/x/y +0x1e/+0x20/+0x22/+0x24 | `ShipClass.light_image_id`, `blink_mode`, `blink_val_a..d`; `Ship.light_intensity` (+0x60), `light_blink_phase` (+0xC8D6), `light_blink_timer` (+0xC8EC) | `NovaShip_TickWeaponSpriteAndRunningLights` |
-| weapon effects | WeapImageID/mask/x/y +0x26/+0x28/+0x2a/+0x2c, WeapDecay +0x32 | `ShipClass.weapon_glow_decay_rate` (WeapDecay * 0.003484), `Ship.weapon_sprite_flash_level` (+0xC8E8) | same tick + fire sites |
+| weapon effects | WeapImageID/mask/x/y +0x26/+0x28/+0x2a/+0x2c, WeapDecay +0x32 | `ShipClass.weapon_glow_decay_rate` (WeapDecay * binary64 0.333), `Ship.weapon_sprite_flash_level` (+0xC8E8) | same tick + fire sites |
 
 The loader's names for sh\x8an +0x36..+0x3e are wrong: they are Bible
 BlinkMode/BlinkValA..D, not gun/turret/guided exit positions. Ground truth is
@@ -232,8 +232,10 @@ geometry begins at +0x48 (already decoded as `ShipClass.muzzle_*`).
 * `Ship.weapon_sprite_flash_level` is raised to 32 at the fire site when the
   fired WeaponDef carries `flags_secondary` 0x200
   (`Weapon_FirePlayerWeaponBank` 0x00455150 / `Weapon_FireShipWeapons`
-  0x00414550) and decays by `weapon_glow_decay_rate` per normalized 30 Hz tick
-  while positive; an overshoot below -1.0 clamps to -1.0. It is independent of
+  0x00414550) and decays by `weapon_glow_decay_rate` per normalized 30 Hz tick.
+  The binary scale is 0.333; a Fed Destroyer (`WeapDecay=5`) fades in about
+  0.64 seconds.
+  An overshoot below -1.0 clamps to -1.0. It is independent of
   WeapDecay 0 (which never decays, matching the original).
 * `Ship.light_intensity` (the original's unnamed float at ShipState +0x60) is
   driven by the Bible `BlinkMode` program: 0/-1 steady full, 1 square wave
