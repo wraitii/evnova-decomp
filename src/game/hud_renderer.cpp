@@ -490,23 +490,23 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   // (Ghidra 0x004AF020 FUN_004af020 tail runs inline here): left =
   // window left + 25, bottom = window bottom - 5, height 26 * ui_scale (the
   // 640x480 logical band spans x 25..width-244, y height-31..height-5 -- the
-  // lower-left). DrawContext_DrawPascalStringInFilledRect (0x004bcd30) draws
-  // the text LEFT-aligned at the rect's left edge with the cursor 12px below
-  // the rect top (every ShowOverlayMessage call site passes font_id 0 /
-  // scaled_value 0xc); the band right edge (--DAT_0088c020-50) is provisional.
+  // lower-left). NovaHud_ShowCachedOverlayMessage (0x0047e430) explicitly
+  // selects font id 0 (Chicago) and size 0xc; the filled-rect helper starts
+  // that text at the rect top, represented here by a 12px baseline offset.
+  // The band right edge (--DAT_0088c020-50) is provisional.
   // Multi-line word wrap is TODO(decomp); current messages are single-line.
   if (state.hud_overlay.active &&
       (state.hud_overlay.expiry_ms == 0 ||
        SDL_GetTicks() < state.hud_overlay.expiry_ms)) {
     const auto &msg = state.hud_overlay;
-    const float size = static_cast<float>(layout_.font_size) + 3.0F;
+    constexpr float kOverlayFontSize = 12.0F;
     const auto logical = platform.logical_playfield_size();
     const float left = 25.0F;
     const float baseline = logical.y - 5.0F - 26.0F + 12.0F;
     NovaText_Draw(platform,
                   *font_cache_,
-                  NovaFontFamily::kGeneva,
-                  size,
+                  NovaFontFamily::kChicago,
+                  kOverlayFontSize,
                   kNovaFontStyleRegular,
                   SDL_Color{msg.red, msg.green, msg.blue, SDL_ALPHA_OPAQUE},
                   left,

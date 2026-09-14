@@ -205,7 +205,7 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 
 // Ghidra scope 0xb of Frame_TickSystems (0x004186b0): the per-tick in-system
 // NPC/reactivity pass. The original runs: Mission_TickShipInteractionReactions,
-// NovaFrame_UpdateCombatChatter, Frame_UpdateScreenFlashTimers,
+// NovaFrame_UpdateCombatChatter, Frame_TickHudOverlayAndRouteMapTimers,
 // Ship_TallyInboundWeaponThreat, then System_TickNpcSpawnMaintenance
 // (encounter fleets + random dude ships up to the system's avg_ships cap) and
 // Asteroid_Spawn('\x01') (the asteroid ring), before clearing the
@@ -214,8 +214,9 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
 // This pass performs the mission interaction-reaction slice (0x00443760) and
 // the NPC-population slice (NovaSystem_TickNpcSpawnMaintenance, which spawns
 // encounter-fleet leads / random dude ships toward avg_ships).
-// TODO(decomp): the screen-flash helper, asteroid ring and interaction flags
-// are still absent.
+// The overlay helper's HUD expiry and route-map deadline are represented by
+// their wall-clock state elsewhere in the port. The asteroid ring and
+// interaction flags are still absent.
 void Stub_TickReactionsAndNpcSpawns(GameState &state,
                                     SdlAudio &audio,
                                     float elapsed_ticks) {
