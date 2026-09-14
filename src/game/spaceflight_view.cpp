@@ -464,7 +464,7 @@ void DrawQueuedBeam(SdlPlatform &platform,
   const int xb = screen_x(beam.target_x);
   const int yb = screen_y(beam.target_y);
   // WeaponDef +0x72 doubles as Bible BeamWidth for beam modes.
-  const int width = weapon.shot_anim_frame_dwell;
+  const int width = weapon.beam_width_or_animation_frame_delay;
   SDL_Renderer *renderer = platform.renderer();
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
   if (weapon.beam_lightning_density > 0) {
@@ -1601,7 +1601,7 @@ void SpaceflightView::DrawShots(SdlPlatform &platform, const GameState &state) {
   //
   // A weapon with flags_primary bit 0 SET takes Shot_HandleShot's *animated*
   // branch instead: NovaWeapon_TickShots steps the shot's frame_cycle_index /
-  // anim_elapsed at the weapon's shot_anim_frame_dwell cadence (see
+  // anim_elapsed at the weapon's animation-frame interval (see
   // weapon.cpp), and here the cycle is wrapped at the shot set's frame count
   // (or held at frame_count-1 for a flags_secondary bit 1 reverse wrap, the
   // last-frame hold Shot_HandleShot applies) before being drawn.

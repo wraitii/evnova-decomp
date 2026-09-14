@@ -861,10 +861,11 @@ struct ActiveShot {
   CollisionMaskBinding collision_mask;
   // Set by collision or expiry; the simulation removes these after the pass.
   bool consumed = false;
-  // Ghidra ShotState.fuse_elapsed. Proximity-fuse behavior is deferred, but
-  // the accumulator belongs on the shot record so adding it will not require
-  // another storage migration.
-  float fuse_elapsed = 0.0F;
+  // Ghidra ShotState.damage_decay_elapsed_ticks / damage_decay_points. The
+  // elapsed value accumulates normalized 30 Hz ticks; each completed Bible
+  // Decay interval adds one point of direct-hit mass/energy damage reduction.
+  float damage_decay_elapsed_ticks = 0.0F;
+  std::int16_t damage_decay_points = 0;
   // Ghidra ShotState.impact_variant, used later by impact visual/effect code.
   std::int8_t impact_variant = 0;
   // Ghidra ShotState +0x1e: optional impact-package row selected by the
@@ -877,10 +878,11 @@ struct ActiveShot {
   std::int16_t linked_shot_generation = 0;
   // Time-animated shot-frame stepping (Ghidra ShotState.frame_cycle_index / +
   // anim_elapsed). For a weapon whose flags_primary bit 0 is SET the shot uses
-  // Shot_HandleShot's animated branch: anim_elapsed accumulates frame time and
-  // each time it crosses the weapon's shot_anim_frame_dwell, frame_cycle_index
-  // advances (wrapping at the frame count). Only the animated-branch shot
-  // sets need these; static/heading sets (Light Blaster) leave them unused.
+  // Shot_HandleShot's animated branch: anim_elapsed accumulates normalized
+  // 30 Hz ticks and each time it crosses the weapon's animation-frame delay,
+  // frame_cycle_index advances (wrapping at the frame count). Only the
+  // animated-branch shot sets need these; static/heading sets leave them
+  // unused.
   int frame_cycle_index = 0; // ShotState.frame_cycle_index (+0x3e)
   float anim_elapsed = 0.0F; // ShotState.anim_elapsed, in ms
   // Ghidra ShotState.heading_deg (+0x20): flight heading in game degrees
@@ -920,7 +922,7 @@ struct BeamHit {
   // correct wall-clock time instead of stalling when truncated to int16.
   float lifetime_remainder = 0.0F;
   // Ghidra record +0x12: decay-phase counter. Only incremented while the
-  // beam's lifetime sits at 0 with a positive WeaponDef fuse_ticks (Bible
+  // beam's lifetime sits at 0 with a positive WeaponDef Decay value (Bible
   // "Decay"); holds the beam on screen until counter + beam_falloff >= 0x10
   // and drives the corona-shrink / lightning-fade in the beam renderer.
   std::int16_t animation_counter = 0;

@@ -201,19 +201,48 @@ TEST_CASE("fractional projectile lifetime advances without rounding",
   shot.vel_x = 2.0F;
   state.active_shots.push_back(shot);
 
-  NovaWeapon_TickShots(state, 16.0F, 0.5F);
+  NovaWeapon_TickShots(state, 0.5F);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].pos_x == Catch::Approx(1.0F));
   CHECK(state.active_shots[0].life_ticks_remaining == Catch::Approx(1.0F));
   CHECK(state.active_shots[0].life_frames == 1);
 
-  NovaWeapon_TickShots(state, 16.0F, 0.75F);
+  NovaWeapon_TickShots(state, 0.75F);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].pos_x == Catch::Approx(2.5F));
   CHECK(state.active_shots[0].life_ticks_remaining == Catch::Approx(0.25F));
 
-  NovaWeapon_TickShots(state, 16.0F, 0.25F);
+  NovaWeapon_TickShots(state, 0.25F);
   CHECK(state.active_shots.empty());
+}
+
+TEST_CASE("animated projectile frame delay is measured in 30 Hz ticks",
+          "[collision][weapon]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.flags |= 0x0001U;
+  weapon.beam_width_or_animation_frame_delay = 2;
+
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.owner_ship_slot = 0;
+  shot.system_id = 0;
+  shot.life_frames = 10;
+  shot.life_ticks_remaining = 10.0F;
+  state.active_shots.push_back(shot);
+
+  // Four 60 Hz updates contribute four half-ticks: two normalized ticks, or
+  // 2/30 second, independent of the update rate.
+  for (int update = 0; update < 3; ++update) {
+    NovaWeapon_TickShots(state, 0.5F);
+    REQUIRE(state.active_shots.size() == 1);
+    CHECK(state.active_shots[0].frame_cycle_index == 0);
+  }
+  NovaWeapon_TickShots(state, 0.5F);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].frame_cycle_index == 1);
+  CHECK(state.active_shots[0].anim_elapsed == Catch::Approx(0.0F));
 }
 
 TEST_CASE("mode one projectile requires its recorded target", "[collision]") {
@@ -369,21 +398,52 @@ TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
   CHECK(!NovaWeapon_CanProjectileHitShip(state, ActiveShot{}, 1));
 }
 
-TEST_CASE("late collision window stops contacts near expiry", "[collision]") {
+TEST_CASE("proximity safety suppresses ship contacts just after launch",
+          "[collision]") {
   GameState state;
   SeedCollisionScenario(state);
-  state.scenario.weapons[0].late_collision_window_ticks = 3;
+  state.scenario.weapons[0].proximity_safety_ticks = 3;
   SpawnTestShot(state);
 
-  state.active_shots[0].life_ticks_remaining = 2.0F;
+  // At launch, remaining life is above Count - ProxSafety, so direct ship
+  // contact is rejected. Equality at the three-tick boundary is accepted.
   NovaWeapon_ResolveDirectShotCollisions(state);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(20.0F));
 
-  state.active_shots[0].life_ticks_remaining = 4.0F;
+  state.active_shots[0].life_ticks_remaining = 7.0F;
   NovaWeapon_ResolveDirectShotCollisions(state);
   CHECK(state.active_shots.empty());
   CHECK(state.ShipAt(1).shield_points == Catch::Approx(10.0F));
+}
+
+TEST_CASE("projectile damage decay uses normalized 30 Hz ticks",
+          "[collision][weapon]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.weapons[0].damage_decay_interval_ticks = 2;
+  SpawnTestShot(state);
+
+  // The original comparison is strict: exactly two accumulated ticks do not
+  // decay yet. A fifth 60 Hz update crosses the interval and removes one point
+  // from both direct-hit damage values.
+  for (int update = 0; update < 4; ++update) {
+    NovaWeapon_TickShots(state, 0.5F);
+  }
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].damage_decay_points == 0);
+  CHECK(state.active_shots[0].damage_decay_elapsed_ticks ==
+        Catch::Approx(2.0F));
+
+  NovaWeapon_TickShots(state, 0.5F);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].damage_decay_points == 1);
+  CHECK(state.active_shots[0].damage_decay_elapsed_ticks ==
+        Catch::Approx(0.0F));
+
+  NovaWeapon_ResolveDirectShotCollisions(state);
+  CHECK(state.active_shots.empty());
+  CHECK(state.ShipAt(1).shield_points == Catch::Approx(11.0F));
 }
 
 TEST_CASE("blast weapon strips asteroid integrity, splashes owner, and breaks",
@@ -460,12 +520,12 @@ TEST_CASE("direct projectile strips asteroid integrity without a blast",
   CHECK(state.player.shield_points == Catch::Approx(100.0F));
 }
 
-TEST_CASE("a fusing direct shot still strikes an asteroid",
+TEST_CASE("a proximity-safe direct shot still strikes an asteroid",
           "[collision][asteroid]") {
   GameState state;
   SeedCollisionScenario(state);
   state.scenario.asteroid_defs.resize(1);
-  state.scenario.weapons[0].late_collision_window_ticks = 3;
+  state.scenario.weapons[0].proximity_safety_ticks = 3;
   state.ShipAt(1).is_active = false;
 
   AsteroidState &asteroid = state.asteroid_pool[0];
@@ -476,9 +536,8 @@ TEST_CASE("a fusing direct shot still strikes an asteroid",
   asteroid.target_pos_y = 0.0F;
 
   SpawnTestShot(state);
-  // Inside the late window: the ship callback would reject this contact, but
-  // the asteroid callback (0x00436f70) has no late-window gate.
-  state.active_shots[0].life_ticks_remaining = 2.0F;
+  // Inside the initial safety delay the ship callback rejects contact, but the
+  // asteroid callback (0x00436f70) has no ProxSafety gate.
   NovaWeapon_ResolveDirectShotCollisions(state);
 
   CHECK(state.active_shots.empty());
@@ -825,7 +884,7 @@ TEST_CASE("expiry launches linked shots unless Flags2 0x20 suppresses it",
   state.active_shots[0].target_ship_slot = 1;
   state.active_shots[0].life_ticks_remaining = 1.0F;
 
-  NovaWeapon_TickShots(state, 16.0F, 1.0F);
+  NovaWeapon_TickShots(state, 1.0F);
 
   REQUIRE(state.active_shots.size() == 2);
   for (const ActiveShot &child : state.active_shots) {
@@ -841,7 +900,7 @@ TEST_CASE("expiry launches linked shots unless Flags2 0x20 suppresses it",
   SpawnTestShot(suppressed_state);
   suppressed_state.active_shots[0].life_ticks_remaining = 1.0F;
 
-  NovaWeapon_TickShots(suppressed_state, 16.0F, 1.0F);
+  NovaWeapon_TickShots(suppressed_state, 1.0F);
 
   CHECK(suppressed_state.active_shots.empty());
 }
