@@ -114,6 +114,7 @@ TEST_CASE("projectile impact consumes shields before armor", "[collision]") {
   GameState state;
   SeedCollisionScenario(state);
   SpawnTestShot(state);
+  state.active_shots[0].target_ship_slot = 1;
 
   REQUIRE(NovaWeapon_CanProjectileHitShip(state, state.active_shots[0], 1));
   NovaWeapon_ResolveDirectShotCollisions(state);
@@ -126,8 +127,84 @@ TEST_CASE("projectile impact consumes shields before armor", "[collision]") {
   // the separate escort/leader-chain link.
   CHECK(state.ShipAt(1).squad_leader_ship_slot == -1);
   CHECK(state.ShipAt(1).ai_hostility_accumulator == 35);
-  CHECK(state.ShipAt(1).hit_reaction_timer == Catch::Approx(32.0F));
+  CHECK(state.ShipAt(1).shield_bubble_flash_intensity == Catch::Approx(32.0F));
   CHECK(state.ShipAt(1).ai_state_code == 4);
+}
+
+TEST_CASE("incidental player hits accumulate before a later retarget",
+          "[collision][aggro]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Ship &target = state.ShipAt(1);
+  target.player_aggro_accumulator = 45.0F;
+  target.primary_target_ship_slot = -1;
+  target.ai_state_code = 0;
+
+  ResolveShipHitFromWeapon(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/false,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/10);
+
+  // The threshold test precedes this hit's +15 increment.
+  CHECK(target.player_aggro_accumulator == Catch::Approx(62.5F));
+  CHECK(target.primary_target_ship_slot == -1);
+  CHECK(target.ai_state_code == 0);
+
+  ResolveShipHitFromWeapon(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/false,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/10);
+
+  CHECK(target.player_aggro_accumulator == Catch::Approx(0.0F));
+  CHECK(target.primary_target_ship_slot == 0);
+  CHECK(target.ai_state_code == 4);
+}
+
+TEST_CASE(
+    "targeted player hits use the ordinary response without aggro buildup",
+    "[collision][aggro]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  Ship &target = state.ShipAt(1);
+
+  ResolveShipHitFromWeapon(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/10);
+
+  CHECK(target.player_aggro_accumulator == Catch::Approx(0.0F));
+  CHECK(target.primary_target_ship_slot == 0);
+  CHECK(target.ai_state_code == 4);
 }
 
 TEST_CASE("player attack alerts same-government NPCs", "[collision][ai]") {
@@ -352,6 +429,7 @@ TEST_CASE("player fire preserves state-9 hit-reset ordering",
   target.ai_secondary_target_slot = 3;
   target.ai_maneuver_timer_ms = 99.0F;
   target.defense_fleet_home_stellar_id = -1;
+  target.player_aggro_accumulator = 50.0F;
 
   NovaWeapon_ResolveDirectShotCollisions(state);
 

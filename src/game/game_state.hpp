@@ -299,9 +299,11 @@ struct Ship {
   // at the executable's 21 ms frame floor; banking it keeps the discrete RNG
   // and timed-debris cadence independent of the SDL presentation rate.
   float destruction_raw_tick_accumulator = 0.0F;
-  // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
-  // timer consumer is still deferred, so the field remains provisional.
-  float hit_reaction_timer = 0.0F;
+  // Ghidra ShipState +0xC8F0. Shot_ResolveShipHitFromWeapon sets this to 32
+  // on non-bypass impacts. Ship_UpdateVisualState caps it by remaining shield
+  // fraction, applies it to the shan ShieldImageID layer, then decays it by
+  // g_avg_frame_tick_scale. That update/render branch remains deferred.
+  float shield_bubble_flash_intensity = 0.0F;
   // Ghidra ShipState +0xB9: boarding/boarding-target latch. Set when a ship
   // boards its target (boarding_plunder), cleared for healthy player ships in
   // PlayerTick_StatusAndOutfitEvents, and read by the disable restriction and
@@ -483,9 +485,10 @@ struct Ship {
   // it (System_TickNpcSpawnMaintenance 0x0041d6e0).
   std::int16_t jump_destination_system_id = -1; // +0x94
   std::int16_t ai_hostility_accumulator = 0;    // +0x96
-  // Ghidra ShipState +0xC910. Accumulates ROUND(weapon reload) * 1.5 per
-  // player-owned hit (Shot_ResolveShipHitFromWeapon) and gates the
-  // player-retarget chance; reset when the ship retargets onto an attacker.
+  // Ghidra ShipState +0xC910. Accumulates weapon reload * 1.75 per
+  // player-owned hit (Shot_ResolveShipHitFromWeapon), gates the player-retarget
+  // chance, and decays by 0.5 per normalized tick in Ship_HandleShip; reset
+  // when the ship retargets onto an attacker.
   float player_aggro_accumulator = 0.0F; // +0xC910
   // Engagement patience timer while the cloak/targetability predicate rejects
   // a target; when it expires the AI gives up and clears the primary target

@@ -3098,6 +3098,16 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   }
   ship.engine_glow_intensity = std::clamp(
       static_cast<float>(ship.engine_glow_level) / 24.0F, 0.0F, 1.0F);
+
+  // Ship_HandleShip 0x00435464..0x004354ae: player-owned hits build this
+  // retarget-pressure accumulator in Shot_ResolveShipHitFromWeapon. Its
+  // passive decay is normalized simulation time (g_avg_frame_tick_scale),
+  // unlike the nearby per-call engine-glow mutations: subtract 0.5 per tick
+  // and clamp a crossing to zero.
+  if (ship.player_aggro_accumulator > 0.0F) {
+    ship.player_aggro_accumulator =
+        std::max(0.0F, ship.player_aggro_accumulator - 0.5F * elapsed_ticks);
+  }
 }
 
 // Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020). Takes the
@@ -3569,7 +3579,7 @@ void RespawnResetPlayerShipState(GameState &state) {
   p.waypoint_arrival_marker_b = 0;
   p.turn_bank_animation_phase = 0.0F;
   p.ai_turn_bias_dir = 0;
-  p.hit_reaction_timer = 0.0F;
+  p.shield_bubble_flash_intensity = 0.0F;
   p.player_aggro_accumulator = 0.0F;
   p.sprite_animation_timer = 0.0F;
   p.skill_variance_scale = 1.0F;
@@ -3606,8 +3616,10 @@ void RespawnResetPlayerShipState(GameState &state) {
     effect.anim_time = -1.0F;
     effect.delay_timer = 0.0F;
   }
-  // TODO(decomp(0x004b3350)) skipped: the directional weapon effect instance
-  // pool reset (g_directional_weapon_effect_instances).
+  // TODO(decomp(0x004b3350)) skipped: reset the unimplemented 64-entry weapon
+  // smoke-puff pool used by Shot_SpawnWeaponSmokePuff (0x004215d0) and
+  // Shot_UpdateWeaponSmokePuffs (0x0042c660). No stock Nova weapon enables it;
+  // it remains relevant to plug-ins using Flags 0x0200/0x0400 and SmokeSet.
 
   // Reroll the per-class licensed availability rolls.
   for (auto &roll : state.ship_class_limit_rolls) {

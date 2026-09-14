@@ -76,8 +76,8 @@ SHOT = re.compile(
     r'(?<!s)Shot|Projectile|BeamHit|BeamQueue|DrawBeamQueue|HandleShot|ResolveShot|'
     r'ResolveCollisions|QueueBeamHit|UpdateBeamHit|SpawnLinkedShots|'
     r'SpawnShotFromWeapon|SpawnAreaImpactEffects|SpawnImpactEffectSprite|'
-    r'UpdateImpactEffectSprites|ResolveShipHitFromWeapon|SpawnDirectionalWeaponEffect|'
-    r'UpdateDirectionalWeaponEffects|SpawnShotOnImpact|ShipDestructionDebris|'
+    r'UpdateImpactEffectSprites|ResolveShipHitFromWeapon|SpawnWeaponSmokePuff|'
+    r'UpdateWeaponSmokePuffs|SpawnShotOnImpact|ShipDestructionDebris|'
     r'UpdateShotGuidance|AimStellarBatteryShot|ResolveShotCollisionHit',
     re.I)
 

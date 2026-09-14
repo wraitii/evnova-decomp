@@ -151,7 +151,7 @@ void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
 // once the ship AI/combat systems are reconstructed; Ship's defaults already
 // match a zero/-1 reset for them):
 //   * jamming_score_1..4, sprite_animation_timer / waypoint markers /
-//     hit_reaction_timer /
+//     shield_bubble_flash_intensity /
 //     player_aggro_accumulator / ai_turn_bias_dir and the various untyped
 //     field_0x* offsets (0x60/0x64/0xac/0xb0/0xb9/0xbb-0xbd/0xc8cc) are all
 //     left at defaults. The visual fields at +0xc8d6,
@@ -1869,7 +1869,7 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
       (cls != nullptr ? cls->skill_variance_percent : 0) - 1);
   ship.waypoint_arrival_marker_a = 0;
   ship.turn_bank_animation_phase = 0.0F;
-  ship.hit_reaction_timer = 0.0F;
+  ship.shield_bubble_flash_intensity = 0.0F;
   ship.player_aggro_accumulator = 0.0F;
   ship.ai_turn_bias_dir = 0;
   ship.sprite_animation_timer = 0.0F;

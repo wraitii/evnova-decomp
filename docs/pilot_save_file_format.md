@@ -133,7 +133,7 @@ is written with `FUN_004f22e0` (C-string + NUL) and read with
   name from path), per-stellar availability rolls (`avail_roll_threshold/
   limit_licensed`), `g_last_system_for_ambient_rolls = 0xffff`, then the
   pilotlog dump, and finally ship-state runtime fields reset (waypoint markers,
-  hit reaction, aggro accumulator, etc.).
+  shield-bubble flash intensity, aggro accumulator, etc.).
 
 ## Where the load path is used
 
