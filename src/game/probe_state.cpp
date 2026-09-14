@@ -235,6 +235,8 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("slot", slot);
       row.num("ship_class_id", ship.ship_class_id);
       row.str("ship_class", cls != nullptr ? cls->display_name : "");
+      row.num("ship_instance_id", ship.ship_instance_id);
+      row.num("government_id", ship.faction_or_government_id);
       row.num("pos_x", ship.pos_x);
       row.num("pos_y", ship.pos_y);
       row.num("vel_x", ship.vel_x);
@@ -250,6 +252,19 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.num("ai_forward_thrust_cmd", ship.ai_forward_thrust_cmd);
       row.num("ai_station_hold_timer", ship.ai_station_hold_timer);
       row.num("ai_maneuver_timer", ship.ai_maneuver_timer_ms);
+      row.num("primary_target_ship_slot", ship.primary_target_ship_slot);
+      row.num("active_weapon_bank_slot", ship.active_weapon_bank_slot);
+      row.num("ai_fire_trigger_latch", ship.ai_fire_trigger_latch);
+      row.num("inbound_weapon_threat", ship.inbound_weapon_threat);
+      if (ship.active_weapon_bank_slot >= 0 &&
+          ship.active_weapon_bank_slot < 0x100) {
+        const std::size_t bank =
+            static_cast<std::size_t>(ship.active_weapon_bank_slot);
+        row.num("active_weapon_ammo", ship.npc_weapon_bank_ammo[bank]);
+        row.num("active_weapon_secondary",
+                ship.npc_weapon_bank_secondary[bank]);
+        row.num("active_weapon_cooldown", ship.npc_weapon_bank_cooldown[bank]);
+      }
       row.boolean("arrival_monitor_active", ship.arrival_monitor_active);
       row.num("arrival_monitor_ticks", ship.arrival_monitor_elapsed_ticks);
       row.boolean("player_target",

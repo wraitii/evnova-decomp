@@ -176,23 +176,26 @@ namespace game {
 
 // Ghidra 0x004cd3b0 IntroCinematic_SetupFrames fills this (g_intro_cinematic).
 // Up to 4 PICT ids (source_pict_ids), each shown for duration_60h_ticks/i
-// 1/60s ticks (clamped to [0,300]). When post_intro_dest_id != -1 the intro
-// finishes by opening the travel-selection dialog for that destination.
+// 1/60s ticks (clamped to [0,300]). When intro_text_desc_id != -1 the intro
+// finishes by showing that desc resource in the generic text-reader dialog.
 struct IntroCinematicData {
   // PICT resource ids for the sequenced frame art (0xffff terminates the
   // list); 0 (or negative) means "no art this frame".
   std::array<std::int16_t, 4> source_pict_ids{-1, -1, -1, -1};
   // Per-frame display time in 1/60 s ticks, matching the original clamp.
   std::array<std::int16_t, 4> duration_60h_ticks{0, 0, 0, 0};
-  std::int16_t post_intro_dest_id = -1;
+  // Bible char resource IntroTextID (block+0x30): the desc shown after the
+  // frames via Ui_LoadSelectionDialogResource + the generic text-reader
+  // Ui_RunTravelSelectionDialog (the "travel" in that name is a misnomer).
+  // -1 = no dialog.
+  std::int16_t intro_text_desc_id = -1;
 
-  // Ghidra IntroCinematic_Run opens the post-intro travel-selection dialog
-  // when post_intro_dest_id != -1. The new-game flow
-  // (IntroCinematic_SetupFrames default) uses 0x7ffd even with no pilot-save
-  // block, which is "no stellar yet" but deliberately not -1 so the dialog
-  // still opens.
-  [[nodiscard]] bool should_open_post_intro_dialog() const {
-    return post_intro_dest_id != -1;
+  // Ghidra IntroCinematic_Run opens the text reader when
+  // intro_text_desc_id != -1. The new-game flow (IntroCinematic_SetupFrames
+  // default) uses 0x7ffd even with no pilot-save block: not a valid desc, so
+  // the reader shows empty text, but deliberately not -1 so it still opens.
+  [[nodiscard]] bool should_open_intro_text_dialog() const {
+    return intro_text_desc_id != -1;
   }
 };
 
@@ -879,9 +882,6 @@ struct ActiveShot {
   std::int16_t damage_decay_points = 0;
   // Ghidra ShotState.impact_variant, used later by impact visual/effect code.
   std::int8_t impact_variant = 0;
-  // Ghidra ShotState +0x1e: optional impact-package row selected by the
-  // chained-impact resolver. -1 means this round has no package dispatch.
-  std::int16_t impact_package_id = -1;
   // Ghidra ShotState.linked_shot_generation (+0x36), zeroed by
   // Shot_SpawnShotFromWeapon and set to (parent + 1) by
   // Shot_SpawnLinkedShotsOnImpact. Compared against the weapon's
@@ -948,8 +948,6 @@ struct BeamHit {
   std::int16_t turret_group_id = -1;
   std::int16_t forced_targeting = -1;
   std::int8_t impact_variant = 0;
-  // Optional impact-package row for the queued beam's terminal hit.
-  std::int16_t impact_package_id = -1;
   bool impact_resolved = false;
 };
 
@@ -1081,12 +1079,12 @@ struct AsteroidState {
   // that frame count (Asteroid_UpdateSprites 0x00436910).
   float wander_frame_accumulator = 0.0F; // +0x14
   float wander_speed = 0.0F;             // +0x18
-  // Integrity counter seeded from the r\xf6id row (DAT_005912dc[type]).
-  // Weapon splash decrements it by the weapon's shield damage (x10 when the
-  // weapon has flags_secondary 0x8000); below zero the destruction package
-  // runs (NovaUi_ResolveWeaponSplashImpact 0x00436ff0 ->
-  // Weapon_SpawnWeaponImpactEffectPackage 0x00462550); <= -32000 retires the
-  // record in Asteroid_UpdateSprites.
+  // Integrity counter seeded from AsteroidDef.strength. Weapon splash
+  // decrements it by the weapon's shield damage (x10 when the weapon has
+  // flags_secondary 0x8000); below zero the destruction package runs
+  // (NovaUi_ResolveWeaponSplashImpact 0x00436ff0 ->
+  // Asteroid_SpawnDestructionPackage 0x00462550); <= -32000 retires the record
+  // in Asteroid_UpdateSprites.
   std::int16_t integrity = 0;   // +0x1c
   std::int16_t wander_type = 0; // +0x1e (index into the asteroid-type table)
 

@@ -107,7 +107,7 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   state.intro_cinematic.source_pict_ids = pilot_file.intro_source_pict_ids;
   state.intro_cinematic.duration_60h_ticks =
       pilot_file.intro_duration_60h_ticks;
-  state.intro_cinematic.post_intro_dest_id = pilot_file.post_intro_dest_id;
+  state.intro_cinematic.intro_text_desc_id = pilot_file.intro_text_desc_id;
   state.intro_played = pilot_file.intro_played;
 
   state.inventory.cargo_bins = pilot_file.cargo_bins;
@@ -145,7 +145,7 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
 
   out.intro_source_pict_ids = state.intro_cinematic.source_pict_ids;
   out.intro_duration_60h_ticks = state.intro_cinematic.duration_60h_ticks;
-  out.post_intro_dest_id = state.intro_cinematic.post_intro_dest_id;
+  out.intro_text_desc_id = state.intro_cinematic.intro_text_desc_id;
   out.intro_played = state.intro_played;
 
   out.cargo_bins = state.inventory.cargo_bins;

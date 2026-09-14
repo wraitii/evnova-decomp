@@ -136,11 +136,11 @@ void NovaSystem_UpdateReinforcementCountdown(GameState &state,
 // [-750,750) scatter). Returns the allocated slot, or -1 when no dude/ship is
 // selectable or no slot is free.
 //
-// Deferred (see ship_spawn.cpp): deep combat/AI residual fields
-// (skill_variance_scale, jamming, combat_state, voice_type,
-// escort-eligibility) and the full 8-bank weapon loadout are not yet modeled
-// on the clean-room Ship. The NPC is left at a visible heading/position
-// (ai_state_code 0) so it renders without the AI-state entry.
+// The selected class's complete stock weapon-bank loadout is copied onto the
+// NPC. Deferred (see ship_spawn.cpp): remaining deep combat/AI residual fields
+// (jamming, combat_state, voice_type, escort-eligibility). The NPC is left at
+// a visible heading/position (ai_state_code 0) so it renders without the
+// AI-state entry.
 [[nodiscard]] int NovaEncounter_SpawnRandomSystemDudeShip(
     GameState &state, std::int16_t system_id, std::uint16_t reserved_slots);
 

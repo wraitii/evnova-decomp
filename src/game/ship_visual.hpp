@@ -170,8 +170,9 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship);
 // slice (all hulls). Decays the weapon-effects sprite flash level set at the
 // fire site (Weapon_FirePlayerWeaponBank / Weapon_FireShipWeapons, gated on
 // the WeaponDef flags_secondary 0x200 muzzle-flash bit) by the class's
-// weapon_glow_decay_rate (WeapDecay * 0.003484), and advances the running-light
-// blink state machine from the class's BlinkMode / BlinkValA..D. The results
+// weapon_glow_decay_rate (WeapDecay * binary64 0.333), and advances the
+// running-light blink state machine from the class's BlinkMode / BlinkValA..D.
+// The results
 // (Ship.weapon_sprite_flash_level, Ship.light_intensity, both 0..32) feed the
 // weapon-effects and light sprite layers in the renderer.
 void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,

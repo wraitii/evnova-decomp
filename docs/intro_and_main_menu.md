@@ -162,26 +162,29 @@ boot-phase splash above; it is a timed scripted sequence tied to a starting a ru
   `FUN_004f1900`, a *level* table, and the delay-free wait loop): Enter (0x1c) and Space (0x39)
   advance only the current frame; the **primary command** (`g_player_key_bindings[0x17]`, default
   0x01 = the mouse) latches `bVar9`, which skips **all** remaining frames and suppresses the
-  post-intro dialog. A separate in-rect click latch (`local_19`) advances one frame, but is only
+  intro-text dialog. A separate in-rect click latch (`local_19`) advances one frame, but is only
   reachable when a full press+release lands inside one poll interval, so in practice a click
   skips the whole intro.
 - Each arted frame also plays **snd 0x7533** (loaded via `NovaSound_LoadDecodedById`
   0x004bc2a0; `NovaAudio_QueueCenteredSound` →
   `Audio_AllocateVoiceSlot` queues it centered). Stock Nova ships no snd 0x7533, so the intro
   is silent there. There is **no** on-screen hint text in the original.
-- After the sequence, if not skipped and a post-intro travel destination is set
-  (g_intro_cinematic.post_intro_dest_id != -1) it opens the intro travel-selection dialog
-  (`Ui_LoadSelectionDialogResource` + `Stellar_BuildTravelDestinationDescription` +
-  `Ui_RunTravelSelectionDialog`, gating `DAT_007d1fa6 = 1`). **Stock data never opens it**: the
-  .Trader block carries post_intro_dest_id = -1; the 0x7ffd "open anyway" value only occurs in
-  the no-save fallback.
+- After the sequence, if not skipped and an intro text dësc is set
+  (`g_intro_cinematic.intro_text_desc_id != -1`, the Bible chär `IntroTextID` at block `+0x30`)
+  it loads that dësc (`Ui_LoadSelectionDialogResource` 0x004c6d50) and shows it in the generic
+  scrolling text-reader `Ui_RunTravelSelectionDialog` (0x004982a0, gating `DAT_007d1fa6 = 1`).
+  The "travel" in that function name is a misnomer — it is the game's generic desc-text reader.
+  **Stock data never opens it**: the .Trader block carries `intro_text_desc_id = -1`; the 0x7ffd
+  "open with empty text" value only occurs in the no-save fallback.
+  See `docs/char_resource_format.md` for the `chär` `+0x30` field and the other
+  character-template fields.
 
 Intro frame data lives in a single typed structure:
 
 ```c
 /** base 0x007d1f42, size 18 */
 struct IntroCinematicData {
-    short post_intro_dest_id;      // +0x00 destination opened after the cinematic (-1/0x7ffd none)
+    short intro_text_desc_id;      // +0x00 chär IntroTextID: dësc shown after the cinematic (-1/0x7ffd none)
     short source_pict_ids[4];      // +0x02 intro frame PICT ids (0xffff terminates)
     short duration_60h_ticks[4];   // +0x0A per-frame wait in 1/60s ticks (clamped [0,300])
 };
@@ -193,16 +196,16 @@ extern IntroCinematicData g_intro_cinematic;   // resolves from 0x007d1f42
   **selected character template's registered name** (`DAT_007d22b7`, filled from the pilot
   dialog; `Menu_RunNewGameFlow` falls back to family entry 1 when the 0xc1e variant leaves it
   empty) and populates `g_intro_cinematic`: source_pict_ids (block `+0x20`), duration_60h_ticks
-  (block `+0x28`), and post_intro_dest_id (block `+0x30`).
+  (block `+0x28`), and intro_text_desc_id (block `+0x30`, Bible chär `IntroTextID`).
 - When no pilot block exists, defaults to a single intro frame PICT `0x2008` for 10 ticks with
-  destination 0x7ffd.
+  intro text desc 0x7ffd (not a valid desc: the reader opens with empty text).
 - Companion accessors: `ResourceData_AccessByKey` (0x004ce300) and
   `PilotData_FindActivePilotName` (0x004cd290, first family entry with flags bit 0 set at
   block+0x132 — stock: .Trader — used to preselect the dialog's Character popup).
 - Called **only** from `Menu_RunNewGameFlow` (new game), never during app boot, and before
   `IntroCinematic_Run` plays.
 
-`View_ResetCameraAndHover` (0x00486790) clears g_intro_cinematic.post_intro_dest_id /
+`View_ResetCameraAndHover` (0x00486790) clears g_intro_cinematic.intro_text_desc_id /
 source_pict_ids to `-1` before the main loop, so the intro only plays for a freshly configured
 game.
 

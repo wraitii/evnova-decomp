@@ -396,9 +396,9 @@ struct ShipClass {
   // Weapon_SpawnShipFromCarrierBayWeapon 0x0041e640).
   std::int16_t combat_state_init_range = 0;
   // Ghidra ShipClassDef.weapon_glow_decay_rate <- sh\x8an WeapDecay +0x32
-  // times g_ship_weapon_glow_decay_scale (0x00575ab8 = 0.003484), the per-tick
-  // fade rate of the weapon-effects sprite flash (Ship_UpdateVisualState
-  // 0x00428340). 0 for a class without the weapon-effects layer.
+  // times the binary64 g_ship_weapon_glow_decay_scale (0x00575ab8 = 0.333),
+  // the normalized-tick fade rate of the weapon-effects sprite flash
+  // (Ship_UpdateVisualState 0x00428340). 0 without a weapon-effects layer.
   float weapon_glow_decay_rate = 0.0F;
   // Ghidra ShipClassDef BlinkMode/BlinkValA..D <- sh\x8an +0x36..+0x3e. The
   // running-lights blink program consumed by Ship_UpdateVisualState
@@ -1494,89 +1494,71 @@ struct DudeDef {
   bool present = false;
 };
 
-// One 0x1c-byte row of the shared asteroid-drift table the original exposes
-// through two overlapping global labels: DAT_005912dc (a short[0xe] window)
-// and DAT_005912f0 (a float[7] window), which are the same 16-row,
-// 0x1c-byte-strided table. One row per resource id 0x80..0x8f (Metal/Ice /
-// Dust/Crystal x Small/Medium/Big/Huge). Loaded by NovaData_LoadScenario-
-// ResourceTables (0x004bd3c0 at 0x004c6207..) from the r\x9aid family into
-// the g_asteroid_states type params.
+// One 0x1c-byte row of the asteroid-type table (Bible r\xf6id family, ids
+// 0x80..0x8f; Metal/Ice/Dust/Crystal x Small/Medium/Big/Huge). The original
+// exposes the same 16-row table through two overlapping windows, DAT_005912dc
+// (short[0xe]) and DAT_005912f0 (float[7]); Ghidra types it as
+// g_asteroid_defs (AsteroidDef[16]). Loaded by
+// NovaData_LoadScenarioResourceTables (0x004bd3c0 at 0x004c6207..) from the
+// r\x9aid family; the loader reorders the payload fields into the runtime row,
+// so the payload offsets below differ from the Ghidra field offsets.
 //
-// Only the two fields consumed by the spawn reads are confidently named:
-//   +0x00 wander_table_value (read via DAT_005912dc[mode]), and
-//   +0x14 wander_speed_multiplier (read via DAT_005912f0[mode]).
-// The remaining fields are decoded with their loader-assigned offsets but
-// semantically provisional (TODO(decomp): confirm against Asteroid_Spawn ring
-// placement and the drift render). Payload layout (big-endian):
-//   +0x00 value, +0x02 speed%, +0x04 field, +0x06 field(+0x02),
-//   +0x08 field(+0x0c), +0x0a RGB bytes (565 -> 15-bit), +0x0e..+0x12 the
-//   3-element direction sub-array, +0x14 field(+0x10), +0x16 lifetime.
+// Payload layout (big-endian): +0x00 Strength, +0x02 SpinRate (raw*0.01),
+// +0x04 YieldType, +0x06 YieldQty, +0x08 PartCount, +0x0a PartColor (3 RGB
+// bytes, packed to 15-bit at +0x18), +0x0e FragType1, +0x10 FragType2,
+// +0x12 FragCount, +0x14 ExplodeType, +0x16 Mass.
 struct AsteroidDef {
-  // Lowest row field; seeds a spawned AsteroidState's integrity (+0x1c),
-  // which doubles as the asteroid's INTEGRITY
-  // COUNTER: NovaUi_ResolveWeaponSplashImpact (0x00436ff0) decrements it by
-  // the hitting weapon's shield damage (x10 for flags_secondary 0x8000) and
-  // runs the destruction package below zero. Ghidra DAT_005912dc[mode]
-  // (+0x00). Payload word[0x0]. Verbatim, no rebase.
-  std::int16_t wander_table_value = 0;
-  // Float wander-speed scale for this type; `(rand(0x29)+0x50) * this * 0.01`
-  // yields a state's wander_speed (+0x18). Ghidra DAT_005912f0[mode]
-  // (+0x14). Payload word[0x2] * 0.01 (0x64..0x12c => 0.5..3.0 shipped).
-  float wander_speed_multiplier = 1.0F;
-  // +0x02; DECODED (Weapon_SpawnWeaponImpactEffectPackage 0x00462550, and
-  // Bible r\xf6id "YieldQty"): the average number of resource-box freeflight
-  // objects ejected when the asteroid breaks. Each break spawns
-  // round((rand(0x65)+0x32) * yield_qty * 0.01) boxes (YieldQty +/- 50%). The
-  // object's cargo/junk type comes from yield_type. Loader validates payload
-  // word[0x6] >= 0.
+  // Ghidra +0x00 (payload +0x00); Bible Strength. Seeds a spawned
+  // AsteroidState's integrity (+0x1c), which doubles as the asteroid's
+  // integrity counter: NovaUi_ResolveWeaponSplashImpact (0x00436ff0)
+  // decrements it by the hitting weapon's damage (x10 for flags_secondary
+  // 0x8000) and runs Asteroid_SpawnDestructionPackage below zero.
+  std::int16_t strength = 0;
+  // Ghidra +0x02 (payload +0x06); Bible YieldQty. Average number of
+  // resource-box freeflight objects ejected when the asteroid breaks:
+  // round((rand(0x65)+0x32) * yield_qty * 0.01). Loader clamps payload < 0 to
+  // 0 and clears yield_type.
   std::int16_t yield_qty = 0;
-  // +0x04; DECODED (Bible r\xf6id "YieldType"): the resource-box payload type
-  // spawned on destruction. 0..5 is a standard cargo commodity; 1000..1127 is
-  // a j\xfcnk id (the scoop banks extra-1000). Other values are ignored by the
-  // scoop. Loader accepts [-6,6] or [0x3e8,0x468).
+  // Ghidra +0x04 (payload +0x04); Bible YieldType. Resource-box payload type:
+  // 0..5 standard cargo, 1000..1127 a j\xfcnk id (the scoop banks
+  // extra-1000). Loader accepts [-6,6] or [0x3e8,0x468), else -1/0.
   std::int16_t yield_type = 0;
-  // +0x0c; DECODED: the debris SWParticle burst count emitted by the
-  // destruction package. Loader validates payload word[0x8] >= 0.
-  std::int16_t field_0x0c = 0;
-  // +0x10; DECODED: the destruction area-effect id (Bible ExplodType-style
-  // impact effect, -1 none) fired by Weapon_SpawnWeaponImpactEffectPackage.
-  std::int16_t field_0x10 = 0;
-  // +0x0e; DECODED: the asteroid's mass used as the divisor when a surviving
-  // asteroid is nudged by weapon impact impulse (NovaUi_ResolveWeaponSplash-
-  // Impact). Scales with size tier in the shipped data (Metal Small 150 /
-  // Medium 300 / Big 600 / Huge 1200).
-  std::int16_t lifetime = 0;
-  // DECODED (Weapon_SpawnWeaponImpactEffectPackage 0x00462550): on
-  // destruction a big asteroid splits into child asteroids of these two
-  // types (+0x06/+0x08, 0-based r\xf6id indices, -1 = unset); the third slot
-  // (+0x0a) is the split-count base: each break spawns
-  // NovaRandom_Range(base) + ceil(base/2) children.
-  std::array<std::int16_t, 3> directions{0, 0, 0};
-  // Packed 15-bit tint for the drift sprite, computed from the payload's
-  // 3 RGB565 bytes via the loader's 565->555 downsample (red=byte[12]>>3,
-  // green=byte[11]>>3, blue=byte[10]>>3). +0x18 (DAT_005912f4). Not yet
-  // consumed (needs the drift-sprite render).
-  std::uint32_t color = 0;
+  // Ghidra +0x06 (payload +0x0e); Bible FragType1. Child asteroid type 0..15
+  // (AsteroidDef index), or -1 for none. Loader rebases 0x80..0x8f by -0x80
+  // and rejects anything outside [0,0x0f] to -1.
+  std::int16_t frag_type1 = -1;
+  // Ghidra +0x08 (payload +0x10); Bible FragType2. Second child asteroid type,
+  // resolved like frag_type1; when both are set a random pick is used.
+  std::int16_t frag_type2 = -1;
+  // Ghidra +0x0a (payload +0x12); Bible FragCount. Child-count base: each
+  // break spawns rand(frag_count) + ceil(frag_count/2) children; 0 = none.
+  // Loader clamps payload < 0 to 0.
+  std::int16_t frag_count = 0;
+  // Ghidra +0x0c (payload +0x08); Bible PartCount. Debris SWParticle burst
+  // count emitted by the destruction package. Loader clamps payload < 0 to 0.
+  std::int16_t part_count = 0;
+  // Ghidra +0x0e (payload +0x16); Bible Mass. Divisor for the impact-impulse
+  // nudge on a surviving asteroid (NovaUi_ResolveWeaponSplashImpact). Scales
+  // with size tier in the shipped data (Metal Small 150 / Medium 300 / Big 600
+  // / Huge 1200).
+  std::int16_t mass = 0;
+  // Ghidra +0x10 (payload +0x14); Bible ExplodeType. Area-effect id shown when
+  // the asteroid breaks (-1 none; +1000 selects the player-colour variant, as
+  // in the w\x91ap ExplodeType). Loader accepts [0,0x3f] or [1000,0x427], else
+  // -1.
+  std::int16_t explode_type = -1;
+  // Ghidra +0x14 (payload +0x02 * 0.01); Bible SpinRate. Float wander-speed
+  // scale: (rand(0x29)+0x50) * spin_rate * 0.01 seeds AsteroidState's
+  // wander_speed (+0x18). 0x64..0x12c shipped => 0.5..3.0.
+  float spin_rate = 1.0F;
+  // Ghidra +0x18 (payload +0x0a); Bible PartColor. Packed 15-bit RGB tint for
+  // the debris burst, computed from the payload's 3 bytes via the loader's
+  // 565->555 downsample (red = byte[0x0c]>>3, green = byte[0x0b]>>3,
+  // blue = byte[0x0a]>>3).
+  std::uint32_t part_color = 0;
   // Set true for every present asteroid-type row (resource id 0x80..0x8f);
   // absent ids stay default.
   bool present = false;
-
-  // The original reuses this 0x1c row as an impact-package definition in
-  // Weapon_SpawnWeaponImpactEffectPackage (0x00462550). These aliases expose
-  // that second interpretation without duplicating or reshaping the loaded
-  // table. The package index is the row index 0..15, not a resource id. The
-  // package's freeflight resource-box count/type share the canonical
-  // yield_qty/yield_type fields; the child-asteroid fragment types/count live
-  // in directions[0..2].
-  [[nodiscard]] std::int16_t ImpactParticleCount() const { return field_0x0c; }
-
-  [[nodiscard]] std::int16_t ImpactAreaEffectId() const { return field_0x10; }
-
-  [[nodiscard]] std::int16_t ImpactSecondaryCount() const { return lifetime; }
-
-  [[nodiscard]] std::int16_t ImpactSecondaryEffectId(std::size_t index) const {
-    return index < directions.size() ? directions[index] : -1;
-  }
 };
 
 // Ghidra ImpactEffectDef (g_impact_effect_defs, 0x005912c0), runtime stride
@@ -1678,10 +1660,6 @@ struct ScenarioData {
   // gh.id 0x80.. lookup for an asteroid-type row, or nullptr when outside the
   // loaded range.
   [[nodiscard]] const AsteroidDef *AsteroidType(std::int16_t resource_id) const;
-  // Impact-package rows reuse the decoded r.x9aid table. The original indexes
-  // these rows directly from a ShotState package slot (0..15).
-  [[nodiscard]] const AsteroidDef *
-  ImpactPackageAt(std::int16_t package_id) const;
   [[nodiscard]] const ImpactEffect *
   ImpactEffectAt(std::int16_t effect_id) const;
 

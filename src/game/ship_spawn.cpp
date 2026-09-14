@@ -656,7 +656,7 @@ int NovaDude_SelectShipTypeIndex(const DudeDef &dude,
 // and lays the dude-def's identity + class stats onto the slot in place (it
 // does NOT go through Ship_AllocateShipSlotInSystem; the slot was already
 // found inactive). We reconstruct the load-bearing identity/kinematics/vitals
-// subset; deep combat/AI residual fields and the 8-bank weapon loadout are
+// subset and class weapon-bank loadout; deep combat/AI residual fields remain
 // deferred (see the header).
 int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
                                             std::int16_t system_id,
@@ -761,6 +761,11 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
       ship.armor_points = static_cast<float>(cls->base_armor);
       ship.fuel_points = static_cast<float>(cls->base_fuel);
     }
+    // Ghidra 0x0041ba80 copies all 0x100 class-default ammo and secondary
+    // counters into the new ShipState immediately before resetting its AI
+    // behavior runtime fields. The clean-room helper factors that same class
+    // loadout copy with the shared burst-counter initialization.
+    NovaWeapon_EnsureNpcWeaponBanks(state, ship);
     NovaLog::Debug("spawned random dude ship: slot {} class {} govt {} ai {}",
                    slot,
                    ship.ship_class_id,

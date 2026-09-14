@@ -30,13 +30,14 @@ inline constexpr std::uint16_t kAsteroidSpinBase = 800;
 // Ghidra 0x00421e60 Asteroid_SpawnRecord: finds the first inactive pool
 // slot, marks it active, records the asteroid type `type` (a 0-based index
 // into ScenarioData.asteroid_defs), copies the spawn position, scatters a
-// target velocity, and seeds the wander radius / speed / table value from the
+// target velocity, and seeds the wander frame seed / speed / strength from the
 // per-type asteroid row plus the original's fixed random factors. Returns the
 // spawned slot index, or -1 when no slot is free.
 //
-// The original scatters position/velocity and picks the wander radius from the
-// sprite descriptor's frame count (+0x54); here the per-type lifetime row
-// field stands in for that value (see AsteroidDef.lifetime TODO(decomp)).
+// The original scatters position/velocity and picks the wander frame seed from
+// the sprite descriptor's frame count (+0x54); here the per-type
+// AsteroidDef.mass row field stands in for that value (TODO(decomp), a known
+// divergence).
 [[nodiscard]] int NovaAsteroid_SpawnRecord(GameState &state,
                                            float pos_x,
                                            float pos_y,

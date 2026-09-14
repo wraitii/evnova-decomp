@@ -10,12 +10,15 @@ Reverse-engineering notes on how EV Nova persists a pilot's game state to
    ("pilot" registry), keyed by pilot name. Block size 0x16a (initialized by
    the per-id block initializer `FUN_004ce700`). Holds small per-pilot
    metadata used by the menu/new-game flow: start-type/ship-class designator
-   (+4), intro cinematic PICT ids (+0x20) / durations (+0x28) / post-intro
-   dest (+0x30), active flag (+0x132). Accessed via
+   (+4), intro cinematic PICT ids (+0x20) / durations (+0x28) / intro text dësc
+   (+0x30, Bible chär `IntroTextID`), active flag (+0x132). Accessed via
    `ResourceData_AccessByKey(0x63688a72, name)`; created/updated by
    `PilotData_InitializePlayerState`. **Open question:** where the registry
    entries are (re)populated from at startup so the new-game dialog can list
    existing pilots — not yet found; may be a scan of `*.plt` in Nova Files.
+   See `docs/char_resource_format.md` for the full `chär` template layout
+   (start date, `DatePrefix`/`DateSuffix`, `IntroTextID`) and the gaps in this
+   reimplementation.
 2. **`.plt` file** — the actual disk persistence of the full game state.
    Written by the saver on new game / travel / periodic save; loaded by
    `PilotFile_LoadSave` (Open Pilot). This doc covers this tier.

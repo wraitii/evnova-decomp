@@ -47,7 +47,7 @@ constexpr int kFreeflightScoopCircleRadiusPx = 16;
 constexpr float kDisableArmorPinFraction = 1.0F / 3.0F;
 constexpr float kDisableArmorPinFractionCap0x10 = 0.1F;
 
-// Asteroid debris particle constants from Weapon_SpawnWeaponImpactEffectPackage
+// Asteroid debris particle constants from Asteroid_SpawnDestructionPackage
 // (0x00462550): speed DAT_00575740 = 0.2 px/tick, speed scatter 0x28, lifetime
 // [0xf0, 0x1e0], and position scatter = sprite frame height / 3. Every shipped
 // asteroid spin set (800..815) is 50x50, so the original's
@@ -1195,18 +1195,18 @@ void ResolveShotCollisionHit(GameState &state,
   state.active_shots[shot_index].consumed = true;
 }
 
-// Ghidra Weapon_SpawnWeaponImpactEffectPackage (0x00462550), asteroid arm:
-// a broken asteroid spawns YieldQty resource-box freeflight objects, a debris
-// particle burst, its destruction area effect, and splits into child asteroids
-// from its def row (child types +0x06/+0x08, count derived from +0x0a), then
-// deactivates. The debris burst runs between the resource boxes and the area
-// effect, matching the original RNG sequence.
+// Ghidra Asteroid_SpawnDestructionPackage (0x00462550): a broken asteroid
+// spawns YieldQty resource-box freeflight objects, a part_count debris burst,
+// its explode_type area effect, and splits into child asteroids from its def
+// row (frag_type1/frag_type2, count derived from frag_count), then deactivates.
+// The debris burst runs between the resource boxes and the area effect,
+// matching the original RNG sequence.
 //
-// Resource-boxes: when YieldQty (row +0x02) > 0 the original rolls
-// `(NovaRandom_Range(0x65) + 0x32) * YieldQty * 0.01`, truncates it, and spawns
-// that many persistent freeflight objects at the asteroid position carrying
-// YieldType (row +0x04) with spin set `(wander_type >> 2) + 1` (501..504, one
-// per asteroid material). YieldType 0..5 is standard cargo and 1000..1127 is a
+// Resource-boxes: when yield_qty > 0 the original rolls
+// `(NovaRandom_Range(0x65) + 0x32) * yield_qty * 0.01`, truncates it, and
+// spawns that many persistent freeflight objects at the asteroid position
+// carrying yield_type with spin set `(wander_type >> 2) + 1` (501..504, one per
+// asteroid material). yield_type 0..5 is standard cargo and 1000..1127 is a
 // j\xfcnk id; Ship_HandleSpritePairCollision's scoop arm grants one unit of it.
 void ResolveAsteroidDestructionPackage(GameState &state,
                                        AsteroidState &asteroid) {
@@ -1232,7 +1232,7 @@ void ResolveAsteroidDestructionPackage(GameState &state,
           static_cast<std::int16_t>((asteroid.wander_type >> 2) + 1));
     }
   }
-  // Debris SWParticle burst (row +0x0c count, +0x18 color).
+  // Debris SWParticle burst (part_count, part_color).
   NovaEffects_SpawnWeaponImpactParticleBurst(
       state,
       asteroid.target_pos_x,
@@ -1241,35 +1241,35 @@ void ResolveAsteroidDestructionPackage(GameState &state,
       kAsteroidDebrisParticleScatter,
       kAsteroidDebrisLifeBase,
       kAsteroidDebrisLifeMax,
-      ExpandAsteroidParticleColor(def->color),
+      ExpandAsteroidParticleColor(def->part_color),
       /*blend_mode=*/0x20,
-      def->field_0x0c,
+      def->part_count,
       kAsteroidDebrisPositionScatter);
-  if (def->field_0x10 != -1) {
+  if (def->explode_type != -1) {
     NovaEffects_SpawnAreaImpact(state,
                                 asteroid.target_pos_x,
                                 asteroid.target_pos_y,
-                                def->field_0x10,
+                                def->explode_type,
                                 0,
                                 true);
   }
-  const int count_base = def->directions[2];
-  if (count_base > 0) {
+  if (def->frag_count > 0) {
     const int count =
-        std::uniform_int_distribution<int>{0, count_base - 1}(state.rng) +
-        (count_base + 1) / 2;
+        std::uniform_int_distribution<int>{0, def->frag_count - 1}(state.rng) +
+        (def->frag_count + 1) / 2;
     for (int i = 0; i < count; ++i) {
       // Both child types unset means the original spawns nothing; a single
       // set type always spawns; otherwise a random pick per fragment.
-      if (def->directions[0] == -1 && def->directions[1] == -1) {
+      if (def->frag_type1 == -1 && def->frag_type2 == -1) {
         continue;
       }
-      std::int16_t child_type = def->directions[0];
-      if (def->directions[0] != -1 && def->directions[1] != -1) {
-        child_type = def->directions[std::uniform_int_distribution<int>{0, 1}(
-            state.rng)];
-      } else if (def->directions[0] == -1) {
-        child_type = def->directions[1];
+      std::int16_t child_type = def->frag_type1;
+      if (def->frag_type1 != -1 && def->frag_type2 != -1) {
+        child_type = std::uniform_int_distribution<int>{0, 1}(state.rng) == 0
+                         ? def->frag_type1
+                         : def->frag_type2;
+      } else if (def->frag_type1 == -1) {
+        child_type = def->frag_type2;
       }
       (void)NovaAsteroid_SpawnRecord(
           state, asteroid.target_pos_x, asteroid.target_pos_y, child_type);
@@ -1365,13 +1365,13 @@ void ResolveAsteroidSplashImpact(GameState &state,
     // Surviving asteroids are nudged along the impact direction. The original
     // reads the bearing from ShotState +0x20 (provisional range_scalar_runtime
     // in the DB); the clean-room derives it from the shot's velocity. The
-    // impulse is divided by the def's size-scaled mass (row +0x0e) and the
-    // result clamped to +-2.0 px/frame per axis (DAT_0057531c).
+    // impulse is divided by the def's size-scaled mass and the result clamped
+    // to +-2.0 px/frame per axis (DAT_0057531c).
     const AsteroidDef *def = state.scenario.AsteroidType(
         static_cast<std::int16_t>(asteroid.wander_type + 0x80));
-    if (def != nullptr && def->lifetime > 0) {
+    if (def != nullptr && def->mass > 0) {
       const float speed = static_cast<float>(weapon->impact_impulse) /
-                          static_cast<float>(def->lifetime);
+                          static_cast<float>(def->mass);
       const float bearing_deg = std::atan2(shot.vel_x, -shot.vel_y) *
                                 (180.0F / 3.14159265358979323846F);
       const float rad = bearing_deg * (3.14159265358979323846F / 180.0F);
@@ -2208,8 +2208,6 @@ void NovaWeapon_ResolveDirectWeaponHit(GameState &state,
     // projectile contact paths use 0x14.
     NovaEffects_SpawnWeaponImpactBurstForWeapon(
         state, shot.pos_x, shot.pos_y, *weapon, /*scatter=*/0x19);
-    NovaEffects_SpawnImpactEffectPackage(
-        state, shot.pos_x, shot.pos_y, shot.impact_package_id, false);
     ResolveShipHitFromWeapon(state,
                              target_ship_slot,
                              target,

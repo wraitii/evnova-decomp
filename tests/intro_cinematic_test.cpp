@@ -2,7 +2,7 @@
 // PilotData_FindActivePilotName against the stock scenario data: the keyed
 // pilot block (0x63688a72 family) and its intro/flags fields are final, so
 // pin them. Stock ch\x9ar 0x0080 ".Trader": intro PICTs 0x2008/0x2009/0x200a
-// for 45 1/60s ticks each, post-intro destination -1 (no dialog), flags bit 0
+// for 45 1/60s ticks each, intro text desc -1 (no dialog), flags bit 0
 // set (the active entry).
 
 #include "brgr_archive.hpp"
@@ -29,9 +29,9 @@ TEST_CASE("IntroCinematic_SetupFrames reads the keyed .Trader block") {
   CHECK(cinematic.duration_60h_ticks[1] == 45);
   CHECK(cinematic.duration_60h_ticks[2] == 45);
   CHECK(cinematic.duration_60h_ticks[3] == 0);
-  // Stock block destination: -1 -> the post-intro travel dialog does NOT open.
-  CHECK(cinematic.post_intro_dest_id == -1);
-  CHECK(!cinematic.should_open_post_intro_dialog());
+  // Stock block intro text desc: -1 -> the intro text reader does NOT open.
+  CHECK(cinematic.intro_text_desc_id == -1);
+  CHECK(!cinematic.should_open_intro_text_dialog());
 }
 
 TEST_CASE("IntroCinematic_SetupFrames falls back without a pilot block") {
@@ -41,8 +41,8 @@ TEST_CASE("IntroCinematic_SetupFrames falls back without a pilot block") {
   CHECK(cinematic.source_pict_ids[0] == 0x2008);
   CHECK(cinematic.source_pict_ids[1] == -1);
   CHECK(cinematic.duration_60h_ticks[0] == 10);
-  CHECK(cinematic.post_intro_dest_id == 0x7ffd);
-  CHECK(cinematic.should_open_post_intro_dialog());
+  CHECK(cinematic.intro_text_desc_id == 0x7ffd);
+  CHECK(cinematic.should_open_intro_text_dialog());
 }
 
 TEST_CASE("PilotData_FindActivePilotName finds the flagged .Trader entry") {

@@ -382,8 +382,8 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
 
 // Ghidra 0x00428340 Ship_UpdateVisualState, weapon-effects + running-lights
 // slice. See the header for scope notes. Constants decoded from data: the
-// weapon flash ceiling is 32.0 (0x42000000), the decay scale is
-// g_ship_weapon_glow_decay_scale (0x00575ab8) = 0.003484, and the fully-off
+// weapon flash ceiling is 32.0 (0x42000000), the binary64 decay scale is
+// g_ship_weapon_glow_decay_scale (0x00575ab8) = 0.333, and the fully-off
 // latch is k_jammed_turn_sign_f32 (-1.0, 0xbf800000). The blink triangle/random
 // rates use k_one_percent_f64 = 0.01.
 void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,

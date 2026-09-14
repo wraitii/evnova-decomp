@@ -54,23 +54,24 @@ void PresentPict(SDL_Renderer *renderer, const PictImage &pict) {
   SDL_RenderTexture(renderer, texture->get(), nullptr, &destination);
 }
 
-// Ghidra IntroCinematic_Run's post-intro epilogue: after the last frame, when
-// not skipped and g_intro_cinematic.post_intro_dest_id != -1 it opens the
-// travel-selection dialog for that destination (Ui_LoadSelectionDialogResource
-// + Stellar_BuildTravelDestinationDescription + Ui_RunTravelSelectionDialog,
-// gating DAT_007d1fa6 = 1). The dialog itself is not reconstructed. Stock
-// Nova's .Trader block carries post_intro_dest_id = -1, so the epilogue never
-// opens there; the no-save SetupFrames fallback uses 0x7ffd, which does open.
-void RunPostIntroDestinationStub(const GameState &state) {
-  if (!state.intro_cinematic.should_open_post_intro_dialog()) {
+// Ghidra IntroCinematic_Run's epilogue: after the last frame, when not skipped
+// and g_intro_cinematic.intro_text_desc_id != -1 it loads that desc
+// (Ui_LoadSelectionDialogResource) and shows it in the generic text-reader
+// Ui_RunTravelSelectionDialog, gating DAT_007d1fa6 = 1. The reader itself is
+// not reconstructed. The field is the Bible char resource IntroTextID
+// (block+0x30). Stock Nova's .Trader block carries -1, so the epilogue never
+// opens there; the no-save SetupFrames fallback uses 0x7ffd, which does open
+// (with empty text).
+void RunPostIntroTextStub(const GameState &state) {
+  if (!state.intro_cinematic.should_open_intro_text_dialog()) {
     return;
   }
   NovaLog::Todo(
-      "post-intro travel-selection dialog (Ui_RunTravelSelectionDialog "
+      "intro text-reader dialog (Ui_RunTravelSelectionDialog "
       "0x004982a0 / Ui_LoadSelectionDialogResource 0x004c6d50) is not "
-      "reconstructed: the intro gated on post_intro_dest_id {} but no "
-      "destination dialog is available",
-      state.intro_cinematic.post_intro_dest_id);
+      "reconstructed: the intro gated on intro_text_desc_id {} but no "
+      "text reader is available",
+      state.intro_cinematic.intro_text_desc_id);
 }
 
 // Per-iteration input poll of the intro wait loop. Mirrors the original's
@@ -116,9 +117,9 @@ void NovaIntroCinematic_SetupFrames(GameState &state,
   // Ghidra: DAT_00863d60 = ResourceData_AccessByKey(0x63688a72, pilot_data).
   const auto block = NovaResource_AccessCharacterBlockByKey(block_key);
   if (!block) {
-    // No-save default: one PICT 0x2008 for 10 ticks, destination 0x7ffd
-    // ("no stellar yet", but != -1 so the post-intro dialog still opens).
-    cinematic.post_intro_dest_id = 0x7ffd;
+    // No-save default: one PICT 0x2008 for 10 ticks, intro text 0x7ffd
+    // (not a valid desc, but != -1 so the reader still opens).
+    cinematic.intro_text_desc_id = 0x7ffd;
     cinematic.source_pict_ids = {0x2008, -1, -1, -1};
     cinematic.duration_60h_ticks = {10, 0, 0, 0};
     NovaLog::Info("intro cinematic: no pilot block for '{}'; using the "
@@ -139,7 +140,7 @@ void NovaIntroCinematic_SetupFrames(GameState &state,
         std::to_integer<unsigned>(bytes[offset + 1]));
   };
 
-  cinematic.post_intro_dest_id = read_i16(0x30);
+  cinematic.intro_text_desc_id = read_i16(0x30);
   for (std::size_t i = 0; i < cinematic.source_pict_ids.size(); ++i) {
     auto frame_id = read_i16(0x20 + i * 2);
     auto duration = read_i16(0x28 + i * 2);
@@ -155,7 +156,7 @@ void NovaIntroCinematic_SetupFrames(GameState &state,
     cinematic.duration_60h_ticks[i] = duration;
   }
   NovaLog::Info("intro cinematic configured from block '{}': frames {} {} {} "
-                "{} for {} {} {} {} ticks, post-intro destination {}",
+                "{} for {} {} {} {} ticks, intro text desc {}",
                 block->name,
                 cinematic.source_pict_ids[0],
                 cinematic.source_pict_ids[1],
@@ -165,7 +166,7 @@ void NovaIntroCinematic_SetupFrames(GameState &state,
                 cinematic.duration_60h_ticks[1],
                 cinematic.duration_60h_ticks[2],
                 cinematic.duration_60h_ticks[3],
-                cinematic.post_intro_dest_id);
+                cinematic.intro_text_desc_id);
 }
 
 // Ghidra 0x0048adc0 IntroCinematic_Run.
@@ -263,14 +264,14 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
   while (platform.PollTextEvent()) {
   }
 
-  // Ghidra: after the sequence, if not skipped and post_intro_dest_id != -1,
-  // open the travel-selection dialog. `intro_played` is *not* set here:
+  // Ghidra: after the sequence, if not skipped and intro_text_desc_id != -1,
+  // show the intro text reader. `intro_played` is *not* set here:
   // Ship_RunSpaceflightMode sets DAT_00596d35 after IntroCinematic_Run
   // returns (see spaceflight.cpp).
   if (!platform.quit_requested() && !input_state.skip_all) {
     NovaLog::Info("intro cinematic finished (input may have advanced "
                   "individual frames)");
-    RunPostIntroDestinationStub(state);
+    RunPostIntroTextStub(state);
   }
   // Return the bVar9 mirror (see intro_cinematic.hpp).
   return !input_state.skip_all;

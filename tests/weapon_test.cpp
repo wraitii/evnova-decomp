@@ -341,6 +341,63 @@ TEST_CASE("NPC energy weapons do not need a secondary ammo counter",
   CHECK(npc.npc_weapon_bank_secondary[0] == 0);
 }
 
+TEST_CASE("brave-trader weapon selection survives the post-state refresh",
+          "[weapon][npc]") {
+  GameState state;
+  Ship &npc = state.ShipAt(1);
+  npc.ai_behavior_code = 2;
+  npc.active_weapon_bank_slot = 17;
+  npc.ai_fire_trigger_latch = 1;
+
+  // Ship_UpdateAutoWeaponSelectionFromTarget returns immediately for original
+  // AI behaviors below 5. Behaviors 1/2 select banks in ApplyShipAiControls;
+  // the clean-room 3/4 refresh bridge must not erase that pending volley.
+  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+
+  CHECK(npc.active_weapon_bank_slot == 17);
+  CHECK(npc.ai_fire_trigger_latch == 1);
+}
+
+TEST_CASE("Fed Destroyer selects and fires its long-range missile",
+          "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  Ship &player = state.player;
+  player.is_active = true;
+  player.ship_instance_id = 0;
+  player.ship_class_id = 0;
+  player.current_system_id = 1;
+  player.armor_points = 30.0F;
+  player.shield_points = 30.0F;
+  player.pos_x = 0.0F;
+  player.pos_y = 0.0F;
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0x8d - 0x80;
+  npc.current_system_id = 1;
+  npc.ai_behavior_code = 3;
+  npc.ai_state_code = 4;
+  npc.ai_control_mode = 6;
+  npc.primary_target_ship_slot = 0;
+  npc.armor_points = 750.0F;
+  npc.shield_points = 800.0F;
+  npc.pos_x = 0.0F;
+  npc.pos_y = 1200.0F;
+
+  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  REQUIRE(npc.active_weapon_bank_slot == 6); // IR Missile, resource 0x86.
+  REQUIRE(npc.ai_fire_trigger_latch != 0);
+
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+  REQUIRE(state.active_shots.size() == 1);
+  CHECK(state.active_shots[0].weapon_id == 6);
+}
+
 TEST_CASE("Abomination can select and fire its pulse cannon", "[weapon][npc]") {
   if (!ArchivesAvailable()) {
     SKIP("Nova .rez archives not present");
@@ -447,6 +504,31 @@ TEST_CASE("a newly disabled NPC cannot retain a latched firing bank",
   // The firing path no longer resets this to 32; Ship_UpdateVisualState can
   // now decay the already-visible flash normally on subsequent frames.
   CHECK(npc.weapon_sprite_flash_level == Catch::Approx(16.0F));
+}
+
+TEST_CASE("an unsuccessful NPC fire request clears its stale bank latch",
+          "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.current_system_id = 0;
+  npc.armor_points = 100.0F;
+  npc.active_weapon_bank_slot = 0;
+  npc.ai_fire_trigger_latch = 1;
+  npc.npc_weapon_bank_ammo[0] = 0;
+
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+
+  CHECK(state.active_shots.empty());
+  CHECK(npc.active_weapon_bank_slot == -1);
+  CHECK(npc.ai_fire_trigger_latch == 0);
 }
 
 // The distance falloff mirrors NovaAudio_PlaySpatialByDistance (0x004692e0)

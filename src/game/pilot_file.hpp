@@ -77,7 +77,8 @@ struct PilotFile {
   // -- Intro cinematic (IntroCinematic_SetupFrames reads block+0x20/0x28/0x30).
   std::array<std::int16_t, 4> intro_source_pict_ids{-1, -1, -1, -1};
   std::array<std::int16_t, 4> intro_duration_60h_ticks{0, 0, 0, 0};
-  std::int16_t post_intro_dest_id = -1;
+  // Bible char resource IntroTextID (block+0x30); -1 = no dialog.
+  std::int16_t intro_text_desc_id = -1;
   // Seen-intro-screen latch (Ghidra DAT_00596d35), block2+0x3086.
   bool intro_played = false;
 

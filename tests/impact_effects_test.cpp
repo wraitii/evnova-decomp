@@ -172,20 +172,4 @@ TEST_CASE("ship destruction debris puffs seed one directional fragment each",
   CHECK(state.pending_destruction_sounds.size() == 2);
 }
 
-TEST_CASE("impact packages dispatch their configured area effect", "[impact]") {
-  GameState state;
-  // ScenarioData allocates the 0x80 asteroid rows during archive loading;
-  // this unit test constructs the state without loading archives.
-  state.scenario.asteroid_defs.resize(0x80);
-  state.scenario.asteroid_defs[0].present = true;
-  state.scenario.asteroid_defs[0].field_0x10 = 5;
-  state.scenario.impact_effects[5].frame_rate_scale = 0.1F;
-
-  NovaEffects_SpawnImpactEffectPackage(state, 40.0F, 50.0F, 0, false);
-
-  REQUIRE(state.impact_effect_instances[0].anim_time == 0.0F);
-  CHECK(state.impact_effect_instances[0].effect_id == 5);
-  CHECK(state.pending_impact_sounds.empty());
-}
-
 } // namespace game

@@ -1331,47 +1331,66 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 // See AsteroidDef in scenario_data.hpp. Mirrors the original loader's
 // asteroid-type section (NovaData_LoadScenarioResourceTables 0x004bd3c0 at
 // 0x004c6207..), which reads the record's fields into the shared 0x1c-row
-// table exposed as DAT_005912dc / DAT_005912f0. Fields are big-endian 16-bit
-// except the 4-byte colour word at +0x0a (byte-swapped to a packed 15-bit RGB
-// at +0x18). Validation branches match the loader (skip row on a bad id
-// window); harmless for the shipped records.
+// g_asteroid_defs table. Fields are big-endian 16-bit except the 4-byte colour
+// word at +0x0a (reduced to a packed 15-bit RGB at +0x18). The loader's
+// validation/clamp branches are reproduced here.
 [[nodiscard]] AsteroidDef DecodeAsteroidType(std::span<const std::byte> bytes) {
   AsteroidDef t;
   if (bytes.size() < 0x18) {
     return t;
   }
-  t.wander_table_value = ReadBeI16(bytes, 0x00);
+  // Rebase a fragment type: 0x80..0x8f -> 0..15, 0..15 kept, else -1.
+  const auto decode_frag_type = [](std::int16_t raw) -> std::int16_t {
+    if (raw >= 0x80 && raw <= 0x8f) {
+      return static_cast<std::int16_t>(raw - 0x80);
+    }
+    return (raw >= 0 && raw <= 0x0f) ? raw : static_cast<std::int16_t>(-1);
+  };
+
+  t.strength = ReadBeI16(bytes, 0x00);
   // word[0x2] * 0.01 -> float multiplier (the loader FMULs by the 0.01 double
   // DAT_00575e60).
-  t.wander_speed_multiplier =
-      static_cast<float>(ReadBeI16(bytes, 0x02)) * 0.01F;
+  t.spin_rate = static_cast<float>(ReadBeI16(bytes, 0x02)) * 0.01F;
   t.yield_type = ReadBeI16(bytes, 0x04);
   t.yield_qty = ReadBeI16(bytes, 0x06);
-  t.field_0x0c = ReadBeI16(bytes, 0x08);
-  // Colour: the loader squashes the three RGB565-ish bytes at +0x0a to a
-  // 15-bit tint: red=byte[0xc]>>3, green=byte[0xb]>>3, blue=byte[0xa]>>3
-  // (see 0x004c62ed..0x004c6380).
+  if (t.yield_qty < 0) {
+    t.yield_qty = 0;
+    t.yield_type = -1;
+  }
+  // Valid YieldType: [0,6] standard cargo or [1000,1127] junk; else no yield.
+  if (t.yield_type < 0 || t.yield_type > 0x467 ||
+      (t.yield_type > 6 && t.yield_type < 1000)) {
+    t.yield_type = -1;
+    t.yield_qty = 0;
+  }
+  t.part_count = ReadBeI16(bytes, 0x08);
+  if (t.part_count < 0) {
+    t.part_count = 0;
+  }
+  // Colour: the loader squashes the three RGB bytes at +0x0a to a 15-bit tint:
+  // red=byte[0xc]>>3, green=byte[0xb]>>3, blue=byte[0xa]>>3 (see
+  // 0x004c62ed..0x004c6380).
   {
     const auto b0 = std::to_integer<std::uint8_t>(bytes[0x0a]); // blue
     const auto b1 = std::to_integer<std::uint8_t>(bytes[0x0b]); // green
     const auto b2 = std::to_integer<std::uint8_t>(bytes[0x0c]); // red
-    t.color = (static_cast<std::uint32_t>(b2) >> 3U) << 10U |
-              (static_cast<std::uint32_t>(b1) >> 3U) << 5U |
-              (static_cast<std::uint32_t>(b0) >> 3U);
+    t.part_color = (static_cast<std::uint32_t>(b2) >> 3U) << 10U |
+                   (static_cast<std::uint32_t>(b1) >> 3U) << 5U |
+                   (static_cast<std::uint32_t>(b0) >> 3U);
   }
-  // 3-element direction sub-array at payload +0x0e; the loader rebases
-  // 0x80..0x90 by -0x80, else requires the value < 0x10.
-  for (std::size_t i = 0; i < t.directions.size(); ++i) {
-    std::int16_t v = ReadBeI16(bytes, 0x0e + i * 2);
-    if (v >= 0x80 && v < 0x90) {
-      v = static_cast<std::int16_t>(v - 0x80);
-    }
-    // Out-of-range (non <0x10, non 0x80..0x90) would abort the row in the
-    // original; shipped data stays within the accepted windows.
-    t.directions[i] = v;
+  t.frag_count = ReadBeI16(bytes, 0x12);
+  if (t.frag_count < 0) {
+    t.frag_count = 0;
   }
-  t.field_0x10 = ReadBeI16(bytes, 0x14);
-  t.lifetime = ReadBeI16(bytes, 0x16);
+  t.frag_type1 = decode_frag_type(ReadBeI16(bytes, 0x0e));
+  t.frag_type2 = decode_frag_type(ReadBeI16(bytes, 0x10));
+  // Valid ExplodeType: [0,0x3f] or [1000,0x427]; else no effect.
+  t.explode_type = ReadBeI16(bytes, 0x14);
+  if (t.explode_type < 0 || t.explode_type > 0x427 ||
+      (t.explode_type > 0x3f && t.explode_type < 1000)) {
+    t.explode_type = -1;
+  }
+  t.mass = ReadBeI16(bytes, 0x16);
   t.present = true;
   return t;
 }
@@ -1464,14 +1483,6 @@ const RankDef *ScenarioData::Rank(std::int16_t resource_id) const {
 const AsteroidDef *ScenarioData::AsteroidType(std::int16_t resource_id) const {
   const auto index = static_cast<std::size_t>(resource_id) - 0x80;
   return index < asteroid_defs.size() ? &asteroid_defs[index] : nullptr;
-}
-
-const AsteroidDef *
-ScenarioData::ImpactPackageAt(std::int16_t package_id) const {
-  if (package_id < 0 || package_id >= static_cast<std::int16_t>(0x10)) {
-    return nullptr;
-  }
-  return &asteroid_defs[static_cast<std::size_t>(package_id)];
 }
 
 const ImpactEffect *ScenarioData::ImpactEffectAt(std::int16_t effect_id) const {
@@ -1625,11 +1636,13 @@ bool ScenarioData::LoadFromArchives() {
         // +0x30, loader 0x004b4ee0); drawn by the spawn paths.
         cls.combat_state_init_range = ReadBeI16(*shan, 0x30);
         // Weapon-effects fade rate and running-lights blink program. The
-        // loader scales WeapDecay (+0x32) by g_ship_weapon_glow_decay_scale
-        // (0x00575ab8 = 0.003484) and copies the Blink fields at +0x36..+0x3e
-        // (see scenario_data.hpp for the field-name caveat).
+        // The loader scales WeapDecay (+0x32) by the binary64
+        // g_ship_weapon_glow_decay_scale (0x00575ab8 = 0.333). Ghidra formerly
+        // typed only its low four bytes as a float (0.003484375), despite the
+        // FMUL instruction reading eight bytes; using that truncated value
+        // made common weapon flashes last roughly a minute.
         cls.weapon_glow_decay_rate =
-            static_cast<float>(ReadBeI16(*shan, 0x32)) * 0.003484F;
+            static_cast<float>(ReadBeI16(*shan, 0x32)) * 0.333F;
         cls.blink_mode = ReadBeI16(*shan, 0x36);
         cls.blink_val_a = ReadBeI16(*shan, 0x38);
         cls.blink_val_b = ReadBeI16(*shan, 0x3a);
