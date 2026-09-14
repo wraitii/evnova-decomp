@@ -1629,7 +1629,7 @@ TEST_CASE("mission-fleet goal 0 forces hostility to the player") {
   ship.ai_state_code = 0;
   ship.primary_target_ship_slot = -1;
   ship.mission_fleet_slot = 0;
-  state.active_missions[0].fleet_spawn_goal = 0;
+  state.active_missions[0].ship_behavior = 0;
   state.active_mission_runtime_flags[0].is_active = true;
 
   game::NovaAi_AcquirePrimaryTarget(state, ship);
@@ -1789,7 +1789,7 @@ TEST_CASE("mission-fleet goal 1 parks with no random candidate") {
   ship.ai_state_code = 0;
   ship.primary_target_ship_slot = 0; // player primary to drop
   ship.mission_fleet_slot = 0;
-  state.active_missions[0].fleet_spawn_goal = 1;
+  state.active_missions[0].ship_behavior = 1;
   state.active_mission_runtime_flags[0].is_active = true;
 
   game::NovaAi_AcquirePrimaryTarget(state, ship);

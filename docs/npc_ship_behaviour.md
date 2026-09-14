@@ -314,8 +314,8 @@ verified):
    field nor the writer is ported, so this stage is **skipped**
    (`TODO(decomp)`).
 4. **Mission-fleet arms (0x0040e202)** — with an active mission-fleet slot:
-   `fleet_spawn_goal == 0` forces hostility to the player (cloak gate);
-   `fleet_spawn_goal == 1` drops a player primary, calls
+   `ship_behavior == 0` forces hostility to the player (cloak gate);
+   `ship_behavior == 1` drops a player primary, calls
    `Ship_EnterShipAiState0x04_TargetRandomCombatCandidate`, else parks in state
    `0x0c` with secondary 0.
 5. **Weapon-readiness gate (0x0040e2c0)** — `Weapon_ClassifyShipWeaponAmmo-

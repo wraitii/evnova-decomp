@@ -216,6 +216,9 @@ bool Stellar_Dock(GameState &state,
   // mission ships; only non-disabled ships actively engaging the player
   // are spared -- see ship_spawn.hpp), then rebuilds the initial population.
   NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
+  // Ghidra 0x004588b1: stellar entry refreshes delayed mission arrivals and
+  // auxiliary-fleet bookkeeping before population is restored.
+  Mission_RefreshActiveMissionSpawnState(state);
   NovaSystem_RestoreMissionFleets(state,
                                   state.player.current_system_id,
                                   /*copy_player_heading=*/false,
@@ -277,9 +280,10 @@ void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
   // Frame_RerollPlayerStatModifiers 0x00431500).
   NovaFrame_JitterPlayerStatModifiers(state);
   NovaFrame_RerollPlayerStatModifiers(state);
-  // 0x004560a0: the per-active-mission rearm/roll loop here is an inline
-  // duplicate of the Misn_TickActiveMissionTimers (0x00448910) tail, which
-  // the port already runs per frame; no separate call needed.
+  // 0x004560a0: an inline duplicate of
+  // Mission_RefreshActiveMissionSpawnState (0x00448910) refreshes delayed
+  // mission arrivals and auxiliary-fleet state at launch.
+  Mission_RefreshActiveMissionSpawnState(state);
   // 0x00456060..0x0045609b: discovery booking at level 2 (slot + current
   // system), visibility rebuild and region events.
   NovaSystem_OnSystemEntered(state, state.player.current_system_id, 2);

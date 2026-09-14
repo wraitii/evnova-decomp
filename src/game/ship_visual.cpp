@@ -297,11 +297,10 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
     const auto slot_idx = static_cast<std::size_t>(fleet_slot);
     MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot_idx];
     ActiveMission &mission = state.active_missions[slot_idx];
-    const std::int16_t spawn_behavior = mission.spawn_behavior;
+    const std::int16_t ship_goal = mission.ship_goal;
     const bool quick_fail_shape =
-        spawn_behavior == 1 || spawn_behavior == 3 ||
-        ((spawn_behavior == 2 || spawn_behavior == 5) &&
-         ship.boarded_target_latch == 0);
+        ship_goal == 1 || ship_goal == 3 ||
+        ((ship_goal == 2 || ship_goal == 5) && ship.boarded_target_latch == 0);
     if (runtime.is_active && mission.goal_counter_a == 0 && quick_fail_shape &&
         !runtime.is_failed &&
         (runtime.flags_primary_at_accept & 0x0400U) == 0U) {

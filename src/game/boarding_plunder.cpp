@@ -626,7 +626,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
 
   // ---- Boardability -------------------------------------------------------
   // Mission arms (Player_HandleBoardTargetCommand 0x0045a3d0): the
-  // pickup_mode-2 cargo pickup and the spawn_behavior 2/5 + flags 0x0001
+  // pickup_mode-2 cargo pickup and the Bible ShipGoal 2/5 + flags 0x0001
   // single-ship rescue arm write goal_counter_b, set the target's boarded
   // latch and clear other ships' targeting before falling through to the
   // capture flow. Inactive-mission ships board like plain ships. The
@@ -661,7 +661,7 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                                      /*duration_frames=*/std::uint64_t{0xfa});
         }
         QueueUiSound(state, 4, 8);
-      } else if ((mission.spawn_behavior == 2 || mission.spawn_behavior == 5) &&
+      } else if ((mission.ship_goal == 2 || mission.ship_goal == 5) &&
                  (mission_flags & 0x0001U) != 0U &&
                  mission.target_ship_count == 1) {
         // Rescue/board-captain arm. flags 0x0008 swaps the generic STR# 0x7d2

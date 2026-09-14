@@ -848,7 +848,7 @@ void HudRenderer::DrawTargetPanel(SdlPlatform &platform,
     // special_ship_attacking latch and the target's boarded_target_latch;
     // neither field is modelled yet.
     bool waiting = false;
-    if (mission != nullptr && mission->spawn_behavior == 5 &&
+    if (mission != nullptr && mission->ship_goal == 5 &&
         state
             .active_mission_runtime_flags[static_cast<std::size_t>(
                 target.mission_fleet_slot)]

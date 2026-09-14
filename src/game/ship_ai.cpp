@@ -363,7 +363,7 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
 
 // Ghidra 0x004687b0 Ship_IsShipDisabled. True when the ship must not
 // fire/act this frame: derelict government (flags_primary 0x800), mission
-// spawn_behavior-5 special ships not yet attacking (TODO(decomp):
+// ShipGoal-5 special ships not yet attacking (TODO(decomp):
 // special_ship_attacking runtime flag unmodelled), or critically damaged
 // (armor below 1/3 of max, 1/10 with capability flags 0x10). Non-player ships
 // with a stellar target are exempt -- the original returns not-disabled
@@ -1496,12 +1496,12 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
     const ActiveMission &mission =
         state
             .active_missions[static_cast<std::size_t>(ship.mission_fleet_slot)];
-    if (mission.fleet_spawn_goal == 0 &&
+    if (mission.ship_behavior == 0 &&
         NovaAiShip_CanEngageTargetUnderCloakRules(state, state.player, ship)) {
       NovaAi_SetShipHostileToPlayer(state, ship);
       return;
     }
-    if (mission.fleet_spawn_goal == 1) {
+    if (mission.ship_behavior == 1) {
       if (ship.primary_target_ship_slot == 0) {
         ship.primary_target_ship_slot = -1;
       }
@@ -4460,7 +4460,7 @@ void NovaAi_UpdateShipAI(GameState &state,
           static_cast<std::size_t>(ship.mission_fleet_slot);
       mission_stellar_attack =
           state.active_mission_runtime_flags[mission_slot].is_active &&
-          state.active_missions[mission_slot].fleet_spawn_goal == 2;
+          state.active_missions[mission_slot].ship_behavior == 2;
     }
     if (mission_stellar_attack) {
       Mission_UpdateShipMissionStellarAttackDirective(state, ship, now_ms);

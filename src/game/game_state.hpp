@@ -74,16 +74,16 @@ struct MissionRuntimeFlags {
 struct ActiveMission {
   // Resolved TravelStel (+0x00, where the mission's visit/pickup happens)
   // and ReturnStel (+0x04, where the mission completes and pays out).
-  std::int16_t travel_stellar_id = -1;      // +0x00
-  std::int16_t return_stellar_id = -1;      // +0x04
-  std::int16_t target_ship_count = 0;       // +0x06
-  std::int16_t dude_def_index = -1;         // +0x08
-  std::int16_t spawn_behavior = 0;          // +0x0a
-  std::int16_t fleet_spawn_goal = 0;        // +0x0c
-  std::int16_t special_ship_spawn_mode = 0; // +0x0e
-  std::int16_t current_system_id = -1;      // +0x10
-  std::int16_t cargo_type_id = -1;          // +0x12
-  std::int16_t cargo_qty_tons = 0;          // +0x14
+  std::int16_t travel_stellar_id = -1; // +0x00
+  std::int16_t return_stellar_id = -1; // +0x04
+  std::int16_t target_ship_count = 0;  // +0x06
+  std::int16_t dude_def_index = -1;    // +0x08
+  std::int16_t ship_goal = 0;          // +0x0a, Bible ShipGoal
+  std::int16_t ship_behavior = 0;      // +0x0c, Bible ShipBehav
+  std::int16_t ship_start = 0;         // +0x0e, Bible ShipStart
+  std::int16_t current_system_id = -1; // +0x10
+  std::int16_t cargo_type_id = -1;     // +0x12
+  std::int16_t cargo_qty_tons = 0;     // +0x14
   // Bible PickupMode (+0x16: -1 ignored, 0 at accept, 1 at TravelStel, 2
   // when boarding), DropOffMode (+0x18: 0 at TravelStel, 1 at ReturnStel)
   // and ScanMask (+0x1a, govts whose scans flag the cargo).
@@ -1505,6 +1505,13 @@ struct GameState {
   // move until the next frame. The spaceflight loop consumes this to skip the
   // PlayerTick_TimedActionTransition call on the eject frame only.
   bool timed_action_suppress_this_frame = false;
+
+  // Port-only accumulator for Frame_TickSystems scope 0xb. The original
+  // executes its discrete mission reactions, RNG rolls, and NPC population
+  // maintenance once per spaceflight call, whose scheduler has a 21 ms floor.
+  // Bank normalized 30 Hz time here and replay whole original-rate calls so
+  // integer countdowns and the shared RNG stream do not follow display Hz.
+  float npc_maintenance_raw_tick_accumulator = 0.0F;
 
   std::array<BeamHit, 0x40> beam_hit_queue{};
   std::array<ImpactEffectInstance, 0x20> impact_effect_instances{};

@@ -1150,9 +1150,9 @@ bool Mission_PopulateActiveSlot(GameState &state,
     active.dude_def_index =
         static_cast<std::int16_t>(active.dude_def_index - kResourceIdBase);
   }
-  active.spawn_behavior = definition->spawn_behavior;
-  active.fleet_spawn_goal = definition->fleet_spawn_goal;
-  active.special_ship_spawn_mode = definition->special_ship_spawn_mode;
+  active.ship_goal = definition->ship_goal;
+  active.ship_behavior = definition->ship_behavior;
+  active.ship_start = definition->ship_start;
   active.current_system_id =
       ResolveMissionCurrentSystem(state, *definition, target);
   // Resolved Bible CargoType/CargoQty (m\xefsn +0x10/+0x12 via the target
@@ -1188,9 +1188,8 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.goal_counter_c = 0;
   // Ghidra 0x0043f8c0: ShipStart/special spawn mode 1 begins with no ships
   // owed to the respawn stepper; the ordinary modes seed the target count.
-  active.goal_count_remaining = definition->special_ship_spawn_mode == 1
-                                    ? 0
-                                    : definition->target_ship_count;
+  active.goal_count_remaining =
+      definition->ship_start == 1 ? 0 : definition->target_ship_count;
   active.goal_counter_e = 0;
   active.mission_target_count = definition->target_ship_count;
   active.can_abort = definition->can_abort;
@@ -1238,10 +1237,9 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.time_limit_days_remaining = definition->time_limit_days < 1
                                          ? static_cast<std::int16_t>(-32000)
                                          : definition->time_limit_days;
-  if (definition->special_ship_spawn_mode < 1) {
+  if (definition->ship_start < 1) {
     active.spawn_rearm_timer = -1;
-  } else if (definition->fleet_spawn_goal == 1 &&
-             definition->spawn_behavior == 3) {
+  } else if (definition->ship_behavior == 1 && definition->ship_goal == 3) {
     active.spawn_rearm_timer = 30;
   } else {
     std::uniform_int_distribution<int> roll(0, 99);
@@ -1487,7 +1485,8 @@ bool Mission_DoesSystemMatchMissionLocator(const GameState &state,
   return false;
 }
 
-void Misn_TickActiveMissionTimers(GameState &state) {
+// Ghidra 0x00448910 Mission_RefreshActiveMissionSpawnState.
+void Mission_RefreshActiveMissionSpawnState(GameState &state) {
   for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
     if (!state.active_mission_runtime_flags[slot].is_active) {
       continue;
@@ -1504,8 +1503,8 @@ void Misn_TickActiveMissionTimers(GameState &state) {
     // rolls 100..199. The goal-countdown latch clears with it.
     if (mission.target_ship_count > 0 &&
         ((resolved == state.player.current_system_id || raw_system == -6) &&
-         mission.special_ship_spawn_mode == 1)) {
-      if (mission.fleet_spawn_goal == 1 && mission.spawn_behavior == 3) {
+         mission.ship_start == 1)) {
+      if (mission.ship_behavior == 1 && mission.ship_goal == 3) {
         mission.spawn_rearm_timer = 30;
       } else {
         mission.spawn_rearm_timer =
@@ -2476,13 +2475,13 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
   ActiveMission &mission = state.active_missions[slot];
   // Auto-abort missions with no goal and exhausted target count drop their
   // completion latch before re-evaluation.
-  if (mission.spawn_behavior == -1 && mission.target_ship_count > 0 &&
+  if (mission.ship_goal == -1 && mission.target_ship_count > 0 &&
       mission.goal_count_remaining < 1 &&
       (mission.flags_primary & 0x0001U) != 0U) {
     runtime.objective_complete = false;
   }
   const bool was_objective_complete = runtime.objective_complete;
-  const std::int16_t goal = mission.spawn_behavior;
+  const std::int16_t goal = mission.ship_goal;
   if (goal == -1 && mission.mission_target_count < 1) {
     runtime.objective_complete = true;
   } else {
@@ -2493,8 +2492,7 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
       // Auto-abort missions complete immediately unless they still owe
       // spawn-mode-1 targets with a pending countdown.
       if ((mission.flags_primary & 0x0001U) == 0U ||
-          mission.goal_count_remaining > 0 ||
-          mission.special_ship_spawn_mode != 1) {
+          mission.goal_count_remaining > 0 || mission.ship_start != 1) {
         runtime.objective_complete = true;
       }
     } else if (mission.goal_count_remaining < target_count &&
@@ -2611,7 +2609,7 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
                     mission.mission_template_id,
                     mission.brief_description_ids[7]);
     }
-    if (mission.spawn_behavior != -1) {
+    if (mission.ship_goal != -1) {
       Mission_RunMisnScriptPayload(
           state, TextOf(mission.state_latch), mission_slot);
     }
@@ -2676,8 +2674,8 @@ void Mission_ProcessInteractionReactionSlotResources(
   if (NovaStellar_AreStellarsEquivalent(
           state, mission.return_stellar_id, landed_stellar_id) &&
       mission.drop_off_mode == 1 && mission.carrying_resources &&
-      (runtime.objective_complete || mission.spawn_behavior == -1 ||
-       (mission.spawn_behavior == 3 && mission.goal_counter_a < 1))) {
+      (runtime.objective_complete || mission.ship_goal == -1 ||
+       (mission.ship_goal == 3 && mission.goal_counter_a < 1))) {
     mission.carrying_resources = false;
     if (mission.brief_description_ids[3] != -1) {
       NovaLog::Todo("mission cargo-dropped desc (misn {} id {}) not "
@@ -2737,7 +2735,7 @@ void Mission_TickReactionSlotsForTravelInteraction(
       if (!runtime.is_failed) {
         // Escort missions with no destroyed escorts complete on arrival;
         // the survivor check runs inside the objective evaluation.
-        if (mission.spawn_behavior == 3 && mission.goal_counter_a < 1) {
+        if (mission.ship_goal == 3 && mission.goal_counter_a < 1) {
           runtime.objective_complete = true;
         }
         if (runtime.initial_briefing_done && runtime.objective_complete) {
@@ -3442,7 +3440,7 @@ bool Mission_HandleAcceptedShipInteraction(GameState &state,
   replacement.vel_x = target.vel_x;
   replacement.vel_y = target.vel_y;
   replacement.heading = target.heading;
-  if (mission.spawn_behavior == 3) {
+  if (mission.ship_goal == 3) {
     NovaShip_EnterSquadReturnState(state, replacement);
   }
   target.is_active = false;

@@ -197,9 +197,9 @@ struct MissionDef {
   // the original MissionDef member remains unnamed.
   std::int16_t target_ship_count = 0;            // resource +0x20
   std::int16_t current_system_locator = -1;      // +0x22
-  std::int16_t spawn_behavior = 0;               // +0x26
-  std::int16_t fleet_spawn_goal = 0;             // +0x28
-  std::int16_t special_ship_spawn_mode = 0;      // +0x2c
+  std::int16_t ship_goal = 0;                    // +0x26, Bible ShipGoal
+  std::int16_t ship_behavior = 0;                // +0x28, Bible ShipBehav
+  std::int16_t ship_start = 0;                   // +0x2c, Bible ShipStart
   std::int16_t competing_government_id = -1;     // +0x2e
   std::int16_t competing_reputation_delta = 0;   // +0x30
   std::int16_t special_ship_name_string_id = -1; // +0x2a
