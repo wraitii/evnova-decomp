@@ -143,6 +143,19 @@ in the SDL renderer yet (TODO).
   AnimDelay / Frame0Bias. Per-frame distance-intensity positioning remains
   TODO(decomp).
 
+### State-0x15 hypergate emergence
+
+`Ship_UpdateVisualState` does not synchronize the arriving hull to the gate's
+current animation frame. The ship's 60-tick state-0x15 hold is its clock: it is
+hidden while `ai_maneuver_timer_ms > 16`, then the final 16 ticks set hull
+transparency to `2 * timer` (32 clear down to 0 opaque), set distance brightness
+to `min(4 * timer, 32)`, and use pure white as the space/fog colour. Thus the
+visible hull fades in white, then regains its normal colours over the last eight
+ticks. All sprite layers are hidden during the earlier hold. During the reveal,
+colored effect layers return with the hull colour so they cannot obscure the
+initial pure-white silhouette. The SDL renderer uses an alpha-preserving white
+silhouette texture for the hull tint.
+
 ## Decoder
 
 `RleSpriteSheet_Decode16` (src/rle_sprite_sheet.cpp) already decodes the same

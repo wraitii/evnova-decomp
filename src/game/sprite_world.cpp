@@ -25,7 +25,8 @@ namespace {
 // unless a caller overrides the anchor (see Sprite_DrawOptions.anchor_*).
 bool UploadSheetTextures(SDL_Renderer *renderer,
                          const RleSpriteSheet &sheet,
-                         SpriteAsset &out) {
+                         SpriteAsset &out,
+                         bool upload_white_silhouettes = false) {
   out.frame_count = static_cast<int>(sheet.frames.size());
   out.tile_width = sheet.width;
   out.tile_height = sheet.height;
@@ -39,9 +40,25 @@ bool UploadSheetTextures(SDL_Renderer *renderer,
       out.frames.clear();
       return false;
     }
+    std::unique_ptr<SdlTexture> white_silhouette;
+    if (upload_white_silhouettes) {
+      std::vector<std::uint8_t> white_pixels = frame.rgba_pixels;
+      for (std::size_t pixel = 0; pixel + 3 < white_pixels.size(); pixel += 4) {
+        white_pixels[pixel] = 0xff;
+        white_pixels[pixel + 1] = 0xff;
+        white_pixels[pixel + 2] = 0xff;
+      }
+      white_silhouette =
+          SdlTexture::Create(renderer, sheet.width, sheet.height, white_pixels);
+      if (!white_silhouette) {
+        out.frames.clear();
+        return false;
+      }
+    }
     // Centre anchor (Ghidra SpriteFrame anchor fields +0x2a/+0x2c for a frame
     // built from a full rect: the frame's centre is the natural anchor point).
-    out.frames.push_back(SpriteFrame{std::move(texture), anchor_x, anchor_y});
+    out.frames.push_back(SpriteFrame{
+        std::move(texture), std::move(white_silhouette), anchor_x, anchor_y});
   }
   return !out.frames.empty();
 }
@@ -208,7 +225,7 @@ std::unique_ptr<SpriteAsset> SpriteAsset::LoadSheet(SDL_Renderer *renderer,
     return nullptr;
   }
   auto asset = std::make_unique<SpriteAsset>();
-  if (!UploadSheetTextures(renderer, *sheet, *asset)) {
+  if (!UploadSheetTextures(renderer, *sheet, *asset, true)) {
     NovaLog::Warn("sprite sheet {}: texture upload failed", sheet_id);
     return nullptr;
   }
@@ -251,7 +268,8 @@ std::unique_ptr<SpriteAsset> SpriteAsset::LoadCicnSet(SDL_Renderer *renderer,
     // from the icon rect. The original's reticle updaters position the four
     // brackets WITHOUT the half-span compensation the ship/stellar updaters
     // apply, so the frame's top-left lands exactly on the placement point.
-    asset->frames.push_back(SpriteFrame{std::move(texture), 0.0F, 0.0F});
+    asset->frames.push_back(
+        SpriteFrame{std::move(texture), nullptr, 0.0F, 0.0F});
   }
   if (asset->frames.empty()) {
     return nullptr;
@@ -405,7 +423,9 @@ void DrawSprite(SDL_Renderer *renderer,
   }
   const int clamped = std::clamp(frame, 0, asset.frame_count - 1);
   const SpriteFrame &sf = asset.frames[static_cast<std::size_t>(clamped)];
-  if (!sf.texture) {
+  const SdlTexture *texture =
+      opts.white_silhouette ? sf.white_silhouette.get() : sf.texture.get();
+  if (texture == nullptr) {
     return;
   }
   // Anchor-aware placement: align the frame's anchor (or the opts override) to
@@ -418,7 +438,7 @@ void DrawSprite(SDL_Renderer *renderer,
           ? std::pair<float, float>{*opts.anchor_x, *opts.anchor_y}
           : std::pair<float, float>{sf.anchor_x, sf.anchor_y};
   BlitFrame(renderer,
-            *sf.texture,
+            *texture,
             static_cast<float>(asset.tile_width) * opts.scale,
             static_cast<float>(asset.tile_height) * opts.scale,
             ax,

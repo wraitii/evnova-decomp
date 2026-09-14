@@ -106,20 +106,29 @@ TEST_CASE("hypergate working animation honors return-to-transition flag") {
   CHECK(animation.current_frame == 3);
 }
 
-TEST_CASE("state-0x15 ship appears only after its hypergate opens") {
+TEST_CASE("state-0x15 ship fades from white over its final 16 hold ticks") {
   game::Ship ship;
   ship.ai_state_code = 0x15;
-  game::Stellar gate;
-  gate.availability_flags = game::Stellar::kHypergate;
-  gate.custom_picture_or_gate_transition_frame = 3;
-
-  gate.sprite_current_frame = 2;
-  CHECK_FALSE(game::NovaStellar_ShouldDrawEmergingShip(ship, &gate, 8));
-  gate.sprite_current_frame = 3;
-  CHECK(game::NovaStellar_ShouldDrawEmergingShip(ship, &gate, 8));
+  ship.ai_maneuver_timer_ms = 60.0F;
+  CHECK_FALSE(game::NovaShip_EmergencePresentation(ship).visible);
+  ship.ai_maneuver_timer_ms = 16.0F;
+  const auto start = game::NovaShip_EmergencePresentation(ship);
+  CHECK(start.visible);
+  CHECK(start.hull_alpha == 0.0F);
+  CHECK(start.white_mix == 1.0F);
+  ship.ai_maneuver_timer_ms = 8.0F;
+  const auto middle = game::NovaShip_EmergencePresentation(ship);
+  CHECK(middle.hull_alpha == 0.5F);
+  CHECK(middle.white_mix == 1.0F);
+  ship.ai_maneuver_timer_ms = 4.0F;
+  const auto colorizing = game::NovaShip_EmergencePresentation(ship);
+  CHECK(colorizing.hull_alpha == 0.75F);
+  CHECK(colorizing.white_mix == 0.5F);
   ship.ai_state_code = 8;
-  gate.sprite_current_frame = 0;
-  CHECK(game::NovaStellar_ShouldDrawEmergingShip(ship, &gate, 8));
+  const auto arrived = game::NovaShip_EmergencePresentation(ship);
+  CHECK(arrived.visible);
+  CHECK(arrived.hull_alpha == 1.0F);
+  CHECK(arrived.white_mix == 0.0F);
 }
 
 TEST_CASE("wormholes distinguish linked and random-unlinked destinations") {
