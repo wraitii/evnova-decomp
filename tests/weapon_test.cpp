@@ -95,6 +95,73 @@ void CheckShotVelocity(const ActiveShot &shot,
 }
 } // namespace
 
+TEST_CASE("shot guidance preserves the shared bomb and rocket post-pass",
+          "[weapon][guidance]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.lifetime_ticks = 100;
+  weapon.projectile_speed = 100.0F;
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.life_ticks_remaining = 90.0F;
+  shot.heading_deg = 0.0F;
+  shot.vel_x = 10.0F;
+
+  SECTION("freefall bomb weathervanes on a raw call") {
+    weapon.weapon_mode_code = 5;
+    NovaWeapon_UpdateShotGuidance(state, shot, 0.63F, 1);
+    CHECK(shot.heading_deg == Catch::Approx(1.0F));
+  }
+  SECTION("freeflight rocket uses the executable's 95/5 blend") {
+    weapon.weapon_mode_code = 6;
+    NovaWeapon_UpdateShotGuidance(state, shot, 0.63F, 1);
+    CHECK(shot.vel_x == Catch::Approx(9.5F));
+    CHECK(shot.vel_y == Catch::Approx(-0.05F));
+  }
+  SECTION("lost-target state still reaches the rocket post-pass") {
+    weapon.weapon_mode_code = 6;
+    shot.guidance_state = 998;
+    NovaWeapon_UpdateShotGuidance(state, shot, 0.63F, 1);
+    CHECK(shot.vel_x == Catch::Approx(9.5F));
+  }
+}
+
+TEST_CASE("shot guidance keeps normalized and raw age gates distinct",
+          "[weapon][guidance]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.weapon_mode_code = 1;
+  weapon.lifetime_ticks = 100;
+  weapon.projectile_speed = 100.0F;
+  weapon.guided_turn_rate = 10.0F;
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.current_system_id = 0;
+  target.pos_x = 100.0F;
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.target_ship_slot = 1;
+  shot.system_id = 0;
+  shot.heading_deg = 0.0F;
+
+  SECTION("normal homing compares age with frame scale times fifteen") {
+    shot.life_ticks_remaining = 90.0F;
+    NovaWeapon_UpdateShotGuidance(state, shot, 0.5F, 0);
+    CHECK(shot.heading_deg == Catch::Approx(5.0F));
+  }
+  SECTION("asteroid-decoy tracking turns by a full raw-call step") {
+    state.asteroid_pool[0].active = true;
+    state.asteroid_pool[0].target_pos_x = 100.0F;
+    shot.guidance_state = 1;
+    shot.target_ship_slot = 0;
+    shot.life_ticks_remaining = 84.0F;
+    NovaWeapon_UpdateShotGuidance(state, shot, 0.63F, 1);
+    CHECK(shot.heading_deg == Catch::Approx(10.0F));
+  }
+}
+
 // Regression: the new-game flow must reconcile the seeded Light Blaster weapon
 // bank into an owned outfit (Weapon_ReconcileOutfitPoolWithWeaponBanks,
 // 0x00462ec0). Without it the starter blaster stays an owned-bank-only weapon:
@@ -598,13 +665,13 @@ TEST_CASE("inbound weapon threat tallies only live normal-lock shots",
   const auto add_shot = [&](std::int16_t weapon_id,
                             std::int16_t target,
                             float life,
-                            std::int16_t cooldown,
+                            std::int16_t guidance_state,
                             bool consumed = false) {
     ActiveShot shot;
     shot.weapon_id = weapon_id;
     shot.target_ship_slot = target;
     shot.life_ticks_remaining = life;
-    shot.retarget_cooldown = cooldown;
+    shot.guidance_state = guidance_state;
     shot.consumed = consumed;
     state.active_shots.push_back(shot);
   };

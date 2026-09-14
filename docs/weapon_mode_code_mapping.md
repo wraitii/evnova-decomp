@@ -12,7 +12,7 @@ Reference: https://evn.fandom.com/wiki/W%C3%ABap
 - `2` unused
 - `3` turreted beam
 - `4` turreted unguided projectile
-- `5` freefall bomb
+- `5` freefall bomb (commonly used as a mine)
 - `6` freeflight rocket
 - `7` front-quadrant turret
 - `8` rear-quadrant turret
@@ -64,21 +64,21 @@ retargets the shot onto its owner. A channel with `lock_quality == 0` is never d
 home unconditionally.
 
 **Other seeker-flag behaviors (flags_quaternary / Bible Seeker, verified against 0x00431530):**
-- `0x0002` decoyed by asteroids: 1/10 per frame, an active asteroid within 200 px on both axes and within 16 deg of the
-  shot heading latches `retarget_cooldown = 1` (target_ship_slot becomes an asteroid pool index).
+- `0x0002` decoyed by asteroids: 1/10 per raw call, an active asteroid within 200 px on both axes and within 16 deg of the
+  shot heading latches internal `guidance_state = 1` (distinct from the Guidance mode; target_ship_slot becomes an asteroid pool index).
 - `0x0008` confused by sensor interference: at spawn, `Random(100 / frame_scale) + 1 <= SystemDef.interference (+0x96,
-  payload +0x6c)` latches `retarget_cooldown = 999` — the weave state (heading zig-zags on a 300-frame phase,
-  `g_license_check_frame_counter % 300 < 150` selects the direction; 1/1000 owner-retarget escape with 0x8000).
+  payload +0x6c)` latches `guidance_state = 999` — the weave state (heading zig-zags on a 300-raw-call phase,
+  `g_spaceflight_frame_counter % 300 < 150` selects the direction; 1/1000 owner-retarget escape with 0x8000).
 - `0x4000` loses lock if target not directly ahead: within 250 px on both axes with the target more than 45 deg off the
   nose, the lock drops (target = -1).
-- `retarget_cooldown == 998` is the inert latch Shot_HandleShot sets when a state-0 shot's target dies.
+- `guidance_state == 998` is the inert latch Shot_HandleShot sets when a state-0 shot's target dies.
 
-**Turn rate:** `WeaponDef.guided_turn_rate` (+0x58 float) = wëap payload +0x6a (Bible "GuidedTurn") * 0.1, in degrees per
-tick. Homing only runs while remaining life > frame_scale * 30 (k_guidance_life_gate_f64 @0x5754c0) — guided weapons fly
-straight over roughly their final second; the 999/1 states use a bare 15-tick gate (0x575400).
+**Turn rate:** `WeaponDef.guided_turn_rate` (+0x58 float) = wëap payload +0x6a (Bible "GuidedTurn") * 0.1. Normal homing
+starts once shot age (`Count - life_time`) is strictly greater than `frame_scale * 15` and turns by
+`guided_turn_rate * frame_scale`. The asteroid-decoy and interference states use a bare age gate of 15 and raw per-call turns.
 
 **Mode-6 rockets** do not chase: they fire along the lead bearing (Ship_AimWeaponPredictive two-regime model) and then
-blend velocity toward the heading each frame: `vel = (vel*94 + polar(heading,speed)*5) * 0.01` (0x57540c/0x575408/0x575368).
+blend velocity toward the heading each raw call: `vel = (vel*95 + polar(heading,speed)*5) * 0.01` (0x57540c/0x575408/0x575368).
 Mode-6 shots launched by the player keep pure inherited velocity at spawn (no polar add); NPC bays get the full polar
 vector. Player mode-5 bombs keep inherited velocity * 0.8.
 

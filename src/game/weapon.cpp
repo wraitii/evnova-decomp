@@ -21,13 +21,13 @@ namespace game {
 namespace {
 
 // Shot_UpdateShotGuidance constants (typed + pre-commented in the Ghidra DB).
-inline constexpr float kGuidanceLifeGateF64 = 30.0F;      // 0x005754c0
-inline constexpr float kGuidanceLifeGateLooseF64 = 15.0F; // 0x00575400
-inline constexpr float kJamTurnSignF32 = -1.0F;           // 0x00575350
-inline constexpr float kRocketBlendOldF32 = 94.0F;        // 0x0057540c
-inline constexpr float kRocketBlendNewF32 = 5.0F;         // 0x00575408
-inline constexpr float kOnePercentF64 = 0.01F;            // 0x00575368
-inline constexpr float kBombNoseTurnRate = 1.0F;          // 0x00575318
+inline constexpr float kGuidanceAgeGateF64 = 15.0F; // 0x00575400
+inline constexpr float kJamTurnSignF32 = -1.0F;     // 0x00575350
+inline constexpr float kRocketBlendOldF32 = 95.0F;  // 0x0057540c
+inline constexpr float kRocketBlendNewF32 = 5.0F;   // 0x00575408
+inline constexpr float kOnePercentF64 = 0.01F;      // 0x00575368
+inline constexpr float kBombNoseTurnRate = 1.0F;    // 0x00575318
+inline constexpr float kOriginalRawCallTicks = 21.0F * 0.03F;
 
 [[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
                                             const Ship &ship) {
@@ -53,7 +53,7 @@ void NovaWeapon_TallyInboundWeaponThreat(GameState &state) {
       const ActiveShot &shot = state.active_shots[shot_slot];
       if (shot.consumed || !(shot.life_ticks_remaining > 0.0F) ||
           shot.target_ship_slot != static_cast<std::int16_t>(ship_slot) ||
-          shot.retarget_cooldown != 0) {
+          shot.guidance_state != 0) {
         continue;
       }
       const Weapon *weapon = state.scenario.Weapon(
@@ -1040,7 +1040,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
   shot.damage_decay_elapsed_ticks =
       w->damage_decay_interval_ticks < 1 ? -1.0F : 0.0F;
   shot.damage_decay_points = 0;
-  shot.retarget_cooldown = 0;
+  shot.guidance_state = 0;
   shot.point_defense_durability =
       std::max<std::int16_t>(0, w->point_defense_durability);
 
@@ -1130,7 +1130,7 @@ int NovaWeapon_SpawnProjectile(GameState &state,
                    static_cast<int>(
                        100.0F / std::max(0.01F, state.last_frame_tick_scale)));
       if (RandomBelow(state, roll_range) + 1 <= system->interference) {
-        shot.retarget_cooldown = 999;
+        shot.guidance_state = 999;
       }
     }
   }
@@ -1335,7 +1335,7 @@ int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
   shot.damage_decay_elapsed_ticks =
       w->damage_decay_interval_ticks < 1 ? -1.0F : 0.0F;
   shot.damage_decay_points = 0;
-  shot.retarget_cooldown = 0;
+  shot.guidance_state = 0;
   shot.linked_shot_generation = 0;
   // Original frame_cycle_index seed: Random(0x24) unless flags_primary 0x4
   // (a fixed/heading sprite set) is set.
@@ -1529,15 +1529,14 @@ void NovaWeapon_SpawnLinkedShotsOnImpact(
   }
 }
 
-// Ghidra Shot_UpdateShotGuidance (0x00431530): per-frame projectile guidance,
-// ported per the plate comment in the Ghidra DB (state machine on
-// ShotState.retarget_cooldown: 0 homing, 1 asteroid target, 998 inert latch,
-// 999 interference weave; mode-6 rocket acceleration blend and mode-5 bomb
-// nose-follow post passes). `elapsed_ticks` stands in for the original's
-// g_avg_frame_tick_scale.
+// Ghidra 0x00431530 Shot_UpdateShotGuidance. Normal homing consumes normalized
+// 30 Hz time; asteroid-decoy tracking, interference weaving, random
+// opportunities, rocket acceleration, and bomb weathervaning consume raw
+// spaceflight calls replayed by the caller at the original 21 ms cadence.
 void NovaWeapon_UpdateShotGuidance(GameState &state,
                                    ActiveShot &shot,
-                                   float elapsed_ticks) {
+                                   float elapsed_ticks,
+                                   int raw_call_count) {
   const Weapon *w = WeaponAt(state, shot.weapon_id);
   if (w == nullptr) {
     return;
@@ -1548,40 +1547,74 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
     return;
   }
   const float frame_scale = std::max(0.0F, elapsed_ticks);
-  const int cooldown = shot.retarget_cooldown;
+  const float shot_age =
+      static_cast<float>(w->lifetime_ticks) - shot.life_ticks_remaining;
+  raw_call_count = std::max(0, raw_call_count);
 
-  if (cooldown == 0) {
-    if (mode != 1) {
-      return; // only homing weapons guide in the normal state
-    }
-    // The target must be gone (-1) or active in the shot's system.
+  // The random parts of normal homing are raw-call opportunities. Perform
+  // them before the continuous turn, as in the original call ordering.
+  for (int call = 0; call < raw_call_count && shot.guidance_state == 0 &&
+                     mode == 1 && frame_scale * kGuidanceAgeGateF64 < shot_age;
+       ++call) {
     const std::int16_t target_slot = shot.target_ship_slot;
-    if (target_slot != -1) {
-      if (!state.SlotInRange(static_cast<std::size_t>(target_slot))) {
-        return;
-      }
-      const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-      if (!target.is_active || target.current_system_id != shot.system_id) {
-        return;
+    if (target_slot < 0 ||
+        !state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+      continue;
+    }
+    Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+    bool jammed = false;
+    for (int channel = 0; channel < 4; ++channel) {
+      const int lock = shot.lock_quality[channel];
+      if (lock > 0 &&
+          NovaAi_GetShipJammingScore(state, target, channel) > 100 - lock) {
+        jammed = true;
+        break;
       }
     }
+    if (jammed && (w->flags_quaternary & 0x8000U) != 0U &&
+        RandomBelow(state, 500) == 0 && shot.owner_ship_slot >= 0 &&
+        shot.owner_ship_slot <
+            static_cast<std::int16_t>(GameState::kMaxShips)) {
+      shot.target_ship_slot = shot.owner_ship_slot;
+      shot.owner_ship_slot = -1;
+      continue;
+    }
+    if (shot.owner_ship_slot >= 0 &&
+        shot.owner_ship_slot <
+            static_cast<std::int16_t>(GameState::kMaxShips) &&
+        !NovaAiShip_CanEngageTargetUnderCloakRules(
+            state,
+            state.ShipAt(static_cast<std::size_t>(shot.target_ship_slot)),
+            state.ShipAt(static_cast<std::size_t>(shot.owner_ship_slot))) &&
+        (w->flags_quaternary & 0x8000U) != 0U &&
+        RandomBelow(state, 1000) == 0) {
+      shot.target_ship_slot = shot.owner_ship_slot;
+      shot.owner_ship_slot = -1;
+    }
+  }
 
-    int bearing = RoundHeadingDeg(shot.heading_deg);
+  if (shot.guidance_state == 0 && mode == 1) {
+    // The target must be gone (-1) or active in the shot's system.
+    std::int16_t target_slot = shot.target_ship_slot;
+    bool target_valid = target_slot == -1;
     if (target_slot != -1) {
-      const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-      bearing = static_cast<int>(
-          BearingDeg(shot.pos_x, shot.pos_y, target.pos_x, target.pos_y));
+      if (state.SlotInRange(static_cast<std::size_t>(target_slot))) {
+        Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+        target_valid =
+            target.is_active && target.current_system_id == shot.system_id;
+      }
     }
-    const float turn_rate = w->guided_turn_rate;
-    const float remaining =
-        static_cast<float>(w->lifetime_ticks) - shot.life_ticks_remaining;
-    // Homing runs only while more than frame_scale * 30 ticks of life remain:
-    // guided weapons fly dumb over roughly their final second.
-    if (frame_scale * kGuidanceLifeGateF64 < remaining) {
-      float effective_turn = turn_rate;
+    if (target_valid) {
+      int bearing = RoundHeadingDeg(shot.heading_deg);
+      if (target_slot != -1) {
+        Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+        bearing = static_cast<int>(
+            BearingDeg(shot.pos_x, shot.pos_y, target.pos_x, target.pos_y));
+      }
+      float effective_turn = w->guided_turn_rate;
       // Jamming: the first seek channel whose vulnerability roll loses to the
-      // target's jamming score dulls (or reverses) the turn and can flip the
-      // missile onto its owner.
+      // target's jamming score dulls or reverses the turn. Owner-retarget RNG
+      // was replayed above on the raw-call cadence.
       if (target_slot != -1) {
         Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
         for (int channel = 0; channel < 4; ++channel) {
@@ -1595,19 +1628,13 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
                                    ? effective_turn * kJamTurnSignF32
                                    : 0.0F;
             }
-            if ((w->flags_quaternary & 0x8000U) != 0U &&
-                RandomBelow(state, 500) == 0 && shot.owner_ship_slot >= 0 &&
-                shot.owner_ship_slot <
-                    static_cast<std::int16_t>(GameState::kMaxShips)) {
-              shot.target_ship_slot = shot.owner_ship_slot;
-              shot.owner_ship_slot = -1;
-            }
             break;
           }
         }
       }
       // A target the owner cannot legitimately engage (cloak rules) makes the
       // missile go dumb; Seeker 0x8000 may retarget the owner instead.
+      target_slot = shot.target_ship_slot;
       if (target_slot != -1 && shot.owner_ship_slot >= 0 &&
           shot.owner_ship_slot <
               static_cast<std::int16_t>(GameState::kMaxShips)) {
@@ -1617,11 +1644,6 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
             state.ShipAt(static_cast<std::size_t>(shot.owner_ship_slot));
         if (!NovaAiShip_CanEngageTargetUnderCloakRules(state, target, owner)) {
           effective_turn = 0.0F;
-          if ((w->flags_quaternary & 0x8000U) != 0U &&
-              RandomBelow(state, 1000) == 0) {
-            shot.target_ship_slot = shot.owner_ship_slot;
-            shot.owner_ship_slot = -1;
-          }
         }
       }
       // Seeker 0x4000 (loses lock if target not directly ahead): inside 250 px
@@ -1640,13 +1662,17 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
           }
         }
       }
-      TurnShotToward(shot, bearing, effective_turn, frame_scale);
+      if (frame_scale * kGuidanceAgeGateF64 < shot_age) {
+        TurnShotToward(shot, bearing, effective_turn, frame_scale);
+      }
       WrapHeadingAndRebuildVelocity(*w, shot);
     }
-    // Seeker 0x0002 (decoyed by asteroids): 1-in-10 per frame, a nearby active
-    // asteroid roughly ahead (200 px box, 16 deg cone) becomes the target and
-    // latches state 1.
-    if ((w->flags_quaternary & 0x0002U) != 0U && RandomBelow(state, 10) == 0) {
+  }
+
+  for (int call = 0; call < raw_call_count; ++call) {
+    bool acquired_asteroid_decoy = false;
+    if (shot.guidance_state == 0 && mode == 1 &&
+        (w->flags_quaternary & 0x0002U) != 0U && RandomBelow(state, 10) == 0) {
       for (std::size_t i = 0; i < state.asteroid_pool.size(); ++i) {
         const AsteroidState &asteroid = state.asteroid_pool[i];
         if (!asteroid.active) {
@@ -1663,112 +1689,87 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
                                         asteroid.target_pos_y));
         if (ShortestAngleDeltaDeg(to_asteroid,
                                   RoundHeadingDeg(shot.heading_deg)) < 16) {
-          shot.retarget_cooldown = 1;
+          shot.guidance_state = 1;
           shot.target_ship_slot = static_cast<std::int16_t>(i);
+          acquired_asteroid_decoy = true;
           break;
         }
       }
     }
-    return;
-  }
 
-  if (cooldown == 999) {
-    // Confused by interference: weave left/right on a 300-frame phase while
-    // more than 15 ticks of life remain, then rebuild the velocity.
-    const float remaining =
-        static_cast<float>(w->lifetime_ticks) - shot.life_ticks_remaining;
-    if (kGuidanceLifeGateLooseF64 < remaining) {
-      // 0x00431530 truncates the guided turn rate toward zero (x87 FIST +
-      // residual/sign correction), not round-to-nearest.
-      const int effective_turn = static_cast<int>(w->guided_turn_rate);
-      if (state.spaceflight_frame_counter % 300 < 150) {
-        shot.heading_deg -= static_cast<float>(effective_turn);
-      } else {
-        shot.heading_deg += static_cast<float>(effective_turn);
+    if (shot.guidance_state == 999) {
+      if (kGuidanceAgeGateF64 < shot_age) {
+        const int phase_counter =
+            static_cast<int>(state.shot_guidance_frame_counter) -
+            (raw_call_count - 1 - call);
+        if (phase_counter % 300 < 150) {
+          shot.heading_deg -= w->guided_turn_rate;
+        } else {
+          shot.heading_deg += w->guided_turn_rate;
+        }
       }
+      WrapHeadingAndRebuildVelocity(*w, shot);
+      if ((w->flags_quaternary & 0x8000U) != 0U &&
+          RandomBelow(state, 1000) == 0 && shot.owner_ship_slot >= 0 &&
+          shot.owner_ship_slot <
+              static_cast<std::int16_t>(GameState::kMaxShips)) {
+        shot.guidance_state = 0;
+        shot.target_ship_slot = shot.owner_ship_slot;
+        shot.owner_ship_slot = -1;
+      }
+    } else if (!acquired_asteroid_decoy && shot.guidance_state != 0 &&
+               shot.guidance_state != 998) {
+      int bearing = RoundHeadingDeg(shot.heading_deg);
+      if (shot.guidance_state == 1) {
+        const std::int16_t asteroid_slot = shot.target_ship_slot;
+        if (asteroid_slot >= 0 &&
+            asteroid_slot <
+                static_cast<std::int16_t>(state.asteroid_pool.size()) &&
+            state.asteroid_pool[static_cast<std::size_t>(asteroid_slot)]
+                .active) {
+          const AsteroidState &asteroid =
+              state.asteroid_pool[static_cast<std::size_t>(asteroid_slot)];
+          bearing = static_cast<int>(BearingDeg(shot.pos_x,
+                                                shot.pos_y,
+                                                asteroid.target_pos_x,
+                                                asteroid.target_pos_y));
+        } else {
+          shot.target_ship_slot = -1;
+        }
+      }
+      if (kGuidanceAgeGateF64 < shot_age) {
+        TurnShotToward(shot, bearing, w->guided_turn_rate, 1.0F);
+      }
+      WrapHeadingAndRebuildVelocity(*w, shot);
     }
-    WrapHeadingAndRebuildVelocity(*w, shot);
-    // Seeker 0x8000 may recover, retargeting onto the owner.
-    if ((w->flags_quaternary & 0x8000U) != 0U &&
-        RandomBelow(state, 1000) == 0 && shot.owner_ship_slot >= 0 &&
-        shot.owner_ship_slot <
-            static_cast<std::int16_t>(GameState::kMaxShips)) {
-      shot.retarget_cooldown = 0;
-      shot.target_ship_slot = shot.owner_ship_slot;
-      shot.owner_ship_slot = -1;
-    }
-    return;
-  }
-  if (cooldown == 998) {
-    return; // inert latch (target lost); no guidance, no velocity rebuild
-  }
 
-  // Any other state (set 1 = asteroid target): fly toward the recorded
-  // asteroid slot (or straight ahead once it deactivates).
-  int bearing = RoundHeadingDeg(shot.heading_deg);
-  if (cooldown == 1) {
-    const std::int16_t asteroid_slot = shot.target_ship_slot;
-    if (asteroid_slot == -1) {
-      bearing = RoundHeadingDeg(shot.heading_deg);
-    } else if (asteroid_slot <
-               static_cast<std::int16_t>(state.asteroid_pool.size())) {
-      const AsteroidState &asteroid =
-          state.asteroid_pool[static_cast<std::size_t>(asteroid_slot)];
-      if (!asteroid.active) {
-        shot.target_ship_slot = -1;
-        bearing = RoundHeadingDeg(shot.heading_deg);
-      } else {
-        bearing = static_cast<int>(BearingDeg(shot.pos_x,
-                                              shot.pos_y,
-                                              asteroid.target_pos_x,
-                                              asteroid.target_pos_y));
-      }
-    } else {
-      shot.target_ship_slot = -1;
+    if (mode == 6) {
+      const float speed = w->projectile_speed / 100.0F;
+      float polar_x = 0.0F;
+      float polar_y = 0.0F;
+      AddPolarVelocity(static_cast<float>(RoundHeadingDeg(shot.heading_deg)),
+                       speed,
+                       polar_x,
+                       polar_y);
+      shot.vel_x =
+          (shot.vel_x * kRocketBlendOldF32 + polar_x * kRocketBlendNewF32) *
+          kOnePercentF64;
+      shot.vel_y =
+          (shot.vel_y * kRocketBlendOldF32 + polar_y * kRocketBlendNewF32) *
+          kOnePercentF64;
     }
-  }
-  const float remaining =
-      static_cast<float>(w->lifetime_ticks) - shot.life_ticks_remaining;
-  if (kGuidanceLifeGateLooseF64 < remaining) {
-    TurnShotToward(shot, bearing, w->guided_turn_rate, frame_scale);
-  }
-  WrapHeadingAndRebuildVelocity(*w, shot);
-
-  // Mode 6 (freeflight rocket): blend the inherited velocity toward the aim
-  // heading -- (vel*94 + polar*5) * 0.01 per frame.
-  if (mode == 6) {
-    const float speed = w->projectile_speed / 100.0F;
-    float polar_x = 0.0F;
-    float polar_y = 0.0F;
-    AddPolarVelocity(static_cast<float>(RoundHeadingDeg(shot.heading_deg)),
-                     speed,
-                     polar_x,
-                     polar_y);
-    shot.vel_x =
-        (shot.vel_x * kRocketBlendOldF32 + polar_x * kRocketBlendNewF32) *
-        kOnePercentF64;
-    shot.vel_y =
-        (shot.vel_y * kRocketBlendOldF32 + polar_y * kRocketBlendNewF32) *
-        kOnePercentF64;
-  }
-  // Mode 5 (freefall bomb): the nose follows the velocity vector, turning
-  // toward it by 1 deg/frame (g_cloak_fade_passive_decay 0x00575318).
-  if (mode == 5) {
-    // Scale the velocity before the bearing math as the original does
-    // (k_bearing_precision_scale_f64 1000.0).
-    const int vel_bearing = static_cast<int>(
-        BearingDeg(0.0F, 0.0F, shot.vel_x * 1000.0F, shot.vel_y * 1000.0F));
-    if (ShortestAngleDeltaDeg(vel_bearing, RoundHeadingDeg(shot.heading_deg)) >
-        0) {
-      int forward = vel_bearing - RoundHeadingDeg(shot.heading_deg);
-      forward %= 360;
-      if (forward < 0) {
-        forward += 360;
-      }
-      if (forward < 181) {
-        shot.heading_deg += kBombNoseTurnRate;
-      } else {
-        shot.heading_deg -= kBombNoseTurnRate;
+    if (mode == 5) {
+      const int vel_bearing = static_cast<int>(
+          BearingDeg(0.0F, 0.0F, shot.vel_x * 1000.0F, shot.vel_y * 1000.0F));
+      if (ShortestAngleDeltaDeg(vel_bearing,
+                                RoundHeadingDeg(shot.heading_deg)) > 0) {
+        int forward = vel_bearing - RoundHeadingDeg(shot.heading_deg);
+        forward %= 360;
+        if (forward < 0) {
+          forward += 360;
+        }
+        shot.heading_deg +=
+            forward < 181 ? kBombNoseTurnRate : -kBombNoseTurnRate;
       }
     }
   }
@@ -2437,7 +2438,7 @@ void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
         shot.target_ship_slot == ship.squad_leader_ship_slot;
     if (shot.consumed || !(shot.life_ticks_remaining > 0.0F) ||
         shot_weapon == nullptr || shot_weapon->weapon_mode_code != 1 ||
-        shot.retarget_cooldown != 0 || (shot_weapon->flags & 0x0080U) != 0U ||
+        shot.guidance_state != 0 || (shot_weapon->flags & 0x0080U) != 0U ||
         (shot.target_ship_slot != ship.ship_instance_id && !protects_leader)) {
       continue;
     }
@@ -2996,7 +2997,20 @@ void NovaWeapon_TickShots(GameState &state, float elapsed_ticks) {
   auto &shots = state.active_shots;
   const float tick_scale = std::max(0.0F, elapsed_ticks);
   state.last_frame_tick_scale = tick_scale;
-  ++state.spaceflight_frame_counter;
+  const std::uint16_t display_counter_bits =
+      std::bit_cast<std::uint16_t>(state.spaceflight_frame_counter);
+  state.spaceflight_frame_counter = std::bit_cast<std::int16_t>(
+      static_cast<std::uint16_t>(display_counter_bits + 1));
+  state.shot_guidance_frame_counter_accumulator +=
+      tick_scale / kOriginalRawCallTicks;
+  const int raw_call_count = static_cast<int>(
+      std::floor(state.shot_guidance_frame_counter_accumulator));
+  state.shot_guidance_frame_counter_accumulator -=
+      static_cast<float>(raw_call_count);
+  const std::uint16_t counter_bits =
+      std::bit_cast<std::uint16_t>(state.shot_guidance_frame_counter);
+  state.shot_guidance_frame_counter = std::bit_cast<std::int16_t>(
+      static_cast<std::uint16_t>(counter_bits + raw_call_count));
   // Linked submunitions append to `shots` when their parent expires. Process
   // only the frame's original shots; the original's fixed pool could revisit a
   // newly allocated earlier slot, while this compacted vector lets children
@@ -3029,9 +3043,9 @@ void NovaWeapon_TickShots(GameState &state, float elapsed_ticks) {
       if (target < 0 ||
           target >= static_cast<std::int16_t>(GameState::kMaxShips)) {
         shot.target_ship_slot = -1;
-      } else if (shot.retarget_cooldown == 0 &&
+      } else if (shot.guidance_state == 0 &&
                  !state.ShipAt(static_cast<std::size_t>(target)).is_active) {
-        shot.retarget_cooldown = 998;
+        shot.guidance_state = 998;
         shot.target_ship_slot = -1;
       }
     }
@@ -3065,7 +3079,7 @@ void NovaWeapon_TickShots(GameState &state, float elapsed_ticks) {
     }
     // Guidance runs before movement: a homing shot turns and rebuilds its
     // velocity, then the (possibly new) vector integrates this frame.
-    NovaWeapon_UpdateShotGuidance(state, shot, tick_scale);
+    NovaWeapon_UpdateShotGuidance(state, shot, tick_scale, raw_call_count);
     shot.pos_x += shot.vel_x * tick_scale;
     shot.pos_y += shot.vel_y * tick_scale;
     NovaWeapon_StepShotAnimation(state, shot, tick_scale);

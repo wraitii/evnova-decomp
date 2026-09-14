@@ -895,10 +895,10 @@ struct ActiveShot {
   // velocity from it each frame; the renderer maps it to the shot sprite frame
   // (frame_count * heading / 360).
   float heading_deg = 0.0F;
-  // Ghidra ShotState.retarget_cooldown (+0x30): guidance state latch. 0 =
-  // normal homing, 1 = asteroid target (target_ship_slot indexes the asteroid
-  // pool), 998 = inert (target lost), 999 = interference weave.
-  std::int16_t retarget_cooldown = 0;
+  // Ghidra ShotState.guidance_state (+0x30): guidance state latch. 0 =
+  // normal homing, 1 = asteroid-decoy tracking (target_ship_slot then indexes
+  // the asteroid pool), 998 = inert (target lost), 999 = interference weave.
+  std::int16_t guidance_state = 0;
   // Ghidra ShotState +0x40: guided-weapon durability against point-defense
   // hits. A value below 1 makes the next PD hit destroy the shot immediately.
   std::int16_t point_defense_durability = 0;
@@ -1406,11 +1406,13 @@ struct GameState {
   // time rolls that the original expresses as Random(100 / frame_scale) read
   // this instead of threading elapsed ticks through every fire path.
   float last_frame_tick_scale = 1.0F;
-  // Port stand-in for g_license_check_frame_counter: incremented once per
-  // simulated frame. The guided-shot interference weave (retarget_cooldown 999)
-  // phases its zig-zag off `counter % 300 < 150`; the original's shareware
-  // license-check duties for this counter are not reproduced.
-  std::uint32_t spaceflight_frame_counter = 0;
+  // Port-wide simulated-frame counter. Several still-display-cadenced systems
+  // use this pending their own reconstruction.
+  std::int16_t spaceflight_frame_counter = 0;
+  // Logical mirror of Ghidra g_spaceflight_frame_counter (0x00597992) for the
+  // raw-call portions of Shot_UpdateShotGuidance.
+  std::int16_t shot_guidance_frame_counter = 0;
+  float shot_guidance_frame_counter_accumulator = 0.0F;
   // Player self-destruct countdown (Ghidra _g_playerSelfDestructCountdown):
   // -1.0 disarmed. The self-destruct command arms 150.0; it decays by the
   // frame tick scale and detonates the player ship at <= 1.0
@@ -1519,9 +1521,9 @@ struct GameState {
   std::array<FreeflightObjectState, FreeflightObjectState::kPoolSize>
       freeflight_objects{};
   // Ghidra SWParticle pool (g_swparticles_entries). The original integrates
-  // particles once per 30 Hz tick; this port's frame loop runs at display
-  // cadence, so the fractional elapsed_ticks are banked here and whole ticks
-  // are stepped (see NovaEffects_TickSwParticles).
+  // particles once per outer flight iteration, whose maximum cadence is one
+  // call per 21 ms. Fractional elapsed time is banked here and whole logical
+  // calls are stepped (see NovaEffects_TickSwParticles).
   std::vector<SwParticle> sw_particles;
   float sw_particle_tick_accumulator = 0.0F;
 
