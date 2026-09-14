@@ -350,6 +350,38 @@ TEST_CASE("destroyed NPCs neither select nor fire a weapon bank",
   CHECK(state.active_shots.empty());
 }
 
+TEST_CASE("a newly disabled NPC cannot retain a latched firing bank",
+          "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.current_system_id = 0;
+  const ShipClass *cls = state.scenario.Ship(0x80);
+  REQUIRE(cls != nullptr);
+  npc.armor_points = static_cast<float>(cls->base_armor) * 0.2F;
+  REQUIRE(npc.armor_points > 0.0F);
+  REQUIRE(NovaAiShip_IsDisabled(state, npc));
+  npc.active_weapon_bank_slot = 0;
+  npc.ai_fire_trigger_latch = 1;
+  npc.weapon_sprite_flash_level = 16.0F;
+
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+
+  CHECK(state.active_shots.empty());
+  CHECK(npc.active_weapon_bank_slot == -1);
+  CHECK(npc.ai_fire_trigger_latch == 0);
+  // The firing path no longer resets this to 32; Ship_UpdateVisualState can
+  // now decay the already-visible flash normally on subsequent frames.
+  CHECK(npc.weapon_sprite_flash_level == Catch::Approx(16.0F));
+}
+
 // The distance falloff mirrors NovaAudio_PlaySpatialByDistance (0x004692e0)
 // with the sound-volume extent factored out: full volume within 200 px, then
 // per-channel 1/d^2 falloff (loud channel full at 850 px, quiet channel at

@@ -2683,11 +2683,16 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   const std::int16_t bank = ship.active_weapon_bank_slot;
   // Ship_HandleShip (0x00433050) keeps destroyed slots around long enough for
   // their death/debris handling, but Weapon_FireShipWeapons must not launch a
-  // bank that was latched before the lethal hit.
+  // bank that was latched before the disabling/lethal hit. The original AI
+  // and control paths suppress fire-restricted ships before this handoff; keep
+  // the firing boundary defensive so a same-frame hit cannot leave a
+  // continuous-fire bank reasserting the weapon sprite flash indefinitely.
+  const bool fire_restricted = NovaAiShip_IsDisabled(state, ship);
   if (ship.ship_instance_id == 0 || bank < 0 || bank >= 0x100 ||
-      ship.ai_fire_trigger_latch == 0 || ship.death_timer_active > 0.0F ||
-      ship.armor_points <= 0.0F) {
-    if (ship.death_timer_active > 0.0F || ship.armor_points <= 0.0F) {
+      ship.ai_fire_trigger_latch == 0 || fire_restricted ||
+      ship.death_timer_active > 0.0F || ship.armor_points <= 0.0F) {
+    if (fire_restricted || ship.death_timer_active > 0.0F ||
+        ship.armor_points <= 0.0F) {
       ship.active_weapon_bank_slot = -1;
       ship.ai_fire_trigger_latch = 0;
     }

@@ -122,10 +122,11 @@ TEST_CASE("npc forward thrust accelerates along the heading") {
   cls.accel = 500.0F; // -> thrust 0.1 px/tick^2 (cruise cap / speed projection)
   cls.speed = 400.0F; // -> max speed 4.0 px/tick
 
-  // One tick of forward thrust: step = cmd * ticks = 10.
+  // The inherited zero velocity is integrated first; current-frame thrust then
+  // installs the velocity used by the following frame.
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
   CHECK(ship.vel_y == Catch::Approx(-10.0F)); // polar(0)= up / -y for sin/cos
-  CHECK(ship.pos_y == Catch::Approx(-10.0F));
+  CHECK(ship.pos_y == Catch::Approx(0.0F));
 }
 
 TEST_CASE("state 2 mode 4 applies the jump ramp directly to position") {
@@ -173,10 +174,12 @@ TEST_CASE("disabled and destroyed NPCs do not regenerate") {
   CHECK(disabled.shield_points == Catch::Approx(10.0F));
   CHECK(disabled.armor_points == Catch::Approx(20.0F));
   // Ship_HandleShip's g_fire_restricted_ship_velocity_damp (0x00575448) is
-  // 0.995: a disabled ship drifts to a stop gradually, not immediately.
-  CHECK(disabled.vel_y == Catch::Approx(-9.95F));
-  CHECK(disabled.pos_y == Catch::Approx(-9.95F));
-  CHECK(disabled.speed == Catch::Approx(9.95F));
+  // 0.995 per original raw call: a disabled ship drifts to a stop gradually,
+  // with one normalized tick representing 1/0.63 raw calls.
+  const float damped_speed = 10.0F * std::pow(0.995F, 1.0F / 0.63F);
+  CHECK(disabled.vel_y == Catch::Approx(-damped_speed));
+  CHECK(disabled.pos_y == Catch::Approx(-damped_speed));
+  CHECK(disabled.speed == Catch::Approx(damped_speed));
 
   game::Ship destroyed = disabled;
   destroyed.shield_points = 10.0F;
@@ -240,8 +243,24 @@ TEST_CASE("npc arrival slowdown scales its decay across a slow frame") {
 
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 2.0F);
 
-  CHECK(ship.ai_desired_speed == Catch::Approx(-27.67F));
+  CHECK(ship.ai_desired_speed == Catch::Approx(-26.301587F));
   CHECK(ship.ai_maneuver_timer_ms <= 0.0F);
+}
+
+TEST_CASE("npc arrival installs velocity after integrating the current frame") {
+  game::GameState state;
+  game::Ship ship;
+  ship.heading = 0.0F;
+  ship.ai_desired_heading_deg = 0;
+  ship.ai_desired_speed = -30.0F;
+  ship.ai_forward_thrust_cmd = -1.165F;
+  game::ShipClass cls = TestShipClass();
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.5F);
+
+  CHECK(ship.pos_x == Catch::Approx(0.0F));
+  CHECK(ship.pos_y == Catch::Approx(0.0F));
+  CHECK(ship.vel_y == Catch::Approx(-30.0F));
 }
 
 TEST_CASE("npc inertia-less ships are pinned (vel zeroed, no motion)") {
@@ -306,13 +325,14 @@ TEST_CASE("gravity-shield npc keeps a scalar clamped speed and applies it") {
   ship.ai_forward_thrust_cmd = 2.0F;
   ship.speed = 1.0F;
 
-  // Forward thrust accumulates the scalar speed: 1 + cmd*ticks = 3, then the
-  // position block steers the velocity toward heading*3 at 0.4/tick from rest:
-  // vel_y approaches -3 by one step, so after one tick it sits at -2.6.
+  // The original position block consumes the inherited scalar speed first:
+  // steering toward heading*1 from rest leaves vel_y at -0.6 after the 0.4
+  // bounded step, and that velocity is integrated. Current-frame thrust then
+  // raises the scalar speed from 1 to 3 for the following frame.
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
   CHECK(ship.speed == Catch::Approx(3.0F));
-  CHECK(ship.vel_y == Catch::Approx(-2.6F)); // heading 0 = up, one steer step
-  CHECK(ship.pos_y == Catch::Approx(-2.6F));
+  CHECK(ship.vel_y == Catch::Approx(-0.6F)); // heading 0 = up, one steer step
+  CHECK(ship.pos_y == Catch::Approx(-0.6F));
 }
 
 TEST_CASE("gravity-shield detect excludes ai_control_mode 0x0c") {
@@ -504,9 +524,10 @@ TEST_CASE("destroyed npc coasts with its inertia instead of stopping") {
 
   // Ship_HandleShip applies the disabled 0.995 damp then integrates one tick;
   // the wreck must not be pinned at its destruction point.
-  CHECK(ship.vel_x == Catch::Approx(9.95F));
-  CHECK(ship.pos_x == Catch::Approx(9.95F));
-  CHECK(ship.death_timer_active == Catch::Approx(4.0F));
+  const float damped_velocity = 10.0F * std::pow(0.995F, 1.0F / 0.63F);
+  CHECK(ship.vel_x == Catch::Approx(damped_velocity));
+  CHECK(ship.pos_x == Catch::Approx(damped_velocity));
+  CHECK(ship.death_timer_active == Catch::Approx(5.0F - 1.0F / 0.63F));
 }
 
 TEST_CASE("destroyed npc keeps its velocity through the AI decision pass") {
