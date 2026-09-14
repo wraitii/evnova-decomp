@@ -477,10 +477,11 @@ NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
 
 // Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. PARTIAL reconstruction:
 // the early retention gate for active engagements, the mission-fleet goal 0/1
-// arms, the weapon-readiness early return, the IFF-scrambler/policy player
-// shield, and the behavior-6 escort re-selection. NOT implemented: the license/
-// anti-tamper check, the pers_def personality arms, and every government target
-// pass (ally-support scan, flags_primary&1 aggressive scan, near-player
+// arms, the weapon-readiness early return, the non-xenophobic ally-support
+// pass, the IFF-scrambler/policy player shield, and the behavior-6 escort
+// re-selection. NOT implemented: the license/anti-tamper check, the pers_def
+// personality arms, and the remaining government target passes
+// (flags_primary&1 aggressive scan, near-player
 // reputation/odds gate, inherent-combat roll, distress-responder rescans) with
 // its perceived-combat-strength filtering; the middle of the routine is an
 // interim clean-room nearest-hostile slice.

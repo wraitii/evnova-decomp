@@ -455,6 +455,29 @@ TEST_CASE("scripted manoeuvre targets ignore queued beam impacts",
   CHECK(target.armor_points == Catch::Approx(100.0F));
 }
 
+TEST_CASE("targeted player beam alerts same-government warships",
+          "[collision][beam][ai]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.governments.resize(1);
+  state.ShipAt(1).faction_or_government_id = 0;
+
+  Ship &responder = state.ShipAt(2);
+  responder.is_active = true;
+  responder.ship_instance_id = 2;
+  responder.ship_class_id = 0;
+  responder.current_system_id = 0;
+  responder.faction_or_government_id = 0;
+  responder.ai_behavior_code = 3;
+  responder.ai_state_code = 0;
+  responder.pers_def_slot = 0;
+
+  NovaWeapon_ResolveDirectWeaponHit(state, 0, 1, 0);
+
+  CHECK(responder.ai_state_code == 4);
+  CHECK(responder.primary_target_ship_slot == 0);
+}
+
 TEST_CASE("lethal projectile leaves destruction to armor state and is consumed",
           "[collision]") {
   GameState state;

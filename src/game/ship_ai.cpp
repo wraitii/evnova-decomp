@@ -1454,10 +1454,11 @@ int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
 
 // Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. PARTIAL reconstruction:
 // the early retention gate, the active mission-fleet goal 0/1 arms, the
-// weapon-readiness early return, the IFF-scrambler/policy player shield, and
-// the behavior-6 escort re-selection. NOT implemented: the license/anti-tamper
-// check, the pers_def personality arms, and every government target pass
-// (ally-support 0x0040e3c0, flags_primary&1 aggressive 0x0040e710, near-player
+// weapon-readiness early return, the non-xenophobic ally-support pass, the
+// IFF-scrambler/policy player shield, and the behavior-6 escort re-selection.
+// NOT implemented: the license/anti-tamper check, the pers_def personality
+// arms, and the remaining government target passes (flags_primary&1
+// aggressive 0x0040e710, near-player
 // reputation/odds 0x0040ece3, inherent-combat roll 0x0040e57f, distress-
 // responder rescans/common tail 0x0040eea0) with their perceived-combat-
 // strength filtering, so the middle of the routine keeps the previous
@@ -1528,20 +1529,65 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
     return;
   }
 
-  // TODO(decomp(0x0040e020)) skipped: the original's government
-  // target passes (0x0040e3c0/0x0040e710 ally-support scan, flags_primary&1
-  // aggressive scan, the 0x0040ece3 near-player reputation/odds gate, the
-  // 0x0040e57f inherent-combat-government roll, and the 0x0040eea0 distress-
-  // responder rescans) with their perceived-combat-strength filters are not
-  // yet reconstructed. NovaAiShip_ComputePerceivedCombatStrength is ported but
-  // unintegrated (no gameplay caller), so it filters nothing here. The region
-  // below keeps the previous clean-room nearest-hostile selection, now
-  // respecting the IFF-scrambler/policy player shield, followed by the
-  // faithful behavior-6 escort re-selection.
   const Government *ship_govt =
       ship.faction_or_government_id >= 0
           ? state.scenario.GovernmentByIndex(ship.faction_or_government_id)
           : nullptr;
+
+  // 0x0040e3c0: a non-xenophobic behavior-1..4 ship joins an allied ship's
+  // current fight when the ally's target is engageable and its perceived
+  // strength fits this government's MaxOdds. The executable deliberately
+  // does not require the allied ship to be in the same system.
+  if (ship_govt != nullptr && (ship_govt->flags_primary & 0x0001U) == 0U &&
+      ship.ai_behavior_code < 5) {
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      const Ship &ally = state.ShipAt(slot);
+      if (static_cast<std::int16_t>(slot) == ship.ship_instance_id ||
+          !ally.is_active || ally.faction_or_government_id < 0 ||
+          ally.primary_target_ship_slot < 0 ||
+          !state.SlotInRange(
+              static_cast<std::size_t>(ally.primary_target_ship_slot)) ||
+          (ally.ai_state_code != 3 && ally.ai_state_code != 4) ||
+          !NovaGovernment_AreGovtsAllied(state.scenario,
+                                         ship.faction_or_government_id,
+                                         ally.faction_or_government_id)) {
+        continue;
+      }
+      const Ship &ally_target =
+          state.ShipAt(static_cast<std::size_t>(ally.primary_target_ship_slot));
+      if ((ally.primary_target_ship_slot == 0 ||
+           ally_target.squad_leader_ship_slot == 0) &&
+          NovaGovernment_GetPolicyFlag(
+              state.scenario, ship.faction_or_government_id, 0)) {
+        continue;
+      }
+      if (!NovaAiShip_CanEngageTargetUnderCloakRules(
+              state, ally_target, ship)) {
+        continue;
+      }
+      const int target_strength =
+          NovaAiShip_ComputePerceivedCombatStrength(state, ally_target);
+      const int own_strength =
+          NovaAiShip_ComputePerceivedCombatStrength(state, ship);
+      if (static_cast<float>(target_strength) >
+          static_cast<float>(own_strength) * ship_govt->max_odds) {
+        continue;
+      }
+      ship.primary_target_ship_slot = ally.primary_target_ship_slot;
+      ship.ai_state_code = 4;
+      return;
+    }
+  }
+
+  // TODO(decomp(0x0040e020)) skipped: the original's government
+  // target passes (0x0040e710 flags_primary&1 aggressive scan, the 0x0040ece3
+  // near-player reputation/odds gate, the
+  // 0x0040e57f inherent-combat-government roll, and the 0x0040eea0 distress-
+  // responder rescans) with their perceived-combat-strength filters are not
+  // yet reconstructed. The region below keeps the previous clean-room
+  // nearest-hostile selection, now
+  // respecting the IFF-scrambler/policy player shield, followed by the
+  // faithful behavior-6 escort re-selection.
   const bool player_shielded =
       ship_govt != nullptr &&
       (ship_govt->iff_scrambler_active ||

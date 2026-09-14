@@ -1606,7 +1606,7 @@ TEST_CASE("acquire refuses a ship with no ready weapons") {
   CHECK(ship.primary_target_ship_slot == -1);
 }
 
-TEST_CASE("warship does not acquire an allied ship attacking the player") {
+TEST_CASE("Federation warship shares an ally's aggression against the player") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
@@ -1615,6 +1615,9 @@ TEST_CASE("warship does not acquire an allied ship attacking the player") {
   state.player.is_active = true;
   state.player.ship_instance_id = 0;
   state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.ship_class_id = 0;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
 
   game::Ship &acquirer = state.ShipAt(1);
   acquirer.is_active = true;
@@ -1625,6 +1628,8 @@ TEST_CASE("warship does not acquire an allied ship attacking the player") {
   acquirer.ai_behavior_code = 3;
   acquirer.ai_state_code = 0;
   acquirer.primary_target_ship_slot = -1;
+  acquirer.armor_points = 750.0F;
+  acquirer.shield_points = 800.0F;
   game::NovaWeapon_EnsureNpcWeaponBanks(state, acquirer);
 
   game::Ship &ally = state.ShipAt(2);
@@ -1641,7 +1646,8 @@ TEST_CASE("warship does not acquire an allied ship attacking the player") {
 
   // Ghidra 0x0040e3c0 redirects allied support onto the ally's target; it
   // never marks the allied attacker itself as hostile.
-  CHECK(acquirer.primary_target_ship_slot != 2);
+  CHECK(acquirer.primary_target_ship_slot == 0);
+  CHECK(acquirer.ai_state_code == 4);
 }
 
 TEST_CASE("mission-fleet goal 0 forces hostility to the player") {

@@ -331,8 +331,10 @@ verified):
    The common tail clears the player flag for IFF-scrambler (`GovtDef +0x83`)
    or policy-flag governments, rescans distress responders, and falls back to
    the nearest acquirable ship via `Ship_IsShipAcquirableAsTarget`.
-   **Not reconstructed** — replaced by an interim clean-room nearest-hostile
-   slice (`TODO(decomp)`).
+   The non-xenophobic ally-support scan is reconstructed; the aggressive,
+   near-player reputation, inherent-combat-government, and common-tail passes
+   remain replaced by an interim clean-room nearest-hostile slice
+   (`TODO(decomp)`).
 7. **Behavior-6 re-selection (0x0040f293)** — with behavior 6 and no primary,
    picks the nearest same-system acquirable target excluding self and the squad
    leader (the predicate is called as `Ship_IsShipAcquirableAsTarget(ship,
@@ -346,14 +348,14 @@ verified):
    absolute axis), not `round(dx^2+dy^2)` and not round-to-nearest.
 
 `Ship_ComputePerceivedCombatStrengthAgainstShip` (0x00411800) is ported
-(`NovaAiShip_ComputePerceivedCombatStrength`) but **unintegrated**: the port has
-no C++ caller, so it does not filter acquisition yet.  In the original it is a
+(`NovaAiShip_ComputePerceivedCombatStrength`) and filters the reconstructed
+ally-support acquisition pass. In the original it is also a
 dependency of the step-6 government passes (call sites 0x0040e995, 0x0040ea61,
 0x0040ec36, 0x0040ecd1, 0x0040ef37, 0x0040f03f).
 `Government::iff_scrambler_active` (`GovtDef +0x83`) is modelled but its writer
 `Outfit_RecomputeOutfitDerivedState` (0x0046d901) is deferred, so the field is
 inert (never set) and the acquisition IFF term has no live effect.
 
-Current port status: steps 2, 4, 5 and 7 (and the strength helper) are faithful;
-steps 1 and 3 are explicitly skipped; step 6 is an interim clean-room
-replacement, so the routine is tracked at 55% in `decomp-progress.tsv`.
+Current port status: steps 2, 4, 5, 7, the strength helper, and step 6's
+ally-support arm are faithful; steps 1 and 3 are explicitly skipped, while the
+rest of step 6 retains the interim clean-room replacement.
