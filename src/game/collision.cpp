@@ -59,17 +59,6 @@ constexpr std::int16_t kAsteroidDebrisLifeBase = 0xf0;
 constexpr std::int16_t kAsteroidDebrisLifeMax = 0x1e0;
 constexpr std::int16_t kAsteroidDebrisPositionScatter = 16;
 
-// The asteroid row stores a packed 15-bit tint; the original converts it to
-// the surface pixel format at load. Expand 5-bit channels to 8-bit for the
-// 24-bit SDL particle color (the standard (v << 3) | (v >> 2) expansion).
-[[nodiscard]] std::uint32_t ExpandAsteroidParticleColor(std::uint32_t rgb555) {
-  const std::uint32_t r = (rgb555 >> 10U) & 0x1fU;
-  const std::uint32_t g = (rgb555 >> 5U) & 0x1fU;
-  const std::uint32_t b = rgb555 & 0x1fU;
-  return ((r << 3U) | (r >> 2U)) << 16U | ((g << 3U) | (g >> 2U)) << 8U |
-         ((b << 3U) | (b >> 2U));
-}
-
 // Ghidra 0x004115c0 Ship_ClearShipState0x09Or0x0FToIdle.
 // The sole hit-resolution callsite invokes this after Ship_SetShipHostileTo-
 // Player has changed the state to 4, making the check normally inert. Keep
@@ -1233,18 +1222,17 @@ void ResolveAsteroidDestructionPackage(GameState &state,
     }
   }
   // Debris SWParticle burst (part_count, part_color).
-  NovaEffects_SpawnWeaponImpactParticleBurst(
-      state,
-      asteroid.target_pos_x,
-      asteroid.target_pos_y,
-      kAsteroidDebrisParticleSpeed,
-      kAsteroidDebrisParticleScatter,
-      kAsteroidDebrisLifeBase,
-      kAsteroidDebrisLifeMax,
-      ExpandAsteroidParticleColor(def->part_color),
-      /*blend_mode=*/0x20,
-      def->part_count,
-      kAsteroidDebrisPositionScatter);
+  NovaEffects_SpawnWeaponImpactParticleBurst(state,
+                                             asteroid.target_pos_x,
+                                             asteroid.target_pos_y,
+                                             kAsteroidDebrisParticleSpeed,
+                                             kAsteroidDebrisParticleScatter,
+                                             kAsteroidDebrisLifeBase,
+                                             kAsteroidDebrisLifeMax,
+                                             def->part_color,
+                                             /*blend_mode=*/0x20,
+                                             def->part_count,
+                                             kAsteroidDebrisPositionScatter);
   if (def->explode_type != -1) {
     NovaEffects_SpawnAreaImpact(state,
                                 asteroid.target_pos_x,

@@ -1703,10 +1703,11 @@ void SpaceflightView::DrawImpactEffects(SdlPlatform &platform,
 // position onto the gameplay surface and writes one pixel per particle. This
 // port draws a 1x1 logical-pixel SDL point (SDL scales it by the display
 // density, so retina gets a 2x2 backing block like every other 1:1 sprite).
-// The particle color is written opaque, matching the original's 24-bit branch;
-// only its 8/16-bit branches did the life-weighted surface blend, which would
-// make the short-lived (life ~9) weapon sparks nearly invisible on a 32-bit
-// target.
+// SDL alpha reproduces the original 16-bit soft-particle blend: particles with
+// fewer than 32 life ticks contribute life/32 of their color. The original
+// 32-bit software-surface branch wrote opaque pixels, but that makes ordinary
+// weapon sparks (typically only 8-10 ticks) stay fully bright until they pop
+// out in the SDL renderer.
 void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
                                       const GameState &state) {
   if (state.sw_particles.empty()) {
@@ -1734,7 +1735,12 @@ void SpaceflightView::DrawSwParticles(SdlPlatform &platform,
     const std::uint8_t red = static_cast<std::uint8_t>(particle.color >> 16U);
     const std::uint8_t green = static_cast<std::uint8_t>(particle.color >> 8U);
     const std::uint8_t blue = static_cast<std::uint8_t>(particle.color);
-    SDL_SetRenderDrawColor(renderer, red, green, blue, SDL_ALPHA_OPAQUE);
+    constexpr int kFullParticleWeight = 0x20;
+    const int life_weight =
+        std::clamp<int>(particle.life_ticks, 0, kFullParticleWeight);
+    const auto alpha = static_cast<std::uint8_t>(
+        life_weight * SDL_ALPHA_OPAQUE / kFullParticleWeight);
+    SDL_SetRenderDrawColor(renderer, red, green, blue, alpha);
     SDL_RenderPoint(renderer, screen_x, screen_y);
   }
   SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);

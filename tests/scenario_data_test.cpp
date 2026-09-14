@@ -1020,6 +1020,8 @@ TEST_CASE("asteroid-type rows decode from the payload",
   CHECK(small->yield_type == 4);
   CHECK(small->yield_qty == 4);
   CHECK(small->part_count == 20);
+  // PartColor is the resource's 0x00RRGGBB value, including its blue bias.
+  CHECK(small->part_color == 0x0073738cU);
 
   // Metal Huge (0x83): mass doubles with the size tier.
   const AsteroidDef *huge = data.AsteroidType(0x83);
