@@ -95,6 +95,29 @@ TEST_CASE("npc turns toward its desired heading at the class turn rate") {
         Catch::Approx(8.0F * std::numbers::pi_v<float> / 180.0F));
 }
 
+TEST_CASE("npc player-aggro accumulator decays in normalized simulation time") {
+  game::GameState state;
+  game::Ship ship;
+  const game::ShipClass cls = TestShipClass();
+  ship.player_aggro_accumulator = 2.0F;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 0.5F);
+  CHECK(ship.player_aggro_accumulator == Catch::Approx(1.75F));
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 4.0F);
+  CHECK(ship.player_aggro_accumulator == Catch::Approx(0.0F));
+}
+
+TEST_CASE("npc player-aggro accumulator does not decay below zero") {
+  game::GameState state;
+  game::Ship ship;
+  const game::ShipClass cls = TestShipClass();
+  ship.player_aggro_accumulator = -1.0F;
+
+  game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
+  CHECK(ship.player_aggro_accumulator == Catch::Approx(-1.0F));
+}
+
 TEST_CASE("npc snaps exactly onto the desired heading within one turn step") {
   game::GameState state;
   game::Ship ship;

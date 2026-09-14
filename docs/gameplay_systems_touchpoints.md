@@ -79,9 +79,12 @@ Observed responsibilities:
   `0x0046c2f0` `Weapon_GetShotImpactVariant` into `ShotState.impact_variant`;
   the hit resolver preserves one armor point when that variant would otherwise
   kill the ship.
-- Non-bypass hits refresh `ShipState.hit_reaction_timer` to 32. The original
-  does not set the death timer at impact; destruction remains an armor-state
-  result consumed by the ship handler.
+- Non-bypass hits set `ShipState.shield_bubble_flash_intensity` to 32. This is
+  the Bible `ShieldImageID` bubble visual, not an AI hit reaction: the original
+  visual updater caps it by remaining shield fraction and decays it by
+  `g_avg_frame_tick_scale`. That update/render branch is deferred. The hit does
+  not set the death timer; destruction remains an armor-state result consumed
+  by the ship handler.
 - A player hit calls `Ship_SetShipHostileToPlayer` (`0x00410700`): it sets the
   hostile AI state and primary target, but leaves `squad_leader_ship_slot` alone.
   That field is also used by `Ship_ShipsShareSquadRoot`; treating it

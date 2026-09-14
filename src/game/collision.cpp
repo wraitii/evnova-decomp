@@ -31,7 +31,9 @@ constexpr float kImpulseCloseRangePx = 50.0F;   // DAT_0057522c
 constexpr float kMaxManeuverTimerOnHit = 20.0F; // DAT_00575224
 constexpr float kShieldDepletionFloorFraction =
     0.1F; // DAT_00575208: shields recharge from a pool bounded at -10% of max
-constexpr float kPlayerAggroPerHitScale = 1.5F; // DAT_00575240
+constexpr float kPlayerAggroPerHitScale = 1.75F;       // DAT_00575240
+constexpr float kPlayerAggroRetargetThreshold = 50.0F; // DAT_0057522c
+constexpr float kEscortDefenseRadiusPx = 320.0F;       // DAT_00575248
 constexpr float kProximitySpanFraction =
     0.333005F; // DAT_00575338: blast + ship half-span * ~1/3
 constexpr std::int16_t kShipClassInvalidSentinel = 0x2ff;
@@ -654,12 +656,12 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
 // from the hull-destruction blast (Ship_UpdateVisualState 0x00428340), which
 // arms the disable-transition armor pin (33%/10% + 1 armor) and the mission
 // DISABLE bookkeeping (escort-goal quick-fail + goal_counter_c++, STR# 0x7d2
-// 0x11c) and the player "disabled" overlay (STR# 0x7d2 0x11f). The full
-// retarget gate chain (system reputation, government max-odds roll, cloak
-// re-entry, escort-command exclusions, and the attacker-side
-// Ship_IsInPlayerSquad gate at 0x0041AB03) is approximated by the
-// conservative subset below. The stellar-target redirect branch (damage x30
-// toward attackers closer than the stellar under attack) is also deferred.
+// 0x11c) and the player "disabled" overlay (STR# 0x7d2 0x11f). Cloak re-entry
+// and a few mission/personality exclusions remain partial. The player-aggro
+// threshold, government shoot-penalty roll, player-squad policy,
+// escort-defense and squad-root gates are ported below. The stellar-target
+// redirect branch (damage x30 toward attackers closer than the stellar under
+// attack) is also deferred.
 } // namespace
 
 // Ghidra 0x0046f1e0 Frame_AddCombatRatingPoints.
@@ -912,15 +914,63 @@ void ResolveShipHitFromWeapon(GameState &state,
 
   if (allow_aggro_updates && target.ai_behavior_code > 0 &&
       target.ai_station_hold_timer <= 0.0F) {
-    // Player-owned fire accumulates the per-hit aggro weight (weapon reload
-    // scaled by DAT_00575240) regardless of whether the target retargets.
+    bool should_retarget = !suppress_retarget_logic;
+    if (attacker_valid && attacker_ship_slot == 0) {
+      // Targeted shots skip the accumulator gates. Incidental hits test the
+      // OLD accumulator; the increment from this hit is applied below.
+      should_retarget =
+          suppress_retarget_logic ||
+          target.player_aggro_accumulator >= kPlayerAggroRetargetThreshold;
+      if (!suppress_retarget_logic && target.faction_or_government_id >= 0 &&
+          target.faction_or_government_id < 0x100) {
+        if (const Government *government = state.scenario.GovernmentByIndex(
+                target.faction_or_government_id);
+            government != nullptr && government->shoot_penalty <= 0) {
+          std::uniform_int_distribution<std::int32_t> roll{0, 3};
+          if (roll(state.rng) != 0) {
+            should_retarget = false;
+          }
+        }
+      }
+    } else if (attacker_valid) {
+      const Ship &attacker =
+          state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
+      if (attacker_ship_slot == target_slot ||
+          (attacker_ship_slot > 0 &&
+           attacker.primary_target_ship_slot != target_slot) ||
+          SharesSquadRoot(state, target_slot, attacker_ship_slot)) {
+        should_retarget = false;
+      }
+    }
+
+    if (attacker_valid) {
+      const Ship &attacker =
+          state.ShipAt(static_cast<std::size_t>(attacker_ship_slot));
+      if (attacker.squad_leader_ship_slot == 0 &&
+          attacker.ai_behavior_code == 5 &&
+          target.primary_target_ship_slot == 0 &&
+          std::abs(target.pos_x - state.player.pos_x) <=
+              kEscortDefenseRadiusPx &&
+          std::abs(target.pos_y - state.player.pos_y) <=
+              kEscortDefenseRadiusPx) {
+        should_retarget = false;
+      }
+      if (NovaShip_IsInPlayerSquad(state, attacker) &&
+          attacker.faction_or_government_id >= 0 &&
+          NovaGovernment_GetPolicyFlag(
+              state.scenario, attacker.faction_or_government_id, 0)) {
+        should_retarget = false;
+      }
+    }
+
+    // Accumulation follows the eligibility test in the executable. This hit
+    // may cross 50, but cannot trigger the retarget until a later hit.
     if (attacker_ship_slot == 0 && !suppress_retarget_logic) {
       target.player_aggro_accumulator +=
           static_cast<float>(player_aggro_delta) * kPlayerAggroPerHitScale;
     }
 
-    const bool self_hit = attacker_valid && attacker_ship_slot == target_slot;
-    if (!self_hit && target_slot != 0) {
+    if (should_retarget && target_slot != 0) {
       // Hostility accumulates from positive damage only, and the escort
       // leader (when it has no stellar assignment) shares the hit.
       if (armor_damage > 0) {
@@ -964,7 +1014,7 @@ void ResolveShipHitFromWeapon(GameState &state,
     // 30x hostility and retargets ships that are attacking a stellar when the
     // attacker is closer than half the squared distance to that stellar.
 
-    if (attacker_ship_slot == 0) {
+    if (should_retarget && attacker_ship_slot == 0) {
       // Ship_SetShipHostileToPlayer (0x00410700) deliberately changes the
       // primary target/state only. squad_leader_ship_slot is the squad-leader
       // attachment link (not a combat target); overwriting it here makes the
@@ -979,16 +1029,15 @@ void ResolveShipHitFromWeapon(GameState &state,
         target.primary_target_ship_slot = 0;
       }
     }
-    if (suppress_retarget_logic && attacker_ship_slot == 0) {
+    if (should_retarget && suppress_retarget_logic && attacker_ship_slot == 0) {
       PropagateHostilityFromPlayerAttack(state, target, attacker_ship_slot);
     }
   }
 
-  // Shot_ResolveShipHitFromWeapon refreshes the non-bypass hit reaction timer.
-  // The clean-room renderer does not consume this yet, but retaining the latch
-  // prevents later status/AI work from losing the event.
+  // Shot_ResolveShipHitFromWeapon starts the shield-bubble flash on every
+  // non-bypass hit. Its Ship_UpdateVisualState decay/render branch is deferred.
   if (!bypass_shields) {
-    target.hit_reaction_timer = 32.0F;
+    target.shield_bubble_flash_intensity = 32.0F;
   }
   // TODO(decomp) skipped: cloak_damage_deactivate_latch handling
   // (Ship_OnShipCloakStateCleared) and g_player_status_panel_dirty.
@@ -1036,9 +1085,9 @@ void ResolveShotCollisionHit(GameState &state,
   ApplyWeaponOnHitEffects(target, *weapon, std::nullopt);
 
   const bool suppress_retarget_logic = shot.target_ship_slot == target_slot;
-  // The per-hit player aggro weight is the weapon's reload interval, rounded.
+  // The x87 FIST + residual/sign sequence truncates the reload toward zero.
   const auto player_aggro_delta = static_cast<std::int16_t>(
-      std::lround(static_cast<float>(weapon->reload_ticks)));
+      static_cast<std::int32_t>(weapon->reload_ticks));
   const bool target_was_destroyed = IsDestroyed(target);
 
   ResolveShipHitFromWeapon(state,

@@ -68,6 +68,13 @@ resource id so shared graphics are deduplicated via
 | g_ship_sprite_weapon | weapon effect sprites        | g_ship_sprite_weapon_resource_id |
 | g_ship_sprite_shield | shield bubble                | g_ship_sprite_shield_resource_id |
 
+The shield-bubble layer remains deferred in the SDL port. The descriptor does
+not yet decode `ShieldImageID`/mask/X/Y at `+0x40..+0x46`, and the renderer does
+not yet reproduce `Ship_UpdateVisualState`'s `shield_bubble_flash_intensity`
+branch. Non-bypass hits already seed that field to 32; the missing branch caps
+it to `clamp(round(shields * 32 / base_shields), 4, 32)`, uses the result as
+the shield sprite RGB intensity, and subtracts `g_avg_frame_tick_scale`.
+
 `ShipClass_FindShipSpriteSetByResourceId` scans the resource-id table; when a
 sprite is already loaded for the same id it is cloned
 (`Sprite_Clone`) rather than re-decoded, and `clone_source_ship_class`

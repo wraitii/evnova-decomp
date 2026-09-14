@@ -35,7 +35,7 @@ RULES = [
     ('Shot/Projectile', ['shot', 'Shot', 'projectile', 'beam', 'homing',
                          'bolt', 'directional weapon', 'SpawnShot',
                          'SpawnLinked', 'Explosion', 'SpawnImpact',
-                         'ImpactEffect', 'DirectionalWeapon', 'BeamHit',
+                         'ImpactEffect', 'WeaponSmoke', 'BeamHit',
                          'BeamQueue', 'DrawBeam']),
     ('Weapon', ['WeaponBank', 'weapon bank', 'turret', 'ammo', 'launch-bay',
                 'guided', 'fire interval', 'FireWeapon', 'FireShipWeapons',

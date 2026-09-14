@@ -57,14 +57,14 @@ These use `g_avg_frame_tick_scale` in the original and should remain on
 
 | Function | Behavior |
 |---|---|
-| `Ship_HandleShip` (`0x00433050`) | Position integration and most continuous ship motion/timers |
+| `Ship_HandleShip` (`0x00433050`) | Position integration, most continuous ship motion/timers, and NPC player-aggro decay (`ShipState+0xC910 -= g_avg_frame_tick_scale * 0.5`, clamped at zero) |
 | `Shot_HandleShot` (`0x00435830`) | Lifetime, position, ordinary mode-1 homing, animation dwell, and fuse |
 | `Stellar_UpdateStellarSprites` (`0x0042cd10`) | Stellar animation |
 | `Asteroid_UpdateSprites` (`0x00436910`) | Asteroid drift and animation |
 | `Shot_UpdateImpactEffectSprites` (`0x0042e160`) | Impact animations |
 | `Frame_UpdateFadingEffectSprites` (`0x0043b170`) | Fading effect lifetime and movement |
 | `Frame_UpdateFreeflightObjectSprites` (`0x0042c1b0`) | Freeflight lifetime and movement |
-| `Shot_UpdateDirectionalWeaponEffects` (`0x0042c660`) | Directional-effect lifetime (`scale * 0.25`) |
+| `Shot_UpdateWeaponSmokePuffs` (`0x0042c660`) | Weapon smoke-puff lifetime (`scale * 0.25`) |
 | `Stellar_TickStellarDefenseBatteries` (`0x0042d890`) | Battery cooldown |
 | `Stellar_TickStellarGravityPull` (`0x0043adb0`) | Gravity acceleration |
 | `System_UpdateRandomEncounterCountdown` (`0x0043a020`) | Reinforcement countdown |
@@ -109,6 +109,11 @@ calls. Normal state-0 homing remains continuous: it turns by
 
 There are also non-policy defects to keep distinct from cadence choices:
 
+- **DONE — NPC player-aggro pressure:** incidental player hits test the
+  pre-hit accumulator against `50.0`, then add `weapon reload ticks * 1.75`;
+  successful retargeting resets it. Targeted hits bypass accumulation and the
+  threshold. `Ship_HandleShip` decays retained pressure by `0.5` per normalized
+  tick and clamps a positive crossing to zero;
 - **DONE — animated shot frame delay:** `NovaWeapon_TickShots` uses the Bible's
   `BeamWidth` unit for spinning sprite weapons: one unit is 1/30 second. The
   port accumulates normalized ticks regardless of its current update rate,
@@ -117,8 +122,14 @@ There are also non-policy defects to keep distinct from cadence choices:
   in 1/30-second ticks. `NovaWeapon_TickShots` accumulates normalized ticks,
   preserves the original strict comparison and reset/no-catch-up behavior, and
   direct hits subtract the elapsed decay points from both damage types;
-- directional weapon effects, ship hit-reaction decay, and player-aggro decay
-  are missing rather than merely using the wrong rate.
+- weapon smoke trails and shield-bubble flash decay are
+  missing rather than merely using the wrong rate. The smoke functions are
+  `Shot_SpawnWeaponSmokePuff` (`0x004215d0`) and
+  `Shot_UpdateWeaponSmokePuffs` (`0x0042c660`): Bible Flags `0x0200`/`0x0400`
+  choose small/big smoke, `0x0800` chooses the persistent animation variant,
+  and `SmokeSet` selects its graphics. None of the 256 stock Nova weapons uses
+  these flags (and every stock `SmokeSet` is `-1`), so this is currently a
+  deferred plug-in-compatibility feature.
 
 **DONE — destruction cadence:** the port-side per-ship accumulator is
 clean-room scheduling machinery, not a recovered `ShipState` field. It banks
