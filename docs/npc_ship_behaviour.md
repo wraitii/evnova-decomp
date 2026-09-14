@@ -258,6 +258,10 @@ labels.
   approaches that stellar, then the state branch hands off through mode
   `0x17`. The handoff may clear velocity for bookkeeping, but has no visible
   brake/spin-up phase: the NPC enters/transfers and vanishes.
+- State `0x15` is the emergence hold at the destination. For animated
+  hypergates, the SDL renderer hides the arriving hull while the gate advances
+  through its opening frames, then reveals it at the CustPicID transition into
+  the working section. The state-0x15 ship itself keeps the gate engaged.
 - For hypergates/wormholes, `StellarDef +0x28` is the Bible's `CustSndID`:
   ordinary stellars use it as ambient sound; gate lanes interpret valid 0–359
   values as emergence heading (otherwise random).

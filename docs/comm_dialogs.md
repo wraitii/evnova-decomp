@@ -82,7 +82,7 @@ the window surface, so oversized sprites overflow the entry rect).
 
 The port resolves the same frame via `SpaceflightView::sprite_store().Spin(`
 `link_a_id + 1000)` + `SpaceflightView::StellarCurrentFrame(stellar_id)`.
-The docked-screen PICT (`engage_highlight_frame >= 0x80` else
+The docked-screen PICT (`CustPicID >= 0x80` else
 `link_a_id + 0x2710`) is only a logged fallback for missing spin sets — it is
 NOT what the original shows here (that PICT is the *docked/landing* screen
 art).

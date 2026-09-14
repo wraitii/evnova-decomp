@@ -961,6 +961,25 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
   const Stellar *target =
       state.scenario.Stellar(state.travel.selected_stellar_id);
   if (target != nullptr && (target->availability_flags & 0x3000U) != 0U) {
+    if (!NovaTravel_PlayerMeetsStellarAccess(
+            state, state.travel.selected_stellar_id)) {
+      const std::uint16_t entry =
+          (target->availability_flags & Stellar::kHypergate) != 0 ? 0x51 : 0x53;
+      NovaHud_ShowOverlayMessage(
+          state,
+          NovaHud_LoadStringEntry(0x7d2, entry)
+              .value_or((target->availability_flags & Stellar::kHypergate) != 0
+                            ? "You are not authorized to use this hypergate."
+                            : "You are not authorized to use this stellar."),
+          0xfa,
+          0x00,
+          0x0c,
+          0xf0U);
+      state.pending_ui_sounds.push_back({1, 1});
+      state.travel.engage_timer = -1;
+      state.travel.selected_stellar_id = -1;
+      return LandCommandResult::kContinue;
+    }
     const float arrival_axis_range =
         Stellar_MaxLandingDistance(target_sprite_full_height);
     const bool within_envelope =

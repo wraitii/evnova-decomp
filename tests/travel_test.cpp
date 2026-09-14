@@ -8,6 +8,7 @@
 #include "game/game_state.hpp"
 #include "game/outfit.hpp"
 #include "game/scenario_data.hpp"
+#include "game/spaceflight_view.hpp"
 #include "game/travel.hpp"
 
 namespace {
@@ -22,6 +23,7 @@ using game::NovaTravel_ResolveHypergateDestination;
 using game::NovaTravel_SelectWormholeDestination;
 using game::NovaTravel_Tick;
 using game::RestrictedTravelKind;
+using game::StellarAnimationState;
 
 // Returns whether zero-based `id` is visited (the per-system fog record):
 // discovery_state > 0 mirrored to the pilot's explored bitset. (SystemDef
@@ -51,6 +53,74 @@ bool IsRevealedOnly(const GameState &state, std::int16_t zero_based_id) {
 }
 
 } // namespace
+
+TEST_CASE(
+    "hypergate animation opens, works, and closes around its transition") {
+  GameState state;
+  game::Stellar gate;
+  gate.availability_flags = game::Stellar::kHypergate;
+  gate.custom_picture_or_gate_transition_frame = 3;
+  gate.animation_dwell_time = 1;
+  StellarAnimationState animation;
+
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, true, 1.0F, animation);
+  CHECK(animation.current_frame == 1);
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, true, 1.0F, animation);
+  CHECK(animation.current_frame == 2);
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, true, 1.0F, animation);
+  CHECK(animation.current_frame == 3);
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, true, 1.0F, animation);
+  CHECK(animation.current_frame == 3);
+  CHECK(animation.previous_frame == 4);
+
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, false, 1.0F, animation);
+  CHECK(animation.current_frame == 4);
+  animation.current_frame = 7;
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, false, 1.0F, animation);
+  CHECK(animation.current_frame == 2);
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, false, 1.0F, animation);
+  CHECK(animation.current_frame == 1);
+}
+
+TEST_CASE("hypergate working animation honors return-to-transition flag") {
+  GameState state;
+  game::Stellar gate;
+  gate.availability_flags =
+      game::Stellar::kHypergate | game::Stellar::kAnimationReturnToFirstFrame;
+  gate.custom_picture_or_gate_transition_frame = 3;
+  StellarAnimationState animation{.current_frame = 3, .previous_frame = 4};
+
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, true, 0.0F, animation);
+  CHECK(animation.current_frame == 4);
+  CHECK(animation.previous_frame == 5);
+  game::NovaStellar_AdvanceAnimationFrame(
+      state, gate, 8, true, 0.0F, animation);
+  CHECK(animation.current_frame == 3);
+}
+
+TEST_CASE("state-0x15 ship appears only after its hypergate opens") {
+  game::Ship ship;
+  ship.ai_state_code = 0x15;
+  game::Stellar gate;
+  gate.availability_flags = game::Stellar::kHypergate;
+  gate.custom_picture_or_gate_transition_frame = 3;
+
+  gate.sprite_current_frame = 2;
+  CHECK_FALSE(game::NovaStellar_ShouldDrawEmergingShip(ship, &gate, 8));
+  gate.sprite_current_frame = 3;
+  CHECK(game::NovaStellar_ShouldDrawEmergingShip(ship, &gate, 8));
+  ship.ai_state_code = 8;
+  gate.sprite_current_frame = 0;
+  CHECK(game::NovaStellar_ShouldDrawEmergingShip(ship, &gate, 8));
+}
 
 TEST_CASE("wormholes distinguish linked and random-unlinked destinations") {
   GameState state;
@@ -103,6 +173,27 @@ TEST_CASE("hypergate selection accepts only linked visible systems") {
   CHECK(NovaTravel_ResolveHypergateDestination(state, 0x80, 2) == -1);
   state.scenario.systems[1].is_visible = false;
   CHECK(NovaTravel_ResolveHypergateDestination(state, 0x80, 1) == -1);
+}
+
+TEST_CASE("stellar government ScanMask gates hypergate access") {
+  GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.ships.resize(1);
+  state.scenario.governments.resize(1);
+  state.scenario.stellars.resize(1);
+  state.player.current_system_id = 0;
+  state.player.ship_class_id = 0;
+  auto &gate = state.scenario.stellars[0];
+  gate.is_defined = true;
+  gate.system_id = 0;
+  gate.government_id = 0;
+  gate.min_status = -0x7fff;
+  gate.availability_flags = game::Stellar::kHypergate;
+  state.scenario.governments[0].scan_mask_lo = 0x20;
+
+  CHECK_FALSE(game::NovaTravel_PlayerMeetsStellarAccess(state, 0x80));
+  state.scenario.ships[0].contribute_lo = 0x20;
+  CHECK(game::NovaTravel_PlayerMeetsStellarAccess(state, 0x80));
 }
 
 TEST_CASE("restricted stellar transfer uses the destination emergence angle") {

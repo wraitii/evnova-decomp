@@ -32,7 +32,29 @@ struct SDL_Renderer;
 
 namespace game {
 struct GameState;
+struct Ship;
 class HudRenderer;
+
+struct StellarAnimationState {
+  int current_frame = 0;
+  int previous_frame = 0;
+  float frame_accumulator = 0.0F;
+};
+
+// Pure frame-state half of Ghidra 0x0042cd10 Stellar_UpdateStellarSprites.
+// elapsed_30hz_ticks is the original normalized tick scale, not milliseconds.
+void NovaStellar_AdvanceAnimationFrame(GameState &state,
+                                       const Stellar &stellar,
+                                       int frame_count,
+                                       bool engaged,
+                                       float elapsed_30hz_ticks,
+                                       StellarAnimationState &animation);
+
+// State-0x15 hypergate emergence presentation: the hull stays hidden during
+// the opening frames and appears once the gate reaches its working section.
+[[nodiscard]] bool NovaStellar_ShouldDrawEmergingShip(const Ship &ship,
+                                                      const Stellar *stellar,
+                                                      int stellar_frame_count);
 
 class SpaceflightView {
 public:
@@ -181,11 +203,9 @@ private:
   // one animation step. frame_time_ms is the real elapsed frame time (the
   // original accumulates _g_avg_frame_time_ms into
   // StellarDef.sprite_frame_accumulator). Hypergate-style stellars
-  // (availability_flags & 0x1000) use the non-engaged drift branch (clamped to
-  // engage_highlight_frame); because this build has no AI ships /
-  // travel-selection state the engage-highlight pulse is documented and left
-  // untouched (TODO(decomp)). Mutates the GameState PRNG (random cycling) so it
-  // is non-const. Called from AdvanceAnimations.
+  // (availability_flags & 0x1000) open and run around the CustPicID transition
+  // frame while the player or an NPC engages them, then close when idle.
+  // Mutates the GameState PRNG (random cycling), so it is non-const.
   void AdvanceStellarAnimation(SdlPlatform &platform,
                                GameState &state,
                                float frame_time_ms);
@@ -322,14 +342,8 @@ private:
   // these on StellarDef sprite_current_frame / sprite_previous_frame /
   // sprite_frame_accumulator, +0x476/+0x478/+0x490). Initial: current and
   // previous both 0, accumulator 0.
-  struct StellarAnimState {
-    int current_frame = 0;
-    int previous_frame = 0;
-    float frame_accumulator = 0.0F;
-  };
-
   // stellar id (resource id) -> runtime animation state for animated stellars.
-  std::map<std::int16_t, StellarAnimState> stellar_anims_;
+  std::map<std::int16_t, StellarAnimationState> stellar_anims_;
 
   // Draws the current system's stellar bodies (planets/stations) at their
   // world positions relative to the player camera.

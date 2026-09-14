@@ -132,13 +132,16 @@ in the SDL renderer yet (TODO).
 - `SpaceflightView::AdvanceStellarAnimation` (src/game/spaceflight_view.cpp)
   reimplements the ambient frame-stepping part: the ordinary ping-pong/
   alternate/random cycler (availability_flags bit clear) and the hypergate
-  (bit 0x1000) non-engaged drift toward/around `engage_highlight_frame`
+  (bit 0x1000) opening/working/closing around the CustPicID transition frame;
+  player engagement and NPC states 0x01/0x14/0x15 drive the open state. The
+  animator consumes normalized 30 Hz ticks, and Flags2 0x0080 swaps animation
+  from the normal sprite zone to the destroyed/active zone
   (StellarDef +0x26, payload +0x18). Reconstructed runtime state is kept per
   stellar id in the view (sprite_current/previous_frame + frame_accumulator,
   mirrored from StellarDef +0x476/+0x478/+0x490). Dwell/frame multiplier decode
   from the sp\x6fb payload +0x22/+0x24 (StellarDef +0x470/+0x472) as Bible
-  AnimDelay / Frame0Bias. The engage-highlight pulse and per-frame
-  distance-intensity positioning are not yet reimplemented (TODO(decomp)).
+  AnimDelay / Frame0Bias. Per-frame distance-intensity positioning remains
+  TODO(decomp).
 
 ## Decoder
 

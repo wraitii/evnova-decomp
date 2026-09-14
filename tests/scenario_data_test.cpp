@@ -689,7 +689,7 @@ TEST_CASE("starfield sheet (spin resource 700) decodes to 16 5x5 frames",
 
 // The stellar animation timing fields (sp\x6fb AnimDelay/Frame0Bias, Ghidra
 // StellarDef +0x470/+0x472 from payload +0x22/+0x24) and the hypergate
-// engage_highlight_frame (Ghidra StellarDef +0x26, payload +0x18) decode from
+// CustPicID / hypergate transition frame (+0x26, payload +0x18) decode from
 // the payload and gate the Stellar_UpdateStellarSprites frame stepping.
 TEST_CASE("stellar animation fields decode", "[scenario][stellar]") {
   ScenarioData data;
@@ -719,7 +719,7 @@ TEST_CASE("stellar animation fields decode", "[scenario][stellar]") {
   CHECK((hg->availability_flags & 0x1000) != 0); // hypergate
   REQUIRE(hg->emergence_angle_deg.has_value());
   CHECK(*hg->emergence_angle_deg == hg->cust_snd_id);
-  CHECK(hg->engage_highlight_frame == 37);
+  CHECK(hg->custom_picture_or_gate_transition_frame == 37);
   CHECK(hg->animation_dwell_time == 0);
   CHECK(hg->animation_frame_multiplier == 0);
 }

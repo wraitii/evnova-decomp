@@ -1000,11 +1000,11 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   // The destination planet picture shown in the DITL item-4 image frame (the
   // original scales the target stellar's ambient sprite into it). The planet
   // PICT comes from the same selection the docked screen uses: the stellar's
-  // custom picture (engage_highlight_frame >= 0x80) or link_a_id + 0x2710.
+  // custom picture (CustPicID >= 0x80) or link_a_id + 0x2710.
   std::unique_ptr<SdlTexture> planet_art;
   const std::int16_t stell_pict =
-      (stellar->engage_highlight_frame >= 0x80)
-          ? stellar->engage_highlight_frame
+      (stellar->custom_picture_or_gate_transition_frame >= 0x80)
+          ? stellar->custom_picture_or_gate_transition_frame
           : static_cast<std::int16_t>(stellar->link_a_id + 0x2710);
   if (stell_pict >= 0x80) {
     planet_art =
