@@ -15,12 +15,12 @@ inline constexpr std::uint32_t kStringResourceType = 0x53545223U;
 
 // Ghidra 0x0047e2d0 NovaHud_ShowOverlayMessage. The original stores param_2
 // (a tick countdown) in g_hud_overlay_msg_color, which
-// Frame_UpdateScreenFlashTimers (0x0042f1b0, called from the 30 Hz
-// Frame_TickSystems) decrements once per tick, clearing the message when it
-// reaches zero — so the message's second parameter is a tick count, not a
-// colour or a millisecond duration. The port keeps wall-clock expiry in
-// GameState but converts ticks at the original's 30 Hz cadence.
-constexpr std::uint64_t kOverlayTickMs = 1000U / 30U;
+// Frame_TickHudOverlayAndRouteMapTimers (0x0042f1b0) decrements it once per
+// raw Frame_TickSystems call, clearing the message when it reaches zero. The
+// original flight loop admits one such call per 21 ms at its maximum cadence;
+// the port uses that reference duration while keeping expiry independent of
+// the display refresh rate.
+constexpr std::uint64_t kOverlayTickMs = 21U;
 
 void NovaHud_ShowOverlayMessage(GameState &state,
                                 std::string message,
@@ -191,7 +191,8 @@ void NovaHud_ShowLandingDenial(GameState &state,
     // Fall back to a plain English phrase when the STR# pool is unavailable.
     text = std::string("Unable to land here.");
   }
-  // 0x168 frames, the original's recorded overlay duration for landing
+  // 0x168 raw flight calls, the original's recorded overlay duration for
+  // landing
   // feedback (Stellar_HandleStellarEntryAndExit).
   NovaHud_ShowOverlayMessage(state, *text, 0xe0, 0xe0, 0xe0, 0x168U);
 }

@@ -268,14 +268,13 @@ Port home: `src/game/boarding_plunder.hpp` (design exists) /
 4b. **Overlay lifetime + range gate corrections** — `NovaHud_ShowOverlay-
    Message`'s second parameter is a FRAME countdown, not ms/colour:
    `g_hud_overlay_msg_color` doubles as the counter and
-   Frame_UpdateScreenFlashTimers (0x0042f1b0) decrements it per frame,
-   clearing the message at zero. That decay runs on the 30 Hz
-   Frame_TickSystems cadence (the port renders at ~60 Hz but ticks the sim on
-   the same 30 Hz basis), so the port converts ticks to wall-clock ms at
-   1000/30: board denials 0x168 ≈ 12 s, window loot/trip overlays 0xf0 ≈ 8 s;
+   Frame_TickHudOverlayAndRouteMapTimers (0x0042f1b0) decrements it once per
+   raw spaceflight call, clearing the message at zero. The port converts each
+   count to the original loop's 21 ms maximum-rate cadence: board denials
+   0x168 ≈ 7.56 s, window loot/trip overlays 0xf0 ≈ 5.04 s;
    previously these rendered as 250–360 ms, far too short). The window now
-   also draws the live overlay message below itself (`HudRenderer::
-   DrawOverlayMessage`) as the original's message rect does. Boarding range
+   also draws the live overlay message below itself using the original cached
+   overlay's Chicago 12 text settings. Boarding range
    gate fixed: the sh\x8an descriptor is loaded at `ship_class_id + 0x80`
    (the renderer's id convention; the old code silently fell back to the
    collision radius), and `Sprite_GetFrameFullHeight` /

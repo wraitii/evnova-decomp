@@ -16,7 +16,8 @@
 //   -/+ keys, x1.3333 / x0.75, capped [0.5, 2.0]).
 // - Clicks: PlayerTick_RouteMapClickBranch 0x0044e027 routes clicks inside the
 //   chart to neighbour-system destination selection.
-// - Auto-dismiss: Frame_UpdateScreenFlashTimers 0x0042f23e clears the flag
+// - Auto-dismiss: Frame_TickHudOverlayAndRouteMapTimers 0x0042f23e clears the
+//   flag
 //   500 ticks after the last interaction (the chart visually fades at +150).
 //
 // The reimplementation draws the chart per frame (no offscreen surface) and
@@ -66,7 +67,8 @@ void RouteMap_Open(GameState &state);
 // Ghidra 0x0045216e PlayerTick_RouteMapZoomCommands (zoom steps, edge-latched
 // via g_playerRouteMapZoomCommandLatch, each step re-stamps the interaction
 // timer and queues the transition-table click sound) plus the auto-dismiss
-// tail of 0x0042f23e (flag clears 500 ticks after the last interaction; the
+// tail of Frame_TickHudOverlayAndRouteMapTimers at 0x0042f23e (flag clears
+// 500 ticks after the last interaction; the
 // zoom handling stays live in the original's invisible-but-flagged window).
 void RouteMap_Tick(GameState &state, const RouteMapZoomInput &input);
 
