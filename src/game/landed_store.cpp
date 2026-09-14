@@ -1,5 +1,6 @@
 #include "landed_store.hpp"
 
+#include "government.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "outfit.hpp"
@@ -92,6 +93,40 @@ OutfitModSlots(const Outfit &outfit) {
 }
 
 } // namespace
+
+// Ghidra 0x00491950 step 5: scopes an outfit's Require bits to the government
+// encoded in RequireGovt. local_govt is the landed stellar's zero-based
+// government id (-1 = independent). The four bands come from the loader's
+// clamp in 0x004bd3c0; any other value (including -1) applies in all shops.
+//  0x80..0x17f  licenses:     local govt == id-0x80 or allied (never govt -1)
+//  0x468..0x567 conditional:  local govt == id-0x468, govt -1, or allied
+//  0x850..0x94f contraband:   anything except id-0x850 or an ally
+//  0xc38..0xd37 contraband:   anything except id-0xc38, govt -1, or an ally
+bool NovaLanded_RequireGovtAllows(const ScenarioData &scenario,
+                                  std::int16_t require_govt,
+                                  std::int16_t local_govt) {
+  const auto allied = [&scenario, local_govt](std::int16_t govt) {
+    return local_govt != -1 &&
+           NovaGovernment_AreGovtsAllied(scenario, local_govt, govt);
+  };
+  if (require_govt >= 0x80 && require_govt <= 0x17f) {
+    const auto target = static_cast<std::int16_t>(require_govt - 0x80);
+    return local_govt == target || allied(target);
+  }
+  if (require_govt >= 0x468 && require_govt <= 0x567) {
+    const auto target = static_cast<std::int16_t>(require_govt - 0x468);
+    return local_govt == target || local_govt == -1 || allied(target);
+  }
+  if (require_govt >= 0x850 && require_govt <= 0x94f) {
+    const auto target = static_cast<std::int16_t>(require_govt - 0x850);
+    return !(local_govt == target || allied(target));
+  }
+  if (require_govt >= 0xc38 && require_govt <= 0xd37) {
+    const auto target = static_cast<std::int16_t>(require_govt - 0xc38);
+    return !(local_govt == target || local_govt == -1 || allied(target));
+  }
+  return true;
+}
 
 // Ghidra 0x0049458d NovaUi_ShipyardSetCursorSlot. The session tracks the
 // 20-slot (4x5 grid) cursor selection and preserves/clears it across paging.
@@ -446,7 +481,7 @@ std::int32_t NovaLanded_OutfitPrice(const GameState &state,
                                      stellar->tech_level);
 }
 
-// Ghidra 0x00491950 NovaUi_IsOutfitterPurchaseAllowed (partial port of the
+// Ghidra 0x00491950 NovaLanded_CanBuyOutfit (partial port of the
 // tech/require/availability gate).
 bool NovaLanded_CanBuyOutfit(GameState &state,
                              std::int16_t stellar_id,
@@ -516,6 +551,15 @@ bool NovaLanded_CanBuyOutfit(GameState &state,
     if (state.control.record_grant_latch)
       return false;
   }
+
+  // 0x00491950 step 5: the original only runs this while
+  // g_is_system_transition_active is set with a travel stellar, i.e. during
+  // Stellar_TravelToSystem's landed sequence (0x00455e10). This function is
+  // reachable only from that landed-store modal, so the latch is implicit and
+  // the local government is the landed stellar's.
+  if (!NovaLanded_RequireGovtAllows(
+          state.scenario, outfit->require_govt, stellar->government_id))
+    return false;
 
   if (!MeetsRequire(state, outfit->require_lo, outfit->require_hi) ||
       !NovaControlExpression_Evaluate(outfit->availability_expr,

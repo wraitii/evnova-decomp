@@ -630,14 +630,15 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 // section (0x004bd3c0). The record *name* is supplied separately from the
 // BRGR resource.map record name (never a numeric payload field). Payload
 // layout:
-//   +0x00 Cost low word / ordering value, +0x02 Mass, +0x04 TechLevel,
-//   +0x06/+0x08 ModType1/modVal1, +0x0a Max, +0x0c Flags, +0x0e Cost (32-bit),
-//   +0x12..+0x1c ModType2-4/ModVal2-4, +0x1e/+0x22 Contribute (32-bit pair),
-//   +0x26/+0x2a Require (32-bit pair), +0x2e Availability, +0x12d OnPurchase,
-//   +0x32b ShortName, +0x36b LCName, +0x3ab LCPlural, +0x3ec DispWeight,
-//   +0x3ee Graphic sprite id, +0x3f0 BuyRandom, +0x3f2 ItemClass.
+//   +0x00 DispWeight, +0x02 Mass, +0x04 TechLevel, +0x06/+0x08 ModType1/
+//   modVal1, +0x0a Max, +0x0c Flags, +0x0e Cost (32-bit), +0x12..+0x1c
+//   ModType2-4/ModVal2-4, +0x1e/+0x22 Contribute (32-bit pair), +0x26/+0x2a
+//   Require (32-bit pair), +0x2e Availability, +0x12d OnPurchase, +0x22c
+//   OnSell, +0x32b ShortName, +0x36b LCName, +0x3ab LCPlural, +0x3ec
+//   ItemClass, +0x3ee Graphic sprite id, +0x3f0 BuyRandom, +0x3f2 RequireGovt.
 [[nodiscard]] Outfit DecodeOutfit(std::span<const std::byte> bytes) {
   Outfit o;
+  o.display_weight = ReadBeI16(bytes, 0x00);      // DispWeight
   o.mass_tons = ReadBeI16(bytes, 0x02);           // Mass
   o.tech_level = ReadBeI16(bytes, 0x04);          // TechLevel
   o.mod_type = ReadBeI16(bytes, 0x06);            // ModType (primary)
@@ -661,7 +662,7 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   o.short_name = ReadCString(bytes, 0x32b);       // ShortName
   o.lc_name = ReadCString(bytes, 0x36b);          // LCName
   o.lc_plural = ReadCString(bytes, 0x3ab);        // LCPlural
-  o.display_weight = ReadBeI16(bytes, 0x3ec);     // DispWeight
+  o.item_class = ReadBeI16(bytes, 0x3ec);         // ItemClass
   o.sprite_id = ReadBeI16(bytes, 0x3ee);          // Graphic (p\x9ari sprite)
   o.stock_threshold = ReadBeI16(bytes, 0x3f0);    // In-Stock % (clamped 0..100)
   if (o.stock_threshold < 0) {
@@ -670,7 +671,16 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (o.stock_threshold > 100) {
     o.stock_threshold = 100;
   }
-  o.item_class = ReadBeI16(bytes, 0x3f2); // ItemClass
+  o.require_govt = ReadBeI16(bytes, 0x3f2); // RequireGovt
+  // The loader (0x004bd3c0) clamps RequireGovt to -1 unless it is one of the
+  // four government-keyed outfit-id bands. The shipped data stores 0x7f for
+  // "apply everywhere", which this normalization maps to -1.
+  if (!((o.require_govt >= 0x80 && o.require_govt <= 0x17f) ||
+        (o.require_govt >= 0x468 && o.require_govt <= 0x567) ||
+        (o.require_govt >= 0x850 && o.require_govt <= 0x94f) ||
+        (o.require_govt >= 0xc38 && o.require_govt <= 0xd37))) {
+    o.require_govt = -1;
+  }
   o.persistent_on_ship_swap = (o.flags & 0x0004U) != 0U;
   // The loader (0x004bd3c0) stores weapon/ammo/bomb mod values zero-based,
   // subtracting 0x80 from any ModVal > 0x7f when the matching ModType is 1

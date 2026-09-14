@@ -102,16 +102,48 @@ globals (AGENTS.md).
   availability expression, not payload. Verified against the shipped 128 defs
   (e.g. fleet 0x80 lead 13, govt 0, filter 10000, escorts 95/96; fleet 0x82
   filter -1 spawns anywhere).
+- **o\x9ftf (outfit)**: DispWeight +00, Mass +02, TechLevel +04, ModType1/
+  ModVal1 +06/+08, Max +0a, Flags +0c, Cost +0e (int32), ModType2-4/ModVal2-4
+  `+12..+1c`, Contribute `+1e/+22`, Require `+26/+2a`, Availability +2e,
+  OnPurchase +12d, OnSell +22c, ShortName +32b, LCName +36b, LCPlural +3ab,
+  then the tail ItemClass +3ec, Graphic +3ee, BuyRandom +3f0, RequireGovt +3f2.
+  The loader's tail copy is at `0x004bf4e1` (`+0x3ec -> +0x18`, `+0x00 ->
+  +0x1a`, `+0x3ee -> +0x28`, `+0x3f0 -> +0x1c`, `+0x3f2 -> +0x22`). Verified
+  against outfit 0x80 (Light Blaster): DispWeight 100, Mass 3, Tech 4, ModType
+  1, Cost 5000, ItemClass 0, BuyRandom 100, RequireGovt 0x7f -> -1.
+
+### o\x9ftf RequireGovt (government-scoped Require bits)
+
+`RequireGovt` (payload +0x3f2, runtime `OutfitDef +0x22`) scopes an outfit's
+64-bit `Require` bits to a government-keyed outfit-id band. The loader
+(`0x004bd3c0`, instruction `0x004bf56b`) keeps the raw value only when it is one
+of:
+
+| band | meaning |
+|------|---------|
+| `0x80..0x17f`  | licenses: only where the local govt is `id-0x80` or an ally (never independent govt -1) |
+| `0x468..0x567` | conditional: local govt is `id-0x468`, independent (-1), or an ally |
+| `0x850..0x94f` | contraband: anywhere except local govt `id-0x850` or an ally |
+| `0xc38..0xd37` | strict contraband: anywhere except `id-0xc38`, independent (-1), or an ally |
+
+Anything else is normalized to `-1` ("apply in all shops"); the shipped data
+uses the raw marker `0x7f` for that. `NovaLanded_CanBuyOutfit`
+(`0x00491950`, step 5) is the only consumer, and it applies the scoping only
+during the `Stellar_TravelToSystem` landed sequence
+(`g_is_system_transition_active` plus a travel stellar). It does **not** affect
+the outfitter listing (`Outfit_RebuildAvailableOutfitListForTravelStellar`
+`0x0046a220`). Ported as `NovaLanded_RequireGovtAllows` plus the gate arm in
+`NovaLanded_CanBuyOutfit` (`src/game/landed_store.cpp`).
 
 ### Provisional fields
 
-`o\x9ftf` (outfit) and `sp\x9ab` (stellars) decoders fill the positively-identified
-header fields but not every offset; they are marked provisional in
-`scenario_data.cpp`. The derived runtime fields the original computes at load
-(purchase mass/price recompute from default outfits, control-expression
-compilation for availability/purchase) are not reconstructed yet, and string
-fields (names, availability/on-purchase expressions) come from the resource
-record name / later string blocks rather than the numeric header.
+The `sp\x9ab` (stellar) decoder still fills only the positively-identified
+header fields and marks the rest provisional in `scenario_data.cpp`. The
+derived runtime fields the original computes at load (purchase mass/price
+recompute from default outfits, control-expression compilation for
+availability/purchase) are not reconstructed yet, and string fields (names,
+availability/on-purchase expressions) come from the resource record name /
+later string blocks rather than the numeric header.
 
 Runtime state derived from owned outfits (effective stats, government policy
 flags, cargo overflow, mining scoop, carried bomb) is rebuilt by

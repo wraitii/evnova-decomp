@@ -536,20 +536,24 @@ struct ShipClass {
 // Payload layout is the o\x9ftf resource (Nova Bible): the numeric header is
 // followed by the mod block, Max/Flags/Cost, the availability/on-purchase
 // strings, a Contribute/Require 64-bit pair each, the ShortName/LCName/LCPlural
-// strings, and a tail block holding DispWeight/Graphic/BuyRandom/ItemClass.
-// The record *name* (BRGR resource.map) is surfaced as `name`, not a numeric
-// header field.
+// strings, and a tail block holding ItemClass/Graphic/BuyRandom/RequireGovt.
+// DispWeight is the leading word at +0x00, not part of the tail. The record
+// *name* (BRGR resource.map) is surfaced as `name`, not a numeric header field.
+// Offsets verified against the shipped payloads and loader 0x004bd3c0.
 struct Outfit {
   std::string name;              // resource record name (BRGR display name)
   std::string availability_expr; // Availability (control test expression)
   std::string on_purchase_expr;  // OnPurchase (control set expression)
   std::string on_sell_expr;      // OnSell (control set expression)
 
-  std::int16_t display_weight = 0; // DispWeight
-  std::int16_t mass_tons = 0;      // Mass
-  std::int16_t tech_level = 0;     // TechLevel
-  std::int16_t mod_type = 0;       // ModType (primary)
-  std::int16_t mod_val = 0;        // ModVal (zero-based for weapon/ammo/bomb)
+  // DispWeight (payload +0x00, OutfitDef +0x1a): the outfit-shop ordering
+  // weight. Higher values sort first, and Flags 0x1000 suppresses equal-weight
+  // later resource ids.
+  std::int16_t display_weight = 0;
+  std::int16_t mass_tons = 0;  // Mass
+  std::int16_t tech_level = 0; // TechLevel
+  std::int16_t mod_type = 0;   // ModType (primary)
+  std::int16_t mod_val = 0;    // ModVal (zero-based for weapon/ammo/bomb)
   // Alternate mods 2-4 (ModType2-4 / ModVal2-4).
   std::array<std::int16_t, 3> alt_mod_types{};
   std::array<std::int16_t, 3> alt_mod_vals{};
@@ -570,12 +574,24 @@ struct Outfit {
   std::uint32_t require_lo = 0;    // Require (low word)
   std::uint32_t require_hi = 0;    // Require (high word)
 
-  std::int16_t item_class = 0; // ItemClass
+  // ItemClass (payload +0x3ec, OutfitDef +0x18): classification matched
+  // against a p\x91rs GrantClass (PersDef +0x784) when a mission ship hands
+  // out a free outfit (NovaUi_RunBoardingPlunderWindow 0x00482940). 0 / -1
+  // when unused.
+  std::int16_t item_class = 0;
   // Bible-style "in stock" percent (OutfitDef +0x1c from o\9ftf payload +0x3f0,
   // clamped 0..100 by the loader): the outfitter lists an unowned outfit only
   // while the per-day stock roll (GameState.outfit_stock_rolls) is <= this.
   std::int16_t stock_threshold = 0;
   std::int16_t sprite_id = 0; // Graphic (p\x9ari sprite id)
+  // Bible RequireGovt (payload +0x3f2, OutfitDef +0x22): scopes the outfit's
+  // Require bits to a government-keyed outfit-id band. The loader stores the
+  // raw value and clamps it to -1 unless it is one of 0x80..0x17f,
+  // 0x468..0x567, 0x850..0x94f or 0xc38..0xd37; -1 (and any other value)
+  // means the Require bits apply in all shops. Consumed only by the purchase
+  // gate NovaLanded_CanBuyOutfit (0x00491950); it does not affect
+  // listing visibility. See NovaLanded_RequireGovtAllows in landed_store.cpp.
+  std::int16_t require_govt = -1;
   // Runtime field_0x378 is initialized from Flags bit 0x0004 and is the
   // marker retained across player-ship replacement.
   bool persistent_on_ship_swap = false;
