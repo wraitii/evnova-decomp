@@ -90,14 +90,14 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(w->impact_effect_id == -1); // was 'explosion'
   CHECK(w->blast_radius == 5);      // was 'prox_radius'
   CHECK(w->splash_radius == 6);     // was 'blast_radius'
-  CHECK(w->fuse_ticks == 0);
-  CHECK(w->late_collision_window_ticks == 0);
+  CHECK(w->damage_decay_interval_ticks == 0);
+  CHECK(w->proximity_safety_ticks == 0);
   CHECK(w->flags == 0x6100);
   CHECK(w->flags_quaternary == 0U); // was mislabeled 'seeker'
   CHECK(w->flags_secondary == 0U);  // (payload +0x48)
   CHECK(w->flags_tertiary == 2U);   // (payload +0x66)
   CHECK(w->beam_length_px == 0);
-  CHECK(w->shot_anim_frame_dwell == 0);
+  CHECK(w->beam_width_or_animation_frame_delay == 0);
   CHECK(w->kickback_impulse == 0);
   CHECK(w->burst_cycle_ticks == 0); // (the old mislabeled 'max_ammo' at +0x5a)
   CHECK(w->burst_reset_cooldown == 0);

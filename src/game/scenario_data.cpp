@@ -336,7 +336,7 @@ namespace {
   w.impact_effect_id = ReadBeI16(bytes, 0x16);
   w.blast_radius = ReadBeI16(bytes, 0x18);
   w.splash_radius = ReadBeI16(bytes, 0x1a);
-  w.fuse_ticks = ReadBeI16(bytes, 0x22);
+  w.damage_decay_interval_ticks = ReadBeI16(bytes, 0x22);
   // HitParticles / HitPartLife / HitPartVel / HitPartColor (+0x4c..+0x52).
   // The loader normalizes HitPartVel by the 0.01 double DAT_00575e60 and
   // converts HitPartColor to the surface pixel format; this port keeps 24-bit
@@ -345,7 +345,7 @@ namespace {
   w.impact_particle_frame_base = ReadBeI16(bytes, 0x4e);
   w.impact_particle_speed = static_cast<float>(ReadBeI16(bytes, 0x50)) * 0.01F;
   w.impact_particle_color = ReadBe32(bytes, 0x52) & 0x00ffffffU;
-  w.late_collision_window_ticks = ReadBeI16(bytes, 0x46);
+  w.proximity_safety_ticks = ReadBeI16(bytes, 0x46);
   w.ionization_points = ReadBeI16(bytes, 0x4a);
   w.ionization_color = ReadBe32(bytes, 0x72) & 0x00ffffffU;
   w.flags = ReadBe16(bytes, 0x1c); // flags_primary
@@ -353,7 +353,7 @@ namespace {
   w.flags_secondary = ReadBe16(bytes, 0x48);
   w.flags_tertiary = ReadBe16(bytes, 0x66);
   w.beam_length_px = ReadBeI16(bytes, 0x30);
-  w.shot_anim_frame_dwell = ReadBeI16(bytes, 0x32);
+  w.beam_width_or_animation_frame_delay = ReadBeI16(bytes, 0x32);
   // Bible MaxAmmo (payload +0x6c -> WeaponDef +0x1e, loader line 0x004c4bxx):
   // per-instance ammo/bay capacity, 0/-1 = defer to the outfit Max field.
   w.max_ammo = ReadBeI16(bytes, 0x6c);
@@ -374,8 +374,8 @@ namespace {
       w.beam_lightning_density = 2;
     }
     w.beam_falloff = 0;
-    if (w.shot_anim_frame_dwell < 1) {
-      w.shot_anim_frame_dwell = 1;
+    if (w.beam_width_or_animation_frame_delay < 1) {
+      w.beam_width_or_animation_frame_delay = 1;
     }
     if (w.beam_lightning_amplitude < 1) {
       w.beam_lightning_amplitude = 1;

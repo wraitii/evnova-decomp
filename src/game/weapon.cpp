@@ -1037,9 +1037,9 @@ int NovaWeapon_SpawnProjectile(GameState &state,
                        ? state.ShipAt(static_cast<std::size_t>(owner_ship_slot))
                              .current_system_id
                        : state.player.current_system_id;
-  // Fuse: a weapon without a fuse gets the -1.0 "no fuse" sentinel (the port
-  // does not tick fuses yet; the field is carried for that slice).
-  shot.fuse_elapsed = w->fuse_ticks < 1 ? -1.0F : 0.0F;
+  shot.damage_decay_elapsed_ticks =
+      w->damage_decay_interval_ticks < 1 ? -1.0F : 0.0F;
+  shot.damage_decay_points = 0;
   shot.retarget_cooldown = 0;
   shot.point_defense_durability =
       std::max<std::int16_t>(0, w->point_defense_durability);
@@ -1298,10 +1298,9 @@ std::int16_t NovaWeapon_AimStellarBatteryShot(const GameState &state,
 // consistent with the bank-indexed table. The port keeps the raw resource id on
 // Stellar.weapon_id and resolves it through ScenarioData::Weapon (which
 // re-applies the same -0x80), then stores the resulting bank slot on the shot,
-// matching the original shot's weapon_id. ShotState +0x24 visibility, +0x32
-// damage_reduction and +0x40 retarget_timer are not modelled on ActiveShot
-// (unused by the port's simulation). The sound variant (5) is likewise not
-// carried by pending_fire_sounds.
+// matching the original shot's weapon_id. ShotState +0x24 visibility and +0x40
+// retarget_timer are not modelled on ActiveShot. The sound variant (5) is
+// likewise not carried by pending_fire_sounds.
 int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
                                        const Stellar &battery,
                                        std::int16_t target_ship_slot,
@@ -1333,7 +1332,9 @@ int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
       std::max(1.0F, static_cast<float>(w->lifetime_ticks));
   shot.life_frames = static_cast<int>(std::ceil(shot.life_ticks_remaining));
   shot.collision_radius_px = 2.0F;
-  shot.fuse_elapsed = w->fuse_ticks < 1 ? -1.0F : 0.0F;
+  shot.damage_decay_elapsed_ticks =
+      w->damage_decay_interval_ticks < 1 ? -1.0F : 0.0F;
+  shot.damage_decay_points = 0;
   shot.retarget_cooldown = 0;
   shot.linked_shot_generation = 0;
   // Original frame_cycle_index seed: Random(0x24) unless flags_primary 0x4
@@ -2657,13 +2658,13 @@ void NovaWeapon_TickBeamHitQueue(GameState &state, float elapsed_ticks) {
         state.scenario.Weapon(static_cast<std::int16_t>(beam.weapon_id + 0x80));
     for (std::int16_t tick = 0; tick < whole_ticks && beam.lifetime_ticks >= 0;
          ++tick) {
-      // Decay phase (Bible "Decay", WeaponDef fuse_ticks): once the lifetime
-      // reaches 0, a beam with a positive fuse holds on screen while
+      // Decay phase (Bible "Decay"): once the lifetime reaches 0, a beam with
+      // a positive Decay value holds on screen while
       // animation_counter + falloff < 0x10, counting animation_counter up;
       // the renderer shrinks the corona / fades the beam with it. The
       // original only ever increments animation_counter in this branch.
       if (beam.lifetime_ticks == 0 && weapon != nullptr &&
-          weapon->fuse_ticks > 0) {
+          weapon->damage_decay_interval_ticks > 0) {
         beam.animation_counter =
             static_cast<std::int16_t>(beam.animation_counter + 1);
         if (beam.animation_counter + weapon->beam_falloff < 0x10) {
@@ -2952,15 +2953,15 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
 // Ghidra Shot_HandleShot (0x00435830) time-animated shot-frame branch: for a
 // weapon with flags_primary bit 0 set, each frame accumulates the real frame
 // time into ShotState.anim_elapsed and, when it crosses the weapon's
-// shot_anim_frame_dwell (Ghidra WeaponDef.homing_strength_or_turn_rate; a
-// dwell < 1 advances every frame), steps ShotState.frame_cycle_index, wrapping
-// at the shot sprite-set's frame count (0, or frame_count-1 when the weapon's
-// flags_secondary bit 1 is set). The Light Blaster and the other unguided
-// projectiles take the static/heading branch instead, so this only drives
-// genuinely time-animated weapon shots.
+// beam_width_or_animation_frame_delay (Bible BeamWidth, in 30ths of a second;
+// a delay < 1 advances every frame), steps ShotState.frame_cycle_index,
+// wrapping at the shot sprite-set's frame count (0, or frame_count-1 when the
+// weapon's flags_secondary bit 1 is set). The Light Blaster and the other
+// unguided projectiles take the static/heading branch instead, so this only
+// drives genuinely time-animated weapon shots.
 void NovaWeapon_StepShotAnimation(GameState &state,
                                   ActiveShot &shot,
-                                  float frame_time_ms) {
+                                  float elapsed_ticks) {
   const Weapon *w = WeaponAt(state, shot.weapon_id);
   if (!w) {
     return;
@@ -2969,9 +2970,9 @@ void NovaWeapon_StepShotAnimation(GameState &state,
   if ((w->flags & 0x0001U) == 0) {
     return;
   }
-  const std::int16_t dwell = w->shot_anim_frame_dwell;
-  shot.anim_elapsed += frame_time_ms;
-  if (dwell < 1 || shot.anim_elapsed >= static_cast<float>(dwell)) {
+  const std::int16_t frame_delay = w->beam_width_or_animation_frame_delay;
+  shot.anim_elapsed += elapsed_ticks;
+  if (frame_delay < 1 || shot.anim_elapsed >= static_cast<float>(frame_delay)) {
     shot.frame_cycle_index += 1;
     shot.anim_elapsed = 0.0F;
   }
@@ -2981,9 +2982,7 @@ void NovaWeapon_StepShotAnimation(GameState &state,
   // side; DrawShots owns that clamp once the set is resolved.
 }
 
-void NovaWeapon_TickShots(GameState &state,
-                          float frame_time_ms,
-                          float elapsed_ticks) {
+void NovaWeapon_TickShots(GameState &state, float elapsed_ticks) {
   // Advance shots per Shot_HandleShot (0x00435830): sanitize ownership/target
   // latches, count lifetime down, run the guidance pass, then integrate the
   // position with the (possibly rebuilt) velocity. Shots that cross zero are
@@ -3064,7 +3063,19 @@ void NovaWeapon_TickShots(GameState &state,
     NovaWeapon_UpdateShotGuidance(state, shot, tick_scale);
     shot.pos_x += shot.vel_x * tick_scale;
     shot.pos_y += shot.vel_y * tick_scale;
-    NovaWeapon_StepShotAnimation(state, shot, frame_time_ms);
+    NovaWeapon_StepShotAnimation(state, shot, tick_scale);
+    // Bible Decay is measured in 30ths of a second. The original adds
+    // g_avg_frame_tick_scale, advances only when elapsed strictly exceeds the
+    // interval, resets to zero, and performs at most one decay step per call.
+    if (weapon->damage_decay_interval_ticks > 0) {
+      shot.damage_decay_elapsed_ticks += tick_scale;
+      if (static_cast<float>(weapon->damage_decay_interval_ticks) <
+          shot.damage_decay_elapsed_ticks) {
+        shot.damage_decay_elapsed_ticks = 0.0F;
+        shot.damage_decay_points =
+            static_cast<std::int16_t>(shot.damage_decay_points + 1);
+      }
+    }
   }
   shots.erase(std::remove_if(shots.begin(),
                              shots.end(),

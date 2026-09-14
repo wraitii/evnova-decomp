@@ -241,19 +241,17 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
   return false;
 }
 
-[[nodiscard]] bool ShotIsInLateCollisionWindow(const ActiveShot &shot,
-                                               const Weapon &weapon) {
-  if (weapon.late_collision_window_ticks <= 0) {
+[[nodiscard]] bool ShotIsWithinProximitySafetyDelay(const ActiveShot &shot,
+                                                    const Weapon &weapon) {
+  if (weapon.proximity_safety_ticks <= 0) {
     return false;
   }
-  const float shot_age = std::max(0.0F,
-                                  static_cast<float>(weapon.lifetime_ticks) -
-                                      shot.life_ticks_remaining);
-  const float collision_end_age = static_cast<float>(
-      weapon.lifetime_ticks - weapon.late_collision_window_ticks);
+  const float armed_lifetime =
+      static_cast<float>(weapon.lifetime_ticks - weapon.proximity_safety_ticks);
   // Both Ship_HandleSpritePairCollision and Shot_ResolveCollisions reject
-  // contacts once life_time drops below the late-window boundary.
-  return collision_end_age < shot_age;
+  // contacts while remaining life is above this boundary: ProxSafety is an
+  // initial post-launch delay, not a late-life collision window.
+  return armed_lifetime < shot.life_ticks_remaining;
 }
 
 // Ghidra Weapon_ApplyWeaponOnHitEffects (0x0046f3f0). Ionization is applied
@@ -1001,11 +999,6 @@ void ResolveShipHitFromWeapon(GameState &state,
 // impact effect, the direct damage/impulse/ionization package, and the axis-
 // aligned splash to every other eligible ship.
 //
-// TODO(decomp) skipped: Weapon_SpawnWeaponImpactParticleBurst (the SWParticle
-// impact flurries; gated on WeaponDef.impact_particle_count > 0). ShotState
-// +0x32 damage_reduction is not carried on ActiveShot; the original zero-
-// initializes it and no writer was found, so the subtraction is a no-op.
-//
 // `shot_index` is used instead of a reference because the linked-shot spawner
 // appends to GameState::active_shots and may reallocate it; the shot is only
 // re-accessed through the index after the spawn.
@@ -1033,8 +1026,12 @@ void ResolveShotCollisionHit(GameState &state,
   NovaEffects_SpawnWeaponImpactBurstForWeapon(
       state, shot.pos_x, shot.pos_y, *weapon, /*scatter=*/0x14);
 
-  const int armor_damage = weapon->mass_damage;
-  const int shield_damage = weapon->energy_damage;
+  int armor_damage = weapon->mass_damage;
+  int shield_damage = weapon->energy_damage;
+  if (shot.damage_decay_points > 0) {
+    armor_damage = std::max(0, armor_damage - shot.damage_decay_points);
+    shield_damage = std::max(0, shield_damage - shot.damage_decay_points);
+  }
 
   // Direct-target ionization is unattenuated (impact_pos = NULL upstream).
   ApplyWeaponOnHitEffects(target, *weapon, std::nullopt);
@@ -1829,7 +1826,7 @@ void NovaWeapon_ResolveDirectShotCollisions(GameState &state) {
               /*allow_pixel_mask=*/ShipContactUsesPixelMask(state, target))) {
         continue;
       }
-      if (ShotIsInLateCollisionWindow(shot, *weapon)) {
+      if (ShotIsWithinProximitySafetyDelay(shot, *weapon)) {
         break;
       }
       ResolveShotCollisionHit(state,
@@ -2052,7 +2049,7 @@ void NovaWeapon_ResolveProjectileCollisions(GameState &state) {
       shot.consumed = true;
       continue;
     }
-    if (ShotIsInLateCollisionWindow(shot, *weapon)) {
+    if (ShotIsWithinProximitySafetyDelay(shot, *weapon)) {
       continue;
     }
 

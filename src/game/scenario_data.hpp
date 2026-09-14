@@ -648,14 +648,13 @@ struct Weapon {
   float impact_particle_speed = 0.0F;      // normalized px/frame (raw * 0.01)
   std::uint32_t impact_particle_color = 0; // 0x00RRGGBB
 
-  // Fuse (resource +0x22; Ghidra WeaponDef.fuse_ticks). A positive value
-  // advances the shot's fuse_elapsed timer in Shot_HandleShot.
-  std::int16_t fuse_ticks = 0;
-  // Resource +0x46, stored by Ghidra as WeaponDef.field_0x1c. The collision
-  // callback and Shot_ResolveCollisions stop accepting contacts during this
-  // final portion of a shot's lifetime. The exact data-editor label remains
-  // provisional because the same field also controls late sprite-frame wrap.
-  std::int16_t late_collision_window_ticks = 0;
+  // Bible Decay (resource +0x22): normalized 30 Hz ticks between removing one
+  // point from both mass and energy damage. Values <= 0 disable decay.
+  std::int16_t damage_decay_interval_ticks = 0;
+  // Bible ProxSafety (resource +0x46): initial post-launch delay in normalized
+  // 30 Hz ticks before ship/proximity contacts are accepted. Flags2 0x0001
+  // also holds a cycling sprite on frame zero during this interval.
+  std::int16_t proximity_safety_ticks = 0;
 
   // Ionization (+0x4a) is accumulated on ShipState.ionization_points when
   // this weapon hits. IonizeColor (+0x72) is retained as packed RGB for the
@@ -673,23 +672,23 @@ struct Weapon {
   // (Weapon_IsShipWithinWeaponRangeOfTarget 0x00411600; mode 10 takes the
   // range_scalar path there, disasm-verified 2026).
   std::int16_t beam_length_px = 0; // resource +0x30 / Ghidra +0x70
-  // Ghidra WeaponDef.homing_strength_or_turn_rate (+0x72, loaded from resource
-  // +0x32): triple-purpose. For beam weapons (modes 0/3/10) it is the Bible
-  // BeamWidth: the core radius in pixels (0 = no center beam, corona only, and
-  // the SWBeams renderer forces it to 1 for lightning beams). For an
-  // animation-frame weapon set it is the shot animation frame-dwell time in ms
-  // (Shot_HandleShot accumulates it into ShotState.anim_elapsed and steps
-  // frame_cycle_index each time the dwell is crossed); for guided weapons it is
-  // the turn rate. The Light Blaster's payload keeps it at 0, which makes even
-  // an animated frame-stepper advance every frame.
-  std::int16_t shot_anim_frame_dwell = 0;
+  // Ghidra WeaponDef.beam_width_or_animation_frame_delay (+0x72, loaded from
+  // resource +0x32): dual-purpose. For beam weapons (modes 0/3/10) it is the
+  // Bible BeamWidth: the core radius in pixels (0 = no center beam, corona
+  // only, and the SWBeams renderer forces it to 1 for lightning beams). For an
+  // animation-frame weapon set it is the delay between frame advances, in
+  // normalized 30 Hz ticks (Bible: 30ths of a second). Shot_HandleShot adds
+  // g_avg_frame_tick_scale to ShotState.anim_elapsed and steps the frame when
+  // this interval is reached. The guided turn rate is the separate +0x58
+  // field.
+  std::int16_t beam_width_or_animation_frame_delay = 0;
 
   // Beam render fields (SWBeams renderer, WeaponDef +0x74/+0x76/+0x78/
   // +0x84/+0x88; verified against the loader copy at 0x004bd3c0).
   // Bible Falloff (resource +0x34): corona falloff rate, 2..16 in practice.
   // The loader defaults it to 0x10 when a beam has no value and zeroes it for
   // lightning beams (which have no corona). Larger = corona falls off faster;
-  // beam lifetime extends by 16 - falloff decay ticks when fuse_ticks > 0.
+  // beam lifetime extends by 16 - falloff decay ticks when Decay > 0.
   std::int16_t beam_falloff = 0;
   // Bible LiDensity (resource +0x6e): 0 = normal straight beam; > 0 = lightning
   // beam with this many zig-zags per 100 px (loader clamps to >= 2).

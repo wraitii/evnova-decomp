@@ -235,8 +235,7 @@ void Stub_CalcAiOdds(GameState &state) {
 // movement/lifetime/cooldown bookkeeping runs here, after scope 9
 // collision checks, matching the original phase order.
 void Stub_HandleShots(GameState &state, float elapsed_ticks) {
-  constexpr float kOriginalTickMs = 1000.0F / 30.0F;
-  NovaWeapon_TickShots(state, elapsed_ticks * kOriginalTickMs, elapsed_ticks);
+  NovaWeapon_TickShots(state, elapsed_ticks);
 }
 
 // Ghidra Ship_HandleShip (0x00433050) destruction debris-puff arm. Once the
