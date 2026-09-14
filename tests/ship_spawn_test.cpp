@@ -9,6 +9,7 @@ namespace {
 
 using game::GameState;
 using game::NovaEncounter_SpawnFleetLeadShip;
+using game::NovaEncounter_SpawnRandomSystemDudeShip;
 using game::NovaShip_AllocateShipSlot;
 
 // Count active NPC ships in the current system (any AI target state). Used by
@@ -51,6 +52,27 @@ TEST_CASE("allocated slot is baselined for the requested system") {
   CHECK(ship.pos_x < 750.0F);
   CHECK(ship.pos_y >= -750.0F);
   CHECK(ship.pos_y < 750.0F);
+}
+
+TEST_CASE("random system dude clears recycled movement state") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  constexpr std::int16_t kSystemId = 1; // Tichel
+
+  game::Ship &recycled = state.ShipAt(1);
+  recycled.is_active = false;
+  recycled.ai_maneuver_timer_ms = 180.0F;
+  recycled.ai_forward_thrust_cmd = 12.0F;
+  recycled.ai_desired_speed = -50.0F;
+  recycled.arrival_monitor_active = true;
+
+  const int slot = NovaEncounter_SpawnRandomSystemDudeShip(state, kSystemId, 8);
+  REQUIRE(slot == 1);
+  const game::Ship &spawned = state.ShipAt(1);
+  CHECK(spawned.ai_maneuver_timer_ms == Catch::Approx(0.0F));
+  CHECK(spawned.ai_forward_thrust_cmd == Catch::Approx(0.0F));
+  CHECK(spawned.ai_desired_speed == Catch::Approx(0.0F));
+  CHECK_FALSE(spawned.arrival_monitor_active);
 }
 
 // The fleet lead-ship spawner lays a fleet def's lead onto an allocated slot.

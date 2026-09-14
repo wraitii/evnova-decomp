@@ -692,6 +692,10 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
       return -1; // ship type selection failed -> slot released
     }
 
+    // The original resets the reused slot's full runtime state before shaping
+    // the new dude. A stale positive maneuver timer would otherwise suppress
+    // AI turning and thrust while the replacement coasts at its initial speed.
+    ship = Ship{};
     ship.is_active = true;
     ship.current_system_id = system_id;
     ship.ship_instance_id = static_cast<std::int16_t>(slot); // identity == slot
@@ -1439,32 +1443,26 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
       // without the derelict exclusion. The original's forced arm (the per-
       // system special-personality table at SystemDef +0x98) remains deferred
       // (TODO(decomp): System pers-slot decode). The spawned personality is
-      // left at the allocator scatter; only the ordinary dude branch adds the
-      // class base-velocity step. Derelict personalities are dead in space.
+      // left at the allocator scatter and then reaches the same base-velocity
+      // tail as an ordinary dude.
       const int pers_slot = NovaPers_SpawnShipFromPersDef(
           state, system_id, /*exclude_derelict_govts=*/false, -1);
       if (pers_slot >= 0) {
-        Ship &pers = state.ShipAt(static_cast<std::size_t>(pers_slot));
-        const Government *govt =
-            state.scenario.GovernmentByIndex(pers.faction_or_government_id);
-        if (govt != nullptr && (govt->flags_primary & 0x0800U) != 0U) {
-          pers.vel_x = 0.0F;
-          pers.vel_y = 0.0F;
-          pers.speed = 0.0F;
-        }
+        slot = pers_slot;
       }
-      continue;
-    }
-    if (RandomBelow(state, kDispatchRoll) == 0) {
+    } else if (RandomBelow(state, kDispatchRoll) == 0) {
       // EncounterFleet_TrySpawnRandomEncounterFleet owns its lead/escort
       // placement; the original does not apply the base-velocity step below to
       // this branch because it does not return the spawned slot to this caller.
       (void)NovaEncounter_TrySpawnRandomFleet(
           state, system_id, /*ignore_ship_availability=*/false);
       continue;
+    } else {
+      slot = NovaEncounter_SpawnRandomSystemDudeShip(state, system_id, 8);
     }
 
-    slot = NovaEncounter_SpawnRandomSystemDudeShip(state, system_id, 8);
+    // All successful single-ship branches share the original base-velocity
+    // tail. Encounter fleets initialize their own ships and return no slot.
     if (slot < 0) {
       continue;
     }
