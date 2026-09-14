@@ -1,6 +1,7 @@
 #include "game/game_state.hpp"
 #include "game/ship_visual.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
@@ -15,6 +16,33 @@ void SetShipClass(GameState &state, const ShipClass &cls) {
 }
 
 } // namespace
+
+TEST_CASE("passive cloak recovery follows the original raw-call cadence",
+          "[ship][visual][timing]") {
+  GameState state;
+  SetShipClass(state, ShipClass{});
+  Ship ship;
+  ship.ship_class_id = 0;
+  ship.armor_points = 1.0F;
+  ship.cloak_transition_latch = 0;
+
+  // At the original 21 ms floor, g_avg_frame_tick_scale is 0.63 and the
+  // unscaled original branch subtracts exactly one unit per call.
+  ship.cloak_fade_progress = 16.0F;
+  NovaShip_TickCloakFadeState(state, ship, 0.63F);
+  CHECK(ship.cloak_fade_progress == Catch::Approx(15.0F));
+
+  // A 60 Hz update is 0.5 normalized ticks. Time adjustment prevents the
+  // former one-unit-per-display-frame speedup.
+  ship.cloak_fade_progress = 16.0F;
+  NovaShip_TickCloakFadeState(state, ship, 0.5F);
+  CHECK(ship.cloak_fade_progress == Catch::Approx(16.0F - 0.5F / 0.63F));
+
+  // Preserve the original's lack of a zero clamp on the passive branch.
+  ship.cloak_fade_progress = 0.5F;
+  NovaShip_TickCloakFadeState(state, ship, 0.63F);
+  CHECK(ship.cloak_fade_progress == Catch::Approx(-0.5F));
+}
 
 TEST_CASE("running lights square wave blinks on and off", "[ship][visual]") {
   GameState state;

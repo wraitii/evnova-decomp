@@ -175,8 +175,9 @@ void NovaShip_TickWeaponSpriteAndRunningLights(GameState &state,
 // including the player). Advances the fade presentation state the gameplay
 // visibility predicate reads (NovaTargeting_ShipAtCloakVisibilityThreshold):
 // with the transition latch idle (0), an in-flight fade passively decays
-// 1.0 tick per frame toward 0; an armed latch (+1 fading in / -1 fading out)
-// integrates latch * fade-rate * frame-tick-scale and clamps at the 32.0
+// one unit per raw spaceflight call, time-adjusted against the original 21 ms
+// frame floor; an armed latch (+1 fading in / -1 fading out) integrates
+// latch * fade-rate * frame-tick-scale and clamps at the 32.0
 // ceiling or the 0.0 floor (clearing the latch). The fade rate is 0.75
 // ticks/frame, or 1.5 when the ship class carries Flags2 0x1
 // (g_cloak_fade_rate_flags2_swarming 0x0057530c vs g_cloak_fade_rate_default

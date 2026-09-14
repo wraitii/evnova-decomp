@@ -33,6 +33,15 @@ namespace {
 
 constexpr std::size_t kMinDescriptorSize = 0x36;
 
+// Frame_MeasureFrameTiming (0x00432ea0) floors ordinary spaceflight calls at
+// 21 ms and publishes elapsed_ms * 0.03 as g_avg_frame_tick_scale. Unscaled
+// per-call visual mutations therefore advance once per 0.63 normalized ticks.
+constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
+
+constexpr float RawSpaceflightCallTicks(float elapsed_ticks) {
+  return elapsed_ticks / kOriginalMaxRateFrameTicks;
+}
+
 // Mirrors the original's NovaRandom_Range(n) -> integer in [0, n). The
 // destruction visuals roll from the same GameState.rng as every other
 // clean-room roll site.
@@ -511,9 +520,10 @@ void NovaShip_TickCloakFadeState(GameState &state,
       state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
   if (ship.cloak_transition_latch == 0) {
     // Passive decay: an interrupted fade bleeds back toward fully visible at
-    // one tick per frame (no frame-scale on this arm in the original).
+    // one unit per raw call (no g_avg_frame_tick_scale multiplication in the
+    // original). Time-adjust against the original loop's 21 ms floor.
     if (ship.cloak_fade_progress > 0.0F && ship.cloak_fade_progress < 32.0F) {
-      ship.cloak_fade_progress -= 1.0F;
+      ship.cloak_fade_progress -= RawSpaceflightCallTicks(elapsed_ticks);
     }
   } else {
     const float fade_rate =
