@@ -66,6 +66,13 @@ NovaLanded_ScaledStorePrice(std::int32_t base_price,
 [[nodiscard]] bool NovaLanded_CanBuyOutfit(GameState &state,
                                            std::int16_t stellar_id,
                                            std::int16_t outfit_id);
+// Ghidra 0x00491950 step 5: RequireGovt scopes an outfit's Require bits to
+// one of four government-keyed outfit-id bands (see Outfit::require_govt).
+// local_govt is the landed stellar's zero-based government id (-1 =
+// independent). Any value outside the bands (including -1) allows all shops.
+[[nodiscard]] bool NovaLanded_RequireGovtAllows(const ScenarioData &scenario,
+                                                std::int16_t require_govt,
+                                                std::int16_t local_govt);
 [[nodiscard]] std::int16_t NovaLanded_BuyOutfit(GameState &state,
                                                 std::int16_t stellar_id,
                                                 std::int16_t outfit_id,

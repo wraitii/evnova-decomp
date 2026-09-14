@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "game/game_state.hpp"
+#include "game/government.hpp"
 #include "game/landed_store.hpp"
 #include "game/landed_window.hpp"
 #include "game/outfit.hpp"
@@ -333,7 +334,7 @@ TEST_CASE("stellar outfit availability follows tech level",
   CHECK(checked > 0);
 }
 
-// NovaUi_IsOutfitterPurchaseAllowed (0x00491950) mode-99 bay arm: buying a
+// NovaLanded_CanBuyOutfit (0x00491950) mode-99 bay arm: buying a
 // carried-ship outfit requires a mounted bay with room for one more craft.
 // The Viper (0x9e) is bound to weapon bank 21; its bay weapon is "Viper Bay"
 // (0x9d, MaxAmmo 4) and its Require needs the Fighter Bay License (0x103).
@@ -371,4 +372,86 @@ TEST_CASE("Outfitter gate enforces fighter-bay capacity",
   CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x9e));
 
   mutable_viper->availability_expr = saved_availability;
+}
+
+// NovaLanded_CanBuyOutfit (0x00491950) step 5: RequireGovt scopes an
+// outfit's Require bits to one of four government-keyed outfit-id bands. The
+// helper is a direct port of the decompiled band chain.
+TEST_CASE("RequireGovt scopes outfit requirements to government bands",
+          "[landed_store][outfitter][government]") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  using game::NovaLanded_RequireGovtAllows;
+
+  // -1 and any out-of-band value apply in every shop.
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, -1, 0));
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, -1, -1));
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0x7f, 0));
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0x1234, 7));
+
+  // Locate a government allied with 0 (Federation) and one that is not, so the
+  // ally branches are exercised against the shipped relations.
+  std::int16_t ally = -1;
+  std::int16_t foe = -1;
+  for (std::int16_t g = 1;
+       g < static_cast<std::int16_t>(state.scenario.governments.size());
+       ++g) {
+    if (game::NovaGovernment_AreGovtsAllied(state.scenario, 0, g)) {
+      if (ally == -1)
+        ally = g;
+    } else if (foe == -1) {
+      foe = g;
+    }
+  }
+  REQUIRE(foe != -1);
+
+  // 0x80..0x17f licenses: own govt or an ally only; independent (govt -1) is
+  // denied. Target govt = 0 -> require_govt 0x80.
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0x80, 0));
+  CHECK_FALSE(NovaLanded_RequireGovtAllows(state.scenario, 0x80, -1));
+  if (ally != -1)
+    CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0x80, ally));
+  CHECK_FALSE(NovaLanded_RequireGovtAllows(state.scenario, 0x80, foe));
+
+  // 0x468..0x567 conditional: own govt, independent, or an ally.
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0x468, 0));
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0x468, -1));
+  CHECK_FALSE(NovaLanded_RequireGovtAllows(state.scenario, 0x468, foe));
+
+  // 0x850..0x94f contraband: anything except own govt or an ally.
+  CHECK_FALSE(NovaLanded_RequireGovtAllows(state.scenario, 0x850, 0));
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0x850, -1));
+  if (ally != -1)
+    CHECK_FALSE(NovaLanded_RequireGovtAllows(state.scenario, 0x850, ally));
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0x850, foe));
+
+  // 0xc38..0xd37 strict contraband: denied for own govt, independent, or ally.
+  CHECK_FALSE(NovaLanded_RequireGovtAllows(state.scenario, 0xc38, 0));
+  CHECK_FALSE(NovaLanded_RequireGovtAllows(state.scenario, 0xc38, -1));
+  if (ally != -1)
+    CHECK_FALSE(NovaLanded_RequireGovtAllows(state.scenario, 0xc38, ally));
+  CHECK(NovaLanded_RequireGovtAllows(state.scenario, 0xc38, foe));
+}
+
+// Integration through the real purchase gate: Earth (0x80) belongs to
+// government 0 (Federation), so the outfit field alone flips the decision.
+TEST_CASE("Outfitter gate enforces RequireGovt at the landed stellar",
+          "[landed_store][outfitter][government]") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  state.player.ship_class_id = 0; // the starter Shuttle
+  state.player.credits = 10'000'000;
+
+  auto *outfit =
+      const_cast<game::Outfit *>(state.scenario.Outfit(0x80)); // Light Blaster
+  REQUIRE(outfit != nullptr);
+
+  outfit->require_govt = 0x80; // license band, target govt 0
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x80));
+
+  outfit->require_govt = 0xc38; // strict contraband: denied at govt 0
+  CHECK_FALSE(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x80));
+
+  outfit->require_govt = -1; // applies everywhere again
+  CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x80));
 }
