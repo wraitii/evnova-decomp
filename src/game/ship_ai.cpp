@@ -94,6 +94,11 @@ constexpr float kCentreRangeSq = 1000000.0F;
 // NPC path measures wall-clock ms, so the port's spin-up is 350 ms --
 // TODO(decomp) unify on the 60 Hz tick unit.
 constexpr float kNpcJumpSpinupDurationMs = 350.0F;
+// Frame_MeasureFrameTiming (0x00432ea0) floors ordinary spaceflight calls at
+// 21 ms and publishes elapsed_ms * 0.03 as normalized ticks. Control mode
+// 0x0d's formation-release counter advances by one per raw call in the
+// original (0x00408d67), hence one unit per 0.63 normalized ticks here.
+constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
 // Gravity-shield approach multipliers (state 0xd/0xf).
 constexpr float kShieldKeepMult = 4.0F;
 // Combat turn-radius constants from DAT_005750a0/a4/a8/ac. The class turn
@@ -3470,7 +3475,8 @@ void NovaAi_ApplyControls(GameState &state,
     // the followed leader. While the leader's station-hold timer runs (>1.0)
     // the ship
     // matches the leader's spin-up: damp to a standstill (0.95, desired -4.0,
-    // timer +1) once the leader is within 11 deg of its own desired heading;
+    // timer +1 raw-call unit) once the leader is within 11 deg of its own
+    // desired heading;
     // once the ship's own hold timer passes 30 and the leader is not the
     // player, the ship releases back to its class default behavior (state 2 /
     // mode 4). Otherwise it copies the leader's velocity and glow (formation
@@ -3515,7 +3521,8 @@ void NovaAi_ApplyControls(GameState &state,
         ship.speed *= kMode1StopDamp;
         ship.ai_forward_thrust_cmd = 0.0F;
         ship.ai_desired_speed = -4.0F;
-        ship.ai_station_hold_timer += 1.0F;
+        ship.ai_station_hold_timer +=
+            elapsed_ticks / kOriginalMaxRateFrameTicks;
       } else if (leader_delta <= eff_turn_deg) {
         ship.ai_maneuver_timer_ms = 180.0F; // normalized ticks, raw 0x43340000
       } else {
