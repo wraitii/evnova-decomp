@@ -89,17 +89,23 @@ These use `g_avg_frame_tick_scale` in the original and should remain on
 `Shot_HandleShot` motion is normalized, but several guidance submodes in
 `Shot_UpdateShotGuidance` (`0x00431530`) deliberately use raw calls:
 
-- asteroid-decoy mode-1 turning uses the raw guided turn rate; the port
-  currently scales it with `elapsed_ticks`;
-- interference state `999` uses raw turning and a raw 300-call phase counter;
-- mode-6 rocket velocity uses `(velocity * 94 + polar * 5) * 0.01` once per
-  call, which needs an exponentiated/time-adjusted blend for stable behavior;
-- mode-5 bomb steering turns one degree per call;
-- jammer, retarget, and asteroid-decoy random rolls occur once per shot call.
+- **DONE — asteroid-decoy tracking:** internal guidance state `1` (distinct
+  from the Bible's `Guidance = 1` homing mode) turns by the raw guided turn
+  rate after shot age exceeds 15;
+- **DONE — interference:** guidance state `999` uses raw turning and a raw
+  300-call phase counter;
+- **DONE — mode-6 rocket acceleration:** velocity uses
+  `(velocity * 95 + polar * 5) * 0.01` once per raw call;
+- **DONE — mode-5 freefall bomb/mine weathervaning:** the nose turns one degree
+  per raw call toward the inherited velocity vector;
+- **DONE — guidance randomness:** jammer owner-retarget, cloak owner-retarget,
+  interference recovery, and asteroid-decoy rolls are replayed once per raw
+  shot call.
 
-Guidance probabilities should be converted as probabilities over time or
-driven by logical 21 ms ticks. Scaling random bounds directly would alter both
-probability and RNG-stream behavior.
+The port banks normalized time and replays these operations on logical 21 ms
+calls. Normal state-0 homing remains continuous: it turns by
+`guided_turn_rate * elapsed_ticks` after the executable's strict
+`shot_age > elapsed_ticks * 15` gate.
 
 There are also non-policy defects to keep distinct from cadence choices:
 

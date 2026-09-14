@@ -1580,7 +1580,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     return false;
   }
   // Ghidra 0x00426f6f: the 998 "target lost" latch makes the shot inert.
-  if (shot.retarget_cooldown == 998) {
+  if (shot.guidance_state == 998) {
     return false;
   }
   if (!target.is_active || target.current_system_id != shot.system_id ||
