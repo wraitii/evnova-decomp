@@ -1026,9 +1026,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   //
   // planet_art is the destination stellar's own planet picture (the "you are
   // here" surface panorama, PICT 0x2710 + link_a_id, or its custom picture id
-  // when it sets one at engage_highlight_frame >= 0x80 - mirrors FUN_0048e970's
-  // planet-PICT selection `engage_highlight_frame >= 0x80 ?
-  // engage_highlight_frame : link_a_id + 0x2710`). The Spaceport DITL 0x3e8
+  // when it sets one at CustPicID >= 0x80 - mirrors FUN_0048e970's
+  // planet-PICT selection. The Spaceport DITL 0x3e8
   // carves a 612x285 outer panel at the top-centre of the docked window that is
   // exactly the pict's natural size, so the planet is drawn there at 1:1, over
   // the spaceport backdrop. When no stellar picture exists (hypergate / missing
@@ -1047,8 +1046,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   std::unique_ptr<SdlTexture> planet_art;
   if (st_dec) {
     const std::int16_t stell_pict =
-        (st_dec->engage_highlight_frame >= 0x80)
-            ? st_dec->engage_highlight_frame
+        (st_dec->custom_picture_or_gate_transition_frame >= 0x80)
+            ? st_dec->custom_picture_or_gate_transition_frame
             : static_cast<std::int16_t>(st_dec->link_a_id + 0x2710);
     if (stell_pict >= 0x80) {
       planet_art = load_pict(static_cast<std::uint16_t>(stell_pict));

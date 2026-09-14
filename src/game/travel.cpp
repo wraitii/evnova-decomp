@@ -1738,31 +1738,13 @@ void NovaStarmap_ClearRoute(GameState &state) {
   state.travel.starmap_destination_system_id = -1;
 }
 
-// Ghidra 0x00459950 NovaUi_UpdateTravelEngagementProgress.
-void NovaTravel_UpdateEngagementProgress(GameState &state) {
-  constexpr std::int16_t kArmedTimer = 0x2ee;
-  constexpr std::int16_t kRequestAxisRange = 0xfa; // 250
-  const std::int16_t selected = state.travel.selected_stellar_id;
-  const Stellar *stellar = state.scenario.Stellar(selected);
-  // Left the current system (or the selection was cleared): wipe the approach.
+bool NovaTravel_PlayerMeetsStellarAccess(const GameState &state,
+                                         std::int16_t stellar_id) {
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
   if (stellar == nullptr ||
       stellar->system_id != state.player.current_system_id) {
-    state.travel.selected_stellar_id = -1;
-    state.travel.engage_timer = -1;
-    return;
+    return false;
   }
-  if (state.travel.engage_timer < 0) {
-    // The original arms the timer from the first land command for a newly
-    // selected stellar (0x0045937c/0x004593d1 set it to 0 or 0x2ed); the port
-    // initialises it on the first tick the selection is seen so the approach
-    // can arm without an initially rejected press.
-    state.travel.engage_timer = 0;
-  }
-
-  // Eligibility (Ghidra bVar5): a faction-less stellar, one whose reputation
-  // threshold the player meets, a hazard/derelict, a stellar already being
-  // approached (timer past the arm), an active mission's Visit/Return target,
-  // or a government whose policy bit 1 clears the denial.
   bool eligible = false;
   if (stellar->government_id == -1) {
     eligible = true;
@@ -1786,6 +1768,18 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
   if (state.travel.engage_timer > 0x2ed) {
     eligible = true;
   }
+  if (stellar->government_id != -1) {
+    const auto govt_index = static_cast<std::size_t>(stellar->government_id);
+    if (govt_index >= state.scenario.governments.size()) {
+      eligible = false;
+    } else {
+      const Government &government = state.scenario.governments[govt_index];
+      if (!NovaOutfit_EvaluateRequireMask(
+              state, government.scan_mask_lo, government.scan_mask_hi)) {
+        eligible = false;
+      }
+    }
+  }
   if (!eligible) {
     for (std::size_t slot = 0; slot < GameState::kMaxActiveMissions; ++slot) {
       if (!state.active_mission_runtime_flags[slot].is_active) {
@@ -1794,8 +1788,8 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
       // Ghidra compares the travel slot against the active mission's two
       // stellar fields (misn -0x6d / -0x69, the Visit/Return ids).
       const ActiveMission &mission = state.active_missions[slot];
-      if (mission.travel_stellar_id == selected ||
-          mission.return_stellar_id == selected) {
+      if (mission.travel_stellar_id == stellar_id ||
+          mission.return_stellar_id == stellar_id) {
         eligible = true;
         break;
       }
@@ -1805,6 +1799,31 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
       NovaGovernment_GetPolicyFlag(state.scenario, stellar->government_id, 1)) {
     eligible = true;
   }
+  return eligible;
+}
+
+// Ghidra 0x00459950 NovaUi_UpdateTravelEngagementProgress.
+void NovaTravel_UpdateEngagementProgress(GameState &state) {
+  constexpr std::int16_t kArmedTimer = 0x2ee;
+  constexpr std::int16_t kRequestAxisRange = 0xfa; // 250
+  const std::int16_t selected = state.travel.selected_stellar_id;
+  const Stellar *stellar = state.scenario.Stellar(selected);
+  // Left the current system (or the selection was cleared): wipe the approach.
+  if (stellar == nullptr ||
+      stellar->system_id != state.player.current_system_id) {
+    state.travel.selected_stellar_id = -1;
+    state.travel.engage_timer = -1;
+    return;
+  }
+  if (state.travel.engage_timer < 0) {
+    // The original arms the timer from the first land command for a newly
+    // selected stellar (0x0045937c/0x004593d1 set it to 0 or 0x2ed); the port
+    // initialises it on the first tick the selection is seen so the approach
+    // can arm without an initially rejected press.
+    state.travel.engage_timer = 0;
+  }
+
+  const bool eligible = NovaTravel_PlayerMeetsStellarAccess(state, selected);
 
   if ((stellar->flags & 0x20U) == 0U && eligible) {
     if (state.travel.engage_timer > 0x2ec) {

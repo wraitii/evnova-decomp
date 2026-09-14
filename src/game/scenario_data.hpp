@@ -749,6 +749,12 @@ struct Weapon {
 // Ghidra StellarDef (g_stellar_defs, entries indexed by stellar id minus
 // 0x80). One planet/station/object in a system.
 struct Stellar {
+  static constexpr std::uint16_t kAnimationReturnToFirstFrame = 0x0001;
+  static constexpr std::uint16_t kAnimationChooseRandomFrame = 0x0002;
+  static constexpr std::uint16_t kAnimateWhenDestroyed = 0x0080;
+  static constexpr std::uint16_t kHypergate = 0x1000;
+  static constexpr std::uint16_t kWormhole = 0x2000;
+
   std::string name; // resource name
 
   std::int16_t pos_x = 0; // xPos
@@ -762,7 +768,9 @@ struct Stellar {
   std::int16_t link_b_id = -1;
 
   std::uint32_t flags = 0; // travel_flags (+0x06; land/dock/trade, economy...)
-  std::uint16_t availability_flags = 0; // availability_flags (+0x20)
+  // Bible Flags2 / Ghidra availability_flags (+0x20). Named constants above
+  // cover the animation and restricted-travel bits used by the clean-room.
+  std::uint16_t availability_flags = 0;
   // Bible "Tribute": the stellar's daily payout when dominated (StellarDef
   // +0x46a). Payload +0x0a; -1/0 falls back to 1000 x TechLevel in the
   // loader. Collected once per game-day by the income pass (0x00423540) for
@@ -773,14 +781,13 @@ struct Stellar {
 
   std::int16_t government_id = -1; // Govt (+0x14; <0x80 -> -1)
   std::int16_t min_status = 0;     // reputation_threshold (+0x16)
-  // engage_highlight_frame (Ghidra StellarDef +0x26, payload +0x18): the
-  // frame index at which an animated stellar (hypergate/wormhole, avail
-  // 0x1000) shows its engaged/pulse highlight. Clamped to the middle frame by
-  // the animator when unset/out of range.
-  std::int16_t engage_highlight_frame = 0;
+  // Bible CustPicID (Ghidra StellarDef +0x26, payload +0x18). For ordinary
+  // stellars, >= 0x80 selects a custom landscape PICT. For animated
+  // hypergates it instead marks the first frame of the open/working portion;
+  // 0 or an invalid frame makes the animator use the sequence midpoint.
+  std::int16_t custom_picture_or_gate_transition_frame = 0;
 
-  std::int16_t cust_pict_id = -1; // CustPicID
-  std::int16_t cust_snd_id = -1;  // CustSndID
+  std::int16_t cust_snd_id = -1; // CustSndID
   // CustSndID (+0x1a) is an ambient sound for ordinary stellars. Only the
   // 0x1000 hypergate and 0x2000 wormhole lanes reinterpret it as an emergence
   // angle; ordinary stellars deliberately leave this empty.
@@ -788,7 +795,6 @@ struct Stellar {
 
   std::int16_t defense_dude_id = -1; // DefenseDude
   std::int16_t defense_count = 0;    // DefCount
-  std::uint16_t flags2 = 0;          // Flags2
 
   // Animation timing for an animated stellar (Ghidra StellarDef +0x470/+0x472;
   // loaded from the sp\x6fb payload +0x22/+0x24). animation_dwell_time is the

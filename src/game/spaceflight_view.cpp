@@ -32,6 +32,50 @@ constexpr float kTwoPi = 6.283185307179586F;
 constexpr int kViewportWidth = 640;
 constexpr int kViewportHeight = 400;
 
+int HypergateTransitionFrame(const Stellar &stellar, int frame_count) {
+  int transition = stellar.custom_picture_or_gate_transition_frame;
+  if (transition < 1 || transition >= frame_count - 1) {
+    transition = frame_count / 2;
+  }
+  return transition;
+}
+
+bool IsHypergateAnimationEngaged(const GameState &state,
+                                 std::int16_t stellar_id,
+                                 const Stellar &stellar,
+                                 int current_frame,
+                                 int frame_count,
+                                 int frame_height) {
+  // Ghidra 0x004159c0 Ship_IsShipInAiState0x15 and 0x00415ad0
+  // Stellar_IsShipHeadingToStellarInAiState0x01Or0x14 run inline here.
+  if (state.travel.selected_stellar_id == stellar_id &&
+      state.travel.engage_timer > 0) {
+    return true;
+  }
+  const int transition = HypergateTransitionFrame(stellar, frame_count);
+  float range = static_cast<float>(frame_height * 2);
+  if (current_frame >= transition) {
+    range *= 1.1F; // Ghidra DAT_005753a8.
+  }
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || NovaAiShip_IsDisabled(state, ship)) {
+      continue;
+    }
+    if (ship.ai_state_code == 0x15 &&
+        ship.ai_secondary_target_slot == stellar_id) {
+      return true;
+    }
+    if ((ship.ai_state_code == 1 || ship.ai_state_code == 0x14) &&
+        ship.ai_secondary_target_slot == stellar_id &&
+        std::abs(ship.pos_x - static_cast<float>(stellar.pos_x)) < range &&
+        std::abs(ship.pos_y - static_cast<float>(stellar.pos_y)) < range) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // The current space-viewport size, in logical (1:1) pixels. In resolution-
 // extension mode the world "extends": a larger window shows more of the system,
 // so the camera, the star-field simulation and the culling all track the full
@@ -544,6 +588,138 @@ void DrawShipEffectLayer(SDL_Renderer *renderer,
 
 } // namespace
 
+void NovaStellar_AdvanceAnimationFrame(GameState &state,
+                                       const Stellar &stellar,
+                                       int frame_count,
+                                       bool engaged,
+                                       float elapsed_30hz_ticks,
+                                       StellarAnimationState &animation) {
+  if (frame_count < 2) {
+    animation.current_frame = 0;
+    return;
+  }
+  animation.frame_accumulator += elapsed_30hz_ticks;
+  const auto random_frame = [&](int count) {
+    return std::uniform_int_distribution<int>{0, count - 1}(state.rng);
+  };
+
+  if ((stellar.availability_flags & Stellar::kHypergate) == 0) {
+    const int dwell =
+        animation.current_frame == 0 && stellar.animation_frame_multiplier > 1
+            ? stellar.animation_dwell_time * stellar.animation_frame_multiplier
+            : stellar.animation_dwell_time;
+    if (animation.frame_accumulator < static_cast<float>(dwell)) {
+      return;
+    }
+    animation.frame_accumulator = 0.0F;
+    if ((stellar.availability_flags & Stellar::kAnimationReturnToFirstFrame) ==
+        0) {
+      animation.current_frame = animation.previous_frame;
+      if ((stellar.availability_flags & Stellar::kAnimationChooseRandomFrame) ==
+          0) {
+        animation.previous_frame = (animation.previous_frame + 1) % frame_count;
+      } else {
+        do {
+          animation.previous_frame = random_frame(frame_count);
+        } while (animation.previous_frame == animation.current_frame);
+      }
+    } else if (animation.current_frame == 0) {
+      animation.current_frame = animation.previous_frame;
+      if ((stellar.availability_flags & Stellar::kAnimationChooseRandomFrame) ==
+          0) {
+        animation.previous_frame = (animation.previous_frame + 1) % frame_count;
+        if (animation.previous_frame == 0) {
+          ++animation.previous_frame;
+        }
+      } else {
+        do {
+          do {
+            animation.previous_frame = random_frame(frame_count);
+          } while (animation.previous_frame == 0);
+        } while (animation.previous_frame == animation.current_frame);
+      }
+    } else {
+      animation.current_frame = 0;
+    }
+    return;
+  }
+
+  const int transition = HypergateTransitionFrame(stellar, frame_count);
+  const int dwell =
+      engaged && animation.current_frame == transition &&
+              stellar.animation_frame_multiplier > 1
+          ? stellar.animation_dwell_time * stellar.animation_frame_multiplier
+          : stellar.animation_dwell_time;
+  if (animation.frame_accumulator < static_cast<float>(dwell)) {
+    return;
+  }
+  animation.frame_accumulator = 0.0F;
+  if (!engaged) {
+    if (animation.current_frame < transition) {
+      if (animation.current_frame > 0) {
+        --animation.current_frame;
+      }
+    } else if ((stellar.availability_flags &
+                Stellar::kAnimationChooseRandomFrame) == 0) {
+      if (animation.current_frame < frame_count - 1) {
+        ++animation.current_frame;
+      } else {
+        animation.current_frame = transition - 1;
+      }
+    } else {
+      animation.current_frame = transition - 1;
+    }
+    return;
+  }
+
+  if (animation.current_frame < transition) {
+    ++animation.current_frame;
+    animation.previous_frame = animation.current_frame;
+  } else if ((stellar.availability_flags &
+              Stellar::kAnimationReturnToFirstFrame) == 0) {
+    animation.current_frame = animation.previous_frame;
+    if ((stellar.availability_flags & Stellar::kAnimationChooseRandomFrame) ==
+        0) {
+      animation.previous_frame = (animation.previous_frame + 1) % frame_count;
+      animation.previous_frame = std::max(animation.previous_frame, transition);
+    } else {
+      do {
+        animation.previous_frame =
+            transition + random_frame(frame_count - transition);
+      } while (animation.previous_frame == animation.current_frame);
+    }
+  } else if (animation.current_frame == transition) {
+    animation.current_frame = animation.previous_frame;
+    if ((stellar.availability_flags & Stellar::kAnimationChooseRandomFrame) ==
+        0) {
+      animation.previous_frame = (animation.previous_frame + 1) % frame_count;
+      if (animation.previous_frame < transition) {
+        animation.previous_frame = transition + 1;
+      }
+    } else {
+      do {
+        do {
+          animation.previous_frame =
+              transition + random_frame(frame_count - transition);
+        } while (animation.previous_frame == transition);
+      } while (animation.previous_frame == animation.current_frame);
+    }
+  } else {
+    animation.current_frame = transition;
+  }
+}
+
+bool NovaStellar_ShouldDrawEmergingShip(const Ship &ship,
+                                        const Stellar *stellar,
+                                        int stellar_frame_count) {
+  if (ship.ai_state_code != 0x15 || stellar == nullptr ||
+      (stellar->availability_flags & Stellar::kHypergate) == 0) {
+    return true;
+  }
+  return stellar->sprite_current_frame >=
+         HypergateTransitionFrame(*stellar, stellar_frame_count);
+}
+
 bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
                                        GameState &state) {
   if (!ship_.frames.empty()) {
@@ -720,6 +896,24 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
     if (!ship.is_active ||
         ship.current_system_id != state.player.current_system_id) {
       continue;
+    }
+    if (ship.ai_state_code == 0x15) {
+      const Stellar *emergence_stellar =
+          state.scenario.Stellar(ship.ai_secondary_target_slot);
+      int stellar_frame_count = 0;
+      if (emergence_stellar != nullptr &&
+          (emergence_stellar->availability_flags & Stellar::kHypergate) != 0) {
+        const SpriteAsset *gate_sprite = sprite_store_.Spin(
+            platform.renderer(),
+            static_cast<std::uint16_t>(
+                NovaTargeting_StellarSpriteLinkId(*emergence_stellar) + 1000));
+        stellar_frame_count =
+            gate_sprite != nullptr ? gate_sprite->frame_count : 0;
+      }
+      if (!NovaStellar_ShouldDrawEmergingShip(
+              ship, emergence_stellar, stellar_frame_count)) {
+        continue;
+      }
     }
     const std::int16_t class_id =
         static_cast<std::int16_t>(ship.ship_class_id + 0x80);
@@ -1216,11 +1410,9 @@ void SpaceflightView::WrapAsteroids(SdlPlatform &platform, GameState &state) {
 // stay static at frame 0. For ordinary animated stellars (availability_flags &
 // 0x1000 clear) this is the ping-pong/alternate/random cycling stepper; for
 // hypergate-style stellars (0x1000 set) it is the non-engaged frame-drift
-// toward/around engage_highlight_frame. Engage-highlight pulsing needs AI ship
-// states and travel-selection (g_travel_selected_stellar_id / g_travel_engage_
-// timer), which this build does not model, so that leg is documented as a
-// no-op and only the non-engaged drift is applied. frame_time_ms mirrors the
-// original's _g_avg_frame_time_ms accumulator basis.
+// toward/around the CustPicID transition frame. Player travel engagement and
+// NPC state 0x01/0x14/0x15 drive the opening/working half. frame_time_ms is
+// converted to the original normalized 30 Hz tick accumulator basis.
 void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
                                               GameState &state,
                                               float frame_time_ms) {
@@ -1248,87 +1440,30 @@ void SpaceflightView::AdvanceStellarAnimation(SdlPlatform &platform,
     if (!set || set->frame_count < 2) {
       continue; // no animated set / single-frame body stays static
     }
-    StellarAnimState &anim = stellar_anims_[nav];
+    StellarAnimationState &anim = stellar_anims_[nav];
     const int frame_count = set->frame_count;
-
-    if ((st->availability_flags & 0x1000) == 0) {
-      // ---- Ordinary ambient animation (no hypergate-style highlighting). ----
-      anim.frame_accumulator += frame_time_ms;
-      // Dwell: hold frame 0 longer (Bible Frame0Bias) when it is shown and the
-      // multiplier is set.
-      const int dwell =
-          (anim.current_frame == 0 && st->animation_frame_multiplier > 1)
-              ? st->animation_dwell_time * st->animation_frame_multiplier
-              : st->animation_dwell_time;
-      if (dwell <= anim.frame_accumulator) {
-        anim.frame_accumulator = 0.0F;
-        if ((st->availability_flags & 1) == 0) {
-          // Alternate: current tracks previous; previous walks forward (or
-          // jumps to a random frame != current when the random bit is set).
-          anim.current_frame = anim.previous_frame;
-          if ((st->availability_flags & 2) == 0) {
-            anim.previous_frame = (anim.previous_frame + 1) % frame_count;
-          } else {
-            do {
-              anim.previous_frame = NovaRandomRange(state.rng, frame_count);
-            } while (anim.previous_frame == anim.current_frame);
-          }
-        } else if (anim.current_frame == 0) {
-          // Linger-on-0: leave frame 0, show previous, then advance it (never
-          // returning it to 0 in the sequential case; random skips 0).
-          anim.current_frame = anim.previous_frame;
-          if ((st->availability_flags & 2) == 0) {
-            anim.previous_frame = (anim.previous_frame + 1) % frame_count;
-            if (anim.previous_frame == 0) {
-              anim.previous_frame += 1;
-            }
-          } else {
-            do {
-              do {
-                anim.previous_frame = NovaRandomRange(state.rng, frame_count);
-              } while (anim.previous_frame == 0);
-            } while (anim.previous_frame == anim.current_frame);
-          }
-        } else {
-          // (flags & 1) with a non-zero current frame: snap back to frame 0.
-          anim.current_frame = 0;
-        }
-      }
-    } else {
-      // ---- Hypergate-style stellar (availability_flags & 0x1000): ----------
-      // Drift frames toward/around the engage_highlight_frame (default middle).
-      int highlight = st->engage_highlight_frame;
-      if (highlight < 1 || frame_count - 1 <= highlight) {
-        highlight = frame_count / 2; // Ghidra (frame_count+1US -1)>>1 == fc/2
-      }
-      // TODO(decomp): g_travel_selected_stellar_id / g_travel_engage_timer and
-      // active-ship engagement not modeled here; the engaged pulse-to-highlight
-      // leg is skipped (no travel-selection / AI ship state in this build). The
-      // non-engaged drift below reproduces the original exactly for this case.
-      if (st->animation_dwell_time <= anim.frame_accumulator) {
-        anim.frame_accumulator = 0.0F;
-        const int cur = anim.current_frame;
-        if (cur < highlight) {
-          if (cur > 0) {
-            anim.current_frame = cur - 1; // drift down toward 0 / highlight
-          }
-        } else if ((st->availability_flags & 2) == 0) {
-          if (cur < frame_count - 1) {
-            anim.current_frame = cur + 1;
-          } else {
-            anim.current_frame = highlight - 1;
-          }
-        } else {
-          anim.current_frame = highlight - 1;
-        }
-      }
+    const bool active = NovaTargeting_IsStellarActive(*st);
+    const bool animate_when_active =
+        (st->availability_flags & Stellar::kAnimateWhenDestroyed) != 0;
+    const bool animate = active == animate_when_active;
+    if (animate) {
+      const bool engaged =
+          (st->availability_flags & Stellar::kHypergate) != 0 &&
+          IsHypergateAnimationEngaged(state,
+                                      nav,
+                                      *st,
+                                      anim.current_frame,
+                                      frame_count,
+                                      set->tile_height);
+      NovaStellar_AdvanceAnimationFrame(
+          state, *st, frame_count, engaged, frame_time_ms * 0.03F, anim);
     }
     // Publish the frame the view draws into the StellarDef-equivalent field
     // (Ghidra StellarDef +0x476) so NovaCollision_RefreshCollisionMasks binds
     // the matching collision mask for this and the next tick.
     if (Stellar *const mutable_stellar = state.scenario.StellarMutable(nav)) {
       mutable_stellar->sprite_current_frame =
-          static_cast<std::int16_t>(anim.current_frame);
+          static_cast<std::int16_t>(animate ? anim.current_frame : 0);
     }
   }
 }

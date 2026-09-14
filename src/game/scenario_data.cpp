@@ -721,10 +721,11 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   } else {
     st.government_id = static_cast<std::int16_t>(st.government_id - 0x80);
   }
-  st.min_status = ReadBeI16(bytes, 0x16);             // reputation_threshold
-  st.engage_highlight_frame = ReadBeI16(bytes, 0x18); // hypergate pulse frame
-  st.cust_snd_id = ReadBeI16(bytes, 0x1a);            // CustSndID
-  st.availability_flags = ReadBe16(bytes, 0x20);      // availability_flags
+  st.min_status = ReadBeI16(bytes, 0x16); // reputation_threshold
+  st.custom_picture_or_gate_transition_frame =
+      ReadBeI16(bytes, 0x18); // Bible CustPicID / hypergate transition frame
+  st.cust_snd_id = ReadBeI16(bytes, 0x1a);       // CustSndID
+  st.availability_flags = ReadBe16(bytes, 0x20); // availability_flags
   if ((st.availability_flags & 0x3000U) != 0U) {
     // CustSndID is an emergence angle only for hypergates (0x1000) and
     // wormholes (0x2000); ordinary stellar sound ids remain untouched.

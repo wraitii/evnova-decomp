@@ -235,7 +235,7 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // Renders the Spaceport backdrop (PICT 0x2134 via
 // g_travel_overlay_sprite_handle, Ghidra FUN_0048e970) across the 640x480
 // playfield, then draws the destination stellar's own planet picture (PICT
-// 0x2710 + link_a_id, or its custom picture id at engage_highlight_frame >=
+// 0x2710 + link_a_id, or its custom picture id at CustPicID >=
 // 0x80, per FUN_0048e970) into the Spaceport DITL-0x3e8 outer panel at its
 // natural 612x285 size. The destination name is centred in the header band and
 // the services sit in the DITL-0x3e8 two-column (4-row) button layout at the
