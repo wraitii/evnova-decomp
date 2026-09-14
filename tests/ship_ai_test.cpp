@@ -887,6 +887,38 @@ void ActivatePlayer(GameState &state, float pos_x, float pos_y) {
 
 } // namespace
 
+TEST_CASE("ApplyControls mode 0xd formation release uses raw-call cadence") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+
+  game::Ship &leader = SpawnCombatTestShip(state, sys_idx, 0);
+  game::Ship &follower = SpawnCombatTestShip(state, sys_idx, 0);
+  follower.ai_control_mode = 0x0d;
+  follower.squad_leader_ship_slot = leader.ship_instance_id;
+  follower.ai_station_hold_timer = 1.0F;
+  leader.ai_station_hold_timer = 2.0F;
+  leader.heading = 0.0F;
+  leader.ai_desired_heading_deg = 0;
+
+  // Half of an original 21 ms call advances half a raw-call unit. The release
+  // test precedes the increment in the original, so crossing 30 does not
+  // release until the following update.
+  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.315F, /*now_ms=*/0);
+  CHECK(follower.ai_station_hold_timer == Catch::Approx(1.5F));
+
+  follower.ai_station_hold_timer = 30.0F;
+  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.63F, /*now_ms=*/0);
+  CHECK(follower.ai_station_hold_timer == Catch::Approx(31.0F));
+  CHECK(follower.ai_control_mode == 0x0d);
+  NovaAi_ApplyControls(state, follower, /*elapsed_ticks=*/0.63F, /*now_ms=*/0);
+  CHECK(follower.squad_leader_ship_slot == -1);
+  CHECK(follower.ai_state_code == 2);
+  CHECK(follower.ai_control_mode == 4);
+}
+
 // The original's mode-5 bearing call reverses the argument order
 // (Math_BearingFromPointToPoint(target_pos, ship_pos)), so the close-range
 // attack mode steers AWAY from the target -- the ship backs off while its
