@@ -74,8 +74,8 @@ These use `g_avg_frame_tick_scale` in the original and should remain on
 | Original behavior | Port status | Recommended treatment |
 |---|---|---|
 | State-8 negative-speed decay in `Ship_HandleShip` (`0x00433b03`) | Normalized to `elapsed_ticks / 0.63`; position-before-thrust ordering restored | Current reference implementation |
-| NPC and active-player death timers (`0x00433050`, `0x0044aa70`) subtract `1.0` per call | Port subtracts `elapsed_ticks` | Recalibrate to the 47.62 Hz raw-call domain; current presentations last about 1.59 times too long |
-| Fire-restricted velocity damping multiplies by `0.995` per call | Port uses `pow(0.995, elapsed_ticks)` | Use exponent `elapsed_ticks / 0.63`; current damping is calibrated to 30 Hz |
+| **DONE — death timers:** NPC, active-player, and inactive-player post-finale timers (`0x00433050`, `0x0044aa70`) subtract `1.0` per call | Port advances by `elapsed_ticks / 0.63` | Matches the original 47.62 Hz maximum-rate duration; the NPC midpoint crossing retains the odd-`DeathDelay` no-hit quirk |
+| **DONE — fire-restricted velocity damping:** multiplies by `0.995` per call | Port uses `pow(0.995, elapsed_ticks / 0.63)` | Matches the original 47.62 Hz maximum-rate damping while remaining refresh-independent |
 | Passive cloak recovery in `Ship_UpdateVisualState` (`0x00428340`) subtracts `1.0` per call | Port subtracts `1.0` per display frame | Normalize to the raw-call domain; active cloak transitions are already correctly scale-based |
 | Engine-glow integer rise/fall | Port changes one unit per display frame | Normalize if stable 47.62 Hz visuals are desired |
 | State-`0x0d` hold counter in `Ship_UpdateShipAiState` | Port retains raw `+1` calls | Normalize or run from a logical 21 ms cadence |
@@ -112,6 +112,14 @@ There are also non-policy defects to keep distinct from cadence choices:
   direct hits subtract the elapsed decay points from both damage types;
 - directional weapon effects, ship hit-reaction decay, and player-aggro decay
   are missing rather than merely using the wrong rate.
+
+The death-timer duration fix does not yet reproduce the discrete destruction
+effect cadence. `Ship_UpdateVisualState` still makes one Explode1 random roll
+per display call, and the NPC timed-action cascade still uses the display-rate
+frame counter. Preserving their RNG stream and modulo behavior requires
+replaying the ordered destruction passes on a logical 21 ms cadence;
+fractional timer stepping alone is intentionally not presented as that larger
+scheduling fix.
 
 ## Review checklist
 

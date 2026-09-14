@@ -189,11 +189,11 @@ void NovaShip_TickDestroyedShipVisualState(GameState &state,
     return;
   }
   // The original seeds the presentation the first time it observes the
-  // destroyed state and then relies on its constant 1.0/frame countdown always
+  // destroyed state and then relies on its constant 1.0/call countdown always
   // landing inside the 0<timer<=2.0 finale window. The port advances the timer
-  // on the normalized 30 Hz basis (elapsed_ticks), where a long frame can step
-  // it below zero; the latch keeps that overshoot from re-seeding a fresh
-  // presentation and swallowing the Explode2 finale.
+  // with a time-adjusted raw-call step, where a long frame can cross below
+  // zero; the latch keeps that overshoot from re-seeding a fresh presentation
+  // and swallowing the Explode2 finale.
   if (!ship.death_timer_seeded) {
     ship.death_timer_seeded = true;
     if (ship.death_timer_active <= 0.0F) {

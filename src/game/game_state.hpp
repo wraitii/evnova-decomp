@@ -290,11 +290,11 @@ struct Ship {
   bool destruction_finale_triggered = false;
   // Port-only: latches the first Ship_UpdateVisualState seed of the death
   // presentation. The original reseeds whenever death_timer_active <= 0, but
-  // because it steps by a constant 1.0 per frame an integer DeathDelay seed can
-  // never cross zero before the 0<timer<=2.0 finale window. The port advances
-  // on the normalized 30 Hz basis, where a long frame can step the timer below
-  // zero; this latch keeps that overshoot from re-seeding a fresh presentation
-  // and swallowing the Explode2 finale.
+  // because it steps by a constant 1.0 per call an integer DeathDelay seed can
+  // never cross zero before the 0<timer<=2.0 finale window. The port uses a
+  // time-adjusted raw-call step, where a long frame can cross below zero; this
+  // latch keeps that overshoot from re-seeding a fresh presentation and
+  // swallowing the Explode2 finale.
   bool death_timer_seeded = false;
   // Shot_ResolveShipHitFromWeapon refreshes this on non-bypass impacts. The
   // timer consumer is still deferred, so the field remains provisional.

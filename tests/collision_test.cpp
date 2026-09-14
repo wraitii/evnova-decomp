@@ -644,11 +644,12 @@ TEST_CASE("armor-only destruction starts the player death sequence",
   REQUIRE(state.player.death_timer_active <= 0.0F);
 
   // The player core consumes the destroyed frame but does not seed the timer.
-  // It does apply the fire-restricted 0.995 per-frame velocity damp.
+  // It applies the fire-restricted 0.995 damp on the raw-call cadence.
   CHECK(PlayerTick_StatusAndOutfitEvents(state,
                                          /*elapsed_ticks=*/1.0F,
                                          /*eject_command=*/false));
-  CHECK(state.player.vel_x == Catch::Approx(9.95F));
+  CHECK(state.player.vel_x ==
+        Catch::Approx(10.0F * std::pow(0.995F, 1.0F / 0.63F)));
   CHECK(state.player.death_timer_active <= 0.0F);
   // Ship_UpdateVisualState (scope 10, right after the core) seeds it.
   NovaShip_TickDestroyedShipVisualState(
@@ -709,8 +710,8 @@ TEST_CASE("death seed latch still runs the finale after a zero overshoot",
   REQUIRE(state.player.is_active);
   REQUIRE(state.player.death_timer_seeded);
 
-  // A long frame on the normalized 30 Hz basis can step the timer from above
-  // the finale window to below zero. The original's constant 1.0 step never
+  // A long time-adjusted raw-call step can move the timer from above the
+  // finale window to below zero. The original's constant 1.0 step never
   // crosses zero, so it always hits 0<timer<=2.0; the latch must preserve that
   // by running the finale instead of re-seeding a fresh 90-tick presentation.
   state.player.death_timer_active = -0.5F;
@@ -771,21 +772,33 @@ TEST_CASE("inactive wreck holds the death screen until the -240 timer floor",
   state.player.is_active = false;
   state.player.death_timer_active = 2.0F;
 
-  // The inactive prologue drains one addend per frame (0x0044af14) and keeps
-  // the frame consumed without latching game-over.
-  CHECK(PlayerTick_StatusAndOutfitEvents(state, 1.0F, false));
+  // The inactive prologue drains one addend per original 21 ms spaceflight
+  // call (0x0044afb0) and keeps the frame consumed without latching game-over.
+  CHECK(PlayerTick_StatusAndOutfitEvents(state, 0.63F, false));
   CHECK(state.player.death_timer_active == Catch::Approx(1.0F));
   CHECK_FALSE(state.game_over_pending);
 
   state.player.death_timer_active = -239.0F;
-  CHECK(PlayerTick_StatusAndOutfitEvents(state, 1.0F, false));
+  CHECK(PlayerTick_StatusAndOutfitEvents(state, 0.63F, false));
   CHECK(state.player.death_timer_active == Catch::Approx(-240.0F));
   CHECK_FALSE(state.game_over_pending);
 
   // At the floor the branch falls through to the game-over latch.
-  CHECK(PlayerTick_StatusAndOutfitEvents(state, 1.0F, false));
+  CHECK(PlayerTick_StatusAndOutfitEvents(state, 0.63F, false));
   CHECK(state.game_over_pending);
   CHECK(state.player.death_timer_active == Catch::Approx(-240.0F));
+}
+
+TEST_CASE("active player death timer follows the original raw-call cadence",
+          "[collision][spaceflight]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.player.is_active = true;
+  state.player.armor_points = -1.0F;
+  state.player.death_timer_active = 5.0F;
+
+  CHECK(PlayerTick_StatusAndOutfitEvents(state, 0.63F, false));
+  CHECK(state.player.death_timer_active == Catch::Approx(4.0F));
 }
 
 TEST_CASE("proximity blast spawns linked submunitions with inherited context",
