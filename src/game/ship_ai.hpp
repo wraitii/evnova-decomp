@@ -306,6 +306,14 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
                                              Ship &ship,
                                              std::uint32_t now_ms);
 
+// Ghidra 0x004053c0 Mission_UpdateShipMissionStellarAttackDirective. Selects
+// the first hostile destroyable stellar in the ship's current system when the
+// ship has a fireable stellar-damage weapon, otherwise falls back to behavior
+// 0x03. Dispatched for active mission fleets whose ShipGoal is 2.
+void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
+                                                     Ship &ship,
+                                                     std::uint32_t now_ms);
+
 // Ghidra 0x004048a0 Ship_UpdateShipAssistResponseBehavior. Per-frame supervisor
 // for behavior > 4 ships: releases squads whose leader vanished, arms the
 // leader-jump-prep sync into AI state 0x0B (disengage + hold formation while

@@ -129,13 +129,15 @@ struct NewsTextPanels {
 // the slot with `landed_stellar_id` as the BBS context; decline runs nothing
 // (the payload decline script/reaction chain is not wired yet). Returns the
 // offer outcome for Mission_TriggerLandingInteractions' latch handling.
-// TODO(decomp) skipped: the mission-ship/hail branches (AvailLoc 2), the
-// variant >= 0x80 DLOG 0x3fc art path, the status-string panel (DITL entry 4),
-// and the starmap/special-interaction/mission-computer actions (4/5/7). The
-// decline arm now shows the payload +0x58 desc via the text reader and runs
-// the +0x25a reaction script; the accept arm runs the 0x0043f100 Brief/
-// LoadCarg acceptance dialogs. Port conveniences beyond the original: Esc
-// counts as decline, DIK arrows scroll.
+// The target-action path (Ship_HandlePlayerTargetActionCommand 0x00454910)
+// reuses this shell for eligible AvailLoc 2 offers; it passes -1 for the
+// landed-stellar context and supplies the live-flight render callback. TODO
+// (decomp) skipped: the variant >= 0x80 DLOG 0x3fc art path, the status-string
+// panel (DITL entry 4), and the starmap/special-interaction/mission-computer
+// actions (4/5/7). The decline arm now shows the payload +0x58 desc via the
+// text reader and runs the +0x25a reaction script; the accept arm runs the
+// 0x0043f100 Brief/ LoadCarg acceptance dialogs. Port conveniences beyond the
+// original: Esc counts as decline, DIK arrows scroll.
 [[nodiscard]] MissionOfferResult
 NovaMission_RunOfferWindow(SdlPlatform &platform,
                            GameState &state,

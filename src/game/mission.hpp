@@ -380,6 +380,15 @@ void Mission_ClearActiveReactionMission(GameState &state);
 [[nodiscard]] bool Mission_CheckMissionShipInteractionEligibility(
     const GameState &state, std::int16_t mission_id, bool interaction_context);
 
+// Ghidra 0x00454910 Ship_HandlePlayerTargetActionCommand, post-accept arm
+// (runs inline): after a mission offered by a personality ship is accepted,
+// retires the personality when Flags 0x0100 requests it, sends the hailed ship
+// into AI state 2 when Flags 0x0800 is set, and replaces a single-ship
+// Flags 0x0040 fleet with a same-class ship while preserving its kinematics.
+// Returns true only when the replacement was spawned and retargeted.
+[[nodiscard]] bool Mission_HandleAcceptedShipInteraction(
+    GameState &state, std::int16_t target_ship_slot, std::uint32_t now_ms);
+
 // Ghidra 0x00433050 mission-hail ladder (runs inline in Ship_HandleShip,
 // after the shield/armor recharge, before the velocity-match block).
 // Per-frame eligibility ladder over the ship's personality Flags for the

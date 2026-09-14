@@ -2007,3 +2007,35 @@ TEST_CASE("spawn destination wrapper accepts only restricted travel points") {
     CHECK(game::NovaAi_SelectRandomAdjacentDestination(state, ship) == 0x81);
   }
 }
+
+TEST_CASE("mission stellar attack directive selects a hostile stellar") {
+  GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  state.scenario.stellars[0].government_id = 1;
+  state.scenario.stellars[0].strength_capacity = 100;
+  state.scenario.stellars[0].strength = 100;
+  state.scenario.governments.resize(2);
+  state.scenario.governments[0].classes[0] = 10;
+  state.scenario.governments[0].enemy_classes[0] = 20;
+  state.scenario.governments[1].classes[0] = 20;
+  state.scenario.weapons.resize(1);
+  state.scenario.weapons[0].flags_secondary = 0x400;
+  state.scenario.weapons[0].weapon_mode_code = 1;
+  state.scenario.weapons[0].ammo_type = -1;
+
+  game::Ship ship;
+  ship.ship_instance_id = 1;
+  ship.current_system_id = 0;
+  ship.faction_or_government_id = 0;
+  ship.armor_points = 100.0F;
+  ship.npc_weapon_bank_ammo[0] = 1;
+
+  game::Mission_UpdateShipMissionStellarAttackDirective(
+      state, ship, /*now_ms=*/0);
+
+  CHECK(ship.ai_state_code == 0x12);
+  CHECK(ship.ai_secondary_target_slot == 0x80);
+  CHECK(ship.primary_target_ship_slot == 0x80);
+}

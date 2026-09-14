@@ -1683,7 +1683,8 @@ void NovaSystem_TickNpcSpawnMaintenance(GameState &state,
       break;
     }
   }
-  // TODO(decomp): the original then runs Mission_SpawnAmbientMissionShip and
+  // TODO(decomp): the original then runs Registration_SpawnLicenseEnforcer
+  // (0x0046ac50) and
   // the DAT_007353f4-latched ambient-traffic encounter escalation (<200
   // ships -> fleet 0xff, >0x31 -> fleet 0xfe at mode 4).
 }

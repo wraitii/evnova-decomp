@@ -1912,9 +1912,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // interaction window for the selected travel stellar. The player disabled/
     // destroyed gate and the target-ship "entering hyperspace" latch only
     // beep + show an overlay in the original (the clean-room shows the overlay
-    // text; the beep is not modelled). Mission-ship defs are not modelled, so
-    // the original's NovaUi_RunMissionShipInteractionWindow branch never
-    // triggers here (TODO(decomp)). Gated while a jump is engaged
+    // text; the beep is not modelled). Mission-ship defs use the mission
+    // interaction window; an accepted single-ship escort mission can replace
+    // the hailed personality ship in-place. Gated while a jump is engaged
     // (disabled through brake + hold + zoom).
     if (!player_tick_consumed && target_action_pressed &&
         !state.travel.engaging) {
@@ -1944,10 +1944,48 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             NovaHud_ShowOverlayMessage(state,
                                        text.value_or("Unable to send hail."));
           } else {
-            (void)NovaShipComm_RunShipDialog(
-                platform, state, ship_target, view, hud);
-            // The comm dialog blocked the loop; freeze gameplay time.
-            resync_frame_clock();
+            const std::int16_t pers_slot = target.pers_def_slot;
+            const PersDef *pers =
+                pers_slot >= 0 && static_cast<std::size_t>(pers_slot) <
+                                      state.scenario.pers_defs.size()
+                    ? &state.scenario
+                           .pers_defs[static_cast<std::size_t>(pers_slot)]
+                    : nullptr;
+            if (pers != nullptr && pers->link_mission_id != -1 &&
+                (pers->flags_primary & 0x0200U) == 0U &&
+                Mission_CheckMissionShipInteractionEligibility(
+                    state,
+                    pers->link_mission_id,
+                    /*interaction_context=*/true)) {
+              // The original sets g_travel_scene_ctx and the speaking-ship
+              // latch around NovaUi_RunMissionShipInteractionWindow. The
+              // mission offer renderer is the current clean-room window shell;
+              // it accepts the same definition and paints over the live flight
+              // frame while the state-only post-accept arm below performs the
+              // replacement.
+              state.mission_speaker_ship_slot = ship_target;
+              const MissionOfferResult result = NovaMission_RunOfferWindow(
+                  platform,
+                  state,
+                  pers->link_mission_id,
+                  /*landed_stellar_id=*/-1,
+                  [&platform, &state, &view, &hud]() {
+                    view.DrawGameFrame(platform, state, hud);
+                  });
+              state.mission_speaker_ship_slot = -1;
+              if (result == MissionOfferResult::kAccepted) {
+                (void)Mission_HandleAcceptedShipInteraction(
+                    state, ship_target, SDL_GetTicks());
+              }
+              // The mission interaction modal blocked the loop; freeze game
+              // time across it.
+              resync_frame_clock();
+            } else {
+              (void)NovaShipComm_RunShipDialog(
+                  platform, state, ship_target, view, hud);
+              // The comm dialog blocked the loop; freeze gameplay time.
+              resync_frame_clock();
+            }
           }
         }
       } else if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {

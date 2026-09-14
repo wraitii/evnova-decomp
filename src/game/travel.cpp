@@ -437,7 +437,7 @@ void FireJump(GameState &state) {
   // (0xffff), the interaction bribe latch
   // (-1) and action index (rand 0x800), DAT_00596d30/31 (0), the ambient
   // mission-spawn re-arm DAT_007353f4 = rand(30)+30 (its consumer
-  // Mission_SpawnAmbientMissionShip is unported), g_travel_countdown (0),
+  // Registration_SpawnLicenseEnforcer is unported), g_travel_countdown (0),
   // the HUD dirty flags (immediate-mode rendering makes them moot) and the
   // starmap-window hide (Sprite_SetVisible 0x0044f857; the map is modal in
   // the port and cannot be open during flight).
