@@ -63,7 +63,9 @@ RNG order:
 * speed `DAT_00575740` = 0.2
 * scatter 0x28
 * life `[0xf0, 0x1e0]`
-* color = the asteroid row tint at +0x18 (packed 555, expanded to 24-bit)
+* color = the asteroid row's Bible `PartColor` (`00RRGGBB` at payload +0x0a);
+  the original converted it to the active surface format, while SDL retains
+  RGB24
 * count = `AsteroidDef.field_0x0c` (payload +0x08)
 * position scatter = `Sprite_GetFrameFullHeight(asteroid) / 3`; every shipped
   asteroid set (800..815) is 50x50, so the port uses 16.
@@ -82,8 +84,8 @@ RNG order:
   5.04-10.08s at the original maximum cadence.
 * `src/game/spaceflight_view.cpp` — `SpaceflightView::DrawSwParticles` (1x1
   logical-pixel SDL point; SDL expands it by the display density, so retina
-  gets a 2x2 backing block). The color is written opaque, matching the
-  original's 24-bit branch.
+  gets a 2x2 backing block). SDL alpha reproduces the original 16-bit soft
+  blend, clamping `life / 32` to full opacity.
 * `GameState::sw_particles` + `sw_particle_tick_accumulator`; cleared by
   `NovaWeapon_ClearTransientCombatState`.
 
@@ -92,9 +94,10 @@ Cadence policy: whole updates are banked at the original loop's maximum
 independent of the port's display refresh rate.
 
 Divergences: the original's 8/16-bit branches blended the particle over the
-saved backdrop with a 0..0x20 life weight; the 24-bit branch (the analog of
-SDL's 32-bit target) writes the color opaquely, which is what the port does.
-The dirty-pixel save/restore pass (`SWParticles_UpdateDirtyPixels`
+saved backdrop with a 0..0x20 life weight, while its 24-bit branch wrote the
+color opaquely. The SDL renderer deliberately uses the soft, life-weighted
+behavior; otherwise the common 8-10-tick weapon particles remain fully bright
+until they disappear. The dirty-pixel save/restore pass (`SWParticles_UpdateDirtyPixels`
 0x0047c3a0 / `SWParticles_RestoreSavedPixels` 0x0047bb30) is not reproduced.
 
 Note on apparent size: the particle is one *logical* pixel on the 1024x768

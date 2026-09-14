@@ -1584,10 +1584,8 @@ struct AsteroidDef {
   // scale: (rand(0x29)+0x50) * spin_rate * 0.01 seeds AsteroidState's
   // wander_speed (+0x18). 0x64..0x12c shipped => 0.5..3.0.
   float spin_rate = 1.0F;
-  // Ghidra +0x18 (payload +0x0a); Bible PartColor. Packed 15-bit RGB tint for
-  // the debris burst, computed from the payload's 3 bytes via the loader's
-  // 565->555 downsample (red = byte[0x0c]>>3, green = byte[0x0b]>>3,
-  // blue = byte[0x0a]>>3).
+  // Ghidra +0x18 (payload +0x0a); Bible PartColor. Stored as 0x00RRGGBB for
+  // SDL; the original converted these channels to its active surface format.
   std::uint32_t part_color = 0;
   // Set true for every present asteroid-type row (resource id 0x80..0x8f);
   // absent ids stay default.

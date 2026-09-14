@@ -1419,17 +1419,10 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (t.part_count < 0) {
     t.part_count = 0;
   }
-  // Colour: the loader squashes the three RGB bytes at +0x0a to a 15-bit tint:
-  // red=byte[0xc]>>3, green=byte[0xb]>>3, blue=byte[0xa]>>3 (see
-  // 0x004c62ed..0x004c6380).
-  {
-    const auto b0 = std::to_integer<std::uint8_t>(bytes[0x0a]); // blue
-    const auto b1 = std::to_integer<std::uint8_t>(bytes[0x0b]); // green
-    const auto b2 = std::to_integer<std::uint8_t>(bytes[0x0c]); // red
-    t.part_color = (static_cast<std::uint32_t>(b2) >> 3U) << 10U |
-                   (static_cast<std::uint32_t>(b1) >> 3U) << 5U |
-                   (static_cast<std::uint32_t>(b0) >> 3U);
-  }
+  // Bible PartColor is the big-endian 00RRGGBB dword at +0x0a. The original
+  // converts its R/G/B channels to the active surface format at load time
+  // (0x004c62ed..0x004c6380); retain RGB24 for SDL instead.
+  t.part_color = ReadBe32(bytes, 0x0a) & 0x00ffffffU;
   t.frag_count = ReadBeI16(bytes, 0x12);
   if (t.frag_count < 0) {
     t.frag_count = 0;
