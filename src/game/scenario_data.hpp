@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -663,6 +664,22 @@ struct Weapon {
   std::int16_t impact_particle_frame_base = 0;
   float impact_particle_speed = 0.0F;      // normalized px/frame (raw * 0.01)
   std::uint32_t impact_particle_color = 0; // 0x00RRGGBB
+
+  // Bible Particles / PartVel / PartLifeMin / PartLifeMax / PartColor
+  // (resource +0x24..+0x2c), copied by the loader to WeaponDef +0x60..+0x64
+  // and the eight-entry variant bands at +0x34/+0x8c. These are the
+  // continuous point-particle trails emitted by Shot_HandleShot
+  // (0x00435830), not the separate sprite smoke-puff fields.
+  std::int16_t trail_particle_count = 0;
+  float trail_particle_speed = 0.0F;        // PartVel, raw * 0.01
+  std::int16_t trail_particle_life_min = 0; // PartLifeMin
+  std::int16_t trail_particle_life_max = 0; // PartLifeMax
+  std::uint32_t trail_particle_color = 0;   // PartColor, 0x00RRGGBB
+  // NovaData_LoadScenarioResourceTables precomputes eight speed and color
+  // variants using one Random(0x51) factor per variant. Shot_HandleShot then
+  // selects one speed and one color with Random(8) each tick.
+  std::array<float, 8> trail_particle_speed_variants{};
+  std::array<std::uint32_t, 8> trail_particle_color_variants{};
 
   // Bible Decay (resource +0x22): normalized 30 Hz ticks between removing one
   // point from both mass and energy damage. Values <= 0 disable decay.
@@ -1682,6 +1699,10 @@ struct ScenarioData {
   // Ghidra NovaData_LoadScenarioResourceTables (0x004bd3c0). Walks each
   // resource family by id 0x80.. max and decodes it into the matching table.
   // Returns true when at least the ship and weapon tables have data.
-  [[nodiscard]] bool LoadFromArchives();
+  // `variant_rng` is the clean-room stand-in for NovaRandom's loader-time
+  // draws. Passing the GameState RNG preserves the original shared-stream
+  // ordering during new-game startup; nullptr uses a deterministic private
+  // stream for data-only callers/tests.
+  [[nodiscard]] bool LoadFromArchives(std::mt19937 *variant_rng = nullptr);
 };
 } // namespace game

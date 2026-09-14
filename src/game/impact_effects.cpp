@@ -265,6 +265,47 @@ void NovaEffects_SpawnWeaponImpactBurstForWeapon(GameState &state,
                                              /*position_scatter=*/0);
 }
 
+// Ghidra Shot_HandleShot (0x00435830), continuous trail arm
+// 0x00436077..0x00436262. The original selects color before speed, then calls
+// Weapon_SpawnWeaponImpactParticleBurst with scatter and position scatter both
+// zero. The loader's eight variants are runtime WeaponDef bands, not the
+// separate animated sprite smoke-puff pool.
+void NovaEffects_SpawnWeaponTrailParticles(GameState &state,
+                                           float x,
+                                           float y,
+                                           const Weapon &weapon,
+                                           float heading_deg,
+                                           float anchor_offset_px,
+                                           std::int16_t blend_mode) {
+  if (weapon.trail_particle_count <= 0) {
+    return;
+  }
+  const auto color_index = static_cast<std::size_t>(RandomRange(
+      state, static_cast<int>(weapon.trail_particle_color_variants.size())));
+  const auto speed_index = static_cast<std::size_t>(RandomRange(
+      state, static_cast<int>(weapon.trail_particle_speed_variants.size())));
+  const float speed = weapon.trail_particle_speed_variants[speed_index];
+  const std::uint32_t color = weapon.trail_particle_color_variants[color_index];
+
+  // DAT_00575450 is the original 180-degree offset: trail particles start at
+  // the rear edge of the shot sprite. ActiveShot does not own the SDL sprite
+  // handle, so the caller supplies the best available half-height estimate.
+  const float behind_angle = (heading_deg + 180.0F) * kGameDegreesToRadians;
+  x += std::sin(behind_angle) * anchor_offset_px;
+  y -= std::cos(behind_angle) * anchor_offset_px;
+  NovaEffects_SpawnWeaponImpactParticleBurst(state,
+                                             x,
+                                             y,
+                                             speed,
+                                             /*scatter=*/0,
+                                             weapon.trail_particle_life_min,
+                                             weapon.trail_particle_life_max,
+                                             color,
+                                             blend_mode,
+                                             weapon.trail_particle_count,
+                                             /*position_scatter=*/0);
+}
+
 // Ghidra 0x0042e160 Shot_UpdateImpactEffectSprites.
 void NovaEffects_TickImpactEffects(GameState &state, float elapsed_ticks) {
   const float delta = std::max(0.0F, elapsed_ticks);

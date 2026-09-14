@@ -1,5 +1,6 @@
 #include "game/game_state.hpp"
 #include "game/impact_effects.hpp"
+#include "game/weapon.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -109,6 +110,72 @@ TEST_CASE("weapon impact bursts spread the spawn point when asked",
     any_offset = any_offset || dx != 0 || dy != 0;
   }
   CHECK(any_offset);
+}
+
+TEST_CASE("weapon trail particles use distinct precomputed variants",
+          "[impact][particle][weapon-trail]") {
+  GameState state;
+  state.rng.seed(0x5eedU);
+  Weapon weapon;
+  weapon.trail_particle_count = 3;
+  weapon.trail_particle_life_min = 4;
+  weapon.trail_particle_life_max = 4;
+  weapon.trail_particle_speed_variants = {
+      1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F};
+  weapon.trail_particle_color_variants = {0x00100000U,
+                                          0x00200000U,
+                                          0x00300000U,
+                                          0x00400000U,
+                                          0x00500000U,
+                                          0x00600000U,
+                                          0x00700000U,
+                                          0x00800000U};
+
+  // Heading 0 is up; the 180-degree rear anchor therefore moves the spawn
+  // point down by the supplied four-pixel half-height.
+  NovaEffects_SpawnWeaponTrailParticles(
+      state, 100.0F, 50.0F, weapon, 0.0F, 4.0F);
+
+  REQUIRE(state.sw_particles.size() == 3);
+  for (const SwParticle &particle : state.sw_particles) {
+    CHECK(particle.pos_x == 100 * 256);
+    CHECK(particle.pos_y == 54 * 256);
+    CHECK(particle.life_ticks == 4);
+    CHECK(particle.blend_mode == 0x20);
+    CHECK((particle.color & 0x00ff0000U) >= 0x00100000U);
+    CHECK((particle.color & 0x00ff0000U) <= 0x00800000U);
+    const float speed =
+        std::sqrt(static_cast<float>(particle.vel_x * particle.vel_x +
+                                     particle.vel_y * particle.vel_y)) /
+        256.0F;
+    CHECK(speed >= 0.9F);
+    CHECK(speed <= 8.1F);
+  }
+}
+
+TEST_CASE("shot tick emits configured trails at original raw-call cadence",
+          "[impact][particle][weapon-trail]") {
+  GameState state;
+  state.scenario.weapons.resize(1);
+  Weapon &weapon = state.scenario.weapons[0];
+  weapon.trail_particle_count = 1;
+  weapon.trail_particle_life_min = 10;
+  weapon.trail_particle_life_max = 10;
+  weapon.trail_particle_speed_variants.fill(1.0F);
+  weapon.trail_particle_color_variants.fill(0x00abcdefU);
+  ActiveShot shot;
+  shot.weapon_id = 0;
+  shot.system_id = state.player.current_system_id;
+  shot.life_ticks_remaining = 10.0F;
+  shot.heading_deg = 0.0F;
+  state.active_shots.push_back(shot);
+
+  NovaWeapon_TickShots(state, 0.3F);
+  CHECK(state.sw_particles.empty());
+  NovaWeapon_TickShots(state, 0.33F);
+  REQUIRE(state.sw_particles.size() == 1);
+  CHECK(state.sw_particles.front().color == 0x00abcdefU);
+  CHECK(state.sw_particles.front().pos_y == 16 * 256);
 }
 
 TEST_CASE("SWParticles advance at the original 21 ms flight cadence and expire",

@@ -6,6 +6,7 @@
 #include "game_state.hpp"
 #include "impact_effects.hpp"
 #include "outfit.hpp"
+#include "preferences.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight.hpp"
 #include "targeting.hpp"
@@ -398,6 +399,7 @@ void NovaWeapon_ClearTransientCombatState(GameState &state) {
   }
   state.sw_particles.clear();
   state.sw_particle_tick_accumulator = 0.0F;
+  state.shot_trail_tick_accumulator = 0.0F;
   state.pending_fire_sounds.clear();
   state.pending_impact_sounds.clear();
 }
@@ -2997,7 +2999,9 @@ void NovaWeapon_StepShotAnimation(GameState &state,
   // side; DrawShots owns that clamp once the set is resolved.
 }
 
-void NovaWeapon_TickShots(GameState &state, float elapsed_ticks) {
+void NovaWeapon_TickShots(GameState &state,
+                          float elapsed_ticks,
+                          const NovaPreferences *prefs) {
   // Advance shots per Shot_HandleShot (0x00435830): sanitize ownership/target
   // latches, count lifetime down, run the guidance pass, then integrate the
   // position with the (possibly rebuilt) velocity. Shots that cross zero are
@@ -3006,6 +3010,14 @@ void NovaWeapon_TickShots(GameState &state, float elapsed_ticks) {
   auto &shots = state.active_shots;
   const float tick_scale = std::max(0.0F, elapsed_ticks);
   state.last_frame_tick_scale = tick_scale;
+  // Shot_HandleShot's trail arm is a raw flight-call effect, unlike movement
+  // and guidance which integrate elapsed ticks. Bank the presentation delta
+  // so a 60 Hz port does not emit twice as many trail particles as the
+  // original's 21 ms outer-loop cadence.
+  state.shot_trail_tick_accumulator += tick_scale / kOriginalRawCallTicks;
+  const int trail_raw_call_count =
+      static_cast<int>(std::floor(state.shot_trail_tick_accumulator));
+  state.shot_trail_tick_accumulator -= static_cast<float>(trail_raw_call_count);
   const std::uint16_t display_counter_bits =
       std::bit_cast<std::uint16_t>(state.spaceflight_frame_counter);
   state.spaceflight_frame_counter = std::bit_cast<std::int16_t>(
@@ -3091,6 +3103,29 @@ void NovaWeapon_TickShots(GameState &state, float elapsed_ticks) {
     NovaWeapon_UpdateShotGuidance(state, shot, tick_scale, raw_call_count);
     shot.pos_x += shot.vel_x * tick_scale;
     shot.pos_y += shot.vel_y * tick_scale;
+    if (trail_raw_call_count > 0 && tick_scale > 0.0F &&
+        (prefs == nullptr || !prefs->smoke_trails) &&
+        weapon->trail_particle_count > 0) {
+      // Sprite_GetFrameFullHeight(shot->sprite_ref) / 2, rounded up, is the
+      // rear-edge anchor used by 0x0043609d. A prepared collision mask carries
+      // the exact frame height; otherwise the original's missing/default shot
+      // sprite is represented by its 32px full-height default (half = 16).
+      const float anchor_offset_px =
+          weapon->trail_particle_count > 0 && shot.collision_mask.HasMask()
+              ? static_cast<float>((shot.collision_mask.mask->height + 1) / 2)
+              : 16.0F;
+      for (int raw_call = 0; raw_call < trail_raw_call_count; ++raw_call) {
+        // TODO(decomp(0x00436170)) skipped: ActiveShot does not model the
+        // original sprite's fade intensity, so the blend weight stays 0x20
+        // instead of 0x20 - sprite_intensity.
+        NovaEffects_SpawnWeaponTrailParticles(state,
+                                              shot.pos_x,
+                                              shot.pos_y,
+                                              *weapon,
+                                              shot.heading_deg,
+                                              anchor_offset_px);
+      }
+    }
     NovaWeapon_StepShotAnimation(state, shot, tick_scale);
     // Bible Decay is measured in 30ths of a second. The original adds
     // g_avg_frame_tick_scale, advances only when elapsed strictly exceeds the

@@ -102,9 +102,25 @@ world. Because spaceflight extends the world 1:1 rather than upscaling the
 1024x768 canvas, a large retina window shows more system and leaves the
 particle small relative to the screen (the same applies to all 1:1 art).
 
-## Smoke trails
+## Continuous weapon-particle trails
 
-`Shot_HandleShot` 0x00435830 smoke trails (`_DAT_...` weapon fields
-`field_0x60`/`0x62`/`0x64` + the 8-entry color table at +0x8c, gated by the
-"SmokeTrails" preference and `0x20 - sprite intensity`). Separate feature; the
-`Weapon` struct does not decode those fields yet.
+`Shot_HandleShot` 0x00435830 emits the Bible `Particles` / `PartVel` /
+`PartLifeMin` / `PartLifeMax` / `PartColor` packet (`wëap` +0x24..+0x2c) from
+the rear edge of each live shot. The loader precomputes eight jointly scaled
+speed/color variants using factors from 0.60 through 1.40; each emission picks
+the color first and speed second with independent `Random(8)` calls. The later
+range post-pass aliases and overwrites speed variant zero with the weapon's
+effective range, a quirk retained by the port. Emission uses the generic
+SWParticle burst routine with zero scatter, the configured lifetime range and
+count, and blend weight `0x20 - shot sprite intensity`.
+
+The clean-room weapon model decodes the packet and `NovaWeapon_TickShots`
+emits it at the original outer-loop maximum cadence. A resolved collision mask
+provides the shot frame height; an unavailable sprite uses the original
+32-pixel default. The port does not yet model per-shot sprite fade intensity,
+so the blend weight remains 0x20. Like the original, the user-facing Smoke
+Trails preference suppresses these point particles.
+
+This is distinct from the animated smoke-puff sprite pool implemented by
+`Shot_SpawnWeaponSmokePuff` (0x004215d0), selected by `SmokeSet` and weapon
+flags 0x0200/0x0400/0x0800. That separate system remains unimplemented.
