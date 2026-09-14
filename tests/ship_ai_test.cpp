@@ -1178,8 +1178,9 @@ TEST_CASE("state 0x08 drives visible high-speed NPC arrival") {
   REQUIRE(cls != nullptr);
   const float max_speed =
       NovaShip_ComputeEffectiveStats(state, ship, *cls).max_speed_px_per_tick;
-  const int expected_slowdown_ticks =
-      static_cast<int>(std::ceil((50.0F - max_speed) / 1.165F));
+  constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
+  const int expected_slowdown_ticks = static_cast<int>(
+      std::ceil((50.0F - max_speed) / (1.165F / kOriginalMaxRateFrameTicks)));
 
   float previous_speed = 51.0F;
   int slowdown_ticks = 0;

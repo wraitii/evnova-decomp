@@ -563,6 +563,11 @@ struct Ship {
   // original integer control level to alpha because the original SpriteWorld
   // blend setup is not reconstructed yet.
   std::int16_t engine_glow_level = 0;
+  // Port-side cadence bank for Ship_HandleShip's integer engine-glow state
+  // machine. The original mutates +0xC8D4 once per spaceflight call; the SDL
+  // loop supplies fractional normalized ticks, so NPCs replay that state
+  // machine once per accumulated 21 ms original-rate call.
+  float engine_glow_raw_tick_accumulator = 0.0F;
   // Render alpha for the engine-glow layer, recomputed each frame in
   // NovaShip_TickWeaponSpriteAndRunningLights (Ship_UpdateVisualState):
   // (engine_glow_level + rand(0..5) - 4)/32, or 0 when that is below 2.
