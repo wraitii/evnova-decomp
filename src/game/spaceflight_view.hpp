@@ -50,11 +50,17 @@ void NovaStellar_AdvanceAnimationFrame(GameState &state,
                                        float elapsed_30hz_ticks,
                                        StellarAnimationState &animation);
 
-// State-0x15 hypergate emergence presentation: the hull stays hidden during
-// the opening frames and appears once the gate reaches its working section.
-[[nodiscard]] bool NovaStellar_ShouldDrawEmergingShip(const Ship &ship,
-                                                      const Stellar *stellar,
-                                                      int stellar_frame_count);
+struct ShipEmergencePresentation {
+  bool visible = true;
+  float hull_alpha = 1.0F;
+  float white_mix = 0.0F;
+};
+
+// Ghidra 0x00428340 Ship_UpdateVisualState: state-0x15 ships stay hidden until
+// the last 16 normalized ticks, then fade from transparent white to their
+// opaque normal colour.
+[[nodiscard]] ShipEmergencePresentation
+NovaShip_EmergencePresentation(const Ship &ship);
 
 class SpaceflightView {
 public:

@@ -46,6 +46,10 @@ struct SpriteDrawOptions;
 // sheets (ship rotation frames) the anchor is the class-defined position.
 struct SpriteFrame {
   std::unique_ptr<class SdlTexture> texture;
+  // Alpha silhouette uploaded for bare rl\x91D sheets. Ship emergence uses
+  // the source frame's alpha with solid-white RGB, matching the original's
+  // pure-white distance tint without requiring a custom SDL shader.
+  std::unique_ptr<class SdlTexture> white_silhouette;
   // Frame-local anchor offset (pixels from the frame's top-left). Defaulted to
   // the centred case by the loaders unless set otherwise.
   float anchor_x = 0.0F;
@@ -243,6 +247,7 @@ struct SpriteDrawOptions {
   // alpha_mod carries intensity/0x20 here. Transparent source pixels stay
   // transparent under SDL_BLENDMODE_ADD.
   bool additive = false;
+  bool white_silhouette = false;
   bool wrap = false; // one-exit wraparound for the extending viewport
   // Use the smooth (linear) filtering when the frame is drawn scaled, e.g. the
   // tiny 5x5px star tiles upscaled so they read as soft glows rather than

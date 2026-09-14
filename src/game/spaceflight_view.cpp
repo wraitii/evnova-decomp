@@ -709,15 +709,21 @@ void NovaStellar_AdvanceAnimationFrame(GameState &state,
   }
 }
 
-bool NovaStellar_ShouldDrawEmergingShip(const Ship &ship,
-                                        const Stellar *stellar,
-                                        int stellar_frame_count) {
-  if (ship.ai_state_code != 0x15 || stellar == nullptr ||
-      (stellar->availability_flags & Stellar::kHypergate) == 0) {
-    return true;
+ShipEmergencePresentation NovaShip_EmergencePresentation(const Ship &ship) {
+  if (ship.ai_state_code != 0x15) {
+    return {};
   }
-  return stellar->sprite_current_frame >=
-         HypergateTransitionFrame(*stellar, stellar_frame_count);
+  constexpr float kFadeTicks = 16.0F; // DAT_00575370
+  if (ship.ai_maneuver_timer_ms > kFadeTicks) {
+    return {.visible = false, .hull_alpha = 0.0F, .white_mix = 1.0F};
+  }
+  const float ticks = std::clamp(ship.ai_maneuver_timer_ms, 0.0F, kFadeTicks);
+  // Original Sprite brightness_level is transparency (0 opaque, 32 clear).
+  const float transparency = (ticks * 2.0F) / 32.0F;
+  // distance_brightness = min(brightness_level * 2, 32), space color white.
+  return {.visible = true,
+          .hull_alpha = 1.0F - transparency,
+          .white_mix = std::min(ticks / 8.0F, 1.0F)};
 }
 
 bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
@@ -897,23 +903,10 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
         ship.current_system_id != state.player.current_system_id) {
       continue;
     }
-    if (ship.ai_state_code == 0x15) {
-      const Stellar *emergence_stellar =
-          state.scenario.Stellar(ship.ai_secondary_target_slot);
-      int stellar_frame_count = 0;
-      if (emergence_stellar != nullptr &&
-          (emergence_stellar->availability_flags & Stellar::kHypergate) != 0) {
-        const SpriteAsset *gate_sprite = sprite_store_.Spin(
-            platform.renderer(),
-            static_cast<std::uint16_t>(
-                NovaTargeting_StellarSpriteLinkId(*emergence_stellar) + 1000));
-        stellar_frame_count =
-            gate_sprite != nullptr ? gate_sprite->frame_count : 0;
-      }
-      if (!NovaStellar_ShouldDrawEmergingShip(
-              ship, emergence_stellar, stellar_frame_count)) {
-        continue;
-      }
+    const ShipEmergencePresentation emergence =
+        NovaShip_EmergencePresentation(ship);
+    if (!emergence.visible) {
+      continue;
     }
     const std::int16_t class_id =
         static_cast<std::int16_t>(ship.ship_class_id + 0x80);
@@ -926,16 +919,20 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                                             sprite->sprite_behavior_flags,
                                             sprite->frames_per_rotation,
                                             sprite->row_count);
-    DrawSprite(platform.renderer(),
-               sprite->base,
-               frame,
-               ship.pos_x,
-               ship.pos_y,
-               camera_x,
-               camera_y,
-               vp.w,
-               vp.h);
-
+    SpriteDrawOptions hull_opts;
+    hull_opts.alpha_mod = emergence.hull_alpha * (1.0F - emergence.white_mix);
+    if (hull_opts.alpha_mod > 0.0F) {
+      DrawSprite(platform.renderer(),
+                 sprite->base,
+                 frame,
+                 ship.pos_x,
+                 ship.pos_y,
+                 camera_x,
+                 camera_y,
+                 vp.w,
+                 vp.h,
+                 hull_opts);
+    }
     // Engine-glow layer, drawn over the hull with the same heading-selected
     // frame and a thrust-driven additive intensity. engine_glow_level is driven
     // in NovaShip_IntegrateNpcMovement (Ship_HandleShip field_0xc8d4); level/24
@@ -944,7 +941,8 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
     if (sprite->has_glow && !sprite->glow.frames.empty() &&
         ship.engine_glow_intensity > 0.0F) {
       SpriteDrawOptions opts;
-      opts.alpha_mod = ship.engine_glow_intensity;
+      opts.alpha_mod =
+          ship.engine_glow_intensity * (1.0F - emergence.white_mix);
       opts.additive = true;
       DrawSprite(platform.renderer(),
                  sprite->glow,
@@ -970,7 +968,7 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                           camera_y,
                           vp.w,
                           vp.h,
-                          ship.light_intensity,
+                          ship.light_intensity * (1.0F - emergence.white_mix),
                           /*visible_threshold=*/1.0F);
     }
     if (sprite->has_weapon) {
@@ -983,8 +981,27 @@ void SpaceflightView::DrawNpcShips(SdlPlatform &platform,
                           camera_y,
                           vp.w,
                           vp.h,
-                          ship.weapon_sprite_flash_level,
+                          ship.weapon_sprite_flash_level *
+                              (1.0F - emergence.white_mix),
                           /*visible_threshold=*/0.0F);
+    }
+    // Emergence tint is the final ship-composite pass. Drawing it after the
+    // ordinary glow/light/weapon layers is essential: putting those colored
+    // layers on top makes the nominally white reveal visibly colored.
+    if (emergence.white_mix > 0.0F && emergence.hull_alpha > 0.0F) {
+      SpriteDrawOptions white_opts;
+      white_opts.alpha_mod = emergence.hull_alpha * emergence.white_mix;
+      white_opts.white_silhouette = true;
+      DrawSprite(platform.renderer(),
+                 sprite->base,
+                 frame,
+                 ship.pos_x,
+                 ship.pos_y,
+                 camera_x,
+                 camera_y,
+                 vp.w,
+                 vp.h,
+                 white_opts);
     }
   }
 }
