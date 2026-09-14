@@ -315,7 +315,20 @@ namespace {
 // burst_cycle_ticks +0x5a / burst_reset_cooldown +0x5c, turret arc +0x30,
 // homing/turn +0x32, kickback +0x56, turret_group +0x58, durability +0x68,
 // jam_vuln +0x5e..+0x64). See the Weapon field comments in scenario_data.hpp.
-[[nodiscard]] Weapon DecodeWeapon(std::span<const std::byte> bytes) {
+[[nodiscard]] std::uint32_t ScalePackedRgb(std::uint32_t color, float scale) {
+  const auto scale_channel = [scale](std::uint32_t channel) {
+    return static_cast<std::uint32_t>(std::clamp(
+        static_cast<int>(std::lround(static_cast<float>(channel) * scale)),
+        0,
+        255));
+  };
+  return scale_channel((color >> 16U) & 0xffU) << 16U |
+         scale_channel((color >> 8U) & 0xffU) << 8U |
+         scale_channel(color & 0xffU);
+}
+
+[[nodiscard]] Weapon DecodeWeapon(std::span<const std::byte> bytes,
+                                  std::mt19937 &variant_rng) {
   Weapon w;
   // Offsets cross-checked against the in-memory loader copy (0x004bd3c0):
   // each `resource +N` below is the payload offset the loader stores into a
@@ -345,6 +358,27 @@ namespace {
   w.impact_particle_frame_base = ReadBeI16(bytes, 0x4e);
   w.impact_particle_speed = static_cast<float>(ReadBeI16(bytes, 0x50)) * 0.01F;
   w.impact_particle_color = ReadBe32(bytes, 0x52) & 0x00ffffffU;
+  // Particles/PartVel/PartLifeMin/PartLifeMax/PartColor (+0x24..+0x2c)
+  // belong to the continuous shot trail. The original loader clamps a count
+  // above seven to zero after copying it, then precomputes eight variants with
+  // one NovaRandom_Range(0x51) factor per variant.
+  w.trail_particle_count = ReadBeI16(bytes, 0x24);
+  w.trail_particle_speed = static_cast<float>(ReadBeI16(bytes, 0x26)) * 0.01F;
+  w.trail_particle_life_min = ReadBeI16(bytes, 0x28);
+  w.trail_particle_life_max = ReadBeI16(bytes, 0x2a);
+  w.trail_particle_color = ReadBe32(bytes, 0x2c) & 0x00ffffffU;
+  for (std::size_t i = 0; i < w.trail_particle_speed_variants.size(); ++i) {
+    const float scale =
+        static_cast<float>(
+            std::uniform_int_distribution<int>{0, 0x50}(variant_rng) + 0x3c) *
+        0.01F;
+    w.trail_particle_speed_variants[i] = w.trail_particle_speed * scale;
+    w.trail_particle_color_variants[i] =
+        ScalePackedRgb(w.trail_particle_color, scale);
+  }
+  if (w.trail_particle_count > 7) {
+    w.trail_particle_count = 0;
+  }
   w.proximity_safety_ticks = ReadBeI16(bytes, 0x46);
   w.ionization_points = ReadBeI16(bytes, 0x4a);
   w.ionization_color = ReadBe32(bytes, 0x72) & 0x00ffffffU;
@@ -448,6 +482,14 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
       }
       current = next;
     }
+  }
+  // The original's inferred `range_scalar` name aliases the first entry of
+  // the eight speed-variant band in the decompiler output. Its post-pass
+  // writes that entry for every weapon, leaving the other seven loader-built
+  // variants untouched; Shot_HandleShot's Random(8) can therefore select the
+  // effective-range value at index zero.
+  for (Weapon &weapon : weapons) {
+    weapon.trail_particle_speed_variants[0] = weapon.range_scalar;
   }
 }
 
@@ -1503,7 +1545,14 @@ const ImpactEffect *ScenarioData::ImpactEffectAt(std::int16_t effect_id) const {
   return &impact_effects[static_cast<std::size_t>(effect_id)];
 }
 
-bool ScenarioData::LoadFromArchives() {
+bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng) {
+  // The original loader consumes eight NovaRandom draws for each present
+  // weapon while building its trail variants. GameState supplies its shared
+  // RNG on the new-game path; data-only callers get a stable private stream so
+  // loading a table does not mutate unrelated test state.
+  std::mt19937 fallback_variant_rng{0x4e6f7661U};
+  std::mt19937 &loader_rng =
+      variant_rng != nullptr ? *variant_rng : fallback_variant_rng;
   // The original sizes these tables to the family maximum and zero-fills
   // missing slots (0x200 ships/outfits, 0x100 weapons). We mirror that so
   // callers can index directly by id - 0x80.
@@ -1712,7 +1761,7 @@ bool ScenarioData::LoadFromArchives() {
   for (std::int32_t id = 0x80; id <= 0x17f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
             scenario::kWeaponResourceType, static_cast<std::uint16_t>(id))) {
-      game::Weapon weapon = DecodeWeapon(res->bytes);
+      game::Weapon weapon = DecodeWeapon(res->bytes, loader_rng);
       weapon.name = res->name;
       weapons[static_cast<std::size_t>(id) - 0x80] = std::move(weapon);
       ++loaded_weapons;

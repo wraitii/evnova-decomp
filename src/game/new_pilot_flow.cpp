@@ -322,7 +322,7 @@ void Stub_LoadScenarioResourceTables(GameState &state) {
   // resource tables (sh\x95p ships, o\x9ftf outfits, w\x91ap weapons,
   // sp\x9ab stellars, s\xd8st systems) into state.scenario, so the player
   // ship reads its real class stats here.
-  if (!state.scenario.LoadFromArchives()) {
+  if (!state.scenario.LoadFromArchives(&state.rng)) {
     NovaLog::Todo("scenario resource tables could not be loaded; player world "
                   "uses fallback defaults");
   }

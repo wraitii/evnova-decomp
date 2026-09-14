@@ -251,8 +251,10 @@ void Stub_CalcAiOdds(GameState &state) {
 // Ghidra scope 7 of Frame_TickSystems -> Shot_HandleShot (0x00435830). Shot
 // movement/lifetime/cooldown bookkeeping runs here, after scope 9
 // collision checks, matching the original phase order.
-void Stub_HandleShots(GameState &state, float elapsed_ticks) {
-  NovaWeapon_TickShots(state, elapsed_ticks);
+void Stub_HandleShots(GameState &state,
+                      float elapsed_ticks,
+                      const NovaPreferences &prefs) {
+  NovaWeapon_TickShots(state, elapsed_ticks, &prefs);
 }
 
 // Ghidra Ship_HandleShip (0x00433050) destruction debris-puff arm. Once the
@@ -514,7 +516,8 @@ void Stub_BeamHitQueue(GameState &state, float elapsed_ticks) {
 void NovaFrame_TickSystems(GameState &state,
                            SdlAudio &audio,
                            bool run_full_tick,
-                           float elapsed_ticks) {
+                           float elapsed_ticks,
+                           const NovaPreferences &prefs) {
   // g_avg_frame_tick_scale for this tick: the normalized 30 Hz scale the
   // collision mask-vs-circle decision (Ship_HandleSpritePairCollision
   // 0x004374f0) and other cadence consumers read. NovaWeapon_TickShots (scope
@@ -554,9 +557,9 @@ void NovaFrame_TickSystems(GameState &state,
   }
 
   // Always-run scopes that keep advancing during frozen transitions.
-  Stub_HandleShots(state, elapsed_ticks);  // scope 7
-  Stub_HandleShips(state, elapsed_ticks);  // scope 4/5
-  Stub_MiscHandlers(state, run_full_tick); // scope 8
+  Stub_HandleShots(state, elapsed_ticks, prefs); // scope 7
+  Stub_HandleShips(state, elapsed_ticks);        // scope 4/5
+  Stub_MiscHandlers(state, run_full_tick);       // scope 8
   Stub_BeamHitQueue(state, elapsed_ticks);
 }
 
@@ -1367,7 +1370,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   NovaFrame_TickSystems(state,
                         audio,
                         /*run_full_tick=*/true,
-                        /*elapsed_ticks=*/1.0F);
+                        /*elapsed_ticks=*/1.0F,
+                        prefs);
   view.DrawGameFrame(platform, state, hud);
   platform.Present();
 
@@ -2187,8 +2191,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 
     // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
     // cursor update.
-    NovaFrame_TickSystems(
-        state, audio, /*run_full_tick=*/true, frame_time_ms / kOriginalTickMs);
+    NovaFrame_TickSystems(state,
+                          audio,
+                          /*run_full_tick=*/true,
+                          frame_time_ms / kOriginalTickMs,
+                          prefs);
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.

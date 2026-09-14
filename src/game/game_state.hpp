@@ -1530,6 +1530,10 @@ struct GameState {
   // calls are stepped (see NovaEffects_TickSwParticles).
   std::vector<SwParticle> sw_particles;
   float sw_particle_tick_accumulator = 0.0F;
+  // Shot_HandleShot's continuous trail arm runs once per original 21 ms
+  // flight call. The port banks fractional presentation updates here so
+  // emission cadence is independent of SDL refresh rate.
+  float shot_trail_tick_accumulator = 0.0F;
 
   // Ghidra g_pending_combat_chatter_{kind,government_id,variant}
   // (0x007353fe/0x00735400/0x00735402). Written by Frame_QueueCombatChatter

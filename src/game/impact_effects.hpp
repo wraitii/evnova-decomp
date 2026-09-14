@@ -38,6 +38,18 @@ void NovaEffects_SpawnWeaponImpactBurstForWeapon(GameState &state,
                                                  const Weapon &weapon,
                                                  std::int16_t scatter);
 
+// Ghidra Shot_HandleShot (0x00435830), trail arm 0x00436077: emit the
+// continuous point-particle trail selected from the weapon's precomputed
+// speed/color variant bands. The helper performs the original Random(8)
+// color-then-speed selection; the caller supplies the behind-shot anchor.
+void NovaEffects_SpawnWeaponTrailParticles(GameState &state,
+                                           float x,
+                                           float y,
+                                           const Weapon &weapon,
+                                           float heading_deg,
+                                           float anchor_offset_px,
+                                           std::int16_t blend_mode = 0x20);
+
 // Ghidra Shot_SpawnImpactEffectSprite (0x00421500): allocate one entry in the
 // 32-slot impact-effect pool. `variant` is the delayed-start value used by the
 // original child-impact scatter path.

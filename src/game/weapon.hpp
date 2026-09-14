@@ -28,6 +28,8 @@
 
 namespace game {
 
+struct NovaPreferences;
+
 // Ghidra 0x00422210 Ship_TallyInboundWeaponThreat. Resets the threat latch on
 // each active ship, then sums half of each live, normal-target-state shot's
 // mass + energy damage into the shot's recorded target. The original pool holds
@@ -326,7 +328,9 @@ void NovaWeapon_UpdateShotGuidance(GameState &state,
 // cooldown toward zero. `elapsed_ticks` is elapsed time in normalized 30 Hz
 // ticks; it drives animation, movement, lifetime, and cooldowns independently
 // of the current update rate. Called from Frame_TickSystems scope 7.
-void NovaWeapon_TickShots(GameState &state, float elapsed_ticks = 1.0F);
+void NovaWeapon_TickShots(GameState &state,
+                          float elapsed_ticks = 1.0F,
+                          const NovaPreferences *prefs = nullptr);
 
 // Diagnostic: the human-readable weapon name of the given bank's weapon, or
 // "?" when the bank is unmounted/invalid. Used by the HUD weapon readout.

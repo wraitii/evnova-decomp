@@ -157,6 +157,45 @@ TEST_CASE("weapon hit-particle fields decode from the wap payload",
   CHECK(w->impact_particle_color == (read_be_u32(0x52) & 0x00ffffffU));
 }
 
+TEST_CASE("weapon trail-particle fields decode from the wap payload",
+          "[scenario][data][weapon-trail]") {
+  const auto payload = NovaResource_Load(0x77916170U, 0x86); // IR Missile
+  REQUIRE(payload.has_value());
+  const auto &bytes = *payload;
+  REQUIRE(bytes.size() >= 0x30);
+  const auto read_be_i16 = [&](std::size_t off) {
+    const auto hi = std::to_integer<std::uint8_t>(bytes[off]);
+    const auto lo = std::to_integer<std::uint8_t>(bytes[off + 1]);
+    return static_cast<std::int16_t>((static_cast<std::uint16_t>(hi) << 8U) |
+                                     static_cast<std::uint16_t>(lo));
+  };
+  const auto read_be_u32 = [&](std::size_t off) {
+    return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[off]))
+               << 24U |
+           static_cast<std::uint32_t>(
+               std::to_integer<std::uint8_t>(bytes[off + 1]))
+               << 16U |
+           static_cast<std::uint32_t>(
+               std::to_integer<std::uint8_t>(bytes[off + 2]))
+               << 8U |
+           static_cast<std::uint32_t>(
+               std::to_integer<std::uint8_t>(bytes[off + 3]));
+  };
+
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  const Weapon *weapon = data.Weapon(0x86);
+  REQUIRE(weapon != nullptr);
+  CHECK(weapon->trail_particle_count == read_be_i16(0x24));
+  CHECK(weapon->trail_particle_speed ==
+        Catch::Approx(static_cast<float>(read_be_i16(0x26)) * 0.01F));
+  CHECK(weapon->trail_particle_life_min == read_be_i16(0x28));
+  CHECK(weapon->trail_particle_life_max == read_be_i16(0x2a));
+  CHECK(weapon->trail_particle_color == (read_be_u32(0x2c) & 0x00ffffffU));
+  CHECK(weapon->trail_particle_speed_variants[0] ==
+        Catch::Approx(weapon->range_scalar));
+}
+
 TEST_CASE("scenario resource families resolve through the BRGR adapter",
           "[scenario][brgr]") {
   // The five scenario families live across the Nova Data archives; the adapter
