@@ -230,14 +230,47 @@ void NovaResources_EvaluateAvailability(GameState &state) {
 namespace {
 
 // Mission_SelectMissionStellarByLocator (0x0043d510) filters all stellars
-// against a locator family. The clean-room model has no separate travel graph
-// yet, so availability/system membership remain the verified gates; the
-// owning-system visibility gate and the random-destination persistence rule
-// (Mission_IsStellarValidRandomDestination, 0x00468b50) are applied here. The
-// reference/current stellar (the original's param_2) is not plumbed through
-// this helper, so the persistence check runs the chain-only arm.
-[[nodiscard]] std::vector<std::int16_t> CollectStellarLocatorCandidates(
-    const GameState &state, std::int16_t locator, std::int16_t excluded) {
+// against a locator family. The clean-room model has no separate travel graph,
+// but uses the same availability, visibility, usable-for-travel, and flag
+// gates as the original. `reference` is the original param_2 offering stellar
+// passed by Mission_ResolveMissionStellarTargets (0x0043d240).
+[[nodiscard]] std::int16_t MissionReferenceStellar(const GameState &state) {
+  if (state.in_travel_scene) {
+    const auto current = state.player.current_system_id;
+    if (current >= 0 &&
+        static_cast<std::size_t>(current) < state.scenario.systems.size()) {
+      // 0x0043d240 initializes this to zero and replaces it with the first
+      // nav stellar while g_travel_scene_ctx is set.
+      for (const std::int16_t nav :
+           state.scenario.systems[static_cast<std::size_t>(current)].nav_defs) {
+        if (nav >= kResourceIdBase && nav < kResourceIdBase + 0x800) {
+          return static_cast<std::int16_t>(nav - kResourceIdBase);
+        }
+      }
+    }
+    return 0;
+  }
+  // The original reads ShipState.ai_secondary_target_slot in flight. The
+  // port's travel commands retain that selection in TravelState instead;
+  // honor the ship field when a caller has populated it for a reconstructed
+  // path, then use the canonical clean-room travel selection.
+  if (state.player.ai_secondary_target_slot >= 0 &&
+      state.player.ai_secondary_target_slot < 0x800) {
+    return state.player.ai_secondary_target_slot;
+  }
+  if (state.travel.selected_stellar_id >= kResourceIdBase &&
+      state.travel.selected_stellar_id < kResourceIdBase + 0x800) {
+    return static_cast<std::int16_t>(state.travel.selected_stellar_id -
+                                     kResourceIdBase);
+  }
+  return -1;
+}
+
+[[nodiscard]] std::vector<std::int16_t>
+CollectStellarLocatorCandidates(const GameState &state,
+                                std::int16_t locator,
+                                std::int16_t excluded,
+                                std::int16_t reference) {
   const auto same_government_class = [&state](std::int16_t lhs,
                                               std::int16_t rhs,
                                               bool require_match) {
@@ -266,7 +299,7 @@ namespace {
     if (!stellar.is_available || stellar.system_id < 0 ||
         stellar.system_id >=
             static_cast<std::int16_t>(state.scenario.systems.size()) ||
-        (stellar.flags & 0x20U) != 0U) {
+        !NovaTargeting_IsStellarUsableForTravel(stellar)) {
       return false;
     }
     const auto stellar_id =
@@ -277,20 +310,44 @@ namespace {
     if (!NovaSystem_IsSystemVisible(state, stellar.system_id)) {
       return false;
     }
-    if (!Mission_IsStellarValidRandomDestination(state, stellar_id, -1)) {
+    if (!Mission_IsStellarValidRandomDestination(
+            state, stellar_id, reference)) {
       return false;
     }
     const auto govt = stellar.government_id;
     if (locator == -2) {
-      return (stellar.flags & 0x10U) == 0U;
+      // Ghidra 0x0043d510: ordinary travel stellar, neither the 0x20
+      // restricted/hypergate lane nor the 0x10 land-only lane.
+      return (stellar.flags & (0x10U | 0x20U)) == 0U;
     }
     if (locator == -3) {
-      return (stellar.flags & 0x10U) != 0U;
+      // Ghidra 0x0043d510: the 0x20 lane, but still not 0x10.
+      return (stellar.flags & 0x20U) != 0U && (stellar.flags & 0x10U) == 0U;
+    }
+    // All remaining random families use the ordinary (non-0x20) travel lane.
+    // The exact-government 9999..14999 arm permits 0x20 only when the target
+    // government carries Flags1c 0x800; retain that narrow original quirk.
+    if ((stellar.flags & 0x20U) != 0U) {
+      const auto target_govt = locator >= 10000 && locator < 15000
+                                   ? static_cast<std::int16_t>(locator - 10000)
+                                   : static_cast<std::int16_t>(-1);
+      if (target_govt < 0 ||
+          target_govt >=
+              static_cast<std::int16_t>(state.scenario.governments.size()) ||
+          (state.scenario.governments[static_cast<std::size_t>(target_govt)]
+               .flags_primary &
+           0x0800U) == 0U) {
+        return false;
+      }
     }
     if (locator >= 10000 && locator < 15000) {
       return govt == static_cast<std::int16_t>(locator - 10000);
     }
     if (locator >= 15000 && locator < 20000) {
+      // TODO(decomp(0x0043d510)) skipped: the decompile's allied-family
+      // existence/pick loops contain inconsistent system-table indexing.
+      // Keep the supported government-alliance predicate until disassembly
+      // establishes whether that expression is a real binary quirk.
       return NovaGovernment_AreGovtsAllied(
           state.scenario, govt, static_cast<std::int16_t>(locator - 15000));
     }
@@ -324,7 +381,8 @@ namespace {
 [[nodiscard]] std::int16_t ResolveMissionStellar(GameState &state,
                                                  std::int16_t locator,
                                                  std::int16_t excluded,
-                                                 std::int16_t fallback) {
+                                                 std::int16_t fallback,
+                                                 std::int16_t reference) {
   if (locator == -1 || locator == -4) {
     return fallback;
   }
@@ -341,10 +399,15 @@ namespace {
   }
 
   const std::vector<std::int16_t> candidates =
-      CollectStellarLocatorCandidates(state, locator, excluded);
+      CollectStellarLocatorCandidates(state, locator, excluded, reference);
   if (candidates.empty()) {
     return fallback;
   }
+  // TODO(decomp(0x0043d510)) skipped: the original proves that at least one
+  // of the fixed 0x800 stellar slots is eligible, then repeatedly draws a
+  // slot in [0, 0x800) until it passes. Choosing once from the eligible vector
+  // is distribution-equivalent but deliberately consumes a different number
+  // of RNG values, so later random events can diverge for the same seed.
   std::uniform_int_distribution<std::size_t> roll(0, candidates.size() - 1);
   return candidates[roll(state.rng)];
 }
@@ -599,7 +662,9 @@ namespace {
                  static_cast<std::int16_t>(state.scenario.stellars.size());
     }
     if (locator == -2 || locator == -3 || locator > 0) {
-      return !CollectStellarLocatorCandidates(state, locator, -1).empty();
+      return !CollectStellarLocatorCandidates(
+                  state, locator, -1, MissionReferenceStellar(state))
+                  .empty();
     }
     return true;
   };
@@ -646,6 +711,15 @@ namespace {
         }
       }
     }
+  }
+
+  // Ghidra 0x00441b40 reads FLOAT_00575510 (100.0): missions with Flags
+  // 0x0008 require at least one jump's worth of player fuel before they can
+  // be offered. The original performs this strict less-than check after the
+  // same-system denial and before the ten cached eligibility gates.
+  if ((def.flags_primary & 0x0008U) != 0U &&
+      state.player.fuel_points < kJumpFuelCost) {
+    return false;
   }
 
   // ---- Duplicate-active check --------------------------------------------
@@ -977,8 +1051,13 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
     // MisnDef +0x0c/+0x0e are the TravelStel/ReturnStel locators (mïsn
     // payload +0x0c/+0x0e); the "on_fail/on_success condition" naming was a
     // misnomer.
-    target.travel_stellar_id =
-        ResolveMissionStellar(state, definition.travel_stellar_locator, -1, -1);
+    const std::int16_t reference = MissionReferenceStellar(state);
+    target.travel_stellar_id = ResolveMissionStellar(
+        state, definition.travel_stellar_locator, -1, -1, reference);
+    // TODO(decomp(0x0043d240)) skipped: the original remaps TravelStel's
+    // owning system through System_ResolveVisibleSystemForTravel and, on -1,
+    // scans every system nav list with System_FindSystemContainingStellar.
+    // ResolveContainingSystem currently returns only Stellar.system_id.
     target.travel_system_id =
         ResolveContainingSystem(state, target.travel_stellar_id);
     target.return_stellar_id =
@@ -987,7 +1066,11 @@ void Mission_ResolveMissionStellarLocators(GameState &state) {
             : ResolveMissionStellar(state,
                                     definition.return_stellar_locator,
                                     target.travel_stellar_id,
-                                    target.travel_stellar_id);
+                                    target.travel_stellar_id,
+                                    reference);
+    // TODO(decomp(0x0043d240)) skipped: ReturnStel does not use the visible
+    // remap, but it does fall back to System_FindSystemContainingStellar when
+    // Stellar.system_id is -1. The clean-room helper has no scan fallback.
     target.return_system_id =
         ResolveContainingSystem(state, target.return_stellar_id);
     target.cargo_type_id =
@@ -1103,7 +1186,11 @@ bool Mission_PopulateActiveSlot(GameState &state,
   active.goal_counter_a = 0;
   active.goal_counter_b = 0;
   active.goal_counter_c = 0;
-  active.goal_count_remaining = definition->target_ship_count;
+  // Ghidra 0x0043f8c0: ShipStart/special spawn mode 1 begins with no ships
+  // owed to the respawn stepper; the ordinary modes seed the target count.
+  active.goal_count_remaining = definition->special_ship_spawn_mode == 1
+                                    ? 0
+                                    : definition->target_ship_count;
   active.goal_counter_e = 0;
   active.mission_target_count = definition->target_ship_count;
   active.can_abort = definition->can_abort;
@@ -1831,10 +1918,11 @@ bool Mission_TriggerLandingInteractions(
   }
 
   const MissionOfferResult result = run_offer(candidate);
-  if (result == MissionOfferResult::kActivationFailed) {
-    // The original latches only the -1 (activation-failed) return; an accept
-    // removes the entry from the offering list and a plain decline leaves it
-    // re-offerable (see 0x00448670's -1 arm).
+  if (result != MissionOfferResult::kAccepted) {
+    // The original removes an ordinary decline from the current return list;
+    // its -1 activation-failure arm also latches the definition as shown.
+    // Since the port rebuilds that list on demand, the shown latch represents
+    // both cases until the interaction context resets it.
     state.mission_interaction_shown[static_cast<std::size_t>(candidate)] = 1;
   }
   // Recheck timer: DAT_00776af4 = NovaTime_GetTickCount60Hz() +
@@ -2558,7 +2646,7 @@ void Mission_ProcessInteractionReactionSlotResources(
   MissionRuntimeFlags &runtime = state.active_mission_runtime_flags[slot];
   if (NovaStellar_AreStellarsEquivalent(
           state, mission.travel_stellar_id, landed_stellar_id)) {
-    if (mission.drop_off_mode == 1 && !mission.carrying_resources) {
+    if (mission.pickup_mode == 1 && !mission.carrying_resources) {
       // Pick up here: gate on hauling the special-ship count as tonnage.
       if (Mission_TryConsumeMissionInteractionResources(
               state, mission.cargo_qty_tons)) {
@@ -3280,6 +3368,88 @@ bool Mission_CheckMissionShipInteractionEligibility(const GameState &state,
                                   static_cast<std::size_t>(mission_id),
                                   /*page_group=*/0,
                                   interaction_context);
+}
+
+// Ghidra 0x00454910 Ship_HandlePlayerTargetActionCommand, post-accept arm.
+// The original performs the personality and fleet lookup inline after
+// NovaUi_RunMissionShipInteractionWindow returns 1. Keep the state mutation
+// here so the SDL modal remains a thin presentation wrapper.
+bool Mission_HandleAcceptedShipInteraction(GameState &state,
+                                           std::int16_t target_ship_slot,
+                                           std::uint32_t now_ms) {
+  if (target_ship_slot <= 0 ||
+      !state.SlotInRange(static_cast<std::size_t>(target_ship_slot))) {
+    return false;
+  }
+  Ship &target = state.ShipAt(static_cast<std::size_t>(target_ship_slot));
+  if (!target.is_active || target.pers_def_slot < 0 ||
+      static_cast<std::size_t>(target.pers_def_slot) >=
+          state.scenario.pers_defs.size()) {
+    return false;
+  }
+
+  const std::int16_t pers_slot = target.pers_def_slot;
+  PersDef &pers = state.scenario.pers_defs[static_cast<std::size_t>(pers_slot)];
+  if ((pers.flags_primary & 0x0100U) != 0U) {
+    // PersDef +0x620 is the present latch, not the ActiveOn cache at +0x622.
+    pers.present = false;
+  }
+  if ((pers.flags_primary & 0x0800U) != 0U) {
+    NovaAi_EnterState2ClearPrimaryTarget(target, now_ms);
+  }
+
+  std::int16_t mission_slot = -1;
+  if (pers.link_mission_id != -1) {
+    for (std::size_t slot = 0; slot < state.active_missions.size(); ++slot) {
+      const auto &runtime = state.active_mission_runtime_flags[slot];
+      if (runtime.is_active &&
+          state.active_missions[slot].mission_template_id ==
+              pers.link_mission_id) {
+        mission_slot = static_cast<std::int16_t>(slot);
+        break;
+      }
+    }
+  }
+  if (mission_slot < 0 || (pers.flags_primary & 0x0040U) == 0U) {
+    return false;
+  }
+  ActiveMission &mission =
+      state.active_missions[static_cast<std::size_t>(mission_slot)];
+  if (mission.target_ship_count != 1) {
+    return false;
+  }
+
+  // Mission_SpawnMissionShipFromDudeDef (0x0041cf40) owns the special
+  // ship-type lock for Flags 0x0800 fleets. The old class is passed as the
+  // forced class exactly as in the original callsite.
+  const int replacement_slot =
+      NovaMission_SpawnMissionShipFromDudeDef(state,
+                                              mission.dude_def_index,
+                                              target.ship_class_id,
+                                              state.player.current_system_id,
+                                              mission_slot);
+  if (replacement_slot < 0) {
+    NovaLog::Todo("mission ship {} accepted linked mission {} but replacement "
+                  "spawn failed",
+                  target_ship_slot,
+                  pers.link_mission_id);
+    return false;
+  }
+
+  Ship &replacement = state.ShipAt(static_cast<std::size_t>(replacement_slot));
+  replacement.pos_x = target.pos_x;
+  replacement.pos_y = target.pos_y;
+  replacement.vel_x = target.vel_x;
+  replacement.vel_y = target.vel_y;
+  replacement.heading = target.heading;
+  if (mission.spawn_behavior == 3) {
+    NovaShip_EnterSquadReturnState(state, replacement);
+  }
+  target.is_active = false;
+  state.player.primary_target_ship_slot =
+      static_cast<std::int16_t>(replacement_slot);
+  state.ship_reticle_pulse = 0.0F;
+  return true;
 }
 
 // Ghidra 0x00433050 mission-hail ladder (runs inline in Ship_HandleShip).

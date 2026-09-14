@@ -4445,7 +4445,19 @@ void NovaAi_UpdateShipAI(GameState &state,
     const bool availability_hull =
         dispatch_class != nullptr &&
         (dispatch_class->availability_flags & 3U) != 0U;
-    if (ship.defense_fleet_home_stellar_id != -1) {
+    bool mission_stellar_attack = false;
+    if (ship.mission_fleet_slot >= 0 &&
+        static_cast<std::size_t>(ship.mission_fleet_slot) <
+            state.active_missions.size()) {
+      const std::size_t mission_slot =
+          static_cast<std::size_t>(ship.mission_fleet_slot);
+      mission_stellar_attack =
+          state.active_mission_runtime_flags[mission_slot].is_active &&
+          state.active_missions[mission_slot].fleet_spawn_goal == 2;
+    }
+    if (mission_stellar_attack) {
+      Mission_UpdateShipMissionStellarAttackDirective(state, ship, now_ms);
+    } else if (ship.defense_fleet_home_stellar_id != -1) {
       // Ghidra 0x00405120 Ship_DefenseFleetPrioritizePlayerThreat.
       NovaAi_DefenseFleetPrioritizePlayerThreat(state, ship);
     } else if (availability_hull && ship.squad_leader_ship_slot == -1) {
@@ -4504,7 +4516,74 @@ void NovaAi_UpdateShipAI(GameState &state,
   // Ship_UpdateAutoWeaponSelectionFromTarget (0x00411540) is a post-state
   // refresh. It must run after ApplyControls because that bridge clears the
   // per-frame fire latch before the bank chooser arms it.
-  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+  if (ship.ai_state_code != 0x12) {
+    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+// Ghidra 0x004053c0 Mission_UpdateShipMissionStellarAttackDirective.
+void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
+                                                     Ship &ship,
+                                                     std::uint32_t now_ms) {
+  if (NovaAiShip_IsDisabled(state, ship) || NovaAiShip_IsDestroyed(ship) ||
+      ship.ai_state_code == 0x16) {
+    return;
+  }
+
+  std::int16_t target_stellar = -1;
+  const System *system =
+      ship.current_system_id >= 0 &&
+              static_cast<std::size_t>(ship.current_system_id) <
+                  state.scenario.systems.size()
+          ? &state.scenario
+                 .systems[static_cast<std::size_t>(ship.current_system_id)]
+          : nullptr;
+  if (system != nullptr) {
+    for (const std::int16_t resource_id : system->nav_defs) {
+      const Stellar *stellar = state.scenario.Stellar(resource_id);
+      if (stellar == nullptr || NovaTargeting_IsStellarActive(*stellar) ||
+          stellar->strength_capacity <= 0 ||
+          !NovaGovernment_AreGovtsHostileOrXenophobic(
+              state.scenario,
+              ship.faction_or_government_id,
+              stellar->government_id)) {
+        continue;
+      }
+      target_stellar = resource_id;
+      break;
+    }
+  }
+
+  std::int16_t stellar_weapon = -1;
+  for (std::int16_t bank = 0; bank < 0x100; ++bank) {
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
+    if (weapon == nullptr || (weapon->flags_secondary & 0x400U) == 0U ||
+        !WeaponBankCanFire(state, ship, bank) ||
+        weapon->weapon_mode_code == 0 || weapon->weapon_mode_code == 3 ||
+        weapon->weapon_mode_code >= 8) {
+      continue;
+    }
+    stellar_weapon = bank;
+    break;
+  }
+
+  if (target_stellar == -1 || stellar_weapon == -1) {
+    if (ship.ai_state_code == 0x12) {
+      ship.primary_target_ship_slot = -1;
+      ship.ai_secondary_target_slot = -1;
+      ship.ai_state_code = 0;
+      ship.ai_control_mode = 0;
+    }
+    NovaAi_UpdateBehavior0x03(state, ship, now_ms);
+    return;
+  }
+
+  ship.ai_secondary_target_slot = target_stellar;
+  ship.primary_target_ship_slot = target_stellar;
+  ship.ai_state_code = 0x12;
 }
 
 // ---------------------------------------------------------------------------

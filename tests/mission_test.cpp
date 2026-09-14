@@ -1,6 +1,7 @@
 #include "game/game_state.hpp"
 #include "game/mission.hpp"
 #include "game/outfit.hpp"
+#include "game/travel.hpp"
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
@@ -117,6 +118,259 @@ TEST_CASE(
   CHECK(active.goal_count_remaining == 4);
   CHECK(state.active_mission_runtime_flags[0].flags_primary_at_accept ==
         0x8123);
+}
+
+// Regression for Ghidra 0x004438d0
+// Mission_ProcessInteractionReactionSlotResources: the TravelStel pickup arm is
+// controlled by PickupMode, not DropOffMode. A mission that starts without
+// cargo and only drops off at ReturnStel must not pick up cargo merely because
+// DropOffMode is 1.
+TEST_CASE("mission cargo pickup follows PickupMode") {
+  GameState state;
+  state.scenario.stellars.resize(1);
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].cargo_holds = 10;
+  state.player.ship_class_id = 0;
+
+  auto &mission = state.active_missions[0];
+  mission.travel_stellar_id = 0;
+  mission.cargo_qty_tons = 3;
+  mission.pickup_mode = 0;
+  mission.drop_off_mode = 1;
+  auto &runtime = state.active_mission_runtime_flags[0];
+  runtime.is_active = true;
+
+  Mission_ProcessInteractionReactionSlotResources(state, 0, 0);
+
+  CHECK_FALSE(mission.carrying_resources);
+}
+
+// Regression for Ghidra 0x0043f8c0 Mission_PopulateMissionSlotFromDef:
+// special-ship spawn mode 1 starts with no completed target-goal count, even
+// when the definition has a nonzero target-ship count.
+TEST_CASE("special-ship mission starts with zero remaining goals") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.target_ship_count = 7;
+  definition.special_ship_spawn_mode = 1;
+
+  REQUIRE(Mission_PopulateActiveSlot(state, 0, 0));
+
+  const auto &mission = state.active_missions[0];
+  CHECK(mission.target_ship_count == 7);
+  CHECK(mission.mission_target_count == 7);
+  CHECK(mission.goal_count_remaining == 0);
+}
+
+TEST_CASE("random mission locator -2 selects ordinary travel stellars") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = -2;
+  definition.return_stellar_locator = -1;
+
+  state.scenario.systems.resize(3);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+    system.has_explored_flag = true;
+  }
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.systems[1].nav_defs[0] = 0x81;
+  state.scenario.systems[2].nav_defs[0] = 0x82;
+  state.scenario.stellars.resize(3);
+  for (auto &stellar : state.scenario.stellars) {
+    stellar.is_available = true;
+    stellar.is_defined = true;
+    stellar.flags = 0x81; // travel target active, ordinary lane
+    stellar.strength_capacity = 1;
+    stellar.strength = 1;
+    stellar.engage_access = 1;
+  }
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[1].system_id = 1;
+  state.scenario.stellars[2].system_id = 2;
+  state.travel.selected_stellar_id = 0x80;
+
+  Mission_ResolveMissionStellarLocators(state);
+  CHECK(state.mission_target_resolutions[0].travel_stellar_id >= 1);
+  CHECK(state.mission_target_resolutions[0].travel_stellar_id <= 2);
+}
+
+TEST_CASE("random mission locator -3 requires the 0x20 travel lane") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = -3;
+  definition.return_stellar_locator = -1;
+
+  state.scenario.systems.resize(2);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+    system.has_explored_flag = true;
+  }
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.systems[1].nav_defs[0] = 0x81;
+  state.scenario.stellars.resize(2);
+  for (auto &stellar : state.scenario.stellars) {
+    stellar.is_available = true;
+    stellar.is_defined = true;
+    stellar.flags = 0xa1; // active + 0x20 mission travel lane
+    stellar.strength_capacity = 1;
+    stellar.strength = 1;
+    stellar.engage_access = 1;
+  }
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[1].system_id = 1;
+  state.travel.selected_stellar_id = 0x80;
+
+  Mission_ResolveMissionStellarLocators(state);
+  CHECK(state.mission_target_resolutions[0].travel_stellar_id == 1);
+
+  // 0x10 is excluded by the original -3 selection arm even when 0x20 is set.
+  state.scenario.stellars[1].flags = 0xb1;
+  Mission_ResolveMissionStellarLocators(state);
+  CHECK(state.mission_target_resolutions[0].travel_stellar_id == -1);
+}
+
+TEST_CASE("mission random locator uses the current travel stellar as anchor") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.travel_stellar_locator = -2;
+  definition.return_stellar_locator = -1;
+
+  state.scenario.systems.resize(2);
+  for (auto &system : state.scenario.systems) {
+    system.is_visible = true;
+    system.has_explored_flag = true;
+  }
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.systems[1].nav_defs[0] = 0x81;
+  state.scenario.stellars.resize(2);
+  for (auto &stellar : state.scenario.stellars) {
+    stellar.is_available = true;
+    stellar.is_defined = true;
+    stellar.flags = 0x81;
+    stellar.strength_capacity = 1;
+    stellar.strength = 1;
+    stellar.engage_access = 1;
+  }
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[1].system_id = 0;
+  state.travel.selected_stellar_id = 0x80;
+
+  // Both candidates are in the anchor's system; the reference plumbing must
+  // reject them rather than using the chain-only destination arm.
+  Mission_ResolveMissionStellarLocators(state);
+  CHECK(state.mission_target_resolutions[0].travel_stellar_id == -1);
+}
+
+// Regression for Ghidra 0x00448670 Mission_TriggerReturnMissionInteractions:
+// an ordinary decline removes the offer from the current interaction walk and
+// must not immediately present the same definition again in that context.
+TEST_CASE("declined mission offer is suppressed for the current context") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.avail_location = 3;
+  definition.avail_random = 100;
+
+  int offer_count = 0;
+  std::int16_t offered_definition = -1;
+  const auto decline = [&](std::int16_t mission_def) {
+    ++offer_count;
+    offered_definition = mission_def;
+    return MissionOfferResult::kDeclined;
+  };
+
+  CHECK(Mission_TriggerLandingInteractions(state, 3, 100, decline));
+  CHECK(offer_count == 1);
+  CHECK(offered_definition == 0);
+  CHECK_FALSE(Mission_TriggerLandingInteractions(state, 3, 200, decline));
+  CHECK(offer_count == 1);
+}
+
+// Regression for the post-accept arm of Ghidra 0x00454910:
+// Flags 0x40 replaces a linked single-ship mission personality with a fresh
+// mission ship of the same class, preserving the hailed ship's kinematics.
+TEST_CASE("accepted single-ship mission replaces hailed personality ship") {
+  GameState state;
+  state.scenario.ships.resize(3);
+  state.scenario.ships[1].base_shield = 20;
+  state.scenario.ships[1].base_armor = 40;
+  state.scenario.dudes.resize(1);
+  state.scenario.dudes[0].ai_type = 1;
+  state.scenario.dudes[0].ship_types[0] = 1;
+  state.scenario.dudes[0].ship_probabilities[0] = 1;
+  state.scenario.pers_defs.resize(1);
+  state.scenario.pers_defs[0].present = true;
+  state.scenario.pers_defs[0].link_mission_id = 0;
+  state.scenario.pers_defs[0].flags_primary = 0x0940;
+
+  state.player.current_system_id = 7;
+  state.player.primary_target_ship_slot = 1;
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_instance_id = 1;
+  target.current_system_id = 7;
+  target.ship_class_id = 1;
+  target.pers_def_slot = 0;
+  target.pos_x = 123.0F;
+  target.pos_y = -45.0F;
+  target.vel_x = 2.5F;
+  target.vel_y = -4.0F;
+  target.heading = 0.75F;
+
+  ActiveMission &mission = state.active_missions[0];
+  mission.mission_template_id = 0;
+  mission.target_ship_count = 1;
+  mission.dude_def_index = 0;
+  mission.spawn_behavior = 3;
+  state.active_mission_runtime_flags[0].is_active = true;
+
+  REQUIRE(Mission_HandleAcceptedShipInteraction(state, 1, 1234));
+  CHECK_FALSE(target.is_active);
+  CHECK_FALSE(state.scenario.pers_defs[0].present);
+  CHECK(state.player.primary_target_ship_slot == 2);
+  const Ship &replacement = state.ShipAt(2);
+  CHECK(replacement.is_active);
+  CHECK(replacement.mission_fleet_slot == 0);
+  CHECK(replacement.ship_class_id == 1);
+  CHECK(replacement.pos_x == 123.0F);
+  CHECK(replacement.pos_y == -45.0F);
+  CHECK(replacement.vel_x == 2.5F);
+  CHECK(replacement.vel_y == -4.0F);
+  CHECK(replacement.heading == 0.75F);
+  CHECK(target.ai_state_code == 2);
+  CHECK(target.primary_target_ship_slot == -1);
+  CHECK(state.ship_reticle_pulse == 0.0F);
+}
+
+// Regression for Ghidra 0x00441b40
+// Mission_CheckMissionShipInteractionEligibility: Flags 0x0008 uses
+// FLOAT_00575510 (100.0), and the original comparison is strict: exactly one
+// jump of fuel passes while any lesser amount fails.
+TEST_CASE("mission fuel gate requires one jump of fuel") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.is_available_runtime = true;
+  definition.avail_location = 0;
+  definition.avail_random = 100;
+  definition.flags_primary = 0x0008;
+
+  state.player.fuel_points = kJumpFuelCost - 0.01F;
+  CHECK_FALSE(Mission_CheckMissionShipInteractionEligibility(state, 0, false));
+
+  state.player.fuel_points = kJumpFuelCost;
+  CHECK(Mission_CheckMissionShipInteractionEligibility(state, 0, false));
 }
 
 // Regression: a fresh new-game pilot landed at Tichel (system 0x81) must find

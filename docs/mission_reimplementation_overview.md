@@ -112,11 +112,15 @@ chain - so a stellar missing from any duplicate system is never chosen
 (`StellarDef.is_defined` also gates out stellars no system hosts). The port
 lives in `mission.cpp` (`Mission_IsStellarValidRandomDestination`) and is
 called from the stellar-locator candidate scan; the twin chain uses the
-already-ported `NovaSystem_ResolveDiscoverySlot` (`0x0046b9b0`). The original's
+already-ported `NovaSystem_ResolveDiscoverySlot` (`0x0046b9b0`). The
 reference/current stellar (the `param_2` anchor from
-`Mission_ResolveMissionStellarTargets` `0x0043d240`, `ai_secondary_target_slot`
-or the current system's first nav default) is not yet plumbed into the
-candidate helper, so the port currently runs the chain-only arm.
+`Mission_ResolveMissionStellarTargets` `0x0043d240`) is now plumbed from the
+flight selection or the current system's first nav default in the docked
+context. The remaining fidelity difference is selection cadence: the original
+first proves that one of its fixed 0x800 stellar slots is eligible, then draws
+uniform random slot numbers until one passes; the port builds the eligible
+vector and draws once from it. Both are uniform over eligible candidates, but
+consume the RNG stream differently.
 
 Related rename: Ghidra `0x00447f00 System_GetSystemDefFlagByte` is exactly the
 `SystemDef.is_visible` (+0x1eb) predicate and was renamed
@@ -192,7 +196,7 @@ The mission-list pipeline is implemented in `src/game/mission.cpp`:
 - `0x0043F100` `Mission_ActivateMissionAtSlot` — DONE (BBS passes the landed
   stellar; script `S` opcode passes `ai_secondary_target_slot`)
 - `0x00447F20` mission condition-expression evaluation — DONE
-- `0x0043F080` reaction schedule calculation — open
+- `0x0043F080` deadline-date calculation — DONE
 - `0x00447A30` system/locator matching — DONE (clean-room locator resolver)
 
 This layer determines which missions appear, sorts them, checks availability expressions, resolves destinations, and accepts a mission into one of 16 active slots.
@@ -285,10 +289,12 @@ Implemented in `src/game/mission.cpp` / `mission_script.cpp`:
 - `0x00447D90` active mission resolution — DONE
 - `0x00440AA0` mission/fleet assignment cleanup — DONE
 - `0x00440BF0` quick failure — DONE
-- `0x00448670` return-mission interactions — open
+- `0x00448670` return-mission interactions — DONE (remaining services-window
+  timer consumers are tracked separately)
 - `0x00440750` `Government_ApplyReputationCreditDelta` (PayVal) — DONE, full
   encoded range map verified against disasm + Bible
-- `0x00446CB0` daily driver (deadline countdown, availability reroll) — open
+- `0x00466CB0` daily driver — DONE for modeled data; rank salary and the
+  unmodeled per-system suppression table remain skipped
 
 These apply credits, reputation, follow-up missions, text, ship cleanup, and script payloads.
 
@@ -301,8 +307,9 @@ The scripting subsystem includes:
 - `0x00449370` mission script engine — ~75% (Bible opcodes A/F/S/G/D/M/N/C/
   E/H/K/L/P/Q/T/U/X/Y; grammar still partially decoded)
 - `0x00448910` active-mission timer tick — DONE (player-tick call site)
-- `0x00466C40` reaction schedule advancement — open
-- `0x00872040` reaction input trigger — open
+- `0x00466C40` calendar advancement — DONE
+- `0x00872040` `Debug_HandleCheatAndNcbCommands` — unported debug/cheat path;
+  renamed in Ghidra from the misleading mission-trigger name
 
 The interpreter can mutate ships, active missions, rank definitions
 (g_rank_defs), stellar state, outfits, weapon/ship availability, and mission
@@ -349,12 +356,12 @@ Ghidra DB: `g_active_misn` retyped as
 ShipState +0x94 named `jump_destination_system_id` (system being jumped
 toward / last left; -1 none, -2 mission-spawn sentinel).
 
-Remaining gaps: the goal-counter increment sites on ship
-death/disable/board (0x00443c60 only evaluates the counters today), the
-hailed-escort respawn call site `0x00454910` (comm-dialog wiring), the ambient
-Shareware-Enforcer spawner `0x0046ac50`, the stellar-attack directive
-`0x004053c0`, government assistance/reinforcement (`0x00413610`/`0x0043a020`),
-and the special-system forced personality arm of `0x0041af90`. Mission-ship
+Remaining gaps include the license-enforcer spawner `0x0046ac50` (renamed
+`Registration_SpawnLicenseEnforcer` in Ghidra), government assistance/
+reinforcement (`0x00413610`/`0x0043a020`), and the special-system forced
+personality arm of `0x0041af90`. The goal-counter writers, hailed single-ship
+replacement arm at `0x00454910`, and stellar-attack directive `0x004053c0`
+are DONE. Mission-ship
 announcements `0x00426d10` are DONE (`Mission_ShowMissionShipAnnouncement`,
 mission.cpp), ambush spawning `0x00426dd0` is DONE
 (`Mission_TrySpawnMissionShipAmbush`, wired at the jump-arrival tail in
@@ -484,18 +491,18 @@ DeathDelay-half fraction (0x005753f8, 0.5), and the armor-pin fraction/addend
 ## Recommended order
 
 1. ~~Decode mission resources and formalize mission-related types.~~ DONE.
-2. ~~Add mission globals/state for active missions, runtime flags, mission-ship definitions, ranks, and timers.~~ DONE (mission-ship definitions themselves still open).
+2. ~~Add mission globals/state for active missions, runtime flags, mission-ship definitions, ranks, and timers.~~ DONE for modeled mission/personality data; the full rank table remains open.
 3. ~~Implement locator resolution and availability/list evaluation.~~ DONE.
 4. ~~Implement Mission BBS display and accept/decline flow in the landed
    current-pilot/travel context, keeping it separate from the galaxy map and
    the active-mission computer.~~ DONE (desc/briefing dialogs are logged
    TODOs).
-5. Active-mission timers DONE; daily driver (0x00466CB0) open; save/load DONE
-   for the mission blocks.
+5. Active-mission timers, modeled daily driver, and mission-block save/load
+   are DONE; rank salary and one unmodeled system suppression table remain.
 6. ~~Implement success/failure and reaction scripts.~~ DONE (debrief dialogs
    wired to the landing-gate sink).
-7. ~~Implement mission ship/fleet spawning~~ DONE (0x0041CF40 + dispatch);
-   remaining: the hailed-escort respawn (0x00454910). Announcements
+7. ~~Implement mission ship/fleet spawning~~ DONE (0x0041CF40 + dispatch),
+   including the hailed single-ship replacement arm (0x00454910). Announcements
    (0x00426d10), the ambush spawner (0x00426dd0), and the HandleShip per-frame
    hail ladder are DONE. Goal-counter increment sites on ship death/disable/
    board are DONE (see 6.1).
