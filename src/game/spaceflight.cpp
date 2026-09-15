@@ -308,6 +308,9 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
     }
     if (spawn_puff) {
       NovaEffects_SpawnShipDestructionDebrisPuff(state, ship);
+      // Ship_HandleShip queues DAT_00591a80 after the visual helper returns,
+      // including when its 32-slot fading-effect pool was already full.
+      state.pending_destruction_sounds.push_back({ship.pos_x, ship.pos_y});
     }
   }
 
@@ -332,6 +335,9 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
       ship.timed_action_counter =
           static_cast<std::int16_t>(ship.timed_action_counter - 1);
       NovaEffects_SpawnShipDestructionDebrisPuff(state, ship);
+      // Ghidra 0x00433050 queues the cue independently of fragment-pool
+      // admission, so a visually saturated battle does not lose this sound.
+      state.pending_destruction_sounds.push_back({ship.pos_x, ship.pos_y});
     }
   }
 }
@@ -1703,7 +1709,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       const float gain = NovaWeapon_ComputeSpatialFireGain(
           state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
-      audio.Play(*sound, gain, 1.0F, pending.slot);
+      audio.Play(*sound, gain, 1.0F, pending.slot, pending.priority_width);
     }
     state.pending_fire_sounds.clear();
     // Impact sounds use the original 300..363 snd range, which is already
@@ -1721,8 +1727,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       const float gain = NovaWeapon_ComputeSpatialFireGain(
           state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
-      audio.Play(
-          *state.gameplay_sounds[cache_index], gain, 1.0F, 300 + pending.slot);
+      audio.Play(*state.gameplay_sounds[cache_index],
+                 gain,
+                 1.0F,
+                 300 + pending.slot,
+                 /*priority_width=*/6);
     }
     state.pending_impact_sounds.clear();
     constexpr std::size_t kDestructionSoundIndex = 372 - 200;
@@ -1732,8 +1741,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       const float gain = NovaWeapon_ComputeSpatialFireGain(
           state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
-      audio.Play(
-          *state.gameplay_sounds[kDestructionSoundIndex], gain, 1.0F, 372);
+      audio.Play(*state.gameplay_sounds[kDestructionSoundIndex],
+                 gain,
+                 1.0F,
+                 372,
+                 /*priority_width=*/5);
     }
     state.pending_destruction_sounds.clear();
     // Centered UI cues from the boarding system (transition-table handles,
@@ -1755,7 +1767,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         continue;
       }
       for (std::int16_t repeat = 0; repeat < pending.count; ++repeat) {
-        audio.Play(*sound, 1.0F, 1.0F, 150 + pending.transition_index);
+        audio.Play(*sound,
+                   1.0F,
+                   1.0F,
+                   150 + pending.transition_index,
+                   /*priority_width=*/8);
       }
     }
     state.pending_ui_sounds.clear();

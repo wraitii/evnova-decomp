@@ -1607,6 +1607,10 @@ struct GameState {
     std::int16_t slot = -1; // 0..35 fire-sound slot (snd resource id 200+slot)
     float src_x = 0.0F;     // source (firing ship) position, world px
     float src_y = 0.0F;
+    // NovaAudio_PlaySpatialByDistance's third argument. The original gives
+    // ordinary NPC fire width 4, ordinary player fire width 5, and selected
+    // player/beam fire width 6; the voice allocator compares it with level.
+    std::int16_t priority_width = 4;
     // Weapon.flags (flags_primary) bit 0x10: the original counts the sound
     // handle already playing (NovaAudio_CountActiveByHandle) and suppresses a
     // retrigger while it is, so this fire sound never stacks.
