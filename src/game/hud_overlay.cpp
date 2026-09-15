@@ -168,6 +168,14 @@ void NovaHud_ShowLandingDenial(GameState &state,
                    : static_cast<std::uint16_t>(0x58) // "land on "
     );
     break;
+  case LandedDenial::kUnauthorized:
+    // Stellar_HandleStellarEntryAndExit: STR# 0x7d2 entry 0x52 for stations,
+    // 0x53 for planets (0x51 is reserved for denied hypergates).
+    text =
+        NovaHud_LoadStringEntry(kStrId,
+                                is_station ? static_cast<std::uint16_t>(0x52)
+                                           : static_cast<std::uint16_t>(0x53));
+    break;
   case LandedDenial::kTooFar:
     text = NovaHud_LoadStringEntry(kStrId,
                                    is_station ? kTooFarStation : kTooFarPlanet);

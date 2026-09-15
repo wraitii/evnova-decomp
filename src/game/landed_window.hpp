@@ -140,6 +140,7 @@ WrapDescriptionLines(std::string_view text,
 enum class LandedDenial : std::uint8_t {
   kNone,         // the landing was accepted (ctx.landed == true)
   kUnavailable,  // no selected/valid ordinary stellar at all
+  kUnauthorized, // reputation/scan-mask/mission/government policy denied
   kTooFar,       // outside the envelope or the approach request is unarmed
   kTooFast,      // within range but still moving / maneuvering
   kTooExpensive, // service_cost exceeds credits

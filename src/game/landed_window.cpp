@@ -138,6 +138,15 @@ bool Stellar_Dock(GameState &state,
     ctx.denial = LandedDenial::kUnavailable;
     return false;
   }
+  // Stellar_HandleStellarEntryAndExit 0x004585ca..0x0045870d resolves the
+  // reputation / government ScanMask / mission override / government-policy
+  // gate before any approach-distance feedback. Without this explicit check,
+  // NovaTravel_UpdateEngagementProgress merely leaves the timer unarmed and a
+  // denied body is misleadingly reported as "too far".
+  if (!NovaTravel_PlayerMeetsStellarAccess(state, stellar_id)) {
+    ctx.denial = LandedDenial::kUnauthorized;
+    return false;
+  }
   // Stellar_HandleStellarEntryAndExit normal-arrival gate. The original runs a
   // single failure branch (0x00458de0) and picks the feedback from whether the
   // ship was inside the envelope with the approach armed:
