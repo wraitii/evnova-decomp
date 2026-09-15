@@ -329,6 +329,50 @@ TEST_CASE("declined mission offer is suppressed for the current context") {
   CHECK(offer_count == 1);
 }
 
+// Regression for the Trade Center arm of Ghidra 0x00448670: this uses its
+// own AvailLoc 4 lane, so tutorial follow-ups must not be limited to the
+// Spaceport's AvailLoc 3 pass.
+TEST_CASE("trade center mission interaction offers the AvailLoc 4 lane") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.avail_location = 4;
+  definition.avail_random = 100;
+
+  std::int16_t offered_definition = -1;
+  const auto decline = [&](std::int16_t mission_def) {
+    offered_definition = mission_def;
+    return MissionOfferResult::kDeclined;
+  };
+
+  CHECK(Mission_TriggerLandingInteractions(state, 4, 100, decline));
+  CHECK(offered_definition == 0);
+}
+
+// Ghidra 0x00492f30 / 0x0048ea70 enter the normal Shipyard and Outfitter
+// modals in their respective mission-offer contexts 5 and 6.
+TEST_CASE("shipyard and outfitter mission interactions use their own lanes") {
+  GameState state;
+  state.scenario.missions.resize(2);
+  for (std::size_t i = 0; i < state.scenario.missions.size(); ++i) {
+    state.scenario.missions[i].present = true;
+    state.scenario.missions[i].avail_location =
+        static_cast<std::int16_t>(i + 5);
+    state.scenario.missions[i].avail_random = 100;
+  }
+
+  std::vector<std::int16_t> offered;
+  const auto decline = [&](std::int16_t mission_def) {
+    offered.push_back(mission_def);
+    return MissionOfferResult::kDeclined;
+  };
+
+  CHECK(Mission_TriggerLandingInteractions(state, 5, 100, decline));
+  CHECK(Mission_TriggerLandingInteractions(state, 6, 200, decline));
+  CHECK(offered == std::vector<std::int16_t>{0, 1});
+}
+
 // Regression for the post-accept arm of Ghidra 0x00454910:
 // Flags 0x40 replaces a linked single-ship mission personality with a fresh
 // mission ship of the same class, preserving the hailed ship's kinematics.

@@ -44,9 +44,15 @@ Buy and Sell both use the single local price (no spread). Plain action moves
   converts at the font boundary so resource names like `Xtreem\xaa
   Rocket-Boards` (`0xAA` -> U+2122) render correctly.
 
+## Mission interactions
+- Entering the Trade Center switches the mission-offer context to `AvailLoc =
+  4`, runs that offer pass immediately, and consumes the recheck timer. This
+  is how the tutorial's trade follow-up is presented. Its offer dialog
+  re-renders the live Trade Center beneath itself rather than dropping back to
+  the Spaceport.
+
 ## Gaps
-- Nested Starmap / Player Info / Mission Computer actions and the `0x0f`
-  mission-recheck tick are `TODO(decomp)`.
+- Nested Starmap / Player Info / Mission Computer actions are `TODO(decomp)`.
 - Footer `Other cargo:` mission-cargo clause is simplified to the free-space
   line; the original summary's filled-rect + `InvertRect` composition and
   word-wrap are not reproduced.

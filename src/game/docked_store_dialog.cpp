@@ -1341,6 +1341,43 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
+  // Ghidra 0x00492f30 skips this lane for the escort-hire mode. The ordinary
+  // Shipyard uses AvailLoc 5, while the Outfitter owns AvailLoc 6.
+  const std::optional<std::int16_t> mission_context =
+      hire_mode ? std::nullopt
+                : std::optional<std::int16_t>{outfit_store ? 6 : 5};
+  const auto render_store_background = [&]() {
+    RenderStoreScreen(platform,
+                      font_cache,
+                      button_art,
+                      state,
+                      session,
+                      stellar_id,
+                      texture_cache,
+                      render_background,
+                      backdrop ? backdrop->get() : nullptr,
+                      frame ? frame->get() : nullptr,
+                      selected_description,
+                      grid_dim,
+                      grid_bright);
+  };
+  const auto run_mission_offer = [&]() {
+    if (!mission_context) {
+      return false;
+    }
+    return Mission_TriggerLandingInteractions(
+        state,
+        *mission_context,
+        static_cast<std::uint32_t>(SDL_GetTicks()),
+        [&](std::int16_t mission_def) {
+          return NovaMission_RunOfferWindow(platform,
+                                            state,
+                                            mission_def,
+                                            stellar_id,
+                                            render_store_background);
+        });
+  };
+  (void)run_mission_offer();
   // Ghidra 0x0048ea70 quantity arms (local_652 & 0x800): a shift-modified
   // buy/sell first computes the affordable/owned maximum and prompts DLOG
   // 0x3eb (FUN_0049e8e0). Plain actions buy/sell one unit. Returns 1 when the
@@ -1381,6 +1418,13 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   };
   ProbeUiAutoClear probe_ui_guard(platform);
   while (!platform.quit_requested()) {
+    const std::uint32_t now_ms = static_cast<std::uint32_t>(SDL_GetTicks());
+    const auto recheck_at =
+        static_cast<std::uint32_t>(state.mission_interaction_recheck_at_ms);
+    if (mission_context &&
+        static_cast<std::int32_t>(now_ms - recheck_at) >= 0) {
+      (void)run_mission_offer();
+    }
     const StoreLayout layout = LayoutStore(platform, outfit_store);
     platform.PublishProbeUi(outfit_store ? "outfitter" : "shipyard",
                             {{"window", layout.frame},

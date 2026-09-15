@@ -206,6 +206,16 @@ TEST_CASE("trade center DITL 0x3e9 exposes the expected control rects",
   CHECK((*items)[13].left == 166);
 }
 
+// Ghidra 0x0048d6f0 draws STR# 0x7d2 entries 0xcc/0xcd for a commodity
+// affected by an öops record. InfoString accepts zero-based pool indices.
+TEST_CASE("trade center disaster trend labels use the Higher and Lower entries",
+          "[docked][trade]") {
+  CHECK(NovaHud_LoadStringEntry(0x7d2, 0xcc) ==
+        std::optional<std::string>{"Higher"});
+  CHECK(NovaHud_LoadStringEntry(0x7d2, 0xcd) ==
+        std::optional<std::string>{"Lower"});
+}
+
 // The trade center rows are filled from the c\x9alr list palette, not the
 // store grid colors: the shipped resource has a black list_background and a
 // dark-red list_hilite, which is what the selected row must use.
