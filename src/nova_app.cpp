@@ -748,10 +748,12 @@ void UpdateMenuCenterPreview(NovaRuntime &runtime, std::uint64_t now_ms) {
 [[nodiscard]] std::string
 MenuSystemLegalStatusText(const game::GameState &state,
                           std::int16_t system_id) {
-  const auto *system = state.scenario.System(system_id);
-  if (system == nullptr) {
+  if (system_id < 0 ||
+      static_cast<std::size_t>(system_id) >= state.scenario.systems.size()) {
     return {};
   }
+  const auto *system =
+      &state.scenario.systems[static_cast<std::size_t>(system_id)];
   constexpr int kNaStringEntry = 0x18c;
   // System_HasUsableTravelDestination over the first four nav defs.
   bool usable_destination = false;
@@ -770,7 +772,9 @@ MenuSystemLegalStatusText(const game::GameState &state,
         .value_or(std::string());
   }
 
-  int tolerance = 0;
+  int tolerance = !state.scenario.governments.empty()
+                      ? state.scenario.governments.front().crime_tol
+                      : 0;
   if (system->government_id >= 0) {
     if (const auto *gov =
             state.scenario.GovernmentByIndex(system->government_id)) {

@@ -691,6 +691,14 @@ void ResolveShipHitFromWeapon(GameState &state,
     return;
   }
   const bool attacker_valid = ValidShipSlot(attacker_ship_slot);
+  // Ghidra local bVar4 at 0x004196b1: faction events and combat-rating credit
+  // belong only to the player or a direct player escort. NPC-on-NPC combat is
+  // deliberately invisible to the player's record.
+  const bool player_involved =
+      attacker_ship_slot == 0 ||
+      (attacker_ship_slot > 0 && attacker_valid &&
+       state.ShipAt(static_cast<std::size_t>(attacker_ship_slot))
+               .squad_leader_ship_slot == 0);
 
   // Ghidra 0x00415e80 Ship_IsShipInAiState0x0D runs inline here.
   // Disable-mode attackers (AI state 0x0D) and their leaders force the
@@ -765,12 +773,12 @@ void ResolveShipHitFromWeapon(GameState &state,
       !target.destruction_visual_triggered) {
     target.destruction_visual_triggered = true;
     NovaTargeting_ClearDestroyedShipReferences(state, target_slot);
-    // Kill-side faction event + combat rating (Ghidra 0x00419748): the victim's
-    // government takes a kill-event reputation pulse and the player gains the
-    // class's combat value. Skipped for the Shareware Enforcer personalities
-    // (pers_def_slot >= 0x3ff, the 0x004196e3 gate) and for derelict
-    // governments (Government_IsShipGovernmentDerelict).
-    if (target.pers_def_slot < 0x3ff &&
+    // Kill-side faction event + combat rating (Ghidra 0x00419748): only a
+    // player/player-escort kill of a non-defense-fleet ship affects the
+    // player's record. Shareware Enforcer personalities and derelict
+    // governments are excluded too.
+    if (player_involved && target.defense_fleet_home_stellar_id == -1 &&
+        target.pers_def_slot < 0x3ff &&
         !NovaGovernment_IsGovernmentDerelict(state.scenario,
                                              target.faction_or_government_id)) {
       NovaGovernment_ProcessFactionCombatEvent(state,
@@ -791,7 +799,8 @@ void ResolveShipHitFromWeapon(GameState &state,
     // Disable-side faction event (Ghidra 0x00419721): the transition into the
     // disabled state pulses event 1; the same pers_def_slot >= 0x3ff gate
     // applies.
-    if (!was_fire_restricted && target.pers_def_slot < 0x3ff) {
+    if (player_involved && target.defense_fleet_home_stellar_id == -1 &&
+        !was_fire_restricted && target.pers_def_slot < 0x3ff) {
       NovaGovernment_ProcessFactionCombatEvent(state,
                                                state.player.current_system_id,
                                                target.faction_or_government_id,

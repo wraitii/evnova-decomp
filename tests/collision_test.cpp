@@ -110,6 +110,63 @@ TEST_CASE("basic projectile carries owner and lifetime state", "[collision]") {
   CHECK(shot.life_ticks_remaining == Catch::Approx(10.0F));
 }
 
+TEST_CASE("combat rating credits only player-side kills",
+          "[collision][rating]") {
+  auto kill_target = [](GameState &state, std::int16_t attacker_slot) {
+    Ship &target = state.ShipAt(1);
+    ResolveShipHitFromWeapon(state,
+                             /*target_slot=*/1,
+                             target,
+                             target.pos_x,
+                             target.pos_y,
+                             /*impact_impulse=*/0,
+                             /*armor_damage=*/200,
+                             /*shield_damage=*/0,
+                             attacker_slot,
+                             /*allow_aggro_updates=*/true,
+                             /*suppress_retarget_logic=*/true,
+                             /*force_armor_only=*/false,
+                             /*bypass_shields=*/true,
+                             /*player_aggro_delta=*/0);
+  };
+
+  SECTION("player kill is credited") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].strength = 50;
+    kill_target(state, 0);
+    CHECK(state.player_combat_rating_points == 10);
+  }
+
+  SECTION("direct player escort kill is credited") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].strength = 50;
+    ActivateHostileShip(state, 2, 20.0F, 0.0F);
+    state.ShipAt(2).squad_leader_ship_slot = 0;
+    kill_target(state, 2);
+    CHECK(state.player_combat_rating_points == 10);
+  }
+
+  SECTION("unrelated NPC kill is not credited") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].strength = 50;
+    ActivateHostileShip(state, 2, 20.0F, 0.0F);
+    kill_target(state, 2);
+    CHECK(state.player_combat_rating_points == 0);
+  }
+
+  SECTION("defense-fleet victim is not credited") {
+    GameState state;
+    SeedCollisionScenario(state);
+    state.scenario.ships[0].strength = 50;
+    state.ShipAt(1).defense_fleet_home_stellar_id = 0x80;
+    kill_target(state, 0);
+    CHECK(state.player_combat_rating_points == 0);
+  }
+}
+
 TEST_CASE("projectile impact consumes shields before armor", "[collision]") {
   GameState state;
   SeedCollisionScenario(state);
