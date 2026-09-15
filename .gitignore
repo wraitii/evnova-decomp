@@ -25,5 +25,4 @@ pi-session-*.html
 /docs/reference/
 /ghidra/
 
-# Extracted game art (regenerate with: python3 tools/ship_spin_extract.py)
 /docs/assets/**
