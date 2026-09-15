@@ -34,7 +34,7 @@ Reverse-engineering notes on how EV Nova persists a pilot's game state to
 ```
 
 The u32 size headers are written with `FUN_004f22b0` (u32) and read back with
-`FUN_004f2310` (4-byte read). The trailer (ship name, global `DAT_00599acc`)
+`FUN_004f2310` (4-byte read). The trailer (ship name, global `g_player_ship_name`)
 is written with `FUN_004f22e0` (C-string + NUL) and read with
 `FUN_004f2350(buf, 0x40, stream)`.
 
@@ -78,28 +78,28 @@ save.
 | Offset | Size | Field |
 |---|---|---|
 | 0x0000 | u16 | **300** (version/magic). Loader rejects: `0x6b` → error -0x2d; `< 300` → error -0x2a. |
-| 0x0002 | u16 | ongoing/new-pilot latch (`DAT_00596d2f`) |
-| 0x0004 | u16 | strict-play code latch (`DAT_00734c1c`, set from the new-game code field == 'm') |
+| 0x0002 | u16 | Strict Play latch (`g_strict_play`); loader stores `(value == 1)` |
+| 0x0004 | u16 | gender latch (`g_player_is_male`, the global read by mission `{g}` expansions); loader stores `(value == 1)` |
 | 0x0006 | u16[0x800] | per-stellar present ship counts |
-| 0x1006 | u16[0x400] | mission-ship-def active flags |
-| 0x1806 | u16[0x400] | mission-ship-def visible flags |
+| 0x1006 | u16[0x400] | përs personality present/active flags (`g_pers_defs +0x620`) |
+| 0x1806 | u16[0x400] | përs personality visible flags (`g_pers_defs +0x621`) |
 | 0x2006 | u16[0x40] | reserved (zeroed) |
 | 0x2086 | u16[0x800] | per-stellar `special_tech+0x14` (availability roll state) |
-| 0x3086 | u8 | seen-intro-screen latch (`DAT_00596d35`) — also noted in `intro_and_main_menu.md` |
+| 0x3086 | u8 | seen-intro-screen latch (`g_intro_played`) — also noted in `intro_and_main_menu.md` |
 | 0x3088 | u16[0x100] | disaster def ids |
 | 0x3288 | u16[0x100] | disaster values (system ids, 0xffff default) |
 | 0x3488 | u16[0x80] | junk item counts (`g_junk_defs+0x22`) |
 | 0x3590 | u16[0x200] | cron event ids |
 | 0x3990 | u16[0x200] | cron event values |
-| 0x3d90 | u16[0x800] | per-system encounter probability state (`dude_prob` field) |
-| 0x4d90 | u16[0x800] | per-stellar availability state (`field_0x47c`) |
-| 0x5d90 | u16[4] | escort command codes by class category (`DAT_007354c4..ca`) |
-| 0x5d98 | char[0x40] | pilot nickname C-string (`DAT_005999cc`) |
-| 0x5dd8 | 3 × u16 | `DAT_00733b4a/4c/4e` |
+| 0x3d90 | u16[0x800] | per-system mutable reinforcement cooldown (`SystemDef +0xC4` `reinf_cooldown_days`; the decompiler also renders it as `dude_prob + 0x1c`, which is the same offset) |
+| 0x4d90 | u16[0x800] | per-stellar engagement access (`StellarDef +0x47C` `engage_access`). Restore: `<1` → `engage_access = -1` and live strength reset to capacity; `>=1` → `engage_access = value` and live strength `-1` |
+| 0x5d90 | u16[4] | escort group-order command codes by class category (`g_target_category_command`); copied onto each active non-player squad-leading ship at load |
+| 0x5d98 | char[0x40] | pilot nickname C-string (`g_player_nickname`) |
+| 0x5dd8 | 3 × u16 | ship-paint 5-bit RGB color channels (`DAT_00733b4a/4c/4e`) |
 | 0x5dde | u16[0x80] | rank active flags (`g_rank_defs` +0x00 per slot) |
-| 0x5ede | char[15] | persistent string A (`DAT_00733b0c`) |
+| 0x5ede | char[15] | persistent string A (`g_date_prefix`) |
 | 0x5eed | u8 | NUL |
-| 0x5eee | char[15] | persistent string B (`DAT_00733b1c`) |
+| 0x5eee | char[15] | persistent string B (`g_date_suffix`) |
 | 0x5efd | u8 | NUL |
 | 0x5efe | u16[0x400] | reserved (zeroed) |
 | 0x66fe | — | end |
@@ -133,7 +133,7 @@ save.
   file (block1 +0x12).
 - Per-outfit / per-weapon entries whose def no longer exists are zeroed and
   latch `local_11` (repairs → final return -0x2e).
-- After restore: name globals (`DAT_00599acc` ship name, `DAT_005997cc` pilot
+- After restore: name globals (`g_player_ship_name` ship name, `g_player_name` pilot
   name from path), per-stellar availability rolls (`avail_roll_threshold/
   limit_licensed`), `g_last_system_for_ambient_rolls = 0xffff`, then the
   pilotlog dump, and finally ship-state runtime fields reset (waypoint markers,
@@ -178,14 +178,19 @@ There is no mid-game reload path.
   `PilotSave_DecodeBlock` transform (0x008725b0).
 - Not reconstructed: the last-pilot marker file (0x004c7d40 / 0x004ca120;
   marker name string 0x82/4 unresolved), `PilotDebug_WritePilotLog`
-  (0x004ca2c0), and the remaining untracked .plt regions (story blob,
-  per-system encounter state, stellar schedule/engagement counters, and
-  mission-fleet tables). Per-stellar saved bytes, garrison counts and
-  availability rolls, disaster/crön runtime counters, and rank active flags
-  are preserved and applied with the original definition/state gates.
-  Dates, all 0x800 discovery/reputation slots, the 16 mission runtime-flag
-  records, and the 16 active-mission records are now preserved; mission
-  records retain their opaque script/text payload bytes.
+  (0x004ca2c0), and the remaining untracked .plt regions (the block1
+  escort/fleet tables at +0xe6ce..+0xe8ce — serialized as the empty set — and
+  the block2 përs active/visible flags at +0x1006/+0x1806). Per-stellar saved
+  bytes, garrison counts and availability rolls, disaster/crön runtime
+  counters, and rank active flags are preserved and applied with the original
+  definition/state gates. Dates, all 0x800 discovery/reputation slots, the 16
+  mission runtime-flag records, and the 16 active-mission records are now
+  preserved; mission records retain their opaque script/text payload bytes.
+  Also round-tripped now: the player combat rating (block1+0xe94e), the
+  Strict Play and gender latches (block2+0x02/+0x04), the per-system
+  reinforcement cooldown (block2+0x3d90), per-stellar engagement access with
+  its live-strength fallback (block2+0x4d90), and the escort group-order
+  codes (block2+0x5d90).
 
 ## Quirks / open questions
 
@@ -208,9 +213,12 @@ There is no mid-game reload path.
   values) — anti-piracy; likely differs from OG depending on build.
 - **Registry population at startup** (where the 0x63688a72 pilot entries come
   from so the new-game dialog lists pilots) — not located yet.
-- The two 15-byte strings and the `DAT_00733b4a/4c/4e` u16s remain
-  unidentified. Block1 `+0xb7be` is confirmed as the 10,000 Nova Control Bit
-  bytes and is preserved exactly, including noncanonical nonzero values found
-  in converted Mac pilots.
+- The two 15-byte strings (block2 `+0x5ede`/`+0x5eee`) remain unidentified;
+  `char` resource notes suggest they are the character template's
+  `DatePrefix`/`DateSuffix`. The `DAT_00733b4a/4c/4e` u16s at `+0x5dd8` are
+  the ship-paint 5-bit RGB color channels (paint rendering is not modelled).
+  Block1 `+0xb7be` is confirmed as the 10,000 Nova Control Bit bytes and is
+  preserved exactly, including noncanonical nonzero values found in converted
+  Mac pilots.
 - `FUN_004cd7e0` sums all resource-family block sizes and compares against a
   stored total (entry `0x63739f6d` [0]) — a data-integrity check, not a save.

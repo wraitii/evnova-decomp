@@ -334,8 +334,8 @@ void Stub_LoadScenarioResourceTables(GameState &state) {
 
 void Stub_ResetReputationAndWorldTables(GameState &state) {
   // Ghidra Game_ResetNewGameReputation / Game_ResetNewGameState clear faction
-  // standings, mission flags, region networks, and set DAT_00596d35 = 0 so the
-  // intro plays on first flight. DAT_00596d35 is our intro_played flag.
+  // standings, mission flags, region networks, and set g_intro_played = 0 so
+  // the intro plays on first flight. g_intro_played is our intro_played flag.
   state.intro_played = false;
   NovaLog::Todo("new-game faction reputation and mission flags not tracked; "
                 "intro_played latch reset only");
@@ -620,7 +620,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // STR# 0x7d2 row 0x79 + the start class's long name (DAT_005a9bcc table;
   // the port reads Ship::long_name from the scenario tables) and initial text
   // = a random STR# 0x80 row 7-9 ship name, max 0x40 chars. The result is
-  // article-stripped into the ship-name global (DAT_00599acc).
+  // article-stripped into the ship-name global (g_player_ship_name).
   {
     const std::string class_caption =
         state.scenario.Ship(
@@ -760,6 +760,21 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   record.weapon_bank_secondary = state.weapon_bank_secondary;
   record.outfit_owned_count = state.inventory.outfit_owned_count;
 
+  // Carry the remaining live runtime fields the record now round-trips, so
+  // PilotFileApply does not reset the new-pilot dialog selections
+  // (strict_play/male) or the Game_ResetNewGameState stellar strength /
+  // engagement seeding performed above.
+  record.strict_play = state.pilot.strict_play;
+  record.male = state.control.male;
+  record.player_combat_rating_points = state.player_combat_rating_points;
+  record.reinforcement_retrigger_delay = state.reinforcement_retrigger_delay;
+  record.target_category_command = state.target_category_command;
+  const std::size_t engage_count = std::min(
+      state.scenario.stellars.size(), record.stellar_engage_access.size());
+  for (std::size_t i = 0; i < engage_count; ++i) {
+    record.stellar_engage_access[i] = state.scenario.stellars[i].engage_access;
+  }
+
   // Copy the assembled record into the live state (mirroring the block-to-
   // global copy IntroCinematic_SetupFrames/PilotData_InitializePlayerState
   // perform). The intro and spaceflight modes read these live fields. The
@@ -791,7 +806,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                 state.intro_cinematic.intro_text_desc_id);
 
   // ---- Step 7: mark active ------------------------------------------------
-  // Ghidra: DAT_00596d28 = 1 (game active), DAT_00596d2f = the dialog's
+  // Ghidra: DAT_00596d28 = 1 (game active), g_strict_play = the dialog's
   // Strict Play checkbox state (latched by the dialog port into
   // state.pilot.strict_play).
   state.game_active = true;

@@ -95,6 +95,9 @@ PilotFile PilotFile::Fresh() {
   fresh.ship_class_id = 0;
   fresh.current_system_id = 0;
   fresh.date = GameDate{1999, 1, 1};
+  // The absent-block engagement default is the loader's <1 fallback
+  // (engage_access -1, live strength reset to capacity).
+  fresh.stellar_engage_access.fill(-1);
   fresh.disaster_days_remaining.fill(-1);
   fresh.disaster_active_stellars.fill(-1);
   fresh.cron_duration_counters.fill(-1);
@@ -111,6 +114,7 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   state.player.ship_name = pilot_file.ship_name;
 
   state.player.credits = pilot_file.credits;
+  state.player_combat_rating_points = pilot_file.player_combat_rating_points;
   state.player.ship_class_id = pilot_file.ship_class_id;
   state.player.current_system_id = pilot_file.current_system_id;
   state.player.active_weapon_bank_slot = pilot_file.active_weapon_bank_slot;
@@ -132,6 +136,18 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
       pilot_file.intro_duration_60h_ticks;
   state.intro_cinematic.intro_text_desc_id = pilot_file.intro_text_desc_id;
   state.intro_played = pilot_file.intro_played;
+  state.pilot.strict_play = pilot_file.strict_play;
+  // g_player_is_male is one global: PilotData.male carries the dialog selection
+  // and PilotControlState.male is what the mission {g} expansion reads.
+  state.pilot.male = pilot_file.male;
+  state.control.male = pilot_file.male;
+
+  state.reinforcement_retrigger_delay =
+      pilot_file.reinforcement_retrigger_delay;
+  for (std::size_t i = 0; i < state.target_category_command.size(); ++i) {
+    state.target_category_command[i] =
+        std::max<std::int16_t>(pilot_file.target_category_command[i], -1);
+  }
 
   state.inventory.cargo_bins = pilot_file.cargo_bins;
   const std::size_t system_count = std::min(state.scenario.systems.size(),
@@ -168,6 +184,43 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
       stellar.availability_roll = pilot_file.stellar_availability_rolls[i];
     }
   }
+  // Per-stellar engagement access + live strength (block2+0x4d90). The
+  // original writes every one of the 0x800 slots regardless of is_defined.
+  const std::size_t engage_count = std::min(
+      state.scenario.stellars.size(), pilot_file.stellar_engage_access.size());
+  for (std::size_t i = 0; i < engage_count; ++i) {
+    Stellar &stellar = state.scenario.stellars[i];
+    const std::int16_t access = pilot_file.stellar_engage_access[i];
+    if (access < 1) {
+      stellar.engage_access = -1;
+      stellar.strength = stellar.strength_capacity;
+    } else {
+      stellar.engage_access = access;
+      stellar.strength = -1;
+    }
+  }
+
+  // Escort group-order code per active, non-player, squad-leading ship
+  // (LoadSave 0x004cb260 applies g_target_category_command after the block2
+  // restore). Ships with no scenario class are left untouched.
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.squad_leader_ship_slot != 0) {
+      continue;
+    }
+    const ShipClass *ship_class = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (ship_class == nullptr) {
+      continue;
+    }
+    const std::int16_t category = ship_class->class_category;
+    if (category < 0 || static_cast<std::size_t>(category) >=
+                            state.target_category_command.size()) {
+      continue;
+    }
+    ship.escort_command_code = state.target_category_command[category];
+  }
+
   const std::size_t disaster_count =
       std::min(state.scenario.disaster_defs.size(),
                pilot_file.disaster_days_remaining.size());
@@ -209,6 +262,7 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.ship_name = state.player.ship_name;
 
   out.credits = state.player.credits;
+  out.player_combat_rating_points = state.player_combat_rating_points;
   out.ship_class_id = state.player.ship_class_id;
   out.current_system_id = state.player.current_system_id;
   out.date = state.date;
@@ -229,6 +283,8 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.intro_duration_60h_ticks = state.intro_cinematic.duration_60h_ticks;
   out.intro_text_desc_id = state.intro_cinematic.intro_text_desc_id;
   out.intro_played = state.intro_played;
+  out.strict_play = state.pilot.strict_play;
+  out.male = state.control.male;
 
   out.cargo_bins = state.inventory.cargo_bins;
   const std::size_t system_count =
@@ -254,6 +310,8 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.weapon_bank_secondary = state.weapon_bank_secondary;
   out.active_mission_runtime_flags = state.active_mission_runtime_flags;
   out.active_missions = state.active_missions;
+  out.reinforcement_retrigger_delay = state.reinforcement_retrigger_delay;
+  out.target_category_command = state.target_category_command;
   const std::size_t stellar_count =
       std::min(state.scenario.stellars.size(), out.stellar_saved_bytes.size());
   for (std::size_t i = 0; i < stellar_count; ++i) {
@@ -262,7 +320,13 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
     out.stellar_present_ship_counts[i] =
         static_cast<std::int16_t>(stellar.present_ship_count);
     out.stellar_availability_rolls[i] = stellar.availability_roll;
+    out.stellar_engage_access[i] = stellar.engage_access;
   }
+  // Define the slots past the scenario's table with the loader's inactive
+  // fallback so a save from a small scenario stays structurally valid.
+  std::fill(out.stellar_engage_access.begin() + stellar_count,
+            out.stellar_engage_access.end(),
+            static_cast<std::int16_t>(-1));
   const std::size_t disaster_count = std::min(
       state.scenario.disaster_defs.size(), out.disaster_days_remaining.size());
   for (std::size_t i = 0; i < disaster_count; ++i) {
@@ -335,6 +399,21 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
         static_cast<std::uint16_t>(pilot_file.weapon_bank_secondary[i * 100]));
   }
   WriteU32(block1, 0x281a, static_cast<std::uint32_t>(pilot_file.credits));
+  WriteU32(block1,
+           0xe94e,
+           static_cast<std::uint32_t>(pilot_file.player_combat_rating_points));
+  // Escort/fleet tables (block1 +0xe6ce..+0xe8ce). SaveGameCore resets all
+  // 0x40 slots to the empty sentinels before filling the active escort rows;
+  // the clean-room escort subsystem is not reconstructed yet, so emit the
+  // empty set (the block is otherwise zero-filled, which is wrong for the
+  // 0xffff class-id tables).
+  for (std::size_t i = 0; i < 0x40; ++i) {
+    WriteU16(block1, 0xe6ce + 2 * i, 0xffff); // fleet/escort class ids
+    WriteU16(block1, 0xe74e + 2 * i, 0xffff); // carried-fighter class ids
+    WriteU16(block1, 0xe7ce + 2 * i, 0x0000); // escort upgrade flags
+    WriteU16(block1, 0xe84e + 2 * i, 0x0000); // escort released flags
+    WriteU16(block1, 0xe8ce + 2 * i, 0xffff); // voice type modes
+  }
   for (std::size_t i = 0; i < pilot_file.control_bits.size(); ++i) {
     block1[0xb7be + i] = static_cast<std::byte>(pilot_file.control_bits[i]);
   }
@@ -430,8 +509,11 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
 
   // -- Block2 (FleetState/world state) field fills.
   WriteU16(block2, 0x00, static_cast<std::uint16_t>(kFleetBlockVersion));
-  // +0x02 ongoing/new-pilot latch (DAT_00596d2f) and +0x04 strict-play latch
-  // (DAT_00734c1c): not tracked by GameState. TODO(decomp).
+  // +0x02 ongoing/new-pilot latch (g_strict_play) and +0x04 gender latch
+  // (g_player_is_male). The original writes the male latch raw, but the loader
+  // only accepts the exact value 1, so emit 0/1.
+  WriteU16(block2, 0x02, pilot_file.strict_play ? 1 : 0);
+  WriteU16(block2, 0x04, pilot_file.male ? 1 : 0);
   WriteU16(block2, 0x3086, pilot_file.intro_played ? 1 : 0);
   for (std::size_t i = 0; i < pilot_file.stellar_present_ship_counts.size();
        ++i) {
@@ -466,6 +548,23 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
              0x5dde + 2 * i,
              static_cast<std::uint16_t>(pilot_file.rank_active_flags[i]));
   }
+  for (std::size_t i = 0; i < pilot_file.reinforcement_retrigger_delay.size();
+       ++i) {
+    WriteU16(block2,
+             0x3d90 + 2 * i,
+             static_cast<std::uint16_t>(
+                 pilot_file.reinforcement_retrigger_delay[i]));
+  }
+  for (std::size_t i = 0; i < pilot_file.stellar_engage_access.size(); ++i) {
+    WriteU16(block2,
+             0x4d90 + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.stellar_engage_access[i]));
+  }
+  for (std::size_t i = 0; i < pilot_file.target_category_command.size(); ++i) {
+    WriteU16(block2,
+             0x5d90 + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.target_category_command[i]));
+  }
   for (std::size_t i = 0; i < pilot_file.junk_counts.size(); ++i) {
     WriteU16(block2,
              0x3488 + 2 * i,
@@ -479,7 +578,7 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
              static_cast<std::uint16_t>(pilot_file.stat_modifier_pct[i]));
   }
   // +0x5d98 pilot nickname C-string, capped at 0x40 bytes like the original
-  // CString_CopyBounded(&DAT_005999cc, ..., 0x40).
+  // CString_CopyBounded(&g_player_nickname, ..., 0x40).
   const std::size_t nick_len =
       std::min<std::size_t>(pilot_file.nickname.size(), 0x3f);
   if (nick_len > 0) {
@@ -551,8 +650,9 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
   // The original reads fixed offsets without bounds checks (it assumes
   // full-size blocks from the same game build). To avoid UB on truncated
   // input, tracked fields are only restored when the block covers them.
-  constexpr std::size_t kBlock1TrackedEnd =
-      0x295e + GameState::kMaxActiveMissions * 0x8e6;
+  // The original reads block1 without bounds checks; the tracked tail now
+  // includes the combat-rating word at +0xe94e, so require the full block.
+  constexpr std::size_t kBlock1TrackedEnd = kBlock1Size;
   constexpr std::size_t kBlock2TrackedEnd = 0x5d98 + 0x40;
   if (block1.size() >= kBlock1TrackedEnd) {
     // jump destination stellar id.
@@ -603,6 +703,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
     }
     out.credits =
         static_cast<std::int32_t>(ReadU32(block1, 0x281a, big_endian));
+    out.player_combat_rating_points =
+        static_cast<std::int32_t>(ReadU32(block1, 0xe94e, big_endian));
     for (std::size_t i = 0; i < out.control_bits.size(); ++i) {
       out.control_bits[i] = std::to_integer<std::uint8_t>(block1[0xb7be + i]);
     }
@@ -705,6 +807,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
     if (magic < kFleetBlockVersion) {
       return PilotLoadError::kInvalidFleetBlock;
     }
+    out.strict_play = ReadU16(block2, 0x02, big_endian) == 1;
+    out.male = ReadU16(block2, 0x04, big_endian) == 1;
     out.intro_played = ReadU16(block2, 0x3086, big_endian) != 0;
     for (std::size_t i = 0; i < out.stellar_present_ship_counts.size(); ++i) {
       out.stellar_present_ship_counts[i] = static_cast<std::int16_t>(
@@ -739,6 +843,19 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       out.rank_active_flags[i] = static_cast<std::int16_t>(
           ReadU16(block2, 0x5dde + 2 * i, big_endian));
     }
+    for (std::size_t i = 0; i < out.reinforcement_retrigger_delay.size(); ++i) {
+      out.reinforcement_retrigger_delay[i] = static_cast<std::int16_t>(
+          ReadU16(block2, 0x3d90 + 2 * i, big_endian));
+    }
+    for (std::size_t i = 0; i < out.stellar_engage_access.size(); ++i) {
+      out.stellar_engage_access[i] = static_cast<std::int16_t>(
+          ReadU16(block2, 0x4d90 + 2 * i, big_endian));
+    }
+    for (std::size_t i = 0; i < out.target_category_command.size(); ++i) {
+      const auto saved = static_cast<std::int16_t>(
+          ReadU16(block2, 0x5d90 + 2 * i, big_endian));
+      out.target_category_command[i] = std::max<std::int16_t>(saved, -1);
+    }
     // TODO(decomp(0x004cb260)) skipped: compatibility divergence. Converted
     // pilots may carry a Pascal nickname independently of scalar byte order
     // (Archer (PC).plt is little-endian but still has a Pascal nickname).
@@ -755,8 +872,6 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       }
       out.nickname.push_back(c);
     }
-    // +0x3d90 system encounter probabilities and +0x4d90 stellar schedule /
-    // engagement counters remain untracked. TODO(decomp).
   }
 
   // Trailer: ship-name C-string (read via FUN_004f2350 in the original).
@@ -825,7 +940,7 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
     return result;
   }
 
-  // The original derives DAT_005997cc (pilot name) from the .plt path:
+  // The original derives g_player_name (pilot name) from the .plt path:
   // substring after the last ':' (FUN_004d6150 = strrchr), then cut at the
   // first '.', dropping the ".plt" extension.
   std::string name = path.filename().string();
