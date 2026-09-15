@@ -1654,9 +1654,11 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng) {
         // Weapon-exit (muzzle) geometry. Loader copy map (0x004b4ee0,
         // sh\x8an -> ShipClassDef +0xa42..+0xab0) combined with the barrel
         // indexing of Weapon_ApplyTurretSpreadVelocity (0x0046c5c0),
-        // i = turret_group*4 + quadrant:
-        //   lateral[g][q] = sh\x8an 0x48 + 8g + 2q  (class +0xa42 + 4i)
-        //   forward[g][q] = sh\x8an 0x50 + 8g + 2q  (class +0xa44 + 4i)
+        // i = ExitType*4 + quadrant. Each ExitType family occupies 16 bytes:
+        // its four X values begin at +0x48 and its four Y values at +0x50.
+        // The original interleaves each X/Y pair into the class table:
+        //   lateral[g][q] = sh\x8an 0x48 + 16g + 2q (class +0xa42 + 4i)
+        //   forward[g][q] = sh\x8an 0x50 + 16g + 2q (class +0xa44 + 4i)
         //   drop[g][q]    = sh\x8an 0x90 + 8g + 2q  (class +0xa82 + 2i)
         // Reads past the payload are zero (the loader pads the descriptor
         // block to 0xc0 before copying).
@@ -1667,8 +1669,8 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng) {
         };
         for (int g = 0; g < 4; ++g) {
           for (int q = 0; q < 4; ++q) {
-            cls.muzzle_lateral[g][q] = muzzle_read(0x48 + 8 * g + 2 * q);
-            cls.muzzle_forward[g][q] = muzzle_read(0x50 + 8 * g + 2 * q);
+            cls.muzzle_lateral[g][q] = muzzle_read(0x48 + 16 * g + 2 * q);
+            cls.muzzle_forward[g][q] = muzzle_read(0x50 + 16 * g + 2 * q);
             cls.muzzle_drop[g][q] = muzzle_read(0x90 + 8 * g + 2 * q);
           }
         }
