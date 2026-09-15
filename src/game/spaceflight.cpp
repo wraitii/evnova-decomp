@@ -9,6 +9,7 @@
 #include "docked_dialog.hpp"
 #include "escort_commands.hpp"
 #include "escort_formation.hpp"
+#include "flight_automation.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -1458,6 +1459,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // marker textures + label font for the whole flight loop).
   RouteMapView route_map_view;
   route_map_view.Load(platform);
+  FlightAutomationController automation;
   while (!platform.quit_requested() && !returning_to_menu) {
     const std::uint64_t now_ms = platform.gameplay_ticks_ms();
     state.gameplay_now_ms = now_ms;
@@ -1506,6 +1508,77 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     input.starmap = binding_held(0x09);
     input.mission_info = binding_held(0x28);
     input.board = binding_held(0x10);
+    // Probe automation is an optional input producer. It runs after both SDL/
+    // probe input and persisted bindings have populated the snapshot, but
+    // before any player-command edge latch observes it.
+    if (const auto request = platform.probe().ConsumeAutomationRequest()) {
+      switch (request->kind) {
+      case ProbeAutomationRequest::Kind::kLandAt:
+        (void)automation.LandAt(
+            state, request->target, now_ms, request->timeout_ms);
+        break;
+      case ProbeAutomationRequest::Kind::kJumpTo:
+        (void)automation.JumpTo(
+            state, request->target, now_ms, request->timeout_ms);
+        break;
+      case ProbeAutomationRequest::Kind::kCancel:
+        automation.Cancel();
+        break;
+      }
+    }
+    if (platform.probe().ConsumeAutomationDocked()) {
+      automation.ObservedDocked();
+    }
+    automation.Tick(state, now_ms, input);
+    const auto &automation_status = automation.status();
+    const auto goal_name = [&] {
+      switch (automation_status.goal) {
+      case FlightAutomationGoal::kLandAt:
+        return "land_at";
+      case FlightAutomationGoal::kJumpTo:
+        return "jump_to";
+      case FlightAutomationGoal::kNone:
+        return "none";
+      }
+      return "none";
+    }();
+    const auto phase_name = [&] {
+      switch (automation_status.phase) {
+      case FlightAutomationPhase::kIdle:
+        return "idle";
+      case FlightAutomationPhase::kSelect:
+        return "select";
+      case FlightAutomationPhase::kMove:
+        return "move";
+      case FlightAutomationPhase::kEngage:
+        return "engage";
+      case FlightAutomationPhase::kWaiting:
+        return "waiting";
+      case FlightAutomationPhase::kComplete:
+        return "complete";
+      case FlightAutomationPhase::kFailed:
+        return "failed";
+      case FlightAutomationPhase::kCancelled:
+        return "cancelled";
+      }
+      return "failed";
+    }();
+    const auto probe_json_escape = [](std::string value) {
+      std::string escaped;
+      escaped.reserve(value.size());
+      for (const char c : value) {
+        if (c == '"' || c == '\\') {
+          escaped.push_back('\\');
+        }
+        escaped.push_back(c == '\n' || c == '\r' ? ' ' : c);
+      }
+      return escaped;
+    };
+    platform.probe().PublishAutomationStatus(
+        std::string{"{\"goal\":\""} + goal_name + "\",\"phase\":\"" +
+        phase_name + "\",\"target\":\"" +
+        probe_json_escape(automation_status.target) + "\",\"detail\":\"" +
+        probe_json_escape(automation_status.detail) + "\"}");
     // Escape/'q' are latched by PollFlightInput (it owns the SDL event drain
     // the old PollTextEvent-based check relied on); return to the menu.
     if (input.escape_pressed) {

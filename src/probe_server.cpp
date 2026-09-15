@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstdio>
 #include <optional>
+#include <utility>
 
 namespace {
 
@@ -383,6 +384,14 @@ void ProbeServer::HandleRequest(const std::string &method,
     return;
   }
 
+  if (path == "/probe/automation" && method == "GET") {
+    const std::lock_guard lock(automation_mutex_);
+    status = "200 OK";
+    content_type = "application/json";
+    body_out = automation_status_;
+    return;
+  }
+
   if (path == "/probe/screenshot" && method == "GET") {
     std::uint64_t known_seq;
     {
@@ -540,6 +549,37 @@ void ProbeServer::HandleRequest(const std::string &method,
                  (enabled && suppress_audio ? "true" : "false") + "}";
       return;
     }
+    if (*cmd == "land_at" || *cmd == "jump_to") {
+      const auto target = JsonStringField(body, "target");
+      const int timeout_ms = JsonIntField(body, "timeout_ms").value_or(180000);
+      if (!target || target->empty() || timeout_ms < 1) {
+        status = "400 Bad Request";
+        body_out = "probe: automation requires target and positive timeout_ms";
+        return;
+      }
+      {
+        const std::lock_guard lock(automation_mutex_);
+        automation_request_ = ProbeAutomationRequest{
+            *cmd == "land_at" ? ProbeAutomationRequest::Kind::kLandAt
+                              : ProbeAutomationRequest::Kind::kJumpTo,
+            *target,
+            static_cast<std::uint64_t>(timeout_ms)};
+      }
+      sync_cv_.notify_all();
+      status = "202 Accepted";
+      content_type = "application/json";
+      body_out = "{\"ok\":true}";
+      return;
+    }
+    if (*cmd == "cancel_automation") {
+      const std::lock_guard lock(automation_mutex_);
+      automation_request_ = ProbeAutomationRequest{};
+      sync_cv_.notify_all();
+      status = "200 OK";
+      content_type = "application/json";
+      body_out = "{\"ok\":true}";
+      return;
+    }
     if (*cmd == "pause") {
       paused_.store(true);
     } else if (*cmd == "resume") {
@@ -553,7 +593,9 @@ void ProbeServer::HandleRequest(const std::string &method,
       quit_requested_.store(true);
     } else {
       status = "400 Bad Request";
-      body_out = "probe: unknown cmd (pause|resume|step|accelerate|quit)";
+      body_out = "probe: unknown cmd "
+                 "(pause|resume|step|accelerate|land_at|jump_to|cancel_"
+                 "automation|quit)";
       return;
     }
     sync_cv_.notify_all();
@@ -647,6 +689,32 @@ void ProbeServer::HandleRequest(const std::string &method,
 
   status = "404 Not Found";
   body_out = "probe: unknown endpoint (see docs/probe_harness.md)";
+}
+
+std::optional<ProbeAutomationRequest> ProbeServer::ConsumeAutomationRequest() {
+  const std::lock_guard lock(automation_mutex_);
+  auto request = std::move(automation_request_);
+  automation_request_.reset();
+  return request;
+}
+
+void ProbeServer::PublishAutomationStatus(std::string json) {
+  const std::lock_guard lock(automation_mutex_);
+  automation_status_ = std::move(json);
+}
+
+void ProbeServer::AutomationObservedDocked() {
+  const std::lock_guard lock(automation_mutex_);
+  automation_docked_ = true;
+  if (automation_status_.find("\"goal\":\"land_at\"") != std::string::npos) {
+    automation_status_ = "{\"goal\":\"land_at\",\"phase\":\"complete\","
+                         "\"detail\":\"Spaceport observed\"}";
+  }
+}
+
+bool ProbeServer::ConsumeAutomationDocked() {
+  const std::lock_guard lock(automation_mutex_);
+  return std::exchange(automation_docked_, false);
 }
 
 std::string ProbeServer::SubmitJob(const std::function<std::string()> &work,

@@ -33,6 +33,12 @@ struct ProbeNamedRect {
   SDL_FRect rect{};
 };
 
+struct ProbeAutomationRequest {
+  enum class Kind { kLandAt, kJumpTo, kCancel } kind = Kind::kCancel;
+  std::string target;
+  std::uint64_t timeout_ms = 180000;
+};
+
 class ProbeServer {
 public:
   ProbeServer() = default;
@@ -68,6 +74,11 @@ public:
   [[nodiscard]] bool ConsumeAccelerationRequest(bool &enabled,
                                                 std::uint32_t &speed_multiplier,
                                                 bool &suppress_audio);
+  [[nodiscard]] std::optional<ProbeAutomationRequest>
+  ConsumeAutomationRequest();
+  void PublishAutomationStatus(std::string json);
+  void AutomationObservedDocked();
+  [[nodiscard]] bool ConsumeAutomationDocked();
 
   // Sets the state reader executed on the main thread (registered by
   // NovaApp_Run with the live GameState). Empty result = unknown query.
@@ -123,6 +134,10 @@ private:
   std::atomic<bool> acceleration_requested_{false};
   std::atomic<std::uint32_t> speed_multiplier_requested_{1};
   std::atomic<bool> audio_suppression_requested_{false};
+  std::mutex automation_mutex_;
+  std::optional<ProbeAutomationRequest> automation_request_;
+  std::string automation_status_{"{\"goal\":\"none\",\"phase\":\"idle\"}"};
+  bool automation_docked_ = false;
 
   // One mutex serializes the job queue, the injected-key queue and the cv
   // the pause wait sleeps on.

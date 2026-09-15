@@ -1,0 +1,155 @@
+version = 1
+name = "tutorial-first-leg"
+quit_on_finish = true
+
+[defaults]
+timeout_ms = 30000
+
+# Create a pilot through the normal dialogs, accepting their default values.
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu" }
+
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = 100
+suppress_audio = true
+
+[[steps]]
+action = "click"
+element = "new_pilot"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3102" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3001" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu", "state.game_active" = true }
+
+[[steps]]
+action = "click"
+element = "enter_ship"
+
+# Land where the fresh pilot starts and accept Barry's first tutorial leg.
+[[steps]]
+action = "wait"
+expect = { "state.system" = "Tichel" }
+
+[[steps]]
+action = "validate_state"
+expect = { "state.game_active" = true, "state.system" = "Tichel", "state.ship_class" = "Shuttle", "state.active_missions" = 0 }
+matches = { "state.pilot" = ".+" }
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Viking"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "mission_offer" }
+timeout_ms = 180000
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 123 }
+
+[[steps]]
+action = "validate_state"
+expect = { "missions.missions.0.template_id" = 123, "missions.missions.0.return_stellar" = "Earth", "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# The controller moves out of the center gate; gameplay owns the jump itself.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "state.active_missions" = 1, "travel.engaging" = false, "travel.hyperspace_mode" = false }
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "missions.missions.0.template_id" = 123, "missions.missions.0.objective_complete" = true, "missions.missions.0.carrying_resources" = false, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "screenshot"
+name = "earth-arrival"
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "state.active_missions" = 0, "missions.missions" = [] }
+
+# Barry's next tutorial offer is triggered by entering the Trade Center.
+[[steps]]
+action = "click"
+element = "trade_center"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_offer" }
+
+[[steps]]
+action = "screenshot"
+name = "trade-tutorial-offer"
