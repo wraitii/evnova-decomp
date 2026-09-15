@@ -276,7 +276,9 @@ void NovaWeapon_TickPlayerWeaponBankCooldowns(GameState &state,
 // beams, turrets, and carrier-bay branches remain deferred. A successful
 // dispatch queues the weapon's fire sound (spatial, sourced at this ship) via
 // GameState.pending_fire_sounds, mirroring the original's sVar9 > 0 gate
-// around NovaAudio_PlaySpatialByDistance.
+// around NovaAudio_PlaySpatialByDistance. Ship_HandleShip's handoff semantics
+// are included: flags_primary 0x2 banks retain their active-bank/trigger latch;
+// ordinary banks consume both fields after one handoff.
 void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship);
 
 // Ghidra 0x0043a310 Weapon_SelectTurretTargetWithinArc: automatically fires
