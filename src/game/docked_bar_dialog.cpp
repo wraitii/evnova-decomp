@@ -414,12 +414,31 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   };
 
   ProbeUiAutoClear probe_ui_guard(platform);
-  platform.PublishProbeUi("bar",
-                          {{"window", window},
-                           {"leave", buttons[0]},
-                           {"gamble", buttons[1]},
-                           {"holovid", buttons[2]},
-                           {"hire_escort", buttons[4]}});
+  const auto publish_probe_controls = [&]() {
+    platform.PublishProbeUi("bar",
+                            {{"window", window},
+                             {"leave", buttons[0]},
+                             {"gamble", buttons[1]},
+                             {"holovid", buttons[2]},
+                             {"hire_escort", buttons[4]}});
+  };
+  publish_probe_controls();
+
+  const auto run_mission_offer = [&]() {
+    return Mission_TriggerLandingInteractions(
+        state,
+        1,
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
+        [&](std::int16_t mission_def) {
+          return NovaMission_RunOfferWindow(
+              platform, state, mission_def, stellar_id, draw_frame);
+        });
+  };
+
+  // Ghidra 0x0047c8e0 sets g_misn_list_page_group = 1 and schedules action 6
+  // (Mission_TriggerReturnMissionInteractions(1)) fifteen ticks after entry.
+  state.mission_interaction_recheck_at_ms =
+      static_cast<std::int32_t>(platform.gameplay_ticks_ms()) + 0x0f;
 
   // Modal action dispatcher (0x0047c8e0's action arms). Returns true when
   // the bar window should close.
@@ -473,6 +492,16 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   };
 
   while (!platform.quit_requested()) {
+    // Mission offers and other nested modals clear their semantic controls.
+    // Restore the bar surface when its root loop resumes.
+    publish_probe_controls();
+    const std::uint32_t now_ms =
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
+    const auto recheck_at =
+        static_cast<std::uint32_t>(state.mission_interaction_recheck_at_ms);
+    if (static_cast<std::int32_t>(now_ms - recheck_at) >= 0) {
+      (void)run_mission_offer();
+    }
     draw_frame();
     bool close = false;
     for (std::optional<TextInput> in; (in = platform.PollTextEvent());) {

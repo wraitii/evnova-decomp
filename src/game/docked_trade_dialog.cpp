@@ -492,9 +492,11 @@ RunTradeCenterDialog(SdlPlatform &platform,
     if (!layout) {
       return LandedExit::kServiceComplete;
     }
-    const SDL_FPoint mouse = platform.mouse_position();
     platform.PublishProbeUi("trade_center",
                             {{"window", layout->frame},
+                             // The original's STR# caption is "Done". Keep
+                             // the older semantic alias for existing probes.
+                             {"done", layout->leave},
                              {"leave", layout->leave},
                              {"buy", layout->buy},
                              {"sell", layout->sell}});
@@ -564,6 +566,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
       }
       // Ghidra 0x004a04d0 NovaUi_TradeCenterHitTestButtons runs inline here.
       if (in->key == TextKey::primary) {
+        const SDL_FPoint mouse = platform.mouse_position();
         if (Contains(layout->leave, mouse)) {
           return LandedExit::kServiceComplete;
         }

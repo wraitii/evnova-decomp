@@ -1429,6 +1429,9 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
     const StoreLayout layout = LayoutStore(platform, outfit_store);
     platform.PublishProbeUi(outfit_store ? "outfitter" : "shipyard",
                             {{"window", layout.frame},
+                             // Both store windows caption this control "Done".
+                             // Retain "leave" as a compatibility alias.
+                             {"done", layout.leave},
                              {"leave", layout.leave},
                              {"buy", layout.buy},
                              {"sell_or_info", layout.sell_or_info},
