@@ -292,6 +292,7 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
   CHECK(state.active_shots[0].owner_ship_slot == 1);
   CHECK(state.active_shots[0].weapon_id == 0);
   CHECK(npc.npc_weapon_bank_secondary[0] == -1);
+  CHECK(npc.active_weapon_bank_slot == -1);
   CHECK(npc.ai_fire_trigger_latch == 0);
 
   // A successful volley must latch the weapon's fire sound (Light Blaster
@@ -303,6 +304,52 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
   CHECK(pending.src_x == Catch::Approx(200.0F));
   CHECK(pending.src_y == Catch::Approx(300.0F));
   state.pending_fire_sounds.clear();
+}
+
+TEST_CASE("continuous NPC weapon handoff retains its bank and trigger",
+          "[weapon][npc]") {
+  if (!ArchivesAvailable()) {
+    SKIP("Nova .rez archives not present");
+  }
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  std::int16_t continuous_bank = -1;
+  for (std::size_t index = 0; index < state.scenario.weapons.size(); ++index) {
+    const Weapon &weapon = state.scenario.weapons[index];
+    if ((weapon.flags & 0x0002U) != 0U) {
+      continuous_bank = static_cast<std::int16_t>(index);
+      break;
+    }
+  }
+  REQUIRE(continuous_bank >= 0);
+
+  Ship &player = state.player;
+  player.is_active = true;
+  player.ship_instance_id = 0;
+  player.current_system_id = 0;
+  player.armor_points = 100.0F;
+  player.pos_y = -200.0F;
+
+  Ship &npc = state.ShipAt(1);
+  npc.is_active = true;
+  npc.ship_instance_id = 1;
+  npc.ship_class_id = 0;
+  npc.current_system_id = 0;
+  npc.primary_target_ship_slot = 0;
+  npc.armor_points = 100.0F;
+  npc.active_weapon_bank_slot = continuous_bank;
+  npc.ai_fire_trigger_latch = 1;
+  npc.npc_weapon_bank_ammo[static_cast<std::size_t>(continuous_bank)] = 1;
+  npc.npc_weapon_bank_secondary[static_cast<std::size_t>(continuous_bank)] = -1;
+  npc.npc_weapon_bank_cooldown[static_cast<std::size_t>(continuous_bank)] =
+      5.0F;
+
+  NovaWeapon_FireNpcWeaponBank(state, npc);
+
+  CHECK(state.active_shots.empty());
+  CHECK(npc.active_weapon_bank_slot == continuous_bank);
+  CHECK(npc.ai_fire_trigger_latch == 1);
 }
 
 TEST_CASE("NPC energy weapons do not need a secondary ammo counter",
@@ -396,6 +443,10 @@ TEST_CASE("Fed Destroyer selects and fires its long-range missile",
   NovaWeapon_FireNpcWeaponBank(state, npc);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].weapon_id == 6);
+  // The IR Missile is not continuous: the original consumes both fields after
+  // the one-shot handoff.
+  CHECK(npc.active_weapon_bank_slot == -1);
+  CHECK(npc.ai_fire_trigger_latch == 0);
 }
 
 TEST_CASE("Abomination can select and fire its pulse cannon", "[weapon][npc]") {
@@ -520,9 +571,11 @@ TEST_CASE("an unsuccessful NPC fire request clears its stale bank latch",
   npc.ship_class_id = 0;
   npc.current_system_id = 0;
   npc.armor_points = 100.0F;
-  npc.active_weapon_bank_slot = 0;
+  // IR Missile bank 6 is non-continuous, so even an unsuccessful handoff is
+  // consumed by Ship_HandleShip after Weapon_FireShipWeapons returns.
+  npc.active_weapon_bank_slot = 6;
   npc.ai_fire_trigger_latch = 1;
-  npc.npc_weapon_bank_ammo[0] = 0;
+  npc.npc_weapon_bank_ammo[6] = 0;
 
   NovaWeapon_FireNpcWeaponBank(state, npc);
 

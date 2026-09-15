@@ -2707,13 +2707,24 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   const std::size_t index = static_cast<std::size_t>(bank);
   const Weapon *weapon =
       state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
-  if (weapon == nullptr || ship.npc_weapon_bank_ammo[index] <= 0 ||
-      ship.npc_weapon_bank_cooldown[index] > 0.0F) {
-    // The AI latch is a one-frame request. Ghidra's selectors can leave the
-    // previous active bank in +0x72 and re-latch it even when their current
-    // scan found no candidate; consuming a failed clean-room handoff prevents
-    // an empty/cooling bank from remaining permanently armed.
+  if (weapon == nullptr) {
     consume_fire_request();
+    return;
+  }
+  // Ship_HandleShip (0x004351de..0x0043530d) retains +0x72 and +0xba after
+  // handing a flags_primary 0x2 continuous-fire bank to Weapon_FireShipWeapons.
+  // Ordinary banks are one-frame requests and are cleared after the handoff,
+  // whether or not the bank was ready. Keeping this distinction is also what
+  // leaves a live weapon id available to the mode-6/7 predictive-aim path.
+  const bool continuous_fire = (weapon->flags & 0x0002U) != 0U;
+  auto finish_fire_handoff = [&]() {
+    if (!continuous_fire) {
+      consume_fire_request();
+    }
+  };
+  if (ship.npc_weapon_bank_ammo[index] <= 0 ||
+      ship.npc_weapon_bank_cooldown[index] > 0.0F) {
+    finish_fire_handoff();
     return;
   }
   // Weapon_CanFireWeaponBank is the authoritative ammo/energy gate.  In
@@ -2721,7 +2732,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   // that counter is not an ammunition requirement for them.
   if (weapon->weapon_mode_code == 99 &&
       ship.npc_weapon_bank_secondary[index] < 1) {
-    consume_fire_request();
+    finish_fire_handoff();
     return;
   }
   const std::int16_t mode = weapon->weapon_mode_code;
@@ -2756,6 +2767,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     burst_attempts = std::max(0, burst_attempts);
   }
   if (burst_attempts < 1) {
+    finish_fire_handoff();
     return;
   }
 
@@ -2882,6 +2894,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
                                          false,
                                          true) >= 0;
     } else {
+      finish_fire_handoff();
       return; // unsupported weapon mode in this bank
     }
     if (!fired) {
@@ -2899,7 +2912,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   }
 
   if (shots_fired < 1) {
-    consume_fire_request();
+    finish_fire_handoff();
     return;
   }
   // flags_secondary 0x200: muzzle sprite flash to level 32 (Ghidra
@@ -2964,7 +2977,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     }
   }
   ship.npc_weapon_bank_cooldown[index] = fire_cooldown;
-  consume_fire_request();
+  finish_fire_handoff();
 }
 
 // Ghidra Shot_HandleShot (0x00435830) time-animated shot-frame branch: for a
