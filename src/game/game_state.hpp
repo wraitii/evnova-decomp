@@ -1648,12 +1648,14 @@ struct GameState {
   // the SDL audio device). Mirrors NovaAudio_QueueCenteredSound with the
   // transition-table handles: the boarding command denial beeps are
   // g_transition_sound_handle_table[3] (snd 153), the "boarded" fanfare is
-  // table[4] (snd 154) with the original's repeat count, and the boarding
+  // table[4] (snd 154) with the original's voice priority, and the boarding
   // window plays table[2]/table[3] per action. See
   // docs/boarding_plunder_capture.md.
   struct PendingUiSound {
     std::int16_t transition_index = 0; // 0..5 into transition_sounds
-    std::int16_t count = 1;            // the original's repeat count
+    // NovaAudio_QueueCenteredSound's second argument. One request creates one
+    // voice; this rank controls ordered full-pool replacement (minimum 1).
+    std::int16_t priority_width = 1;
   };
 
   std::vector<PendingUiSound> pending_ui_sounds;

@@ -859,7 +859,7 @@ TEST_CASE("entering jump range with a plotted jump cues the UI sound") {
   NovaTravel_Tick(state, /*travel_input=*/false, 16.67F);
   REQUIRE(state.pending_ui_sounds.size() == 1);
   CHECK(state.pending_ui_sounds[0].transition_index == 4);
-  CHECK(state.pending_ui_sounds[0].count == 1);
+  CHECK(state.pending_ui_sounds[0].priority_width == 1);
   CHECK(state.travel.jump_range_cue_latch);
   state.pending_ui_sounds.clear();
 

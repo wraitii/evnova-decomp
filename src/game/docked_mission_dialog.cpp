@@ -1090,7 +1090,11 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
     const auto &sound =
         state.transition_sounds[static_cast<std::size_t>(transition_index)];
     if (sound.has_value()) {
-      audio.Play(*sound, 1.0F, 1.0F, 150 + transition_index);
+      audio.Play(*sound,
+                 1.0F,
+                 1.0F,
+                 150 + transition_index,
+                 /*priority_width=*/1);
     }
   };
 

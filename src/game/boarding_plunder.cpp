@@ -426,8 +426,11 @@ namespace {
 // Queues a transition-table cue on GameState.pending_ui_sounds (drained by
 // the spaceflight loop). `index` is the g_transition_sound_handle_table slot:
 // 2 = confirm/plunder taken, 3 = denial/error, 4 = "boarded" fanfare.
-void QueueUiSound(GameState &state, std::int16_t index, std::int16_t count) {
-  state.pending_ui_sounds.push_back(GameState::PendingUiSound{index, count});
+void QueueUiSound(GameState &state,
+                  std::int16_t index,
+                  std::int16_t priority_width) {
+  state.pending_ui_sounds.push_back(
+      GameState::PendingUiSound{index, priority_width});
 }
 
 void ShowBoardingOverlay(GameState &state, std::uint16_t str_index) {
@@ -1234,12 +1237,12 @@ void DrawBoardWindow(SdlPlatform &platform,
 
 // Plays a transition-table cue directly through the flight-loop-owned audio
 // device (the modal owns no device). Mirrors NovaAudio_QueueCenteredSound
-// on g_transition_sound_handle_table[index] with `count` repeats; index 2 =
-// confirm/taken, 3 = denial/error.
+// on g_transition_sound_handle_table[index] with one voice at the supplied
+// allocator priority; index 2 = confirm/taken, 3 = denial/error.
 void PlayTransitionCue(SdlAudio &audio,
                        GameState &state,
                        std::int16_t index,
-                       std::int16_t count = 1) {
+                       std::int16_t priority_width = 1) {
   EnsureTransitionSounds(state);
   if (index < 0 ||
       index >= static_cast<std::int16_t>(state.transition_sounds.size())) {
@@ -1249,9 +1252,7 @@ void PlayTransitionCue(SdlAudio &audio,
   if (!sound.has_value()) {
     return;
   }
-  for (std::int16_t repeat = 0; repeat < count; ++repeat) {
-    audio.Play(*sound, 1.0F, 1.0F, 150 + index);
-  }
+  audio.Play(*sound, 1.0F, 1.0F, 150 + index, priority_width);
 }
 
 void BoardShowOverlay(GameState &state,

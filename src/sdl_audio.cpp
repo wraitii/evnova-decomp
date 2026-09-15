@@ -50,6 +50,23 @@ bool SdlAudio::StreamActive(SDL_AudioStream *stream) {
   return queued > 0;
 }
 
+std::optional<std::size_t>
+NovaAudio_SelectVoiceInsertion(std::span<const NovaAudioVoicePriority> active,
+                               NovaAudioVoicePriority incoming,
+                               std::size_t capacity) {
+  std::size_t index = 0;
+  while (index < active.size() && (incoming.width < active[index].width ||
+                                   incoming.level < active[index].level)) {
+    ++index;
+  }
+  if (active.size() >= capacity && index == active.size()) {
+    return std::nullopt;
+  }
+  return index;
+}
+
+// Ghidra 0x0046aad0 NovaAudio_QueueCenteredSound; 0x004d64f0
+// NovaAudio_FillVoiceSlotDescriptor; 0x004d6550 Audio_AllocateVoiceSlot.
 void SdlAudio::Play(const NovaSoundData &sound,
                     float gain,
                     float playback_rate,
@@ -60,71 +77,56 @@ void SdlAudio::Play(const NovaSoundData &sound,
     return;
   }
 
-  // Grow the voice pool toward the original's 16-slot AudioVoiceSlot table
-  // (Audio_AllocateVoiceSlot 0x004d6550). The pool previously stopped at 8 and
-  // reused the least-recently-used voice, which cut off long effects such as
-  // the player's Explode2 when a busier explosion started later.
+  // Retire drained descriptors before applying the original ordered 16-slot
+  // insertion policy (Audio_AllocateVoiceSlot 0x004d6550).
   constexpr std::size_t kMaxVoices = 16;
-  if (voices_.empty()) {
-    voices_.reserve(kMaxVoices);
+  voices_.erase(std::remove_if(voices_.begin(),
+                               voices_.end(),
+                               [](const Voice &voice) {
+                                 return !StreamActive(voice.stream.get());
+                               }),
+                voices_.end());
+  const int incoming_width = std::max(1, priority_width);
+  // QueueCenteredSound supplies levels on a 0..0x100 scale; the allocator
+  // clamps each channel to 0x80 before comparing their sum. SDL's gain is
+  // already normalized after that clamp, so recover one channel's rank here.
+  const int incoming_level = std::clamp(
+      static_cast<int>(std::lround(std::max(0.0F, gain) * master_gain_ * 128)),
+      0,
+      0x80);
+  std::vector<NovaAudioVoicePriority> active_priorities;
+  active_priorities.reserve(voices_.size());
+  for (const Voice &voice : voices_) {
+    active_priorities.push_back(voice.priority);
   }
-  if (voices_.size() < kMaxVoices) {
-    Voice voice{std::unique_ptr<SDL_AudioStream, StreamDeleter>{
-                    SDL_CreateAudioStream(nullptr, nullptr)},
-                -1};
-    if (!voice.stream) {
+  const auto insertion_index = NovaAudio_SelectVoiceInsertion(
+      active_priorities, {incoming_width, incoming_level}, kMaxVoices);
+  if (!insertion_index.has_value()) {
+    return;
+  }
+
+  Voice incoming;
+  if (voices_.size() == kMaxVoices) {
+    incoming = std::move(voices_.back());
+    SDL_ClearAudioStream(incoming.stream.get());
+    voices_.pop_back();
+  } else {
+    incoming.stream.reset(SDL_CreateAudioStream(nullptr, nullptr));
+    if (!incoming.stream) {
       NovaLog::Error("SDL audio stream creation failed: {}", SDL_GetError());
       return;
     }
-    if (!SDL_BindAudioStream(device_id_, voice.stream.get())) {
+    if (!SDL_BindAudioStream(device_id_, incoming.stream.get())) {
       NovaLog::Error("SDL audio stream bind failed: {}", SDL_GetError());
-    }
-    voices_.push_back(std::move(voice));
-  }
-
-  // Find a voice that has drained its previous effect. When all 16 voices are
-  // active, Audio_AllocateVoiceSlot (0x004d6550) compares the descriptor width
-  // and channel level against its ordered voice table, replacing a weaker
-  // entry when the incoming cue wins. This keeps a nearby explosion audible
-  // during sustained weapon fire instead of letting the earliest fire sounds
-  // monopolize the table.
-  Voice *voice = nullptr;
-  for (std::size_t attempt = 0; attempt < voices_.size(); ++attempt) {
-    Voice &candidate = voices_[(next_voice_ + attempt) % voices_.size()];
-    if (!StreamActive(candidate.stream.get())) {
-      voice = &candidate;
-      break;
-    }
-  }
-  if (voice == nullptr) {
-    Voice *weakest_eligible = nullptr;
-    for (Voice &candidate : voices_) {
-      // Audio_AllocateVoiceSlot only inserts ahead of an active entry when
-      // neither descriptor dimension is lower. Width is not an absolute
-      // priority: a distant width-6 impact cannot evict a loud width-5
-      // weapon launch.
-      if (priority_width < candidate.priority_width ||
-          gain < candidate.source_gain) {
-        continue;
-      }
-      if (weakest_eligible == nullptr ||
-          candidate.priority_width < weakest_eligible->priority_width ||
-          (candidate.priority_width == weakest_eligible->priority_width &&
-           candidate.source_gain < weakest_eligible->source_gain)) {
-        weakest_eligible = &candidate;
-      }
-    }
-    if (weakest_eligible == nullptr) {
       return;
     }
-    voice = weakest_eligible;
-    SDL_ClearAudioStream(voice->stream.get());
   }
-  next_voice_ =
-      (static_cast<std::size_t>(voice - voices_.data()) + 1) % voices_.size();
-  voice->key = sound_key;
-  voice->priority_width = std::max(1, priority_width);
-  voice->source_gain = std::max(0.0F, gain);
+  incoming.key = sound_key;
+  incoming.priority = {incoming_width, incoming_level};
+  incoming.source_gain = std::max(0.0F, gain);
+  auto voice_it =
+      voices_.insert(voices_.begin() + *insertion_index, std::move(incoming));
+  Voice *voice = &*voice_it;
 
   const int playback_sample_rate =
       static_cast<int>(std::lround(sound.sample_rate * playback_rate));
@@ -151,6 +153,7 @@ void SdlAudio::Play(const NovaSoundData &sound,
   SDL_FlushAudioStream(voice->stream.get());
 }
 
+// Ghidra 0x004d6770 NovaAudio_CountActiveByHandle.
 int SdlAudio::CountActiveByKey(int sound_key) const {
   if (sound_key < 0) {
     return 0;
@@ -164,6 +167,7 @@ int SdlAudio::CountActiveByKey(int sound_key) const {
   return active;
 }
 
+// Ghidra 0x004d67d0 NovaAudio_UnregisterCallbacks.
 void SdlAudio::StopByKey(int sound_key) {
   if (sound_key < 0) {
     return;
