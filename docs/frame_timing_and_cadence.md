@@ -40,9 +40,15 @@ cadence.
 
 `Frame_SpaceflightLoop` (`0x00417600`) calls `Frame_TickSystems(1)` once per
 ordinary loop. X2 mode adds `Frame_TickSystems(0)` after drawing. The reduced
-call still runs the player, collision, shot, ship, and scope-8 passes; it omits
-status/reactions, AI, and AI-odds work. This scheduling distinction is separate
-from whether an individual calculation uses `g_avg_frame_tick_scale`.
+call is an extra simulation pass, not a display-only update: it still advances
+the player, collision resolution, shots, ships, visual state, and scope-8
+world effects. A full tick additionally does the less time-critical
+bookkeeping and decision work: proximity/UI refresh, squad-leader setup,
+mission/reaction and NPC-spawn maintenance, ship AI, combat-odds evaluation,
+and the travel-countdown sprite. In short, X2 doubles the physics/action
+cadence while leaving much of the UI, AI planning, and world maintenance at the
+ordinary cadence. This scheduling distinction is separate from whether an
+individual calculation uses `g_avg_frame_tick_scale`.
 
 The current port gates most scope-8 work on `run_full_tick`. This is benign in
 the presently reachable frozen reduced path, but differs from original X2
