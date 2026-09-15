@@ -939,23 +939,6 @@ void DrawLandedMenu(SdlPlatform &platform,
                           label_baseline,
                           ServiceLabel(svc));
   }
-
-  // Footer hint row in the body font, just below the docked content (the
-  // window bottom when laid out; otherwise the top of the panel).
-  const float footer_y = layout.from_ditl
-                             ? layout.window.y + layout.window.h - 20.0F
-                             : panel.y + 52.0F;
-  NovaText_DrawCentered(platform,
-                        font_cache,
-                        NovaFontFamily::kGeneva,
-                        11.0F,
-                        kNovaFontStyleRegular,
-                        kBody,
-                        panel.x + 300.0F,
-                        panel.x + 530.0F,
-                        footer_y,
-                        "R/F refuel  C/T trade  O outfit  S shipyard  "
-                        "N mission  B bar  Esc/Enter leave");
 }
 
 // Handles one service selection from the docked menu. Returns the exit intent:
