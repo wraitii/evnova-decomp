@@ -228,10 +228,11 @@ bool Stellar_Dock(GameState &state,
   // Ghidra 0x004588b1: stellar entry refreshes delayed mission arrivals and
   // auxiliary-fleet bookkeeping before population is restored.
   Mission_RefreshActiveMissionSpawnState(state);
-  NovaSystem_RestoreMissionFleets(state,
-                                  state.player.current_system_id,
-                                  /*copy_player_heading=*/false,
-                                  SDL_GetTicks());
+  NovaSystem_RestoreMissionFleets(
+      state,
+      state.player.current_system_id,
+      /*copy_player_heading=*/false,
+      static_cast<std::uint32_t>(state.gameplay_now_ms));
   // Offering rolls redraw on landing too (Stellar_HandleStellarEntryAndExit
   // 0x00458802 arm).
   Mission_RerollOfferingRolls(state);
@@ -1010,6 +1011,7 @@ LandedExit DispatchService(SdlPlatform &platform,
 LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                 GameState &state,
                                 LandedContext &ctx) {
+  state.gameplay_now_ms = platform.gameplay_ticks_ms();
   NovaLog::Info("opening landed services window at stellar {}",
                 static_cast<int>(ctx.stellar_id));
 
@@ -1223,12 +1225,15 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   // the offer pass. The success/failure debrief readers layer over the live
   // dock through render_background.
   Mission_TickReactionSlotsForTravelInteraction(
-      state, ctx.stellar_id, SDL_GetTicks(), [&](const std::string &text) {
+      state,
+      ctx.stellar_id,
+      platform.gameplay_ticks_ms(),
+      [&](const std::string &text) {
         NovaUi_RunTextReaderDialog(
             platform, state, text, false, render_background);
       });
   (void)Mission_TriggerLandingInteractions(
-      state, 3, SDL_GetTicks(), [&](std::int16_t mission_def) {
+      state, 3, platform.gameplay_ticks_ms(), [&](std::int16_t mission_def) {
         return NovaMission_RunOfferWindow(
             platform, state, mission_def, ctx.stellar_id, render_background);
       });
@@ -1352,7 +1357,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
         break;
       }
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return finish(LandedExit::kQuit);
 }

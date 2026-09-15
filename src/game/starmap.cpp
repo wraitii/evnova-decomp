@@ -2590,6 +2590,7 @@ StarmapResult NovaStarmap_RunWindow(SdlPlatform &platform,
       state.starmap_pan_y = view.pan_y;
       overlay_needs_rebuild = true;
     }
+    platform.PaceFrame();
   }
 
   StarmapResult quit;

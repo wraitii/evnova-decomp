@@ -1176,7 +1176,7 @@ void RunShipyardInfoDialog(SdlPlatform &platform,
     if (done) {
       return;
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
 }
 
@@ -1368,7 +1368,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
     return Mission_TriggerLandingInteractions(
         state,
         *mission_context,
-        static_cast<std::uint32_t>(SDL_GetTicks()),
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
         [&](std::int16_t mission_def) {
           return NovaMission_RunOfferWindow(platform,
                                             state,
@@ -1418,7 +1418,8 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   };
   ProbeUiAutoClear probe_ui_guard(platform);
   while (!platform.quit_requested()) {
-    const std::uint32_t now_ms = static_cast<std::uint32_t>(SDL_GetTicks());
+    const std::uint32_t now_ms =
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
     const auto recheck_at =
         static_cast<std::uint32_t>(state.mission_interaction_recheck_at_ms);
     if (mission_context &&
@@ -1639,7 +1640,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         }
       }
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return LandedExit::kQuit;
 }

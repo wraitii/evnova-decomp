@@ -466,7 +466,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
     return Mission_TriggerLandingInteractions(
         state,
         4,
-        static_cast<std::uint32_t>(SDL_GetTicks()),
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
         [&](std::int16_t mission_def) {
           return NovaMission_RunOfferWindow(platform,
                                             state,
@@ -481,7 +481,8 @@ RunTradeCenterDialog(SdlPlatform &platform,
   // it; tutorial follow-ups such as the first trade task depend on that pass.
   (void)run_mission_offer();
   while (!platform.quit_requested()) {
-    const std::uint32_t now_ms = static_cast<std::uint32_t>(SDL_GetTicks());
+    const std::uint32_t now_ms =
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
     const auto recheck_at =
         static_cast<std::uint32_t>(state.mission_interaction_recheck_at_ms);
     if (static_cast<std::int32_t>(now_ms - recheck_at) >= 0) {
@@ -583,6 +584,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
         }
       }
     }
+    platform.PaceFrame();
   }
   return LandedExit::kQuit;
 }

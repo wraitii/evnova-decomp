@@ -763,7 +763,7 @@ RunBribePaymentWindow(SdlPlatform &platform,
         paid = true;
       }
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return paid ? PaymentResult::kPaid : PaymentResult::kClosed;
 }
@@ -1203,7 +1203,7 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
       }
     }
 
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return NegotiationExit::kQuit;
 }

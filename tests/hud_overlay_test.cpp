@@ -64,5 +64,21 @@ TEST_CASE("STR# pool decodes length-prefixed entries and rejects malformed "
   CHECK(NovaHud_DecodeStringEntry(truncated, 1) == std::nullopt);
 }
 
+TEST_CASE("HUD overlay deadlines use the gameplay clock snapshot",
+          "[hud_overlay][clock]") {
+  GameState state;
+  state.gameplay_now_ms = 1'000;
+  NovaHud_ShowOverlayMessage(state, "test", std::uint64_t{10});
+  CHECK(state.hud_overlay.active);
+  CHECK(state.hud_overlay.expiry_ms == 1'210);
+
+  state.gameplay_now_ms = 1'209;
+  NovaHud_TickOverlay(state);
+  CHECK(state.hud_overlay.active);
+  state.gameplay_now_ms = 1'210;
+  NovaHud_TickOverlay(state);
+  CHECK_FALSE(state.hud_overlay.active);
+}
+
 } // namespace
 } // namespace game

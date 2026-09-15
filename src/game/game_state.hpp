@@ -1053,8 +1053,8 @@ struct HudOverlayState {
   std::uint8_t red = 0xe0;
   std::uint8_t green = 0xe0;
   std::uint8_t blue = 0xe0;
-  // Absolute wall-clock deadline (SDL_GetTicks ms) after which the message
-  // disappears. Set by NovaHud_ShowOverlayMessage from its duration.
+  // Absolute gameplay-clock deadline after which the message disappears. Set
+  // by NovaHud_ShowOverlayMessage from its duration.
   std::uint64_t expiry_ms = 0;
 };
 
@@ -1450,6 +1450,12 @@ struct GameState {
   // truncated) once per frame. ai_mode_start_time_ms stamps compare against
   // this counter.
   std::uint32_t tick_60hz = 0;
+  // Snapshot of the platform-owned gameplay clock for game-logic helpers that
+  // do not otherwise receive SdlPlatform. The flight/modal entry points refresh
+  // this before invoking timestamped mission, combat, and HUD code. Keeping
+  // the snapshot in GameState makes those helpers independent of SDL and lets
+  // probe-controlled accelerated time flow through the whole gameplay path.
+  std::uint64_t gameplay_now_ms = 0;
   // Ghidra g_target_category_command (0x007354c4, short[4]): the escort-group
   // command the player issued per ship-class category. Initialized to -1 by
   // Ship_InitGameplayDataTables (0x004b0c20); the player-core command dispatch

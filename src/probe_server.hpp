@@ -53,12 +53,20 @@ public:
 
   // Runs queued work and enforces the pause/step latch. Called at the top of
   // every input poll; blocks here while paused (still servicing requests).
-  void Pump();
+  // Returns true when the pause latch blocked this call. SdlPlatform uses the
+  // result to keep time spent paused out of the gameplay clock.
+  [[nodiscard]] bool Pump();
 
   // Flight-input merge: true when the harness holds this scancode virtually
   // (SDL_GetKeyboardState cannot see injected events, so held flight keys go
   // through this channel instead).
   [[nodiscard]] bool VirtualKey(SDL_Scancode scancode) const;
+
+  // Returns the latest execution-mode request. The listener only records the
+  // request; SdlPlatform consumes it on the main thread before SDL/timing
+  // state is changed.
+  [[nodiscard]] bool
+  ConsumeAccelerationRequest(bool &enabled, std::uint32_t &speed_multiplier);
 
   // Sets the state reader executed on the main thread (registered by
   // NovaApp_Run with the live GameState). Empty result = unknown query.
@@ -110,6 +118,9 @@ private:
   std::atomic<bool> paused_{false};
   std::atomic<int> step_remaining_{0};
   std::atomic<bool> quit_requested_{false};
+  std::atomic<bool> acceleration_request_pending_{false};
+  std::atomic<bool> acceleration_requested_{false};
+  std::atomic<std::uint32_t> speed_multiplier_requested_{1};
 
   // One mutex serializes the job queue, the injected-key queue and the cv
   // the pause wait sleeps on.

@@ -291,6 +291,8 @@ bool SdlPlatform::Initialize() {
     return false;
   }
   sdl_initialized_ = true;
+  wall_clock_anchor_ms_ = SDL_GetTicks();
+  gameplay_clock_anchor_ms_ = wall_clock_anchor_ms_;
 
   SDL_SetAppMetadata("Escape Velocity Nova", "0.1.0", "com.ambrosiasw.evnova");
   // Minimum window: 1024x768 (the user-facing baseline resolution, matching
@@ -445,7 +447,19 @@ void SdlPlatform::PumpProbe() {
   probe_.SetGeometry(
       {static_cast<float>(window_width), static_cast<float>(window_height)},
       playfield_window_rect());
-  probe_.Pump();
+  const std::uint64_t pump_started_ms = wall_ticks_ms();
+  const bool waited_while_paused = probe_.Pump();
+  if (waited_while_paused) {
+    // Pausing is a probe execution-control operation, not simulated elapsed
+    // time. Move the wall anchor forward so resuming cannot produce one large
+    // gameplay delta (scaled or otherwise).
+    wall_clock_anchor_ms_ += wall_ticks_ms() - pump_started_ms;
+  }
+  bool enabled = false;
+  std::uint32_t speed_multiplier = 1;
+  if (probe_.ConsumeAccelerationRequest(enabled, speed_multiplier)) {
+    ApplyProbeExecutionSettings(enabled, speed_multiplier);
+  }
 }
 
 std::optional<TextInput> SdlPlatform::PollTextEvent() {
@@ -697,7 +711,38 @@ std::optional<char> SdlPlatform::PollCommandEvent() {
 
 bool SdlPlatform::quit_requested() const { return quit_requested_; }
 
-std::uint64_t SdlPlatform::ticks_ms() const { return SDL_GetTicks(); }
+std::uint64_t SdlPlatform::wall_ticks_ms() const { return SDL_GetTicks(); }
+
+std::uint64_t SdlPlatform::gameplay_ticks_ms() const {
+  const std::uint64_t wall_elapsed = wall_ticks_ms() - wall_clock_anchor_ms_;
+  return gameplay_clock_anchor_ms_ + wall_elapsed * speed_multiplier_;
+}
+
+void SdlPlatform::PaceFrame() {
+  if (!accelerated_) {
+    SDL_Delay(16);
+  }
+}
+
+void SdlPlatform::ApplyProbeExecutionSettings(bool enabled,
+                                              std::uint32_t speed_multiplier) {
+  // Re-anchor before changing scale so gameplay time stays monotonic across
+  // enable, multiplier-change, and disable requests.
+  const std::uint64_t gameplay_now = gameplay_ticks_ms();
+  const std::uint64_t wall_now = wall_ticks_ms();
+  gameplay_clock_anchor_ms_ = gameplay_now;
+  wall_clock_anchor_ms_ = wall_now;
+  accelerated_ = enabled;
+  speed_multiplier_ =
+      enabled ? std::max<std::uint32_t>(1, speed_multiplier) : 1;
+  if (accelerated_) {
+    SDL_SetRenderVSync(renderer_.get(), 0);
+    NovaLog::Info("probe: accelerated mode enabled ({}x)", speed_multiplier_);
+  } else {
+    SDL_SetRenderVSync(renderer_.get(), 1);
+    NovaLog::Info("probe: accelerated mode disabled");
+  }
+}
 
 // mouse_position_ is already in render (viewport-relative) coordinates: it is
 // filled via SDL_RenderCoordinatesFromWindow, which subtracts the current

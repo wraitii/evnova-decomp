@@ -1494,7 +1494,7 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
       take_ship = false;
       close = true;
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
 
   // Both choices play g_transition_sound_handle_table[1].
@@ -1976,7 +1976,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
     // Frame cap. The original's NovaUi_PollTravelScriptAction pumps one event
     // batch per call (15 ms throttle inside UiWindow_RunInteractionLoop), so
     // this loop runs at ~60 Hz, not a CPU-burning spin.
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
 
   NovaLog::Info("board: window closed ({})", close_reason);

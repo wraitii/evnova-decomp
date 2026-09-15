@@ -432,7 +432,7 @@ void NovaUi_RunTextReaderDialog(
       starmap_requested = false;
     }
     draw_frame();
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
 }
 

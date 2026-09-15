@@ -702,6 +702,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
                                 std::int16_t ship_slot,
                                 SpaceflightView &view,
                                 HudRenderer &hud) {
+  state.gameplay_now_ms = platform.gameplay_ticks_ms();
   if (ship_slot <= 0 ||
       ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips)) {
     NovaLog::Warn("ship-comm: slot {} out of range",
@@ -978,7 +979,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
         if (outcome == BribeOutcome::kPaid) {
           status = LoadCommPrompt(random_index, kMsgBusiness).value_or(status);
           NovaAi_EnterState2ClearPrimaryTarget(
-              target, static_cast<std::uint32_t>(SDL_GetTicks()));
+              target, static_cast<std::uint32_t>(platform.gameplay_ticks_ms()));
           target.ai_behavior_code = 1;
         } else if (outcome == BribeOutcome::kRefused) {
           status =
@@ -1210,7 +1211,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     if (close_channel) {
       break;
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
 
   // ---- Close-time side effects ---------------------------------------------
@@ -1234,7 +1235,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     target.ai_control_mode = 0;
     target.ai_secondary_target_slot = -1;
     NovaAi_EnterState2ClearPrimaryTarget(
-        target, static_cast<std::uint32_t>(SDL_GetTicks()));
+        target, static_cast<std::uint32_t>(platform.gameplay_ticks_ms()));
   }
   target.comm_interacted_mark = 1;
   return true;

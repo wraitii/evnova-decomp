@@ -1070,7 +1070,7 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
     redraw(-1);
     platform.Present();
 
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
 
   // Teardown: the original drains the special binding, destroys the window,

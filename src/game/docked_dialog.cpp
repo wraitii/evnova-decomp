@@ -281,7 +281,7 @@ NovaLanded_RunSubWindowDialog(SdlPlatform &platform,
         break;
       }
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return LandedExit::kQuit;
 }

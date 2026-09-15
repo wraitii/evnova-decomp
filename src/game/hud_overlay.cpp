@@ -34,7 +34,7 @@ void NovaHud_ShowOverlayMessage(GameState &state,
   state.hud_overlay.green = green;
   state.hud_overlay.blue = blue;
   state.hud_overlay.expiry_ms =
-      SDL_GetTicks() + duration_frames * kOverlayTickMs;
+      state.gameplay_now_ms + duration_frames * kOverlayTickMs;
 }
 
 // Duration-only overload: see hud_overlay.hpp.
@@ -54,10 +54,10 @@ void NovaHud_ShowCachedOverlayMessage(GameState &state, bool extend) {
   // original replays the same buffered text after a refresh pass).
   if (extend) {
     const std::uint64_t lifetime =
-        state.hud_overlay.expiry_ms > SDL_GetTicks()
-            ? state.hud_overlay.expiry_ms - SDL_GetTicks()
+        state.hud_overlay.expiry_ms > state.gameplay_now_ms
+            ? state.hud_overlay.expiry_ms - state.gameplay_now_ms
             : 250U * kOverlayTickMs;
-    state.hud_overlay.expiry_ms = SDL_GetTicks() + lifetime;
+    state.hud_overlay.expiry_ms = state.gameplay_now_ms + lifetime;
   }
 }
 
@@ -72,7 +72,7 @@ void NovaHud_ClearOverlayMessage(GameState &state) {
 
 void NovaHud_TickOverlay(GameState &state) {
   if (state.hud_overlay.active && state.hud_overlay.expiry_ms != 0 &&
-      SDL_GetTicks() >= state.hud_overlay.expiry_ms) {
+      state.gameplay_now_ms >= state.hud_overlay.expiry_ms) {
     NovaHud_ClearOverlayMessage(state);
   }
 }

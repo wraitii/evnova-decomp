@@ -516,6 +516,25 @@ void ProbeServer::HandleRequest(const std::string &method,
       body_out = "probe: missing cmd";
       return;
     }
+    if (*cmd == "accelerate") {
+      const bool enabled = JsonBoolField(body, "enabled").value_or(true);
+      const int multiplier = JsonIntField(body, "speed_multiplier").value_or(1);
+      if (multiplier < 1 || multiplier > 1000) {
+        status = "400 Bad Request";
+        body_out = "probe: speed_multiplier must be between 1 and 1000";
+        return;
+      }
+      acceleration_requested_.store(enabled);
+      speed_multiplier_requested_.store(static_cast<std::uint32_t>(multiplier));
+      acceleration_request_pending_.store(true);
+      sync_cv_.notify_all();
+      status = "200 OK";
+      content_type = "application/json";
+      body_out = std::string{"{\"ok\":true,\"accelerated\":"} +
+                 (enabled ? "true" : "false") + ",\"speed_multiplier\":" +
+                 std::to_string(enabled ? multiplier : 1) + "}";
+      return;
+    }
     if (*cmd == "pause") {
       paused_.store(true);
     } else if (*cmd == "resume") {
@@ -529,7 +548,7 @@ void ProbeServer::HandleRequest(const std::string &method,
       quit_requested_.store(true);
     } else {
       status = "400 Bad Request";
-      body_out = "probe: unknown cmd (pause|resume|step|quit)";
+      body_out = "probe: unknown cmd (pause|resume|step|accelerate|quit)";
       return;
     }
     sync_cv_.notify_all();
@@ -649,10 +668,11 @@ void ProbeServer::RunJobsLocked() {
   }
 }
 
-void ProbeServer::Pump() {
+bool ProbeServer::Pump() {
   if (!running_.load()) {
-    return;
+    return false;
   }
+  bool waited_while_paused = false;
   {
     std::unique_lock lock(sync_);
     // Inject queued synthetic key events (the modal-loop channel).
@@ -663,6 +683,7 @@ void ProbeServer::Pump() {
     // Pause latch: sleep here (still servicing requests) until resumed or a
     // step budget is granted. Stepping counts frames in OnPresent.
     while (paused_.load() && step_remaining_.load() == 0 && running_.load()) {
+      waited_while_paused = true;
       RunJobsLocked();
       sync_cv_.wait_for(lock, std::chrono::milliseconds(50));
     }
@@ -678,6 +699,7 @@ void ProbeServer::Pump() {
       latch();
     }
   }
+  return waited_while_paused;
 }
 
 void ProbeServer::OnPresent(SDL_Renderer *renderer) {
@@ -731,6 +753,16 @@ void ProbeServer::OnPresent(SDL_Renderer *renderer) {
 bool ProbeServer::VirtualKey(SDL_Scancode scancode) const {
   const std::lock_guard lock(keys_mutex_);
   return virtual_keys_.count(scancode) != 0;
+}
+
+bool ProbeServer::ConsumeAccelerationRequest(bool &enabled,
+                                             std::uint32_t &speed_multiplier) {
+  if (!acceleration_request_pending_.exchange(false)) {
+    return false;
+  }
+  enabled = acceleration_requested_.load();
+  speed_multiplier = speed_multiplier_requested_.load();
+  return true;
 }
 
 void ProbeServer::SetStateProvider(

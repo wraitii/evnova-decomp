@@ -166,7 +166,8 @@ void Stub_AiRoutines(GameState &state, float elapsed_ticks) {
   const std::int16_t current_system = state.player.current_system_id;
   // now_ms backs the AI mode/formation timers and must be monotonic across
   // frames; the original reads its global millisecond tick source here.
-  const std::uint32_t now_ms = SDL_GetTicks();
+  const std::uint32_t now_ms =
+      static_cast<std::uint32_t>(state.gameplay_now_ms);
   // Frame_TickSystems (0x004186b0) scope-6 leader-flag pass: snapshot AI
   // targets, reacquire dead leaders, and refresh the +0xC0/+0xC1/+0xC2
   // leader bytes that gate the per-frame escort formation updates.
@@ -226,7 +227,8 @@ void Stub_TickReactionsAndNpcSpawns(GameState &state,
   while (state.npc_maintenance_raw_tick_accumulator >= 1.0F) {
     state.npc_maintenance_raw_tick_accumulator -= 1.0F;
     // The original's AI mode timers use a global millisecond tick source.
-    const std::uint32_t now_ms = SDL_GetTicks();
+    const std::uint32_t now_ms =
+        static_cast<std::uint32_t>(state.gameplay_now_ms);
     Mission_TickShipInteractionReactions(state, now_ms);
     NovaFrame_UpdateCombatChatter(state, audio);
     NovaWeapon_TallyInboundWeaponThreat(state);
@@ -434,7 +436,11 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
       // in the containing scope. Keep the wreck's current-frame coast before
       // any finale deactivates it.
       NovaShip_IntegrateNpcMovement(
-          state, ship, *cls, elapsed_ticks, SDL_GetTicks());
+          state,
+          ship,
+          *cls,
+          elapsed_ticks,
+          static_cast<std::uint32_t>(state.gameplay_now_ms));
       ship.destruction_raw_tick_accumulator +=
           std::max(0.0F, RawSpaceflightCallTicks(elapsed_ticks));
       // Clean-room scheduler: the accumulator does not model an original
@@ -459,7 +465,11 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
     }
 
     NovaShip_IntegrateNpcMovement(
-        state, ship, *cls, elapsed_ticks, SDL_GetTicks());
+        state,
+        ship,
+        *cls,
+        elapsed_ticks,
+        static_cast<std::uint32_t>(state.gameplay_now_ms));
 
     NovaWeapon_TickNpcWeaponBanks(ship, elapsed_ticks);
     // Ship_HandleShip hands a latched active bank to Weapon_FireShipWeapons.
@@ -467,7 +477,10 @@ void Stub_HandleShips(GameState &state, float elapsed_ticks) {
 
     // Mission-hail ladder (0x00433050 inline block, after the shield/armor
     // recharge in the original's ordering).
-    Mission_TickShipHailLadder(state, ship, SDL_GetTicks() * 60 / 1000);
+    Mission_TickShipHailLadder(
+        state,
+        ship,
+        static_cast<std::uint32_t>(state.gameplay_now_ms * 60 / 1000));
 
     // The separate ionization speed clamp remains deferred.
     TickIonizationDecay(state, ship, elapsed_ticks);
@@ -854,7 +867,7 @@ void PlayerTick_JumpArrivalBlock(SdlPlatform &platform,
   NovaSystem_RestoreMissionFleets(state,
                                   state.player.current_system_id,
                                   /*copy_player_heading=*/false,
-                                  SDL_GetTicks());
+                                  platform.gameplay_ticks_ms());
   // Offering rolls redraw on every system arrival (Stellar_ProcessTravel
   // AndLanding 0x00458802: roll 1..100 per definition, then re-evaluate
   // the mission lists).
@@ -1076,7 +1089,8 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
                     destination);
       return LandCommandResult::kContinue;
     }
-    PlayerTick_JumpArrivalBlock(platform, view, state, SDL_GetTicks());
+    PlayerTick_JumpArrivalBlock(
+        platform, view, state, platform.gameplay_ticks_ms());
     return LandCommandResult::kBlockedFrame;
   }
   LandedContext ctx;
@@ -1105,6 +1119,10 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
       // tick, stat-modifier jitter/reroll, autosave, random launch
       // heading, travel-selection reset and the shot wipe.
       Stellar_Launch(state, ctx.stellar_id);
+      // The docked modal advances the probe's virtual frame clock. Refresh
+      // the snapshot before arming the departure overlay so its deadline is
+      // relative to the actual launch instant rather than modal entry.
+      state.gameplay_now_ms = platform.gameplay_ticks_ms();
       // Stellar_RunDockAndLaunchSequence tail (0x00456323): the "leaving
       // <stellar> on <date>" overlay shows as the player departs.
       NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
@@ -1388,6 +1406,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // the travel/landing transitions). We spawn once when the mode starts, then
   // advance it per frame below.
   view.SpawnAmbientStars(platform, state);
+  state.gameplay_now_ms = platform.gameplay_ticks_ms();
   NovaFrame_TickSystems(state,
                         audio,
                         /*run_full_tick=*/true,
@@ -1408,7 +1427,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   float prev_y = state.player.pos_y;
   // Real frame-time basis for the per-frame ambient/stellar animation steppers
   // (the original accumulates _g_avg_frame_time_ms).
-  std::uint64_t prev_tick_ms = SDL_GetTicks();
+  state.gameplay_now_ms = platform.gameplay_ticks_ms();
+  std::uint64_t prev_tick_ms = state.gameplay_now_ms;
   PlayerTravelSelectionLatches travel_selection_latches;
   travel_selection_latches.prev_travel_stellar =
       state.travel.selected_stellar_id;
@@ -1429,16 +1449,19 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   // site calls resync_frame_clock() so the wall-clock gap is never integrated
   // as one giant flight frame (ship integration, ambient stars, shield
   // recharge and the reticle decay all scale by frame_time_ms).
-  const auto resync_frame_clock = [&] { prev_tick_ms = SDL_GetTicks(); };
+  const auto resync_frame_clock = [&] {
+    prev_tick_ms = platform.gameplay_ticks_ms();
+    state.gameplay_now_ms = prev_tick_ms;
+  };
   // Route-map overlay session assets (Ghidra FUN_004ab9d4 creates the
   // surface + CICNs once at flight-interface setup; the port caches the
   // marker textures + label font for the whole flight loop).
   RouteMapView route_map_view;
   route_map_view.Load(platform);
   while (!platform.quit_requested() && !returning_to_menu) {
-    const std::uint64_t now_ms = SDL_GetTicks();
-    const float frame_time_ms =
-        std::max(1.0F, static_cast<float>(now_ms - prev_tick_ms));
+    const std::uint64_t now_ms = platform.gameplay_ticks_ms();
+    state.gameplay_now_ms = now_ms;
+    const float frame_time_ms = static_cast<float>(now_ms - prev_tick_ms);
     prev_tick_ms = now_ms;
     // Port stand-in for NovaTime_GetTickCount60Hz's g_frame_tick_count_60hz
     // (see GameState::tick_60hz): re-derived from the wall clock each frame.
@@ -1647,7 +1670,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
            .order_hold_held = escort_held(escort_key[0x32]),
            .order_formation_held = escort_held(escort_key[0x33]),
            .arm_modifier_held = escort_held(0x38)},
-          SDL_GetTicks() * 60 / 1000);
+          state.gameplay_now_ms * 60 / 1000);
     }
     // Face-target command (Ghidra 0x0044aa70 block 0x0044c0b1 -> 0x0044c18a,
     // binding slot 7; the port binds R -- see FlightInput::face_target):
@@ -2045,7 +2068,9 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
               state.mission_speaker_ship_slot = -1;
               if (result == MissionOfferResult::kAccepted) {
                 (void)Mission_HandleAcceptedShipInteraction(
-                    state, ship_target, SDL_GetTicks());
+                    state,
+                    ship_target,
+                    static_cast<std::uint32_t>(state.gameplay_now_ms));
               }
               // The mission interaction modal blocked the loop; freeze game
               // time across it.
@@ -2207,7 +2232,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // centered effect 0x32).
     state.screen_flash_intensity =
         std::max(0.0F, state.screen_flash_intensity - frame_time_ms / 60.0F);
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
 }
 
@@ -4084,7 +4109,8 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
                 "not reconstructed)");
 
   // Abort every active mission (Mission_ClearMisnSlotAssignments(slot, 1)).
-  const std::uint32_t now_ms = SDL_GetTicks();
+  const std::uint32_t now_ms =
+      static_cast<std::uint32_t>(state.gameplay_now_ms);
   for (std::size_t slot = 0; slot < state.active_mission_runtime_flags.size();
        ++slot) {
     if (state.active_mission_runtime_flags[slot].is_active) {
