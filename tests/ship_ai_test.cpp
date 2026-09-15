@@ -714,7 +714,7 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   const auto *stellar = state.scenario.Stellar(stellar_id);
   REQUIRE(stellar != nullptr);
 
-  game::NovaAi_EnterState15JumpOutToSystem(state, ship, stellar_id);
+  game::NovaAi_EnterState15EmergeFromHypergate(state, ship, stellar_id);
 
   CHECK(ship.ai_state_code == 0x15);
   CHECK(ship.ai_control_mode == 0);
@@ -759,7 +759,8 @@ TEST_CASE("state 0x15 hypergate emergence preserves its slower arrival speed") {
   game::Ship player_follower;
   player_follower.ship_class_id = 0;
   player_follower.squad_leader_ship_slot = 0;
-  game::NovaAi_EnterState15JumpOutToSystem(state, player_follower, stellar_id);
+  game::NovaAi_EnterState15EmergeFromHypergate(
+      state, player_follower, stellar_id);
   CHECK(player_follower.ai_desired_speed == Catch::Approx(-15.0F));
 }
 

@@ -283,7 +283,7 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
 
   // The Shuttle's stock bank is Light Blaster {count 1, ammo -1}; the NPC
   // selector must accept the unguided mode and preserve the unlimited sentinel.
-  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  NovaAi_EscortFireAtUnprovokedTarget(state, npc);
   REQUIRE(npc.active_weapon_bank_slot == 0);
   REQUIRE(npc.ai_fire_trigger_latch != 0);
 
@@ -378,7 +378,7 @@ TEST_CASE("NPC energy weapons do not need a secondary ammo counter",
   npc.armor_points = 100.0F;
   npc.shield_points = 100.0F;
 
-  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  NovaAi_EscortFireAtUnprovokedTarget(state, npc);
   REQUIRE(npc.active_weapon_bank_slot == 0);
   // The original treats the Light Blaster's ammo_type == -1 as an energy /
   // unlimited bank; a zero secondary counter must not suppress firing.
@@ -396,10 +396,10 @@ TEST_CASE("brave-trader weapon selection survives the post-state refresh",
   npc.active_weapon_bank_slot = 17;
   npc.ai_fire_trigger_latch = 1;
 
-  // Ship_UpdateAutoWeaponSelectionFromTarget returns immediately for original
+  // Ship_EscortFireAtUnprovokedTarget returns immediately for original
   // AI behaviors below 5. Behaviors 1/2 select banks in ApplyShipAiControls;
   // the clean-room 3/4 refresh bridge must not erase that pending volley.
-  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  NovaAi_EscortFireAtUnprovokedTarget(state, npc);
 
   CHECK(npc.active_weapon_bank_slot == 17);
   CHECK(npc.ai_fire_trigger_latch == 1);
@@ -436,7 +436,7 @@ TEST_CASE("Fed Destroyer selects and fires its long-range missile",
   npc.pos_x = 0.0F;
   npc.pos_y = 1200.0F;
 
-  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  NovaAi_EscortFireAtUnprovokedTarget(state, npc);
   REQUIRE(npc.active_weapon_bank_slot == 6); // IR Missile, resource 0x86.
   REQUIRE(npc.ai_fire_trigger_latch != 0);
 
@@ -482,7 +482,7 @@ TEST_CASE("Abomination can select and fire its pulse cannon", "[weapon][npc]") {
   npc.pos_y = 0.0F;
   npc.heading = 0.0F;
 
-  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  NovaAi_EscortFireAtUnprovokedTarget(state, npc);
   // The turret selector must keep the pulse cannon distinct from the loaded
   // mode-1 hailgun; the original does not let the latter win by damage score.
   REQUIRE(npc.active_weapon_bank_slot == 34);
@@ -517,7 +517,7 @@ TEST_CASE("destroyed NPCs neither select nor fire a weapon bank",
   state.player.ship_class_id = 0;
   state.player.current_system_id = 0;
 
-  NovaAi_UpdateAutoWeaponSelectionFromTarget(state, npc);
+  NovaAi_EscortFireAtUnprovokedTarget(state, npc);
   CHECK(npc.active_weapon_bank_slot == -1);
   CHECK(npc.ai_fire_trigger_latch == 0);
 

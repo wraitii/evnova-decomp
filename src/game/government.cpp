@@ -233,12 +233,11 @@ bool NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
          (ship.ship_instance_id == 0 || ship.squad_leader_ship_slot == 0);
 }
 
-// Ghidra 0x0040fd20 Government_IsShipEligibleForGovernmentAid. See the header
+// Ghidra 0x0040fd20 Ship_DoesShipLikePlayer. See the header
 // for the branch description. The mission-fleet branch (random-encounter
 // fleet defs) and the GovtDef +0x83 byte gate are deferred: the fleet defs
 // are not modelled, and the +0x83 byte has no clean-room field (TODO(decomp)).
-bool NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
-                                                   const Ship &ship) {
+bool NovaShip_DoesShipLikePlayer(const GameState &state, const Ship &ship) {
   if (NovaAiShip_ShouldKeepPressingTarget(state, ship)) {
     return false;
   }
@@ -329,7 +328,7 @@ bool NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
     return true;
   }
 
-  // Ghidra Government_IsShipEligibleForGovernmentAid (0x0040fd20) also returns
+  // Ghidra Ship_DoesShipLikePlayer (0x0040fd20) also returns
   // true when GovtDef +0x83 is set -- the final gate of the eligibility
   // branch. TODO(decomp(0x0040fd20)) skipped: no clean-room +0x83 field, so
   // the gate is not reproduced.

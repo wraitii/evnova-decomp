@@ -108,10 +108,10 @@ bool NovaTargeting_ShipAtCloakVisibilityThreshold(const Ship &ship) {
 }
 
 // ---------------------------------------------------------------------------
-// Ship_IsShipEligibleForDistressCall (0x0040f6d0).
+// Ship_IsThreatToPlayerSquad (0x0040f6d0).
 // ---------------------------------------------------------------------------
-bool NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
-                                                 const Ship &ship) {
+bool NovaTargeting_IsThreatToPlayerSquad(const GameState &state,
+                                         const Ship &ship) {
   if (!ship.is_active) {
     return false;
   }
@@ -160,12 +160,12 @@ bool NovaTargeting_IsShipAcquirableAsTarget(const GameState &state,
   }
   if (acquirer.ship_instance_id == 0) {
     // Player branch: government policy flag 0 (the aggro gate) or the
-    // candidate is eligible for a distress call.
+    // candidate is a threat to the player squad.
     if (NovaGovernment_GetPolicyFlag(
             state.scenario, candidate.faction_or_government_id, 0)) {
       return true;
     }
-    return NovaTargeting_IsShipEligibleForDistressCall(state, candidate);
+    return NovaTargeting_IsThreatToPlayerSquad(state, candidate);
   }
   // NPC branch: the candidate is the acquirer's primary target (and the
   // acquirer is in an attacking state), or another active ship targets the
@@ -403,7 +403,7 @@ NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state) {
     // Hostile = distress-eligible, or locked on its primary target in AI
     // state 4 while that primary is an active ship targeting the player
     // (Ship_IsShipLockedOnAttackerInAiState0x04 0x004102b0).
-    bool hostile = NovaTargeting_IsShipEligibleForDistressCall(state, ship);
+    bool hostile = NovaTargeting_IsThreatToPlayerSquad(state, ship);
     if (!hostile) {
       const std::int16_t t = ship.primary_target_ship_slot;
       if (t >= 0 && t < static_cast<std::int16_t>(GameState::kMaxShips)) {

@@ -18,7 +18,7 @@ mission_fleet_slot)` is the single entry point. Ten call sites:
 
 | code | meaning | call sites | `mission_fleet_slot` |
 |---|---|---|---|
-| 0 | smuggling detected (`Government_HandlePlayerFactionExtortion`) | `0x00401A1D`, `0x00402399` | `-1` |
+| 0 | smuggling detected (`Ship_ScanPlayerForContraband`) | `0x00401A1D`, `0x00402399` | `-1` |
 | 1 | ship **disabled** (`Ship_IsShipDisabled`) | `0x00419721` | victim's `+0xC8D2` |
 | 2 | **boarded** | `0x0045A85F` | victim's `+0xC8D2` |
 | 3 | **killed** / stellar destroyed / attack-stellar | `0x0041976F`, `0x004381EF` (×10), `0x00453670`, `0x00480E4B`/`0x00480F9B`/`0x0048102B` (×5) | kill victim's `+0xC8D2`; stellar/attack sites `-1` |

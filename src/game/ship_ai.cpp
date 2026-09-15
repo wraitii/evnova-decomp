@@ -259,10 +259,10 @@ void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship) {
   // clean-room Ship yet; allocation already supplies its zero default.
 }
 
-// Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem.
-void NovaAi_EnterState15JumpOutToSystem(GameState &state,
-                                        Ship &ship,
-                                        std::int16_t stellar_id) {
+// Ghidra 0x004159e0 Ship_EnterShipAiState0x15_EmergeFromHypergate.
+void NovaAi_EnterState15EmergeFromHypergate(GameState &state,
+                                            Ship &ship,
+                                            std::int16_t stellar_id) {
   ship.ai_state_code = 0x15;
   ship.ai_control_mode = 0;
   ship.primary_target_ship_slot = -1;
@@ -357,7 +357,7 @@ bool NovaAi_CompleteNpcJump(GameState &state, Ship &ship) {
     ship.pos_x = static_cast<float>(destination->pos_x);
     ship.pos_y = static_cast<float>(destination->pos_y);
   }
-  NovaAi_EnterState15JumpOutToSystem(state, ship, entry_stellar);
+  NovaAi_EnterState15EmergeFromHypergate(state, ship, entry_stellar);
   return true;
 }
 
@@ -992,7 +992,7 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
 // Ghidra 0x00411540 plus the weapon-bank chooser at 0x0040ce00. This is the
 // target-validity side faithfully; bank ranking is the available clean-room
 // subset (mode, ammo, cooldown, target capability, range, and damage class).
-void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship) {
+void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship) {
   // Combat behaviors 3/4 acquire hostile contacts directly. The original's
   // post-state weapon refresh still arms their selected bank; restricting
   // this to escort/mission behaviors (>4) left ordinary hostile NPCs with no
@@ -1439,7 +1439,7 @@ int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
     }
     candidate_ratio = clamp_ratio(candidate_ratio);
     if (support > 0 &&
-        NovaAiShip_HasIncomingDistressSupport(state, candidate, ship)) {
+        NovaAiShip_IsThreatenedByEnemyOfShip(state, candidate, ship)) {
       // The original doubles support in a 16-bit short (ADD EDI,EDI then
       // MOVSX at 0x00411a25) and sign-extends the running total's low 16 bits
       // before each add (MOVSX EAX,DI at 0x00411a1a).
@@ -3306,7 +3306,7 @@ void NovaAi_ApplyControls(GameState &state,
     // and importantly does NOT touch ai_desired_speed. The entry reset above
     // only rewrites a non-negative desired to eff_max_speed; a negative value
     // (e.g. state-15's -30 or -15 emergence speed seeded by
-    // NovaAi_EnterState15JumpOutToSystem) survives the hold intact and is
+    // NovaAi_EnterState15EmergeFromHypergate) survives the hold intact and is
     // handed to the mode-0x0a arrival slowdown, which keeps an already-negative
     // value. Clobbering it here made gate-emergence ships reseed to -50 and
     // fly ~1.67x too fast / ~2.8x too far (Ghidra 0x00408150 mode 0 has no
@@ -3421,7 +3421,7 @@ void NovaAi_ApplyControls(GameState &state,
     } else {
       ship.ai_forward_thrust_cmd = -eff_thrust * kMode1SlowThrustFactor;
     }
-    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+    NovaAi_EscortFireAtUnprovokedTarget(state, ship);
     break;
   }
 
@@ -4000,7 +4000,7 @@ void NovaAi_ApplyControls(GameState &state,
       ship.ai_forward_thrust_cmd = eff_thrust;
       ship.ai_desired_speed = 0.0F;
     }
-    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+    NovaAi_EscortFireAtUnprovokedTarget(state, ship);
     break;
   }
 
@@ -4059,7 +4059,7 @@ void NovaAi_ApplyControls(GameState &state,
         ship.ai_desired_speed = max_speed * 0.5F;
       }
     }
-    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+    NovaAi_EscortFireAtUnprovokedTarget(state, ship);
     break;
   }
 
@@ -4144,7 +4144,7 @@ void NovaAi_ApplyControls(GameState &state,
         ship.vel_y = target.vel_y + rel_y * kMode1Damp;
       }
     }
-    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+    NovaAi_EscortFireAtUnprovokedTarget(state, ship);
     break;
   }
 
@@ -4556,13 +4556,13 @@ void NovaAi_UpdateShipAI(GameState &state,
       // state 4.
       NovaAi_UpdateBehavior0x03(state, ship, now_ms);
     } else if (behavior > 4) {
-      // Ship_UpdateShipAssistResponseBehavior (0x004048a0), now ported as
-      // NovaAi_UpdateAssistResponseBehavior (replaces the former force-state-10
+      // Ship_UpdateEscortAI (0x004048a0), now ported as
+      // NovaAi_UpdateEscortAI (replaces the former force-state-10
       // divergence glue; see that function for the deferred slices). The
       // State 9/0xf exclusions live inside the supervisor, matching the
       // original. A valid state-8 arrival never reaches this branch because
       // its -999 station-hold sentinel takes the dispatcher arm above.
-      NovaAi_UpdateAssistResponseBehavior(state, ship, now_ms);
+      NovaAi_UpdateEscortAI(state, ship, now_ms);
     }
   }
 
@@ -4572,11 +4572,11 @@ void NovaAi_UpdateShipAI(GameState &state,
   // _g_avg_frame_time_ms EMA (about 1.0 at 30 Hz).
   NovaAi_UpdateShipState(state, ship, now_ms, elapsed_ticks);
   NovaAi_ApplyControls(state, ship, elapsed_ticks, now_ms);
-  // Ship_UpdateAutoWeaponSelectionFromTarget (0x00411540) is a post-state
+  // Ship_EscortFireAtUnprovokedTarget (0x00411540) is a post-state
   // refresh. It must run after ApplyControls because that bridge clears the
   // per-frame fire latch before the bank chooser arms it.
   if (ship.ai_state_code != 0x12) {
-    NovaAi_UpdateAutoWeaponSelectionFromTarget(state, ship);
+    NovaAi_EscortFireAtUnprovokedTarget(state, ship);
   }
 }
 
@@ -4684,14 +4684,12 @@ namespace {
 
 } // namespace
 
-// Ghidra 0x004048a0 Ship_UpdateShipAssistResponseBehavior. Per-frame supervisor
+// Ghidra 0x004048a0 Ship_UpdateEscortAI. Per-frame supervisor
 // for behavior > 4 ships (carried fighters = 5, escorts = 6): keeps the squad
 // attached to its leader, decodes the escort command (player group command /
 // sub-leader mirror), and arms the leader-jump-prep sync that enters AI state
 // 0x0B. Deferred slices are marked TODO(decomp) inline.
-void NovaAi_UpdateAssistResponseBehavior(GameState &state,
-                                         Ship &ship,
-                                         std::uint32_t now_ms) {
+void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
   (void)now_ms;
   if (ship.ai_state_code == 0x16) {
     return; // destroyed: the destruction package owns this ship
@@ -5151,9 +5149,8 @@ bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
   return false;
 }
 
-// Ghidra 0x0040fc00 Ship_IsShipEligibleForCommAidInteraction.
-bool NovaAiShip_IsShipEligibleForCommAidInteraction(const GameState &state,
-                                                    const Ship &ship) {
+// Ghidra 0x0040fc00 Ship_IsThreatened.
+bool NovaAiShip_IsThreatened(const GameState &state, const Ship &ship) {
   if (!ship.is_active || NovaAiShip_IsDisabled(state, ship)) {
     return false;
   }
@@ -5266,32 +5263,32 @@ bool NovaAiShip_IsShipInNonIdleAiState(const Ship &ship) {
   return s != 0 && s != 2 && s != 1 && s != 0x14 && s != 7;
 }
 
-// Ghidra 0x00410060 Ship_AreAnyShipsEligibleForDistressCall.
-bool NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state) {
+// Ghidra 0x00410060 Ship_IsAnyShipThreatToPlayerSquad.
+bool NovaAi_IsAnyShipThreatToPlayerSquad(const GameState &state) {
   for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
     const Ship &other = state.ShipAt(j);
-    if (NovaTargeting_IsShipEligibleForDistressCall(state, other)) {
+    if (NovaTargeting_IsThreatToPlayerSquad(state, other)) {
       return true;
     }
   }
   return false;
 }
 
-// Ghidra 0x004101d0 Ship_CanShipRespondToDistressCall.
-bool NovaAiShip_CanShipRespondToDistressCall(const GameState &state,
-                                             const Ship &responder,
-                                             const Ship &distressed) {
-  if (responder.ship_instance_id == distressed.ship_instance_id) {
+// Ghidra 0x004101d0 Ship_IsEnemyOfShip.
+bool NovaAiShip_IsEnemyOfShip(const GameState &state,
+                              const Ship &ship,
+                              const Ship &other) {
+  if (ship.ship_instance_id == other.ship_instance_id) {
     return false;
   }
-  if (!responder.is_active || !distressed.is_active) {
+  if (!ship.is_active || !other.is_active) {
     return false;
   }
-  if (distressed.pers_def_slot == 0x3ff) {
+  if (other.pers_def_slot == 0x3ff) {
     return false;
   }
-  const std::int16_t govt_a = responder.faction_or_government_id;
-  const std::int16_t govt_b = distressed.faction_or_government_id;
+  const std::int16_t govt_a = ship.faction_or_government_id;
+  const std::int16_t govt_b = other.faction_or_government_id;
   if (govt_a != -1 && govt_b != -1) {
     if (govt_a == govt_b) {
       return false;
@@ -5300,7 +5297,7 @@ bool NovaAiShip_CanShipRespondToDistressCall(const GameState &state,
             state.scenario, govt_a, govt_b)) {
       return true;
     }
-    // A xenophobic `distressed` government admits any non-allied responder
+    // A xenophobic `other` government treats any non-allied ship as an enemy
     // (literal port of the decomp's goto LAB_0041029d).
     if ((state.scenario.governments[static_cast<std::size_t>(govt_b)]
              .flags_primary &
@@ -5312,9 +5309,9 @@ bool NovaAiShip_CanShipRespondToDistressCall(const GameState &state,
   return false;
 }
 
-// Ghidra 0x004100a0 Ship_HasShipDistressResponder.
-bool NovaAiShip_HasShipDistressResponder(const GameState &state,
-                                         const Ship &ship) {
+// Ghidra 0x004100a0 Ship_IsPlayerThreatenedByEnemyOfShip.
+bool NovaAiShip_IsPlayerThreatenedByEnemyOfShip(const GameState &state,
+                                                const Ship &ship) {
   for (std::size_t j = 1; j < GameState::kMaxShips; ++j) {
     const Ship &other = state.ShipAt(j);
     if (!other.is_active ||
@@ -5322,19 +5319,19 @@ bool NovaAiShip_HasShipDistressResponder(const GameState &state,
       continue;
     }
     if (NovaAiShip_ShouldKeepPressingTarget(state, other) &&
-        NovaAiShip_CanShipRespondToDistressCall(state, ship, other)) {
+        NovaAiShip_IsEnemyOfShip(state, ship, other)) {
       return true;
     }
   }
   return false;
 }
 
-// Ghidra 0x00410110 Ship_HasIncomingDistressSupportForShip.
-bool NovaAiShip_HasIncomingDistressSupport(const GameState &state,
-                                           const Ship &ship,
-                                           const Ship &context_ship) {
+// Ghidra 0x00410110 Ship_IsThreatenedByEnemyOfShip.
+bool NovaAiShip_IsThreatenedByEnemyOfShip(const GameState &state,
+                                          const Ship &ship,
+                                          const Ship &context_ship) {
   if (ship.ship_instance_id == 0) {
-    return NovaAiShip_HasShipDistressResponder(state, context_ship);
+    return NovaAiShip_IsPlayerThreatenedByEnemyOfShip(state, context_ship);
   }
   if (NovaAiShip_ShouldKeepPressingTarget(state, ship)) {
     return true;
@@ -5347,8 +5344,7 @@ bool NovaAiShip_HasIncomingDistressSupport(const GameState &state,
       continue;
     }
     if (NovaTargeting_IsShipAcquirableAsTarget(state, candidate, ship) &&
-        NovaAiShip_CanShipRespondToDistressCall(
-            state, context_ship, candidate)) {
+        NovaAiShip_IsEnemyOfShip(state, context_ship, candidate)) {
       return true;
     }
   }
@@ -5396,7 +5392,7 @@ namespace {
     return false;
   }
   if (require_distress) {
-    return NovaTargeting_IsShipEligibleForDistressCall(state, candidate);
+    return NovaTargeting_IsThreatToPlayerSquad(state, candidate);
   }
   return candidate.primary_target_ship_slot == 0 &&
          (candidate.ai_state_code == 3 || candidate.ai_state_code == 4);

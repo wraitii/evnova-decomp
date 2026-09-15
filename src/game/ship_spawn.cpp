@@ -393,7 +393,7 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
     const Stellar *stellar = state.scenario.Stellar(entry_stellar);
     ship.pos_x = static_cast<float>(stellar->pos_x);
     ship.pos_y = static_cast<float>(stellar->pos_y);
-    NovaAi_EnterState15JumpOutToSystem(state, ship, entry_stellar);
+    NovaAi_EnterState15EmergeFromHypergate(state, ship, entry_stellar);
   } else {
     PlaceRandomPolarSlowdown(state, ship);
   }
@@ -1075,7 +1075,7 @@ int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
     const Stellar *stellar = state.scenario.Stellar(entry_stellar);
     ship.pos_x = static_cast<float>(stellar->pos_x);
     ship.pos_y = static_cast<float>(stellar->pos_y);
-    NovaAi_EnterState15JumpOutToSystem(state, ship, entry_stellar);
+    NovaAi_EnterState15EmergeFromHypergate(state, ship, entry_stellar);
   } else {
     AddArrivalSlowdownVelocity(ship);
     NovaAi_EnterState8Slowdown(state, ship);

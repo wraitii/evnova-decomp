@@ -26,7 +26,7 @@
 //     the per-tick re-derivation of stellar system_id + is_available for the
 //     player's current system; the sprite-set bookkeeping is left to the view)
 //   Ship_IsShipCloakVisibilityThresholdActive    0x0046C7A0  cloak gate
-//   Ship_IsShipEligibleForDistressCall           0x0040F6D0  distress gate
+//   Ship_IsThreatToPlayerSquad           0x0040F6D0  distress gate
 //   Ship_IsShipAcquirableAsTarget                0x0040FAA0  acquire gate
 //   Ship_FindNextPlayerCycleTarget               0x00461BD0  ship cycle fwd
 //   Ship_FindPreviousPlayerCycleTarget           0x00461F60  ship cycle back
@@ -132,21 +132,18 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state);
 [[nodiscard]] bool
 NovaTargeting_ShipAtCloakVisibilityThreshold(const Ship &ship);
 
-// Ghidra 0x0040f6d0 Ship_IsShipEligibleForDistressCall: true when the ship
-// is an active, non-disabled combatant that could call for help -- not
-// coasting through a reversal (ai_maneuver_timer_ms <= 0), holding a primary
-// target that is either the player or a ship targeting the player, and not in
-// a retreat/disengage AI state (7,9,15,10,11,5,12,18). Used by the
-// nearest-hostile scan and the player target-acquisition predicate.
-[[nodiscard]] bool
-NovaTargeting_IsShipEligibleForDistressCall(const GameState &state,
-                                            const Ship &ship);
+// Ghidra 0x0040f6d0 Ship_IsThreatToPlayerSquad: true when the ship is an
+// active, non-disabled combatant, is not coasting through a reversal, targets
+// the player or a player-led ship, and is not in a retreat/disengage AI state
+// (7,9,15,10,11,5,12,18). Used by hostile scans and target acquisition.
+[[nodiscard]] bool NovaTargeting_IsThreatToPlayerSquad(const GameState &state,
+                                                       const Ship &ship);
 
 // Ghidra 0x0040faa0 Ship_IsShipAcquirableAsTarget: pairwise predicate for
 // whether `acquirer` should validly acquire `candidate` as a target. The
 // player branch (acquirer.ship_instance_id == 0) returns true when the
-// candidate's government policy flag 0 is set or the candidate is
-// distress-eligible; the NPC branch keeps the candidate when it is the
+// candidate's government policy flag 0 is set or the candidate threatens the
+// player squad; the NPC branch keeps the candidate when it is the
 // acquirer's primary target (or another active ship targets it while the
 // acquirer tracks that ship) and the acquirer is not in a disengage/retreat
 // AI state.

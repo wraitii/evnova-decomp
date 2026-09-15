@@ -79,7 +79,7 @@ NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
                                             const Stellar &stellar,
                                             std::int16_t stellar_id);
 
-// Ghidra 0x0040fd20 Government_IsShipEligibleForGovernmentAid. Whether the
+// Ghidra 0x0040fd20 Ship_DoesShipLikePlayer. Whether the
 // ship's government would send it to help the player when hailed: false when
 // the ship keeps pressing its own target; true when it is idle with no AI
 // target, or its government policy flag 0 is set, or it has no faction at all.
@@ -90,9 +90,8 @@ NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
 // negative, and hostile system governments admit aid under the same threshold
 // test. The mission-fleet branch (random-encounter fleet defs) and the
 // GovtDef +0x83 byte gate are deferred (TODO(decomp): not modelled).
-[[nodiscard]] bool
-NovaGovernment_IsShipEligibleForGovernmentAid(const GameState &state,
-                                              const Ship &ship);
+[[nodiscard]] bool NovaShip_DoesShipLikePlayer(const GameState &state,
+                                               const Ship &ship);
 
 // Ghidra 0x00413610 Government_TryTriggerGovtAssistanceEncounter.
 [[nodiscard]] bool NovaGovernment_TryTriggerAssistanceEncounter(

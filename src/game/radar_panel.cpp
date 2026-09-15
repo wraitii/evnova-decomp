@@ -73,7 +73,7 @@ SDL_Color Ship_RadarDisplayColor(const GameState &state, const Ship &ship) {
   if (NovaAiShip_IsDisabled(state, ship)) {
     return kIffShipFireRestricted;
   }
-  if (NovaTargeting_IsShipEligibleForDistressCall(state, ship)) {
+  if (NovaTargeting_IsThreatToPlayerSquad(state, ship)) {
     return kIffStellarHostile;
   }
   const std::int16_t squad_leader = ship.squad_leader_ship_slot;

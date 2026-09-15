@@ -142,7 +142,7 @@ Player ship targeting / selection (reconstructed in `src/game/targeting.cpp`, wi
 - `0x00461bd0` / `0x00461f60` `Ship_FindNextPlayerCycleTarget` / `_Previous` — backquote (`) / Shift+backquote cycle the player's primary target ship; the held include-combat modifier (Alt or the original's 'k' / 0x6b) restricts the cycle to combat-relevant ships (targeting the player or a player-targeting ship). Ported as `NovaTargeting_FindNext/PreviousPlayerCycleTarget`.
 - `0x00462bd0` `Ship_SelectNearestHostileCombatTarget` ('o') and `0x00462850` `Ship_SelectNearestEngagedTarget` (Alt+'o') — nearest combat-target scans, ported as `NovaTargeting_SelectNearest*`.
 - `0x0040faa0` `Ship_IsShipAcquirableAsTarget` — pairwise acquisition predicate (player + NPC branches), ported as `NovaTargeting_IsShipAcquirableAsTarget`.
-- `0x0046c7a0` `Ship_IsShipCloakVisibilityThresholdActive`, `0x0040f6d0` `Ship_IsShipEligibleForDistressCall`, and the two cloak-scanner outfit predicates (`0x0046c930` / `0x0046ca60`) — the shared visibility/eligibility helpers behind all of the above.
+- `0x0046c7a0` `Ship_IsShipCloakVisibilityThresholdActive`, `0x0040f6d0` `Ship_IsThreatToPlayerSquad`, and the two cloak-scanner outfit predicates (`0x0046c930` / `0x0046ca60`) — the shared visibility/eligibility helpers behind all of the above.
 - `0x00467e80` `Ship_CanMaintainCloakState` — ModType-17 cloak/resource predicate used both by the per-frame cloak drain path and by the preemptive-cloak-on-hit path; it is not surrender logic.
 - `0x004687b0` `Ship_IsShipFireRestricted` — separate fire-restriction/true-disabled predicate. Its armor branch uses the Bible's 33% threshold, or 10% when Ship Flags `0x0010` is set; this is distinct from cloak fade visibility.
 - Click-to-target ship picking (`SpaceflightView::PickShipAt`, sprite half-span hit test approximating the original's pixel-test pass) sets the primary target directly (the manual: "click on a ship to select it with your targeting sensors").
@@ -191,7 +191,7 @@ Traced from the handlers in `NovaGameplay_UpdateShipAiState` (0x00405590) and it
 | 7 | escort/follow primary at range (control 9), escort-arrive |
 | 8 | NPC arrival slowdown (control 0x0a); entered directly by ordinary polar arrivals and after the state-0x15 stellar-entry hold, runs a heading-aligned speed override from 50 (or the state-0x15 override of 30/15) downward in ~1.165-unit normalized-tick steps, normally exits to state 0 through `Ship_ResetShipPrimaryAndSecondaryTargets` at the effective-speed threshold, and can also be removed by the outer vacant-ship sweep |
 | 9 | escort-pursue primary (chase 0xb) |
-| 10 | assist/reaction behavior (from `UpdateShipAssistResponseBehavior`) |
+| 10 | assist/reaction behavior (from `Ship_UpdateEscortAI`) |
 | 0xb | hold-station / follow target (waits `ai_station_hold_timer`), entry to 5 jump if behavior 5 |
 | 0xc | engage target at turn radius w/ cloak-aware engagement |
 | 0xd | acquire disabled/boardable target (board state) |

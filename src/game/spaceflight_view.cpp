@@ -2014,8 +2014,7 @@ void SpaceflightView::DrawShipTargetReticle(SdlPlatform &platform,
         target.defense_fleet_home_stellar_id == -1) {
       frame_base = 8; // directly targeting the player
     } else {
-      frame_base =
-          NovaTargeting_IsShipEligibleForDistressCall(state, target) ? 0 : 4;
+      frame_base = NovaTargeting_IsThreatToPlayerSquad(state, target) ? 0 : 4;
     }
     // The original re-checks the chain AFTER the state branches and overrides
     // 0/4: targeting a ship that itself targets the player reads as 8.
