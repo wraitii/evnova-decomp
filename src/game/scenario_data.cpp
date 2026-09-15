@@ -1213,20 +1213,21 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   } else {
     s.government_id = static_cast<std::int16_t>(s.government_id - 0x80);
   }
-  for (std::size_t i = 0; i < s.dude_types.size(); ++i) {
-    s.dude_types[i] = ReadBeI16(bytes, 0x6e + i * 2);
-    s.dude_prob[i] = ReadBeI16(bytes, 0x7e + i * 2);
-    // Dude type id rebase/clamp (loader): < 0x80 or > 0x47e -> -1 else -0x80.
-    if (s.dude_types[i] < 0x80 || s.dude_types[i] > 0x47e) {
-      s.dude_types[i] = -1;
+  for (std::size_t i = 0; i < s.personality_slots.size(); ++i) {
+    s.personality_slots[i] = ReadBeI16(bytes, 0x6e + i * 2);
+    s.personality_spawn_probabilities[i] = ReadBeI16(bytes, 0x7e + i * 2);
+    // Person përs id rebase/clamp: < 0x80 or > 0x47e -> -1 else -0x80.
+    if (s.personality_slots[i] < 0x80 || s.personality_slots[i] > 0x47e) {
+      s.personality_slots[i] = -1;
     } else {
-      s.dude_types[i] = static_cast<std::int16_t>(s.dude_types[i] - 0x80);
+      s.personality_slots[i] =
+          static_cast<std::int16_t>(s.personality_slots[i] - 0x80);
     }
     // % Prob clamp to [0,100] (loader).
-    if (s.dude_prob[i] < 0) {
-      s.dude_prob[i] = 0;
-    } else if (s.dude_prob[i] > 100) {
-      s.dude_prob[i] = 100;
+    if (s.personality_spawn_probabilities[i] < 0) {
+      s.personality_spawn_probabilities[i] = 0;
+    } else if (s.personality_spawn_probabilities[i] > 100) {
+      s.personality_spawn_probabilities[i] = 100;
     }
   }
   // BkgndColor (s\xd8st +0x8e): three colour bytes (pure black when unset) that

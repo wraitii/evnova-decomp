@@ -1440,24 +1440,50 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
                                         std::int16_t system_id) {
   const System *sys =
       state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
-  if (sys == nullptr || sys->avg_ships <= 0) {
+  if (sys == nullptr) {
     return;
   }
+
+  const auto add_class_base_velocity = [&state](int slot) {
+    Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+    const ShipClass *cls = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (cls == nullptr) {
+      return;
+    }
+    const float base_speed = static_cast<float>(cls->speed) / 100.0F;
+    ship.vel_x = std::sin(ship.heading) * base_speed;
+    ship.vel_y = -std::cos(ship.heading) * base_speed;
+  };
+
+  const auto stop_if_derelict = [&state](int slot) {
+    Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
+    if (ship.faction_or_government_id < 0) {
+      return;
+    }
+    const Government *govt =
+        state.scenario.GovernmentByIndex(ship.faction_or_government_id);
+    if (govt == nullptr || (govt->flags_primary & 0x0800U) == 0U) {
+      return;
+    }
+    ship.vel_x = 0.0F;
+    ship.vel_y = 0.0F;
+    ship.speed = 0.0F;
+  };
 
   constexpr std::int32_t kDispatchRoll = 7;
   for (std::int16_t attempt = 0; attempt < sys->avg_ships; ++attempt) {
     int slot = -1;
     if (RandomBelow(state, kDispatchRoll) == 0) {
       // 1-in-7 personality branch (random arm): Pers_SpawnShipFromPersDef
-      // without the derelict exclusion. The original's forced arm (the per-
-      // system special-personality table at SystemDef +0x98) remains deferred
-      // (TODO(decomp): System pers-slot decode). The spawned personality is
-      // left at the allocator scatter and then reaches the same base-velocity
-      // tail as an ordinary dude.
+      // without the derelict exclusion. The spawned personality is left at
+      // the allocator scatter and then reaches the same base-velocity tail as
+      // an ordinary dude.
       const int pers_slot = NovaPers_SpawnShipFromPersDef(
           state, system_id, /*exclude_derelict_govts=*/false, -1);
       if (pers_slot >= 0) {
         slot = pers_slot;
+        stop_if_derelict(slot);
       }
     } else if (RandomBelow(state, kDispatchRoll) == 0) {
       // EncounterFleet_TrySpawnRandomEncounterFleet owns its lead/escort
@@ -1476,18 +1502,33 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
       continue;
     }
 
-    Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
-    const ShipClass *cls = state.scenario.Ship(
-        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-    if (cls == nullptr) {
+    add_class_base_velocity(slot);
+  }
+
+  // Ghidra 0x0041af90: the eight Person/% Prob pairs run after AvgShips,
+  // including in empty systems. The outer pass checks the përs resource and
+  // its ActiveOn expression before calling the forced-slot spawner.
+  for (std::size_t i = 0; i < sys->personality_slots.size(); ++i) {
+    const std::int16_t pers_slot = sys->personality_slots[i];
+    if (pers_slot < 0 || static_cast<std::size_t>(pers_slot) >=
+                             state.scenario.pers_defs.size()) {
       continue;
     }
-    // The clean-room keeps the Bible's raw speed scale (100 units per
-    // px/reference-tick), whereas g_ship_class_defs contains the runtime float
-    // used by Math_AddPolarVelocityWithClamp in the original.
-    const float base_speed = static_cast<float>(cls->speed) / 100.0F;
-    ship.vel_x = std::sin(ship.heading) * base_speed;
-    ship.vel_y = -std::cos(ship.heading) * base_speed;
+    const PersDef &pers =
+        state.scenario.pers_defs[static_cast<std::size_t>(pers_slot)];
+    if (!pers.present ||
+        !Mission_CheckReactionConditionSatisfied(
+            state, pers.availability_expression) ||
+        RandomBelow(state, 100) + 1 > sys->personality_spawn_probabilities[i]) {
+      continue;
+    }
+    const int spawned = NovaPers_SpawnShipFromPersDef(
+        state, system_id, /*exclude_derelict_govts=*/false, pers_slot);
+    if (spawned < 0) {
+      continue;
+    }
+    add_class_base_velocity(spawned);
+    stop_if_derelict(spawned);
   }
 }
 

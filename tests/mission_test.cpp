@@ -120,14 +120,14 @@ TEST_CASE(
         0x8123);
 }
 
-TEST_CASE("Tutorial 006 derelict uses the narrated Rautherion system") {
+TEST_CASE("Tutorial 006a preserves its shipped lore fleet") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
 
   constexpr std::int16_t kTutorial006aIndex = 755 - 0x80;
   REQUIRE(Mission_PopulateActiveSlot(state, kTutorial006aIndex, 0));
-  CHECK(state.active_missions[0].current_system_id == 166 - 0x80);
-  CHECK(state.active_missions[0].dude_def_index == 238 - 0x80);
+  CHECK(state.active_missions[0].current_system_id == 129 - 0x80);
+  CHECK(state.active_missions[0].dude_def_index == 155 - 0x80);
 }
 
 TEST_CASE("concrete mission ShipSyst decodes as a system resource id") {
