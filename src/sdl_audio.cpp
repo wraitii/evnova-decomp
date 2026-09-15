@@ -53,7 +53,8 @@ bool SdlAudio::StreamActive(SDL_AudioStream *stream) {
 void SdlAudio::Play(const NovaSoundData &sound,
                     float gain,
                     float playback_rate,
-                    int sound_key) {
+                    int sound_key,
+                    int priority_width) {
   if (!initialized_ || sound.samples.empty() || sound.sample_rate <= 0 ||
       sound.channel_count <= 0) {
     return;
@@ -81,9 +82,12 @@ void SdlAudio::Play(const NovaSoundData &sound,
     voices_.push_back(std::move(voice));
   }
 
-  // Find a voice that has drained its previous effect. If every voice is still
-  // busy, the original allocator returns 0 and the new cue is dropped rather
-  // than truncating an effect that is already playing.
+  // Find a voice that has drained its previous effect. When all 16 voices are
+  // active, Audio_AllocateVoiceSlot (0x004d6550) compares the descriptor width
+  // and channel level against its ordered voice table, replacing a weaker
+  // entry when the incoming cue wins. This keeps a nearby explosion audible
+  // during sustained weapon fire instead of letting the earliest fire sounds
+  // monopolize the table.
   Voice *voice = nullptr;
   for (std::size_t attempt = 0; attempt < voices_.size(); ++attempt) {
     Voice &candidate = voices_[(next_voice_ + attempt) % voices_.size()];
@@ -93,11 +97,34 @@ void SdlAudio::Play(const NovaSoundData &sound,
     }
   }
   if (voice == nullptr) {
-    return;
+    Voice *weakest_eligible = nullptr;
+    for (Voice &candidate : voices_) {
+      // Audio_AllocateVoiceSlot only inserts ahead of an active entry when
+      // neither descriptor dimension is lower. Width is not an absolute
+      // priority: a distant width-6 impact cannot evict a loud width-5
+      // weapon launch.
+      if (priority_width < candidate.priority_width ||
+          gain < candidate.source_gain) {
+        continue;
+      }
+      if (weakest_eligible == nullptr ||
+          candidate.priority_width < weakest_eligible->priority_width ||
+          (candidate.priority_width == weakest_eligible->priority_width &&
+           candidate.source_gain < weakest_eligible->source_gain)) {
+        weakest_eligible = &candidate;
+      }
+    }
+    if (weakest_eligible == nullptr) {
+      return;
+    }
+    voice = weakest_eligible;
+    SDL_ClearAudioStream(voice->stream.get());
   }
   next_voice_ =
       (static_cast<std::size_t>(voice - voices_.data()) + 1) % voices_.size();
   voice->key = sound_key;
+  voice->priority_width = std::max(1, priority_width);
+  voice->source_gain = std::max(0.0F, gain);
 
   const int playback_sample_rate =
       static_cast<int>(std::lround(sound.sample_rate * playback_rate));
@@ -110,7 +137,8 @@ void SdlAudio::Play(const NovaSoundData &sound,
     NovaLog::Warn("SDL audio stream format failed: {}", SDL_GetError());
     return;
   }
-  SDL_SetAudioStreamGain(voice->stream.get(), gain * master_gain_);
+  SDL_SetAudioStreamGain(voice->stream.get(),
+                         voice->source_gain * master_gain_);
   SDL_ClearAudioStream(voice->stream.get());
   const auto data = std::span<const std::byte>{
       reinterpret_cast<const std::byte *>(sound.samples.data()),
@@ -160,7 +188,8 @@ void SdlAudio::SetMasterVolume(float volume) {
   const float clamped = std::clamp(volume, 0.0F, 1.0F);
   master_gain_ = clamped;
   for (Voice &voice : voices_) {
-    SDL_SetAudioStreamGain(voice.stream.get(), master_gain_);
+    SDL_SetAudioStreamGain(voice.stream.get(),
+                           voice.source_gain * master_gain_);
   }
 }
 

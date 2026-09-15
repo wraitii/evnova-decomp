@@ -85,7 +85,6 @@ void NovaEffects_SpawnShipDestructionDebrisPuff(GameState &state,
     // The original orients the debris sprite by the resulting velocity's
     // bearing (Math_BearingFromPointToPoint on the post-scatter velocity).
     fragment.heading_radians = std::atan2(fragment.vel_x, -fragment.vel_y);
-    state.pending_destruction_sounds.push_back({ship.pos_x, ship.pos_y});
     return;
   }
 }

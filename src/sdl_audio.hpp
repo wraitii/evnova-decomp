@@ -41,7 +41,8 @@ public:
   void Play(const NovaSoundData &sound,
             float gain = 1.0F,
             float playback_rate = 1.0F,
-            int sound_key = -1);
+            int sound_key = -1,
+            int priority_width = 8);
   // Number of voices still playing (draining) with the given key. Mirrors
   // NovaAudio_CountActiveByHandle for the no-stack fire-sound gate.
   [[nodiscard]] int CountActiveByKey(int sound_key) const;
@@ -62,6 +63,12 @@ private:
   struct Voice {
     std::unique_ptr<SDL_AudioStream, StreamDeleter> stream;
     int key = -1;
+    // Nova's AudioVoiceSlot allocator keeps voices ordered by this descriptor
+    // width and then its channel level. A full table admits a louder/wider
+    // incoming cue by replacing the weakest voice rather than dropping every
+    // later effect.
+    int priority_width = 1;
+    float source_gain = 1.0F;
   };
 
   [[nodiscard]] static bool StreamActive(SDL_AudioStream *stream);

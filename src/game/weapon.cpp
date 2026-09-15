@@ -30,6 +30,16 @@ inline constexpr float kOnePercentF64 = 0.01F;      // 0x00575368
 inline constexpr float kBombNoseTurnRate = 1.0F;    // 0x00575318
 inline constexpr float kOriginalRawCallTicks = 21.0F * 0.03F;
 
+[[nodiscard]] std::int16_t PlayerFireSoundPriorityWidth(const Weapon &weapon) {
+  // Weapon_FirePlayerWeaponBank 0x00455150: beam modes 0/3 and launch bays
+  // use 6; other secondary-trigger banks use 6; ordinary primary fire uses 5.
+  if (weapon.weapon_mode_code == 0 || weapon.weapon_mode_code == 3 ||
+      weapon.weapon_mode_code == 99 || (weapon.flags & 0x0002U) != 0U) {
+    return 6;
+  }
+  return 5;
+}
+
 [[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
                                             const Ship &ship) {
   return state.scenario.Ship(
@@ -1373,8 +1383,11 @@ int NovaWeapon_SpawnStellarBatteryShot(GameState &state,
         vuln < 1 ? 0 : static_cast<std::int16_t>(RandomBelow(state, vuln + 1));
   }
   if (w->fire_sound >= 0) {
-    state.pending_fire_sounds.push_back(
-        {w->fire_sound, shot.pos_x, shot.pos_y, (w->flags & 0x0010U) != 0U});
+    state.pending_fire_sounds.push_back({w->fire_sound,
+                                         shot.pos_x,
+                                         shot.pos_y,
+                                         /*priority_width=*/5,
+                                         (w->flags & 0x0010U) != 0U});
   }
   state.active_shots.push_back(shot);
   return static_cast<int>(state.active_shots.size() - 1);
@@ -1456,6 +1469,7 @@ void NovaWeapon_SpawnLinkedShotsOnImpact(
         {linked_weapon->fire_sound,
          impacting_shot.pos_x,
          impacting_shot.pos_y,
+         /*priority_width=*/4,
          (linked_weapon->flags & 0x0010U) != 0U});
   }
 
@@ -1946,6 +1960,7 @@ void NovaWeapon_FirePlayerWeaponBank(GameState &state,
     state.pending_fire_sounds.push_back({w->fire_sound,
                                          player.pos_x,
                                          player.pos_y,
+                                         PlayerFireSoundPriorityWidth(*w),
                                          (w->flags & 0x0010U) != 0U});
   }
 
@@ -2562,6 +2577,7 @@ void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
     state.pending_fire_sounds.push_back({weapon->fire_sound,
                                          ship.pos_x,
                                          ship.pos_y,
+                                         /*priority_width=*/4,
                                          (weapon->flags & 0x0010U) != 0U});
   }
   if (weapon->ammo_type < -999) {
@@ -2929,6 +2945,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     state.pending_fire_sounds.push_back({weapon->fire_sound,
                                          ship.pos_x,
                                          ship.pos_y,
+                                         /*priority_width=*/4,
                                          (weapon->flags & 0x0010U) != 0U});
   }
   const int mount_count =

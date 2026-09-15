@@ -2055,8 +2055,11 @@ bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher) {
   // Launch sound: the queued path plays def.fire_sound relative to the
   // launcher (original: NovaAudio_PlaySpatialByDistance, volume 5).
   if (def != nullptr && def->fire_sound >= 0) {
-    state.pending_fire_sounds.push_back(
-        {def->fire_sound, launcher.pos_x, launcher.pos_y, false});
+    state.pending_fire_sounds.push_back({def->fire_sound,
+                                         launcher.pos_x,
+                                         launcher.pos_y,
+                                         /*priority_width=*/5,
+                                         false});
   }
 
   // Original quirk: the cooldown divisor is the bank's MOUNTED count, not
