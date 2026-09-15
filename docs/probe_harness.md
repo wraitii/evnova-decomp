@@ -63,7 +63,8 @@ python3 tools/scenario_runner.py tests/scenarios/tutorial_first_leg.toml
 ```
 
 Steps use observable waits plus input-only `click`, `key`, and `command`
-actions. `validate_state` performs immediate exact (`expect`) and full-regex
+actions; an explicit `quit` step stops the game. `validate_state` performs
+immediate exact (`expect`) and full-regex
 (`matches`) assertions on dotted probe paths; numeric path components index
 arrays. `screenshot` writes BMP checkpoints below `build/scenario-results/`.
 On failure the runner records UI, summary, travel, mission, automation and log

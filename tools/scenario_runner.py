@@ -191,6 +191,7 @@ def run_step(
         "key": {"action", "key"},
         "command": {"action", "cmd", "target", "timeout_ms", "enabled", "speed_multiplier", "suppress_audio"},
         "screenshot": {"action", "name"},
+        "quit": {"action"},
     }
     if action not in allowed:
         raise ScenarioError(f"unknown action {action!r}")
@@ -226,6 +227,8 @@ def run_step(
             raise ScenarioError("screenshot name must not contain a directory")
         artifacts.mkdir(parents=True, exist_ok=True)
         (artifacts / f"{name}.bmp").write_bytes(probe.screenshot())
+    elif action == "quit":
+        probe.post("/probe/command", {"cmd": "quit"})
 
 
 def main() -> int:
