@@ -783,10 +783,16 @@ void PlayerTick_MouseTargetAndControlCommands(SdlPlatform &platform,
   }
   const std::int16_t stellar =
       view.PickStellarAt(platform, state, input.mouse_x, input.mouse_y);
-  if (stellar >= 0x80 && stellar != state.travel.selected_stellar_id) {
+  if (stellar >= 0x80) {
+    const bool changed = stellar != state.travel.selected_stellar_id;
     state.travel.selected_stellar_id = stellar;
     state.travel.selected_stellar_is_manual = true;
-    state.travel_reticle_pulse = 256.0F;
+    // A system arrival resets this to -1.  Selecting a stellar must restore
+    // mode 2 or NovaUi_UpdateTravelTargetReticle deliberately hides it.
+    state.player.travel_transfer_mode = 2;
+    if (changed) {
+      state.travel_reticle_pulse = 256.0F;
+    }
   }
 }
 
@@ -964,6 +970,7 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
         NovaTargeting_FindNearestAvailableTravelStellar(state);
     if (nearest >= 0x80) {
       state.travel.selected_stellar_id = nearest;
+      state.player.travel_transfer_mode = 2;
       state.travel_reticle_pulse = 256.0F;
     }
   }

@@ -9,6 +9,7 @@
 #include "game/outfit.hpp"
 #include "game/scenario_data.hpp"
 #include "game/spaceflight_view.hpp"
+#include "game/targeting.hpp"
 #include "game/travel.hpp"
 
 namespace {
@@ -53,6 +54,23 @@ bool IsRevealedOnly(const GameState &state, std::int16_t zero_based_id) {
 }
 
 } // namespace
+
+TEST_CASE("stellar cycling restores travel mode after system arrival") {
+  GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.stellars.resize(1);
+  state.scenario.systems[0].nav_defs.fill(-1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars[0].system_id = 0;
+  state.scenario.stellars[0].is_available = true;
+  state.scenario.stellars[0].flags = 1;
+  state.player.current_system_id = 0;
+  state.player.travel_transfer_mode = -1; // system-arrival reset
+
+  REQUIRE(game::NovaTargeting_CyclePlayerStellarTarget(state, true));
+  CHECK(state.travel.selected_stellar_id == 0x80);
+  CHECK(state.player.travel_transfer_mode == 2);
+}
 
 TEST_CASE(
     "hypergate animation opens, works, and closes around its transition") {
