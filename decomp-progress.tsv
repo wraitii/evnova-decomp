@@ -447,7 +447,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046A870	NovaUi_RedrawGameplayViewportAndRadar		0%	
 0x0046AAD0	NovaAudio_QueueCenteredSound		0%	
 0x0046AB00	NovaAudio_PreStageJumpSoundBySeconds		0%	
-0x0046AB60	Frame_UpdateEffectIntensityGlobal		0%	
+0x0046AB60	NovaAudio_UpdateCenteredGainFromPreference	src/game/preferences.hpp	100%	Maps sound_volume * 8 through the original [0,0x100] centered-level clamp and Audio_AllocateVoiceSlot's 0x80 per-channel cap, then normalizes the backend's level * sample >> 7 scale for SDL master gain.
 0x0046ABB0	Ship_GetScannerStrength	src/game/radar_panel.cpp	90%	Ship_ComputeScannerStrength: owned_count * ModVal summed over ModType 0x18 slots, clamp [-100,100]; the DAT_007356ba memoization sentinel is not reproduced.
 0x0046AC50	Registration_SpawnLicenseEnforcer		0%	Shareware/license enforcement encounter using personality slot 0x3ff; day thresholds and licensed-runtime flags gate a near-player state-8 spawn. Renamed in Ghidra from the misleading Mission_SpawnAmbientMissionShip; unported.
 0x0046B210	Math_ShortestAngleDeltaDeg	src/game/weapon.cpp	100%	Faithful [0,180] unsigned shortest-angle magnitude runs inline in weapon guidance; an equivalent local helper is used by ship AI. Callers recover turn direction separately, matching the original.

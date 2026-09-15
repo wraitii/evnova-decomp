@@ -1283,7 +1283,7 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
     NovaLog::Warn("continuing without audio (menu sounds are silent)");
   } else {
     runtime.audio.SetMasterVolume(
-        static_cast<float>(runtime.prefs.sound_volume) / 8.0F);
+        game::NovaAudio_EffectGainFromPreference(runtime.prefs.sound_volume));
   }
 
   // Background music. The shipped bass track is the MP3 in the Nova Files

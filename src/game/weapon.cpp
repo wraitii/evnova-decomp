@@ -3303,13 +3303,13 @@ void NovaWeapon_PreloadGameplaySounds(GameState &state) {
 // clamps each channel to the [extent/8, extent] band, then averages the
 // channels (NovaAudio_QueueCenteredSound -> Audio_AllocateVoiceSlot feeds
 // a single mono gain to the mixer). The extent is the sound-volume scaled
-// global (0..0x100, Frame_UpdateEffectIntensityGlobal), so the *distance*
-// behavior factors out into a pure 0..1 attenuation; the caller's master
-// volume carries the preference. Within 200 px the sound plays at full
-// volume; beyond that the loud channel falls as 722500/d^2 (full at 850 px)
-// and the quiet channel as 40000/d^2, each floored at 1/8 of the extent. The
-// integer channel truncation, clamp, and (L+R+1)>>1 average are preserved so
-// the gain matches the original at 1/256 resolution.
+// global (0..0x100, NovaAudio_UpdateCenteredGainFromPreference), so the
+// *distance* behavior factors out into a pure 0..1 attenuation; the caller's
+// master volume carries the original mixer-level preference mapping. Within 200
+// px the sound plays at full volume; beyond that the loud channel falls as
+// 722500/d^2 (full at 850 px) and the quiet channel as 40000/d^2, each floored
+// at 1/8 of the extent. The integer channel truncation, clamp, and (L+R+1)>>1
+// average are preserved so the gain matches the original at 1/256 resolution.
 float NovaWeapon_ComputeSpatialFireGain(float listener_x,
                                         float listener_y,
                                         float src_x,
