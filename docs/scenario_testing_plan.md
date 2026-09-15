@@ -38,7 +38,7 @@ they can verify that:
 - No state depends on host execution speed.
 - General statistical properties remain within expected bounds.
 
-## 3. Add practical headless execution (optional except for audio)
+## 3. Add practical headless execution (optional except for audio) - done for audio
 
 Initially use a hidden/offscreen SDL window and renderer:
 
@@ -108,3 +108,75 @@ The key dependency chain is:
 ```text
 virtual clock -> accelerated execution -> automation input -> scenario runner -> tutorial E2E
 ```
+
+## Concrete first automation slice
+
+Target the tutorial first; defer combat, boarding, and general-purpose
+autopilot behavior.
+
+### Controller structure
+
+Mirror the AI's high-level/low-level split while producing only `FlightInput`:
+
+- High-level goals: `landAt(stellar_name)`, `jumpTo(system_name)`.
+- Low-level maneuvers: `moveAwayFrom(point)`, `stop()`,
+  `moveToAndStopAt(point, radius)`.
+
+Invoke the optional controller after physical/probe input and persisted key
+bindings have populated `FlightInput`, but before player command latches are
+processed. Disabled automation is an exact no-op and never writes gameplay
+state directly.
+
+Reuse the AI's bearing, alignment, approach, and turnaround/braking logic where
+it can be factored into pure helpers. Do not run the NPC supervisor or NPC
+movement integrator on the player: those paths use AI-only damping, weapon
+banks, stats, targeting, boarding resolution, and other side effects.
+
+`stop()` turns opposite the velocity vector without thrust, then thrusts once
+aligned. `moveToAndStopAt()` begins braking from estimated turn distance plus
+stopping distance, with hysteresis and a practical velocity tolerance rather
+than requiring exact zero.
+
+### Goal transitions
+
+`landAt(name)`:
+
+1. Resolve an exact, case-insensitive stellar name in the current system;
+   reject missing or ambiguous names.
+2. Select it through edge-triggered stellar-cycle input.
+3. Move into its landing envelope and settle below the landing velocity gate.
+4. Wait for the approach timer to arm, tap Land, and complete only when the
+   landed/Spaceport modal is observed.
+
+`jumpTo(name)`:
+
+1. Resolve an exact, case-insensitive directly linked system name; reject
+   missing, ambiguous, current, or non-adjacent systems.
+2. Toggle hyperspace mode and cycle destinations through input until selected.
+3. Tap Travel, then stop emitting steering while the existing jump state
+   machine owns the player.
+4. Complete when the requested system is current and jump engagement has
+   ended.
+
+The controller must generate one-frame taps followed by release and wait for
+the corresponding observed state change before issuing another edge command.
+It fails cleanly on player death, invalidated destinations, unexpected flight
+exit, or a simulation-time deadline. Until save loading exists, death aborts
+the attempt with state/log/screenshot diagnostics and the scenario runner may
+restart from the new-pilot flow.
+
+### Probe and UI surface
+
+Add narrow semantic probe commands/status for starting, cancelling, and
+observing these goals. This configures an input producer, like probe-held keys;
+it does not grant direct writes to ship, mission, inventory, or travel state.
+
+Publish the root Spaceport controls (`launch`, `refuel`, `trade_center`,
+`outfitter`, `shipyard`, `bar`, `mission_bbs`) so landing completion and the
+tutorial's docked transitions can be driven by intent. Continue using the
+existing published controls for nested modals.
+
+Unit-test steering wraparound, turnaround without thrust, braking transitions,
+settling under real player movement integration, edge-command taps, name
+resolution, and failure transitions. The first probe workflow is new pilot ->
+`landAt` -> tutorial modal actions -> launch -> `jumpTo`.
