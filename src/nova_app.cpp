@@ -5,6 +5,7 @@
 #include "game/hud_overlay.hpp"
 #include "game/new_pilot_flow.hpp"
 #include "game/nova_font.hpp"
+#include "game/pilot_file.hpp"
 #include "game/probe_state.hpp"
 #include "game/ship_ai.hpp"
 #include "game/spaceflight.hpp"
@@ -1337,6 +1338,32 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
   // coordinates stay in 640x480 content space.
   runtime.platform.SetScaledPlayfield();
 
+  if (auto selection = runtime.platform.PollOpenFileDialogResult()) {
+    if (!selection->error.empty()) {
+      NovaLog::Error("Open Pilot file dialog failed: {}", selection->error);
+    } else if (selection->path) {
+      const game::PilotLoadError result =
+          game::PilotFileLoadSave(*selection->path, runtime.game);
+      if (result == game::PilotLoadError::kOk ||
+          result == game::PilotLoadError::kRepairsApplied) {
+        runtime.game.game_active = true;
+        runtime.game.player.is_active = true;
+        runtime.game_active = true;
+        runtime.menu_status_portrait.reset();
+        runtime.menu_status_portrait_class = -1;
+        NovaLog::Info("opened pilot file '{}'{}",
+                      selection->path->string(),
+                      result == game::PilotLoadError::kRepairsApplied
+                          ? " (repairs applied)"
+                          : "");
+      } else {
+        NovaLog::Error("could not open pilot file '{}': loader error {}",
+                       selection->path->string(),
+                       static_cast<int>(result));
+      }
+    }
+  }
+
   if (const auto command = runtime.platform.PollCommandEvent()) {
     if (*command == 'q') {
       runtime.requested_action = GameModeAction::quit;
@@ -1835,7 +1862,12 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     break;
   }
   case GameModeAction::open_pilot:
-    NovaLog::Todo("Open Pilot file dialog is not reconstructed.");
+    // Ghidra 0x004c9e90 Menu_OpenPilotFileDialog. SDL supplies the native
+    // cross-platform chooser in place of GetOpenFileNameA; its asynchronous
+    // result is applied by NovaMainLoop_UpdateFrame on the main thread.
+    if (!runtime.platform.ShowOpenPilotFileDialog()) {
+      NovaLog::Info("Open Pilot file dialog is already active");
+    }
     break;
   case GameModeAction::quit:
     runtime.quit_requested = true;

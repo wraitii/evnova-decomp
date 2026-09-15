@@ -338,6 +338,51 @@ bool SdlPlatform::Initialize() {
 
 SDL_Renderer *SdlPlatform::renderer() const { return renderer_.get(); }
 
+bool SdlPlatform::ShowOpenPilotFileDialog() {
+  {
+    std::scoped_lock lock(open_file_dialog_mutex_);
+    if (open_file_dialog_pending_) {
+      return false;
+    }
+    open_file_dialog_pending_ = true;
+    open_file_dialog_completed_ = false;
+    open_file_dialog_result_ = {};
+  }
+
+  static constexpr SDL_DialogFileFilter kPilotFilter{"EV Nova pilot files",
+                                                     "plt"};
+  SDL_ShowOpenFileDialog(
+      [](void *userdata, const char *const *filelist, int) {
+        auto &platform = *static_cast<SdlPlatform *>(userdata);
+        std::scoped_lock lock(platform.open_file_dialog_mutex_);
+        if (filelist == nullptr) {
+          platform.open_file_dialog_result_.error = SDL_GetError();
+        } else if (*filelist != nullptr) {
+          platform.open_file_dialog_result_.path =
+              std::filesystem::path(*filelist);
+        }
+        platform.open_file_dialog_pending_ = false;
+        platform.open_file_dialog_completed_ = true;
+      },
+      this,
+      window_.get(),
+      &kPilotFilter,
+      1,
+      nullptr,
+      false);
+  return true;
+}
+
+std::optional<SdlPlatform::OpenFileDialogResult>
+SdlPlatform::PollOpenFileDialogResult() {
+  std::scoped_lock lock(open_file_dialog_mutex_);
+  if (!open_file_dialog_completed_) {
+    return std::nullopt;
+  }
+  open_file_dialog_completed_ = false;
+  return std::move(open_file_dialog_result_);
+}
+
 void SdlPlatform::ApplyFullscreenPresentation() {
   // Extending free-flight world / fullscreen splash: 1 logical unit = 1
   // window-coordinate point, no clipping. On a high-density display the
