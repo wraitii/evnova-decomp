@@ -167,6 +167,15 @@ TEST_CASE("Preferences defaults match NovaPrefs_ResetToDefaults") {
   CHECK(prefs.bindings.cmd_to_key.size() == 0x52);
 }
 
+TEST_CASE("Sound preference uses the original mixer level scale") {
+  CHECK(game::NovaAudio_EffectGainFromPreference(-1) == 0.0F);
+  CHECK(game::NovaAudio_EffectGainFromPreference(0) == 0.0F);
+  CHECK(game::NovaAudio_EffectGainFromPreference(5) == 0.3125F);
+  CHECK(game::NovaAudio_EffectGainFromPreference(8) == 0.5F);
+  CHECK(game::NovaAudio_EffectGainFromPreference(16) == 1.0F);
+  CHECK(game::NovaAudio_EffectGainFromPreference(33) == 1.0F);
+}
+
 TEST_CASE("Original preference file round-trips modeled settings and keys") {
   const auto path = std::filesystem::temp_directory_path() /
                     "evnova_preferences_round_trip.prf";

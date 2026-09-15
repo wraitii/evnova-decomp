@@ -92,6 +92,20 @@ struct NovaPreferences {
   void ResetToDefaults();
 };
 
+// Ghidra 0x0046ab60 NovaAudio_UpdateCenteredGainFromPreference.
+// The original first maps the stored preference to an integer mixer level
+// (sound_volume * 8, clamped to 0x100). Audio_AllocateVoiceSlot then clamps
+// each channel to 0x80, and the backend applies level * sample >> 7. Express
+// that complete path as the normalized gain expected by SDL.
+[[nodiscard]] constexpr float
+NovaAudio_EffectGainFromPreference(std::int32_t sound_volume) {
+  const std::int32_t centered_level =
+      sound_volume < 0 ? 0 : (sound_volume > 32 ? 0x100 : sound_volume * 8);
+  const std::int32_t voice_level =
+      centered_level > 0x80 ? 0x80 : centered_level;
+  return static_cast<float>(voice_level) / 128.0F;
+}
+
 // Ghidra 0x004c7400 NovaPrefs_LoadOrInit / 0x004c7820
 // NovaPrefs_SaveToDisk. Path-taking forms expose the original 0x8c-byte,
 // version-0x69 format for tests. System forms use SDL_GetPrefPath.
