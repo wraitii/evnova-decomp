@@ -4,6 +4,7 @@
 #include "game/government.hpp"
 #include "game/landed_store.hpp"
 #include "game/landed_window.hpp"
+#include "game/mission.hpp"
 #include "game/outfit.hpp"
 #include "game/travel.hpp"
 #include "game/weapon.hpp"
@@ -339,6 +340,40 @@ TEST_CASE("Outfitter sale clears the active weapon bank on the last unit",
   CHECK(sale.block == game::OutfitSaleBlock::kNone);
   CHECK(state.inventory.outfit_owned_count[0] == 0);
   CHECK(state.player.active_weapon_bank_slot == -1);
+}
+
+TEST_CASE("launch rebuild includes missions accepted while docked") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  constexpr std::int16_t kRautherionSystem = 166 - 0x80;
+  constexpr std::int16_t kRautherStellar = 191;
+  constexpr std::int16_t kTutorial006Index = 754 - 0x80;
+  constexpr std::int16_t kPirateViperShipClass = 166 - 0x80;
+  constexpr std::int16_t kDerelictsGovernment = 180 - 0x80;
+  state.player.current_system_id = kRautherionSystem;
+  state.player.ship_class_id = 0;
+
+  REQUIRE(
+      game::Mission_ActivateAtSlot(state, kTutorial006Index, kRautherStellar));
+  REQUIRE(state.active_mission_runtime_flags[0].is_active);
+  REQUIRE(state.active_mission_runtime_flags[1].is_active);
+  for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
+    CHECK_FALSE(state.ShipAt(slot).is_active);
+  }
+
+  game::Stellar_Launch(state, kRautherStellar);
+
+  bool found_derelict = false;
+  for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
+    const auto &ship = state.ShipAt(slot);
+    if (ship.is_active && ship.mission_fleet_slot == 1) {
+      found_derelict = true;
+      CHECK(ship.current_system_id == kRautherionSystem);
+      CHECK(ship.ship_class_id == kPirateViperShipClass);
+      CHECK(ship.faction_or_government_id == kDerelictsGovernment);
+    }
+  }
+  CHECK(found_derelict);
 }
 
 // DAT_007d4c0d (0x0048ea70): a stellar with a zero TechLevel and no positive

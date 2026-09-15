@@ -443,10 +443,10 @@ TEST_CASE("Fed Destroyer selects and fires its long-range missile",
   NovaWeapon_FireNpcWeaponBank(state, npc);
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].weapon_id == 6);
-  // The IR Missile is not continuous: the original consumes both fields after
-  // the one-shot handoff.
-  CHECK(npc.active_weapon_bank_slot == -1);
-  CHECK(npc.ai_fire_trigger_latch == 0);
+  // IR Missile Flags includes 0x0002: Ship_HandleShip retains both fields so
+  // the bank can keep firing while the AI request remains asserted.
+  CHECK(npc.active_weapon_bank_slot == 6);
+  CHECK(npc.ai_fire_trigger_latch == 1);
 }
 
 TEST_CASE("Abomination can select and fire its pulse cannon", "[weapon][npc]") {
@@ -571,11 +571,11 @@ TEST_CASE("an unsuccessful NPC fire request clears its stale bank latch",
   npc.ship_class_id = 0;
   npc.current_system_id = 0;
   npc.armor_points = 100.0F;
-  // IR Missile bank 6 is non-continuous, so even an unsuccessful handoff is
-  // consumed by Ship_HandleShip after Weapon_FireShipWeapons returns.
-  npc.active_weapon_bank_slot = 6;
+  // Light Blaster bank 0 has no continuous-fire flag, so even an unsuccessful
+  // handoff is consumed by Ship_HandleShip after Weapon_FireShipWeapons.
+  npc.active_weapon_bank_slot = 0;
   npc.ai_fire_trigger_latch = 1;
-  npc.npc_weapon_bank_ammo[6] = 0;
+  npc.npc_weapon_bank_ammo[0] = 0;
 
   NovaWeapon_FireNpcWeaponBank(state, npc);
 

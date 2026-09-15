@@ -1,5 +1,7 @@
 #include "mission.hpp"
 
+#include "compatibility.hpp"
+
 #include "../brgr_archive.hpp"
 #include "boarding_plunder.hpp"
 #include "game_state.hpp"
@@ -808,10 +810,46 @@ ResolveMissionCurrentSystem(GameState &state,
         state, locator, state.player.current_system_id);
   }
   if (locator >= kResourceIdBase && locator < kResourceIdBase + 0x800) {
-    return ResolveContainingSystem(
-        state, static_cast<std::int16_t>(locator - kResourceIdBase));
+    return static_cast<std::int16_t>(locator - kResourceIdBase);
   }
   return ResolveMissionSystemByLocator(state, locator, -1);
+}
+
+[[nodiscard]] bool
+IsTutorial006aBrokenFleetDefinition(std::int16_t mission_id,
+                                    const MissionDef &definition) {
+  constexpr std::int16_t kTutorial006aMissionIndex = 755 - kResourceIdBase;
+  return kApplyOriginalBugFixes && mission_id == kTutorial006aMissionIndex &&
+         definition.target_ship_count == 1 &&
+         definition.current_system_locator == 129 &&
+         definition.special_ship_dude == 155 &&
+         definition.flags_primary == 0x0c02;
+}
+
+[[nodiscard]] std::int16_t
+ApplyMissionSystemBugFixes(std::int16_t mission_id,
+                           const MissionDef &definition,
+                           std::int16_t resolved_system_id) {
+  // BUGFIX(original): shipped mïsn 755 (Tutorial 006a) says ShipSyst 129
+  // (Tichel), while both its parent mission's brief and quick brief place the
+  // target in Rautherion (sÿst 166).
+  if (IsTutorial006aBrokenFleetDefinition(mission_id, definition)) {
+    return 166 - kResourceIdBase;
+  }
+  return resolved_system_id;
+}
+
+[[nodiscard]] std::int16_t
+ApplyMissionDudeBugFixes(std::int16_t mission_id,
+                         const MissionDef &definition,
+                         std::int16_t resolved_dude_id) {
+  // BUGFIX(original): the same record says ShipDude 155 (Large Auroran War
+  // Ships). The shipped purpose-built düde 238, "Tutorial Derelict", uses
+  // only Pirate Vipers under the Derelicts government.
+  if (IsTutorial006aBrokenFleetDefinition(mission_id, definition)) {
+    return 238 - kResourceIdBase;
+  }
+  return resolved_dude_id;
 }
 
 [[nodiscard]] std::int16_t SelectMissionShipType(GameState &state,
@@ -1150,11 +1188,15 @@ bool Mission_PopulateActiveSlot(GameState &state,
     active.dude_def_index =
         static_cast<std::int16_t>(active.dude_def_index - kResourceIdBase);
   }
+  active.dude_def_index =
+      ApplyMissionDudeBugFixes(mission_id, *definition, active.dude_def_index);
   active.ship_goal = definition->ship_goal;
   active.ship_behavior = definition->ship_behavior;
   active.ship_start = definition->ship_start;
-  active.current_system_id =
-      ResolveMissionCurrentSystem(state, *definition, target);
+  active.current_system_id = ApplyMissionSystemBugFixes(
+      mission_id,
+      *definition,
+      ResolveMissionCurrentSystem(state, *definition, target));
   // Resolved Bible CargoType/CargoQty (m\xefsn +0x10/+0x12 via the target
   // table +0x04/+0x06); the prior names special_ship_system_id/count were
   // misnomers.
@@ -2442,15 +2484,14 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
   // FUN_004d45a0: the registration name, or the shared "EV Nova Community"
   // string when no name is registered. The port has no registration system.
   ReplaceMissionToken(result, "<REG>", "EV Nova Community");
-  // <PRKnnn>/<SRKnnn> per-government rank names (Bible 1796-1799). The
-  // original pre-scanned the id into g_expanded_psrk_ship_class / _ssrk and
-  // substituted from crossed buffers; see ReplacePerGovernmentRankTokens for
-  // the divergence. The unregistered letter-scramble block (DAT_007354a4)
-  // still needs the shareware model.
-  ReplacePerGovernmentRankTokens(
-      state, result, "<PRK", /*use_short_name=*/false);
-  ReplacePerGovernmentRankTokens(
-      state, result, "<SRK", /*use_short_name=*/true);
+  // BUGFIX(original): the original's crossed pre-scan buffers break shipped
+  // <PRKnnn>/<SRKnnn> text. See ReplacePerGovernmentRankTokens.
+  if (kApplyOriginalBugFixes) {
+    ReplacePerGovernmentRankTokens(
+        state, result, "<PRK", /*use_short_name=*/false);
+    ReplacePerGovernmentRankTokens(
+        state, result, "<SRK", /*use_short_name=*/true);
+  }
   return result;
 }
 

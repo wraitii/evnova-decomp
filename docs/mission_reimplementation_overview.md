@@ -335,7 +335,7 @@ half (the `0x0041CF40` + dispatch pass):
   used by the aux-fleet respawn arm.
 - Dispatch — DONE in both owners of the mission-fleet slices:
   - `0x0041af90` system-entry restore (`NovaSystem_RestoreMissionFleets`,
-    wired at landing, new-game and jump-arrival call sites): locator/system
+    wired after dock launch, at new-game and jump-arrival call sites): locator/system
     match, escort pre-count for follow-player ShipBehav 1 fleets, placement
     arms (`ship_goal` 3 center scatter, 5 derelict wreck with the
     33%/10% armor cut and the +0xB9 deadline latch, negative ShipStart

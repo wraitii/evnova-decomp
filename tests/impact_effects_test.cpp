@@ -228,15 +228,15 @@ TEST_CASE("ship destruction debris puffs seed one directional fragment each",
       std::sqrt(scatter_x * scatter_x + scatter_y * scatter_y);
   CHECK(scatter >= 1.0F);
   CHECK(scatter <= 1.9F);
-  REQUIRE(state.pending_destruction_sounds.size() == 1);
-  CHECK(state.pending_destruction_sounds[0].src_x == 10.0F);
-  CHECK(state.pending_destruction_sounds[0].src_y == 20.0F);
+  // The visual helper does not queue audio; Ship_HandleShip does that after
+  // each halfway/timed-action call, even if the fragment pool is full.
+  CHECK(state.pending_destruction_sounds.empty());
 
   // A second puff claims the next free slot rather than overwriting the first.
   NovaEffects_SpawnShipDestructionDebrisPuff(state, ship);
   CHECK(state.fading_effect_instances[0].lifetime_ticks >= 150.0F);
   CHECK(state.fading_effect_instances[1].lifetime_ticks >= 150.0F);
-  CHECK(state.pending_destruction_sounds.size() == 2);
+  CHECK(state.pending_destruction_sounds.empty());
 }
 
 } // namespace game

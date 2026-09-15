@@ -64,9 +64,10 @@ void NovaEffects_SpawnImpactEffect(GameState &state,
 // timed-action cascade: claim the first free fading-effect slot, seed it at the
 // ship position with the ship's velocity plus a randomized scatter vector
 // ((10 + rand(10)) * 0.1), orient it by the resulting velocity bearing, give it
-// a 150..249-frame lifetime, and queue the spatial destruction sound. This is
-// the directional wreck debris fragment, distinct from the Explode1/Explode2
-// area impacts that Ship_UpdateVisualState spawns.
+// a 150..249-frame lifetime. Ship_HandleShip queues the spatial destruction
+// sound separately after this helper returns. This is the directional wreck
+// debris fragment, distinct from the Explode1/Explode2 area impacts that
+// Ship_UpdateVisualState spawns.
 void NovaEffects_SpawnShipDestructionDebrisPuff(GameState &state,
                                                 const Ship &ship);
 

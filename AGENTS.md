@@ -39,6 +39,7 @@ These root-level TSVs must be disjoint and jointly cover the decompile dump with
 The purpose of this reimplementation is to have identical gameplay to the original, but the rendering, audio & such will be swapped out for SDL3.
 
 - Preserve original game behavior, constants, and quirks first; improve architecture second. Do not “clean up” strange original behavior.
+- Mark intentional corrections to confirmed bugs in the original executable or shipped scenario data as `BUGFIX(original)`, gate them through the shared compatibility policy, and always flag them to the user before implementing them. Do not use this marker for ordinary SDL/platform divergences.
 - Trace every reimplemented Ghidra function to its original binary address; keep its progress row current.
 - Citation format: `// Ghidra 0xaabbccdd Original_Name.` directly above the port function. When one original function is spread across port helpers, cite it at the primary site and name the others in the same comment ("… runs inline in X"), not one citation per fragment.
 - Divergence/skip markers: plain `TODO(decomp)` for an unported scope; `TODO(decomp(0xaabbccdd)) skipped: <reason>` when original behavior is known and deliberately not reproduced. Never leave a comment-only `if` block as a deferral marker.
