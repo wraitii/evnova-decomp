@@ -161,15 +161,16 @@ void NovaSystem_UpdateReinforcementCountdown(GameState &state,
                                                 std::int16_t forced_pers_slot);
 
 // Mirrors Dude_SpawnRandomDudeShipInSystem (Ghidra 0x0041c710): the
-// high-level random wandering NPC spawn dispatcher. Rolls 1-in-7 for a mission
-// ship, else 1-in-7 for a random-encounter fleet, else spawns a random system
-// dude ship (discarded when its computed fuel capacity < 1), then positions
-// the spawned ship at a random polar offset from system centre and faces it
-// toward the origin. Returns the spawned ship slot or -1.
+// high-level random wandering NPC spawn dispatcher. Rolls 1-in-7 for a përs
+// personality/linked-mission ship, else 1-in-7 for a random-encounter fleet,
+// else spawns a random system dude ship (discarded when its computed fuel
+// capacity < 1), then positions the spawned ship at a random polar offset from
+// system centre and faces it toward the origin. Returns the spawned ship slot
+// or -1.
 //
-// The 1-in-7 mission-ship branch and the AI-state entry (slowdown / jump-in)
-// are deferred (mission system / AI-state helpers not reconstructed); see
-// ship_spawn.cpp.
+// The original's "mission ship" arm is the përs call above; there is no
+// separate active-mission fleet arm in this dispatcher. Successful single
+// ships share the slowdown / restricted-stellar jump-in placement tail.
 [[nodiscard]] int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
                                                        std::int16_t system_id);
 
@@ -179,8 +180,8 @@ void NovaSystem_UpdateReinforcementCountdown(GameState &state,
 // Ordinary dude ships
 // use EncounterFleet_SpawnRandomSystemDudeShip directly, retaining its
 // [-750,750) scatter, and receive their class base velocity along their random
-// heading. Encounter and mission rolls are kept in their original 1-in-7
-// order; mission-ship creation remains deferred.
+// heading. Encounter and mission/personality rolls are kept in their original
+// 1-in-7 order; the latter is the përs spawner.
 void NovaSystem_PopulateInitialNpcShips(GameState &state,
                                         std::int16_t system_id);
 

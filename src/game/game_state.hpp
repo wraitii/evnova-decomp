@@ -148,9 +148,7 @@ struct ActiveMission {
 };
 
 // Results of Mission_ResolveMissionStellarTargets (0x0043d240) needed by
-// active-slot population. Locator selection is still a separate subsystem;
-// this cache allows the accepted-mission path to remain one-to-one with the
-// original without inventing locator semantics.
+// active-slot population and personality LinkMission offers.
 struct MissionTargetResolution {
   std::int16_t travel_stellar_id = -1;
   std::int16_t travel_system_id = -1;

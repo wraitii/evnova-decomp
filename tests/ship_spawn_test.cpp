@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 
 #include "game/ship_spawn.hpp"
 
@@ -431,6 +432,11 @@ TEST_CASE("pers spawner lays a personality onto the ship", "[pers][spawn]") {
   REQUIRE(jack.present);
   jack.loaded_latch = true;
   jack.is_available_runtime = true;
+  REQUIRE(jack.link_mission_id >= 0);
+  auto &linked_target =
+      state.mission_target_resolutions[static_cast<std::size_t>(
+          jack.link_mission_id)];
+  linked_target.priority_payload = std::numeric_limits<std::int32_t>::min();
 
   const int slot =
       NovaPers_SpawnShipFromPersDef(state,
@@ -457,7 +463,11 @@ TEST_CASE("pers spawner lays a personality onto the ship", "[pers][spawn]") {
   // class stock loadout.
   CHECK(ship.npc_weapon_bank_ammo[0x81 - 0x80] >= 1);
   CHECK(ship.npc_weapon_bank_secondary[0x87 - 0x80] >= 50);
-  // LinkMission 12: target-block resolution deferred, spawn still succeeds.
+  // LinkMission 12 refreshes that mission's offer-time target block.
+  const auto &linked_definition =
+      state.scenario.missions[static_cast<std::size_t>(jack.link_mission_id)];
+  CHECK(linked_target.priority_payload ==
+        linked_definition.resource_delta_or_cost);
 
   // The same-name dedup blocks a second spawn of an already-active
   // personality (forced slot still goes through the active-ship pass).

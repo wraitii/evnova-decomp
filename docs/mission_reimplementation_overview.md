@@ -373,8 +373,10 @@ throttle bypass, and the 1-in-0x8C roll + `+0xAC` re-hail window). The
 `0x452d5c` forced-pers-0x201 call site is a debug/cheat spawn key arm
 (0x00452b71) and is deliberately skipped. `0x004235c0`
 personality spawn (the përs table drives ambient personalities as well as
-missions); its LinkMission target-block arm is a logged skip until
-`Mission_ResolveMissionStellarTargets` (0x0043d240) lands. Reinforcement fleets are a related
+missions); its LinkMission arm now refreshes the linked definition's target
+block through `Mission_ResolveMissionStellarTargets` (0x0043d240). The 1-in-7
+"mission ship" arm in the ambient dispatcher is this same përs path; Ghidra
+shows no separate active-mission-fleet branch there. Reinforcement fleets are a related
 but distinct path: combat arms `Government_TryTriggerGovtAssistanceEncounter`,
 which starts the system's `ReinfTime` countdown; when it expires,
 `System_UpdateRandomEncounterCountdown` calls the ordinary `flet` spawner with
