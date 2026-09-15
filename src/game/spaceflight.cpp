@@ -154,7 +154,7 @@ void Stub_DrawStatus(GameState &state) {
 }
 
 // Ghidra scope 6 parts 1 & 2 of Frame_TickSystems (0x004186b0). Part 1 ran the
-// per-frame targeting setup (Ship_UpdateAutoWeaponSelectionFromTarget etc.);
+// per-frame targeting setup (Ship_EscortFireAtUnprovokedTarget etc.);
 // part 2 is the per-ship AI decision stage -- the top-level Ship_UpdateShipAI
 // (0x00401000) listed in the plan. The clean-room equivalent is
 // NovaAi_UpdateShipAI (src/game/ship_ai.cpp), which dispatches the behavior
@@ -3836,7 +3836,7 @@ void RunPlayerEjectTransform(GameState &state) {
     if (!ship.is_active) {
       continue;
     }
-    if (!NovaTargeting_IsShipEligibleForDistressCall(state, ship)) {
+    if (!NovaTargeting_IsThreatToPlayerSquad(state, ship)) {
       if (ship.squad_leader_ship_slot == 0 &&
           p.ship_class_id == kEscapePodShipClassIndex) {
         ship.squad_leader_ship_slot = -1;
@@ -4037,8 +4037,7 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
   // distress alert (g_transition_sound_handle_table[5], snd 155) five times.
   if (state.spaceflight_frame_counter % 60 == 0) {
     state.distress_cue_active_prev = state.distress_cue_active;
-    state.distress_cue_active =
-        NovaAi_AreAnyShipsEligibleForDistressCall(state);
+    state.distress_cue_active = NovaAi_IsAnyShipThreatToPlayerSquad(state);
     if (state.distress_cue_active && !state.distress_cue_active_prev &&
         p.timed_action_counter < 1) {
       state.pending_ui_sounds.push_back(

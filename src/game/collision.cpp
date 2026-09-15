@@ -92,10 +92,10 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
       NovaHud_ShowOverlayMessage(
           state, *text, /*duration_frames=*/std::uint64_t{0xf0});
     }
-    Mission_FailMissionSlotQuick(state,
-                                 static_cast<std::int16_t>(slot),
-                                 static_cast<std::uint32_t>(
-                                     state.gameplay_now_ms));
+    Mission_FailMissionSlotQuick(
+        state,
+        static_cast<std::int16_t>(slot),
+        static_cast<std::uint32_t>(state.gameplay_now_ms));
     break;
   }
 }
@@ -575,7 +575,7 @@ void PropagateHostilityFromPlayerAttack(GameState &state,
         responder.faction_or_government_id >= 0x100) {
       continue;
     }
-    if (NovaAiShip_CanShipRespondToDistressCall(state, responder, target)) {
+    if (NovaAiShip_IsEnemyOfShip(state, responder, target)) {
       continue;
     }
 
@@ -846,7 +846,8 @@ void ResolveShipHitFromWeapon(GameState &state,
                 state, *text, /*duration_frames=*/std::uint64_t{0xf0});
           }
           Mission_FailMissionSlotQuick(
-              state, fleet_slot,
+              state,
+              fleet_slot,
               static_cast<std::uint32_t>(state.gameplay_now_ms));
         }
         mission.goal_counter_c =

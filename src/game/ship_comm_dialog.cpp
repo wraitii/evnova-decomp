@@ -817,7 +817,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     if (NovaAiShip_ShouldKeepPressingTarget(state, target)) {
       status = LoadCommPrompt(random_index, kMsgWhatDoYouWant).value_or(status);
     } else if (target.squad_leader_ship_slot != 0) {
-      status = NovaGovernment_IsShipEligibleForGovernmentAid(state, target)
+      status = NovaShip_DoesShipLikePlayer(state, target)
                    ? LoadCommPrompt(random_index, kMsgHailOpen).value_or(status)
                    : LoadCommPrompt(random_index, kMsgWhatDoYouWant)
                          .value_or(status);
@@ -994,13 +994,13 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       }
       return;
     }
-    if (!NovaGovernment_IsShipEligibleForGovernmentAid(state, target) ||
-        govt_aid_flag || keep_refusal) {
+    if (!NovaShip_DoesShipLikePlayer(state, target) || govt_aid_flag ||
+        keep_refusal) {
       // No aid on offer: "In your dreams, pal."
       status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
       return;
     }
-    if (NovaAiShip_IsShipEligibleForCommAidInteraction(state, target) ||
+    if (NovaAiShip_IsThreatened(state, target) ||
         NovaAiShip_IsShipInNonIdleAiState(target)) {
       // The ship is already busy with something: "I'm busy." / "Sorry sir, I
       // can't do that." (escorts), or "Okay, I'm on my way." when it is
@@ -1016,7 +1016,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       }
       return;
     }
-    if (!NovaAi_AreAnyShipsEligibleForDistressCall(state)) {
+    if (!NovaAi_IsAnyShipThreatToPlayerSquad(state)) {
       // No distress call in progress: the fuel-offer branch triggers when the
       // player's tank is low (or the player is disabled). A govt-aid
       // ship (xenophobic flag) refuses with "In your dreams, pal." instead;
@@ -1054,7 +1054,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       return;
     }
     // A distress call is possible: route on the target's responders.
-    if (!NovaAiShip_HasShipDistressResponder(state, target)) {
+    if (!NovaAiShip_IsPlayerThreatenedByEnemyOfShip(state, target)) {
       status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
       return;
     }
@@ -1110,7 +1110,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   const auto RunGreetings = [&]() {
     if (!fire_restricted && !special_mask) {
       if (!NovaAiShip_ShouldKeepPressingTarget(state, target) &&
-          NovaGovernment_IsShipEligibleForGovernmentAid(state, target)) {
+          NovaShip_DoesShipLikePlayer(state, target)) {
         const std::string info = BuildHailInfoText(target);
         if (!info.empty()) {
           status = info;

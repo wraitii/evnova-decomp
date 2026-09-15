@@ -3487,7 +3487,7 @@ void Mission_TickShipHailLadder(GameState &state,
   if ((flags & 0x10U) != 0U && !disabled) {
     if (ship.mission_hail_latch != 0) {
       allow = false;
-    } else if (NovaTargeting_IsShipEligibleForDistressCall(state, ship)) {
+    } else if (NovaTargeting_IsThreatToPlayerSquad(state, ship)) {
       distress_override = true;
     } else {
       allow = false;
@@ -3499,8 +3499,7 @@ void Mission_TickShipHailLadder(GameState &state,
     allow = false;
   }
   // Flags 0x08: hail only when the ship's government would aid the player.
-  if ((flags & 0x08U) != 0U &&
-      !NovaGovernment_IsShipEligibleForGovernmentAid(state, ship)) {
+  if ((flags & 0x08U) != 0U && !NovaShip_DoesShipLikePlayer(state, ship)) {
     allow = false;
   }
   // Flags 0x400 + LinkMission: the linked mission must currently offer from

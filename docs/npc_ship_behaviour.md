@@ -102,7 +102,7 @@ logic and is not the occasional jump-in branch.
 | 2 | `Ship_UpdateShipAiBehavior0x02_BraveTrader` | wander, fight back once close |
 | 3 | `Ship_UpdateShipAiBehavior0x03_Warship` (or `…_WarshipCapture` when the govt has flags_primary 0x1000) | seek/attack, or plunder |
 | 4 | `Ship_UpdateShipAiBehavior0x04_Interceptor` | seek/park, piracy police |
-| >4 | `Ship_UpdateShipAssistResponseBehavior` | escort / fighter / assist |
+| >4 | `Ship_UpdateEscortAI` | escort / fighter / assist |
 
 A ship holding a stellar assignment runs `Ship_DefenseFleetPrioritizePlayerThreat`. In the original
 `defense_fleet_home_stellar_id != -1` is set

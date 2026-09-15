@@ -133,15 +133,15 @@ void NovaAi_ResetShipPrimaryAndSecondaryTargets(Ship &ship);
 // polar position/velocity; this helper arms the state and its visual latches.
 void NovaAi_EnterState8Slowdown(GameState &state, Ship &ship);
 
-// Ghidra 0x004159e0 Ship_EnterShipAiState0x15_JumpOutToSystem. Places an NPC
-// at a destination hypergate/wormhole stellar's emergence point, seeds its
+// Ghidra 0x004159e0 Ship_EnterShipAiState0x15_EmergeFromHypergate. Places an
+// NPC at a destination hypergate/wormhole stellar's emergence point, seeds its
 // emergence heading, and arms a 60-tick hold before the slower arrival
 // override: 30 px/tick normally, or 15 when squad_leader_ship_slot is the
 // player. This is not normally a persistent state-0x17 successor in the NPC
 // path.
-void NovaAi_EnterState15JumpOutToSystem(GameState &state,
-                                        Ship &ship,
-                                        std::int16_t stellar_id);
+void NovaAi_EnterState15EmergeFromHypergate(GameState &state,
+                                            Ship &ship,
+                                            std::int16_t stellar_id);
 
 // Completes a cross-system jump for an NPC already in state 0x14: performs
 // the gameplay-visible system transfer. The original's larger hyperspace
@@ -201,9 +201,9 @@ NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
 [[nodiscard]] std::int16_t NovaAi_FindBestAssistTargetForShip(
     const GameState &state, const Ship &ship, std::int16_t score_flags);
 
-// Ghidra 0x00411540 Ship_UpdateAutoWeaponSelectionFromTarget. Refreshes the
+// Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget. Refreshes the
 // active NPC weapon bank for higher-behavior ships and clears stale targets.
-void NovaAi_UpdateAutoWeaponSelectionFromTarget(GameState &state, Ship &ship);
+void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship);
 
 // The four per-mode weapon-bank selectors called by the AI control modes
 // (Ghidra 0x00408150). Each is the faithful port of one original selector:
@@ -314,7 +314,7 @@ void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
                                                      Ship &ship,
                                                      std::uint32_t now_ms);
 
-// Ghidra 0x004048a0 Ship_UpdateShipAssistResponseBehavior. Per-frame supervisor
+// Ghidra 0x004048a0 Ship_UpdateEscortAI. Per-frame supervisor
 // for behavior > 4 ships: releases squads whose leader vanished, arms the
 // leader-jump-prep sync into AI state 0x0B (disengage + hold formation while
 // the leader charges a jump; gravity-shield ships detach and travel on their
@@ -323,9 +323,7 @@ void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
 // 2 attack, 3 return-to-hangar, 4 cease fire, 0/default formation). Deferred:
 // the government voice override and the pending-latch reset for chatter (the
 // chatter consumer pass is TODO(decomp)).
-void NovaAi_UpdateAssistResponseBehavior(GameState &state,
-                                         Ship &ship,
-                                         std::uint32_t now_ms);
+void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
 // Ship-comm / hail predicates and AI state entries (added for the ship-comm
@@ -362,15 +360,14 @@ void NovaAi_UpdateAssistResponseBehavior(GameState &state,
 [[nodiscard]] bool NovaAiShip_ShouldKeepPressingTarget(const GameState &state,
                                                        const Ship &ship);
 
-// Ghidra 0x0040fc00 Ship_IsShipEligibleForCommAidInteraction. True when some
+// Ghidra 0x0040fc00 Ship_IsThreatened. True when some
 // other active ship is positioned to come to `ship`'s aid: iterates the other
 // slots and returns true for the first one in a non-disengage state
 // (ai_state_code not in {7,9,15,10,11,5,12}) while `ship`'s primary target
 // slot equals its own instance id (a literal port of the original's
 // comparison; see the implementation comment).
-[[nodiscard]] bool
-NovaAiShip_IsShipEligibleForCommAidInteraction(const GameState &state,
-                                               const Ship &ship);
+[[nodiscard]] bool NovaAiShip_IsThreatened(const GameState &state,
+                                           const Ship &ship);
 
 // Ghidra 0x0040fca0 / 0x0040fce0 Ship_IsShipAssistingPlayerInAiState0x09/0x0F.
 // True when an active, non-disabled ship targets the player in the assist
@@ -430,34 +427,33 @@ NovaAiShip_IsShipInHoldStateWithControlMode4Or0xD(const Ship &ship);
 // (docked), 2 (idle-template), 7 (escort-arrive), 0x14 (jump/travel)}.
 [[nodiscard]] bool NovaAiShip_IsShipInNonIdleAiState(const Ship &ship);
 
-// Ghidra 0x00410060 Ship_AreAnyShipsEligibleForDistressCall. Scans the NPC
-// slots for any ship satisfying NovaTargeting_IsShipEligibleForDistressCall.
+// Ghidra 0x00410060 Ship_IsAnyShipThreatToPlayerSquad. Scans the NPC
+// slots for any ship satisfying NovaTargeting_IsThreatToPlayerSquad.
+[[nodiscard]] bool NovaAi_IsAnyShipThreatToPlayerSquad(const GameState &state);
+
+// Ghidra 0x004101d0 Ship_IsEnemyOfShip. Pairwise enemy predicate: distinct,
+// both active, `other` not a 0x3ff mission slot, and government relation rules.
+// Hostile/xenophobic governments are enemies, same-government ships are not,
+// and a xenophobic `other` government admits any non-allied ship.
+[[nodiscard]] bool NovaAiShip_IsEnemyOfShip(const GameState &state,
+                                            const Ship &ship,
+                                            const Ship &other);
+
+// Ghidra 0x004100a0 Ship_IsPlayerThreatenedByEnemyOfShip. True when at least
+// one other ship (not `ship`) both keeps pressing its own target and is an
+// enemy of `ship`. Used by the comm dialog to route the threat branch.
 [[nodiscard]] bool
-NovaAi_AreAnyShipsEligibleForDistressCall(const GameState &state);
+NovaAiShip_IsPlayerThreatenedByEnemyOfShip(const GameState &state,
+                                           const Ship &ship);
 
-// Ghidra 0x004101d0 Ship_CanShipRespondToDistressCall. Whether `responder`
-// can serve as a responder for `distressed`'s distress-call flow: distinct,
-// both active, `distressed` not a 0x3ff mission slot, and government relation
-// rules -- hostile/xenophobic governments respond, same-government does not,
-// and a xenophobic `distressed` government admits any non-allied responder.
-[[nodiscard]] bool NovaAiShip_CanShipRespondToDistressCall(
-    const GameState &state, const Ship &responder, const Ship &distressed);
-
-// Ghidra 0x004100a0 Ship_HasShipDistressResponder. True when at least one
-// other ship (not `ship`) both keeps pressing its own target and can respond
-// to `ship`'s distress call. Used by the comm dialog to route the distress
-// branch.
-[[nodiscard]] bool NovaAiShip_HasShipDistressResponder(const GameState &state,
-                                                       const Ship &ship);
-
-// Ghidra 0x00410110 Ship_HasIncomingDistressSupportForShip. Aggregate
-// distress-responder probe: a player-owned `ship` delegates to
-// NovaAiShip_HasShipDistressResponder; otherwise true when `ship` itself is
-// still pressing its target, or when some other active ship (excluding
-// `ship` and `context_ship`) can acquire `ship` as a target and qualifies as
-// a responder for `context_ship`. Used to double an ally's perceived combat
-// strength when support is incoming.
-[[nodiscard]] bool NovaAiShip_HasIncomingDistressSupport(
+// Ghidra 0x00410110 Ship_IsThreatenedByEnemyOfShip. Aggregate threat probe: a
+// player-owned `ship` delegates to
+// NovaAiShip_IsPlayerThreatenedByEnemyOfShip; otherwise true when `ship` itself
+// is still pressing its target, or when some other active ship (excluding
+// `ship` and `context_ship`) can acquire `ship` as a target and is an enemy of
+// `context_ship`. Used to double perceived combat strength when an allied
+// threat is present.
+[[nodiscard]] bool NovaAiShip_IsThreatenedByEnemyOfShip(
     const GameState &state, const Ship &ship, const Ship &context_ship);
 
 // Ghidra 0x00411800 Ship_ComputePerceivedCombatStrengthAgainstShip. Combat
@@ -509,7 +505,7 @@ void NovaAi_EnterState4TargetRandomUnengagedShip(GameState &state, Ship &ship);
 
 // Ghidra 0x004107e0 Ship_EnterShipAiState0x04_TargetRandomCombatCandidate.
 // Same as TargetRandomUnengagedShip but the candidate scan additionally
-// requires NovaTargeting_IsShipEligibleForDistressCall.
+// requires NovaTargeting_IsThreatToPlayerSquad.
 void NovaAi_EnterState4TargetRandomCombatCandidate(GameState &state,
                                                    Ship &ship);
 
@@ -529,7 +525,7 @@ void NovaAi_EnterState4TargetRandomRelativeToSquadLeader(GameState &state,
 // not running, seeds the 1.0-tick hold and stamps the 60 Hz mode start.
 // Called when a squad leader charges a jump: by Ship_SyncJumpStateToSquad
 // (0x00422340) and the leader-jump-prep arm of
-// Ship_UpdateShipAssistResponseBehavior (0x004048a0).
+// Ship_UpdateEscortAI (0x004048a0).
 void NovaAi_EnterStateBClearTargetsSeedHold(Ship &ship, std::uint32_t now_60hz);
 
 // Ghidra 0x00422340 Ship_SyncJumpStateToSquad. During the squad leader's

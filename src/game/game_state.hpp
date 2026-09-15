@@ -422,7 +422,7 @@ struct Ship {
   // (Weapon_CanWeaponHitTarget 0x00426ef0 / collision.cpp), and the stellar's
   // own battery shots only hit ships matching its recorded target.
   std::int16_t defense_fleet_home_stellar_id = -1; // +0x8C
-  // Escort command selected by the assist supervisor. The clean-room dialog
+  // Escort command selected by the escort AI supervisor. The clean-room dialog
   // and mission models only use the neutral default so far, but the field is
   // needed to preserve the state-0x05+ branch shape.
   std::int16_t escort_command_code = 0; // +0xC90A (provisional)
@@ -1461,7 +1461,7 @@ struct GameState {
   // Ship_InitGameplayDataTables (0x004b0c20); the player-core command dispatch
   // (0x00450d88, unported) writes the dialog selection and resets idle
   // categories to 0. Until that slice is ported the table stays -1, which the
-  // assist supervisor (0x004048a0) coerces to command 0 (formation).
+  // escort AI supervisor (0x004048a0) coerces to command 0 (formation).
   std::array<std::int16_t, 4> target_category_command{{-1, -1, -1, -1}};
 
   // --- PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240) ------
