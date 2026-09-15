@@ -1334,9 +1334,10 @@ struct System {
   // entries are moved into encounter_fleet_* below instead.
   std::array<std::int16_t, 8> dude_class_ids{-1, -1, -1, -1, -1, -1, -1, -1};
   std::array<std::uint16_t, 8> dude_class_weights{};
-  std::array<std::int16_t, 8> dude_types{}; // DudeTypes (+0x6e, rebased -0x80;
-                                            //  <0x80 / >0x47e -> -1)
-  std::array<std::int16_t, 8> dude_prob{};  // % Prob (+0x7e, clamped 0..100)
+  // Person1-8 / Person Prob1-8 (+0x6e/+0x7e): forced përs entries evaluated
+  // on system entry, separate from the ordinary Dude1-8 table above.
+  std::array<std::int16_t, 8> personality_slots{};
+  std::array<std::int16_t, 8> personality_spawn_probabilities{};
   // AvgShips (payload +0x64): the per-system NPC ship population cap that the
   // spawn maintainers replenish the system's active ship count toward.
   std::int16_t avg_ships = 0;

@@ -69,7 +69,7 @@ globals (AGENTS.md).
   -> -1) with % Prob at `0x7e` (clamped 0..100), BkgndColor+0x8e, Murk+0x92,
   ReinfFleet/Time/Interval +0x196..+0x19a. SystemDef runtime +0x96 is Interference (payload +0x6c; the loader writes it to dude_types-2), consumed by the guided-shot confusion roll in Shot_SpawnShotFromWeapon 0x0041fd30. Verified against
   system 0x80 (links 199/200/202/129/135, avg 4, govt 128->0, message -1,
-  asteroids 3, dude types 510/155/156/128, probs 50/1/1/10). Dude1-8 at +0x44
+  asteroids 3, personality slots 510/155/156/128, probs 50/1/1/10). Dude1-8 at +0x44
   and their weights at +0x54 are split by the loader: ordinary 0x80..0x27f ids
   become normalized dude-class bindings, while negative -0x80..-0x17f ids
   become the per-system encounter-fleet binding (SystemDef +0x6a ids / +0x7a

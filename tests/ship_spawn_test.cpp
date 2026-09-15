@@ -275,6 +275,50 @@ TEST_CASE("system entry populates scattered ambient ships immediately") {
   CHECK(scattered > 0);
 }
 
+TEST_CASE("system entry force-spawns mission-gated system personalities") {
+  using namespace game;
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  constexpr std::int16_t kRautherionSystem = 166 - 0x80;
+  constexpr std::int16_t kTutorialDerelictPers = 642 - 0x80;
+  auto &system = state.scenario.systems[kRautherionSystem];
+  system.avg_ships = 0;
+  REQUIRE(system.personality_slots[0] == kTutorialDerelictPers);
+  REQUIRE(system.personality_spawn_probabilities[0] == 100);
+  REQUIRE(
+      state.scenario.pers_defs[kTutorialDerelictPers].availability_expression ==
+      "b9208");
+  REQUIRE((state.scenario.pers_defs[kTutorialDerelictPers].flags_primary &
+           0x0002U) != 0U); // Escape-pod exception: bit 9208 is the final gate.
+
+  NovaSystem_PopulateInitialNpcShips(state, kRautherionSystem);
+  CHECK(ActiveShipsInSystem(state, kRautherionSystem) == 0);
+
+  state.control.SetControlBit(9208, true);
+  NovaSystem_PopulateInitialNpcShips(state, kRautherionSystem);
+  REQUIRE(ActiveShipsInSystem(state, kRautherionSystem) == 1);
+
+  const Ship *derelict = nullptr;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (ship.is_active && ship.pers_def_slot == kTutorialDerelictPers) {
+      derelict = &ship;
+      break;
+    }
+  }
+  REQUIRE(derelict != nullptr);
+  const ShipClass *cls = state.scenario.Ship(
+      static_cast<std::int16_t>(derelict->ship_class_id + 0x80));
+  REQUIRE(cls != nullptr);
+  CHECK(derelict->shield_points == Catch::Approx(0.0F));
+  CHECK(derelict->armor_points ==
+        Catch::Approx(static_cast<float>(cls->base_armor) * 0.33F - 1.0F));
+  CHECK(derelict->vel_x == Catch::Approx(0.0F));
+  CHECK(derelict->vel_y == Catch::Approx(0.0F));
+  CHECK(derelict->speed == Catch::Approx(0.0F));
+}
+
 // Ship_DeactivateVacantShipsAndTally (0x0041ad50): the vacancy predicate
 // spares ONLY non-fire-restricted ships actively engaging the player
 // (behavior > 4, squad_leader_ship_slot == 0, not docked, no mission fleet,

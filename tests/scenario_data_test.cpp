@@ -836,7 +836,7 @@ TEST_CASE("random encounter fleet defs decode", "[scenario][fleet]") {
 // The system record's population/faction/spawn block (payload +0x64..+0x6c)
 // and the dude tables decode with the loader's rebasing. Pinned against system
 // 0x80 (payload: avg_ships 4 @ +0x64, govt 0x80 @ +0x66, message -1, asteroids
-// 3, interference 0, dude_types 0x01fe/0x9b/0x9c/0x80/... @ +0x6e, % prob @
+// 3, interference 0, Person slots 0x01fe/0x9b/0x9c/0x80/... @ +0x6e, % prob @
 // +0x7e).
 TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   ScenarioData data;
@@ -855,15 +855,15 @@ TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   CHECK(s->interference == 0);
 
   // Dude type ids are rebased -0x80 (payload 0x01fe/0x9b/0x9c/0x80/0xe3/...).
-  CHECK(s->dude_types[0] == 510 - 0x80); // payload 0x01fe
-  CHECK(s->dude_types[1] == 155 - 0x80); // payload 0x009b
-  CHECK(s->dude_types[2] == 156 - 0x80); // payload 0x009c
-  CHECK(s->dude_types[3] == 128 - 0x80); // payload 0x0080
+  CHECK(s->personality_slots[0] == 510 - 0x80); // payload 0x01fe
+  CHECK(s->personality_slots[1] == 155 - 0x80); // payload 0x009b
+  CHECK(s->personality_slots[2] == 156 - 0x80); // payload 0x009c
+  CHECK(s->personality_slots[3] == 128 - 0x80); // payload 0x0080
   // % Prob values are carried verbatim (0x32/0x01/0x01/0x0a/... @ +0x7e).
-  CHECK(s->dude_prob[0] == 50);
-  CHECK(s->dude_prob[1] == 1);
-  CHECK(s->dude_prob[2] == 1);
-  CHECK(s->dude_prob[3] == 10);
+  CHECK(s->personality_spawn_probabilities[0] == 50);
+  CHECK(s->personality_spawn_probabilities[1] == 1);
+  CHECK(s->personality_spawn_probabilities[2] == 1);
+  CHECK(s->personality_spawn_probabilities[3] == 10);
 
   // Kania has only ordinary dude-class entries. Its raw weights already sum to
   // 100, and all ids are rebased from resource ids to zero-based indexes.

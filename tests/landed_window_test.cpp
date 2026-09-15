@@ -348,8 +348,9 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
   constexpr std::int16_t kRautherionSystem = 166 - 0x80;
   constexpr std::int16_t kRautherStellar = 191;
   constexpr std::int16_t kTutorial006Index = 754 - 0x80;
+  constexpr std::int16_t kTutorialDerelictPers = 642 - 0x80;
   constexpr std::int16_t kPirateViperShipClass = 166 - 0x80;
-  constexpr std::int16_t kDerelictsGovernment = 180 - 0x80;
+  constexpr std::int16_t kDerelictsGovernment = 160 - 0x80;
   state.player.current_system_id = kRautherionSystem;
   state.player.ship_class_id = 0;
 
@@ -357,6 +358,7 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
       game::Mission_ActivateAtSlot(state, kTutorial006Index, kRautherStellar));
   REQUIRE(state.active_mission_runtime_flags[0].is_active);
   REQUIRE(state.active_mission_runtime_flags[1].is_active);
+  REQUIRE(state.control.bits.test(9208));
   for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
     CHECK_FALSE(state.ShipAt(slot).is_active);
   }
@@ -366,14 +368,51 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
   bool found_derelict = false;
   for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
     const auto &ship = state.ShipAt(slot);
-    if (ship.is_active && ship.mission_fleet_slot == 1) {
+    if (ship.is_active && ship.pers_def_slot == kTutorialDerelictPers) {
       found_derelict = true;
       CHECK(ship.current_system_id == kRautherionSystem);
       CHECK(ship.ship_class_id == kPirateViperShipClass);
       CHECK(ship.faction_or_government_id == kDerelictsGovernment);
+      CHECK(ship.mission_fleet_slot == -1);
     }
   }
   CHECK(found_derelict);
+}
+
+TEST_CASE("TEMP seed sweep derelict spawn") {
+  constexpr std::int16_t kRautherionSystem = 166 - 0x80;
+  constexpr std::int16_t kRautherStellar = 191;
+  constexpr std::int16_t kTutorial006Index = 754 - 0x80;
+  constexpr std::int16_t kTutorialDerelictPers = 642 - 0x80;
+  int failures = 0;
+  int first_failure = -1;
+  for (unsigned seed = 1; seed <= 400; ++seed) {
+    game::GameState state;
+    REQUIRE(state.scenario.LoadFromArchives());
+    state.rng.seed(seed);
+    state.player.current_system_id = kRautherionSystem;
+    state.player.ship_class_id = 0;
+    if (!game::Mission_ActivateAtSlot(state, kTutorial006Index, kRautherStellar)) {
+      ++failures;
+      continue;
+    }
+    game::Stellar_Launch(state, kRautherStellar);
+    bool found = false;
+    for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
+      const auto &ship = state.ShipAt(slot);
+      if (ship.is_active && ship.pers_def_slot == kTutorialDerelictPers) {
+        found = true;
+      }
+    }
+    if (!found) {
+      ++failures;
+      if (first_failure < 0) {
+        first_failure = static_cast<int>(seed);
+      }
+    }
+  }
+  INFO("failures=" << failures << " first=" << first_failure);
+  CHECK(failures == 0);
 }
 
 // DAT_007d4c0d (0x0048ea70): a stellar with a zero TechLevel and no positive
