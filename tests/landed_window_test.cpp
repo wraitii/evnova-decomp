@@ -181,6 +181,38 @@ TEST_CASE("landing rejects a moving ship within range", "[landed_window]") {
   CHECK(game::Stellar_Dock(state, ctx, 96));
 }
 
+TEST_CASE("landing reports authorization denial before distance",
+          "[landed_window]") {
+  game::GameState state;
+  state.scenario.systems.resize(1);
+  state.scenario.systems[0].nav_defs[0] = 0x80;
+  state.scenario.stellars.resize(1);
+  game::Stellar &stellar = state.scenario.stellars[0];
+  stellar.name = "Restricted station";
+  stellar.pos_x = 0;
+  stellar.pos_y = 0;
+  stellar.flags = 0x11; // targetable + station
+  stellar.is_available = true;
+  stellar.system_id = 0;
+  stellar.government_id = 0;
+  stellar.min_status = 100;
+  state.scenario.governments.resize(1);
+  state.player.current_system_id = 0;
+  state.player.pos_x = 1'000.0F; // distance must not mask the permission result
+  state.system_reputation.resize(1);
+  state.system_reputation[0] = 0;
+  state.travel.selected_stellar_id = 0x80;
+  state.travel.engage_timer = 0;
+
+  game::LandedContext ctx;
+  CHECK_FALSE(game::Stellar_Dock(state, ctx, 96));
+  CHECK(ctx.denial == game::LandedDenial::kUnauthorized);
+
+  state.system_reputation[0] = 100;
+  CHECK_FALSE(game::Stellar_Dock(state, ctx, 96));
+  CHECK(ctx.denial == game::LandedDenial::kTooFar);
+}
+
 TEST_CASE("landing approach timer arms within 250 and expires", "[travel]") {
   game::GameState state;
   state.scenario.systems.resize(1);

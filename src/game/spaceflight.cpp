@@ -1103,6 +1103,14 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
   const auto *st = state.scenario.Stellar(state.travel.selected_stellar_id);
   const bool is_station = st != nullptr && (st->flags & 0x10U) != 0U;
   NovaHud_ShowLandingDenial(state, ctx.denial, is_station);
+  if (ctx.denial == LandedDenial::kUnauthorized) {
+    // 0x00458708: a failed authorization attempt disarms the approach and
+    // clears the selected stellar after presenting the dedicated denial.
+    state.pending_ui_sounds.push_back({1, 1});
+    state.travel.engage_timer = -1;
+    state.travel.selected_stellar_id = -1;
+    state.travel.selected_stellar_is_manual = false;
+  }
   return LandCommandResult::kContinue;
 }
 
