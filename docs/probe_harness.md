@@ -42,7 +42,8 @@ and the binary behaves exactly as before. The implementation lives in
 | `GET /probe/ui?at=x,y` | hit-test oracle: name of the published element under that window point |
 | `GET /probe/screenshot` | next frame as `image/bmp` (last frame if paused) |
 | `GET /probe/logs?since=SEQ` | tail the in-game log ring (`{"tail":N,"lines":[...]}`) |
-| `POST /probe/command` | `{"cmd":"pause"\|"resume"\|"step"\|"accelerate"\|"quit", "frames":N}` |
+| `POST /probe/command` | Execution commands plus semantic `land_at`, `jump_to`, and `cancel_automation` |
+| `GET /probe/automation` | Current optional flight-automation goal, phase, target, and failure detail |
 | `POST /probe/key` | `{"key":"I"}` tap; `{"key":"I","down":true\|false}` hold/release (modal-loop channel, synthetic `SDL_Event`s) |
 | `POST /probe/click` | `{"element":"accept"}` clicks the named rect published by the active modal; `{"x":553,"y":508}` clicks raw window points (motion + button-down pair) |
 | `POST /probe/hold` | `{"keys":["W","SPACE"],"down":true}` virtual held keys merged into `PollFlightInput` (flight channel — `SDL_GetKeyboardState` cannot see injected events) |
@@ -51,6 +52,31 @@ Unknown queries/paths return `400`/`404` with a hint. Requests that need the
 main thread time out with `504` if it never pumps (e.g. blocked in a native
 modal). While paused, state/log reads still work (the pump services them);
 screenshots return the last captured frame.
+
+### Scenario replays
+
+Semantic probe workflows live in `tests/scenarios/` as versioned TOML files
+and run through the standard-library runner:
+
+```sh
+python3 tools/scenario_runner.py tests/scenarios/tutorial_first_leg.toml
+```
+
+Steps use observable waits plus input-only `click`, `key`, and `command`
+actions. `validate_state` performs immediate exact (`expect`) and full-regex
+(`matches`) assertions on dotted probe paths; numeric path components index
+arrays. `screenshot` writes BMP checkpoints below `build/scenario-results/`.
+On failure the runner records UI, summary, travel, mission, automation and log
+state plus a screenshot. Comments are ordinary TOML comments, and unknown
+actions or fields fail instead of being silently ignored. Set
+`quit_on_finish = true` at the document root to stop the probed game after
+either success or failure.
+
+Flight automation is input-only: `{"cmd":"land_at","target":"Earth"}` and
+`{"cmd":"jump_to","target":"Sol"}` install a controller that emits the same
+edge/held `FlightInput` commands as a pilot. An optional positive `timeout_ms`
+is measured in gameplay time. `cancel_automation` stops emission; status is
+read from `/probe/automation`.
 
 ### UI layout registry (click by intent)
 

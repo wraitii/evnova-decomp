@@ -1011,6 +1011,8 @@ LandedExit DispatchService(SdlPlatform &platform,
 LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                 GameState &state,
                                 LandedContext &ctx) {
+  ProbeUiAutoClear probe_ui(platform);
+  platform.probe().AutomationObservedDocked();
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
   NovaLog::Info("opening landed services window at stellar {}",
                 static_cast<int>(ctx.stellar_id));
@@ -1115,6 +1117,24 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     NovaLog::Warn("service button art unavailable");
   }
   const std::vector<ServiceButton> button_rects = BuildServiceButtons(layout);
+  constexpr std::array<const char *, 7> kProbeNames{"launch",
+                                                    "refuel",
+                                                    "trade_center",
+                                                    "outfitter",
+                                                    "shipyard",
+                                                    "mission_bbs",
+                                                    "bar"};
+  const auto publish_probe_controls = [&] {
+    std::vector<std::pair<std::string, SDL_FRect>> probe_controls{
+        {"window", panel}};
+    for (const auto &button : button_rects) {
+      if (button.slot < kProbeNames.size()) {
+        probe_controls.emplace_back(kProbeNames[button.slot], button.rect);
+      }
+    }
+    platform.PublishProbeUi("spaceport", std::move(probe_controls));
+  };
+  publish_probe_controls();
 
   NovaLog::Todo(
       "docked screen geometry (panels, title band, buttons) is laid out from "
@@ -1239,6 +1259,9 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
       });
 
   while (!platform.quit_requested()) {
+    // Nested modals clear their published controls on return. Restore the
+    // Spaceport's semantic surface at the same point its root face resumes.
+    publish_probe_controls();
     // Compute the mouse-hovered service (for hover state on the buttons).
     std::optional<std::uint8_t> hovered;
     if (!entered_sub_screen) {
