@@ -93,7 +93,7 @@ bool SdlMusic::Load(const std::string &path) {
 }
 
 void SdlMusic::Play() {
-  if (!initialized_ || !track_) {
+  if (!initialized_ || !track_ || playback_suppressed_) {
     return;
   }
   if (MIX_TrackPlaying(track_.get())) {
@@ -120,6 +120,23 @@ void SdlMusic::SetVolume(float volume) {
   }
   const auto clamped = volume < 0.0F ? 0.0F : (volume > 1.0F ? 1.0F : volume);
   MIX_SetTrackGain(track_.get(), clamped);
+}
+
+void SdlMusic::SetPlaybackSuppressed(bool suppressed) {
+  if (playback_suppressed_ == suppressed) {
+    return;
+  }
+  if (suppressed) {
+    resume_after_suppression_ = IsPlaying();
+    Stop();
+    playback_suppressed_ = true;
+    return;
+  }
+  playback_suppressed_ = false;
+  if (resume_after_suppression_) {
+    resume_after_suppression_ = false;
+    Play();
+  }
 }
 
 bool SdlMusic::IsPlaying() const {

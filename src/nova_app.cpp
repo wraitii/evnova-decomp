@@ -1223,6 +1223,12 @@ int NovaApp_Run(NovaRuntime &runtime) {
       [&runtime](const std::string &query) {
         return ProbeState_Snapshot(runtime.game, query);
       });
+  runtime.platform.SetProbeAudioSuppressionHandler([&runtime](bool suppressed) {
+    runtime.audio.SetPlaybackSuppressed(suppressed, [&runtime] {
+      return runtime.platform.gameplay_ticks_ms();
+    });
+    runtime.music.SetPlaybackSuppressed(suppressed);
+  });
   NovaGameSession_Run(runtime);
   return 0;
 }

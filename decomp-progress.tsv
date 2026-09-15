@@ -1127,7 +1127,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004D2010	FUN_004d2010		0%	
 0x004D2440	FUN_004d2440		0%	
 0x004D2950	Platform_RegisterMainWindow		0%	
-0x004D2A80	NovaApp_Run	src/nova_app.cpp	100%	NovaApp_Run app entry
+0x004D2A80	NovaApp_Run	src/nova_app.cpp	100%	NovaApp_Run app entry; port-only probe hook can suppress physical audio while retaining gameplay-clock SFX completion semantics
 0x004D2BD0	FUN_004d2bd0		0%	
 0x004D3163	NovaPlatform_InitializeRuntime		0%	
 0x004D332D	NovaPlatform_ShutdownRuntime		0%	

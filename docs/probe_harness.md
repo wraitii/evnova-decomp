@@ -92,7 +92,7 @@ the returned `tail` value as the next `since`.
 EVN_PROBE=1 build/release/src/evnova &
 curl -s localhost:8190/probe/state | python3 -m json.tool
 curl -s -X POST -d '{"cmd":"step","frames":60}' localhost:8190/probe/command
-curl -s -X POST -d '{"cmd":"accelerate","enabled":true,"speed_multiplier":10}' localhost:8190/probe/command
+curl -s -X POST -d '{"cmd":"accelerate","enabled":true,"speed_multiplier":10,"suppress_audio":true}' localhost:8190/probe/command
 curl -s localhost:8190/probe/screenshot -o frame.bmp
 curl -s -X POST -d '{"key":"I"}' localhost:8190/probe/key   # open missions
 curl -s "localhost:8190/probe/logs?since=0" | jq .
@@ -124,3 +124,9 @@ normal frame yield; modal loops and spaceflight use the same pacing hook. Send
 speed, pacing, and VSync without discontinuity in the gameplay clock.
 Presentation, resource loading, and render-side effects remain active; this
 is not a renderer-free headless mode.
+
+Set `"suppress_audio":true` on the command to stop physical SFX and music
+output while accelerated. Suppression happens in the audio backends. SFX
+still create logical voices timed by the gameplay clock, so hyperspace's
+warp-up completion gate and no-stack sound checks retain their normal
+simulation-time behavior. Disabling acceleration restores audio output.

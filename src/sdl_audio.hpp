@@ -3,6 +3,7 @@
 #include <SDL3/SDL_audio.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -67,6 +68,12 @@ public:
   void StopAll();
   void SetMasterVolume(float volume);
 
+  // Probe-only output suppression. Play still creates logical voices whose
+  // lifetimes use gameplay_clock, preserving completion and no-stack gates.
+  void
+  SetPlaybackSuppressed(bool suppressed,
+                        std::function<std::uint64_t()> gameplay_clock = {});
+
   [[nodiscard]] bool IsEnabled() const;
 
 private:
@@ -83,12 +90,15 @@ private:
     // later effect.
     NovaAudioVoicePriority priority;
     float source_gain = 1.0F;
+    std::optional<std::uint64_t> logical_end_ms;
   };
 
-  [[nodiscard]] static bool StreamActive(SDL_AudioStream *stream);
+  [[nodiscard]] bool VoiceActive(const Voice &voice) const;
 
   SDL_AudioDeviceID device_id_ = 0;
   std::vector<Voice> voices_;
   float master_gain_ = 1.0F;
   bool initialized_ = false;
+  bool playback_suppressed_ = false;
+  std::function<std::uint64_t()> gameplay_clock_;
 };

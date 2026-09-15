@@ -2,6 +2,7 @@
 #include "log.hpp"
 
 #include <SDL3/SDL_init.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <cmath>
@@ -43,7 +44,14 @@ bool SdlAudio::Initialize() {
   return true;
 }
 
-bool SdlAudio::StreamActive(SDL_AudioStream *stream) {
+bool SdlAudio::VoiceActive(const Voice &voice) const {
+  if (voice.logical_end_ms.has_value()) {
+    return gameplay_clock_ && gameplay_clock_() < *voice.logical_end_ms;
+  }
+  SDL_AudioStream *const stream = voice.stream.get();
+  if (stream == nullptr) {
+    return false;
+  }
   // A stream that has been flushed and drained reports no queued bytes and so
   // is available for reuse. Nonzero queued data means it is still playing.
   const auto queued = SDL_GetAudioStreamQueued(stream);
@@ -72,19 +80,18 @@ void SdlAudio::Play(const NovaSoundData &sound,
                     float playback_rate,
                     int sound_key,
                     int priority_width) {
-  if (!initialized_ || sound.samples.empty() || sound.sample_rate <= 0 ||
-      sound.channel_count <= 0) {
+  if ((!initialized_ && !playback_suppressed_) || sound.samples.empty() ||
+      sound.sample_rate <= 0 || sound.channel_count <= 0) {
     return;
   }
 
   // Retire drained descriptors before applying the original ordered 16-slot
   // insertion policy (Audio_AllocateVoiceSlot 0x004d6550).
   constexpr std::size_t kMaxVoices = 16;
-  voices_.erase(std::remove_if(voices_.begin(),
-                               voices_.end(),
-                               [](const Voice &voice) {
-                                 return !StreamActive(voice.stream.get());
-                               }),
+  voices_.erase(std::remove_if(
+                    voices_.begin(),
+                    voices_.end(),
+                    [this](const Voice &voice) { return !VoiceActive(voice); }),
                 voices_.end());
   const int incoming_width = std::max(1, priority_width);
   // QueueCenteredSound supplies levels on a 0..0x100 scale; the allocator
@@ -108,9 +115,11 @@ void SdlAudio::Play(const NovaSoundData &sound,
   Voice incoming;
   if (voices_.size() == kMaxVoices) {
     incoming = std::move(voices_.back());
-    SDL_ClearAudioStream(incoming.stream.get());
+    if (incoming.stream) {
+      SDL_ClearAudioStream(incoming.stream.get());
+    }
     voices_.pop_back();
-  } else {
+  } else if (!playback_suppressed_) {
     incoming.stream.reset(SDL_CreateAudioStream(nullptr, nullptr));
     if (!incoming.stream) {
       NovaLog::Error("SDL audio stream creation failed: {}", SDL_GetError());
@@ -124,6 +133,7 @@ void SdlAudio::Play(const NovaSoundData &sound,
   incoming.key = sound_key;
   incoming.priority = {incoming_width, incoming_level};
   incoming.source_gain = std::max(0.0F, gain);
+  incoming.logical_end_ms.reset();
   auto voice_it =
       voices_.insert(voices_.begin() + *insertion_index, std::move(incoming));
   Voice *voice = &*voice_it;
@@ -131,6 +141,15 @@ void SdlAudio::Play(const NovaSoundData &sound,
   const int playback_sample_rate =
       static_cast<int>(std::lround(sound.sample_rate * playback_rate));
   if (playback_sample_rate <= 0) {
+    return;
+  }
+  if (playback_suppressed_) {
+    const auto frames =
+        sound.samples.size() / static_cast<std::size_t>(sound.channel_count);
+    const auto duration_ms = static_cast<std::uint64_t>(
+        std::ceil(static_cast<double>(frames) * 1000.0 /
+                  static_cast<double>(playback_sample_rate)));
+    voice->logical_end_ms = gameplay_clock_() + duration_ms;
     return;
   }
   const SDL_AudioSpec source_spec{
@@ -160,7 +179,7 @@ int SdlAudio::CountActiveByKey(int sound_key) const {
   }
   int active = 0;
   for (const Voice &voice : voices_) {
-    if (voice.key == sound_key && StreamActive(voice.stream.get())) {
+    if (voice.key == sound_key && VoiceActive(voice)) {
       ++active;
     }
   }
@@ -174,7 +193,9 @@ void SdlAudio::StopByKey(int sound_key) {
   }
   for (Voice &voice : voices_) {
     if (voice.key == sound_key) {
-      SDL_ClearAudioStream(voice.stream.get());
+      if (voice.stream) {
+        SDL_ClearAudioStream(voice.stream.get());
+      }
       voice.key = -1;
     }
   }
@@ -182,7 +203,9 @@ void SdlAudio::StopByKey(int sound_key) {
 
 void SdlAudio::StopAll() {
   for (Voice &voice : voices_) {
-    SDL_ClearAudioStream(voice.stream.get());
+    if (voice.stream) {
+      SDL_ClearAudioStream(voice.stream.get());
+    }
     voice.key = -1;
   }
   voices_.clear();
@@ -192,8 +215,28 @@ void SdlAudio::SetMasterVolume(float volume) {
   const float clamped = std::clamp(volume, 0.0F, 1.0F);
   master_gain_ = clamped;
   for (Voice &voice : voices_) {
-    SDL_SetAudioStreamGain(voice.stream.get(),
-                           voice.source_gain * master_gain_);
+    if (voice.stream) {
+      SDL_SetAudioStreamGain(voice.stream.get(),
+                             voice.source_gain * master_gain_);
+    }
+  }
+}
+
+void SdlAudio::SetPlaybackSuppressed(
+    bool suppressed, std::function<std::uint64_t()> gameplay_clock) {
+  if (playback_suppressed_ == suppressed) {
+    return;
+  }
+  StopAll();
+  playback_suppressed_ = suppressed;
+  if (suppressed) {
+    gameplay_clock_ = gameplay_clock
+                          ? std::move(gameplay_clock)
+                          : std::function<std::uint64_t()>{[] {
+                              return static_cast<std::uint64_t>(SDL_GetTicks());
+                            }};
+  } else {
+    gameplay_clock_ = {};
   }
 }
 

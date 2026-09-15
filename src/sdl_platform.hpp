@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -226,7 +227,12 @@ public:
   // are applied only after a probe command has been consumed on the main
   // thread.
   void ApplyProbeExecutionSettings(bool enabled,
-                                   std::uint32_t speed_multiplier);
+                                   std::uint32_t speed_multiplier,
+                                   bool suppress_audio = false);
+
+  void SetProbeAudioSuppressionHandler(std::function<void(bool)> handler) {
+    probe_audio_suppression_handler_ = std::move(handler);
+  }
 
   [[nodiscard]] bool accelerated() const { return accelerated_; }
 
@@ -345,6 +351,7 @@ private:
   std::uint32_t speed_multiplier_ = 1;
   std::uint64_t gameplay_clock_anchor_ms_ = 0;
   std::uint64_t wall_clock_anchor_ms_ = 0;
+  std::function<void(bool)> probe_audio_suppression_handler_;
 
   bool sdl_initialized_ = false;
   bool quit_requested_ = false;

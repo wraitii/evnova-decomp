@@ -456,9 +456,11 @@ void SdlPlatform::PumpProbe() {
     wall_clock_anchor_ms_ += wall_ticks_ms() - pump_started_ms;
   }
   bool enabled = false;
+  bool suppress_audio = false;
   std::uint32_t speed_multiplier = 1;
-  if (probe_.ConsumeAccelerationRequest(enabled, speed_multiplier)) {
-    ApplyProbeExecutionSettings(enabled, speed_multiplier);
+  if (probe_.ConsumeAccelerationRequest(
+          enabled, speed_multiplier, suppress_audio)) {
+    ApplyProbeExecutionSettings(enabled, speed_multiplier, suppress_audio);
   }
 }
 
@@ -725,7 +727,8 @@ void SdlPlatform::PaceFrame() {
 }
 
 void SdlPlatform::ApplyProbeExecutionSettings(bool enabled,
-                                              std::uint32_t speed_multiplier) {
+                                              std::uint32_t speed_multiplier,
+                                              bool suppress_audio) {
   // Re-anchor before changing scale so gameplay time stays monotonic across
   // enable, multiplier-change, and disable requests.
   const std::uint64_t gameplay_now = gameplay_ticks_ms();
@@ -735,6 +738,9 @@ void SdlPlatform::ApplyProbeExecutionSettings(bool enabled,
   accelerated_ = enabled;
   speed_multiplier_ =
       enabled ? std::max<std::uint32_t>(1, speed_multiplier) : 1;
+  if (probe_audio_suppression_handler_) {
+    probe_audio_suppression_handler_(enabled && suppress_audio);
+  }
   if (accelerated_) {
     SDL_SetRenderVSync(renderer_.get(), 0);
     NovaLog::Info("probe: accelerated mode enabled ({}x)", speed_multiplier_);
