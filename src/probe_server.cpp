@@ -519,6 +519,8 @@ void ProbeServer::HandleRequest(const std::string &method,
     if (*cmd == "accelerate") {
       const bool enabled = JsonBoolField(body, "enabled").value_or(true);
       const int multiplier = JsonIntField(body, "speed_multiplier").value_or(1);
+      const bool suppress_audio =
+          JsonBoolField(body, "suppress_audio").value_or(false);
       if (multiplier < 1 || multiplier > 1000) {
         status = "400 Bad Request";
         body_out = "probe: speed_multiplier must be between 1 and 1000";
@@ -526,13 +528,16 @@ void ProbeServer::HandleRequest(const std::string &method,
       }
       acceleration_requested_.store(enabled);
       speed_multiplier_requested_.store(static_cast<std::uint32_t>(multiplier));
+      audio_suppression_requested_.store(enabled && suppress_audio);
       acceleration_request_pending_.store(true);
       sync_cv_.notify_all();
       status = "200 OK";
       content_type = "application/json";
       body_out = std::string{"{\"ok\":true,\"accelerated\":"} +
                  (enabled ? "true" : "false") + ",\"speed_multiplier\":" +
-                 std::to_string(enabled ? multiplier : 1) + "}";
+                 std::to_string(enabled ? multiplier : 1) +
+                 ",\"audio_suppressed\":" +
+                 (enabled && suppress_audio ? "true" : "false") + "}";
       return;
     }
     if (*cmd == "pause") {
@@ -756,12 +761,14 @@ bool ProbeServer::VirtualKey(SDL_Scancode scancode) const {
 }
 
 bool ProbeServer::ConsumeAccelerationRequest(bool &enabled,
-                                             std::uint32_t &speed_multiplier) {
+                                             std::uint32_t &speed_multiplier,
+                                             bool &suppress_audio) {
   if (!acceleration_request_pending_.exchange(false)) {
     return false;
   }
   enabled = acceleration_requested_.load();
   speed_multiplier = speed_multiplier_requested_.load();
+  suppress_audio = audio_suppression_requested_.load();
   return true;
 }
 

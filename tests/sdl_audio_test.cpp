@@ -41,3 +41,17 @@ TEST_CASE("full audio voice insertion selects the tail eviction boundary") {
   CHECK(active[8].width == 8);
   CHECK(active.back().width == 2);
 }
+
+TEST_CASE("suppressed audio retains gameplay-clock voice completion") {
+  SdlAudio audio;
+  std::uint64_t now_ms = 100;
+  audio.SetPlaybackSuppressed(true, [&now_ms] { return now_ms; });
+  NovaSoundData sound{1000, 1, std::vector<std::int16_t>(2000)};
+
+  audio.Play(sound, 1.0F, 1.0F, 128);
+  CHECK(audio.CountActiveByKey(128) == 1);
+  now_ms = 2099;
+  CHECK(audio.CountActiveByKey(128) == 1);
+  now_ms = 2100;
+  CHECK(audio.CountActiveByKey(128) == 0);
+}

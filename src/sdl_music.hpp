@@ -44,6 +44,7 @@ public:
 
   // 0.0..1.0 gain applied to the music track.
   void SetVolume(float volume);
+  void SetPlaybackSuppressed(bool suppressed);
 
   [[nodiscard]] bool IsPlaying() const;
 
@@ -64,4 +65,6 @@ private:
   std::unique_ptr<MIX_Audio, AudioDeleter> audio_;
   std::unique_ptr<MIX_Track, TrackDeleter> track_;
   bool initialized_ = false;
+  bool playback_suppressed_ = false;
+  bool resume_after_suppression_ = false;
 };
