@@ -1044,10 +1044,10 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
     buttons.push_back(ServiceButton{frame.buttons[i], i});
   }
 
-  // One full frame of the interaction window + present; the payment window
-  // re-renders this beneath itself every frame (boarding keep-rendering
-  // pattern).
-  const auto draw_dialog = [&]() {
+  // Rebuild the complete parent layer for every payment-modal frame. The
+  // payment window owns presentation, just like the other nested dialogs:
+  // presenting here would expose a transient frame without the payment panel.
+  const auto render_payment_background = [&]() {
     DrawNegotiationDialog(platform,
                           state,
                           view,
@@ -1060,12 +1060,10 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                           stellar_id,
                           frame,
                           -1);
-    platform.Present();
   };
 
   // The top button's action (NovaUi_PollTravelScriptAction ordinal 2 = DITL
   // item 1): Greetings when landing is open, the bribe ladder when denied.
-  bool proceed_to_land = false;
   const auto run_comm_action = [&]() {
     if (!denied || stellar->hazard_marker) {
       if (!denied) {
@@ -1096,15 +1094,15 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
         font_cache,
         button_art,
         payment_backdrop ? payment_backdrop->get() : nullptr,
-        draw_dialog,
+        render_payment_background,
         payment_amount);
     if (state.player.credits < payment_amount) {
       frame.status = LoadStatusVariant(random_index, kMsgCannotAfford)
                          .value_or(frame.status);
     } else if (result == PaymentResult::kPaid) {
-      // The original's HUD overlay composes "<name>, you're cleared to
-      // dock/land. Commence final approach." (STR# 0x7d2 0x5f/0x62 + 100)
-      // and sets the travel handoff directly.
+      // Ghidra 0x00480030: payment grants clearance by selecting the stellar
+      // and arming the ordinary landing-approach timer. It does not move the
+      // player or invoke the Spaceport; the normal proximity gate does that.
       const std::string cleared =
           NovaHud_LoadStringEntry(kMiscStr,
                                   (stellar->flags & 0x10) != 0U
@@ -1122,7 +1120,10 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                                  0xe0,
                                  250);
       state.player.credits -= payment_amount;
-      proceed_to_land = true;
+      state.travel.selected_stellar_id = stellar_id;
+      state.travel.engage_timer = 0x2ef;
+      state.player.ai_maneuver_timer_ms = 0.0F;
+      bribe_offered = false;
     } else {
       // Refused / closed: the haggle -- +1000, latch reset (offer stays
       // available per the original's bribe_offered = false), status msg 6.
@@ -1202,12 +1203,6 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
       }
     }
 
-    if (proceed_to_land) {
-      // Hand off to the Spaceport (DLOG 0x3e8) by staging the target stellar,
-      // exactly as the original's bribe path sets g_travel_selected_stellar_id.
-      state.travel.selected_stellar_id = stellar_id;
-      return NegotiationExit::kProceedToLand;
-    }
     SDL_Delay(16);
   }
   return NegotiationExit::kQuit;
