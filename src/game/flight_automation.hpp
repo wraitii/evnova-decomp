@@ -8,7 +8,7 @@
 #include <string>
 
 namespace game {
-enum class FlightAutomationGoal { kNone, kLandAt, kJumpTo };
+enum class FlightAutomationGoal { kNone, kLandAt, kJumpTo, kDestroy };
 enum class FlightAutomationPhase {
   kIdle,
   kSelect,
@@ -44,6 +44,25 @@ public:
               std::string,
               std::uint64_t now_ms,
               std::uint64_t timeout_ms = 180000);
+  // High-level "destroy a ship" routine. `target` matches an active ship in
+  // the player's system by class display name (case-insensitive), falling back
+  // to its instance ship_name; a pure-decimal target is also read as a ship
+  // identifier when no name matches. `ship_id` (when >= 0) is an explicit
+  // identifier that matches either a live ship slot or its instance id; it
+  // takes precedence over the numeric-string fallback but not over a name.
+  // Acquisition cycles the player's primary ship target with the backquote
+  // hotkey (input.cycle_ship_target_next), first through the combat-relevant
+  // half and then the non-relevant half, until it lands on a matching ship.
+  // While locked it aims at the predicted intercept of the ready primary bank
+  // every frame (leading a crossing target) and fires eagerly whenever the
+  // target is within the best weapon reach, so a moving target cannot outrun
+  // the projectile. Completes when the locked target is destroyed or gone;
+  // fails when no matching ship exists or it leaves the system.
+  bool DestroyShip(const GameState &,
+                   std::string target,
+                   std::uint64_t now_ms,
+                   std::uint64_t timeout_ms = 180000,
+                   std::int16_t ship_id = -1);
   void Cancel();
   void ObservedDocked();
   // `elapsed_ticks` is the normalized 30 Hz tick scale the integrator consumes
@@ -95,10 +114,21 @@ public:
 private:
   void Fail(std::string);
   void Tap(bool FlightInput::*field, FlightInput &);
+  // kDestroy body: acquires via the target-cycle hotkey, then leads/fires.
+  void TickDestroy(const GameState &, FlightInput &, float elapsed_ticks);
   FlightAutomationStatus status_;
   std::int16_t target_id_ = -1;
+  // Explicit/numeric ship identifier for kDestroy; -1 when the name is the
+  // only identity.
+  std::int16_t target_ship_id_ = -1;
   std::uint64_t deadline_ms_ = 0;
   float landing_envelope_axis_range_ = -1.0F;
   bool tap_release_ = false;
+  // kDestroy acquisition cursor. `cycle_pass_` 0 selects the combat-relevant
+  // cycle half (include-combat modifier held), 1 the non-relevant half; 2 means
+  // both halves were exhausted without a match. `cycle_taps_left_` bounds each
+  // half so a no-wrap cycle cannot spin forever.
+  int cycle_pass_ = 0;
+  int cycle_taps_left_ = 0;
 };
 } // namespace game

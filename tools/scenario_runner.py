@@ -189,7 +189,7 @@ def run_step(
         "validate_state": {"action", "expect", "matches"},
         "click": {"action", "element", "timeout_ms"},
         "key": {"action", "key"},
-        "command": {"action", "cmd", "target", "timeout_ms", "enabled", "speed_multiplier", "suppress_audio"},
+        "command": {"action", "cmd", "target", "ship_id", "timeout_ms", "enabled", "speed_multiplier", "suppress_audio"},
         "screenshot": {"action", "name"},
         "quit": {"action"},
     }
