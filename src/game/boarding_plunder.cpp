@@ -669,7 +669,8 @@ void Player_HandleBoardTargetCommand(SdlPlatform &platform,
                  mission.target_ship_count == 1) {
         // Rescue/board-captain arm. flags 0x0008 swaps the generic STR# 0x7d2
         // 0x7e "boarding" message for a class-name message whose tail strings
-        // (DAT_0072d5cc / DAT_00599acc) are not reconstructed. TODO(decomp).
+        // (DAT_0072d5cc / g_player_ship_name) are not reconstructed.
+        // TODO(decomp).
         ShowBoardingOverlay(state, 0x7e);
         QueueUiSound(state, 4, 8);
         mission.goal_counter_b =

@@ -14,7 +14,7 @@ This codebase has **two independent sequences** that are easy to mix up:
    images (no animation/timing) and always play on every app launch.
 2. **New-game intro cinematic** (after a pilot starts, *inside* flight entry). Played by
    `IntroCinematic_Run`, configured by `IntroCinematic_SetupFrames`. Plays only on a new
-   pilot's first flight entry (gated on `DAT_00596d35`), never during app boot.
+   pilot's first flight entry (gated on `g_intro_played`), never during app boot.
 
 Naming convention: the boot imagery is called **splash**; the delayed scripted sequence is
 called **intro cinematic** (`IntroCinematic_*`). Nothing named `IntroCinematic_*` runs at
@@ -147,10 +147,10 @@ depending on the game-active flag:
 ## Intro cinematic — NOT the splash, plays only on new-game flight entry
 
 `IntroCinematic_Run` (0x0048adc0) plays the intro cinematic
-when a pilot first enters spaceflight (gated on `DAT_00596d35`). This is distinct from the
+when a pilot first enters spaceflight (gated on `g_intro_played`). This is distinct from the
 boot-phase splash above; it is a timed scripted sequence tied to a starting a run.
 
-- `DAT_00596d35` — intro-played latch, set to 1 in `Ship_RunSpaceflightMode` after the cinematic
+- `g_intro_played` — intro-played latch, set to 1 in `Ship_RunSpaceflightMode` after the cinematic
   first runs; **persisted in the pilot save** (offset `0x3086`, restored by `PilotFile_LoadSave` and
   written back by the save writer `PilotFile_SaveGameCore`).
 - For each of (up to 4) intro frames: loads/fills the frame PICT (id from

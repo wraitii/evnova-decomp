@@ -341,14 +341,14 @@ Rows below are the 1-based ordinals used by
 | 1 | 0 | button `OK` (70x20, bottom-right) | activation code 1 |
 | 2 | 1 | button `Cancel` (70x20, bottom-left) | activation code 2 |
 | 3 | 2 | type-0x40 image 182x22 | decorative plate |
-| 4 | 3 | checkbox `Strict Play` | toggles the new-pilot flag (code 4); persisted to DAT_00596d2f by the flow |
+| 4 | 3 | checkbox `Strict Play` | toggles the new-pilot flag (code 4); persisted to g_strict_play by the flow |
 | 5 | 4 | static `Full Name:` | label |
 | 6 | 5 | static `Nickname:` | label |
 | 7 | 6 | static `name3:` (y=357, offscreen both variants) | vestigial third field |
 | 8 | 7 | edit text 170x16 | **Full Name**; prefilled from STR# 0x80 rows 1-3 (random), copied back to DAT_007d20b7; the `.plt` file is named `<Full Name>.plt` |
 | 9 | 8 | edit text 170x16 | **Nickname**; prefilled from STR# 0x80 rows 4-6, copied back to DAT_007d21b7 |
 | 10 | 9 | edit text (offscreen) | vestigial |
-| 11 | 10 | type-7 popup 200x20 -> **MENU 0x1f4 `Gender`** (Male/Female) | selection -> DAT_007d23b7; the flow lowercases its first char and compares to 'm' (0x6d) to latch DAT_00734c1c (male) |
+| 11 | 10 | type-7 popup 200x20 -> **MENU 0x1f4 `Gender`** (Male/Female) | selection -> DAT_007d23b7; the flow lowercases its first char and compares to 'm' (0x6d) to latch g_player_is_male (male) |
 | 12 | 11 | static `Create a new pilot:` | title |
 | 13 | 12 | type-7 popup 271x20 -> **MENU 0x1f5 `Character`** (entries filled at runtime from the 0x63688a72 pilot/châr family) | selection -> DAT_007d22b7 = character-template key for `PilotData_InitializePlayerState`; only inside 0xc1d's window (0xc1e pushes it to y=277, offscreen) |
 | 14 | 13 | type-0x40 image 32x32 (top-left) | pilot icon |
@@ -372,4 +372,4 @@ brand-new") + ` ` + `<ship class long name>` + `: ` (class name from the
 DAT_005a9bcc 0x100-stride Pascal table, indexed by the châr's ShipType),
 initial text = a random STR# 0x80 row 7-9 ship name ('Ring of Glory', 'Snowy
 Owl', 'Cardinal Virtue'), max 0x40 chars. The result, article-stripped, becomes
-the ship name (DAT_00599acc, the .plt trailer string).
+the ship name (g_player_ship_name, the .plt trailer string).

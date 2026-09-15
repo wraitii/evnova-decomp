@@ -1996,7 +1996,7 @@ void Mission_ExpandStringPlaceholders(const GameState &state,
     switch (machine) {
     case 1:
       if (ch == 'g' || ch == 'G') {
-        // DAT_00734c1c ('m' latch): 1 = male -> first arm; '!' swaps.
+        // g_player_is_male ('m' latch): 1 = male -> first arm; '!' swaps.
         const bool male = state.control.male != negate;
         machine = male ? 3 : 5;
       } else if (ch == 'p' || ch == 'P') {
@@ -3211,9 +3211,10 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
   }
   // Ship/outfit availability rerolls (the driver's tail): every ship class
   // gets fresh 1..100 licensed threshold/limit rolls, every outfit a fresh
-  // 1..100 stock roll. TODO(decomp) skipped: the per-system dude_prob
-  // +0x1c suppression countdown is handled above. TODO(decomp) skipped: the
-  // active-rank daily salary (ränk Salary) is not modelled.
+  // 1..100 stock roll. The per-system reinforcement cooldown (SystemDef
+  // +0xC4 reinf_cooldown_days, printed as dude_prob +0x1c) is ticked above.
+  // TODO(decomp) skipped: the active-rank daily salary (ränk Salary) is not
+  // modelled.
   const std::size_t ship_count =
       std::min(state.scenario.ships.size(), static_cast<std::size_t>(0x300));
   for (std::size_t i = 0; i < ship_count; ++i) {

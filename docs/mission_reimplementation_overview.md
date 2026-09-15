@@ -13,9 +13,11 @@ hull mass), landing (1 day) and launch (15..44 docked days); DatePostInc
 re-runs it per count. The driver now also ticks crön events, stellar tribute
 income, the per-stellar garrison/schedule countdown, ship/outfit availability
 rerolls, and the öops disaster states (System_UpdateDisasterStates 0x00424F90).
-Still open in the driver: the per-system dude_prob suppression countdown and
-the rank (ränk) daily salary (the rank table is not modelled). See the progress
-tracker for per-function percentages.
+Still open in the driver: the rank (ränk) daily salary (the rank table is not
+modelled). The per-system reinforcement cooldown (`SystemDef +0xC4`
+`reinf_cooldown_days`, which the decompiler prints as `dude_prob +0x1c`) is
+ticked as `state.reinforcement_retrigger_delay`. See the progress tracker for
+per-function percentages.
 
 ## Disasters (öops)
 

@@ -4301,7 +4301,7 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
     state.system_reputation[i] = gov_def != nullptr ? gov_def->initial_rec : 0;
   }
 
-  // Conditional post-respawn auto-save (DAT_00596d2f: save at the first nav
+  // Conditional post-respawn auto-save (g_strict_play: save at the first nav
   // stellar of the new system, else slot 0). TODO(decomp(0x0044da30))
   // skipped: the autosave preference flag and PilotFileSaveGame wiring.
   NovaLog::Info("escape-pod respawn complete: system {}, class {}, ' {}'",
@@ -4658,14 +4658,14 @@ void NovaSpaceflight_Run(SdlPlatform &platform,
   NovaLog::Info("entering spaceflight mode");
 
   // Preflight: the new-game intro cinematic plays on the pilot's first entry
-  // (Ghidra DAT_00596d35 == 0 in Ship_RunSpaceflightMode). We set the
+  // (Ghidra g_intro_played == 0 in Ship_RunSpaceflightMode). We set the
   // intro_played latch *after* the intro returns, exactly as the original sets
-  // DAT_00596d35 = 0x01 immediately after IntroCinematic_Run(). The intro's
+  // g_intro_played = 0x01 immediately after IntroCinematic_Run(). The intro's
   // skip result already gates (a stub of) the intro text-reader dialog
   // internally, so its return value needs no action here.
   if (!state.intro_played) {
     (void)NovaIntroCinematic_Run(platform, audio, state);
-    // Ghidra: DAT_00596d35 = 0x01, the latch IntroCinematic_SetupFrames/
+    // Ghidra: g_intro_played = 0x01, the latch IntroCinematic_SetupFrames/
     // Game_ResetNewGameState clear on a new pilot (see new_pilot_flow.cpp).
     state.intro_played = true;
   }
