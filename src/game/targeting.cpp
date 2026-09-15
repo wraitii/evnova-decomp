@@ -782,6 +782,10 @@ bool NovaTargeting_CyclePlayerStellarTarget(GameState &state, bool forward) {
   }
   state.travel.selected_stellar_id = candidates[next];
   state.travel.selected_stellar_is_manual = true;
+  // Stellar navigation and its reticle use the player's mode-2 channel.
+  // Cross-system arrival resets the channel to -1, so a first post-jump Tab
+  // selection must explicitly re-arm it.
+  state.player.travel_transfer_mode = 2;
   return true;
 }
 
