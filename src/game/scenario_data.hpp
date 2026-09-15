@@ -919,6 +919,12 @@ struct Stellar {
   // the travel/targeting interaction when a ship engages this stellar. >0 keeps
   // the stellar "active" even while its ambient sprite is unloaded.
   std::int16_t engage_access = 0;
+  // Pilot-persistent runtime byte (StellarDef special-tech block +0x30) and
+  // availability roll (+0x14). LoadSave restores these from block1+0xdece
+  // and block2+0x2086 for defined stellars; an asserted saved byte suppresses
+  // the saved garrison/roll restoration.
+  std::uint8_t persistent_state_byte = 0;
+  std::int16_t availability_roll = 0;
 
   // ---- Hostile-ship deposit bookkeeping (Ghidra StellarDef +0x4e/+0x50 and
   // the field_0x47 latch). The original keeps a pool of defense-fleet ships

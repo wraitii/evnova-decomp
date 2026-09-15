@@ -622,6 +622,10 @@ struct PilotControlState {
   // The Bible defines exactly 10,000 Nova control bits (b0..b9999).
   static constexpr std::size_t kControlBitCount = 10000;
   std::bitset<kControlBitCount> bits;
+  // Preserve the original byte values across load/save. Gameplay treats each
+  // entry as boolean, but archived Mac pilots contain noncanonical nonzero
+  // values and the original copies all 10,000 bytes verbatim.
+  std::array<std::uint8_t, kControlBitCount> persisted_bit_bytes{};
   std::bitset<0x800> explored_systems;
   bool registered = true;
   bool male = true;
@@ -643,7 +647,7 @@ struct PilotControlState {
   // progression/lockout bit. This is provisional until the full pilot-control
   // block is restored from save data, but keeps the baseline mission board
   // usable in the clean-room runtime.
-  PilotControlState() { bits.set(311); }
+  PilotControlState() { SetControlBit(311, true); }
 
   [[nodiscard]] bool ControlBit(std::uint32_t bit) const {
     return bit < kControlBitCount && bits.test(bit);
@@ -652,6 +656,7 @@ struct PilotControlState {
   void SetControlBit(std::uint32_t bit, bool value) {
     if (bit < kControlBitCount) {
       bits.set(bit, value);
+      persisted_bit_bytes[bit] = value ? 1 : 0;
     }
   }
 };
@@ -1279,9 +1284,9 @@ struct GameState {
   // CronEventDef). The tick (Mission_TickDailyCronEvents 0x00439500) runs
   // once per game-day.
   struct CronEventState {
-    bool is_active = false;            // block +0x00
-    std::int16_t duration_counter = 0; // block +0x26 (days left active)
-    std::int16_t holdoff_counter = 0;  // block +0x28 (pre/post holdoff wait)
+    bool is_active = false;             // block +0x00
+    std::int16_t duration_counter = -1; // block +0x26 (days left active)
+    std::int16_t holdoff_counter = -1;  // block +0x28 (pre/post holdoff wait)
   };
 
   std::array<CronEventState, 0x200> cron_event_states{};

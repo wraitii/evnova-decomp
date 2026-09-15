@@ -96,6 +96,18 @@ struct PilotFile {
       weapon_bank_secondary{}; // block1+0x261a
   // Junk item quantities (Ghidra g_junk_defs strided counts), block2+0x3488.
   std::array<std::int16_t, 0x80> junk_counts{};
+  // Exact Nova Control Bit bytes b0..b9999 (block1+0xb7be). Nonzero means set,
+  // but raw values are retained because converted Mac pilots are not always
+  // normalized to 1.
+  std::array<std::uint8_t, PilotControlState::kControlBitCount> control_bits{};
+  std::array<std::uint8_t, 0x800> stellar_saved_bytes{}; // block1+0xdece
+  std::array<std::int16_t, 0x800> stellar_present_ship_counts{}; // block2+6
+  std::array<std::int16_t, 0x800> stellar_availability_rolls{};  // +0x2086
+  std::array<std::int16_t, 0x100> disaster_days_remaining{};     // +0x3088
+  std::array<std::int16_t, 0x100> disaster_active_stellars{};    // +0x3288
+  std::array<std::int16_t, 0x200> cron_duration_counters{};      // +0x3590
+  std::array<std::int16_t, 0x200> cron_holdoff_counters{};       // +0x3990
+  std::array<std::int16_t, 0x80> rank_active_flags{};            // +0x5dde
   // The persisted player stat modifier quartet (DAT_007353f6..0x7353fd,
   // percentages; see GameState.player_stat_modifier_pct). SaveGameCore writes
   // them at FleetState block2 +0x3588/+0x358a/+0x358c/+0x358e and LoadSave
