@@ -120,6 +120,29 @@ TEST_CASE(
         0x8123);
 }
 
+TEST_CASE("Tutorial 006 derelict uses the narrated Rautherion system") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  constexpr std::int16_t kTutorial006aIndex = 755 - 0x80;
+  REQUIRE(Mission_PopulateActiveSlot(state, kTutorial006aIndex, 0));
+  CHECK(state.active_missions[0].current_system_id == 166 - 0x80);
+  CHECK(state.active_missions[0].dude_def_index == 238 - 0x80);
+}
+
+TEST_CASE("concrete mission ShipSyst decodes as a system resource id") {
+  GameState state;
+  state.scenario.missions.resize(1);
+  auto &definition = state.scenario.missions[0];
+  definition.present = true;
+  definition.current_system_locator = 0x81;
+  state.scenario.stellars.resize(2);
+  state.scenario.stellars[1].system_id = 38;
+
+  REQUIRE(Mission_PopulateActiveSlot(state, 0, 0));
+  CHECK(state.active_missions[0].current_system_id == 1);
+}
+
 // Regression for Ghidra 0x004438d0
 // Mission_ProcessInteractionReactionSlotResources: the TravelStel pickup arm is
 // controlled by PickupMode, not DropOffMode. A mission that starts without

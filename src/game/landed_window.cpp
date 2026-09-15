@@ -216,27 +216,9 @@ bool Stellar_Dock(GameState &state,
   // that in the launch tail, after the interaction loop returns -- see
   // Stellar_Launch.
 
-  // Stellar_HandleStellarEntryAndExit (0x00457580) runs Ship_DeactivateVacant
-  // ShipsAndTally('\0') during the normal arrival, then Mission_SpawnSystemMisn
-  // Ships immediately seeds System.avg_ships scattered ambient ships.
-  // So a landing (and the subsequent launch) leaves the system with a fresh
-  // batch of ships rather than the fleet that had accumulated before docking.
-  // The port deactivates the whole vacant cohort (idle wanderers / parked /
-  // mission ships; only non-disabled ships actively engaging the player
-  // are spared -- see ship_spawn.hpp), then rebuilds the initial population.
-  NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
-  // Ghidra 0x004588b1: stellar entry refreshes delayed mission arrivals and
-  // auxiliary-fleet bookkeeping before population is restored.
-  Mission_RefreshActiveMissionSpawnState(state);
-  NovaSystem_RestoreMissionFleets(
-      state,
-      state.player.current_system_id,
-      /*copy_player_heading=*/false,
-      static_cast<std::uint32_t>(state.gameplay_now_ms));
   // Offering rolls redraw on landing too (Stellar_HandleStellarEntryAndExit
   // 0x00458802 arm).
   Mission_RerollOfferingRolls(state);
-  NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
 
   ctx.stellar_id = stellar_id;
   ctx.landed = true;
@@ -329,6 +311,18 @@ void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
   // rebuilds the current system's drifting field around the repositioned
   // player.
   NovaAsteroid_InitSystem(state);
+
+  // Stellar_HandleStellarEntryAndExit 0x00458a47..0x00458bd2 performs the
+  // vacant-ship sweep and System_RebuildInitialNpcAndMissionPopulation only
+  // after Stellar_RunDockAndLaunchSequence returns. Missions accepted in the
+  // Spaceport loop must therefore participate in this rebuild.
+  NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/false);
+  NovaSystem_RestoreMissionFleets(
+      state,
+      state.player.current_system_id,
+      /*copy_player_heading=*/true,
+      static_cast<std::uint32_t>(state.gameplay_now_ms));
+  NovaSystem_PopulateInitialNpcShips(state, state.player.current_system_id);
 }
 
 // ---------------------------------------------------------------------------
