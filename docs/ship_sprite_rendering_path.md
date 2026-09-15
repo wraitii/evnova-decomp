@@ -229,6 +229,15 @@ the only consumer, the blink machine in `Ship_UpdateVisualState` (0x00428340),
 plus the loader's 0x1f intensity clamps for BlinkMode 2/3. The real exit
 geometry begins at +0x48 (already decoded as `ShipClass.muzzle_*`).
 
+Weapon exit geometry is four Bible `ExitType` families (Gun, Turret, Guided,
+Beam), with four quadrant barrels each. The loader interleaves each family's
+X/Y data into runtime pairs: for family `g` and quadrant `q`, X is `sh\x8an
++0x48 + 16*g + 2*q` and Y is `+0x50 + 16*g + 2*q`; Z is `+0x90 + 8*g +
+2*q`. Do not use an 8-byte X/Y family stride: that reads the preceding
+family's Y values as the next family's X values. The Gjinchar-class Aurora
+Cruiser exposes this visibly: its Fusion Pulse Battery (ExitType 1) is
+`(X=0,Y=-35)`, whereas the erroneous 8-byte stride yields `(X=56,Y=0)`.
+
 * `Ship.weapon_sprite_flash_level` is raised to 32 at the fire site when the
   fired WeaponDef carries `flags_secondary` 0x200
   (`Weapon_FirePlayerWeaponBank` 0x00455150 / `Weapon_FireShipWeapons`

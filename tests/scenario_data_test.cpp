@@ -109,6 +109,17 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(pulse->weapon_mode_code == 4);
   CHECK(pulse->projectile_speed == 900.0F); // 9 px/frame * 100
   CHECK(pulse->lifetime_ticks == 55);
+
+  // Gjinchar-class Aurora Cruiser (0x9a) mounts Fusion Pulse Batteries
+  // (ExitType 1). sh\x8an interleaves each exit family's four X/Y pairs;
+  // the turret family is X +0x58 / Y +0x60, not the adjacent gun Y block.
+  // This pins the original loader's +16-byte family stride.
+  const ShipClass *gjinchar = data.Ship(0x9a);
+  REQUIRE(gjinchar != nullptr);
+  REQUIRE(gjinchar->muzzle_ready);
+  CHECK(gjinchar->muzzle_lateral[1][0] == 0);
+  CHECK(gjinchar->muzzle_forward[1][0] == -35);
+  CHECK(gjinchar->muzzle_drop[1][0] == 3);
   CHECK(pulse->beam_length_px == 0);
   CHECK(pulse->range_scalar == 495.0F); // 9 px/frame * 55 frames
 
