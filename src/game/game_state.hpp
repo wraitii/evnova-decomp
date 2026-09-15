@@ -600,14 +600,14 @@ using PlayerShip = Ship;
 // Menu_RunPilotSelectionDialog (0x0048a7e0). Ghidra keeps the names in
 // DAT_007d20b7 (Full Name, also the <name>.plt file stem) / DAT_007d21b7
 // (Nickname), the character-template choice in DAT_007d22b7, and the Gender
-// popup selection in DAT_007d23b7 (first char latched into DAT_00734c1c).
+// popup selection in DAT_007d23b7 (first char latched into g_player_is_male).
 struct PilotData {
   std::string first_name;
   std::string last_name;
   std::int16_t start_type_code = 0; // PilotData_ResolveStartType result
-  // Row-4 Strict Play checkbox (the new-pilot flag, DAT_00596d2f).
+  // Row-4 Strict Play checkbox (the new-pilot flag, g_strict_play).
   bool strict_play = false;
-  // Row-11 Gender popup (MENU 0x1f4); 'm' latch = DAT_00734c1c.
+  // Row-11 Gender popup (MENU 0x1f4); 'm' latch = g_player_is_male.
   bool male = true;
   // Row-13 Character popup (MENU 0x1f5): the selected ch r template name
   // (DAT_007d22b7), empty when the 0xc1e variant left the popup offscreen.
@@ -1174,7 +1174,7 @@ struct GameState {
   // consumer is not decoded (TODO(decomp)).
   std::array<std::int16_t, 4> player_stat_modifier_pct{100, 100, 100, 100};
   bool game_active = false;  // Ghidra DAT_00596d28
-  bool intro_played = false; // Ghidra DAT_00596d35: cleared on new pilot so
+  bool intro_played = false; // Ghidra g_intro_played: cleared on new pilot so
                              // the intro cinematic plays on first flight.
   PilotData pilot;
   PilotControlState control;

@@ -12,7 +12,7 @@
 // gate holds; false = skipped by the primary mouse command, dialog suppressed).
 //
 // Note: like IntroCinematic_Run itself, this function does *not* flip the
-// intro-played latch; Ship_RunSpaceflightMode sets DAT_00596d35 after the
+// intro-played latch; Ship_RunSpaceflightMode sets g_intro_played after the
 // intro returns (moved to spaceflight.cpp's NovaSpaceflight_Run).
 
 #include "game_state.hpp"

@@ -23,11 +23,11 @@ namespace game {
 // Enters in-system spaceflight mode. On the pilot's first entry (state
 // intro_played == false) it first plays the intro cinematic, then sets
 // intro_played = true immediately after it returns -- mirroring
-// Ship_RunSpaceflightMode setting DAT_00596d35 = 0x01 right after
+// Ship_RunSpaceflightMode setting g_intro_played = 0x01 right after
 // IntroCinematic_Run(). Then it runs the in-game main loop until the player
 // returns to the menu, at which point it returns. Mirrors
-// Ship_RunSpaceflightMode's gating (DAT_00596d35) and clean return to the menu
-// shell.
+// Ship_RunSpaceflightMode's gating (g_intro_played) and clean return to the
+// menu shell.
 void NovaSpaceflight_Run(SdlPlatform &platform,
                          SdlAudio &audio,
                          GameState &state,

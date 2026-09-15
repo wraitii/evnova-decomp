@@ -146,7 +146,7 @@ at the window top, middle tile stretched to cover the text area, bottom at
 
 - **Page 1 — General.** Two-column stat grid (labels in the dim colour
   `SHORT_ARRAY_00733b50`, values in `PTR_DAT_00575ad8`, rows every 0x10):
-  left: STR# 0x7d2 0xfb Pilot Name (DAT_005997cc), 0xfc Current Date
+  left: STR# 0x7d2 0xfb Pilot Name (g_player_name), 0xfc Current Date
   (`NovaText_FormatDateString`), 0xfd System (system def display name;
   cheat mode appends the raw id), 0x146 government/legal row
   (`NovaUi_DrawSystemFactionConflictStatus` or STR# 0x18c "N/A"),
@@ -155,12 +155,12 @@ at the window top, middle tile stretched to cover the text area, bottom at
   "N/A" without shields, "Shields Down" when empty, percent + `DAT_0056d16c`
   otherwise), 0x6c armor row (DAT_0072e4cc; destroyed → STR# 0x105), 0x7c
   fuel row (percent + remaining jumps; 0xef/0x106/0x107 fragments).
-  right: 0xff Ship Name (DAT_00599acc), 0x100 Ship Class (class def
+  right: 0xff Ship Name (g_player_ship_name), 0x100 Ship Class (class def
   field_0x6c), 0x101 Turn Rate (`Ship_ComputeShipMaxTurnRateDeg *
   DAT_005759b8`, rounded, + STR# 0x102 " deg/sec"), 0x103 Thrust
   (`Ship_ComputeShipEffectiveThrust * DAT_005759c0`), 0x104 Max Speed
   (`Ship_ComputeShipEffectiveMaxSpeed * DAT_005759c8` [* `DAT_005759d0` when
-  `DAT_00596d2f`], i.e. velocity-capped variants), credits row (0x5c right,
+  `g_strict_play`], i.e. velocity-capped variants), credits row (0x5c right,
   `DrawContext_DrawGroupedUInt(g_ship_states->credits)` prefixed by the
   translated key glyph `DAT_0072f1cc` + `DAT_0056d168`), plus the fleet
   value block: for each of the 0x40 escort slots (stride 0xc948) with

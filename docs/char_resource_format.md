@@ -49,7 +49,7 @@ shorts into `DAT_00735478` / `DAT_00735476` / `DAT_00735474`. `Menu_RunNewGameFl
 
 ### DatePrefix / DateSuffix (`+0x13a` / `+0x14a`)
 
-Copied by `PilotData_InitializePlayerState` into `DAT_00733b0c` / `DAT_00733b1c`.
+Copied by `PilotData_InitializePlayerState` into `g_date_prefix` / `g_date_suffix`.
 Both date formatters use them:
 
 - `NovaText_FormatDateString` (`0x00468450`) starts with `DatePrefix` and ends with

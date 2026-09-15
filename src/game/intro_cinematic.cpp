@@ -271,7 +271,7 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
 
   // Ghidra: after the sequence, if not skipped and intro_text_desc_id != -1,
   // show the intro text reader. `intro_played` is *not* set here:
-  // Ship_RunSpaceflightMode sets DAT_00596d35 after IntroCinematic_Run
+  // Ship_RunSpaceflightMode sets g_intro_played after IntroCinematic_Run
   // returns (see spaceflight.cpp).
   if (!platform.quit_requested() && !input_state.skip_all) {
     NovaLog::Info("intro cinematic finished (input may have advanced "

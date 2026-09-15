@@ -649,7 +649,7 @@ TEST_CASE("unresolvable offer destinations fall back to the return target") {
 }
 
 TEST_CASE("string placeholder expansion handles gender blocks and quirks") {
-  GameState state; // pilot defaults: male ('m' latch = DAT_00734c1c)
+  GameState state; // pilot defaults: male ('m' latch = g_player_is_male)
 
   std::string male = R"(a {G"m'boy" "lass"} b)";
   Mission_ExpandStringPlaceholders(state, male);
