@@ -49,14 +49,10 @@ namespace game {
 class HudRenderer;
 class SpaceflightView;
 
-// Return code from the negotiation modal. The spaceflight loop either returns
-// to free flight (kClosed / kQuit) or, once the player has paid a successful
-// bribe, runs the normal Spaceport window for the stellar.
+// Return code from the negotiation modal.
 enum class NegotiationExit : std::uint8_t {
-  kClosed,        // dismissed (Close Channel / Esc / close) without buying in
-  kQuit,          // the platform quit latch tripped
-  kProceedToLand, // the player paid an accepted bribe; the caller should open
-                  // the Spaceport for the target stellar
+  kClosed,
+  kQuit,
 };
 
 // Computes the credits-scaled base of the destination-interaction bribe
@@ -78,9 +74,9 @@ enum class NegotiationExit : std::uint8_t {
 // its DLOG over the unmodified gameplay surface), shows the target's
 // status/prompt text (STR# 0xbba / 0xbb8 flavour variants), the header block
 // (name, destination description, Status: word) and the three comm buttons,
-// and loops until the player closes the channel, pays an accepted bribe
-// (returns kProceedToLand with state.travel.selected_stellar_id set), or the
-// platform quits. The Demand Tribute / Release button is deferred (loud Todo).
+// and loops until the player closes the channel, pays an accepted bribe (which
+// arms the normal proximity-based landing approach), or the platform quits.
+// The Demand Tribute / Release button is deferred (loud Todo).
 [[nodiscard]] NegotiationExit
 NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
                                      GameState &state,

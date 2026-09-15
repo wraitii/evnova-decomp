@@ -2046,58 +2046,6 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         // The destination-interaction window blocked the loop; freeze
         // gameplay time across it.
         resync_frame_clock();
-        if (exit == NegotiationExit::kProceedToLand) {
-          // The player paid an accepted bribe in the interaction window (the
-          // only path out of that window that docks; landing itself stays on
-          // the normal second-E request flow). The original's bribe handoff is
-          // a granted landing (it arms g_travel_engage_timer and warps the ship
-          // to the destination), so co-locate the ship, arm the approach timer
-          // and settle the ship before the normal dock gate.
-          const auto *st =
-              state.scenario.Stellar(state.travel.selected_stellar_id);
-          if (st != nullptr) {
-            state.player.pos_x = static_cast<float>(st->pos_x);
-            state.player.pos_y = static_cast<float>(st->pos_y);
-          }
-          state.travel.engage_timer = 0x2ee;
-          state.player.vel_x = 0.0F;
-          state.player.vel_y = 0.0F;
-          state.player.ai_maneuver_timer_ms = 0.0F;
-          LandedContext ctx;
-          if (Stellar_Dock(state,
-                           ctx,
-                           StellarArrivalSpriteFullHeight(
-                               platform,
-                               view,
-                               state,
-                               state.travel.selected_stellar_id))) {
-            NovaLog::Info("destination-interaction dialog granted landing at "
-                          "stellar {}; opening Spaceport",
-                          ctx.stellar_id);
-            const LandedExit landed =
-                NovaLanded_RunWindow(platform, state, ctx);
-            if (landed == LandedExit::kQuit) {
-              returning_to_menu = true;
-              break;
-            }
-            // Stellar_RunDockAndLaunchSequence launch tail
-            // (0x00455f99..0x00456268); see the dock-exit note above. The
-            // original's launch block does not advance extra calendar days: the
-            // single daily world tick of the tail is run inside Stellar_Launch.
-            // TODO(decomp(0x0044d870)) skipped: the 15..44-day loop belongs to
-            // the death respawn (0x0044d490), not launch.
-            if (landed == LandedExit::kLaunched) {
-              Stellar_Launch(state, ctx.stellar_id);
-              NovaHud_ShowLaunchDepartureMessage(state, ctx.stellar_id);
-            }
-            resync_frame_clock();
-          } else {
-            NovaLog::Warn("destination-interaction dialog staged a landing at "
-                          "stellar {} but arrival was refused ({})",
-                          ctx.stellar_id,
-                          static_cast<int>(ctx.denial));
-          }
-        }
       } else {
         NovaLog::Info("target-action: selected stellar cannot open its "
                       "destination interaction");
