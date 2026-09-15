@@ -47,6 +47,10 @@ using game::PilotLoadError;
   p.heading = 1.25F;
   p.intro_played = true;
   p.cargo_bins = {3, 0, 5, 1, 0, 2};
+  p.system_discovery[0] = 2;
+  p.system_discovery[0x7ff] = 1;
+  p.system_reputation[3] = -1234;
+  p.system_reputation[0x7ff] = 5678;
   p.outfit_owned_count[0] = 1;
   p.outfit_owned_count[0x1ff] = -2;
   p.weapon_bank_ammo[5 * 100] = 7;
@@ -84,6 +88,8 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.fuel_points == 77.0F); // 77.6 truncated toward zero, stored as u16
   CHECK(out.intro_played);
   CHECK(out.cargo_bins == p.cargo_bins);
+  CHECK(out.system_discovery == p.system_discovery);
+  CHECK(out.system_reputation == p.system_reputation);
   CHECK(out.outfit_owned_count[0] == 1);
   CHECK(out.outfit_owned_count[0x1ff] == -2);
   CHECK(out.weapon_bank_ammo[5 * 100] == 7);
@@ -100,6 +106,23 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.active_missions[2].return_stellar_id == 0x123);
   CHECK(out.active_missions[2].resource_delta_or_cost == -4567);
   CHECK(out.active_missions[2].raw_payload[0x6e] == std::byte{0xa5});
+}
+
+TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
+  PilotFile pilot = SampleRecord();
+  game::GameState state;
+  state.scenario.systems.resize(4);
+
+  PilotFileApply(pilot, state);
+
+  CHECK(state.scenario.systems[0].discovery_state == 2);
+  CHECK(state.scenario.systems[1].discovery_state == 0);
+  REQUIRE(state.system_reputation.size() == 4);
+  CHECK(state.system_reputation[3] == -1234);
+
+  const PilotFile collected = PilotFileCollectFromState(state);
+  CHECK(collected.system_discovery[0] == 2);
+  CHECK(collected.system_reputation[3] == -1234);
 }
 
 TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
@@ -180,21 +203,23 @@ TEST_CASE("PilotFile load rejects wrong FleetState magic") {
   CHECK(PilotFileDeserialize(bytes, out) == PilotLoadError::kWrongFileType);
 }
 
-TEST_CASE("PilotFile load skips a block1 rejected by the validity gate") {
+TEST_CASE("PilotFile decodes an obfuscated pilot block") {
   const PilotFile p = SampleRecord();
   auto bytes = PilotFileSerialize(p, p.jump_dest_stellar);
-  // A jump destination of -1 (0xffff) makes block1's first u16 >= 0x800, which
-  // fails the 0x008725b0 gate; the original then skips the block1 restore but
-  // still restores block2 (and returns 0). Mirror that. Block1 data starts
-  // right after the u32 size header.
-  bytes[4] = std::byte{0xff};
-  bytes[5] = std::byte{0xff};
+  std::uint32_t key = 0xb36a210f;
+  for (std::size_t offset = 4; offset < 4 + 0xe952;) {
+    for (unsigned byte = 0; byte < 4 && offset < 4 + 0xe952; ++byte, ++offset) {
+      bytes[offset] ^=
+          static_cast<std::byte>((key >> (24U - byte * 8U)) & 0xffU);
+    }
+    key = (key + 0xdeadbeefU) ^ 0xdeadbeefU;
+  }
   PilotFile out;
   const auto err = PilotFileDeserialize(bytes, out);
   CHECK(err == PilotLoadError::kOk);
-  CHECK(out.ship_class_id == 0);   // block1 restore skipped
-  CHECK(out.intro_played == true); // block2 restore still ran
-  CHECK(out.junk_counts[0x7f] == 13);
+  CHECK(out.ship_class_id == p.ship_class_id);
+  CHECK(out.credits == p.credits);
+  CHECK(out.date.year == p.date.year);
 }
 
 TEST_CASE("archived pilot fixtures have recognizable .plt framing",
@@ -220,6 +245,10 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
     const auto result = PilotFileLoadSave(entry.path(), state);
     CHECK((result == PilotLoadError::kOk ||
            result == PilotLoadError::kRepairsApplied));
+    CHECK(state.player.ship_class_id >= 0);
+    CHECK(state.date.year >= 1170);
+    CHECK_FALSE(state.pilot.last_name.empty());
+    CHECK(static_cast<unsigned char>(state.pilot.last_name.front()) >= 0x20);
   }
   if (fixture_count == 0) {
     SKIP("no optional .plt fixtures found in docs/assets/pilots");

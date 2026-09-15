@@ -1039,7 +1039,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004C9E90	Menu_OpenPilotFileDialog	src/nova_app.cpp	55%	SDL3 native .plt chooser is wired asynchronously into the main menu and selected files run through PilotFileLoadSave; original reset/reputation preparation, error dialogs, last-pilot marker update, and password/repair interaction remain incomplete
 0x004CA120	PilotData_AutoresumeLastPilot		0%	PilotData_AutoresumeLastPilot (startup auto-resume via last-pilot marker file string 0x82/4) not reconstructed; marker file name unresolved
 0x004CA2C0	PilotDebug_WritePilotLog		0%	debug-only pilotlog.txt dump (licensed runtime only); not reconstructed
-0x004CB260	PilotFile_LoadSave	src/game/pilot_file.cpp	50%	PilotFile_LoadSave: PilotFileDeserialize + file I/O + name-from-path + jump-dest system resolution for the tracked subset
+0x004CB260	PilotFile_LoadSave	src/game/pilot_file.cpp	72%	PilotFile_LoadSave: file I/O, retail XOR decode, name-from-path, discovery/reputation restore, definition-aware class repair, destination-stellar position/current-system resolution, random heading, max shield/armor recompute, and tracked inventory/mission/FleetState fields. Deliberate compatibility divergence: auto-detects converted big-endian Mac payloads, forces block1 decode after Mac detection, and recognizes Pascal nicknames independently of byte order. Remaining: unmodeled world tables, richer fallback placement/display refresh, definition-aware outfit/weapon repairs, and post-load runtime resets
 0x004CD030	PilotFile_ProbeExists	src/game/pilot_file.cpp	90%	PilotFile_ProbeExists: reimplemented as filesystem is_regular_file probe (original opens the file); used by save tests
 0x004CD040	PilotFile_Delete	src/game/pilot_file.cpp	90%	PilotFile_Delete: probe-guarded remove
 0x004CD0B0	FUN_004cd0b0		0%	
@@ -2060,7 +2060,7 @@ address	name	impl_file	reimpl_pct	comment
 0x00872500	FUN_00872500		0%	
 0x00872550	FUN_00872550		0%	
 0x00872560	FUN_00872560		0%	
-0x008725B0	PilotSave_ValidateBlock	src/game/pilot_file.cpp	30%	BlockPassesGate: u16[0] < 0x800 gate reimplemented (BlockPassesGate); checksum branch (LAB_0046f960) unresolved and treated as invalid
+0x008725B0	PilotSave_DecodeBlock	src/game/pilot_file.cpp	100%	DecodePilotBlock leaves plaintext blocks with u16[0] < 0x800 unchanged and otherwise applies the symmetric 0xb36a210f XOR stream from the 0x0046f960 tail call; archived Windows and converted big-endian Mac pilots load through it
 0x008725E0	FUN_008725e0		0%	
 0x00872640	FUN_00872640		0%	
 0x0087265D	FUN_0087265d		0%	

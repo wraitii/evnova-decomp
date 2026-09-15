@@ -2,11 +2,14 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "outfit.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <fstream>
+#include <numbers>
+#include <random>
 
 namespace game {
 namespace {
@@ -30,17 +33,21 @@ constexpr std::int16_t kPrefsFileSignature = 0x6b;
 }
 
 [[nodiscard]] std::uint16_t ReadU16(std::span<const std::byte> bytes,
-                                    std::size_t offset) {
-  std::uint16_t v = 0;
-  std::memcpy(&v, bytes.data() + offset, sizeof(v));
-  return v;
+                                    std::size_t offset,
+                                    bool big_endian = false) {
+  const auto a = std::to_integer<std::uint16_t>(bytes[offset]);
+  const auto b = std::to_integer<std::uint16_t>(bytes[offset + 1]);
+  return big_endian ? static_cast<std::uint16_t>((a << 8U) | b)
+                    : static_cast<std::uint16_t>(a | (b << 8U));
 }
 
 [[nodiscard]] std::uint32_t ReadU32(std::span<const std::byte> bytes,
-                                    std::size_t offset) {
-  std::uint32_t v = 0;
-  std::memcpy(&v, bytes.data() + offset, sizeof(v));
-  return v;
+                                    std::size_t offset,
+                                    bool big_endian = false) {
+  const auto first = ReadU16(bytes, offset, big_endian);
+  const auto second = ReadU16(bytes, offset + 2, big_endian);
+  return big_endian ? (static_cast<std::uint32_t>(first) << 16U) | second
+                    : first | (static_cast<std::uint32_t>(second) << 16U);
 }
 
 void WriteU16(std::vector<std::byte> &out,
@@ -55,13 +62,22 @@ void WriteU32(std::vector<std::byte> &out,
   std::memcpy(out.data() + offset, &v, sizeof(v));
 }
 
-// The block-level validity gate, mirroring PilotSave_ValidateBlock
-// (0x008725b0): a block whose first u16 is < 0x800 is accepted without
-// further checks. TODO(decomp): the original computes a 32-bit rolling
-// checksum for u16[0] >= 0x800 (LAB_0046f960); that path is not reconstructed
-// and such blocks are treated as invalid here.
-[[nodiscard]] bool BlockPassesGate(std::span<const std::byte> block) {
-  return block.size() >= 2 && ReadU16(block, 0) < 0x800;
+// Ghidra 0x008725b0 PilotSave_DecodeBlock. Plain blocks (first u16 < 0x800)
+// are left alone. Otherwise it tail-calls the symmetric XOR transform at
+// 0x0046f960 with (data, size, 0xb36a210f).
+void DecodePilotBlock(std::span<std::byte> block, bool force = false) {
+  if (block.size() < 2 || (!force && ReadU16(block, 0) < 0x800)) {
+    return;
+  }
+  std::uint32_t key = 0xb36a210f;
+  for (std::size_t offset = 0; offset < block.size();) {
+    for (unsigned byte = 0; byte < 4 && offset < block.size();
+         ++byte, ++offset) {
+      block[offset] ^=
+          static_cast<std::byte>((key >> (24U - byte * 8U)) & 0xffU);
+    }
+    key = (key + 0xdeadbeefU) ^ 0xdeadbeefU;
+  }
 }
 
 } // namespace
@@ -86,6 +102,7 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   // SetupFrames). Apply the tracked subset into GameState.
   state.pilot.first_name = pilot_file.pilot_name;
   state.pilot.last_name = pilot_file.nickname;
+  state.player.ship_name = pilot_file.ship_name;
 
   state.player.credits = pilot_file.credits;
   state.player.ship_class_id = pilot_file.ship_class_id;
@@ -111,6 +128,15 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   state.intro_played = pilot_file.intro_played;
 
   state.inventory.cargo_bins = pilot_file.cargo_bins;
+  const std::size_t system_count = std::min(state.scenario.systems.size(),
+                                            pilot_file.system_discovery.size());
+  for (std::size_t i = 0; i < system_count; ++i) {
+    state.scenario.systems[i].discovery_state = pilot_file.system_discovery[i];
+  }
+  state.system_reputation.assign(system_count, 0);
+  std::copy_n(pilot_file.system_reputation.begin(),
+              system_count,
+              state.system_reputation.begin());
   state.inventory.outfit_owned_count = pilot_file.outfit_owned_count;
   state.inventory.junk_counts = pilot_file.junk_counts;
   state.player_stat_modifier_pct = pilot_file.stat_modifier_pct;
@@ -149,6 +175,15 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.intro_played = state.intro_played;
 
   out.cargo_bins = state.inventory.cargo_bins;
+  const std::size_t system_count =
+      std::min(state.scenario.systems.size(), out.system_discovery.size());
+  for (std::size_t i = 0; i < system_count; ++i) {
+    out.system_discovery[i] = state.scenario.systems[i].discovery_state;
+  }
+  std::copy_n(
+      state.system_reputation.begin(),
+      std::min(state.system_reputation.size(), out.system_reputation.size()),
+      out.system_reputation.begin());
   out.outfit_owned_count = state.inventory.outfit_owned_count;
   out.junk_counts = state.inventory.junk_counts;
   out.stat_modifier_pct = state.player_stat_modifier_pct;
@@ -186,6 +221,14 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
   WriteU16(block1, 0x14, static_cast<std::uint16_t>(pilot_file.date.month));
   WriteU16(block1, 0x16, static_cast<std::uint16_t>(pilot_file.date.day));
   WriteU16(block1, 0x18, static_cast<std::uint16_t>(pilot_file.date.year));
+  for (std::size_t i = 0; i < pilot_file.system_discovery.size(); ++i) {
+    WriteU16(block1,
+             0x1a + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.system_discovery[i]));
+    WriteU16(block1,
+             0x141a + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.system_reputation[i]));
+  }
   for (std::size_t i = 0; i < pilot_file.outfit_owned_count.size(); ++i) {
     WriteU16(block1,
              0x101a + 2 * i,
@@ -350,23 +393,31 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
   if (size1 == 0 || 4 + size1 > bytes.size()) {
     return PilotLoadError::kMissingOrEmptyFile;
   }
-  const std::span<const std::byte> block1 = bytes.subspan(4, size1);
+  std::vector<std::byte> block1(bytes.begin() + 4, bytes.begin() + 4 + size1);
   const std::size_t size2_offset = 4 + size1;
   if (size2_offset + 4 > bytes.size()) {
     return PilotLoadError::kMissingOrEmptyFile;
   }
   const std::size_t size2 = ReadU32(bytes, size2_offset);
-  if (size2 == 0 || size2_offset + 4 + size2 > bytes.size()) {
+  if (size2 < 2 || size2_offset + 4 + size2 > bytes.size()) {
     return PilotLoadError::kMissingOrEmptyFile;
   }
-  const std::span<const std::byte> block2 =
-      bytes.subspan(size2_offset + 4, size2);
+  std::vector<std::byte> block2(bytes.begin() + size2_offset + 4,
+                                bytes.begin() + size2_offset + 4 + size2);
   const std::span<const std::byte> trailer =
       bytes.subspan(size2_offset + 4 + size2);
 
-  // Ghidra 0x004cb260: the whole restore is gated per block by
-  // PilotSave_ValidateBlock (0x008725b0) — u16[0] < 0x800 is accepted, larger
-  // values (which would include a jump_dest of -1) skip that block's restore.
+  DecodePilotBlock(block2);
+  // Converted classic-Mac pilots retain big-endian block payloads. Windows
+  // pilots are little-endian. FleetState's version word distinguishes them.
+  const bool big_endian = ReadU16(block2, 0) != kFleetBlockVersion &&
+                          ReadU16(block2, 0, true) == kFleetBlockVersion;
+  // TODO(decomp(0x008725b0)) skipped: compatibility divergence for converted
+  // Mac pilots. The original Mac build reads this gate natively; after wrapping
+  // its block in Windows framing, the ciphertext can resemble a little-endian
+  // plaintext jump id (Alien.plt begins 0x00b3), so force the transform once
+  // the FleetState byte order identifies a Mac payload.
+  DecodePilotBlock(block1, big_endian);
   bool repairs = false;
   // The original reads fixed offsets without bounds checks (it assumes
   // full-size blocks from the same game build). To avoid UB on truncated
@@ -374,10 +425,12 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
   constexpr std::size_t kBlock1TrackedEnd =
       0x295e + GameState::kMaxActiveMissions * 0x8e6;
   constexpr std::size_t kBlock2TrackedEnd = 0x5d98 + 0x40;
-  if (BlockPassesGate(block1) && block1.size() >= kBlock1TrackedEnd) {
+  if (block1.size() >= kBlock1TrackedEnd) {
     // jump destination stellar id.
-    out.jump_dest_stellar = static_cast<std::int16_t>(ReadU16(block1, 0x00));
-    out.ship_class_id = static_cast<std::int16_t>(ReadU16(block1, 0x02));
+    out.jump_dest_stellar =
+        static_cast<std::int16_t>(ReadU16(block1, 0x00, big_endian));
+    out.ship_class_id =
+        static_cast<std::int16_t>(ReadU16(block1, 0x02, big_endian));
     if (out.ship_class_id < 0 || out.ship_class_id >= 0x300) {
       // Original: class fallback loop over g_ship_class_defs. TODO(decomp):
       // validate against the loaded ship-class table; here only bounds.
@@ -388,30 +441,39 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
     }
     for (std::size_t i = 0; i < out.cargo_bins.size(); ++i) {
       out.cargo_bins[i] =
-          static_cast<std::int16_t>(ReadU16(block1, 0x04 + 2 * i));
+          static_cast<std::int16_t>(ReadU16(block1, 0x04 + 2 * i, big_endian));
     }
     // +0x10 shield: the original recomputes shield/armor from class+outfits
     // and does NOT read the stored value back (Ship_ComputeShipMaxShieldPoints
     // / Ship_ComputeShipMaxArmor). TODO(decomp): recompute-equivalent once the
     // outfit math is reconstructed; fuel is restored from +0x12.
-    out.fuel_points = static_cast<float>(ReadU16(block1, 0x12));
+    out.fuel_points = static_cast<float>(ReadU16(block1, 0x12, big_endian));
     // +0x14/+0x16/+0x18 month/day/year: the in-game calendar.
-    out.date.month = static_cast<std::int16_t>(ReadU16(block1, 0x14));
-    out.date.day = static_cast<std::int16_t>(ReadU16(block1, 0x16));
-    out.date.year = static_cast<std::int16_t>(ReadU16(block1, 0x18));
+    out.date.month =
+        static_cast<std::int16_t>(ReadU16(block1, 0x14, big_endian));
+    out.date.day = static_cast<std::int16_t>(ReadU16(block1, 0x16, big_endian));
+    out.date.year =
+        static_cast<std::int16_t>(ReadU16(block1, 0x18, big_endian));
+    for (std::size_t i = 0; i < out.system_discovery.size(); ++i) {
+      out.system_discovery[i] =
+          static_cast<std::int16_t>(ReadU16(block1, 0x1a + 2 * i, big_endian));
+      out.system_reputation[i] = static_cast<std::int16_t>(
+          ReadU16(block1, 0x141a + 2 * i, big_endian));
+    }
     for (std::size_t i = 0; i < out.outfit_owned_count.size(); ++i) {
-      out.outfit_owned_count[i] =
-          static_cast<std::int16_t>(ReadU16(block1, 0x101a + 2 * i));
+      out.outfit_owned_count[i] = static_cast<std::int16_t>(
+          ReadU16(block1, 0x101a + 2 * i, big_endian));
       // Original zeroes outfits whose def no longer exists. TODO(decomp).
     }
     for (std::size_t i = 0; i < 0x100; ++i) {
-      out.weapon_bank_ammo[i * 100] =
-          static_cast<std::int16_t>(ReadU16(block1, 0x241a + 2 * i));
-      out.weapon_bank_secondary[i * 100] =
-          static_cast<std::int16_t>(ReadU16(block1, 0x261a + 2 * i));
+      out.weapon_bank_ammo[i * 100] = static_cast<std::int16_t>(
+          ReadU16(block1, 0x241a + 2 * i, big_endian));
+      out.weapon_bank_secondary[i * 100] = static_cast<std::int16_t>(
+          ReadU16(block1, 0x261a + 2 * i, big_endian));
       // Original zeroes banks whose weapon def no longer exists. TODO(decomp).
     }
-    out.credits = static_cast<std::int32_t>(ReadU32(block1, 0x281a));
+    out.credits =
+        static_cast<std::int32_t>(ReadU32(block1, 0x281a, big_endian));
     constexpr std::size_t kRuntimeFlagsOffset = 0x281e;
     constexpr std::size_t kRuntimeFlagsStride = 0x14;
     for (std::size_t slot = 0; slot < out.active_mission_runtime_flags.size();
@@ -426,16 +488,17 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
           std::to_integer<unsigned char>(block1[offset + 0x02]) != 0;
       flags.is_failed =
           std::to_integer<unsigned char>(block1[offset + 0x03]) != 0;
-      flags.flags_primary_at_accept = ReadU16(block1, offset + 0x04);
+      flags.flags_primary_at_accept =
+          ReadU16(block1, offset + 0x04, big_endian);
       flags.deadline_year =
-          static_cast<std::int16_t>(ReadU16(block1, offset + 0x06));
+          static_cast<std::int16_t>(ReadU16(block1, offset + 0x06, big_endian));
       flags.deadline_month =
-          static_cast<std::int16_t>(ReadU16(block1, offset + 0x08));
+          static_cast<std::int16_t>(ReadU16(block1, offset + 0x08, big_endian));
       flags.deadline_day =
-          static_cast<std::int16_t>(ReadU16(block1, offset + 0x0a));
+          static_cast<std::int16_t>(ReadU16(block1, offset + 0x0a, big_endian));
       flags.elapsed_travel_days =
-          static_cast<std::int32_t>(ReadU32(block1, offset + 0x0e));
-      flags.elapsed_travel_subday = ReadU16(block1, offset + 0x12);
+          static_cast<std::int32_t>(ReadU32(block1, offset + 0x0e, big_endian));
+      flags.elapsed_travel_subday = ReadU16(block1, offset + 0x12, big_endian);
     }
     constexpr std::size_t kActiveMissionsOffset = 0x295e;
     constexpr std::size_t kActiveMissionStride = 0x8e6;
@@ -446,7 +509,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
                   block1.data() + offset,
                   mission.raw_payload.size());
       const auto get_i16 = [&](std::size_t field) {
-        return static_cast<std::int16_t>(ReadU16(block1, offset + field));
+        return static_cast<std::int16_t>(
+            ReadU16(block1, offset + field, big_endian));
       };
       mission.travel_stellar_id = get_i16(0x00);
       mission.return_stellar_id = get_i16(0x04);
@@ -464,7 +528,7 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.comp_govt_id = get_i16(0x1c);
       mission.comp_reward_delta = get_i16(0x1e);
       mission.resource_delta_or_cost =
-          static_cast<std::int32_t>(ReadU32(block1, offset + 0x22));
+          static_cast<std::int32_t>(ReadU32(block1, offset + 0x22, big_endian));
       mission.goal_count_remaining = get_i16(0x2c);
       mission.can_abort =
           std::to_integer<unsigned char>(block1[offset + 0x32]) != 0;
@@ -481,48 +545,53 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.random_text_string_id = get_i16(0x4f);
       mission.random_text_entry = get_i16(0x51);
       mission.special_ship_type_index = get_i16(0x53);
-      mission.flags_primary = ReadU16(block1, offset + 0x55);
-      mission.flags_secondary = ReadU16(block1, offset + 0x57);
+      mission.flags_primary = ReadU16(block1, offset + 0x55, big_endian);
+      mission.flags_secondary = ReadU16(block1, offset + 0x57, big_endian);
       mission.mission_ship_count_max = get_i16(0x61);
       mission.aux_ships_dude_def_index = get_i16(0x63);
       mission.mission_ship_count_active = get_i16(0x6b);
     }
   } else {
-    NovaLog::Todo("pilot load: block1 rejected by the validity gate or too "
-                  "short (u16[0] = 0x{:x}, size {}); restore skipped",
-                  block1.size() >= 2 ? ReadU16(block1, 0) : 0,
+    NovaLog::Todo("pilot load: block1 too short (size {}); restore skipped",
                   block1.size());
   }
 
   // Block2 gate + FleetState magic checks (original: 0x6b -> -0x2d,
   // < 300 -> -0x2a).
-  if (!BlockPassesGate(block2) || block2.size() < kBlock2TrackedEnd) {
-    NovaLog::Todo("pilot load: block2 rejected by the validity gate or too "
-                  "short; restore skipped");
+  if (block2.size() < kBlock2TrackedEnd) {
+    NovaLog::Todo("pilot load: block2 too short; restore skipped");
   } else {
-    const std::int16_t magic = static_cast<std::int16_t>(ReadU16(block2, 0));
+    const std::int16_t magic =
+        static_cast<std::int16_t>(ReadU16(block2, 0, big_endian));
     if (magic == kPrefsFileSignature) {
       return PilotLoadError::kWrongFileType;
     }
     if (magic < kFleetBlockVersion) {
       return PilotLoadError::kInvalidFleetBlock;
     }
-    out.intro_played = ReadU16(block2, 0x3086) != 0;
+    out.intro_played = ReadU16(block2, 0x3086, big_endian) != 0;
     for (std::size_t i = 0; i < out.junk_counts.size(); ++i) {
-      out.junk_counts[i] =
-          static_cast<std::int16_t>(ReadU16(block2, 0x3488 + 2 * i));
+      out.junk_counts[i] = static_cast<std::int16_t>(
+          ReadU16(block2, 0x3488 + 2 * i, big_endian));
       // Original zeroes junk whose def no longer exists. TODO(decomp).
     }
     // +0x3588..+0x358e stat modifier quartet (LoadSave 0x004cb260 restores
     // DAT_007353f6/f8/fa/fc from here).
     for (std::size_t i = 0; i < out.stat_modifier_pct.size(); ++i) {
-      out.stat_modifier_pct[i] =
-          static_cast<std::int16_t>(ReadU16(block2, 0x3588 + 2 * i));
+      out.stat_modifier_pct[i] = static_cast<std::int16_t>(
+          ReadU16(block2, 0x3588 + 2 * i, big_endian));
     }
-    // +0x5d98 nickname C-string (0x40 cap, NUL-terminated).
+    // TODO(decomp(0x004cb260)) skipped: compatibility divergence. Converted
+    // pilots may carry a Pascal nickname independently of scalar byte order
+    // (Archer (PC).plt is little-endian but still has a Pascal nickname).
     out.nickname.clear();
-    for (std::size_t i = 0; i < 0x40 && i < block2.size() - 0x5d98; ++i) {
-      const auto c = static_cast<char>(block2[0x5d98 + i]);
+    const auto pascal_length = std::to_integer<unsigned char>(block2[0x5d98]);
+    const bool pascal_nickname = pascal_length > 0 && pascal_length < 0x40 &&
+                                 block2[0x5d99 + pascal_length] == std::byte{0};
+    const std::size_t nickname_start = pascal_nickname ? 1 : 0;
+    const std::size_t nickname_limit = pascal_nickname ? pascal_length : 0x40;
+    for (std::size_t i = 0; i < nickname_limit; ++i) {
+      const auto c = static_cast<char>(block2[0x5d98 + nickname_start + i]);
       if (c == '\0') {
         break;
       }
@@ -593,9 +662,10 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   std::memcpy(bytes.data(), raw.data(), raw.size());
 
   PilotFile record;
-  const PilotLoadError err = PilotFileDeserialize(bytes, record);
-  if (err != PilotLoadError::kOk && err != PilotLoadError::kRepairsApplied) {
-    return err;
+  PilotLoadError result = PilotFileDeserialize(bytes, record);
+  if (result != PilotLoadError::kOk &&
+      result != PilotLoadError::kRepairsApplied) {
+    return result;
   }
 
   // The original derives DAT_005997cc (pilot name) from the .plt path:
@@ -606,6 +676,27 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
     name.resize(dot);
   }
   record.pilot_name = name;
+
+  // The original repairs a class whose definition is absent, then reports
+  // kRepairsApplied. ScenarioData stores only defined ship rows, so an
+  // out-of-range resource lookup is the clean-room equivalent of its
+  // tech_level == -9999 sentinel check.
+  const auto *saved_class = state.scenario.Ship(
+      static_cast<std::int16_t>(record.ship_class_id + 0x80));
+  if (!state.scenario.ships.empty() &&
+      (saved_class == nullptr ||
+       saved_class->tech_level == kShipClassNonexistentTechLevel)) {
+    const auto first_defined =
+        std::ranges::find_if(state.scenario.ships, [](const ShipClass &ship) {
+          return ship.tech_level != kShipClassNonexistentTechLevel;
+        });
+    record.ship_class_id =
+        first_defined == state.scenario.ships.end()
+            ? 0
+            : static_cast<std::int16_t>(
+                  std::distance(state.scenario.ships.begin(), first_defined));
+    result = PilotLoadError::kRepairsApplied;
+  }
   // current_system_id is not serialized; the loader resolves it from the saved
   // jump destination stellar (Ghidra 0x004cb260 fallback chain).
   record.current_system_id = [&]() -> std::int16_t {
@@ -627,7 +718,25 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
     return 0;
   }();
 
+  // Ghidra 0x004cb260 places a restored player at the saved destination
+  // stellar and chooses a fresh heading with NovaRandom_Range(360). The port
+  // stores headings in radians rather than the original integer degrees.
+  if (record.jump_dest_stellar >= 0) {
+    if (const auto *stellar =
+            state.scenario.Stellar(record.jump_dest_stellar + 0x80)) {
+      record.pos_x = static_cast<float>(stellar->pos_x);
+      record.pos_y = static_cast<float>(stellar->pos_y);
+      std::uniform_int_distribution<int> heading_degrees(0, 359);
+      record.heading = static_cast<float>(heading_degrees(state.rng)) *
+                       std::numbers::pi_v<float> / 180.0F;
+    }
+  }
+
   PilotFileApply(record, state);
+  NovaOutfit_RecomputeOutfitDerivedState(state);
+  const auto effective = Outfit_ComputePlayerEffectiveStats(state);
+  state.player.shield_points = effective.max_shield_points;
+  state.player.armor_points = effective.max_armor_points;
   // The original's session-start path (PilotData_AutoresumeLastPilot
   // 0x004ca120 / Menu_OpenPilotFileDialog 0x004c9e90) runs Ship_ResetPlayer-
   // ShipState (which latches the flight-hint state to 0x7fff, 0x004b3a3b)
@@ -638,7 +747,7 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
                  path.string(),
                  record.jump_dest_stellar,
                  record.current_system_id);
-  return err;
+  return result;
 }
 
 bool PilotFileProbeExists(const std::filesystem::path &path) {

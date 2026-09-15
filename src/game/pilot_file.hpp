@@ -85,6 +85,11 @@ struct PilotFile {
   // -- Ownership tables (g_outfit_owned_count, weapon banks) -----------------
   std::array<std::int16_t, 6>
       cargo_bins{}; // block1+0x04 (ShipState field_0x7a..)
+  // Persistent system fog and standing tables. Both occupy the original
+  // fixed 0x800-slot address space; PilotFileApply projects the loaded prefix
+  // into the scenario's currently defined systems.
+  std::array<std::int16_t, GameState::kMaxSystems> system_discovery{};
+  std::array<std::int16_t, GameState::kMaxSystems> system_reputation{};
   std::array<std::int16_t, 0x200> outfit_owned_count{};     // block1+0x101a
   std::array<std::int16_t, 0x100 * 100> weapon_bank_ammo{}; // block1+0x241a
   std::array<std::int16_t, 0x100 * 100>
@@ -146,8 +151,9 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state);
 // The on-disk format (docs/pilot_save_file_format.md) is:
 //   [u32 block1 size][block1 data 0xe952][u32 block2 size][block2 data 0x66fe]
 //   [ship-name C-string trailer]
-// All integers little-endian. PilotFileSerialize/Deserialize are pure byte
-// transforms; the PilotFile* path helpers add the file I/O.
+// PilotFileSerialize writes the Windows little-endian form. Deserialize also
+// accepts converted classic-Mac payloads as the documented compatibility
+// divergence; the PilotFile* path helpers add the file I/O.
 // ---------------------------------------------------------------------------
 
 // Error codes returned by PilotFileDeserialize / PilotFileLoadSave, mirroring
