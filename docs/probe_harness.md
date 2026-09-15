@@ -42,7 +42,7 @@ and the binary behaves exactly as before. The implementation lives in
 | `GET /probe/ui?at=x,y` | hit-test oracle: name of the published element under that window point |
 | `GET /probe/screenshot` | next frame as `image/bmp` (last frame if paused) |
 | `GET /probe/logs?since=SEQ` | tail the in-game log ring (`{"tail":N,"lines":[...]}`) |
-| `POST /probe/command` | `{"cmd":"pause"\|"resume"\|"step"\|"quit", "frames":N}` |
+| `POST /probe/command` | `{"cmd":"pause"\|"resume"\|"step"\|"accelerate"\|"quit", "frames":N}` |
 | `POST /probe/key` | `{"key":"I"}` tap; `{"key":"I","down":true\|false}` hold/release (modal-loop channel, synthetic `SDL_Event`s) |
 | `POST /probe/click` | `{"element":"accept"}` clicks the named rect published by the active modal; `{"x":553,"y":508}` clicks raw window points (motion + button-down pair) |
 | `POST /probe/hold` | `{"keys":["W","SPACE"],"down":true}` virtual held keys merged into `PollFlightInput` (flight channel — `SDL_GetKeyboardState` cannot see injected events) |
@@ -92,6 +92,7 @@ the returned `tail` value as the next `since`.
 EVN_PROBE=1 build/release/src/evnova &
 curl -s localhost:8190/probe/state | python3 -m json.tool
 curl -s -X POST -d '{"cmd":"step","frames":60}' localhost:8190/probe/command
+curl -s -X POST -d '{"cmd":"accelerate","enabled":true,"speed_multiplier":10}' localhost:8190/probe/command
 curl -s localhost:8190/probe/screenshot -o frame.bmp
 curl -s -X POST -d '{"key":"I"}' localhost:8190/probe/key   # open missions
 curl -s "localhost:8190/probe/logs?since=0" | jq .
@@ -100,7 +101,26 @@ curl -s -X POST -d '{"cmd":"quit"}' localhost:8190/probe/command
 
 ## Not yet (deliberate)
 
-- Deterministic virtual clock / seed control (phase B of the design; needs
-  the `SDL_GetTicks()` sweep through `SdlPlatform::ticks_ms`).
+- Deterministic seed control.
 - PNG encoding (BMP keeps the dependency set at zero).
 - Write-access to game state (intentionally excluded; see the safety model).
+
+### Accelerated execution
+
+The probe can scale gameplay time while the process is running. This is
+deliberately a probe-command-only setting; ordinary startup, preferences, and
+command-line execution remain unchanged:
+
+```sh
+curl -s -X POST -d '{"cmd":"accelerate","enabled":true,"speed_multiplier":10}' \
+  localhost:8190/probe/command
+```
+
+`enabled` defaults to `true` and `speed_multiplier` defaults to 1. A value of
+10 advances gameplay time at ten times wall-clock speed regardless of the
+unlocked render rate. Accelerated frames disable renderer VSync and skip the
+normal frame yield; modal loops and spaceflight use the same pacing hook. Send
+`{"cmd":"accelerate","enabled":false}` to restore ordinary gameplay-clock
+speed, pacing, and VSync without discontinuity in the gameplay clock.
+Presentation, resource loading, and render-side effects remain active; this
+is not a renderer-free headless mode.

@@ -1228,7 +1228,7 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   // pilot loaded, the status panel); the original draws no other status line
   // (Ghidra 0x004873b0).
   runtime.startup_phase = StartupPhase::loading_splash;
-  runtime.startup_phase_started_ms = runtime.platform.ticks_ms();
+  runtime.startup_phase_started_ms = runtime.platform.wall_ticks_ms();
   // Ghidra: FUN_004ad960 loads sp\x95n 600-605 into DAT_00596cb8; the port
   // defers it (and the other menu assets) into the startup_splash phase so
   // the progress bar reflects real work. See RunStartupLoadStep.
@@ -1335,7 +1335,7 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
     }
   }
 
-  const auto now_ms = runtime.platform.ticks_ms();
+  const auto now_ms = runtime.platform.wall_ticks_ms();
   if (runtime.startup_phase == StartupPhase::loading_splash &&
       now_ms - runtime.startup_phase_started_ms >= kLoadingSplashDurationMs) {
     runtime.startup_phase = StartupPhase::startup_splash;
@@ -1657,7 +1657,7 @@ void NovaUi_PresentLoadingSplashFrame(NovaRuntime &runtime) {
     return;
   }
   const auto elapsed_ms =
-      runtime.platform.ticks_ms() - runtime.startup_phase_started_ms;
+      runtime.platform.wall_ticks_ms() - runtime.startup_phase_started_ms;
   const auto progress = static_cast<float>(elapsed_ms) /
                         static_cast<float>(kLoadingSplashDurationMs);
   DrawSplashFrame(runtime.platform.renderer(),

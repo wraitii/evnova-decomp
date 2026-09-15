@@ -1299,7 +1299,7 @@ bool NovaMenu_RunSettingsDialog(
         break;
       }
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return false;
 }
@@ -1403,7 +1403,7 @@ bool NovaMenu_RunKeySettingsDialog(
         selected_row = (selected_row + 1) % working.size();
       }
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return false;
 }

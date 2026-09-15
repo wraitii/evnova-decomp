@@ -97,8 +97,8 @@ struct FlightInput {
   bool mission_info = false;
   // Edge-triggered normal arrival command: Return. When the currently selected
   // ordinary stellar is inside the 250-unit arrival envelope, this follows the
-  // ticker-text / Spaceport path in Stellar_HandleStellarEntryAndExit instead of
-  // opening the target-action interaction dialog.
+  // ticker-text / Spaceport path in Stellar_HandleStellarEntryAndExit instead
+  // of opening the target-action interaction dialog.
   bool land = false;
   // Edge-triggered target-action command: 'e' opens the destination-
   // interaction window for the currently targeted stellar. It is separate
@@ -206,7 +206,34 @@ public:
   // Covers the codes the current consumers use; unmapped codes return false.
   [[nodiscard]] bool IsOriginalKeyCodeHeld(std::uint16_t key_code);
   [[nodiscard]] bool quit_requested() const;
-  [[nodiscard]] std::uint64_t ticks_ms() const;
+  // Host wall-clock time used by presentation/UI domains. Gameplay code must
+  // use gameplay_ticks_ms(), so a probe-controlled clock can replace the
+  // simulation domain without changing SDL or modal timing.
+  [[nodiscard]] std::uint64_t wall_ticks_ms() const;
+  // Clock owned by the platform/runtime for gameplay timestamps. It currently
+  // follows the wall clock; probe acceleration can scale this domain while
+  // leaving genuine wall-clock effects alone.
+  [[nodiscard]] std::uint64_t gameplay_ticks_ms() const;
+
+  // Compatibility name for presentation code that has not yet been classified
+  // as a wall-clock or gameplay domain.
+  [[nodiscard]] std::uint64_t ticks_ms() const { return wall_ticks_ms(); }
+
+  // Shared loop pacing. Normal execution preserves the historical 16-ms
+  // yield; probe-armed accelerated execution returns immediately.
+  void PaceFrame();
+  // Execution settings intentionally have no CLI/preferences surface: they
+  // are applied only after a probe command has been consumed on the main
+  // thread.
+  void ApplyProbeExecutionSettings(bool enabled,
+                                   std::uint32_t speed_multiplier);
+
+  [[nodiscard]] bool accelerated() const { return accelerated_; }
+
+  [[nodiscard]] std::uint32_t speed_multiplier() const {
+    return speed_multiplier_;
+  }
+
   [[nodiscard]] SDL_FPoint mouse_position() const;
 
   // Frame-boundary hook: captures a pending probe screenshot (while the
@@ -313,6 +340,11 @@ private:
 
   // Pushes fresh window geometry to the probe, then services the harness.
   void PumpProbe();
+
+  bool accelerated_ = false;
+  std::uint32_t speed_multiplier_ = 1;
+  std::uint64_t gameplay_clock_anchor_ms_ = 0;
+  std::uint64_t wall_clock_anchor_ms_ = 0;
 
   bool sdl_initialized_ = false;
   bool quit_requested_ = false;

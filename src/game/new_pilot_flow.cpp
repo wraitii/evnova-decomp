@@ -590,6 +590,7 @@ void NovaNewPilot_ResetStellarStrengthForNewGame(GameState &state) {
 bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                           GameState &state,
                           const std::function<void()> &render_background) {
+  state.gameplay_now_ms = platform.gameplay_ticks_ms();
   // ---- Step 1: pilot naming/selection ------------------------------------
   // Ghidra: Menu_RunNewGameFlow prefills DAT_007d20b7/DAT_007d21b7 with random
   // STR# 0x80 sample names (done inside the dialog port) and runs
@@ -699,7 +700,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   NovaSystem_RestoreMissionFleets(state,
                                   state.player.current_system_id,
                                   /*copy_player_heading=*/false,
-                                  SDL_GetTicks());
+                                  platform.gameplay_ticks_ms());
   // First offering roll for the fresh world (Ship_InitGameplayDataTables
   // 0x00458802 arm also re-rolls on arrival; the loader zeroed the table).
   Mission_RerollOfferingRolls(state);

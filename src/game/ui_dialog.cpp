@@ -430,7 +430,7 @@ void UiWindow_Draw(SdlPlatform &platform,
                   font_cache,
                   entry.text.substr(
                       0, static_cast<std::size_t>(entry.selection_start)));
-          if ((SDL_GetTicks() / 530U) % 2U == 0U) {
+          if ((platform.wall_ticks_ms() / 530U) % 2U == 0U) {
             SDL_SetRenderDrawColor(renderer,
                                    kControlText.r,
                                    kControlText.g,
@@ -787,7 +787,7 @@ void UiWindow_RunInteractionLoop(
   platform.Present();
   // Modal-loop cadence: the original yields through its frame pump
   // (NovaPlatform_PumpWindowEventsThrottled); other ported dialogs use 16 ms.
-  SDL_Delay(16);
+  platform.PaceFrame();
 }
 
 } // namespace game

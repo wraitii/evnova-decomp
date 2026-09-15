@@ -497,7 +497,7 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
   // Multi-line word wrap is TODO(decomp); current messages are single-line.
   if (state.hud_overlay.active &&
       (state.hud_overlay.expiry_ms == 0 ||
-       SDL_GetTicks() < state.hud_overlay.expiry_ms)) {
+       platform.gameplay_ticks_ms() < state.hud_overlay.expiry_ms)) {
     const auto &msg = state.hud_overlay;
     constexpr float kOverlayFontSize = 12.0F;
     const auto logical = platform.logical_playfield_size();
@@ -1357,7 +1357,8 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
   // Target-status poll (NovaUi_RefreshGameplayPanels 0x0045d320): toggles the
   // blink phase every >= 15 ms poll, which also re-marks the radar dirty
   // (i.e. the panel redraws every poll).
-  const std::uint32_t now = SDL_GetTicks();
+  const std::uint32_t now =
+      static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
   if (now - radar_poll_ms_ >= 15) {
     radar_poll_ms_ = now;
     radar_blink_phase_ =

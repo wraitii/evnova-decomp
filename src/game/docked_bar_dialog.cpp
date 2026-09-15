@@ -239,7 +239,7 @@ void RunBarNewsWindow(SdlPlatform &platform,
         return;
       }
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
 }
 
@@ -526,7 +526,7 @@ LandedExit RunBarDialog(SdlPlatform &platform,
       Mission_ClearActiveReactionMission(state);
       return LandedExit::kServiceComplete;
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   Mission_ClearActiveReactionMission(state);
   return LandedExit::kQuit;

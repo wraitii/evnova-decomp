@@ -229,7 +229,7 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
       audio.Play(*intro_sound);
     }
 
-    const auto start_ms = platform.ticks_ms();
+    const auto start_ms = platform.gameplay_ticks_ms();
     const auto duration_ms =
         static_cast<std::uint64_t>(
             std::max<int>(0, cinematic.duration_60h_ticks[frame_index])) *
@@ -250,10 +250,11 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
       const auto polled = PollIntroInput(platform);
       input_state.skip_all = input_state.skip_all || polled.skip_all;
       if (platform.quit_requested() || input_state.skip_all ||
-          polled.frame_done || platform.ticks_ms() - start_ms >= duration_ms) {
+          polled.frame_done ||
+          platform.gameplay_ticks_ms() - start_ms >= duration_ms) {
         break;
       }
-      SDL_Delay(16);
+      platform.PaceFrame();
     }
     if (platform.quit_requested() || input_state.skip_all) {
       break;

@@ -525,7 +525,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
         accept();
       }
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return LandedExit::kQuit;
 }
@@ -635,6 +635,7 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                            std::int16_t mission_def,
                            std::int16_t landed_stellar_id,
                            const std::function<void()> &render_background) {
+  state.gameplay_now_ms = platform.gameplay_ticks_ms();
   if (mission_def < 0 || mission_def >= 1000) {
     return MissionOfferResult::kDeclined;
   }
@@ -908,7 +909,7 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
       }
     }
     draw_frame();
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   return MissionOfferResult::kDeclined;
 }
@@ -1075,6 +1076,7 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
                                       GameState &state,
                                       SpaceflightView &view,
                                       HudRenderer &hud) {
+  state.gameplay_now_ms = platform.gameplay_ticks_ms();
   const auto contains = [](const SDL_FRect &rect, SDL_FPoint point) {
     return point.x >= rect.x && point.x < rect.x + rect.w &&
            point.y >= rect.y && point.y < rect.y + rect.h;
@@ -1323,7 +1325,10 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
       }
     }
     Mission_ClearMisnSlotAssignments(
-        state, slot, /*emit_completion_payload=*/true, SDL_GetTicks());
+        state,
+        slot,
+        /*emit_completion_payload=*/true,
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms()));
     // Rebuild the list; an empty mission set closes the window.
     rows = BuildMissionInfoRows(state);
     selected = -1;
@@ -1444,7 +1449,7 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
       // rebuild instead of redrawing an empty window.
       exit_requested = true;
     }
-    SDL_Delay(16);
+    platform.PaceFrame();
   }
   play_cue(2);
 }

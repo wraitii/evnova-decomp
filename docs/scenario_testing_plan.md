@@ -2,21 +2,30 @@
 
 Determinism is deferred.
 
-## 1. Centralize gameplay time
+## 1. Centralize gameplay time — complete
 
 Replace direct gameplay `SDL_GetTicks()` access with a clock owned by the
 platform/runtime. Preserve normalized ticks, original 21 ms logical calls, and
 genuine wall-clock domains.
 
-## 2. Add fixed-step accelerated mode
+Implemented with `SdlPlatform::gameplay_ticks_ms()` and explicit wall-clock
+access for presentation-only timing. Gameplay helpers receive the current
+clock through `GameState::gameplay_now_ms` where passing the platform would
+couple otherwise SDL-independent logic to the runtime.
+
+## 2. Add accelerated gameplay-clock mode — complete
 
 Add opt-in execution settings:
 
-- Fixed virtual timestep.
+- An intuitive gameplay-time speed multiplier independent of render rate.
 - No VSync.
 - No `SDL_Delay(16)`.
 - The same pacing policy across spaceflight and modal loops.
 - Continue routing frame boundaries through `SdlPlatform::Present()`.
+
+Implemented as the probe-only `accelerate` command with an integer
+`speed_multiplier`. The scaled gameplay clock remains continuous when the
+mode or multiplier changes, and probe pauses do not advance gameplay time.
 
 This immediately benefits probe-driven testing, even without autopilot.
 Because determinism is postponed, validation tests cannot be too exact, but
@@ -91,7 +100,7 @@ Milestones:
 - Accelerated landing and jump test.
 - Automated new-pilot flow.
 - Tutorial at ordinary speed.
-- Tutorial at accelerated fixed-step speed.
+- Tutorial at accelerated gameplay-clock speed.
 - Hidden/offscreen CI execution.
 
 The key dependency chain is:

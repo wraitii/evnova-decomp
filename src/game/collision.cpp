@@ -94,7 +94,8 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
     }
     Mission_FailMissionSlotQuick(state,
                                  static_cast<std::int16_t>(slot),
-                                 static_cast<std::uint32_t>(SDL_GetTicks()));
+                                 static_cast<std::uint32_t>(
+                                     state.gameplay_now_ms));
     break;
   }
 }
@@ -845,7 +846,8 @@ void ResolveShipHitFromWeapon(GameState &state,
                 state, *text, /*duration_frames=*/std::uint64_t{0xf0});
           }
           Mission_FailMissionSlotQuick(
-              state, fleet_slot, static_cast<std::uint32_t>(SDL_GetTicks()));
+              state, fleet_slot,
+              static_cast<std::uint32_t>(state.gameplay_now_ms));
         }
         mission.goal_counter_c =
             static_cast<std::int16_t>(mission.goal_counter_c + 1);
