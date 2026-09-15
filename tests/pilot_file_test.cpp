@@ -36,6 +36,7 @@ using game::PilotLoadError;
   p.ship_name = "Vengeance";
   p.jump_dest_stellar = 0x123;
   p.credits = 123456;
+  p.player_combat_rating_points = 987654;
   p.ship_class_id = 3;
   p.current_system_id = 7;
   p.active_weapon_bank_slot = 2;
@@ -48,6 +49,8 @@ using game::PilotLoadError;
   p.pos_y = -34.0F;
   p.heading = 1.25F;
   p.intro_played = true;
+  p.strict_play = true;
+  p.male = false;
   p.cargo_bins = {3, 0, 5, 1, 0, 2};
   p.system_discovery[0] = 2;
   p.system_discovery[0x7ff] = 1;
@@ -64,6 +67,9 @@ using game::PilotLoadError;
   p.stellar_saved_bytes[7] = 0x5a;
   p.stellar_present_ship_counts[7] = 23;
   p.stellar_availability_rolls[7] = 81;
+  p.stellar_engage_access[7] = 33;
+  p.reinforcement_retrigger_delay[5] = 12;
+  p.target_category_command = {1, -1, 2, 0};
   p.disaster_days_remaining[3] = 12;
   p.disaster_active_stellars[3] = 44;
   p.cron_duration_counters[5] = 9;
@@ -96,9 +102,12 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   // on load (the trailer carries the ship name).
   CHECK(out.jump_dest_stellar == 0x123);
   CHECK(out.credits == 123456);
+  CHECK(out.player_combat_rating_points == 987654);
   CHECK(out.ship_class_id == 3);
   CHECK(out.fuel_points == 77.0F); // 77.6 truncated toward zero, stored as u16
   CHECK(out.intro_played);
+  CHECK(out.strict_play);
+  CHECK_FALSE(out.male);
   CHECK(out.cargo_bins == p.cargo_bins);
   CHECK(out.system_discovery == p.system_discovery);
   CHECK(out.system_reputation == p.system_reputation);
@@ -113,6 +122,9 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.stellar_saved_bytes[7] == 0x5a);
   CHECK(out.stellar_present_ship_counts[7] == 23);
   CHECK(out.stellar_availability_rolls[7] == 81);
+  CHECK(out.stellar_engage_access[7] == 33);
+  CHECK(out.reinforcement_retrigger_delay[5] == 12);
+  CHECK(out.target_category_command == p.target_category_command);
   CHECK(out.disaster_days_remaining[3] == 12);
   CHECK(out.disaster_active_stellars[3] == 44);
   CHECK(out.cron_duration_counters[5] == 9);
@@ -138,6 +150,16 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   state.scenario.stellars[7].is_defined = true;
   pilot.stellar_present_ship_counts[6] = 17;
   pilot.stellar_availability_rolls[6] = 62;
+  pilot.stellar_engage_access[6] = 17;
+  pilot.stellar_engage_access[7] = -1;
+  state.scenario.stellars[6].strength_capacity = 250;
+  state.scenario.stellars[7].strength_capacity = 400;
+  // One active, squad-leading escort for the group-order restore loop.
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].class_category = 2;
+  state.ShipAt(1).is_active = true;
+  state.ShipAt(1).squad_leader_ship_slot = 0;
+  state.ShipAt(1).ship_class_id = 0;
   state.scenario.disaster_defs.resize(4);
   state.scenario.disaster_defs[3].present = true;
   state.scenario.cron_events.resize(6);
@@ -159,6 +181,15 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(state.scenario.stellars[7].persistent_state_byte == 0x5a);
   CHECK(state.scenario.stellars[7].present_ship_count == 0);
   CHECK(state.scenario.stellars[7].availability_roll == 0);
+  CHECK(state.scenario.stellars[6].engage_access == 17);
+  CHECK(state.scenario.stellars[6].strength == -1);
+  CHECK(state.scenario.stellars[7].engage_access == -1);
+  CHECK(state.scenario.stellars[7].strength == 400);
+  CHECK(state.reinforcement_retrigger_delay[5] == 12);
+  CHECK(state.target_category_command[2] == 2);
+  CHECK(state.ShipAt(1).escort_command_code == 2);
+  CHECK(state.pilot.strict_play);
+  CHECK_FALSE(state.control.male);
   CHECK(state.scenario.disaster_defs[3].days_remaining == 12);
   CHECK(state.scenario.disaster_defs[3].active_stellar == 44);
   CHECK(state.cron_event_states[5].is_active);
@@ -172,9 +203,31 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(collected.control_bits[42] == 1);
   CHECK(collected.control_bits[9999] == 0x8a);
   CHECK(collected.stellar_present_ship_counts[6] == 17);
+  CHECK(collected.stellar_engage_access[6] == 17);
+  CHECK(collected.stellar_engage_access[7] == -1);
+  CHECK(collected.reinforcement_retrigger_delay[5] == 12);
+  CHECK(collected.target_category_command == pilot.target_category_command);
+  CHECK(collected.strict_play);
+  CHECK_FALSE(collected.male);
   CHECK(collected.disaster_days_remaining[3] == 12);
   CHECK(collected.cron_duration_counters[5] == 9);
   CHECK(collected.rank_active_flags[6] == 1);
+}
+
+TEST_CASE("PilotFile normalizes invalid negative escort commands") {
+  PilotFile pilot = PilotFile::Fresh();
+  pilot.target_category_command = {-2, -1, 0, 3};
+
+  const auto bytes = PilotFileSerialize(pilot, 0);
+  PilotFile decoded;
+  REQUIRE(PilotFileDeserialize(bytes, decoded) == PilotLoadError::kOk);
+  CHECK((decoded.target_category_command ==
+         std::array<std::int16_t, 4>{-1, -1, 0, 3}));
+
+  game::GameState state;
+  PilotFileApply(decoded, state);
+  CHECK((state.target_category_command ==
+         std::array<std::int16_t, 4>{-1, -1, 0, 3}));
 }
 
 TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
@@ -195,6 +248,7 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   saved_state.player.credits = p.credits;
   saved_state.player.ship_class_id = p.ship_class_id;
   saved_state.player.fuel_points = p.fuel_points;
+  saved_state.player_combat_rating_points = p.player_combat_rating_points;
   saved_state.inventory.outfit_owned_count[0] = 1;
   saved_state.weapon_bank_ammo[5 * 100] = 7;
   REQUIRE(PilotFileProbeExists(path) == false);
@@ -208,6 +262,8 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   CHECK(loaded_state.pilot.last_name == "Maclean");
   CHECK(loaded_state.player.credits == p.credits);
   CHECK(loaded_state.player.ship_class_id == p.ship_class_id);
+  CHECK(loaded_state.player_combat_rating_points ==
+        p.player_combat_rating_points);
   // Fuel is stored as a truncated u16 in the file (block1+0x12).
   CHECK(loaded_state.player.fuel_points == 77.0F);
   CHECK(loaded_state.inventory.outfit_owned_count[0] == 1);
@@ -288,6 +344,7 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
     std::int16_t month;
     std::int16_t day;
     std::int32_t credits;
+    std::int32_t combat_rating;
     std::int16_t ship_class;
     std::int16_t jump_stellar;
     std::size_t discovered_systems;
@@ -295,28 +352,38 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
 
   constexpr std::array expectations{
       FixtureExpectation{
-          "Alien.plt", "Dark Knight", 1178, 10, 6, 1296635129, 0, 106, 537},
+          "Alien.plt", "Dark Knight", 1178, 10, 6, 1296635129, -1, 0, 106, 537},
+      FixtureExpectation{"Archer (PC).plt",
+                         "Archer",
+                         1178,
+                         8,
+                         31,
+                         519967550,
+                         352715,
+                         37,
+                         0,
+                         537},
       FixtureExpectation{
-          "Archer (PC).plt", "Archer", 1178, 8, 31, 519967550, 37, 0, 537},
-      FixtureExpectation{
-          "Hunter.plt", "Maverick", 1177, 11, 22, 48522725, 15, 0, 534},
+          "Hunter.plt", "Maverick", 1177, 11, 22, 48522725, -1, 15, 0, 534},
       FixtureExpectation{"Pirate Hunter.plt",
                          "Hunter",
                          1177,
                          7,
                          28,
                          1075610999,
+                         -1,
                          252,
                          280,
                          534},
       FixtureExpectation{
-          "Plank.plt", "Planky", 1185, 10, 23, 12251587, 163, 169, 458},
+          "Plank.plt", "Planky", 1185, 10, 23, 12251587, -1, 163, 169, 458},
       FixtureExpectation{"Rick Hunter.plt",
                          "Pirate Hunter",
                          1177,
                          8,
                          8,
                          2522959,
+                         -1,
                          252,
                          232,
                          535},
@@ -353,11 +420,14 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
     CHECK(state.pilot.first_name ==
           expected->file.substr(0, expected->file.size() - 4));
     CHECK(state.pilot.last_name == expected->nickname);
+    CHECK_FALSE(state.pilot.strict_play);
+    CHECK(state.control.male);
     CHECK(record.nickname == expected->nickname);
     CHECK(record.date.year == expected->year);
     CHECK(record.date.month == expected->month);
     CHECK(record.date.day == expected->day);
     CHECK(record.credits == expected->credits);
+    CHECK(record.player_combat_rating_points == expected->combat_rating);
     CHECK(record.ship_class_id == expected->ship_class);
     CHECK(record.jump_dest_stellar == expected->jump_stellar);
     CHECK(static_cast<std::size_t>(std::ranges::count_if(

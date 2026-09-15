@@ -133,9 +133,20 @@ movement integrator on the player: those paths use AI-only damping, weapon
 banks, stats, targeting, boarding resolution, and other side effects.
 
 `stop()` turns opposite the velocity vector without thrust, then thrusts once
-aligned. `moveToAndStopAt()` begins braking from estimated turn distance plus
-stopping distance, with hysteresis and a practical velocity tolerance rather
-than requiring exact zero.
+aligned. It brakes velocity *relative* to an optional reference velocity, so a
+zero reference is a full stop while a non-zero reference matches a moving
+target.
+
+`moveToAndStopAt()` is the general arrive-and-settle primitive: it drives to
+the point and stops within `radius`, matching the target's velocity when one is
+supplied. Speed is capped by the turnaround-drift-plus-braking distance and by
+the turn radius (`kTurnRadiusSpeedFraction * omega * distance`), so a
+slow-turning hull sheds speed to curve in instead of orbiting. It leads a
+moving target by the estimated closing time, and a velocity-error law (thrust
+along `desired velocity - relative velocity`) replaces the old phase switching
+between "face target" and "face reverse velocity". All control is expressed
+through `FlightInput`; the one-frame alignment gate scales with the frame's
+normalized tick count so accelerated probe runs stay consistent.
 
 ### Goal transitions
 
@@ -144,7 +155,10 @@ than requiring exact zero.
 1. Resolve an exact, case-insensitive stellar name in the current system;
    reject missing or ambiguous names.
 2. Select it through edge-triggered stellar-cycle input.
-3. Move into its landing envelope and settle below the landing velocity gate.
+3. Move inside the target's actual per-axis arrival envelope
+   (`Stellar_MaxLandingDistance` of the displayed sprite) and settle below the
+   per-axis landing velocity gate; the low-level maneuver drives to the
+   stellar and stops once inside a tolerance of half the envelope.
 4. Wait for the approach timer to arm, tap Land, and complete only when the
    landed/Spaceport modal is observed.
 

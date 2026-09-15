@@ -1513,10 +1513,20 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // before any player-command edge latch observes it.
     if (const auto request = platform.probe().ConsumeAutomationRequest()) {
       switch (request->kind) {
-      case ProbeAutomationRequest::Kind::kLandAt:
+      case ProbeAutomationRequest::Kind::kLandAt: {
+        // Resolve the target's real per-axis arrival envelope from its
+        // displayed sprite (Stellar_MaxLandingDistance) so the autopilot stops
+        // inside the actual gate rather than a fixed radius.
+        float envelope = -1.0F;
+        if (const auto resolved = FlightAutomationController::ResolveStellar(
+                state, request->target)) {
+          envelope = Stellar_MaxLandingDistance(
+              StellarArrivalSpriteFullHeight(platform, view, state, *resolved));
+        }
         (void)automation.LandAt(
-            state, request->target, now_ms, request->timeout_ms);
+            state, request->target, now_ms, request->timeout_ms, envelope);
         break;
+      }
       case ProbeAutomationRequest::Kind::kJumpTo:
         (void)automation.JumpTo(
             state, request->target, now_ms, request->timeout_ms);
@@ -1529,7 +1539,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (platform.probe().ConsumeAutomationDocked()) {
       automation.ObservedDocked();
     }
-    automation.Tick(state, now_ms, input);
+    automation.Tick(state, now_ms, input, frame_time_ms / (1000.0F / 30.0F));
     const auto &automation_status = automation.status();
     const auto goal_name = [&] {
       switch (automation_status.goal) {

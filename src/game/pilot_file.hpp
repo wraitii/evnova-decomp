@@ -44,11 +44,11 @@ struct PilotFile {
   // in-memory the original keys the pilot-save registry block by this name
   // (ResourceData_AccessByKey 0x63688a72; block+0x32 carries the name/opener).
   std::string pilot_name;
-  // The pilot's nickname/callsign suffix (Ghidra DAT_005999cc), stored in the
-  // .plt FleetState block at +0x5d98. The new-game flow uses it as the second
-  // generated opener string (last name).
+  // The pilot's nickname/callsign suffix (Ghidra g_player_nickname), stored in
+  // the .plt FleetState block at +0x5d98. The new-game flow uses it as the
+  // second generated opener string (last name).
   std::string nickname;
-  // The player ship's name (Ghidra DAT_00599acc). Serialized as the .plt
+  // The player ship's name (Ghidra g_player_ship_name). Serialized as the .plt
   // trailer C-string; not yet applied to any GameState visuals.
   std::string ship_name;
 
@@ -56,7 +56,10 @@ struct PilotFile {
   // The saved jump/travel destination stellar id (block1+0x00). The loader
   // places the player at this stellar on restore; -1 means none.
   std::int16_t jump_dest_stellar = -1;
-  std::int32_t credits = 0;       // block1+0x281a
+  std::int32_t credits = 0; // block1+0x281a
+  // Aggregate career score (Ghidra g_player_combat_rating_points),
+  // block1+0xe94e.
+  std::int32_t player_combat_rating_points = 0;
   std::int16_t ship_class_id = 0; // block1+0x02 (0 = default class)
   std::int16_t current_system_id = 0;
   std::int16_t active_weapon_bank_slot = 0;
@@ -79,8 +82,14 @@ struct PilotFile {
   std::array<std::int16_t, 4> intro_duration_60h_ticks{0, 0, 0, 0};
   // Bible char resource IntroTextID (block+0x30); -1 = no dialog.
   std::int16_t intro_text_desc_id = -1;
-  // Seen-intro-screen latch (Ghidra DAT_00596d35), block2+0x3086.
+  // Seen-intro-screen latch (Ghidra g_intro_played), block2+0x3086.
   bool intro_played = false;
+  // New-pilot option latches restored from FleetState block2: +0x02 is
+  // g_strict_play (the Strict Play checkbox) and +0x04 is g_player_is_male (the
+  // gender latch read by mission {g} expansions). Both are written by
+  // PilotFile_SaveGameCore and copied into the globals by PilotFile_LoadSave.
+  bool strict_play = false; // block2+0x02
+  bool male = true;         // block2+0x04
 
   // -- Ownership tables (g_outfit_owned_count, weapon banks) -----------------
   std::array<std::int16_t, 6>
@@ -103,11 +112,23 @@ struct PilotFile {
   std::array<std::uint8_t, 0x800> stellar_saved_bytes{}; // block1+0xdece
   std::array<std::int16_t, 0x800> stellar_present_ship_counts{}; // block2+6
   std::array<std::int16_t, 0x800> stellar_availability_rolls{};  // +0x2086
-  std::array<std::int16_t, 0x100> disaster_days_remaining{};     // +0x3088
-  std::array<std::int16_t, 0x100> disaster_active_stellars{};    // +0x3288
-  std::array<std::int16_t, 0x200> cron_duration_counters{};      // +0x3590
-  std::array<std::int16_t, 0x200> cron_holdoff_counters{};       // +0x3990
-  std::array<std::int16_t, 0x80> rank_active_flags{};            // +0x5dde
+  // Per-system mutable reinforcement retrigger delay (Ghidra SystemDef +0xC4),
+  // block2+0x3d90.
+  std::array<std::int16_t, GameState::kMaxSystems>
+      reinforcement_retrigger_delay{};
+  // Per-stellar engagement access (Ghidra StellarDef +0x47C), block2+0x4d90.
+  // Restored with the loader's <1 fallback (engage_access -1, live strength
+  // reset to capacity) vs >=1 branch (engage_access = value, strength -1);
+  // no separate strength array is persisted.
+  std::array<std::int16_t, 0x800> stellar_engage_access{};
+  // Escort group-order command codes by class category (Ghidra
+  // g_target_category_command), block2+0x5d90.
+  std::array<std::int16_t, 4> target_category_command{-1, -1, -1, -1};
+  std::array<std::int16_t, 0x100> disaster_days_remaining{};  // +0x3088
+  std::array<std::int16_t, 0x100> disaster_active_stellars{}; // +0x3288
+  std::array<std::int16_t, 0x200> cron_duration_counters{};   // +0x3590
+  std::array<std::int16_t, 0x200> cron_holdoff_counters{};    // +0x3990
+  std::array<std::int16_t, 0x80> rank_active_flags{};         // +0x5dde
   // The persisted player stat modifier quartet (DAT_007353f6..0x7353fd,
   // percentages; see GameState.player_stat_modifier_pct). SaveGameCore writes
   // them at FleetState block2 +0x3588/+0x358a/+0x358c/+0x358e and LoadSave
