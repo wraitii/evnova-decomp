@@ -63,7 +63,7 @@ save.
 | 0x281a | u32 | credits |
 | 0x281e | 16 × 0x14 | active-mission runtime flags (`g_active_misn_runtime_flags`) |
 | 0x295e | 16 × 0x8e6 | active missions (`_g_active_misn` structs, byte copy) |
-| 0xb7be | 0x2710 (10000) | persistent story/event data (`_DAT_005914cc` blob; contents unidentified) |
+| 0xb7be | 0x2710 (10000) | Nova Control Bits `b0..b9999` (`g_nova_control_bits`); one persistent byte per story/availability flag, tested as boolean but copied verbatim |
 | 0xdece | u8[0x800] | per-stellar saved byte (gated on `special_tech+0x2f`) |
 | 0xe6ce | u16[0x40] | fleet/escort ship class ids — behavior-6 (mission) escorts; +1000 marks `field_0xbb` |
 | 0xe74e | u16[0x40] | carried-fighter class ids — behavior-5 ships (deployed carrier fighters: Weapon_SpawnShipFromCarrierBayWeapon 0x0041e640 seeds ai_behavior_code 5 + squad_leader_ship_slot = owner). At a hyperspace jump the arrival walk 0x0044f8d6 deactivates the ones that cannot jump and the overlay tallies them as "fighter(s) abandoned" (STR# 0x7d2 0xa4/0xa5) |
@@ -179,7 +179,10 @@ There is no mid-game reload path.
 - Not reconstructed: the last-pilot marker file (0x004c7d40 / 0x004ca120;
   marker name string 0x82/4 unresolved), `PilotDebug_WritePilotLog`
   (0x004ca2c0), and the remaining untracked .plt regions (story blob,
-  per-stellar state, disaster/cron tables, ranks, and mission-fleet tables).
+  per-system encounter state, stellar schedule/engagement counters, and
+  mission-fleet tables). Per-stellar saved bytes, garrison counts and
+  availability rolls, disaster/crön runtime counters, and rank active flags
+  are preserved and applied with the original definition/state gates.
   Dates, all 0x800 discovery/reputation slots, the 16 mission runtime-flag
   records, and the 16 active-mission records are now preserved; mission
   records retain their opaque script/text payload bytes.
@@ -205,7 +208,9 @@ There is no mid-game reload path.
   values) — anti-piracy; likely differs from OG depending on build.
 - **Registry population at startup** (where the 0x63688a72 pilot entries come
   from so the new-game dialog lists pilots) — not located yet.
-- `0xb7be` 10000-byte story blob, the two 15-byte strings, and the
-  `DAT_00733b4a/4c/4e` u16s are unidentified.
+- The two 15-byte strings and the `DAT_00733b4a/4c/4e` u16s remain
+  unidentified. Block1 `+0xb7be` is confirmed as the 10,000 Nova Control Bit
+  bytes and is preserved exactly, including noncanonical nonzero values found
+  in converted Mac pilots.
 - `FUN_004cd7e0` sums all resource-family block sizes and compares against a
   stored total (entry `0x63739f6d` [0]) — a data-integrity check, not a save.

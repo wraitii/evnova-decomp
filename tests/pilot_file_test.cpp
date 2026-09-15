@@ -8,10 +8,12 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -57,6 +59,16 @@ using game::PilotLoadError;
   p.weapon_bank_secondary[5 * 100] = 11;
   p.weapon_bank_ammo[0xff * 100 + 42] = 99; // non-first slot: not serialized
   p.junk_counts[0x7f] = 13;
+  p.control_bits[42] = 1;
+  p.control_bits[9999] = 0x8a;
+  p.stellar_saved_bytes[7] = 0x5a;
+  p.stellar_present_ship_counts[7] = 23;
+  p.stellar_availability_rolls[7] = 81;
+  p.disaster_days_remaining[3] = 12;
+  p.disaster_active_stellars[3] = 44;
+  p.cron_duration_counters[5] = 9;
+  p.cron_holdoff_counters[5] = -1;
+  p.rank_active_flags[6] = 1;
   p.active_mission_runtime_flags[2].is_active = true;
   p.active_mission_runtime_flags[2].initial_briefing_done = true;
   p.active_mission_runtime_flags[2].deadline_day = 17;
@@ -97,6 +109,15 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   // Non-first bank slots are not persisted by the original format.
   CHECK(out.weapon_bank_ammo[0xff * 100 + 42] == 0);
   CHECK(out.junk_counts[0x7f] == 13);
+  CHECK(out.control_bits == p.control_bits);
+  CHECK(out.stellar_saved_bytes[7] == 0x5a);
+  CHECK(out.stellar_present_ship_counts[7] == 23);
+  CHECK(out.stellar_availability_rolls[7] == 81);
+  CHECK(out.disaster_days_remaining[3] == 12);
+  CHECK(out.disaster_active_stellars[3] == 44);
+  CHECK(out.cron_duration_counters[5] == 9);
+  CHECK(out.cron_holdoff_counters[5] == -1);
+  CHECK(out.rank_active_flags[6] == 1);
   CHECK(out.active_mission_runtime_flags[2].is_active);
   CHECK(out.active_mission_runtime_flags[2].initial_briefing_done);
   CHECK(out.active_mission_runtime_flags[2].deadline_day == 17);
@@ -112,6 +133,17 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   PilotFile pilot = SampleRecord();
   game::GameState state;
   state.scenario.systems.resize(4);
+  state.scenario.stellars.resize(8);
+  state.scenario.stellars[6].is_defined = true;
+  state.scenario.stellars[7].is_defined = true;
+  pilot.stellar_present_ship_counts[6] = 17;
+  pilot.stellar_availability_rolls[6] = 62;
+  state.scenario.disaster_defs.resize(4);
+  state.scenario.disaster_defs[3].present = true;
+  state.scenario.cron_events.resize(6);
+  state.scenario.cron_events[5].present = true;
+  state.scenario.ranks.resize(7);
+  state.scenario.ranks[6].defined = true;
 
   PilotFileApply(pilot, state);
 
@@ -119,10 +151,30 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(state.scenario.systems[1].discovery_state == 0);
   REQUIRE(state.system_reputation.size() == 4);
   CHECK(state.system_reputation[3] == -1234);
+  CHECK(state.control.ControlBit(42));
+  CHECK(state.control.ControlBit(9999));
+  CHECK(state.control.persisted_bit_bytes[9999] == 0x8a);
+  CHECK(state.scenario.stellars[6].present_ship_count == 17);
+  CHECK(state.scenario.stellars[6].availability_roll == 62);
+  CHECK(state.scenario.stellars[7].persistent_state_byte == 0x5a);
+  CHECK(state.scenario.stellars[7].present_ship_count == 0);
+  CHECK(state.scenario.stellars[7].availability_roll == 0);
+  CHECK(state.scenario.disaster_defs[3].days_remaining == 12);
+  CHECK(state.scenario.disaster_defs[3].active_stellar == 44);
+  CHECK(state.cron_event_states[5].is_active);
+  CHECK(state.cron_event_states[5].duration_counter == 9);
+  CHECK(state.cron_event_states[5].holdoff_counter == -1);
+  CHECK(state.scenario.ranks[6].active);
 
   const PilotFile collected = PilotFileCollectFromState(state);
   CHECK(collected.system_discovery[0] == 2);
   CHECK(collected.system_reputation[3] == -1234);
+  CHECK(collected.control_bits[42] == 1);
+  CHECK(collected.control_bits[9999] == 0x8a);
+  CHECK(collected.stellar_present_ship_counts[6] == 17);
+  CHECK(collected.disaster_days_remaining[3] == 12);
+  CHECK(collected.cron_duration_counters[5] == 9);
+  CHECK(collected.rank_active_flags[6] == 1);
 }
 
 TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
@@ -229,6 +281,47 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
     SKIP("optional docs/assets/pilots fixtures are not installed");
   }
 
+  struct FixtureExpectation {
+    std::string_view file;
+    std::string_view nickname;
+    std::int16_t year;
+    std::int16_t month;
+    std::int16_t day;
+    std::int32_t credits;
+    std::int16_t ship_class;
+    std::int16_t jump_stellar;
+    std::size_t discovered_systems;
+  };
+
+  constexpr std::array expectations{
+      FixtureExpectation{
+          "Alien.plt", "Dark Knight", 1178, 10, 6, 1296635129, 0, 106, 537},
+      FixtureExpectation{
+          "Archer (PC).plt", "Archer", 1178, 8, 31, 519967550, 37, 0, 537},
+      FixtureExpectation{
+          "Hunter.plt", "Maverick", 1177, 11, 22, 48522725, 15, 0, 534},
+      FixtureExpectation{"Pirate Hunter.plt",
+                         "Hunter",
+                         1177,
+                         7,
+                         28,
+                         1075610999,
+                         252,
+                         280,
+                         534},
+      FixtureExpectation{
+          "Plank.plt", "Planky", 1185, 10, 23, 12251587, 163, 169, 458},
+      FixtureExpectation{"Rick Hunter.plt",
+                         "Pirate Hunter",
+                         1177,
+                         8,
+                         8,
+                         2522959,
+                         252,
+                         232,
+                         535},
+  };
+
   std::size_t fixture_count = 0;
   for (const auto &entry :
        std::filesystem::recursive_directory_iterator(fixture_dir)) {
@@ -241,14 +334,38 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
     }
     ++fixture_count;
     CAPTURE(entry.path());
-    game::GameState state;
-    const auto result = PilotFileLoadSave(entry.path(), state);
+    const auto expected = std::ranges::find_if(
+        expectations, [&](const FixtureExpectation &candidate) {
+          return candidate.file == entry.path().filename().string();
+        });
+    REQUIRE(expected != expectations.end());
+    std::ifstream stream(entry.path(), std::ios::binary);
+    const std::string raw{std::istreambuf_iterator<char>(stream),
+                          std::istreambuf_iterator<char>()};
+    std::vector<std::byte> bytes(raw.size());
+    std::memcpy(bytes.data(), raw.data(), raw.size());
+    PilotFile record;
+    const auto result = PilotFileDeserialize(bytes, record);
     CHECK((result == PilotLoadError::kOk ||
            result == PilotLoadError::kRepairsApplied));
-    CHECK(state.player.ship_class_id >= 0);
-    CHECK(state.date.year >= 1170);
-    CHECK_FALSE(state.pilot.last_name.empty());
-    CHECK(static_cast<unsigned char>(state.pilot.last_name.front()) >= 0x20);
+    game::GameState state;
+    CHECK(PilotFileLoadSave(entry.path(), state) == result);
+    CHECK(state.pilot.first_name ==
+          expected->file.substr(0, expected->file.size() - 4));
+    CHECK(state.pilot.last_name == expected->nickname);
+    CHECK(record.nickname == expected->nickname);
+    CHECK(record.date.year == expected->year);
+    CHECK(record.date.month == expected->month);
+    CHECK(record.date.day == expected->day);
+    CHECK(record.credits == expected->credits);
+    CHECK(record.ship_class_id == expected->ship_class);
+    CHECK(record.jump_dest_stellar == expected->jump_stellar);
+    CHECK(static_cast<std::size_t>(std::ranges::count_if(
+              record.system_discovery, [](std::int16_t value) {
+                return value != 0;
+              })) == expected->discovered_systems);
+    // Archer's class 37 belongs to its plugin set. Raw decoding must retain
+    // the exact id; a scenario-aware load may repair it without those plugins.
   }
   if (fixture_count == 0) {
     SKIP("no optional .plt fixtures found in docs/assets/pilots");
