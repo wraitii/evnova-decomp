@@ -1036,7 +1036,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004C7D40	FUN_004c7d40		0%	
 0x004C7DB0	PilotFile_SaveGame	src/game/pilot_file.cpp	30%	PilotFile_SaveGame: entry -> PilotFileSaveGame(path build from pilot name + serialized tracked subset + write). License-seed check
 0x004C7DD0	PilotFile_SaveGameCore	src/game/pilot_file.cpp	45%	PilotFile_SaveGameCore: PilotFileSerialize covers the tracked block1/block2 offsets (cargo
-0x004C9E90	Menu_OpenPilotFileDialog		0%	
+0x004C9E90	Menu_OpenPilotFileDialog	src/nova_app.cpp	55%	SDL3 native .plt chooser is wired asynchronously into the main menu and selected files run through PilotFileLoadSave; original reset/reputation preparation, error dialogs, last-pilot marker update, and password/repair interaction remain incomplete
 0x004CA120	PilotData_AutoresumeLastPilot		0%	PilotData_AutoresumeLastPilot (startup auto-resume via last-pilot marker file string 0x82/4) not reconstructed; marker file name unresolved
 0x004CA2C0	PilotDebug_WritePilotLog		0%	debug-only pilotlog.txt dump (licensed runtime only); not reconstructed
 0x004CB260	PilotFile_LoadSave	src/game/pilot_file.cpp	50%	PilotFile_LoadSave: PilotFileDeserialize + file I/O + name-from-path + jump-dest system resolution for the tracked subset

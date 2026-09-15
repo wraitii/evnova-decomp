@@ -3,7 +3,9 @@
 #include "game/game_state.hpp"
 #include "game/pilot_file.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -193,6 +195,35 @@ TEST_CASE("PilotFile load skips a block1 rejected by the validity gate") {
   CHECK(out.ship_class_id == 0);   // block1 restore skipped
   CHECK(out.intro_played == true); // block2 restore still ran
   CHECK(out.junk_counts[0x7f] == 13);
+}
+
+TEST_CASE("archived pilot fixtures have recognizable .plt framing",
+          "[pilot-fixtures]") {
+  const std::filesystem::path fixture_dir = "docs/assets/pilots";
+  if (!std::filesystem::is_directory(fixture_dir)) {
+    SKIP("optional docs/assets/pilots fixtures are not installed");
+  }
+
+  std::size_t fixture_count = 0;
+  for (const auto &entry :
+       std::filesystem::recursive_directory_iterator(fixture_dir)) {
+    std::string extension = entry.path().extension().string();
+    std::ranges::transform(extension, extension.begin(), [](unsigned char c) {
+      return static_cast<char>(std::tolower(c));
+    });
+    if (!entry.is_regular_file() || extension != ".plt") {
+      continue;
+    }
+    ++fixture_count;
+    CAPTURE(entry.path());
+    game::GameState state;
+    const auto result = PilotFileLoadSave(entry.path(), state);
+    CHECK((result == PilotLoadError::kOk ||
+           result == PilotLoadError::kRepairsApplied));
+  }
+  if (fixture_count == 0) {
+    SKIP("no optional .plt fixtures found in docs/assets/pilots");
+  }
 }
 
 } // namespace

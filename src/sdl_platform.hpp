@@ -3,8 +3,10 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -184,6 +186,11 @@ private:
 
 class SdlPlatform {
 public:
+  struct OpenFileDialogResult {
+    std::optional<std::filesystem::path> path;
+    std::string error;
+  };
+
   SdlPlatform() = default;
   ~SdlPlatform();
 
@@ -194,6 +201,11 @@ public:
 
   [[nodiscard]] bool Initialize();
   [[nodiscard]] SDL_Renderer *renderer() const;
+  // SDL3's native chooser is asynchronous and may invoke its callback from a
+  // worker thread. Results are copied into platform-owned state and consumed
+  // by the main loop through PollOpenFileDialogResult.
+  [[nodiscard]] bool ShowOpenPilotFileDialog();
+  [[nodiscard]] std::optional<OpenFileDialogResult> PollOpenFileDialogResult();
   [[nodiscard]] std::optional<char> PollCommandEvent();
   // Raw editable-key event for modal dialogs. Enter/Escape/Backspace are
   // returned as distinct TextKey values; printable keys return translated
@@ -361,6 +373,10 @@ private:
   SDL_FPoint mouse_window_point_{};
   std::unique_ptr<SDL_Window, WindowDeleter> window_;
   std::unique_ptr<SDL_Renderer, RendererDeleter> renderer_;
+  std::mutex open_file_dialog_mutex_;
+  bool open_file_dialog_pending_ = false;
+  bool open_file_dialog_completed_ = false;
+  OpenFileDialogResult open_file_dialog_result_;
 };
 
 // Clears the probe UI layout registry at scope exit so a closed modal never
