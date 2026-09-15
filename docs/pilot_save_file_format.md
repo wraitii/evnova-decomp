@@ -38,10 +38,11 @@ The u32 size headers are written with `FUN_004f22b0` (u32) and read back with
 is written with `FUN_004f22e0` (C-string + NUL) and read with
 `FUN_004f2350(buf, 0x40, stream)`.
 
-> Caveat: the "u32 size prefix" framing may be a community/port tweak. Verify
-> against an OG save file before relying on it for interop. The block contents
-> below are read at fixed offsets relative to each block's start, so both
-> blocks must be present with their expected sizes for a valid save.
+The size-prefix framing is present in the archived Windows pilot
+`Archer (PC).plt` and in the converted Mac fixtures under `docs/assets/pilots`.
+The block contents below are read at fixed offsets relative to each block's
+start, so both blocks must be present with their expected sizes for a valid
+save.
 ### Block 1 — "PilotState" (0xe952 = 59730 bytes)
 
 | Offset | Size | Field |
@@ -110,7 +111,7 @@ is written with `FUN_004f22e0` (C-string + NUL) and read with
 | 0x004c7db0 | `PilotFile_SaveGame` (was `Stellar_SetTravelDestination`) | Trampoline: guards on `DAT_00863f09`, then calls the saver with the current jump/travel destination stellar id. This IS the pilot save entry point. Callers: `Menu_RunNewGameFlow` (initial save), `Stellar_RunDockAndLaunchSequence`, `Ship_HandlePlayerShipCore`. |
 | 0x004c7dd0 | `PilotFile_SaveGameCore` | Saver core: builds `<nova_files><pilot name>.plt`, allocates block1 (0xe952) + block2 (0x66fe), fills all fields, writes `[u32 sz][data]` twice + ship-name trailer, closes. Guards on `DAT_00863f0a`. |
 | 0x004cb260 | `PilotFile_LoadSave` | Loader (Open Pilot + startup auto-resume): reads `[u32 sz1][data1]` → restores PilotState; `[u32 sz2][data2]` → restores FleetState/world; then ship-name trailer. Derives the pilot name from the file path (after last ':', before '.'). Returns 0 ok; -0x2b missing/empty; -0x2a/-0x2d invalid block2; -0x2e repairs applied. |
-| 0x008725b0 | `PilotSave_ValidateBlock` | Block validator: if first u16 < 0x800 → 0 (valid, no checksum); else runs a 32-bit checksum helper (LAB_0046f960, partially inlined). Nonzero → caller skips restoring that block. Suspected community-fix. |
+| 0x008725b0 | `PilotSave_DecodeBlock` | Leaves plaintext blocks whose first u16 is below 0x800 alone; otherwise tail-calls the symmetric XOR transform at 0x0046f960 with `(data, size, 0xb36a210f)`. Both save blocks in the archived retail pilots use this encoding. |
 | 0x004c7d40 | `PilotFile_RecordLastPilotPath` | Writes `<nova_files><string-table 0x82/4>` with the pilot file path (the *last-pilot marker file*, consumed by `PilotData_AutoresumeLastPilot` at startup; string id unresolved). Called at end of both save and load. |
 | 0x004ca120 | `PilotData_AutoresumeLastPilot` (was `GameScenario_LoadStoryData`) | Startup auto-resume: reads the last-pilot marker file (same string 0x82/4), probes the named .plt, and if present resets player state and calls `PilotFile_LoadSave`. Called from `NovaGameSession_Run` immediately before `NovaMainLoop_Run`. |
 | 0x004ca2c0 | `PilotDebug_WritePilotLog` | Debug-only: dumps `pilotlog.txt` ("EV Nova pilot data dump") when licensed runtime. Called at end of load. |
@@ -174,22 +175,32 @@ There is no mid-game reload path.
 - `PilotFileSaveGame` (0x004c7db0/0x004c7dd0), `PilotFileLoadSave`
   (0x004cb260, incl. name-from-path and jump-dest system resolution),
   `PilotFileProbeExists` (0x004cd030), `PilotFileDelete` (0x004cd040),
-  `PilotSave_ValidateBlock` gate (0x008725b0).
+  `PilotSave_DecodeBlock` transform (0x008725b0).
 - Not reconstructed: the last-pilot marker file (0x004c7d40 / 0x004ca120;
   marker name string 0x82/4 unresolved), `PilotDebug_WritePilotLog`
-  (0x004ca2c0), and the remaining untracked .plt regions (discovery,
-  reputations, dates, story blob, disaster/cron tables, and mission-fleet
-  tables). The 16 mission runtime-flag records and 16 active-mission records
-  are now preserved by the clean-room serializer, including their opaque
-  script/text payload bytes.
+  (0x004ca2c0), and the remaining untracked .plt regions (story blob,
+  per-stellar state, disaster/cron tables, ranks, and mission-fleet tables).
+  Dates, all 0x800 discovery/reputation slots, the 16 mission runtime-flag
+  records, and the 16 active-mission records are now preserved; mission
+  records retain their opaque script/text payload bytes.
 
 ## Quirks / open questions
 
-- **u32 size-prefix framing** vs OG format — verify with a real OG `.plt`.
-- **`PilotSave_ValidateBlock` validator** — the `u16[0] < 0x800` gate + checksum
-  branch is unusual; a genuine save with `jump_destination == -1` (0xffff) takes the
-  checksum branch. Whether nonzero there still allows a restore, and what the
-  checksum covers, is unresolved. Suspected "community fix" divergence.
+- **Block obfuscation** — `PilotSave_DecodeBlock` uses a symmetric XOR stream
+  seeded with `0xb36a210f`. A plaintext block whose first u16 is naturally at
+  least `0x800` would be mistaken for encoded data; shipped saves avoid that
+  ambiguity by encoding both blocks.
+- Converted classic-Mac pilots retain big-endian scalars and Pascal strings
+  inside the size-prefixed blocks. Windows pilots use little-endian scalars and
+  C strings. FleetState version 300 distinguishes the payload layouts. The
+  loader forces the first-block transform after detecting a Mac FleetState:
+  testing Mac ciphertext's first word as little-endian can otherwise resemble
+  an unencoded jump id (as it does in `Alien.plt`).
+  Both byte-order detection and forced block-1 decoding are clean-room
+  compatibility divergences: each original platform read its own native save
+  format and did not auto-detect the other platform. Pascal nickname detection
+  is likewise independent of scalar byte order because `Archer (PC).plt`
+  contains little-endian fields but retains a Pascal nickname.
 - **License seed check** in the saver (block1 +2 zeroing for 4 magic seed
   values) — anti-piracy; likely differs from OG depending on build.
 - **Registry population at startup** (where the 0x63688a72 pilot entries come
