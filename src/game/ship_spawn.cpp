@@ -970,9 +970,11 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
   if (is_derelict && cls != nullptr) {
     // Derelict government: no shields, reduced armor (Bible shïp Flags
     // 0x0010: disabled at 10% armor instead of 33%), dead in space.
+    // g_derelict_armor_fraction (0x00575258) is a 0.33 double; the 0x10 hull
+    // cap uses _DAT_00575208 = 0.1; g_armor_pin_addend_f64 (0x00575230) = 1.0.
     ship.shield_points = 0.0F;
     const float armor_scale =
-        (cls->capability_flags & 0x10U) != 0U ? 0.1F : 0.32F;
+        (cls->capability_flags & 0x10U) != 0U ? 0.1F : 0.33F;
     ship.armor_points =
         static_cast<float>(cls->base_armor) * armor_scale - 1.0F;
     ship.vel_y = 0.0F;
@@ -1379,11 +1381,13 @@ void NovaSystem_RestoreMissionFleets(GameState &state,
         const ShipClass *cls = state.scenario.Ship(
             static_cast<std::int16_t>(ship.ship_class_id + 0x80));
         if (cls != nullptr) {
-          // The original's _DAT_00575230 subtrahend is 0.0.
+          // g_derelict_armor_fraction (0x00575258 = 0.33; 0.1 for 0x10 hulls,
+          // _DAT_00575208) less the g_armor_pin_addend_f64 (0x00575230 = 1.0)
+          // subtrahend, as in 0x0041b7f6.
           const float armor_factor =
               (cls->capability_flags & 0x10U) != 0U ? 0.1F : 0.33F;
           ship.armor_points =
-              static_cast<float>(cls->base_armor) * armor_factor;
+              static_cast<float>(cls->base_armor) * armor_factor - 1.0F;
         }
         if (mission.time_limit_days_remaining < 1 &&
             mission.time_limit_days_remaining > -32000) {
