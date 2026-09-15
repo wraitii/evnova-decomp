@@ -3243,7 +3243,8 @@ void Mission_ShowMissionShipAnnouncement(GameState &state,
   // NovaAudio_QueueCenteredSound(g_transition_sound_handle_table[4], 1,
   // g_centered_audio_gain): the flight loop consumes pending_ui_sounds and
   // plays transition-table cue 4 directly.
-  state.pending_ui_sounds.push_back({/*transition_index=*/4, /*count=*/1});
+  state.pending_ui_sounds.push_back(
+      {/*transition_index=*/4, /*priority_width=*/1});
 
   // Hail text: first string of STR# (hail_quote_id + 4999) when present,
   // else entry hail_quote_id of STR# 0x1bbd (7101, the pers HailQuote pool).

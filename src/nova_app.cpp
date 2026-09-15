@@ -674,11 +674,19 @@ void UpdateMenuEntrance(NovaRuntime &runtime, std::uint64_t now_ms) {
       ++runtime.menu_row_reveal_counters[row];
       if (runtime.menu_row_reveal_counters[row] == 0 &&
           runtime.menu_reveal_start_sound) {
-        runtime.audio.Play(*runtime.menu_reveal_start_sound);
+        runtime.audio.Play(*runtime.menu_reveal_start_sound,
+                           1.0F,
+                           1.0F,
+                           /*sound_key=*/602,
+                           /*priority_width=*/0x32);
       }
       if (runtime.menu_row_reveal_counters[row] == frame_count &&
           runtime.menu_reveal_finish_sound) {
-        runtime.audio.Play(*runtime.menu_reveal_finish_sound);
+        runtime.audio.Play(*runtime.menu_reveal_finish_sound,
+                           1.0F,
+                           1.0F,
+                           /*sound_key=*/603,
+                           /*priority_width=*/0x32);
       }
     }
   }
@@ -1408,10 +1416,18 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
   // when leaving one. Moving directly between entries therefore plays 600.
   if (runtime.hovered_action != runtime.previous_hovered_action) {
     if (runtime.hovered_action && runtime.menu_focus_enter_sound) {
-      runtime.audio.Play(*runtime.menu_focus_enter_sound);
+      runtime.audio.Play(*runtime.menu_focus_enter_sound,
+                         1.0F,
+                         1.0F,
+                         /*sound_key=*/600,
+                         /*priority_width=*/10);
     } else if (!runtime.hovered_action && runtime.previous_hovered_action &&
                runtime.menu_focus_exit_sound) {
-      runtime.audio.Play(*runtime.menu_focus_exit_sound);
+      runtime.audio.Play(*runtime.menu_focus_exit_sound,
+                         1.0F,
+                         1.0F,
+                         /*sound_key=*/601,
+                         /*priority_width=*/10);
     }
   }
   runtime.previous_hovered_action = runtime.hovered_action;
@@ -1420,7 +1436,11 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
     // NovaAudio_PlayTransitionEffectsWait plays focus-in then focus-out around
     // keyboard actions. Dispatch remains asynchronous in this SDL loop.
     if (runtime.menu_focus_enter_sound) {
-      runtime.audio.Play(*runtime.menu_focus_enter_sound);
+      runtime.audio.Play(*runtime.menu_focus_enter_sound,
+                         1.0F,
+                         1.0F,
+                         /*sound_key=*/600,
+                         /*priority_width=*/10);
     }
     NovaGameMode_DispatchAction(runtime, *runtime.requested_action);
     runtime.requested_action.reset();

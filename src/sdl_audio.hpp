@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -15,6 +16,19 @@ struct NovaSoundData {
   int channel_count = 0;
   std::vector<std::int16_t> samples;
 };
+
+struct NovaAudioVoicePriority {
+  int width = 1;
+  int level = 0;
+};
+
+// Pure decision step from Audio_AllocateVoiceSlot (0x004d6550), exposed for
+// saturation tests. Returns the ordered insertion index, or nullopt when a
+// full table rejects an incoming descriptor that outranks no active entry.
+[[nodiscard]] std::optional<std::size_t>
+NovaAudio_SelectVoiceInsertion(std::span<const NovaAudioVoicePriority> active,
+                               NovaAudioVoicePriority incoming,
+                               std::size_t capacity = 16);
 
 // RAII wrapper around an SDL3 audio device. Owns one output device plus a small
 // pool of streaming voices (SDL_AudioStream) so several one-shot effects can
@@ -32,9 +46,9 @@ public:
   // Opens the default output device. Safe to call once; idempotent.
   [[nodiscard]] bool Initialize();
 
-  // Plays a one-shot effect by streaming the provided PCM through a free voice.
-  // If every voice is busy the oldest voice is reused (the new blip replaces
-  // the tail of an earlier one, as the original's small voice pool does).
+  // Plays one effect through the original's ordered 16-voice policy. A full
+  // pool admits the incoming descriptor only when it outranks an active entry;
+  // insertion then drops the final, lower-ranked voice.
   // sound_key tags the voice for CountActiveByKey (the original counts active
   // instances of a sound handle before retriggering no-stack effects); pass
   // -1 for untagged one-shots.
@@ -42,7 +56,7 @@ public:
             float gain = 1.0F,
             float playback_rate = 1.0F,
             int sound_key = -1,
-            int priority_width = 8);
+            int priority_width = 1);
   // Number of voices still playing (draining) with the given key. Mirrors
   // NovaAudio_CountActiveByHandle for the no-stack fire-sound gate.
   [[nodiscard]] int CountActiveByKey(int sound_key) const;
@@ -67,7 +81,7 @@ private:
     // width and then its channel level. A full table admits a louder/wider
     // incoming cue by replacing the weakest voice rather than dropping every
     // later effect.
-    int priority_width = 1;
+    NovaAudioVoicePriority priority;
     float source_gain = 1.0F;
   };
 
@@ -75,7 +89,6 @@ private:
 
   SDL_AudioDeviceID device_id_ = 0;
   std::vector<Voice> voices_;
-  std::size_t next_voice_ = 0;
   float master_gain_ = 1.0F;
   bool initialized_ = false;
 };

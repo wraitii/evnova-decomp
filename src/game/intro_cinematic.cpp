@@ -226,7 +226,11 @@ bool NovaIntroCinematic_Run(SdlPlatform &platform,
                     pict_id);
     }
     if (intro_sound) {
-      audio.Play(*intro_sound);
+      audio.Play(*intro_sound,
+                 1.0F,
+                 1.0F,
+                 /*sound_key=*/-1,
+                 /*priority_width=*/10);
     }
 
     const auto start_ms = platform.gameplay_ticks_ms();

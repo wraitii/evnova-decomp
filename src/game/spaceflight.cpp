@@ -1774,7 +1774,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Centered UI cues from the boarding system (transition-table handles,
     // snd 150 + index). The flight loop owns the audio device; the modal
     // windows play their cues through the same queue. Mirrors
-    // NovaAudio_QueueCenteredSound(handle, count, ...). The lazy decode runs
+    // NovaAudio_QueueCenteredSound(handle, priority_width, ...). The lazy
+    // decode runs
     // here so every gameplay-side queuer (jump-range cue, auto-repair,
     // distress alert) sees a loaded table even without a boarding pass.
     EnsureTransitionSounds(state);
@@ -1789,13 +1790,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       if (!sound.has_value()) {
         continue;
       }
-      for (std::int16_t repeat = 0; repeat < pending.count; ++repeat) {
-        audio.Play(*sound,
-                   1.0F,
-                   1.0F,
-                   150 + pending.transition_index,
-                   /*priority_width=*/8);
-      }
+      audio.Play(*sound,
+                 1.0F,
+                 1.0F,
+                 150 + pending.transition_index,
+                 pending.priority_width);
     }
     state.pending_ui_sounds.clear();
     // Cross-system hyperspace jump state machine (travel.cpp): engages on
@@ -1852,8 +1851,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         // port pins the multiplier to 1.0 (not decoded into ShipClass yet),
         // so the cue plays at rate 1.0: 6.08 s of rising cue, ~2.1 s of
         // stationary hold, ramp onset, boom as the cue resolves.
-        audio.Play(
-            *state.warp_up_sound, 1.0F, 1.0F, game::kHyperspaceWarpUpSoundKey);
+        audio.Play(*state.warp_up_sound,
+                   1.0F,
+                   1.0F,
+                   game::kHyperspaceWarpUpSoundKey,
+                   /*priority_width=*/0x32);
       }
       state.warp_up_sound_pending = false;
     }
@@ -1863,7 +1865,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     }
     if (state.warp_out_sound_pending) {
       if (state.warp_out_sound.has_value()) {
-        audio.Play(*state.warp_out_sound);
+        audio.Play(*state.warp_out_sound,
+                   1.0F,
+                   1.0F,
+                   /*sound_key=*/130,
+                   /*priority_width=*/0x32);
       }
       state.warp_out_sound_pending = false;
     }
@@ -4675,7 +4681,11 @@ void NovaFrame_UpdateCombatChatter(GameState &state, SdlAudio &audio) {
   }
   state.active_combat_chatter_sound = std::move(*decoded);
   state.active_combat_chatter_sound_id = sound_id;
-  audio.Play(*state.active_combat_chatter_sound, 1.0F, 1.0F, sound_id);
+  audio.Play(*state.active_combat_chatter_sound,
+             1.0F,
+             1.0F,
+             sound_id,
+             /*priority_width=*/0x0f);
 }
 
 // Ghidra 0x004313C0 Frame_CancelCombatChatter.

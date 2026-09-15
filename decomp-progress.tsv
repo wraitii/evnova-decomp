@@ -445,7 +445,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0046A730	Ship_ComputeShipTotalCargoCapacity	src/game/outfit.cpp	100%	Port as Ship_ComputeShipTotalCargoCapacity: class Holds (ShipClassDef.cargo_holds +0x0 / shp payload 0x00) plus, for every owned outfit, owned_count * ModType-2 (cargo space) ModVal per slot (16-bit product truncation mirrored). Player baseline for Player_ComputeFleetCargoCapacity (0x00469760). Renamed from Ship_ComputeShipTotalMass after disassembly proved ModType 2 is cargo space, not mass; the previous port wrongly returned hull mass + all-outfit PurchaseMass.
 0x0046A7C0	Player_ComputeRemainingCargoSpace	src/game/outfit.cpp	100%	Full 0x0046a7c0 formula: ship capacity minus carried, with escort-freighter holds absorbing bins/junk overflow before mission cargo and any remainder are charged to the ship. Single-ship branch is not clamped (callers clamp; e.g. 0x0049c050). The escort branch activates once Player_ComputeFleetCargoCapacity (0x00469760) models escort freighters (itself 50%).
 0x0046A870	NovaUi_RedrawGameplayViewportAndRadar		0%	
-0x0046AAD0	NovaAudio_QueueCenteredSound		0%	
+0x0046AAD0	NovaAudio_QueueCenteredSound	src/sdl_audio.cpp	95%	SdlAudio::Play queues exactly one centered SDL voice and carries the original second argument as priority_width (minimum 1), rather than replaying it as a repeat count. Direct callsites preserve verified ranks: menu focus/intro 10, menu reveal/hyperspace 0x32, combat chatter 0x0f, ordinary transition cues 1. SDL stream conversion replaces the original descriptor/backend plumbing.
 0x0046AB00	NovaAudio_PreStageJumpSoundBySeconds		0%	
 0x0046AB60	NovaAudio_UpdateCenteredGainFromPreference	src/game/preferences.hpp	100%	Maps sound_volume * 8 through the original [0,0x100] centered-level clamp and Audio_AllocateVoiceSlot's 0x80 per-channel cap, then normalizes the backend's level * sample >> 7 scale for SDL master gain.
 0x0046ABB0	Ship_GetScannerStrength	src/game/radar_panel.cpp	90%	Ship_ComputeScannerStrength: owned_count * ModVal summed over ModType 0x18 slots, clamp [-100,100]; the DAT_007356ba memoization sentinel is not reproduced.
@@ -1198,10 +1198,10 @@ address	name	impl_file	reimpl_pct	comment
 0x004D6440	FUN_004d6440		0%	
 0x004D64B0	NovaAudio_GetOutputLevelByte		0%	
 0x004D64D0	OsHeap_FreeInternal		0%	
-0x004D64F0	FUN_004d64f0		0%	
-0x004D6550	Audio_AllocateVoiceSlot	src/sdl_audio.cpp	65%	SDL replacement: bounded 16-voice pool admits idle streams first, then replaces the weakest eligible active stream only when incoming descriptor width AND spatial gain are both at least as high, matching the original admission comparison. DirectSound backend descriptors, callbacks, and exact table ordering remain deliberately unported.
-0x004D6770	NovaAudio_CountActiveByHandle		0%	
-0x004D67D0	NovaAudio_UnregisterCallbacks		0%	
+0x004D64F0	NovaAudio_FillVoiceSlotDescriptor	src/sdl_audio.cpp	90%	Runs inline in SdlAudio::Play: one voice, fixed 1.0 playback rate, centered mono gain, priority_width preserved. SDL stream setup replaces original backend descriptors and owner-link allocation.
+0x004D6550	Audio_AllocateVoiceSlot	src/sdl_audio.cpp	90%	SDL replacement preserves the 16-slot ordered insertion policy: scan until incoming width and effective level both meet/exceed an entry, insert there, evict the final entry when full, or reject when none qualifies. DirectSound handles and callback fields are deliberately replaced by RAII SDL streams.
+0x004D6770	NovaAudio_CountActiveByHandle	src/sdl_audio.cpp	90%	SdlAudio::CountActiveByKey counts draining voices with matching resource key. Original also accepts owner-link ids and handle 0 as count-all; neither form is needed by reconstructed callsites.
+0x004D67D0	NovaAudio_UnregisterCallbacks	src/sdl_audio.cpp	85%	SdlAudio::StopByKey clears all active streams matching a resource key, matching gameplay cancellation behavior. Original callback invocation and owner-link matching are not modelled.
 0x004D6890	FUN_004d6890		0%	
 0x004D6900	NovaSound_ExpandIma4Samples		0%	snd sample expansion (v+0x80) dup quirk; decoded in NovaSound_DecodePayload
 0x004D6B90	FUN_004d6b90		0%	
