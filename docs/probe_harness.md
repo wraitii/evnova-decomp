@@ -42,7 +42,7 @@ and the binary behaves exactly as before. The implementation lives in
 | `GET /probe/ui?at=x,y` | hit-test oracle: name of the published element under that window point |
 | `GET /probe/screenshot` | next frame as `image/bmp` (last frame if paused) |
 | `GET /probe/logs?since=SEQ` | tail the in-game log ring (`{"tail":N,"lines":[...]}`) |
-| `POST /probe/command` | Execution commands plus semantic `land_at`, `jump_to`, and `cancel_automation` |
+| `POST /probe/command` | Execution commands plus semantic `land_at`, `jump_to`, `destroy_ship`, and `cancel_automation` |
 | `GET /probe/automation` | Current optional flight-automation goal, phase, target, and failure detail |
 | `POST /probe/key` | `{"key":"I"}` tap; `{"key":"I","down":true\|false}` hold/release (modal-loop channel, synthetic `SDL_Event`s) |
 | `POST /probe/click` | `{"element":"accept"}` clicks the named rect published by the active modal; `{"x":553,"y":508}` clicks raw window points (motion + button-down pair) |
@@ -78,6 +78,19 @@ Flight automation is input-only: `{"cmd":"land_at","target":"Earth"}` and
 edge/held `FlightInput` commands as a pilot. An optional positive `timeout_ms`
 is measured in gameplay time. `cancel_automation` stops emission; status is
 read from `/probe/automation`.
+
+`{"cmd":"destroy_ship","target":"Raider"}` matches a current-system ship by
+class display name (falling back to its instance `ship_name`, case-insensitive).
+A pure-decimal `target` and an optional `ship_id` (matching either a live ship
+slot or its instance id) are identifier fallbacks. It cycles the player's
+primary ship target with the backquote hotkey until it lands on a match, then
+leads and fires that target eagerly whenever it is within weapon reach: the
+nose tracks the ready primary bank's predicted intercept (via
+`Ship_AimWeaponPredictive` 0x0043b740) so a crossing target cannot outrun the
+projectile, and re-tracking every frame keeps weapon pushback from breaking
+the lock. It completes
+when the locked target is destroyed and fails fast when no ship in the system
+matches.
 
 ### UI layout registry (click by intent)
 

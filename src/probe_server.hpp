@@ -34,9 +34,17 @@ struct ProbeNamedRect {
 };
 
 struct ProbeAutomationRequest {
-  enum class Kind { kLandAt, kJumpTo, kCancel } kind = Kind::kCancel;
+  enum class Kind {
+    kLandAt,
+    kJumpTo,
+    kDestroyShip,
+    kCancel
+  } kind = Kind::kCancel;
   std::string target;
   std::uint64_t timeout_ms = 180000;
+  // Optional explicit ship identifier for kDestroyShip (slot or instance id);
+  // -1 when the target name is the only identity.
+  std::int32_t ship_id = -1;
 };
 
 class ProbeServer {

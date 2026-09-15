@@ -1531,6 +1531,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         (void)automation.JumpTo(
             state, request->target, now_ms, request->timeout_ms);
         break;
+      case ProbeAutomationRequest::Kind::kDestroyShip:
+        (void)automation.DestroyShip(
+            state,
+            request->target,
+            now_ms,
+            request->timeout_ms,
+            static_cast<std::int16_t>(request->ship_id));
+        break;
       case ProbeAutomationRequest::Kind::kCancel:
         automation.Cancel();
         break;
@@ -1547,6 +1555,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
         return "land_at";
       case FlightAutomationGoal::kJumpTo:
         return "jump_to";
+      case FlightAutomationGoal::kDestroy:
+        return "destroy";
       case FlightAutomationGoal::kNone:
         return "none";
       }

@@ -549,21 +549,23 @@ void ProbeServer::HandleRequest(const std::string &method,
                  (enabled && suppress_audio ? "true" : "false") + "}";
       return;
     }
-    if (*cmd == "land_at" || *cmd == "jump_to") {
+    if (*cmd == "land_at" || *cmd == "jump_to" || *cmd == "destroy_ship") {
       const auto target = JsonStringField(body, "target");
       const int timeout_ms = JsonIntField(body, "timeout_ms").value_or(180000);
+      const int ship_id = JsonIntField(body, "ship_id").value_or(-1);
       if (!target || target->empty() || timeout_ms < 1) {
         status = "400 Bad Request";
         body_out = "probe: automation requires target and positive timeout_ms";
         return;
       }
+      const ProbeAutomationRequest::Kind kind =
+          *cmd == "land_at"   ? ProbeAutomationRequest::Kind::kLandAt
+          : *cmd == "jump_to" ? ProbeAutomationRequest::Kind::kJumpTo
+                              : ProbeAutomationRequest::Kind::kDestroyShip;
       {
         const std::lock_guard lock(automation_mutex_);
         automation_request_ = ProbeAutomationRequest{
-            *cmd == "land_at" ? ProbeAutomationRequest::Kind::kLandAt
-                              : ProbeAutomationRequest::Kind::kJumpTo,
-            *target,
-            static_cast<std::uint64_t>(timeout_ms)};
+            kind, *target, static_cast<std::uint64_t>(timeout_ms), ship_id};
       }
       sync_cv_.notify_all();
       status = "202 Accepted";
@@ -594,8 +596,8 @@ void ProbeServer::HandleRequest(const std::string &method,
     } else {
       status = "400 Bad Request";
       body_out = "probe: unknown cmd "
-                 "(pause|resume|step|accelerate|land_at|jump_to|cancel_"
-                 "automation|quit)";
+                 "(pause|resume|step|accelerate|land_at|jump_to|destroy_ship|"
+                 "cancel_automation|quit)";
       return;
     }
     sync_cv_.notify_all();

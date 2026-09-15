@@ -562,10 +562,140 @@ expect = { "state.system" = "Rautherion", "state.active_missions" = 2 }
 action = "screenshot"
 name = "combat-tutorial-start"
 
+# Tutorial 006's objective is the derelict Pirate Viper Barry leaves in orbit:
+# the flight controller cycles to the matching ship, closes to weapon range and
+# fires until it is destroyed.
+[[steps]]
+action = "command"
+cmd = "destroy_ship"
+target = "Pirate Viper"
+timeout_ms = 240000
+
+# Temporary slowdown until we fix our logic.
 [[steps]]
 action = "command"
 cmd = "accelerate"
-enabled = false
+enabled = true
+speed_multiplier = 2.0
+suppress_audio = true
 
-#[[steps]]
-#action = "quit"
+# Confirm the new goal actually installed before waiting on its completion;
+# the previous land_at status is still "complete" and would match instantly.
+[[steps]]
+action = "wait"
+expect = { "automation.goal" = "destroy", "automation.target" = "Pirate Viper" }
+timeout_ms = 5000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Rautherion" }
+timeout_ms = 240000
+
+[[steps]]
+action = "screenshot"
+name = "combat-tutorial-viper-destroyed"
+
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = 100.0
+suppress_audio = true
+
+# Tutorial 006 resolves at its return stellar, Viking (in Tichel); the forward
+# route was Sol -> Nesre Primus -> Arcturus -> Rautherion, so reverse it and
+# land to take the success debrief and complete mïsn 754/755.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Arcturus"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Arcturus" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Nesre Primus"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Nesre Primus" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+# The return leg is long enough to run the tank dry; top up at Earth before
+# the final Tichel hop.
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tichel"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tichel" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Viking"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Tichel", "missions.missions.0.template_id" = 626, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-006-complete"
+
+[[steps]]
+action = "quit"

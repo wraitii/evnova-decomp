@@ -252,6 +252,155 @@ TEST_CASE("automation arrival reaches a small-sprite envelope") {
   CHECK(run.axis_speed <= 0.55F);
 }
 
+// Player at the origin with a single unlimited direct-fire bank whose reach is
+// 500 px, a matching "Raider" target in slot 1, and the target already
+// selected.
+GameState DestroyState() {
+  GameState state = AutomationState();
+  state.player.is_active = true;
+  state.player.current_system_id = 0;
+  state.player.ship_class_id = 0;
+  state.player.heading = 3.14159265358979323846F / 2.0F; // +x
+
+  state.scenario.ships.resize(2);
+  state.scenario.ships[0].turn_rate = 40.0F;
+  state.scenario.ships[0].accel = 500.0F;
+  state.scenario.ships[0].speed = 400.0F;
+  state.scenario.ships[1].display_name = "Raider";
+
+  state.scenario.weapons.resize(1);
+  state.scenario.weapons[0].weapon_mode_code = -1;
+  state.scenario.weapons[0].ammo_type = -1; // free energy, always ready
+  state.scenario.weapons[0].range_scalar = 500.0F;
+  state.weapon_bank_ammo.fill(0);
+  state.weapon_bank_ammo[0] = 1;
+
+  Ship &target = state.ShipAt(1);
+  target.is_active = true;
+  target.ship_class_id = 1;
+  target.current_system_id = 0;
+  target.armor_points = 50.0F;
+  target.pos_x = 100.0F;
+  target.pos_y = 0.0F;
+
+  state.player.primary_target_ship_slot = 1;
+  return state;
+}
+
+TEST_CASE("automation destroy locks the selected target and fires in range") {
+  GameState state = DestroyState();
+  FlightAutomationController automation;
+  REQUIRE(automation.DestroyShip(state, "rAiDeR", 0));
+  FlightInput input;
+  automation.Tick(state, 0, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kEngage);
+  CHECK(input.fire);
+  CHECK_FALSE(input.thrust); // already inside reach, hold and fire
+}
+
+TEST_CASE("automation destroy leads a crossing target") {
+  GameState state = DestroyState();
+  // A real projectile speed makes the intercept point differ from the target's
+  // current position; the target crosses perpendicular to the line of sight.
+  state.scenario.weapons[0].projectile_speed = 1500.0F; // 15 px/tick
+  state.ShipAt(1).vel_y = 10.0F;
+  // Nose already on the target's straight bearing (+x, heading pi/2).
+  state.player.heading = 3.14159265358979323846F / 2.0F;
+  FlightAutomationController automation;
+  REQUIRE(automation.DestroyShip(state, "Raider", 0));
+  FlightInput input;
+  automation.Tick(state, 0, input);
+  // The intercept is clockwise of the target (+x toward +y), so a straight-aim
+  // implementation would hold the nose still while this one turns right.
+  CHECK(input.turn_right);
+  CHECK_FALSE(input.turn_left);
+}
+
+TEST_CASE("automation destroy closes the distance while out of range") {
+  GameState state = DestroyState();
+  state.ShipAt(1).pos_x = 2000.0F; // beyond the 500 px reach, dead ahead
+  FlightAutomationController automation;
+  REQUIRE(automation.DestroyShip(state, "Raider", 0));
+  FlightInput input;
+  automation.Tick(state, 0, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kEngage);
+  CHECK(input.thrust);
+  CHECK_FALSE(input.fire);
+
+  state.ShipAt(1).pos_x = 100.0F;
+  input = {};
+  automation.Tick(state, 16, input);
+  CHECK(input.fire);
+  CHECK_FALSE(input.thrust);
+}
+
+TEST_CASE("automation destroy cycles the target hotkey until it lands") {
+  GameState state = DestroyState();
+  state.player.primary_target_ship_slot = -1;
+  FlightAutomationController automation;
+  REQUIRE(automation.DestroyShip(state, "Raider", 0));
+  FlightInput input;
+  automation.Tick(state, 0, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kSelect);
+  CHECK(input.cycle_ship_target_next);
+  CHECK(input.cycle_ship_include_combat); // first pass is the combat half
+  CHECK_FALSE(input.fire);
+
+  // Simulate the loop's own target-command pass landing on the Raider.
+  state.player.primary_target_ship_slot = 1;
+  input = {};
+  automation.Tick(state, 16, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kEngage);
+  CHECK_FALSE(input.cycle_ship_target_next);
+}
+
+TEST_CASE("automation destroy completes when the target is destroyed") {
+  GameState state = DestroyState();
+  FlightAutomationController automation;
+  REQUIRE(automation.DestroyShip(state, "Raider", 0));
+  FlightInput input;
+  automation.Tick(state, 0, input);
+  REQUIRE(automation.status().phase == FlightAutomationPhase::kEngage);
+  state.ShipAt(1).armor_points = 0.0F;
+  input = {};
+  automation.Tick(state, 16, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kComplete);
+}
+
+TEST_CASE("automation destroy accepts an explicit ship id") {
+  GameState state = DestroyState();
+  state.scenario.ships[1].display_name = "Ion Frigate";
+  state.player.primary_target_ship_slot = -1;
+  FlightAutomationController automation;
+  // The name does not match; the id arm (slot or instance id) acquires it.
+  REQUIRE(
+      automation.DestroyShip(state, "NoSuchShip", 0, 180000, /*ship_id=*/1));
+  state.player.primary_target_ship_slot = 1;
+  FlightInput input;
+  automation.Tick(state, 0, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kEngage);
+  CHECK(input.fire);
+}
+
+TEST_CASE("automation destroy reads a numeric target as a ship id fallback") {
+  GameState state = DestroyState();
+  state.scenario.ships[1].display_name = "Ion Frigate";
+  state.player.primary_target_ship_slot = -1;
+  FlightAutomationController automation;
+  REQUIRE(automation.DestroyShip(state, "1", 0));
+  state.player.primary_target_ship_slot = 1;
+  FlightInput input;
+  automation.Tick(state, 0, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kEngage);
+}
+
+TEST_CASE("automation destroy fails fast when no ship matches") {
+  GameState state = DestroyState();
+  FlightAutomationController automation;
+  CHECK_FALSE(automation.DestroyShip(state, "Marauder", 0));
+  CHECK(automation.status().phase == FlightAutomationPhase::kFailed);
+}
+
 TEST_CASE("automation fails on death and simulation deadline") {
   GameState state = AutomationState();
   FlightAutomationController automation;
