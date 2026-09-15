@@ -379,42 +379,6 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
   CHECK(found_derelict);
 }
 
-TEST_CASE("TEMP seed sweep derelict spawn") {
-  constexpr std::int16_t kRautherionSystem = 166 - 0x80;
-  constexpr std::int16_t kRautherStellar = 191;
-  constexpr std::int16_t kTutorial006Index = 754 - 0x80;
-  constexpr std::int16_t kTutorialDerelictPers = 642 - 0x80;
-  int failures = 0;
-  int first_failure = -1;
-  for (unsigned seed = 1; seed <= 400; ++seed) {
-    game::GameState state;
-    REQUIRE(state.scenario.LoadFromArchives());
-    state.rng.seed(seed);
-    state.player.current_system_id = kRautherionSystem;
-    state.player.ship_class_id = 0;
-    if (!game::Mission_ActivateAtSlot(state, kTutorial006Index, kRautherStellar)) {
-      ++failures;
-      continue;
-    }
-    game::Stellar_Launch(state, kRautherStellar);
-    bool found = false;
-    for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
-      const auto &ship = state.ShipAt(slot);
-      if (ship.is_active && ship.pers_def_slot == kTutorialDerelictPers) {
-        found = true;
-      }
-    }
-    if (!found) {
-      ++failures;
-      if (first_failure < 0) {
-        first_failure = static_cast<int>(seed);
-      }
-    }
-  }
-  INFO("failures=" << failures << " first=" << first_failure);
-  CHECK(failures == 0);
-}
-
 // DAT_007d4c0d (0x0048ea70): a stellar with a zero TechLevel and no positive
 // SpecialTech has nothing to sell, which disables the Buy button.
 TEST_CASE("stellar outfit availability follows tech level",
