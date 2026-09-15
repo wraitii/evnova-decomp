@@ -985,12 +985,7 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
   NovaShip_ResetAiBehaviorRuntimeFields(ship);
 
   if (def.link_mission_id != -1) {
-    // Ghidra calls Mission_ResolveMissionStellarTargets (0x0043d240) for the
-    // LinkMission target block; that resolver is not reconstructed yet.
-    NovaLog::Debug("pers slot {} LinkMission {}: ResolveMissionStellarTargets "
-                   "deferred (TODO(decomp 0x0043d240))",
-                   slot,
-                   def.link_mission_id);
+    Mission_ResolveMissionStellarTargets(state, def.link_mission_id);
   }
 
   if (is_derelict) {
@@ -1010,9 +1005,9 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
 }
 
 // Ghidra 0x0041c710 Dude_SpawnRandomDudeShipInSystem. See the header.
-// Rolls 1-in-7 for a mission ship (deferred), else 1-in-7 for a random-
-// encounter fleet (existing NovaEncounter_TrySpawnRandomFleet), else spawns a
-// random system dude ship (discarded when its fuel capacity < 1), then
+// Rolls 1-in-7 for a përs personality/linked-mission ship, else 1-in-7 for a
+// random- encounter fleet (existing NovaEncounter_TrySpawnRandomFleet), else
+// spawns a random system dude ship (discarded when its fuel capacity < 1), then
 // positions the spawned ship at a random polar offset from system centre and
 // faces it toward the origin. The AI-state entry (slowdown / jump-in) and the
 // speed polar integration mirror Math_AddPolarVelocity (heading 0 = up, world
@@ -1020,8 +1015,9 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
 int NovaDude_SpawnRandomDudeShipInSystem(GameState &state,
                                          std::int16_t system_id) {
   int slot = -1;
-  // 1-in-7 personality branch: Pers_SpawnShipFromPersDef with the derelict-
-  // government exclusion (the ambient roll passes flag=1).
+  // 1-in-7 përs personality/linked-mission branch:
+  // Pers_SpawnShipFromPersDef with the derelict-government exclusion (the
+  // ambient roll passes flag=1). Active mission-fleet ships use 0x0041cf40.
   constexpr std::int32_t kDispatchRoll = 7;
   if (RandomBelow(state, kDispatchRoll) == 0) {
     slot = NovaPers_SpawnShipFromPersDef(

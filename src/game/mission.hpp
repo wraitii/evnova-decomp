@@ -22,6 +22,13 @@ struct MissionListEvaluation {
 // Mission_ResolveMissionStellarTargets (0x0043d240).
 void Mission_ResolveMissionStellarLocators(GameState &state);
 
+// Ghidra 0x0043d240 Mission_ResolveMissionStellarTargets. Resolves one
+// zero-based mission definition into its offer-time target cache. Personality
+// LinkMission spawns call this directly so their linked offer has fresh
+// TravelStel/ReturnStel, cargo, pay, and deadline values.
+void Mission_ResolveMissionStellarTargets(GameState &state,
+                                          std::int16_t mission_id);
+
 // Ghidra 0x00468b50 Mission_IsStellarValidRandomDestination. Bible rule for a
 // randomly selected mission destination: it must be far enough from the
 // offering system and guaranteed to exist for the whole game despite system

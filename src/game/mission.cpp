@@ -138,6 +138,25 @@ Mission_PassesAcceptanceResourceGates(const GameState &state,
       .system_id;
 }
 
+[[nodiscard]] std::int16_t
+FindSystemContainingStellar(const GameState &state, std::int16_t stellar_id) {
+  if (stellar_id < 0) {
+    return -1;
+  }
+  const auto resource_id =
+      static_cast<std::int16_t>(stellar_id + kResourceIdBase);
+  for (std::size_t system_id = 0; system_id < state.scenario.systems.size();
+       ++system_id) {
+    const auto &system = state.scenario.systems[system_id];
+    if (std::find(system.nav_defs.begin(),
+                  system.nav_defs.end(),
+                  resource_id) != system.nav_defs.end()) {
+      return static_cast<std::int16_t>(system_id);
+    }
+  }
+  return -1;
+}
+
 } // namespace
 
 // Ghidra 0x00448090 NovaResources_EvaluateAvailability, stellar/system
@@ -1040,53 +1059,87 @@ bool Mission_IsStellarValidRandomDestination(const GameState &state,
   return chain_is_persistent(candidate_system);
 }
 
+// Ghidra 0x0043d240 Mission_ResolveMissionStellarTargets.
+void Mission_ResolveMissionStellarTargets(GameState &state,
+                                          std::int16_t mission_id) {
+  if (mission_id < 0 ||
+      mission_id >= static_cast<std::int16_t>(state.scenario.missions.size()) ||
+      static_cast<std::size_t>(mission_id) >=
+          state.mission_target_resolutions.size()) {
+    return;
+  }
+  const auto &definition =
+      state.scenario.missions[static_cast<std::size_t>(mission_id)];
+  if (!definition.present) {
+    return;
+  }
+  auto &target =
+      state.mission_target_resolutions[static_cast<std::size_t>(mission_id)];
+  const auto old_deadline_year = target.deadline_year;
+  const auto old_deadline_month = target.deadline_month;
+  const auto old_deadline_day = target.deadline_day;
+  target = {};
+  if (definition.time_limit_days < 1) {
+    // Mission_ComputeDateAfterSteps returns without touching its output for a
+    // non-positive step count, so a repeated LinkMission refresh preserves
+    // the prior deadline bytes.
+    target.deadline_year = old_deadline_year;
+    target.deadline_month = old_deadline_month;
+    target.deadline_day = old_deadline_day;
+  }
+  // MisnDef +0x0c/+0x0e are the TravelStel/ReturnStel locators (mïsn
+  // payload +0x0c/+0x0e); the "on_fail/on_success condition" naming was a
+  // misnomer.
+  const std::int16_t reference = MissionReferenceStellar(state);
+  target.travel_stellar_id = ResolveMissionStellar(
+      state, definition.travel_stellar_locator, -1, -1, reference);
+  target.travel_system_id =
+      ResolveContainingSystem(state, target.travel_stellar_id);
+  if (target.travel_system_id != -1) {
+    target.travel_system_id =
+        Misn_ResolveVisibleSystemForTravel(state, target.travel_system_id);
+  }
+  if (target.travel_system_id == -1) {
+    target.travel_system_id =
+        FindSystemContainingStellar(state, target.travel_stellar_id);
+  }
+  target.return_stellar_id =
+      definition.return_stellar_locator == -1
+          ? target.travel_stellar_id
+          : ResolveMissionStellar(state,
+                                  definition.return_stellar_locator,
+                                  target.travel_stellar_id,
+                                  target.travel_stellar_id,
+                                  reference);
+  target.return_system_id =
+      ResolveContainingSystem(state, target.return_stellar_id);
+  if (target.return_system_id == -1) {
+    target.return_system_id =
+        FindSystemContainingStellar(state, target.return_stellar_id);
+  }
+  target.cargo_type_id =
+      ResolveSpecialShipSystem(state, definition.cargo_type_resource);
+  target.cargo_qty_tons =
+      ResolveSpecialShipCount(state, definition.cargo_qty_tons);
+  target.priority_payload = definition.resource_delta_or_cost;
+  // The per-definition deadline for the offer-row <DL> token (0x0043d240
+  // tail): today + TimeLimit, untouched (zeroed by the reset above) when
+  // the mission has no TimeLimit.
+  if (definition.time_limit_days > 0) {
+    const GameDate deadline =
+        Mission_ComputeDateAfterSteps(state, definition.time_limit_days);
+    target.deadline_year = deadline.year;
+    target.deadline_month = deadline.month;
+    target.deadline_day = deadline.day;
+  }
+}
+
 // Ghidra 0x0043c3e0 Misn_ResolveMissionStellarLocators.
 void Mission_ResolveMissionStellarLocators(GameState &state) {
   for (std::size_t index = 0; index < state.scenario.missions.size(); ++index) {
-    const auto &definition = state.scenario.missions[index];
-    if (!definition.present) {
-      continue;
-    }
-    auto &target = state.mission_target_resolutions[index];
-    target = {};
-    // MisnDef +0x0c/+0x0e are the TravelStel/ReturnStel locators (mïsn
-    // payload +0x0c/+0x0e); the "on_fail/on_success condition" naming was a
-    // misnomer.
-    const std::int16_t reference = MissionReferenceStellar(state);
-    target.travel_stellar_id = ResolveMissionStellar(
-        state, definition.travel_stellar_locator, -1, -1, reference);
-    // TODO(decomp(0x0043d240)) skipped: the original remaps TravelStel's
-    // owning system through System_ResolveVisibleSystemForTravel and, on -1,
-    // scans every system nav list with System_FindSystemContainingStellar.
-    // ResolveContainingSystem currently returns only Stellar.system_id.
-    target.travel_system_id =
-        ResolveContainingSystem(state, target.travel_stellar_id);
-    target.return_stellar_id =
-        definition.return_stellar_locator == -1
-            ? target.travel_stellar_id
-            : ResolveMissionStellar(state,
-                                    definition.return_stellar_locator,
-                                    target.travel_stellar_id,
-                                    target.travel_stellar_id,
-                                    reference);
-    // TODO(decomp(0x0043d240)) skipped: ReturnStel does not use the visible
-    // remap, but it does fall back to System_FindSystemContainingStellar when
-    // Stellar.system_id is -1. The clean-room helper has no scan fallback.
-    target.return_system_id =
-        ResolveContainingSystem(state, target.return_stellar_id);
-    target.cargo_type_id =
-        ResolveSpecialShipSystem(state, definition.cargo_type_resource);
-    target.cargo_qty_tons =
-        ResolveSpecialShipCount(state, definition.cargo_qty_tons);
-    // The per-definition deadline for the offer-row <DL> token (0x0043d240
-    // tail): today + TimeLimit, untouched (zeroed by the reset above) when
-    // the mission has no TimeLimit.
-    if (definition.time_limit_days > 0) {
-      const GameDate deadline =
-          Mission_ComputeDateAfterSteps(state, definition.time_limit_days);
-      target.deadline_year = deadline.year;
-      target.deadline_month = deadline.month;
-      target.deadline_day = deadline.day;
+    if (state.scenario.missions[index].present) {
+      Mission_ResolveMissionStellarTargets(state,
+                                           static_cast<std::int16_t>(index));
     }
   }
 }
