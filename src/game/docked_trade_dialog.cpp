@@ -271,7 +271,10 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
         NovaTradeCenter_HeldCount(state, session, static_cast<int>(i));
     std::string trend;
     if (row->has_disaster) {
-      trend = InfoString(row->disaster_raised ? 0xcc : 0xcd);
+      // Resource_DrawStringEntry takes 1-based entries. InfoString uses the
+      // corresponding zero-based pool index, so Ghidra entries 0xcc/0xcd
+      // ("Higher"/"Lower") are 0xcb/0xcc here.
+      trend = InfoString(row->disaster_raised ? 0xcb : 0xcc);
     } else {
       const std::int16_t lane = row->trend;
       trend = InfoString(lane == 1 ? 0xc8 : (lane == 4 ? 0xca : 0xc9));
@@ -438,7 +441,52 @@ RunTradeCenterDialog(SdlPlatform &platform,
   ServicesButtonArt button_art;
   (void)button_art.Initialize(platform);
   NovaFontCache font_cache;
+  const auto render_trade_background = [&]() {
+    const auto layout = LayoutTradeCenter(platform);
+    if (!layout) {
+      if (render_background) {
+        render_background();
+      }
+      return;
+    }
+    DrawTradeCenterScreen(platform,
+                          font_cache,
+                          button_art,
+                          state,
+                          session,
+                          *layout,
+                          render_background,
+                          backdrop ? backdrop->get() : nullptr,
+                          frame ? frame->get() : nullptr,
+                          list_text,
+                          list_background,
+                          list_hilite);
+  };
+  const auto run_mission_offer = [&]() {
+    return Mission_TriggerLandingInteractions(
+        state,
+        4,
+        static_cast<std::uint32_t>(SDL_GetTicks()),
+        [&](std::int16_t mission_def) {
+          return NovaMission_RunOfferWindow(platform,
+                                            state,
+                                            mission_def,
+                                            stellar_id,
+                                            render_trade_background);
+        });
+  };
+
+  // The commodity-exchange modal has its own AvailLoc lane. In the original,
+  // it is entered with g_misn_list_page_group = 4 and immediately dispatches
+  // it; tutorial follow-ups such as the first trade task depend on that pass.
+  (void)run_mission_offer();
   while (!platform.quit_requested()) {
+    const std::uint32_t now_ms = static_cast<std::uint32_t>(SDL_GetTicks());
+    const auto recheck_at =
+        static_cast<std::uint32_t>(state.mission_interaction_recheck_at_ms);
+    if (static_cast<std::int32_t>(now_ms - recheck_at) >= 0) {
+      (void)run_mission_offer();
+    }
     const auto layout = LayoutTradeCenter(platform);
     if (!layout) {
       return LandedExit::kServiceComplete;
