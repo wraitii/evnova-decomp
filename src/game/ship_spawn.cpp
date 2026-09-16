@@ -1,7 +1,9 @@
 #include "ship_spawn.hpp"
 
 #include "../log.hpp"
+#include "escort_formation.hpp"
 #include "government.hpp"
+#include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
@@ -12,10 +14,13 @@
 #include <chrono>
 #include <cmath>
 #include <random>
+#include <utility>
 #include <vector>
 
 namespace game {
 namespace {
+
+constexpr std::int16_t kResourceIdBase = 0x80;
 
 // Mirrors the original's NovaRandom_Range(n) -> integer in [0, n) for the
 // allocator's scatter. The reimplementation draws from GameState.rng so runs
@@ -303,21 +308,15 @@ int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
   return slot;
 }
 
-// Ghidra 0x004259b0 EncounterFleet_SpawnRandomEncounterFleet -- lead-ship
-// slice only. See the header for the field rationale and the deferred parts.
-//
-// Lead shaping decoded from the original: allocates a slot (reserve 8), then
-// ship_class = def lead (already zero-based), government = def government_id,
-// ai_behavior = requested code or ship-class default when -1, base shield/
-// armor from the ship class, mission slots cleared, escort-eligibility and
-// mining-scoop derived flags, and the timed-action seed. The original also
-// seeds random cargo for carry_cargo_flag & low-default-AI fleets, positions
-// the lead (slowdown / jump-in), copies the 8-bank weapon loadout and spawns
-// the escorts; those are deferred and left at defaults here (see header TODO).
+// Ghidra 0x004259b0 EncounterFleet_SpawnRandomEncounterFleet. The original
+// shapes the lead, then rolls and spawns four escort classes. The class cache
+// is checked after the count roll, so an unavailable escort slot consumes its
+// count-roll cadence but produces no ships.
 int NovaEncounter_SpawnFleetLeadShip(GameState &state,
                                      std::int16_t system_id,
                                      std::int16_t fleet_def_index,
-                                     std::int16_t ai_behavior_code) {
+                                     std::int16_t ai_behavior_code,
+                                     bool ignore_ship_availability) {
   const FleetDef *def =
       state.scenario.Fleet(static_cast<std::int16_t>(fleet_def_index + 0x80));
   if (def == nullptr) {
@@ -351,6 +350,9 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
                               : (cls != nullptr ? cls->default_ai_behavior : 0);
 
   if (cls != nullptr) {
+    ship.afterburner_latch =
+        NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;
+    ship.mining_scoop_active = NovaOutfit_HasMiningScoopOutfit(state, ship);
     ship.skill_variance_scale = SkillVarianceScale(state, cls);
     ship.shield_points = static_cast<float>(cls->base_shield);
     ship.armor_points = static_cast<float>(cls->base_armor);
@@ -361,12 +363,9 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
     ship.timed_action_counter = 0;
   }
 
-  // Mission/misc slots cleared and derived flags (the original computes
-  // escort-eligibility + mining-scoop here; mining-scoop is deferred, kept
-  // false).
+  // Mission/misc slots cleared and derived flags.
   ship.pers_def_slot = -1;
   ship.mission_fleet_slot = -1;
-  ship.mining_scoop_active = false;
   ship.ai_hostility_accumulator = 0;
   // Ship_AllocateShipSlotInSystem initializes credits to zero; the fleet
   // spawner does not override them.
@@ -396,6 +395,117 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
     NovaAi_EnterState15EmergeFromHypergate(state, ship, entry_stellar);
   } else {
     PlaceRandomPolarSlowdown(state, ship);
+  }
+
+  if (def->HasCargoFlag() && cls != nullptr && cls->default_ai_behavior < 3) {
+    ship.cargo_bins[static_cast<std::size_t>(RandomBelow(state, 6))] =
+        static_cast<std::int16_t>(RandomBelow(state, cls->cargo_holds) + 1);
+  }
+  NovaWeapon_EnsureNpcWeaponBanks(state, ship);
+
+  for (std::size_t escort_type = 0; escort_type < 4; ++escort_type) {
+    const std::int16_t escort_class_id =
+        def->escort_ship_class_ids[escort_type];
+    const std::int16_t minimum = def->escort_min_count[escort_type];
+    const std::int16_t maximum = def->escort_max_count[escort_type];
+    const auto count_range = static_cast<std::int32_t>(maximum) - minimum + 1;
+    const std::int16_t count =
+        static_cast<std::int16_t>(RandomBelow(state, count_range) + minimum);
+    const ShipClass *escort_class =
+        state.scenario.Ship(static_cast<std::int16_t>(escort_class_id + 0x80));
+    if (escort_class_id < 0 || escort_class == nullptr ||
+        !escort_class->is_available_runtime || count <= 0) {
+      continue;
+    }
+
+    for (std::int16_t spawned = 0; spawned < count; ++spawned) {
+      const int escort_slot = NovaShip_AllocateShipSlot(state, system_id, 8);
+      if (escort_slot == -1) {
+        break;
+      }
+      Ship &escort = state.ShipAt(static_cast<std::size_t>(escort_slot));
+      escort.ai_behavior_code = 6;
+      escort.squad_leader_ship_slot = static_cast<std::int16_t>(slot);
+      escort.ship_class_id = escort_class_id;
+      escort.dude_class_id = -1;
+      escort.pers_def_slot = -1;
+      escort.faction_or_government_id = def->government_id;
+      escort.shield_points = static_cast<float>(escort_class->base_shield);
+      escort.armor_points = static_cast<float>(escort_class->base_armor);
+      escort.timed_action_counter = escort_class->escape_pod_count;
+      escort.afterburner_latch =
+          NovaShip_CanShipUseAfterburner(state, escort) ? 1 : 0;
+      escort.mining_scoop_active =
+          NovaOutfit_HasMiningScoopOutfit(state, escort);
+      escort.jump_destination_stellar_id = -2;
+      escort.jump_destination_system_id = -2;
+      escort.formation_leader_ship_slot = -1;
+      escort.resolved_squad_leader_ship_slot = static_cast<std::int16_t>(slot);
+      escort.ai_selected_as_resolved_target = true;
+      escort.vel_x = ship.vel_x;
+      escort.vel_y = ship.vel_y;
+      escort.speed = ship.speed;
+      escort.heading = ship.heading;
+
+      NovaShip_ResetAiBehaviorRuntimeFields(escort);
+      escort.resolved_squad_leader_ship_slot = static_cast<std::int16_t>(slot);
+      escort.ai_selected_as_resolved_target = true;
+      NovaWeapon_EnsureNpcWeaponBanks(state, escort);
+      if (def->HasCargoFlag() && escort_class->default_ai_behavior < 3) {
+        escort.cargo_bins[static_cast<std::size_t>(RandomBelow(state, 6))] =
+            static_cast<std::int16_t>(
+                RandomBelow(state, escort_class->cargo_holds) + 1);
+      }
+
+      if (entry_stellar < 0) {
+        escort.pos_x =
+            ship.pos_x + static_cast<float>(RandomBelow(state, 300) - 150);
+        escort.pos_y =
+            ship.pos_y + static_cast<float>(RandomBelow(state, 300) - 150);
+        NovaAi_EnterState8Slowdown(state, escort);
+      } else {
+        const Stellar *stellar = state.scenario.Stellar(entry_stellar);
+        if (stellar != nullptr) {
+          escort.pos_x = static_cast<float>(stellar->pos_x);
+          escort.pos_y = static_cast<float>(stellar->pos_y);
+        }
+        NovaAi_EnterState15EmergeFromHypergate(state, escort, entry_stellar);
+        escort.heading =
+            ship.heading + static_cast<float>(RandomBelow(state, 15) + 5) *
+                               (3.14159265358979323846F / 180.0F);
+        escort.ai_maneuver_timer_ms +=
+            static_cast<float>(RandomBelow(state, 15) + 5);
+      }
+    }
+  }
+  Ship_UpdateEscortFormations(state, ship, /*snap=*/true);
+
+  if (ignore_ship_availability && def->arrival_message_id > 0) {
+    const auto pool = static_cast<std::uint16_t>(def->arrival_message_id);
+    const std::uint16_t count = NovaHud_StringPoolEntryCount(pool);
+    if (count > 0) {
+      const auto entry = NovaHud_LoadStringEntry(
+          pool, static_cast<std::uint16_t>(RandomBelow(state, count) + 1));
+      if (entry.has_value()) {
+        std::string message = *entry;
+        bool previous_was_placeholder = false;
+        for (char &character : message) {
+          if (character == '#') {
+            const int upper_bound = previous_was_placeholder ? 10 : 9;
+            character =
+                static_cast<char>('0' + RandomBelow(state, upper_bound));
+            if (!previous_was_placeholder) {
+              ++character;
+            }
+            previous_was_placeholder = true;
+          } else {
+            previous_was_placeholder = false;
+          }
+        }
+        NovaHud_ShowOverlayMessage(
+            state, std::move(message), static_cast<std::uint64_t>(0x168U));
+      }
+    }
   }
 
   return slot;
@@ -546,7 +656,7 @@ int NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 // ScenarioData.fleets is likewise sized to 0x100, so the scan range matches.
 int NovaEncounter_TrySpawnRandomFleet(GameState &state,
                                       std::int16_t system_id,
-                                      bool /*ignore_ship_availability*/) {
+                                      bool ignore_ship_availability) {
   const System *sys =
       state.scenario.System(static_cast<std::int16_t>(system_id + 0x80));
   if (sys == nullptr) {
@@ -603,7 +713,8 @@ int NovaEncounter_TrySpawnRandomFleet(GameState &state,
   const std::int16_t idx = RandomBelow(state, 0x100);
   if (idx >= 0 && static_cast<std::size_t>(idx) < eligible.size() &&
       eligible[static_cast<std::size_t>(idx)]) {
-    return NovaEncounter_SpawnFleetLeadShip(state, system_id, idx);
+    return NovaEncounter_SpawnFleetLeadShip(
+        state, system_id, idx, -1, ignore_ship_availability);
   }
   return -1;
 }
@@ -613,15 +724,20 @@ int NovaEncounter_TrySpawnRandomFleet(GameState &state,
 // the entries whose class is present and (unless `ignore_ship_availability`)
 // whose runtime availability result is non-zero, draws a uniform value in
 // [0, total), and picks the lowest-index slot whose cumulative bucket first
-// reaches (draw+1). Our clean-room does not yet evaluate ship-class
-// availability expressions, so every present slot is a candidate; see the
-// TODO(decomp) in the header.
+// reaches (draw+1).
 int NovaDude_SelectShipTypeIndex(const DudeDef &dude,
+                                 const ScenarioData &scenario,
                                  bool ignore_ship_availability,
                                  std::mt19937 &rng) {
-  auto present = [&dude, ignore_ship_availability](std::size_t i) {
-    (void)ignore_ship_availability; // availability eval deferred (see header)
-    return dude.ship_types[i] >= 0 && dude.ship_types[i] < 0x200;
+  auto present = [&dude, &scenario, ignore_ship_availability](std::size_t i) {
+    const std::int16_t class_id = dude.ship_types[i];
+    if (class_id < 0 || class_id >= 0x200) {
+      return false;
+    }
+    const ShipClass *ship_class =
+        scenario.Ship(static_cast<std::int16_t>(class_id + kResourceIdBase));
+    return ship_class != nullptr &&
+           (ignore_ship_availability || ship_class->is_available_runtime);
   };
 
   std::array<std::int32_t, 16> bucket{}; // cumulative weights
@@ -687,7 +803,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
       continue;
     }
     const int type_slot = NovaDude_SelectShipTypeIndex(
-        *dude, /*ignore_ship_availability=*/false, state.rng);
+        *dude, state.scenario, /*ignore_ship_availability=*/false, state.rng);
     if (type_slot < 0 || type_slot >= 16) {
       return -1; // ship type selection failed -> slot released
     }
@@ -1108,9 +1224,10 @@ int NovaDude_SpawnShipFromDudeDefInSystem(GameState &state,
   }
   const DudeDef *dude =
       state.scenario.Dude(static_cast<std::int16_t>(dude_def_index + 0x80));
-  const int type_slot = dude ? NovaDude_SelectShipTypeIndex(
-                                   *dude, ignore_ship_availability, state.rng)
-                             : -1;
+  const int type_slot =
+      dude ? NovaDude_SelectShipTypeIndex(
+                 *dude, state.scenario, ignore_ship_availability, state.rng)
+           : -1;
   if (dude == nullptr || type_slot < 0 || type_slot >= 16) {
     state.ShipAt(static_cast<std::size_t>(slot)).is_active = false;
     return -1;
@@ -1263,10 +1380,11 @@ int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
   std::int16_t type_index = mission.special_ship_type_index;
   if (type_index == -1) {
     type_index = static_cast<std::int16_t>(NovaDude_SelectShipTypeIndex(
-        *dude, /*ignore_ship_availability=*/false, state.rng));
+        *dude, state.scenario, /*ignore_ship_availability=*/false, state.rng));
     if (type_index == -1) {
       type_index = static_cast<std::int16_t>(
           NovaDude_SelectShipTypeIndex(*dude,
+                                       state.scenario,
                                        /*ignore_ship_availability=*/true,
                                        state.rng));
     }

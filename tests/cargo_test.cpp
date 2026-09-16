@@ -332,6 +332,62 @@ TEST_CASE("player total cargo capacity and free mass aggregates",
   CHECK(Outfit_ComputePlayerFreeMass(state) == 0);
 }
 
+// Ghidra 0x00469760 Player_ComputeFleetCargoCapacity: the player ship's
+// capacity plus eligible behavior-6 escort freighters, so a Cargo Drone hired
+// from the Bar must augment the fleet total.
+TEST_CASE("fleet cargo capacity adds eligible escort freighters",
+          "[cargo][outfit][escort]") {
+  GameState state;
+  state.scenario.ships.assign(3, {});
+  state.scenario.ships[0].cargo_holds = 10; // player
+  state.scenario.ships[1].cargo_holds = 20; // freighter escort
+  state.scenario.ships[1].default_ai_behavior = 1;
+  state.scenario.ships[2].cargo_holds = 5; // combat escort: InherentAI >= 3
+  state.scenario.ships[2].default_ai_behavior = 3;
+  state.player.ship_class_id = 0;
+  state.scenario.outfits.clear();
+  state.inventory.outfit_owned_count.fill(0);
+
+  const auto make_escort = [&](std::size_t slot, std::int16_t class_id) {
+    Ship &ship = state.ShipAt(slot);
+    ship.is_active = true;
+    ship.armor_points = 1.0F;
+    ship.squad_leader_ship_slot = 0;
+    ship.ai_behavior_code = 6;
+    ship.mission_fleet_slot = -1;
+    ship.ship_class_id = class_id;
+  };
+  // Slots 1 and 2 are the only escorts; the base holds 10, and only the
+  // InherentAI<3 hull adds its 20.
+  make_escort(1, 1);
+  make_escort(2, 2);
+  CHECK(Player_ComputeFleetCargoCapacity(state) == 30);
+
+  // A mission-fleet member is excluded.
+  state.ShipAt(1).mission_fleet_slot = 0;
+  CHECK(Player_ComputeFleetCargoCapacity(state) == 10);
+  state.ShipAt(1).mission_fleet_slot = -1;
+
+  // A destroyed escort is excluded (original Ship_IsShipDestroyed 0x004688e0).
+  state.ShipAt(1).armor_points = 0.0F;
+  CHECK(Player_ComputeFleetCargoCapacity(state) == 10);
+  state.ShipAt(1).armor_points = 1.0F;
+
+  // An escort attached to another squadron (not the player) is excluded.
+  state.ShipAt(1).squad_leader_ship_slot = 4;
+  CHECK(Player_ComputeFleetCargoCapacity(state) == 10);
+  state.ShipAt(1).squad_leader_ship_slot = 0;
+
+  // A behavior-5 fighter is not a freighter escort.
+  state.ShipAt(1).ai_behavior_code = 5;
+  CHECK(Player_ComputeFleetCargoCapacity(state) == 10);
+  state.ShipAt(1).ai_behavior_code = 6;
+
+  // An inactive slot contributes nothing.
+  state.ShipAt(1).is_active = false;
+  CHECK(Player_ComputeFleetCargoCapacity(state) == 10);
+}
+
 // Ghidra 0x0046a7c0 Player_ComputeRemainingCargoSpace: player ship free holds
 // = capacity - carried, where carried = the cargo bins + every active
 // mission's CargoQty (+0x14, when +0x33 carrying and >= 0) + positive junk.
@@ -379,6 +435,9 @@ TEST_CASE("probe cargo query reports credits, bins and non-zero junk",
   const std::string json = ProbeState_Snapshot(state, "cargo");
   CHECK(json.find("\"credits\":12345") != std::string::npos);
   CHECK(json.find("\"capacity\":50.00") != std::string::npos);
+  // The empty scenario has no player ship class, so the fleet total is 0 even
+  // though the cached per-hull value is 50.
+  CHECK(json.find("\"fleet_capacity\":0") != std::string::npos);
   CHECK(json.find("{\"tons\":1}") != std::string::npos);
   CHECK(json.find("{\"tons\":3}") != std::string::npos);
   CHECK(json.find("{\"id\":7,\"count\":4}") != std::string::npos);

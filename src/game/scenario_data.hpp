@@ -528,6 +528,9 @@ struct ShipClass {
   // (TODO(decomp): lane not modelled).
   std::int16_t buy_random = 0;
   std::int16_t hire_random = 0;
+  // Ghidra ShipClassDef +0xa41: cached Availability NCB result refreshed by
+  // NovaResources_EvaluateAvailability (0x00448090).
+  bool is_available_runtime = false;
   // Bible UpgradeTo / EscUpgrdCost / EscSellValue (shp payload +0x728/+0x72a/
   // +0x72e -> ShipClassDef +0xa22/+0x64/+0x68), consumed by the auto fleet
   // trade pass Player_ProcessEscortFleetAtStellar (0x004229d0) and the escort

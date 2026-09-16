@@ -2,6 +2,7 @@
 
 #include "game_state.hpp"
 #include "nova_font.hpp"
+#include "outfit.hpp"
 #include "scenario_data.hpp"
 
 #include <cmath>
@@ -245,6 +246,11 @@ std::string ProbeState_Snapshot(const GameState &state,
       // ordinary ship (the boarding selector skips mission-fleet ships).
       row.num("pers_def_slot", ship.pers_def_slot);
       row.num("mission_fleet_slot", ship.mission_fleet_slot);
+      // `squad_leader_ship_slot == 0` is the player's-attached test used by
+      // Ship_CanPlayerHaveMoreEscorts (0x00468920); a non-escort has -1 and an
+      // NPC escort carries its leader's slot, so the harness can separate the
+      // player's fleet from system traffic.
+      row.num("squad_leader_ship_slot", ship.squad_leader_ship_slot);
       row.num("boarded_target_latch", ship.boarded_target_latch);
       row.num("post_hit_mode_hint", ship.post_hit_mode_hint);
       // The values the capture-variant arbitration actually reads.
@@ -293,7 +299,12 @@ std::string ProbeState_Snapshot(const GameState &state,
   if (query == "cargo") {
     Json j;
     j.num("credits", state.player.credits);
+    // `capacity` is the player hull's own holds (cached outfit aggregate);
+    // `fleet_capacity` adds eligible escort freighters' holds
+    // (Player_ComputeFleetCargoCapacity 0x00469760), which is what the trade
+    // center and HUD actually enforce.
     j.num("capacity", state.cached_stats.cargo_capacity);
+    j.num("fleet_capacity", Player_ComputeFleetCargoCapacity(state));
     JsonArr bins;
     for (const auto tons : state.inventory.cargo_bins) {
       Json row;

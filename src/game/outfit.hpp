@@ -152,9 +152,7 @@ NovaOutfit_GrantOutfitToPlayer(GameState &state,
                                std::int16_t outfit_resource_id);
 
 // Cargo bookkeeping (mirrors Player_ComputeCargoAndJunkTotal /
-// ComputeFleetCargoCapacity / ComputeRemainingCargoSpace). Single-ship player
-// capacity for now (no NPC fleet), so fleet capacity == the player's own
-// outfit-derived cargo capacity.
+// ComputeFleetCargoCapacity / ComputeRemainingCargoSpace).
 [[nodiscard]] std::int16_t
 Player_ComputeCargoAndJunkTotal(const GameState &state);
 
@@ -187,6 +185,11 @@ Outfit_PlayerHasOutfitForControlExpression(const GameState &state,
 [[nodiscard]] std::int32_t
 Ship_ComputeShipTotalCargoCapacity(const GameState &state);
 
+// Ghidra 0x00469760 Player_ComputeFleetCargoCapacity. The player hull's
+// Ship_ComputeShipTotalCargoCapacity plus the holds of every active,
+// undestroyed behavior-6 escort attached to the player (squad_leader 0) that
+// is not in a mission fleet and whose class InherentAI is below 3. Clamped to
+// 32000.
 [[nodiscard]] std::int16_t
 Player_ComputeFleetCargoCapacity(const GameState &state);
 

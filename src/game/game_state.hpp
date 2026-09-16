@@ -343,6 +343,10 @@ struct Ship {
   std::int16_t faction_or_government_id = -1; // +0x98
   std::int16_t dude_class_id = -1;            // +0x78
   std::string ship_name;
+  // Ghidra ShipState cargo_bin_0..5 (+0x7a..0x84). NPC fleet arrivals use
+  // these six bins for the optional random cargo seed; the player mirrors the
+  // same layout in GameState::inventory.cargo_bins.
+  std::array<std::int16_t, 6> cargo_bins{};
 
   // --- Weapon bank / active selection ---
   std::int16_t active_weapon_bank_slot = 0; // +0x72
@@ -1323,10 +1327,12 @@ struct GameState {
   // after the pass). Gates the deadline quick-fail (0x00443c60) and the
   // Mission_ClearMisnSlotAssignments despawn arm (0x00440aa0).
   bool in_travel_scene = false;
-  // Ghidra DAT_00776af4: post-interaction recheck timer
-  // (NovaTime_GetTickCount60Hz + NovaRandom_Range(0x1e) + 0x1e). Only the
-  // services windows consume it; the port stores it for the future consumers.
-  std::int32_t mission_interaction_recheck_at_ms = 0;
+  // Ghidra DAT_00776af4: post-interaction recheck deadline in NovaTime_
+  // GetTickCount60Hz ticks (NovaTime_GetTickCount60Hz() + NovaRandom_
+  // Range(0x1e) + 0x1e after an offer pass, or +0x0f at Bar entry). The
+  // services windows re-run their AvailLoc offer pass when the 60 Hz counter
+  // reaches it; compare against tick_60hz, NOT gameplay_ticks_ms().
+  std::int32_t mission_interaction_recheck_tick_60hz = 0;
   // Ghidra g_recently_activated_rank_id (0x007354b6): the slot index of the
   // most recently activated rank, or -1. Rank_Activate writes it and
   // Rank_Deactivate clears it when it names that rank; <RRK> expands the
@@ -1457,11 +1463,13 @@ struct GameState {
   float player_speed_cap_x = 0.0F;
   float player_speed_cap_y = 0.0F;
   // Port stand-in for g_frame_tick_count_60hz (0x00865858, NovaTime_
-  // GetTickCount60Hz 0x004d5e10): wall-clock 1/60 s ticks. The original bumps
-  // the global from the input-helper thread once per 16.664 ms; the port
-  // re-derives it from the flight-loop frame clock (now_ms * 60 / 1000,
-  // truncated) once per frame. ai_mode_start_time_ms stamps compare against
-  // this counter.
+  // GetTickCount60Hz 0x004d5e10): 1/60 s ticks. The original bumps the global
+  // from the input-helper thread once per 16.664 ms; the port re-derives it
+  // from the gameplay clock (now_ms * 60 / 1000, truncated). The flight loop
+  // refreshes it each frame, and the landed service modals (Bar/store/trade)
+  // refresh it themselves because they block the flight loop. Timestamps such
+  // as ai_mode_start_time_ms and mission_interaction_recheck_tick_60hz compare
+  // against this counter.
   std::uint32_t tick_60hz = 0;
   // Snapshot of the platform-owned gameplay clock for game-logic helpers that
   // do not otherwise receive SdlPlatform. The flight/modal entry points refresh
