@@ -58,7 +58,7 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 
 - Default iteration: `cmake --build build/release`; run relevant tests with `ctest --test-dir build/release --output-on-failure -R '<pattern>'` (omit `-R` for the full suite).
 - For C++ changes, also build debug with `cmake --build build/debug`. Configure missing build directories with `cmake --preset release` / `cmake --preset debug`; these require `VCPKG_ROOT`.
-- Treat compiler warnings as errors. Format changed C++ files with `clang-format -i`. Keep whole-build clang-tidy disabled; run it on affected translation units with `clang-tidy -p build/release --checks='clang-analyzer-*' --warnings-as-errors='*' src/path.cpp`.
+- Treat compiler warnings as errors. Format changed C++ files with `clang-format -i`. Keep whole-build clang-tidy disabled; run it on affected translation units with `clang-tidy -p build/release --checks='clang-analyzer-*' --warnings-as-errors='*' src/path.cpp`. On macOS, prefix with the SDK root (`SDKROOT="$(xcrun --show-sdk-path)"`) when using Homebrew LLVM's `clang-tidy`, which does not inherit AppleClang's implicit sysroot; otherwise SDK headers such as `AvailabilityMacros.h` are not found.
 - After reimplementation or tracker changes, run `python3 tools/ref_audit.py` with Ghidra available and inspect `analysis/ref_audit.txt`. Dump coverage is checked only when `/tmp/ghidra_full_decompile` exists.
 - Documentation-only changes do not require builds or tests.
 

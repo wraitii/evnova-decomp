@@ -17,8 +17,22 @@ if(EVNOVA_ENABLE_CLANG_TIDY)
     find_program(EVNOVA_CLANG_TIDY NAMES clang-tidy
         HINTS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin)
     if(EVNOVA_CLANG_TIDY)
-        set(CMAKE_CXX_CLANG_TIDY
-            "${EVNOVA_CLANG_TIDY};--checks=clang-analyzer-*;--warnings-as-errors=*")
+        set(_evnova_clang_tidy_args --checks=clang-analyzer-* --warnings-as-errors=*)
+        if(APPLE)
+            # Homebrew LLVM's clang-tidy does not inherit AppleClang's default
+            # sysroot, and compile_commands.json has no -isysroot because Apple's
+            # clang discovers it implicitly. Pass the SDK explicitly so headers
+            # such as AvailabilityMacros.h are found.
+            execute_process(COMMAND xcrun --show-sdk-path
+                OUTPUT_VARIABLE _evnova_sdk_path
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+            if(_evnova_sdk_path)
+                list(APPEND _evnova_clang_tidy_args
+                    "--extra-arg=-isysroot" "--extra-arg=${_evnova_sdk_path}")
+            endif()
+        endif()
+        set(CMAKE_CXX_CLANG_TIDY "${EVNOVA_CLANG_TIDY}" ${_evnova_clang_tidy_args})
     else()
         message(STATUS "clang-tidy not found; static analysis is disabled")
     endif()
