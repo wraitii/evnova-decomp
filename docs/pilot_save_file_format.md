@@ -4,6 +4,16 @@ Reverse-engineering notes on how EV Nova persists a pilot's game state to
 `<Nova Files>/<pilot name>.plt` and restores it. Derived from the Ghidra DB
 (saver `0x004c7db0`/`0x004c7dd0`, loader `0x004cb260`).
 
+External references archived locally:
+
+- `docs/reference/pilotformat.txt` — Andrew Madsen's Mac/Windows pilot layout
+  and SimpleCrypt key, mirrored from
+  https://andrews05.github.io/evstuff/guides/pilotformat.txt.
+- `docs/assets/escape-velocity-nova-pilot-conversion/` — Halprin's reference
+  Mac-to-Windows converter. Its per-mission padding removal is correct; its
+  blanket two-byte endian swap is not used here (see below).
+- `docs/assets/ResForge/` — the maintained ResForge resource-fork editor.
+
 ## Two persistence tiers (don't confuse them)
 
 1. **Pilot-save data block** — in-memory resource family `0x63688a72`
@@ -66,7 +76,25 @@ Hunter is `Fed Carrier `, Pirate Hunter is `Aurora Thunderforge ` (both include
 their original trailing space), Plank is `Vengence Reaper` (original spelling),
 and Rick Hunter is `Pirate Hunter II`.
 
+The fixtures were reconverted from their original Mac resource forks after
+the 0x60-byte mission-padding difference was identified. Their recovered
+combat ratings are Alien 34915, Hunter 31979, Pirate Hunter 0, Plank 25251,
+and Rick Hunter 0. The earlier prefix-truncated conversions read `-1` from a
+misaligned escort field and lost the real Mac +0xe9ae rating entirely.
+
 ### Block 1 — "PilotState" (0xe952 = 59730 bytes)
+
+The Mac resource-128 structure is 0xe9b2 bytes. Its 16 MissionData records
+each contain six platform padding bytes (a short at Mac +0x20, a byte at
++0x35, and three trailing bytes). Windows omits them, so fields after the
+mission array move earlier by 0x60 bytes: for example mission bits are Mac
++0xb81e / Windows +0xb7be and combat rating is Mac +0xe9ae / Windows
++0xe94e. Conversion must decrypt first, remove those pads per record, then
+re-encrypt the shortened block while preserving its big-endian payload for the
+loader's existing Mac-compatibility path. Truncating the Mac block loses the
+combat rating and misaligns every post-mission field. The archived third-party
+converter instead swaps every two-byte pair; do not copy that step blindly,
+because it corrupts 32-bit fields and byte/Pascal strings.
 
 | Offset | Size | Field |
 |---|---|---|
