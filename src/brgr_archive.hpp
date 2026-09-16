@@ -28,6 +28,9 @@ constexpr std::uint32_t kResourceTypeRleSheet8 =
 constexpr std::uint32_t kResourceTypeRleSheet16 =
     0x726c9144; // "rl\x91D" (16-bit sheets)
 constexpr std::uint32_t kResourceTypePict = 0x50494354; // "PICT"
+// "ppat" pixel-pattern family: the radar interference static is one of the
+// ten patterns 128..137 (see pixpat_image.hpp).
+constexpr std::uint32_t kResourceTypePpat = 0x70706174; // "ppat"
 constexpr std::uint32_t kResourceTypeCicn =
     0x6369636e; // "cicn" (color icons, e.g. the target reticles)
 constexpr std::uint32_t kResourceTypeSnd =

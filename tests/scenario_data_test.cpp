@@ -906,6 +906,15 @@ TEST_CASE("system encounter/population fields decode", "[scenario][system]") {
   CHECK(alphara->encounter_fleet_weights[0] == 20);
   CHECK(alphara->dude_class_ids[1] == 2);
   CHECK(alphara->dude_class_weights[1] == 20); // raw 16, normalized by 1.25
+
+  // Interference (payload +0x6c) is a plain copy with no transform. Nonzero
+  // values drive Frame_RollProximityScanDetection 0x0045d030 -> the radar
+  // interference static: Alphara 20, Nesre Secundus 5 (0-interference systems
+  // like Kania never show static).
+  CHECK(alphara->interference == 20);
+  const System *nesre = data.System(0x85);
+  REQUIRE(nesre != nullptr);
+  CHECK(nesre->interference == 5);
 }
 
 // The DudeDef table (d\x9fde family, Nova Data 1) decodes into

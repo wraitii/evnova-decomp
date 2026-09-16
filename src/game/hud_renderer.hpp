@@ -34,6 +34,7 @@
 #include "nova_font.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -116,12 +117,34 @@ private:
   // toggles the blink phase inside NovaUi_RefreshGameplayPanels (0x0045d320).
   std::uint32_t radar_poll_ms_ = 0;
   std::int16_t radar_blink_phase_ = 0;
-  // Sensor-static tiles drawn while a proximity scan is detected (the
-  // original's 10 preloaded 'ppat' resources 128..137, DAT_00733b7c). The
-  // original picks a tile from the shared NovaRandom stream each frame; the
-  // port keeps its own stream (TODO(decomp): decode the 'ppat' resources).
+  // Sensor-static tiles drawn while a proximity scan is detected: the
+  // original's 10 preloaded 'ppat' resources 128..137 (DAT_00733b7c), decoded
+  // by Resource_LoadPixPatAsImage. On each >=15-tick radar refresh the original
+  // picks one from the shared NovaRandom stream and tiles it
+  // (DrawContext_TileImageInRect 0x004bbdc0); the port keeps its own stream
+  // (divergence).
+  // Divergence: the original searches the archive list newest-first
+  // (FUN_004ff900 prepends on open), so ppat 128 resolves to Nova Graphics 1's
+  // 8-bit pattern; the port's NovaResource_Load scans first-match, so ppat 128
+  // resolves to Nova.rez's 4-bit grayscale pattern. ppat 128 is the only
+  // duplicated resource key in the shipped archives, so this is confined to
+  // radar static.
+  bool radar_static_loaded_ = false;
   std::mt19937 radar_rng_{1337};
   std::array<std::unique_ptr<SdlTexture>, 10> radar_static_{};
+  // Index of the pattern currently tiled. The original re-rolls it inside
+  // NovaUi_DrawStellarRadarPanel, which only runs on the >= 15-tick radar
+  // refresh; the port re-rolls it on that same poll and holds it between
+  // frames because it composites directly every frame.
+  std::size_t radar_static_index_ = 0;
+  // Whether the interference static was selected at the last >= 15-tick radar
+  // refresh. The original decides the static/contacts branch inside
+  // NovaUi_DrawStellarRadarPanel and holds the result in the offscreen radar
+  // buffer for the whole poll interval; because g_proximity_scan_detected is
+  // re-rolled every simulation tick (Frame_RollProximityScanDetection
+  // 0x0045d030, TickSystems scope 0xc) but only sampled at the draw, the port
+  // must latch it on the poll instead of reading it per rendered frame.
+  bool radar_static_active_ = false;
 
   // Loads (and caches) the target-panel portrait for a zero-based ship class
   // id, resolving the portrait PICT through the class's clone source, or null

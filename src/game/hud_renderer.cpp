@@ -3,6 +3,7 @@
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../pict_image.hpp"
+#include "../pixpat_image.hpp"
 #include "../sdl_platform.hpp"
 #include "escort_commands.hpp"
 #include "hud_overlay.hpp"
@@ -1127,6 +1128,15 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
 // rect (RebuildStellarRadarPanel's backdrop restore). Everything else mirrors
 // the decompilation: 1/32 position scale, blip colour/size tiers, the blink
 // phase, the far-from-origin arrow and the interference static.
+//
+// Deliberate rendering divergence (improvement): the original only recomposites
+// the panel when DAT_00596d25 is dirty, so in normal flight every contact, the
+// origin arrow, and the target blink step once per >=15-tick (250 ms) poll. The
+// port recomputes contacts and the arrow every presentation frame instead, so
+// blips track live positions smoothly rather than at ~4 Hz. The blink phase and
+// the interference static pattern are still latched to the poll (see the poll
+// block below) so their cadence matches the original; the per-frame contact
+// pass is cosmetic and does not feed gameplay state.
 // ---------------------------------------------------------------------------
 namespace {
 
@@ -1138,7 +1148,9 @@ constexpr float kRadarArrowShaftFar = 50.0F;
 constexpr float kRadarArrowWingLength = 6.0F;
 constexpr float kRadarArrowWingDeg = 135.0F; // 0x87 bearing offsets
 constexpr std::int16_t kRadarDefaultFrameHeight = 0x20;
-constexpr int kRadarStaticTileSize = 64;
+// The interference static is one of the ten preloaded 'ppat' resources
+// 128..137 (DAT_00733b7c); DrawContext_TileImageInRect tiles the 64x64 source.
+constexpr std::uint16_t kRadarStaticFirstPpatId = 128;
 constexpr std::uint32_t kRadarBlinkHalfPeriodMs = 250; // 15 ticks at 60 Hz
 
 // The original's ROUND(value) + (fraction > 0) pattern resolves to ceil for
@@ -1374,19 +1386,44 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
 
   // Target-status poll (NovaUi_RefreshGameplayPanels 0x0045d320): toggles the
   // blink phase every >= 15 ticks of the original 60 Hz clock (250 ms), which
-  // also re-marks the radar dirty.
+  // also re-marks the radar dirty (DAT_00596d25) and is the only normal-flight
+  // trigger to redraw the panel. The interference pattern is re-rolled inside
+  // that draw, so it advances once per poll -- not once per rendered frame.
   const std::uint32_t now =
       static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
   if (now - radar_poll_ms_ >= kRadarBlinkHalfPeriodMs) {
     radar_poll_ms_ = now;
     radar_blink_phase_ =
         static_cast<std::int16_t>((radar_blink_phase_ + 1) & 1);
+    // The original decides the static/contacts branch and runs
+    // NovaRandom_Range(10) inside the draw, i.e. once per >= 15-tick radar
+    // refresh -- g_proximity_scan_detected itself is re-rolled every
+    // simulation tick. The port redraws every frame, so it samples the scan
+    // latch here and holds both the active flag and the chosen pattern between
+    // polls; reading the per-frame roll would flicker the static at frame
+    // rate.
+    radar_static_active_ = state.proximity_scan_detected;
+    if (radar_static_active_) {
+      std::uniform_int_distribution<int> pick(
+          0, static_cast<int>(radar_static_.size()) - 1);
+      radar_static_index_ = static_cast<std::size_t>(pick(radar_rng_));
+    }
   }
 
   const bool iff = Outfit_PlayerHasIffOutfit(state);
   const bool density = Outfit_PlayerHasDensityScanner(state);
-  // g_is_system_transition_active: the port's travel transition latch.
-  const bool force_empty = state.travel.engaging;
+  // Ghidra g_is_system_transition_active (0x007354a9) is set ONLY around the
+  // docked/landing visit (Stellar_RunDockAndLaunchSequence 0x00455e10 sets it
+  // at 0x00455e19, clears it on the launch tail 0x0045612d; also cleared at
+  // Ship_RunSpaceflightMode 0x00489241 and Ship_ResetPlayerShipState
+  // 0x004b32bc). It is NOT the hyperspace jump: no jump/arrival path writes it,
+  // so the radar keeps rendering contacts and static through the whole
+  // brake/hold/tunnel (the blink/static still advance on the 250 ms poll). The
+  // docked visit is a blocking modal in the port (Stellar_Dock /
+  // NovaLanded_RunWindow), so the flight HUD is never drawn while it is active
+  // and force_empty is always false here -- the previous `travel.engaging`
+  // mapping wrongly blanked the radar for the entire jump.
+  const bool force_empty = false;
 
   // Backdrop: IFF radar fills black (DAT_00733b74); otherwise the cockpit
   // PICT drawn above is the backing the original re-blits.
@@ -1414,32 +1451,40 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
                                      static_cast<double>(dy) * kRadarScale))};
   };
 
-  if (!force_empty && state.proximity_scan_detected) {
+  if (!force_empty && radar_static_active_) {
     // Interference static: tile one of ten pre-rendered noise patterns over
     // the panel (DrawContext_TileImageInRect 0x004bbdc0). The original tiles a
     // random NovaRandom-picked 'ppat' resource 128..137 (DAT_00733b7c); the
-    // port generates its own noise tiles.
-    // TODO(decomp(0x004bbdc0)) partial: 'ppat' resources not decoded.
-    if (!radar_static_[0]) {
-      std::uniform_int_distribution<int> shade(0, 255);
-      std::vector<std::uint8_t> pixels(
-          static_cast<std::size_t>(kRadarStaticTileSize) *
-          kRadarStaticTileSize * 4);
-      for (int tile = 0; tile < 10; ++tile) {
-        for (std::size_t i = 0; i < pixels.size(); i += 4) {
-          const std::uint8_t v = static_cast<std::uint8_t>(shade(radar_rng_));
-          pixels[i] = v;
-          pixels[i + 1] = v;
-          pixels[i + 2] = v;
-          pixels[i + 3] = SDL_ALPHA_OPAQUE;
+    // port decodes the same resources once and re-rolls the index on the
+    // 250 ms radar poll (see above), then holds it between polls. This is the
+    // timing-critical half of the direct-composite divergence: unlike the
+    // contacts, the static is random, so it must be latched to the poll or it
+    // would flicker at presentation rate.
+    if (!radar_static_loaded_) {
+      radar_static_loaded_ = true;
+      // ppat 128 exists in both Nova.rez (4-bit grayscale) and Nova Graphics 1
+      // (8-bit colour); the port's first-match lookup takes Nova.rez, while the
+      // original's newest-first archive search takes Nova Graphics 1.
+      NovaLog::Todo("radar static: ppat lookup uses first-match archive order, "
+                    "not the original newest-first order (ppat 128 only)");
+      for (std::size_t i = 0; i < radar_static_.size(); ++i) {
+        const auto data = NovaResource_Load(
+            kResourceTypePpat,
+            static_cast<std::uint16_t>(kRadarStaticFirstPpatId + i));
+        if (!data) {
+          NovaLog::Warn("radar static: ppat {} is missing",
+                        kRadarStaticFirstPpatId + i);
+          continue;
         }
-        radar_static_[static_cast<std::size_t>(tile)] = SdlTexture::Create(
-            renderer, kRadarStaticTileSize, kRadarStaticTileSize, pixels);
+        const auto image = Resource_LoadPixPatAsImage(*data);
+        if (!image) {
+          continue;
+        }
+        radar_static_[i] = SdlTexture::Create(
+            renderer, image->width, image->height, image->rgba_pixels);
       }
     }
-    std::uniform_int_distribution<int> pick(0, 9);
-    if (const SdlTexture *tile =
-            radar_static_[static_cast<std::size_t>(pick(radar_rng_))].get()) {
+    if (const SdlTexture *tile = radar_static_[radar_static_index_].get()) {
       const SDL_FRect dst{static_cast<float>(radar.left),
                           static_cast<float>(radar.top),
                           static_cast<float>(radar.right - radar.left),

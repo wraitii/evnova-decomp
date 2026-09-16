@@ -90,6 +90,32 @@ These use `g_avg_frame_tick_scale` in the original and should remain on
 | **DONE — HUD overlay duration** in `Frame_TickHudOverlayAndRouteMapTimers` (`0x0042f1b0`; formerly misnamed `Frame_UpdateScreenFlashTimers`) | Port converts each raw-call countdown unit to 21 ms; cached overlays use the original Chicago 12 face instead of layout-sized Geneva | Matches the original maximum-rate duration and text settings; route-map deadlines using the 60 Hz clock remain wall-clock based. This function does not update the hyperspace screen flash. |
 | **DONE — SWParticles** (`0x0047c800`) | Port banks and replays whole updates at the original 21 ms outer-loop cadence (47.62/s) | Preserves discrete lifetime/movement ordering without making particles follow the port's display refresh rate |
 
+## Dirty-gated UI cadence (stellar radar)
+
+The stellar radar panel (`NovaUi_DrawStellarRadarPanel` 0x0045d600) is not
+drawn per loop; it is dirty-gated on `DAT_00596d25`, which
+`NovaUi_RefreshGameplayPanels` (0x0045d320) sets on each `+ 0xf <=
+NovaTime_GetTickCount60Hz` poll (250 ms), plus on `RebuildStellarRadarPanel`
+(0x0045d0a0) state changes. The panel body is composed into an offscreen
+buffer, so between draws every contact, the far-from-origin arrow, and the
+target-blink phase hold their poll-time values; `g_proximity_scan_detected`
+(0x007caba0) is re-rolled every simulation tick by
+`Frame_RollProximityScanDetection` (0x0045d030, scope 0xc) but sampled (and its
+static pattern re-rolled with `NovaRandom_Range(10)`) only inside the draw.
+
+`force_empty` in that draw is the caller passing `g_is_system_transition_active`
+(0x007354a9), which is set only around the docked/landing visit (writes at
+0x00455e19/0x0045612d/0x00489241/0x004b32bc) and never by a hyperspace jump;
+the radar therefore keeps drawing contacts and static through the jump
+brake/hold/tunnel.
+
+Port status: the radar panel is composited directly each presentation frame.
+The blink phase and the interference static are latched on the 250 ms poll so
+their cadence matches the original; contacts and the arrow are recomputed per
+frame as a deliberate rendering divergence tagged **[improvement]** (smooth
+blips rather than ~4 Hz steps). This is cosmetic only -- no gameplay state
+reads the painted panel.
+
 ## Weapon-specific findings
 
 `Shot_HandleShot` motion is normalized, but several guidance submodes in
