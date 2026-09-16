@@ -1520,9 +1520,17 @@ struct GameState {
   // flight frame by the status tick (TODO(decomp): reset site).
   bool player_disable_message_shown = false;
   // DAT_00596d36 / DAT_00596d37: current + previous 60-frame
-  // any-distress-eligible-ship probe, for the distress-alert rising edge.
-  bool distress_cue_active = false;
-  bool distress_cue_active_prev = false;
+  // Ship_IsAnyShipThreatToPlayerSquad (0x00410060) probe, for the combat-alert
+  // rising edge. When any ship starts threatening the player squad the flight
+  // tick queues the snd 370 "Red Alert" cue below.
+  bool player_threat_active = false;
+  bool player_threat_active_prev = false;
+  // Set by PlayerTick_StatusAndOutfitEvents (Ghidra 0x0044d410-0x0044d46b)
+  // on the rising edge of player_threat_active; the spaceflight loop plays
+  // gameplay_sounds[snd 370 - 200] centered with priority width 5 and clears
+  // this. The original queues the dedicated handle NovaSound_LoadDecodedById
+  // (0x172) stored at g_nova_control_bits[144] (0x0059155c).
+  bool pending_red_alert = false;
   // DAT_00596d38: player death bookkeeping finished (latched for the
   // game-over/return-to-menu flow, consumed by the spaceflight loop).
   bool game_over_pending = false;

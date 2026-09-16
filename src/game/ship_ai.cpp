@@ -32,6 +32,7 @@
 #include "boarding_plunder.hpp"
 #include "escort_formation.hpp"
 #include "government.hpp"
+#include "hud_overlay.hpp"
 #include "log.hpp"
 #include "mission.hpp"
 #include "outfit.hpp"
@@ -1989,6 +1990,51 @@ void NovaAi_ReacquireTravelOrSettle(GameState &state,
   }
 }
 
+// Ghidra 0x004112C0 Ship_ShowPlayerInterceptTauntIfEligible. Generic
+// (non-personality) ships entering intercept state may challenge the player
+// when no HUD message is already visible. The stock challenges are the 20
+// entries in STR# 0x138b; transition-table cue 4 accompanies the message.
+void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship) {
+  if (ship.pers_def_slot != -1 || state.hud_overlay.active) {
+    return;
+  }
+  const auto govt_suppresses = [&state](std::int16_t govt_index) {
+    const Government *govt = state.scenario.GovernmentByIndex(govt_index);
+    return govt != nullptr && (govt->scan_mask_short & 0x08U) != 0U;
+  };
+  if (govt_suppresses(ship.faction_or_government_id)) {
+    return;
+  }
+  const ShipClass *ship_class =
+      state.scenario.Ship(static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+  if (ship_class == nullptr ||
+      govt_suppresses(ship_class->inherent_attributes_govt) ||
+      !NovaShip_DoesShipLikePlayer(state, ship) ||
+      NovaTargeting_IsShipAcquirableAsTarget(state, ship, state.player) ||
+      NovaAiShip_IsDestroyed(state.player) ||
+      NovaTargeting_ShipAtCloakVisibilityThreshold(ship)) {
+    return;
+  }
+
+  std::string speaker = ship_class->display_name;
+  if (ship.mission_fleet_slot >= 0 &&
+      static_cast<std::size_t>(ship.mission_fleet_slot) <
+          state.active_missions.size() &&
+      !state.active_missions[static_cast<std::size_t>(ship.mission_fleet_slot)]
+           .mission_fleet_name.empty()) {
+    speaker =
+        state.active_missions[static_cast<std::size_t>(ship.mission_fleet_slot)]
+            .mission_fleet_name;
+  }
+  const auto challenge_index =
+      std::uniform_int_distribution<std::uint16_t>{1, 20}(state.rng);
+  const std::string challenge = NovaHud_LoadStringEntry(0x138b, challenge_index)
+                                    .value_or("Prepare to be destroyed!");
+  NovaHud_ShowOverlayMessage(
+      state, speaker + ":  " + challenge, 0xe0, 0xe0, 0xe0, 0xf0U);
+  state.pending_ui_sounds.push_back({4, 1});
+}
+
 // Ghidra 0x00402860 Ship_UpdateShipAiBehavior0x01_WimpyTrader. The "normal
 // travel / wander" supervisor. Reacquires a travel stellar when idle (state 0)
 // -- picking a random adjacent travel stellar and entering state 1 (travel to
@@ -2056,8 +2102,9 @@ void NovaAi_UpdateBehavior0x01(GameState &state,
       ship.ai_state_code = 3;
     }
   }
-  // State 3's intercept taunt (Ship_ShowPlayerInterceptTauntIfEligible) is a
-  // HUD flavor no-op (TODO: mission/HUD chatter).
+  if (ship.ai_state_code == 3) {
+    NovaAi_ShowPlayerInterceptTauntIfEligible(state, ship);
+  }
   (void)now_ms;
 }
 
@@ -2173,9 +2220,9 @@ void NovaAi_UpdateAvailabilityBehavior(GameState &state,
     ship.ai_state_code = 3;
   }
 
-  // Ship_ShowPlayerInterceptTauntIfEligible (called when ai_state_code == 3)
-  // is HUD/mission chatter, the same no-op as in NovaAi_UpdateBehavior0x01.
-  // TODO(decomp): port the taunt.
+  if (ship.ai_state_code == 3) {
+    NovaAi_ShowPlayerInterceptTauntIfEligible(state, ship);
+  }
 }
 
 // Ghidra 0x00405120 Ship_DefenseFleetPrioritizePlayerThreat. Per-frame
@@ -2326,8 +2373,16 @@ void NovaAi_UpdateBehavior0x02(GameState &state,
     }
   }
   if (ship.ai_state_code == 3) {
+    NovaAi_ShowPlayerInterceptTauntIfEligible(state, ship);
     (void)NovaGovernment_TryTriggerAssistanceEncounter(
         state, ship, /*force=*/false);
+  } else if (ship.ai_state_code == 4 && ship.primary_target_ship_slot > 0 &&
+             state.SlotInRange(
+                 static_cast<std::size_t>(ship.primary_target_ship_slot)) &&
+             state.ShipAt(
+                      static_cast<std::size_t>(ship.primary_target_ship_slot))
+                     .ai_behavior_code > 2) {
+    NovaAi_ShowPlayerInterceptTauntIfEligible(state, ship);
   }
 }
 

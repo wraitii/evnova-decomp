@@ -40,8 +40,11 @@
 #include "game_state.hpp"
 
 class SdlPlatform;
+class SdlAudio;
 
 namespace game {
+
+struct NovaPreferences;
 
 // The service menu actions a docked player may pick, mirroring the original
 // travel-destination services.  The Spaceport has exactly seven actions;
@@ -254,7 +257,9 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // fixed 640x480 centred with black borders; the F5 scale toggle (documented
 // divergence) scales it to fill the window.
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
+                                              SdlAudio &audio,
                                               GameState &state,
-                                              LandedContext &ctx);
+                                              LandedContext &ctx,
+                                              const NovaPreferences &prefs);
 
 } // namespace game
