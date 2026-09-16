@@ -1304,8 +1304,8 @@ RunShipPurchaseConfirmation(SdlPlatform &platform,
     return std::nullopt;
   UiDialogWindow window = std::move(*loaded);
   NovaFontCache font_cache;
-  const std::string prompt = InfoString(0x78) + " " + ship.display_name + ":";
-  std::string proposed = ship.short_name;
+  const std::string prompt = InfoString(0x78) + " " + ship.long_name + ":";
+  std::string proposed = ship.long_name;
   proposed.push_back(' ');
   for (int i = 0; i < 3; ++i) {
     proposed +=
@@ -1368,13 +1368,12 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           : NovaLanded_OpenShipyardSession(state, stellar_id, hire_mode);
   // Ghidra 0x00492f30: an empty availability list pops the STR# 0x7d2
   // 0xdf/0xe0 notice (per mode) instead of opening the store window.
-  if (!outfit_store && hire_mode && session.available_ids.empty()) {
-    NovaUi_RunTextReaderDialog(
-        platform,
-        state,
-        InfoString(0xdf) /* "There are no ships available for hire." */,
-        false,
-        render_background);
+  if (!outfit_store && session.available_ids.empty()) {
+    NovaUi_RunTextReaderDialog(platform,
+                               state,
+                               InfoString(hire_mode ? 0xe0 : 0xdf),
+                               false,
+                               render_background);
     return LandedExit::kServiceComplete;
   }
   auto backdrop = LoadPictTexture(platform, kDockedBackdropPict);
@@ -1472,6 +1471,22 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
     if (max <= 1)
       return 1;
     return RunStoreQuantityPrompt(platform, max, render_background);
+  };
+  // The original input callback only emits the confirm action when the
+  // purchase-allowed latch is set. Keep the input gate identical to the
+  // disabled-button rendering gate so keyboard and mouse cannot open a
+  // quantity/christening dialog for an unavailable purchase.
+  const auto can_buy_selected = [&]() {
+    if (session.selected_id < 0) {
+      return false;
+    }
+    if (outfit_store) {
+      return NovaLanded_StellarSellsOutfits(state, stellar_id) &&
+             NovaLanded_CanBuyOutfit(state, stellar_id, session.selected_id);
+    }
+    return session.hire_mode
+               ? NovaLanded_CanHireShip(state, stellar_id, session.selected_id)
+               : NovaLanded_CanBuyShip(state, stellar_id, session.selected_id);
   };
   ProbeUiAutoClear probe_ui_guard(platform);
   while (!platform.quit_requested()) {
@@ -1593,6 +1608,9 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           continue;
         }
         if (key == 'b' && session.selected_id >= 0) {
+          if (!can_buy_selected()) {
+            continue;
+          }
           if (outfit_store) {
             const std::int16_t quantity =
                 input->shift ? prompt_buy_quantity() : 1;
@@ -1678,7 +1696,7 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
         }
         continue;
       }
-      if (Contains(layout.buy, point) && session.selected_id >= 0) {
+      if (Contains(layout.buy, point) && can_buy_selected()) {
         if (outfit_store) {
           const std::int16_t quantity =
               input->shift ? prompt_buy_quantity() : 1;

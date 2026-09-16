@@ -738,11 +738,22 @@ ShipEmergencePresentation NovaShip_EmergencePresentation(const Ship &ship) {
 
 bool SpaceflightView::EnsureShipSprite(SdlPlatform &platform,
                                        GameState &state) {
-  if (!ship_.frames.empty()) {
-    return true;
-  }
   const std::int16_t player_class =
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80);
+  if (player_sprite_ship_class_id_ == player_class && !ship_.frames.empty()) {
+    return true;
+  }
+  if (player_sprite_ship_class_id_ != player_class) {
+    ship_ = {};
+    glow_ = {};
+    light_ = {};
+    weapon_ = {};
+    has_glow_ = false;
+    has_light_ = false;
+    has_weapon_ = false;
+    glow_last_drawn_ = false;
+    player_sprite_ship_class_id_ = player_class;
+  }
   const auto *ship_class = state.scenario.Ship(player_class);
   if (!ship_class) {
     NovaLog::Warn("ship sprite: no ship class {:#x} in scenario tables",

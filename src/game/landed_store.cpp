@@ -1255,7 +1255,7 @@ void Player_TransferCargoAndJunkToEscortByRatio(GameState &state,
         static_cast<std::int16_t>(std::trunc(static_cast<float>(junk) * ratio));
     junk = static_cast<std::int16_t>(std::max(0, junk - transferred));
   }
-  state.stat_cache_valid = false;
+  NovaOutfit_RecomputeOutfitDerivedState(state);
 }
 
 // ---------------------------------------------------------------------------
