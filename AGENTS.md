@@ -11,12 +11,13 @@ Escape Velocity Nova is Ambrosia Software's 2002 open-world 2D space-trading and
   the fastest ground-truth shortcut over re-deriving from the Ghidra API.
 - Always improve ghidra when possible.
 - Check the EVN bible ("EV Nova Bible.html") for information.
+- ResForge, an extensive EVN resource editor is bundled at assets/ResForge. Check the source for .rez reference.
+- The pilot format is documented at docs/reference/pilotformat.txt
 - Reference decompiled / disassembled ground truth from the Ghidra API.
 - Be conservative with speculative renames. Rename only when behavior is clearly supported by decompile + callsites; otherwise keep neutral names and mark "Provisional" in comments.
 - In ghidra: Prefer plate comments for functions; pre-comments for globals/data.
 - When renaming high-level control-flow functions (startup, run loop, shutdown), also add a short clean-room comment block (2-4 lines) documenting purpose, entry/exit conditions, and confidence/unknowns.
 - Prefer reproducible tests where practical; some gameplay situations are difficult to reproduce. Ask the user for gameplay validation when needed, and always ask before using the probe.
-- Do not pipe builds through `head`/`tail` or impose short timeouts; let builds finish and preserve their exit status.
 - **External probe harness**: `EVN_PROBE=1` starts a localhost HTTP control surface (pause/step, input injection, state reads, screenshots, log tailing). See `docs/probe_harness.md`. Any new game loop must present through `SdlPlatform::Present()` (not `SDL_RenderPresent`) and poll input through the existing platform channels so the probe keeps working everywhere.
 
 ## Function progress trackers (`decomp-progress.tsv` + `decomp-skipped.tsv`)
@@ -58,7 +59,7 @@ The purpose of this reimplementation is to have identical gameplay to the origin
 
 - Default iteration: `cmake --build build/release`; run relevant tests with `ctest --test-dir build/release --output-on-failure -R '<pattern>'` (omit `-R` for the full suite).
 - For C++ changes, also build debug with `cmake --build build/debug`. Configure missing build directories with `cmake --preset release` / `cmake --preset debug`; these require `VCPKG_ROOT`.
-- Treat compiler warnings as errors. Format changed C++ files with `clang-format -i`. Keep whole-build clang-tidy disabled; run it on affected translation units with `clang-tidy -p build/release --checks='clang-analyzer-*' --warnings-as-errors='*' src/path.cpp`. On macOS, prefix with the SDK root (`SDKROOT="$(xcrun --show-sdk-path)"`) when using Homebrew LLVM's `clang-tidy`, which does not inherit AppleClang's implicit sysroot; otherwise SDK headers such as `AvailabilityMacros.h` are not found.
+- Treat compiler warnings as errors. Format changed C++ files with `clang-format -i`. Keep whole-build clang-tidy disabled; run it on affected translation units with `/opt/homebrew/opt/llvm/bin/clang-tidy -p build/release --checks='clang-analyzer-*' --warnings-as-errors='*' src/path.cpp`. On macOS, Homebrew LLVM's `clang-tidy` is not on `PATH` in the agent shell; use that absolute path and prefix it with the SDK root (`SDKROOT="$(xcrun --show-sdk-path)"`). Homebrew LLVM does not inherit AppleClang's implicit sysroot, so otherwise SDK headers such as `AvailabilityMacros.h` are not found.
 - After reimplementation or tracker changes, run `python3 tools/ref_audit.py` with Ghidra available and inspect `analysis/ref_audit.txt`. Dump coverage is checked only when `/tmp/ghidra_full_decompile` exists.
 - Documentation-only changes do not require builds or tests.
 
