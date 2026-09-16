@@ -2256,8 +2256,8 @@ void ReplaceMissionToken(std::string &text,
   if (cargo_type < 0 || cargo_type >= 0x100) {
     return "[Error]";
   }
-  auto name = NovaHud_LoadStringEntry(
-      0xfa1, static_cast<std::uint16_t>(cargo_type + 1));
+  auto name = NovaResources_LoadPatchedStringEntry(
+      0xfa1, static_cast<std::uint16_t>(cargo_type + 1), 0x238c);
   if (!name) {
     return "[Error]";
   }
@@ -3351,15 +3351,12 @@ void Mission_ShowMissionShipAnnouncement(GameState &state,
   state.pending_ui_sounds.push_back(
       {/*transition_index=*/4, /*priority_width=*/1});
 
-  // Hail text: first string of STR# (hail_quote_id + 4999) when present,
-  // else entry hail_quote_id of STR# 0x1bbd (7101, the pers HailQuote pool).
-  // TODO(decomp): the original copies the raw STR# resource bytes into the
-  // scratch and pstring-converts in place; the port decodes entry 1 of the
-  // pool instead (same text for well-formed pools).
+  // Hail text: `STR ` (hail_quote_id + 4999) when present, else entry
+  // hail_quote_id of STR# 0x1bbd (7101, the pers HailQuote pool).
   std::optional<std::string> text;
   if (hail_quote_id >= 0) {
-    text = NovaHud_LoadStringEntry(
-        static_cast<std::uint16_t>(hail_quote_id + 4999), /*entry=*/1);
+    text = NovaResources_LoadStringResource(
+        static_cast<std::uint16_t>(hail_quote_id + 4999));
     if (!text) {
       text = NovaHud_LoadStringEntry(0x1bbd,
                                      static_cast<std::uint16_t>(hail_quote_id));

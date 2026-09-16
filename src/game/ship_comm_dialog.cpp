@@ -680,16 +680,35 @@ LoadMoodPromptPayFirst(std::int16_t random_index, double personality) {
 // stellar scan + commodity names) is deferred;
 // this mirrors the default STR# 0x7d2 0xaf fragment the original shows when
 // the hail target carries no dude hail info (the common case).
-[[nodiscard]] std::string BuildHailInfoText(const Ship &target) {
-  (void)target;
+[[nodiscard]] std::string BuildHailInfoText(const GameState &state,
+                                            const Ship &target) {
   // TODO(decomp): dude-def hail_info_types / stellar-scan assembly of
   // NovaUi_BuildShipCommHailInfoText branch 0 is not reconstructed; the
   // original's default fragment is shown instead.
   // 1-based STR# 0x7d2 entry 0xb0 = "is a good place to".
-  if (auto s = NovaHud_LoadStringEntry(kMiscStr, 0xb0)) {
-    return *s; // "is a good place to"
+  std::string text = NovaHud_LoadStringEntry(kMiscStr, 0xb0).value_or("");
+
+  // The original applies a personality CommQuote last, replacing whichever
+  // generic/dude hail-info branch was selected above. A sparse `STR ` at
+  // 15000 + CommQuote overrides the matching STR# 7100 entry.
+  if (target.pers_def_slot >= 0 &&
+      target.pers_def_slot <
+          static_cast<std::int16_t>(state.scenario.pers_defs.size())) {
+    const PersDef &pers =
+        state.scenario
+            .pers_defs[static_cast<std::size_t>(target.pers_def_slot)];
+    if (pers.comm_quote_id > 0) {
+      if (auto quote = NovaResources_LoadStringResource(
+              static_cast<std::uint16_t>(pers.comm_quote_id + 15000))) {
+        return *quote;
+      }
+      if (auto quote = NovaHud_LoadStringEntry(
+              0x1bbc, static_cast<std::uint16_t>(pers.comm_quote_id))) {
+        return *quote;
+      }
+    }
   }
-  return {};
+  return text;
 }
 
 } // namespace
@@ -1113,7 +1132,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
     if (!fire_restricted && !special_mask) {
       if (!NovaAiShip_ShouldKeepPressingTarget(state, target) &&
           NovaShip_DoesShipLikePlayer(state, target)) {
-        const std::string info = BuildHailInfoText(target);
+        const std::string info = BuildHailInfoText(state, target);
         if (!info.empty()) {
           status = info;
         }

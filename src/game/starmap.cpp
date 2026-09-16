@@ -367,8 +367,10 @@ StarmapStrings LoadStarmapStrings() {
                                                       "Metal",
                                                       "Equipment"};
   for (std::size_t i = 0; i < s.goods_classes.size(); ++i) {
-    s.goods_classes[i] = LoadStringOr(
-        0xfa0, static_cast<std::uint16_t>(i + 1), kGoodsFallback[i]);
+    const auto entry = static_cast<std::uint16_t>(i + 1);
+    s.goods_classes[i] =
+        NovaResources_LoadPatchedStringEntry(0xfa0, entry, 9000)
+            .value_or(std::string(kGoodsFallback[i]));
   }
   return s;
 }

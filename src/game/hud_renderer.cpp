@@ -263,15 +263,26 @@ constexpr MiscStrEntry kMiscMultiple{0x15, "Multiple"};
 // fill slot n from 1-based entry n+1 (NovaData_LoadDisplayNamePstringTables
 // 0x004c7040), so callers below pass entry = slot + 1.
 constexpr std::uint16_t kBinLabelsId = 0xfa3;
+constexpr std::uint16_t kBinLabelOverrideBase = 0x24b8;
 constexpr std::string_view kBinLabelFallbacks[6] = {
     "Food:", "Ind:", "Med:", "LuxG:", "Met:", "Equ:"};
 constexpr std::uint16_t kCommodityShortNamesId = 0xfa2;
+constexpr std::uint16_t kCommodityShortNameOverrideBase = 0x23f0;
 
 [[nodiscard]] std::string PoolString(std::uint16_t resource_id,
                                      std::uint16_t entry,
                                      std::string_view fallback) {
-  if (auto text = NovaHud_LoadStringEntry(resource_id, entry);
-      text && !text->empty()) {
+  std::optional<std::string> text;
+  if (resource_id == kBinLabelsId) {
+    text = NovaResources_LoadPatchedStringEntry(
+        resource_id, entry, kBinLabelOverrideBase);
+  } else if (resource_id == kCommodityShortNamesId) {
+    text = NovaResources_LoadPatchedStringEntry(
+        resource_id, entry, kCommodityShortNameOverrideBase);
+  } else {
+    text = NovaHud_LoadStringEntry(resource_id, entry);
+  }
+  if (text && !text->empty()) {
     return *text;
   }
   return std::string(fallback);

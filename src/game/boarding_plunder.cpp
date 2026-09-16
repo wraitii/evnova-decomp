@@ -957,8 +957,8 @@ std::string CargoName(const GameState &state, int cargo_type) {
     return "?";
   }
   (void)state;
-  if (auto s = NovaHud_LoadStringEntry(
-          kCargoNameStr, static_cast<std::uint16_t>(cargo_type + 1))) {
+  if (auto s = NovaResources_LoadPatchedStringEntry(
+          kCargoNameStr, static_cast<std::uint16_t>(cargo_type + 1), 0x238c)) {
     return *s;
   }
   // Fallbacks mirror the six standard boarding commodities.

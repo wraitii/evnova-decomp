@@ -88,6 +88,23 @@ NovaHud_StringPoolEntryCount(std::uint16_t resource_id);
 [[nodiscard]] std::optional<std::string>
 NovaHud_DecodeStringEntry(std::span<const std::byte> pool, std::uint16_t entry);
 
+// Ghidra NovaResources_CopyStringResource 0x004c73b0. Decodes a raw `STR `
+// resource (one Pascal string, unlike the counted STR# family).
+[[nodiscard]] std::optional<std::string>
+NovaResources_DecodeStringResource(std::span<const std::byte> resource);
+
+// Loads and decodes one `STR ` resource by id.
+[[nodiscard]] std::optional<std::string>
+NovaResources_LoadStringResource(std::uint16_t resource_id);
+
+// One logical entry from NovaData_LoadDisplayNamePstringTables (0x004c7040):
+// prefer sparse `STR ` id (override_base + zero-based slot), then fall back to
+// the corresponding 1-based entry of `STR#` fallback_pool.
+[[nodiscard]] std::optional<std::string>
+NovaResources_LoadPatchedStringEntry(std::uint16_t fallback_pool,
+                                     std::uint16_t entry,
+                                     std::uint16_t override_base);
+
 // Composes and shows the on-screen HUD overlay for a denied landing request,
 // mirroring the Stellar_HandleStellarEntryAndExit feedback cases (STR# 0x7d2).
 // `denial` is the reason Stellar_Dock reported; `is_station` picks
