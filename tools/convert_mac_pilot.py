@@ -10,13 +10,60 @@ sizes. StuffIt archives must be extracted before invoking this tool.
 from __future__ import annotations
 
 import argparse
+import os
 import struct
+import subprocess
 from pathlib import Path
 
 
 PILOT_RESOURCE_TYPE = b"Np\x95L"
 BLOCK1_SIZE = 0xE952
+MAC_BLOCK1_SIZE = 0xE9B2
 BLOCK2_SIZE = 0x66FE
+SIMPLE_CRYPT_KEY = 0xB36A210F
+SIMPLE_CRYPT_MODIFIER = 0xDEADBEEF
+
+
+def simple_crypt(data: bytes) -> bytes:
+    """Andrew Welch's symmetric SimpleCrypt transform."""
+    transformed = bytearray(data)
+    key = SIMPLE_CRYPT_KEY
+    for offset in range(0, len(transformed) - len(transformed) % 4, 4):
+        chunk = int.from_bytes(transformed[offset : offset + 4], "big") ^ key
+        transformed[offset : offset + 4] = chunk.to_bytes(4, "big")
+        key = ((key + SIMPLE_CRYPT_MODIFIER) & 0xFFFFFFFF) ^ SIMPLE_CRYPT_MODIFIER
+    for offset in range(len(transformed) - len(transformed) % 4, len(transformed)):
+        transformed[offset] ^= key >> 24
+        key = (key << 8) & 0xFFFFFFFF
+    return bytes(transformed)
+
+
+def convert_primary_block(mac_block: bytes) -> bytes:
+    """Remove Mac mission padding while preserving its big-endian payload."""
+    if len(mac_block) != MAC_BLOCK1_SIZE:
+        raise ValueError(f"unexpected Mac primary block size: {len(mac_block):#x}")
+    decrypted = simple_crypt(mac_block)
+    windows = bytearray(decrypted[:0x295E])
+    cursor = 0x295E
+    for _ in range(16):
+        mission = bytearray()
+        mission.extend(decrypted[cursor : cursor + 0x20])
+        cursor += 0x22  # Mac +0x20 short is absent on Windows.
+        mission.extend(decrypted[cursor : cursor + 0x13])
+        cursor += 0x14  # Mac +0x35 byte is absent on Windows.
+        mission.extend(decrypted[cursor : cursor + 0x8B1])
+        cursor += 0x8B4  # Mac's final three pad bytes are absent on Windows.
+        windows.extend(mission)
+    windows.extend(decrypted[cursor:])
+    if len(windows) != BLOCK1_SIZE:
+        raise ValueError(f"converted primary block has size {len(windows):#x}")
+    return simple_crypt(windows)
+
+
+def convert_secondary_block(mac_block: bytes) -> bytes:
+    if len(mac_block) != BLOCK2_SIZE:
+        raise ValueError(f"unexpected Mac secondary block size: {len(mac_block):#x}")
+    return mac_block
 
 
 def macbinary_resource_fork(data: bytes) -> tuple[str, bytes] | None:
@@ -103,10 +150,32 @@ def resource_entries(
     return entries, names
 
 
+def native_resource_fork(path: Path) -> bytes:
+    try:
+        return os.getxattr(path, "com.apple.ResourceFork")
+    except AttributeError:
+        # Some python.org/Homebrew builds omit os.getxattr on macOS.
+        result = subprocess.run(
+            ["/usr/bin/xattr", "-px", "com.apple.ResourceFork", path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return bytes.fromhex(result.stdout)
+    except OSError:
+        pass
+    return b""
+
+
 def convert(source: Path, output_dir: Path) -> Path:
     source_data = source.read_bytes()
+    native_resource = native_resource_fork(source)
     apple_resource = appledouble_resource_fork(source_data)
-    if apple_resource is not None:
+    if native_resource:
+        pilot_name = source.name
+        resource_fork = native_resource
+    elif apple_resource is not None:
         pilot_name = source.name.removesuffix(".rsrc")
         resource_fork = apple_resource
     else:
@@ -122,20 +191,23 @@ def convert(source: Path, output_dir: Path) -> Path:
     block2 = entries.get((PILOT_RESOURCE_TYPE, 129))
     if block1 is None or block2 is None:
         raise ValueError("not an EV Nova pilot resource fork (Np\\x95L 128/129 missing)")
-    if len(block1) < BLOCK1_SIZE or len(block2) != BLOCK2_SIZE:
+    if len(block1) != MAC_BLOCK1_SIZE or len(block2) != BLOCK2_SIZE:
         raise ValueError(
             f"unexpected pilot block sizes: {len(block1):#x}, {len(block2):#x}"
         )
 
-    # Mac resource 128 has a 96-byte platform tail after the Windows block.
+    # Mac resource 128 has six padding bytes in every mission record. Windows
+    # omits those bytes, shifting all later fields by 16*6 = 96 bytes.
     # The ship name is the MacRoman resource name of block 129; the Windows
     # format stores the same value as its trailing C string.
     ship_name = names.get((PILOT_RESOURCE_TYPE, 129), b"")
+    converted_block1 = convert_primary_block(block1)
+    converted_block2 = convert_secondary_block(block2)
     output = (
         struct.pack("<I", BLOCK1_SIZE)
-        + block1[:BLOCK1_SIZE]
+        + converted_block1
         + struct.pack("<I", BLOCK2_SIZE)
-        + block2
+        + converted_block2
         + ship_name
         + b"\0"
     )
