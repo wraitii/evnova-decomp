@@ -614,6 +614,30 @@ void ProbeServer::HandleRequest(const std::string &method,
         body_out = "probe: trade requires commodity and side (buy|sell)";
         return;
       }
+      // Optional quantity: the trade modal consumes it inside its own handler
+      // (the synthesized clicks below stay the transaction trigger). `tons`
+      // requests an exact amount; `max` requests the whole affordable/held
+      // amount, matching the shift quantity prompt. Neither leaves 0, meaning
+      // the original hardcoded click quantity (up to 10 tons).
+      const auto tons_field = JsonIntField(body, "tons");
+      const bool want_max = JsonBoolField(body, "max").value_or(false);
+      if (tons_field && want_max) {
+        status = "400 Bad Request";
+        body_out = "probe: trade accepts either tons or max, not both";
+        return;
+      }
+      std::int16_t tons = 0;
+      if (tons_field) {
+        if (*tons_field <= 0 || *tons_field > 32000) {
+          status = "400 Bad Request";
+          body_out = "probe: trade tons must be between 1 and 32000";
+          return;
+        }
+        tons = static_cast<std::int16_t>(*tons_field);
+      } else if (want_max) {
+        // Negative sentinel: the modal maps it to its live BuyMax/SellMax.
+        tons = -1;
+      }
       const std::string row_name = "trade.row." + std::to_string(*commodity);
       const std::string button_name = *side == "buy" ? "buy" : "sell";
       const auto row_rect = UiElementRect(row_name);
@@ -630,10 +654,33 @@ void ProbeServer::HandleRequest(const std::string &method,
                    "' button (GET /probe/ui)";
         return;
       }
+      // Publish the tonnage only once the target controls exist, so a failed
+      // command cannot leave a value for a later real click to consume. The
+      // modal clears it on consumption.
+      trade_quantity_consumed_.store(false);
+      pending_trade_tons_.store(tons);
       InjectClick(row_rect->x + row_rect->w / 2.0F,
                   row_rect->y + row_rect->h / 2.0F);
       InjectClick(button_rect->x + button_rect->w / 2.0F,
                   button_rect->y + button_rect->h / 2.0F);
+      // The main thread applies the transaction when the modal handles the
+      // injected click. Wait for that before returning, so a follow-up trade
+      // cannot overwrite the queued quantity before this one lands. This keeps
+      // a `tons`/`max` trade ordered without the scenario polling an exact
+      // post-trade cargo count (which credit-limited `max` makes unknowable).
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(2);
+      while (!trade_quantity_consumed_.load() &&
+             std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      if (!trade_quantity_consumed_.load()) {
+        pending_trade_tons_.store(0);
+        status = "504 Gateway Timeout";
+        body_out =
+            "probe: trade was not applied (trade center did not consume it)";
+        return;
+      }
       status = "200 OK";
       content_type = "application/json";
       body_out = "{\"ok\":true}";
@@ -789,6 +836,12 @@ void ProbeServer::AutomationObservedDocked() {
 bool ProbeServer::ConsumeAutomationDocked() {
   const std::lock_guard lock(automation_mutex_);
   return std::exchange(automation_docked_, false);
+}
+
+std::int16_t ProbeServer::ConsumePendingTradeQuantity() {
+  const std::int16_t quantity = pending_trade_tons_.exchange(0);
+  trade_quantity_consumed_.store(true);
+  return quantity;
 }
 
 std::string ProbeServer::SubmitJob(const std::function<std::string()> &work,
@@ -1048,7 +1101,8 @@ std::string ProbeServer::UiJson() const {
                   named.rect.h);
     out += "{\"name\":\"" + JsonEscape(named.name) + "\",\"rect\":" + rect +
            ",\"label\":\"" + JsonEscape(named.label) +
-           "\",\"price\":" + std::to_string(named.value) + "}";
+           "\",\"price\":" + std::to_string(named.value) +
+           ",\"selected\":" + (named.selected ? "true" : "false") + "}";
   }
   out += "]}";
   return out;

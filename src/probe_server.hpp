@@ -34,7 +34,10 @@ struct ProbeNamedRect {
   SDL_FRect rect{};
   // Optional list-row payload surfaced in /probe/ui's "items" array (e.g. a
   // commodity row's label and price). Plain controls leave `has_value` false.
+  // `selected` lets the harness assert the list's current highlight (trade
+  // center row, store grid cell) instead of inferring it from a screenshot.
   bool has_value = false;
+  bool selected = false;
   std::string label;
   std::int32_t value = 0;
 
@@ -114,6 +117,14 @@ public:
   // Latch executed on the main thread when the harness asks the game to quit.
   void SetQuitLatch(std::function<void()> latch);
 
+  // Explicit quantity for the next synthesized `trade` transaction. The
+  // server-side `trade` command stores it; the trade modal consumes it inside
+  // its own handler, so the trade still runs through the normal UI path (no
+  // direct game-state writes). 0 means "use the click quantity"; a negative
+  // value means "the whole affordable/held amount" (the shift prompt's max).
+  // Consumption releases the waiting `trade` command.
+  [[nodiscard]] std::int16_t ConsumePendingTradeQuantity();
+
   // ---- UI layout registry (docs/probe_harness.md) -------------------------
   // The active modal publishes its named control rects (window-point space,
   // the same space /probe/click consumes) so the harness can click by intent
@@ -163,6 +174,12 @@ private:
   std::atomic<bool> acceleration_requested_{false};
   std::atomic<std::uint32_t> speed_multiplier_requested_{1};
   std::atomic<bool> audio_suppression_requested_{false};
+  std::atomic<std::int16_t> pending_trade_tons_{0};
+  // Set by the modal when it applies a queued quantity, so the `trade`
+  // command can wait for the transaction before returning (see
+  // ConsumePendingTradeQuantity). Starts true so a no-op consume before any
+  // command cannot look like an applied trade.
+  std::atomic<bool> trade_quantity_consumed_{true};
   std::mutex automation_mutex_;
   std::optional<ProbeAutomationRequest> automation_request_;
   std::string automation_status_{"{\"goal\":\"none\",\"phase\":\"idle\"}"};
