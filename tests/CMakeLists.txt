@@ -19,6 +19,7 @@ add_executable(evnova_tests
     new_pilot_dialog_test.cpp
     nova_font_test.cpp
     pilot_file_test.cpp
+    player_info_window_test.cpp
     preferences_test.cpp
     rank_test.cpp
     scenario_data_test.cpp
