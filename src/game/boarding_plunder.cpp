@@ -19,6 +19,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
+#include "landed_store.hpp"
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "nova_font.hpp"
@@ -1929,14 +1930,17 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
                                                             : nullptr);
             }
             if (take_ship) {
-              // TODO(decomp(0x00497eb0)) skipped: the swap arm (rename-confirm
-              // dialog with class name + 3 random digits, then
-              // Player_SwapShipWithEscort + gameplay layout reinstall)
-              // is not reconstructed; the escort conversion below is the
-              // port's fallback for both choices.
-              NovaLog::Todo("board: 'Use As My Ship' chosen, but "
-                            "Player_SwapShipWithEscort is not "
-                            "reconstructed; converting to escort instead");
+              // Ghidra 0x00497eb0 -> 0x00423fa0: the accepted "Use As My
+              // Ship" choice promotes the boarded hull into slot zero. The
+              // rename-confirm dialog's random suffix is still a UI gap; use
+              // the captured class name supplied by the escort hull.
+              if (Player_SwapShipWithEscort(state, target, true)) {
+                close = true;
+                close_reason = "target captured as player ship";
+                result.target_captured_as_player = true;
+                state.stat_cache_valid = false;
+                break;
+              }
             }
             close = true;
             close_reason = "target captured as escort";

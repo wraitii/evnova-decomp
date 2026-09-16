@@ -2,6 +2,7 @@
 
 #include "government.hpp"
 #include "hud_overlay.hpp"
+#include "log.hpp"
 #include "mission.hpp"
 #include "mission_trace.hpp"
 #include "outfit.hpp"
@@ -943,10 +944,166 @@ int NovaLanded_HireShip(GameState &state,
   return slot;
 }
 
+// Ghidra 0x00423fa0 Player_SwapShipWithEscort. Promotes an escort into the
+// player slot and leaves the previous player hull in a newly allocated slot.
+// `from_capture` selects the original capture-transfer state (no shields,
+// one armor, boarded latch, and cargo ratio transfer) versus the ordinary
+// escort-return state. Confidence: high; deep jamming/runtime fields remain
+// represented by their neutral port defaults.
 bool Player_SwapShipWithEscort(GameState &state,
-                               std::int16_t stellar_id,
-                               std::int16_t ship_id,
-                               std::string_view player_ship_name) {
+                               Ship &escort,
+                               bool from_capture) {
+  const int replacement_slot =
+      NovaShip_AllocateShipSlot(state, state.player.current_system_id, 1);
+  if (replacement_slot == -1) {
+    NovaLog::Todo("ship swap: no replacement slot available");
+    return false;
+  }
+  Ship &replacement = state.ShipAt(static_cast<std::size_t>(replacement_slot));
+  Ship old_player = state.player;
+  const ShipClass *old_class = state.scenario.Ship(
+      static_cast<std::int16_t>(old_player.ship_class_id + 0x80));
+  const ShipClass *escort_class = state.scenario.Ship(
+      static_cast<std::int16_t>(escort.ship_class_id + 0x80));
+  if (old_class != nullptr)
+    NovaLanded_ExecuteControlSet(
+        state, old_class->on_retire_expr, "ship OnRetire");
+  if (escort_class != nullptr)
+    NovaLanded_ExecuteControlSet(
+        state, escort_class->on_capture_expr, "ship OnCapture");
+  replacement.ship_class_id = old_player.ship_class_id;
+  replacement.dude_class_id = -1;
+  replacement.pers_def_slot = -1;
+  replacement.pos_x = old_player.pos_x;
+  replacement.pos_y = old_player.pos_y;
+  replacement.vel_x = old_player.vel_x;
+  replacement.vel_y = old_player.vel_y;
+  replacement.heading = old_player.heading;
+  replacement.ai_desired_heading_deg = static_cast<std::int16_t>(
+      std::lround(static_cast<double>(replacement.heading)));
+  replacement.ai_secondary_target_slot = -1;
+  replacement.primary_target_ship_slot = -1;
+  replacement.active_weapon_bank_slot = -1;
+  replacement.current_system_id = old_player.current_system_id;
+  replacement.faction_or_government_id = -1;
+  replacement.mission_owner_slot = -1;
+  replacement.escort_command_code = -1;
+  replacement.ship_instance_id = static_cast<std::int16_t>(replacement_slot);
+  replacement.voice_type_mode = static_cast<std::int16_t>(
+      std::uniform_int_distribution<int>{0, 1}(state.rng));
+  replacement.cargo_bins = old_player.cargo_bins;
+  replacement.afterburner_latch = 0;
+
+  // Escorts attached to the old player become ordinary ships attached to the
+  // replacement hull, matching the original's squad-leader repair loop.
+  for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+    Ship &other = state.ShipAt(i);
+    if (!other.is_active || &other == &escort ||
+        other.squad_leader_ship_slot != 0) {
+      continue;
+    }
+    other.ai_secondary_target_slot = -1;
+    other.primary_target_ship_slot = other.ai_secondary_target_slot;
+    other.ai_hostility_accumulator = 0;
+    other.squad_leader_ship_slot = -1;
+    const ShipClass *other_class = state.scenario.Ship(
+        static_cast<std::int16_t>(other.ship_class_id + 0x80));
+    other.ai_behavior_code =
+        other_class == nullptr ? 0 : other_class->default_ai_behavior;
+  }
+
+  replacement.mission_fleet_slot = -1;
+  if (!from_capture) {
+    replacement.death_timer_active = 0.0F;
+    replacement.squad_leader_ship_slot = 0;
+    replacement.ai_behavior_code = 6;
+    replacement.defense_fleet_home_stellar_id = -1;
+    replacement.ai_hostility_accumulator = 0;
+    replacement.fuel_points =
+        Outfit_ComputePlayerEffectiveStats(state).fuel_capacity;
+    replacement.ai_state_code = 0;
+    replacement.ai_control_mode = 0;
+    NovaShip_ResetAiBehaviorRuntimeFields(replacement);
+    NovaShip_EnterSquadReturnState(state, replacement);
+  } else {
+    replacement.shield_points = 0.0F;
+    replacement.armor_points = 1.0F;
+    replacement.boarded_target_latch = 1;
+    replacement.post_hit_mode_hint = -1;
+    replacement.squad_leader_ship_slot = 0;
+    replacement.ai_behavior_code = 6;
+    // Ghidra 0x00469810 scales each player cargo bin by receiving holds /
+    // fleet capacity. Junk follows the same ratio in the original, but NPC
+    // junk bins are not represented in this clean-room state yet.
+    const ShipClass *replacement_class = state.scenario.Ship(
+        static_cast<std::int16_t>(replacement.ship_class_id + 0x80));
+    const float fleet_capacity = static_cast<float>(
+        std::max<std::int32_t>(1, Player_ComputeFleetCargoCapacity(state)));
+    const float ratio = std::min(
+        1.0F,
+        static_cast<float>(
+            replacement_class == nullptr ? 0 : replacement_class->cargo_holds) /
+            fleet_capacity);
+    for (std::size_t i = 0; i < state.inventory.cargo_bins.size(); ++i) {
+      const auto transferred = static_cast<std::int16_t>(std::trunc(
+          static_cast<float>(state.inventory.cargo_bins[i]) * ratio));
+      state.inventory.cargo_bins[i] -= transferred;
+      replacement.cargo_bins[i] = transferred;
+    }
+    state.player.squad_leader_ship_slot = -1;
+    state.player.ai_behavior_code = -1;
+  }
+
+  // Swap the complete escort hull into slot zero, retaining its cargo and
+  // identity while resetting player targeting and faction state.
+  Ship promoted = escort;
+  promoted.ship_instance_id = 0;
+  promoted.current_system_id = old_player.current_system_id;
+  promoted.faction_or_government_id = -1;
+  promoted.ai_behavior_code = -1;
+  promoted.squad_leader_ship_slot = -1;
+  promoted.primary_target_ship_slot = -1;
+  promoted.ai_secondary_target_slot = -1;
+  promoted.active_weapon_bank_slot = -1;
+  promoted.shield_points = 0.0F;
+  const ShipClass *promoted_class = escort_class;
+  promoted.armor_points =
+      promoted_class == nullptr
+          ? 1.0F
+          : static_cast<float>(promoted_class->base_armor) *
+                    (promoted_class->capability_flags & 0x10U ? 0.1F
+                                                              : 0.3333F) +
+                1.0F;
+  state.player = std::move(promoted);
+  escort.is_active = false;
+
+  state.player.ship_name =
+      state.player.ship_name.empty()
+          ? (promoted_class == nullptr ? std::string{}
+                                       : promoted_class->short_name)
+          : state.player.ship_name;
+  state.player.cargo_bins = escort.cargo_bins;
+  NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+  state.stat_cache_valid = false;
+  state.player.active_weapon_bank_slot = -1;
+  const PlayerEffectiveStats stats = Outfit_ComputePlayerEffectiveStats(state);
+  state.player.shield_points = 0.0F;
+  const auto fuel_capacity =
+      static_cast<std::int16_t>(std::max(0.0F, stats.fuel_capacity));
+  state.player.fuel_points =
+      fuel_capacity < 1 ? 0.0F
+                        : static_cast<float>(std::uniform_int_distribution<int>{
+                              0, fuel_capacity - 1}(state.rng));
+  state.player.armor_points =
+      std::min(state.player.armor_points, stats.max_armor_points);
+  return true;
+}
+
+bool NovaLanded_BuyShip(GameState &state,
+                        std::int16_t stellar_id,
+                        std::int16_t ship_id,
+                        std::string_view player_ship_name) {
   if (!NovaLanded_CanBuyShip(state, stellar_id, ship_id))
     return false;
   const ShipClass *old_ship = state.scenario.Ship(
@@ -960,6 +1117,15 @@ bool Player_SwapShipWithEscort(GameState &state,
   state.player.ship_class_id = static_cast<std::int16_t>(ship_id - 0x80);
   state.player.ship_name.assign(player_ship_name.empty() ? new_ship->short_name
                                                          : player_ship_name);
+  // NovaUi_RunShipyardPurchaseLoop removes deployed behavior-5 craft that
+  // belonged to the outgoing player hull before rebuilding its loadout.
+  for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
+    Ship &fighter = state.ShipAt(i);
+    if (fighter.is_active && fighter.squad_leader_ship_slot == 0 &&
+        fighter.ai_behavior_code == 5) {
+      fighter.is_active = false;
+    }
+  }
   for (std::size_t i = 0; i < 0x200 && i < state.scenario.outfits.size(); ++i)
     if (!state.scenario.outfits[i].persistent_on_ship_swap)
       state.inventory.outfit_owned_count[i] = 0;

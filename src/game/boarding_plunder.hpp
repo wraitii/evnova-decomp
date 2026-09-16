@@ -75,9 +75,10 @@ struct BoardingWindowResult {
   // death timer is armed and the flight sim resolves the kill.
   bool target_self_destructed = false;
   // A capture roll succeeded and the target was converted to an escort
-  // (ai_behavior_code 6). The keep-as-new-ship / capture-decision dialog is
-  // TODO(decomp) — the port currently always takes the escort path.
+  // (ai_behavior_code 6).
   bool target_captured_as_escort = false;
+  // The captured hull was promoted into the player slot.
+  bool target_captured_as_player = false;
   // Capture was attempted and failed, or was refused because of the escort
   // cap / an unlicensed ship class.
   bool capture_attempt_failed = false;
@@ -91,7 +92,7 @@ struct BoardingWindowResult {
 // applies its transfer to GameState and re-arms the panic self-destruct
 // re-roll; the capture arm converts the boarded hull to a behavior-6 escort
 // (the capture-decision dialog / ship swap, NovaUi_ShowCaptureDecisionDialog
-// 0x00497eb0, is TODO(decomp) — see the BoardingWindowResult note).
+// 0x00497eb0, can promote the target into the player slot).
 //
 // Note: the flight loop owns the SDL audio device, so the modal plays its
 // one-shot cues directly through `audio` (the original queues them into
