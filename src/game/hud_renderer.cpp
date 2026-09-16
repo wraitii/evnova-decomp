@@ -1137,8 +1137,9 @@ constexpr float kRadarArrowShaftNear = 25.0F;
 constexpr float kRadarArrowShaftFar = 50.0F;
 constexpr float kRadarArrowWingLength = 6.0F;
 constexpr float kRadarArrowWingDeg = 135.0F; // 0x87 bearing offsets
-constexpr std::int16_t kRadarDefaultHalfSpan = 0x20;
+constexpr std::int16_t kRadarDefaultFrameHeight = 0x20;
 constexpr int kRadarStaticTileSize = 64;
+constexpr std::uint32_t kRadarBlinkHalfPeriodMs = 250; // 15 ticks at 60 Hz
 
 // The original's ROUND(value) + (fraction > 0) pattern resolves to ceil for
 // non-integers, identity for integers (FIST round-to-nearest then bump).
@@ -1175,7 +1176,7 @@ void DrawRadarPoint(SDL_Renderer *renderer,
 void DrawRadarDisc(SDL_Renderer *renderer, const HudPanelRect &rect) {
   const int cx = (rect.left + rect.right + 1) / 2;
   const int cy = (rect.top + rect.bottom + 1) / 2;
-  const int radius = (rect.bottom - rect.top) / 2;
+  const int radius = (rect.right - rect.left) / 2;
   int x = 0;
   int y = radius;
   int d = 1 - radius;
@@ -1198,25 +1199,31 @@ void DrawRadarDisc(SDL_Renderer *renderer, const HudPanelRect &rect) {
   }
 }
 
-// DrawContext_FrameRect16WithCurrentColor: QuickDraw FrameRect, boundary
-// inclusive (a 3x3 rect frames a 3x3 hollow box).
+// DrawContext_FrameRect16WithCurrentColor: QuickDraw FrameRect with exclusive
+// right/bottom bounds. The radar's point rect inset by one therefore becomes
+// a 2x2 contact.
 void DrawRadarBox(SDL_Renderer *renderer, const HudPanelRect &rect) {
+  const int width = rect.right - rect.left;
+  const int height = rect.bottom - rect.top;
+  if (width <= 0 || height <= 0) {
+    return;
+  }
   const SDL_FRect top{static_cast<float>(rect.left),
                       static_cast<float>(rect.top),
-                      static_cast<float>(rect.right - rect.left + 1),
+                      static_cast<float>(width),
                       1.0F};
   const SDL_FRect bottom{static_cast<float>(rect.left),
-                         static_cast<float>(rect.bottom),
-                         static_cast<float>(rect.right - rect.left + 1),
+                         static_cast<float>(rect.bottom - 1),
+                         static_cast<float>(width),
                          1.0F};
   const SDL_FRect left_edge{static_cast<float>(rect.left),
                             static_cast<float>(rect.top),
                             1.0F,
-                            static_cast<float>(rect.bottom - rect.top + 1)};
-  const SDL_FRect right_edge{static_cast<float>(rect.right),
+                            static_cast<float>(height)};
+  const SDL_FRect right_edge{static_cast<float>(rect.right - 1),
                              static_cast<float>(rect.top),
                              1.0F,
-                             static_cast<float>(rect.bottom - rect.top + 1)};
+                             static_cast<float>(height)};
   SDL_RenderFillRect(renderer, &top);
   SDL_RenderFillRect(renderer, &bottom);
   SDL_RenderFillRect(renderer, &left_edge);
@@ -1366,11 +1373,11 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
       layout_.radar_panel, static_cast<std::int16_t>(playfield.x));
 
   // Target-status poll (NovaUi_RefreshGameplayPanels 0x0045d320): toggles the
-  // blink phase every >= 15 ms poll, which also re-marks the radar dirty
-  // (i.e. the panel redraws every poll).
+  // blink phase every >= 15 ticks of the original 60 Hz clock (250 ms), which
+  // also re-marks the radar dirty.
   const std::uint32_t now =
       static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
-  if (now - radar_poll_ms_ >= 15) {
+  if (now - radar_poll_ms_ >= kRadarBlinkHalfPeriodMs) {
     radar_poll_ms_ = now;
     radar_blink_phase_ =
         static_cast<std::int16_t>((radar_blink_phase_ + 1) & 1);
@@ -1466,17 +1473,18 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
         const bool planet = (st->flags & 0x10U) == 0U &&
                             (st->availability_flags & 0x3000U) == 0U;
         if (planet) {
-          // Disc radius tier from the spin sprite half-span
+          // Disc radius tier from the spin sprite's full frame height
           // (Sprite_GetFrameFullHeight 0x00462390, default 0x20).
-          std::int16_t half_span = kRadarDefaultHalfSpan;
+          std::int16_t frame_height = kRadarDefaultFrameHeight;
           if (sprite_store_ != nullptr) {
             const SpriteAsset *set = sprite_store_->Spin(
                 renderer, static_cast<std::uint16_t>(st->link_a_id + 1000));
             if (set != nullptr && !set->frames.empty()) {
-              half_span = static_cast<std::int16_t>(set->tile_width / 2);
+              frame_height = static_cast<std::int16_t>(set->tile_height);
             }
           }
-          const int inset = half_span < 200 ? (half_span < 90 ? -1 : -2) : -3;
+          const int inset =
+              frame_height < 200 ? (frame_height < 90 ? -1 : -2) : -3;
           HudPanelRect rect{static_cast<std::int16_t>(bx),
                             static_cast<std::int16_t>(by),
                             static_cast<std::int16_t>(bx),
@@ -1489,7 +1497,7 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
             DrawRadarDisc(renderer, rect);
           }
         } else {
-          // Stations / hypergates / wormholes: hollow 3x3 box.
+          // Stations / hypergates / wormholes: 2x2 QuickDraw frame.
           HudPanelRect rect{static_cast<std::int16_t>(bx - 1),
                             static_cast<std::int16_t>(by - 1),
                             static_cast<std::int16_t>(bx + 1),
@@ -1518,15 +1526,14 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
           continue;
         }
         const auto [bx, by] = blip_pos(ship.pos_x, ship.pos_y);
-        SDL_Color color = bright;
-        if (iff) {
-          if (state.player.primary_target_ship_slot ==
-                  static_cast<std::int16_t>(slot) &&
-              radar_blink_phase_ != 0) {
-            color = kRadarTargetBlinkColor;
-          } else {
-            color = Ship_RadarDisplayColor(state, ship);
-          }
+        // Without IFF, ordinary contacts are DimRadar and the selected ship
+        // flashes BrightRadar. With IFF, it flashes grey over its relation
+        // colour instead (NovaUi_DrawStellarRadarPanel 0x0045d600).
+        const bool selected = state.player.primary_target_ship_slot ==
+                              static_cast<std::int16_t>(slot);
+        SDL_Color color = iff ? Ship_RadarDisplayColor(state, ship) : dim;
+        if (selected && radar_blink_phase_ != 0) {
+          color = iff ? kRadarTargetBlinkColor : bright;
         }
         SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
         const ShipClass *cls = state.scenario.Ship(

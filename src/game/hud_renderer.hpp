@@ -70,7 +70,7 @@ public:
   void Draw(SdlPlatform &platform, const GameState &state);
 
   // Non-owning pointer to the spaceflight view's sprite store, used to
-  // resolve each stellar body's spin sprite half-span for the radar blip
+  // resolve each stellar body's spin sprite full height for the radar blip
   // size tiers (Sprite_GetFrameFullHeight 0x00462390 on the loaded spin set).
   void AttachSpriteStore(const SpriteStore *store) { sprite_store_ = store; }
 
@@ -112,7 +112,7 @@ private:
   // --- Stellar radar state (NovaUi_DrawStellarRadarPanel 0x0045d600) -----
   const SpriteStore *sprite_store_ = nullptr;
   // Ghidra g_last_target_status_poll_tick / g_target_status_blink_phase
-  // (0x007cab74 / 0x007cab6c): the >= 15 ms target-status poll cadence that
+  // (0x007cab74 / 0x007cab6c): the >= 15-tick target-status poll cadence that
   // toggles the blink phase inside NovaUi_RefreshGameplayPanels (0x0045d320).
   std::uint32_t radar_poll_ms_ = 0;
   std::int16_t radar_blink_phase_ = 0;
