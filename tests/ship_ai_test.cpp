@@ -1467,6 +1467,67 @@ TEST_CASE("capture-approach drive boards a disabled ship end-to-end",
   CHECK(!game::NovaAiShip_IsDisabled(state, victim));
 }
 
+TEST_CASE("capture warship abandons only a disabled high-AI target",
+          "[ai][boarding]") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int ship_class = FindClassIndex(state, [](const game::ShipClass &c) {
+    return c.base_armor >= 30 && c.default_ai_behavior > 2;
+  });
+  REQUIRE(ship_class >= 0);
+
+  int secondary_free_energy_bank = -1;
+  for (std::size_t w = 0; w < state.scenario.weapons.size(); ++w) {
+    if (state.scenario.weapons[w].ammo_type >= -1000 &&
+        state.scenario.weapons[w].ammo_type <= -1) {
+      secondary_free_energy_bank = static_cast<int>(w);
+      break;
+    }
+  }
+  REQUIRE(secondary_free_energy_bank >= 0);
+  state.scenario.weapons[static_cast<std::size_t>(secondary_free_energy_bank)]
+      .flags_secondary |= 0x1000U;
+
+  const int attacker_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  const int target_slot = game::NovaShip_AllocateShipSlot(state, 0, 0);
+  REQUIRE(attacker_slot > 0);
+  REQUIRE(target_slot > 0);
+
+  game::Ship &attacker = state.ShipAt(static_cast<std::size_t>(attacker_slot));
+  attacker.ship_class_id = static_cast<std::int16_t>(ship_class);
+  attacker.armor_points = static_cast<float>(
+      state.scenario.ships[static_cast<std::size_t>(ship_class)].base_armor);
+  attacker.ai_state_code = 4;
+  attacker.primary_target_ship_slot = static_cast<std::int16_t>(target_slot);
+  attacker.npc_weapon_count_by_class[static_cast<std::size_t>(
+      secondary_free_energy_bank)] = 1;
+
+  game::Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
+  target.ship_class_id = static_cast<std::int16_t>(ship_class);
+  const float target_max_armor = static_cast<float>(
+      state.scenario.ships[static_cast<std::size_t>(ship_class)].base_armor);
+  target.armor_points = target_max_armor;
+
+  REQUIRE_FALSE(
+      game::NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, attacker));
+  REQUIRE(game::NovaWeapon_ClassifyAmmoReadiness(state, attacker) == 0);
+  REQUIRE_FALSE(game::NovaAiShip_IsDisabled(state, target));
+  game::NovaAi_UpdateBehavior0x03CaptureVariant(state,
+                                                attacker,
+                                                /*now_ms=*/0);
+  CHECK(attacker.ai_state_code == 4);
+  CHECK(attacker.primary_target_ship_slot == target_slot);
+
+  target.armor_points = target_max_armor * 0.25F;
+  REQUIRE(game::NovaAiShip_IsDisabled(state, target));
+  game::NovaAi_UpdateBehavior0x03CaptureVariant(state,
+                                                attacker,
+                                                /*now_ms=*/0);
+  CHECK(attacker.ai_state_code == 0);
+  CHECK(attacker.primary_target_ship_slot == -1);
+}
+
 // End-to-end assist approach (Ghidra 0x00410c70 entry -> 0x00405590 state 0xf
 // -> 0x00408150 mode 0xf): a hailed helper targeting a disabled player
 // velocity-matches, latches the player on arrival, then the assist arm clears

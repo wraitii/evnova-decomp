@@ -2309,7 +2309,8 @@ void NovaAi_UpdateBehavior0x03CaptureVariant(GameState &state,
     const Ship &target = state.ShipAt(target_slot);
     const ShipClass *target_class = state.scenario.Ship(
         static_cast<std::int16_t>(target.ship_class_id + 0x80));
-    if ((target_class != nullptr && target_class->default_ai_behavior > 2) &&
+    if (NovaAiShip_IsDisabled(state, target) &&
+        (target_class != nullptr && target_class->default_ai_behavior > 2) &&
         ship.primary_target_ship_slot != 0 && target.post_hit_mode_hint < 0 &&
         (!NovaWeapon_HasAnyFireableNonSecondaryWeapon(state, ship) ||
          NovaWeapon_ClassifyAmmoReadiness(state, ship) == 2)) {
