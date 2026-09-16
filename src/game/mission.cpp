@@ -3266,12 +3266,27 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
       stellar.destroyed_days_remaining = -1;
     }
   }
+  // Active-rank daily salary (0x00466d63): for each active + defined rank with
+  // a nonzero Salary, pay it unless the player is already at/above SalaryCap
+  // (a cap of 0 or -1 means uncapped); clamp credits back to >= 0 after each
+  // payment. The clamp only runs on the paid arm, mirroring the original.
+  for (const RankDef &rank : state.scenario.ranks) {
+    if (!rank.active || !rank.defined || rank.salary == 0) {
+      continue;
+    }
+    const std::int32_t salary = static_cast<std::int32_t>(rank.salary);
+    const std::int32_t cap = static_cast<std::int32_t>(rank.salary_cap);
+    if (state.player.credits < cap || cap < 1) {
+      state.player.credits += salary;
+    }
+    if (state.player.credits < 0) {
+      state.player.credits = 0;
+    }
+  }
   // Ship/outfit availability rerolls (the driver's tail): every ship class
   // gets fresh 1..100 licensed threshold/limit rolls, every outfit a fresh
   // 1..100 stock roll. The per-system reinforcement cooldown (SystemDef
   // +0xC4 reinf_cooldown_days, printed as dude_prob +0x1c) is ticked above.
-  // TODO(decomp) skipped: the active-rank daily salary (ränk Salary) is not
-  // modelled.
   const std::size_t ship_count =
       std::min(state.scenario.ships.size(), static_cast<std::size_t>(0x300));
   for (std::size_t i = 0; i < ship_count; ++i) {

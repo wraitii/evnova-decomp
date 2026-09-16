@@ -21,10 +21,13 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace game {
 
@@ -149,6 +152,144 @@ std::string MiscString(std::uint16_t entry_1based, std::string_view fallback) {
   }
   NovaLog::Todo("player-info: missing STR# 0x7d2 entry 0x{:x}", entry_1based);
   return std::string(fallback);
+}
+
+// Honors list glue from 0x0049c050. The original prints the rank names first
+// (each followed by "," when `printed <= total-1` and " and " (STR# 0x7d2
+// 0x188) only at `printed == total-1`), then the outfit entries (each followed
+// by "," when `printed <= total-1`, never "and"). `total` is the combined
+// entry count, so the "and" lands before the final entry only when that entry
+// is a rank; a lone rank+outfit pair renders "A, and B" (a quirk kept here).
+std::string JoinHonorsEntries(const std::vector<std::string> &rank_names,
+                              const std::vector<std::string> &outfits) {
+  std::string out;
+  const std::size_t total = rank_names.size() + outfits.size();
+  std::size_t printed = 0;
+  for (const std::string &name : rank_names) {
+    out += name;
+    ++printed;
+    if (printed <= total - 1) {
+      out += ",";
+    }
+    if (total - 1 <= printed) {
+      if (printed != total - 1) {
+        continue;
+      }
+      out += " ";
+      out += MiscString(kStrAnd, "and");
+    }
+    out += " ";
+  }
+  for (const std::string &entry : outfits) {
+    out += entry;
+    ++printed;
+    if (printed <= total - 1) {
+      out += ", ";
+    }
+  }
+  return out;
+}
+
+// Extras list glue (0x0049c050): comma only when there are 3+ entries (two
+// items render "A and B", no Oxford comma), " and " before the final entry.
+std::string JoinExtrasEntries(const std::vector<std::string> &entries) {
+  std::string out;
+  const std::size_t total = entries.size();
+  for (std::size_t i = 0; i < total; ++i) {
+    out += entries[i];
+    const std::size_t printed = i + 1;
+    if (printed <= total - 1 && total > 2) {
+      out += ",";
+    }
+    if (printed < total - 1) {
+      out += " ";
+    } else if (printed == total - 1) {
+      out += " ";
+      out += MiscString(kStrAnd, "and");
+      out += " ";
+    }
+  }
+  return out;
+}
+
+// One grouped outfit entry for the Extras/Honors lists. `index` is the
+// similar_to representative (first same-LCName outfit) and `count` the summed
+// owned total.
+struct OutfitSummaryGroup {
+  std::size_t index = 0;
+  std::int16_t count = 0;
+};
+
+// Builds the Extras (rank_outfits=false) or Honors (rank_outfits=true) outfit
+// groups (0x0049c050): owned outfits with a non-empty LCName, filtered by the
+// 0x2000 flag, grouped via similar_to, ordered by the representative's
+// DisplayWeight descending (stable, ascending slot on ties; the original scans
+// slots ascending and emits the current weight tier in one pass).
+std::vector<OutfitSummaryGroup>
+CollectOutfitSummaryGroups(const GameState &state, bool rank_outfits) {
+  std::array<std::int16_t, 0x200> counts{};
+  const std::size_t outfit_count = std::min(
+      state.inventory.outfit_owned_count.size(), state.scenario.outfits.size());
+  for (std::size_t i = 0; i < outfit_count; ++i) {
+    const std::int16_t owned = state.inventory.outfit_owned_count[i];
+    if (owned <= 0) {
+      continue;
+    }
+    const Outfit &outfit = state.scenario.outfits[i];
+    if (outfit.lc_name.empty()) {
+      continue;
+    }
+    if (((outfit.flags & 0x2000U) != 0U) != rank_outfits) {
+      continue;
+    }
+    std::size_t representative = i;
+    if (outfit.similar_to >= 0 &&
+        static_cast<std::size_t>(outfit.similar_to) < i) {
+      representative = static_cast<std::size_t>(outfit.similar_to);
+    }
+    counts[representative] =
+        static_cast<std::int16_t>(counts[representative] + owned);
+  }
+  std::vector<OutfitSummaryGroup> groups;
+  for (std::size_t i = 0; i < counts.size(); ++i) {
+    if (counts[i] > 0) {
+      groups.push_back(OutfitSummaryGroup{i, counts[i]});
+    }
+  }
+  std::stable_sort(
+      groups.begin(),
+      groups.end(),
+      [&](const OutfitSummaryGroup &a, const OutfitSummaryGroup &b) {
+        return state.scenario.outfits[a.index].display_weight >
+               state.scenario.outfits[b.index].display_weight;
+      });
+  return groups;
+}
+
+// Count word shared by the Extras and Honors lists (0x0049c050): 1 -> "a/an"
+// (vowel test on the LCName first letter, MWRuntime_FUN_004d6230), 2/3 ->
+// STR# 0x89 0x1e/0x1f ("two"/"three"), 4+ -> decimal digits.
+std::string OutfitListCountWord(std::int16_t count, std::string_view lc_name) {
+  if (count == 1) {
+    const char first = !lc_name.empty() ? lc_name.front() : '\0';
+    const bool vowel = first == 'a' || first == 'e' || first == 'i' ||
+                       first == 'o' || first == 'u';
+    return MiscString(vowel ? kStrAn : kStrA, "a");
+  }
+  if (count == 2 || count == 3) {
+    if (auto word = NovaHud_LoadStringEntry(
+            0x89, static_cast<std::uint16_t>(count + 0x1c))) {
+      return *word;
+    }
+  }
+  return std::to_string(count);
+}
+
+std::string FormatOutfitSummaryGroup(const GameState &state,
+                                     const OutfitSummaryGroup &group) {
+  const Outfit &outfit = state.scenario.outfits[group.index];
+  return OutfitListCountWord(group.count, outfit.lc_name) + " " +
+         (group.count == 1 ? outfit.lc_name : outfit.lc_plural);
 }
 
 // The strip tables (DAT_007d830e etc.) store 0-based STR# 0x96 indices (the
@@ -694,49 +835,22 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
     }
   }
 
-  // Extras text: owned non-0x2000 outfits, count words + plural names, then
-  // the ship trade-in footer. The original groups entries by the similar_to
-  // chain (OutfitDef +(-10)) and orders groups by cost descending; the
-  // scenario model carries neither similar_to nor a stable display order, so
-  // each owned outfit lists itself (a group of one renders identically) in id
-  // order.
-  // TODO(decomp(0x0049c050)): similar_to grouping + cost ordering.
+  // Extras text (0x7d6278, 0x0049c050): owned non-0x2000 outfits grouped by
+  // similar_to and ordered by DisplayWeight descending, then the ship
+  // trade-in footer.
   {
-    std::string extras;
-    int total = 0;
-    for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size();
-         i++) {
-      const std::int16_t owned = state.inventory.outfit_owned_count[i];
-      if (owned <= 0) {
-        continue;
+    const auto groups =
+        CollectOutfitSummaryGroups(state, /*rank_outfits=*/false);
+    if (!groups.empty()) {
+      std::vector<std::string> entries;
+      entries.reserve(groups.size());
+      for (const OutfitSummaryGroup &group : groups) {
+        entries.push_back(FormatOutfitSummaryGroup(state, group));
       }
-      const Outfit &outfit = state.scenario.outfits[i];
-      if ((outfit.flags & 0x2000) != 0) {
-        continue;
-      }
-      if (total > 0) {
-        extras += ", ";
-      }
-      // Count word: a/an (vowel test on the lowercase name via
-      // MWRuntime_FUN_004d6230), "two"/"three" from STR# 0x89 0x1e/0x1f,
-      // digits above.
-      if (owned == 1) {
-        const char first =
-            !outfit.lc_name.empty() ? outfit.lc_name.front() : '\0';
-        const bool vowel = first == 'a' || first == 'e' || first == 'i' ||
-                           first == 'o' || first == 'u';
-        extras += MiscString(vowel ? kStrAn : kStrA, "a") + " ";
-      } else {
-        extras += std::to_string(owned) + " ";
-      }
-      extras += owned == 1 ? outfit.lc_name : outfit.lc_plural;
-      total++;
-    }
-    if (total > 0) {
       // Ghidra 0x0049c050: the list ends with ".\r\r" and, when the ship's
       // trade-in is positive, the STR# 0x7d2 0x111 label + grouped quantity +
       // "credits" word (base trade-in, before store scaling).
-      extras += ".";
+      std::string extras = JoinExtrasEntries(entries) + ".";
       const std::int32_t trade_in = Ship_ComputeTradeInValue(state);
       if (trade_in > 0) {
         extras += "\r\r" +
@@ -748,33 +862,38 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
     }
   }
 
-  // Honors text: rank badges (rank-def name strings, u16 Weight sort key at
-  // g_rank_defs+0x04) are not yet built here even though the RankDef table is
-  // now modelled (GameState.scenario.ranks); only the 0x2000-flag "ranks"
-  // outfits are listed with the same count machinery. TODO(decomp(0x0049c050)):
-  // badge names from the active rank records.
+  // Honors text (0x7d7278, 0x0049c050): the active + defined rank full names
+  // first (record name at +0x1e, non-empty), ordered by Weight descending
+  // (higher weight displayed first per the Bible), then the owned 0x2000-flag
+  // ("Show as Rank in player info") outfits grouped by similar_to and ordered
+  // by DisplayWeight descending. Entries share the 0x0049c050 list glue
+  // (JoinHonorsEntries).
   {
-    std::string honors;
-    int total = 0;
-    for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size();
-         i++) {
-      const std::int16_t owned = state.inventory.outfit_owned_count[i];
-      if (owned <= 0) {
-        continue;
+    std::vector<const RankDef *> ranked;
+    for (const RankDef &rank : state.scenario.ranks) {
+      if (rank.active && rank.defined && !rank.full_name.empty()) {
+        ranked.push_back(&rank);
       }
-      const Outfit &outfit = state.scenario.outfits[i];
-      if ((outfit.flags & 0x2000) == 0) {
-        continue;
-      }
-      if (!honors.empty()) {
-        honors += ", ";
-      }
-      honors += std::to_string(owned) + " " +
-                (owned == 1 ? outfit.lc_name : outfit.lc_plural);
-      total++;
     }
-    if (total > 0) {
-      texts.honors = MiscString(kStrHonorsHeader, "") + "\r\r" + honors;
+    // The original scans slots ascending and emits the current weight tier in
+    // one pass, so equal weights keep slot order.
+    std::stable_sort(
+        ranked.begin(), ranked.end(), [](const RankDef *a, const RankDef *b) {
+          return a->weight > b->weight;
+        });
+    std::vector<std::string> rank_names;
+    rank_names.reserve(ranked.size());
+    for (const RankDef *rank : ranked) {
+      rank_names.push_back(rank->full_name);
+    }
+    std::vector<std::string> outfits;
+    for (const OutfitSummaryGroup &group :
+         CollectOutfitSummaryGroups(state, /*rank_outfits=*/true)) {
+      outfits.push_back(FormatOutfitSummaryGroup(state, group));
+    }
+    if (!rank_names.empty() || !outfits.empty()) {
+      texts.honors = MiscString(kStrHonorsHeader, "") + "\r\r" +
+                     JoinHonorsEntries(rank_names, outfits);
     }
   }
 

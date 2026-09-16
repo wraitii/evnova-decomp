@@ -61,6 +61,15 @@ NovaLanded_ScaledStorePrice(std::int32_t base_price,
                             std::int16_t item_tech,
                             std::int16_t stellar_tech,
                             float scale = 1.0F);
+// Ghidra DAT_007d4bbc / DAT_007d4bc0, seeded in
+// NovaUi_RunTravelDestinationInteractionLoop (0x00491f9b..0x00492038). Both
+// rank-price globals start at 1.0 and are multiplied by
+// `PriceMod * 0.01` for every active + defined rank allied to the landed
+// stellar's government; the original computes the two identically, so the port
+// exposes one scale. Returns 1.0 at government-less stellars or when no allied
+// rank applies.
+[[nodiscard]] float NovaLanded_RankPriceScale(const GameState &state,
+                                              std::int16_t stellar_id);
 [[nodiscard]] std::int32_t NovaLanded_OutfitPrice(const GameState &state,
                                                   std::int16_t stellar_id,
                                                   std::int16_t outfit_id);

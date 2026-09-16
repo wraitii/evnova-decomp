@@ -1363,6 +1363,15 @@ void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,
     contribute_lo |= cls->contribute_lo;
     contribute_hi |= cls->contribute_hi;
   }
+  // Active + defined ranks OR in their 64-bit mask (Mission_AccumulatePlayer-
+  // ContributeMask 0x0046cca0 rank arm). `rank.defined` is the loader's
+  // +0x01 latch; an inactive-but-defined rank contributes nothing.
+  for (const RankDef &rank : state.scenario.ranks) {
+    if (rank.active && rank.defined) {
+      contribute_lo |= rank.contribute_lo;
+      contribute_hi |= rank.contribute_hi;
+    }
+  }
   // Owned outfits contribute while at least one unit is held.
   for (std::size_t i = 0; i < state.inventory.outfit_owned_count.size() &&
                           i < state.scenario.outfits.size();
@@ -1373,9 +1382,7 @@ void NovaOutfit_AccumulatePlayerContributeMask(const GameState &state,
     }
   }
   // Active crön events contribute once past their pre-holdoff wait
-  // (Mission_AccumulatePlayerContributeMask 0x0046cca0 cron arm). The
-  // original's rank (g_rank_defs) arm is skipped there too -- ranks are not
-  // modelled (TODO(decomp)).
+  // (Mission_AccumulatePlayerContributeMask 0x0046cca0 cron arm).
   const std::size_t cron_count = std::min(state.scenario.cron_events.size(),
                                           state.cron_event_states.size());
   for (std::size_t i = 0; i < cron_count; ++i) {

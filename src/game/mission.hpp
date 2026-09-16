@@ -346,9 +346,8 @@ void System_UpdateDisasterStates(GameState &state);
 // per-stellar garrison resupply + schedule countdown, and rerolls ship/outfit
 // availability. The per-system reinforcement cooldown (SystemDef +0xC4
 // reinf_cooldown_days; the decompiler also prints it as dude_prob +0x1c) is
-// ticked via state.reinforcement_retrigger_delay. TODO(decomp) skipped slice:
-// the active-rank daily salary (ränk Salary, g_rank_defs +0x0c) is not
-// modelled.
+// ticked via state.reinforcement_retrigger_delay. The active-rank daily
+// salary (ränk Salary, runtime +0x0c) is paid here (0x00466d63).
 void Mission_TickDailyWorldUpdate(GameState &state);
 
 // Ghidra 0x00468450 NovaText_FormatDateString / 0x00468600

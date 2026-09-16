@@ -2,6 +2,8 @@
 
 #include "game/game_state.hpp"
 #include "game/government.hpp"
+#include "game/mission.hpp"
+#include "game/outfit.hpp"
 #include "game/rank.hpp"
 #include "game/scenario_data.hpp"
 
@@ -200,6 +202,59 @@ TEST_CASE("faction combat event floods reputation through adjacency",
   CHECK(state.system_reputation[0] == -7);
   // 7 * 0.65 = 4.55, truncated toward zero (x87 FIST + residual correction).
   CHECK(state.system_reputation[1] == -4);
+}
+
+// Active + defined ranks OR their Contribute mask into the player's mask
+// (Mission_AccumulatePlayerContributeMask 0x0046cca0 rank arm).
+TEST_CASE("active ranks contribute their mask", "[rank][contribute]") {
+  GameState state = RankState();
+  state.scenario.ranks[0].defined = true;
+  state.scenario.ranks[0].active = true;
+  state.scenario.ranks[0].contribute_lo = 0x4;
+  state.scenario.ranks[0].contribute_hi = 0x8;
+  state.scenario.ranks[1].defined = true;
+  state.scenario.ranks[1].active = false; // inactive -> ignored
+  state.scenario.ranks[1].contribute_lo = 0x10;
+  state.scenario.ranks[2].active = true; // undefined -> ignored
+  state.scenario.ranks[2].contribute_lo = 0x20;
+
+  std::uint32_t lo = 0;
+  std::uint32_t hi = 0;
+  game::NovaOutfit_AccumulatePlayerContributeMask(state, lo, hi);
+  CHECK((lo & 0x4U) != 0U);
+  CHECK((hi & 0x8U) != 0U);
+  CHECK((lo & 0x10U) == 0U);
+  CHECK((lo & 0x20U) == 0U);
+}
+
+// Active-rank daily salary (Mission_TickDailyWorldUpdate 0x00466d63).
+TEST_CASE("active rank daily salary is paid up to the cap", "[rank][salary]") {
+  GameState state = RankState();
+  state.scenario.ranks[0].defined = true;
+  state.scenario.ranks[0].active = true;
+  state.scenario.ranks[0].salary = 200;
+  state.scenario.ranks[0].salary_cap = 0; // uncapped
+  state.player.credits = 1000;
+  game::Mission_TickDailyWorldUpdate(state);
+  CHECK(state.player.credits == 1200);
+
+  // At/above a positive cap the salary stops.
+  state.scenario.ranks[0].salary_cap = 1500;
+  state.player.credits = 1500;
+  game::Mission_TickDailyWorldUpdate(state);
+  CHECK(state.player.credits == 1500);
+
+  // 0xffffffff reads as signed -1, which the original treats as uncapped.
+  state.scenario.ranks[0].salary_cap = 0xffffffffU;
+  state.player.credits = 5000;
+  game::Mission_TickDailyWorldUpdate(state);
+  CHECK(state.player.credits == 5200);
+
+  // An inactive rank pays nothing.
+  state.scenario.ranks[0].active = false;
+  state.player.credits = 100;
+  game::Mission_TickDailyWorldUpdate(state);
+  CHECK(state.player.credits == 100);
 }
 
 } // namespace

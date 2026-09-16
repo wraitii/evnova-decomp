@@ -605,6 +605,16 @@ struct Outfit {
   // marker retained across player-ship replacement.
   bool persistent_on_ship_swap = false;
 
+  // Runtime OutfitDef +0x20 (name - 0x0a): similar_to. Ship_InitGameplayData-
+  // Tables (0x004b0c20) seeds it to the slot's own index; the loader's
+  // name-match pass (NovaData_LoadScenarioResourceTables 0x004bd3c0) rewrites
+  // it to the first earlier outfit with an identical LCName. The player-info
+  // Extras/Honors lists group owned outfits by this representative; -1 or a
+  // forward reference is treated as self by the consumers. Computed in
+  // ScenarioData::LoadFromArchives; -1 is the default for scenarios built
+  // without that pass (e.g. synthetic unit-test data).
+  std::int16_t similar_to = -1;
+
   std::string short_name; // ShortName (dialog menu label)
   std::string lc_name;    // LCName (lowercase singular)
   std::string lc_plural;  // LCPlural (lowercase plural)
@@ -1143,12 +1153,16 @@ struct RankDef {
   std::int16_t government_id = -1;
   // +0x08 PriceMod (payload +0x04); the loader floors it at 100.
   std::int16_t price_mod = 100;
-  // +0x0c/+0x10 Bible Contribute 64-bit mask (payload +0x06/+0x0a).
-  std::uint32_t contribute_lo = 0;
-  std::uint32_t contribute_hi = 0;
-  // +0x14/+0x18 Bible Salary / SalaryCap (payload +0x0e/+0x12).
+  // +0x0c/+0x10 Bible Salary / SalaryCap (payload +0x06/+0x0a). Paid per
+  // game-day by the world-update pass (0x00466d63) while the rank is active;
+  // a SalaryCap of 0/-1 means uncapped.
   std::uint32_t salary = 0;
   std::uint32_t salary_cap = 0;
+  // +0x14/+0x18 Bible Contribute 64-bit mask (payload +0x0e/+0x12), OR-ed into
+  // the player's mask while the rank is active (Mission_AccumulatePlayer-
+  // ContributeMask 0x0046cca0).
+  std::uint32_t contribute_lo = 0;
+  std::uint32_t contribute_hi = 0;
   // +0x1c Bible status flags: 0x0001 deactivate same-govt on activate, 0x0002
   // same-govt on deactivate, 0x0004 destroy/disable revokes, 0x0008 permanent,
   // 0x0010 lower-weight on activate, 0x0020 lower-weight on deactivate, 0x0040

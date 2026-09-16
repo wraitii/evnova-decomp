@@ -1205,8 +1205,13 @@ TEST_CASE("rank defs decode from the r.nk payload", "[scenario][rank]") {
   CHECK(commander->weight == 1);
   CHECK(commander->government_id == 0); // payload govt 0x80 rebased -0x80
   CHECK(commander->price_mod == 85);
-  CHECK(commander->salary == 123);
+  // ResForge TMPL order: Salary/SalaryCap precede the Contribute mask. The
+  // daily-salary pass (0x00466d63) and Mission_AccumulatePlayerContributeMask
+  // (0x0046ccd6) pin payload +0x06 = Salary and +0x0e = Contribute.
+  CHECK(commander->salary == 200);
   CHECK(commander->salary_cap == 0);
+  CHECK(commander->contribute_lo == 0x7b);
+  CHECK(commander->contribute_hi == 0);
   CHECK(commander->flags == 0x0b08);
   // The record name is the full name with the ';'-subtitle stripped.
   CHECK(commander->full_name == "Federation Naval Rank of Commander");
@@ -1225,6 +1230,19 @@ TEST_CASE("rank defs decode from the r.nk payload", "[scenario][rank]") {
   REQUIRE(absent != nullptr);
   CHECK_FALSE(absent->defined);
   CHECK(absent->id == 0x20);
+}
+
+// The loader's outfit name-match pass (0x004bd3c0) groups same-LCName outfits
+// via similar_to. "Wraith Cannon" ships at o\x9ftf 0x97/0xfe/0x116/0x159
+// (slots 0x17/0x7e/0x96/0xd9), so each later slot points at the first.
+TEST_CASE("outfit similar_to groups same-named outfits", "[scenario][outfit]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+  for (const std::int16_t id : {0x97, 0xfe, 0x116, 0x159}) {
+    const Outfit *wraith = data.Outfit(id);
+    REQUIRE(wraith != nullptr);
+    CHECK(wraith->similar_to == 0x17);
+  }
 }
 
 } // namespace game

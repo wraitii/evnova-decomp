@@ -1003,15 +1003,20 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
 // ---------------------------------------------------------------------------
 // r\x8ank (rank / honor) decode
 // ---------------------------------------------------------------------------
-// Field map verified against Nova Data 2's r\x8ank payloads (ids 0x80..0x9e)
-// and the loader's rank pass (NovaData_LoadScenarioResourceTables 0x004bd3c0):
-// weight (i16 +0x00), affiliated government (i16 +0x02; <0x80 -> -1, else
-// rebased -0x80), PriceMod (i16 +0x04, floored at 100), Contribute 64-bit
-// (u32 +0x06 / +0x0a), Salary / SalaryCap (u32 +0x0e / +0x12), status flags
-// (u16 +0x16), then the ConvName (+0x18) and ShortName (+0x58) C strings. The
-// record name (metadata) is the full name; the loader strips its ';' subtitle
-// suffix. The slot index (RankDef::id) is assigned by the loader table
-// initializer, not carried in the payload.
+// Field map verified against Nova Data 2's r\x8ank payloads (ids 0x80..0x9e),
+// the ResForge TMPL field order (Weight, Govt, Price Mod, Salary, Salary Cap,
+// Contribute, Flags, Conv Name, Short Name), and the loader's rank pass
+// (NovaData_LoadScenarioResourceTables 0x004bd3c0): weight (i16 +0x00),
+// affiliated government (i16 +0x02; <0x80 -> -1, else rebased -0x80), PriceMod
+// (i16 +0x04, floored at 100), Salary / SalaryCap (u32 +0x06 / +0x0a),
+// Contribute 64-bit (u32 +0x0e / +0x12), status flags (u16 +0x16), then the
+// ConvName (+0x18) and ShortName (+0x58) C strings. The record name
+// (metadata) is the full name; the loader strips its ';' subtitle suffix. The
+// slot index (RankDef::id) is assigned by the loader table initializer, not
+// carried in the payload. Cross-checked at the consumers: the daily-salary
+// pass (0x00466d63) reads runtime +0x0c/+0x10 (= payload +0x06/+0x0a) and
+// Mission_AccumulatePlayerContributeMask (0x0046ccd6) reads +0x14/+0x18
+// (= payload +0x0e/+0x12).
 [[nodiscard]] RankDef DecodeRank(std::span<const std::byte> bytes) {
   RankDef def;
   def.defined = true;
@@ -1023,10 +1028,10 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   if (def.price_mod < 1) {
     def.price_mod = 100;
   }
-  def.contribute_lo = ReadBe32(bytes, 0x06);
-  def.contribute_hi = ReadBe32(bytes, 0x0a);
-  def.salary = ReadBe32(bytes, 0x0e);
-  def.salary_cap = ReadBe32(bytes, 0x12);
+  def.salary = ReadBe32(bytes, 0x06);
+  def.salary_cap = ReadBe32(bytes, 0x0a);
+  def.contribute_lo = ReadBe32(bytes, 0x0e);
+  def.contribute_hi = ReadBe32(bytes, 0x12);
   def.flags = ReadBe16(bytes, 0x16);
   def.conv_name = ReadCStringBounded(bytes, 0x18, 0x40);
   def.short_name = ReadCStringBounded(bytes, 0x58, 0x40);
@@ -1771,6 +1776,24 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng) {
       outfit.name = res->name; // record name (HUD/UI display)
       outfits[static_cast<std::size_t>(id) - 0x80] = std::move(outfit);
       ++loaded_outfits;
+    }
+  }
+  // Loader name-match pass (NovaData_LoadScenarioResourceTables 0x004bd3c0):
+  // seed each slot's similar_to to itself, then point every outfit with a
+  // non-empty LCName at the first earlier outfit sharing that LCName. The
+  // player-info Extras/Honors grouping consumes this representative.
+  for (std::size_t i = 0; i < outfits.size(); ++i) {
+    outfits[i].similar_to = static_cast<std::int16_t>(i);
+  }
+  for (std::size_t i = 0; i < outfits.size(); ++i) {
+    if (outfits[i].lc_name.empty()) {
+      continue;
+    }
+    for (std::size_t j = 0; j < i; ++j) {
+      if (outfits[j].lc_name == outfits[i].lc_name) {
+        outfits[i].similar_to = static_cast<std::int16_t>(j);
+        break;
+      }
     }
   }
   for (std::int32_t id = 0x80; id <= 0x17f; ++id) {
