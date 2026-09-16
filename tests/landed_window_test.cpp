@@ -48,6 +48,87 @@ TEST_CASE("Outfitter buying respects the ship class contribute baseline",
   CHECK(state.player.credits == 5'000); // paid the 5000 credit list price
 }
 
+TEST_CASE("Ship replacement rechecks requirements and preserves mutation order",
+          "[landed_store][shipyard]") {
+  game::GameState state;
+  state.scenario.ships.resize(2);
+  state.scenario.stellars.resize(1);
+  state.scenario.outfits.resize(1);
+  state.scenario.weapons.resize(1);
+  state.player.ship_class_id = 0;
+  state.player.ship_name = "Wayfarer";
+  state.player.credits = 1'000;
+  state.scenario.ships[0].cost = 100;
+  state.scenario.ships[0].cargo_holds = 10;
+  state.scenario.ships[0].contribute_lo = 1;
+  state.scenario.ships[1].cost = 500;
+  state.scenario.ships[1].cargo_holds = 5;
+  state.scenario.ships[1].require_lo = 2;
+  state.scenario.ships[1].buy_random = 100;
+
+  CHECK_FALSE(game::NovaLanded_CanBuyShip(state, 0x80, 0x81));
+  state.scenario.ships[0].contribute_lo = 3;
+  state.scenario.ships[1].availability_expr = "b42";
+  CHECK_FALSE(game::NovaLanded_CanBuyShip(state, 0x80, 0x81));
+  state.control.bits.set(42);
+  CHECK(game::NovaLanded_CanBuyShip(state, 0x80, 0x81));
+
+  state.inventory.cargo_bins[0] = 8;
+  state.inventory.junk_counts[0] = 8;
+  state.player.primary_target_ship_slot = 7;
+  state.player.active_weapon_bank_slot = 3;
+  REQUIRE(game::NovaLanded_BuyShip(state, 0x80, 0x81, "Peregrine"));
+  CHECK(state.player.ship_class_id == 1);
+  CHECK(state.player.ship_name == "Peregrine");
+  CHECK(state.player.credits == 525); // 25-credit trade-in, then 500 list price
+  CHECK(state.player.primary_target_ship_slot == -1);
+  CHECK(state.player.active_weapon_bank_slot == -1);
+  CHECK(state.inventory.cargo_bins[0] == 8);
+  CHECK(state.inventory.junk_counts[0] == 0);
+  CHECK(state.ship_class_limit_rolls[1] >= 1);
+  CHECK(state.ship_class_limit_rolls[1] <= 100);
+
+  state.player.ship_class_id = 0;
+  state.player.ship_name = "Wayfarer";
+  state.player.credits = 1'000;
+  REQUIRE(game::NovaLanded_BuyShip(state, 0x80, 0x81, ""));
+  CHECK(state.player.ship_name.empty());
+}
+
+TEST_CASE("Cargo transfer uses the unclamped same-system fleet capacity",
+          "[landed_store][shipyard]") {
+  game::GameState state;
+  state.scenario.ships.resize(2);
+  state.player.ship_class_id = 0;
+  state.player.current_system_id = 3;
+  state.scenario.ships[0].cargo_holds = 20'000;
+  state.scenario.ships[1].cargo_holds = 400;
+  state.scenario.ships[1].default_ai_behavior = 0;
+
+  for (std::size_t slot = 1; slot <= 50; ++slot) {
+    game::Ship &escort = state.ShipAt(slot);
+    escort.is_active = true;
+    escort.armor_points = 1.0F;
+    escort.ship_class_id = 1;
+    escort.ship_instance_id = static_cast<std::int16_t>(slot);
+    escort.current_system_id = 3;
+    escort.squad_leader_ship_slot = 0;
+    escort.ai_behavior_code = 6;
+    escort.mission_fleet_slot = -1;
+  }
+  // This otherwise-eligible escort is outside the player's system and is not
+  // part of 0x00469810's denominator.
+  state.ShipAt(50).current_system_id = 4;
+  state.inventory.cargo_bins[0] = 100;
+  state.inventory.junk_counts[0] = 100;
+
+  game::Player_TransferCargoAndJunkToEscortByRatio(state, 0);
+
+  // 20,000 / (20,000 + 49 * 400) = 0.50505..., truncated per item.
+  CHECK(state.inventory.cargo_bins[0] == 50);
+  CHECK(state.inventory.junk_counts[0] == 50);
+}
+
 // The docked landing-description panel is word-wrapped. The wrap must NOT
 // "cumulatively append": each new line must start fresh (with only its own
 // words), never re-embed the already-drained earlier line. Regression for a

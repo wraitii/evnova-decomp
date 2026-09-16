@@ -878,10 +878,20 @@ std::int32_t NovaLanded_ShipPurchasePrice(const GameState &state,
 bool NovaLanded_CanBuyShip(const GameState &state,
                            std::int16_t stellar_id,
                            std::int16_t ship_id) {
-  return IsValidShip(state, ship_id) &&
-         ship_id != state.player.ship_class_id + 0x80 &&
-         state.player.credits >=
-             NovaLanded_ShipPurchasePrice(state, stellar_id, ship_id);
+  const ShipClass *ship = state.scenario.Ship(ship_id);
+  if (!IsValidShip(state, ship_id) || ship == nullptr ||
+      state.scenario.Stellar(stellar_id) == nullptr ||
+      ship_id == state.player.ship_class_id + 0x80 ||
+      state.player.credits <
+          NovaLanded_ShipPurchasePrice(state, stellar_id, ship_id)) {
+    return false;
+  }
+  // 0x00498dc0 rechecks these after selection. This matters to direct callers
+  // even though NovaUi_RebuildShipyardAvailabilityList normally filtered the
+  // same class before it could be selected.
+  return MeetsRequire(state, ship->require_lo, ship->require_hi) &&
+         Mission_CheckReactionConditionSatisfied(state,
+                                                 ship->availability_expr);
 }
 
 // Ghidra 0x00498dc0's escort-hire arm. The multiplier is DAT_00575950,
@@ -905,15 +915,18 @@ std::int32_t NovaLanded_ShipHirePrice(const GameState &state,
                   static_cast<std::int32_t>(static_cast<float>(scaled) * 0.1F));
 }
 
-// Ghidra 0x00498dc0 (hire arm): affordability against the hire price only --
-// no trade-in, no current-class rejection. The Require/Availability gates
-// already ran when the listing was built (0x00469e90).
+// Ghidra 0x00498dc0 (hire arm): affordability against the hire price, followed
+// by the shared Availability recheck. There is no trade-in, current-class
+// rejection, or Require-mask check in this lane.
 bool NovaLanded_CanHireShip(const GameState &state,
                             std::int16_t stellar_id,
                             std::int16_t ship_id) {
-  return IsValidShip(state, ship_id) &&
+  const ShipClass *ship = state.scenario.Ship(ship_id);
+  return IsValidShip(state, ship_id) && ship != nullptr &&
          state.player.credits >=
-             NovaLanded_ShipHirePrice(state, stellar_id, ship_id);
+             NovaLanded_ShipHirePrice(state, stellar_id, ship_id) &&
+         Mission_CheckReactionConditionSatisfied(state,
+                                                 ship->availability_expr);
 }
 
 // Ghidra 0x00492f30's hire-mode confirm arm.
@@ -1110,13 +1123,15 @@ bool NovaLanded_BuyShip(GameState &state,
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
   const ShipClass *new_ship = state.scenario.Ship(ship_id);
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
-  state.player.credits -=
-      NovaLanded_ShipPurchasePrice(state, stellar_id, ship_id);
+  // 0x00492f30 deliberately exposes the trade-in credit to OnRetire before
+  // charging the new hull's full list price. Scripts can observe/mutate the
+  // balance, so replacing this with one net subtraction changes behavior.
+  state.player.credits += NovaLanded_ShipTradeInValue(state, stellar_id);
   NovaLanded_ExecuteControlSet(
       state, old_ship->on_retire_expr, "ship OnRetire");
   state.player.ship_class_id = static_cast<std::int16_t>(ship_id - 0x80);
-  state.player.ship_name.assign(player_ship_name.empty() ? new_ship->short_name
-                                                         : player_ship_name);
+  state.player.credits -= NovaLanded_ShipPrice(state, stellar_id, ship_id);
+  state.player.ship_name.assign(player_ship_name);
   // NovaUi_RunShipyardPurchaseLoop removes deployed behavior-5 craft that
   // belonged to the outgoing player hull before rebuilding its loadout.
   for (std::size_t i = 1; i < GameState::kMaxShips; ++i) {
@@ -1132,19 +1147,42 @@ bool NovaLanded_BuyShip(GameState &state,
   for (std::size_t i = 0; i < new_ship->default_outfit_ids.size(); ++i) {
     const auto id = new_ship->default_outfit_ids[i];
     if (IsValidOutfit(state, id) && new_ship->default_outfit_counts[i] > 0)
-      (void)Outfit_AddInstalledOutfit(
-          state, id, new_ship->default_outfit_counts[i]);
+      state.inventory.outfit_owned_count[static_cast<std::size_t>(id - 0x80)] =
+          static_cast<std::int16_t>(
+              state.inventory
+                  .outfit_owned_count[static_cast<std::size_t>(id - 0x80)] +
+              new_ship->default_outfit_counts[i]);
   }
-  // Player_SwapShipWithEscort (0x00423fa0) seeds the new ship's weapon
-  // banks from its mounted stock weapons, then runs
-  // Weapon_ReconcileOutfitPoolWithWeaponBanks so the stock guns become owned,
-  // sellable outfits. Our ShipClass carries the stock as stock_weapons (the
-  // loader's default_weapon_ammo/secondary mapping), so seed + reconcile here.
-  NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
-  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+  NovaWeapon_RebuildBanksFromOwnedOutfits(state);
+  // The original takes the maximum of the rebuilt inventory bank and every
+  // stock DefaultWeapon value. Secondary stock is stored against AmmoType,
+  // except mode-99 fighter bays which retain the launcher bank index.
+  for (const ShipDefaultWeaponBank &stock : new_ship->stock_weapons) {
+    if (stock.weapon_id < 0x80 || stock.weapon_id > 0x17f)
+      continue;
+    const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
+    auto &count = state.weapon_count_by_class[bank * 100];
+    count =
+        std::max<std::int16_t>(count, std::max<std::int16_t>(0, stock.count));
+    if (stock.ammo_load <= 0)
+      continue;
+    std::size_t secondary_bank = bank;
+    const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
+    if (weapon != nullptr && weapon->weapon_mode_code != 99 &&
+        weapon->ammo_type >= 0 && weapon->ammo_type < 0x100) {
+      secondary_bank = static_cast<std::size_t>(weapon->ammo_type);
+    }
+    auto &secondary =
+        state.weapon_secondary_count_by_class[secondary_bank * 100];
+    secondary = std::max<std::int16_t>(secondary, stock.ammo_load);
+  }
+  Player_TransferCargoAndJunkToEscortByRatio(state, 0);
   state.stat_cache_valid = false;
-  const PlayerEffectiveStats stats = Outfit_ComputePlayerEffectiveStats(state);
   state.player.active_weapon_bank_slot = -1;
+  state.player.primary_target_ship_slot = -1;
+  NovaLanded_ExecuteControlSet(
+      state, new_ship->on_purchase_expr, "ship OnPurchase");
+  const PlayerEffectiveStats stats = Outfit_ComputePlayerEffectiveStats(state);
   state.player.shield_points = stats.max_shield_points;
   state.player.armor_points = stats.max_armor_points;
   state.player.fuel_points = stats.fuel_capacity;
@@ -1152,9 +1190,72 @@ bool NovaLanded_BuyShip(GameState &state,
   state.player.pos_y = static_cast<float>(stellar->pos_y);
   state.player.vel_x = 0.0F;
   state.player.vel_y = 0.0F;
-  NovaLanded_ExecuteControlSet(
-      state, new_ship->on_purchase_expr, "ship OnPurchase");
+  const std::size_t def = static_cast<std::size_t>(ship_id - 0x80);
+  if (def < state.ship_class_limit_rolls.size()) {
+    state.ship_class_limit_rolls[def] = static_cast<std::int16_t>(
+        std::uniform_int_distribution<int>{0, 99}(state.rng) + 1);
+  }
   return true;
+}
+
+// Ghidra 0x00469810 Player_TransferCargoAndJunkToEscortByRatio.
+void Player_TransferCargoAndJunkToEscortByRatio(GameState &state,
+                                                std::int16_t escort_ship_slot) {
+  if (escort_ship_slot < 0 ||
+      escort_ship_slot >= static_cast<std::int16_t>(GameState::kMaxShips)) {
+    return;
+  }
+  const Ship &recipient =
+      state.ShipAt(static_cast<std::size_t>(escort_ship_slot));
+  const ShipClass *recipient_class = state.scenario.Ship(
+      static_cast<std::int16_t>(recipient.ship_class_id + 0x80));
+  const std::int32_t recipient_capacity =
+      escort_ship_slot == 0
+          ? Ship_ComputeShipTotalCargoCapacity(state)
+          : (recipient_class == nullptr ? 0 : recipient_class->cargo_holds);
+  // 0x00469810 computes this denominator inline rather than calling the
+  // clamped Player_ComputeFleetCargoCapacity helper. It includes only
+  // same-system cargo escorts, and exceptionally keeps a destroyed escort in
+  // the sum when that escort is the transfer recipient.
+  std::int32_t fleet_capacity =
+      static_cast<std::int16_t>(Ship_ComputeShipTotalCargoCapacity(state));
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &escort = state.ShipAt(slot);
+    if (!escort.is_active ||
+        (NovaAiShip_IsDestroyed(escort) &&
+         static_cast<std::int16_t>(slot) != escort_ship_slot) ||
+        escort.current_system_id != state.player.current_system_id ||
+        escort.squad_leader_ship_slot != 0 || escort.ai_behavior_code != 6 ||
+        escort.mission_fleet_slot != -1) {
+      continue;
+    }
+    const ShipClass *escort_class = state.scenario.Ship(
+        static_cast<std::int16_t>(escort.ship_class_id + 0x80));
+    if (escort_class != nullptr && escort_class->default_ai_behavior < 3) {
+      fleet_capacity += escort_class->cargo_holds;
+    }
+  }
+  const float ratio = fleet_capacity <= 0
+                          ? 1.0F
+                          : std::min(1.0F,
+                                     static_cast<float>(recipient_capacity) /
+                                         static_cast<float>(fleet_capacity));
+  Ship &destination = state.ShipAt(static_cast<std::size_t>(escort_ship_slot));
+  for (std::size_t i = 0; i < state.inventory.cargo_bins.size(); ++i) {
+    const auto transferred = static_cast<std::int16_t>(
+        std::trunc(static_cast<float>(state.inventory.cargo_bins[i]) * ratio));
+    state.inventory.cargo_bins[i] = static_cast<std::int16_t>(
+        std::max(0, state.inventory.cargo_bins[i] - transferred));
+    destination.cargo_bins[i] = transferred;
+    if (escort_ship_slot == 0)
+      state.inventory.cargo_bins[i] = transferred;
+  }
+  for (std::int16_t &junk : state.inventory.junk_counts) {
+    const auto transferred =
+        static_cast<std::int16_t>(std::trunc(static_cast<float>(junk) * ratio));
+    junk = static_cast<std::int16_t>(std::max(0, junk - transferred));
+  }
+  state.stat_cache_valid = false;
 }
 
 // ---------------------------------------------------------------------------

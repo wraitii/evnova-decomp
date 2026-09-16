@@ -11,8 +11,10 @@
 #include "game/weapon.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <limits>
+#include <random>
 
 namespace {
 
@@ -246,13 +248,19 @@ TEST_CASE("behavior-0x03 acquires a hostile player and pursues") {
   state.player.armor_points = 30.0F;
   state.player.shield_points = 30.0F;
 
+  const auto *system =
+      state.scenario.System(static_cast<std::int16_t>(sys_idx + 0x80));
+  REQUIRE(system != nullptr);
+  REQUIRE(system->government_id >= 0);
+
   const int slot = NovaShip_AllocateShipSlot(
       state, static_cast<std::int16_t>(sys_idx), /*reserved_tail=*/8);
   REQUIRE(slot > 0);
   game::Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
-  ship.ship_class_id = 0;
+  ship.ship_class_id = 0x8d - 0x80;
   ship.ship_instance_id = static_cast<std::int16_t>(slot);
   ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.faction_or_government_id = system->government_id;
   ship.is_active = true;
   ship.ai_behavior_code = 3;
   ship.ai_state_code = 0;
@@ -260,7 +268,13 @@ TEST_CASE("behavior-0x03 acquires a hostile player and pursues") {
   ship.primary_target_ship_slot = -1;
   ship.pos_x = 100.0F;
   ship.pos_y = 0.0F;
-  ship.armor_points = 30.0F;
+  ship.armor_points = 750.0F;
+  ship.shield_points = 800.0F;
+  // Ghidra 0x0040e020 near-player reputation gate: a criminal record in the
+  // ship's own system flags the player within random_ai_render_cadence * 600.
+  state.system_reputation.assign(state.scenario.systems.size(), 0);
+  state.system_reputation[static_cast<std::size_t>(sys_idx)] = -30000;
+  ship.random_ai_render_cadence = 2;
 
   NovaAi_UpdateShipAI(state, ship, /*skip_heavy_ai=*/false, /*now_ms=*/0);
 
@@ -445,6 +459,14 @@ TEST_CASE("assist helper chooses the lowest positive candidate score") {
   candidate.pos_x = 100.0F;
   candidate.pos_y = 0.0F;
 
+  CHECK(NovaAi_FindBestAssistTargetForShip(state, helper, -1) ==
+        candidate_slot);
+
+  // 0x00412090 has no separate destroyed-candidate rejection. A stellar-bound
+  // ship is exempt from the disabled armor gate, so it remains scoreable while
+  // active even with zero armor.
+  candidate.armor_points = 0.0F;
+  candidate.defense_fleet_home_stellar_id = 0x80;
   CHECK(NovaAi_FindBestAssistTargetForShip(state, helper, -1) ==
         candidate_slot);
 }
@@ -1639,14 +1661,16 @@ TEST_CASE(
   // only tests slot activity).
   CHECK(ship.primary_target_ship_slot == target_slot);
 
-  // Outside state 3/4 the gate does not fire and the interim hostile slice
-  // finds no contact, so the target is dropped.
+  // Outside state 3/4 the gate does not fire. A factionless ship runs no
+  // government target pass (the whole 0x0040e020 government block is guarded
+  // by faction != -1), so with a cleared primary the inactive cross-system
+  // target is never re-acquired. (The original leaves a stale primary
+  // untouched here; the behavior supervisor clears inactive targets.)
   ship.ai_state_code = 0;
+  ship.primary_target_ship_slot = -1;
   target.is_active = false;
   game::NovaAi_AcquirePrimaryTarget(state, ship);
-  // The gate no longer retains the inactive target; whatever the interim
-  // hostile slice picks, it is not the retired slot.
-  CHECK(ship.primary_target_ship_slot != target_slot);
+  CHECK(ship.primary_target_ship_slot == -1);
 }
 
 TEST_CASE("acquire refuses a ship with no ready weapons") {
@@ -1700,6 +1724,66 @@ TEST_CASE("acquire honors a Flags-1 personality grudge") {
 
   CHECK(ship.primary_target_ship_slot == 0);
   CHECK(ship.ai_state_code == 4);
+}
+
+TEST_CASE("acquire uses the player's hull inherent combat govt for the roll") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  const int sys_idx = FindWanderSuitableSystem(state);
+  REQUIRE(sys_idx >= 0);
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = static_cast<std::int16_t>(sys_idx);
+  state.player.faction_or_government_id = -1;
+  state.player.armor_points = 30.0F;
+  state.player.shield_points = 30.0F;
+  // Far from the NPC so the near-player reputation gate stays out of the way:
+  // the inherent-combat roll is deliberately not distance-gated (0x0040e57f).
+  state.player.pos_x = 1.0e6F;
+  state.player.pos_y = 1.0e6F;
+
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  // Fed Destroyer (res 141): its own inherent combat govt is Federation, so an
+  // own-class read of the roll could never fire against a Federation NPC.
+  ship.ship_class_id = 0x8d - 0x80;
+  ship.current_system_id = static_cast<std::int16_t>(sys_idx);
+  ship.faction_or_government_id = 0; // Federation, non-xenophobic
+  ship.ai_behavior_code = 3;
+  ship.ai_state_code = 0;
+  ship.primary_target_ship_slot = -1;
+  ship.random_ai_render_cadence = 0;
+  ship.armor_points = 750.0F;
+  ship.shield_points = 800.0F;
+  game::NovaWeapon_EnsureNpcWeaponBanks(state, ship);
+
+  // The first NovaRandom_Range(0x32) call in this path is the roll, so pick the
+  // lowest seed whose first [0,50) draw is 0 rather than hard-coding a
+  // distribution-implementation-specific constant.
+  std::uint32_t seed = 1;
+  for (;; ++seed) {
+    std::mt19937 probe(seed);
+    if (std::uniform_int_distribution<int>{0, 49}(probe) == 0) {
+      break;
+    }
+  }
+
+  // Rebel Dragon (res 180, inherent combat govt Rebellion 13), which the
+  // Federation government is class-hostile to -> the roll may flag the player.
+  state.player.ship_class_id = 0xb4 - 0x80;
+  state.rng.seed(seed);
+  game::NovaAi_AcquirePrimaryTarget(state, ship);
+  CHECK(ship.primary_target_ship_slot == 0);
+
+  // A Federation hull (res 141, inherent combat govt Federation 0) is not
+  // hostile to a Federation ship, so the same roll must not flag the player.
+  ship.primary_target_ship_slot = -1;
+  state.player.ship_class_id = 0x8d - 0x80;
+  state.rng.seed(seed);
+  game::NovaAi_AcquirePrimaryTarget(state, ship);
+  CHECK(ship.primary_target_ship_slot != 0);
 }
 
 TEST_CASE("Federation warship shares an ally's aggression against the player") {
