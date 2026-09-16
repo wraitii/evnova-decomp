@@ -89,12 +89,24 @@ Mission_ExpandMissionWildcards(const GameState &state,
                                               std::int16_t mission_id,
                                               std::size_t active_slot);
 
+// UI sink for the post-activation acceptance dialogs that the original runs
+// inline in Mission_ActivateMissionAtSlot (0x0043f100): the Brief desc
+// (payload +0x34) with starmap access, then the LoadCarg desc (payload +0x38)
+// when PickupMode 0 puts the cargo aboard at accept. The flight/docked layer
+// wires it to NovaMission_RunAcceptanceDialogs; because the mission-script S
+// opcode activates missions from inside an on-accept/on-abort payload, the
+// same sink is threaded through Mission_ActivateAtSlot so script-started
+// missions still show their readers. Unset sinks keep the state-only port.
+using MissionAcceptanceSink = std::function<void(std::int16_t mission_def)>;
+
 // landed_stellar_id is the stellar the player is docked at when accepting
 // (the BBS context) as a 0x80-based resource id; a mission whose resolved
 // TravelStel matches it skips the initial destination briefing.
-[[nodiscard]] bool Mission_ActivateAtSlot(GameState &state,
-                                          std::int16_t mission_id,
-                                          std::int16_t landed_stellar_id);
+[[nodiscard]] bool
+Mission_ActivateAtSlot(GameState &state,
+                       std::int16_t mission_id,
+                       std::int16_t landed_stellar_id,
+                       const MissionAcceptanceSink &acceptance = {});
 
 // Ghidra 0x0046b920 System_ResolveVisibleSystemForTravel. Follows a system's
 // visibility remap chain (twin-system links written by the scenario loader)
@@ -139,13 +151,16 @@ Mission_CheckReactionConditionSatisfied(const GameState &state,
 // Ghidra 0x00440aa0 Mission_ClearMisnSlotAssignments. Releases every ship
 // assigned to the mission-fleet slot (clearing its fleet/targeting state and,
 // when the travel scene owns the world (state.in_travel_scene), despawning
-// it), optionally runs the slot's resolve-script payload, then clears the
-// slot's accepted/active latches. The ambient-roll latch is not modelled yet
-// (TODO(decomp)).
-void Mission_ClearMisnSlotAssignments(GameState &state,
-                                      std::int16_t mission_slot,
-                                      bool emit_completion_payload,
-                                      std::uint32_t now_ms);
+// it), optionally runs the slot's on-abort payload (Bible OnAbort, +0x5e8),
+// then clears the slot's accepted/active latches. `acceptance` is forwarded to
+// any mission the on-abort payload starts via the S opcode. The ambient-roll
+// latch is not modelled yet (TODO(decomp)).
+void Mission_ClearMisnSlotAssignments(
+    GameState &state,
+    std::int16_t mission_slot,
+    bool emit_completion_payload,
+    std::uint32_t now_ms,
+    const MissionAcceptanceSink &acceptance = {});
 
 // UI sink for the mission debrief text-reader dialogs (MisnActive +0x3d Comp
 // on success, +0x3f Fail on failure). The landing gate invokes it with the

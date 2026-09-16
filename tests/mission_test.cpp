@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace game;
 
@@ -118,6 +119,36 @@ TEST_CASE(
   CHECK(active.goal_count_remaining == 4);
   CHECK(state.active_mission_runtime_flags[0].flags_primary_at_accept ==
         0x8123);
+}
+
+TEST_CASE("acceptance dialogs follow script activation order") {
+  GameState state;
+  state.scenario.missions.resize(2);
+  for (auto &definition : state.scenario.missions) {
+    definition.present = true;
+    definition.travel_stellar_locator = -1;
+    definition.return_stellar_locator = -1;
+  }
+  // Mission 0's on-accept payload (misn payload +0x15b) starts mission 1 with
+  // the S opcode: S129 = resource 0x81 = definition 1.
+  constexpr std::string_view kStartNested = "S129";
+  for (std::size_t i = 0; i < kStartNested.size(); ++i) {
+    state.scenario.missions[0].raw_payload[0x15b + i] =
+        static_cast<std::byte>(kStartNested[i]);
+  }
+
+  std::vector<std::int16_t> presented;
+  const MissionAcceptanceSink sink = [&](std::int16_t mission_def) {
+    presented.push_back(mission_def);
+  };
+  REQUIRE(Mission_ActivateAtSlot(state, 0, -1, sink));
+
+  // The nested activation's dialogs run inside the outer on-accept payload, so
+  // it reports first; the outer mission follows when activation returns.
+  const std::vector<std::int16_t> expected{1, 0};
+  CHECK(presented == expected);
+  CHECK(state.active_mission_runtime_flags[0].is_active);
+  CHECK(state.active_mission_runtime_flags[1].is_active);
 }
 
 TEST_CASE("Tutorial 006a preserves its shipped lore fleet") {

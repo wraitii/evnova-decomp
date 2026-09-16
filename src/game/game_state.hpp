@@ -139,15 +139,17 @@ struct ActiveMission {
   // driver (ShipClass_RerollShipClassAvailabilityChances 0x00466cb0, not yet
   // ported) decrements it once per game day.
   std::int16_t time_limit_days_remaining = -32000; // +0x45
-  // MisnActive's six 255-byte text/script buffers. The resource decoder keeps
-  // the source mïsn payload; activation projects these strings to the active
-  // record at the offsets used by Mission_PopulateMissionSlotFromDef.
-  std::array<std::byte, 255> on_accept_text{};              // +0x1ec
-  std::array<std::byte, 255> mission_payload_text_b{};      // +0x2eb
-  std::array<std::byte, 255> on_success_text{};             // +0x3ea
-  std::array<std::byte, 255> on_failure_text{};             // +0x4e9
-  std::array<std::byte, 255> resolve_script_buffer_start{}; // +0x5e8
-  std::array<std::byte, 255> state_latch{};                 // +0x6e7
+  // MisnActive's six 255-byte text/script buffers, in Bible mïsn field order:
+  // OnAccept, OnRefuse, OnSuccess, OnFailure, OnAbort, OnShipDone. The resource
+  // decoder keeps the source mïsn payload; activation projects these strings to
+  // the active record at the offsets used by
+  // Mission_PopulateMissionSlotFromDef.
+  std::array<std::byte, 255> on_accept_text{};    // +0x1ec (payload +0x15b)
+  std::array<std::byte, 255> on_refuse_text{};    // +0x2eb (payload +0x25a)
+  std::array<std::byte, 255> on_success_text{};   // +0x3ea (payload +0x359)
+  std::array<std::byte, 255> on_failure_text{};   // +0x4e9 (payload +0x458)
+  std::array<std::byte, 255> on_abort_text{};     // +0x5e8 (payload +0x557)
+  std::array<std::byte, 255> on_ship_done_text{}; // +0x6e7 (payload +0x660)
   std::array<std::byte, 0x8e6> raw_payload{};
 };
 

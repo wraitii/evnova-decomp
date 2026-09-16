@@ -147,8 +147,10 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
 
 } // namespace
 
-MissionScriptResult Mission_ExecuteScript(GameState &state,
-                                          std::string_view script) {
+MissionScriptResult
+Mission_ExecuteScript(GameState &state,
+                      std::string_view script,
+                      const MissionAcceptanceSink &acceptance) {
   MissionScriptResult result;
 
   std::function<void(std::size_t, std::size_t)> execute_range;
@@ -318,11 +320,21 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
       case 'S':
         if (operand >= kResourceIdBase && operand < 0x468) {
           // The original's activation reads ai_secondary_target_slot (the
-          // current travel/landed stellar) for its briefing check.
+          // current travel/landed stellar) for its briefing check, and shows
+          // the Brief/LoadCarg acceptance dialogs inline; forward the sink so
+          // a script-started mission still presents them.
+          // TODO(decomp(0x00449370)) skipped: the original wraps the call in
+          // g_travel_scene_ctx = (g_is_system_transition_active == 0), then
+          // restores the previous value -- i.e. state.in_travel_scene =
+          // !state.travel.engaging around the activation. The port leaves
+          // in_travel_scene as the landing pass set it, so any travel-scene-
+          // gated branch inside Mission_ActivateMissionAtSlot (destination
+          // window / overlay) is not reproduced on the script-S path.
           (void)Mission_ActivateAtSlot(
               state,
               static_cast<std::int16_t>(operand - kResourceIdBase),
-              state.player.ai_secondary_target_slot);
+              state.player.ai_secondary_target_slot,
+              acceptance);
           applied = true;
         }
         break;
@@ -438,13 +450,15 @@ MissionScriptResult Mission_ExecuteScript(GameState &state,
 }
 
 // Ghidra 0x00448020 Mission_ExecuteReactionScript.
-MissionScriptResult Mission_ExecuteReactionScript(GameState &state,
-                                                  std::string_view script) {
+MissionScriptResult
+Mission_ExecuteReactionScript(GameState &state,
+                              std::string_view script,
+                              const MissionAcceptanceSink &acceptance) {
   // The original returns before touching any state for an empty script.
   if (script.empty()) {
     return {};
   }
-  auto result = Mission_ExecuteScript(state, script);
+  auto result = Mission_ExecuteScript(state, script, acceptance);
   // The reaction entrypoint also recomputes derived outfit state after the
   // engine (Outfit_RecomputeOutfitDerivedState 0x0046d4b0).
   NovaOutfit_RecomputeOutfitDerivedState(state);
@@ -452,9 +466,11 @@ MissionScriptResult Mission_ExecuteReactionScript(GameState &state,
 }
 
 // Ghidra 0x00448050 Mission_RunMisnScriptPayload.
-MissionScriptResult Mission_RunMisnScriptPayload(GameState &state,
-                                                 std::string_view script,
-                                                 std::int16_t mission_slot) {
+MissionScriptResult
+Mission_RunMisnScriptPayload(GameState &state,
+                             std::string_view script,
+                             std::int16_t mission_slot,
+                             const MissionAcceptanceSink &acceptance) {
   // The original returns before touching any state for an empty payload.
   if (script.empty()) {
     return {};
@@ -466,7 +482,7 @@ MissionScriptResult Mission_RunMisnScriptPayload(GameState &state,
   // original. The original does no range validation on the slot; the engine's
   // Q case only consults slots 0..15.
   state.script_mission_context_slot = mission_slot;
-  auto result = Mission_ExecuteScript(state, script);
+  auto result = Mission_ExecuteScript(state, script, acceptance);
   state.script_mission_context_slot = -1;
   // Outfit_RecomputeOutfitDerivedState (0x0046d4b0) after the engine.
   NovaOutfit_RecomputeOutfitDerivedState(state);
@@ -474,9 +490,11 @@ MissionScriptResult Mission_RunMisnScriptPayload(GameState &state,
 }
 
 // Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine.
-MissionScriptResult Mission_ExecuteMisnScriptEngine(GameState &state,
-                                                    std::string_view script) {
-  return Mission_ExecuteScript(state, script);
+MissionScriptResult
+Mission_ExecuteMisnScriptEngine(GameState &state,
+                                std::string_view script,
+                                const MissionAcceptanceSink &acceptance) {
+  return Mission_ExecuteScript(state, script, acceptance);
 }
 
 } // namespace game
