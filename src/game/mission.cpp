@@ -170,7 +170,8 @@ FindSystemContainingStellar(const GameState &state, std::int16_t stellar_id) {
 // locator-family resolution. External linkage: the flight loop, the starmap
 // and the new-game flow all re-run it outside mission.cpp.
 // The mïsn availability-expression arm of 0x00448090 runs inline in
-// Mission_EvaluateMissionLists.
+// Mission_EvaluateMissionLists; the p\xefrs ActiveOn cache (PersDef +0x622)
+// is refreshed below.
 void NovaResources_EvaluateAvailability(GameState &state) {
   const ControlExpressionState expression =
       MissionControlExpressionState(state);
@@ -218,6 +219,19 @@ void NovaResources_EvaluateAvailability(GameState &state) {
   // is_available/hazard_marker from the new membership map; the original
   // relies on the last per-tick pass having run with the same map.
   NovaTargeting_UpdateStellarAvailability(state);
+
+  // p\x91rs ActiveOn cache (PersDef +0x622). Ghidra 0x00448090 walks all
+  // 0x400 personality slots (stride 0x794): a clear +0x623 loaded latch
+  // forces +0x622 = 0, otherwise +0x622 caches the +0x644 ActiveOn evaluation.
+  // Pers_SpawnShipFromPersDef (0x004235c0) requires +0x622, so without this a
+  // personality gated by a control bit never becomes eligible after the bit
+  // flips. The ship-class/fleet/region-trigger arms of the same original loop
+  // remain TODO(decomp).
+  for (auto &pers : state.scenario.pers_defs) {
+    pers.is_available_runtime =
+        pers.loaded_latch && Mission_CheckReactionConditionSatisfied(
+                                 state, pers.availability_expression);
+  }
 
   // Tail of 0x00448090: if the player's current system just failed its
   // Visibility NCB, resolve it to the visible member of its twin group and
@@ -1404,6 +1418,7 @@ bool Mission_ActivateAtSlot(GameState &state,
       state,
       TextOf(state.active_missions[free_slot].on_accept_text),
       static_cast<std::int16_t>(free_slot),
+      MissionScriptContext{"OnAccept"},
       acceptance);
   if (acceptance) {
     acceptance(mission_id);
@@ -1659,6 +1674,7 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
         TextOf(state.active_missions[static_cast<std::size_t>(mission_slot)]
                    .on_abort_text),
         mission_slot,
+        MissionScriptContext{"OnAbort"},
         acceptance);
   }
   state.active_missions[static_cast<std::size_t>(mission_slot)]
@@ -1718,8 +1734,10 @@ void Mission_ResolveMissionSuccess(GameState &state,
     NovaLog::Todo("mission success debrief dësc {} loaded empty", comp_text_id);
   }
   state.active_mission_runtime_flags[slot].is_active = false;
-  Mission_RunMisnScriptPayload(
-      state, TextOf(mission.on_success_text), mission_slot);
+  Mission_RunMisnScriptPayload(state,
+                               TextOf(mission.on_success_text),
+                               mission_slot,
+                               MissionScriptContext{"OnSuccess"});
   // On-resolve repeat count (Bible DatePostInc) re-runs the daily world
   // update (0x00466cb0) once per count, advancing the calendar.
   for (std::int16_t i = 0; i < mission.on_resolve_repeat_count; ++i) {
@@ -1763,8 +1781,10 @@ void Mission_ResolveMissionFailure(GameState &state,
                                    const MissionDebriefSink &debrief) {
   const auto slot = static_cast<std::size_t>(mission_slot);
   ActiveMission &mission = state.active_missions[slot];
-  Mission_RunMisnScriptPayload(
-      state, TextOf(mission.on_failure_text), mission_slot);
+  Mission_RunMisnScriptPayload(state,
+                               TextOf(mission.on_failure_text),
+                               mission_slot,
+                               MissionScriptContext{"OnFailure"});
   const std::int16_t govt = mission.comp_govt_id;
   if (govt != -1) {
     // Failure subtracts half the reputation delta (integer division rounded
@@ -1881,8 +1901,10 @@ void Mission_FailMissionSlotQuick(GameState &state,
                                   std::uint32_t now_ms) {
   const auto slot = static_cast<std::size_t>(mission_slot);
   ActiveMission &mission = state.active_missions[slot];
-  Mission_RunMisnScriptPayload(
-      state, TextOf(mission.on_failure_text), mission_slot);
+  Mission_RunMisnScriptPayload(state,
+                               TextOf(mission.on_failure_text),
+                               mission_slot,
+                               MissionScriptContext{"OnFailure (quick)"});
   state.active_mission_runtime_flags[slot].is_failed = true;
   if (mission.can_abort) {
     Mission_ClearMisnSlotAssignments(state, mission_slot, false, now_ms);
@@ -1898,8 +1920,10 @@ void Mission_ResolveMisnSlot(GameState &state,
                              std::uint32_t now_ms) {
   const auto slot = static_cast<std::size_t>(mission_slot);
   ActiveMission &mission = state.active_missions[slot];
-  Mission_RunMisnScriptPayload(
-      state, TextOf(mission.on_abort_text), mission_slot);
+  Mission_RunMisnScriptPayload(state,
+                               TextOf(mission.on_abort_text),
+                               mission_slot,
+                               MissionScriptContext{"OnAbort (auto)"});
   // On-resolve repeat count (Bible DatePostInc) re-runs the daily world
   // update (0x00466cb0) once per count, advancing the calendar.
   for (std::int16_t i = 0; i < mission.on_resolve_repeat_count; ++i) {
@@ -2676,8 +2700,10 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
                     mission.brief_description_ids[7]);
     }
     if (mission.ship_goal != -1) {
-      Mission_RunMisnScriptPayload(
-          state, TextOf(mission.on_ship_done_text), mission_slot);
+      Mission_RunMisnScriptPayload(state,
+                                   TextOf(mission.on_ship_done_text),
+                                   mission_slot,
+                                   MissionScriptContext{"OnShipDone"});
     }
     if ((mission.flags_primary & 0x0001U) != 0U) {
       Mission_ResolveMisnSlot(state, mission_slot, now_ms);
@@ -2962,7 +2988,8 @@ void Mission_ActivateCronEvent(GameState &state, std::int16_t cron_index) {
   const CronEventDef &def =
       state.scenario.cron_events[static_cast<std::size_t>(cron_index)];
   if ((def.flags & 0x0001U) == 0U) {
-    Mission_ExecuteReactionScript(state, def.on_start);
+    Mission_ExecuteReactionScript(
+        state, def.on_start, MissionScriptContext{"cron OnStart"});
     return;
   }
   std::int16_t iterations = 0;
@@ -2972,7 +2999,8 @@ void Mission_ActivateCronEvent(GameState &state, std::int16_t cron_index) {
         !Mission_CheckReactionConditionSatisfied(state, def.enable_on)) {
       break;
     }
-    Mission_ExecuteReactionScript(state, def.on_start);
+    Mission_ExecuteReactionScript(
+        state, def.on_start, MissionScriptContext{"cron OnStart (repeat)"});
     ++iterations;
   }
 }
@@ -2983,7 +3011,8 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
   const CronEventDef &def =
       state.scenario.cron_events[static_cast<std::size_t>(cron_index)];
   if ((def.flags & 0x0002U) == 0U) {
-    Mission_ExecuteReactionScript(state, def.on_end);
+    Mission_ExecuteReactionScript(
+        state, def.on_end, MissionScriptContext{"cron OnEnd"});
     return;
   }
   std::int16_t iterations = 0;
@@ -2993,7 +3022,8 @@ void Mission_TerminateCronEvent(GameState &state, std::int16_t cron_index) {
         !Mission_CheckReactionConditionSatisfied(state, def.enable_on)) {
       break;
     }
-    Mission_ExecuteReactionScript(state, def.on_end);
+    Mission_ExecuteReactionScript(
+        state, def.on_end, MissionScriptContext{"cron OnEnd (repeat)"});
     ++iterations;
   }
 }
@@ -3228,7 +3258,9 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
       } else if (--stellar.engage_access < 1) {
         stellar.engage_access = -1;
         stellar.strength = stellar.strength_capacity;
-        Mission_ExecuteReactionScript(state, stellar.schedule_script);
+        Mission_ExecuteReactionScript(state,
+                                      stellar.schedule_script,
+                                      MissionScriptContext{"stellar schedule"});
       }
     } else {
       stellar.engage_access = -1;

@@ -1,4 +1,5 @@
 #include "probe_server.hpp"
+#include "game/mission_trace.hpp"
 #include "log.hpp"
 
 #include <SDL3/SDL.h>
@@ -549,6 +550,24 @@ void ProbeServer::HandleRequest(const std::string &method,
                  (enabled && suppress_audio ? "true" : "false") + "}";
       return;
     }
+    if (*cmd == "mission_trace") {
+      const bool enabled = JsonBoolField(body, "enabled").value_or(true);
+      auto mode = game::MissionTrace::Mode::off;
+      if (enabled) {
+        const auto requested = JsonStringField(body, "mode");
+        mode = (requested && *requested == "full")
+                   ? game::MissionTrace::Mode::full
+                   : game::MissionTrace::Mode::commands;
+      }
+      game::MissionTrace::SetMode(mode);
+      status = "200 OK";
+      content_type = "application/json";
+      body_out = std::string{"{\"ok\":true,\"mode\":\""} +
+                 std::string{game::MissionTrace::ModeName(
+                     game::MissionTrace::GetMode())} +
+                 "\"}";
+      return;
+    }
     if (*cmd == "land_at" || *cmd == "jump_to" || *cmd == "destroy_ship") {
       const auto target = JsonStringField(body, "target");
       const int timeout_ms = JsonIntField(body, "timeout_ms").value_or(180000);
@@ -596,8 +615,8 @@ void ProbeServer::HandleRequest(const std::string &method,
     } else {
       status = "400 Bad Request";
       body_out = "probe: unknown cmd "
-                 "(pause|resume|step|accelerate|land_at|jump_to|destroy_ship|"
-                 "cancel_automation|quit)";
+                 "(pause|resume|step|accelerate|mission_trace|land_at|jump_to|"
+                 "destroy_ship|cancel_automation|quit)";
       return;
     }
     sync_cv_.notify_all();

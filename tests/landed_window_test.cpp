@@ -6,6 +6,7 @@
 #include "game/landed_window.hpp"
 #include "game/mission.hpp"
 #include "game/outfit.hpp"
+#include "game/ship_spawn.hpp"
 #include "game/travel.hpp"
 #include "game/weapon.hpp"
 
@@ -374,6 +375,45 @@ TEST_CASE("launch rebuild includes missions accepted while docked") {
       CHECK(ship.ship_class_id == kPirateViperShipClass);
       CHECK(ship.faction_or_government_id == kDerelictsGovernment);
       CHECK(ship.mission_fleet_slot == -1);
+    }
+  }
+  CHECK(found_derelict);
+}
+
+// Same as the test above, but with the arrival population that the real
+// journey runs before the player lands and accepts Tutorial 006. The bit is
+// still clear on arrival, so the derelict must be suppressed then, and the
+// launch rebuild must spawn it once the mission accept sets b9208.
+TEST_CASE("derelict spawns at launch after a pre-accept arrival population") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  constexpr std::int16_t kRautherionSystem = 166 - 0x80;
+  constexpr std::int16_t kRautherStellar = 191;
+  constexpr std::int16_t kTutorial006Index = 754 - 0x80;
+  constexpr std::int16_t kTutorialDerelictPers = 642 - 0x80;
+  state.player.current_system_id = kRautherionSystem;
+  state.player.ship_class_id = 0;
+
+  // System arrival with b9208 clear: no derelict yet.
+  REQUIRE_FALSE(state.control.bits.test(9208));
+  game::NovaSystem_PopulateInitialNpcShips(state, kRautherionSystem);
+  for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
+    CHECK(state.ShipAt(slot).pers_def_slot != kTutorialDerelictPers);
+  }
+
+  // Accept Tutorial 006 while docked; the payload sets b9208 and activates
+  // the silent companion mission.
+  REQUIRE(
+      game::Mission_ActivateAtSlot(state, kTutorial006Index, kRautherStellar));
+  REQUIRE(state.control.bits.test(9208));
+
+  game::Stellar_Launch(state, kRautherStellar);
+
+  bool found_derelict = false;
+  for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
+    const auto &ship = state.ShipAt(slot);
+    if (ship.is_active && ship.pers_def_slot == kTutorialDerelictPers) {
+      found_derelict = true;
     }
   }
   CHECK(found_derelict);

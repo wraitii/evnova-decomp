@@ -169,6 +169,14 @@ struct PilotFile {
 // IntroCinematic_SetupFrames after the block is created).
 void PilotFileApply(const PilotFile &pilot_file, GameState &state);
 
+// Project the scenario's loader-marked përs table into a fresh pilot record
+// before PilotFileApply copies it back. A brand-new record has its pers flags
+// zero-filled (PilotFile::Fresh), so without this carry the apply pass clears
+// every personality (including the tutorial 006 derelict Viper). Loaded saves
+// instead carry their own persisted flags and must not call this.
+void PilotFileSeedPersonalityPresence(const ScenarioData &scenario,
+                                      PilotFile &record);
+
 // See pilot_file.hpp. Iterates the family in registry order (resource id
 // order in the archive world); only entries whose flags bit 0 is set are
 // considered, and the first match wins (the original keeps scanning but its

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "game/game_state.hpp"
+#include "game/new_pilot_flow.hpp"
 #include "game/pilot_file.hpp"
 
 #include <algorithm>
@@ -244,6 +245,23 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(collected.pers_visible_flags[3] == 1);
 }
 
+TEST_CASE("new-pilot record seeding preserves loader-marked personalities") {
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  // Tutorial 006's derelict target: përs resource 642, slot 642 - 0x80.
+  constexpr std::size_t kTutorialDerelictPers = 642 - 0x80;
+  REQUIRE(state.scenario.pers_defs.size() > kTutorialDerelictPers);
+  REQUIRE(state.scenario.pers_defs[kTutorialDerelictPers].present);
+
+  // A fresh record's pers flags are zero; the new-pilot flow must project the
+  // loader-marked table before PilotFileApply or every personality is cleared.
+  PilotFile record = PilotFile::Fresh();
+  game::PilotFileSeedPersonalityPresence(state.scenario, record);
+  PilotFileApply(record, state);
+
+  CHECK(state.scenario.pers_defs[kTutorialDerelictPers].present);
+}
+
 TEST_CASE("PilotFile normalizes invalid negative escort commands") {
   PilotFile pilot = PilotFile::Fresh();
   pilot.target_category_command = {-2, -1, 0, 3};
@@ -302,12 +320,32 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   }
 
   game::GameState loaded_state;
+  loaded_state.scenario.ships.resize(4);
+  loaded_state.scenario.ships[3].base_shield = 500;
+  loaded_state.scenario.ships[3].base_armor = 300;
+  loaded_state.scenario.ships[3].base_fuel = 100;
+  loaded_state.player.is_active = false;
+  loaded_state.player.death_timer_active = 12.0F;
+  loaded_state.player.death_timer_seeded = true;
+  loaded_state.player.destruction_visual_triggered = true;
+  loaded_state.player.destruction_finale_triggered = true;
+  loaded_state.game_over_pending = true;
+  loaded_state.return_to_menu_pending = true;
+  game::NovaShip_ResetPlayerShipState(loaded_state);
   const auto err = PilotFileLoadSave(path, loaded_state);
   CHECK(err == PilotLoadError::kOk);
   CHECK(loaded_state.pilot.first_name == "Test Pilot");
   CHECK(loaded_state.pilot.last_name == "Maclean");
   CHECK(loaded_state.player.credits == p.credits);
   CHECK(loaded_state.player.ship_class_id == p.ship_class_id);
+  CHECK(loaded_state.player.is_active);
+  CHECK(loaded_state.player.death_timer_active == -1.0F);
+  CHECK_FALSE(loaded_state.player.death_timer_seeded);
+  CHECK_FALSE(loaded_state.player.destruction_visual_triggered);
+  CHECK_FALSE(loaded_state.player.destruction_finale_triggered);
+  CHECK(loaded_state.player.armor_points == 300.0F);
+  CHECK_FALSE(loaded_state.game_over_pending);
+  CHECK_FALSE(loaded_state.return_to_menu_pending);
   CHECK(loaded_state.player_combat_rating_points ==
         p.player_combat_rating_points);
   // Fuel is stored as a truncated u16 in the file (block1+0x12).

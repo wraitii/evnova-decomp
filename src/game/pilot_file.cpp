@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
+#include "new_pilot_flow.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
@@ -149,6 +150,16 @@ PilotFile PilotFile::Fresh() {
   fresh.fighter_ship_class_ids.fill(-1);
   fresh.fighter_voice_types.fill(-1);
   return fresh;
+}
+
+void PilotFileSeedPersonalityPresence(const ScenarioData &scenario,
+                                      PilotFile &record) {
+  const std::size_t count =
+      std::min(scenario.pers_defs.size(), record.pers_present_flags.size());
+  for (std::size_t i = 0; i < count; ++i) {
+    record.pers_present_flags[i] = scenario.pers_defs[i].present ? 1 : 0;
+    record.pers_visible_flags[i] = scenario.pers_defs[i].visible ? 1 : 0;
+  }
 }
 
 void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
@@ -1140,6 +1151,7 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   if (!state.scenario.ships.empty() &&
       (saved_class == nullptr ||
        saved_class->tech_level == kShipClassNonexistentTechLevel)) {
+    const std::int16_t missing_class_id = record.ship_class_id;
     const auto first_defined =
         std::ranges::find_if(state.scenario.ships, [](const ShipClass &ship) {
           return ship.tech_level != kShipClassNonexistentTechLevel;
@@ -1149,6 +1161,17 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
             ? 0
             : static_cast<std::int16_t>(
                   std::distance(state.scenario.ships.begin(), first_defined));
+    const std::string_view fallback_name =
+        first_defined == state.scenario.ships.end()
+            ? std::string_view{"<none>"}
+            : std::string_view{first_defined->display_name};
+    NovaLog::Warn("pilot load: saved ship class {} (resource {:#x}) is not "
+                  "defined; substituting class {} '{}' and reporting repairs "
+                  "(an unavailable plugin is a likely cause)",
+                  missing_class_id,
+                  missing_class_id + 0x80,
+                  record.ship_class_id,
+                  fallback_name);
     result = PilotLoadError::kRepairsApplied;
   }
   // current_system_id is not serialized; the loader resolves it from the saved
@@ -1391,6 +1414,7 @@ PilotLoadError PilotData_AutoresumeLastPilot(GameState &state) {
   if (path.is_relative() && !PilotFileProbeExists(path)) {
     path = marker->parent_path() / path;
   }
+  NovaShip_ResetPlayerShipState(state);
   return PilotFileLoadSave(path, state);
 }
 

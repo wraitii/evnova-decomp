@@ -2044,7 +2044,9 @@ bool ResolveShotStellarContact(GameState &state,
       }
       // The original logs the display name + OnDestroy string first, then runs
       // the reaction script. The log is diagnostic only.
-      (void)Mission_ExecuteReactionScript(state, stellar->on_destroy_script);
+      Mission_ExecuteReactionScript(state,
+                                    stellar->on_destroy_script,
+                                    MissionScriptContext{"stellar OnDestroy"});
       stellar->strength = -1;
       stellar->engage_access = stellar->schedule_days;
       if (shot.owner_ship_slot == 0) {

@@ -1001,6 +1001,14 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
     }
   }
 
+  NovaLog::Debug(
+      "spawned pers ship: slot {} class {} govt {} ai {} pers 0x{:x} '{}'",
+      alloc,
+      ship.ship_class_id,
+      ship.faction_or_government_id,
+      ship.ai_behavior_code,
+      slot,
+      def.display_name);
   return alloc;
 }
 
@@ -1512,15 +1520,47 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
     }
     const PersDef &pers =
         state.scenario.pers_defs[static_cast<std::size_t>(pers_slot)];
-    if (!pers.present ||
-        !Mission_CheckReactionConditionSatisfied(
-            state, pers.availability_expression) ||
-        RandomBelow(state, 100) + 1 > sys->personality_spawn_probabilities[i]) {
+    if (!pers.present) {
+      NovaLog::Debug("system {} personality[{}] pers 0x{:x} '{}' skipped: not "
+                     "present",
+                     system_id,
+                     i,
+                     pers_slot,
+                     pers.display_name);
+      continue;
+    }
+    if (!Mission_CheckReactionConditionSatisfied(
+            state, pers.availability_expression)) {
+      NovaLog::Debug("system {} personality[{}] pers 0x{:x} '{}' skipped: "
+                     "ActiveOn '{}' false",
+                     system_id,
+                     i,
+                     pers_slot,
+                     pers.display_name,
+                     pers.availability_expression);
+      continue;
+    }
+    const int roll = RandomBelow(state, 100) + 1;
+    if (roll > sys->personality_spawn_probabilities[i]) {
+      NovaLog::Debug("system {} personality[{}] pers 0x{:x} '{}' skipped: roll "
+                     "{} > prob {}",
+                     system_id,
+                     i,
+                     pers_slot,
+                     pers.display_name,
+                     roll,
+                     sys->personality_spawn_probabilities[i]);
       continue;
     }
     const int spawned = NovaPers_SpawnShipFromPersDef(
         state, system_id, /*exclude_derelict_govts=*/false, pers_slot);
     if (spawned < 0) {
+      NovaLog::Debug("system {} personality[{}] pers 0x{:x} '{}' spawn failed "
+                     "(dedup/alloc)",
+                     system_id,
+                     i,
+                     pers_slot,
+                     pers.display_name);
       continue;
     }
     add_class_base_velocity(spawned);

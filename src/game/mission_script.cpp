@@ -2,31 +2,27 @@
 
 #include "brgr_archive.hpp"
 #include "hud_overlay.hpp"
+#include "log.hpp"
 #include "mission.hpp"
+#include "mission_trace.hpp"
 #include "outfit.hpp"
 #include "rank.hpp"
 #include "travel.hpp"
 #include "weapon.hpp"
 
-#include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace game {
 namespace {
 
 constexpr std::int16_t kResourceIdBase = 0x80;
 constexpr std::uint32_t kStringTableType = 0x53545223U;
-
-void AddDiagnostic(MissionScriptResult &result,
-                   std::size_t offset,
-                   std::string message) {
-  result.diagnostics.push_back({offset, std::move(message)});
-}
 
 [[nodiscard]] bool IsDigit(char value) {
   return std::isdigit(static_cast<unsigned char>(value)) != 0;
@@ -147,11 +143,11 @@ MovePlayer(GameState &state, std::int32_t resource_id, char opcode) {
 
 } // namespace
 
-MissionScriptResult
-Mission_ExecuteScript(GameState &state,
-                      std::string_view script,
-                      const MissionAcceptanceSink &acceptance) {
-  MissionScriptResult result;
+void Mission_ExecuteScript(GameState &state,
+                           std::string_view script,
+                           const MissionScriptContext &context,
+                           const MissionAcceptanceSink &acceptance) {
+  MissionTrace::LogScript(context.source, context.mission_slot, script);
 
   std::function<void(std::size_t, std::size_t)> execute_range;
   execute_range = [&](std::size_t begin, std::size_t end) {
@@ -177,8 +173,10 @@ Mission_ExecuteScript(GameState &state,
           ++cursor;
         }
         if (number_begin == cursor) {
-          AddDiagnostic(
-              result, command_offset, "control bit is missing its number");
+          NovaLog::Warn("mission script {} +{}: control bit is missing its "
+                        "number",
+                        context.source,
+                        command_offset);
           continue;
         }
         std::uint32_t bit = 0;
@@ -186,19 +184,28 @@ Mission_ExecuteScript(GameState &state,
             script.data() + number_begin, script.data() + cursor, bit);
         if (parsed.ec != std::errc{} ||
             bit >= PilotControlState::kControlBitCount) {
-          AddDiagnostic(result, command_offset, "control bit is out of range");
+          NovaLog::Warn("mission script {} +{}: control bit is out of range",
+                        context.source,
+                        command_offset);
           continue;
         }
-        const bool value =
-            modifier == '^' ? !state.control.ControlBit(bit) : modifier != '!';
+        const bool old_value = state.control.ControlBit(bit);
+        const bool value = modifier == '^' ? !old_value : modifier != '!';
         state.control.SetControlBit(bit, value);
-        ++result.commands_executed;
+        MissionTrace::LogScriptBit(context.source,
+                                   context.mission_slot,
+                                   command_offset,
+                                   modifier,
+                                   bit,
+                                   old_value,
+                                   value);
         continue;
       }
       if (modifier != '\0') {
-        AddDiagnostic(result,
-                      command_offset,
-                      "! and ^ modifiers require a b-prefixed control bit");
+        NovaLog::Warn("mission script {} +{}: ! and ^ modifiers require a "
+                      "b-prefixed control bit",
+                      context.source,
+                      command_offset);
         continue;
       }
       if (cursor < end && (script[cursor] == 'r' || script[cursor] == 'R')) {
@@ -208,8 +215,10 @@ Mission_ExecuteScript(GameState &state,
           ++cursor;
         }
         if (cursor >= end || script[cursor] != '(') {
-          AddDiagnostic(
-              result, command_offset, "R requires parenthesized alternatives");
+          NovaLog::Warn("mission script {} +{}: R requires parenthesized "
+                        "alternatives",
+                        context.source,
+                        command_offset);
           continue;
         }
         const auto content_begin = ++cursor;
@@ -222,7 +231,9 @@ Mission_ExecuteScript(GameState &state,
           ++cursor;
         }
         if (depth != 0) {
-          AddDiagnostic(result, command_offset, "unterminated R expression");
+          NovaLog::Warn("mission script {} +{}: unterminated R expression",
+                        context.source,
+                        command_offset);
           return;
         }
         const auto content_end = cursor - 1;
@@ -232,7 +243,9 @@ Mission_ExecuteScript(GameState &state,
           ++split;
         }
         if (split == content_end) {
-          AddDiagnostic(result, command_offset, "R requires two alternatives");
+          NovaLog::Warn("mission script {} +{}: R requires two alternatives",
+                        context.source,
+                        command_offset);
           continue;
         }
         while (split < content_end &&
@@ -250,7 +263,9 @@ Mission_ExecuteScript(GameState &state,
 
       if (cursor >= end ||
           std::isalpha(static_cast<unsigned char>(script[cursor])) == 0) {
-        AddDiagnostic(result, command_offset, "expected mission script opcode");
+        NovaLog::Warn("mission script {} +{}: expected mission script opcode",
+                      context.source,
+                      command_offset);
         ++cursor;
         continue;
       }
@@ -261,23 +276,29 @@ Mission_ExecuteScript(GameState &state,
         ++cursor;
       }
       if (number_begin == cursor) {
-        AddDiagnostic(
-            result, command_offset, "mission opcode is missing its number");
+        NovaLog::Warn(
+            "mission script {} +{}: mission opcode is missing its number",
+            context.source,
+            command_offset);
         continue;
       }
       std::int32_t operand = 0;
       const auto parsed = std::from_chars(
           script.data() + number_begin, script.data() + cursor, operand);
       if (parsed.ec != std::errc{}) {
-        AddDiagnostic(result, command_offset, "invalid mission script number");
+        NovaLog::Warn("mission script {} +{}: invalid mission script number",
+                      context.source,
+                      command_offset);
         continue;
       }
 
       bool applied = false;
       bool known_opcode = true;
+      std::string_view action = "unmodelled opcode";
       switch (opcode) {
       case 'A':
       case 'F': {
+        action = opcode == 'F' ? "fail active mission" : "reset active mission";
         if (operand >= kResourceIdBase && operand < 0x468) {
           const auto mission_id =
               static_cast<std::int16_t>(operand - kResourceIdBase);
@@ -301,6 +322,7 @@ Mission_ExecuteScript(GameState &state,
         break;
       }
       case 'D':
+        action = "remove outfit";
         if (operand >= kResourceIdBase && operand < 0x280) {
           (void)Outfit_RemoveOutfit(
               state, static_cast<std::int16_t>(operand - kResourceIdBase), 1);
@@ -308,6 +330,7 @@ Mission_ExecuteScript(GameState &state,
         }
         break;
       case 'G':
+        action = "grant outfit";
         if (operand >= kResourceIdBase && operand < 0x280) {
           // Ghidra 0x00427770 Outfit_GrantOutfitToPlayer: mission outfit
           // grants run the same on-acquire effects (map reveal / paint /
@@ -318,6 +341,7 @@ Mission_ExecuteScript(GameState &state,
         }
         break;
       case 'S':
+        action = "activate mission";
         if (operand >= kResourceIdBase && operand < 0x468) {
           // The original's activation reads ai_secondary_target_slot (the
           // current travel/landed stellar) for its briefing check, and shows
@@ -339,12 +363,20 @@ Mission_ExecuteScript(GameState &state,
         }
         break;
       case 'C':
+        action = "switch ship class (keep loadout)";
+        applied = ChangePlayerShip(state, operand, opcode);
+        break;
       case 'E':
+        action = "switch ship class (add default outfits)";
+        applied = ChangePlayerShip(state, operand, opcode);
+        break;
       case 'H':
+        action = "switch ship class (defaults, drop non-persistent)";
         applied = ChangePlayerShip(state, operand, opcode);
         break;
       case 'K':
       case 'L':
+        action = opcode == 'K' ? "activate rank" : "deactivate rank";
         if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x80) {
           const auto rank_slot =
               static_cast<std::int16_t>(operand - kResourceIdBase);
@@ -357,10 +389,15 @@ Mission_ExecuteScript(GameState &state,
         }
         break;
       case 'M':
+        action = "move player to system, center on first nav";
+        applied = MovePlayer(state, operand, opcode);
+        break;
       case 'N':
+        action = "move player to system center";
         applied = MovePlayer(state, operand, opcode);
         break;
       case 'P':
+        action = "queue transient sound";
         if (operand >= 0 && operand <= 0xffff) {
           // Ghidra 0x00449370: g_pending_transient_sound_id = operand (a
           // single slot, overwritten by any later P in the same script).
@@ -369,6 +406,7 @@ Mission_ExecuteScript(GameState &state,
         }
         break;
       case 'Q': {
+        action = "show message and force leave landing";
         state.script_forced_leave_landing = true;
         state.pending_script_message_string_id =
             operand >= 0 && operand <= 0x7fff
@@ -395,6 +433,7 @@ Mission_ExecuteScript(GameState &state,
         break;
       }
       case 'T': {
+        action = "rename ship from string list";
         const auto old_name = state.player.ship_name;
         if (auto title = LoadRandomStringListEntry(state.rng, operand)) {
           ReplaceShipTitleMarkers(*title, old_name);
@@ -404,18 +443,31 @@ Mission_ExecuteScript(GameState &state,
         break;
       }
       case 'U':
-      case 'Y':
+        action = "restore stellar";
         if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
           const auto stellar_index =
               static_cast<std::size_t>(operand - kResourceIdBase);
           if (stellar_index < state.scenario.stellars.size()) {
             auto &stellar = state.scenario.stellars[stellar_index];
-            stellar.is_destroyed = opcode == 'Y';
+            stellar.is_destroyed = false;
+            applied = true;
+          }
+        }
+        break;
+      case 'Y':
+        action = "destroy stellar";
+        if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
+          const auto stellar_index =
+              static_cast<std::size_t>(operand - kResourceIdBase);
+          if (stellar_index < state.scenario.stellars.size()) {
+            auto &stellar = state.scenario.stellars[stellar_index];
+            stellar.is_destroyed = true;
             applied = true;
           }
         }
         break;
       case 'X':
+        action = "reveal system";
         if (operand >= kResourceIdBase && operand < kResourceIdBase + 0x800) {
           state.control.explored_systems.set(
               static_cast<std::size_t>(operand - kResourceIdBase));
@@ -430,50 +482,62 @@ Mission_ExecuteScript(GameState &state,
         break;
       default:
         known_opcode = false;
-        AddDiagnostic(result,
-                      command_offset,
-                      "script opcode is not modelled: " +
-                          std::string(1, opcode));
         break;
       }
+
       if (applied) {
-        ++result.commands_executed;
+        MissionTrace::LogCommand(context.source,
+                                 context.mission_slot,
+                                 command_offset,
+                                 opcode,
+                                 operand,
+                                 action);
       } else if (known_opcode) {
-        AddDiagnostic(
-            result, command_offset, "script operand is invalid for opcode");
+        NovaLog::Warn("mission script {} +{}: operand {} invalid for opcode {}",
+                      context.source,
+                      command_offset,
+                      operand,
+                      opcode);
+      } else if (MissionTrace::Enabled()) {
+        // Unmodelled opcodes are expected while the grammar is reconstructed;
+        // surface them only when tracing so ordinary play stays quiet.
+        NovaLog::Todo("mission script {} +{}: opcode {} (operand {}) is not "
+                      "modelled",
+                      context.source,
+                      command_offset,
+                      opcode,
+                      operand);
       }
     }
   };
 
   execute_range(0, script.size());
-  return result;
 }
 
 // Ghidra 0x00448020 Mission_ExecuteReactionScript.
-MissionScriptResult
-Mission_ExecuteReactionScript(GameState &state,
-                              std::string_view script,
-                              const MissionAcceptanceSink &acceptance) {
+void Mission_ExecuteReactionScript(GameState &state,
+                                   std::string_view script,
+                                   const MissionScriptContext &context,
+                                   const MissionAcceptanceSink &acceptance) {
   // The original returns before touching any state for an empty script.
   if (script.empty()) {
-    return {};
+    return;
   }
-  auto result = Mission_ExecuteScript(state, script, acceptance);
+  Mission_ExecuteScript(state, script, context, acceptance);
   // The reaction entrypoint also recomputes derived outfit state after the
   // engine (Outfit_RecomputeOutfitDerivedState 0x0046d4b0).
   NovaOutfit_RecomputeOutfitDerivedState(state);
-  return result;
 }
 
 // Ghidra 0x00448050 Mission_RunMisnScriptPayload.
-MissionScriptResult
-Mission_RunMisnScriptPayload(GameState &state,
-                             std::string_view script,
-                             std::int16_t mission_slot,
-                             const MissionAcceptanceSink &acceptance) {
+void Mission_RunMisnScriptPayload(GameState &state,
+                                  std::string_view script,
+                                  std::int16_t mission_slot,
+                                  const MissionScriptContext &context,
+                                  const MissionAcceptanceSink &acceptance) {
   // The original returns before touching any state for an empty payload.
   if (script.empty()) {
-    return {};
+    return;
   }
   // g_script_mission_context_slot is a real global in the original, so a
   // nested payload (the engine's S opcode -> Mission_ActivateAtSlot) clobbers
@@ -481,20 +545,21 @@ Mission_RunMisnScriptPayload(GameState &state,
   // parameter so an outer Q after an S sees no context, exactly like the
   // original. The original does no range validation on the slot; the engine's
   // Q case only consults slots 0..15.
+  MissionScriptContext effective = context;
+  effective.mission_slot = mission_slot;
   state.script_mission_context_slot = mission_slot;
-  auto result = Mission_ExecuteScript(state, script, acceptance);
+  Mission_ExecuteScript(state, script, effective, acceptance);
   state.script_mission_context_slot = -1;
   // Outfit_RecomputeOutfitDerivedState (0x0046d4b0) after the engine.
   NovaOutfit_RecomputeOutfitDerivedState(state);
-  return result;
 }
 
 // Ghidra 0x00449370 Mission_ExecuteMisnScriptEngine.
-MissionScriptResult
-Mission_ExecuteMisnScriptEngine(GameState &state,
-                                std::string_view script,
-                                const MissionAcceptanceSink &acceptance) {
-  return Mission_ExecuteScript(state, script, acceptance);
+void Mission_ExecuteMisnScriptEngine(GameState &state,
+                                     std::string_view script,
+                                     const MissionScriptContext &context,
+                                     const MissionAcceptanceSink &acceptance) {
+  Mission_ExecuteScript(state, script, context, acceptance);
 }
 
 } // namespace game

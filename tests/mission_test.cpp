@@ -151,6 +151,40 @@ TEST_CASE("acceptance dialogs follow script activation order") {
   CHECK(state.active_mission_runtime_flags[1].is_active);
 }
 
+// Regression for the Tutorial 006 payload shape: mïsn 754's on-accept is
+// `S755 b9208`, i.e. an S activation followed by a control-bit command. The
+// acceptance sink is now threaded into the nested activation, and this test
+// pins that the parser still executes the commands AFTER the S opcode (the
+// original `acceptance dialogs follow script activation order` test only
+// covered a payload ending at the S).
+TEST_CASE("script S activation preserves trailing commands") {
+  GameState state;
+  state.scenario.missions.resize(2);
+  for (auto &definition : state.scenario.missions) {
+    definition.present = true;
+    definition.travel_stellar_locator = -1;
+    definition.return_stellar_locator = -1;
+  }
+  // S129 = activate definition 1; b424 must then set control bit 424.
+  constexpr std::string_view kStartNestedThenBit = "S129 b424";
+  for (std::size_t i = 0; i < kStartNestedThenBit.size(); ++i) {
+    state.scenario.missions[0].raw_payload[0x15b + i] =
+        static_cast<std::byte>(kStartNestedThenBit[i]);
+  }
+
+  std::vector<std::int16_t> presented;
+  const MissionAcceptanceSink sink = [&](std::int16_t mission_def) {
+    presented.push_back(mission_def);
+  };
+  REQUIRE(Mission_ActivateAtSlot(state, 0, -1, sink));
+
+  CHECK(state.active_mission_runtime_flags[0].is_active);
+  CHECK(state.active_mission_runtime_flags[1].is_active);
+  CHECK(state.control.ControlBit(424));
+  const std::vector<std::int16_t> expected{1, 0};
+  CHECK(presented == expected);
+}
+
 TEST_CASE("Tutorial 006a preserves its shipped lore fleet") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());

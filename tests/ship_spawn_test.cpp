@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 
+#include "game/mission.hpp"
 #include "game/ship_spawn.hpp"
 
 namespace {
@@ -487,4 +488,28 @@ TEST_CASE("pers spawner rejects an ineligible forced slot", "[pers][spawn]") {
   jack.is_available_runtime = true;
   const int slot = NovaPers_SpawnShipFromPersDef(state, 4, false, 0x83 - 0x80);
   REQUIRE(slot != -1);
+}
+
+TEST_CASE("pers ActiveOn cache refreshes with control bits",
+          "[pers][availability]") {
+  using namespace game;
+  GameState state;
+  state.scenario.pers_defs.assign(2, {});
+  PersDef &gated = state.scenario.pers_defs[0];
+  gated.present = true;
+  gated.loaded_latch = true;
+  gated.availability_expression = "b7";
+  PersDef &unloaded = state.scenario.pers_defs[1];
+  unloaded.present = true;
+  unloaded.loaded_latch = false;
+  unloaded.availability_expression = ""; // blank would pass if it were loaded
+
+  NovaResources_EvaluateAvailability(state);
+  CHECK_FALSE(gated.is_available_runtime);
+  CHECK_FALSE(unloaded.is_available_runtime);
+
+  state.control.SetControlBit(7, true);
+  NovaResources_EvaluateAvailability(state);
+  CHECK(gated.is_available_runtime);
+  CHECK_FALSE(unloaded.is_available_runtime);
 }

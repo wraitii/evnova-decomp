@@ -101,7 +101,11 @@ shipyard-info, and every `UiWindow` setup dialog generically
 (`ui_dialog_ditl_<id>`, buttons named by title: `ok`, `cancel`, ...). Common
 names: `window`, `accept`/`decline`, `done`, `take`, `leave`, `buy`,
 `sell_or_info`, `previous`, `next`, `abort`, `list`, `description`,
-`scroll_up`, `scroll_down`. `GET /probe/ui` returns the active modal's rects
+`scroll_up`, `scroll_down`. The Mission BBS additionally publishes one
+`mission.<template_id>` rect per available row (the same zero-based id as
+`missions.missions.N.template_id`), so a scenario can select a specific row
+instead of relying on the default first entry. `GET /probe/ui` returns the
+active modal's rects
 **plus `window_size` and `playfield`** — the current window point size and
 the 640x480 canvas rect — so a harness can convert backing-store screenshots
 (the BMPs are physical pixels = window points x display density) to window
@@ -125,6 +129,28 @@ prefer small typed queries over one giant dump.
 (1000 lines, sequence-numbered). `GET /probe/logs` returns everything since a
 sequence number, so a harness can `tail` continuously: fetch once, then pass
 the returned `tail` value as the next `since`.
+
+### Mission-script / control-bit tracing
+
+Mission scripts and Nova control-bit set strings are silent in the original
+(`Mission_ExecuteMisnScriptEngine` 0x00449370 has no logging), so an opt-in
+trace records what ran and why. Enable it at startup with `EVN_MISSION_TRACE`
+(`1`/`on`/`commands` for one line per executed command and control-bit write,
+`full` to also dump each raw script before it executes), or toggle it live:
+
+```sh
+curl -s -X POST -d '{"cmd":"mission_trace","enabled":true}' localhost:8190/probe/command
+curl -s -X POST -d '{"cmd":"mission_trace","enabled":true,"mode":"full"}' \
+  localhost:8190/probe/command
+curl -s -X POST -d '{"cmd":"mission_trace","enabled":false}' localhost:8190/probe/command
+```
+
+Traced lines go through `NovaLog` and are therefore tailed from
+`/probe/logs`; they are prefixed `mission-trace` and carry the call-site
+reason (`OnAccept`, `cron OnStart`, `stellar OnDestroy`, `nebula OnExplore`,
+...) plus the mission slot and script offset. Malformed commands are logged
+(`WARN`) regardless; unmodelled opcodes are logged (`TODO(decomp)`) and every
+executed command and control-bit write is recorded only while tracing is on.
 
 ## Example session
 
