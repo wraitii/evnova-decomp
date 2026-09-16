@@ -29,6 +29,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -1288,6 +1289,62 @@ RunStoreQuantityPrompt(SdlPlatform &platform,
   return 0;
 }
 
+namespace {
+
+// Ghidra 0x00492f30 -> 0x00497900: replacement purchases propose the new
+// class short name plus a random three-digit suffix. The accepted edit is the
+// christening/name-entry buffer copied onto the player ship.
+[[nodiscard]] std::optional<std::string>
+RunShipPurchaseConfirmation(SdlPlatform &platform,
+                            GameState &state,
+                            const ShipClass &ship,
+                            const std::function<void()> &render_background) {
+  auto loaded = UiWindow_CreateFromDialogResource(platform, 0xbb9);
+  if (!loaded)
+    return std::nullopt;
+  UiDialogWindow window = std::move(*loaded);
+  NovaFontCache font_cache;
+  const std::string prompt = InfoString(0x78) + " " + ship.display_name + ":";
+  std::string proposed = ship.short_name;
+  proposed.push_back(' ');
+  for (int i = 0; i < 3; ++i) {
+    proposed +=
+        std::to_string(std::uniform_int_distribution<int>{1, 9}(state.rng));
+  }
+  UiPanel_SetEntryTextPascal(window, 3, prompt);
+  UiPanel_SetEntryTextPascal(window, 5, proposed);
+  UiPanel_SetTextEntrySelectionRange(window, 5, 0, 0xfe);
+  while (!platform.quit_requested()) {
+    short code = -1;
+    UiWindow_RunInteractionLoop(
+        platform, font_cache, window, &code, render_background);
+    if (code == 6)
+      return std::nullopt;
+    if (code != 1)
+      continue;
+    std::string name = UiPanel_GetEntryTextPascal(window, 5);
+    if (name.size() > 0x40) {
+      UiPanel_SetTextEntrySelectionRange(window, 5, 0, 0x3f);
+      continue;
+    }
+    constexpr std::string_view article = "the ";
+    if (name.size() > article.size() &&
+        std::equal(article.begin(),
+                   article.end(),
+                   name.begin(),
+                   [](char expected, char actual) {
+                     return expected ==
+                            std::tolower(static_cast<unsigned char>(actual));
+                   })) {
+      name.erase(0, article.size());
+    }
+    return name;
+  }
+  return std::nullopt;
+}
+
+} // namespace
+
 // Ghidra 0x0048ea70 NovaUi_RunOutfitterInteractionLoop and
 // 0x00492f30 NovaUi_RunShipyardPurchaseLoop: one generic store loop replaces
 // both (service is a parameter). The 0x00493fc0 NovaUi_ShipyardHandleSelection
@@ -1554,9 +1611,14 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
             }
           } else {
             const ShipClass *ship = state.scenario.Ship(session.selected_id);
-            (void)NovaLanded_BuyShip(state, stellar_id, session.selected_id,
-                                     ship == nullptr ? "" : ship->short_name);
-            session = NovaLanded_OpenShipyardSession(state, stellar_id);
+            if (ship != nullptr) {
+              const auto name = RunShipPurchaseConfirmation(
+                  platform, state, *ship, render_store_background);
+              if (name && NovaLanded_BuyShip(
+                              state, stellar_id, session.selected_id, *name)) {
+                return LandedExit::kServiceComplete;
+              }
+            }
           }
           continue;
         }
@@ -1632,9 +1694,14 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           }
         } else {
           const ShipClass *ship = state.scenario.Ship(session.selected_id);
-          (void)NovaLanded_BuyShip(state, stellar_id, session.selected_id,
-                                   ship == nullptr ? "" : ship->short_name);
-          session = NovaLanded_OpenShipyardSession(state, stellar_id);
+          if (ship != nullptr) {
+            const auto name = RunShipPurchaseConfirmation(
+                platform, state, *ship, render_store_background);
+            if (name && NovaLanded_BuyShip(
+                            state, stellar_id, session.selected_id, *name)) {
+              return LandedExit::kServiceComplete;
+            }
+          }
         }
         continue;
       }

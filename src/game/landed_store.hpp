@@ -174,6 +174,13 @@ Player_SwapShipWithEscort(GameState &state, Ship &escort, bool from_capture);
                                       std::int16_t ship_id,
                                       std::string_view player_ship_name);
 
+// Ghidra 0x00469810 Player_TransferCargoAndJunkToEscortByRatio. Slot zero is
+// the shipyard-replacement case: retain the new player hull's proportional
+// cargo share and move the remainder into the eligible escort fleet's
+// abstract capacity.
+void Player_TransferCargoAndJunkToEscortByRatio(GameState &state,
+                                                std::int16_t escort_ship_slot);
+
 // Ghidra 0x004229d0 Player_ProcessEscortFleetAtStellar. Auto fleet-trade pass
 // run at the end of the Spaceport interaction loop: at a shipyard-capable
 // stellar (`travel_flags & 8`) it sells escorts marked for release, upgrades

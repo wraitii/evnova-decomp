@@ -195,6 +195,14 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship);
 NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
                                             const Ship &ship);
 
+// Ghidra 0x00412090 Ship_ScoreAssistTargetForShip. Scores one candidate for an
+// assist/response ship; returns 0 when the candidate is not eligible.
+[[nodiscard]] std::int32_t
+NovaAi_ScoreAssistTargetForShip(const GameState &state,
+                                const Ship &candidate,
+                                const Ship &helper,
+                                std::int16_t score_flags);
+
 // Ghidra 0x00412030 Ship_FindBestAssistTargetForShip. `score_flags` is the
 // original short argument: 0x226 limits the first range term, while -1 means
 // no range limit. Returns the slot with the lowest positive score.
@@ -473,16 +481,13 @@ NovaAiShip_IsPlayerThreatenedByEnemyOfShip(const GameState &state,
 NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
                                           const Ship &ship);
 
-// Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. PARTIAL reconstruction:
-// the early retention gate for active engagements, the mission-fleet goal 0/1
-// arms, the weapon-readiness early return, the non-xenophobic ally-support
-// pass, the IFF-scrambler/policy player shield, and the behavior-6 escort
-// re-selection. NOT implemented: the license/anti-tamper check, the pers_def
-// personality arms, and the remaining government target passes
-// (flags_primary&1 aggressive scan, near-player
-// reputation/odds gate, inherent-combat roll, distress-responder rescans) with
-// its perceived-combat-strength filtering; the middle of the routine is an
-// interim clean-room nearest-hostile slice.
+// Ghidra 0x0040e020 Ship_AcquirePrimaryTargetForShip. Full NPC target
+// acquisition: retention / pers / mission-fleet early arms, ally join, then
+// the near-player + reputation legal-record gate, inherent-combat roll,
+// xenophobic aggressive scan, IFF/policy player shield, MaxOdds strength
+// filter, squadron-leader Mass preference, nearest-acquirable fallback, and
+// the behavior-6 escort re-selection. Only the leading license-seed
+// anti-tamper prologue is skipped (see the .cpp).
 void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship);
 
 // Ghidra 0x00410c30 Ship_EnterShipAiState0x09_TargetPlayerForAssist. Enters AI
