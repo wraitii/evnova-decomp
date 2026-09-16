@@ -442,7 +442,18 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
     state.weapon_count_by_class[bank * kBankStride] =
         static_cast<std::int16_t>(stock.count > 0 ? stock.count : 0);
     if (stock.ammo_load > 0) {
-      state.weapon_secondary_count_by_class[bank * kBankStride] =
+      // The original seeds the secondary counter at the mounted weapon's
+      // ammo_or_energy_cost_code (mode-99 carried-ship bays and out-of-range
+      // codes fall back to the bank); it is NOT the weapon bank itself. See
+      // Menu_RunNewGameFlow 0x00489d70 and Player_SwapShipWithEscort
+      // 0x00423fa0.
+      std::size_t secondary_bank = bank;
+      const Weapon *weapon = state.scenario.Weapon(stock.weapon_id);
+      if (weapon != nullptr && weapon->weapon_mode_code != 99 &&
+          weapon->ammo_type >= 0 && weapon->ammo_type < 0x100) {
+        secondary_bank = static_cast<std::size_t>(weapon->ammo_type);
+      }
+      state.weapon_secondary_count_by_class[secondary_bank * kBankStride] =
           static_cast<std::int16_t>(stock.ammo_load);
     }
   }

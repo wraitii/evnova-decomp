@@ -327,11 +327,15 @@ struct ShipClass {
   // type", e.g. "Class A"). Drawn under the target-panel name.
   std::string subtitle;
 
-  std::int16_t cargo_holds = 0;   // Holds
-  std::int16_t base_shield = 0;   // Shield
-  std::int16_t base_armor = 0;    // Armor
-  std::int16_t base_fuel = 0;     // Fuel (100 = 1 jump)
-  std::int16_t free_mass = 0;     // FreeMass
+  std::int16_t cargo_holds = 0; // Holds
+  std::int16_t base_shield = 0; // Shield
+  std::int16_t base_armor = 0;  // Armor
+  std::int16_t base_fuel = 0;   // Fuel (100 = 1 jump)
+  std::int16_t free_mass = 0;   // FreeMass (runtime: payload + default loadout)
+  // Advertised FreeMass (shp payload +0x0c) captured before the loader's
+  // default-loadout mass fold (0x004bd3c0) raised free_mass. The Shipyard Info
+  // panel shows this value; see the BUGFIX note in DrawShipyardInfoPanel.
+  std::int16_t advertised_free_mass = 0;
   std::int16_t mass_tons = 0;     // Mass
   std::int16_t length_meters = 0; // Length
   std::int16_t tech_level = 0;    // TechLevel
@@ -1741,4 +1745,12 @@ struct ScenarioData {
   [[nodiscard]] bool LoadFromArchives(std::mt19937 *variant_rng = nullptr,
                                       bool ship_animations = true);
 };
+
+// Ghidra NovaData_LoadScenarioResourceTables (0x004bd3c0) ship-section
+// default-loadout FreeMass fold: adds the default weapon/ammo/DefaultItem
+// purchase mass to each ShipClass.free_mass (see scenario_data.cpp). Called by
+// LoadFromArchives once the outfit and weapon tables are available; exposed so
+// unit tests can pin the ammo keying.
+void FoldShipDefaultLoadoutMass(ScenarioData &data);
+
 } // namespace game

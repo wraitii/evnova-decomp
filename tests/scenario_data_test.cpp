@@ -35,7 +35,11 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(ship->speed == 400.0F);
   CHECK(ship->turn_rate == 40.0F);
   CHECK(ship->base_fuel == 300);
-  CHECK(ship->free_mass == 8);
+  // Shuttle payload FreeMass is 8; the loader's default-loadout fold
+  // (0x004bd3c0) adds its stock Light Blaster's mass (3), so the runtime
+  // ShipClassDef.free_mass is 11. The shipyard panel shows the advertised 8.
+  CHECK(ship->advertised_free_mass == 8);
+  CHECK(ship->free_mass == 11);
   CHECK(ship->base_armor == 30);
   CHECK(ship->mass_tons == 15);
   // Cost is repacked as a 4-byte big-endian field at 0x30 (0x00002710 = 10000).
