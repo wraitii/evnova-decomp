@@ -52,6 +52,8 @@ constexpr float kPlayerFireRestrictedVelocityDamp = 0.995F;
 // 21 ms and publishes elapsed_ms * 0.03 as the normalized tick scale. Raw
 // per-call mutations therefore advance at one unit per 0.63 normalized ticks.
 constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
+constexpr float kOriginalMaxRateFrameMs = 21.0F;
+constexpr float kOriginalTickMs = 1000.0F / 30.0F;
 
 constexpr float RawSpaceflightCallTicks(float elapsed_ticks) {
   return elapsed_ticks / kOriginalMaxRateFrameTicks;
@@ -1461,14 +1463,22 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
   RouteMapView route_map_view;
   route_map_view.Load(platform);
   FlightAutomationController automation;
+  // The simulation advances in fixed 30 Hz quanta. Rendering remains the
+  // outer loop, so accelerated mode can execute many logical ticks before one
+  // presentation without handing AI, travel, or lower-level control routines
+  // a render-sized delta.
+  float simulation_accumulator_ms = kOriginalTickMs;
+  double simulation_tick_ms =
+      static_cast<double>(state.gameplay_now_ms) - kOriginalTickMs;
   while (!platform.quit_requested() && !returning_to_menu) {
-    const std::uint64_t now_ms = platform.gameplay_ticks_ms();
-    state.gameplay_now_ms = now_ms;
-    const float frame_time_ms = static_cast<float>(now_ms - prev_tick_ms);
-    prev_tick_ms = now_ms;
+    const std::uint64_t host_now_ms = platform.gameplay_ticks_ms();
+    state.gameplay_now_ms = host_now_ms;
+    const float host_frame_time_ms =
+        static_cast<float>(host_now_ms - prev_tick_ms);
+    prev_tick_ms = host_now_ms;
     // Port stand-in for NovaTime_GetTickCount60Hz's g_frame_tick_count_60hz
     // (see GameState::tick_60hz): re-derived from the wall clock each frame.
-    state.tick_60hz = static_cast<std::uint32_t>(now_ms * 60ULL / 1000ULL);
+    state.tick_60hz = static_cast<std::uint32_t>(host_now_ms * 60ULL / 1000ULL);
     // Keep the gameplay viewport half-size current (g_viewport_center_x/y);
     // asteroid spawn scatters over it.
     view.SyncGameplayViewport(platform, state);
@@ -1482,7 +1492,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Player control (heading/throttle) is read here once so the ship flies
     // while the simulation stubs do not, and the same snapshot feeds the
     // travel/jump channel. Movement integrates into PlayerShip.
-    FlightInput input = platform.PollFlightInput();
+    FlightInput frame_input = platform.PollFlightInput();
     const auto binding_held = [&](std::size_t command) {
       const std::uint16_t key = prefs.bindings.cmd_to_key[command];
       return key != 0xff && key != 0xffff &&
@@ -1491,24 +1501,24 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // Ship_HandlePlayerShipControl reads every action through
     // g_player_key_bindings. PollFlightInput owns the SDL event pump; replace
     // its convenience defaults with the persisted original command table.
-    input.turn_left = binding_held(0x13);
-    input.turn_right = binding_held(0x14);
-    input.thrust = binding_held(0x15);
-    input.reverse = binding_held(0x16);
-    input.afterburner = binding_held(0x18);
-    input.fire = binding_held(0x02);
-    input.fire_secondary = binding_held(0x03);
-    input.cycle_secondary = binding_held(0x00);
-    input.cycle_secondary_backwards =
-        input.cycle_secondary && (platform.IsOriginalKeyCodeHeld(0x2a) ||
-                                  platform.IsOriginalKeyCodeHeld(0x36));
-    input.clear_secondary = binding_held(0x01);
-    input.face_target = binding_held(0x07);
-    input.land = binding_held(0x06);
-    input.travel = binding_held(0x0e);
-    input.starmap = binding_held(0x09);
-    input.mission_info = binding_held(0x28);
-    input.board = binding_held(0x10);
+    frame_input.turn_left = binding_held(0x13);
+    frame_input.turn_right = binding_held(0x14);
+    frame_input.thrust = binding_held(0x15);
+    frame_input.reverse = binding_held(0x16);
+    frame_input.afterburner = binding_held(0x18);
+    frame_input.fire = binding_held(0x02);
+    frame_input.fire_secondary = binding_held(0x03);
+    frame_input.cycle_secondary = binding_held(0x00);
+    frame_input.cycle_secondary_backwards =
+        frame_input.cycle_secondary && (platform.IsOriginalKeyCodeHeld(0x2a) ||
+                                        platform.IsOriginalKeyCodeHeld(0x36));
+    frame_input.clear_secondary = binding_held(0x01);
+    frame_input.face_target = binding_held(0x07);
+    frame_input.land = binding_held(0x06);
+    frame_input.travel = binding_held(0x0e);
+    frame_input.starmap = binding_held(0x09);
+    frame_input.mission_info = binding_held(0x28);
+    frame_input.board = binding_held(0x10);
     // Probe automation is an optional input producer. It runs after both SDL/
     // probe input and persisted bindings have populated the snapshot, but
     // before any player-command edge latch observes it.
@@ -1525,18 +1535,18 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
               StellarArrivalSpriteFullHeight(platform, view, state, *resolved));
         }
         (void)automation.LandAt(
-            state, request->target, now_ms, request->timeout_ms, envelope);
+            state, request->target, host_now_ms, request->timeout_ms, envelope);
         break;
       }
       case ProbeAutomationRequest::Kind::kJumpTo:
         (void)automation.JumpTo(
-            state, request->target, now_ms, request->timeout_ms);
+            state, request->target, host_now_ms, request->timeout_ms);
         break;
       case ProbeAutomationRequest::Kind::kDestroyShip:
         (void)automation.DestroyShip(
             state,
             request->target,
-            now_ms,
+            host_now_ms,
             request->timeout_ms,
             static_cast<std::int16_t>(request->ship_id),
             request->allow_missing);
@@ -1549,770 +1559,806 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     if (platform.probe().ConsumeAutomationDocked()) {
       automation.ObservedDocked();
     }
-    automation.Tick(state, now_ms, input, frame_time_ms / (1000.0F / 30.0F));
-    const auto &automation_status = automation.status();
-    const auto goal_name = [&] {
-      switch (automation_status.goal) {
-      case FlightAutomationGoal::kLandAt:
-        return "land_at";
-      case FlightAutomationGoal::kJumpTo:
-        return "jump_to";
-      case FlightAutomationGoal::kDestroy:
-        return "destroy";
-      case FlightAutomationGoal::kNone:
+    // Ordinary mode preserves the original 21 ms outer-call cadence. Probe
+    // acceleration intentionally switches to 30 Hz outer frames to reduce
+    // scheduler overhead; raw-call consumers still replay their 21 ms calls
+    // internally from the normalized step size.
+    const float simulation_quantum_ms =
+        platform.accelerated() ? kOriginalTickMs : kOriginalMaxRateFrameMs;
+    simulation_accumulator_ms += host_frame_time_ms;
+    while (simulation_accumulator_ms >= simulation_quantum_ms) {
+      simulation_accumulator_ms -= simulation_quantum_ms;
+      simulation_tick_ms += simulation_quantum_ms;
+      const std::uint64_t now_ms =
+          static_cast<std::uint64_t>(std::max(0.0, simulation_tick_ms));
+      const float frame_time_ms = simulation_quantum_ms;
+      FlightInput input = frame_input;
+      automation.Tick(state, now_ms, input, frame_time_ms / kOriginalTickMs);
+      const auto &automation_status = automation.status();
+      const auto goal_name = [&] {
+        switch (automation_status.goal) {
+        case FlightAutomationGoal::kLandAt:
+          return "land_at";
+        case FlightAutomationGoal::kJumpTo:
+          return "jump_to";
+        case FlightAutomationGoal::kDestroy:
+          return "destroy";
+        case FlightAutomationGoal::kNone:
+          return "none";
+        }
         return "none";
-      }
-      return "none";
-    }();
-    const auto phase_name = [&] {
-      switch (automation_status.phase) {
-      case FlightAutomationPhase::kIdle:
-        return "idle";
-      case FlightAutomationPhase::kSelect:
-        return "select";
-      case FlightAutomationPhase::kMove:
-        return "move";
-      case FlightAutomationPhase::kEngage:
-        return "engage";
-      case FlightAutomationPhase::kWaiting:
-        return "waiting";
-      case FlightAutomationPhase::kComplete:
-        return "complete";
-      case FlightAutomationPhase::kFailed:
+      }();
+      const auto phase_name = [&] {
+        switch (automation_status.phase) {
+        case FlightAutomationPhase::kIdle:
+          return "idle";
+        case FlightAutomationPhase::kSelect:
+          return "select";
+        case FlightAutomationPhase::kMove:
+          return "move";
+        case FlightAutomationPhase::kEngage:
+          return "engage";
+        case FlightAutomationPhase::kWaiting:
+          return "waiting";
+        case FlightAutomationPhase::kComplete:
+          return "complete";
+        case FlightAutomationPhase::kFailed:
+          return "failed";
+        case FlightAutomationPhase::kCancelled:
+          return "cancelled";
+        }
         return "failed";
-      case FlightAutomationPhase::kCancelled:
-        return "cancelled";
-      }
-      return "failed";
-    }();
-    // A request accepted by the probe but not yet consumed by the flight loop
-    // leaves the controller on the previous goal. Suppress a stale "complete"
-    // so a harness waiting on it cannot match the goal that just finished and
-    // race ahead of the queued one.
-    const char *published_phase =
-        platform.probe().HasPendingAutomationRequest() &&
-                automation_status.phase == FlightAutomationPhase::kComplete
-            ? "select"
-            : phase_name;
-    const auto probe_json_escape = [](std::string_view value) {
-      // JSON must be valid UTF-8; the target is probe-authored UTF-8 while the
-      // detail may embed raw MacRoman game strings.
-      const std::string encoded = NovaText_EncodeUtf8(value);
-      std::string escaped;
-      escaped.reserve(encoded.size());
-      for (const char c : encoded) {
-        if (c == '"' || c == '\\') {
-          escaped.push_back('\\');
-        }
-        escaped.push_back(c == '\n' || c == '\r' ? ' ' : c);
-      }
-      return escaped;
-    };
-    platform.probe().PublishAutomationStatus(
-        std::string{"{\"goal\":\""} + goal_name + "\",\"phase\":\"" +
-        published_phase + "\",\"target\":\"" +
-        probe_json_escape(automation_status.target) + "\",\"detail\":\"" +
-        probe_json_escape(automation_status.detail) + "\"}");
-    // Escape/'q' are latched by PollFlightInput (it owns the SDL event drain
-    // the old PollTextEvent-based check relied on); return to the menu.
-    if (input.escape_pressed) {
-      returning_to_menu = true;
-      break;
-    }
-    // PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240): death
-    // bookkeeping, disabled damping, disabled auto-repair, the periodic
-    // distress cue, and carried-bomb detonation. Runs ahead of the flight
-    // input pass, matching the original's dispatch order. `true` means the
-    // death/inactive branch consumed the frame (flight input is skipped).
-    // Once the bookkeeping latches game_over_pending the original returns to
-    // the pilot/menu flow via its restart command; TODO(decomp(0x0044abf8))
-    // skipped: that command channel is not reconstructed, so the port leaves
-    // flight mode instead.
-    // True when PlayerTick_StatusAndOutfitEvents' death branch consumed the
-    // frame (flight input is skipped, matching the original's early return).
-    bool player_status_consumed = false;
-    if (PlayerTick_StatusAndOutfitEvents(
-            state, frame_time_ms / (1000.0F / 30.0F), input.eject)) {
-      if (state.game_over_pending) {
-        // The original latches DAT_00596d38 during the tick and only exits at
-        // the top of the next loop iteration, so the frame that latches
-        // game-over is still presented (the wreck's Explode2 gets its final
-        // frames before the menu). Do not break here; the loop condition ends
-        // the run after this frame is drawn.
-        returning_to_menu = true;
-      }
-      player_status_consumed = true;
-    }
-    // PlayerTick_TimedActionTransition (0x0044d490): while a blocking timed
-    // action is armed (escape-pod flight) the original returns from the
-    // player core after moving the ship and ticking the countdown; flight
-    // input and the weapon/target command blocks are skipped. On zero the
-    // respawn transition runs inside this call. The eject frame suppresses
-    // the tick once (the original's dispatch has already passed when the
-    // eject transform arms the countdown).
-    bool timed_action_active = false;
-    if (!player_status_consumed) {
-      if (state.timed_action_suppress_this_frame) {
-        state.timed_action_suppress_this_frame = false;
-      } else {
-        timed_action_active = PlayerTick_TimedActionTransition(
-            state, frame_time_ms / (1000.0F / 30.0F));
-      }
-    }
-    // DAT_007354a5: the escape-pod bomb variant latches an immediate return
-    // to the menu shell after its deployment overlay.
-    if (state.return_to_menu_pending) {
-      state.return_to_menu_pending = false;
-      returning_to_menu = true;
-      break;
-    }
-    // Per-frame player-target validation (Ship_HandlePlayerShipCore 0x0044aa70
-    // prologue): the ship target drops when the target ship is inactive,
-    // destroyed, entering hyperspace (AI state 0x15) or cloaked past the
-    // visibility gate -- which is how a targeted ship jumping out releases the
-    // selection. The stellar selection has no per-frame validation.
-    const bool player_tick_consumed =
-        player_status_consumed || timed_action_active;
-    if (!player_tick_consumed) {
-      NovaTargeting_ValidatePlayerTarget(state);
-    }
-    // Ghidra System_UpdateSystemAndStellarDisplayState (0x00432470) scope B:
-    // per-tick recompute of the transient discovered_this_rebuild latch (the
-    // starmap's one-jump-ahead window), so script reveals (mïsn X opcode) get
-    // their grey neighbour ring without waiting for the next system entry.
-    NovaSystem_RebuildDiscoveredLatch(state);
-    if (!player_tick_consumed) {
-      PlayerTick_TravelSelectionCommands(
-          state, input, travel_selection_latches);
-      PlayerTick_ShipTargetCommands(state, input, ship_target_latches);
-    }
-    // Route-map overlay zoom + auto-dismiss (Ghidra 0x0045216e /
-    // 0x0042f23e, the PlayerTick_AuxiliaryCommands zoom block). Zoom keys
-    // are raw scancodes: minus/equals and the numpad -/+ pair; the
-    // modifier-combo guard covers shift/ctrl/alt
-    // (TODO(decomp): original commands 0x6b/0x6f not modelled).
-    if (!player_tick_consumed) {
-      RouteMap_Tick(
-          state,
-          {.zoom_in_held = platform.IsOriginalKeyCodeHeld(0x0c) ||
-                           platform.IsOriginalKeyCodeHeld(0x4a),
-           .zoom_out_held = platform.IsOriginalKeyCodeHeld(0x0d) ||
-                            platform.IsOriginalKeyCodeHeld(0x4e),
-           .modifier_combo_held = platform.IsOriginalKeyCodeHeld(0x2a) ||
-                                  platform.IsOriginalKeyCodeHeld(0x36) ||
-                                  platform.IsOriginalKeyCodeHeld(0x1d) ||
-                                  platform.IsOriginalKeyCodeHeld(0x38)});
-    }
-    if (!player_tick_consumed) {
-      PlayerTick_MouseTargetAndControlCommands(platform, view, state, input);
-    }
-    const bool land_pressed =
-        !player_tick_consumed && input.land && !land_was_held;
-    const bool target_action_pressed =
-        !player_tick_consumed && input.target_action && !target_action_was_held;
-    const bool board_pressed =
-        !player_tick_consumed && input.board && !board_was_held;
-    if (!player_tick_consumed) {
-      land_was_held = input.land;
-      target_action_was_held = input.target_action;
-      board_was_held = input.board;
-    }
-    // The original's movement values are per simulation tick. Its normal
-    // cadence is 30 Hz; using a 60 Hz SDL render loop without this conversion
-    // advances the player ship at twice the intended speed.
-    constexpr float kOriginalTickMs = 1000.0F / 30.0F;
-    // During an engaged hyperspace jump the jump state machine owns the ship
-    // (heading/velocity/glow) for the brake, alignment hold and zoom thrust;
-    // the player's normal movement integration is suspended so it does not
-    // overwrite the jump's flight. NovaTravel_Tick below drives the phases.
-    // Ship_HandlePlayerShipCore (0x00451003): with escorts resolved on the
-    // player, the player core refreshes their wedge offsets every frame
-    // (smooth mode). The +0xC2 flag comes from Ship_TickLeaderFlags in
-    // the scope-6 pass. Gated off while the jump state machine owns the ship,
-    // matching the original's engage path bypassing this command block.
-    // PlayerTick_WeaponCommands (0x0044aa70 block 0x0044BEB0) +
-    // PlayerTick_WeaponCycleContinuation (0x0044EAB4): primary fire loop,
-    // selected-secondary fire, unfirable-bank auto-clear, the wrapped
-    // secondary-bank cycle and the clear-selection arm. The original gates
-    // the fire arms on the station-hold/maneuver timers and the
-    // disabled state inside the dispatch; the port additionally
-    // suspends the whole pass while the jump state machine owns the ship
-    // (matching the disable restriction the original applies through the brake,
-    // hold and zoom phases) and while a blocking timed action runs (the
-    // original returns from the player core before the weapon block).
-    if (!player_tick_consumed && !state.travel.engaging) {
-      const bool cycle_secondary =
-          input.cycle_secondary && !secondary_cycle_was_held;
-      const bool clear_secondary =
-          input.clear_secondary && !clear_secondary_was_held;
-      NovaWeapon_TickPlayerWeaponCommands(
-          state,
-          {.fire_primary_held = input.fire,
-           .fire_secondary_held = input.fire_secondary,
-           .cycle_secondary = cycle_secondary,
-           .cycle_secondary_backwards = input.cycle_secondary_backwards,
-           .clear_secondary = clear_secondary},
-          frame_time_ms / kOriginalTickMs);
-      secondary_cycle_was_held = input.cycle_secondary;
-      clear_secondary_was_held = input.clear_secondary;
-      // Escort Commands overlay + order dispatch (PlayerTick_Auxiliary-
-      // Commands escort blocks 0x00450ae7..0x00450f67, Ship_CommandPlayer-
-      // EscortGroup 0x0045c880): the keys resolve through the binding table
-      // (slots 0x2a / 0x2b..0x2f / 0x30..0x33) against the live keyboard
-      // state, matching the original's command-active reads.
-      const auto &escort_key = prefs.bindings.cmd_to_key;
-      const auto escort_held = [&platform](std::uint16_t code) {
-        return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
-      };
-      PlayerTick_EscortCommands(
-          state,
-          {.panel_toggle_held = escort_held(escort_key[0x2a]),
-           .select_group_held = {escort_held(escort_key[0x2b]),
-                                 escort_held(escort_key[0x2c]),
-                                 escort_held(escort_key[0x2d]),
-                                 escort_held(escort_key[0x2e]),
-                                 escort_held(escort_key[0x2f])},
-           .order_attack_held = escort_held(escort_key[0x30]),
-           .order_defend_held = escort_held(escort_key[0x31]),
-           .order_hold_held = escort_held(escort_key[0x32]),
-           .order_formation_held = escort_held(escort_key[0x33]),
-           .arm_modifier_held = escort_held(0x38)},
-          state.gameplay_now_ms * 60 / 1000);
-    }
-    // Face-target command (Ghidra 0x0044aa70 block 0x0044c0b1 -> 0x0044c18a,
-    // binding slot 7; the port binds R -- see FlightInput::face_target):
-    // while held, stores the heading to face and arms the manual-flight
-    // auto-turn that PlayerTick_ManualFlightAndRegeneration consumes this
-    // frame. The original dispatches this directly after the weapon commands.
-    bool face_target_armed = false;
-    if (!player_tick_consumed && !state.travel.engaging) {
-      const bool face_arm_modifier = platform.IsOriginalKeyCodeHeld(0x38) ||
-                                     platform.IsOriginalKeyCodeHeld(0x6f);
-      face_target_armed =
-          PlayerTick_FaceTargetCommand(state, input, face_arm_modifier);
-    }
-    // Ghidra 0x00450710 PlayerTick_AuxiliaryCommands coverage map: the port
-    // reconstructs the fuel-scoop tail
-    // (PlayerTick_IonizationAndFuelRegeneration), the
-    // escort/category command group (above), the route-map zoom block
-    // (0x0045216e, RouteMap_Tick) and the ionization/fuel regeneration arm
-    // (0x00450717, PlayerTick_IonizationAndFuelRegeneration).
-    // TODO(decomp(0x00450fd9)) skipped: the cheat/debug-spawn arm
-    // (PlayerTick_CheatAndSpawnCommands, plan score 1.37) -- instant-jump
-    // cheat (command 0xe) and the 0x38/0x6f/0x1d/0x6b/0x2a debug ship-spawn
-    // combos. Also unported: the FPS toggle and the launch-bay command
-    // slices of the same region.
-    // Cooldown decay remains live during an engaged jump, but not after an
-    // earlier death/timed-action branch has returned from the player core.
-    if (!player_tick_consumed) {
-      NovaWeapon_TickPlayerWeaponBankCooldowns(state,
-                                               frame_time_ms / kOriginalTickMs);
-    }
-    // Play every fire sound latched this frame by the player or NPC firing
-    // routines (a round actually spawned). The firing routines append
-    // GameState.pending_fire_sounds; this loop owns the SdlAudio device, plays
-    // each decoded sound with the original's distance attenuation
-    // (NovaAudio_PlaySpatialByDistance, NPC fire sourced at the firing ship
-    // against the player ship as listener; the player's own fire is
-    // src == listener and plays at full volume), then clears the queue. Runs
-    // every frame regardless of the fire input so NPC volleys are audible.
-    for (const auto &pending : state.pending_fire_sounds) {
-      if (pending.slot < 0 || pending.slot >= 36) {
-        continue;
-      }
-      // Weapon fire slots 0..35 map onto the gameplay snd table (id 200+slot),
-      // which is fully preloaded; fall back to the legacy owned-weapon cache.
-      const std::size_t index = static_cast<std::size_t>(pending.slot);
-      const auto *sound = state.gameplay_sounds[index].has_value()
-                              ? &*state.gameplay_sounds[index]
-                              : (state.weapon_fire_sounds[index].has_value()
-                                     ? &*state.weapon_fire_sounds[index]
-                                     : nullptr);
-      if (sound == nullptr) {
-        continue;
-      }
-      // Weapon.flags bit 0x10: suppress a retrigger while this fire sound is
-      // still playing (NovaAudio_CountActiveByHandle gate in the original).
-      if (pending.suppress_if_active &&
-          audio.CountActiveByKey(pending.slot) > 0) {
-        continue;
-      }
-      const float gain = NovaWeapon_ComputeSpatialFireGain(
-          state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
-      audio.Play(*sound, gain, 1.0F, pending.slot, pending.priority_width);
-    }
-    state.pending_fire_sounds.clear();
-    // Impact sounds use the original 300..363 snd range, which is already
-    // covered by the contiguous gameplay_sounds cache at offsets 100..163.
-    // Collision/effect code only queues source coordinates; this loop owns the
-    // SDL audio device and applies the same spatial attenuation as weapon fire.
-    for (const auto &pending : state.pending_impact_sounds) {
-      if (pending.slot < 0 || pending.slot >= 64) {
-        continue;
-      }
-      const std::size_t cache_index =
-          static_cast<std::size_t>(100 + pending.slot);
-      if (!state.gameplay_sounds[cache_index].has_value()) {
-        continue;
-      }
-      const float gain = NovaWeapon_ComputeSpatialFireGain(
-          state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
-      audio.Play(*state.gameplay_sounds[cache_index],
-                 gain,
-                 1.0F,
-                 300 + pending.slot,
-                 /*priority_width=*/6);
-    }
-    state.pending_impact_sounds.clear();
-    constexpr std::size_t kDestructionSoundIndex = 372 - 200;
-    for (const auto &pending : state.pending_destruction_sounds) {
-      if (!state.gameplay_sounds[kDestructionSoundIndex].has_value()) {
-        continue;
-      }
-      const float gain = NovaWeapon_ComputeSpatialFireGain(
-          state.player.pos_x, state.player.pos_y, pending.src_x, pending.src_y);
-      audio.Play(*state.gameplay_sounds[kDestructionSoundIndex],
-                 gain,
-                 1.0F,
-                 372,
-                 /*priority_width=*/5);
-    }
-    state.pending_destruction_sounds.clear();
-    // Centered UI cues from the boarding system (transition-table handles,
-    // snd 150 + index). The flight loop owns the audio device; the modal
-    // windows play their cues through the same queue. Mirrors
-    // NovaAudio_QueueCenteredSound(handle, priority_width, ...). The lazy
-    // decode runs
-    // here so every gameplay-side queuer (jump-range cue, auto-repair,
-    // distress alert) sees a loaded table even without a boarding pass.
-    EnsureTransitionSounds(state);
-    for (const auto &pending : state.pending_ui_sounds) {
-      if (pending.transition_index < 0 ||
-          pending.transition_index >=
-              static_cast<std::int16_t>(state.transition_sounds.size())) {
-        continue;
-      }
-      const auto &sound = state.transition_sounds[static_cast<std::size_t>(
-          pending.transition_index)];
-      if (!sound.has_value()) {
-        continue;
-      }
-      audio.Play(*sound,
-                 1.0F,
-                 1.0F,
-                 150 + pending.transition_index,
-                 pending.priority_width);
-    }
-    state.pending_ui_sounds.clear();
-    // Cross-system hyperspace jump state machine (travel.cpp): engages on
-    // the 'j' key with a plotted destination, then drives the brake and the
-    // warp-up hold before the fire. The 'Warp up' voice count gates the fire
-    // like the original's NovaAudio_CountActiveByHandle latch.
-    if (!player_tick_consumed) {
-      NovaTravel_Tick(state,
-                      input.travel,
-                      frame_time_ms,
-                      audio.CountActiveByKey(game::kHyperspaceWarpUpSoundKey) >
-                          0);
-    }
-    // The original dispatches the hyperspace command before the manual-flight
-    // region. A newly engaged jump therefore owns this frame immediately;
-    // normal steering must not contribute one final integration step.
-    if (!player_tick_consumed && !state.travel.engaging) {
-      PlayerTick_ManualFlightAndRegeneration(
-          state, input, frame_time_ms / kOriginalTickMs, face_target_armed);
-    } else if (!timed_action_active && state.player.is_active &&
-               NovaAiShip_IsDestroyed(state.player)) {
-      // Destroyed hull coast (Ship_HandlePlayerShipCore 0x0044aa70): the
-      // original still applies stellar gravity, the per-axis speed caps and
-      // position integration while its input-driven thrust/steering blocks are
-      // gated off by the fire-restricted flag. Feed a neutral input so the
-      // wreck keeps its inertia through the death presentation instead of
-      // stopping dead.
-      PlayerTick_ManualFlightAndRegeneration(state,
-                                             FlightInput{},
-                                             frame_time_ms / kOriginalTickMs,
-                                             /*face_target_armed=*/false);
-    }
-    if (!player_tick_consumed) {
-      PlayerTick_ShieldAndArmorRegeneration(state, frame_time_ms);
-    }
-    if (!player_tick_consumed && !state.travel.engaging &&
-        state.player.ai_selected_as_resolved_target) {
-      Ship_UpdateEscortFormations(state, state.player, /*snap=*/false);
-    }
-    // Play the hyperspace jump sounds latched by the travel state machine
-    // (the 'Warp up' cue as the zoom thrust begins and the 'Warp out' boom at
-    // the fire/arrival, synced with the screen flash). The loop owns the
-    // SdlAudio device, so travel only latches flags. Mirrors the original's
-    // Stellar_TriggerHyperspaceAudioOnce one-shot (g_playerHyperspaceAudio-
-    // Latch gating NovaAudio_QueueCenteredSound)
-    // [Ghidra 0x00431420].
-    if (state.warp_up_sound_pending) {
-      if (state.warp_up_sound.has_value()) {
-        // The fire gate in NovaTravel_Tick waits for this voice to finish, and
-        // the tunnel ramp schedule is cue-relative, so this rate sets the
-        // whole jump cadence. The original stages the cue at rate
-        // 1.0/jump_duration_multiplier (0x0046ab00: 65536/multiplier
-        // fixed-point; chassis-derived 0.91..2.08 -> rates 0.48..1.1). The
-        // port pins the multiplier to 1.0 (not decoded into ShipClass yet),
-        // so the cue plays at rate 1.0: 6.08 s of rising cue, ~2.1 s of
-        // stationary hold, ramp onset, boom as the cue resolves.
-        audio.Play(*state.warp_up_sound,
-                   1.0F,
-                   1.0F,
-                   game::kHyperspaceWarpUpSoundKey,
-                   /*priority_width=*/0x32);
-      }
-      state.warp_up_sound_pending = false;
-    }
-    if (state.warp_up_cancel_pending) {
-      audio.StopByKey(game::kHyperspaceWarpUpSoundKey);
-      state.warp_up_cancel_pending = false;
-    }
-    if (state.warp_out_sound_pending) {
-      if (state.warp_out_sound.has_value()) {
-        audio.Play(*state.warp_out_sound,
-                   1.0F,
-                   1.0F,
-                   /*sound_key=*/130,
-                   /*priority_width=*/0x32);
-      }
-      state.warp_out_sound_pending = false;
-    }
-
-    // Finish the system-entry branch before commands can observe the new
-    // system. In particular, a completed jump clears `engaging`; modal and
-    // targeting commands below must see the rebuilt population and selections.
-    if (!player_tick_consumed) {
-      PlayerTick_JumpArrivalBlock(platform, view, state, now_ms);
-    }
-
-    // Galaxy-map command ('m', edge-triggered): open the starmap modal over
-    // the current flight scene. Mirrors Ship_HandlePlayerShip (0x0044b120)
-    // dispatching NovaUi_RunStarmapWindow when its map gameplay command is
-    // active. The modal owns the frame until the player closes it; the jump
-    // state machine is untouched by inspection (the map only selects systems).
-    // Gated while a jump is engaged (the original fire-restricts the player
-    // through the brake, hold and zoom).
-    const bool starmap_held = input.starmap;
-    if (!player_tick_consumed && starmap_held && !starmap_was_held &&
-        !state.travel.engaging) {
-      const StarmapResult map_result =
-          NovaStarmap_RunWindow(platform, state, -1, &view, &hud);
-      if (map_result.exit == StarmapExit::kQuit) {
-        returning_to_menu = true;
-        break;
-      }
-      // Plot the map-selected system as the next jump destination so the HUD
-      // shows the plotted jump and 'j' engages it. The map itself applies
-      // plain-click plots and route re-arms internally (matching the
-      // original's in-session dispatch), so an empty result leaves the armed
-      // state untouched.
-      if (map_result.destination_system_id >= 0) {
-        NovaTravel_PlotStarmapDestination(state,
-                                          map_result.destination_system_id);
-      }
-      // Refresh the travel reticle after the map may have re-selected the
-      // travel stellar (the original re-arms the travel pulse on map return
-      // via NovaUi_MarkTravelAndStatusPanelsDirty).
-      state.travel_reticle_pulse = 256.0F;
-      // The map blocked the loop; freeze gameplay time across it.
-      resync_frame_clock();
-    }
-    if (!player_tick_consumed) {
-      starmap_was_held = starmap_held;
-    }
-    // Active-missions command ('i', edge-triggered; gameplay command 0x28):
-    // Ship_HandlePlayerShipCore 0x0044aa70 counts the non-invisible active
-    // missions and either plays the denied cue + "You have no active
-    // missions." overlay (STR# 0x7d2 0x162, 0xf0 ticks) or opens the
-    // mission-computer window (NovaUi_RunMissionComputerWindow 0x00446150).
-    // Gates mirrored from 0x00451c87: the command suppresses while the player
-    // is disabled (ai_station_hold_timer > 0), a timed action is armed
-    // (timed_action_counter > 0), destroyed (death_timer_active > 0) or within
-    // the 15-frame arrival grace -- the port's earlier travel.engaging gate
-    // (a jump's hold/zoom phases set the hold timer anyway) is subsumed by
-    // the disabled check.
-    const bool mission_info_held = input.mission_info;
-    if (!player_tick_consumed && mission_info_held && !mission_info_was_held &&
-        state.player.ai_station_hold_timer <= 0.0F &&
-        state.player.timed_action_counter <= 0 &&
-        state.player.death_timer_active <= 0.0F &&
-        state.arrival_command_grace_frames <= 0) {
-      std::size_t visible_missions = 0;
-      for (std::size_t slot = 0;
-           slot < state.active_mission_runtime_flags.size();
-           ++slot) {
-        const auto &flags = state.active_mission_runtime_flags[slot];
-        if (flags.is_active && (flags.flags_primary_at_accept & 0x400) == 0U) {
-          ++visible_missions;
-        }
-      }
-      if (visible_missions == 0) {
-        state.pending_ui_sounds.push_back({3, 1});
-        NovaHud_ShowOverlayMessage(
-            state,
-            NovaHud_LoadStringEntry(0x7d2, 0x162)
-                .value_or("You have no active missions."),
-            static_cast<std::uint64_t>(0xf0));
-      } else {
-        NovaMission_RunMissionInfoWindow(platform, audio, state, view, hud);
-        // The mission-computer window blocked the loop; freeze gameplay time
-        // across it.
-        resync_frame_clock();
-      }
-    }
-    if (!player_tick_consumed) {
-      mission_info_was_held = mission_info_held;
-    }
-    // No per-frame stellar auto-seed: the original only sets
-    // ai_secondary_target_slot from explicit commands (the land command's
-    // nearest-pick below, number keys, click, nearest, starmap route). The
-    // selection therefore stays empty until the player targets something, and
-    // a ship target and a stellar selection can coexist as in the original.
-    // A change to the selected travel stellar re-arms the travel reticle pulse
-    // (the original arms _g_travel_target_reticle_pulse whenever
-    // ai_secondary_target_slot is assigned a fresh stellar).
-    if (!player_tick_consumed &&
-        state.travel.selected_stellar_id !=
-            travel_selection_latches.prev_travel_stellar) {
-      state.travel_reticle_pulse = 256.0F;
-      // A fresh selection restarts the landing/docking approach
-      // (Stellar_HandleStellarEntryAndExit 0x0045937c re-arms the timer for the
-      // new ai_secondary_target_slot).
-      state.travel.engage_timer = -1;
-      travel_selection_latches.prev_travel_stellar =
-          state.travel.selected_stellar_id;
-    }
-    // Normal arrival (Return) is independent of target action: the original
-    // player-ship tick directly invokes Stellar_HandleStellarEntryAndExit here,
-    // opening the Spaceport only when the selected ordinary stellar is inside
-    // its arrival envelope. The rejection feedback is shown as an on-screen HUD
-    // overlay (STR# 0x7d2 messages) instead of a bare log line. Gated while a
-    // jump is engaged (disabled through brake + hold + zoom).
-    if (!player_tick_consumed && land_pressed && !state.travel.engaging) {
-      const LandCommandResult landed =
-          PlayerTick_LandCommandDispatch(platform, view, state);
-      if (landed == LandCommandResult::kQuit) {
-        returning_to_menu = true;
-        break;
-      }
-      if (landed == LandCommandResult::kBlockedFrame) {
-        resync_frame_clock();
-      }
-    }
-    // Landing/docking approach progress (NovaUi_UpdateTravelEngagementProgress
-    // 0x00459950): runs once per player frame, arms state.travel.engage_timer
-    // to 0x2ee while the selected stellar is within 250 px, shows the
-    // "cleared to dock/land" overlay, and expires the request back to -1.
-    // Gated while a jump is engaged, mirroring the player tick.
-    if (!player_tick_consumed && !state.travel.engaging) {
-      NovaTravel_UpdateEngagementProgress(state);
-    }
-    // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
-    // interaction pathway. It is intentionally not substituted for landing.
-    // Mirrors Ship_HandlePlayerTargetActionCommand (0x00454910): with a ship
-    // primary target the action opens the ship-comm dialog (DLOG 0x3ef); with
-    // no target (or the 0x38/0x6f commands held) it opens the destination-
-    // interaction window for the selected travel stellar. The player disabled/
-    // destroyed gate and the target-ship "entering hyperspace" latch only
-    // beep + show an overlay in the original (the clean-room shows the overlay
-    // text; the beep is not modelled). Mission-ship defs use the mission
-    // interaction window; an accepted single-ship escort mission can replace
-    // the hailed personality ship in-place. Gated while a jump is engaged
-    // (disabled through brake + hold + zoom).
-    if (!player_tick_consumed && target_action_pressed &&
-        !state.travel.engaging) {
-      const std::int16_t ship_target = state.player.primary_target_ship_slot;
-      if (ship_target > 0 &&
-          state.SlotInRange(static_cast<std::size_t>(ship_target))) {
-        if (NovaAiShip_IsDestroyed(state.player) ||
-            state.player.ai_station_hold_timer > 0.0F) {
-          NovaLog::Info("target-action: player disabled/destroyed; hail "
-                        "ignored");
-        } else {
-          const Ship &target =
-              state.ShipAt(static_cast<std::size_t>(ship_target));
-          if (target.ai_station_hold_timer > 0.0F) {
-            // Ship is launching/entering hyperspace: cannot hail.
-            const bool restricted = NovaAiShip_IsDisabled(state, target);
-            // Entry numbers exactly as the original passes them (1-based):
-            // 0x35 = "No response." (disabled target), 0x36 = "Unable
-            // to send hail - target ship is entering hyperspace."
-            const auto text =
-                NovaHud_LoadStringEntry(0x7d2, restricted ? 0x35 : 0x36);
-            NovaHud_ShowOverlayMessage(state,
-                                       text.value_or("Unable to send hail."));
-          } else if (!NovaShipComm_TargetEligibleForHail(state, target)) {
-            const auto text =
-                NovaHud_LoadStringEntry(0x7d2, 0x35); // "No response."
-            NovaHud_ShowOverlayMessage(state,
-                                       text.value_or("Unable to send hail."));
-          } else {
-            const std::int16_t pers_slot = target.pers_def_slot;
-            const PersDef *pers =
-                pers_slot >= 0 && static_cast<std::size_t>(pers_slot) <
-                                      state.scenario.pers_defs.size()
-                    ? &state.scenario
-                           .pers_defs[static_cast<std::size_t>(pers_slot)]
-                    : nullptr;
-            if (pers != nullptr && pers->link_mission_id != -1 &&
-                (pers->flags_primary & 0x0200U) == 0U &&
-                Mission_CheckMissionShipInteractionEligibility(
-                    state,
-                    pers->link_mission_id,
-                    /*interaction_context=*/true)) {
-              // The original sets g_travel_scene_ctx and the speaking-ship
-              // latch around NovaUi_RunMissionShipInteractionWindow. The
-              // mission offer renderer is the current clean-room window shell;
-              // it accepts the same definition and paints over the live flight
-              // frame while the state-only post-accept arm below performs the
-              // replacement.
-              state.mission_speaker_ship_slot = ship_target;
-              const MissionOfferResult result = NovaMission_RunOfferWindow(
-                  platform,
-                  state,
-                  pers->link_mission_id,
-                  /*landed_stellar_id=*/-1,
-                  [&platform, &state, &view, &hud]() {
-                    view.DrawGameFrame(platform, state, hud);
-                  });
-              state.mission_speaker_ship_slot = -1;
-              if (result == MissionOfferResult::kAccepted) {
-                (void)Mission_HandleAcceptedShipInteraction(
-                    state,
-                    ship_target,
-                    static_cast<std::uint32_t>(state.gameplay_now_ms));
-              }
-              // The mission interaction modal blocked the loop; freeze game
-              // time across it.
-              resync_frame_clock();
-            } else {
-              (void)NovaShipComm_RunShipDialog(
-                  platform, state, ship_target, view, hud);
-              // The comm dialog blocked the loop; freeze gameplay time.
-              resync_frame_clock();
-            }
+      }();
+      // A request accepted by the probe but not yet consumed by the flight loop
+      // leaves the controller on the previous goal. Suppress a stale "complete"
+      // so a harness waiting on it cannot match the goal that just finished and
+      // race ahead of the queued one.
+      const char *published_phase =
+          platform.probe().HasPendingAutomationRequest() &&
+                  automation_status.phase == FlightAutomationPhase::kComplete
+              ? "select"
+              : phase_name;
+      const auto probe_json_escape = [](std::string_view value) {
+        // JSON must be valid UTF-8; the target is probe-authored UTF-8 while
+        // the detail may embed raw MacRoman game strings.
+        const std::string encoded = NovaText_EncodeUtf8(value);
+        std::string escaped;
+        escaped.reserve(encoded.size());
+        for (const char c : encoded) {
+          if (c == '"' || c == '\\') {
+            escaped.push_back('\\');
           }
+          escaped.push_back(c == '\n' || c == '\r' ? ' ' : c);
         }
-      } else if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
-        const std::int16_t dialog_stellar = state.travel.selected_stellar_id;
-        const NegotiationExit exit = NovaNegotiation_RunDestinationDialog(
-            platform, state, dialog_stellar, view, hud);
-        if (exit == NegotiationExit::kQuit) {
+        return escaped;
+      };
+      platform.probe().PublishAutomationStatus(
+          std::string{"{\"goal\":\""} + goal_name + "\",\"phase\":\"" +
+          published_phase + "\",\"target\":\"" +
+          probe_json_escape(automation_status.target) + "\",\"detail\":\"" +
+          probe_json_escape(automation_status.detail) + "\"}");
+      // Escape/'q' are latched by PollFlightInput (it owns the SDL event drain
+      // the old PollTextEvent-based check relied on); return to the menu.
+      if (input.escape_pressed) {
+        returning_to_menu = true;
+        break;
+      }
+      // PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240): death
+      // bookkeeping, disabled damping, disabled auto-repair, the periodic
+      // distress cue, and carried-bomb detonation. Runs ahead of the flight
+      // input pass, matching the original's dispatch order. `true` means the
+      // death/inactive branch consumed the frame (flight input is skipped).
+      // Once the bookkeeping latches game_over_pending the original returns to
+      // the pilot/menu flow via its restart command; TODO(decomp(0x0044abf8))
+      // skipped: that command channel is not reconstructed, so the port leaves
+      // flight mode instead.
+      // True when PlayerTick_StatusAndOutfitEvents' death branch consumed the
+      // frame (flight input is skipped, matching the original's early return).
+      bool player_status_consumed = false;
+      if (PlayerTick_StatusAndOutfitEvents(
+              state, frame_time_ms / (1000.0F / 30.0F), input.eject)) {
+        if (state.game_over_pending) {
+          // The original latches DAT_00596d38 during the tick and only exits at
+          // the top of the next loop iteration, so the frame that latches
+          // game-over is still presented (the wreck's Explode2 gets its final
+          // frames before the menu). Do not break here; the loop condition ends
+          // the run after this frame is drawn.
+          returning_to_menu = true;
+        }
+        player_status_consumed = true;
+      }
+      // PlayerTick_TimedActionTransition (0x0044d490): while a blocking timed
+      // action is armed (escape-pod flight) the original returns from the
+      // player core after moving the ship and ticking the countdown; flight
+      // input and the weapon/target command blocks are skipped. On zero the
+      // respawn transition runs inside this call. The eject frame suppresses
+      // the tick once (the original's dispatch has already passed when the
+      // eject transform arms the countdown).
+      bool timed_action_active = false;
+      if (!player_status_consumed) {
+        if (state.timed_action_suppress_this_frame) {
+          state.timed_action_suppress_this_frame = false;
+        } else {
+          timed_action_active = PlayerTick_TimedActionTransition(
+              state, frame_time_ms / (1000.0F / 30.0F));
+        }
+      }
+      // DAT_007354a5: the escape-pod bomb variant latches an immediate return
+      // to the menu shell after its deployment overlay.
+      if (state.return_to_menu_pending) {
+        state.return_to_menu_pending = false;
+        returning_to_menu = true;
+        break;
+      }
+      // Per-frame player-target validation (Ship_HandlePlayerShipCore
+      // 0x0044aa70 prologue): the ship target drops when the target ship is
+      // inactive, destroyed, entering hyperspace (AI state 0x15) or cloaked
+      // past the visibility gate -- which is how a targeted ship jumping out
+      // releases the selection. The stellar selection has no per-frame
+      // validation.
+      const bool player_tick_consumed =
+          player_status_consumed || timed_action_active;
+      if (!player_tick_consumed) {
+        NovaTargeting_ValidatePlayerTarget(state);
+      }
+      // Ghidra System_UpdateSystemAndStellarDisplayState (0x00432470) scope B:
+      // per-tick recompute of the transient discovered_this_rebuild latch (the
+      // starmap's one-jump-ahead window), so script reveals (mïsn X opcode) get
+      // their grey neighbour ring without waiting for the next system entry.
+      NovaSystem_RebuildDiscoveredLatch(state);
+      if (!player_tick_consumed) {
+        PlayerTick_TravelSelectionCommands(
+            state, input, travel_selection_latches);
+        PlayerTick_ShipTargetCommands(state, input, ship_target_latches);
+      }
+      // Route-map overlay zoom + auto-dismiss (Ghidra 0x0045216e /
+      // 0x0042f23e, the PlayerTick_AuxiliaryCommands zoom block). Zoom keys
+      // are raw scancodes: minus/equals and the numpad -/+ pair; the
+      // modifier-combo guard covers shift/ctrl/alt
+      // (TODO(decomp): original commands 0x6b/0x6f not modelled).
+      if (!player_tick_consumed) {
+        RouteMap_Tick(
+            state,
+            {.zoom_in_held = platform.IsOriginalKeyCodeHeld(0x0c) ||
+                             platform.IsOriginalKeyCodeHeld(0x4a),
+             .zoom_out_held = platform.IsOriginalKeyCodeHeld(0x0d) ||
+                              platform.IsOriginalKeyCodeHeld(0x4e),
+             .modifier_combo_held = platform.IsOriginalKeyCodeHeld(0x2a) ||
+                                    platform.IsOriginalKeyCodeHeld(0x36) ||
+                                    platform.IsOriginalKeyCodeHeld(0x1d) ||
+                                    platform.IsOriginalKeyCodeHeld(0x38)});
+      }
+      if (!player_tick_consumed) {
+        PlayerTick_MouseTargetAndControlCommands(platform, view, state, input);
+      }
+      const bool land_pressed =
+          !player_tick_consumed && input.land && !land_was_held;
+      const bool target_action_pressed = !player_tick_consumed &&
+                                         input.target_action &&
+                                         !target_action_was_held;
+      const bool board_pressed =
+          !player_tick_consumed && input.board && !board_was_held;
+      if (!player_tick_consumed) {
+        land_was_held = input.land;
+        target_action_was_held = input.target_action;
+        board_was_held = input.board;
+      }
+      // The original's movement values are per simulation tick. Its normal
+      // cadence is 30 Hz; using a 60 Hz SDL render loop without this conversion
+      // advances the player ship at twice the intended speed.
+      // During an engaged hyperspace jump the jump state machine owns the ship
+      // (heading/velocity/glow) for the brake, alignment hold and zoom thrust;
+      // the player's normal movement integration is suspended so it does not
+      // overwrite the jump's flight. NovaTravel_Tick below drives the phases.
+      // Ship_HandlePlayerShipCore (0x00451003): with escorts resolved on the
+      // player, the player core refreshes their wedge offsets every frame
+      // (smooth mode). The +0xC2 flag comes from Ship_TickLeaderFlags in
+      // the scope-6 pass. Gated off while the jump state machine owns the ship,
+      // matching the original's engage path bypassing this command block.
+      // PlayerTick_WeaponCommands (0x0044aa70 block 0x0044BEB0) +
+      // PlayerTick_WeaponCycleContinuation (0x0044EAB4): primary fire loop,
+      // selected-secondary fire, unfirable-bank auto-clear, the wrapped
+      // secondary-bank cycle and the clear-selection arm. The original gates
+      // the fire arms on the station-hold/maneuver timers and the
+      // disabled state inside the dispatch; the port additionally
+      // suspends the whole pass while the jump state machine owns the ship
+      // (matching the disable restriction the original applies through the
+      // brake, hold and zoom phases) and while a blocking timed action runs
+      // (the original returns from the player core before the weapon block).
+      if (!player_tick_consumed && !state.travel.engaging) {
+        const bool cycle_secondary =
+            input.cycle_secondary && !secondary_cycle_was_held;
+        const bool clear_secondary =
+            input.clear_secondary && !clear_secondary_was_held;
+        NovaWeapon_TickPlayerWeaponCommands(
+            state,
+            {.fire_primary_held = input.fire,
+             .fire_secondary_held = input.fire_secondary,
+             .cycle_secondary = cycle_secondary,
+             .cycle_secondary_backwards = input.cycle_secondary_backwards,
+             .clear_secondary = clear_secondary},
+            frame_time_ms / kOriginalTickMs);
+        secondary_cycle_was_held = input.cycle_secondary;
+        clear_secondary_was_held = input.clear_secondary;
+        // Escort Commands overlay + order dispatch (PlayerTick_Auxiliary-
+        // Commands escort blocks 0x00450ae7..0x00450f67, Ship_CommandPlayer-
+        // EscortGroup 0x0045c880): the keys resolve through the binding table
+        // (slots 0x2a / 0x2b..0x2f / 0x30..0x33) against the live keyboard
+        // state, matching the original's command-active reads.
+        const auto &escort_key = prefs.bindings.cmd_to_key;
+        const auto escort_held = [&platform](std::uint16_t code) {
+          return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
+        };
+        PlayerTick_EscortCommands(
+            state,
+            {.panel_toggle_held = escort_held(escort_key[0x2a]),
+             .select_group_held = {escort_held(escort_key[0x2b]),
+                                   escort_held(escort_key[0x2c]),
+                                   escort_held(escort_key[0x2d]),
+                                   escort_held(escort_key[0x2e]),
+                                   escort_held(escort_key[0x2f])},
+             .order_attack_held = escort_held(escort_key[0x30]),
+             .order_defend_held = escort_held(escort_key[0x31]),
+             .order_hold_held = escort_held(escort_key[0x32]),
+             .order_formation_held = escort_held(escort_key[0x33]),
+             .arm_modifier_held = escort_held(0x38)},
+            state.gameplay_now_ms * 60 / 1000);
+      }
+      // Face-target command (Ghidra 0x0044aa70 block 0x0044c0b1 -> 0x0044c18a,
+      // binding slot 7; the port binds R -- see FlightInput::face_target):
+      // while held, stores the heading to face and arms the manual-flight
+      // auto-turn that PlayerTick_ManualFlightAndRegeneration consumes this
+      // frame. The original dispatches this directly after the weapon commands.
+      bool face_target_armed = false;
+      if (!player_tick_consumed && !state.travel.engaging) {
+        const bool face_arm_modifier = platform.IsOriginalKeyCodeHeld(0x38) ||
+                                       platform.IsOriginalKeyCodeHeld(0x6f);
+        face_target_armed =
+            PlayerTick_FaceTargetCommand(state, input, face_arm_modifier);
+      }
+      // Ghidra 0x00450710 PlayerTick_AuxiliaryCommands coverage map: the port
+      // reconstructs the fuel-scoop tail
+      // (PlayerTick_IonizationAndFuelRegeneration), the
+      // escort/category command group (above), the route-map zoom block
+      // (0x0045216e, RouteMap_Tick) and the ionization/fuel regeneration arm
+      // (0x00450717, PlayerTick_IonizationAndFuelRegeneration).
+      // TODO(decomp(0x00450fd9)) skipped: the cheat/debug-spawn arm
+      // (PlayerTick_CheatAndSpawnCommands, plan score 1.37) -- instant-jump
+      // cheat (command 0xe) and the 0x38/0x6f/0x1d/0x6b/0x2a debug ship-spawn
+      // combos. Also unported: the FPS toggle and the launch-bay command
+      // slices of the same region.
+      // Cooldown decay remains live during an engaged jump, but not after an
+      // earlier death/timed-action branch has returned from the player core.
+      if (!player_tick_consumed) {
+        NovaWeapon_TickPlayerWeaponBankCooldowns(
+            state, frame_time_ms / kOriginalTickMs);
+      }
+      // Play every fire sound latched this frame by the player or NPC firing
+      // routines (a round actually spawned). The firing routines append
+      // GameState.pending_fire_sounds; this loop owns the SdlAudio device,
+      // plays each decoded sound with the original's distance attenuation
+      // (NovaAudio_PlaySpatialByDistance, NPC fire sourced at the firing ship
+      // against the player ship as listener; the player's own fire is
+      // src == listener and plays at full volume), then clears the queue. Runs
+      // every frame regardless of the fire input so NPC volleys are audible.
+      for (const auto &pending : state.pending_fire_sounds) {
+        if (pending.slot < 0 || pending.slot >= 36) {
+          continue;
+        }
+        // Weapon fire slots 0..35 map onto the gameplay snd table (id
+        // 200+slot), which is fully preloaded; fall back to the legacy
+        // owned-weapon cache.
+        const std::size_t index = static_cast<std::size_t>(pending.slot);
+        const auto *sound = state.gameplay_sounds[index].has_value()
+                                ? &*state.gameplay_sounds[index]
+                                : (state.weapon_fire_sounds[index].has_value()
+                                       ? &*state.weapon_fire_sounds[index]
+                                       : nullptr);
+        if (sound == nullptr) {
+          continue;
+        }
+        // Weapon.flags bit 0x10: suppress a retrigger while this fire sound is
+        // still playing (NovaAudio_CountActiveByHandle gate in the original).
+        if (pending.suppress_if_active &&
+            audio.CountActiveByKey(pending.slot) > 0) {
+          continue;
+        }
+        const float gain = NovaWeapon_ComputeSpatialFireGain(state.player.pos_x,
+                                                             state.player.pos_y,
+                                                             pending.src_x,
+                                                             pending.src_y);
+        audio.Play(*sound, gain, 1.0F, pending.slot, pending.priority_width);
+      }
+      state.pending_fire_sounds.clear();
+      // Impact sounds use the original 300..363 snd range, which is already
+      // covered by the contiguous gameplay_sounds cache at offsets 100..163.
+      // Collision/effect code only queues source coordinates; this loop owns
+      // the SDL audio device and applies the same spatial attenuation as weapon
+      // fire.
+      for (const auto &pending : state.pending_impact_sounds) {
+        if (pending.slot < 0 || pending.slot >= 64) {
+          continue;
+        }
+        const std::size_t cache_index =
+            static_cast<std::size_t>(100 + pending.slot);
+        if (!state.gameplay_sounds[cache_index].has_value()) {
+          continue;
+        }
+        const float gain = NovaWeapon_ComputeSpatialFireGain(state.player.pos_x,
+                                                             state.player.pos_y,
+                                                             pending.src_x,
+                                                             pending.src_y);
+        audio.Play(*state.gameplay_sounds[cache_index],
+                   gain,
+                   1.0F,
+                   300 + pending.slot,
+                   /*priority_width=*/6);
+      }
+      state.pending_impact_sounds.clear();
+      constexpr std::size_t kDestructionSoundIndex = 372 - 200;
+      for (const auto &pending : state.pending_destruction_sounds) {
+        if (!state.gameplay_sounds[kDestructionSoundIndex].has_value()) {
+          continue;
+        }
+        const float gain = NovaWeapon_ComputeSpatialFireGain(state.player.pos_x,
+                                                             state.player.pos_y,
+                                                             pending.src_x,
+                                                             pending.src_y);
+        audio.Play(*state.gameplay_sounds[kDestructionSoundIndex],
+                   gain,
+                   1.0F,
+                   372,
+                   /*priority_width=*/5);
+      }
+      state.pending_destruction_sounds.clear();
+      // Centered UI cues from the boarding system (transition-table handles,
+      // snd 150 + index). The flight loop owns the audio device; the modal
+      // windows play their cues through the same queue. Mirrors
+      // NovaAudio_QueueCenteredSound(handle, priority_width, ...). The lazy
+      // decode runs
+      // here so every gameplay-side queuer (jump-range cue, auto-repair,
+      // distress alert) sees a loaded table even without a boarding pass.
+      EnsureTransitionSounds(state);
+      for (const auto &pending : state.pending_ui_sounds) {
+        if (pending.transition_index < 0 ||
+            pending.transition_index >=
+                static_cast<std::int16_t>(state.transition_sounds.size())) {
+          continue;
+        }
+        const auto &sound = state.transition_sounds[static_cast<std::size_t>(
+            pending.transition_index)];
+        if (!sound.has_value()) {
+          continue;
+        }
+        audio.Play(*sound,
+                   1.0F,
+                   1.0F,
+                   150 + pending.transition_index,
+                   pending.priority_width);
+      }
+      state.pending_ui_sounds.clear();
+      // Cross-system hyperspace jump state machine (travel.cpp): engages on
+      // the 'j' key with a plotted destination, then drives the brake and the
+      // warp-up hold before the fire. The 'Warp up' voice count gates the fire
+      // like the original's NovaAudio_CountActiveByHandle latch.
+      if (!player_tick_consumed) {
+        NovaTravel_Tick(
+            state,
+            input.travel,
+            frame_time_ms,
+            audio.CountActiveByKey(game::kHyperspaceWarpUpSoundKey) > 0);
+      }
+      // The original dispatches the hyperspace command before the manual-flight
+      // region. A newly engaged jump therefore owns this frame immediately;
+      // normal steering must not contribute one final integration step.
+      if (!player_tick_consumed && !state.travel.engaging) {
+        PlayerTick_ManualFlightAndRegeneration(
+            state, input, frame_time_ms / kOriginalTickMs, face_target_armed);
+      } else if (!timed_action_active && state.player.is_active &&
+                 NovaAiShip_IsDestroyed(state.player)) {
+        // Destroyed hull coast (Ship_HandlePlayerShipCore 0x0044aa70): the
+        // original still applies stellar gravity, the per-axis speed caps and
+        // position integration while its input-driven thrust/steering blocks
+        // are gated off by the fire-restricted flag. Feed a neutral input so
+        // the wreck keeps its inertia through the death presentation instead of
+        // stopping dead.
+        PlayerTick_ManualFlightAndRegeneration(state,
+                                               FlightInput{},
+                                               frame_time_ms / kOriginalTickMs,
+                                               /*face_target_armed=*/false);
+      }
+      if (!player_tick_consumed) {
+        PlayerTick_ShieldAndArmorRegeneration(state, frame_time_ms);
+      }
+      if (!player_tick_consumed && !state.travel.engaging &&
+          state.player.ai_selected_as_resolved_target) {
+        Ship_UpdateEscortFormations(state, state.player, /*snap=*/false);
+      }
+      // Play the hyperspace jump sounds latched by the travel state machine
+      // (the 'Warp up' cue as the zoom thrust begins and the 'Warp out' boom at
+      // the fire/arrival, synced with the screen flash). The loop owns the
+      // SdlAudio device, so travel only latches flags. Mirrors the original's
+      // Stellar_TriggerHyperspaceAudioOnce one-shot (g_playerHyperspaceAudio-
+      // Latch gating NovaAudio_QueueCenteredSound)
+      // [Ghidra 0x00431420].
+      if (state.warp_up_sound_pending) {
+        if (state.warp_up_sound.has_value()) {
+          // The fire gate in NovaTravel_Tick waits for this voice to finish,
+          // and the tunnel ramp schedule is cue-relative, so this rate sets the
+          // whole jump cadence. The original stages the cue at rate
+          // 1.0/jump_duration_multiplier (0x0046ab00: 65536/multiplier
+          // fixed-point; chassis-derived 0.91..2.08 -> rates 0.48..1.1). The
+          // port pins the multiplier to 1.0 (not decoded into ShipClass yet),
+          // so the cue plays at rate 1.0: 6.08 s of rising cue, ~2.1 s of
+          // stationary hold, ramp onset, boom as the cue resolves.
+          audio.Play(*state.warp_up_sound,
+                     1.0F,
+                     1.0F,
+                     game::kHyperspaceWarpUpSoundKey,
+                     /*priority_width=*/0x32);
+        }
+        state.warp_up_sound_pending = false;
+      }
+      if (state.warp_up_cancel_pending) {
+        audio.StopByKey(game::kHyperspaceWarpUpSoundKey);
+        state.warp_up_cancel_pending = false;
+      }
+      if (state.warp_out_sound_pending) {
+        if (state.warp_out_sound.has_value()) {
+          audio.Play(*state.warp_out_sound,
+                     1.0F,
+                     1.0F,
+                     /*sound_key=*/130,
+                     /*priority_width=*/0x32);
+        }
+        state.warp_out_sound_pending = false;
+      }
+
+      // Finish the system-entry branch before commands can observe the new
+      // system. In particular, a completed jump clears `engaging`; modal and
+      // targeting commands below must see the rebuilt population and
+      // selections.
+      if (!player_tick_consumed) {
+        PlayerTick_JumpArrivalBlock(platform, view, state, now_ms);
+      }
+
+      // Galaxy-map command ('m', edge-triggered): open the starmap modal over
+      // the current flight scene. Mirrors Ship_HandlePlayerShip (0x0044b120)
+      // dispatching NovaUi_RunStarmapWindow when its map gameplay command is
+      // active. The modal owns the frame until the player closes it; the jump
+      // state machine is untouched by inspection (the map only selects
+      // systems). Gated while a jump is engaged (the original fire-restricts
+      // the player through the brake, hold and zoom).
+      const bool starmap_held = input.starmap;
+      if (!player_tick_consumed && starmap_held && !starmap_was_held &&
+          !state.travel.engaging) {
+        const StarmapResult map_result =
+            NovaStarmap_RunWindow(platform, state, -1, &view, &hud);
+        if (map_result.exit == StarmapExit::kQuit) {
           returning_to_menu = true;
           break;
         }
-        // The destination-interaction window blocked the loop; freeze
-        // gameplay time across it.
-        resync_frame_clock();
-      } else {
-        NovaLog::Info("target-action: selected stellar cannot open its "
-                      "destination interaction");
-      }
-    }
-    // Board command ('b', edge-triggered): Player_HandleBoardTargetCommand
-    // (0x0045a3d0). Like the original's command-latch read in
-    // Ship_HandlePlayerShipCore this runs every frame regardless of jump state;
-    // its own gates reject un-boardable targets. The dispatch may open the
-    // boarding/plunder modal (blocking on the flight loop); the modal renders
-    // the live game view beneath itself via SpaceflightView::DrawGameFrame.
-    if (!player_tick_consumed && board_pressed) {
-      Player_HandleBoardTargetCommand(platform, audio, state, view, hud);
-      if (returning_to_menu) {
-        break;
-      }
-      // The boarding/plunder modal blocked the loop; freeze gameplay time.
-      resync_frame_clock();
-    }
-    // Self-destruct + cloak commands (Ghidra 0x0044aa70 PlayerTick_Interaction-
-    // CloakAndStatus blocks 0x00451954..0x00451b91 and 0x00451db0..0x00451e6f).
-    // Key bindings resolve through the table like the escort commands: the
-    // self-destruct needs the 0x38/0x6f arm-modifier pair (both Alt scancodes)
-    // plus binding slot 0x12; the cloak toggle is binding slot 0x29 (default
-    // DIK 0x16 = U). Both run every frame the player core reaches them; the
-    // countdown/toggle latches do their own gating.
-    if (!player_tick_consumed) {
-      const auto &binding_key = prefs.bindings.cmd_to_key;
-      const auto held = [&platform](std::uint16_t code) {
-        return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
-      };
-      const bool arm_modifier_held = platform.IsOriginalKeyCodeHeld(0x38) ||
-                                     platform.IsOriginalKeyCodeHeld(0x6f);
-      PlayerTick_SelfDestructCommand(state,
-                                     arm_modifier_held &&
-                                         held(binding_key[0x12]),
-                                     frame_time_ms / kOriginalTickMs);
-      // In-flight cargo dump (Ghidra 0x0044aa70 block 0x00451907): the
-      // arm-modifier pair (0x38/0x6f) plus binding slot 0x0f dumps the fleet
-      // cargo. Shift held selects the non-mission-only variant (cVar6 = 0);
-      // without Shift everything, mission cargo included, is jettisoned
-      // (cVar6 = 1). The original calls Player_RedistributeFleetCargoOverflow
-      // while the command is held; the pass is idempotent after the first
-      // frame because the cargo is already empty.
-      if (arm_modifier_held && held(binding_key[0x0f])) {
-        const bool shift_held = platform.IsOriginalKeyCodeHeld(0x2a) ||
-                                platform.IsOriginalKeyCodeHeld(0x36);
-        Player_RedistributeFleetCargoOverflow(
-            state, /*jettison_all=*/!shift_held, now_ms);
-      }
-      // Player Info window (Ghidra 0x00451b91 -> 0x00451c4f, binding slot
-      // 0x19 = the manual's P-key dialog). The original hides the travel-
-      // selection sprite, redraws viewport+radar and resets the average
-      // frame-time accumulator after the modal closes; the port's modal
-      // runs synchronously and the next frame's draw covers the refresh.
-      // The mission-computer window (0x00451c87 -> 0x00451db0) that follows
-      // this block is TODO(decomp).
-      if (held(binding_key[0x19])) {
-        const PlayerInfoWindowResult info_result =
-            NovaPlayerInfo_RunWindow(platform, state, view, hud);
-        // The original runs Player_RedistributeFleetCargoOverflow(1) inside
-        // the window loop when the Cargo page's Jettison action is confirmed
-        // (0x00499c10); the port surfaces the confirmation and applies it
-        // here, where the sim clock is in scope for the mission teardown.
-        if (info_result.jettison_confirmed) {
-          Player_RedistributeFleetCargoOverflow(
-              state, /*jettison_all=*/true, now_ms);
+        // Plot the map-selected system as the next jump destination so the HUD
+        // shows the plotted jump and 'j' engages it. The map itself applies
+        // plain-click plots and route re-arms internally (matching the
+        // original's in-session dispatch), so an empty result leaves the armed
+        // state untouched.
+        if (map_result.destination_system_id >= 0) {
+          NovaTravel_PlotStarmapDestination(state,
+                                            map_result.destination_system_id);
         }
+        // Refresh the travel reticle after the map may have re-selected the
+        // travel stellar (the original re-arms the travel pulse on map return
+        // via NovaUi_MarkTravelAndStatusPanelsDirty).
+        state.travel_reticle_pulse = 256.0F;
+        // The map blocked the loop; freeze gameplay time across it.
         resync_frame_clock();
       }
-      PlayerTick_InteractionCloakAndStatus(
-          state, held(binding_key[0x29]), frame_time_ms / kOriginalTickMs);
-    }
-    // Late auxiliary regeneration region: ionization decay and velocity
-    // damping, followed by fuel-scoop recharge.
-    if (!player_tick_consumed) {
-      PlayerTick_IonizationAndFuelRegeneration(state, frame_time_ms);
-    }
-    // Expire any transient HUD overlay message once its wall-clock deadline
-    // passes (the draw path is const over state).
-    NovaHud_TickOverlay(state);
-    const float delta_x = state.player.pos_x - prev_x;
-    const float delta_y = state.player.pos_y - prev_y;
-    prev_x = state.player.pos_x;
-    prev_y = state.player.pos_y;
-    // Unified per-frame world animation pass: advances the ambient starfield by
-    // the ship's movement delta (NovaEffects_UpdateAmbientStarParticles) and
-    // steps each animated stellar one animation segment (Stellar_UpdateStellar-
-    // Sprites), both on the single frame_time_ms cadence (see the header).
-    view.AdvanceAnimations(platform, state, frame_time_ms, delta_x, delta_y);
-    // Re-derive visibility + stellar availability each tick
-    // (NovaResources_EvaluateAvailability 0x00448090 runs per frame in the
-    // original's flight loop, refreshing is_visible from the Visibility NCBs
-    // and re-homing the stellars — its tail is the scope-3
-    // System_UpdateSystemAndStellarDisplayState availability pass). This
-    // keeps story-flag twin swaps (system government changes) in step while
-    // in flight.
-    NovaResources_EvaluateAvailability(state);
+      if (!player_tick_consumed) {
+        starmap_was_held = starmap_held;
+      }
+      // Active-missions command ('i', edge-triggered; gameplay command 0x28):
+      // Ship_HandlePlayerShipCore 0x0044aa70 counts the non-invisible active
+      // missions and either plays the denied cue + "You have no active
+      // missions." overlay (STR# 0x7d2 0x162, 0xf0 ticks) or opens the
+      // mission-computer window (NovaUi_RunMissionComputerWindow 0x00446150).
+      // Gates mirrored from 0x00451c87: the command suppresses while the player
+      // is disabled (ai_station_hold_timer > 0), a timed action is armed
+      // (timed_action_counter > 0), destroyed (death_timer_active > 0) or
+      // within the 15-frame arrival grace -- the port's earlier travel.engaging
+      // gate (a jump's hold/zoom phases set the hold timer anyway) is subsumed
+      // by the disabled check.
+      const bool mission_info_held = input.mission_info;
+      if (!player_tick_consumed && mission_info_held &&
+          !mission_info_was_held &&
+          state.player.ai_station_hold_timer <= 0.0F &&
+          state.player.timed_action_counter <= 0 &&
+          state.player.death_timer_active <= 0.0F &&
+          state.arrival_command_grace_frames <= 0) {
+        std::size_t visible_missions = 0;
+        for (std::size_t slot = 0;
+             slot < state.active_mission_runtime_flags.size();
+             ++slot) {
+          const auto &flags = state.active_mission_runtime_flags[slot];
+          if (flags.is_active &&
+              (flags.flags_primary_at_accept & 0x400) == 0U) {
+            ++visible_missions;
+          }
+        }
+        if (visible_missions == 0) {
+          state.pending_ui_sounds.push_back({3, 1});
+          NovaHud_ShowOverlayMessage(
+              state,
+              NovaHud_LoadStringEntry(0x7d2, 0x162)
+                  .value_or("You have no active missions."),
+              static_cast<std::uint64_t>(0xf0));
+        } else {
+          NovaMission_RunMissionInfoWindow(platform, audio, state, view, hud);
+          // The mission-computer window blocked the loop; freeze gameplay time
+          // across it.
+          resync_frame_clock();
+        }
+      }
+      if (!player_tick_consumed) {
+        mission_info_was_held = mission_info_held;
+      }
+      // No per-frame stellar auto-seed: the original only sets
+      // ai_secondary_target_slot from explicit commands (the land command's
+      // nearest-pick below, number keys, click, nearest, starmap route). The
+      // selection therefore stays empty until the player targets something, and
+      // a ship target and a stellar selection can coexist as in the original.
+      // A change to the selected travel stellar re-arms the travel reticle
+      // pulse (the original arms _g_travel_target_reticle_pulse whenever
+      // ai_secondary_target_slot is assigned a fresh stellar).
+      if (!player_tick_consumed &&
+          state.travel.selected_stellar_id !=
+              travel_selection_latches.prev_travel_stellar) {
+        state.travel_reticle_pulse = 256.0F;
+        // A fresh selection restarts the landing/docking approach
+        // (Stellar_HandleStellarEntryAndExit 0x0045937c re-arms the timer for
+        // the new ai_secondary_target_slot).
+        state.travel.engage_timer = -1;
+        travel_selection_latches.prev_travel_stellar =
+            state.travel.selected_stellar_id;
+      }
+      // Normal arrival (Return) is independent of target action: the original
+      // player-ship tick directly invokes Stellar_HandleStellarEntryAndExit
+      // here, opening the Spaceport only when the selected ordinary stellar is
+      // inside its arrival envelope. The rejection feedback is shown as an
+      // on-screen HUD overlay (STR# 0x7d2 messages) instead of a bare log line.
+      // Gated while a jump is engaged (disabled through brake + hold + zoom).
+      if (!player_tick_consumed && land_pressed && !state.travel.engaging) {
+        const LandCommandResult landed =
+            PlayerTick_LandCommandDispatch(platform, view, state);
+        if (landed == LandCommandResult::kQuit) {
+          returning_to_menu = true;
+          break;
+        }
+        if (landed == LandCommandResult::kBlockedFrame) {
+          resync_frame_clock();
+          // A landing/service modal may have returned to flight with a large
+          // accelerated-tick batch still queued. End this batch at the modal
+          // boundary so the next outer frame can publish/observe the docked
+          // state before probe automation emits another landing edge.
+          break;
+        }
+      }
+      // Landing/docking approach progress
+      // (NovaUi_UpdateTravelEngagementProgress 0x00459950): runs once per
+      // player frame, arms state.travel.engage_timer to 0x2ee while the
+      // selected stellar is within 250 px, shows the "cleared to dock/land"
+      // overlay, and expires the request back to -1. Gated while a jump is
+      // engaged, mirroring the player tick.
+      if (!player_tick_consumed && !state.travel.engaging) {
+        NovaTravel_UpdateEngagementProgress(state);
+      }
+      // Target action remains the distinct DLOG 0x3f1 bribe/hostility/script
+      // interaction pathway. It is intentionally not substituted for landing.
+      // Mirrors Ship_HandlePlayerTargetActionCommand (0x00454910): with a ship
+      // primary target the action opens the ship-comm dialog (DLOG 0x3ef); with
+      // no target (or the 0x38/0x6f commands held) it opens the destination-
+      // interaction window for the selected travel stellar. The player
+      // disabled/ destroyed gate and the target-ship "entering hyperspace"
+      // latch only beep + show an overlay in the original (the clean-room shows
+      // the overlay text; the beep is not modelled). Mission-ship defs use the
+      // mission interaction window; an accepted single-ship escort mission can
+      // replace the hailed personality ship in-place. Gated while a jump is
+      // engaged (disabled through brake + hold + zoom).
+      if (!player_tick_consumed && target_action_pressed &&
+          !state.travel.engaging) {
+        const std::int16_t ship_target = state.player.primary_target_ship_slot;
+        if (ship_target > 0 &&
+            state.SlotInRange(static_cast<std::size_t>(ship_target))) {
+          if (NovaAiShip_IsDestroyed(state.player) ||
+              state.player.ai_station_hold_timer > 0.0F) {
+            NovaLog::Info("target-action: player disabled/destroyed; hail "
+                          "ignored");
+          } else {
+            const Ship &target =
+                state.ShipAt(static_cast<std::size_t>(ship_target));
+            if (target.ai_station_hold_timer > 0.0F) {
+              // Ship is launching/entering hyperspace: cannot hail.
+              const bool restricted = NovaAiShip_IsDisabled(state, target);
+              // Entry numbers exactly as the original passes them (1-based):
+              // 0x35 = "No response." (disabled target), 0x36 = "Unable
+              // to send hail - target ship is entering hyperspace."
+              const auto text =
+                  NovaHud_LoadStringEntry(0x7d2, restricted ? 0x35 : 0x36);
+              NovaHud_ShowOverlayMessage(state,
+                                         text.value_or("Unable to send hail."));
+            } else if (!NovaShipComm_TargetEligibleForHail(state, target)) {
+              const auto text =
+                  NovaHud_LoadStringEntry(0x7d2, 0x35); // "No response."
+              NovaHud_ShowOverlayMessage(state,
+                                         text.value_or("Unable to send hail."));
+            } else {
+              const std::int16_t pers_slot = target.pers_def_slot;
+              const PersDef *pers =
+                  pers_slot >= 0 && static_cast<std::size_t>(pers_slot) <
+                                        state.scenario.pers_defs.size()
+                      ? &state.scenario
+                             .pers_defs[static_cast<std::size_t>(pers_slot)]
+                      : nullptr;
+              if (pers != nullptr && pers->link_mission_id != -1 &&
+                  (pers->flags_primary & 0x0200U) == 0U &&
+                  Mission_CheckMissionShipInteractionEligibility(
+                      state,
+                      pers->link_mission_id,
+                      /*interaction_context=*/true)) {
+                // The original sets g_travel_scene_ctx and the speaking-ship
+                // latch around NovaUi_RunMissionShipInteractionWindow. The
+                // mission offer renderer is the current clean-room window
+                // shell; it accepts the same definition and paints over the
+                // live flight frame while the state-only post-accept arm below
+                // performs the replacement.
+                state.mission_speaker_ship_slot = ship_target;
+                const MissionOfferResult result = NovaMission_RunOfferWindow(
+                    platform,
+                    state,
+                    pers->link_mission_id,
+                    /*landed_stellar_id=*/-1,
+                    [&platform, &state, &view, &hud]() {
+                      view.DrawGameFrame(platform, state, hud);
+                    });
+                state.mission_speaker_ship_slot = -1;
+                if (result == MissionOfferResult::kAccepted) {
+                  (void)Mission_HandleAcceptedShipInteraction(
+                      state,
+                      ship_target,
+                      static_cast<std::uint32_t>(state.gameplay_now_ms));
+                }
+                // The mission interaction modal blocked the loop; freeze game
+                // time across it.
+                resync_frame_clock();
+              } else {
+                (void)NovaShipComm_RunShipDialog(
+                    platform, state, ship_target, view, hud);
+                // The comm dialog blocked the loop; freeze gameplay time.
+                resync_frame_clock();
+              }
+            }
+          }
+        } else if (NovaTargeting_CanOpenTravelDestinationInteraction(state)) {
+          const std::int16_t dialog_stellar = state.travel.selected_stellar_id;
+          const NegotiationExit exit = NovaNegotiation_RunDestinationDialog(
+              platform, state, dialog_stellar, view, hud);
+          if (exit == NegotiationExit::kQuit) {
+            returning_to_menu = true;
+            break;
+          }
+          // The destination-interaction window blocked the loop; freeze
+          // gameplay time across it.
+          resync_frame_clock();
+        } else {
+          NovaLog::Info("target-action: selected stellar cannot open its "
+                        "destination interaction");
+        }
+      }
+      // Board command ('b', edge-triggered): Player_HandleBoardTargetCommand
+      // (0x0045a3d0). Like the original's command-latch read in
+      // Ship_HandlePlayerShipCore this runs every frame regardless of jump
+      // state; its own gates reject un-boardable targets. The dispatch may open
+      // the boarding/plunder modal (blocking on the flight loop); the modal
+      // renders the live game view beneath itself via
+      // SpaceflightView::DrawGameFrame.
+      if (!player_tick_consumed && board_pressed) {
+        Player_HandleBoardTargetCommand(platform, audio, state, view, hud);
+        if (returning_to_menu) {
+          break;
+        }
+        // The boarding/plunder modal blocked the loop; freeze gameplay time.
+        resync_frame_clock();
+      }
+      // Self-destruct + cloak commands (Ghidra 0x0044aa70
+      // PlayerTick_Interaction- CloakAndStatus blocks 0x00451954..0x00451b91
+      // and 0x00451db0..0x00451e6f). Key bindings resolve through the table
+      // like the escort commands: the self-destruct needs the 0x38/0x6f
+      // arm-modifier pair (both Alt scancodes) plus binding slot 0x12; the
+      // cloak toggle is binding slot 0x29 (default DIK 0x16 = U). Both run
+      // every frame the player core reaches them; the countdown/toggle latches
+      // do their own gating.
+      if (!player_tick_consumed) {
+        const auto &binding_key = prefs.bindings.cmd_to_key;
+        const auto held = [&platform](std::uint16_t code) {
+          return code != 0xff && platform.IsOriginalKeyCodeHeld(code);
+        };
+        const bool arm_modifier_held = platform.IsOriginalKeyCodeHeld(0x38) ||
+                                       platform.IsOriginalKeyCodeHeld(0x6f);
+        PlayerTick_SelfDestructCommand(state,
+                                       arm_modifier_held &&
+                                           held(binding_key[0x12]),
+                                       frame_time_ms / kOriginalTickMs);
+        // In-flight cargo dump (Ghidra 0x0044aa70 block 0x00451907): the
+        // arm-modifier pair (0x38/0x6f) plus binding slot 0x0f dumps the fleet
+        // cargo. Shift held selects the non-mission-only variant (cVar6 = 0);
+        // without Shift everything, mission cargo included, is jettisoned
+        // (cVar6 = 1). The original calls Player_RedistributeFleetCargoOverflow
+        // while the command is held; the pass is idempotent after the first
+        // frame because the cargo is already empty.
+        if (arm_modifier_held && held(binding_key[0x0f])) {
+          const bool shift_held = platform.IsOriginalKeyCodeHeld(0x2a) ||
+                                  platform.IsOriginalKeyCodeHeld(0x36);
+          Player_RedistributeFleetCargoOverflow(
+              state, /*jettison_all=*/!shift_held, now_ms);
+        }
+        // Player Info window (Ghidra 0x00451b91 -> 0x00451c4f, binding slot
+        // 0x19 = the manual's P-key dialog). The original hides the travel-
+        // selection sprite, redraws viewport+radar and resets the average
+        // frame-time accumulator after the modal closes; the port's modal
+        // runs synchronously and the next frame's draw covers the refresh.
+        // The mission-computer window (0x00451c87 -> 0x00451db0) that follows
+        // this block is TODO(decomp).
+        if (held(binding_key[0x19])) {
+          const PlayerInfoWindowResult info_result =
+              NovaPlayerInfo_RunWindow(platform, state, view, hud);
+          // The original runs Player_RedistributeFleetCargoOverflow(1) inside
+          // the window loop when the Cargo page's Jettison action is confirmed
+          // (0x00499c10); the port surfaces the confirmation and applies it
+          // here, where the sim clock is in scope for the mission teardown.
+          if (info_result.jettison_confirmed) {
+            Player_RedistributeFleetCargoOverflow(
+                state, /*jettison_all=*/true, now_ms);
+          }
+          resync_frame_clock();
+        }
+        PlayerTick_InteractionCloakAndStatus(
+            state, held(binding_key[0x29]), frame_time_ms / kOriginalTickMs);
+      }
+      // Late auxiliary regeneration region: ionization decay and velocity
+      // damping, followed by fuel-scoop recharge.
+      if (!player_tick_consumed) {
+        PlayerTick_IonizationAndFuelRegeneration(state, frame_time_ms);
+      }
+      // Expire any transient HUD overlay message once its wall-clock deadline
+      // passes (the draw path is const over state).
+      NovaHud_TickOverlay(state);
+      const float delta_x = state.player.pos_x - prev_x;
+      const float delta_y = state.player.pos_y - prev_y;
+      prev_x = state.player.pos_x;
+      prev_y = state.player.pos_y;
+      // Unified per-frame world animation pass: advances the ambient starfield
+      // by the ship's movement delta (NovaEffects_UpdateAmbientStarParticles)
+      // and steps each animated stellar one animation segment
+      // (Stellar_UpdateStellar- Sprites), both on the single frame_time_ms
+      // cadence (see the header).
+      view.AdvanceAnimations(platform, state, frame_time_ms, delta_x, delta_y);
+      // Re-derive visibility + stellar availability each tick
+      // (NovaResources_EvaluateAvailability 0x00448090 runs per frame in the
+      // original's flight loop, refreshing is_visible from the Visibility NCBs
+      // and re-homing the stellars — its tail is the scope-3
+      // System_UpdateSystemAndStellarDisplayState availability pass). This
+      // keeps story-flag twin swaps (system government changes) in step while
+      // in flight.
+      NovaResources_EvaluateAvailability(state);
 
-    // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
-    // cursor update.
-    NovaFrame_TickSystems(state,
-                          audio,
-                          /*run_full_tick=*/true,
-                          frame_time_ms / kOriginalTickMs,
-                          prefs);
+      // Ghidra scope 1 "pre-draw tasks": full TickSystems + ambient particles +
+      // cursor update.
+      NovaFrame_TickSystems(state,
+                            audio,
+                            /*run_full_tick=*/true,
+                            frame_time_ms / kOriginalTickMs,
+                            prefs);
+    }
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
@@ -2337,14 +2383,14 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     // delta_ms * 0.03 * 60 = delta_ms * 1.8: at 60fps that is ~30px/frame,
     // settling the 256px grow-out in ~0.15s.
     state.ship_reticle_pulse =
-        std::max(0.0F, state.ship_reticle_pulse - frame_time_ms * 1.8F);
+        std::max(0.0F, state.ship_reticle_pulse - host_frame_time_ms * 1.8F);
     state.travel_reticle_pulse =
-        std::max(0.0F, state.travel_reticle_pulse - frame_time_ms * 1.8F);
+        std::max(0.0F, state.travel_reticle_pulse - host_frame_time_ms * 1.8F);
     // Decay the hyperspace fire flash: full white at the boom instant, gone
     // in ~60 ms (a single bright frame, matching the original's one-frame
     // centered effect 0x32).
-    state.screen_flash_intensity =
-        std::max(0.0F, state.screen_flash_intensity - frame_time_ms / 60.0F);
+    state.screen_flash_intensity = std::max(
+        0.0F, state.screen_flash_intensity - host_frame_time_ms / 60.0F);
     platform.PaceFrame();
   }
 }
@@ -3037,10 +3083,9 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
         ship.speed = std::abs(desired);
       }
       // NOTE(decomp) deliberate divergence: the original advances this decay
-      // once per rendered frame without g_avg_frame_tick_scale. Its gameplay
-      // loop waits for a minimum 21 ms frame (Frame_MeasureFrameTiming
-      // 0x00432ea0), so normalize the decay to that maximum-rate 47.62 Hz
-      // behavior while keeping the clean-room result independent of FPS.
+      // once per 21 ms outer call without g_avg_frame_tick_scale. The fixed
+      // 30 Hz simulation scheduler supplies the normalized equivalent while
+      // keeping the clean-room result independent of presentation FPS.
       ship.ai_desired_speed += std::abs(ship.ai_forward_thrust_cmd) *
                                elapsed_ticks / kOriginalMaxRateFrameTicks;
       // Ship_HandleShip (0x00433050) hands the ship to

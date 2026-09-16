@@ -1,8 +1,9 @@
 # Spaceflight timing and cadence
 
-This note separates EV Nova's actual frame scheduling from the units used by
-its simulation variables. They are not both 30 Hz, and a raw per-call update
-must not automatically be treated like a normalized movement tick.
+This note separates EV Nova's presentation rate, its normalized 30 Hz game
+units, and its raw 21 ms outer-call cadence. They are different clocks. A raw
+per-call update must not automatically be treated like a normalized movement
+tick.
 
 ## Original timing model
 
@@ -29,6 +30,37 @@ times 0.63 normalized ticks/call is 30 normalized ticks/s.
 | Wall-clock / 60 Hz clock | `NovaTime_GetTickCount60Hz` or elapsed timestamp | Preserve wall-clock duration |
 | Presentation/display | Explicit sprite-world/present hook | Choose and document a fixed visual reference rate when stable behavior is desired |
 
+## Port scheduling policy
+
+The port has two deliberately different outer-step modes:
+
+| Mode | Simulation quantum | Normalized delta | Purpose |
+|---|---:|---:|---|
+| Ordinary (`speed_multiplier = 1`, acceleration disabled) | 21 ms | 0.63 | Preserve the original maximum-rate outer calls while rendering at the host's 60/120 Hz cadence |
+| Accelerated | 33.333 ms | 1.0 | Reduce scheduler overhead while executing virtual time faster than wall time |
+
+The host loop polls input and renders independently. It accumulates virtual
+gameplay time and executes as many simulation quanta as are owed before drawing
+the latest state. At ordinary speed this yields approximately 47.6 outer calls
+per second; the normalized quantities therefore still advance at 30 ticks/sec.
+In accelerated mode, a multiplier of `M` executes approximately `30*M` outer
+simulation ticks/sec. The 21 ms/raw-call consumers use their own accumulators,
+so they execute approximately `47.6*M` raw calls/sec even though the accelerated
+outer scheduler is only 30 Hz.
+
+Rendering is intentionally not part of the simulation quantum. Drawing, HUD
+composition, route-map painting, and `Present()` run once per host frame. An
+uncapped accelerated renderer may therefore draw the same state repeatedly;
+this is an explicit **divergence — uncapped presentation**, not an additional
+gameplay tick.
+
+For now the gameplay update body remains grouped inside the selected outer
+quantum. The intended next refinement is to move continuous operations such as
+player integration and visual animation to the host/render cadence with proper
+elapsed-time scaling, while retaining fixed 21 ms and 30 Hz schedulers for
+discrete work. Until then, do not describe the grouped 30 Hz accelerated step
+as a fully multi-rate implementation.
+
 The raw-call conversion is a deliberate clean-room policy. The original raw
 behavior still varied below its maximum rate; the port targets the original at
 47.62 Hz while remaining stable at modern display rates. Probabilities and
@@ -38,9 +70,10 @@ cadence.
 
 ## Full and reduced system ticks
 
-`Frame_SpaceflightLoop` (`0x00417600`) calls `Frame_TickSystems(1)` once per
-ordinary loop. X2 mode adds `Frame_TickSystems(0)` after drawing. The reduced
-call is an extra simulation pass, not a display-only update: it still advances
+`Frame_SpaceflightLoop` (`0x00417600`) runs its gameplay body on the selected
+21 ms or accelerated 30 Hz virtual simulation quanta and presents the latest
+state once per host frame. X2 mode adds `Frame_TickSystems(0)` after drawing in
+the original. The reduced call is an extra simulation pass, not a display-only update: it still advances
 the player, collision resolution, shots, ships, visual state, and scope-8
 world effects. A full tick additionally does the less time-critical
 bookkeeping and decision work: proximity/UI refresh, squad-leader setup,
@@ -49,6 +82,11 @@ and the travel-countdown sprite. In short, X2 doubles the physics/action
 cadence while leaving much of the UI, AI planning, and world maintenance at the
 ordinary cadence. This scheduling distinction is separate from whether an
 individual calculation uses `g_avg_frame_tick_scale`.
+
+Blocking landing/service windows are simulation boundaries. When one returns,
+the current virtual-tick batch is abandoned and the next outer frame resumes
+flight. This lets docked-state observers and automation see the modal result
+before another command edge is generated from the pre-modal batch.
 
 The current port gates most scope-8 work on `run_full_tick`. This is benign in
 the presently reachable frozen reduced path, but differs from original X2

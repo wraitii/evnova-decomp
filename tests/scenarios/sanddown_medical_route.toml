@@ -37,7 +37,7 @@ expect = { "ui.window" = "main_menu" }
 action = "command"
 cmd = "accelerate"
 enabled = true
-speed_multiplier = 35
+speed_multiplier = 100
 suppress_audio = true
 
 [[steps]]
