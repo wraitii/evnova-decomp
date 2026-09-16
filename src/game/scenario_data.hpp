@@ -374,9 +374,11 @@ struct ShipClass {
   // decorative escape-pod/debris puffs during the second half of DeathDelay.
   std::int16_t escape_pod_count = 0;
 
-  // Ghidra ShipClassDef +0xA00 (payload +0x60). Pilot skill variance percent
-  // used to seed each NPC's skill_variance_scale; it also gates some AI
-  // cadence decisions. Valid stock values are 1..50%.
+  // Ghidra ShipClassDef +0x9F8 (Bible SkillVar, sh\xefp payload +0x60). Pilot
+  // skill variance percent, clamped [1,50] by the sh\xefp loader 0x004bd3c0;
+  // used only by ShipClass_ComputeShipClassSkillVarianceScale 0x0046b870 to
+  // seed each NPC's skill_variance_scale. Distinct from
+  // animation_cycle_count (+0xA00).
   std::int16_t skill_variance_percent = 0;
   // Ghidra ShipClassDef +0x34 (shïp payload +0x5e, written by loader
   // 0x004bd3c0). Bible FuelRegen: "frames per 1 unit of fuel generated",
@@ -476,6 +478,13 @@ struct ShipClass {
   // waypoint arrival markers, bit 2 = banking ships with sprite_behavior_flags
   // 0x80 timing, etc.). Consulted by the AI travel/arrive logic.
   std::uint16_t sprite_behavior_flags = 0;
+  // Ghidra ShipClassDef +0xA00 <- sh\x8an BaseSetCount +0x04, or 1 when the
+  // ship-animations preference is off (ShipClass_LoadShipClassVisualAndLaunch
+  // Data 0x004b4ee0, disasm 0x004b5232/0x004b5246). Length of the sprite
+  // fold/unfold and combat animation cycles; seeds
+  // ShipState.sprite_animation_cycle_index and the waypoint_arrival_marker_b
+  // countdown. NOT skill variance (that is skill_variance_percent at +0x9F8).
+  std::int16_t animation_cycle_count = 1;
 
   // Ghidra ShipClassDef +0xA0A (pict_fallback_sprite_resource_id): the large
   // (200x200) portrait PICT drawn in the ship-comm dialog (DLOG 0x3ef item 10)
@@ -1723,6 +1732,10 @@ struct ScenarioData {
   // draws. Passing the GameState RNG preserves the original shared-stream
   // ordering during new-game startup; nullptr uses a deterministic private
   // stream for data-only callers/tests.
-  [[nodiscard]] bool LoadFromArchives(std::mt19937 *variant_rng = nullptr);
+  // `ship_animations` mirrors g_pref_ship_animations at the point
+  // ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0 runs: when false,
+  // each class's animation_cycle_count is forced to 1.
+  [[nodiscard]] bool LoadFromArchives(std::mt19937 *variant_rng = nullptr,
+                                      bool ship_animations = true);
 };
 } // namespace game

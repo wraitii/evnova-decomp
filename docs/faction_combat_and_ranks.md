@@ -107,7 +107,7 @@ payload → runtime `+0x06→0x54`, `+0x08→0x46`, `+0x0A→0x48`, `+0x0C→0x4
 SkillMult at payload `+0x30` → runtime `+0x64` and InhJam1–4 at payload
 `+0x5C..+0x62` → runtime `+0x56..+0x5C`. The semantics are pinned by the
 consumers: `NovaUi_DrawSystemFactionConflictStatus` reads `0x46` (CrimeTol) as
-the legal-status tolerance, `Game_ResetNewGameReputation` clamps system
+the legal-status tolerance, `Game_ResetReputationAndAvailability` clamps system
 reputation up to `0x52` (InitialRec), `Ship_ComputeShipEffectiveMaxSpeed`
 scales by `0x64` (SkillMult), and `Government_TryTriggerGovtAssistanceEncounter`
 compares `0x60` (MaxOdds) against `ai_odds_score`.

@@ -163,7 +163,7 @@ void PlaceRandomPolarSlowdown(GameState &state, Ship &ship) {
 //     +0xc8e4/+0xc8e8/+0xc8ec, and +0xc8f4/+0xc8f6; their reset/seed behavior
 //     remains deferred with the presentation subsystem.
 //   * the random inits gated on ShipClassDef.combat_state_init_range /
-//     skill_variance_percent (0x9FE/0xA00) and the derelict-government
+//     animation_cycle_count (0x9FE/0xA00) and the derelict-government
 //     engine-glow override are skipped (those ShipClassDef fields are not yet
 //     loaded from scenario data).
 int NovaShip_AllocateShipSlot(GameState &state,
@@ -231,9 +231,9 @@ int NovaShip_AllocateShipSlot(GameState &state,
   // id and before the position scatter; spawners that care redraw from their
   // own class.
   if (const ShipClass *class0 = state.scenario.Ship(0x80); class0 != nullptr) {
-    if (class0->skill_variance_percent > 0) {
+    if (class0->animation_cycle_count > 0) {
       ship.sprite_animation_cycle_index =
-          RandomBelow(state, class0->skill_variance_percent);
+          RandomBelow(state, class0->animation_cycle_count);
     }
     if (class0->combat_state_init_range > 0) {
       ship.sprite_animation_timer = static_cast<float>(
@@ -1120,7 +1120,7 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
     ship.speed = 0.0F;
     ship.engine_glow_level = 0;
     if ((cls->sprite_behavior_flags & 2U) != 0U) {
-      ship.waypoint_arrival_marker_b = cls->skill_variance_percent - 1;
+      ship.waypoint_arrival_marker_b = cls->animation_cycle_count - 1;
     }
   }
 
@@ -1424,11 +1424,11 @@ int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
   }
   ship.timed_action_counter = cls != nullptr ? cls->escape_pod_count : -1;
   ship.waypoint_arrival_marker_b = static_cast<std::int16_t>(
-      (cls != nullptr ? cls->skill_variance_percent : 0) - 1);
+      (cls != nullptr ? cls->animation_cycle_count : 0) - 1);
   ship.skill_variance_scale = SkillVarianceScale(state, cls);
-  if (cls != nullptr && cls->skill_variance_percent > 0) {
+  if (cls != nullptr && cls->animation_cycle_count > 0) {
     ship.sprite_animation_cycle_index =
-        RandomBelow(state, cls->skill_variance_percent);
+        RandomBelow(state, cls->animation_cycle_count);
   }
   if (mission.ship_behavior == 0) {
     // ShipBehav 0: the fleet spawns hostile to the player.
@@ -2075,7 +2075,7 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.sprite_animation_cycle_index = 0;
   ship.timed_action_counter = cls != nullptr ? cls->escape_pod_count : -1;
   ship.waypoint_arrival_marker_b = static_cast<std::int16_t>(
-      (cls != nullptr ? cls->skill_variance_percent : 0) - 1);
+      (cls != nullptr ? cls->animation_cycle_count : 0) - 1);
   ship.waypoint_arrival_marker_a = 0;
   ship.turn_bank_animation_phase = 0.0F;
   ship.shield_bubble_flash_intensity = 0.0F;
@@ -2100,9 +2100,9 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
     }
   }
   ship.jamming_score = {-1, -1, -1, -1};
-  if (cls != nullptr && cls->skill_variance_percent > 0) {
+  if (cls != nullptr && cls->animation_cycle_count > 0) {
     ship.sprite_animation_cycle_index =
-        RandomBelow(state, cls->skill_variance_percent);
+        RandomBelow(state, cls->animation_cycle_count);
   }
   if (cls != nullptr && cls->combat_state_init_range > 0) {
     ship.sprite_animation_timer =

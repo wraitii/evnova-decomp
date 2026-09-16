@@ -4490,9 +4490,10 @@ void NovaAi_UpdateShipAI(GameState &state,
     const ShipClass *cls = state.scenario.Ship(
         static_cast<std::int16_t>(ship.ship_class_id + 0x80));
     if (cls && (cls->sprite_behavior_flags & 2) != 0) {
-      // Skilled/fast ships can afford the heavy decision every frame; basic
-      // ones are rate-limited by skill variance (provisional cadence).
-      const std::int16_t variance = cls->skill_variance_percent;
+      // Ships with fold/unfold animation frames (Flags 2) can afford the
+      // heavy decision every frame; basic ones are rate-limited by the
+      // animation cycle length (provisional cadence, from +0xA00).
+      const std::int16_t variance = cls->animation_cycle_count;
       if (variance > 0 || ship.ship_instance_id % 3 == 0) {
         // heavy path allowed
       } else {
