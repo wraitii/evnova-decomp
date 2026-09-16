@@ -1421,6 +1421,19 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
     if (runtime.startup_load_step >= kStartupLoadStepCount &&
         runtime.loading_progress_displayed >= runtime.loading_progress_value &&
         phase_elapsed_ms >= kStartupSplashDurationMs) {
+      const game::PilotLoadError resume =
+          game::PilotData_AutoresumeLastPilot(runtime.game);
+      if (resume == game::PilotLoadError::kOk ||
+          resume == game::PilotLoadError::kRepairsApplied) {
+        runtime.game.game_active = true;
+        runtime.game.player.is_active = true;
+        runtime.game_active = true;
+        NovaLog::Info("auto-resumed pilot '{}'{}",
+                      runtime.game.pilot.first_name,
+                      resume == game::PilotLoadError::kRepairsApplied
+                          ? " (repairs applied)"
+                          : "");
+      }
       runtime.startup_phase = StartupPhase::main_menu;
       runtime.startup_phase_started_ms = now_ms;
       InitializeMenuEntrance(runtime, now_ms);
@@ -1900,15 +1913,13 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // 0xfa3). Edits runtime.prefs in place; OK commits the .prf (deferred) and
     // Esc/Cancel discards. Returns to the main menu either way.
     game::NovaFontCache font_cache;
-    const bool saved = game::NovaMenu_RunSettingsDialog(runtime.platform,
-                                                        runtime.audio,
-                                                        runtime.music,
-                                                        font_cache,
-                                                        runtime.prefs,
-                                                        [&runtime] {
-                                                          NovaRender_RedrawAndPresentFrame(
-                                                              runtime, 0);
-                                                        });
+    const bool saved = game::NovaMenu_RunSettingsDialog(
+        runtime.platform,
+        runtime.audio,
+        runtime.music,
+        font_cache,
+        runtime.prefs,
+        [&runtime] { NovaRender_RedrawAndPresentFrame(runtime, 0); });
     NovaLog::Info("preferences {}", saved ? "saved" : "cancelled");
     // Force a redraw so the menu backdrop (and any brightness change) is seen.
     NovaRender_RedrawAndPresentFrame(runtime, 1);
@@ -1920,10 +1931,9 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // "About text" resource).
     // The modal keeps re-rendering the menu behind itself each frame.
     NovaRender_RedrawAndPresentFrame(runtime, 0);
-    game::NovaMenu_RunAboutDialog(
-        runtime.platform, runtime.game, [&runtime] {
-          NovaRender_RedrawAndPresentFrame(runtime, 0);
-        });
+    game::NovaMenu_RunAboutDialog(runtime.platform, runtime.game, [&runtime] {
+      NovaRender_RedrawAndPresentFrame(runtime, 0);
+    });
     break;
   }
   }

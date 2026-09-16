@@ -107,14 +107,18 @@ struct ActiveMission {
   bool can_abort = false; // +0x32
   // Carrying-the-mission-cargo latch: set at acceptance for PickupMode 0,
   // set/cleared by the landing interaction pass.
-  bool carrying_resources = false;               // +0x33
-  std::int16_t mission_template_id = -1;         // +0x4d
-  std::int16_t mission_ship_count_max = 0;       // +0x61
-  std::int16_t aux_ships_dude_def_index = -1;    // +0x63
-  std::int16_t mission_fleet_metric_b = 0;       // +0x65
-  std::int16_t mission_fleet_metric_c = 0;       // +0x67
-  std::int16_t rearm_roll_clock = 0;             // +0x69
-  std::int16_t mission_ship_count_active = 0;    // +0x6b
+  bool carrying_resources = false;            // +0x33
+  std::int16_t mission_template_id = -1;      // +0x4d
+  std::int16_t mission_ship_count_max = 0;    // +0x61
+  std::int16_t aux_ships_dude_def_index = -1; // +0x63
+  std::int16_t mission_fleet_metric_b = 0;    // +0x65
+  std::int16_t mission_fleet_metric_c = 0;    // +0x67
+  std::int16_t rearm_roll_clock = 0;          // +0x69
+  std::int16_t mission_ship_count_active = 0; // +0x6b
+  // Rebuilt after loading from the two saved STR# references. These buffers
+  // occupy +0x6d and +0xad in the original active-mission record.
+  std::string mission_fleet_name;
+  std::string mission_text_name_b;
   std::uint16_t flags_primary = 0;               // +0x55
   std::uint16_t flags_secondary = 0;             // +0x57
   std::int16_t special_ship_type_index = -1;     // +0x53
@@ -1276,6 +1280,9 @@ struct GameState {
   // by the new-game flow (real clock date with year + 250) and advanced once
   // per NovaMission_TickDailyWorldUpdate call.
   GameDate date{};
+  std::string date_prefix;
+  std::string date_suffix;
+  std::array<std::uint16_t, 3> ship_paint_rgb5{};
 
   // crön event runtime half (g_cron_event_states 0x005914c0, one 0x350-stride
   // block per crön def; the date-window/odds/script halves live on

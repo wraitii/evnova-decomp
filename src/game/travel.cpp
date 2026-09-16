@@ -44,7 +44,8 @@ std::string RestrictedArrivalMessage(const GameState &state,
   message += " ";
   message += NovaHud_LoadStringEntry(0x7d2, 0x30).value_or("system on");
   message += " ";
-  message += NovaText_FormatDateString(state.date, false);
+  message += NovaText_FormatDateString(
+      state.date, false, state.date_prefix, state.date_suffix);
   message += ".";
   const bool has_nav = std::any_of(system.nav_defs.begin(),
                                    system.nav_defs.end(),
@@ -359,7 +360,8 @@ void FireJump(GameState &state) {
       msg += *text;
     }
     msg += " ";
-    msg += NovaText_FormatDateString(state.date, false);
+    msg += NovaText_FormatDateString(
+        state.date, false, state.date_prefix, state.date_suffix);
     msg += ".";
     // 0x31 "No stellar objects present." when the system defines no navs.
     bool has_navs = false;

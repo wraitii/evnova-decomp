@@ -431,7 +431,8 @@ void DrawGeneralPage(SdlPlatform &platform,
            kGridLeftLabelX,
            kGridLeftValueX,
            MiscString(kStrCurrentDate, "Current Date:"),
-           NovaText_FormatDateString(state.date, true));
+           NovaText_FormatDateString(
+               state.date, true, state.date_prefix, state.date_suffix));
   const System *system = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   draw_row(label_y + 2 * kGridRowStride,
