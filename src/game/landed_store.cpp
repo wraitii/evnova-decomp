@@ -479,9 +479,13 @@ std::int32_t NovaLanded_OutfitPrice(const GameState &state,
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
   if (stellar == nullptr || outfit == nullptr || ship == nullptr)
     return 0;
-  return NovaLanded_ScaledStorePrice(outfit->PurchasePrice(ship->mass_tons),
-                                     outfit->tech_level,
-                                     stellar->tech_level);
+  // Outfitter prices use DAT_007d4bbc (the same rank scale; see
+  // NovaLanded_RankPriceScale).
+  return NovaLanded_ScaledStorePrice(
+      outfit->PurchasePrice(ship->mass_tons),
+      outfit->tech_level,
+      stellar->tech_level,
+      NovaLanded_RankPriceScale(state, stellar_id));
 }
 
 // Ghidra 0x00491950 NovaLanded_CanBuyOutfit (partial port of the
@@ -789,18 +793,43 @@ void NovaLanded_CloseOutfitterSession(GameState &state) {
       std::min(state.player.armor_points, stats.max_armor_points);
 }
 
-// Ghidra DAT_007d4bbc / DAT_007d4bc0: rank-derived price scales, both set to
-// 1.0 at 0x00491f9c and folded multiplicatively by each active rank's modifier
-// (rank record +0x08 * 0.01). Rank price modifiers are not modelled yet, so
-// both stay 1.0. DAT_007d4bbc scales the first trade-in stage; DAT_007d4bc0
-// scales the second trade-in stage and the new ship's list price.
-// TODO(decomp): model the rank price scales.
-constexpr float kRankResaleScale = 1.0F;   // DAT_007d4bbc
-constexpr float kRankPurchaseScale = 1.0F; // DAT_007d4bc0
+// Ghidra DAT_007d4bbc / DAT_007d4bc0 (set in NovaUi_RunTravelDestination-
+// InteractionLoop 0x00491f9b..0x00492038). The original seeds both globals to
+// 1.0, then for each active + defined rank whose affiliated government is
+// allied to the landed stellar's government folds in `PriceMod * 0.01`. Both
+// globals receive the exact same product there, and the outfit/shipyard
+// consumers use DAT_007d4bbc for item and trade-in stages and DAT_007d4bc0 for
+// the ship list/hire stages, so one scale covers all of them. Because the
+// landed stellar and the rank set are fixed for the modal's lifetime, the port
+// derives the scale from the destination stellar on demand instead of latching
+// a pair of globals.
+// The two original globals are kept equal by construction; if a future site
+// ever writes one without the other, split this helper.
+float NovaLanded_RankPriceScale(const GameState &state,
+                                std::int16_t stellar_id) {
+  const Stellar *stellar = state.scenario.Stellar(stellar_id);
+  if (stellar == nullptr || stellar->government_id == -1) {
+    return 1.0F;
+  }
+  float scale = 1.0F;
+  for (const RankDef &rank : state.scenario.ranks) {
+    if (!rank.active || !rank.defined) {
+      continue;
+    }
+    if (!NovaGovernment_AreGovtsAllied(
+            state.scenario, stellar->government_id, rank.government_id)) {
+      continue;
+    }
+    scale *= static_cast<float>(rank.price_mod) * 0.01F;
+  }
+  return scale;
+}
 
 // Ghidra 0x00498dc0 / 0x004948b0 / 0x00492f30: the base trade-in from
 // Ship_ComputeTradeInValue scaled through two identical tech-discount stages,
-// both using the current ship's tech level and the destination stellar's.
+// both using the current ship's tech level and the destination stellar's. The
+// original applies DAT_007d4bbc to the first stage and DAT_007d4bc0 to the
+// second; both are the same rank price scale.
 std::int32_t NovaLanded_ShipTradeInValue(const GameState &state,
                                          std::int16_t stellar_id) {
   const ShipClass *ship = state.scenario.Ship(
@@ -808,13 +837,14 @@ std::int32_t NovaLanded_ShipTradeInValue(const GameState &state,
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   if (ship == nullptr || stellar == nullptr)
     return 0;
+  const float rank_scale = NovaLanded_RankPriceScale(state, stellar_id);
   const std::int32_t value =
       NovaLanded_ScaledStorePrice(Ship_ComputeTradeInValue(state),
                                   ship->tech_level,
                                   stellar->tech_level,
-                                  kRankResaleScale);
+                                  rank_scale);
   return NovaLanded_ScaledStorePrice(
-      value, ship->tech_level, stellar->tech_level, kRankPurchaseScale);
+      value, ship->tech_level, stellar->tech_level, rank_scale);
 }
 
 // Ghidra 0x00498dc0 / 0x004948b0: the selected ship's scaled list price before
@@ -827,7 +857,10 @@ std::int32_t NovaLanded_ShipPrice(const GameState &state,
   if (ship == nullptr || stellar == nullptr)
     return 0;
   return NovaLanded_ScaledStorePrice(
-      ship->cost, ship->tech_level, stellar->tech_level, kRankPurchaseScale);
+      ship->cost,
+      ship->tech_level,
+      stellar->tech_level,
+      NovaLanded_RankPriceScale(state, stellar_id));
 }
 
 std::int32_t NovaLanded_ShipPurchasePrice(const GameState &state,
@@ -860,8 +893,13 @@ std::int32_t NovaLanded_ShipHirePrice(const GameState &state,
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   if (ship == nullptr || stellar == nullptr)
     return 0;
-  const std::int32_t scaled = NovaLanded_ScaledStorePrice(
-      ship->cost, ship->tech_level, stellar->tech_level);
+  // The hire arm scales base_cost through DAT_007d4bc0 before the 0.1 hire
+  // multiplier (0x00498dc0), the same rank scale as the purchase price.
+  const std::int32_t scaled =
+      NovaLanded_ScaledStorePrice(ship->cost,
+                                  ship->tech_level,
+                                  stellar->tech_level,
+                                  NovaLanded_RankPriceScale(state, stellar_id));
   return std::max(0,
                   static_cast<std::int32_t>(static_cast<float>(scaled) * 0.1F));
 }

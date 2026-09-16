@@ -441,9 +441,11 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
     std::int16_t ship_class;
     std::int16_t jump_stellar;
     std::size_t discovered_systems;
+    // Active rank slots recovered from block2 +0x5dde (0-based rank id).
+    std::vector<std::int16_t> active_ranks;
   };
 
-  constexpr std::array expectations{
+  const std::array expectations{
       FixtureExpectation{"Alien.plt",
                          "Dark Knight",
                          "Vell-os Javelin",
@@ -454,7 +456,8 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
                          34915,
                          0,
                          106,
-                         537},
+                         537,
+                         {1, 2, 8, 10, 13, 17, 19}},
       FixtureExpectation{"Archer (PC).plt",
                          "Archer",
                          "Serenity",
@@ -465,7 +468,8 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
                          352715,
                          37,
                          0,
-                         537},
+                         537,
+                         {10, 17, 18, 19, 21, 23}},
       FixtureExpectation{"Hunter.plt",
                          "Maverick",
                          "Fed Carrier ",
@@ -476,7 +480,8 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
                          31979,
                          15,
                          0,
-                         534},
+                         534,
+                         {17, 19}},
       FixtureExpectation{"Pirate Hunter.plt",
                          "Hunter",
                          "Aurora Thunderforge ",
@@ -487,7 +492,8 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
                          0,
                          252,
                          280,
-                         534},
+                         534,
+                         {}},
       FixtureExpectation{"Plank.plt",
                          "Planky",
                          "Vengence Reaper",
@@ -498,7 +504,8 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
                          25251,
                          163,
                          169,
-                         458},
+                         458,
+                         {8, 17}},
       FixtureExpectation{"Rick Hunter.plt",
                          "Pirate Hunter",
                          "Pirate Hunter II",
@@ -509,7 +516,8 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
                          0,
                          252,
                          232,
-                         535},
+                         535,
+                         {}},
   };
 
   std::size_t fixture_count = 0;
@@ -539,7 +547,22 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
     CHECK((result == PilotLoadError::kOk ||
            result == PilotLoadError::kRepairsApplied));
     game::GameState state;
+    // The .plt restore only latches rank slots whose definition is present
+    // (the repair loop zeroes flags for absent records), so give the load a
+    // full defined table to exercise the active-flag apply path.
+    state.scenario.ranks.assign(0x80, {});
+    for (auto &rank : state.scenario.ranks) {
+      rank.defined = true;
+    }
     CHECK(PilotFileLoadSave(entry.path(), state) == result);
+    for (std::size_t slot = 0; slot < record.rank_active_flags.size(); ++slot) {
+      const bool expected_active =
+          std::ranges::find(expected->active_ranks,
+                            static_cast<std::int16_t>(slot)) !=
+          expected->active_ranks.end();
+      CHECK((record.rank_active_flags[slot] != 0) == expected_active);
+      CHECK(state.scenario.ranks[slot].active == expected_active);
+    }
     CHECK(state.pilot.first_name ==
           expected->file.substr(0, expected->file.size() - 4));
     CHECK(state.pilot.last_name == expected->nickname);

@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "game/game_state.hpp"
@@ -564,4 +565,45 @@ TEST_CASE("Outfitter gate enforces RequireGovt at the landed stellar",
 
   outfit->require_govt = -1; // applies everywhere again
   CHECK(game::NovaLanded_CanBuyOutfit(state, 0x80, 0x80));
+}
+
+// Rank price scale: DAT_007d4bbc / DAT_007d4bc0 seed at 1.0 and fold in
+// `PriceMod * 0.01` for every active + defined rank allied to the landed
+// stellar's government (NovaUi_RunTravelDestinationInteractionLoop 0x00491f9b).
+TEST_CASE("rank price scale folds allied active rank modifiers",
+          "[landed_store][rank][price]") {
+  game::GameState state;
+  state.scenario.stellars.resize(1);
+  state.scenario.governments.assign(2, {});
+  // Cross-ally governments 0 and 1 via a shared class id.
+  state.scenario.governments[0].classes = {5, -1, -1, -1};
+  state.scenario.governments[1].ally_classes = {5, -1, -1, -1};
+  state.scenario.stellars[0].government_id = 0;
+  state.scenario.ranks.assign(0x80, {});
+
+  state.scenario.ranks[0].defined = true;
+  state.scenario.ranks[0].active = true;
+  state.scenario.ranks[0].government_id = 1;
+  state.scenario.ranks[0].price_mod = 50; // 0.5x
+  CHECK(game::NovaLanded_RankPriceScale(state, 0x80) == Catch::Approx(0.5F));
+
+  state.scenario.ranks[1].defined = true;
+  state.scenario.ranks[1].active = true;
+  state.scenario.ranks[1].government_id = 1;
+  state.scenario.ranks[1].price_mod = 80; // 0.4x combined
+  CHECK(game::NovaLanded_RankPriceScale(state, 0x80) == Catch::Approx(0.4F));
+
+  // An inactive rank is ignored.
+  state.scenario.ranks[0].active = false;
+  CHECK(game::NovaLanded_RankPriceScale(state, 0x80) == Catch::Approx(0.8F));
+
+  // A government-less stellar never scales.
+  state.scenario.ranks[0].active = true;
+  state.scenario.stellars[0].government_id = -1;
+  CHECK(game::NovaLanded_RankPriceScale(state, 0x80) == Catch::Approx(1.0F));
+
+  // A non-allied rank is ignored.
+  state.scenario.stellars[0].government_id = 0;
+  state.scenario.governments[1].ally_classes = {-1, -1, -1, -1};
+  CHECK(game::NovaLanded_RankPriceScale(state, 0x80) == Catch::Approx(1.0F));
 }
