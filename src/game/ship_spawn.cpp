@@ -285,13 +285,18 @@ int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
     ship.pos_x = state.player.pos_x;
     ship.pos_y = state.player.pos_y;
     ship.heading = state.player.heading;
-    // Math_AddPolarVelocity 0x0043b4a0 with a random bearing and a
-    // 50 + rand(0x32) speed: the game convention is vel_x += sin, vel_y -= cos.
+    // Math_AddPolarVelocity 0x0043b4a0 is called here with a pointer to the
+    // ship's POSITION (disasm 0x00422986: `ADD EAX,0x18` = +pos_x, not the
+    // +0x20 vel_x), a random bearing and a 50 + rand(0x32) speed. It is a
+    // small spawn scatter around the player (50..99 px), NOT a launch
+    // velocity: applying it to vel_x/vel_y flung restored escorts away at
+    // ~50-100 px/tick. Spawned escorts keep the allocator's zero velocity.
+    // The game convention is pos_x += sin, pos_y -= cos.
     const float speed = static_cast<float>(RandomBelow(state, 0x32) + 0x32);
     const float bearing_deg = static_cast<float>(RandomBelow(state, 0x168));
     const float bearing_rad = bearing_deg * (3.14159265358979323846F / 180.0F);
-    ship.vel_x += std::sin(bearing_rad) * speed;
-    ship.vel_y -= std::cos(bearing_rad) * speed;
+    ship.pos_x += std::sin(bearing_rad) * speed;
+    ship.pos_y -= std::cos(bearing_rad) * speed;
   } else if (const Stellar *stellar = state.scenario.Stellar(spawn_stellar_id);
              stellar != nullptr) {
     ship.pos_x = static_cast<float>(stellar->pos_x);
