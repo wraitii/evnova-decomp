@@ -123,7 +123,7 @@ void SeedStellarScenario(GameState &state) {
   stellar.strength = 100;
   stellar.availability_flags = 0x100; // fatal collision body
   stellar.explosion_type = -1;
-  stellar.engage_access = 0;
+  stellar.destroyed_days_remaining = 0;
   stellar.schedule_days = 0;
 
   state.scenario.ships.resize(1);
@@ -494,10 +494,11 @@ TEST_CASE("stellar destruction re-arms the regeneration countdown",
   state.active_shots[0].collision_mask = stellar.collision_mask;
   NovaWeapon_ResolveProjectileCollisions(state);
   CHECK(state.active_shots.empty());
-  // The destruction package clamps Strength to -1 and seeds engage_access from
-  // the schedule day field (Ghidra +0x3c = -1, +0x47c = +0x47a).
+  // The destruction package clamps Strength to -1 and seeds
+  // destroyed_days_remaining from the schedule day field (Ghidra +0x3c = -1,
+  // +0x47c = +0x47a).
   CHECK(stellar.strength == -1);
-  CHECK(stellar.engage_access == 7);
+  CHECK(stellar.destroyed_days_remaining == 7);
 
   // A destroyed (now "active") stellar no longer accepts planet-type fire.
   REQUIRE(NovaWeapon_SpawnProjectile(state, 0, -1, 0) == 0);
@@ -642,7 +643,7 @@ TEST_CASE("stellar active state and sprite link follow strength",
   CHECK(NovaTargeting_StellarSpriteLinkId(st) == 3);
 
   st.strength = 100;
-  st.engage_access = 5; // engaged -> active
+  st.destroyed_days_remaining = 5; // engaged -> active
   CHECK(NovaTargeting_IsStellarActive(st));
   CHECK(NovaTargeting_StellarSpriteLinkId(st) == 3);
 
@@ -658,7 +659,7 @@ TEST_CASE("daily stellar regeneration restores live strength",
   Stellar &stellar = state.scenario.stellars[0];
   stellar.is_available = true;
   stellar.strength = -1;
-  stellar.engage_access = 1;
+  stellar.destroyed_days_remaining = 1;
   stellar.schedule_days = 3;
   REQUIRE(NovaTargeting_IsStellarActive(stellar));
 
@@ -684,15 +685,15 @@ TEST_CASE("starts-destroyed stellars initialize strength and countdown",
 
   NovaNewPilot_ResetStellarStrengthForNewGame(state);
   CHECK(destroyed.strength == -1);
-  CHECK(destroyed.engage_access == 4);
+  CHECK(destroyed.destroyed_days_remaining == 4);
   CHECK(normal.strength == 50);
-  CHECK(normal.engage_access == 0);
+  CHECK(normal.destroyed_days_remaining == 0);
 
   // A negative schedule seed pins the regeneration countdown at 1.
   destroyed.schedule_days = -3;
   NovaNewPilot_ResetStellarStrengthForNewGame(state);
   CHECK(destroyed.strength == -1);
-  CHECK(destroyed.engage_access == 1);
+  CHECK(destroyed.destroyed_days_remaining == 1);
 }
 
 TEST_CASE("crash deactivates immediately while weapon damage enters death",

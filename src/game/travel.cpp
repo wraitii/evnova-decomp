@@ -1766,7 +1766,7 @@ bool NovaTravel_PlayerMeetsStellarAccess(const GameState &state,
       eligible = true;
     }
   }
-  if (stellar->hazard_marker) {
+  if (stellar->dominated) {
     eligible = true;
   }
   if (state.travel.engage_timer > 0x2ed) {
@@ -1879,7 +1879,7 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
       } else {
         message += text(0x65, "Welcome to") + " " + stellar->name + ". ";
       }
-      if (stellar->service_cost > 0 && !stellar->hazard_marker) {
+      if (stellar->service_cost > 0 && !stellar->dominated) {
         message += "  ";
         message += text(is_station ? 0x67 : 0x68,
                         is_station ? "[Docking fee is" : "[Landing fee is");

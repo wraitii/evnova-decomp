@@ -699,7 +699,7 @@ OutfitSaleResult NovaLanded_SellOutfit(GameState &state,
                                   weapon->weapon_mode_code == 99)
                                      ? static_cast<std::size_t>(weapon_index)
                                      : static_cast<std::size_t>(ammo_type);
-        std::int32_t loaded = state.weapon_bank_secondary[bank * 100];
+        std::int32_t loaded = state.weapon_secondary_count_by_class[bank * 100];
         if (weapon->weapon_mode_code == 99) {
           // Carrier-bay weapon: count active, non-disabled behavior-5
           // fighters whose class matches the id encoded in ammo_type.
@@ -1011,13 +1011,13 @@ namespace {
 // cache in step so the stock ammo is not re-expanded after an upgrade zeroed
 // it (NovaWeapon_EnsureNpcWeaponBanks).
 void ReseedWeaponSecondary(Ship &ship, const ShipClass *cls) {
-  ship.npc_weapon_bank_secondary.fill(0);
+  ship.npc_weapon_secondary_count_by_class.fill(0);
   if (cls != nullptr) {
     for (const ShipDefaultWeaponBank &stock : cls->stock_weapons) {
       if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
         continue;
       }
-      ship.npc_weapon_bank_secondary[static_cast<std::size_t>(
+      ship.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
           stock.weapon_id - 0x80)] = stock.ammo_load;
     }
   }
@@ -1042,7 +1042,7 @@ void Player_ProcessEscortFleetAtStellar(
     for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
       Ship &ship = state.ShipAt(slot);
       if (!ship.is_active || ship.squad_leader_ship_slot != 0 ||
-          ship.ai_behavior_code != 6 || ship.escort_released_mark == 0 ||
+          ship.ai_behavior_code != 6 || ship.escort_pending_sale_mark == 0 ||
           ship.mission_fleet_slot != -1 || NovaAiShip_IsDisabled(state, ship)) {
         continue;
       }
@@ -1075,8 +1075,8 @@ void Player_ProcessEscortFleetAtStellar(
         state.player.credits -= cost;
         state.stat_cache_valid = false;
         ship.ship_class_id = cls->upgrade_to_ship_class_id;
-        ship.npc_weapon_bank_ammo.fill(0);
-        ship.npc_weapon_bank_secondary.fill(0);
+        ship.npc_weapon_count_by_class.fill(0);
+        ship.npc_weapon_secondary_count_by_class.fill(0);
         ship.escort_upgrade_mark = 0;
         cls = state.scenario.Ship(
             static_cast<std::int16_t>(ship.ship_class_id + 0x80));

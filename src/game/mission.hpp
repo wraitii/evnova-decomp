@@ -378,7 +378,7 @@ void Mission_ShowMissionShipAnnouncement(GameState &state,
 // Ghidra 0x00426dd0 Mission_TrySpawnMissionShipAmbush. When the scenario
 // defines the ambush personality (pers slot 0x3fe present + loaded), counts
 // the current system's dominated/hazard stellars (is_available +
-// hazard_marker set, availability_flags 0x20 clear) and rolls 1-in-10 (one
+// dominated set, availability_flags 0x20 clear) and rolls 1-in-10 (one
 // candidate) / 1-in-5 (several) per call. On a hit spawns the forced
 // personality 0x3fe in the player's system, flips it hostile (whose pers
 // Flags 0x10 arm may hail first), then latches the speaker and plays the

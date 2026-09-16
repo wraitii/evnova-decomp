@@ -181,7 +181,7 @@ bool NovaGovernment_IsCandidateHostileToTargeter(const GameState &state,
                                                  const Ship &ship,
                                                  const Stellar &stellar,
                                                  std::int16_t stellar_id) {
-  if (stellar.hazard_marker) {
+  if (stellar.dominated) {
     return false;
   }
   if (ship.ship_instance_id != 0 && NovaAiShip_IsShipInAiState8(ship)) {

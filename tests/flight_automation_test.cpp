@@ -272,8 +272,8 @@ GameState DestroyState() {
   state.scenario.weapons[0].weapon_mode_code = -1;
   state.scenario.weapons[0].ammo_type = -1; // free energy, always ready
   state.scenario.weapons[0].range_scalar = 500.0F;
-  state.weapon_bank_ammo.fill(0);
-  state.weapon_bank_ammo[0] = 1;
+  state.weapon_count_by_class.fill(0);
+  state.weapon_count_by_class[0] = 1;
 
   Ship &target = state.ShipAt(1);
   target.is_active = true;

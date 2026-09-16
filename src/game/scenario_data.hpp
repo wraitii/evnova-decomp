@@ -244,8 +244,8 @@ struct PersDef {
   // is the cached ActiveOn evaluation, refreshed from availability_expression
   // by the mission-list evaluator (0x0044830c block of Mission_Evaluate-
   // MissionLists 0x0043cf00) each time it runs.
-  bool present = false;              // +0x620
-  bool visible = false;              // +0x621, persisted independently
+  bool alive = false;                // +0x620
+  bool grudge = false;               // +0x621, persisted independently
   bool loaded_latch = false;         // +0x623
   bool is_available_runtime = false; // +0x622
 
@@ -916,23 +916,16 @@ struct Stellar {
   // Mission_IsStellarValidRandomDestination (0x00468b50) so random mission
   // destinations cannot be a stellar that no system actually hosts.
   bool is_defined = false;
-  // hazard_marker (field_0x46): set when the stellar's system is visible and
-  // its availability_flags carry the 0x20 hazard/derelict bit; colours the
-  // stellar as a hazard on the radar/target display.
-  bool hazard_marker = false;
+  // dominated (+0x46): persistent domination latch. The display-state pass
+  // only sets it when a visible stellar carries availability_flags 0x20; it
+  // deliberately never clears it.
+  std::uint8_t dominated = 0;
   // Strength (Ghidra +0x3c/+0x40) is modelled as `strength` /
   // `strength_capacity` above; the old `sprite_population` /
   // `sprite_handle_active` projection was a misreading of the same words.
-  // engage_access (+0x47c): the stellar's engagement-access counter, bumped by
-  // the travel/targeting interaction when a ship engages this stellar. >0 keeps
-  // the stellar "active" even while its ambient sprite is unloaded.
-  std::int16_t engage_access = 0;
-  // Pilot-persistent runtime byte (StellarDef special-tech block +0x30) and
-  // availability roll (+0x14). LoadSave restores these from block1+0xdece
-  // and block2+0x2086 for defined stellars; an asserted saved byte suppresses
-  // the saved garrison/roll restoration.
-  std::uint8_t persistent_state_byte = 0;
-  std::int16_t availability_roll = 0;
+  // destroyed_days_remaining (+0x47c): days until a destroyed stellar
+  // regenerates. Positive values keep it active; -1 denotes alive.
+  std::int16_t destroyed_days_remaining = 0;
 
   // ---- Hostile-ship deposit bookkeeping (Ghidra StellarDef +0x4e/+0x50 and
   // the field_0x47 latch). The original keeps a pool of defense-fleet ships
@@ -957,16 +950,13 @@ struct Stellar {
   // the countdown and, when it expires, runs the payload +0x345 set-string
   // through the reaction-script executor and latches the countdown off. A
   // negative seed pins the countdown at 1 (never fires). The original counts
-  // down in StellarDef +0x47c, the same field the targeting code uses as the
-  // engagement-access counter -- one shared runtime word; the port keeps both
-  // views on it (engage_access is bumped by targeting, the daily tick drives
-  // it as the countdown).
+  // down in StellarDef +0x47c.
   std::int16_t schedule_days = 0; // payload +0x242 (StellarDef +0x47a)
   std::string schedule_script;    // payload +0x345 (StellarDef +0x365)
   // Day counter (StellarDef +0x2a): bumped once per game-day by the tribute
-  // income pass (0x00423540) while the stellar pays out. No other consumer
-  // decoded yet.
-  std::int16_t held_days = 0;
+  // income pass (0x00423540) while the stellar pays out. The pilot format's
+  // stelAnnoyance persists this same word; no reset or other writer is known.
+  std::int16_t domination_days = 0;
   std::uint8_t field_0x47 = 0;
   // Runtime destruction latch used by the Y/U mission-script operators.
   // The original stores this across several unnamed StellarDef fields; this

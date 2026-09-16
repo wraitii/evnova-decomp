@@ -102,8 +102,8 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
       ship.npc_weapon_banks_ship_class == ship.ship_class_id) {
     return;
   }
-  ship.npc_weapon_bank_ammo.fill(0);
-  ship.npc_weapon_bank_secondary.fill(0);
+  ship.npc_weapon_count_by_class.fill(0);
+  ship.npc_weapon_secondary_count_by_class.fill(0);
   ship.npc_weapon_bank_cooldown.fill(0.0F);
   ship.npc_weapon_bank_burst_counter.fill(0);
   const ShipClass *cls = ShipClassFor(state, ship);
@@ -113,9 +113,10 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
         continue;
       }
       const auto bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-      ship.npc_weapon_bank_ammo[bank] = std::max<std::int16_t>(stock.count, 0);
+      ship.npc_weapon_count_by_class[bank] =
+          std::max<std::int16_t>(stock.count, 0);
       // -1 is the original unlimited-secondary sentinel.
-      ship.npc_weapon_bank_secondary[bank] = stock.ammo_load;
+      ship.npc_weapon_secondary_count_by_class[bank] = stock.ammo_load;
     }
     // Weapon_InitShipWeaponBursts (0x00413810): a configured burst weapon
     // (burst_cycle AND burst_reset_cooldown) starts with a zeroed burst
@@ -123,7 +124,7 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship) {
     for (std::size_t bank = 0; bank < 0x100; ++bank) {
       const Weapon *w =
           state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
-      if (w != nullptr && ship.npc_weapon_bank_ammo[bank] > 0 &&
+      if (w != nullptr && ship.npc_weapon_count_by_class[bank] > 0 &&
           w->burst_cycle_ticks > 0 && w->burst_reset_cooldown > 0) {
         ship.npc_weapon_bank_burst_counter[bank] = 0;
         ship.npc_weapon_bank_cooldown[bank] =
@@ -139,8 +140,9 @@ int NovaWeapon_ClassifyAmmoReadiness(const GameState &state, const Ship &ship) {
   int armed = 0;
   int usable = 0;
   int depleted = 0;
-  for (std::size_t bank = 0; bank < ship.npc_weapon_bank_ammo.size(); ++bank) {
-    if (ship.npc_weapon_bank_ammo[bank] <= 0) {
+  for (std::size_t bank = 0; bank < ship.npc_weapon_count_by_class.size();
+       ++bank) {
+    if (ship.npc_weapon_count_by_class[bank] <= 0) {
       continue;
     }
     ++armed;
@@ -155,7 +157,7 @@ int NovaWeapon_ClassifyAmmoReadiness(const GameState &state, const Ship &ship) {
     if (cost >= 0) {
       // Secondary-ammo weapon: ready while rounds remain.
       ++usable;
-      if (ship.npc_weapon_bank_secondary[bank] < 1) {
+      if (ship.npc_weapon_secondary_count_by_class[bank] < 1) {
         ++depleted;
       }
     } else if (cost < -1000) {
@@ -254,21 +256,23 @@ namespace {
 constexpr std::size_t kBankStride = 100;
 
 std::int16_t &BankAmmo(GameState &state, std::int16_t bank) {
-  return state.weapon_bank_ammo[static_cast<std::size_t>(bank) * kBankStride];
+  return state
+      .weapon_count_by_class[static_cast<std::size_t>(bank) * kBankStride];
 }
 
 const std::int16_t &BankAmmo(const GameState &state, std::int16_t bank) {
-  return state.weapon_bank_ammo[static_cast<std::size_t>(bank) * kBankStride];
+  return state
+      .weapon_count_by_class[static_cast<std::size_t>(bank) * kBankStride];
 }
 
 std::int16_t &BankSecondary(GameState &state, std::int16_t bank) {
-  return state
-      .weapon_bank_secondary[static_cast<std::size_t>(bank) * kBankStride];
+  return state.weapon_secondary_count_by_class[static_cast<std::size_t>(bank) *
+                                               kBankStride];
 }
 
 const std::int16_t &BankSecondary(const GameState &state, std::int16_t bank) {
-  return state
-      .weapon_bank_secondary[static_cast<std::size_t>(bank) * kBankStride];
+  return state.weapon_secondary_count_by_class[static_cast<std::size_t>(bank) *
+                                               kBankStride];
 }
 
 // Game-bearing in degrees (0 = up, clockwise) from (x1,y1) to (x2,y2). Local
@@ -419,10 +423,10 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
   // Seeds the player's 0x100 weapon-bank ammo/secondary counters from a ship
   // class's mounted stock weapons (Ghidra default_weapon_ammo / default_weapon_
   // secondary). For each stock weapon triple {weapon_id, count, ammo_load} the
-  // mounted-count goes into weapon_bank_ammo[weapon_id-0x80] and any carried
-  // rounds (ammo_load, when > 0) into the matching secondary/ammo counter. The
-  // original seeds the new ship's banks this way in Menu_RunNewGameFlow and
-  // Player_SwapShipWithEscort, then calls
+  // mounted-count goes into weapon_count_by_class[weapon_id-0x80] and any
+  // carried rounds (ammo_load, when > 0) into the matching secondary/ammo
+  // counter. The original seeds the new ship's banks this way in
+  // Menu_RunNewGameFlow and Player_SwapShipWithEscort, then calls
   // Weapon_ReconcileOutfitPoolWithWeaponBanks to register the mounted stock
   // guns as owned outfits.
   const ShipClass *ship =
@@ -435,10 +439,10 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
       continue; // unmounted bank (weapon_id -1) or out-of-range
     }
     const std::size_t bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-    state.weapon_bank_ammo[bank * kBankStride] =
+    state.weapon_count_by_class[bank * kBankStride] =
         static_cast<std::int16_t>(stock.count > 0 ? stock.count : 0);
     if (stock.ammo_load > 0) {
-      state.weapon_bank_secondary[bank * kBankStride] =
+      state.weapon_secondary_count_by_class[bank * kBankStride] =
           static_cast<std::int16_t>(stock.ammo_load);
     }
   }
@@ -448,8 +452,8 @@ void NovaWeapon_SeedBanksFromShipStock(GameState &state,
 void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state) {
   // Zero-sweep all 0x100 banks (the original clears both counters).
   for (std::size_t b = 0; b < 0x100; ++b) {
-    state.weapon_bank_ammo[b * kBankStride] = 0;
-    state.weapon_bank_secondary[b * kBankStride] = 0;
+    state.weapon_count_by_class[b * kBankStride] = 0;
+    state.weapon_secondary_count_by_class[b * kBankStride] = 0;
   }
   // Accumulate from owned outfits. outfit_owned_count is indexed by outfit id
   // - 0x80; scenario.outfits is indexed the same way, so index i maps to both.
@@ -592,12 +596,12 @@ bool NovaWeapon_HasLoadedLaunchBayAmmo(const GameState &state,
   auto bank_ammo = [&](std::int16_t bank) -> std::int16_t {
     return is_player
                ? BankAmmo(state, bank)
-               : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+               : ship.npc_weapon_count_by_class[static_cast<std::size_t>(bank)];
   };
   auto bank_secondary = [&](std::int16_t bank) -> std::int16_t {
-    return is_player
-               ? BankSecondary(state, bank)
-               : ship.npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+    return is_player ? BankSecondary(state, bank)
+                     : ship.npc_weapon_secondary_count_by_class
+                           [static_cast<std::size_t>(bank)];
   };
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
     const Weapon *w = WeaponAt(state, bank);
@@ -636,8 +640,9 @@ constexpr std::uint16_t kEscapeShipClassFlag = 0x8000;
   }
   const bool is_player = ship.ship_instance_id == 0;
   const std::int16_t mounted =
-      is_player ? BankAmmo(state, bank)
-                : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+      is_player
+          ? BankAmmo(state, bank)
+          : ship.npc_weapon_count_by_class[static_cast<std::size_t>(bank)];
   if (mounted < 1) {
     return false;
   }
@@ -686,8 +691,9 @@ bool NovaWeapon_HasAnyFireableNonSecondaryWeapon(const GameState &state,
   const bool is_player = ship.ship_instance_id == 0;
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
     const std::int16_t mounted =
-        is_player ? BankAmmo(state, bank)
-                  : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+        is_player
+            ? BankAmmo(state, bank)
+            : ship.npc_weapon_count_by_class[static_cast<std::size_t>(bank)];
     if (mounted <= 0) {
       continue;
     }
@@ -758,7 +764,7 @@ int NovaWeapon_GetShipMaxWeaponRange(const GameState &state, const Ship &ship) {
   auto bank_ammo = [&](std::int16_t bank) -> std::int16_t {
     return is_player
                ? BankAmmo(state, bank)
-               : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+               : ship.npc_weapon_count_by_class[static_cast<std::size_t>(bank)];
   };
   int max_range = 0;
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
@@ -829,9 +835,9 @@ bool NovaWeapon_CanFireWeaponBank(const GameState &state,
   // -- the original reads one ShipState array either way, branching only on
   // which counter index to use (Weapon_CanFireWeaponBank 0x00468990).
   auto loaded_secondary = [&](std::int16_t slot) -> std::int16_t {
-    return is_player
-               ? BankSecondary(state, slot)
-               : ship.npc_weapon_bank_secondary[static_cast<std::size_t>(slot)];
+    return is_player ? BankSecondary(state, slot)
+                     : ship.npc_weapon_secondary_count_by_class
+                           [static_cast<std::size_t>(slot)];
   };
   if (w->weapon_mode_code == 99) {
     // Carrier-bay weapon: needs a loaded ship in the firing bank's counter.
@@ -2230,12 +2236,12 @@ void NovaWeapon_TickNpcWeaponBanks(Ship &ship, float elapsed_ticks) {
   auto bank_ammo = [&](std::int16_t slot) -> std::int16_t {
     return is_player
                ? BankAmmo(state, slot)
-               : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(slot)];
+               : ship.npc_weapon_count_by_class[static_cast<std::size_t>(slot)];
   };
   auto bank_secondary = [&](std::int16_t slot) -> std::int16_t {
-    return is_player
-               ? BankSecondary(state, slot)
-               : ship.npc_weapon_bank_secondary[static_cast<std::size_t>(slot)];
+    return is_player ? BankSecondary(state, slot)
+                     : ship.npc_weapon_secondary_count_by_class
+                           [static_cast<std::size_t>(slot)];
   };
   if ((w->flags & 0x0040U) == 0U) {
     return 1;
@@ -2378,13 +2384,14 @@ void NovaWeapon_SelectTurretTargetWithinArc(GameState &state, Ship &ship) {
   }
   const bool player = ship.ship_instance_id == 0;
   auto ammo = [&](std::int16_t bank) -> std::int16_t {
-    return player ? BankAmmo(state, bank)
-                  : ship.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+    return player
+               ? BankAmmo(state, bank)
+               : ship.npc_weapon_count_by_class[static_cast<std::size_t>(bank)];
   };
   auto secondary = [&](std::int16_t bank) -> std::int16_t & {
-    return player
-               ? BankSecondary(state, bank)
-               : ship.npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+    return player ? BankSecondary(state, bank)
+                  : ship.npc_weapon_secondary_count_by_class
+                        [static_cast<std::size_t>(bank)];
   };
   auto cooldown = [&](std::int16_t bank) -> float & {
     return player
@@ -2738,7 +2745,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
       consume_fire_request();
     }
   };
-  if (ship.npc_weapon_bank_ammo[index] <= 0 ||
+  if (ship.npc_weapon_count_by_class[index] <= 0 ||
       ship.npc_weapon_bank_cooldown[index] > 0.0F) {
     finish_fire_handoff();
     return;
@@ -2747,7 +2754,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   // particular, energy weapons (ammo_type == -1) can have secondary == 0;
   // that counter is not an ammunition requirement for them.
   if (weapon->weapon_mode_code == 99 &&
-      ship.npc_weapon_bank_secondary[index] < 1) {
+      ship.npc_weapon_secondary_count_by_class[index] < 1) {
     finish_fire_handoff();
     return;
   }
@@ -2769,15 +2776,14 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
   // is deferred (the port does not model fuel-on-weapons).
   int burst_attempts = 1;
   if ((weapon->flags & 0x0040U) != 0) {
-    burst_attempts = ship.npc_weapon_bank_ammo[index];
+    burst_attempts = ship.npc_weapon_count_by_class[index];
     if ((weapon->flags_tertiary & 0x0001U) != 0) {
       const int cost = weapon->ammo_type;
       if (cost >= 0 && cost <= 0xff) {
-        burst_attempts = std::min(
-            burst_attempts,
-            static_cast<int>(
-                ship.npc_weapon_bank_secondary[static_cast<std::size_t>(
-                    cost)]));
+        burst_attempts =
+            std::min(burst_attempts,
+                     static_cast<int>(ship.npc_weapon_secondary_count_by_class
+                                          [static_cast<std::size_t>(cost)]));
       }
     }
     burst_attempts = std::max(0, burst_attempts);
@@ -2919,10 +2925,11 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     ++shots_fired;
     // Per-burst ammo consumption (one per successful shot, mirroring the
     // original's loop).
-    const std::int16_t secondary = ship.npc_weapon_bank_secondary[index];
+    const std::int16_t secondary =
+        ship.npc_weapon_secondary_count_by_class[index];
     if (secondary > 0 && ship.pers_def_slot != 0x3ff &&
         (weapon->flags_tertiary & 0x0001U) == 0U) {
-      ship.npc_weapon_bank_secondary[index] =
+      ship.npc_weapon_secondary_count_by_class[index] =
           static_cast<std::int16_t>(secondary - 1);
     }
   }
@@ -2949,7 +2956,7 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
                                          (weapon->flags & 0x0010U) != 0U});
   }
   const int mount_count =
-      std::max(1, static_cast<int>(ship.npc_weapon_bank_ammo[index]));
+      std::max(1, static_cast<int>(ship.npc_weapon_count_by_class[index]));
   float fire_cooldown;
   if ((weapon->flags & 0x0040U) == 0) {
     // Original: local_1c = sVar9 * (speed_scalar / mount_count).
@@ -2979,7 +2986,8 @@ void NovaWeapon_FireNpcWeaponBank(GameState &state, Ship &ship) {
     if ((weapon->flags_tertiary & 0x0001U) != 0 &&
         (ship.npc_weapon_bank_burst_counter[index] %
          weapon->burst_cycle_ticks) == 0) {
-      auto &cost_secondary = ship.npc_weapon_bank_secondary[cost_index];
+      auto &cost_secondary =
+          ship.npc_weapon_secondary_count_by_class[cost_index];
       cost_secondary = static_cast<std::int16_t>(
           std::max(0, static_cast<int>(cost_secondary) - 1));
     }

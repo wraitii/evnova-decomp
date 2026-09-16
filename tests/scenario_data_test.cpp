@@ -1229,10 +1229,10 @@ TEST_CASE("scenario loads pers personalities", "[scenario][data]") {
   REQUIRE(data.LoadFromArchives());
 
   REQUIRE(data.pers_defs.size() == 0x400);
-  const auto pers_count = static_cast<int>(std::count_if(
-      data.pers_defs.begin(), data.pers_defs.end(), [](const PersDef &d) {
-        return d.present;
-      }));
+  const auto pers_count =
+      static_cast<int>(std::count_if(data.pers_defs.begin(),
+                                     data.pers_defs.end(),
+                                     [](const PersDef &d) { return d.alive; }));
   CHECK(pers_count == 516);
 
   // Jack Folstam (p\x91rs 0x83), the Federation storyline contact flying the
@@ -1241,7 +1241,7 @@ TEST_CASE("scenario loads pers personalities", "[scenario][data]") {
   // ammo, ActiveOn "b0 & !b8".
   const PersDef *jack = data.Pers(0x83);
   REQUIRE(jack != nullptr);
-  CHECK(jack->present);
+  CHECK(jack->alive);
   CHECK(jack->loaded_latch);
   CHECK(jack->display_name == "Jack Folstam");
   CHECK(jack->special_ship_name == "Night-Master");
@@ -1280,7 +1280,7 @@ TEST_CASE("scenario loads pers personalities", "[scenario][data]") {
 
   // Absent slots stay inactive.
   const PersDef *absent = data.Pers(0x300);
-  REQUIRE((absent == nullptr || !absent->present));
+  REQUIRE((absent == nullptr || !absent->alive));
 }
 
 TEST_CASE("temp personality probe", "[.persprobe]") {
@@ -1292,7 +1292,7 @@ TEST_CASE("temp personality probe", "[.persprobe]") {
   int shown = 0;
   for (std::size_t i = 0; i < data.pers_defs.size() && shown < 8; ++i) {
     const auto &d = data.pers_defs[i];
-    if (!d.present) {
+    if (!d.alive) {
       continue;
     }
     ++shown;

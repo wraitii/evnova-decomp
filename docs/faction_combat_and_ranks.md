@@ -132,8 +132,8 @@ mission text breaks. The port uses the Bible semantics (ConvName for
 ### Demand-tribute middle-button branch (0x00480030)
 
 Per pulse it fires event 3, spawns defense-fleet ships up to the stellar
-max/present bookkeeping, latches domination (`hazard_marker` 1, tribute STR#
-0xbba 25/26; release mirrors it with 35/36 and clears `hazard_marker`), and
+max/present bookkeeping, latches domination (`dominated` 1, tribute STR#
+0xbba 25/26; release mirrors it with 35/36 and clears `dominated`), and
 runs the stellar reaction scripts. TODO(decomp): the branch is not ported.
 
 Pilot save/load does not persist the `g_rank_defs` active flags (FleetState

@@ -363,7 +363,7 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
     return nullptr;
   }
   const PersDef &pers = scenario.pers_defs[static_cast<std::size_t>(pers_slot)];
-  return pers.present ? &pers : nullptr;
+  return pers.alive ? &pers : nullptr;
 }
 
 // Resolves an active mission's ship-name (misn +0x2a pool) or subtitle

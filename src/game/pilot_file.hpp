@@ -102,30 +102,32 @@ struct PilotFile {
   // into the scenario's currently defined systems.
   std::array<std::int16_t, GameState::kMaxSystems> system_discovery{};
   std::array<std::int16_t, GameState::kMaxSystems> system_reputation{};
-  std::array<std::int16_t, 0x200> outfit_owned_count{};     // block1+0x101a
-  std::array<std::int16_t, 0x100 * 100> weapon_bank_ammo{}; // block1+0x241a
+  std::array<std::int16_t, 0x200> outfit_owned_count{}; // block1+0x101a
   std::array<std::int16_t, 0x100 * 100>
-      weapon_bank_secondary{}; // block1+0x261a
+      weapon_count_by_class{}; // block1+0x241a
+  std::array<std::int16_t, 0x100 * 100>
+      weapon_secondary_count_by_class{}; // block1+0x261a
   // Junk item quantities (Ghidra g_junk_defs strided counts), block2+0x3488.
   std::array<std::int16_t, 0x80> junk_counts{};
   // Exact Nova Control Bit bytes b0..b9999 (block1+0xb7be). Nonzero means set,
   // but raw values are retained because converted Mac pilots are not always
   // normalized to 1.
   std::array<std::uint8_t, PilotControlState::kControlBitCount> control_bits{};
-  std::array<std::uint8_t, 0x800> stellar_saved_bytes{}; // block1+0xdece
+  std::array<std::uint8_t, 0x800> stellar_dominated{}; // block1+0xdece
   std::array<std::int16_t, 0x800> stellar_present_ship_counts{}; // block2+6
-  std::array<std::int16_t, 0x800> stellar_availability_rolls{};  // +0x2086
-  std::array<std::int16_t, 0x400> pers_present_flags{};          // +0x1006
-  std::array<std::int16_t, 0x400> pers_visible_flags{};          // +0x1806
+  std::array<std::int16_t, 0x800> stellar_domination_days{};     // +0x2086
+  std::array<std::int16_t, 0x400> pers_alive_flags{};            // +0x1006
+  std::array<std::int16_t, 0x400> pers_grudge_flags{};           // +0x1806
   // Per-system mutable reinforcement retrigger delay (Ghidra SystemDef +0xC4),
   // block2+0x3d90.
   std::array<std::int16_t, GameState::kMaxSystems>
       reinforcement_retrigger_delay{};
-  // Per-stellar engagement access (Ghidra StellarDef +0x47C), block2+0x4d90.
-  // Restored with the loader's <1 fallback (engage_access -1, live strength
-  // reset to capacity) vs >=1 branch (engage_access = value, strength -1);
-  // no separate strength array is persisted.
-  std::array<std::int16_t, 0x800> stellar_engage_access{};
+  // Per-stellar regeneration countdown (Ghidra StellarDef +0x47C),
+  // block2+0x4d90.
+  // Restored with the loader's <1 fallback (destroyed_days_remaining -1, live
+  // strength reset to capacity) vs >=1 branch (destroyed_days_remaining =
+  // value, strength -1); no separate strength array is persisted.
+  std::array<std::int16_t, 0x800> stellar_destroyed_days_remaining{};
   // Escort group-order command codes by class category (Ghidra
   // g_target_category_command), block2+0x5d90.
   std::array<std::int16_t, 4> target_category_command{-1, -1, -1, -1};
@@ -135,7 +137,7 @@ struct PilotFile {
   std::array<std::int16_t, 0x40> escort_ship_class_ids{};
   std::array<std::int16_t, 0x40> fighter_ship_class_ids{};
   std::array<std::int16_t, 0x40> escort_upgrade_flags{};
-  std::array<std::int16_t, 0x40> escort_released_flags{};
+  std::array<std::int16_t, 0x40> escort_pending_sale_flags{};
   std::array<std::int16_t, 0x40> fighter_voice_types{};
   std::array<std::int16_t, 0x100> disaster_days_remaining{};  // +0x3088
   std::array<std::int16_t, 0x100> disaster_active_stellars{}; // +0x3288

@@ -584,8 +584,8 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
   // any ammo capacity the weapon definitions impose.
   //
   // TODO(decomp): the original caps this via the weapon bank / ammo system
-  // (Weapon_CanFireWeaponBank gating on weapon_bank_secondary counters), not
-  // a per-weapon "max ammo" payload field. Payload +0x5a is
+  // (Weapon_CanFireWeaponBank gating on weapon_secondary_count_by_class
+  // counters), not a per-weapon "max ammo" payload field. Payload +0x5a is
   // burst_cycle_ticks, not an ammo capacity (see the weapon-decode audit).
   // Until the real ammo system is reconstructed we leave the capacity cap
   // out; the plain owned-count handling below still bounds it correctly for
@@ -998,10 +998,10 @@ Outfit_CountCarriedShipsForOutfit(const GameState &state,
         state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
     const std::size_t counter = bank * 100;
     if (weapon != nullptr && weapon->weapon_mode_code == 99 &&
-        state.weapon_bank_ammo[counter] > 0 &&
+        state.weapon_count_by_class[counter] > 0 &&
         weapon->ammo_type - 0x80 == carried_ship_class &&
-        state.weapon_bank_secondary[counter] > 0) {
-      return state.weapon_bank_secondary[counter];
+        state.weapon_secondary_count_by_class[counter] > 0) {
+      return state.weapon_secondary_count_by_class[counter];
     }
   }
   return 0;

@@ -473,7 +473,7 @@ void NovaAi_UpdateShipCloakStateFromTraits(GameState &state, Ship &ship) {
   if ((flags & 0x0100U) != 0U) {
     for (std::int16_t bank = 0; bank < 0x100; ++bank) {
       const std::size_t bank_index = static_cast<std::size_t>(bank);
-      if (ship.npc_weapon_bank_ammo[bank_index] <= 0) {
+      if (ship.npc_weapon_count_by_class[bank_index] <= 0) {
         continue;
       }
       const Weapon *weapon =
@@ -565,12 +565,12 @@ struct WeaponBankState {
 ReadWeaponBank(const GameState &state, const Ship &ship, std::int16_t bank) {
   const auto index = static_cast<std::size_t>(bank);
   if (ship.ship_instance_id == 0) {
-    return {state.weapon_bank_ammo[index * 100],
-            state.weapon_bank_secondary[index * 100],
+    return {state.weapon_count_by_class[index * 100],
+            state.weapon_secondary_count_by_class[index * 100],
             state.weapon_bank_cooldown[index]};
   }
-  return {ship.npc_weapon_bank_ammo[index],
-          ship.npc_weapon_bank_secondary[index],
+  return {ship.npc_weapon_count_by_class[index],
+          ship.npc_weapon_secondary_count_by_class[index],
           ship.npc_weapon_bank_cooldown[index]};
 }
 
@@ -1450,8 +1450,8 @@ int NovaAiShip_ComputePerceivedCombatStrength(const GameState &state,
 // the early retention gate, the active mission-fleet goal 0/1 arms, the
 // weapon-readiness early return, the non-xenophobic ally-support pass, the
 // IFF-scrambler/policy player shield, and the behavior-6 escort re-selection.
-// NOT implemented: the license/anti-tamper check, the pers_def personality
-// arms, and the remaining government target passes (flags_primary&1
+// NOT implemented: the license/anti-tamper check and the remaining government
+// target passes (flags_primary&1
 // aggressive 0x0040e710, near-player
 // reputation/odds 0x0040ece3, inherent-combat roll 0x0040e57f, distress-
 // responder rescans/common tail 0x0040eea0) with their perceived-combat-
@@ -1465,12 +1465,6 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
   // FALSE (a matching pair), not on an arbitrary mismatch; the purpose is
   // provisional. The clean-room model has no license-seed field.
   //
-  // TODO(decomp(0x0040e020)) skipped: the pers_def_slot arms -- slot 0x3fe
-  // forces hostility, and (pers.flags_primary & 1) with the pers +0x621 grudge
-  // latch and the cloak rules forces hostility. PersDef has no grudge-latch
-  // field and its writer (Shot_ResolveShipHitFromWeapon 0x0041a2cb) is
-  // unported.
-
   // 0x0040e149 early retention: keep an existing primary target while the ship
   // is in an attack state (3/4) and the target slot is still active. The
   // original has NO same-system and NO destroyed check in this gate.
@@ -1481,6 +1475,25 @@ void NovaAi_AcquirePrimaryTarget(GameState &state, Ship &ship) {
       state.ShipAt(static_cast<std::size_t>(ship.primary_target_ship_slot))
           .is_active) {
     return;
+  }
+
+  // Personality overrides at 0x0040e1d0: the sentinel ambusher always turns
+  // hostile; other Flags-1 personalities do so after their persistent grudge
+  // latch has been set by a player weapon hit, subject to cloak visibility.
+  if (ship.pers_def_slot >= 0 && static_cast<std::size_t>(ship.pers_def_slot) <
+                                     state.scenario.pers_defs.size()) {
+    if (ship.pers_def_slot == 0x3fe) {
+      NovaAi_SetShipHostileToPlayer(state, ship);
+      return;
+    }
+    const PersDef &pers =
+        state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
+    if ((static_cast<std::uint16_t>(pers.flags_primary) & 0x0001U) != 0U &&
+        pers.grudge &&
+        NovaAiShip_CanEngageTargetUnderCloakRules(state, state.player, ship)) {
+      NovaAi_SetShipHostileToPlayer(state, ship);
+      return;
+    }
   }
 
   // 0x0040e202 active mission-fleet arms. Goal 0 forces hostility to the

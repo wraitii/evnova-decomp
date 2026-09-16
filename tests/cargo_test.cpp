@@ -120,8 +120,8 @@ TEST_CASE("carried-ship outfit count prefers deployed craft then bay ammo",
   bay.weapon_mode_code = 99;
   bay.ammo_type = 0x80;
 
-  state.weapon_bank_ammo[0] = 1;
-  state.weapon_bank_secondary[0] = 3;
+  state.weapon_count_by_class[0] = 1;
+  state.weapon_secondary_count_by_class[0] = 3;
   CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 3);
   CHECK(Outfit_PlayerHasOutfitForControlExpression(state, 0x80));
 
@@ -140,7 +140,7 @@ TEST_CASE("carried-ship outfit count prefers deployed craft then bay ammo",
   second.is_active = false;
   CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 3);
 
-  state.weapon_bank_ammo[0] = 0;
+  state.weapon_count_by_class[0] = 0;
   CHECK(Outfit_CountCarriedShipsForOutfit(state, 0x80) == 0);
   CHECK_FALSE(Outfit_PlayerHasOutfitForControlExpression(state, 0x80));
   state.inventory.outfit_owned_count[0] = 1;

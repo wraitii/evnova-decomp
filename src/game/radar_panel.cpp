@@ -112,7 +112,7 @@ SDL_Color Stellar_RadarDisplayColor(const GameState &state, const Stellar &st) {
   }
   // Hazard markers (availability 0x20 hazard/derelict bit, cached into
   // StellarDef +0x46) draw green.
-  if (st.hazard_marker) {
+  if (st.dominated) {
     return kIffStellarHazard;
   }
   if (st.government_id != -1 &&

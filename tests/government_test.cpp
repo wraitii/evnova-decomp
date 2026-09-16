@@ -117,10 +117,10 @@ TEST_CASE("candidate-hostility applies the stellar targeter gates",
   SECTION("hazard marker and AI state 8 reject a candidate") {
     ship.ship_instance_id = 1;
     ship.squad_leader_ship_slot = -1;
-    stellar.hazard_marker = true;
+    stellar.dominated = true;
     CHECK(!NovaGovernment_IsCandidateHostileToTargeter(
         state, ship, stellar, 0x80));
-    stellar.hazard_marker = false;
+    stellar.dominated = false;
     ship.ai_state_code = 8;
     CHECK(!NovaGovernment_IsCandidateHostileToTargeter(
         state, ship, stellar, 0x80));

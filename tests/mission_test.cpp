@@ -308,7 +308,7 @@ TEST_CASE("random mission locator -2 selects ordinary travel stellars") {
     stellar.flags = 0x81; // travel target active, ordinary lane
     stellar.strength_capacity = 1;
     stellar.strength = 1;
-    stellar.engage_access = 1;
+    stellar.destroyed_days_remaining = 1;
   }
   state.scenario.stellars[0].system_id = 0;
   state.scenario.stellars[1].system_id = 1;
@@ -342,7 +342,7 @@ TEST_CASE("random mission locator -3 requires the 0x20 travel lane") {
     stellar.flags = 0xa1; // active + 0x20 mission travel lane
     stellar.strength_capacity = 1;
     stellar.strength = 1;
-    stellar.engage_access = 1;
+    stellar.destroyed_days_remaining = 1;
   }
   state.scenario.stellars[0].system_id = 0;
   state.scenario.stellars[1].system_id = 1;
@@ -379,7 +379,7 @@ TEST_CASE("mission random locator uses the current travel stellar as anchor") {
     stellar.flags = 0x81;
     stellar.strength_capacity = 1;
     stellar.strength = 1;
-    stellar.engage_access = 1;
+    stellar.destroyed_days_remaining = 1;
   }
   state.scenario.stellars[0].system_id = 0;
   state.scenario.stellars[1].system_id = 0;
@@ -474,7 +474,7 @@ TEST_CASE("accepted single-ship mission replaces hailed personality ship") {
   state.scenario.dudes[0].ship_types[0] = 1;
   state.scenario.dudes[0].ship_probabilities[0] = 1;
   state.scenario.pers_defs.resize(1);
-  state.scenario.pers_defs[0].present = true;
+  state.scenario.pers_defs[0].alive = true;
   state.scenario.pers_defs[0].link_mission_id = 0;
   state.scenario.pers_defs[0].flags_primary = 0x0940;
 
@@ -501,7 +501,7 @@ TEST_CASE("accepted single-ship mission replaces hailed personality ship") {
 
   REQUIRE(Mission_HandleAcceptedShipInteraction(state, 1, 1234));
   CHECK_FALSE(target.is_active);
-  CHECK_FALSE(state.scenario.pers_defs[0].present);
+  CHECK_FALSE(state.scenario.pers_defs[0].alive);
   CHECK(state.player.primary_target_ship_slot == 2);
   const Ship &replacement = state.ShipAt(2);
   CHECK(replacement.is_active);

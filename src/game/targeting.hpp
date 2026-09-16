@@ -52,9 +52,9 @@ namespace game {
 // "active" for rendering/targeting -- its Bible Strength capacity (+0x40) is
 // positive and either the live Strength (+0x3c) has gone negative (destroyed)
 // or the engagement-access counter (+0x47c) is positive. Our Stellar carries
-// these as `strength_capacity`, `strength` and `engage_access`; the +0x40/+0x3c
-// pair is Strength, not an ambient-sprite count. This drives sprite-set
-// (link_a/link_b) selection and defence/target passes.
+// these as `strength_capacity`, `strength` and `destroyed_days_remaining`; the
+// +0x40/+0x3c pair is Strength, not an ambient-sprite count. This drives
+// sprite-set (link_a/link_b) selection and defence/target passes.
 [[nodiscard]] bool NovaTargeting_IsStellarActive(const Stellar &st);
 
 // Ghidra Stellar_UpdateStellarSprites (0x0042cd10) ambient-sprite zone
@@ -105,7 +105,7 @@ NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
 
 // Ghidra 0x00432470 System_UpdateSystemAndStellarDisplayState (scope 3):
 // re-derives, for the player's current system, each stellar's owning
-// `system_id` and `is_available` / `hazard_marker` flags. A stellar is called
+// `system_id` and `is_available` / `dominated` flags. A stellar is called
 // available when it belongs to (or is re-homed to) a visible system. This is
 // the per-tick availability evaluation the spaceflight pre-loop currently skips
 // (TODO in NovaFrame_SpaceflightLoop).

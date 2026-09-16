@@ -1026,6 +1026,17 @@ void ResolveShipHitFromWeapon(GameState &state,
         target.ai_maneuver_timer_ms = kMaxManeuverTimerOnHit;
       }
       if (target_slot != 0 && target.defense_fleet_home_stellar_id == -1) {
+        if (target.pers_def_slot >= 0 &&
+            static_cast<std::size_t>(target.pers_def_slot) <
+                state.scenario.pers_defs.size()) {
+          PersDef &pers =
+              state.scenario
+                  .pers_defs[static_cast<std::size_t>(target.pers_def_slot)];
+          if ((static_cast<std::uint16_t>(pers.flags_primary) & 0x0001U) !=
+              0U) {
+            pers.grudge = true;
+          }
+        }
         ClearState9OrFToIdle(target);
         target.primary_target_ship_slot = 0;
       }
@@ -2048,7 +2059,7 @@ bool ResolveShotStellarContact(GameState &state,
                                     stellar->on_destroy_script,
                                     MissionScriptContext{"stellar OnDestroy"});
       stellar->strength = -1;
-      stellar->engage_access = stellar->schedule_days;
+      stellar->destroyed_days_remaining = stellar->schedule_days;
       if (shot.owner_ship_slot == 0) {
         // Ghidra 0x004381d4..0x004381fe: a player shot that destroys the
         // stellar pulses the stellar government's kill event ten times.

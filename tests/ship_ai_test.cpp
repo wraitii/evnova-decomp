@@ -1403,7 +1403,9 @@ TEST_CASE("capture-approach drive boards a disabled ship end-to-end",
   boarder.ai_behavior_code = 3;
   boarder.armor_points = static_cast<float>(
       state.scenario.ships[static_cast<std::size_t>(boarder_class)].base_armor);
-  boarder.npc_weapon_bank_ammo[static_cast<std::size_t>(free_energy_bank)] = 1;
+  boarder
+      .npc_weapon_count_by_class[static_cast<std::size_t>(free_energy_bank)] =
+      1;
   boarder.pos_x = 0.0F; // override the allocator's spawn scatter
   boarder.pos_y = 0.0F;
 
@@ -1609,10 +1611,34 @@ TEST_CASE("acquire refuses a ship with no ready weapons") {
   ship.ai_state_code = 0;
   ship.ai_hostility_accumulator = 1; // would otherwise target the player
   ship.primary_target_ship_slot = -1;
-  ship.npc_weapon_bank_ammo.fill(0); // readiness bucket 2
+  ship.npc_weapon_count_by_class.fill(0); // readiness bucket 2
 
   game::NovaAi_AcquirePrimaryTarget(state, ship);
   CHECK(ship.primary_target_ship_slot == -1);
+}
+
+TEST_CASE("acquire honors a Flags-1 personality grudge") {
+  GameState state;
+  state.scenario.pers_defs.resize(1);
+  game::PersDef &pers = state.scenario.pers_defs[0];
+  pers.alive = true;
+  pers.grudge = true;
+  pers.flags_primary = 0x0001;
+
+  state.player.is_active = true;
+  state.player.ship_instance_id = 0;
+  state.player.current_system_id = 0;
+  game::Ship &ship = state.ShipAt(1);
+  ship.is_active = true;
+  ship.ship_instance_id = 1;
+  ship.current_system_id = 0;
+  ship.pers_def_slot = 0;
+  ship.primary_target_ship_slot = -1;
+
+  game::NovaAi_AcquirePrimaryTarget(state, ship);
+
+  CHECK(ship.primary_target_ship_slot == 0);
+  CHECK(ship.ai_state_code == 4);
 }
 
 TEST_CASE("Federation warship shares an ally's aggression against the player") {
@@ -2116,7 +2142,7 @@ TEST_CASE("mission stellar attack directive selects a hostile stellar") {
   ship.current_system_id = 0;
   ship.faction_or_government_id = 0;
   ship.armor_points = 100.0F;
-  ship.npc_weapon_bank_ammo[0] = 1;
+  ship.npc_weapon_count_by_class[0] = 1;
 
   game::Mission_UpdateShipMissionStellarAttackDirective(
       state, ship, /*now_ms=*/0);

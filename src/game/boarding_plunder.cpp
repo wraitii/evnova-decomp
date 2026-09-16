@@ -89,7 +89,8 @@ constexpr std::size_t kEscortCap = 6; // Ship_CanPlayerHaveMoreEscorts soft cap
     return false;
   }
   for (int bank = 0; bank < 0x100; ++bank) {
-    if (state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100] <= 0) {
+    if (state.weapon_count_by_class[static_cast<std::size_t>(bank) * 100] <=
+        0) {
       continue;
     }
     const Weapon *carried =
@@ -257,7 +258,8 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
     int candidates = 0;
     for (int bank = 0; bank < 0x100; ++bank) {
       const std::int16_t stock =
-          target.npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+          target.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
+              bank)];
       const Weapon *w =
           state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
       if (stock > 0 && w != nullptr && w->weapon_mode_code != 99 &&
@@ -272,7 +274,8 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
       while (true) {
         const int bank = NovaRandomRange(state.rng, 0x100);
         const std::int16_t stock =
-            target.npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+            target.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
+                bank)];
         const Weapon *w =
             state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
         if (stock >= 1 && w != nullptr && w->weapon_mode_code != 99 &&
@@ -1794,9 +1797,9 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
           if (own.effective_owned >= own.max_allowed) {
             break;
           }
-          state.weapon_bank_secondary[static_cast<std::size_t>(
-                                          options.ammo_bank) *
-                                      100] += 1;
+          state.weapon_secondary_count_by_class[static_cast<std::size_t>(
+                                                    options.ammo_bank) *
+                                                100] += 1;
           ++transferred;
         }
         if (transferred < 1) {
@@ -1950,9 +1953,9 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
             }
             target.ai_behavior_code = 6;
             target.squad_leader_ship_slot = 0;
-            target.escort_origin_mark = 0;   // field_0xbb
-            target.escort_released_mark = 0; // field_0xbe
-            target.escort_upgrade_mark = 0;  // field_0xbf
+            target.escort_origin_mark = 0;       // field_0xbb
+            target.escort_pending_sale_mark = 0; // field_0xbe
+            target.escort_upgrade_mark = 0;      // field_0xbf
             target.armor_points = max_armor * kCapturedArmorFraction;
             target.faction_or_government_id = -1;
             target.pers_def_slot = -1;
