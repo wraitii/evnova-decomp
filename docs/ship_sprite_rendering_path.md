@@ -298,6 +298,6 @@ Player glow-level drive is a clean-room approximation inside
 (thrust), 32 (afterburner) or 0 (coast), while the original adds +1/frame
 under thrust (<24), +2/frame while banking (no clamp), fades once while
 coasting and again under a maneuver/station hold, and ramps the afterburner
-level at up to +2/frame to 32; the gravity-shield arm ramps toward
+level at up to +2/frame to 32; the inertialess arm ramps toward
 `round(speed*32*0.75/eff_max)` capped 24. The NPC `Ship_HandleShip` drive is
 faithful.

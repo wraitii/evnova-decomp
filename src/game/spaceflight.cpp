@@ -611,7 +611,7 @@ void NovaFrame_TickSystems(GameState &state,
 //   turn-bank animation         0x0044CA6B -> 0x0044CB99
 //   shield/armor regeneration   0x0044CB99 -> 0x0044CCAF
 //   hyperspace tunnel accel     0x0044CCAF -> 0x0044CFFE
-//   gravity-shield steering     0x0044CFFE -> 0x0044D05B
+//   inertialess steering        0x0044CFFE -> 0x0044D05B
 //   velocity-cap clamp          0x0044D05B -> 0x0044D0C3
 //   timed-action transition     0x0044D490 -> 0x0044D560
 //   route-map click              0x0044E035 -> [0x0044BC1E, 0x0044E490]
@@ -2460,7 +2460,7 @@ void Math_AddPolarVelocityWithClamp(float heading_rad,
 // GravityPull passes gravity * frame_time as max_accel, divides by the squared
 // separation (with a tiny-distance floor), then adds the polar result to the
 // ship velocity. The player is exempt with either opcode 38 (inertial
-// dampener, used by Outfit_ShipHasGravityShieldOutfit) or opcode 41 (gravity
+// dampener, used by Outfit_ShipIsInertialess) or opcode 41 (gravity
 // resistance, added by Stellar_ShipHasGravityShielding).
 static bool Ship_AccelerateShipTowardPoint(GameState &state,
                                            float elapsed_ticks) {
@@ -2576,8 +2576,8 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
       stats.turn_dir = delta > 0.0F ? 1 : -1;
     }
   } else if (input.thrust) {
-    if (opts.gravity_shield) {
-      // Ghidra 0x0044c9ab thrust arm, gravity-shield variant: thrust
+    if (opts.inertialess) {
+      // Ghidra 0x0044c9ab thrust arm, inertialess variant: thrust
       // accumulates the scalar speed (+0x48), clamped to the effective max
       // speed; the steering block below converts it into velocity.
       ship.speed =
@@ -2607,9 +2607,9 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
     return stats;
   }
 
-  if (opts.gravity_shield) {
-    // Ghidra 0x0044cffe gravity-shield steering block
-    // (PlayerTick_GravityShield- Steering). The scalar speed is clamped to the
+  if (opts.inertialess) {
+    // Ghidra 0x0044cffe inertialess steering block
+    // (PlayerTick_InertialessSteering). The scalar speed is clamped to the
     // cap global, decays by 33/34 (DAT_005755e0, a double) while
     // fire-restricted, and the velocity rotates toward heading * speed at the
     // thrust-scaled rate. The block's engine-glow ramp toward round(speed * 32
@@ -2621,8 +2621,8 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
       ship.speed = scalar_cap;
     }
     if (opts.fire_restricted) {
-      constexpr float kShieldFireRestrictedSpeedDamp = 33.0F / 34.0F;
-      ship.speed *= kShieldFireRestrictedSpeedDamp;
+      constexpr float kInertialessFireRestrictedSpeedDamp = 33.0F / 34.0F;
+      ship.speed *= kInertialessFireRestrictedSpeedDamp;
     }
     NovaShip_SteerVelocityTowardShipHeading(
         ship, stats.thrust_px_per_tick2, elapsed_ticks);
@@ -2644,9 +2644,9 @@ NovaPlayer_IntegrateMovement(PlayerShip &ship,
 
   ship.pos_x += ship.vel_x * elapsed_ticks;
   ship.pos_y += ship.vel_y * elapsed_ticks;
-  // Gravity-shield ships keep the scalar speed (+0x48) the thrust/steering
+  // Inertialess ships keep the scalar speed (+0x48) the thrust/steering
   // blocks maintained; the velocity is derived from it, not the reverse.
-  if (!opts.gravity_shield) {
+  if (!opts.inertialess) {
     ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
   }
   return stats;
@@ -2790,7 +2790,7 @@ NpcEffectiveStats NovaShip_ComputeEffectiveStats(const GameState &state,
 // (+0x40) factor and disable/ionization damping when the NPC outfit/combat
 // state is reconstructed.
 //
-// Gravity-shield ships (ShipClassDef.flags_secondary bit 0x40) keep a scalar
+// Inertialess ships (ShipClassDef.flags_secondary bit 0x40) keep a scalar
 // `speed` (integrated in the thrust block below) and steer their velocity
 // through NovaShip_SteerVelocityTowardShipHeading (0x0043b020) in the position
 // block, matching the original's two-regime movement model.
@@ -2821,10 +2821,10 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   }
   const float eff_max_speed = stats.max_speed_px_per_tick;
   const float eff_thrust = stats.thrust_px_per_tick2;
-  // Gravity-shield ships (ShipClassDef.flags_secondary bit 0x40, and not in
+  // Inertialess ships (ShipClassDef.flags_secondary bit 0x40, and not in
   // ai_control_mode 0x0c) keep a scalar Ship.speed and steer their velocity
   // through Ship_SteerVelocityTowardShipHeading instead of vector thrust.
-  const bool gravity_shield = NovaShip_HasGravityShield(ship, ship_class);
+  const bool inertialess = NovaShip_IsInertialess(ship, ship_class);
 
   // The movement blocks are gated off only while the maneuver timer is active
   // AND the ship is not in AI state 0x16. Ghidra Ship_HandleShip 0x00433050
@@ -2877,7 +2877,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // ship keeps almost all of its velocity and drifts to a stop slowly. The
   // original applies it once per raw spaceflight call; exponentiate by the
   // time-adjusted raw-call count so the stop is frame-rate independent. It
-  // also covers the gravity-shield scalar speed.
+  // also covers the inertialess scalar speed.
   if (fire_restricted) {
     constexpr float kFireRestrictedVelocityDamp = 0.995F; // 0x00575448
     const float damp = std::pow(kFireRestrictedVelocityDamp,
@@ -2897,12 +2897,12 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     ship.vel_y = 0.0F;
     ship.speed = 0.0F;
   } else {
-    if (gravity_shield) {
+    if (inertialess) {
       NovaShip_SteerVelocityTowardShipHeading(ship, eff_thrust, elapsed_ticks);
     }
     ship.pos_x += ship.vel_x * elapsed_ticks;
     ship.pos_y += ship.vel_y * elapsed_ticks;
-    if (!gravity_shield) {
+    if (!inertialess) {
       ship.speed = std::sqrt(ship.vel_x * ship.vel_x + ship.vel_y * ship.vel_y);
     }
   }
@@ -2971,8 +2971,8 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
   // stopped ship with no thrust command drifts without applying any new
   // velocity). The coast case (desired == 0) is a clamped step toward the
   // class top speed; desired > 0 throttles toward it; desired < 0 is the
-  // physics-override path. Non-gravity-shield ships apply heading-aligned
-  // thrust; gravity-shield ships accumulate a scalar `speed` clamped at the
+  // physics-override path. Non-inertialess ships apply heading-aligned
+  // thrust; inertialess ships accumulate a scalar `speed` clamped at the
   // same caps.
   if (!holds_course && ship.ai_forward_thrust_cmd != 0.0F) {
     const float desired = ship.ai_desired_speed;
@@ -2991,13 +2991,13 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
     const float thrust_step = ship.ai_forward_thrust_cmd * elapsed_ticks;
 
     if (desired == 0.0F) {
-      // Coast branch. Non-shield: per-axis clamped step toward the class top
-      // speed (with a zero command this is a no-op). Gravity-shield: scalar
+      // Coast branch. Non-inertialess: per-axis clamped step toward the class
+      // top speed (with a zero command this is a no-op). Inertialess: scalar
       // `speed` clamped at the class top speed. The original gates this branch
       // on ai_station_hold_timer <= 0 (a ship parked at a hold point does not
       // coast-accelerate).
       if (ship.ai_station_hold_timer <= 0.0F) {
-        if (!gravity_shield) {
+        if (!inertialess) {
           add_polar_clamped(thrust_step, eff_max_speed);
         } else {
           ship.speed =
@@ -3006,7 +3006,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       }
     } else if (desired > 0.0F) {
       // Forward thrust toward the requested speed.
-      if (!gravity_shield) {
+      if (!inertialess) {
         add_polar_clamped(thrust_step, desired);
       } else {
         ship.speed = std::clamp(ship.speed + thrust_step, 0.0F, desired);
@@ -3015,7 +3015,7 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       // Physics override: replace the velocity with abs(desired) along the
       // current heading. Negative throttle is not reverse acceleration; its
       // magnitude decays the signed desired value toward zero below.
-      if (!gravity_shield) {
+      if (!inertialess) {
         ship.vel_x = 0.0F;
         ship.vel_y = 0.0F;
         add_polar(std::abs(desired));
@@ -3055,8 +3055,8 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
       }
       if (ship.ai_desired_speed >= -threshold_max_speed) {
         NovaAi_ResetShipPrimaryAndSecondaryTargets(ship);
-        if (gravity_shield) {
-          // Gravity-shield completion quirk (0x00434f7e): the original zeroes
+        if (inertialess) {
+          // Inertialess completion quirk (0x00434f7e): the original zeroes
           // the vector velocity and re-commands the scalar override at the
           // threshold max speed instead of keeping the glide velocity.
           ship.ai_desired_speed = threshold_max_speed;
@@ -3221,25 +3221,32 @@ void NovaShip_IntegrateNpcMovement(GameState &state,
 }
 
 // Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020). Takes the
-// gravity-shield ship's scalar `speed` + `heading`, resets the velocity to the
-// heading*speed vector, then relaxes it back toward the previous frame's
-// velocity by a per-axis step of eff_thrust * 4.0 * frame_time (never
-// overshooting the prior velocity), yielding a smooth velocity rotation. The
-// turn-scale 4.0 mirrors _DAT_005754ac (provisional).
+// inertialess ship's scalar `speed` + `heading`, builds the commanded
+// velocity as heading*speed (Math_AddPolarVelocity), then moves the PREVIOUS
+// velocity toward that command by at most eff_thrust * 4.0 * frame_time per
+// axis, never overshooting the command. That is a smooth acceleration of the
+// current velocity toward the commanded heading*speed vector, not a heading
+// snap. The turn-scale is _DAT_005754ac = 4.0f (0x005754ac, disasm-verified).
+// eff_thrust and elapsed_ticks stand in for the original's internal
+// Ship_ComputeShipEffectiveThrust(ship) call and g_avg_frame_tick_scale read.
 void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
                                              float eff_thrust,
                                              float elapsed_ticks) {
   const float prev_vel_x = ship.vel_x;
   const float prev_vel_y = ship.vel_y;
-  // Reset the vector velocity to forward-heading * speed (Ship.speed is the
-  // gravity-shield scalar), via Math_AddPolarVelocity semantics.
+  // Commanded velocity = forward-heading * speed (Ship.speed is the
+  // inertialess scalar), via Math_AddPolarVelocity semantics.
   const float new_vx = std::sin(ship.heading) * ship.speed;
   const float new_vy = -std::cos(ship.heading) * ship.speed;
-  const float step = eff_thrust * 4.0F * elapsed_ticks;
-  // new + clamp(prev - new, -step, +step): move the heading snap back toward
-  // the previous velocity at most `step` per axis, never crossing it.
-  ship.vel_x = new_vx + std::clamp(prev_vel_x - new_vx, -step, step);
-  ship.vel_y = new_vy + std::clamp(prev_vel_y - new_vy, -step, step);
+  // Original disasm: x87 FIST truncation of heading to integer degrees, then
+  // Math_AddPolarVelocity; the table lookup is reproduced here as sin/cos of
+  // the port's radian heading (see the NPC polar helpers).
+  constexpr float kSteerTurnScale = 4.0F; // 0x005754ac
+  const float step = eff_thrust * kSteerTurnScale * elapsed_ticks;
+  // prev + clamp(new - prev, -step, +step): advance the previous velocity
+  // toward the command at most `step` per axis, never crossing it.
+  ship.vel_x = prev_vel_x + std::clamp(new_vx - prev_vel_x, -step, step);
+  ship.vel_y = prev_vel_y + std::clamp(new_vy - prev_vel_y, -step, step);
 }
 
 // ---------------------------------------------------------------------------
@@ -4523,13 +4530,13 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
       }
     }
   }
-  // Gravity-shield movement model (Outfit_ShipHasGravityShieldOutfit 0x0046df70
+  // Inertialess movement model (Outfit_ShipIsInertialess 0x0046df70
   // player branch: class flags_secondary 0x40 or an owned inertial dampener).
   PlayerMovementOptions movement_opts;
   movement_opts.face_target_armed = face_target_armed;
   const ShipClass *player_class =
       state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
-  movement_opts.gravity_shield =
+  movement_opts.inertialess =
       (player_class != nullptr &&
        (player_class->flags_secondary & 0x40U) != 0U) ||
       Outfit_HasOwnedEffect(state, OutfitEffect::kInertialDampener);
@@ -4549,7 +4556,7 @@ void PlayerTick_ManualFlightAndRegeneration(GameState &state,
       state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
   // TODO(decomp(0x0044aa70)) skipped: the player engine-glow state machine is
   // still a clean-room target interpolation. Reconstruct its distinct normal
-  // thrust, gravity-shield, afterburner, banking, turnaround, and hyperspace
+  // thrust, inertialess, afterburner, banking, turnaround, and hyperspace
   // branches before changing its cadence. Those original integer mutations
   // run once per raw spaceflight call and should eventually replay at the
   // 21 ms cadence used by the NPC Ship_HandleShip path above; do not merely

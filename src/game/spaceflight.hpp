@@ -60,13 +60,14 @@ struct PlayerMovementOptions {
   // Face-target auto-turn arm (0x0044c0b1 command); suppresses keyboard
   // steering and turns one step per frame toward ai_desired_heading_deg.
   bool face_target_armed = false;
-  // Gravity-shield movement model (Outfit_ShipHasGravityShieldOutfit
+  // Inertialess movement model (Outfit_ShipIsInertialess
   // 0x0046df70 player branch): thrust accumulates the scalar speed, which the
   // steering block converts into velocity via
   // NovaShip_SteerVelocityTowardShipHeading; ship.speed stays a scalar.
-  bool gravity_shield = false;
+  bool inertialess = false;
   // Fire-restricted flag (the port's NovaAiShip_IsDisabled approximation of
-  // the parent's local fire-restriction latch); drives the shield speed decay.
+  // the parent's local fire-restriction latch); drives the inertialess speed
+  // decay.
   bool fire_restricted = false;
   // Per-axis velocity clamp targets (g_player_speed_cap_x/y). Always >= the
   // effective max speed while maintained by the afterburner tail.
@@ -239,25 +240,25 @@ extern void NovaShip_IntegrateNpcMovement(GameState &state,
                                           std::uint32_t now_ms = 0);
 
 // Port of Ghidra Ship_SteerVelocityTowardShipHeading (0x0043b020), the momentum
-// / turn integrator for gravity-shield ships (ShipClassDef.flags_secondary bit
-// 0x40). These ships keep a scalar `speed` in Ship.speed; this converts it into
-// an actual velocity each frame by snapping the velocity toward the
-// forward-heading * speed vector, then letting it relax back toward the
-// previous frame's velocity at a rate of `eff_thrust * 4.0 * frame_time` per
-// axis (Math_AddPolarVelocity semantics + a per-axis clamp that never
-// overshoots the prior velocity). Produces a smooth velocity rotation rather
-// than an instant heading snap. Confidence: medium-high on the shape; the
-// turn-scale constant 4.0 (_DAT_005754ac) is provisional.
+// / turn integrator for inertialess ships (ShipClassDef.flags_secondary bit
+// 0x40). These ships keep a scalar `speed` in Ship.speed; this commands a
+// velocity of forward-heading * speed (Math_AddPolarVelocity) and then advances
+// the previous frame's velocity toward that command at a rate of
+// `eff_thrust * 4.0 * frame_time` per axis (per-axis clamp, no overshoot of the
+// command). Produces a smooth velocity acceleration rather than an instant
+// heading snap. The turn scale _DAT_005754ac = 4.0f is disasm-verified;
+// `eff_thrust`/`elapsed_ticks` stand in for the original's internal
+// Ship_ComputeShipEffectiveThrust and g_avg_frame_tick_scale.
 extern void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
                                                     float eff_thrust,
                                                     float elapsed_ticks);
 
-// Whether an NPC ship is on the gravity-shield movement model: the ship-class
+// Whether an NPC ship is on the inertialess movement model: the ship-class
 // flags_secondary bit 0x40 gate (and not in ai_control_mode 0x0c). Ports the
-// NPC branch of Outfit_ShipHasGravityShieldOutfit (0x0046df70); the player's
+// NPC branch of Outfit_ShipIsInertialess (0x0046df70); the player's
 // owned-outfit branch is handled separately in the player path.
-[[nodiscard]] inline bool NovaShip_HasGravityShield(const Ship &ship,
-                                                    const ShipClass &cls) {
+[[nodiscard]] inline bool NovaShip_IsInertialess(const Ship &ship,
+                                                 const ShipClass &cls) {
   return (cls.flags_secondary & 0x40) != 0 && ship.ai_control_mode != 0x0c;
 }
 

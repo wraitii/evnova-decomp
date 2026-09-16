@@ -319,7 +319,7 @@ void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
 // Ghidra 0x004048a0 Ship_UpdateEscortAI. Per-frame supervisor
 // for behavior > 4 ships: releases squads whose leader vanished, arms the
 // leader-jump-prep sync into AI state 0x0B (disengage + hold formation while
-// the leader charges a jump; gravity-shield ships detach and travel on their
+// the leader charges a jump; inertialess ships detach and travel on their
 // own), validates the primary target, decodes the escort command (player
 // category table / sub-leader mirror), and runs the command arms (1 assist,
 // 2 attack, 3 return-to-hangar, 4 cease fire, 0/default formation). Deferred:

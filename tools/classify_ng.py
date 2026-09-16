@@ -100,7 +100,7 @@ RULES = [
                   'RadarColor', 'TintColor', 'SteerVelocity', 'TurnShip',
                   'MaxShield', 'MaxArmor', 'FuelCap', 'RegenRate',
                   'RechargeRate', 'StatusEffect', 'ScannerStrength',
-                  'GravityShield', 'GravityShielding', 'FireRestricted',
+                  'GravityShield', 'GravityShielding', 'Inertialess', 'FireRestricted',
                   'Destroyed', 'PriorityThreat', 'heading', 'CurrentMass',
                   'ShipTotalMass', 'AutoRepair', 'Missile',
                   'DisablePressure', 'Escape', 'Recovery', 'Threat',

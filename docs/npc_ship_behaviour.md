@@ -145,12 +145,12 @@ related side effects owned by another subsystem.
 | Mode | Name | Movement behaviour |
 |---:|---|---|
 | `0x00` | Idle | No thrust; holds heading. Refreshes automatic weapons. |
-| `0x01` | Brake to stop | Turns toward reverse velocity; full thrust, then 0.5x thrust + 0.94 damp, then 0.95 damp + idle below 0.35 px/tick. Gravity shields use -0.5x thrust. |
+| `0x01` | Brake to stop | Turns toward reverse velocity; full thrust, then 0.5x thrust + 0.94 damp, then 0.95 damp + idle below 0.35 px/tick. Inertialess ships use -0.5x thrust. |
 | `0x02` | Travel to stellar | Heads toward stellar/map point; thrust only inside `turn_rate + 5°`. Far away desired speed is 0 (normal max-speed clamp); within 500 px on both axes it is 0.25x max speed. |
 | `0x03` | Depart from centre | Computes the bearing from the system centre `(0,0)` to the ship and thrusts outward when within `turn_rate + 3°`. At the exact centre the bearing helper's zero-vector convention supplies the initial heading. |
 | `0x04` | Outward jump spin-up | Points from the system centre toward the ship, advances a hold timer, and lets `Ship_HandleShip` ramp movement along that outward heading. After a 350 ms base duration, the original deactivates/clears system identity (class multiplier unresolved). |
 | `0x05` | Attack strafe-out | **Heads away from the primary target**: its bearing helper arguments are reversed in the original. Thrust gate is `turn_rate + 20°`; close-range boost can follow. |
-| `0x06` | Combat pursuit | Predictive/direct aim; normal thrust gate `turn_rate + 15°`. Can break to evasive `0x10` or boost `0x11`; gravity-shield ships may match speed close in. |
+| `0x06` | Combat pursuit | Predictive/direct aim; normal thrust gate `turn_rate + 15°`. Can break to evasive `0x10` or boost `0x11`; inertialess ships may match speed close in. |
 | `0x07` | Combat strafe | Guided predictive aim; thrust gate `turn_rate * 4`; may boost to `0x11`. |
 | `0x08` | Escort follow | Heads at lead; thrust gate `turn_rate + 1°`. Formation/launch handoff is partial. |
 | `0x09` | Hold at distance | Steers at target while distant, otherwise matches velocity bearing in a 15° window. |
