@@ -64,6 +64,26 @@ TEST_CASE("STR# pool decodes length-prefixed entries and rejects malformed "
   CHECK(NovaHud_DecodeStringEntry(truncated, 1) == std::nullopt);
 }
 
+TEST_CASE("STR resource decodes one Pascal string and rejects truncation",
+          "[hud_overlay]") {
+  const std::vector<std::byte> resource{std::byte{4},
+                                        std::byte{'H'},
+                                        std::byte{'a'},
+                                        std::byte{'i'},
+                                        std::byte{'l'},
+                                        std::byte{0x7f}};
+  CHECK(NovaResources_DecodeStringResource(resource) ==
+        std::optional<std::string>("Hail"));
+
+  const std::vector<std::byte> empty_string{std::byte{0}};
+  CHECK(NovaResources_DecodeStringResource(empty_string) ==
+        std::optional<std::string>(""));
+  CHECK(NovaResources_DecodeStringResource({}) == std::nullopt);
+
+  const std::vector<std::byte> truncated{std::byte{2}, std::byte{'x'}};
+  CHECK(NovaResources_DecodeStringResource(truncated) == std::nullopt);
+}
+
 TEST_CASE("HUD overlay deadlines use the gameplay clock snapshot",
           "[hud_overlay][clock]") {
   GameState state;

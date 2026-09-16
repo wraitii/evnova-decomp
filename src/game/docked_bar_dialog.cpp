@@ -254,8 +254,8 @@ std::string BarCommodityName(std::int16_t commodity) {
   if (commodity < 0 || commodity > 5) {
     return "?";
   }
-  return NovaHud_LoadStringEntry(0xfa1,
-                                 static_cast<std::uint16_t>(commodity + 1))
+  return NovaResources_LoadPatchedStringEntry(
+             0xfa1, static_cast<std::uint16_t>(commodity + 1), 0x238c)
       .value_or("?");
 }
 

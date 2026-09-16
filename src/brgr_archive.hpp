@@ -55,6 +55,9 @@ constexpr std::uint32_t kResourceTypeControl = 0x434e544c;     // "CNTL"
 // many Pascal strings. The Settings dialog's sound-volume words are STR# 0x88
 // (9 entries, indexed by volume+1).
 constexpr std::uint32_t kResourceTypeStringTable = 0x53545223;
+// "STR " single-string family: one Pascal string (u8 length + bytes). Nova
+// uses these as sparse, plugin-friendly overrides for shared STR# entries.
+constexpr std::uint32_t kResourceTypeString = 0x53545220;
 // "ch"♦r" (ch\x9ar) — the single default character/pilot-type resource.
 // Same FourCC (0x63688a72) the game uses as the pilot-save registry key; the
 // resource carries the new-pilot intro frame ids and per-frame delays (Nova

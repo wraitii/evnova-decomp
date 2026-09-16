@@ -8,10 +8,6 @@
 #include <random>
 
 namespace game {
-namespace {
-// The STR# resource type code (0x53545223, "STR#").
-inline constexpr std::uint32_t kStringResourceType = 0x53545223U;
-} // namespace
 
 // Ghidra 0x0047e2d0 NovaHud_ShowOverlayMessage. The original stores param_2
 // (a tick countdown) in g_hud_overlay_msg_color, which
@@ -117,7 +113,7 @@ NovaHud_DecodeStringEntry(std::span<const std::byte> pool,
 
 std::optional<std::string> NovaHud_LoadStringEntry(std::uint16_t resource_id,
                                                    std::uint16_t entry) {
-  const auto bytes = NovaResource_Load(kStringResourceType, resource_id);
+  const auto bytes = NovaResource_Load(kResourceTypeStringTable, resource_id);
   if (!bytes) {
     return std::nullopt;
   }
@@ -125,13 +121,55 @@ std::optional<std::string> NovaHud_LoadStringEntry(std::uint16_t resource_id,
 }
 
 std::uint16_t NovaHud_StringPoolEntryCount(std::uint16_t resource_id) {
-  const auto bytes = NovaResource_Load(kStringResourceType, resource_id);
+  const auto bytes = NovaResource_Load(kResourceTypeStringTable, resource_id);
   if (!bytes || bytes->size() < 2) {
     return 0;
   }
   return static_cast<std::uint16_t>(
       (std::to_integer<std::uint8_t>((*bytes)[0]) << 8U) |
       std::to_integer<std::uint8_t>((*bytes)[1]));
+}
+
+std::optional<std::string>
+NovaResources_DecodeStringResource(std::span<const std::byte> resource) {
+  if (resource.empty()) {
+    return std::nullopt;
+  }
+  const auto length = static_cast<std::size_t>(resource.front());
+  if (length > resource.size() - 1U) {
+    return std::nullopt;
+  }
+
+  std::string out(length, '\0');
+  for (std::size_t i = 0; i < length; ++i) {
+    out[i] = static_cast<char>(resource[i + 1U]);
+  }
+  return out;
+}
+
+// Ghidra 0x004c73b0 NovaResources_CopyStringResource.
+std::optional<std::string>
+NovaResources_LoadStringResource(std::uint16_t resource_id) {
+  const auto bytes = NovaResource_Load(kResourceTypeString, resource_id);
+  if (!bytes) {
+    return std::nullopt;
+  }
+  return NovaResources_DecodeStringResource(*bytes);
+}
+
+std::optional<std::string>
+NovaResources_LoadPatchedStringEntry(std::uint16_t fallback_pool,
+                                     std::uint16_t entry,
+                                     std::uint16_t override_base) {
+  if (entry == 0) {
+    return std::nullopt;
+  }
+  if (auto patched =
+          NovaResources_LoadStringResource(static_cast<std::uint16_t>(
+              override_base + static_cast<std::uint16_t>(entry - 1U)))) {
+    return patched;
+  }
+  return NovaHud_LoadStringEntry(fallback_pool, entry);
 }
 
 namespace {

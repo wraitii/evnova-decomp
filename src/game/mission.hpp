@@ -364,8 +364,8 @@ NovaText_FormatDateString(const GameDate &date,
                           std::string_view suffix = {});
 
 // Ghidra 0x00426d10 Mission_ShowMissionShipAnnouncement. Plays the mission-
-// ship hail: transition-table cue 4, then the hail text -- first string of
-// STR# (hail_quote_id + 4999) when that resource exists, else entry
+// ship hail: transition-table cue 4, then the hail text -- `STR ` resource
+// (hail_quote_id + 4999) when that resource exists, else entry
 // hail_quote_id of STR# 7101 (the pers HailQuote pool) -- run through the
 // desc placeholder expansion and the mission-wildcard pass (mission context
 // cleared, so mission tokens expand to their [Error] sentinels and <OSN> to
