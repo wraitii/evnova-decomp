@@ -41,6 +41,53 @@ constexpr std::array<std::uint16_t, 128> kMacRomanToUnicode{
     0x02DB, 0x02C7,
 };
 
+// True when `text` is well-formed UTF-8. The probe harness's JSON output must
+// be valid UTF-8, but game resource strings are raw MacRoman while
+// probe-authored/user-entered strings are already UTF-8, so the two have to be
+// told apart at that boundary.
+[[nodiscard]] bool IsValidUtf8(std::string_view text) {
+  std::size_t i = 0;
+  while (i < text.size()) {
+    const auto lead = static_cast<std::uint8_t>(text[i]);
+    if (lead < 0x80U) {
+      ++i;
+      continue;
+    }
+    std::size_t continuation = 0;
+    std::uint32_t code_point = 0;
+    if ((lead & 0xE0U) == 0xC0U) {
+      continuation = 1;
+      code_point = lead & 0x1FU;
+    } else if ((lead & 0xF0U) == 0xE0U) {
+      continuation = 2;
+      code_point = lead & 0x0FU;
+    } else if ((lead & 0xF8U) == 0xF0U) {
+      continuation = 3;
+      code_point = lead & 0x07U;
+    } else {
+      return false;
+    }
+    if (i + continuation >= text.size()) {
+      return false;
+    }
+    for (std::size_t j = 1; j <= continuation; ++j) {
+      const auto trail = static_cast<std::uint8_t>(text[i + j]);
+      if ((trail & 0xC0U) != 0x80U) {
+        return false;
+      }
+      code_point = (code_point << 6U) | (trail & 0x3FU);
+    }
+    const std::uint32_t minimum =
+        continuation == 1 ? 0x80U : (continuation == 2 ? 0x800U : 0x10000U);
+    if (code_point < minimum || code_point > 0x10FFFFU ||
+        (code_point >= 0xD800U && code_point <= 0xDFFFU)) {
+      return false;
+    }
+    i += continuation + 1;
+  }
+  return true;
+}
+
 void AppendUtf8(std::string &out, std::uint32_t code_point) {
   if (code_point < 0x80U) {
     out.push_back(static_cast<char>(code_point));
@@ -421,6 +468,17 @@ std::string NovaText_MacRomanToUtf8(std::string_view text) {
     }
   }
   return out;
+}
+
+// Returns `text` unchanged when it is already valid UTF-8; otherwise decodes
+// it as MacRoman. Unlike NovaText_MacRomanToUtf8 this is for data boundaries
+// (currently the probe harness's JSON) that must emit valid UTF-8 but may
+// receive either raw MacRoman game strings or already-UTF-8 user input.
+std::string NovaText_EncodeUtf8(std::string_view text) {
+  if (IsValidUtf8(text)) {
+    return std::string(text);
+  }
+  return NovaText_MacRomanToUtf8(text);
 }
 
 // Ghidra 0x004bcad0 DrawContext_GetPascalStringWidth.

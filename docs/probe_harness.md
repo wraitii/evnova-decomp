@@ -42,7 +42,7 @@ and the binary behaves exactly as before. The implementation lives in
 | `GET /probe/ui?at=x,y` | hit-test oracle: name of the published element under that window point |
 | `GET /probe/screenshot` | next frame as `image/bmp` (last frame if paused) |
 | `GET /probe/logs?since=SEQ` | tail the in-game log ring (`{"tail":N,"lines":[...]}`) |
-| `POST /probe/command` | Execution commands plus semantic `land_at`, `jump_to`, `destroy_ship`, and `cancel_automation` |
+| `POST /probe/command` | Execution commands plus semantic `land_at`, `jump_to`, `destroy_ship`, `trade`, and `cancel_automation` |
 | `GET /probe/automation` | Current optional flight-automation goal, phase, target, and failure detail |
 | `POST /probe/key` | `{"key":"I"}` tap; `{"key":"I","down":true\|false}` hold/release (modal-loop channel, synthetic `SDL_Event`s) |
 | `POST /probe/click` | `{"element":"accept"}` clicks the named rect published by the active modal; `{"x":553,"y":508}` clicks raw window points (motion + button-down pair) |
@@ -75,18 +75,29 @@ On failure the runner records UI, summary, travel, mission, automation and log
 state plus a screenshot. Comments are ordinary TOML comments, and unknown
 actions or fields fail instead of being silently ignored. Set
 `quit_on_finish = true` at the document root to stop the probed game after
-either success or failure.
+either success or failure. A `repeat` step (with `count` and a nested
+`[[steps.steps]]` array-of-tables) re-runs a block in place, keeping long
+repeated routes compact; log and diagnostic step labels become dotted
+(`7.3.2`) inside nested iterations.
 
 Flight automation is input-only: `{"cmd":"land_at","target":"Earth"}` and
 `{"cmd":"jump_to","target":"Sol"}` install a controller that emits the same
-edge/held `FlightInput` commands as a pilot. An optional positive `timeout_ms`
+edge/held `FlightInput` commands as a pilot. A pure-decimal `target` for
+`land_at` is a stellar resource id (e.g. `201` = `0xC9` = Kiniké), which is the
+reliable way to name a stellar whose raw MacRoman resource name cannot
+round-trip through the probe's UTF-8 JSON. An optional positive `timeout_ms`
 is measured in gameplay time. `cancel_automation` stops emission; status is
-read from `/probe/automation`.
+read from `/probe/automation`. Accepting a new `land_at`/`jump_to` request
+immediately moves the published `phase` off any previous `complete` (to
+`select`), so a `wait` on the finished goal cannot match the stale state and
+race ahead before the flight loop starts the new one.
 
 `{"cmd":"destroy_ship","target":"Raider"}` matches a current-system ship by
 class display name (falling back to its instance `ship_name`, case-insensitive).
 A pure-decimal `target` and an optional `ship_id` (matching either a live ship
-slot or its instance id) are identifier fallbacks. It cycles the player's
+slot or its instance id) are identifier fallbacks. `allow_missing = true`
+completes instead of failing when no matching ship remains, for scenarios whose
+target another ship may destroy first. It cycles the player's
 primary ship target with the backquote hotkey until it lands on a match, then
 leads and fires that target eagerly whenever it is within weapon reach: the
 nose tracks the ready primary bank's predicted intercept (via
@@ -94,7 +105,13 @@ nose tracks the ready primary bank's predicted intercept (via
 projectile, and re-tracking every frame keeps weapon pushback from breaking
 the lock. It completes
 when the locked target is destroyed and fails fast when no ship in the system
-matches.
+matches (unless `allow_missing` is set).
+
+`{"cmd":"trade","commodity":2,"side":"buy"}` exercises the docked trade
+center without touching game state: it synthesizes a click on the published
+`trade.row.<commodity>` rect and then one on the `buy`/`sell` button, so the
+modal's own handler runs the transaction (the click quantity, up to 10 tons).
+It returns `409` if the trade center has not published those elements yet.
 
 ### UI layout registry (click by intent)
 
@@ -108,7 +125,10 @@ names: `window`, `accept`/`decline`, `done`, `take`, `leave`, `buy`,
 `scroll_up`, `scroll_down`. The Mission BBS additionally publishes one
 `mission.<template_id>` rect per available row (the same zero-based id as
 `missions.missions.N.template_id`), so a scenario can select a specific row
-instead of relying on the default first entry. `GET /probe/ui` returns the
+instead of relying on the default first entry. The trade center similarly
+publishes `trade.row.<n>` for its 8 commodity rows and lists them in the
+`items` array with `label` and `price` (so a scenario can assert
+`ui.items.0.price` as well as click the row). `GET /probe/ui` returns the
 active modal's rects
 **plus `window_size` and `playfield`** — the current window point size and
 the 640x480 canvas rect — so a harness can convert backing-store screenshots
@@ -122,7 +142,8 @@ and doubles as documentation of the dialog's controls.
 ### State queries
 
 `summary` (default), `player`, `missions`, `ships` (active NPCs in the
-current system), `travel`, `system`. Floats are rounded to 2 decimals; ids
+current system), `cargo` (credits, capacity, the 6 commodity bins and any
+non-zero junk), `travel`, `system`. Floats are rounded to 2 decimals; ids
 are the reimplementation's zero-based/rebased ids unless the field name says
 otherwise. Extend `ProbeState_Snapshot` as subsystems are reconstructed —
 prefer small typed queries over one giant dump.
@@ -132,7 +153,11 @@ prefer small typed queries over one giant dump.
 `NovaLog::Write` double-writes every console line into a bounded ring
 (1000 lines, sequence-numbered). `GET /probe/logs` returns everything since a
 sequence number, so a harness can `tail` continuously: fetch once, then pass
-the returned `tail` value as the next `since`.
+the returned `tail` value as the next `since`. All JSON string output is
+valid UTF-8: game strings are stored as MacRoman, so the serializers decode
+any string that is not already valid UTF-8 (`game::NovaText_EncodeUtf8`),
+which is what lets a strict `json.loads` read responses containing names such
+as `Kiniké` or `Xtreem™ Rocket-Boards`.
 
 ### Mission-script / control-bit tracing
 

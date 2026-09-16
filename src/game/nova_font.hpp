@@ -160,6 +160,12 @@ private:
 // conversion belongs at the font boundary and nowhere else.
 [[nodiscard]] std::string NovaText_MacRomanToUtf8(std::string_view text);
 
+// Returns `text` unchanged when it is already valid UTF-8; otherwise decodes it
+// as MacRoman. For data boundaries that must emit valid UTF-8 (currently the
+// probe harness's JSON) but may carry either raw MacRoman game strings or
+// already-UTF-8 user input.
+[[nodiscard]] std::string NovaText_EncodeUtf8(std::string_view text);
+
 // Draws `text` with family/size/style at the given logical coordinates with
 // `color`, treating (x, y) as the *baseline* exactly as the original's cursor
 // does (FUN_004bc760 places the glyph rect top at baseline - fontsize and the

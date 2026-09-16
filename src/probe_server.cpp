@@ -1,5 +1,6 @@
 #include "probe_server.hpp"
 #include "game/mission_trace.hpp"
+#include "game/nova_font.hpp"
 #include "log.hpp"
 
 #include <SDL3/SDL.h>
@@ -144,9 +145,12 @@ std::optional<SDL_Scancode> ScancodeFromName(const std::string &name) {
 }
 
 [[nodiscard]] std::string JsonEscape(std::string_view text) {
+  // JSON must be valid UTF-8; game resource strings (UI labels, log lines) are
+  // raw MacRoman while probe-authored strings are already UTF-8.
+  const std::string encoded = game::NovaText_EncodeUtf8(text);
   std::string out;
-  out.reserve(text.size());
-  for (const char c : text) {
+  out.reserve(encoded.size());
+  for (const char c : encoded) {
     switch (c) {
     case '"':
       out += "\\\"";
@@ -498,21 +502,7 @@ void ProbeServer::HandleRequest(const std::string &method,
       body_out = "probe: missing element or x/y";
       return;
     }
-    SDL_Event motion{};
-    motion.type = SDL_EVENT_MOUSE_MOTION;
-    motion.motion.x = x;
-    motion.motion.y = y;
-    SDL_Event down{};
-    down.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
-    down.button.button = SDL_BUTTON_LEFT;
-    down.button.down = true;
-    down.button.clicks = 1;
-    down.button.x = x;
-    down.button.y = y;
-    const std::lock_guard lock(sync_);
-    key_events_.push_back(motion);
-    key_events_.push_back(down);
-    sync_cv_.notify_all();
+    InjectClick(x, y);
     status = "200 OK";
     content_type = "application/json";
     body_out = "{\"ok\":true}";
@@ -572,6 +562,8 @@ void ProbeServer::HandleRequest(const std::string &method,
       const auto target = JsonStringField(body, "target");
       const int timeout_ms = JsonIntField(body, "timeout_ms").value_or(180000);
       const int ship_id = JsonIntField(body, "ship_id").value_or(-1);
+      const bool allow_missing =
+          JsonBoolField(body, "allow_missing").value_or(false);
       if (!target || target->empty() || timeout_ms < 1) {
         status = "400 Bad Request";
         body_out = "probe: automation requires target and positive timeout_ms";
@@ -583,8 +575,25 @@ void ProbeServer::HandleRequest(const std::string &method,
                               : ProbeAutomationRequest::Kind::kDestroyShip;
       {
         const std::lock_guard lock(automation_mutex_);
-        automation_request_ = ProbeAutomationRequest{
-            kind, *target, static_cast<std::uint64_t>(timeout_ms), ship_id};
+        automation_request_ =
+            ProbeAutomationRequest{kind,
+                                   *target,
+                                   static_cast<std::uint64_t>(timeout_ms),
+                                   ship_id,
+                                   allow_missing};
+        // Immediately move the published status off any previous "complete".
+        // The flight loop only switches the controller when it consumes this
+        // request, so leaving the old phase visible lets a harness wait on
+        // "complete" match the goal that just finished and race ahead of the
+        // new one (observed as a click landing in the wrong window).
+        const char *goal_name =
+            kind == ProbeAutomationRequest::Kind::kLandAt   ? "land_at"
+            : kind == ProbeAutomationRequest::Kind::kJumpTo ? "jump_to"
+                                                            : "destroy";
+        automation_status_ = std::string{"{\"goal\":\""} + goal_name +
+                             "\",\"phase\":\"select\",\"target\":\"" +
+                             JsonEscape(*target) +
+                             "\",\"detail\":\"requested\"}";
       }
       sync_cv_.notify_all();
       status = "202 Accepted";
@@ -592,9 +601,48 @@ void ProbeServer::HandleRequest(const std::string &method,
       body_out = "{\"ok\":true}";
       return;
     }
+    if (*cmd == "trade") {
+      // Clean input-only trade: select a published commodity row and press the
+      // Buy/Sell button with the same synthetic clicks a real user makes. The
+      // modal's normal handler runs the transaction, so no game state is
+      // touched here. Only valid while the trade center has published its
+      // rows (`trade.row.<n>`) and action buttons.
+      const auto commodity = JsonIntField(body, "commodity");
+      const auto side = JsonStringField(body, "side");
+      if (!commodity || !side || (*side != "buy" && *side != "sell")) {
+        status = "400 Bad Request";
+        body_out = "probe: trade requires commodity and side (buy|sell)";
+        return;
+      }
+      const std::string row_name = "trade.row." + std::to_string(*commodity);
+      const std::string button_name = *side == "buy" ? "buy" : "sell";
+      const auto row_rect = UiElementRect(row_name);
+      const auto button_rect = UiElementRect(button_name);
+      if (!row_rect) {
+        status = "409 Conflict";
+        body_out =
+            "probe: trade row '" + row_name + "' not published (GET /probe/ui)";
+        return;
+      }
+      if (!button_rect) {
+        status = "409 Conflict";
+        body_out = "probe: trade center has no published '" + button_name +
+                   "' button (GET /probe/ui)";
+        return;
+      }
+      InjectClick(row_rect->x + row_rect->w / 2.0F,
+                  row_rect->y + row_rect->h / 2.0F);
+      InjectClick(button_rect->x + button_rect->w / 2.0F,
+                  button_rect->y + button_rect->h / 2.0F);
+      status = "200 OK";
+      content_type = "application/json";
+      body_out = "{\"ok\":true}";
+      return;
+    }
     if (*cmd == "cancel_automation") {
       const std::lock_guard lock(automation_mutex_);
       automation_request_ = ProbeAutomationRequest{};
+      automation_status_ = "{\"goal\":\"none\",\"phase\":\"cancelled\"}";
       sync_cv_.notify_all();
       status = "200 OK";
       content_type = "application/json";
@@ -616,7 +664,7 @@ void ProbeServer::HandleRequest(const std::string &method,
       status = "400 Bad Request";
       body_out = "probe: unknown cmd "
                  "(pause|resume|step|accelerate|mission_trace|land_at|jump_to|"
-                 "destroy_ship|cancel_automation|quit)";
+                 "destroy_ship|trade|cancel_automation|quit)";
       return;
     }
     sync_cv_.notify_all();
@@ -717,6 +765,11 @@ std::optional<ProbeAutomationRequest> ProbeServer::ConsumeAutomationRequest() {
   auto request = std::move(automation_request_);
   automation_request_.reset();
   return request;
+}
+
+bool ProbeServer::HasPendingAutomationRequest() {
+  const std::lock_guard lock(automation_mutex_);
+  return automation_request_.has_value();
 }
 
 void ProbeServer::PublishAutomationStatus(std::string json) {
@@ -872,6 +925,24 @@ void ProbeServer::SetQuitLatch(std::function<void()> latch) {
   quit_latch_ = std::move(latch);
 }
 
+void ProbeServer::InjectClick(float x, float y) {
+  SDL_Event motion{};
+  motion.type = SDL_EVENT_MOUSE_MOTION;
+  motion.motion.x = x;
+  motion.motion.y = y;
+  SDL_Event down{};
+  down.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+  down.button.button = SDL_BUTTON_LEFT;
+  down.button.down = true;
+  down.button.clicks = 1;
+  down.button.x = x;
+  down.button.y = y;
+  const std::lock_guard lock(sync_);
+  key_events_.push_back(motion);
+  key_events_.push_back(down);
+  sync_cv_.notify_all();
+}
+
 void ProbeServer::PublishUi(std::string window_name,
                             std::vector<ProbeNamedRect> rects) {
   if (!running_.load()) {
@@ -957,6 +1028,28 @@ std::string ProbeServer::UiJson() const {
                   named.rect.h);
     out += "\"" + named.name + "\":" + rect;
   }
-  out += "}}";
+  out += "},\"items\":[";
+  bool first_item = true;
+  for (const auto &named : ui_rects_) {
+    if (!named.has_value) {
+      continue;
+    }
+    if (!first_item) {
+      out += ",";
+    }
+    first_item = false;
+    char rect[96];
+    std::snprintf(rect,
+                  sizeof(rect),
+                  "[%.1f,%.1f,%.1f,%.1f]",
+                  named.rect.x,
+                  named.rect.y,
+                  named.rect.w,
+                  named.rect.h);
+    out += "{\"name\":\"" + JsonEscape(named.name) + "\",\"rect\":" + rect +
+           ",\"label\":\"" + JsonEscape(named.label) +
+           "\",\"price\":" + std::to_string(named.value) + "}";
+  }
+  out += "]}";
   return out;
 }

@@ -1,0 +1,266 @@
+version = 1
+name = "sanddown-medical-route"
+
+[defaults]
+timeout_ms = 30000
+
+# Micro-trade run: Sanddown (Sol -> Tau Ceti -> Sanddown). The reimplementation's
+# fresh-pilot flow hardcodes Tichel as the start system, so the extra Tichel -> Sol
+# jump precedes the stated Sol -> Tau Ceti -> Sanddown route. We first land at
+# Viking and refuse tutorial 001 (mïsn 251), whose on_refuse sets control bit
+# b9215; every later Barry tutorial gates on !(... | b9215), so one refusal
+# disables the whole tutorial chain before we leave Tichel. In Sanddown a
+# `repeat` step runs the same Kiniké -> Kolan -> Kiniké circuit ten times:
+# launch, land at Kolan and fill the Shuttle's 10 holds with Medical Supplies
+# (commodity 2), then land back at Kiniké and sell all ten. Flight runs at the
+# tutorial's x100 gameplay-clock acceleration; the last step restores ordinary
+# speed and leaves the game running docked at Kiniké so a human can keep playing.
+
+# Create a pilot through the normal dialogs, accepting their default values.
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu" }
+
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = 100
+suppress_audio = true
+
+[[steps]]
+action = "click"
+element = "new_pilot"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3102" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3001" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu", "state.game_active" = true }
+
+[[steps]]
+action = "click"
+element = "enter_ship"
+
+[[steps]]
+action = "wait"
+expect = { "state.system" = "Tichel" }
+
+# Refuse tutorial 001 at Viking so the Barry chain never arms. Its availability
+# expression is '!(b9200 | b9215)'; declining runs on_refuse = 'b9215'.
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Viking"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "mission_offer" }
+timeout_ms = 180000
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-001-offer"
+
+[[steps]]
+action = "click"
+element = "decline"
+
+# Declining shows mïsn 251's slot_aux_text (+0x58 = 20200) in the text
+# reader, whose button is published as `done` (not `ok`).
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# ---------------------------------------------------------------- travel legs
+# Tichel -> Sol -> Tau Ceti -> Sanddown, three single jumps on a full 300-point
+# Shuttle tank (100 per jump).
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tau Ceti"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tau Ceti" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sanddown"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sanddown" }
+timeout_ms = 180000
+
+[[steps]]
+action = "screenshot"
+name = "sanddown-arrival"
+
+# --------------------------------------------------- repeat 10x trade circuit
+# Dock at Kiniké once so the repeated body can begin from a docked state. The
+# Kiniké (resource 0xC9 = 201) and Kolan names are stable: Kiniké's raw
+# MacRoman resource name cannot round-trip through the probe's UTF-8 JSON, so
+# it is addressed by decimal id.
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "201"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+# One buy/sell circuit, starting and ending docked at Kiniké: launch, land at
+# Kolan and fill the Shuttle's 10 holds with Medical Supplies (commodity 2),
+# then launch, land at Kiniké and sell all ten. Repeating it leaves the final
+# delivery docked at Kiniké exactly like the hand-written rounds did.
+[[steps]]
+action = "repeat"
+count = 10
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "Kolan"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "validate_state"
+expect = { "state.system" = "Sanddown" }
+
+[[steps.steps]]
+action = "click"
+element = "trade_center"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "trade_center", "ui.items.0.label" = "Food" }
+
+[[steps.steps]]
+action = "command"
+cmd = "trade"
+commodity = 2
+side = "buy"
+
+[[steps.steps]]
+action = "wait"
+expect = { "cargo.bins.2.tons" = 10 }
+
+[[steps.steps]]
+action = "click"
+element = "done"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "201"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "click"
+element = "trade_center"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "trade_center", "ui.items.0.label" = "Food" }
+
+[[steps.steps]]
+action = "command"
+cmd = "trade"
+commodity = 2
+side = "sell"
+
+[[steps.steps]]
+action = "wait"
+expect = { "cargo.bins.2.tons" = 0 }
+
+[[steps.steps]]
+action = "click"
+element = "done"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+# Ten buy/sell pairs should have more than doubled the fresh pilot's 10000
+# starting credits. The loop ends docked at Kiniké, so no further launch.
+[[steps]]
+action = "validate_state"
+matches = { "cargo.credits" = "[1-9][0-9]{4,}" }
+
+[[steps]]
+action = "screenshot"
+name = "sanddown-route-complete"
+
+# Hand the running game back to a human at ordinary speed.
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = false

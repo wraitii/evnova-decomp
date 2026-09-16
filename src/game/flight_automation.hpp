@@ -57,12 +57,16 @@ public:
   // every frame (leading a crossing target) and fires eagerly whenever the
   // target is within the best weapon reach, so a moving target cannot outrun
   // the projectile. Completes when the locked target is destroyed or gone;
-  // fails when no matching ship exists or it leaves the system.
+  // fails when no matching ship exists or it leaves the system. `allow_missing`
+  // relaxes the no-match failure: when the target is already gone (for example
+  // a mission ship another AI destroyed first) the goal completes instead.
+  // Probe scenarios set it for targets that other ships can destroy.
   bool DestroyShip(const GameState &,
                    std::string target,
                    std::uint64_t now_ms,
                    std::uint64_t timeout_ms = 180000,
-                   std::int16_t ship_id = -1);
+                   std::int16_t ship_id = -1,
+                   bool allow_missing = false);
   void Cancel();
   void ObservedDocked();
   // `elapsed_ticks` is the normalized 30 Hz tick scale the integrator consumes
@@ -121,6 +125,9 @@ private:
   // Explicit/numeric ship identifier for kDestroy; -1 when the name is the
   // only identity.
   std::int16_t target_ship_id_ = -1;
+  // kDestroy: treat a vanished target as success rather than failure. Set by
+  // DestroyShip for probe scenarios whose target other ships may destroy first.
+  bool destroy_allow_missing_ = false;
   std::uint64_t deadline_ms_ = 0;
   float landing_envelope_axis_range_ = -1.0F;
   bool tap_release_ = false;

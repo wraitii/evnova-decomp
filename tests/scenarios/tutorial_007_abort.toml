@@ -564,11 +564,14 @@ name = "combat-tutorial-start"
 
 # Tutorial 006's objective is the derelict Pirate Viper Barry leaves in orbit:
 # the flight controller cycles to the matching ship, closes to weapon range and
-# fires until it is destroyed.
+# fires until it is destroyed. Ambient ships can destroy the derelict first, in
+# which case the objective is already complete; allow_missing keeps the
+# controller from failing on a target that no longer exists.
 [[steps]]
 action = "command"
 cmd = "destroy_ship"
 target = "Pirate Viper"
+allow_missing = true
 timeout_ms = 240000
 
 # Temporary slowdown until we fix our logic.

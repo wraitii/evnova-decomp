@@ -1,6 +1,7 @@
 #include "probe_state.hpp"
 
 #include "game_state.hpp"
+#include "nova_font.hpp"
 #include "scenario_data.hpp"
 
 #include <cmath>
@@ -26,9 +27,11 @@ struct Json {
   }
 
   void str(std::string_view name, std::string_view value) {
+    // JSON must be valid UTF-8; game strings are raw MacRoman.
+    const std::string encoded = NovaText_EncodeUtf8(value);
     key(name);
     text += "\"";
-    for (const char c : value) {
+    for (const char c : encoded) {
       switch (c) {
       case '"':
         text += "\\\"";
@@ -237,6 +240,17 @@ std::string ProbeState_Snapshot(const GameState &state,
       row.str("ship_class", cls != nullptr ? cls->display_name : "");
       row.num("ship_instance_id", ship.ship_instance_id);
       row.num("government_id", ship.faction_or_government_id);
+      // Mission/pers tagging and the capture gates. pers_def_slot is the
+      // 0x80-based personality index; mission_fleet_slot == -1 marks an
+      // ordinary ship (the boarding selector skips mission-fleet ships).
+      row.num("pers_def_slot", ship.pers_def_slot);
+      row.num("mission_fleet_slot", ship.mission_fleet_slot);
+      row.num("boarded_target_latch", ship.boarded_target_latch);
+      row.num("post_hit_mode_hint", ship.post_hit_mode_hint);
+      // The values the capture-variant arbitration actually reads.
+      row.num("class_default_ai_behavior",
+              cls != nullptr ? cls->default_ai_behavior : -1);
+      row.num("class_crew", cls != nullptr ? cls->crew : -1);
       row.num("pos_x", ship.pos_x);
       row.num("pos_y", ship.pos_y);
       row.num("vel_x", ship.vel_x);
@@ -273,6 +287,32 @@ std::string ProbeState_Snapshot(const GameState &state,
       rows.raw(row.done());
     }
     j.array("ships", rows.done());
+    return j.done();
+  }
+
+  if (query == "cargo") {
+    Json j;
+    j.num("credits", state.player.credits);
+    j.num("capacity", state.cached_stats.cargo_capacity);
+    JsonArr bins;
+    for (const auto tons : state.inventory.cargo_bins) {
+      Json row;
+      row.num("tons", tons);
+      bins.raw(row.done());
+    }
+    j.array("bins", bins.done());
+    JsonArr junk;
+    for (std::size_t id = 0; id < state.inventory.junk_counts.size(); ++id) {
+      const auto count = state.inventory.junk_counts[id];
+      if (count == 0) {
+        continue;
+      }
+      Json row;
+      row.num("id", id);
+      row.num("count", count);
+      junk.raw(row.done());
+    }
+    j.array("junk", junk.done());
     return j.done();
   }
 
