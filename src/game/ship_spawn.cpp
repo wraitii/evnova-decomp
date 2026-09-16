@@ -2185,7 +2185,7 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
   const bool carrier_is_player = carrier_slot == 0;
 
   // The carrier's mode-99 bay weapon matching the fighter's class (fallback:
-  // the class's escort_type clone-source id), with mounted ammo remaining.
+  // the class's base-sprite clone source id), with mounted ammo remaining.
   const auto find_bay_bank = [&](std::int16_t class_id) -> std::int16_t {
     if (class_id < 0) {
       return -1;
@@ -2213,8 +2213,8 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
   if (bay_bank == -1) {
     if (const ShipClass *cls = state.scenario.Ship(fighter_class_resource);
         cls != nullptr) {
-      bay_bank =
-          find_bay_bank(static_cast<std::int16_t>(cls->escort_type + 0x80));
+      bay_bank = find_bay_bank(static_cast<std::int16_t>(
+          cls->base_sprite_clone_source_ship_class + 0x80));
     }
   }
   if (bay_bank == -1) {
@@ -2261,12 +2261,13 @@ bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
 
   if (outfit_slot == -1 && weapon_bank == -1) {
     // Resolve the bay weapon that would hold this class: first by direct
-    // class match, then by escort_type (clone-family) fallback -- the same
-    // mapping Ship_LaunchCarriedShipFromBay uses.
+    // class match, then by base-sprite clone source (clone-family) fallback --
+    // the same mapping Ship_LaunchCarriedShipFromBay uses.
     const ShipClass *target_cls =
         state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80));
-    const std::int16_t target_escort =
-        target_cls != nullptr ? target_cls->escort_type : -1;
+    const std::int16_t target_clone_source =
+        target_cls != nullptr ? target_cls->base_sprite_clone_source_ship_class
+                              : -1;
     // First scan: direct class match over all banks.
     for (std::int16_t bank = 0; bank < 0x100; ++bank) {
       const Weapon *def =
@@ -2280,7 +2281,7 @@ bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
         break;
       }
     }
-    // Second scan: escort_type (clone-family) fallback.
+    // Second scan: base-sprite clone source (clone-family) fallback.
     if (resolved_bank == -1) {
       for (std::int16_t bank = 0; bank < 0x100; ++bank) {
         const Weapon *def =
@@ -2290,7 +2291,9 @@ bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
           continue;
         }
         const ShipClass *carried = state.scenario.Ship(def->ammo_type);
-        if (carried != nullptr && carried->escort_type == target_escort) {
+        if (carried != nullptr &&
+            carried->base_sprite_clone_source_ship_class ==
+                target_clone_source) {
           resolved_bank = bank;
           break;
         }

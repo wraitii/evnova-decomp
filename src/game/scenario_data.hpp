@@ -421,12 +421,14 @@ struct ShipClass {
   // Non-positive means the class has no engine-glow layer, so
   // Ship_UpdateVisualState (0x00428340) skips the glow brightness block.
   std::int16_t engine_glow_image_id = 0;
-  // Ghidra ShipClassDef +0xa08: zero-based id of the class whose base sprite
-  // this class cloned (0x004b4ee0 clone arm: the first EARLIER class in load
-  // order whose sh\x8an BaseImageID matches; -1 when the class builds its own
-  // sprite). Read by Ship_LaunchCarriedShipFromBay 0x00415ea0's bay-weapon
-  // fallback, mapping a fighter variant back to its carrier's bay weapon.
-  std::int16_t escort_type = -1;
+  // Ghidra ShipClassDef +0xa08 (base_sprite_clone_source_ship_class):
+  // zero-based id of the class whose base sprite this class cloned (0x004b4ee0
+  // clone arm: the first EARLIER class in load order whose sh\x8an BaseImageID
+  // matches; -1 when the class builds its own sprite). Read by
+  // Ship_LaunchCarriedShipFromBay 0x00415ea0's bay-weapon fallback, mapping a
+  // fighter variant back to its carrier's bay weapon. Distinct from the Bible
+  // EscortType/EscortCategory field.
+  std::int16_t base_sprite_clone_source_ship_class = -1;
   // Ghidra ShipClassDef +0xa06 (sh\x8an +0x34 FramesPer, 36 when 0): the
   // rotation-grid frame count. The turret muzzle bearing is the displayed
   // rotation frame scaled back to degrees (Weapon_SelectTurretQuadrant

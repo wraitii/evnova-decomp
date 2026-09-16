@@ -355,7 +355,7 @@ bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher);
 // Ghidra 0x00415ea0 Ship_LaunchCarriedShipFromBay (bay-RECOVERY arm; called
 // when a carried fighter reaches its carrier in AI control mode 8): finds the
 // carrier's mode-99 bay weapon matching the fighter's class id (fallback:
-// the class's escort_type clone-source id), tops the bay back up (+1 loaded
+// the class's base-sprite clone-source id), tops the bay back up (+1 loaded
 // secondary, priming the bank cooldown to reload when it was empty), and
 // deactivates the fighter with its squad/AI linkage cleared. The original's
 // g_shipAvailabilityCachesDirty set on a player carrier stays deferred
@@ -365,7 +365,7 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter);
 // Ghidra 0x004694a0 ShipClass_HasPlayerBayCapacityFor: whether the player
 // can capture/retain another ship of the given (zero-based) class. With both
 // outfit_slot and weapon_bank == -1 the holding is resolved: the first armed
-// mode-99 bank whose class (or escort_type clone family) matches the class,
+// mode-99 bank whose class (or base-sprite clone family) matches the class,
 // then the ModType-3 fighter-bay outfit bound to that bank; no bay/outfit ->
 // false. Occupancy = the bay's loaded secondary count (or the outfit's owned
 // count when both slots are explicit); capacity = weapon MaxAmmo x mounted
