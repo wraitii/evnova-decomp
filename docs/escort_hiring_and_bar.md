@@ -111,10 +111,13 @@ Ghidra. The clean-room counterparts live in
   set** (the comm dialog's "Captured Escort"/"Hired Escort" status gate),
   `mission_fleet_slot/mission_owner_slot = -1`, `escort_command_code = -1`,
   jamming caches −1, all eight weapon banks seeded from class stock.
-  `spawn_stellar == -1` places it at the player with the player's heading and
-  a random polar drift (`Math_AddPolarVelocity`, bearing `rand(0x168)°`,
-  speed `50 + rand(0x32)`); otherwise at the stellar's map position. Finally
-  `Ship_ResetShipAiBehaviorRuntimeFields` (0x00402810) and
+  `spawn_stellar == -1` places it at the player with the player's heading,
+  then scatters it by a random polar **position offset**
+  (`Math_AddPolarVelocity` 0x0043b4a0 is called on the ship's `pos_x`/`pos_y`
+  -- disasm 0x00422986 passes `ship + 0x18`, not the `+0x20` velocity pair --
+  bearing `rand(0x168)°`, magnitude `50 + rand(0x32)` px); otherwise at the
+  stellar's map position. Spawn velocity is left at the allocator's zero.
+  Finally `Ship_ResetShipAiBehaviorRuntimeFields` (0x00402810) and
   `Ship_EnterSquadReturnState` (0x00410d10): escorts attached to
   the player enter **AI state 0x0c** (player-oriented assist/hold) with the
   secondary target mirroring the attach slot; behavior-5 followers of this
