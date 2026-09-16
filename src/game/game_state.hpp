@@ -60,11 +60,12 @@ struct MissionRuntimeFlags {
   // 0x0043f080 writes {year, month, day} here). Zero when the mission has no
   // deadline. (Ghidra named the first two shorts deadline_year_month/_ext
   // from the packed (year,month) argument shape.)
-  std::int16_t deadline_year = 0;          // +0x06
-  std::int16_t deadline_month = 0;         // +0x08
-  std::int16_t deadline_day = 0;           // +0x0a
-  std::int32_t elapsed_travel_days = 0;    // +0x0e
-  std::uint16_t elapsed_travel_subday = 0; // +0x12
+  std::int16_t deadline_year = 0;  // +0x06
+  std::int16_t deadline_month = 0; // +0x08
+  std::int16_t deadline_day = 0;   // +0x0a
+  // Unused time fields of the original DateTimeRec. Gameplay only consumes
+  // the date triple, but the saver copies all four words byte-for-byte.
+  std::array<std::uint16_t, 4> deadline_time_components{}; // +0x0c..+0x12
 };
 
 // Clean-room active mission state. It intentionally names only the fields

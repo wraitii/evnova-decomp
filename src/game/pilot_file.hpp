@@ -13,16 +13,12 @@
 //
 // In the original the on-disk .plt is a large binary block (offsets up to
 // 0xe94e) holding ship state, outfit/weapon tables, system discovery, per-govt
-// reputations, missions/FleetState, dates, etc. The vast majority of those
-// fields are not reconstructed yet (the live GameState does not track them).
-// So this build carries a focused PilotFile covering exactly the fields the
-// current GameState tracks, each mapped to its Ghidra .plt block offset when
-// known. The remaining original fields are absent until their subsystems are
-// reconstructed; this record is over the tracked subset only. Serialization
-// (PilotFileSerialize / PilotFileDeserialize) mirrors the original block
-// layout and offsets for the tracked fields and zero-fills the rest, so a
-// reimplementation save is structurally a valid .plt but does not round-trip
-// the untracked original state. See docs/pilot_save_file_format.md.
+// reputations, missions/FleetState, dates, etc. Scalar/table fields are
+// represented directly; active missions additionally retain their complete
+// opaque 0x8e6-byte payload so fields not yet named by the clean-room model
+// survive load/save. Serialization mirrors the original block layout and
+// explicitly zeroes only the two ranges that the original saver itself
+// clears. See docs/pilot_save_file_format.md.
 
 #include "game_state.hpp"
 
@@ -30,6 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -222,9 +219,14 @@ enum class PilotLoadError : int {
   kRepairsApplied = -0x2e, // 0xffffffd2: restored with fallbacks (see log)
 };
 
-// Serialize the tracked PilotFile subset into the .plt byte layout. Mirrors
-// PilotFile_SaveGameCore (0x004c7dd0) for the tracked fields; untracked
-// regions are zero-filled. jump_dest_stellar is the destination written at
+// Writable directory used by the SDL port for pilot saves and the Last Pilot
+// marker. This is SDL's per-user EV Nova preference directory; it is created
+// on demand. The original used its configured Nova Files directory.
+[[nodiscard]] std::optional<std::filesystem::path> PilotFileSaveDirectory();
+
+// Serialize PilotFile into the .plt byte layout. Mirrors PilotFile_SaveGameCore
+// (0x004c7dd0); opaque active-mission bytes are retained and the original's
+// reserved ranges are zero-filled. jump_dest_stellar is written at
 // block1+0x00 (the caller's current travel destination).
 [[nodiscard]] std::vector<std::byte>
 PilotFileSerialize(const PilotFile &pilot_file, std::int16_t jump_dest_stellar);

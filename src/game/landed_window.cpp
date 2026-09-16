@@ -10,6 +10,7 @@
 #include "landed_store.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
+#include "pilot_file.hpp"
 #include "scenario_data.hpp"
 #include "selection_text_dialog.hpp"
 #include "services_buttons.hpp"
@@ -279,11 +280,17 @@ void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
   // 0x00456060..0x0045609b: discovery booking at level 2 (slot + current
   // system), visibility rebuild and region events.
   NovaSystem_OnSystemEntered(state, state.player.current_system_id, 2);
-  // 0x00456103: launch autosave, with the docked stellar as the restore
-  // point (block1 +0x00). TODO(decomp(0x00456103)) skipped: the game flow
-  // keeps pilot records in memory only (see new_pilot_flow.cpp); the save
-  // call is wired once the flow resolves its nova-files directory.
-  NovaLog::Todo("launch: pilot autosave (PilotFile_SaveGame) not wired yet");
+  // 0x00456103: launch autosave, with the docked stellar as the restore point
+  // (block1 +0x00). Tests and incomplete bootstrap states have no pilot name;
+  // the original entry point is likewise only reachable for an active pilot.
+  if (!state.pilot.first_name.empty()) {
+    if (const auto directory = PilotFileSaveDirectory()) {
+      if (!PilotFileSaveGame(*directory, state, stellar_id)) {
+        NovaLog::Error("launch: could not autosave pilot '{}'",
+                       state.pilot.first_name);
+      }
+    }
+  }
   // 0x00456109: random launch heading, rand(0x168) = 0..359 degrees (the
   // port stores radians).
   {
