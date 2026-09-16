@@ -43,6 +43,29 @@ The size-prefix framing is present in the archived Windows pilot
 The block contents below are read at fixed offsets relative to each block's
 start, so both blocks must be present with their expected sizes for a valid
 save.
+
+### Archived fixture notes
+
+The companion download-page descriptions under `EVN/Cheats` identify four of
+the converted Mac fixtures by their hulls: Alien (Shuttle), Hunter (Federation
+Carrier), Pirate Hunter (Thunderforge), and Plank (an upgraded Valkyrie). The
+Plank description says Ship Variants 1.0.5 is required, but that attribution is
+not yet established: the Class IV hull is present in stock Nova data and is
+normally unavailable for purchase. Treat the stated plugin dependency as
+provisional rather than evidence that the saved class itself is plugin-only.
+
+A Latin-text scan of the raw and decoded saves found mission-state strings
+(for example `United Shipping`, `Vengeance` fragments, `Warrior's Pride`,
+`Bounty Hunter`, and `Black Dragon`) and the expected pilot nicknames. These
+are embedded in the two save blocks and are not player ship names. No credible
+UTF-16LE/BE names were found. Of the fixture trailers, only
+`Archer (PC).plt` is non-empty (`Serenity`). The classic-Mac format stores the
+ship name as the name of resource 129 rather than in either resource payload.
+The converted fixtures now preserve those names: Alien is `Vell-os Javelin`,
+Hunter is `Fed Carrier `, Pirate Hunter is `Aurora Thunderforge ` (both include
+their original trailing space), Plank is `Vengence Reaper` (original spelling),
+and Rick Hunter is `Pirate Hunter II`.
+
 ### Block 1 — "PilotState" (0xe952 = 59730 bytes)
 
 | Offset | Size | Field |
