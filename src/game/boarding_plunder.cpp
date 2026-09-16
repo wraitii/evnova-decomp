@@ -20,6 +20,7 @@
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "mission.hpp"
+#include "mission_script.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
@@ -1941,9 +1942,12 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
                 target_class != nullptr
                     ? static_cast<float>(target_class->base_armor)
                     : target.armor_points;
-            // TODO(decomp): the original runs the OnCapture reaction script
-            // (Mission_ExecuteReactionScript of ShipClassDef.field_0x3e9)
-            // before conversion.
+            if (target_class != nullptr) {
+              Mission_ExecuteReactionScript(
+                  state,
+                  target_class->on_capture_expr,
+                  MissionScriptContext{"ship OnCapture"});
+            }
             target.ai_behavior_code = 6;
             target.squad_leader_ship_slot = 0;
             target.escort_origin_mark = 0;   // field_0xbb

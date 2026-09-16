@@ -211,7 +211,7 @@ int NovaShip_AllocateShipSlot(GameState &state,
   if (const auto *ship_class = state.scenario.Ship(
           static_cast<std::int16_t>(ship.ship_class_id + 0x80));
       ship_class != nullptr) {
-    ship.timed_action_counter = ship_class->timed_action_counter_init;
+    ship.timed_action_counter = ship_class->escape_pod_count;
     ship.skill_variance_scale = SkillVarianceScale(state, ship_class);
   } else {
     ship.timed_action_counter = 0;
@@ -354,7 +354,7 @@ int NovaEncounter_SpawnFleetLeadShip(GameState &state,
     ship.skill_variance_scale = SkillVarianceScale(state, cls);
     ship.shield_points = static_cast<float>(cls->base_shield);
     ship.armor_points = static_cast<float>(cls->base_armor);
-    ship.timed_action_counter = cls->timed_action_counter_init;
+    ship.timed_action_counter = cls->escape_pod_count;
   } else {
     ship.shield_points = 0.0F;
     ship.armor_points = 0.0F;
@@ -747,8 +747,7 @@ int NovaEncounter_SpawnRandomSystemDudeShip(GameState &state,
     ship.primary_target_ship_slot = -1;
     ship.ai_secondary_target_slot = -1;
     ship.death_timer_active = 0.0F;
-    ship.timed_action_counter =
-        cls != nullptr ? cls->timed_action_counter_init : 0;
+    ship.timed_action_counter = cls != nullptr ? cls->escape_pod_count : 0;
     ship.credits = 10000;
     // The original derives mining_scoop_active from the spawned class's scoop
     // outfit (Outfit_HasMiningScoopOutfit); the clean-room leaves it false (it
@@ -1297,8 +1296,7 @@ int NovaMission_SpawnMissionShipFromDudeDef(GameState &state,
     ship.shield_points = static_cast<float>(cls->base_shield);
     ship.armor_points = static_cast<float>(cls->base_armor);
   }
-  ship.timed_action_counter =
-      cls != nullptr ? cls->timed_action_counter_init : -1;
+  ship.timed_action_counter = cls != nullptr ? cls->escape_pod_count : -1;
   ship.waypoint_arrival_marker_b = static_cast<std::int16_t>(
       (cls != nullptr ? cls->skill_variance_percent : 0) - 1);
   ship.skill_variance_scale = SkillVarianceScale(state, cls);
@@ -1949,8 +1947,7 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.ionization_points = 0.0F;
   ship.ionization_color = 0; // ShipState field_0xb0
   ship.sprite_animation_cycle_index = 0;
-  ship.timed_action_counter =
-      cls != nullptr ? cls->timed_action_counter_init : -1;
+  ship.timed_action_counter = cls != nullptr ? cls->escape_pod_count : -1;
   ship.waypoint_arrival_marker_b = static_cast<std::int16_t>(
       (cls != nullptr ? cls->skill_variance_percent : 0) - 1);
   ship.waypoint_arrival_marker_a = 0;

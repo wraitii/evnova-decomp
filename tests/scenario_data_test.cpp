@@ -46,6 +46,11 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(ship->upgrade_to_ship_class_id == 0xBC - 0x80);
   CHECK(ship->escort_upgrade_cost == 5000);
   CHECK(ship->escort_sell_value == 1000);
+  CHECK(ship->escape_pod_count == 0);
+  CHECK(ship->class_category == 3);
+  CHECK(ship->on_capture_expr.empty());
+  CHECK(ship->comm_name == "Shuttle");
+  CHECK(ship->movie_file.empty());
 
   // The Heavy Shuttle (0x81) upgrades to 0xBD for 10000, sale default 1750.
   const ShipClass *heavy = data.Ship(0x81);
@@ -53,6 +58,15 @@ TEST_CASE("scenario tables load ships, outfits and weapons",
   CHECK(heavy->upgrade_to_ship_class_id == 0xBD - 0x80);
   CHECK(heavy->escort_upgrade_cost == 10000);
   CHECK(heavy->escort_sell_value == 1750);
+
+  // These pin non-default values in the tail/string blocks. Star Liner has
+  // ten decorative pods, while Leviathan runs b8888 when captured.
+  const ShipClass *liner = data.Ship(0x86);
+  REQUIRE(liner != nullptr);
+  CHECK(liner->escape_pod_count == 10);
+  const ShipClass *leviathan = data.Ship(0x83);
+  REQUIRE(leviathan != nullptr);
+  CHECK(leviathan->on_capture_expr == "b8888");
 
   // The starter ship's stock weapon banks: bank 0 has a single stock weapon of
   // weapon id 0x80 (the weapon defined at resource id 128).
