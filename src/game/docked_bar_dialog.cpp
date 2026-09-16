@@ -358,7 +358,16 @@ LandedExit RunBarDialog(SdlPlatform &platform,
     return slot != 5;
   };
 
-  const auto draw_frame = [&]() {
+  // Draws the bar surface into the current backbuffer and does NOT present.
+  // It is both the body of the bar's own frame and the render_background
+  // handed to nested modals (mission offers, text readers, the hire-escort
+  // store). Nested modals must layer themselves over this and present once at
+  // the end of their frame; passing draw_frame (which presents) as
+  // render_background made SDL swap a bar frame and then draw the nested
+  // window into the already-invalidated backbuffer, which is what produced the
+  // glitchy mission-offer rendering. Mirrors the landed/store/trade pattern
+  // (docs/dlog_ditl_dialog_format.md section 7.1).
+  const auto draw_bar_contents = [&]() {
     platform.SetFullscreenPlayfield();
     SDL_SetRenderDrawColor(platform.renderer(), 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(platform.renderer());
@@ -410,6 +419,10 @@ LandedExit RunBarDialog(SdlPlatform &platform,
                                 label.value_or(""),
                                 enabled ? kLabel : kLabelGrey);
     }
+  };
+
+  const auto draw_frame = [&]() {
+    draw_bar_contents();
     platform.Present();
   };
 
@@ -431,7 +444,7 @@ LandedExit RunBarDialog(SdlPlatform &platform,
         static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
         [&](std::int16_t mission_def) {
           return NovaMission_RunOfferWindow(
-              platform, state, mission_def, stellar_id, draw_frame);
+              platform, state, mission_def, stellar_id, draw_bar_contents);
         });
   };
 

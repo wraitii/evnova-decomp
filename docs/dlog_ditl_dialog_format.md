@@ -270,6 +270,16 @@ the rest of it.
 look): every modal re-renders the preserved underlying screen each frame and
 layers its DLOG window on top.**
 
+The `render_background` callback must **only draw**, never call
+`SdlPlatform::Present()` or otherwise swap the backbuffer: the modal draws its
+own window into the same backbuffer and presents exactly once at the end of
+its frame. A presenter that passed its full presenting frame (contents +
+`Present()`) as `render_background` swapped a background frame and then drew
+the window into the already-invalidated backbuffer; this showed up as glitchy
+mission-offer rendering over the Bar. Split such a frame into a contents-only
+lambda plus a `Present()` wrapper (as `RunBarDialog` does with
+`draw_bar_contents` / `draw_frame`) and pass the contents-only part.
+
 * In-flight modals (ship-comm, boarding/plunder, the mission-info window
   0x00446150) call `SpaceflightView::DrawGameFrame` every frame and then draw
   their window in the centred 640x480 canvas. The flight sim is paused, so
