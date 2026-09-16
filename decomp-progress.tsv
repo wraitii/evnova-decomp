@@ -316,7 +316,7 @@ address	name	impl_file	reimpl_pct	comment
 0x0045D0A0	NovaUi_RebuildStellarRadarPanel	src/game/hud_renderer.cpp	25%	Backdrop/IFF-black fill and radar rect translate are reproduced inside HudRenderer::DrawRadarPanel; the offscreen radar buffer rebuild + dirty-mark fan-out is subsumed by the port redrawing the cockpit + radar each frame.
 0x0045D287	NovaUi_BlitGameplayClipRect		0%	
 0x0045D320	NovaUi_RefreshGameplayPanels	src/game/hud_renderer.cpp	15%	Only the >=15-tick target-status poll cadence on the original 60 Hz clock (250 ms; g_last_target_status_poll_tick/g_target_status_blink_phase toggle) and the radar dispatch are reproduced, as HudRenderer members; the other panel dirty-dispatch paths are separate draw calls here.
-0x0045D600	NovaUi_DrawStellarRadarPanel	src/game/hud_renderer.cpp	85%	HudRenderer::DrawRadarPanel: 1/32 blip scale with ceil rounding, stellar disc tiers from full sprite-frame height (0x20 default; thresholds 90/200), 2x2 QuickDraw-style station/density-scanner boxes (mass>=100), cloak visibility gate, non-IFF DimRadar contacts with selected target blinking BrightRadar, IFF relation colours with selected target blinking grey, black IFF backdrop, far-from-origin arrow sharing the 15-tick blink phase (7000000 dist-sq, 25..50px shaft, +-135deg 6px wings), static while scan detected. Divergences: direct composite instead of offscreen buffer; static tiles procedural (ppat not decoded); original center-dot under static draws at an uninitialized cursor and is skipped.
+0x0045D600	NovaUi_DrawStellarRadarPanel	src/game/hud_renderer.cpp	85%	HudRenderer::DrawRadarPanel: 1/32 blip scale with ceil rounding, stellar disc tiers from full sprite-frame height (0x20 default; thresholds 90/200), 2x2 QuickDraw-style station/density-scanner boxes (mass>=100), cloak visibility gate, non-IFF DimRadar contacts with selected target blinking BrightRadar, IFF relation colours with selected target blinking grey, black IFF backdrop, far-from-origin arrow sharing the 15-tick blink phase (7000000 dist-sq, 25..50px shaft, +-135deg 6px wings), static while scan detected decoded from the real ppat 128..137 (pixpat_image.cpp) and re-rolled once per >=15-tick radar poll. The static/contacts branch itself is latched on the poll (radar_static_active_) because g_proximity_scan_detected is re-rolled every simulation tick but the original samples it only inside the dirty-gated draw. force_empty is always false in the port: the original's g_is_system_transition_active brackets only the blocking docked/landing visit (writes 0x00455e19/0x0045612d/0x00489241/0x004b32bc), never a hyperspace jump -- an earlier travel.engaging mapping wrongly blanked the radar through the whole brake/hold/tunnel. Divergences: direct composite instead of offscreen buffer (radar redrawn every frame; the static active flag and pattern are held between polls, but contacts and the origin arrow are recomputed per presentation frame) -- deliberate rendering improvement over the original's 4 Hz dirty-gated panel (smooth blips; cosmetic only, no gameplay state consumed), tagged [improvement]; extra draws from RebuildStellarRadarPanel/redundant RedrawGameplayViewportAndRadar do not re-roll the pattern; static RNG is a private stream, not the shared NovaRandom; original center-dot under static draws at an uninitialized cursor and is skipped.
 0x0045E400	NovaUi_DrawTravelStatusPanel	src/game/hud_renderer.cpp	95%	Faithful rewrite: idle ("Nav System Off" @top+22 label) / transfer ("Stellar Navigation" @+12 + stellar name @+29 value) / jump ("Hyperspace" @+12 + destination @+29
 0x0045E9C0	NovaUi_DrawPlayerShieldArmorPanels		0%	
 0x0045EA66	NovaUi_DrawPlayerShieldBar	src/game/hud_renderer.cpp	60%	aspect-driven fill geometry (HudBar_FillRect + DrawLifeBar): tall slots fill top-down
@@ -990,8 +990,8 @@ address	name	impl_file	reimpl_pct	comment
 0x004BBD20	FUN_004bbd20		0%	
 0x004BBD30	FUN_004bbd30		0%	
 0x004BBD40	FUN_004bbd40		0%	
-0x004BBD50	Resource_LoadPixPat		0%	
-0x004BBDC0	DrawContext_TileImageInRect	src/game/hud_renderer.cpp	60%	Tiled-fill logic ported (SDL_RenderTextureTiled over the radar rect); the 10 preloaded ppat resources 128..137 (DAT_00733b7c) are replaced by procedurally generated noise tiles (TODO(decomp)).
+0x004BBD50	Resource_LoadPixPat	src/pixpat_image.cpp	90%	Ghidra wrapper: looks up the ppat via the resource DB and decodes it with thunk_Resource_LoadPixPatAsImage (0x004fdf40) / Resource_LoadPixPatAsImage (0x0087293e) into an RGBA image (src/pixpat_image.cpp, Resource_LoadPixPatAsImage). Used by the radar static 128..137. Divergence: lookup is first-match archive order, not the original's newest-archive-first (affects only ppat 128, the one duplicated key).
+0x004BBDC0	DrawContext_TileImageInRect	src/game/hud_renderer.cpp	80%	Radar static fills the panel by tiling the chosen ppat with SDL_RenderTextureTiled; the 10 preloaded ppat 128..137 (DAT_00733b7c) decode via Resource_LoadPixPatAsImage. Divergence: SDL performs the per-tile edge clipping that the original's BlitClippedRect does, and the port has no generic tiled-image helper (only this radar call site).
 0x004BBF90	ResourceError_SetMessageContext		0%	
 0x004BC070	ResourceError_ShowMessageDialog		0%	
 0x004BC0E0	NovaPlatform_MarkTickAndWait		0%	
@@ -1642,7 +1642,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004FDEC0	ThreadSafe_CallUnderLock		0%	
 0x004FDEF0	Platform_ExitProcess		0%	
 0x004FDF10	FUN_004fdf10		0%	
-0x004FDF40	thunk_FUN_0087293e		0%	
+0x004FDF40	thunk_Resource_LoadPixPatAsImage	src/pixpat_image.cpp	100%	Thunk to Resource_LoadPixPatAsImage (0x0087293e). The port calls the decoder body directly from Resource_LoadPixPatAsImage.
 0x004FE1F9	MemOrStream_FUN_004fe1f9		0%	
 0x004FE22C	MemOrStream_Alloc		0%	
 0x004FE25F	MemOrStream_FUN_004fe25f		0%	
@@ -2068,7 +2068,7 @@ address	name	impl_file	reimpl_pct	comment
 0x008726CF	FUN_008726cf		0%	
 0x008726F9	FUN_008726f9		0%	
 0x008727A1	Registry_RegisterAppFileAssociations		0%	
-0x0087293E	FUN_0087293e		0%	
+0x0087293E	Resource_LoadPixPatAsImage	src/pixpat_image.cpp	100%	PixPat decoder: validates patType 1, the PixMap rowBytes flag (0xc000==0x8000), bounds, zero resolution words and depth 1/2/4/8, unpacks MSB-first colour indices with a masked rowBytes stride, and maps the inline ColorTable (count entries, index at +0, RGB low byte at +3/+5/+7) into a 256-colour palette. src/pixpat_image.cpp Resource_LoadPixPatAsImage reproduces it and emits RGBA.
 0x00872DC0	FUN_00872dc0		0%	
 0x00872E7E	Settings_LoadUiScale		0%	
 0x00873065	DrawContext_StoreScaledValue		0%	

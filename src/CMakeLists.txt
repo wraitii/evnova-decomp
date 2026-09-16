@@ -69,6 +69,7 @@ add_library(evnova_runtime
     log.cpp
     nova_app.cpp
     pict_image.cpp
+    pixpat_image.cpp
     probe_server.cpp
     rle_sprite_sheet.cpp
     sdl_audio.cpp
