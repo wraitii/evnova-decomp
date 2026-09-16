@@ -996,13 +996,10 @@ void DrawMenuStatusPanel(NovaRuntime &runtime) {
     return;
   }
 
-  std::string pilot_name = game.pilot.first_name;
-  if (!game.pilot.last_name.empty()) {
-    if (!pilot_name.empty()) {
-      pilot_name += " ";
-    }
-    pilot_name += game.pilot.last_name;
-  }
+  // Ghidra 0x004873b0 draws g_player_name here, not g_player_nickname. The
+  // nickname is persisted separately for gameplay/dialog use but has no row in
+  // the original main-menu status panel.
+  const std::string &pilot_name = game.pilot.first_name;
   const auto *ship_class = game.scenario.Ship(
       static_cast<std::int16_t>(game.player.ship_class_id + 0x80));
   // TODO(decomp) skipped: the live game calendar (g_current_game_year_month/

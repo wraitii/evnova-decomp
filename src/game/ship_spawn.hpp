@@ -72,53 +72,38 @@ NovaDude_SelectRandomSystemDudeClassIndex(const System &system,
 // full 0x100-def space and only spawns when the drawn slot is marked eligible
 // (the original's effective per-eligible-def odds, lower when few defs fit).
 //
-// TODO(decomp) ignore_ship_availability: the original forwards this to
-// EncounterFleet_SpawnRandomEncounterFleet to gate the arrival overlay banner;
-// our lead-only spawner does not model the banner yet, so the flag is accepted
-// for signature parity but not yet acted on.
+// ignore_ship_availability is forwarded to the fleet spawner and gates its
+// arrival overlay banner; it does not bypass the fleet or escort availability
+// cache checks.
 [[nodiscard]] int NovaEncounter_TrySpawnRandomFleet(
     GameState &state, std::int16_t system_id, bool ignore_ship_availability);
 
 // Mirrors Dude_SelectShipTypeIndexFromDudeDef (Ghidra 0x0046b4b0): weighted-
 // random pick of one ship slot (0..15) from a DudeDef's ship_types /
-// ship_probabilities tables, skipping entries whose ship class the system does
-// not host. ignore_ship_availability lifts that filter (the caller accepts any
-// listed class). Returns the chosen slot index or -1 when no valid entry is
-// selectable.
-//
-// TODO(decomp): the original skips ship classes whose runtime availability
-// expression evaluates false (ShipClassDef.runtime_availability_result). The
-// clean-room does not yet evaluate ship-class availability expressions, so all
-// listed classes are treated as available; this only diverges for classes with
-// an availability gate (rare for dude-bound traders/pirates).
+// ship_probabilities tables, skipping entries whose ShipClass runtime
+// availability bit is clear. ignore_ship_availability lifts that filter (the
+// caller accepts any listed class). Returns the chosen slot index or -1 when
+// no valid entry is selectable.
 [[nodiscard]] int NovaDude_SelectShipTypeIndex(const DudeDef &dude,
+                                               const ScenarioData &scenario,
                                                bool ignore_ship_availability,
                                                std::mt19937 &rng);
 
-// PARTIAL reconstruction of the lead-ship spawn of
-// EncounterFleet_SpawnRandomEncounterFleet (Ghidra 0x004259b0). Allocates one
-// ship slot in system_id for the random-encounter fleet template at
-// fleet_def_index (0-based index into ScenarioData.fleets), applying the def's
-// lead ship class (if any) and identity: zero-based ship_class_id, government,
-// AI behavior
-// (or ship-class default when the requested code is -1), base shield/armor,
-// mission slots cleared, mining-scoop flag, zero credits. Returns the allocated
-// slot
-// or -1 when the def has no lead ship, is unavailable at spawn time
-// (is_available_runtime clear), or no slot is free.
-//
-// Partial/deferred (see ship_spawn.cpp): the adjacent-stellar jump-in branch
-// (AI state 0x15) is reconstructed, including the original selector-flavor
-// roll, restricted-stellar validation, and 60-tick emergence setup. The
-// no-adjacent-stellar fallback still
-// uses the original random polar placement and AI state 0x08 slowdown. Cargo,
-// the 8-bank weapon loadout, escorts, and the arrival overlay banner remain
-// deferred.
+// Reimplementation of EncounterFleet_SpawnRandomEncounterFleet
+// (Ghidra 0x004259b0). Allocates and shapes the lead, rolls all four escort
+// ranges, skips escorts whose cached ShipClass availability is clear, copies
+// stock loadouts, seeds optional cargo, links escorts to the lead, and applies
+// the original state-0x08/state-0x15 arrival placement. Returns the lead slot,
+// or -1 when the fleet is absent/unavailable or its lead cannot be allocated.
+// The ignore_ship_availability argument in the original is presentation-only
+// for this function (it gates the arrival banner); the fleet and escort cache
+// checks remain authoritative here.
 [[nodiscard]] int
 NovaEncounter_SpawnFleetLeadShip(GameState &state,
                                  std::int16_t system_id,
                                  std::int16_t fleet_def_index,
-                                 std::int16_t ai_behavior_code = -1);
+                                 std::int16_t ai_behavior_code = -1,
+                                 bool ignore_ship_availability = false);
 
 // Ghidra 0x0043A020 System_UpdateRandomEncounterCountdown. Advances the
 // current system's armed reinforcement timer and spawns its fleet on expiry.

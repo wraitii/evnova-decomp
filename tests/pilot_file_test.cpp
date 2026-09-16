@@ -126,6 +126,34 @@ struct TemporaryDirectory {
   return p;
 }
 
+TEST_CASE("player reset preserves the christened ship name") {
+  game::GameState state;
+  state.player.ship_name = "Vengeance";
+  state.player.is_active = false;
+  state.player.death_timer_active = 12.0F;
+
+  game::NovaShip_ResetPlayerShipState(state);
+
+  CHECK(state.player.ship_name == "Vengeance");
+  CHECK(state.player.is_active);
+  CHECK(state.player.death_timer_active == -999.0F);
+}
+
+TEST_CASE("fresh pilot application retains the christened ship name") {
+  game::GameState state;
+  state.player.ship_name = "Vengeance";
+  game::PilotFile record = game::PilotFile::Fresh();
+  record.pilot_name = "Jacqueline";
+  record.nickname = "Maclean";
+  record.ship_name = state.player.ship_name;
+
+  game::PilotFileApply(record, state);
+
+  CHECK(state.pilot.first_name == "Jacqueline");
+  CHECK(state.pilot.last_name == "Maclean");
+  CHECK(state.player.ship_name == "Vengeance");
+}
+
 TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
           "subset") {
   const PilotFile p = SampleRecord();

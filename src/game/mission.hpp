@@ -239,10 +239,10 @@ enum class MissionOfferResult {
 // the lane-1 offering list for the first definition whose AvailLoc == context
 // that still passes the eligibility chain and has not been shown, shows it via
 // `run_offer`, and re-arms the recheck timer (DAT_00776af4 = now + rand(0..29)
-// + 30). An accepted offer removes the definition from the offering list --
-// the port re-evaluates lists on demand, and an activated mission fails the
-// duplicate-active check on the next evaluation, so the removal is implicit.
-// Returns true when an offer interaction ran.
+// + 30, in 1/60 s ticks). An accepted offer removes the definition from the
+// offering list -- the port re-evaluates lists on demand, and an activated
+// mission fails the duplicate-active check on the next evaluation, so the
+// removal is implicit. Returns true when an offer interaction ran.
 [[nodiscard]] bool Mission_TriggerLandingInteractions(
     GameState &state,
     std::int16_t context,

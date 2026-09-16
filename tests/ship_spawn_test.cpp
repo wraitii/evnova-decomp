@@ -13,6 +13,46 @@ using game::GameState;
 using game::NovaEncounter_SpawnFleetLeadShip;
 using game::NovaEncounter_SpawnRandomSystemDudeShip;
 using game::NovaShip_AllocateShipSlot;
+using game::NovaShip_DeactivateVacantShipsAndTally;
+
+TEST_CASE("dude ship selection honors cached class availability") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+
+  game::DudeDef dude;
+  dude.ship_types[0] = 0;
+  dude.ship_types[1] = 1;
+  dude.ship_probabilities[0] = 1;
+  dude.ship_probabilities[1] = 1;
+  REQUIRE(state.scenario.ships.size() >= 2);
+  state.scenario.ships[0].is_available_runtime = false;
+  state.scenario.ships[1].is_available_runtime = true;
+
+  std::mt19937 rng{1234};
+  CHECK(game::NovaDude_SelectShipTypeIndex(dude, state.scenario, false, rng) ==
+        1);
+  game::DudeDef bypass_dude = dude;
+  bypass_dude.ship_probabilities[1] = 0;
+  CHECK(game::NovaDude_SelectShipTypeIndex(
+            bypass_dude, state.scenario, true, rng) == 0);
+}
+
+TEST_CASE("new-game vacant cleanup removes an existing player escort") {
+  GameState state;
+  game::Ship &escort = state.ShipAt(1);
+  escort.is_active = true;
+  escort.ai_behavior_code = 6;
+  escort.squad_leader_ship_slot = 0;
+  escort.mission_fleet_slot = -1;
+  escort.defense_fleet_home_stellar_id = -1;
+
+  NovaShip_DeactivateVacantShipsAndTally(state,
+                                         /*keep_player_engaged=*/true);
+
+  CHECK_FALSE(escort.is_active);
+  CHECK(escort.squad_leader_ship_slot == -1);
+  CHECK(escort.mission_fleet_slot == -1);
+}
 
 // Count active NPC ships in the current system (any AI target state). Used by
 // the population tests below to assert ships actually spawned.
@@ -59,6 +99,7 @@ TEST_CASE("allocated slot is baselined for the requested system") {
 TEST_CASE("random system dude clears recycled movement state") {
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  game::NovaResources_EvaluateAvailability(state);
   constexpr std::int16_t kSystemId = 1; // Tichel
 
   game::Ship &recycled = state.ShipAt(1);
@@ -152,6 +193,37 @@ TEST_CASE("fleet lead spawner shapes the ship from the fleet def") {
   }
 }
 
+TEST_CASE("random encounter fleet skips unavailable escort classes") {
+  GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  auto &def = state.scenario.fleets[0];
+  def.lead_ship_class_id = 13;
+  def.escort_ship_class_ids = {14, -1, -1, -1};
+  def.escort_min_count[0] = 2;
+  def.escort_max_count[0] = 2;
+  def.is_available_runtime = true;
+  REQUIRE(state.scenario.ships.size() > 14);
+  state.scenario.ships[14].is_available_runtime = false;
+
+  REQUIRE(NovaEncounter_SpawnFleetLeadShip(state, 0x88, 0) != -1);
+  CHECK(ActiveShipsInSystem(state, 0x88) == 1);
+
+  GameState available_state;
+  REQUIRE(available_state.scenario.LoadFromArchives());
+  auto &available_def = available_state.scenario.fleets[0];
+  available_def.lead_ship_class_id = 13;
+  available_def.escort_ship_class_ids = {14, -1, -1, -1};
+  available_def.escort_min_count[0] = 2;
+  available_def.escort_max_count[0] = 2;
+  available_def.is_available_runtime = true;
+  available_state.scenario.ships[14].is_available_runtime = true;
+
+  REQUIRE(NovaEncounter_SpawnFleetLeadShip(available_state, 0x88, 0) != -1);
+  CHECK(ActiveShipsInSystem(available_state, 0x88) == 3);
+  CHECK(available_state.ShipAt(2).squad_leader_ship_slot == 1);
+  CHECK(available_state.ShipAt(3).squad_leader_ship_slot == 1);
+}
+
 // System_TickNpcSpawnMaintenance (0x0041d6e0, ambience slice): over repeated
 // full ticks the AvgShips cap for Tichel (system 0x81) is filled with dude
 // ships. Tichel binds no encounter fleets, so the dude spawn dominates.
@@ -159,6 +231,7 @@ TEST_CASE("system maintenance populates Tichel toward avg_ships") {
   using game::NovaSystem_TickNpcSpawnMaintenance;
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  game::NovaResources_EvaluateAvailability(state);
   state.player.current_system_id = 0x81; // Tichel
   const auto *sys = state.scenario.System(0x81);
   REQUIRE(sys != nullptr);
@@ -249,6 +322,7 @@ TEST_CASE("system entry populates scattered ambient ships immediately") {
   using game::NovaSystem_PopulateInitialNpcShips;
   GameState state;
   REQUIRE(state.scenario.LoadFromArchives());
+  game::NovaResources_EvaluateAvailability(state);
   constexpr std::int16_t kSystemId = 1; // Tichel, zero-based runtime id
   state.player.current_system_id = kSystemId;
   auto &sys = state.scenario.systems[static_cast<std::size_t>(kSystemId)];

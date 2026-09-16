@@ -582,7 +582,12 @@ void ResetStellarStrengthForNewGame(GameState &state) {
 
 // Ghidra 0x004b3350 Ship_ResetPlayerShipState.
 void NovaShip_ResetPlayerShipState(GameState &state) {
+  // Ghidra 0x004b3350 does not overwrite g_player_ship_name. The selected
+  // christening must survive this reset before the fresh pilot record is
+  // materialized below.
+  const std::string ship_name = state.player.ship_name;
   state.player = Ship{};
+  state.player.ship_name = ship_name;
   state.player.pos_x = 50.0F;
   state.player.pos_y = 50.0F;
   state.player.is_active = true;
@@ -738,6 +743,11 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
 
   // ---- Step 5: first travel destination + scenario spawn ------------------
   const std::int16_t first_save_stellar = PickFirstSaveStellar(state);
+  // Ghidra 0x00489d70 calls Ship_DeactivateVacantShipsAndTally(1) before
+  // rebuilding the initial population. With the new-game flag set, the
+  // previous pilot's escorts are vacant too; leaving this call out lets them
+  // leak into the new pilot and consume fleet slots/save rows.
+  NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/true);
   // Ghidra: System_RebuildInitialNpcAndMissionPopulation +
   // System_UpdateSystemAndStellar display state + Asteroid_InitSystem (the
   // system's asteroid field). The mission-fleet restore slice and the initial
@@ -773,6 +783,11 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // GameState so the intro and spaceflight read one consistent record.
   PilotFile record = PilotFile::Fresh();
   record.pilot_name = state.pilot.first_name;
+  record.nickname = state.pilot.last_name;
+  // The christening result lives in g_player_ship_name/state.player until the
+  // fresh pilot block is materialized. Carry it into the record before
+  // PilotFileApply, otherwise the apply pass replaces it with an empty name.
+  record.ship_name = state.player.ship_name;
   // A fresh pilot block is not a loaded save: PilotData_InitializePlayerState
   // leaves Ship_ResetPlayerShipState's live values in place, then the original
   // refills shield, armor and fuel after stock outfits are seeded. Our

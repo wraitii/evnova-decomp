@@ -1051,12 +1051,30 @@ std::int32_t Ship_ComputeShipTotalCargoCapacity(const GameState &state) {
 }
 
 // Ghidra 0x00469760 Player_ComputeFleetCargoCapacity. Player fleet cargo
-// capacity starts from the player ship's total cargo capacity and adds
-// eligible escort freighters' holds. TODO(decomp): escort hulls (behavior-6
-// followers with no mission-fleet slot) are not modelled yet.
+// capacity starts from the player ship's total cargo capacity (truncated to a
+// signed 16-bit value, matching the original's `(int)(short)` cast) and adds
+// the holds of eligible escort freighters: active, undestroyed behavior-6
+// followers attached to the player (squad_leader_ship_slot == 0), not members
+// of a mission fleet, whose class InherentAI is below 3 (civilian/merchant
+// hulls). The original scans slots 1..0x3f, so the player's own slot is
+// excluded here even though its capacity supplied the base. The final sum is
+// clamped to 32000.
 std::int16_t Player_ComputeFleetCargoCapacity(const GameState &state) {
   std::int32_t capacity =
       static_cast<std::int16_t>(Ship_ComputeShipTotalCargoCapacity(state));
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || NovaAiShip_IsDestroyed(ship) ||
+        ship.squad_leader_ship_slot != 0 || ship.ai_behavior_code != 6 ||
+        ship.mission_fleet_slot != -1) {
+      continue;
+    }
+    const ShipClass *ship_class = state.scenario.Ship(
+        static_cast<std::int16_t>(ship.ship_class_id + 0x80));
+    if (ship_class != nullptr && ship_class->default_ai_behavior < 3) {
+      capacity += ship_class->cargo_holds;
+    }
+  }
   return static_cast<std::int16_t>(std::min<std::int32_t>(capacity, 32000));
 }
 
@@ -1133,9 +1151,9 @@ std::int32_t Ship_ComputeTradeInValue(const GameState &state) {
 // Ghidra 0x0046a7c0 Player_ComputeRemainingCargoSpace. "Remaining" is the
 // player ship's own free holds after mission cargo and the bins/junk overflow
 // beyond the escort freighters' extra capacity. When the fleet has no extra
-// holds (single ship, the only case this build models today) the result is
-// simply ship_capacity - carried and is NOT clamped: callers that need a
-// non-negative value clamp it themselves (e.g. 0x0049c050).
+// holds the result is simply ship_capacity - carried and is NOT clamped:
+// callers that need a non-negative value clamp it themselves (e.g.
+// 0x0049c050).
 std::int16_t Player_ComputeRemainingCargoSpace(const GameState &state) {
   const std::int32_t ship_capacity = Ship_ComputeShipTotalCargoCapacity(state);
   const std::int32_t fleet_capacity = Player_ComputeFleetCargoCapacity(state);

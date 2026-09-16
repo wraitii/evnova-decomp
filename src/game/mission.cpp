@@ -173,8 +173,6 @@ FindSystemContainingStellar(const GameState &state, std::int16_t stellar_id) {
 // Mission_EvaluateMissionLists; the p\xefrs ActiveOn cache (PersDef +0x622)
 // is refreshed below.
 void NovaResources_EvaluateAvailability(GameState &state) {
-  const ControlExpressionState expression =
-      MissionControlExpressionState(state);
   for (auto &stellar : state.scenario.stellars) {
     stellar.system_id = -1;
   }
@@ -187,7 +185,7 @@ void NovaResources_EvaluateAvailability(GameState &state) {
       continue;
     }
     system.is_visible =
-        NovaControlExpression_Evaluate(system.visibility_expr, expression);
+        Mission_CheckReactionConditionSatisfied(state, system.visibility_expr);
   }
   for (std::size_t i = 0; i < systems.size(); ++i) {
     auto &system = systems[i];
@@ -220,17 +218,47 @@ void NovaResources_EvaluateAvailability(GameState &state) {
   // relies on the last per-tick pass having run with the same map.
   NovaTargeting_UpdateStellarAvailability(state);
 
+  // ShipClass availability cache. The -9999 TechLevel sentinel marks an
+  // absent ship class and must suppress the expression result.
+  for (auto &ship : state.scenario.ships) {
+    ship.is_available_runtime =
+        ship.tech_level != kShipClassNonexistentTechLevel &&
+        Mission_CheckReactionConditionSatisfied(state, ship.availability_expr);
+  }
+
   // p\x91rs ActiveOn cache (PersDef +0x622). Ghidra 0x00448090 walks all
   // 0x400 personality slots (stride 0x794): a clear +0x623 loaded latch
   // forces +0x622 = 0, otherwise +0x622 caches the +0x644 ActiveOn evaluation.
   // Pers_SpawnShipFromPersDef (0x004235c0) requires +0x622, so without this a
   // personality gated by a control bit never becomes eligible after the bit
-  // flips. The ship-class/fleet/region-trigger arms of the same original loop
-  // remain TODO(decomp).
+  // flips.
   for (auto &pers : state.scenario.pers_defs) {
     pers.is_available_runtime =
         pers.loaded_latch && Mission_CheckReactionConditionSatisfied(
                                  state, pers.availability_expression);
+  }
+
+  // Fleet availability is disabled for an absent fleet (lead ship -1).
+  for (auto &fleet : state.scenario.fleets) {
+    fleet.is_available_runtime =
+        fleet.lead_ship_class_id >= 0 &&
+        Mission_CheckReactionConditionSatisfied(state, fleet.availability_expr);
+  }
+
+  // Mission availability uses LinkSyst == -32000 as its absent/suppressed
+  // sentinel; the expression itself is evaluated by the shared NCB helper.
+  for (auto &mission : state.scenario.missions) {
+    mission.is_available_runtime = mission.link_system_filter != -32000 &&
+                                   Mission_CheckReactionConditionSatisfied(
+                                       state, mission.availability_expr);
+  }
+
+  // n\x91bu region triggers use their rectangle dimensions as the presence
+  // test before evaluating ActiveOn.
+  for (auto &nebula : state.scenario.nebulae) {
+    nebula.active_on = nebula.width >= 1 && nebula.height >= 1 &&
+                       Mission_CheckReactionConditionSatisfied(
+                           state, nebula.active_on_expression);
   }
 
   // Tail of 0x00448090: if the player's current system just failed its
@@ -257,8 +285,22 @@ void NovaResources_EvaluateAvailability(GameState &state) {
           true;
     }
     state.player.current_system_id = resolved;
-    // TODO(decomp): the original also rewrites every active ship state's and
-    // shot's current-system field to the resolved system (0x0044821a).
+    for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+      Ship &ship = state.ShipAt(slot);
+      if (ship.is_active) {
+        ship.current_system_id = resolved;
+      }
+    }
+    for (ActiveShot &shot : state.active_shots) {
+      if (shot.life_ticks_remaining > 0.0F) {
+        shot.system_id = resolved;
+      }
+    }
+    for (FreeflightObjectState &object : state.freeflight_objects) {
+      if (object.lifetime_ticks >= 0.0F) {
+        object.system_id = resolved;
+      }
+    }
   }
 }
 
@@ -861,10 +903,11 @@ ResolveMissionCurrentSystem(GameState &state,
   }
   // Mission_PopulateMissionSlotFromDef first permits available ship types,
   // then retries with the ignore-availability selector when none remain.
-  const auto selected = NovaDude_SelectShipTypeIndex(*dude, false, state.rng);
+  const auto selected =
+      NovaDude_SelectShipTypeIndex(*dude, state.scenario, false, state.rng);
   return selected >= 0 ? static_cast<std::int16_t>(selected)
                        : static_cast<std::int16_t>(NovaDude_SelectShipTypeIndex(
-                             *dude, true, state.rng));
+                             *dude, state.scenario, true, state.rng));
 }
 
 // Ghidra 0x0043e6f0 Mission_SelectMissionSystemByLocator.
@@ -2014,10 +2057,12 @@ bool Mission_TriggerLandingInteractions(
     state.mission_interaction_shown[static_cast<std::size_t>(candidate)] = 1;
   }
   // Recheck timer: DAT_00776af4 = NovaTime_GetTickCount60Hz() +
-  // NovaRandom_Range(30)
-  // + 30. Consumed by the services windows; stored for the future consumers.
-  state.mission_interaction_recheck_at_ms =
-      static_cast<std::int32_t>(now_ms) +
+  // NovaRandom_Range(30) + 30, in 1/60 s ticks. Refresh the port's shared
+  // 60 Hz counter from the caller's gameplay clock before stamping it.
+  state.tick_60hz = static_cast<std::uint32_t>(
+      static_cast<std::uint64_t>(now_ms) * 60 / 1000);
+  state.mission_interaction_recheck_tick_60hz =
+      static_cast<std::int32_t>(state.tick_60hz) +
       static_cast<std::int32_t>(RandomBelow(state, 0x1e)) + 0x1e;
   return true;
 }
