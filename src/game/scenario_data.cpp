@@ -1717,9 +1717,10 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng) {
         if (const auto found = first_class_by_base_image.find(base_image);
             found != first_class_by_base_image.end()) {
           cls.clone_source_ship_class = found->second;
-          // Escort type is the clone source class (ShipClassDef +0xa08); the
-          // original leaves it at -1 when the sprite is built fresh.
-          cls.escort_type = found->second;
+          // Base sprite clone source (ShipClassDef +0xa08,
+          // base_sprite_clone_source_ship_class); the original leaves it at -1
+          // when the sprite is built fresh.
+          cls.base_sprite_clone_source_ship_class = found->second;
         } else {
           cls.clone_source_ship_class = static_cast<std::int16_t>(index);
           first_class_by_base_image.emplace(base_image,

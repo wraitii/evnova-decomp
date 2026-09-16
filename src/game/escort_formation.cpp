@@ -57,12 +57,12 @@ int RoundHeadingDeg(const Ship &ship) {
 
 // Sprite_GetShipClassEscortFrameHeight (0x004624c0): the ship-class sprite
 // span used to size wedge spacing. The original resolves
-// ShipClassDef.escort_type (+0xa08), which the sh\x8an loader writes to the
-// clone-source class; clone classes share the source sprite, so the port
-// decodes the class's own sh\x8an (identical span for clones). Divergence:
-// non-clone classes read escort_type 0 (class 0's sprite) in the original
-// when the field defaults to zero; the port always uses the class's own
-// span. TODO(decomp) if a scenario shows spacing drift.
+// ShipClassDef.base_sprite_clone_source_ship_class (+0xa08), which the
+// sh\x8an loader writes to the clone-source class; clone classes share the
+// source sprite, so the port decodes the class's own sh\x8an (identical span
+// for clones). Divergence: non-clone classes read clone source 0 (class 0's
+// sprite) in the original when the field defaults to zero; the port always
+// uses the class's own span. TODO(decomp) if a scenario shows spacing drift.
 // Like Sprite_GetFrameFullHeight, this returns the FULL frame width (see the
 // boarding reticle note in boarding_plunder.cpp), fallback 0x4b = 75.
 // Cached per class id: the scenario resource set is fixed for the process
