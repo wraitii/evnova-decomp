@@ -25,6 +25,8 @@ namespace {
 // machinery, but the freeflight scoop's pixel-mask overlap is not exercised by
 // a dedicated sprite-resource test here.
 void SeedPlayerForCollision(GameState &state) {
+  state.scenario.ships.resize(1);
+  state.scenario.ships[0].cargo_holds = 10;
   state.collision_masks_enabled = false;
   state.player.is_active = true;
   state.player.ship_instance_id = 0;

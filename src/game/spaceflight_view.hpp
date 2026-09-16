@@ -286,6 +286,9 @@ private:
   // bare rl\x91D sheets (sh\x8an BaseImageID / GlowImageID) sharing the same
   // rotation grid. Empty when the class has none.
   SpriteAsset ship_;
+  // Resource id of the class currently held in the player-only sprite cache.
+  // Buying/capturing a different hull invalidates all four cached layers.
+  std::int16_t player_sprite_ship_class_id_ = -1;
   SpriteAsset glow_;
   // Running-lights (sh\x8an LightImageID) and weapon-effects (WeapImageID)
   // layers, sharing the base rotation grid. Empty when the class has none.

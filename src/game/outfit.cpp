@@ -165,16 +165,30 @@ void InvalidatePlayerStatCache(GameState &state) {
 // side-effecting recompute vs. the lazy Ship_Compute* sentinel caches) and the
 // caller map.
 //
-// Modelled arms: stat-cache invalidation, negative cargo/junk clamps, jamming
+// Modelled arms: stat-cache invalidation, cargo-overflow scaling, negative
+// cargo/junk clamps, jamming
 // reset, cloak-latch reset, outfit-derived government latches (ModType
 // 0x2c/0x30), government policy_flags clear/rebuild from active ranks,
 // mining-scoop latch + cargo-capacity gate, and the recently-hit timer reset.
 // TODO(decomp): the remaining eager arms are not ported -- license clamp
 // (unlicensed -> max shield/armor 1.0), junk-derived flags, carried-bomb class
-// + detonation timer, cargo-overflow bin scaling, and the distance-intensity/
-// murk cache.
+// + detonation timer, and the distance-intensity/murk cache.
 void NovaOutfit_RecomputeOutfitDerivedState(GameState &state) {
   InvalidatePlayerStatCache(state);
+  // Ghidra 0x0046d4b0: when all cargo and junk exceeds the fleet's new
+  // capacity, scale each of the six ordinary cargo bins by capacity / total.
+  // Mission cargo and junk participate in the denominator but are not
+  // themselves reduced. This notably runs after buying a smaller ship.
+  const std::int16_t fleet_capacity = Player_ComputeFleetCargoCapacity(state);
+  const std::int16_t cargo_and_junk = Player_ComputeCargoAndJunkTotal(state);
+  if (fleet_capacity < cargo_and_junk && cargo_and_junk > 0) {
+    const float ratio =
+        static_cast<float>(fleet_capacity) / static_cast<float>(cargo_and_junk);
+    for (std::int16_t &bin : state.inventory.cargo_bins) {
+      bin = static_cast<std::int16_t>(
+          std::trunc(static_cast<float>(bin) * ratio));
+    }
+  }
   // Ghidra 0x0046d4b0: clamp negative cargo bins (ShipState +0x7a, 6 shorts)
   // and junk counts (g_junk_defs +0x22) to zero. The original also raises
   // g_playerInventoryAndLoadoutDirty here; the port has no separate dirty

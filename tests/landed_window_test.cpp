@@ -83,7 +83,7 @@ TEST_CASE("Ship replacement rechecks requirements and preserves mutation order",
   CHECK(state.player.credits == 525); // 25-credit trade-in, then 500 list price
   CHECK(state.player.primary_target_ship_slot == -1);
   CHECK(state.player.active_weapon_bank_slot == -1);
-  CHECK(state.inventory.cargo_bins[0] == 8);
+  CHECK(state.inventory.cargo_bins[0] == 5);
   CHECK(state.inventory.junk_counts[0] == 0);
   CHECK(state.ship_class_limit_rolls[1] >= 1);
   CHECK(state.ship_class_limit_rolls[1] <= 100);
