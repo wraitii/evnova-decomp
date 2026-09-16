@@ -4,9 +4,11 @@
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
 #include "game_state.hpp"
+#include "government.hpp"
 #include "hud_overlay.hpp"
 #include "intro_cinematic.hpp"
 #include "mission.hpp"
+#include "mission_script.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
 #include "pilot_file.hpp"
@@ -560,9 +562,69 @@ void SetNewGameDateAndStrings(GameState &state) {
   state.date.day = static_cast<std::int16_t>(local.tm_mday);
 }
 
+// Ghidra 0x004cd4b0 PilotData_InitializePlayerState (param_2 != 0): overlays
+// the selected character template's starting state onto the freshly reset
+// world. Credits, combat rating, per-system reputation and the calendar replace
+// the Ship_ResetPlayerShipState / Game_ResetNewGameState seeds. Returns the
+// OnStart control-bit set string for the caller to run once the world reset is
+// done (the original's param_2 == 0 pass, just before the initial save).
+std::string ApplyCharacterTemplate(GameState &state) {
+  const auto tmpl = CharacterTemplate_Read(state.pilot.character_template);
+  if (!tmpl) {
+    // Absent-block seed (0x004cd4b0): 10000 credits/class 0/system 0 already
+    // applied elsewhere, calendar 2250/1/1, no date prefix/suffix.
+    state.date = GameDate{2250, 1, 1};
+    state.date_prefix.clear();
+    state.date_suffix.clear();
+    NovaLog::Todo("new pilot: character template '{}' not found; keeping the "
+                  "absent-block defaults",
+                  state.pilot.character_template);
+    return {};
+  }
+
+  state.player.credits = std::max<std::int32_t>(tmpl->credits, 0);
+  state.player_combat_rating_points = tmpl->combat_rating_points;
+  // Per-govt starting legal record: for each present Govt entry, apply Status
+  // to every system owned by an allied government and negate it for that
+  // government's enemies (the original's 4 x 0x800 double loop, which leaves
+  // neutral systems untouched). Stock .Trader has all Govt/Status = -1, so
+  // nothing changes; mod templates can start the player criminal or legal.
+  for (std::size_t i = 0; i < tmpl->govt_ids.size(); ++i) {
+    if (tmpl->govt_ids[i] < 0x80) {
+      continue;
+    }
+    const auto govt = static_cast<std::int16_t>(tmpl->govt_ids[i] - 0x80);
+    const auto status = tmpl->govt_status[i];
+    for (std::size_t s = 0; s < state.system_reputation.size(); ++s) {
+      const auto system_govt = state.scenario.systems[s].government_id;
+      if (NovaGovernment_AreGovtsAllied(state.scenario, system_govt, govt)) {
+        state.system_reputation[s] = status;
+      } else if (NovaGovernment_AreGovtsHostileOrXenophobic(
+                     state.scenario, system_govt, govt)) {
+        state.system_reputation[s] = static_cast<std::int16_t>(-status);
+      }
+    }
+  }
+
+  state.date = tmpl->date;
+  state.date_prefix = tmpl->date_prefix;
+  state.date_suffix = tmpl->date_suffix;
+  NovaLog::Info("character template '{}': {} credits, combat rating {}, start "
+                "date {}-{:02}-{:02}, date suffix '{}'",
+                state.pilot.character_template,
+                state.player.credits,
+                state.player_combat_rating_points,
+                state.date.year,
+                state.date.month,
+                state.date.day,
+                state.date_suffix);
+  return tmpl->on_start;
+}
+
 // Ghidra Game_ResetNewGameState (0x004b4690), 0x004b46bc..0x004b4760: for every
-// stellar slot the loader left behind, clear dominated and seed Strength.
-// Bodies carrying availability_flags 0x40 (Bible "starts the game destroyed")
+// stellar slot the loader left behind, set dominated from availability_flags
+// 0x20 and seed Strength. Bodies carrying availability_flags 0x40 (Bible
+// "starts the game destroyed")
 // start at live strength -1 with the regeneration countdown pinned (1 when the
 // schedule seed is negative, otherwise the schedule seed); every other body
 // resets live strength to the loaded capacity with destroyed_days_remaining 0.
@@ -570,7 +632,10 @@ void SetNewGameDateAndStrings(GameState &state) {
 // intact.
 void ResetStellarStrengthForNewGame(GameState &state) {
   for (Stellar &stellar : state.scenario.stellars) {
-    stellar.dominated = false;
+    // Bible Flags2 0x20 "starts the game dominated"; the original sets the
+    // persistent domination latch from this bit (Game_ResetNewGameState
+    // 0x004b4690), not unconditionally false.
+    stellar.dominated = (stellar.availability_flags & 0x20U) != 0U ? 1 : 0;
     if ((stellar.availability_flags & 0x40U) != 0U) {
       stellar.strength = -1;
       stellar.destroyed_days_remaining =
@@ -743,7 +808,13 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // for the starter loadout's outfit bonuses.
   RecomputePlayerMeters(state);
   Stub_DiscoverStartingSystems(state);
+  // Game_ResetNewGameState seeds the calendar from the local clock+250; the
+  // selected character template then overrides it
+  // (PilotData_InitializePlayerState 0x004cd4b0 param_2 != 0).
+  // ApplyCharacterTemplate returns the OnStart control-bit set string, run
+  // after the world reset below.
   SetNewGameDateAndStrings(state);
+  const std::string on_start_script = ApplyCharacterTemplate(state);
 
   // ---- Step 5: first travel destination + scenario spawn ------------------
   const std::int16_t first_save_stellar = PickFirstSaveStellar(state);
@@ -800,6 +871,12 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // initialization. Otherwise PilotFileApply would incorrectly erase the
   // newly filled ship and the seeded inventory.
   record.credits = state.player.credits;
+  // The character template overrode the clock-seeded calendar; carry the
+  // applied date and its prefix/suffix (block +0x134..+0x14a) so PilotFileApply
+  // cannot reset them to Fresh()'s absent-block default.
+  record.date = state.date;
+  record.date_prefix = state.date_prefix;
+  record.date_suffix = state.date_suffix;
   record.ship_class_id = state.player.ship_class_id;
   record.current_system_id = state.player.current_system_id;
   record.active_weapon_bank_slot = state.player.active_weapon_bank_slot;
@@ -823,6 +900,22 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   record.weapon_secondary_count_by_class =
       state.weapon_secondary_count_by_class;
   record.outfit_owned_count = state.inventory.outfit_owned_count;
+  // Carry the starting legal record applied by ApplyCharacterTemplate;
+  // PilotFileApply otherwise clears the whole reputation table to zero.
+  const std::size_t reputation_count =
+      std::min(state.system_reputation.size(), record.system_reputation.size());
+  std::copy_n(state.system_reputation.begin(),
+              reputation_count,
+              record.system_reputation.begin());
+  // Carry the start-system discovery seeded by Stub_DiscoverStartingSystems;
+  // PilotFileApply otherwise copies the fresh record's all-zero fog table over
+  // it (control.explored_systems is a separate field and survives, but the fog
+  // consumers read discovery_state).
+  const std::size_t discovery_count =
+      std::min(state.scenario.systems.size(), record.system_discovery.size());
+  for (std::size_t i = 0; i < discovery_count; ++i) {
+    record.system_discovery[i] = state.scenario.systems[i].discovery_state;
+  }
 
   // Carry the remaining live runtime fields the record now round-trips, so
   // PilotFileApply does not reset the new-pilot dialog selections
@@ -880,6 +973,13 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // Strict Play checkbox state (latched by the dialog port into
   // state.pilot.strict_play).
   state.game_active = true;
+  // Ghidra 0x00489d70 calls PilotData_InitializePlayerState(..., 0) here: it
+  // runs the template's OnStart control-bit set script (block+0x32). Run it
+  // before the save so any starting control bits are persisted.
+  if (!on_start_script.empty()) {
+    Mission_ExecuteReactionScript(
+        state, on_start_script, MissionScriptContext{"OnStart", -1});
+  }
   // Ghidra 0x00489d70 calls PilotFile_SaveGame after the fresh state and
   // character block have been finalized. The selected starting stellar is
   // the restore point persisted at block1+0x00.

@@ -881,40 +881,6 @@ MenuSystemLegalStatusText(const game::GameState &state,
       .value_or(std::string());
 }
 
-// Ghidra 0x00468450 NovaText_FormatDateString. Formats
-// "<Mon.> <day><st/nd/rd/th>, <year>" from STR# 0x89 (abbreviated month names
-// at entry month+12; ordinal suffixes at 0x19-0x1c with the 11-13 -> th rule).
-[[nodiscard]] std::string FormatGameDateString(int year, int month, int day) {
-  std::string text;
-  if (auto name = game::NovaHud_LoadStringEntry(
-          0x89, static_cast<std::uint16_t>(month + 0xc))) {
-    text += *name;
-  }
-  text += " ";
-  text += std::to_string(day);
-  const char *suffix = "th";
-  switch (day % 10) {
-  case 1:
-    suffix = "st";
-    break;
-  case 2:
-    suffix = "nd";
-    break;
-  case 3:
-    suffix = "rd";
-    break;
-  default:
-    break;
-  }
-  if (day > 10 && day < 14) {
-    suffix = "th";
-  }
-  text += suffix;
-  text += ", ";
-  text += std::to_string(year);
-  return text;
-}
-
 void DrawMenuText(SdlPlatform &platform,
                   game::NovaFontCache &font_cache,
                   float x,
@@ -1003,10 +969,10 @@ void DrawMenuStatusPanel(NovaRuntime &runtime) {
   const std::string &pilot_name = game.pilot.first_name;
   const auto *ship_class = game.scenario.Ship(
       static_cast<std::int16_t>(game.player.ship_class_id + 0x80));
-  // TODO(decomp) skipped: the live game calendar (g_current_game_year_month/
-  // day, Ghidra 0x00468450 callers) is not tracked by GameState yet; draw the
-  // original fresh-pilot baseline date.
-  const std::string date_text = FormatGameDateString(1999, 1, 1);
+  // Ghidra 0x004873b0 / 0x00468450: the live calendar with the pilot's
+  // DatePrefix/DateSuffix (char template +0x13a/+0x14a), abbreviated months.
+  const std::string date_text = game::NovaText_FormatDateString(
+      game.date, true, game.date_prefix, game.date_suffix);
 
   struct StatusRow {
     float label_x;

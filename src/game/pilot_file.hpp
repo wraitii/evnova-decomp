@@ -29,6 +29,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace game {
@@ -170,6 +171,31 @@ struct PilotFile {
 // the original's block-to-global copy (PilotData_InitializePlayerState /
 // IntroCinematic_SetupFrames after the block is created).
 void PilotFileApply(const PilotFile &pilot_file, GameState &state);
+
+// Ghidra 0x004cd4b0 PilotData_InitializePlayerState, param_2 != 0 branch: the
+// starting-state fields of the selected character template block
+// (resource 0x63688a72, keyed by name). All values are big-endian; the
+// original grows short blocks to 0x16a bytes before reading, so absent bytes
+// read as zero. Offsets and the shipped .Trader values are documented in
+// docs/char_resource_format.md. The random System1-4 pick is deliberately not
+// applied yet (the flow uses a fixed start system).
+struct CharacterTemplate {
+  std::int32_t credits = 0;       // +0x00 Cash
+  std::int16_t ship_class_id = 0; // +0x04 ShipType minus 0x80 (<0x80 -> 0)
+  std::array<std::int16_t, 4> systems{-1, -1, -1, -1};     // +0x06 System1-4
+  std::array<std::int16_t, 4> govt_ids{-1, -1, -1, -1};    // +0x0e Govt1-4
+  std::array<std::int16_t, 4> govt_status{-1, -1, -1, -1}; // +0x16 Status1-4
+  std::int32_t combat_rating_points = 0;                   // +0x1e Kills
+  GameDate date{0, 0, 0};  // +0x138 year, +0x136 month, +0x134 day
+  std::string date_prefix; // +0x13a C string
+  std::string date_suffix; // +0x14a C string
+  std::string on_start;    // +0x32 Pascal string (OnStart)
+};
+
+// Read the character template named `block_key` from the chär family. Returns
+// nullopt when no block matches (the original's absent-block branch).
+[[nodiscard]] std::optional<CharacterTemplate>
+CharacterTemplate_Read(std::string_view block_key);
 
 // Project the scenario's loader-marked përs table into a fresh pilot record
 // before PilotFileApply copies it back. A brand-new record has its pers flags

@@ -1,9 +1,11 @@
 #include "brgr_archive.hpp"
+#include "game/pilot_file.hpp"
 #include "pict_image.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 
 // TEMPORARY new-pilot dialog resource checks (dropped once the port settles).
 
@@ -115,4 +117,29 @@ TEST_CASE("ch r census: one hidden .Trader template (stock Nova)",
       (std::to_integer<unsigned>((*block)[4]) << 8U) |
       std::to_integer<unsigned>((*block)[5]));
   CHECK(ship_type == 0x80);
+}
+
+TEST_CASE("ch r .Trader starting-state fields decode", "[new_pilot_dialog]") {
+  if (!ArchivesPresent()) {
+    SKIP("Nova .rez archives not present");
+  }
+  // Ghidra 0x004cd4b0 PilotData_InitializePlayerState param_2 != 0. Offsets
+  // per docs/char_resource_format.md; stock .Trader values.
+  const auto tmpl = game::CharacterTemplate_Read(".Trader");
+  REQUIRE(tmpl.has_value());
+  CHECK(tmpl->credits == 25000);
+  CHECK(tmpl->ship_class_id == 0);
+  CHECK((tmpl->systems == std::array<std::int16_t, 4>{0x80, 0x88, 0xaa, 0xb8}));
+  CHECK((tmpl->govt_ids == std::array<std::int16_t, 4>{-1, -1, -1, -1}));
+  CHECK((tmpl->govt_status == std::array<std::int16_t, 4>{-1, -1, -1, -1}));
+  CHECK(tmpl->combat_rating_points == 0);
+  CHECK(tmpl->date.year == 1177);
+  CHECK(tmpl->date.month == 6);
+  CHECK(tmpl->date.day == 23);
+  CHECK(tmpl->date_prefix.empty());
+  CHECK(tmpl->date_suffix == " NC");
+  CHECK(tmpl->on_start.empty());
+
+  const auto missing = game::CharacterTemplate_Read(".NoSuchTemplate");
+  CHECK_FALSE(missing.has_value());
 }
