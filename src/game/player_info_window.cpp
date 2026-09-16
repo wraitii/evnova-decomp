@@ -603,6 +603,11 @@ void DrawTextPage(SdlPlatform &platform,
     // The original draws the pstring into a filled rect and inverts it
     // (white-on-dark after inversion); the port draws light text directly.
     const auto lines = WrapText(font_cache, text, view_rect.w - 12.0F);
+    const SDL_Rect clip{static_cast<int>(std::floor(view_rect.x)),
+                        static_cast<int>(std::floor(view_rect.y)),
+                        static_cast<int>(std::ceil(view_rect.w)),
+                        static_cast<int>(std::ceil(view_rect.h))};
+    SDL_SetRenderClipRect(platform.renderer(), &clip);
     float baseline = view_rect.y + 11.0F;
     for (const auto &line : lines) {
       NovaText_Draw(platform,
@@ -616,6 +621,7 @@ void DrawTextPage(SdlPlatform &platform,
                     line);
       baseline += 11.0F;
     }
+    SDL_SetRenderClipRect(platform.renderer(), nullptr);
     return;
   }
   NovaText_Draw(platform,
@@ -703,6 +709,9 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
       if ((outfit.flags & 0x2000) != 0) {
         continue;
       }
+      if (total > 0) {
+        extras += ", ";
+      }
       // Count word: a/an (vowel test on the lowercase name via
       // MWRuntime_FUN_004d6230), "two"/"three" from STR# 0x89 0x1e/0x1f,
       // digits above.
@@ -716,7 +725,6 @@ NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {
         extras += std::to_string(owned) + " ";
       }
       extras += owned == 1 ? outfit.lc_name : outfit.lc_plural;
-      extras += total == 0 ? "" : ", ";
       total++;
     }
     if (total > 0) {
@@ -849,22 +857,24 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
   NovaFontCache font_cache;
   // Auto-grow (0x00499c10): the longest page text must fit the view rect;
   // the window grows by delta = content - view_height + 4, shifts up by
-  // delta/2 (DAT_00575940 = 0.5) and moves entries 1/6/7 down by delta.
+  // delta/2 (DAT_00575940 = 0.5), extends entry 6, and moves entries 1/7
+  // down by delta.
   float delta = 0.0F;
   for (const std::string *text : {&texts.cargo, &texts.extras, &texts.honors}) {
-    const float height = MeasureTextHeight(font_cache, *text, view_rect.w);
+    const float height =
+        MeasureTextHeight(font_cache, *text, view_rect.w - 12.0F);
     delta = std::max(delta, height - view_rect.h + 4.0F);
   }
   SDL_FRect window_pos{window_rect};
   if (delta > 0.0F) {
     // FUN_004d18b0 grows the window by delta; FUN_004d1a30 shifts it up by
     // delta * 0.5 (DAT_00575940). Only the bottom-anchored entries move with
-    // the new bottom edge: entries 1 (Done), 6 (text view) and 7 (Jettison)
-    // offset down by delta (window-relative); the top tab entries 2..5 stay
-    // glued to the window top.
+    // the new bottom edge: entries 1 (Done) and 7 (Jettison) offset down by
+    // delta (window-relative), while entry 6 extends its bottom edge by delta;
+    // the top tab entries 2..5 stay glued to the window top.
     window_pos.y -= delta / 2.0F;
     window_pos.h += delta;
-    view_rect.y += delta;
+    view_rect.h += delta;
     strip_rects[kTabClose].y += delta;
     strip_rects[kTabJettison].y += delta;
   }
