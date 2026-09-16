@@ -124,6 +124,14 @@ struct PilotFile {
   // Escort group-order command codes by class category (Ghidra
   // g_target_category_command), block2+0x5d90.
   std::array<std::int16_t, 4> target_category_command{-1, -1, -1, -1};
+  // Saved player fleet rows (block1+0xe6ce..+0xe8ce). The first class table
+  // holds behavior-6 escorts; +1000 preserves field_0xbb. The second holds
+  // deployed carrier fighters restored as behavior 5 ships.
+  std::array<std::int16_t, 0x40> escort_ship_class_ids{};
+  std::array<std::int16_t, 0x40> fighter_ship_class_ids{};
+  std::array<std::int16_t, 0x40> escort_upgrade_flags{};
+  std::array<std::int16_t, 0x40> escort_released_flags{};
+  std::array<std::int16_t, 0x40> fighter_voice_types{};
   std::array<std::int16_t, 0x100> disaster_days_remaining{};  // +0x3088
   std::array<std::int16_t, 0x100> disaster_active_stellars{}; // +0x3288
   std::array<std::int16_t, 0x200> cron_duration_counters{};   // +0x3590

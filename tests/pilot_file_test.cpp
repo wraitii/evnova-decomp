@@ -70,6 +70,11 @@ using game::PilotLoadError;
   p.stellar_engage_access[7] = 33;
   p.reinforcement_retrigger_delay[5] = 12;
   p.target_category_command = {1, -1, 2, 0};
+  p.escort_ship_class_ids[0] = 1003;
+  p.escort_upgrade_flags[0] = 1;
+  p.escort_released_flags[0] = 1;
+  p.fighter_ship_class_ids[0] = 4;
+  p.fighter_voice_types[0] = 2;
   p.disaster_days_remaining[3] = 12;
   p.disaster_active_stellars[3] = 44;
   p.cron_duration_counters[5] = 9;
@@ -103,6 +108,11 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.jump_dest_stellar == 0x123);
   CHECK(out.credits == 123456);
   CHECK(out.player_combat_rating_points == 987654);
+  CHECK(out.escort_ship_class_ids[0] == 1003);
+  CHECK(out.escort_upgrade_flags[0] == 1);
+  CHECK(out.escort_released_flags[0] == 1);
+  CHECK(out.fighter_ship_class_ids[0] == 4);
+  CHECK(out.fighter_voice_types[0] == 2);
   CHECK(out.ship_class_id == 3);
   CHECK(out.fuel_points == 77.0F); // 77.6 truncated toward zero, stored as u16
   CHECK(out.intro_played);
