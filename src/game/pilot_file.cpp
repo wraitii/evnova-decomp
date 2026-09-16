@@ -477,6 +477,19 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   return out;
 }
 
+std::int16_t
+PilotFileStellarIndexFromResourceId(std::int16_t stellar_resource_id) {
+  // Ghidra 0x004c7dd0 PilotFile_SaveGameCore writes the caller's 0-based
+  // g_stellar_defs index at block1+0x00 (the launch autosave passes
+  // ship->ai_secondary_target_slot). The port tracks stellar ids as 0x80-based
+  // resource ids everywhere else, and 0x004cb260 PilotFile_LoadSave reads the
+  // word back as an index (it indexes g_stellar_defs directly), so rebase at
+  // this one boundary.
+  return stellar_resource_id >= 0x80
+             ? static_cast<std::int16_t>(stellar_resource_id - 0x80)
+             : stellar_resource_id;
+}
+
 std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
                                           std::int16_t jump_dest_stellar) {
   std::vector<std::byte> block1(kBlock1Size, std::byte{0});

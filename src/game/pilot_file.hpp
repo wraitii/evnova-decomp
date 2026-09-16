@@ -50,8 +50,11 @@ struct PilotFile {
   std::string ship_name;
 
   // -- Player ship core (Ghidra .plt offsets from PilotFile_LoadSave) --------
-  // The saved jump/travel destination stellar id (block1+0x00). The loader
-  // places the player at this stellar on restore; -1 means none.
+  // The saved jump/travel destination stellar, block1+0x00, as the 0-based
+  // g_stellar_defs index the original saver writes
+  // (ship->ai_secondary_target_slot). The loader places the player at this
+  // stellar on restore; -1 means none. Use PilotFileStellarIndexFromResourceId
+  // when the caller has the port's 0x80-based stellar resource id.
   std::int16_t jump_dest_stellar = -1;
   std::int32_t credits = 0; // block1+0x281a
   // Aggregate career score (Ghidra g_player_combat_rating_points),
@@ -226,10 +229,20 @@ enum class PilotLoadError : int {
 
 // Serialize PilotFile into the .plt byte layout. Mirrors PilotFile_SaveGameCore
 // (0x004c7dd0); opaque active-mission bytes are retained and the original's
-// reserved ranges are zero-filled. jump_dest_stellar is written at
-// block1+0x00 (the caller's current travel destination).
+// reserved ranges are zero-filled. jump_dest_stellar is written verbatim at
+// block1+0x00 and is the 0-based g_stellar_defs index of the current travel
+// destination (use PilotFileStellarIndexFromResourceId to rebase a resource
+// id); -1 means none.
 [[nodiscard]] std::vector<std::byte>
 PilotFileSerialize(const PilotFile &pilot_file, std::int16_t jump_dest_stellar);
+
+// Rebase the port's 0x80-based stellar resource id (StellarDef indexing is
+// resource_id - 0x80) into the 0-based g_stellar_defs index the .plt stores at
+// block1+0x00 and PilotFile_LoadSave expects. Values >= 0x80 become
+// id - 0x80; -1 (and any value already below 0x80, including the new-game
+// "no nav stellar" 0 fallback) passes through.
+[[nodiscard]] std::int16_t
+PilotFileStellarIndexFromResourceId(std::int16_t stellar_resource_id);
 
 // Parse a .plt byte stream into `out` (mirrors PilotFile_LoadSave 0x004cb260
 // restore of the tracked subset, including the PilotSave_ValidateBlock gate at
@@ -241,9 +254,11 @@ PilotFileDeserialize(std::span<const std::byte> bytes, PilotFile &out);
 
 // Save <nova_files_dir>/<pilot name>.plt from the live state. Mirrors
 // PilotFile_SaveGame (0x004c7db0) + PilotFile_SaveGameCore (0x004c7dd0).
-// jump_dest_stellar is the player's current jump/travel destination. Returns
-// false on I/O failure. Also writes the "Last Pilot" marker file in the same
-// directory (PilotFile_RecordLastPilotPath 0x004c7d40; STR# 0x82 entry 4).
+// jump_dest_stellar is the 0-based g_stellar_defs index of the player's
+// current jump/travel destination (see PilotFileSerialize; rebase a resource
+// id with PilotFileStellarIndexFromResourceId first). Returns false on I/O
+// failure. Also writes the "Last Pilot" marker file in the same directory
+// (PilotFile_RecordLastPilotPath 0x004c7d40; STR# 0x82 entry 4).
 [[nodiscard]] bool
 PilotFileSaveGame(const std::filesystem::path &nova_files_dir,
                   const GameState &state,

@@ -435,24 +435,27 @@ void Stub_DiscoverStartingSystems(GameState &state) {
   // reachable travel point as the pilot's initial jump target. The travel
   // mechanics are reconstructed (travel.cpp): the first-jump target is
   // resolved dynamically at engage time, so this step just validates that the
-  // starting system has a reachable outward route and logs it.
+  // starting system has a reachable outward route and logs it. Returns the
+  // 0-based g_stellar_defs index the original saves at block1+0x00 (the port's
+  // nav_defs are 0x80-based resource ids, so rebase).
   const int slot = NovaTravel_FindNearestTravelPoint(state);
   if (slot >= 0) {
     const System *system = state.scenario.System(
         static_cast<std::int16_t>(state.player.current_system_id + 0x80));
     if (system != nullptr) {
-      return system->nav_defs[static_cast<std::size_t>(slot)];
+      return PilotFileStellarIndexFromResourceId(
+          system->nav_defs[static_cast<std::size_t>(slot)]);
     }
   }
   // 0x00489d70 falls back to the first nonnegative nav stellar, then passes
-  // zero when the system has no nav stellar at all.
+  // zero (g_stellar_defs index 0) when the system has no nav stellar at all.
   const System *system = state.scenario.System(
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   if (system != nullptr) {
     const auto fallback = std::ranges::find_if(
-        system->nav_defs, [](std::int16_t stellar) { return stellar >= 0; });
+        system->nav_defs, [](std::int16_t stellar) { return stellar >= 0x80; });
     if (fallback != system->nav_defs.end()) {
-      return *fallback;
+      return PilotFileStellarIndexFromResourceId(*fallback);
     }
   }
   return 0;

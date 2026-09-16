@@ -100,7 +100,7 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 
 | Offset | Size | Field |
 |---|---|---|
-| 0x0000 | u16 | jump destination stellar id (0xffff = none). Loader's fallback logic keys off this. |
+| 0x0000 | u16 | jump destination stellar, stored as a **0-based `g_stellar_defs` index** (resource id - 0x80), not a 0x80-based resource id. 0xffff = none. Loader's fallback logic keys off this. |
 | 0x0002 | u16 | ship class id. Saver zeroes it if the license seed is not one of 4 magic values (`License_ComputeSeed` anti-piracy check — see quirks). |
 | 0x0004 | u16[6] | cargo (commodity) counts `cargo_bin[0..5]` |
 | 0x0010 | u16 | shield points (rounded). **Not read back by the loader** — it recomputes max shield from class+outfits. |
@@ -161,7 +161,7 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 
 | Addr | Name | Role |
 |---|---|---|
-| 0x004c7db0 | `PilotFile_SaveGame` (was `Stellar_SetTravelDestination`) | Trampoline: guards on `DAT_00863f09`, then calls the saver with the current jump/travel destination stellar id. This IS the pilot save entry point. Callers: `Menu_RunNewGameFlow` (initial save), `Stellar_RunDockAndLaunchSequence`, `Ship_HandlePlayerShipCore`. |
+| 0x004c7db0 | `PilotFile_SaveGame` (was `Stellar_SetTravelDestination`) | Trampoline: guards on `DAT_00863f09`, then calls the saver with the current jump/travel destination as a 0-based `g_stellar_defs` index. This IS the pilot save entry point. Callers: `Menu_RunNewGameFlow` (initial save, index from `Stellar_FindNearestAvailableTravelStellar`), `Stellar_RunDockAndLaunchSequence` (`ship->ai_secondary_target_slot`), `Ship_HandlePlayerShipCore`. |
 | 0x004c7dd0 | `PilotFile_SaveGameCore` | Saver core: builds `<nova_files><pilot name>.plt`, allocates block1 (0xe952) + block2 (0x66fe), fills all fields, writes `[u32 sz][data]` twice + ship-name trailer, closes. Guards on `DAT_00863f0a`. |
 | 0x004cb260 | `PilotFile_LoadSave` | Loader (Open Pilot + startup auto-resume): reads `[u32 sz1][data1]` → restores PilotState; `[u32 sz2][data2]` → restores FleetState/world; then ship-name trailer. Derives the pilot name from the file path (after last ':', before '.'). Returns 0 ok; -0x2b missing/empty; -0x2a/-0x2d invalid block2; -0x2e repairs applied. |
 | 0x008725b0 | `PilotSave_DecodeBlock` | Leaves plaintext blocks whose first u16 is below 0x800 alone; otherwise tail-calls the symmetric XOR transform at 0x0046f960 with `(data, size, 0xb36a210f)`. Both save blocks in the archived retail pilots use this encoding. |
@@ -177,6 +177,13 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 
 ## Loader behavior details
 
+- **The saved destination is a 0-based `g_stellar_defs` index, not a resource
+  id.** `0x004cb260` reads block1+0x00 straight into
+  `g_ship_states->jump_destination_stellar_id` and indexes `g_stellar_defs`
+  with it (`MOVSX ...; IMUL ...,0x498`), and the launch autosave passes
+  `ship->ai_secondary_target_slot`, which is also an index. Storing a
+  0x80-based resource id here lands the restored player on the wrong stellar,
+  or at (0,0) when that index holds no defined stellar.
 - **Position/heading are NOT saved.** The loader places the player at the
   saved jump-destination stellar's map coords with a random heading, then sets
   `current_system_id` from that stellar's system (falling back to
