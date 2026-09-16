@@ -1794,7 +1794,8 @@ void DrawSidePanels(SdlPlatform &platform,
   // description (0x004a6219 second half). "<Unknown>" until visited.
   // The game date right-aligned in the status bar (0x004a6219's date arm).
   {
-    const std::string date_text = NovaText_FormatDateString(state.date, true);
+    const std::string date_text = NovaText_FormatDateString(
+        state.date, true, state.date_prefix, state.date_suffix);
     const float date_w = static_cast<float>(font_cache.TextWidth(
         NovaFontFamily::kGeneva, 10.0F, kNovaFontStyleRegular, date_text));
     NovaText_Draw(platform,

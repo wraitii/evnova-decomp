@@ -65,6 +65,9 @@ struct PilotFile {
   std::int16_t active_weapon_bank_slot = 0;
   // The in-game calendar (block1+0x14/+0x16/+0x18 month/day/year).
   GameDate date{};
+  std::string date_prefix; // block2+0x5ede, bounded to 15 bytes
+  std::string date_suffix; // block2+0x5eee, bounded to 15 bytes
+  std::array<std::uint16_t, 3> ship_paint_rgb5{}; // block2+0x5dd8
   std::int16_t timed_action_counter = -1;
   float death_timer_active = -1.0F;
   float shield_points = 0.0F; // block1+0x10 as u16 (rounded; not read back)
@@ -112,6 +115,8 @@ struct PilotFile {
   std::array<std::uint8_t, 0x800> stellar_saved_bytes{}; // block1+0xdece
   std::array<std::int16_t, 0x800> stellar_present_ship_counts{}; // block2+6
   std::array<std::int16_t, 0x800> stellar_availability_rolls{};  // +0x2086
+  std::array<std::int16_t, 0x400> pers_present_flags{};          // +0x1006
+  std::array<std::int16_t, 0x400> pers_visible_flags{};          // +0x1806
   // Per-system mutable reinforcement retrigger delay (Ghidra SystemDef +0xC4),
   // block2+0x3d90.
   std::array<std::int16_t, GameState::kMaxSystems>
@@ -225,9 +230,8 @@ PilotFileDeserialize(std::span<const std::byte> bytes, PilotFile &out);
 // Save <nova_files_dir>/<pilot name>.plt from the live state. Mirrors
 // PilotFile_SaveGame (0x004c7db0) + PilotFile_SaveGameCore (0x004c7dd0).
 // jump_dest_stellar is the player's current jump/travel destination. Returns
-// false on I/O failure. Does not write the last-pilot marker file
-// (PilotFile_RecordLastPilotPath 0x004c7d40) -- TODO(decomp): wire it once the
-// marker file name (string-table id 0x82/4) is resolved.
+// false on I/O failure. Also writes the "Last Pilot" marker file in the same
+// directory (PilotFile_RecordLastPilotPath 0x004c7d40; STR# 0x82 entry 4).
 [[nodiscard]] bool
 PilotFileSaveGame(const std::filesystem::path &nova_files_dir,
                   const GameState &state,
@@ -247,5 +251,9 @@ PilotFileLoadSave(const std::filesystem::path &path, GameState &state);
 // Delete a pilot save file. Mirrors PilotFile_Delete (0x004cd040) — only
 // removes the file when it exists.
 void PilotFileDelete(const std::filesystem::path &path);
+
+// Ghidra 0x004ca120 PilotData_AutoresumeLastPilot. Finds the stock "Last
+// Pilot" marker in the Nova Files roots and loads the referenced .plt.
+[[nodiscard]] PilotLoadError PilotData_AutoresumeLastPilot(GameState &state);
 
 } // namespace game

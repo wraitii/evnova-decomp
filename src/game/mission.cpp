@@ -1880,15 +1880,15 @@ void Mission_FailMissionSlotQuick(GameState &state,
 }
 
 // Ghidra 0x00447d90 Mission_ResolveMisnSlot. Completes an auto-abort/goal
-// mission: resolve payload, optional daily rerolls, the auto-abort fuel
-// penalty, auto-abort pay, and slot teardown.
+// mission: on-abort payload (Bible OnAbort, +0x5e8), optional daily rerolls,
+// the auto-abort fuel penalty, auto-abort pay, and slot teardown.
 void Mission_ResolveMisnSlot(GameState &state,
                              std::int16_t mission_slot,
                              std::uint32_t now_ms) {
   const auto slot = static_cast<std::size_t>(mission_slot);
   ActiveMission &mission = state.active_missions[slot];
   Mission_RunMisnScriptPayload(
-      state, TextOf(mission.resolve_script_buffer_start), mission_slot);
+      state, TextOf(mission.on_abort_text), mission_slot);
   // On-resolve repeat count (Bible DatePostInc) re-runs the daily world
   // update (0x00466cb0) once per count, advancing the calendar.
   for (std::int16_t i = 0; i < mission.on_resolve_repeat_count; ++i) {
@@ -2411,7 +2411,8 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
       if (deadline.year != state.date.year ||
           deadline.month != state.date.month ||
           deadline.day != state.date.day) {
-        deadline_text = NovaText_FormatDateString(deadline, false);
+        deadline_text = NovaText_FormatDateString(
+            deadline, false, state.date_prefix, state.date_suffix);
       }
       ReplaceMissionToken(result, "<DL>", deadline_text);
     } else {
@@ -3250,45 +3251,51 @@ namespace {
 // STR# 0x89 month table and day suffixes (st/nd/rd by last digit, th
 // otherwise, 11-13 forced back to th).
 [[nodiscard]] std::string FormatDateString(const GameDate &date,
-                                           std::uint16_t month_entry) {
-  std::string out;
+                                           std::uint16_t month_entry,
+                                           std::string_view prefix,
+                                           std::string_view suffix) {
+  std::string out{prefix};
   if (const auto month = NovaHud_LoadStringEntry(0x89, month_entry)) {
     out += *month;
   }
   out += ' ';
   out += std::to_string(date.day);
-  std::uint16_t suffix = 0x1c; // "th"
+  std::uint16_t ordinal_suffix = 0x1c; // "th"
   const int digit = date.day % 10;
   if (digit == 1) {
-    suffix = 0x19;
+    ordinal_suffix = 0x19;
   } else if (digit == 2) {
-    suffix = 0x1a;
+    ordinal_suffix = 0x1a;
   } else if (digit == 3) {
-    suffix = 0x1b;
+    ordinal_suffix = 0x1b;
   }
   if (date.day > 10 && date.day < 14) {
-    suffix = 0x1c;
+    ordinal_suffix = 0x1c;
   }
-  if (const auto text = NovaHud_LoadStringEntry(0x89, suffix)) {
+  if (const auto text = NovaHud_LoadStringEntry(0x89, ordinal_suffix)) {
     out += *text;
   }
   out += ", ";
   out += std::to_string(date.year);
+  out += suffix;
   return out;
 }
 
 } // namespace
 
 std::string NovaText_FormatDateString(const GameDate &date,
-                                      bool abbreviated_month) {
+                                      bool abbreviated_month,
+                                      std::string_view prefix,
+                                      std::string_view suffix) {
   // The UI sites (BBS date 0x00441620, mission-info window, starmap status
   // bar) use the abbreviated month names (STR# 0x89 entries 13-24);
   // Stellar_FormatElapsedTravelTime (arrival message / <DL> token) uses the
   // full names (entries 1-12).
   return FormatDateString(date,
-                          static_cast<std::uint16_t>(abbreviated_month
-                                                         ? date.month + 12
-                                                         : date.month));
+                          static_cast<std::uint16_t>(
+                              abbreviated_month ? date.month + 12 : date.month),
+                          prefix,
+                          suffix);
 }
 
 // Ghidra 0x00426d10 Mission_ShowMissionShipAnnouncement.

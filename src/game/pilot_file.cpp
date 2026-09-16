@@ -2,6 +2,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "hud_overlay.hpp"
 #include "mission.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
@@ -30,6 +31,45 @@ constexpr std::int16_t kFleetBlockVersion = 300;
 // First u16 of a .prf-style prefs file (rejected by the .plt loader as
 // "wrong file type").
 constexpr std::int16_t kPrefsFileSignature = 0x6b;
+constexpr std::string_view kLastPilotMarkerName = "Last Pilot";
+
+[[nodiscard]] std::string ReadBoundedCString(std::span<const std::byte> bytes,
+                                             std::size_t offset,
+                                             std::size_t limit) {
+  std::string out;
+  for (std::size_t i = 0; i < limit; ++i) {
+    const char c = static_cast<char>(bytes[offset + i]);
+    if (c == '\0') {
+      break;
+    }
+    out.push_back(c);
+  }
+  return out;
+}
+
+void WriteBoundedCString(std::vector<std::byte> &bytes,
+                         std::size_t offset,
+                         std::size_t capacity,
+                         std::string_view value) {
+  const std::size_t count = std::min(value.size(), capacity - 1);
+  std::memcpy(bytes.data() + offset, value.data(), count);
+  bytes[offset + count] = std::byte{0};
+}
+
+[[nodiscard]] bool
+RecordLastPilotPath(const std::filesystem::path &marker_dir,
+                    const std::filesystem::path &pilot_path) {
+  const auto marker_path = marker_dir / kLastPilotMarkerName;
+  std::ofstream marker(marker_path, std::ios::binary | std::ios::trunc);
+  const std::string saved_path = pilot_path.string();
+  marker.write(saved_path.c_str(),
+               static_cast<std::streamsize>(saved_path.size() + 1));
+  if (!marker) {
+    NovaLog::Error("pilot marker: could not write '{}'", marker_path.string());
+    return false;
+  }
+  return true;
+}
 
 // Truncate toward zero, matching the original's x87 FIST + residual/sign
 // correction (0x004c7dd0 PilotFile_SaveGameCore), not round-to-nearest.
@@ -125,6 +165,9 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   state.player.current_system_id = pilot_file.current_system_id;
   state.player.active_weapon_bank_slot = pilot_file.active_weapon_bank_slot;
   state.date = pilot_file.date;
+  state.date_prefix = pilot_file.date_prefix;
+  state.date_suffix = pilot_file.date_suffix;
+  state.ship_paint_rgb5 = pilot_file.ship_paint_rgb5;
   state.player.timed_action_counter = pilot_file.timed_action_counter;
   state.player.death_timer_active = pilot_file.death_timer_active;
   state.player.shield_points = pilot_file.shield_points;
@@ -176,6 +219,20 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
   state.weapon_bank_secondary = pilot_file.weapon_bank_secondary;
   state.active_mission_runtime_flags = pilot_file.active_mission_runtime_flags;
   state.active_missions = pilot_file.active_missions;
+  const std::size_t pers_count = std::min(state.scenario.pers_defs.size(),
+                                          pilot_file.pers_present_flags.size());
+  for (std::size_t i = 0; i < pers_count; ++i) {
+    PersDef &pers = state.scenario.pers_defs[i];
+    if (pers.ai_behavior_code < 1) {
+      pers.present = false;
+    } else if (!pers.loaded_latch || pilot_file.pers_present_flags[i] == 0) {
+      pers.present = false;
+      pers.visible = false;
+    } else {
+      pers.present = true;
+      pers.visible = pilot_file.pers_visible_flags[i] != 0;
+    }
+  }
   const std::size_t stellar_count = std::min(
       state.scenario.stellars.size(), pilot_file.stellar_saved_bytes.size());
   for (std::size_t i = 0; i < stellar_count; ++i) {
@@ -272,6 +329,9 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.ship_class_id = state.player.ship_class_id;
   out.current_system_id = state.player.current_system_id;
   out.date = state.date;
+  out.date_prefix = state.date_prefix;
+  out.date_suffix = state.date_suffix;
+  out.ship_paint_rgb5 = state.ship_paint_rgb5;
   out.active_weapon_bank_slot = state.player.active_weapon_bank_slot;
   out.timed_action_counter = state.player.timed_action_counter;
   out.death_timer_active = state.player.death_timer_active;
@@ -316,6 +376,12 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.weapon_bank_secondary = state.weapon_bank_secondary;
   out.active_mission_runtime_flags = state.active_mission_runtime_flags;
   out.active_missions = state.active_missions;
+  const std::size_t pers_count =
+      std::min(state.scenario.pers_defs.size(), out.pers_present_flags.size());
+  for (std::size_t i = 0; i < pers_count; ++i) {
+    out.pers_present_flags[i] = state.scenario.pers_defs[i].present ? 1 : 0;
+    out.pers_visible_flags[i] = state.scenario.pers_defs[i].visible ? 1 : 0;
+  }
   out.reinforcement_retrigger_delay = state.reinforcement_retrigger_delay;
   out.target_category_command = state.target_category_command;
   out.escort_ship_class_ids.fill(-1);
@@ -551,6 +617,14 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
   WriteU16(block2, 0x02, pilot_file.strict_play ? 1 : 0);
   WriteU16(block2, 0x04, pilot_file.male ? 1 : 0);
   WriteU16(block2, 0x3086, pilot_file.intro_played ? 1 : 0);
+  for (std::size_t i = 0; i < pilot_file.pers_present_flags.size(); ++i) {
+    WriteU16(block2,
+             0x1006 + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.pers_present_flags[i]));
+    WriteU16(block2,
+             0x1806 + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.pers_visible_flags[i]));
+  }
   for (std::size_t i = 0; i < pilot_file.stellar_present_ship_counts.size();
        ++i) {
     WriteU16(
@@ -621,6 +695,11 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     std::memcpy(block2.data() + 0x5d98, pilot_file.nickname.data(), nick_len);
   }
   block2[0x5d98 + nick_len] = std::byte{0};
+  for (std::size_t i = 0; i < pilot_file.ship_paint_rgb5.size(); ++i) {
+    WriteU16(block2, 0x5dd8 + 2 * i, pilot_file.ship_paint_rgb5[i]);
+  }
+  WriteBoundedCString(block2, 0x5ede, 0x10, pilot_file.date_prefix);
+  WriteBoundedCString(block2, 0x5eee, 0x10, pilot_file.date_suffix);
 
   // File framing: [u32 block1 size][block1][u32 block2 size][block2]
   // [ship-name C-string] (FUN_004f22b0 / Stream_WriteLocked /
@@ -859,6 +938,12 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
     out.strict_play = ReadU16(block2, 0x02, big_endian) == 1;
     out.male = ReadU16(block2, 0x04, big_endian) == 1;
     out.intro_played = ReadU16(block2, 0x3086, big_endian) != 0;
+    for (std::size_t i = 0; i < out.pers_present_flags.size(); ++i) {
+      out.pers_present_flags[i] = static_cast<std::int16_t>(
+          ReadU16(block2, 0x1006 + 2 * i, big_endian));
+      out.pers_visible_flags[i] = static_cast<std::int16_t>(
+          ReadU16(block2, 0x1806 + 2 * i, big_endian));
+    }
     for (std::size_t i = 0; i < out.stellar_present_ship_counts.size(); ++i) {
       out.stellar_present_ship_counts[i] = static_cast<std::int16_t>(
           ReadU16(block2, 0x0006 + 2 * i, big_endian));
@@ -905,6 +990,11 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
           ReadU16(block2, 0x5d90 + 2 * i, big_endian));
       out.target_category_command[i] = std::max<std::int16_t>(saved, -1);
     }
+    for (std::size_t i = 0; i < out.ship_paint_rgb5.size(); ++i) {
+      out.ship_paint_rgb5[i] = ReadU16(block2, 0x5dd8 + 2 * i, big_endian);
+    }
+    out.date_prefix = ReadBoundedCString(block2, 0x5ede, 0x0f);
+    out.date_suffix = ReadBoundedCString(block2, 0x5eee, 0x0f);
     // TODO(decomp(0x004cb260)) skipped: compatibility divergence. Converted
     // pilots may carry a Pascal nickname independently of scalar byte order
     // (Archer (PC).plt is little-endian but still has a Pascal nickname).
@@ -963,7 +1053,7 @@ bool PilotFileSaveGame(const std::filesystem::path &nova_files_dir,
   }
   NovaLog::Debug(
       "pilot save: wrote {} bytes to '{}'", bytes.size(), path.string());
-  return true;
+  return RecordLastPilotPath(nova_files_dir, path);
 }
 
 PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
@@ -1117,6 +1207,7 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   }
 
   PilotFileApply(record, state);
+  static_cast<void>(RecordLastPilotPath(path.parent_path(), path));
 
   // Recreate the two saved player-fleet classes after the persistent state is
   // live. Invalid class rows are skipped and make the successful load report
@@ -1171,6 +1262,32 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
     state.active_mission_runtime_flags[i].deadline_year = deadline.year;
     state.active_mission_runtime_flags[i].deadline_month = deadline.month;
     state.active_mission_runtime_flags[i].deadline_day = deadline.day;
+    ActiveMission &mission = state.active_missions[i];
+    mission.mission_fleet_name.clear();
+    mission.mission_text_name_b.clear();
+    if (mission.special_ship_name_string_id > 0x7f &&
+        mission.special_ship_name_entry > 0) {
+      mission.mission_fleet_name =
+          NovaHud_LoadStringEntry(
+              static_cast<std::uint16_t>(mission.special_ship_name_string_id),
+              static_cast<std::uint16_t>(mission.special_ship_name_entry))
+              .value_or("")
+              .substr(0, 0x3e);
+    }
+    if (mission.random_text_string_id > 0x7f && mission.random_text_entry > 0) {
+      mission.mission_text_name_b =
+          NovaHud_LoadStringEntry(
+              static_cast<std::uint16_t>(mission.random_text_string_id),
+              static_cast<std::uint16_t>(mission.random_text_entry))
+              .value_or("")
+              .substr(0, 0x3e);
+    }
+    if ((mission.flags_primary & 0x10U) != 0U) {
+      mission.mission_ship_count_active = mission.mission_ship_count_max;
+    }
+    mission.rearm_roll_clock = static_cast<std::int16_t>(
+        std::uniform_int_distribution<int>{0x46, 0x8b}(state.rng));
+    mission.mission_fleet_metric_c = 0;
   }
   NovaOutfit_RecomputeOutfitDerivedState(state);
   const auto effective = Outfit_ComputePlayerEffectiveStats(state);
@@ -1252,6 +1369,29 @@ void PilotFileDelete(const std::filesystem::path &path) {
     std::error_code ec;
     std::filesystem::remove(path, ec);
   }
+}
+
+PilotLoadError PilotData_AutoresumeLastPilot(GameState &state) {
+  const auto marker =
+      NovaResource_LocateFile(std::string{kLastPilotMarkerName});
+  if (!marker) {
+    return PilotLoadError::kMissingOrEmptyFile;
+  }
+  std::ifstream file(*marker, std::ios::binary);
+  const std::string raw{std::istreambuf_iterator<char>(file),
+                        std::istreambuf_iterator<char>()};
+  if (raw.empty()) {
+    return PilotLoadError::kMissingOrEmptyFile;
+  }
+  const std::string saved_path(raw.c_str(), strnlen(raw.c_str(), raw.size()));
+  if (saved_path.empty()) {
+    return PilotLoadError::kMissingOrEmptyFile;
+  }
+  std::filesystem::path path{saved_path};
+  if (path.is_relative() && !PilotFileProbeExists(path)) {
+    path = marker->parent_path() / path;
+  }
+  return PilotFileLoadSave(path, state);
 }
 
 std::string PilotData_FindActivePilotName() {

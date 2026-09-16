@@ -250,7 +250,8 @@ void NovaHud_ShowLaunchDepartureMessage(GameState &state,
   // Stellar_FormatElapsedTravelTime shape: full month names (STR# 0x89
   // entries 1-12). The trailing chär/save-carried date suffix
   // (g_date_suffix, save block +0x5eee) is empty for stock pilots.
-  msg += NovaText_FormatDateString(state.date, false);
+  msg += NovaText_FormatDateString(
+      state.date, false, state.date_prefix, state.date_suffix);
   msg += ".";
   NovaHud_ShowOverlayMessage(state, msg, static_cast<std::uint64_t>(0xf0U));
   // The original re-arms the cached overlay (0x0045646e).

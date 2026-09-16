@@ -176,10 +176,13 @@ There is no mid-game reload path.
   (0x004cb260, incl. name-from-path and jump-dest system resolution),
   `PilotFileProbeExists` (0x004cd030), `PilotFileDelete` (0x004cd040),
   `PilotSave_DecodeBlock` transform (0x008725b0).
-- Not reconstructed: the last-pilot marker file (0x004c7d40 / 0x004ca120;
-  marker name string 0x82/4 unresolved), `PilotDebug_WritePilotLog`
-  (0x004ca2c0), and the block2 përs active/visible flags at
-  +0x1006/+0x1806. The block1 escort/fleet tables at +0xe6ce..+0xe8ce are now
+- The last-pilot marker (0x004c7d40 / 0x004ca120) is reconstructed as the
+  NUL-terminated pilot path in `<Nova Files>/Last Pilot` (STR# 0x82 entry 4),
+  written after save/load and consumed once after staged startup loading.
+  `PilotDebug_WritePilotLog` (0x004ca2c0) remains unported. The block2 përs
+  active/visible flags at +0x1006/+0x1806 are decoded, applied with the
+  original definition/AI gates, and saved. The block1 escort/fleet tables at
+  +0xe6ce..+0xe8ce are now
   decoded, encoded, collected from live player-affiliated ships, and restored
   through `ShipClass_SpawnEscortShipFromClass`. Per-stellar saved
   bytes, garrison counts and availability rolls, disaster/crön runtime
@@ -192,6 +195,12 @@ There is no mid-game reload path.
   reinforcement cooldown (block2+0x3d90), per-stellar engagement access with
   its live-strength fallback (block2+0x4d90), and the escort group-order
   codes (block2+0x5d90).
+
+The ship-paint RGB5 channels and date prefix/suffix are also restored and
+saved. Date rendering consumes the affixes at the same boundary as the
+original formatter. Active missions rebuild their two cached STR# display
+names, deadline, count latch, randomized rearm clock, and cleared transient
+metric after the raw records are loaded.
 
 The scenario-aware load pass also mirrors the original recovery work: it
 clears positive outfit, weapon-bank, and junk quantities whose definitions no
@@ -222,10 +231,10 @@ definition loss reports `kRepairsApplied` while retaining the usable pilot.
   values) — anti-piracy; likely differs from OG depending on build.
 - **Registry population at startup** (where the 0x63688a72 pilot entries come
   from so the new-game dialog lists pilots) — not located yet.
-- The two 15-byte strings (block2 `+0x5ede`/`+0x5eee`) remain unidentified;
-  `char` resource notes suggest they are the character template's
-  `DatePrefix`/`DateSuffix`. The `DAT_00733b4a/4c/4e` u16s at `+0x5dd8` are
-  the ship-paint 5-bit RGB color channels (paint rendering is not modelled).
+- The two 15-byte strings (block2 `+0x5ede`/`+0x5eee`) are the character
+  template's `DatePrefix`/`DateSuffix`. The `DAT_00733b4a/4c/4e` u16s at
+  `+0x5dd8` are the ship-paint 5-bit RGB color channels (paint rendering is
+  not modelled).
   Block1 `+0xb7be` is confirmed as the 10,000 Nova Control Bit bytes and is
   preserved exactly, including noncanonical nonzero values found in converted
   Mac pilots.

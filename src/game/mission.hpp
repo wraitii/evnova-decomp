@@ -342,8 +342,11 @@ void Mission_TickDailyWorldUpdate(GameState &state);
 // The HUD/UI sites use the abbreviated month names (entries 13-24, the
 // 0x00468450 shape); the <DL> mission token uses the full names (entries
 // 1-12, the 0x00468600 shape).
-[[nodiscard]] std::string NovaText_FormatDateString(const GameDate &date,
-                                                    bool abbreviated_month);
+[[nodiscard]] std::string
+NovaText_FormatDateString(const GameDate &date,
+                          bool abbreviated_month,
+                          std::string_view prefix = {},
+                          std::string_view suffix = {});
 
 // Ghidra 0x00426d10 Mission_ShowMissionShipAnnouncement. Plays the mission-
 // ship hail: transition-table cue 4, then the hail text -- first string of

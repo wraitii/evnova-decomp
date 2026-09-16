@@ -245,6 +245,7 @@ struct PersDef {
   // by the mission-list evaluator (0x0044830c block of Mission_Evaluate-
   // MissionLists 0x0043cf00) each time it runs.
   bool present = false;              // +0x620
+  bool visible = false;              // +0x621, persisted independently
   bool loaded_latch = false;         // +0x623
   bool is_available_runtime = false; // +0x622
 

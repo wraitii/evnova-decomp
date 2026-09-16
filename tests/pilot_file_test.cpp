@@ -51,6 +51,11 @@ using game::PilotLoadError;
   p.intro_played = true;
   p.strict_play = true;
   p.male = false;
+  p.date_prefix = "Before ";
+  p.date_suffix = " A.G.";
+  p.ship_paint_rgb5 = {3, 17, 29};
+  p.pers_present_flags[3] = 1;
+  p.pers_visible_flags[3] = 1;
   p.cargo_bins = {3, 0, 5, 1, 0, 2};
   p.system_discovery[0] = 2;
   p.system_discovery[0x7ff] = 1;
@@ -118,6 +123,11 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.intro_played);
   CHECK(out.strict_play);
   CHECK_FALSE(out.male);
+  CHECK(out.date_prefix == "Before ");
+  CHECK(out.date_suffix == " A.G.");
+  CHECK(out.ship_paint_rgb5 == p.ship_paint_rgb5);
+  CHECK(out.pers_present_flags[3] == 1);
+  CHECK(out.pers_visible_flags[3] == 1);
   CHECK(out.cargo_bins == p.cargo_bins);
   CHECK(out.system_discovery == p.system_discovery);
   CHECK(out.system_reputation == p.system_reputation);
@@ -176,6 +186,9 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   state.scenario.cron_events[5].present = true;
   state.scenario.ranks.resize(7);
   state.scenario.ranks[6].defined = true;
+  state.scenario.pers_defs.resize(4);
+  state.scenario.pers_defs[3].ai_behavior_code = 2;
+  state.scenario.pers_defs[3].loaded_latch = true;
 
   PilotFileApply(pilot, state);
 
@@ -206,6 +219,11 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(state.cron_event_states[5].duration_counter == 9);
   CHECK(state.cron_event_states[5].holdoff_counter == -1);
   CHECK(state.scenario.ranks[6].active);
+  CHECK(state.scenario.pers_defs[3].present);
+  CHECK(state.scenario.pers_defs[3].visible);
+  CHECK(state.date_prefix == "Before ");
+  CHECK(state.date_suffix == " A.G.");
+  CHECK(state.ship_paint_rgb5 == pilot.ship_paint_rgb5);
 
   const PilotFile collected = PilotFileCollectFromState(state);
   CHECK(collected.system_discovery[0] == 2);
@@ -222,6 +240,8 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(collected.disaster_days_remaining[3] == 12);
   CHECK(collected.cron_duration_counters[5] == 9);
   CHECK(collected.rank_active_flags[6] == 1);
+  CHECK(collected.pers_present_flags[3] == 1);
+  CHECK(collected.pers_visible_flags[3] == 1);
 }
 
 TEST_CASE("PilotFile normalizes invalid negative escort commands") {
@@ -261,9 +281,25 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   saved_state.player_combat_rating_points = p.player_combat_rating_points;
   saved_state.inventory.outfit_owned_count[0] = 1;
   saved_state.weapon_bank_ammo[5 * 100] = 7;
+  saved_state.active_mission_runtime_flags[0].is_active = true;
+  saved_state.active_missions[0].special_ship_name_string_id = 0x89;
+  saved_state.active_missions[0].special_ship_name_entry = 1;
+  saved_state.active_missions[0].random_text_string_id = 0x89;
+  saved_state.active_missions[0].random_text_entry = 2;
+  saved_state.active_missions[0].flags_primary = 0x10;
+  saved_state.active_missions[0].mission_ship_count_max = 7;
   REQUIRE(PilotFileProbeExists(path) == false);
   REQUIRE(PilotFileSaveGame(dir, saved_state, p.jump_dest_stellar));
   CHECK(PilotFileProbeExists(path) == true);
+  const auto marker_path = dir / "Last Pilot";
+  REQUIRE(std::filesystem::is_regular_file(marker_path));
+  {
+    std::ifstream marker(marker_path, std::ios::binary);
+    const std::string marker_value{std::istreambuf_iterator<char>(marker),
+                                   std::istreambuf_iterator<char>()};
+    REQUIRE_FALSE(marker_value.empty());
+    CHECK(std::string_view(marker_value.c_str()) == path.string());
+  }
 
   game::GameState loaded_state;
   const auto err = PilotFileLoadSave(path, loaded_state);
@@ -278,8 +314,15 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   CHECK(loaded_state.player.fuel_points == 77.0F);
   CHECK(loaded_state.inventory.outfit_owned_count[0] == 1);
   CHECK(loaded_state.weapon_bank_ammo[5 * 100] == 7);
+  CHECK_FALSE(loaded_state.active_missions[0].mission_fleet_name.empty());
+  CHECK_FALSE(loaded_state.active_missions[0].mission_text_name_b.empty());
+  CHECK(loaded_state.active_missions[0].mission_ship_count_active == 7);
+  CHECK(loaded_state.active_missions[0].mission_fleet_metric_c == 0);
+  CHECK(loaded_state.active_missions[0].rearm_roll_clock >= 0x46);
+  CHECK(loaded_state.active_missions[0].rearm_roll_clock <= 0x8b);
 
   PilotFileDelete(path);
+  std::filesystem::remove(marker_path);
   CHECK(PilotFileProbeExists(path) == false);
 }
 
