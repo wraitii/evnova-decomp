@@ -990,7 +990,8 @@ struct MissionInfoLayout {
 // DLOG 0x3f4 (471x155, DITL 0x3f4): entry 1 Done button, entry 2 native list,
 // entry 3 heading, entry 4 description panel, entry 5 Abort button, entry 7
 // date. Entry 6 (item 5) sits offscreen in this dialog and is unused.
-[[nodiscard]] std::optional<MissionInfoLayout> LayoutMissionInfo() {
+[[nodiscard]] std::optional<MissionInfoLayout>
+LayoutMissionInfo(const SdlPlatform &platform) {
   const auto definition = NovaResource_LoadDialogDefinition(0x3f4);
   const auto items =
       definition ? NovaResource_LoadDialogItems(definition->dialog_item_list_id)
@@ -1001,10 +1002,12 @@ struct MissionInfoLayout {
   }
   const float width = static_cast<float>(definition->right - definition->left);
   const float height = static_cast<float>(definition->bottom - definition->top);
-  // The window draws in the centred 640x480 canvas (SetCenteredPlayfield,
-  // like the boarding window), so centring uses the fixed canvas size.
-  const SDL_FPoint origin{std::truncf((640.0F - width) * 0.5F),
-                          std::truncf((480.0F - height) * 0.5F)};
+  // The window draws with SetFullscreenPlayfield like the other probe-
+  // publishing modals (mission BBS/offer), so its controls live in window-
+  // point space and the probe can click them by name.
+  const SDL_FPoint output = platform.logical_playfield_size();
+  const SDL_FPoint origin{(output.x - width) * 0.5F,
+                          (output.y - height) * 0.5F};
   MissionInfoLayout layout;
   layout.frame = {origin.x, origin.y, width, height};
   const auto item_rect = [origin](const NovaDialogItem &item) {
@@ -1148,7 +1151,7 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
     }
   };
 
-  const auto layout = LayoutMissionInfo();
+  const auto layout = LayoutMissionInfo(platform);
   if (!layout) {
     return;
   }
@@ -1203,7 +1206,7 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
     // DLOG over the single game surface. The flight sim is paused, so this
     // redraws the same world each frame.
     view.DrawGameFrame(platform, state, hud);
-    platform.SetCenteredPlayfield();
+    platform.SetFullscreenPlayfield();
     // DrawContext_BlitImageToRect(DAT_007742e4, UiWindow_GetRect(...)).
     if (frame != nullptr) {
       SDL_RenderTexture(renderer, frame->get(), nullptr, &layout->frame);

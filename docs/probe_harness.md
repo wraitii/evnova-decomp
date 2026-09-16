@@ -62,8 +62,12 @@ and run through the standard-library runner:
 python3 tools/scenario_runner.py tests/scenarios/tutorial_first_leg.toml
 ```
 
-Steps use observable waits plus input-only `click`, `key`, and `command`
-actions; an explicit `quit` step stops the game. `validate_state` performs
+Steps use observable waits plus input-only `click`, `key`, `hold`, and
+`command` actions; an explicit `quit` step stops the game. `key` taps inject
+an SDL event (the modal-loop channel), while `hold` sets/releases virtual held
+keys (the flight channel) and is required for held flight commands such as the
+missions panel (key `I`), which read `PollFlightInput` state rather than SDL
+events. `validate_state` performs
 immediate exact (`expect`) and full-regex
 (`matches`) assertions on dotted probe paths; numeric path components index
 arrays. `screenshot` writes BMP checkpoints below `build/scenario-results/`.

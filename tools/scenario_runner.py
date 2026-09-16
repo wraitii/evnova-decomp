@@ -189,6 +189,7 @@ def run_step(
         "validate_state": {"action", "expect", "matches"},
         "click": {"action", "element", "timeout_ms"},
         "key": {"action", "key"},
+        "hold": {"action", "keys", "down"},
         "command": {"action", "cmd", "target", "ship_id", "timeout_ms", "enabled", "speed_multiplier", "suppress_audio"},
         "screenshot": {"action", "name"},
         "quit": {"action"},
@@ -217,6 +218,18 @@ def run_step(
         )
     elif action == "key":
         probe.post("/probe/key", {"key": step["key"]})
+    elif action == "hold":
+        keys = step.get("keys")
+        down = step.get("down")
+        if (
+            not isinstance(keys, list)
+            or not keys
+            or not all(isinstance(key, str) for key in keys)
+        ):
+            raise ScenarioError("hold requires a non-empty keys array")
+        if not isinstance(down, bool):
+            raise ScenarioError("hold requires down = true or false")
+        probe.post("/probe/hold", {"keys": keys, "down": down})
     elif action == "command":
         probe.post(
             "/probe/command", {key: value for key, value in step.items() if key != "action"}

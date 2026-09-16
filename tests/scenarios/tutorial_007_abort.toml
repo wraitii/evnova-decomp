@@ -1,0 +1,899 @@
+version = 1
+name = "tutorial-007-abort"
+
+[defaults]
+timeout_ms = 30000
+
+# Create a pilot through the normal dialogs, accepting their default values.
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu" }
+
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = 100
+suppress_audio = true
+
+[[steps]]
+action = "click"
+element = "new_pilot"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3102" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3001" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu", "state.game_active" = true }
+
+[[steps]]
+action = "click"
+element = "enter_ship"
+
+# Land where the fresh pilot starts and accept Barry's first tutorial leg.
+[[steps]]
+action = "wait"
+expect = { "state.system" = "Tichel" }
+
+[[steps]]
+action = "validate_state"
+expect = { "state.game_active" = true, "state.system" = "Tichel", "state.ship_class" = "Shuttle", "state.active_missions" = 0 }
+matches = { "state.pilot" = ".+" }
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Viking"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "mission_offer" }
+timeout_ms = 180000
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 123 }
+
+[[steps]]
+action = "validate_state"
+expect = { "missions.missions.0.template_id" = 123, "missions.missions.0.return_stellar" = "Earth", "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# The controller moves out of the center gate; gameplay owns the jump itself.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "state.active_missions" = 1, "travel.engaging" = false, "travel.hyperspace_mode" = false }
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "missions.missions.0.template_id" = 123, "missions.missions.0.objective_complete" = true, "missions.missions.0.carrying_resources" = false, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "screenshot"
+name = "earth-arrival"
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "state.active_missions" = 0, "missions.missions" = [] }
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+# Barry's next tutorial offer is triggered by entering the Trade Center.
+[[steps]]
+action = "click"
+element = "trade_center"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_offer" }
+
+[[steps]]
+action = "screenshot"
+name = "trade-tutorial-offer"
+
+# Tutorial 002: the Trade Center's offer teaches buying medical supplies, but
+# its zero-cargo mission record advances solely when we land at Port Kane.
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 502, "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "trade_center" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# Port Kane is in Kania, reached from Sol through Tichel.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tichel"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tichel" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Kania"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Kania" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Port Kane"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Kania", "state.active_missions" = 1, "missions.missions.0.template_id" = 502, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+# Tutorial 003 is another Trade Center offer at Port Kane.
+[[steps]]
+action = "click"
+element = "trade_center"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_offer" }
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 503, "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "trade_center" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# New England (Wolf 359) is reached via Tichel and Sol.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tichel"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tichel" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Wolf 359"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Wolf 359" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "New England"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Wolf 359", "state.active_missions" = 1, "missions.missions.0.template_id" = 503, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+# Tutorial 004 returns the pilot to Earth. It has no initial briefing reader.
+[[steps]]
+action = "click"
+element = "trade_center"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_offer" }
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 504, "ui.window" = "trade_center" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "state.active_missions" = 1, "missions.missions.0.template_id" = 504, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+[[steps]]
+action = "screenshot"
+name = "trade-tutorial-complete"
+
+# Tutorial 005 is offered when Barry sends the pilot into Earth's outfitter.
+[[steps]]
+action = "click"
+element = "outfitter"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_offer" }
+
+[[steps]]
+action = "screenshot"
+name = "outfitter-tutorial-offer"
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 505, "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "outfitter" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# Rautherion is reached from Sol through Nesre Primus and Arcturus.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Nesre Primus"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Nesre Primus" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Arcturus"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Arcturus" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Rautherion"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Rautherion" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Rauther"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Rautherion", "state.active_missions" = 1, "missions.missions.0.template_id" = 505, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+[[steps]]
+action = "screenshot"
+name = "outfitter-tutorial-complete"
+
+# Tutorial 006 begins in Rauther's bar and arms a silent companion mission for
+# the derelict Viper used as target practice.
+[[steps]]
+action = "click"
+element = "bar"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_offer" }
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 626, "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "bar", "state.active_missions" = 2 }
+
+[[steps]]
+action = "screenshot"
+name = "combat-tutorial-handoff"
+
+[[steps]]
+action = "click"
+element = "leave"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 2 }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "wait"
+expect = { "state.system" = "Rautherion", "state.active_missions" = 2 }
+
+[[steps]]
+action = "screenshot"
+name = "combat-tutorial-start"
+
+# Tutorial 006's objective is the derelict Pirate Viper Barry leaves in orbit:
+# the flight controller cycles to the matching ship, closes to weapon range and
+# fires until it is destroyed.
+[[steps]]
+action = "command"
+cmd = "destroy_ship"
+target = "Pirate Viper"
+timeout_ms = 240000
+
+# Temporary slowdown until we fix our logic.
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = 2.0
+suppress_audio = true
+
+# Confirm the new goal actually installed before waiting on its completion;
+# the previous land_at status is still "complete" and would match instantly.
+[[steps]]
+action = "wait"
+expect = { "automation.goal" = "destroy", "automation.target" = "Pirate Viper" }
+timeout_ms = 5000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Rautherion" }
+timeout_ms = 240000
+
+[[steps]]
+action = "screenshot"
+name = "combat-tutorial-viper-destroyed"
+
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = 100.0
+suppress_audio = true
+
+# Tutorial 006 resolves at its return stellar, Viking (in Tichel); the forward
+# route was Sol -> Nesre Primus -> Arcturus -> Rautherion, so reverse it and
+# land to take the success debrief and complete mïsn 754/755.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Arcturus"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Arcturus" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Nesre Primus"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Nesre Primus" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+# The return leg is long enough to run the tank dry; top up at Earth before
+# the final Tichel hop.
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Tichel"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Tichel" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Viking"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Tichel", "missions.missions.0.template_id" = 626, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-006-complete"
+
+# Tutorial 007 is offered from Viking's shipyard (AvailLoc 5). Barry asks the
+# pilot to return to Earth after the combat lesson.
+[[steps]]
+action = "click"
+element = "shipyard"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_offer" }
+
+[[steps]]
+action = "screenshot"
+name = "shipyard-tutorial-offer"
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 628, "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "shipyard" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 1 }
+
+[[steps]]
+action = "validate_state"
+expect = { "missions.missions.0.template_id" = 628, "missions.missions.0.return_stellar" = "Earth", "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# Abort Tutorial 007 instead of flying Barry back to Earth. The missions panel
+# is gameplay command 0x28 (default key I); it must be driven through the
+# flight input channel, where PollFlightInput reads held key state. A
+# /probe/key tap only injects an SDL event and cannot open it, so use hold.
+[[steps]]
+action = "hold"
+keys = ["I"]
+down = true
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_info" }
+
+[[steps]]
+action = "hold"
+keys = ["I"]
+down = false
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_info", "missions.missions.0.template_id" = 628 }
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-007-abort-panel"
+
+[[steps]]
+action = "click"
+element = "abort"
+
+# Mïsn 756's on-abort payload is "b9215 S758": it starts the abort-specific
+# Tutorial 009 (mïsn 758, template 630) immediately, and the panel stays open
+# on the newly started mission.
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_info", "missions.missions.0.template_id" = 630 }
+
+[[steps]]
+action = "validate_state"
+expect = { "state.active_missions" = 1, "missions.missions.0.template_id" = 630, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-007-aborted"
+
+[[steps]]
+action = "click"
+element = "done"
+
+# Tutorial 009 is a return mission to Dunroamin (Journey's End), reached from
+# Tichel through Sol, Kerella and Procyon.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+# The abort route is four jumps long (Tichel -> Sol -> Kerella -> Procyon ->
+# Journey's End), more than a full tank. Stop at Earth for fuel before the
+# three-jump run to Journey's End.
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Kerella"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Kerella" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Procyon"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Procyon" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Journey's End"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Journey's End" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Dunroamin"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Journey's End", "missions.missions.0.template_id" = 630 }
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-009-dunroamin"
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "validate_state"
+expect = { "state.active_missions" = 0, "missions.missions" = [] }
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-009-complete"
+
+[[steps]]
+action = "quit"
