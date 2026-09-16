@@ -1127,7 +1127,12 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     }
     platform.PublishProbeUi("spaceport", std::move(probe_controls));
   };
-  publish_probe_controls();
+  // Deliberately do not publish here. The probe surface is only truthful once
+  // the input loop below owns the screen: the AvailLoc-3 offer pass and the
+  // mission debrief readers between this point and the loop publish their own
+  // modals and consume input. Publishing early let a harness observe
+  // "spaceport" and fire a click that the offer/reader then swallowed, so the
+  // dock looked open while the click never reached it.
 
   NovaLog::Todo(
       "docked screen geometry (panels, title band, buttons) is laid out from "

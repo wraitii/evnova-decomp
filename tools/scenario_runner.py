@@ -19,6 +19,19 @@ class ScenarioError(RuntimeError):
     pass
 
 
+class StepFailure(ScenarioError):
+    """A step error whose diagnostics were captured under its own label.
+
+    Raised by the innermost ``run_steps`` so an enclosing ``repeat`` does not
+    overwrite the failing nested step's diagnostics with its own label.
+    """
+
+    def __init__(self, label: str, error: Exception) -> None:
+        super().__init__(f"step {label}: {error}")
+        self.label = label
+        self.error = error
+
+
 class Probe:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
@@ -69,6 +82,8 @@ def observations(probe: Probe, expected: dict[str, object]) -> dict[str, object]
         result["travel"] = probe.get("/probe/state?query=travel")
     if "missions" in roots:
         result["missions"] = probe.get("/probe/state?query=missions")
+    if "cargo" in roots:
+        result["cargo"] = probe.get("/probe/state?query=cargo")
     if "automation" in roots:
         result["automation"] = probe.get("/probe/automation")
     unknown = roots - result.keys()
@@ -155,9 +170,9 @@ def click_when_available(probe: Probe, element: object, timeout_ms: int) -> None
     raise ScenarioError(f"timed out waiting to click UI element {element!r}")
 
 
-def capture_diagnostics(probe: Probe, directory: Path, step_number: int) -> None:
+def capture_diagnostics(probe: Probe, directory: Path, step_label: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    snapshot: dict[str, object] = {"failed_step": step_number}
+    snapshot: dict[str, object] = {"failed_step": step_label}
     endpoints = {
         "ui": "/probe/ui",
         "state": "/probe/state?query=summary",
@@ -180,8 +195,33 @@ def capture_diagnostics(probe: Probe, directory: Path, step_number: int) -> None
         (directory / "screenshot-error.txt").write_text(str(error), encoding="utf-8")
 
 
+def run_steps(
+    probe: Probe,
+    steps: list[object],
+    default_timeout_ms: int,
+    artifacts: Path,
+    prefix: str = "",
+) -> None:
+    for index, step in enumerate(steps, 1):
+        label = f"{prefix}.{index}" if prefix else str(index)
+        try:
+            if not isinstance(step, dict):
+                raise ScenarioError(f"step {label} is not a table")
+            print(f"[{label}] {step.get('action', '<missing>')}", flush=True)
+            run_step(probe, step, default_timeout_ms, artifacts, label)
+        except StepFailure:
+            raise
+        except Exception as error:
+            capture_diagnostics(probe, artifacts, label)
+            raise StepFailure(label, error) from error
+
+
 def run_step(
-    probe: Probe, step: dict[str, object], default_timeout_ms: int, artifacts: Path
+    probe: Probe,
+    step: dict[str, object],
+    default_timeout_ms: int,
+    artifacts: Path,
+    step_label: str,
 ) -> None:
     action = step.get("action")
     allowed = {
@@ -190,8 +230,9 @@ def run_step(
         "click": {"action", "element", "timeout_ms"},
         "key": {"action", "key"},
         "hold": {"action", "keys", "down"},
-        "command": {"action", "cmd", "target", "ship_id", "timeout_ms", "enabled", "speed_multiplier", "suppress_audio"},
+        "command": {"action", "cmd", "target", "ship_id", "allow_missing", "commodity", "side", "timeout_ms", "enabled", "speed_multiplier", "suppress_audio"},
         "screenshot": {"action", "name"},
+        "repeat": {"action", "count", "steps"},
         "quit": {"action"},
     }
     if action not in allowed:
@@ -240,6 +281,22 @@ def run_step(
             raise ScenarioError("screenshot name must not contain a directory")
         artifacts.mkdir(parents=True, exist_ok=True)
         (artifacts / f"{name}.bmp").write_bytes(probe.screenshot())
+    elif action == "repeat":
+        count = step.get("count")
+        nested = step.get("steps")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ScenarioError("repeat requires a non-negative integer count")
+        if not isinstance(nested, list) or not nested:
+            raise ScenarioError("repeat requires a non-empty steps array")
+        for iteration in range(1, count + 1):
+            print(f"[{step_label}] repeat {iteration}/{count}", flush=True)
+            run_steps(
+                probe,
+                nested,
+                default_timeout_ms,
+                artifacts,
+                f"{step_label}.{iteration}",
+            )
     elif action == "quit":
         probe.post("/probe/command", {"cmd": "quit"})
 
@@ -267,15 +324,7 @@ def main() -> int:
         defaults = document.get("defaults", {})
         timeout_ms = int(defaults.get("timeout_ms", 30_000))
         artifact_dir = args.artifacts / name
-        for index, step in enumerate(steps, 1):
-            if not isinstance(step, dict):
-                raise ScenarioError(f"step {index} is not a table")
-            print(f"[{index}/{len(steps)}] {step.get('action', '<missing>')}", flush=True)
-            try:
-                run_step(probe, step, timeout_ms, artifact_dir)
-            except Exception:
-                capture_diagnostics(probe, artifact_dir, index)
-                raise
+        run_steps(probe, steps, timeout_ms, artifact_dir)
         print(f"scenario {name!r} passed")
         return 0
     except (OSError, tomllib.TOMLDecodeError, urllib.error.URLError, ScenarioError, KeyError) as error:

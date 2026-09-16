@@ -492,14 +492,27 @@ RunTradeCenterDialog(SdlPlatform &platform,
     if (!layout) {
       return LandedExit::kServiceComplete;
     }
-    platform.PublishProbeUi("trade_center",
-                            {{"window", layout->frame},
-                             // The original's STR# caption is "Done". Keep
-                             // the older semantic alias for existing probes.
-                             {"done", layout->leave},
-                             {"leave", layout->leave},
-                             {"buy", layout->buy},
-                             {"sell", layout->sell}});
+    // Publish the commodity rows as named rects (for `click`) and as
+    // label/value items (for price assertions). Rows stay index-addressable
+    // even when their price is 0.
+    std::vector<ProbeNamedRect> probe_controls{
+        {"window", layout->frame},
+        // The original's STR# caption is "Done". Keep the older semantic
+        // alias for existing probes.
+        {"done", layout->leave},
+        {"leave", layout->leave},
+        {"buy", layout->buy},
+        {"sell", layout->sell}};
+    for (std::size_t i = 0; i < kTradeCenterRowCount; ++i) {
+      ProbeNamedRect row;
+      row.name = "trade.row." + std::to_string(i);
+      row.rect = layout->rows[i];
+      row.has_value = true;
+      row.label = NovaTradeCenter_RowName(state, session, static_cast<int>(i));
+      row.value = session.rows[i].price;
+      probe_controls.push_back(std::move(row));
+    }
+    platform.PublishProbeUiItems("trade_center", std::move(probe_controls));
     DrawTradeCenterScreen(platform,
                           font_cache,
                           button_art,

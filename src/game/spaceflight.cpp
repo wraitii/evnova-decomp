@@ -19,6 +19,7 @@
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "negotiation_dialog.hpp"
+#include "nova_font.hpp"
 #include "outfit.hpp"
 #include "player_info_window.hpp"
 #include "radar_panel.hpp"
@@ -1537,7 +1538,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
             request->target,
             now_ms,
             request->timeout_ms,
-            static_cast<std::int16_t>(request->ship_id));
+            static_cast<std::int16_t>(request->ship_id),
+            request->allow_missing);
         break;
       case ProbeAutomationRequest::Kind::kCancel:
         automation.Cancel();
@@ -1583,10 +1585,22 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       return "failed";
     }();
-    const auto probe_json_escape = [](std::string value) {
+    // A request accepted by the probe but not yet consumed by the flight loop
+    // leaves the controller on the previous goal. Suppress a stale "complete"
+    // so a harness waiting on it cannot match the goal that just finished and
+    // race ahead of the queued one.
+    const char *published_phase =
+        platform.probe().HasPendingAutomationRequest() &&
+                automation_status.phase == FlightAutomationPhase::kComplete
+            ? "select"
+            : phase_name;
+    const auto probe_json_escape = [](std::string_view value) {
+      // JSON must be valid UTF-8; the target is probe-authored UTF-8 while the
+      // detail may embed raw MacRoman game strings.
+      const std::string encoded = NovaText_EncodeUtf8(value);
       std::string escaped;
-      escaped.reserve(value.size());
-      for (const char c : value) {
+      escaped.reserve(encoded.size());
+      for (const char c : encoded) {
         if (c == '"' || c == '\\') {
           escaped.push_back('\\');
         }
@@ -1596,7 +1610,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
     };
     platform.probe().PublishAutomationStatus(
         std::string{"{\"goal\":\""} + goal_name + "\",\"phase\":\"" +
-        phase_name + "\",\"target\":\"" +
+        published_phase + "\",\"target\":\"" +
         probe_json_escape(automation_status.target) + "\",\"detail\":\"" +
         probe_json_escape(automation_status.detail) + "\"}");
     // Escape/'q' are latched by PollFlightInput (it owns the SDL event drain

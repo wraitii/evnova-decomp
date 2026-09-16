@@ -273,9 +273,20 @@ public:
     std::vector<ProbeNamedRect> named;
     named.reserve(rects.size());
     for (auto &entry : rects) {
-      named.push_back({std::move(entry.first), entry.second});
+      ProbeNamedRect named_entry;
+      named_entry.name = std::move(entry.first);
+      named_entry.rect = entry.second;
+      named.push_back(std::move(named_entry));
     }
     probe_.PublishUi(std::move(window_name), std::move(named));
+  }
+
+  // Rich variant for list rows: entries marked `has_value` also surface in
+  // /probe/ui's "items" array with their label and numeric payload (e.g. a
+  // trade center commodity row's name and price).
+  void PublishProbeUiItems(std::string window_name,
+                           std::vector<ProbeNamedRect> entries) {
+    probe_.PublishUi(std::move(window_name), std::move(entries));
   }
 
   void ClearProbeUi() { probe_.ClearUi(); }

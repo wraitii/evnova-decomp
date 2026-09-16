@@ -25,12 +25,23 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // One named control rect published by the active modal (see PublishUi).
 struct ProbeNamedRect {
   std::string name;
   SDL_FRect rect{};
+  // Optional list-row payload surfaced in /probe/ui's "items" array (e.g. a
+  // commodity row's label and price). Plain controls leave `has_value` false.
+  bool has_value = false;
+  std::string label;
+  std::int32_t value = 0;
+
+  ProbeNamedRect() = default;
+
+  ProbeNamedRect(std::string name_in, SDL_FRect rect_in)
+      : name(std::move(name_in)), rect(rect_in) {}
 };
 
 struct ProbeAutomationRequest {
@@ -45,6 +56,9 @@ struct ProbeAutomationRequest {
   // Optional explicit ship identifier for kDestroyShip (slot or instance id);
   // -1 when the target name is the only identity.
   std::int32_t ship_id = -1;
+  // kDestroyShip: complete instead of failing when no matching ship exists
+  // (the target was already destroyed by another ship).
+  bool allow_missing = false;
 };
 
 class ProbeServer {
@@ -84,6 +98,10 @@ public:
                                                 bool &suppress_audio);
   [[nodiscard]] std::optional<ProbeAutomationRequest>
   ConsumeAutomationRequest();
+  // True while a goal request has been accepted but not yet picked up by the
+  // flight loop. Callers publishing the controller status use this to avoid
+  // reporting a stale "complete" for the previous goal.
+  [[nodiscard]] bool HasPendingAutomationRequest();
   void PublishAutomationStatus(std::string json);
   void AutomationObservedDocked();
   [[nodiscard]] bool ConsumeAutomationDocked();
@@ -127,6 +145,9 @@ private:
   // Submits a main-thread job and waits (bounded) for its string result.
   std::string SubmitJob(const std::function<std::string()> &work,
                         bool &timed_out);
+  // Enqueues a synthetic motion + left button-down at a window point (the
+  // same pair a real click produces; see /probe/click).
+  void InjectClick(float x, float y);
   // Executes every queued job; main thread only (holds sync_).
   void RunJobsLocked();
 

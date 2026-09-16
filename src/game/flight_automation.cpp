@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 
 namespace game {
@@ -177,6 +178,26 @@ FlightAutomationController::ResolveStellar(const GameState &state,
       static_cast<std::int16_t>(state.player.current_system_id + 0x80));
   if (!system)
     return std::nullopt;
+  // A pure-decimal target is a stellar resource id, matching the destroy_ship
+  // identifier fallback. This is the reliable way to name a stellar whose
+  // MacRoman resource name cannot round-trip through UTF-8 (e.g. Kinik\x8e,
+  // resource 0xC9). The id must still be one of the system's nav points.
+  std::int32_t numeric = 0;
+  if (!name.empty()) {
+    const auto parsed =
+        std::from_chars(name.data(), name.data() + name.size(), numeric);
+    if (parsed.ec == std::errc{} && parsed.ptr == name.data() + name.size()) {
+      if (numeric < 0x80 || numeric > 0xFFFF) {
+        return std::nullopt;
+      }
+      const auto id = static_cast<std::int16_t>(numeric);
+      if (std::find(system->nav_defs.begin(), system->nav_defs.end(), id) ==
+          system->nav_defs.end()) {
+        return std::nullopt;
+      }
+      return id;
+    }
+  }
   const std::string folded = Fold(name);
   std::optional<std::int16_t> found;
   for (const std::int16_t id : system->nav_defs) {
@@ -256,13 +277,15 @@ bool FlightAutomationController::DestroyShip(const GameState &state,
                                              std::string name,
                                              std::uint64_t now_ms,
                                              std::uint64_t timeout_ms,
-                                             std::int16_t ship_id) {
+                                             std::int16_t ship_id,
+                                             bool allow_missing) {
   status_ = {FlightAutomationGoal::kDestroy,
              FlightAutomationPhase::kSelect,
              std::move(name),
              {}};
   target_id_ = -1;
   target_ship_id_ = ship_id;
+  destroy_allow_missing_ = allow_missing;
   if (target_ship_id_ < 0) {
     target_ship_id_ = ParseShipId(status_.target);
   }
@@ -272,8 +295,14 @@ bool FlightAutomationController::DestroyShip(const GameState &state,
   cycle_pass_ = 0;
   cycle_taps_left_ = kCycleTapsPerPass;
   // Fail fast when nothing in the system matches: cycling could only exhaust
-  // both halves and time out.
+  // both halves and time out. Probe scenarios may instead opt into treating an
+  // already-destroyed target as success (e.g. another ship got the kill).
   if (!FindShipSlot(state, Fold(status_.target), target_ship_id_)) {
+    if (destroy_allow_missing_) {
+      status_.phase = FlightAutomationPhase::kComplete;
+      status_.detail = "target already gone";
+      return true;
+    }
     Fail("no ship matching target in system");
     return false;
   }
@@ -527,6 +556,15 @@ void FlightAutomationController::TickDestroy(const GameState &state,
                                              FlightInput &input,
                                              float elapsed_ticks) {
   const std::string folded = Fold(status_.target);
+  // An already-vanished target (destroyed by another AI before the cycle
+  // reached it) satisfies the goal in allow-missing mode instead of leaving
+  // the scenario cycling for a ship that is no longer there.
+  if (target_id_ < 0 && destroy_allow_missing_ &&
+      !FindShipSlot(state, folded, target_ship_id_)) {
+    status_.phase = FlightAutomationPhase::kComplete;
+    status_.detail = "target gone";
+    return;
+  }
   if (target_id_ < 0) {
     // Lock immediately when the player already holds a matching target; this
     // also catches the frame after a successful cycle tap.

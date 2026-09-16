@@ -31,6 +31,12 @@ TEST_CASE(
   GameState state = AutomationState();
   CHECK(FlightAutomationController::ResolveStellar(state, "eArTh") == 0x80);
   CHECK_FALSE(FlightAutomationController::ResolveStellar(state, "Ear"));
+  // Pure-decimal targets are stellar resource ids and must be a nav point.
+  CHECK(FlightAutomationController::ResolveStellar(state, "128") == 0x80);
+  CHECK(FlightAutomationController::ResolveStellar(state, "129") == 0x81);
+  CHECK_FALSE(FlightAutomationController::ResolveStellar(state, "130"));
+  CHECK_FALSE(FlightAutomationController::ResolveStellar(state, "127"));
+  CHECK_FALSE(FlightAutomationController::ResolveStellar(state, "12x"));
   CHECK(FlightAutomationController::ResolveLinkedSystem(state,
                                                         "alpha centauri") == 1);
   CHECK_FALSE(
@@ -399,6 +405,41 @@ TEST_CASE("automation destroy fails fast when no ship matches") {
   FlightAutomationController automation;
   CHECK_FALSE(automation.DestroyShip(state, "Marauder", 0));
   CHECK(automation.status().phase == FlightAutomationPhase::kFailed);
+}
+
+TEST_CASE("automation destroy may complete when the target is already gone") {
+  GameState state = DestroyState();
+  FlightAutomationController automation;
+  REQUIRE(automation.DestroyShip(state,
+                                 "Marauder",
+                                 0,
+                                 180000,
+                                 /*ship_id=*/static_cast<std::int16_t>(-1),
+                                 /*allow_missing=*/true));
+  CHECK(automation.status().phase == FlightAutomationPhase::kComplete);
+  CHECK(automation.status().detail == "target already gone");
+}
+
+TEST_CASE(
+    "automation destroy allow_missing completes when the target vanishes") {
+  GameState state = DestroyState();
+  state.player.primary_target_ship_slot = -1;
+  FlightAutomationController automation;
+  REQUIRE(automation.DestroyShip(state,
+                                 "Raider",
+                                 0,
+                                 180000,
+                                 /*ship_id=*/static_cast<std::int16_t>(-1),
+                                 /*allow_missing=*/true));
+  FlightInput input;
+  automation.Tick(state, 0, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kSelect);
+  // Another ship destroys the target before the cycle reaches it.
+  state.ShipAt(1).is_active = false;
+  input = {};
+  automation.Tick(state, 16, input);
+  CHECK(automation.status().phase == FlightAutomationPhase::kComplete);
+  CHECK(automation.status().detail == "target gone");
 }
 
 TEST_CASE("automation fails on death and simulation deadline") {

@@ -6,6 +6,7 @@
 #include "game/freeflight_objects.hpp"
 #include "game/game_state.hpp"
 #include "game/outfit.hpp"
+#include "game/probe_state.hpp"
 #include "game/scenario_data.hpp"
 
 #include "brgr_archive.hpp"
@@ -364,6 +365,24 @@ TEST_CASE("remaining cargo space subtracts bins, mission cargo and junk",
   state.active_missions[1].cargo_qty_tons = -3;
   CHECK(Player_ComputeCargoAndJunkTotal(state) == 8);
   CHECK(Player_ComputeRemainingCargoSpace(state) == 2);
+}
+
+TEST_CASE("probe cargo query reports credits, bins and non-zero junk",
+          "[probe][cargo]") {
+  GameState state;
+  state.player.credits = 12345;
+  state.cached_stats.cargo_capacity = 50.0F;
+  state.inventory.cargo_bins = {1, 2, 0, 0, 0, 3};
+  state.inventory.junk_counts.fill(0);
+  state.inventory.junk_counts[7] = 4;
+
+  const std::string json = ProbeState_Snapshot(state, "cargo");
+  CHECK(json.find("\"credits\":12345") != std::string::npos);
+  CHECK(json.find("\"capacity\":50.00") != std::string::npos);
+  CHECK(json.find("{\"tons\":1}") != std::string::npos);
+  CHECK(json.find("{\"tons\":3}") != std::string::npos);
+  CHECK(json.find("{\"id\":7,\"count\":4}") != std::string::npos);
+  CHECK(json.find("{\"tons\":0}") != std::string::npos);
 }
 
 } // namespace game

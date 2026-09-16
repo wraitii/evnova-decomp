@@ -26,4 +26,20 @@ TEST_CASE("MacRoman text decodes to UTF-8 for the font renderer",
         "Xtreem\xE2\x84\xA2 Rocket-Boards");
 }
 
+TEST_CASE("EncodeUtf8 keeps valid UTF-8 and decodes raw MacRoman",
+          "[font][encoding]") {
+  // Already-UTF-8 input (probe-authored names and user input) passes through.
+  CHECK(NovaText_EncodeUtf8("Kinik\xC3\xA9") == "Kinik\xC3\xA9");
+  CHECK(NovaText_EncodeUtf8("plain ASCII") == "plain ASCII");
+
+  // Raw MacRoman (invalid UTF-8) is decoded, so JSON stays valid.
+  CHECK(NovaText_EncodeUtf8("Kinik\x8e") == "Kinik\xC3\xA9");
+  CHECK(NovaText_EncodeUtf8("Xtreem\xaa Rocket-Boards") ==
+        "Xtreem\xE2\x84\xA2 Rocket-Boards");
+
+  // Overlong and truncated sequences are rejected, not passed through.
+  CHECK(NovaText_EncodeUtf8("\xC0\xAF") != "\xC0\xAF");
+  CHECK(NovaText_EncodeUtf8("\xE2\x84") != "\xE2\x84");
+}
+
 } // namespace game
