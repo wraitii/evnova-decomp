@@ -11,6 +11,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace game {
 
@@ -243,6 +246,44 @@ std::vector<std::uint8_t> LoadFontFileStrippedOfBitmapStrikes(
   return out;
 }
 
+// Process-wide cache of font file images (raw or sanitized), keyed by path.
+// The bytes must outlive every TTF_Font opened through TTF_OpenFontIO, and
+// NovaFontCache is constructed fresh for each modal (a dozen-plus sites), so a
+// per-instance cache would re-read and re-sanitize -- and re-log -- the same
+// file on every dialog. Sharing the image process-wide keeps the backing store
+// alive independently of any one cache.
+//
+// Divergence from the original: the original holds one process-global font
+// cache of OS handles (FontCache_InitializeDefaultFamilies, 0x004bc3e0). Our
+// port keeps the font *handles* per NovaFontCache instance and only the
+// sanitized file *images* process-wide here; the two halves of the original's
+// global cache are therefore split, which changes resource lifetime but not
+// what is drawn.
+//
+// Intentionally leaked: SDL_ttf/FreeType teardown can still touch these bytes
+// during static destruction, and a handful of font files is negligible.
+std::shared_ptr<std::vector<std::uint8_t>> GetFontImage(const std::string &path,
+                                                        bool strip_strikes) {
+  static auto *cache =
+      new std::unordered_map<std::string,
+                             std::shared_ptr<std::vector<std::uint8_t>>>();
+  const auto existing = cache->find(path);
+  if (existing != cache->end()) {
+    return existing->second;
+  }
+
+  bool stripped = false;
+  auto bytes = std::make_shared<std::vector<std::uint8_t>>(
+      LoadFontFileStrippedOfBitmapStrikes(path, strip_strikes, stripped));
+  if (stripped) {
+    NovaLog::Info("font '{}' contains embedded bitmap strikes with advances "
+                  "inconsistent with its outlines; stripped them at load time",
+                  path);
+  }
+  cache->emplace(path, bytes);
+  return bytes;
+}
+
 } // namespace
 
 // Ghidra 0x004bc670 FontCache_GetOrCreateFontHandle.
@@ -268,7 +309,6 @@ void NovaFontCache::Clear() {
     }
   }
   fonts_.clear();
-  font_buffers_.clear();
 }
 
 std::string NovaFontCache::ResolveFontFile(NovaFontFamily family) const {
@@ -326,29 +366,14 @@ TTF_Font *NovaFontCache::Font(NovaFontFamily family,
     return nullptr;
   }
 
-  // Load (and for the bundled CE faces, sanitize) the file image; FreeType
-  // reads tables lazily through the stream, so the buffer is owned by the
-  // cache and must outlive the face.
-  std::shared_ptr<std::vector<std::uint8_t>> image;
-  const auto image_it = font_buffers_.find(file);
-  if (image_it != font_buffers_.end()) {
-    image = image_it->second;
-  } else {
-    // Only the bundled CE faces are sanitized: their FontForge-converted
-    // embedded strikes are corrupt (see LoadFontFileStrippedOfBitmapStrikes).
-    const bool bundled_ce_face =
-        family == NovaFontFamily::kChicago || family == NovaFontFamily::kGeneva;
-    bool stripped = false;
-    image = std::make_shared<std::vector<std::uint8_t>>(
-        LoadFontFileStrippedOfBitmapStrikes(file, bundled_ce_face, stripped));
-    if (stripped) {
-      NovaLog::Info(
-          "font '{}' contains embedded bitmap strikes with advances "
-          "inconsistent with its outlines; stripped them at load time",
-          file);
-    }
-    font_buffers_.emplace(file, image);
-  }
+  // Load (and for the bundled CE faces, sanitize) the file image. Only the
+  // bundled CE faces are sanitized: their FontForge-converted embedded strikes
+  // are corrupt (see LoadFontFileStrippedOfBitmapStrikes). The image is shared
+  // process-wide and must outlive every TTF_Font opened from it.
+  const bool bundled_ce_face =
+      family == NovaFontFamily::kChicago || family == NovaFontFamily::kGeneva;
+  const std::shared_ptr<std::vector<std::uint8_t>> image =
+      GetFontImage(file, bundled_ce_face);
 
   // This size is the concrete raster size requested by the caller. Text draw
   // calls multiply their logical size by the current output density first.

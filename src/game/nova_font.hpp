@@ -34,11 +34,9 @@
 // every modal.
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <vector>
 
 #include "../sdl_platform.hpp"
 
@@ -76,6 +74,14 @@ inline constexpr int kLogicalUiHeight = 480;
 // A resolved, rasterizable font face for one (family, size, style) triple.
 // The original caches OS font handles by exactly that key
 // (FontFamily_FindHandleBySizeAndStyle / FontFamily_CreateFontHandle).
+//
+// Divergence from the original: the original keeps a single process-global
+// font cache (FontCache_InitializeDefaultFamilies, 0x004bc3e0); our port uses
+// short-lived per-screen instances, each holding its own handle map and its
+// own TTF_Init/TTF_Quit refcount. Only the sanitized font file *images* are
+// shared process-wide (nova_font.cpp GetFontImage), so the original's one
+// cache is effectively split in two. This changes resource lifetime/reuse,
+// not the text that is measured or drawn.
 class NovaFontCache {
 public:
   NovaFontCache() = default;
@@ -140,11 +146,6 @@ private:
   [[nodiscard]] std::string ResolveFontFile(NovaFontFamily family) const;
 
   std::unordered_map<FontKey, TTF_Font *, FontKeyHash> fonts_;
-  // Backing bytes for faces opened through TTF_OpenFontIO: FreeType reads
-  // tables lazily through the SDL_IOStream, so the (sanitized) file image
-  // must outlive every TTF_Font opened from it.
-  std::unordered_map<std::string, std::shared_ptr<std::vector<std::uint8_t>>>
-      font_buffers_;
   // Whether the (refcounted) SDL_ttf library is currently held by this cache;
   // set lazily on first font open and torn down by the destructor. SDL_ttf's
   // refcount makes nested caches safe.

@@ -1004,7 +1004,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004BC5C0	FontCache_CreateFamilyEntry		0%	
 0x004BC600	FontFamily_FindHandleBySizeAndStyle		0%	
 0x004BC640	FontCache_GetFamilyEntryByIndex		0%	
-0x004BC670	FontCache_GetOrCreateFontHandle	src/game/nova_font.cpp	60%	NovaFontCache.Font/TextWidth: caches SDL_ttf faces by (family,size,style) key; lazy TTF_Init refcounted in the cache lifetime; bundled CE Geneva.ttf opened via in-memory sfnt rewrite stripping its corrupt EBDT/EBLC strikes (advances inconsistent with outlines, FreeType served them at exact ppem matches) TODO(decomp) skip documented in nova_font.cpp
+0x004BC670	FontCache_GetOrCreateFontHandle	src/game/nova_font.cpp	60%	NovaFontCache.Font/TextWidth: caches SDL_ttf faces by (family,size,style) key; lazy TTF_Init refcounted in the cache lifetime; bundled CE Geneva.ttf opened via in-memory sfnt rewrite stripping its corrupt EBDT/EBLC strikes (advances inconsistent with outlines, FreeType served them at exact ppem matches), with the sanitized image cached process-wide so per-modal NovaFontCache instances share it; divergence from the original's single process-global font cache: handles stay per-instance, only sanitized file images are process-wide TODO(decomp) skip documented in nova_font.cpp
 0x004BC6E0	FontCache_FindOrAddFamilyByName		0%	
 0x004BC760	FUN_004bc760		0%	
 0x004BCA70	FUN_004bca70		0%	
