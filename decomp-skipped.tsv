@@ -1,5 +1,6 @@
 address	name	library	comment
 0x0046E8B0	NovaRender_ReleaseMainWindowOwnerGuarded	blitter	Platform render-owner release wrapper: callers pass NovaRender_GetMainWindowOwner; the wrapped release target NovaRender_ReleaseWindowOwnerStub is a bare return in this build. SDL rendering owns no corresponding handle.
+0x004AB9D4	NovaUi_InitializeFlightViewSurfaces	blitter	Deliberate SDL replacement: the QuickDraw/SpriteWorld gameplay surface, 14 ordered SpriteLayer objects, beam layer callbacks, target-FPS setup, and 8/16-bit-depth validation are replaced by the RAII SpaceflightView created on flight entry (src/game/spaceflight.cpp) and its explicit Draw ordering (src/game/spaceflight_view.cpp). The route-map offscreen frame is replaced by direct RouteMapView drawing; RouteMap_OverlayRect preserves the original top-left square geometry and min-200 side. Its SpriteWorld_InitializeFlightViewSpritePools child remains in progress for separate pool-lifecycle audit.
 0x004D61A0	MWRuntime_FUN_004d61a0	msl-crt	MSL ctype alpha-bit test (table bit 0x0001); the store name tint uses std::isalnum instead (0x00490C70 / 0x004948B0).
 0x004D61D0	MWRuntime_FUN_004d61d0	msl-crt	MSL ctype digit-bit test (table bit 0x0008); the store name tint uses std::isalnum instead (0x00490C70 / 0x004948B0).
 0x004DD37E	FUN_004dd37e	blitter	
