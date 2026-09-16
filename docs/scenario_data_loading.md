@@ -57,7 +57,9 @@ globals (AGENTS.md).
   and `0x370/0x378`. MaxGun2a, MaxTur2c, TechLevel2e, Cost30(**int32**),
   DeathDelay34, ArmorRech36, Explode1/2 38/3a, DispWeight3c, Mass3e, Length40,
   InherentAI42, Crew44, Strength46, InherentGovt48, Flags(capability)4a,
-  Flags2 62, Flags3 726. Verified against ship 0x80 (holds 10, shield 30,
+  PodCount4c, Flags2 62, OnCapture3d0, CommName60e, MovieFile6ae, Flags3 726,
+  EscortType732 (normalized/inferred to 0..3 by the loader). Verified against
+  ship 0x80 (holds 10, shield 30,
   accel 500, speed 400, turn 40, fuel 300, mass 15, cost 10000).
 - **w\x91ap (weapon)**: Reload0, Count2, MassDmg4, EnergyDmg6, Guidance8,
   Speed_a, AmmoType_c, Graphic_e, Inaccuracy10, Sound12, Impact14, ExplodType16,

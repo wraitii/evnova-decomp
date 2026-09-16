@@ -322,19 +322,19 @@ void TickShipHandleDestructionDebrisPuffs(GameState &state,
   // when it is positive (_DAT_005753b0 = 0.0). Fires while the timer is in the
   // second half, decrementing the counter so the class emits exactly its
   // initial counter worth of fragments.
-  if (ship.timed_action_counter > 0 && cls->timed_action_counter_init > 0 &&
+  if (ship.timed_action_counter > 0 && cls->escape_pod_count > 0 &&
       ship.death_timer_active <= half_death_delay) {
     // The original casts both operands to int first, so this is integer
     // division before the 0.4 (DAT_005754a0) scale.
     const int death_delay = static_cast<int>(cls->death_delay_frames);
-    const int init = static_cast<int>(cls->timed_action_counter_init);
+    const int init = static_cast<int>(cls->escape_pod_count);
     int interval =
         static_cast<int>(static_cast<float>(death_delay / init) * 0.4F);
     if (interval < 10) {
       interval = 10;
     }
     if (raw_frame_counter % interval == 0 ||
-        ship.timed_action_counter == cls->timed_action_counter_init) {
+        ship.timed_action_counter == cls->escape_pod_count) {
       ship.timed_action_counter =
           static_cast<std::int16_t>(ship.timed_action_counter - 1);
       NovaEffects_SpawnShipDestructionDebrisPuff(state, ship);

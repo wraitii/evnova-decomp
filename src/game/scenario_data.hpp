@@ -319,7 +319,9 @@ inline constexpr std::int16_t kShipClassNonexistentTechLevel =
 struct ShipClass {
   std::string display_name; // resource name / target display
   std::string short_name;   // shipyard menu label
+  std::string comm_name;    // hail dialog label (Bible CommName)
   std::string long_name;    // purchase dialog / new-pilot text
+  std::string movie_file;   // shipyard movie filename (Bible MovieFile)
   // Ghidra ShipClassDef +0xac <- shp payload +0x6e6 C string (Bible
   // "Subtitle: The subtitle to show on the target display for this ship
   // type", e.g. "Class A"). Drawn under the target-panel name.
@@ -348,7 +350,9 @@ struct ShipClass {
   float armor_recharge = 0.0F;  // ArmorRech
 
   std::int16_t default_ai_behavior = 0; // InherentAI
-  std::int16_t class_category = 0;      // Strength? / category
+  // Bible EscortType, normalized by the loader to 0 Fighter, 1 Medium Ship,
+  // 2 Warship, or 3 Freighter (including its runtime inference for -1).
+  std::int16_t class_category = 0;
   std::int16_t crew = 0; // Crew (Ghidra ShipClassDef.capture_power +0x9f2:
                          // ships with 0 crew cannot be boarded nor capture;
                          // the AI boarding selector reads it as capture_power)
@@ -365,10 +369,10 @@ struct ShipClass {
   std::int16_t max_gun = 0;    // MaxGun
   std::int16_t max_turret = 0; // MaxTur
 
-  // Ghidra ShipClassDef +0xA20 (ship payload +0x4c). The starting
-  // timed_action_counter for a newly allocated ship; Ship_AllocateShipSlot
-  // (Ship_AllocateShipSlotInSystem 0x004254b0) seeds a fresh ship slot from it.
-  std::int16_t timed_action_counter_init = 0;
+  // Ghidra ShipClassDef +0xA20 (ship payload +0x4c), Bible PodCount. A fresh
+  // ship copies this into its runtime counter; destruction emits this many
+  // decorative escape-pod/debris puffs during the second half of DeathDelay.
+  std::int16_t escape_pod_count = 0;
 
   // Ghidra ShipClassDef +0xA00 (payload +0x60). Pilot skill variance percent
   // used to seed each NPC's skill_variance_scale; it also gates some AI
@@ -505,6 +509,7 @@ struct ShipClass {
   // Player-facing strings used by the new-pilot flow.
   std::string availability_expr; // Availability
   std::string on_purchase_expr;  // OnPurchase
+  std::string on_capture_expr;   // OnCapture
   std::string on_retire_expr;    // OnRetire
   // Contribute / Require 64-bit pairs (payload +0x64/+0x68 and +0x380/+0x384).
   // Contribute is the ship's baseline for the player's aggregate Contribute

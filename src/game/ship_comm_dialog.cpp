@@ -869,13 +869,15 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   const SDL_FRect panel{0.0F, 0.0F, 640.0F, 480.0F};
   platform.SetCenteredPlayfield();
 
-  // Item-11 info block contents (0x0047e470 + 0x0047fb70): the class name
-  // (DAT_006bd2cc class-name table), the pers 0x3ff "Ambrosia Mascot"
+  // Item-11 info block contents (0x0047e470 + 0x0047fb70): the class's Bible
+  // CommName (DAT_006bd2cc table), the pers 0x3ff "Ambrosia Mascot"
   // placeholder (DAT_0056cc30) and the government comm-name table entry
   // (DAT_007d1d0c; faction-less ships get an empty pstring, DAT_0056cc2c,
   // which drops the parenthesised line).
   const std::string class_name =
-      ship_class != nullptr ? ship_class->display_name : target.ship_name;
+      ship_class != nullptr && !ship_class->comm_name.empty()
+          ? ship_class->comm_name
+          : target.ship_name;
   const bool pers_placeholder = target.pers_def_slot == 0x3ff;
   const std::string comm_name = govt != nullptr && !govt->comm_name.empty()
                                     ? govt->comm_name

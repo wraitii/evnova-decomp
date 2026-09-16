@@ -541,7 +541,7 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   s.mass_tons = ReadBeI16(bytes, 0x3e);
   s.length_meters = ReadBeI16(bytes, 0x40);
   s.default_ai_behavior = ReadBeI16(bytes, 0x42);
-  s.timed_action_counter_init = ReadBeI16(bytes, 0x4c);
+  s.escape_pod_count = ReadBeI16(bytes, 0x4c);
   s.crew = ReadBeI16(bytes, 0x44); // == Ghidra ShipClassDef.capture_power
   // The loader clamps negatives to 0 (0x004bd3c0): a negative crew count
   // would otherwise read as boardable/capturing.
@@ -620,9 +620,12 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   }
   s.availability_expr = ReadCString(bytes, 0x6c);
   s.on_purchase_expr = ReadCString(bytes, 0x26a);
+  s.on_capture_expr = ReadCString(bytes, 0x3d0);
   s.on_retire_expr = ReadCString(bytes, 0x4cf);
   s.short_name = ReadCString(bytes, 0x5ce);
+  s.comm_name = ReadCString(bytes, 0x60e);
   s.long_name = ReadCString(bytes, 0x62e);
+  s.movie_file = ReadCString(bytes, 0x6ae);
   s.buy_random = ReadBeI16(bytes, 0x388);
   if (s.buy_random > 100) {
     s.buy_random = 100;
@@ -660,6 +663,21 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
     if (s.escort_sell_value <= 0) {
       s.escort_sell_value =
           static_cast<std::int32_t>(static_cast<double>(s.cost) * 0.1);
+    }
+  }
+  // Bible EscortType. The original loader accepts only 0..3; Automatic (-1)
+  // and every invalid value are inferred exactly as in 0x004bd3c0: freighter
+  // for inherent AI below 3, otherwise by hull mass.
+  s.class_category = ReadBeI16(bytes, 0x732);
+  if (s.class_category < 0 || s.class_category > 3) {
+    if (s.default_ai_behavior < 3) {
+      s.class_category = 3;
+    } else if (s.mass_tons < 50) {
+      s.class_category = 0;
+    } else if (s.mass_tons < 200) {
+      s.class_category = 1;
+    } else {
+      s.class_category = 2;
     }
   }
   return s;
