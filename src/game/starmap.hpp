@@ -66,6 +66,12 @@ struct StarmapResult {
   std::int16_t destination_system_id = -1;
 };
 
+// Ghidra 0x00468d90 NovaUi_DrawSystemFactionConflictStatus. Callers apply
+// the separate System_HasUsableTravelDestination gate before this lookup.
+[[nodiscard]] std::string
+NovaUi_SystemFactionConflictStatusText(const GameState &state,
+                                       std::int16_t zero_based_system_id);
+
 // Marker arrow textures shared by the starmap window and the route-map
 // overlay chart (Ghidra CICN 0x3a98 -> DAT_007dc3b0, 0x3a99 -> DAT_007dc3b4).
 struct NovaStarmap_MarkerIcons {

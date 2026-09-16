@@ -14,6 +14,7 @@
 //   NovaUi_DrawPlayerSpecialInteractionTabs   0x004a1c40  (strip painter)
 //   NovaUi_BuildPlayerSpecialInteractionStrings 0x0049c050 (page texts)
 
+#include <cstdint>
 #include <string>
 
 class HudRenderer;
@@ -34,6 +35,10 @@ struct PlayerInfoSummaryTexts {
 
 [[nodiscard]] PlayerInfoSummaryTexts
 NovaPlayerInfo_BuildSummaryTexts(const GameState &state);
+
+// Ghidra 0x00469030 NovaUi_DrawCombatRankLabel. The zero-based rank selects
+// STR# 138 entry rank+1.
+[[nodiscard]] int NovaPlayerInfo_CombatRankIndex(std::int32_t points);
 
 // Outcome of one Player Info session. The original latches the jettison arm
 // as a local flag in the run loop before closing.

@@ -282,6 +282,19 @@ labels.
   behavior supervisor; state `0x08` restores `-999` every frame, so ordinary
   behavior cannot replace the arrival state before its speed decay completes.
 
+## Known divergences
+
+- **Fire-refresh call site.** The original `Ship_ApplyShipAiControls`
+  (0x00408150) calls `Ship_EscortFireAtUnprovokedTarget` (0x00411540) at the
+  tail of control modes `0x00`, `0x01`, `0x09`, `0x0b`, and `0x0c`
+  (0x0040847d, 0x00408674, 0x0040acf1, 0x0040ae2f, 0x0040b4bc). The port
+  implements the calls in modes 1/9/0xb/0xc but omits the mode-0 call and
+  instead runs an unconditional post-state call in `NovaAi_UpdateShipAI`
+  guarded only on `ai_state_code != 0x12`. That covers every control mode
+  (including 6/7/0x16, where the original never calls it) and also mode `0x17`,
+  which has no arm in the original. Tracked as `TODO(decomp(0x00408150))` in
+  `src/game/ship_ai.cpp`.
+
 ## Documentation practice
 
 For new evidence, prefer a Ghidra plate comment on the function that owns the

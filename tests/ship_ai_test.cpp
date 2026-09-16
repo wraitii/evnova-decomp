@@ -1420,10 +1420,17 @@ TEST_CASE("capture-approach drive boards a disabled ship end-to-end",
   REQUIRE(game::NovaAiShip_IsDisabled(state, victim));
 
   bool handed_off = false;
+  bool armed_at_disabled_victim = false;
   std::uint32_t now_ms = 0;
   for (int t = 0; t < 600 && !handed_off; ++t) {
     game::NovaAi_UpdateShipAI(state, boarder, /*skip_heavy_ai=*/false, now_ms);
     now_ms += 33;
+    // Regression: the behavior-3 capture drive must never arm its weapons
+    // against the disabled boarding victim. Ship_EscortFireAtUnprovokedTarget
+    // returns for ai_behavior_code < 5 and clears disabled targets.
+    if (boarder.ai_fire_trigger_latch != 0) {
+      armed_at_disabled_victim = true;
+    }
     if (t == 5) {
       // Mid-approach: victim latched, boarding pause armed, velocity-match
       // hold (control 0xf) active.
@@ -1441,6 +1448,7 @@ TEST_CASE("capture-approach drive boards a disabled ship end-to-end",
         std::max(0.0F, boarder.ai_maneuver_timer_ms - 1.0F);
   }
   REQUIRE(handed_off);
+  CHECK_FALSE(armed_at_disabled_victim);
 
   // Conversion post-conditions (cheat-forced): the victim becomes a
   // behavior-6 follower of the boarder at 66% armor with dropped shields.

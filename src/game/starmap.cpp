@@ -1320,9 +1320,8 @@ void DrawGalaxy(SdlPlatform &platform,
 // three nav stellars overrides to 0x10/0x11 (the STR# 0x86 pool's trailing
 // "Military Dictator"/"Military Governor" entries -- odd but verbatim), and
 // governments with flags_primary bit 0 suppress the status to "N/A".
-[[nodiscard]] std::string LegalStatusText(const GameState &state,
-                                          std::int16_t zero_based_id,
-                                          const StarmapStrings &strings) {
+[[nodiscard]] int LegalStatusLevel(const GameState &state,
+                                   std::int16_t zero_based_id) {
   const System &sys =
       state.scenario.systems[static_cast<std::size_t>(zero_based_id)];
   const std::int16_t rep =
@@ -1415,10 +1414,7 @@ void DrawGalaxy(SdlPlatform &platform,
   if (gov != nullptr && (gov->flags_primary & 0x0001U) != 0U) {
     level = 0;
   }
-  if (level == 0) {
-    return strings.na;
-  }
-  return strings.legal_table[static_cast<std::size_t>(level)];
+  return level;
 }
 
 // Ghidra 0x00469d30 Stellar_ExtractTravelFlagConnectiveValue: the six
@@ -1597,7 +1593,7 @@ void DrawSidePanels(SdlPlatform &platform,
              side.y + 132.0F * s,
              10.0F,
              kColorWhite,
-             LegalStatusText(state, selected_id, strings));
+             NovaUi_SystemFactionConflictStatusText(state, selected_id));
   // Goods traded (0x004a67a0): class names for the lanes present among the
   // usable nav stellars; "<Unknown>" until discovery_state reaches 2.
   DrawTextAt(platform,
@@ -1999,6 +1995,22 @@ std::vector<std::int16_t> BuildMissionTargetSystems(const GameState &state) {
 }
 
 } // namespace
+
+std::string
+NovaUi_SystemFactionConflictStatusText(const GameState &state,
+                                       std::int16_t zero_based_system_id) {
+  if (zero_based_system_id < 0 ||
+      static_cast<std::size_t>(zero_based_system_id) >=
+          state.scenario.systems.size()) {
+    return NovaHud_LoadStringEntry(0x7d2, 0x18c).value_or("N/A");
+  }
+  const int level = LegalStatusLevel(state, zero_based_system_id);
+  if (level == 0) {
+    return NovaHud_LoadStringEntry(0x7d2, 0x18c).value_or("N/A");
+  }
+  return NovaHud_LoadStringEntry(0x86, static_cast<std::uint16_t>(level + 1))
+      .value_or("N/A");
+}
 
 // Ghidra 0x004a99f0 Ui_DrawSystemRouteMap draw pass (see starmap.hpp). The
 // original re-renders NovaUi_DrawStarmapRoutesAndMarkers into a dedicated
