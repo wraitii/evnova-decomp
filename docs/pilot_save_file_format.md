@@ -178,9 +178,10 @@ There is no mid-game reload path.
   `PilotSave_DecodeBlock` transform (0x008725b0).
 - Not reconstructed: the last-pilot marker file (0x004c7d40 / 0x004ca120;
   marker name string 0x82/4 unresolved), `PilotDebug_WritePilotLog`
-  (0x004ca2c0), and the remaining untracked .plt regions (the block1
-  escort/fleet tables at +0xe6ce..+0xe8ce — serialized as the empty set — and
-  the block2 përs active/visible flags at +0x1006/+0x1806). Per-stellar saved
+  (0x004ca2c0), and the block2 përs active/visible flags at
+  +0x1006/+0x1806. The block1 escort/fleet tables at +0xe6ce..+0xe8ce are now
+  decoded, encoded, collected from live player-affiliated ships, and restored
+  through `ShipClass_SpawnEscortShipFromClass`. Per-stellar saved
   bytes, garrison counts and availability rolls, disaster/crön runtime
   counters, and rank active flags are preserved and applied with the original
   definition/state gates. Dates, all 0x800 discovery/reputation slots, the 16
@@ -191,6 +192,14 @@ There is no mid-game reload path.
   reinforcement cooldown (block2+0x3d90), per-stellar engagement access with
   its live-strength fallback (block2+0x4d90), and the escort group-order
   codes (block2+0x5d90).
+
+The scenario-aware load pass also mirrors the original recovery work: it
+clears positive outfit, weapon-bank, and junk quantities whose definitions no
+longer exist; repairs a missing ship class; recovers a `-1` jump destination;
+resolves the current system through the stellar membership map and then the
+first explored system; reconstructs saved escorts/fighters; and recomputes
+active mission deadline dates from their saved remaining-day counters. Any
+definition loss reports `kRepairsApplied` while retaining the usable pilot.
 
 ## Quirks / open questions
 

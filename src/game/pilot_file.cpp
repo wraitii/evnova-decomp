@@ -4,6 +4,9 @@
 #include "../log.hpp"
 #include "mission.hpp"
 #include "outfit.hpp"
+#include "ship_ai.hpp"
+#include "ship_spawn.hpp"
+#include "targeting.hpp"
 #include "travel.hpp"
 
 #include <algorithm>
@@ -102,6 +105,9 @@ PilotFile PilotFile::Fresh() {
   fresh.disaster_active_stellars.fill(-1);
   fresh.cron_duration_counters.fill(-1);
   fresh.cron_holdoff_counters.fill(-1);
+  fresh.escort_ship_class_ids.fill(-1);
+  fresh.fighter_ship_class_ids.fill(-1);
+  fresh.fighter_voice_types.fill(-1);
   return fresh;
 }
 
@@ -312,6 +318,29 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
   out.active_missions = state.active_missions;
   out.reinforcement_retrigger_delay = state.reinforcement_retrigger_delay;
   out.target_category_command = state.target_category_command;
+  out.escort_ship_class_ids.fill(-1);
+  out.fighter_ship_class_ids.fill(-1);
+  out.fighter_voice_types.fill(-1);
+  std::size_t escort_row = 0;
+  std::size_t fighter_row = 0;
+  for (std::size_t slot = 1; slot < GameState::kMaxShips; ++slot) {
+    const Ship &ship = state.ShipAt(slot);
+    if (!ship.is_active || ship.squad_leader_ship_slot != 0 ||
+        ship.mission_fleet_slot >= 0) {
+      continue;
+    }
+    if (ship.ai_behavior_code == 6 && escort_row < 0x40) {
+      out.escort_ship_class_ids[escort_row] = static_cast<std::int16_t>(
+          ship.ship_class_id + (ship.escort_origin_mark != 0 ? 1000 : 0));
+      out.escort_upgrade_flags[escort_row] = ship.escort_upgrade_mark;
+      out.escort_released_flags[escort_row] = ship.escort_released_mark;
+      ++escort_row;
+    } else if (ship.ai_behavior_code == 5 && fighter_row < 0x40) {
+      out.fighter_ship_class_ids[fighter_row] = ship.ship_class_id;
+      out.fighter_voice_types[fighter_row] = ship.voice_type_mode;
+      ++fighter_row;
+    }
+  }
   const std::size_t stellar_count =
       std::min(state.scenario.stellars.size(), out.stellar_saved_bytes.size());
   for (std::size_t i = 0; i < stellar_count; ++i) {
@@ -402,17 +431,23 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
   WriteU32(block1,
            0xe94e,
            static_cast<std::uint32_t>(pilot_file.player_combat_rating_points));
-  // Escort/fleet tables (block1 +0xe6ce..+0xe8ce). SaveGameCore resets all
-  // 0x40 slots to the empty sentinels before filling the active escort rows;
-  // the clean-room escort subsystem is not reconstructed yet, so emit the
-  // empty set (the block is otherwise zero-filled, which is wrong for the
-  // 0xffff class-id tables).
+  // Escort/fleet tables (block1 +0xe6ce..+0xe8ce).
   for (std::size_t i = 0; i < 0x40; ++i) {
-    WriteU16(block1, 0xe6ce + 2 * i, 0xffff); // fleet/escort class ids
-    WriteU16(block1, 0xe74e + 2 * i, 0xffff); // carried-fighter class ids
-    WriteU16(block1, 0xe7ce + 2 * i, 0x0000); // escort upgrade flags
-    WriteU16(block1, 0xe84e + 2 * i, 0x0000); // escort released flags
-    WriteU16(block1, 0xe8ce + 2 * i, 0xffff); // voice type modes
+    WriteU16(block1,
+             0xe6ce + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.escort_ship_class_ids[i]));
+    WriteU16(block1,
+             0xe74e + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.fighter_ship_class_ids[i]));
+    WriteU16(block1,
+             0xe7ce + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.escort_upgrade_flags[i]));
+    WriteU16(block1,
+             0xe84e + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.escort_released_flags[i]));
+    WriteU16(block1,
+             0xe8ce + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.fighter_voice_types[i]));
   }
   for (std::size_t i = 0; i < pilot_file.control_bits.size(); ++i) {
     block1[0xb7be + i] = static_cast<std::byte>(pilot_file.control_bits[i]);
@@ -489,6 +524,7 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     block1[offset + 0x32] = mission.can_abort ? std::byte{1} : std::byte{0};
     block1[offset + 0x33] =
         mission.carrying_resources ? std::byte{1} : std::byte{0};
+    put_i16(0x45, mission.time_limit_days_remaining);
     for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
       put_i16(0x35 + i * sizeof(std::int16_t),
               mission.brief_description_ids[i]);
@@ -705,6 +741,18 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
         static_cast<std::int32_t>(ReadU32(block1, 0x281a, big_endian));
     out.player_combat_rating_points =
         static_cast<std::int32_t>(ReadU32(block1, 0xe94e, big_endian));
+    for (std::size_t i = 0; i < 0x40; ++i) {
+      out.escort_ship_class_ids[i] = static_cast<std::int16_t>(
+          ReadU16(block1, 0xe6ce + 2 * i, big_endian));
+      out.fighter_ship_class_ids[i] = static_cast<std::int16_t>(
+          ReadU16(block1, 0xe74e + 2 * i, big_endian));
+      out.escort_upgrade_flags[i] = static_cast<std::int16_t>(
+          ReadU16(block1, 0xe7ce + 2 * i, big_endian));
+      out.escort_released_flags[i] = static_cast<std::int16_t>(
+          ReadU16(block1, 0xe84e + 2 * i, big_endian));
+      out.fighter_voice_types[i] = static_cast<std::int16_t>(
+          ReadU16(block1, 0xe8ce + 2 * i, big_endian));
+    }
     for (std::size_t i = 0; i < out.control_bits.size(); ++i) {
       out.control_bits[i] = std::to_integer<std::uint8_t>(block1[0xb7be + i]);
     }
@@ -772,6 +820,7 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
           std::to_integer<unsigned char>(block1[offset + 0x32]) != 0;
       mission.carrying_resources =
           std::to_integer<unsigned char>(block1[offset + 0x33]) != 0;
+      mission.time_limit_days_remaining = get_i16(0x45);
       for (std::size_t i = 0; i < mission.brief_description_ids.size(); ++i) {
         mission.brief_description_ids[i] =
             get_i16(0x35 + i * sizeof(std::int16_t));
@@ -949,6 +998,49 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   }
   record.pilot_name = name;
 
+  // Definition-aware inventory repairs. PilotFile_LoadSave clears positive
+  // quantities whose scenario resource is absent and returns -0x2e while
+  // still loading the rest of the pilot.
+  for (std::size_t i = 0;
+       !state.scenario.outfits.empty() && i < record.outfit_owned_count.size();
+       ++i) {
+    if (record.outfit_owned_count[i] > 0 &&
+        (i >= state.scenario.outfits.size() ||
+         state.scenario.outfits[i].name.empty())) {
+      record.outfit_owned_count[i] = 0;
+      result = PilotLoadError::kRepairsApplied;
+    }
+  }
+  for (std::size_t i = 0; !state.scenario.weapons.empty() && i < 0x100; ++i) {
+    const bool missing = i >= state.scenario.weapons.size() ||
+                         state.scenario.weapons[i].name.empty();
+    if (missing && (record.weapon_bank_ammo[i * 100] > 0 ||
+                    record.weapon_bank_secondary[i * 100] > 0)) {
+      record.weapon_bank_ammo[i * 100] = 0;
+      record.weapon_bank_secondary[i * 100] = 0;
+      result = PilotLoadError::kRepairsApplied;
+    }
+  }
+  for (std::size_t i = 0;
+       !state.scenario.junk_defs.empty() && i < record.junk_counts.size();
+       ++i) {
+    if (record.junk_counts[i] > 0 && (i >= state.scenario.junk_defs.size() ||
+                                      !state.scenario.junk_defs[i].present)) {
+      record.junk_counts[i] = 0;
+      result = PilotLoadError::kRepairsApplied;
+    }
+  }
+  for (std::size_t i = 0;
+       !state.scenario.ranks.empty() && i < record.rank_active_flags.size();
+       ++i) {
+    if (record.rank_active_flags[i] != 0 &&
+        (i >= state.scenario.ranks.size() ||
+         !state.scenario.ranks[i].defined)) {
+      record.rank_active_flags[i] = 0;
+      result = PilotLoadError::kRepairsApplied;
+    }
+  }
+
   // The original repairs a class whose definition is absent, then reports
   // kRepairsApplied. ScenarioData stores only defined ship rows, so an
   // out-of-range resource lookup is the clean-room equivalent of its
@@ -971,22 +1063,42 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   }
   // current_system_id is not serialized; the loader resolves it from the saved
   // jump destination stellar (Ghidra 0x004cb260 fallback chain).
+  if (record.jump_dest_stellar < 0) {
+    const auto fallback =
+        std::ranges::find_if(state.scenario.stellars,
+                             [](const Stellar &st) { return st.is_defined; });
+    if (fallback != state.scenario.stellars.end()) {
+      record.jump_dest_stellar = static_cast<std::int16_t>(
+          std::distance(state.scenario.stellars.begin(), fallback));
+    }
+    result = PilotLoadError::kRepairsApplied;
+  }
   record.current_system_id = [&]() -> std::int16_t {
+    const auto valid_explored = [&](std::int16_t system_id) {
+      return system_id >= 0 &&
+             static_cast<std::size_t>(system_id) <
+                 record.system_discovery.size() &&
+             record.system_discovery[static_cast<std::size_t>(system_id)] != 0;
+    };
     if (record.jump_dest_stellar >= 0) {
-      if (const auto *st =
-              state.scenario.Stellar(record.jump_dest_stellar + 0x80)) {
-        if (st->system_id >= 0) {
-          return st->system_id;
-        }
+      const auto resource_id =
+          static_cast<std::int16_t>(record.jump_dest_stellar + 0x80);
+      if (const auto *st = state.scenario.Stellar(resource_id);
+          st != nullptr && valid_explored(st->system_id)) {
+        return st->system_id;
+      }
+      const auto containing = NovaTargeting_FindSystemContainingStellar(
+          state.scenario, resource_id);
+      if (valid_explored(containing)) {
+        return containing;
       }
     }
-    // Original also tries System_FindSystemContainingStellar then any explored
-    // system, then 0. TODO(decomp): the save's per-system discovery block
-    // (u16[0x800] of SystemDef.discovery_state at block1 + 0x1a,
-    // PilotFile_SaveGameCore 0x004c7dd0 / LoadSave 0x004cb260) is not yet
-    // serialized by this clean-room save format; restoring it should re-mark
-    // each visited system (NovaSystem_MarkSystemVisited) and rebuild the map
-    // reveal from the restored system.
+    const auto explored = std::ranges::find_if(
+        record.system_discovery, [](std::int16_t value) { return value != 0; });
+    if (explored != record.system_discovery.end()) {
+      return static_cast<std::int16_t>(
+          std::distance(record.system_discovery.begin(), explored));
+    }
     return 0;
   }();
 
@@ -1005,6 +1117,61 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   }
 
   PilotFileApply(record, state);
+
+  // Recreate the two saved player-fleet classes after the persistent state is
+  // live. Invalid class rows are skipped and make the successful load report
+  // repairs, matching the original.
+  if (!state.scenario.ships.empty()) {
+    NovaShip_DeactivateVacantShipsAndTally(state, /*keep_player_engaged=*/true);
+  }
+  for (std::size_t i = 0; !state.scenario.ships.empty() && i < 0x40; ++i) {
+    const auto restore_ship = [&](std::int16_t encoded_class,
+                                  bool fighter) -> Ship * {
+      if (encoded_class < 0) {
+        return nullptr;
+      }
+      const std::int16_t ship_class =
+          fighter ? encoded_class
+                  : static_cast<std::int16_t>(encoded_class % 1000);
+      const ShipClass *definition =
+          state.scenario.Ship(static_cast<std::int16_t>(ship_class + 0x80));
+      if (definition == nullptr ||
+          definition->tech_level == kShipClassNonexistentTechLevel) {
+        result = PilotLoadError::kRepairsApplied;
+        return nullptr;
+      }
+      const int slot =
+          NovaShipClass_SpawnEscortShipFromClass(state, ship_class, -1);
+      return slot < 0 ? nullptr : &state.ShipAt(static_cast<std::size_t>(slot));
+    };
+    if (Ship *escort = restore_ship(record.escort_ship_class_ids[i], false)) {
+      escort->escort_origin_mark =
+          record.escort_ship_class_ids[i] >= 1000 ? 1 : 0;
+      escort->escort_upgrade_mark =
+          static_cast<std::int8_t>(record.escort_upgrade_flags[i] != 0);
+      escort->escort_released_mark =
+          static_cast<std::int8_t>(record.escort_released_flags[i] != 0);
+    }
+    if (Ship *fighter = restore_ship(record.fighter_ship_class_ids[i], true)) {
+      fighter->ai_behavior_code = 5;
+      fighter->escort_origin_mark = 0;
+      NovaShip_ResetAiBehaviorRuntimeFields(*fighter);
+      if (record.fighter_voice_types[i] != -1) {
+        fighter->voice_type_mode = record.fighter_voice_types[i];
+      }
+    }
+  }
+
+  for (std::size_t i = 0; i < state.active_missions.size(); ++i) {
+    if (!state.active_mission_runtime_flags[i].is_active) {
+      continue;
+    }
+    const GameDate deadline = Mission_ComputeDateAfterSteps(
+        state, state.active_missions[i].time_limit_days_remaining);
+    state.active_mission_runtime_flags[i].deadline_year = deadline.year;
+    state.active_mission_runtime_flags[i].deadline_month = deadline.month;
+    state.active_mission_runtime_flags[i].deadline_day = deadline.day;
+  }
   NovaOutfit_RecomputeOutfitDerivedState(state);
   const auto effective = Outfit_ComputePlayerEffectiveStats(state);
   state.player.shield_points = effective.max_shield_points;
