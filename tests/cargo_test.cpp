@@ -8,6 +8,7 @@
 #include "game/outfit.hpp"
 #include "game/probe_state.hpp"
 #include "game/scenario_data.hpp"
+#include "game/weapon.hpp"
 
 #include "brgr_archive.hpp"
 #include "rle_sprite_sheet.hpp"
@@ -330,6 +331,109 @@ TEST_CASE("player total cargo capacity and free mass aggregates",
   // The original clamps the free-mass result at zero.
   state.scenario.ships[0].free_mass = 5;
   CHECK(Outfit_ComputePlayerFreeMass(state) == 0);
+}
+
+// Real-data regression for the loader's default-loadout FreeMass fold
+// (0x004bd3c0): after the ship purchase/new-pilot loadout rebuild (0x00492f30
+// adds DefaultItems to owned, then the weapon banks are seeded and reconciled
+// into owned outfits), Ship_ComputeShipFreeMass must report the advertised
+// (shp payload) FreeMass. Without the fold the player lost the whole default
+// loadout mass; the IDA Frigate (0x8c) is the shared-ammo reporter case.
+TEST_CASE("default-loadout fold leaves the advertised player free mass",
+          "[cargo][outfit][scenario]") {
+  ScenarioData data;
+  REQUIRE(data.LoadFromArchives());
+
+  for (const std::int16_t resource_id : {0x80, 0x85, 0x8c, 0x8f, 0xb2}) {
+    const ShipClass *ship = data.Ship(resource_id);
+    REQUIRE(ship != nullptr);
+
+    GameState state;
+    state.scenario.ships = data.ships;
+    state.scenario.outfits = data.outfits;
+    state.scenario.weapons = data.weapons;
+    state.player.ship_class_id = static_cast<std::int16_t>(resource_id - 0x80);
+    state.inventory.outfit_owned_count.fill(0);
+
+    // New-pilot seeding: DefaultItems into owned, then stock weapons/ammo
+    // into the banks and reconciled back into owned outfit counts.
+    for (std::size_t i = 0; i < ship->default_outfit_ids.size(); ++i) {
+      const std::int16_t id = ship->default_outfit_ids[i];
+      if (id >= 0x80 && ship->default_outfit_counts[i] > 0) {
+        state.inventory
+            .outfit_owned_count[static_cast<std::size_t>(id - 0x80)] +=
+            ship->default_outfit_counts[i];
+      }
+    }
+    NovaWeapon_SeedBanksFromShipStock(state, state.player.ship_class_id);
+    NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+
+    INFO("ship 0x" << std::hex << resource_id << " " << ship->display_name);
+    CHECK(Outfit_ComputePlayerFreeMass(state) == ship->advertised_free_mass);
+  }
+}
+
+// Synthetic pin for the fold's ammo keying: the loader adds the mass of the
+// ammo outfit selected by the mounted weapon's ammo_or_energy_cost_code, not
+// the ammo outfit whose mod_val equals the weapon bank. A decoy ammo outfit at
+// the bank must be ignored.
+TEST_CASE("default-loadout fold keys ammo mass on the weapon ammo code",
+          "[cargo][outfit][scenario]") {
+  ScenarioData data;
+  data.ships.assign(1, {});
+  data.outfits.assign(6, {});
+  data.weapons.assign(1, {});
+
+  ShipClass &ship = data.ships[0];
+  ship.free_mass = 20;
+  ship.advertised_free_mass = 20;
+  ship.mass_tons = 100;
+  ship.stock_weapons[0].weapon_id = 0x80;
+  ship.stock_weapons[0].count = 1;
+  ship.stock_weapons[0].ammo_load = 3;
+
+  data.outfits[0].mod_type = 1; // weapon at bank 0
+  data.outfits[0].mod_val = 0;
+  data.outfits[0].mass_tons = 2;
+  data.outfits[2].mod_type = 3; // shared ammo code 5, nonzero mass
+  data.outfits[2].mod_val = 5;
+  data.outfits[2].mass_tons = 4;
+  data.outfits[4].mod_type = 3; // decoy ammo at the weapon bank
+  data.outfits[4].mod_val = 0;
+  data.outfits[4].mass_tons = 7;
+
+  data.weapons[0].weapon_mode_code = 1;
+  data.weapons[0].ammo_type = 5;
+
+  FoldShipDefaultLoadoutMass(data);
+  // 20 + weapon(2*1) + shared ammo(4*3) = 34; the 7-mass bank-0 decoy is not
+  // counted.
+  CHECK(ship.free_mass == 34);
+}
+
+// Synthetic pin for stock-weapon seeding (0x00489d70 / 0x00423fa0): carried
+// rounds go into the bank named by the mounted weapon's ammo code, so the
+// shared ammo outfit survives Weapon_ReconcileOutfitPoolWithWeaponBanks and
+// the fold cancels.
+TEST_CASE("stock weapon seeding keys carried ammo on the weapon ammo code",
+          "[cargo][outfit][weapon][scenario]") {
+  GameState state;
+  state.scenario.ships.assign(1, {});
+  state.scenario.outfits.assign(6, {});
+  state.scenario.weapons.assign(1, {});
+
+  ShipClass &ship = state.scenario.ships[0];
+  ship.stock_weapons[0].weapon_id = 0x80;
+  ship.stock_weapons[0].count = 1;
+  ship.stock_weapons[0].ammo_load = 3;
+
+  state.scenario.weapons[0].weapon_mode_code = 1;
+  state.scenario.weapons[0].ammo_type = 5;
+
+  NovaWeapon_SeedBanksFromShipStock(state, 0);
+  CHECK(state.weapon_count_by_class[0] == 1);
+  CHECK(state.weapon_secondary_count_by_class[5 * 100] == 3);
+  CHECK(state.weapon_secondary_count_by_class[0] == 0);
 }
 
 // Ghidra 0x00469760 Player_ComputeFleetCargoCapacity: the player ship's

@@ -511,6 +511,7 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
   s.turn_rate = static_cast<float>(ReadBeI16(bytes, 0x08));
   s.base_fuel = ReadBeI16(bytes, 0x0a);
   s.free_mass = ReadBeI16(bytes, 0x0c);
+  s.advertised_free_mass = s.free_mass;
   s.base_armor = ReadBeI16(bytes, 0x0e);
   // Bible ShieldRech/ArmorRech units are shield/armor points * 1000 per
   // reference frame: 1000 means one point per 30 Hz frame.
@@ -1566,6 +1567,73 @@ const ImpactEffect *ScenarioData::ImpactEffectAt(std::int16_t effect_id) const {
   return &impact_effects[static_cast<std::size_t>(effect_id)];
 }
 
+// Ghidra 0x004bd3c0 ship-section FreeMass fold. ShipClassDef.free_mass (+0x4,
+// shp payload +0x0c) is raised by the purchase mass of every default loadout
+// item so that Ship_ComputeShipFreeMass (0x00463470), which subtracts
+// g_outfit_owned_count -- including the defaults a ship purchase adds
+// (0x00492f30) -- nets back to the payload value. Folded here:
+//   - per stock weapon bank: the weapon Outfit (ModType1==1, ModVal==bank)
+//     times the mounted count, then the ammo Outfit (ModType1==3) keyed on the
+//     mounted weapon's ammo_or_energy_cost_code (mode-99 carried-ship bays
+//     fall back to the bank) times the carried rounds;
+//   - per DefaultItem slot: the outfit times its count.
+// An outfit whose tech_level is the 0x7fff "unavailable" sentinel is skipped.
+void FoldShipDefaultLoadoutMass(ScenarioData &data) {
+  for (ShipClass &ship : data.ships) {
+    std::int16_t folded = ship.free_mass;
+    for (const ShipDefaultWeaponBank &stock : ship.stock_weapons) {
+      if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
+        continue;
+      }
+      const std::int16_t bank =
+          static_cast<std::int16_t>(stock.weapon_id - 0x80);
+      if (stock.count > 0) {
+        for (const Outfit &outfit : data.outfits) {
+          if (outfit.mod_type == 1 && outfit.mod_val == bank &&
+              outfit.tech_level < 0x7fff) {
+            folded = static_cast<std::int16_t>(
+                folded + outfit.PurchaseMass(ship.mass_tons) * stock.count);
+            break;
+          }
+        }
+      }
+      if (stock.ammo_load <= 0) {
+        continue;
+      }
+      std::int16_t key = bank;
+      if (const Weapon *weapon = data.Weapon(stock.weapon_id);
+          weapon != nullptr && weapon->weapon_mode_code != 99) {
+        if (weapon->ammo_type < 0 || weapon->ammo_type > 0xff) {
+          continue;
+        }
+        key = weapon->ammo_type;
+      }
+      for (const Outfit &outfit : data.outfits) {
+        if (outfit.mod_type == 3 && outfit.mod_val == key &&
+            outfit.tech_level < 0x7fff) {
+          folded = static_cast<std::int16_t>(
+              folded + outfit.PurchaseMass(ship.mass_tons) * stock.ammo_load);
+          break;
+        }
+      }
+    }
+    for (std::size_t i = 0; i < ship.default_outfit_ids.size(); ++i) {
+      const std::int16_t id = ship.default_outfit_ids[i];
+      const std::int16_t count = ship.default_outfit_counts[i];
+      if (id < 0x80 || count <= 0) {
+        continue;
+      }
+      const Outfit *outfit = data.Outfit(id);
+      if (outfit == nullptr || outfit->tech_level >= 0x7fff) {
+        continue;
+      }
+      folded = static_cast<std::int16_t>(
+          folded + outfit->PurchaseMass(ship.mass_tons) * count);
+    }
+    ship.free_mass = folded;
+  }
+}
+
 bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
                                     bool ship_animations) {
   // The original loader consumes eight NovaRandom draws for each present
@@ -1822,6 +1890,9 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
     }
   }
   ComputeWeaponEffectiveRanges(weapons);
+  // Apply the loader's ship-section default-loadout FreeMass fold once the
+  // outfit and weapon tables it resolves against are loaded (0x004bd3c0).
+  FoldShipDefaultLoadoutMass(*this);
   for (std::int32_t id = 0x80; id <= 0x57f; ++id) {
     if (const auto res = NovaResource_LoadNamed(
             scenario::kStellarResourceType, static_cast<std::uint16_t>(id))) {

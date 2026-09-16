@@ -8,6 +8,7 @@
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
 #include "../sdl_platform.hpp"
+#include "compatibility.hpp"
 #include "hud_overlay.hpp"
 #include "landed_store.hpp"
 #include "mission.hpp"
@@ -806,6 +807,69 @@ struct ShipyardInfoLayout {
   return lines;
 }
 
+// "Space:" value in the Shipyard Info panel. The original (0x00495c80) starts
+// from the loader-folded ShipClassDef.free_mass and re-subtracts the default
+// weapon/ammo/DefaultItem masses. Its ammo subtraction is keyed on the weapon
+// bank index, while the loader's matching addition (0x004bd3c0) is keyed on
+// the mounted weapon's ammo_or_energy_cost_code, so a weapon that shares
+// another weapon's ammo outfit leaves its loaded rounds in the total
+// (FreeMass + loaded ammo). BUGFIX(original): show the advertised payload
+// FreeMass instead. The faithful (buggy) recompute is kept for
+// kApplyOriginalBugFixes == false.
+[[nodiscard]] std::int32_t ShipyardDisplayFreeMass(const GameState &state,
+                                                   const ShipClass &ship) {
+  if (kApplyOriginalBugFixes) {
+    return std::max(0, static_cast<std::int32_t>(ship.advertised_free_mass));
+  }
+  std::int32_t free_mass = ship.free_mass;
+  const auto subtract = [&free_mass](std::int32_t mass) {
+    if (mass <= free_mass) {
+      free_mass -= mass;
+    } else {
+      free_mass = 0;
+    }
+  };
+  for (const ShipDefaultWeaponBank &stock : ship.stock_weapons) {
+    if (stock.weapon_id < 0x80 || stock.weapon_id >= 0x180) {
+      continue;
+    }
+    const std::int16_t bank = static_cast<std::int16_t>(stock.weapon_id - 0x80);
+    if (stock.count > 0) {
+      for (const Outfit &outfit : state.scenario.outfits) {
+        if (outfit.mod_type == 1 && outfit.mod_val == bank &&
+            outfit.tech_level < 0x7fff) {
+          subtract(outfit.PurchaseMass(ship.mass_tons) * stock.count);
+          break;
+        }
+      }
+    }
+    if (stock.ammo_load > 0) {
+      // Original display keys the ammo subtraction on the bank, not on the
+      // mounted weapon's ammo code -- the shared-ammo source of the bug.
+      for (const Outfit &outfit : state.scenario.outfits) {
+        if (outfit.mod_type == 3 && outfit.mod_val == bank &&
+            outfit.tech_level < 0x7fff) {
+          subtract(outfit.PurchaseMass(ship.mass_tons) * stock.ammo_load);
+          break;
+        }
+      }
+    }
+  }
+  for (std::size_t i = 0; i < ship.default_outfit_ids.size(); ++i) {
+    const std::int16_t id = ship.default_outfit_ids[i];
+    const std::int16_t count = ship.default_outfit_counts[i];
+    if (id < 0x80 || count <= 0) {
+      continue;
+    }
+    const Outfit *outfit = state.scenario.Outfit(id);
+    if (outfit == nullptr || outfit->tech_level >= 0x7fff) {
+      continue;
+    }
+    subtract(outfit->PurchaseMass(ship.mass_tons) * count);
+  }
+  return std::max(0, free_mass);
+}
+
 void DrawShipyardInfoPanel(SdlPlatform &platform,
                            NovaFontCache &font_cache,
                            const ServicesButtonArt &button_art,
@@ -931,17 +995,15 @@ void DrawShipyardInfoPanel(SdlPlatform &platform,
           : none);
 
   // Right column (label at +0x82, value at +0xaf). "Space:" is the shïp
-  // FreeMass: the original recomputes it per draw by re-subtracting the stock
-  // outfit masses that the loader (0x004bd3c0 post-pass) folded into
-  // ShipClassDef+0x4; that round trip always lands back on the payload value
-  // clamped at zero, which the port keeps as free_mass.
+  // advertised FreeMass; see ShipyardDisplayFreeMass for the original
+  // (0x00495c80) recompute and the shared-ammo BUGFIX(original).
   constexpr float kRightLabelDx = 130.0F;
   constexpr float kRightValueDx = 175.0F;
   row(stats_left + kRightLabelDx,
       stats_left + kRightValueDx,
       12.0F,
       InfoString(0xe9),
-      quantity(std::max(0, static_cast<int>(ship->free_mass)), ton, tons));
+      quantity(ShipyardDisplayFreeMass(state, *ship), ton, tons));
   row(stats_left + kRightLabelDx,
       stats_left + kRightValueDx,
       24.0F,
