@@ -735,4 +735,57 @@ TEST_CASE("archived pilot fixtures survive a non-destructive canonical disk "
   }
 }
 
+TEST_CASE("pilot save stores the 0-based stellar index, not a resource id") {
+  using game::PilotFileStellarIndexFromResourceId;
+  // 0x004c7dd0/0x004cb260 treat block1+0x00 as a g_stellar_defs index;
+  // the port's stellar ids are 0x80-based resource ids.
+  CHECK(PilotFileStellarIndexFromResourceId(0x80) == 0);
+  CHECK(PilotFileStellarIndexFromResourceId(0x81) == 1);
+  CHECK(PilotFileStellarIndexFromResourceId(0xea) == 106);
+  CHECK(PilotFileStellarIndexFromResourceId(-1) == -1);
+  // The new-game "no nav stellar" fallback saves index 0 (see
+  // Menu_RunNewGameFlow 0x00489d70); it must pass through untouched.
+  CHECK(PilotFileStellarIndexFromResourceId(0) == 0);
+
+  game::GameState state;
+  REQUIRE(state.scenario.LoadFromArchives());
+  // Pick a defined stellar away from the origin so a lost position (0,0) or an
+  // off-by-0x80 lookup on the wrong (undefined) slot is detectable.
+  const game::Stellar *departure = nullptr;
+  std::int16_t departure_resource_id = -1;
+  for (std::size_t i = 0; i < state.scenario.stellars.size(); ++i) {
+    const game::Stellar &stellar = state.scenario.stellars[i];
+    if (stellar.is_defined && (stellar.pos_x != 0 || stellar.pos_y != 0)) {
+      departure = &stellar;
+      departure_resource_id = static_cast<std::int16_t>(i + 0x80);
+      break;
+    }
+  }
+  REQUIRE(departure != nullptr);
+
+  const auto dir =
+      std::filesystem::temp_directory_path() / "evnova_pilot_index_test";
+  std::filesystem::create_directories(dir);
+  const auto path = dir / "Index Pilot.plt";
+  std::filesystem::remove(path);
+
+  state.pilot.first_name = "Index Pilot";
+  state.player.ship_class_id = 0;
+  REQUIRE(PilotFileSaveGame(
+      dir, state, PilotFileStellarIndexFromResourceId(departure_resource_id)));
+
+  game::GameState loaded;
+  REQUIRE(loaded.scenario.LoadFromArchives());
+  game::NovaShip_ResetPlayerShipState(loaded);
+  const auto result = PilotFileLoadSave(path, loaded);
+  CHECK((result == PilotLoadError::kOk ||
+         result == PilotLoadError::kRepairsApplied));
+  // PilotFile_LoadSave 0x004cb260: pos = g_stellar_defs[jump_dest].map_x/y.
+  CHECK(loaded.player.pos_x == static_cast<float>(departure->pos_x));
+  CHECK(loaded.player.pos_y == static_cast<float>(departure->pos_y));
+
+  PilotFileDelete(path);
+  std::filesystem::remove(dir / "Last Pilot");
+}
+
 } // namespace

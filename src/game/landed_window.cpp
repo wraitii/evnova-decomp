@@ -281,11 +281,18 @@ void Stellar_Launch(GameState &state, std::int16_t stellar_id) {
   // system), visibility rebuild and region events.
   NovaSystem_OnSystemEntered(state, state.player.current_system_id, 2);
   // 0x00456103: launch autosave, with the docked stellar as the restore point
-  // (block1 +0x00). Tests and incomplete bootstrap states have no pilot name;
-  // the original entry point is likewise only reachable for an active pilot.
+  // (block1 +0x00). The original passes ship->ai_secondary_target_slot, a
+  // 0-based g_stellar_defs index; stellar_id here is the port's 0x80-based
+  // resource id, so rebase before saving (the loader reads the word back as
+  // an index, so a raw resource id would land the player on the wrong stellar
+  // or at 0,0 when that slot is undefined). Tests and incomplete bootstrap
+  // states have no pilot name; the original entry point is likewise only
+  // reachable for an active pilot.
   if (!state.pilot.first_name.empty()) {
     if (const auto directory = PilotFileSaveDirectory()) {
-      if (!PilotFileSaveGame(*directory, state, stellar_id)) {
+      if (!PilotFileSaveGame(*directory,
+                             state,
+                             PilotFileStellarIndexFromResourceId(stellar_id))) {
         NovaLog::Error("launch: could not autosave pilot '{}'",
                        state.pilot.first_name);
       }
