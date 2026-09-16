@@ -318,6 +318,39 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(collected.pers_grudge_flags[3] == 1);
 }
 
+TEST_CASE("new-pilot stellar reset derives domination from flags 0x20") {
+  game::GameState state;
+  state.scenario.stellars.resize(3);
+  auto &dominated = state.scenario.stellars[0];
+  dominated.availability_flags = 0x20; // Bible "starts the game dominated"
+  dominated.strength_capacity = 5;
+  dominated.strength = 99;
+  auto &destroyed = state.scenario.stellars[1];
+  destroyed.availability_flags = 0x40; // Bible "starts the game destroyed"
+  destroyed.schedule_days = 7;
+  destroyed.strength = 99;
+  auto &plain = state.scenario.stellars[2];
+  plain.strength_capacity = 9;
+  plain.strength = 3;
+
+  game::NovaNewPilot_ResetStellarStrengthForNewGame(state);
+
+  CHECK(dominated.dominated == 1);
+  CHECK(dominated.strength == 5);
+  CHECK(dominated.destroyed_days_remaining == 0);
+  CHECK(destroyed.dominated == 0);
+  CHECK(destroyed.strength == -1);
+  CHECK(destroyed.destroyed_days_remaining == 7);
+  CHECK(plain.dominated == 0);
+  CHECK(plain.strength == 9);
+  CHECK(plain.destroyed_days_remaining == 0);
+
+  // Starts-destroyed with a negative schedule seed pins the countdown to 1.
+  destroyed.schedule_days = -3;
+  game::NovaNewPilot_ResetStellarStrengthForNewGame(state);
+  CHECK(destroyed.destroyed_days_remaining == 1);
+}
+
 TEST_CASE("new-pilot record seeding preserves loader-marked personalities") {
   game::GameState state;
   REQUIRE(state.scenario.LoadFromArchives());

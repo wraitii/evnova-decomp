@@ -2,8 +2,10 @@
 
 #include "game/game_state.hpp"
 #include "game/hud_overlay.hpp"
+#include "game/outfit.hpp"
 #include "game/player_info_window.hpp"
 #include "game/starmap.hpp"
+#include "game/weapon.hpp"
 
 #include <filesystem>
 
@@ -46,6 +48,25 @@ TEST_CASE("player info extras separate consecutive outfits") {
   // comma for 3+).
   CHECK(texts.extras.find("an alpha module and two beta modules.") !=
         std::string::npos);
+}
+
+TEST_CASE("player info extras include mounted stock weapons after reconcile") {
+  game::GameState state;
+  state.scenario.outfits.resize(state.inventory.outfit_owned_count.size());
+  game::Outfit &medium_blaster = state.scenario.outfits[3];
+  medium_blaster.mod_type =
+      static_cast<std::int16_t>(game::OutfitEffect::kWeapon);
+  medium_blaster.mod_val = 7;
+  medium_blaster.lc_name = "medium blaster";
+  medium_blaster.lc_plural = "medium blasters";
+  medium_blaster.similar_to = 3;
+  state.weapon_count_by_class[7 * 100] = 1;
+
+  game::NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
+
+  CHECK(state.inventory.outfit_owned_count[3] == 1);
+  CHECK(game::NovaPlayerInfo_BuildSummaryTexts(state).extras.find(
+            "a medium blaster") != std::string::npos);
 }
 
 TEST_CASE("player info extras group same-named outfits through similar_to") {

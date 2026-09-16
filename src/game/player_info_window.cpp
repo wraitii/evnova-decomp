@@ -17,6 +17,7 @@
 #include "starmap.hpp"
 #include "travel.hpp"
 #include "ui_dialog.hpp"
+#include "weapon.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -921,8 +922,10 @@ PlayerInfoWindowResult NovaPlayerInfo_RunWindow(SdlPlatform &platform,
   }
 
   // Weapon_ReconcileOutfitPoolWithWeaponBanks (0x00462ec0) refreshes the
-  // outfit ledger before the window opens.
-  // TODO(decomp(0x00462ec0)).
+  // outfit ledger before the window opens. This materializes mounted stock
+  // weapons that are not DefaultItems (for example the Terrapin's Medium
+  // Blaster) so the Extras page includes them.
+  NovaWeapon_ReconcileOutfitPoolWithWeaponBanks(state);
 
   auto definition = NovaResource_LoadDialogDefinition(kDialogId);
   auto items =

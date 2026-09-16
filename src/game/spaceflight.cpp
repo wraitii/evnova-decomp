@@ -2362,6 +2362,11 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
 
     // Ghidra scope 2 "drawing": sprite world present + viewport particles +
     // commit frame.
+    // A shipyard purchase/capture can change the player class while this
+    // flight loop remains alive. Re-run the class-aware cache gate before
+    // every draw; it is a no-op unless the class changed, and refreshes the
+    // hull/effect sheets plus muzzle geometry when it did.
+    (void)view.EnsureShipSprite(platform, state);
     view.DrawGameFrame(platform, state, hud);
     // Route-map overlay blit (Ghidra 0x00439bd0, drawn over the frame after
     // the HUD overlay message, before the target-category panel): draws only

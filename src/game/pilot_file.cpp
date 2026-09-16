@@ -153,14 +153,15 @@ std::optional<std::filesystem::path> PilotFileSaveDirectory() {
 PilotFile PilotFile::Fresh() {
   // Ghidra 0x004cd4b0 PilotData_InitializePlayerState, absent-block seed:
   // g_ship_states->credits = 10000, ship_class_id = 0, current_system_id = 0,
-  // combat rating = 0, in-game date 1999/1/1, per-govt reputation reset. The
-  // reputation/combat-rating fields are not tracked by GameState yet, so
-  // only the ship-core defaults and the calendar are seeded here.
+  // combat rating = 0, in-game date 2250/1/1 (DAT_00735474/76/78 =
+  // 0x8ca/1/1), per-govt reputation reset. The reputation/combat-rating
+  // fields are not tracked here; the fresh-game flow reads them from the
+  // character template.
   PilotFile fresh;
   fresh.credits = 10000;
   fresh.ship_class_id = 0;
   fresh.current_system_id = 0;
-  fresh.date = GameDate{1999, 1, 1};
+  fresh.date = GameDate{2250, 1, 1};
   // The absent-block engagement default is the loader's <1 fallback
   // (destroyed_days_remaining -1, live strength reset to capacity).
   fresh.stellar_destroyed_days_remaining.fill(-1);
@@ -172,6 +173,78 @@ PilotFile PilotFile::Fresh() {
   fresh.fighter_ship_class_ids.fill(-1);
   fresh.fighter_voice_types.fill(-1);
   return fresh;
+}
+
+std::optional<CharacterTemplate>
+CharacterTemplate_Read(std::string_view block_key) {
+  // Ghidra 0x004cd4b0 PilotData_InitializePlayerState (param_2 != 0): reads the
+  // selected 0x63688a72 block. The original grows it to 0x16a bytes first
+  // (ResourceData_EnsureBlockSize), so a short block reads as zero-padded.
+  const auto block = NovaResource_AccessCharacterBlockByKey(block_key);
+  if (!block) {
+    return std::nullopt;
+  }
+  const std::span<const std::byte> bytes{block->bytes};
+  const auto read_u16 = [&bytes](std::size_t offset) -> std::int16_t {
+    if (offset + 2 > bytes.size()) {
+      return 0;
+    }
+    return static_cast<std::int16_t>(
+        (std::to_integer<unsigned>(bytes[offset]) << 8U) |
+        std::to_integer<unsigned>(bytes[offset + 1]));
+  };
+  const auto read_u32 = [&bytes](std::size_t offset) -> std::int32_t {
+    if (offset + 4 > bytes.size()) {
+      return 0;
+    }
+    return static_cast<std::int32_t>(
+        (std::to_integer<std::uint32_t>(bytes[offset]) << 24U) |
+        (std::to_integer<std::uint32_t>(bytes[offset + 1]) << 16U) |
+        (std::to_integer<std::uint32_t>(bytes[offset + 2]) << 8U) |
+        std::to_integer<std::uint32_t>(bytes[offset + 3]));
+  };
+  const auto read_cstring = [&bytes](std::size_t offset,
+                                     std::size_t limit) -> std::string {
+    std::string out;
+    for (std::size_t i = 0; i < limit && offset + i < bytes.size(); ++i) {
+      const char c = static_cast<char>(bytes[offset + i]);
+      if (c == '\0') {
+        break;
+      }
+      out.push_back(c);
+    }
+    return out;
+  };
+  const auto read_pstring = [&bytes](std::size_t offset,
+                                     std::size_t limit) -> std::string {
+    if (offset >= bytes.size()) {
+      return {};
+    }
+    const std::size_t length =
+        std::min<std::size_t>(std::to_integer<unsigned>(bytes[offset]), limit);
+    std::string out;
+    for (std::size_t i = 0; i < length && offset + 1 + i < bytes.size(); ++i) {
+      out.push_back(static_cast<char>(bytes[offset + 1 + i]));
+    }
+    return out;
+  };
+
+  CharacterTemplate tmpl;
+  tmpl.credits = read_u32(0x00);
+  const std::int16_t ship_type = read_u16(0x04);
+  tmpl.ship_class_id =
+      ship_type >= 0x80 ? static_cast<std::int16_t>(ship_type - 0x80) : 0;
+  for (std::size_t i = 0; i < tmpl.systems.size(); ++i) {
+    tmpl.systems[i] = read_u16(0x06 + i * 2);
+    tmpl.govt_ids[i] = read_u16(0x0e + i * 2);
+    tmpl.govt_status[i] = read_u16(0x16 + i * 2);
+  }
+  tmpl.combat_rating_points = read_u16(0x1e);
+  tmpl.date = GameDate{read_u16(0x138), read_u16(0x136), read_u16(0x134)};
+  tmpl.date_prefix = read_cstring(0x13a, 0x10);
+  tmpl.date_suffix = read_cstring(0x14a, 0x20);
+  tmpl.on_start = read_pstring(0x32, 0x100);
+  return tmpl;
 }
 
 void PilotFileSeedPersonalityPresence(const ScenarioData &scenario,
