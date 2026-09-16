@@ -80,6 +80,29 @@ either success or failure. A `repeat` step (with `count` and a nested
 repeated routes compact; log and diagnostic step labels become dotted
 (`7.3.2`) inside nested iterations.
 
+Path components may use `*` to fan out over a list: `ui.items.*.label` holds
+when any row's label equals the value. A step may carry `trigger` (a table
+that must match before the step runs) and `trigger_not` (a table that must not
+match); either failing skips the step, so a route can gate optional actions on
+runtime state (e.g. only hire a class when it is currently offered and the
+fleet does not already have one). `click` accepts either `element` (a
+published rect name) or `where` (a table matched against the active modal's
+`items[]` fields, e.g. `where = { label = "Terrapin" }`), resolving the first
+matching row. A `repeat` may add `until = { ... }` to stop early once the
+condition holds (checked after each iteration). The `ships` observation root
+exposes `/probe/state?query=ships` plus synthetic `ships.escorts` (class
+display names of the player's attached, non-mission behavior-6 escorts) and
+`ships.escort_count`, so scenarios can test fleet composition without scanning
+arrays in TOML. The escort predicate mirrors `Ship_CanPlayerHaveMoreEscorts`
+(0x00468920): `ai_behavior_code == 6`, `mission_fleet_slot == -1` and
+`squad_leader_ship_slot == 0`. The last test is what excludes NPC escorts
+following other ships, which otherwise share the behavior code and mission
+slot and inflate the count. `decline_mission` is a semantic step for the Spaceport/Bar
+AvailLoc offer passes: it clicks `decline` on any `mission_offer` and `done`
+on the `text_reader` refuse dialog that follows, returning once no such modal
+has appeared for `settle_ms` (default 300, raise it to cover the Bar's delayed
+recheck timer).
+
 Flight automation is input-only: `{"cmd":"land_at","target":"Earth"}` and
 `{"cmd":"jump_to","target":"Sol"}` install a controller that emits the same
 edge/held `FlightInput` commands as a pilot. A pure-decimal `target` for
@@ -111,7 +134,14 @@ matches (unless `allow_missing` is set).
 center without touching game state: it synthesizes a click on the published
 `trade.row.<commodity>` rect and then one on the `buy`/`sell` button, so the
 modal's own handler runs the transaction (the click quantity, up to 10 tons).
-It returns `409` if the trade center has not published those elements yet.
+An optional `"tons":N` (1..32000) makes that transaction exact, and
+`"max":true` trades the whole affordable/held amount (the shift quantity
+prompt's default). The modal consumes the queued quantity inside the same
+handler, so no game state is written outside the UI path; the command waits
+for that consumption before returning (`504` if the modal never applies it),
+which keeps consecutive `tons`/`max` trades ordered even when the resulting
+cargo count is credit-limited and not known in advance. It returns `409` if
+the trade center has not published those elements yet.
 
 ### UI layout registry (click by intent)
 
@@ -128,7 +158,17 @@ names: `window`, `accept`/`decline`, `done`, `take`, `leave`, `buy`,
 instead of relying on the default first entry. The trade center similarly
 publishes `trade.row.<n>` for its 8 commodity rows and lists them in the
 `items` array with `label` and `price` (so a scenario can assert
-`ui.items.0.price` as well as click the row). `GET /probe/ui` returns the
+`ui.items.0.price` as well as click the row). The shipyard, hire-escort and
+outfitter stores publish one `store.slot.<n>` rect per filled cell on the
+current page as label/price items whose label is the item's scenario short
+name, so a harness can page (`previous`/`next`) until the wanted ship or outfit
+appears, click its cell, and assert `ui.items.<n>.selected` afterwards. The
+store windows are named `outfitter`, `shipyard` (purchase) and
+`shipyard_hire` (the Bar's Hire Escort action); the third action button is
+`buy` / `sell_or_info` (Sell for the outfitter, Info for the shipyard).
+Every `items` entry carries `"selected": true|false`, the list's current
+highlight, so the harness can verify a trade row or store cell selection
+without a screenshot. `GET /probe/ui` returns the
 active modal's rects
 **plus `window_size` and `playfield`** — the current window point size and
 the 640x480 canvas rect — so a harness can convert backing-store screenshots
@@ -142,8 +182,9 @@ and doubles as documentation of the dialog's controls.
 ### State queries
 
 `summary` (default), `player`, `missions`, `ships` (active NPCs in the
-current system), `cargo` (credits, capacity, the 6 commodity bins and any
-non-zero junk), `travel`, `system`. Floats are rounded to 2 decimals; ids
+current system), `cargo` (credits, `capacity` = the player hull's own holds,
+`fleet_capacity` = hull + eligible escort freighters' holds, the 6 commodity
+bins and any non-zero junk), `travel`, `system`. Floats are rounded to 2 decimals; ids
 are the reimplementation's zero-based/rebased ids unless the field name says
 otherwise. Extend `ProbeState_Snapshot` as subsystems are reconstructed —
 prefer small typed queries over one giant dump.

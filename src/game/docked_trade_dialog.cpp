@@ -480,12 +480,26 @@ RunTradeCenterDialog(SdlPlatform &platform,
   // it is entered with g_misn_list_page_group = 4 and immediately dispatches
   // it; tutorial follow-ups such as the first trade task depend on that pass.
   (void)run_mission_offer();
+  // Probe-harness support (docs/probe_harness.md): a `trade` command may carry
+  // an explicit `tons` or `max`, consumed here so the transaction still runs
+  // through this handler. A negative pending value means "the whole lot" (the
+  // shift quantity prompt's default); 0 keeps the original hardcoded click
+  // quantity (up to 10 tons).
+  const auto trade_quantity = [&platform](std::int16_t max) -> std::int16_t {
+    const std::int16_t requested =
+        platform.probe().ConsumePendingTradeQuantity();
+    if (requested < 0) {
+      return max;
+    }
+    return requested > 0 ? std::min(requested, max)
+                         : std::min<std::int16_t>(10, max);
+  };
   while (!platform.quit_requested()) {
-    const std::uint32_t now_ms =
-        static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
+    state.tick_60hz =
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms() * 60 / 1000);
     const auto recheck_at =
-        static_cast<std::uint32_t>(state.mission_interaction_recheck_at_ms);
-    if (static_cast<std::int32_t>(now_ms - recheck_at) >= 0) {
+        static_cast<std::uint32_t>(state.mission_interaction_recheck_tick_60hz);
+    if (static_cast<std::int32_t>(state.tick_60hz - recheck_at) >= 0) {
       (void)run_mission_offer();
     }
     const auto layout = LayoutTradeCenter(platform);
@@ -508,6 +522,7 @@ RunTradeCenterDialog(SdlPlatform &platform,
       row.name = "trade.row." + std::to_string(i);
       row.rect = layout->rows[i];
       row.has_value = true;
+      row.selected = static_cast<std::int16_t>(i) == session.selected;
       row.label = NovaTradeCenter_RowName(state, session, static_cast<int>(i));
       row.value = session.rows[i].price;
       probe_controls.push_back(std::move(row));
@@ -545,32 +560,26 @@ RunTradeCenterDialog(SdlPlatform &platform,
           return LandedExit::kServiceComplete;
         }
         if (key == 'b') {
-          std::int16_t qty = std::min<std::int16_t>(
-              10, NovaTradeCenter_BuyMax(state, session, session.selected));
-          if (in->shift) {
-            const std::int16_t max =
-                NovaTradeCenter_BuyMax(state, session, session.selected);
-            qty =
-                max <= 1
-                    ? max
-                    : RunStoreQuantityPrompt(platform, max, render_background);
-          }
+          const std::int16_t max =
+              NovaTradeCenter_BuyMax(state, session, session.selected);
+          const std::int16_t qty =
+              in->shift ? (max <= 1 ? max
+                                    : RunStoreQuantityPrompt(
+                                          platform, max, render_background))
+                        : trade_quantity(max);
           if (qty > 0) {
             (void)NovaTradeCenter_Buy(state, session, session.selected, qty);
           }
           continue;
         }
         if (key == 's') {
-          std::int16_t qty = std::min<std::int16_t>(
-              10, NovaTradeCenter_SellMax(state, session, session.selected));
-          if (in->shift) {
-            const std::int16_t max =
-                NovaTradeCenter_SellMax(state, session, session.selected);
-            qty =
-                max <= 1
-                    ? max
-                    : RunStoreQuantityPrompt(platform, max, render_background);
-          }
+          const std::int16_t max =
+              NovaTradeCenter_SellMax(state, session, session.selected);
+          const std::int16_t qty =
+              in->shift ? (max <= 1 ? max
+                                    : RunStoreQuantityPrompt(
+                                          platform, max, render_background))
+                        : trade_quantity(max);
           if (qty > 0) {
             (void)NovaTradeCenter_Sell(state, session, session.selected, qty);
           }
@@ -584,13 +593,13 @@ RunTradeCenterDialog(SdlPlatform &platform,
           return LandedExit::kServiceComplete;
         }
         if (Contains(layout->buy, mouse)) {
-          const std::int16_t qty = std::min<std::int16_t>(
-              10, NovaTradeCenter_BuyMax(state, session, session.selected));
+          const std::int16_t qty = trade_quantity(
+              NovaTradeCenter_BuyMax(state, session, session.selected));
           (void)NovaTradeCenter_Buy(state, session, session.selected, qty);
         }
         if (Contains(layout->sell, mouse)) {
-          const std::int16_t qty = std::min<std::int16_t>(
-              10, NovaTradeCenter_SellMax(state, session, session.selected));
+          const std::int16_t qty = trade_quantity(
+              NovaTradeCenter_SellMax(state, session, session.selected));
           (void)NovaTradeCenter_Sell(state, session, session.selected, qty);
         }
         for (std::size_t i = 0; i < kTradeCenterRowCount; ++i) {

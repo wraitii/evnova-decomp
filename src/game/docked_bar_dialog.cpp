@@ -436,9 +436,12 @@ LandedExit RunBarDialog(SdlPlatform &platform,
   };
 
   // Ghidra 0x0047c8e0 sets g_misn_list_page_group = 1 and schedules action 6
-  // (Mission_TriggerReturnMissionInteractions(1)) fifteen ticks after entry.
-  state.mission_interaction_recheck_at_ms =
-      static_cast<std::int32_t>(platform.gameplay_ticks_ms()) + 0x0f;
+  // (Mission_TriggerReturnMissionInteractions(1)) fifteen 60 Hz ticks after
+  // entry.
+  state.tick_60hz =
+      static_cast<std::uint32_t>(platform.gameplay_ticks_ms() * 60 / 1000);
+  state.mission_interaction_recheck_tick_60hz =
+      static_cast<std::int32_t>(state.tick_60hz) + 0x0f;
 
   // Modal action dispatcher (0x0047c8e0's action arms). Returns true when
   // the bar window should close.
@@ -495,11 +498,14 @@ LandedExit RunBarDialog(SdlPlatform &platform,
     // Mission offers and other nested modals clear their semantic controls.
     // Restore the bar surface when its root loop resumes.
     publish_probe_controls();
-    const std::uint32_t now_ms =
-        static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
+    // The original's shared 60 Hz counter advances independently of the
+    // flight loop, so refresh it here (this modal owns the frame clock) before
+    // consulting the recheck deadline.
+    state.tick_60hz =
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms() * 60 / 1000);
     const auto recheck_at =
-        static_cast<std::uint32_t>(state.mission_interaction_recheck_at_ms);
-    if (static_cast<std::int32_t>(now_ms - recheck_at) >= 0) {
+        static_cast<std::uint32_t>(state.mission_interaction_recheck_tick_60hz);
+    if (static_cast<std::int32_t>(state.tick_60hz - recheck_at) >= 0) {
       (void)run_mission_offer();
     }
     draw_frame();

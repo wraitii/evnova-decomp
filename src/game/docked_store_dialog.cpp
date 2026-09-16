@@ -1418,25 +1418,58 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
   };
   ProbeUiAutoClear probe_ui_guard(platform);
   while (!platform.quit_requested()) {
-    const std::uint32_t now_ms =
-        static_cast<std::uint32_t>(platform.gameplay_ticks_ms());
+    state.tick_60hz =
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms() * 60 / 1000);
     const auto recheck_at =
-        static_cast<std::uint32_t>(state.mission_interaction_recheck_at_ms);
+        static_cast<std::uint32_t>(state.mission_interaction_recheck_tick_60hz);
     if (mission_context &&
-        static_cast<std::int32_t>(now_ms - recheck_at) >= 0) {
+        static_cast<std::int32_t>(state.tick_60hz - recheck_at) >= 0) {
       (void)run_mission_offer();
     }
     const StoreLayout layout = LayoutStore(platform, outfit_store);
-    platform.PublishProbeUi(outfit_store ? "outfitter" : "shipyard",
-                            {{"window", layout.frame},
-                             // Both store windows caption this control "Done".
-                             // Retain "leave" as a compatibility alias.
-                             {"done", layout.leave},
-                             {"leave", layout.leave},
-                             {"buy", layout.buy},
-                             {"sell_or_info", layout.sell_or_info},
-                             {"previous", layout.previous},
-                             {"next", layout.next}});
+    // The store windows share one control set; the grid slots are published
+    // as label/price items so a harness can find a ship or outfit by name and
+    // click its cell without guessing the page layout. Window names
+    // distinguish the three screens (the Shipyard and the Bar's Hire Escort
+    // action both run this loop).
+    std::vector<ProbeNamedRect> probe_controls{
+        // Both store windows caption this control "Done". Retain "leave" as
+        // a compatibility alias.
+        {"window", layout.frame},
+        {"done", layout.leave},
+        {"leave", layout.leave},
+        {"buy", layout.buy},
+        {"sell_or_info", layout.sell_or_info},
+        {"previous", layout.previous},
+        {"next", layout.next}};
+    for (std::size_t slot = 0; slot < LandedStoreSession::kPageSlots; ++slot) {
+      const std::size_t index = session.page_base + slot;
+      if (index >= session.available_ids.size()) {
+        break;
+      }
+      const std::int16_t id = session.available_ids[index];
+      ProbeNamedRect cell;
+      cell.name = "store.slot." + std::to_string(slot);
+      cell.rect = StoreCell(layout, slot);
+      cell.has_value = true;
+      cell.selected = id == session.selected_id;
+      if (outfit_store) {
+        const Outfit *outfit = state.scenario.Outfit(id);
+        cell.label = outfit == nullptr ? std::string{} : outfit->short_name;
+        cell.value = NovaLanded_OutfitPrice(state, stellar_id, id);
+      } else {
+        const ShipClass *ship = state.scenario.Ship(id);
+        cell.label = ship == nullptr ? std::string{} : ship->short_name;
+        cell.value = session.hire_mode
+                         ? NovaLanded_ShipHirePrice(state, stellar_id, id)
+                         : NovaLanded_ShipPrice(state, stellar_id, id);
+      }
+      probe_controls.push_back(std::move(cell));
+    }
+    platform.PublishProbeUiItems(
+        outfit_store ? "outfitter"
+                     : (session.hire_mode ? "shipyard_hire" : "shipyard"),
+        std::move(probe_controls));
     if (session.selected_id != selected_description_id) {
       selected_description.clear();
       if (session.selected_id >= 0x80) {
