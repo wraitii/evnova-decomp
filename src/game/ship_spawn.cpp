@@ -292,6 +292,9 @@ int NovaShipClass_SpawnEscortShipFromClass(GameState &state,
     // velocity: applying it to vel_x/vel_y flung restored escorts away at
     // ~50-100 px/tick. Spawned escorts keep the allocator's zero velocity.
     // The game convention is pos_x += sin, pos_y -= cos.
+    // TODO(decomp(0x0043b4a0)) skipped: the original uses 0x168-entry sine
+    // and cosine lookup tables; std::sin/std::cos preserve the behavior but
+    // can differ slightly in the resulting float coordinates.
     const float speed = static_cast<float>(RandomBelow(state, 0x32) + 0x32);
     const float bearing_deg = static_cast<float>(RandomBelow(state, 0x168));
     const float bearing_rad = bearing_deg * (3.14159265358979323846F / 180.0F);
