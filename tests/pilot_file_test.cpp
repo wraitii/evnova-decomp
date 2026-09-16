@@ -393,6 +393,7 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
   struct FixtureExpectation {
     std::string_view file;
     std::string_view nickname;
+    std::string_view ship_name;
     std::int16_t year;
     std::int16_t month;
     std::int16_t day;
@@ -404,10 +405,20 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
   };
 
   constexpr std::array expectations{
-      FixtureExpectation{
-          "Alien.plt", "Dark Knight", 1178, 10, 6, 1296635129, -1, 0, 106, 537},
+      FixtureExpectation{"Alien.plt",
+                         "Dark Knight",
+                         "Vell-os Javelin",
+                         1178,
+                         10,
+                         6,
+                         1296635129,
+                         -1,
+                         0,
+                         106,
+                         537},
       FixtureExpectation{"Archer (PC).plt",
                          "Archer",
+                         "Serenity",
                          1178,
                          8,
                          31,
@@ -416,10 +427,20 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
                          37,
                          0,
                          537},
-      FixtureExpectation{
-          "Hunter.plt", "Maverick", 1177, 11, 22, 48522725, -1, 15, 0, 534},
+      FixtureExpectation{"Hunter.plt",
+                         "Maverick",
+                         "Fed Carrier ",
+                         1177,
+                         11,
+                         22,
+                         48522725,
+                         -1,
+                         15,
+                         0,
+                         534},
       FixtureExpectation{"Pirate Hunter.plt",
                          "Hunter",
+                         "Aurora Thunderforge ",
                          1177,
                          7,
                          28,
@@ -428,10 +449,20 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
                          252,
                          280,
                          534},
-      FixtureExpectation{
-          "Plank.plt", "Planky", 1185, 10, 23, 12251587, -1, 163, 169, 458},
+      FixtureExpectation{"Plank.plt",
+                         "Planky",
+                         "Vengence Reaper",
+                         1185,
+                         10,
+                         23,
+                         12251587,
+                         -1,
+                         163,
+                         169,
+                         458},
       FixtureExpectation{"Rick Hunter.plt",
                          "Pirate Hunter",
+                         "Pirate Hunter II",
                          1177,
                          8,
                          8,
@@ -476,6 +507,7 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
     CHECK_FALSE(state.pilot.strict_play);
     CHECK(state.control.male);
     CHECK(record.nickname == expected->nickname);
+    CHECK(record.ship_name == expected->ship_name);
     CHECK(record.date.year == expected->year);
     CHECK(record.date.month == expected->month);
     CHECK(record.date.day == expected->day);

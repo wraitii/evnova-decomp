@@ -47,7 +47,9 @@ def appledouble_resource_fork(data: bytes) -> bytes | None:
     raise ValueError("AppleDouble file has no resource-fork entry")
 
 
-def resource_entries(resource_fork: bytes) -> dict[tuple[bytes, int], bytes]:
+def resource_entries(
+    resource_fork: bytes,
+) -> tuple[dict[tuple[bytes, int], bytes], dict[tuple[bytes, int], bytes]]:
     if len(resource_fork) < 16:
         raise ValueError("resource fork header is truncated")
     data_offset, map_offset, data_length, map_length = struct.unpack_from(
@@ -61,8 +63,10 @@ def resource_entries(resource_fork: bytes) -> dict[tuple[bytes, int], bytes]:
         raise ValueError("resource fork header points outside the file")
 
     type_list = map_offset + struct.unpack_from(">H", resource_fork, map_offset + 24)[0]
+    name_list = map_offset + struct.unpack_from(">H", resource_fork, map_offset + 26)[0]
     type_count = struct.unpack_from(">H", resource_fork, type_list)[0] + 1
     entries: dict[tuple[bytes, int], bytes] = {}
+    names: dict[tuple[bytes, int], bytes] = {}
     for type_index in range(type_count):
         type_entry = type_list + 2 + type_index * 8
         if type_entry + 8 > len(resource_fork):
@@ -75,6 +79,7 @@ def resource_entries(resource_fork: bytes) -> dict[tuple[bytes, int], bytes]:
             if reference + 12 > len(resource_fork):
                 raise ValueError("resource reference list is truncated")
             resource_id = struct.unpack_from(">h", resource_fork, reference)[0]
+            name_offset = struct.unpack_from(">h", resource_fork, reference + 2)[0]
             relative_offset = int.from_bytes(resource_fork[reference + 5 : reference + 8], "big")
             length_offset = data_offset + relative_offset
             if length_offset + 4 > len(resource_fork):
@@ -83,8 +88,19 @@ def resource_entries(resource_fork: bytes) -> dict[tuple[bytes, int], bytes]:
             start = length_offset + 4
             if start + length > len(resource_fork):
                 raise ValueError("resource data is truncated")
-            entries[(resource_type, resource_id)] = resource_fork[start : start + length]
-    return entries
+            key = (resource_type, resource_id)
+            entries[key] = resource_fork[start : start + length]
+            if name_offset >= 0:
+                name = name_list + name_offset
+                if name >= len(resource_fork):
+                    raise ValueError("resource name offset is outside the file")
+                name_length = resource_fork[name]
+                name_start = name + 1
+                name_end = name_start + name_length
+                if name_end > len(resource_fork):
+                    raise ValueError("resource name is truncated")
+                names[key] = resource_fork[name_start:name_end]
+    return entries, names
 
 
 def convert(source: Path, output_dir: Path) -> Path:
@@ -101,7 +117,7 @@ def convert(source: Path, output_dir: Path) -> Path:
             pilot_name = source.stem
             resource_fork = source_data
 
-    entries = resource_entries(resource_fork)
+    entries, names = resource_entries(resource_fork)
     block1 = entries.get((PILOT_RESOURCE_TYPE, 128))
     block2 = entries.get((PILOT_RESOURCE_TYPE, 129))
     if block1 is None or block2 is None:
@@ -112,13 +128,15 @@ def convert(source: Path, output_dir: Path) -> Path:
         )
 
     # Mac resource 128 has a 96-byte platform tail after the Windows block.
-    # The ship-name trailer is not separately represented in the Mac fork;
-    # leave it empty rather than inventing a value.
+    # The ship name is the MacRoman resource name of block 129; the Windows
+    # format stores the same value as its trailing C string.
+    ship_name = names.get((PILOT_RESOURCE_TYPE, 129), b"")
     output = (
         struct.pack("<I", BLOCK1_SIZE)
         + block1[:BLOCK1_SIZE]
         + struct.pack("<I", BLOCK2_SIZE)
         + block2
+        + ship_name
         + b"\0"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
