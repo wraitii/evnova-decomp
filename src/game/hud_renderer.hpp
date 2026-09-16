@@ -68,7 +68,17 @@ public:
   // Composites the HUD overlay over the already-drawn free-flight world. The
   // cockpit PICT is drawn at native size pinned to the viewport top-right;
   // bars and readouts inherit that horizontal offset.
-  void Draw(SdlPlatform &platform, const GameState &state);
+  //
+  // force_empty_radar mirrors Ghidra NovaUi_DrawStellarRadarPanel's
+  // force_empty flag (0x0045d600): the panel still draws its backdrop and the
+  // own-ship centre dot, but no stellar/ship contacts and no interference
+  // static. The original forces it on for the whole docked/landing visit
+  // (g_is_system_transition_active, set by Stellar_RunDockAndLaunchSequence
+  // 0x00455e10), where the 618x517 Spaceport window is centered and the
+  // cockpit strip stays visible around it. The docked renderer passes true.
+  void Draw(SdlPlatform &platform,
+            const GameState &state,
+            bool force_empty_radar = false);
 
   // Non-owning pointer to the spaceflight view's sprite store, used to
   // resolve each stellar body's spin sprite full height for the radar blip
@@ -164,7 +174,9 @@ private:
                                const GameState &state,
                                const SDL_Color &value_color,
                                const SDL_Color &label_color);
-  void DrawRadarPanel(SdlPlatform &platform, const GameState &state);
+  void DrawRadarPanel(SdlPlatform &platform,
+                      const GameState &state,
+                      bool force_empty);
 
   // The four gameplay text panels, one per original draw path. Each mirrors
   // its Ghidra function: shared top-right anchor transform, label/value

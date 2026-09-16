@@ -7,6 +7,7 @@
 #include "game/landed_window.hpp"
 #include "game/mission.hpp"
 #include "game/outfit.hpp"
+#include "game/ship_ai.hpp"
 #include "game/ship_spawn.hpp"
 #include "game/travel.hpp"
 #include "game/weapon.hpp"
@@ -93,6 +94,41 @@ TEST_CASE("Ship replacement rechecks requirements and preserves mutation order",
   state.player.credits = 1'000;
   REQUIRE(game::NovaLanded_BuyShip(state, 0x80, 0x81, ""));
   CHECK(state.player.ship_name.empty());
+}
+
+TEST_CASE("Capture ship swap leaves the outgoing player hull operable",
+          "[landed_store][capture]") {
+  game::GameState state;
+  state.scenario.ships.resize(2);
+  state.player.is_active = true;
+  state.player.ship_class_id = 0;
+  state.player.current_system_id = 3;
+  state.player.armor_points = 90.0F;
+  state.scenario.ships[0].base_armor = 90;
+  state.scenario.ships[1].base_armor = 120;
+
+  game::Ship &captured = state.ShipAt(1);
+  captured.is_active = true;
+  captured.ship_class_id = 1;
+  captured.ship_instance_id = 1;
+  captured.current_system_id = 3;
+  captured.armor_points = 10.0F;
+
+  REQUIRE(game::Player_SwapShipWithEscort(state, captured, false));
+  CHECK(state.player.ship_class_id == 1);
+
+  const game::Ship *outgoing = nullptr;
+  for (std::size_t slot = 1; slot < game::GameState::kMaxShips; ++slot) {
+    const game::Ship &candidate = state.ShipAt(slot);
+    if (candidate.is_active && candidate.ship_class_id == 0) {
+      outgoing = &candidate;
+      break;
+    }
+  }
+  REQUIRE(outgoing != nullptr);
+  CHECK(outgoing->ai_behavior_code == 6);
+  CHECK(outgoing->squad_leader_ship_slot == 0);
+  CHECK_FALSE(game::NovaAiShip_IsDisabled(state, *outgoing));
 }
 
 TEST_CASE("Cargo transfer uses the unclamped same-system fleet capacity",

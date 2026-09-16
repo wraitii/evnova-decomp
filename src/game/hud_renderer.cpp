@@ -420,7 +420,9 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
   return out;
 }
 
-void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
+void HudRenderer::Draw(SdlPlatform &platform,
+                       const GameState &state,
+                       bool force_empty_radar) {
   if (!installed_) {
     return;
   }
@@ -454,7 +456,7 @@ void HudRenderer::Draw(SdlPlatform &platform, const GameState &state) {
 
   // Stellar radar panel (NovaUi_DrawStellarRadarPanel 0x0045d600): composites
   // onto the cockpit art before the other panels refresh.
-  DrawRadarPanel(platform, state);
+  DrawRadarPanel(platform, state, force_empty_radar);
 
   // Life-support bars, drawn inside their genuine top-right-strip rects. The
   // Federation shield/armor/fuel slots are x=35..184 at y=200/216/234, and
@@ -1373,7 +1375,8 @@ void HudRenderer::DrawEscortCommandsPanel(SdlPlatform &platform,
 }
 
 void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
-                                 const GameState &state) {
+                                 const GameState &state,
+                                 bool force_empty) {
   // RadarArea validity gate (DAT_007355de < DAT_007355e2 && dc < e0).
   if (!(layout_.radar_panel.left < layout_.radar_panel.right) ||
       !(layout_.radar_panel.top < layout_.radar_panel.bottom)) {
@@ -1419,11 +1422,10 @@ void HudRenderer::DrawRadarPanel(SdlPlatform &platform,
   // 0x004b32bc). It is NOT the hyperspace jump: no jump/arrival path writes it,
   // so the radar keeps rendering contacts and static through the whole
   // brake/hold/tunnel (the blink/static still advance on the 250 ms poll). The
-  // docked visit is a blocking modal in the port (Stellar_Dock /
-  // NovaLanded_RunWindow), so the flight HUD is never drawn while it is active
-  // and force_empty is always false here -- the previous `travel.engaging`
-  // mapping wrongly blanked the radar for the entire jump.
-  const bool force_empty = false;
+  // port's dock is a blocking modal, so the live flag cannot be read here;
+  // NovaLanded_RunWindow passes force_empty=true for the docked HUD render.
+  // It must NOT track `travel.engaging`: that wrongly blanked the radar for
+  // the entire jump.
 
   // Backdrop: IFF radar fills black (DAT_00733b74); otherwise the cockpit
   // PICT drawn above is the backing the original re-blits.

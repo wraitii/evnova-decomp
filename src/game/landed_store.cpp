@@ -959,13 +959,14 @@ int NovaLanded_HireShip(GameState &state,
 
 // Ghidra 0x00423fa0 Player_SwapShipWithEscort. Promotes an escort into the
 // player slot and leaves the previous player hull in a newly allocated slot.
-// `from_capture` selects the original capture-transfer state (no shields,
-// one armor, boarded latch, and cargo ratio transfer) versus the ordinary
-// escort-return state. Confidence: high; deep jamming/runtime fields remain
-// represented by their neutral port defaults.
+// `leave_old_ship_disabled` selects the special transfer state (no shields,
+// one armor, boarded latch, and cargo ratio transfer). The boarding-window
+// "Use As My Ship" call passes false and returns the old hull as an operable
+// escort. Confidence: high; deep jamming/runtime fields remain represented by
+// their neutral port defaults.
 bool Player_SwapShipWithEscort(GameState &state,
                                Ship &escort,
-                               bool from_capture) {
+                               bool leave_old_ship_disabled) {
   const int replacement_slot =
       NovaShip_AllocateShipSlot(state, state.player.current_system_id, 1);
   if (replacement_slot == -1) {
@@ -1026,7 +1027,7 @@ bool Player_SwapShipWithEscort(GameState &state,
   }
 
   replacement.mission_fleet_slot = -1;
-  if (!from_capture) {
+  if (!leave_old_ship_disabled) {
     replacement.death_timer_active = 0.0F;
     replacement.squad_leader_ship_slot = 0;
     replacement.ai_behavior_code = 6;
@@ -1034,6 +1035,13 @@ bool Player_SwapShipWithEscort(GameState &state,
     replacement.ai_hostility_accumulator = 0;
     replacement.fuel_points =
         Outfit_ComputePlayerEffectiveStats(state).fuel_capacity;
+    const float old_max_armor =
+        old_class == nullptr ? 1.0F : static_cast<float>(old_class->base_armor);
+    const float disable_fraction =
+        old_class != nullptr && (old_class->capability_flags & 0x10U) != 0U
+            ? 0.1F
+            : 0.3333F;
+    replacement.armor_points = old_max_armor * disable_fraction + 1.0F;
     replacement.ai_state_code = 0;
     replacement.ai_control_mode = 0;
     NovaShip_ResetAiBehaviorRuntimeFields(replacement);

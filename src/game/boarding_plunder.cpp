@@ -1934,8 +1934,10 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
               // Ship" choice promotes the boarded hull into slot zero. The
               // rename-confirm dialog's random suffix is still a UI gap; use
               // the captured class name supplied by the escort hull.
-              if (Player_SwapShipWithEscort(state, target, true)) {
-                close = true;
+              // The original calls Player_SwapShipWithEscort with flag 0
+              // here. Flag 1 is the separate damaged-transfer state that
+              // leaves the outgoing player hull disabled at one armor.
+              if (Player_SwapShipWithEscort(state, target, false)) {
                 close_reason = "target captured as player ship";
                 result.target_captured_as_player = true;
                 state.stat_cache_valid = false;
