@@ -1554,11 +1554,8 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
             }
           } else {
             const ShipClass *ship = state.scenario.Ship(session.selected_id);
-            (void)Player_SwapShipWithEscort(state,
-                                            stellar_id,
-                                            session.selected_id,
-                                            ship == nullptr ? ""
-                                                            : ship->short_name);
+            (void)NovaLanded_BuyShip(state, stellar_id, session.selected_id,
+                                     ship == nullptr ? "" : ship->short_name);
             session = NovaLanded_OpenShipyardSession(state, stellar_id);
           }
           continue;
@@ -1635,11 +1632,8 @@ LandedExit RunStoreDialog(SdlPlatform &platform,
           }
         } else {
           const ShipClass *ship = state.scenario.Ship(session.selected_id);
-          (void)Player_SwapShipWithEscort(state,
-                                          stellar_id,
-                                          session.selected_id,
-                                          ship == nullptr ? ""
-                                                          : ship->short_name);
+          (void)NovaLanded_BuyShip(state, stellar_id, session.selected_id,
+                                   ship == nullptr ? "" : ship->short_name);
           session = NovaLanded_OpenShipyardSession(state, stellar_id);
         }
         continue;

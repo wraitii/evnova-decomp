@@ -167,10 +167,12 @@ void NovaLanded_CloseOutfitterSession(GameState &state);
 [[nodiscard]] bool NovaLanded_CanBuyShip(const GameState &state,
                                          std::int16_t stellar_id,
                                          std::int16_t ship_id);
-[[nodiscard]] bool Player_SwapShipWithEscort(GameState &state,
-                                             std::int16_t stellar_id,
-                                             std::int16_t ship_id,
-                                             std::string_view player_ship_name);
+[[nodiscard]] bool
+Player_SwapShipWithEscort(GameState &state, Ship &escort, bool from_capture);
+[[nodiscard]] bool NovaLanded_BuyShip(GameState &state,
+                                      std::int16_t stellar_id,
+                                      std::int16_t ship_id,
+                                      std::string_view player_ship_name);
 
 // Ghidra 0x004229d0 Player_ProcessEscortFleetAtStellar. Auto fleet-trade pass
 // run at the end of the Spaceport interaction loop: at a shipyard-capable
