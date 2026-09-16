@@ -334,9 +334,10 @@ void Stub_LoadScenarioResourceTables(GameState &state) {
 }
 
 void Stub_ResetReputationAndWorldTables(GameState &state) {
-  // Ghidra Game_ResetNewGameReputation / Game_ResetNewGameState clear faction
-  // standings, mission flags, region networks, and set g_intro_played = 0 so
-  // the intro plays on first flight. g_intro_played is our intro_played flag.
+  // Ghidra Game_ResetReputationAndAvailability (0x004b4220) and
+  // Game_ResetNewGameState (0x004b4690) clear faction standings, mission flags,
+  // region networks, and set g_intro_played = 0 so the intro plays on first
+  // flight. g_intro_played is our intro_played flag.
   state.intro_played = false;
   NovaLog::Todo("new-game faction reputation and mission flags not tracked; "
                 "intro_played latch reset only");
@@ -717,7 +718,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
 
   // ---- Step 4: fresh-world reset ------------------------------------------
   // Ghidra: g_travel_interaction_loop_active = 0, Ship_ResetPlayerShipState,
-  // Game_ResetNewGameReputation/State, zero outfit/weapon tables,
+  // Game_ResetReputationAndAvailability/State, zero outfit/weapon tables,
   // PilotData_InitializePlayerState, clear system discovery, re-seed the
   // starting inventory, discover surrounding systems, load scenario tables.
   // Ghidra reseeds the global LCG once at session bootstrap

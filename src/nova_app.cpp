@@ -1244,7 +1244,8 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   // PilotData_AutoresumeLastPilot. Without that ordering a restored class id
   // has no definition, so the effective-stat pass gives it zero armor and the
   // main menu reports the otherwise valid pilot as killed.
-  if (!runtime.game.scenario.LoadFromArchives(&runtime.game.rng)) {
+  if (!runtime.game.scenario.LoadFromArchives(&runtime.game.rng,
+                                              runtime.prefs.ship_animations)) {
     NovaLog::Error(
         "game session: scenario resource tables could not be loaded");
   }
@@ -1747,7 +1748,12 @@ void NovaUi_PresentLoadingSplashFrame(NovaRuntime &runtime) {
                   progress);
 }
 
-// Ghidra: 0x004aaf60 NovaUi_PresentStartupSplashFrame
+// Ghidra: 0x004aaf60 NovaUi_PresentStartupSplashFrame. The black pre-clear
+// here also subsumes NovaUi_ClearMainWindowAndHoldFrame (0x004ab180): that
+// routine's Frame_CommitFrameAndLatchTransitionWait (0x00467de0) plus its
+// BOOL_007354a8 latch are replaced by SdlPlatform::Present(), and its
+// full-window black fill by SDL_RenderClear below (the loading-splash
+// presenter does the same). Same deliberate skip as spaceflight.cpp:4267.
 void NovaUi_PresentStartupSplashFrame(NovaRuntime &runtime) {
   if (runtime.startup_splash_texture) {
     SDL_SetRenderDrawColor(

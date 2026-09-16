@@ -4367,7 +4367,7 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
 
   // Rebuild the per-system reputations from each system government's InitialRec
   // (GovtDef 0x52, payload +0x14) over all 0x800 systems, matching
-  // Game_ResetNewGameReputation (0x004b4220).
+  // Game_ResetReputationAndAvailability (0x004b4220).
   const std::size_t system_count =
       std::min(state.scenario.systems.size(), state.system_reputation.size());
   for (std::size_t i = 0; i < system_count; ++i) {

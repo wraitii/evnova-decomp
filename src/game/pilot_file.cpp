@@ -1417,7 +1417,7 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   if (const ShipClass *ship_class = state.scenario.Ship(
           static_cast<std::int16_t>(player.ship_class_id + 0x80))) {
     player.waypoint_arrival_marker_b =
-        static_cast<std::int16_t>(ship_class->skill_variance_percent - 1);
+        static_cast<std::int16_t>(ship_class->animation_cycle_count - 1);
   }
   player.shield_bubble_flash_intensity = 0.0F;
   player.weapon_sprite_flash_level = 0.0F;

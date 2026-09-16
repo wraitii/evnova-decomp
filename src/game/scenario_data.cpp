@@ -583,7 +583,11 @@ void ComputeWeaponEffectiveRanges(std::vector<Weapon> &weapons) {
       s.default_outfit_counts[i + 4] = ReadBeI16(bytes, 0x378 + i * 2);
     }
   }
+  // Bible SkillVar (payload +0x60 -> ShipClassDef +0x9F8), clamped [1,50] by
+  // the loader 0x004bd3c0 (disasm 0x004c1dd6/0x004c1df2).
   s.skill_variance_percent = ReadBeI16(bytes, 0x60);
+  s.skill_variance_percent =
+      std::clamp<std::int16_t>(s.skill_variance_percent, 1, 50);
   // Bible FuelRegen (payload +0x5e -> ShipClassDef +0x34): frames per 1 unit
   // of fuel regenerated; verified against loader 0x004bd3c0 (payload 0x5e
   // feeds the short consumed by Ship_ComputeShipFuelRechargeRate 0x00463b30).
@@ -1562,7 +1566,8 @@ const ImpactEffect *ScenarioData::ImpactEffectAt(std::int16_t effect_id) const {
   return &impact_effects[static_cast<std::size_t>(effect_id)];
 }
 
-bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng) {
+bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng,
+                                    bool ship_animations) {
   // The original loader consumes eight NovaRandom draws for each present
   // weapon while building its trail variants. GameState supplies its shared
   // RNG on the new-game path; data-only callers get a stable private stream so
@@ -1669,6 +1674,17 @@ bool ScenarioData::LoadFromArchives(std::mt19937 *variant_rng) {
         // bias blocks, the waypoint-marker arm (weapon.cpp), and the combat-
         // animation cycle.
         cls.sprite_behavior_flags = ReadBe16(*shan, 0x2e);
+        // Animation cycle length (ShipClassDef +0xA00): sh\x8an BaseSetCount
+        // (+0x04, clamped >=1), or 1 when the ship-animations preference is
+        // off (ShipClass_LoadShipClassVisualAndLaunchData 0x004b4ee0, disasm
+        // 0x004b5232/0x004b5246). Seeds sprite_animation_cycle_index and the
+        // waypoint_arrival_marker_b countdown; NOT skill variance (that is
+        // skill_variance_percent, sh\xefp payload +0x60 -> +0x9F8).
+        {
+          const std::int16_t base_sets = ReadBeI16(*shan, 0x04);
+          cls.animation_cycle_count =
+              ship_animations ? std::max<std::int16_t>(base_sets, 1) : 1;
+        }
         // Rotation frame count (ShipClassDef +0xa06): sh\x8an +0x34 FramesPer,
         // 36 when 0 (ShipClass_LoadShipClassVisualAndLaunchData default).
         {
