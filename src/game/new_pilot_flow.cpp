@@ -430,7 +430,7 @@ void Stub_DiscoverStartingSystems(GameState &state) {
                 kStartSystemResourceId);
 }
 
-void Stub_PickFirstTravelDestination(GameState &state) {
+[[nodiscard]] std::int16_t PickFirstSaveStellar(const GameState &state) {
   // Ghidra Stellar_FindNearestAvailableTravelStellar picks the first adjacent,
   // reachable travel point as the pilot's initial jump target. The travel
   // mechanics are reconstructed (travel.cpp): the first-jump target is
@@ -438,13 +438,24 @@ void Stub_PickFirstTravelDestination(GameState &state) {
   // starting system has a reachable outward route and logs it.
   const int slot = NovaTravel_FindNearestTravelPoint(state);
   if (slot >= 0) {
-    NovaLog::Info("initial travel outline resolved from starting-system "
-                  "nav-defs: travel slot {} available",
-                  slot);
-  } else {
-    NovaLog::Todo("first travel destination not resolved: starting system has "
-                  "no reachable travel point defined");
+    const System *system = state.scenario.System(
+        static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+    if (system != nullptr) {
+      return system->nav_defs[static_cast<std::size_t>(slot)];
+    }
   }
+  // 0x00489d70 falls back to the first nonnegative nav stellar, then passes
+  // zero when the system has no nav stellar at all.
+  const System *system = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  if (system != nullptr) {
+    const auto fallback = std::ranges::find_if(
+        system->nav_defs, [](std::int16_t stellar) { return stellar >= 0; });
+    if (fallback != system->nav_defs.end()) {
+      return *fallback;
+    }
+  }
+  return 0;
 }
 
 void RecomputePlayerMeters(GameState &state) {
@@ -684,12 +695,17 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   }
 
   // ---- Step 3: overwrite-existing-pilot confirmation ----------------------
-  // Ghidra: builds <nova_files><name>.plt, PilotFile_ProbeExists, and on hit
-  // asks "overwrite?" via Ui_ShowConfirmDialog. The reimplementation does not
-  // create pilot save files (.plt) yet, so there is never an existing pilot to
-  // confirm against; the overwrite prompt is skipped entirely.
-  NovaLog::Todo("pilot save files (.plt) are not written; overwrite check "
-                "skipped so a like-named pilot is never rejected");
+  // Ghidra asks for confirmation here. The shared confirmation dialog is not
+  // yet exposed to this flow, so preserve the existing behavior and log the
+  // remaining UI gap when this will replace a save.
+  if (const auto directory = PilotFileSaveDirectory()) {
+    const auto path = *directory / (state.pilot.first_name + ".plt");
+    if (PilotFileProbeExists(path)) {
+      NovaLog::Todo("new pilot: overwrite confirmation dialog for '{}' is not "
+                    "reconstructed; replacing the existing save",
+                    path.string());
+    }
+  }
 
   // ---- Step 4: fresh-world reset ------------------------------------------
   // Ghidra: g_travel_interaction_loop_active = 0, Ship_ResetPlayerShipState,
@@ -721,7 +737,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   SetNewGameDateAndStrings(state);
 
   // ---- Step 5: first travel destination + scenario spawn ------------------
-  Stub_PickFirstTravelDestination(state);
+  const std::int16_t first_save_stellar = PickFirstSaveStellar(state);
   // Ghidra: System_RebuildInitialNpcAndMissionPopulation +
   // System_UpdateSystemAndStellar display state + Asteroid_InitSystem (the
   // system's asteroid field). The mission-fleet restore slice and the initial
@@ -747,7 +763,6 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   //     turn_bank_animation_phase/ai_turn_bias_dir and DAT_007cab1c = 0xfffd
   //   - the second PilotData_InitializePlayerState pass (param 0) after the
   //     availability rolls
-  //   - PilotFile_SaveGame(final stellar) — no .plt writer yet (Step 3 log)
 
   // ---- Step 6: assemble the persistent pilot record and apply it ----------
   // Ghidra keeps the freshly-seeded pilot in a pilot-save block (resource id
@@ -815,7 +830,6 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // Copy the assembled record into the live state (mirroring the block-to-
   // global copy IntroCinematic_SetupFrames/PilotData_InitializePlayerState
   // perform). The intro and spaceflight modes read these live fields. The
-  // record is kept in memory only (no .plt writer); see PilotFileApply.
   PilotFileApply(record, state);
   // Menu_RunNewGameFlow's state-reset tail (0x0048a600) ends with the
   // flight-hint state at -3 (0xfffd): the Ship_ResetPlayerShipState 0x7fff
@@ -847,6 +861,15 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // Strict Play checkbox state (latched by the dialog port into
   // state.pilot.strict_play).
   state.game_active = true;
+  // Ghidra 0x00489d70 calls PilotFile_SaveGame after the fresh state and
+  // character block have been finalized. The selected starting stellar is
+  // the restore point persisted at block1+0x00.
+  if (const auto directory = PilotFileSaveDirectory()) {
+    if (!PilotFileSaveGame(*directory, state, first_save_stellar)) {
+      NovaLog::Error("new pilot: initial save failed for '{}'",
+                     state.pilot.first_name);
+    }
+  }
   NovaLog::Info("new pilot active: callsign '{}', start type {}",
                 state.pilot.first_name,
                 state.pilot.start_type_code);

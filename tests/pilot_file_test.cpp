@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -29,6 +30,15 @@ using game::PilotFileProbeExists;
 using game::PilotFileSaveGame;
 using game::PilotFileSerialize;
 using game::PilotLoadError;
+
+struct TemporaryDirectory {
+  std::filesystem::path path;
+
+  ~TemporaryDirectory() {
+    std::error_code ec;
+    std::filesystem::remove_all(path, ec);
+  }
+};
 
 [[nodiscard]] PilotFile SampleRecord() {
   PilotFile p = PilotFile::Fresh();
@@ -90,11 +100,28 @@ using game::PilotLoadError;
   p.active_mission_runtime_flags[2].is_active = true;
   p.active_mission_runtime_flags[2].initial_briefing_done = true;
   p.active_mission_runtime_flags[2].deadline_day = 17;
-  p.active_mission_runtime_flags[2].elapsed_travel_days = 1234;
+  p.active_mission_runtime_flags[2].deadline_time_components = {
+      0x3456, 0x1234, 0x5678, 0x9abc};
   p.active_missions[2].carrying_resources = true;
   p.active_missions[2].mission_template_id = 0x91;
   p.active_missions[2].return_stellar_id = 0x123;
   p.active_missions[2].resource_delta_or_cost = -4567;
+  p.active_missions[2].on_resolve_repeat_count = 8;
+  p.active_missions[2].goal_counter_a = 9;
+  p.active_missions[2].goal_counter_b = 10;
+  p.active_missions[2].goal_counter_c = 11;
+  p.active_missions[2].goal_count_remaining = 12;
+  p.active_missions[2].goal_counter_e = 13;
+  p.active_missions[2].mission_target_count = 14;
+  p.active_missions[2].mission_fleet_metric_b = 15;
+  p.active_missions[2].mission_fleet_metric_c = 16;
+  p.active_missions[2].rearm_roll_clock = 17;
+  p.active_missions[2].on_accept_text[0] = std::byte{'A'};
+  p.active_missions[2].on_refuse_text[1] = std::byte{'R'};
+  p.active_missions[2].on_success_text[2] = std::byte{'S'};
+  p.active_missions[2].on_failure_text[3] = std::byte{'F'};
+  p.active_missions[2].on_abort_text[4] = std::byte{'B'};
+  p.active_missions[2].on_ship_done_text[5] = std::byte{'D'};
   p.active_missions[2].raw_payload[0x6e] = std::byte{0xa5};
   return p;
 }
@@ -155,11 +182,28 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.active_mission_runtime_flags[2].is_active);
   CHECK(out.active_mission_runtime_flags[2].initial_briefing_done);
   CHECK(out.active_mission_runtime_flags[2].deadline_day == 17);
-  CHECK(out.active_mission_runtime_flags[2].elapsed_travel_days == 1234);
+  CHECK(out.active_mission_runtime_flags[2].deadline_time_components ==
+        p.active_mission_runtime_flags[2].deadline_time_components);
   CHECK(out.active_missions[2].carrying_resources);
   CHECK(out.active_missions[2].mission_template_id == 0x91);
   CHECK(out.active_missions[2].return_stellar_id == 0x123);
   CHECK(out.active_missions[2].resource_delta_or_cost == -4567);
+  CHECK(out.active_missions[2].on_resolve_repeat_count == 8);
+  CHECK(out.active_missions[2].goal_counter_a == 9);
+  CHECK(out.active_missions[2].goal_counter_b == 10);
+  CHECK(out.active_missions[2].goal_counter_c == 11);
+  CHECK(out.active_missions[2].goal_count_remaining == 12);
+  CHECK(out.active_missions[2].goal_counter_e == 13);
+  CHECK(out.active_missions[2].mission_target_count == 14);
+  CHECK(out.active_missions[2].mission_fleet_metric_b == 15);
+  CHECK(out.active_missions[2].mission_fleet_metric_c == 16);
+  CHECK(out.active_missions[2].rearm_roll_clock == 17);
+  CHECK(out.active_missions[2].on_accept_text[0] == std::byte{'A'});
+  CHECK(out.active_missions[2].on_refuse_text[1] == std::byte{'R'});
+  CHECK(out.active_missions[2].on_success_text[2] == std::byte{'S'});
+  CHECK(out.active_missions[2].on_failure_text[3] == std::byte{'F'});
+  CHECK(out.active_missions[2].on_abort_text[4] == std::byte{'B'});
+  CHECK(out.active_missions[2].on_ship_done_text[5] == std::byte{'D'});
   CHECK(out.active_missions[2].raw_payload[0x6e] == std::byte{0xa5});
 }
 
@@ -583,6 +627,80 @@ TEST_CASE("archived pilot fixtures have recognizable .plt framing",
               })) == expected->discovered_systems);
     // Archer's class 37 belongs to its plugin set. Raw decoding must retain
     // the exact id; a scenario-aware load may repair it without those plugins.
+  }
+  if (fixture_count == 0) {
+    SKIP("no optional .plt fixtures found in docs/assets/pilots");
+  }
+}
+
+TEST_CASE("archived pilot fixtures survive a non-destructive canonical disk "
+          "round trip",
+          "[pilot-fixtures]") {
+  const std::filesystem::path fixture_dir = "docs/assets/pilots";
+  if (!std::filesystem::is_directory(fixture_dir)) {
+    SKIP("optional docs/assets/pilots fixtures are not installed");
+  }
+
+  const auto nonce =
+      std::chrono::steady_clock::now().time_since_epoch().count();
+  TemporaryDirectory temporary{
+      std::filesystem::temp_directory_path() /
+      ("evnova-pilot-roundtrip-" + std::to_string(nonce))};
+  REQUIRE(std::filesystem::create_directory(temporary.path));
+
+  std::size_t fixture_count = 0;
+  for (const auto &entry :
+       std::filesystem::recursive_directory_iterator(fixture_dir)) {
+    std::string extension = entry.path().extension().string();
+    std::ranges::transform(extension, extension.begin(), [](unsigned char c) {
+      return static_cast<char>(std::tolower(c));
+    });
+    if (!entry.is_regular_file() || extension != ".plt") {
+      continue;
+    }
+    ++fixture_count;
+    CAPTURE(entry.path());
+
+    // The fixture is opened read-only. All output is confined to the unique
+    // temporary directory, so a failure cannot alter the archived input.
+    std::ifstream source(entry.path(), std::ios::binary);
+    REQUIRE(source);
+    const std::string raw{std::istreambuf_iterator<char>(source),
+                          std::istreambuf_iterator<char>()};
+    std::vector<std::byte> source_bytes(raw.size());
+    std::memcpy(source_bytes.data(), raw.data(), raw.size());
+
+    PilotFile decoded;
+    const PilotLoadError decode_result =
+        PilotFileDeserialize(source_bytes, decoded);
+    REQUIRE((decode_result == PilotLoadError::kOk ||
+             decode_result == PilotLoadError::kRepairsApplied));
+
+    const std::vector<std::byte> canonical =
+        PilotFileSerialize(decoded, decoded.jump_dest_stellar);
+    const auto copy_path = temporary.path / entry.path().filename();
+    {
+      std::ofstream copy(copy_path, std::ios::binary | std::ios::trunc);
+      REQUIRE(copy);
+      copy.write(reinterpret_cast<const char *>(canonical.data()),
+                 static_cast<std::streamsize>(canonical.size()));
+      REQUIRE(copy);
+    }
+
+    std::ifstream copy(copy_path, std::ios::binary);
+    REQUIRE(copy);
+    const std::string copied_raw{std::istreambuf_iterator<char>(copy),
+                                 std::istreambuf_iterator<char>()};
+    std::vector<std::byte> copied_bytes(copied_raw.size());
+    std::memcpy(copied_bytes.data(), copied_raw.data(), copied_raw.size());
+    PilotFile reloaded;
+    REQUIRE(PilotFileDeserialize(copied_bytes, reloaded) ==
+            PilotLoadError::kOk);
+
+    // Canonical serialization must be byte-stable after the disk reload. This
+    // compares every persisted byte, including opaque mission-record regions.
+    CHECK(PilotFileSerialize(reloaded, reloaded.jump_dest_stellar) ==
+          canonical);
   }
   if (fixture_count == 0) {
     SKIP("no optional .plt fixtures found in docs/assets/pilots");

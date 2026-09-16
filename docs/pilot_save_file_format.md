@@ -1,7 +1,9 @@
 # Pilot save files (.plt): format and load/save flow
 
 Reverse-engineering notes on how EV Nova persists a pilot's game state to
-`<Nova Files>/<pilot name>.plt` and restores it. Derived from the Ghidra DB
+`<Nova Files>/<pilot name>.plt` and restores it. The SDL port writes the same
+files under `SDL_GetPrefPath("Ambrosia Software", "EV Nova")`, alongside its
+preferences, and autoresumes exclusively from that directory. Derived from the Ghidra DB
 (saver `0x004c7db0`/`0x004c7dd0`, loader `0x004cb260`).
 
 External references archived locally:
@@ -247,9 +249,12 @@ dialog remains a `TODO(decomp)`.
 
 `src/game/pilot_file.{hpp,cpp}` carries:
 
-- `PilotFileSerialize` / `PilotFileDeserialize` — pure byte transforms of the
-  tracked subset with the exact block offsets/framing above (untracked regions
-  zero-filled; verified in `tests/pilot_file_test.cpp`).
+- `PilotFileSerialize` / `PilotFileDeserialize` — pure byte transforms with
+  the exact block offsets/framing above. Scalar/table fields are explicit;
+  complete active-mission payloads are retained opaquely and overlaid with the
+  modeled counters and six script buffers. Only block2's +0x2006 and +0x5efe
+  reserved ranges are zero-filled, matching the original saver. Verified in
+  `tests/pilot_file_test.cpp`.
 - `PilotFileSaveGame` (0x004c7db0/0x004c7dd0), `PilotFileLoadSave`
   (0x004cb260, incl. name-from-path and jump-dest system resolution),
   `PilotFileProbeExists` (0x004cd030), `PilotFileDelete` (0x004cd040),

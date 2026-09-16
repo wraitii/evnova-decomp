@@ -18,6 +18,9 @@
 #include <numbers>
 #include <random>
 
+#include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_stdinc.h>
+
 namespace game {
 namespace {
 
@@ -127,6 +130,25 @@ void DecodePilotBlock(std::span<std::byte> block, bool force = false) {
 }
 
 } // namespace
+
+std::optional<std::filesystem::path> PilotFileSaveDirectory() {
+  char *raw = SDL_GetPrefPath("Ambrosia Software", "EV Nova");
+  if (raw == nullptr) {
+    NovaLog::Error("pilot save: SDL_GetPrefPath failed: {}", SDL_GetError());
+    return std::nullopt;
+  }
+  const std::filesystem::path directory{raw};
+  SDL_free(raw);
+  std::error_code ec;
+  std::filesystem::create_directories(directory, ec);
+  if (ec) {
+    NovaLog::Error("pilot save: could not create '{}': {}",
+                   directory.string(),
+                   ec.message());
+    return std::nullopt;
+  }
+  return directory;
+}
 
 PilotFile PilotFile::Fresh() {
   // Ghidra 0x004cd4b0 PilotData_InitializePlayerState, absent-block seed:
@@ -562,10 +584,11 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
              static_cast<std::uint16_t>(flags.deadline_month));
     WriteU16(
         block1, offset + 0x0a, static_cast<std::uint16_t>(flags.deadline_day));
-    WriteU32(block1,
-             offset + 0x0e,
-             static_cast<std::uint32_t>(flags.elapsed_travel_days));
-    WriteU16(block1, offset + 0x12, flags.elapsed_travel_subday);
+    for (std::size_t i = 0; i < flags.deadline_time_components.size(); ++i) {
+      WriteU16(block1,
+               offset + 0x0c + i * sizeof(std::uint16_t),
+               flags.deadline_time_components[i]);
+    }
   }
 
   // MisnActive (0x295e, 16 x 0x8e6). Start with the opaque record so unknown
@@ -597,11 +620,16 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     put_i16(0x1a, mission.scan_mask);
     put_i16(0x1c, mission.comp_govt_id);
     put_i16(0x1e, mission.comp_reward_delta);
-    put_i16(0x20, mission.goal_count_remaining);
+    put_i16(0x20, mission.on_resolve_repeat_count);
     WriteU32(block1,
              offset + 0x22,
              static_cast<std::uint32_t>(mission.resource_delta_or_cost));
+    put_i16(0x26, mission.goal_counter_a);
+    put_i16(0x28, mission.goal_counter_b);
+    put_i16(0x2a, mission.goal_counter_c);
     put_i16(0x2c, mission.goal_count_remaining);
+    put_i16(0x2e, mission.goal_counter_e);
+    put_i16(0x30, mission.mission_target_count);
     block1[offset + 0x32] = mission.can_abort ? std::byte{1} : std::byte{0};
     block1[offset + 0x33] =
         mission.carrying_resources ? std::byte{1} : std::byte{0};
@@ -621,7 +649,20 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     WriteU16(block1, offset + 0x57, mission.flags_secondary);
     put_i16(0x61, mission.mission_ship_count_max);
     put_i16(0x63, mission.aux_ships_dude_def_index);
+    put_i16(0x65, mission.mission_fleet_metric_b);
+    put_i16(0x67, mission.mission_fleet_metric_c);
+    put_i16(0x69, mission.rearm_roll_clock);
     put_i16(0x6b, mission.mission_ship_count_active);
+    const auto copy_payload = [&](std::size_t field, const auto &payload) {
+      std::memcpy(
+          block1.data() + offset + field, payload.data(), payload.size());
+    };
+    copy_payload(0x1ec, mission.on_accept_text);
+    copy_payload(0x2eb, mission.on_refuse_text);
+    copy_payload(0x3ea, mission.on_success_text);
+    copy_payload(0x4e9, mission.on_failure_text);
+    copy_payload(0x5e8, mission.on_abort_text);
+    copy_payload(0x6e7, mission.on_ship_done_text);
   }
 
   // -- Block2 (FleetState/world state) field fills.
@@ -878,9 +919,10 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
           static_cast<std::int16_t>(ReadU16(block1, offset + 0x08, big_endian));
       flags.deadline_day =
           static_cast<std::int16_t>(ReadU16(block1, offset + 0x0a, big_endian));
-      flags.elapsed_travel_days =
-          static_cast<std::int32_t>(ReadU32(block1, offset + 0x0e, big_endian));
-      flags.elapsed_travel_subday = ReadU16(block1, offset + 0x12, big_endian);
+      for (std::size_t i = 0; i < flags.deadline_time_components.size(); ++i) {
+        flags.deadline_time_components[i] = ReadU16(
+            block1, offset + 0x0c + i * sizeof(std::uint16_t), big_endian);
+      }
     }
     constexpr std::size_t kActiveMissionsOffset = 0x295e;
     constexpr std::size_t kActiveMissionStride = 0x8e6;
@@ -909,9 +951,15 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.scan_mask = get_i16(0x1a);
       mission.comp_govt_id = get_i16(0x1c);
       mission.comp_reward_delta = get_i16(0x1e);
+      mission.on_resolve_repeat_count = get_i16(0x20);
       mission.resource_delta_or_cost =
           static_cast<std::int32_t>(ReadU32(block1, offset + 0x22, big_endian));
+      mission.goal_counter_a = get_i16(0x26);
+      mission.goal_counter_b = get_i16(0x28);
+      mission.goal_counter_c = get_i16(0x2a);
       mission.goal_count_remaining = get_i16(0x2c);
+      mission.goal_counter_e = get_i16(0x2e);
+      mission.mission_target_count = get_i16(0x30);
       mission.can_abort =
           std::to_integer<unsigned char>(block1[offset + 0x32]) != 0;
       mission.carrying_resources =
@@ -932,7 +980,20 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       mission.flags_secondary = ReadU16(block1, offset + 0x57, big_endian);
       mission.mission_ship_count_max = get_i16(0x61);
       mission.aux_ships_dude_def_index = get_i16(0x63);
+      mission.mission_fleet_metric_b = get_i16(0x65);
+      mission.mission_fleet_metric_c = get_i16(0x67);
+      mission.rearm_roll_clock = get_i16(0x69);
       mission.mission_ship_count_active = get_i16(0x6b);
+      const auto copy_payload = [&](auto &payload, std::size_t field) {
+        std::memcpy(
+            payload.data(), block1.data() + offset + field, payload.size());
+      };
+      copy_payload(mission.on_accept_text, 0x1ec);
+      copy_payload(mission.on_refuse_text, 0x2eb);
+      copy_payload(mission.on_success_text, 0x3ea);
+      copy_payload(mission.on_failure_text, 0x4e9);
+      copy_payload(mission.on_abort_text, 0x5e8);
+      copy_payload(mission.on_ship_done_text, 0x6e7);
     }
   } else {
     NovaLog::Todo("pilot load: block1 too short (size {}); restore skipped",
@@ -1402,12 +1463,15 @@ void PilotFileDelete(const std::filesystem::path &path) {
 }
 
 PilotLoadError PilotData_AutoresumeLastPilot(GameState &state) {
-  const auto marker =
-      NovaResource_LocateFile(std::string{kLastPilotMarkerName});
-  if (!marker) {
+  const auto save_directory = PilotFileSaveDirectory();
+  if (!save_directory) {
     return PilotLoadError::kMissingOrEmptyFile;
   }
-  std::ifstream file(*marker, std::ios::binary);
+  const std::filesystem::path marker = *save_directory / kLastPilotMarkerName;
+  if (!PilotFileProbeExists(marker)) {
+    return PilotLoadError::kMissingOrEmptyFile;
+  }
+  std::ifstream file(marker, std::ios::binary);
   const std::string raw{std::istreambuf_iterator<char>(file),
                         std::istreambuf_iterator<char>()};
   if (raw.empty()) {
@@ -1419,7 +1483,7 @@ PilotLoadError PilotData_AutoresumeLastPilot(GameState &state) {
   }
   std::filesystem::path path{saved_path};
   if (path.is_relative() && !PilotFileProbeExists(path)) {
-    path = marker->parent_path() / path;
+    path = marker.parent_path() / path;
   }
   NovaShip_ResetPlayerShipState(state);
   return PilotFileLoadSave(path, state);
