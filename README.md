@@ -1,6 +1,29 @@
 # Escape Velocity Nova recompilation
 
-Clean-room C++23 recompilation project for *Escape Velocity Nova*. The original game data and reverse-engineering artefacts remain local and are intentionally not versioned.
+C++23 reimplementation project for the *Escape Velocity Nova* engine. The original game data and reverse-engineering artefacts remain local and are intentionally not versioned.
+
+The reimplementation is based on the Windows Community Edition, since that's the latest patch for Nova, in essence.
+
+## Scope
+
+I want to get as close as possible to 100% feature parity, including original quirks. This will probably not be achieved anytime soon, as RNG & exact timing is quite tricky to get right. However, in Nova's case I don't think this matters enormously to get the feel 100% right, so that's what I'm going for.
+
+Relation to:
+- Cosmic Frontier: that was intended as more of an Override remake. This project substitutes the 'open source engine' part.
+- NovaSwift: so far, this project is much higher fidelity, e.g. AI routines are closely reimplemented. Plus this is multiplatform.
+- Singularity Horizon: unclear
+
+## Current status
+
+Maybe 80% of the way there? As I'm writing this, the big things that are missing are buying a ship/capturing, most escort-related stuff, a bunch of mission-adjacent functionality. Preferences & keymapping that work. Plugin support. The x2 speed branch.
+
+## Quick legal disclaimer + License
+
+Everything I have copyright over in this repository is licenced under MIT (see LICENSE.txt).
+This repo was mostly written using 'driven' AI, so that muddies the water. Further muddying the water is that this is a reimplementation of the original engine via decompilation, which is in a kinda grey area all of its own.
+In Nova's case, as far as I can tell, the original copyright holder here for the engine is now Matt Burch, the original programmer at Ambrosia Software. So if you intend to do something with any of the code here, I'd ask him. I haven't yet contacted him about this project, either, so dragons be here.
+I choose to release the repo because I believe this is legally defensible regardless, and genuinely useful. Plus the game is definitely abandonware, even if that isn't really a thing.
+As for the assets, that's probably under ATMOS copyright, and I think Cosmic Frontier is the closet to an answer you'll get. This repository sidesteps that problem by not providing them.
 
 ## Prerequisites
 
@@ -19,42 +42,16 @@ export VCPKG_ROOT="$HOME/vcpkg"
 
 ## Build and test
 
-Configure the Release build for normal iteration. CMake invokes vcpkg automatically and installs the dependencies declared in `vcpkg.json`.
+Configure, build, and test the Release preset (CMake installs the `vcpkg.json` dependencies automatically):
 
 ```sh
 cmake --preset release
-```
-
-Build and run the test suite:
-
-```sh
 cmake --build build/release
 ctest --test-dir build/release --output-on-failure
 ```
 
-To run selected tests, append `-R '<pattern>'` to the CTest command. Tests run from the repository root so they can locate local game data.
-
-For C++ changes, also build Debug:
-
-```sh
-cmake --preset debug
-cmake --build build/debug
-```
-
-Debug builds retain debug information and use `-Og` on Clang/GCC-family compilers. `ctest --preset debug` runs that build's tests.
-
-Run the current SDL3 title/main-menu build:
+Run the game with:
 
 ```sh
 ./build/release/src/evnova
 ```
-
-Both presets disable clang-tidy during builds because whole-codebase analysis is slow. Format changed C++ files with `clang-format -i` and lint affected translation units using the generated compilation database:
-
-```sh
-clang-tidy -p build/release --checks='clang-analyzer-*' --warnings-as-errors='*' src/path.cpp
-```
-
-Replace `src/path.cpp` with the changed source file; for header changes, choose affected source files that include it. CMake locates Homebrew LLVM for build-integrated linting, but standalone commands require `clang-tidy` on your `PATH` (or its full path).
-
-Build products and vcpkg-installed packages are local and ignored by Git.
