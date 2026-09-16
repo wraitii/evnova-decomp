@@ -30,9 +30,9 @@ These root-level TSVs must be disjoint and jointly cover the decompile dump with
 - Estimate completeness conservatively: **0%** unported, regardless of Ghidra annotations; **10–30%** skeleton/cadence only; **40–90%** substantial but incomplete; **100%** faithful reimplementation.
 - **Never dump or rewrite the whole file.** Locate target addresses with `rg` and patch only affected rows in place.
 
-`decomp-skipped.tsv` records deliberate SDL3/OS/codec replacements: `address\tname\tlibrary\tcomment`.
+`decomp-skipped.tsv` records functions deliberately not ported: SDL3/OS/codec replacements and game-code functions with no port need: `address\tname\tlibrary\tcomment`.
 
-- `library`: `blitter | qtml-iml | msl-crt | crt | winsock | vorbis | libpng | libjpeg`. Mirror Ghidra library renames into `name`.
+- `library`: `blitter | qtml-iml | msl-crt | crt | winsock | vorbis | libpng | libjpeg | redundant`. Mirror Ghidra library renames into `name`. Use `redundant` for game-code functions the port has no need for: pure compile-time constant setters/seeds, dead or no-op routines, and behavior the port expresses structurally elsewhere rather than as a runtime call. Record the rationale in `comment`.
 - Move rows from progress only with a deliberate decision recorded in `comment`. Keep the glue strip (~0x004E7389–0x00514593) and late-linked game code (≥0x00569C9C) in progress until triaged.
 
 ## C++ reimplementation phase

@@ -25,7 +25,7 @@
 namespace game {
 
 // The primary-target blink colour (Ghidra DAT_00733b50, an 0xc000 grey triple
-// seeded by Settings_InitTimingPresets 0x004ad7c0).
+// seeded by Settings_InitColors 0x004ad7c0).
 inline constexpr SDL_Color kRadarTargetBlinkColor{
     192, 192, 192, SDL_ALPHA_OPAQUE};
 

@@ -82,7 +82,9 @@ public:
 
   // Keeps GameState.viewport_center_x/y in sync with the live play area (the
   // original's g_viewport_center_x/y globals, set at interface setup by
-  // Ship_InitializeMainInterface 0x004ac380). Asteroid_Spawn scatters new
+  // Ship_InitializeMainInterface 0x004ac380). The play area is the window minus
+  // the right-hand cockpit strip (kGameplayHudStripWidth), so the half-size is
+  // (window_width - strip)/2 and window_height/2. Asteroid_Spawn scatters new
   // records over this half-size, so it must be current before any spawn on
   // entry, arrival or launch.
   void SyncGameplayViewport(SdlPlatform &platform, GameState &state);
@@ -384,10 +386,13 @@ private:
   void DrawBeamsUnderShips(SdlPlatform &platform, const GameState &state);
   // Ghidra Shot_DrawBeamHitQueueForSurface (0x00438810), visible non-0x2000
   // path: the topmost gameplay layer draws every other queued beam above ships
-  // and effects. The original's kinked/flare branches (and twin Shot_DrawBeam-
-  // Queue 0x004386f0) are sprite-world save/restore erase machinery, replaced
-  // wholesale by SDL's back buffer - TODO(decomp(0x004386f0)) skipped:
-  // software surface-restore pass has no SDL equivalent.
+  // and effects. The field_0xec != 0 twin-surface branches (every live beam
+  // replotted to both gameplay surfaces via SWBeams_DrawKinkedBeam 0x0047AC50 /
+  // SWBeams_DrawBeamWithFlare 0x0047AFD0) are not reproduced yet; the port
+  // always uses the single-surface DrawShortBeam/ThickFadingBeam appearance.
+  // TODO(decomp(0x00438810)): twin-surface branches and their plotters.
+  // The restore-phase twin Shot_DrawBeamQueue (0x004386f0) is not called (the
+  // port keeps no saved-backdrop buffer).
   void DrawBeamsOverShips(SdlPlatform &platform, const GameState &state);
   // Jitter source for lightning beams (Ghidra SWBeams_DrawThickFadingBeam
   // 0x0047a410 draws rand()% per segment). Draw-phase rand() calls mutate the

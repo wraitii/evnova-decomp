@@ -7,6 +7,7 @@
 #include "asteroid.hpp"
 #include "freeflight_objects.hpp"
 #include "game_state.hpp"
+#include "gameplay_interface.hpp"
 #include "hud_renderer.hpp"
 #include "impact_effects.hpp"
 #include "ship_ai.hpp"
@@ -26,9 +27,10 @@ namespace game {
 namespace {
 
 constexpr float kTwoPi = 6.283185307179586F;
-// Fixed logical play area reserved at the bottom of the window for the HUD
-// strip (the placeholder HUD sits at y 400..460). At the default 640x480 window
-// the space viewport is the 640x400 region above it.
+// Base logical play area. The live flight viewport is the window minus the
+// top-right cockpit/HUD strip (kGameplayHudStripWidth, the original's
+// DAT_0088c020), full height; these floors just keep it sane before the window
+// exists.
 constexpr int kViewportWidth = 640;
 constexpr int kViewportHeight = 400;
 
@@ -94,9 +96,17 @@ std::pair<float, float> WorldCameraPosition(const GameState &state) {
   return {state.player.pos_x, state.player.pos_y};
 }
 
+// The flight world's camera viewport, in window points: the render owner minus
+// the right-hand cockpit strip. The original's play area is
+// `[RenderOwner.left, RenderOwner.right - DAT_0088c020]` (see
+// NovaUi_RedrawGameplayViewportAndRadar 0x0046a870), so the ship-centred camera
+// (g_viewport_center_x/y, set by Ship_InitializeMainInterface 0x004ac380) sits
+// at half this width. Using the full window here would push the world and the
+// asteroid field kGameplayHudStripWidth/2 too far right.
 [[nodiscard]] Viewport CurrentViewport(const SdlPlatform &platform) {
   const auto sz = platform.logical_playfield_size();
-  const int w = std::max(kViewportWidth, static_cast<int>(sz.x));
+  const int window_w = std::max(kViewportWidth, static_cast<int>(sz.x));
+  const int w = window_w - kGameplayHudStripWidth;
   const int h = std::max(kViewportHeight, static_cast<int>(sz.y));
   return {w, h};
 }
@@ -1170,6 +1180,12 @@ void SpaceflightView::DrawBackground(SdlPlatform &platform,
   }
 }
 
+// Ghidra 0x004ac380 Ship_InitializeMainInterface (viewport half-size half). The
+// original sets g_viewport_center_x/y to half the play area:
+// round((RenderOwner.right - RenderOwner.left - DAT_0088c020) * 0.5) and
+// round((RenderOwner.bottom - RenderOwner.top) * 0.5). CurrentViewport already
+// excludes the DAT_0088c020 cockpit strip, so the plain halves match (integer
+// truncation vs the original's round differs by at most 1px on odd widths).
 void SpaceflightView::SyncGameplayViewport(SdlPlatform &platform,
                                            GameState &state) {
   const Viewport vp = CurrentViewport(platform);
@@ -1380,9 +1396,11 @@ void SpaceflightView::DrawAsteroids(SdlPlatform &platform,
 // fires at +/- (half_viewport + frame_width + 32) and lands at
 // -/+ (half_viewport + 2*frame_width).
 void SpaceflightView::WrapAsteroids(SdlPlatform &platform, GameState &state) {
-  const Viewport vp = CurrentViewport(platform);
-  const float center_x = static_cast<float>(vp.w) / 2.0F;
-  const float center_y = static_cast<float>(vp.h) / 2.0F;
+  // Ghidra 0x00436910 Asteroid_UpdateSprites wraps a record that left the
+  // play area against g_viewport_center_x/y; use the synced half-size rather
+  // than recomputing it, so the wrap matches the scatter/spawn centre.
+  const float center_x = static_cast<float>(state.viewport_center_x);
+  const float center_y = static_cast<float>(state.viewport_center_y);
   // Sprite_GetFrameFullHeight / Sprite_GetFrameFullWidth return the full
   // frame span; the original scans every loaded asteroid set for the maximum.
   int max_span_x = 1;
@@ -1768,11 +1786,14 @@ void SpaceflightView::DrawBeamsUnderShips(SdlPlatform &platform,
 // Ghidra Shot_DrawBeamHitQueueForSurface (0x00438810), visible path: the
 // topmost gameplay layer draws every beam that does NOT set flags_secondary
 // 0x2000 (those render underneath ships via DrawBeamsUnderShips). The
-// original's kinked/flare branches and its twin Shot_DrawBeamQueue
-// (0x004386f0) copy saved background pixels back along the previous frame's
-// beam line — sprite-world save/restore erase machinery with no SDL
-// equivalent, deliberately not reproduced.
-// TODO(decomp(0x00438810)) skipped: twin-surface / erase branches.
+// field_0xec != 0 twin-surface branches are not reproduced yet: they replot
+// every live beam to both gameplay surfaces via SWBeams_DrawKinkedBeam
+// (0x0047AC50) / SWBeams_DrawBeamWithFlare (0x0047AFD0), including the
+// under-ships twin branch, instead of the single-surface DrawShortBeam /
+// ThickFadingBeam appearance the port always uses. The restore-phase twin
+// Shot_DrawBeamQueue (0x004386f0) has no SDL equivalent (the port keeps no
+// saved-backdrop buffer).
+// TODO(decomp(0x00438810)): twin-surface branches and their plotters.
 void SpaceflightView::DrawBeamsOverShips(SdlPlatform &platform,
                                          const GameState &state) {
   for (const BeamHit &beam : state.beam_hit_queue) {

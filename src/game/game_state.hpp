@@ -1585,8 +1585,10 @@ struct GameState {
   // Half the logical flight play area, in pixels (Ghidra g_viewport_center_x
   // 0x005997b8 / g_viewport_center_y 0x005997ba, set by
   // Ship_InitializeMainInterface 0x004ac380 from the render owner rect). The
-  // spaceflight view keeps this in sync with the live viewport each frame;
-  // Asteroid_Spawn scatters new records within `viewport_center_x + 0x80` (x) /
+  // play area is the render-owner width minus the right cockpit strip
+  // (DAT_0088c020 / kGameplayHudStripWidth), full height. The spaceflight view
+  // keeps this in sync with the live viewport each frame; Asteroid_Spawn
+  // scatters new records within `viewport_center_x + 0x80` (x) /
   // `viewport_center_y` (y) of the player, so a wrong/stale value makes the
   // whole field bunch on the player.
   int viewport_center_x = 320;
