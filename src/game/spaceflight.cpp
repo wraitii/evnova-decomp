@@ -988,6 +988,7 @@ std::int16_t StellarArrivalSpriteFullHeight(SdlPlatform &platform,
 LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
                                                  SdlAudio &audio,
                                                  SpaceflightView &view,
+                                                 HudRenderer &hud,
                                                  GameState &state,
                                                  const NovaPreferences &prefs) {
   // The original's land command (binding 5 in Ship_HandlePlayerShipCore
@@ -1114,7 +1115,7 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
     // (0x00491f30): after the window is up, before the AvailLoc-3 offer
     // pass, with debriefs layered over the dock.
     const LandedExit exit =
-        NovaLanded_RunWindow(platform, audio, state, ctx, prefs);
+        NovaLanded_RunWindow(platform, audio, state, ctx, prefs, hud);
     if (exit == LandedExit::kQuit) {
       return LandCommandResult::kQuit;
     }
@@ -2150,8 +2151,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // on-screen HUD overlay (STR# 0x7d2 messages) instead of a bare log line.
       // Gated while a jump is engaged (disabled through brake + hold + zoom).
       if (!player_tick_consumed && land_pressed && !state.travel.engaging) {
-        const LandCommandResult landed =
-            PlayerTick_LandCommandDispatch(platform, audio, view, state, prefs);
+        const LandCommandResult landed = PlayerTick_LandCommandDispatch(
+            platform, audio, view, hud, state, prefs);
         if (landed == LandCommandResult::kQuit) {
           returning_to_menu = true;
           break;

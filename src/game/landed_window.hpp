@@ -41,6 +41,7 @@
 
 class SdlPlatform;
 class SdlAudio;
+class HudRenderer;
 
 namespace game {
 
@@ -256,10 +257,15 @@ std::int32_t NovaLanded_Repair(GameState &state,
 // remains out of scope. In resolution-extension mode the playfield stays a
 // fixed 640x480 centred with black borders; the F5 scale toggle (documented
 // divergence) scales it to fill the window.
+// `hud` is the live spaceflight HUD (pitched at the same interface layout as
+// the flight overlay). It is composited behind the docked dialog with the
+// radar forced empty, matching Ghidra 0x00491f30 redrawing the gameplay
+// viewport/radar/cargo panel before presenting the centered Spaceport window.
 [[nodiscard]] LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                               SdlAudio &audio,
                                               GameState &state,
                                               LandedContext &ctx,
-                                              const NovaPreferences &prefs);
+                                              const NovaPreferences &prefs,
+                                              HudRenderer &hud);
 
 } // namespace game

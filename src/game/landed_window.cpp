@@ -7,6 +7,7 @@
 #include "../sdl_platform.hpp"
 #include "asteroid.hpp"
 #include "docked_dialog.hpp"
+#include "hud_renderer.hpp"
 #include "landed_store.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
@@ -752,6 +753,7 @@ bool ServiceAvailable(const GameState &state,
 // laid-out DITL items
 // (`layout`) rather than hardcoded geometry.
 void DrawLandedMenu(SdlPlatform &platform,
+                    HudRenderer *hud,
                     NovaFontCache &font_cache,
                     const ServicesButtonArt &buttons,
                     const GameState &state,
@@ -768,9 +770,33 @@ void DrawLandedMenu(SdlPlatform &platform,
 
   // The Spaceport backdrop is the DLOG 0x3e8 window artwork. Draw it at its
   // native 618x517 size in the same centred coordinate space as the DITL.
-  SDL_SetRenderDrawColor(renderer, 1, 4, 12, SDL_ALPHA_OPAQUE);
+  // The visible area around the centered window is the flat per-system space
+  // background: during the docked/landing transition the original fills the
+  // gameplay surface with NovaRender_SetSystemSpaceBackgroundColor but skips
+  // SpriteWorld_RenderLayers (NovaUi_RedrawGameplayViewportAndRadar
+  // 0x0046a870, g_is_system_transition_active != 0), so no starfield or ship
+  // sprites are drawn behind the dock.
+  const auto *bg_system = state.scenario.System(
+      static_cast<std::int16_t>(state.player.current_system_id + 0x80));
+  const std::uint32_t bg = bg_system ? bg_system->bkgnd_color : 0U;
+  SDL_SetRenderDrawColor(renderer,
+                         static_cast<std::uint8_t>((bg >> 16) & 0xffU),
+                         static_cast<std::uint8_t>((bg >> 8) & 0xffU),
+                         static_cast<std::uint8_t>(bg & 0xffU),
+                         SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
   platform.SetFullscreenPlayfield();
+  // Flight HUD behind the docked dialog. Ghidra 0x00491f30
+  // NovaUi_RunTravelDestinationInteractionLoop redraws the gameplay viewport,
+  // the stellar radar panel (NovaUi_DrawStellarRadarPanel 0x0045d600) and the
+  // cargo/mission status panel (NovaUi_DrawCargoMissionStatusPanel 0x004612c0)
+  // at window-open, before the 618x517 Spaceport window is composited. Because
+  // that window is centered, the cockpit strip stays visible around it. The
+  // radar is forced empty for the whole docked visit through
+  // g_is_system_transition_active.
+  if (hud != nullptr) {
+    hud->Draw(platform, state, /*force_empty_radar=*/true);
+  }
   if (destination_art != nullptr) {
     const SDL_FRect backdrop_rect = layout.from_ditl ? layout.window : panel;
     SDL_RenderTexture(renderer, destination_art, nullptr, &backdrop_rect);
@@ -1019,7 +1045,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
                                 SdlAudio &audio,
                                 GameState &state,
                                 LandedContext &ctx,
-                                const NovaPreferences &prefs) {
+                                const NovaPreferences &prefs,
+                                HudRenderer &hud) {
   ProbeUiAutoClear probe_ui(platform);
   platform.probe().AutomationObservedDocked();
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
@@ -1251,6 +1278,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   // docs/dlog_ditl_dialog_format.md).
   const std::function<void()> render_background = [&] {
     DrawLandedMenu(platform,
+                   &hud,
                    font_cache,
                    button_art,
                    state,
@@ -1309,6 +1337,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
   // the original also re-runs the pass on Spaceport action 0xf and consumes
   // the DAT_00776af4 recheck timer in the services windows.
   DrawLandedMenu(platform,
+                 &hud,
                  font_cache,
                  button_art,
                  state,
@@ -1364,6 +1393,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     // a nested modal widget; the MVP keeps the same menu surface and only
     // distinguishes via the hint, so we always redraw the list.
     DrawLandedMenu(platform,
+                   &hud,
                    font_cache,
                    button_art,
                    state,
