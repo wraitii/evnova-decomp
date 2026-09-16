@@ -152,8 +152,9 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
 // availability_flags 0x20, or -- for the player only -- when the player owns
 // any outfit whose mod slots include ModType 0x2a. Deliberately distinct from
 // Stellar_ShipHasGravityShielding (0x0046e120): the NPC flags_secondary 0x40
-// gate and the ModType 0x26/0x29 gravity-shield outfits do NOT grant crash
-// immunity. The original caches the player-outfit roll in DAT_007356c6; the
+// (inertialess) gate and the ModType 0x26 (inertial dampener)/0x29 (gravity
+// resistance) outfits do NOT grant crash immunity. The original caches the
+// player-outfit roll in DAT_007356c6; the
 // clean-room recomputes it (identical while the inventory is unchanged).
 [[nodiscard]] bool Stellar_ShipImmuneToStellarCrash(const GameState &state,
                                                     const Ship &ship) {

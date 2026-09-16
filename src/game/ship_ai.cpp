@@ -2,9 +2,9 @@
 // for the module overview and the Ghidra-address mapping of each helper.
 //
 // Porting notes:
-//  * Ships carry no outfit inventory, so "has gravity shield" uses the NPC
-//    branch of Outfit_ShipHasGravityShieldOutfit (0x0046df70) via
-//    NovaShip_HasGravityShield, and "effective stats" are the class base
+//  * Ships carry no outfit inventory, so "is inertialess" uses the NPC
+//    branch of Outfit_ShipIsInertialess (0x0046df70) via
+//    NovaShip_IsInertialess, and "effective stats" are the class base
 //    values (the player's outfit/ionization damping is not modelled yet).
 //  * The per-mode turn/thrust scale constants (the _DAT_005750xx globals) are
 //    decoded from the raw bytes and typed + pre-commented in the Ghidra DB.
@@ -99,8 +99,8 @@ constexpr float kNpcJumpSpinupDurationMs = 350.0F;
 // 0x0d's formation-release counter advances by one per raw call in the
 // original (0x00408d67), hence one unit per 0.63 normalized ticks here.
 constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
-// Gravity-shield approach multipliers (state 0xd/0xf).
-constexpr float kShieldKeepMult = 4.0F;
+// Inertialess approach multipliers (state 0xd/0xf).
+constexpr float kInertialessKeepMult = 4.0F;
 // Combat turn-radius constants from DAT_005750a0/a4/a8/ac. The class turn
 // value is converted to the runtime degrees-per-tick value before these
 // branches use it.
@@ -2813,7 +2813,7 @@ void NovaAi_UpdateShipState(GameState &state,
   // ---- Assist approach to a disabled ship (state 0xf). Entered from the
   // comm-window Request Assistance / Beg For Mercy arm
   // (Ship_EnterShipAiState0x0F 0x00410c70, player as primary target): keep
-  // within (10 - turn) * 30 + 50 px (x4 gravity shield) of the cripple,
+  // within (10 - turn) * 30 + 50 px (x4 inertialess) of the cripple,
   // velocity-matching (mode 0xf) when close; the repair itself happens in the
   // mode-0xf within-3 px arm of NovaAi_ApplyControls. Leaves the state when
   // the target is gone or no longer disabled.
@@ -2836,10 +2836,10 @@ void NovaAi_UpdateShipState(GameState &state,
     const std::int16_t range = static_cast<std::int16_t>(
         (kTurnRadiusBase - base_turn) * kAssistTurnRadiusScale + 50.0F);
     const Ship &tgt = state.ShipAt(target_slot);
-    // Gravity-shield ships scale the keeping range up (they drift at a larger
+    // Inertialess ships scale the keeping range up (they drift at a larger
     // turn radius).
-    const bool gravity_shield_0f = cls && NovaShip_HasGravityShield(ship, *cls);
-    const float full = gravity_shield_0f ? range * kShieldKeepMult : range;
+    const bool inertialess_0f = cls && NovaShip_IsInertialess(ship, *cls);
+    const float full = inertialess_0f ? range * kInertialessKeepMult : range;
     ship.ai_control_mode = (std::abs(ship.pos_x - tgt.pos_x) > full ||
                             std::abs(ship.pos_y - tgt.pos_y) > full)
                                ? 0xb
@@ -3055,8 +3055,8 @@ void NovaAi_UpdateShipState(GameState &state,
       const auto *cls = ShipClassFor(state, ship);
       const float turn = cls ? cls->turn_rate * 0.1F : 0.0F;
       float range = (kTurnRadiusBase - turn) * kAssistTurnRadiusScale;
-      if (cls != nullptr && NovaShip_HasGravityShield(ship, *cls)) {
-        range *= kShieldKeepMult;
+      if (cls != nullptr && NovaShip_IsInertialess(ship, *cls)) {
+        range *= kInertialessKeepMult;
       }
       if (dx > range || dy > range) {
         ship.ai_control_mode =
@@ -3400,7 +3400,7 @@ void NovaAi_ApplyControls(GameState &state,
     // 0.35 px/tick, steer toward the reverse of the velocity bearing and brake
     // with the raw effective thrust; once aligned and below 1.75 px/tick brake
     // at half thrust while damping velocity by 0.94; once below 0.35 px/tick
-    // damp by 0.95 and drop to idle control mode 0. Gravity-shield ships brake
+    // damp by 0.95 and drop to idle control mode 0. Inertialess ships brake
     // with a NEGATIVE thrust command (the integrator's scalar-speed path). The
     // state-code-9 not-yet-aligned damp is kept for parity.
     if (fire_restricted) {
@@ -3414,7 +3414,7 @@ void NovaAi_ApplyControls(GameState &state,
       ship.ai_control_mode = 0;
       break;
     }
-    if (cls == nullptr || !NovaShip_HasGravityShield(ship, *cls)) {
+    if (cls == nullptr || !NovaShip_IsInertialess(ship, *cls)) {
       ship.ai_desired_heading_deg = static_cast<std::int16_t>(
           WrapDeg(BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
       if (std::abs(heading_delta_deg()) < eff_turn_deg + kMode1AlignAddend) {
@@ -3661,11 +3661,11 @@ void NovaAi_ApplyControls(GameState &state,
     // Combat pursuit / lead-in: steer at the primary target (predictive aim
     // when a weapon bank is live is deferred, so the straight bearing stands
     // in), thrust once within turn+15 deg. A second turn*3 alignment gate
-    // arms a direct-fire bank and, for gravity-shield ships
+    // arms a direct-fire bank and, for inertialess ships
     // within 100 px, throttles the cruise down to the target's scalar speed.
-    // Break-off: at/inside 165 px (or any distance for non-shield ships) the
-    // evasive-break order fires -- a player target must beat the combat-rating
-    // gate, non-player targets skip it half the time -- when the
+    // Break-off: at/inside 165 px (or any distance for non-inertialess ships)
+    // the evasive-break order fires -- a player target must beat the
+    // combat-rating gate, non-player targets skip it half the time -- when the
     // ship is a light fighter (class default behavior > 2, mass < 200 t)
     // closing on a lighter/earlier target within 123 px with both hulls facing
     // each other within 31 deg; the evasive heading is current +/-135 deg by
@@ -3692,9 +3692,9 @@ void NovaAi_ApplyControls(GameState &state,
     if (std::abs(heading_delta_deg()) < eff_turn_deg * 3.0F) {
       // Ghidra 0x00408150 mode 6 arms a direct-fire bank within turn*3.
       NovaAi_SelectDirectFireWeaponBankForPrimaryTarget(state, ship, false);
-      const bool gravity_shield =
-          cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
-      if (gravity_shield && std::abs(ship.pos_x - target.pos_x) < 100.0F &&
+      const bool inertialess =
+          cls != nullptr && NovaShip_IsInertialess(ship, *cls);
+      if (inertialess && std::abs(ship.pos_x - target.pos_x) < 100.0F &&
           std::abs(ship.pos_y - target.pos_y) < 100.0F &&
           target.speed < ship.speed) {
         ship.ai_desired_speed = target.speed;
@@ -3702,9 +3702,9 @@ void NovaAi_ApplyControls(GameState &state,
     }
     const float dx = std::abs(ship.pos_x - target.pos_x);
     const float dy = std::abs(ship.pos_y - target.pos_y);
-    const bool gravity_shield =
-        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
-    if (dx < kCombatCloseRange || dy < kCombatCloseRange || !gravity_shield) {
+    const bool inertialess =
+        cls != nullptr && NovaShip_IsInertialess(ship, *cls);
+    if (dx < kCombatCloseRange || dy < kCombatCloseRange || !inertialess) {
       // Ghidra 0x00408150 mode 6: the primary target slot 0 (player) must
       // pass the rating gate; any other target rolls NovaRandom_Range(2) and
       // bypasses the gate on 0, otherwise requires the gate to pass.
@@ -3756,7 +3756,7 @@ void NovaAi_ApplyControls(GameState &state,
   case 0x10: {
     // Evasive break: fly the stored evasive heading (+/-135 deg) at 1.5x
     // thrust with cruise 0, then drop back to combat pursuit (6) once the
-    // hull is within turn*3 deg of it (or, for gravity-shield ships, once the
+    // hull is within turn*3 deg of it (or, for inertialess ships, once the
     // target is beyond 165 px). Arms the current-target bank while close.
     if (fire_restricted || ship.primary_target_ship_slot == -1) {
       break;
@@ -3772,9 +3772,9 @@ void NovaAi_ApplyControls(GameState &state,
       // both axes stay within 165 px (the original uses AND, not OR).
       NovaAi_SelectWeaponBankForCurrentTarget(state, ship);
     }
-    const bool gravity_shield =
-        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
-    if (!gravity_shield) {
+    const bool inertialess =
+        cls != nullptr && NovaShip_IsInertialess(ship, *cls);
+    if (!inertialess) {
       if (std::abs(
               std::remainder(static_cast<float>(ship.ai_evasive_heading_deg) -
                                  ship.heading / kDegToRad,
@@ -4092,10 +4092,10 @@ void NovaAi_ApplyControls(GameState &state,
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
     const float rel_x = ship.vel_x - target.vel_x;
     const float rel_y = ship.vel_y - target.vel_y;
-    const bool gravity_shield =
-        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
-    if (gravity_shield || (std::abs(rel_x) < kVelocityMatchTol &&
-                           std::abs(rel_y) < kVelocityMatchTol)) {
+    const bool inertialess =
+        cls != nullptr && NovaShip_IsInertialess(ship, *cls);
+    if (inertialess || (std::abs(rel_x) < kVelocityMatchTol &&
+                        std::abs(rel_y) < kVelocityMatchTol)) {
       ship.vel_x = target.vel_x;
       ship.vel_y = target.vel_y;
       const float target_heading_deg = target.heading / kDegToRad;
@@ -4174,11 +4174,11 @@ void NovaAi_ApplyControls(GameState &state,
     Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
     const float rel_x = ship.vel_x - target.vel_x;
     const float rel_y = ship.vel_y - target.vel_y;
-    const bool gravity_shield =
-        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
+    const bool inertialess =
+        cls != nullptr && NovaShip_IsInertialess(ship, *cls);
     if (std::abs(rel_x) >= kVelocityMatchTol ||
         std::abs(rel_y) >= kVelocityMatchTol) {
-      if (!gravity_shield) {
+      if (!inertialess) {
         ship.ai_desired_heading_deg = static_cast<std::int16_t>(
             WrapDeg(BearingDeg(0.0F, 0.0F, rel_x, rel_y) + 180.0F));
         if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
@@ -4242,7 +4242,7 @@ void NovaAi_ApplyControls(GameState &state,
     // Evade / break: while still moving (>= 0.35 px/tick) brake like mode 1
     // (reverse of the velocity bearing, or a predictive aim when a weapon
     // bank is live -- deferred to the straight bearing), thrust once within
-    // turn+1 deg; gravity-shield ships reverse-thrust. Once slow, damp by 0.95
+    // turn+1 deg; inertialess ships reverse-thrust. Once slow, damp by 0.95
     // and steer at the target, arming direct-fire/guided/current banks within
     // turn*3 deg. The carrier-bay launch (Ship_LaunchShipFromCarrierBay) is
     // deferred.
@@ -4251,11 +4251,11 @@ void NovaAi_ApplyControls(GameState &state,
     }
     const std::int16_t target_slot = ship.primary_target_ship_slot;
     const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-    const bool gravity_shield =
-        cls != nullptr && NovaShip_HasGravityShield(ship, *cls);
+    const bool inertialess =
+        cls != nullptr && NovaShip_IsInertialess(ship, *cls);
     if (std::abs(ship.vel_x) >= kVerySlowSpeed ||
         std::abs(ship.vel_y) >= kVerySlowSpeed) {
-      if (!gravity_shield) {
+      if (!inertialess) {
         ship.ai_desired_heading_deg = static_cast<std::int16_t>(
             WrapDeg(BearingDeg(0.0F, 0.0F, ship.vel_x, ship.vel_y) + 180.0F));
         if (std::abs(heading_delta_deg()) < eff_turn_deg + 1.0F) {
@@ -4781,8 +4781,8 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
       leader->ai_station_hold_timer > 0.0F) {
     ship.ai_secondary_target_slot = leader->ai_secondary_target_slot;
     ship.primary_target_ship_slot = -1;
-    if (leader_slot != 0 && NovaShip_HasGravityShield(ship, *cls)) {
-      // Gravity-shield ships detach from NPC leaders and travel on their own
+    if (leader_slot != 0 && NovaShip_IsInertialess(ship, *cls)) {
+      // Inertialess ships detach from NPC leaders and travel on their own
       // (state 2 + mode 4 toward the mirrored destination) instead of being
       // adopted at arrival.
       ship.squad_leader_ship_slot = -1;
@@ -4886,7 +4886,7 @@ void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms) {
     // State-0x0B maintenance: the hold state owns the ship until the leader's
     // jump fires (or the leader exits, handled by the 0x00401000 exits).
     ship.primary_target_ship_slot = -1;
-    if (leader_slot != 0 && NovaShip_HasGravityShield(ship, *cls)) {
+    if (leader_slot != 0 && NovaShip_IsInertialess(ship, *cls)) {
       ship.squad_leader_ship_slot = -1;
       ship.ai_behavior_code = cls->default_ai_behavior;
       ship.ai_state_code = 2;

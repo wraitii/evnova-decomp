@@ -318,29 +318,28 @@ TEST_CASE("npc coasts without thrust (no forward command)") {
   CHECK(ship.pos_y == Catch::Approx(-6.0F));
 }
 
-TEST_CASE("steer velocity rotates heading*speed toward the prior velocity") {
+TEST_CASE("steer velocity advances the prior velocity toward heading*speed") {
   game::Ship ship;
   ship.heading = 0.0F; // heading 0 = up (-y)
-  ship.speed = 4.0F;   // gravity-shield scalar speed
-  // Prior velocity points elsewhere (large positive x) so the steer converges
-  // from it toward the heading*speed vector at a bounded per-axis rate.
+  ship.speed = 4.0F;   // inertialess scalar speed
+  // Prior velocity points elsewhere (large positive x) so the steer advances
+  // it toward the heading*speed command at a bounded per-axis rate.
   ship.vel_x = 100.0F;
   ship.vel_y = -100.0F;
 
   // eff_thrust 0.1 * 4.0 turn-scale = 0.4 step per tick.
   game::NovaShip_SteerVelocityTowardShipHeading(ship, 0.1F, 1.0F);
-  // new heading*vel = (0,-4). It moves from the prior velocity toward that by
-  // at most 0.4 per axis (clamped, never crossing the new value). Starting far
-  // away, the not-yet-clamped result stays within one step of the prior side
-  // of the target:
-  CHECK(ship.vel_x == Catch::Approx(0.4F));  // approached 0 from above
-  CHECK(ship.vel_y == Catch::Approx(-4.4F)); // approached -4 from below
+  // New heading*vel = (0,-4). The PRIOR velocity moves toward it by at most
+  // 0.4 per axis (clamped, never crossing the command). Starting far away, the
+  // result stays within one step of the prior velocity:
+  CHECK(ship.vel_x == Catch::Approx(99.6F));  // 100 moved 0.4 toward 0
+  CHECK(ship.vel_y == Catch::Approx(-99.6F)); // -100 moved 0.4 toward -4
 }
 
-TEST_CASE("gravity-shield npc keeps a scalar clamped speed and applies it") {
+TEST_CASE("inertialess npc keeps a scalar clamped speed and applies it") {
   game::GameState state;
   game::Ship ship;
-  // flags_secondary 0x40 marks the class as a gravity-shield ship.
+  // flags_secondary 0x40 marks the class as an inertialess ship.
   game::ShipClass cls = TestShipClass();
   cls.flags_secondary = 0x40;
   ship.ai_desired_heading_deg = 0;
@@ -349,22 +348,23 @@ TEST_CASE("gravity-shield npc keeps a scalar clamped speed and applies it") {
   ship.speed = 1.0F;
 
   // The original position block consumes the inherited scalar speed first:
-  // steering toward heading*1 from rest leaves vel_y at -0.6 after the 0.4
-  // bounded step, and that velocity is integrated. Current-frame thrust then
-  // raises the scalar speed from 1 to 3 for the following frame.
+  // steering from rest toward heading*1 advances the prior (zero) velocity by
+  // the 0.4 bounded step, leaving vel_y at -0.4, and that velocity is
+  // integrated. Current-frame thrust then raises the scalar speed from 1 to 3
+  // for the following frame.
   game::NovaShip_IntegrateNpcMovement(state, ship, cls, 1.0F);
   CHECK(ship.speed == Catch::Approx(3.0F));
-  CHECK(ship.vel_y == Catch::Approx(-0.6F)); // heading 0 = up, one steer step
-  CHECK(ship.pos_y == Catch::Approx(-0.6F));
+  CHECK(ship.vel_y == Catch::Approx(-0.4F)); // heading 0 = up, one steer step
+  CHECK(ship.pos_y == Catch::Approx(-0.4F));
 }
 
-TEST_CASE("gravity-shield detect excludes ai_control_mode 0x0c") {
+TEST_CASE("inertialess detect excludes ai_control_mode 0x0c") {
   game::Ship ship;
   game::ShipClass cls = TestShipClass();
   cls.flags_secondary = 0x40;
-  CHECK(game::NovaShip_HasGravityShield(ship, cls));
+  CHECK(game::NovaShip_IsInertialess(ship, cls));
   ship.ai_control_mode = 0x0c;
-  CHECK_FALSE(game::NovaShip_HasGravityShield(ship, cls));
+  CHECK_FALSE(game::NovaShip_IsInertialess(ship, cls));
 }
 
 // --- NPC engine-glow level (Ghidra Ship_HandleShip field_0xc8d4) ---
