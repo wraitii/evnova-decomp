@@ -32,7 +32,7 @@ namespace {
 // the input handler 0x0048d190 and redraw 0x0048d6f0 run inline here.
 // ---------------------------------------------------------------------------
 
-// Window furniture palette from Settings_InitTimingPresets (0x004ad7c0):
+// Window furniture palette from Settings_InitColors (0x004ad7c0):
 // DAT_00733b50 grey 0xc000 is the header text, DAT_00733b5c grey 0x4000 is the
 // table frame/grid. PTR_DAT_00575acc is the default (white) window text.
 constexpr SDL_Color kHeaderText{192, 192, 192, SDL_ALPHA_OPAQUE};

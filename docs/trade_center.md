@@ -36,7 +36,7 @@ Buy and Sell both use the single local price (no spread). Plain action moves
   `brgr_archive.{hpp,cpp}`), matching the original's `DAT_0073566a`
   `list_background` / `DAT_00735670` `list_hilite` (shipped: black / dark red
   0x800000) / `DAT_00735664` `list_text`. The 0x733b5c grid lines and 0x733b50
-  header text come from `Settings_InitTimingPresets` (0x004ad7c0).
+  header text come from `Settings_InitColors` (0x004ad7c0).
 - Button captions are the shared three-state label table entries the original
   indexes: STR# 0x96 entries 5/2/3 = `Done` / `Buy` / `Sell`
   (`NovaUi_InitThreeStateButtonArt` 0x004a2f50 + `DAT_007d82e8 = {4,1,2}`).

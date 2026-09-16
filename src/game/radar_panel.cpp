@@ -13,7 +13,7 @@ namespace game {
 namespace {
 
 // The IFF palette is a set of fixed RGBColor triples seeded at session start
-// by Settings_InitTimingPresets (0x004ad7c0). Components are 16-bit; the SDL
+// by Settings_InitColors (0x004ad7c0). Components are 16-bit; the SDL
 // port truncates to 8 bits (the original's RGB555 rasterization keeps only
 // the high 5 bits of each component anyway).
 [[nodiscard]] constexpr std::uint8_t Comp8(std::uint16_t component) {
@@ -26,7 +26,7 @@ Rgb(std::uint16_t r, std::uint16_t g, std::uint16_t b) {
 }
 
 // RGBColor triples at DAT_00733b32 / DAT_00733b50 / DAT_00733b56 / DAT_00733b5c
-// (Settings_InitTimingPresets 0x004ad7c0).
+// (Settings_InitColors 0x004ad7c0).
 constexpr SDL_Color kIffShipAttackingWithPlayer = Rgb(0x0000, 0xffff, 0x0000);
 constexpr SDL_Color kIffShipNeutral = Rgb(0x0000, 0x0000, 0xffff);
 constexpr SDL_Color kIffShipFireRestricted = Rgb(0x4000, 0x4000, 0x4000);

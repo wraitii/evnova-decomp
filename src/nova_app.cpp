@@ -3,6 +3,7 @@
 #include "brgr_archive.hpp"
 #include "game/about_dialog.hpp"
 #include "game/hud_overlay.hpp"
+#include "game/mission.hpp"
 #include "game/mission_trace.hpp"
 #include "game/new_pilot_flow.hpp"
 #include "game/nova_font.hpp"
@@ -1249,6 +1250,10 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
     NovaLog::Error(
         "game session: scenario resource tables could not be loaded");
   }
+  // Ghidra 0x004B0C20 Ship_InitGameplayDataTables. The original seeds the
+  // per-definition mission offering rolls before loading/resuming a pilot;
+  // keep that observable RNG/table side effect in the session bootstrap.
+  game::Mission_RerollOfferingRolls(runtime.game);
   runtime.game.system_reputation.assign(runtime.game.scenario.systems.size(),
                                         0);
   // Idle main menu shows only the "No Pilot File Loaded" prompt (or, with a

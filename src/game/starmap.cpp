@@ -94,7 +94,7 @@ constexpr std::array<StarmapButtonRect, 6> kStarmapButtonRects{{
      25.0F * kStarmapFitScale},
 }};
 
-// ---- Palette (Ghidra Settings_InitTimingPresets 0x004ad7c0 fills the fixed
+// ---- Palette (Ghidra Settings_InitColors 0x004ad7c0 fills the fixed
 // RGBColor triples at DAT_00733b2c..DAT_00733b78; 16-bit components render as
 // >>8 in the 8-bit draw paths). PTR_DAT_00575acc targets the black system-
 // space colour (map background + marker disc fill); PTR_DAT_00575ad8 and

@@ -147,7 +147,7 @@ void DrawMissionBbsContents(SdlPlatform &platform,
   // the label. The title/description panels keep the fill+InvertRect black.
   constexpr SDL_Color kPanelBlack{0, 0, 0, 255};
   const SDL_Color list_text_sdl = ToSdlColor(list_text);
-  // Window furniture colours (Settings_InitTimingPresets 0x004ad7c0, triples
+  // Window furniture colours (Settings_InitColors 0x004ad7c0, triples
   // consumed by NovaUi_DrawMissionBbsWindow 0x00441620): the heading
   // band uses the 0xc000 grey DAT_00733b50, the date the 0x4000 grey
   // DAT_00733b5c, and the selected title white PTR_DAT_00575ad8.
