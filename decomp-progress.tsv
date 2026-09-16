@@ -884,7 +884,6 @@ address	name	impl_file	reimpl_pct	comment
 0x004AB8D0	NovaPlatform_PumpWindowEventsThrottled		0%	
 0x004AB970	NovaRandom_Reseed	src/game/ship_spawn.cpp	40%	NovaGame_ReseedRandom: reseeds the clean-room mt19937 with fresh entropy (seed_seq of random_device + steady_clock) at new-game bootstrap
 0x004AB980	NovaUi_SetInterfaceActive		0%	
-0x004AB9D4	NovaUi_InitializeFlightViewSurfaces	src/game/route_map.cpp	20%	Provisional; flight-view sprite world/layers (0%) + route-map overlay surface/rect slice (ported as RouteMap_OverlayRect, route_map.cpp): rect side=round(view_w*scale) min 200, top-left square
 0x004ABD8D	SpriteWorld_InitializeFlightViewSpritePools		0%	PROVISIONAL Ghidra rename (was FUN_004abd8d): flight-view sprite bootstrap from NovaUi_InitializeFlightViewSurfaces (via FUN_008757c0); installs sprite-world hooks and clones/attaches every pooled sprite instance. Not yet ported.	
 0x004AC380	Ship_InitializeMainInterface		0%	
 0x004AC560	DataTables_AllocateAll		0%	
