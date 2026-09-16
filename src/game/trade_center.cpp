@@ -113,7 +113,7 @@ TradeCenterSession NovaTradeCenter_OpenSession(const GameState &state,
           0) {
     scale = 1.1;
   }
-  if (stellar->hazard_marker) {
+  if (stellar->dominated) {
     scale = 1.5;
   }
   const float scale_f = static_cast<float>(scale);

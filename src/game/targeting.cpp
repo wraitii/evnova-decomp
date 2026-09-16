@@ -437,7 +437,8 @@ NovaTargeting_SelectNearestHostileCombatTarget(const GameState &state) {
 // +0x40 Bible Strength capacity) and strength (the live +0x3c value decremented
 // by planet-type weapons); see scenario_data.
 bool NovaTargeting_IsStellarActive(const Stellar &st) {
-  return st.strength_capacity > 0 && (st.strength < 0 || st.engage_access > 0);
+  return st.strength_capacity > 0 &&
+         (st.strength < 0 || st.destroyed_days_remaining > 0);
 }
 
 // Ghidra Stellar_UpdateStellarSprites (0x0042cd10) zone selection.
@@ -575,7 +576,7 @@ NovaTargeting_FindSystemContainingStellar(const ScenarioData &scenario,
 // Ghidra 0x00432470 System_UpdateSystemAndStellarDisplayState (scope 3).
 // ---------------------------------------------------------------------------
 // For the player's current system, re-derive each stellar's owning system_id
-// and is_available / hazard_marker. A stellar whose system is unset or invalid
+// and is_available / dominated. A stellar whose system is unset or invalid
 // is re-homed to the current system when it appears in the current nav list.
 // The sprite-set resource bookkeeping (link_a/link_b allocation) is left to the
 // renderer/view.
@@ -618,7 +619,6 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state) {
   for (std::size_t idx = 0; idx < state.scenario.stellars.size(); ++idx) {
     Stellar &st = state.scenario.stellars[idx];
     st.is_available = false;
-    st.hazard_marker = false;
 
     // A stellar that names an out-of-range system may be re-homed when it sits
     // in the current system's nav list (the original fixes missing system ids
@@ -636,7 +636,7 @@ void NovaTargeting_UpdateStellarAvailability(GameState &state) {
             .is_visible) {
       st.is_available = true;
       if ((st.availability_flags & 0x20U) != 0U) {
-        st.hazard_marker = true;
+        st.dominated = true;
       }
     }
   }

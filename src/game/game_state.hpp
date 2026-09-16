@@ -349,8 +349,8 @@ struct Ship {
   // GameState's equivalent 100-stride arrays; NPCs keep their class loadout
   // counters here so AI target/intercept helpers do not accidentally inspect
   // the player's weapons.
-  std::array<std::int16_t, 0x100> npc_weapon_bank_ammo{};
-  std::array<std::int16_t, 0x100> npc_weapon_bank_secondary{};
+  std::array<std::int16_t, 0x100> npc_weapon_count_by_class{};
+  std::array<std::int16_t, 0x100> npc_weapon_secondary_count_by_class{};
   std::array<float, 0x100> npc_weapon_bank_cooldown{};
   // Per-bank burst-cycle tick counter (Ghidra ShipState field_0x17c, a
   // 200-stride int16 array). Driven by Weapon_FireShipWeapons
@@ -531,7 +531,7 @@ struct Ship {
 
   // Whether this ship is flagged as carrying a mining scoop outfit (ShipState
   // +0xC3 mining_scoop_active, derived by Outfit_HasMiningScoopOutfit). The
-  // earlier comment placed this at +0xBE, which is escort_released_mark.
+  // earlier comment placed this at +0xBE, which is escort_pending_sale_mark.
   bool mining_scoop_active = false;
 
   // --- Ship-comm dialog latches (Provisional; see ship_comm_dialog.cpp) -----
@@ -551,8 +551,8 @@ struct Ship {
   // the class's UpgradeTo upgrade when affordable. Set by the (unported)
   // escort management window 0x004853a0, cleared by the upgrade pass and on
   // slot allocation / capture.
-  std::int8_t escort_released_mark = 0; // +0xBE
-  std::int8_t escort_upgrade_mark = 0;  // +0xBF
+  std::int8_t escort_pending_sale_mark = 0; // +0xBE
+  std::int8_t escort_upgrade_mark = 0;      // +0xBF
   // ShipState +0xC8DE post_hit_mode_hint: the AI's post-hit behavior hint
   // (written by the ship-comm escort release and post-hit state handling).
   std::int16_t post_hit_mode_hint = -1; // +0xC8DE
@@ -1384,8 +1384,8 @@ struct GameState {
   PlayerEffectiveStats cached_stats{};
 
   // The original stores 0x100 weapon banks with a 100-element stride.
-  std::array<std::int16_t, 0x100 * 100> weapon_bank_ammo{};
-  std::array<std::int16_t, 0x100 * 100> weapon_bank_secondary{};
+  std::array<std::int16_t, 0x100 * 100> weapon_count_by_class{};
+  std::array<std::int16_t, 0x100 * 100> weapon_secondary_count_by_class{};
   // Per-weapon-bank cooldown, in reference-cadence ticks remaining before the
   // bank may fire again (Ghidra ShipState.weapon_bank_cooldown_0, a float per
   // bank). Mirrors the original: after firing, the bank's cooldown is set to

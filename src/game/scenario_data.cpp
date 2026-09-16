@@ -191,7 +191,7 @@ namespace {
   if (bytes.size() < 0x180) {
     return def;
   }
-  def.present = true;
+  def.alive = true;
   def.loaded_latch = true;
 
   def.spawn_system_filter = ReadBeI16(bytes, 0x00);

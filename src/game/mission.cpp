@@ -216,7 +216,7 @@ void NovaResources_EvaluateAvailability(GameState &state) {
   }
   // The per-frame display pass (scope 3 of
   // System_UpdateSystemAndStellarDisplayState 0x00432470) refreshes
-  // is_available/hazard_marker from the new membership map; the original
+  // is_available/dominated from the new membership map; the original
   // relies on the last per-tick pass having run with the same map.
   NovaTargeting_UpdateStellarAvailability(state);
 
@@ -3116,13 +3116,13 @@ void Player_CollectStellarTribute(GameState &state) {
       std::min(state.scenario.stellars.size(), static_cast<std::size_t>(0x800));
   for (std::size_t i = 0; i < count; ++i) {
     Stellar &stellar = state.scenario.stellars[i];
-    if (!stellar.is_available || !stellar.hazard_marker) {
+    if (!stellar.is_available || !stellar.dominated) {
       continue;
     }
     const Stellar *docked = state.scenario.Stellar(
         static_cast<std::int16_t>(state.travel.selected_stellar_id));
     if (docked == nullptr || (docked->availability_flags & 0x20U) == 0U) {
-      ++stellar.held_days;
+      ++stellar.domination_days;
     }
     state.player.credits += stellar.tribute;
     // g_playerInventoryAndLoadoutDirty = 1: the port's stat cache is the
@@ -3237,7 +3237,7 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
     // Garrison resupply (gated on the +0x46 marker like the income pass): a
     // garrison size above 1000 wraps modulo 1000, and the count creeps back
     // up one ship per 0x1c2-roll hit while below quota.
-    if (stellar.hazard_marker) {
+    if (stellar.dominated) {
       int max = stellar.max_ship_count;
       if (max > 1000) {
         max %= 1000;
@@ -3254,16 +3254,16 @@ void Mission_TickDailyWorldUpdate(GameState &state) {
     // schedule set-string once.
     if (NovaTargeting_IsStellarActive(stellar)) {
       if (stellar.schedule_days < 0) {
-        stellar.engage_access = 1;
-      } else if (--stellar.engage_access < 1) {
-        stellar.engage_access = -1;
+        stellar.destroyed_days_remaining = 1;
+      } else if (--stellar.destroyed_days_remaining < 1) {
+        stellar.destroyed_days_remaining = -1;
         stellar.strength = stellar.strength_capacity;
         Mission_ExecuteReactionScript(state,
                                       stellar.schedule_script,
                                       MissionScriptContext{"stellar schedule"});
       }
     } else {
-      stellar.engage_access = -1;
+      stellar.destroyed_days_remaining = -1;
     }
   }
   // Ship/outfit availability rerolls (the driver's tail): every ship class
@@ -3390,7 +3390,7 @@ void Mission_TrySpawnMissionShipAmbush(GameState &state) {
   // scenario (present + loaded latch; PersDef +0x620/+0x623).
   const PersDef &ambusher =
       state.scenario.pers_defs[static_cast<std::size_t>(0x3fe)];
-  if (!ambusher.present || !ambusher.loaded_latch) {
+  if (!ambusher.alive || !ambusher.loaded_latch) {
     return;
   }
 
@@ -3399,7 +3399,7 @@ void Mission_TrySpawnMissionShipAmbush(GameState &state) {
   // +0x44/+0x46/+0x34 read through the g_stellar_defs scan).
   std::int16_t candidates = 0;
   for (const Stellar &stellar : state.scenario.stellars) {
-    if (stellar.is_available && stellar.hazard_marker &&
+    if (stellar.is_available && stellar.dominated &&
         (stellar.availability_flags & 0x20U) == 0U) {
       ++candidates;
     }
@@ -3496,7 +3496,7 @@ bool Mission_HandleAcceptedShipInteraction(GameState &state,
   PersDef &pers = state.scenario.pers_defs[static_cast<std::size_t>(pers_slot)];
   if ((pers.flags_primary & 0x0100U) != 0U) {
     // PersDef +0x620 is the present latch, not the ActiveOn cache at +0x622.
-    pers.present = false;
+    pers.alive = false;
   }
   if ((pers.flags_primary & 0x0800U) != 0U) {
     NovaAi_EnterState2ClearPrimaryTarget(target, now_ms);
@@ -3566,7 +3566,7 @@ void Mission_TickShipHailLadder(GameState &state,
   }
   const PersDef &pers =
       state.scenario.pers_defs[static_cast<std::size_t>(ship.pers_def_slot)];
-  if (pers.hail_quote_id == -1 || !pers.present) {
+  if (pers.hail_quote_id == -1 || !pers.alive) {
     return;
   }
   // The player must not be station-held, the hailing ship must be visible

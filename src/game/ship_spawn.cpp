@@ -794,8 +794,8 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
     const std::int16_t sys_govt = system->government_id;
     for (std::size_t slot = 0; slot < 0x3ff; ++slot) {
       const PersDef &def = state.scenario.pers_defs[slot];
-      if (!(def.present && def.ai_behavior_code > 0 &&
-            def.is_available_runtime && def.loaded_latch)) {
+      if (!(def.alive && def.ai_behavior_code > 0 && def.is_available_runtime &&
+            def.loaded_latch)) {
         continue;
       }
       bool ok = false;
@@ -851,7 +851,7 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
     // ambush and player-core call sites).
     const auto forced = static_cast<std::size_t>(forced_pers_slot);
     eligible[forced] = 1;
-    state.scenario.pers_defs[forced].present = true;
+    state.scenario.pers_defs[forced].alive = true;
     eligible_count = 1;
   }
 
@@ -935,11 +935,11 @@ int NovaPers_SpawnShipFromPersDef(GameState &state,
   // deltas (indexed by weapon id - 0x80).
   NovaWeapon_EnsureNpcWeaponBanks(state, ship);
   for (std::size_t bank = 0; bank < 0x100; ++bank) {
-    ship.npc_weapon_bank_ammo[bank] = static_cast<std::int16_t>(
-        ship.npc_weapon_bank_ammo[bank] + def.weapon_count_delta[bank]);
-    ship.npc_weapon_bank_secondary[bank] =
-        static_cast<std::int16_t>(ship.npc_weapon_bank_secondary[bank] +
-                                  def.weapon_ammo_load_delta[bank]);
+    ship.npc_weapon_count_by_class[bank] = static_cast<std::int16_t>(
+        ship.npc_weapon_count_by_class[bank] + def.weapon_count_delta[bank]);
+    ship.npc_weapon_secondary_count_by_class[bank] = static_cast<std::int16_t>(
+        ship.npc_weapon_secondary_count_by_class[bank] +
+        def.weapon_ammo_load_delta[bank]);
   }
 
   const ShipClass *cls =
@@ -1518,7 +1518,7 @@ void NovaSystem_PopulateInitialNpcShips(GameState &state,
     }
     const PersDef &pers =
         state.scenario.pers_defs[static_cast<std::size_t>(pers_slot)];
-    if (!pers.present) {
+    if (!pers.alive) {
       NovaLog::Debug("system {} personality[{}] pers 0x{:x} '{}' skipped: not "
                      "present",
                      system_id,
@@ -1915,9 +1915,9 @@ int NovaWeapon_SpawnShipFromCarrierBayWeapon(GameState &state,
   ship.mission_hail_latch = 0;
   ship.afterburner_latch = NovaShip_CanShipUseAfterburner(state, ship) ? 1 : 0;
   ship.mining_scoop_active = NovaOutfit_HasMiningScoopOutfit(state, ship);
-  ship.escort_origin_mark = 0;   // ShipState +0xbb
-  ship.escort_released_mark = 0; // ShipState +0xbe
-  ship.escort_upgrade_mark = 0;  // ShipState +0xbf
+  ship.escort_origin_mark = 0;       // ShipState +0xbb
+  ship.escort_pending_sale_mark = 0; // ShipState +0xbe
+  ship.escort_upgrade_mark = 0;      // ShipState +0xbf
   ship.mission_owner_slot = -1;
   ship.ai_behavior_code = 5;
   ship.faction_or_government_id = launcher.faction_or_government_id;
@@ -2095,13 +2095,17 @@ bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher) {
     }
     const std::int16_t mounted =
         is_player
-            ? state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100]
-            : launcher.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+            ? state.weapon_count_by_class[static_cast<std::size_t>(bank) * 100]
+            : launcher
+                  .npc_weapon_count_by_class[static_cast<std::size_t>(bank)];
     const std::int16_t loaded =
         is_player
-            ? state.weapon_bank_secondary[static_cast<std::size_t>(bank) * 100]
+            ? state.weapon_secondary_count_by_class[static_cast<std::size_t>(
+                                                        bank) *
+                                                    100]
             : launcher
-                  .npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+                  .npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
+                      bank)];
     if (mounted < 1 || loaded < 1) {
       continue;
     }
@@ -2144,19 +2148,20 @@ bool NovaShip_LaunchShipFromCarrierBay(GameState &state, Ship &launcher) {
   // the loaded secondary.
   const std::int16_t mounted =
       is_player
-          ? state.weapon_bank_ammo[static_cast<std::size_t>(bay_bank) * 100]
-          : launcher.npc_weapon_bank_ammo[static_cast<std::size_t>(bay_bank)];
+          ? state
+                .weapon_count_by_class[static_cast<std::size_t>(bay_bank) * 100]
+          : launcher
+                .npc_weapon_count_by_class[static_cast<std::size_t>(bay_bank)];
   const float new_cooldown =
       def != nullptr
           ? static_cast<float>(def->reload_ticks) / static_cast<float>(mounted)
           : 0.0F;
   bank_cooldown(bay_bank) = new_cooldown;
   auto bank_loaded = [&](std::int16_t bank) -> std::int16_t & {
-    return is_player
-               ? state.weapon_bank_secondary[static_cast<std::size_t>(bank) *
-                                             100]
-               : launcher
-                     .npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+    return is_player ? state.weapon_secondary_count_by_class
+                           [static_cast<std::size_t>(bank) * 100]
+                     : launcher.npc_weapon_secondary_count_by_class
+                           [static_cast<std::size_t>(bank)];
   };
   --bank_loaded(bay_bank);
 
@@ -2196,8 +2201,10 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
       }
       const std::int16_t mounted =
           carrier_is_player
-              ? state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100]
-              : carrier.npc_weapon_bank_ammo[static_cast<std::size_t>(bank)];
+              ? state
+                    .weapon_count_by_class[static_cast<std::size_t>(bank) * 100]
+              : carrier
+                    .npc_weapon_count_by_class[static_cast<std::size_t>(bank)];
       if (mounted > 0) {
         return bank;
       }
@@ -2221,11 +2228,10 @@ void NovaShip_RecoverCarriedShipToBay(GameState &state, Ship &fighter) {
       state.scenario.Weapon(static_cast<std::int16_t>(bay_bank + 0x80));
 
   auto bank_loaded = [&](std::int16_t bank) -> std::int16_t & {
-    return carrier_is_player
-               ? state.weapon_bank_secondary[static_cast<std::size_t>(bank) *
-                                             100]
-               : carrier
-                     .npc_weapon_bank_secondary[static_cast<std::size_t>(bank)];
+    return carrier_is_player ? state.weapon_secondary_count_by_class
+                                   [static_cast<std::size_t>(bank) * 100]
+                             : carrier.npc_weapon_secondary_count_by_class
+                                   [static_cast<std::size_t>(bank)];
   };
   auto bank_cooldown = [&](std::int16_t bank) -> float & {
     return carrier_is_player
@@ -2270,7 +2276,8 @@ bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
       const Weapon *def =
           state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
       if (def == nullptr || def->weapon_mode_code != 99 ||
-          state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100] < 1) {
+          state.weapon_count_by_class[static_cast<std::size_t>(bank) * 100] <
+              1) {
         continue;
       }
       if (static_cast<std::int16_t>(def->ammo_type - 0x80) == ship_class_id) {
@@ -2284,7 +2291,8 @@ bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
         const Weapon *def =
             state.scenario.Weapon(static_cast<std::int16_t>(bank + 0x80));
         if (def == nullptr || def->weapon_mode_code != 99 ||
-            state.weapon_bank_ammo[static_cast<std::size_t>(bank) * 100] < 1) {
+            state.weapon_count_by_class[static_cast<std::size_t>(bank) * 100] <
+                1) {
           continue;
         }
         const ShipClass *carried = state.scenario.Ship(def->ammo_type);
@@ -2323,9 +2331,9 @@ bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
     if (resolved_outfit == -1) {
       return false;
     }
-    occupancy =
-        state.weapon_bank_secondary[static_cast<std::size_t>(resolved_bank) *
-                                    100];
+    occupancy = state.weapon_secondary_count_by_class[static_cast<std::size_t>(
+                                                          resolved_bank) *
+                                                      100];
   } else if (outfit_slot == -1 || weapon_bank == -1) {
     return false;
   } else {
@@ -2341,8 +2349,9 @@ bool NovaShipClass_HasPlayerBayCapacityFor(GameState &state,
   const int capacity =
       bay_weapon != nullptr && bay_weapon->max_ammo >= 1
           ? static_cast<int>(bay_weapon->max_ammo) *
-                state.weapon_bank_ammo[static_cast<std::size_t>(resolved_bank) *
-                                       100]
+                state.weapon_count_by_class[static_cast<std::size_t>(
+                                                resolved_bank) *
+                                            100]
           : static_cast<int>(
                 state.scenario
                     .outfits[static_cast<std::size_t>(resolved_outfit)]

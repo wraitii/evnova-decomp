@@ -70,7 +70,8 @@ binary, see "System discovery" below):
 - Stellar `is_available` (+0x44) is runtime state recomputed per tick by
   `System_UpdateSystemAndStellarDisplayState` `0x00432470` scope 3: defined
   (`+0x45`, set by the loader) stellars owned by a visible system become
-  available, and `availability_flags & 0x20` sets the hazard marker. Because
+  available, and `availability_flags & 0x20` sets the persistent domination
+  latch (it is not cleared by this refresh). Because
   `is_visible` is re-filtered per system through its Visibility NCB (see
   below), stellars of NCB-hidden systems stay unavailable.
 - **Visibility twins**: the scenario repeats `syst` resources at identical

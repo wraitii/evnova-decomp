@@ -416,7 +416,7 @@ SDL_Color StellarDisplayColor(const GameState &state,
         !NovaTargeting_StellarTargetsSpriteSetActive(*st)) {
       continue;
     }
-    if (st->hazard_marker) {
+    if (st->dominated) {
       ++hazard;
       continue;
     }
@@ -1402,7 +1402,7 @@ void DrawGalaxy(SdlPlatform &platform,
         !NovaTargeting_IsStellarUsableForTravel(*st)) {
       continue;
     }
-    if (st->hazard_marker) {
+    if (st->dominated) {
       ++hazard;
     } else {
       ++non_hazard;

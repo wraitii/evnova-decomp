@@ -204,10 +204,10 @@ false (i.e. not destroyed and not engaged). A hit subtracts
 `energy_damage + mass_damage` from `strength`, spawns the weapon area impact,
 and kills the shot. When strength goes negative the destruction package runs:
 ExplodType effect at the map position, the OnDestroy reaction script, then
-`strength = -1` and `engage_access = schedule_days`; player-owned shots also
+`strength = -1` and `destroyed_days_remaining = schedule_days`; player-owned shots also
 fire 10 `Government_ProcessFactionCombatEvent` events (still deferred in the
 clean-room). `NovaTargeting_IsStellarActive` reads `strength < 0 ||
-engage_access > 0` with `strength_capacity > 0`, matching 0x0046e3c0. Daily
+destroyed_days_remaining > 0` with `strength_capacity > 0`, matching 0x0046e3c0. Daily
 regeneration (`Mission_TickDailyWorldUpdate` 0x00466f26) restores `strength`
 from the capacity. `availability_flags 0x40` (Bible "starts the game
 Destroyed") is applied at new-game reset by

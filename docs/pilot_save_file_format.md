@@ -132,10 +132,10 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 | 0x0002 | u16 | Strict Play latch (`g_strict_play`); loader stores `(value == 1)` |
 | 0x0004 | u16 | gender latch (`g_player_is_male`, the global read by mission `{g}` expansions); loader stores `(value == 1)` |
 | 0x0006 | u16[0x800] | per-stellar present ship counts |
-| 0x1006 | u16[0x400] | përs personality present/active flags (`g_pers_defs +0x620`) |
-| 0x1806 | u16[0x400] | përs personality visible flags (`g_pers_defs +0x621`) |
+| 0x1006 | u16[0x400] | përs personality alive flags (`g_pers_defs +0x620`) |
+| 0x1806 | u16[0x400] | përs personality grudge flags (`g_pers_defs +0x621`) |
 | 0x2006 | u16[0x40] | reserved (zeroed) |
-| 0x2086 | u16[0x800] | per-stellar `special_tech+0x14` (availability roll state) |
+| 0x2086 | u16[0x800] | per-stellar domination-day counter (`StellarDef +0x2A`, reference `stelAnnoyance`) |
 | 0x3086 | u8 | seen-intro-screen latch (`g_intro_played`) — also noted in `intro_and_main_menu.md` |
 | 0x3088 | u16[0x100] | disaster def ids |
 | 0x3288 | u16[0x100] | disaster values (system ids, 0xffff default) |
@@ -143,7 +143,7 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 | 0x3590 | u16[0x200] | cron event ids |
 | 0x3990 | u16[0x200] | cron event values |
 | 0x3d90 | u16[0x800] | per-system mutable reinforcement cooldown (`SystemDef +0xC4` `reinf_cooldown_days`; the decompiler also renders it as `dude_prob + 0x1c`, which is the same offset) |
-| 0x4d90 | u16[0x800] | per-stellar engagement access (`StellarDef +0x47C` `engage_access`). Restore: `<1` → `engage_access = -1` and live strength reset to capacity; `>=1` → `engage_access = value` and live strength `-1` |
+| 0x4d90 | u16[0x800] | per-stellar regeneration countdown (`StellarDef +0x47C` `destroyed_days_remaining`, reference `stelDestroyed`). Restore: `<1` → `destroyed_days_remaining = -1` and live strength reset to capacity; `>=1` → `destroyed_days_remaining = value` and live strength `-1` |
 | 0x5d90 | u16[4] | escort group-order command codes by class category (`g_target_category_command`); copied onto each active non-player squad-leading ship at load |
 | 0x5d98 | char[0x40] | pilot nickname C-string (`g_player_nickname`) |
 | 0x5dd8 | 3 × u16 | ship-paint 5-bit RGB color channels (`DAT_00733b4a/4c/4e`) |
@@ -185,7 +185,7 @@ because it corrupts 32-bit fields and byte/Pascal strings.
 - Per-outfit / per-weapon entries whose def no longer exists are zeroed and
   latch `local_11` (repairs → final return -0x2e).
 - After restore: name globals (`g_player_ship_name` ship name, `g_player_name` pilot
-  name from path), per-stellar availability rolls (`avail_roll_threshold/
+  name from path), per-ship/outfit availability rolls (`avail_roll_threshold/
   limit_licensed`), `g_last_system_for_ambient_rolls = 0xffff`, then the
   pilotlog dump, and finally ship-state runtime fields reset (waypoint markers,
   shield-bubble flash intensity, aggro accumulator, etc.).
@@ -258,19 +258,19 @@ dialog remains a `TODO(decomp)`.
   NUL-terminated pilot path in `<Nova Files>/Last Pilot` (STR# 0x82 entry 4),
   written after save/load and consumed once after staged startup loading.
   `PilotDebug_WritePilotLog` (0x004ca2c0) remains unported. The block2 përs
-  active/visible flags at +0x1006/+0x1806 are decoded, applied with the
+  alive/grudge flags at +0x1006/+0x1806 are decoded, applied with the
   original definition/AI gates, and saved. The block1 escort/fleet tables at
   +0xe6ce..+0xe8ce are now
   decoded, encoded, collected from live player-affiliated ships, and restored
   through `ShipClass_SpawnEscortShipFromClass`. Per-stellar saved
-  bytes, garrison counts and availability rolls, disaster/crön runtime
+  domination bytes, garrison counts and domination-day counters, disaster/crön runtime
   counters, and rank active flags are preserved and applied with the original
   definition/state gates. Dates, all 0x800 discovery/reputation slots, the 16
   mission runtime-flag records, and the 16 active-mission records are now
   preserved; mission records retain their opaque script/text payload bytes.
   Also round-tripped now: the player combat rating (block1+0xe94e), the
   Strict Play and gender latches (block2+0x02/+0x04), the per-system
-  reinforcement cooldown (block2+0x3d90), per-stellar engagement access with
+  reinforcement cooldown (block2+0x3d90), per-stellar regeneration countdown with
   its live-strength fallback (block2+0x4d90), and the escort group-order
   codes (block2+0x5d90).
 

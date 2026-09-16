@@ -260,9 +260,9 @@ std::string ProbeState_Snapshot(const GameState &state,
           ship.active_weapon_bank_slot < 0x100) {
         const std::size_t bank =
             static_cast<std::size_t>(ship.active_weapon_bank_slot);
-        row.num("active_weapon_ammo", ship.npc_weapon_bank_ammo[bank]);
+        row.num("active_weapon_ammo", ship.npc_weapon_count_by_class[bank]);
         row.num("active_weapon_secondary",
-                ship.npc_weapon_bank_secondary[bank]);
+                ship.npc_weapon_secondary_count_by_class[bank]);
         row.num("active_weapon_cooldown", ship.npc_weapon_bank_cooldown[bank]);
       }
       row.boolean("arrival_monitor_active", ship.arrival_monitor_active);

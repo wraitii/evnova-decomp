@@ -851,7 +851,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       const PersDef &pers =
           state.scenario
               .pers_defs[static_cast<std::size_t>(target.pers_def_slot)];
-      if (pers.present && pers.hail_pict_id > 0x7f) {
+      if (pers.alive && pers.hail_pict_id > 0x7f) {
         pict_id = static_cast<std::uint16_t>(pers.hail_pict_id);
       }
     }

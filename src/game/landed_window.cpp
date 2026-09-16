@@ -176,7 +176,7 @@ bool Stellar_Dock(GameState &state,
   // Stellar_HandleStellarEntryAndExit checks affordability before it begins the
   // arrival transition, then deducts the full fee (unless the stellar is in
   // its hostile/hazard state). Do the same before touching player state.
-  const bool fee_waived = stellar->hazard_marker;
+  const bool fee_waived = stellar->dominated;
   if (stellar->service_cost > 0 && !fee_waived &&
       state.player.credits < stellar->service_cost) {
     NovaLog::Info("landing denied at stellar {}: service cost {} exceeds "
@@ -963,8 +963,7 @@ LandedExit DispatchService(SdlPlatform &platform,
 
   case LandedService::kRefuel: {
     const Stellar *stellar = state.scenario.Stellar(ctx.stellar_id);
-    NovaLanded_Refuel(state,
-                      stellar != nullptr && stellar->hazard_marker ? 0 : 1);
+    NovaLanded_Refuel(state, stellar != nullptr && stellar->dominated ? 0 : 1);
     return LandedExit::kServiceComplete;
   }
 

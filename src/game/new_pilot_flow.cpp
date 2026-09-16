@@ -349,8 +349,8 @@ void Stub_SeedStartingInventory(GameState &state) {
   // available in state.scenario, so for the default ship (id 0x80, zero-based
   // 0) the outfit counts are populated from its default items.
   state.inventory.outfit_owned_count.fill(0);
-  state.weapon_bank_ammo.fill(0);
-  state.weapon_bank_secondary.fill(0);
+  state.weapon_count_by_class.fill(0);
+  state.weapon_secondary_count_by_class.fill(0);
 
   const auto *ship = state.scenario.Ship(
       static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
@@ -375,10 +375,10 @@ void Stub_SeedStartingInventory(GameState &state) {
   // Seed the weapon banks from the starting ship class's stock weapons,
   // mirroring Menu_RunNewGameFlow: for each stock weapon triple
   // {weapon_id, count, ammo_load} the mounted-count goes into
-  // weapon_bank_ammo[weapon_id-0x80] and any carried rounds (ammo_load, when
-  // > 0) into the matching secondary/ammo counter. The starter Shuttle's
+  // weapon_count_by_class[weapon_id-0x80] and any carried rounds (ammo_load,
+  // when > 0) into the matching secondary/ammo counter. The starter Shuttle's
   // single Light Blaster ({0x80, 1, -1}: 1 mounted, unlimited ammo) thereby
-  // lands in bank 0 with weapon_bank_ammo[0] = 1 > 0, so the primary-fire
+  // lands in bank 0 with weapon_count_by_class[0] = 1 > 0, so the primary-fire
   // loop (NovaWeapon_TickPlayerWeaponCommands primary-fire arm) can fire it.
   // The stock_weapons decode and the loader's default_weapon_ammo/secondary
   // mapping are verified in tests/scenario_data_test.cpp.
@@ -546,22 +546,23 @@ void SetNewGameDateAndStrings(GameState &state) {
 }
 
 // Ghidra Game_ResetNewGameState (0x004b4690), 0x004b46bc..0x004b4760: for every
-// stellar slot the loader left behind, clear hazard_marker and seed Strength.
+// stellar slot the loader left behind, clear dominated and seed Strength.
 // Bodies carrying availability_flags 0x40 (Bible "starts the game destroyed")
 // start at live strength -1 with the regeneration countdown pinned (1 when the
 // schedule seed is negative, otherwise the schedule seed); every other body
-// resets live strength to the loaded capacity with engage_access 0. Without
-// this the loader's capacity seed would leave starts-destroyed bodies intact.
+// resets live strength to the loaded capacity with destroyed_days_remaining 0.
+// Without this the loader's capacity seed would leave starts-destroyed bodies
+// intact.
 void ResetStellarStrengthForNewGame(GameState &state) {
   for (Stellar &stellar : state.scenario.stellars) {
-    stellar.hazard_marker = false;
+    stellar.dominated = false;
     if ((stellar.availability_flags & 0x40U) != 0U) {
       stellar.strength = -1;
-      stellar.engage_access =
+      stellar.destroyed_days_remaining =
           stellar.schedule_days < 0 ? 1 : stellar.schedule_days;
     } else {
       stellar.strength = stellar.strength_capacity;
-      stellar.engage_access = 0;
+      stellar.destroyed_days_remaining = 0;
     }
   }
 }
@@ -583,8 +584,8 @@ void NovaShip_ResetPlayerShipState(GameState &state) {
   state.inventory.cargo_bins.fill(0);
   state.inventory.outfit_owned_count.fill(0);
   state.inventory.junk_counts.fill(0);
-  state.weapon_bank_ammo.fill(0);
-  state.weapon_bank_secondary.fill(0);
+  state.weapon_count_by_class.fill(0);
+  state.weapon_secondary_count_by_class.fill(0);
   state.weapon_bank_cooldown.fill(0.0F);
   state.active_mission_runtime_flags = {};
   state.active_missions = {};
@@ -784,8 +785,9 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // weapons) into the record, otherwise PilotFileApply below copies a fresh
   // record whose banks are all zero and clobbers the seeded Light Blaster
   // bank 0, so nothing could ever fire.
-  record.weapon_bank_ammo = state.weapon_bank_ammo;
-  record.weapon_bank_secondary = state.weapon_bank_secondary;
+  record.weapon_count_by_class = state.weapon_count_by_class;
+  record.weapon_secondary_count_by_class =
+      state.weapon_secondary_count_by_class;
   record.outfit_owned_count = state.inventory.outfit_owned_count;
 
   // Carry the remaining live runtime fields the record now round-trips, so
@@ -797,10 +799,12 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   record.player_combat_rating_points = state.player_combat_rating_points;
   record.reinforcement_retrigger_delay = state.reinforcement_retrigger_delay;
   record.target_category_command = state.target_category_command;
-  const std::size_t engage_count = std::min(
-      state.scenario.stellars.size(), record.stellar_engage_access.size());
+  const std::size_t engage_count =
+      std::min(state.scenario.stellars.size(),
+               record.stellar_destroyed_days_remaining.size());
   for (std::size_t i = 0; i < engage_count; ++i) {
-    record.stellar_engage_access[i] = state.scenario.stellars[i].engage_access;
+    record.stellar_destroyed_days_remaining[i] =
+        state.scenario.stellars[i].destroyed_days_remaining;
   }
   // The loader marked every present përs resource active (+0x620); a fresh
   // record's pers flags are zero, so without this carry PilotFileApply would

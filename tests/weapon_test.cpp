@@ -17,7 +17,7 @@ namespace game {
 // path. These assert the weapon-bank population and fire/cooldown behaviour
 // that get the player's main weapon shooting, against the shipped Nova data:
 // the starter ship (class 0x80) mounts one Light Blaster (stock weapon
-// {id 0x80, count 1, ammo -1=unlimited}) in bank 0, so weapon_bank_ammo[0]
+// {id 0x80, count 1, ammo -1=unlimited}) in bank 0, so weapon_count_by_class[0]
 // must be 1 and the primary-fire path (the primary-fire arm of
 // NovaWeapon_TickPlayerWeaponCommands) must be able to fire it.
 
@@ -56,17 +56,17 @@ void SeedStockWeaponBanks(GameState &state) {
   if (!ship) {
     return;
   }
-  state.weapon_bank_ammo.fill(0);
-  state.weapon_bank_secondary.fill(0);
+  state.weapon_count_by_class.fill(0);
+  state.weapon_secondary_count_by_class.fill(0);
   for (const ShipDefaultWeaponBank &stock : ship->stock_weapons) {
     if (stock.weapon_id < 0x80 || stock.weapon_id > 0x17f) {
       continue;
     }
     const std::size_t bank = static_cast<std::size_t>(stock.weapon_id - 0x80);
-    state.weapon_bank_ammo[bank * 100] =
+    state.weapon_count_by_class[bank * 100] =
         static_cast<std::int16_t>(stock.count > 0 ? stock.count : 0);
     if (stock.ammo_load > 0) {
-      state.weapon_bank_secondary[bank * 100] =
+      state.weapon_secondary_count_by_class[bank * 100] =
           static_cast<std::int16_t>(stock.ammo_load);
     }
   }
@@ -197,7 +197,7 @@ TEST_CASE("starter light blaster becomes owned and survives a rebuild",
   // the Light Blaster bank mounted, so firing survives any Outfitter
   // transaction.
   NovaWeapon_RebuildBanksFromOwnedOutfits(state);
-  CHECK(state.weapon_bank_ammo[0] == 1);
+  CHECK(state.weapon_count_by_class[0] == 1);
   CHECK(NovaWeapon_CanFireWeaponBank(state, state.player, 0));
 }
 
@@ -293,7 +293,7 @@ TEST_CASE("hostile NPC selects and fires an unlimited weapon bank",
   REQUIRE(state.active_shots.size() == 1);
   CHECK(state.active_shots[0].owner_ship_slot == 1);
   CHECK(state.active_shots[0].weapon_id == 0);
-  CHECK(npc.npc_weapon_bank_secondary[0] == -1);
+  CHECK(npc.npc_weapon_secondary_count_by_class[0] == -1);
   CHECK(npc.active_weapon_bank_slot == -1);
   CHECK(npc.ai_fire_trigger_latch == 0);
 
@@ -342,8 +342,9 @@ TEST_CASE("continuous NPC weapon handoff retains its bank and trigger",
   npc.armor_points = 100.0F;
   npc.active_weapon_bank_slot = continuous_bank;
   npc.ai_fire_trigger_latch = 1;
-  npc.npc_weapon_bank_ammo[static_cast<std::size_t>(continuous_bank)] = 1;
-  npc.npc_weapon_bank_secondary[static_cast<std::size_t>(continuous_bank)] = -1;
+  npc.npc_weapon_count_by_class[static_cast<std::size_t>(continuous_bank)] = 1;
+  npc.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
+      continuous_bank)] = -1;
   npc.npc_weapon_bank_cooldown[static_cast<std::size_t>(continuous_bank)] =
       5.0F;
 
@@ -385,10 +386,10 @@ TEST_CASE("NPC energy weapons do not need a secondary ammo counter",
   REQUIRE(npc.active_weapon_bank_slot == 0);
   // The original treats the Light Blaster's ammo_type == -1 as an energy /
   // unlimited bank; a zero secondary counter must not suppress firing.
-  npc.npc_weapon_bank_secondary[0] = 0;
+  npc.npc_weapon_secondary_count_by_class[0] = 0;
   NovaWeapon_FireNpcWeaponBank(state, npc);
   REQUIRE(state.active_shots.size() == 1);
-  CHECK(npc.npc_weapon_bank_secondary[0] == 0);
+  CHECK(npc.npc_weapon_secondary_count_by_class[0] == 0);
 }
 
 TEST_CASE("brave-trader weapon selection survives the post-state refresh",
@@ -580,7 +581,7 @@ TEST_CASE("an unsuccessful NPC fire request clears its stale bank latch",
   // handoff is consumed by Ship_HandleShip after Weapon_FireShipWeapons.
   npc.active_weapon_bank_slot = 0;
   npc.ai_fire_trigger_latch = 1;
-  npc.npc_weapon_bank_ammo[0] = 0;
+  npc.npc_weapon_count_by_class[0] = 0;
 
   NovaWeapon_FireNpcWeaponBank(state, npc);
 
@@ -631,10 +632,10 @@ TEST_CASE("spatial fire gain matches the original distance falloff",
 
 // Regression: mounting a second identical weapon in a bank doubles the fire
 // rate by halving the per-shot cooldown (the original divides the weapon's
-// fire cadence by weapon_bank_ammo, the number of weapons in the bank) rather
-// than being a no-op. Pins the earlier behaviour where the bank always cooled
-// down at the full reload regardless of mount count, so buying a second Light
-// Blaster changed nothing.
+// fire cadence by weapon_count_by_class, the number of weapons in the bank)
+// rather than being a no-op. Pins the earlier behaviour where the bank always
+// cooled down at the full reload regardless of mount count, so buying a second
+// Light Blaster changed nothing.
 TEST_CASE("second mounted weapon halves the bank cooldown", "[weapon]") {
   if (!ArchivesAvailable()) {
     SKIP("Nova .rez archives not present");
@@ -645,14 +646,14 @@ TEST_CASE("second mounted weapon halves the bank cooldown", "[weapon]") {
   SeedStockWeaponBanks(state);
 
   // One Light Blaster mounted: cooldown = reload(10) / ammo(1) = 10 ticks.
-  REQUIRE(state.weapon_bank_ammo[0] == 1);
+  REQUIRE(state.weapon_count_by_class[0] == 1);
   FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
   const float single_cooldown = state.weapon_bank_cooldown[0];
   REQUIRE(single_cooldown == Catch::Approx(10.0F));
 
   // A second identical weapon in the same bank halves the cooldown.
-  state.weapon_bank_ammo[0] = 2;
+  state.weapon_count_by_class[0] = 2;
   state.weapon_bank_cooldown[0] = 0.0F; // back off cooldown
   FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 2); // previous shot still flying
@@ -717,16 +718,17 @@ TEST_CASE("fresh-pilot record round-trip keeps the light blaster fireable",
   REQUIRE(state.scenario.LoadFromArchives());
   state.player.ship_class_id = 0;
   SeedStockWeaponBanks(state);
-  REQUIRE(state.weapon_bank_ammo[0] == 1);
+  REQUIRE(state.weapon_count_by_class[0] == 1);
 
   // Step 6 (new_pilot_flow.cpp): build the fresh record and carry the banks.
   PilotFile record = PilotFile::Fresh();
-  record.weapon_bank_ammo = state.weapon_bank_ammo;
-  record.weapon_bank_secondary = state.weapon_bank_secondary;
+  record.weapon_count_by_class = state.weapon_count_by_class;
+  record.weapon_secondary_count_by_class =
+      state.weapon_secondary_count_by_class;
   PilotFileApply(record, state);
 
   // The seeded Light Blaster must survive the record round-trip.
-  CHECK(state.weapon_bank_ammo[0] == 1);
+  CHECK(state.weapon_count_by_class[0] == 1);
   CHECK(NovaWeapon_CanFireWeaponBank(state, state.player, 0));
   FirePlayerPrimary(state);
   REQUIRE(state.active_shots.size() == 1);
@@ -884,7 +886,7 @@ TEST_CASE("point defense prioritizes and damages an inbound guided shot",
   defender.armor_points = 100.0F;
   defender.pos_x = 0.0F;
   defender.pos_y = 0.0F;
-  state.weapon_bank_ammo[0] = 2;
+  state.weapon_count_by_class[0] = 2;
 
   ActiveShot incoming;
   incoming.weapon_id = 1;

@@ -855,7 +855,7 @@ MenuSystemLegalStatusText(const game::GameState &state,
         !game::NovaTargeting_IsStellarUsableForTravel(*stellar)) {
       continue;
     }
-    if (stellar->hazard_marker) {
+    if (stellar->dominated) {
       ++hazard_destinations;
     } else {
       ++normal_destinations;

@@ -148,8 +148,8 @@ std::int16_t LeadWeaponBank(const GameState &state, const Ship &ship) {
   constexpr std::size_t kBankStride = 100;
   std::int16_t first_primary = -1;
   for (std::int16_t bank = 0; bank < 0x100; ++bank) {
-    if (state.weapon_bank_ammo[static_cast<std::size_t>(bank) * kBankStride] <=
-        0) {
+    if (state.weapon_count_by_class[static_cast<std::size_t>(bank) *
+                                    kBankStride] <= 0) {
       continue;
     }
     const Weapon *w =

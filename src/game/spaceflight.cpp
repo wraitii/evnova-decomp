@@ -3580,7 +3580,7 @@ std::int16_t Weapon_FindLaunchBayShipClassIndex(const GameState &state) {
     if (def == nullptr || def->weapon_mode_code != kBayWeaponModeCode) {
       continue;
     }
-    if (state.weapon_bank_ammo[bank * kPlayerBankStride] < 1) {
+    if (state.weapon_count_by_class[bank * kPlayerBankStride] < 1) {
       continue;
     }
     if (def->ammo_type < 0x80) {
@@ -3615,8 +3615,8 @@ bool Outfit_HasEscapePodOrLaunchBay(const GameState &state) {
 // 0x100 banks in the eject/respawn paths).
 void ZeroPlayerWeaponBanks(GameState &state) {
   for (std::size_t bank = 0; bank < 0x100; ++bank) {
-    state.weapon_bank_ammo[bank * kPlayerBankStride] = 0;
-    state.weapon_bank_secondary[bank * kPlayerBankStride] = 0;
+    state.weapon_count_by_class[bank * kPlayerBankStride] = 0;
+    state.weapon_secondary_count_by_class[bank * kPlayerBankStride] = 0;
   }
   state.weapon_bank_cooldown.fill(0.0F);
   state.weapon_bank_burst_counter.fill(0);

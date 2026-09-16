@@ -264,6 +264,34 @@ TEST_CASE(
   CHECK(target.ai_state_code == 4);
 }
 
+TEST_CASE("player hit latches a Flags-1 personality grudge",
+          "[collision][aggro][pers]") {
+  GameState state;
+  SeedCollisionScenario(state);
+  state.scenario.pers_defs.resize(1);
+  state.scenario.pers_defs[0].alive = true;
+  state.scenario.pers_defs[0].flags_primary = 0x0001;
+  Ship &target = state.ShipAt(1);
+  target.pers_def_slot = 0;
+
+  ResolveShipHitFromWeapon(state,
+                           /*target_slot=*/1,
+                           target,
+                           target.pos_x,
+                           target.pos_y,
+                           /*impact_impulse=*/0,
+                           /*armor_damage=*/1,
+                           /*shield_damage=*/1,
+                           /*attacker_ship_slot=*/0,
+                           /*allow_aggro_updates=*/true,
+                           /*suppress_retarget_logic=*/true,
+                           /*force_armor_only=*/false,
+                           /*bypass_shields=*/false,
+                           /*player_aggro_delta=*/0);
+
+  CHECK(state.scenario.pers_defs[0].grudge);
+}
+
 TEST_CASE("player attack alerts same-government NPCs", "[collision][ai]") {
   GameState state;
   SeedCollisionScenario(state);

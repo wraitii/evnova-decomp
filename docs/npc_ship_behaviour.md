@@ -323,9 +323,9 @@ verified):
 3. **pers_def arms (0x0040e186)** — slot `0x3fe` forces hostility; otherwise
    `pers.Flags & 1` (grudge) with the pers `+0x621` grudge latch and the cloak
    engagement predicate also forces hostility.  The `+0x621` latch is set by
-   `Shot_ResolveShipHitFromWeapon` (0x0041a2cb) on a player hit; neither the
-   field nor the writer is ported, so this stage is **skipped**
-   (`TODO(decomp)`).
+   `Shot_ResolveShipHitFromWeapon` (0x0041a2cb) on a player hit. The latch,
+   writer, and target-acquisition override are ported; the separate grudge
+   suppression of the unported flee transition remains deferred.
 4. **Mission-fleet arms (0x0040e202)** — with an active mission-fleet slot:
    `ship_behavior == 0` forces hostility to the player (cloak gate);
    `ship_behavior == 1` drops a player primary, calls

@@ -15,7 +15,7 @@ redraw `0x0048d6f0` `NovaUi_RedrawTradeCenterWindow`, selection cycler
   `1` = `round(base/scale)` (Low), `2` = base (Med), `4` = `round(base*scale)`
   (High), `0` = not traded (price 0, row disabled). Prices floor at 5.
 - `scale` = 1.25; 1.1 when `government_id != -1` and
-  `system_reputation[stellar.system_id] < 0`; 1.5 when `hazard_marker`.
+  `system_reputation[stellar.system_id] < 0`; 1.5 when `dominated`.
 - Active `öops` (`g_disaster_defs`) bound to the landed stellar override
   `price = base + delta` (floor 5). Badge shows Higher/Lower.
 - Rows 6/7: first `jünk` def whose **BoughtAt** contains the stellar and

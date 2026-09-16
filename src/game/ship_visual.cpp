@@ -327,8 +327,7 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
                                    /*duration_frames=*/std::uint64_t{0xf0});
       }
       Mission_FailMissionSlotQuick(
-          state, fleet_slot,
-          static_cast<std::uint32_t>(state.gameplay_now_ms));
+          state, fleet_slot, static_cast<std::uint32_t>(state.gameplay_now_ms));
     }
     mission.goal_counter_a =
         static_cast<std::int16_t>(mission.goal_counter_a + 1);
@@ -354,10 +353,10 @@ void NovaShip_RunShipDestructionFinale(GameState &state, Ship &ship) {
     if (ship.pers_def_slot == 0x3fe) {
       std::uniform_int_distribution<std::int32_t> roll{0, 7};
       if (roll(state.rng) == 0) {
-        def.present = false;
+        def.alive = false;
       }
     } else if ((def.flags_primary & 0x0002U) == 0U) {
-      def.present = false;
+      def.alive = false;
     }
   }
 

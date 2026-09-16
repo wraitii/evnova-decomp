@@ -55,8 +55,8 @@ using game::PilotLoadError;
   p.date_prefix = "Before ";
   p.date_suffix = " A.G.";
   p.ship_paint_rgb5 = {3, 17, 29};
-  p.pers_present_flags[3] = 1;
-  p.pers_visible_flags[3] = 1;
+  p.pers_alive_flags[3] = 1;
+  p.pers_grudge_flags[3] = 1;
   p.cargo_bins = {3, 0, 5, 1, 0, 2};
   p.system_discovery[0] = 2;
   p.system_discovery[0x7ff] = 1;
@@ -64,21 +64,22 @@ using game::PilotLoadError;
   p.system_reputation[0x7ff] = 5678;
   p.outfit_owned_count[0] = 1;
   p.outfit_owned_count[0x1ff] = -2;
-  p.weapon_bank_ammo[5 * 100] = 7;
-  p.weapon_bank_secondary[5 * 100] = 11;
-  p.weapon_bank_ammo[0xff * 100 + 42] = 99; // non-first slot: not serialized
+  p.weapon_count_by_class[5 * 100] = 7;
+  p.weapon_secondary_count_by_class[5 * 100] = 11;
+  p.weapon_count_by_class[0xff * 100 + 42] =
+      99; // non-first slot: not serialized
   p.junk_counts[0x7f] = 13;
   p.control_bits[42] = 1;
   p.control_bits[9999] = 0x8a;
-  p.stellar_saved_bytes[7] = 0x5a;
+  p.stellar_dominated[7] = 0x5a;
   p.stellar_present_ship_counts[7] = 23;
-  p.stellar_availability_rolls[7] = 81;
-  p.stellar_engage_access[7] = 33;
+  p.stellar_domination_days[7] = 81;
+  p.stellar_destroyed_days_remaining[7] = 33;
   p.reinforcement_retrigger_delay[5] = 12;
   p.target_category_command = {1, -1, 2, 0};
   p.escort_ship_class_ids[0] = 1003;
   p.escort_upgrade_flags[0] = 1;
-  p.escort_released_flags[0] = 1;
+  p.escort_pending_sale_flags[0] = 1;
   p.fighter_ship_class_ids[0] = 4;
   p.fighter_voice_types[0] = 2;
   p.disaster_days_remaining[3] = 12;
@@ -116,7 +117,7 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.player_combat_rating_points == 987654);
   CHECK(out.escort_ship_class_ids[0] == 1003);
   CHECK(out.escort_upgrade_flags[0] == 1);
-  CHECK(out.escort_released_flags[0] == 1);
+  CHECK(out.escort_pending_sale_flags[0] == 1);
   CHECK(out.fighter_ship_class_ids[0] == 4);
   CHECK(out.fighter_voice_types[0] == 2);
   CHECK(out.ship_class_id == 3);
@@ -127,23 +128,23 @@ TEST_CASE("PilotFile .plt serialize/deserialize round-trips the tracked "
   CHECK(out.date_prefix == "Before ");
   CHECK(out.date_suffix == " A.G.");
   CHECK(out.ship_paint_rgb5 == p.ship_paint_rgb5);
-  CHECK(out.pers_present_flags[3] == 1);
-  CHECK(out.pers_visible_flags[3] == 1);
+  CHECK(out.pers_alive_flags[3] == 1);
+  CHECK(out.pers_grudge_flags[3] == 1);
   CHECK(out.cargo_bins == p.cargo_bins);
   CHECK(out.system_discovery == p.system_discovery);
   CHECK(out.system_reputation == p.system_reputation);
   CHECK(out.outfit_owned_count[0] == 1);
   CHECK(out.outfit_owned_count[0x1ff] == -2);
-  CHECK(out.weapon_bank_ammo[5 * 100] == 7);
-  CHECK(out.weapon_bank_secondary[5 * 100] == 11);
+  CHECK(out.weapon_count_by_class[5 * 100] == 7);
+  CHECK(out.weapon_secondary_count_by_class[5 * 100] == 11);
   // Non-first bank slots are not persisted by the original format.
-  CHECK(out.weapon_bank_ammo[0xff * 100 + 42] == 0);
+  CHECK(out.weapon_count_by_class[0xff * 100 + 42] == 0);
   CHECK(out.junk_counts[0x7f] == 13);
   CHECK(out.control_bits == p.control_bits);
-  CHECK(out.stellar_saved_bytes[7] == 0x5a);
+  CHECK(out.stellar_dominated[7] == 0x5a);
   CHECK(out.stellar_present_ship_counts[7] == 23);
-  CHECK(out.stellar_availability_rolls[7] == 81);
-  CHECK(out.stellar_engage_access[7] == 33);
+  CHECK(out.stellar_domination_days[7] == 81);
+  CHECK(out.stellar_destroyed_days_remaining[7] == 33);
   CHECK(out.reinforcement_retrigger_delay[5] == 12);
   CHECK(out.target_category_command == p.target_category_command);
   CHECK(out.disaster_days_remaining[3] == 12);
@@ -170,9 +171,9 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   state.scenario.stellars[6].is_defined = true;
   state.scenario.stellars[7].is_defined = true;
   pilot.stellar_present_ship_counts[6] = 17;
-  pilot.stellar_availability_rolls[6] = 62;
-  pilot.stellar_engage_access[6] = 17;
-  pilot.stellar_engage_access[7] = -1;
+  pilot.stellar_domination_days[6] = 62;
+  pilot.stellar_destroyed_days_remaining[6] = 17;
+  pilot.stellar_destroyed_days_remaining[7] = -1;
   state.scenario.stellars[6].strength_capacity = 250;
   state.scenario.stellars[7].strength_capacity = 400;
   // One active, squad-leading escort for the group-order restore loop.
@@ -201,13 +202,13 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(state.control.ControlBit(9999));
   CHECK(state.control.persisted_bit_bytes[9999] == 0x8a);
   CHECK(state.scenario.stellars[6].present_ship_count == 17);
-  CHECK(state.scenario.stellars[6].availability_roll == 62);
-  CHECK(state.scenario.stellars[7].persistent_state_byte == 0x5a);
+  CHECK(state.scenario.stellars[6].domination_days == 62);
+  CHECK(state.scenario.stellars[7].dominated == 0x5a);
   CHECK(state.scenario.stellars[7].present_ship_count == 0);
-  CHECK(state.scenario.stellars[7].availability_roll == 0);
-  CHECK(state.scenario.stellars[6].engage_access == 17);
+  CHECK(state.scenario.stellars[7].domination_days == 0);
+  CHECK(state.scenario.stellars[6].destroyed_days_remaining == 17);
   CHECK(state.scenario.stellars[6].strength == -1);
-  CHECK(state.scenario.stellars[7].engage_access == -1);
+  CHECK(state.scenario.stellars[7].destroyed_days_remaining == -1);
   CHECK(state.scenario.stellars[7].strength == 400);
   CHECK(state.reinforcement_retrigger_delay[5] == 12);
   CHECK(state.target_category_command[2] == 2);
@@ -220,8 +221,8 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(state.cron_event_states[5].duration_counter == 9);
   CHECK(state.cron_event_states[5].holdoff_counter == -1);
   CHECK(state.scenario.ranks[6].active);
-  CHECK(state.scenario.pers_defs[3].present);
-  CHECK(state.scenario.pers_defs[3].visible);
+  CHECK(state.scenario.pers_defs[3].alive);
+  CHECK(state.scenario.pers_defs[3].grudge);
   CHECK(state.date_prefix == "Before ");
   CHECK(state.date_suffix == " A.G.");
   CHECK(state.ship_paint_rgb5 == pilot.ship_paint_rgb5);
@@ -232,8 +233,8 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(collected.control_bits[42] == 1);
   CHECK(collected.control_bits[9999] == 0x8a);
   CHECK(collected.stellar_present_ship_counts[6] == 17);
-  CHECK(collected.stellar_engage_access[6] == 17);
-  CHECK(collected.stellar_engage_access[7] == -1);
+  CHECK(collected.stellar_destroyed_days_remaining[6] == 17);
+  CHECK(collected.stellar_destroyed_days_remaining[7] == -1);
   CHECK(collected.reinforcement_retrigger_delay[5] == 12);
   CHECK(collected.target_category_command == pilot.target_category_command);
   CHECK(collected.strict_play);
@@ -241,8 +242,8 @@ TEST_CASE("PilotFile applies persistent system state to live scenario rows") {
   CHECK(collected.disaster_days_remaining[3] == 12);
   CHECK(collected.cron_duration_counters[5] == 9);
   CHECK(collected.rank_active_flags[6] == 1);
-  CHECK(collected.pers_present_flags[3] == 1);
-  CHECK(collected.pers_visible_flags[3] == 1);
+  CHECK(collected.pers_alive_flags[3] == 1);
+  CHECK(collected.pers_grudge_flags[3] == 1);
 }
 
 TEST_CASE("new-pilot record seeding preserves loader-marked personalities") {
@@ -251,7 +252,7 @@ TEST_CASE("new-pilot record seeding preserves loader-marked personalities") {
   // Tutorial 006's derelict target: përs resource 642, slot 642 - 0x80.
   constexpr std::size_t kTutorialDerelictPers = 642 - 0x80;
   REQUIRE(state.scenario.pers_defs.size() > kTutorialDerelictPers);
-  REQUIRE(state.scenario.pers_defs[kTutorialDerelictPers].present);
+  REQUIRE(state.scenario.pers_defs[kTutorialDerelictPers].alive);
 
   // A fresh record's pers flags are zero; the new-pilot flow must project the
   // loader-marked table before PilotFileApply or every personality is cleared.
@@ -259,7 +260,7 @@ TEST_CASE("new-pilot record seeding preserves loader-marked personalities") {
   game::PilotFileSeedPersonalityPresence(state.scenario, record);
   PilotFileApply(record, state);
 
-  CHECK(state.scenario.pers_defs[kTutorialDerelictPers].present);
+  CHECK(state.scenario.pers_defs[kTutorialDerelictPers].alive);
 }
 
 TEST_CASE("PilotFile normalizes invalid negative escort commands") {
@@ -298,7 +299,7 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   saved_state.player.fuel_points = p.fuel_points;
   saved_state.player_combat_rating_points = p.player_combat_rating_points;
   saved_state.inventory.outfit_owned_count[0] = 1;
-  saved_state.weapon_bank_ammo[5 * 100] = 7;
+  saved_state.weapon_count_by_class[5 * 100] = 7;
   saved_state.active_mission_runtime_flags[0].is_active = true;
   saved_state.active_missions[0].special_ship_name_string_id = 0x89;
   saved_state.active_missions[0].special_ship_name_entry = 1;
@@ -351,7 +352,7 @@ TEST_CASE("PilotFile .plt round-trips through a real file and derives the "
   // Fuel is stored as a truncated u16 in the file (block1+0x12).
   CHECK(loaded_state.player.fuel_points == 77.0F);
   CHECK(loaded_state.inventory.outfit_owned_count[0] == 1);
-  CHECK(loaded_state.weapon_bank_ammo[5 * 100] == 7);
+  CHECK(loaded_state.weapon_count_by_class[5 * 100] == 7);
   CHECK_FALSE(loaded_state.active_missions[0].mission_fleet_name.empty());
   CHECK_FALSE(loaded_state.active_missions[0].mission_text_name_b.empty());
   CHECK(loaded_state.active_missions[0].mission_ship_count_active == 7);

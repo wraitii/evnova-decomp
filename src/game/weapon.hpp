@@ -8,12 +8,12 @@
 //   Weapon_FirePlayerWeaponBank                   0x00455150
 //   Weapon_GetWeaponFireIntervalTicks             0x0046f270
 // The original stores 0x100 weapon banks (one per zero-based weapon id),
-// each carrying two counters: `weapon_bank_ammo[bank]` (the number of the
+// each carrying two counters: `weapon_count_by_class[bank]` (the number of the
 // weapon mounted / shots per volley, >0 gates whether the primary-fire loop
-// touches the bank) and `weapon_bank_secondary[bank]` (carried ammunition
-// rounds). The starter Shuttle mounts a single Light Blaster (stock weapon
-// {id 0x80, count 1, ammo -1=unlimited}); `weapon_bank_ammo[0]=1` so it is
-// fireable.
+// touches the bank) and `weapon_secondary_count_by_class[bank]` (carried
+// ammunition rounds). The starter Shuttle mounts a single Light Blaster (stock
+// weapon {id 0x80, count 1, ammo -1=unlimited}); `weapon_count_by_class[0]=1`
+// so it is fireable.
 //
 // The player still only fires the basic projectile branch here. The shared
 // projectile spawn record carries the ownership/lifetime data consumed by
@@ -39,10 +39,10 @@ void NovaWeapon_TallyInboundWeaponThreat(GameState &state);
 // Ghidra Weapon_RebuildWeaponBankPoolsFromOwnedOutfits (0x00463260): rebuilds
 // the player's 0x100 weapon-bank ammo/secondary counters from the currently
 // owned outfits. Every owned outfit with ModType 1 (kWeapon) contributes its
-// owned count to weapon_bank_ammo[mod_val] (mod_val is the zero-based weapon
-// bank slot); every owned ModType 3 (kAmmo) outfit contributes to
-// weapon_bank_secondary[mod_val]. All banks are zeroed first. Mirrors the
-// original's zero-sweep + owned-outfit accumulation. Used when outfit
+// owned count to weapon_count_by_class[mod_val] (mod_val is the zero-based
+// weapon bank slot); every owned ModType 3 (kAmmo) outfit contributes to
+// weapon_secondary_count_by_class[mod_val]. All banks are zeroed first. Mirrors
+// the original's zero-sweep + owned-outfit accumulation. Used when outfit
 // ownership changes (the outfitter buy/sell path).
 void NovaWeapon_RebuildBanksFromOwnedOutfits(GameState &state);
 
@@ -80,11 +80,11 @@ void NovaWeapon_EnsureNpcWeaponBanks(GameState &state, Ship &ship);
 //   2 = no armed banks, or every armed bank is depleted;
 //   1 = armed banks exist and every usable (cost-bearing) bank is depleted;
 //   0 = at least one armed bank is ready.
-// A bank is armed when npc_weapon_bank_ammo > 0. Its def's ammo_type
+// A bank is armed when npc_weapon_count_by_class > 0. Its def's ammo_type
 // (ammo_or_energy_cost_code) classifies it: >= 0 secondary-ammo (ready while
-// npc_weapon_bank_secondary > 0); < -1000 fuel weapon (ready while fuel_points
-// is STRICTLY greater than |cost| - 1000, equality counts depleted); [-1000,-1]
-// free-energy (armed, never depleted).
+// npc_weapon_secondary_count_by_class > 0); < -1000 fuel weapon (ready while
+// fuel_points is STRICTLY greater than |cost| - 1000, equality counts
+// depleted); [-1000,-1] free-energy (armed, never depleted).
 [[nodiscard]] int NovaWeapon_ClassifyAmmoReadiness(const GameState &state,
                                                    const Ship &ship);
 
@@ -341,12 +341,13 @@ void NovaWeapon_TickShots(GameState &state,
 
 // The ammo/secondary counter shown for a weapon bank in the HUD weapon/ammo
 // panel, mirroring NovaUi_DrawActiveWeaponAmmoPanel (0x00460ec0). The original
-// reads `weapon_bank_secondary_counter_0[bank*100]` for a special weapon
-// (weapon_mode_code 99 / out-of-range ammo_type), else the ammo counter of the
-// weapon whose id equals this weapon's ammo_type (weapon_bank_secondary
-// counter `ammo_type`). The panel hides the count for energy-based weapons
-// (ammo_type == -1 or flags_secondary & 0x40), and returns `-1` to signal that
-// case. Returns -1 when the bank/weapon is invalid.
+// reads `weapon_secondary_count_by_class_counter_0[bank*100]` for a special
+// weapon (weapon_mode_code 99 / out-of-range ammo_type), else the ammo counter
+// of the weapon whose id equals this weapon's ammo_type
+// (weapon_secondary_count_by_class counter `ammo_type`). The panel hides the
+// count for energy-based weapons (ammo_type == -1 or flags_secondary & 0x40),
+// and returns `-1` to signal that case. Returns -1 when the bank/weapon is
+// invalid.
 [[nodiscard]] std::int16_t NovaWeapon_BankAmmoCount(const GameState &state,
                                                     std::int16_t weapon_bank);
 

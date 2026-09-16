@@ -140,8 +140,8 @@ PilotFile PilotFile::Fresh() {
   fresh.current_system_id = 0;
   fresh.date = GameDate{1999, 1, 1};
   // The absent-block engagement default is the loader's <1 fallback
-  // (engage_access -1, live strength reset to capacity).
-  fresh.stellar_engage_access.fill(-1);
+  // (destroyed_days_remaining -1, live strength reset to capacity).
+  fresh.stellar_destroyed_days_remaining.fill(-1);
   fresh.disaster_days_remaining.fill(-1);
   fresh.disaster_active_stellars.fill(-1);
   fresh.cron_duration_counters.fill(-1);
@@ -155,10 +155,10 @@ PilotFile PilotFile::Fresh() {
 void PilotFileSeedPersonalityPresence(const ScenarioData &scenario,
                                       PilotFile &record) {
   const std::size_t count =
-      std::min(scenario.pers_defs.size(), record.pers_present_flags.size());
+      std::min(scenario.pers_defs.size(), record.pers_alive_flags.size());
   for (std::size_t i = 0; i < count; ++i) {
-    record.pers_present_flags[i] = scenario.pers_defs[i].present ? 1 : 0;
-    record.pers_visible_flags[i] = scenario.pers_defs[i].visible ? 1 : 0;
+    record.pers_alive_flags[i] = scenario.pers_defs[i].alive ? 1 : 0;
+    record.pers_grudge_flags[i] = scenario.pers_defs[i].grudge ? 1 : 0;
   }
 }
 
@@ -226,50 +226,52 @@ void PilotFileApply(const PilotFile &pilot_file, GameState &state) {
     state.control.bits.set(i, pilot_file.control_bits[i] != 0);
   }
   state.player_stat_modifier_pct = pilot_file.stat_modifier_pct;
-  state.weapon_bank_ammo = pilot_file.weapon_bank_ammo;
-  state.weapon_bank_secondary = pilot_file.weapon_bank_secondary;
+  state.weapon_count_by_class = pilot_file.weapon_count_by_class;
+  state.weapon_secondary_count_by_class =
+      pilot_file.weapon_secondary_count_by_class;
   state.active_mission_runtime_flags = pilot_file.active_mission_runtime_flags;
   state.active_missions = pilot_file.active_missions;
   const std::size_t pers_count = std::min(state.scenario.pers_defs.size(),
-                                          pilot_file.pers_present_flags.size());
+                                          pilot_file.pers_alive_flags.size());
   for (std::size_t i = 0; i < pers_count; ++i) {
     PersDef &pers = state.scenario.pers_defs[i];
     if (pers.ai_behavior_code < 1) {
-      pers.present = false;
-    } else if (!pers.loaded_latch || pilot_file.pers_present_flags[i] == 0) {
-      pers.present = false;
-      pers.visible = false;
+      pers.alive = false;
+    } else if (!pers.loaded_latch || pilot_file.pers_alive_flags[i] == 0) {
+      pers.alive = false;
+      pers.grudge = false;
     } else {
-      pers.present = true;
-      pers.visible = pilot_file.pers_visible_flags[i] != 0;
+      pers.alive = true;
+      pers.grudge = pilot_file.pers_grudge_flags[i] != 0;
     }
   }
   const std::size_t stellar_count = std::min(
-      state.scenario.stellars.size(), pilot_file.stellar_saved_bytes.size());
+      state.scenario.stellars.size(), pilot_file.stellar_dominated.size());
   for (std::size_t i = 0; i < stellar_count; ++i) {
     auto &stellar = state.scenario.stellars[i];
-    stellar.persistent_state_byte =
-        stellar.is_defined ? pilot_file.stellar_saved_bytes[i] : 0;
-    if (!stellar.is_defined || stellar.persistent_state_byte != 0) {
+    stellar.dominated =
+        stellar.is_defined ? pilot_file.stellar_dominated[i] : 0;
+    if (!stellar.is_defined || stellar.dominated) {
       stellar.present_ship_count = 0;
-      stellar.availability_roll = 0;
+      stellar.domination_days = 0;
     } else {
       stellar.present_ship_count = pilot_file.stellar_present_ship_counts[i];
-      stellar.availability_roll = pilot_file.stellar_availability_rolls[i];
+      stellar.domination_days = pilot_file.stellar_domination_days[i];
     }
   }
   // Per-stellar engagement access + live strength (block2+0x4d90). The
   // original writes every one of the 0x800 slots regardless of is_defined.
-  const std::size_t engage_count = std::min(
-      state.scenario.stellars.size(), pilot_file.stellar_engage_access.size());
+  const std::size_t engage_count =
+      std::min(state.scenario.stellars.size(),
+               pilot_file.stellar_destroyed_days_remaining.size());
   for (std::size_t i = 0; i < engage_count; ++i) {
     Stellar &stellar = state.scenario.stellars[i];
-    const std::int16_t access = pilot_file.stellar_engage_access[i];
+    const std::int16_t access = pilot_file.stellar_destroyed_days_remaining[i];
     if (access < 1) {
-      stellar.engage_access = -1;
+      stellar.destroyed_days_remaining = -1;
       stellar.strength = stellar.strength_capacity;
     } else {
-      stellar.engage_access = access;
+      stellar.destroyed_days_remaining = access;
       stellar.strength = -1;
     }
   }
@@ -383,15 +385,15 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
                                                        : 0;
   }
   out.stat_modifier_pct = state.player_stat_modifier_pct;
-  out.weapon_bank_ammo = state.weapon_bank_ammo;
-  out.weapon_bank_secondary = state.weapon_bank_secondary;
+  out.weapon_count_by_class = state.weapon_count_by_class;
+  out.weapon_secondary_count_by_class = state.weapon_secondary_count_by_class;
   out.active_mission_runtime_flags = state.active_mission_runtime_flags;
   out.active_missions = state.active_missions;
   const std::size_t pers_count =
-      std::min(state.scenario.pers_defs.size(), out.pers_present_flags.size());
+      std::min(state.scenario.pers_defs.size(), out.pers_alive_flags.size());
   for (std::size_t i = 0; i < pers_count; ++i) {
-    out.pers_present_flags[i] = state.scenario.pers_defs[i].present ? 1 : 0;
-    out.pers_visible_flags[i] = state.scenario.pers_defs[i].visible ? 1 : 0;
+    out.pers_alive_flags[i] = state.scenario.pers_defs[i].alive ? 1 : 0;
+    out.pers_grudge_flags[i] = state.scenario.pers_defs[i].grudge ? 1 : 0;
   }
   out.reinforcement_retrigger_delay = state.reinforcement_retrigger_delay;
   out.target_category_command = state.target_category_command;
@@ -410,7 +412,7 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
       out.escort_ship_class_ids[escort_row] = static_cast<std::int16_t>(
           ship.ship_class_id + (ship.escort_origin_mark != 0 ? 1000 : 0));
       out.escort_upgrade_flags[escort_row] = ship.escort_upgrade_mark;
-      out.escort_released_flags[escort_row] = ship.escort_released_mark;
+      out.escort_pending_sale_flags[escort_row] = ship.escort_pending_sale_mark;
       ++escort_row;
     } else if (ship.ai_behavior_code == 5 && fighter_row < 0x40) {
       out.fighter_ship_class_ids[fighter_row] = ship.ship_class_id;
@@ -419,19 +421,19 @@ PilotFile PilotFileCollectFromState(const GameState &state) {
     }
   }
   const std::size_t stellar_count =
-      std::min(state.scenario.stellars.size(), out.stellar_saved_bytes.size());
+      std::min(state.scenario.stellars.size(), out.stellar_dominated.size());
   for (std::size_t i = 0; i < stellar_count; ++i) {
     const auto &stellar = state.scenario.stellars[i];
-    out.stellar_saved_bytes[i] = stellar.persistent_state_byte;
+    out.stellar_dominated[i] = stellar.dominated;
     out.stellar_present_ship_counts[i] =
         static_cast<std::int16_t>(stellar.present_ship_count);
-    out.stellar_availability_rolls[i] = stellar.availability_roll;
-    out.stellar_engage_access[i] = stellar.engage_access;
+    out.stellar_domination_days[i] = stellar.domination_days;
+    out.stellar_destroyed_days_remaining[i] = stellar.destroyed_days_remaining;
   }
   // Define the slots past the scenario's table with the loader's inactive
   // fallback so a save from a small scenario stays structurally valid.
-  std::fill(out.stellar_engage_access.begin() + stellar_count,
-            out.stellar_engage_access.end(),
+  std::fill(out.stellar_destroyed_days_remaining.begin() + stellar_count,
+            out.stellar_destroyed_days_remaining.end(),
             static_cast<std::int16_t>(-1));
   const std::size_t disaster_count = std::min(
       state.scenario.disaster_defs.size(), out.disaster_days_remaining.size());
@@ -494,15 +496,16 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
              static_cast<std::uint16_t>(pilot_file.outfit_owned_count[i]));
   }
   // +0x241a/+0x261a weapon bank ammo/secondary: the original persists only the
-  // first slot of each 100-slot bank (weapon_bank_ammo[i*100]).
+  // first slot of each 100-slot bank (weapon_count_by_class[i*100]).
   for (std::size_t i = 0; i < 0x100; ++i) {
-    WriteU16(block1,
-             0x241a + 2 * i,
-             static_cast<std::uint16_t>(pilot_file.weapon_bank_ammo[i * 100]));
     WriteU16(
         block1,
-        0x261a + 2 * i,
-        static_cast<std::uint16_t>(pilot_file.weapon_bank_secondary[i * 100]));
+        0x241a + 2 * i,
+        static_cast<std::uint16_t>(pilot_file.weapon_count_by_class[i * 100]));
+    WriteU16(block1,
+             0x261a + 2 * i,
+             static_cast<std::uint16_t>(
+                 pilot_file.weapon_secondary_count_by_class[i * 100]));
   }
   WriteU32(block1, 0x281a, static_cast<std::uint32_t>(pilot_file.credits));
   WriteU32(block1,
@@ -519,9 +522,10 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
     WriteU16(block1,
              0xe7ce + 2 * i,
              static_cast<std::uint16_t>(pilot_file.escort_upgrade_flags[i]));
-    WriteU16(block1,
-             0xe84e + 2 * i,
-             static_cast<std::uint16_t>(pilot_file.escort_released_flags[i]));
+    WriteU16(
+        block1,
+        0xe84e + 2 * i,
+        static_cast<std::uint16_t>(pilot_file.escort_pending_sale_flags[i]));
     WriteU16(block1,
              0xe8ce + 2 * i,
              static_cast<std::uint16_t>(pilot_file.fighter_voice_types[i]));
@@ -529,9 +533,9 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
   for (std::size_t i = 0; i < pilot_file.control_bits.size(); ++i) {
     block1[0xb7be + i] = static_cast<std::byte>(pilot_file.control_bits[i]);
   }
-  for (std::size_t i = 0; i < pilot_file.stellar_saved_bytes.size(); ++i) {
+  for (std::size_t i = 0; i < pilot_file.stellar_dominated.size(); ++i) {
     block1[0xdece + i] =
-        static_cast<std::byte>(pilot_file.stellar_saved_bytes[i]);
+        static_cast<std::byte>(pilot_file.stellar_dominated[i]);
   }
 
   // MissionRuntimeFlags (0x281e, 16 x 0x14). These are explicit little-endian
@@ -628,13 +632,13 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
   WriteU16(block2, 0x02, pilot_file.strict_play ? 1 : 0);
   WriteU16(block2, 0x04, pilot_file.male ? 1 : 0);
   WriteU16(block2, 0x3086, pilot_file.intro_played ? 1 : 0);
-  for (std::size_t i = 0; i < pilot_file.pers_present_flags.size(); ++i) {
+  for (std::size_t i = 0; i < pilot_file.pers_alive_flags.size(); ++i) {
     WriteU16(block2,
              0x1006 + 2 * i,
-             static_cast<std::uint16_t>(pilot_file.pers_present_flags[i]));
+             static_cast<std::uint16_t>(pilot_file.pers_alive_flags[i]));
     WriteU16(block2,
              0x1806 + 2 * i,
-             static_cast<std::uint16_t>(pilot_file.pers_visible_flags[i]));
+             static_cast<std::uint16_t>(pilot_file.pers_grudge_flags[i]));
   }
   for (std::size_t i = 0; i < pilot_file.stellar_present_ship_counts.size();
        ++i) {
@@ -642,10 +646,9 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
         block2,
         0x0006 + 2 * i,
         static_cast<std::uint16_t>(pilot_file.stellar_present_ship_counts[i]));
-    WriteU16(
-        block2,
-        0x2086 + 2 * i,
-        static_cast<std::uint16_t>(pilot_file.stellar_availability_rolls[i]));
+    WriteU16(block2,
+             0x2086 + 2 * i,
+             static_cast<std::uint16_t>(pilot_file.stellar_domination_days[i]));
   }
   for (std::size_t i = 0; i < pilot_file.disaster_days_remaining.size(); ++i) {
     WriteU16(block2,
@@ -676,10 +679,13 @@ std::vector<std::byte> PilotFileSerialize(const PilotFile &pilot_file,
              static_cast<std::uint16_t>(
                  pilot_file.reinforcement_retrigger_delay[i]));
   }
-  for (std::size_t i = 0; i < pilot_file.stellar_engage_access.size(); ++i) {
+  for (std::size_t i = 0;
+       i < pilot_file.stellar_destroyed_days_remaining.size();
+       ++i) {
     WriteU16(block2,
              0x4d90 + 2 * i,
-             static_cast<std::uint16_t>(pilot_file.stellar_engage_access[i]));
+             static_cast<std::uint16_t>(
+                 pilot_file.stellar_destroyed_days_remaining[i]));
   }
   for (std::size_t i = 0; i < pilot_file.target_category_command.size(); ++i) {
     WriteU16(block2,
@@ -821,9 +827,9 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       // Original zeroes outfits whose def no longer exists. TODO(decomp).
     }
     for (std::size_t i = 0; i < 0x100; ++i) {
-      out.weapon_bank_ammo[i * 100] = static_cast<std::int16_t>(
+      out.weapon_count_by_class[i * 100] = static_cast<std::int16_t>(
           ReadU16(block1, 0x241a + 2 * i, big_endian));
-      out.weapon_bank_secondary[i * 100] = static_cast<std::int16_t>(
+      out.weapon_secondary_count_by_class[i * 100] = static_cast<std::int16_t>(
           ReadU16(block1, 0x261a + 2 * i, big_endian));
       // Original zeroes banks whose weapon def no longer exists. TODO(decomp).
     }
@@ -838,7 +844,7 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
           ReadU16(block1, 0xe74e + 2 * i, big_endian));
       out.escort_upgrade_flags[i] = static_cast<std::int16_t>(
           ReadU16(block1, 0xe7ce + 2 * i, big_endian));
-      out.escort_released_flags[i] = static_cast<std::int16_t>(
+      out.escort_pending_sale_flags[i] = static_cast<std::int16_t>(
           ReadU16(block1, 0xe84e + 2 * i, big_endian));
       out.fighter_voice_types[i] = static_cast<std::int16_t>(
           ReadU16(block1, 0xe8ce + 2 * i, big_endian));
@@ -846,8 +852,8 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
     for (std::size_t i = 0; i < out.control_bits.size(); ++i) {
       out.control_bits[i] = std::to_integer<std::uint8_t>(block1[0xb7be + i]);
     }
-    for (std::size_t i = 0; i < out.stellar_saved_bytes.size(); ++i) {
-      out.stellar_saved_bytes[i] =
+    for (std::size_t i = 0; i < out.stellar_dominated.size(); ++i) {
+      out.stellar_dominated[i] =
           std::to_integer<std::uint8_t>(block1[0xdece + i]);
     }
     constexpr std::size_t kRuntimeFlagsOffset = 0x281e;
@@ -949,16 +955,16 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
     out.strict_play = ReadU16(block2, 0x02, big_endian) == 1;
     out.male = ReadU16(block2, 0x04, big_endian) == 1;
     out.intro_played = ReadU16(block2, 0x3086, big_endian) != 0;
-    for (std::size_t i = 0; i < out.pers_present_flags.size(); ++i) {
-      out.pers_present_flags[i] = static_cast<std::int16_t>(
+    for (std::size_t i = 0; i < out.pers_alive_flags.size(); ++i) {
+      out.pers_alive_flags[i] = static_cast<std::int16_t>(
           ReadU16(block2, 0x1006 + 2 * i, big_endian));
-      out.pers_visible_flags[i] = static_cast<std::int16_t>(
+      out.pers_grudge_flags[i] = static_cast<std::int16_t>(
           ReadU16(block2, 0x1806 + 2 * i, big_endian));
     }
     for (std::size_t i = 0; i < out.stellar_present_ship_counts.size(); ++i) {
       out.stellar_present_ship_counts[i] = static_cast<std::int16_t>(
           ReadU16(block2, 0x0006 + 2 * i, big_endian));
-      out.stellar_availability_rolls[i] = static_cast<std::int16_t>(
+      out.stellar_domination_days[i] = static_cast<std::int16_t>(
           ReadU16(block2, 0x2086 + 2 * i, big_endian));
     }
     for (std::size_t i = 0; i < out.disaster_days_remaining.size(); ++i) {
@@ -992,8 +998,9 @@ PilotLoadError PilotFileDeserialize(std::span<const std::byte> bytes,
       out.reinforcement_retrigger_delay[i] = static_cast<std::int16_t>(
           ReadU16(block2, 0x3d90 + 2 * i, big_endian));
     }
-    for (std::size_t i = 0; i < out.stellar_engage_access.size(); ++i) {
-      out.stellar_engage_access[i] = static_cast<std::int16_t>(
+    for (std::size_t i = 0; i < out.stellar_destroyed_days_remaining.size();
+         ++i) {
+      out.stellar_destroyed_days_remaining[i] = static_cast<std::int16_t>(
           ReadU16(block2, 0x4d90 + 2 * i, big_endian));
     }
     for (std::size_t i = 0; i < out.target_category_command.size(); ++i) {
@@ -1115,10 +1122,10 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
   for (std::size_t i = 0; !state.scenario.weapons.empty() && i < 0x100; ++i) {
     const bool missing = i >= state.scenario.weapons.size() ||
                          state.scenario.weapons[i].name.empty();
-    if (missing && (record.weapon_bank_ammo[i * 100] > 0 ||
-                    record.weapon_bank_secondary[i * 100] > 0)) {
-      record.weapon_bank_ammo[i * 100] = 0;
-      record.weapon_bank_secondary[i * 100] = 0;
+    if (missing && (record.weapon_count_by_class[i * 100] > 0 ||
+                    record.weapon_secondary_count_by_class[i * 100] > 0)) {
+      record.weapon_count_by_class[i * 100] = 0;
+      record.weapon_secondary_count_by_class[i * 100] = 0;
       result = PilotLoadError::kRepairsApplied;
     }
   }
@@ -1263,8 +1270,8 @@ PilotLoadError PilotFileLoadSave(const std::filesystem::path &path,
           record.escort_ship_class_ids[i] >= 1000 ? 1 : 0;
       escort->escort_upgrade_mark =
           static_cast<std::int8_t>(record.escort_upgrade_flags[i] != 0);
-      escort->escort_released_mark =
-          static_cast<std::int8_t>(record.escort_released_flags[i] != 0);
+      escort->escort_pending_sale_mark =
+          static_cast<std::int8_t>(record.escort_pending_sale_flags[i] != 0);
     }
     if (Ship *fighter = restore_ship(record.fighter_ship_class_ids[i], true)) {
       fighter->ai_behavior_code = 5;

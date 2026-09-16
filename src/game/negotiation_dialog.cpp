@@ -41,9 +41,9 @@ namespace {
 //     deferred)
 //   Stellar_SpawnDefenseFleetShip (defense-fleet spawns, capped by
 //     StellarDef max_ship_count/present_ship_count bookkeeping)
-//   the domination latch: StellarDef.hazard_marker = 1, tribute status
+//   the domination latch: StellarDef.dominated = 1, tribute status
 //     (STR# 0xbba msg 25/26), present_ship_count reset, plus the release
-//     mirror branch (msg 35/36, hazard_marker = 0)
+//     mirror branch (msg 35/36, dominated = 0)
 //   Mission_ExecuteReactionScript 0x00448020 on the stellar's reaction
 //     scripts (StellarDef field_0x68 / 0x167)
 //
@@ -911,15 +911,14 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   }
 
   frame.tribute_enabled =
-      !(stellar->hazard_marker && (stellar->availability_flags & 0x20) != 0U);
+      !(stellar->dominated && (stellar->availability_flags & 0x20) != 0U);
   frame.button_labels[0] = LoadButtonLabel(kBtnCloseChannel, "Close Channel");
   frame.button_labels[1] = denied
                                ? LoadButtonLabel(kBtnOfferBribe, "Offer Bribe")
                                : LoadButtonLabel(kBtnGreetings, "Greetings");
   frame.button_labels[2] =
-      stellar->hazard_marker
-          ? LoadButtonLabel(kBtnRelease, "Release")
-          : LoadButtonLabel(kBtnDemandTribute, "Demand Tribute");
+      stellar->dominated ? LoadButtonLabel(kBtnRelease, "Release")
+                         : LoadButtonLabel(kBtnDemandTribute, "Demand Tribute");
   frame.name = stellar->name;
 
   // Destination description (0x00480030): the desc resource keyed at
@@ -943,7 +942,7 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
     frame.status_word = NovaHud_LoadStringEntry(kMiscStr, kMiscUninhabited)
                             .value_or("Uninhabited");
     frame.status_word_color = kLightGrey; // SHORT_ARRAY_00733b50
-  } else if (stellar->hazard_marker) {
+  } else if (stellar->dominated) {
     frame.status_word =
         NovaHud_LoadStringEntry(kMiscStr,
                                 (stellar->availability_flags & 0x20) != 0U
@@ -972,7 +971,7 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   // name when landing is open (or already dominated), the hostile prompt when
   // denied, "No response." for uninhabited bodies.
   if ((stellar->flags & 0x20) == 0U) {
-    if (!denied || stellar->hazard_marker) {
+    if (!denied || stellar->dominated) {
       frame.status = LoadStatusVariant(random_index, kMsgWelcomeStatus)
                          .value_or("Communications channel open to ") +
                      stellar->name + ".";
@@ -1065,7 +1064,7 @@ NegotiationExit NovaNegotiation_RunDestinationDialog(SdlPlatform &platform,
   // The top button's action (NovaUi_PollTravelScriptAction ordinal 2 = DITL
   // item 1): Greetings when landing is open, the bribe ladder when denied.
   const auto run_comm_action = [&]() {
-    if (!denied || stellar->hazard_marker) {
+    if (!denied || stellar->dominated) {
       if (!denied) {
         // Greetings: the greeting-response flavour prompt (msg 9).
         frame.status = LoadPromptVariant(random_index, kMsgGreetingResponse)

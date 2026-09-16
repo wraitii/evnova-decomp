@@ -2162,9 +2162,9 @@ void SpaceflightView::DrawTravelTargetReticle(SdlPlatform &platform,
   const float off = std::ceil(full * 0.5F) + std::trunc(pulse);
 
   // Frame base by the destination's hazard marker (Ghidra StellarDef
-  // hazard_marker +0x46 in NovaUi_UpdateTravelTargetReticle 0x0042eac0:
+  // dominated +0x46 in NovaUi_UpdateTravelTargetReticle 0x0042eac0:
   // marker clear -> frames 0..3, set -> frames 4..7 of cicn 10000+).
-  const int frame_base = st->hazard_marker ? 4 : 0;
+  const int frame_base = st->dominated ? 4 : 0;
   const float pos[4][2] = {{wx - off - 16.0F, wy - off - 16.0F},
                            {wx + off, wy - off - 16.0F},
                            {wx + off, wy + off},

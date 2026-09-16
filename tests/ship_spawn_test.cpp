@@ -67,8 +67,8 @@ TEST_CASE("random system dude clears recycled movement state") {
   recycled.ai_forward_thrust_cmd = 12.0F;
   recycled.ai_desired_speed = -50.0F;
   recycled.arrival_monitor_active = true;
-  recycled.npc_weapon_bank_ammo.fill(123);
-  recycled.npc_weapon_bank_secondary.fill(456);
+  recycled.npc_weapon_count_by_class.fill(123);
+  recycled.npc_weapon_secondary_count_by_class.fill(456);
   recycled.npc_weapon_banks_ship_class = 77;
 
   const int slot = NovaEncounter_SpawnRandomSystemDudeShip(state, kSystemId, 8);
@@ -93,8 +93,8 @@ TEST_CASE("random system dude clears recycled movement state") {
     expected_ammo[bank] = std::max<std::int16_t>(stock.count, 0);
     expected_secondary[bank] = stock.ammo_load;
   }
-  CHECK(spawned.npc_weapon_bank_ammo == expected_ammo);
-  CHECK(spawned.npc_weapon_bank_secondary == expected_secondary);
+  CHECK(spawned.npc_weapon_count_by_class == expected_ammo);
+  CHECK(spawned.npc_weapon_secondary_count_by_class == expected_secondary);
 }
 
 // The fleet lead-ship spawner lays a fleet def's lead onto an allocated slot.
@@ -430,7 +430,7 @@ TEST_CASE("pers spawner lays a personality onto the ship", "[pers][spawn]") {
   REQUIRE(state.scenario.LoadFromArchives());
 
   PersDef &jack = state.scenario.pers_defs[0x83 - 0x80];
-  REQUIRE(jack.present);
+  REQUIRE(jack.alive);
   jack.loaded_latch = true;
   jack.is_available_runtime = true;
   REQUIRE(jack.link_mission_id >= 0);
@@ -462,8 +462,8 @@ TEST_CASE("pers spawner lays a personality onto the ship", "[pers][spawn]") {
   CHECK(ship.fuel_points == static_cast<float>(cls->base_fuel));
   // Weapon deltas: 0x81/0x83/0x85 +1, 0x87 +2 count and +50 ammo over the
   // class stock loadout.
-  CHECK(ship.npc_weapon_bank_ammo[0x81 - 0x80] >= 1);
-  CHECK(ship.npc_weapon_bank_secondary[0x87 - 0x80] >= 50);
+  CHECK(ship.npc_weapon_count_by_class[0x81 - 0x80] >= 1);
+  CHECK(ship.npc_weapon_secondary_count_by_class[0x87 - 0x80] >= 50);
   // LinkMission 12 refreshes that mission's offer-time target block.
   const auto &linked_definition =
       state.scenario.missions[static_cast<std::size_t>(jack.link_mission_id)];
@@ -496,11 +496,11 @@ TEST_CASE("pers ActiveOn cache refreshes with control bits",
   GameState state;
   state.scenario.pers_defs.assign(2, {});
   PersDef &gated = state.scenario.pers_defs[0];
-  gated.present = true;
+  gated.alive = true;
   gated.loaded_latch = true;
   gated.availability_expression = "b7";
   PersDef &unloaded = state.scenario.pers_defs[1];
-  unloaded.present = true;
+  unloaded.alive = true;
   unloaded.loaded_latch = false;
   unloaded.availability_expression = ""; // blank would pass if it were loaded
 
