@@ -9,12 +9,24 @@ timeout_ms = 30000
 # jump precedes the stated Sol -> Tau Ceti -> Sanddown route. We first land at
 # Viking and refuse tutorial 001 (mïsn 251), whose on_refuse sets control bit
 # b9215; every later Barry tutorial gates on !(... | b9215), so one refusal
-# disables the whole tutorial chain before we leave Tichel. In Sanddown a
-# `repeat` step runs the same Kiniké -> Kolan -> Kiniké circuit ten times:
-# launch, land at Kolan and fill the Shuttle's 10 holds with Medical Supplies
-# (commodity 2), then land back at Kiniké and sell all ten. Flight runs at the
-# tutorial's x100 gameplay-clock acceleration; the last step restores ordinary
-# speed and leaves the game running docked at Kiniké so a human can keep playing.
+# disables the whole tutorial chain before we leave Tichel. In Sanddown we land
+# at Kolan directly (not Kiniké first) so the first buy happens immediately
+# instead of after an empty Kiniké -> Kolan leg. A `repeat` step then runs the
+# Kolan -> Kiniké -> Kolan medical circuit fifteen times: fill the Shuttle's 10
+# holds with Medical Supplies (commodity 2) at Kolan, launch to Kiniké, and sell
+# all ten at Kiniké's higher price, then return to Kolan for the next load. A
+# Terrapin escort is then hired at Kolan's bar and the same circuit runs fifteen
+# more times; the post-hire rounds start docked at Kolan, buy the fleet's fill
+# (the Terrapin adds 125 holds, so `max` exceeds the Shuttle's ten), and sell
+# four supplies immediately so the launch payroll (Player_ProcessEscortPayroll,
+# 1500 per Terrapin) cannot leave the escort unpaid before the rest of the load
+# is sold at Kiniké. Once that first batch of Terrapin rounds is done, five more
+# Terrapins are hired in a row (the fleet then holds the escort cap of six), and
+# a final fifteen-round circuit resumes; each Kolan departure now sells twenty
+# tons back so the six-escort payroll (9000) is covered before launch. Flight
+# runs at the tutorial's x100 gameplay-clock acceleration; the last step restores
+# ordinary speed and leaves the game running docked at Kolan so a human can keep
+# playing.
 
 # Create a pilot through the normal dialogs, accepting their default values.
 [[steps]]
@@ -25,7 +37,7 @@ expect = { "ui.window" = "main_menu" }
 action = "command"
 cmd = "accelerate"
 enabled = true
-speed_multiplier = 100
+speed_multiplier = 35
 suppress_audio = true
 
 [[steps]]
@@ -139,48 +151,29 @@ timeout_ms = 180000
 action = "screenshot"
 name = "sanddown-arrival"
 
-# --------------------------------------------------- repeat 10x trade circuit
-# Dock at Kiniké once so the repeated body can begin from a docked state. The
-# Kiniké (resource 0xC9 = 201) and Kolan names are stable: Kiniké's raw
-# MacRoman resource name cannot round-trip through the probe's UTF-8 JSON, so
-# it is addressed by decimal id.
+# --------------------------------------------------- repeat 15x trade circuit
+# Land at Kolan directly so the repeated body can begin buying on the first
+# docking rather than making an empty Kiniké -> Kolan repositioning leg. The
+# Kiniké (resource 0xC9 = 201) and Kolan names are stable: Kiniké's raw MacRoman
+# resource name cannot round-trip through the probe's UTF-8 JSON, so it is
+# addressed by decimal id.
 [[steps]]
-action = "command"
-cmd = "land_at"
-target = "201"
-timeout_ms = 180000
-
-[[steps]]
-action = "wait"
-expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
-timeout_ms = 180000
-
-# One buy/sell circuit, starting and ending docked at Kiniké: launch, land at
-# Kolan and fill the Shuttle's 10 holds with Medical Supplies (commodity 2),
-# then launch, land at Kiniké and sell all ten. Repeating it leaves the final
-# delivery docked at Kiniké exactly like the hand-written rounds did.
-[[steps]]
-action = "repeat"
-count = 10
-
-[[steps.steps]]
-action = "click"
-element = "launch"
-
-[[steps.steps]]
 action = "command"
 cmd = "land_at"
 target = "Kolan"
 timeout_ms = 180000
 
-[[steps.steps]]
+[[steps]]
 action = "wait"
 expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
 timeout_ms = 180000
 
-[[steps.steps]]
-action = "validate_state"
-expect = { "state.system" = "Sanddown" }
+# One buy/sell circuit, starting and ending docked at Kolan: fill the Shuttle's
+# 10 holds with Medical Supplies (commodity 2), launch to Kiniké and sell all
+# ten at its higher price, then launch back to Kolan for the next load.
+[[steps]]
+action = "repeat"
+count = 15
 
 [[steps.steps]]
 action = "click"
@@ -249,8 +242,27 @@ element = "done"
 action = "wait"
 expect = { "ui.window" = "spaceport" }
 
-# Ten buy/sell pairs should have more than doubled the fresh pilot's 10000
-# starting credits. The loop ends docked at Kiniké, so no further launch.
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "Kolan"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "validate_state"
+expect = { "state.system" = "Sanddown" }
+
+# Fifteen buy/sell pairs should have more than doubled the fresh pilot's 10000
+# starting credits. The loop ends docked at Kolan, so no further launch.
 [[steps]]
 action = "validate_state"
 matches = { "cargo.credits" = "[1-9][0-9]{4,}" }
@@ -258,6 +270,429 @@ matches = { "cargo.credits" = "[1-9][0-9]{4,}" }
 [[steps]]
 action = "screenshot"
 name = "sanddown-route-complete"
+
+# ------------------------------------------------ hire a Terrapin escort --
+# With the trade profits banked, hire one regular Terrapin escort. The hire
+# list is the Bar's Hire Escort lane (Kolan, stellar 0xCA, has a bar) and is
+# rebuilt from fresh per-class rolls on every landing, so each iteration
+# relaunches and redocks at Kolan to reroll availability. The select/buy pair
+# runs only when a regular Terrapin is offered and the fleet does not already
+# have one; `until` stops the loop once the Terrapin is in the fleet. The
+# `- used -` clone is deliberately not matched (keep it simple).
+[[steps]]
+action = "repeat"
+count = 20
+until = { "ships.escorts.*" = "Terrapin" }
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "Kolan"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "click"
+element = "bar"
+
+# The Bar's AvailLoc-1 mission pass can pop an offer (and its refuse reader)
+# over the bar; decline any before using the service. The long settle window
+# covers the bar's delayed recheck timer.
+[[steps.steps]]
+action = "decline_mission"
+settle_ms = 1500
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "bar" }
+
+[[steps.steps]]
+action = "click"
+element = "hire_escort"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "shipyard_hire" }
+
+[[steps.steps]]
+action = "click"
+where = { label = "Terrapin" }
+trigger = { "ui.items.*.label" = "Terrapin" }
+trigger_not = { "ships.escorts.*" = "Terrapin" }
+
+# Guard: only buy once the Terrapin row is actually selected, so a missed
+# click can never hire whatever else happened to be highlighted.
+[[steps.steps]]
+action = "wait"
+expect = { "ui.items.*.selected" = true, "ui.items.*.label" = "Terrapin" }
+trigger = { "ui.items.*.label" = "Terrapin" }
+trigger_not = { "ships.escorts.*" = "Terrapin" }
+
+[[steps.steps]]
+action = "click"
+element = "buy"
+trigger = { "ui.items.*.label" = "Terrapin" }
+trigger_not = { "ships.escorts.*" = "Terrapin" }
+
+[[steps.steps]]
+action = "click"
+element = "done"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "bar" }
+
+# A new bar offer can surface after the store closes; clear it before leaving.
+[[steps.steps]]
+action = "decline_mission"
+
+[[steps.steps]]
+action = "click"
+element = "leave"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "validate_state"
+expect = { "ships.escorts.*" = "Terrapin" }
+
+[[steps]]
+action = "screenshot"
+name = "terrapin-escort-hired"
+
+# -------------------------------------------------- post-hire trade circuit --
+# The hire ends docked at Kolan, so the repeated body starts and ends there
+# (buy first, then the two launches of the round). That avoids an empty
+# Kolan -> Kiniké repositioning trip. Besides the anchor swap, the post-hire
+# body buys the fleet's fill and sells four tons back before launching.
+[[steps]]
+action = "repeat"
+count = 25
+
+[[steps.steps]]
+action = "validate_state"
+expect = { "state.system" = "Sanddown" }
+
+[[steps.steps]]
+action = "click"
+element = "trade_center"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "trade_center", "ui.items.0.label" = "Food" }
+
+# The Terrapin adds 125 holds, so the fleet capacity is now 135; `max = true`
+# fills whatever the player can afford (credit-limited, so the tonnage differs
+# each round). The probe's trade command waits for the modal to apply the
+# transaction, so no exact post-buy count is asserted.
+[[steps.steps]]
+action = "command"
+cmd = "trade"
+commodity = 2
+side = "buy"
+max = true
+
+# Kolan's medical price (750) makes four tons exactly the Terrapin's
+# 1500-credit upkeep for 2 days. Player_ProcessEscortPayroll runs on every dock
+# departure, so the launch below would otherwise be paid out of the
+# near-empty post-purchase balance and the escort would defect.
+[[steps.steps]]
+action = "command"
+cmd = "trade"
+commodity = 2
+side = "sell"
+tons = 4
+
+[[steps.steps]]
+action = "click"
+element = "done"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "201"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "click"
+element = "trade_center"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "trade_center", "ui.items.0.label" = "Food" }
+
+# `max = true` clears the rest of the load at Kiniké's higher price.
+[[steps.steps]]
+action = "command"
+cmd = "trade"
+commodity = 2
+side = "sell"
+max = true
+
+[[steps.steps]]
+action = "wait"
+expect = { "cargo.bins.2.tons" = 0 }
+
+[[steps.steps]]
+action = "click"
+element = "done"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "Kolan"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+# Fifteen post-hire rounds should leave the pilot solvent and the escort intact;
+# an unpaid payroll would have made the Terrapin defect and ended the run.
+[[steps]]
+action = "validate_state"
+expect = { "ships.escorts.*" = "Terrapin" }
+
+[[steps]]
+action = "screenshot"
+name = "sanddown-post-hire-route-complete"
+
+# --------------------------------------------------- hire five more Terrapins --
+# The first Terrapin batch is banked, so fill the fleet up to the six-escort
+# cap (Ship_CanPlayerHaveMoreEscorts). The loop is the same Kolan bar reroll as
+# before; only the stop condition changes: it keeps hiring until the count hits
+# six, so the select/buy steps run while there is still room for another hull.
+[[steps]]
+action = "repeat"
+count = 60
+until = { "ships.escort_count" = 6 }
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "Kolan"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "click"
+element = "bar"
+
+[[steps.steps]]
+action = "decline_mission"
+settle_ms = 1500
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "bar" }
+
+[[steps.steps]]
+action = "click"
+element = "hire_escort"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "shipyard_hire" }
+
+[[steps.steps]]
+action = "click"
+where = { label = "Terrapin" }
+trigger = { "ui.items.*.label" = "Terrapin" }
+trigger_not = { "ships.escort_count" = 6 }
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.items.*.selected" = true, "ui.items.*.label" = "Terrapin" }
+trigger = { "ui.items.*.label" = "Terrapin" }
+trigger_not = { "ships.escort_count" = 6 }
+
+[[steps.steps]]
+action = "click"
+element = "buy"
+trigger = { "ui.items.*.label" = "Terrapin" }
+trigger_not = { "ships.escort_count" = 6 }
+
+[[steps.steps]]
+action = "click"
+element = "done"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "bar" }
+
+[[steps.steps]]
+action = "decline_mission"
+
+[[steps.steps]]
+action = "click"
+element = "leave"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps]]
+action = "validate_state"
+expect = { "ships.escort_count" = 6 }
+
+[[steps]]
+action = "screenshot"
+name = "terrapin-fleet-six"
+
+# --------------------------------------------------- six-escort trade circuit --
+# Now that the fleet is at cap, resume the Kolan -> Kiniké circuit for fifteen
+# more rounds. The body is the single-Terrapin one, except that each Kolan
+# departure sells twenty tons back instead of four: the six Terrapins cost
+# 6 * 1500 = 9000 per departure, and twenty tons at Kolan's 750 covers that
+# with margin while leaving the rest of the load to sell high at Kiniké.
+[[steps]]
+action = "repeat"
+count = 15
+
+[[steps.steps]]
+action = "validate_state"
+expect = { "state.system" = "Sanddown" }
+
+[[steps.steps]]
+action = "click"
+element = "trade_center"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "trade_center", "ui.items.0.label" = "Food" }
+
+[[steps.steps]]
+action = "command"
+cmd = "trade"
+commodity = 2
+side = "buy"
+max = true
+
+# Six escorts at 1500 upkeep each = 9000 per departure; twenty tons at 750
+# covers the launch payroll on the next `launch`.
+[[steps.steps]]
+action = "command"
+cmd = "trade"
+commodity = 2
+side = "sell"
+tons = 20
+
+[[steps.steps]]
+action = "click"
+element = "done"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "201"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "click"
+element = "trade_center"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "trade_center", "ui.items.0.label" = "Food" }
+
+[[steps.steps]]
+action = "command"
+cmd = "trade"
+commodity = 2
+side = "sell"
+max = true
+
+[[steps.steps]]
+action = "wait"
+expect = { "cargo.bins.2.tons" = 0 }
+
+[[steps.steps]]
+action = "click"
+element = "done"
+
+[[steps.steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport" }
+
+[[steps.steps]]
+action = "click"
+element = "launch"
+
+[[steps.steps]]
+action = "command"
+cmd = "land_at"
+target = "Kolan"
+timeout_ms = 180000
+
+[[steps.steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "spaceport" }
+timeout_ms = 180000
+
+# With a full six-escort freighter fleet (760 holds) the fifteen runs should
+# compound well past a million credits; the escort count guards against an
+# unpaid payroll silently shrinking the fleet along the way.
+[[steps]]
+action = "validate_state"
+expect = { "ships.escort_count" = 6 }
+matches = { "cargo.credits" = "[1-9][0-9]{6,}" }
+
+[[steps]]
+action = "screenshot"
+name = "sanddown-fleet-route-complete"
 
 # Hand the running game back to a human at ordinary speed.
 [[steps]]
