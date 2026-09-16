@@ -15,7 +15,11 @@ Relation to:
 
 ## Current status
 
-Maybe 80% of the way there? As I'm writing this, the big things that are missing are buying a ship/capturing, most escort-related stuff, a bunch of mission-adjacent functionality. Preferences & keymapping that work. Plugin support. The x2 speed branch.
+Maybe 80% of the way there? As I'm writing this, the big things that are missing are buying a ship/capturing, most escort-related stuff, a bunch of mission-adjacent functionality. Preferences & keymapping that work. Plugin support. The x2 speed branch. Murkiness & nebulas. Ship paints. Shield bubbles.
+
+## AI slop disclaimer
+
+Most of this repo's code was written by AI agents, mostly various versions of GPT 5.2 to 5.6. Bit of GLM 5.3 flash, deepseek flash. I've probably directed a lot of the actual naming or things. But I haven't really checked the code, mostly tested behaviour.
 
 ## Quick legal disclaimer + License
 

@@ -30,12 +30,12 @@ MAP_RECORD_SIZE = 0x10A
 # The named buffers copied into MisnActive by Mission_PopulateMissionSlotFromDef
 # (Ghidra 0x0043f8c0); see src/game/mission.cpp.
 SCRIPT_OFFSETS = {
-    "on_accept": 0x15B,
-    "offer_reaction": 0x25A,
-    "on_success": 0x359,
-    "on_failure": 0x458,
-    "resolve": 0x557,
-    "state_latch": 0x660,
+    "on_accept": 0x15B,    # Bible OnAccept
+    "on_refuse": 0x25A,    # Bible OnRefuse
+    "on_success": 0x359,   # Bible OnSuccess
+    "on_failure": 0x458,   # Bible OnFailure
+    "on_abort": 0x557,     # Bible OnAbort
+    "on_ship_done": 0x660, # Bible OnShipDone
 }
 
 

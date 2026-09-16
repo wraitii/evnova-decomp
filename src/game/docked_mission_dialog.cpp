@@ -262,16 +262,18 @@ void DrawMissionBbsContents(SdlPlatform &platform,
   if (layout.date.w > 0.0F) {
     // NovaText_FormatDateString (0x00468450) over the current game date;
     // date colour is the 0x4000 grey.
-    NovaText_DrawCentered(platform,
-                          font_cache,
-                          NovaFontFamily::kGeneva,
-                          kMissionListFontSize,
-                          kNovaFontStyleRegular,
-                          kDateGrey,
-                          layout.date.x,
-                          layout.date.x + layout.date.w,
-                          layout.date.y + kMissionListFontSize,
-                          NovaText_FormatDateString(state.date, true));
+    NovaText_DrawCentered(
+        platform,
+        font_cache,
+        NovaFontFamily::kGeneva,
+        kMissionListFontSize,
+        kNovaFontStyleRegular,
+        kDateGrey,
+        layout.date.x,
+        layout.date.x + layout.date.w,
+        layout.date.y + kMissionListFontSize,
+        NovaText_FormatDateString(
+            state.date, true, state.date_prefix, state.date_suffix));
   }
   if (!status.empty()) {
     NovaText_DrawCentered(platform,
@@ -389,6 +391,21 @@ void NovaMission_RunAcceptanceDialogs(
     std::int16_t mission_def,
     const std::function<void()> &render_background);
 
+// Binds the acceptance-dialog sink. Mission_ActivateAtSlot invokes it for the
+// mission it activated (and recurses into it for script-S activations, so a
+// nested mission's readers precede the outer mission's, as in the original);
+// Mission_ClearMisnSlotAssignments forwards it so an abort's on-abort payload
+// can present the readers for any mission it starts.
+[[nodiscard]] MissionAcceptanceSink
+MakeAcceptanceSink(SdlPlatform &platform,
+                   GameState &state,
+                   const std::function<void()> &render_background) {
+  return [&platform, &state, &render_background](std::int16_t mission_def) {
+    NovaMission_RunAcceptanceDialogs(
+        platform, state, mission_def, render_background);
+  };
+}
+
 } // namespace
 
 // Ghidra 0x0043c470 NovaUi_RunMissionBbsWindow (partial port of the landed
@@ -464,18 +481,17 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
         return;
       }
       const auto mission_id = missions.page_zero[selected];
-      if (Mission_ActivateAtSlot(state, mission_id, stellar_id)) {
+      if (Mission_ActivateAtSlot(
+              state,
+              mission_id,
+              stellar_id,
+              MakeAcceptanceSink(platform, state, render_background))) {
         status = "Mission accepted";
         missions = Mission_EvaluateMissionLists(state);
         if (selected >= missions.page_zero.size() &&
             !missions.page_zero.empty()) {
           selected = missions.page_zero.size() - 1;
         }
-        // Mission_ActivateMissionAtSlot (0x0043f100) shows the Brief/
-        // LoadCarg dialogs after slot population; the state-only port
-        // activates above, so run the UI chain here.
-        NovaMission_RunAcceptanceDialogs(
-            platform, state, mission_id, render_background);
       } else {
         status = "Mission could not be accepted";
       }
@@ -577,8 +593,14 @@ FindActiveMissionSlot(const GameState &state, std::int16_t mission_def) {
 // chain after slot population: the Brief dialog (payload +0x34 desc) with
 // starmap access, and the LoadCarg dialog (payload +0x38 desc) when
 // PickupMode 0 puts cargo on board at accept. The port keeps
-// Mission_ActivateAtSlot state-only, so this UI slice lives here and every
-// accept path (mission-offer window, Mission BBS) invokes it.
+// Mission_ActivateAtSlot state-only; the UI layer binds this via
+// MakeAcceptanceSink, so the activation and abort paths (mission-offer window,
+// Mission BBS, mission computer abort) present it through the same sink, and
+// a mission a payload starts with the S opcode presents it too. Note: every
+// shipped S-opcode target is a silent helper (BriefText 0, LoadCargText 0),
+// so no Nova mïsn exercises the S arm -- only plug-in/synthetic data does
+// (tests/mission_test.cpp "acceptance dialogs follow script activation
+// order" pins the ordering).
 void NovaMission_RunAcceptanceDialogs(
     SdlPlatform &platform,
     GameState &state,
@@ -660,11 +682,13 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     text = Mission_ExpandMissionWildcards(state, text, true, mission_def);
   }
   if (!normal_arm && text.empty()) {
-    if (!Mission_ActivateAtSlot(state, mission_def, landed_stellar_id)) {
+    if (!Mission_ActivateAtSlot(
+            state,
+            mission_def,
+            landed_stellar_id,
+            MakeAcceptanceSink(platform, state, render_background))) {
       return MissionOfferResult::kActivationFailed;
     }
-    NovaMission_RunAcceptanceDialogs(
-        platform, state, mission_def, render_background);
     return MissionOfferResult::kAccepted;
   }
 
@@ -855,13 +879,16 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
       if (input->key == TextKey::primary) {
         const SDL_FPoint point = platform.mouse_position();
         if (Contains(accept_rect, point)) {
-          if (!Mission_ActivateAtSlot(state, mission_def, landed_stellar_id)) {
+          if (!Mission_ActivateAtSlot(
+                  state,
+                  mission_def,
+                  landed_stellar_id,
+                  MakeAcceptanceSink(platform, state, render_background))) {
             return MissionOfferResult::kActivationFailed;
           }
           // 0x00442510's accept arm activates, then Mission_ActivateMission-
-          // AtSlot (0x0043f100) shows the Brief/LoadCarg dialogs inline.
-          NovaMission_RunAcceptanceDialogs(
-              platform, state, mission_def, render_background);
+          // AtSlot (0x0043f100) shows the Brief/LoadCarg dialogs inline via
+          // the sink passed above.
           return MissionOfferResult::kAccepted;
         }
         if (Contains(decline_rect, point)) {
@@ -884,8 +911,10 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                   platform, state, followup_text, false, render_background);
             }
           }
-          (void)Mission_ExecuteReactionScript(state,
-                                              PayloadCString(*def, 0x25a));
+          (void)Mission_ExecuteReactionScript(
+              state,
+              PayloadCString(*def, 0x25a),
+              MakeAcceptanceSink(platform, state, render_background));
           return MissionOfferResult::kDeclined;
         }
         // Arrow buttons (entries 9/10), NovaUi_ScrollSelectionText ±10px per
@@ -1181,16 +1210,18 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
                   heading);
     if (layout->date.w > 0.0F) {
       // NovaText_FormatDateString (0x00468450) over the current game date.
-      NovaText_DrawCentered(platform,
-                            font_cache,
-                            NovaFontFamily::kGeneva,
-                            kMissionInfoFontSize,
-                            kNovaFontStyleRegular,
-                            kText,
-                            layout->date.x,
-                            layout->date.x + layout->date.w,
-                            layout->date.y + kMissionInfoFontSize,
-                            NovaText_FormatDateString(state.date, true));
+      NovaText_DrawCentered(
+          platform,
+          font_cache,
+          NovaFontFamily::kGeneva,
+          kMissionInfoFontSize,
+          kNovaFontStyleRegular,
+          kText,
+          layout->date.x,
+          layout->date.x + layout->date.w,
+          layout->date.y + kMissionInfoFontSize,
+          NovaText_FormatDateString(
+              state.date, true, state.date_prefix, state.date_suffix));
     }
 
     // Rows: black fill, selected row in the 50%-red highlight, white text
@@ -1303,6 +1334,13 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
     platform.Present();
   };
 
+  // Render callback for the acceptance readers a script S activation may
+  // open during an abort (e.g. the tutorial's on-abort S758): re-draw the
+  // paused flight scene beneath the reader, matching the window's own frame.
+  const auto acceptance_background = [&]() {
+    view.DrawGameFrame(platform, state, hud);
+  };
+
   // Ghidra action 5 (0x00446150): the abort arm.
   const auto abort_selected = [&]() {
     if (selected < 0) {
@@ -1332,7 +1370,8 @@ void NovaMission_RunMissionInfoWindow(SdlPlatform &platform,
         state,
         slot,
         /*emit_completion_payload=*/true,
-        static_cast<std::uint32_t>(platform.gameplay_ticks_ms()));
+        static_cast<std::uint32_t>(platform.gameplay_ticks_ms()),
+        MakeAcceptanceSink(platform, state, acceptance_background));
     // Rebuild the list; an empty mission set closes the window.
     rows = BuildMissionInfoRows(state);
     selected = -1;

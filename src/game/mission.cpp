@@ -1313,11 +1313,11 @@ bool Mission_PopulateActiveSlot(GameState &state,
     }
   };
   copy_text_buffer(active.on_accept_text, 0x15b);
-  copy_text_buffer(active.mission_payload_text_b, 0x25a);
+  copy_text_buffer(active.on_refuse_text, 0x25a);
   copy_text_buffer(active.on_success_text, 0x359);
   copy_text_buffer(active.on_failure_text, 0x458);
-  copy_text_buffer(active.resolve_script_buffer_start, 0x557);
-  copy_text_buffer(active.state_latch, 0x660);
+  copy_text_buffer(active.on_abort_text, 0x557);
+  copy_text_buffer(active.on_ship_done_text, 0x660);
   std::copy(definition->raw_payload.begin(),
             definition->raw_payload.end(),
             active.raw_payload.begin());
@@ -1326,7 +1326,8 @@ bool Mission_PopulateActiveSlot(GameState &state,
 
 bool Mission_ActivateAtSlot(GameState &state,
                             std::int16_t mission_id,
-                            std::int16_t landed_stellar_id) {
+                            std::int16_t landed_stellar_id,
+                            const MissionAcceptanceSink &acceptance) {
   if (mission_id < 0 ||
       mission_id >= static_cast<std::int16_t>(state.scenario.missions.size())) {
     return false;
@@ -1394,13 +1395,19 @@ bool Mission_ActivateAtSlot(GameState &state,
         std::max<std::int32_t>(0, state.player.credits - charge);
   }
   // Ghidra 0x0043f100: the on-accept payload (MisnActive +0x1ec, mïsn
-  // payload +0x15b) runs at the end of the original activate function,
-  // before the caller's acceptance dialogs. Tutorial missions use it to set
-  // chain bits and reveal the destination system (X opcode).
+  // payload +0x15b) runs at the end of the original activate function, and
+  // then the same function shows the acceptance dialogs. Tutorial missions use
+  // the payload to set chain bits and reveal the destination system (X
+  // opcode); a nested S activation recurses through here with the same sink,
+  // so its dialogs precede this mission's exactly as in the original.
   Mission_RunMisnScriptPayload(
       state,
       TextOf(state.active_missions[free_slot].on_accept_text),
-      static_cast<std::int16_t>(free_slot));
+      static_cast<std::int16_t>(free_slot),
+      acceptance);
+  if (acceptance) {
+    acceptance(mission_id);
+  }
   return true;
 }
 
@@ -1617,14 +1624,17 @@ bool Mission_CheckReactionConditionSatisfied(const GameState &state,
 // Ghidra 0x00440aa0 Mission_ClearMisnSlotAssignments. Releases every ship
 // assigned to the mission-fleet slot: clears its fleet link, restores the
 // class-default AI behavior when it held a target, and re-enters AI state 2.
-// While the travel scene owns the world (state.in_travel_scene, the
-// original's g_travel_scene_ctx) the released ships are despawned instead:
-// the landing pass runs while the destination window owns the world, so the
-// released fleet must not linger into the flight scene.
+// When emit_completion_payload is set it then runs the mission's on-abort
+// payload (Bible OnAbort, MisnActive +0x5e8). While the travel scene owns the
+// world (state.in_travel_scene, the original's g_travel_scene_ctx) the
+// released ships are despawned instead: the landing pass runs while the
+// destination window owns the world, so the released fleet must not linger
+// into the flight scene.
 void Mission_ClearMisnSlotAssignments(GameState &state,
                                       std::int16_t mission_slot,
                                       bool emit_completion_payload,
-                                      std::uint32_t now_ms) {
+                                      std::uint32_t now_ms,
+                                      const MissionAcceptanceSink &acceptance) {
   for (Ship &ship : state.ships_) {
     if (!ship.is_active || ship.mission_fleet_slot != mission_slot) {
       continue;
@@ -1647,8 +1657,9 @@ void Mission_ClearMisnSlotAssignments(GameState &state,
     Mission_RunMisnScriptPayload(
         state,
         TextOf(state.active_missions[static_cast<std::size_t>(mission_slot)]
-                   .resolve_script_buffer_start),
-        mission_slot);
+                   .on_abort_text),
+        mission_slot,
+        acceptance);
   }
   state.active_missions[static_cast<std::size_t>(mission_slot)]
       .carrying_resources = false;
@@ -2435,7 +2446,8 @@ std::string Mission_ExpandMissionWildcards(const GameState &state,
       if (deadline.year != state.date.year ||
           deadline.month != state.date.month ||
           deadline.day != state.date.day) {
-        deadline_text = NovaText_FormatDateString(deadline, false);
+        deadline_text = NovaText_FormatDateString(
+            deadline, false, state.date_prefix, state.date_suffix);
       }
     }
     ReplaceMissionToken(result, "<DL>", deadline_text);
@@ -2665,7 +2677,7 @@ void Mission_HandleMissionOrSurrenderShipReaction(GameState &state,
     }
     if (mission.ship_goal != -1) {
       Mission_RunMisnScriptPayload(
-          state, TextOf(mission.state_latch), mission_slot);
+          state, TextOf(mission.on_ship_done_text), mission_slot);
     }
     if ((mission.flags_primary & 0x0001U) != 0U) {
       Mission_ResolveMisnSlot(state, mission_slot, now_ms);
