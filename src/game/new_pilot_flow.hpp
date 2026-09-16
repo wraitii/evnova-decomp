@@ -19,6 +19,10 @@ class SdlPlatform;
 
 namespace game {
 
+// Ghidra 0x004b3350 Ship_ResetPlayerShipState. Resets slot 0 and the
+// per-flight/per-pilot tables before either a new game or pilot-file load.
+void NovaShip_ResetPlayerShipState(GameState &state);
+
 // Runs the full "new pilot" path from the main menu: picks random opener
 // strings, runs the pilot-name/selection step, resolves the start type,
 // resets the per-pilot world for a fresh character, loads scenario tables,

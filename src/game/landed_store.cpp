@@ -3,6 +3,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
+#include "mission_trace.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "ship_spawn.hpp"
@@ -211,10 +212,12 @@ NovaLanded_ControlExpressionState(const GameState &state) {
 }
 
 void NovaLanded_ExecuteControlSet(GameState &state,
-                                  std::string_view expression) {
+                                  std::string_view expression,
+                                  std::string_view origin) {
   NovaControlExpression_ExecuteSet(
-      expression, {.set_control_bit = [&state](std::uint32_t bit, bool value) {
-        state.control.SetControlBit(bit, value);
+      expression,
+      {.set_control_bit = [&state, origin](std::uint32_t bit, bool value) {
+        MissionTrace::SetControlBit(state.control, bit, value, origin);
       }});
 }
 
@@ -594,12 +597,16 @@ std::int16_t NovaLanded_BuyOutfit(GameState &state,
       // so multi-unit buys stop here.
       state.player.credits -= price;
       NovaLanded_ExecuteControlSet(
-          state, state.scenario.Outfit(outfit_id)->on_purchase_expr);
+          state,
+          state.scenario.Outfit(outfit_id)->on_purchase_expr,
+          "outfit OnPurchase");
       return 1;
     }
     state.player.credits -= price;
     NovaLanded_ExecuteControlSet(
-        state, state.scenario.Outfit(outfit_id)->on_purchase_expr);
+        state,
+        state.scenario.Outfit(outfit_id)->on_purchase_expr,
+        "outfit OnPurchase");
   }
   if (bought > 0)
     NovaWeapon_RebuildBanksFromOwnedOutfits(state);
@@ -752,7 +759,7 @@ OutfitSaleResult NovaLanded_SellOutfit(GameState &state,
     }
     state.player.credits +=
         current_owned <= opening ? resale_value : scaled_price;
-    NovaLanded_ExecuteControlSet(state, outfit->on_sell_expr);
+    NovaLanded_ExecuteControlSet(state, outfit->on_sell_expr, "outfit OnSell");
     ++result.sold;
   }
   if (result.sold > 0)
@@ -910,7 +917,8 @@ bool Player_SwapShipWithEscort(GameState &state,
   const Stellar *stellar = state.scenario.Stellar(stellar_id);
   state.player.credits -=
       NovaLanded_ShipPurchasePrice(state, stellar_id, ship_id);
-  NovaLanded_ExecuteControlSet(state, old_ship->on_retire_expr);
+  NovaLanded_ExecuteControlSet(
+      state, old_ship->on_retire_expr, "ship OnRetire");
   state.player.ship_class_id = static_cast<std::int16_t>(ship_id - 0x80);
   state.player.ship_name.assign(player_ship_name.empty() ? new_ship->short_name
                                                          : player_ship_name);
@@ -940,7 +948,8 @@ bool Player_SwapShipWithEscort(GameState &state,
   state.player.pos_y = static_cast<float>(stellar->pos_y);
   state.player.vel_x = 0.0F;
   state.player.vel_y = 0.0F;
-  NovaLanded_ExecuteControlSet(state, new_ship->on_purchase_expr);
+  NovaLanded_ExecuteControlSet(
+      state, new_ship->on_purchase_expr, "ship OnPurchase");
   return true;
 }
 

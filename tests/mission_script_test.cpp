@@ -1,27 +1,27 @@
 #include "game/game_state.hpp"
 #include "game/mission_script.hpp"
+#include "game/mission_trace.hpp"
+#include "log.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <cstdlib>
 
 using namespace game;
 
 TEST_CASE("mission script executor follows Bible control-bit set syntax") {
   GameState state;
-  const auto result = Mission_ExecuteScript(state, "b311 !b312 ^b311");
+  Mission_ExecuteScript(state, "b311 !b312 ^b311");
 
-  REQUIRE(result.ok());
-  CHECK(result.commands_executed == 3);
   CHECK(state.control.ControlBit(311) == false);
   CHECK(state.control.ControlBit(312) == false);
 }
 
-TEST_CASE("mission script executor reports unknown opcodes") {
+TEST_CASE("mission script executor skips unknown opcodes without aborting") {
   GameState state;
-  const auto result = Mission_ExecuteScript(state, "Z128");
+  Mission_ExecuteScript(state, "Z128 b5");
 
-  REQUIRE_FALSE(result.ok());
-  REQUIRE(result.diagnostics.size() == 1);
-  CHECK(result.diagnostics.front().offset == 0);
+  CHECK(state.control.ControlBit(5));
 }
 
 TEST_CASE("mission script executor implements mission lifecycle operators") {
@@ -29,12 +29,10 @@ TEST_CASE("mission script executor implements mission lifecycle operators") {
   state.active_mission_runtime_flags[0].is_active = true;
   state.active_missions[0].mission_template_id = 2;
 
-  auto result = Mission_ExecuteScript(state, "F130");
-  REQUIRE(result.ok());
+  Mission_ExecuteScript(state, "F130");
   CHECK(state.active_mission_runtime_flags[0].is_failed);
 
-  result = Mission_ExecuteScript(state, "A130");
-  REQUIRE(result.ok());
+  Mission_ExecuteScript(state, "A130");
   CHECK_FALSE(state.active_mission_runtime_flags[0].is_active);
 }
 
@@ -46,16 +44,14 @@ TEST_CASE("mission script executor mutates ranks, exploration, and stellars") {
     state.scenario.ranks[i].id = static_cast<std::int16_t>(i);
   }
 
-  const auto result = Mission_ExecuteScript(state, "K131 X128 Y128 U128");
+  Mission_ExecuteScript(state, "K131 X128 Y128 U128");
 
-  REQUIRE(result.ok());
-  CHECK(result.commands_executed == 4);
   CHECK(state.scenario.ranks[3].active);
   CHECK(state.recently_activated_rank_id == 3);
   CHECK(state.control.explored_systems.test(0));
   CHECK_FALSE(state.scenario.stellars[0].is_destroyed);
 
-  REQUIRE(Mission_ExecuteScript(state, "Y128").ok());
+  Mission_ExecuteScript(state, "Y128");
   CHECK(state.scenario.stellars[0].is_destroyed);
 }
 
@@ -63,10 +59,8 @@ TEST_CASE("mission script executor supports random two-branch choices") {
   GameState state;
   state.rng.seed(42);
 
-  const auto result = Mission_ExecuteScript(state, "R(b7 !b8)");
+  Mission_ExecuteScript(state, "R(b7 !b8)");
 
-  REQUIRE(result.ok());
-  CHECK(result.commands_executed == 1);
   CHECK(state.control.ControlBit(7) != state.control.ControlBit(8));
 }
 
@@ -80,12 +74,12 @@ TEST_CASE("mission script movement uses system center and first stellar") {
   state.scenario.stellars[0].pos_x = 12;
   state.scenario.stellars[0].pos_y = 34;
 
-  REQUIRE(Mission_ExecuteScript(state, "M129").ok());
+  Mission_ExecuteScript(state, "M129");
   CHECK(state.player.current_system_id == 1);
   CHECK(state.player.pos_x == 12.0F);
   CHECK(state.player.pos_y == 34.0F);
 
-  REQUIRE(Mission_ExecuteScript(state, "N129").ok());
+  Mission_ExecuteScript(state, "N129");
   CHECK(state.player.pos_x == 100.0F);
   CHECK(state.player.pos_y == 200.0F);
 }
@@ -100,35 +94,35 @@ TEST_CASE(
   state.scenario.ships[1].default_outfit_counts[0] = 1;
   state.inventory.outfit_owned_count[0] = 2;
 
-  REQUIRE(Mission_ExecuteScript(state, "C129").ok());
+  Mission_ExecuteScript(state, "C129");
   CHECK(state.player.ship_class_id == 1);
   CHECK(state.inventory.outfit_owned_count[0] == 2);
 
-  REQUIRE(Mission_ExecuteScript(state, "H129").ok());
+  Mission_ExecuteScript(state, "H129");
   CHECK(state.inventory.outfit_owned_count[0] == 1);
 }
 
-TEST_CASE("mission script executor rejects malformed random expressions") {
+TEST_CASE(
+    "mission script executor recovers from malformed random expressions") {
   GameState state;
-  const auto result = Mission_ExecuteScript(state, "R(b1)");
+  Mission_ExecuteScript(state, "R(b1) b6");
 
-  REQUIRE_FALSE(result.ok());
-  REQUIRE(result.diagnostics.size() == 1);
+  CHECK(state.control.ControlBit(6));
 }
 
 TEST_CASE("mission script entrypoints retain their Ghidra call boundaries") {
   GameState state;
 
-  REQUIRE(Mission_ExecuteReactionScript(state, "b11").ok());
-  REQUIRE(Mission_RunMisnScriptPayload(state, "b12", 0).ok());
-  REQUIRE(Mission_ExecuteMisnScriptEngine(state, "b13").ok());
+  Mission_ExecuteReactionScript(state, "b11");
+  Mission_RunMisnScriptPayload(state, "b12", 0);
+  Mission_ExecuteMisnScriptEngine(state, "b13");
 
   CHECK(state.control.ControlBit(11));
   CHECK(state.control.ControlBit(12));
   CHECK(state.control.ControlBit(13));
   // The original does not validate the payload slot (a short global); an
   // out-of-range value runs the script and only skips the Q text-tag context.
-  CHECK(Mission_RunMisnScriptPayload(state, "b14", 16).ok());
+  Mission_RunMisnScriptPayload(state, "b14", 16);
   CHECK(state.control.ControlBit(14));
 }
 
@@ -136,8 +130,7 @@ TEST_CASE("mission payload context expands Q message text tags") {
   GameState state;
   state.pilot.first_name = "Jane";
   // Q7022 loads a random "Prodigal Son Replies" entry ("To: Captain <PN>...").
-  const auto result = Mission_RunMisnScriptPayload(state, "Q7022", 0);
-  REQUIRE(result.ok());
+  Mission_RunMisnScriptPayload(state, "Q7022", 0);
   CHECK(state.hud_overlay.active);
   CHECK(state.hud_overlay.message.find("<PN>") == std::string::npos);
   CHECK(state.hud_overlay.message.find("Jane") != std::string::npos);
@@ -146,6 +139,27 @@ TEST_CASE("mission payload context expands Q message text tags") {
   // only slots 0..15 run the travel-destination expansion pass.
   GameState no_context;
   no_context.pilot.first_name = "Jane";
-  REQUIRE(Mission_RunMisnScriptPayload(no_context, "Q7022", -1).ok());
+  Mission_RunMisnScriptPayload(no_context, "Q7022", -1);
   CHECK(no_context.hud_overlay.message.find("<PN>") != std::string::npos);
+}
+
+TEST_CASE("mission trace full mode recaps the raw script") {
+  setenv("EVN_MISSION_TRACE", "full", 1);
+  MissionTrace::ConfigureFromEnvironment();
+  const auto since = NovaLog::LogTailSeq();
+  {
+    GameState state;
+    Mission_ExecuteScript(state, "b7", MissionScriptContext{"unit test"});
+  }
+  MissionTrace::SetMode(MissionTrace::Mode::off);
+  unsetenv("EVN_MISSION_TRACE");
+
+  bool saw_recap = false;
+  for (const auto &line : NovaLog::ReadLogSince(since)) {
+    if (line.text.find("mission-trace unit test") != std::string::npos &&
+        line.text.find("\"b7\"") != std::string::npos) {
+      saw_recap = true;
+    }
+  }
+  CHECK(saw_recap);
 }

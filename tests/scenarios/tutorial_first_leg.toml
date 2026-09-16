@@ -697,5 +697,211 @@ expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
 action = "screenshot"
 name = "tutorial-006-complete"
 
+# Tutorial 007 is offered from Viking's shipyard (AvailLoc 5). Barry asks the
+# pilot to return to Earth after the combat lesson.
+[[steps]]
+action = "click"
+element = "shipyard"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_offer" }
+
+[[steps]]
+action = "screenshot"
+name = "shipyard-tutorial-offer"
+
+[[steps]]
+action = "click"
+element = "accept"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 628, "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "shipyard" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 1 }
+
+[[steps]]
+action = "validate_state"
+expect = { "missions.missions.0.template_id" = 628, "missions.missions.0.return_stellar" = "Earth", "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Sol"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Sol" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Earth"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Sol", "missions.missions.0.template_id" = 628, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "click"
+element = "refuel"
+
+# Tutorial 008 is the only remaining Mission BBS entry at Earth (AvailLoc 0).
+# The BBS lists several generic Federation missions too, so the scenario must
+# click the tutorial row by its zero-based template id (757 - 0x80 = 629)
+# before taking it.
+[[steps]]
+action = "click"
+element = "mission_bbs"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_bbs" }
+
+[[steps]]
+action = "click"
+element = "mission.629"
+
+[[steps]]
+action = "click"
+element = "take"
+
+[[steps]]
+action = "wait"
+expect = { "missions.missions.0.template_id" = 629, "ui.window" = "text_reader" }
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "mission_bbs" }
+
+[[steps]]
+action = "screenshot"
+name = "mission-bbs-tutorial-offer"
+
+# Leave the BBS without taking a second mission.
+[[steps]]
+action = "click"
+element = "decline"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 1 }
+
+[[steps]]
+action = "validate_state"
+expect = { "missions.missions.0.template_id" = 629, "missions.missions.0.return_stellar" = "Dunroamin", "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "click"
+element = "launch"
+
+# Dunroamin is in Journey's End, reached from Sol through Kerella and Procyon.
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Kerella"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Kerella" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Procyon"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Procyon" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "jump_to"
+target = "Journey's End"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "state.system" = "Journey's End" }
+timeout_ms = 180000
+
+[[steps]]
+action = "command"
+cmd = "land_at"
+target = "Dunroamin"
+timeout_ms = 180000
+
+[[steps]]
+action = "wait"
+expect = { "automation.phase" = "complete", "ui.window" = "text_reader" }
+timeout_ms = 180000
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Journey's End", "missions.missions.0.template_id" = 629, "missions.missions.0.objective_complete" = true, "missions.missions.0.failed" = false }
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-008-dunroamin"
+
+[[steps]]
+action = "click"
+element = "done"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "spaceport", "state.active_missions" = 0 }
+
+[[steps]]
+action = "validate_state"
+expect = { "state.system" = "Journey's End", "state.active_missions" = 0, "missions.missions" = [] }
+
+[[steps]]
+action = "screenshot"
+name = "tutorial-008-complete"
+
 [[steps]]
 action = "quit"

@@ -3,6 +3,7 @@
 #include "brgr_archive.hpp"
 #include "game/about_dialog.hpp"
 #include "game/hud_overlay.hpp"
+#include "game/mission_trace.hpp"
 #include "game/new_pilot_flow.hpp"
 #include "game/nova_font.hpp"
 #include "game/pilot_file.hpp"
@@ -1198,6 +1199,9 @@ void UpdateCenterPreviewCompositedTexture(NovaRuntime &runtime) {
 
 // Ghidra: 0x00503f30 NovaProgramEntry
 int NovaProgramEntry() {
+  // Diagnostic-only mission-script/control-bit trace; inert unless
+  // EVN_MISSION_TRACE is set (the probe can toggle it at runtime).
+  game::MissionTrace::ConfigureFromEnvironment();
   NovaRuntime runtime;
   // Ghidra: NovaPrefs_ResetToDefaults (0x004b4320) seeds the preference globals
   // before any dialog reads them; the key-settings .prf load-overrides them
@@ -1239,6 +1243,16 @@ void NovaGameSession_Run(NovaRuntime &runtime) {
   // Resource and QuickTime startup are not reconstructed yet. Licence checks
   // are deliberately skipped.
   runtime.game_active = false;
+  // Ghidra 0x00416100 loads the scenario tables before
+  // PilotData_AutoresumeLastPilot. Without that ordering a restored class id
+  // has no definition, so the effective-stat pass gives it zero armor and the
+  // main menu reports the otherwise valid pilot as killed.
+  if (!runtime.game.scenario.LoadFromArchives(&runtime.game.rng)) {
+    NovaLog::Error(
+        "game session: scenario resource tables could not be loaded");
+  }
+  runtime.game.system_reputation.assign(runtime.game.scenario.systems.size(),
+                                        0);
   // Idle main menu shows only the "No Pilot File Loaded" prompt (or, with a
   // pilot loaded, the status panel); the original draws no other status line
   // (Ghidra 0x004873b0).
@@ -1342,6 +1356,7 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
     if (!selection->error.empty()) {
       NovaLog::Error("Open Pilot file dialog failed: {}", selection->error);
     } else if (selection->path) {
+      game::NovaShip_ResetPlayerShipState(runtime.game);
       const game::PilotLoadError result =
           game::PilotFileLoadSave(*selection->path, runtime.game);
       if (result == game::PilotLoadError::kOk ||
@@ -1356,6 +1371,11 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
                       result == game::PilotLoadError::kRepairsApplied
                           ? " (repairs applied)"
                           : "");
+        if (result == game::PilotLoadError::kRepairsApplied) {
+          NovaLog::Todo("Open Pilot repair warning dialog (original STR# "
+                        "0x8c entry 0x34) is not ported; repair details were "
+                        "written to the log");
+        }
       } else {
         NovaLog::Error("could not open pilot file '{}': loader error {}",
                        selection->path->string(),
@@ -1423,16 +1443,14 @@ void NovaMainLoop_UpdateFrame(NovaRuntime &runtime) {
         phase_elapsed_ms >= kStartupSplashDurationMs) {
       const game::PilotLoadError resume =
           game::PilotData_AutoresumeLastPilot(runtime.game);
-      if (resume == game::PilotLoadError::kOk ||
-          resume == game::PilotLoadError::kRepairsApplied) {
+      if (resume == game::PilotLoadError::kOk) {
         runtime.game.game_active = true;
         runtime.game.player.is_active = true;
         runtime.game_active = true;
-        NovaLog::Info("auto-resumed pilot '{}'{}",
-                      runtime.game.pilot.first_name,
-                      resume == game::PilotLoadError::kRepairsApplied
-                          ? " (repairs applied)"
-                          : "");
+        NovaLog::Info("auto-resumed pilot '{}'", runtime.game.pilot.first_name);
+      } else if (resume == game::PilotLoadError::kRepairsApplied) {
+        NovaLog::Warn("startup pilot required repairs and was not "
+                      "auto-resumed; use Open Pilot to load it explicitly");
       }
       runtime.startup_phase = StartupPhase::main_menu;
       runtime.startup_phase_started_ms = now_ms;

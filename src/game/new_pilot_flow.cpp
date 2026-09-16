@@ -322,7 +322,8 @@ void Stub_LoadScenarioResourceTables(GameState &state) {
   // resource tables (sh\x95p ships, o\x9ftf outfits, w\x91ap weapons,
   // sp\x9ab stellars, s\xd8st systems) into state.scenario, so the player
   // ship reads its real class stats here.
-  if (!state.scenario.LoadFromArchives(&state.rng)) {
+  if (state.scenario.ships.empty() &&
+      !state.scenario.LoadFromArchives(&state.rng)) {
     NovaLog::Todo("scenario resource tables could not be loaded; player world "
                   "uses fallback defaults");
   }
@@ -481,6 +482,7 @@ void ResetPlayerShipForNewGame(GameState &state) {
   // the game convention confirmed from the flight renderer: heading 0 = up
   // (-y), so world +y is down on screen (Math_AddPolarVelocity projects
   // heading -> vel = (sin, -cos); pos += vel * dt).
+  NovaShip_ResetPlayerShipState(state);
   state.player.current_system_id = kStartSystemId;
   state.player.credits = 10000;
   // Ghidra 0x0048a3a5 (Menu_RunNewGameFlow): the starmap pan origin starts on
@@ -517,26 +519,11 @@ void ResetPlayerShipForNewGame(GameState &state) {
                   kStartSystemResourceId);
   }
 
-  state.player.vel_x = state.player.vel_y = 0.0F;
-  state.player.heading = 0.0F;
-  state.player.speed = 0.0F;
   state.player.ship_class_id = state.pilot.start_type_code; // ch r ShipType
   // Ship_ResetPlayerShipState leaves the active weapon bank unselected (-1);
   // the firing loop (NovaWeapon_TickPlayerWeaponCommands) fires every loaded
   // bank regardless, so the selection latch is only carried for save/UI
   // fidelity.
-  state.player.active_weapon_bank_slot = -1;
-  state.player.timed_action_counter = -1;
-  state.player.death_timer_active = -1.0F;
-  state.player.is_active = true;
-  // Clear the death / escape-pod latches a previous flight may have left set
-  // (the original's new-game reset path clears DAT_00596d38 / DAT_007354a5).
-  state.game_over_pending = false;
-  state.return_to_menu_pending = false;
-  state.distress_cue_active = false;
-  state.distress_cue_active_prev = false;
-  state.bomb_detonation_timer = 0.0F;
-  state.recently_hit_timer = 0.0F;
 }
 
 void SetNewGameDateAndStrings(GameState &state) {
@@ -580,6 +567,47 @@ void ResetStellarStrengthForNewGame(GameState &state) {
 }
 
 } // namespace
+
+// Ghidra 0x004b3350 Ship_ResetPlayerShipState.
+void NovaShip_ResetPlayerShipState(GameState &state) {
+  state.player = Ship{};
+  state.player.pos_x = 50.0F;
+  state.player.pos_y = 50.0F;
+  state.player.is_active = true;
+  state.player.ai_behavior_code = -1;
+  state.player.travel_transfer_mode = -1;
+  state.player.active_weapon_bank_slot = -1;
+  state.player.death_timer_active = -999.0F;
+  state.player.waypoint_arrival_marker_a = 1;
+
+  state.inventory.cargo_bins.fill(0);
+  state.inventory.outfit_owned_count.fill(0);
+  state.inventory.junk_counts.fill(0);
+  state.weapon_bank_ammo.fill(0);
+  state.weapon_bank_secondary.fill(0);
+  state.weapon_bank_cooldown.fill(0.0F);
+  state.active_mission_runtime_flags = {};
+  state.active_missions = {};
+  state.active_shots.clear();
+
+  state.player_stat_modifier_pct.fill(100);
+  state.target_category_command.fill(-1);
+  state.travel = {};
+  state.travel.travel_hint_state = 0x7fff;
+  state.game_over_pending = false;
+  state.return_to_menu_pending = false;
+  state.distress_cue_active = false;
+  state.distress_cue_active_prev = false;
+  state.bomb_detonation_timer = 0.0F;
+  state.recently_hit_timer = 0.0F;
+
+  NovaOutfit_RecomputeOutfitDerivedState(state);
+  const PlayerEffectiveStats effective =
+      Outfit_ComputePlayerEffectiveStats(state);
+  state.player.shield_points = effective.max_shield_points;
+  state.player.armor_points = effective.max_armor_points;
+  state.player.fuel_points = effective.fuel_capacity;
+}
 
 // Test/entry seam for the Ghidra Game_ResetNewGameState (0x004b4690) stellar
 // Strength/hazard reset, applied by the fresh-world flow.
@@ -774,6 +802,11 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   for (std::size_t i = 0; i < engage_count; ++i) {
     record.stellar_engage_access[i] = state.scenario.stellars[i].engage_access;
   }
+  // The loader marked every present përs resource active (+0x620); a fresh
+  // record's pers flags are zero, so without this carry PilotFileApply would
+  // clear the whole personality table (the tutorial derelict Viper included)
+  // and the system-population pass would log "not present" and skip it.
+  PilotFileSeedPersonalityPresence(state.scenario, record);
 
   // Copy the assembled record into the live state (mirroring the block-to-
   // global copy IntroCinematic_SetupFrames/PilotData_InitializePlayerState

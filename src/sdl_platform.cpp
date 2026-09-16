@@ -380,6 +380,10 @@ SdlPlatform::PollOpenFileDialogResult() {
     return std::nullopt;
   }
   open_file_dialog_completed_ = false;
+  // Native dialogs can leave their SDL parent behind another application
+  // after the asynchronous callback completes, notably on macOS. This runs
+  // on the main thread, where SDL window operations are permitted.
+  SDL_RaiseWindow(window_.get());
   return std::move(open_file_dialog_result_);
 }
 

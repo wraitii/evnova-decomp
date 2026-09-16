@@ -179,6 +179,33 @@ and Rick Hunter is `Pirate Hunter II`.
 
 There is no mid-game reload path.
 
+### Repair status differs between startup and Open Pilot
+
+`PilotFile_LoadSave` can finish restoring a usable pilot while returning
+`-0x2e` (`kRepairsApplied`). One cause is a saved ship class whose current
+definition has `TechLevel == -9999`, as happens when the pilot depends on a
+plugin that is no longer loaded. The original marks the load repaired, replaces
+the missing player ship with the first defined ship class (starting its scan at
+class 0), and continues restoring the file. Missing outfits, weapon entries,
+junk, ranks, escorts, and fighters have similar lossy repair paths.
+
+The two callers intentionally handle `-0x2e` differently:
+
+- **Startup autoresume** activates the pilot only when the loader returns
+  exactly `0`. A repaired pilot has already been read and repaired in memory,
+  but it is not marked active; the player must choose it explicitly through
+  Open Pilot.
+- **Open Pilot** accepts both `0` and `-0x2e` as successful loads. For
+  `-0x2e`, it sets a caller-visible repair flag; `NovaGameMode_DispatchAction`
+  then displays the warning from STR# `0x8c`, entry `0x34`, before activating
+  the repaired pilot.
+
+This prevents a plugin-dependent or otherwise damaged pilot from being
+silently autoresumed with substituted data, while still allowing the player to
+load it deliberately after a warning. The SDL port currently preserves the
+activation distinction and logs the repair details; reproducing the warning
+dialog remains a `TODO(decomp)`.
+
 ## Save trigger points
 
 - New game (`Menu_RunNewGameFlow`) — writes the initial save with the starting

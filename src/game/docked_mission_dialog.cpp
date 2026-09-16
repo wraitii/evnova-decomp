@@ -440,15 +440,34 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
     return LandedExit::kServiceComplete;
   }
   ProbeUiAutoClear probe_ui_guard(platform);
-  platform.PublishProbeUi("mission_bbs",
-                          {{"window", layout->frame},
-                           {"list", layout->list},
-                           {"take", layout->take},
-                           {"decline", layout->decline},
-                           {"description", layout->description}});
   MissionListEvaluation missions = Mission_EvaluateMissionLists(state);
   std::size_t selected = 0;
   std::string status;
+  // The active mission list is re-evaluated when a mission is accepted, so
+  // recompute the published controls every frame. Each available row is
+  // addressable by its zero-based template id (matching the
+  // `missions.missions.N.template_id` state field) so a probe scenario can
+  // click a specific mission instead of relying on the default first row.
+  const auto publish_probe_ui = [&]() {
+    std::vector<std::pair<std::string, SDL_FRect>> rects{
+        {"window", layout->frame},
+        {"list", layout->list},
+        {"take", layout->take},
+        {"decline", layout->decline},
+        {"description", layout->description}};
+    const float list_bottom = layout->list.y + layout->list.h;
+    for (std::size_t row = 0; row < missions.page_zero.size(); ++row) {
+      const float row_top = layout->list.y + row * kMissionListRowPitch;
+      if (row_top >= list_bottom) {
+        break;
+      }
+      const float row_height =
+          std::min(kMissionListRowPitch, list_bottom - row_top);
+      rects.push_back({"mission." + std::to_string(missions.page_zero[row]),
+                       {layout->list.x, row_top, layout->list.w, row_height}});
+    }
+    platform.PublishProbeUi("mission_bbs", std::move(rects));
+  };
   NovaLog::Info(
       "mission BBS opened at stellar {}: {} available rows (first id {})",
       static_cast<int>(stellar_id),
@@ -458,6 +477,7 @@ LandedExit RunMissionBbsWindow(SdlPlatform &platform,
           : static_cast<int>(missions.page_zero.front()));
 
   while (!platform.quit_requested()) {
+    publish_probe_ui();
     DrawMissionBbsBase(platform,
                        render_background,
                        backdrop ? backdrop->get() : nullptr,
@@ -911,9 +931,10 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
                   platform, state, followup_text, false, render_background);
             }
           }
-          (void)Mission_ExecuteReactionScript(
+          Mission_ExecuteReactionScript(
               state,
               PayloadCString(*def, 0x25a),
+              MissionScriptContext{"offer decline"},
               MakeAcceptanceSink(platform, state, render_background));
           return MissionOfferResult::kDeclined;
         }

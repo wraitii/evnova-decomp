@@ -37,7 +37,8 @@ struct LandedStoreSession {
 [[nodiscard]] ControlExpressionState
 NovaLanded_ControlExpressionState(const GameState &state);
 void NovaLanded_ExecuteControlSet(GameState &state,
-                                  std::string_view expression);
+                                  std::string_view expression,
+                                  std::string_view origin);
 
 // Ghidra 0x0048ea70 (open path): runs Weapon_ReconcileOutfitPoolWithWeaponBanks
 // at modal entry (registering stock-bank weapons not yet owned as owned

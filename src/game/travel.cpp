@@ -4,6 +4,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
+#include "mission_trace.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "targeting.hpp"
@@ -1061,7 +1062,8 @@ void NovaSystem_TriggerNebulaRegionEvents(GameState &state,
     NovaControlExpression_ExecuteSet(
         neb.on_explore_expression,
         ControlExpressionMutation{[&state](std::uint32_t bit, bool value) {
-          state.control.SetControlBit(bit, value);
+          MissionTrace::SetControlBit(
+              state.control, bit, value, "nebula OnExplore");
         }});
   }
 }

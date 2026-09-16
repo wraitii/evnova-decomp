@@ -3869,7 +3869,8 @@ void RunPlayerEjectTransform(GameState &state) {
   // Old ship class's OnRetire reaction script.
   if (const ShipClass *old_cls = state.scenario.Ship(
           static_cast<std::int16_t>(p.ship_class_id + 0x80))) {
-    (void)Mission_ExecuteReactionScript(state, old_cls->on_retire_expr);
+    Mission_ExecuteReactionScript(
+        state, old_cls->on_retire_expr, MissionScriptContext{"ship OnRetire"});
   }
 
   if (!Weapon_HasPlayerLaunchBayWeapon(state)) {
@@ -4224,7 +4225,8 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
   // reaction script (ShipClassDef+0x1eb <- shp payload 0x26a).
   RespawnResetPlayerShipState(state);
   if (const ShipClass *cls = state.scenario.Ship(0x80)) {
-    (void)Mission_ExecuteReactionScript(state, cls->on_purchase_expr);
+    Mission_ExecuteReactionScript(
+        state, cls->on_purchase_expr, MissionScriptContext{"ship OnPurchase"});
   }
   // Ship_DeactivateVacantShipsAndTally(1, 1): the clean-room models the
   // second flag through keep_player_engaged.
