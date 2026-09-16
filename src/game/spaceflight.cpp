@@ -113,10 +113,14 @@ constexpr std::uint16_t kStrEscapePodDeployed = 0x26;
 constexpr std::uint16_t kStrBombYou = 0x27; // "You " prefix
 constexpr std::uint16_t kStrBombDetonatedSingular = 0x28;
 constexpr std::uint16_t kStrBombDetonatedPlural = 0x29;
-// g_transition_sound_handle_table (snd 150+i): [4] auto-repair cue, [5]
-// distress alert (_DAT_0059155c, snd 155 via NovaSound_LoadDecodedById).
+// g_transition_sound_handle_table (snd 150+i): [4] auto-repair cue. The
+// combat-alert cue is the separate snd 370 "Red Alert" handle (Ghidra
+// g_nova_control_bits[144] / 0x0059155c), not a transition-table slot.
 constexpr std::int16_t kAutoRepairSoundTransitionIndex = 4;
-constexpr std::int16_t kDistressCueSoundTransitionIndex = 5;
+// NovaAudio_PreloadGameplayData (0x004b0957-0x004b0962) also decodes snd 370
+// into a dedicated handle for the first-hostile alert; the port plays it from
+// the contiguous gameplay_sounds cache (ids 200..455).
+constexpr std::size_t kRedAlertGameplaySoundIndex = 370 - 200;
 // HUD overlay durations (simulation ticks).
 constexpr std::uint64_t kOverlayDurationAutoRepair = 250; // 0xfa
 constexpr std::uint64_t kOverlayDurationBomb = 400;       // 0x190
@@ -982,8 +986,10 @@ std::int16_t StellarArrivalSpriteFullHeight(SdlPlatform &platform,
 // (DAT_007cab1c < 2, g_license_check_frame_counter gate in the decompile);
 // the port auto-picks only once per press when nothing is targeted.
 LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
+                                                 SdlAudio &audio,
                                                  SpaceflightView &view,
-                                                 GameState &state) {
+                                                 GameState &state,
+                                                 const NovaPreferences &prefs) {
   // The original's land command (binding 5 in Ship_HandlePlayerShipCore
   // 0x0044aa70) auto-picks the nearest available travel stellar when no
   // stellar is currently targeted (travel_transfer_mode != 2 or
@@ -1107,7 +1113,8 @@ LandCommandResult PlayerTick_LandCommandDispatch(SdlPlatform &platform,
     // position in NovaUi_RunTravelDestinationInteractionLoop
     // (0x00491f30): after the window is up, before the AvailLoc-3 offer
     // pass, with debriefs layered over the dock.
-    const LandedExit exit = NovaLanded_RunWindow(platform, state, ctx);
+    const LandedExit exit =
+        NovaLanded_RunWindow(platform, audio, state, ctx, prefs);
     if (exit == LandedExit::kQuit) {
       return LandCommandResult::kQuit;
     }
@@ -1645,7 +1652,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       }
       // PlayerTick_StatusAndOutfitEvents (0x0044aa70 block 0x0044b240): death
       // bookkeeping, disabled damping, disabled auto-repair, the periodic
-      // distress cue, and carried-bomb detonation. Runs ahead of the flight
+      // combat-alert cue, and carried-bomb detonation. Runs ahead of the flight
       // input pass, matching the original's dispatch order. `true` means the
       // death/inactive branch consumed the frame (flight input is skipped).
       // Once the bookkeeping latches game_over_pending the original returns to
@@ -1916,8 +1923,8 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // windows play their cues through the same queue. Mirrors
       // NovaAudio_QueueCenteredSound(handle, priority_width, ...). The lazy
       // decode runs
-      // here so every gameplay-side queuer (jump-range cue, auto-repair,
-      // distress alert) sees a loaded table even without a boarding pass.
+      // here so every gameplay-side queuer (jump-range cue, auto-repair)
+      // sees a loaded table even without a boarding pass.
       EnsureTransitionSounds(state);
       for (const auto &pending : state.pending_ui_sounds) {
         if (pending.transition_index < 0 ||
@@ -1937,6 +1944,21 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
                    pending.priority_width);
       }
       state.pending_ui_sounds.clear();
+      // Combat alert (Ghidra 0x0044d410-0x0044d46b): the rising edge of
+      // Ship_IsAnyShipThreatToPlayerSquad queues the dedicated snd 370 "Red
+      // Alert" handle via NovaAudio_QueueCenteredSound(handle, 5, ...). The
+      // original keeps a separate handle (g_nova_control_bits[144]); the port
+      // plays the same sample from the preloaded gameplay_sounds cache.
+      if (state.pending_red_alert) {
+        state.pending_red_alert = false;
+        if (state.gameplay_sounds[kRedAlertGameplaySoundIndex].has_value()) {
+          audio.Play(*state.gameplay_sounds[kRedAlertGameplaySoundIndex],
+                     1.0F,
+                     1.0F,
+                     370,
+                     /*priority_width=*/5);
+        }
+      }
       // Cross-system hyperspace jump state machine (travel.cpp): engages on
       // the 'j' key with a plotted destination, then drives the brake and the
       // warp-up hold before the fire. The 'Warp up' voice count gates the fire
@@ -2129,7 +2151,7 @@ void NovaFrame_SpaceflightLoop(SdlPlatform &platform,
       // Gated while a jump is engaged (disabled through brake + hold + zoom).
       if (!player_tick_consumed && land_pressed && !state.travel.engaging) {
         const LandCommandResult landed =
-            PlayerTick_LandCommandDispatch(platform, view, state);
+            PlayerTick_LandCommandDispatch(platform, audio, view, state, prefs);
         if (landed == LandCommandResult::kQuit) {
           returning_to_menu = true;
           break;
@@ -3786,8 +3808,9 @@ void RespawnResetPlayerShipState(GameState &state) {
   state.travel.selected_stellar_id = -1;
   state.travel.engage_timer = -1;
   state.travel.travel_hint_state = 0x7fff; // hint latch (0x004b3a3b)
-  state.distress_cue_active = false;
-  state.distress_cue_active_prev = false;
+  state.player_threat_active = false;
+  state.player_threat_active_prev = false;
+  state.pending_red_alert = false;
   p.timed_action_counter = -1;
 
   Mission_RerollOfferingRolls(state);
@@ -4196,17 +4219,16 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
         GameState::PendingUiSound{kAutoRepairSoundTransitionIndex, 1});
   }
 
-  // --- Distress-call cue (0x0044b3a8, tail at 0x0044d410) ------------------
-  // Every 60th frame the original re-evaluates Ship_AreAnyShipsEligibleFor-
-  // DistressCall; a rising edge with no blocking timed action plays the
-  // distress alert (g_transition_sound_handle_table[5], snd 155) five times.
+  // --- Combat-alert cue (0x0044b3a8, tail at 0x0044d410) -------------------
+  // Every 60th frame the original re-evaluates Ship_IsAnyShipThreatToPlayer-
+  // Squad (0x00410060); a rising edge with no blocking timed action queues
+  // the snd 370 "Red Alert" cue (g_nova_control_bits[144], priority width 5).
   if (state.spaceflight_frame_counter % 60 == 0) {
-    state.distress_cue_active_prev = state.distress_cue_active;
-    state.distress_cue_active = NovaAi_IsAnyShipThreatToPlayerSquad(state);
-    if (state.distress_cue_active && !state.distress_cue_active_prev &&
+    state.player_threat_active_prev = state.player_threat_active;
+    state.player_threat_active = NovaAi_IsAnyShipThreatToPlayerSquad(state);
+    if (state.player_threat_active && !state.player_threat_active_prev &&
         p.timed_action_counter < 1) {
-      state.pending_ui_sounds.push_back(
-          GameState::PendingUiSound{kDistressCueSoundTransitionIndex, 5});
+      state.pending_red_alert = true;
       // The original also sets g_travel_countdown = 0x1e when
       // g_pref_sound_volume < 2; the preference and the countdown consumer are
       // not modelled yet (TODO(decomp)).

@@ -813,6 +813,9 @@ struct Weapon {
 struct Stellar {
   static constexpr std::uint16_t kAnimationReturnToFirstFrame = 0x0001;
   static constexpr std::uint16_t kAnimationChooseRandomFrame = 0x0002;
+  // Bible Flags2 0x0010 "Play this stellar's sound in a continuous loop":
+  // the CustSndID ambient replays gaplessly instead of on the 8..16 s timer.
+  static constexpr std::uint16_t kContinuousAmbientSound = 0x0010;
   static constexpr std::uint16_t kAnimateWhenDestroyed = 0x0080;
   static constexpr std::uint16_t kHypergate = 0x1000;
   static constexpr std::uint16_t kWormhole = 0x2000;

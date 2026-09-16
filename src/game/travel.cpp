@@ -1840,14 +1840,15 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
       state.travel.engage_timer = kArmedTimer;
     }
     if (state.travel.engage_timer == kArmedTimer) {
+      // Ghidra 0x00459950 queues transition-table cue 1 at the same edge as
+      // the clearance message. Incrementing the timer above prevents repeats.
+      state.pending_ui_sounds.push_back({1, 1});
       // "Cleared to dock/land" overlay (STR# 0x7d2), composing the randomly
       // rolled lead/connector/tail variants the original builds.
       const bool is_station = (stellar->flags & 0x10U) != 0U;
-      const std::string system_name = [&]() -> std::string {
-        const System *sys = state.scenario.System(
-            static_cast<std::int16_t>(state.player.current_system_id + 0x80));
-        return sys != nullptr ? sys->name : std::string();
-      }();
+      // The original interpolates g_player_ship_name (the hull's registration
+      // name), NOT the system name; e.g. "<ship>, you're cleared to land."
+      const std::string &ship_name = state.player.ship_name;
       auto text = [](std::uint16_t entry, const char *fallback) {
         return NovaHud_LoadStringEntry(0x7d2, entry).value_or(fallback);
       };
@@ -1856,20 +1857,20 @@ void NovaTravel_UpdateEngagementProgress(GameState &state) {
       if (is_station) {
         if (lead == 0) {
           message = text(0x5e, "Cleared to dock");
-          message += ", " + system_name + ". ";
+          message += ", " + ship_name + ". ";
         } else if (lead == 1) {
           message =
-              system_name + ", " + text(0x5f, "you're cleared to dock.") + " ";
+              ship_name + ", " + text(0x5f, "you're cleared to dock.") + " ";
         } else {
           message = text(0x60, "You are cleared to dock.") + " ";
         }
       } else {
         if (lead == 0) {
           message = text(0x61, "Cleared to land");
-          message += ", " + system_name + ". ";
+          message += ", " + ship_name + ". ";
         } else if (lead == 1) {
           message =
-              system_name + ", " + text(0x62, "you're cleared to land.") + " ";
+              ship_name + ", " + text(0x62, "you're cleared to land.") + " ";
         } else {
           message = text(0x63, "You are cleared to land.") + " ";
         }

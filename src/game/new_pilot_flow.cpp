@@ -682,8 +682,9 @@ void NovaShip_ResetPlayerShipState(GameState &state) {
   state.travel.travel_hint_state = 0x7fff;
   state.game_over_pending = false;
   state.return_to_menu_pending = false;
-  state.distress_cue_active = false;
-  state.distress_cue_active_prev = false;
+  state.player_threat_active = false;
+  state.player_threat_active_prev = false;
+  state.pending_red_alert = false;
   state.bomb_detonation_timer = 0.0F;
   state.recently_hit_timer = 0.0F;
 

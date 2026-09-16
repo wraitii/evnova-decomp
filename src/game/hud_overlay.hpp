@@ -70,6 +70,12 @@ void NovaHud_TickOverlay(GameState &state);
 // count select nothing). Returns the entry, or std::nullopt when the
 // pool/entry is missing. Used to build the landing/negotiation feedback text
 // (STR# 0x7d2).
+// Divergence (port-only): the original Resource_LoadStringEntry leaves the
+// output empty and has no substitute text, so a missing entry renders nothing.
+// Returning nullopt lets callers keep a literal English fallback; any caller
+// passing one therefore shows text where the original would show none. This is
+// a deliberate clean-room convenience for resource-less/test scenarios, not
+// reproduced behavior. Callers that need parity should not pass a fallback.
 [[nodiscard]] std::optional<std::string>
 NovaHud_LoadStringEntry(std::uint16_t resource_id, std::uint16_t entry);
 

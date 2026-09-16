@@ -24,6 +24,9 @@
 
 namespace game {
 
+// Ghidra 0x004112C0 Ship_ShowPlayerInterceptTauntIfEligible.
+void NovaAi_ShowPlayerInterceptTauntIfEligible(GameState &state, Ship &ship);
+
 // Ghidra 0x0043b740 Ship_AimWeaponPredictive. Predictive weapon lead-aim:
 // returns the game-degree bearing toward the best intercept point for a
 // straight-flight / fast-close weapon (mode -1/4/6/7/8/9) against a moving

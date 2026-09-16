@@ -1016,8 +1016,10 @@ LandedExit DispatchService(SdlPlatform &platform,
 // NovaUi_RunTravelDestinationServicesWindow 0x0047c8e0 runs inline here: the
 // landed services modal uses the Spaceport backdrop PICT 0x2134.
 LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
+                                SdlAudio &audio,
                                 GameState &state,
-                                LandedContext &ctx) {
+                                LandedContext &ctx,
+                                const NovaPreferences &prefs) {
   ProbeUiAutoClear probe_ui(platform);
   platform.probe().AutomationObservedDocked();
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
@@ -1073,6 +1075,75 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
       }
     }
   }
+  // Ghidra 0x00491f30 NovaUi_RunTravelDestinationInteractionLoop, ambient
+  // slice. The DLOG 0x3e8 window is created with a per-frame interaction
+  // callback (0x4928a0, folded into the parent by Ghidra) that plays the
+  // stellar's Bible CustSndID as an ambient cue for the whole docked visit --
+  // the same lifetime as CustPicID. NovaSound_LoadDecodedById(cust_snd_id)
+  // runs at window open only when cust_snd_id >= 0x80 and g_pref_ambient_
+  // sounds; the callback then (re)plays it every 0x1e0 + NovaRandom_Range(
+  // 0x1e0) 60 Hz ticks (8..16 s, DAT_007d525c initialised to 0 so it fires on
+  // the first frame), or gaplessly whenever the previous voice drains when
+  // availability_flags (Bible Flags2) kContinuousAmbientSound is set. The
+  // decoded handle is unregistered/freed on window close.
+  std::optional<NovaSoundData> ambient_sound;
+  bool ambient_continuous = false;
+  if (st_dec != nullptr && prefs.ambient_sounds &&
+      st_dec->cust_snd_id >= 0x80) {
+    if (const auto resource = NovaResource_LoadSndData(
+            static_cast<std::uint16_t>(st_dec->cust_snd_id))) {
+      ambient_sound = NovaSound_Decode(*resource);
+    }
+    if (!ambient_sound) {
+      NovaLog::Todo("docked ambient snd {} for stellar '{}' could not be "
+                    "decoded; no CustSndID ambience",
+                    static_cast<int>(st_dec->cust_snd_id),
+                    st_dec->name);
+    } else {
+      ambient_continuous =
+          (st_dec->availability_flags & Stellar::kContinuousAmbientSound) != 0U;
+      NovaLog::Info("docked ambient snd {} for stellar '{}' ({})",
+                    static_cast<int>(st_dec->cust_snd_id),
+                    st_dec->name,
+                    ambient_continuous ? "gapless" : "8..16s retrigger");
+    }
+  }
+  // The original tags the ambient voice with the descriptor at
+  // &DAT_00591ab4 (g_nova_control_bits[1512]); 1512 is reused here as the
+  // SdlAudio voice key so CountActiveByKey can gate the gapless path. The
+  // descriptor width is 32000 (NovaAudio_PreloadGameplayData), so the cue
+  // outranks ordinary effects.
+  constexpr int kAmbientSoundKey = 1512;
+  constexpr int kAmbientPriorityWidth = 32000;
+  std::uint64_t next_ambient_ms = 0;
+  const auto tick_ambient = [&] {
+    if (!ambient_sound) {
+      return;
+    }
+    const std::uint64_t now = platform.gameplay_ticks_ms();
+    if (ambient_continuous) {
+      if (audio.CountActiveByKey(kAmbientSoundKey) == 0) {
+        audio.Play(*ambient_sound,
+                   1.0F,
+                   1.0F,
+                   kAmbientSoundKey,
+                   kAmbientPriorityWidth);
+      }
+      return;
+    }
+    if (now < next_ambient_ms) {
+      return;
+    }
+    audio.Play(
+        *ambient_sound, 1.0F, 1.0F, kAmbientSoundKey, kAmbientPriorityWidth);
+    std::uniform_int_distribution<std::int32_t> roll{0, 0x1e0 - 1};
+    const std::uint64_t interval_ms =
+        static_cast<std::uint64_t>(0x1e0 + roll(state.rng)) * 1000ULL / 60ULL;
+    next_ambient_ms = now + interval_ms;
+  };
+  // DAT_007d525c starts at 0, so the callback fires on the first frame the
+  // dock window is up.
+  tick_ambient();
   destination_art = load_pict(0x2134);
   if (destination_art) {
     NovaLog::Info("landed dock backdrop PICT 0x2134");
@@ -1202,6 +1273,7 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
     NovaUi_RunTextReaderDialog(platform, state, text, false, render_background);
   };
   const auto finish = [&](LandedExit exit) {
+    audio.StopByKey(kAmbientSoundKey);
     Player_ProcessEscortFleetAtStellar(state, ctx.stellar_id, show_text);
     return exit;
   };
@@ -1271,6 +1343,8 @@ LandedExit NovaLanded_RunWindow(SdlPlatform &platform,
       });
 
   while (!platform.quit_requested()) {
+    // Ambient CustSndID retrigger (0x4928a0 callback), once per frame.
+    tick_ambient();
     // Nested modals clear their published controls on return. Restore the
     // Spaceport's semantic surface at the same point its root face resumes.
     publish_probe_controls();

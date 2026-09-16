@@ -323,6 +323,13 @@ TEST_CASE("landing approach timer arms within 250 and expires", "[travel]") {
   state.player.pos_x = 100.0F;
   game::NovaTravel_UpdateEngagementProgress(state);
   CHECK(state.travel.engage_timer == 0x2ee);
+  REQUIRE(state.pending_ui_sounds.size() == 1);
+  CHECK(state.pending_ui_sounds.front().transition_index == 1);
+  CHECK(state.pending_ui_sounds.front().priority_width == 1);
+
+  // The cue is edge-triggered; the armed timer advances on the next tick.
+  game::NovaTravel_UpdateEngagementProgress(state);
+  CHECK(state.pending_ui_sounds.size() == 1);
 
   // Past 0x7ff the request expires and the selection clears.
   state.travel.engage_timer = 0x800;
