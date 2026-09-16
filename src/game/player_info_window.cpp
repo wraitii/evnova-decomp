@@ -14,6 +14,8 @@
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight_view.hpp"
+#include "starmap.hpp"
+#include "travel.hpp"
 #include "ui_dialog.hpp"
 
 #include <SDL3/SDL.h>
@@ -355,14 +357,8 @@ int HandleTabStrip(SdlPlatform &platform,
 // doubling threshold chain 100/200/400/800/1600/3200/6400/12800/25600, drawn
 // from STR# 138.
 std::string CombatRankLabel(const GameState &state) {
-  static constexpr std::int32_t kThresholds[] = {
-      100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600};
-  int rank = 0;
-  for (std::int32_t threshold : kThresholds) {
-    if (state.player_combat_rating_points >= threshold) {
-      rank++;
-    }
-  }
+  const int rank =
+      NovaPlayerInfo_CombatRankIndex(state.player_combat_rating_points);
   auto label = NovaHud_LoadStringEntry(kRatingsStr, rank + 1);
   if (!label) {
     NovaLog::Todo("player-info: missing combat-rank STR# 138 entry {}",
@@ -440,20 +436,17 @@ void DrawGeneralPage(SdlPlatform &platform,
            kGridLeftValueX,
            MiscString(kStrSystem, "System:"),
            system != nullptr ? system->name : std::string("?"));
-  // Legal Status row: the value arm draws
-  // NovaUi_DrawSystemFactionConflictStatus (0x00468d90), which lives inside
-  // the starmap module and is not yet exported. TODO(decomp(0x00468d90)).
-  static bool logged_legal_status = false;
-  if (!logged_legal_status) {
-    logged_legal_status = true;
-    NovaLog::Todo("player-info: legal-status value arm "
-                  "(NovaUi_DrawSystemFactionConflictStatus) not wired");
-  }
+  const std::string legal_status =
+      NovaSystem_HasUsableTravelDestination(state,
+                                            state.player.current_system_id)
+          ? NovaUi_SystemFactionConflictStatusText(
+                state, state.player.current_system_id)
+          : na;
   draw_row(label_y + 3 * kGridRowStride,
            kGridLeftLabelX,
            kGridLeftValueX,
            MiscString(kStrLegalStatus, "Legal Status:"),
-           na);
+           legal_status);
   draw_row(label_y + 4 * kGridRowStride,
            kGridLeftLabelX,
            kGridLeftValueX,
@@ -669,6 +662,18 @@ bool RunJettisonConfirmDialog(SdlPlatform &platform,
 // ---------------------------------------------------------------------------
 // Ghidra 0x0049c050 NovaUi_BuildPlayerSpecialInteractionStrings.
 // ---------------------------------------------------------------------------
+
+int NovaPlayerInfo_CombatRankIndex(std::int32_t points) {
+  int rank = points > 0 ? 1 : 0;
+  static constexpr std::int32_t kThresholds[] = {
+      100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600};
+  for (const std::int32_t threshold : kThresholds) {
+    if (points >= threshold) {
+      ++rank;
+    }
+  }
+  return rank;
+}
 
 PlayerInfoSummaryTexts
 NovaPlayerInfo_BuildSummaryTexts(const GameState &state) {

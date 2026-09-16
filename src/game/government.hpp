@@ -34,8 +34,10 @@ namespace game {
 // governments are hostile either by class relationship (one's class id appears
 // in the other's enemy list, checked both directions) or by the xenophobic
 // override: when not allied, if either government has the xenophobic flag
-// (flags_primary & 0x0001) they are treated as hostile-from-sight. Derelict
-// governments are excluded from the class checks (same as the allied helper).
+// (flags_primary & 0x0001) they are treated as hostile-from-sight. A derelict
+// government (flags_primary & 0x0800) short-circuits to false before the
+// xenophobic fallback, so a derelict is never hostile on sight; only
+// out-of-range ids fall through to the (still range-guarded) fallback.
 [[nodiscard]] bool NovaGovernment_AreGovtsHostileOrXenophobic(
     const ScenarioData &scenario, std::int16_t govt_a, std::int16_t govt_b);
 

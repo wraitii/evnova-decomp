@@ -216,6 +216,12 @@ translated through `NovaCommand_TranslateByInputMap`.
 
 ## Port status
 
+The combat ladder has a distinct positive-score first rank: 0 points uses
+rank index 0, 1..99 uses index 1, then 100/200/400/.../25600 advance through
+indices 2..10. Legal status is derived rather than stored separately: the
+current system's saved reputation is graded against its government's CrimeTol
+by the shared 0x00468d90 ladder after the usable-destination gate.
+
 Ported in `src/game/player_info_window.cpp` (see module comments; the
 `NovaUi_*` addresses above map to `NovaPlayerInfo_*`). Divergences are
 marked with `TODO(decomp)`/`NovaLog::Todo` at the port sites and tracked in

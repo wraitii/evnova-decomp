@@ -993,18 +993,15 @@ std::int16_t NovaAi_FindBestAssistTargetForShip(const GameState &state,
 // target-validity side faithfully; bank ranking is the available clean-room
 // subset (mode, ammo, cooldown, target capability, range, and damage class).
 void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship) {
-  // Combat behaviors 3/4 acquire hostile contacts directly. The original's
-  // post-state weapon refresh still arms their selected bank; restricting
-  // this to escort/mission behaviors (>4) left ordinary hostile NPCs with no
-  // active weapon at all.
+  // Ship_EscortFireAtUnprovokedTarget (0x00411540) is an escort/mission
+  // post-state refresh: behaviors below 5 return without touching the bank,
+  // so only escorts/fighters/assists revalidate and re-arm here. Behaviors 3/4
+  // arm their banks in the combat control-mode bodies instead.
   // Ship_IsShipDestroyed (0x004688e0) is a separate gate from the
   // disabled predicate.  A lethal hit leaves the ship slot
   // active during its destruction window, but it must not acquire a fresh
   // weapon bank in the post-state refresh.
-  // The original returns without touching the bank for behaviors below 5.
-  // Behaviors 1/2 arm their weapons in the combat control-mode branches, so
-  // clearing here would erase the bank before Ship_HandleShip can fire it.
-  if (ship.ai_behavior_code < 3) {
+  if (ship.ai_behavior_code < 5) {
     return;
   }
   if (NovaAiShip_IsDestroyed(ship)) {
@@ -1019,13 +1016,10 @@ void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship) {
     return;
   }
   const Ship &target = state.ShipAt(static_cast<std::size_t>(target_slot));
-  // 0x00411540 gates the whole refresh on behavior >= 5, so its disabled-
-  // target clear never applied to behavior-3 capture drives boarding a
-  // disabled victim. The port runs the refresh for behaviors 3/4 (the
-  // original arms their banks elsewhere, TODO(decomp)), so the clear is
-  // restricted to behaviors >= 5 to keep the state-0xd boarding target alive.
-  if (!target.is_active ||
-      (ship.ai_behavior_code >= 5 && NovaAiShip_IsDisabled(state, target))) {
+  // The original clears the primary target whenever it is inactive or
+  // disabled, so a disabled boarding victim is never re-armed here. Behavior
+  // 3/4 capture drives return above and do not reach this clear.
+  if (!target.is_active || NovaAiShip_IsDisabled(state, target)) {
     ship.primary_target_ship_slot = -1;
     return;
   }
@@ -3311,6 +3305,12 @@ void NovaAi_ApplyControls(GameState &state,
     // value. Clobbering it here made gate-emergence ships reseed to -50 and
     // fly ~1.67x too fast / ~2.8x too far (Ghidra 0x00408150 mode 0 has no
     // desired-spec write; the auto-weapon select is the only body).
+    // TODO(decomp(0x00408150)): the original calls
+    // Ship_EscortFireAtUnprovokedTarget at the tail of control mode 0
+    // (0x0040847d). The port omits it here and runs the refresh from the
+    // post-state call in NovaAi_UpdateShipAI instead, which covers every
+    // control mode (including 0x17 and modes where the original has no call).
+    // See docs/npc_ship_behaviour.md.
     // Mode 0x17 likewise has no steering block: state 0x14 owns the
     // gate/wormhole handoff and velocity bookkeeping; the surrounding jump
     // path performs the actual transfer.
@@ -4572,9 +4572,12 @@ void NovaAi_UpdateShipAI(GameState &state,
   // _g_avg_frame_time_ms EMA (about 1.0 at 30 Hz).
   NovaAi_UpdateShipState(state, ship, now_ms, elapsed_ticks);
   NovaAi_ApplyControls(state, ship, elapsed_ticks, now_ms);
-  // Ship_EscortFireAtUnprovokedTarget (0x00411540) is a post-state
-  // refresh. It must run after ApplyControls because that bridge clears the
-  // per-frame fire latch before the bank chooser arms it.
+  // TODO(decomp(0x00408150)): the original calls
+  // Ship_EscortFireAtUnprovokedTarget only inside Ship_ApplyShipAiControls, at
+  // the tail of control modes 0/1/9/0xb/0xc. This post-state call substitutes
+  // for the missing mode-0 call and runs for every control mode. The correct
+  // shape is to call it in ApplyControls' case 0 (split from 0x17) and remove
+  // this call; see docs/npc_ship_behaviour.md and the case-0 comment.
   if (ship.ai_state_code != 0x12) {
     NovaAi_EscortFireAtUnprovokedTarget(state, ship);
   }

@@ -202,7 +202,9 @@ NovaAiShip_CanInterceptCurrentPrimaryTarget(const GameState &state,
     const GameState &state, const Ship &ship, std::int16_t score_flags);
 
 // Ghidra 0x00411540 Ship_EscortFireAtUnprovokedTarget. Refreshes the
-// active NPC weapon bank for higher-behavior ships and clears stale targets.
+// active NPC weapon bank for behavior >4 ships; ships with a lower behavior
+// return untouched (behavior 3/4 arm banks in the combat control modes).
+// Clears the primary target whenever it is inactive or disabled.
 void NovaAi_EscortFireAtUnprovokedTarget(GameState &state, Ship &ship);
 
 // The four per-mode weapon-bank selectors called by the AI control modes

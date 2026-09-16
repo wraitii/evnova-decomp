@@ -15,20 +15,24 @@
 namespace game {
 namespace {
 
-// Mirrors the original's range guard (`-1 < id && id < 0x100`) and derelict
-// exclusion (flags_primary & 0x0800) shared by both relation helpers. Returns
-// the government entry for a zero-based id when it is valid and not derelict,
-// else nullptr.
+// Mirrors the original's range guard (`-1 < id && id < 0x100`) shared by the
+// relation helpers. The C++ government table can be smaller than the
+// original's 0x100 entries in synthetic data, so the size check stands in for
+// the absent entries.
+[[nodiscard]] bool GovernmentInRange(const ScenarioData &scenario,
+                                     std::int16_t govt_id) {
+  return govt_id >= 0 && govt_id < 0x100 &&
+         static_cast<std::size_t>(govt_id) < scenario.governments.size();
+}
+
+// Returns the government entry for a zero-based id when it is valid and not
+// derelict (flags_primary & 0x0800), else nullptr.
 [[nodiscard]] const Government *RelationEligible(const ScenarioData &scenario,
                                                  std::int16_t govt_id) {
-  if (govt_id < 0 || govt_id >= 0x100) {
+  if (!GovernmentInRange(scenario, govt_id)) {
     return nullptr;
   }
-  const auto idx = static_cast<std::size_t>(govt_id);
-  if (idx >= scenario.governments.size()) {
-    return nullptr;
-  }
-  const Government &g = scenario.governments[idx];
+  const Government &g = scenario.governments[static_cast<std::size_t>(govt_id)];
   if ((g.flags_primary & 0x0800U) != 0) {
     return nullptr; // derelict
   }
@@ -77,22 +81,34 @@ bool NovaGovernment_AreGovtsHostileOrXenophobic(const ScenarioData &scenario,
   if (govt_a == govt_b) {
     return false;
   }
-  const Government *a = RelationEligible(scenario, govt_a);
-  const Government *b = RelationEligible(scenario, govt_b);
-  // Direct enemy-class hostility check (both directions), only when both sides
-  // are relation-eligible (non-derelict, in range).
-  if (a != nullptr && b != nullptr) {
+  // Both governments must be in range to reach the class tables. The original
+  // falls straight to a zero return when either side carries the derelict bit
+  // (flags_primary 0x0800): a derelict is NOT hostile even to a xenophobic
+  // government, because the xenophobic fallback below is skipped. Only
+  // out-of-range ids fall through to that fallback (where the range-guarded
+  // xenophobic test then rejects them).
+  if (GovernmentInRange(scenario, govt_a) &&
+      GovernmentInRange(scenario, govt_b)) {
+    const Government &a =
+        scenario.governments[static_cast<std::size_t>(govt_a)];
+    const Government &b =
+        scenario.governments[static_cast<std::size_t>(govt_b)];
+    if ((a.flags_primary & 0x0800U) != 0U ||
+        (b.flags_primary & 0x0800U) != 0U) {
+      return false; // derelict: no relation checks and no xenophobic override
+    }
+    // Direct enemy-class hostility check (both directions).
     for (std::size_t i = 0; i < 4; ++i) {
-      if (a->classes[i] != -1) {
+      if (a.classes[i] != -1) {
         for (std::size_t j = 0; j < 4; ++j) {
-          if (b->enemy_classes[j] == a->classes[i]) {
+          if (b.enemy_classes[j] == a.classes[i]) {
             return true;
           }
         }
       }
-      if (b->classes[i] != -1) {
+      if (b.classes[i] != -1) {
         for (std::size_t j = 0; j < 4; ++j) {
-          if (a->enemy_classes[j] == b->classes[i]) {
+          if (a.enemy_classes[j] == b.classes[i]) {
             return true;
           }
         }

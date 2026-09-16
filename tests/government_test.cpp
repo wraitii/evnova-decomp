@@ -30,6 +30,27 @@ ScenarioData TwoGovts() {
   return data;
 }
 
+TEST_CASE("derelict governments are never hostile on sight",
+          "[government][relation]") {
+  ScenarioData data;
+  Government pirate;   // xenophobic
+  Government derelict; // flags_primary 0x0800
+  pirate.flags_primary = 0x0001U;
+  pirate.classes = {1, -1, -1, -1};
+  derelict.flags_primary = 0x0800U;
+  derelict.classes = {2, -1, -1, -1};
+  data.governments = {pirate, derelict};
+
+  // Neither order is hostile: the derelict side short-circuits before the
+  // xenophobic override can fire.
+  CHECK_FALSE(NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 1));
+  CHECK_FALSE(NovaGovernment_AreGovtsHostileOrXenophobic(data, 1, 0));
+
+  // The same xenophobic government is hostile to a non-derelict neighbour.
+  data.governments[1].flags_primary = 0;
+  CHECK(NovaGovernment_AreGovtsHostileOrXenophobic(data, 0, 1));
+}
+
 TEST_CASE("allied helper matches a class against the other's allies",
           "[government][relation]") {
   const ScenarioData data = TwoGovts();
@@ -172,6 +193,11 @@ TEST_CASE("government relation helpers agree with the Federation scenario data",
   // not hostile.
   CHECK(NovaGovernment_AreGovtsAllied(data, 4, 5));
   CHECK(!NovaGovernment_AreGovtsHostileOrXenophobic(data, 4, 5));
+
+  // Derelicts (id 0x20, flags 0x0d00) vs the xenophobic Pirate govt (id 0x09,
+  // flags 0xf2b3): never hostile on sight, in either order.
+  CHECK_FALSE(NovaGovernment_AreGovtsHostileOrXenophobic(data, 0x09, 0x20));
+  CHECK_FALSE(NovaGovernment_AreGovtsHostileOrXenophobic(data, 0x20, 0x09));
 
   // Self-allied, self never hostile.
   CHECK(NovaGovernment_AreGovtsAllied(data, 0, 0));
