@@ -4,35 +4,27 @@ name = "sanddown-medical-route"
 [defaults]
 timeout_ms = 30000
 
-# Micro-trade run: Sanddown (Sol -> Tau Ceti -> Sanddown). The reimplementation's
-# fresh-pilot flow hardcodes Tichel as the start system, so the extra Tichel -> Sol
-# jump precedes the stated Sol -> Tau Ceti -> Sanddown route. We first land at
-# Viking and refuse tutorial 001 (mïsn 251), whose on_refuse sets control bit
-# b9215; every later Barry tutorial gates on !(... | b9215), so one refusal
-# disables the whole tutorial chain before we leave Tichel. In Sanddown we land
-# at Kolan directly (not Kiniké first) so the first buy happens immediately
-# instead of after an empty Kiniké -> Kolan leg. A `repeat` step then runs the
-# Kolan -> Kiniké -> Kolan medical circuit fifteen times: fill the Shuttle's 10
-# holds with Medical Supplies (commodity 2) at Kolan, launch to Kiniké, and sell
-# all ten at Kiniké's higher price, then return to Kolan for the next load. A
-# Terrapin escort is then hired at Kolan's bar and the same circuit runs fifteen
-# more times; the post-hire rounds start docked at Kolan, buy the fleet's fill
-# (the Terrapin adds 125 holds, so `max` exceeds the Shuttle's ten), and sell
-# four supplies immediately so the launch payroll (Player_ProcessEscortPayroll,
-# 1500 per Terrapin) cannot leave the escort unpaid before the rest of the load
-# is sold at Kiniké. Once that first batch of Terrapin rounds is done, five more
-# Terrapins are hired in a row (the fleet then holds the escort cap of six), and
-# a final fifteen-round circuit resumes; each Kolan departure now sells twenty
-# tons back so the six-escort payroll (9000) is covered before launch. Flight
-# runs at the tutorial's x100 gameplay-clock acceleration; the last step restores
-# ordinary speed and leaves the game running docked at Kolan so a human can keep
-# playing.
+# Sanddown medical cash route: a reusable money-making fragment. It assumes the
+# player is already in space in the Sanddown system (a caller that has flown
+# there), lands at Kolan, and runs the Kolan <-> Kiniké medical-supply circuit
+# before scaling the operation by hiring Terrapin escorts up to the six-escort
+# cap. The fragment runs itself at x100 gameplay-clock speed with audio
+# suppressed and restores ordinary speed when it finishes; a caller that needs
+# a different pace can set it again afterwards.
+#
+# The route starts (in space) and ends docked at Kolan, so a caller can pick up
+# from the Spaceport afterwards. Invoke it from another scenario with
+# `action = "call"`, `scenario = "sanddown_medical_route"`. Kolan (stellar
+# 0xCA) has both a bar and a trade center; Kiniké is addressed by resource id
+# (0xC9 = 201) because its raw MacRoman name cannot round-trip through the
+# probe's UTF-8 JSON. Each circuit buys Medical Supplies (commodity 2) cheap
+# at Kolan, sells them high at Kiniké, and returns. The escort payroll
+# (Player_ProcessEscortPayroll, 1500 per Terrapin per departure) is pre-funded
+# by selling a few tons back at Kolan before each launch, so the fleet cannot go
+# unpaid and defect.
 
-# Create a pilot through the normal dialogs, accepting their default values.
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "main_menu" }
-
+# Run at x100 so the automated landings and waits complete in reasonable wall
+# time; accelerated audio is suppressed.
 [[steps]]
 action = "command"
 cmd = "accelerate"
@@ -40,123 +32,9 @@ enabled = true
 speed_multiplier = 100
 suppress_audio = true
 
-[[steps]]
-action = "click"
-element = "new_pilot"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "ui_dialog_ditl_3102" }
-
-[[steps]]
-action = "click"
-element = "ok"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "ui_dialog_ditl_3001" }
-
-[[steps]]
-action = "click"
-element = "ok"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "main_menu", "state.game_active" = true }
-
-[[steps]]
-action = "click"
-element = "enter_ship"
-
-[[steps]]
-action = "wait"
-expect = { "state.system" = "Tichel" }
-
-# Refuse tutorial 001 at Viking so the Barry chain never arms. Its availability
-# expression is '!(b9200 | b9215)'; declining runs on_refuse = 'b9215'.
-[[steps]]
-action = "command"
-cmd = "land_at"
-target = "Viking"
-timeout_ms = 180000
-
-[[steps]]
-action = "wait"
-expect = { "automation.phase" = "complete", "ui.window" = "mission_offer" }
-timeout_ms = 180000
-
-[[steps]]
-action = "screenshot"
-name = "tutorial-001-offer"
-
-[[steps]]
-action = "click"
-element = "decline"
-
-# Declining shows mïsn 251's slot_aux_text (+0x58 = 20200) in the text
-# reader, whose button is published as `done` (not `ok`).
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "text_reader" }
-
-[[steps]]
-action = "click"
-element = "done"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "spaceport" }
-
-[[steps]]
-action = "click"
-element = "launch"
-
-# ---------------------------------------------------------------- travel legs
-# Tichel -> Sol -> Tau Ceti -> Sanddown, three single jumps on a full 300-point
-# Shuttle tank (100 per jump).
-[[steps]]
-action = "command"
-cmd = "jump_to"
-target = "Sol"
-timeout_ms = 180000
-
-[[steps]]
-action = "wait"
-expect = { "automation.phase" = "complete", "state.system" = "Sol" }
-timeout_ms = 180000
-
-[[steps]]
-action = "command"
-cmd = "jump_to"
-target = "Tau Ceti"
-timeout_ms = 180000
-
-[[steps]]
-action = "wait"
-expect = { "automation.phase" = "complete", "state.system" = "Tau Ceti" }
-timeout_ms = 180000
-
-[[steps]]
-action = "command"
-cmd = "jump_to"
-target = "Sanddown"
-timeout_ms = 180000
-
-[[steps]]
-action = "wait"
-expect = { "automation.phase" = "complete", "state.system" = "Sanddown" }
-timeout_ms = 180000
-
-[[steps]]
-action = "screenshot"
-name = "sanddown-arrival"
-
 # --------------------------------------------------- repeat 15x trade circuit
 # Land at Kolan directly so the repeated body can begin buying on the first
-# docking rather than making an empty Kiniké -> Kolan repositioning leg. The
-# Kiniké (resource 0xC9 = 201) and Kolan names are stable: Kiniké's raw MacRoman
-# resource name cannot round-trip through the probe's UTF-8 JSON, so it is
-# addressed by decimal id.
+# docking rather than making an empty Kiniké -> Kolan repositioning leg.
 [[steps]]
 action = "command"
 cmd = "land_at"
@@ -694,7 +572,7 @@ matches = { "cargo.credits" = "[1-9][0-9]{6,}" }
 action = "screenshot"
 name = "sanddown-fleet-route-complete"
 
-# Hand the running game back to a human at ordinary speed.
+# Hand gameplay back at ordinary speed; a caller may override this.
 [[steps]]
 action = "command"
 cmd = "accelerate"

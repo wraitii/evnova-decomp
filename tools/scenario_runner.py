@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
@@ -30,6 +31,209 @@ class StepFailure(ScenarioError):
         super().__init__(f"step {label}: {error}")
         self.label = label
         self.error = error
+
+
+# A called scenario (a reusable "function") may declare parameters. A
+# parameter without a default is required; ``args`` must name declared
+# parameters exactly, so typos fail instead of being silently ignored.
+_NO_DEFAULT = object()
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_MAX_CALL_DEPTH = 32
+
+
+@dataclass(frozen=True)
+class ScenarioParam:
+    name: str
+    default: object = _NO_DEFAULT
+
+    @property
+    def has_default(self) -> bool:
+        return self.default is not _NO_DEFAULT
+
+
+@dataclass
+class Scenario:
+    path: Path
+    name: str
+    steps: list[object]
+    params: tuple[ScenarioParam, ...]
+    timeout_ms: int
+    quit_on_finish: bool
+
+
+@dataclass
+class RunContext:
+    probe: Probe
+    artifacts: Path
+    base_dir: Path
+    stack: tuple[Path, ...]
+
+
+_scenario_cache: dict[Path, Scenario] = {}
+
+
+def clear_scenario_cache() -> None:
+    """Drop parsed-scenario state (tests that rewrite a file between loads)."""
+    _scenario_cache.clear()
+
+
+def _parse_params(raw: object, path: Path) -> tuple[ScenarioParam, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ScenarioError(f"{path}: params must be an array of tables")
+    params: list[ScenarioParam] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw, 1):
+        if not isinstance(entry, dict):
+            raise ScenarioError(f"{path}: params[{index}] must be a table")
+        unknown = set(entry) - {"name", "default"}
+        if unknown:
+            raise ScenarioError(
+                f"{path}: params[{index}] unknown field(s): {', '.join(sorted(unknown))}"
+            )
+        name = entry.get("name")
+        if not isinstance(name, str) or not _IDENTIFIER.fullmatch(name):
+            raise ScenarioError(f"{path}: params[{index}] has an invalid name")
+        if name in seen:
+            raise ScenarioError(f"{path}: duplicate param {name!r}")
+        seen.add(name)
+        params.append(ScenarioParam(name, entry.get("default", _NO_DEFAULT)))
+    return tuple(params)
+
+
+def load_scenario(path: Path) -> Scenario:
+    """Parse and validate a scenario or callable fragment TOML file."""
+    resolved = path.resolve()
+    cached = _scenario_cache.get(resolved)
+    if cached is not None:
+        return cached
+    document = tomllib.loads(resolved.read_text(encoding="utf-8"))
+    if document.get("version") != 1:
+        raise ScenarioError(f"{resolved}: scenario version must be 1")
+    name = document.get("name")
+    steps = document.get("steps")
+    if not isinstance(name, str) or not name or not isinstance(steps, list):
+        raise ScenarioError(f"{resolved}: scenario requires a name and [[steps]]")
+    quit_on_finish = document.get("quit_on_finish", False)
+    if not isinstance(quit_on_finish, bool):
+        raise ScenarioError(f"{resolved}: quit_on_finish must be true or false")
+    defaults = document.get("defaults", {})
+    if not isinstance(defaults, dict):
+        raise ScenarioError(f"{resolved}: defaults must be a table")
+    scenario = Scenario(
+        path=resolved,
+        name=name,
+        steps=steps,
+        params=_parse_params(document.get("params"), resolved),
+        timeout_ms=int(defaults.get("timeout_ms", 30_000)),
+        quit_on_finish=quit_on_finish,
+    )
+    _scenario_cache[resolved] = scenario
+    return scenario
+
+
+def resolve_scenario_path(reference: str, *base_dirs: Path) -> Path:
+    """Resolve a ``call`` reference against the caller's search directories.
+
+    The caller's own directory is tried first, then (for nested fragments)
+    the root scenario's directory; the first existing match wins. Without a
+    match the primary candidate is returned so the error names a real path.
+    """
+    candidate = Path(reference)
+    if candidate.suffix != ".toml":
+        candidate = candidate.with_name(candidate.name + ".toml")
+    if candidate.is_absolute():
+        return candidate.resolve()
+    resolved = [(base_dir / candidate).resolve() for base_dir in base_dirs]
+    for path in resolved:
+        if path.exists():
+            return path
+    return resolved[0] if resolved else candidate.resolve()
+
+
+def bind_args(scenario: Scenario, args: dict[str, object]) -> dict[str, object]:
+    """Merge call arguments over the callee's defaults, rejecting surprises."""
+    declared = {param.name for param in scenario.params}
+    unknown = set(args) - declared
+    if unknown:
+        raise ScenarioError(
+            f"call to {scenario.path}: unknown argument(s): {', '.join(sorted(unknown))}"
+        )
+    bound: dict[str, object] = {}
+    missing: list[str] = []
+    for param in scenario.params:
+        if param.name in args:
+            bound[param.name] = args[param.name]
+        elif param.has_default:
+            bound[param.name] = param.default
+        else:
+            missing.append(param.name)
+    if missing:
+        raise ScenarioError(
+            f"call to {scenario.path}: missing required argument(s): "
+            f"{', '.join(sorted(missing))}"
+        )
+    return bound
+
+
+_PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+_PLACEHOLDER_WHOLE = re.compile(r"^\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$")
+
+
+def _placeholder_value(name: str, params: dict[str, object], source: Path) -> object:
+    if name not in params:
+        declared = ", ".join(sorted(params)) or "<none>"
+        raise ScenarioError(
+            f"{source}: undefined parameter {name!r} (available: {declared})"
+        )
+    return params[name]
+
+
+def substitute(value: object, params: dict[str, object], source: Path) -> object:
+    """Replace ``{{ name }}`` placeholders throughout a step tree.
+
+    A string that is exactly one placeholder takes the parameter's own type
+    (so numeric/boolean ``expect`` values survive); embedded placeholders are
+    stringified.
+    """
+    if isinstance(value, dict):
+        result: dict[object, object] = {}
+        for key, item in value.items():
+            resolved_key = key
+            if isinstance(key, str) and "{{" in key:
+                resolved_key = _PLACEHOLDER.sub(
+                    lambda match: str(
+                        _placeholder_value(match.group(1), params, source)
+                    ),
+                    key,
+                )
+            if resolved_key in result:
+                raise ScenarioError(
+                    f"{source}: parameter substitution produced duplicate key "
+                    f"{resolved_key!r}"
+                )
+            result[resolved_key] = substitute(item, params, source)
+        return result
+    if isinstance(value, list):
+        return [substitute(item, params, source) for item in value]
+    if not isinstance(value, str):
+        return value
+    whole = _PLACEHOLDER_WHOLE.match(value)
+    if whole is not None:
+        return _placeholder_value(whole.group(1), params, source)
+    return _PLACEHOLDER.sub(
+        lambda match: str(
+            _placeholder_value(match.group(1), params, source)
+        ),
+        value,
+    )
+
+
+def substitute_steps(
+    steps: list[object], params: dict[str, object], source: Path
+) -> list[object]:
+    return [substitute(step, params, source) for step in steps]
 
 
 class Probe:
@@ -313,10 +517,9 @@ def capture_diagnostics(probe: Probe, directory: Path, step_label: str) -> None:
 
 
 def run_steps(
-    probe: Probe,
+    context: RunContext,
     steps: list[object],
     default_timeout_ms: int,
-    artifacts: Path,
     prefix: str = "",
 ) -> None:
     for index, step in enumerate(steps, 1):
@@ -325,21 +528,22 @@ def run_steps(
             if not isinstance(step, dict):
                 raise ScenarioError(f"step {label} is not a table")
             print(f"[{label}] {step.get('action', '<missing>')}", flush=True)
-            run_step(probe, step, default_timeout_ms, artifacts, label)
+            run_step(context, step, default_timeout_ms, label)
         except StepFailure:
             raise
         except Exception as error:
-            capture_diagnostics(probe, artifacts, label)
+            capture_diagnostics(context.probe, context.artifacts, label)
             raise StepFailure(label, error) from error
 
 
 def run_step(
-    probe: Probe,
+    context: RunContext,
     step: dict[str, object],
     default_timeout_ms: int,
-    artifacts: Path,
     step_label: str,
 ) -> None:
+    probe = context.probe
+    artifacts = context.artifacts
     action = step.get("action")
     common = {"action", "trigger", "trigger_not"}
     allowed = {
@@ -352,6 +556,7 @@ def run_step(
         "screenshot": {"name"},
         "repeat": {"count", "steps", "until"},
         "decline_mission": {"timeout_ms", "settle_ms"},
+        "call": {"scenario", "args"},
         "quit": set(),
     }
     if action not in allowed:
@@ -453,10 +658,9 @@ def run_step(
         for iteration in range(1, count + 1):
             print(f"[{step_label}] repeat {iteration}/{count}", flush=True)
             run_steps(
-                probe,
+                context,
                 nested,
                 default_timeout_ms,
-                artifacts,
                 f"{step_label}.{iteration}",
             )
             if until is not None:
@@ -468,6 +672,41 @@ def run_step(
                         flush=True,
                     )
                     break
+    elif action == "call":
+        reference = step.get("scenario")
+        args = step.get("args", {})
+        if not isinstance(reference, str) or not reference:
+            raise ScenarioError("call requires a non-empty scenario")
+        if not isinstance(args, dict):
+            raise ScenarioError("call args must be a table")
+        search_dirs = [context.base_dir]
+        if context.stack:
+            search_dirs.append(context.stack[0].parent)
+        target = resolve_scenario_path(reference, *search_dirs)
+        if target in context.stack:
+            chain = " -> ".join(path.name for path in (*context.stack, target))
+            raise ScenarioError(f"recursive scenario call: {chain}")
+        if len(context.stack) >= _MAX_CALL_DEPTH:
+            raise ScenarioError(
+                f"call depth exceeded {_MAX_CALL_DEPTH} at {target}"
+            )
+        called = load_scenario(target)
+        bound = bind_args(called, args)
+        steps = substitute_steps(called.steps, bound, called.path)
+        print(
+            f"[{step_label}] call {called.name!r} ({called.path})", flush=True
+        )
+        run_steps(
+            RunContext(
+                probe=probe,
+                artifacts=artifacts,
+                base_dir=called.path.parent,
+                stack=(*context.stack, target),
+            ),
+            steps,
+            called.timeout_ms,
+            f"{step_label}->{called.name}",
+        )
     elif action == "quit":
         probe.post("/probe/command", {"cmd": "quit"})
 
@@ -482,21 +721,18 @@ def main() -> int:
     probe = Probe(args.base_url)
     quit_on_finish = False
     try:
-        document = tomllib.loads(args.scenario.read_text(encoding="utf-8"))
-        if document.get("version") != 1:
-            raise ScenarioError("scenario version must be 1")
-        name = document.get("name")
-        steps = document.get("steps")
-        if not isinstance(name, str) or not name or not isinstance(steps, list):
-            raise ScenarioError("scenario requires a name and [[steps]]")
-        quit_on_finish = document.get("quit_on_finish", False)
-        if not isinstance(quit_on_finish, bool):
-            raise ScenarioError("quit_on_finish must be true or false")
-        defaults = document.get("defaults", {})
-        timeout_ms = int(defaults.get("timeout_ms", 30_000))
-        artifact_dir = args.artifacts / name
-        run_steps(probe, steps, timeout_ms, artifact_dir)
-        print(f"scenario {name!r} passed")
+        scenario = load_scenario(args.scenario)
+        quit_on_finish = scenario.quit_on_finish
+        context = RunContext(
+            probe=probe,
+            artifacts=args.artifacts / scenario.name,
+            base_dir=scenario.path.parent,
+            stack=(scenario.path,),
+        )
+        root_params = bind_args(scenario, {})
+        root_steps = substitute_steps(scenario.steps, root_params, scenario.path)
+        run_steps(context, root_steps, scenario.timeout_ms)
+        print(f"scenario {scenario.name!r} passed")
         return 0
     except (OSError, tomllib.TOMLDecodeError, urllib.error.URLError, ScenarioError, KeyError) as error:
         print(f"scenario failed: {error}", file=sys.stderr)

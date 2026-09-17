@@ -1,0 +1,60 @@
+version = 1
+name = "new-pilot"
+
+[defaults]
+timeout_ms = 30000
+
+# Shared new-pilot bootstrap: reach the main menu, create a pilot through the
+# normal dialogs accepting their defaults, enter the ship, and wait for the
+# starting system. Callers may override the starting system and acceleration.
+
+[[params]]
+name = "start_system"
+default = "Tichel"
+
+[[params]]
+name = "speed_multiplier"
+default = 100
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu" }
+
+[[steps]]
+action = "command"
+cmd = "accelerate"
+enabled = true
+speed_multiplier = "{{ speed_multiplier }}"
+suppress_audio = true
+
+[[steps]]
+action = "click"
+element = "new_pilot"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3102" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "ui_dialog_ditl_3001" }
+
+[[steps]]
+action = "click"
+element = "ok"
+
+[[steps]]
+action = "wait"
+expect = { "ui.window" = "main_menu", "state.game_active" = true }
+
+[[steps]]
+action = "click"
+element = "enter_ship"
+
+[[steps]]
+action = "wait"
+expect = { "state.system" = "{{ start_system }}" }

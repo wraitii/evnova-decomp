@@ -4,50 +4,11 @@ name = "tutorial-007-abort"
 [defaults]
 timeout_ms = 30000
 
-# Create a pilot through the normal dialogs, accepting their default values.
+# Create a pilot through the normal dialogs, accepting their default values,
+# then land where the fresh pilot starts and accept Barry's first tutorial leg.
 [[steps]]
-action = "wait"
-expect = { "ui.window" = "main_menu" }
-
-[[steps]]
-action = "command"
-cmd = "accelerate"
-enabled = true
-speed_multiplier = 100
-suppress_audio = true
-
-[[steps]]
-action = "click"
-element = "new_pilot"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "ui_dialog_ditl_3102" }
-
-[[steps]]
-action = "click"
-element = "ok"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "ui_dialog_ditl_3001" }
-
-[[steps]]
-action = "click"
-element = "ok"
-
-[[steps]]
-action = "wait"
-expect = { "ui.window" = "main_menu", "state.game_active" = true }
-
-[[steps]]
-action = "click"
-element = "enter_ship"
-
-# Land where the fresh pilot starts and accept Barry's first tutorial leg.
-[[steps]]
-action = "wait"
-expect = { "state.system" = "Tichel" }
+action = "call"
+scenario = "fragments/new_pilot"
 
 [[steps]]
 action = "validate_state"
