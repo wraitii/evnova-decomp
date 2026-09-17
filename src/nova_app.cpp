@@ -8,6 +8,7 @@
 #include "game/new_pilot_flow.hpp"
 #include "game/nova_font.hpp"
 #include "game/pilot_file.hpp"
+#include "game/player_info_window.hpp"
 #include "game/probe_state.hpp"
 #include "game/ship_ai.hpp"
 #include "game/spaceflight.hpp"
@@ -15,6 +16,8 @@
 #include "log.hpp"
 #include "pict_image.hpp"
 #include "rle_sprite_sheet.hpp"
+#include "util/color.hpp"
+#include "util/geometry.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -24,6 +27,12 @@
 #include <string_view>
 
 namespace {
+
+// The menu hover follows Sprite_TestOpaquePixelAtPoint (0x00475e20), whose
+// bounds check includes the bottom/right edge (unlike the dialogs'
+// Rect_ContainsPoint).
+using evnova::util::ContainsInclusive;
+using evnova::util::ToSdlColor;
 
 struct MenuEntry {
   GameModeAction action;
@@ -110,11 +119,6 @@ constexpr SDL_Color kMenuValueColor{248, 0, 0, SDL_ALPHA_OPAQUE};
       kFallbackMenuWidth,
       kFallbackMenuHeight,
   };
-}
-
-[[nodiscard]] bool Contains(const SDL_FRect &rect, SDL_FPoint point) {
-  return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y &&
-         point.y <= rect.y + rect.h;
 }
 
 [[nodiscard]] std::optional<NovaMenuSpriteAsset>
@@ -247,7 +251,7 @@ void PublishMainMenuProbeUi(NovaRuntime &runtime) {
                                                  std::size_t index,
                                                  SDL_FPoint point) {
   const auto rect = MenuRect(runtime, index);
-  if (!Contains(rect, point) ||
+  if (!ContainsInclusive(rect, point) ||
       index >= runtime.main_menu_sprite_assets.size() ||
       !runtime.main_menu_sprite_assets[index]) {
     return false;
@@ -467,10 +471,6 @@ struct ProgressBarPalette {
   SDL_Color inner;
   SDL_Color outer;
 };
-
-[[nodiscard]] SDL_Color ToSdlColor(const NovaRgbColor &color) {
-  return SDL_Color{color.red, color.green, color.blue, SDL_ALPHA_OPAQUE};
-}
 
 [[nodiscard]] ProgressBarPalette ProgressBarColors(const NovaRuntime &runtime) {
   if (runtime.main_menu_style) {
@@ -735,14 +735,8 @@ void UpdateMenuCenterPreview(NovaRuntime &runtime, std::uint64_t now_ms) {
 // points to a rank index (thresholds 100/200/400/800/1600/3200/6400/12800/
 // 25600) and returns the STR# 0x8a label (1-based entry rank+1).
 [[nodiscard]] std::string MenuCombatRankLabel(const game::GameState &state) {
-  std::int32_t rank = state.player_combat_rating_points > 0 ? 1 : 0;
-  constexpr std::array<std::int32_t, 9> kThresholds{
-      99, 199, 399, 799, 1599, 3199, 6399, 12799, 25599};
-  for (std::size_t i = 0; i < kThresholds.size(); ++i) {
-    if (state.player_combat_rating_points > kThresholds[i]) {
-      rank = static_cast<std::int32_t>(i) + 2;
-    }
-  }
+  const int rank =
+      game::NovaPlayerInfo_CombatRankIndex(state.player_combat_rating_points);
   auto label =
       game::NovaHud_LoadStringEntry(0x8a, static_cast<std::uint16_t>(rank + 1));
   return label.value_or(std::string());
@@ -1963,7 +1957,7 @@ NovaHud_TrackFocusHoverIndex(const NovaRuntime &runtime) {
     }
     if (runtime.main_menu_sprite_assets[index]
             ? MenuSpriteContainsOpaquePixel(runtime, index, mouse_position)
-            : Contains(MenuRect(runtime, index), mouse_position)) {
+            : ContainsInclusive(MenuRect(runtime, index), mouse_position)) {
       return kMenuEntries[index].action;
     }
   }

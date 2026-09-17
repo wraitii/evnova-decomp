@@ -1,25 +1,16 @@
 #include "rle_sprite_sheet.hpp"
 
+#include "util/byte_reader.hpp"
+
 #include <limits>
 #include <utility>
 
 namespace {
 
+using evnova::util::ReadBe16;
+using evnova::util::ReadBe32;
+
 constexpr std::size_t kHeaderSize = 0x10;
-
-[[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return std::to_integer<std::uint16_t>(bytes[offset]) << 8U |
-         std::to_integer<std::uint16_t>(bytes[offset + 1]);
-}
-
-[[nodiscard]] std::uint32_t ReadBe32(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return std::to_integer<std::uint32_t>(bytes[offset]) << 24U |
-         std::to_integer<std::uint32_t>(bytes[offset + 1]) << 16U |
-         std::to_integer<std::uint32_t>(bytes[offset + 2]) << 8U |
-         std::to_integer<std::uint32_t>(bytes[offset + 3]);
-}
 
 void StoreRgb555(std::span<std::uint8_t> rgba_pixels,
                  std::size_t pixel_index,

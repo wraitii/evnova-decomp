@@ -9,6 +9,7 @@
 #include "hud_overlay.hpp"
 #include "log.hpp"
 #include "mission_script.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "rank.hpp"
 #include "ship_ai.hpp"
@@ -27,16 +28,6 @@ namespace game {
 namespace {
 
 constexpr std::int16_t kResourceIdBase = 0x80;
-
-// Mirrors NovaRandom_Range (0x004683b0) -> integer in [0, n), drawn from
-// GameState.rng so runs stay reproducible (see ship_spawn.cpp).
-[[nodiscard]] std::int16_t RandomBelow(GameState &state, std::int32_t bound) {
-  if (bound <= 0) {
-    return 0;
-  }
-  std::uniform_int_distribution<std::int32_t> dist{0, bound - 1};
-  return static_cast<std::int16_t>(dist(state.rng));
-}
 
 // Draws the 1-based STR# entry for a mission name pool, mirroring the
 // Mission_PopulateMissionSlotFromDef (0x0043f8c0) fleet-name rolls

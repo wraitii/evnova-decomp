@@ -5,6 +5,8 @@
 #include "collision.hpp"
 #include "game_state.hpp"
 #include "impact_effects.hpp"
+#include "nova_math.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "preferences.hpp"
 #include "ship_ai.hpp"
@@ -38,12 +40,6 @@ inline constexpr float kOriginalRawCallTicks = 21.0F * 0.03F;
     return 6;
   }
   return 5;
-}
-
-[[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
-                                            const Ship &ship) {
-  return state.scenario.Ship(
-      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
 }
 
 } // namespace
@@ -275,19 +271,6 @@ const std::int16_t &BankSecondary(const GameState &state, std::int16_t bank) {
                                                kBankStride];
 }
 
-// Game-bearing in degrees (0 = up, clockwise) from (x1,y1) to (x2,y2). Local
-// twin of ship_ai.cpp's BearingDeg (GameState angle convention), wrapped to
-// [0, 360).
-float BearingDeg(float x1, float y1, float x2, float y2) {
-  const float rad = std::atan2(x2 - x1, -(y2 - y1));
-  float deg = rad * (180.0F / 3.14159265358979323846F);
-  deg = std::fmod(deg, 360.0F);
-  if (deg < 0.0F) {
-    deg += 360.0F;
-  }
-  return deg;
-}
-
 // The weapon loaded in a bank, or nullptr when the bank holds nothing valid.
 const Weapon *WeaponAt(const GameState &state, std::int16_t bank) {
   // Banks are indexed by zero-based weapon id; the scenario Weapon() lookup
@@ -387,12 +370,6 @@ void TurnShotToward(ActiveShot &shot,
 }
 
 // NovaRandom_Range([0,n)) stand-in on the GameState LCG.
-int RandomBelow(GameState &state, int n) {
-  if (n <= 0) {
-    return 0;
-  }
-  return std::uniform_int_distribution<int>{0, n - 1}(state.rng);
-}
 
 } // namespace
 

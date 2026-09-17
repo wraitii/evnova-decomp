@@ -2,11 +2,13 @@
 
 #include "asteroid.hpp"
 #include "freeflight_objects.hpp"
+#include "game_state.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "impact_effects.hpp"
 #include "mission.hpp"
 #include "mission_script.hpp"
+#include "nova_math.hpp"
 #include "outfit.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
@@ -113,16 +115,8 @@ void QuickFailPlayerDependencyMissions(GameState &state) {
   return slot >= 0 && slot < static_cast<std::int16_t>(GameState::kMaxShips);
 }
 
-// Ghidra Ship_IsShipDestroyed (0x004688e0): death timer running or armor gone.
-[[nodiscard]] bool IsDestroyed(const Ship &ship) {
-  return ship.death_timer_active > 0.0F || ship.armor_points <= 0.0F;
-}
-
-[[nodiscard]] const ShipClass *ShipClassFor(const GameState &state,
-                                            const Ship &ship) {
-  return state.scenario.Ship(
-      static_cast<std::int16_t>(ship.ship_class_id + 0x80));
-}
+// Ghidra 0x004688e0 Ship_IsShipDestroyed is game::IsShipDestroyed
+// (game_state.hpp).
 
 [[nodiscard]] bool HasGovernmentFlag(const GameState &state,
                                      const Ship &ship,
@@ -274,27 +268,6 @@ void ApplyWeaponOnHitEffects(
   }
 }
 
-// Ghidra Ship_UpdateVisualState (0x00428340) / Shot_HandleShot (0x00435830) /
-// Asteroid_UpdateSprites (0x00436910) frame selection, reused so the collision
-// mask matches the frame the renderer presents this tick. Copied from the
-// renderer's FrameForHeading (spaceflight_view.cpp) to keep the collision layer
-// free of view state.
-[[nodiscard]] int MaskFrameForHeading(float heading_radians,
-                                      int frames_per_rotation) {
-  if (frames_per_rotation <= 0) {
-    return 0;
-  }
-  constexpr float kTwoPi = 6.28318530717958647692F;
-  const float normalized = std::fmod(heading_radians + kTwoPi, kTwoPi);
-  const float sector =
-      (normalized / kTwoPi) * static_cast<float>(frames_per_rotation);
-  int frame = static_cast<int>(std::lround(sector)) % frames_per_rotation;
-  if (frame < 0) {
-    frame += frames_per_rotation;
-  }
-  return frame;
-}
-
 // The original pre-subtracts the sprite half-span from the world position
 // before Sprite_SetPositionFromCurrentFrameAnchor, whose stored frame anchor is
 // (0,0) for the multi-frame ship/asteroid sheets
@@ -380,7 +353,7 @@ void RefreshCollisionMasks(GameState &state) {
     }
     const int frame =
         row * ship_class->frames_per_rotation +
-        MaskFrameForHeading(ship.heading, ship_class->frames_per_rotation);
+        FrameForHeading(ship.heading, ship_class->frames_per_rotation);
     BindEntityMask(ship.collision_mask,
                    store.Sheet(ship_class->base_image_id, frame),
                    frame,
@@ -403,7 +376,7 @@ void RefreshCollisionMasks(GameState &state) {
     int frame = 0;
     if ((weapon->flags & 0x0001U) == 0) {
       const float bearing = std::atan2(shot.vel_x, -shot.vel_y);
-      frame = MaskFrameForHeading(bearing, frame_count);
+      frame = FrameForHeading(bearing, frame_count);
     } else {
       frame = std::clamp(shot.frame_cycle_index, 0, frame_count - 1);
     }
@@ -734,7 +707,7 @@ void ResolveShipHitFromWeapon(GameState &state,
     impact_impulse = 0;
   }
 
-  const bool was_destroyed = IsDestroyed(target);
+  const bool was_destroyed = IsShipDestroyed(target);
   // Ghidra local_12a: disabled (disabled) before this hit applied.
   const bool was_fire_restricted = NovaAiShip_IsDisabled(state, target);
 
@@ -771,7 +744,7 @@ void ResolveShipHitFromWeapon(GameState &state,
   // the timer for NPCs and the player (DeathDelay, x3 for the player via
   // g_player_death_timer_scale 0x00575378), drives the Explode1 debris cadence
   // and spawns the Explode2 finale. No explosion or timer is spawned here.
-  if (!was_destroyed && IsDestroyed(target) &&
+  if (!was_destroyed && IsShipDestroyed(target) &&
       !target.destruction_visual_triggered) {
     target.destruction_visual_triggered = true;
     NovaTargeting_ClearDestroyedShipReferences(state, target_slot);
@@ -888,7 +861,7 @@ void ResolveShipHitFromWeapon(GameState &state,
   // Player destruction arm (transition into destroyed): "ship destroyed"
   // overlay unless the disable or a Shareware-Enforcer taunt already showed,
   // plus the same flags-0x0004 mission quick-fail sweep.
-  if (target_slot == 0 && IsDestroyed(target) && !was_destroyed) {
+  if (target_slot == 0 && IsShipDestroyed(target) && !was_destroyed) {
     state.pending_ui_sounds.push_back(GameState::PendingUiSound{1, 1});
     bool taunt_shown = false;
     if (allow_aggro_updates && ValidShipSlot(attacker_ship_slot) &&
@@ -1105,7 +1078,7 @@ void ResolveShotCollisionHit(GameState &state,
   // The x87 FIST + residual/sign sequence truncates the reload toward zero.
   const auto player_aggro_delta = static_cast<std::int16_t>(
       static_cast<std::int32_t>(weapon->reload_ticks));
-  const bool target_was_destroyed = IsDestroyed(target);
+  const bool target_was_destroyed = IsShipDestroyed(target);
 
   ResolveShipHitFromWeapon(state,
                            target_slot,
@@ -1178,7 +1151,7 @@ void ResolveShotCollisionHit(GameState &state,
   // player (ai_target == 0) and that were attacking the destroyed ship queue
   // one combat chatter line unless their class is flagged mute
   // (flags_secondary 0x10). Ghidra Shot_ResolveShotCollisionHit tail.
-  if (!target_was_destroyed && IsDestroyed(target)) {
+  if (!target_was_destroyed && IsShipDestroyed(target)) {
     for (std::int16_t slot = 1;
          slot < static_cast<std::int16_t>(GameState::kMaxShips);
          ++slot) {
@@ -1587,7 +1560,7 @@ void NovaStellar_HandleShipStellarCrash(GameState &state) {
          slot < static_cast<std::int16_t>(GameState::kMaxShips);
          ++slot) {
       Ship &ship = state.ShipAt(static_cast<std::size_t>(slot));
-      if (!ship.is_active || IsDestroyed(ship)) {
+      if (!ship.is_active || IsShipDestroyed(ship)) {
         continue;
       }
       if (Stellar_ShipImmuneToStellarCrash(state, ship)) {
@@ -1649,7 +1622,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     return false;
   }
   if (!target.is_active || target.current_system_id != shot.system_id ||
-      IsDestroyed(target)) {
+      IsShipDestroyed(target)) {
     return false;
   }
   if (target.pers_def_slot == 0x3ff) {
@@ -1687,7 +1660,7 @@ bool NovaWeapon_CanProjectileHitShip(const GameState &state,
     // Clean-room guard: the original relies on shot lifetime to drop dead or
     // departed owners; the explicit checks keep stale shots from damaging
     // across systems in this simplified model.
-    if (owner.current_system_id != shot.system_id || IsDestroyed(owner)) {
+    if (owner.current_system_id != shot.system_id || IsShipDestroyed(owner)) {
       return false;
     }
     if (owner.squad_leader_ship_slot != -1 &&

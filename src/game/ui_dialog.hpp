@@ -127,4 +127,14 @@ void UiWindow_RunInteractionLoop(
     short *code_out,
     const std::function<void()> &render_background = {});
 
+// Maps one DITL item rect (top,left,bottom,right in the dialog's own space)
+// to an SDL_FRect in playfield coordinates by adding the window origin.
+[[nodiscard]] inline SDL_FRect ItemRect(const NovaDialogItem &item,
+                                        const SDL_FRect &window) {
+  return SDL_FRect{window.x + static_cast<float>(item.left),
+                   window.y + static_cast<float>(item.top),
+                   static_cast<float>(item.right - item.left),
+                   static_cast<float>(item.bottom - item.top)};
+}
+
 } // namespace game

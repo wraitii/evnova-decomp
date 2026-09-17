@@ -14,6 +14,9 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/format.hpp"
+#include "../util/math.hpp"
+#include "button_label.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -21,6 +24,8 @@
 #include "landed_window.hpp"
 #include "mission.hpp"
 #include "nova_font.hpp"
+#include "nova_random.hpp"
+#include "pict_texture.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
@@ -30,6 +35,10 @@
 #include <SDL3/SDL.h>
 
 namespace game {
+
+using evnova::util::GroupThousands;
+using evnova::util::TruncateToInt32;
+
 namespace {
 
 // ---- Resource ids ----------------------------------------------------------
@@ -229,7 +238,6 @@ constexpr std::uint16_t kMiscHostileLabel = 0xae;     // "Hostile"
 // f0/f2 indexes in the original), as 1-based entry numbers: 0x15 Close
 // Channel, 0x16 Greetings, 0x17 Request Assistance, 0x19 Beg For Mercy,
 // 0x20 Release.
-constexpr std::uint16_t kButtonLabelStr = 0x96;
 constexpr std::uint16_t kBtnCloseChannel = 0x15;
 constexpr std::uint16_t kBtnGreetings = 0x16;
 constexpr std::uint16_t kBtnRequestAssistance = 0x17;
@@ -326,22 +334,6 @@ constexpr SDL_Color kPanelGrey{128, 128, 128, 255};
 constexpr SDL_Color kStatusOrange{255, 102, 0, 255};
 constexpr SDL_Color kHostileRed{255, 0, 0, 255};
 
-// Uniform integer in [0, bound). Mirrors NovaRandom_Range using the GameState
-// PRNG so all comm rolls are reproducible per session.
-[[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
-  if (bound <= 1) {
-    return 0;
-  }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<int>{0, bound - 1}(rng));
-}
-
-// Truncate toward zero, matching the original's x87 FIST + residual/sign
-// correction (0x00482280 payment window), not round-half-up.
-[[nodiscard]] std::int32_t RoundDouble(double v) {
-  return static_cast<std::int32_t>(v);
-}
-
 // Loads one flavour variant of a ship-comm prompt (STR# 0xbb8 for
 // prompt_index < 0x26, else STR# 0xbb9 at (index*5+random)-0xbd), mirroring
 // NovaUi_LoadTravelDestinationPromptString (0x004828c0).
@@ -356,39 +348,6 @@ LoadCommPrompt(std::int16_t random_index, std::uint16_t prompt_index) {
         static_cast<std::uint16_t>(prompt_index * 5u + random_index - 0xbd);
     return NovaHud_LoadStringEntry(kPromptStrHigh, entry);
   }
-}
-
-// Loads a STR# 0x96 button label with a fallback for missing resources.
-[[nodiscard]] std::string LoadButtonLabel(std::uint16_t index) {
-  if (auto s = NovaHud_LoadStringEntry(kButtonLabelStr, index)) {
-    return *s;
-  }
-  return "?";
-}
-
-[[nodiscard]] std::string GroupedUnsigned(std::uint32_t value) {
-  std::string digits = std::to_string(value);
-  for (std::ptrdiff_t pos = static_cast<std::ptrdiff_t>(digits.size()) - 3;
-       pos > 0;
-       pos -= 3) {
-    digits.insert(static_cast<std::size_t>(pos), 1, ',');
-  }
-  return digits;
-}
-
-// Loads one PICT resource into a texture (null on failure to locate/decode).
-std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
-                                            std::uint16_t pict_id) {
-  const auto data = NovaResource_LoadPictData(pict_id);
-  if (!data) {
-    return {};
-  }
-  const auto img = Resource_LoadPictAsImage(*data);
-  if (!img) {
-    return {};
-  }
-  return SdlTexture::Create(
-      platform.renderer(), img->width, img->height, img->rgba_pixels);
 }
 
 // The ship-comm bribe cost. Mirrors the opening block of
@@ -412,10 +371,10 @@ std::unique_ptr<SdlTexture> LoadPictTexture(SdlPlatform &platform,
   upper = std::max<std::int64_t>(1, upper);
   // NovaRandom_Range is [0, bound); the decompile multiplies the raw pick:
   // `(rand(upper) * 1000 + base) * personality` -- no +1.
-  const std::int64_t pick = NovaRandomRange(rng, static_cast<int>(upper));
+  const std::int64_t pick = RandomBelow(rng, static_cast<int>(upper));
   double cost = static_cast<double>((pick * kBribeGrouping + base)) *
                 static_cast<double>(personality);
-  std::int64_t cost_int = RoundDouble(cost);
+  std::int64_t cost_int = TruncateToInt32(cost);
 
   // Cap at 1/3 of credits (only when the cap is smaller than the cost).
   const std::int64_t credit_cap = static_cast<std::int64_t>(
@@ -695,13 +654,13 @@ RunBribePayment(GameState &state, std::int32_t &bribe_cost, bool free_help) {
   if (free_help) {
     return BribeOutcome::kPaid; // local_10 bit0: granted without payment
   }
-  const bool accepted =
-      NovaRandomRange(state.rng, 100) <= kPaymentChancePercent;
+  const bool accepted = RandomBelow(state.rng, 100) <= kPaymentChancePercent;
   std::int32_t amount = bribe_cost;
   if (accepted) {
-    amount = RoundDouble(static_cast<double>(amount) * kPaymentBribeScale);
+    amount = TruncateToInt32(static_cast<double>(amount) * kPaymentBribeScale);
     amount =
-        RoundDouble(static_cast<double>(amount) * kPaymentRoundFactor) * 100;
+        TruncateToInt32(static_cast<double>(amount) * kPaymentRoundFactor) *
+        100;
   }
   if (state.player.credits < amount) {
     return BribeOutcome::kCannotAfford;
@@ -716,28 +675,17 @@ RunBribePayment(GameState &state, std::int32_t &bribe_cost, bool free_help) {
 }
 
 // The shared "how much for help?" prompt pick: personality < 0.8 -> good mood
-// (0x17), in [0.8, 1.2] -> help-if-paid (0x1c), above -> terrible mood (0x18).
-// Used by the player-fuel branch. The keep-pressing and distress branches use
-// the 0x17/0x12/0x18 ladder ("You'll have to pay me first.") instead.
-[[nodiscard]] std::optional<std::string>
-LoadMoodPrompt(std::int16_t random_index, double personality) {
+// (0x17), in [0.8, 1.2] -> `mid_msg`, above -> terrible mood (0x18). The
+// player-fuel branch passes 0x1c ("I'll help you out if you pay"), while the
+// keep-pressing and distress branches pass 0x12 ("You'll have to pay me
+// first.").
+[[nodiscard]] std::optional<std::string> LoadMoodPrompt(
+    std::int16_t random_index, double personality, std::uint16_t mid_msg) {
   if (personality < kPersonalityMoodLow) {
     return LoadCommPrompt(random_index, kMsgGoodMood);
   }
   if (personality <= kPersonalityMoodHigh) {
-    return LoadCommPrompt(random_index, kMsgHelpIfPay);
-  }
-  return LoadCommPrompt(random_index, kMsgTerribleMood);
-}
-
-// The 0x17/0x12/0x18 ladder used by the keep-pressing and distress branches.
-[[nodiscard]] std::optional<std::string>
-LoadMoodPromptPayFirst(std::int16_t random_index, double personality) {
-  if (personality < kPersonalityMoodLow) {
-    return LoadCommPrompt(random_index, kMsgGoodMood);
-  }
-  if (personality <= kPersonalityMoodHigh) {
-    return LoadCommPrompt(random_index, kMsgPayFirst);
+    return LoadCommPrompt(random_index, mid_msg);
   }
   return LoadCommPrompt(random_index, kMsgTerribleMood);
 }
@@ -862,7 +810,7 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
               70,
               12,
               kTitle,
-              GroupedUnsigned(static_cast<std::uint32_t>(
+              GroupThousands(static_cast<std::uint32_t>(
                   std::max(0, ship_class.escort_upgrade_cost))) +
                   " " +
                   (ship_class.escort_upgrade_cost == 1 ? "credit" : "credits"));
@@ -886,7 +834,7 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
                 70,
                 28,
                 kTitle,
-                GroupedUnsigned(static_cast<std::uint32_t>(
+                GroupThousands(static_cast<std::uint32_t>(
                     std::max(0, ship_class.escort_sell_value))) +
                     " " +
                     (ship_class.escort_sell_value == 1 ? "credit" : "credits"));
@@ -904,7 +852,7 @@ void DrawEscortManagementDialog(SdlPlatform &platform,
               30,
               42,
               kTitle,
-              GroupedUnsigned(static_cast<std::uint32_t>(
+              GroupThousands(static_cast<std::uint32_t>(
                   std::max(std::int32_t{0}, daily_cost))) +
                   " " + (daily_cost == 1 ? "credit" : "credits") + " " +
                   NovaHud_LoadStringEntry(kMiscStr, 0x10b).value_or("per day"));
@@ -1157,16 +1105,15 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
   const bool free_help = govt != nullptr && (govt->scan_mask_short & 0x10) != 0;
 
   // Per-launch random flavour index (g_travel_interaction_random_index).
-  const std::int16_t random_index = NovaRandomRange(state.rng, 5);
+  const std::int16_t random_index = RandomBelow(state.rng, 5);
 
   // Ship "personality" factor (DAT_007d17ec): (rand(0x29)+0x50)*0.01 with a
   // 1-in-5 -0.5 / further 1-in-5 +0.5 mood swing.
-  float personality =
-      static_cast<float>(NovaRandomRange(state.rng, 0x29) + 0x50) *
-      kPersonalityStep;
-  if (NovaRandomRange(state.rng, 5) == 0) {
+  float personality = static_cast<float>(RandomBelow(state.rng, 0x29) + 0x50) *
+                      kPersonalityStep;
+  if (RandomBelow(state.rng, 5) == 0) {
     personality -= kPersonalityMoodSwing;
-  } else if (NovaRandomRange(state.rng, 5) == 0) {
+  } else if (RandomBelow(state.rng, 5) == 0) {
     personality += kPersonalityMoodSwing;
   }
 
@@ -1357,8 +1304,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
       // 0x13 refusal, 0x17/0x12/0x18 mood ladder, outcomes 0x14 re-hired / 0x1e
       // hostile / 0xc can't-afford).
       if (target.defense_fleet_home_stellar_id == -1 && bribe_offered) {
-        status =
-            LoadMoodPromptPayFirst(random_index, personality).value_or(status);
+        status = LoadMoodPrompt(random_index, personality, kMsgPayFirst)
+                     .value_or(status);
         const BribeOutcome outcome =
             RunBribePayment(state, bribe_cost, free_help);
         if (outcome == BribeOutcome::kPaid) {
@@ -1413,7 +1360,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
         if (govt_aid_flag) {
           status = LoadCommPrompt(random_index, kMsgDreams).value_or(status);
         } else if (target.ai_behavior_code < 5) {
-          status = LoadMoodPrompt(random_index, personality).value_or(status);
+          status = LoadMoodPrompt(random_index, personality, kMsgHelpIfPay)
+                       .value_or(status);
           const BribeOutcome outcome =
               RunBribePayment(state, bribe_cost, free_help);
           if (outcome == BribeOutcome::kPaid) {
@@ -1452,8 +1400,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
         status = LoadCommPrompt(random_index, kMsgRatherNot).value_or(status);
       } else if (behavior == 2 && target.ship_instance_id % 3 == 0 &&
                  target.faction_or_government_id == -1) {
-        status =
-            LoadMoodPromptPayFirst(random_index, personality).value_or(status);
+        status = LoadMoodPrompt(random_index, personality, kMsgPayFirst)
+                     .value_or(status);
         const BribeOutcome outcome =
             RunBribePayment(state, bribe_cost, free_help);
         if (outcome == BribeOutcome::kPaid) {
@@ -1466,8 +1414,8 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
               LoadCommPrompt(random_index, kMsgCantAfford).value_or(status);
         }
       } else if (behavior == 3 || behavior == 4) {
-        status =
-            LoadMoodPromptPayFirst(random_index, personality).value_or(status);
+        status = LoadMoodPrompt(random_index, personality, kMsgPayFirst)
+                     .value_or(status);
         const BribeOutcome outcome =
             RunBribePayment(state, bribe_cost, free_help);
         if (outcome == BribeOutcome::kPaid) {

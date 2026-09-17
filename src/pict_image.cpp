@@ -1,5 +1,6 @@
 #include "pict_image.hpp"
 #include "log.hpp"
+#include "util/byte_reader.hpp"
 
 #include <array>
 #include <cstddef>
@@ -10,12 +11,7 @@
 
 namespace {
 
-[[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return static_cast<std::uint16_t>(
-      (std::to_integer<std::uint16_t>(bytes[offset]) << 8U) |
-      std::to_integer<std::uint16_t>(bytes[offset + 1]));
-}
+using evnova::util::ReadBe16;
 
 // Ghidra DAT_00570344: operand-size table consumed by the
 // Pict_ParseDirectBitsRect opcode walker. Entry n is the payload byte count

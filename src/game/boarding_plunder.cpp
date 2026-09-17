@@ -16,6 +16,8 @@
 #include "../pict_image.hpp"
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/format.hpp"
+#include "button_label.hpp"
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -23,7 +25,9 @@
 #include "mission.hpp"
 #include "mission_script.hpp"
 #include "nova_font.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
+#include "pict_texture.hpp"
 #include "scenario_data.hpp"
 #include "services_buttons.hpp"
 #include "ship_ai.hpp"
@@ -34,6 +38,9 @@
 #include <SDL3/SDL.h>
 
 namespace game {
+
+using evnova::util::GroupThousands;
+
 namespace {
 
 // ---- Decoded binary constants (doubles in the original's data pool) -------
@@ -55,19 +62,6 @@ constexpr std::int16_t kMarinesModType = 25;
 constexpr int kOutfitModPairCount = 4; // ModType1-4 / ModVal1-4
 
 constexpr std::size_t kEscortCap = 6; // Ship_CanPlayerHaveMoreEscorts soft cap
-
-// Uniform integer in [0, bound). Mirrors NovaRandom_Range (0x004683b0) drawn
-// from GameState's PRNG, per the negotiation-dialog convention. Divergence:
-// the original reseeds its LCG on bound == 0 and returns an undefined
-// register; the port deterministically returns 0 (affects only the fuel roll
-// for classes with fuel_max < 10, whose offer is 0 either way).
-[[nodiscard]] std::int16_t NovaRandomRange(std::mt19937 &rng, int bound) {
-  if (bound <= 1) {
-    return 0;
-  }
-  return static_cast<std::int16_t>(
-      std::uniform_int_distribution<int>{0, bound - 1}(rng));
-}
 
 // The original's float-to-int conversions in the boarding/plunder paths use
 // the x87 FIST + residual/sign correction (0x00484230, 0x00482940,
@@ -130,7 +124,7 @@ struct OutfitModPair {
 [[nodiscard]] std::int32_t RollCredits(GameState &state, double v) {
   if (kCreditRollThreshold < v) {
     const int bound = static_cast<int>(std::ceil(v));
-    const int roll = NovaRandomRange(state.rng, bound);
+    const int roll = RandomBelow(state.rng, bound);
     const double raw = (static_cast<double>(roll) + v) * kCreditScale;
     return TruncToInt(static_cast<float>(raw));
   }
@@ -222,7 +216,7 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
   if ((booty_flags & 0xffbfU) != 0) {
     bool accepted = false;
     do {
-      options.cargo_type = NovaRandomRange(state.rng, 7);
+      options.cargo_type = RandomBelow(state.rng, 7);
       if (options.cargo_type >= 0 && options.cargo_type <= 5 &&
           (booty_flags & (1U << static_cast<unsigned>(options.cargo_type))) !=
               0U) {
@@ -238,7 +232,7 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
     } else {
       const std::int16_t half = static_cast<std::int16_t>((holds + 1) / 2);
       options.cargo_quantity =
-          static_cast<std::int16_t>(NovaRandomRange(state.rng, half) + half);
+          static_cast<std::int16_t>(RandomBelow(state.rng, half) + half);
     }
   } else {
     options.cargo_type = -1;
@@ -273,7 +267,7 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
     } else {
       // Rejection-sample a stocked bank with the same predicate.
       while (true) {
-        const int bank = NovaRandomRange(state.rng, 0x100);
+        const int bank = RandomBelow(state.rng, 0x100);
         const std::int16_t stock =
             target.npc_weapon_secondary_count_by_class[static_cast<std::size_t>(
                 bank)];
@@ -295,7 +289,7 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
     options.fuel_quantity = 0;
   } else {
     options.fuel_quantity = static_cast<std::int16_t>(
-        NovaRandomRange(state.rng, target_class->base_fuel / kFuelBinSize) *
+        RandomBelow(state.rng, target_class->base_fuel / kFuelBinSize) *
         kFuelBinSize);
   }
 
@@ -369,7 +363,7 @@ BoardingPlunderOptions Boarding_BuildOptions(GameState &state) {
   }
 
   // ±5 noise, then clamp to [1, 75].
-  odds += static_cast<float>(5 - NovaRandomRange(state.rng, 0xb));
+  odds += static_cast<float>(5 - RandomBelow(state.rng, 0xb));
   if (odds < 1.0F) {
     odds = 1.0F;
   }
@@ -795,7 +789,6 @@ constexpr std::uint16_t kCaptureBtnEscort = 0x2e; // STR# 0x96 1-based entry
 
 // STR# 0x96 button-label pool: Abort/Cargo/Credits/Ammo/Energy/Capture Ship.
 // 1-based entry numbers, as passed to Resource_LoadStringEntry.
-constexpr std::uint16_t kButtonLabelStr = 0x96;
 constexpr std::uint16_t kBtnAbort = 0x23;
 constexpr std::uint16_t kBtnCargo = 0x28;
 constexpr std::uint16_t kBtnCredits = 0x29;
@@ -895,51 +888,12 @@ constexpr SDL_Color kBoardValue{255, 255, 255, 255};
 constexpr SDL_Color kBoardDim{128, 128, 128, 255};
 constexpr SDL_Color kBoardPanelBg{0, 0, 0, 255};
 
-// Loads one PICT into a texture (null on failure), mirroring the other modal
-// dialogs.
-std::unique_ptr<SdlTexture> LoadBoardPictTexture(SdlPlatform &platform,
-                                                 std::uint16_t pict_id) {
-  const auto data = NovaResource_LoadPictData(pict_id);
-  if (!data) {
-    return {};
-  }
-  const auto img = Resource_LoadPictAsImage(*data);
-  if (!img) {
-    return {};
-  }
-  return SdlTexture::Create(
-      platform.renderer(), img->width, img->height, img->rgba_pixels);
-}
-
-// Loads a STR# 0x96 button label with a fallback.
-std::string LoadBoardButtonLabel(std::uint16_t index) {
-  if (auto s = NovaHud_LoadStringEntry(kButtonLabelStr, index)) {
-    return *s;
-  }
-  return "?";
-}
-
 // Loads a STR# 0x7d2 overlay fragment with a fallback.
 std::string LoadBoardMiscString(std::uint16_t index, std::string fallback) {
   if (auto s = NovaHud_LoadStringEntry(kMiscStr, index)) {
     return *s;
   }
   return fallback;
-}
-
-// Ghidra DrawContext_DrawGroupedUInt: decimal digits grouped in threes with
-// commas, e.g. 26600 -> "26,600".
-std::string GroupedUInt(std::int32_t value) {
-  std::string digits = std::to_string(value);
-  std::string out;
-  out.reserve(digits.size() + digits.size() / 3);
-  for (std::size_t i = 0; i < digits.size(); ++i) {
-    if (i > 0 && (digits.size() - i) % 3 == 0) {
-      out.push_back(',');
-    }
-    out.push_back(digits[i]);
-  }
-  return out;
 }
 
 // The STR# pool stores "credits" lowercase; the shipped window draws the row
@@ -990,27 +944,27 @@ std::array<BoardButton, 6> BuildBoardButtons() {
       BoardButton{abs(91.0F, 166.0F, 126.0F, 25.0F),
                   kActionAbort,
                   kBtnAbort,
-                  LoadBoardButtonLabel(kBtnAbort)},
+                  LoadButtonLabel(kBtnAbort)},
       BoardButton{abs(110.0F, 110.0F, 89.0F, 25.0F),
                   kActionCargo,
                   kBtnCargo,
-                  LoadBoardButtonLabel(kBtnCargo)},
+                  LoadButtonLabel(kBtnCargo)},
       BoardButton{abs(35.0F, 138.0F, 89.0F, 25.0F),
                   kActionCredits,
                   kBtnCredits,
-                  LoadBoardButtonLabel(kBtnCredits)},
+                  LoadButtonLabel(kBtnCredits)},
       BoardButton{abs(204.0F, 110.0F, 89.0F, 25.0F),
                   kActionAmmo,
                   kBtnAmmo,
-                  LoadBoardButtonLabel(kBtnAmmo)},
+                  LoadButtonLabel(kBtnAmmo)},
       BoardButton{abs(16.0F, 110.0F, 89.0F, 25.0F),
                   kActionEnergy,
                   kBtnEnergy,
-                  LoadBoardButtonLabel(kBtnEnergy)},
+                  LoadButtonLabel(kBtnEnergy)},
       BoardButton{abs(129.0F, 138.0F, 146.0F, 25.0F),
                   kActionCapture,
                   kBtnCaptureShip,
-                  LoadBoardButtonLabel(kBtnCaptureShip)},
+                  LoadButtonLabel(kBtnCaptureShip)},
   };
 }
 
@@ -1201,7 +1155,7 @@ void DrawBoardWindow(SdlPlatform &platform,
     draw_text(vx, py + 42.0F, none, kBoardDim);
   } else {
     // DrawGroupedUInt: thousands-separated, e.g. "26,600".
-    draw_text(vx, py + 42.0F, GroupedUInt(options.credits), kBoardValue);
+    draw_text(vx, py + 42.0F, GroupThousands(options.credits), kBoardValue);
   }
   if (options.ammo_bank == -1) {
     draw_text(vx, py + 56.0F, none, kBoardDim);
@@ -1365,14 +1319,14 @@ RunCaptureDecisionDialog(SdlPlatform &platform,
   const std::array<CaptureButton, 2> buttons{
       CaptureButton{abs(55.0F, 51.0F, 146.0F, 26.0F),
                     1,
-                    LoadBoardButtonLabel(kCaptureBtnMyShip)},
+                    LoadButtonLabel(kCaptureBtnMyShip)},
       CaptureButton{abs(55.0F, 83.0F, 146.0F, 26.0F),
                     2,
-                    LoadBoardButtonLabel(kCaptureBtnEscort)},
+                    LoadButtonLabel(kCaptureBtnEscort)},
   };
   const SDL_FRect text_panel = abs(9.0F, 6.0F, 238.0F, 40.0F);
 
-  auto backdrop = LoadBoardPictTexture(platform, kCaptureBackdropPict);
+  auto backdrop = LoadPictTexture(platform, kCaptureBackdropPict);
   if (!backdrop) {
     NovaLog::Todo("board: capture-dialog backdrop PICT 0x2144 unavailable; "
                   "drawing a bordered placeholder");
@@ -1545,7 +1499,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
   // multiplies it; the self-destruct re-roll (armed by a loot action) fires
   // when rand(100) <= panic, exactly once on the loop iteration after the
   // action (the original clears its latch each iteration).
-  std::int32_t panic = NovaRandomRange(state.rng, 0x1a) + 0xf;
+  std::int32_t panic = RandomBelow(state.rng, 0x1a) + 0xf;
 
   BoardingPlunderOptions options = Boarding_BuildOptions(state);
   NovaLog::Info(
@@ -1571,7 +1525,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
   }
 
   // ---- Assets -------------------------------------------------------------
-  auto backdrop = LoadBoardPictTexture(platform, kBoardBackdropPict);
+  auto backdrop = LoadPictTexture(platform, kBoardBackdropPict);
   if (!backdrop) {
     NovaLog::Todo("board: window backdrop PICT 0x2143 unavailable; drawing a "
                   "bordered placeholder");
@@ -1686,7 +1640,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
     // the original rolls exactly once per loot action (its latch clears each
     // loop iteration), so one rand(100) <= panic check here.
     if (panic_armed) {
-      const std::int16_t trip_roll = NovaRandomRange(state.rng, 100);
+      const std::int16_t trip_roll = RandomBelow(state.rng, 100);
       if (trip_roll <= panic) {
         NovaLog::Info("board: self-destruct tripped — roll {} <= panic {}",
                       trip_roll,
@@ -1764,7 +1718,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
         // "You stole all the <credits> credits from this ship."
         const std::string text =
             LoadBoardMiscString(kMiscStoleAll, "You stole all the") + " " +
-            GroupedUInt(options.credits) + " " +
+            GroupThousands(options.credits) + " " +
             Capitalized(LoadBoardMiscString(kMiscCreditsLabel, "credits")) +
             " " + LoadBoardMiscString(kMiscFromThisShip, "from this ship.");
         NovaHud_ShowOverlayMessage(state, text);
@@ -1875,7 +1829,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
           options.capture_odds_percent = -1;
         }
       }
-      const std::int16_t roll = NovaRandomRange(state.rng, 100);
+      const std::int16_t roll = RandomBelow(state.rng, 100);
       const bool auto_fail = options.capture_odds_percent < 1;
       NovaLog::Info("board: capture roll {} vs odds {}{}",
                     roll,
@@ -1891,7 +1845,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
         result.capture_attempt_failed = true;
       } else {
         // 1-in-10 "Oops" self-destruct roll.
-        if (NovaRandomRange(state.rng, 10) == 0) {
+        if (RandomBelow(state.rng, 10) == 0) {
           NovaLog::Info("board: capture Oops roll hit — self-destruct");
           close = true;
           close_reason = "capture Oops self-destruct";
@@ -2162,7 +2116,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
 
   // +-10 noise (10 - rand(0x15)) and clamp to [10, 100]; every consumer
   // sign-extends the low 16 bits, as the original's (short) casts do.
-  odds += 10 - NovaRandomRange(state.rng, 0x15);
+  odds += 10 - RandomBelow(state.rng, 0x15);
   if (static_cast<std::int16_t>(odds) < 10) {
     odds = 10;
   }
@@ -2198,7 +2152,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
       victim_total = victim_capacity;
     }
     while (boarder_free > 0 && victim_total > 0) {
-      const int bin = NovaRandomRange(state.rng, 6);
+      const int bin = RandomBelow(state.rng, 6);
       const std::int16_t victim_bin =
           state.inventory.cargo_bins[static_cast<std::size_t>(bin)];
       if (victim_bin <= 0) {
@@ -2253,7 +2207,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
     if (transferred > 0 || credits_taken > 0) {
       std::string text;
       if (transferred > 0) {
-        text += GroupedUInt(transferred);
+        text += GroupThousands(transferred);
         text += ' ';
         text +=
             LoadBoardMiscString(transferred == 1 ? kMiscTonWord : kMiscTonsWord,
@@ -2274,7 +2228,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
         if (transferred < 1) {
           text.clear();
         }
-        text += GroupedUInt(credits_taken);
+        text += GroupThousands(credits_taken);
         text += ' ';
         text += credits_taken < 2 ? "credit" : "credits";
         text += ' ';
@@ -2314,7 +2268,7 @@ void Boarding_BoardShipAndTransferCargo(GameState &state,
   if (static_cast<std::int16_t>(odds) < 0x29) {
     convert = state.cheat_mode_active;
   } else {
-    const int roll = NovaRandomRange(state.rng, 0x65);
+    const int roll = RandomBelow(state.rng, 0x65);
     convert = !(static_cast<double>(static_cast<std::int16_t>(odds)) * 0.5 <
                 static_cast<double>(roll));
     if (!convert) {

@@ -4,6 +4,7 @@
 #include "../log.hpp"
 #include "../pict_image.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/geometry.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "landed_window.hpp"
@@ -19,6 +20,9 @@
 #include <optional>
 
 namespace game {
+
+using evnova::util::Contains;
+
 namespace {
 
 constexpr std::uint16_t kReaderDialogId = 0xbbb;
@@ -30,11 +34,6 @@ constexpr float kTextSize = 9.0F;
 constexpr float kLineHeight = 11.0F;
 constexpr float kFirstLineOffset = 11.0F;
 constexpr float kTextInset = 6.0F;
-
-[[nodiscard]] bool Contains(const SDL_FRect &rect, SDL_FPoint point) {
-  return point.x >= rect.x && point.x < rect.x + rect.w && point.y >= rect.y &&
-         point.y < rect.y + rect.h;
-}
 
 } // namespace
 

@@ -5,6 +5,7 @@
 #include "../pict_image.hpp"
 #include "../pixpat_image.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/format.hpp"
 #include "escort_commands.hpp"
 #include "hud_overlay.hpp"
 #include "nova_font.hpp"
@@ -24,6 +25,9 @@
 #include <string>
 
 namespace game {
+
+using evnova::util::GroupThousands;
+
 // The HudRenderer owns a screen-font cache (NovaFontCache); its destructor must
 // live where that type is complete, so it is defined here rather than inline.
 HudRenderer::~HudRenderer() = default;
@@ -423,20 +427,6 @@ PanelTextWidth(NovaFontCache &font, float font_size, std::string_view text) {
 // tests system visibility and the ship-to-system-centre distance.
 // TODO(decomp): re-derive the exact table/endpoint once SystemDef adjacency
 // typing is settled.
-// Thousands-grouped credits (DrawContext_DrawGroupedUInt).
-[[nodiscard]] std::string GroupedNumber(std::int32_t value) {
-  std::string digits = std::to_string(value);
-  std::string out;
-  out.reserve(digits.size() + digits.size() / 3);
-  for (std::size_t i = 0; i < digits.size(); ++i) {
-    if (i > 0 && (digits.size() - i) % 3 == 0) {
-      out.push_back(',');
-    }
-    out.push_back(digits[i]);
-  }
-  return out;
-}
-
 void HudRenderer::Draw(SdlPlatform &platform,
                        const GameState &state,
                        bool force_empty_radar) {
@@ -1132,7 +1122,7 @@ void HudRenderer::DrawCargoPanel(SdlPlatform &platform,
                   font_size,
                   left + 87.0F,
                   top + 82.0F,
-                  GroupedNumber(state.player.credits),
+                  GroupThousands(state.player.credits),
                   value_color);
 }
 

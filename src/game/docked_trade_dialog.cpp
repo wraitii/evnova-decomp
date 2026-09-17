@@ -6,6 +6,8 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../util/color.hpp"
+#include "button_label.hpp"
 #include "hud_overlay.hpp"
 #include "nova_font.hpp"
 #include "outfit.hpp"
@@ -24,6 +26,9 @@
 #include <string_view>
 
 namespace game {
+
+using evnova::util::ToSdlColor;
+
 namespace {
 
 // ---------------------------------------------------------------------------
@@ -43,20 +48,9 @@ constexpr SDL_Color kDefaultText{255, 255, 255, SDL_ALPHA_OPAQUE};
 // NovaUi_InitThreeStateButtonArt (0x004a2f50) fills from STR# 0x96 entries
 // 1..0x3d. NovaUi_TradeCenterDrawButtons indexes it with DAT_007d82e8 =
 // {4, 1, 2}, i.e. the 1-based STR# entries below: "Done", "Buy", "Sell".
-constexpr std::uint16_t kButtonLabelResource = 0x96;
 constexpr std::uint16_t kLeaveLabelEntry = 5; // table index 4
 constexpr std::uint16_t kBuyLabelEntry = 2;   // table index 1
 constexpr std::uint16_t kSellLabelEntry = 3;  // table index 2
-
-[[nodiscard]] constexpr SDL_Color ToSdlColor(NovaRgbColor color) {
-  return SDL_Color{color.red, color.green, color.blue, SDL_ALPHA_OPAQUE};
-}
-
-[[nodiscard]] std::string ButtonLabel(std::uint16_t entry,
-                                      std::string_view fallback) {
-  return NovaHud_LoadStringEntry(kButtonLabelResource, entry)
-      .value_or(std::string{fallback});
-}
 
 struct TradeCenterLayout {
   SDL_FRect frame{};
@@ -396,19 +390,19 @@ void DrawTradeCenterScreen(SdlPlatform &platform,
                   font_cache,
                   button_art,
                   layout.leave,
-                  ButtonLabel(kLeaveLabelEntry, "Done"),
+                  LoadButtonLabel(kLeaveLabelEntry, "Done"),
                   true);
   DrawTradeButton(platform,
                   font_cache,
                   button_art,
                   layout.buy,
-                  ButtonLabel(kBuyLabelEntry, "Buy"),
+                  LoadButtonLabel(kBuyLabelEntry, "Buy"),
                   buy_enabled);
   DrawTradeButton(platform,
                   font_cache,
                   button_art,
                   layout.sell,
-                  ButtonLabel(kSellLabelEntry, "Sell"),
+                  LoadButtonLabel(kSellLabelEntry, "Sell"),
                   sell_enabled);
 }
 

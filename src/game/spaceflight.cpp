@@ -10,6 +10,7 @@
 #include "escort_commands.hpp"
 #include "escort_formation.hpp"
 #include "flight_automation.hpp"
+#include "frame_timing.hpp"
 #include "game_state.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
@@ -20,6 +21,7 @@
 #include "mission_script.hpp"
 #include "negotiation_dialog.hpp"
 #include "nova_font.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "player_info_window.hpp"
 #include "radar_panel.hpp"
@@ -52,13 +54,8 @@ constexpr float kPlayerFireRestrictedVelocityDamp = 0.995F;
 // Frame_MeasureFrameTiming (0x00432ea0) floors ordinary spaceflight calls at
 // 21 ms and publishes elapsed_ms * 0.03 as the normalized tick scale. Raw
 // per-call mutations therefore advance at one unit per 0.63 normalized ticks.
-constexpr float kOriginalMaxRateFrameTicks = 21.0F * 0.03F;
 constexpr float kOriginalMaxRateFrameMs = 21.0F;
 constexpr float kOriginalTickMs = 1000.0F / 30.0F;
-
-constexpr float RawSpaceflightCallTicks(float elapsed_ticks) {
-  return elapsed_ticks / kOriginalMaxRateFrameTicks;
-}
 
 // Player recently-hit timer (g_player_recently_hit_timer, DAT_0073549c):
 // armed to 300 ticks when the player takes a hit, decays one tick per frame
@@ -3358,16 +3355,6 @@ void NovaShip_SteerVelocityTowardShipHeading(Ship &ship,
 
 namespace {
 
-// Mirrors the original's NovaRandom_Range(n) -> integer in [0, n) (draws from
-// GameState.rng like the other clean-room roll sites).
-std::int16_t RollRandom(GameState &state, std::int32_t n) {
-  if (n <= 0) {
-    return 0;
-  }
-  std::uniform_int_distribution<std::int32_t> dist{0, n - 1};
-  return static_cast<std::int16_t>(dist(state.rng));
-}
-
 // Outfit-def scan shared by Frame_ShouldTriggerAutoRepairTick (0x0046e540) and
 // the carried-bomb detonation scans: the original walks the four mod-type
 // words of every owned outfit (decompile `name - 0x26 + i*2`, 0x37c-byte def
@@ -3401,7 +3388,7 @@ bool Frame_ShouldTriggerAutoRepairTick(GameState &state) {
           ? kAutoRepairFrameRerollRange
           : static_cast<int>(static_cast<float>(kAutoRepairFrameRerollRange) /
                              state.last_frame_tick_scale);
-  if (RollRandom(state, roll_range) != 0) {
+  if (RandomBelow(state, roll_range) != 0) {
     return false;
   }
   if (NovaAiShip_IsDestroyed(state.player)) {
@@ -3562,9 +3549,9 @@ void DetonateCarriedBomb(GameState &state) {
         state.scenario.Ship(static_cast<std::int16_t>(p.ship_class_id + 0x80));
     const float max_armor = cls ? static_cast<float>(cls->base_armor) : 0.0F;
     const int roll =
-        RollRandom(state,
-                   static_cast<int>(max_armor * kBombDamageArmorFraction +
-                                    kBombDamageArmorAddend));
+        RandomBelow(state,
+                    static_cast<int>(max_armor * kBombDamageArmorFraction +
+                                     kBombDamageArmorAddend));
     NovaCollision_ResolveShipHitFromWeaponSlot(
         state,
         0,
@@ -3601,7 +3588,7 @@ void DetonateCarriedBomb(GameState &state) {
 // 1 -> +1, 2 -> unchanged).
 void NovaFrame_JitterPlayerStatModifiers(GameState &state) {
   for (std::size_t i = 0; i < 2; ++i) {
-    const int roll = RollRandom(state, 3);
+    const int roll = RandomBelow(state, 3);
     if (roll == 0) {
       --state.player_stat_modifier_pct[i];
     } else if (roll == 1) {
@@ -3616,7 +3603,7 @@ void NovaFrame_JitterPlayerStatModifiers(GameState &state) {
 void NovaFrame_RerollPlayerStatModifiers(GameState &state) {
   for (std::size_t i = 2; i < 4; ++i) {
     state.player_stat_modifier_pct[i] =
-        static_cast<std::int16_t>(RollRandom(state, 0x15) + 0x5a);
+        static_cast<std::int16_t>(RandomBelow(state, 0x15) + 0x5a);
   }
 }
 
@@ -3841,10 +3828,10 @@ void RespawnResetPlayerShipState(GameState &state) {
 
   // Reroll the per-class licensed availability rolls.
   for (auto &roll : state.ship_class_limit_rolls) {
-    roll = static_cast<std::int16_t>(RollRandom(state, 100) + 1);
+    roll = static_cast<std::int16_t>(RandomBelow(state, 100) + 1);
   }
   for (auto &roll : state.ship_class_threshold_rolls) {
-    roll = static_cast<std::int16_t>(RollRandom(state, 100) + 1);
+    roll = static_cast<std::int16_t>(RandomBelow(state, 100) + 1);
   }
 }
 
@@ -4013,13 +4000,13 @@ void RunPlayerEjectTransform(GameState &state) {
                     "class resolved; staying in the current class");
     } else {
       p.ship_class_id = fighter_index;
-      p.shield_points = static_cast<float>((RollRandom(state, 30) + 50) *
+      p.shield_points = static_cast<float>((RandomBelow(state, 30) + 50) *
                                            fighter->base_shield) *
                         0.01F;
-      p.armor_points = static_cast<float>((RollRandom(state, 30) + 50) *
+      p.armor_points = static_cast<float>((RandomBelow(state, 30) + 50) *
                                           fighter->base_armor) *
                        0.01F;
-      p.fuel_points = static_cast<float>((RollRandom(state, 30) + 50) *
+      p.fuel_points = static_cast<float>((RandomBelow(state, 30) + 50) *
                                          fighter->base_fuel) *
                       0.01F;
       p.timed_action_counter = -1;
@@ -4255,7 +4242,7 @@ bool PlayerTick_StatusAndOutfitEvents(GameState &state,
   } else if (state.bomb_detonation_timer < kBombDetonationTimerFloor) {
     // 0x0044da75 tail: expired timer rerolls a whole number of intervals.
     state.bomb_detonation_timer =
-        static_cast<float>(RollRandom(state, kBombDetonationRerollMax));
+        static_cast<float>(RandomBelow(state, kBombDetonationRerollMax));
   } else if (!NovaAiShip_IsDestroyed(p)) {
     state.bomb_detonation_timer += elapsed_ticks;
     if (state.bomb_detonation_timer > kBombDetonationIntervalFrames) {
@@ -4385,7 +4372,7 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
 
   // The world catches up over rand(30) + 15 elapsed game-days.
   const std::int16_t elapsed_days = static_cast<std::int16_t>(
-      RollRandom(state, kRespawnDailyUpdateRange) + kRespawnDailyUpdateBase);
+      RandomBelow(state, kRespawnDailyUpdateRange) + kRespawnDailyUpdateBase);
   for (std::int16_t day = 0; day < elapsed_days; ++day) {
     Mission_TickDailyWorldUpdate(state);
   }
@@ -4399,7 +4386,7 @@ bool PlayerTick_TimedActionTransition(GameState &state, float elapsed_ticks) {
           static_cast<std::int16_t>(p.ship_class_id + 0x80))) {
     std::string registration = cls->display_name + " ";
     for (int digit = 0; digit < 4; ++digit) {
-      registration += std::to_string(RollRandom(state, 9) + 1);
+      registration += std::to_string(RandomBelow(state, 9) + 1);
     }
     p.ship_name = registration;
   }
@@ -4861,12 +4848,12 @@ void NovaFrame_UpdateCombatChatter(GameState &state, SdlAudio &audio) {
   const std::int16_t variant = state.pending_combat_chatter_variant;
   std::int16_t selected = 0;
   if (variant < 0 || variant > 1 || (count & 1) != 0) {
-    selected = RollRandom(state, count);
+    selected = RandomBelow(state, count);
   } else if (count == 2) {
     selected = variant;
   } else {
     selected =
-        static_cast<std::int16_t>(RollRandom(state, count / 2) * 2 + variant);
+        static_cast<std::int16_t>(RandomBelow(state, count / 2) * 2 + variant);
   }
 
   const std::int16_t sound_id = static_cast<std::int16_t>(base_id + selected);

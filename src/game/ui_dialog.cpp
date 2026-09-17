@@ -2,6 +2,7 @@
 
 #include "../log.hpp"
 #include "../pict_image.hpp"
+#include "../util/geometry.hpp"
 #include "nova_font.hpp"
 
 #include <SDL3/SDL_render.h>
@@ -12,6 +13,9 @@
 #include <cmath>
 
 namespace game {
+
+using evnova::util::Contains;
+
 namespace {
 
 // The four grayscale RGBColor triples UiWindow_Draw uses for control bevels
@@ -31,18 +35,6 @@ constexpr SDL_Color kSelectionText{255, 255, 255, 255};
 constexpr float kDialogFontSize = 12.0F;
 // Popup entry height the original's popup drawer uses (0x14 units).
 constexpr float kPopupRowHeight = 20.0F;
-
-[[nodiscard]] SDL_FRect ItemRect(const NovaDialogItem &item,
-                                 const SDL_FRect &window) {
-  return SDL_FRect{window.x + static_cast<float>(item.left),
-                   window.y + static_cast<float>(item.top),
-                   static_cast<float>(item.right - item.left),
-                   static_cast<float>(item.bottom - item.top)};
-}
-
-[[nodiscard]] bool Contains(const SDL_FRect &r, float x, float y) {
-  return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-}
 
 // Centres a win_w x win_h dialog inside the playfield's on-screen rect
 // (window points), truncating the half-offsets like Dialog_CreateFromDlog.

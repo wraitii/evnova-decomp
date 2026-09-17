@@ -1,6 +1,7 @@
 #include "asteroid.hpp"
 
 #include "../log.hpp"
+#include "nova_random.hpp"
 #include "scenario_data.hpp"
 
 #include <algorithm>
@@ -9,18 +10,6 @@
 
 namespace game {
 namespace {
-
-// Mirrors the original's NovaRandom_Range(n) -> integer in [0, n), drawn from
-// GameState.rng so runs stay reproducible (the original uses the global
-// NovaRandom LCG, a deterministic warp-lock sequence). Returns the signed
-// 16-bit value the original stores into the spawn fields.
-inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
-  if (n <= 0) {
-    return 0;
-  }
-  std::uniform_int_distribution<std::int32_t> dist{0, n - 1};
-  return static_cast<std::int16_t>(dist(state.rng));
-}
 
 // Ghidra _DAT_00575298: the double 0.01 used across the asteroid spawn for
 // converting the integer random rolls into the small fractional world/pixel

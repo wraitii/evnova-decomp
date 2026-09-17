@@ -2,6 +2,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "../util/byte_reader.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -15,25 +16,14 @@
 namespace game {
 namespace {
 
+using evnova::util::ReadBe16;
+using evnova::util::ReadBeI16;
+using evnova::util::ReadCString;
+
 // Interface-layout FourCC, stored as the negative key -0x6a918b9a in the
 // scenario resource map. The archived record id is the government interface_id
 // (>= 0x80), preserving the game's write-once layout cache.
 constexpr std::uint32_t kInterfaceLayoutType = 0x956e7466U;
-
-[[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  if (offset + 2 > bytes.size()) {
-    return 0;
-  }
-  return static_cast<std::uint16_t>(
-      std::to_integer<std::uint8_t>(bytes[offset]) << 8U |
-      std::to_integer<std::uint8_t>(bytes[offset + 1]));
-}
-
-[[nodiscard]] std::int16_t ReadBeI16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return static_cast<std::int16_t>(ReadBe16(bytes, offset));
-}
 
 // Raw 32-bit colour slot word at `offset`. The archived HUD palette stores
 // each colour in a 4-byte group `00 rr gg bb` (a leading zero pad byte then
@@ -59,23 +49,6 @@ constexpr std::uint32_t kInterfaceLayoutType = 0x956e7466U;
          static_cast<std::uint32_t>(
              std::to_integer<std::uint8_t>(bytes[offset + 3]))
              << 24U;
-}
-
-// NUL-terminated C string at `offset` (bounded by the payload). The family
-// name is stored as a C string and Pascal-ized in memory; we surface it as-is.
-[[nodiscard]] std::string ReadCString(std::span<const std::byte> bytes,
-                                      std::size_t offset) {
-  if (offset >= bytes.size()) {
-    return {};
-  }
-  const auto *begin = reinterpret_cast<const char *>(bytes.data() + offset);
-  const auto max_len = bytes.size() - offset;
-  const void *nul = std::memchr(begin, '\0', max_len);
-  const std::size_t len =
-      nul == nullptr
-          ? max_len
-          : static_cast<std::size_t>(static_cast<const char *>(nul) - begin);
-  return std::string{begin, len};
 }
 
 [[nodiscard]] HudPanelRect ReadPanel(std::span<const std::byte> bytes,

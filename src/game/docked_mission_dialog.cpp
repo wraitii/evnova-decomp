@@ -9,6 +9,7 @@
 #include "../log.hpp"
 #include "../sdl_audio.hpp"
 #include "../sdl_platform.hpp"
+#include "../util/color.hpp"
 #include "hud_overlay.hpp"
 #include "hud_renderer.hpp"
 #include "mission.hpp"
@@ -35,12 +36,10 @@
 #include <vector>
 
 namespace game {
-namespace {
 
-// c\x9alr colors arrive as 8-bit RGB triples; SDL draws want SDL_Color.
-[[nodiscard]] constexpr SDL_Color ToSdlColor(NovaRgbColor color) {
-  return SDL_Color{color.red, color.green, color.blue, SDL_ALPHA_OPAQUE};
-}
+using evnova::util::ToSdlColor;
+
+namespace {
 
 struct MissionBbsLayout {
   SDL_FRect frame{};

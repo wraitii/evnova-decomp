@@ -1,6 +1,7 @@
 #include "cicn_image.hpp"
 
 #include "log.hpp"
+#include "util/byte_reader.hpp"
 
 #include <array>
 #include <cstddef>
@@ -9,6 +10,10 @@
 #include <span>
 
 namespace {
+
+using evnova::util::ReadBe16;
+using evnova::util::ReadBeI16;
+
 // Payload offsets (byte offsets from the start of the cicn resource), taken
 // from FUN_004d2bd0's extended color-icon branch.
 constexpr std::size_t kMaskRowBytesOffset = 0x04; // BE16; & 0xe000 == 0x8000
@@ -20,21 +25,6 @@ constexpr std::size_t kMaskRowBytesField = 0x36; // BE16 mask rowBytes (per row)
 constexpr std::size_t kCompRowBytesField = 0x44; // BE16 complementary rowBytes
 constexpr std::size_t kMaskDataOffset = 0x52; // start of the 1-bit mask bitmap
 
-[[nodiscard]] std::uint16_t ReadBe16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  if (offset + 2 > bytes.size()) {
-    return 0;
-  }
-  return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset])
-                                    << 8U) |
-         static_cast<std::uint16_t>(
-             std::to_integer<std::uint8_t>(bytes[offset + 1]));
-}
-
-[[nodiscard]] std::int16_t ReadBeI16(std::span<const std::byte> bytes,
-                                     std::size_t offset) {
-  return static_cast<std::int16_t>(ReadBe16(bytes, offset));
-}
 } // namespace
 
 std::optional<PictImage>

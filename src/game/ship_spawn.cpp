@@ -5,6 +5,7 @@
 #include "government.hpp"
 #include "hud_overlay.hpp"
 #include "mission.hpp"
+#include "nova_random.hpp"
 #include "outfit.hpp"
 #include "ship_ai.hpp"
 #include "spaceflight.hpp"
@@ -21,17 +22,6 @@ namespace game {
 namespace {
 
 constexpr std::int16_t kResourceIdBase = 0x80;
-
-// Mirrors the original's NovaRandom_Range(n) -> integer in [0, n) for the
-// allocator's scatter. The reimplementation draws from GameState.rng so runs
-// stay reproducible; the original uses the global NovaRandom LCG.
-inline std::int16_t RandomBelow(GameState &state, std::int32_t n) {
-  if (n <= 0) {
-    return 0;
-  }
-  std::uniform_int_distribution<std::int32_t> dist{0, n - 1};
-  return static_cast<std::int16_t>(dist(state.rng));
-}
 
 // Ghidra 0x0046b870 ShipClass_ComputeShipClassSkillVarianceScale. The class
 // percentage p produces one integer in [0, 2p], then maps it to
