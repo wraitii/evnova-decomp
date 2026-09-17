@@ -319,13 +319,16 @@ NovaUi_ShowTextEntryDialog(SdlPlatform &platform,
 // the systems it depends on.
 namespace {
 
-void Stub_LoadScenarioResourceTables(GameState &state) {
+void Stub_LoadScenarioResourceTables(GameState &state, bool ship_animations) {
   // Ghidra 0x004bd3c0 NovaData_LoadScenarioResourceTables reads the scenario
   // resource tables (sh\x95p ships, o\x9ftf outfits, w\x91ap weapons,
   // sp\x9ab stellars, s\xd8st systems) into state.scenario, so the player
-  // ship reads its real class stats here.
-  if (state.scenario.ships.empty() &&
-      !state.scenario.LoadFromArchives(&state.rng)) {
+  // ship reads its real class stats here. Menu_RunNewGameFlow calls this on
+  // EVERY new game (0x0048a4f8), so the reload also resets every resource-
+  // derived mutable field (system discovery_state, personality alive/grudge,
+  // nebula explored latches, stellar destroyed/present counts); without it a
+  // second new game in one session inherits the previous pilot's galaxy.
+  if (!state.scenario.LoadFromArchives(&state.rng, ship_animations)) {
     NovaLog::Todo("scenario resource tables could not be loaded; player world "
                   "uses fallback defaults");
   }
@@ -337,12 +340,26 @@ void Stub_LoadScenarioResourceTables(GameState &state) {
 
 void Stub_ResetReputationAndWorldTables(GameState &state) {
   // Ghidra Game_ResetReputationAndAvailability (0x004b4220) and
-  // Game_ResetNewGameState (0x004b4690) clear faction standings, mission flags,
-  // region networks, and set g_intro_played = 0 so the intro plays on first
-  // flight. g_intro_played is our intro_played flag.
+  // Game_ResetNewGameState (0x004b4690). The latter zeroes the whole
+  // g_nova_control_bits array (0x004b477e loop): a second new game must not
+  // inherit the previous pilot's story/mission control bits. Gender and the
+  // license `registered` flag are separate globals and stay untouched, so
+  // preserve them here. Re-seed the clean-room ferry baseline (b311).
+  state.control.bits.reset();
+  state.control.persisted_bit_bytes.fill(0);
+  state.control.SetControlBit(311, true);
+  state.control.map_grant_latch = false;
+  state.control.record_grant_latch = false;
+  // Game_ResetReputationAndAvailability 0x004b4220 param_1 != 0 zeroes the
+  // player combat rating and clears the recently-activated rank latch. The
+  // character template (ApplyCharacterTemplate) overwrites the rating when
+  // present; without this a template-less pilot would inherit the previous
+  // pilot's rating.
+  state.player_combat_rating_points = 0;
+  state.recently_activated_rank_id = -1;
   state.intro_played = false;
   NovaLog::Todo("new-game faction reputation and mission flags not tracked; "
-                "intro_played latch reset only");
+                "control bits and intro_played latch reset only");
 }
 
 void Stub_SeedStartingInventory(GameState &state) {
@@ -416,19 +433,55 @@ void Stub_SeedStartingInventory(GameState &state) {
 }
 
 void Stub_DiscoverStartingSystems(GameState &state) {
-  // The original books the starting system as visited (discovery_state = 1,
-  // both the ship-init and per-tick latches in Ship_HandlePlayerShipCore
-  // 0x0044aa70) and rebuilds the map reveal from it
-  // (System_RebuildSystemVisibilityMap(cur, 0, 1)). Only the start system is
-  // marked visited; its linked neighbours show on the starmap via the
-  // discovered_this_rebuild latch without becoming explored themselves.
-  NovaSystem_OnSystemEntered(state, kStartSystemId, 1);
+  // Ghidra Menu_RunNewGameFlow 0x0048a0f0 explicitly zeroes every system's
+  // discovery_state before the mark pass, then marks the current system's
+  // discovery slot (0x0048a1a0) and every direct adjacency whose target is
+  // visible (0x0048a17e) as visited (discovery_state = 1). The unconditional
+  // scenario reload in Stub_LoadScenarioResourceTables already clears the fog,
+  // but keep the zero pass here so the reset is visible and survives any
+  // future loader change.
+  for (System &system : state.scenario.systems) {
+    system.discovery_state = 0;
+    system.discovered_this_rebuild = false;
+  }
+  if (kStartSystemId < 0 || static_cast<std::size_t>(kStartSystemId) >=
+                                state.scenario.systems.size()) {
+    NovaLog::Todo("starting system {} out of range; discovery left empty",
+                  kStartSystemId);
+    return;
+  }
+
+  // Current system and its discovery slot (the visibility-twin root).
+  NovaSystem_MarkSystemVisited(state, kStartSystemId, 1);
+  NovaSystem_MarkSystemVisited(
+      state, NovaSystem_ResolveDiscoverySlot(state, kStartSystemId), 1);
+
+  // Direct adjacency: the original walks the system's 16 Con slots and books
+  // each visible target's discovery slot as visited. The port's links are
+  // already normalized to visibility roots and stored as 0x80-based resource
+  // ids (scenario_data.cpp link pass), so mark each link's discovery slot.
+  for (const std::int16_t link :
+       state.scenario.systems[static_cast<std::size_t>(kStartSystemId)].links) {
+    if (link < 0x80) {
+      continue;
+    }
+    const auto target = static_cast<std::int16_t>(link - 0x80);
+    if (!NovaSystem_IsSystemVisible(state, target)) {
+      continue;
+    }
+    NovaSystem_MarkSystemVisited(
+        state, NovaSystem_ResolveDiscoverySlot(state, target), 1);
+  }
+
   // Ghidra NovaResources_EvaluateAvailability 0x00448090 runs at game-session
   // bootstrap: filter every system's is_visible through its Visibility NCB
-  // (hiding the invisible story-twin clones) before anything reads it.
+  // (hiding the invisible story-twin clones) before anything reads it. The
+  // reveal latch is rebuilt afterwards, mirroring
+  // System_UpdateSystemAndStellarDisplayState later in the original flow.
   NovaResources_EvaluateAvailability(state);
+  NovaSystem_RebuildDiscoveredLatch(state);
   NovaLog::Info("starting system discovery seeded: {} (resource {}) and "
-                "adjacent neighbours now visible on the starmap",
+                "adjacent neighbours now visited on the starmap",
                 kStartSystemId,
                 kStartSystemResourceId);
 }
@@ -502,6 +555,16 @@ void ResetPlayerShipForNewGame(GameState &state) {
   NovaShip_ResetPlayerShipState(state);
   state.player.current_system_id = kStartSystemId;
   state.player.credits = 10000;
+  // Ghidra Menu_RunNewGameFlow 0x0048a1b4: the starting system's reinforcement
+  // countdown is armed to -1 with a zero cooldown so a fresh pilot does not
+  // inherit the previous pilot's pending enemy spawn timer.
+  if (kStartSystemId >= 0 && static_cast<std::size_t>(kStartSystemId) <
+                                 state.reinforcement_countdown.size()) {
+    state.reinforcement_countdown[static_cast<std::size_t>(kStartSystemId)] =
+        -1.0F;
+    state.reinforcement_retrigger_delay[static_cast<std::size_t>(
+        kStartSystemId)] = 0;
+  }
   // Ghidra 0x0048a3a5 (Menu_RunNewGameFlow): the starmap pan origin starts on
   // the starting system's position so the map opens centred there.
   if (const auto *start_sys = state.scenario.System(kStartSystemResourceId)) {
@@ -704,6 +767,7 @@ void NovaNewPilot_ResetStellarStrengthForNewGame(GameState &state) {
 
 bool NovaNewPilotFlow_Run(SdlPlatform &platform,
                           GameState &state,
+                          bool ship_animations,
                           const std::function<void()> &render_background) {
   state.gameplay_now_ms = platform.gameplay_ticks_ms();
   // ---- Step 1: pilot naming/selection ------------------------------------
@@ -797,7 +861,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   // Ghidra loads the scenario data tables (ships/outfits/weapons/stellars/
   // systems) as part of the fresh world reset; the ship reset and inventory
   // seed below read class stats, so load the tables first.
-  Stub_LoadScenarioResourceTables(state);
+  Stub_LoadScenarioResourceTables(state, ship_animations);
   // Ghidra Game_ResetNewGameState applies the starts-destroyed/hazard reset to
   // every stellar immediately after the tables load.
   ResetStellarStrengthForNewGame(state);
@@ -901,6 +965,18 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
   record.weapon_secondary_count_by_class =
       state.weapon_secondary_count_by_class;
   record.outfit_owned_count = state.inventory.outfit_owned_count;
+  // Carry the reset control-bit table (Game_ResetNewGameState zeroes it, then
+  // the clean-room ferry baseline b311 is re-seeded). Without this the fresh
+  // record's all-zero block would clear the bits on PilotFileApply before the
+  // character template's OnStart script runs. Mirrors PilotFileCollectFromState
+  // (0x004c7dd0 saver).
+  for (std::size_t i = 0; i < record.control_bits.size(); ++i) {
+    const std::uint8_t persisted = state.control.persisted_bit_bytes[i];
+    record.control_bits[i] = (persisted != 0) == state.control.bits.test(i)
+                                 ? persisted
+                             : state.control.bits.test(i) ? 1
+                                                          : 0;
+  }
   // Carry the starting legal record applied by ApplyCharacterTemplate;
   // PilotFileApply otherwise clears the whole reputation table to zero.
   const std::size_t reputation_count =
@@ -910,8 +986,7 @@ bool NovaNewPilotFlow_Run(SdlPlatform &platform,
               record.system_reputation.begin());
   // Carry the start-system discovery seeded by Stub_DiscoverStartingSystems;
   // PilotFileApply otherwise copies the fresh record's all-zero fog table over
-  // it (control.explored_systems is a separate field and survives, but the fog
-  // consumers read discovery_state).
+  // it (the fog consumers read discovery_state).
   const std::size_t discovery_count =
       std::min(state.scenario.systems.size(), record.system_discovery.size());
   for (std::size_t i = 0; i < discovery_count; ++i) {

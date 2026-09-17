@@ -1857,9 +1857,11 @@ void NovaGameMode_DispatchAction(NovaRuntime &runtime, GameModeAction action) {
     // player then chooses ENTER SPACE to play (intro cinematic plays then).
     // The dialogs keep re-rendering the menu behind themselves each frame.
     NovaRender_RedrawAndPresentFrame(runtime, 0);
-    if (game::NovaNewPilotFlow_Run(runtime.platform, runtime.game, [&runtime] {
-          NovaRender_RedrawAndPresentFrame(runtime, 0);
-        })) {
+    if (game::NovaNewPilotFlow_Run(
+            runtime.platform,
+            runtime.game,
+            runtime.prefs.ship_animations,
+            [&runtime] { NovaRender_RedrawAndPresentFrame(runtime, 0); })) {
       NovaLog::Info("new pilot created; choose ENTER SHIP to fly");
     } else {
       NovaLog::Info("new game cancelled");
