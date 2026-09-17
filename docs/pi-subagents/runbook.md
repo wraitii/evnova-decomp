@@ -60,6 +60,32 @@ after a response. The launcher stops inference at the reported budget boundary,
 allowing a detected running build/test to finish. Inspect partial work after an
 abort. Do not use compaction to justify another long session.
 
+## Steer during work
+
+Monitor compact status while the task runs, not just after it becomes idle.
+Check the latest milestone or a targeted draft diff when there is a useful
+decision to make. A healthy session with clear scope needs room to work; a
+question, questionable assumption, widening scope, or silent stall needs a
+response. Do not load the full transcript to obtain a status update.
+
+Write a short message to a task file, then send it with `steer`:
+
+```sh
+node tools/pi_session.mjs steer --run /absolute/run/dir --task /absolute/review.md
+```
+
+Make the message actionable: identify the finding, the constraint, and what
+should happen next. For example: "The proposed shared header includes constants
+used by only one file. Keep those local; share only the helpers used by both.
+Continue the approved split and report when the mechanical comparison passes."
+For a requested proposal checkpoint, review and authorize the concrete scope
+with `prompt` once the worker is idle. This is the main agent directing its
+worker, not an additional request for user permission.
+
+Check that the queued command was accepted. If a session is unexpectedly silent,
+check its state, last tool, and narrow relevant log excerpts. Request status;
+abort only when warranted, and inspect partial work before sending a new task.
+
 ## Review and continue
 
 Review `git status --short`, `git diff`, and `git diff --cached`, comparing with
