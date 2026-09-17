@@ -18,6 +18,7 @@ add_executable(evnova_tests
     mission_script_test.cpp
     new_pilot_dialog_test.cpp
     nova_font_test.cpp
+    outfit_clamp_test.cpp
     pilot_file_test.cpp
     player_info_window_test.cpp
     pixpat_test.cpp

@@ -110,6 +110,11 @@ Outfit_ComputePlayerEffectiveStats(const GameState &state);
 struct OutfitOwnership {
   std::int16_t effective_owned = 0; // clamped owned count
   std::int16_t max_allowed = 0;     // what the player may hold
+  // Original bool return: true when a cap was applied (or the id was invalid),
+  // even when the cap equals the owned count; false only on the fall-through
+  // where effective_owned == the raw owned count. Callers that pass null
+  // output pointers and test the return consult this.
+  bool limited = false;
 };
 
 [[nodiscard]] OutfitOwnership

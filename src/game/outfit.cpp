@@ -570,19 +570,31 @@ float NovaOutfit_ComputeIonizationDecayRate(const GameState &state,
 // ---------------------------------------------------------------------------
 // Ghidra 0x004656a0 Outfit_ClampOutfitOwnedCountToCurrentLimits: resolve
 // the effective owned count and max-allowed for one outfit, honoring (in
-// order) ammo-backed weapon limits, ModType-27 (kIncreaseMax) maximum
-// multipliers, and the gun/turret slot caps. `outfit_resource_id` is the
-// zero-based after-0x80 outfit id.
+// order) ammo-backed weapon limits (primary ModType 3), ModType-27
+// (kIncreaseMax) maximum multipliers, and the gun/turret slot caps (Flags
+// 0x0001/0x0002). `outfit_resource_id` is the zero-based after-0x80 outfit id.
+//
+// The original returns true ("limited") whenever a cap was applied - including
+// when the cap equals the owned count - and false only on the fall-through
+// where effective_owned == owned; the port carries that in
+// OutfitOwnership::limited.
 
 OutfitOwnership
 Outfit_ClampOwnedCountToLimits(const GameState &state,
                                std::int16_t outfit_resource_id) {
   OutfitOwnership out;
-  if (outfit_resource_id < 0 || outfit_resource_id >= 0x200) {
-    return out; // out of range -> both 0
+
+  // Original range guard: ids outside [0, 0x1ff] zero both outputs and report
+  // limited.
+  if (outfit_resource_id < 0 || outfit_resource_id > 0x1ff) {
+    out.limited = true;
+    return out;
   }
   const std::size_t idx = static_cast<std::size_t>(outfit_resource_id);
-  if (idx >= state.scenario.outfits.size()) {
+  if (idx >= state.scenario.outfits.size() ||
+      idx >= state.inventory.outfit_owned_count.size()) {
+    // Clean-room guard: the original always indexes 512 loaded outfits.
+    out.limited = true;
     return out;
   }
   const Outfit &o = state.scenario.outfits[idx];
@@ -591,75 +603,75 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
   // Base maximum = the outfit's Max field.
   out.max_allowed = o.max_count;
 
-  std::int16_t effective = owned;
-
-  // (1) Ammo-backed weapons: an outfit whose ModType1 == 3 (ammo) supplies a
-  // weapon bank; the ammo outfit's holdings are capped by the bank ammo and
-  // any ammo capacity the weapon definitions impose.
-  //
-  // TODO(decomp): the original caps this via the weapon bank / ammo system
-  // (Weapon_CanFireWeaponBank gating on weapon_secondary_count_by_class
-  // counters), not a per-weapon "max ammo" payload field. Payload +0x5a is
-  // burst_cycle_ticks, not an ammo capacity (see the weapon-decode audit).
-  // Until the real ammo system is reconstructed we leave the capacity cap
-  // out; the plain owned-count handling below still bounds it correctly for
-  // non-ammo outfits.
-  if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo)) {
-    // Held ammo is not yet a separate concept in this build; skip the
-    // capacity cap (TODO(decomp) above).
-    out.effective_owned = static_cast<std::int16_t>(std::max<int>(0, owned));
-    return out;
+  // (1) Ammo-backed weapons: the PRIMARY ModType-3 slot names a weapon bank
+  // (mod_val, zero-based). When that weapon defines a per-mount MaxAmmo
+  // (WeaponDef +0x1e, loader-read; 0/-1 defers), holdings are capped at
+  // MaxAmmo * the live bank count weapon_count_by_class[mod_val]. The original
+  // does NOT return here unless the cap is already reached, so an under-cap
+  // ammo outfit still runs the ModType-27 / slot-cap arms below.
+  if (o.mod_type == static_cast<std::int16_t>(OutfitEffect::kAmmo) &&
+      o.mod_val >= 0 && o.mod_val < 0x100) {
+    const Weapon *weapon =
+        state.scenario.Weapon(static_cast<std::int16_t>(o.mod_val + 0x80));
+    if (weapon != nullptr && weapon->max_ammo > 0) {
+      const std::int16_t ammo_cap = static_cast<std::int16_t>(
+          weapon->max_ammo *
+          state.weapon_count_by_class[static_cast<std::size_t>(o.mod_val) *
+                                      100]);
+      if (ammo_cap < out.max_allowed) {
+        out.max_allowed = ammo_cap;
+      }
+      if (ammo_cap <= owned) {
+        out.effective_owned = ammo_cap;
+        out.limited = true;
+        return out;
+      }
+    }
   }
 
   // (2) ModType-27 (kIncreaseMax) maximum multipliers: every owned outfit
-  // pointing at this one (mod type 27, mod val == this outfit's id) multiplies
-  // the base maximum by the owned count of the multiplier.
-  std::int32_t multiplier = 0;
+  // pointing at this one (mod type 27, mod val == this outfit's id + 0x80)
+  // multiplies the base maximum by the owned count of the multiplier. The sum
+  // is floored at 1 and only the first matching slot per outfit counts.
+  std::int16_t multiplier = 0;
   for (std::size_t mid = 0; mid < state.inventory.outfit_owned_count.size();
        ++mid) {
     const std::int16_t mowned = state.inventory.outfit_owned_count[mid];
     if (mowned <= 0 || mid >= state.scenario.outfits.size()) {
       continue;
     }
-    const Outfit &mo = state.scenario.outfits[mid];
-    for (const Effect &e : OutfitEffects(mo)) {
+    for (const Effect &e : OutfitEffects(state.scenario.outfits[mid])) {
       // The mod value names the target outfit's RESOURCE id (0x80..), matching
       // how the Bible/Max references the target.
       if (e.type == static_cast<std::int16_t>(OutfitEffect::kIncreaseMax) &&
           e.val == static_cast<std::int16_t>(outfit_resource_id + 0x80)) {
-        multiplier += mowned;
+        multiplier = static_cast<std::int16_t>(multiplier + mowned);
         break;
       }
     }
   }
-  multiplier = std::max<std::int32_t>(1, multiplier);
-  const std::int16_t lifted = static_cast<std::int16_t>(
-      std::clamp<std::int32_t>(multiplier * out.max_allowed, 0, 32767));
+  if (multiplier < 1) {
+    multiplier = 1;
+  }
+  const std::int16_t lifted =
+      static_cast<std::int16_t>(multiplier * out.max_allowed);
   if (multiplier > 1 || lifted < out.max_allowed) {
     out.max_allowed = lifted;
   }
-  effective = std::min<int>(effective, lifted);
-
-  // (3) Gun / turret slot caps (outfit Flags bits 0x0001 / 0x0002): the player
-  // can only mount as many guns/turrets as the ship class allows, lifted by
-  // opcode 45 (guns) / 46 (turrets) mods. The cap is the sum of the two
-  // relevant variables: guns use class max_gun = max_guns minus the 45 lifts
-  // we already folded into PlayerEffectiveStats; to avoid double counting we
-  // recompute the base + lifts here from the class and owned outfits directly,
-  // exactly mirroring the decomp's sVar7 (= max_gun + opcode45) and sVar8
-  // (= owned guns) tracking.
-  const std::int16_t ship_class_id = state.player.ship_class_id;
-  const ShipClass *cls =
-      state.scenario.Ship(static_cast<std::int16_t>(ship_class_id + 0x80));
-
-  std::int16_t gun_cap = 0;       // sVar7: class max_gun + opcode 45 lifts
-  std::int16_t turret_cap = 0;    // sVar8: class max_tur + opcode 46 lifts
-  std::int16_t guns_owned = 0;    // total owned guns (flags & 1)
-  std::int16_t turrets_owned = 0; // total owned turrets (flags & 2)
-  if (cls) {
-    gun_cap = cls->max_gun;
-    turret_cap = cls->max_turret;
+  if (lifted <= owned) {
+    out.effective_owned = lifted;
+    out.limited = true;
+    return out;
   }
+
+  // (3) Gun / turret slot caps (outfit Flags bits 0x0001 / 0x0002): the mounted
+  // total across the whole inventory is compared against the ship class's
+  // MaxGun/MaxTur (ShipClassDef +0x6/+0x8) lifted by the first ModType-45 /
+  // ModType-46 modifier on each owned outfit.
+  const ShipClass *cls = state.scenario.Ship(
+      static_cast<std::int16_t>(state.player.ship_class_id + 0x80));
+  std::int16_t guns_owned = 0;    // Flags 0x0001 total
+  std::int16_t turrets_owned = 0; // Flags 0x0002 total
   for (std::size_t gid = 0; gid < state.inventory.outfit_owned_count.size();
        ++gid) {
     const std::int16_t gowned = state.inventory.outfit_owned_count[gid];
@@ -668,52 +680,77 @@ Outfit_ClampOwnedCountToLimits(const GameState &state,
     }
     const Outfit &go = state.scenario.outfits[gid];
     if (go.flags & 0x0001) {
-      guns_owned += gowned;
+      guns_owned = static_cast<std::int16_t>(guns_owned + gowned);
     }
     if (go.flags & 0x0002) {
-      turrets_owned += gowned;
-    }
-    for (const Effect &e : OutfitEffects(go)) {
-      if (e.type == static_cast<std::int16_t>(OutfitEffect::kModifyMaxGuns)) {
-        gun_cap += e.val;
-      } else if (e.type ==
-                 static_cast<std::int16_t>(OutfitEffect::kModifyMaxTurrets)) {
-        turret_cap += e.val;
-      }
+      turrets_owned = static_cast<std::int16_t>(turrets_owned + gowned);
     }
   }
 
-  // Apply the slot cap for whichever kind this outfit is.
   if (o.flags & 0x0001) { // gun
+    std::int16_t gun_cap = cls != nullptr ? cls->max_gun : 0;
+    for (std::size_t gid = 0; gid < state.inventory.outfit_owned_count.size();
+         ++gid) {
+      if (state.inventory.outfit_owned_count[gid] <= 0 ||
+          gid >= state.scenario.outfits.size()) {
+        continue;
+      }
+      for (const Effect &e : OutfitEffects(state.scenario.outfits[gid])) {
+        if (e.type == static_cast<std::int16_t>(OutfitEffect::kModifyMaxGuns)) {
+          gun_cap = static_cast<std::int16_t>(gun_cap + e.val);
+          break; // first ModType-45 slot per outfit
+        }
+      }
+    }
+    if (gun_cap < out.max_allowed) {
+      out.max_allowed = gun_cap;
+    }
     if (gun_cap < 1) {
       out.effective_owned = 0;
+      out.limited = true;
       return out;
     }
-    out.max_allowed = std::min(out.max_allowed, gun_cap);
     if (gun_cap <= guns_owned) {
-      out.effective_owned =
-          static_cast<std::int16_t>(std::max<int>(0, gun_cap));
+      out.effective_owned = gun_cap;
+      out.limited = true;
       return out; // all gun slots full
     }
   }
   if (o.flags & 0x0002) { // turret
+    std::int16_t turret_cap = cls != nullptr ? cls->max_turret : 0;
+    for (std::size_t gid = 0; gid < state.inventory.outfit_owned_count.size();
+         ++gid) {
+      if (state.inventory.outfit_owned_count[gid] <= 0 ||
+          gid >= state.scenario.outfits.size()) {
+        continue;
+      }
+      for (const Effect &e : OutfitEffects(state.scenario.outfits[gid])) {
+        if (e.type ==
+            static_cast<std::int16_t>(OutfitEffect::kModifyMaxTurrets)) {
+          turret_cap = static_cast<std::int16_t>(turret_cap + e.val);
+          break; // first ModType-46 slot per outfit
+        }
+      }
+    }
+    if (turret_cap < out.max_allowed) {
+      out.max_allowed = turret_cap;
+    }
     if (turret_cap < 1) {
       out.effective_owned = 0;
+      out.limited = true;
       return out;
     }
-    out.max_allowed = std::min(out.max_allowed, turret_cap);
     if (turret_cap <= turrets_owned) {
-      out.effective_owned =
-          static_cast<std::int16_t>(std::max<int>(0, turret_cap));
+      out.effective_owned = turret_cap;
+      out.limited = true;
       return out; // all turret slots full
     }
   }
 
-  // Otherwise effective owned is min(owned, max_allowed) for non-limited items
-  // (the decomp's final branch preserves the owned count, which is already the
-  // min here because the limits above clamp it).
-  out.effective_owned = static_cast<std::int16_t>(
-      std::min<int>(effective, std::max<int>(0, out.max_allowed)));
+  // Nothing bound: the effective count is the raw owned count (the original's
+  // low-byte-zero return).
+  out.effective_owned = owned;
+  out.limited = false;
   return out;
 }
 
