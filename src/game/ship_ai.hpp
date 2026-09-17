@@ -178,6 +178,18 @@ NovaAi_WeaponIsTargetBearingInTurretBlindSpot(const ShipClass &ship_class,
 
 bool NovaAiShip_IsDisabled(const GameState &state, const Ship &ship);
 
+// Computes the current maximum shield capacity using the player outfit cache
+// or the NPC class / personality values used by the original AI.
+[[nodiscard]] double NovaAi_ComputeMaxShieldPoints(const GameState &state,
+                                                   const Ship &ship);
+
+// Ghidra 0x00463a20 Ship_ComputeShipFuelCapacity. Player capacity folds in
+// opcode-12 (kFuelCapacity) outfit bonuses via the effective-stats pass; an
+// NPC's is the raw class value (the original skips the outfit loop for
+// ship_instance_id != 0).
+[[nodiscard]] double NovaAi_ComputeShipFuelCapacity(const GameState &state,
+                                                    const Ship &ship);
+
 // Ghidra 0x004680d0 Ship_OnShipCloakStateEntered. Starts the signed cloak
 // transition and drops shields when ModType 17 requests it.
 void NovaAi_OnShipCloakStateEntered(GameState &state, Ship &ship);
@@ -337,6 +349,10 @@ void Mission_UpdateShipMissionStellarAttackDirective(GameState &state,
 // the government voice override and the pending-latch reset for chatter (the
 // chatter consumer pass is TODO(decomp)).
 void NovaAi_UpdateEscortAI(GameState &state, Ship &ship, std::uint32_t now_ms);
+
+// Assigns autonomous commands to dependent escorts on the leader's cadence.
+// Commands are 0 Formation, 1 Defend, 2 Attack, and 3 Return.
+void NovaAi_IssueEscortOrders(GameState &state, Ship &ship);
 
 // ---------------------------------------------------------------------------
 // Ship-comm / hail predicates and AI state entries (added for the ship-comm

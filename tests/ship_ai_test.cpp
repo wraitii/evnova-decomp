@@ -21,6 +21,7 @@ namespace {
 using game::GameState;
 using game::NovaAi_FindBestAssistTargetForShip;
 using game::NovaAi_IsInboundThreatExceedingDefenses;
+using game::NovaAi_IssueEscortOrders;
 using game::NovaAi_UpdateShipAI;
 using game::NovaAiShip_CanInterceptCurrentPrimaryTarget;
 using game::NovaShip_AllocateShipSlot;
@@ -121,6 +122,179 @@ void ClearAllShips(GameState &state) {
 }
 
 } // namespace
+
+TEST_CASE("escort order tiers use each side's stocked weapon reach") {
+  GameState state;
+  state.scenario.ships.resize(6);
+  state.scenario.weapons.resize(2);
+
+  state.scenario.ships[0].base_shield = 100;
+  state.scenario.ships[0].base_armor = 100;
+  state.scenario.ships[0].stock_weapons[0] = {0x80, 1, 0};
+  state.scenario.ships[1].base_shield = 100;
+  state.scenario.ships[1].base_armor = 100;
+  state.scenario.ships[1].stock_weapons[0] = {0x81, 1, 0};
+  for (std::size_t category = 0; category < 4; ++category) {
+    state.scenario.ships[category + 2].class_category =
+        static_cast<std::int16_t>(category);
+  }
+  state.scenario.weapons[0].weapon_mode_code = 1;
+  state.scenario.weapons[1].weapon_mode_code = 1;
+  state.scenario.weapons[0].range_scalar = 30.0F;
+  state.scenario.weapons[1].range_scalar = 100.0F;
+
+  game::Ship &leader = state.ShipAt(1);
+  leader.ship_instance_id = 1;
+  leader.ship_class_id = 0;
+  leader.ai_behavior_code = 3;
+  leader.ai_state_code = 4;
+  leader.primary_target_ship_slot = 2;
+  leader.shield_points = 20.0F;
+  leader.pos_x = 0.0F;
+  leader.pos_y = 0.0F;
+  for (std::size_t slot = 3; slot <= 6; ++slot) {
+    game::Ship &escort = state.ShipAt(slot);
+    escort.ship_instance_id = static_cast<std::int16_t>(slot);
+    escort.ship_class_id = static_cast<std::int16_t>(slot - 1);
+    escort.ai_behavior_code = 5;
+    escort.squad_leader_ship_slot = 1;
+  }
+
+  game::Ship &target = state.ShipAt(2);
+  target.ship_instance_id = 2;
+  target.ship_class_id = 1;
+  target.ai_state_code = 4;
+  target.primary_target_ship_slot = 1;
+  target.armor_points = 100.0F;
+  target.pos_x = 100.0F;
+  target.pos_y = 0.0F;
+
+  NovaAi_IssueEscortOrders(state, leader);
+
+  // The target's stocked weapon reaches the leader, while the leader's does
+  // not reach the target. The corrected low-shield tier therefore attacks
+  // with categories 0/1; the original literal weapon-1 probes were symmetric.
+  CHECK(state.ShipAt(3).escort_command_code == 2);
+  CHECK(state.ShipAt(4).escort_command_code == 2);
+  CHECK(state.ShipAt(5).escort_command_code == 1);
+  CHECK(state.ShipAt(6).escort_command_code == 0);
+  CHECK(state.ShipAt(3).escort_command_pending == 1);
+
+  SECTION("leaders that can reach their attacker keep damaged escorts close") {
+    state.scenario.weapons[0].range_scalar = 100.0F;
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 1);
+    CHECK(state.ShipAt(4).escort_command_code == 1);
+  }
+
+  SECTION("range asymmetry matters only when the target attacks the leader") {
+    target.primary_target_ship_slot = -1;
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 1);
+    CHECK(state.ShipAt(4).escort_command_code == 1);
+  }
+
+  SECTION("passive leaders use the healthy fighter branch") {
+    leader.ai_behavior_code = 1;
+    leader.shield_points = 70.0F;
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 2);
+    CHECK(state.ShipAt(4).escort_command_code == 1);
+    CHECK(state.ShipAt(5).escort_command_code == 1);
+    CHECK(state.ShipAt(6).escort_command_code == 0);
+    leader.shield_points = 50.0F;
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 1);
+  }
+
+  SECTION("disabled targets recall combat escorts in state 0x0d") {
+    leader.ai_behavior_code = 3;
+    leader.ai_state_code = 0xd;
+    target.armor_points = 0.0F;
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 3);
+    CHECK(state.ShipAt(4).escort_command_code == 3);
+    CHECK(state.ShipAt(5).escort_command_code == 3);
+    CHECK(state.ShipAt(6).escort_command_code == 0);
+  }
+
+  SECTION("negative combat odds do not attack with warships") {
+    leader.ai_behavior_code = 3;
+    leader.ai_state_code = 4;
+    leader.shield_points = 80.0F;
+    leader.ai_odds_score = -1.0F;
+    target.armor_points = 100.0F;
+    NovaAi_IssueEscortOrders(state, leader);
+    CHECK(state.ShipAt(3).escort_command_code == 2);
+    CHECK(state.ShipAt(4).escort_command_code == 2);
+    CHECK(state.ShipAt(5).escort_command_code == 0);
+    CHECK(state.ShipAt(6).escort_command_code == 0);
+  }
+}
+
+TEST_CASE("escort orders obey caller cadence and bypasses") {
+  GameState state;
+  state.scenario.ships.resize(2);
+  state.scenario.weapons.resize(1);
+  state.scenario.ships[0].base_shield = 100;
+  state.scenario.ships[0].base_armor = 100;
+  state.scenario.ships[0].stock_weapons[0] = {0x80, 1, 0};
+  state.scenario.ships[1].class_category = 0;
+  state.scenario.ships[1].base_shield = 100;
+  state.scenario.ships[1].base_armor = 100;
+  state.scenario.weapons[0].weapon_mode_code = 1;
+  state.scenario.weapons[0].range_scalar = 100.0F;
+
+  game::Ship &leader = state.ShipAt(1);
+  leader.ship_instance_id = 1;
+  leader.ship_class_id = 0;
+  leader.ai_behavior_code = 3;
+  leader.ai_state_code = 4;
+  leader.ai_control_mode = 0;
+  leader.shield_points = 80.0F;
+  leader.armor_points = 0.0F;
+  leader.is_any_ships_squad_leader = true;
+
+  game::Ship &escort = state.ShipAt(2);
+  escort.ship_instance_id = 2;
+  escort.ship_class_id = 1;
+  escort.ai_behavior_code = 5;
+  escort.squad_leader_ship_slot = 1;
+  escort.escort_command_code = -7;
+
+  // The order pass runs before the disabled auto-guard clears the leader.
+  state.spaceflight_frame_counter = 0;
+  NovaAi_UpdateShipAI(state, leader, false, 0);
+  CHECK(escort.escort_command_code == 2);
+  CHECK(leader.squad_leader_ship_slot == -1);
+
+  // A nonmatching frame phase skips the order pass.
+  leader.armor_points = 100.0F;
+  leader.ai_state_code = 4;
+  leader.ai_control_mode = 0;
+  escort.escort_command_code = -7;
+  state.spaceflight_frame_counter = 1;
+  NovaAi_UpdateShipAI(state, leader, false, 0);
+  CHECK(escort.escort_command_code == -7);
+
+  // Entry control mode 4 bypasses the order pass even when its later state
+  // handling would otherwise change the mode.
+  leader.ai_control_mode = 4;
+  leader.ai_state_code = 0xb;
+  leader.squad_leader_ship_slot = 0;
+  state.player.armor_points = 0.0F;
+  escort.escort_command_code = -8;
+  state.spaceflight_frame_counter = 0;
+  NovaAi_UpdateShipAI(state, leader, false, 0);
+  CHECK(escort.escort_command_code == -8);
+
+  // The arrival sentinel has the same bypass and installs control mode 10.
+  leader.ai_control_mode = 0;
+  leader.ai_station_hold_timer = -999.0F;
+  escort.escort_command_code = -9;
+  NovaAi_UpdateShipAI(state, leader, false, 0);
+  CHECK(escort.escort_command_code == -9);
+}
 
 // End-to-end wiring check for the Phase 3/4 wander milestone: a behavior-0x01
 // NPC spawned idle in a system with travel points should, after one
