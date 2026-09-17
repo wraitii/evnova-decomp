@@ -19,12 +19,43 @@ float ThreeStateButtonLabelBaseline(const SDL_FRect &rect) {
   return std::floor(rect.y + rect.h / 2.0F) + 5.0F;
 }
 
+// Ghidra 0x004b97e0 DrawContext_DrawLineTo.
+// The unclipped 45-degree, 2x2-pen slice used by 0x004a3340; the general
+// line/clip path remains TODO(decomp). Both button painters call this helper.
+void DrawThreeStateButtonArrow(SDL_Renderer *renderer,
+                               const SDL_FRect &rect,
+                               bool up,
+                               const SDL_Color &color) {
+  const int s = static_cast<int>(rect.h) / 10;
+  const int cx = static_cast<int>(rect.w) / 2;
+  const int cy = static_cast<int>(rect.h) / 2;
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  // The line rasterizer decrements the larger endpoint on each axis before
+  // stamping the pen. Each arm therefore has 2s stamps, not 2s+1; for s=2
+  // their union is 9x5 pixels, centred on the button's local integer midpoint.
+  for (int step = 0; step < 2 * s; ++step) {
+    const int y = cy - s + step;
+    const int left = up ? cx - 1 - step : cx - 2 * s + step;
+    const int right = up ? cx + step : cx + 2 * s - 1 - step;
+    for (const int x : {left, right}) {
+      const SDL_FRect stamp{
+          rect.x + static_cast<float>(x), rect.y + static_cast<float>(y), 2, 2};
+      SDL_RenderFillRect(renderer, &stamp);
+    }
+  }
+}
+
 void DrawThreeStateButtonLabel(SdlPlatform &platform,
                                NovaFontCache &font_cache,
                                const SDL_FRect &rect,
                                std::string_view label,
                                const SDL_Color &color) {
   if (label.empty()) {
+    return;
+  }
+  if (label.front() == '^' || label.front() == '&') {
+    DrawThreeStateButtonArrow(
+        platform.renderer(), rect, label.front() == '^', color);
     return;
   }
   const float left = rect.x;
@@ -48,18 +79,6 @@ void DrawThreeStateButtonLabel(SdlPlatform &platform,
                    center_y + y2 + 1.0F);
   };
   switch (label.front()) {
-  case '^': { // down chevron: apex at (0,-s), arms to (+/-2s,+s)
-    const float s = (bottom - top) / 10.0F;
-    stroke(0.0F, -s, -2.0F * s, s);
-    stroke(0.0F, -s, 2.0F * s, s);
-    return;
-  }
-  case '&': { // up chevron: apex at (0,+s), arms to (+/-2s,-s)
-    const float s = (bottom - top) / 10.0F;
-    stroke(0.0F, s, -2.0F * s, -s);
-    stroke(0.0F, s, 2.0F * s, -s);
-    return;
-  }
   case '+': {
     const float s = (right - left) / 8.0F;
     stroke(-s, 0.0F, s, 0.0F);
@@ -218,12 +237,16 @@ void ServicesButtonArt::Draw(SdlPlatform &platform,
   // Backdrop colour used for missing pieces / the button body.
   const SDL_Color kBackdrop{1, 4, 12, 255};
 
-  // The left/right caps are fixed 13px wide; the 2px middle tile stretches
-  // across the body between them. For a button narrower than two caps
-  // (2*13 = 26px) clamp so it still draws without a negative middle band.
+  // The left/right caps are fixed 13px wide and the 2px middle tile stretches
+  // across the body between them. The original blits the left cap
+  // (FUN_00873279), then the right cap (FUN_00873310), then the middle band;
+  // for the 23px scroll arrows the middle band is empty, so only the caps
+  // matter and the right cap, drawn after the left, wins the overlap. Do not
+  // compress the caps to fit -- the native 13px art carries the rounded
+  // corners and shading.
   constexpr float kCapWidth = 13.0F;
-  const float left_w = std::min(kCapWidth, rect.w / 2.0F);
-  const float right_w = std::min(kCapWidth, rect.w - left_w);
+  const float left_w = kCapWidth;
+  const float right_w = kCapWidth;
   const float mid_x = rect.x + left_w;
   const float mid_w = std::max(0.0F, rect.w - left_w - right_w);
 

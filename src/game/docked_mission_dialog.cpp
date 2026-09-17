@@ -259,20 +259,19 @@ void DrawMissionBbsContents(SdlPlatform &platform,
     DrawThreeStateButtonLabel(platform, font_cache, rect, label, kText);
   }
   if (layout.date.w > 0.0F) {
-    // NovaText_FormatDateString (0x00468450) over the current game date;
-    // date colour is the 0x4000 grey.
-    NovaText_DrawCentered(
-        platform,
-        font_cache,
-        NovaFontFamily::kGeneva,
-        kMissionListFontSize,
-        kNovaFontStyleRegular,
-        kDateGrey,
-        layout.date.x,
-        layout.date.x + layout.date.w,
-        layout.date.y + kMissionListFontSize,
-        NovaText_FormatDateString(
-            state.date, true, state.date_prefix, state.date_suffix));
+    // 0x00441620 sets the date cursor to the entry-11 rect's bottom-left and
+    // draws it left-aligned; the rect bottom matches the heading's top+12
+    // baseline (both 15 in DITL 0x3ee), so the lines align. 0x4000 grey.
+    NovaText_Draw(platform,
+                  font_cache,
+                  NovaFontFamily::kGeneva,
+                  kMissionListFontSize,
+                  kNovaFontStyleRegular,
+                  kDateGrey,
+                  layout.date.x,
+                  layout.date.y + layout.date.h,
+                  NovaText_FormatDateString(
+                      state.date, true, state.date_prefix, state.date_suffix));
   }
   if (!status.empty()) {
     NovaText_DrawCentered(platform,
@@ -750,12 +749,14 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
   const SDL_FRect accept_rect = item_rect(0);  // UiPanel entry 1
   const SDL_FRect decline_rect = item_rect(1); // UiPanel entry 2
   const SDL_FRect text_rect = item_rect(2);    // UiPanel entry 3: text view
-  // Entries 9/10 (DITL items 8/9) are the text-view scroll arrows. Their
-  // glyphs are part of the bottom-strip art (PICT 0x214b); only the hit-test
-  // rects are used here. Action 9 (entry 9) = scroll +10px (down), action 10
-  // (entry 10) = -10px (up) in NovaUi_ScrollSelectionText.
-  const SDL_FRect scroll_down_rect = item_rect(8);
-  const SDL_FRect scroll_up_rect = item_rect(9);
+  // Entries 9/10 (DITL items 8/9) are the text-view scroll arrows. Entry 9 is
+  // label 0x12 (STR# 0x96 entry 19 '^' = up) and entry 10 label 0x13 (entry 20
+  // '&' = down) per 0x004a1820. Actions 9/10 pass +/-10 as a content
+  // translation
+  // (+ = up); this port's ScrollBy offset grows downward, so up maps to item 8
+  // and down to item 9.
+  const SDL_FRect scroll_up_rect = item_rect(8);
+  const SDL_FRect scroll_down_rect = item_rect(9);
 
   // Publish the window's control rects to the probe harness (window-point
   // space) so the harness can click by intent; cleared when this modal exits.
@@ -863,16 +864,21 @@ NovaMission_RunOfferWindow(SdlPlatform &platform,
     // Text view: dark fill + wrapped offer text, scrolled inside a clip to
     // the view rect; the arrow buttons are runtime-drawn (0x004a1820).
     view.Draw(platform);
-    NovaUi_DrawScrollArrow(platform,
-                           button_art,
-                           scroll_up_rect,
-                           true,
-                           view.scroll_offset() > 0.0F);
-    NovaUi_DrawScrollArrow(platform,
-                           button_art,
-                           scroll_down_rect,
-                           false,
-                           view.scroll_offset() < view.max_scroll());
+    // 0x004a1820 gives both arrow states 0xfffe (not drawn) when neither
+    // direction can scroll; only show the pair when the view actually scrolls.
+    if (view.scroll_offset() > 0.0F ||
+        view.scroll_offset() < view.max_scroll()) {
+      NovaUi_DrawScrollArrow(platform,
+                             button_art,
+                             scroll_up_rect,
+                             true,
+                             view.scroll_offset() > 0.0F);
+      NovaUi_DrawScrollArrow(platform,
+                             button_art,
+                             scroll_down_rect,
+                             false,
+                             view.scroll_offset() < view.max_scroll());
+    }
 
     for (const auto &[rect, caption] :
          std::array<std::pair<SDL_FRect, const std::string &>, 2>{

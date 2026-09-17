@@ -56,7 +56,7 @@ public:
   // and the scroll clamp move.
   void SetViewRect(const SDL_FRect &rect) {
     view_rect_ = rect;
-    max_scroll_ = std::max(0.0F, content_height_ - view_rect_.h);
+    max_scroll_ = std::max(0.0F, text_height_ - view_rect_.h);
     scroll_offset_ = std::clamp(scroll_offset_, 0.0F, max_scroll_);
   }
 
@@ -78,9 +78,9 @@ private:
 // bodies whose glyphs are vector chevrons keyed off the label's second byte
 // ('^' up / '&' down, STR# 0x96 slots 0x12/0x13) -- not text. `up` selects
 // the chevron shape; `enabled` selects the normal/grey strip and the
-// white/dark-grey glyph (câlr record bytes ffffff / 262626). Chevron
-// geometry is integer: s = width/10, apex at the rounded midpoint, stroked
-// with the original's 2x2 pen.
+// white/dark-grey glyph (câlr record bytes ffffff / 262626). The original
+// draws the glyph into the button-strip surface at the local integer centre
+// (floor(w/2), floor(h/2)) with s = floor(h/10), then blits it to the rect.
 void NovaUi_DrawScrollArrow(SdlPlatform &platform,
                             const ServicesButtonArt &button_art,
                             const SDL_FRect &rect,
