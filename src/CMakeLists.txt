@@ -74,6 +74,8 @@ add_library(evnova_runtime
     game/targeting.cpp
     game/travel.cpp
     game/weapon.cpp
+    game/weapon_banks.cpp
+    game/weapon_shots.cpp
     log.cpp
     nova_app.cpp
     nova_paths.cpp
