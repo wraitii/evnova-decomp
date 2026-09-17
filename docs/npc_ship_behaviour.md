@@ -5,7 +5,11 @@ rather than an implementation plan.  The authoritative primary evidence is
 Ghidra's `Ship_UpdateShipAI` (0x00401000), `Ship_UpdateShipAiState`
 (0x00405590), `Ship_ApplyShipAiControls` (0x00408150), and
 `Ship_HandleShip` (0x00433050).  The clean-room counterparts are primarily in
-`src/game/ship_ai.cpp`, `src/game/spaceflight.cpp`, and
+`src/game/ship_ai.cpp` (dispatch and lifecycle), `ship_ai_behaviors.cpp`
+(behavior selection), `ship_ai_state.cpp` (state transitions),
+`ship_ai_controls.cpp` (steering commands), and `ship_ai_weapons.cpp`
+(weapon selection). `spaceflight.cpp` coordinates the frame;
+`spaceflight_movement.cpp` integrates movement. Runtime fields live in
 `src/game/game_state.hpp`.
 
 `ai_state_code` is the high-level state machine.  It chooses an
@@ -122,7 +126,7 @@ winner (state 4) or returns to its stellar (state 1, secondary =
 `g_ship_states` with the exhausted search-loop counter (0x40), i.e. one
 `ShipState` past the 64-ship heap array; the clean-room port revalidates the
 existing primary slot instead. See
-`NovaAi_DefenseFleetPrioritizePlayerThreat` in `src/game/ship_ai.cpp`.
+`NovaAi_DefenseFleetPrioritizePlayerThreat` in `src/game/ship_ai_behaviors.cpp`.
 
 A hull whose class Flags3 has bit 0x1 ("destroys asteroids") or 0x2
 ("scoops asteroid debris") with no squad leader runs
@@ -293,7 +297,7 @@ labels.
   guarded only on `ai_state_code != 0x12`. That covers every control mode
   (including 6/7/0x16, where the original never calls it) and also mode `0x17`,
   which has no arm in the original. Tracked as `TODO(decomp(0x00408150))` in
-  `src/game/ship_ai.cpp`.
+  `src/game/ship_ai_controls.cpp`.
 
 ## Documentation practice
 
@@ -306,7 +310,7 @@ turning this reference back into a roadmap.
 
 ## Primary-target acquisition (`Ship_AcquirePrimaryTargetForShip` 0x0040e020)
 
-`src/game/ship_ai.cpp` `NovaAi_AcquirePrimaryTarget` is a partial reconstruction
+`src/game/ship_ai_behaviors.cpp` `NovaAi_AcquirePrimaryTarget` is a partial reconstruction
 of the original's 5.6 KB routine.  Decoded structural order (disassembly
 verified):
 
