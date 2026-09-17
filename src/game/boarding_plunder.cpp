@@ -1795,7 +1795,7 @@ NovaUi_RunBoardingPlunderWindow(SdlPlatform &platform,
         while (transferred < options.ammo_quantity) {
           const OutfitOwnership own =
               Outfit_ClampOwnedCountToLimits(state, resource_id);
-          if (own.effective_owned >= own.max_allowed) {
+          if (own.limited) {
             break;
           }
           state.weapon_secondary_count_by_class[static_cast<std::size_t>(

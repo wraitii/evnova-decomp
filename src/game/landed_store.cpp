@@ -508,7 +508,7 @@ bool NovaLanded_CanBuyOutfit(GameState &state,
     return false;
   const OutfitOwnership ownership = Outfit_ClampOwnedCountToLimits(
       state, static_cast<std::int16_t>(outfit_id - 0x80));
-  if (ownership.effective_owned >= ownership.max_allowed)
+  if (ownership.limited)
     return false;
 
   // Mod-slot specializations in the original's precedence (0x00491950): a

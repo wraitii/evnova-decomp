@@ -575,7 +575,7 @@ void DrawStoreContents(SdlPlatform &platform,
       const OutfitOwnership ownership = Outfit_ClampOwnedCountToLimits(
           state, static_cast<std::int16_t>(session.selected_id - 0x80));
       std::string status;
-      if (ownership.effective_owned >= ownership.max_allowed) {
+      if (ownership.limited) {
         status = InfoString(owned < 1 ? 0xdb : 0xda);
       } else if (item_mass > 0 && free_mass < item_mass) {
         status = InfoString(owned < 1 ? 0xdd : 0xdc);
