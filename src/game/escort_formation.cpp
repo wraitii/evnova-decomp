@@ -9,6 +9,7 @@
 
 #include "../brgr_archive.hpp"
 #include "../log.hpp"
+#include "landed_store.hpp"
 #include "scenario_data.hpp"
 #include "ship_ai.hpp"
 #include "ship_visual.hpp"
@@ -489,19 +490,16 @@ void NovaSystem_RestorePlayerEscorts(GameState &state,
       continue;
     }
     if (NovaAiShip_IsDisabled(state, ship)) {
+      // 0x0041b026 clears active before transfer: the lost escort no longer
+      // contributes to the denominator, but retains its leader attachment.
+      ship.is_active = false;
       const ShipClass *cls = state.scenario.Ship(
           static_cast<std::int16_t>(ship.ship_class_id + 0x80));
       if (ship.ai_behavior_code == 6 && ship.mission_fleet_slot == -1 &&
           cls != nullptr && cls->default_ai_behavior < 3) {
-        // TODO(decomp(0x00469810)) skipped: the cargo/junk hand-back to the
-        // player (Player_TransferCargoAndJunkToEscortByRatio) runs before the
-        // deactivation; the port's escort cargo is not modelled yet.
-        NovaLog::Info("escort adoption: disabled cargo escort deactivated "
-                      "without cargo hand-back");
+        Player_TransferCargoAndJunkToEscortByRatio(
+            state, static_cast<std::int16_t>(slot));
       }
-      // The original only clears is_active here (0x0041b026); the ship stays
-      // "attached" (squad_leader_ship_slot == 0) while inactive.
-      ship.is_active = false;
       continue;
     }
     if (ship.mission_fleet_slot == -1) {

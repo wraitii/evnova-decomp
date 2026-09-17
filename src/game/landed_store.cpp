@@ -1485,11 +1485,10 @@ void Player_ProcessEscortPayroll(
         ++defected;
         if (ship.ai_behavior_code == 6 && fleet_slot == -1 && cls != nullptr &&
             cls->default_ai_behavior < 3) {
-          // TODO(decomp(0x00469810)) skipped: the defecting escort takes its
-          // share of the player's cargo/junk
-          // (Player_TransferCargoAndJunkToEscortByRatio); per-escort cargo
-          // bins are not modelled yet (same skip as escort_formation.cpp and
-          // ship_visual.cpp).
+          // Transfer while still active so this escort contributes to the
+          // fleet-capacity denominator.
+          Player_TransferCargoAndJunkToEscortByRatio(
+              state, static_cast<std::int16_t>(slot));
         }
         state.stat_cache_valid = false;
         ship.is_active = false;

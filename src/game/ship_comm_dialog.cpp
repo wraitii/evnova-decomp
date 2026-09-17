@@ -1601,15 +1601,7 @@ bool NovaShipComm_RunShipDialog(SdlPlatform &platform,
 
   // ---- Close-time side effects ---------------------------------------------
   if (escort_transfer_armed) {
-    // The original transfers cargo/junk to the escort by ratio and resets its
-    // AI to re-hire it (Player_TransferCargoAndJunkToEscortByRatio 0x00469810
-    // + field_0xb9 + post_hit_mode_hint + Ship_ResetShipAiBehaviorRuntimeFields
-    // 0x00402810). The cargo transfer itself is deferred (TODO(decomp): the
-    // cargo/junk inventory split is not modelled); the escort re-hire fields
-    // are applied.
-    NovaLog::Todo("ship-comm: escort cargo transfer "
-                  "(Player_TransferCargoAndJunkToEscortByRatio 0x00469810) not "
-                  "reconstructed");
+    Player_TransferCargoAndJunkToEscortByRatio(state, target.ship_instance_id);
     target.squad_leader_ship_slot = -1;
     target.ai_behavior_code =
         ship_class != nullptr ? ship_class->default_ai_behavior : 1;
