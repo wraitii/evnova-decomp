@@ -1116,3 +1116,20 @@ address	name	library	comment
 0x0088AC30	FUN_0088ac30	crt	
 0x0088AE30	FUN_0088ae30	crt	
 0x0088AE80	WinMainCRTStartup_ParseCmdLine	crt	
+0x004D9180	FileEnumerator_Open	redundant	Win32 FindFirstFileA folder scan; replaced by std::filesystem enumeration (EnumerateRezArchives, src/brgr_archive.cpp).
+0x004D9280	FileEnumerator_Advance	redundant	Win32 FindNextFileA step; replaced by std::filesystem directory iteration (EnumerateRezArchives, src/brgr_archive.cpp).
+0x004D94B0	FileEnumerator_Close	redundant	Win32 FindClose for the folder scan; std::filesystem iteration is RAII and owns no handle.
+0x004D9680	Path_MacToWindows	redundant	Mac "N:..." -> Win32 path translation; the port resolves the install root once with std::filesystem and never builds Mac-style path strings.
+0x004D9990	Platform_InitPathGlobals	redundant	Registers APPDATA/system/module/install prefixes in the Mac path table; the port uses SDL_GetPrefPath and direct std::filesystem roots (src/brgr_archive.cpp, src/game/pilot_file.cpp).
+0x004F1D30	Path_CreateDirectory	redundant	Mac->Windows path then recursive CreateDirectoryA; PilotFileSaveDirectory uses std::filesystem::create_directories (src/game/pilot_file.cpp).
+0x004F1D70	FileEnumerator_NextMatchingExt	redundant	Case-insensitive .rez filter over the Win32 folder scan; reproduced by EnumerateRezArchives extension match and case-insensitive sort (src/brgr_archive.cpp).
+0x004F1E70	Path_ExpandMacPrefix	redundant	Expands "N:..." prefixes from DAT_0087071c; the port has no Mac prefix table.
+0x004F20B0	Path_SetPrefix	redundant	Registers Mac path prefixes; the port has no runtime path-prefix layer.
+0x004D9150	FileSystem_IsFile	redundant	Win32 GetFileAttributesA file-exists probe (non-directory); port uses std::filesystem::is_regular_file (PilotFileProbeExists).
+0x004D94F0	FileSystem_DeleteFileOrDirectory	redundant	Win32 DeleteFileA then RemoveDirectoryA; port uses std::filesystem::remove (PilotFile_Delete).
+0x004D9530	FileSystem_CreateDirectoryRecursive	redundant	Recursive CreateDirectoryA per path component; port uses std::filesystem::create_directories (PilotFileSaveDirectory).
+0x004D9820	Path_GetDriveVolumeName	redundant	GetVolumeInformationA drive-label formatting for the Mac volume path layer; the port has no Mac volume paths.
+0x004F1CF0	Resource_OpenFromPath	redundant	Mac-path file probe (Path_MacToWindows + FileSystem_IsFile); replaced by std::filesystem probes (PilotFileProbeExists, NovaResource_LocateFile).
+0x004F1DF0	Resource_WriteFromPath	redundant	Mac-path file write (Path_MacToWindows + FUN_004f1180); replaced by std::ofstream in the prefs/pilot/INI save paths.
+0x004F1E30	Resource_DeleteFromPath	redundant	Mac-path delete (Path_MacToWindows + FileSystem_DeleteFileOrDirectory); replaced by std::filesystem::remove.
+0x004F21B0	Path_TrimTrailingComponent	redundant	Strips the leaf component of a registered Mac path prefix; the port has no runtime path-prefix layer.

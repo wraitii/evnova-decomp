@@ -798,11 +798,11 @@ address	name	impl_file	reimpl_pct	comment
 0x0049D640	Outfit_ComputeScaledPurchasePrice	src/game/landed_store.cpp	100%	Faithful clean-room price scaling: tech discount and scale both truncate toward zero (x87 FIST + residual/sign correction, not round-nearest), then threshold quantization.
 0x0049D7A0	NoSys_NoOp_0049d7a0		0%	
 0x0049D7B0	NoSys_NoOp_0049d7b0		0%	
-0x0049D7C0	FUN_0049d7c0		0%	
+0x0049D7C0	Ui_PlayMovieFileInRect		0%	Plays a named QuickTime movie ("9:Nova Plug-ins:<name>" then "9:Nova Files:<name>") into an explicit rect; shipyard per-ship MovieFile preview loop. Unported (QuickTime replaced by SDL).
 0x0049DA80	FUN_0049da80		0%	
 0x0049DAB0	FUN_0049dab0		0%	
-0x0049DB00	FUN_0049db00		0%	
-0x0049E3C0	FUN_0049e3c0		0%	
+0x0049DB00	Ui_PlayMovieFileModal		0%	Modal named-movie playback (normally g_selection_dialog_status_str from a desc resource) with rect scaling and wait-for-input loop. Unported (QuickTime replaced by SDL).
+0x0049E3C0	Ui_LoadDescAndPlayMovie		0%	Loads a desc resource and plays its trailing status/movie string via Ui_PlayMovieFileModal. Unported.
 0x0049E420	NoSys_NoOp_0049e420		0%	
 0x0049E430	Ui_DrawTargetCategoryPanel	src/game/hud_renderer.cpp	95%	Ported as HudRenderer::DrawEscortCommandsPanel: original 160x120 panel at (15,150), c\x9alr floating-map frame and escort-highlight colors, fixed Geneva 9 font, centered title, five `N) Group` rows on an 18px pitch, presence dimming, exact highlight inset, right-aligned current-order labels from the shared input/AI/pilot category table, and the 32-tick compositor fade after the 480-tick inactivity hold. SDL draws the panel immediately rather than through the prepared sprite frame.
 0x0049E8D0	Ui_ShowTargetCategoryPanel	src/game/escort_commands.cpp	80%	Timer arm ported inline as ShowEscortPanel (0x20 ticks). The original immediately calls Ui_DrawTargetCategoryPanel; SDL defers rendering to HudRenderer::DrawEscortCommandsPanel during the HUD refresh.
@@ -1018,7 +1018,7 @@ address	name	impl_file	reimpl_pct	comment
 0x004BCF80	NovaUtil_FreeOwnedHeapBufferAndRelease		0%	
 0x004BCFA0	IniConfig_EnsureLoaded		0%	
 0x004BCFD0	FUN_004bcfd0		0%	
-0x004BD000	FUN_004bd000		0%	
+0x004BD000	IniConfig_GetSectionString		0%	Reads EVNova.ini "<section>" / "S<index>" into a buffer (Pilots folder, Last Pilot marker, prefs name, error strings). Unported; port uses fixed literals.
 0x004BD090	FUN_004bd090		0%	
 0x004BD0C0	Prefs_SetPilotsPathPrefix		0%	Builds the "Pilots:" prefix from EVNova.ini [130] S3. Former Ghidra name Prefs_SetNovaFilesPathPrefix was wrong. Unported; the port hardcodes a "Pilots" subdirectory under SDL_GetPrefPath (src/game/pilot_file.cpp PilotFileSaveDirectory).
 0x004BD160	Resource_ValidateInstallFolders	src/brgr_archive.cpp	40%	NovaResourceDb::EnsureLoaded resolves the install root and reproduces the Nova.rez -> Nova Files/*.rez -> Nova Plug-ins/*.rez load order; the Pilots-dir validation, missing-folder abort dialogs, and install-checksum pass are not reconstructed.
@@ -1235,17 +1235,8 @@ address	name	impl_file	reimpl_pct	comment
 0x004D8D60	FUN_004d8d60		0%	
 0x004D8EE0	NovaHeap_DumpBlockList		0%	
 0x004D9090	FUN_004d9090		0%	
-0x004D9150	FUN_004d9150		0%	
-0x004D9180	FUN_004d9180		0%	
-0x004D9280	FUN_004d9280		0%	
-0x004D94B0	FUN_004d94b0		0%	
-0x004D94F0	FUN_004d94f0		0%	
-0x004D9530	FUN_004d9530		0%	
-0x004D9680	FUN_004d9680		0%	
-0x004D9820	FUN_004d9820		0%	
 0x004D9920	FUN_004d9920		0%	
-0x004D9990	Platform_InitPathGlobals		0%	
-0x004D9B10	FUN_004d9b10		0%	
+0x004D9B10	Path_GetModulePathMac		0%	Full path -> Mac-style "<drive>:a:b" prefix string. Unported.
 0x004D9C70	QuickTime_EnterQTML		0%	
 0x004D9C90	Ui_ShowErrorDialog		0%	
 0x004D9D10	FUN_004d9d10		0%	
@@ -1450,14 +1441,6 @@ address	name	impl_file	reimpl_pct	comment
 0x004F1C50	FUN_004f1c50		0%	
 0x004F1C70	FUN_004f1c70		0%	
 0x004F1CA0	FUN_004f1ca0		0%	
-0x004F1CF0	Resource_OpenFromPath		0%	
-0x004F1D30	FUN_004f1d30		0%	
-0x004F1D70	FUN_004f1d70		0%	
-0x004F1DF0	FUN_004f1df0		0%	
-0x004F1E30	FUN_004f1e30		0%	
-0x004F1E70	FUN_004f1e70		0%	
-0x004F20B0	FUN_004f20b0		0%	
-0x004F21B0	FUN_004f21b0		0%	
 0x004F22B0	FUN_004f22b0		0%	
 0x004F22E0	FUN_004f22e0		0%	
 0x004F2310	FUN_004f2310		0%	
